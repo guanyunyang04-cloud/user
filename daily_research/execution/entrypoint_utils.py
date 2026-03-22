@@ -45,6 +45,11 @@ def ensure_default_pool_argument() -> None:
     inject_default_arg("--stocks-file", str(pool_file))
 
 
+def ensure_execution_strategy_defaults() -> None:
+    # Promote the current execution default from ma60 to the validated ma50 baseline.
+    inject_default_arg("--regime-ma-window", "50")
+
+
 def ensure_text_file_from_example(target: Path, example: Path, default_text: str) -> None:
     if target.exists():
         return

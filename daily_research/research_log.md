@@ -4962,3 +4962,60 @@
 4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不再参与当前执行修复排序
 5. 下一步研究重心继续留在 `ma50 baseline` 内部，但顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
 
+## 2026-03-23 执行端默认值切换：`ma50 baseline`
+### 本轮目标
+- 既然 `ma50 baseline` 已经完成专项复验，并在稳定性上明确优于当前执行主线，就不再停留在“候选”状态；
+- 正式把执行端默认口径从原 `ma60` 切到 `ma50 baseline`，并确保：
+  - 训练入口默认值完成切换；
+  - 出计划入口默认值完成切换；
+  - 当前默认模型产物同步重训到 `ma50`；
+  - 文档口径从“候选”更新为“当前默认执行”。
+
+### 本轮动作
+1. 执行端入口参数切换：
+   - `daily_research/execution/entrypoint_utils.py`
+   - `daily_research/execution/update_model.py`
+   - `daily_research/execution/run_trade_plan.py`
+   - 新增统一默认注入：`--regime-ma-window 50`
+2. 修正了执行端脚本直接按路径运行时的入口缺口：
+   - `update_model.py` / `run_trade_plan.py` 在最顶部先补 `sys.path`
+   - 因此 `python daily_research/execution/update_model.py ...` 与 `python daily_research/execution/run_trade_plan.py ...` 现在都可以直接运行
+3. 补强模型元数据：
+   - `daily_research/baseline/train_trade_model.py`
+   - 默认模型 `json` 现在会写出：
+     - `regime_ma_window`
+     - `regime_vol_window`
+     - `regime_max_annual_vol`
+     - `regime_allowed_quadrants`
+
+### 本轮执行结果
+1. 已按新的执行默认值重训默认模型产物：
+   - `daily_research/execution/models/latest_ml_model.joblib`
+   - `daily_research/execution/models/latest_ml_model.json`
+2. 当前默认模型元数据已明确写明：
+   - `trained_at = 2026-03-23 00:32:27`
+   - `regime_ma_window = 50`
+   - `regime_vol_window = 20`
+   - `regime_max_annual_vol = 0.32`
+   - `regime_allowed_quadrants = [trend_up_low_vol, trend_up_high_vol]`
+3. 以脚本路径方式完成了执行端冒烟验证：
+   - `python daily_research/execution/update_model.py ...`
+   - `python daily_research/execution/run_trade_plan.py ... --output-dir daily_research/output/ma50_execution_switch_smoke --experiment-tag ma50_switch_smoke_20260323`
+4. 冒烟验证已通过：
+   - 训练入口正常写出 `latest_ml_model.joblib/json`
+   - 出计划入口正常完成推理并输出到：
+     - `daily_research/output/ma50_execution_switch_smoke/ma50_switch_smoke_20260323`
+
+### 本轮结论
+1. `ma50 baseline` 已从“头号正式修复候选”正式晋级为当前执行默认口径。
+2. 当前执行端默认值已不再是原 `ma60` 口径，而是：`advanced_ml (ma50 baseline) + liquid500 + next_open`。
+3. 后续研究主线不再讨论“要不要切到 ma50”，而是直接围绕当前默认执行 `ma50 baseline` 做增量优化。
+4. 原 `ma60 + up_low_ml55_none25_v220` 保留为次一级回滚参考，但不再作为当前默认执行主线。
+
+### 当前决策
+1. 执行端默认值已切换为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 已正式晋级为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 保留为次一级回滚备选
+4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不参与当前执行默认值排序
+5. 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，并先隔离 `trend_up_low_vol`
+

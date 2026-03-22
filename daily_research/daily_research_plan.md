@@ -262,6 +262,12 @@
    - 状态专属 ensemble 权重：目前唯一让最新弱窗口略有改善的，是 `trend_up_low_vol=ml0.60/none0.25/v20.15` 并叠加 `trend_up_high_vol=ml0.80/none0.15/v20.05`；但它把全样本超额 Sharpe 从 `1.841` 拉回约 `1.753`，不是干净升级
    - `ma50` 波动阈值微调：`regime_max_annual_vol=0.30 ~ 0.34` 的正式收益指标完全一致；复核后确认，这组阈值只改动了少数 `trend_down` 标签，`regime_on`、持仓和交易动作都没有变化
    - 因此当前顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
+18. `2026-03-23` 起，执行端默认值正式从原 `ma60` 口径切换到 `ma50 baseline`：
+   - 当前默认执行主线为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+   - `daily_research/execution/update_model.py` 与 `daily_research/execution/run_trade_plan.py` 已默认注入 `--regime-ma-window 50`
+   - 默认模型产物 `daily_research/execution/models/latest_ml_model.json` 已重训并写明 `regime_ma_window=50`
+   - 后续研究不再以“是否切换到 ma50”为目标，而是直接在当前执行默认 `ma50 baseline` 内部做增量优化
+   - 当前回滚参考保留为：`ma60 + up_low_ml55_none25_v220`
 
 ### 优先级 B：完成 `deep_alpha` 当前主线的正式判决
 目标：

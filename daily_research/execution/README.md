@@ -13,9 +13,10 @@
 - 次日开盘执行；
 - 人工下单，不做自动报单。
 
-当前冻结执行主线：
+当前执行默认主线：
 
-- `advanced_ml + liquid500 + next_open`
+- `advanced_ml (ma50 baseline) + liquid500 + next_open`
+- 已于 `2026-03-23` 从原 `ma60` 口径切换到 `ma50 baseline`
 
 ## 2. 目录与真实职责
 - `update_liquid_pool.py`
@@ -62,6 +63,8 @@
 - `--stocks-file`
   - 如果你没有手动传 `--stocks` 或 `--stocks-file`，会默认读取：
     - `daily_research/execution/universe/liquid500_latest.txt`
+- `--regime-ma-window`
+  - 如果你没有手动传，会默认注入为 `50`
 
 ### 3.2 `run_trade_plan.py`
 默认会自动补上：
@@ -75,6 +78,8 @@
 - `--stocks-file`
   - 如果你没有手动传 `--stocks` 或 `--stocks-file`，会默认读取：
     - `daily_research/execution/universe/liquid500_latest.txt`
+- `--regime-ma-window`
+  - 如果你没有手动传，会默认注入为 `50`
 
 额外行为：
 
@@ -115,7 +120,7 @@ python daily_research/execution/update_liquid_pool.py --start-date 20240101
 推荐命令：
 
 ```bash
-python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
+python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
 ```
 
 真实默认值与行为：
@@ -134,6 +139,8 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
   - `5:0.2,10:0.3,20:0.5`
 - 默认训练窗口：
   - `504` 个交易日
+- 当前默认执行状态边界：
+  - `regime_ma_window=50`
 
 常用补充参数：
 
@@ -180,7 +187,7 @@ stock,shares,cost_price
 推荐命令：
 
 ```bash
-python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 5d --cash 200000 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
+python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 5d --cash 200000 --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
 ```
 
 真实默认值与行为：
@@ -197,6 +204,8 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - `5`
 - 默认调仓频率：
   - `5d`
+- 当前默认执行状态边界：
+  - `regime_ma_window=50`
 - 默认 lot size：
   - `100`
 - 默认会读取离线模型产物；
@@ -288,7 +297,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 
 ## 8. 执行端与研究端口径约定
 - 执行端默认冻结为：
-  - `advanced_ml + liquid500 + next_open`
+  - `advanced_ml (ma50 baseline) + liquid500 + next_open`
 - 执行端股票池：
   - 每日盘后更新一次 `liquid500_latest.txt`
 - 正式研究端股票池：

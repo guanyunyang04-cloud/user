@@ -302,6 +302,10 @@ def main():
         "universe_scope": cfg.universe_scope,
         "universe_size": int(len(df_dict["Close"].columns)),
         "execution_mode": cfg.execution_mode,
+        "regime_ma_window": cfg.regime_ma_window,
+        "regime_vol_window": cfg.regime_vol_window,
+        "regime_max_annual_vol": cfg.regime_max_annual_vol,
+        "regime_allowed_quadrants": list(cfg.regime_allowed_quadrants),
         "history_window": history_window_to_dict(history_window),
         "cache": {
             "raw": raw_cache_meta,

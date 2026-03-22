@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from daily_research.execution.entrypoint_utils import (
     bootstrap_execution_paths,
     ensure_default_pool_argument,
+    ensure_execution_strategy_defaults,
     inject_default_arg,
 )
 
@@ -18,6 +25,7 @@ def main():
     inject_default_arg("--artifact-path", str(artifact_path))
     inject_default_arg("--artifact-meta-path", str(artifact_meta_path))
     ensure_default_pool_argument()
+    ensure_execution_strategy_defaults()
 
     from daily_research.baseline.train_trade_model import main as base_main
 

@@ -224,11 +224,11 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 复核 `regime_state.csv` 与 `actions.csv` 后确认：这些阈值只改动了少数 `trend_down_low_vol / trend_down_high_vol` 标签，`regime_on` 完全不变，实际持仓与交易动作也完全一致
   - 这说明：在当前 `ma50 + liquid500 + next_open` 框架里，简单波动阈值微调没有有效敏感度，这条线不再列为第一优先级
 - 当前执行决策现更新为：
-  - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
-  - `ma50 baseline` 继续作为当前头号正式修复候选
-  - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+  - 执行端默认值已切换为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+  - `ma50 baseline` 已从“头号正式修复候选”晋级为当前执行默认口径
+  - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
   - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
-  - 下一步研究重心继续留在 `ma50 baseline` 内部，但顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
+  - 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，且先隔离 `trend_up_low_vol`
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`

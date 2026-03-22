@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from daily_research.execution.entrypoint_utils import (
     bootstrap_execution_paths,
     ensure_default_pool_argument,
+    ensure_execution_strategy_defaults,
     ensure_text_file_from_example,
     inject_default_arg,
 )
@@ -29,6 +36,7 @@ def main():
     inject_default_arg("--output-dir", str(output_dir))
     inject_default_arg("--model-artifact", str(model_artifact))
     ensure_default_pool_argument()
+    ensure_execution_strategy_defaults()
 
     from daily_research.baseline.generate_daily_trade_plan import main as base_main
 
