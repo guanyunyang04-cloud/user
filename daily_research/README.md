@@ -194,12 +194,18 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma48` 相对 `ma47` 的 `2025Q3` compound 超额边际约 `+62.43%`，相对 `ma50` 约 `+55.31%`；其中 `2025-09` 的月度边际最强，分别约 `+16.83%` 和 `+18.84%`
   - `ma48` 相对 `ma47` 的 Top5 正向日占 `2025Q3` 正向日总优势约 `41.12%`，相对 `ma50` 的 Top5 正向日占比约 `51.25%`
   - `ma48` 相对 `ma47 / ma50` 的平均持仓重叠 Jaccard 都在约 `0.69 ~ 0.70`，且约 `73% ~ 76%` 的日期至少重合 `4` 个名字，说明优势主要来自少数持仓槽位替换，而不是整套组合重写
+- 第八轮 `trend_up_low_vol` 关键槽位复现诊断已经完成：
+  - `ma48` 相对 `ma47` 的 `2025Q3` top5 槽位签名是 `301389.SZ / 301488.SZ / 603716.SH / 300436.SZ / 300486.SZ`
+  - `ma48` 相对 `ma50` 的 `2025Q3` top5 槽位签名是 `301357.SZ / 300436.SZ / 301488.SZ / 300476.SZ / 601728.SH`
+  - 这两组签名在其他 `trend_up_low_vol` 季度里的完整复现次数都是 `0`，放宽到“任意重叠”后也仍是 `0`
+  - 相对 `ma47`，这 5 个 Q3 槽位名字在其他季度里连 `0.1%` 以上的平均正权重差都没有再次出现；相对 `ma50` 只有 `301488.SZ / 300476.SZ / 601728.SH` 各自零星出现 `1` 次，且只有 `301488.SZ` 落在正边际季度
+  - 这说明：`2025Q3` 的优势更像“季度特定槽位命中”，还不是已经能跨季度稳定复放的固定签名
 - 当前执行决策同步为：
   - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
   - `ma50 baseline` 继续作为当前头号正式修复候选
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
-  - 高收益待复验分支从单点 `ma48 baseline` 扩展为 `ma47/48` 左侧边界带；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为其附加轻量风控版本保留
-  - 下一步不直接切执行默认值，而是先围绕 `trend_up_low_vol` 做 `ma47/48` 左侧边界带的关键槽位复现诊断，检查 `2025Q3` 的增益是否能跨季度重复出现
+  - `ma47/48` 左侧边界带继续保留为高收益研究分支，但当前按“季度特定槽位命中”看待；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为附加轻量风控版本保留
+  - 下一步不直接切执行默认值，也不继续盲扫边界，而是先把 `2025Q3` 的槽位替换抽象成更稳定的 `trend_up_low_vol` 信号逻辑；如果抽象不出来，就停止该分支晋级
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -302,6 +308,12 @@ python daily_research/tools/ma48_stability_report.py --anchor-run daily_research
 
 ```bash
 python daily_research/tools/ma4748_band_report.py --ma47-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --ma48-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --ma50-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --ma48-variant-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/take20 --focus-quarter 2025Q3 --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round7_ma4748_band
+```
+
+执行端第八轮 `trend_up_low_vol` 槽位复现诊断：
+
+```bash
+python daily_research/tools/trend_up_low_vol_slot_replay_report.py --ma47-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --ma48-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --ma50-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --focus-quarter 2025Q3 --focus-quadrant trend_up_low_vol --top-n 5 --min-positive-delta 0.001 --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round8_slot_replay
 ```
 
 只清理可再生缓存：
