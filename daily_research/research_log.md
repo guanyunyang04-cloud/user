@@ -1,26 +1,46 @@
-# Research Log
+# 研究日志
 
-## Overview
+## 总览
 - 2026-03-14：初始化 `daily_research` baseline。
 - 2026-03-17：完成第一阶段研究框架扩展。
-- 当前研究主线：全A、收盘调仓、高集中组合、相对基准超额、市场状态过滤、状态内动态权重。
+- 当前项目已经形成三层分工：
+  - `baseline / advanced_ml`
+  - `execution`
+  - `deep_alpha`
+- 当前执行端冻结为：`advanced_ml + liquid500 + next_open`
+- `deep_alpha` 是研究主线，但尚未晋级执行端。
 
-## Stage-1 Experiment Template
-- Date:
-- Experiment tag:
-- Data source:
-- Universe scope:
-- Benchmark:
-- Sample range:
-- Holding count:
-- Weighting method:
-- Rebalance frequency:
-- Score threshold:
-- Core metrics:
-- IC / RankIC highlights:
-- Quantile return highlights:
-- Conclusion:
-- Next action:
+## 阅读说明
+- 本文件只保留按时间顺序排列的实验记录、结果与结论。
+- 当前状态与使用入口见 `README.md`。
+- 当前主线、优先级与停止规则见 `daily_research_plan.md`。
+
+## 阶段索引
+- `2026-03-17 ~ 2026-03-18`
+  - 基线收敛：`score + 5d`、市场状态过滤、`up_low_breakout_v2`
+- `2026-03-18 ~ 2026-03-20`
+  - `advanced_ml` 主线形成，并接入执行端
+- `2026-03-19 ~ 2026-03-22`
+  - `deep_alpha` 从烟测走向正式研究框架
+- `2026-03-22`
+  - 项目治理：入口去重、Git 纳管、归档规则、文档重整
+
+## 阶段实验记录模板
+- 日期：
+- 实验标签：
+- 数据来源：
+- 股票池范围：
+- 基准：
+- 样本区间：
+- 持仓数量：
+- 权重方式：
+- 调仓频率：
+- 分数阈值：
+- 核心指标：
+- IC / RankIC 重点：
+- 分层收益重点：
+- 结论：
+- 下一步动作：
 
 ## 2026-03-17 第一轮全A结果与实现方式选择
 - 基线调优版：`all_a_stage1_tuned_concentrated_20240101`
@@ -2148,69 +2168,69 @@
 3. 在此之前
    - `advanced_ml` 继续作为稳定执行主线
 
-## 2026-03-19 Deep Alpha ??? return ?????winner-picking ??????????
+## 2026-03-19 Deep Alpha 原始 return 学习升级：更贴近 winner-picking 排序目标
 
-### ??
-- ?? `deep_alpha` ????????????
-  - `risk` ????
-  - ??? `return` ???????????????
-- ????????????????????????? `return` ???
+### 目标
+- 之前的 `deep_alpha` 更偏向“风险约束 + 回归拟合”，第一层 `return` 学习还不够直接服务于挑选下一阶段更强股票。
+- 这一步的目标是让 `return` 学习更贴近横截面 winner-picking，而不是继续把主信号交给后处理阶段补救。
 
-### ????
+### 本次改动
 - `daily_research/deep_alpha/models.py`
-  - ?????? `return head` ? `risk head`
+  - 进一步拆分 `return head` 与 `risk head`
 - `daily_research/deep_alpha/sequence_dataset.py`
-  - ????????????????
+  - 调整标签与样本组织方式，让 `return` 目标更直接服务排序
 - `daily_research/deep_alpha/trainer.py`
-  - ?? `listwise rank loss`
+  - 新增 `listwise rank loss`
 - `daily_research/deep_alpha/run_deep_alpha_research.py`
-  - ???
+  - 新增参数：
     - `--return-target-transform`
     - `--listwise-loss-weight`
     - `--listwise-temperature`
 
-### ????
-#### 300 ???????????
-???
+### 结果
+#### 300 高流动性股票池
+输出：
 - `daily_research/output/deep_alpha_liquid300_regression_stategate_20260319`
 - `daily_research/output/deep_alpha_liquid300_raw_listwise25_e4_20260319`
 - `daily_research/output/deep_alpha_liquid300_csrank_listwise25_e4_20260319`
 
-???
-- ??? `state_gate`
-  - ?????`92.23%`
-  - ?? Sharpe?`8.01`
+结果：
+- 原始 `state_gate`
+  - 超额收益：`92.23%`
+  - 超额 Sharpe：`8.01`
 - `raw + listwise`
-  - ?????`134.52%`
-  - ?? Sharpe?`10.10`
+  - 超额收益：`134.52%`
+  - 超额 Sharpe：`10.10`
 - `cs_rank + listwise`
-  - ?????`73.96%`
-  - ?? Sharpe?`6.27`
+  - 超额收益：`73.96%`
+  - 超额 Sharpe：`6.27`
 
-#### 500 ???????????
-???
+#### 500 高流动性股票池
+输出：
 - `daily_research/output/deep_alpha_liquid500_regression_stategate_20260319`
 - `daily_research/output/deep_alpha_liquid500_raw_listwise25_e4_20260319`
 
-???
-- ??? `state_gate`
-  - ?????`57.13%`
-  - ?? Sharpe?`4.06`
+结果：
+- 原始 `state_gate`
+  - 超额收益：`57.13%`
+  - 超额 Sharpe：`4.06`
 - `raw + listwise`
-  - ?????`193.79%`
-  - ?? Sharpe?`17.20`
+  - 超额收益：`193.79%`
+  - 超额 Sharpe：`17.20`
 
-### ?????
-- ???????? `return target` ???? `rank`????
-  - ?? `raw return target`
-  - ?????? `pairwise + listwise` ????
-- `deep_alpha` ???????????????
+### 结论
+- 当前证据很清楚：要让第一层 `return target` 更直接服务 `rank learning`。
+- 目前最优方向是：
+  - 使用 `raw return target`
+  - 叠加 `pairwise + listwise` 排序损失
+  - 再结合 `state_gate`
+- 因此 `deep_alpha` 的第一层正式研究主线更新为：
   - `raw return target`
   - `pairwise rank loss`
   - `listwise rank loss`
   - `state_gate`
 
-### ????
+### 汇总输出
 - `daily_research/output/deep_alpha_return_learning_compare_20260319.csv`
 - `daily_research/output/deep_alpha_return_learning_vs_advancedml_20260319.csv`
 
@@ -3451,26 +3471,6 @@
 2. 历史滚动 `liquid500 / liquid800`：用于正式研究结论与策略晋级评估。
 3. 没有在正式框架下通过验证的研究结果，不进入执行端，也不直接讨论 shadow mode。
 
-## 2026-03-21 执行端 / 研究端口径复核
-### 结论
-- 当前执行端和研究端不是“完全同频”，但这是有意为之，而且当前判断是合理的。
-- 二者已经对齐的部分：
-  - 都围绕高流动性股票池；
-  - 都采用 `next_open` 交易口径；
-  - 执行端冻结为 `advanced_ml + liquid500 + next_open`。
-- 二者故意保留差异的部分：
-  - 执行端流动池：`每日盘后更新 liquid500_latest.txt`；
-  - 正式研究端流动池：`历史滚动 liquid500/liquid800`，默认每 `21` 个交易日重建一次。
-
-### 这样设计的原因
-- 执行端面对的是“明天开盘实际买什么”，所以优先使用最新已完成交易日的流动性排名结果。
-- 正式研究端面对的是“做可信验证”，所以必须避免拿今天的静态股票池回看历史，并降低过于频繁换池带来的噪声。
-
-### 当前治理规则
-1. `liquid500_latest.txt / liquid800_latest.txt`：用于执行端与快速研究诊断。
-2. 历史滚动 `liquid500 / liquid800`：用于正式研究结论与策略晋级评估。
-3. 没有在正式框架下通过验证的研究结果，不进入执行端，也不直接讨论 `shadow mode`。
-
 ## 2026-03-21 轻量结构表达增强：上下文嵌入复验
 ### 目标
 - 保持正式框架不变：历史滚动 `liquid500`、`next_open`、多窗口 walk-forward。
@@ -3667,137 +3667,148 @@
    - 或更细的单结构局部表达
 4. 不再继续堆叠“能识别结构但不能稳定提升排序”的辅助任务线
 
-## 2026-03-22 Deep Alpha Representation-Learning Upgrade
-### Decision
-- The next major bet is `patch-based masked self-supervised pretraining + return ranking fine-tune`.
-- We stop using auxiliary heads, prototype heads, and local loss reweighting as the main research route.
-- The formal evaluation framework stays unchanged:
+## 2026-03-22 Deep Alpha 表示学习主线升级
+### 决策
+- 下一阶段的大方向收敛为：
+  - `patch-based masked self-supervised pretraining + return ranking fine-tune`
+- 辅助任务、原型约束、本地 loss 重加权不再作为主研究路线。
+- 正式评价框架保持不变：
   - rolling `liquid500`
   - `next_open`
   - multi-window walk-forward
 
-### New framework delivered
-- New encoder family: `patch_transformer`
-- New masked pretraining model: `MaskedPatchPretrainer`
-- New entry script: `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
-- Fine-tune entry now supports:
+### 已交付的新框架
+- 新编码器族：
+  - `patch_transformer`
+- 新预训练模型：
+  - `MaskedPatchPretrainer`
+- 新入口脚本：
+  - `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
+- fine-tune 入口新增支持：
   - `--encoder-family patch_transformer`
   - `--patch-len`
   - `--pretrained-encoder-path`
 
-### Research rule for this stage
-1. Pretrain the encoder without return labels.
-2. Fine-tune the same encoder on return ranking.
-3. Run only one formal A/B:
+### 本阶段研究规则
+1. 先在没有 return label 的条件下预训练编码器。
+2. 再用同一编码器做 return ranking fine-tune。
+3. 正式 A/B 只比较两组：
    - `shared baseline`
-   - vs `masked-pretrained encoder + ranking fine-tune`
-4. If it only repairs one weak window but breaks strong windows, stop.
-5. If it is not more stable than `shared` across walk-forward windows, stop.
+   - `masked-pretrained encoder + ranking fine-tune`
+4. 如果它只修复弱窗口、却破坏强窗口，就停止推进。
+5. 如果它没有在多窗口 walk-forward 中比 `shared` 更稳，也停止推进。
 
-### Smoke validation
-- Pretrain smoke: `daily_research/output/deep_alpha_pretrain_smoke_20260322`
-- Fine-tune smoke: `daily_research/output/deep_alpha_pretrained_finetune_smoke_20260322`
-- Conclusion:
-  - the two-stage pipeline runs end-to-end
-  - the pretrained encoder can be loaded into ranking fine-tune
-  - the next step is a formal A/B under the formal framework
+### 烟测验证
+- 预训练烟测：
+  - `daily_research/output/deep_alpha_pretrain_smoke_20260322`
+- fine-tune 烟测：
+  - `daily_research/output/deep_alpha_pretrained_finetune_smoke_20260322`
+- 结论：
+  - 两阶段流程已经可以端到端跑通；
+  - 预训练编码器可以被 fine-tune 正常加载；
+  - 下一步转入正式 A/B。
 
-## 2026-03-22 Formal A/B: Shared Baseline vs Masked-Pretrained Encoder
-### Formal framework
+## 2026-03-22 正式 A/B：`shared` 基线 vs 掩码预训练编码器
+### 正式框架
 - rolling `liquid500`
 - `next_open`
 - multi-window walk-forward
-- compare only:
-  - current `shared baseline`
-  - vs `masked-pretrained encoder + ranking fine-tune`
+- 只比较：
+  - 当前 `shared baseline`
+  - `masked-pretrained encoder + ranking fine-tune`
 
-### Pretraining runs
+### 预训练运行
 - `daily_research/output/deep_alpha_pretrain_liq500_formal_20240822_20250305`
 - `daily_research/output/deep_alpha_pretrain_liq500_formal_20250306_20250904`
 - `daily_research/output/deep_alpha_pretrain_liq500_formal_20250905_20260319`
 
-### Fine-tune runs
+### 微调运行
 - `daily_research/output/deep_alpha_pretrained_liq500_formal_20240822_20250305`
 - `daily_research/output/deep_alpha_pretrained_liq500_formal_20250306_20250904`
 - `daily_research/output/deep_alpha_pretrained_liq500_formal_20250905_20260319`
-- summary: `daily_research/output/deep_alpha_pretrained_walkforward_compare_20260322.csv`
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrained_walkforward_compare_20260322.csv`
 
-### Result summary
-1. Window `2024-08-22 -> 2025-03-05`
+### 结果摘要
+1. 窗口 `2024-08-22 -> 2025-03-05`
 - `shared`: excess return `16.23%`, excess Sharpe `1.912`, excess MDD `-7.91%`
 - `pretrained`: excess return `20.74%`, excess Sharpe `0.620`, excess MDD `-23.14%`
-- Interpretation: return improved a bit, but stability got materially worse.
+- 解读：
+  - 收益略有提升，但稳定性明显变差。
 
-2. Window `2025-03-06 -> 2025-09-04`
+2. 窗口 `2025-03-06 -> 2025-09-04`
 - `shared`: excess return `-9.65%`, excess Sharpe `-0.692`, excess MDD `-14.62%`
 - `pretrained`: excess return `-19.04%`, excess Sharpe `-0.993`, excess MDD `-27.34%`
-- Interpretation: the weak window became worse, not better.
+- 解读：
+  - 最弱窗口没有被修复，反而更差。
 
-3. Window `2025-09-05 -> 2026-03-19`
+3. 窗口 `2025-09-05 -> 2026-03-19`
 - `shared`: excess return `25.88%`, excess Sharpe `2.889`, excess MDD `-8.66%`
 - `pretrained`: excess return `1.75%`, excess Sharpe `0.174`, excess MDD `-14.34%`
-- Interpretation: the strongest window was heavily damaged.
+- 解读：
+  - 原本最强的窗口被明显破坏。
 
-### Conclusion
-- The first big-bet version of masked pretraining does **not** beat the current `shared` baseline under the formal framework.
-- It fails the stop rule:
-  - it does not improve walk-forward stability
-  - it makes the weak window worse
-  - it clearly damages the strongest window
-- Decision:
-  - keep `advanced_ml + liquid500 + next_open` frozen for execution
-  - keep `deep_alpha` as research mainline
-  - stop this exact masked-pretraining recipe instead of polishing it locally
+### 结论
+- 第一版大方向押注的 masked pretraining，并没有在正式框架下战胜当前 `shared` 基线。
+- 它触发了停止规则：
+  - 没有提升 walk-forward 稳定性；
+  - 让弱窗口更差；
+  - 明显破坏了最强窗口。
+- 当前决策：
+  - 执行端继续冻结为 `advanced_ml + liquid500 + next_open`
+  - `deep_alpha` 继续保留为研究主线
+  - 这版 masked-pretraining 配方先停止，不继续做局部打磨
 
-## 2026-03-22 Pretraining Epoch Sensitivity Check
-### Question
-- We tested whether the first masked-pretraining recipe was failing mainly because the pretraining stage was too short.
-- We tested only the pretraining epoch budget and kept the rest fixed.
+## 2026-03-22 预训练轮数敏感性检查
+### 问题
+- 需要确认第一版 masked-pretraining 的失败，是否主要来自预训练预算过低。
+- 本轮只改预训练 epoch 预算，其余配置保持不变。
 
-### Formal setup
+### 正式设置
 - rolling `liquid500`
 - `next_open`
-- same fine-tune recipe as before
-- representative windows:
-  - weak window: `2025-03-06 -> 2025-09-04`
-  - strong window: `2025-09-05 -> 2026-03-19`
-- summary: `daily_research/output/deep_alpha_pretrain_epoch_sensitivity_20260322.csv`
+- fine-tune 配方保持不变
+- 代表性窗口：
+  - 弱窗口：`2025-03-06 -> 2025-09-04`
+  - 强窗口：`2025-09-05 -> 2026-03-19`
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrain_epoch_sensitivity_20260322.csv`
 
-### Result
-#### Weak window `2025-03-06 -> 2025-09-04`
+### 结果
+#### 弱窗口 `2025-03-06 -> 2025-09-04`
 - `shared baseline`: excess return `-9.65%`, excess Sharpe `-0.692`
 - `pretrained 4e`: excess return `-19.04%`, excess Sharpe `-0.993`
 - `pretrained 8e`: excess return `-3.39%`, excess Sharpe `-0.166`
 - `pretrained 12e`: excess return `18.15%`, excess Sharpe `0.784`
 
-#### Strong window `2025-09-05 -> 2026-03-19`
+#### 强窗口 `2025-09-05 -> 2026-03-19`
 - `shared baseline`: excess return `25.88%`, excess Sharpe `2.889`
 - `pretrained 4e`: excess return `1.75%`, excess Sharpe `0.174`
 - `pretrained 8e`: excess return `-4.55%`, excess Sharpe `-0.540`
 - `pretrained 12e`: excess return `21.24%`, excess Sharpe `1.876`
 
-### Interpretation
-- Pretraining budget matters a lot.
-- The first 4-epoch failure was not enough to kill the whole idea.
-- `8 epoch` is still not good enough.
-- `12 epoch` materially changes the picture:
-  - it repairs the weak window
-  - it no longer destroys the strong window
-  - but it still does not fully beat the current `shared` baseline on the strong window
+### 解读
+- 预训练预算影响非常大。
+- `4 epoch` 的失败不足以直接判死整条路线。
+- `8 epoch` 依然不够。
+- `12 epoch` 已经明显改变结论：
+  - 修复了弱窗口；
+  - 不再像早期版本那样彻底破坏强窗口；
+  - 但仍未在强窗口上稳定战胜 `shared` 基线。
 
-### Decision
-- Do **not** kill the masked-pretraining route yet.
-- But do **not** promote it yet either.
-- Next step should be one more full formal verdict with `12 epoch` pretraining across the complete multi-window set.
+### 决策
+- 这条 masked-pretraining 路线先不判死。
+- 但也不能提前晋级。
+- 下一步需要用 `12 epoch` 预训练，在完整多窗口上再做一次正式结论。
 
-## 2026-03-22 Training-budget guardrail and local runtime tuning
-### Why this was necessary
-- The first `masked pretraining v1` verdict was distorted by an underpowered pretraining budget.
-- Pretraining validation loss was still falling at `4 epoch`, while fine-tune loss was already mostly flat.
-- So the real issue was not just the recipe itself; we also lacked a guardrail against undertraining.
+## 2026-03-22 训练预算护栏与本机运行策略
+### 为什么需要这一步
+- 第一版 `masked pretraining v1` 的结论被低预算预训练明显扭曲。
+- 当时 `4 epoch` 结束时，预训练验证损失还在下降，而 fine-tune 已经接近平稳。
+- 这说明问题不只在配方本身，也在于我们缺少识别 `undertraining` 的护栏。
 
-### What changed in code
-- Added training diagnostics to both `deep_alpha` fine-tune and masked pretraining:
+### 代码改动
+- 为 `deep_alpha` fine-tune 与 masked pretraining 同时加入训练诊断：
   - `best_epoch`
   - `best_valid_loss`
   - `final_valid_loss`
@@ -3805,143 +3816,150 @@
   - `still_improving`
   - `status`
   - `recommendation`
-- Added `ReduceLROnPlateau + best-checkpoint restore + early stopping` to both stages.
-- Added safe local runtime tuning for this machine:
-  - auto-cap `patch_transformer` batch size to `192`
-  - auto-cap Windows `num_workers` to `2`
-  - set `prefetch_factor=1`
-  - keep `AMP` on when CUDA is available
+- 两个阶段都加入：
+  - `ReduceLROnPlateau`
+  - best-checkpoint restore
+  - early stopping
+- 为当前本机增加安全运行策略：
+  - `patch_transformer` batch size 上限 `192`
+  - Windows `num_workers` 上限 `2`
+  - `prefetch_factor=1`
+  - CUDA 可用时保留 `AMP`
 
-### Current decision
-- Future formal research should no longer kill a recipe before checking training diagnostics.
-- If `status = undertrained`, the recipe does **not** get a final verdict yet.
-- The current machine profile should favor:
-  - low worker count
-  - cached data reuse
-  - moderate batch size
-  - AMP
+### 当前决策
+- 以后正式研究不能在不看训练诊断的情况下直接判死一条路线。
+- 如果 `status = undertrained`，就不能给最终判决。
+- 当前机器的推荐运行画像是：
+  - 低 worker 数
+  - 复用缓存
+  - 中等 batch size
+  - 开启 AMP
 
-### Immediate next step
-- Re-run the full formal verdict for the masked-pretraining route with `12 epoch` pretraining.
-- Keep the same formal framework:
+### 下一步
+- 用 `12 epoch` 预训练重新跑完整正式结论。
+- 正式框架保持不变：
   - rolling `liquid500`
   - `next_open`
   - multi-window walk-forward
 
-## 2026-03-22 Formal-framework speed fix: train-eval window trim
-### Problem
-- The formal `deep_alpha` pipeline was not failing only because of model quality.
-- The post-training evaluation chain had become too heavy on this local machine.
-- The main bottleneck was:
+## 2026-03-22 正式框架提速：`train_eval` 窗口裁剪
+### 问题
+- 正式 `deep_alpha` 流程变慢，不只是模型质量问题。
+- 训练后的评估链条在当前本机上已经过重。
+- 主要瓶颈是：
   - full-train `train_eval_loader`
   - then fitting `score_head`
   - then fitting `state_gate`
 
-### Fix
-- Keep the formal framework unchanged:
+### 修正
+- 正式框架保持不变：
   - rolling `liquid500`
   - `next_open`
   - multi-window walk-forward
-- But trim `train_eval_loader` to the most recent train-side window instead of the full train span.
-- New default:
+- 但把 `train_eval_loader` 裁剪为最近一段 train-side 窗口，而不是整段训练区间。
+- 新默认值：
   - `train_eval_window_days = 126`
-- This keeps the calibration closer to recent market conditions and reduces formal-run cost materially.
+- 这样既让校准更贴近近期市场，又显著降低正式运行成本。
 
-### Code changes
+### 代码改动
 - `daily_research/deep_alpha/config.py`
 - `daily_research/deep_alpha/run_deep_alpha_research.py`
 
-### New rule
-- Full-train score-head/state-gate fitting is no longer the default.
-- If needed, use `--train-eval-window-days 0` to restore the old full-train behavior.
+### 新规则
+- 不再默认使用 full-train 的 score-head / state-gate 拟合。
+- 如需恢复旧行为，可显式加：
+  - `--train-eval-window-days 0`
 
-## 2026-03-22 Full 12-epoch masked-pretraining verdict under the lighter formal framework
-### Why we re-ran it
-- The first `12 epoch` formal verdict was still being mixed with a heavier post-training evaluation chain.
-- We therefore re-ran the full walk-forward verdict under the lighter formal default:
+## 2026-03-22 更轻正式框架下的 12 轮预训练完整结论
+### 为什么重跑
+- 第一版 `12 epoch` 正式结论仍混杂了更重的后处理评估链条。
+- 因此这次在更轻的正式默认值下重新跑完整 walk-forward：
   - rolling `liquid500`
   - `next_open`
   - `train_eval_window_days = 126`
   - explicit `num_workers = 0`
 
-### Outputs
-- Summary: `daily_research/output/deep_alpha_pretrained_e12_lite126_walkforward_compare_20260322.csv`
-- Fine-tune windows:
+### 输出
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrained_e12_lite126_walkforward_compare_20260322.csv`
+- fine-tune 窗口：
   - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20240822_20250305`
   - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20250306_20250904`
   - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20250905_20260319`
 
-### Result
-#### Window `2024-08-22 -> 2025-03-05`
+### 结果
+#### 窗口 `2024-08-22 -> 2025-03-05`
 - `shared baseline`: excess return `16.23%`, excess Sharpe `1.912`, excess MDD `-7.91%`
 - `pretrained e12 + lite126`: excess return `26.31%`, excess Sharpe `1.997`, excess MDD `-10.85%`
 
-#### Window `2025-03-06 -> 2025-09-04`
-- `shared baseline`: excess return `-9.65%`, excess Sharpe `-0.692`, excess MDD `-14.62%`
+#### 窗口 `2025-03-06 -> 2025-09-04`
+- `shared baseline`: excess return `-9.65%`, excess Sharpe `-0.692`
 - `pretrained e12 + lite126`: excess return `-5.87%`, excess Sharpe `-0.478`, excess MDD `-16.60%`
 
-#### Window `2025-09-05 -> 2026-03-19`
+#### 窗口 `2025-09-05 -> 2026-03-19`
 - `shared baseline`: excess return `25.88%`, excess Sharpe `2.889`, excess MDD `-8.66%`
 - `pretrained e12 + lite126`: excess return `14.41%`, excess Sharpe `1.566`, excess MDD `-6.16%`
 
-### Training diagnostics
-- Pretraining window `2024-08-22 -> 2025-03-05`
+### 训练诊断
+- 预训练窗口 `2024-08-22 -> 2025-03-05`
   - `status = undertrained`
   - `best_epoch = 12/12`
-- Pretraining window `2025-03-06 -> 2025-09-04`
+- 预训练窗口 `2025-03-06 -> 2025-09-04`
   - `status = stable`
   - `best_epoch = 10/12`
-- Pretraining window `2025-09-05 -> 2026-03-19`
+- 预训练窗口 `2025-09-05 -> 2026-03-19`
   - `status = undertrained`
   - `best_epoch = 12/12`
 
-### Interpretation
-- The lighter formal framework materially improved research throughput and made the full verdict runnable on the local machine.
-- Under this cleaner setup, `12 epoch` masked pretraining is clearly stronger than the original `4 epoch` version.
-- It now:
-  - improves the first window on return and excess Sharpe
-  - repairs part of the weak window
-  - but still fails to protect the strongest window on return / Sharpe
-- More importantly, windows `1` and `3` still end pretraining with `status = undertrained`.
+### 解读
+- 更轻的正式框架显著提升了本机研究吞吐，让完整结论可以稳定跑完。
+- 在这套更干净的设置下，`12 epoch` masked pretraining 明显强于最早的 `4 epoch` 版本。
+- 当前它已经：
+  - 改善了第一个窗口的收益与 Sharpe；
+  - 修复了部分弱窗口；
+  - 但仍然没有保护住最强窗口的收益与 Sharpe。
+- 更关键的是：
+  - 窗口 `1` 与 `3` 的预训练结束时仍是 `undertrained`。
 
-### Decision
-- Per the new guardrail, this route still does **not** get a final recipe verdict yet.
-- We do **not** promote it toward execution.
-- We also do **not** kill it yet.
-- Next step:
-  - keep the same formal framework
-  - raise the pretraining cap from `12 -> 16`
-  - prioritize windows `1` and `3`, where pretraining still has not plateaued
+### 决策
+- 按新的训练护栏，这条路线现在仍不能拿最终配方判决。
+- 当前既不晋级执行，也不直接判死。
+- 下一步：
+  - 保持同一正式框架；
+  - 把预训练预算上限从 `12 -> 16`；
+  - 优先处理仍未平台化的窗口 `1` 与 `3`。
 
-## 2026-03-22 Adaptive pretraining budget support
-### Why we added it
-- We now have enough evidence that pretraining budget can materially change the research verdict.
-- The right response is not to guess a fixed cap each time.
-- Instead, we should let pretraining continue automatically when diagnostics still show `undertrained`, while keeping a hard upper bound.
+## 2026-03-22 自适应预训练预算支持
+### 为什么新增
+- 当前已经有足够证据表明：预训练预算会实质性改变研究结论。
+- 因此不应该每次都凭经验猜一个固定上限。
+- 更合理的方式是：
+  - 当诊断仍显示 `undertrained` 时，允许在同一轮运行里自动续训；
+  - 同时保留明确的硬上限。
 
-### What changed
+### 改动
 - `daily_research/deep_alpha/trainer.py`
 - `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
 
-New pretraining controls:
+新增预训练控制参数：
 - `--auto-extend-undertrained`
 - `--epoch-extend-step`
 - `--max-total-epochs`
 
-Behavior:
-- Pretraining still starts from the requested `--epochs` cap.
-- If the run reaches that cap and diagnostics still say `undertrained`, the budget is automatically extended by `epoch_extend_step`.
-- Extension stops at `max_total_epochs`.
-- This keeps the same optimizer / scheduler state inside one run instead of forcing us to restart from scratch for every budget test.
+行为：
+- 预训练先从指定的 `--epochs` 启动；
+- 如果跑到上限后诊断仍为 `undertrained`，预算会按 `epoch_extend_step` 自动上调；
+- 到达 `max_total_epochs` 后停止；
+- 整个过程保持同一轮 optimizer / scheduler 状态，不再为每次预算测试重新起跑。
 
-### Current policy
-- We do not treat adaptive extension as a free pass.
-- Final research verdicts still require:
-  - non-`undertrained` diagnostics
-  - multi-window walk-forward under the formal framework
-- For this local machine, we still keep the safe runtime profile conservative:
-  - `num_workers = 0` is respected if explicitly requested
-  - batch size stays capped at safe levels
+### 当前政策
+- 自适应续训不是“自动放行”。
+- 最终研究结论仍然要求：
+  - 关键窗口不再是 `undertrained`
+  - 正式框架下通过多窗口 walk-forward
+- 对当前本机，安全运行策略仍保持克制：
+  - 如果显式指定 `num_workers = 0`，就尊重它；
+  - batch size 仍然受安全上限约束。
 
 ## 2026-03-22 项目治理与维护整理
 ### 项目总评
