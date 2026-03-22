@@ -619,6 +619,59 @@ def rolling_ml_scores_multi(
     open_df: pd.DataFrame | None = None,
     benchmark_open: pd.Series | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    combined, training_log_df, _ = rolling_ml_scores_multi_detail(
+        feature_frames=feature_frames,
+        market_features=market_features,
+        close=close,
+        benchmark_close=benchmark_close,
+        filter_mask=filter_mask,
+        regime_state=regime_state,
+        config=config,
+        open_df=open_df,
+        benchmark_open=benchmark_open,
+    )
+    return combined, training_log_df
+
+
+def combine_per_horizon_ml_scores(
+    per_horizon_scores: Dict[int, pd.DataFrame],
+    close: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    config: MLAplhaConfig,
+) -> pd.DataFrame:
+    if not per_horizon_scores:
+        return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
+
+    combined = pd.DataFrame(0.0, index=close.index, columns=close.columns, dtype=float)
+    valid_mask = None
+    for frame in per_horizon_scores.values():
+        frame_valid = frame.notna()
+        valid_mask = frame_valid if valid_mask is None else (valid_mask | frame_valid)
+
+    quadrant_series = regime_state["quadrant"].reindex(close.index)
+    for dt in close.index:
+        weights_for_date = resolve_horizon_weights(config, str(quadrant_series.loc[dt]) if dt in quadrant_series.index else None)
+        row = pd.Series(0.0, index=close.columns, dtype=float)
+        for horizon, weight in weights_for_date.items():
+            frame = per_horizon_scores.get(horizon)
+            if frame is None or dt not in frame.index:
+                continue
+            row = row.add(frame.loc[dt].fillna(0.0) * float(weight), fill_value=0.0)
+        combined.loc[dt] = row
+    return combined.where(valid_mask)
+
+
+def rolling_ml_scores_multi_detail(
+    feature_frames: Dict[str, pd.DataFrame],
+    market_features: Dict[str, pd.Series],
+    close: pd.DataFrame,
+    benchmark_close: pd.Series,
+    filter_mask: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    config: MLAplhaConfig,
+    open_df: pd.DataFrame | None = None,
+    benchmark_open: pd.Series | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, Dict[int, pd.DataFrame]]:
     horizon_weights = _normalize_horizon_weights(config)
     per_horizon_scores: Dict[int, pd.DataFrame] = {}
     training_logs = []
@@ -651,26 +704,16 @@ def rolling_ml_scores_multi(
 
     if not per_horizon_scores:
         empty = pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
-        return empty, pd.DataFrame()
+        return empty, pd.DataFrame(), {}
 
-    combined = pd.DataFrame(0.0, index=close.index, columns=close.columns, dtype=float)
-    valid_mask = None
-    for frame in per_horizon_scores.values():
-        frame_valid = frame.notna()
-        valid_mask = frame_valid if valid_mask is None else (valid_mask | frame_valid)
-    quadrant_series = regime_state["quadrant"].reindex(close.index)
-    for dt in close.index:
-        weights_for_date = resolve_horizon_weights(config, str(quadrant_series.loc[dt]) if dt in quadrant_series.index else None)
-        row = pd.Series(0.0, index=close.columns, dtype=float)
-        for horizon, weight in weights_for_date.items():
-            frame = per_horizon_scores.get(horizon)
-            if frame is None or dt not in frame.index:
-                continue
-            row = row.add(frame.loc[dt].fillna(0.0) * float(weight), fill_value=0.0)
-        combined.loc[dt] = row
-    combined = combined.where(valid_mask)
+    combined = combine_per_horizon_ml_scores(
+        per_horizon_scores=per_horizon_scores,
+        close=close,
+        regime_state=regime_state,
+        config=config,
+    )
     training_log_df = pd.concat(training_logs, axis=0, ignore_index=True) if training_logs else pd.DataFrame()
-    return combined, training_log_df
+    return combined, training_log_df, per_horizon_scores
 
 
 def blend_scores(

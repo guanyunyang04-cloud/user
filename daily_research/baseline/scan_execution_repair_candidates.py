@@ -33,7 +33,8 @@ from daily_research.baseline.ml_alpha import (
     MLAplhaConfig,
     blend_scores,
     build_ml_feature_bundle,
-    rolling_ml_scores_multi,
+    combine_per_horizon_ml_scores,
+    rolling_ml_scores_multi_detail,
 )
 from daily_research.baseline.portfolio import build_target_weights
 from daily_research.baseline.regime import apply_market_regime_filter
@@ -64,7 +65,15 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument(
         "--candidate-set",
-        choices=["round1", "round2_weights", "pair_best", "ma50_boundary_risk"],
+        choices=[
+            "round1",
+            "round2_weights",
+            "pair_best",
+            "ma50_boundary_risk",
+            "ma50_state_horizon_round1",
+            "ma50_state_ensemble_round1",
+            "ma50_regime_vol_round1",
+        ],
         default="round1",
     )
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
@@ -96,9 +105,19 @@ def parse_args():
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
     parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="histgb")
+    parser.add_argument(
+        "--ml-state-horizon-profiles",
+        default="",
+        help="Optional base state horizon weights, e.g. trend_up_high_vol=5:0.3,10:0.4,20:0.3;trend_up_low_vol=5:0.15,10:0.35,20:0.5",
+    )
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
+    parser.add_argument(
+        "--ensemble-state-weights",
+        default="",
+        help="Optional base state ensemble weights, e.g. trend_up_high_vol=ml:0.8,none:0.15,v2:0.05",
+    )
     parser.add_argument(
         "--windows",
         default="recent_full:20250307:20260319,latest_weak:20250905:20260319",
@@ -165,6 +184,49 @@ def _parse_horizon_weights(raw: str | None) -> dict[int, float]:
         horizon_raw, weight_raw = item.split(":", 1)
         out[int(horizon_raw.strip())] = float(weight_raw.strip())
     return out
+
+
+def _parse_state_horizon_profiles(raw: str | None) -> dict[str, dict[int, float]]:
+    if not raw:
+        return {}
+    out: dict[str, dict[int, float]] = {}
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        state_raw, weights_raw = chunk.split("=", 1)
+        out[state_raw.strip()] = _parse_horizon_weights(weights_raw)
+    return out
+
+
+def _parse_state_ensemble_weights(raw: str | None) -> dict[str, dict[str, float]]:
+    if not raw:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        state_raw, weights_raw = chunk.split("=", 1)
+        weights: dict[str, float] = {}
+        for item in weights_raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            name_raw, value_raw = item.split(":", 1)
+            weights[name_raw.strip().lower()] = float(value_raw.strip())
+        out[state_raw.strip()] = weights
+    return out
+
+
+def _merge_nested_dict(base: dict[str, dict[Any, Any]] | None, override: dict[str, dict[Any, Any]] | None) -> dict[str, dict[Any, Any]]:
+    merged: dict[str, dict[Any, Any]] = {
+        str(key): dict(value)
+        for key, value in (base or {}).items()
+    }
+    for key, value in (override or {}).items():
+        merged[str(key)] = dict(value)
+    return merged
 
 
 def _parse_named_windows(raw: str | None) -> list[tuple[str, str, str]]:
@@ -300,6 +362,96 @@ def _candidate_profiles(candidate_set: str) -> list[dict[str, Any]]:
             },
         ]
 
+    if candidate_set == "ma50_state_horizon_round1":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_high_h304030",
+                "state_horizon_weights": {
+                    "trend_up_high_vol": {5: 0.30, 10: 0.40, 20: 0.30},
+                },
+            },
+            {
+                "label": "up_high_h354025",
+                "state_horizon_weights": {
+                    "trend_up_high_vol": {5: 0.35, 10: 0.40, 20: 0.25},
+                },
+            },
+            {
+                "label": "up_high_h403525",
+                "state_horizon_weights": {
+                    "trend_up_high_vol": {5: 0.40, 10: 0.35, 20: 0.25},
+                },
+            },
+            {
+                "label": "up_split_low153550_high304030",
+                "state_horizon_weights": {
+                    "trend_up_low_vol": {5: 0.15, 10: 0.35, 20: 0.50},
+                    "trend_up_high_vol": {5: 0.30, 10: 0.40, 20: 0.30},
+                },
+            },
+            {
+                "label": "up_split_low153550_high354025",
+                "state_horizon_weights": {
+                    "trend_up_low_vol": {5: 0.15, 10: 0.35, 20: 0.50},
+                    "trend_up_high_vol": {5: 0.35, 10: 0.40, 20: 0.25},
+                },
+            },
+            {
+                "label": "up_split_low103060_high354025",
+                "state_horizon_weights": {
+                    "trend_up_low_vol": {5: 0.10, 10: 0.30, 20: 0.60},
+                    "trend_up_high_vol": {5: 0.35, 10: 0.40, 20: 0.25},
+                },
+            },
+        ]
+
+    if candidate_set == "ma50_state_ensemble_round1":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_high_ml80_none15_v205",
+                "state_ensemble_weights": {
+                    "trend_up_high_vol": {"ml": 0.80, "none": 0.15, "v2": 0.05},
+                },
+            },
+            {
+                "label": "up_high_ml75_none20_v205",
+                "state_ensemble_weights": {
+                    "trend_up_high_vol": {"ml": 0.75, "none": 0.20, "v2": 0.05},
+                },
+            },
+            {
+                "label": "up_high_ml70_none20_v210",
+                "state_ensemble_weights": {
+                    "trend_up_high_vol": {"ml": 0.70, "none": 0.20, "v2": 0.10},
+                },
+            },
+            {
+                "label": "up_split_low65_none20_v215_high80_none15_v205",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.65, "none": 0.20, "v2": 0.15},
+                    "trend_up_high_vol": {"ml": 0.80, "none": 0.15, "v2": 0.05},
+                },
+            },
+            {
+                "label": "up_split_low60_none25_v215_high80_none15_v205",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.60, "none": 0.25, "v2": 0.15},
+                    "trend_up_high_vol": {"ml": 0.80, "none": 0.15, "v2": 0.05},
+                },
+            },
+        ]
+
+    if candidate_set == "ma50_regime_vol_round1":
+        return [
+            {"label": "vol030", "regime_max_annual_vol": 0.30},
+            {"label": "vol031", "regime_max_annual_vol": 0.31},
+            {"label": "baseline", "regime_max_annual_vol": 0.32},
+            {"label": "vol033", "regime_max_annual_vol": 0.33},
+            {"label": "vol034", "regime_max_annual_vol": 0.34},
+        ]
+
     raise ValueError(f"Unsupported candidate_set: {candidate_set}")
 
 
@@ -409,9 +561,21 @@ def _clone_ml_config(ml_cfg: MLAplhaConfig) -> MLAplhaConfig:
     return MLAplhaConfig(**asdict(ml_cfg))
 
 
+def _candidate_requires_prepared_recompute(candidate: dict[str, Any]) -> bool:
+    return any(
+        key in candidate
+        for key in (
+            "regime_ma_window",
+            "regime_vol_window",
+            "regime_max_annual_vol",
+        )
+    )
+
+
 def main():
     args = parse_args()
     candidate_profiles = _candidate_profiles(args.candidate_set)
+    full_recompute_mode = any(_candidate_requires_prepared_recompute(candidate) for candidate in candidate_profiles)
 
     cfg = ResearchConfig(
         start_date=args.start_date,
@@ -449,6 +613,7 @@ def main():
         target_horizon=args.ml_target_horizon,
         target_horizons=_parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
         target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        state_horizon_weights=_parse_state_horizon_profiles(args.ml_state_horizon_profiles),
         enhanced_profile=args.enhanced_profile,
         train_window_days=args.ml_train_window_days,
         retrain_every_days=args.ml_retrain_every_days,
@@ -460,6 +625,7 @@ def main():
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
+        state_ensemble_weights=_parse_state_ensemble_weights(args.ensemble_state_weights),
         train_regime_only=cfg.enable_market_regime_filter,
         execution_mode=cfg.execution_mode,
     )
@@ -526,77 +692,89 @@ def main():
     else:
         print("[3/7] using fixed universe without rolling liquidity pool...")
 
-    prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
-        raw_df_dict=prepared_raw_df_dict,
-        raw_cache_key=(
-            raw_cache_meta["cache_key"]
-            if rolling_pool_artifact is None
-            else (
-                f"{raw_cache_meta['cache_key']}|{args.rolling_liquidity_pool}|"
-                f"{args.pool_rebalance_days}|{args.pool_adv_window}"
-            )
-        ),
-        cfg=cfg,
-        enhanced_profile=args.enhanced_profile,
-        use_cache=not args.no_cache,
-        refresh_cache=args.refresh_cache,
+    prepared_raw_cache_key = (
+        raw_cache_meta["cache_key"]
+        if rolling_pool_artifact is None
+        else (
+            f"{raw_cache_meta['cache_key']}|{args.rolling_liquidity_pool}|"
+            f"{args.pool_rebalance_days}|{args.pool_adv_window}"
+        )
     )
-    print(
-        f"[4/7] factor cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
-        f"{prepared_cache_meta['cache_path']}"
-    )
-
-    df_dict = prepared_bundle["df_dict"]
-    benchmark_close = prepared_bundle["benchmark_close"]
-    benchmark_open = prepared_bundle["benchmark_open"]
-    factor_bundle = prepared_bundle["factor_bundle"]
-    regime_state = prepared_bundle["regime_state"]
-    score_none = prepared_bundle["score_none"]
-    score_v2 = prepared_bundle["score_v2"]
-    filter_mask = prepared_bundle["filter_mask"]
-    feature_frames = prepared_bundle["feature_frames"]
-    market_features = prepared_bundle["market_features"]
-
-    if rolling_membership_mask is not None:
-        rolling_membership_mask = rolling_membership_mask.reindex(
-            index=df_dict["Close"].index,
-            columns=df_dict["Close"].columns,
-        ).fillna(False)
-        filter_mask = filter_mask & rolling_membership_mask
-        score_none = score_none.where(rolling_membership_mask)
-        score_v2 = score_v2.where(rolling_membership_mask)
-        feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_v2)
 
     industry_map = None
     style_map = None
+    candidate_columns = [col for col in prepared_raw_df_dict["Close"].columns if col != cfg.benchmark]
     if cfg.enable_industry_cap and args.data_source == "tq":
-        industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
+        industry_map = load_industry_map_from_tq(candidate_columns)
     if cfg.enable_style_cap and args.data_source == "tq":
-        style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
-
-    print("[5/7] computing shared rolling ML score once...")
-    ml_score, training_log = rolling_ml_scores_multi(
-        feature_frames=feature_frames,
-        market_features=market_features,
-        close=factor_bundle["raw_inputs"]["Close"],
-        benchmark_close=benchmark_close,
-        open_df=factor_bundle["raw_inputs"]["Open"],
-        benchmark_open=benchmark_open,
-        filter_mask=filter_mask,
-        regime_state=regime_state,
-        config=ml_cfg,
-    )
+        style_map = load_style_map_from_tq(candidate_columns)
 
     output_root = Path("daily_research/output") / (
         args.experiment_tag.strip() or f"advanced_ml_execution_repair_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
+    shared_prepared_cache_meta = None
+    shared_training_log = pd.DataFrame()
+    shared_per_horizon_scores: dict[int, pd.DataFrame] = {}
+    shared_bundle: dict[str, Any] | None = None
+    shared_membership_mask: pd.DataFrame | None = None
+
+    if full_recompute_mode:
+        print("[4/7] full recompute mode enabled for candidate-specific regime settings...")
+    else:
+        prepared_bundle, shared_prepared_cache_meta = build_prepared_bundle_with_cache(
+            raw_df_dict=prepared_raw_df_dict,
+            raw_cache_key=prepared_raw_cache_key,
+            cfg=cfg,
+            enhanced_profile=args.enhanced_profile,
+            use_cache=not args.no_cache,
+            refresh_cache=args.refresh_cache,
+        )
+        print(
+            f"[4/7] factor cache: {'hit' if shared_prepared_cache_meta['cache_hit'] else 'build'} | "
+            f"{shared_prepared_cache_meta['cache_path']}"
+        )
+
+        shared_bundle = prepared_bundle
+        shared_membership_mask = None
+        if rolling_membership_mask is not None:
+            shared_membership_mask = rolling_membership_mask.reindex(
+                index=prepared_bundle["df_dict"]["Close"].index,
+                columns=prepared_bundle["df_dict"]["Close"].columns,
+            ).fillna(False)
+            prepared_bundle["filter_mask"] = prepared_bundle["filter_mask"] & shared_membership_mask
+            prepared_bundle["score_none"] = prepared_bundle["score_none"].where(shared_membership_mask)
+            prepared_bundle["score_v2"] = prepared_bundle["score_v2"].where(shared_membership_mask)
+            feature_frames, market_features = build_ml_feature_bundle(
+                prepared_bundle["factor_bundle"],
+                prepared_bundle["regime_state"],
+                prepared_bundle["score_none"],
+                prepared_bundle["score_v2"],
+            )
+            prepared_bundle["feature_frames"] = feature_frames
+            prepared_bundle["market_features"] = market_features
+
+        print("[5/7] computing shared rolling ML score once...")
+        _, shared_training_log, shared_per_horizon_scores = rolling_ml_scores_multi_detail(
+            feature_frames=prepared_bundle["feature_frames"],
+            market_features=prepared_bundle["market_features"],
+            close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
+            benchmark_close=prepared_bundle["benchmark_close"],
+            open_df=prepared_bundle["factor_bundle"]["raw_inputs"]["Open"],
+            benchmark_open=prepared_bundle["benchmark_open"],
+            filter_mask=prepared_bundle["filter_mask"],
+            regime_state=prepared_bundle["regime_state"],
+            config=ml_cfg,
+        )
+        shared_training_log.to_csv(output_root / "shared_training_log.csv", index=False, encoding="utf-8-sig")
+
     scan_meta = {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "history_window": history_window_to_dict(history_window),
         "raw_cache": raw_cache_meta,
-        "prepared_cache": prepared_cache_meta,
+        "shared_prepared_cache": shared_prepared_cache_meta,
+        "full_recompute_mode": full_recompute_mode,
         "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
         "rolling_pool_rebalance_days": int(args.pool_rebalance_days),
         "rolling_pool_adv_window": int(args.pool_adv_window),
@@ -621,7 +799,6 @@ def main():
         json.dumps(scan_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    training_log.to_csv(output_root / "shared_training_log.csv", index=False, encoding="utf-8-sig")
 
     windows = _parse_named_windows(args.windows)
     summary_rows: list[dict[str, Any]] = []
@@ -631,25 +808,99 @@ def main():
         label = str(candidate["label"])
         run_cfg = _clone_research_config(cfg)
         run_ml_cfg = _clone_ml_config(ml_cfg)
-        run_ml_cfg.state_ensemble_weights = candidate.get("state_ensemble_weights") or {}
+        run_ml_cfg.state_horizon_weights = _merge_nested_dict(
+            ml_cfg.state_horizon_weights,
+            candidate.get("state_horizon_weights"),
+        )
+        run_ml_cfg.state_ensemble_weights = _merge_nested_dict(
+            ml_cfg.state_ensemble_weights,
+            candidate.get("state_ensemble_weights"),
+        )
         if "turnover_limit" in candidate:
             run_cfg.turnover_limit = float(candidate["turnover_limit"])
         if "min_hold_days" in candidate:
             run_cfg.min_hold_days = int(candidate["min_hold_days"])
+        if "regime_ma_window" in candidate:
+            run_cfg.regime_ma_window = int(candidate["regime_ma_window"])
+        if "regime_vol_window" in candidate:
+            run_cfg.regime_vol_window = int(candidate["regime_vol_window"])
+        if "regime_max_annual_vol" in candidate:
+            run_cfg.regime_max_annual_vol = float(candidate["regime_max_annual_vol"])
         if "stop_loss" in candidate:
             run_cfg.stop_loss = float(candidate["stop_loss"])
         if "take_profit" in candidate:
             run_cfg.take_profit = float(candidate["take_profit"])
 
+        run_dir = output_root / label
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        prepared_cache_meta = shared_prepared_cache_meta
+        current_membership_mask = shared_membership_mask
+
+        if full_recompute_mode:
+            prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+                raw_df_dict=prepared_raw_df_dict,
+                raw_cache_key=prepared_raw_cache_key,
+                cfg=run_cfg,
+                enhanced_profile=args.enhanced_profile,
+                use_cache=not args.no_cache,
+                refresh_cache=args.refresh_cache,
+            )
+            print(
+                f"  > {label}: factor cache {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+                f"regime_max_annual_vol={run_cfg.regime_max_annual_vol:.2f}"
+            )
+
+            current_membership_mask = None
+            if rolling_membership_mask is not None:
+                current_membership_mask = rolling_membership_mask.reindex(
+                    index=prepared_bundle["df_dict"]["Close"].index,
+                    columns=prepared_bundle["df_dict"]["Close"].columns,
+                ).fillna(False)
+                prepared_bundle["filter_mask"] = prepared_bundle["filter_mask"] & current_membership_mask
+                prepared_bundle["score_none"] = prepared_bundle["score_none"].where(current_membership_mask)
+                prepared_bundle["score_v2"] = prepared_bundle["score_v2"].where(current_membership_mask)
+                feature_frames, market_features = build_ml_feature_bundle(
+                    prepared_bundle["factor_bundle"],
+                    prepared_bundle["regime_state"],
+                    prepared_bundle["score_none"],
+                    prepared_bundle["score_v2"],
+                )
+                prepared_bundle["feature_frames"] = feature_frames
+                prepared_bundle["market_features"] = market_features
+
+            candidate_ml_score, training_log, _ = rolling_ml_scores_multi_detail(
+                feature_frames=prepared_bundle["feature_frames"],
+                market_features=prepared_bundle["market_features"],
+                close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
+                benchmark_close=prepared_bundle["benchmark_close"],
+                open_df=prepared_bundle["factor_bundle"]["raw_inputs"]["Open"],
+                benchmark_open=prepared_bundle["benchmark_open"],
+                filter_mask=prepared_bundle["filter_mask"],
+                regime_state=prepared_bundle["regime_state"],
+                config=run_ml_cfg,
+            )
+            training_log.to_csv(run_dir / "training_log.csv", index=False, encoding="utf-8-sig")
+        else:
+            prepared_bundle = shared_bundle
+            if prepared_bundle is None:
+                raise RuntimeError("Shared prepared bundle is missing in shared scan mode.")
+            candidate_ml_score = combine_per_horizon_ml_scores(
+                per_horizon_scores=shared_per_horizon_scores,
+                close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
+                regime_state=prepared_bundle["regime_state"],
+                config=run_ml_cfg,
+            )
+
         final_score = blend_scores(
-            ml_score,
-            score_none,
-            score_v2,
+            candidate_ml_score,
+            prepared_bundle["score_none"],
+            prepared_bundle["score_v2"],
             run_ml_cfg,
-            quadrant_series=regime_state["quadrant"],
+            quadrant_series=prepared_bundle["regime_state"]["quadrant"],
         )
-        if rolling_membership_mask is not None:
-            final_score = final_score.where(rolling_membership_mask)
+        if current_membership_mask is not None:
+            final_score = final_score.where(current_membership_mask)
 
         target_weights = build_target_weights(
             final_score,
@@ -662,17 +913,17 @@ def main():
             target_weights, score_for_backtest = apply_market_regime_filter(
                 target_weights,
                 score_for_backtest,
-                regime_state,
+                prepared_bundle["regime_state"],
             )
         equity_df, action_df, metrics = backtest(
-            close=factor_bundle["raw_inputs"]["Close"],
-            benchmark_close=benchmark_close,
-            open_df=factor_bundle["raw_inputs"]["Open"],
-            benchmark_open=benchmark_open,
+            close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
+            benchmark_close=prepared_bundle["benchmark_close"],
+            open_df=prepared_bundle["factor_bundle"]["raw_inputs"]["Open"],
+            benchmark_open=prepared_bundle["benchmark_open"],
             target_weights=target_weights,
             target_scores=score_for_backtest,
             config=run_cfg,
-            regime_on=regime_state["regime_on"],
+            regime_on=prepared_bundle["regime_state"]["regime_on"],
         )
 
         metrics.update(
@@ -694,6 +945,10 @@ def main():
                 "rolling_pool_rebalance_count": 0
                 if rolling_pool_artifact is None
                 else int(len(rolling_pool_artifact.schedule_df)),
+                "prepared_cache_key": prepared_cache_meta["cache_key"] if prepared_cache_meta else "",
+                "prepared_cache_path": prepared_cache_meta["cache_path"] if prepared_cache_meta else "",
+                "prepared_cache_hit": bool(prepared_cache_meta["cache_hit"]) if prepared_cache_meta else False,
+                "state_horizon_weights": run_ml_cfg.state_horizon_weights or {},
                 "state_ensemble_weights": run_ml_cfg.state_ensemble_weights or {},
                 "turnover_limit": float(run_cfg.turnover_limit),
                 "min_hold_days": int(run_cfg.min_hold_days),
@@ -702,13 +957,17 @@ def main():
             }
         )
 
-        run_dir = output_root / label
-        run_dir.mkdir(parents=True, exist_ok=True)
         equity_df.to_csv(run_dir / "equity_curve.csv", encoding="utf-8-sig")
         action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
-        regime_state.to_csv(run_dir / "regime_state.csv", encoding="utf-8-sig")
+        prepared_bundle["regime_state"].to_csv(run_dir / "regime_state.csv", encoding="utf-8-sig")
         target_weights.to_csv(run_dir / "target_weights.csv", encoding="utf-8-sig")
-        _build_latest_scores(final_score, target_weights, score_none, score_v2, ml_score).to_csv(
+        _build_latest_scores(
+            final_score,
+            target_weights,
+            prepared_bundle["score_none"],
+            prepared_bundle["score_v2"],
+            candidate_ml_score,
+        ).to_csv(
             run_dir / "latest_scores.csv",
             index=False,
             encoding="utf-8-sig",
@@ -721,6 +980,10 @@ def main():
             "full_excess_sharpe": metrics.get("excess_sharpe"),
             "full_excess_max_drawdown": metrics.get("excess_max_drawdown"),
             "full_avg_turnover": metrics.get("avg_turnover"),
+            "regime_ma_window": run_cfg.regime_ma_window,
+            "regime_vol_window": run_cfg.regime_vol_window,
+            "regime_max_annual_vol": run_cfg.regime_max_annual_vol,
+            "state_horizon_weights": json.dumps(run_ml_cfg.state_horizon_weights or {}, ensure_ascii=False, sort_keys=True),
             "state_ensemble_weights": json.dumps(run_ml_cfg.state_ensemble_weights or {}, ensure_ascii=False, sort_keys=True),
             "turnover_limit": run_cfg.turnover_limit,
             "min_hold_days": run_cfg.min_hold_days,

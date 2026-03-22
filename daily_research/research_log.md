@@ -4885,3 +4885,80 @@
 4. `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和产物保留，但不再作为当前执行修复候选
 5. 下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重，其后再看状态专属 ensemble 权重与 `ma50` 框架内波动阈值微调
 
+## 2026-03-22 执行端第十至十二轮正式复验：`ma50 baseline` 内部升级
+### 本轮目标
+- 在确认 `ma47/48` 左侧边界带停止晋级后，把研究主线收回到 `ma50 baseline` 内部；
+- 依次回答三件事：
+  - 状态专属 horizon 权重，是否能以最小改动修复最新弱窗口；
+  - 状态专属 ensemble 权重，是否存在“弱窗口改善且不破坏全样本”的干净升级；
+  - `ma50` 框架内的简单波动阈值微调，是否还存在有效敏感度。
+
+### 本轮脚本修正
+- 在第十轮正式扫描前，先修正了共享扫描器的一个实现问题：
+  - 之前 `scan_execution_repair_candidates.py` 会在候选循环外先合成一遍多周期 `ml_score`，导致状态专属 horizon 候选即使写进配置，也不会真的影响候选结果；
+  - 因此补充了 `ml_alpha.py` 的 `combine_per_horizon_ml_scores` 与 `rolling_ml_scores_multi_detail`，并让扫描器在候选循环内按各自 `state_horizon_weights` 重新合成 `candidate_ml_score`；
+  - 同时把扫描器扩成支持“候选级全量重算”，以便安全复验 `regime_max_annual_vol` 这种会改状态标签与 ML 特征的参数。
+
+### 本轮产物
+- 第十轮 `ma50` 状态专属 horizon 权重：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round10_ma50_state_horizon`
+- 第十一轮 `ma50` 状态专属 ensemble 权重：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round11_ma50_state_ensemble`
+- 第十二轮 `ma50` 波动阈值微调：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round12_ma50_regime_vol`
+- 关键脚本：
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+  - `daily_research/baseline/ml_alpha.py`
+
+### 结果一：状态专属 horizon 权重不是当前修复主线
+- 只改 `trend_up_high_vol` 的 horizon 配比时：
+  - `latest_weak` 窗口始终停在基线同一水平，约 `-10.87% / -0.559`
+  - 但全样本超额 Sharpe 会从 `1.841` 回落到约 `1.653 ~ 1.712`
+- 一旦同时改到 `trend_up_low_vol` 的 horizon 配比：
+  - 最新弱窗口会明显恶化，最差一档约退到 `-18.96% / -0.927`
+  - 全样本超额 Sharpe 也进一步退到约 `1.412 ~ 1.608`
+- 这说明：
+  - `ma50 baseline` 下，状态专属 horizon 权重对当前弱窗口没有提供有效修复；
+  - 尤其 `trend_up_low_vol` 的 horizon 结构，当前不宜作为下一步第一优先级。
+
+### 结果二：状态专属 ensemble 权重仍有一点信息量，但还没有干净升级
+- 纯 `trend_up_high_vol` 的 ensemble 调整：
+  - 对最新弱窗口几乎完全无影响；
+  - 但会轻微拖累全样本超额 Sharpe。
+- 首个真正动到弱窗口的候选是：
+  - `trend_up_low_vol=ml0.60/none0.25/v20.15`
+  - `trend_up_high_vol=ml0.80/none0.15/v20.05`
+- 这条候选的表现是：
+  - 最新弱窗口从基线约 `-10.87% / -0.559` 小幅改善到约 `-10.04% / -0.550`
+  - 最近完整窗口提升到约 `90.53% / 2.299`
+  - 但全样本超额 Sharpe 从 `1.841` 回落到约 `1.753`
+  - 全样本超额最大回撤也从约 `-29.11%` 扩到约 `-32.43%`
+- 这说明：
+  - 当前三条升级线里，只有状态专属 ensemble 还保留一点继续研究的价值；
+  - 但第一轮结果还不足以把它直接晋级成 `ma50 baseline` 的正式替代。
+
+### 结果三：`ma50` 简单波动阈值微调没有有效敏感度
+- `regime_max_annual_vol=0.30 / 0.31 / 0.32 / 0.33 / 0.34` 五个点的正式收益指标完全一致：
+  - 全样本超额 Sharpe 都约 `1.841`
+  - 最新弱窗口都约 `-10.87% / -0.559`
+- 进一步比对 `regime_state.csv` 与 `actions.csv` 后确认：
+  - 阈值变化只改动了少数 `trend_down_low_vol / trend_down_high_vol` 的标签；
+  - `regime_on` 一天都没有变化；
+  - 持仓权重与交易动作也完全一致。
+- 这说明：
+  - 在当前 `ma50 + liquid500 + next_open` 框架里，简单波动阈值微调并没有触发到真正影响执行结果的边界；
+  - 这条线当前不应继续放在第一优先级。
+
+### 本轮结论
+1. `ma50 baseline` 内部升级的首轮正式复验已经完成，原定三条线里，`horizon` 与简单波动阈值都没有跑出可继续优先推进的信号。
+2. 状态专属 ensemble 权重仍保留一定信息量，但当前最佳候选仍是“弱窗口略改善、全样本明显退步”的不干净升级。
+3. 因此执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`，`ma50 baseline` 继续保留为头号正式修复候选。
+4. 下一步不再按原顺序继续推 `horizon -> ensemble -> vol threshold`，而是收束为：只对 `ma50` 做第二轮状态专属 ensemble 精扫，并先隔离 `trend_up_low_vol` 的权重结构。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不再参与当前执行修复排序
+5. 下一步研究重心继续留在 `ma50 baseline` 内部，但顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
+

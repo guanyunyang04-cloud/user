@@ -211,12 +211,24 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 更克制的 `slot_logic_shared` 最终只剩单因子 `volatility_contraction`；它的季度 RankIC 均值约 `0.044`，相对 `v2` 虽在 `5` 个非 `2025Q3` 季度更强，但正向改善约 `82.42%` 仍集中在 `2024Q3`，且在焦点季度 `2025Q3` 反而落后 `v2` 约 `-0.060`
   - 对 `ma48_vs_ma47 / ma48_vs_ma50` 的季度槽位复放，`slot_logic_shared` 在非焦点季度里分别只出现 `2 / 3` 个正向槽位边际，且没有在 `ma48` 其他正边际季度上形成稳定对齐；`slot_logic` 也没有同时满足“可解释槽位”与“可解释未来超额”
   - 这说明：`2025Q3` 的槽位替换目前还抽象不成可跨季度复放的稳定 `trend_up_low_vol` 信号逻辑，因此 `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重
+- 第十轮 `ma50` 状态专属 horizon 权重首轮扫描已经完成：
+  - 只调整 `trend_up_high_vol` 的 `5/10/20` 权重，只会改动全样本高波段表现，最新弱窗口 `2025-09-05 -> 2026-03-19` 保持在约 `-10.87% / -0.559`，没有任何净改善
+  - 一旦同时动到 `trend_up_low_vol` 的 horizon 配比，最新弱窗口会明显恶化，最差一档约退到 `-18.96% / -0.927`
+  - 这说明：在 `ma50 baseline` 下，状态专属 horizon 权重不是当前弱窗口修复的主增量来源，这条线暂时降级
+- 第十一轮 `ma50` 状态专属 ensemble 权重首轮扫描已经完成：
+  - 纯 `trend_up_high_vol` 的权重改法，对最新弱窗口几乎没有影响
+  - 首个真正动到弱窗口的候选是 `trend_up_low_vol=ml0.60/none0.25/v20.15` 并叠加 `trend_up_high_vol=ml0.80/none0.15/v20.05`，它把最新弱窗口小幅改善到约 `-10.04% / -0.550`
+  - 但这条候选的全样本超额 Sharpe 从 `1.841` 回落到约 `1.753`，回撤也更差，因此还不是可晋级的干净升级
+- 第十二轮 `ma50` 波动阈值微调已经完成：
+  - `regime_max_annual_vol=0.30 ~ 0.34` 五个点的正式收益指标完全一致
+  - 复核 `regime_state.csv` 与 `actions.csv` 后确认：这些阈值只改动了少数 `trend_down_low_vol / trend_down_high_vol` 标签，`regime_on` 完全不变，实际持仓与交易动作也完全一致
+  - 这说明：在当前 `ma50 + liquid500 + next_open` 框架里，简单波动阈值微调没有有效敏感度，这条线不再列为第一优先级
 - 当前执行决策现更新为：
   - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
   - `ma50 baseline` 继续作为当前头号正式修复候选
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
   - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
-  - 下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重
+  - 下一步研究重心继续留在 `ma50 baseline` 内部，但顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
