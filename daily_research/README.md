@@ -156,6 +156,17 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 在同口径正式扫描里，最新弱窗口超额收益从约 `-28.95%` 改善到 `-10.76%`，超额 Sharpe 从约 `-1.381` 改善到 `-0.583`
   - 同时全样本超额 Sharpe 仍约 `1.035`，超额最大回撤从约 `-41.53%` 收敛到约 `-31.22%`
   - 但该候选尚未把弱窗口修回正收益，因此暂不改执行默认值，只作为下一轮正式修复候选
+- 第二轮正式扫描继续聚焦两类变量：
+  - 在原 `regime_ma_window=60` 框架里，`0.55 / 0.25 / 0.20` 仍然是 `0.55 ~ 0.60` 区间内最优权重点；
+  - 但更强的新信号来自状态启停：把 `regime_ma_window` 从 `60` 收到 `50` 后，`baseline` 本身就在三个正式窗口里同时优于当前执行主线
+- `regime_ma_window=50` 的 `baseline` 结果：
+  - 全样本超额收益约 `580.31%`
+  - 全样本超额 Sharpe 约 `1.841`
+  - 最新弱窗口超额收益约 `-10.87%`
+  - 最新弱窗口超额 Sharpe 约 `-0.559`
+- 当前判断：
+  - 执行端修复的第一优先级已经转成“优先复验 `regime_ma_window=50`”
+  - `trend_up_low_vol` 的分段权重微调继续保留，但已降为次优先级
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -228,6 +239,12 @@ python daily_research/tools/execution_health_check.py
 
 ```bash
 python daily_research/baseline/scan_execution_repair_candidates.py --data-source tq --start-date 20220101 --benchmark 000300.SH --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --pool-adv-window 20 --holding-count 5 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504 --ml-model-family histgb
+```
+
+执行端第二轮扫描：
+
+```bash
+python daily_research/baseline/scan_execution_repair_candidates.py --candidate-set round2_weights --data-source tq --start-date 20220101 --benchmark 000300.SH --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --pool-adv-window 20 --holding-count 5 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504 --ml-model-family histgb
 ```
 
 只清理可再生缓存：

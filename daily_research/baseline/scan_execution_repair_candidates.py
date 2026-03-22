@@ -62,6 +62,11 @@ def parse_args():
     parser.add_argument("--holding-count", type=int, default=5)
     parser.add_argument("--rebalance-freq", default="5d")
     parser.add_argument("--experiment-tag", default="")
+    parser.add_argument(
+        "--candidate-set",
+        choices=["round1", "round2_weights", "pair_best"],
+        default="round1",
+    )
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
 
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
@@ -192,43 +197,92 @@ def _subset_raw_df_dict_to_stocks(
     return out
 
 
-def _candidate_profiles() -> list[dict[str, Any]]:
-    return [
-        {"label": "baseline"},
-        {
-            "label": "up_low_ml55_none25_v220",
-            "state_ensemble_weights": {
-                "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+def _candidate_profiles(candidate_set: str) -> list[dict[str, Any]]:
+    if candidate_set == "round1":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_low_ml55_none25_v220",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+                },
             },
-        },
-        {
-            "label": "up_low_ml50_none20_v230",
-            "state_ensemble_weights": {
-                "trend_up_low_vol": {"ml": 0.50, "none": 0.20, "v2": 0.30},
+            {
+                "label": "up_low_ml50_none20_v230",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.50, "none": 0.20, "v2": 0.30},
+                },
             },
-        },
-        {
-            "label": "turnover1_hold3",
-            "turnover_limit": 1.00,
-            "min_hold_days": 3,
-        },
-        {
-            "label": "up_low_ml55_none25_v220_turnover1_hold3",
-            "state_ensemble_weights": {
-                "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+            {
+                "label": "turnover1_hold3",
+                "turnover_limit": 1.00,
+                "min_hold_days": 3,
             },
-            "turnover_limit": 1.00,
-            "min_hold_days": 3,
-        },
-        {
-            "label": "up_low_ml50_none20_v230_turnover1_hold3",
-            "state_ensemble_weights": {
-                "trend_up_low_vol": {"ml": 0.50, "none": 0.20, "v2": 0.30},
+            {
+                "label": "up_low_ml55_none25_v220_turnover1_hold3",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+                },
+                "turnover_limit": 1.00,
+                "min_hold_days": 3,
             },
-            "turnover_limit": 1.00,
-            "min_hold_days": 3,
-        },
-    ]
+            {
+                "label": "up_low_ml50_none20_v230_turnover1_hold3",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.50, "none": 0.20, "v2": 0.30},
+                },
+                "turnover_limit": 1.00,
+                "min_hold_days": 3,
+            },
+        ]
+
+    if candidate_set == "round2_weights":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_low_ml60_none25_v215",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.60, "none": 0.25, "v2": 0.15},
+                },
+            },
+            {
+                "label": "up_low_ml58_none24_v218",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.58, "none": 0.24, "v2": 0.18},
+                },
+            },
+            {
+                "label": "up_low_ml57_none25_v218",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.57, "none": 0.25, "v2": 0.18},
+                },
+            },
+            {
+                "label": "up_low_ml56_none24_v220",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.56, "none": 0.24, "v2": 0.20},
+                },
+            },
+            {
+                "label": "up_low_ml55_none25_v220",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+                },
+            },
+        ]
+
+    if candidate_set == "pair_best":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_low_ml55_none25_v220",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
+                },
+            },
+        ]
+
+    raise ValueError(f"Unsupported candidate_set: {candidate_set}")
 
 
 def _annualized_return(equity: pd.Series) -> float:
@@ -339,6 +393,7 @@ def _clone_ml_config(ml_cfg: MLAplhaConfig) -> MLAplhaConfig:
 
 def main():
     args = parse_args()
+    candidate_profiles = _candidate_profiles(args.candidate_set)
 
     cfg = ResearchConfig(
         start_date=args.start_date,
@@ -537,11 +592,12 @@ def main():
             "research": asdict(cfg),
             "ml": asdict(ml_cfg),
         },
+        "candidate_set": args.candidate_set,
         "windows": [
             {"name": name, "start": start, "end": end}
             for name, start, end in _parse_named_windows(args.windows)
         ],
-        "candidates": _candidate_profiles(),
+        "candidates": candidate_profiles,
     }
     (output_root / "scan_config.json").write_text(
         json.dumps(scan_meta, ensure_ascii=False, indent=2),
@@ -553,7 +609,7 @@ def main():
     summary_rows: list[dict[str, Any]] = []
 
     print("[6/7] running candidate backtests...")
-    for candidate in _candidate_profiles():
+    for candidate in candidate_profiles:
         label = str(candidate["label"])
         run_cfg = _clone_research_config(cfg)
         run_ml_cfg = _clone_ml_config(ml_cfg)
@@ -607,6 +663,10 @@ def main():
                 "candidate_label": label,
                 "benchmark": cfg.benchmark,
                 "execution_mode": cfg.execution_mode,
+                "regime_ma_window": int(run_cfg.regime_ma_window),
+                "regime_vol_window": int(run_cfg.regime_vol_window),
+                "regime_max_annual_vol": float(run_cfg.regime_max_annual_vol),
+                "regime_allowed_quadrants": list(run_cfg.regime_allowed_quadrants),
                 "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
                 "rolling_pool_rebalance_days": int(args.pool_rebalance_days),
                 "rolling_pool_adv_window": int(args.pool_adv_window),
