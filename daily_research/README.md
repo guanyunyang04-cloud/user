@@ -182,12 +182,18 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 这说明：`ma48` 的确跑出了更高上限，但当前还像“局部高收益候选”，不够稳定到直接替代 `ma50 baseline`
   - `ma50` 框架内的轻量风控只能带来很小的弱窗口改善，不足以改变当前主判断
   - 因此当前不更新执行默认值，也不把头号正式修复候选从 `ma50 baseline` 改掉；下一步改为对 `ma48` 做专门稳定性复验
+- 第六轮 `ma48` 专门稳定性复验与季度集中度诊断已经完成：
+  - `ma48 baseline` 的全样本超额 Sharpe 约 `2.202`，最近完整窗口约 `112.46% / 2.790`，最新弱窗口约 `+3.24% / 0.157`；左邻 `ma47 baseline` 也保持了约 `1.955` 的全样本超额 Sharpe 和约 `+1.79% / 0.106` 的最新弱窗口
+  - 但 `ma48 baseline` 相对 `ma50 baseline` 只在 `17` 个季度里的 `5` 个季度更强，最佳季度 `2025Q3` 占正向季度总优势约 `53.86%`，Top3 季度占比约 `94.20%`
+  - `ma48 baseline` 相对 `ma47 baseline` 虽然仍有总优势，但最佳季度 `2025Q3` 占正向季度总优势约 `71.02%`，说明 `47 -> 48` 的新增优势本身也高度集中
+  - `ma48 + take20` 相对 `ma48 baseline` 只在 `17` 个季度里的 `2` 个季度更强，总增益很小且高度集中，不足以单独晋级
+  - 这说明：`ma48` 不再像纯随机孤点，左侧 `ma47/48` 带值得继续复验；但当前还不足以把头号正式修复候选从 `ma50 baseline` 改掉
 - 当前执行决策同步为：
   - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
   - `ma50 baseline` 继续作为当前头号正式修复候选
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
-  - 新增一条高收益待复验分支：`ma48 baseline`，`ma48 + take20` 作为其附加轻量风控版本保留
-  - 下一步不直接切执行默认值，而是先对 `ma48` 做专门稳定性复验与季度集中度诊断
+  - 高收益待复验分支从单点 `ma48 baseline` 扩展为 `ma47/48` 左侧边界带；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为其附加轻量风控版本保留
+  - 下一步不直接切执行默认值，而是先做 `ma47/48` 左侧边界带的稳定性复验与 `2025Q3` 集中来源诊断
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -274,10 +280,16 @@ python daily_research/baseline/scan_execution_repair_candidates.py --candidate-s
 python daily_research/tools/ma50_revalidation_report.py --current-baseline-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/baseline --backup-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/up_low_ml55_none25_v220 --candidate-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_pair/baseline
 ```
 
-执行端第五轮边界 / 轻量风控汇总：
+执行端第五轮边界 / 轻量风控汇总（含 `ma47` 左邻补跑）：
 
 ```bash
-python daily_research/tools/ma_boundary_risk_report.py --scan-dirs daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma51_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma52_boundary_risk
+python daily_research/tools/ma_boundary_risk_report.py --scan-dirs daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma51_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma52_boundary_risk
+```
+
+执行端第六轮 `ma48` 稳定性 / 季度集中度诊断：
+
+```bash
+python daily_research/tools/ma48_stability_report.py --anchor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --candidate-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --variant-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/take20 --left-neighbor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --right-neighbor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk/baseline --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round6_ma48_stability
 ```
 
 只清理可再生缓存：
