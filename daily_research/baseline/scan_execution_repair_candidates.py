@@ -64,7 +64,7 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument(
         "--candidate-set",
-        choices=["round1", "round2_weights", "pair_best"],
+        choices=["round1", "round2_weights", "pair_best", "ma50_boundary_risk"],
         default="round1",
     )
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
@@ -279,6 +279,24 @@ def _candidate_profiles(candidate_set: str) -> list[dict[str, Any]]:
                 "state_ensemble_weights": {
                     "trend_up_low_vol": {"ml": 0.55, "none": 0.25, "v2": 0.20},
                 },
+            },
+        ]
+
+    if candidate_set == "ma50_boundary_risk":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "stop8",
+                "stop_loss": -0.08,
+            },
+            {
+                "label": "take20",
+                "take_profit": 0.20,
+            },
+            {
+                "label": "stop8_take20",
+                "stop_loss": -0.08,
+                "take_profit": 0.20,
             },
         ]
 

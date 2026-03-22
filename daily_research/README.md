@@ -175,6 +175,13 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 相对这两个对照，`ma50 baseline` 都是在 `17` 个季度里赢下 `13` 个季度，且最强季度贡献占正向季度总优势约 `20%`，不是单季度异常放大
   - 在 `ma50` 框架里再叠加 `up_low_ml55_none25_v220` 只把最新弱窗口从约 `-10.87% / -0.559` 轻微改善到约 `-9.31% / -0.509`，但会把全样本超额 Sharpe 从约 `1.841` 拉回约 `1.392`
   - 因此下一步不急着进入第四轮权重微调，而是先做 `ma50` 边界稳定性与轻量风险控制复验
+- 第五轮 `ma50` 边界稳定性与轻量风险控制复验已经完成：
+  - 在 `ma48 / ma49 / ma50 / ma51 / ma52` 中，聚合指标最强的候选跑到了 `ma48 + take20`
+  - `ma48 + take20` 的全样本超额 Sharpe 约 `2.239`，最近完整窗口约 `116.70% / 2.930`，最新弱窗口约 `+3.24% / 0.157`
+  - 但它相对 `ma50 baseline` 只在 `17` 个季度里的 `5` 个季度更强，且 `2025Q3` 一季就占了约 `54.92%` 的正向季度总优势；相对 `ma48 baseline` 的 `take20` 增益也高度集中
+  - 这说明：`ma48` 的确跑出了更高上限，但当前还像“局部高收益候选”，不够稳定到直接替代 `ma50 baseline`
+  - `ma50` 框架内的轻量风控只能带来很小的弱窗口改善，不足以改变当前主判断
+  - 因此当前不更新执行默认值，也不把头号正式修复候选从 `ma50 baseline` 改掉；下一步改为对 `ma48` 做专门稳定性复验
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -259,6 +266,12 @@ python daily_research/baseline/scan_execution_repair_candidates.py --candidate-s
 
 ```bash
 python daily_research/tools/ma50_revalidation_report.py --current-baseline-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/baseline --backup-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/up_low_ml55_none25_v220 --candidate-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_pair/baseline
+```
+
+执行端第五轮边界 / 轻量风控汇总：
+
+```bash
+python daily_research/tools/ma_boundary_risk_report.py --scan-dirs daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma51_boundary_risk daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma52_boundary_risk
 ```
 
 只清理可再生缓存：

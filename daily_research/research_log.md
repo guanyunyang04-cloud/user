@@ -4457,3 +4457,97 @@
 3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
 4. 下一步直接进入 `ma50` 的状态边界与轻量风险控制复验；第四轮权重微调改为条件触发
 
+## 2026-03-22 执行端第五轮正式复验：`ma50` 边界稳定性与轻量风险控制
+### 本轮目标
+- 不再继续在 `ma50` 框架里盲调权重，而是先判断：
+  - `ma50` 周围的状态边界是否存在更强点
+  - 轻量风控是否能在不破坏整体的前提下提供净增益
+- 这轮只做两类变量：
+  - 状态边界：`ma48 / ma49 / ma50 / ma51 / ma52`
+  - 轻量风控：`baseline / stop8 / take20 / stop8_take20`
+
+### 本轮产物
+- 边界扫描目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma51_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma52_boundary_risk`
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare`
+- 关键归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma50_baseline_vs_ma48_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma50_baseline_vs_ma48_take20`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma48_baseline_vs_ma48_take20`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/ma48_take20_revalidation`
+
+### 结果一：边界扫描的主结论
+- `ma48 baseline`
+  - 全样本超额收益：`729.66%`
+  - 全样本超额 Sharpe：`2.202`
+  - 最近完整窗口：`112.46% / 2.790`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma48 + take20`
+  - 全样本超额收益：`746.20%`
+  - 全样本超额 Sharpe：`2.239`
+  - 最近完整窗口：`116.70% / 2.930`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- `ma49 / ma51 / ma52` 的基线都明显更差，尤其最新弱窗口重新大幅转负。
+- 这说明：
+  - `ma48` 的确跑出了比 `ma50` 更强的边界点；
+  - 但这个改善不是一个平滑的“附近都更好”，而是一个比较尖锐的局部甜点。
+
+### 结果二：轻量风控的主结论
+- 在 `ma50` 框架里：
+  - `take20` 只能把最新弱窗口从 `-10.87% / -0.559` 轻微改善到 `-9.66% / -0.504`
+  - 但全样本超额 Sharpe 会从 `1.841` 轻微回落到 `1.836`
+  - `stop8` 与 `stop8_take20` 都更差
+- 在 `ma48` 框架里：
+  - `take20` 把全样本超额 Sharpe 从 `2.202` 小幅抬到 `2.239`
+  - 但它对 `ma48 baseline` 的增益很小，更多像附加微调，而不是主驱动
+- 这说明：
+  - 真正有信息量的是“边界从 `ma50` 收到 `ma48`”，不是“轻量风控本身”
+  - `take20` 目前只能算边界候选上的次级增强，而不是单独结论
+
+### 结果三：稳定性与集中度
+- `ma48 + take20` 相对 `ma50 baseline`
+  - 只在 `17` 个季度里的 `5` 个季度更强
+  - 有 `8` 个季度反而更弱
+  - 最强季度是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `54.92%`
+- `ma48 + take20` 相对 `ma48 baseline`
+  - 只在 `17` 个季度里的 `2` 个季度更强
+  - 总增益很小
+  - 最强季度同样是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `72.05%`
+- 这说明：
+  - `ma48` 这条线虽然数值很强，但当前优势明显更集中；
+  - `take20` 的附加收益本身也不够稳定。
+
+### 归因补充
+- `ma48 baseline` / `ma48 + take20` 相对 `ma50 baseline` 的主要新增优势：
+  - `trend_up_high_vol` 超额差约 `+34.25%`
+  - `trend_down_low_vol` 超额差约 `+4.73%`
+- 相对 `ma50 baseline`，它们在 `trend_up_low_vol` 反而没有继续扩大优势。
+- 这说明：
+  - 第五轮跑出来的新信号，核心不是再次强化原先的 `trend_up_low_vol`
+  - 而是边界变化后，对 `trend_up_high_vol` 的映射明显变强
+
+### 本轮结论
+1. 第五轮已经确认：`ma50` 附近确实存在一个更强的边界点，当前最亮眼的是 `ma48`。
+2. 但 `ma48` 的优势并不平滑，`ma49 / ma51 / ma52` 都明显回落，说明它目前更像局部甜点，而不是已经确认的稳定新主线。
+3. `ma48 + take20` 是当前数值最强点，但其相对 `ma48 baseline` 的增益本身高度集中，不足以单独晋级。
+4. `ma50` 框架内的轻量风控没有提供足够大的净增益，因此当前不改变“`ma50 baseline` 是头号正式修复候选”的主判断。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 新增一条高收益待复验分支：`ma48 baseline`，`ma48 + take20` 作为其附加轻量风控版本保留
+5. 下一步不直接切执行默认值，而是先对 `ma48` 做专门稳定性复验与季度集中度诊断
+
