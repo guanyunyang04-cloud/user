@@ -206,6 +206,17 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
   - `ma47/48` 左侧边界带继续保留为高收益研究分支，但当前按“季度特定槽位命中”看待；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为附加轻量风控版本保留
   - 下一步不直接切执行默认值，也不继续盲扫边界，而是先把 `2025Q3` 的槽位替换抽象成更稳定的 `trend_up_low_vol` 信号逻辑；如果抽象不出来，就停止该分支晋级
+- 第九轮 `trend_up_low_vol` 信号逻辑抽象诊断已经完成：
+  - 从 `2025Q3` 槽位替换里自动抽出的宽口径 `slot_logic` 因子为：`volatility_contraction / ma_gap_20_60 / volatility_20 / price_volume_divergence / mom_20 / long_regime_flag`，但它的季度 RankIC 均值约 `-0.009`，相对 `v2` 仅在 `3` 个非 `2025Q3` 季度更强，且这些正向改善约 `95.71%` 集中在单一季度
+  - 更克制的 `slot_logic_shared` 最终只剩单因子 `volatility_contraction`；它的季度 RankIC 均值约 `0.044`，相对 `v2` 虽在 `5` 个非 `2025Q3` 季度更强，但正向改善约 `82.42%` 仍集中在 `2024Q3`，且在焦点季度 `2025Q3` 反而落后 `v2` 约 `-0.060`
+  - 对 `ma48_vs_ma47 / ma48_vs_ma50` 的季度槽位复放，`slot_logic_shared` 在非焦点季度里分别只出现 `2 / 3` 个正向槽位边际，且没有在 `ma48` 其他正边际季度上形成稳定对齐；`slot_logic` 也没有同时满足“可解释槽位”与“可解释未来超额”
+  - 这说明：`2025Q3` 的槽位替换目前还抽象不成可跨季度复放的稳定 `trend_up_low_vol` 信号逻辑，因此 `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重
+- 当前执行决策现更新为：
+  - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+  - `ma50 baseline` 继续作为当前头号正式修复候选
+  - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+  - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
+  - 下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -314,6 +325,12 @@ python daily_research/tools/ma4748_band_report.py --ma47-run daily_research/outp
 
 ```bash
 python daily_research/tools/trend_up_low_vol_slot_replay_report.py --ma47-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --ma48-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --ma50-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --focus-quarter 2025Q3 --focus-quadrant trend_up_low_vol --top-n 5 --min-positive-delta 0.001 --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round8_slot_replay
+```
+
+执行端第九轮 `trend_up_low_vol` 信号逻辑抽象诊断：
+
+```bash
+python daily_research/tools/trend_up_low_vol_signal_logic_report.py --ma47-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --ma48-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --ma50-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --focus-quarter 2025Q3 --focus-quadrant trend_up_low_vol --top-days 10 --slot-top-n 5 --factor-top-k 6 --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round9_signal_logic
 ```
 
 只清理可再生缓存：
