@@ -4053,3 +4053,176 @@
 2. 归档后优先提交 manifest 与规则文件，不提交 payload 本体。
 3. 若某个缓存桶将来出现误判，再调规则，不直接恢复为“长期全部热存”。
 
+## 2026-03-22 执行端收益能力体检与研究重启
+### 体检依据
+- 正式执行主线目录：
+  - `daily_research/output/advanced_ml_rolling_liq500_formal_20260320`
+- 股票池对照：
+  - `daily_research/output/advanced_ml_liquidity_pool_compare_20260320.csv`
+- 体检工具：
+  - `daily_research/tools/execution_health_check.py`
+
+### 总体结果
+- 在正式框架 `rolling liquid500 + next_open` 下，截至 `2026-03-19`：
+  - 总超额收益：`224.21%`
+  - 总超额 Sharpe：`1.037`
+  - 总超额最大回撤：`-41.39%`
+- 这说明长期样本下，当前执行主线仍然是有效的。
+
+### 近期结果
+- 最近完整 holdout `2025-03-07 -> 2026-03-19`：
+  - 超额收益：`12.44%`
+  - 超额 Sharpe：`0.323`
+  - 超额最大回撤：`-41.39%`
+- 最新子窗口 `2025-09-05 -> 2026-03-19`：
+  - 超额收益：`-28.78%`
+  - 超额 Sharpe：`-1.382`
+  - 超额最大回撤：`-41.39%`
+
+### 股票池判断
+- `liquid300 / liquid500 / liquid800` 对照结果显示：
+  - `liquid500` 的超额 Sharpe 仍是三档高流动性池里最高；
+  - `liquid800` 接近，但没有稳定优于 `liquid500`。
+- 因此这轮不先改执行股票池，继续固定为 `liquid500`。
+
+### 结论
+- 当前执行主线不是“整体失效”，而是“长期仍有效，但近期收益能力已经不理想”。
+- 真正触发重启研究的核心证据是：
+  - 最新正式子窗口已经出现负超额收益；
+  - 最新正式子窗口超额 Sharpe 为负；
+  - 整体超额回撤仍然偏深。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. 不直接切换到 `deep_alpha`，因为它还没有通过完整晋级标准
+3. 从现在开始，正式重启执行方向研究
+
+### 重启范围
+1. 固定正式框架不变：
+   - 历史滚动 `liquid500`
+   - `next_open`
+   - 多窗口 walk-forward
+2. 第一轮优先研究：
+   - `advanced_ml` 集成权重
+   - 状态启停
+   - 回撤控制
+   - 换手约束
+3. 研究目标不是先扩新路线，而是先修复当前执行主线在 `2025-09-05 -> 2026-03-19` 的弱窗口表现
+
+## 2026-03-22 执行端弱窗口第一轮正式修复扫描
+### 本轮目的
+- 不改执行默认值，也不先改股票池。
+- 只在正式框架下检查：当前弱窗口能否通过执行线自身的小修复得到明显改善。
+- 第一轮优先看两类杠杆：
+  - `trend_up_low_vol` 下的分段集成权重；
+  - 换手约束。
+
+### 为跑正式扫描补的历史兼容修复
+- 在 `quant` 环境下，项目里一批旧脚本会因为 `Python 3.9` 的类型注解兼容问题直接报错。
+- 本轮顺手补齐了这些文件的 `from __future__ import annotations`：
+  - `daily_research/baseline/alpha.py`
+  - `daily_research/baseline/backtest.py`
+  - `daily_research/baseline/data_provider.py`
+  - `daily_research/baseline/portfolio.py`
+  - `daily_research/baseline/position_manager.py`
+  - `daily_research/baseline/run_daily_research.py`
+- 这一步不改变策略逻辑，只是清理旧环境兼容债，确保正式研究脚本在现有研究环境里可直接运行。
+
+### 新增工具
+- `daily_research/baseline/scan_execution_repair_candidates.py`
+- 作用：
+  - 固定正式口径 `rolling liquid500 + next_open`
+  - 共享同一份原始数据、因子准备和滚动 ML 分数
+  - 批量比较执行线修复候选
+  - 自动输出全样本、最近完整窗口和最新弱窗口摘要
+
+### 正式扫描输出
+- 目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1`
+- 汇总：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1/repair_scan_summary.csv`
+- 基线对候选归因：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1/attr_baseline_vs_up_low_ml55_none25_v220`
+
+### 候选结果
+#### 基线
+- `baseline`
+  - 全样本超额收益：`223.44%`
+  - 全样本超额 Sharpe：`1.035`
+  - 最新弱窗口超额收益：`-28.95%`
+  - 最新弱窗口超额 Sharpe：`-1.381`
+  - 最新弱窗口平均换手：`0.940`
+
+#### 候选 1：只调低 `trend_up_low_vol` 的 ML 主导权重
+- `up_low_ml55_none25_v220`
+  - 状态权重：`trend_up_low_vol -> ml=0.55 / none=0.25 / v2=0.20`
+  - 全样本超额收益：`200.21%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-31.22%`
+  - 最近完整窗口超额收益：`33.11%`
+  - 最近完整窗口超额 Sharpe：`0.898`
+  - 最新弱窗口超额收益：`-10.76%`
+  - 最新弱窗口超额 Sharpe：`-0.582`
+  - 最新弱窗口平均换手：`1.071`
+
+#### 候选 2：更激进地下调 `trend_up_low_vol` 的 ML 权重
+- `up_low_ml50_none20_v230`
+  - 状态权重：`trend_up_low_vol -> ml=0.50 / none=0.20 / v2=0.30`
+  - 全样本超额收益：`151.50%`
+  - 全样本超额 Sharpe：`0.875`
+  - 最新弱窗口超额收益：`-7.84%`
+  - 最新弱窗口超额 Sharpe：`-0.466`
+- 结论：
+  - 弱窗口修得更狠；
+  - 但全样本收益和 Sharpe 损失更大，不是当前最稳候选。
+
+#### 候选 3：单独收紧换手约束
+- `turnover1_hold3`
+  - 约束：`turnover_limit=1.0`，`min_hold_days=3`
+  - 全样本超额收益：`141.97%`
+  - 全样本超额 Sharpe：`0.833`
+  - 最新弱窗口超额收益：`-29.10%`
+  - 最新弱窗口超额 Sharpe：`-1.550`
+- 结论：
+  - 单独收紧换手约束没有修复弱窗口；
+  - 反而同时伤害了全样本和近期窗口。
+
+#### 候选 4：状态权重修复 + 更严换手约束
+- `up_low_ml55_none25_v220_turnover1_hold3`
+- `up_low_ml50_none20_v230_turnover1_hold3`
+- 结论：
+  - 两者都明显差于只做状态权重修复；
+  - 当前不应把更严换手约束作为第一优先修复方向。
+
+### 弱窗口结构判断
+- 最新弱窗口的拖累主要集中在：
+  - `trend_up_low_vol`
+  - 次要是 `trend_down_low_vol`
+- 基线在弱窗口里：
+  - `trend_up_low_vol` 超额收益约 `-29.68%`
+  - `trend_down_low_vol` 超额收益约 `-8.14%`
+- `up_low_ml55_none25_v220` 修复后：
+  - `trend_up_low_vol` 超额收益改善到约 `-11.58%`
+  - `trend_down_low_vol` 超额收益改善到约 `-1.05%`
+- 这说明当前最有效的修复不是“少交易”，而是“减少 `trend_up_low_vol` 状态下 ML 分数的主导性”。
+
+### 归因补充
+- 基线与 `up_low_ml55_none25_v220` 的全样本归因显示：
+  - `repair` 相对基线最强季度是 `2025Q4`
+  - 超额差值约 `+8.82%`
+- 但它在更早的强窗口有一定让利，因此当前仍只能算“最稳修复候选”，不能直接升级成新默认值。
+
+### 本轮结论
+1. 第一轮正式修复扫描已经确认：执行线当前最值得继续做的是 `trend_up_low_vol` 分段权重修复，而不是先收紧换手。
+2. 当前最稳候选是：
+   - `trend_up_low_vol -> ml=0.55 / none=0.25 / v2=0.20`
+3. 这个候选已经显著改善了最新弱窗口，同时保住了全样本超额 Sharpe，并明显收敛了全样本超额回撤。
+4. 但它仍没有把弱窗口修回正收益，所以执行端默认值继续冻结，不直接切换。
+
+### 下一步
+1. 继续围绕 `trend_up_low_vol` 分段权重做更细的正式扫描。
+2. 把第二轮重点放在：
+   - `0.55 ~ 0.60` 一带的分段权重微调
+   - 状态启停阈值
+3. 暂不把更严换手约束作为第一优先修复方向。
+

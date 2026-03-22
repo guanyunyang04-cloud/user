@@ -146,6 +146,16 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
 - `trend_up_high_vol` 的增强版本仍不稳健
 - 执行端继续冻结为：
   - `advanced_ml + liquid500 + next_open`
+- 但截至 `2026-03-19` 的最新正式子窗口 `2025-09-05 -> 2026-03-19`，执行主线已经出现明显转弱：
+  - 超额收益 `-28.78%`
+  - 超额 Sharpe `-1.382`
+  - 因此执行方向研究已经重启，但当前执行默认值暂不切换
+- 第一轮正式修复扫描已经完成：
+  - 工具：`daily_research/baseline/scan_execution_repair_candidates.py`
+  - 当前最稳的修复候选是仅在 `trend_up_low_vol` 下把集成权重调为 `ml=0.55 / none=0.25 / v2=0.20`
+  - 在同口径正式扫描里，最新弱窗口超额收益从约 `-28.95%` 改善到 `-10.76%`，超额 Sharpe 从约 `-1.381` 改善到 `-0.583`
+  - 同时全样本超额 Sharpe 仍约 `1.035`，超额最大回撤从约 `-41.53%` 收敛到约 `-31.22%`
+  - 但该候选尚未把弱窗口修回正收益，因此暂不改执行默认值，只作为下一轮正式修复候选
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -206,6 +216,18 @@ python daily_research/tools/doc_guard.py check
 
 ```bash
 python daily_research/tools/workspace_maintenance.py report
+```
+
+执行端收益体检：
+
+```bash
+python daily_research/tools/execution_health_check.py
+```
+
+执行端正式修复扫描：
+
+```bash
+python daily_research/baseline/scan_execution_repair_candidates.py --data-source tq --start-date 20220101 --benchmark 000300.SH --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --pool-adv-window 20 --holding-count 5 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504 --ml-model-family histgb
 ```
 
 只清理可再生缓存：
