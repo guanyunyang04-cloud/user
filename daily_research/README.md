@@ -167,6 +167,9 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
 - 当前判断：
   - 执行端修复的第一优先级已经转成“优先复验 `regime_ma_window=50`”
   - `trend_up_low_vol` 的分段权重微调继续保留，但已降为次优先级
+  - 执行端默认值暂不切换，继续冻结为：`advanced_ml + liquid500 + next_open`
+  - 新的“最强正式修复候选”已经从第一轮的 `ma60 + up_low_ml55_none25_v220`，更新为第二轮的 `ma50 baseline`
+  - `ma60 + up_low_ml55_none25_v220` 仍保留为次一级备选
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`

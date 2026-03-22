@@ -105,6 +105,10 @@
   - 在原 `regime_ma_window=60` 框架里，`0.55 / 0.25 / 0.20` 仍是 `0.55 ~ 0.60` 区间内最优点；
   - 但比权重微调更强的新信号是：`regime_ma_window=50` 的 `baseline` 在三个正式窗口里都优于当前执行主线；
   - 因此执行端修复的第一优先级已经上移到“复验并确认 `ma50` 状态启停候选”。
+- 当前冻结决策同步明确为：
+  - 执行端默认值暂不切换，继续冻结为：`advanced_ml + liquid500 + next_open`
+  - 新的“最强正式修复候选”已经从第一轮的 `ma60 + up_low_ml55_none25_v220`，更新为第二轮的 `ma50 baseline`
+  - `ma60 + up_low_ml55_none25_v220` 仍保留为次一级备选
 
 ### 5.2 `deep_alpha`
 - `Transformer` 路线优于 `GRU`
