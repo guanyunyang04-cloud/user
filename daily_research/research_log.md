@@ -4370,3 +4370,90 @@
 2. 但新的“最强正式修复候选”已经从第一轮的 `ma60 + up_low_ml55_none25_v220`，更新为第二轮的 `ma50 baseline`
 3. `ma60 + up_low_ml55_none25_v220` 仍保留为次一级备选
 
+## 2026-03-22 执行端弱窗口第三轮正式复验：`ma50 baseline`
+### 本轮目标
+- 不再继续盲扫新的大分支，而是专门确认第二轮跑出来的 `ma50 baseline` 是否真的站得住。
+- 本轮只回答三件事：
+  - `ma50 baseline` 是否继续优于当前 `ma60 baseline`
+  - `ma50 baseline` 是否继续优于次一级备选 `ma60 + up_low_ml55_none25_v220`
+  - 在 `ma50` 框架里，是否还值得立刻进入第四轮权重微调
+
+### 本轮产物
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair`
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_pair`
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation`
+- 关键归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma60_baseline_vs_ma50_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma60_up_low_vs_ma50_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma50_baseline_vs_ma50_up_low`
+
+### 结果一：`ma50 baseline` 对当前执行主线
+- `ma60 baseline`
+  - 全样本超额收益：`223.44%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-41.53%`
+  - 最近完整窗口：`12.17% / 0.315`
+  - 最新弱窗口：`-28.95% / -1.381`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 全样本超额最大回撤：`-29.11%`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- 季度稳定性：
+  - `ma50 baseline` 在 `17` 个季度里有 `13` 个季度超额更强
+  - 最强季度是 `2026Q1`
+  - 单一最强季度对正向季度总优势的占比约 `20.96%`
+- 这说明：
+  - `ma50 baseline` 不是只靠某一个季度抬起来；
+  - 它对当前执行主线的优势是跨季度、跨窗口的。
+
+### 结果二：`ma50 baseline` 对次一级备选
+- `ma60 + up_low_ml55_none25_v220`
+  - 全样本超额收益：`200.21%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-31.22%`
+  - 最近完整窗口：`33.11% / 0.898`
+  - 最新弱窗口：`-10.76% / -0.582`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 全样本超额最大回撤：`-29.11%`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- 季度稳定性：
+  - `ma50 baseline` 同样是在 `17` 个季度里赢下 `13` 个季度
+  - 最强季度是 `2025Q2`
+  - 单一最强季度对正向季度总优势的占比约 `19.84%`
+- 这说明：
+  - 即使把第一轮最稳的 `ma60` 权重修补拿来对照，`ma50 baseline` 仍然是更强的正式候选；
+  - 它的优势同样不是单季度异常造成。
+
+### 结果三：`ma50` 框架内部是否还要立刻做权重微调
+- `ma50 baseline`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- `ma50 + up_low_ml55_none25_v220`
+  - 全样本超额 Sharpe：`1.392`
+  - 最近完整窗口：`64.14% / 1.679`
+  - 最新弱窗口：`-9.31% / -0.509`
+- 归因上：
+  - `ma50 + up_low_ml55_none25_v220` 只在 `17` 个季度里的 `4` 个季度更强
+  - 最明显的拖累来自 `trend_up_low_vol`，超额差约 `-100.56%`
+- 这说明：
+  - 在 `ma50` 框架里继续叠加第一轮那套权重修补，代价明显大于收益；
+  - 第四轮权重微调不该再作为立刻要做的下一步。
+
+### 本轮结论
+1. 第三轮专项复验已经通过，`ma50 baseline` 继续稳居当前“最强正式修复候选”。
+2. `ma50 baseline` 同时优于当前执行主线和次一级备选，而且优势不是单季度异常造成。
+3. 在 `ma50` 框架里，继续叠加 `up_low_ml55_none25_v220` 会明显伤害整体表现，因此第四轮权重微调降级为条件触发项。
+4. 下一步研究重心应当从“继续调 `trend_up_low_vol` 权重”，切到“复验 `ma50` 的状态边界稳定性与轻量风险控制”。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 下一步直接进入 `ma50` 的状态边界与轻量风险控制复验；第四轮权重微调改为条件触发
+

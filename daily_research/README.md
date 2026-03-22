@@ -170,6 +170,11 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 执行端默认值暂不切换，继续冻结为：`advanced_ml + liquid500 + next_open`
   - 新的“最强正式修复候选”已经从第一轮的 `ma60 + up_low_ml55_none25_v220`，更新为第二轮的 `ma50 baseline`
   - `ma60 + up_low_ml55_none25_v220` 仍保留为次一级备选
+- 第三轮 `ma50 baseline` 专项复验已经完成：
+  - `ma50 baseline` 在同一轮新产物中同时优于当前 `ma60 baseline` 与次一级备选 `ma60 + up_low_ml55_none25_v220`
+  - 相对这两个对照，`ma50 baseline` 都是在 `17` 个季度里赢下 `13` 个季度，且最强季度贡献占正向季度总优势约 `20%`，不是单季度异常放大
+  - 在 `ma50` 框架里再叠加 `up_low_ml55_none25_v220` 只把最新弱窗口从约 `-10.87% / -0.559` 轻微改善到约 `-9.31% / -0.509`，但会把全样本超额 Sharpe 从约 `1.841` 拉回约 `1.392`
+  - 因此下一步不急着进入第四轮权重微调，而是先做 `ma50` 边界稳定性与轻量风险控制复验
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -248,6 +253,12 @@ python daily_research/baseline/scan_execution_repair_candidates.py --data-source
 
 ```bash
 python daily_research/baseline/scan_execution_repair_candidates.py --candidate-set round2_weights --data-source tq --start-date 20220101 --benchmark 000300.SH --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --pool-adv-window 20 --holding-count 5 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504 --ml-model-family histgb
+```
+
+执行端第三轮 `ma50` 专项复验汇总：
+
+```bash
+python daily_research/tools/ma50_revalidation_report.py --current-baseline-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/baseline --backup-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair/up_low_ml55_none25_v220 --candidate-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_pair/baseline
 ```
 
 只清理可再生缓存：
