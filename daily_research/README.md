@@ -188,12 +188,18 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma48 baseline` 相对 `ma47 baseline` 虽然仍有总优势，但最佳季度 `2025Q3` 占正向季度总优势约 `71.02%`，说明 `47 -> 48` 的新增优势本身也高度集中
   - `ma48 + take20` 相对 `ma48 baseline` 只在 `17` 个季度里的 `2` 个季度更强，总增益很小且高度集中，不足以单独晋级
   - 这说明：`ma48` 不再像纯随机孤点，左侧 `ma47/48` 带值得继续复验；但当前还不足以把头号正式修复候选从 `ma50 baseline` 改掉
+- 第七轮 `ma47/48` 左侧边界带稳定性复验已经完成：
+  - `ma48 baseline` 的全样本超额 Sharpe 约 `2.202`，高于 `ma47 baseline` 的约 `1.955` 和 `ma50 baseline` 的约 `1.841`
+  - 但 `2025Q3` 全季 `66` 个交易日都处于 `trend_up_low_vol`，说明这轮集中来源不是状态切换，而是同一状态内的选股与换仓差异
+  - `ma48` 相对 `ma47` 的 `2025Q3` compound 超额边际约 `+62.43%`，相对 `ma50` 约 `+55.31%`；其中 `2025-09` 的月度边际最强，分别约 `+16.83%` 和 `+18.84%`
+  - `ma48` 相对 `ma47` 的 Top5 正向日占 `2025Q3` 正向日总优势约 `41.12%`，相对 `ma50` 的 Top5 正向日占比约 `51.25%`
+  - `ma48` 相对 `ma47 / ma50` 的平均持仓重叠 Jaccard 都在约 `0.69 ~ 0.70`，且约 `73% ~ 76%` 的日期至少重合 `4` 个名字，说明优势主要来自少数持仓槽位替换，而不是整套组合重写
 - 当前执行决策同步为：
   - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
   - `ma50 baseline` 继续作为当前头号正式修复候选
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
   - 高收益待复验分支从单点 `ma48 baseline` 扩展为 `ma47/48` 左侧边界带；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为其附加轻量风控版本保留
-  - 下一步不直接切执行默认值，而是先做 `ma47/48` 左侧边界带的稳定性复验与 `2025Q3` 集中来源诊断
+  - 下一步不直接切执行默认值，而是先围绕 `trend_up_low_vol` 做 `ma47/48` 左侧边界带的关键槽位复现诊断，检查 `2025Q3` 的增益是否能跨季度重复出现
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
@@ -290,6 +296,12 @@ python daily_research/tools/ma_boundary_risk_report.py --scan-dirs daily_researc
 
 ```bash
 python daily_research/tools/ma48_stability_report.py --anchor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --candidate-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --variant-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/take20 --left-neighbor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --right-neighbor-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk/baseline --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round6_ma48_stability
+```
+
+执行端第七轮 `ma47/48` 左侧边界带与 `2025Q3` 集中来源诊断：
+
+```bash
+python daily_research/tools/ma4748_band_report.py --ma47-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk/baseline --ma48-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/baseline --ma50-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk/baseline --ma48-variant-run daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk/take20 --focus-quarter 2025Q3 --output-dir daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round7_ma4748_band
 ```
 
 只清理可再生缓存：
