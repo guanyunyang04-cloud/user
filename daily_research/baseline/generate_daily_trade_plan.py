@@ -1,0 +1,862 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import argparse
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List
+
+import numpy as np
+import pandas as pd
+
+from daily_research.baseline.advanced_ml_runtime import (
+    build_prepared_bundle_with_cache,
+    history_window_to_dict,
+    load_raw_data_with_cache,
+    resolve_history_window,
+)
+from daily_research.baseline.config import ResearchConfig
+from daily_research.baseline.data_provider import (
+    get_next_trading_date,
+    load_industry_map_from_tq,
+    load_style_map_from_tq,
+    load_universe_from_tq,
+)
+from daily_research.baseline.ml_alpha import (
+    MLAplhaConfig,
+    blend_scores,
+    load_ml_artifact,
+    predict_ml_scores_for_date_bundle,
+    resolve_horizon_weights,
+    rolling_ml_scores_multi,
+)
+from daily_research.baseline.portfolio import build_target_weights
+from daily_research.baseline.regime import apply_market_regime_filter
+
+
+@dataclass
+class PositionSnapshot:
+    stock: str
+    shares: int
+    cost_price: float = 0.0
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate end-of-day trade plan TXT for manual execution")
+    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--stocks", default=None)
+    parser.add_argument("--stocks-file", default=None, help="Path to txt/csv file containing stock codes.")
+    parser.add_argument("--start-date", default="20210101")
+    parser.add_argument("--end-date", default="")
+    parser.add_argument("--universe-scope", default="all_a")
+    parser.add_argument("--benchmark", default="000300.SH")
+    parser.add_argument("--enhanced-profile", default="up_low_breakout_v2", help=argparse.SUPPRESS)
+    parser.add_argument("--holding-count", type=int, default=5)
+    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--positions-file", default="daily_research/execution/current_positions.csv")
+    parser.add_argument("--cash", type=float, default=0.0)
+    parser.add_argument("--lot-size", type=int, default=100)
+    parser.add_argument("--output-dir", default="daily_research/execution/output")
+    parser.add_argument("--experiment-tag", default="")
+    parser.add_argument("--model-artifact", default="daily_research/execution/models/latest_ml_model.joblib")
+    parser.add_argument("--train-on-the-fly", action="store_true", help=argparse.SUPPRESS)
+
+    parser.add_argument("--min-adv20", type=float, default=50_000.0)
+    parser.add_argument("--min-price", type=float, default=2.0)
+    parser.add_argument("--max-price", type=float, default=300.0)
+    parser.add_argument("--max-weight", type=float, default=0.25)
+    parser.add_argument("--score-threshold", type=float, default=0.0)
+
+    parser.add_argument("--no-market-regime-filter", action="store_true")
+    parser.add_argument("--regime-ma-window", type=int, default=60)
+    parser.add_argument("--regime-vol-window", type=int, default=20)
+    parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
+    parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
+
+    parser.add_argument("--no-style-cap", action="store_true")
+    parser.add_argument("--max-style-weight", type=float, default=0.50)
+    parser.add_argument("--industry-cap", action="store_true")
+    parser.add_argument("--max-industry-weight", type=float, default=0.40)
+
+    parser.add_argument("--ml-target-horizon", type=int, default=20, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-target-horizons", default="5,10,20", help=argparse.SUPPRESS)
+    parser.add_argument("--ml-horizon-weights", default="5:0.2,10:0.3,20:0.5", help=argparse.SUPPRESS)
+    parser.add_argument("--ml-state-horizon-profiles", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--ml-train-window-days", type=int, default=504, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-retrain-every-days", type=int, default=21, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-min-train-dates", type=int, default=120, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-max-samples-per-day", type=int, default=600, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-max-train-rows", type=int, default=200000, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-random-seed", type=int, default=7, help=argparse.SUPPRESS)
+    parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="histgb", help=argparse.SUPPRESS)
+    parser.add_argument("--ensemble-ml-weight", type=float, default=0.70, help=argparse.SUPPRESS)
+    parser.add_argument("--ensemble-none-weight", type=float, default=0.20, help=argparse.SUPPRESS)
+    parser.add_argument("--ensemble-v2-weight", type=float, default=0.10, help=argparse.SUPPRESS)
+    parser.add_argument("--ensemble-state-weights", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--no-auto-trim-history", action="store_true")
+    return parser.parse_args()
+
+
+def _parse_stocks(raw: str | None) -> List[str]:
+    if not raw:
+        return []
+    return [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
+
+
+def _load_stocks_from_file(path: str | None) -> List[str]:
+    if not path:
+        return []
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"stocks file not found: {path}")
+    text = file_path.read_text(encoding="utf-8-sig").strip()
+    if not text:
+        return []
+    tokens: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "," in line:
+            tokens.extend(item.strip() for item in line.split(",") if item.strip())
+        else:
+            tokens.append(line)
+    return [token.upper() for token in tokens]
+
+
+def _parse_csv_list(raw: str | None) -> List[str]:
+    if not raw:
+        return []
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def _parse_int_tuple(raw: str | None, fallback: int) -> tuple[int, ...]:
+    if not raw:
+        return (int(fallback),)
+    values = tuple(int(item.strip()) for item in raw.split(",") if item.strip())
+    return values or (int(fallback),)
+
+
+def _parse_horizon_weights(raw: str | None) -> dict[int, float]:
+    if not raw:
+        return {}
+    out: dict[int, float] = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        horizon_raw, weight_raw = item.split(":", 1)
+        out[int(horizon_raw.strip())] = float(weight_raw.strip())
+    return out
+
+
+def _parse_state_horizon_profiles(raw: str | None) -> dict[str, dict[int, float]]:
+    if not raw:
+        return {}
+    out: dict[str, dict[int, float]] = {}
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        state_raw, weights_raw = chunk.split("=", 1)
+        out[state_raw.strip()] = _parse_horizon_weights(weights_raw)
+    return out
+
+
+def _parse_state_ensemble_weights(raw: str | None) -> dict[str, dict[str, float]]:
+    if not raw:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        state_raw, weights_raw = chunk.split("=", 1)
+        weights: dict[str, float] = {}
+        for item in weights_raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            name_raw, value_raw = item.split(":", 1)
+            weights[name_raw.strip().lower()] = float(value_raw.strip())
+        out[state_raw.strip()] = weights
+    return out
+
+
+def _load_positions(path_str: str) -> pd.DataFrame:
+    path = Path(path_str)
+    if not path.exists():
+        return pd.DataFrame(columns=["stock", "shares", "cost_price"])
+    df = pd.read_csv(path)
+    required = {"stock", "shares"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Positions file missing required columns: {sorted(missing)}")
+    if "cost_price" not in df.columns:
+        df["cost_price"] = 0.0
+    df["stock"] = df["stock"].astype(str).str.upper().str.strip()
+    df["shares"] = df["shares"].fillna(0).astype(int)
+    df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce").fillna(0.0)
+    df = df[df["shares"] > 0].copy()
+    return df
+
+
+def _build_scores_from_artifact(
+    cfg: ResearchConfig,
+    artifact,
+    prepared_bundle: Dict[str, object],
+    style_map: pd.DataFrame | None,
+    industry_map: pd.Series | None,
+):
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
+    score_none = prepared_bundle["score_none"]
+    score_v2 = prepared_bundle["score_v2"]
+    filter_mask = prepared_bundle["filter_mask"]
+    feature_frames = prepared_bundle["feature_frames"]
+    market_features = prepared_bundle["market_features"]
+    artifact_cfg = MLAplhaConfig(**artifact.ml_config)
+    enhanced_profile = str(getattr(artifact_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2")
+    latest_date = factor_bundle["raw_inputs"]["Close"].index.max()
+    latest_quadrant = str(regime_state.loc[latest_date, "quadrant"])
+
+    ml_score_row, _ = predict_ml_scores_for_date_bundle(
+        models=artifact.models,
+        feature_frames=feature_frames,
+        market_features=market_features,
+        filter_mask=filter_mask,
+        dt=latest_date,
+        feature_names=artifact.feature_names,
+        horizon_weights=resolve_horizon_weights(artifact_cfg, latest_quadrant),
+    )
+    ml_score = pd.DataFrame(np.nan, index=[latest_date], columns=score_none.columns)
+    if not ml_score_row.empty:
+        ml_score.loc[latest_date, ml_score_row.index] = ml_score_row.values
+
+    score_none_latest = score_none.loc[[latest_date]]
+    score_v2_latest = score_v2.loc[[latest_date]]
+    final_score_raw = blend_scores(
+        ml_score,
+        score_none_latest,
+        score_v2_latest,
+        artifact_cfg,
+        quadrant_series=regime_state.loc[[latest_date], "quadrant"],
+    )
+    target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
+    final_score = final_score_raw.copy()
+    if cfg.enable_market_regime_filter:
+        target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
+
+    summary_values = list(artifact.train_summary.values()) if artifact.train_summary else []
+    train_end = max((item.get("train_end", "") for item in summary_values), default="")
+    training_log = pd.DataFrame(
+        [
+            {
+                "source": "artifact",
+                "artifact_path": "",
+                "trained_at": artifact.trained_at,
+                "horizons": ",".join(sorted(artifact.models.keys())),
+                "train_end": train_end,
+                "quadrant": latest_quadrant,
+                "enhanced_profile": enhanced_profile,
+            }
+        ]
+    )
+    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+
+
+def _build_scores_on_the_fly(
+    cfg: ResearchConfig,
+    ml_cfg: MLAplhaConfig,
+    prepared_bundle: Dict[str, object],
+    style_map: pd.DataFrame | None,
+    industry_map: pd.Series | None,
+):
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
+    score_none = prepared_bundle["score_none"]
+    score_v2 = prepared_bundle["score_v2"]
+    filter_mask = prepared_bundle["filter_mask"]
+    feature_frames = prepared_bundle["feature_frames"]
+    market_features = prepared_bundle["market_features"]
+    benchmark_close = prepared_bundle["benchmark_close"]
+    benchmark_open = prepared_bundle["benchmark_open"]
+    ml_score, training_log = rolling_ml_scores_multi(
+        feature_frames=feature_frames,
+        market_features=market_features,
+        close=factor_bundle["raw_inputs"]["Close"],
+        benchmark_close=benchmark_close,
+        open_df=factor_bundle["raw_inputs"]["Open"],
+        benchmark_open=benchmark_open,
+        filter_mask=filter_mask,
+        regime_state=regime_state,
+        config=ml_cfg,
+    )
+    final_score_raw = blend_scores(ml_score, score_none, score_v2, ml_cfg, quadrant_series=regime_state["quadrant"])
+    target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
+    final_score = final_score_raw.copy()
+    if cfg.enable_market_regime_filter:
+        target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
+
+    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+
+
+def _round_buy_shares(delta_value: float, price: float, lot_size: int) -> int:
+    if delta_value <= 0 or price <= 0:
+        return 0
+    raw = int(delta_value / price)
+    return (raw // lot_size) * lot_size
+
+
+def _round_sell_shares(current_shares: int, target_delta_value: float, price: float, lot_size: int) -> int:
+    if current_shares <= 0 or price <= 0:
+        return 0
+    desired = int(abs(target_delta_value) / price)
+    if desired >= current_shares:
+        return current_shares
+    rounded = (desired // lot_size) * lot_size
+    return min(max(rounded, 0), current_shares)
+
+
+def _build_trade_plan(
+    latest_date: pd.Timestamp,
+    close_row: pd.Series,
+    target_weight_row: pd.Series,
+    final_score_row: pd.Series,
+    score_none_row: pd.Series,
+    score_v2_row: pd.Series,
+    ml_score_row: pd.Series,
+    positions_df: pd.DataFrame,
+    cash: float,
+    lot_size: int,
+) -> tuple[pd.DataFrame, Dict[str, float]]:
+    latest_price = close_row.dropna()
+    pos = positions_df.copy()
+    if pos.empty:
+        pos = pd.DataFrame(columns=["stock", "shares", "cost_price"])
+    pos = pos[pos["stock"].isin(latest_price.index)].copy()
+
+    current_value_map = {
+        row.stock: float(row.shares) * float(latest_price.get(row.stock, 0.0))
+        for row in pos.itertuples(index=False)
+    }
+    total_equity = float(cash) + float(sum(current_value_map.values()))
+
+    target_weight_row = target_weight_row[target_weight_row > 0].sort_values(ascending=False)
+    target_value_map = {stock: total_equity * float(weight) for stock, weight in target_weight_row.items()}
+    current_shares_map = {row.stock: int(row.shares) for row in pos.itertuples(index=False)}
+    current_cost_map = {row.stock: float(row.cost_price) for row in pos.itertuples(index=False)}
+
+    rows = []
+    available_cash = float(cash)
+
+    for stock, shares in sorted(current_shares_map.items()):
+        price = float(latest_price.get(stock, 0.0))
+        current_value = float(shares * price)
+        target_value = float(target_value_map.get(stock, 0.0))
+        delta_value = target_value - current_value
+        if target_value <= 0:
+            sell_shares = shares
+            sell_value = sell_shares * price
+            available_cash += sell_value
+            rows.append(
+                {
+                    "stock": stock,
+                    "action": "卖出",
+                    "shares": sell_shares,
+                    "price": price,
+                    "est_value": sell_value,
+                    "reason": "调出目标组合",
+                    "current_weight": current_value / total_equity if total_equity > 0 else 0.0,
+                    "target_weight": 0.0,
+                    "final_score": float(final_score_row.get(stock, 0.0)),
+                    "score_none": float(score_none_row.get(stock, 0.0)),
+                    "score_v2": float(score_v2_row.get(stock, 0.0)),
+                    "ml_score": float(ml_score_row.get(stock, 0.0)),
+                    "cost_price": float(current_cost_map.get(stock, 0.0)),
+                }
+            )
+        elif delta_value < -price * lot_size:
+            sell_shares = _round_sell_shares(shares, delta_value, price, lot_size)
+            if sell_shares > 0:
+                sell_value = sell_shares * price
+                available_cash += sell_value
+                rows.append(
+                    {
+                        "stock": stock,
+                        "action": "减仓",
+                        "shares": sell_shares,
+                        "price": price,
+                        "est_value": sell_value,
+                        "reason": "目标仓位下降",
+                        "current_weight": current_value / total_equity if total_equity > 0 else 0.0,
+                        "target_weight": target_value / total_equity if total_equity > 0 else 0.0,
+                        "final_score": float(final_score_row.get(stock, 0.0)),
+                        "score_none": float(score_none_row.get(stock, 0.0)),
+                        "score_v2": float(score_v2_row.get(stock, 0.0)),
+                        "ml_score": float(ml_score_row.get(stock, 0.0)),
+                        "cost_price": float(current_cost_map.get(stock, 0.0)),
+                    }
+                )
+
+    for stock, target_value in target_weight_row.items():
+        price = float(latest_price.get(stock, 0.0))
+        current_shares = int(current_shares_map.get(stock, 0))
+        current_value = float(current_shares * price)
+        delta_value = float(target_value - current_value)
+        if delta_value <= price * lot_size:
+            continue
+        planned_buy_value = min(delta_value, available_cash)
+        buy_shares = _round_buy_shares(planned_buy_value, price, lot_size)
+        if buy_shares <= 0:
+            continue
+        est_value = float(buy_shares * price)
+        available_cash -= est_value
+        rows.append(
+            {
+                "stock": stock,
+                "action": "买入" if current_shares == 0 else "加仓",
+                "shares": buy_shares,
+                "price": price,
+                "est_value": est_value,
+                "reason": "进入目标组合" if current_shares == 0 else "目标仓位上升",
+                "current_weight": current_value / total_equity if total_equity > 0 else 0.0,
+                "target_weight": float(target_value / total_equity) if total_equity > 0 else 0.0,
+                "final_score": float(final_score_row.get(stock, 0.0)),
+                "score_none": float(score_none_row.get(stock, 0.0)),
+                "score_v2": float(score_v2_row.get(stock, 0.0)),
+                "ml_score": float(ml_score_row.get(stock, 0.0)),
+                "cost_price": float(current_cost_map.get(stock, 0.0)),
+            }
+        )
+
+    action_df = pd.DataFrame(rows)
+    action_df = action_df.sort_values(["action", "final_score"], ascending=[True, False]).reset_index(drop=True) if not action_df.empty else action_df
+
+    execution_date = get_next_trading_date(latest_date)
+    summary = {
+        "signal_date": str(latest_date.date()),
+        "execution_date": str(execution_date or ""),
+        "cash_input": float(cash),
+        "total_equity": float(total_equity),
+        "estimated_cash_after_plan": float(available_cash),
+        "current_position_count": int(len(current_shares_map)),
+        "target_position_count": int((target_weight_row > 0).sum()),
+        "price_basis": "signal_close",
+    }
+    return action_df, summary
+
+
+def _build_hold_table(
+    latest_date: pd.Timestamp,
+    close_row: pd.Series,
+    target_weight_row: pd.Series,
+    final_score_row: pd.Series,
+    positions_df: pd.DataFrame,
+) -> pd.DataFrame:
+    latest_price = close_row.dropna()
+    pos = positions_df.copy()
+    pos = pos[pos["stock"].isin(latest_price.index)].copy()
+    rows = []
+    for row in pos.itertuples(index=False):
+        stock = row.stock
+        shares = int(row.shares)
+        price = float(latest_price.get(stock, 0.0))
+        target_weight = float(target_weight_row.get(stock, 0.0))
+        rows.append(
+            {
+                "date": latest_date,
+                "stock": stock,
+                "shares": shares,
+                "close": price,
+                "market_value": shares * price,
+                "cost_price": float(row.cost_price),
+                "target_weight": target_weight,
+                "final_score": float(final_score_row.get(stock, 0.0)),
+                "status": "目标持有" if target_weight > 0 else "待卖出",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_watchlist(
+    latest_date: pd.Timestamp,
+    final_score_row: pd.Series,
+    target_weight_row: pd.Series,
+    score_none_row: pd.Series,
+    score_v2_row: pd.Series,
+    ml_score_row: pd.Series,
+    top_n: int = 15,
+) -> pd.DataFrame:
+    df = pd.DataFrame(
+        {
+            "date": latest_date,
+            "stock": final_score_row.index,
+            "final_score": final_score_row.values,
+            "target_weight": target_weight_row.reindex(final_score_row.index).fillna(0.0).values,
+            "score_none": score_none_row.reindex(final_score_row.index).values,
+            "score_v2": score_v2_row.reindex(final_score_row.index).values,
+            "ml_score": ml_score_row.reindex(final_score_row.index).values,
+        }
+    )
+    return df.sort_values("final_score", ascending=False).head(top_n).reset_index(drop=True)
+
+
+def _write_trade_plan_txt(
+    path: Path,
+    summary: Dict[str, float],
+    regime_state_row: pd.Series,
+    action_df: pd.DataFrame,
+    hold_df: pd.DataFrame,
+    watch_df: pd.DataFrame,
+    model_info: Dict[str, str],
+):
+    lines: List[str] = []
+    lines.append("每日盘后策略（次日开盘执行）")
+    lines.append("=" * 36)
+    lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"信号日期: {summary['signal_date']}")
+    if summary.get("execution_date"):
+        lines.append(f"执行日期: {summary['execution_date']}")
+    lines.append("执行方式: 盘后生成建议，下一交易日开盘手工执行")
+    lines.append(f"市场状态: {regime_state_row.get('quadrant', '')}")
+    lines.append(f"允许开仓: {'是' if bool(regime_state_row.get('regime_on', False)) else '否'}")
+    lines.append(f"模型来源: {model_info.get('mode', '')}")
+    if model_info.get("artifact_path"):
+        lines.append(f"模型文件: {model_info['artifact_path']}")
+    if model_info.get("trained_at"):
+        lines.append(f"模型训练时间: {model_info['trained_at']}")
+    if model_info.get("train_end"):
+        lines.append(f"模型训练样本截止: {model_info['train_end']}")
+    history_window = model_info.get("history_window")
+    if isinstance(history_window, dict) and history_window.get("effective_start_date"):
+        lines.append(
+            "历史窗口: "
+            f"{history_window.get('effective_start_date')} -> {history_window.get('end_date') or 'latest'} "
+            f"(required_trading_days={history_window.get('required_trading_days')})"
+        )
+    if model_info.get("horizons"):
+        lines.append(f"模型周期: {model_info['horizons']}")
+    if model_info.get("model_family"):
+        lines.append(f"模型族: {model_info['model_family']}")
+    if model_info.get("horizon_weights"):
+        lines.append(f"模型周期权重: {model_info['horizon_weights']}")
+    if model_info.get("state_horizon_profiles"):
+        lines.append(f"状态周期权重: {model_info['state_horizon_profiles']}")
+    if model_info.get("state_ensemble_weights"):
+        lines.append(f"状态集成权重: {model_info['state_ensemble_weights']}")
+    if model_info.get("enhanced_profile"):
+        lines.append(f"Enhanced Profile: {model_info['enhanced_profile']}")
+    lines.append(f"总资产估算: {summary['total_equity']:.2f}")
+    lines.append(f"输入现金: {summary['cash_input']:.2f}")
+    lines.append(f"计划后剩余现金估算: {summary['estimated_cash_after_plan']:.2f}")
+    lines.append("价格口径: 以下数量按信号日收盘价估算，次日开盘请按实际开盘价微调。")
+    lines.append("")
+
+    if action_df.empty:
+        lines.append("一、次日开盘建议动作")
+        lines.append("- 当前无明确调仓动作，建议次日开盘保持现有仓位。")
+    else:
+        lines.append("一、次日开盘建议动作")
+        for idx, row in action_df.iterrows():
+            lines.append(
+                f"{idx + 1}. {row['action']} {row['stock']} | 估算数量 {int(row['shares'])} 股 | 信号日收盘参考 {row['price']:.2f} | "
+                f"估算金额 {row['est_value']:.2f} | 原因: {row['reason']}"
+            )
+            lines.append(
+                f"   当前权重 {row['current_weight']:.2%} -> 目标权重 {row['target_weight']:.2%} | "
+                f"综合分 {row['final_score']:.4f} | ML {row['ml_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+            )
+
+    lines.append("")
+    lines.append("二、当前持仓概览")
+    if hold_df.empty:
+        lines.append("- 当前无持仓。")
+    else:
+        for _, row in hold_df.iterrows():
+            lines.append(
+                f"- {row['stock']} | 持股 {int(row['shares'])} 股 | 收盘 {row['close']:.2f} | 市值 {row['market_value']:.2f} | "
+                f"目标权重 {row['target_weight']:.2%} | 状态 {row['status']}"
+            )
+
+    lines.append("")
+    lines.append("三、候选观察名单")
+    for _, row in watch_df.iterrows():
+        lines.append(
+            f"- {row['stock']} | 综合分 {row['final_score']:.4f} | 目标权重 {row['target_weight']:.2%} | "
+            f"ML {row['ml_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+        )
+
+    lines.append("")
+    lines.append("四、执行提示")
+    lines.append("- 本文件用于盘后生成、次日开盘执行。")
+    lines.append("- 次日开盘前先核对可用现金、持仓与竞价情况。")
+    lines.append("- 先处理卖出/减仓，再处理买入/加仓。")
+    lines.append("- 若次日开盘出现明显跳空，请优先按目标权重而不是按估算股数机械执行。")
+    lines.append("- 若实际可用资金与本文件不同，请以卖出后实际资金为准调整买入数量。")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main():
+    args = parse_args()
+    cfg = ResearchConfig(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        universe_scope=args.universe_scope,
+        benchmark=args.benchmark,
+        execution_mode="next_open",
+        holding_count=args.holding_count,
+        weighting_method="score",
+        rebalance_freq=args.rebalance_freq,
+        score_threshold=args.score_threshold,
+        max_weight=args.max_weight,
+        min_adv20=args.min_adv20,
+        min_price=args.min_price,
+        max_price=args.max_price,
+        enable_market_regime_filter=not args.no_market_regime_filter,
+        regime_ma_window=args.regime_ma_window,
+        regime_vol_window=args.regime_vol_window,
+        regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        enable_style_cap=not args.no_style_cap,
+        max_style_weight=args.max_style_weight,
+        enable_industry_cap=args.industry_cap,
+        max_industry_weight=args.max_industry_weight,
+    )
+    stocks = _parse_stocks(args.stocks)
+    file_stocks = _load_stocks_from_file(args.stocks_file)
+    if stocks or file_stocks:
+        stocks = list(dict.fromkeys(stocks + file_stocks))
+    if stocks:
+        cfg.universe = stocks
+
+    ml_cfg = MLAplhaConfig(
+        target_horizon=args.ml_target_horizon,
+        target_horizons=_parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
+        target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        state_horizon_weights=_parse_state_horizon_profiles(args.ml_state_horizon_profiles),
+        enhanced_profile=args.enhanced_profile,
+        train_window_days=args.ml_train_window_days,
+        retrain_every_days=args.ml_retrain_every_days,
+        min_train_dates=args.ml_min_train_dates,
+        max_samples_per_day=args.ml_max_samples_per_day,
+        max_train_rows=args.ml_max_train_rows,
+        random_seed=args.ml_random_seed,
+        model_family=args.ml_model_family,
+        ensemble_ml_weight=args.ensemble_ml_weight,
+        ensemble_none_weight=args.ensemble_none_weight,
+        ensemble_v2_weight=args.ensemble_v2_weight,
+        state_ensemble_weights=_parse_state_ensemble_weights(args.ensemble_state_weights),
+        train_regime_only=cfg.enable_market_regime_filter,
+        execution_mode=cfg.execution_mode,
+    )
+
+    artifact = None
+    artifact_path = Path(args.model_artifact)
+    effective_profile = args.enhanced_profile
+    effective_ml_cfg = ml_cfg
+    if not args.train_on_the_fly:
+        if not artifact_path.exists():
+            raise FileNotFoundError(
+                f"模型产物不存在: {artifact_path}。请先运行 daily_research/execution/update_model.py。"
+            )
+        artifact = load_ml_artifact(artifact_path)
+        effective_ml_cfg = MLAplhaConfig(**artifact.ml_config)
+        effective_profile = str(getattr(effective_ml_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2")
+
+    if args.data_source == "tq":
+        if not cfg.universe and cfg.universe_scope == "all_a":
+            print("[1/9] 正在从 TQ 加载全A股票池...")
+            cfg.universe = load_universe_from_tq(cfg.universe_scope)
+        elif not cfg.universe:
+            raise ValueError("TQ 模式下，未指定 --stocks 时目前仅支持 --universe-scope all_a。")
+    elif not args.csv_folder:
+        raise ValueError("CSV 模式需要提供 --csv-folder。")
+
+    history_window = resolve_history_window(
+        cfg=cfg,
+        ml_cfg=effective_ml_cfg,
+        requested_start_date=args.start_date,
+        end_date=args.end_date,
+        mode="infer",
+        auto_trim_history=not args.no_auto_trim_history,
+    )
+    print(
+        f"[2/9] 推理历史窗口: {history_window.effective_start_date} -> "
+        f"{history_window.end_date or 'latest'} | required_trading_days={history_window.required_trading_days}"
+    )
+    print(f"[3/9] 正在准备行情数据，股票数: {len(cfg.universe)}，基准: {cfg.benchmark}")
+    raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
+        data_source=args.data_source,
+        csv_folder=args.csv_folder,
+        universe=cfg.universe,
+        benchmark=cfg.benchmark,
+        history_window=history_window,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+    )
+    print(
+        f"[4/9] raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | "
+        f"{raw_cache_meta['cache_path']}"
+    )
+
+    print("[5/9] 正在读取当前持仓...")
+    positions_df = _load_positions(args.positions_file)
+
+    prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+        raw_df_dict=raw_df_dict,
+        raw_cache_key=raw_cache_meta["cache_key"],
+        cfg=cfg,
+        enhanced_profile=effective_profile,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+    )
+    print(
+        f"[6/9] factor cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+        f"{prepared_cache_meta['cache_path']}"
+    )
+    df_dict = prepared_bundle["df_dict"]
+    style_map = None
+    industry_map = None
+    if cfg.enable_style_cap and args.data_source == "tq":
+        print("[7/9] 正在加载风格映射...")
+        style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
+    if cfg.enable_industry_cap and args.data_source == "tq":
+        industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
+
+    print("[8/9] 正在计算先进版分数...")
+    if args.train_on_the_fly:
+        factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_on_the_fly(
+            cfg, ml_cfg, prepared_bundle, style_map, industry_map
+        )
+        model_info = {
+            "mode": "实时训练",
+            "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
+            "model_family": str(ml_cfg.model_family),
+            "state_horizon_profiles": ";".join(
+                f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
+                for state, weights in (ml_cfg.state_horizon_weights or {}).items()
+            ),
+            "history_window": history_window_to_dict(history_window),
+            "enhanced_profile": str(ml_cfg.enhanced_profile),
+        }
+    else:
+        factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_from_artifact(
+            cfg, artifact, prepared_bundle, style_map, industry_map
+        )
+        if not training_log.empty:
+            training_log.loc[:, "artifact_path"] = str(artifact_path)
+        model_info = {
+            "mode": "离线模型产物",
+            "artifact_path": str(artifact_path),
+            "trained_at": str(training_log.iloc[0].get("trained_at", "")) if not training_log.empty else "",
+            "train_end": str(training_log.iloc[0].get("train_end", "")) if not training_log.empty else "",
+            "horizons": str(training_log.iloc[0].get("horizons", "")) if not training_log.empty else "",
+            "model_family": str(artifact.ml_config.get("model_family", "histgb")),
+            "horizon_weights": ",".join(
+                f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
+            ),
+            "state_horizon_profiles": ";".join(
+                f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
+                for state, weights in (artifact.ml_config.get("state_horizon_weights") or {}).items()
+            ),
+            "history_window": history_window_to_dict(history_window),
+            "enhanced_profile": str(artifact.ml_config.get("enhanced_profile", "up_low_breakout_v2")),
+        }
+
+    signal_date = final_score_raw.dropna(how="all").index.max()
+    if pd.isna(signal_date):
+        raise RuntimeError("No valid latest date found for trade plan generation.")
+
+    print("[9/9] 正在生成盘后策略与次日开盘执行建议...")
+    action_df, summary = _build_trade_plan(
+        latest_date=signal_date,
+        close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
+        target_weight_row=target_weights.loc[signal_date],
+        final_score_row=final_score_raw.loc[signal_date],
+        score_none_row=score_none.loc[signal_date],
+        score_v2_row=score_v2.loc[signal_date],
+        ml_score_row=ml_score.loc[signal_date],
+        positions_df=positions_df,
+        cash=args.cash,
+        lot_size=args.lot_size,
+    )
+    summary["history_window"] = history_window_to_dict(history_window)
+    summary["cache"] = {
+        "raw": raw_cache_meta,
+        "prepared": prepared_cache_meta,
+    }
+    hold_df = _build_hold_table(
+        latest_date=signal_date,
+        close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
+        target_weight_row=target_weights.loc[signal_date],
+        final_score_row=final_score_raw.loc[signal_date],
+        positions_df=positions_df,
+    )
+    watch_df = _build_watchlist(
+        latest_date=signal_date,
+        final_score_row=final_score_raw.loc[signal_date].dropna(),
+        target_weight_row=target_weights.loc[signal_date],
+        score_none_row=score_none.loc[signal_date],
+        score_v2_row=score_v2.loc[signal_date],
+        ml_score_row=ml_score.loc[signal_date],
+        top_n=15,
+    )
+
+    print("正在写入输出文件...")
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    run_name = args.experiment_tag.strip() or signal_date.strftime("%Y%m%d")
+    run_dir = output_dir / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    txt_path = run_dir / "daily_trade_plan.txt"
+    latest_txt_path = output_dir / "latest_trade_plan.txt"
+    _write_trade_plan_txt(
+        txt_path,
+        summary=summary,
+        regime_state_row=regime_state.loc[signal_date],
+        action_df=action_df,
+        hold_df=hold_df,
+        watch_df=watch_df,
+        model_info=model_info,
+    )
+    _write_trade_plan_txt(
+        latest_txt_path,
+        summary=summary,
+        regime_state_row=regime_state.loc[signal_date],
+        action_df=action_df,
+        hold_df=hold_df,
+        watch_df=watch_df,
+        model_info=model_info,
+    )
+
+    action_df.to_csv(run_dir / "actions_today.csv", index=False, encoding="utf-8-sig")
+    hold_df.to_csv(run_dir / "holdings_snapshot.csv", index=False, encoding="utf-8-sig")
+    watch_df.to_csv(run_dir / "watchlist.csv", index=False, encoding="utf-8-sig")
+    training_log.to_csv(run_dir / "training_log.csv", index=False, encoding="utf-8-sig")
+    with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print(f"输出目录: {run_dir}")
+    print(f"最新建议文件: {latest_txt_path}")
+    if not action_df.empty:
+        print(action_df[["stock", "action", "shares", "price", "reason"]].to_string(index=False))
+    else:
+        print("今日无明确调仓动作。")
+
+
+if __name__ == "__main__":
+    main()

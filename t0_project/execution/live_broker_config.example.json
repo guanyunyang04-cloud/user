@@ -1,0 +1,9 @@
+{
+  "broker_name": "tdx_live",
+  "account_id": "your_account_id",
+  "endpoint": "",
+  "client_path": "C:\\\\path\\\\to\\\\trading_client",
+  "dry_run": true,
+  "allow_market_orders": false,
+  "password_env": "T0_BROKER_PASSWORD"
+}

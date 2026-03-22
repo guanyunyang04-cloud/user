@@ -1,0 +1,16 @@
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.joblib binary
+*.pkl binary
+*.pt binary
+*.pth binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary

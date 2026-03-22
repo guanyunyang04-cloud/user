@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "archive_root": "daily_research/archive",
+  "notes": [
+    "Archive payloads move generated artifacts out of the hot working set and remain ignored by Git.",
+    "Small control caches such as industry/style maps, rolling_pools, liquidity_buckets and states stay hot unless manually reviewed."
+  ],
+  "rules": [
+    {
+      "name": "output_runs",
+      "description": "Archive completed experiment directories from daily_research/output after they leave the hot working set.",
+      "source": "daily_research/output",
+      "archive_subdir": "output/runs",
+      "path_kind": "dir",
+      "keep_recent_count": 12,
+      "keep_recent_days": 21,
+      "protect_globs": []
+    },
+    {
+      "name": "output_root_files",
+      "description": "Archive one-off comparison tables, notes and logs from the output root once they age out.",
+      "source": "daily_research/output",
+      "archive_subdir": "output/root_files",
+      "path_kind": "file",
+      "keep_recent_count": 30,
+      "keep_recent_days": 30,
+      "protect_globs": [
+        ".gitkeep"
+      ]
+    },
+    {
+      "name": "deep_alpha_raw_cache",
+      "description": "Archive older hashed raw-market cache payloads for deep_alpha.",
+      "source": "daily_research/cache/deep_alpha/raw",
+      "archive_subdir": "cache/deep_alpha/raw",
+      "path_kind": "file",
+      "keep_recent_count": 12,
+      "keep_recent_days": 14,
+      "protect_globs": []
+    },
+    {
+      "name": "deep_alpha_features_cache",
+      "description": "Archive older hashed feature frames for deep_alpha while keeping the newest hot set local.",
+      "source": "daily_research/cache/deep_alpha/features",
+      "archive_subdir": "cache/deep_alpha/features",
+      "path_kind": "file",
+      "keep_recent_count": 12,
+      "keep_recent_days": 21,
+      "protect_globs": []
+    },
+    {
+      "name": "deep_alpha_corpus_cache",
+      "description": "Archive heavyweight deep_alpha corpus snapshots aggressively once newer snapshots exist.",
+      "source": "daily_research/cache/deep_alpha/corpus",
+      "archive_subdir": "cache/deep_alpha/corpus",
+      "path_kind": "file",
+      "keep_recent_count": 6,
+      "keep_recent_days": 21,
+      "protect_globs": []
+    },
+    {
+      "name": "advanced_ml_raw_cache",
+      "description": "Archive older advanced_ml raw cache payloads.",
+      "source": "daily_research/cache/advanced_ml/raw",
+      "archive_subdir": "cache/advanced_ml/raw",
+      "path_kind": "file",
+      "keep_recent_count": 8,
+      "keep_recent_days": 21,
+      "protect_globs": []
+    },
+    {
+      "name": "advanced_ml_prepared_cache",
+      "description": "Archive older advanced_ml prepared datasets while keeping the newest prepared matrices hot.",
+      "source": "daily_research/cache/advanced_ml/prepared",
+      "archive_subdir": "cache/advanced_ml/prepared",
+      "path_kind": "file",
+      "keep_recent_count": 6,
+      "keep_recent_days": 30,
+      "protect_globs": []
+    }
+  ]
+}
