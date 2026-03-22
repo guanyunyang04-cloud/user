@@ -182,6 +182,12 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 这说明：`ma48` 的确跑出了更高上限，但当前还像“局部高收益候选”，不够稳定到直接替代 `ma50 baseline`
   - `ma50` 框架内的轻量风控只能带来很小的弱窗口改善，不足以改变当前主判断
   - 因此当前不更新执行默认值，也不把头号正式修复候选从 `ma50 baseline` 改掉；下一步改为对 `ma48` 做专门稳定性复验
+- 当前执行决策同步为：
+  - 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+  - `ma50 baseline` 继续作为当前头号正式修复候选
+  - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+  - 新增一条高收益待复验分支：`ma48 baseline`，`ma48 + take20` 作为其附加轻量风控版本保留
+  - 下一步不直接切执行默认值，而是先对 `ma48` 做专门稳定性复验与季度集中度诊断
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
