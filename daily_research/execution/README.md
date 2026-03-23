@@ -37,6 +37,10 @@
   - 当前默认产物：
     - `latest_ml_model.joblib`
     - `latest_ml_model.json`
+  - `latest_ml_model.json` 还会记录：
+    - `train_summary`
+    - `validation_summary`
+    - 当前执行口径的 regime 参数
 - `universe/`
   - 执行端股票池目录；
   - 当前默认维护：
@@ -141,6 +145,9 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
   - `504` 个交易日
 - 当前默认执行状态边界：
   - `regime_ma_window=50`
+- 默认验证摘要：
+  - 写入 `latest_ml_model.json -> validation_summary`
+  - 当前采用滚动 RankIC 摘要，默认 `21` 个交易日一个历史重训块
 
 常用补充参数：
 
@@ -150,6 +157,9 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - `--refresh-cache`
 - `--no-cache`
 - `--no-auto-trim-history`
+- `--skip-validation-summary`
+- `--validation-retrain-every-days`
+- `--validation-min-observations`
 
 说明：
 
@@ -206,6 +216,10 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - `5d`
 - 当前默认执行状态边界：
   - `regime_ma_window=50`
+- 默认模型新鲜度保护：
+  - 相对当前信号日滞后 `1` 个交易日开始提醒
+  - 滞后 `3` 个交易日开始拦截
+  - 如确需继续，可显式传入 `--allow-stale-model`
 - 默认 lot size：
   - `100`
 - 默认会读取离线模型产物；
@@ -216,6 +230,9 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--refresh-cache`
 - `--no-cache`
 - `--no-auto-trim-history`
+- `--stale-model-warn-trading-days`
+- `--stale-model-max-trading-days`
+- `--allow-stale-model`
 - `--stocks`
   - 临时改成小股票池测试；
 - `--experiment-tag`
@@ -248,6 +265,8 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - 是否允许开仓；
 - 当前使用的模型文件；
 - 模型训练时间与训练样本截止日期；
+- 模型最新数据日与模型新鲜度；
+- 模型验证摘要；
 - 卖出、减仓、买入、加仓建议；
 - 当前持仓概览；
 - 候选观察名单；

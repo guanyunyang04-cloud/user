@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -68,6 +68,9 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--model-artifact", default="daily_research/execution/models/latest_ml_model.joblib")
     parser.add_argument("--train-on-the-fly", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--stale-model-warn-trading-days", type=int, default=1)
+    parser.add_argument("--stale-model-max-trading-days", type=int, default=3)
+    parser.add_argument("--allow-stale-model", action="store_true")
 
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
@@ -191,6 +194,92 @@ def _parse_state_ensemble_weights(raw: str | None) -> dict[str, dict[str, float]
             weights[name_raw.strip().lower()] = float(value_raw.strip())
         out[state_raw.strip()] = weights
     return out
+
+
+def _load_artifact_meta(artifact_path: Path) -> dict[str, Any]:
+    meta_path = artifact_path.with_suffix(".json")
+    if not meta_path.exists():
+        return {}
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _safe_timestamp(raw: object) -> pd.Timestamp | None:
+    if raw in {None, ""}:
+        return None
+    try:
+        return pd.Timestamp(raw)
+    except Exception:
+        return None
+
+
+def _assess_model_freshness(
+    *,
+    artifact_meta: dict[str, Any],
+    latest_signal_date: pd.Timestamp,
+    trading_dates: pd.Index,
+    warn_trading_days: int,
+    max_trading_days: int,
+) -> dict[str, Any]:
+    latest_data_date = _safe_timestamp(artifact_meta.get("latest_data_date"))
+    trained_at = _safe_timestamp(artifact_meta.get("trained_at"))
+    result: dict[str, Any] = {
+        "status": "unknown",
+        "status_text": "未知",
+        "artifact_latest_data_date": str(latest_data_date.date()) if latest_data_date is not None else "",
+        "trained_at": str(trained_at) if trained_at is not None else "",
+        "trading_day_lag": None,
+        "calendar_day_lag": None,
+        "warnings": [],
+        "should_block": False,
+    }
+
+    if latest_data_date is None:
+        result["warnings"].append("模型元数据缺少 latest_data_date，无法确认是否过期。")
+        return result
+
+    latest_signal_date = pd.Timestamp(latest_signal_date)
+    result["calendar_day_lag"] = int((latest_signal_date - latest_data_date).days)
+
+    calendar = pd.DatetimeIndex(pd.to_datetime(trading_dates)).sort_values().unique()
+    if latest_signal_date in calendar and latest_data_date in calendar:
+        trading_day_lag = int(calendar.get_loc(latest_signal_date) - calendar.get_loc(latest_data_date))
+        result["trading_day_lag"] = trading_day_lag
+    else:
+        trading_day_lag = None
+
+    if trading_day_lag is None:
+        result["warnings"].append("无法用交易日历计算模型滞后天数，请人工确认模型是否最新。")
+        return result
+
+    if trading_day_lag < 0:
+        result["status"] = "future"
+        result["status_text"] = "数据日超前"
+        result["warnings"].append("模型 latest_data_date 晚于当前信号日，请检查数据口径。")
+        return result
+
+    if max_trading_days > 0 and trading_day_lag >= int(max_trading_days):
+        result["status"] = "blocked"
+        result["status_text"] = "过期拦截"
+        result["should_block"] = True
+        result["warnings"].append(
+            f"模型 latest_data_date={latest_data_date.date()}，相对当前信号日滞后 {trading_day_lag} 个交易日，达到拦截阈值 {max_trading_days}。"
+        )
+        return result
+
+    if warn_trading_days > 0 and trading_day_lag >= int(warn_trading_days):
+        result["status"] = "warning"
+        result["status_text"] = "过期提醒"
+        result["warnings"].append(
+            f"模型 latest_data_date={latest_data_date.date()}，相对当前信号日滞后 {trading_day_lag} 个交易日，请优先先跑 update_model.py。"
+        )
+        return result
+
+    result["status"] = "fresh"
+    result["status_text"] = "最新"
+    return result
 
 
 def _load_positions(path_str: str) -> pd.DataFrame:
@@ -521,6 +610,15 @@ def _write_trade_plan_txt(
     watch_df: pd.DataFrame,
     model_info: Dict[str, str],
 ):
+    def _fmt_metric(value: object) -> str:
+        try:
+            number = float(value)
+        except Exception:
+            return "nan"
+        if np.isnan(number):
+            return "nan"
+        return f"{number:.3f}"
+
     lines: List[str] = []
     lines.append("每日盘后策略（次日开盘执行）")
     lines.append("=" * 36)
@@ -538,6 +636,13 @@ def _write_trade_plan_txt(
         lines.append(f"模型训练时间: {model_info['trained_at']}")
     if model_info.get("train_end"):
         lines.append(f"模型训练样本截止: {model_info['train_end']}")
+    if model_info.get("latest_data_date"):
+        lines.append(f"模型最新数据日: {model_info['latest_data_date']}")
+    if model_info.get("freshness_status"):
+        freshness_line = f"模型新鲜度: {model_info['freshness_status']}"
+        if model_info.get("trading_day_lag") is not None:
+            freshness_line += f" | 交易日滞后 {model_info['trading_day_lag']}"
+        lines.append(freshness_line)
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):
         lines.append(
@@ -557,6 +662,25 @@ def _write_trade_plan_txt(
         lines.append(f"状态集成权重: {model_info['state_ensemble_weights']}")
     if model_info.get("enhanced_profile"):
         lines.append(f"Enhanced Profile: {model_info['enhanced_profile']}")
+    validation_summary = model_info.get("validation_summary")
+    if isinstance(validation_summary, dict):
+        combined = validation_summary.get("combined")
+        if isinstance(combined, dict):
+            snapshot_parts: list[str] = []
+            for key, label in (("full", "full"), ("recent_252d", "recent252d"), ("recent_63d", "recent63d")):
+                item = combined.get(key)
+                if not isinstance(item, dict) or int(item.get("obs_days", 0) or 0) <= 0:
+                    continue
+                snapshot_parts.append(
+                    f"{label} IC {_fmt_metric(item.get('mean_rank_ic'))}/IR {_fmt_metric(item.get('rank_ic_ir'))}"
+                )
+            if snapshot_parts:
+                lines.append("模型验证: " + " | ".join(snapshot_parts))
+    warnings = model_info.get("warnings") or []
+    if warnings:
+        lines.append("模型提醒:")
+        for warning in warnings:
+            lines.append(f"- {warning}")
     lines.append(f"总资产估算: {summary['total_equity']:.2f}")
     lines.append(f"输入现金: {summary['cash_input']:.2f}")
     lines.append(f"计划后剩余现金估算: {summary['estimated_cash_after_plan']:.2f}")
@@ -663,6 +787,7 @@ def main():
     )
 
     artifact = None
+    artifact_meta: dict[str, Any] = {}
     artifact_path = Path(args.model_artifact)
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
@@ -672,6 +797,7 @@ def main():
                 f"模型产物不存在: {artifact_path}。请先运行 daily_research/execution/update_model.py。"
             )
         artifact = load_ml_artifact(artifact_path)
+        artifact_meta = _load_artifact_meta(artifact_path)
         effective_ml_cfg = MLAplhaConfig(**artifact.ml_config)
         effective_profile = str(getattr(effective_ml_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2")
 
@@ -780,6 +906,46 @@ def main():
     if pd.isna(signal_date):
         raise RuntimeError("No valid latest date found for trade plan generation.")
 
+    freshness_info: dict[str, Any] = {}
+    validation_summary: dict[str, Any] = {}
+    if not args.train_on_the_fly:
+        validation_summary = (
+            artifact_meta.get("validation_summary")
+            if isinstance(artifact_meta.get("validation_summary"), dict)
+            else {}
+        )
+        freshness_info = _assess_model_freshness(
+            artifact_meta=artifact_meta,
+            latest_signal_date=pd.Timestamp(signal_date),
+            trading_dates=factor_bundle["raw_inputs"]["Close"].index,
+            warn_trading_days=args.stale_model_warn_trading_days,
+            max_trading_days=args.stale_model_max_trading_days,
+        )
+        if not validation_summary:
+            freshness_info.setdefault("warnings", []).append(
+                "模型元数据尚未包含 validation_summary，建议先运行 update_model.py 生成新产物。"
+            )
+        if freshness_info.get("should_block") and args.allow_stale_model:
+            freshness_info.setdefault("warnings", []).append("已使用 --allow-stale-model 放行过期模型，请谨慎执行。")
+        for warning in freshness_info.get("warnings", []):
+            print(f"[warning] {warning}")
+        if freshness_info.get("should_block") and not args.allow_stale_model:
+            raise RuntimeError(
+                "模型已达到过期拦截阈值。"
+                f" latest_data_date={freshness_info.get('artifact_latest_data_date', '')},"
+                f" trading_day_lag={freshness_info.get('trading_day_lag')}。"
+                "请先运行 daily_research/execution/update_model.py；如确需继续，可显式传入 --allow-stale-model。"
+            )
+        model_info.update(
+            {
+                "latest_data_date": str(artifact_meta.get("latest_data_date", "")),
+                "freshness_status": str(freshness_info.get("status_text", "")),
+                "trading_day_lag": freshness_info.get("trading_day_lag"),
+                "warnings": list(freshness_info.get("warnings", [])),
+                "validation_summary": validation_summary,
+            }
+        )
+
     print("[9/9] 正在生成盘后策略与次日开盘执行建议...")
     action_df, summary = _build_trade_plan(
         latest_date=signal_date,
@@ -798,6 +964,11 @@ def main():
         "raw": raw_cache_meta,
         "prepared": prepared_cache_meta,
     }
+    if not args.train_on_the_fly:
+        summary["model_artifact"] = str(artifact_path)
+        summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
+        summary["model_freshness"] = freshness_info
+        summary["model_validation"] = validation_summary
     hold_df = _build_hold_table(
         latest_date=signal_date,
         close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],

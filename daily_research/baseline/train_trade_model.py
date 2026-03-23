@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -9,6 +10,9 @@ if __package__ in {None, ""}:
 import argparse
 import json
 from datetime import datetime
+
+import numpy as np
+import pandas as pd
 
 from daily_research.baseline.advanced_ml_runtime import (
     build_prepared_bundle_with_cache,
@@ -23,6 +27,9 @@ from daily_research.baseline.data_provider import (
 )
 from daily_research.baseline.ml_alpha import (
     MLAplhaConfig,
+    build_ml_target,
+    resolve_horizon_weights,
+    rolling_ml_scores_multi_detail,
     save_ml_artifact,
     train_point_in_time_model_bundle,
 )
@@ -68,6 +75,9 @@ def parse_args():
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
     parser.add_argument("--ensemble-state-weights", default="")
+    parser.add_argument("--skip-validation-summary", action="store_true")
+    parser.add_argument("--validation-retrain-every-days", type=int, default=21)
+    parser.add_argument("--validation-min-observations", type=int, default=20)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--no-auto-trim-history", action="store_true")
@@ -158,6 +168,182 @@ def _parse_state_ensemble_weights(raw: str | None) -> dict[str, dict[str, float]
             weights[name_raw.strip().lower()] = float(value_raw.strip())
         out[state_raw.strip()] = weights
     return out
+
+
+def _compute_rank_ic_frame(
+    score_df: pd.DataFrame,
+    label_df: pd.DataFrame,
+    min_observations: int,
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    common_index = score_df.index.intersection(label_df.index)
+    for dt in common_index:
+        score_row = score_df.loc[dt]
+        label_row = label_df.loc[dt]
+        valid = score_row.notna() & label_row.notna()
+        sample_count = int(valid.sum())
+        rank_ic = np.nan
+        if sample_count >= int(min_observations):
+            rank_ic = score_row.loc[valid].corr(label_row.loc[valid], method="spearman")
+        rows.append(
+            {
+                "date": pd.Timestamp(dt),
+                "rank_ic": float(rank_ic) if pd.notna(rank_ic) else np.nan,
+                "sample_count": sample_count,
+            }
+        )
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return pd.DataFrame(columns=["rank_ic", "sample_count"])
+    return out.set_index("date")
+
+
+def _summarize_rank_ic_frame(ic_frame: pd.DataFrame) -> dict[str, object]:
+    if ic_frame.empty:
+        return {
+            "start_date": "",
+            "end_date": "",
+            "obs_days": 0,
+            "mean_rank_ic": np.nan,
+            "rank_ic_std": np.nan,
+            "rank_ic_ir": np.nan,
+            "positive_ratio": np.nan,
+            "avg_sample_count": np.nan,
+        }
+    valid = ic_frame["rank_ic"].dropna()
+    if valid.empty:
+        return {
+            "start_date": str(ic_frame.index.min().date()),
+            "end_date": str(ic_frame.index.max().date()),
+            "obs_days": 0,
+            "mean_rank_ic": np.nan,
+            "rank_ic_std": np.nan,
+            "rank_ic_ir": np.nan,
+            "positive_ratio": np.nan,
+            "avg_sample_count": np.nan,
+        }
+
+    std = float(valid.std()) if len(valid) > 1 else np.nan
+    mean = float(valid.mean())
+    return {
+        "start_date": str(valid.index.min().date()),
+        "end_date": str(valid.index.max().date()),
+        "obs_days": int(len(valid)),
+        "mean_rank_ic": mean,
+        "rank_ic_std": std,
+        "rank_ic_ir": float(mean / std) if std and not np.isnan(std) else np.nan,
+        "positive_ratio": float((valid > 0).mean()),
+        "avg_sample_count": float(ic_frame.loc[valid.index, "sample_count"].mean()),
+    }
+
+
+def _slice_rank_ic_window(ic_frame: pd.DataFrame, trading_days: int | None) -> pd.DataFrame:
+    if trading_days is None or trading_days <= 0:
+        return ic_frame
+    return ic_frame.tail(int(trading_days))
+
+
+def _combine_per_horizon_labels(
+    label_frames: dict[int, pd.DataFrame],
+    close: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    config: MLAplhaConfig,
+) -> pd.DataFrame:
+    if not label_frames:
+        return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
+
+    combined = pd.DataFrame(0.0, index=close.index, columns=close.columns, dtype=float)
+    valid_mask = None
+    quadrant_series = regime_state["quadrant"].reindex(close.index)
+    for frame in label_frames.values():
+        frame_valid = frame.notna()
+        valid_mask = frame_valid if valid_mask is None else (valid_mask | frame_valid)
+
+    for dt in close.index:
+        weights_for_date = resolve_horizon_weights(
+            config,
+            str(quadrant_series.loc[dt]) if dt in quadrant_series.index else None,
+        )
+        row = pd.Series(0.0, index=close.columns, dtype=float)
+        for horizon, weight in weights_for_date.items():
+            frame = label_frames.get(int(horizon))
+            if frame is None or dt not in frame.index:
+                continue
+            row = row.add(frame.loc[dt].fillna(0.0) * float(weight), fill_value=0.0)
+        combined.loc[dt] = row
+    return combined.where(valid_mask)
+
+
+def _build_validation_summary(
+    *,
+    feature_frames: dict[str, pd.DataFrame],
+    market_features: dict[str, pd.Series],
+    close: pd.DataFrame,
+    benchmark_close: pd.Series,
+    open_df: pd.DataFrame,
+    benchmark_open: pd.Series,
+    filter_mask: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    ml_cfg: MLAplhaConfig,
+    min_observations: int,
+    validation_retrain_every_days: int,
+) -> dict[str, object]:
+    validation_cfg = MLAplhaConfig(**asdict(ml_cfg))
+    validation_cfg.retrain_every_days = int(validation_retrain_every_days)
+
+    combined_score, training_log_df, per_horizon_scores = rolling_ml_scores_multi_detail(
+        feature_frames=feature_frames,
+        market_features=market_features,
+        close=close,
+        benchmark_close=benchmark_close,
+        open_df=open_df,
+        benchmark_open=benchmark_open,
+        filter_mask=filter_mask,
+        regime_state=regime_state,
+        config=validation_cfg,
+    )
+
+    label_frames: dict[int, pd.DataFrame] = {}
+    for horizon in validation_cfg.target_horizons:
+        label_frames[int(horizon)] = build_ml_target(
+            close,
+            benchmark_close,
+            int(horizon),
+            execution_mode=validation_cfg.execution_mode,
+            open_df=open_df,
+            benchmark_open=benchmark_open,
+        )
+
+    combined_label = _combine_per_horizon_labels(label_frames, close, regime_state, validation_cfg)
+    windows = {
+        "full": None,
+        "recent_252d": 252,
+        "recent_126d": 126,
+        "recent_63d": 63,
+    }
+
+    combined_ic = _compute_rank_ic_frame(combined_score, combined_label, min_observations=min_observations)
+    combined_summary = {
+        name: _summarize_rank_ic_frame(_slice_rank_ic_window(combined_ic, trading_days))
+        for name, trading_days in windows.items()
+    }
+
+    per_horizon_summary: dict[str, dict[str, object]] = {}
+    for horizon, score_df in per_horizon_scores.items():
+        ic_frame = _compute_rank_ic_frame(score_df, label_frames[int(horizon)], min_observations=min_observations)
+        per_horizon_summary[f"h{int(horizon)}"] = {
+            name: _summarize_rank_ic_frame(_slice_rank_ic_window(ic_frame, trading_days))
+            for name, trading_days in windows.items()
+        }
+
+    return {
+        "method": "rolling_rank_ic",
+        "validation_retrain_every_days": int(validation_cfg.retrain_every_days),
+        "min_observations": int(min_observations),
+        "training_block_count": int(len(training_log_df)),
+        "combined": combined_summary,
+        "per_horizon": per_horizon_summary,
+    }
 
 
 def main():
@@ -282,6 +468,25 @@ def main():
         config=ml_cfg,
         as_of_date=latest_date,
     )
+
+    validation_summary: dict[str, object] = {}
+    if args.skip_validation_summary:
+        print("[6/6] 跳过默认模型验证摘要生成。")
+    else:
+        print("[6/6] 正在生成默认模型滚动验证摘要...")
+        validation_summary = _build_validation_summary(
+            feature_frames=feature_frames,
+            market_features=market_features,
+            close=factor_bundle["raw_inputs"]["Close"],
+            benchmark_close=benchmark_close,
+            open_df=factor_bundle["raw_inputs"]["Open"],
+            benchmark_open=benchmark_open,
+            filter_mask=filter_mask,
+            regime_state=regime_state,
+            ml_cfg=ml_cfg,
+            min_observations=args.validation_min_observations,
+            validation_retrain_every_days=args.validation_retrain_every_days,
+        )
     feature_names = list(feature_frames.keys()) + list(market_features.keys())
 
     artifact_path = save_ml_artifact(
@@ -329,6 +534,7 @@ def main():
             "enhanced_profile": args.enhanced_profile,
         },
         "train_summary": train_summary,
+        "validation_summary": validation_summary,
     }
     meta_path = Path(args.artifact_meta_path) if args.artifact_meta_path else artifact_path.with_suffix(".json")
     meta_path.parent.mkdir(parents=True, exist_ok=True)

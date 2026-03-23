@@ -5019,3 +5019,43 @@
 4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不参与当前执行默认值排序
 5. 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，并先隔离 `trend_up_low_vol`
 
+## 2026-03-23 执行端模型治理补强：验证指标落盘 + 过期拦截
+### 本轮目标
+- 解决两个执行端治理空缺：
+  - 默认模型产物只有 `train_summary`，没有历史验证摘要，导致“模型是否仍有效”不能直接从产物上看；
+  - 出计划时只检查模型文件是否存在，不检查模型是否过期。
+
+### 本轮动作
+1. 在 `daily_research/baseline/train_trade_model.py` 中补了默认模型滚动验证摘要：
+   - 沿当前默认口径跑历史滚动 ML 验证；
+   - 采用滚动 RankIC 摘要作为默认验证指标；
+   - 默认 `21` 个交易日一个历史重训块；
+   - 结果写入 `latest_ml_model.json -> validation_summary`
+2. 在 `daily_research/baseline/generate_daily_trade_plan.py` 中补了模型新鲜度判断：
+   - 默认相对当前信号日滞后 `1` 个交易日开始提醒；
+   - 默认滞后 `3` 个交易日开始拦截；
+   - 可用 `--allow-stale-model` 强制放行
+3. 同步把模型验证摘要与模型新鲜度写进：
+   - `latest_trade_plan.txt`
+   - `plan_summary.json`
+
+### 本轮执行结果
+1. 已重新生成默认模型产物：
+   - `daily_research/execution/models/latest_ml_model.joblib`
+   - `daily_research/execution/models/latest_ml_model.json`
+2. 当前默认模型元数据已包含 `validation_summary`：
+   - `combined.full` 平均 RankIC 约 `0.107`
+   - `combined.recent_126d` 平均 RankIC 约 `0.146`
+   - `combined.recent_63d` 平均 RankIC 约 `0.212`
+3. 已完成正常执行冒烟：
+   - `daily_research/output/model_validation_smoke/model_validation_smoke_20260323`
+   - `latest_trade_plan.txt` 已能显示模型最新数据日、模型新鲜度、模型验证摘要
+4. 已完成过期拦截冒烟：
+   - 构造临时过期模型元数据 `latest_data_date=2026-03-20`
+   - 在 `--stale-model-max-trading-days 1` 下，执行端已按预期抛出 `RuntimeError` 并中止出计划
+
+### 本轮结论
+1. 默认模型产物现在不再只是“能加载”，而是可以直接看到训练摘要和滚动验证摘要。
+2. 执行端现在不再只是“有模型就继续”，而是具备了最基本的模型过期提醒与拦截能力。
+3. 当前执行主线仍保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`，后续优化可以直接建立在这套更可观测的执行底座上。
+

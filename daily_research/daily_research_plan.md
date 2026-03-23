@@ -268,6 +268,11 @@
    - 默认模型产物 `daily_research/execution/models/latest_ml_model.json` 已重训并写明 `regime_ma_window=50`
    - 后续研究不再以“是否切换到 ma50”为目标，而是直接在当前执行默认 `ma50 baseline` 内部做增量优化
    - 当前回滚参考保留为：`ma60 + up_low_ml55_none25_v220`
+19. 执行端模型治理已补强：
+   - 默认模型产物 `latest_ml_model.json` 现在会落盘 `validation_summary`
+   - 当前验证口径为滚动 RankIC 摘要，默认 `21` 个交易日一个历史重训块
+   - `run_trade_plan.py` 已补上模型新鲜度保护：默认滞后 `1` 个交易日提醒、滞后 `3` 个交易日拦截
+   - 日常查看 `latest_trade_plan.txt` 时，可以直接看到模型最新数据日、模型新鲜度与验证摘要
 
 ### 优先级 B：完成 `deep_alpha` 当前主线的正式判决
 目标：

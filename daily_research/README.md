@@ -229,6 +229,7 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
   - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
   - 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，且先隔离 `trend_up_low_vol`
+  - 默认模型产物 `latest_ml_model.json` 已补充 `validation_summary`；执行端也已补上模型新鲜度保护，默认 `1` 个交易日滞后提醒、`3` 个交易日滞后拦截
 
 ### 6.2 `deep_alpha`
 - `Transformer` 优于 `GRU`
