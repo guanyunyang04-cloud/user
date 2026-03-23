@@ -219,6 +219,12 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 纯 `trend_up_high_vol` 的权重改法，对最新弱窗口几乎没有影响
   - 首个真正动到弱窗口的候选是 `trend_up_low_vol=ml0.60/none0.25/v20.15` 并叠加 `trend_up_high_vol=ml0.80/none0.15/v20.05`，它把最新弱窗口小幅改善到约 `-10.04% / -0.550`
   - 但这条候选的全样本超额 Sharpe 从 `1.841` 回落到约 `1.753`，回撤也更差，因此还不是可晋级的干净升级
+- 第十三轮 `ma50` 状态专属 ensemble 第二轮精扫已经完成：
+  - 本轮先隔离 `trend_up_low_vol`，固定 `trend_up_high_vol` 回到 baseline，只在 `ml=0.57 ~ 0.62` 一带细扫
+  - `up_low_ml62_none23_v215` 是当前弱窗口修复最强点：最新弱窗口约修到 `-7.67% / -0.413`，最近完整窗口约 `91.04% / 2.279`
+  - `up_low_ml61_none24_v215` 是相对更平衡的候选：最新弱窗口约 `-8.05% / -0.451`，最近完整窗口约 `91.54% / 2.337`
+  - 但两者的全样本超额 Sharpe 仍都低于 baseline，分别约 `1.775 / 1.792` 对 `1.869`，且最强季度都集中在 `2026Q1`
+  - 这说明：隔离 `trend_up_low_vol` 之后，ensemble 权重线确实还有信息量，但当前仍是“修弱窗口要付出全样本代价”，还不是可直接替换默认执行的干净升级
 - 第十二轮 `ma50` 波动阈值微调已经完成：
   - `regime_max_annual_vol=0.30 ~ 0.34` 五个点的正式收益指标完全一致
   - 复核 `regime_state.csv` 与 `actions.csv` 后确认：这些阈值只改动了少数 `trend_down_low_vol / trend_down_high_vol` 标签，`regime_on` 完全不变，实际持仓与交易动作也完全一致
@@ -228,7 +234,8 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma50 baseline` 已从“头号正式修复候选”晋级为当前执行默认口径
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
   - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
-  - 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，且先隔离 `trend_up_low_vol`
+  - `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 作为本轮保留下来的两档研究候选，其中前者偏弱窗口修复、后者偏近期窗口平衡
+  - 下一步不再继续盲扫更大的 `trend_up_low_vol` 权重网格，而是先对这两档候选做季度集中度与 `2026Q1` 归因诊断；若确认仍是季度集中驱动，就停止这条 ensemble 权重线晋级
   - 默认模型产物 `latest_ml_model.json` 已补充 `validation_summary`；执行端也已补上模型新鲜度保护，默认 `1` 个交易日滞后提醒、`3` 个交易日滞后拦截
 
 ### 6.2 `deep_alpha`

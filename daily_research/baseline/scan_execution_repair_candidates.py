@@ -72,6 +72,7 @@ def parse_args():
             "ma50_boundary_risk",
             "ma50_state_horizon_round1",
             "ma50_state_ensemble_round1",
+            "ma50_state_ensemble_round2_low_only",
             "ma50_regime_vol_round1",
         ],
         default="round1",
@@ -439,6 +440,53 @@ def _candidate_profiles(candidate_set: str) -> list[dict[str, Any]]:
                 "state_ensemble_weights": {
                     "trend_up_low_vol": {"ml": 0.60, "none": 0.25, "v2": 0.15},
                     "trend_up_high_vol": {"ml": 0.80, "none": 0.15, "v2": 0.05},
+                },
+            },
+        ]
+
+    if candidate_set == "ma50_state_ensemble_round2_low_only":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "up_low_ml62_none23_v215",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.62, "none": 0.23, "v2": 0.15},
+                },
+            },
+            {
+                "label": "up_low_ml61_none24_v215",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.61, "none": 0.24, "v2": 0.15},
+                },
+            },
+            {
+                "label": "up_low_ml60_none25_v215",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.60, "none": 0.25, "v2": 0.15},
+                },
+            },
+            {
+                "label": "up_low_ml60_none24_v216",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.60, "none": 0.24, "v2": 0.16},
+                },
+            },
+            {
+                "label": "up_low_ml59_none25_v216",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.59, "none": 0.25, "v2": 0.16},
+                },
+            },
+            {
+                "label": "up_low_ml58_none25_v217",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.58, "none": 0.25, "v2": 0.17},
+                },
+            },
+            {
+                "label": "up_low_ml57_none25_v218",
+                "state_ensemble_weights": {
+                    "trend_up_low_vol": {"ml": 0.57, "none": 0.25, "v2": 0.18},
                 },
             },
         ]

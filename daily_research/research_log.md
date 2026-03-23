@@ -5059,3 +5059,82 @@
 2. 执行端现在不再只是“有模型就继续”，而是具备了最基本的模型过期提醒与拦截能力。
 3. 当前执行主线仍保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`，后续优化可以直接建立在这套更可观测的执行底座上。
 
+## 2026-03-23 执行端第十三轮正式复验：`ma50` 状态专属 ensemble 第二轮精扫（先隔离 `trend_up_low_vol`）
+### 本轮目标
+- 既然当前执行默认值已经切到 `ma50 baseline`，这轮不再同时调两个上涨状态，而是先把变量收干净：
+  - 固定 `trend_up_high_vol` 回到 baseline；
+  - 只围绕 `trend_up_low_vol` 的 `ML / none / v2` 配比，做第二轮细扫；
+  - 重点确认：第一轮里“弱窗口略有改善”的信号，在隔离 `trend_up_high_vol` 后是否还能成立，以及能否跑出更干净的正式候选。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only`
+- 汇总表：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/repair_scan_summary.csv`
+- 归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/attr_baseline_vs_up_low_ml62_none23_v215`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/attr_baseline_vs_up_low_ml61_none24_v215`
+- 关键脚本：
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+
+### 结果一：只隔离 `trend_up_low_vol` 后，弱窗口修复信号仍然存在
+- 本轮 baseline（当前执行默认 `ma50 baseline`）：
+  - 全样本超额 Sharpe 约 `1.869`
+  - 最近完整窗口约 `77.68% / 1.904`
+  - 最新弱窗口约 `-10.70% / -0.550`
+- 弱窗口修复最强点出现在：
+  - `up_low_ml62_none23_v215`
+  - 全样本超额 Sharpe 约 `1.775`
+  - 最近完整窗口约 `91.04% / 2.279`
+  - 最新弱窗口约 `-7.67% / -0.413`
+- 相对更平衡的候选是：
+  - `up_low_ml61_none24_v215`
+  - 全样本超额 Sharpe 约 `1.792`
+  - 最近完整窗口约 `91.54% / 2.337`
+  - 最新弱窗口约 `-8.05% / -0.451`
+- 这说明：
+  - 第一轮里“`trend_up_low_vol` 权重仍有修复信息量”的判断没有被推翻；
+  - 而且在把 `trend_up_high_vol` 固定回 baseline 后，这条信号反而更清楚。
+
+### 结果二：但当前仍没有跑出“弱窗口改善 + 全样本不伤”的干净升级
+- 虽然 `up_low_ml62_none23_v215 / up_low_ml61_none24_v215` 都显著改善了最近完整窗口和最新弱窗口：
+  - 但两者的全样本超额 Sharpe 仍分别从 baseline 的约 `1.869` 回落到约 `1.775 / 1.792`
+  - 全样本超额最大回撤也分别扩到约 `-31.28% / -32.62%`，都差于 baseline 的约 `-29.11%`
+- 更激进地把 `ML` 压到 `0.59` 以下后，结果开始明显恶化：
+  - `up_low_ml59_none25_v216` 的最新弱窗口已经退到约 `-14.67% / -0.792`
+  - `up_low_ml58_none25_v217` 更差，约 `-19.46% / -1.018`
+- 这说明：
+  - `trend_up_low_vol` 的第二轮细扫已经把有效区间压缩到了 `0.60 ~ 0.62` 附近；
+  - 再继续往下压 `ML` 主导权，并不会持续改善，反而会把这条线推回失效区。
+
+### 结果三：当前最强候选的增益仍然带有季度集中迹象
+- `up_low_ml62_none23_v215` 相对 baseline：
+  - 只在 `17` 个季度里的 `7` 个季度更强
+  - 最强季度是 `2026Q1`，超额差约 `+9.04%`
+  - 最弱季度是 `2024Q4`，超额差约 `-16.58%`
+- `up_low_ml61_none24_v215` 相对 baseline：
+  - 也只在 `17` 个季度里的 `7` 个季度更强
+  - 最强季度同样是 `2026Q1`，超额差约 `+11.19%`
+  - 最弱季度同样落在 `2024Q4`，超额差约 `-16.47%`
+- 状态归因也表明：
+  - 这轮差异几乎全部来自 `trend_up_low_vol`
+  - `trend_up_high_vol` 与两个下跌象限基本没变
+- 这说明：
+  - “先隔离 `trend_up_low_vol`”这一步是对的；
+  - 但当前最佳候选仍然可能带有较强的季度集中性，不能直接按正式升级处理。
+
+### 本轮结论
+1. `ma50 baseline` 内部第二轮状态专属 ensemble 精扫已经完成，且确认：真正还有继续研究价值的，确实是 `trend_up_low_vol` 这条线。
+2. 目前保留下来的两个候选是：
+   - `up_low_ml62_none23_v215`：偏弱窗口修复最强；
+   - `up_low_ml61_none24_v215`：偏近期窗口相对更平衡。
+3. 但它们都还不是“弱窗口改善且全样本不伤”的干净升级，因此当前执行默认值不切换，继续保持 `advanced_ml (ma50 baseline) + liquid500 + next_open`。
+4. 下一步不再继续盲扫更大的 `trend_up_low_vol` 权重网格，而是先对这两档候选做季度集中度与 `2026Q1` 归因诊断；如果确认增益仍主要集中在单一季度，就停止这条 ensemble 权重线晋级。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
+4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 作为本轮保留的两档研究候选，但暂不晋级执行端
+5. 下一步先做这两档候选的季度集中度与 `2026Q1` 归因诊断；若确认仍属季度集中驱动，则停止这条 ensemble 权重线继续晋级
+
