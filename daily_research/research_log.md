@@ -5171,3 +5171,85 @@ position,000001.SZ,1200,12.38,
 4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 作为本轮保留的两档研究候选，但暂不晋级执行端
 5. 下一步先做这两档候选的季度集中度与 `2026Q1` 归因诊断；若确认仍属季度集中驱动，则停止这条 ensemble 权重线继续晋级
 
+## 2026-03-23 执行端第十四轮正式诊断：`ma50` ensemble 候选季度集中度与 `2026Q1` 归因
+### 本轮目标
+- 对 round13 保留下来的两档候选做最后一步正式诊断：
+  - `up_low_ml62_none23_v215`
+  - `up_low_ml61_none24_v215`
+- 直接回答两个问题：
+  - 它们相对 `ma50 baseline` 的改进是否仍主要集中在少数季度；
+  - 若焦点季度为 `2026Q1`，增益究竟来自稳定的季度级增强，还是少数日期与少数槽位放大。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round14_ma50_ensemble_q1_diagnosis`
+- 关键文件：
+  - `summary_rows.csv`
+  - `repair_vs_baseline_quarterly_compare.csv`
+  - `balance_vs_baseline_quarterly_compare.csv`
+  - `repair_focus_quarter_monthly.csv`
+  - `balance_focus_quarter_monthly.csv`
+  - `repair_focus_quarter_top_days.csv`
+  - `balance_focus_quarter_top_days.csv`
+  - `report.json`
+  - `report.md`
+- 关键工具：
+  - `daily_research/tools/ma50_ensemble_q1_report.py`
+
+### 结果一：两条候选都确认存在较强季度集中度
+- `up_low_ml62_none23_v215` 相对 baseline：
+  - 只在 `17` 个季度里的 `7` 个季度更强
+  - 最佳季度 `2026Q1` 占正向季度总优势约 `45.27%`
+  - Top3 季度占比约 `81.16%`
+  - 季度正向优势 HHI 约 `0.285`
+- `up_low_ml61_none24_v215` 相对 baseline：
+  - 也只在 `17` 个季度里的 `7` 个季度更强
+  - 最佳季度 `2026Q1` 占正向季度总优势约 `52.20%`
+  - Top3 季度占比约 `86.74%`
+  - 季度正向优势 HHI 约 `0.341`
+- 这说明：
+  - 两条候选都不是“多季度平滑抬升”的修复；
+  - 其中 `up_low_ml61_none24_v215` 比 `up_low_ml62_none23_v215` 还要更集中。
+
+### 结果二：`2026Q1` 的增量主要堆在 `2026-01`
+- `up_low_ml62_none23_v215`：
+  - `2026-01` compound 超额边际约 `+8.93%`
+  - `2026-02` 反而回吐约 `-4.75%`
+  - `2026-03` 仅修复约 `+3.41%`
+- `up_low_ml61_none24_v215`：
+  - `2026-01` compound 超额边际约 `+12.99%`
+  - `2026-02` 回吐约 `-6.79%`
+  - `2026-03` 仅修复约 `+3.41%`
+- 这说明：
+  - 即使把最佳季度拆到月度，增量也不是均匀分布；
+  - 真正的放大主要集中在 `2026-01`，而不是整个 `2026Q1` 都持续占优。
+
+### 结果三：焦点季度内的增益仍主要来自少数日期与少数槽位替换
+- `up_low_ml62_none23_v215` 在 `2026Q1`：
+  - Top5 正向日占正向日总优势约 `79.11%`
+  - Top10 正向日占比约 `97.26%`
+  - 平均持仓重叠 Jaccard 约 `0.714`
+  - 约 `54%` 的日期仍至少与 baseline 重合 `4` 个名字
+- `up_low_ml61_none24_v215` 在 `2026Q1`：
+  - Top5 正向日占比约 `79.12%`
+  - Top10 正向日占比约 `96.02%`
+  - 平均持仓重叠 Jaccard 约 `0.697`
+  - 约 `52%` 的日期仍至少与 baseline 重合 `4` 个名字
+- 焦点季度里的正向差异主要发生在 `trend_up_low_vol`，但并不是整季整套组合重写：
+  - 更多还是少数日期放大；
+  - 再叠加少数槽位替换完成。
+
+### 本轮结论
+1. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的正式季度集中度与 `2026Q1` 归因诊断已经完成。
+2. 结论可以正式落地为：这条 `trend_up_low_vol` ensemble 权重线仍然属于季度集中驱动，不满足继续晋级执行端的条件。
+3. 因此这条线到此停止晋级执行端；已有扫描结果、归因结果和焦点季度诊断全部保留，但仅作为研究附录，不再继续扩展权重网格。
+4. 当前执行默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`。
+5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究，而不是继续扫这条 ensemble 权重线。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
+4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的诊断已完成，并确认仍属季度集中驱动；两者保留为研究附录，但停止继续晋级执行端
+5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究
+
