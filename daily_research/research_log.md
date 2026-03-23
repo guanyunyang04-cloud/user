@@ -5059,6 +5059,39 @@
 2. 执行端现在不再只是“有模型就继续”，而是具备了最基本的模型过期提醒与拦截能力。
 3. 当前执行主线仍保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`，后续优化可以直接建立在这套更可观测的执行底座上。
 
+## 2026-03-23 执行端易用性修正：`current_positions.csv` 升级为可选账号快照
+### 本轮目标
+- 修正执行端文档与实际使用上的两个摩擦点：
+  - 原 README 把“更新持仓”和“准备次日开盘可用现金”拆成了两步，逻辑重复；
+  - 日常执行时还要求命令行手填 `--cash`，不利于直接模拟真实账号状态。
+
+### 本轮动作
+1. 在 `daily_research/baseline/generate_daily_trade_plan.py` 中补了账号快照读取：
+   - `current_positions.csv` 继续兼容原来的老格式：`stock,shares,cost_price`
+   - 同时支持新的账号快照格式：同一文件内写 `account` 行现金与 `position` 行持仓
+2. `--cash` 现在改成可选覆盖参数：
+   - 不传时，优先读取 `current_positions.csv` 中 `account -> available_cash`
+   - 传了 `--cash` 时，命令行显式覆盖文件里的现金
+3. 在计划摘要与 `latest_trade_plan.txt` 中补了现金来源说明：
+   - 会写明本次现金来自命令行覆盖、账号快照，还是“未提供按 0 处理”
+4. 更新样例与说明：
+   - `daily_research/execution/current_positions.example.csv`
+   - `daily_research/execution/README.md`
+
+### 新的推荐账号快照格式
+```csv
+record_type,stock,shares,cost_price,available_cash
+account,,,,200000
+position,600000.SH,1000,10.52,
+position,600036.SH,800,42.10,
+position,000001.SZ,1200,12.38,
+```
+
+### 本轮结论
+1. 执行端现在不必再把“持仓更新”和“现金输入”拆成两步。
+2. 日常更推荐只维护一份 `current_positions.csv`，直接把账号现金和持仓一起写进去。
+3. `--cash` 仍然保留，但定位变成“临时覆盖”，而不是每天必须手填的常规入口。
+
 ## 2026-03-23 执行端第十三轮正式复验：`ma50` 状态专属 ensemble 第二轮精扫（先隔离 `trend_up_low_vol`）
 ### 本轮目标
 - 既然当前执行默认值已经切到 `ma50 baseline`，这轮不再同时调两个上涨状态，而是先把变量收干净：

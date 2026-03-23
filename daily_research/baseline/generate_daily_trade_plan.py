@@ -48,6 +48,14 @@ class PositionSnapshot:
     cost_price: float = 0.0
 
 
+@dataclass
+class AccountStateInput:
+    positions_df: pd.DataFrame
+    cash: float | None
+    source: str
+    path: str
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate end-of-day trade plan TXT for manual execution")
     parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
@@ -62,7 +70,7 @@ def parse_args():
     parser.add_argument("--holding-count", type=int, default=5)
     parser.add_argument("--rebalance-freq", default="5d")
     parser.add_argument("--positions-file", default="daily_research/execution/current_positions.csv")
-    parser.add_argument("--cash", type=float, default=0.0)
+    parser.add_argument("--cash", type=float, default=None, help="Optional cash override. If omitted, will try to read from current_positions.csv account snapshot row.")
     parser.add_argument("--lot-size", type=int, default=100)
     parser.add_argument("--output-dir", default="daily_research/execution/output")
     parser.add_argument("--experiment-tag", default="")
@@ -282,22 +290,67 @@ def _assess_model_freshness(
     return result
 
 
-def _load_positions(path_str: str) -> pd.DataFrame:
-    path = Path(path_str)
-    if not path.exists():
+def _normalize_positions_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
         return pd.DataFrame(columns=["stock", "shares", "cost_price"])
-    df = pd.read_csv(path)
     required = {"stock", "shares"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Positions file missing required columns: {sorted(missing)}")
-    if "cost_price" not in df.columns:
-        df["cost_price"] = 0.0
-    df["stock"] = df["stock"].astype(str).str.upper().str.strip()
-    df["shares"] = df["shares"].fillna(0).astype(int)
-    df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce").fillna(0.0)
-    df = df[df["shares"] > 0].copy()
-    return df
+    out = df.copy()
+    if "cost_price" not in out.columns:
+        out["cost_price"] = 0.0
+    out["stock"] = out["stock"].astype(str).str.upper().str.strip()
+    out["shares"] = pd.to_numeric(out["shares"], errors="coerce").fillna(0).astype(int)
+    out["cost_price"] = pd.to_numeric(out["cost_price"], errors="coerce").fillna(0.0)
+    out = out[(out["stock"] != "") & (out["shares"] > 0)].copy()
+    return out[["stock", "shares", "cost_price"]]
+
+
+def _load_account_state(path_str: str) -> AccountStateInput:
+    path = Path(path_str)
+    if not path.exists():
+        return AccountStateInput(
+            positions_df=pd.DataFrame(columns=["stock", "shares", "cost_price"]),
+            cash=None,
+            source="missing",
+            path=str(path),
+        )
+    df = pd.read_csv(path)
+    columns = {str(col).strip().lower(): col for col in df.columns}
+    if "record_type" not in columns:
+        return AccountStateInput(
+            positions_df=_normalize_positions_frame(df),
+            cash=None,
+            source="positions_only",
+            path=str(path),
+        )
+
+    record_type_col = columns["record_type"]
+    typed = df.copy()
+    typed[record_type_col] = typed[record_type_col].astype(str).str.strip().str.lower()
+
+    account_rows = typed[typed[record_type_col].eq("account")].copy()
+    cash_value: float | None = None
+    if not account_rows.empty:
+        cash_col = columns.get("available_cash", columns.get("cash"))
+        if cash_col:
+            cash_series = pd.to_numeric(account_rows[cash_col], errors="coerce").dropna()
+            if not cash_series.empty:
+                cash_value = float(cash_series.iloc[-1])
+
+    position_rows = typed[typed[record_type_col].isin(["position", "holding", "hold"])].copy()
+    if position_rows.empty and {"stock", "shares"} <= set(columns):
+        stock_col = columns["stock"]
+        position_rows = typed[typed[stock_col].notna()].copy()
+        position_rows = position_rows[position_rows[record_type_col] != "account"].copy()
+
+    return AccountStateInput(
+        positions_df=_normalize_positions_frame(position_rows),
+        cash=cash_value,
+        source="account_snapshot",
+        path=str(path),
+    )
 
 
 def _build_scores_from_artifact(
@@ -682,6 +735,8 @@ def _write_trade_plan_txt(
         for warning in warnings:
             lines.append(f"- {warning}")
     lines.append(f"总资产估算: {summary['total_equity']:.2f}")
+    if summary.get("cash_source_text"):
+        lines.append(f"现金来源: {summary['cash_source_text']}")
     lines.append(f"输入现金: {summary['cash_input']:.2f}")
     lines.append(f"计划后剩余现金估算: {summary['estimated_cash_after_plan']:.2f}")
     lines.append("价格口径: 以下数量按信号日收盘价估算，次日开盘请按实际开盘价微调。")
@@ -837,8 +892,25 @@ def main():
         f"{raw_cache_meta['cache_path']}"
     )
 
-    print("[5/9] 正在读取当前持仓...")
-    positions_df = _load_positions(args.positions_file)
+    print("[5/9] 正在读取当前账号快照...")
+    account_state = _load_account_state(args.positions_file)
+    positions_df = account_state.positions_df
+    if args.cash is not None:
+        effective_cash = float(args.cash)
+        cash_source = "cli_override"
+        cash_source_text = f"命令行 --cash 覆盖 ({args.positions_file})"
+    elif account_state.cash is not None:
+        effective_cash = float(account_state.cash)
+        cash_source = account_state.source
+        cash_source_text = f"{Path(args.positions_file).name} 的 account 行"
+    else:
+        effective_cash = 0.0
+        cash_source = "default_zero"
+        cash_source_text = "未提供 account 行现金，按 0 处理"
+        print(
+            "[warning] 当前 positions 文件未提供 account 行现金，且未传入 --cash；"
+            " 本次按 0 现金生成计划。"
+        )
 
     prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
         raw_df_dict=raw_df_dict,
@@ -956,9 +1028,13 @@ def main():
         score_v2_row=score_v2.loc[signal_date],
         ml_score_row=ml_score.loc[signal_date],
         positions_df=positions_df,
-        cash=args.cash,
+        cash=effective_cash,
         lot_size=args.lot_size,
     )
+    summary["positions_source"] = str(account_state.path)
+    summary["positions_source_mode"] = str(account_state.source)
+    summary["cash_source"] = str(cash_source)
+    summary["cash_source_text"] = str(cash_source_text)
     summary["history_window"] = history_window_to_dict(history_window)
     summary["cache"] = {
         "raw": raw_cache_meta,

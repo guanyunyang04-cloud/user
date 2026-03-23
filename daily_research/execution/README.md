@@ -89,6 +89,9 @@
 
 - 如果 `current_positions.csv` 不存在，脚本会优先复制 `current_positions.example.csv`；
 - 如果样例也不存在，才会创建一个最小表头文件。
+- `current_positions.csv` 现在支持两种格式：
+  - 老格式：只写持仓；
+  - 新格式：把 `account` 行现金和 `position` 行持仓一起写进同一个文件。
 
 ## 4. 每日标准流程
 
@@ -167,43 +170,54 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - 日常执行默认读取离线模型产物，不在计划生成时实时训练；
 - 如果你没有先更新模型，`run_trade_plan.py` 会因为找不到模型产物而报错。
 
-### 第 2 步：更新持仓文件
-把你的真实持仓写入：
+### 第 2 步：更新账号快照文件
+把你的真实持仓与可用现金一起写入：
 
 - `daily_research/execution/current_positions.csv`
 
-格式：
+推荐格式：
 
 ```csv
-stock,shares,cost_price
-600000.SH,1000,10.52
-600036.SH,800,42.10
-000001.SZ,1200,12.38
+record_type,stock,shares,cost_price,available_cash
+account,,,,200000
+position,600000.SH,1000,10.52,
+position,600036.SH,800,42.10,
+position,000001.SZ,1200,12.38,
 ```
 
 字段说明：
 
+- `record_type`
+  - `account` 表示账号级信息；
+  - `position` 表示单只持仓；
 - `stock`
-  - 必须是 `600000.SH` 这种格式；
+  - 持仓行必须是 `600000.SH` 这种格式；
 - `shares`
   - 当前持股数量；
 - `cost_price`
   - 当前持仓成本价。
+- `available_cash`
+  - 只在 `account` 行填写；
+  - 推荐填你预计次日开盘可动用的现金；
+  - 日常执行时如果已经写在这里，就不必再单独传 `--cash`。
 
-### 第 3 步：准备次日开盘可用现金
-运行交易计划脚本时，需要传入预计到次日开盘可用的现金金额。
+兼容说明：
 
-### 第 4 步：生成次日开盘计划
+- 老格式 `stock,shares,cost_price` 仍然可用；
+- 但如果继续用老格式，且命令行也不传 `--cash`，系统会按 `0` 现金生成计划。
+
+### 第 3 步：生成次日开盘计划
 推荐命令：
 
 ```bash
-python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 5d --cash 200000 --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
+python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 5d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
 ```
 
 真实默认值与行为：
 
 - 默认持仓文件：
   - `current_positions.csv`
+  - 若文件中存在 `account` 行，会自动读取其中的 `available_cash`
 - 默认模型产物：
   - `models/latest_ml_model.joblib`
 - 默认输出目录：
@@ -222,6 +236,9 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - 如确需继续，可显式传入 `--allow-stale-model`
 - 默认 lot size：
   - `100`
+- `--cash` 现在变成可选覆盖参数：
+  - 不传时，优先读 `current_positions.csv` 里的 `account -> available_cash`
+  - 传了 `--cash` 时，以命令行为准
 - 默认会读取离线模型产物；
 - 只有隐藏参数 `--train-on-the-fly` 才会改为实时训练，日常不建议使用。
 
@@ -233,6 +250,8 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--stale-model-warn-trading-days`
 - `--stale-model-max-trading-days`
 - `--allow-stale-model`
+- `--cash`
+  - 临时覆盖账号快照中的现金
 - `--stocks`
   - 临时改成小股票池测试；
 - `--experiment-tag`
@@ -270,7 +289,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - 卖出、减仓、买入、加仓建议；
 - 当前持仓概览；
 - 候选观察名单；
-- 输入现金与计划后剩余现金估算。
+- 现金来源、输入现金与计划后剩余现金估算。
 
 ## 6. 如何执行建议
 次日开盘建议按下面顺序手工执行：
