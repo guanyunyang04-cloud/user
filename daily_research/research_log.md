@@ -5253,3 +5253,84 @@ position,000001.SZ,1200,12.38,
 4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的诊断已完成，并确认仍属季度集中驱动；两者保留为研究附录，但停止继续晋级执行端
 5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究
 
+## 2026-03-24 执行端第十五轮正式复验：`ma50` 口径模型族对照（`histgb / lgbm / etr`）
+### 本轮目标
+- 既然 `trend_up_low_vol` 的 ensemble 权重线已经确认停止晋级，就把执行端 ML 增量优化的主线切到当前真实执行口径下的模型族对照：
+  - 固定 `ma50 + rolling liquid500 + next_open`
+  - 不再沿用旧的 `ma60` 模型族结论
+  - 直接回答：当前默认 `histgb` 是否仍然是最合适的执行模型族
+- 本轮也把之前超时中断的 `etr` 单独补跑完成，避免三家模型里只留两家半结论。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
+- 关键文件：
+  - `model_family_compare_summary.csv`
+  - `model_family_compare_report.json`
+  - `model_family_compare_report.md`
+  - `histgb_vs_lgbm/overall_comparison.csv`
+  - `histgb_vs_lgbm/quarterly_comparison.csv`
+  - `histgb_vs_lgbm/quadrant_comparison.csv`
+- 关键脚本：
+  - `daily_research/baseline/compare_ml_model_families.py`
+  - `daily_research/baseline/analyze_advanced_ml_comparison.py`
+
+### 结果一：`lgbm` 在当前执行口径下显著强于当前默认 `histgb`
+- `lgbm`：
+  - 全样本超额收益约 `887.75%`
+  - 全样本超额 Sharpe 约 `2.300`
+  - 最近完整窗口 `2025-03-07 -> 2026-03-19` 约 `127.99% / 2.816`
+  - 最新弱窗口 `2025-09-05 -> 2026-03-19` 约 `9.79% / 0.475`
+- 当前默认 `histgb`：
+  - 全样本超额收益约 `388.95%`
+  - 全样本超额 Sharpe 约 `1.487`
+  - 最近完整窗口约 `61.33% / 1.402`
+  - 最新弱窗口约 `-8.46% / -0.423`
+- 这说明：
+  - 在当前已经切换到 `ma50 baseline` 的执行口径下，`histgb` 不再是最强模型族；
+  - `lgbm` 不只是弱窗口更好，而是全样本、最近完整窗口、最新弱窗口三层都明显更强。
+
+### 结果二：`etr` 补跑完成，但仍不是头号 challenger
+- `etr` 正式补跑结果为：
+  - 全样本超额收益约 `274.63%`
+  - 全样本超额 Sharpe 约 `1.443`
+  - 最近完整窗口约 `41.74% / 1.491`
+  - 最新弱窗口约 `6.46% / 0.433`
+- 这说明：
+  - `etr` 的确比当前默认 `histgb` 更能修复最新弱窗口；
+  - 但它在全样本与最近完整窗口上都明显落后于 `lgbm`，且全样本超额 Sharpe 也低于 `histgb`；
+  - 因此 `etr` 只保留为正式研究附录，不再作为头号模型族升级候选。
+
+### 结果三：`lgbm` 的领先不是单季度孤点
+- `lgbm` 相对 `histgb` 的季度对照结果：
+  - 在 `17` 个季度里有 `9` 个季度更强
+  - `8` 个季度持平
+  - `0` 个季度更弱
+- 季度集中度摘要：
+  - 最强季度为 `2025Q3`
+  - 该季度占正向季度总优势约 `29.67%`
+  - Top3 季度占比约 `74.12%`
+  - 正向季度 HHI 约 `0.214`
+- 状态归因结果：
+  - 主要新增优势来自 `trend_up_low_vol`
+  - `trend_up_high_vol` 也有正向增益
+  - 并不存在“一个上涨状态修好、另一个上涨状态反而更差”的问题
+- 这说明：
+  - 这次 `lgbm` 的领先不是“少数季度抬起来、其他季度更差”；
+  - 更像是从 `2024Q1` 起，在当前 `ma50` 执行框架里持续把 `histgb` 拉开。
+
+### 本轮结论
+1. `ma50` 口径下的正式模型族对照已经完成，当前最强模型族已从默认 `histgb` 明确切换为 `lgbm`。
+2. `etr` 正式补跑完成后，结论更新为：它能修复弱窗口，但整体不如 `lgbm`，因此只保留为研究附录。
+3. `lgbm` 相对 `histgb` 的领先已经具备跨窗口、跨季度的一致性，不再只是旧 `ma60` 口径下那个“值得继续观察”的 challenger。
+4. 但当前执行默认模型暂不直接切换，先进入 `ma50 + lgbm` 的切换前复核与执行端烟测，再决定是否正式替换默认模型。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族继续保持为：`histgb`
+3. `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选
+4. `etr` 正式补跑完成，但只保留为研究附录，不再作为主 challenger
+5. 下一步若继续做执行端 ML 增量优化，优先顺序更新为：
+   - 先对 `ma50 + lgbm` 做切换前复核与执行端烟测
+   - 再决定是否还有必要进入状态专属模型研究
+

@@ -241,7 +241,18 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
   - `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和正式产物保留，但不再作为当前执行修复候选
   - `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的正式诊断已经完成，并确认仍属季度集中驱动；两者作为研究附录保留，但不再继续晋级执行端
-  - 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究，而不是继续扫这条 ensemble 权重线
+- 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究，而不是继续扫这条 ensemble 权重线
+- `2026-03-24` 已完成当前执行口径 `ma50 + rolling liquid500 + next_open` 的正式模型族对照，并补跑完成了原本耗时最长的 `etr`：
+  - `lgbm`：全样本超额收益约 `887.75%`，全样本超额 Sharpe 约 `2.300`；最近完整窗口约 `127.99% / 2.816`；最新弱窗口约 `9.79% / 0.475`
+  - `histgb`：全样本超额收益约 `388.95%`，全样本超额 Sharpe 约 `1.487`；最近完整窗口约 `61.33% / 1.402`；最新弱窗口约 `-8.46% / -0.423`
+  - `etr`：全样本超额收益约 `274.63%`，全样本超额 Sharpe 约 `1.443`；最近完整窗口约 `41.74% / 1.491`；最新弱窗口约 `6.46% / 0.433`
+- `lgbm` 相对当前默认 `histgb` 在 `17` 个季度里有 `9` 个季度更强、`8` 个季度持平、`0` 个季度更弱；最佳季度 `2025Q3` 仅占正向季度总优势约 `29.67%`，不是单季度孤点。
+- 因此当前执行默认模型仍保持 `histgb`，但 `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选；`etr` 正式补跑后确认不构成头号 challenger，只保留为研究附录。
+- 本轮产物汇总在：
+  - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
+  - `model_family_compare_summary.csv`
+  - `model_family_compare_report.json`
+  - `model_family_compare_report.md`
   - 默认模型产物 `latest_ml_model.json` 已补充 `validation_summary`；执行端也已补上模型新鲜度保护，默认 `1` 个交易日滞后提醒、`3` 个交易日滞后拦截
 
 ### 6.2 `deep_alpha`
