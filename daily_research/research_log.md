@@ -5334,3 +5334,153 @@ position,000001.SZ,1200,12.38,
    - 先对 `ma50 + lgbm` 做切换前复核与执行端烟测
    - 再决定是否还有必要进入状态专属模型研究
 
+## 2026-03-24 执行端第十六轮正式复核：`ma50 + lgbm` 切换前复核与第一轮执行端烟测
+### 本轮目标
+- 既然 `lgbm` 已在当前 `ma50` 执行口径下跑成头号模型族升级候选，这轮不直接切默认值，而是先做切换前复核：
+  - 生成独立的 `lgbm` 候选模型产物，不覆盖默认 `latest_ml_model.*`
+  - 确认候选产物也能完整走通执行端 `update_model.py -> run_trade_plan.py`
+  - 检查执行端是否能正常读取候选 meta 里的 `validation_summary` 与模型新鲜度
+  - 再判断：当前是否已经足够进入默认模型切换
+
+### 本轮产物
+- 候选模型目录：
+  - `daily_research/output/ma50_lgbm_switch_review/models`
+- 候选模型产物：
+  - `ma50_lgbm_candidate.joblib`
+  - `ma50_lgbm_candidate.json`
+- 烟测目录：
+  - `daily_research/output/ma50_lgbm_switch_smoke/ma50_lgbm_switch_smoke_20260324`
+  - `daily_research/output/ma50_lgbm_switch_smoke/latest_trade_plan.txt`
+- 复核摘要：
+  - `daily_research/output/ma50_lgbm_switch_review/switch_review_summary.json`
+  - `daily_research/output/ma50_lgbm_switch_review/switch_review_summary.md`
+
+### 结果一：独立 `lgbm` 候选产物已成功生成，且验证摘要继续强于默认 `histgb`
+- 候选产物训练完成时间：
+  - `trained_at = 2026-03-24 11:27:56`
+- 候选产物口径：
+  - `ma50 + liquid500 + next_open`
+  - `ml_model_family = lgbm`
+- 候选 `lgbm` 的滚动验证摘要：
+  - `full IC 0.121`
+  - `recent126d IC 0.152`
+  - `recent63d IC 0.219`
+- 当前默认 `histgb` 的对应摘要：
+  - `full IC 0.107`
+  - `recent126d IC 0.146`
+  - `recent63d IC 0.212`
+- 这说明：
+  - `lgbm` 不只是在回测收益上更强，离线滚动验证摘要也继续优于当前默认 `histgb`
+  - 当前 `lgbm` 候选产物已经具备进入执行端复核的基础质量
+
+### 结果二：第一轮执行端烟测已跑通，但当前只覆盖到 `regime_off` 卖出路径
+- 烟测命令已用独立候选产物跑通：
+  - `update_model.py` 显式输出到独立 `artifact-path / artifact-meta-path`
+  - `run_trade_plan.py` 显式读取该候选 `model-artifact`
+- 烟测摘要确认：
+  - 模型新鲜度 `fresh`
+  - `trading_day_lag = 0`
+  - 执行端已正常读取候选 meta 中的 `validation_summary`
+- 当前烟测信号日为：
+  - `2026-03-23`
+  - 市场状态 `trend_down_low_vol`
+  - `regime_off`
+- 因此本次烟测只走到了“禁止开新仓时的卖出路径”，计划结果为：
+  - 卖出 `002843.SZ` `800` 股
+
+### 结果三：候选 `lgbm` 与当前默认计划在本次烟测日没有引入额外执行漂移
+- 当前默认计划与候选 `lgbm` 计划在 `2026-03-23` 的动作完全一致：
+  - 都只给出一笔卖出 `002843.SZ` `800` 股
+- 差异主要体现在分数层：
+  - 默认 `histgb` 对该标的的 `final_score` 约 `2.447`
+  - 候选 `lgbm` 对该标的的 `final_score` 约 `2.767`
+- 这说明：
+  - 在当前这个 `regime_off` 信号日上，切到 `lgbm` 不会导致额外的执行动作漂移
+  - 但这仍不足以证明买入路径也完全稳定，因为今天没有覆盖到 `regime_on` 下的新开仓场景
+
+### 本轮结论
+1. `ma50 + lgbm` 的切换前复核已经完成第一步：独立候选产物与执行端烟测都已跑通。
+2. 当前候选 `lgbm` 不仅正式回测强于默认 `histgb`，滚动验证摘要也继续优于默认模型。
+3. 但本次烟测落在 `trend_down_low_vol`，只覆盖了 `regime_off` 卖出路径，还不能直接作为最终切换依据。
+4. 因此当前执行默认模型暂不切换；下一步应先补一个 `regime_on` 日期的点时烟测，把买入路径也完整验证掉。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族继续保持为：`histgb`
+3. `lgbm` 继续作为当前头号模型族升级候选
+4. 下一步不直接进入状态专属模型研究，而是先补一个 `regime_on` 日期的点时烟测
+5. 只有在该点时烟测也通过后，才决定是否正式把默认模型从 `histgb` 切换到 `lgbm`
+
+## 2026-03-24 执行端第十七轮正式复核：`regime_on` 点时烟测补完与买入路径修复
+### 本轮目标
+- 承接第十六轮尚未完成的切换前复核，直接回答两个问题：
+  - `ma50 + lgbm` 在 `regime_on` 场景下是否也能稳定走通真实买入路径；
+  - 若点时烟测仍异常，问题究竟来自模型本身，还是执行端计划生成逻辑。
+
+### 本轮产物
+- 点时账户快照：
+  - `daily_research/output/ma50_lgbm_switch_review/regime_on_account_snapshot.csv`
+- 点时模型产物：
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_histgb_pointtime_20260311.joblib`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_histgb_pointtime_20260311.json`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_pointtime_20260311.joblib`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_pointtime_20260311.json`
+- 修复后点时烟测目录：
+  - `daily_research/output/ma50_lgbm_switch_review/histgb_regime_on_smoke_fixed/20260311`
+  - `daily_research/output/ma50_lgbm_switch_review/lgbm_regime_on_smoke_fixed/20260311`
+
+### 结果一：前一次 `regime_on` 失败暴露的是执行端买入 bug，不是模型失效
+- 原始异常现象是：
+  - `plan_summary.json` 显示 `target_position_count = 5`
+  - `watchlist.csv` 里已有多只接近 `25%` 的目标仓位
+  - 但 `actions_today.csv` 为空，计划文本写成“今日无明确调仓动作”
+- 复核后定位到真实原因：
+  - `daily_research/baseline/generate_daily_trade_plan.py` 的买入腿循环里，误把 `target_weight_row` 当成了 `target_value`
+  - 结果就是买入判断实际在拿 `0.25` 这类权重去和一手股票金额比较，正常候选会被直接跳过
+- 这说明：
+  - 前一次 `regime_on` 烟测未通过，不能归因到 `histgb` 或 `lgbm`
+  - 它首先是一个执行端计划生成 bug
+
+### 结果二：修复后，`histgb / lgbm` 都能在同一 `regime_on` 日期正常生成买单
+- 本轮点时信号日固定为：`2026-03-11`
+- 当日市场状态为：
+  - `trend_up_low_vol`
+  - `regime_on = True`
+- 修复后 `histgb` 点时计划：
+  - 买入 `002470.SZ` `16600` 股
+  - 买入 `688800.SH` `500` 股
+  - 买入 `300617.SZ` `700` 股
+  - 买入 `002843.SZ` `1800` 股
+  - 计划后剩余现金约 `9098`
+- 修复后 `lgbm` 点时计划：
+  - 买入 `002470.SZ` `16600` 股
+  - 买入 `000510.SZ` `2600` 股
+  - 买入 `688800.SH` `500` 股
+  - 买入 `300739.SZ` `1700` 股
+  - 计划后剩余现金约 `5584`
+- 两边点时产物都保持：
+  - `model_freshness = fresh`
+  - `trading_day_lag = 0`
+
+### 结果三：切换前执行链路现在已经补全
+- 第十六轮已经覆盖了 `2026-03-23` 的 `regime_off` 卖出路径：
+  - 默认 `histgb` 与候选 `lgbm` 给出同一笔卖出 `002843.SZ` `800` 股
+- 第十七轮又补完了 `2026-03-11` 的 `regime_on` 买入路径：
+  - `histgb / lgbm` 都能正常生成多笔买单
+  - 且 `lgbm` 的买入组合与 `histgb` 有清晰但可解释的差异，不是执行链路漂移失控
+- 这说明：
+  - 当前 `ma50 + lgbm` 不只是离线回测与验证摘要更强
+  - 在执行端里也已经同时通过了卖出场景和买入场景的烟测复核
+
+### 本轮结论
+1. `regime_on` 点时烟测已经补完，且在修复执行端买入 bug 后正式通过。
+2. 前一次“有目标仓位却无买单”的异常，已经确认是执行端买入腿 sizing 逻辑问题，不构成对 `lgbm` 的负面证据。
+3. 因此当前默认模型从研究侧和执行侧都已满足正式切换到 `lgbm` 的条件。
+4. 下一步不再优先进入状态专属模型研究，而是应先完成默认模型从 `histgb` 到 `lgbm` 的正式替换。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族仍暂时是：`histgb`
+3. 但 `lgbm` 的切换前复核已经完整通过，现已具备正式替换默认模型的条件
+4. 下一步优先做默认模型切换：`histgb -> lgbm`
+5. 默认模型切换完成后，再决定是否还有必要进入状态专属模型研究

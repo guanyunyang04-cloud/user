@@ -248,6 +248,17 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `etr`：全样本超额收益约 `274.63%`，全样本超额 Sharpe 约 `1.443`；最近完整窗口约 `41.74% / 1.491`；最新弱窗口约 `6.46% / 0.433`
 - `lgbm` 相对当前默认 `histgb` 在 `17` 个季度里有 `9` 个季度更强、`8` 个季度持平、`0` 个季度更弱；最佳季度 `2025Q3` 仅占正向季度总优势约 `29.67%`，不是单季度孤点。
 - 因此当前执行默认模型仍保持 `histgb`，但 `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选；`etr` 正式补跑后确认不构成头号 challenger，只保留为研究附录。
+- `2026-03-24` 已完成 `ma50 + lgbm` 的切换前复核与第一轮执行端烟测：
+  - 独立候选产物已生成在 `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_candidate.joblib`
+  - 候选 `lgbm` 的滚动验证摘要高于当前默认 `histgb`：`full IC 0.121 > 0.107`，`recent126d IC 0.152 > 0.146`，`recent63d IC 0.219 > 0.212`
+  - 独立烟测已跑通 `update_model.py -> run_trade_plan.py`，模型新鲜度为 `fresh`，信号日 `2026-03-23` 与当前默认计划给出同一笔卖出动作
+  - 当时唯一未覆盖的是 `regime_on` 下的真实买入路径
+- `2026-03-24` 已补完 `regime_on` 日期 `2026-03-11` 的点时烟测，并顺手修复了执行端一个真实买入 bug：
+  - 原异常不是模型问题，而是 `generate_daily_trade_plan.py` 在买入腿里把 `target_weight` 当成了 `target_value`，导致空账户场景下可能出现“有目标仓位但无买单”
+  - 修复后，`histgb` 在同一口径下给出 `4` 笔买入：`002470.SZ / 688800.SH / 300617.SZ / 002843.SZ`
+  - 修复后，`lgbm` 在同一口径下给出 `4` 笔买入：`002470.SZ / 000510.SZ / 688800.SH / 300739.SZ`
+  - 两边点时产物都保持 `fresh`，买入路径与之前 `2026-03-23` 的 `regime_off` 卖出路径一起，已经把切换前执行链路补全
+- 因此当前默认模型从研究和执行两侧都已具备正式切换到 `lgbm` 的条件；若继续推进执行端 ML 增量优化，下一步应先做默认模型切换，再决定是否还有必要进入状态专属模型研究。
 - 本轮产物汇总在：
   - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
   - `model_family_compare_summary.csv`

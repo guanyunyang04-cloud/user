@@ -551,7 +551,8 @@ def _build_trade_plan(
                     }
                 )
 
-    for stock, target_value in target_weight_row.items():
+    # Convert target weights to position values before comparing against cash and lot size.
+    for stock, target_value in target_value_map.items():
         price = float(latest_price.get(stock, 0.0))
         current_shares = int(current_shares_map.get(stock, 0))
         current_value = float(current_shares * price)
@@ -573,7 +574,7 @@ def _build_trade_plan(
                 "est_value": est_value,
                 "reason": "进入目标组合" if current_shares == 0 else "目标仓位上升",
                 "current_weight": current_value / total_equity if total_equity > 0 else 0.0,
-                "target_weight": float(target_value / total_equity) if total_equity > 0 else 0.0,
+                "target_weight": float(target_weight_row.get(stock, 0.0)),
                 "final_score": float(final_score_row.get(stock, 0.0)),
                 "score_none": float(score_none_row.get(stock, 0.0)),
                 "score_v2": float(score_v2_row.get(stock, 0.0)),
