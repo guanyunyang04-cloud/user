@@ -6327,3 +6327,36 @@ position,000001.SZ,1200,12.38,
 3. 连续状态分数继续保留为诊断层与风险附录，不晋级为执行层软调节逻辑
 4. 这条连续状态软调节线到此停止，不继续扩单旋钮参数网格
 5. 下一步研究重心回到 `deep_alpha` 的最终正式判决
+
+## 2026-03-24 项目治理回收：README / 计划去日志化
+### 本轮目标
+- 把 `daily_research/README.md` 收回到“当前状态与入口”；
+- 把 `daily_research/daily_research_plan.md` 收回到“当前默认决策与优先级”；
+- 让 `research_log.md` 继续作为唯一时间顺序记录；
+- 给文档维护补上结构守卫，而不只是靠人工记忆。
+
+### 本轮动作
+- 重写 `daily_research/README.md`：
+  - 只保留当前默认执行口径、目录职责、日常入口与维护命令；
+- 重写 `daily_research/daily_research_plan.md`：
+  - 只保留当前默认主线、当前优先级、已降级分支与停止规则；
+- 更新根目录 `README.md`：
+  - 把当前执行主线写精确为 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`；
+  - 补上 `2026-03-23 ~ 2026-03-24` 的主线收束阶段；
+- 增强 `daily_research/tools/doc_guard.py`：
+  - 默认纳入根目录 `README.md`；
+  - 增加 README / 计划文件的行数上限检查；
+  - 增加按日期追加日志式标题的结构检查。
+
+### 本轮结论
+1. 文档治理已经从“靠人工记住边界”升级为“文档分工 + 守卫脚本”。
+2. `README.md` 与 `daily_research_plan.md` 不再承担历史追加职责，完整时间线统一留在 `research_log.md`。
+3. 当前更准确的项目状态已经固化为：
+   - 执行端默认口径：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+   - 调仓语义：日频目标更新
+   - 当前主研究事项：`deep_alpha` 最终正式判决
+
+### 当前决策
+1. 以后新增实验结论继续写入 `research_log.md`，不再顺手堆进 README 或计划文件。
+2. 日常维护时先跑 `python daily_research/tools/doc_guard.py check`，再提交文档更新。
+3. 继续保留 `workspace_maintenance.py` 作为热区体检与清理入口，不回到人工记忆式维护。

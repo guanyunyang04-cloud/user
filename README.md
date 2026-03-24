@@ -9,7 +9,7 @@
 
 ## 当前结论
 
-- 执行端主线已经冻结为：`advanced_ml + liquid500 + next_open`
+- 执行端主线已经冻结为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 - `deep_alpha` 仍是最重要的研究主线，但还没有通过多窗口正式框架验证，不能进入执行端或 `shadow mode`
 - `t0_project` 当前定位是独立实验区，不和 `daily_research` 的正式执行链路混用
 
@@ -25,6 +25,9 @@
    - 多个结构增强方向被验证后淘汰，当前收敛到 `patch-based masked pretraining + ranking fine-tune`。
 4. `2026-03-22`
    - 开始补项目治理：清理入口重复、拆出共享流程、增加工作区巡检/清理工具、建立顶层维护说明。
+5. `2026-03-23 ~ 2026-03-24`
+   - 执行默认口径完成 `ma50 baseline` 与 `lgbm` 切换，并明确标准化为“日频目标更新”。
+   - `daily_research/README.md` 与 `daily_research/daily_research_plan.md` 回收到“当前状态 / 当前计划”职责，完整时间线只保留在 `daily_research/research_log.md`。
 
 ## 代码与产物边界
 
@@ -92,6 +95,7 @@ python daily_research/tools/workspace_maintenance.py archive --apply
 
 - 文档统一用 UTF-8 保存，中文内容不要再用 shell 重定向直接追加。
 - 研究结论优先写入 `daily_research/research_log.md`，规划写入 `daily_research/daily_research_plan.md`。
+- `daily_research/README.md` 只保留当前状态与入口，`daily_research/daily_research_plan.md` 只保留当前优先级与停止规则，不再持续追加时间日志。
 - 任何要接近执行端的新方案，都必须先过正式研究框架，而不是靠单窗口或烟测结果推进。
 - 默认只清理可再生生成物，不直接删除研究输出、模型产物和持仓状态文件。
 - 热区只放近期结果，过期的 `daily_research/output/` 与大体积哈希缓存按 `daily_research/archive_policy.json` 进入冷归档。
