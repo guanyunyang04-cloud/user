@@ -36,6 +36,8 @@
 ## 3. 文档分工
 - `daily_research/README.md`
   - 只解决“现在项目是什么、怎么进主入口”。
+- `daily_research/runtime_environment.md`
+  - 只记录当前工作区、解释器、关键依赖与推荐调用方式。
 - `daily_research/daily_research_plan.md`
   - 只解决“当前默认决策是什么、下一步优先级是什么”。
 - `daily_research/research_log.md`
@@ -46,8 +48,9 @@
 推荐阅读顺序：
 
 1. 先看本文件，确认当前主线与入口；
-2. 再看 `daily_research_plan.md`，确认当前优先级与停止规则；
-3. 需要追溯实验过程时，再查 `research_log.md`。
+2. 再看 `runtime_environment.md`，确认解释器、依赖与推荐调用方式；
+3. 再看 `daily_research_plan.md`，确认当前优先级与停止规则；
+4. 需要追溯实验过程时，再查 `research_log.md`。
 
 ## 4. 当前结构
 - `daily_research/baseline/`
@@ -99,6 +102,7 @@ python daily_research/baseline/run_advanced_daily_research.py --data-source tq -
 ```bash
 python daily_research/deep_alpha/pretrain_deep_alpha_encoder.py --data-source tq --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --start-date 20220101 --benchmark 000300.SH --lookback-window 120 --patch-len 5 --hidden-dim 96 --transformer-heads 4 --transformer-layers 2 --mask-ratio 0.40 --epochs 12 --min-epochs 8 --auto-extend-undertrained --epoch-extend-step 4 --max-total-epochs 20 --valid-days 252 --pretrain-valid-days 63 --experiment-tag deep_alpha_pretrain_liq500
 python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --start-date 20220101 --benchmark 000300.SH --encoder-family patch_transformer --patch-len 5 --pretrained-encoder-path daily_research/output/deep_alpha_pretrain_liq500/pretrained_encoder.pt --return-loss-mode regression --return-target-transform raw --ranking-loss-weight 0.5 --listwise-loss-weight 0.25 --score-risk-mode state_gate --rebalance-freq 1d --epochs 8 --min-epochs 4 --train-eval-window-days 126 --valid-days 252 --experiment-tag deep_alpha_pretrained_liq500
+python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-tag deep_alpha_minimal_matrix_round1
 ```
 
 ## 6. 当前已收敛结论

@@ -6387,3 +6387,81 @@ position,000001.SZ,1200,12.38,
 ### 当前决策
 1. 后续 `deep_alpha` 正式对照实验默认按 `rebalance_freq=1d` 记录与解释。
 2. 下一步直接进入 `deep_alpha` 当前主线的最小充分对照矩阵，不再先做额外支线扩展。
+
+## 2026-03-24 `deep_alpha` 最小充分对照矩阵：runner 固化与正式起步
+### 本轮目标
+- 不再手工拼接 `deep_alpha` 正式对照命令；
+- 把“最小充分对照矩阵”固化成正式 runner；
+- 先从 `backbone` 阶段进入当前主线正式判决。
+
+### 本轮动作
+- 新增 `daily_research/deep_alpha/run_minimal_matrix.py`：
+  - 自动按最新已完成交易日切最近三段正式 walk-forward 窗口；
+  - 当前分三阶段组织最小矩阵：
+    - `backbone`
+    - `score_head`
+    - `ranking`
+  - `backbone` 阶段当前只比较：
+    - `gru + manual + plain`
+    - `patch_transformer + manual + plain`
+    - `patch_transformer + masked pretrain + manual + plain`
+  - 同一套 runner 会把：
+    - `matrix_plan.json`
+    - `windows.csv`
+    - 各阶段命令清单
+    - 各阶段运行汇总 / 选中 recipe
+    统一写到同一个输出根目录下。
+- 用 `quant` 环境做了 dry-run：
+  - 根目录：`daily_research/output/deep_alpha_minimal_matrix_20260324_formal_round1`
+  - 生成了：
+    - `matrix_plan.json`
+    - `windows.csv`
+    - `stage_backbone_commands.txt`
+- 同时补了主 README 入口：
+  - `python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-tag deep_alpha_minimal_matrix_round1`
+
+### 当前 dry-run 切出的正式窗口
+1. `2023-02-09 -> 2024-02-22`
+2. `2024-02-23 -> 2025-03-10`
+3. `2025-03-11 -> 2026-03-24`
+
+### 本轮结论
+1. `deep_alpha` 当前主线的最小充分对照矩阵已经从“文字规划”变成“可执行正式入口”。
+2. 当前正式起步点已经明确为 `backbone` 阶段，而不是继续横向扩更多研究支线。
+3. 后续 `score_head` 与 `ranking` 阶段将建立在 `backbone` winner 之上，而不是直接暴力全因子扩表。
+
+### 当前决策
+1. 正式矩阵入口固定为：
+   - `daily_research/deep_alpha/run_minimal_matrix.py`
+2. 当前第一阶段固定为：
+   - `--phase backbone`
+3. `score_head` 与 `ranking` 只在上阶段 winner 产生后继续推进。
+
+## 2026-03-24 运行环境基线固化：解释器与调用口径留档
+### 本轮目标
+- 把当前工作区真实可用的运行环境固定成项目文档；
+- 避免后续研究再次混用 `base` 与 `quant` 解释器；
+- 给 `deep_alpha` 主线与最小充分对照矩阵保留统一调用前缀。
+
+### 本轮动作
+- 新增 `daily_research/runtime_environment.md`：
+  - 记录工作区根目录、Shell、时区与环境快照日期；
+  - 记录默认 `python` 与推荐 `quant` Python 的路径和版本；
+  - 记录 `quant` 环境中的关键依赖版本：
+    - `pandas==2.3.3`
+    - `numpy==2.0.2`
+    - `torch==2.8.0+cpu`
+  - 记录可用 conda 环境清单与推荐调用方式。
+- 更新 `daily_research/README.md`：
+  - 在文档分工里加入 `runtime_environment.md`；
+  - 在推荐阅读顺序里补上环境基线入口。
+
+### 本轮结论
+1. 当前运行口径已经从“靠会话记忆”固化为项目文档。
+2. `daily_research` 的正式研究与 `deep_alpha` 相关脚本默认应使用 `quant` 环境，而不是 `base` Python。
+3. 后续如果解释器或关键依赖升级，应先更新环境基线文档，再推进新的正式实验批次。
+
+### 当前决策
+1. 正式研究脚本默认调用：
+   - `C:\Users\ASUS\miniconda3\envs\quant\python.exe`
+2. `base` 环境只视为轻量维护入口，不再假定具备完整研究依赖。
