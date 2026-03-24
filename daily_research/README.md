@@ -425,3 +425,27 @@ python daily_research/tools/workspace_maintenance.py archive --apply
   3. `volume_contraction`、`volatility_contraction` 出现“权重可能过重”的信号，进入 `v2.1` 微调首批候选。
   4. 不直接做整组删除：`group_structure`、`group_volume`、`group_volatility` 的结果都说明组级改动过粗。
   5. 下一步优先做 `v2.1` 小范围减法微调，而不是重开 `v3 / v4` 大分支。
+
+## 2026-03-24 执行口径复核：`rebalance_freq=5d` 已漂移为日频目标更新
+- 已完成两组最小复现实验：
+  - 执行端：`daily_research/output/rebalance_freq_audit_exec/exec_1d_audit` 与 `daily_research/output/rebalance_freq_audit_exec/exec_5d_audit_samepool`
+  - 研究端：`daily_research/output/rebalance_freq_audit_research_1d` 与 `daily_research/output/rebalance_freq_audit_research_5d`
+- 关键结论：
+  1. 早期 `score + 5d` 的结论只严格适用于 `run_daily_research.py` 那条 stage1 基线；该路径仍会显式调用 `_apply_rebalance_frequency()`。
+  2. 当前 `advanced_ml` 主线的 `run_advanced_daily_research.py` 与 `generate_daily_trade_plan.py` 都会记录 `rebalance_freq`，但不会真正把它施加到目标权重滚动保持上。
+  3. 研究端 `1d / 5d` 的 `metrics / equity_curve / actions / latest_scores / regime_state / training_log` 全部逐文件一致；执行端 `1d / 5d` 的 `actions_today / watchlist` 也完全一致，仅剩元数据字段差异。
+  4. 因此当前执行默认口径 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 应理解为“日频目标更新”，而不是“真 5d”。
+  5. 这次先不静默改执行语义；下一步若要动这条线，应先明确二选一：
+     - 恢复 `advanced_ml` 主线里的真 `5d` 调仓约束；
+     - 或正式把这条主线标准化为日频目标更新，并同步清理历史表述。
+
+## 2026-03-24 当前主线正式决策
+- 已正式按以下口径收束当前执行主线：
+  1. 训练窗口继续保持当前近两年滚动口径，不机械拉长；默认仍以 `ml_train_window_days=504` 为主。
+  2. 稳定性验证窗口与正式复验窗口应继续向更早历史扩展；后续优先尝试把研究验证起点从 `2021` 继续往 `2019`，必要时再评估 `2018`。
+  3. `advanced_ml` 主线正式标准化为“日频目标更新”；相关主入口默认值已统一到 `rebalance_freq=1d`。
+  4. 市场状态过滤继续保留为门控层，`none / v2` 继续保留为规则层先验；这两条线当前不扩成新的 profile 家族或状态专属模型主线。
+- 因此当前更准确的项目结构是：
+  - 状态过滤 = 门控层
+  - `none / v2` = 规则层先验
+  - `lgbm` = 当前主引擎

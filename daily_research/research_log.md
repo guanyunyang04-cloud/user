@@ -5700,3 +5700,126 @@ position,000001.SZ,1200,12.38,
    - 优先下调或移除 `volatility_contraction`
    - 固定保留 `range_position_20 / drawdown_20 / price_volume_divergence`
 4. 下一步继续围绕 `v2.1` 做小范围减法微调，不扩 `v3 / v4` 分支
+
+## 2026-03-24 执行端第二十一轮口径复核：`rebalance_freq=5d` 是否仍为真 `5d`
+### 本轮目标
+- 直接回答当前 `advanced_ml` 主线里的 `rebalance_freq=5d` 究竟代表什么：
+  - 它是否仍像早期 `score + 5d` 一样，是真正作用到目标权重上的调仓约束；
+  - 还是已经只剩历史参数名，当前实际行为更接近日频目标更新。
+- 如果确认口径已经漂移，就把研究端、执行端和文档里的理解重新对齐。
+
+### 本轮产物
+- 执行端最小复现实验：
+  - `daily_research/output/rebalance_freq_audit_exec/exec_1d_audit`
+  - `daily_research/output/rebalance_freq_audit_exec/exec_5d_audit_samepool`
+- 研究端最小复现实验：
+  - `daily_research/output/rebalance_freq_audit_research_1d`
+  - `daily_research/output/rebalance_freq_audit_research_5d`
+
+### 结果一：早期 stage1 基线仍是真 `5d`
+- 静态代码复核显示：
+  - `daily_research/baseline/run_daily_research.py` 仍保留 `_apply_rebalance_frequency()`
+  - 且会在 `build_target_weights()` 之后，把 `target_weights` 与 `score_for_backtest` 一并做频率约束
+- 这说明：
+  - 早期 `score + 5d` 的研究结论本身没有问题；
+  - 但它严格对应的是 stage1 基线路径，不能自动外推到后来的 `advanced_ml` 主线。
+
+### 结果二：当前 `advanced_ml` 研究端不会真正应用 `rebalance_freq`
+- 静态代码复核显示：
+  - `daily_research/baseline/run_advanced_daily_research.py` 会读取并记录 `rebalance_freq`
+  - 但在 `build_target_weights(final_score, ...)` 之后，直接进入后续回测，没有像 stage1 那样再做 `_apply_rebalance_frequency()`
+- 最小复现实验显示：
+  - `rebalance_freq=1d` 与 `rebalance_freq=5d` 的研究端正式输出里，`metrics / equity_curve / actions / latest_scores / regime_state / training_log / factor_ic_summary / factor_quantile_returns` 全部逐文件一致
+  - `metrics.json` 的唯一差异只剩：
+    - `rebalance_freq: 1d`
+    - `rebalance_freq: 5d`
+- 这说明：
+  - 当前 `run_advanced_daily_research.py` 的 `rebalance_freq` 已经只剩元数据意义；
+  - 它不会改变研究端的真实目标权重路径。
+
+### 结果三：当前执行端也不会因为 `1d / 5d` 改变计划输出
+- 静态代码复核显示：
+  - `daily_research/baseline/generate_daily_trade_plan.py` 会读取 `rebalance_freq`
+  - 但在构建完 `target_weights` 后，会直接取 `target_weights.loc[signal_date]`
+  - 中间不存在与 stage1 等价的频率约束步骤
+- 最小复现实验显示：
+  - 同一模型、同一股票池、同一账户快照下，`rebalance_freq=1d` 与 `rebalance_freq=5d` 的 `actions_today.csv` 完全一致
+  - `watchlist.csv` 也完全一致
+  - `plan_summary.json` 只有缓存命中元数据不同，不涉及任何计划动作差异
+- 这说明：
+  - 当前执行端对 `rebalance_freq` 的处理，也已经不再是“真 `5d`”；
+  - 当前计划生成行为实质上等价于日频目标更新。
+
+### 本轮结论
+1. `advanced_ml` 主线里的 `rebalance_freq=5d` 已经不是早期 stage1 那种“真 `5d` 调仓约束”。
+2. 当前研究端与执行端都已确认：`rebalance_freq=1d / 5d` 只改元数据，不改真实目标权重与计划输出。
+3. 因此当前执行默认口径 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 应解释为“日频目标更新”，而不能再直接沿用旧 `score + 5d` 的理解。
+4. 这次先不静默改执行语义；下一步若要继续处理这条线，应先做清晰选择：
+   - 恢复 `advanced_ml` 主线里的真 `5d` 调仓约束；
+   - 或正式把这条主线标准化为日频目标更新，并清理历史文档表述。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 但当前主线的实际调仓语义更新为：按“日频目标更新”理解，而不是“真 `5d`”
+3. 早期 `score + 5d` 的研究结论继续保留，但仅限对应 stage1 基线路径，不再直接引用为当前 `advanced_ml` 主线口径
+4. 下一步先不改代码行为；等后续再明确是恢复真 `5d`，还是正式标准化为日频目标更新
+
+## 2026-03-24 执行端第二十二轮正式决策：统一当前主线口径
+### 本轮目标
+- 不再停留在“口径提醒”层面，而是基于当前代码、默认模型产物与已有正式研究记录，把三个容易混淆的问题一次性定下来：
+  - 当前默认 `lgbm` 的训练窗口是否需要立即继续拉长；
+  - 当前 `advanced_ml` 主线到底按“真 `5d`”还是“日频目标更新”理解；
+  - 市场状态过滤与 `none / v2` profile 之后该放在什么层级，不再混成同一条主引擎叙述。
+
+### 结果一：训练窗口保持当前近两年滚动，不机械拉长
+- 当前默认模型产物 `daily_research/execution/models/latest_ml_model.json` 对应的真实训练口径显示：
+  - 请求起点仍可写为 `2021-01-01`
+  - 但有效原始历史窗口约为 `2023-03-06 -> 2026-03-24`
+  - 真正用于三组 horizon 训练的样本大致为 `2024-02-22 -> 2026-03-23`
+- 这说明：
+  - 当前默认 `lgbm` 并不是“吃满 2021 以来全部历史”的长期训练；
+  - 它本质上仍是一条近两年滚动、偏近期适应性的主线。
+- 因此正式决策为：
+  - 当前不机械继续拉长训练窗口；
+  - 默认训练口径继续维持 `ml_train_window_days=504`。
+
+### 结果二：验证窗口应继续扩，而不是拿训练窗口替代稳定性判断
+- 稳定性问题要靠更长的正式复验窗口回答，而不是靠把训练窗口越喂越长来回答。
+- 因此正式决策为：
+  - 后续正式复验优先把研究验证起点从 `2021` 往 `2019` 扩；
+  - 若数据质量、基准对齐与运行成本允许，再继续评估是否扩到 `2018`。
+
+### 结果三：当前 `advanced_ml` 主线正式标准化为“日频目标更新”
+- 承接第二十一轮的静态复核与 `1d / 5d` 最小复现实验，当前已经没有必要继续保留“以后再决定”的模糊态。
+- 因此正式决策为：
+  - 当前 `advanced_ml` 主线不再按“真 `5d` 调仓约束”理解；
+  - 直接标准化为“日频目标更新”；
+  - 主入口相关默认值同步统一到 `rebalance_freq=1d`。
+- 本轮同步更新的入口包括：
+  - `daily_research/baseline/run_advanced_daily_research.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+  - `daily_research/baseline/compare_ml_model_families.py`
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+
+### 结果四：状态过滤与 `none / v2` 的定位正式收束
+- 市场状态过滤这条线继续成立，但只作为门控层，不再被叙述成“主收益引擎”。
+- `none / v2` 这条线继续成立，但更适合作为规则层先验，而不是继续扩成 profile zoo。
+- 当前真正的主收益引擎继续明确为默认 `lgbm`。
+
+### 本轮结论
+1. 你之前的研究主方向没有走偏，但此前确实存在训练窗口、验证窗口、`score + 5d` 与当前主线语义混用的问题。
+2. 这些问题现在已正式收束为统一口径：
+   - 训练窗口不机械拉长；
+   - 验证窗口继续向更长历史扩展；
+   - 当前 `advanced_ml` 主线正式按日频目标更新理解。
+3. 市场状态过滤与 `none / v2` 继续有效，但层级明确更新为：
+   - 状态过滤 = 门控层
+   - `none / v2` = 规则层先验
+   - `lgbm` = 当前主引擎
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 默认训练窗口继续保持近两年滚动，不机械拉长
+3. 后续正式研究验证窗口优先从 `2021` 向 `2019` 扩，必要时再评估 `2018`
+4. `advanced_ml` 主线正式标准化为“日频目标更新”，不再沿用旧 `score + 5d` 口径
+5. 市场状态过滤继续作为门控层，`none / v2` 继续作为规则层先验；当前不把 profile 家族扩成新的执行端主线研究

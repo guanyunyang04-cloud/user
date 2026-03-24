@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("--universe-scope", default="all_a")
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--holding-count", type=int, default=5)
-    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--rebalance-freq", default="1d")
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
     parser.add_argument("--model-families", default="histgb,lgbm,etr")

@@ -213,7 +213,7 @@ position,000001.SZ,1200,12.38,
 推荐命令：
 
 ```bash
-python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 5d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
+python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 1d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
 ```
 
 真实默认值与行为：
@@ -229,8 +229,10 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - `universe/liquid500_latest.txt`
 - 默认持仓数：
   - `5`
-- 默认调仓频率：
-  - `5d`
+- 当前默认调仓语义：
+  - `1d`
+  - 当前 `advanced_ml` 主线已正式按“日频目标更新”理解
+  - 早期 `score + 5d` 只对应 stage1 基线路径，不再作为当前执行主线口径
 - 当前默认执行状态边界：
   - `regime_ma_window=50`
 - 默认模型新鲜度保护：

@@ -68,7 +68,7 @@ def parse_args():
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2", help=argparse.SUPPRESS)
     parser.add_argument("--holding-count", type=int, default=5)
-    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--rebalance-freq", default="1d")
     parser.add_argument("--positions-file", default="daily_research/execution/current_positions.csv")
     parser.add_argument("--cash", type=float, default=None, help="Optional cash override. If omitted, will try to read from current_positions.csv account snapshot row.")
     parser.add_argument("--lot-size", type=int, default=100)

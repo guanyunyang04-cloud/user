@@ -383,6 +383,25 @@
    - `v2.1` 的首批微调方向固定为：
      - 优先下调或移除 `volume_contraction`
      - 优先下调或移除 `volatility_contraction`
-     - 固定保留并继续观察 `range_position_20 / drawdown_20 / price_volume_divergence`
+   - 固定保留并继续观察 `range_position_20 / drawdown_20 / price_volume_divergence`
    - 暂不直接删除整个 `structure / volume / volatility` 组，因为组级删除结果过于粗糙、且强弱窗口方向不一致
    - 这一轮完成前，不把规则层升级线重新抬回执行端主线，只作为默认 `lgbm` 主线下的二级优化
+28. `advanced_ml` 主线里的 `rebalance_freq=5d` 口径复核已完成：
+   - 当前 `run_advanced_daily_research.py` 与 `generate_daily_trade_plan.py` 都不会把 `rebalance_freq` 真正施加到目标权重滚动保持上
+   - 研究端 `1d / 5d` 正式输出逐文件一致；执行端 `1d / 5d` 的计划输出也一致，仅剩元数据差异
+   - 因此当前执行默认口径应解释为“日频目标更新”，不能再直接沿用早期 stage1 的“真 `score + 5d`”理解
+   - 下一步不静默改执行语义，先保留当前默认主线：
+     - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+     - 再明确二选一：恢复真 `5d` 调仓约束，或正式标准化为日频目标更新
+29. 按当前代码与研究记录，已对这三条口径正式做出决策：
+   - 训练窗口：
+     - 当前默认 `lgbm` 继续保持近两年滚动训练，不机械延长；默认口径继续以 `ml_train_window_days=504` 为主
+   - 验证窗口：
+     - 后续正式复验优先把研究验证起点从 `2021` 往 `2019` 扩；若数据质量与运行成本允许，再评估是否继续扩到 `2018`
+   - 调仓语义：
+     - `advanced_ml` 主线不再保留含混的“历史 5d”表述，正式标准化为“日频目标更新”
+     - 当前主入口默认值已统一到 `rebalance_freq=1d`
+   - 状态过滤与 profile：
+     - 市场状态过滤继续作为门控层保留
+     - `none / v2` 继续作为规则层先验保留
+     - 当前不把 profile 家族扩成新的执行端主线研究
