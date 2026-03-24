@@ -263,6 +263,10 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 默认产物 `daily_research/execution/models/latest_ml_model.json` 已更新为 `trained_at = 2026-03-24 16:33:31`、`latest_data_date = 2026-03-24`、`model_family = lgbm`
   - 切换后的默认 `run_trade_plan.py` 已重新烟测，`2026-03-24` 信号日继续给出卖出 `002843.SZ` `800` 股，执行链路正常
 - 因此当前执行默认口径已经更新为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`；默认模型切换完成后，下一步再决定是否还有必要进入状态专属模型研究。
+- `2026-03-24` 已完成这一步决策，当前结论是：暂不进入状态专属模型研究。
+  - 现有正式按状态对照里，`lgbm` 相对旧默认 `histgb` 在 `trend_up_low_vol` 的超额边际约 `+164.71%`，在 `trend_up_high_vol` 约 `+15.78%`，两个真实开仓状态都已经同步改善
+  - 而此前 `ma50` 内部的状态专属 horizon / ensemble 线，要么几乎没有增量，要么属于季度集中驱动，尚未形成比当前默认 `lgbm` 更干净的升级证据
+  - 因此下一步先进入默认 `lgbm` 观察期；只有在后续重新出现明确的状态内失衡证据时，才重启状态专属模型研究
 - 本轮产物汇总在：
   - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
   - `model_family_compare_summary.csv`
