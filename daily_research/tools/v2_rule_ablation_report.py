@@ -57,7 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--holding-count", type=int, default=5)
-    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--rebalance-freq", default="1d")
+    parser.add_argument("--candidate-set", choices=["round1", "v21"], default="round1")
     parser.add_argument("--max-weight", type=float, default=0.25)
     parser.add_argument("--score-threshold", type=float, default=0.0)
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
@@ -214,7 +215,7 @@ def _safe_num(value: Any) -> str:
     return f"{float(value):.3f}"
 
 
-def _candidate_specs() -> list[dict[str, Any]]:
+def _round1_candidate_specs() -> list[dict[str, Any]]:
     return [
         {"label": "none", "kind": "baseline", "profile": "none"},
         {"label": "v2", "kind": "baseline", "profile": "v2"},
@@ -266,6 +267,75 @@ def _candidate_specs() -> list[dict[str, Any]]:
     ]
 
 
+def _v21_candidate_specs() -> list[dict[str, Any]]:
+    return [
+        {"label": "v2", "kind": "baseline", "profile": "v2"},
+        {
+            "label": "v21_volume_contraction_035",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volume_contraction": 0.35},
+        },
+        {
+            "label": "v21_volume_contraction_025",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volume_contraction": 0.25},
+        },
+        {
+            "label": "v21_volume_contraction_015",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volume_contraction": 0.15},
+        },
+        {
+            "label": "v21_volatility_contraction_020",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volatility_contraction": 0.20},
+        },
+        {
+            "label": "v21_volatility_contraction_015",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volatility_contraction": 0.15},
+        },
+        {
+            "label": "v21_volatility_contraction_010",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {"volatility_contraction": 0.10},
+        },
+        {
+            "label": "v21_dual_mild_035_020",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {
+                "volume_contraction": 0.35,
+                "volatility_contraction": 0.20,
+            },
+        },
+        {
+            "label": "v21_dual_balanced_025_015",
+            "kind": "tune",
+            "profile": "v2",
+            "set_factor_weights": {
+                "volume_contraction": 0.25,
+                "volatility_contraction": 0.15,
+            },
+        },
+    ]
+
+
+def _candidate_specs(candidate_set: str) -> list[dict[str, Any]]:
+    key = str(candidate_set or "round1").strip().lower()
+    if key == "round1":
+        return _round1_candidate_specs()
+    if key == "v21":
+        return _v21_candidate_specs()
+    raise ValueError(f"Unsupported candidate set: {candidate_set}")
+
+
 def _build_v2_state_config(base_cfg: ResearchConfig, candidate: dict[str, Any]) -> ResearchConfig:
     v2_cfg = deepcopy(build_state_configs(base_cfg, "up_low_breakout_v2")["trend_up_low_vol"])
     zero_group = str(candidate.get("zero_group", "")).strip()
@@ -276,6 +346,16 @@ def _build_v2_state_config(base_cfg: ResearchConfig, candidate: dict[str, Any]) 
     if zero_factor:
         v2_cfg.factor_weights = dict(v2_cfg.factor_weights)
         v2_cfg.factor_weights[zero_factor] = 0.0
+    set_group_weights = candidate.get("set_group_weights", {}) or {}
+    if set_group_weights:
+        v2_cfg.factor_group_weights = dict(v2_cfg.factor_group_weights)
+        for group_name, value in set_group_weights.items():
+            v2_cfg.factor_group_weights[str(group_name)] = float(value)
+    set_factor_weights = candidate.get("set_factor_weights", {}) or {}
+    if set_factor_weights:
+        v2_cfg.factor_weights = dict(v2_cfg.factor_weights)
+        for factor_name, value in set_factor_weights.items():
+            v2_cfg.factor_weights[str(factor_name)] = float(value)
     return v2_cfg
 
 
@@ -414,6 +494,73 @@ def _build_report(summary_df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _build_v21_report(summary_df: pd.DataFrame) -> dict[str, Any]:
+    baseline_v2 = summary_df.loc[summary_df["label"] == "v2"].iloc[0]
+    tune_rows = summary_df.loc[summary_df["kind"] == "tune"].copy()
+    if tune_rows.empty:
+        return {
+            "baseline_v2": {
+                "full_excess_sharpe": float(baseline_v2["full_excess_sharpe"]),
+                "recent_full_excess_total_return": float(baseline_v2["recent_full_excess_total_return"]),
+                "latest_weak_excess_total_return": float(baseline_v2["latest_weak_excess_total_return"]),
+                "full_rank_ic_mean": float(baseline_v2["full_rank_ic_mean"]),
+            },
+            "best_by_full_sharpe": [],
+            "best_by_latest_weak": [],
+            "best_balanced_candidates": [],
+        }
+
+    tune_rows["delta_full_excess_sharpe_vs_v2"] = tune_rows["full_excess_sharpe"] - float(baseline_v2["full_excess_sharpe"])
+    tune_rows["delta_recent_full_excess_return_vs_v2"] = (
+        tune_rows["recent_full_excess_total_return"] - float(baseline_v2["recent_full_excess_total_return"])
+    )
+    tune_rows["delta_latest_weak_excess_return_vs_v2"] = (
+        tune_rows["latest_weak_excess_total_return"] - float(baseline_v2["latest_weak_excess_total_return"])
+    )
+    tune_rows["delta_up_low_rankic_vs_v2"] = tune_rows["full_rank_ic_mean"] - float(baseline_v2["full_rank_ic_mean"])
+    tune_rows["balanced_score"] = (
+        tune_rows["delta_full_excess_sharpe_vs_v2"].fillna(-999.0) * 1.0
+        + tune_rows["delta_latest_weak_excess_return_vs_v2"].fillna(-999.0) * 3.0
+        + tune_rows["delta_up_low_rankic_vs_v2"].fillna(-999.0) * 2.0
+    )
+
+    cols = [
+        "label",
+        "full_excess_sharpe",
+        "recent_full_excess_total_return",
+        "latest_weak_excess_total_return",
+        "full_rank_ic_mean",
+        "delta_full_excess_sharpe_vs_v2",
+        "delta_recent_full_excess_return_vs_v2",
+        "delta_latest_weak_excess_return_vs_v2",
+        "delta_up_low_rankic_vs_v2",
+        "balanced_score",
+    ]
+    return {
+        "baseline_v2": {
+            "full_excess_sharpe": float(baseline_v2["full_excess_sharpe"]),
+            "recent_full_excess_total_return": float(baseline_v2["recent_full_excess_total_return"]),
+            "latest_weak_excess_total_return": float(baseline_v2["latest_weak_excess_total_return"]),
+            "full_rank_ic_mean": float(baseline_v2["full_rank_ic_mean"]),
+        },
+        "best_by_full_sharpe": tune_rows.sort_values(
+            ["delta_full_excess_sharpe_vs_v2", "delta_latest_weak_excess_return_vs_v2", "delta_up_low_rankic_vs_v2"],
+            ascending=[False, False, False],
+            na_position="last",
+        ).head(5)[cols].to_dict(orient="records"),
+        "best_by_latest_weak": tune_rows.sort_values(
+            ["delta_latest_weak_excess_return_vs_v2", "delta_full_excess_sharpe_vs_v2", "delta_up_low_rankic_vs_v2"],
+            ascending=[False, False, False],
+            na_position="last",
+        ).head(5)[cols].to_dict(orient="records"),
+        "best_balanced_candidates": tune_rows.sort_values(
+            ["balanced_score", "delta_full_excess_sharpe_vs_v2", "delta_latest_weak_excess_return_vs_v2"],
+            ascending=[False, False, False],
+            na_position="last",
+        ).head(5)[cols].to_dict(orient="records"),
+    }
+
+
 def _write_markdown_report(output_dir: Path, report: dict[str, Any]) -> None:
     baseline = report["baseline_v2"]
 
@@ -457,9 +604,58 @@ def _write_markdown_report(output_dir: Path, report: dict[str, Any]) -> None:
     (output_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def _write_v21_markdown_report(output_dir: Path, report: dict[str, Any]) -> None:
+    baseline = report["baseline_v2"]
+
+    def _render_rows(rows: list[dict[str, Any]]) -> list[str]:
+        out: list[str] = []
+        for row in rows:
+            out.append(
+                "- `{label}`: full_excess_sharpe={full_excess_sharpe}, recent_full_excess_return={recent_full_excess_total_return}, "
+                "latest_weak_excess_return={latest_weak_excess_total_return}, rank_ic={full_rank_ic_mean}, "
+                "d_sharpe={delta_full_excess_sharpe_vs_v2}, d_recent_full={delta_recent_full_excess_return_vs_v2}, "
+                "d_latest_weak={delta_latest_weak_excess_return_vs_v2}, d_rank_ic={delta_up_low_rankic_vs_v2}".format(
+                    label=row["label"],
+                    full_excess_sharpe=_safe_num(row["full_excess_sharpe"]),
+                    recent_full_excess_total_return=_safe_pct(row["recent_full_excess_total_return"]),
+                    latest_weak_excess_total_return=_safe_pct(row["latest_weak_excess_total_return"]),
+                    full_rank_ic_mean=_safe_num(row["full_rank_ic_mean"]),
+                    delta_full_excess_sharpe_vs_v2=_safe_num(row["delta_full_excess_sharpe_vs_v2"]),
+                    delta_recent_full_excess_return_vs_v2=_safe_pct(row["delta_recent_full_excess_return_vs_v2"]),
+                    delta_latest_weak_excess_return_vs_v2=_safe_pct(row["delta_latest_weak_excess_return_vs_v2"]),
+                    delta_up_low_rankic_vs_v2=_safe_num(row["delta_up_low_rankic_vs_v2"]),
+                )
+            )
+        return out or ["- 无"]
+
+    lines = [
+        "# v2.1 Rule Tuning Report",
+        "",
+        "## Baseline",
+        (
+            f"- `v2`: full_excess_sharpe={_safe_num(baseline['full_excess_sharpe'])}, "
+            f"recent_full_excess_return={_safe_pct(baseline['recent_full_excess_total_return'])}, "
+            f"latest_weak_excess_return={_safe_pct(baseline['latest_weak_excess_total_return'])}, "
+            f"rank_ic={_safe_num(baseline['full_rank_ic_mean'])}"
+        ),
+        "",
+        "## Best By Full Sharpe",
+        *_render_rows(report["best_by_full_sharpe"]),
+        "",
+        "## Best By Latest Weak Window",
+        *_render_rows(report["best_by_latest_weak"]),
+        "",
+        "## Best Balanced Candidates",
+        *_render_rows(report["best_balanced_candidates"]),
+        "",
+    ]
+    (output_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
     windows = _parse_named_windows(args.windows)
+    candidate_specs = _candidate_specs(args.candidate_set)
     latest_end = str(args.end_date or "").strip() or get_latest_completed_trading_date()
 
     cfg = ResearchConfig(
@@ -569,7 +765,8 @@ def main() -> None:
         "base_config": asdict(cfg),
         "rankic_horizon": int(args.rankic_horizon),
         "windows": [{"name": name, "start": start, "end": end} for name, start, end in windows],
-        "candidates": _candidate_specs(),
+        "candidate_set": args.candidate_set,
+        "candidates": candidate_specs,
     }
     (output_root / "scan_config.json").write_text(json.dumps(scan_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -577,7 +774,7 @@ def main() -> None:
     summary_rows: list[dict[str, Any]] = []
     quarter_frames: list[pd.DataFrame] = []
 
-    for candidate in _candidate_specs():
+    for candidate in candidate_specs:
         label = str(candidate["label"])
         print(f"  - {label}")
         state_configs = _candidate_state_configs(cfg, candidate)
@@ -640,6 +837,8 @@ def main() -> None:
             "profile": candidate.get("profile", ""),
             "zero_group": candidate.get("zero_group", ""),
             "zero_factor": candidate.get("zero_factor", ""),
+            "set_factor_weights": json.dumps(candidate.get("set_factor_weights", {}), ensure_ascii=False, sort_keys=True),
+            "set_group_weights": json.dumps(candidate.get("set_group_weights", {}), ensure_ascii=False, sort_keys=True),
             "full_excess_total_return": metrics.get("excess_total_return"),
             "full_excess_sharpe": metrics.get("excess_sharpe"),
             "full_excess_max_drawdown": metrics.get("excess_max_drawdown"),
@@ -659,11 +858,18 @@ def main() -> None:
     baseline_v2 = summary_df.loc[summary_df["label"] == "v2"].iloc[0]
     for col in ["full_excess_sharpe", "latest_weak_excess_total_return", "full_rank_ic_mean"]:
         summary_df[f"{col}_delta_vs_v2"] = summary_df[col] - float(baseline_v2[col])
-    summary_df = summary_df.sort_values(
-        ["full_excess_sharpe_delta_vs_v2", "latest_weak_excess_total_return_delta_vs_v2"],
-        ascending=[True, True],
-        na_position="last",
-    ).reset_index(drop=True)
+    if args.candidate_set == "v21":
+        summary_df = summary_df.sort_values(
+            ["full_excess_sharpe_delta_vs_v2", "latest_weak_excess_total_return_delta_vs_v2", "full_rank_ic_mean_delta_vs_v2"],
+            ascending=[False, False, False],
+            na_position="last",
+        ).reset_index(drop=True)
+    else:
+        summary_df = summary_df.sort_values(
+            ["full_excess_sharpe_delta_vs_v2", "latest_weak_excess_total_return_delta_vs_v2"],
+            ascending=[True, True],
+            na_position="last",
+        ).reset_index(drop=True)
     summary_df.to_csv(output_root / "summary_rows.csv", index=False, encoding="utf-8-sig")
     if quarter_frames:
         pd.concat(quarter_frames, axis=0, ignore_index=True).to_csv(
@@ -672,9 +878,15 @@ def main() -> None:
             encoding="utf-8-sig",
         )
 
-    report = _build_report(summary_df)
+    if args.candidate_set == "v21":
+        report = _build_v21_report(summary_df)
+    else:
+        report = _build_report(summary_df)
     (output_root / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    _write_markdown_report(output_root, report)
+    if args.candidate_set == "v21":
+        _write_v21_markdown_report(output_root, report)
+    else:
+        _write_markdown_report(output_root, report)
 
     print("[7/7] done.")
     print(f"Output: {output_root}")

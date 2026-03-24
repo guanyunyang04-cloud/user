@@ -449,3 +449,104 @@ python daily_research/tools/workspace_maintenance.py archive --apply
   - 状态过滤 = 门控层
   - `none / v2` = 规则层先验
   - `lgbm` = 当前主引擎
+
+## 2026-03-24 `v2.1` 第二轮正式微调：减权优先落在 `volume_contraction`
+- 已完成正式输出：
+  - `daily_research/output/v21_rule_tuning_20260324_formal_round2`
+- 工具继续沿用并扩成双轮入口：
+  - `daily_research/tools/v2_rule_ablation_report.py --candidate-set v21`
+- 当前结论：
+  1. `v2.1` 这轮最强候选不是“双因子一起减”，而是单独大幅下调 `volume_contraction`。
+  2. `v21_volume_contraction_015` 是当前头号候选：
+     - 全样本超额 Sharpe 由约 `-0.139` 提升到约 `0.095`
+     - 最近完整窗口超额收益由约 `-4.09%` 提升到约 `+21.66%`
+     - 最新弱窗口超额收益由约 `+0.08%` 提升到约 `+22.89%`
+     - `trend_up_low_vol` 的 `20d RankIC` 只从约 `0.180` 小幅回落到约 `0.176`
+  3. `v21_volume_contraction_025` 也有正向信息，但改善明显弱于 `0.15` 档。
+  4. 单独下调 `volatility_contraction` 的效果远弱于下调 `volume_contraction`；双因子一起减反而回吐，大多不如单独调 `volume_contraction`。
+  5. 因此下一步不继续扩 `v3 / v4`，也不继续盲扫更多网格；先对 `v21_volume_contraction_015` 做季度集中度与归因诊断，再决定是否正式晋级为 `v2.1`。
+
+## 2026-03-24 `v21_volume_contraction_015` 归因诊断：暂不正式晋级为 `v2.1`
+- 已完成正式输出：
+  - `daily_research/output/v21_rule_concentration_20260324_formal_round3`
+- 关键工具：
+  - `daily_research/tools/v21_rule_concentration_report.py`
+- 当前结论：
+  1. `v21_volume_contraction_015` 相对 `v2` 的收益改善是真实的，但还不够干净，暂不正式晋级为默认 `v2.1`。
+  2. 季度集中度比前面几条失败分支温和一些，但仍不算平滑：
+     - `19` 个季度里 `9` 个季度更强、`8` 个季度更弱
+     - 最佳季度 `2026Q1` 占正向季度总优势约 `34.95%`
+     - Top3 季度占比约 `72.87%`
+     - HHI 约 `0.210`
+  3. 焦点季度 `2026Q1` 的增量又明显主要堆在 `2026-01`：
+     - `2026-01` compound 超额边际约 `+13.98%`
+     - `2026-02` 仅约 `+0.61%`
+     - `2026-03` 仅约 `+0.20%`
+  4. 焦点季度内的增益也没有完全摆脱少数日期放大：
+     - Top5 正向日占比约 `61.20%`
+     - Top10 正向日占比约 `87.85%`
+     - 平均持仓重叠 Jaccard 约 `0.599`
+  5. 更关键的是，`trend_up_low_vol` 的季度 RankIC 没有同步变好：
+     - 仅 `4/17` 个季度强于 `v2`
+     - `13/17` 个季度反而更弱
+     - 说明这轮收益改善还更像交易路径与局部样本结构增益，不像稳定排序质量升级。
+- 因此当前最稳决策是：
+  - `v21_volume_contraction_015` 保留为头号规则层研究候选
+  - 但暂不正式晋级为 `v2.1`
+  - 下一步不再盲扫参数，先拆解 `2026Q1` 尤其 `2026-01` 的关键槽位与交易日来源
+## 2026-03-24 `v21` 规则逻辑抽象诊断
+- 已完成正式输出：
+  - `daily_research/output/v21_rule_logic_20260324_formal_round4`
+- 关键工具：
+  - `daily_research/tools/v21_rule_logic_report.py`
+- 当前结论：
+  1. `v21_volume_contraction_015` 在 `2026Q1` 尤其 `2026-01` 的改善，关键新增槽位主要集中在：
+     - `002716.SZ`
+     - `000603.SZ`
+     - `688521.SH`
+     - `000547.SZ`
+     - `603920.SH / 002413.SZ / 002851.SZ / 600219.SH`
+  2. 从这些关键交易日和关键槽位里抽出的 signed 逻辑，主要偏向：
+     - 更强的趋势斜率与中期动量：`kama_slope / mom_20 / mom_60 / trend_slope_20 / ma_gap_10 / ma_gap_20_60 / mom_5`
+     - 更强的价量背离：`price_volume_divergence`
+     - 更低的波动与 ATR：`-volatility_20 / -atr_14_pct`
+  3. 这条 `logic_signed` 虽然能解释候选为何偏好这些槽位，但还不能当成更稳的规则排序逻辑：
+     - 相对 `v2` 的季度 RankIC 均值约 `-0.067`，只在 `1` 个季度更强
+     - 焦点季度 `2026Q1` 本身反而落后 `v2` 约 `-0.157`
+     - 相对 `v21` 也只在 `1` 个季度更强，焦点季度落后约 `-0.153`
+  4. 槽位解释层面，这条 logic 在其他季度仍经常给出正向槽位边际，但并不稳定对应更好的未来超额：
+     - `positive_slot_edge_other_quarters = 14`
+     - 真正落在候选正收益季度上的只有 `8`
+  5. 因此，当前可以说“这轮改善已经能被描述成一组槽位偏好”，但还不能说“它已经被抽象成一条可跨季度复放的稳定规则逻辑”。
+- 当前决策：
+  - `v21_volume_contraction_015` 继续保留为规则层研究候选
+  - 但不正式晋级为默认 `v2.1`
+  - 规则层这条线到这里再次停止晋级，不继续扫参数，也不继续硬抽新的 profile 逻辑
+## 2026-03-24 当前默认主线长窗口正式复验
+- 已完成正式输出：
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal`
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal/long_window_review`
+- 关键修复：
+  - `daily_research/baseline/ml_alpha.py`
+  - 修复了长窗口下 `regime_state` 与 `label_df` 日期不完全对齐时，`train_regime_only` 会直接 `KeyError` 的问题
+- 关键结论：
+  1. 当前默认执行主线 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 在更长历史里仍然有效，没有因为拉长窗口而失效。
+  2. `2019` 起正式复验结果为：
+     - 全样本超额收益约 `529.30%`
+     - 全样本超额 Sharpe 约 `1.578`
+     - 全样本超额最大回撤约 `-27.50%`
+  3. 相对当前 `2021` 口径，它确实变弱了，但不是塌掉：
+     - `2021` 口径超额 Sharpe 约 `2.300`
+     - `2019` 口径超额 Sharpe 约 `1.578`
+     - 说明新增的更早样本更难做，但主线仍保持正超额和正 Sharpe
+  4. 这轮还确认了一个非常关键的口径问题：
+     - “请求起点 = 2019” 不等于 “真实交易样本从 2019 开始”
+     - 在当前 `ml_train_window_days=504` 与滚动 liquid500 口径下，这次长窗口回测的：
+       - `first_equity_date = 2021-08-02`
+       - `first_holding_date = 2021-10-20`
+     - 也就是说，`2019 ~ 2021` 里相当一部分仍然在承担训练/预热作用，而不是完整实盘式交易样本
+  5. 因此，如果后续还要把真实交易样本再往前压，不应继续机械把起点从 `2019` 改到 `2018`，而应先解决“更早数据边界 + 长训练窗预热”这个结构问题。
+- 当前决策：
+  - 默认执行主线继续保持为 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+  - 不再把“先观察一段时间”作为下一步研究前提
+  - 下一步正式转向 `deep_alpha` 的最终判决

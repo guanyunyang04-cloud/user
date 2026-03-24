@@ -291,6 +291,7 @@ def train_point_in_time_model(
     as_of_date: pd.Timestamp | None = None,
 ) -> tuple[Any, dict]:
     dates = label_df.index
+    regime_on_series = regime_state["regime_on"].reindex(dates).eq(True)
     if len(dates) == 0:
         raise ValueError("No dates available for ML training.")
 
@@ -319,7 +320,7 @@ def train_point_in_time_model(
     for pos, dt in enumerate(train_dates):
         valid = filter_mask.loc[dt].copy()
         if config.train_regime_only:
-            valid &= bool(regime_state["regime_on"].loc[dt])
+            valid &= bool(regime_on_series.loc[dt])
         valid &= label_df.loc[dt].notna()
         if not bool(valid.any()):
             continue
@@ -519,6 +520,7 @@ def rolling_ml_scores(
     config: MLAplhaConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     dates = label_df.index
+    regime_on_series = regime_state["regime_on"].reindex(dates).eq(True)
     stocks = list(label_df.columns)
     ml_score = pd.DataFrame(np.nan, index=dates, columns=stocks)
     training_logs: List[Dict] = []
@@ -540,7 +542,7 @@ def rolling_ml_scores(
         for pos, dt in enumerate(train_dates):
             valid = filter_mask.loc[dt].copy()
             if config.train_regime_only:
-                valid &= bool(regime_state["regime_on"].loc[dt])
+                valid &= bool(regime_on_series.loc[dt])
             valid &= label_df.loc[dt].notna()
             if not bool(valid.any()):
                 continue
