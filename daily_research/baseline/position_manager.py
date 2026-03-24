@@ -26,10 +26,17 @@ class PositionManager:
         prices: pd.Series,
         target_weights: pd.Series,
         target_scores: pd.Series | None = None,
+        runtime_overrides: Dict[str, float | int] | None = None,
     ) -> Tuple[pd.Series, List[Dict], Dict[str, float]]:
         prices = _safe_series(prices)
         target_weights = _safe_series(target_weights)
         target_scores = _safe_series(target_scores)
+        runtime_overrides = runtime_overrides or {}
+
+        stop_loss = float(runtime_overrides.get("stop_loss", self.config.stop_loss))
+        take_profit = float(runtime_overrides.get("take_profit", self.config.take_profit))
+        min_hold_days = int(runtime_overrides.get("min_hold_days", self.config.min_hold_days))
+        turnover_limit = float(runtime_overrides.get("turnover_limit", self.config.turnover_limit))
 
         current = self.weights.reindex(prices.index).fillna(0.0)
         desired = target_weights.reindex(prices.index).fillna(0.0)
@@ -48,25 +55,25 @@ class PositionManager:
                 continue
             entry = self.entry_price.get(stock, float(prices[stock]))
             ret = float(prices[stock] / entry - 1.0)
-            if ret <= float(self.config.stop_loss):
+            if ret <= stop_loss:
                 desired[stock] = 0.0
                 forced_reasons[stock] = "止损清仓"
-            elif ret >= float(self.config.take_profit):
+            elif ret >= take_profit:
                 desired[stock] = min(float(desired.get(stock, 0.0)), current_weight * 0.5)
                 forced_reasons[stock] = "止盈减仓"
 
         for stock, current_weight in current.items():
             if current_weight <= 0:
                 continue
-            if self.hold_days.get(stock, 0) < int(self.config.min_hold_days):
+            if self.hold_days.get(stock, 0) < min_hold_days:
                 if forced_reasons.get(stock) != "止损清仓":
                     desired[stock] = max(float(desired.get(stock, 0.0)), current_weight)
 
         delta = desired - current
         raw_turnover = float(delta.abs().sum())
         turnover_scale = 1.0
-        if raw_turnover > float(self.config.turnover_limit) and raw_turnover > 0:
-            turnover_scale = float(self.config.turnover_limit) / raw_turnover
+        if raw_turnover > turnover_limit and raw_turnover > 0:
+            turnover_scale = turnover_limit / raw_turnover
             delta = delta * turnover_scale
 
         new_weights = (current + delta).clip(lower=0.0)
@@ -116,5 +123,7 @@ class PositionManager:
             "raw_turnover": raw_turnover,
             "turnover_scale": turnover_scale,
             "holding_count": int((new_weights > 0).sum()),
+            "turnover_limit_applied": turnover_limit,
+            "runtime_override_active": bool(runtime_overrides),
         }
         return new_weights, actions, diagnostics

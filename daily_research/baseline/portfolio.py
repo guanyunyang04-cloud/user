@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from daily_research.baseline.config import ResearchConfig
@@ -113,6 +115,24 @@ def _current_style_weight(style: str, weights: pd.Series, style_map: pd.DataFram
     return float(weights.reindex(members).fillna(0.0).sum())
 
 
+def _resolve_daily_config(config: ResearchConfig, row: pd.Series | None) -> ResearchConfig:
+    if row is None or row.empty:
+        return config
+
+    out = replace(config)
+    if "holding_count" in row and pd.notna(row["holding_count"]):
+        out.holding_count = max(int(row["holding_count"]), 1)
+    if "max_weight" in row and pd.notna(row["max_weight"]):
+        out.max_weight = max(float(row["max_weight"]), 0.0)
+    if "max_style_weight" in row and pd.notna(row["max_style_weight"]):
+        out.max_style_weight = max(float(row["max_style_weight"]), 0.0)
+    if "max_industry_weight" in row and pd.notna(row["max_industry_weight"]):
+        out.max_industry_weight = max(float(row["max_industry_weight"]), 0.0)
+    if "score_threshold" in row and pd.notna(row["score_threshold"]):
+        out.score_threshold = float(row["score_threshold"])
+    return out
+
+
 def _enforce_exposure_caps(
     weights: pd.Series,
     scores: pd.Series,
@@ -185,27 +205,35 @@ def build_target_weights(
     config: ResearchConfig,
     industry_map: pd.Series | None = None,
     style_map: pd.DataFrame | None = None,
+    daily_config_overrides: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
+    if daily_config_overrides is not None:
+        daily_config_overrides = daily_config_overrides.reindex(scores.index)
+
     targets = []
     for dt, row in scores.iterrows():
+        run_cfg = _resolve_daily_config(
+            config,
+            None if daily_config_overrides is None else daily_config_overrides.loc[dt],
+        )
         s = row.dropna()
-        s = s[s > float(config.score_threshold)]
+        s = s[s > float(run_cfg.score_threshold)]
         if s.empty:
             targets.append(pd.Series(dtype=float, name=dt))
             continue
 
         s = s.sort_values(ascending=False)
-        s = _select_with_exposure_caps(s, config, industry_map, style_map)
+        s = _select_with_exposure_caps(s, run_cfg, industry_map, style_map)
 
-        if config.weighting_method == "score":
+        if run_cfg.weighting_method == "score":
             min_v = s.min()
             adj = s - min_v + 1e-6
             w = adj / adj.sum()
         else:
             w = pd.Series(1.0 / len(s), index=s.index, name=dt)
 
-        w = _apply_weight_cap(w, config.max_weight)
-        w = _enforce_exposure_caps(w, s, config, industry_map, style_map)
+        w = _apply_weight_cap(w, run_cfg.max_weight)
+        w = _enforce_exposure_caps(w, s, run_cfg, industry_map, style_map)
         w.name = dt
         targets.append(w)
 

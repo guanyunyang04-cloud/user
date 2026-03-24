@@ -6249,3 +6249,81 @@ position,000001.SZ,1200,12.38,
    - `turnover_limit`
    - `max_style_weight`
 6. 若出现“弱窗口改善但强窗口或全样本被破坏”，则停止这条线晋级执行层
+
+## 2026-03-24 执行端第二十八轮正式回测：连续状态分数驱动的软调节
+### 本轮目标
+- 保留现有四象限门控不动；
+- 只在低 `context_score` 的 `regime_on` 日期做轻度去风险；
+- 首批单独测试 4 个执行旋钮：
+  - `holding_count`
+  - `max_weight`
+  - `turnover_limit`
+  - `max_style_weight`
+- 严格执行既定停止规则：
+  - 只要出现“弱窗口改善但强窗口或全样本被破坏”，就停止这条线晋级执行层。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/continuous_market_context_soft_20260324_formal_round2_defaultwindow`
+- 关键工具：
+  - `daily_research/tools/continuous_market_context_soft_scan.py`
+- 关键文件：
+  - `soft_scan_summary.csv`
+  - `report.json`
+  - `report.md`
+  - 各候选子目录下的：
+    - `equity_curve.csv`
+    - `actions.csv`
+    - `target_weights.csv`
+    - `metrics.json`
+    - `metrics_recent_full.json`
+    - `metrics_latest_weak.json`
+
+### 结果一：四个首批候选都没有通过正式停止规则
+- `baseline`：
+  - 全样本超额 Sharpe 约 `1.601`
+  - 最近完整窗口超额 Sharpe 约 `1.416`
+  - 最新弱窗口超额收益约 `-26.18%`
+  - 最新弱窗口超额 Sharpe 约 `-1.088`
+- `low_ctx_hold3`：
+  - 全样本超额 Sharpe 回落到约 `1.564`
+  - 最近完整窗口超额 Sharpe 回落到约 `1.218`
+  - 最新弱窗口恶化到约 `-31.87% / -1.437`
+  - 结论：整体退化，不保留
+- `low_ctx_maxw20`：
+  - 全样本超额 Sharpe 回落到约 `1.466`
+  - 最近完整窗口超额 Sharpe 回落到约 `1.096`
+  - 最新弱窗口恶化到约 `-30.92% / -1.296`
+  - 结论：整体退化，不保留
+- `low_ctx_turnover1`：
+  - 最近完整窗口超额 Sharpe 提升到约 `1.576`
+  - 但全样本超额 Sharpe 回落到约 `1.570`
+  - 最新弱窗口超额收益小幅改善到约 `-25.50%`，但 Sharpe 反而微幅回落到约 `-1.101`
+  - 结论：不满足“弱窗口与全样本同步改善”，不晋级
+- `low_ctx_style40`：
+  - 最新弱窗口从约 `-26.18% / -1.088` 小幅改善到约 `-25.97% / -1.081`
+  - 但全样本超额 Sharpe 从约 `1.601` 回落到约 `1.593`
+  - 最近完整窗口超额 Sharpe 从约 `1.416` 回落到约 `1.395`
+  - 结论：触发既定停止规则，`candidate_verdict = stop_due_to_tradeoff`
+
+### 结果二：低状态分数触发本身不是空信号
+- 本轮所有候选共用同一批低状态分数触发日：
+  - `override_signal_days = 95`
+  - `override_signal_ratio = 9.31%`
+  - 最新弱窗口里的 `override_ratio` 约 `32.54%`
+- 这说明：
+  - 连续状态分数确实识别到了不少“门开着但环境不够舒服”的日期；
+  - 当前问题不在“触发条件太稀或太假”，而在第一批单旋钮软调节还不够干净。
+
+### 本轮结论
+1. 连续状态分数作为诊断层与风险附录的价值继续成立。
+2. 但在当前默认窗口下，首批四个单旋钮软调节都没有通过“弱窗口改善且强窗口/全样本不被破坏”的正式晋级门槛。
+3. 因此这条连续状态软调节线到这里停止，不进入执行层默认逻辑。
+4. 当前默认执行口径继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限继续作为第一层安全门
+3. 连续状态分数继续保留为诊断层与风险附录，不晋级为执行层软调节逻辑
+4. 这条连续状态软调节线到此停止，不继续扩单旋钮参数网格
+5. 下一步研究重心回到 `deep_alpha` 的最终正式判决

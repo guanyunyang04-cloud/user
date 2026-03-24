@@ -581,3 +581,26 @@ python daily_research/tools/workspace_maintenance.py archive --apply
      - `turnover_limit`
      - `max_style_weight`
   4. 只要出现“弱窗口改善但强窗口或全样本被破坏”，就停止这条连续状态升级线。
+## 2026-03-24 连续状态软调节第二轮正式回测
+- 已完成正式输出：
+  - `daily_research/output/continuous_market_context_soft_20260324_formal_round2_defaultwindow`
+- 关键工具：
+  - `daily_research/tools/continuous_market_context_soft_scan.py`
+- 关键结论：
+  1. 这条连续状态软调节线到第二轮为止，不能晋级执行层。
+  2. 官方默认窗口下，四个单旋钮候选都没有同时满足“弱窗口改善”与“强窗口/全样本不被破坏”：
+     - `low_ctx_hold3`：弱窗口、最近完整窗口、全样本都明显变差；
+     - `low_ctx_maxw20`：同样整体变差，不具备保留价值；
+     - `low_ctx_turnover1`：最近完整窗口改善，但全样本变差，弱窗口 Sharpe 也没有同步改善；
+     - `low_ctx_style40`：是最接近有效的一档，最新弱窗口从约 `-26.18% / -1.088` 小幅改善到约 `-25.97% / -1.081`，但全样本超额 Sharpe 从约 `1.601` 回落到约 `1.593`，最近完整窗口超额 Sharpe 从约 `1.416` 回落到约 `1.395`，触发既定停止规则。
+  3. 本轮 `overall_verdict` 已正式落在：`stop_due_to_weak_window_vs_strong_window_tradeoff`。
+  4. 低 `context_score` 触发本身不是空信号：
+     - `override_signal_days = 95`
+     - `override_signal_ratio = 9.31%`
+     - 最新弱窗口里的触发占比约 `32.54%`
+     - 说明问题不在“没有识别到差环境”，而在当前这批单侧软调节还不够干净。
+- 当前决策：
+  - 连续状态分数继续保留为诊断层与风险附录；
+  - 这条软调节回测线到此停止，不晋级执行层；
+  - 执行端默认值继续保持为 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`；
+  - 下一步研究重心回到 `deep_alpha` 的正式最终判决。

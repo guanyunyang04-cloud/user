@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -26,6 +26,22 @@ def _annualized_vol(returns: pd.Series) -> float:
     return float(returns.std() * np.sqrt(252)) if len(returns) > 1 else 0.0
 
 
+def _runtime_override_row(
+    daily_position_overrides: pd.DataFrame | None,
+    dt: pd.Timestamp,
+) -> dict[str, Any]:
+    if daily_position_overrides is None or dt not in daily_position_overrides.index:
+        return {}
+    row = daily_position_overrides.loc[dt]
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[-1]
+    return {
+        str(key): value
+        for key, value in row.items()
+        if pd.notna(value)
+    }
+
+
 def backtest(
     close: pd.DataFrame,
     benchmark_close: pd.Series,
@@ -35,6 +51,7 @@ def backtest(
     regime_on: pd.Series | None = None,
     open_df: pd.DataFrame | None = None,
     benchmark_open: pd.Series | None = None,
+    daily_position_overrides: pd.DataFrame | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
     execution_mode = str(config.execution_mode).lower()
     close = close.dropna(how="all")
@@ -54,6 +71,8 @@ def backtest(
     target_scores = target_scores.reindex(common_index).fillna(0.0)
     if regime_on is not None:
         regime_on = regime_on.reindex(common_index).fillna(False)
+    if daily_position_overrides is not None:
+        daily_position_overrides = daily_position_overrides.reindex(common_index)
 
     pm = PositionManager(config)
     weights = pd.Series(0.0, index=close.columns)
@@ -88,12 +107,14 @@ def backtest(
             execution_dt = dates[i]
             signal_dt = dates[i - 1]
             next_dt = dates[i + 1]
+            runtime_overrides = _runtime_override_row(daily_position_overrides, signal_dt)
 
             weights, actions, diagnostics = pm.step(
                 date=execution_dt,
                 prices=open_df.loc[execution_dt],
                 target_weights=target_weights.loc[signal_dt],
                 target_scores=target_scores.loc[signal_dt],
+                runtime_overrides=runtime_overrides,
             )
             for action in actions:
                 action["signal_date"] = signal_dt
@@ -120,6 +141,7 @@ def backtest(
                     "holding_count": diagnostics["holding_count"],
                     "turnover": diagnostics["turnover"],
                     "regime_on": bool(regime_on.loc[signal_dt]) if regime_on is not None else True,
+                    "soft_override_active": diagnostics.get("runtime_override_active", False),
                 }
             )
     else:
@@ -134,11 +156,13 @@ def backtest(
                 portfolio_equity *= 1.0 + portfolio_return
                 benchmark_equity *= 1.0 + benchmark_return
 
+            runtime_overrides = _runtime_override_row(daily_position_overrides, dt)
             weights, actions, diagnostics = pm.step(
                 date=dt,
                 prices=close.loc[dt],
                 target_weights=target_weights.loc[dt],
                 target_scores=target_scores.loc[dt],
+                runtime_overrides=runtime_overrides,
             )
             action_logs.extend(actions)
 
@@ -156,6 +180,7 @@ def backtest(
                     "holding_count": diagnostics["holding_count"],
                     "turnover": diagnostics["turnover"],
                     "regime_on": bool(regime_on.loc[dt]) if regime_on is not None else True,
+                    "soft_override_active": diagnostics.get("runtime_override_active", False),
                 }
             )
 
