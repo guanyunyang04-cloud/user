@@ -158,7 +158,7 @@ def parse_args():
     parser.add_argument("--random-seed", type=int, default=7)
     parser.add_argument("--market-state-count", type=int, default=4)
     parser.add_argument("--holding-count", type=int, default=5)
-    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--rebalance-freq", default="1d")
     parser.add_argument("--max-weight", type=float, default=0.25)
     parser.add_argument("--relation-layer", action="store_true", help="Enable lightweight relation features such as industry-relative ranking and style strength.")
     parser.add_argument("--liquidity-layer", action="store_true", help="Enable liquidity-stratification features and bucket-aware relation features.")
@@ -880,6 +880,7 @@ def main():
                 "rankic_summary": rankic_summary.to_dict(orient="records"),
                 "holdout_backtest": metrics,
                 "execution_mode": "next_open",
+                "rebalance_freq": cfg.rebalance_freq,
                 "liquidity_pool": args.liquidity_pool or "",
                 "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
                 "rolling_pool_rebalance_days": int(args.pool_rebalance_days),

@@ -93,7 +93,7 @@ class DeepAlphaConfig:
     random_seed: int = 7
     market_state_count: int = 4
     holding_count: int = 5
-    rebalance_freq: str = "5d"
+    rebalance_freq: str = "1d"
     max_weight: float = 0.25
     min_adv20: float = 50_000.0
     min_price: float = 2.0

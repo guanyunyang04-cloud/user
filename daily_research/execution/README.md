@@ -1,185 +1,66 @@
 # 盘后执行端说明
 
-## 1. 目录作用
-`daily_research/execution/` 是当前正式执行链路的入口目录，负责三件事：
-
+## 1. 定位
+`daily_research/execution/` 是当前正式执行链路的入口目录，只负责三件事：
 1. 盘后刷新高流动性股票池；
 2. 盘后更新离线模型产物；
-3. 盘后生成“次日开盘执行”的人工操作建议。
+3. 盘后生成“次日开盘手工执行”的交易建议。
 
-这套执行端的定位很明确：
+这不是自动下单系统。当前执行端固定为：
+- 盘后生成建议，次日开盘人工执行；
+- 默认读取离线模型，不在生成计划时临时重训。
 
-- 盘后准备；
-- 次日开盘执行；
-- 人工下单，不做自动报单。
+## 2. 当前默认执行口径
+- 主线：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- 默认股票池：`universe/liquid500_latest.txt`
+- 成交假设：`next_open`
+- 调仓语义：日频目标更新，默认 `rebalance_freq=1d`
+- 市场状态边界：`regime_ma_window=50`、`regime_max_annual_vol=0.32`、`trend_up_low_vol,trend_up_high_vol`
+- 默认模型族：`lgbm`
+- 默认训练窗口：`ml_train_window_days=504`
 
-当前执行默认主线：
-
-- `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
-- 已于 `2026-03-23` 从原 `ma60` 口径切换到 `ma50 baseline`
-- 已于 `2026-03-24` 从默认 `histgb` 切换到默认 `lgbm`
-
-## 2. 目录与真实职责
-- `update_liquid_pool.py`
-  - 刷新执行端使用的高流动性股票池；
-- `update_model.py`
-  - 包装 `baseline/train_trade_model.py`；
-  - 负责训练并导出最新模型产物；
-- `run_trade_plan.py`
-  - 包装 `baseline/generate_daily_trade_plan.py`；
-  - 默认读取离线模型产物，生成次日开盘建议；
-- `current_positions.example.csv`
-  - 持仓样例；
-- `current_positions.csv`
-  - 当前真实持仓；
-  - 如果文件不存在，`run_trade_plan.py` 会先按样例自动生成；
-- `models/`
-  - 模型产物目录；
-  - 当前默认产物：
-    - `latest_ml_model.joblib`
-    - `latest_ml_model.json`
-  - `latest_ml_model.json` 还会记录：
-    - `train_summary`
-    - `validation_summary`
-    - 当前执行口径的 regime 参数
-- `universe/`
-  - 执行端股票池目录；
-  - 当前默认维护：
-    - `liquid300_latest.txt`
-    - `liquid500_latest.txt`
-    - `liquid800_latest.txt`
-    - `liquidity_rank_latest.csv`
-    - `liquidity_pool_summary_latest.csv`
-- `output/`
-  - 交易计划输出目录；
-  - 当前最重要文件：
-    - `latest_trade_plan.txt`
-
-## 3. 包装脚本的默认行为
-执行端两个主入口不是重新实现一套逻辑，而是对底层主程序做“默认参数注入”。
-
-### 3.1 `update_model.py`
-默认会自动补上：
-
-- `--artifact-path`
-  - `daily_research/execution/models/latest_ml_model.joblib`
-- `--artifact-meta-path`
-  - `daily_research/execution/models/latest_ml_model.json`
-- `--stocks-file`
-  - 如果你没有手动传 `--stocks` 或 `--stocks-file`，会默认读取：
-    - `daily_research/execution/universe/liquid500_latest.txt`
-- `--ml-model-family`
-  - 如果你没有手动传，会默认注入为 `lgbm`
-- `--regime-ma-window`
-  - 如果你没有手动传，会默认注入为 `50`
-
-### 3.2 `run_trade_plan.py`
-默认会自动补上：
-
-- `--positions-file`
-  - `daily_research/execution/current_positions.csv`
-- `--output-dir`
-  - `daily_research/execution/output`
-- `--model-artifact`
-  - `daily_research/execution/models/latest_ml_model.joblib`
-- `--stocks-file`
-  - 如果你没有手动传 `--stocks` 或 `--stocks-file`，会默认读取：
-    - `daily_research/execution/universe/liquid500_latest.txt`
-- `--regime-ma-window`
-  - 如果你没有手动传，会默认注入为 `50`
-
-额外行为：
-
-- 如果 `current_positions.csv` 不存在，脚本会优先复制 `current_positions.example.csv`；
-- 如果样例也不存在，才会创建一个最小表头文件。
-- `current_positions.csv` 现在支持两种格式：
-  - 老格式：只写持仓；
-  - 新格式：把 `account` 行现金和 `position` 行持仓一起写进同一个文件。
-
-## 4. 每日标准流程
-
-### 第 0 步：更新高流动性股票池
-推荐命令：
-
+## 3. 每日标准流程
+### 第 1 步：更新高流动性股票池
 ```bash
 python daily_research/execution/update_liquid_pool.py --start-date 20240101
 ```
-
 这一步会刷新：
-
-- `liquid300_latest.txt`
-- `liquid500_latest.txt`
-- `liquid800_latest.txt`
-- `liquidity_rank_latest.csv`
-- `liquidity_pool_summary_latest.csv`
+- `universe/liquid300_latest.txt`
+- `universe/liquid500_latest.txt`
+- `universe/liquid800_latest.txt`
+- `universe/liquidity_rank_latest.csv`
+- `universe/liquidity_pool_summary_latest.csv`
 
 常用补充参数：
-
 - `--signal-date`
-  - 手动指定已完成交易日；
 - `--pool-sizes`
-  - 自定义导出的池规模，默认 `300,500,800`；
 - `--lookback-days`
-  - 流动性回看窗口，默认 `80`；
 - `--no-cache`
-  - 不读缓存；
 - `--refresh-cache`
-  - 强制刷新缓存。
 
-### 第 1 步：更新模型产物
-推荐命令：
-
+### 第 2 步：更新离线模型产物
 ```bash
-python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
+python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
 ```
+这个包装脚本会自动补：
+- `--artifact-path=models/latest_ml_model.joblib`
+- `--artifact-meta-path=models/latest_ml_model.json`
+- `--stocks-file=universe/liquid500_latest.txt`
+- `--ml-model-family=lgbm`
+- 当前执行主线共享默认参数
 
-真实默认值与行为：
+`latest_ml_model.json` 里优先看：
+- `trained_at`
+- `latest_data_date`
+- `model_family`
+- `validation_summary`
+- 当前 regime 参数与训练窗口信息
 
-- 默认模型文件：
-  - `models/latest_ml_model.joblib`
-- 默认元数据文件：
-  - `models/latest_ml_model.json`
-- 默认股票池：
-  - `universe/liquid500_latest.txt`
-- 默认模型族：
-  - `lgbm`
-- 默认多周期目标：
-  - `5,10,20`
-- 默认多周期权重：
-  - `5:0.2,10:0.3,20:0.5`
-- 默认训练窗口：
-  - `504` 个交易日
-- 当前默认执行状态边界：
-  - `regime_ma_window=50`
-- 默认验证摘要：
-  - 写入 `latest_ml_model.json -> validation_summary`
-  - 当前采用滚动 RankIC 摘要，默认 `21` 个交易日一个历史重训块
-
-常用补充参数：
-
-- `--ml-model-family histgb|etr|lgbm`
-- `--ml-state-horizon-profiles`
-  - 按市场状态指定周期权重
-- `--refresh-cache`
-- `--no-cache`
-- `--no-auto-trim-history`
-- `--skip-validation-summary`
-- `--validation-retrain-every-days`
-- `--validation-min-observations`
-
-说明：
-
-- 模型训练与交易计划生成已经拆开；
-- 日常执行默认读取离线模型产物，不在计划生成时实时训练；
-- 如果你没有先更新模型，`run_trade_plan.py` 会因为找不到模型产物而报错。
-
-### 第 2 步：更新账号快照文件
-把你的真实持仓与可用现金一起写入：
-
+### 第 3 步：更新账号快照
+把真实持仓和可用现金写进：
 - `daily_research/execution/current_positions.csv`
 
 推荐格式：
-
 ```csv
 record_type,stock,shares,cost_price,available_cash
 account,,,,200000
@@ -188,92 +69,55 @@ position,600036.SH,800,42.10,
 position,000001.SZ,1200,12.38,
 ```
 
-字段说明：
+说明：
+- `account` 行写账户级可用现金；
+- `position` 行写单只持仓；
+- 若文件不存在，`run_trade_plan.py` 会优先复制 `current_positions.example.csv`；
+- 老格式 `stock,shares,cost_price` 仍兼容；
+- 若既没有 `account` 行，也没有命令行传 `--cash`，系统会按 `0` 现金生成计划。
 
-- `record_type`
-  - `account` 表示账号级信息；
-  - `position` 表示单只持仓；
-- `stock`
-  - 持仓行必须是 `600000.SH` 这种格式；
-- `shares`
-  - 当前持股数量；
-- `cost_price`
-  - 当前持仓成本价。
-- `available_cash`
-  - 只在 `account` 行填写；
-  - 推荐填你预计次日开盘可动用的现金；
-  - 日常执行时如果已经写在这里，就不必再单独传 `--cash`。
-
-兼容说明：
-
-- 老格式 `stock,shares,cost_price` 仍然可用；
-- 但如果继续用老格式，且命令行也不传 `--cash`，系统会按 `0` 现金生成计划。
-
-### 第 3 步：生成次日开盘计划
-推荐命令：
-
+### 第 4 步：生成次日开盘计划
 ```bash
 python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 1d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
 ```
+这个包装脚本会自动补：
+- `--positions-file=current_positions.csv`
+- `--output-dir=output/`
+- `--model-artifact=models/latest_ml_model.joblib`
+- `--stocks-file=universe/liquid500_latest.txt`
+- 当前执行主线共享默认参数
 
-真实默认值与行为：
-
-- 默认持仓文件：
-  - `current_positions.csv`
-  - 若文件中存在 `account` 行，会自动读取其中的 `available_cash`
-- 默认模型产物：
-  - `models/latest_ml_model.joblib`
-- 默认输出目录：
-  - `output/`
-- 默认股票池：
-  - `universe/liquid500_latest.txt`
-- 默认持仓数：
-  - `5`
-- 当前默认调仓语义：
-  - `1d`
-  - 当前 `advanced_ml` 主线已正式按“日频目标更新”理解
-  - 早期 `score + 5d` 只对应 stage1 基线路径，不再作为当前执行主线口径
-- 当前默认执行状态边界：
-  - `regime_ma_window=50`
-- 默认模型新鲜度保护：
-  - 相对当前信号日滞后 `1` 个交易日开始提醒
-  - 滞后 `3` 个交易日开始拦截
-  - 如确需继续，可显式传入 `--allow-stale-model`
-- 默认 lot size：
-  - `100`
-- `--cash` 现在变成可选覆盖参数：
-  - 不传时，优先读 `current_positions.csv` 里的 `account -> available_cash`
-  - 传了 `--cash` 时，以命令行为准
-- 默认会读取离线模型产物；
+额外行为：
+- 若 `current_positions.csv` 中存在 `account` 行，会自动读取 `available_cash`；
+- `--cash` 是可选覆盖参数，传了就以命令行为准；
+- 默认启用模型新鲜度保护：
+  - 滞后 `1` 个交易日开始提醒；
+  - 滞后 `3` 个交易日开始拦截；
+  - 如确需继续，可显式传 `--allow-stale-model`；
 - 只有隐藏参数 `--train-on-the-fly` 才会改为实时训练，日常不建议使用。
 
-常用补充参数：
+## 4. 目录与职责
+- `update_liquid_pool.py`：刷新执行端高流动性股票池。
+- `update_model.py`：包装 `baseline/train_trade_model.py`，训练并导出默认离线模型产物。
+- `run_trade_plan.py`：包装 `baseline/generate_daily_trade_plan.py`，基于离线模型生成次日开盘建议。
+- `current_positions.example.csv`：账号快照样例。
+- `current_positions.csv`：当前真实账号快照。
+- `models/`：默认模型产物目录。
+- `universe/`：默认执行股票池目录。
+- `output/`：每次运行的计划输出目录。
 
-- `--refresh-cache`
-- `--no-cache`
-- `--no-auto-trim-history`
-- `--stale-model-warn-trading-days`
-- `--stale-model-max-trading-days`
-- `--allow-stale-model`
-- `--cash`
-  - 临时覆盖账号快照中的现金
-- `--stocks`
-  - 临时改成小股票池测试；
-- `--experiment-tag`
-  - 自定义输出目录名。
+当前最重要的默认文件：
+- `models/latest_ml_model.joblib`
+- `models/latest_ml_model.json`
+- `universe/liquid500_latest.txt`
+- `output/latest_trade_plan.txt`
 
-## 5. 输出文件
-每次运行后，脚本会创建一个运行目录：
+## 5. 输出文件怎么读
+每次运行后会写出：
+- `output/<信号日期>/`
+- 或 `output/<experiment_tag>/`
 
-- `daily_research/execution/output/<信号日期>/`
-- 或 `daily_research/execution/output/<experiment_tag>/`
-
-并同步刷新：
-
-- `daily_research/execution/output/latest_trade_plan.txt`
-
-运行目录中当前真实会写出：
-
+运行目录里当前会有：
 - `daily_trade_plan.txt`
 - `actions_today.csv`
 - `holdings_snapshot.csv`
@@ -281,81 +125,52 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `training_log.csv`
 - `plan_summary.json`
 
-`latest_trade_plan.txt` 是每天最值得看的文件。它会写清楚：
+同时会刷新：
+- `output/latest_trade_plan.txt`
 
-- 信号日期；
-- 计划执行日期；
+`latest_trade_plan.txt` 是每天优先看的文件。它会写清楚：
+- 信号日期与计划执行日期；
 - 当前市场状态；
 - 是否允许开仓；
-- 当前使用的模型文件；
-- 模型训练时间与训练样本截止日期；
-- 模型最新数据日与模型新鲜度；
-- 模型验证摘要；
+- 当前使用的模型文件与模型族；
+- 模型训练时间、样本截止日、最新数据日；
+- 模型新鲜度与验证摘要；
 - 卖出、减仓、买入、加仓建议；
-- 当前持仓概览；
-- 候选观察名单；
-- 现金来源、输入现金与计划后剩余现金估算。
+- 当前持仓概览与候选观察名单；
+- 输入现金与计划后剩余现金估算。
 
-## 6. 如何执行建议
-次日开盘建议按下面顺序手工执行：
+## 6. 常用覆盖参数
+### `update_model.py`
+- `--ml-model-family histgb|etr|lgbm`
+- `--ml-state-horizon-profiles`
+- `--refresh-cache`
+- `--no-cache`
+- `--no-auto-trim-history`
+- `--skip-validation-summary`
+- `--validation-retrain-every-days`
+- `--validation-min-observations`
 
-1. 先卖出；
-2. 再减仓；
-3. 再买入；
-4. 最后加仓。
+### `run_trade_plan.py`
+- `--cash`：临时覆盖账号快照中的现金。
+- `--stocks`：临时改成小股票池测试。
+- `--experiment-tag`：自定义输出目录名。
+- `--refresh-cache`
+- `--no-cache`
+- `--no-auto-trim-history`
+- `--stale-model-warn-trading-days`
+- `--stale-model-max-trading-days`
+- `--allow-stale-model`
 
-原因：
-
-- 先释放现金；
-- 更贴近组合调仓逻辑；
-- 能减少“先买后卖导致现金不够”的问题。
-
-## 7. 关键术语
-
-### 7.1 市场状态
-- `trend_up_low_vol`
-  - 上涨低波；
-- `trend_up_high_vol`
-  - 上涨高波；
-- `trend_down_low_vol`
-  - 下跌低波；
-- `trend_down_high_vol`
-  - 下跌高波。
-
-### 7.2 是否允许开仓
-- `是`
-  - 可以执行新增仓位动作；
-- `否`
-  - 更偏向风险控制，只建议卖出或减仓。
-
-### 7.3 分数字段
-- `综合分`
-  - 最终排序与建仓决策使用的分数；
-- `ML`
-  - 机器学习横截面分数；
-- `none`
-  - 稳健基线分数；
-- `v2`
-  - `up_low_breakout_v2` 增强分数。
-
-## 8. 执行端与研究端口径约定
-- 执行端默认冻结为：
-  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
-- 执行端股票池：
-  - 每日盘后更新一次 `liquid500_latest.txt`
-- 正式研究端股票池：
-  - 历史滚动 `liquid500 / liquid800`
-  - 默认每 `21` 个交易日重建一次
-
-这样设计的原因是：
-
-- 执行端关心的是“明天开盘实际交易什么”；
-- 研究端关心的是“历史验证是否可信”；
-- 因此二者可以同口径于 `next_open`，但不必同频于股票池刷新节奏。
-
-## 9. 日常注意事项
-- 这是盘后生成、次日开盘执行的人工建议，不是自动下单程序。
-- 如果模型文件不存在，请先运行 `update_model.py`。
+## 7. 执行边界
+- 这是盘后生成、次日开盘执行的人工建议，不是自动报单程序。
+- 如果模型文件不存在，先运行 `update_model.py`。
 - 如果当天市场状态不允许开仓，计划里可能只有卖出或减仓动作。
-- 如果你的实际可用现金与输入现金不一致，请以实际资金为准。
-- 如果你只是做小范围测试，优先显式传 `--stocks`，不要直接改默认股票池文件。
+- 如果次日开盘明显跳空，优先按目标权重调整，不要机械照搬估算股数。
+- 如果实际可用现金与计划输入现金不一致，以真实资金为准重新估算买入数量。
+- 如果只是做小范围测试，优先显式传 `--stocks`，不要直接改默认股票池文件。
+
+## 8. 执行端与研究端的分工
+- 执行端默认冻结为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- 执行端关心的是：明天开盘实际怎么交易。
+- 正式研究端关心的是：历史滚动股票池下，策略升级是否可信。
+- 因此执行端默认读取最新 `liquid500`，而正式研究继续使用历史滚动 `liquid500 / liquid800`。

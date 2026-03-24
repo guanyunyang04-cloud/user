@@ -10,6 +10,7 @@ from typing import Iterable
 DEFAULT_DOCS = [
     "README.md",
     "daily_research/README.md",
+    "daily_research/execution/README.md",
     "daily_research/research_log.md",
     "daily_research/daily_research_plan.md",
 ]
@@ -32,6 +33,12 @@ DOC_RULES = {
         max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research README should only describe the current state and entrypoints"),
+        ),
+    ),
+    "daily_research/execution/README.md": DocRule(
+        max_lines=220,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "execution README should stay focused on current execution defaults and daily operations"),
         ),
     ),
     "daily_research/daily_research_plan.md": DocRule(

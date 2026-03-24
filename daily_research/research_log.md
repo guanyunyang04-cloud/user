@@ -6360,3 +6360,30 @@ position,000001.SZ,1200,12.38,
 1. 以后新增实验结论继续写入 `research_log.md`，不再顺手堆进 README 或计划文件。
 2. 日常维护时先跑 `python daily_research/tools/doc_guard.py check`，再提交文档更新。
 3. 继续保留 `workspace_maintenance.py` 作为热区体检与清理入口，不回到人工记忆式维护。
+
+## 2026-03-24 下一阶段正式起步：执行 README 收敛 + `deep_alpha` 口径统一
+### 本轮目标
+- 把 `daily_research/execution/README.md` 收敛成面向日常操作的执行手册；
+- 正式启动 `deep_alpha` 最终判决阶段的第一项治理动作；
+- 先统一 `deep_alpha` 的调仓语义默认值，避免后续研究结论继续混入旧 `5d` 元数据。
+
+### 本轮动作
+- 重写 `daily_research/execution/README.md`：
+  - 把内容收敛为“当前默认口径 + 每日标准流程 + 输出解释 + 风险边界”；
+  - 减少历史叙述和分散说明，让执行入口更直接。
+- 更新 `daily_research/deep_alpha/config.py`：
+  - 默认 `rebalance_freq` 从 `5d` 改为 `1d`。
+- 更新 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - 命令行默认 `--rebalance-freq` 从 `5d` 改为 `1d`；
+  - `metrics.json` 显式写出 `rebalance_freq`。
+- 更新 `daily_research/README.md`：
+  - `deep_alpha` 主线示例命令显式补上 `--rebalance-freq 1d`。
+
+### 本轮结论
+1. 执行端说明文档已经从“信息堆叠”收敛为“可直接照着跑的操作手册”。
+2. `deep_alpha` 的默认调仓语义已经与当前主线统一到“日频目标更新”。
+3. 这标志着 `deep_alpha` 最终正式判决已经从“规划阶段”进入“口径统一后的正式执行阶段”。
+
+### 当前决策
+1. 后续 `deep_alpha` 正式对照实验默认按 `rebalance_freq=1d` 记录与解释。
+2. 下一步直接进入 `deep_alpha` 当前主线的最小充分对照矩阵，不再先做额外支线扩展。
