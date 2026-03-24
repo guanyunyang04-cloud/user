@@ -414,3 +414,14 @@ python daily_research/tools/workspace_maintenance.py archive --apply
 - `research_log.md` 只保留“时间顺序的研究记录”；
 - 不再把同一批内容同时写进三份文档；
 - 中文内容不再用容易引入编码问题的 shell 重定向直接追加。
+## 2026-03-24 规则层升级进展：`v2` 首轮减法诊断
+- 已完成正式输出：
+  - `daily_research/output/v2_rule_ablation_20260324_formal_round1_fixed`
+- 关键工具：
+  - `daily_research/tools/v2_rule_ablation_report.py`
+- 当前结论：
+  1. `none / v2` 继续保留为规则层锚点，不扩成新的 profile 家族。
+  2. `range_position_20`、`drawdown_20`、`price_volume_divergence` 暂视为 `v2` 当前更应保留的骨架。
+  3. `volume_contraction`、`volatility_contraction` 出现“权重可能过重”的信号，进入 `v2.1` 微调首批候选。
+  4. 不直接做整组删除：`group_structure`、`group_volume`、`group_volatility` 的结果都说明组级改动过粗。
+  5. 下一步优先做 `v2.1` 小范围减法微调，而不是重开 `v3 / v4` 大分支。

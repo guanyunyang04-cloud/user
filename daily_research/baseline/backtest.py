@@ -43,9 +43,10 @@ def backtest(
     if execution_mode == "next_open":
         if open_df is None or benchmark_open is None:
             raise ValueError("next_open backtest requires open_df and benchmark_open.")
-        common_index = common_index.intersection(open_df.index).intersection(benchmark_open.index)
+        valid_benchmark_open = benchmark_open.dropna()
+        common_index = common_index.intersection(open_df.index).intersection(valid_benchmark_open.index)
         open_df = open_df.loc[common_index]
-        benchmark_open = benchmark_open.reindex(common_index).ffill().dropna()
+        benchmark_open = valid_benchmark_open.reindex(common_index).ffill().dropna()
 
     close = close.loc[common_index]
     benchmark_close = benchmark_close.reindex(common_index).ffill().dropna()

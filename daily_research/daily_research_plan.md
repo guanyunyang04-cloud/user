@@ -377,3 +377,12 @@
 - `research_log.md` 只保留实验记录和阶段结论；
 - 根目录 `README.md` 负责工作区级治理说明；
 - 研究产物归档规则以 `daily_research/archive_policy.json` 为准。
+27. `none / v2` 规则层升级已进入第一轮正式减法诊断后的微调阶段：
+   - 已完成 `daily_research/tools/v2_rule_ablation_report.py`，正式输出目录为 `daily_research/output/v2_rule_ablation_20260324_formal_round1_fixed`
+   - 当前先不扩新的 state alpha profile 家族
+   - `v2.1` 的首批微调方向固定为：
+     - 优先下调或移除 `volume_contraction`
+     - 优先下调或移除 `volatility_contraction`
+     - 固定保留并继续观察 `range_position_20 / drawdown_20 / price_volume_divergence`
+   - 暂不直接删除整个 `structure / volume / volatility` 组，因为组级删除结果过于粗糙、且强弱窗口方向不一致
+   - 这一轮完成前，不把规则层升级线重新抬回执行端主线，只作为默认 `lgbm` 主线下的二级优化

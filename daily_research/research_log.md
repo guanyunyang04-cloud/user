@@ -5577,3 +5577,126 @@ position,000001.SZ,1200,12.38,
 3. 其中默认模型族保持为：`lgbm`
 4. 当前不进入状态专属模型研究
 5. 只有在后续重新出现明确的状态内失衡证据时，才重启状态专属模型研究
+## 2026-03-24 执行端第二十轮正式诊断：`v2` 规则层首轮减法诊断
+### 本轮目标
+- 承接“`none / v2` 规则层值得做的 3 个小升级点”，先做第一步：
+  - 不急着加新因子；
+  - 先回答 `v2` 里哪些因子/分组是真贡献，哪些可能已经变成过重负担。
+- 诊断口径固定为当前执行默认框架的规则层隔离评估：
+  - `ma50`
+  - `rolling liquid500`
+  - `next_open`
+  - `holding_count=5`
+  - `max_style_weight=0.50`
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/v2_rule_ablation_20260324_formal_round1_fixed`
+- 关键工具：
+  - `daily_research/tools/v2_rule_ablation_report.py`
+- 关键汇总：
+  - `summary_rows.csv`
+  - `quarter_rankic_summary.csv`
+  - `report.json`
+  - `report.md`
+
+### 过程补记：顺手修复一个 `next_open` 基准对齐 bug
+- 在正式开跑这轮 ablation 时，暴露出 `daily_research/baseline/backtest.py` 的一个底层问题：
+  - `next_open` 回测只按索引对齐 `benchmark_open`；
+  - 没有在进入公共交易日集合前排除 `benchmark_open` 的空值日期；
+  - 导致早期样本可能出现 `common_index` 包含日期、但 `benchmark_open` 在该日期已被 `dropna` 掉，随后触发 `KeyError`。
+- 已修复为：
+  - 先对 `benchmark_open` 做 `dropna()`；
+  - 再进入 `common_index` 对齐。
+- 这次修复是底层稳健性修复，不改变已有正常样本上的策略逻辑，只避免早期缺口把正式诊断跑断。
+
+### 候选设计
+- 基线：
+  - `none`
+  - `v2`
+- 组级 ablation：
+  - `ablate_group_volume`
+  - `ablate_group_volatility`
+  - `ablate_group_structure`
+- 因子级 ablation：
+  - `ablate_factor_volume_contraction`
+  - `ablate_factor_price_volume_divergence`
+  - `ablate_factor_volatility_20`
+  - `ablate_factor_volatility_contraction`
+  - `ablate_factor_close_strength`
+  - `ablate_factor_range_position_20`
+  - `ablate_factor_drawdown_20`
+
+### 结果一：`v2` 不是“过于简陋”，但内部确实已经出现过重项
+- `v2` 基线本轮规则层隔离结果为：
+  - 全样本超额 Sharpe 约 `-0.139`
+  - 最近完整窗口超额收益约 `-4.09%`，超额 Sharpe 约 `-0.175`
+  - 最新弱窗口超额收益约 `+0.08%`
+  - `trend_up_low_vol` `20d RankIC` 均值约 `0.180`
+- 这再次说明：
+  - 当前 `none / v2` 更像规则层锚点，而不是独立主引擎；
+  - 但 `v2` 作为锚点内部，已经不是“所有信号都该继续保留”的状态。
+
+### 结果二：`range_position_20 / drawdown_20 / price_volume_divergence` 更像当前应保留的骨架
+- 去掉 `range_position_20` 后：
+  - 全样本超额 Sharpe 从约 `-0.139` 恶化到约 `-0.345`
+  - 最新弱窗口从约 `+0.08%` 降到约 `-3.35%`
+- 去掉 `drawdown_20` 后：
+  - 全样本超额 Sharpe 恶化到约 `-0.287`
+  - 最新弱窗口降到约 `-3.52%`
+- 去掉 `price_volume_divergence` 后：
+  - 全样本超额 Sharpe 恶化到约 `-0.211`
+  - 最新弱窗口降到约 `-7.44%`
+- 这说明：
+  - `v2` 的“结构位置 + 回撤约束 + 量价背离”仍然更像当前骨架；
+  - 下一轮不应优先动这三项。
+
+### 结果三：`volume_contraction / volatility_contraction` 出现“过重嫌疑”
+- 去掉 `volume_contraction` 后：
+  - 全样本超额 Sharpe 反而升到约 `0.142`
+  - 最近完整窗口升到约 `39.44% / 1.106`
+  - 最新弱窗口升到约 `31.01%`
+  - 但 `trend_up_low_vol` `20d RankIC` 均值从约 `0.180` 小幅回落到约 `0.169`
+- 去掉 `volatility_contraction` 后：
+  - 全样本超额 Sharpe 升到约 `0.145`
+  - 最近完整窗口升到约 `5.76% / 0.271`
+  - 最新弱窗口升到约 `3.16%`
+  - `trend_up_low_vol` `20d RankIC` 均值升到约 `0.194`
+- 这说明：
+  - 这两项至少在当前 `v2` 里的权重有“偏重”嫌疑；
+  - 其中 `volatility_contraction` 更像值得优先保留为低权重候选；
+  - `volume_contraction` 则更像应优先做减权/移除复核的对象。
+
+### 结果四：整组删除过于粗糙，不适合作为下一步
+- 去掉整个 `structure` 组后：
+  - 全样本超额 Sharpe 反而升到约 `0.111`
+  - 但最新弱窗口直接掉到约 `-11.25%`
+- 去掉整个 `volume` 组后：
+  - 最新弱窗口升到约 `20.24%`
+  - 但全样本超额 Sharpe 降到约 `-0.239`
+- 去掉整个 `volatility` 组后：
+  - 最新弱窗口升到约 `10.30%`
+  - 但 `RankIC` 均值显著降到约 `0.109`
+- 这说明：
+  - 组级改动太粗，容易出现“修一边、坏一边”；
+  - 下一轮应坚持小步减法，不做整组删除。
+
+### 本轮结论
+1. `none / v2` 这条规则层并不算“过于简陋”，但 `v2` 内部确实已经出现需要清理的过重项。
+2. 当前更应保留的骨架是：
+   - `range_position_20`
+   - `drawdown_20`
+   - `price_volume_divergence`
+3. 当前最值得进入 `v2.1` 微调首批候选的是：
+   - `volume_contraction`
+   - `volatility_contraction`
+4. 下一轮不做整组删除，也不重开新的 profile 家族；优先做 `v2.1` 小范围减法微调。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. `none / v2` 继续保留为规则层锚点，不上升为新的主线替换议题
+3. `v2.1` 的首批微调方向固定为：
+   - 优先下调或移除 `volume_contraction`
+   - 优先下调或移除 `volatility_contraction`
+   - 固定保留 `range_position_20 / drawdown_20 / price_volume_divergence`
+4. 下一步继续围绕 `v2.1` 做小范围减法微调，不扩 `v3 / v4` 分支
