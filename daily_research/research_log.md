@@ -6166,3 +6166,86 @@ position,000001.SZ,1200,12.38,
 2. 不再把“先观察一段时间”作为进入下一研究阶段的前置动作
 3. 下一步正式转向 `deep_alpha` 的最终判决
 4. 若后续还要继续做更早历史的执行端正式复验，优先级高于“继续往 `2018` 改 start-date`”的，是先补更早可用数据或重新设计长训练窗预热口径
+## 2026-03-24 执行端第二十七轮正式诊断：连续状态分数首轮验证
+### 本轮目标
+- 保留现有四象限门控不动；
+- 不直接改默认执行逻辑；
+- 先验证一层“宽度 + 分歧 + 流动性”的连续状态分数，是否能解释 `regime_on` 内部的弱窗口与错误开仓。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/continuous_market_context_20260324_formal_round1`
+- 关键工具：
+  - `daily_research/baseline/market_context.py`
+  - `daily_research/tools/continuous_market_context_report.py`
+- 关键文件：
+  - `context_features.csv`
+  - `decision_context_diagnostic.csv`
+  - `regime_on_context_diagnostic.csv`
+  - `regime_on_quantile_summary.csv`
+  - `regime_on_quadrant_summary.csv`
+  - `context_correlation_summary.csv`
+  - `latest_weak_window_summary.csv`
+  - `top_wrong_open_days.csv`
+  - `report.json`
+  - `report.md`
+
+### 结果一：连续状态分数对后续 20 日市场环境已有解释力
+- 在当前默认主线 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 上，`regime_on` 样本按 `context_score` 做五分位后：
+  - Q1 的 `benchmark_fwd_20d` 均值约 `0.55%`
+  - Q5 的 `benchmark_fwd_20d` 均值约 `2.47%`
+- 同时，`wrong_open_rate_20d` 也明显分层：
+  - Q1 约 `50.00%`
+  - Q5 约 `29.41%`
+- `context_score` 与 `benchmark_fwd_20d` 的相关性也已转正：
+  - Pearson 约 `0.226`
+  - Spearman 约 `0.278`
+- 这说明：
+  - 这层分数已经能在“门开了”的前提下，区分哪些日期后面的市场环境更舒服、哪些日期更容易变成错误开仓。
+
+### 结果二：它还没有直接解释成更强的 1 日超额
+- `context_score` 与当前主线的 `portfolio_return / excess_return` 相关性都接近于零：
+  - `portfolio_return` Pearson 约 `0.014`
+  - `excess_return` Pearson 约 `0.017`
+- 五分位比较里，Q5 并没有稳定跑赢 Q1 的 `avg_excess_return_1d`：
+  - Q1 约 `0.85%`
+  - Q5 约 `0.63%`
+- 这说明：
+  - 这层连续状态分数当前更像“风险与执行调节器”；
+  - 还不是能直接拿来替代当前选股 alpha 的东西。
+
+### 结果三：最新弱窗口里低状态分数显著堆积
+- 最新弱窗口 `2025-09-05 -> 2026-03-19` 的 `regime_on` 日期：
+  - 平均 `context_score` 约 `0.474`
+  - 底部五分位占比约 `34.83%`
+  - 顶部五分位占比为 `0%`
+- 其余 `regime_on` 日期：
+  - 平均 `context_score` 约 `0.717`
+  - 底部五分位占比约 `3.75%`
+  - 顶部五分位占比约 `42.50%`
+- 这说明：
+  - 当前默认主线的弱窗口，不只是收益结果变差；
+  - 连续状态层也已经明确显示出“门虽开着，但开得不够舒服”的结构特征。
+
+### 结果四：当前 `regime_on` 样本几乎全部落在 `trend_up_low_vol`
+- 本轮正式样本里，`regime_on` 主体都落在 `trend_up_low_vol`；
+- 所以这轮连续状态诊断本质上是在回答：
+  - 同样都是低波上涨，哪些日期值得更积极，哪些日期应该收一点。
+
+### 本轮结论
+1. 连续状态分数已经表现出明确的“风险门内再分层”价值。
+2. 它能解释一部分后续 20 日市场环境与错误开仓风险。
+3. 但它还不能直接解释成更强的 1 日超额，因此当前不该把它当成新的 alpha 主引擎。
+4. 正确的升级方向应是：保留现有四象限门控不动，只在 `regime_on` 内部拿这层分数去做轻度执行去风险。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限继续作为第一层安全门
+3. 连续状态分数先定位为“风险门内再分层”，不直接替换门控，也不直接接入 ML 主引擎
+4. 下一步正式进入第二轮：连续状态分数驱动的软调节回测
+5. 首批只试：
+   - `holding_count`
+   - `max_weight`
+   - `turnover_limit`
+   - `max_style_weight`
+6. 若出现“弱窗口改善但强窗口或全样本被破坏”，则停止这条线晋级执行层

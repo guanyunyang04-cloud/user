@@ -550,3 +550,34 @@ python daily_research/tools/workspace_maintenance.py archive --apply
   - 默认执行主线继续保持为 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
   - 不再把“先观察一段时间”作为下一步研究前提
   - 下一步正式转向 `deep_alpha` 的最终判决
+## 2026-03-24 连续状态诊断首轮结论
+- 已完成正式输出：
+  - `daily_research/output/continuous_market_context_20260324_formal_round1`
+- 关键工具：
+  - `daily_research/baseline/market_context.py`
+  - `daily_research/tools/continuous_market_context_report.py`
+- 本轮前提：
+  1. 保留现有四象限门控不动；
+  2. 不直接改默认执行逻辑；
+  3. 先回答“宽度 + 分歧 + 流动性”的连续状态分数，能否解释 `regime_on` 内部的弱窗口与错误开仓。
+- 当前结论：
+  1. 这层连续状态分数已经显示出“适合做风险门内再分层”的信号，但还不适合直接当成新的 alpha 主引擎。
+  2. 在当前默认主线 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 上，`regime_on` 低分位 Q1 相对高分位 Q5：
+     - `benchmark_fwd_20d` 均值约 `0.55% vs 2.47%`
+     - `wrong_open_rate_20d` 约 `50.00% vs 29.41%`
+     - 说明它对“后续 20 日市场环境”和“错误开仓风险”已经有解释力。
+  3. 但它对当前主线的 `1d` 超额解释还偏弱：
+     - `avg_excess_return_1d` 约 `0.85% vs 0.63%`
+     - `context_score` 与 `excess_return` 的相关性几乎为零
+     - 说明这层分数更像风险/执行调节器，而不是直接提高当日选股 alpha 的因子。
+  4. 最新弱窗口 `2025-09-05 -> 2026-03-19` 里，`regime_on` 日期的平均 `context_score` 约 `0.474`，显著低于其余 `regime_on` 的约 `0.717`；底部五分位占比约 `34.83%`，而其余 `regime_on` 只有约 `3.75%`。
+  5. 因此这条线值得进入第二轮正式回测，但升级方式应是“软调节”，不是替换四象限，也不是立刻喂进 ML。
+- 下一步：
+  1. 继续保留现有四象限为第一层安全门；
+  2. 进入第二轮正式回测，只在 `regime_on` 内部按低 `context_score` 做轻度去风险；
+  3. 首批只试：
+     - `holding_count`
+     - `max_weight`
+     - `turnover_limit`
+     - `max_style_weight`
+  4. 只要出现“弱窗口改善但强窗口或全样本被破坏”，就停止这条连续状态升级线。
