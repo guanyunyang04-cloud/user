@@ -5484,3 +5484,63 @@ position,000001.SZ,1200,12.38,
 3. 但 `lgbm` 的切换前复核已经完整通过，现已具备正式替换默认模型的条件
 4. 下一步优先做默认模型切换：`histgb -> lgbm`
 5. 默认模型切换完成后，再决定是否还有必要进入状态专属模型研究
+
+## 2026-03-24 执行端第十八轮正式变更：默认模型 `histgb -> lgbm`
+### 本轮目标
+- 承接第十七轮已经完成的切换前复核，不再停留在“具备切换条件”，而是把默认执行模型真正从 `histgb` 切换到 `lgbm`：
+  - 修改执行端默认入口；
+  - 重训默认 `latest_ml_model.*`；
+  - 重新跑默认 `run_trade_plan.py`，确认切换后真实默认链路正常。
+
+### 本轮产物
+- 默认模型产物：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+- 默认执行输出：
+  - `daily_research/execution/output/20260324`
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+### 结果一：执行端默认入口已切到 `lgbm`
+- `daily_research/execution/update_model.py` 现已默认注入：
+  - `--ml-model-family lgbm`
+- 这意味着：
+  - 后续按执行端标准流程运行 `update_model.py` 时，不再需要手动显式补 `--ml-model-family lgbm`
+  - 当前默认执行模型族已从“文档建议切换”升级为“入口默认已切换”
+
+### 结果二：默认 `latest_ml_model.*` 已重训为 `lgbm`
+- 默认模型元数据当前为：
+  - `trained_at = 2026-03-24 16:33:31`
+  - `latest_data_date = 2026-03-24`
+  - `regime_ma_window = 50`
+  - `model_family = lgbm`
+- 当前默认滚动验证摘要为：
+  - `full IC 0.120`
+  - `recent126d IC 0.153`
+  - `recent63d IC 0.227`
+- 这说明：
+  - 当前默认执行产物已经不再是旧的 `histgb`
+  - 默认元数据中的验证摘要和新鲜度也都同步更新到了新模型上
+
+### 结果三：切换后的默认执行链路烟测正常
+- 用当前真实执行快照重新运行默认 `run_trade_plan.py` 后：
+  - 信号日：`2026-03-24`
+  - 市场状态：`trend_down_low_vol`
+  - 默认计划动作：卖出 `002843.SZ` `800` 股
+- 当前计划文件已写回：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+- 这说明：
+  - 默认 `lgbm` 切换后，执行端入口、默认模型产物、默认计划输出三者口径已经重新对齐
+  - 本次切换没有引入新的执行异常
+
+### 本轮结论
+1. 默认模型 `histgb -> lgbm` 已于 `2026-03-24` 正式完成，不再只是候选结论。
+2. 当前执行默认口径正式更新为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+3. 切换后的默认模型产物、模型新鲜度、验证摘要与默认计划输出均已完成同步刷新。
+4. 下一步不直接进入状态专属模型研究，而是先判断：在默认 `lgbm` 已经切换完成后，是否还存在值得继续投入的额外 ML 增量空间。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml + liquid500 + next_open`
+2. 其中默认状态边界为：`ma50 baseline`
+3. 其中默认模型族现已正式切换为：`lgbm`
+4. `ma60 + up_low_ml55_none25_v220` 继续只保留为旧执行口径回滚备选
+5. 下一步再决定是否还有必要进入状态专属模型研究

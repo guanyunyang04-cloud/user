@@ -311,9 +311,15 @@
    - `histgb` 的买入组合为：`002470.SZ / 688800.SH / 300617.SZ / 002843.SZ`
    - `lgbm` 的买入组合为：`002470.SZ / 000510.SZ / 688800.SH / 300739.SZ`
    - 结合此前 `2026-03-23` 的 `regime_off` 卖出烟测，当前 `lgbm` 已经同时通过卖出路径与买入路径复核
-   - 因此下一步优先级正式更新为：
-     - 先把默认模型从 `histgb` 切换到 `lgbm`
-     - 再决定是否还有必要进入状态专属模型研究
+25. 默认模型切换 `histgb -> lgbm` 已于 `2026-03-24` 正式完成：
+   - `daily_research/execution/update_model.py` 已改为默认注入 `--ml-model-family lgbm`
+   - 默认产物 `daily_research/execution/models/latest_ml_model.json` 已更新为：
+     - `trained_at = 2026-03-24 16:33:31`
+     - `latest_data_date = 2026-03-24`
+     - `model_family = lgbm`
+   - 默认 `run_trade_plan.py` 已在当前实盘快照下重新烟测，`2026-03-24` 信号日继续给出卖出 `002843.SZ` `800` 股，执行链路正常
+   - 当前执行默认口径正式更新为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+   - 下一步不立即进入状态专属模型研究，而是先判断在默认 `lgbm` 已切换后，是否还存在值得继续投入的额外增量空间
 
 ### 优先级 B：完成 `deep_alpha` 当前主线的正式判决
 目标：

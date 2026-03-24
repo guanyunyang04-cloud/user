@@ -24,6 +24,7 @@ def main():
 
     inject_default_arg("--artifact-path", str(artifact_path))
     inject_default_arg("--artifact-meta-path", str(artifact_meta_path))
+    inject_default_arg("--ml-model-family", "lgbm")
     ensure_default_pool_argument()
     ensure_execution_strategy_defaults()
 

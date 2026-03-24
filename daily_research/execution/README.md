@@ -15,8 +15,9 @@
 
 当前执行默认主线：
 
-- `advanced_ml (ma50 baseline) + liquid500 + next_open`
+- `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 - 已于 `2026-03-23` 从原 `ma60` 口径切换到 `ma50 baseline`
+- 已于 `2026-03-24` 从默认 `histgb` 切换到默认 `lgbm`
 
 ## 2. 目录与真实职责
 - `update_liquid_pool.py`
@@ -67,6 +68,8 @@
 - `--stocks-file`
   - 如果你没有手动传 `--stocks` 或 `--stocks-file`，会默认读取：
     - `daily_research/execution/universe/liquid500_latest.txt`
+- `--ml-model-family`
+  - 如果你没有手动传，会默认注入为 `lgbm`
 - `--regime-ma-window`
   - 如果你没有手动传，会默认注入为 `50`
 
@@ -139,7 +142,7 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - 默认股票池：
   - `universe/liquid500_latest.txt`
 - 默认模型族：
-  - `histgb`
+  - `lgbm`
 - 默认多周期目标：
   - `5,10,20`
 - 默认多周期权重：
@@ -335,7 +338,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 
 ## 8. 执行端与研究端口径约定
 - 执行端默认冻结为：
-  - `advanced_ml (ma50 baseline) + liquid500 + next_open`
+  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 - 执行端股票池：
   - 每日盘后更新一次 `liquid500_latest.txt`
 - 正式研究端股票池：

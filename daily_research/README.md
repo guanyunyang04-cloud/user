@@ -247,7 +247,7 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - `histgb`：全样本超额收益约 `388.95%`，全样本超额 Sharpe 约 `1.487`；最近完整窗口约 `61.33% / 1.402`；最新弱窗口约 `-8.46% / -0.423`
   - `etr`：全样本超额收益约 `274.63%`，全样本超额 Sharpe 约 `1.443`；最近完整窗口约 `41.74% / 1.491`；最新弱窗口约 `6.46% / 0.433`
 - `lgbm` 相对当前默认 `histgb` 在 `17` 个季度里有 `9` 个季度更强、`8` 个季度持平、`0` 个季度更弱；最佳季度 `2025Q3` 仅占正向季度总优势约 `29.67%`，不是单季度孤点。
-- 因此当前执行默认模型仍保持 `histgb`，但 `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选；`etr` 正式补跑后确认不构成头号 challenger，只保留为研究附录。
+- 因此 `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选；`etr` 正式补跑后确认不构成头号 challenger，只保留为研究附录。
 - `2026-03-24` 已完成 `ma50 + lgbm` 的切换前复核与第一轮执行端烟测：
   - 独立候选产物已生成在 `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_candidate.joblib`
   - 候选 `lgbm` 的滚动验证摘要高于当前默认 `histgb`：`full IC 0.121 > 0.107`，`recent126d IC 0.152 > 0.146`，`recent63d IC 0.219 > 0.212`
@@ -258,7 +258,11 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --data-source tq --r
   - 修复后，`histgb` 在同一口径下给出 `4` 笔买入：`002470.SZ / 688800.SH / 300617.SZ / 002843.SZ`
   - 修复后，`lgbm` 在同一口径下给出 `4` 笔买入：`002470.SZ / 000510.SZ / 688800.SH / 300739.SZ`
   - 两边点时产物都保持 `fresh`，买入路径与之前 `2026-03-23` 的 `regime_off` 卖出路径一起，已经把切换前执行链路补全
-- 因此当前默认模型从研究和执行两侧都已具备正式切换到 `lgbm` 的条件；若继续推进执行端 ML 增量优化，下一步应先做默认模型切换，再决定是否还有必要进入状态专属模型研究。
+- `2026-03-24` 已正式完成默认模型切换：
+  - `daily_research/execution/update_model.py` 现已默认注入 `--ml-model-family lgbm`
+  - 默认产物 `daily_research/execution/models/latest_ml_model.json` 已更新为 `trained_at = 2026-03-24 16:33:31`、`latest_data_date = 2026-03-24`、`model_family = lgbm`
+  - 切换后的默认 `run_trade_plan.py` 已重新烟测，`2026-03-24` 信号日继续给出卖出 `002843.SZ` `800` 股，执行链路正常
+- 因此当前执行默认口径已经更新为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`；默认模型切换完成后，下一步再决定是否还有必要进入状态专属模型研究。
 - 本轮产物汇总在：
   - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
   - `model_family_compare_summary.csv`
