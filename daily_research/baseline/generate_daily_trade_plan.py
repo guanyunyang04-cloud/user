@@ -39,6 +39,7 @@ from daily_research.baseline.ml_alpha import (
 )
 from daily_research.baseline.portfolio import build_target_weights
 from daily_research.baseline.regime import apply_market_regime_filter
+from daily_research.progress import StageProgress
 
 
 @dataclass
@@ -1104,6 +1105,349 @@ def main():
         print(action_df[["stock", "action", "shares", "price", "reason"]].to_string(index=False))
     else:
         print("今日无明确调仓动作。")
+
+
+def main_with_progress():
+    args = parse_args()
+    cfg = ResearchConfig(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        universe_scope=args.universe_scope,
+        benchmark=args.benchmark,
+        execution_mode="next_open",
+        holding_count=args.holding_count,
+        weighting_method="score",
+        rebalance_freq=args.rebalance_freq,
+        score_threshold=args.score_threshold,
+        max_weight=args.max_weight,
+        min_adv20=args.min_adv20,
+        min_price=args.min_price,
+        max_price=args.max_price,
+        enable_market_regime_filter=not args.no_market_regime_filter,
+        regime_ma_window=args.regime_ma_window,
+        regime_vol_window=args.regime_vol_window,
+        regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        enable_style_cap=not args.no_style_cap,
+        max_style_weight=args.max_style_weight,
+        enable_industry_cap=args.industry_cap,
+        max_industry_weight=args.max_industry_weight,
+    )
+    stocks = _parse_stocks(args.stocks)
+    file_stocks = _load_stocks_from_file(args.stocks_file)
+    if stocks or file_stocks:
+        stocks = list(dict.fromkeys(stocks + file_stocks))
+    if stocks:
+        cfg.universe = stocks
+
+    ml_cfg = MLAplhaConfig(
+        target_horizon=args.ml_target_horizon,
+        target_horizons=_parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
+        target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        state_horizon_weights=_parse_state_horizon_profiles(args.ml_state_horizon_profiles),
+        enhanced_profile=args.enhanced_profile,
+        train_window_days=args.ml_train_window_days,
+        retrain_every_days=args.ml_retrain_every_days,
+        min_train_dates=args.ml_min_train_dates,
+        max_samples_per_day=args.ml_max_samples_per_day,
+        max_train_rows=args.ml_max_train_rows,
+        random_seed=args.ml_random_seed,
+        model_family=args.ml_model_family,
+        ensemble_ml_weight=args.ensemble_ml_weight,
+        ensemble_none_weight=args.ensemble_none_weight,
+        ensemble_v2_weight=args.ensemble_v2_weight,
+        state_ensemble_weights=_parse_state_ensemble_weights(args.ensemble_state_weights),
+        train_regime_only=cfg.enable_market_regime_filter,
+        execution_mode=cfg.execution_mode,
+    )
+
+    artifact = None
+    artifact_meta: dict[str, Any] = {}
+    artifact_path = Path(args.model_artifact)
+    effective_profile = args.enhanced_profile
+    effective_ml_cfg = ml_cfg
+
+    with StageProgress(total=9, label="交易计划流程") as progress:
+        with progress.stage("准备模型与研究宇宙", f"source={args.data_source}"):
+            if not args.train_on_the_fly:
+                if not artifact_path.exists():
+                    raise FileNotFoundError(
+                        f"Model artifact not found: {artifact_path}. Run daily_research/execution/update_model.py first."
+                    )
+                artifact = load_ml_artifact(artifact_path)
+                artifact_meta = _load_artifact_meta(artifact_path)
+                effective_ml_cfg = MLAplhaConfig(**artifact.ml_config)
+                effective_profile = str(
+                    getattr(effective_ml_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2"
+                )
+            if args.data_source == "tq":
+                if not cfg.universe and cfg.universe_scope == "all_a":
+                    cfg.universe = load_universe_from_tq(cfg.universe_scope)
+                elif not cfg.universe:
+                    raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
+            elif not args.csv_folder:
+                raise ValueError("CSV mode requires --csv-folder.")
+
+        with progress.stage("解析推理历史窗口", args.start_date):
+            history_window = resolve_history_window(
+                cfg=cfg,
+                ml_cfg=effective_ml_cfg,
+                requested_start_date=args.start_date,
+                end_date=args.end_date,
+                mode="infer",
+                auto_trim_history=not args.no_auto_trim_history,
+            )
+            progress.log(
+                f"infer history: {history_window.effective_start_date} -> "
+                f"{history_window.end_date or 'latest'} | required_trading_days={history_window.required_trading_days}"
+            )
+
+        with progress.stage("读取市场行情", f"stocks={len(cfg.universe)} benchmark={cfg.benchmark}"):
+            raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
+                data_source=args.data_source,
+                csv_folder=args.csv_folder,
+                universe=cfg.universe,
+                benchmark=cfg.benchmark,
+                history_window=history_window,
+                use_cache=not args.no_cache,
+                refresh_cache=args.refresh_cache,
+                progress_desc="读取交易计划行情",
+                progress_position=1,
+            )
+            progress.log(
+                f"raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | {raw_cache_meta['cache_path']}"
+            )
+
+        with progress.stage("读取账户快照", Path(args.positions_file).name):
+            account_state = _load_account_state(args.positions_file)
+            positions_df = account_state.positions_df
+            if args.cash is not None:
+                effective_cash = float(args.cash)
+                cash_source = "cli_override"
+                cash_source_text = f"--cash override ({args.positions_file})"
+            elif account_state.cash is not None:
+                effective_cash = float(account_state.cash)
+                cash_source = account_state.source
+                cash_source_text = f"{Path(args.positions_file).name} account row"
+            else:
+                effective_cash = 0.0
+                cash_source = "default_zero"
+                cash_source_text = "no account cash provided, fallback to 0"
+                progress.log(
+                    "[warning] positions file has no account cash row and --cash was not provided; fallback to 0."
+                )
+
+        with progress.stage("构建研究缓存输入", effective_profile):
+            prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+                raw_df_dict=raw_df_dict,
+                raw_cache_key=raw_cache_meta["cache_key"],
+                cfg=cfg,
+                enhanced_profile=effective_profile,
+                use_cache=not args.no_cache,
+                refresh_cache=args.refresh_cache,
+            )
+            progress.log(
+                f"factor cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+                f"{prepared_cache_meta['cache_path']}"
+            )
+            df_dict = prepared_bundle["df_dict"]
+
+        with progress.stage("加载约束映射", "industry/style"):
+            style_map = None
+            industry_map = None
+            if cfg.enable_style_cap and args.data_source == "tq":
+                style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
+            if cfg.enable_industry_cap and args.data_source == "tq":
+                industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
+
+        with progress.stage("计算组合分数", "artifact/live"):
+            if args.train_on_the_fly:
+                (
+                    factor_bundle,
+                    regime_state,
+                    score_none,
+                    score_v2,
+                    ml_score,
+                    final_score_raw,
+                    final_score_filtered,
+                    target_weights,
+                    training_log,
+                ) = _build_scores_on_the_fly(cfg, ml_cfg, prepared_bundle, style_map, industry_map)
+                model_info = {
+                    "mode": "实时训练",
+                    "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
+                    "model_family": str(ml_cfg.model_family),
+                    "state_horizon_profiles": ";".join(
+                        f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
+                        for state, weights in (ml_cfg.state_horizon_weights or {}).items()
+                    ),
+                    "history_window": history_window_to_dict(history_window),
+                    "enhanced_profile": str(ml_cfg.enhanced_profile),
+                }
+                freshness_info: dict[str, Any] = {}
+                validation_summary: dict[str, Any] = {}
+            else:
+                (
+                    factor_bundle,
+                    regime_state,
+                    score_none,
+                    score_v2,
+                    ml_score,
+                    final_score_raw,
+                    final_score_filtered,
+                    target_weights,
+                    training_log,
+                ) = _build_scores_from_artifact(cfg, artifact, prepared_bundle, style_map, industry_map)
+                if not training_log.empty:
+                    training_log.loc[:, "artifact_path"] = str(artifact_path)
+                model_info = {
+                    "mode": "离线模型产物",
+                    "artifact_path": str(artifact_path),
+                    "trained_at": str(training_log.iloc[0].get("trained_at", "")) if not training_log.empty else "",
+                    "train_end": str(training_log.iloc[0].get("train_end", "")) if not training_log.empty else "",
+                    "horizons": str(training_log.iloc[0].get("horizons", "")) if not training_log.empty else "",
+                    "model_family": str(artifact.ml_config.get("model_family", "histgb")),
+                    "horizon_weights": ",".join(
+                        f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
+                    ),
+                    "state_horizon_profiles": ";".join(
+                        f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
+                        for state, weights in (artifact.ml_config.get("state_horizon_weights") or {}).items()
+                    ),
+                    "history_window": history_window_to_dict(history_window),
+                    "enhanced_profile": str(artifact.ml_config.get("enhanced_profile", "up_low_breakout_v2")),
+                }
+
+                signal_date = final_score_raw.dropna(how="all").index.max()
+                if pd.isna(signal_date):
+                    raise RuntimeError("No valid latest date found for trade plan generation.")
+                validation_summary = (
+                    artifact_meta.get("validation_summary")
+                    if isinstance(artifact_meta.get("validation_summary"), dict)
+                    else {}
+                )
+                freshness_info = _assess_model_freshness(
+                    artifact_meta=artifact_meta,
+                    latest_signal_date=pd.Timestamp(signal_date),
+                    trading_dates=factor_bundle["raw_inputs"]["Close"].index,
+                    warn_trading_days=args.stale_model_warn_trading_days,
+                    max_trading_days=args.stale_model_max_trading_days,
+                )
+                if not validation_summary:
+                    freshness_info.setdefault("warnings", []).append(
+                        "artifact metadata has no validation_summary; rerun update_model.py for a fresh artifact."
+                    )
+                if freshness_info.get("should_block") and args.allow_stale_model:
+                    freshness_info.setdefault("warnings", []).append("stale artifact allowed by --allow-stale-model")
+                for warning in freshness_info.get("warnings", []):
+                    progress.log(f"[warning] {warning}")
+                if freshness_info.get("should_block") and not args.allow_stale_model:
+                    raise RuntimeError(
+                        "Model artifact reached stale blocking threshold. Run daily_research/execution/update_model.py "
+                        "or pass --allow-stale-model explicitly."
+                    )
+                model_info.update(
+                    {
+                        "latest_data_date": str(artifact_meta.get("latest_data_date", "")),
+                        "freshness_status": str(freshness_info.get("status_text", "")),
+                        "trading_day_lag": freshness_info.get("trading_day_lag"),
+                        "warnings": list(freshness_info.get("warnings", [])),
+                        "validation_summary": validation_summary,
+                    }
+                )
+
+        with progress.stage("生成交易计划数据", cfg.rebalance_freq):
+            signal_date = final_score_raw.dropna(how="all").index.max()
+            if pd.isna(signal_date):
+                raise RuntimeError("No valid latest date found for trade plan generation.")
+            action_df, summary = _build_trade_plan(
+                latest_date=signal_date,
+                close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
+                target_weight_row=target_weights.loc[signal_date],
+                final_score_row=final_score_raw.loc[signal_date],
+                score_none_row=score_none.loc[signal_date],
+                score_v2_row=score_v2.loc[signal_date],
+                ml_score_row=ml_score.loc[signal_date],
+                positions_df=positions_df,
+                cash=effective_cash,
+                lot_size=args.lot_size,
+            )
+            summary["positions_source"] = str(account_state.path)
+            summary["positions_source_mode"] = str(account_state.source)
+            summary["cash_source"] = str(cash_source)
+            summary["cash_source_text"] = str(cash_source_text)
+            summary["history_window"] = history_window_to_dict(history_window)
+            summary["cache"] = {
+                "raw": raw_cache_meta,
+                "prepared": prepared_cache_meta,
+            }
+            if not args.train_on_the_fly:
+                summary["model_artifact"] = str(artifact_path)
+                summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
+                summary["model_freshness"] = freshness_info
+                summary["model_validation"] = validation_summary
+            hold_df = _build_hold_table(
+                latest_date=signal_date,
+                close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
+                target_weight_row=target_weights.loc[signal_date],
+                final_score_row=final_score_raw.loc[signal_date],
+                positions_df=positions_df,
+            )
+            watch_df = _build_watchlist(
+                latest_date=signal_date,
+                final_score_row=final_score_raw.loc[signal_date].dropna(),
+                target_weight_row=target_weights.loc[signal_date],
+                score_none_row=score_none.loc[signal_date],
+                score_v2_row=score_v2.loc[signal_date],
+                ml_score_row=ml_score.loc[signal_date],
+                top_n=15,
+            )
+
+        with progress.stage("写出执行文件", "txt/csv/json"):
+            output_dir = Path(args.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            run_name = args.experiment_tag.strip() or signal_date.strftime("%Y%m%d")
+            run_dir = output_dir / run_name
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            txt_path = run_dir / "daily_trade_plan.txt"
+            latest_txt_path = output_dir / "latest_trade_plan.txt"
+            _write_trade_plan_txt(
+                txt_path,
+                summary=summary,
+                regime_state_row=regime_state.loc[signal_date],
+                action_df=action_df,
+                hold_df=hold_df,
+                watch_df=watch_df,
+                model_info=model_info,
+            )
+            _write_trade_plan_txt(
+                latest_txt_path,
+                summary=summary,
+                regime_state_row=regime_state.loc[signal_date],
+                action_df=action_df,
+                hold_df=hold_df,
+                watch_df=watch_df,
+                model_info=model_info,
+            )
+
+            action_df.to_csv(run_dir / "actions_today.csv", index=False, encoding="utf-8-sig")
+            hold_df.to_csv(run_dir / "holdings_snapshot.csv", index=False, encoding="utf-8-sig")
+            watch_df.to_csv(run_dir / "watchlist.csv", index=False, encoding="utf-8-sig")
+            training_log.to_csv(run_dir / "training_log.csv", index=False, encoding="utf-8-sig")
+            with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print(f"输出目录: {run_dir}")
+    print(f"最新建议文件: {latest_txt_path}")
+    if not action_df.empty:
+        print(action_df[["stock", "action", "shares", "price", "reason"]].to_string(index=False))
+    else:
+        print("今日无明确调仓动作。")
+
+
+main = main_with_progress
 
 
 if __name__ == "__main__":

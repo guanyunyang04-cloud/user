@@ -11,6 +11,7 @@ from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.market_state_model import build_state_frame, fit_market_state_model
 from daily_research.deep_alpha.sequence_dataset import build_liquidity_bucket_frame
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership, get_named_pool_file
+from daily_research.progress import progress_write
 
 
 def parse_stocks(raw: str | None) -> list[str]:
@@ -139,6 +140,9 @@ def load_raw_market_data(
     cfg: DeepAlphaConfig,
     args: Any,
     universe: list[str],
+    *,
+    progress_desc: str = "读取股票日线",
+    progress_position: int = 0,
 ) -> tuple[dict[str, pd.DataFrame], str]:
     cache_root = get_cache_root() / "raw"
     raw_meta = {
@@ -157,19 +161,28 @@ def load_raw_market_data(
         if args.use_cache and not args.refresh_cache:
             cached = load_pickle(raw_path)
             if cached is not None:
-                print(f"[2/8] Loading daily bars from cache: {raw_path.name}")
+                progress_write(f"raw cache hit: {raw_path.name}")
                 return cached, raw_key
-        print(f"[2/8] Loading daily bars from TQ. universe={len(universe)} benchmark={cfg.benchmark}")
-        raw_df_dict = load_daily_from_tq(universe, cfg.start_date, cfg.end_date, benchmark=cfg.benchmark)
+        raw_df_dict = load_daily_from_tq(
+            universe,
+            cfg.start_date,
+            cfg.end_date,
+            benchmark=cfg.benchmark,
+            progress_desc=progress_desc,
+            progress_position=progress_position,
+        )
         if args.use_cache:
             save_pickle(raw_path, raw_df_dict)
-            print(f"      Saved raw cache: {raw_path}")
+            progress_write(f"saved raw cache: {raw_path}")
         return raw_df_dict, raw_key
 
     if not args.csv_folder:
         raise ValueError("CSV mode requires --csv-folder.")
-    print(f"[1/8] Loading CSV folder: {args.csv_folder}")
-    raw_df_dict = load_daily_from_csv(args.csv_folder)
+    raw_df_dict = load_daily_from_csv(
+        args.csv_folder,
+        progress_desc=progress_desc,
+        progress_position=progress_position,
+    )
     return raw_df_dict, raw_key
 
 
@@ -198,9 +211,12 @@ def load_cached_or_build_rolling_pool(
     if args.use_cache and not args.refresh_cache:
         cached = load_pickle(rolling_path)
         if cached is not None:
-            print(f"[3/8] Loading rolling research pool cache: {rolling_path.name}")
+            progress_write(f"rolling pool cache hit: {rolling_path.name}")
             return cached, rolling_key
-    print(f"[3/8] Building rolling research pool: {args.rolling_liquidity_pool} (rebalance_every={args.pool_rebalance_days}d)")
+    progress_write(
+        f"building rolling pool: {args.rolling_liquidity_pool} "
+        f"(rebalance_every={args.pool_rebalance_days}d)"
+    )
     artifact = build_rolling_liquidity_membership(
         close_frame=df_dict["Close"],
         amount_frame=df_dict["Amount"],
@@ -214,7 +230,7 @@ def load_cached_or_build_rolling_pool(
     )
     if args.use_cache:
         save_pickle(rolling_path, artifact)
-        print(f"      Saved rolling pool cache: {rolling_path}")
+        progress_write(f"saved rolling pool cache: {rolling_path}")
     return artifact, rolling_key
 
 
@@ -237,9 +253,9 @@ def load_cached_or_fit_market_state(
     if args.use_cache and not args.refresh_cache:
         cached = load_pickle(state_path)
         if cached is not None:
-            print(f"[3/8] Loading market state cache: {state_path.name}")
+            progress_write(f"market state cache hit: {state_path.name}")
             return cached["state_frame"], cached["state_name_map"], state_key
-    print("[3/8] Fitting market state model...")
+    progress_write("fitting market state model...")
     state_artifact = fit_market_state_model(
         benchmark_close,
         n_states=cfg.market_state_count,
@@ -249,7 +265,7 @@ def load_cached_or_fit_market_state(
     state_name_map = {int(k): str(v) for k, v in state_artifact.state_names.items()}
     if args.use_cache:
         save_pickle(state_path, {"state_frame": state_frame, "state_name_map": state_name_map})
-        print(f"      Saved market state cache: {state_path}")
+        progress_write(f"saved market state cache: {state_path}")
     return state_frame, state_name_map, state_key
 
 
@@ -271,7 +287,7 @@ def load_cached_or_build_liquidity_buckets(
     if args.use_cache and not args.refresh_cache:
         cached = load_pickle(bucket_path)
         if cached is not None:
-            print(f"      Loading liquidity bucket cache: {bucket_path.name}")
+            progress_write(f"liquidity bucket cache hit: {bucket_path.name}")
             return cached, bucket_key
     liquidity_bucket_frame = build_liquidity_bucket_frame(
         amount_frame,
@@ -280,5 +296,5 @@ def load_cached_or_build_liquidity_buckets(
     )
     if args.use_cache:
         save_pickle(bucket_path, liquidity_bucket_frame)
-        print(f"      Saved liquidity bucket cache: {bucket_path}")
+        progress_write(f"saved liquidity bucket cache: {bucket_path}")
     return liquidity_bucket_frame, bucket_key

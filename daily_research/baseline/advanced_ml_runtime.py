@@ -159,6 +159,8 @@ def load_raw_data_with_cache(
     history_window: HistoryWindow,
     use_cache: bool = True,
     refresh_cache: bool = False,
+    progress_desc: str = "读取股票日线",
+    progress_position: int = 0,
 ) -> tuple[Dict[str, pd.DataFrame], dict[str, Any]]:
     payload = {
         "kind": "raw_data",
@@ -185,11 +187,17 @@ def load_raw_data_with_cache(
             history_window.effective_start_date,
             history_window.end_date,
             benchmark=benchmark,
+            progress_desc=progress_desc,
+            progress_position=progress_position,
         )
     elif data_source == "csv":
         if not csv_folder:
             raise ValueError("CSV mode requires --csv-folder.")
-        raw_df_dict = load_daily_from_csv(csv_folder)
+        raw_df_dict = load_daily_from_csv(
+            csv_folder,
+            progress_desc=progress_desc,
+            progress_position=progress_position,
+        )
         raw_df_dict = slice_data_dict(raw_df_dict, history_window.effective_start_date, history_window.end_date)
     else:
         raise ValueError(f"Unsupported data_source: {data_source}")

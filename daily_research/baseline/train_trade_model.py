@@ -33,6 +33,7 @@ from daily_research.baseline.ml_alpha import (
     save_ml_artifact,
     train_point_in_time_model_bundle,
 )
+from daily_research.progress import StageProgress
 
 
 def parse_args():
@@ -544,6 +545,214 @@ def main():
     print(f"artifact: {artifact_path}")
     print(f"meta: {meta_path}")
     print(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def main_with_progress():
+    args = parse_args()
+
+    cfg = ResearchConfig(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        universe_scope=args.universe_scope,
+        benchmark=args.benchmark,
+        execution_mode="next_open",
+        weighting_method="score",
+        score_threshold=args.score_threshold,
+        min_adv20=args.min_adv20,
+        min_price=args.min_price,
+        max_price=args.max_price,
+        enable_market_regime_filter=not args.no_market_regime_filter,
+        regime_ma_window=args.regime_ma_window,
+        regime_vol_window=args.regime_vol_window,
+        regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+    )
+
+    stocks = _parse_stocks(args.stocks)
+    file_stocks = _load_stocks_from_file(args.stocks_file)
+    if stocks or file_stocks:
+        stocks = list(dict.fromkeys(stocks + file_stocks))
+    if stocks:
+        cfg.universe = stocks
+
+    ml_cfg = MLAplhaConfig(
+        target_horizon=args.ml_target_horizon,
+        target_horizons=_parse_int_list(args.ml_target_horizons, args.ml_target_horizon),
+        target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        state_horizon_weights=_parse_state_horizon_profiles(args.ml_state_horizon_profiles),
+        enhanced_profile=args.enhanced_profile,
+        train_window_days=args.ml_train_window_days,
+        retrain_every_days=1,
+        min_train_dates=args.ml_min_train_dates,
+        max_samples_per_day=args.ml_max_samples_per_day,
+        max_train_rows=args.ml_max_train_rows,
+        random_seed=args.ml_random_seed,
+        model_family=args.ml_model_family,
+        ensemble_ml_weight=args.ensemble_ml_weight,
+        ensemble_none_weight=args.ensemble_none_weight,
+        ensemble_v2_weight=args.ensemble_v2_weight,
+        state_ensemble_weights=_parse_state_ensemble_weights(args.ensemble_state_weights),
+        train_regime_only=cfg.enable_market_regime_filter,
+        execution_mode=cfg.execution_mode,
+    )
+
+    with StageProgress(total=6, label="模型训练流程") as progress:
+        with progress.stage("准备研究宇宙", f"source={args.data_source}"):
+            if args.data_source == "tq":
+                if not cfg.universe and cfg.universe_scope == "all_a":
+                    cfg.universe = load_universe_from_tq(cfg.universe_scope)
+                elif not cfg.universe:
+                    raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
+            elif not args.csv_folder:
+                raise ValueError("CSV mode requires --csv-folder.")
+
+        with progress.stage("解析训练历史窗口", args.start_date):
+            history_window = resolve_history_window(
+                cfg=cfg,
+                ml_cfg=ml_cfg,
+                requested_start_date=args.start_date,
+                end_date=args.end_date,
+                mode="train",
+                auto_trim_history=not args.no_auto_trim_history,
+            )
+            progress.log(
+                f"train history: {history_window.effective_start_date} -> "
+                f"{history_window.end_date or 'latest'} | required_trading_days={history_window.required_trading_days}"
+            )
+
+        with progress.stage("读取训练行情数据", f"stocks={len(cfg.universe)} benchmark={cfg.benchmark}"):
+            raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
+                data_source=args.data_source,
+                csv_folder=args.csv_folder,
+                universe=cfg.universe,
+                benchmark=cfg.benchmark,
+                history_window=history_window,
+                use_cache=not args.no_cache,
+                refresh_cache=args.refresh_cache,
+                progress_desc="读取训练股票数据",
+                progress_position=1,
+            )
+            progress.log(
+                f"raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | {raw_cache_meta['cache_path']}"
+            )
+
+        with progress.stage("构建特征与缓存", args.enhanced_profile):
+            prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+                raw_df_dict=raw_df_dict,
+                raw_cache_key=raw_cache_meta["cache_key"],
+                cfg=cfg,
+                enhanced_profile=args.enhanced_profile,
+                use_cache=not args.no_cache,
+                refresh_cache=args.refresh_cache,
+            )
+            progress.log(
+                f"factor cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+                f"{prepared_cache_meta['cache_path']}"
+            )
+
+        df_dict = prepared_bundle["df_dict"]
+        benchmark_close = prepared_bundle["benchmark_close"]
+        benchmark_open = prepared_bundle["benchmark_open"]
+        factor_bundle = prepared_bundle["factor_bundle"]
+        regime_state = prepared_bundle["regime_state"]
+        filter_mask = prepared_bundle["filter_mask"]
+        feature_frames = prepared_bundle["feature_frames"]
+        market_features = prepared_bundle["market_features"]
+
+        with progress.stage("训练点时模型", ml_cfg.model_family):
+            latest_date = factor_bundle["raw_inputs"]["Close"].index.max()
+            models, train_summary = train_point_in_time_model_bundle(
+                feature_frames=feature_frames,
+                market_features=market_features,
+                close=factor_bundle["raw_inputs"]["Close"],
+                benchmark_close=benchmark_close,
+                open_df=factor_bundle["raw_inputs"]["Open"],
+                benchmark_open=benchmark_open,
+                filter_mask=filter_mask,
+                regime_state=regime_state,
+                config=ml_cfg,
+                as_of_date=latest_date,
+            )
+
+        validation_summary: dict[str, object] = {}
+        with progress.stage("写出模型产物", "artifact/meta"):
+            if args.skip_validation_summary:
+                progress.log("skip validation summary")
+            else:
+                progress.log("building default rolling validation summary...")
+                validation_summary = _build_validation_summary(
+                    feature_frames=feature_frames,
+                    market_features=market_features,
+                    close=factor_bundle["raw_inputs"]["Close"],
+                    benchmark_close=benchmark_close,
+                    open_df=factor_bundle["raw_inputs"]["Open"],
+                    benchmark_open=benchmark_open,
+                    filter_mask=filter_mask,
+                    regime_state=regime_state,
+                    ml_cfg=ml_cfg,
+                    min_observations=args.validation_min_observations,
+                    validation_retrain_every_days=args.validation_retrain_every_days,
+                )
+
+            feature_names = list(feature_frames.keys()) + list(market_features.keys())
+            artifact_path = save_ml_artifact(
+                path=args.artifact_path,
+                models=models,
+                feature_names=feature_names,
+                ml_config=ml_cfg,
+                train_summary=train_summary,
+            )
+
+            meta = {
+                "artifact_path": str(artifact_path),
+                "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "latest_data_date": str(latest_date.date()),
+                "signal_date": str(latest_date.date()),
+                "execution_date": str(get_next_trading_date(latest_date) or ""),
+                "benchmark": cfg.benchmark,
+                "universe_scope": cfg.universe_scope,
+                "universe_size": int(len(df_dict["Close"].columns)),
+                "execution_mode": cfg.execution_mode,
+                "regime_ma_window": cfg.regime_ma_window,
+                "regime_vol_window": cfg.regime_vol_window,
+                "regime_max_annual_vol": cfg.regime_max_annual_vol,
+                "regime_allowed_quadrants": list(cfg.regime_allowed_quadrants),
+                "history_window": history_window_to_dict(history_window),
+                "cache": {
+                    "raw": raw_cache_meta,
+                    "prepared": prepared_cache_meta,
+                },
+                "ml_config": {
+                    "target_horizon": ml_cfg.target_horizon,
+                    "target_horizons": list(ml_cfg.target_horizons),
+                    "target_horizon_weights": ml_cfg.target_horizon_weights or {},
+                    "state_horizon_weights": ml_cfg.state_horizon_weights or {},
+                    "train_window_days": ml_cfg.train_window_days,
+                    "min_train_dates": ml_cfg.min_train_dates,
+                    "max_samples_per_day": ml_cfg.max_samples_per_day,
+                    "max_train_rows": ml_cfg.max_train_rows,
+                    "random_seed": ml_cfg.random_seed,
+                    "model_family": ml_cfg.model_family,
+                    "ensemble_ml_weight": ml_cfg.ensemble_ml_weight,
+                    "ensemble_none_weight": ml_cfg.ensemble_none_weight,
+                    "ensemble_v2_weight": ml_cfg.ensemble_v2_weight,
+                    "state_ensemble_weights": ml_cfg.state_ensemble_weights or {},
+                    "enhanced_profile": args.enhanced_profile,
+                },
+                "train_summary": train_summary,
+                "validation_summary": validation_summary,
+            }
+            meta_path = Path(args.artifact_meta_path) if args.artifact_meta_path else artifact_path.with_suffix(".json")
+            meta_path.parent.mkdir(parents=True, exist_ok=True)
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print("模型产物已写入。")
+    print(f"artifact: {artifact_path}")
+    print(f"meta: {meta_path}")
+    print(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+main = main_with_progress
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
+from daily_research.progress import create_progress
+
 
 A_SHARE_PREFIXES = (
     "00",
@@ -34,6 +36,9 @@ STYLE_SECTOR_CODES = {
         "880526.SH",
     ],
 }
+
+MARKET_DATA_FIELDS = ("Open", "High", "Low", "Close", "Volume", "Amount")
+TQ_FETCH_BATCH_SIZE = 64
 
 
 def _try_import_tq():
@@ -234,6 +239,8 @@ def _fetch_tq_data(
     end_date: str = "",
     count: int = 0,
     dividend_type: str = "front",
+    progress_desc: str = "读取股票日线",
+    progress_position: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     tq = _try_import_tq()
     if tq is None:
@@ -241,18 +248,44 @@ def _fetch_tq_data(
 
     tq.initialize(__file__)
     try:
-        df_dict = tq.get_market_data(
-            field_list=["Open", "High", "Low", "Close", "Volume", "Amount"],
-            stock_list=stock_list,
-            start_time=start_date,
-            end_time=end_date,
-            count=count,
-            dividend_type=dividend_type,
-            period="1d",
-        )
-        if not df_dict or "Close" not in df_dict:
+        chunk_size = max(1, min(TQ_FETCH_BATCH_SIZE, len(stock_list)))
+        collected: Dict[str, list[pd.DataFrame]] = {field: [] for field in MARKET_DATA_FIELDS}
+        with create_progress(
+            total=len(stock_list),
+            desc=str(progress_desc or "读取股票日线"),
+            unit="stock",
+            leave=False,
+            position=progress_position,
+        ) as progress:
+            for start in range(0, len(stock_list), chunk_size):
+                batch = stock_list[start:start + chunk_size]
+                batch_dict = tq.get_market_data(
+                    field_list=list(MARKET_DATA_FIELDS),
+                    stock_list=batch,
+                    start_time=start_date,
+                    end_time=end_date,
+                    count=count,
+                    dividend_type=dividend_type,
+                    period="1d",
+                )
+                if not batch_dict or "Close" not in batch_dict:
+                    raise RuntimeError(f"TDX returned empty data for batch starting at {start}.")
+                for field in MARKET_DATA_FIELDS:
+                    frame = batch_dict.get(field)
+                    if frame is None or frame.empty:
+                        continue
+                    collected[field].append(_ensure_datetime_index(frame))
+                progress.update(len(batch))
+
+        merged: Dict[str, pd.DataFrame] = {}
+        for field, frames in collected.items():
+            if not frames:
+                continue
+            merged_frame = pd.concat(frames, axis=1)
+            merged[field] = merged_frame.loc[:, ~merged_frame.columns.duplicated(keep="last")]
+        if not merged or "Close" not in merged:
             raise RuntimeError("TDX returned empty data.")
-        return align_data_dict({k: _ensure_datetime_index(v) for k, v in df_dict.items()})
+        return align_data_dict({k: _ensure_datetime_index(v) for k, v in merged.items()})
     finally:
         try:
             tq.close()
@@ -267,6 +300,8 @@ def load_daily_from_tq(
     count: int = 0,
     dividend_type: str = "front",
     benchmark: str = "",
+    progress_desc: str = "读取股票日线",
+    progress_position: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     to_fetch = [s for s in stock_list if s]
     benchmark_symbol = resolve_benchmark_symbol(benchmark) if benchmark else ""
@@ -281,37 +316,55 @@ def load_daily_from_tq(
         end_date=end_date,
         count=count,
         dividend_type=dividend_type,
+        progress_desc=progress_desc,
+        progress_position=progress_position,
     )
 
 
-def load_daily_from_csv(folder: str) -> Dict[str, pd.DataFrame]:
+def load_daily_from_csv(
+    folder: str,
+    *,
+    progress_desc: str = "读取CSV行情",
+    progress_position: int = 0,
+) -> Dict[str, pd.DataFrame]:
     path = Path(folder)
     if not path.exists():
         raise FileNotFoundError(f"CSV folder not found: {folder}")
 
     fields = {"Open": {}, "High": {}, "Low": {}, "Close": {}, "Volume": {}, "Amount": {}}
     required_fields = tuple(fields.keys())
+    csv_files = sorted(path.glob("*.csv"))
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found under: {folder}")
 
-    for csv_file in path.glob("*.csv"):
-        stock = csv_file.stem
-        df = pd.read_csv(csv_file)
+    with create_progress(
+        total=len(csv_files),
+        desc=str(progress_desc or "读取CSV行情"),
+        unit="file",
+        leave=False,
+        position=progress_position,
+    ) as progress:
+        for csv_file in csv_files:
+            stock = csv_file.stem
+            df = pd.read_csv(csv_file)
 
-        if "Date" in df.columns:
-            df["Date"] = pd.to_datetime(df["Date"])
-            df = df.set_index("Date")
-        elif "Datetime" in df.columns:
-            df["Datetime"] = pd.to_datetime(df["Datetime"])
-            df = df.set_index("Datetime")
-        else:
-            raise ValueError(f"{csv_file.name} missing Date/Datetime column.")
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.set_index("Date")
+            elif "Datetime" in df.columns:
+                df["Datetime"] = pd.to_datetime(df["Datetime"])
+                df = df.set_index("Datetime")
+            else:
+                raise ValueError(f"{csv_file.name} missing Date/Datetime column.")
 
-        missing = [field for field in required_fields if field not in df.columns]
-        if missing:
-            raise ValueError(f"{csv_file.name} missing fields: {missing}")
+            missing = [field for field in required_fields if field not in df.columns]
+            if missing:
+                raise ValueError(f"{csv_file.name} missing fields: {missing}")
 
-        df = df.sort_index()
-        for field in required_fields:
-            fields[field][stock] = df[field].copy()
+            df = df.sort_index()
+            for field in required_fields:
+                fields[field][stock] = df[field].copy()
+            progress.update(1)
 
     df_dict = {k: pd.DataFrame(v) for k, v in fields.items()}
     return align_data_dict({k: _ensure_datetime_index(v) for k, v in df_dict.items()})
