@@ -11,8 +11,10 @@ DEFAULT_DOCS = [
     "README.md",
     "daily_research/README.md",
     "daily_research/execution/README.md",
+    "daily_research/runtime_environment.md",
     "daily_research/research_log.md",
     "daily_research/daily_research_plan.md",
+    "t0_project/README.md",
 ]
 
 
@@ -41,10 +43,22 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "execution README should stay focused on current execution defaults and daily operations"),
         ),
     ),
+    "daily_research/runtime_environment.md": DocRule(
+        max_lines=180,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "runtime_environment should stay focused on the current environment baseline"),
+        ),
+    ),
     "daily_research/daily_research_plan.md": DocRule(
         max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research_plan should keep only current priorities and stop rules"),
+        ),
+    ),
+    "t0_project/README.md": DocRule(
+        max_lines=220,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0_project README should describe the current experiment boundary instead of becoming a dated log"),
         ),
     ),
 }

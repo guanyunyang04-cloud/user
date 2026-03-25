@@ -6,6 +6,7 @@
   - 日线研究、先进版机器学习主线、执行端、`deep_alpha` 表示学习研究。
 - `t0_project/`
   - 通达信 T+0 / 盘中策略与强化学习实验区，和 `daily_research` 的次日开盘执行主线分开维护。
+- 本轮项目评估与维护结论见 `PROJECT_REVIEW.md`，`t0_project` 的操作边界见 `t0_project/README.md`。
 
 ## 当前结论
 
@@ -32,10 +33,12 @@
 ## 代码与产物边界
 
 - 需要长期维护的源码与文档：
+  - `PROJECT_REVIEW.md`
   - `daily_research/baseline/`
   - `daily_research/deep_alpha/`
   - `daily_research/execution/`
   - `daily_research/*.md`
+  - `t0_project/README.md`
   - `t0_project/*.py`
   - `t0_project/execution/`
 - 主要是生成物、默认不应手工维护：

@@ -25,6 +25,14 @@ REPORT_DIRS = [
     "t0_project/logs",
     "t0_project/ppo_tdx_tensorboard",
 ]
+REPORT_ALERT_THRESHOLDS = {
+    "daily_research/cache": 256 * 1024**2,
+    "daily_research/output": 512 * 1024**2,
+    "daily_research/execution/models": 128 * 1024**2,
+    "daily_research/execution/output": 64 * 1024**2,
+    "t0_project/ppo_tdx_tensorboard": 256 * 1024**2,
+}
+ARCHIVE_MONITORED_SOURCES = ("daily_research/cache", "daily_research/output")
 
 TARGET_SPECS = {
     "pycache": {
@@ -288,6 +296,96 @@ def print_archive_plan(plan: dict[str, Any], limit: int) -> None:
             print(f"    ... {hidden} more candidate(s)")
 
 
+def build_archive_status(root: Path) -> dict[str, Any]:
+    try:
+        plan = build_archive_plan(root, DEFAULT_ARCHIVE_POLICY, selected_rules=())
+    except SystemExit as exc:
+        return {
+            "available": False,
+            "policy_path": str(DEFAULT_ARCHIVE_POLICY.relative_to(root)),
+            "error": str(exc),
+        }
+
+    return {
+        "available": True,
+        "policy_path": plan["policy_path"],
+        "candidate_count": plan["candidate_count"],
+        "candidate_size_bytes": plan["candidate_size_bytes"],
+        "rules": [
+            {
+                "name": rule["name"],
+                "source": rule["source"],
+                "archive_subdir": rule["archive_subdir"],
+                "candidate_count": rule["candidate_count"],
+                "candidate_size_bytes": rule["candidate_size_bytes"],
+            }
+            for rule in plan["rules"]
+        ],
+    }
+
+
+def build_report_alerts(report: dict[str, Any]) -> list[dict[str, str]]:
+    alerts: list[dict[str, str]] = []
+    directory_index = {
+        item["path"]: item
+        for item in report["directory_sizes"]
+        if item["exists"]
+    }
+
+    for raw_path, threshold_bytes in REPORT_ALERT_THRESHOLDS.items():
+        item = directory_index.get(raw_path)
+        if not item:
+            continue
+        if int(item["size_bytes"]) >= threshold_bytes:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "code": "hot_dir_size",
+                    "path": raw_path,
+                    "message": (
+                        f"{raw_path} has grown to {format_bytes(int(item['size_bytes']))}, "
+                        f"which exceeds the maintenance threshold {format_bytes(threshold_bytes)}."
+                    ),
+                }
+            )
+
+    if report["pycache_dirs"] or report["pyc_files"]:
+        alerts.append(
+            {
+                "level": "info",
+                "code": "pycache_present",
+                "path": ".",
+                "message": (
+                    f"Workspace currently contains {report['pycache_dirs']} __pycache__ directories "
+                    f"and {report['pyc_files']} *.pyc files. Use the pycache cleanup target after validation."
+                ),
+            }
+        )
+
+    archive_status = report["archive_status"]
+    if archive_status.get("available") and int(archive_status["candidate_count"]) == 0:
+        oversized_sources = [
+            raw_path
+            for raw_path in ARCHIVE_MONITORED_SOURCES
+            if int(directory_index.get(raw_path, {}).get("size_bytes", 0))
+            >= int(REPORT_ALERT_THRESHOLDS.get(raw_path, 0))
+        ]
+        if oversized_sources:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "code": "archive_coverage_gap",
+                    "path": ",".join(oversized_sources),
+                    "message": (
+                        "Archive dry-run currently matches 0 candidates while active hot areas remain in "
+                        f"{', '.join(oversized_sources)}. Review recency thresholds or inspect the newest heavy artifacts manually."
+                    ),
+                }
+            )
+
+    return alerts
+
+
 def build_report(root: Path) -> dict:
     directory_sizes = []
     for raw in REPORT_DIRS:
@@ -297,6 +395,7 @@ def build_report(root: Path) -> dict:
                 "path": raw,
                 "exists": path.exists(),
                 "size_bytes": path_size(path),
+                "latest_mtime": iso_timestamp(latest_mtime(path)) if path.exists() else "",
             }
         )
     directory_sizes.sort(key=lambda item: item["size_bytes"], reverse=True)
@@ -304,19 +403,23 @@ def build_report(root: Path) -> dict:
     pycache_dirs = len(list(root.rglob("__pycache__")))
     pyc_files = len(list(root.rglob("*.pyc")))
     python_files = len(list(root.rglob("*.py")))
+    archive_status = build_archive_status(root)
 
-    return {
+    report = {
         "workspace_root": str(root),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "directory_sizes": directory_sizes,
         "pycache_dirs": pycache_dirs,
         "pyc_files": pyc_files,
         "python_files": python_files,
+        "archive_status": archive_status,
         "cleanup_targets": {
             name: TARGET_SPECS[name]["description"]
             for name in TARGET_SPECS
         },
     }
+    report["alerts"] = build_report_alerts(report)
+    return report
 
 
 def print_report(report: dict) -> None:
@@ -330,7 +433,31 @@ def print_report(report: dict) -> None:
     for item in report["directory_sizes"]:
         if not item["exists"]:
             continue
-        print(f"  - {item['path']}: {format_bytes(item['size_bytes'])}")
+        print(
+            f"  - {item['path']}: {format_bytes(item['size_bytes'])} "
+            f"(latest_mtime={item['latest_mtime']})"
+        )
+    print()
+    print("Archive coverage:")
+    archive_status = report["archive_status"]
+    if not archive_status.get("available"):
+        print(f"  - unavailable: {archive_status['error']}")
+    else:
+        print(
+            f"  - policy={archive_status['policy_path']} "
+            f"candidates={archive_status['candidate_count']} "
+            f"size={format_bytes(archive_status['candidate_size_bytes'])}"
+        )
+        for rule in archive_status["rules"]:
+            print(
+                f"  - rule={rule['name']} source={rule['source']} "
+                f"candidates={rule['candidate_count']} size={format_bytes(rule['candidate_size_bytes'])}"
+            )
+    if report["alerts"]:
+        print()
+        print("Alerts:")
+        for alert in report["alerts"]:
+            print(f"  - [{alert['level']}] {alert['message']}")
     print()
     print("Cleanup targets:")
     for name, description in report["cleanup_targets"].items():
@@ -341,7 +468,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     report = build_report(WORKSPACE_ROOT)
     print_report(report)
     if args.json_out:
-        out_path = Path(args.json_out)
+        out_path = resolve_workspace_path(args.json_out)
         write_json(out_path, report)
         print()
         print(f"JSON report written to: {out_path}")
@@ -387,7 +514,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     print_archive_plan(plan, args.limit)
 
     if args.json_out:
-        out_path = Path(args.json_out)
+        out_path = resolve_workspace_path(args.json_out)
         write_json(out_path, plan)
         print()
         print(f"Archive plan JSON written to: {out_path}")
@@ -442,7 +569,11 @@ def cmd_archive(args: argparse.Namespace) -> int:
         "moved_size_bytes": moved_size_bytes,
         "items": moved_items,
     }
-    manifest_path = Path(args.manifest_out) if args.manifest_out else archive_root / "manifests" / f"archive_{batch_id}.json"
+    manifest_path = (
+        resolve_workspace_path(args.manifest_out)
+        if args.manifest_out
+        else archive_root / "manifests" / f"archive_{batch_id}.json"
+    )
     write_json(manifest_path, manifest)
 
     print()
