@@ -74,6 +74,7 @@ def parse_args():
             "ma50_state_ensemble_round1",
             "ma50_state_ensemble_round2_low_only",
             "ma50_regime_vol_round1",
+            "bad_market_round1",
         ],
         default="round1",
     )
@@ -124,6 +125,27 @@ def parse_args():
         default="recent_full:20250307:20260319,latest_weak:20250905:20260319",
         help="Comma-separated named windows in name:YYYYMMDD:YYYYMMDD format.",
     )
+    parser.add_argument(
+        "--selection-objective",
+        choices=["default_excess", "bad_market_absolute"],
+        default="default_excess",
+        help="How to rank candidates in the final summary.",
+    )
+    parser.add_argument(
+        "--bad-market-quadrants",
+        default="trend_down_low_vol,trend_down_high_vol",
+        help="Quadrants treated as bad-market environments for dedicated evaluation.",
+    )
+    parser.add_argument(
+        "--primary-bad-market-quadrant",
+        default="trend_down_low_vol",
+        help="Primary bad-market quadrant used for tie-breaking when selection-objective=bad_market_absolute.",
+    )
+    parser.add_argument(
+        "--candidate-labels",
+        default="",
+        help="Optional comma-separated subset of candidate labels to run.",
+    )
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument(
@@ -165,6 +187,16 @@ def _parse_csv_list(raw: str | None) -> list[str]:
     if not raw:
         return []
     return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def _normalize_quadrant_value(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return _parse_csv_list(raw)
+    if isinstance(raw, (list, tuple, set)):
+        return [str(item).strip().lower() for item in raw if str(item).strip()]
+    raise TypeError(f"Unsupported quadrant value: {raw!r}")
 
 
 def _parse_int_tuple(raw: str | None, fallback: int) -> tuple[int, ...]:
@@ -244,6 +276,13 @@ def _parse_named_windows(raw: str | None) -> list[tuple[str, str, str]]:
         name, start, end = parts
         windows.append((name.strip(), start.strip(), end.strip()))
     return windows
+
+
+def _build_equity_from_returns(returns: pd.Series) -> pd.Series:
+    if returns.empty:
+        return pd.Series(dtype=float)
+    clean = pd.to_numeric(returns, errors="coerce").fillna(0.0)
+    return (1.0 + clean).cumprod()
 
 
 def _subset_raw_df_dict_to_stocks(
@@ -500,6 +539,145 @@ def _candidate_profiles(candidate_set: str) -> list[dict[str, Any]]:
             {"label": "vol034", "regime_max_annual_vol": 0.34},
         ]
 
+    if candidate_set == "bad_market_round1":
+        return [
+            {"label": "baseline"},
+            {
+                "label": "downlow_rebound_open",
+                "enhanced_profile": "upv2_downlow_rebound_v1",
+                "regime_quadrants": [
+                    "trend_up_low_vol",
+                    "trend_up_high_vol",
+                    "trend_down_low_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.30, "none": 0.35, "v2": 0.35},
+                },
+                "stop_loss": -0.06,
+                "take_profit": 0.10,
+            },
+            {
+                "label": "downlow_rebound_open_hold2",
+                "enhanced_profile": "upv2_downlow_rebound_v1",
+                "regime_quadrants": [
+                    "trend_up_low_vol",
+                    "trend_up_high_vol",
+                    "trend_down_low_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.30, "none": 0.35, "v2": 0.35},
+                },
+                "turnover_limit": 1.00,
+                "min_hold_days": 2,
+                "stop_loss": -0.06,
+                "take_profit": 0.10,
+            },
+            {
+                "label": "downlow_ruleheavy_open",
+                "enhanced_profile": "upv2_downlow_rebound_v1",
+                "regime_quadrants": [
+                    "trend_up_low_vol",
+                    "trend_up_high_vol",
+                    "trend_down_low_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.70, 10: 0.20, 20: 0.10},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.15, "none": 0.45, "v2": 0.40},
+                },
+                "turnover_limit": 0.80,
+                "stop_loss": -0.05,
+                "take_profit": 0.08,
+            },
+            {
+                "label": "downdual_reversal_open",
+                "enhanced_profile": "upv2_downdual_reversal_v1",
+                "regime_quadrants": [
+                    "trend_up_low_vol",
+                    "trend_up_high_vol",
+                    "trend_down_low_vol",
+                    "trend_down_high_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                    "trend_down_high_vol": {5: 0.65, 10: 0.25, 20: 0.10},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.25, "none": 0.35, "v2": 0.40},
+                    "trend_down_high_vol": {"ml": 0.15, "none": 0.40, "v2": 0.45},
+                },
+                "stop_loss": -0.05,
+                "take_profit": 0.08,
+            },
+            {
+                "label": "downdual_reversal_open_hold2",
+                "enhanced_profile": "upv2_downdual_reversal_v1",
+                "regime_quadrants": [
+                    "trend_up_low_vol",
+                    "trend_up_high_vol",
+                    "trend_down_low_vol",
+                    "trend_down_high_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                    "trend_down_high_vol": {5: 0.65, 10: 0.25, 20: 0.10},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.25, "none": 0.35, "v2": 0.40},
+                    "trend_down_high_vol": {"ml": 0.15, "none": 0.40, "v2": 0.45},
+                },
+                "turnover_limit": 0.80,
+                "min_hold_days": 2,
+                "stop_loss": -0.05,
+                "take_profit": 0.08,
+            },
+            {
+                "label": "downdual_reversal_badonly",
+                "enhanced_profile": "upv2_downdual_reversal_v1",
+                "regime_quadrants": [
+                    "trend_down_low_vol",
+                    "trend_down_high_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                    "trend_down_high_vol": {5: 0.65, 10: 0.25, 20: 0.10},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.25, "none": 0.35, "v2": 0.40},
+                    "trend_down_high_vol": {"ml": 0.15, "none": 0.40, "v2": 0.45},
+                },
+                "stop_loss": -0.05,
+                "take_profit": 0.08,
+            },
+            {
+                "label": "downdual_reversal_badonly_hold2",
+                "enhanced_profile": "upv2_downdual_reversal_v1",
+                "regime_quadrants": [
+                    "trend_down_low_vol",
+                    "trend_down_high_vol",
+                ],
+                "state_horizon_weights": {
+                    "trend_down_low_vol": {5: 0.55, 10: 0.30, 20: 0.15},
+                    "trend_down_high_vol": {5: 0.65, 10: 0.25, 20: 0.10},
+                },
+                "state_ensemble_weights": {
+                    "trend_down_low_vol": {"ml": 0.25, "none": 0.35, "v2": 0.40},
+                    "trend_down_high_vol": {"ml": 0.15, "none": 0.40, "v2": 0.45},
+                },
+                "turnover_limit": 0.80,
+                "min_hold_days": 2,
+                "stop_loss": -0.05,
+                "take_profit": 0.08,
+            },
+        ]
+
     raise ValueError(f"Unsupported candidate_set: {candidate_set}")
 
 
@@ -520,60 +698,92 @@ def _max_drawdown(equity: pd.Series) -> float:
     return float(dd.min()) if len(dd) else 0.0
 
 
+def _empty_metrics() -> dict[str, Any]:
+    return {
+        "day_count": 0,
+        "total_return": np.nan,
+        "annual_return": np.nan,
+        "annual_vol": np.nan,
+        "sharpe": np.nan,
+        "benchmark_total_return": np.nan,
+        "benchmark_annual_return": np.nan,
+        "excess_total_return": np.nan,
+        "excess_annual_return": np.nan,
+        "excess_sharpe": np.nan,
+        "excess_max_drawdown": np.nan,
+        "max_drawdown": np.nan,
+        "avg_holding_count": np.nan,
+        "avg_turnover": np.nan,
+        "hit_rate": np.nan,
+        "regime_active_ratio": np.nan,
+    }
+
+
+def _metrics_from_window(window: pd.DataFrame) -> dict[str, Any]:
+    if window.empty:
+        return _empty_metrics()
+
+    portfolio_returns = pd.to_numeric(window["portfolio_return"], errors="coerce").fillna(0.0)
+    benchmark_returns = pd.to_numeric(window["benchmark_return"], errors="coerce").fillna(0.0)
+    excess_returns = pd.to_numeric(window["excess_return"], errors="coerce").fillna(0.0)
+
+    portfolio_equity = _build_equity_from_returns(portfolio_returns)
+    benchmark_equity = _build_equity_from_returns(benchmark_returns)
+    excess_equity = _build_equity_from_returns(excess_returns)
+
+    portfolio_ann_ret = _annualized_return(portfolio_equity)
+    benchmark_ann_ret = _annualized_return(benchmark_equity)
+    excess_ann_ret = _annualized_return(excess_equity) if not excess_equity.empty else 0.0
+    portfolio_ann_vol = _annualized_vol(portfolio_returns)
+    excess_ann_vol = _annualized_vol(excess_returns)
+
+    return {
+        "day_count": int(len(window)),
+        "total_return": float(portfolio_equity.iloc[-1] - 1.0),
+        "annual_return": float(portfolio_ann_ret),
+        "annual_vol": float(portfolio_ann_vol),
+        "sharpe": float(portfolio_ann_ret / portfolio_ann_vol) if portfolio_ann_vol > 0 else 0.0,
+        "benchmark_total_return": float(benchmark_equity.iloc[-1] - 1.0),
+        "benchmark_annual_return": float(benchmark_ann_ret),
+        "excess_total_return": float(excess_equity.iloc[-1] - 1.0) if not excess_equity.empty else 0.0,
+        "excess_annual_return": float(excess_ann_ret),
+        "excess_sharpe": float(excess_ann_ret / excess_ann_vol) if excess_ann_vol > 0 else 0.0,
+        "excess_max_drawdown": float(_max_drawdown(excess_equity)) if not excess_equity.empty else 0.0,
+        "max_drawdown": float(_max_drawdown(portfolio_equity)),
+        "avg_holding_count": float(window["holding_count"].mean()),
+        "avg_turnover": float(window["turnover"].mean()),
+        "hit_rate": float((portfolio_returns > 0).mean()) if not portfolio_returns.empty else 0.0,
+        "regime_active_ratio": float(window["regime_on"].mean()) if "regime_on" in window else np.nan,
+    }
+
+
 def _slice_metrics(equity_df: pd.DataFrame, start: str, end: str, include_window_keys: bool = True) -> dict[str, Any]:
     window = equity_df.loc[(equity_df.index >= pd.Timestamp(start)) & (equity_df.index <= pd.Timestamp(end))].copy()
-    if window.empty:
-        metrics = {
-            "total_return": np.nan,
-            "annual_return": np.nan,
-            "annual_vol": np.nan,
-            "sharpe": np.nan,
-            "benchmark_total_return": np.nan,
-            "benchmark_annual_return": np.nan,
-            "excess_total_return": np.nan,
-            "excess_annual_return": np.nan,
-            "excess_sharpe": np.nan,
-            "excess_max_drawdown": np.nan,
-            "max_drawdown": np.nan,
-            "avg_holding_count": np.nan,
-            "avg_turnover": np.nan,
-            "hit_rate": np.nan,
-            "regime_active_ratio": np.nan,
-        }
-    else:
-        portfolio_equity = window["portfolio_equity"] / float(window["portfolio_equity"].iloc[0])
-        benchmark_equity = window["benchmark_equity"] / float(window["benchmark_equity"].iloc[0])
-        excess_equity = portfolio_equity / benchmark_equity.replace(0.0, np.nan)
-        excess_equity = excess_equity.replace([np.inf, -np.inf], np.nan).ffill().dropna()
-
-        portfolio_returns = window["portfolio_return"].dropna()
-        excess_returns = window["excess_return"].dropna()
-        portfolio_ann_ret = _annualized_return(portfolio_equity)
-        benchmark_ann_ret = _annualized_return(benchmark_equity)
-        excess_ann_ret = _annualized_return(excess_equity) if not excess_equity.empty else 0.0
-        portfolio_ann_vol = _annualized_vol(portfolio_returns)
-        excess_ann_vol = _annualized_vol(excess_returns)
-
-        metrics = {
-            "total_return": float(portfolio_equity.iloc[-1] - 1.0),
-            "annual_return": float(portfolio_ann_ret),
-            "annual_vol": float(portfolio_ann_vol),
-            "sharpe": float(portfolio_ann_ret / portfolio_ann_vol) if portfolio_ann_vol > 0 else 0.0,
-            "benchmark_total_return": float(benchmark_equity.iloc[-1] - 1.0),
-            "benchmark_annual_return": float(benchmark_ann_ret),
-            "excess_total_return": float(excess_equity.iloc[-1] - 1.0) if not excess_equity.empty else 0.0,
-            "excess_annual_return": float(excess_ann_ret),
-            "excess_sharpe": float(excess_ann_ret / excess_ann_vol) if excess_ann_vol > 0 else 0.0,
-            "excess_max_drawdown": float(_max_drawdown(excess_equity)) if not excess_equity.empty else 0.0,
-            "max_drawdown": float(_max_drawdown(portfolio_equity)),
-            "avg_holding_count": float(window["holding_count"].mean()),
-            "avg_turnover": float(window["turnover"].mean()),
-            "hit_rate": float((portfolio_returns > 0).mean()) if not portfolio_returns.empty else 0.0,
-            "regime_active_ratio": float(window["regime_on"].mean()) if "regime_on" in window else np.nan,
-        }
+    metrics = _metrics_from_window(window)
     if include_window_keys:
         metrics["holdout_start"] = pd.Timestamp(start).strftime("%Y-%m-%d")
         metrics["holdout_end"] = pd.Timestamp(end).strftime("%Y-%m-%d")
+    return metrics
+
+
+def _slice_metrics_by_quadrants(
+    equity_df: pd.DataFrame,
+    quadrant_series: pd.Series,
+    start: str,
+    end: str,
+    quadrants: list[str],
+    include_window_keys: bool = True,
+) -> dict[str, Any]:
+    selected_quadrants = {str(item).strip().lower() for item in quadrants if str(item).strip()}
+    window = equity_df.loc[(equity_df.index >= pd.Timestamp(start)) & (equity_df.index <= pd.Timestamp(end))].copy()
+    if selected_quadrants and not window.empty:
+        aligned_quadrants = quadrant_series.reindex(window.index).astype(str).str.lower()
+        window = window.loc[aligned_quadrants.isin(selected_quadrants)]
+    metrics = _metrics_from_window(window)
+    if include_window_keys:
+        metrics["holdout_start"] = pd.Timestamp(start).strftime("%Y-%m-%d")
+        metrics["holdout_end"] = pd.Timestamp(end).strftime("%Y-%m-%d")
+        metrics["quadrants"] = list(selected_quadrants)
     return metrics
 
 
@@ -616,6 +826,8 @@ def _candidate_requires_prepared_recompute(candidate: dict[str, Any]) -> bool:
             "regime_ma_window",
             "regime_vol_window",
             "regime_max_annual_vol",
+            "regime_quadrants",
+            "enhanced_profile",
         )
     )
 
@@ -623,7 +835,27 @@ def _candidate_requires_prepared_recompute(candidate: dict[str, Any]) -> bool:
 def main():
     args = parse_args()
     candidate_profiles = _candidate_profiles(args.candidate_set)
+    requested_candidate_labels = {
+        str(item).strip()
+        for item in str(args.candidate_labels or "").split(",")
+        if str(item).strip()
+    }
+    if requested_candidate_labels:
+        candidate_profiles = [
+            candidate for candidate in candidate_profiles
+            if str(candidate.get("label", "")).strip() in requested_candidate_labels
+        ]
+        if not candidate_profiles:
+            raise ValueError(
+                f"No candidates matched --candidate-labels={sorted(requested_candidate_labels)}"
+            )
     full_recompute_mode = any(_candidate_requires_prepared_recompute(candidate) for candidate in candidate_profiles)
+    bad_market_quadrants = _parse_csv_list(args.bad_market_quadrants)
+    primary_bad_market_quadrant = str(args.primary_bad_market_quadrant or "").strip().lower()
+    if args.selection_objective == "bad_market_absolute" and not bad_market_quadrants:
+        raise ValueError("bad_market_absolute objective requires at least one --bad-market-quadrants value.")
+    if primary_bad_market_quadrant and primary_bad_market_quadrant not in bad_market_quadrants:
+        bad_market_quadrants = [primary_bad_market_quadrant] + [item for item in bad_market_quadrants if item != primary_bad_market_quadrant]
 
     cfg = ResearchConfig(
         start_date=args.start_date,
@@ -837,6 +1069,9 @@ def main():
             "ml": asdict(ml_cfg),
         },
         "candidate_set": args.candidate_set,
+        "selection_objective": args.selection_objective,
+        "bad_market_quadrants": bad_market_quadrants,
+        "primary_bad_market_quadrant": primary_bad_market_quadrant,
         "windows": [
             {"name": name, "start": start, "end": end}
             for name, start, end in _parse_named_windows(args.windows)
@@ -856,6 +1091,7 @@ def main():
         label = str(candidate["label"])
         run_cfg = _clone_research_config(cfg)
         run_ml_cfg = _clone_ml_config(ml_cfg)
+        candidate_enhanced_profile = str(candidate.get("enhanced_profile", args.enhanced_profile))
         run_ml_cfg.state_horizon_weights = _merge_nested_dict(
             ml_cfg.state_horizon_weights,
             candidate.get("state_horizon_weights"),
@@ -874,6 +1110,8 @@ def main():
             run_cfg.regime_vol_window = int(candidate["regime_vol_window"])
         if "regime_max_annual_vol" in candidate:
             run_cfg.regime_max_annual_vol = float(candidate["regime_max_annual_vol"])
+        if "regime_quadrants" in candidate:
+            run_cfg.regime_allowed_quadrants = _normalize_quadrant_value(candidate["regime_quadrants"])
         if "stop_loss" in candidate:
             run_cfg.stop_loss = float(candidate["stop_loss"])
         if "take_profit" in candidate:
@@ -890,7 +1128,7 @@ def main():
                 raw_df_dict=prepared_raw_df_dict,
                 raw_cache_key=prepared_raw_cache_key,
                 cfg=run_cfg,
-                enhanced_profile=args.enhanced_profile,
+                enhanced_profile=candidate_enhanced_profile,
                 use_cache=not args.no_cache,
                 refresh_cache=args.refresh_cache,
             )
@@ -996,6 +1234,7 @@ def main():
                 "prepared_cache_key": prepared_cache_meta["cache_key"] if prepared_cache_meta else "",
                 "prepared_cache_path": prepared_cache_meta["cache_path"] if prepared_cache_meta else "",
                 "prepared_cache_hit": bool(prepared_cache_meta["cache_hit"]) if prepared_cache_meta else False,
+                "enhanced_profile": candidate_enhanced_profile,
                 "state_horizon_weights": run_ml_cfg.state_horizon_weights or {},
                 "state_ensemble_weights": run_ml_cfg.state_ensemble_weights or {},
                 "turnover_limit": float(run_cfg.turnover_limit),
@@ -1004,6 +1243,40 @@ def main():
                 "take_profit": float(run_cfg.take_profit),
             }
         )
+
+        full_start = pd.Timestamp(equity_df.index.min()).strftime("%Y%m%d")
+        full_end = pd.Timestamp(equity_df.index.max()).strftime("%Y%m%d")
+        quadrant_series = prepared_bundle["regime_state"]["quadrant"].reindex(equity_df.index)
+        bad_full_metrics = _slice_metrics_by_quadrants(
+            equity_df,
+            quadrant_series,
+            full_start,
+            full_end,
+            bad_market_quadrants,
+        )
+        primary_bad_full_metrics = _slice_metrics_by_quadrants(
+            equity_df,
+            quadrant_series,
+            full_start,
+            full_end,
+            [primary_bad_market_quadrant] if primary_bad_market_quadrant else [],
+        )
+        (run_dir / "metrics_bad_market_full.json").write_text(
+            json.dumps(bad_full_metrics, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (run_dir / "metrics_primary_bad_market_full.json").write_text(
+            json.dumps(primary_bad_full_metrics, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        metrics["bad_market_summary"] = {
+            "quadrants": list(bad_market_quadrants),
+            **bad_full_metrics,
+        }
+        metrics["primary_bad_market_summary"] = {
+            "quadrant": primary_bad_market_quadrant,
+            **primary_bad_full_metrics,
+        }
 
         equity_df.to_csv(run_dir / "equity_curve.csv", encoding="utf-8-sig")
         action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
@@ -1028,9 +1301,18 @@ def main():
             "full_excess_sharpe": metrics.get("excess_sharpe"),
             "full_excess_max_drawdown": metrics.get("excess_max_drawdown"),
             "full_avg_turnover": metrics.get("avg_turnover"),
+            "full_bad_market_total_return": bad_full_metrics.get("total_return"),
+            "full_bad_market_excess_total_return": bad_full_metrics.get("excess_total_return"),
+            "full_bad_market_max_drawdown": bad_full_metrics.get("max_drawdown"),
+            "full_bad_market_day_count": bad_full_metrics.get("day_count"),
+            "full_primary_bad_market_total_return": primary_bad_full_metrics.get("total_return"),
+            "full_primary_bad_market_excess_total_return": primary_bad_full_metrics.get("excess_total_return"),
+            "full_primary_bad_market_day_count": primary_bad_full_metrics.get("day_count"),
             "regime_ma_window": run_cfg.regime_ma_window,
             "regime_vol_window": run_cfg.regime_vol_window,
             "regime_max_annual_vol": run_cfg.regime_max_annual_vol,
+            "regime_allowed_quadrants": json.dumps(run_cfg.regime_allowed_quadrants, ensure_ascii=False),
+            "enhanced_profile": candidate_enhanced_profile,
             "state_horizon_weights": json.dumps(run_ml_cfg.state_horizon_weights or {}, ensure_ascii=False, sort_keys=True),
             "state_ensemble_weights": json.dumps(run_ml_cfg.state_ensemble_weights or {}, ensure_ascii=False, sort_keys=True),
             "turnover_limit": run_cfg.turnover_limit,
@@ -1040,9 +1322,31 @@ def main():
         }
         for window_name, start, end in windows:
             window_metrics = _slice_metrics(equity_df, start, end)
+            bad_window_metrics = _slice_metrics_by_quadrants(
+                equity_df,
+                quadrant_series,
+                start,
+                end,
+                bad_market_quadrants,
+            )
+            primary_bad_window_metrics = _slice_metrics_by_quadrants(
+                equity_df,
+                quadrant_series,
+                start,
+                end,
+                [primary_bad_market_quadrant] if primary_bad_market_quadrant else [],
+            )
             metrics_name = f"metrics_{window_name}.json"
             (run_dir / metrics_name).write_text(
                 json.dumps(window_metrics, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            (run_dir / f"metrics_{window_name}_bad_market.json").write_text(
+                json.dumps(bad_window_metrics, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            (run_dir / f"metrics_{window_name}_primary_bad_market.json").write_text(
+                json.dumps(primary_bad_window_metrics, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             prefix = f"{window_name}_"
@@ -1050,21 +1354,53 @@ def main():
             row[f"{prefix}excess_sharpe"] = window_metrics.get("excess_sharpe")
             row[f"{prefix}excess_max_drawdown"] = window_metrics.get("excess_max_drawdown")
             row[f"{prefix}avg_turnover"] = window_metrics.get("avg_turnover")
+            row[f"{prefix}bad_market_total_return"] = bad_window_metrics.get("total_return")
+            row[f"{prefix}bad_market_excess_total_return"] = bad_window_metrics.get("excess_total_return")
+            row[f"{prefix}bad_market_day_count"] = bad_window_metrics.get("day_count")
+            row[f"{prefix}primary_bad_market_total_return"] = primary_bad_window_metrics.get("total_return")
+            row[f"{prefix}primary_bad_market_excess_total_return"] = primary_bad_window_metrics.get("excess_total_return")
+            row[f"{prefix}primary_bad_market_day_count"] = primary_bad_window_metrics.get("day_count")
 
         summary_rows.append(row)
         latest_key = windows[-1][0] if windows else "latest"
-        print(
-            f"  - {label}: full_excess_sharpe={metrics.get('excess_sharpe', float('nan')):.3f} | "
-            f"{latest_key}_excess_sharpe={row.get(f'{latest_key}_excess_sharpe', float('nan')):.3f} | "
-            f"{latest_key}_excess_return={row.get(f'{latest_key}_excess_total_return', float('nan')):.2%}"
-        )
+        if args.selection_objective == "bad_market_absolute":
+            print(
+                f"  - {label}: full_bad={row.get('full_bad_market_total_return', float('nan')):.2%} | "
+                f"{latest_key}_bad={row.get(f'{latest_key}_bad_market_total_return', float('nan')):.2%} | "
+                f"{latest_key}_primary_bad={row.get(f'{latest_key}_primary_bad_market_total_return', float('nan')):.2%}"
+            )
+        else:
+            print(
+                f"  - {label}: full_excess_sharpe={metrics.get('excess_sharpe', float('nan')):.3f} | "
+                f"{latest_key}_excess_sharpe={row.get(f'{latest_key}_excess_sharpe', float('nan')):.3f} | "
+                f"{latest_key}_excess_return={row.get(f'{latest_key}_excess_total_return', float('nan')):.2%}"
+            )
 
     summary_df = pd.DataFrame(summary_rows)
     sort_keys = []
-    if windows:
-        latest_prefix = f"{windows[-1][0]}_"
-        sort_keys.extend([f"{latest_prefix}excess_sharpe", f"{latest_prefix}excess_total_return"])
-    sort_keys.extend(["full_excess_sharpe", "full_excess_total_return"])
+    if args.selection_objective == "bad_market_absolute":
+        if windows:
+            latest_prefix = f"{windows[-1][0]}_"
+            sort_keys.extend(
+                [
+                    f"{latest_prefix}bad_market_total_return",
+                    f"{latest_prefix}primary_bad_market_total_return",
+                    f"{latest_prefix}bad_market_excess_total_return",
+                ]
+            )
+        sort_keys.extend(
+            [
+                "full_bad_market_total_return",
+                "full_primary_bad_market_total_return",
+                "full_bad_market_excess_total_return",
+                "full_excess_sharpe",
+            ]
+        )
+    else:
+        if windows:
+            latest_prefix = f"{windows[-1][0]}_"
+            sort_keys.extend([f"{latest_prefix}excess_sharpe", f"{latest_prefix}excess_total_return"])
+        sort_keys.extend(["full_excess_sharpe", "full_excess_total_return"])
     summary_df = summary_df.sort_values(sort_keys, ascending=[False] * len(sort_keys)).reset_index(drop=True)
     summary_df.to_csv(output_root / "repair_scan_summary.csv", index=False, encoding="utf-8-sig")
 

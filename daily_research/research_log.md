@@ -6465,3 +6465,207 @@ position,000001.SZ,1200,12.38,
 1. 正式研究脚本默认调用：
    - `C:\Users\ASUS\miniconda3\envs\quant\python.exe`
 2. `base` 环境只视为轻量维护入口，不再假定具备完整研究依赖。
+
+## 2026-03-25 执行端完整四象限复核：坏市场盈利能力与坏状态专用 profile 排查
+### 本轮目标
+- 直接回答当前执行默认主线在完整四象限里的盈利能力；
+- 明确坏市场里当前策略是“绝对赚钱”还是“少亏 / 空仓”；
+- 判断当前是否已经存在类似 `v2`、但只在坏市场状态起作用的成熟分支。
+
+### 本轮动作
+- 复核当前最贴近执行默认口径的正式产物：
+  - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution/lgbm`
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal`
+- 新增输出目录：
+  - `daily_research/output/execution_quadrant_review_20260325_formal_round1`
+  - 其中生成：
+    - `current_execution_lgbm_quadrant_summary.csv`
+    - `longwindow_lgbm_quadrant_summary.csv`
+    - `bad_market_summary.csv`
+    - `histgb_vs_lgbm/`
+- 用现有归因脚本补跑：
+  - `histgb vs lgbm` 的完整四象限对照与季度对照。
+- 复核 `daily_research/baseline/state_profiles.py` 与近几轮正式诊断记录，确认当前已注册与已保留候选主要覆盖哪些状态。
+
+### 结果一：当前默认执行端在坏市场里更像“去风险”，不是稳定绝对盈利
+- 当前默认等价正式口径 `current_execution_lgbm`：
+  - `trend_down_high_vol`
+    - 组合收益约 `0.00%`
+    - 超额收益约 `+3.79%`
+    - 平均持仓数约 `0.00`
+  - `trend_down_low_vol`
+    - 组合收益约 `-19.17%`
+    - 基准收益约 `-54.14%`
+    - 超额收益约 `+66.79%`
+    - 平均持仓数约 `0.23`
+- 长窗口附录 `longwindow_lgbm` 也保持同一结构：
+  - `trend_down_high_vol` 约 `0.00% / -0.98%`（组合 / 超额）
+  - `trend_down_low_vol` 约 `-38.11% / +45.01%`
+- 这说明：
+  - 当前主线在坏市场里的核心能力是空仓、降仓、少亏；
+  - 不是已经具备“坏市场里稳定做出绝对正收益”的独立 alpha。
+
+### 结果二：`lgbm` 对坏市场的改进存在，但主要仍是防守改进
+- 相对旧 `histgb`：
+  - `trend_down_high_vol` 的超额边际约 `+0.00%`
+  - `trend_down_low_vol` 的超额边际约 `+5.94%`
+  - `trend_up_high_vol` 的超额边际约 `+15.78%`
+  - `trend_up_low_vol` 的超额边际约 `+164.71%`
+- 这说明 `lgbm` 对坏市场不是完全没改善；
+- 但当前默认主线的决定性增益仍主要来自两个上涨象限，尤其 `trend_up_low_vol`。
+
+### 结果三：当前没有成熟的“坏市场专用 `v2` 类 profile”
+- `daily_research/baseline/state_profiles.py` 当前正式注册的 profile 只有：
+  - `up_low_breakout_v1 / v2 / v3`
+  - `up_dual_v1 / v2`
+- 它们只覆盖：
+  - `trend_up_low_vol`
+  - `trend_up_high_vol`
+- 当前没有一个已注册、已验证、只在 `trend_down_low_vol / trend_down_high_vol` 生效的正式 profile。
+- 历史上确实出现过“弱窗口和 `trend_down_low_vol` 一起改善”的候选，例如：
+  - `up_low_ml55_none25_v220` 曾把 `trend_down_low_vol` 的弱窗口超额从约 `-8.14%` 改善到约 `-1.05%`
+- 但那类改善的来源是：
+  - 降低 `trend_up_low_vol` 下 `ML` 主导权；
+  - 不是构建了一个真正独立的坏市场状态 alpha。
+- 后续第二轮保留下来的候选 `up_low_ml62_none23_v215 / up_low_ml61_none24_v215` 也已确认：
+  - 差异几乎全部来自 `trend_up_low_vol`
+  - 两个下跌象限基本没变
+  - 因此没有资格被解释成“坏市场专用分支”。
+
+### 本轮结论
+1. 当前执行默认主线在坏市场里具备明显防守价值，但还不能说“坏市场本身能稳定盈利”。
+2. 当前没有成熟的、已正式验证的“坏市场专用 `v2` 类 profile”。
+3. 如果下一步继续研究坏市场增量，正确方向应是：
+   - 单独定义 `trend_down_low_vol / trend_down_high_vol` 的防守或反向候选；
+   - 而不是继续假定上涨态 profile 的外推会自动修复坏市场。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限门控继续作为第一层安全门，不因为这轮检查而撤掉。
+3. 若继续推进“坏市场专项研究”，应明确把目标定义为：
+   - 坏市场绝对收益
+   - 或坏市场进一步降损
+   二者需要分开立题与验收。
+
+## 2026-03-25 坏市场专项目标固定：从“坏市场超额”切到“坏市场绝对收益”
+### 本轮目标
+- 把“坏市场绝对收益”从口头选择固定成正式研究目标；
+- 让后续候选扫描直接按这个目标排序，而不是继续默认按全样本超额 Sharpe；
+- 避免后续再次把“坏市场少亏”表述成“坏市场盈利”。
+
+### 本轮动作
+- 更新 `daily_research/daily_research_plan.md`：
+  - 明确坏市场专项若重启，主目标固定为“坏市场绝对收益”；
+  - 明确坏市场专项的停止规则不能只看坏市场超额。
+- 更新 `daily_research/baseline/scan_execution_repair_candidates.py`：
+  - 新增 `--selection-objective`
+    - `default_excess`
+    - `bad_market_absolute`
+  - 新增 `--bad-market-quadrants`
+  - 新增 `--primary-bad-market-quadrant`
+  - 候选汇总新增：
+    - `full_bad_market_total_return`
+    - `full_primary_bad_market_total_return`
+    - 各窗口 `bad_market_total_return`
+    - 各窗口 `primary_bad_market_total_return`
+  - 正式扫描产物新增坏市场专项指标文件：
+    - `metrics_bad_market_full.json`
+    - `metrics_primary_bad_market_full.json`
+    - `metrics_<window>_bad_market.json`
+    - `metrics_<window>_primary_bad_market.json`
+  - 当目标切到 `bad_market_absolute` 时，最终 summary 改按坏市场绝对收益优先排序。
+- 立即对现有正式候选库存做了一次坏市场目标重排：
+  - 输出目录：`daily_research/output/bad_market_objective_existing_candidates_20260325`
+  - 复核范围：
+    - `advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only`
+    - `advanced_ml_execution_repair_scan_20260322_formal_round12_ma50_regime_vol`
+
+### 本轮结论
+1. 后续“坏市场专项研究”终于有了清晰目标函数，不再和“坏市场超额修复”混为一谈。
+2. 这一步还没有证明我们已经找到坏市场绝对盈利方案，但已经把研究入口改成会朝这个方向收敛。
+3. 现有正式候选库存按坏市场绝对收益重排后，当前第一名仍是 `baseline`，且 `positive_bad_market_candidate_count = 0`。
+4. 这说明：
+   - 当前库存里还没有一个候选已经达到“坏市场绝对盈利”；
+   - 下一步必须显式设计坏市场候选，而不是继续指望现有上涨态微调自然外溢成坏市场盈利方案。
+
+### 当前决策
+1. 坏市场专项默认目标固定为：`bad_market_absolute`
+2. 若后续继续执行端候选扫描，优先显式传：
+   - `--selection-objective bad_market_absolute`
+3. 若候选只改善坏市场超额、不改善坏市场绝对收益，则只记为防守修复，不记为坏市场盈利方案。
+
+## 2026-03-25 坏市场专项首批专用候选：formal round1 完整收口
+### 本轮目标
+- 不再继续拿上涨态微调外推坏市场；
+- 直接设计面向 `trend_down_low_vol / trend_down_high_vol` 的第一批专用候选；
+- 按“坏市场绝对收益”完成首批正式扫描，并判断是否存在值得继续细化的坏市场防守分支。
+
+### 本轮动作
+- 更新 `daily_research/baseline/state_profiles.py`：
+  - 新增 `upv2_downlow_rebound_v1`
+  - 新增 `upv2_downdual_reversal_v1`
+- 更新 `daily_research/baseline/scan_execution_repair_candidates.py`：
+  - 新增 `bad_market_round1` 候选集；
+  - 支持 `--candidate-labels`，允许长时扫描按标签分批续跑；
+  - 修正坏市场切片指标口径：
+    - 由“直接截取累计 equity”改为“按入选日期自身收益序列重建 equity”；
+    - 避免坏市场切片收益把中间非坏市场日期也错误算入。
+- 首批候选正式分批产出：
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_core3`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_badonly_hold2`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_hold2_remaining`
+- 汇总目录：
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_consolidated`
+  - 其中生成：
+    - `combined_bad_market_round1_summary.csv`
+    - `summary.txt`
+
+### 首批正式候选
+1. `baseline`
+2. `downlow_rebound_open`
+3. `downlow_rebound_open_hold2`
+4. `downlow_ruleheavy_open`
+5. `downdual_reversal_open`
+6. `downdual_reversal_open_hold2`
+7. `downdual_reversal_badonly`
+8. `downdual_reversal_badonly_hold2`
+
+### 汇总结果
+- 全历史坏市场绝对收益仍然最好的是 `baseline`：
+  - `full_bad_market_total_return = -28.46%`
+- 最近弱窗口坏市场绝对收益最强的前三名是：
+  1. `downdual_reversal_open_hold2`
+     - `latest_weak_bad_market_total_return = -4.72%`
+  2. `downdual_reversal_badonly_hold2`
+     - `latest_weak_bad_market_total_return = -5.53%`
+  3. `downlow_ruleheavy_open`
+     - `latest_weak_bad_market_total_return = -6.16%`
+- 当前首批候选里仍然没有一个达到坏市场绝对盈利：
+  - `positive_full_bad_market_candidate_count = 0`
+- `hold2` 在这轮里普遍优于对应 open 母体：
+  - `downlow_rebound_open_hold2` 明显优于 `downlow_rebound_open`
+  - `downdual_reversal_open_hold2` 明显优于 `downdual_reversal_open`
+  - `downdual_reversal_badonly_hold2` 明显优于 `downdual_reversal_badonly`
+- 但它们当前改善的主要是：
+  - 最近坏市场窗口的少亏与超额修复；
+  - 还不是跨长历史稳定成立的坏市场绝对盈利。
+
+### 本轮结论
+1. 坏市场专项首批专用候选已经从“口头方向”变成了正式可复核的一轮产物。
+2. 这轮没有找到可晋级执行端的坏市场绝对盈利方案，`baseline` 仍是全历史坏市场绝对收益的最优参考。
+3. 但近期弱市里已经筛出两个值得继续细化的防守修复方向：
+   - `downdual_reversal_open_hold2`
+   - `downdual_reversal_badonly_hold2`
+4. 这两个方向当前只能记为“近期坏市场防守修复候选”，不能记为“坏市场盈利方案”。
+
+### 当前决策
+1. 首批坏市场专用候选不晋级执行端默认值。
+2. 若继续推进坏市场专项，下一轮只围绕以下两条线做小步细化：
+   - `downdual_reversal_open_hold2`
+   - `downdual_reversal_badonly_hold2`
+3. 下一轮只允许细化：
+   - 持有约束
+   - 止盈止损
+   - 坏市场专用 `state_horizon_weights / state_ensemble_weights`
+4. 在出现“全历史坏市场绝对收益仍显著差于 baseline”时，不再继续横向扩更多 recipe。
