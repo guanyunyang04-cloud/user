@@ -6669,3 +6669,238 @@ position,000001.SZ,1200,12.38,
    - 止盈止损
    - 坏市场专用 `state_horizon_weights / state_ensemble_weights`
 4. 在出现“全历史坏市场绝对收益仍显著差于 baseline”时，不再继续横向扩更多 recipe。
+## 2026-03-26 `advanced_ml (ma50 baseline, lgbm)` 组合策略消融 / `trend_up_low_vol` state-only / overlap 诊断
+### 本轮目标
+- 不再只凭经验判断 `ma50 baseline + lgbm + none + v2` 是否合理；
+- 正式补齐三类可复现诊断：
+  - `ablation`: `ml only / none only / v2 only / ml+none / ml+v2 / ml+none+v2`
+  - `state-only`: 只在 `trend_up_low_vol` 扫 `ml:none:v2`
+  - `overlap`: 比较 `ml_score` 与 `score_none / score_v2` 的截面相关、Top5 重合率、弱窗口信号增益
+
+### 本轮动作
+- 新增统一诊断脚本：
+  - `daily_research/baseline/diagnose_advanced_ml_ensemble.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_ensemble_diag_20260326_formal_rerun`
+- 这轮实际数据日期：
+  - `latest_data_date = 2026-03-25`
+- 这轮因 `--auto-trim-history` 实际使用的训练/评估历史窗口：
+  - `2023-03-07 -> 2026-03-25`
+- 本轮弱窗口统一按绝对日期命名为：
+  - `weak_window_20250905_20260319 = 2025-09-05 -> 2026-03-19`
+- 顺手补了共享 `ML per_horizon scores` 缓存，避免以后改权重表时重复训练 30 分钟：
+  - `daily_research/cache/advanced_ml/ml_scores/6600fbb205abd471d5ef.pkl`
+
+### 结果一：全局默认三层融合并不是当前最优主组合
+- `ml_only`
+  - `full_excess_sharpe = 0.379`
+  - `full_excess_total_return = +37.02%`
+- 当前默认 `ml+none+v2`（全局 `0.70 / 0.20 / 0.10`）
+  - `full_excess_sharpe = 0.265`
+  - `full_excess_total_return = +23.87%`
+- 这说明：
+  - 全样本上，当前默认三层融合相对 `ml_only` 已出现明显拖累；
+  - 拖累不是来自 `ma50` 边界，而是来自全局 ensemble 结构本身。
+
+### 结果二：弱窗口里真正拖累默认策略的不是 `ma50`，而是“ML 权重过高”
+- 在弱窗口 `2025-09-05 -> 2026-03-19` 内：
+  - `v2_only`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.170`
+    - `weak_window_20250905_20260319_excess_total_return = +2.27%`
+  - `none_only`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.363`
+    - `weak_window_20250905_20260319_excess_total_return = -4.42%`
+  - `ml_only`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.581`
+    - `weak_window_20250905_20260319_excess_total_return = -12.35%`
+  - 默认 `ml+none+v2`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.627`
+    - `weak_window_20250905_20260319_excess_total_return = -12.72%`
+- 这说明：
+  - 弱窗口里，`v2` 规则层比 `ML` 更抗压；
+  - 默认组合不仅没有对冲 `ML` 的弱窗口拖累，反而因为仍以 `ML` 为主导而继续被拉低。
+
+### 结果三：最值得推进的修复方向不是“抛弃 ML”，而是只在 `trend_up_low_vol` 重配 ensemble
+- `trend_up_low_vol_ml20_none30_v250`
+  - 仅在 `trend_up_low_vol` 使用 `ml:0.20, none:0.30, v2:0.50`
+  - 其余状态仍保留全局默认 `0.70 / 0.20 / 0.10`
+  - 结果：
+    - `full_excess_sharpe = 0.419`
+    - `full_excess_total_return = +29.67%`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.684`
+    - `weak_window_20250905_20260319_excess_total_return = +7.11%`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.558`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +4.55%`
+- 相对默认 `base_global`：
+  - `full_excess_sharpe`: `0.265 -> 0.419`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.627 -> 0.684`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.667 -> 0.558`
+- 次优但更偏全样本强势的候选是：
+  - `trend_up_low_vol_ml50_none10_v240`
+  - 结果：
+    - `full_excess_sharpe = 0.420`
+    - `full_excess_total_return = +38.78%`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.208`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.366`
+- 这说明：
+  - 当前最合理的修复方式不是全局改成 `v2_only`；
+  - 而是保留 `ML` 作为全样本主干，同时只在 `trend_up_low_vol` 显著抬升 `v2`、下调 `ML`。
+
+### 结果四：`ML` 和规则层并不重合，真正高度重合的是 `none` 与 `v2`
+- 全样本 overlap 诊断：
+  - `ml_vs_none`
+    - `mean_pearson = 0.058`
+    - `mean_spearman = 0.057`
+    - `Top5 overlap = 1.02%`
+  - `ml_vs_v2`
+    - `mean_pearson = 0.073`
+    - `mean_spearman = 0.094`
+    - `Top5 overlap = 1.96%`
+  - `none_vs_v2`
+    - `mean_pearson = 0.960`
+    - `mean_spearman = 0.953`
+    - `Top5 overlap = 75.88%`
+- 在 `trend_up_low_vol` 内：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.30%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 2.60%`
+  - `none_vs_v2`
+    - `Top5 overlap = 47.52%`
+- 这说明：
+  - `ML` 与规则层是明显不同的信号源；
+  - `none` 与 `v2` 才是高度重叠的一对，`v2` 本质上更像 `none` 在 `trend_up_low_vol` 的局部修正版。
+
+### 结果五：弱窗口里 `ML` 的“独立性”没有转化成优势，反而转化成拖累
+- 在弱窗口 `2025-09-05 -> 2026-03-19`：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.27%`
+    - `ML Top5 - none Top5 = -15.70%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 3.02%`
+    - `ML Top5 - v2 Top5 = -10.73%`
+- 在 `trend_up_low_vol` 且仍限定弱窗口时：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.57%`
+    - `ML Top5 - none Top5 = -17.57%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 4.04%`
+    - `ML Top5 - v2 Top5 = -11.96%`
+- 这说明：
+  - `ML` 的确提供了与规则层不同的排序；
+  - 但在这段弱窗口里，这份“独立性”方向错了，带来的是负贡献而不是额外 alpha。
+
+### 本轮结论
+1. `ma50 baseline` 本身没有构成组合矛盾，真正的问题在于全局默认 ensemble 把 `ML` 放得太重。
+2. 当前默认 `ml+none+v2 = 0.70 / 0.20 / 0.10` 已不应继续被视为“无需再碰”的稳态默认。
+3. 目前最值得推进的正式修复方向是：
+   - 仅在 `trend_up_low_vol` 下调 `ML`、上调 `v2`
+   - 第一优先候选：`ml:0.20, none:0.30, v2:0.50`
+   - 第二优先候选：`ml:0.50, none:0.10, v2:0.40`
+4. 不建议把结论误读成“应全局移除 `ML`”：
+   - 因为 `ml_only` 仍是全样本最强单体；
+   - 真正合理的方向是“保留 ML 主线，但在 `trend_up_low_vol` 做状态专属降权”。
+
+### 当前决策
+1. 执行端默认暂不直接切换，但当前默认组合已进入“需要正式复验后再决定是否升级”的状态。
+2. 下一轮若继续做正式研究，优先做更细的局部扫描，而不是再做全局盲扫：
+   - 以 `trend_up_low_vol_ml20_none30_v250` 为中心
+   - 用 `0.05` 步长在附近细扫
+   - 重点扫描区间：
+     - `ml 0.15 ~ 0.55`
+     - `none 0.10 ~ 0.35`
+     - `v2 0.30 ~ 0.60`
+3. 后续文档与口头结论中，不再把 `latest_weak` 当作相对时间词使用，应写成：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-26 `advanced_ml (ma50 baseline, lgbm)` `trend_up_low_vol` `0.05` 步长局部细扫补充复验
+### 本轮动作
+- 基于上一轮正式诊断结论，围绕 `trend_up_low_vol_ml20_none30_v250` 继续做状态专属 ensemble 局部细扫；
+- 只保留 `state-only`，跳过已完成的 `ablation / overlap`，聚焦 `trend_up_low_vol` 的 `ml:none:v2` 局部权重结构；
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_ensemble_focus_scan_20260326_local005`
+- 本轮实际数据日期：
+  - `latest_data_date = 2026-03-26`
+- 本轮 `--auto-trim-history` 后实际使用的训练/评估历史窗口：
+  - `2023-03-08 -> 2026-03-26`
+- 本轮局部扫描约束：
+  - `ml 0.15 ~ 0.55`
+  - `none 0.10 ~ 0.35`
+  - `v2 0.30 ~ 0.60`
+  - `step = 0.05`
+- 本轮弱窗口命名与指标列统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：上一轮中心候选有效，但局部最优点进一步收敛到 `ml 0.25 / none 0.20~0.25 / v2 0.50~0.55`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_sharpe = 0.829`
+  - `full_excess_total_return = +67.85%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.779`
+  - `weak_window_20250905_20260319_excess_total_return = +9.26%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.706`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +6.65%`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe = 0.788`
+  - `full_excess_total_return = +64.29%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.914`
+  - `weak_window_20250905_20260319_excess_total_return = +11.06%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.881`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +8.41%`
+- `trend_up_low_vol_ml20_none30_v250`
+  - `full_excess_sharpe = 0.689`
+  - `full_excess_total_return = +52.25%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.784`
+  - `weak_window_20250905_20260319_excess_total_return = +8.63%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.695`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +6.04%`
+- 这说明：
+  - 上一轮选出来的 `trend_up_low_vol_ml20_none30_v250` 不是误报，它在更细扫描里仍处在前排；
+  - 但局部前沿已经明显向 `ml 0.25`、`v2 0.50~0.55`、`none 0.20~0.25` 这一小块区域收敛。
+
+### 结果二：与当前 `base_global` 相比，局部降 `ML`、抬 `v2` 仍然显著改善弱窗口
+- `base_global`
+  - `full_excess_sharpe = 0.732`
+  - `full_excess_total_return = +73.66%`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.247`
+  - `weak_window_20250905_20260319_excess_total_return = -4.77%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.291`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = -4.30%`
+- 相对 `base_global`，`trend_up_low_vol_ml25_none25_v250`：
+  - `full_excess_sharpe`: `0.732 -> 0.829`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.247 -> 0.779`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.291 -> 0.706`
+- 相对 `base_global`，`trend_up_low_vol_ml25_none20_v255`：
+  - `full_excess_sharpe`: `0.732 -> 0.788`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.247 -> 0.914`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.291 -> 0.881`
+- 这说明：
+  - 默认组合在当前新数据口径下，全样本本身并不弱；
+  - 但在 `weak_window_20250905_20260319` 这段里，它依然明显落后于 `trend_up_low_vol` 的状态专属降 `ML` 方案。
+
+### 结果三：局部扫描已经把“平衡型候选”和“防守型候选”分开了
+- 更平衡、可作为头号正式复验候选的是：
+  - `trend_up_low_vol_ml25_none25_v250`
+- 更偏弱窗口防守、但全样本仍不伤的候选是：
+  - `trend_up_low_vol_ml25_none20_v255`
+- 弱窗口 Sharpe 最高但全样本明显偏弱的极端防守候选是：
+  - `trend_up_low_vol_ml15_none30_v255`
+  - `full_excess_sharpe = 0.552`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.923`
+- 这说明：
+  - 当前已经不需要再做大范围盲扫；
+  - 更合理的下一步，是把候选缩到 `ml25_none25_v250` 与 `ml25_none20_v255`，再和 `base_global` 做正式复验对照。
+
+### 本轮结论
+1. 细扫后，`trend_up_low_vol_ml20_none30_v250` 仍然成立，但已不再是局部最优点。
+2. 当前最稳的平衡型候选更新为：`trend_up_low_vol_ml25_none25_v250`。
+3. 当前最强的弱窗口防守型候选更新为：`trend_up_low_vol_ml25_none20_v255`。
+4. 这轮结果继续支持同一方向：问题不在 `ma50 baseline`，而在默认全局 ensemble 在 `trend_up_low_vol` 里给了 `ML` 过高主导权。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，先保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，优先做三组严格对照：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
