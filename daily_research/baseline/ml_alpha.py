@@ -40,6 +40,7 @@ class MLAplhaConfig:
     max_train_rows: int = 200_000
     random_seed: int = 7
     model_family: str = "histgb"
+    lgbm_n_estimators: int = 260
     ensemble_ml_weight: float = 0.70
     ensemble_none_weight: float = 0.20
     ensemble_v2_weight: float = 0.10
@@ -62,6 +63,12 @@ def _normalize_horizons(config: MLAplhaConfig) -> tuple[int, ...]:
     if not horizons:
         return (int(config.target_horizon),)
     return tuple(dict.fromkeys(horizons))
+
+
+def _label_lookahead_bars(config: MLAplhaConfig) -> int:
+    horizon = int(config.target_horizon)
+    mode = str(config.execution_mode or "close").lower()
+    return horizon + 1 if mode == "next_open" else horizon
 
 
 def _zscore_series_cs(series: pd.Series) -> pd.Series:
@@ -232,6 +239,7 @@ def _fit_model(
     x_train: pd.DataFrame,
     y_train: pd.Series,
     sample_weight: np.ndarray,
+    config: MLAplhaConfig,
     random_seed: int,
     model_family: str,
 ) -> Any:
@@ -263,7 +271,7 @@ def _fit_model(
         model = LGBMRegressor(
             objective="regression",
             learning_rate=0.04,
-            n_estimators=260,
+            n_estimators=int(config.lgbm_n_estimators),
             num_leaves=31,
             max_depth=-1,
             min_child_samples=120,
@@ -305,8 +313,11 @@ def train_point_in_time_model(
     if as_of_idx <= 0:
         raise ValueError("Not enough history before as_of_date to train model.")
 
-    train_end_idx = as_of_idx - 1
-    train_start_idx = max(0, as_of_idx - int(config.train_window_days))
+    label_gap = _label_lookahead_bars(config)
+    train_end_idx = as_of_idx - label_gap
+    if train_end_idx < 0:
+        raise ValueError("Not enough label-safe history before as_of_date to train model.")
+    train_start_idx = max(0, train_end_idx - int(config.train_window_days) + 1)
     train_dates = list(dates[train_start_idx : train_end_idx + 1])
     if len(train_dates) < int(config.min_train_dates):
         raise ValueError("Not enough train dates for point-in-time model.")
@@ -353,7 +364,7 @@ def train_point_in_time_model(
     x_train = pd.concat(x_parts, axis=0).iloc[: config.max_train_rows]
     y_train = pd.concat(y_parts, axis=0).iloc[: config.max_train_rows]
     sample_weight = np.concatenate(weight_parts)[: len(x_train)]
-    model = _fit_model(x_train, y_train, sample_weight, config.random_seed, config.model_family)
+    model = _fit_model(x_train, y_train, sample_weight, config, config.random_seed, config.model_family)
 
     summary = {
         "train_start": str(train_dates[0].date()),
@@ -526,10 +537,13 @@ def rolling_ml_scores(
     training_logs: List[Dict] = []
     rng = np.random.default_rng(config.random_seed)
 
-    start_idx = max(int(config.train_window_days), int(config.min_train_dates))
+    label_gap = _label_lookahead_bars(config)
+    start_idx = label_gap + max(int(config.train_window_days), int(config.min_train_dates))
     for block_start in range(start_idx, len(dates), int(config.retrain_every_days)):
-        train_end_idx = block_start - 1
-        train_start_idx = max(0, block_start - int(config.train_window_days))
+        train_end_idx = block_start - label_gap - 1
+        if train_end_idx < 0:
+            continue
+        train_start_idx = max(0, train_end_idx - int(config.train_window_days) + 1)
         train_dates = list(dates[train_start_idx : train_end_idx + 1])
         if len(train_dates) < int(config.min_train_dates):
             continue
@@ -574,7 +588,7 @@ def rolling_ml_scores(
         x_train = pd.concat(x_parts, axis=0).iloc[: config.max_train_rows]
         y_train = pd.concat(y_parts, axis=0).iloc[: config.max_train_rows]
         sample_weight = np.concatenate(weight_parts)[: len(x_train)]
-        model = _fit_model(x_train, y_train, sample_weight, config.random_seed, config.model_family)
+        model = _fit_model(x_train, y_train, sample_weight, config, config.random_seed, config.model_family)
 
         block_end = min(len(dates), block_start + int(config.retrain_every_days))
         predict_dates = list(dates[block_start:block_end])

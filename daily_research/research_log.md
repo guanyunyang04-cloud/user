@@ -6904,3 +6904,142 @@ position,000001.SZ,1200,12.38,
    - `trend_up_low_vol_ml25_none20_v255`
 3. 后续文档与口头结论继续统一使用：
    - `weak_window_20250905_20260319`
+
+## 2026-03-27 `advanced_ml (ma50 baseline, lgbm)` 重训频率 / boosting 轮数正式敏感性实验
+### 本轮目标
+- 不再凭经验判断“`retrain_every_days` 和 `lgbm boosting rounds` 会不会影响结果”；
+- 直接在当前执行主线口径下做正式实验，回答两件事：
+  - 树模型重训频率是否影响结果；
+  - `lgbm_n_estimators` 是否影响结果。
+
+### 先修正一处本轮实验中暴露出来的时序错误
+- 在第一次矩阵实验 `advanced_ml_retrain_tree_impact_20260326_formal_r1` 里，出现了不合理的超高 Sharpe；
+- 回查后确认，问题不在参数本身，而在 `rolling ML` 训练窗口的标签边界：
+  - 训练样本末端没有对 `target_horizon` 做足够的 label-safe 截断；
+  - 会把对预测块而言“未来才知道”的标签提前喂进滚动训练。
+- 已修正为：
+  - `train_point_in_time_model` 与 `rolling_ml_scores` 都按 `target_horizon` 与 `execution_mode=next_open` 做 label-safe 截断；
+  - 共享 `ml score cache` 也同步抬了版本，避免误命中旧缓存。
+- 因此：
+  - `advanced_ml_retrain_tree_impact_20260326_formal_r1` 作废；
+  - 本轮正式结论只以 `advanced_ml_retrain_tree_impact_20260326_formal_r2` 为准。
+
+### 本轮动作
+- 新增正式实验脚本：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 这轮固定只比较三组候选，不再做全局盲扫：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260326_formal_r2`
+- 本轮实际数据日期：
+  - `latest_data_date = 2026-03-26`
+- 本轮 `--auto-trim-history` 后实际训练/评估历史窗口：
+  - `2023-03-08 -> 2026-03-26`
+- 固定比较网格：
+  - `retrain_every_days = 5, 10, 21, 42`
+  - `lgbm_n_estimators = 130, 260, 520`
+- 本轮弱窗口命名统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：结论已经实验确认，两类参数都会影响结果
+- `base_global`
+  - `full_excess_sharpe` 全范围：`-0.351 -> 0.248`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-1.922 -> -0.486`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe` 全范围：`-0.176 -> 0.282`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-0.581 -> 0.346`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_sharpe` 全范围：`0.006 -> 0.311`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-0.308 -> 0.425`
+- 这说明：
+  - `retrain_every_days` 不是无关参数；
+  - `lgbm_n_estimators` 也不是无关参数；
+  - 两者都会实质改变结论，不能再把当前 `21 / 260` 当成默认不动的“天然合理值”。
+
+### 结果二：`base_global` 会被参数调整拉动，但仍然修不好弱窗口
+- 默认 `base_global @ 21 / 260`
+  - `full_excess_sharpe = -0.008`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.939`
+- `base_global` 全样本最强点在 `5 / 260`
+  - `full_excess_sharpe = 0.248`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.486`
+- `base_global` 的弱窗口最佳点也仍然是 `5 / 260`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.486`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.612`
+- 这说明：
+  - 更频繁重训确实能改善 `base_global`；
+  - 但 `base_global` 即使调到本轮最佳参数，弱窗口仍然是负 Sharpe，不能靠“只调训练次数”完成修复。
+
+### 结果三：状态专属候选会被参数显著放大，而且已经出现弱窗口转正
+- 默认 `trend_up_low_vol_ml25_none25_v250 @ 21 / 260`
+  - `full_excess_sharpe = 0.158`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.131`
+- 它的全样本最强点在 `5 / 130`
+  - `full_excess_sharpe = 0.311`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.005`
+- 它的弱窗口最强点在 `5 / 520`
+  - `full_excess_sharpe = 0.222`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.425`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.253`
+- 默认 `trend_up_low_vol_ml25_none20_v255 @ 21 / 260`
+  - `full_excess_sharpe = -0.035`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.581`
+- 它的全样本最强点在 `5 / 260`
+  - `full_excess_sharpe = 0.282`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.312`
+- 它的弱窗口最强点在 `21 / 520`
+  - `full_excess_sharpe = 0.173`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.346`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.150`
+- 这说明：
+  - 两个状态专属候选都不是“参数不敏感”的假稳态；
+  - 但它们都能在更合适的参数组合下，把弱窗口从负值推到正值；
+  - 其中 `ml25_none25_v250` 当前是更稳的主候选。
+
+### 结果四：重训频率通常对全样本更敏感，boosting 轮数对弱窗口常常同样重要甚至更重要
+- 用组均值看参数影响范围：
+  - `trend_up_low_vol_ml25_none25_v250`
+    - `full_excess_sharpe`：
+      - `retrain` 组均值范围 `0.154`
+      - `n_estimators` 组均值范围 `0.057`
+    - `weak_window_20250905_20260319_excess_sharpe`：
+      - `retrain` 组均值范围 `0.234`
+      - `n_estimators` 组均值范围 `0.224`
+  - `trend_up_low_vol_ml25_none20_v255`
+    - `full_excess_sharpe`：
+      - `retrain` 组均值范围 `0.198`
+      - `n_estimators` 组均值范围 `0.106`
+    - `weak_window_20250905_20260319_excess_sharpe`：
+      - `retrain` 组均值范围 `0.318`
+      - `n_estimators` 组均值范围 `0.362`
+- 这说明：
+  - 对全样本表现，`retrain_every_days` 往往影响更大；
+  - 对弱窗口表现，`lgbm_n_estimators` 的影响并不比重训频率小，有时还更大；
+  - 所以以后不能只扫一个维度，至少要把这两个维度联动看。
+
+### 本轮结论
+1. “树模型重训频率 + boosting 轮数是否有影响”这个问题，现在已经有正式实验答案：有，而且是实质影响，不是边角扰动。
+2. 当前默认 `21 / 260` 并不是这三组候选里的稳定优值。
+3. `base_global` 可以通过参数优化改善，但仍然不能解决 `weak_window_20250905_20260319` 的核心弱点。
+4. 当前更值得继续推进的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 5 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 5 / 260`
+   - 这两者都比默认 `21 / 260` 更值得正式复验。
+5. 本轮也顺手确认了一件更底层的事：
+   - 以后凡是基于 rolling ML 的正式研究，必须沿用这次修正后的 label-safe 边界；
+   - 不能再引用修正前那版滚动结果。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，先保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，优先仍是这三组严格对照，但不再默认锁死 `21 / 260`：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 下一轮正式复验时，至少应把以下参数组合纳入首轮：
+   - `5 / 260`
+   - `5 / 520`
+   - `21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`

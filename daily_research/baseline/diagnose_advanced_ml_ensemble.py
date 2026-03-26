@@ -96,6 +96,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
     parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="lgbm")
+    parser.add_argument("--lgbm-n-estimators", type=int, default=260)
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
@@ -474,6 +475,7 @@ def _safe_num(value: Any) -> str:
 def _ml_score_cache_path(prepared_cache_key: str, ml_cfg: MLAplhaConfig) -> Path:
     payload = {
         "kind": "diagnose_shared_ml_scores",
+        "score_engine_version": 2,
         "prepared_cache_key": str(prepared_cache_key),
         "ml_config": {
             "target_horizon": int(ml_cfg.target_horizon),
@@ -486,6 +488,7 @@ def _ml_score_cache_path(prepared_cache_key: str, ml_cfg: MLAplhaConfig) -> Path
             "max_train_rows": int(ml_cfg.max_train_rows),
             "random_seed": int(ml_cfg.random_seed),
             "model_family": str(ml_cfg.model_family),
+            "lgbm_n_estimators": int(ml_cfg.lgbm_n_estimators),
             "train_regime_only": bool(ml_cfg.train_regime_only),
             "execution_mode": str(ml_cfg.execution_mode),
         },
@@ -835,6 +838,7 @@ def main() -> None:
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
