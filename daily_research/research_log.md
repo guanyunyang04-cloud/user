@@ -7043,3 +7043,117 @@ position,000001.SZ,1200,12.38,
    - `21 / 520`
 4. 后续文档与口头结论继续统一使用：
    - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 训练窗口 / 重训频率 / boosting 轮数正式矩阵
+### 本轮目标
+- 把 `ml_train_window_days` 正式纳入当前执行主线的受控变量。
+- 不再只看 `retrain_every_days` 与 `lgbm_n_estimators`，而是一起回答：
+  - `ml_train_window_days` 是否实质影响结果；
+  - 三个当前候选在 `train_window / retrain / n_estimators` 联动下的最优点分别在哪里。
+
+### 先修正本轮第一版矩阵的历史窗口边界
+- 2026-03-27 先跑出的 `advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r1` 不作为正式结论引用。
+- 原因不是候选本身失效，而是脚本刚接入 `--train-window-grid` 后，`--auto-trim-history` 仍按默认 `ml_train_window_days=504` 裁历史；
+- 但本轮网格已经扩到 `train_window_days=756`，导致 `756` 这组历史不够长，训练日志几乎为空，结果更接近规则层回退，不适合作为正式对照。
+- 已修正为：
+  - `auto-trim-history` 按 `train-window-grid` 的最大窗口裁历史；
+  - 本轮正式口径只认 `advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`。
+
+### 本轮动作
+- 脚本：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 新增能力：
+  - `--train-window-grid`
+  - 摘要 / 默认行 / 最优行 / run_config 全部带上 `ml_train_window_days`
+  - `auto-trim-history` 现在按 `train-window-grid` 最大值取历史窗口
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+- 实际最新数据日期：
+  - `latest_data_date = 2026-03-27`
+- 本轮 `--auto-trim-history` 后的实际训练/评估历史窗口：
+  - `20220322 -> 20260327`
+- 固定候选仍只看三组严格对照：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 本轮正式参数网格：
+  - `ml_train_window_days = 378, 504, 756`
+  - `retrain_every_days = 5, 21`
+  - `lgbm_n_estimators = 260, 520`
+- 后续命名继续统一：
+  - `weak_window_20250905_20260319`
+
+### 结果一：`ml_train_window_days` 确实会影响结果，而且不是越长越好
+- `base_global`
+  - 默认 `504 / 21 / 260`: `full_excess_sharpe = 0.410`
+  - 默认 `504 / 21 / 260`: `weak_window_20250905_20260319_excess_sharpe = -0.961`
+  - 最强全样本点在 `504 / 5 / 260`: `0.837 / -0.788`
+  - 最强弱窗口点在 `378 / 21 / 520`: `0.776 / -0.383`
+- `trend_up_low_vol_ml25_none20_v255`
+  - 默认 `504 / 21 / 260`: `0.515 / 0.368`
+  - 最强全样本点在 `504 / 5 / 260`: `0.793 / 0.204`
+  - 最强弱窗口点在 `504 / 21 / 520`: `0.699 / 1.094`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 默认 `504 / 21 / 260`: `0.549 / 0.692`
+  - 最强全样本点在 `504 / 5 / 260`: `0.745 / -0.070`
+  - 最强弱窗口点在 `504 / 21 / 520`: `0.663 / 1.154`
+- 这说明：
+  - `ml_train_window_days` 不是无关变量；
+  - 但当前执行主线下，并没有出现“窗口拉到 `756` 就自然更稳”的结论；
+  - 在这轮正式矩阵里，真正占优的主轴仍然落在 `504`。
+
+### 结果二：`504` 是当前两组状态专属候选的主窗口，`756` 不是
+- 按弱窗口最优点看：
+  - `trend_up_low_vol_ml25_none20_v255`
+    - `378` 最优：`0.427 / 0.314`
+    - `504` 最优：`0.699 / 1.094`
+    - `756` 最优：`0.329 / 0.827`
+  - `trend_up_low_vol_ml25_none25_v250`
+    - `378` 最优：`0.485 / 0.152`
+    - `504` 最优：`0.663 / 1.154`
+    - `756` 最优：`0.355 / 0.801`
+- 这说明：
+  - `756` 不是没用，它确实能把弱窗口维持在正值；
+  - 但在这轮正式口径里，`504` 明显更强，尤其配合 `21 / 520` 时，已经同时兼顾了全样本与弱窗口。
+
+### 结果三：当前最值得推进的正式候选进一步收敛
+- `base_global`
+  - 即使纳入 `train_window_days`，弱窗口最优也仍为负值；
+  - 说明它可以被参数改善，但依旧不是能够修复当前弱窗口问题的主候选。
+- `trend_up_low_vol_ml25_none20_v255`
+  - 当前最强弱窗口点更新为：
+    - `504 / 21 / 520`
+    - `full_excess_sharpe = 0.699`
+    - `weak_window_20250905_20260319_excess_sharpe = 1.094`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.076`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 当前最强弱窗口点更新为：
+    - `504 / 21 / 520`
+    - `full_excess_sharpe = 0.663`
+    - `weak_window_20250905_20260319_excess_sharpe = 1.154`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.139`
+- 这说明：
+  - 这两组状态专属候选仍然是当前最值得推进的正式复验对象；
+  - 而且在引入 `ml_train_window_days` 之后，它们并没有被推翻，反而更清楚地收敛到 `504 / 21 / 520`。
+
+### 本轮结论
+1. `ml_train_window_days` 会实质影响结果，这个问题现在已经有正式实验答案。
+2. 在本轮正式矩阵里，`504` 明显强于 `378` 与 `756`，当前没有证据支持把训练窗口继续机械拉长到 `756`。
+3. `base_global` 仍不具备作为弱窗口修复主方案的资格。
+4. 当前最值得推进正式复验的两组候选，进一步收敛为：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+5. `504 / 5 / 260` 依然有价值，但更像“全样本进攻型对照点”，不如 `504 / 21 / 520` 兼顾弱窗口稳定性。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，继续保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，三组严格对照仍保持不变：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 下一轮正式 pair revalidation 时，参数优先级更新为：
+   - `504 / 21 / 520`
+   - `504 / 5 / 260`
+   - `378 / 21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,7 +44,7 @@ from daily_research.progress import StageProgress, iter_progress
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Formally compare retrain frequency and LGBM boosting rounds for fixed advanced_ml ensemble candidates."
+        description="Formally compare train window, retrain frequency, and LGBM boosting rounds for fixed advanced_ml ensemble candidates."
     )
     parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
     parser.add_argument("--csv-folder", default=None)
@@ -89,6 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ml-target-horizons", default="5,10,20")
     parser.add_argument("--ml-horizon-weights", default="5:0.2,10:0.3,20:0.5")
     parser.add_argument("--ml-train-window-days", type=int, default=504)
+    parser.add_argument("--train-window-grid", default="")
     parser.add_argument("--ml-min-train-dates", type=int, default=120)
     parser.add_argument("--ml-max-samples-per-day", type=int, default=600)
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
@@ -209,19 +210,21 @@ def _render_summary(
     range_df: pd.DataFrame,
     weak_window_name: str,
     focus_state: str,
+    train_window_grid: list[int],
     retrain_grid: list[int],
     lgbm_estimator_grid: list[int],
 ) -> str:
     weak_metric = f"{weak_window_name}_excess_sharpe"
     focus_weak_metric = f"{focus_state}_{weak_window_name}_excess_sharpe"
     lines: list[str] = []
-    lines.append("# Advanced ML Retrain / Tree Impact")
+    lines.append("# Advanced ML Train Window / Retrain / Tree Impact")
     lines.append("")
     lines.append(f"- generated_at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"- latest_data_date: {latest_data_date}")
     lines.append(
         f"- history_window: {history_window['effective_start_date']} -> {history_window['end_date']} (mode={history_window['mode']})"
     )
+    lines.append(f"- train_window_grid: {train_window_grid}")
     lines.append(f"- retrain_grid: {retrain_grid}")
     lines.append(f"- lgbm_estimator_grid: {lgbm_estimator_grid}")
     lines.append("")
@@ -229,7 +232,8 @@ def _render_summary(
     lines.append("## Default config rows")
     for _, row in default_rows.iterrows():
         lines.append(
-            f"- {row['label']}: retrain={int(row['ml_retrain_every_days'])}, "
+            f"- {row['label']}: train_window_days={int(row['ml_train_window_days'])}, "
+            f"retrain={int(row['ml_retrain_every_days'])}, "
             f"lgbm_n_estimators={int(row['lgbm_n_estimators'])}, "
             f"full excess Sharpe {_safe_num(row['full_excess_sharpe'])}, "
             f"{weak_window_name} excess Sharpe {_safe_num(row[weak_metric])}"
@@ -239,7 +243,8 @@ def _render_summary(
     lines.append("## Best by full_excess_sharpe")
     for _, row in best_full_df.iterrows():
         lines.append(
-            f"- {row['label']}: retrain={int(row['ml_retrain_every_days'])}, "
+            f"- {row['label']}: train_window_days={int(row['ml_train_window_days'])}, "
+            f"retrain={int(row['ml_retrain_every_days'])}, "
             f"lgbm_n_estimators={int(row['lgbm_n_estimators'])}, "
             f"full excess Sharpe {_safe_num(row['full_excess_sharpe'])}, "
             f"{weak_window_name} excess Sharpe {_safe_num(row[weak_metric])}, "
@@ -250,7 +255,8 @@ def _render_summary(
     lines.append(f"## Best by {weak_window_name}_excess_sharpe")
     for _, row in best_weak_df.iterrows():
         lines.append(
-            f"- {row['label']}: retrain={int(row['ml_retrain_every_days'])}, "
+            f"- {row['label']}: train_window_days={int(row['ml_train_window_days'])}, "
+            f"retrain={int(row['ml_retrain_every_days'])}, "
             f"lgbm_n_estimators={int(row['lgbm_n_estimators'])}, "
             f"full excess Sharpe {_safe_num(row['full_excess_sharpe'])}, "
             f"{weak_window_name} excess Sharpe {_safe_num(row[weak_metric])}, "
@@ -272,8 +278,9 @@ def _render_summary(
         overall_best = results_df.sort_values([weak_metric, "full_excess_sharpe"], ascending=[False, False]).iloc[0]
         lines.append("## Direct answer")
         lines.append(
-            f"- In the current lgbm execution stack, changing retrain frequency and boosting rounds does affect results: "
-            f"best observed row is {overall_best['label']} @ retrain={int(overall_best['ml_retrain_every_days'])}, "
+            f"- In the current lgbm execution stack, changing train window, retrain frequency, and boosting rounds does affect results: "
+            f"best observed row is {overall_best['label']} @ train_window_days={int(overall_best['ml_train_window_days'])}, "
+            f"retrain={int(overall_best['ml_retrain_every_days'])}, "
             f"lgbm_n_estimators={int(overall_best['lgbm_n_estimators'])}, "
             f"{weak_window_name} excess Sharpe {_safe_num(overall_best[weak_metric])}, "
             f"full excess Sharpe {_safe_num(overall_best['full_excess_sharpe'])}."
@@ -351,6 +358,7 @@ def main() -> None:
     if not weak_window_name:
         raise ValueError("windows must include an explicit weak_window_* section.")
     focus_state = str(args.focus_state).strip().lower() or DEFAULT_FOCUS_STATE
+    train_window_grid = _parse_int_grid(args.train_window_grid, [int(args.ml_train_window_days)])
     retrain_grid = _parse_int_grid(args.retrain_grid, [5, 10, 21, 42])
     lgbm_estimator_grid = _parse_int_grid(args.lgbm_estimator_grid, [130, 260, 520])
     base_weights = {
@@ -359,6 +367,8 @@ def main() -> None:
         "v2": float(args.ensemble_v2_weight),
     }
     candidates = _build_strict_compare_candidates(focus_state, base_weights)
+
+    history_ml_cfg = replace(base_ml_cfg, train_window_days=max(train_window_grid))
 
     with StageProgress(total=7, label="retrain/tree impact") as progress:
         with progress.stage("prepare universe", f"source={args.data_source}"):
@@ -375,7 +385,7 @@ def main() -> None:
         with progress.stage("resolve history window", args.start_date):
             history_window = resolve_history_window(
                 cfg=cfg,
-                ml_cfg=base_ml_cfg,
+                ml_cfg=history_ml_cfg,
                 requested_start_date=args.start_date,
                 end_date=args.end_date,
                 mode="train",
@@ -472,71 +482,78 @@ def main() -> None:
             if cfg.enable_style_cap and args.data_source == "tq":
                 style_map = load_style_map_from_tq(candidate_columns)
 
-        with progress.stage("run strict comparisons", f"{len(retrain_grid)}x{len(lgbm_estimator_grid)} configs"):
+        with progress.stage("run strict comparisons", f"{len(train_window_grid)}x{len(retrain_grid)}x{len(lgbm_estimator_grid)} configs"):
             results: list[dict[str, Any]] = []
             training_logs_dir = output_root / "training_logs"
             training_logs_dir.mkdir(parents=True, exist_ok=True)
-            total_configs = len(retrain_grid) * len(lgbm_estimator_grid)
+            total_configs = len(train_window_grid) * len(retrain_grid) * len(lgbm_estimator_grid)
             config_index = 0
-            for retrain_every_days in retrain_grid:
-                for lgbm_n_estimators in lgbm_estimator_grid:
-                    config_index += 1
-                    config_name = f"r{int(retrain_every_days):02d}_n{int(lgbm_n_estimators):03d}"
-                    progress.log(f"[{config_index}/{total_configs}] {config_name}")
-                    run_ml_cfg = MLAplhaConfig(**asdict(base_ml_cfg))
-                    run_ml_cfg.retrain_every_days = int(retrain_every_days)
-                    run_ml_cfg.lgbm_n_estimators = int(lgbm_n_estimators)
-
-                    ml_score_cache_path = _ml_score_cache_path(prepared_cache_meta["cache_key"], run_ml_cfg)
-                    cached_ml_payload = None if args.refresh_cache else _load_pickle(ml_score_cache_path)
-                    if cached_ml_payload is not None:
-                        training_log = cached_ml_payload["training_log"]
-                        shared_per_horizon_scores = cached_ml_payload["per_horizon_scores"]
-                    else:
-                        _, training_log, shared_per_horizon_scores = rolling_ml_scores_multi_detail(
-                            feature_frames=prepared_bundle["feature_frames"],
-                            market_features=prepared_bundle["market_features"],
-                            close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
-                            benchmark_close=prepared_bundle["benchmark_close"],
-                            open_df=prepared_bundle["factor_bundle"]["raw_inputs"]["Open"],
-                            benchmark_open=prepared_bundle["benchmark_open"],
-                            filter_mask=prepared_bundle["filter_mask"],
-                            regime_state=prepared_bundle["regime_state"],
-                            config=run_ml_cfg,
+            for train_window_days in train_window_grid:
+                for retrain_every_days in retrain_grid:
+                    for lgbm_n_estimators in lgbm_estimator_grid:
+                        config_index += 1
+                        config_name = (
+                            f"w{int(train_window_days):04d}_"
+                            f"r{int(retrain_every_days):02d}_"
+                            f"n{int(lgbm_n_estimators):03d}"
                         )
-                        if not args.no_cache:
-                            _save_pickle(
-                                ml_score_cache_path,
-                                {
-                                    "training_log": training_log,
-                                    "per_horizon_scores": shared_per_horizon_scores,
-                                },
+                        progress.log(f"[{config_index}/{total_configs}] {config_name}")
+                        run_ml_cfg = MLAplhaConfig(**asdict(base_ml_cfg))
+                        run_ml_cfg.train_window_days = int(train_window_days)
+                        run_ml_cfg.retrain_every_days = int(retrain_every_days)
+                        run_ml_cfg.lgbm_n_estimators = int(lgbm_n_estimators)
+
+                        ml_score_cache_path = _ml_score_cache_path(prepared_cache_meta["cache_key"], run_ml_cfg)
+                        cached_ml_payload = None if args.refresh_cache else _load_pickle(ml_score_cache_path)
+                        if cached_ml_payload is not None:
+                            training_log = cached_ml_payload["training_log"]
+                            shared_per_horizon_scores = cached_ml_payload["per_horizon_scores"]
+                        else:
+                            _, training_log, shared_per_horizon_scores = rolling_ml_scores_multi_detail(
+                                feature_frames=prepared_bundle["feature_frames"],
+                                market_features=prepared_bundle["market_features"],
+                                close=prepared_bundle["factor_bundle"]["raw_inputs"]["Close"],
+                                benchmark_close=prepared_bundle["benchmark_close"],
+                                open_df=prepared_bundle["factor_bundle"]["raw_inputs"]["Open"],
+                                benchmark_open=prepared_bundle["benchmark_open"],
+                                filter_mask=prepared_bundle["filter_mask"],
+                                regime_state=prepared_bundle["regime_state"],
+                                config=run_ml_cfg,
                             )
+                            if not args.no_cache:
+                                _save_pickle(
+                                    ml_score_cache_path,
+                                    {
+                                        "training_log": training_log,
+                                        "per_horizon_scores": shared_per_horizon_scores,
+                                    },
+                                )
 
-                    training_log.to_csv(training_logs_dir / f"{config_name}.csv", index=False, encoding="utf-8-sig")
-                    for candidate in iter_progress(
-                        candidates,
-                        total=len(candidates),
-                        desc=f"compare {config_name}",
-                        unit="candidate",
-                        position=1,
-                    ):
-                        row, _ = _run_candidate(
-                            candidate=candidate,
-                            cfg=cfg,
-                            ml_cfg=run_ml_cfg,
-                            shared_per_horizon_scores=shared_per_horizon_scores,
-                            prepared_bundle=prepared_bundle,
-                            current_membership_mask=current_membership_mask,
-                            industry_map=industry_map,
-                            style_map=style_map,
-                            windows=windows,
-                            focus_state=focus_state,
-                        )
-                        row["ml_retrain_every_days"] = int(retrain_every_days)
-                        row["lgbm_n_estimators"] = int(lgbm_n_estimators)
-                        row["ml_score_cache_path"] = str(ml_score_cache_path)
-                        results.append(row)
+                        training_log.to_csv(training_logs_dir / f"{config_name}.csv", index=False, encoding="utf-8-sig")
+                        for candidate in iter_progress(
+                            candidates,
+                            total=len(candidates),
+                            desc=f"compare {config_name}",
+                            unit="candidate",
+                            position=1,
+                        ):
+                            row, _ = _run_candidate(
+                                candidate=candidate,
+                                cfg=cfg,
+                                ml_cfg=run_ml_cfg,
+                                shared_per_horizon_scores=shared_per_horizon_scores,
+                                prepared_bundle=prepared_bundle,
+                                current_membership_mask=current_membership_mask,
+                                industry_map=industry_map,
+                                style_map=style_map,
+                                windows=windows,
+                                focus_state=focus_state,
+                            )
+                            row["ml_train_window_days"] = int(train_window_days)
+                            row["ml_retrain_every_days"] = int(retrain_every_days)
+                            row["lgbm_n_estimators"] = int(lgbm_n_estimators)
+                            row["ml_score_cache_path"] = str(ml_score_cache_path)
+                            results.append(row)
 
     results_df = pd.DataFrame(results)
     if results_df.empty:
@@ -546,7 +563,9 @@ def main() -> None:
     best_full_df = _pick_best_rows(results_df, "full_excess_sharpe", weak_metric).sort_values("label").reset_index(drop=True)
     best_weak_df = _pick_best_rows(results_df, weak_metric, "full_excess_sharpe").sort_values("label").reset_index(drop=True)
     default_rows = results_df.loc[
-        results_df["ml_retrain_every_days"].eq(21) & results_df["lgbm_n_estimators"].eq(260)
+        results_df["ml_train_window_days"].eq(int(args.ml_train_window_days))
+        & results_df["ml_retrain_every_days"].eq(21)
+        & results_df["lgbm_n_estimators"].eq(260)
     ].sort_values("label").reset_index(drop=True)
     range_df = _build_metric_range_rows(results_df, weak_window_name, focus_state).sort_values("label").reset_index(drop=True)
 
@@ -569,6 +588,7 @@ def main() -> None:
         "focus_state": focus_state,
         "windows": [{"name": name, "start": start, "end": end} for name, start, end in windows],
         "strict_compare_candidates": candidates,
+        "train_window_grid": train_window_grid,
         "retrain_grid": retrain_grid,
         "lgbm_estimator_grid": lgbm_estimator_grid,
         "base_config": {"research": asdict(cfg), "ml": asdict(base_ml_cfg)},
@@ -585,6 +605,7 @@ def main() -> None:
         range_df=range_df,
         weak_window_name=weak_window_name,
         focus_state=focus_state,
+        train_window_grid=train_window_grid,
         retrain_grid=retrain_grid,
         lgbm_estimator_grid=lgbm_estimator_grid,
     )
