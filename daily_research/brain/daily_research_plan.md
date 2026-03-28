@@ -34,6 +34,13 @@
 - 执行端默认值继续不自动切换；
 - `daily_research/output/advanced_ml_shortlist_head_to_head_20260328_formal_r1` 已经产出；
 - 当前没有单一升级赢家；
+- `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1` 已经完成第一轮正式扫描；
+- `daily_research/output/advanced_ml_attack_defense_diagnosis_20260328_formal_r1` 与 `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r2_ret10` 已经完成；
+- 但 16 个简单动态控制器里，仍没有一个能同时压过静态 `v255` 的全样本进攻与静态 `v250` 的弱窗口防守；
+- 第二轮正式扫描表明：加入 `benchmark_ret_10d` 过滤后，最强折中候选已经能把
+  - `weak_window_20250905_20260319_excess_sharpe` 提到 `1.101`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe` 提到 `1.114`
+  - 但它的 `full_excess_sharpe` 仍只有 `0.807`，还没超过静态 `v255` 的 `0.860`
 - 下一步不再回头重复做 `504 / 5 / 260` 与 `378 / 21 / 520` 的正式复验；
 - 后续正式方向已明确改成：
   - 不再强迫这两组候选选出一个静态唯一赢家；
@@ -47,6 +54,8 @@
   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520` 更强
 - 若按当前停止规则执行：
   - 维持现默认值，不做口头升级
+- 若按当前动态控制器首轮扫描看：
+  - 方向是对的，但简单 `trend_gap + annual_vol` 阈值控制器还不够作为默认执行升级方案
 
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责。
@@ -82,6 +91,10 @@
    - 静态 `v250`
    - 动态攻守控制器
 5. 在攻守控制器正式跑完前，不允许研究侧局部高收益候选静默替换默认值。
+6. 当前若继续推进动态控制器，顺序更新为：
+   - 保留 `benchmark_ret_10d` 作为第二代控制轴，不再退回到只有 `trend_gap + annual_vol` 的首轮规则；
+   - 继续围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 这类候选补 `full_excess_sharpe`；
+   - `focus_streak` 暂保留为解释变量，不直接升格为正式 gating 入口。
 
 ### 优先级 B：维持当前执行主线稳态
 目标：

@@ -93,7 +93,8 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
 - 执行端默认值暂不自动切换；
-  - 2026-03-28 的 formal head-to-head 已完成，但当前没有单一升级赢家，相关口径统一写在 `daily_research/brain/daily_research_plan.md`
+  - 2026-03-28 的 formal head-to-head、攻守分型诊断、首轮动态控制器扫描与第二轮 `ret10` 动态扫描都已完成，但当前仍没有可升级默认值的单一或动态赢家，相关口径统一写在 `daily_research/brain/daily_research_plan.md`
+  - 当前最强的动态折中候选是 `gap>=0.024192, vol<=0.176128, ret10>=0.014717`，它已经把弱窗口指标推到 `1.101 / 1.114`，但 `full_excess_sharpe` 仍只有 `0.807`
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
 - 连续状态分数保留为诊断层，不进入当前默认执行软调节逻辑。
 - `ma47/48` 左侧边界带、`v21_volume_contraction_015` 等高收益旁支保留在研究附录，不进入默认执行口径。

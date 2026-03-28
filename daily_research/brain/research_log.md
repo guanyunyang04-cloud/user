@@ -7317,3 +7317,203 @@ position,000001.SZ,1200,12.38,
    - 或补一项同口径的 formal comparator，再让两组最终候选分出单一赢家。
 4. 后续文档与口头结论继续统一使用：
    - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器首轮正式扫描
+### 本轮目标
+- 不再逼 `v250` 与 `v255` 选出静态唯一赢家。
+- 直接验证一个最小可执行的动态控制器：在 `trend_up_low_vol` 内部，根据市场趋势强度与波动水平，在两组最终候选之间切换。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/scan_advanced_ml_attack_defense_controller.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1`
+- 正式口径继续固定为：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+- 静态对照仍只看：
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 动态控制器首轮只做最小扫描：
+  - 在 `trend_up_low_vol` 内，若 `trend_gap >= 阈值` 且 `annual_vol <= 阈值`，则切到 `v255`
+  - 否则保持 `v250`
+- 首轮阈值网格：
+  - `trend_gap = 0.010, 0.024, 0.044, 0.065`
+  - `annual_vol = 0.140, 0.170, 0.200, 0.320`
+
+### 结果一：当前没有动态控制器能同时压过两组静态 shortlist
+- 静态 `v250`
+  - `full_excess_sharpe = 0.786`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.968`
+- 静态 `v255`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- 本轮 16 个动态候选里：
+  - `dominating_dynamic_candidate_count = 0`
+- 这说明：
+  - 首轮简单控制器还不能把“进攻”和“防守”同时收口成一个可直接升级的默认方案。
+
+### 结果二：简单控制器确实有信号，但还不够形成默认值升级
+- 进攻最强的动态候选：
+  - `gap>=0.010, vol<=0.320`
+  - `full_excess_sharpe = 0.817`
+  - `weak_window_excess_sharpe = 0.745`
+  - `focus_weak_excess_sharpe = 0.657`
+- 防守最强、也是 balance score 最强的动态候选：
+  - `gap>=0.024, vol<=0.140`
+  - `full_excess_sharpe = 0.758`
+  - `weak_window_excess_sharpe = 1.095`
+  - `focus_weak_excess_sharpe = 1.108`
+- 当前最像“折中型”的候选之一：
+  - `gap>=0.024, vol<=0.200`
+  - `full_excess_sharpe = 0.806`
+  - `weak_window_excess_sharpe = 0.987`
+  - `focus_weak_excess_sharpe = 0.966`
+- 这说明：
+  - 简单控制器已经能明显改变攻守平衡；
+  - 但它还做不到既保住 `v255` 的全样本上沿，又同时稳定压过 `v250` 的弱窗口上沿。
+
+### 本轮结论
+1. “做动态攻守控制器”这条方向本身是对的，不需要回退到静态二选一。
+2. 但首轮最小规则版控制器还不够作为默认执行升级方案。
+3. 当前最重要的真实信息不是“动态无效”，而是：
+   - 简单 `trend_gap + annual_vol` 双阈值规则不足以完成这次升级。
+4. 后续若继续推进，重点应转向：
+   - 补强 `trend_up_low_vol` 内部的状态识别与切换信号；
+   - 而不是继续在同一层重复更密的纯阈值扫网格。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 动态控制器方向继续保留为优先研究线。
+3. 下一步不再回头做静态 shortlist 的重复争论。
+4. 下一步若继续推进，优先做：
+   - 更强的 `trend_up_low_vol` 内部攻守识别信号
+   - 再用同一正式口径重跑动态控制器正式比较
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守分型诊断
+### 本轮目标
+- 不再停留在“动态方案有没有赢家”这一层。
+- 直接拆清 `trend_up_low_vol` 内，究竟哪些信号更像正式攻守切换入口，哪些只是解释变量。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/diagnose_advanced_ml_attack_defense.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_diagnosis_20260328_formal_r1`
+- 诊断对象继续固定为：
+  - 静态 `trend_up_low_vol_ml25_none20_v255`
+  - 静态 `trend_up_low_vol_ml25_none25_v250`
+- 诊断口径继续固定为：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+
+### 结果一：日级攻守差分真实存在，但强度还不够直接形成单变量 gate
+- `focus_state_days = 482`
+- `offense_minus_defense_mean_excess_return` 接近零轴，但 `offense_win_rate = 0.523`
+- 这说明：
+  - `v255` 与 `v250` 的日级优势差异不是不存在；
+  - 但它不是那种用单一简单特征就能一下子完全分开的强信号。
+
+### 结果二：`focus_streak` 更像解释变量，不像下一轮 formal controller 的主入口
+- `focus_streak>=18 / 27 / 10` 这类单规则虽然在全样本上有轻微正向 mean diff；
+- 但它们在弱窗口里的 `weak_mean_diff` 并不稳定，普遍没有形成比 `ret10` 更清晰的正式升级方向。
+- 这说明：
+  - `focus_streak` 可以保留为解释 `trend_up_low_vol` 内部节奏的诊断特征；
+  - 但当前不值得直接升格为第二轮正式 gating 入口。
+
+### 结果三：更值得 formal 化的是 `benchmark_ret_10d`
+- 诊断里更像“下一轮正式入口”的组合集中在：
+  - `trend_gap >= 0.024192`
+  - `annual_vol <= 0.176128`
+  - 再叠加 `benchmark_ret_10d`
+- 这说明：
+  - 与其继续在首轮 `trend_gap + annual_vol` 上加密网格；
+  - 不如直接把 `benchmark_ret_10d` 作为第二代动态控制器的新增门槛进入正式复验。
+
+### 本轮结论
+1. 当前攻守控制器方向继续成立，不回退到静态二选一。
+2. 下一轮最值得 formal 化的新轴不是 `focus_streak`，而是 `benchmark_ret_10d`。
+3. 因此下一步直接进入：
+   - 带 `ret10` 门槛的第二轮正式动态控制器扫描。
+
+### 当前决策
+1. 保留 `focus_streak` 为诊断变量。
+2. 把 `benchmark_ret_10d` 升为第二轮正式控制器扫描的新增门槛。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器第二轮正式扫描（加 `ret10`）
+### 本轮目标
+- 验证在首轮 `trend_gap + annual_vol` 基础上，再加入 `benchmark_ret_10d`，能否把动态控制器正式推到可升级默认值的水平。
+
+### 本轮动作
+- 继续使用脚本：
+  - `daily_research/baseline/scan_advanced_ml_attack_defense_controller.py`
+- 脚本新增：
+  - `--offense-benchmark-ret10-grid`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r2_ret10`
+- 第二轮正式网格收敛为：
+  - `trend_gap = 0.015576, 0.024192`
+  - `annual_vol = 0.108317, 0.176128`
+  - `benchmark_ret_10d = -0.007665, 0.003449, 0.014717`
+- 静态对照继续保持：
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+
+### 结果一：`ret10` 确实让动态方案更接近正式可用
+- `dominating_dynamic_candidate_count = 0`
+- 但第二轮最强折中候选已经变成：
+  - `gap>=0.024192, vol<=0.176128, ret10>=0.014717`
+  - `full_excess_sharpe = 0.807`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.101`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.114`
+- 这说明：
+  - `ret10` 不是噪音门槛；
+  - 它确实把动态方案的弱窗口与 focus-weak 防守能力又往上推了一层。
+
+### 结果二：当前更偏进攻的第二轮候选也已经比首轮更完整
+- 本轮 full 端最强动态候选是：
+  - `gap>=0.024192, vol<=0.176128, ret10>=0.003449`
+  - `full_excess_sharpe = 0.818`
+  - `weak_window_excess_sharpe = 1.088`
+  - `focus_weak_excess_sharpe = 1.097`
+- 这说明：
+  - 第二轮 `ret10` 控制器已经不再只是“纯防守补丁”；
+  - 它开始形成“full 端不算差，弱窗口端明显更强”的正式动态候选形态。
+
+### 结果三：但它还没有真正跨过升级门槛
+- 静态 `v255` 仍然保持：
+  - `full_excess_sharpe = 0.860`
+- 静态 `v250` 仍然保持：
+  - `weak_window_excess_sharpe = 0.992`
+  - `focus_weak_excess_sharpe = 0.968`
+- 当前第二轮最强动态候选虽然已经在弱窗口侧明显超过 `v250`；
+- 但在 full 端仍没超过静态 `v255`。
+- 这说明：
+  - 当前问题已经从“动态方向有没有信号”收敛成：
+  - 如何在保住 `ret10` 带来的弱窗口增益前提下，再把 full 端补回去。
+
+### 本轮结论
+1. 第二轮正式扫描进一步确认：
+   - `benchmark_ret_10d` 是值得保留的第二代动态控制轴。
+2. 当前最强动态折中候选是：
+   - `gap>=0.024192, vol<=0.176128, ret10>=0.014717`
+3. 当前更偏 full 端的动态候选是：
+   - `gap>=0.024192, vol<=0.176128, ret10>=0.003449`
+4. 但当前仍没有一个动态控制器能同时压过静态 `v255` 的 full 上沿与静态 `v250` 的弱窗口防守。
+5. 因此执行端默认值继续保持不切换。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 动态控制器研究线继续保留，而且优先级高于回头争论静态二选一。
+3. 下一步不再把 `focus_streak` 升格为正式 gating 入口。
+4. 下一步若继续推进，优先做：
+   - 围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 继续补 full 端收益；
+   - 在保住这层 `ret10` 弱窗口增益的前提下，再做同口径 formal comparator。
