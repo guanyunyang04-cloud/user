@@ -5260,6 +5260,10 @@ position,000001.SZ,1200,12.38,
 5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究
 
 ## 2026-03-24 执行端第十五轮正式复验：`ma50` 口径模型族对照（`histgb / lgbm / etr`）
+> 注：这段高收益结论属于 `2026-03-24` 的旧执行口径，不等于当前 live 执行端的收益预期。
+> 当时脚本默认起点仍是 `2022-01-01`，且使用的是旧 `market_features(7)` 与全局 `ML / none / v2 = 0.70 / 0.20 / 0.10` 集成；
+> `2026-03-28` 底层状态和 `market_features` 已扩到 `24` 个，当前 live 默认也已切到 `trend_up_low_vol` 状态专属 `v250`，因此这里的高收益只能作为“旧模型族对照结论”，不能直接外推到今天的执行端。
+
 ### 本轮目标
 - 既然 `trend_up_low_vol` 的 ensemble 权重线已经确认停止晋级，就把执行端 ML 增量优化的主线切到当前真实执行口径下的模型族对照：
   - 固定 `ma50 + rolling liquid500 + next_open`
@@ -7518,6 +7522,8 @@ position,000001.SZ,1200,12.38,
    - 围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 继续补 full 端收益；
    - 在保住这层 `ret10` 弱窗口增益的前提下，再做同口径 formal comparator。
 
+> 注：以上结论基于旧 `market_features` 口径，已被下方“当前代码口径重跑 + 执行默认值升级”条目覆盖；后续默认以该新条目为准。
+
 ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 当前代码口径重跑 + 执行默认值升级
 ### 本轮目标
 - 解释为什么旧 formal `r1 / r2` 与当前脚本结果发生冲突；
@@ -7595,3 +7601,167 @@ position,000001.SZ,1200,12.38,
 3. 后续所有正式动态比较，默认都要先回答：
    - 能否在同一 formal 口径下跑赢 live `v250`
 4. 后续若继续推进动态控制器，不再把“是否沿用旧 `v255` 口径”作为讨论前提。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` `market_features` 正式对照（`legacy_v7` vs `expanded_v24`）
+### 本轮目标
+- 直接回答：`2026-03-28` 这次底层状态与 `market_features` 扩容后，当前执行端到底是整体更强，还是只是“看起来更现代、但收益反而掉了”。
+- 把“怀念旧 `v255` 高收益”和“当前 live `v250` 是否合理”拆成两件事，用同一 execution stack 正式比较。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+- 正式输出目录：
+  - `daily_research/output/market_feature_profile_compare_20260328_formal_r1`
+- 固定比较对象：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+  - `trend_up_low_vol_controller_gap0p024192_vol0p176128_ret100p014717`
+- 固定口径继续保持：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+
+### 结果一：`expanded_v24` 不是整体升级，而是“修 base + 保住 `v250` 防守”
+- `base_global`
+  - `expanded_v24 - legacy_v7 = full_excess_sharpe +0.278`
+  - `weak_window_20250905_20260319_excess_sharpe +0.808`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.686`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_annual_return +0.08%`
+  - `full_excess_sharpe -0.027`
+  - `recent_full_excess_sharpe +0.097`
+  - `weak_window_20250905_20260319_excess_sharpe +0.081`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.115`
+- 这说明：
+  - `24-feature` 新系统并不是把所有候选都一起抬高；
+  - 它明显修复了旧 `legacy_v7` 下几乎失效的 `base_global`；
+  - 对当前 live `v250`，它属于“全样本收益几乎持平、full Sharpe 略低，但最近窗口和弱窗口更强”。
+
+### 结果二：`expanded_v24` 明显吃掉了旧 `v255` 与动态控制器的进攻上沿
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe -0.184`
+  - `full_excess_annual_return -3.45%`
+  - `weak_window_20250905_20260319_excess_sharpe -0.538`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe -0.656`
+- `trend_up_low_vol_controller_gap0p024192_vol0p176128_ret100p014717`
+  - `full_excess_sharpe -0.058`
+  - `full_excess_annual_return -0.67%`
+  - `weak_window_20250905_20260319_excess_sharpe -0.110`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe -0.134`
+- 这说明：
+  - 你记忆里“以前明显更能打”的感觉，主要不是错觉；
+  - 它集中体现在旧 `legacy_v7` 口径下的 `v255` 进攻腿；
+  - 当前 `expanded_v24` 不是把整条 frontier 全面右移，而是把收益结构重排了。
+
+### 本轮结论
+1. 当前 live `expanded_v24 + v250` 仍然成立，不应该因为怀念旧 `v255` 高收益就直接整体系回滚。
+2. 但 `24-feature` 不能再被表述成“整体架构全面增强”；更准确的表述是：
+   - `base` 更强；
+   - `v250` 防守更稳；
+   - `v255` 与当前动态控制器的进攻边更弱。
+3. 当前真正的研发目标不再是争论“是否回滚到底层旧系统”，而是：
+   - 如何在保住 `v250` 防守改进的前提下，补回 `v255 / dynamic` 的进攻能力。
+
+### 当前决策
+1. live 默认继续保持：
+   - 当前代码口径
+   - `expanded_v24`
+   - `trend_up_low_vol_ml25_none25_v250`
+2. 下一步优先研究：
+   - `attack leg` 的 `market_features` 裁剪或 hybrid profile；
+   - 再用同一 formal 口径比较其是否能追回旧 `v255` 的进攻上沿，而不破坏当前 `v250` 的弱窗口防守。
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` `market_features` focused pruning 正式扫描（以 `expanded_v24` 为锚）
+### 本轮目标
+- 在已经确认 `expanded_v24 + v250` 是当前 live 默认之后，不再泛泛争论“要不要整体系回滚”。
+- 直接回答更具体的问题：
+  - `24-feature` 里有没有一组更小的 profile，能在不破坏当前 live `v250` 防守的前提下，把旧 `v255` 的进攻边拉回来？
+- 本轮 focused pruning 只看当前最有信息量的六组 profile：
+  - `legacy_v7`
+  - `continuous_quadrant_v9`
+  - `expanded_state_only_v14`
+  - `expanded_no_market_state_v15`
+  - `expanded_no_buckets_v18`
+  - `expanded_v24`
+
+### 本轮动作
+- 新增/扩展：
+  - `daily_research/baseline/ml_alpha.py`
+    - 把 `market_feature_profile` 从“新旧两档”扩成可复用的 profile registry
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+    - 新增多 profile anchored comparator 输出
+- 正式输出目录：
+  - `daily_research/output/market_feature_profile_pruning_20260328_formal_r1`
+- 固定口径继续保持：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+  - 本轮先 `--skip-dynamic`，先把静态 offense / live-defense frontier 跑清楚
+
+### 结果一：简单 pruning 没有产生新的单一升级赢家
+- 当前锚点仍是：
+  - `expanded_v24`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `legacy_v7`: `full_excess_sharpe = 0.860`, `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `continuous_quadrant_v9`: `0.594 / 0.765`
+  - `expanded_state_only_v14`: `0.544 / 0.389`
+  - `expanded_no_market_state_v15`: `0.481 / 0.199`
+  - `expanded_no_buckets_v18`: `0.447 / -0.380`
+  - `expanded_v24`: `0.675 / 0.281`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `legacy_v7`: `full_excess_sharpe = 0.786`, `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `continuous_quadrant_v9`: `0.579 / 0.787`
+  - `expanded_state_only_v14`: `0.568 / 0.393`
+  - `expanded_no_market_state_v15`: `0.512 / 0.392`
+  - `expanded_no_buckets_v18`: `0.505 / -0.068`
+  - `expanded_v24`: `0.759 / 1.073`
+- 这说明：
+  - 没有任何一个中间态 profile 能同时拿到“比 `expanded_v24` 更强的 live `v250` 防守”和“比 `expanded_v24` 更强的 `v255` 进攻”；
+  - `expanded_no_buckets_v18` 明显是错误方向；
+  - `expanded_state_only_v14` 和 `expanded_no_market_state_v15` 也没有形成有效折中。
+
+### 结果二：`continuous_quadrant_v9` 是最接近可讨论的 pruning，但仍不够
+- 相对当前锚点 `expanded_v24`：
+  - 对 `v255`：
+    - `full_excess_sharpe = -0.082`
+    - `weak_window_20250905_20260319_excess_sharpe = +0.484`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = +0.604`
+  - 对 live `v250`：
+    - `full_excess_sharpe = -0.180`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.286`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.371`
+- 这说明：
+  - 它确实证明“当前 24 维特征里有一部分在压制 `v255` 的弱窗口表现”；
+  - 但它并没有把 `v255` 的 full 端追回来，反而还会明显伤到 live `v250`；
+  - 所以它只能作为结构线索，不能直接晋级。
+
+### 结果三：真正清晰的 frontier 变成了“双 profile 分工”
+- offense 最强 profile 仍是：
+  - `legacy_v7`
+- live-defense 最强 profile 仍是：
+  - `expanded_v24`
+- 而且这两边都不是简单 pruning 能统一起来的。
+- 这说明：
+  - 当前更值得做的，不再是继续扫“单一全局 profile”；
+  - 而是把问题改写成：
+    - 是否能让 offense leg 用 `legacy_v7`
+    - 同时让 defense/live leg 继续用 `expanded_v24`
+    - 再放进同一套 formal 攻守控制器里比较
+
+### 本轮结论
+1. `expanded_v24 + v250` 继续成立，不回滚。
+2. 简单 `market_features` pruning 不是当前最优研发方向。
+3. `legacy_v7` 仍然承载最强的 offense edge，但不能直接整体回滚，因为它会削弱当前 live-defense 口径。
+4. 下一步正式研发重点应收口为：
+   - 双 profile 攻守控制器
+   - 而不是继续做单一全局 profile 的裁剪比赛
+
+### 当前决策
+1. 执行端默认值不变：
+   - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+2. 后续若继续推进收益上沿，优先做：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 同口径 formal comparator

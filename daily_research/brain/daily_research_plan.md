@@ -52,6 +52,18 @@
   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
 - 当前 upgrade gate：
   - 只有动态方案在同一 formal 口径下跑赢 live `v250`，同时不丢失 `v255` 的 full 端进攻价值，才允许继续讨论默认值升级
+- `market_feature_profile_compare_20260328_formal_r1` 已进一步确认：
+  - `expanded_v24` 对 `base_global` 是明显修复；
+  - 对 live `v250` 是“全样本几乎持平、弱窗口更强、full Sharpe 略低”；
+  - 对 `v255` 与当前动态控制器则明显更弱。
+- `market_feature_profile_pruning_20260328_formal_r1` 已继续确认：
+  - 简单的 `market_features` 裁剪没有产生新的单一升级赢家；
+  - `continuous_quadrant_v9` 虽然能把 `v255` 的弱窗口拉回一部分，但会明显牺牲 full 端，并拖累 live `v250`；
+  - `legacy_v7` 仍是当前最强 offense profile，`expanded_v24` 仍是当前最强 live-defense profile。
+- 因此当前不回滚 `expanded_v24 + v250` live 默认；
+  后续若要追回旧 `v255` 的进攻上沿，优先方向应从“继续做全局 pruning”收口到“双 profile 攻守控制器”：
+  - offense leg 优先研究 `legacy_v7`
+  - defense/live leg 继续保持 `expanded_v24`
 
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责。

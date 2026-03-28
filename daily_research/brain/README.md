@@ -107,6 +107,16 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - 静态 `v255`：`0.675 / 0.281 / 0.094`
   - 当前没有动态控制器能同时压过新的 live 默认值与进攻对照
 - 2026-03-28 之前基于旧 `market_features` 集合得出的 `v255` 偏强结论已失效；当前所有正式升级讨论统一以 live `v250` 默认值为基准。
+- `market_feature_profile_compare_20260328_formal_r1` 已确认：
+  - `expanded_v24` 对 `base_global` 是明显修复；
+  - 对 live `v250` 是“全样本几乎持平、弱窗口更强、full Sharpe 略低”；
+  - 对旧 `v255` 与当前动态控制器则明显更弱。
+- `market_feature_profile_pruning_20260328_formal_r1` 已确认：
+  - 几组简单 pruning profile 都没有形成新的单一升级赢家；
+  - `legacy_v7` 仍是 offense 最强 profile；
+  - `expanded_v24` 仍是 live-defense 最强 profile。
+- 因此当前默认执行口径继续保持 `expanded_v24 + v250`；
+  后续研发重点不是整体系回滚，也不是继续做全局剪枝，而是研究双 profile 攻守控制器。
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
 - 连续状态分数保留为诊断层，不进入当前默认执行软调节逻辑。
 - `ma47/48` 左侧边界带、`v21_volume_contraction_015` 等高收益旁支保留在研究附录，不进入默认执行口径。

@@ -18,6 +18,103 @@ except Exception:  # pragma: no cover - optional dependency
     LGBMRegressor = None
 
 
+LEGACY_MARKET_FEATURE_PROFILE = "legacy_v7"
+EXPANDED_MARKET_FEATURE_PROFILE = "expanded_v24"
+CONTINUOUS_QUADRANT_MARKET_FEATURE_PROFILE = "continuous_quadrant_v9"
+EXPANDED_STATE_ONLY_MARKET_FEATURE_PROFILE = "expanded_state_only_v14"
+EXPANDED_NO_MARKET_STATE_MARKET_FEATURE_PROFILE = "expanded_no_market_state_v15"
+EXPANDED_NO_BUCKETS_MARKET_FEATURE_PROFILE = "expanded_no_buckets_v18"
+CONTINUOUS_MARKET_FEATURE_NAMES = (
+    "benchmark_trend_gap",
+    "benchmark_annual_vol",
+    "benchmark_vol_gap",
+    "benchmark_vol_ratio",
+)
+LEGACY_MARKET_FEATURE_NAMES = (
+    "benchmark_trend_gap",
+    "benchmark_annual_vol",
+    "is_up_low",
+    "is_up_high",
+    "is_down_low",
+    "is_down_high",
+    "regime_on",
+)
+QUADRANT_MARKET_FEATURE_NAMES = (
+    "is_up_low",
+    "is_up_high",
+    "is_down_low",
+    "is_down_high",
+)
+TREND_BUCKET_MARKET_FEATURE_NAMES = (
+    "is_trend_up",
+    "is_trend_flat",
+    "is_trend_down",
+)
+VOL_BUCKET_MARKET_FEATURE_NAMES = (
+    "is_vol_low",
+    "is_vol_mid",
+    "is_vol_high",
+)
+MARKET_STATE_FEATURE_NAMES = tuple(f"is_{market_state_label}" for market_state_label in MARKET_STATE_LABELS)
+REGIME_SWITCH_FEATURE_NAMES = ("regime_on",)
+EXPANDED_MARKET_FEATURE_NAMES = (
+    CONTINUOUS_MARKET_FEATURE_NAMES
+    + QUADRANT_MARKET_FEATURE_NAMES
+    + TREND_BUCKET_MARKET_FEATURE_NAMES
+    + VOL_BUCKET_MARKET_FEATURE_NAMES
+    + MARKET_STATE_FEATURE_NAMES
+    + REGIME_SWITCH_FEATURE_NAMES
+)
+MARKET_FEATURE_PROFILE_FEATURE_NAMES = {
+    LEGACY_MARKET_FEATURE_PROFILE: LEGACY_MARKET_FEATURE_NAMES,
+    CONTINUOUS_QUADRANT_MARKET_FEATURE_PROFILE: (
+        CONTINUOUS_MARKET_FEATURE_NAMES + QUADRANT_MARKET_FEATURE_NAMES + REGIME_SWITCH_FEATURE_NAMES
+    ),
+    EXPANDED_STATE_ONLY_MARKET_FEATURE_PROFILE: (
+        CONTINUOUS_MARKET_FEATURE_NAMES + MARKET_STATE_FEATURE_NAMES + REGIME_SWITCH_FEATURE_NAMES
+    ),
+    EXPANDED_NO_MARKET_STATE_MARKET_FEATURE_PROFILE: (
+        CONTINUOUS_MARKET_FEATURE_NAMES
+        + QUADRANT_MARKET_FEATURE_NAMES
+        + TREND_BUCKET_MARKET_FEATURE_NAMES
+        + VOL_BUCKET_MARKET_FEATURE_NAMES
+        + REGIME_SWITCH_FEATURE_NAMES
+    ),
+    EXPANDED_NO_BUCKETS_MARKET_FEATURE_PROFILE: (
+        CONTINUOUS_MARKET_FEATURE_NAMES
+        + QUADRANT_MARKET_FEATURE_NAMES
+        + MARKET_STATE_FEATURE_NAMES
+        + REGIME_SWITCH_FEATURE_NAMES
+    ),
+    EXPANDED_MARKET_FEATURE_PROFILE: EXPANDED_MARKET_FEATURE_NAMES,
+}
+SUPPORTED_MARKET_FEATURE_PROFILES = tuple(MARKET_FEATURE_PROFILE_FEATURE_NAMES.keys())
+MARKET_FEATURE_PROFILE_ALIASES = {
+    "legacy": LEGACY_MARKET_FEATURE_PROFILE,
+    "legacy_v7": LEGACY_MARKET_FEATURE_PROFILE,
+    "old": LEGACY_MARKET_FEATURE_PROFILE,
+    "old_v7": LEGACY_MARKET_FEATURE_PROFILE,
+    "hybrid_v9": CONTINUOUS_QUADRANT_MARKET_FEATURE_PROFILE,
+    "continuous_quadrant_v9": CONTINUOUS_QUADRANT_MARKET_FEATURE_PROFILE,
+    "cq_v9": CONTINUOUS_QUADRANT_MARKET_FEATURE_PROFILE,
+    "state_only": EXPANDED_STATE_ONLY_MARKET_FEATURE_PROFILE,
+    "expanded_state_only_v14": EXPANDED_STATE_ONLY_MARKET_FEATURE_PROFILE,
+    "state_only_v14": EXPANDED_STATE_ONLY_MARKET_FEATURE_PROFILE,
+    "no_market_state": EXPANDED_NO_MARKET_STATE_MARKET_FEATURE_PROFILE,
+    "expanded_no_market_state_v15": EXPANDED_NO_MARKET_STATE_MARKET_FEATURE_PROFILE,
+    "no_state_v15": EXPANDED_NO_MARKET_STATE_MARKET_FEATURE_PROFILE,
+    "no_buckets": EXPANDED_NO_BUCKETS_MARKET_FEATURE_PROFILE,
+    "expanded_no_buckets_v18": EXPANDED_NO_BUCKETS_MARKET_FEATURE_PROFILE,
+    "no_bucket_v18": EXPANDED_NO_BUCKETS_MARKET_FEATURE_PROFILE,
+    "expanded": EXPANDED_MARKET_FEATURE_PROFILE,
+    "expanded_v24": EXPANDED_MARKET_FEATURE_PROFILE,
+    "current": EXPANDED_MARKET_FEATURE_PROFILE,
+    "current_v24": EXPANDED_MARKET_FEATURE_PROFILE,
+    "new": EXPANDED_MARKET_FEATURE_PROFILE,
+    "new_v24": EXPANDED_MARKET_FEATURE_PROFILE,
+}
+
+
 def _zscore_cs(df: pd.DataFrame) -> pd.DataFrame:
     mean = df.mean(axis=1)
     std = df.std(axis=1).replace(0, np.nan)
@@ -26,6 +123,29 @@ def _zscore_cs(df: pd.DataFrame) -> pd.DataFrame:
 
 def _safe_ratio(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
     return a.div(b.replace(0, np.nan))
+
+
+def normalize_market_feature_profile(profile: str | None) -> str:
+    normalized = str(profile or EXPANDED_MARKET_FEATURE_PROFILE).strip().lower()
+    resolved = MARKET_FEATURE_PROFILE_ALIASES.get(normalized, normalized)
+    if resolved not in SUPPORTED_MARKET_FEATURE_PROFILES:
+        raise ValueError(
+            f"Unsupported market feature profile: {profile}. "
+            f"Expected one of {list(SUPPORTED_MARKET_FEATURE_PROFILES)}."
+        )
+    return resolved
+
+
+def select_market_feature_profile(
+    market_features: Dict[str, pd.Series],
+    profile: str | None = None,
+) -> Dict[str, pd.Series]:
+    normalized = normalize_market_feature_profile(profile)
+    required_features = MARKET_FEATURE_PROFILE_FEATURE_NAMES[normalized]
+    missing = [name for name in required_features if name not in market_features]
+    if missing:
+        raise ValueError(f"Market feature profile `{normalized}` is missing required features: {missing}")
+    return {name: market_features[name] for name in required_features}
 
 
 @dataclass

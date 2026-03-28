@@ -166,7 +166,9 @@
   - 静态 `v255 = 0.675 / 0.281 / 0.094`
   - 最强动态候选 `= 0.791 / 0.992 / 0.980`
   - 所以动态方向仍成立，但研究 benchmark 已改成 live `v250` 默认值。
-
+- `market_feature_profile_compare_20260328_formal_r1` 又把更深一层的边界补清了：`expanded_v24` 修复了 `base_global`、让 live `v250` 的弱窗口更稳，但也明显吃掉了旧 `v255` 与当前动态控制器的进攻上沿。
+- `market_feature_profile_pruning_20260328_formal_r1` 继续把边界压实了：几组中间态 profile 都没能同时保住当前 `expanded_v24` 的 live 防守、又恢复旧 `legacy_v7` 的进攻上沿；最接近的是 `continuous_quadrant_v9`，但它仍然是“弱窗口修回来一些、full 端和 live `v250` 都变差”。
+- 这意味着当前执行端的真实瓶颈已进一步收敛为：不是“要不要回滚整个新状态层”，也不是“再剪几刀全局 `market_features`”，而是“如何把 `legacy_v7` 的 offense edge 和 `expanded_v24` 的 defense edge 收进同一套双 profile 攻守控制器里”。
 ### 6.2 保持执行主线稳态
 - 当前仍在持续维持：
   - 执行链路可运行
