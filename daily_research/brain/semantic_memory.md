@@ -30,14 +30,15 @@
 
 ## 3. 当前稳定主线
 - 正式执行主线：
-  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
 - 调仓语义：
   - 日频目标更新，默认 `rebalance_freq=1d`
 - 执行方式：
   - 盘后生成计划，次日开盘人工执行
-- 当前 live 默认 focus-state 权重：
-  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
-- 当前 live-defense 默认值：
+- 当前执行后端：
+  - `2026-03-24 18:58:23 +0800` 审计快照 `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - 当前 `execution/update_model.py` 与 `execution/run_trade_plan.py` 已切到该快照后端
+- 当前研究侧对照锚点：
   - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
 
 ## 4. 分脑模块

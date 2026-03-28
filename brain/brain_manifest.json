@@ -9,6 +9,26 @@
     "brain/procedural_memory.md",
     "brain/environment_model.md"
   ],
+  "governance": {
+    "default_objective_policy": "profit_first_non_regression_for_production_brains",
+    "brain_body_match_required": true,
+    "cross_project_rules_write_first": "brain/master_brain.md"
+  },
+  "brain_contract": {
+    "required_sub_brain_keys": [
+      "brain_type",
+      "brain_id",
+      "parent_brain",
+      "attach_status",
+      "entrypoint",
+      "body_root",
+      "read_order",
+      "write_routes",
+      "body_map",
+      "modules",
+      "handoff_contract"
+    ]
+  },
   "child_brains": [
     {
       "id": "daily_research",
@@ -16,6 +36,7 @@
       "role": "production_research_and_execution",
       "control_level": "managed_by_main_brain",
       "body_root": "daily_research",
+      "entrypoint": "daily_research/brain/semantic_memory.md",
       "attach_status": "attached"
     },
     {
@@ -24,6 +45,7 @@
       "role": "intraday_experiment_and_rl",
       "control_level": "managed_by_main_brain",
       "body_root": "t0_project",
+      "entrypoint": "t0_project/brain/semantic_memory.md",
       "attach_status": "attached"
     },
     {
@@ -32,6 +54,7 @@
       "role": "multi_market_ai_stock_analysis",
       "control_level": "managed_by_main_brain",
       "body_root": "daily_stock_analysis-main",
+      "entrypoint": "daily_stock_analysis-main/brain/semantic_memory.md",
       "attach_status": "attached"
     }
   ],

@@ -1,23 +1,31 @@
 # Main Working Memory
 
-## 1. 当前工作区优先级
+## 1. 当前全局优先级
 - 一级优先级：
-  - 保持 `daily_research` 作为当前正式生产主线
+  - 巩固主脑与三个分脑的结构一致性、接管顺序和 manifest contract
+- 一级优先级：
+  - 维持 `daily_research` 作为当前正式生产主线
 - 二级优先级：
   - 保持 `t0_project` 与正式执行主线隔离
 - 二级优先级：
-  - 把 `daily_stock_analysis-main` 接入主脑拓扑，形成可交接的完整分脑
-- 三级优先级：
-  - 继续把所有长期认知收口到 brain 体系，保证项目 body 与 brain 高匹配
+  - 保持 `daily_stock_analysis-main` 作为独立产品分脑，不与执行主线混写
 
-## 2. 当前全局边界
-- `daily_research` 的默认值与 formal 结论优先级最高
-- `t0_project` 的任何实验结果都不能直接替代 `daily_research` live 默认值
-- `daily_stock_analysis-main` 是独立产品线，不直接接管 `daily_research` 的执行默认值
-- 后续 agent 的标准接入面是 brain，而不是项目 README
+## 2. 当前全局目标函数
+- 对生产型分脑，默认目标函数为：
+  - 收益优先、非降级
+- 稳定性、坏市场收益、弱窗口修复：
+  - 只能作为利润增益项或阶段控制器约束
+- 若某分脑要接受“更稳但更低收益”的升级：
+  - 必须由用户显式确认
+  - 并写入该分脑 `working_memory.md`
 
-## 3. 当前治理动作
-- 工作区只保留 brain 文档作为长期认知载体
-- 主脑继续维护分脑拓扑和 manifest
-- 以后新增分项目时，必须先建立自己的 `brain/`
-- 每个分脑都应维护 body_map 和 handoff_contract
+## 3. 当前全局边界
+- `daily_research` 的 live 默认值与 formal 结论仍是工作区最高优先级生产判断
+- `t0_project` 的实验结果不得直接替代 `daily_research` 默认值
+- `daily_stock_analysis-main` 是独立产品线，不接管 `daily_research` 执行默认值
+- 后续 agent 的统一接入面是各级 brain，而不是 `README`
+
+## 4. 当前治理动作
+- 工作区只保留 brain 体系作为长期认知载体
+- 主脑持续维护 child_brains、body_root、attach_status 与 handoff contract
+- 新增分项目时，必须先建立完整分脑，再允许接入主脑

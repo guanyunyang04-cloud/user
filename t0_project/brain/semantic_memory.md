@@ -1,52 +1,58 @@
 # T0 Project Semantic Memory
 
 ## 1. 项目身份
-`t0_project/` 是通达信盘中 T+0、监控与强化学习的独立实验分项目，用来验证：
+`t0_project/` 是通达信盘中 T+0、监控与强化学习的独立实验分项目，负责验证：
 
 - 盘中信号
 - 执行抽象
 - RL 原型
 
-它和 `daily_research/` 的正式执行主线严格隔离。
+上级主脑位于：
 
-## 2. 当前判断
-- 当前最主要的策略入口是 `integrated_tq_strategy.py`
-- `execution/` 是执行抽象层与真实交易适配器骨架，不是已打通的自动下单系统
-- `rl_agent/` 是强化学习研究分支，结论仍应按实验代码理解
+- `brain/master_brain.md`
+- `brain/brain_manifest.json`
 
-## 3. 分脑模块
-- `t0_project/brain/semantic_memory.md`
-- `t0_project/brain/brain_architecture.md`
-- `t0_project/brain/working_memory.md`
-- `t0_project/brain/procedural_memory.md`
-- `t0_project/brain/environment_model.md`
-- `t0_project/brain/action_system.md`
-- `t0_project/brain/episodic_memory.md`
-- `t0_project/brain/brain_manifest.json`
+当前接入状态：
+
+- 已接入主脑
+- 不承担 `daily_research` 的正式默认值职责
+
+## 2. 当前稳定认知
+- 主策略入口：
+  - `integrated_tq_strategy.py`
+- 回测入口：
+  - `backtest_integrated_strategy.py`
+- 执行抽象：
+  - `execution/`
+- 强化学习分支：
+  - `rl_agent/`
+- 底层交互：
+  - `tqcenter.py`
+
+## 3. 当前边界
+- `t0_project` 是实验分脑，不是正式生产执行主线
+- `execution/` 仍是抽象层和适配骨架，不应被视为已打通自动下单
+- `rl_agent/` 的结论只按实验代码与实验记录解释
 
 ## 4. 身子与脑子的映射
-- 主策略 body：
+- 策略 body：
   - `t0_project/integrated_tq_strategy.py`
   - `t0_project/backtest_integrated_strategy.py`
+  - `t0_project/select_stocks_only.py`
+- 监控 body：
+  - `t0_project/my_t0_monitor.py`
 - 执行抽象 body：
   - `t0_project/execution/`
-- 强化学习 body：
+- RL body：
   - `t0_project/rl_agent/`
-- 底层交互 body：
+- 交互底层 body：
   - `t0_project/tqcenter.py`
 
-## 5. 当前结构
-- `integrated_tq_strategy.py`
-  - 盘中策略主入口
-- `my_t0_monitor.py`
-  - 监控与辅助观察脚本
-- `backtest_integrated_strategy.py`
-  - 集成策略回测入口
-- `select_stocks_only.py`
-  - 轻量选股辅助脚本
-- `execution/`
-  - 订单、风控、Broker 抽象与 `paper/live` 适配层
-- `rl_agent/`
-  - 环境、训练、推理与强化学习实验代码
-- `tqcenter.py`
-  - 通达信 TQCenter 交互底层
+## 5. 默认进入顺序
+1. 先读本文件
+2. 再读 `brain_architecture.md`
+3. 再读 `working_memory.md`
+4. 再读 `procedural_memory.md`
+5. 需要命令时读 `environment_model.md`
+6. 需要执行边界时读 `action_system.md`
+7. 需要实验时间证据时读 `episodic_memory.md`

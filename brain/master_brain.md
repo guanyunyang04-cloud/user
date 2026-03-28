@@ -1,64 +1,69 @@
 # Main Brain
 
 ## 1. 作用
-`user/` 是整个工作区的主项目根目录，`brain/` 是它的主脑。
+`brain/` 是 `user/` 工作区的主脑，也是整个工作区的 AI 控制面。
 
-主脑只负责三件事：
+主脑只负责四类事情：
 
-- 维护整个工作区的分脑拓扑与边界
-- 规定跨项目协作、写入路由与治理规则
-- 作为上级脑管理各项目分脑，并保证“身子-脑子”匹配
+- 维护主脑与分脑的拓扑、边界和接管顺序
+- 规定跨项目治理、写入路由与交接协议
+- 约束各项目的 `body <-> brain` 匹配关系
+- 在生产型分脑之间统一目标函数，避免静默漂移
 
-## 2. 当前分脑拓扑
-- `brain/`
-  - 工作区主脑
+## 2. 当前脑网络
+- 主脑：
+  - `brain/`
+- 一级分脑：
+  - `daily_research/brain/`
+  - `t0_project/brain/`
+  - `daily_stock_analysis-main/brain/`
+
+当前职责分工固定为：
+
+- `daily_research`
+  - 正式生产研究与执行主线
+- `t0_project`
+  - 盘中 T+0、执行抽象与 RL 实验分支
+- `daily_stock_analysis-main`
+  - 独立的多市场 AI 股票分析产品分支
+
+## 3. 主脑治理原则
+- `brain-first`
+  - agent 先接主脑，再接分脑，再进入 body
+- `body-brain match`
+  - 每个项目的 brain 必须和源码、脚本、配置、测试、产物目录高度匹配
+- `non-silent-upgrade`
+  - 生产型分脑不得把“更稳但更低收益”的方案静默升级成默认值
+- `cross-project-first`
+  - 涉及跨项目边界的规则，先写主脑，再写分脑
+
+对于生产型分脑，当前全局默认目标函数为：
+
+- 收益优先、非降级
+- 稳定性、坏市场收益、弱窗口修复只能作为增益项或阶段控制器约束
+- 若要接受更低收益换取其它属性，必须由用户显式改写目标，并写入对应分脑的 `working_memory.md`
+
+## 4. 分脑边界
 - `daily_research/brain/`
-  - 当前正式生产研究与执行分脑
-- `t0_project/brain/`
-  - 盘中 T+0 与强化学习实验分脑
-- `daily_stock_analysis-main/brain/`
-  - 多市场 AI 股票分析系统分脑
-
-当前主从关系固定为：
-
-- 主脑：`brain/`
-- 一级分脑：`daily_research/brain/`
-- 一级分脑：`t0_project/brain/`
-- 一级分脑：`daily_stock_analysis-main/brain/`
-
-## 3. 当前总判断
-- `daily_research` 是当前默认生产主线，承担正式研究、执行默认值和日常治理
-- `t0_project` 是独立实验支线，不得静默替换 `daily_research` 的正式执行默认值
-- `daily_stock_analysis-main` 是独立的多市场 AI 分析产品分支，拥有自己的技术栈、入口和协作规则
-- 工作区的 AI 接管入口统一收口到各级 brain，项目 body 与 brain 必须保持高匹配
-
-## 4. 读取顺序
-默认协作顺序如下：
-
-1. 先看 `brain/master_brain.md`
-2. 再看 `brain/brain_architecture.md`
-3. 再看 `brain/working_memory.md`
-4. 再按任务进入具体分脑
-5. 若任务属于正式执行主线，优先进入 `daily_research/brain/`
-6. 若任务属于盘中实验与 RL，进入 `t0_project/brain/`
-7. 若任务属于多市场 AI 分析系统，进入 `daily_stock_analysis-main/brain/`
-
-## 5. 分脑边界
-- `daily_research/brain/`
-  - 正式日线研究、执行主线、formal comparator、执行端默认值
+  - 正式日线研究、formal comparator、执行端默认值、live 升级门槛
 - `t0_project/brain/`
   - 盘中实验、执行抽象、RL 原型、实时接口边界
 - `daily_stock_analysis-main/brain/`
-  - 多市场股票分析、FastAPI/Web/Desktop/Bot、多数据源与 LLM 协调
+  - 多市场分析产品、FastAPI/Web/Desktop/Bot、多数据源与 AI 协作资产
 
-## 6. 身子与脑子的关系
-- 每个项目都像一个“身子”，其源码、脚本、配置、测试和产物目录构成 body
-- 每个项目都必须有一个与 body 高度匹配的 brain，负责保存稳定认知、当前优先级、方法学、环境和行动系统
-- brain 不是 body 的装饰文档，而是该项目的 AI 控制面
-- 后续 agent 接手时，默认先接 brain，再按 brain 的 body_map 进入源码
+## 5. 标准接脑顺序
+默认接管顺序如下：
 
-## 7. 主脑规则
+1. `brain/brain_manifest.json`
+2. `brain/master_brain.md`
+3. `brain/brain_architecture.md`
+4. `brain/working_memory.md`
+5. 按任务进入目标分脑
+6. 读取目标分脑的 `brain_manifest.json`
+7. 按 `semantic -> working -> procedural -> environment -> action -> episodic` 进入
+
+## 6. 主脑维护动作
 - 新的长期说明、治理规则与协作方法，不再写进根 `README`
-- 上级脑负责定义跨项目边界，下级脑负责维护本项目内部认知
-- 若下级脑结构发生变化，必须同步更新主脑与下级脑各自的 `brain_manifest.json`
-- 新增项目时，必须同时补齐自己的 `brain/` 和 body_map，才算真正接入工作区
+- 分脑结构变更时，主脑与分脑的 `brain_manifest.json` 必须同步更新
+- 新增项目时，必须先补齐 `brain/`、`body_map` 与 `handoff_contract`
+- `doc_guard.py check` 是当前脑网络的最低守卫

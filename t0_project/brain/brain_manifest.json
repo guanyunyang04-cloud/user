@@ -3,6 +3,7 @@
   "brain_id": "t0_project",
   "brain_version": "2026-03-28",
   "parent_brain": "brain/brain_manifest.json",
+  "attach_status": "attached_to_main_brain",
   "entrypoint": "t0_project/brain/semantic_memory.md",
   "body_root": "t0_project",
   "read_order": [
@@ -38,6 +39,44 @@
       "t0_project/tqcenter.py"
     ]
   },
+  "modules": [
+    {
+      "id": "semantic_memory",
+      "paths": [
+        "t0_project/brain/semantic_memory.md"
+      ]
+    },
+    {
+      "id": "working_memory",
+      "paths": [
+        "t0_project/brain/working_memory.md"
+      ]
+    },
+    {
+      "id": "procedural_memory",
+      "paths": [
+        "t0_project/brain/procedural_memory.md"
+      ]
+    },
+    {
+      "id": "environment_model",
+      "paths": [
+        "t0_project/brain/environment_model.md"
+      ]
+    },
+    {
+      "id": "action_system",
+      "paths": [
+        "t0_project/brain/action_system.md"
+      ]
+    },
+    {
+      "id": "episodic_memory",
+      "paths": [
+        "t0_project/brain/episodic_memory.md"
+      ]
+    }
+  ],
   "handoff_contract": {
     "entry_sequence": [
       "t0_project/brain/brain_manifest.json",

@@ -28,7 +28,11 @@
 
 ## 3. 当前默认执行口径
 - 主线：
-  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
+- 当前执行后端：
+  - `2026-03-24 18:58:23 +0800` 审计快照 `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - 当前 wrapper 调用旧快照 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`
+  - 模型产物与计划文件仍写回当前 `daily_research/execution/`
 - 默认股票池：
   - `universe/liquid500_latest.txt`
 - 成交假设：
@@ -43,8 +47,8 @@
   - `lgbm`
 - 默认训练窗口：
   - `ml_train_window_days=504`
-- 默认 focus-state 集成权重：
-  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- 默认状态集成：
+  - 以旧高收益快照后端默认参数为准，不再由当前 wrapper 注入 `focus-state` 集成权重
 
 ## 4. 每日标准流程
 ### 第 1 步：更新高流动性股票池
@@ -63,8 +67,8 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - `--artifact-meta-path=models/latest_ml_model.json`
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--ml-model-family=lgbm`
-- `--enhanced-profile=up_low_breakout_v2`
-- `--ensemble-state-weights=trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- `--regime-ma-window=50`
+- 并把训练实际转发给旧高收益快照后端
 
 ### 第 3 步：更新账号快照
 把真实持仓和可用现金写进：
@@ -82,8 +86,8 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--output-dir=output/`
 - `--model-artifact=models/latest_ml_model.joblib`
 - `--stocks-file=universe/liquid500_latest.txt`
-- `--enhanced-profile=up_low_breakout_v2`
-- `--ensemble-state-weights=trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- `--regime-ma-window=50`
+- 并把计划生成实际转发给旧高收益快照后端
 
 ## 5. 关键执行文件
 - `daily_research/execution/update_liquid_pool.py`

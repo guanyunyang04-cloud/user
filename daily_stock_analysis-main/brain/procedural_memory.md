@@ -18,6 +18,11 @@
 - 若修改 AI 协作治理资产，执行：
   - `python scripts/check_ai_assets.py`
 
+### 1.4 主脑协同协议
+- 先接主脑，再接本分脑，再进入具体 body
+- 若结构变更，先改 `brain_architecture.md`，再改 `brain_manifest.json`
+- brain 是当前 AI 入口；`AGENTS.md / CLAUDE.md` 属于 body 级协作资产，应保持同步但不反客为主
+
 ## 2. 验证矩阵
 - 后端验证：
   - `./scripts/ci_gate.sh`

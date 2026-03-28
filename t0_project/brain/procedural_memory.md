@@ -18,3 +18,8 @@
 - 环境与命令写 `environment_model.md`
 - 执行抽象与流程写 `action_system.md`
 - 单轮实验写 `episodic_memory.md`
+
+### 2.4 主脑协同协议
+- 接手前先读主脑 manifest，再读本分脑 manifest
+- 若结构变更，先改 `brain_architecture.md`，再改 `brain_manifest.json`
+- 若结论会影响正式生产主线，必须在主脑和 `daily_research` 分脑显式落盘，不能只在本分脑口头外推

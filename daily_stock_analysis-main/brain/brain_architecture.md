@@ -19,11 +19,25 @@
 - `brain_manifest.json`
   - 机器可读读写路由、body_map、handoff_contract
 
-## 3. Body 映射原则
+## 3. 写入路由
+- 稳定认知：
+  - `semantic_memory.md`
+- 当前优先级：
+  - `working_memory.md`
+- 可复用仓库规则：
+  - `procedural_memory.md`
+- 环境与命令：
+  - `environment_model.md`
+- 系统入口与模块路由：
+  - `action_system.md`
+- 时间顺序证据：
+  - `episodic_memory.md`
+
+## 4. Body 映射原则
 - brain 不重复保存源码细节
 - brain 只负责说明源码 body 应该如何被理解与进入
 - agent 先接 brain，再进入 `src/ api/ apps/ bot/ data_provider/ tests/`
 
-## 4. 去冗余规则
+## 5. 去冗余规则
 - 现有 `README.md`、`docs/`、`AGENTS.md`、`CLAUDE.md` 等可保留为 body 历史资产或上游说明
 - 但当前 AI 接管入口以本分脑为准
