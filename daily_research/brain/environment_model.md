@@ -82,5 +82,7 @@ gemini --resume latest -p "Reply with exactly: GEMINI_FRONTEND_OK"
 
 ## 8. 使用注意
 - `run_minimal_matrix.py` 会继承 `sys.executable` 写出阶段命令清单，因此必须从 `quant` 环境启动，才能让后续命令文件保持正确解释器路径。
+- 当前 Windows / PowerShell 环境下，`conda run -n quant ...` 在中文进度输出较多时可能触发 `gbk` 回显异常；
+  对正式研究脚本，优先直接使用 `C:\Users\ASUS\miniconda3\envs\quant\python.exe`，避免“脚本已跑完但 `conda run` 在打印输出时失败”的假异常。
 - 如果未来升级了解释器、切换了核心包版本，或新增 GPU / CUDA 依赖，应先更新本文档，再启动新的正式实验批次。
 - 如果 Gemini 协同方式从 `latest` 切到固定 session id，应同步更新 `procedural_memory.md` 与 `brain_manifest.json`。

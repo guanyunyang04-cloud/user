@@ -3,7 +3,7 @@
 ## 1. 当前默认决策
 当前默认执行主线继续保持为：
 
-- `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
 
 当前默认口径同时固定为：
 
@@ -22,11 +22,38 @@
   - `lgbm`
 - 默认训练窗口：
   - `ml_train_window_days=504`
-- 默认 focus-state 集成权重：
-  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- 默认执行后端：
+  - `2026-03-24 18:58:23 +0800` 历史快照 `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - 当前 wrapper 已切到旧快照 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`
+  - 继续写回当前 `daily_research/execution/models/` 与 `daily_research/execution/output/`
+- 默认状态集成：
+  - 不再沿用当前代码口径下的 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - 以旧高收益快照后端的默认集成参数为准
 
 ## 2. 当前最近待决策事项
-2026-03-28 的当前代码口径 formal R3 重跑，已经把执行端短期升级收口为一个明确结论：
+用户已在 2026-03-28 明确纠偏项目主目标：
+
+- 坏市场收益、弱窗口收益、稳定性提升，都必须建立在“不降低当前收益率”的前提下
+- 不同阶段可以用不同策略
+- 但每个阶段都必须追求最大利润，不能靠委曲求全把更低收益方案升成执行端
+
+这意味着当前执行端主目标已重新收口为：
+
+- 收益峰值优先
+- 稳定性 / 坏市场 / 弱窗口修复只能作为附加增益或阶段控制器约束
+- 任何单纯“更稳但更低收益”的候选，不再自动具备执行端升级资格
+
+用户随后又在 2026-03-28 明确要求：
+
+- “我要的就是最高收益”
+
+因此当前执行端决策已经进一步改写为：
+
+- 不再先守当前代码口径下的 live-defense 默认值；
+- 先把执行端切到已经审计复刻过的旧高收益快照后端；
+- 当前代码口径下的 `v250 / v255 / 双 profile 控制器` 结论继续保留为研究侧比较锚点，而不是当前执行默认值。
+
+2026-03-28 的当前代码口径 formal R3 重跑，之前曾把执行端短期升级收口为一个明确结论：
 
 - live 默认值升级为 `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
 - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520` 保留为进攻对照与未来动态控制器的 `offense leg`
@@ -60,13 +87,25 @@
   - 简单的 `market_features` 裁剪没有产生新的单一升级赢家；
   - `continuous_quadrant_v9` 虽然能把 `v255` 的弱窗口拉回一部分，但会明显牺牲 full 端，并拖累 live `v250`；
   - `legacy_v7` 仍是当前最强 offense profile，`expanded_v24` 仍是当前最强 live-defense profile。
-- 因此当前不回滚 `expanded_v24 + v250` live 默认；
-  后续若要追回旧 `v255` 的进攻上沿，优先方向应从“继续做全局 pruning”收口到“双 profile 攻守控制器”：
+- `market_feature_stack_ab_20260328_formal_r1` 已把“旧 offense 栈 vs 当前 live 栈”跑清：
+  - 旧 `legacy_v7 + v255`：`full_annual_return = 15.54%`，`full_excess_annual_return = 18.22%`，`full_excess_sharpe = 0.860`
+  - 当前 `expanded_v24 + v250`：`13.92% / 16.57% / 0.759`
+  - 当前 live 相对旧 offense：`full_excess_sharpe -0.100`，但 `recent_full_excess_sharpe +0.030`，`weak_window_20250905_20260319_excess_sharpe +0.254`，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.332`
+  - 所以这次不是“整体升级”，也不是“白改了全面变弱”，而是把 full 端进攻上沿换成了更强的 live 稳健性。
+- `advanced_ml_model_family_compare_20260319_legacy_snapshot_reaudit_r2` 已把旧高收益日志做成可审计证据：
+  - 通过 `git` 历史快照 `e7d0f8d (2026-03-24 18:58:23 +0800)` 直接重跑旧脚本；
+  - `lgbm` 复刻结果为 `full_excess_total_return = 910.30%`，`full_excess_sharpe = 2.398`
+  - 这与旧日志里的 `887.75% / 2.300` 已属于同一量级，说明旧高收益在旧系统里是真实结果，而不是凭空写出来的假数字。
+- 但在用户刚刚明确的“收益优先非降级”目标下，`expanded_v24 + v250` 不再能被直接表述成终局正确答案；
+  它更准确的身份是：
+  - 当前代码口径下的防守型 live 方案
+  - 不是已经满足用户原始目标的利润最优方案
+- 因此后续若要同时满足用户目标，研发方向应从“继续做全局 pruning”收口到“双 profile 攻守控制器”：
   - offense leg 优先研究 `legacy_v7`
   - defense/live leg 继续保持 `expanded_v24`
 
 ## 3. 当前项目判断
-- `advanced_ml` 继续承担当前正式执行职责。
+- `advanced_ml` 继续承担当前正式执行职责，但执行后端已切到旧高收益快照口径。
 - `deep_alpha` 仍是长期主研究线，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
 - 底层市场状态层已经完成架构升级：
   - `quadrant` 继续保留为兼容标签
@@ -83,8 +122,10 @@
 ### 优先级 A：把 shortlist 升级为攻守控制器
 目标：
 
+- 在执行端已切到旧高收益快照后端的前提下，继续保留当前代码口径的研究主线；
 - 不再扩新候选；
-- 把已经完成的 shortlist head-to-head 收口成可正式回测的攻守切换规则。
+- 把已经完成的 shortlist head-to-head 收口成可正式回测的攻守切换规则；
+- 且必须以“不低于旧收益前沿”为前提。
 
 具体动作：
 
@@ -103,7 +144,8 @@
    - 静态 `v255`
    - 静态 `v250`
    - 动态攻守控制器
-5. 在攻守控制器正式跑完前，不允许研究侧局部高收益候选静默替换默认值。
+5. 在攻守控制器正式跑完前，不允许研究侧局部高收益候选静默替换默认值；
+   同时也不允许只靠“更稳”把更低收益方案继续升级为默认值。
 6. 当前若继续推进动态控制器，顺序更新为：
    - 保留 `benchmark_ret_10d` 作为第二代控制轴，不再退回到只有 `trend_gap + annual_vol` 的首轮规则；
    - 继续围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 这类候选补 `full_excess_sharpe`；

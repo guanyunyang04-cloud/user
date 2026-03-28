@@ -37,7 +37,15 @@ from daily_research.baseline.data_provider import (
     load_universe_from_tq,
     split_benchmark_from_universe,
 )
-from daily_research.baseline.ml_alpha import MLAplhaConfig, blend_scores, build_ml_feature_bundle, rolling_ml_scores_multi
+from daily_research.baseline.ml_alpha import (
+    EXPANDED_MARKET_FEATURE_PROFILE,
+    MLAplhaConfig,
+    blend_scores,
+    build_ml_feature_bundle,
+    normalize_market_feature_profile,
+    rolling_ml_scores_multi,
+    select_market_feature_profile,
+)
 from daily_research.baseline.portfolio import build_target_weights
 from daily_research.baseline.regime import apply_market_regime_filter, resolve_regime_label_series
 from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
@@ -65,6 +73,7 @@ def parse_args():
     parser.add_argument("--rebalance-freq", default="1d")
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
+    parser.add_argument("--market-feature-profile", default=EXPANDED_MARKET_FEATURE_PROFILE)
     parser.add_argument("--model-families", default="histgb,lgbm,etr")
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
@@ -214,6 +223,7 @@ def _slice_metrics(equity_df: pd.DataFrame, start: str, end: str) -> dict[str, A
 
 def main():
     args = parse_args()
+    market_feature_profile = normalize_market_feature_profile(args.market_feature_profile)
     validate_state_profile_selector(args.enhanced_profile, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
@@ -353,6 +363,12 @@ def main():
     score_none = prepared_bundle["score_none"]
     score_enhanced = prepared_bundle["score_v2"]
     filter_mask = prepared_bundle["filter_mask"]
+    current_membership_mask = None
+    if rolling_membership_mask is not None:
+        current_membership_mask = rolling_membership_mask.reindex(
+            index=df_dict["Close"].index,
+            columns=df_dict["Close"].columns,
+        ).fillna(False)
 
     industry_map = None
     style_map = None
@@ -364,20 +380,36 @@ def main():
         style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
 
     print("[6/8] Preparing shared scores and features...")
-    if rolling_membership_mask is not None:
-        filter_mask = filter_mask & rolling_membership_mask
-        score_none = score_none.where(rolling_membership_mask)
-        score_enhanced = score_enhanced.where(rolling_membership_mask)
+    if current_membership_mask is not None:
+        filter_mask = filter_mask & current_membership_mask
+        score_none = score_none.where(current_membership_mask)
+        score_enhanced = score_enhanced.where(current_membership_mask)
         feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_enhanced)
     else:
         feature_frames = prepared_bundle["feature_frames"]
         market_features = prepared_bundle["market_features"]
+    selected_market_features = select_market_feature_profile(market_features, market_feature_profile)
+    print(
+        f"[6/8] market feature profile: {market_feature_profile} "
+        f"(feature_count={len(selected_market_features)})"
+    )
     windows = parse_named_windows(args.windows)
 
     output_root = Path("daily_research/output") / (
         args.experiment_tag.strip() or f"advanced_ml_model_families_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     output_root.mkdir(parents=True, exist_ok=True)
+    run_config = {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "market_feature_profile": market_feature_profile,
+        "market_feature_count": int(len(selected_market_features)),
+        "market_feature_names": sorted(selected_market_features.keys()),
+        "args": vars(args),
+        "history_window": history_window_to_dict(history_window),
+        "raw_cache": raw_cache_meta,
+        "prepared_cache": prepared_cache_meta,
+    }
+    (output_root / "run_config.json").write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     rows = []
     print("[7/8] Running model-family A/B...")
@@ -389,7 +421,7 @@ def main():
             ml_cfg.model_family = family
             ml_score, training_log = rolling_ml_scores_multi(
                 feature_frames=feature_frames,
-                market_features=market_features,
+                market_features=selected_market_features,
                 close=factor_bundle["raw_inputs"]["Close"],
                 benchmark_close=benchmark_close,
                 open_df=factor_bundle["raw_inputs"]["Open"],
@@ -406,8 +438,8 @@ def main():
                 ml_cfg,
                 quadrant_series=state_label_series,
             )
-            if rolling_membership_mask is not None:
-                final_score = final_score.where(rolling_membership_mask)
+            if current_membership_mask is not None:
+                final_score = final_score.where(current_membership_mask)
             target_weights = build_target_weights(final_score, cfg, industry_map=industry_map, style_map=style_map)
             score_for_backtest = final_score.fillna(0.0)
             if cfg.enable_market_regime_filter:
@@ -448,6 +480,9 @@ def main():
                     "framework": "advanced_ml_model_family_compare",
                     "model_family": family,
                     "enhanced_profile": args.enhanced_profile,
+                    "market_feature_profile": market_feature_profile,
+                    "market_feature_count": int(len(selected_market_features)),
+                    "market_feature_names": sorted(selected_market_features.keys()),
                     "regime_state_selector": cfg.regime_state_selector,
                     "history_window": history_window_to_dict(history_window),
                     "execution_mode": cfg.execution_mode,
@@ -467,6 +502,8 @@ def main():
                 "model_family": family,
                 "status": "ok",
                 "error_message": "",
+                "market_feature_profile": market_feature_profile,
+                "market_feature_count": int(len(selected_market_features)),
                 "regime_state_selector": cfg.regime_state_selector,
                 "full_excess_total_return": metrics.get("excess_total_return"),
                 "full_excess_annual_return": metrics.get("excess_annual_return"),
@@ -537,6 +574,7 @@ def parse_args():
     parser.add_argument("--rebalance-freq", default="1d")
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
+    parser.add_argument("--market-feature-profile", default=EXPANDED_MARKET_FEATURE_PROFILE)
     parser.add_argument("--model-families", default="histgb,lgbm,etr")
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)

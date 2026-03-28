@@ -5287,6 +5287,12 @@ position,000001.SZ,1200,12.38,
   - `daily_research/baseline/analyze_advanced_ml_comparison.py`
 
 ### 结果一：`lgbm` 在当前执行口径下显著强于当前默认 `histgb`
+> 2026-03-28 追加澄清：
+> 这里的 `887.75%` 是旧口径下的“全样本超额总收益”，不是年化收益，也不是“一年翻数倍”。
+> 同段里的 `127.99% / 2.816` 也应读作“最近完整窗口超额总收益 / 超额 Sharpe”，不是“窗口年化 / Sharpe”。
+> 另外，这轮模型族对照脚本当时默认仍是 `start_date=20220101`、全局 blend `0.70 / 0.20 / 0.10`，且发生在 `market_features(7)` 旧系统里；
+> 2026-03-28 切到 `market_features(24)` 后，当前 live 口径必须以 `advanced_ml_attack_defense_controller_20260328_formal_r3_weightgrid_focus`
+> 与 `market_feature_profile_compare_20260328_formal_r1` 为准，不能把这里的旧高收益直接外推成今天执行端的收益预期。
 - `lgbm`：
   - 全样本超额收益约 `887.75%`
   - 全样本超额 Sharpe 约 `2.300`
@@ -7641,6 +7647,13 @@ position,000001.SZ,1200,12.38,
   - 对当前 live `v250`，它属于“全样本收益几乎持平、full Sharpe 略低，但最近窗口和弱窗口更强”。
 
 ### 结果二：`expanded_v24` 明显吃掉了旧 `v255` 与动态控制器的进攻上沿
+- 用同一 execution stack 直接比较时，`expanded_v24 - legacy_v7` 的结果是：
+  - `v250`：`full_excess_sharpe = -0.027`，但 `weak_window_20250905_20260319_excess_sharpe = +0.081`
+  - `v255`：`full_excess_sharpe = -0.184`，`weak_window_20250905_20260319_excess_sharpe = -0.538`
+- 这说明：
+  - 新系统不是把所有候选都抬高；
+  - 它主要保住并强化了当前 live `v250` 的防守；
+  - 但旧 `legacy_v7` 下 `v255` 的进攻上沿，确实比当前 `expanded_v24` 更高。
 - `trend_up_low_vol_ml25_none20_v255`
   - `full_excess_sharpe -0.184`
   - `full_excess_annual_return -3.45%`
@@ -7766,3 +7779,209 @@ position,000001.SZ,1200,12.38,
    - `legacy_v7` offense leg
    - `expanded_v24` defense/live leg
    - 同口径 formal comparator
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 旧 `legacy_v7` 进攻栈 vs 当前 `expanded_v24` live 栈正式 A/B
+### 本轮目标
+- 在同一正式长窗口下，把“旧最强 offense 栈”和“当前 live 默认栈”直接做硬 A/B。
+- 不再只看“同候选跨 profile delta”，而是直接回答：
+  - 当前系统到底是升级了，还是变弱了？
+
+### 本轮产物
+- 正式输出目录：
+  - `daily_research/output/market_feature_stack_ab_20260328_formal_r1`
+- 关键文件：
+  - `profile_results.csv`
+  - `pairwise_comparison.csv`
+  - `summary.md`
+  - `stack_ab/summary.md`
+  - `stack_ab/verdict.json`
+  - `stack_ab/stack_metrics.csv`
+- 关键脚本：
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+  - `daily_research/baseline/render_market_feature_stack_ab.py`
+
+### 固定口径
+- `20190101 -> 20260327`
+- `liquid500`
+- `next_open`
+- `lgbm`
+- `504 / 21 / 520`
+- 本轮只保留静态：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none20_v255`
+  - `trend_up_low_vol_ml25_none25_v250`
+- 本轮显式：
+  - `--skip-dynamic`
+
+### 结果一：旧 offense 栈 full 端更强，当前 live 栈 recent / weak 更强
+- 旧 offense 栈：
+  - `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+  - `full_annual_return = 15.54%`
+  - `full_excess_annual_return = 18.22%`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- 当前 live 栈：
+  - `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+  - `full_annual_return = 13.92%`
+  - `full_excess_annual_return = 16.57%`
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- 当前 live 相对旧 offense 的直接 delta：
+  - `full_annual_return -1.62%`
+  - `full_excess_annual_return -1.65%`
+  - `full_excess_sharpe -0.100`
+  - `recent_full_excess_sharpe +0.030`
+  - `weak_window_20250905_20260319_excess_annual_return +7.28%`
+  - `weak_window_20250905_20260319_excess_sharpe +0.254`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.332`
+- 这说明：
+  - 如果标尺是旧 `legacy_v7 + v255` 的 full 端进攻，当前 live 的确更弱；
+  - 但如果标尺是当前执行端最需要的 recent / weak / focus-weak 稳健性，当前 live 又是明显更强。
+
+### 结果二：差异主要来自 `expanded_v24` 对 `v255` 的伤害更大，而对 `v250` 基本是“保住 + 加固”
+- profile-only change：
+  - `v255` 上：`expanded_v24 - legacy_v7 = full_excess_sharpe -0.184`，`weak_window_20250905_20260319_excess_sharpe -0.538`
+  - `v250` 上：`expanded_v24 - legacy_v7 = full_excess_sharpe -0.027`，`weak_window_20250905_20260319_excess_sharpe +0.081`
+- 同 profile 内部切换：
+  - `legacy_v7` 下 `v250 - v255 = full_excess_sharpe -0.073`，`weak_window_20250905_20260319_excess_sharpe +0.173`
+  - `expanded_v24` 下 `v250 - v255 = full_excess_sharpe +0.084`，`weak_window_20250905_20260319_excess_sharpe +0.792`
+- 这说明：
+  - 新 profile 对 `v255` 的 full 和 weak 都伤得很重；
+  - 但对 `v250` 则接近“full 基本持平、weak 明显增强”；
+  - 当前系统内部的静态偏好，也已经从旧 `legacy_v7` 的 offense 倾向，切到了 `expanded_v24` 的 live-defense 倾向。
+
+### 本轮结论
+1. 这次升级不能再被表述成“整体都更强”。
+2. 但它也不能被表述成“白改了、全面变弱”。
+3. 更准确的结论是：
+   - 当前系统牺牲了旧 `legacy_v7 + v255` 的 full 端进攻上沿；
+   - 换来了 current live `expanded_v24 + v250` 在 `recent / weak / focus-weak` 三层更强的稳健性。
+4. 所以后续研发主线继续收口为：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 同一 formal 口径下的双 profile 攻守控制器
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+2. 不整体系回滚到旧 `legacy_v7`。
+3. 后续若要追回收益上沿，不再继续泛泛争论“新系统是不是不如旧系统”，而是直接围绕：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 双 profile formal comparator
+
+## 2026-03-28 历史快照复刻：`2026-03-24` 旧 `lgbm / histgb / etr` 模型族高收益审计
+### 本轮目标
+- 不再只靠研究日志判断 `887.75%` 是否可信。
+- 直接把 `2026-03-24` 的旧模型族对照，在对应历史代码快照上重跑成可审计证据。
+
+### 本轮动作
+- 先用当前代码做了两轮探针：
+  - `legacy_v7 + current compare_ml_model_families + auto-trim`
+  - `legacy_v7 + current compare_ml_model_families + no-auto-trim-history`
+- 结果都无法复刻旧日志量级，说明问题不只在 `market_features`，还有脚本实现与状态层的历史漂移。
+- 随后改用 `git worktree` 拉起历史快照：
+  - commit: `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - commit time: `2026-03-24 18:58:23 +0800`
+  - subject: `执行端12`
+- 在隔离快照里直接运行当时的原脚本：
+  - `daily_research/baseline/compare_ml_model_families.py`
+- 为了尽量贴近旧日志，再追加一轮：
+  - `--end-date 20260319`
+- 审计产物已拷回当前工作区：
+  - `daily_research/output/advanced_ml_model_family_compare_20260319_legacy_snapshot_reaudit_r2`
+  - `audit_metadata.json`
+
+### 结果一：旧高收益量级被历史快照成功复刻
+- `lgbm`
+  - `full_excess_total_return = 910.30%`
+  - `full_excess_annual_return = 77.57%`
+  - `full_excess_sharpe = 2.398`
+  - `recent_full_excess_total_return = 118.01%`
+  - `recent_full_excess_sharpe = 2.789`
+  - `latest_weak_excess_total_return = 4.96%`
+  - `latest_weak_excess_sharpe = 0.230`
+- `histgb`
+  - `full_excess_total_return = 337.24%`
+  - `full_excess_sharpe = 1.395`
+- `etr`
+  - `full_excess_total_return = 322.53%`
+  - `full_excess_sharpe = 1.691`
+
+### 结果二：它与旧日志已经足够接近，可以确认旧记录不是伪高收益
+- 旧日志记录：
+  - `lgbm full_excess_total_return ≈ 887.75%`
+  - `lgbm full_excess_sharpe ≈ 2.300`
+  - `recent_full ≈ 127.99% / 2.816`
+  - `latest_weak ≈ 9.79% / 0.475`
+- 当前历史快照复刻：
+  - `910.30% / 2.398`
+  - `118.01% / 2.789`
+  - `4.96% / 0.230`
+- 这说明：
+  - 旧日志里的高收益不是凭空写出来的假数字；
+  - 在旧系统快照里，`lgbm` 确实能跑出“全样本超额总收益接近 9x、Sharpe > 2”的量级；
+  - 当前和旧日志之间的细小差异，更像是数据更新时间、TQ 数据回补或环境细节漂移，而不是结论层面的翻案。
+
+### 本轮结论
+1. `2026-03-24` 那段旧高收益，在旧系统里是真实结果。
+2. 但它属于历史快照系统，不属于今天的 current live 系统。
+3. 所以后续表述应固定为：
+   - 旧 `lgbm` 高收益是真实历史结果；
+   - 但不能直接拿它替代今天的 current live benchmark。
+
+### 当前决策
+1. 旧 `887.75%` 不再按“存疑旧日志”处理。
+2. 未来若再遇到类似“历史高收益到底真不真”的争议，优先走：
+   - 当前代码探针
+   - 历史快照复刻
+   - 再做 current live 同口径 A/B
+
+## 2026-03-28 用户显式要求执行端切到最高收益后端
+### 本轮目标
+- 用户已明确要求“我要的就是最高收益”。
+- 不再继续把当前代码口径下的 `expanded_v24 + v250` 当作执行默认值。
+- 直接把执行端切到已经审计复刻过的旧高收益快照后端。
+
+### 本轮动作
+- 新增当前执行 wrapper 的快照后端转发器：
+  - `daily_research/execution/high_profit_backend.py`
+- 修改当前执行入口：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/run_trade_plan.py`
+- 当前 wrapper 不再直接调用当前工作区 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`；
+  而是转发到历史快照：
+  - commit: `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - commit time: `2026-03-24 18:58:23 +0800`
+  - local worktree: `H:/new_tdx64/PYPlugins/user_snapshot_codex_e7d0f8d`
+- 同时保持落盘位置不变：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+### 结果
+- `update_model.py` 已在旧高收益快照后端重训成功：
+  - `trained_at = 2026-03-28 22:59:12`
+  - `latest_data_date = 2026-03-27`
+  - `execution_date = 2026-03-30`
+  - `model_family = lgbm`
+  - `regime_ma_window = 50`
+  - `feature_count = 34 / 34 / 34`（`h5 / h10 / h20`）
+  - `state_ensemble_weights = {}`
+- `run_trade_plan.py` 已在同一旧快照后端生成完成：
+  - 输出目录：`daily_research/execution/output/20260327`
+  - 最新建议文件：`daily_research/execution/output/latest_trade_plan.txt`
+  - 本次结果：`今日无明确调仓动作`
+- 运行过程中虽然仍打印了 TQ `Load DLL ERROR Version:309 / Get PyGILState_* Error` 提示，但旧快照脚本最终完成了模型产物写出与计划生成。
+
+### 本轮结论
+1. 当前执行端已经不再是“当前代码口径下的 live-defense 默认值”。
+2. 当前执行端已切到“已审计复刻的旧高收益快照后端”。
+3. `expanded_v24 + v250`、`legacy_v7 + v255` 与双 profile 控制器，继续保留为当前代码研究侧的比较锚点。
+
+### 当前决策
+1. 执行端默认后端切换为：
+   - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 当前 wrapper 继续保留“写回当前 execution 目录”的方式，不直接把整个工作区代码回滚到旧提交。
