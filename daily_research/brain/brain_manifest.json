@@ -1,0 +1,103 @@
+{
+  "brain_type": "sub_brain",
+  "brain_id": "daily_research",
+  "brain_version": "2026-03-28",
+  "parent_brain": "brain/brain_manifest.json",
+  "entrypoint": "daily_research/brain/semantic_memory.md",
+  "body_root": "daily_research",
+  "read_order": [
+    "daily_research/brain/semantic_memory.md",
+    "daily_research/brain/brain_architecture.md",
+    "daily_research/brain/project_map.md",
+    "daily_research/brain/working_memory.md",
+    "daily_research/brain/procedural_memory.md",
+    "daily_research/brain/environment_model.md",
+    "daily_research/brain/action_system.md",
+    "daily_research/brain/episodic_memory.md"
+  ],
+  "write_routes": {
+    "stable_state": "daily_research/brain/semantic_memory.md",
+    "project_context": "daily_research/brain/project_map.md",
+    "current_priorities": "daily_research/brain/working_memory.md",
+    "methods": "daily_research/brain/procedural_memory.md",
+    "runtime_and_tools": "daily_research/brain/environment_model.md",
+    "execution_operations": "daily_research/brain/action_system.md",
+    "dated_experiments": "daily_research/brain/episodic_memory.md",
+    "brain_structure": "daily_research/brain/brain_architecture.md"
+  },
+  "body_map": {
+    "research": [
+      "daily_research/baseline"
+    ],
+    "execution": [
+      "daily_research/execution"
+    ],
+    "long_horizon_research": [
+      "daily_research/deep_alpha"
+    ],
+    "tools": [
+      "daily_research/tools"
+    ],
+    "artifacts": [
+      "daily_research/cache",
+      "daily_research/output",
+      "daily_research/archive"
+    ]
+  },
+  "modules": [
+    {
+      "id": "semantic_memory",
+      "paths": [
+        "daily_research/brain/semantic_memory.md",
+        "daily_research/brain/project_map.md"
+      ]
+    },
+    {
+      "id": "working_memory",
+      "paths": [
+        "daily_research/brain/working_memory.md"
+      ]
+    },
+    {
+      "id": "procedural_memory",
+      "paths": [
+        "daily_research/brain/procedural_memory.md"
+      ]
+    },
+    {
+      "id": "environment_model",
+      "paths": [
+        "daily_research/brain/environment_model.md"
+      ]
+    },
+    {
+      "id": "action_system",
+      "paths": [
+        "daily_research/brain/action_system.md"
+      ]
+    },
+    {
+      "id": "episodic_memory",
+      "paths": [
+        "daily_research/brain/episodic_memory.md"
+      ]
+    }
+  ],
+  "tooling": {
+    "doc_guard": "daily_research/tools/doc_guard.py",
+    "gemini_frontend_cmd": "daily_research/tools/gemini_frontend.cmd",
+    "gemini_frontend_ps1": "daily_research/tools/gemini_frontend.ps1"
+  },
+  "handoff_contract": {
+    "entry_sequence": [
+      "daily_research/brain/brain_manifest.json",
+      "daily_research/brain/semantic_memory.md",
+      "daily_research/brain/working_memory.md",
+      "daily_research/brain/procedural_memory.md",
+      "daily_research/brain/environment_model.md",
+      "daily_research/brain/action_system.md",
+      "daily_research/brain/episodic_memory.md"
+    ],
+    "principle": "Attach to the brain first, then enter baseline/execution/deep_alpha/tools through the declared body_map."
+  }
+}

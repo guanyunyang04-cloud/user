@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("open", "close", "status")]
+    [ValidateSet("open", "close", "status", "sessions")]
     [string]$Action = "status",
     [string]$Session = "latest",
     [string]$Title = "Gemini Frontend - daily_research",
@@ -173,8 +173,8 @@ function Close-Frontend {
     }
 
     $pids = Get-DescendantProcessIds -RootPid $rootPid | Sort-Object -Descending
-    foreach ($pid in $pids) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    foreach ($targetPid in $pids) {
+        Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
     }
     Clear-State
     Write-Output ("Closed Gemini frontend. root_pid={0}" -f $rootPid)
@@ -189,5 +189,8 @@ switch ($Action) {
     }
     "status" {
         Get-FrontendStatus | ConvertTo-Json -Depth 5
+    }
+    "sessions" {
+        & $geminiPath --list-sessions
     }
 }

@@ -1,0 +1,60 @@
+{
+  "brain_type": "sub_brain",
+  "brain_id": "daily_stock_analysis-main",
+  "brain_version": "2026-03-28",
+  "parent_brain": "brain/brain_manifest.json",
+  "entrypoint": "daily_stock_analysis-main/brain/semantic_memory.md",
+  "body_root": "daily_stock_analysis-main",
+  "read_order": [
+    "daily_stock_analysis-main/brain/semantic_memory.md",
+    "daily_stock_analysis-main/brain/brain_architecture.md",
+    "daily_stock_analysis-main/brain/working_memory.md",
+    "daily_stock_analysis-main/brain/procedural_memory.md",
+    "daily_stock_analysis-main/brain/environment_model.md",
+    "daily_stock_analysis-main/brain/action_system.md",
+    "daily_stock_analysis-main/brain/episodic_memory.md"
+  ],
+  "write_routes": {
+    "stable_state": "daily_stock_analysis-main/brain/semantic_memory.md",
+    "current_priorities": "daily_stock_analysis-main/brain/working_memory.md",
+    "methods": "daily_stock_analysis-main/brain/procedural_memory.md",
+    "runtime": "daily_stock_analysis-main/brain/environment_model.md",
+    "system_entry_and_modules": "daily_stock_analysis-main/brain/action_system.md",
+    "dated_changes": "daily_stock_analysis-main/brain/episodic_memory.md"
+  },
+  "body_map": {
+    "core_backend": [
+      "daily_stock_analysis-main/src",
+      "daily_stock_analysis-main/api"
+    ],
+    "web_and_desktop": [
+      "daily_stock_analysis-main/apps"
+    ],
+    "bot_and_agent": [
+      "daily_stock_analysis-main/bot",
+      "daily_stock_analysis-main/src/agent"
+    ],
+    "data_sources": [
+      "daily_stock_analysis-main/data_provider"
+    ],
+    "operations": [
+      "daily_stock_analysis-main/scripts",
+      "daily_stock_analysis-main/.github/workflows"
+    ],
+    "tests": [
+      "daily_stock_analysis-main/tests"
+    ]
+  },
+  "handoff_contract": {
+    "entry_sequence": [
+      "daily_stock_analysis-main/brain/brain_manifest.json",
+      "daily_stock_analysis-main/brain/semantic_memory.md",
+      "daily_stock_analysis-main/brain/working_memory.md",
+      "daily_stock_analysis-main/brain/procedural_memory.md",
+      "daily_stock_analysis-main/brain/environment_model.md",
+      "daily_stock_analysis-main/brain/action_system.md",
+      "daily_stock_analysis-main/brain/episodic_memory.md"
+    ],
+    "principle": "Attach to the brain first, then enter src/api/apps/bot/data_provider/tests through the declared body_map."
+  }
+}

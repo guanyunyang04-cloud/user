@@ -1,0 +1,53 @@
+{
+  "brain_type": "sub_brain",
+  "brain_id": "t0_project",
+  "brain_version": "2026-03-28",
+  "parent_brain": "brain/brain_manifest.json",
+  "entrypoint": "t0_project/brain/semantic_memory.md",
+  "body_root": "t0_project",
+  "read_order": [
+    "t0_project/brain/semantic_memory.md",
+    "t0_project/brain/brain_architecture.md",
+    "t0_project/brain/working_memory.md",
+    "t0_project/brain/procedural_memory.md",
+    "t0_project/brain/environment_model.md",
+    "t0_project/brain/action_system.md",
+    "t0_project/brain/episodic_memory.md"
+  ],
+  "write_routes": {
+    "stable_state": "t0_project/brain/semantic_memory.md",
+    "current_priorities": "t0_project/brain/working_memory.md",
+    "methods": "t0_project/brain/procedural_memory.md",
+    "runtime": "t0_project/brain/environment_model.md",
+    "execution_design": "t0_project/brain/action_system.md",
+    "dated_experiments": "t0_project/brain/episodic_memory.md"
+  },
+  "body_map": {
+    "strategy": [
+      "t0_project/integrated_tq_strategy.py",
+      "t0_project/backtest_integrated_strategy.py",
+      "t0_project/select_stocks_only.py"
+    ],
+    "execution": [
+      "t0_project/execution"
+    ],
+    "reinforcement_learning": [
+      "t0_project/rl_agent"
+    ],
+    "gateway": [
+      "t0_project/tqcenter.py"
+    ]
+  },
+  "handoff_contract": {
+    "entry_sequence": [
+      "t0_project/brain/brain_manifest.json",
+      "t0_project/brain/semantic_memory.md",
+      "t0_project/brain/working_memory.md",
+      "t0_project/brain/procedural_memory.md",
+      "t0_project/brain/environment_model.md",
+      "t0_project/brain/action_system.md",
+      "t0_project/brain/episodic_memory.md"
+    ],
+    "principle": "Attach to the brain first, then enter strategy/execution/rl/gateway through the declared body_map."
+  }
+}

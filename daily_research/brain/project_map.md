@@ -10,13 +10,15 @@
 
 本文档不承载每日默认值、最新 shortlist 或原始实验证据。对应的单一职责仍保持为：
 
-- `daily_research/brain/README.md`
-  - 当前状态、主入口与文档边界
-- `daily_research/brain/daily_research_plan.md`
+- `daily_research/brain/semantic_memory.md`
+  - 当前状态、稳定主线与脑模块边界
+- `daily_research/brain/working_memory.md`
   - 当前默认决策、升级 shortlist、优先级与停止规则
-- `daily_research/brain/runtime_environment.md`
+- `daily_research/brain/environment_model.md`
   - 解释器、依赖与运行口径
-- `daily_research/brain/research_log.md`
+- `daily_research/brain/action_system.md`
+  - 执行流程与日常操作细节
+- `daily_research/brain/episodic_memory.md`
   - 时间顺序实验记录、证据与结论
 
 ## 2. 一句话概括项目
@@ -239,15 +241,17 @@
 ## 9. 推荐协同阅读顺序
 后续无论是你、Codex 还是 Gemini CLI，建议统一按这个顺序建立上下文：
 
-1. 先看 `daily_research/brain/README.md`
+1. 先看 `daily_research/brain/semantic_memory.md`
    - 确认当前状态、主入口与文档边界
 2. 再看 `daily_research/brain/project_map.md`
    - 快速理解项目背景、当前瓶颈和未来方向
-3. 再看 `daily_research/brain/daily_research_plan.md`
+3. 再看 `daily_research/brain/working_memory.md`
    - 确认当前待决策事项和优先级
-4. 需要落命令时看 `daily_research/brain/runtime_environment.md`
+4. 需要落命令时看 `daily_research/brain/environment_model.md`
    - 确认解释器和运行口径
-5. 需要追溯证据时查 `daily_research/brain/research_log.md`
+5. 需要执行链路时看 `daily_research/brain/action_system.md`
+   - 确认盘后操作流程和执行边界
+6. 需要追溯证据时查 `daily_research/brain/episodic_memory.md`
    - 看完整时间线和实验结论来源
 
 ## 10. 协作纪律

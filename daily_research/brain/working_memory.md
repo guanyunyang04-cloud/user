@@ -140,15 +140,16 @@
 ### 优先级 D：把治理规则变成日常流程
 目标：
 
-- 避免 README、项目地图、计划、环境基线与研究日志再次混写。
+- 避免语义记忆、项目地图、工作记忆、环境模型、行动系统与情景记忆再次混写。
 
 具体动作：
 
-1. `README.md` 只写当前状态、入口与边界。
+1. `semantic_memory.md` 只写当前状态、入口与边界。
 2. `project_map.md` 只写项目背景、当前瓶颈与未来方向。
-3. `daily_research_plan.md` 只写当前默认决策、shortlist、优先级与停止规则。
-4. `runtime_environment.md` 只写解释器、依赖与推荐调用口径。
-5. `research_log.md` 只写时间顺序实验记录，并保持日期顺序追加。
+3. `working_memory.md` 只写当前默认决策、shortlist、优先级与停止规则。
+4. `environment_model.md` 只写解释器、依赖与推荐调用口径。
+5. `action_system.md` 只写执行流程与日常操作细节。
+6. `episodic_memory.md` 只写时间顺序实验记录，并保持日期顺序追加。
 
 ## 5. 当前不推进或已降级的方向
 - `base_global` 参数优化：
@@ -186,20 +187,26 @@
 2. 只在静态最新股票池上好看，未通过历史滚动股票池验证。
 3. 只在单次样本或烟测中有效，未通过多窗口 walk-forward。
 4. 收益改善主要来自季度集中或少数日期放大。
-5. 结论无法在 `research_log.md` 中回溯到对应实验与产物。
+5. 结论无法在 `episodic_memory.md` 中回溯到对应实验与产物。
 6. 所谓“坏市场盈利”若只体现为坏市场超额更高、但坏市场绝对收益仍持续为负，不得按坏市场盈利方案晋级。
 7. 当前 shortlist 的 head-to-head 若不能在同一正式口径下稳定分出胜负，则维持现默认值，不做口头升级。
 
 ## 8. 文档维护规则
-- `daily_research/brain/README.md`
-  - 只保留当前状态、主入口与文档边界。
+- `daily_research/brain/semantic_memory.md`
+  - 只保留当前状态、主入口与脑边界。
+- `daily_research/brain/brain_architecture.md`
+  - 只保留分脑结构、写入路由与父子脑关系。
 - `daily_research/brain/project_map.md`
   - 只保留项目背景、当前瓶颈、未来方向与协作导航。
-- `daily_research/brain/daily_research_plan.md`
+- `daily_research/brain/working_memory.md`
   - 只保留当前默认决策、升级 shortlist、优先级与停止规则。
-- `daily_research/brain/runtime_environment.md`
+- `daily_research/brain/procedural_memory.md`
+  - 只保留可复用方法学与技能。
+- `daily_research/brain/environment_model.md`
   - 只保留解释器、依赖与推荐调用方式。
-- `daily_research/brain/research_log.md`
+- `daily_research/brain/action_system.md`
+  - 只保留盘后执行链路与日常操作细节。
+- `daily_research/brain/episodic_memory.md`
   - 只保留时间顺序实验记录与阶段结论。
-- 根目录 `README.md`
-  - 只负责工作区级治理说明。
+- `brain/master_brain.md`
+  - 负责工作区级主脑治理说明。

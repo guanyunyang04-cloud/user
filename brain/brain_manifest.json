@@ -1,0 +1,53 @@
+{
+  "brain_type": "main",
+  "brain_version": "2026-03-28",
+  "entrypoint": "brain/master_brain.md",
+  "read_order": [
+    "brain/master_brain.md",
+    "brain/brain_architecture.md",
+    "brain/working_memory.md",
+    "brain/procedural_memory.md",
+    "brain/environment_model.md"
+  ],
+  "child_brains": [
+    {
+      "id": "daily_research",
+      "path": "daily_research/brain/brain_manifest.json",
+      "role": "production_research_and_execution",
+      "control_level": "managed_by_main_brain",
+      "body_root": "daily_research"
+    },
+    {
+      "id": "t0_project",
+      "path": "t0_project/brain/brain_manifest.json",
+      "role": "intraday_experiment_and_rl",
+      "control_level": "managed_by_main_brain",
+      "body_root": "t0_project"
+    },
+    {
+      "id": "daily_stock_analysis-main",
+      "path": "daily_stock_analysis-main/brain/brain_manifest.json",
+      "role": "multi_market_ai_stock_analysis",
+      "control_level": "managed_by_main_brain",
+      "body_root": "daily_stock_analysis-main"
+    }
+  ],
+  "write_routes": {
+    "workspace_identity": "brain/master_brain.md",
+    "workspace_priorities": "brain/working_memory.md",
+    "workspace_methods": "brain/procedural_memory.md",
+    "workspace_environment": "brain/environment_model.md"
+  },
+  "handoff_contract": {
+    "agent_boot_order": [
+      "brain/brain_manifest.json",
+      "<child>/brain/brain_manifest.json",
+      "<child>/brain/semantic_memory.md",
+      "<child>/brain/working_memory.md",
+      "<child>/brain/procedural_memory.md",
+      "<child>/brain/environment_model.md",
+      "<child>/brain/action_system.md"
+    ],
+    "principle": "Agents should attach to brains first, then enter body modules through the declared body_map."
+  }
+}
