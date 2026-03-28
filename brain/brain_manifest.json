@@ -15,21 +15,24 @@
       "path": "daily_research/brain/brain_manifest.json",
       "role": "production_research_and_execution",
       "control_level": "managed_by_main_brain",
-      "body_root": "daily_research"
+      "body_root": "daily_research",
+      "attach_status": "attached"
     },
     {
       "id": "t0_project",
       "path": "t0_project/brain/brain_manifest.json",
       "role": "intraday_experiment_and_rl",
       "control_level": "managed_by_main_brain",
-      "body_root": "t0_project"
+      "body_root": "t0_project",
+      "attach_status": "attached"
     },
     {
       "id": "daily_stock_analysis-main",
       "path": "daily_stock_analysis-main/brain/brain_manifest.json",
       "role": "multi_market_ai_stock_analysis",
       "control_level": "managed_by_main_brain",
-      "body_root": "daily_stock_analysis-main"
+      "body_root": "daily_stock_analysis-main",
+      "attach_status": "attached"
     }
   ],
   "write_routes": {

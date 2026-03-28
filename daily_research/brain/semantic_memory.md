@@ -13,6 +13,13 @@
 上级主脑位于：
 
 - `brain/master_brain.md`
+- `brain/brain_manifest.json`
+
+当前接入状态：
+
+- 已接入主脑
+- 已被主脑纳入 `child_brains`
+- 后续 agent 可先接主脑，再顺主脑进入本分脑
 
 ## 2. 项目身份
 `daily_research` 是当前正式维护的日线研究与执行分项目，负责三类任务：

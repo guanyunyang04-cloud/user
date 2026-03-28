@@ -3,6 +3,7 @@
   "brain_id": "daily_research",
   "brain_version": "2026-03-28",
   "parent_brain": "brain/brain_manifest.json",
+  "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_research/brain/semantic_memory.md",
   "body_root": "daily_research",
   "read_order": [

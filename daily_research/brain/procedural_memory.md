@@ -45,6 +45,19 @@
 - 文档改动后默认运行：
   - `python daily_research/tools/doc_guard.py check`
 
+### 3.3 主脑接入协议
+- 新 agent 接手 `daily_research` 时，默认先读：
+  - `brain/brain_manifest.json`
+  - `daily_research/brain/brain_manifest.json`
+- 然后再按顺序进入：
+  - `semantic_memory.md`
+  - `working_memory.md`
+  - `procedural_memory.md`
+  - `environment_model.md`
+  - `action_system.md`
+  - `episodic_memory.md`
+- 若主脑与分脑的判断出现冲突，以主脑边界和当前分脑实际落盘状态一起校准，不允许跳过 brain 直接盲扫 body
+
 ## 4. Gemini 协同技能
 ### 4.1 常驻前台窗口
 - Gemini 前台协同入口：
