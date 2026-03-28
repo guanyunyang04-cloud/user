@@ -19,8 +19,12 @@ from daily_research.baseline.data_provider import (
 )
 from daily_research.baseline.features import compute_factors
 from daily_research.baseline.ml_alpha import MLAplhaConfig, build_ml_feature_bundle
-from daily_research.baseline.regime import compute_market_regime_state
-from daily_research.baseline.state_profiles import build_state_configs
+from daily_research.baseline.regime import (
+    REGIME_ENGINE_VERSION,
+    compute_market_regime_state,
+    resolve_regime_label_series,
+)
+from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 
 
 @dataclass(frozen=True)
@@ -216,6 +220,7 @@ def build_prepared_bundle_with_cache(
     use_cache: bool = True,
     refresh_cache: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    validate_state_profile_selector(enhanced_profile, cfg.regime_state_selector)
     payload = {
         "kind": "prepared_bundle",
         "raw_cache_key": raw_cache_key,
@@ -227,7 +232,11 @@ def build_prepared_bundle_with_cache(
         "regime_ma_window": int(cfg.regime_ma_window),
         "regime_vol_window": int(cfg.regime_vol_window),
         "regime_max_annual_vol": float(cfg.regime_max_annual_vol),
+        "regime_trend_flat_band": float(cfg.regime_trend_flat_band),
+        "regime_vol_transition_band": float(cfg.regime_vol_transition_band),
+        "regime_state_selector": str(cfg.regime_state_selector),
         "regime_allowed_quadrants": list(cfg.regime_allowed_quadrants),
+        "regime_engine_version": int(REGIME_ENGINE_VERSION),
         "min_adv20": float(cfg.min_adv20),
         "min_price": float(cfg.min_price),
         "max_price": float(cfg.max_price),
@@ -246,16 +255,17 @@ def build_prepared_bundle_with_cache(
     benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
     factor_bundle = compute_factors(df_dict)
     regime_state = compute_market_regime_state(benchmark_close, cfg)
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     score_none, _, filter_mask = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=build_state_configs(cfg, "none"),
     )
     score_v2, _, _ = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=build_state_configs(cfg, enhanced_profile),
     )
     feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_v2)

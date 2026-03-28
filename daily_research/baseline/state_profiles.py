@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Dict
 
 from daily_research.baseline.config import ResearchConfig
+from daily_research.baseline.regime import normalize_regime_state_selector
 
 
 def _merge_dict(base: dict, updates: dict) -> dict:
@@ -334,3 +335,18 @@ def build_state_configs(
         }
 
     raise ValueError(f"Unsupported state alpha profile: {profile_name}")
+
+
+def validate_state_profile_selector(
+    profile_name: str,
+    regime_state_selector: str,
+) -> None:
+    profile_name = str(profile_name or "").strip().lower()
+    if not profile_name or profile_name == "none":
+        return
+    selector = normalize_regime_state_selector(regime_state_selector)
+    if selector != "quadrant":
+        raise ValueError(
+            f"State alpha profile '{profile_name}' currently only supports "
+            f"--regime-state-selector quadrant; got {selector}."
+        )

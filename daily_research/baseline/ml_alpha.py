@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
 
+from daily_research.baseline.regime import MARKET_STATE_LABELS
+
 try:
     from lightgbm import LGBMRegressor
 except Exception:  # pragma: no cover - optional dependency
@@ -167,12 +169,22 @@ def build_ml_feature_bundle(
     feature_frames["volume_rank"] = vol20.rank(axis=1, pct=True)
 
     market_features: Dict[str, pd.Series] = {}
-    market_features["benchmark_trend_gap"] = regime_state["benchmark_close"] / regime_state["benchmark_ma"] - 1.0
+    market_features["benchmark_trend_gap"] = regime_state["benchmark_trend_gap"]
     market_features["benchmark_annual_vol"] = regime_state["benchmark_annual_vol"]
+    market_features["benchmark_vol_gap"] = regime_state["benchmark_vol_gap"]
+    market_features["benchmark_vol_ratio"] = regime_state["benchmark_vol_ratio"]
     market_features["is_up_low"] = regime_state["quadrant"].eq("trend_up_low_vol").astype(float)
     market_features["is_up_high"] = regime_state["quadrant"].eq("trend_up_high_vol").astype(float)
     market_features["is_down_low"] = regime_state["quadrant"].eq("trend_down_low_vol").astype(float)
     market_features["is_down_high"] = regime_state["quadrant"].eq("trend_down_high_vol").astype(float)
+    market_features["is_trend_up"] = regime_state["trend_bucket"].eq("trend_up").astype(float)
+    market_features["is_trend_flat"] = regime_state["trend_bucket"].eq("trend_flat").astype(float)
+    market_features["is_trend_down"] = regime_state["trend_bucket"].eq("trend_down").astype(float)
+    market_features["is_vol_low"] = regime_state["vol_bucket"].eq("vol_low").astype(float)
+    market_features["is_vol_mid"] = regime_state["vol_bucket"].eq("vol_mid").astype(float)
+    market_features["is_vol_high"] = regime_state["vol_bucket"].eq("vol_high").astype(float)
+    for market_state_label in MARKET_STATE_LABELS:
+        market_features[f"is_{market_state_label}"] = regime_state["market_state"].eq(market_state_label).astype(float)
     market_features["regime_on"] = regime_state["regime_on"].astype(float)
     return feature_frames, market_features
 
@@ -632,6 +644,7 @@ def rolling_ml_scores_multi(
     filter_mask: pd.DataFrame,
     regime_state: pd.DataFrame,
     config: MLAplhaConfig,
+    state_label_series: pd.Series | None = None,
     open_df: pd.DataFrame | None = None,
     benchmark_open: pd.Series | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -643,6 +656,7 @@ def rolling_ml_scores_multi(
         filter_mask=filter_mask,
         regime_state=regime_state,
         config=config,
+        state_label_series=state_label_series,
         open_df=open_df,
         benchmark_open=benchmark_open,
     )
@@ -654,6 +668,7 @@ def combine_per_horizon_ml_scores(
     close: pd.DataFrame,
     regime_state: pd.DataFrame,
     config: MLAplhaConfig,
+    state_label_series: pd.Series | None = None,
 ) -> pd.DataFrame:
     if not per_horizon_scores:
         return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
@@ -664,9 +679,16 @@ def combine_per_horizon_ml_scores(
         frame_valid = frame.notna()
         valid_mask = frame_valid if valid_mask is None else (valid_mask | frame_valid)
 
-    quadrant_series = regime_state["quadrant"].reindex(close.index)
+    regime_labels = (
+        state_label_series.reindex(close.index)
+        if state_label_series is not None
+        else regime_state["quadrant"].reindex(close.index)
+    )
     for dt in close.index:
-        weights_for_date = resolve_horizon_weights(config, str(quadrant_series.loc[dt]) if dt in quadrant_series.index else None)
+        weights_for_date = resolve_horizon_weights(
+            config,
+            str(regime_labels.loc[dt]) if dt in regime_labels.index else None,
+        )
         row = pd.Series(0.0, index=close.columns, dtype=float)
         for horizon, weight in weights_for_date.items():
             frame = per_horizon_scores.get(horizon)
@@ -685,6 +707,7 @@ def rolling_ml_scores_multi_detail(
     filter_mask: pd.DataFrame,
     regime_state: pd.DataFrame,
     config: MLAplhaConfig,
+    state_label_series: pd.Series | None = None,
     open_df: pd.DataFrame | None = None,
     benchmark_open: pd.Series | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, Dict[int, pd.DataFrame]]:
@@ -727,6 +750,7 @@ def rolling_ml_scores_multi_detail(
         close=close,
         regime_state=regime_state,
         config=config,
+        state_label_series=state_label_series,
     )
     training_log_df = pd.concat(training_logs, axis=0, ignore_index=True) if training_logs else pd.DataFrame()
     return combined, training_log_df, per_horizon_scores

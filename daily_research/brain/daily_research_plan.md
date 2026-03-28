@@ -60,6 +60,11 @@
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责。
 - `deep_alpha` 仍是长期主研究线，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
+- 底层市场状态层已经完成架构升级：
+  - `quadrant` 继续保留为兼容标签
+  - 新默认研究输入同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`
+  - 后续新策略与新诊断默认优先接 `regime_state_selector`，不再新增硬编码四象限分支
+  - 但当前 `state_alpha_profile` 仍只支持 `quadrant`；若切到更细 selector，系统现在会显式报错而不是静默退化
 - `base_global` 即使经过参数优化，也没有通过当前弱窗口修复门槛，不再作为执行升级主候选。
 - `504 / 5 / 260` 与 `378 / 21 / 520` 已不再是优先晋级参数组合。
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。

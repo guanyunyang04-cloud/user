@@ -205,12 +205,15 @@ def _load_or_build_shared_scores(
 def _build_signal_feature_frame(prepared_bundle: dict[str, Any], focus_state: str) -> pd.DataFrame:
     regime_state = prepared_bundle["regime_state"]
     benchmark_close = prepared_bundle["benchmark_close"].sort_index()
-    trend_gap = regime_state["benchmark_close"] / regime_state["benchmark_ma"] - 1.0
 
     feature_df = pd.DataFrame(index=benchmark_close.index)
     feature_df["quadrant"] = regime_state["quadrant"].reindex(feature_df.index)
-    feature_df["trend_gap"] = trend_gap.reindex(feature_df.index)
+    feature_df["market_state"] = regime_state["market_state"].reindex(feature_df.index)
+    feature_df["trend_bucket"] = regime_state["trend_bucket"].reindex(feature_df.index)
+    feature_df["vol_bucket"] = regime_state["vol_bucket"].reindex(feature_df.index)
+    feature_df["trend_gap"] = regime_state["benchmark_trend_gap"].reindex(feature_df.index)
     feature_df["annual_vol"] = regime_state["benchmark_annual_vol"].reindex(feature_df.index)
+    feature_df["benchmark_vol_ratio"] = regime_state["benchmark_vol_ratio"].reindex(feature_df.index)
     feature_df["benchmark_ret_5d"] = benchmark_close.pct_change(5)
     feature_df["benchmark_ret_10d"] = benchmark_close.pct_change(10)
     feature_df["benchmark_ret_20d"] = benchmark_close.pct_change(20)

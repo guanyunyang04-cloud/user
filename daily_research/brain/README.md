@@ -92,6 +92,11 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - `regime_ma_window=50`
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
+- 底层市场状态架构已升级为：
+  - 兼容层继续保留 legacy `quadrant`
+  - 底层同时输出连续 `trend/vol gap`、`trend_bucket`、`vol_bucket` 与 `market_state`
+  - 上层入口已支持通过 `regime_state_selector` 切换状态标签来源
+  - 当前 `state_alpha_profile` 这一层仍只支持 legacy `quadrant`，非 quadrant selector 会被显式拦截，避免静默失效
 - 执行端默认值暂不自动切换；
   - 2026-03-28 的 formal head-to-head、攻守分型诊断、首轮动态控制器扫描与第二轮 `ret10` 动态扫描都已完成，但当前仍没有可升级默认值的单一或动态赢家，相关口径统一写在 `daily_research/brain/daily_research_plan.md`
   - 当前最强的动态折中候选是 `gap>=0.024192, vol<=0.176128, ret10>=0.014717`，它已经把弱窗口指标推到 `1.101 / 1.114`，但 `full_excess_sharpe` 仍只有 `0.807`

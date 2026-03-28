@@ -19,6 +19,9 @@ class ResearchConfig:
     regime_ma_window: int = 60
     regime_vol_window: int = 20
     regime_max_annual_vol: float = 0.28
+    regime_trend_flat_band: float = 0.01
+    regime_vol_transition_band: float = 0.10
+    regime_state_selector: str = "quadrant"
     regime_allowed_quadrants: List[str] = field(default_factory=lambda: [
         "trend_up_low_vol",
         "trend_up_high_vol",
@@ -140,6 +143,13 @@ class ResearchConfig:
         self.universe_scope = str(self.universe_scope).lower()
         self.regime_ma_window = max(int(self.regime_ma_window), 2)
         self.regime_vol_window = max(int(self.regime_vol_window), 2)
+        self.regime_trend_flat_band = max(float(self.regime_trend_flat_band), 0.0)
+        self.regime_vol_transition_band = max(float(self.regime_vol_transition_band), 0.0)
+        self.regime_state_selector = str(self.regime_state_selector or "quadrant").strip().lower()
+        if self.regime_state_selector not in {"quadrant", "market_state", "trend_bucket", "vol_bucket"}:
+            raise ValueError(
+                "regime_state_selector must be one of: quadrant, market_state, trend_bucket, vol_bucket."
+            )
         self.regime_allowed_quadrants = [
             str(name).strip().lower()
             for name in self.regime_allowed_quadrants

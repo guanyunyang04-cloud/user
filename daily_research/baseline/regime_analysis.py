@@ -5,37 +5,49 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+from daily_research.baseline.config import ResearchConfig
+from daily_research.baseline.regime import compute_market_regime_state, resolve_regime_label_series
+
 
 def classify_market_quadrants(
     benchmark_close: pd.Series,
     ma_window: int = 60,
     vol_window: int = 20,
     vol_threshold: float = 0.32,
+    trend_flat_band: float = 0.01,
+    vol_transition_band: float = 0.10,
+    state_selector: str = "quadrant",
 ) -> pd.DataFrame:
-    benchmark_close = benchmark_close.astype(float).sort_index().dropna()
-    ma = benchmark_close.rolling(ma_window).mean()
-    daily_ret = benchmark_close.pct_change(fill_method=None)
-    annual_vol = daily_ret.rolling(vol_window).std() * np.sqrt(252)
-
-    trend_up = (benchmark_close > ma).fillna(False)
-    low_vol = (annual_vol <= float(vol_threshold)).fillna(False)
-
-    quadrant = pd.Series("unknown", index=benchmark_close.index, dtype="object")
-    quadrant.loc[trend_up & low_vol] = "trend_up_low_vol"
-    quadrant.loc[trend_up & (~low_vol)] = "trend_up_high_vol"
-    quadrant.loc[(~trend_up) & low_vol] = "trend_down_low_vol"
-    quadrant.loc[(~trend_up) & (~low_vol)] = "trend_down_high_vol"
-
-    return pd.DataFrame(
-        {
-            "benchmark_close": benchmark_close,
-            "benchmark_ma": ma,
-            "benchmark_annual_vol": annual_vol,
-            "trend_up": trend_up.astype(bool),
-            "low_vol": low_vol.astype(bool),
-            "quadrant": quadrant,
-        }
+    cfg = ResearchConfig(
+        benchmark="000300.SH",
+        regime_ma_window=ma_window,
+        regime_vol_window=vol_window,
+        regime_max_annual_vol=vol_threshold,
+        regime_trend_flat_band=trend_flat_band,
+        regime_vol_transition_band=vol_transition_band,
+        regime_state_selector=state_selector,
+        enable_market_regime_filter=False,
     )
+    regime_state = compute_market_regime_state(benchmark_close, cfg)
+    out = regime_state[
+        [
+            "benchmark_close",
+            "benchmark_ma",
+            "benchmark_trend_gap",
+            "benchmark_annual_vol",
+            "benchmark_vol_gap",
+            "benchmark_vol_ratio",
+            "trend_bucket",
+            "vol_bucket",
+            "market_state",
+            "quadrant",
+        ]
+    ].copy()
+    out["state_label"] = resolve_regime_label_series(regime_state, state_selector)
+    out["state_selector"] = str(state_selector)
+    out["trend_up"] = regime_state["trend_pass"].astype(bool)
+    out["low_vol"] = regime_state["vol_pass"].astype(bool)
+    return out
 
 
 def _max_drawdown_from_returns(returns: pd.Series) -> float:
@@ -51,9 +63,17 @@ def summarize_strategy_by_quadrant(
     equity_df: pd.DataFrame,
     quadrant_state: pd.DataFrame,
 ) -> pd.DataFrame:
-    aligned = equity_df.join(quadrant_state[["quadrant"]], how="left")
+    return summarize_strategy_by_state(equity_df, quadrant_state, label_column="quadrant")
+
+
+def summarize_strategy_by_state(
+    equity_df: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    label_column: str = "state_label",
+) -> pd.DataFrame:
+    aligned = equity_df.join(regime_state[[label_column]], how="left")
     rows = []
-    for quadrant, group in aligned.groupby("quadrant", dropna=False):
+    for state_label, group in aligned.groupby(label_column, dropna=False):
         portfolio_ret = group["portfolio_return"].dropna()
         excess_ret = group["excess_return"].dropna()
         holding_count = group["holding_count"].fillna(0.0)
@@ -63,7 +83,7 @@ def summarize_strategy_by_quadrant(
 
         rows.append(
             {
-                "quadrant": quadrant,
+                "state_label": state_label,
                 "days": int(len(group)),
                 "active_days": int(active_mask.sum()),
                 "active_ratio": float(active_mask.mean()) if len(group) > 0 else 0.0,
@@ -85,23 +105,31 @@ def summarize_strategy_by_quadrant(
                 "excess_max_drawdown": _max_drawdown_from_returns(excess_ret),
             }
         )
-    return pd.DataFrame(rows).sort_values("quadrant")
+    return pd.DataFrame(rows).sort_values("state_label")
 
 
 def summarize_year_quadrants(
     equity_df: pd.DataFrame,
     quadrant_state: pd.DataFrame,
 ) -> pd.DataFrame:
-    aligned = equity_df.join(quadrant_state[["quadrant"]], how="left")
+    return summarize_year_states(equity_df, quadrant_state, label_column="quadrant")
+
+
+def summarize_year_states(
+    equity_df: pd.DataFrame,
+    regime_state: pd.DataFrame,
+    label_column: str = "state_label",
+) -> pd.DataFrame:
+    aligned = equity_df.join(regime_state[[label_column]], how="left")
     aligned = aligned.copy()
     aligned["year"] = aligned.index.year.astype(str)
     rows = []
-    for (year, quadrant), group in aligned.groupby(["year", "quadrant"], dropna=False):
+    for (year, state_label), group in aligned.groupby(["year", label_column], dropna=False):
         excess_ret = group["excess_return"].dropna()
         rows.append(
             {
                 "year": year,
-                "quadrant": quadrant,
+                "state_label": state_label,
                 "days": int(len(group)),
                 "active_days": int((group["holding_count"].fillna(0.0) > 0).sum()),
                 "excess_total_return": float((1.0 + excess_ret).prod() - 1.0) if not excess_ret.empty else 0.0,
@@ -109,4 +137,4 @@ def summarize_year_quadrants(
                 "excess_win_rate": float((excess_ret > 0).mean()) if not excess_ret.empty else 0.0,
             }
         )
-    return pd.DataFrame(rows).sort_values(["year", "quadrant"])
+    return pd.DataFrame(rows).sort_values(["year", "state_label"])

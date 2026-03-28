@@ -21,13 +21,13 @@ from daily_research.baseline.data_provider import (
 )
 from daily_research.baseline.features import compute_factors
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state
-from daily_research.baseline.regime_analysis import classify_market_quadrants, summarize_strategy_by_quadrant, summarize_year_quadrants
-from daily_research.baseline.state_profiles import build_state_configs
+from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state, resolve_regime_label_series
+from daily_research.baseline.regime_analysis import classify_market_quadrants, summarize_strategy_by_state, summarize_year_states
+from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Analyze strategy performance by market quadrants")
+    parser = argparse.ArgumentParser(description="Analyze strategy performance by market states")
     parser.add_argument("--start-date", default="20210101")
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--experiment-tag", default="")
@@ -37,10 +37,18 @@ def parse_args():
     parser.add_argument("--regime-ma-window", type=int, default=60)
     parser.add_argument("--regime-vol-window", type=int, default=20)
     parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="按哪一列市场状态标签做分组分析；默认 quadrant。",
+    )
     parser.add_argument(
         "--regime-quadrants",
         default="trend_up_low_vol,trend_up_high_vol",
-        help="允许持仓的市场状态象限，逗号分隔。",
+        help="允许持仓的市场状态筛选器，逗号分隔。",
     )
     parser.add_argument("--style-cap", action="store_true")
     parser.add_argument("--max-style-weight", type=float, default=0.50)
@@ -58,6 +66,7 @@ def _apply_rebalance_frequency(frame, rebalance_freq: str):
 
 def main():
     args = parse_args()
+    validate_state_profile_selector(args.state_alpha_profile, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
         benchmark=args.benchmark,
@@ -68,6 +77,9 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=args.style_cap,
         max_style_weight=args.max_style_weight,
@@ -82,11 +94,12 @@ def main():
     print("[3/6] 计算因子和分数...")
     factor_bundle = compute_factors(df_dict)
     regime_state = compute_market_regime_state(benchmark_close, cfg)
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     state_configs = build_state_configs(cfg, args.state_alpha_profile)
     score, _, _ = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=state_configs,
     )
 
@@ -112,30 +125,38 @@ def main():
         regime_on=regime_state["regime_on"] if cfg.enable_market_regime_filter else None,
     )
 
-    print("[6/6] 生成四象限分析报表...")
-    quadrants = classify_market_quadrants(
+    print("[6/6] 生成市场状态分析报表...")
+    regime_labels = classify_market_quadrants(
         benchmark_close=benchmark_close.loc[equity_df.index],
         ma_window=cfg.regime_ma_window,
         vol_window=cfg.regime_vol_window,
         vol_threshold=cfg.regime_max_annual_vol,
+        trend_flat_band=cfg.regime_trend_flat_band,
+        vol_transition_band=cfg.regime_vol_transition_band,
+        state_selector=cfg.regime_state_selector,
     )
-    quadrant_summary = summarize_strategy_by_quadrant(equity_df, quadrants)
-    year_quadrant_summary = summarize_year_quadrants(equity_df, quadrants)
+    state_summary = summarize_strategy_by_state(equity_df, regime_labels, label_column="state_label")
+    year_state_summary = summarize_year_states(equity_df, regime_labels, label_column="state_label")
+    metrics["regime_state_selector"] = cfg.regime_state_selector
 
     base_dir = Path(__file__).resolve().parents[1] / "output"
-    run_name = args.experiment_tag.strip() or datetime.now().strftime("regime_quadrant_%Y%m%d_%H%M%S")
+    run_name = args.experiment_tag.strip() or datetime.now().strftime("regime_state_%Y%m%d_%H%M%S")
     out_dir = base_dir / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     equity_df.to_csv(out_dir / "equity_curve.csv", encoding="utf-8-sig")
-    quadrants.to_csv(out_dir / "quadrant_state.csv", encoding="utf-8-sig")
-    quadrant_summary.to_csv(out_dir / "quadrant_summary.csv", index=False, encoding="utf-8-sig")
-    year_quadrant_summary.to_csv(out_dir / "year_quadrant_summary.csv", index=False, encoding="utf-8-sig")
+    regime_labels.to_csv(out_dir / "regime_state.csv", encoding="utf-8-sig")
+    state_summary.to_csv(out_dir / "state_summary.csv", index=False, encoding="utf-8-sig")
+    year_state_summary.to_csv(out_dir / "year_state_summary.csv", index=False, encoding="utf-8-sig")
+    if cfg.regime_state_selector == "quadrant":
+        regime_labels.to_csv(out_dir / "quadrant_state.csv", encoding="utf-8-sig")
+        state_summary.to_csv(out_dir / "quadrant_summary.csv", index=False, encoding="utf-8-sig")
+        year_state_summary.to_csv(out_dir / "year_quadrant_summary.csv", index=False, encoding="utf-8-sig")
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
     print(f"输出目录: {out_dir}")
-    print(quadrant_summary.to_string(index=False))
+    print(state_summary.to_string(index=False))
 
 
 if __name__ == "__main__":

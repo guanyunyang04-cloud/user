@@ -22,8 +22,8 @@ from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_daily_from_tq, load_style_map_from_tq, load_universe_from_tq, split_benchmark_from_universe
 from daily_research.baseline.features import compute_factors
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state
-from daily_research.baseline.state_profiles import build_state_configs
+from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state, resolve_regime_label_series
+from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 
 
 def parse_args():
@@ -32,7 +32,17 @@ def parse_args():
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--train-years", type=int, default=2)
     parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--regime-ma-window", type=int, default=60)
+    parser.add_argument("--regime-vol-window", type=int, default=20)
     parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="状态标签来源；当前非 none profile 仍只支持 quadrant。",
+    )
     parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
     parser.add_argument("--style-cap", action="store_true")
     parser.add_argument("--max-style-weight", type=float, default=0.50)
@@ -57,11 +67,12 @@ def _build_profile_artifacts(
     style_map: pd.DataFrame | None,
 ):
     regime_state = compute_market_regime_state(benchmark_close, cfg)
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     state_configs = build_state_configs(cfg, profile_name)
     score, _, _ = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=state_configs,
     )
     target_weights = build_target_weights(score, cfg, style_map=style_map)
@@ -138,6 +149,8 @@ def _combine_equity_segments(segments: List[pd.DataFrame]) -> pd.DataFrame:
 def main():
     args = parse_args()
     profiles = parse_csv_list(args.profiles)
+    for profile_name in profiles:
+        validate_state_profile_selector(profile_name, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
         benchmark=args.benchmark,
@@ -145,7 +158,12 @@ def main():
         weighting_method="score",
         rebalance_freq=args.rebalance_freq,
         enable_market_regime_filter=True,
+        regime_ma_window=args.regime_ma_window,
+        regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=args.style_cap,
         max_style_weight=args.max_style_weight,
@@ -288,6 +306,7 @@ def main():
             "regime_active_ratio": float(stitched_equity["regime_on"].mean()),
             "profiles": profiles,
             "train_years": int(args.train_years),
+            "regime_state_selector": cfg.regime_state_selector,
         }
 
     out_root = Path(__file__).resolve().parents[1] / "output"

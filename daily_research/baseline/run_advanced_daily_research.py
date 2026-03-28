@@ -38,8 +38,12 @@ from daily_research.baseline.evaluation import evaluate_factor_bundle
 from daily_research.baseline.features import compute_factors
 from daily_research.baseline.ml_alpha import MLAplhaConfig, blend_scores, build_ml_feature_bundle, rolling_ml_scores_multi
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state
-from daily_research.baseline.state_profiles import build_state_configs
+from daily_research.baseline.regime import (
+    apply_market_regime_filter,
+    compute_market_regime_state,
+    resolve_regime_label_series,
+)
+from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership
 from daily_research.progress import StageProgress
 
@@ -77,7 +81,19 @@ def parse_args():
     parser.add_argument("--regime-ma-window", type=int, default=60)
     parser.add_argument("--regime-vol-window", type=int, default=20)
     parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
-    parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="State selector used by state-aware scoring and blending. Defaults to compatibility quadrant.",
+    )
+    parser.add_argument(
+        "--regime-quadrants",
+        default="trend_up_low_vol,trend_up_high_vol",
+        help="Allowed regime selectors. Supports legacy quadrants plus richer labels such as trend_up_vol_low, trend_flat, vol_mid.",
+    )
 
     parser.add_argument("--no-style-cap", action="store_true")
     parser.add_argument("--max-style-weight", type=float, default=0.50)
@@ -142,6 +158,7 @@ def _subset_df_dict_to_stocks(df_dict: dict[str, pd.DataFrame], stocks: list[str
 
 def main():
     args = parse_args()
+    validate_state_profile_selector(args.enhanced_profile, args.regime_state_selector)
     if args.rolling_liquidity_pool and (args.stocks or args.stocks_file):
         raise ValueError("Use either a fixed --stocks/--stocks-file universe or --rolling-liquidity-pool, not both.")
 
@@ -163,6 +180,9 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
@@ -241,6 +261,7 @@ def main():
         rolling_membership_mask = rolling_membership_mask.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
     factor_bundle = compute_factors(df_dict)
     regime_state = compute_market_regime_state(benchmark_close, cfg)
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
 
     industry_map = None
     style_map = None
@@ -255,13 +276,13 @@ def main():
     score_none, _, filter_mask = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=build_state_configs(cfg, "none"),
     )
     score_enhanced, _, _ = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=build_state_configs(cfg, args.enhanced_profile),
     )
     if rolling_membership_mask is not None:
@@ -281,8 +302,9 @@ def main():
         filter_mask=filter_mask,
         regime_state=regime_state,
         config=ml_cfg,
+        state_label_series=state_label_series,
     )
-    final_score = blend_scores(ml_score, score_none, score_enhanced, ml_cfg, quadrant_series=regime_state["quadrant"])
+    final_score = blend_scores(ml_score, score_none, score_enhanced, ml_cfg, quadrant_series=state_label_series)
     if rolling_membership_mask is not None:
         final_score = final_score.where(rolling_membership_mask)
 
@@ -341,6 +363,7 @@ def main():
             },
             "enhanced_profile": str(args.enhanced_profile),
             "market_regime_filter": cfg.enable_market_regime_filter,
+            "regime_state_selector": cfg.regime_state_selector,
             "regime_allowed_quadrants": cfg.regime_allowed_quadrants,
             "style_cap": cfg.enable_style_cap,
             "max_style_weight": cfg.max_style_weight,
@@ -380,6 +403,7 @@ def main():
 
 def main_with_progress():
     args = parse_args()
+    validate_state_profile_selector(args.enhanced_profile, args.regime_state_selector)
     if args.rolling_liquidity_pool and (args.stocks or args.stocks_file):
         raise ValueError("Use either a fixed --stocks/--stocks-file universe or --rolling-liquidity-pool, not both.")
 
@@ -401,6 +425,9 @@ def main_with_progress():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
@@ -509,16 +536,17 @@ def main_with_progress():
         with progress.stage("计算基础因子分数", args.enhanced_profile):
             factor_bundle = compute_factors(df_dict)
             regime_state = compute_market_regime_state(benchmark_close, cfg)
+            state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
             score_none, _, filter_mask = combine_scores_by_state(
                 factor_bundle,
                 cfg,
-                quadrant_series=regime_state["quadrant"],
+                quadrant_series=state_label_series,
                 state_configs=build_state_configs(cfg, "none"),
             )
             score_enhanced, _, _ = combine_scores_by_state(
                 factor_bundle,
                 cfg,
-                quadrant_series=regime_state["quadrant"],
+                quadrant_series=state_label_series,
                 state_configs=build_state_configs(cfg, args.enhanced_profile),
             )
             if rolling_membership_mask is not None:
@@ -543,13 +571,14 @@ def main_with_progress():
                 filter_mask=filter_mask,
                 regime_state=regime_state,
                 config=ml_cfg,
+                state_label_series=state_label_series,
             )
             final_score = blend_scores(
                 ml_score,
                 score_none,
                 score_enhanced,
                 ml_cfg,
-                quadrant_series=regime_state["quadrant"],
+                quadrant_series=state_label_series,
             )
             if rolling_membership_mask is not None:
                 final_score = final_score.where(rolling_membership_mask)
@@ -613,6 +642,7 @@ def main_with_progress():
             },
             "enhanced_profile": str(args.enhanced_profile),
             "market_regime_filter": cfg.enable_market_regime_filter,
+            "regime_state_selector": cfg.regime_state_selector,
             "regime_allowed_quadrants": cfg.regime_allowed_quadrants,
             "style_cap": cfg.enable_style_cap,
             "max_style_weight": cfg.max_style_weight,

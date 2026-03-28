@@ -47,7 +47,8 @@ from daily_research.baseline.ml_alpha import (
     rolling_ml_scores_multi,
 )
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter
+from daily_research.baseline.regime import apply_market_regime_filter, resolve_regime_label_series
+from daily_research.baseline.state_profiles import validate_state_profile_selector
 from daily_research.progress import StageProgress
 
 
@@ -100,7 +101,19 @@ def parse_args():
     parser.add_argument("--regime-ma-window", type=int, default=60)
     parser.add_argument("--regime-vol-window", type=int, default=20)
     parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
-    parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="State selector used by score switching and ML blend. Defaults to compatibility quadrant.",
+    )
+    parser.add_argument(
+        "--regime-quadrants",
+        default="trend_up_low_vol,trend_up_high_vol",
+        help="Allowed regime selectors. Supports legacy quadrants plus richer labels such as trend_up_vol_low, trend_flat, vol_mid.",
+    )
 
     parser.add_argument("--no-style-cap", action="store_true")
     parser.add_argument("--max-style-weight", type=float, default=0.50)
@@ -294,6 +307,8 @@ def _build_scores_from_artifact(
     artifact_cfg = MLAplhaConfig(**artifact.ml_config)
     enhanced_profile = str(getattr(artifact_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2")
     latest_date = factor_bundle["raw_inputs"]["Close"].index.max()
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
+    latest_regime_label = str(state_label_series.loc[latest_date]) if latest_date in state_label_series.index else ""
     latest_quadrant = str(regime_state.loc[latest_date, "quadrant"])
 
     ml_score_row, _ = predict_ml_scores_for_date_bundle(
@@ -303,7 +318,7 @@ def _build_scores_from_artifact(
         filter_mask=filter_mask,
         dt=latest_date,
         feature_names=artifact.feature_names,
-        horizon_weights=resolve_horizon_weights(artifact_cfg, latest_quadrant),
+        horizon_weights=resolve_horizon_weights(artifact_cfg, latest_regime_label),
     )
     ml_score = pd.DataFrame(np.nan, index=[latest_date], columns=score_none.columns)
     if not ml_score_row.empty:
@@ -316,7 +331,7 @@ def _build_scores_from_artifact(
         score_none_latest,
         score_v2_latest,
         artifact_cfg,
-        quadrant_series=regime_state.loc[[latest_date], "quadrant"],
+        quadrant_series=state_label_series.loc[[latest_date]],
     )
     target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
     final_score = final_score_raw.copy()
@@ -334,6 +349,8 @@ def _build_scores_from_artifact(
                 "horizons": ",".join(sorted(artifact.models.keys())),
                 "train_end": train_end,
                 "quadrant": latest_quadrant,
+                "regime_selector": cfg.regime_state_selector,
+                "regime_label": latest_regime_label,
                 "enhanced_profile": enhanced_profile,
             }
         ]
@@ -355,6 +372,7 @@ def _build_scores_on_the_fly(
     filter_mask = prepared_bundle["filter_mask"]
     feature_frames = prepared_bundle["feature_frames"]
     market_features = prepared_bundle["market_features"]
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     benchmark_close = prepared_bundle["benchmark_close"]
     benchmark_open = prepared_bundle["benchmark_open"]
     ml_score, training_log = rolling_ml_scores_multi(
@@ -367,8 +385,9 @@ def _build_scores_on_the_fly(
         filter_mask=filter_mask,
         regime_state=regime_state,
         config=ml_cfg,
+        state_label_series=state_label_series,
     )
-    final_score_raw = blend_scores(ml_score, score_none, score_v2, ml_cfg, quadrant_series=regime_state["quadrant"])
+    final_score_raw = blend_scores(ml_score, score_none, score_v2, ml_cfg, quadrant_series=state_label_series)
     target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
     final_score = final_score_raw.copy()
     if cfg.enable_market_regime_filter:
@@ -714,6 +733,7 @@ def _write_trade_plan_txt(
 
 def main():
     args = parse_args()
+    validate_state_profile_selector(args.enhanced_profile, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
         end_date=args.end_date,
@@ -732,6 +752,9 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
@@ -780,6 +803,7 @@ def main():
         artifact_meta = _load_artifact_meta(artifact_path)
         effective_ml_cfg = MLAplhaConfig(**artifact.ml_config)
         effective_profile = str(getattr(effective_ml_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2")
+        validate_state_profile_selector(effective_profile, cfg.regime_state_selector)
 
     if args.data_source == "tq":
         if not cfg.universe and cfg.universe_scope == "all_a":
@@ -1032,6 +1056,7 @@ def main():
 
 def main_with_progress():
     args = parse_args()
+    validate_state_profile_selector(args.enhanced_profile, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
         end_date=args.end_date,
@@ -1050,6 +1075,9 @@ def main_with_progress():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
@@ -1103,6 +1131,7 @@ def main_with_progress():
                 effective_profile = str(
                     getattr(effective_ml_cfg, "enhanced_profile", "up_low_breakout_v2") or "up_low_breakout_v2"
                 )
+                validate_state_profile_selector(effective_profile, cfg.regime_state_selector)
             if args.data_source == "tq":
                 if not cfg.universe and cfg.universe_scope == "all_a":
                     cfg.universe = load_universe_from_tq(cfg.universe_scope)

@@ -27,8 +27,12 @@ from daily_research.baseline.data_provider import (
 from daily_research.baseline.evaluation import evaluate_factor_bundle
 from daily_research.baseline.features import compute_factors
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state
-from daily_research.baseline.state_profiles import build_state_configs
+from daily_research.baseline.regime import (
+    apply_market_regime_filter,
+    compute_market_regime_state,
+    resolve_regime_label_series,
+)
+from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 
 
 def parse_args():
@@ -52,10 +56,18 @@ def parse_args():
     parser.add_argument("--regime-ma-window", type=int, default=60)
     parser.add_argument("--regime-vol-window", type=int, default=20)
     parser.add_argument("--regime-max-annual-vol", type=float, default=0.28)
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="上层策略使用哪一列市场状态标签；默认沿用兼容层 quadrant。",
+    )
     parser.add_argument(
         "--regime-quadrants",
         default="trend_up_low_vol,trend_up_high_vol",
-        help="允许持仓的市场状态象限，逗号分隔。例如 trend_up_low_vol,trend_up_high_vol",
+        help="允许持仓的市场状态筛选器，逗号分隔。支持 legacy quadrant，也支持 trend_up_vol_low、trend_flat、vol_mid。",
     )
     parser.add_argument("--industry-cap", action="store_true", help="启用单行业集中度上限。")
     parser.add_argument("--max-industry-weight", type=float, default=0.40)
@@ -110,6 +122,7 @@ def _build_latest_scores(
 
 def main():
     args = parse_args()
+    validate_state_profile_selector(args.state_alpha_profile, args.regime_state_selector)
     cfg = ResearchConfig(
         start_date=args.start_date,
         end_date=args.end_date,
@@ -123,6 +136,9 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
+        regime_trend_flat_band=args.regime_trend_flat_band,
+        regime_vol_transition_band=args.regime_vol_transition_band,
+        regime_state_selector=args.regime_state_selector,
         regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_industry_cap=args.industry_cap,
         max_industry_weight=args.max_industry_weight,
@@ -169,6 +185,7 @@ def main():
 
     factor_bundle = compute_factors(df_dict)
     regime_state = compute_market_regime_state(benchmark_close, cfg)
+    state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     industry_map = None
     style_map = None
     if cfg.enable_industry_cap and args.data_source == "tq":
@@ -183,7 +200,7 @@ def main():
     score, group_scores, filter_mask = combine_scores_by_state(
         factor_bundle,
         cfg,
-        quadrant_series=regime_state["quadrant"],
+        quadrant_series=state_label_series,
         state_configs=state_configs,
     )
     target_weights = build_target_weights(score, cfg, industry_map=industry_map, style_map=style_map)
@@ -226,6 +243,7 @@ def main():
             "execution_mode": cfg.execution_mode,
             "rebalance_freq": cfg.rebalance_freq,
             "market_regime_filter": cfg.enable_market_regime_filter,
+            "regime_state_selector": cfg.regime_state_selector,
             "regime_allowed_quadrants": cfg.regime_allowed_quadrants,
             "industry_cap": cfg.enable_industry_cap,
             "max_industry_weight": cfg.max_industry_weight,

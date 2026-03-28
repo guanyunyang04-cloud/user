@@ -303,7 +303,7 @@ def _build_dynamic_final_score(
     defense_score = _build_weighted_score(ml_z, none_z, v2_z, defense_weights, valid_mask)
 
     quadrant = regime_state["quadrant"].reindex(base_score.index)
-    trend_gap = regime_state["benchmark_close"].div(regime_state["benchmark_ma"]).sub(1.0).reindex(base_score.index)
+    trend_gap = regime_state["benchmark_trend_gap"].reindex(base_score.index)
     annual_vol = regime_state["benchmark_annual_vol"].reindex(base_score.index)
     benchmark_ret_10d = benchmark_close.sort_index().pct_change(10).reindex(base_score.index)
 
