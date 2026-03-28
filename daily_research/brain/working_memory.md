@@ -2,9 +2,10 @@
 
 ## 1. 当前默认决策
 当前默认执行主线继续保持为：
-
 - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
-
+但 `2026-03-29` 的代码考古 + 受控 ablation 已钉死一个关键红旗：
+- 在隔离 worktree `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off` 中，只把 `daily_research/baseline/ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从当前代码的 `151.70% / 0.882` 立即回跳到旧快照的 `958.89% / 2.447`
+- 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；当前 wrapper 运行时虽仍指向旧快照后端，但研究判断已不能再把那条 `958.89%` 视为可信 alpha 主线
 当前默认口径同时固定为：
 
 - 股票池：
@@ -96,6 +97,9 @@
   - 通过 `git` 历史快照 `e7d0f8d (2026-03-24 18:58:23 +0800)` 直接重跑旧脚本；
   - `lgbm` 复刻结果为 `full_excess_total_return = 910.30%`，`full_excess_sharpe = 2.398`
   - 这与旧日志里的 `887.75% / 2.300` 已属于同一量级，说明旧高收益在旧系统里是真实结果，而不是凭空写出来的假数字。
+- 但 `2026-03-29` 的受控 ablation 又进一步说明：
+  - “旧系统里能稳定复刻出 9x 收益”这件事本身是真实的；
+  - 但它的主因是 `next_open` 训练边界缺少 label-safe gap，而不是可直接继承到今天执行端的真实 alpha。
 - 但在用户刚刚明确的“收益优先非降级”目标下，`expanded_v24 + v250` 不再能被直接表述成终局正确答案；
   它更准确的身份是：
   - 当前代码口径下的防守型 live 方案

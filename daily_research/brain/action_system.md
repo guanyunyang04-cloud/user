@@ -50,6 +50,12 @@
 - 默认状态集成：
   - 以旧高收益快照后端默认参数为准，不再由当前 wrapper 注入 `focus-state` 集成权重
 
+### 3.1 执行真实性红线
+- `2026-03-29` 的隔离 worktree ablation 已确认：
+  - 只要在当前代码里临时关闭 `ml_alpha.py::_label_lookahead_bars()` 的 label-safe gap，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从 `151.70% / 0.882` 回跳到 `958.89% / 2.447`
+- 这说明旧快照高收益的主因不是更好的因子，而是 `next_open` 训练边界上的 `label leakage / look-ahead bias`
+- 因此当前 wrapper 虽仍指向旧快照后端，但不得再把旧快照收益直接当成“可信实盘 alpha”；后续若继续沿用、回滚或切换，必须先经过用户确认与桥接验证
+
 ## 4. 每日标准流程
 ### 第 1 步：更新高流动性股票池
 ```bash

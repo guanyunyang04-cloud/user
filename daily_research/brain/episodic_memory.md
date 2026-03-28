@@ -8028,3 +8028,56 @@ position,000001.SZ,1200,12.38,
 1. 以 `2026-03-27` 为最新数据日重新回测后，当前执行端实际运行的旧快照后端，仍然是当前可确认的最高收益方案。
 2. 它不只是高于当前 live 默认 `expanded_v24 + v250`，也明显高于当前代码侧最强静态进攻腿、动态控制器，以及 `legacy_v7` 的 no-auto-trim probe。
 3. 因此截至 `2026-03-28`，把执行端保持在 `historical_snapshot_e7d0f8d (ma50 baseline, lgbm)`，与用户“我要的就是最高收益”的目标一致。
+
+## 2026-03-29 旧快照高收益因果链钉死：`label_gap_off` 受控 ablation
+### 本轮目标
+- 不再停留在“旧快照收益很高”或“当前代码收益明显更低”的表面现象。
+- 用单开关 ablation 直接验证：
+  - 旧快照 `958.89% / 2.447`
+  - 到底是来自更强 alpha，还是来自 `next_open` 训练边界上的口径问题。
+
+### 本轮动作
+- 先做代码考古，确认：
+  - 当前与快照 `features.py` 完全一致；
+  - 当前与快照 `build_ml_target()` 也一致；
+  - 关键差异落在 `daily_research/baseline/ml_alpha.py` 的训练边界：
+    - 快照版直接 `train_end_idx = as_of_idx - 1` / `block_start - 1`
+    - 当前版新增 `_label_lookahead_bars()`，对 `next_open` 强制回退 `horizon + 1`
+- 新建隔离 worktree：
+  - `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off`
+  - branch: `ablation_labelgap_off_20260328`
+- 只做一个改动：
+  - 在隔离 worktree 里把 `ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`
+- 然后重跑与当前 probe 同口径的命令：
+  - `compare_ml_model_families.py`
+  - `--model-families lgbm`
+  - `--market-feature-profile legacy_v7`
+  - `--no-auto-trim-history`
+  - `--experiment-tag advanced_ml_model_family_compare_20260328_legacy_v7_labelgap_off_ablation`
+
+### 结果
+- 当前代码正常 probe：
+  - `advanced_ml_model_family_compare_20260328_legacy_v7_lgbm_noautotrim_probe`
+  - `full_excess_total_return = 151.70%`
+  - `full_excess_sharpe = 0.882`
+- 隔离 worktree `label_gap_off` ablation：
+  - `advanced_ml_model_family_compare_20260328_legacy_v7_labelgap_off_ablation`
+  - `full_excess_total_return = 958.89%`
+  - `full_excess_sharpe = 2.447`
+- 该 ablation 与旧快照 livecheck 的 full 指标完全对齐：
+  - `958.89% / 2.447`
+- 训练日志也同步回到旧快照边界：
+  - 第一段由当前代码的 `predict_start = 2024-02-06`
+  - 回跳为旧快照式的 `predict_start = 2024-01-30`
+
+### 本轮结论
+1. 旧快照 `958.89%` 的主因已经被单开关实验证实：
+   - 不是 `features.py` 更强；
+   - 不是 `build_ml_target()` 公式不同；
+   - 而是 `next_open` 训练边界缺少 label-safe gap，存在严重 `label leakage / look-ahead bias`。
+2. 这意味着“旧快照高收益”虽然可复刻，但它不是当前执行端可以直接继承的可信 alpha。
+3. 当前 wrapper 运行时虽仍指向旧快照后端，但研究判断必须从“最高收益主线”切换为“已识别出真实性问题的历史 artifact”。
+4. 这轮也把一个可复用方法沉淀出来：
+   - 先做 apples-to-apples 口径对齐
+   - 再用隔离 worktree 做 single-switch ablation
+   - 如果单开关能精确复现旧收益，就先把旧收益视为 artifact 候选，再决定后续执行切回或桥接验证

@@ -115,6 +115,29 @@
   - `episodic_memory.md`
 - 若主脑与分脑的判断出现冲突，以主脑边界和当前分脑实际落盘状态一起校准，不允许跳过 brain 直接盲扫 body
 
+### 3.4 决策后遇阻的因果隔离流程
+- 如果 brain 已给出方向，但代码结果、回测结论或口径解释出现明显矛盾，不要立刻扩大战线；先把问题收口成一个最小因果问题。
+- 先拆成两层：
+  - apples-to-apples 的同口径差异
+  - apples-to-oranges 的策略/配置差异
+- 优先固定不变量：
+  - `features.py`
+  - `build_ml_target()`
+  - 股票池
+  - 回测命令口径
+  - 输出窗口
+- 然后只改一个机制，放进隔离 worktree 做 single-switch ablation，不在主工作区直接混改。
+- 对 `next_open` / walk-forward / 滚动训练问题，优先检查：
+  - label-safe gap
+  - train_end 与 predict_start 的边界
+  - 是否存在 look-ahead bias / label leakage
+  - 股票池或状态标签是否跨窗泄漏
+- 如果 single-switch ablation 能精确复现旧高收益，应先把旧收益视为 artifact 候选，而不是继续按“更高收益”晋级。
+- 困难解决后，默认回写顺序为：
+  - 可复用方法写 `procedural_memory.md`
+  - 本轮证据链写 `episodic_memory.md`
+  - 若结论推翻当前默认判断，再同步 `working_memory.md` 与 `action_system.md`
+
 ## 4. Gemini 协同技能
 ### 4.1 常驻前台窗口
 - Gemini 前台协同入口：
