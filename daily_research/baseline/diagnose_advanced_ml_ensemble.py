@@ -25,6 +25,14 @@ from daily_research.baseline.advanced_ml_runtime import (
     resolve_history_window,
 )
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import (
+    load_stock_list_from_file,
+    parse_csv_list,
+    parse_horizon_weights,
+    parse_int_tuple,
+    parse_named_windows,
+    parse_stock_list,
+)
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_industry_map_from_tq, load_style_map_from_tq, load_universe_from_tq
 from daily_research.baseline.ml_alpha import (
@@ -116,75 +124,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     return parser.parse_args()
-
-
-def _parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
-
-
-def _parse_stocks(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
-
-
-def _load_stocks_from_file(path: str | None) -> list[str]:
-    if not path:
-        return []
-    file_path = Path(path)
-    if not file_path.exists():
-        raise FileNotFoundError(f"stocks file not found: {path}")
-    text = file_path.read_text(encoding="utf-8-sig").strip()
-    if not text:
-        return []
-    tokens: list[str] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if "," in line:
-            tokens.extend(item.strip() for item in line.split(",") if item.strip())
-        else:
-            tokens.append(line)
-    return [token.upper() for token in tokens]
-
-
-def _parse_int_tuple(raw: str | None, fallback: int) -> tuple[int, ...]:
-    if not raw:
-        return (int(fallback),)
-    values = tuple(int(item.strip()) for item in raw.split(",") if item.strip())
-    return values or (int(fallback),)
-
-
-def _parse_horizon_weights(raw: str | None) -> dict[int, float]:
-    if not raw:
-        return {}
-    out: dict[int, float] = {}
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        horizon_raw, weight_raw = item.split(":", 1)
-        out[int(horizon_raw.strip())] = float(weight_raw.strip())
-    return out
-
-
-def _parse_named_windows(raw: str | None) -> list[tuple[str, str, str]]:
-    if not raw:
-        return []
-    windows: list[tuple[str, str, str]] = []
-    for chunk in raw.split(","):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        parts = chunk.split(":")
-        if len(parts) != 3:
-            raise ValueError(f"Invalid window spec: {chunk}")
-        name, start, end = parts
-        windows.append((name.strip(), start.strip(), end.strip()))
-    return windows
 
 
 def _parse_float_range(raw: str | None) -> tuple[float, float] | None:
@@ -812,15 +751,15 @@ def main() -> None:
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
-        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
         enable_industry_cap=args.industry_cap,
         max_industry_weight=args.max_industry_weight,
     )
 
-    stocks = _parse_stocks(args.stocks)
-    file_stocks = _load_stocks_from_file(args.stocks_file)
+    stocks = parse_stock_list(args.stocks)
+    file_stocks = load_stock_list_from_file(args.stocks_file)
     if stocks or file_stocks:
         stocks = list(dict.fromkeys(stocks + file_stocks))
     if stocks:
@@ -828,8 +767,8 @@ def main() -> None:
 
     ml_cfg = MLAplhaConfig(
         target_horizon=args.ml_target_horizon,
-        target_horizons=_parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
-        target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        target_horizons=parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
+        target_horizon_weights=parse_horizon_weights(args.ml_horizon_weights),
         enhanced_profile=args.enhanced_profile,
         train_window_days=args.ml_train_window_days,
         retrain_every_days=args.ml_retrain_every_days,
@@ -854,7 +793,7 @@ def main() -> None:
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    windows = _parse_named_windows(args.windows)
+    windows = parse_named_windows(args.windows)
     weak_window_name = _resolve_weak_window_name(windows)
     focus_state = str(args.focus_state).strip().lower() or DEFAULT_FOCUS_STATE
     base_weights = {

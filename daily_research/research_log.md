@@ -7,13 +7,14 @@
   - `baseline / advanced_ml`
   - `execution`
   - `deep_alpha`
-- 当前执行端冻结为：`advanced_ml + liquid500 + next_open`
-- `deep_alpha` 是研究主线，但尚未晋级执行端。
+- 当前执行端冻结为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- `deep_alpha` 仍是正式研究主线之一，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
 
 ## 阅读说明
 - 本文件只保留按时间顺序排列的实验记录、结果与结论。
 - 当前状态与使用入口见 `README.md`。
-- 当前主线、优先级与停止规则见 `daily_research_plan.md`。
+- 当前默认决策、升级 shortlist、优先级与停止规则见 `daily_research_plan.md`。
+- 当前运行基线与解释器口径见 `runtime_environment.md`。
 
 ## 阶段索引
 - `2026-03-17 ~ 2026-03-18`
@@ -22,8 +23,12 @@
   - `advanced_ml` 主线形成，并接入执行端
 - `2026-03-19 ~ 2026-03-22`
   - `deep_alpha` 从烟测走向正式研究框架
-- `2026-03-22`
-  - 项目治理：入口去重、Git 纳管、归档规则、文档重整
+- `2026-03-22 ~ 2026-03-24`
+  - 项目治理：入口去重、Git 纳管、归档规则、文档分工、执行口径固化
+- `2026-03-25`
+  - 坏市场专项目标澄清与首批防守候选收口
+- `2026-03-26 ~ 2026-03-28`
+  - `advanced_ml (ma50 baseline, lgbm)` 状态专属候选、正式参数矩阵与长窗口 pair revalidation 收敛
 
 ## 阶段实验记录模板
 - 日期：
@@ -7155,5 +7160,92 @@ position,000001.SZ,1200,12.38,
    - `504 / 21 / 520`
    - `504 / 5 / 260`
    - `378 / 21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 长窗口 pair revalidation
+### 本轮目标
+- 对上一轮已经收敛出的三组参数优先级做长窗口正式复验，不再做新的参数盲扫。
+- 本轮只验证三组显式参数：
+  - `504 / 21 / 520`
+  - `504 / 5 / 260`
+  - `378 / 21 / 520`
+
+### 先说明本轮第一版 `r1`
+- 2026-03-28 先跑出的 `advanced_ml_pair_revalidation_20260328_formal_r1` 不作为长窗口正式结论引用。
+- 原因是当时仍带了 `--auto-trim-history`，实际历史窗口被自动裁回：
+  - `20230309 -> 20260327`
+- 它可以作为“这三组参数在当前短样本上的快速对照”，但不是这轮要的长窗口 pair revalidation。
+- 本轮正式口径只认：
+  - `advanced_ml_pair_revalidation_20260328_formal_r2`
+
+### 本轮动作
+- 脚本继续使用：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 为了精确复验三组指定参数，脚本新增：
+  - `--explicit-configs`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_pair_revalidation_20260328_formal_r2`
+- 最新数据日期：
+  - `latest_data_date = 2026-03-27`
+- 本轮正式历史窗口：
+  - `20190101 -> 20260327`
+- 固定候选仍只看三组严格对照：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 命名继续统一：
+  - `weak_window_20250905_20260319`
+
+### 结果一：长窗口复验后，只有 `504 / 21 / 520` 真正站住
+- `base_global`
+  - `378 / 21 / 520`: `full_excess_sharpe = -0.111`, `weak_window_20250905_20260319_excess_sharpe = -0.581`
+  - `504 / 5 / 260`: `0.375 / -0.544`
+  - `504 / 21 / 520`: `0.016 / -0.656`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `378 / 21 / 520`: `0.012 / -0.876`
+  - `504 / 5 / 260`: `0.550 / -0.575`
+  - `504 / 21 / 520`: `0.860 / 0.819`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `378 / 21 / 520`: `0.100 / -0.798`
+  - `504 / 5 / 260`: `0.492 / -0.287`
+  - `504 / 21 / 520`: `0.786 / 0.992`
+- 这说明：
+  - 在长窗口 pair revalidation 里，`504 / 21 / 520` 是唯一能让两组状态专属候选同时保持“全样本强 + 弱窗口为正”的参数；
+  - `504 / 5 / 260` 和 `378 / 21 / 520` 在长窗口下都没有守住弱窗口。
+
+### 结果二：两组状态专属候选都通过了长窗口复验，但侧重点不同
+- `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+  - `full_excess_sharpe = 0.786`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.968`
+- 这说明：
+  - `ml25_none20_v255` 更偏全样本进攻；
+  - `ml25_none25_v250` 更偏弱窗口和 `trend_up_low_vol` 防守；
+  - 两者都已经明显优于 `base_global`。
+
+### 本轮结论
+1. 长窗口 pair revalidation 已经把参数层面收敛到一个很清楚的结论：
+   - `504 / 21 / 520`
+2. `504 / 5 / 260` 没有通过长窗口复验，不再适合作为优先晋级参数。
+3. `378 / 21 / 520` 也没有通过长窗口复验，不再适合作为优先晋级参数。
+4. 当前真正通过长窗口正式复验、值得进入执行端升级 shortlist 的，只剩两组：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+5. 若按弱窗口稳健性排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+6. 若按全样本收益排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+
+### 当前决策
+1. 执行端默认值暂不自动切换，但“是否升级”的判断门槛已经满足。
+2. 后续若继续推进，不再需要回头做这三组参数的重复复验。
+3. 下一步应直接聚焦两组最终候选的 head-to-head：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
 4. 后续文档与口头结论继续统一使用：
    - `weak_window_20250905_20260319`

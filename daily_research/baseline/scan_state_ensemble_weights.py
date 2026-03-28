@@ -14,6 +14,12 @@ import pandas as pd
 
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import (
+    parse_csv_list,
+    parse_horizon_weights,
+    parse_int_tuple,
+    parse_stock_list,
+)
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
     load_daily_from_csv,
@@ -67,38 +73,6 @@ def parse_args():
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
     return parser.parse_args()
-
-
-def _parse_stocks(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
-
-
-def _parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
-
-
-def _parse_int_tuple(raw: str | None, fallback: int) -> tuple[int, ...]:
-    if not raw:
-        return (int(fallback),)
-    values = tuple(int(item.strip()) for item in raw.split(",") if item.strip())
-    return values or (int(fallback),)
-
-
-def _parse_horizon_weights(raw: str | None) -> dict[int, float]:
-    if not raw:
-        return {}
-    out: dict[int, float] = {}
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        horizon_raw, weight_raw = item.split(":", 1)
-        out[int(horizon_raw.strip())] = float(weight_raw.strip())
-    return out
 
 
 def _candidate_profiles() -> dict[str, dict[str, dict[str, float]]]:
@@ -159,20 +133,20 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
-        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=not args.no_style_cap,
         max_style_weight=args.max_style_weight,
         enable_industry_cap=args.industry_cap,
         max_industry_weight=args.max_industry_weight,
     )
-    stocks = _parse_stocks(args.stocks)
+    stocks = parse_stock_list(args.stocks)
     if stocks:
         cfg.universe = stocks
 
     ml_cfg_base = MLAplhaConfig(
         target_horizon=args.ml_target_horizon,
-        target_horizons=_parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
-        target_horizon_weights=_parse_horizon_weights(args.ml_horizon_weights),
+        target_horizons=parse_int_tuple(args.ml_target_horizons, args.ml_target_horizon),
+        target_horizon_weights=parse_horizon_weights(args.ml_horizon_weights),
         enhanced_profile=args.enhanced_profile,
         train_window_days=args.ml_train_window_days,
         retrain_every_days=args.ml_retrain_every_days,

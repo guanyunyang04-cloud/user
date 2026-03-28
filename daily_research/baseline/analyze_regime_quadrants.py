@@ -11,6 +11,7 @@ from pathlib import Path
 
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import parse_csv_list
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
     load_daily_from_tq,
@@ -55,10 +56,6 @@ def _apply_rebalance_frequency(frame, rebalance_freq: str):
     return frame.loc[frame.index[::step]].reindex(frame.index).ffill().fillna(0.0)
 
 
-def _parse_csv_list(raw: str):
-    return [item.strip().lower() for item in str(raw).split(",") if item.strip()]
-
-
 def main():
     args = parse_args()
     cfg = ResearchConfig(
@@ -71,7 +68,7 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
-        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=args.style_cap,
         max_style_weight=args.max_style_weight,
     )

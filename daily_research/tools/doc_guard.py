@@ -9,6 +9,7 @@ from typing import Iterable
 
 DEFAULT_DOCS = [
     "README.md",
+    "PROJECT_REVIEW.md",
     "daily_research/README.md",
     "daily_research/execution/README.md",
     "daily_research/runtime_environment.md",
@@ -22,6 +23,7 @@ DEFAULT_DOCS = [
 class DocRule:
     max_lines: int | None = None
     forbidden_heading_patterns: tuple[tuple[str, str], ...] = ()
+    enforce_non_decreasing_dated_headings: bool = False
 
 
 DOC_RULES = {
@@ -31,10 +33,16 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "root README should not grow into a dated change log"),
         ),
     ),
-    "daily_research/README.md": DocRule(
-        max_lines=220,
+    "PROJECT_REVIEW.md": DocRule(
+        max_lines=80,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research README should only describe the current state and entrypoints"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "project review should stay an archive pointer instead of becoming a live dated log"),
+        ),
+    ),
+    "daily_research/README.md": DocRule(
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research README should stay a single current-state document instead of a dated log"),
         ),
     ),
     "daily_research/execution/README.md": DocRule(
@@ -44,16 +52,19 @@ DOC_RULES = {
         ),
     ),
     "daily_research/runtime_environment.md": DocRule(
-        max_lines=180,
+        max_lines=140,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "runtime_environment should stay focused on the current environment baseline"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "runtime_environment should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
     "daily_research/daily_research_plan.md": DocRule(
-        max_lines=220,
+        max_lines=240,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research_plan should keep only current priorities and stop rules"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research_plan should stay a current-decision document instead of becoming a dated log"),
         ),
+    ),
+    "daily_research/research_log.md": DocRule(
+        enforce_non_decreasing_dated_headings=True,
     ),
     "t0_project/README.md": DocRule(
         max_lines=220,
@@ -103,6 +114,16 @@ def _matching_lines(lines: Iterable[str], pattern: str) -> list[str]:
     return [line for line in lines if regex.search(line)]
 
 
+def _dated_headings(lines: Iterable[str]) -> list[tuple[int, str, str]]:
+    regex = re.compile(r"^##\s+(20\d{2}-\d{2}-\d{2})\b")
+    headings: list[tuple[int, str, str]] = []
+    for lineno, line in enumerate(lines, start=1):
+        match = regex.search(line)
+        if match:
+            headings.append((lineno, match.group(1), line))
+    return headings
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     has_issue = False
     for raw in args.files:
@@ -142,6 +163,21 @@ def cmd_check(args: argparse.Namespace) -> int:
                     has_issue = True
                     for line in matches[: args.show_lines]:
                         print(f"    ! {line}")
+
+            if rule.enforce_non_decreasing_dated_headings:
+                headings = _dated_headings(lines)
+                out_of_order_pairs: list[tuple[tuple[int, str, str], tuple[int, str, str]]] = []
+                for previous, current in zip(headings, headings[1:]):
+                    if current[1] < previous[1]:
+                        out_of_order_pairs.append((previous, current))
+
+                print(f"  dated_heading_order_issues={len(out_of_order_pairs)}")
+                if out_of_order_pairs:
+                    has_issue = True
+                    for previous, current in out_of_order_pairs[: args.show_lines]:
+                        print(f"    ! {path}:{current[0]} date {current[1]} appears after later date {previous[1]}")
+                        print(f"      prev={previous[2]}")
+                        print(f"      curr={current[2]}")
 
     return 1 if has_issue else 0
 

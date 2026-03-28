@@ -29,8 +29,11 @@
 
 1. 先保留热区最近一段时间的结果，避免打断正在复盘的研究。
 2. 只归档“超出保留天数且超出最近保留数量”的项目。
-3. `cache/` 根目录下的 `industry_map_tq.csv`、`style_map_tq.csv` 这类基础映射文件不参与默认归档。
-4. `deep_alpha/states`、`rolling_pools`、`liquidity_buckets` 这类体积较小、复用频繁的控制缓存默认不归档，后续如体积异常再单独加规则。
+3. 若某条规则配置了 `max_hot_size_mb`，则：
+   - `keep_recent_count` 与 `protect_globs` 仍然是硬保护；
+   - `keep_recent_days` 会退化为软偏好，必要时会为了把热区压回预算而归档较旧的“近期文件”。
+4. `cache/` 根目录下的 `industry_map_tq.csv`、`style_map_tq.csv` 这类基础映射文件不参与默认归档。
+5. `deep_alpha/states`、`rolling_pools`、`liquidity_buckets` 这类体积较小、复用频繁的控制缓存默认不归档，后续如体积异常再单独加规则。
 
 ## 推荐工作流
 

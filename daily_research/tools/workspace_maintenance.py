@@ -33,6 +33,7 @@ REPORT_ALERT_THRESHOLDS = {
     "t0_project/ppo_tdx_tensorboard": 256 * 1024**2,
 }
 ARCHIVE_MONITORED_SOURCES = ("daily_research/cache", "daily_research/output")
+HOTSPOT_PREVIEW_LIMIT = 5
 
 TARGET_SPECS = {
     "pycache": {
@@ -196,6 +197,116 @@ def serialize_path_stat(root: Path, item: PathStat) -> dict[str, Any]:
     }
 
 
+def clone_serialized_entry(item: dict[str, Any]) -> dict[str, Any]:
+    cloned = dict(item)
+    if "keep_reasons" in cloned:
+        cloned["keep_reasons"] = list(cloned["keep_reasons"])
+    if "candidate_reasons" in cloned:
+        cloned["candidate_reasons"] = list(cloned["candidate_reasons"])
+    return cloned
+
+
+def resolve_max_hot_size_bytes(rule: dict[str, Any]) -> int | None:
+    raw = rule.get("max_hot_size_mb")
+    if raw in {None, ""}:
+        return None
+    value = float(raw)
+    if value <= 0:
+        return None
+    return int(value * 1024**2)
+
+
+def summarize_top_entries(root: Path, entries: list[PathStat], limit: int = HOTSPOT_PREVIEW_LIMIT) -> list[dict[str, Any]]:
+    ranked = sorted(entries, key=lambda item: (item.size_bytes, item.latest_mtime_ts, item.path.name), reverse=True)
+    return [serialize_path_stat(root, item) for item in ranked[:limit]]
+
+
+def classify_archive_entries(
+    root: Path,
+    entries: list[PathStat],
+    *,
+    keep_recent_count: int,
+    cutoff: datetime | None,
+    protect_globs: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    hard_kept: list[dict[str, Any]] = []
+    soft_kept: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+
+    for index, item in enumerate(entries):
+        hard_reasons: list[str] = []
+        soft_reasons: list[str] = []
+        if index < keep_recent_count:
+            hard_reasons.append("recent_count")
+        if matches_any_glob(item.path.name, protect_globs):
+            hard_reasons.append("protect_glob")
+        if cutoff is not None and datetime.fromtimestamp(item.latest_mtime_ts) >= cutoff:
+            soft_reasons.append("recent_days")
+
+        serialized = serialize_path_stat(root, item)
+        reasons = hard_reasons + soft_reasons
+        if reasons:
+            serialized["keep_reasons"] = reasons
+        if hard_reasons:
+            hard_kept.append(serialized)
+        elif soft_reasons:
+            soft_kept.append(serialized)
+        else:
+            candidates.append(serialized)
+
+    return hard_kept, soft_kept, candidates
+
+
+def apply_hot_budget(
+    *,
+    soft_kept: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    max_hot_size_bytes: int | None,
+    total_source_size_bytes: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    base_candidate_bytes = sum(int(item["size_bytes"]) for item in candidates)
+    hot_size_after_aged_candidates = max(total_source_size_bytes - base_candidate_bytes, 0)
+    budget = {
+        "enabled": max_hot_size_bytes is not None,
+        "max_hot_size_bytes": int(max_hot_size_bytes or 0),
+        "hot_size_after_aged_candidates_bytes": hot_size_after_aged_candidates,
+        "hot_size_after_plan_bytes": hot_size_after_aged_candidates,
+        "promoted_recent_count": 0,
+        "promoted_recent_size_bytes": 0,
+        "budget_unmet": False,
+        "budget_shortfall_bytes": 0,
+    }
+    if max_hot_size_bytes is None:
+        return list(soft_kept), list(candidates), budget
+
+    if hot_size_after_aged_candidates <= max_hot_size_bytes:
+        return list(soft_kept), list(candidates), budget
+
+    promoted_paths: set[str] = set()
+    promoted: list[dict[str, Any]] = []
+    promoted_size = 0
+    remaining_hot = hot_size_after_aged_candidates
+    for item in sorted(soft_kept, key=lambda entry: (entry["latest_mtime"], entry["name"])):
+        if remaining_hot <= max_hot_size_bytes:
+            break
+        promoted_item = clone_serialized_entry(item)
+        promoted_item.pop("keep_reasons", None)
+        promoted_item["candidate_reasons"] = ["budget_trimmed_recent_days"]
+        promoted.append(promoted_item)
+        promoted_paths.add(promoted_item["path"])
+        promoted_size += int(promoted_item["size_bytes"])
+        remaining_hot -= int(promoted_item["size_bytes"])
+
+    kept_soft = [item for item in soft_kept if item["path"] not in promoted_paths]
+    final_candidates = list(candidates) + promoted
+    budget["hot_size_after_plan_bytes"] = max(remaining_hot, 0)
+    budget["promoted_recent_count"] = len(promoted)
+    budget["promoted_recent_size_bytes"] = promoted_size
+    budget["budget_unmet"] = remaining_hot > max_hot_size_bytes
+    budget["budget_shortfall_bytes"] = max(remaining_hot - max_hot_size_bytes, 0)
+    return kept_soft, final_candidates, budget
+
+
 def build_archive_plan(root: Path, policy_path: Path, selected_rules: Iterable[str]) -> dict[str, Any]:
     policy = load_archive_policy(policy_path)
     selected = {name for name in selected_rules if name}
@@ -213,25 +324,23 @@ def build_archive_plan(root: Path, policy_path: Path, selected_rules: Iterable[s
         keep_recent_count = int(rule.get("keep_recent_count", 0))
         keep_recent_days = int(rule.get("keep_recent_days", 0))
         protect_globs = list(rule.get("protect_globs", []))
+        max_hot_size_bytes = resolve_max_hot_size_bytes(rule)
         cutoff = now - timedelta(days=keep_recent_days) if keep_recent_days > 0 else None
 
-        kept = []
-        candidates = []
-        for index, item in enumerate(entries):
-            reasons = []
-            if index < keep_recent_count:
-                reasons.append("recent_count")
-            if cutoff is not None and datetime.fromtimestamp(item.latest_mtime_ts) >= cutoff:
-                reasons.append("recent_days")
-            if matches_any_glob(item.path.name, protect_globs):
-                reasons.append("protect_glob")
-
-            serialized = serialize_path_stat(root, item)
-            if reasons:
-                serialized["keep_reasons"] = reasons
-                kept.append(serialized)
-            else:
-                candidates.append(serialized)
+        hard_kept, soft_kept, candidates = classify_archive_entries(
+            root,
+            entries,
+            keep_recent_count=keep_recent_count,
+            cutoff=cutoff,
+            protect_globs=protect_globs,
+        )
+        kept_soft, candidates, budget = apply_hot_budget(
+            soft_kept=soft_kept,
+            candidates=candidates,
+            max_hot_size_bytes=max_hot_size_bytes,
+            total_source_size_bytes=sum(item.size_bytes for item in entries),
+        )
+        kept = hard_kept + kept_soft
 
         candidate_count += len(candidates)
         candidate_size_bytes += sum(item["size_bytes"] for item in candidates)
@@ -245,9 +354,15 @@ def build_archive_plan(root: Path, policy_path: Path, selected_rules: Iterable[s
                 "keep_recent_count": keep_recent_count,
                 "keep_recent_days": keep_recent_days,
                 "protect_globs": protect_globs,
+                "source_exists": source.exists(),
+                "source_size_bytes": sum(item.size_bytes for item in entries),
+                "source_entry_count": len(entries),
+                "max_hot_size_bytes": int(max_hot_size_bytes or 0),
                 "kept_count": len(kept),
                 "candidate_count": len(candidates),
                 "candidate_size_bytes": sum(item["size_bytes"] for item in candidates),
+                "top_entries": summarize_top_entries(root, entries),
+                "budget": budget,
                 "kept": kept,
                 "candidates": candidates,
             }
@@ -284,7 +399,29 @@ def print_archive_plan(plan: dict[str, Any], limit: int) -> None:
         print(f"  source: {rule['source']}")
         print(f"  archive: {rule['archive_subdir']}")
         print(f"  keep_recent_count={rule['keep_recent_count']}, keep_recent_days={rule['keep_recent_days']}")
+        print(f"  source_size: {format_bytes(rule['source_size_bytes'])} across {rule['source_entry_count']} item(s)")
+        if int(rule.get("max_hot_size_bytes", 0)) > 0:
+            budget = rule["budget"]
+            print(
+                f"  max_hot_size: {format_bytes(rule['max_hot_size_bytes'])}, "
+                f"hot_after_plan={format_bytes(budget['hot_size_after_plan_bytes'])}"
+            )
+            if budget["promoted_recent_count"]:
+                print(
+                    f"  budget_trimmed_recent_days: {budget['promoted_recent_count']} "
+                    f"({format_bytes(budget['promoted_recent_size_bytes'])})"
+                )
+            if budget["budget_unmet"]:
+                print(f"  budget_shortfall: {format_bytes(budget['budget_shortfall_bytes'])}")
         print(f"  candidates: {rule['candidate_count']} ({format_bytes(rule['candidate_size_bytes'])})")
+        if rule["top_entries"]:
+            print("  top_entries:")
+            for item in rule["top_entries"]:
+                kind = "dir " if item["is_dir"] else "file"
+                print(
+                    f"    - [{kind}] {item['path']} "
+                    f"({format_bytes(item['size_bytes'])}, mtime={item['latest_mtime']})"
+                )
         if not rule["candidates"]:
             continue
         preview = rule["candidates"] if limit == 0 else rule["candidates"][:limit]
@@ -316,8 +453,12 @@ def build_archive_status(root: Path) -> dict[str, Any]:
                 "name": rule["name"],
                 "source": rule["source"],
                 "archive_subdir": rule["archive_subdir"],
+                "source_size_bytes": rule["source_size_bytes"],
                 "candidate_count": rule["candidate_count"],
                 "candidate_size_bytes": rule["candidate_size_bytes"],
+                "max_hot_size_bytes": rule["max_hot_size_bytes"],
+                "top_entries": rule["top_entries"],
+                "budget": rule["budget"],
             }
             for rule in plan["rules"]
         ],
@@ -331,12 +472,25 @@ def build_report_alerts(report: dict[str, Any]) -> list[dict[str, str]]:
         for item in report["directory_sizes"]
         if item["exists"]
     }
+    archive_status = report["archive_status"]
 
     for raw_path, threshold_bytes in REPORT_ALERT_THRESHOLDS.items():
         item = directory_index.get(raw_path)
         if not item:
             continue
-        if int(item["size_bytes"]) >= threshold_bytes:
+        effective_threshold_bytes = int(threshold_bytes)
+        if archive_status.get("available"):
+            budgeted_rules = [
+                rule
+                for rule in archive_status["rules"]
+                if str(rule["source"]).startswith(raw_path) and int(rule.get("max_hot_size_bytes", 0)) > 0
+            ]
+            if budgeted_rules:
+                effective_threshold_bytes = max(
+                    effective_threshold_bytes,
+                    sum(int(rule["max_hot_size_bytes"]) for rule in budgeted_rules),
+                )
+        if int(item["size_bytes"]) >= effective_threshold_bytes:
             alerts.append(
                 {
                     "level": "warn",
@@ -344,7 +498,7 @@ def build_report_alerts(report: dict[str, Any]) -> list[dict[str, str]]:
                     "path": raw_path,
                     "message": (
                         f"{raw_path} has grown to {format_bytes(int(item['size_bytes']))}, "
-                        f"which exceeds the maintenance threshold {format_bytes(threshold_bytes)}."
+                        f"which exceeds the maintenance threshold {format_bytes(effective_threshold_bytes)}."
                     ),
                 }
             )
@@ -362,28 +516,86 @@ def build_report_alerts(report: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
 
-    archive_status = report["archive_status"]
+    if archive_status.get("available"):
+        for rule in archive_status["rules"]:
+            budget = rule.get("budget", {})
+            if budget.get("budget_unmet"):
+                alerts.append(
+                    {
+                        "level": "warn",
+                        "code": "archive_budget_unmet",
+                        "path": rule["source"],
+                        "message": (
+                            f"{rule['source']} still exceeds its configured hot budget by "
+                            f"{format_bytes(int(budget['budget_shortfall_bytes']))}. "
+                            "Lower keep_recent_count or raise the budget if the latest hot set is intentionally larger."
+                        ),
+                    }
+                )
     if archive_status.get("available") and int(archive_status["candidate_count"]) == 0:
-        oversized_sources = [
-            raw_path
-            for raw_path in ARCHIVE_MONITORED_SOURCES
-            if int(directory_index.get(raw_path, {}).get("size_bytes", 0))
-            >= int(REPORT_ALERT_THRESHOLDS.get(raw_path, 0))
-        ]
-        if oversized_sources:
+        unresolved_sources: list[str] = []
+        for raw_path in ARCHIVE_MONITORED_SOURCES:
+            threshold_bytes = int(REPORT_ALERT_THRESHOLDS.get(raw_path, 0))
+            if int(directory_index.get(raw_path, {}).get("size_bytes", 0)) < threshold_bytes:
+                continue
+
+            related_rules = [
+                rule
+                for rule in archive_status["rules"]
+                if str(rule["source"]).startswith(raw_path)
+            ]
+            if not related_rules:
+                unresolved_sources.append(raw_path)
+                continue
+
+            has_budget_unmet = any(bool(rule.get("budget", {}).get("budget_unmet")) for rule in related_rules)
+            has_pending_candidates = any(int(rule.get("candidate_count", 0)) > 0 for rule in related_rules)
+            if has_budget_unmet or has_pending_candidates:
+                unresolved_sources.append(raw_path)
+
+        if unresolved_sources:
             alerts.append(
                 {
                     "level": "warn",
                     "code": "archive_coverage_gap",
-                    "path": ",".join(oversized_sources),
+                    "path": ",".join(unresolved_sources),
                     "message": (
                         "Archive dry-run currently matches 0 candidates while active hot areas remain in "
-                        f"{', '.join(oversized_sources)}. Review recency thresholds or inspect the newest heavy artifacts manually."
+                        f"{', '.join(unresolved_sources)}. Review recency thresholds, hot-size budgets, or inspect the newest heavy artifacts manually."
                     ),
                 }
             )
 
     return alerts
+
+
+def build_report_hotspots(report: dict[str, Any]) -> list[dict[str, Any]]:
+    archive_status = report["archive_status"]
+    if not archive_status.get("available"):
+        return []
+
+    hotspots: list[dict[str, Any]] = []
+    for rule in archive_status["rules"]:
+        budget = rule.get("budget", {})
+        source_size_bytes = int(rule.get("source_size_bytes", 0))
+        if source_size_bytes <= 0:
+            continue
+        if source_size_bytes < 64 * 1024**2 and int(rule.get("candidate_count", 0)) == 0 and not budget.get("enabled"):
+            continue
+        hotspots.append(
+            {
+                "path": rule["source"],
+                "source_size_bytes": source_size_bytes,
+                "candidate_count": int(rule.get("candidate_count", 0)),
+                "candidate_size_bytes": int(rule.get("candidate_size_bytes", 0)),
+                "max_hot_size_bytes": int(rule.get("max_hot_size_bytes", 0)),
+                "hot_size_after_plan_bytes": int(budget.get("hot_size_after_plan_bytes", 0)),
+                "budget_unmet": bool(budget.get("budget_unmet")),
+                "top_entries": list(rule.get("top_entries", [])),
+            }
+        )
+    hotspots.sort(key=lambda item: item["source_size_bytes"], reverse=True)
+    return hotspots[:HOTSPOT_PREVIEW_LIMIT]
 
 
 def build_report(root: Path) -> dict:
@@ -419,6 +631,7 @@ def build_report(root: Path) -> dict:
         },
     }
     report["alerts"] = build_report_alerts(report)
+    report["hotspots"] = build_report_hotspots(report)
     return report
 
 
@@ -453,6 +666,28 @@ def print_report(report: dict) -> None:
                 f"  - rule={rule['name']} source={rule['source']} "
                 f"candidates={rule['candidate_count']} size={format_bytes(rule['candidate_size_bytes'])}"
             )
+    if report["hotspots"]:
+        print()
+        print("Hotspots:")
+        for hotspot in report["hotspots"]:
+            summary = (
+                f"  - {hotspot['path']}: {format_bytes(hotspot['source_size_bytes'])}, "
+                f"archive_candidates={hotspot['candidate_count']} ({format_bytes(hotspot['candidate_size_bytes'])})"
+            )
+            if hotspot["max_hot_size_bytes"] > 0:
+                summary += (
+                    f", hot_budget={format_bytes(hotspot['max_hot_size_bytes'])}, "
+                    f"hot_after_plan={format_bytes(hotspot['hot_size_after_plan_bytes'])}"
+                )
+            if hotspot["budget_unmet"]:
+                summary += " [budget_unmet]"
+            print(summary)
+            for item in hotspot["top_entries"]:
+                kind = "dir " if item["is_dir"] else "file"
+                print(
+                    f"    * [{kind}] {item['path']} "
+                    f"({format_bytes(item['size_bytes'])}, mtime={item['latest_mtime']})"
+                )
     if report["alerts"]:
         print()
         print("Alerts:")

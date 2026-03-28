@@ -2,7 +2,7 @@
 
 本文档记录 `daily_research` 当前默认使用的运行环境，作为后续研究、执行与维护时的统一调用口径。
 
-快照时间：`2026-03-24`  
+快照时间：`2026-03-28`  
 时区：`Asia/Shanghai`  
 工作区根目录：`H:\new_tdx64\PYPlugins\user`  
 默认 Shell：`PowerShell`

@@ -16,6 +16,7 @@ import pandas as pd
 
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import parse_csv_list
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_daily_from_tq, load_style_map_from_tq, load_universe_from_tq, split_benchmark_from_universe
 from daily_research.baseline.features import compute_factors
@@ -39,10 +40,6 @@ def parse_args():
     parser.add_argument("--profiles", default="none,up_low_breakout_v1,up_dual_v1")
     parser.add_argument("--experiment-tag", default="")
     return parser.parse_args()
-
-
-def _parse_csv_list(raw: str) -> List[str]:
-    return [item.strip().lower() for item in str(raw).split(",") if item.strip()]
 
 
 def _apply_rebalance_frequency(frame: pd.DataFrame, rebalance_freq: str) -> pd.DataFrame:
@@ -108,7 +105,7 @@ def _slice_backtest(
 
 def main():
     args = parse_args()
-    profiles = _parse_csv_list(args.profiles)
+    profiles = parse_csv_list(args.profiles)
     cfg = ResearchConfig(
         start_date=args.start_date,
         end_date=args.test_end,
@@ -118,7 +115,7 @@ def main():
         rebalance_freq=args.rebalance_freq,
         enable_market_regime_filter=True,
         regime_max_annual_vol=args.regime_max_annual_vol,
-        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_style_cap=args.style_cap,
         max_style_weight=args.max_style_weight,
     )

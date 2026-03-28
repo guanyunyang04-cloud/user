@@ -17,6 +17,7 @@ import pandas as pd
 
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import parse_csv_list
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_daily_from_tq, load_style_map_from_tq, load_universe_from_tq, split_benchmark_from_universe
 from daily_research.baseline.evaluation import compute_forward_returns
@@ -59,10 +60,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def _parse_csv_list(raw: str) -> List[str]:
-    return [item.strip().lower() for item in str(raw).split(",") if item.strip()]
-
-
 def _parse_quadrant_candidates(raw: str, default_profiles: List[str], quadrants: List[str]) -> Dict[str, List[str]]:
     mapping = {quadrant: list(default_profiles) for quadrant in quadrants}
     raw = str(raw or "").strip()
@@ -77,7 +74,7 @@ def _parse_quadrant_candidates(raw: str, default_profiles: List[str], quadrants:
         quadrant_name = quadrant_name.strip().lower()
         if quadrant_name not in mapping:
             continue
-        profiles = _parse_csv_list(profile_csv)
+        profiles = parse_csv_list(profile_csv)
         if profiles:
             mapping[quadrant_name] = profiles
     return mapping
@@ -266,8 +263,8 @@ def _stitch_selected_profile_outputs(
 
 def main():
     args = parse_args()
-    profiles = _parse_csv_list(args.profiles)
-    allowed_quadrants = _parse_csv_list(args.regime_quadrants)
+    profiles = parse_csv_list(args.profiles)
+    allowed_quadrants = parse_csv_list(args.regime_quadrants)
     quadrant_candidates = _parse_quadrant_candidates(args.quadrant_candidates, profiles, allowed_quadrants)
     cfg = ResearchConfig(
         start_date=args.start_date,

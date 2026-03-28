@@ -9,13 +9,12 @@ if __package__ in {None, ""}:
 import argparse
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import List
 
 import pandas as pd
 
 from daily_research.baseline.alpha import combine_scores, combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import parse_csv_list, parse_stock_list
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
     load_daily_from_csv,
@@ -68,18 +67,6 @@ def parse_args():
         help="状态内动态权重方案，例如 up_low_breakout_v1；默认 none",
     )
     return parser.parse_args()
-
-
-def _parse_stocks(raw: str | None) -> List[str]:
-    if not raw:
-        return []
-    return [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
-
-
-def _parse_csv_list(raw: str | None) -> List[str]:
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
 
 
 def _apply_rebalance_frequency(frame: pd.DataFrame, rebalance_freq: str) -> pd.DataFrame:
@@ -136,7 +123,7 @@ def main():
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
         regime_max_annual_vol=args.regime_max_annual_vol,
-        regime_allowed_quadrants=_parse_csv_list(args.regime_quadrants),
+        regime_allowed_quadrants=parse_csv_list(args.regime_quadrants),
         enable_industry_cap=args.industry_cap,
         max_industry_weight=args.max_industry_weight,
         enable_style_cap=args.style_cap,
@@ -149,7 +136,7 @@ def main():
     if args.max_price is not None:
         cfg.max_price = float(args.max_price)
 
-    stocks = _parse_stocks(args.stocks)
+    stocks = parse_stock_list(args.stocks)
     if stocks:
         cfg.universe = stocks
 

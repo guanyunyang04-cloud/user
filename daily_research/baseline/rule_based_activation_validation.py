@@ -17,6 +17,7 @@ import pandas as pd
 
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
+from daily_research.baseline.cli_utils import parse_csv_list
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_daily_from_tq, load_style_map_from_tq, load_universe_from_tq, split_benchmark_from_universe
 from daily_research.baseline.evaluation import compute_forward_returns
@@ -47,10 +48,6 @@ def parse_args():
     parser.add_argument("--range-position-rankic-min", type=float, default=-0.06)
     parser.add_argument("--experiment-tag", default="")
     return parser.parse_args()
-
-
-def _parse_csv_list(raw: str) -> list[str]:
-    return [item.strip().lower() for item in str(raw).split(",") if item.strip()]
 
 
 def _rank_corr(x: pd.Series, y: pd.Series) -> float:
@@ -148,7 +145,7 @@ def _stitch_selected_profile_outputs(
 
 def main():
     args = parse_args()
-    allowed_quadrants = _parse_csv_list(args.regime_quadrants)
+    allowed_quadrants = parse_csv_list(args.regime_quadrants)
     cfg = ResearchConfig(
         start_date=args.start_date,
         benchmark=args.benchmark,
