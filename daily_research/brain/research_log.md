@@ -7250,3 +7250,70 @@ position,000001.SZ,1200,12.38,
    - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
 4. 后续文档与口头结论继续统一使用：
    - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` shortlist head-to-head
+### 本轮目标
+- 把已经通过长窗口正式复验的两组最终候选，收口成一次可复用、可回滚、可解释的正式 head-to-head。
+- 不再扩新候选，不再重跑已经淘汰的参数组，只比较：
+  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+  - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+
+### 本轮动作
+- 新增汇总脚本：
+  - `daily_research/baseline/render_advanced_ml_shortlist_head_to_head.py`
+- 直接读取两份正式输出：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+  - `daily_research/output/advanced_ml_pair_revalidation_20260328_formal_r2`
+- 固定精确配置：
+  - `504 / 21 / 520`
+- 正式 head-to-head 输出目录：
+  - `daily_research/output/advanced_ml_shortlist_head_to_head_20260328_formal_r1`
+- 本轮继续统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：两组最终候选的优势分工被正式固定
+- `trend_up_low_vol_ml25_none20_v255`
+  - 在两份 formal 输出里，`full_excess_sharpe` 都更强：
+    - `0.699 > 0.663`
+    - `0.860 > 0.786`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 在两份 formal 输出里，`weak_window_20250905_20260319_excess_sharpe` 都更强：
+    - `1.154 > 1.094`
+    - `0.992 > 0.819`
+  - 在两份 formal 输出里，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe` 也都更强：
+    - `1.139 > 1.076`
+    - `0.968 > 0.751`
+- 这说明：
+  - `ml25_none20_v255` 的优势继续稳定落在全样本进攻；
+  - `ml25_none25_v250` 的优势继续稳定落在弱窗口与 `trend_up_low_vol` 防守。
+
+### 结果二：辅助指标没有把结论收口成单一赢家
+- `recent_full_excess_sharpe`
+  - 在短历史 formal 矩阵里是 `v250` 更强；
+  - 在长窗口 pair revalidation 里是 `v255` 更强。
+- `full_excess_max_drawdown` 与 `recent_full_excess_max_drawdown`
+  - 也没有形成跨两份 formal 输出都偏向同一候选的单边优势。
+- `full_avg_turnover`
+  - `v255` 略优，但差距很小。
+- 这说明：
+  - 当前并不存在一个在“全样本收益、弱窗口稳健、回撤、换手”上同时形成单边优势的候选；
+  - 这轮 head-to-head 产出的不是“升级赢家”，而是“分工清楚但仍 split 的 verdict”。
+
+### 本轮结论
+1. 当前 formal head-to-head 已经完成，但没有形成单一升级赢家。
+2. 若按全样本进攻排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+3. 若按弱窗口与 `trend_up_low_vol` 防守排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+4. 按当前项目停止规则执行，结论应当是：
+   - 维持现默认值，不做口头升级。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 后续若继续推进升级，不再重开更大候选分支。
+3. 下一步若仍要推动升级，先做以下二选一：
+   - 明确写出“全样本进攻 vs 弱窗口防守”谁是当前升级优先级；
+   - 或补一项同口径的 formal comparator，再让两组最终候选分出单一赢家。
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`

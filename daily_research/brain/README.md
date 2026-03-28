@@ -93,7 +93,7 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
 - 执行端默认值暂不自动切换；
-  - 最新执行升级 shortlist 与 head-to-head 待决事项统一写在 `daily_research/brain/daily_research_plan.md`
+  - 2026-03-28 的 formal head-to-head 已完成，但当前没有单一升级赢家，相关口径统一写在 `daily_research/brain/daily_research_plan.md`
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
 - 连续状态分数保留为诊断层，不进入当前默认执行软调节逻辑。
 - `ma47/48` 左侧边界带、`v21_volume_contraction_015` 等高收益旁支保留在研究附录，不进入默认执行口径。
