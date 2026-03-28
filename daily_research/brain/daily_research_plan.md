@@ -102,14 +102,15 @@
 ### 优先级 D：把治理规则变成日常流程
 目标：
 
-- 避免 README、计划、环境基线与研究日志再次混写。
+- 避免 README、项目地图、计划、环境基线与研究日志再次混写。
 
 具体动作：
 
 1. `README.md` 只写当前状态、入口与边界。
-2. `daily_research_plan.md` 只写当前默认决策、shortlist、优先级与停止规则。
-3. `runtime_environment.md` 只写解释器、依赖与推荐调用口径。
-4. `research_log.md` 只写时间顺序实验记录，并保持日期顺序追加。
+2. `project_map.md` 只写项目背景、当前瓶颈与未来方向。
+3. `daily_research_plan.md` 只写当前默认决策、shortlist、优先级与停止规则。
+4. `runtime_environment.md` 只写解释器、依赖与推荐调用口径。
+5. `research_log.md` 只写时间顺序实验记录，并保持日期顺序追加。
 
 ## 5. 当前不推进或已降级的方向
 - `base_global` 参数优化：
@@ -152,13 +153,15 @@
 7. 当前 shortlist 的 head-to-head 若不能在同一正式口径下稳定分出胜负，则维持现默认值，不做口头升级。
 
 ## 8. 文档维护规则
-- `daily_research/README.md`
+- `daily_research/brain/README.md`
   - 只保留当前状态、主入口与文档边界。
-- `daily_research/daily_research_plan.md`
+- `daily_research/brain/project_map.md`
+  - 只保留项目背景、当前瓶颈、未来方向与协作导航。
+- `daily_research/brain/daily_research_plan.md`
   - 只保留当前默认决策、升级 shortlist、优先级与停止规则。
-- `daily_research/runtime_environment.md`
+- `daily_research/brain/runtime_environment.md`
   - 只保留解释器、依赖与推荐调用方式。
-- `daily_research/research_log.md`
+- `daily_research/brain/research_log.md`
   - 只保留时间顺序实验记录与阶段结论。
 - 根目录 `README.md`
   - 只负责工作区级治理说明。

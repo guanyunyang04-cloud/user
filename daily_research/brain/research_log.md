@@ -13,6 +13,7 @@
 ## 阅读说明
 - 本文件只保留按时间顺序排列的实验记录、结果与结论。
 - 当前状态与使用入口见 `README.md`。
+- 项目背景、当前瓶颈与未来方向见 `project_map.md`。
 - 当前默认决策、升级 shortlist、优先级与停止规则见 `daily_research_plan.md`。
 - 当前运行基线与解释器口径见 `runtime_environment.md`。
 

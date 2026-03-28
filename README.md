@@ -9,28 +9,30 @@
 
 ## 当前入口
 
-- `daily_research/README.md`
+- `daily_research/brain/`
+  - `daily_research` 的 AI 工作流脑区目录，集中承载当前状态、项目地图、计划、运行基线与研究日志。
+- `daily_research/brain/README.md`
   - `daily_research` 的当前状态、主入口与文档边界。
-- `daily_research/daily_research_plan.md`
+- `daily_research/brain/project_map.md`
+  - `daily_research` 的项目背景、当前瓶颈、未来方向与协作导航。
+- `daily_research/brain/daily_research_plan.md`
   - `daily_research` 的当前默认决策、升级 shortlist、优先级与停止规则。
-- `daily_research/runtime_environment.md`
+- `daily_research/brain/runtime_environment.md`
   - `daily_research` 的解释器、依赖与推荐调用口径。
+- `daily_research/brain/research_log.md`
+  - 按时间顺序记录实验、证据与结论。
 - `daily_research/execution/README.md`
   - 执行端日常操作手册。
-- `daily_research/research_log.md`
-  - 按时间顺序记录实验、证据与结论。
 - `t0_project/README.md`
   - `t0_project` 的边界、入口与安全约束。
-- `PROJECT_REVIEW.md`
-  - 旧的专项评估入口，现已降级为归档说明，不再承载当前状态。
 
 ## 代码与产物边界
 
 - 需要长期维护的源码与文档：
   - `daily_research/baseline/`
+  - `daily_research/brain/*.md`
   - `daily_research/deep_alpha/`
   - `daily_research/execution/`
-  - `daily_research/*.md`
   - `daily_research/tools/`
   - `t0_project/*.py`
   - `t0_project/execution/`
@@ -86,10 +88,10 @@ git status --short
 
 ## 当前维护规则
 
-- `daily_research/README.md` 只写当前状态、主入口与文档边界。
-- `daily_research/daily_research_plan.md` 只写当前默认决策、shortlist、优先级与停止规则。
-- `daily_research/runtime_environment.md` 只写解释器、依赖与运行口径。
-- `daily_research/research_log.md` 只写时间顺序实验记录。
-- `PROJECT_REVIEW.md` 不再更新“当前状态”，只保留为旧专项评估的归档入口。
+- `daily_research/brain/README.md` 只写当前状态、主入口与文档边界。
+- `daily_research/brain/project_map.md` 只写项目背景、当前瓶颈、未来方向与协作导航。
+- `daily_research/brain/daily_research_plan.md` 只写当前默认决策、shortlist、优先级与停止规则。
+- `daily_research/brain/runtime_environment.md` 只写解释器、依赖与运行口径。
+- `daily_research/brain/research_log.md` 只写时间顺序实验记录。
 - 文档统一使用 UTF-8，不再用 shell 重定向直接追加中文内容。
 - 默认只清理可再生产物，不直接删除模型产物、持仓快照和研究结论文件。

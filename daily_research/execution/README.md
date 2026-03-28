@@ -6,7 +6,7 @@
 2. 盘后更新离线模型产物；
 3. 盘后生成“次日开盘手工执行”的交易建议。
 
-`daily_research` 的当前默认口径与主入口以上游 `daily_research/README.md` 为准；当前升级决策与优先级以 `daily_research/daily_research_plan.md` 为准；解释器与环境基线以 `daily_research/runtime_environment.md` 为准。本文件只负责执行端日常操作细节。
+`daily_research` 的当前默认口径与主入口以上游 `daily_research/brain/README.md` 为准；当前升级决策与优先级以 `daily_research/brain/daily_research_plan.md` 为准；解释器与环境基线以 `daily_research/brain/runtime_environment.md` 为准。本文件只负责执行端日常操作细节。
 
 这不是自动下单系统。当前执行端固定为：
 - 盘后生成建议，次日开盘人工执行；

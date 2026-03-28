@@ -9,12 +9,12 @@ from typing import Iterable
 
 DEFAULT_DOCS = [
     "README.md",
-    "PROJECT_REVIEW.md",
-    "daily_research/README.md",
+    "daily_research/brain/README.md",
+    "daily_research/brain/project_map.md",
+    "daily_research/brain/runtime_environment.md",
+    "daily_research/brain/research_log.md",
+    "daily_research/brain/daily_research_plan.md",
     "daily_research/execution/README.md",
-    "daily_research/runtime_environment.md",
-    "daily_research/research_log.md",
-    "daily_research/daily_research_plan.md",
     "t0_project/README.md",
 ]
 
@@ -33,16 +33,16 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "root README should not grow into a dated change log"),
         ),
     ),
-    "PROJECT_REVIEW.md": DocRule(
-        max_lines=80,
-        forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "project review should stay an archive pointer instead of becoming a live dated log"),
-        ),
-    ),
-    "daily_research/README.md": DocRule(
+    "daily_research/brain/README.md": DocRule(
         max_lines=260,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research README should stay a single current-state document instead of a dated log"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "brain README should stay a single current-state document instead of a dated log"),
+        ),
+    ),
+    "daily_research/brain/project_map.md": DocRule(
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "brain project_map should stay a collaboration guide instead of becoming a dated log"),
         ),
     ),
     "daily_research/execution/README.md": DocRule(
@@ -51,19 +51,19 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "execution README should stay focused on current execution defaults and daily operations"),
         ),
     ),
-    "daily_research/runtime_environment.md": DocRule(
+    "daily_research/brain/runtime_environment.md": DocRule(
         max_lines=140,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "runtime_environment should stay an environment baseline instead of becoming a dated log"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "brain runtime_environment should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
-    "daily_research/daily_research_plan.md": DocRule(
+    "daily_research/brain/daily_research_plan.md": DocRule(
         max_lines=240,
         forbidden_heading_patterns=(
-            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research_plan should stay a current-decision document instead of becoming a dated log"),
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "brain daily_research_plan should stay a current-decision document instead of becoming a dated log"),
         ),
     ),
-    "daily_research/research_log.md": DocRule(
+    "daily_research/brain/research_log.md": DocRule(
         enforce_non_decreasing_dated_headings=True,
     ),
     "t0_project/README.md": DocRule(

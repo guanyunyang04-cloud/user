@@ -14,25 +14,35 @@
 - 执行方式：盘后生成计划，次日开盘人工执行
 
 ## 2. 文档分工
-- `daily_research/README.md`
+- `daily_research/brain/README.md`
   - 只保留当前状态、主入口与文档边界。
-- `daily_research/daily_research_plan.md`
+- `daily_research/brain/project_map.md`
+  - 只保留项目背景、已解决问题、当前瓶颈与未来方向，供协作快速建立上下文。
+- `daily_research/brain/daily_research_plan.md`
   - 只保留当前默认决策、升级 shortlist、优先级与停止规则。
-- `daily_research/runtime_environment.md`
+- `daily_research/brain/runtime_environment.md`
   - 只保留解释器、关键依赖与推荐调用方式。
-- `daily_research/research_log.md`
+- `daily_research/brain/research_log.md`
   - 只保留按时间顺序推进的实验记录、证据与结论。
 - `daily_research/execution/README.md`
   - 只保留执行端目录职责、默认参数与日常操作细节。
 
+以上五份正本文档现在统一集中在：
+
+- `daily_research/brain/`
+  - 作为 AI 工作流脑区目录使用
+
 推荐阅读顺序：
 
 1. 先看本文件，确认当前项目状态与主入口；
-2. 再看 `daily_research_plan.md`，确认当前待决策事项与优先级；
-3. 需要落命令时，再看 `runtime_environment.md`；
-4. 需要回溯证据时，再查 `research_log.md`。
+2. 再看 `daily_research/brain/project_map.md`，确认项目是如何演化到当前状态、真正瓶颈是什么；
+3. 再看 `daily_research/brain/daily_research_plan.md`，确认当前待决策事项与优先级；
+4. 需要落命令时，再看 `daily_research/brain/runtime_environment.md`；
+5. 需要回溯证据时，再查 `daily_research/brain/research_log.md`。
 
 ## 3. 当前结构
+- `daily_research/brain/`
+  - AI 工作流脑区目录，集中承载当前状态、项目地图、计划、运行基线与研究日志。
 - `daily_research/baseline/`
   - 可解释基线、`advanced_ml`、正式回测与诊断脚本。
 - `daily_research/execution/`
@@ -83,7 +93,7 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
 - 执行端默认值暂不自动切换；
-  - 最新执行升级 shortlist 与 head-to-head 待决事项统一写在 `daily_research/daily_research_plan.md`
+  - 最新执行升级 shortlist 与 head-to-head 待决事项统一写在 `daily_research/brain/daily_research_plan.md`
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
 - 连续状态分数保留为诊断层，不进入当前默认执行软调节逻辑。
 - `ma47/48` 左侧边界带、`v21_volume_contraction_015` 等高收益旁支保留在研究附录，不进入默认执行口径。
@@ -92,16 +102,18 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
 ## 6. 文档与产物边界
 当前仍需主动维护的文档只有：
 
-- `daily_research/README.md`
+- `daily_research/brain/README.md`
   - 当前状态、主入口与文档边界
-- `daily_research/daily_research_plan.md`
+- `daily_research/brain/project_map.md`
+  - 项目背景、当前瓶颈、未来方向与协作导航
+- `daily_research/brain/daily_research_plan.md`
   - 当前默认决策、shortlist、优先级与停止规则
-- `daily_research/runtime_environment.md`
+- `daily_research/brain/runtime_environment.md`
   - 解释器、依赖与运行口径
+- `daily_research/brain/research_log.md`
+  - 时间顺序实验记录
 - `daily_research/execution/README.md`
   - 执行端日常操作
-- `daily_research/research_log.md`
-  - 时间顺序实验记录
 
 主要生成物边界：
 
@@ -133,5 +145,4 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
 - 默认只清理可再生产物，不直接删除模型产物、持仓快照和研究结论文件。
 
 ## 9. 历史入口
-- 完整时间线、阶段实验记录与历史结论：`daily_research/research_log.md`
-- 旧的专项评估说明：`PROJECT_REVIEW.md`
+- 完整时间线、阶段实验记录与历史结论：`daily_research/brain/research_log.md`
