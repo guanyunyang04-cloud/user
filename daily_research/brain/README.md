@@ -92,14 +92,21 @@ python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-t
   - `regime_ma_window=50`
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
+- 当前默认 focus-state 集成权重保持为：
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
 - 底层市场状态架构已升级为：
   - 兼容层继续保留 legacy `quadrant`
   - 底层同时输出连续 `trend/vol gap`、`trend_bucket`、`vol_bucket` 与 `market_state`
   - 上层入口已支持通过 `regime_state_selector` 切换状态标签来源
   - 当前 `state_alpha_profile` 这一层仍只支持 legacy `quadrant`，非 quadrant selector 会被显式拦截，避免静默失效
-- 执行端默认值暂不自动切换；
-  - 2026-03-28 的 formal head-to-head、攻守分型诊断、首轮动态控制器扫描与第二轮 `ret10` 动态扫描都已完成，但当前仍没有可升级默认值的单一或动态赢家，相关口径统一写在 `daily_research/brain/daily_research_plan.md`
-  - 当前最强的动态折中候选是 `gap>=0.024192, vol<=0.176128, ret10>=0.014717`，它已经把弱窗口指标推到 `1.101 / 1.114`，但 `full_excess_sharpe` 仍只有 `0.807`
+- 执行端当前默认值已于 2026-03-28 升级为：
+  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `trend_up_low_vol` 状态专属默认权重：`ml:0.25, none:0.25, v2:0.50`
+- 这次切换依据当前代码口径的 formal R3 对照：
+  - 静态 `v250`：`full_excess_sharpe = 0.759`，`weak_window_20250905_20260319_excess_sharpe = 1.073`，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+  - 静态 `v255`：`0.675 / 0.281 / 0.094`
+  - 当前没有动态控制器能同时压过新的 live 默认值与进攻对照
+- 2026-03-28 之前基于旧 `market_features` 集合得出的 `v255` 偏强结论已失效；当前所有正式升级讨论统一以 live `v250` 默认值为基准。
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
 - 连续状态分数保留为诊断层，不进入当前默认执行软调节逻辑。
 - `ma47/48` 左侧边界带、`v21_volume_contraction_015` 等高收益旁支保留在研究附录，不进入默认执行口径。

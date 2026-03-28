@@ -7517,3 +7517,81 @@ position,000001.SZ,1200,12.38,
 4. 下一步若继续推进，优先做：
    - 围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 继续补 full 端收益；
    - 在保住这层 `ret10` 弱窗口增益的前提下，再做同口径 formal comparator。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 当前代码口径重跑 + 执行默认值升级
+### 本轮目标
+- 解释为什么旧 formal `r1 / r2` 与当前脚本结果发生冲突；
+- 在当前代码、当前特征空间和当前 rolling ML score 口径下，重新决定 live execution default。
+
+### 本轮动作
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_weightgrid_focus`
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_baseprobe`
+- 对比了旧 formal 产物与当前 prepared / ml_score cache：
+  - 旧 prepared cache：`daily_research/cache/advanced_ml/prepared/2ec8e125112e2645a3aa.pkl`
+  - 当前 prepared cache：`daily_research/cache/advanced_ml/prepared/e237c99bfbfa9a984e00.pkl`
+  - 旧 ml_scores cache：`daily_research/cache/advanced_ml/ml_scores/5b68d4a05901bf6f1229.pkl`
+  - 当前 ml_scores cache：`daily_research/cache/advanced_ml/ml_scores/bb3aae2219e0720b81ca.pkl`
+- 同时把执行端 wrapper 的共享默认参数切到：
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- 并重训 live artifact：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+
+### 结果一：旧 split verdict 失效的原因，不在四象限，也不在规则层，而在 market-feature 扩容后的 ML 分数漂移
+- 旧 prepared / 当前 prepared 之间：
+  - `regime_state` 行数一致；
+  - `trend_up_low_vol` 天数一致；
+  - `score_none / score_v2 / filter_mask` 一致；
+  - `feature_frames` 一致；
+  - 但 `market_features` 已从 `7` 个扩到 `24` 个。
+- 当前新增的 market features 里，包括：
+  - `benchmark_vol_gap`
+  - `benchmark_vol_ratio`
+  - `trend_bucket / vol_bucket` 对应的一组布尔 market signals
+- 这直接导致 rolling ML scores 已经实质变化：
+  - `h20` 平均绝对差约 `0.272`
+  - `h20` 最大绝对差约 `4.490`
+- 所以旧 formal `r1 / r2` 里“`v255` 更适合当默认主候选”的结论，已经不再代表当前代码。
+
+### 结果二：在当前代码口径下，静态赢家已经收敛为 `v250`
+- 当前静态 `trend_up_low_vol_ml25_none25_v250`：
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- 当前静态 `trend_up_low_vol_ml25_none20_v255`：
+  - `full_excess_sharpe = 0.675`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.281`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.094`
+- 当前 base-equivalent 默认 artifact：
+  - `full_excess_sharpe = 0.294`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.151`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.186`
+- 这说明：
+  - 在当前代码下，旧 live default 已明显落后；
+  - `v250` 已经不是“防守候选之一”，而是新的 live default。
+
+### 结果三：动态控制器方向仍成立，但当前还不足以越过新的 live 默认值
+- 当前最强 full 端动态候选：
+  - `0.791 / 0.992 / 0.980`
+- 当前最强 balance 动态候选：
+  - `0.775 / 1.013 / 1.008`
+- 它们都说明：
+  - 动态方案已经开始接近“攻守切换”；
+  - 但还没有形成一个足以绕过 live `v250` 默认值、直接升级执行端的单一赢家。
+
+### 本轮结论
+1. 旧 formal `r1 / r2` 结论已不再代表当前代码，应整体降级为历史口径。
+2. 当前代码下的静态默认值应升级为：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+3. `trend_up_low_vol_ml25_none20_v255` 继续保留为进攻对照，而不是 live default。
+4. 动态控制器研究线继续保留，但它的比较基准已经改成 live `v250`，不再是旧 split verdict。
+
+### 当前决策
+1. 执行端 wrapper 已切换共享默认参数为：
+   - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+2. live artifact 已重训完成：
+   - `trained_at = 2026-03-28 15:19:20`
+3. 后续所有正式动态比较，默认都要先回答：
+   - 能否在同一 formal 口径下跑赢 live `v250`
+4. 后续若继续推进动态控制器，不再把“是否沿用旧 `v255` 口径”作为讨论前提。

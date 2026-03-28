@@ -892,6 +892,7 @@ def main():
             "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
             "model_family": str(ml_cfg.model_family),
+            "state_ensemble_weights": ml_cfg.state_ensemble_weights or {},
             "state_horizon_profiles": ";".join(
                 f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
                 for state, weights in (ml_cfg.state_horizon_weights or {}).items()
@@ -915,6 +916,7 @@ def main():
             "horizon_weights": ",".join(
                 f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
             ),
+            "state_ensemble_weights": artifact.ml_config.get("state_ensemble_weights") or {},
             "state_horizon_profiles": ";".join(
                 f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
                 for state, weights in (artifact.ml_config.get("state_horizon_weights") or {}).items()
@@ -1230,6 +1232,7 @@ def main_with_progress():
                     "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
                     "model_family": str(ml_cfg.model_family),
+                    "state_ensemble_weights": ml_cfg.state_ensemble_weights or {},
                     "state_horizon_profiles": ";".join(
                         f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
                         for state, weights in (ml_cfg.state_horizon_weights or {}).items()
@@ -1263,6 +1266,7 @@ def main_with_progress():
                     "horizon_weights": ",".join(
                         f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
                     ),
+                    "state_ensemble_weights": artifact.ml_config.get("state_ensemble_weights") or {},
                     "state_horizon_profiles": ";".join(
                         f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
                         for state, weights in (artifact.ml_config.get("state_horizon_weights") or {}).items()

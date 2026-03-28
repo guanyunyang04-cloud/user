@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -14,6 +15,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from daily_research.baseline.advanced_ml_runtime import (
+    build_prepared_bundle_with_cache,
+    history_window_to_dict,
+    load_raw_data_with_cache,
+    resolve_history_window,
+)
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
 from daily_research.baseline.cli_utils import (
@@ -25,17 +32,14 @@ from daily_research.baseline.cli_utils import (
 )
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
-    load_daily_from_csv,
-    load_daily_from_tq,
     load_industry_map_from_tq,
     load_style_map_from_tq,
     load_universe_from_tq,
     split_benchmark_from_universe,
 )
-from daily_research.baseline.features import compute_factors
 from daily_research.baseline.ml_alpha import MLAplhaConfig, blend_scores, build_ml_feature_bundle, rolling_ml_scores_multi
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state, resolve_regime_label_series
+from daily_research.baseline.regime import apply_market_regime_filter, resolve_regime_label_series
 from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership
 
@@ -96,6 +100,9 @@ def parse_args():
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--no-auto-trim-history", action="store_true")
     parser.add_argument(
         "--windows",
         default="recent_full:20250307:20260319,latest_weak:20250905:20260319",
@@ -118,6 +125,17 @@ def _parse_model_families(raw: str | None) -> list[str]:
 def _subset_df_dict_to_stocks(df_dict: dict[str, pd.DataFrame], stocks: list[str]) -> dict[str, pd.DataFrame]:
     keep = [stock for stock in stocks if stock in df_dict["Close"].columns]
     return {field: frame.reindex(columns=keep) for field, frame in df_dict.items()}
+
+
+def _stock_signature(stocks: list[str]) -> str:
+    normalized = ",".join(sorted(set(str(stock).upper() for stock in stocks if stock)))
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:20] if normalized else "empty"
+
+
+def _subset_raw_df_dict_to_universe(raw_df_dict: dict[str, pd.DataFrame], benchmark: str, stocks: list[str]) -> dict[str, pd.DataFrame]:
+    keep = [benchmark] + [stock for stock in stocks if stock != benchmark and stock in raw_df_dict["Close"].columns]
+    keep = list(dict.fromkeys(keep))
+    return {field: frame.reindex(columns=keep) for field, frame in raw_df_dict.items()}
 
 
 def _annualized_return(equity: pd.Series) -> float:
@@ -251,27 +269,50 @@ def main():
             cfg.universe = load_universe_from_tq(cfg.universe_scope)
         elif not cfg.universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
-        print(f"[2/8] Loading daily bars from TQ. universe={len(cfg.universe)} benchmark={cfg.benchmark}")
-        raw_df_dict = load_daily_from_tq(cfg.universe, cfg.start_date, cfg.end_date, benchmark=cfg.benchmark)
-    else:
-        if not args.csv_folder:
-            raise ValueError("CSV mode requires --csv-folder.")
-        print(f"[1/8] Loading CSV folder: {args.csv_folder}")
-        raw_df_dict = load_daily_from_csv(args.csv_folder)
+    elif not args.csv_folder:
+        raise ValueError("CSV mode requires --csv-folder.")
 
-    print("[3/8] Building factor bundle and regime state...")
-    benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
-    df_dict, benchmark_close = split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
+    history_window = resolve_history_window(
+        cfg=cfg,
+        ml_cfg=base_ml_cfg,
+        requested_start_date=args.start_date,
+        end_date=args.end_date,
+        mode="train",
+        auto_trim_history=not args.no_auto_trim_history,
+    )
+    print(
+        f"[2/8] Loading raw data via cache. history={history_window.effective_start_date} -> "
+        f"{history_window.end_date or 'latest'}"
+    )
+    raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
+        data_source=args.data_source,
+        csv_folder=args.csv_folder,
+        universe=cfg.universe,
+        benchmark=cfg.benchmark,
+        history_window=history_window,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+        progress_desc="Load model-family comparison market data",
+        progress_position=1,
+    )
+    print(
+        f"[3/8] raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | "
+        f"{raw_cache_meta['cache_path']}"
+    )
+
+    raw_universe_df_dict, _ = split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
     rolling_pool_artifact = None
     rolling_membership_mask = None
+    prepared_raw_df_dict = raw_df_dict
+    prepared_raw_cache_key = raw_cache_meta["cache_key"]
     if args.rolling_liquidity_pool:
         print(
             f"[4/8] Building rolling {args.rolling_liquidity_pool} pool "
             f"(rebalance={args.pool_rebalance_days}d, adv_window={args.pool_adv_window})..."
         )
         rolling_pool_artifact = build_rolling_liquidity_membership(
-            close_frame=df_dict["Close"],
-            amount_frame=df_dict["Amount"],
+            close_frame=raw_universe_df_dict["Close"],
+            amount_frame=raw_universe_df_dict["Amount"],
             pool_name=args.rolling_liquidity_pool,
             signal_start_date=cfg.start_date,
             signal_end_date=cfg.end_date,
@@ -284,42 +325,53 @@ def main():
         rolling_union = rolling_membership_mask.columns[rolling_membership_mask.any(axis=0)].tolist()
         if not rolling_union:
             raise RuntimeError(f"Rolling {args.rolling_liquidity_pool} pool is empty for the requested window.")
-        df_dict = _subset_df_dict_to_stocks(df_dict, rolling_union)
-        rolling_membership_mask = rolling_membership_mask.reindex(
-            index=df_dict["Close"].index,
-            columns=df_dict["Close"].columns,
-        ).fillna(False)
-    factor_bundle = compute_factors(df_dict)
-    regime_state = compute_market_regime_state(benchmark_close, cfg)
+        prepared_raw_df_dict = _subset_raw_df_dict_to_universe(raw_df_dict, cfg.benchmark, rolling_union)
+        prepared_raw_cache_key = (
+            f"{raw_cache_meta['cache_key']}::rolling_pool::{args.rolling_liquidity_pool}::"
+            f"{args.pool_rebalance_days}::{args.pool_adv_window}::{_stock_signature(rolling_union)}"
+        )
+
+    prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+        raw_df_dict=prepared_raw_df_dict,
+        raw_cache_key=prepared_raw_cache_key,
+        cfg=cfg,
+        enhanced_profile=args.enhanced_profile,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+    )
+    print(
+        f"[5/8] prepared cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+        f"{prepared_cache_meta['cache_path']}"
+    )
+
+    df_dict = prepared_bundle["df_dict"]
+    benchmark_close = prepared_bundle["benchmark_close"]
+    benchmark_open = prepared_bundle["benchmark_open"]
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
     state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
+    score_none = prepared_bundle["score_none"]
+    score_enhanced = prepared_bundle["score_v2"]
+    filter_mask = prepared_bundle["filter_mask"]
 
     industry_map = None
     style_map = None
     if cfg.enable_industry_cap and args.data_source == "tq":
-        print("[5/8] Loading industry map...")
+        print("[6/8] Loading industry map...")
         industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
     if cfg.enable_style_cap and args.data_source == "tq":
-        print("[5/8] Loading style map...")
+        print("[6/8] Loading style map...")
         style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
 
-    print("[6/8] Computing shared none / enhanced rule layers...")
-    score_none, _, filter_mask = combine_scores_by_state(
-        factor_bundle,
-        cfg,
-        quadrant_series=state_label_series,
-        state_configs=build_state_configs(cfg, "none"),
-    )
-    score_enhanced, _, _ = combine_scores_by_state(
-        factor_bundle,
-        cfg,
-        quadrant_series=state_label_series,
-        state_configs=build_state_configs(cfg, args.enhanced_profile),
-    )
+    print("[6/8] Preparing shared scores and features...")
     if rolling_membership_mask is not None:
         filter_mask = filter_mask & rolling_membership_mask
         score_none = score_none.where(rolling_membership_mask)
         score_enhanced = score_enhanced.where(rolling_membership_mask)
-    feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_enhanced)
+        feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_enhanced)
+    else:
+        feature_frames = prepared_bundle["feature_frames"]
+        market_features = prepared_bundle["market_features"]
     windows = parse_named_windows(args.windows)
 
     output_root = Path("daily_research/output") / (
@@ -397,8 +449,11 @@ def main():
                     "model_family": family,
                     "enhanced_profile": args.enhanced_profile,
                     "regime_state_selector": cfg.regime_state_selector,
+                    "history_window": history_window_to_dict(history_window),
                     "execution_mode": cfg.execution_mode,
                     "ml_horizon_weights": {str(k): float(v) for k, v in (ml_cfg.target_horizon_weights or {}).items()},
+                    "raw_cache": raw_cache_meta,
+                    "prepared_cache": prepared_cache_meta,
                     "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
                     "rolling_pool_rebalance_days": int(args.pool_rebalance_days),
                     "rolling_pool_adv_window": int(args.pool_adv_window),
@@ -460,6 +515,77 @@ def main():
     print("[8/8] Done.")
     print(f"Output: {output_root}")
     print(summary_df.to_string(index=False))
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Compare advanced ML model families on one shared dataset.")
+    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--stocks", default=None)
+    parser.add_argument(
+        "--rolling-liquidity-pool",
+        choices=["liquid300", "liquid500", "liquid800"],
+        default="liquid500",
+        help="Use the historical rolling high-liquidity pool under current execution settings.",
+    )
+    parser.add_argument("--pool-rebalance-days", type=int, default=21)
+    parser.add_argument("--pool-adv-window", type=int, default=20)
+    parser.add_argument("--start-date", default="20220101")
+    parser.add_argument("--end-date", default="")
+    parser.add_argument("--universe-scope", default="all_a")
+    parser.add_argument("--benchmark", default="000300.SH")
+    parser.add_argument("--holding-count", type=int, default=5)
+    parser.add_argument("--rebalance-freq", default="1d")
+    parser.add_argument("--experiment-tag", default="")
+    parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
+    parser.add_argument("--model-families", default="histgb,lgbm,etr")
+    parser.add_argument("--min-adv20", type=float, default=50_000.0)
+    parser.add_argument("--min-price", type=float, default=2.0)
+    parser.add_argument("--max-price", type=float, default=300.0)
+    parser.add_argument("--max-weight", type=float, default=0.25)
+    parser.add_argument("--score-threshold", type=float, default=0.0)
+    parser.add_argument("--no-market-regime-filter", action="store_true")
+    parser.add_argument("--regime-ma-window", type=int, default=50)
+    parser.add_argument("--regime-vol-window", type=int, default=20)
+    parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="State selector used by state-aware scoring and blending. Legacy state profiles currently require quadrant.",
+    )
+    parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
+    parser.add_argument("--no-style-cap", action="store_true")
+    parser.add_argument("--max-style-weight", type=float, default=0.50)
+    parser.add_argument("--industry-cap", action="store_true")
+    parser.add_argument("--max-industry-weight", type=float, default=0.40)
+    parser.add_argument("--ml-target-horizon", type=int, default=20)
+    parser.add_argument("--ml-target-horizons", default="5,10,20")
+    parser.add_argument("--ml-horizon-weights", default="5:0.2,10:0.3,20:0.5")
+    parser.add_argument("--ml-train-window-days", type=int, default=504)
+    parser.add_argument("--ml-retrain-every-days", type=int, default=21)
+    parser.add_argument("--ml-min-train-dates", type=int, default=120)
+    parser.add_argument("--ml-max-samples-per-day", type=int, default=600)
+    parser.add_argument("--ml-max-train-rows", type=int, default=200000)
+    parser.add_argument("--ml-random-seed", type=int, default=7)
+    parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
+    parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
+    parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--no-auto-trim-history", action="store_true")
+    parser.add_argument(
+        "--windows",
+        default="recent_full:20250307:20260319,latest_weak:20250905:20260319",
+        help="Comma-separated named windows in name:YYYYMMDD:YYYYMMDD format.",
+    )
+    parser.add_argument(
+        "--skip-missing-families",
+        action="store_true",
+        help="Skip model families that cannot be run in the current environment instead of failing the whole comparison.",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":

@@ -22,40 +22,36 @@
   - `lgbm`
 - 默认训练窗口：
   - `ml_train_window_days=504`
+- 默认 focus-state 集成权重：
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
 
 ## 2. 当前最近待决策事项
-2026-03-28 的长窗口正式复验与正式 head-to-head 已经把执行端升级判决收敛到两组最终候选：
+2026-03-28 的当前代码口径 formal R3 重跑，已经把执行端短期升级收口为一个明确结论：
 
-- `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
-- `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+- live 默认值升级为 `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+- `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520` 保留为进攻对照与未来动态控制器的 `offense leg`
 
 当前明确结论：
 
-- 执行端默认值继续不自动切换；
-- `daily_research/output/advanced_ml_shortlist_head_to_head_20260328_formal_r1` 已经产出；
-- 当前没有单一升级赢家；
-- `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1` 已经完成第一轮正式扫描；
-- `daily_research/output/advanced_ml_attack_defense_diagnosis_20260328_formal_r1` 与 `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r2_ret10` 已经完成；
-- 但 16 个简单动态控制器里，仍没有一个能同时压过静态 `v255` 的全样本进攻与静态 `v250` 的弱窗口防守；
-- 第二轮正式扫描表明：加入 `benchmark_ret_10d` 过滤后，最强折中候选已经能把
-  - `weak_window_20250905_20260319_excess_sharpe` 提到 `1.101`
-  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe` 提到 `1.114`
-  - 但它的 `full_excess_sharpe` 仍只有 `0.807`，还没超过静态 `v255` 的 `0.860`
-- 下一步不再回头重复做 `504 / 5 / 260` 与 `378 / 21 / 520` 的正式复验；
-- 后续正式方向已明确改成：
-  - 不再强迫这两组候选选出一个静态唯一赢家；
-  - 直接研究“该进攻时切 `v255`、该防守时切 `v250`”的攻守控制器。
+- `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_weightgrid_focus` 与 `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_baseprobe` 已经产出；
+- 当前静态 `v250`：`full_excess_sharpe = 0.759`，`weak_window_20250905_20260319_excess_sharpe = 1.073`，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- 当前静态 `v255`：`full_excess_sharpe = 0.675`，`weak_window_20250905_20260319_excess_sharpe = 0.281`，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.094`
+- 当前 base-equivalent 默认 artifact：`full_excess_sharpe = 0.294`，`weak_window_20250905_20260319_excess_sharpe = 0.151`，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.186`
+- 最强动态候选最多只做到 `0.791 / 0.992 / 0.980`，仍没有同时压过新的 live 默认值与进攻对照
+- 旧 formal `r1 / r2` 里“`v255` 更适合作为默认主候选”的口径已失效，因为底层 `market_features` 已从 `7` 扩到 `24`，rolling ML scores 已发生实质变化
+- 下一步不再回头争论旧 split verdict，也不再重复 `504 / 5 / 260` 与 `378 / 21 / 520` 的正式复验；
+- 后续正式方向收口为：
+  - 把动态控制器的 benchmark 改成 live `v250` 默认值；
+  - 用 `v255` 继续承担进攻对照。
 
-两组候选的分工已经由 formal head-to-head 固化：
+两组候选的当前职责已经重新收口为：
 
-- 若按弱窗口稳健性排序：
-  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520` 更强
-- 若按全样本收益排序：
-  - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520` 更强
-- 若按当前停止规则执行：
-  - 维持现默认值，不做口头升级
-- 若按当前动态控制器首轮扫描看：
-  - 方向是对的，但简单 `trend_gap + annual_vol` 阈值控制器还不够作为默认执行升级方案
+- 当前 live default：
+  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+- 当前 offense comparator：
+  - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+- 当前 upgrade gate：
+  - 只有动态方案在同一 formal 口径下跑赢 live `v250`，同时不丢失 `v255` 的 full 端进攻价值，才允许继续讨论默认值升级
 
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责。

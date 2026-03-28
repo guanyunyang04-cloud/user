@@ -12,6 +12,12 @@ from datetime import datetime
 
 import pandas as pd
 
+from daily_research.baseline.advanced_ml_runtime import (
+    build_prepared_bundle_with_cache,
+    history_window_to_dict,
+    load_raw_data_with_cache,
+    resolve_history_window,
+)
 from daily_research.baseline.alpha import combine_scores_by_state
 from daily_research.baseline.backtest import backtest
 from daily_research.baseline.cli_utils import (
@@ -22,17 +28,13 @@ from daily_research.baseline.cli_utils import (
 )
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
-    load_daily_from_csv,
-    load_daily_from_tq,
     load_industry_map_from_tq,
     load_style_map_from_tq,
     load_universe_from_tq,
-    split_benchmark_from_universe,
 )
-from daily_research.baseline.features import compute_factors
 from daily_research.baseline.ml_alpha import MLAplhaConfig, blend_scores, build_ml_feature_bundle, rolling_ml_scores_multi
 from daily_research.baseline.portfolio import build_target_weights
-from daily_research.baseline.regime import apply_market_regime_filter, compute_market_regime_state, resolve_regime_label_series
+from daily_research.baseline.regime import apply_market_regime_filter, resolve_regime_label_series
 from daily_research.baseline.state_profiles import build_state_configs, validate_state_profile_selector
 
 
@@ -80,6 +82,9 @@ def parse_args():
     parser.add_argument("--ml-max-samples-per-day", type=int, default=600)
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--no-auto-trim-history", action="store_true")
     return parser.parse_args()
 
 
@@ -180,43 +185,71 @@ def main():
             cfg.universe = load_universe_from_tq(cfg.universe_scope)
         elif not cfg.universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
-        print(f"[2/8] Loading daily bars from TQ. universe={len(cfg.universe)} benchmark={cfg.benchmark}")
-        raw_df_dict = load_daily_from_tq(cfg.universe, cfg.start_date, cfg.end_date, benchmark=cfg.benchmark)
-    else:
-        if not args.csv_folder:
-            raise ValueError("CSV mode requires --csv-folder.")
-        print(f"[1/8] Loading CSV folder: {args.csv_folder}")
-        raw_df_dict = load_daily_from_csv(args.csv_folder)
+    elif not args.csv_folder:
+        raise ValueError("CSV mode requires --csv-folder.")
 
-    print("[3/8] Building factor bundle and regime state...")
-    df_dict, benchmark_close = split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
-    factor_bundle = compute_factors(df_dict)
-    regime_state = compute_market_regime_state(benchmark_close, cfg)
+    history_window = resolve_history_window(
+        cfg=cfg,
+        ml_cfg=ml_cfg_base,
+        requested_start_date=args.start_date,
+        end_date=args.end_date,
+        mode="train",
+        auto_trim_history=not args.no_auto_trim_history,
+    )
+    print(
+        f"[2/8] Loading raw data via cache. history={history_window.effective_start_date} -> "
+        f"{history_window.end_date or 'latest'}"
+    )
+    raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
+        data_source=args.data_source,
+        csv_folder=args.csv_folder,
+        universe=cfg.universe,
+        benchmark=cfg.benchmark,
+        history_window=history_window,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+        progress_desc="Load state-ensemble scan market data",
+        progress_position=1,
+    )
+    print(
+        f"[3/8] raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | "
+        f"{raw_cache_meta['cache_path']}"
+    )
+
+    prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
+        raw_df_dict=raw_df_dict,
+        raw_cache_key=raw_cache_meta["cache_key"],
+        cfg=cfg,
+        enhanced_profile=args.enhanced_profile,
+        use_cache=not args.no_cache,
+        refresh_cache=args.refresh_cache,
+    )
+    print(
+        f"[4/8] prepared cache: {'hit' if prepared_cache_meta['cache_hit'] else 'build'} | "
+        f"{prepared_cache_meta['cache_path']}"
+    )
+
+    df_dict = prepared_bundle["df_dict"]
+    benchmark_close = prepared_bundle["benchmark_close"]
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
     state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
+    score_none = prepared_bundle["score_none"]
+    score_enhanced = prepared_bundle["score_v2"]
+    filter_mask = prepared_bundle["filter_mask"]
 
     industry_map = None
     style_map = None
     if cfg.enable_industry_cap and args.data_source == "tq":
-        print("[4/8] Loading industry map...")
+        print("[5/8] Loading industry map...")
         industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
     if cfg.enable_style_cap and args.data_source == "tq":
         print("[5/8] Loading style map...")
         style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
 
-    print("[6/8] Computing none / enhanced scores and rolling ML score once...")
-    score_none, _, filter_mask = combine_scores_by_state(
-        factor_bundle,
-        cfg,
-        quadrant_series=state_label_series,
-        state_configs=build_state_configs(cfg, "none"),
-    )
-    score_enhanced, _, _ = combine_scores_by_state(
-        factor_bundle,
-        cfg,
-        quadrant_series=state_label_series,
-        state_configs=build_state_configs(cfg, args.enhanced_profile),
-    )
-    feature_frames, market_features = build_ml_feature_bundle(factor_bundle, regime_state, score_none, score_enhanced)
+    print("[6/8] Loading shared scores and rolling ML score...")
+    feature_frames = prepared_bundle["feature_frames"]
+    market_features = prepared_bundle["market_features"]
     ml_score, training_log = rolling_ml_scores_multi(
         feature_frames=feature_frames,
         market_features=market_features,
@@ -266,8 +299,11 @@ def main():
                 "candidate_label": label,
                 "enhanced_profile": args.enhanced_profile,
                 "regime_state_selector": cfg.regime_state_selector,
+                "history_window": history_window_to_dict(history_window),
                 "state_ensemble_weights": state_weights,
                 "ml_horizon_weights": {str(k): float(v) for k, v in (ml_cfg_base.target_horizon_weights or {}).items()},
+                "raw_cache": raw_cache_meta,
+                "prepared_cache": prepared_cache_meta,
             }
         )
         (run_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -297,6 +333,55 @@ def main():
     print("[8/8] Done.")
     print(f"Output: {output_root}")
     print(summary_df.to_string(index=False))
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Scan state-scoped ensemble weights on one shared advanced ML dataset.")
+    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--stocks", default=None)
+    parser.add_argument("--start-date", default="20220101")
+    parser.add_argument("--end-date", default="")
+    parser.add_argument("--universe-scope", default="all_a")
+    parser.add_argument("--benchmark", default="000300.SH")
+    parser.add_argument("--holding-count", type=int, default=5)
+    parser.add_argument("--rebalance-freq", default="5d")
+    parser.add_argument("--experiment-tag", default="")
+    parser.add_argument("--enhanced-profile", default="up_low_breakout_v2")
+    parser.add_argument("--min-adv20", type=float, default=50_000.0)
+    parser.add_argument("--min-price", type=float, default=2.0)
+    parser.add_argument("--max-price", type=float, default=300.0)
+    parser.add_argument("--max-weight", type=float, default=0.25)
+    parser.add_argument("--score-threshold", type=float, default=0.0)
+    parser.add_argument("--no-market-regime-filter", action="store_true")
+    parser.add_argument("--regime-ma-window", type=int, default=60)
+    parser.add_argument("--regime-vol-window", type=int, default=20)
+    parser.add_argument("--regime-max-annual-vol", type=float, default=0.32)
+    parser.add_argument("--regime-trend-flat-band", type=float, default=0.01)
+    parser.add_argument("--regime-vol-transition-band", type=float, default=0.10)
+    parser.add_argument(
+        "--regime-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="quadrant",
+        help="State selector used for state-aware scoring. This script still compares legacy quadrant-scoped ensemble candidates only.",
+    )
+    parser.add_argument("--regime-quadrants", default="trend_up_low_vol,trend_up_high_vol")
+    parser.add_argument("--no-style-cap", action="store_true")
+    parser.add_argument("--max-style-weight", type=float, default=0.50)
+    parser.add_argument("--industry-cap", action="store_true")
+    parser.add_argument("--max-industry-weight", type=float, default=0.40)
+    parser.add_argument("--ml-target-horizon", type=int, default=20)
+    parser.add_argument("--ml-target-horizons", default="5,10,20")
+    parser.add_argument("--ml-horizon-weights", default="5:0.2,10:0.3,20:0.5")
+    parser.add_argument("--ml-train-window-days", type=int, default=504)
+    parser.add_argument("--ml-retrain-every-days", type=int, default=21)
+    parser.add_argument("--ml-min-train-dates", type=int, default=120)
+    parser.add_argument("--ml-max-samples-per-day", type=int, default=600)
+    parser.add_argument("--ml-max-train-rows", type=int, default=200000)
+    parser.add_argument("--ml-random-seed", type=int, default=7)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--no-auto-trim-history", action="store_true")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":

@@ -113,6 +113,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
     parser.add_argument("--offense-state-weights", default="ml:0.25,none:0.20,v2:0.55")
     parser.add_argument("--defense-state-weights", default="ml:0.25,none:0.25,v2:0.50")
+    parser.add_argument(
+        "--dynamic-offense-state-weights-grid",
+        default="",
+        help="Optional ';'-separated offense weight triplets for dynamic scans.",
+    )
+    parser.add_argument(
+        "--dynamic-defense-state-weights-grid",
+        default="",
+        help="Optional ';'-separated defense weight triplets for dynamic scans.",
+    )
     parser.add_argument("--offense-trend-gap-grid", default="0.010,0.024,0.044,0.065")
     parser.add_argument("--offense-max-vol-grid", default="0.140,0.170,0.200,0.320")
     parser.add_argument("--offense-benchmark-ret10-grid", default="")
@@ -141,6 +151,25 @@ def _parse_weight_triplet(raw: str) -> dict[str, float]:
     if total <= 0:
         raise ValueError("weight triplet must sum to a positive number")
     return {key: float(weights[key] / total) for key in ("ml", "none", "v2")}
+
+
+def _parse_weight_triplet_grid(raw: str | None, fallback: dict[str, float]) -> list[dict[str, float]]:
+    if not raw:
+        return [dict(fallback)]
+
+    parsed: list[dict[str, float]] = []
+    seen: set[str] = set()
+    for chunk in str(raw).split(";"):
+        item = chunk.strip()
+        if not item:
+            continue
+        weights = _parse_weight_triplet(item)
+        key = json.dumps(weights, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        parsed.append(weights)
+    return parsed or [dict(fallback)]
 
 
 def _parse_float_grid(raw: str | None, fallback: list[float]) -> list[float]:
@@ -220,12 +249,20 @@ def _fmt_label_num(value: float) -> str:
     return str(value).replace(".", "p")
 
 
+def _weight_profile_label(weights: dict[str, float]) -> str:
+    def _fmt_pct(value: float) -> str:
+        raw = f"{float(value) * 100:.1f}".rstrip("0").rstrip(".")
+        return raw.replace(".", "p")
+
+    return f"ml{_fmt_pct(weights['ml'])}_none{_fmt_pct(weights['none'])}_v2{_fmt_pct(weights['v2'])}"
+
+
 def _build_dynamic_candidates(
     *,
     focus_state: str,
     base_weights: dict[str, float],
-    offense_weights: dict[str, float],
-    defense_weights: dict[str, float],
+    offense_weight_grid: list[dict[str, float]],
+    defense_weight_grid: list[dict[str, float]],
     trend_gap_grid: list[float],
     max_vol_grid: list[float],
     benchmark_ret10_grid: list[float] | None = None,
@@ -234,32 +271,41 @@ def _build_dynamic_candidates(
     ret10_values: list[float | None] = list(benchmark_ret10_grid or [])
     if not ret10_values:
         ret10_values = [None]
-    for trend_gap_min in trend_gap_grid:
-        for max_vol in max_vol_grid:
-            for benchmark_ret10_min in ret10_values:
-                label = f"{focus_state}_controller_gap{_fmt_label_num(trend_gap_min)}_vol{_fmt_label_num(max_vol)}"
-                controller_kind = "trend_gap_and_vol"
-                if benchmark_ret10_min is not None:
-                    label = f"{label}_ret10{_fmt_label_num(float(benchmark_ret10_min))}"
-                    controller_kind = "trend_gap_and_vol_and_ret10"
-                candidates.append(
-                    {
-                        "label": label,
-                        "blend_kind": "dynamic_controller",
-                        "weights": dict(base_weights),
-                        "state_ensemble_weights": {},
-                        "distance_to_default": 0.90,
-                        "focus_state": focus_state,
-                        "controller_kind": controller_kind,
-                        "offense_trend_gap_min": float(trend_gap_min),
-                        "offense_max_annual_vol": float(max_vol),
-                        "offense_benchmark_ret10_min": (
-                            float(benchmark_ret10_min) if benchmark_ret10_min is not None else np.nan
-                        ),
-                        "offense_weights": dict(offense_weights),
-                        "defense_weights": dict(defense_weights),
-                    }
-                )
+    multi_weight_profiles = len(offense_weight_grid) > 1 or len(defense_weight_grid) > 1
+    for offense_weights in offense_weight_grid:
+        offense_label = _weight_profile_label(offense_weights)
+        for defense_weights in defense_weight_grid:
+            defense_label = _weight_profile_label(defense_weights)
+            for trend_gap_min in trend_gap_grid:
+                for max_vol in max_vol_grid:
+                    for benchmark_ret10_min in ret10_values:
+                        label = f"{focus_state}_controller_gap{_fmt_label_num(trend_gap_min)}_vol{_fmt_label_num(max_vol)}"
+                        controller_kind = "trend_gap_and_vol"
+                        if benchmark_ret10_min is not None:
+                            label = f"{label}_ret10{_fmt_label_num(float(benchmark_ret10_min))}"
+                            controller_kind = "trend_gap_and_vol_and_ret10"
+                        if multi_weight_profiles:
+                            label = f"{label}_off{offense_label}_def{defense_label}"
+                        candidates.append(
+                            {
+                                "label": label,
+                                "blend_kind": "dynamic_controller",
+                                "weights": dict(base_weights),
+                                "state_ensemble_weights": {},
+                                "distance_to_default": 0.90,
+                                "focus_state": focus_state,
+                                "controller_kind": controller_kind,
+                                "offense_trend_gap_min": float(trend_gap_min),
+                                "offense_max_annual_vol": float(max_vol),
+                                "offense_benchmark_ret10_min": (
+                                    float(benchmark_ret10_min) if benchmark_ret10_min is not None else np.nan
+                                ),
+                                "offense_weights": dict(offense_weights),
+                                "defense_weights": dict(defense_weights),
+                                "offense_profile_label": offense_label,
+                                "defense_profile_label": defense_label,
+                            }
+                        )
     return candidates
 
 
@@ -402,6 +448,8 @@ def _run_dynamic_candidate(
             if pd.notna(candidate.get("offense_benchmark_ret10_min", np.nan))
             else np.nan
         ),
+        "offense_profile_label": str(candidate.get("offense_profile_label", "")),
+        "defense_profile_label": str(candidate.get("defense_profile_label", "")),
         "offense_state_weights": json.dumps(candidate["offense_weights"], ensure_ascii=False, sort_keys=True),
         "defense_state_weights": json.dumps(candidate["defense_weights"], ensure_ascii=False, sort_keys=True),
         "focus_state_days": int(focus_mask.sum()),
@@ -601,6 +649,8 @@ def main() -> None:
     }
     offense_weights = _parse_weight_triplet(args.offense_state_weights)
     defense_weights = _parse_weight_triplet(args.defense_state_weights)
+    dynamic_offense_weight_grid = _parse_weight_triplet_grid(args.dynamic_offense_state_weights_grid, offense_weights)
+    dynamic_defense_weight_grid = _parse_weight_triplet_grid(args.dynamic_defense_state_weights_grid, defense_weights)
     trend_gap_grid = _parse_float_grid(args.offense_trend_gap_grid, [0.010, 0.024, 0.044, 0.065])
     max_vol_grid = _parse_float_grid(args.offense_max_vol_grid, [0.140, 0.170, 0.200, 0.320])
     benchmark_ret10_grid = _parse_float_grid(args.offense_benchmark_ret10_grid, [])
@@ -637,8 +687,8 @@ def main() -> None:
     dynamic_candidates = _build_dynamic_candidates(
         focus_state=focus_state,
         base_weights=base_weights,
-        offense_weights=offense_weights,
-        defense_weights=defense_weights,
+        offense_weight_grid=dynamic_offense_weight_grid,
+        defense_weight_grid=dynamic_defense_weight_grid,
         trend_gap_grid=trend_gap_grid,
         max_vol_grid=max_vol_grid,
         benchmark_ret10_grid=benchmark_ret10_grid,
@@ -906,6 +956,8 @@ def main() -> None:
         "base_weights": base_weights,
         "offense_weights": offense_weights,
         "defense_weights": defense_weights,
+        "dynamic_offense_weight_grid": dynamic_offense_weight_grid,
+        "dynamic_defense_weight_grid": dynamic_defense_weight_grid,
         "offense_trend_gap_grid": trend_gap_grid,
         "offense_max_vol_grid": max_vol_grid,
         "offense_benchmark_ret10_grid": benchmark_ret10_grid,

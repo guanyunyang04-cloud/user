@@ -20,6 +20,8 @@
 - 市场状态边界：`regime_ma_window=50`、`regime_max_annual_vol=0.32`、`trend_up_low_vol,trend_up_high_vol`
 - 默认模型族：`lgbm`
 - 默认训练窗口：`ml_train_window_days=504`
+- 默认 focus-state 集成权重：`trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- 这组默认权重来自 2026-03-28 当前代码口径 formal R3 对照；当前 live 默认值已经从旧 base artifact 升级到 `v250`
 
 ## 3. 每日标准流程
 ### 第 1 步：更新高流动性股票池
@@ -49,12 +51,15 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - `--artifact-meta-path=models/latest_ml_model.json`
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--ml-model-family=lgbm`
+- `--enhanced-profile=up_low_breakout_v2`
+- `--ensemble-state-weights=trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
 - 当前执行主线共享默认参数
 
 `latest_ml_model.json` 里优先看：
 - `trained_at`
 - `latest_data_date`
 - `model_family`
+- `ml_config.state_ensemble_weights`
 - `validation_summary`
 - 当前 regime 参数与训练窗口信息
 
@@ -87,6 +92,8 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--output-dir=output/`
 - `--model-artifact=models/latest_ml_model.joblib`
 - `--stocks-file=universe/liquid500_latest.txt`
+- `--enhanced-profile=up_low_breakout_v2`
+- `--ensemble-state-weights=trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
 - 当前执行主线共享默认参数
 
 额外行为：
