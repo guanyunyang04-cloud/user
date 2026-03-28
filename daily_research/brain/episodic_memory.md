@@ -7985,3 +7985,46 @@ position,000001.SZ,1200,12.38,
 1. 执行端默认后端切换为：
    - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
 2. 当前 wrapper 继续保留“写回当前 execution 目录”的方式，不直接把整个工作区代码回滚到旧提交。
+
+## 2026-03-28 执行端最高收益回测复核
+### 本轮目标
+- 直接回测当前执行端实际在跑的旧快照后端，确认它在最新数据 `2026-03-27` 下，是否仍然是当前可确认的最高收益方案。
+
+### 本轮动作
+- 运行旧快照 worktree：
+  - `H:/new_tdx64/PYPlugins/user_snapshot_codex_e7d0f8d/daily_research/baseline/compare_ml_model_families.py`
+- 使用命令：
+  - `--model-families lgbm`
+  - `--end-date 20260327`
+  - `--windows recent_full:20250307:20260327,latest_weak:20250905:20260327`
+  - `--experiment-tag advanced_ml_model_family_compare_20260328_execution_backend_livecheck`
+- 对照读取当前代码侧今天已经形成的正式结果：
+  - `daily_research/output/market_feature_stack_ab_20260328_formal_r1`
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1`
+  - `daily_research/output/advanced_ml_model_family_compare_20260328_legacy_v7_lgbm_noautotrim_probe`
+
+### 结果
+- 当前执行端实际后端：
+  - `execution_backend_snapshot_lgbm`
+  - `full_excess_total_return = 958.89%`
+  - `full_excess_sharpe = 2.447`
+  - `recent_full_excess_total_return = 128.49%`
+  - `latest_weak_excess_total_return = 10.01%`
+- 当前代码里今天能确认到的几条高收益对照：
+  - `legacy_v7_lgbm_noautotrim_probe`
+    - `full_excess_total_return = 151.70%`
+    - `full_excess_sharpe = 0.882`
+  - `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+    - `full_excess_total_return = 110.99%`
+    - `full_excess_sharpe = 0.860`
+  - `best_dynamic_r1`
+    - `full_excess_total_return = 103.60%`
+    - `full_excess_sharpe = 0.817`
+  - `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+    - `full_excess_total_return = 98.14%`
+    - `full_excess_sharpe = 0.759`
+
+### 本轮结论
+1. 以 `2026-03-27` 为最新数据日重新回测后，当前执行端实际运行的旧快照后端，仍然是当前可确认的最高收益方案。
+2. 它不只是高于当前 live 默认 `expanded_v24 + v250`，也明显高于当前代码侧最强静态进攻腿、动态控制器，以及 `legacy_v7` 的 no-auto-trim probe。
+3. 因此截至 `2026-03-28`，把执行端保持在 `historical_snapshot_e7d0f8d (ma50 baseline, lgbm)`，与用户“我要的就是最高收益”的目标一致。
