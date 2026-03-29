@@ -92,11 +92,17 @@
 - 评估顺序固定为：先看 `full_annual_return / full_excess_sharpe`，再看 weak-window 与 focus-weak Sharpe，最后看 offense gating 占比、turnover 与 drawdown。
 - 如果 best cross-profile dynamic 只是明显补强 weak / focus-weak，但仍未超过静态 offense 的 `full_annual_return` 或 `full_excess_sharpe`，则应把它记为“稳健性 frontier”，而不是“新的收益前沿”。
 - 一旦在同口径 formal 下得到这个结论，就停止把当前 `v250 / v255 / controller` 参数空间当作第一研发前线，转向新机会集 / 新 alpha 家族。
-
 ### 2.9 最小矩阵长跑的恢复规则
 - 对 `deep_alpha/run_minimal_matrix.py` 这类长时间 formal stage，如果 shell 等待超时或中途中断，不要换新 tag 重来；优先用同一个 `root-tag` 直接重跑。
 - 这类 runner 会自动 `skip-existing`、复用已完成的 run / pretrain artifact，并在最后一块补齐后继续写出阶段 summary 与 selected recipe。
 - 只有当 `stage_<name>_selected.json` 已落盘时，才把该阶段视为正式完成；仅有各窗口 `metrics.json` 还不算阶段收口。
+
+### 2.10 Per-window cache 提速规则
+- 对 `deep_alpha` 这类多窗口正式矩阵，默认把“能否复用 per-window 中间产物”当成研究设计约束，而不是跑完后才补救。
+- 若改动没有触及窗口切分、股票池、lookback、targets 或 encoder / pretrain 本体，就优先复用 feature cache、sequence corpus cache 与已落盘 encoder / pretrain artifact。
+- 对只改 `score_head` 或 `ranking` 的实验，不要按“从零重跑整条慢链路”来思考；先判断哪些阶段可直接复用，再决定是否值得开跑。
+- 当前实测最重的时间瓶颈是每个 window 内部的 `[4/8] Building sequence features and targets` 与 `[6/8] Training deep alpha model`。
+- 因此前沿抬升预期弱的小旋钮候选，应先缩小矩阵或直接降级，避免浪费长时间全流程重训。
 ## 3. 分脑写入技能
 ### 3.1 写入路由
 - 当前稳定状态写 `semantic_memory.md`
@@ -148,39 +154,23 @@
   - 本轮证据链写 `episodic_memory.md`
   - 若结论推翻当前默认判断，再同步 `working_memory.md` 与 `action_system.md`
 
-## 4. Gemini 协同技能
-### 4.1 后台标准调用
-- Gemini 标准入口：`daily_research/tools/gemini_frontend.cmd`
-- 标准命令：
-  - `ask -Prompt "..."` / `ask -Prompt "..." -FreshSession` / `ask -Prompt "..." -Escalate`
-  - `ask -Prompt "..." -FreshSession -Model "gemini-3.1-pro-preview"`
-  - `closeout -WorkSummary "..." -NextStep "..."` / `sessions`
-- 前台命令只保留为可选人工交互：`open` / `open -ForceNew -Escalate` / `status` / `close`
+## 4. Gemini 协同状态
+### 4.1 当前结论
+- 从 `2026-03-29` 起，整个 Gemini 协作模块暂时中止。
+- `daily_research/tools/gemini_frontend.cmd` 只保留停用占位用途；不再作为默认工作流的一部分。
+- 不再要求 `ask / closeout / doctor / pin / unpin / sessions / open`，也不再要求 final-answer closeout。
 
-### 4.2 会话连续性规则
-- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式；默认续接目标仍是 `latest`，若已有更稳定的 session id 应显式固定。
-- 前台窗口只用于人工连续对话，不再是 Codex 调用 Gemini 的必要前置条件；关闭前台也不会阻止后续后台 `--resume`。
-- 若后台 `latest` 带回明显过时的上下文，Gemini 只能算“需甄别的第二意见”；优先在 prompt 重述本轮真实状态、尽量固定 session id，并始终以当前工作区文件、回测产物和执行结果为准。
-- 标准升级梯子固定为：`-FreshSession` -> `-FreshSession -Model "gemini-3.1-pro-preview"` 或 `-Escalate` -> `open -ForceNew -Escalate`。
-- `-Escalate` 固定表示“强制 fresh session；若未显式指定 `-Model`，默认切到 `gemini-3.1-pro-preview`”。
-- 是否升级由 Codex 按风险决定：普通补充意见继续后台 `--resume`；出现一次明显漂移先 `-FreshSession`；连续漂移、高风险判断或关键收尾复核直接 `-Escalate`。
+### 4.2 保留的最小记忆
+- 这轮尝试已经发生过，细节留在 `episodic_memory.md` 作为历史证据。
+- 当前只保留一个高层结论：
+  - Gemini 自动化协作链路比人工前台对话更脆弱，主要瓶颈在 session hygiene、后台一次一调用、超时与格式校验。
+- 在模块重新启动前，Gemini 输出不参与默认决策链。
 
-### 4.3 Codex / Gemini 分工
-- Codex 负责主线判断、文件修改、结果落盘与一致性收口
-- Gemini 负责交叉核对、补充视角、长文归纳和方案对照
-- 最终以当前工作区实际验证与落盘结果为准
-
-### 4.4 Final-answer closeout ritual
-- Before every final user-facing reply, Codex must run:
-  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
-- This is the default closing step for Gemini-backed collaboration, not just for frontend mode.
-- The closeout must cover two things:
-  - confirm what has already been done
-  - discuss the most sensible next step
-- If Gemini CLI is unavailable or the call fails, report that honestly; do not fabricate a closeout.
-- If `closeout` times out, first retry once with a shorter `WorkSummary`; if it still fails, report the failure honestly instead of inventing a Gemini conclusion.
-- The final answer to the user should reflect the Gemini closeout, but the actual workspace state remains the source of truth.
-- The closeout prompt itself should explicitly tell Gemini to treat the supplied work summary as authoritative and ignore conflicting stale session memory.
+### 4.3 若未来重启
+- 视为一次新的设计问题重新评估，不自动继承这轮 `session hygiene / closeout` 假设。
+- 重启前先确认：
+  - 目标到底是人工对话便利，还是 Codex 自动化复核
+  - 如果两者目标不同，应拆成不同工具，而不是继续混成一个模块
 
 ### 4.5 Dependent runtime sequencing
 - Do not parallelize producer-consumer runtime steps.

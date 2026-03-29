@@ -23,7 +23,7 @@
 
 ### 2.4 程序记忆
 - `daily_research/brain/procedural_memory.md`
-  - 已验证方法学、写入路由、Gemini 协同方式
+  - 已验证方法学、写入路由、以及 Gemini 协作尝试的停用结论
 
 ### 2.5 环境模型
 - `daily_research/brain/environment_model.md`

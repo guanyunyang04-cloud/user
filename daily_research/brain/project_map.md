@@ -1,7 +1,7 @@
 # Daily Research 项目地图
 
 ## 1. 用途
-本文档是 `daily_research` 的协作导航页，供你、Codex、Gemini CLI 在进入具体工作前快速对齐以下问题：
+本文档是 `daily_research` 的协作导航页，供你和 Codex 在进入具体工作前快速对齐以下问题：
 
 - 项目为什么会演化成现在这条主线；
 - 已经解决了哪些核心问题；
@@ -113,13 +113,14 @@
 
 ## 5. 当前真正的瓶颈
 ### 5.1 `deep_alpha` 的核心瓶颈是排序稳定性，不是想法不够多
-- 当前最重要的问题不是模型不够复杂，而是：
-  - 在 `trend_up_low_vol` 这类关键状态里，`deep_alpha` 的 winner-picking 稳定性不足。
-- 更具体地说，弱窗口失守主要集中在：
-  - `neutral_mixed`
-  - `pullback_rebound`
-  - `trend_breakout`
+- 当前最重要的问题不是模型不够复杂，而是 `trend_up_low_vol` 这类关键状态里的 winner-picking 稳定性不足。
+- 弱窗口失守主要集中在 `neutral_mixed / pullback_rebound / trend_breakout`。
 - 这说明它的问题是状态和结构耦合下的排序质量，而不是单纯的流动性或容量问题。
+
+### 5.1.1 当前最重的工程时间瓶颈是 per-window 全流程重训
+- 最近完成的 `score_head / ranking` formal 阶段表明，最耗时的不是 `run_minimal_matrix.py` 的矩阵编排，而是每个 walk-forward window 里的 `run_deep_alpha_research.py`。
+- 时间主要花在 `[4/8] Building sequence features and targets` 与 `[6/8] Training deep alpha model`。
+- 因此后续研究要把“少开无效分支”和“尽量复用 per-window cache”同时当成默认纪律，优先复用 feature cache / sequence corpus cache / 已落盘 encoder artifact，避免对只改 head 或 ranking 的实验重复走整条慢链路。
 
 ### 5.2 执行端的瓶颈已从“缺少控制器”转成“当前机会集天花板过低”
 - 当前默认主线并不是被新方案全面推翻，而是已经把 `v250`、`v255` 和双 profile 控制器的 frontier 基本画清。
@@ -184,18 +185,13 @@
   - 不同阶段可以有不同策略
   - 但阶段切换必须提高总利润，而不是牺牲旧收益前沿换局部稳定性
 ### 6.2 保持执行主线稳态
-- 当前仍在持续维持：
-  - 执行链路可运行
-  - 模型新鲜度保护
-  - 研究结果不能静默替换默认值
+- 当前仍在持续维持：执行链路可运行、模型新鲜度保护、研究结果不能静默替换默认值。
 
 ### 6.3 `deep_alpha` 的正式判决没有结束
-- 这条线没有被放弃，但研究目标已经从“扩更多新结构”收缩为：
-  - 先解决关键窗口 `undertrained`
-  - 先修关键状态下的排序稳定性
-  - 先证明多窗口一致性
-- `2026-03-29` 这条线已经真正进入正式矩阵：`deep_alpha_minimal_matrix_20260329_backbone_r1` 完成 `backbone`，winner 是 `patch_transformer` 无预训练版本，`masked pretrain` 当前没有通过 backbone 判决。
-- 这意味着“新 alpha 家族”现在不再只是方向判断，而是已经进入“先定 backbone，再进 `score_head`，再进 `ranking`”的正式节奏。
+- 这条线没有被放弃，但目标已经收缩为：先解决关键窗口 `undertrained`、先修关键状态下的排序稳定性、先证明多窗口一致性。
+- `2026-03-29` 这条线已经跑完整个最小矩阵：`deep_alpha_minimal_matrix_20260329_backbone_r1` 的 `backbone / score_head / ranking` 都已完成，winner 始终是 `patch_transformer + no pretrain + manual + plain`。
+- `masked pretrain`、`ridge / lgbm` score head、`ranked` loss 都没有把前沿抬高。
+- 这意味着“新 alpha 家族”已经完成第一轮最小充分判决，下一步不该继续深挖这几个已输掉的小旋钮，而要把资源投向真正改变机会集或表示能力的分支。
 
 ## 7. 接下来最值得投入的研究方向
 ### 7.1 第一优先级：转向新机会集 / 新 alpha 家族
@@ -217,7 +213,8 @@
   - 强化 `trend_up_low_vol` 下的排序稳定性
   - 优先修复弱窗口里的关键结构
   - 继续用 rolling liquid pool + `next_open` + 多窗口 walk-forward 验证
-- 当前最具体、最该继续的下一步已经收口为：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 的 winner 进入 `score_head`，不再在 backbone 阶段平行扩更多 recipe。
+- 当前最小矩阵已经证明：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 继续细磨 `score_head / ranking` 的边际收益很低。
+- 下一步更值得投入的是新机会集、新 encoder / 表示能力，或更彻底的收益翻译方式。
 
 ### 7.3 第三优先级：保持当前执行主线稳态
 - 当前执行默认值仍应继续停在：
@@ -255,7 +252,7 @@
   - 不再按坏市场盈利方案解释
 
 ## 9. 推荐协同阅读顺序
-后续无论是你、Codex 还是 Gemini CLI，建议统一按这个顺序建立上下文：
+后续无论是你还是 Codex，建议统一按这个顺序建立上下文：
 
 1. 先看 `daily_research/brain/semantic_memory.md`
    - 确认当前状态、主入口与文档边界

@@ -52,7 +52,7 @@
 - `daily_research/brain/working_memory.md`
   - 当前默认决策、优先级、停止规则
 - `daily_research/brain/procedural_memory.md`
-  - 已验证的方法学、文档技能、Gemini 协同技能
+  - 已验证的方法学、文档技能、以及 Gemini 协作尝试的停用结论
 - `daily_research/brain/environment_model.md`
   - 解释器、依赖、命令口径与工具入口
 - `daily_research/brain/action_system.md`

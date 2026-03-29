@@ -50,35 +50,19 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --help
 ```
 
 ## 6. AI 协同工具入口
-### Gemini 后台标准入口
+### Gemini 模块状态
 ```powershell
-daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_BACKEND_OK"
-daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRESH_OK" -FreshSession
-daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_ESCALATE_OK" -Escalate
-daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."
-daily_research\tools\gemini_frontend.cmd sessions
-```
-
-### Gemini 可选前台入口
-```powershell
-daily_research\tools\gemini_frontend.cmd open
-daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate
 daily_research\tools\gemini_frontend.cmd status
 daily_research\tools\gemini_frontend.cmd close
 ```
 
 ### 当前协同边界
-- Codex 可以后台续接 Gemini 会话，并读取命令结果。
-- Codex 不能直接接管一个可见 GUI 终端窗口去实时敲字和读屏。
-- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式；前台窗口只保留为可选的人工交互入口。
-- 关闭前台窗口，只会结束那一个可见交互窗口；不会阻止后续后台 `--resume` 续接。
-- 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`。
-- 从 `2026-03-29` 起，Gemini 升级策略也固定为三层：
-  - 普通情况：后台 `--resume`
-  - 一次明显漂移：`-FreshSession`
-  - 连续漂移、关键收尾或高风险复核：`-Escalate`，默认会切到 `gemini-3.1-pro-preview`
-- 如果需要把漂移上下文和当前协作彻底隔离开，可以直接开新窗口：
-  - `daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate`
+- 从 `2026-03-29` 起，整个 Gemini 协作模块暂时中止。
+- `gemini_frontend` 只保留停用占位和清理入口，不再作为默认研究、复核或收尾工具。
+- 关闭或查询状态可以继续走：
+  - `daily_research\tools\gemini_frontend.cmd status`
+  - `daily_research\tools\gemini_frontend.cmd close`
+- `ask / closeout / doctor / pin / unpin / sessions / open` 当前均视为停用动作。
 
 ## 7. 当前适用范围
 - 默认使用 `quant` 的脚本：
@@ -97,4 +81,4 @@ daily_research\tools\gemini_frontend.cmd close
 - 当前 Windows / PowerShell 环境下，`conda run -n quant ...` 在中文进度输出较多时可能触发 `gbk` 回显异常；
   对正式研究脚本，优先直接使用 `C:\Users\ASUS\miniconda3\envs\quant\python.exe`，避免“脚本已跑完但 `conda run` 在打印输出时失败”的假异常。
 - 如果未来升级了解释器、切换了核心包版本，或新增 GPU / CUDA 依赖，应先更新本文档，再启动新的正式实验批次。
-- 如果 Gemini 协同方式从 `latest` 切到固定 session id，应同步更新 `procedural_memory.md` 与 `brain_manifest.json`。
+- 如果未来重新启用 Gemini 协作模块，应先更新 `procedural_memory.md`，再恢复 `brain_manifest.json` 中的默认口径。

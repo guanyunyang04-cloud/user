@@ -107,10 +107,9 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `daily_research/execution/models/latest_ml_model.json`
 - `daily_research/execution/output/latest_trade_plan.txt`
 ## 6. Gemini Final Closeout
-- Before every final user-facing reply, run:
-  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
-- The closeout is used to confirm completed work and align on the next move.
-- It now uses background resume by default; a frontend window is optional and not required.
+- This step is temporarily disabled.
+- From `2026-03-29`, Gemini is no longer part of the default final-answer workflow.
+- Do not block delivery on Gemini closeout; current workspace evidence remains sufficient.
 
 ## 7. 执行安全边界
 - 日常不启用实时训练

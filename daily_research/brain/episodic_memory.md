@@ -8419,3 +8419,149 @@ position,000001.SZ,1200,12.38,
 - If context must be visually isolated from the old thread:
   - open a new frontend window with `open -ForceNew -Escalate`
 - Gemini remains a second-opinion tool; final truth still comes from the current workspace artifacts and commands.
+
+## 2026-03-29 `deep_alpha` 最小矩阵继续推进：`score_head` 与 `ranking` 都已正式收口
+
+### Objective
+- Continue the same formal root:
+  - `deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Finish the next two minimal-matrix stages:
+  - `score_head`
+  - `ranking`
+
+### Formal runs
+- Commands:
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase score_head --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase ranking --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Both stages initially hit shell timeout before the outer wrapper returned.
+- The correct handling remained the same as backbone:
+  - do not open a new tag
+  - inspect whether child processes are still running
+  - if the stage stops before writing `stage_<name>_selected.json`, rerun the same `root-tag`
+  - let `skip-existing` fill only the missing windows and write the final summary
+
+### Score-head result
+- `stage_score_head_selected.json` landed successfully.
+- Leaderboard:
+  - `enc-patch__pre-nopre__score-manual__rank-plain`: `mean_excess_sharpe = 0.744`, `mean_excess_total_return = 60.76%`
+  - `enc-patch__pre-nopre__score-lgbm__rank-plain`: `0.441`, `14.72%`
+  - `enc-patch__pre-nopre__score-ridge__rank-plain`: `-0.063`, `1.50%`
+- Conclusion:
+  - changing the score head did not improve the frontier
+  - manual stayed the winner
+
+### Ranking result
+- `stage_ranking_selected.json` landed successfully.
+- Leaderboard:
+  - `enc-patch__pre-nopre__score-manual__rank-plain`: `mean_excess_sharpe = 0.744`, `mean_excess_total_return = 60.76%`
+  - `enc-patch__pre-nopre__score-manual__rank-ranked`: `0.638`, `28.26%`
+- Conclusion:
+  - adding ranking/listwise loss did not improve the frontier
+  - plain stayed the winner
+
+### Time bottleneck learned
+- The main time bottleneck in this round was not `run_minimal_matrix.py` orchestration.
+- The heavy part was each walk-forward window inside `run_deep_alpha_research.py`, especially:
+  - `[4/8] Building sequence features and targets`
+  - `[6/8] Training deep alpha model`
+- `score_head` was noticeably heavier than `ranking`, and the slowest new branch was `score-lgbm`.
+
+### Reusable rule
+- Future `deep_alpha` research must treat per-window cache reuse as a first-class design constraint.
+- If a new branch does not change windows, pool, lookback, targets, or encoder/pretrain itself, prefer reusing:
+  - feature cache
+  - sequence corpus cache
+  - already-landed encoder / pretrain artifacts
+- Do not reopen full slow chains by default for small `score_head / ranking` tweaks that already look frontier-weak.
+
+## 2026-03-29 Gemini CLI session hygiene was repaired into a usable default workflow
+
+### Objective
+- Fix the real collaboration pain points in `daily_research/tools/gemini_frontend.ps1` so Gemini CLI can be used efficiently, repeatedly, and with less session drift.
+- Target issues:
+  - `closeout` frequently timed out
+  - background `latest` could drift into stale or utility-heavy sessions
+  - there was no stable way to inspect or pin a good analysis thread
+
+### What changed
+- Patched `daily_research/tools/gemini_frontend.ps1` to add or stabilize:
+  - `doctor`
+  - `pin`
+  - `unpin`
+  - remembered `analysis_session`
+  - smarter resume routing for `ask`
+- `ask` now prefers:
+  - pinned session
+  - remembered analysis session
+  - latest non-utility analysis session
+  - literal `latest` only as the last fallback
+- `pin -Session latest` now means “pin the latest analysis session”, not blindly pin the latest utility/closeout thread.
+- Added explicit escape hatch:
+  - `-Session raw_latest`
+- Reworked `closeout`:
+  - default fresh session
+  - default model `gemini-3.1-pro-preview`
+  - short ASCII-only response contract:
+    - `Done: ...`
+    - `Next: ...`
+    - `Risk: ...`
+- Added UTF-8 output handling inside the background process wrapper to reduce Chinese garbling.
+
+### Validation
+- `daily_research\tools\gemini_frontend.cmd ask -Prompt "请只回复：ASK_PATH_OK" -FreshSession`
+  - returned `ASK_PATH_OK`
+- `daily_research\tools\gemini_frontend.cmd ask -FreshSession -Prompt "In one short English sentence, summarize why session hygiene matters for a CLI assistant."`
+  - returned a valid answer
+  - then wrote `analysis_session = 47` into `daily_research/cache/gemini_frontend/preferences.json`
+- `daily_research\tools\gemini_frontend.cmd ask -Prompt "Name the topic we just discussed in one word."`
+  - returned `Hygiene.`
+  - showing the default non-fresh path continued the remembered analysis session instead of a polluted `latest`
+- `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+  - returned valid structured output:
+    - `Done: ...`
+    - `Next: ...`
+    - `Risk: ...`
+- A later end-of-turn validation with a longer summary still hit:
+  - `Gemini closeout retry timed out.`
+  - so the truthful state is "much more usable than before, but not yet perfectly deterministic"
+- `doctor` now reports the recommended analysis session separately from utility/closeout-heavy recent threads.
+- `pin -Session latest` pinned session `47`, not the newer closeout thread.
+- `unpin` cleared the pin while preserving `analysis_session`.
+
+### Bugs found and fixed during repair
+- `Start-Process` argument passing was unreliable for complex prompts; switched the background runner to a `Start-Job` wrapper with array-style argument expansion.
+- A PowerShell collection-enumeration bug in `Update-Preferences` caused:
+  - `Collection was modified; enumeration operation may not execute.`
+  - fixed by iterating over a snapshot of keys.
+- Old long closeout prompts plus fresh-session overhead were the main reason the previous `closeout` path kept timing out.
+
+### Operational rule learned
+- Treat analysis-thread continuity and closeout hygiene as two separate lanes.
+- Use `doctor` when session quality is unclear.
+- Let `ask` reuse the remembered analysis lane by default.
+- Use `pin` only when a specific thread must stay fixed across several rounds.
+- Keep Gemini as second opinion only; current workspace artifacts remain authoritative.
+
+## 2026-03-29 Gemini 协作模块被整体暂停
+
+### Trigger
+- After the session-hygiene and closeout experiments, the user decided the entire Gemini collaboration module should be paused.
+- The new requirement was:
+  - stop the whole module for now
+  - keep only the minimal memory that this attempt happened
+
+### Action taken
+- Replaced `daily_research/tools/gemini_frontend.ps1` with a suspended placeholder.
+- The placeholder now:
+  - keeps `status`
+  - keeps `close` for local cache cleanup
+  - blocks `open / sessions / ask / closeout / doctor / pin / unpin`
+- Cleared the active Gemini frontend cache expectation from current brain docs.
+- Removed Gemini from default workflow and from final-answer closeout requirements.
+
+### Active conclusion
+- Gemini is not part of the default collaboration path right now.
+- The only active memory that should remain is:
+  - we tried to productize Gemini-assisted collaboration
+  - the automation layer was more fragile than desired
+  - the module is now temporarily suspended

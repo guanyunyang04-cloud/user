@@ -123,8 +123,9 @@
   - 但没有把年化前沿抬过静态 offense；
   - 继续深挖这组参数的边际收益已明显下降。
 - `2026-03-29` 已把“新 alpha 家族”推进到 formal entry：`daily_research/output/deep_alpha_minimal_matrix_20260329_backbone_r1`
-- 当前 `deep_alpha` backbone winner 已明确为 `enc-patch__pre-nopre__score-manual__rank-plain`，`selection_scope = eligible_only`，`mean_excess_sharpe = 0.744`，`mean_excess_total_return = 60.76%`
-- `patch_transformer` 无预训练版本当前优于 `gru`；`masked pretrain` 既不是 winner，也出现 `pretrain_undertrained_count = 1`；因此下一步直接进入 `score_head`
+- 当前 `deep_alpha_minimal_matrix_20260329_backbone_r1` 已经连续完成 `backbone / score_head / ranking`
+- 最终 winner 仍是 `enc-patch__pre-nopre__score-manual__rank-plain`，`selection_scope = eligible_only`，`mean_excess_sharpe = 0.744`，`mean_excess_total_return = 60.76%`
+- `patch_transformer` 无预训练版本当前优于 `gru`；`masked pretrain`、`ridge`、`lgbm` head、`ranked` loss 都没有把前沿抬高，因此这一轮最小矩阵已经说明：当前不该继续在 `score_head / ranking` 细旋钮上久留
 - 底层市场状态层已经完成架构升级：
   - `quadrant` 继续保留为兼容标签
   - 新默认研究输入同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`
@@ -158,7 +159,8 @@
    - `next_open`
    - 多窗口 walk-forward
 6. 在新机会集没有跑出明确新前沿前，执行默认值不变，不允许因为“旧 offense 更高”或“动态更稳”而反复摇摆 live anchor。
-7. 当前这条“新 alpha 家族”主入口已经具体化为 `daily_research/deep_alpha/run_minimal_matrix.py --phase backbone`；winner 已产出，下一步直接进入 `score_head`。
+7. 当前这条“新 alpha 家族”主入口已经完成最小矩阵正式收口：`daily_research/deep_alpha/run_minimal_matrix.py --phase backbone / score_head / ranking` 都已落盘，winner 始终保持 `patch + no pretrain + manual + plain`。
+8. 这条线当前最大的时间瓶颈不是矩阵包装层，而是每个 window 里的 `run_deep_alpha_research.py` 全流程重训，尤其是 `[4/8] Building sequence features and targets` 与 `[6/8] Training deep alpha model`；后续新研究必须优先考虑复用 per-window cache 提速。
 
 ### 优先级 B：维持当前执行主线稳态
 目标：
@@ -180,8 +182,9 @@
    - `next_open`
    - 多窗口 walk-forward
 2. 当前 backbone 已选出 `patch_transformer + no pretrain + manual + plain`。
-3. 下一步直接进入 `score_head`；`masked pretrain` 先保留为 challenger，不作为默认 backbone 路线。
-4. 只有在后续阶段多窗口持续改善且真正把 clean annual frontier 往上抬时，才允许讨论接近执行端。
+3. 当前最小矩阵已经证明：`masked pretrain` 先保留为 challenger，`ridge / lgbm` score head 与 `ranked` loss 都不应作为当前默认推进方向。
+4. 后续若继续做 `deep_alpha`，优先级应转向真正改变机会集或表示能力的分支，而不是重复深挖已输掉的 `score_head / ranking` 小旋钮。
+5. 所有后续新研究都要优先利用 per-window 的 feature / sequence corpus / 已落盘 encoder artifact 等缓存；若改动不触及窗口、股票池、lookback 或 encoder 本体，就不应从零重建整条链路。
 
 ### 优先级 D：把治理规则变成日常流程
 目标：

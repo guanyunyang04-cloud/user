@@ -18,17 +18,11 @@
 - 工作区体检：
   - `python daily_research/tools/workspace_maintenance.py report`
 - Gemini 标准协同：
-  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
-  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..." -FreshSession`
-  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..." -Escalate`
-  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
-  - `daily_research\tools\gemini_frontend.cmd sessions`
-  - 可选人工前台：`open / status / close`
-  - 升级隔离前台：`open -ForceNew -Escalate`
+  - 当前模块已暂时中止
+  - 只保留占位入口：`daily_research\tools\gemini_frontend.cmd status` / `daily_research\tools\gemini_frontend.cmd close`
 - 当前默认规则：
-  - Gemini 默认走后台 `--resume` 续接
-  - 前台窗口只作为可选人工交互入口
-  - 若出现明显幻觉/陈旧上下文，先 `-FreshSession`，再视风险升级到 `-Escalate`
+  - Gemini 不再参与默认工作流与 final closeout
+  - 当前只保留一条记忆：我们尝试过这套协作模块，但暂时停用
 
 ## 4. 编码与读取口径
 - 脑文件统一使用 UTF-8
