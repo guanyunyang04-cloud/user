@@ -190,7 +190,9 @@
 ### 6.3 `deep_alpha` 的正式判决没有结束
 - 这条线没有被放弃，但目标已经收缩为：先解决关键窗口 `undertrained`、先修关键状态下的排序稳定性、先证明多窗口一致性。
 - `2026-03-29` 这条线已经跑完整个最小矩阵：`deep_alpha_minimal_matrix_20260329_backbone_r1` 的 `backbone / score_head / ranking` 都已完成，winner 始终是 `patch_transformer + no pretrain + manual + plain`。
-- `masked pretrain`、`ridge / lgbm` score head、`ranked` loss 都没有把前沿抬高。
+- `relation` 阶段也已补完，`relation_layer` 没有把 rolling `liquid500` 前沿抬高。
+- 但同日机会集切到 rolling `liquid800` 后，前沿发生了新变化：`liquid800_plain` 把 `deep_alpha` 的 mean annual frontier 从 `27.38%` 抬到 `38.38%`，而此前在 `liquid500` 输掉的 `ranked` 也重新活了，形成 `liquid800_ranked (mean_excess_sharpe = 1.003)` 这条更激进前沿。
+- 同时，“直接极端集中持仓”这条收益翻译路线已经在 `liquid800_ranked_hold3_w40` 上被正式打掉；它放大了单窗收益，但破坏了整体前沿。
 - 这意味着“新 alpha 家族”已经完成第一轮最小充分判决，下一步不该继续深挖这几个已输掉的小旋钮，而要把资源投向真正改变机会集或表示能力的分支。
 
 ## 7. 接下来最值得投入的研究方向
@@ -214,7 +216,8 @@
   - 优先修复弱窗口里的关键结构
   - 继续用 rolling liquid pool + `next_open` + 多窗口 walk-forward 验证
 - 当前最小矩阵已经证明：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 继续细磨 `score_head / ranking` 的边际收益很低。
-- 下一步更值得投入的是新机会集、新 encoder / 表示能力，或更彻底的收益翻译方式。
+- 但 `2026-03-29` 的 rolling `liquid800` formal 结果也补充了一条更细的判断：机会集变化后，少数对股票池敏感的小旋钮可以被有限度重开，例如 `ranked` 在 `liquid800` 上就不再是完全失败；相反，`hold3_w40` 这种更激进收益翻译方式已经证明不值得继续优先推进。
+- 因此下一步更值得投入的是围绕 rolling `liquid800` 继续找新的表示能力或状态/窗口控制方式，而不是回到 `liquid500` 深挖已输掉的小旋钮，也不是继续把集中持仓推得更极端。
 
 ### 7.3 第三优先级：保持当前执行主线稳态
 - 当前执行默认值仍应继续停在：

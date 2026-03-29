@@ -24,7 +24,7 @@ from daily_research.baseline.data_provider import (
 
 
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
-STAGE_SEQUENCE = ("backbone", "score_head", "ranking")
+STAGE_SEQUENCE = ("backbone", "score_head", "ranking", "relation")
 SCORE_HEAD_CHOICES = ("manual", "ridge", "lgbm")
 
 
@@ -48,12 +48,14 @@ class RecipeSpec:
     ranking_profile: str
     ranking_loss_weight: float
     listwise_loss_weight: float
+    relation_layer: bool = False
 
     @property
     def slug(self) -> str:
         encoder = "gru" if self.encoder_family == "gru" else "patch"
         pretrain = "maskedpre" if self.use_pretrain else "nopre"
-        return f"enc-{encoder}__pre-{pretrain}__score-{self.score_head_method}__rank-{self.ranking_profile}"
+        relation = "rel" if self.relation_layer else "norel"
+        return f"enc-{encoder}__pre-{pretrain}__score-{self.score_head_method}__rank-{self.ranking_profile}__{relation}"
 
     @property
     def display_name(self) -> str:
@@ -64,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the minimal sufficient deep_alpha comparison matrix in phased walk-forward form."
     )
-    parser.add_argument("--phase", choices=["backbone", "score_head", "ranking", "all"], default="all")
+    parser.add_argument("--phase", choices=["backbone", "score_head", "ranking", "relation", "all"], default="all")
     parser.add_argument("--root-tag", default=f"deep_alpha_minimal_matrix_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     parser.add_argument("--dry-run", action="store_true", help="Only write the matrix plan and command list; do not execute runs.")
     parser.add_argument("--skip-existing", action="store_true", help="Reuse finished runs under the same root-tag.")
@@ -329,6 +331,29 @@ def _ranking_recipes(base_recipe: RecipeSpec, args: argparse.Namespace) -> list[
     ]
 
 
+def _relation_recipes(base_recipe: RecipeSpec) -> list[RecipeSpec]:
+    return [
+        RecipeSpec(
+            encoder_family=base_recipe.encoder_family,
+            use_pretrain=base_recipe.use_pretrain,
+            score_head_method=base_recipe.score_head_method,
+            ranking_profile=base_recipe.ranking_profile,
+            ranking_loss_weight=base_recipe.ranking_loss_weight,
+            listwise_loss_weight=base_recipe.listwise_loss_weight,
+            relation_layer=False,
+        ),
+        RecipeSpec(
+            encoder_family=base_recipe.encoder_family,
+            use_pretrain=base_recipe.use_pretrain,
+            score_head_method=base_recipe.score_head_method,
+            ranking_profile=base_recipe.ranking_profile,
+            ranking_loss_weight=base_recipe.ranking_loss_weight,
+            listwise_loss_weight=base_recipe.listwise_loss_weight,
+            relation_layer=True,
+        ),
+    ]
+
+
 def _selected_recipe_from_file(path: Path) -> RecipeSpec | None:
     if not path.exists():
         return None
@@ -557,6 +582,8 @@ def _build_finetune_cmd(
         cmd.extend(["--csv-folder", args.csv_folder])
     if recipe.use_pretrain and pretrained_artifact is not None:
         cmd.extend(["--pretrained-encoder-path", _relative_posix(pretrained_artifact)])
+    if recipe.relation_layer:
+        cmd.append("--relation-layer")
     _append_runtime_flags(cmd, args)
     _append_cache_flags(cmd, args)
     return cmd
@@ -610,6 +637,7 @@ def _load_run_record(
         "ranking_profile": recipe.ranking_profile,
         "ranking_loss_weight": recipe.ranking_loss_weight,
         "listwise_loss_weight": recipe.listwise_loss_weight,
+        "relation_layer": bool(recipe.relation_layer),
         "finetune_status": training.get("status", ""),
         "finetune_epochs_completed": training.get("epochs_completed", 0),
         "finetune_best_epoch": training.get("best_epoch", 0),
@@ -660,6 +688,7 @@ def _summarize_stage(records_df: pd.DataFrame) -> pd.DataFrame:
                 "ranking_profile": first["ranking_profile"],
                 "ranking_loss_weight": float(first["ranking_loss_weight"]),
                 "listwise_loss_weight": float(first["listwise_loss_weight"]),
+                "relation_layer": bool(first["relation_layer"]),
                 "window_count": int(len(group)),
                 "finetune_undertrained_count": int(group["finetune_status"].eq("undertrained").sum()),
                 "pretrain_undertrained_count": int(group["pretrain_status"].eq("undertrained").sum()),
@@ -795,6 +824,11 @@ def _stage_recipes(
         if base_recipe is None:
             raise RuntimeError("stage_ranking requires stage_score_head_selected.json. Run score_head stage first.")
         return _ranking_recipes(base_recipe, args)
+    if stage_name == "relation":
+        base_recipe = _selected_recipe_from_file(_selected_path(matrix_root, "ranking"))
+        if base_recipe is None:
+            raise RuntimeError("stage_relation requires stage_ranking_selected.json. Run ranking stage first.")
+        return _relation_recipes(base_recipe)
     raise ValueError(f"Unsupported stage: {stage_name}")
 
 
@@ -880,6 +914,7 @@ def _execute_stage(
             "ranking_profile": str(winner_row["ranking_profile"]),
             "ranking_loss_weight": float(winner_row["ranking_loss_weight"]),
             "listwise_loss_weight": float(winner_row["listwise_loss_weight"]),
+            "relation_layer": bool(winner_row["relation_layer"]),
         },
         "recipe_slug": str(winner_row["recipe_slug"]),
         "summary": {

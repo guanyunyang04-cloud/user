@@ -8565,3 +8565,87 @@ position,000001.SZ,1200,12.38,
   - we tried to productize Gemini-assisted collaboration
   - the automation layer was more fragile than desired
   - the module is now temporarily suspended
+
+## 2026-03-29 Deep Alpha 新机会集 formal：rolling liquid800 + ranked / concentration 复验
+
+### 背景
+- `deep_alpha_minimal_matrix_20260329_backbone_r1` 已经完成 `backbone / score_head / ranking`，当前 rolling `liquid500` winner 固定为：
+  - `enc-patch__pre-nopre__score-manual__rank-plain`
+- 同日又补完了 `relation` 阶段：
+  - `enc-patch__pre-nopre__score-manual__rank-plain__norel`
+  - `mean_excess_sharpe = 0.744`
+  - 明显高于 `__rel` 的 `0.413`
+- 因此 `relation_layer` 在当前 `liquid500` 机会集下正式降级。
+
+### 这轮目标
+- 不再继续在 rolling `liquid500` 里磨已经输掉的小旋钮；
+- 直接把同一 winner 推到真正的新机会集上，检查能否把 clean annual frontier 抬出新台阶；
+- 然后只在这个更强机会集里，有限度地重开最有依据的小旋钮与收益翻译候选。
+
+### 产物
+- 机会集 formal 对照：
+  - `daily_research/output/deep_alpha_opportunity_liquid800_20260329_formal_r1`
+- 关键文件：
+  - `liquid800_vs_liquid500_window_compare.csv`
+  - `liquid800_vs_liquid500_summary.csv`
+  - `summary.md`
+  - `candidate_window_compare.csv`
+  - `candidate_summary.csv`
+  - `candidate_summary.md`
+
+### 结果一：rolling liquid800 明确强于当前 liquid500 frontier
+- `liquid500_plain`
+  - `mean_annual_return = 27.38%`
+  - `mean_excess_annual_return = 16.16%`
+  - `mean_excess_sharpe = 0.744`
+  - `min_excess_sharpe = -0.529`
+- `liquid800_plain`
+  - `mean_annual_return = 38.38%`
+  - `mean_excess_annual_return = 27.32%`
+  - `mean_excess_sharpe = 0.870`
+  - `min_excess_sharpe = 0.634`
+- 这说明：
+  - rolling `liquid800` 已经不是“略有希望”的旁支，而是当前 `deep_alpha` 更强的新机会集；
+  - 它不仅抬高了均值年化和均值超额 Sharpe，还把最差窗口从负 Sharpe 拉回到正 Sharpe。
+
+### 结果二：`ranked` 在新机会集里重新变成可研究分支
+- 在 rolling `liquid500` 最小矩阵里，`ranked` 曾输给 `plain`；
+- 但放到 rolling `liquid800` 后，`liquid800_ranked` 变成了新的激进前沿：
+  - `mean_annual_return = 38.29%`
+  - `mean_excess_annual_return = 25.94%`
+  - `mean_excess_sharpe = 1.003`
+  - `min_excess_sharpe = -0.367`
+  - `mean_excess_max_drawdown = -0.251`
+- 形态很清楚：
+  - 均值 Sharpe 与回撤优于 `liquid800_plain`
+  - 但重新引入了负窗口
+- 因而当前判断是：
+  - `liquid800_plain` = 稳定前沿
+  - `liquid800_ranked` = 激进前沿
+
+### 结果三：更激进的集中持仓翻译方式没有成立
+- 在 `liquid800_ranked` 上又做了：
+  - `holding_count = 3`
+  - `max_weight = 0.40`
+- 结果 `liquid800_ranked_hold3_w40`：
+  - `mean_annual_return = 32.58%`
+  - `mean_excess_annual_return = 20.49%`
+  - `mean_excess_sharpe = 0.685`
+  - `min_excess_sharpe = -0.777`
+- 这说明：
+  - 它虽然继续放大了中间窗口；
+  - 但整体前沿、最差窗口和鲁棒性都明显退化；
+  - “直接把当前候选压缩成 3 持仓 + 0.40 上限”不是当前通往 `100%+` 年化的正确下一跳。
+
+### 这轮学到的方法
+1. 机会集变化后，可以有限度地重开此前输掉的小旋钮，但必须先证明新机会集本身更强。
+2. 对当前项目而言，rolling `liquid800` 已经满足这个前提，所以 `ranked` 的重开是合理的。
+3. 收益翻译方式要在更强机会集上测，但不能因为单窗更猛就继续推；一旦 `3` 窗里破坏了 `2` 窗，就直接降级。
+
+### 当前结论
+1. `deep_alpha` 当前真正值得继续投入的前沿，已经从 `liquid500_plain` 切换到 rolling `liquid800`。
+2. 当前需要维护两条 `deep_alpha` 候选：
+   - 稳定前沿：`liquid800_plain`
+   - 激进前沿：`liquid800_ranked`
+3. `relation_layer` 与 `ranked_hold3_w40` 都已正式失败，不再作为这一轮第一优先级。
+4. 这轮虽然把 clean annual frontier 从 `27%` 级抬到了 `38%` 级，但离用户目标的 `100%+` 年化仍有明显距离；后续还需要新的表示能力或更聪明的状态/窗口控制，而不是继续极端集中持仓。
