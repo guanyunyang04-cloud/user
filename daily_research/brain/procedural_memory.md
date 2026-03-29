@@ -181,3 +181,26 @@
   - `run_trade_plan.py` consumes `latest_ml_model.joblib`
 - If a downstream step reads an artifact produced by the upstream step, run them sequentially and verify the downstream output reflects the new artifact timestamp.
 - If parallel execution was started by mistake, rerun the consumer step after the producer finishes and record the dependency pitfall in `episodic_memory.md`.
+### 4.6 Same-Protocol Bridge Validation
+- When execution default and research live anchor differ mainly by one numeric knob, compare them under the exact same protocol before changing the live default.
+- First lock the shared parts:
+  - same stock pool logic
+  - same `next_open` execution mode
+  - same feature/profile stack
+  - same state-ensemble weights
+  - same walk-forward windows
+- Then compare only the target knob rows. For the 2026-03-29 execution upgrade, the decisive bridge rows were:
+  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 260`
+  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+- Decide from the metric delta table, not from narrative memory. The minimum decision set is:
+  - `full_excess_total_return`
+  - `full_excess_sharpe`
+  - weak-window excess total return / Sharpe
+  - focus-state weak-window Sharpe
+  - turnover / drawdown
+- If the winning knob cannot yet pass through the execution entrypoints, patch the CLI / wrapper first; otherwise the project will keep "thinking" it upgraded while the live artifact still runs the old value.
+- Confirm the upgrade on three layers:
+  - formal compare row
+  - artifact internal `ml_config`
+  - downstream consumer output such as `latest_trade_plan.txt`
+- If artifact internal config and outer meta JSON disagree, trust the artifact first, patch the meta writer, and rerun the producer step so later audits do not get misled.

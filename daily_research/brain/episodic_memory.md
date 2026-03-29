@@ -8138,3 +8138,79 @@ position,000001.SZ,1200,12.38,
    - `legacy_v7 + v255` 作为 offense 锚点
    但它们不再与执行 wrapper 的默认后端混写。
 3. 后续若要把执行端从“安全桥接版”继续升级到更贴近当前研究 live 默认值，必须先补做同口径桥接验证，而不是再次直接切到一个高收益表象更强的后端。
+## 2026-03-29 Same-Protocol Bridge Validation: execution `v250@260` vs live-anchor `v250@520`
+### Objective
+- Decide whether the current execution default should stay on the 260-tree safe bridge or be upgraded to the current-code live anchor.
+
+### Bridge evidence
+- Reused the formal output directory:
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+- Locked the protocol to the same stack:
+  - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+  - `liquid500`
+  - `next_open`
+  - `504 / 21`
+  - weak window `20250905 -> 20260319`
+- Only changed one knob:
+  - `lgbm_n_estimators = 260`
+  - `lgbm_n_estimators = 520`
+
+### Key bridge result
+- `v250 @ 504 / 21 / 260`
+  - `full_excess_total_return = 61.81%`
+  - `full_excess_sharpe = 0.549`
+  - `recent_full_excess_total_return = 23.09%`
+  - `recent_full_excess_sharpe = 1.039`
+  - `weak_window_20250905_20260319_excess_total_return = 6.86%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.692`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.547`
+  - `full_avg_turnover = 0.732`
+- `v250 @ 504 / 21 / 520`
+  - `full_excess_total_return = 65.96%`
+  - `full_excess_sharpe = 0.663`
+  - `recent_full_excess_total_return = 19.93%`
+  - `recent_full_excess_sharpe = 0.885`
+  - `weak_window_20250905_20260319_excess_total_return = 11.38%`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.154`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.139`
+  - `full_avg_turnover = 0.725`
+
+### Engineering obstacle and fix
+- During implementation, found that the execution path could not actually express the winning knob:
+  - `daily_research/execution/entrypoint_utils.py` had no `--lgbm-n-estimators` injection
+  - `daily_research/baseline/train_trade_model.py` and `daily_research/baseline/generate_daily_trade_plan.py` also lacked this CLI argument
+- Fixed by:
+  - adding `--lgbm-n-estimators`
+  - wiring it into `MLAplhaConfig`
+  - making the execution wrapper inject `520`
+  - exposing `LGBM Trees: 520` in `latest_trade_plan.txt`
+- Found one more audit mismatch after the first retrain:
+  - artifact internal `ml_config` already showed `520`
+  - outer `latest_ml_model.json` initially did not write `lgbm_n_estimators`
+- Patched the meta writer and reran `update_model.py` so the external JSON and the internal artifact now agree.
+
+### Live verification
+- Retrained with:
+  - `python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504`
+- Final live model artifact:
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `trained_at = 2026-03-29 09:59:12`
+  - `model_family = lgbm`
+  - `lgbm_n_estimators = 520`
+  - `enhanced_profile = up_low_breakout_v2`
+  - `state_ensemble_weights.trend_up_low_vol = ml:0.25 / none:0.25 / v2:0.50`
+- Rebuilt the plan after training finished:
+  - `python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 1d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50`
+- Final plan artifact:
+  - `daily_research/execution/output/latest_trade_plan.txt`
+  - `generated_at = 2026-03-29 09:59:28`
+  - text now includes `LGBM Trees: 520`
+  - result remains `今日无明确调仓动作`
+
+### Conclusion
+1. The bridge validation is strong enough to support upgrading the execution default from `v250 @ 504 / 21 / 260` to `v250 @ 504 / 21 / 520`.
+2. This is a current-code upgrade, not a return to the invalid old snapshot backend.
+3. Future execution-path upgrades must keep the same validation discipline:
+   - same protocol first
+   - then CLI / wrapper expressibility
+   - then artifact + meta + downstream-plan triple verification

@@ -62,3 +62,13 @@
 - 主脑与分脑 manifest 必须互相可解析、可追踪
 - 新增项目时，先补脑，再接入主脑 child_brains
 - 任何脑网络调整完成后，必须跑 `doc_guard.py check`
+## 3.1 Live-Path Parameter Upgrade Discipline
+- If the chosen better config differs from the current live path by only one knob, do not upgrade by narrative memory alone.
+- First prove it with same-protocol rows.
+- Then check whether the live entrypoints can actually express that knob.
+- If the CLI / wrapper cannot express it yet, patch that path before declaring the upgrade "done".
+- Final verification should cover three layers:
+  - formal comparison evidence
+  - producer artifact internal config
+  - downstream consumer output
+- If producer artifact and outer summary/meta disagree, trust the artifact first, fix the summary writer, and rerun the producer so the audit trail stays consistent.

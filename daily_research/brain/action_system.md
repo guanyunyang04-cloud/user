@@ -28,7 +28,7 @@
 
 ## 3. 当前默认执行口径
 - 主线：
-  - `advanced_ml_safe_bridge_current_code (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 - 当前执行后端：
   - 当前仓 `baseline/train_trade_model.py`
   - 当前仓 `baseline/generate_daily_trade_plan.py`
@@ -47,6 +47,7 @@
   - `lgbm`
 - 默认训练窗口：
   - `ml_train_window_days=504`
+- `lgbm_n_estimators=520`
 - 默认状态集成：
   - 当前 wrapper 默认注入 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
   - 当前 wrapper 默认注入 `enhanced_profile=up_low_breakout_v2`

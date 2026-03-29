@@ -131,6 +131,7 @@ def parse_args():
     parser.add_argument("--ml-max-train-rows", type=int, default=200000, help=argparse.SUPPRESS)
     parser.add_argument("--ml-random-seed", type=int, default=7, help=argparse.SUPPRESS)
     parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="histgb", help=argparse.SUPPRESS)
+    parser.add_argument("--lgbm-n-estimators", type=int, default=260, help=argparse.SUPPRESS)
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70, help=argparse.SUPPRESS)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20, help=argparse.SUPPRESS)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10, help=argparse.SUPPRESS)
@@ -657,6 +658,8 @@ def _write_trade_plan_txt(
         lines.append(f"状态周期权重: {model_info['state_horizon_profiles']}")
     if model_info.get("state_ensemble_weights"):
         lines.append(f"状态集成权重: {model_info['state_ensemble_weights']}")
+    if model_info.get("lgbm_n_estimators"):
+        lines.append(f"LGBM Trees: {model_info['lgbm_n_estimators']}")
     if model_info.get("enhanced_profile"):
         lines.append(f"Enhanced Profile: {model_info['enhanced_profile']}")
     validation_summary = model_info.get("validation_summary")
@@ -781,6 +784,7 @@ def main():
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
@@ -892,6 +896,7 @@ def main():
             "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
             "model_family": str(ml_cfg.model_family),
+            "lgbm_n_estimators": int(ml_cfg.lgbm_n_estimators) if str(ml_cfg.model_family) == "lgbm" else None,
             "state_ensemble_weights": ml_cfg.state_ensemble_weights or {},
             "state_horizon_profiles": ";".join(
                 f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
@@ -913,6 +918,11 @@ def main():
             "train_end": str(training_log.iloc[0].get("train_end", "")) if not training_log.empty else "",
             "horizons": str(training_log.iloc[0].get("horizons", "")) if not training_log.empty else "",
             "model_family": str(artifact.ml_config.get("model_family", "histgb")),
+            "lgbm_n_estimators": (
+                int(artifact.ml_config.get("lgbm_n_estimators", 260))
+                if str(artifact.ml_config.get("model_family", "histgb")) == "lgbm"
+                else None
+            ),
             "horizon_weights": ",".join(
                 f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
             ),
@@ -1106,6 +1116,7 @@ def main_with_progress():
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
@@ -1232,6 +1243,7 @@ def main_with_progress():
                     "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
                     "model_family": str(ml_cfg.model_family),
+                    "lgbm_n_estimators": int(ml_cfg.lgbm_n_estimators) if str(ml_cfg.model_family) == "lgbm" else None,
                     "state_ensemble_weights": ml_cfg.state_ensemble_weights or {},
                     "state_horizon_profiles": ";".join(
                         f"{state}=" + ",".join(f"{k}:{v:.2f}" for k, v in sorted(weights.items()))
@@ -1263,6 +1275,11 @@ def main_with_progress():
                     "train_end": str(training_log.iloc[0].get("train_end", "")) if not training_log.empty else "",
                     "horizons": str(training_log.iloc[0].get("horizons", "")) if not training_log.empty else "",
                     "model_family": str(artifact.ml_config.get("model_family", "histgb")),
+                    "lgbm_n_estimators": (
+                        int(artifact.ml_config.get("lgbm_n_estimators", 260))
+                        if str(artifact.ml_config.get("model_family", "histgb")) == "lgbm"
+                        else None
+                    ),
                     "horizon_weights": ",".join(
                         f"{k}:{v:.2f}" for k, v in sorted((artifact.ml_config.get("target_horizon_weights") or {}).items())
                     ),

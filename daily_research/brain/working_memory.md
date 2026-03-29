@@ -2,7 +2,7 @@
 
 ## 1. 当前默认决策
 当前默认执行主线继续保持为：
-- `advanced_ml_safe_bridge_current_code (ma50 baseline, lgbm) + liquid500 + next_open`
+- `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 但 `2026-03-29` 的代码考古 + 受控 ablation 已钉死一个关键红旗：
 - 在隔离 worktree `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off` 中，只把 `daily_research/baseline/ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从当前代码的 `151.70% / 0.882` 立即回跳到旧快照的 `958.89% / 2.447`
 - 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；`2026-03-29` 已把执行 wrapper 从旧快照后端切回当前仓安全桥接后端，不再继续默认沿用那条 `958.89%` artifact 链路
@@ -22,7 +22,7 @@
 - 模型族：
   - `lgbm`
 - 默认训练窗口：
-  - `ml_train_window_days=504`
+  - `ml_train_window_days=504, lgbm_n_estimators=520`
 - 默认执行后端：
 - 当前安全桥接后端：
   - `daily_research/baseline/train_trade_model.py`

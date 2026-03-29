@@ -5,6 +5,7 @@ from pathlib import Path
 
 EXECUTION_DEFAULT_ENHANCED_PROFILE = "up_low_breakout_v2"
 EXECUTION_DEFAULT_STATE_ENSEMBLE_WEIGHTS = "trend_up_low_vol=ml:0.25,none:0.25,v2:0.50"
+EXECUTION_DEFAULT_LGBM_N_ESTIMATORS = "520"
 
 
 def has_arg(name: str) -> bool:
@@ -53,6 +54,7 @@ def ensure_execution_strategy_defaults() -> None:
     inject_default_arg("--regime-ma-window", "50")
     inject_default_arg("--enhanced-profile", EXECUTION_DEFAULT_ENHANCED_PROFILE)
     inject_default_arg("--ensemble-state-weights", EXECUTION_DEFAULT_STATE_ENSEMBLE_WEIGHTS)
+    inject_default_arg("--lgbm-n-estimators", EXECUTION_DEFAULT_LGBM_N_ESTIMATORS)
 
 
 def ensure_text_file_from_example(target: Path, example: Path, default_text: str) -> None:

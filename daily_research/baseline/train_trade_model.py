@@ -91,6 +91,7 @@ def parse_args():
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
     parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="histgb")
+    parser.add_argument("--lgbm-n-estimators", type=int, default=260)
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
@@ -321,6 +322,7 @@ def main():
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
@@ -461,6 +463,7 @@ def main():
             "max_train_rows": ml_cfg.max_train_rows,
             "random_seed": ml_cfg.random_seed,
             "model_family": ml_cfg.model_family,
+            "lgbm_n_estimators": ml_cfg.lgbm_n_estimators,
             "ensemble_ml_weight": ml_cfg.ensemble_ml_weight,
             "ensemble_none_weight": ml_cfg.ensemble_none_weight,
             "ensemble_v2_weight": ml_cfg.ensemble_v2_weight,
@@ -521,6 +524,7 @@ def main_with_progress():
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
@@ -666,6 +670,7 @@ def main_with_progress():
                     "max_train_rows": ml_cfg.max_train_rows,
                     "random_seed": ml_cfg.random_seed,
                     "model_family": ml_cfg.model_family,
+                    "lgbm_n_estimators": ml_cfg.lgbm_n_estimators,
                     "ensemble_ml_weight": ml_cfg.ensemble_ml_weight,
                     "ensemble_none_weight": ml_cfg.ensemble_none_weight,
                     "ensemble_v2_weight": ml_cfg.ensemble_v2_weight,
@@ -729,6 +734,7 @@ def parse_args():
     parser.add_argument("--ml-max-train-rows", type=int, default=200000)
     parser.add_argument("--ml-random-seed", type=int, default=7)
     parser.add_argument("--ml-model-family", choices=["histgb", "etr", "lgbm"], default="histgb")
+    parser.add_argument("--lgbm-n-estimators", type=int, default=260)
     parser.add_argument("--ensemble-ml-weight", type=float, default=0.70)
     parser.add_argument("--ensemble-none-weight", type=float, default=0.20)
     parser.add_argument("--ensemble-v2-weight", type=float, default=0.10)
@@ -901,6 +907,7 @@ def _build_cfg_and_ml_cfg(args: argparse.Namespace) -> tuple[ResearchConfig, MLA
         max_train_rows=args.ml_max_train_rows,
         random_seed=args.ml_random_seed,
         model_family=args.ml_model_family,
+        lgbm_n_estimators=args.lgbm_n_estimators,
         ensemble_ml_weight=args.ensemble_ml_weight,
         ensemble_none_weight=args.ensemble_none_weight,
         ensemble_v2_weight=args.ensemble_v2_weight,
@@ -958,6 +965,7 @@ def _build_meta_payload(
             "max_train_rows": ml_cfg.max_train_rows,
             "random_seed": ml_cfg.random_seed,
             "model_family": ml_cfg.model_family,
+            "lgbm_n_estimators": ml_cfg.lgbm_n_estimators,
             "ensemble_ml_weight": ml_cfg.ensemble_ml_weight,
             "ensemble_none_weight": ml_cfg.ensemble_none_weight,
             "ensemble_v2_weight": ml_cfg.ensemble_v2_weight,
