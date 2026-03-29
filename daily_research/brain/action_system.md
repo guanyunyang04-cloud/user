@@ -28,10 +28,10 @@
 
 ## 3. 当前默认执行口径
 - 主线：
-  - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `advanced_ml_safe_bridge_current_code (ma50 baseline, lgbm) + liquid500 + next_open`
 - 当前执行后端：
-  - `2026-03-24 18:58:23 +0800` 审计快照 `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
-  - 当前 wrapper 调用旧快照 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`
+  - 当前仓 `baseline/train_trade_model.py`
+  - 当前仓 `baseline/generate_daily_trade_plan.py`
   - 模型产物与计划文件仍写回当前 `daily_research/execution/`
 - 默认股票池：
   - `universe/liquid500_latest.txt`
@@ -48,13 +48,14 @@
 - 默认训练窗口：
   - `ml_train_window_days=504`
 - 默认状态集成：
-  - 以旧高收益快照后端默认参数为准，不再由当前 wrapper 注入 `focus-state` 集成权重
+  - 当前 wrapper 默认注入 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - 当前 wrapper 默认注入 `enhanced_profile=up_low_breakout_v2`
 
 ### 3.1 执行真实性红线
 - `2026-03-29` 的隔离 worktree ablation 已确认：
   - 只要在当前代码里临时关闭 `ml_alpha.py::_label_lookahead_bars()` 的 label-safe gap，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从 `151.70% / 0.882` 回跳到 `958.89% / 2.447`
 - 这说明旧快照高收益的主因不是更好的因子，而是 `next_open` 训练边界上的 `label leakage / look-ahead bias`
-- 因此当前 wrapper 虽仍指向旧快照后端，但不得再把旧快照收益直接当成“可信实盘 alpha”；后续若继续沿用、回滚或切换，必须先经过用户确认与桥接验证
+- 因此旧快照收益只保留为审计 artifact；当前执行 wrapper 已切回当前仓安全桥接后端，后续若再沿用、回滚或切换，必须先经过用户确认与桥接验证
 
 ## 4. 每日标准流程
 ### 第 1 步：更新高流动性股票池
@@ -74,7 +75,7 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--ml-model-family=lgbm`
 - `--regime-ma-window=50`
-- 并把训练实际转发给旧高收益快照后端
+- 并由当前仓 `baseline/train_trade_model.py` 在无泄漏口径下实际训练
 
 ### 第 3 步：更新账号快照
 把真实持仓和可用现金写进：
@@ -93,7 +94,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--model-artifact=models/latest_ml_model.joblib`
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--regime-ma-window=50`
-- 并把计划生成实际转发给旧高收益快照后端
+- 并由当前仓 `baseline/generate_daily_trade_plan.py` 生成计划
 
 ## 5. 关键执行文件
 - `daily_research/execution/update_liquid_pool.py`
@@ -103,6 +104,11 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `daily_research/execution/models/latest_ml_model.joblib`
 - `daily_research/execution/models/latest_ml_model.json`
 - `daily_research/execution/output/latest_trade_plan.txt`
+## 7. Gemini Final Closeout
+- Before every final user-facing reply in an active Gemini frontend collaboration session, run:
+  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+- The closeout is used to confirm completed work and align on the next move.
+- If the frontend window has been closed, treat that collaboration mode as ended.
 
 ## 6. 执行安全边界
 - 日常不启用实时训练

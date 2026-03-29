@@ -22,6 +22,10 @@
   - `daily_research\tools\gemini_frontend.cmd status`
   - `daily_research\tools\gemini_frontend.cmd close`
   - `daily_research\tools\gemini_frontend.cmd sessions`
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
+- 当前默认规则：
+  - Gemini 只在前台常驻模式下调用
+  - 用户关掉前台窗口，即视为本轮 Gemini 协作模式结束
 
 ## 4. 编码与读取口径
 - 脑文件统一使用 UTF-8

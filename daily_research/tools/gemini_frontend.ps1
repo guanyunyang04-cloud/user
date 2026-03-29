@@ -1,9 +1,12 @@
 param(
-    [ValidateSet("open", "close", "status", "sessions")]
+    [ValidateSet("open", "close", "status", "sessions", "ask", "closeout")]
     [string]$Action = "status",
     [string]$Session = "latest",
     [string]$Title = "Gemini Frontend - daily_research",
-    [switch]$ForceNew
+    [switch]$ForceNew,
+    [string]$Prompt = "",
+    [string]$WorkSummary = "",
+    [string]$NextStep = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -180,6 +183,54 @@ function Close-Frontend {
     Write-Output ("Closed Gemini frontend. root_pid={0}" -f $rootPid)
 }
 
+function Invoke-FrontendPrompt {
+    if ([string]::IsNullOrWhiteSpace($Prompt)) {
+        throw "Prompt is required for Action=ask."
+    }
+
+    $status = Get-FrontendStatus
+    if (-not $status.running) {
+        throw "Gemini frontend is not running. Open it first; closing the frontend ends collaboration mode."
+    }
+
+    $resumeTarget = if ([string]::IsNullOrWhiteSpace([string]$status.session)) { "latest" } else { [string]$status.session }
+    & $geminiPath --resume $resumeTarget -p $Prompt
+}
+
+function Invoke-FrontendCloseout {
+    if ([string]::IsNullOrWhiteSpace($WorkSummary)) {
+        throw "WorkSummary is required for Action=closeout."
+    }
+
+    $nextLine = if ([string]::IsNullOrWhiteSpace($NextStep)) {
+        "Next-step context: not specified; infer the most sensible next move."
+    } else {
+        "Next-step context: $NextStep"
+    }
+
+    $closeoutPrompt = @"
+You are the Gemini closeout reviewer for the current workspace.
+We are about to send the user a final reply.
+
+Completed work summary:
+$WorkSummary
+
+$nextLine
+
+Reply in Chinese, concise and concrete.
+Use exactly these three headings:
+已完成：
+下一步：
+风险/待确认：
+
+Under each heading, provide 1-3 short bullet points.
+Focus on confirming what has already been done and what we should do next.
+"@
+
+    $script:Prompt = $closeoutPrompt
+    Invoke-FrontendPrompt
+}
+
 switch ($Action) {
     "open" {
         Open-Frontend
@@ -192,5 +243,11 @@ switch ($Action) {
     }
     "sessions" {
         & $geminiPath --list-sessions
+    }
+    "ask" {
+        Invoke-FrontendPrompt
+    }
+    "closeout" {
+        Invoke-FrontendCloseout
     }
 }

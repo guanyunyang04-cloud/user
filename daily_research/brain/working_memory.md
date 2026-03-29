@@ -2,10 +2,10 @@
 
 ## 1. 当前默认决策
 当前默认执行主线继续保持为：
-- `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
+- `advanced_ml_safe_bridge_current_code (ma50 baseline, lgbm) + liquid500 + next_open`
 但 `2026-03-29` 的代码考古 + 受控 ablation 已钉死一个关键红旗：
 - 在隔离 worktree `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off` 中，只把 `daily_research/baseline/ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从当前代码的 `151.70% / 0.882` 立即回跳到旧快照的 `958.89% / 2.447`
-- 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；当前 wrapper 运行时虽仍指向旧快照后端，但研究判断已不能再把那条 `958.89%` 视为可信 alpha 主线
+- 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；`2026-03-29` 已把执行 wrapper 从旧快照后端切回当前仓安全桥接后端，不再继续默认沿用那条 `958.89%` artifact 链路
 当前默认口径同时固定为：
 
 - 股票池：
@@ -24,12 +24,14 @@
 - 默认训练窗口：
   - `ml_train_window_days=504`
 - 默认执行后端：
-  - `2026-03-24 18:58:23 +0800` 历史快照 `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
-  - 当前 wrapper 已切到旧快照 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`
+- 当前安全桥接后端：
+  - `daily_research/baseline/train_trade_model.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
   - 继续写回当前 `daily_research/execution/models/` 与 `daily_research/execution/output/`
 - 默认状态集成：
-  - 不再沿用当前代码口径下的 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
-  - 以旧高收益快照后端的默认集成参数为准
+- 当前执行 wrapper 默认注入：
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - `enhanced_profile=up_low_breakout_v2`
 
 ## 2. 当前最近待决策事项
 用户已在 2026-03-28 明确纠偏项目主目标：
@@ -51,7 +53,7 @@
 因此当前执行端决策已经进一步改写为：
 
 - 不再先守当前代码口径下的 live-defense 默认值；
-- 先把执行端切到已经审计复刻过的旧高收益快照后端；
+- 已把执行端从已证伪的旧高收益快照后端切回当前仓安全桥接后端；
 - 当前代码口径下的 `v250 / v255 / 双 profile 控制器` 结论继续保留为研究侧比较锚点，而不是当前执行默认值。
 
 2026-03-28 的当前代码口径 formal R3 重跑，之前曾把执行端短期升级收口为一个明确结论：
@@ -109,7 +111,7 @@
   - defense/live leg 继续保持 `expanded_v24`
 
 ## 3. 当前项目判断
-- `advanced_ml` 继续承担当前正式执行职责，但执行后端已切到旧高收益快照口径。
+- `advanced_ml` 继续承担当前正式执行职责，但执行后端已切回当前仓安全桥接口径。
 - `deep_alpha` 仍是长期主研究线，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
 - 底层市场状态层已经完成架构升级：
   - `quadrant` 继续保留为兼容标签
@@ -126,7 +128,7 @@
 ### 优先级 A：把 shortlist 升级为攻守控制器
 目标：
 
-- 在执行端已切到旧高收益快照后端的前提下，继续保留当前代码口径的研究主线；
+- 在执行端已切回当前仓安全桥接后端的前提下，继续保留当前代码口径的研究主线；
 - 不再扩新候选；
 - 把已经完成的 shortlist head-to-head 收口成可正式回测的攻守切换规则；
 - 且必须以“不低于旧收益前沿”为前提。

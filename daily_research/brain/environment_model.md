@@ -56,16 +56,20 @@ daily_research\tools\gemini_frontend.cmd open
 daily_research\tools\gemini_frontend.cmd status
 daily_research\tools\gemini_frontend.cmd close
 daily_research\tools\gemini_frontend.cmd sessions
+daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRONTEND_OK"
 ```
 
-### Gemini 会话续接
+### Gemini 标准协作方式
 ```powershell
-gemini --resume latest -p "Reply with exactly: GEMINI_FRONTEND_OK"
+daily_research\tools\gemini_frontend.cmd open
+daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRONTEND_OK"
 ```
 
 ### 当前协同边界
 - Codex 可以启动、关闭、复用 Gemini 会话，并读取命令结果。
 - Codex 不能直接接管一个可见 GUI 终端窗口去实时敲字和读屏。
+- 从 `2026-03-29` 起，前台常驻协作是默认标准方式；Codex 不再把裸 `gemini --resume latest -p ...` 当作默认入口。
+- `ask` 只会在前台运行中时成功；如果用户手动关掉前台窗口，后续 `ask` 会失败并视为协作模式结束。
 - 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`。
 
 ## 7. 当前适用范围

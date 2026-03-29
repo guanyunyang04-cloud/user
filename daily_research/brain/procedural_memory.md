@@ -147,15 +147,37 @@
   - `daily_research\tools\gemini_frontend.cmd status`
   - `daily_research\tools\gemini_frontend.cmd close`
   - `daily_research\tools\gemini_frontend.cmd sessions`
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
 
 ### 4.2 会话连续性规则
-- 关闭前台窗口会终止当前交互进程
-- 但 Gemini session 本身不会自动消失，可以继续 `resume`
-- 如果只追求便捷，可用：
-  - `--resume latest`
+- 从 `2026-03-29` 起，标准方式改为：
+  - 先 `open`
+  - 后续统一用 `gemini_frontend.cmd ask -Prompt "..."`
+  - 不再默认裸调 `gemini --resume latest -p "..."`
+- 关闭前台窗口会终止当前交互进程，并结束这轮协作模式
+- 若用户手动关掉前台窗口，后续 `ask` 必须直接失败，而不是静默重新走后台模式
+- Gemini session 本身仍可被未来 `resume`，但那属于新的协作轮次，不视为当前前台协作仍在继续
 - 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`
 
 ### 4.3 Codex / Gemini 分工
 - Codex 负责主线判断、文件修改、结果落盘与一致性收口
 - Gemini 负责交叉核对、补充视角、长文归纳和方案对照
 - 最终以当前工作区实际验证与落盘结果为准
+
+### 4.4 Final-answer closeout ritual
+- Before every final user-facing reply, Codex must run:
+  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+- This is not optional when Gemini frontend collaboration mode is active; it is the default closing step.
+- The closeout must cover two things:
+  - confirm what has already been done
+  - discuss the most sensible next step
+- If the frontend window has been closed, treat the collaboration mode as ended; do not silently fall back to background Gemini calls.
+- The final answer to the user should reflect the Gemini closeout, but the actual workspace state remains the source of truth.
+
+### 4.5 Dependent runtime sequencing
+- Do not parallelize producer-consumer runtime steps.
+- Typical forbidden pair:
+  - `update_model.py` produces `latest_ml_model.joblib`
+  - `run_trade_plan.py` consumes `latest_ml_model.joblib`
+- If a downstream step reads an artifact produced by the upstream step, run them sequentially and verify the downstream output reflects the new artifact timestamp.
+- If parallel execution was started by mistake, rerun the consumer step after the producer finishes and record the dependency pitfall in `episodic_memory.md`.

@@ -8080,4 +8080,61 @@ position,000001.SZ,1200,12.38,
 4. 这轮也把一个可复用方法沉淀出来：
    - 先做 apples-to-apples 口径对齐
    - 再用隔离 worktree 做 single-switch ablation
-   - 如果单开关能精确复现旧收益，就先把旧收益视为 artifact 候选，再决定后续执行切回或桥接验证
+- 如果单开关能精确复现旧收益，就先把旧收益视为 artifact 候选，再决定后续执行切回或桥接验证
+
+## 2026-03-29 执行端从旧快照高收益后端切回当前仓安全桥接版
+
+### 背景
+- `2026-03-29` 的代码考古与受控 ablation 已钉死：
+  - 旧快照 `958.89% / 2.447` 的主因是 `next_open` 训练边界缺少 `label-safe gap`
+  - 它属于 `label leakage / look-ahead bias` 产物，不再允许继续作为执行默认后端
+- 用户随后明确要求直接处理最现实的问题：
+  - 把当前执行端从已证伪的快照高收益后端切回来，或者至少先做一个安全桥接版本
+
+### 实际改动
+- 修改执行 wrapper：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/run_trade_plan.py`
+- 不再转发到历史快照 worktree，而是切回当前仓：
+  - `daily_research/baseline/train_trade_model.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+- 恢复执行默认注入：
+  - `regime_ma_window=50`
+  - `enhanced_profile=up_low_breakout_v2`
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - `stocks-file=universe/liquid500_latest.txt`
+
+### 验证
+- 先实际运行：
+  - `python daily_research/execution/update_model.py ...`
+- 新模型产物已写出：
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `trained_at = 2026-03-29 00:36:54`
+  - `latest_data_date = 2026-03-27`
+  - `model_family = lgbm`
+  - `enhanced_profile = up_low_breakout_v2`
+  - `state_ensemble_weights.trend_up_low_vol = ml:0.25 / none:0.25 / v2:0.50`
+- 随后运行：
+  - `python daily_research/execution/run_trade_plan.py ...`
+- 新计划已写出：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+  - 生成时间 `2026-03-29 00:37:40`
+  - 信号日 `2026-03-27`
+  - 执行日 `2026-03-30`
+  - 本次结果：`今日无明确调仓动作`
+
+### 本轮遇到的困难与修正
+- 一开始为了省时间，把 `update_model.py` 和 `run_trade_plan.py` 并行跑了。
+- 结果计划先消费了旧 artifact，出现了“计划生成成功，但绑定的仍是旧模型”的依赖错位。
+- 修正方式：
+  - 立刻停止把这类 producer-consumer 步骤当成可并行任务；
+  - 在训练完成后顺序重跑一次 `run_trade_plan.py`；
+  - 重新确认 `latest_trade_plan.txt` 里的模型训练时间已经更新到 `2026-03-29 00:36:53`
+
+### 结论
+1. 当前执行端默认后端已不再指向旧快照高收益 artifact，而是切回当前仓无泄漏的安全桥接口径。
+2. 研究侧仍保留：
+   - `expanded_v24 + v250` 作为当前代码 live-defense 锚点
+   - `legacy_v7 + v255` 作为 offense 锚点
+   但它们不再与执行 wrapper 的默认后端混写。
+3. 后续若要把执行端从“安全桥接版”继续升级到更贴近当前研究 live 默认值，必须先补做同口径桥接验证，而不是再次直接切到一个高收益表象更强的后端。
