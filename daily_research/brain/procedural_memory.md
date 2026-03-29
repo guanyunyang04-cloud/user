@@ -139,25 +139,28 @@
   - 若结论推翻当前默认判断，再同步 `working_memory.md` 与 `action_system.md`
 
 ## 4. Gemini 协同技能
-### 4.1 常驻前台窗口
-- Gemini 前台协同入口：
+### 4.1 后台标准调用
+- Gemini 标准入口：
   - `daily_research/tools/gemini_frontend.cmd`
-- 常用命令：
+- 标准命令：
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
+  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+  - `daily_research\tools\gemini_frontend.cmd sessions`
+- 前台命令保留为可选人工交互：
   - `daily_research\tools\gemini_frontend.cmd open`
   - `daily_research\tools\gemini_frontend.cmd status`
   - `daily_research\tools\gemini_frontend.cmd close`
-  - `daily_research\tools\gemini_frontend.cmd sessions`
-  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
 
 ### 4.2 会话连续性规则
-- 从 `2026-03-29` 起，标准方式改为：
-  - 先 `open`
-  - 后续统一用 `gemini_frontend.cmd ask -Prompt "..."`
-  - 不再默认裸调 `gemini --resume latest -p "..."`
-- 关闭前台窗口会终止当前交互进程，并结束这轮协作模式
-- 若用户手动关掉前台窗口，后续 `ask` 必须直接失败，而不是静默重新走后台模式
-- Gemini session 本身仍可被未来 `resume`，但那属于新的协作轮次，不视为当前前台协作仍在继续
-- 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`
+- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式。
+- 默认续接目标仍是 `latest`；如果已有更稳定的 session id，应显式固定。
+- 前台窗口只用于人工连续对话，不再作为 Codex 调用 Gemini 的必要前置条件。
+- 关闭前台窗口只会结束那个可见窗口；后续后台 `ask` 仍可继续通过 `--resume` 调用 Gemini。
+- 若后台 `latest` 会话带回了明显过时的上下文，必须把 Gemini 输出当作“需甄别的第二意见”，而不是事实源。
+- 遇到这种漂移时，优先做三件事：
+  - 在 prompt 里重述本轮已完成工作与当前真实状态
+  - 尽量固定 session id，而不是长期只依赖 `latest`
+  - 最终以当前工作区文件、回测产物和执行结果为准
 
 ### 4.3 Codex / Gemini 分工
 - Codex 负责主线判断、文件修改、结果落盘与一致性收口
@@ -167,12 +170,13 @@
 ### 4.4 Final-answer closeout ritual
 - Before every final user-facing reply, Codex must run:
   - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
-- This is not optional when Gemini frontend collaboration mode is active; it is the default closing step.
+- This is the default closing step for Gemini-backed collaboration, not just for frontend mode.
 - The closeout must cover two things:
   - confirm what has already been done
   - discuss the most sensible next step
-- If the frontend window has been closed, treat the collaboration mode as ended; do not silently fall back to background Gemini calls.
+- If Gemini CLI is unavailable or the call fails, report that honestly; do not fabricate a closeout.
 - The final answer to the user should reflect the Gemini closeout, but the actual workspace state remains the source of truth.
+- The closeout prompt itself should explicitly tell Gemini to treat the supplied work summary as authoritative and ignore conflicting stale session memory.
 
 ### 4.5 Dependent runtime sequencing
 - Do not parallelize producer-consumer runtime steps.

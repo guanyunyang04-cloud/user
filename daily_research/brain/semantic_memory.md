@@ -30,16 +30,17 @@
 
 ## 3. 当前稳定主线
 - 正式执行主线：
-  - `advanced_ml_safe_bridge_current_code (ma50 baseline, lgbm) + liquid500 + next_open`
+  - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 - 调仓语义：
   - 日频目标更新，默认 `rebalance_freq=1d`
 - 执行方式：
   - 盘后生成计划，次日开盘人工执行
 - 当前执行后端：
-  - 当前 `execution/update_model.py` 与 `execution/run_trade_plan.py` 已切回当前仓安全桥接后端
-  - 默认注入 `regime_ma_window=50`、`enhanced_profile=up_low_breakout_v2` 与 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - 当前 `execution/update_model.py` 与 `execution/run_trade_plan.py` 直接走当前仓执行链路
+  - 默认注入 `regime_ma_window=50`、`enhanced_profile=up_low_breakout_v2`、`trend_up_low_vol=ml:0.25,none:0.25,v2:0.50` 与 `lgbm_n_estimators=520`
 - 当前研究侧对照锚点：
-  - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+  - 执行默认：`expanded_v24 + trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+  - 研究进攻对照：`trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
 
 ## 4. 分脑模块
 - `daily_research/brain/semantic_memory.md`

@@ -3,7 +3,7 @@
 ## 1. 根环境
 - 工作区根目录：`H:\new_tdx64\PYPlugins\user`
 - 默认 Shell：`PowerShell`
-- 当前日期：`2026-03-28`
+- 当前日期：`2026-03-29`
 - 时区：`Asia/Shanghai`
 
 ## 2. 共享解释器
@@ -17,15 +17,14 @@
   - `python daily_research/tools/doc_guard.py check`
 - 工作区体检：
   - `python daily_research/tools/workspace_maintenance.py report`
-- Gemini 常驻协同：
-  - `daily_research\tools\gemini_frontend.cmd open`
-  - `daily_research\tools\gemini_frontend.cmd status`
-  - `daily_research\tools\gemini_frontend.cmd close`
-  - `daily_research\tools\gemini_frontend.cmd sessions`
+- Gemini 标准协同：
   - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
+  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+  - `daily_research\tools\gemini_frontend.cmd sessions`
+  - 可选人工前台：`open / status / close`
 - 当前默认规则：
-  - Gemini 只在前台常驻模式下调用
-  - 用户关掉前台窗口，即视为本轮 Gemini 协作模式结束
+  - Gemini 默认走后台 `--resume` 续接
+  - 前台窗口只作为可选人工交互入口
 
 ## 4. 编码与读取口径
 - 脑文件统一使用 UTF-8

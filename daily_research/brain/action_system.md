@@ -56,7 +56,7 @@
 - `2026-03-29` 的隔离 worktree ablation 已确认：
   - 只要在当前代码里临时关闭 `ml_alpha.py::_label_lookahead_bars()` 的 label-safe gap，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从 `151.70% / 0.882` 回跳到 `958.89% / 2.447`
 - 这说明旧快照高收益的主因不是更好的因子，而是 `next_open` 训练边界上的 `label leakage / look-ahead bias`
-- 因此旧快照收益只保留为审计 artifact；当前执行 wrapper 已切回当前仓安全桥接后端，后续若再沿用、回滚或切换，必须先经过用户确认与桥接验证
+- 因此旧快照收益只保留为审计 artifact；当前执行 wrapper 已稳定在当前仓当前代码 live-anchor 后端，后续若再沿用、回滚或切换，必须先经过用户确认与桥接验证
 
 ## 4. 每日标准流程
 ### 第 1 步：更新高流动性股票池
@@ -75,6 +75,7 @@ python daily_research/execution/update_model.py --data-source tq --start-date 20
 - `--artifact-meta-path=models/latest_ml_model.json`
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--ml-model-family=lgbm`
+- `--lgbm-n-estimators=520`
 - `--regime-ma-window=50`
 - 并由当前仓 `baseline/train_trade_model.py` 在无泄漏口径下实际训练
 
@@ -105,13 +106,13 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `daily_research/execution/models/latest_ml_model.joblib`
 - `daily_research/execution/models/latest_ml_model.json`
 - `daily_research/execution/output/latest_trade_plan.txt`
-## 7. Gemini Final Closeout
-- Before every final user-facing reply in an active Gemini frontend collaboration session, run:
+## 6. Gemini Final Closeout
+- Before every final user-facing reply, run:
   - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
 - The closeout is used to confirm completed work and align on the next move.
-- If the frontend window has been closed, treat that collaboration mode as ended.
+- It now uses background resume by default; a frontend window is optional and not required.
 
-## 6. 执行安全边界
+## 7. 执行安全边界
 - 日常不启用实时训练
 - 默认启用模型新鲜度保护
 - 研究侧局部高收益候选不得静默替换 live 默认值

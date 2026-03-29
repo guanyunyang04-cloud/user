@@ -8214,3 +8214,47 @@ position,000001.SZ,1200,12.38,
    - same protocol first
    - then CLI / wrapper expressibility
    - then artifact + meta + downstream-plan triple verification
+## 2026-03-29 Gemini standard mode rollback to background resume, plus brain repair
+### Objective
+- User judged that the previous "frontend persistent collaboration mode" did not actually save time, because Codex later still called Gemini through a separate background CLI process.
+- User asked for two things:
+  - switch Gemini back to background mode as the standard way
+  - repair and improve the brain so it no longer insists on the outdated frontend-first workflow
+
+### What changed
+- Patched `daily_research/tools/gemini_frontend.ps1`:
+  - added `default_mode = background_resume`
+  - `ask` and `closeout` now work without requiring a running frontend window
+  - `status` now reports the default mode explicitly
+  - frontend `open / close / status` remains available, but only as optional human interactive mode
+- Repaired current-state brain docs so they match the real execution chain and Gemini workflow:
+  - `brain/environment_model.md`
+  - `brain/procedural_memory.md`
+  - `daily_research/brain/environment_model.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `brain/brain_manifest.json`
+  - `daily_research/brain/brain_manifest.json`
+
+### Verification
+- `daily_research/tools/gemini_frontend.cmd status` returned:
+  - `default_mode = background_resume`
+  - `running = false`
+- `daily_research/tools/gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_BACKEND_OK"` returned:
+  - `GEMINI_BACKEND_OK`
+- `python daily_research/tools/doc_guard.py check` passed after all brain edits
+
+### New pitfall discovered
+- Running Gemini closeout through background `--resume latest` can still drag stale historical context into the reply.
+- During this turn, Gemini closeout incorrectly mentioned:
+  - `v24 feature degradation`
+  - `V24-Slim`
+  - `execution via snapshot bridge`
+  even though the current workspace had already moved to the current-code `lgbm520` live anchor.
+
+### Conclusion
+1. The standard Codex-to-Gemini path is now background `ask / closeout / sessions`; frontend is optional only.
+2. Closing a visible frontend window is no longer treated as "ending Gemini collaboration", because background `--resume` remains usable by design.
+3. If background `latest` brings back stale context, Gemini output must be treated as a second opinion rather than a source of truth; workspace files, artifacts, and backtest outputs stay authoritative.

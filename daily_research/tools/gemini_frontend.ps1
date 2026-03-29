@@ -15,6 +15,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $stateDir = Join-Path $repoRoot "daily_research\cache\gemini_frontend"
 $statePath = Join-Path $stateDir "state.json"
 $geminiPath = "C:\Users\ASUS\AppData\Roaming\npm\gemini.cmd"
+$defaultMode = "background_resume"
 
 function Get-State {
     if (-not (Test-Path -LiteralPath $statePath)) {
@@ -81,6 +82,7 @@ function Get-FrontendStatus {
     $state = Get-State
     if ($null -eq $state) {
         return [pscustomobject]@{
+            default_mode = $defaultMode
             running    = $false
             message    = "No Gemini frontend state file."
             root_pid   = $null
@@ -96,6 +98,7 @@ function Get-FrontendStatus {
     if ($null -eq $rootProcess) {
         Clear-State
         return [pscustomobject]@{
+            default_mode = $defaultMode
             running    = $false
             message    = "Gemini frontend state was stale and has been cleared."
             root_pid   = $rootPid
@@ -120,6 +123,7 @@ function Get-FrontendStatus {
     }
 
     return [pscustomobject]@{
+        default_mode = $defaultMode
         running   = $true
         message   = "Gemini frontend is running."
         root_pid  = $rootPid
@@ -151,6 +155,8 @@ Set-Location -LiteralPath '$repoRoot'
 `$Host.UI.RawUI.WindowTitle = '$Title'
 Write-Host 'Gemini frontend attached to workspace:' '$repoRoot'
 Write-Host 'Session:' '$Session'
+Write-Host 'This window is optional interactive mode only.'
+Write-Host 'Codex standard calls use background resume via gemini_frontend.cmd ask / closeout.'
 Write-Host 'Close this window manually when finished, or run gemini_frontend.ps1 close from another shell.'
 & '$geminiPath' --resume $Session
 "@
@@ -183,17 +189,34 @@ function Close-Frontend {
     Write-Output ("Closed Gemini frontend. root_pid={0}" -f $rootPid)
 }
 
+function Resolve-ResumeTarget([string]$PreferredSession) {
+    $explicitSession = ""
+    if ($null -ne $PreferredSession) {
+        $explicitSession = [string]$PreferredSession
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitSession) -and $explicitSession -ne "latest") {
+        return $explicitSession
+    }
+
+    $state = Get-State
+    if ($null -ne $state) {
+        $stateSession = ""
+        if ($null -ne $state.session) {
+            $stateSession = [string]$state.session
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stateSession)) {
+            return $stateSession
+        }
+    }
+    return "latest"
+}
+
 function Invoke-FrontendPrompt {
     if ([string]::IsNullOrWhiteSpace($Prompt)) {
         throw "Prompt is required for Action=ask."
     }
 
-    $status = Get-FrontendStatus
-    if (-not $status.running) {
-        throw "Gemini frontend is not running. Open it first; closing the frontend ends collaboration mode."
-    }
-
-    $resumeTarget = if ([string]::IsNullOrWhiteSpace([string]$status.session)) { "latest" } else { [string]$status.session }
+    $resumeTarget = Resolve-ResumeTarget -PreferredSession $Session
     & $geminiPath --resume $resumeTarget -p $Prompt
 }
 
@@ -208,9 +231,12 @@ function Invoke-FrontendCloseout {
         "Next-step context: $NextStep"
     }
 
-    $closeoutPrompt = @"
+$closeoutPrompt = @"
 You are the Gemini closeout reviewer for the current workspace.
 We are about to send the user a final reply.
+Treat the supplied summary below as the authoritative source of truth for this turn.
+If any earlier session memory conflicts with the supplied summary, ignore the older memory.
+Do not introduce stale experiments, outdated branches, or superseded execution paths unless they are explicitly mentioned in the supplied summary.
 
 Completed work summary:
 $WorkSummary

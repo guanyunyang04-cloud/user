@@ -5,7 +5,7 @@
 - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 但 `2026-03-29` 的代码考古 + 受控 ablation 已钉死一个关键红旗：
 - 在隔离 worktree `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off` 中，只把 `daily_research/baseline/ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从当前代码的 `151.70% / 0.882` 立即回跳到旧快照的 `958.89% / 2.447`
-- 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；`2026-03-29` 已把执行 wrapper 从旧快照后端切回当前仓安全桥接后端，不再继续默认沿用那条 `958.89%` artifact 链路
+- 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；`2026-03-29` 已把执行 wrapper 从旧快照后端切回当前仓当前代码执行链路，并在同口径 bridge validation 后升级到 `lgbm520` live anchor，不再继续默认沿用那条 `958.89%` artifact 链路
 当前默认口径同时固定为：
 
 - 股票池：
@@ -24,7 +24,7 @@
 - 默认训练窗口：
   - `ml_train_window_days=504, lgbm_n_estimators=520`
 - 默认执行后端：
-- 当前安全桥接后端：
+- 当前执行后端：
   - `daily_research/baseline/train_trade_model.py`
   - `daily_research/baseline/generate_daily_trade_plan.py`
   - 继续写回当前 `daily_research/execution/models/` 与 `daily_research/execution/output/`
@@ -53,8 +53,8 @@
 因此当前执行端决策已经进一步改写为：
 
 - 不再先守当前代码口径下的 live-defense 默认值；
-- 已把执行端从已证伪的旧高收益快照后端切回当前仓安全桥接后端；
-- 当前代码口径下的 `v250 / v255 / 双 profile 控制器` 结论继续保留为研究侧比较锚点，而不是当前执行默认值。
+- 已把执行端从已证伪的旧高收益快照后端切回当前仓当前代码后端，并完成 `v250 @ 504 / 21 / 260 -> 520` 的同口径 bridge validation；
+- 当前代码口径下的 `v250 / v255 / 双 profile 控制器` 结论继续保留为研究侧比较锚点；其中 `v250 @ 504 / 21 / 520` 已是当前执行默认值，`v255` 仍是 offense comparator。
 
 2026-03-28 的当前代码口径 formal R3 重跑，之前曾把执行端短期升级收口为一个明确结论：
 
@@ -102,16 +102,16 @@
 - 但 `2026-03-29` 的受控 ablation 又进一步说明：
   - “旧系统里能稳定复刻出 9x 收益”这件事本身是真实的；
   - 但它的主因是 `next_open` 训练边界缺少 label-safe gap，而不是可直接继承到今天执行端的真实 alpha。
-- 但在用户刚刚明确的“收益优先非降级”目标下，`expanded_v24 + v250` 不再能被直接表述成终局正确答案；
+- 但在用户刚刚明确的“收益优先非降级”目标下，`expanded_v24 + v250 @ 504 / 21 / 520` 只应被表述为当前执行默认值，而不是项目探索的终局停止点；
   它更准确的身份是：
   - 当前代码口径下的防守型 live 方案
-  - 不是已经满足用户原始目标的利润最优方案
+  - 当前默认值，但仍允许在“不降级”的前提下继续被更优方案替换
 - 因此后续若要同时满足用户目标，研发方向应从“继续做全局 pruning”收口到“双 profile 攻守控制器”：
   - offense leg 优先研究 `legacy_v7`
   - defense/live leg 继续保持 `expanded_v24`
 
 ## 3. 当前项目判断
-- `advanced_ml` 继续承担当前正式执行职责，但执行后端已切回当前仓安全桥接口径。
+- `advanced_ml` 继续承担当前正式执行职责，执行后端已稳定落在当前仓当前代码 live-anchor 口径。
 - `deep_alpha` 仍是长期主研究线，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
 - 底层市场状态层已经完成架构升级：
   - `quadrant` 继续保留为兼容标签
@@ -128,7 +128,7 @@
 ### 优先级 A：把 shortlist 升级为攻守控制器
 目标：
 
-- 在执行端已切回当前仓安全桥接后端的前提下，继续保留当前代码口径的研究主线；
+- 在执行端已稳定为当前仓当前代码 live-anchor 后端的前提下，继续保留当前代码口径的研究主线；
 - 不再扩新候选；
 - 把已经完成的 shortlist head-to-head 收口成可正式回测的攻守切换规则；
 - 且必须以“不低于旧收益前沿”为前提。

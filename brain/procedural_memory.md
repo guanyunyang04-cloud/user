@@ -37,22 +37,25 @@
 - 操作链路写 `action_system.md`
 
 ## 2. Gemini 协同方法
-- 常驻入口：
+- 标准入口：
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
+  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+- `daily_research\tools\gemini_frontend.cmd sessions`
+- 可选人工前台：
   - `daily_research\tools\gemini_frontend.cmd open`
   - `daily_research\tools\gemini_frontend.cmd status`
   - `daily_research\tools\gemini_frontend.cmd close`
-- `daily_research\tools\gemini_frontend.cmd sessions`
-- `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
-- `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
 - Final-answer closeout:
   - Run `closeout` before every final user-facing reply.
   - Use it to confirm completed work and discuss the next step.
+  - The closeout prompt should explicitly tell Gemini to trust the supplied work summary over conflicting stale session memory.
 - Dependent runtime sequencing:
   - Do not parallelize producer-consumer steps where one command writes an artifact and the next command reads it.
   - If that mistake happens, rerun the consumer after the producer finishes and write the pitfall back into the project brain.
 - 会话续接：
   - 优先固定 session id
-  - 若只在当前轮次里协作，统一走前台 + `ask`
+  - 默认走后台 `--resume` 续接；前台只作可选人工交互
+- 若后台 `latest` 会话明显带回旧上下文，Gemini 输出只能当第二意见，不能覆盖当前工作区事实。
 - 已知边界：
   - Codex 可以复用 Gemini 会话
   - Codex 不能直接接管一个可见终端窗口实时敲字读屏

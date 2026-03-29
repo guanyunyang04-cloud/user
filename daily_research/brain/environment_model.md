@@ -2,7 +2,7 @@
 
 本文档记录 `daily_research` 分脑当前默认使用的运行环境，作为后续研究、执行、维护与 AI 协同时的统一调用口径。
 
-快照时间：`2026-03-28`  
+快照时间：`2026-03-29`  
 时区：`Asia/Shanghai`  
 工作区根目录：`H:\new_tdx64\PYPlugins\user`  
 默认 Shell：`PowerShell`
@@ -50,26 +50,25 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --help
 ```
 
 ## 6. AI 协同工具入口
-### Gemini 前台常驻入口
+### Gemini 后台标准入口
+```powershell
+daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_BACKEND_OK"
+daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."
+daily_research\tools\gemini_frontend.cmd sessions
+```
+
+### Gemini 可选前台入口
 ```powershell
 daily_research\tools\gemini_frontend.cmd open
 daily_research\tools\gemini_frontend.cmd status
 daily_research\tools\gemini_frontend.cmd close
-daily_research\tools\gemini_frontend.cmd sessions
-daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRONTEND_OK"
-```
-
-### Gemini 标准协作方式
-```powershell
-daily_research\tools\gemini_frontend.cmd open
-daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRONTEND_OK"
 ```
 
 ### 当前协同边界
-- Codex 可以启动、关闭、复用 Gemini 会话，并读取命令结果。
+- Codex 可以后台续接 Gemini 会话，并读取命令结果。
 - Codex 不能直接接管一个可见 GUI 终端窗口去实时敲字和读屏。
-- 从 `2026-03-29` 起，前台常驻协作是默认标准方式；Codex 不再把裸 `gemini --resume latest -p ...` 当作默认入口。
-- `ask` 只会在前台运行中时成功；如果用户手动关掉前台窗口，后续 `ask` 会失败并视为协作模式结束。
+- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式；前台窗口只保留为可选的人工交互入口。
+- 关闭前台窗口，只会结束那一个可见交互窗口；不会阻止后续后台 `--resume` 续接。
 - 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`。
 
 ## 7. 当前适用范围
