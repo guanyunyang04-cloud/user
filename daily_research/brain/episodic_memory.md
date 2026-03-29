@@ -8258,3 +8258,164 @@ position,000001.SZ,1200,12.38,
 1. The standard Codex-to-Gemini path is now background `ask / closeout / sessions`; frontend is optional only.
 2. Closing a visible frontend window is no longer treated as "ending Gemini collaboration", because background `--resume` remains usable by design.
 3. If background `latest` brings back stale context, Gemini output must be treated as a second opinion rather than a source of truth; workspace files, artifacts, and backtest outputs stay authoritative.
+## 2026-03-29 Cross-profile 攻守控制器正式扫描：`legacy_v7` offense vs `expanded_v24` defense
+### Objective
+- Keep execution default on the current-code `lgbm520` live anchor.
+- Formally test whether a cross-profile attack/defense controller can raise annual return above the current clean static offense frontier while retaining the weak-window/focus-weak defense edge.
+- If not, stop lingering in the current `v250 / v255 / controller` parameter space and pivot R&D to a new opportunity set.
+
+### New tool
+- Added:
+  - `daily_research/baseline/scan_cross_profile_attack_defense_controller.py`
+- Purpose:
+  - use one market-feature profile for offense scoring
+  - use another market-feature profile for defense/live scoring
+  - keep the same current-code protocol:
+    - `liquid500`
+    - `next_open`
+    - `504 / 21 / 520`
+    - `holding_count = 5`
+    - `rebalance_freq = 1d`
+
+### Formal run
+- Experiment tag:
+  - `advanced_ml_cross_profile_attack_defense_20260329_formal_r1`
+- Output directory:
+  - `daily_research/output/advanced_ml_cross_profile_attack_defense_20260329_formal_r1`
+- Focus state:
+  - `trend_up_low_vol`
+- Static controls:
+  - defense: `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+  - offense: `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+
+### Key result
+- Static defense:
+  - `full_annual_return = 13.92%`
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- Static offense:
+  - `full_annual_return = 15.54%`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- Best cross-profile dynamic by `full_excess_sharpe` and balance:
+  - `trend_up_low_vol_cross_legacy_v7_off_expanded_v24_def_controller_gap0p024192_vol0p176128_ret100p014717_offml25_none22_v253_defml25_none23p5_v251p5`
+  - `full_annual_return = 15.49%`
+  - `full_excess_annual_return = 18.17%`
+  - `full_excess_sharpe = 0.836`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.359`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.458`
+  - `offense_within_focus = 24.90%`
+
+### Direct answer
+- The controller is real:
+  - it materially strengthens weak-window and focus-weak defense
+  - it improves the balance between offense and defense compared with either static leg alone
+- But it still fails the user's upgrade gate:
+  - `15.49%` annual return is still below the clean static offense frontier `15.54%`
+  - no dynamic candidate dominates both static controls on full and weak-window metrics at the same time
+
+### Conclusion
+1. Execution default stays unchanged on the current-code `lgbm520 v250` live anchor.
+2. Cross-profile controller work is now a finished frontier-mapping step, not the main active frontier.
+3. By the user's explicit rule, R&D should now pivot away from the current `v250 / v255 / controller` parameter space and move to a new opportunity set / new alpha family.
+## 2026-03-29 `deep_alpha` 新 alpha 家族正式起跑：最小充分矩阵 `backbone` 阶段完成
+### Objective
+- Stop continuing the `v250 / v255 / controller` frontier.
+- Move the new-alpha search onto the already-defined formal entry:
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+- Complete the first real formal stage:
+  - `backbone`
+
+### Formal run
+- Command:
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase backbone --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Output root:
+  - `daily_research/output/deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Windows:
+  1. `20230214 -> 20240227`
+  2. `20240228 -> 20250313`
+  3. `20250314 -> 20260327`
+
+### Practical obstacle and fix
+- This stage was long enough that the shell wait timed out before the full stage finished.
+- The correct recovery method was:
+  - rerun the same `root-tag`
+  - let the runner `skip-existing`
+  - fill the remaining missing pretrain / finetune windows
+  - wait for `stage_backbone_selected.json` instead of treating partial window metrics as a finished stage
+
+### Leaderboard
+- `enc-patch__pre-nopre__score-manual__rank-plain`
+  - `mean_excess_sharpe = 0.744`
+  - `min_excess_sharpe = -0.529`
+  - `mean_excess_total_return = 60.76%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 0`
+- `enc-gru__pre-nopre__score-manual__rank-plain`
+  - `mean_excess_sharpe = 0.626`
+  - `min_excess_sharpe = 0.014`
+  - `mean_excess_total_return = 45.78%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 0`
+- `enc-patch__pre-maskedpre__score-manual__rank-plain`
+  - `mean_excess_sharpe = -0.224`
+  - `min_excess_sharpe = -1.173`
+  - `mean_excess_total_return = -13.03%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 1`
+
+### Conclusion
+1. The first formal winner in the new-alpha family is:
+   - `patch_transformer + no pretrain + manual + plain`
+2. `masked pretrain` does not currently deserve to stay on the default backbone route:
+   - it is not the winner
+   - it carries one undertrained pretrain window
+   - its three-window average is materially worse
+3. The next sensible step is now narrow and concrete:
+   - continue to `score_head`
+   - do not open more backbone branches first
+
+## 2026-03-29 Gemini hallucination escalation rule was productized
+
+### Trigger
+- The existing Gemini background flow was too sticky to `latest` session memory.
+- When stale context leaked back in, Codex needed an explicit, repeatable escalation path instead of ad hoc prompt tightening.
+
+### Tooling changes
+- Patched `daily_research/tools/gemini_frontend.ps1` to support:
+  - `-FreshSession`
+  - `-Model`
+  - `-Escalate`
+- `-Escalate` was defined as:
+  - force fresh session
+  - if no explicit model is provided, default to `gemini-3.1-pro-preview`
+- Frontend window mode can now be reopened as an isolation path with:
+  - `daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate`
+
+### Validation
+- Verified the new status surface:
+  - `default_mode = background_resume`
+  - `escalation_mode = fresh_session_plus_model`
+  - `default_escalation_model = gemini-3.1-pro-preview`
+- Verified fresh-session background call:
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRESH_OK" -FreshSession`
+  - returned `GEMINI_FRESH_OK`
+- Verified pro escalation path:
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_ESCALATE_OK" -Escalate`
+  - returned `GEMINI_ESCALATE_OK`
+- Tried `closeout` twice after the upgrade:
+  - first with `-Escalate`
+  - then with a shorter summary and `-FreshSession`
+  - both timed out without a trustworthy return, so the fallback rule was recorded: retry once with a shorter summary, then report failure honestly
+
+### Operational rule learned
+- Default collaborative path remains background `--resume`.
+- First obvious stale-memory / hallucination event:
+  - upgrade to `-FreshSession`
+- Repeated drift, critical review, or high-risk closeout:
+  - upgrade to `-Escalate`
+- If context must be visually isolated from the old thread:
+  - open a new frontend window with `open -ForceNew -Escalate`
+- Gemini remains a second-opinion tool; final truth still comes from the current workspace artifacts and commands.

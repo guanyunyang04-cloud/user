@@ -53,6 +53,8 @@ python daily_research/deep_alpha/run_deep_alpha_research.py --help
 ### Gemini 后台标准入口
 ```powershell
 daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_BACKEND_OK"
+daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRESH_OK" -FreshSession
+daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_ESCALATE_OK" -Escalate
 daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."
 daily_research\tools\gemini_frontend.cmd sessions
 ```
@@ -60,6 +62,7 @@ daily_research\tools\gemini_frontend.cmd sessions
 ### Gemini 可选前台入口
 ```powershell
 daily_research\tools\gemini_frontend.cmd open
+daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate
 daily_research\tools\gemini_frontend.cmd status
 daily_research\tools\gemini_frontend.cmd close
 ```
@@ -70,6 +73,12 @@ daily_research\tools\gemini_frontend.cmd close
 - 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式；前台窗口只保留为可选的人工交互入口。
 - 关闭前台窗口，只会结束那一个可见交互窗口；不会阻止后续后台 `--resume` 续接。
 - 如果追求强连续性，应优先固定 session id，而不是长期依赖 `latest`。
+- 从 `2026-03-29` 起，Gemini 升级策略也固定为三层：
+  - 普通情况：后台 `--resume`
+  - 一次明显漂移：`-FreshSession`
+  - 连续漂移、关键收尾或高风险复核：`-Escalate`，默认会切到 `gemini-3.1-pro-preview`
+- 如果需要把漂移上下文和当前协作彻底隔离开，可以直接开新窗口：
+  - `daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate`
 
 ## 7. 当前适用范围
 - 默认使用 `quant` 的脚本：

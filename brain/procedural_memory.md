@@ -39,16 +39,20 @@
 ## 2. Gemini 协同方法
 - 标准入口：
   - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..." -FreshSession`
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..." -Escalate`
   - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
 - `daily_research\tools\gemini_frontend.cmd sessions`
 - 可选人工前台：
   - `daily_research\tools\gemini_frontend.cmd open`
+  - `daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate`
   - `daily_research\tools\gemini_frontend.cmd status`
   - `daily_research\tools\gemini_frontend.cmd close`
 - Final-answer closeout:
   - Run `closeout` before every final user-facing reply.
   - Use it to confirm completed work and discuss the next step.
   - The closeout prompt should explicitly tell Gemini to trust the supplied work summary over conflicting stale session memory.
+  - If `closeout` times out, retry once with a shorter summary, then report the failure honestly if it still does not return.
 - Dependent runtime sequencing:
   - Do not parallelize producer-consumer steps where one command writes an artifact and the next command reads it.
   - If that mistake happens, rerun the consumer after the producer finishes and write the pitfall back into the project brain.
@@ -56,6 +60,11 @@
   - 优先固定 session id
   - 默认走后台 `--resume` 续接；前台只作可选人工交互
 - 若后台 `latest` 会话明显带回旧上下文，Gemini 输出只能当第二意见，不能覆盖当前工作区事实。
+- 幻觉 / 漂移升级梯子：
+  - 第一步先试 `-FreshSession`
+  - 若仍漂移，或属于关键复核，则直接 `-Escalate`
+  - `-Escalate` 默认等价于 fresh session + `gemini-3.1-pro-preview`
+  - 若需要把旧上下文和当前协作显式隔离，则开 `open -ForceNew -Escalate`
 - 已知边界：
   - Codex 可以复用 Gemini 会话
   - Codex 不能直接接管一个可见终端窗口实时敲字读屏

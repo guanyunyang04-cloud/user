@@ -86,7 +86,17 @@
 - 当前这轮历史高收益审计已经证明：
   - `2026-03-24` 的 `lgbm / histgb / etr` 高收益不是空话
   - 但它属于历史快照系统，不属于今天的 current live benchmark
+### 2.8 Cross-profile 控制器的收官判定
+- 当 offense edge 与 defense edge 已明确落在不同 feature profile 上时，不要再只靠同 profile 内部 gating 近似它们的差异。
+- 标准动作是直接做 cross-profile formal comparator，而不是继续口头推演；当前复用脚本为 `daily_research/baseline/scan_cross_profile_attack_defense_controller.py`，静态控制必须同时包含当前 live-defense 锚点和当前 clean offense 锚点。
+- 评估顺序固定为：先看 `full_annual_return / full_excess_sharpe`，再看 weak-window 与 focus-weak Sharpe，最后看 offense gating 占比、turnover 与 drawdown。
+- 如果 best cross-profile dynamic 只是明显补强 weak / focus-weak，但仍未超过静态 offense 的 `full_annual_return` 或 `full_excess_sharpe`，则应把它记为“稳健性 frontier”，而不是“新的收益前沿”。
+- 一旦在同口径 formal 下得到这个结论，就停止把当前 `v250 / v255 / controller` 参数空间当作第一研发前线，转向新机会集 / 新 alpha 家族。
 
+### 2.9 最小矩阵长跑的恢复规则
+- 对 `deep_alpha/run_minimal_matrix.py` 这类长时间 formal stage，如果 shell 等待超时或中途中断，不要换新 tag 重来；优先用同一个 `root-tag` 直接重跑。
+- 这类 runner 会自动 `skip-existing`、复用已完成的 run / pretrain artifact，并在最后一块补齐后继续写出阶段 summary 与 selected recipe。
+- 只有当 `stage_<name>_selected.json` 已落盘时，才把该阶段视为正式完成；仅有各窗口 `metrics.json` 还不算阶段收口。
 ## 3. 分脑写入技能
 ### 3.1 写入路由
 - 当前稳定状态写 `semantic_memory.md`
@@ -140,27 +150,20 @@
 
 ## 4. Gemini 协同技能
 ### 4.1 后台标准调用
-- Gemini 标准入口：
-  - `daily_research/tools/gemini_frontend.cmd`
+- Gemini 标准入口：`daily_research/tools/gemini_frontend.cmd`
 - 标准命令：
-  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "..."`
-  - `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
-  - `daily_research\tools\gemini_frontend.cmd sessions`
-- 前台命令保留为可选人工交互：
-  - `daily_research\tools\gemini_frontend.cmd open`
-  - `daily_research\tools\gemini_frontend.cmd status`
-  - `daily_research\tools\gemini_frontend.cmd close`
+  - `ask -Prompt "..."` / `ask -Prompt "..." -FreshSession` / `ask -Prompt "..." -Escalate`
+  - `ask -Prompt "..." -FreshSession -Model "gemini-3.1-pro-preview"`
+  - `closeout -WorkSummary "..." -NextStep "..."` / `sessions`
+- 前台命令只保留为可选人工交互：`open` / `open -ForceNew -Escalate` / `status` / `close`
 
 ### 4.2 会话连续性规则
-- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式。
-- 默认续接目标仍是 `latest`；如果已有更稳定的 session id，应显式固定。
-- 前台窗口只用于人工连续对话，不再作为 Codex 调用 Gemini 的必要前置条件。
-- 关闭前台窗口只会结束那个可见窗口；后续后台 `ask` 仍可继续通过 `--resume` 调用 Gemini。
-- 若后台 `latest` 会话带回了明显过时的上下文，必须把 Gemini 输出当作“需甄别的第二意见”，而不是事实源。
-- 遇到这种漂移时，优先做三件事：
-  - 在 prompt 里重述本轮已完成工作与当前真实状态
-  - 尽量固定 session id，而不是长期只依赖 `latest`
-  - 最终以当前工作区文件、回测产物和执行结果为准
+- 从 `2026-03-29` 起，后台 `ask / closeout` 是默认标准方式；默认续接目标仍是 `latest`，若已有更稳定的 session id 应显式固定。
+- 前台窗口只用于人工连续对话，不再是 Codex 调用 Gemini 的必要前置条件；关闭前台也不会阻止后续后台 `--resume`。
+- 若后台 `latest` 带回明显过时的上下文，Gemini 只能算“需甄别的第二意见”；优先在 prompt 重述本轮真实状态、尽量固定 session id，并始终以当前工作区文件、回测产物和执行结果为准。
+- 标准升级梯子固定为：`-FreshSession` -> `-FreshSession -Model "gemini-3.1-pro-preview"` 或 `-Escalate` -> `open -ForceNew -Escalate`。
+- `-Escalate` 固定表示“强制 fresh session；若未显式指定 `-Model`，默认切到 `gemini-3.1-pro-preview`”。
+- 是否升级由 Codex 按风险决定：普通补充意见继续后台 `--resume`；出现一次明显漂移先 `-FreshSession`；连续漂移、高风险判断或关键收尾复核直接 `-Escalate`。
 
 ### 4.3 Codex / Gemini 分工
 - Codex 负责主线判断、文件修改、结果落盘与一致性收口
@@ -175,6 +178,7 @@
   - confirm what has already been done
   - discuss the most sensible next step
 - If Gemini CLI is unavailable or the call fails, report that honestly; do not fabricate a closeout.
+- If `closeout` times out, first retry once with a shorter `WorkSummary`; if it still fails, report the failure honestly instead of inventing a Gemini conclusion.
 - The final answer to the user should reflect the Gemini closeout, but the actual workspace state remains the source of truth.
 - The closeout prompt itself should explicitly tell Gemini to treat the supplied work summary as authoritative and ignore conflicting stale session memory.
 

@@ -6,7 +6,10 @@ param(
     [switch]$ForceNew,
     [string]$Prompt = "",
     [string]$WorkSummary = "",
-    [string]$NextStep = ""
+    [string]$NextStep = "",
+    [string]$Model = "",
+    [switch]$FreshSession,
+    [switch]$Escalate
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +19,9 @@ $stateDir = Join-Path $repoRoot "daily_research\cache\gemini_frontend"
 $statePath = Join-Path $stateDir "state.json"
 $geminiPath = "C:\Users\ASUS\AppData\Roaming\npm\gemini.cmd"
 $defaultMode = "background_resume"
+$defaultEscalationMode = "fresh_session_plus_model"
+$defaultEscalationModel = "gemini-3.1-pro-preview"
+$freshSessionLabel = "fresh"
 
 function Get-State {
     if (-not (Test-Path -LiteralPath $statePath)) {
@@ -24,14 +30,23 @@ function Get-State {
     return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 }
 
-function Save-State([int]$RootPid, [string]$Workspace, [string]$SessionName, [string]$WindowTitle) {
+function Save-State(
+    [int]$RootPid,
+    [string]$Workspace,
+    [string]$SessionName,
+    [string]$WindowTitle,
+    [string]$ModelName,
+    [bool]$FreshSessionEnabled
+) {
     New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
     $state = [ordered]@{
-        root_pid    = $RootPid
-        workspace   = $Workspace
-        session     = $SessionName
-        title       = $WindowTitle
-        launched_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        root_pid      = $RootPid
+        workspace     = $Workspace
+        session       = $SessionName
+        title         = $WindowTitle
+        model         = $ModelName
+        fresh_session = $FreshSessionEnabled
+        launched_at   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 }
@@ -78,35 +93,123 @@ function Get-DescendantProcessIds([int]$RootPid) {
     return [int[]]$seen
 }
 
+function Get-RequestedFreshSession {
+    return [bool]($FreshSession -or $Escalate)
+}
+
+function Resolve-EffectiveModel([string]$RequestedModel) {
+    $modelName = ""
+    if ($null -ne $RequestedModel) {
+        $modelName = [string]$RequestedModel
+    }
+    if (-not [string]::IsNullOrWhiteSpace($modelName)) {
+        return $modelName
+    }
+    if ($Escalate) {
+        return $defaultEscalationModel
+    }
+    return ""
+}
+
+function Resolve-ResumeTarget([string]$PreferredSession) {
+    $explicitSession = ""
+    if ($null -ne $PreferredSession) {
+        $explicitSession = [string]$PreferredSession
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitSession) -and $explicitSession -ne "latest") {
+        return $explicitSession
+    }
+
+    $state = Get-State
+    if ($null -ne $state) {
+        $stateSession = ""
+        if ($null -ne $state.session) {
+            $stateSession = [string]$state.session
+        }
+        if (
+            -not [string]::IsNullOrWhiteSpace($stateSession) -and
+            $stateSession -ne $freshSessionLabel
+        ) {
+            return $stateSession
+        }
+    }
+    return "latest"
+}
+
+function Get-InvocationSpec {
+    $useFreshSession = Get-RequestedFreshSession
+    $effectiveModel = Resolve-EffectiveModel -RequestedModel $Model
+    $resumeTarget = $null
+    $sessionName = $freshSessionLabel
+
+    if (-not $useFreshSession) {
+        $resumeTarget = Resolve-ResumeTarget -PreferredSession $Session
+        $sessionName = $resumeTarget
+    }
+
+    return [pscustomobject]@{
+        use_fresh_session = $useFreshSession
+        model             = $effectiveModel
+        resume_target     = $resumeTarget
+        session_name      = $sessionName
+        escalate          = [bool]$Escalate
+    }
+}
+
+function Build-GeminiArgs([pscustomobject]$Spec, [string]$PromptText) {
+    $args = @()
+    if (-not [string]::IsNullOrWhiteSpace([string]$Spec.model)) {
+        $args += @("--model", [string]$Spec.model)
+    }
+    if (-not [bool]$Spec.use_fresh_session) {
+        $args += @("--resume", [string]$Spec.resume_target)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PromptText)) {
+        $args += @("-p", $PromptText)
+    }
+    return $args
+}
+
 function Get-FrontendStatus {
+    $base = [ordered]@{
+        default_mode              = $defaultMode
+        escalation_mode           = $defaultEscalationMode
+        default_escalation_model  = $defaultEscalationModel
+        fresh_session_supported   = $true
+        model_override_supported  = $true
+        open_new_window_supported = $true
+    }
+
     $state = Get-State
     if ($null -eq $state) {
-        return [pscustomobject]@{
-            default_mode = $defaultMode
-            running    = $false
-            message    = "No Gemini frontend state file."
-            root_pid   = $null
-            session    = $null
-            workspace  = $repoRoot
-            title      = $Title
-            processes  = @()
-        }
+        return [pscustomobject]($base + @{
+            running       = $false
+            message       = "No Gemini frontend state file."
+            root_pid      = $null
+            session       = $null
+            workspace     = $repoRoot
+            title         = $Title
+            model         = $null
+            fresh_session = $null
+            processes     = @()
+        })
     }
 
     $rootPid = [int]$state.root_pid
     $rootProcess = Get-Process -Id $rootPid -ErrorAction SilentlyContinue
     if ($null -eq $rootProcess) {
         Clear-State
-        return [pscustomobject]@{
-            default_mode = $defaultMode
-            running    = $false
-            message    = "Gemini frontend state was stale and has been cleared."
-            root_pid   = $rootPid
-            session    = $state.session
-            workspace  = $state.workspace
-            title      = $state.title
-            processes  = @()
-        }
+        return [pscustomobject]($base + @{
+            running       = $false
+            message       = "Gemini frontend state was stale and has been cleared."
+            root_pid      = $rootPid
+            session       = $state.session
+            workspace     = $state.workspace
+            title         = $state.title
+            model         = $state.model
+            fresh_session = $state.fresh_session
+            processes     = @()
+        })
     }
 
     $snapshot = Get-ProcessSnapshot
@@ -122,16 +225,17 @@ function Get-FrontendStatus {
         }
     }
 
-    return [pscustomobject]@{
-        default_mode = $defaultMode
-        running   = $true
-        message   = "Gemini frontend is running."
-        root_pid  = $rootPid
-        session   = $state.session
-        workspace = $state.workspace
-        title     = $state.title
-        processes = @($processes | Sort-Object pid)
-    }
+    return [pscustomobject]($base + @{
+        running       = $true
+        message       = "Gemini frontend is running."
+        root_pid      = $rootPid
+        session       = $state.session
+        workspace     = $state.workspace
+        title         = $state.title
+        model         = $state.model
+        fresh_session = $state.fresh_session
+        processes     = @($processes | Sort-Object pid)
+    })
 }
 
 function Open-Frontend {
@@ -141,7 +245,13 @@ function Open-Frontend {
 
     $status = Get-FrontendStatus
     if ($status.running -and -not $ForceNew) {
-        Write-Output ("Gemini frontend already running. root_pid={0} session={1}" -f $status.root_pid, $status.session)
+        Write-Output (
+            "Gemini frontend already running. root_pid={0} session={1} fresh_session={2} model={3}" -f
+            $status.root_pid,
+            $status.session,
+            $status.fresh_session,
+            $status.model
+        )
         return
     }
 
@@ -149,21 +259,53 @@ function Open-Frontend {
         Close-Frontend | Out-Null
     }
 
+    $spec = Get-InvocationSpec
+    $resumeTarget = ""
+    if ($null -ne $spec.resume_target) {
+        $resumeTarget = [string]$spec.resume_target
+    }
+    $effectiveModel = ""
+    if ($null -ne $spec.model) {
+        $effectiveModel = [string]$spec.model
+    }
+    $sessionBanner = if ($spec.use_fresh_session) { "fresh" } else { $resumeTarget }
+    $modelBanner = if ([string]::IsNullOrWhiteSpace($effectiveModel)) { "default" } else { $effectiveModel }
+
     $boot = @"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location -LiteralPath '$repoRoot'
 `$Host.UI.RawUI.WindowTitle = '$Title'
+`$geminiArgs = @()
+if ('$effectiveModel' -ne '') {
+    `$geminiArgs += @('--model', '$effectiveModel')
+}
+if ('$resumeTarget' -ne '') {
+    `$geminiArgs += @('--resume', '$resumeTarget')
+}
 Write-Host 'Gemini frontend attached to workspace:' '$repoRoot'
-Write-Host 'Session:' '$Session'
+Write-Host 'Session mode:' '$sessionBanner'
+Write-Host 'Model:' '$modelBanner'
 Write-Host 'This window is optional interactive mode only.'
-Write-Host 'Codex standard calls use background resume via gemini_frontend.cmd ask / closeout.'
+Write-Host 'Codex may escalate to fresh session or 3.1 pro when stale context is detected.'
 Write-Host 'Close this window manually when finished, or run gemini_frontend.ps1 close from another shell.'
-& '$geminiPath' --resume $Session
+& '$geminiPath' @geminiArgs
 "@
 
     $process = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-Command", $boot -WindowStyle Normal -PassThru
-    Save-State -RootPid $process.Id -Workspace $repoRoot -SessionName $Session -WindowTitle $Title
-    Write-Output ("Opened Gemini frontend. root_pid={0} session={1}" -f $process.Id, $Session)
+    Save-State `
+        -RootPid $process.Id `
+        -Workspace $repoRoot `
+        -SessionName $spec.session_name `
+        -WindowTitle $Title `
+        -ModelName $effectiveModel `
+        -FreshSessionEnabled ([bool]$spec.use_fresh_session)
+    Write-Output (
+        "Opened Gemini frontend. root_pid={0} session={1} fresh_session={2} model={3}" -f
+        $process.Id,
+        $spec.session_name,
+        $spec.use_fresh_session,
+        $modelBanner
+    )
 }
 
 function Close-Frontend {
@@ -189,35 +331,14 @@ function Close-Frontend {
     Write-Output ("Closed Gemini frontend. root_pid={0}" -f $rootPid)
 }
 
-function Resolve-ResumeTarget([string]$PreferredSession) {
-    $explicitSession = ""
-    if ($null -ne $PreferredSession) {
-        $explicitSession = [string]$PreferredSession
-    }
-    if (-not [string]::IsNullOrWhiteSpace($explicitSession) -and $explicitSession -ne "latest") {
-        return $explicitSession
-    }
-
-    $state = Get-State
-    if ($null -ne $state) {
-        $stateSession = ""
-        if ($null -ne $state.session) {
-            $stateSession = [string]$state.session
-        }
-        if (-not [string]::IsNullOrWhiteSpace($stateSession)) {
-            return $stateSession
-        }
-    }
-    return "latest"
-}
-
 function Invoke-FrontendPrompt {
     if ([string]::IsNullOrWhiteSpace($Prompt)) {
         throw "Prompt is required for Action=ask."
     }
 
-    $resumeTarget = Resolve-ResumeTarget -PreferredSession $Session
-    & $geminiPath --resume $resumeTarget -p $Prompt
+    $spec = Get-InvocationSpec
+    $args = Build-GeminiArgs -Spec $spec -PromptText $Prompt
+    & $geminiPath @args
 }
 
 function Invoke-FrontendCloseout {

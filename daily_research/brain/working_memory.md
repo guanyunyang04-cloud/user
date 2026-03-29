@@ -106,13 +106,25 @@
   它更准确的身份是：
   - 当前代码口径下的防守型 live 方案
   - 当前默认值，但仍允许在“不降级”的前提下继续被更优方案替换
-- 因此后续若要同时满足用户目标，研发方向应从“继续做全局 pruning”收口到“双 profile 攻守控制器”：
-  - offense leg 优先研究 `legacy_v7`
-  - defense/live leg 继续保持 `expanded_v24`
+- `2026-03-29` 已完成 `advanced_ml_cross_profile_attack_defense_20260329_formal_r1`：
+  - 静态 defense `expanded_v24 + v250`：`full_annual_return = 13.92%`，`full_excess_sharpe = 0.759`，`weak_excess_sharpe = 1.073`，`focus_weak_excess_sharpe = 1.083`
+  - 静态 offense `legacy_v7 + v255`：`full_annual_return = 15.54%`，`full_excess_sharpe = 0.860`，`weak_excess_sharpe = 0.819`，`focus_weak_excess_sharpe = 0.751`
+  - 最强 cross-profile dynamic：`full_annual_return = 15.49%`，`full_excess_sharpe = 0.836`，`weak_excess_sharpe = 1.359`，`focus_weak_excess_sharpe = 1.458`
+- 这次 formal 结果说明：
+  - 双 profile 控制器确实把弱窗口与 focus-weak 防守补强了；
+  - 但它没有把 full 年化推过静态 offense 的 `15.54%`，也没有形成同时压过两组静态控制的单一赢家；
+  - 因此按用户的“若控制器不能把年化抬出新台阶，就转向新机会集”规则，当前 `v250 / v255 / 双 profile 控制器` 参数空间不再是第一研发前线。
 
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责，执行后端已稳定落在当前仓当前代码 live-anchor 口径。
-- `deep_alpha` 仍是长期主研究线，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
+- `deep_alpha` 仍是长期主研究线，而当前最近待决策事项已经从“执行端升级 shortlist 的最终判决”转成“寻找能把 clean annual frontier 抬出新台阶的新机会集”。
+- 当前 `advanced_ml` 的 `v250 / v255 / 双 profile 控制器` frontier 已基本画清：
+  - 控制器可以提升稳健性；
+  - 但没有把年化前沿抬过静态 offense；
+  - 继续深挖这组参数的边际收益已明显下降。
+- `2026-03-29` 已把“新 alpha 家族”推进到 formal entry：`daily_research/output/deep_alpha_minimal_matrix_20260329_backbone_r1`
+- 当前 `deep_alpha` backbone winner 已明确为 `enc-patch__pre-nopre__score-manual__rank-plain`，`selection_scope = eligible_only`，`mean_excess_sharpe = 0.744`，`mean_excess_total_return = 60.76%`
+- `patch_transformer` 无预训练版本当前优于 `gru`；`masked pretrain` 既不是 winner，也出现 `pretrain_undertrained_count = 1`；因此下一步直接进入 `score_head`
 - 底层市场状态层已经完成架构升级：
   - `quadrant` 继续保留为兼容标签
   - 新默认研究输入同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`
@@ -125,71 +137,55 @@
 - 坏市场专项若重启，主目标固定为“坏市场绝对收益”，不得再用坏市场超额替代坏市场盈利。
 
 ## 4. 当前优先级
-### 优先级 A：把 shortlist 升级为攻守控制器
+### 优先级 A：转向新机会集
 目标：
-
-- 在执行端已稳定为当前仓当前代码 live-anchor 后端的前提下，继续保留当前代码口径的研究主线；
-- 不再扩新候选；
-- 把已经完成的 shortlist head-to-head 收口成可正式回测的攻守切换规则；
-- 且必须以“不低于旧收益前沿”为前提。
-
+- 在执行端继续稳定保留 `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250)` 的前提下，停止继续深挖当前 `v250 / v255 / 双 profile 控制器` 参数空间；
+- 把研发主线转到“有机会把年化真正抬出新台阶”的新机会集或新 alpha 家族；
+- 继续遵守“利润优先非降级”，不接受只补稳健、不抬前沿的延长战。
 具体动作：
-
-1. 只比较以下两组最终候选：
-   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
-   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
-2. 比较口径继续固定为：
+1. 把 `advanced_ml_cross_profile_attack_defense_20260329_formal_r1` 视为当前参数空间的 frontier map，而不是新的默认升级起点。
+2. 记住这组三元边界：
+   - 静态 defense `expanded_v24 + v250 = 13.92% / 0.759 / 1.073 / 1.083`
+   - 静态 offense `legacy_v7 + v255 = 15.54% / 0.860 / 0.819 / 0.751`
+   - 最强 dynamic `= 15.49% / 0.836 / 1.359 / 1.458`
+3. 因为 best dynamic 仍未突破静态 offense 的年化 `15.54%`，当前 `v250 / v255 / controller` family 暂不继续加大扫参投入。
+4. 后续“新机会集”至少应体现为以下之一：
+   - 新 universe / 新容量假设
+   - 新 alpha family / 新表示学习主线
+   - 新组合构建与收益翻译方式
+5. 所有新机会集仍必须走：
    - 历史滚动高流动性股票池
    - `next_open`
    - 多窗口 walk-forward
-   - `weak_window_20250905_20260319`
-3. head-to-head 已完成；当前两组候选的职责固定解释为：
-   - `v255` 负责进攻
-   - `v250` 负责防守
-4. 下一步正式工作不再是“二选一”，而是补一个同口径 formal comparator，比较：
-   - 静态 `v255`
-   - 静态 `v250`
-   - 动态攻守控制器
-5. 在攻守控制器正式跑完前，不允许研究侧局部高收益候选静默替换默认值；
-   同时也不允许只靠“更稳”把更低收益方案继续升级为默认值。
-6. 当前若继续推进动态控制器，顺序更新为：
-   - 保留 `benchmark_ret_10d` 作为第二代控制轴，不再退回到只有 `trend_gap + annual_vol` 的首轮规则；
-   - 继续围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 这类候选补 `full_excess_sharpe`；
-   - `focus_streak` 暂保留为解释变量，不直接升格为正式 gating 入口。
+6. 在新机会集没有跑出明确新前沿前，执行默认值不变，不允许因为“旧 offense 更高”或“动态更稳”而反复摇摆 live anchor。
+7. 当前这条“新 alpha 家族”主入口已经具体化为 `daily_research/deep_alpha/run_minimal_matrix.py --phase backbone`；winner 已产出，下一步直接进入 `score_head`。
 
 ### 优先级 B：维持当前执行主线稳态
 目标：
-
 - 保持当前默认执行链路可用、可复核、可回滚。
-
 具体动作：
-
 1. 继续依赖 `latest_ml_model.json` 的验证摘要与模型新鲜度保护。
 2. 继续把执行端默认值明确解释为：
    - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 3. 若后续继续做执行端长窗口正式复核，优先沿当前 shortlist 收口，不回退到更早已淘汰参数。
 4. 若重启坏市场专项，统一按“坏市场绝对收益”排序与验收。
 
-### 优先级 C：完成 `deep_alpha` 的正式判决
+### 优先级 C：用 `deep_alpha` 承接新机会集探索
 目标：
-
-- 把 `deep_alpha` 的正式能力边界跑清楚；
-- 在不打断执行端升级判决的前提下，继续维持主研究线推进。
-
+- 把 `deep_alpha` 作为“新机会集 / 新 alpha 家族”的第一承接点之一；
+- 在不打断当前执行默认值的前提下，继续推动真正可能抬升年化前沿的研究线。
 具体动作：
-
 1. 固定正式框架：
    - 历史滚动高流动性股票池
    - `next_open`
    - 多窗口 walk-forward
-2. 先解决关键窗口 `undertrained`，再讨论结构升级。
-3. 只有在多窗口持续改善且不破坏既有强窗口时，才允许讨论接近执行端。
+2. 当前 backbone 已选出 `patch_transformer + no pretrain + manual + plain`。
+3. 下一步直接进入 `score_head`；`masked pretrain` 先保留为 challenger，不作为默认 backbone 路线。
+4. 只有在后续阶段多窗口持续改善且真正把 clean annual frontier 往上抬时，才允许讨论接近执行端。
 
 ### 优先级 D：把治理规则变成日常流程
 目标：
-
 - 避免语义记忆、项目地图、工作记忆、环境模型、行动系统与情景记忆再次混写。
-
 具体动作：
 
 1. `semantic_memory.md` 只写当前状态、入口与边界。
@@ -238,6 +234,7 @@
 5. 结论无法在 `episodic_memory.md` 中回溯到对应实验与产物。
 6. 所谓“坏市场盈利”若只体现为坏市场超额更高、但坏市场绝对收益仍持续为负，不得按坏市场盈利方案晋级。
 7. 当前 shortlist 的 head-to-head 若不能在同一正式口径下稳定分出胜负，则维持现默认值，不做口头升级。
+8. 若 cross-profile 攻守控制器已在同口径 formal 下证明“稳健性提升但年化不创新高”，则停止继续把当前参数空间当作第一研发前线。
 
 ## 8. 文档维护规则
 - `daily_research/brain/semantic_memory.md`

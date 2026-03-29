@@ -121,16 +121,19 @@
   - `trend_breakout`
 - 这说明它的问题是状态和结构耦合下的排序质量，而不是单纯的流动性或容量问题。
 
-### 5.2 执行端的瓶颈是缺少攻守控制器
-- 当前默认主线并不是被新方案全面推翻，而是已经遇到两组值得升级的 shortlist。
-- 真正的短期瓶颈已经不是“还没做 head-to-head”，而是：
-  - formal head-to-head 做完之后，收益进攻性与弱窗口防守性仍然分属不同候选；
-  - 当前系统还没有把这种 split verdict 收口成“该进攻时进攻、该防守时防守”的动态动作。
-- 底层状态机本身已经不再停留在纯四象限：
-  - 当前 `quadrant` 已经降级为兼容层；
-  - 底层研究输入已扩展为连续 `trend/vol` 指标、`trend_bucket`、`vol_bucket` 和 `market_state`；
-  - 现在的瓶颈转移成“如何让上层策略真正消费更细状态”，而不是继续重复讨论四象限是否太粗。
-  - 当前需要明确记住的一条边界是：旧 `state_alpha_profile` 仍是按 legacy quadrant 调出来的，暂时不能直接外推到更细状态标签。
+### 5.2 执行端的瓶颈已从“缺少控制器”转成“当前机会集天花板过低”
+- 当前默认主线并不是被新方案全面推翻，而是已经把 `v250`、`v255` 和双 profile 控制器的 frontier 基本画清。
+- `2026-03-29` 的 cross-profile formal comparator 已明确给出三元边界：
+  - 静态 defense `expanded_v24 + v250`：`full_annual_return = 13.92%`，`full_excess_sharpe = 0.759`
+  - 静态 offense `legacy_v7 + v255`：`full_annual_return = 15.54%`，`full_excess_sharpe = 0.860`
+  - 最强 cross-profile dynamic：`full_annual_return = 15.49%`，`full_excess_sharpe = 0.836`，但 `weak_excess_sharpe = 1.359`，`focus_weak_excess_sharpe = 1.458`
+- 这说明：
+  - 控制器确实能把弱窗口和 focus-weak 防守抬起来；
+  - 但它没有把年化前沿推过静态 offense，也没有形成一个同时压过两组静态控制的单一赢家。
+- 所以当前真正的短期瓶颈已经不再是“怎么把 offense edge 和 defense edge 拼起来”，而是：
+  - 在当前 `liquid500 + next_open + advanced_ml_current_code` 机会集里，clean annual frontier 本身就抬不高；
+  - 想继续冲更高收益，必须转向新机会集、新 alpha 家族，或新的收益翻译方式。
+- 底层状态机本身仍然有价值，但它现在更像“帮助解释与切换”的基础设施，而不是当前收益天花板的决定性瓶颈。
 
 ### 5.3 坏市场里还没有成熟的绝对收益 alpha
 - 当前执行主线在坏市场里的能力更接近：
@@ -162,7 +165,7 @@
   - `v255` 降级为进攻对照，不再作为默认值候选。
 - 当前更合理的下一步：
   - 不再追问旧 split verdict 到底谁赢；
-  - 直接研究动态控制器能否跑赢 live `v250`，同时保留 `v255` 的进攻切片。
+  - 先用双 profile 控制器把 frontier 画清，再决定是否值得继续留在当前参数空间。
 - 当前的 formal R3 已经把边界更新成了：
   - 静态 `v250 = 0.759 / 1.073 / 1.083`
   - 静态 `v255 = 0.675 / 0.281 / 0.094`
@@ -170,7 +173,11 @@
   - 所以动态方向仍成立，但研究 benchmark 已改成 live `v250` 默认值。
 - `market_feature_profile_compare_20260328_formal_r1` 又把更深一层的边界补清了：`expanded_v24` 修复了 `base_global`、让 live `v250` 的弱窗口更稳，但也明显吃掉了旧 `v255` 与当前动态控制器的进攻上沿。
 - `market_feature_profile_pruning_20260328_formal_r1` 继续把边界压实了：几组中间态 profile 都没能同时保住当前 `expanded_v24` 的 live 防守、又恢复旧 `legacy_v7` 的进攻上沿；最接近的是 `continuous_quadrant_v9`，但它仍然是“弱窗口修回来一些、full 端和 live `v250` 都变差”。
-- 这意味着当前执行端的真实瓶颈已进一步收敛为：不是“要不要回滚整个新状态层”，也不是“再剪几刀全局 `market_features`”，而是“如何把 `legacy_v7` 的 offense edge 和 `expanded_v24` 的 defense edge 收进同一套双 profile 攻守控制器里”。
+- `advanced_ml_cross_profile_attack_defense_20260329_formal_r1` 已经把这件事正式跑完：
+  - best dynamic `15.49% / 0.836 / 1.359 / 1.458`
+  - static offense `15.54% / 0.860 / 0.819 / 0.751`
+  - static defense `13.92% / 0.759 / 1.073 / 1.083`
+- 因此当前执行端的真实瓶颈已进一步收敛为：不是“控制器还没做”，而是“控制器做完后，当前机会集的 clean annual frontier 仍然不够高”。
 - 用户已在 2026-03-28 明确纠偏：坏市场、弱窗口、稳定性都属于从属目标，它们必须服务于“总利润继续抬高”，而不是替代总利润目标本身。
 - 这意味着项目的下一阶段不该再把“更稳但更低收益”解释成自然升级，而应回到更原始也更严格的目标：
   - 每个阶段都追求最大利润
@@ -187,42 +194,44 @@
   - 先解决关键窗口 `undertrained`
   - 先修关键状态下的排序稳定性
   - 先证明多窗口一致性
+- `2026-03-29` 这条线已经真正进入正式矩阵：`deep_alpha_minimal_matrix_20260329_backbone_r1` 完成 `backbone`，winner 是 `patch_transformer` 无预训练版本，`masked pretrain` 当前没有通过 backbone 判决。
+- 这意味着“新 alpha 家族”现在不再只是方向判断，而是已经进入“先定 backbone，再进 `score_head`，再进 `ranking`”的正式节奏。
 
 ## 7. 接下来最值得投入的研究方向
-### 7.1 第一优先级：把 split verdict 升级为攻守控制器
-- 当前收益最高的投入，不是再开一堆候选，而是让动态控制器在同口径下同时满足两件事：
-  - 不低于旧收益前沿
-  - 又优于当前防守型 live 方案
-- 下一步真正值得做的，是在同一 formal 口径下比较：
-  - 旧高收益 offense 方案
-  - 当前防守型 `v250` 方案
-  - 动态攻守切换方案
-- 只有当动态方案在同样的滚动股票池、`next_open` 与多窗口 walk-forward 下同时不丢旧收益前沿、又补上弱窗口 / 坏市场利润，项目才算真正接近“该进攻时进攻、该防守时防守”。
-- 第一轮扫描后的更具体方向是：
-  - 不再停留在简单双阈值规则；
-  - 继续补强 `trend_up_low_vol` 内部的状态识别与切换信号。
-- 第二轮 `ret10` 扫描后的更具体方向是：
-  - 保留 `benchmark_ret_10d` 这条新控制轴；
-  - 继续围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 这类候选补 full 端收益；
-  - 不再把 `focus_streak` 当作下一轮 formal controller 的主入口。
-- 架构层的并行动作已经明确：
-  - 新状态表继续保留向后兼容；
-  - 后续新增控制器、状态 profile 与诊断工具时，优先消费 `regime_state_selector`，不再新增硬编码四象限入口。
+### 7.1 第一优先级：转向新机会集 / 新 alpha 家族
+- 当前最值得投入的，不再是继续细磨 `v250 / v255 / controller`，因为 formal cross-profile comparator 已证明：
+  - 控制器能补稳健；
+  - 但不能把年化前沿抬出新台阶。
+- 下一步真正值得做的，是寻找新的收益来源，而不是继续在当前 frontier 附近绕圈：
+  - 新 universe / 新容量约束
+  - 新 alpha family
+  - 新组合构建与收益翻译方式
+- 这些新方向仍必须沿用当前正式纪律：
+  - 历史滚动股票池
+  - `next_open`
+  - 多窗口 walk-forward
+  - 不破坏强窗口
 
 ### 7.2 第二优先级：让 `deep_alpha` 从“局部有效”走向“正式可判决”
 - 值得投入的不是泛化的“更大模型”，而是更具体的三件事：
   - 强化 `trend_up_low_vol` 下的排序稳定性
   - 优先修复弱窗口里的关键结构
   - 继续用 rolling liquid pool + `next_open` + 多窗口 walk-forward 验证
+- 当前最具体、最该继续的下一步已经收口为：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 的 winner 进入 `score_head`，不再在 backbone 阶段平行扩更多 recipe。
 
-### 7.3 第三优先级：若重启坏市场专项，必须单独立题
+### 7.3 第三优先级：保持当前执行主线稳态
+- 当前执行默认值仍应继续停在：
+  - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- cross-profile controller 的 formal 结果应只作为研究 frontier map 使用，不应再触发默认值来回摇摆。
+
+### 7.4 第四优先级：若重启坏市场专项，必须单独立题
 - 这条线只有在目标明确写成：
   - 坏市场绝对收益
   - 或更进一步的坏市场降损
   时才值得继续投资源。
 - 它不能再作为上涨态微调的副产品存在。
 
-### 7.4 第四优先级：继续强化项目治理，而不是回退到口头管理
+### 7.5 第五优先级：继续强化项目治理，而不是回退到口头管理
 - 这个项目后续能否长期维持质量，很大程度取决于：
   - 文档边界
   - 研究结论可回溯
