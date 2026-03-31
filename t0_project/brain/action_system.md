@@ -40,7 +40,31 @@
 2. 再接人工确认下单
 3. 最后才接真实自动交易接口
 
-## 6. 当前安全边界
+## 6. RL 执行层路线入口
+### 6.1 数据采集
+```bash
+python t0_project/rl_agent/data_collector.py
+```
+
+### 6.2 训练入口
+```bash
+python t0_project/rl_agent/train_ppo_agent.py --data-path t0_project/rl_agent/data/600536.SH_1m_history.csv --model-name recurrent_ppo_exec_r1 --vecnormalize-name vecnormalize_exec_r1.pkl --total-timesteps 200000
+```
+
+### 6.3 回放与调试入口
+```bash
+python t0_project/rl_agent/debug_inference.py --data-path t0_project/rl_agent/data/600536.SH_1m_history.csv --model-path t0_project/models/recurrent_ppo_exec_r1.zip --vecnormalize-path t0_project/models/vecnormalize_exec_r1.pkl
+```
+
+### 6.4 当前约束
+- RL 当前只在 `paper` / 回放链路里验证执行质量。
+- 当前目标是：
+  - timing
+  - sizing
+  - inventory 管理
+- 当前不把 RL 结果直接外推到 `daily_research` 的日线 alpha 主线。
+
+## 7. 当前安全边界
 - `live` 当前不会真的下单
 - 若信号进入 `LiveBrokerAdapter`，未实现能力会抛出 `NotImplementedError`
 - 这属于保护，不是 bug

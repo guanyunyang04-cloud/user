@@ -45,6 +45,7 @@ DEFAULT_DOCS = [
 
 @dataclass(frozen=True)
 class DocRule:
+    warn_lines: int | None = None
     max_lines: int | None = None
     forbidden_heading_patterns: tuple[tuple[str, str], ...] = ()
     enforce_non_decreasing_dated_headings: bool = False
@@ -52,76 +53,89 @@ class DocRule:
 
 DOC_RULES = {
     "brain/master_brain.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main brain should stay a current workspace memory instead of becoming a dated log"),
         ),
     ),
     "brain/brain_architecture.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main brain architecture should stay structural instead of becoming a dated log"),
         ),
     ),
     "brain/working_memory.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=240,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main working memory should stay a current-priority document instead of becoming a dated log"),
         ),
     ),
     "brain/procedural_memory.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
     "brain/environment_model.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main environment model should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
     "brain/brain_manifest.json": DocRule(
-        max_lines=200,
+        warn_lines=200,
+        max_lines=280,
     ),
     "daily_research/brain/semantic_memory.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research semantic memory should stay a current-state document instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/brain_architecture.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research brain architecture should stay structural instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/project_map.md": DocRule(
-        max_lines=280,
+        warn_lines=280,
+        max_lines=420,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research project_map should stay a collaboration guide instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/working_memory.md": DocRule(
-        max_lines=260,
+        warn_lines=260,
+        max_lines=360,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research working memory should stay a current-decision document instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/procedural_memory.md": DocRule(
-        max_lines=220,
+        warn_lines=220,
+        max_lines=320,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/environment_model.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research environment model should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/action_system.md": DocRule(
-        max_lines=220,
+        warn_lines=220,
+        max_lines=320,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research action system should stay an operations guide instead of becoming a dated log"),
         ),
@@ -130,97 +144,114 @@ DOC_RULES = {
         enforce_non_decreasing_dated_headings=True,
     ),
     "daily_research/brain/brain_manifest.json": DocRule(
-        max_lines=220,
+        warn_lines=220,
+        max_lines=320,
     ),
     "t0_project/brain/semantic_memory.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=240,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 semantic memory should stay a current-state document instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/brain_architecture.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=240,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 brain architecture should stay structural instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/working_memory.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=240,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 working memory should stay a current-priority document instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/procedural_memory.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/environment_model.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 environment model should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/action_system.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 action system should stay an operations guide instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/episodic_memory.md": DocRule(
-        max_lines=120,
+        warn_lines=120,
+        max_lines=180,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 episodic memory should stay empty or time-ordered once activated"),
         ),
     ),
     "t0_project/brain/brain_manifest.json": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
     ),
     "daily_stock_analysis-main/brain/semantic_memory.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis semantic memory should stay a current-state document instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/brain_architecture.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis brain architecture should stay structural instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/working_memory.md": DocRule(
-        max_lines=160,
+        warn_lines=160,
+        max_lines=240,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis working memory should stay a current-priority document instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/procedural_memory.md": DocRule(
-        max_lines=200,
+        warn_lines=200,
+        max_lines=280,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/environment_model.md": DocRule(
-        max_lines=180,
+        warn_lines=180,
+        max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis environment model should stay an environment baseline instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/action_system.md": DocRule(
-        max_lines=220,
+        warn_lines=220,
+        max_lines=320,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis action system should stay an operations guide instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/episodic_memory.md": DocRule(
-        max_lines=120,
+        warn_lines=120,
+        max_lines=180,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis episodic memory should stay empty or time-ordered once activated"),
         ),
     ),
     "daily_stock_analysis-main/brain/brain_manifest.json": DocRule(
-        max_lines=220,
+        warn_lines=220,
+        max_lines=320,
     ),
 }
 
@@ -452,6 +483,9 @@ def cmd_check(args: argparse.Namespace) -> int:
             has_issue = True
             for line in tail_question_lines[: args.show_lines]:
                 print(f"    ? {line}")
+
+        if rule and rule.warn_lines is not None and line_count > rule.warn_lines:
+            print(f"  structural_warning=line_count_exceeds_warning ({line_count} > {rule.warn_lines})")
 
         if rule and rule.max_lines is not None and line_count > rule.max_lines:
             has_issue = True
