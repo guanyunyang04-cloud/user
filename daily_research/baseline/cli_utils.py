@@ -3,11 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from daily_research.baseline.data_provider import filter_a_share_universe, load_cached_stock_name_map
+
+
+def _restrict_tradeable_stocks(stocks: list[str]) -> list[str]:
+    stock_name_map = load_cached_stock_name_map()
+    return filter_a_share_universe(
+        stocks,
+        universe_scope="all_a",
+        stock_name_map=stock_name_map if not stock_name_map.empty else None,
+    )
+
 
 def parse_stock_list(raw: str | None) -> list[str]:
     if not raw:
         return []
-    return [stock.strip().upper() for stock in str(raw).split(",") if stock.strip()]
+    stocks = [stock.strip().upper() for stock in str(raw).split(",") if stock.strip()]
+    return _restrict_tradeable_stocks(stocks)
 
 
 def load_stock_list_from_file(path: str | None) -> list[str]:
@@ -30,7 +42,7 @@ def load_stock_list_from_file(path: str | None) -> list[str]:
             tokens.extend(item.strip() for item in line.split(",") if item.strip())
         else:
             tokens.append(line)
-    return [token.upper() for token in tokens]
+    return _restrict_tradeable_stocks([token.upper() for token in tokens])
 
 
 def parse_csv_list(

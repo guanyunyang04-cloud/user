@@ -158,6 +158,156 @@ def _dynamic_group_mean_feature(
     return pd.DataFrame(out_arr, index=value_df.index, columns=value_df.columns)
 
 
+def _build_static_graph_prior(
+    columns: pd.Index,
+    industry_map: pd.Series | None,
+    style_map: pd.DataFrame | None,
+    industry_boost: float,
+    style_boost: float,
+) -> np.ndarray:
+    n_stocks = len(columns)
+    prior = np.zeros((n_stocks, n_stocks), dtype=np.float32)
+    if industry_map is not None and not industry_map.empty and industry_boost != 0.0:
+        industry = industry_map.reindex(columns)
+        industry_arr = industry.astype("object").to_numpy()
+        same_industry = (
+            pd.notna(industry_arr)[:, None]
+            & pd.notna(industry_arr)[None, :]
+            & (industry_arr[:, None] == industry_arr[None, :])
+        )
+        prior += same_industry.astype(np.float32) * float(industry_boost)
+    if style_map is not None and not style_map.empty and style_boost != 0.0:
+        style_bool = style_map.reindex(columns).fillna(False).astype(bool).to_numpy(dtype=np.float32, copy=False)
+        if style_bool.size > 0:
+            overlap = style_bool @ style_bool.T
+            style_counts = style_bool.sum(axis=1, keepdims=True)
+            denom = np.maximum(np.minimum(style_counts, style_counts.T), 1.0)
+            prior += (overlap / denom).astype(np.float32) * float(style_boost)
+    np.fill_diagonal(prior, 0.0)
+    return prior
+
+
+def _aggregate_dynamic_graph_feature(
+    base_features: np.ndarray,
+    source_arr: np.ndarray,
+    valid_mask: np.ndarray,
+    static_prior: np.ndarray,
+    top_k: int,
+    temperature: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    out = np.full(source_arr.shape, np.nan, dtype=np.float32)
+    similarity_out = np.full(source_arr.shape, np.nan, dtype=np.float32)
+    if base_features.ndim != 3:
+        raise ValueError(f"Expected base_features to have 3 dims, got {base_features.shape}")
+    n_dates = base_features.shape[0]
+    safe_temp = max(float(temperature), 1e-3)
+    for row_idx in range(n_dates):
+        active_idx = np.flatnonzero(valid_mask[row_idx])
+        if active_idx.size <= 1:
+            continue
+        k = min(int(top_k), int(active_idx.size) - 1)
+        if k <= 0:
+            continue
+        x = np.nan_to_num(base_features[row_idx, active_idx, :], nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
+        norms = np.linalg.norm(x, axis=1, keepdims=True)
+        norms[norms == 0.0] = 1.0
+        x = x / norms
+        sim = (x @ x.T).astype(np.float32, copy=False)
+        sim += static_prior[np.ix_(active_idx, active_idx)]
+        np.fill_diagonal(sim, -np.inf)
+        top_pos = np.argpartition(sim, kth=sim.shape[1] - k, axis=1)[:, -k:]
+        top_sim = np.take_along_axis(sim, top_pos, axis=1)
+        logits = top_sim / safe_temp
+        finite_logits = np.where(np.isfinite(logits), logits, -np.inf)
+        row_max = np.max(finite_logits, axis=1, keepdims=True)
+        row_max[~np.isfinite(row_max)] = 0.0
+        weights = np.exp(finite_logits - row_max)
+        weights[~np.isfinite(top_sim)] = 0.0
+        weight_denom = weights.sum(axis=1, keepdims=True)
+        weight_denom[weight_denom == 0.0] = 1.0
+        weights = weights / weight_denom
+
+        source_vals = source_arr[row_idx, active_idx]
+        neighbor_vals = source_vals[top_pos]
+        finite_neighbor = np.isfinite(neighbor_vals)
+        neighbor_weights = weights * finite_neighbor.astype(np.float32)
+        neighbor_denom = neighbor_weights.sum(axis=1)
+        weighted_sum = (neighbor_weights * np.nan_to_num(neighbor_vals, nan=0.0, posinf=0.0, neginf=0.0)).sum(axis=1)
+        neighbor_mean = np.divide(
+            weighted_sum,
+            neighbor_denom,
+            out=np.full(active_idx.size, np.nan, dtype=np.float32),
+            where=neighbor_denom > 0.0,
+        )
+        sim_weight_sum = (weights * np.where(np.isfinite(top_sim), top_sim, 0.0)).sum(axis=1)
+
+        out[row_idx, active_idx] = neighbor_mean
+        similarity_out[row_idx, active_idx] = sim_weight_sum.astype(np.float32, copy=False)
+    return out, similarity_out
+
+
+def build_dynamic_graph_feature_frames(
+    close: pd.DataFrame,
+    ret_5: pd.DataFrame,
+    ret_20: pd.DataFrame,
+    ma_20_gap: pd.DataFrame,
+    amount_ratio_5_20: pd.DataFrame,
+    liquidity_rank_20: pd.DataFrame,
+    industry_map: pd.Series | None = None,
+    style_map: pd.DataFrame | None = None,
+    top_k: int = 8,
+    temperature: float = 0.35,
+    industry_boost: float = 0.15,
+    style_boost: float = 0.05,
+) -> Dict[str, pd.DataFrame]:
+    columns = close.columns
+    valid_mask = close.notna().to_numpy(dtype=bool, copy=False)
+    static_prior = _build_static_graph_prior(
+        columns=columns,
+        industry_map=industry_map,
+        style_map=style_map,
+        industry_boost=industry_boost,
+        style_boost=style_boost,
+    )
+    signal_frames = {
+        "ret_5": ret_5,
+        "ret_20": ret_20,
+        "ma_20_gap": ma_20_gap,
+        "amount_ratio_5_20": amount_ratio_5_20.sub(1.0),
+        "liquidity_rank_20": (liquidity_rank_20 - 0.5) * 2.0,
+    }
+    base_features = np.stack(
+        [
+            _cross_sectional_zscore_frame(frame).to_numpy(dtype=np.float32, copy=False)
+            for frame in signal_frames.values()
+        ],
+        axis=-1,
+    )
+    peer_outputs: Dict[str, pd.DataFrame] = {}
+    similarity_arr = None
+    for name, frame in signal_frames.items():
+        peer_arr, sim_arr = _aggregate_dynamic_graph_feature(
+            base_features=base_features,
+            source_arr=frame.to_numpy(dtype=np.float32, copy=False),
+            valid_mask=valid_mask,
+            static_prior=static_prior,
+            top_k=top_k,
+            temperature=temperature,
+        )
+        peer_frame = pd.DataFrame(peer_arr, index=frame.index, columns=frame.columns)
+        peer_outputs[f"graph_peer_{name}"] = peer_frame.fillna(0.0)
+        peer_outputs[f"graph_rel_{name}"] = frame.sub(peer_frame, axis=0).fillna(0.0)
+        if similarity_arr is None:
+            similarity_arr = sim_arr
+    if similarity_arr is not None:
+        peer_outputs["graph_peer_similarity"] = pd.DataFrame(
+            similarity_arr,
+            index=close.index,
+            columns=close.columns,
+        ).fillna(0.0)
+    return peer_outputs
+
+
 def build_sequence_features(
     df_dict: Dict[str, pd.DataFrame],
     benchmark_close: pd.Series,
@@ -167,6 +317,11 @@ def build_sequence_features(
     liquidity_layer: bool = False,
     liquidity_bucket_count: int = 5,
     liquidity_bucket_frame: pd.DataFrame | None = None,
+    dynamic_graph_layer: bool = False,
+    dynamic_graph_top_k: int = 8,
+    dynamic_graph_temperature: float = 0.35,
+    dynamic_graph_industry_boost: float = 0.15,
+    dynamic_graph_style_boost: float = 0.05,
 ) -> Dict[str, pd.DataFrame]:
     close = df_dict["Close"].astype(float)
     open_df = df_dict["Open"].astype(float)
@@ -266,11 +421,11 @@ def build_sequence_features(
             features[f"style_{style_name}_strength_20"] = style_strength_df
             features[f"style_{style_name}_member"] = style_member_df
 
+    liquidity_rank_20 = adv20.rank(axis=1, pct=True).fillna(0.5)
     if liquidity_layer:
         if liquidity_bucket_frame is None:
             liquidity_bucket_frame = build_liquidity_bucket_frame(amount, window=20, n_buckets=liquidity_bucket_count)
         liquidity_bucket_frame = liquidity_bucket_frame.reindex(index=close.index, columns=close.columns)
-        liquidity_rank_20 = adv20.rank(axis=1, pct=True).fillna(0.5)
         liquidity_z_20 = _cross_sectional_zscore_frame(adv20)
         liquidity_ratio_20_60 = adv20.div(adv60.replace(0, np.nan)).fillna(1.0)
         liquidity_bucket_mean_ret_20 = _dynamic_group_mean_feature(ret_20, liquidity_bucket_frame, list(range(liquidity_bucket_count)))
@@ -283,6 +438,23 @@ def build_sequence_features(
         for bucket in range(liquidity_bucket_count):
             bucket_mask = (liquidity_bucket_frame == float(bucket)).astype(float)
             features[f"liquidity_bucket_{bucket}"] = bucket_mask.fillna(0.0)
+    if dynamic_graph_layer:
+        features.update(
+            build_dynamic_graph_feature_frames(
+                close=close,
+                ret_5=ret_5,
+                ret_20=ret_20,
+                ma_20_gap=ma_20_gap,
+                amount_ratio_5_20=amount_ratio_5_20,
+                liquidity_rank_20=liquidity_rank_20,
+                industry_map=industry_map,
+                style_map=style_map,
+                top_k=dynamic_graph_top_k,
+                temperature=dynamic_graph_temperature,
+                industry_boost=dynamic_graph_industry_boost,
+                style_boost=dynamic_graph_style_boost,
+            )
+        )
     return features
 
 

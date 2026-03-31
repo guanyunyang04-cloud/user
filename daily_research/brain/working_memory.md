@@ -128,6 +128,10 @@
 - `2026-03-30` 已定位并修复 `run_deep_alpha_research.py` 的 strict-window bug：旧版 `valid_days` 只约束了 `valid_start`，却没有真正截断 `valid_end`，导致之前的 `liquid800` “多窗口”结果其实是嵌套长 holdout，不是严格等长 walk-forward。
 - 按修正后的 strict walk-forward 重跑 `rolling liquid800` 后，当前 clean frontier 明确收口为单一 winner：`liquid800_plain = 51.02% / 46.73% / 1.621 / 1.124`，显著强于 `liquid800_ranked = 35.50% / 29.31% / 1.173 / 0.184`；旧的“`plain` 稳定前沿 + `ranked` 激进前沿”口径失效，`ranked` 只保留为次级对照。
 - 同一轮 strict `liquid800` 下，`relation_layer` 与 `masked_pretrain` 也都正式失败：`relation = 11.37% / 4.73% / 0.061 / -1.520`，`masked_pretrain = 17.67% / 12.85% / 0.477 / -0.346`。
+- `2026-03-31` 已在新 universe 约束下补完 `patch_plain vs original_mamba_plain` strict head-to-head：研究范围固定为“上证 A + 深证 A，剔除创业板 / 科创板 / ST”，结果 `patch` 在 `3/3` 窗口全胜；均值上 `patch = 3.66% / 3.71% / 0.137 / -23.84%`，`original_mamba = -4.39% / -4.41% / -0.233 / -25.60%`，因此原始 `mamba` 正式记为“新 universe 下首轮失败”，不再直接进入优化循环。
+- 同日已把 `dynamic graph v1` 接入 `deep_alpha` 正式脚本：新增 `--dynamic-graph-layer` 与 `top-k / temperature / industry_boost / style_boost` 参数，形态是“按日重算 top-k peer graph 特征层”，并已跑通技术 smoke `daily_research/output/deep_alpha_liquid800_dynamic_graph_20260331_smoke_v2`；该 smoke 只代表链路可用，不参与 frontier 判决。
+- 随后已补完新 universe 下的 strict formal head-to-head：`relation_baseline` 对 `dynamic_graph_v1`，产物在 `daily_research/output/deep_alpha_relgraph_h2h_20260331_mainboard_r1`。结果 `dynamic_graph_v1` 以 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜通过旧 `relation` baseline；均值上 `dynamic_graph_v1 = 15.48% / 15.64% / 0.534 / -25.71%`，`relation_baseline = -4.09% / -4.10% / -0.117 / -27.47%`。
+- 但这轮 formal 只证明 `dynamic_graph_v1` 已明显优于旧 `relation_layer`，还不能直接升格为新 frontier；下一道默认 gate 应改为 `plain vs dynamic_graph_v1` strict head-to-head，而不是立刻切去 `MoE`。
 - `plain` 与 `ranked` 的近似 stitched-return controller 也已补完：walk-forward state/window controller 没有跑赢 `plain`；只有 oracle / window-oracle 略高于 `plain`，因此这条控制线目前不再是第一优先级。
 - 底层市场状态层已经完成架构升级：`quadrant` 继续保留为兼容标签；新默认研究输入已同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`；后续策略默认优先接 `regime_state_selector`，而当前 `state_alpha_profile` 若切到更细 selector 会显式报错而不是静默退化。
 - `base_global` 即使经过参数优化，也没有通过当前弱窗口修复门槛，不再作为执行升级主候选。
@@ -183,7 +187,9 @@
    - 多窗口 walk-forward
 2. 当前 backbone 已选出 `patch_transformer + no pretrain + manual + plain`。
 3. 在 strict rolling `liquid800` 这个更强新机会集里，当前唯一主前沿是 `liquid800_plain`；`ranked`、`controller`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都已在 formal 或 strict formal 下失利。
-4. 后续若继续做 `deep_alpha`，应转向真正改变机会集或表示能力的分支，而不是继续围绕 `plain/ranked/controller` 做小修小补；同时继续优先复用 per-window cache 与已落盘 artifact。
+4. `2026-03-31` 的新 universe strict head-to-head 也已把原始 `mamba` 降级为首轮失败分支；这条 backbone 先记结论，不再直接追加优化。
+5. 后续若继续做 `deep_alpha`，默认顺序收口为：先做 `dynamic_graph_v1 vs plain` strict head-to-head；若动态图仍未抬高 strict frontier，再切到 `state-conditioned MoE`；不要继续围绕 `plain/ranked/controller` 或原始 `mamba` 做小修小补。
+6. 新分支仍应继续优先复用 per-window cache 与已落盘 artifact。
 
 ### 优先级 D：把治理规则变成日常流程
 目标：

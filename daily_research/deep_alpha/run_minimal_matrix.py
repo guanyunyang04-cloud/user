@@ -52,10 +52,21 @@ class RecipeSpec:
 
     @property
     def slug(self) -> str:
-        encoder = "gru" if self.encoder_family == "gru" else "patch"
+        encoder_key = str(self.encoder_family).strip().lower()
+        if encoder_key == "ssm":
+            encoder_key = "mamba"
+        encoder_map = {
+            "gru": "gru",
+            "transformer": "trans",
+            "patch_transformer": "patch",
+            "mamba": "mamba",
+        }
+        encoder = encoder_map.get(encoder_key, encoder_key.replace("_", "-"))
         pretrain = "maskedpre" if self.use_pretrain else "nopre"
-        relation = "rel" if self.relation_layer else "norel"
-        return f"enc-{encoder}__pre-{pretrain}__score-{self.score_head_method}__rank-{self.ranking_profile}__{relation}"
+        slug = f"enc-{encoder}__pre-{pretrain}__score-{self.score_head_method}__rank-{self.ranking_profile}"
+        if self.relation_layer:
+            slug = f"{slug}__rel"
+        return slug
 
     @property
     def display_name(self) -> str:
@@ -288,6 +299,14 @@ def _backbone_recipes() -> list[RecipeSpec]:
         RecipeSpec(
             encoder_family="patch_transformer",
             use_pretrain=True,
+            score_head_method="manual",
+            ranking_profile="plain",
+            ranking_loss_weight=0.0,
+            listwise_loss_weight=0.0,
+        ),
+        RecipeSpec(
+            encoder_family="mamba",
+            use_pretrain=False,
             score_head_method="manual",
             ranking_profile="plain",
             ranking_loss_weight=0.0,

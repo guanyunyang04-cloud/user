@@ -194,6 +194,8 @@
 - 但 `2026-03-30` 又发现 `run_deep_alpha_research.py` 的 strict-window bug：旧版 `valid_days` 没有真正写入 `valid_end`，导致 `2026-03-29` 的 `liquid800` 结果其实是嵌套长 holdout，不是严格等长 walk-forward。
 - 修正并重跑 strict rolling `liquid800` 后，前沿被重新改写为：`plain = 51.02% / 46.73% / 1.621 / 1.124`，`ranked = 35.50% / 29.31% / 1.173 / 0.184`，`masked_pretrain = 17.67% / 12.85% / 0.477 / -0.346`，`relation = 11.37% / 4.73% / 0.061 / -1.520`。
 - 也就是说，修正后真正成立的不是“双前沿并存”，而是 `liquid800_plain` 单独胜出；`ranked`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都没能把 strict frontier 再抬高，而 `plain/ranked` 的近似 walk-forward controller 也没有实盘可用地跑赢 `plain`，只剩 oracle stitched-return 略高。
+- `2026-03-31` 又在新 universe 约束下补完 `patch_plain vs original_mamba_plain` strict head-to-head：研究范围固定为“上证 A + 深证 A，剔除创业板 / 科创板 / ST”，结果 `patch` 在 `3/3` 窗口全胜；均值上 `patch = 3.66% / 3.71% / 0.137 / -23.84%`，`original_mamba = -4.39% / -4.41% / -0.233 / -25.60%`，因此原始 `mamba` 正式记为“新 universe 下首轮失败”，不再作为默认优化对象。
+- 同日又补完 `relation_baseline vs dynamic_graph_v1` 的 strict formal head-to-head：`dynamic_graph_v1` 以 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜通过旧 `relation` baseline；均值上 `dynamic_graph_v1 = 15.48% / 15.64% / 0.534 / -25.71%`，`relation_baseline = -4.09% / -4.10% / -0.117 / -27.47%`。
 - 这意味着“新 alpha 家族”已经完成更严格的一轮判决，下一步不该继续深挖这几个已输掉的小旋钮，而要把资源投向真正改变机会集或表示能力的分支。
 
 ## 7. 接下来最值得投入的研究方向
@@ -219,6 +221,7 @@
 - 当前最小矩阵已经证明：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 继续细磨 `score_head / ranking` 的边际收益很低。
 - `2026-03-30` 的 strict rerun 又把这个判断继续收紧了：`liquid800` 机会集本身确实更强，但旧的 `ranked revived` 叙事主要来自窗口 bug；修正后 `ranked` 虽然仍是正收益对照，却不再构成和 `plain` 并列的主前沿。
 - 因此下一步更值得投入的是围绕 strict rolling `liquid800` 继续找真正新的表示能力或收益翻译机制，而不是继续在 `plain/ranked/controller` 这一圈里做小范围修补，也不是回到 `liquid500` 深挖已输掉的小旋钮。
+- 当前默认后续顺序已收口为：先做 `plain vs dynamic_graph_v1` strict head-to-head；若动态图仍未抬高 strict frontier，再切到 `state-conditioned MoE`；RL 仍只放在执行层独立分脑，不回灌成日线 alpha 主线。
 
 ### 7.3 第三优先级：保持当前执行主线稳态
 - 当前执行默认值仍应继续停在：`advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`

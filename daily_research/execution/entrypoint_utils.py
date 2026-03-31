@@ -39,6 +39,7 @@ def ensure_default_pool_argument() -> None:
     if has_arg("--stocks") or has_arg("--stocks-file"):
         return
     from daily_research.execution.liquidity_universe import get_default_pool_file
+    from daily_research.baseline.data_provider import find_universe_violations, load_cached_stock_name_map
 
     pool_file = get_default_pool_file()
     if not pool_file.exists() and not is_help_request():
@@ -46,6 +47,23 @@ def ensure_default_pool_argument() -> None:
             f"Default liquid500 universe file not found: {pool_file}. "
             "Please run daily_research/execution/update_liquid_pool.py after close first."
         )
+    if pool_file.exists():
+        raw_stocks = [
+            line.strip().upper()
+            for line in pool_file.read_text(encoding="utf-8-sig").splitlines()
+            if line.strip()
+        ]
+        stock_name_map = load_cached_stock_name_map()
+        violations = find_universe_violations(
+            raw_stocks,
+            stock_name_map=stock_name_map if not stock_name_map.empty else None,
+        )
+        if violations:
+            bad_examples = ", ".join(list(violations.keys())[:8])
+            raise ValueError(
+                "Default execution pool contains stocks outside the allowed trade universe "
+                f"(main-board SH/SZ A-shares only, excluding ST). Re-run update_liquid_pool.py. Examples: {bad_examples}"
+            )
     inject_default_arg("--stocks-file", str(pool_file))
 
 

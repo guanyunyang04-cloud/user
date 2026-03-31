@@ -5,7 +5,12 @@ from typing import Any
 
 import pandas as pd
 
-from daily_research.baseline.data_provider import load_daily_from_csv, load_daily_from_tq
+from daily_research.baseline.data_provider import (
+    filter_a_share_universe,
+    load_cached_stock_name_map,
+    load_daily_from_csv,
+    load_daily_from_tq,
+)
 from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, get_cache_root, load_pickle, save_pickle, series_signature
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.market_state_model import build_state_frame, fit_market_state_model
@@ -17,7 +22,13 @@ from daily_research.progress import progress_write
 def parse_stocks(raw: str | None) -> list[str]:
     if not raw:
         return []
-    return [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
+    stock_name_map = load_cached_stock_name_map()
+    stocks = [stock.strip().upper() for stock in raw.split(",") if stock.strip()]
+    return filter_a_share_universe(
+        stocks,
+        universe_scope="all_a",
+        stock_name_map=stock_name_map if not stock_name_map.empty else None,
+    )
 
 
 def load_stocks_from_file(path: str | None) -> list[str]:
@@ -38,7 +49,12 @@ def load_stocks_from_file(path: str | None) -> list[str]:
             tokens.extend(item.strip() for item in line.split(",") if item.strip())
         else:
             tokens.append(line)
-    return [token.upper() for token in tokens]
+    stock_name_map = load_cached_stock_name_map()
+    return filter_a_share_universe(
+        [token.upper() for token in tokens],
+        universe_scope="all_a",
+        stock_name_map=stock_name_map if not stock_name_map.empty else None,
+    )
 
 
 def resolve_stocks_file(args: Any) -> str | None:

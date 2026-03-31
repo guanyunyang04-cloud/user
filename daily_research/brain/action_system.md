@@ -110,11 +110,13 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 ### 5.1 当前研发路线入口
 - 研发路线固定入口仍是 `deep_alpha`，而不是执行端 wrapper。
 - 统一解释器优先使用：
-  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe`
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
+- 当前股票研究范围固定为：上证 A + 深证 A，剔除创业板、科创板与 ST；`liquid300 / liquid500 / liquid800` 默认池已按该约束重建。
+- 训练任务一旦启动默认不手动打断；如需提速，只允许做不改变结果口径的运行时优化。
 
 #### A. 当前 strict anchor 复核入口（可直接运行）
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_minimal_matrix.py `
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_minimal_matrix.py `
   --phase backbone `
   --root-tag deep_alpha_strict_liquid800_anchor_20260331_r1 `
   --rolling-liquidity-pool liquid800 `
@@ -126,24 +128,22 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   --safe-runtime-profile
 ```
 
-#### B. `Mamba / SSM` backbone 目标入口（功能分支落地后沿用同一入口）
+#### B. `Mamba / SSM` 已完成首轮判决（新 universe 下暂不继续优化）
 ```powershell
-# 先在 models.py / run_deep_alpha_research.py / run_minimal_matrix.py 中加入 mamba encoder family，再跑：
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_minimal_matrix.py `
-  --phase backbone `
-  --root-tag deep_alpha_mamba_backbone_20260331_r1 `
-  --rolling-liquidity-pool liquid800 `
-  --window-count 3 `
-  --valid-days 252 `
-  --start-date 20220101 `
-  --benchmark 000300.SH `
-  --skip-existing `
-  --safe-runtime-profile
+# `deep_alpha_mamba_patch_head2head_20260331_mainboard_r2` 已在新 universe 下完成：
+# patch = 3.66% / 3.71% / 0.137 / -23.84%
+# original_mamba = -4.39% / -4.41% / -0.233 / -25.60%
+# 结论：`patch` 3/3 窗口全胜，原始 `mamba` 记为“首轮失败”，先不直接追加优化。
 ```
 
-#### C. `dynamic graph` 旧基线入口（可直接运行，用来定义 no-go baseline）
+#### C. `dynamic graph` 默认下一条研究分支
+`dynamic graph` 现在是 `deep_alpha` 的默认后续入口；若动态图仍未把 strict frontier 抬高，再切到 `MoE`。
+- 当前已落地的是 `v1 = daily-updated top-k peer graph feature layer`，技术 smoke 产物为 `daily_research/output/deep_alpha_liquid800_dynamic_graph_20260331_smoke_v2`；这只是链路验收，不是正式前沿判决。
+- `2026-03-31` 的 strict formal 旧基线对比也已补完：`deep_alpha_relgraph_h2h_20260331_mainboard_r1` 中，`dynamic_graph_v1` 相对 `relation_baseline` 实现 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜，因此下一条默认 gate 已更新为 `plain vs dynamic_graph_v1`，暂不直接切去 `MoE`。
+
+#### D. `dynamic graph` 旧基线入口（可直接运行，用来定义 no-go baseline）
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
   --data-source tq `
   --rolling-liquidity-pool liquid800 `
   --start-date 20220101 `
@@ -156,24 +156,29 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   --experiment-tag deep_alpha_liquid800_relation_baseline_20260331_smoke
 ```
 
-#### D. `dynamic graph` 目标入口（功能分支落地后沿用同一入口）
+#### E. `dynamic graph` 目标入口（功能分支落地后沿用同一入口）
 ```powershell
 # 目标是不再发明新脚本，而是在 run_deep_alpha_research.py 上追加动态图配置后直接 head-to-head：
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
   --data-source tq `
   --rolling-liquidity-pool liquid800 `
   --start-date 20220101 `
   --benchmark 000300.SH `
   --encoder-family patch_transformer `
   --score-head-method manual `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 8 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.15 `
+  --dynamic-graph-style-boost 0.05 `
   --valid-days 252 `
   --safe-runtime-profile `
   --experiment-tag deep_alpha_liquid800_dynamic_graph_20260331_smoke
 ```
 
-#### E. `state-conditioned MoE` 低成本 warm-start（可直接运行）
+#### F. `state-conditioned MoE` 低成本 warm-start（排在 `dynamic graph` 之后）
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
   --data-source tq `
   --rolling-liquidity-pool liquid800 `
   --start-date 20220101 `
@@ -190,10 +195,10 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   --experiment-tag deep_alpha_liquid800_moe_warmstart_20260331_smoke
 ```
 
-#### F. `state-conditioned MoE` 目标入口（功能分支落地后仍沿用同一入口）
+#### G. `state-conditioned MoE` 目标入口（功能分支落地后仍沿用同一入口）
 ```powershell
 # 若 warm-start 有效，再把同一脚本升级成真正的 sparse expert routing；不要新开并行评测框架。
-& "C:\Users\ASUS\miniconda3\envs\quant\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
   --data-source tq `
   --rolling-liquidity-pool liquid800 `
   --start-date 20220101 `
@@ -204,7 +209,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   --experiment-tag deep_alpha_liquid800_sparse_moe_20260331_smoke
 ```
 
-#### G. RL 执行层入口
+#### H. RL 执行层入口
 - RL 不从 `daily_research` 进入，统一转到：
   - `t0_project/brain/action_system.md`
 ## 6. Gemini Final Closeout

@@ -90,6 +90,11 @@ class DeepAlphaConfig:
     score_risk_gate_threshold: float = 0.35
     liquidity_layer: bool = False
     liquidity_bucket_count: int = 5
+    dynamic_graph_layer: bool = False
+    dynamic_graph_top_k: int = 8
+    dynamic_graph_temperature: float = 0.35
+    dynamic_graph_industry_boost: float = 0.15
+    dynamic_graph_style_boost: float = 0.05
     random_seed: int = 7
     market_state_count: int = 4
     holding_count: int = 5

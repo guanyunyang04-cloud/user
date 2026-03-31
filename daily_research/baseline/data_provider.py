@@ -10,19 +10,11 @@ import pandas as pd
 from daily_research.progress import create_progress
 
 
-A_SHARE_PREFIXES = (
-    "00",
-    "30",
-    "60",
-    "68",
-    "43",
-    "82",
-    "83",
-    "87",
-    "88",
-    "89",
-    "92",
-)
+MAINLAND_MAIN_BOARD_PREFIXES = {
+    "SH": ("600", "601", "603", "605"),
+    "SZ": ("000", "001", "002", "003"),
+}
+ST_NAME_PREFIXES = ("ST", "*ST", "SST", "S*ST")
 
 STYLE_SECTOR_CODES = {
     "financial": [
@@ -86,21 +78,106 @@ def resolve_benchmark_symbol(benchmark: str) -> str:
     return benchmark
 
 
+def _normalize_stock_code(code: str) -> str:
+    return str(code or "").strip().upper()
+
+
+def _unique_preserve_order(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _name_map_lookup(stock_name_map: pd.Series | Dict[str, str] | None) -> Dict[str, str] | None:
+    if stock_name_map is None:
+        return None
+    if isinstance(stock_name_map, pd.Series):
+        return {str(idx).upper(): str(value or "") for idx, value in stock_name_map.dropna().items()}
+    return {str(key).upper(): str(value or "") for key, value in stock_name_map.items()}
+
+
+def _looks_like_st_stock(name: str) -> bool:
+    normalized = str(name or "").strip().upper().replace(" ", "")
+    if not normalized:
+        return False
+    return normalized.startswith(ST_NAME_PREFIXES)
+
+
 def _is_a_share_stock(code: str) -> bool:
     if not code or "." not in code:
         return False
     prefix, market = code.split(".", 1)
-    if market.upper() not in {"SH", "SZ", "BJ"}:
+    market = market.upper()
+    if market not in MAINLAND_MAIN_BOARD_PREFIXES:
         return False
-    return prefix.startswith(A_SHARE_PREFIXES)
+    prefix = prefix.upper()
+    return any(prefix.startswith(item) for item in MAINLAND_MAIN_BOARD_PREFIXES[market])
 
 
-def filter_a_share_universe(stock_list: List[str], universe_scope: str = "all_a") -> List[str]:
+def get_stock_name_cache_file(cache_path: str | Path | None = None) -> Path:
+    if cache_path:
+        cache_file = Path(cache_path)
+    else:
+        cache_file = Path(__file__).resolve().parents[1] / "cache" / "stock_name_map_tq.csv"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    return cache_file
+
+
+def load_cached_stock_name_map(cache_path: str | Path | None = None) -> pd.Series:
+    cache_file = get_stock_name_cache_file(cache_path)
+    if not cache_file.exists():
+        return pd.Series(dtype=str, name="name")
+    cached = pd.read_csv(cache_file, dtype={"stock": str, "name": str})
+    if cached.empty or not {"stock", "name"}.issubset(cached.columns):
+        return pd.Series(dtype=str, name="name")
+    series = cached.drop_duplicates(subset=["stock"]).set_index("stock")["name"].fillna("").astype(str)
+    series.index = series.index.map(lambda item: str(item).upper())
+    return series.sort_index()
+
+
+def _save_stock_name_map_cache(stock_name_map: pd.Series, cache_path: str | Path | None = None) -> None:
+    cache_file = get_stock_name_cache_file(cache_path)
+    series = stock_name_map.dropna().astype(str)
+    if series.empty:
+        return
+    series.rename_axis("stock").rename("name").reset_index().to_csv(cache_file, index=False, encoding="utf-8-sig")
+
+
+def find_universe_violations(
+    stock_list: List[str],
+    stock_name_map: pd.Series | Dict[str, str] | None = None,
+) -> Dict[str, str]:
+    name_lookup = _name_map_lookup(stock_name_map)
+    violations: Dict[str, str] = {}
+    for raw in stock_list:
+        stock = _normalize_stock_code(raw)
+        if not stock:
+            continue
+        if not _is_a_share_stock(stock):
+            violations[stock] = "market_or_board"
+            continue
+        if name_lookup is not None and _looks_like_st_stock(name_lookup.get(stock, "")):
+            violations[stock] = "st"
+    return violations
+
+
+def filter_a_share_universe(
+    stock_list: List[str],
+    universe_scope: str = "all_a",
+    stock_name_map: pd.Series | Dict[str, str] | None = None,
+) -> List[str]:
     universe_scope = str(universe_scope or "all_a").lower()
+    normalized = [_normalize_stock_code(stock) for stock in stock_list if _normalize_stock_code(stock)]
     if universe_scope != "all_a":
-        return [s for s in stock_list if s]
-    filtered = [s for s in stock_list if _is_a_share_stock(s)]
-    return sorted(set(filtered))
+        return _unique_preserve_order(normalized)
+    violations = find_universe_violations(normalized, stock_name_map=stock_name_map)
+    filtered = [stock for stock in normalized if stock not in violations]
+    return _unique_preserve_order(filtered)
 
 
 def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
@@ -113,7 +190,32 @@ def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
         stock_list = tq.get_stock_list()
         if not stock_list:
             raise RuntimeError("TDX returned empty stock list.")
-        filtered = filter_a_share_universe(list(stock_list), universe_scope=universe_scope)
+        code_filtered = filter_a_share_universe(list(stock_list), universe_scope=universe_scope)
+        stock_name_map = load_cached_stock_name_map()
+        missing = [stock for stock in code_filtered if stock not in set(stock_name_map.index)]
+        if missing:
+            fetched: Dict[str, str] = {}
+            for stock in missing:
+                try:
+                    info = tq.get_stock_info(stock, ["Name"])
+                except Exception:
+                    continue
+                name = str((info or {}).get("Name", "")).strip()
+                if name:
+                    fetched[stock] = name
+            if fetched:
+                stock_name_map = (
+                    pd.concat([stock_name_map, pd.Series(fetched, name="name")])
+                    .groupby(level=0)
+                    .last()
+                    .sort_index()
+                )
+                _save_stock_name_map_cache(stock_name_map)
+        filtered = filter_a_share_universe(
+            list(stock_list),
+            universe_scope=universe_scope,
+            stock_name_map=stock_name_map if not stock_name_map.empty else None,
+        )
         if not filtered:
             raise RuntimeError(f"No valid stocks found for universe_scope={universe_scope}.")
         return filtered

@@ -122,7 +122,7 @@ def parse_args():
     parser.add_argument("--pin-memory", action="store_true", help="Enable DataLoader pin_memory.")
     parser.add_argument("--no-pin-memory", dest="pin_memory", action="store_false")
     parser.add_argument("--hidden-dim", type=int, default=96)
-    parser.add_argument("--encoder-family", choices=["gru", "transformer", "patch_transformer"], default="gru")
+    parser.add_argument("--encoder-family", choices=["gru", "transformer", "patch_transformer", "mamba", "ssm"], default="gru")
     parser.add_argument("--patch-len", type=int, default=5)
     parser.add_argument("--pretrained-encoder-path", default="", help="Optional path to a masked-pretrained patch encoder artifact for ranking fine-tuning.")
     parser.add_argument("--return-head-mode", choices=["shared", "liquidity_switch"], default="shared")
@@ -163,6 +163,11 @@ def parse_args():
     parser.add_argument("--relation-layer", action="store_true", help="Enable lightweight relation features such as industry-relative ranking and style strength.")
     parser.add_argument("--liquidity-layer", action="store_true", help="Enable liquidity-stratification features and bucket-aware relation features.")
     parser.add_argument("--liquidity-bucket-count", type=int, default=5)
+    parser.add_argument("--dynamic-graph-layer", action="store_true", help="Enable a daily-updated top-k peer graph feature layer built from cross-sectional similarity.")
+    parser.add_argument("--dynamic-graph-top-k", type=int, default=8)
+    parser.add_argument("--dynamic-graph-temperature", type=float, default=0.35)
+    parser.add_argument("--dynamic-graph-industry-boost", type=float, default=0.15)
+    parser.add_argument("--dynamic-graph-style-boost", type=float, default=0.05)
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
@@ -172,6 +177,33 @@ def parse_args():
     parser.set_defaults(pin_memory=True, use_amp=True, safe_runtime_profile=True)
     parser.set_defaults(use_cache=True)
     return parser.parse_args()
+
+
+def _load_cached_rolling_pool_union(pool_name: str, start_date: str, end_date: str) -> list[str]:
+    rolling_root = get_cache_root() / "rolling_pools"
+    if not rolling_root.exists():
+        return []
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    for path in sorted(rolling_root.glob("*.pkl"), key=lambda item: item.stat().st_mtime, reverse=True):
+        artifact = load_pickle(path)
+        if artifact is None or str(getattr(artifact, "pool_name", "")) != str(pool_name):
+            continue
+        membership = getattr(artifact, "membership_frame", None)
+        if membership is None or membership.empty:
+            continue
+        membership = membership.copy()
+        membership.index = pd.to_datetime(membership.index)
+        if membership.index.max() < end_ts:
+            continue
+        effective_start = max(start_ts, membership.index.min())
+        window_membership = membership.loc[(membership.index >= effective_start) & (membership.index <= end_ts)]
+        if window_membership.empty:
+            continue
+        union = window_membership.columns[window_membership.any(axis=0)].tolist()
+        if union:
+            return sorted({str(stock) for stock in union})
+    return []
 
 
 def _cross_sectional_signal(pivot: pd.DataFrame, rank_blend: float) -> pd.DataFrame:
@@ -339,6 +371,11 @@ def main():
         score_risk_gate_threshold=args.score_risk_gate_threshold,
         liquidity_layer=args.liquidity_layer,
         liquidity_bucket_count=args.liquidity_bucket_count,
+        dynamic_graph_layer=args.dynamic_graph_layer,
+        dynamic_graph_top_k=args.dynamic_graph_top_k,
+        dynamic_graph_temperature=args.dynamic_graph_temperature,
+        dynamic_graph_industry_boost=args.dynamic_graph_industry_boost,
+        dynamic_graph_style_boost=args.dynamic_graph_style_boost,
         random_seed=args.random_seed,
         market_state_count=args.market_state_count,
         holding_count=args.holding_count,
@@ -348,6 +385,8 @@ def main():
         min_price=args.min_price,
         max_price=args.max_price,
     )
+    if cfg.encoder_family == "ssm":
+        cfg.encoder_family = "mamba"
     if not cfg.end_date:
         cfg.end_date = pd.Timestamp(get_latest_completed_trading_date()).strftime("%Y%m%d")
 
@@ -356,7 +395,18 @@ def main():
     if args.data_source == "tq":
         if args.rolling_liquidity_pool:
             print(f"[1/8] Loading base universe for rolling {args.rolling_liquidity_pool} research pool...")
-            universe = load_universe_from_tq(cfg.universe_scope)
+            try:
+                universe = load_universe_from_tq(cfg.universe_scope)
+            except Exception as exc:
+                fallback_universe = _load_cached_rolling_pool_union(
+                    pool_name=args.rolling_liquidity_pool,
+                    start_date=cfg.start_date,
+                    end_date=cfg.end_date,
+                )
+                if not fallback_universe:
+                    raise
+                universe = fallback_universe
+                print(f"      TQ universe unavailable, using cached rolling-pool union ({len(universe)} stocks): {exc}")
         elif not universe and cfg.universe_scope == "all_a":
             print("[1/8] Loading all-A universe from TQ...")
             universe = load_universe_from_tq(cfg.universe_scope)
@@ -405,8 +455,8 @@ def main():
     print("[4/8] Building sequence features and targets...")
     industry_map = None
     style_map = None
-    if args.relation_layer and args.data_source == "tq":
-        print("      Loading lightweight relation maps (industry/style)...")
+    if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "tq":
+        print("      Loading relation priors (industry/style)...")
         try:
             industry_map = load_industry_map_from_tq(list(close.columns))
         except Exception as exc:
@@ -416,11 +466,16 @@ def main():
         except Exception as exc:
             print(f"      Style map unavailable: {exc}")
     feature_meta = {
-        "version": 3,
+        "version": 4,
         "raw_key": raw_key,
         "relation_layer": bool(args.relation_layer),
         "liquidity_layer": bool(cfg.liquidity_layer),
         "liquidity_bucket_count": int(cfg.liquidity_bucket_count),
+        "dynamic_graph_layer": bool(cfg.dynamic_graph_layer),
+        "dynamic_graph_top_k": int(cfg.dynamic_graph_top_k),
+        "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
+        "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
+        "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
         "prediction_horizons": list(cfg.prediction_horizons),
         "market_state_count": cfg.market_state_count,
         "state_key": state_key,
@@ -447,6 +502,11 @@ def main():
             liquidity_layer=cfg.liquidity_layer,
             liquidity_bucket_count=cfg.liquidity_bucket_count,
             liquidity_bucket_frame=liquidity_bucket_frame,
+            dynamic_graph_layer=cfg.dynamic_graph_layer,
+            dynamic_graph_top_k=cfg.dynamic_graph_top_k,
+            dynamic_graph_temperature=cfg.dynamic_graph_temperature,
+            dynamic_graph_industry_boost=cfg.dynamic_graph_industry_boost,
+            dynamic_graph_style_boost=cfg.dynamic_graph_style_boost,
         )
         target_frames = build_targets(
             close,
@@ -915,6 +975,11 @@ def main():
                 "score_risk_state_thresholds": parse_float_list(args.score_risk_state_thresholds),
                 "liquidity_layer": bool(cfg.liquidity_layer),
                 "liquidity_bucket_count": int(cfg.liquidity_bucket_count),
+                "dynamic_graph_layer": bool(cfg.dynamic_graph_layer),
+                "dynamic_graph_top_k": int(cfg.dynamic_graph_top_k),
+                "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
+                "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
+                "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
                 "safe_runtime_profile": bool(cfg.safe_runtime_profile),
                 "runtime_profile": runtime_profile.__dict__,
                 "training_diagnostics": training_diagnostics.__dict__,

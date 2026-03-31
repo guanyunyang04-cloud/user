@@ -142,6 +142,101 @@ class PatchTransformerStockEncoder(nn.Module):
         return self.proj(pooled)
 
 
+class SelectiveSSMBlock(nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int,
+        dropout: float = 0.10,
+        kernel_size: int = 4,
+        expansion: int = 2,
+    ) -> None:
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.kernel_size = max(int(kernel_size), 2)
+        self.expansion = max(int(expansion), 2)
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.in_proj = nn.Linear(hidden_dim, hidden_dim * 2)
+        self.depthwise_conv = nn.Conv1d(
+            in_channels=hidden_dim,
+            out_channels=hidden_dim,
+            kernel_size=self.kernel_size,
+            groups=hidden_dim,
+            padding=self.kernel_size - 1,
+        )
+        self.param_proj = nn.Linear(hidden_dim, hidden_dim * 3)
+        self.a_log = nn.Parameter(torch.zeros(hidden_dim))
+        self.delta_bias = nn.Parameter(torch.zeros(hidden_dim))
+        self.skip = nn.Parameter(torch.ones(hidden_dim))
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.ffn_norm = nn.LayerNorm(hidden_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * self.expansion),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * self.expansion, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def _causal_conv(self, x: torch.Tensor) -> torch.Tensor:
+        conv = self.depthwise_conv(x.transpose(1, 2))
+        return conv[:, :, : x.size(1)].transpose(1, 2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        h = self.norm(x)
+        u, gate = self.in_proj(h).chunk(2, dim=-1)
+        u = F.silu(self._causal_conv(u))
+        delta_raw, b, c = self.param_proj(h).chunk(3, dim=-1)
+        delta = F.softplus(delta_raw + self.delta_bias)
+        a = -torch.exp(self.a_log).unsqueeze(0)
+        skip = self.skip.unsqueeze(0)
+
+        state = h.new_zeros((h.size(0), self.hidden_dim))
+        outputs = []
+        for step in range(h.size(1)):
+            step_delta = delta[:, step, :]
+            decay = torch.exp(a * step_delta)
+            step_u = u[:, step, :]
+            step_b = torch.tanh(b[:, step, :])
+            step_c = torch.tanh(c[:, step, :])
+            state = decay * state + step_delta * step_b * step_u
+            outputs.append(step_c * state + skip * step_u)
+        y = torch.stack(outputs, dim=1)
+        y = self.out_proj(y * torch.sigmoid(gate))
+        x = residual + self.dropout(y)
+        return x + self.ffn(self.ffn_norm(x))
+
+
+class MambaStockEncoder(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        n_layers: int = 2,
+        dropout: float = 0.10,
+    ) -> None:
+        super().__init__()
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.blocks = nn.ModuleList(
+            [SelectiveSSMBlock(hidden_dim=hidden_dim, dropout=dropout) for _ in range(max(int(n_layers), 1))]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.proj = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.input_proj(x)
+        for block in self.blocks:
+            h = block(h)
+        h = self.norm(h)
+        return self.proj(h[:, -1, :])
+
+
 class MaskedPatchPretrainer(nn.Module):
     def __init__(
         self,
@@ -222,9 +317,12 @@ class MultiTaskRanker(nn.Module):
         transformer_layers: int = 2,
     ) -> None:
         super().__init__()
-        if encoder_family == "gru":
+        encoder_key = str(encoder_family).strip().lower()
+        if encoder_key == "ssm":
+            encoder_key = "mamba"
+        if encoder_key == "gru":
             self.encoder = GRUStockEncoder(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout)
-        elif encoder_family == "transformer":
+        elif encoder_key == "transformer":
             self.encoder = TransformerStockEncoder(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
@@ -232,12 +330,19 @@ class MultiTaskRanker(nn.Module):
                 n_layers=transformer_layers,
                 dropout=dropout,
             )
-        elif encoder_family == "patch_transformer":
+        elif encoder_key == "patch_transformer":
             self.encoder = PatchTransformerStockEncoder(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 patch_len=patch_len,
                 n_heads=transformer_heads,
+                n_layers=transformer_layers,
+                dropout=dropout,
+            )
+        elif encoder_key == "mamba":
+            self.encoder = MambaStockEncoder(
+                input_dim=input_dim,
+                hidden_dim=hidden_dim,
                 n_layers=transformer_layers,
                 dropout=dropout,
             )
