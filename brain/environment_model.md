@@ -10,7 +10,7 @@
 - 轻量维护默认：
   - `C:\Users\ASUS\miniconda3\python.exe`
 - 正式研究默认：
-  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe`
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
 
 ## 3. 共享工具
 - 脑网络守卫：

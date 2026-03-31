@@ -140,6 +140,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 `dynamic graph` 现在是 `deep_alpha` 的默认后续入口；若动态图仍未把 strict frontier 抬高，再切到 `MoE`。
 - 当前已落地的是 `v1 = daily-updated top-k peer graph feature layer`，技术 smoke 产物为 `daily_research/output/deep_alpha_liquid800_dynamic_graph_20260331_smoke_v2`；这只是链路验收，不是正式前沿判决。
 - `2026-03-31` 的 strict formal 旧基线对比也已补完：`deep_alpha_relgraph_h2h_20260331_mainboard_r1` 中，`dynamic_graph_v1` 相对 `relation_baseline` 实现 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜，因此下一条默认 gate 已更新为 `plain vs dynamic_graph_v1`，暂不直接切去 `MoE`。
+- 同日晚间已补完 `plain vs dynamic_graph_v1` 的 strict head-to-head，汇总在 `daily_research/output/deep_alpha_plain_vs_dynagraph_h2h_20260331_mainboard_r1`；`dynamic_graph_v1` 已在均值上跑赢 `plain`，因此当前默认下一步改为：围绕 `dynamic_graph_v1` 做稳健性确认和图参数 / 先验消融，而不是直接切 `MoE`。
 
 #### D. `dynamic graph` 旧基线入口（可直接运行，用来定义 no-go baseline）
 ```powershell

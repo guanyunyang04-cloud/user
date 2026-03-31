@@ -20,18 +20,20 @@ from daily_research.baseline.advanced_ml_runtime import (
     load_raw_data_with_cache,
     resolve_history_window,
 )
+from daily_research.baseline.cli_utils import (
+    load_stock_list_from_file as _load_stocks_from_file,
+    parse_csv_list as _parse_csv_list,
+    parse_horizon_weights as _parse_horizon_weights,
+    parse_int_tuple as _parse_int_tuple,
+    parse_named_windows as _parse_named_windows,
+    parse_stock_list as _parse_stocks,
+)
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_industry_map_from_tq, load_style_map_from_tq, load_universe_from_tq
 from daily_research.baseline.diagnose_advanced_ml_ensemble import (
     DEFAULT_FOCUS_STATE,
     _load_pickle,
-    _load_stocks_from_file,
     _ml_score_cache_path,
-    _parse_csv_list,
-    _parse_horizon_weights,
-    _parse_int_tuple,
-    _parse_named_windows,
-    _parse_stocks,
     _resolve_weak_window_name,
     _run_candidate,
     _save_pickle,
