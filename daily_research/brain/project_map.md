@@ -191,9 +191,10 @@
 - 这条线没有被放弃，但目标已经收缩为：先解决关键窗口 `undertrained`、先修关键状态下的排序稳定性、先证明多窗口一致性。
 - `2026-03-29` 这条线已经跑完整个最小矩阵：`deep_alpha_minimal_matrix_20260329_backbone_r1` 的 `backbone / score_head / ranking` 都已完成，winner 始终是 `patch_transformer + no pretrain + manual + plain`。
 - `relation` 阶段也已补完，`relation_layer` 没有把 rolling `liquid500` 前沿抬高。
-- 但同日机会集切到 rolling `liquid800` 后，前沿发生了新变化：`liquid800_plain` 把 `deep_alpha` 的 mean annual frontier 从 `27.38%` 抬到 `38.38%`，而此前在 `liquid500` 输掉的 `ranked` 也重新活了，形成 `liquid800_ranked (mean_excess_sharpe = 1.003)` 这条更激进前沿。
-- 同时，“直接极端集中持仓”这条收益翻译路线已经在 `liquid800_ranked_hold3_w40` 上被正式打掉；它放大了单窗收益，但破坏了整体前沿。
-- 这意味着“新 alpha 家族”已经完成第一轮最小充分判决，下一步不该继续深挖这几个已输掉的小旋钮，而要把资源投向真正改变机会集或表示能力的分支。
+- 但 `2026-03-30` 又发现 `run_deep_alpha_research.py` 的 strict-window bug：旧版 `valid_days` 没有真正写入 `valid_end`，导致 `2026-03-29` 的 `liquid800` 结果其实是嵌套长 holdout，不是严格等长 walk-forward。
+- 修正并重跑 strict rolling `liquid800` 后，前沿被重新改写为：`plain = 51.02% / 46.73% / 1.621 / 1.124`，`ranked = 35.50% / 29.31% / 1.173 / 0.184`，`masked_pretrain = 17.67% / 12.85% / 0.477 / -0.346`，`relation = 11.37% / 4.73% / 0.061 / -1.520`。
+- 也就是说，修正后真正成立的不是“双前沿并存”，而是 `liquid800_plain` 单独胜出；`ranked`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都没能把 strict frontier 再抬高，而 `plain/ranked` 的近似 walk-forward controller 也没有实盘可用地跑赢 `plain`，只剩 oracle stitched-return 略高。
+- 这意味着“新 alpha 家族”已经完成更严格的一轮判决，下一步不该继续深挖这几个已输掉的小旋钮，而要把资源投向真正改变机会集或表示能力的分支。
 
 ## 7. 接下来最值得投入的研究方向
 ### 7.1 第一优先级：转向新机会集 / 新 alpha 家族
@@ -216,12 +217,11 @@
   - 优先修复弱窗口里的关键结构
   - 继续用 rolling liquid pool + `next_open` + 多窗口 walk-forward 验证
 - 当前最小矩阵已经证明：沿 `deep_alpha_minimal_matrix_20260329_backbone_r1` 继续细磨 `score_head / ranking` 的边际收益很低。
-- 但 `2026-03-29` 的 rolling `liquid800` formal 结果也补充了一条更细的判断：机会集变化后，少数对股票池敏感的小旋钮可以被有限度重开，例如 `ranked` 在 `liquid800` 上就不再是完全失败；相反，`hold3_w40` 这种更激进收益翻译方式已经证明不值得继续优先推进。
-- 因此下一步更值得投入的是围绕 rolling `liquid800` 继续找新的表示能力或状态/窗口控制方式，而不是回到 `liquid500` 深挖已输掉的小旋钮，也不是继续把集中持仓推得更极端。
+- `2026-03-30` 的 strict rerun 又把这个判断继续收紧了：`liquid800` 机会集本身确实更强，但旧的 `ranked revived` 叙事主要来自窗口 bug；修正后 `ranked` 虽然仍是正收益对照，却不再构成和 `plain` 并列的主前沿。
+- 因此下一步更值得投入的是围绕 strict rolling `liquid800` 继续找真正新的表示能力或收益翻译机制，而不是继续在 `plain/ranked/controller` 这一圈里做小范围修补，也不是回到 `liquid500` 深挖已输掉的小旋钮。
 
 ### 7.3 第三优先级：保持当前执行主线稳态
-- 当前执行默认值仍应继续停在：
-  - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- 当前执行默认值仍应继续停在：`advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 - cross-profile controller 的 formal 结果应只作为研究 frontier map 使用，不应再触发默认值来回摇摆。
 
 ### 7.4 第四优先级：若重启坏市场专项，必须单独立题

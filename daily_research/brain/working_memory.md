@@ -125,12 +125,11 @@
 - `2026-03-29` 已把“新 alpha 家族”推进到 formal entry：`daily_research/output/deep_alpha_minimal_matrix_20260329_backbone_r1` 已连续完成 `backbone / score_head / ranking`，winner 仍是 `enc-patch__pre-nopre__score-manual__rank-plain`，`selection_scope = eligible_only`，`mean_excess_sharpe = 0.744`，`mean_excess_total_return = 60.76%`
 - `patch_transformer` 无预训练版本当前优于 `gru`；`masked pretrain`、`ridge`、`lgbm` head、`ranked` loss 都没有把前沿抬高，因此这一轮最小矩阵已经说明：当前不该继续在 `score_head / ranking` 细旋钮上久留
 - `2026-03-29` 已补完 `relation` 正式阶段：`norel` 仍优于 `rel`，`mean_excess_sharpe = 0.744 > 0.413`，因此 `relation_layer` 在 rolling `liquid500` 下正式降级。
-- 同日把“新机会集”推进到 formal：rolling `liquid800_plain = 38.38% / 27.32% / 0.870 / 0.634`，明显强于 `liquid500_plain = 27.38% / 16.16% / 0.744 / -0.529`，因此 `liquid800` 已成为当前更强机会集；同池 `liquid800_ranked = 38.29% / 25.94% / 1.003 / -0.367` 形成激进前沿，而 `liquid800_ranked_hold3_w40` 已正式失败。
-- 底层市场状态层已经完成架构升级：
-  - `quadrant` 继续保留为兼容标签
-  - 新默认研究输入同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`
-  - 后续新策略与新诊断默认优先接 `regime_state_selector`，不再新增硬编码四象限分支
-  - 但当前 `state_alpha_profile` 仍只支持 `quadrant`；若切到更细 selector，系统现在会显式报错而不是静默退化
+- `2026-03-30` 已定位并修复 `run_deep_alpha_research.py` 的 strict-window bug：旧版 `valid_days` 只约束了 `valid_start`，却没有真正截断 `valid_end`，导致之前的 `liquid800` “多窗口”结果其实是嵌套长 holdout，不是严格等长 walk-forward。
+- 按修正后的 strict walk-forward 重跑 `rolling liquid800` 后，当前 clean frontier 明确收口为单一 winner：`liquid800_plain = 51.02% / 46.73% / 1.621 / 1.124`，显著强于 `liquid800_ranked = 35.50% / 29.31% / 1.173 / 0.184`；旧的“`plain` 稳定前沿 + `ranked` 激进前沿”口径失效，`ranked` 只保留为次级对照。
+- 同一轮 strict `liquid800` 下，`relation_layer` 与 `masked_pretrain` 也都正式失败：`relation = 11.37% / 4.73% / 0.061 / -1.520`，`masked_pretrain = 17.67% / 12.85% / 0.477 / -0.346`。
+- `plain` 与 `ranked` 的近似 stitched-return controller 也已补完：walk-forward state/window controller 没有跑赢 `plain`；只有 oracle / window-oracle 略高于 `plain`，因此这条控制线目前不再是第一优先级。
+- 底层市场状态层已经完成架构升级：`quadrant` 继续保留为兼容标签；新默认研究输入已同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`；后续策略默认优先接 `regime_state_selector`，而当前 `state_alpha_profile` 若切到更细 selector 会显式报错而不是静默退化。
 - `base_global` 即使经过参数优化，也没有通过当前弱窗口修复门槛，不再作为执行升级主候选。
 - `504 / 5 / 260` 与 `378 / 21 / 520` 已不再是优先晋级参数组合。
 - `none / v2` 保留为规则层先验，不扩成新的执行主线。
@@ -161,7 +160,7 @@
 6. 在新机会集没有跑出明确新前沿前，执行默认值不变，不允许因为“旧 offense 更高”或“动态更稳”而反复摇摆 live anchor。
 7. 当前这条“新 alpha 家族”主入口已经完成最小矩阵正式收口：`daily_research/deep_alpha/run_minimal_matrix.py --phase backbone / score_head / ranking` 都已落盘，winner 始终保持 `patch + no pretrain + manual + plain`。
 8. 这条线当前最大的时间瓶颈不是矩阵包装层，而是每个 window 里的 `run_deep_alpha_research.py` 全流程重训，尤其是 `[4/8] Building sequence features and targets` 与 `[6/8] Training deep alpha model`；后续新研究必须优先考虑复用 per-window cache 提速。
-9. 当前 `deep_alpha` 的新机会集 frontier 已分成两条：稳定前沿 `liquid800_plain`，激进前沿 `liquid800_ranked`；`hold3_w40` 已失败，后续不再优先走“直接极端集中持仓”。
+9. `deep_alpha` 当前更强的新机会集仍是 strict rolling `liquid800`，但 frontier 已不再分裂成 `plain/ranked` 双主线；修正后应把 `liquid800_plain` 视为唯一主前沿，`ranked`、`controller`、`hold3_w40` 只保留为已验证但未晋级的旁支对照。
 
 ### 优先级 B：维持当前执行主线稳态
 目标：
@@ -183,8 +182,8 @@
    - `next_open`
    - 多窗口 walk-forward
 2. 当前 backbone 已选出 `patch_transformer + no pretrain + manual + plain`。
-3. 在 rolling `liquid800` 这个更强新机会集里，当前已明确存在两条待判主线：稳定前沿 `liquid800_plain`，以及重新引入负窗口的激进前沿 `liquid800_ranked`；`relation_layer` 与 `ranked_hold3_w40` 已在 formal 下失利。
-4. 后续若继续做 `deep_alpha`，应转向真正改变机会集或表示能力的分支，并继续优先复用 per-window cache 与已落盘 artifact。
+3. 在 strict rolling `liquid800` 这个更强新机会集里，当前唯一主前沿是 `liquid800_plain`；`ranked`、`controller`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都已在 formal 或 strict formal 下失利。
+4. 后续若继续做 `deep_alpha`，应转向真正改变机会集或表示能力的分支，而不是继续围绕 `plain/ranked/controller` 做小修小补；同时继续优先复用 per-window cache 与已落盘 artifact。
 
 ### 优先级 D：把治理规则变成日常流程
 目标：

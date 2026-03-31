@@ -110,6 +110,15 @@
   2. 只有当新机会集确认更强后，才在该机会集下重开 1 到 2 个最有依据的小旋钮；
   3. 若重开候选只是抬高均值、却重新引入明显负窗口，则把它记为激进分支，不覆盖稳定前沿。
 - 对“更激进的收益翻译方式”也遵守同样纪律：先在更强机会集上试，再判断是否值得继续；如果集中持仓在 `3` 个窗口里破坏了 `2` 个窗口，就直接降级，不继续沿这条线猛推。
+
+### 2.12 Strict walk-forward 边界校验规则
+- 对 `deep_alpha/run_deep_alpha_research.py` 这类 walk-forward runner，`valid_days` 不能只约束 `valid_start`，必须显式落成真正的 `valid_end`，并同时截断 `valid_dates / sample_dates / valid_ds / ResearchConfig.end_date`。
+- 如果 `metrics.json` 里 `valid_end` 缺失、为 `None`，或不同窗口的 `valid_samples` 明显呈嵌套递减而不是等长近似，就先把结果视为“窗口边界可疑”，不能直接写进主结论。
+- 只要发现这类边界问题，默认动作不是继续解释收益差，而是先修 runner、重跑 strict 结果，再决定哪些旧结论需要降级为 artifact。
+- 对被 strict bug 污染过的研究线，收口顺序固定为：先在 `working_memory.md / project_map.md` 撤销旧主结论，再在 `episodic_memory.md` 追加“发现 bug -> 修复 -> 严格重跑 -> 新结论”的证据链，最后才基于修正后的 frontier 继续往前选新实验。
+### 2.13 Dead-flag 自检规则
+- 如果某个实验的 `metrics.json` 显示新开关已开启、参数也写对了，但 `latest_scores / actions / holdout_backtest` 与基线完全相同，先不要急着下策略结论；优先排查这是不是“指标已记录、执行链却没真正消费该参数”的 dead flag。
+- 对 `deep_alpha`，这类自检尤其要盯住 `manual` 路径：`score_head_task_weights`、`adaptive_task_weights` 这类中间结果可能已经算出并写盘，但手工打分函数仍在沿用旧的固定权重。
 ## 3. 分脑写入技能
 ### 3.1 写入路由
 - 当前稳定状态写 `semantic_memory.md`

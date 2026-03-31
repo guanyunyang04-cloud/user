@@ -2,7 +2,7 @@
 
 本文档记录 `daily_research` 分脑当前默认使用的运行环境，作为后续研究、执行、维护与 AI 协同时的统一调用口径。
 
-快照时间：`2026-03-29`  
+快照时间：`2026-03-31`  
 时区：`Asia/Shanghai`  
 工作区根目录：`H:\new_tdx64\PYPlugins\user`  
 默认 Shell：`PowerShell`
@@ -64,7 +64,17 @@ daily_research\tools\gemini_frontend.cmd close
   - `daily_research\tools\gemini_frontend.cmd close`
 - `ask / closeout / doctor / pin / unpin / sessions / open` 当前均视为停用动作。
 
-## 7. 当前适用范围
+## 7. 工作区维护入口
+- 工作区维护与归档工具：
+  - `python daily_research/tools/workspace_maintenance.py report`
+  - `python daily_research/tools/workspace_maintenance.py archive --limit 20`
+  - `python daily_research/tools/workspace_maintenance.py clean --targets pycache`
+- 当 `daily_research/cache` 或 `daily_research/output` 出现热区告警时：
+  - 默认先看 `report`
+  - 再做 `archive` 预演
+  - 不直接删除当前活跃实验目录、最新执行产物或仍在对照中的 artifact
+
+## 8. 当前适用范围
 - 默认使用 `quant` 的脚本：
   - `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
   - `daily_research/deep_alpha/run_deep_alpha_research.py`
@@ -76,7 +86,7 @@ daily_research\tools\gemini_frontend.cmd close
   - `daily_research/tools/gemini_frontend.ps1`
   - 其他不依赖研究栈的文档、清理和协同工具
 
-## 8. 使用注意
+## 9. 使用注意
 - `run_minimal_matrix.py` 会继承 `sys.executable` 写出阶段命令清单，因此必须从 `quant` 环境启动，才能让后续命令文件保持正确解释器路径。
 - 当前 Windows / PowerShell 环境下，`conda run -n quant ...` 在中文进度输出较多时可能触发 `gbk` 回显异常；
   对正式研究脚本，优先直接使用 `C:\Users\ASUS\miniconda3\envs\quant\python.exe`，避免“脚本已跑完但 `conda run` 在打印输出时失败”的假异常。

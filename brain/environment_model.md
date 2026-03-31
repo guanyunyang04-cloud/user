@@ -3,7 +3,7 @@
 ## 1. 根环境
 - 工作区根目录：`H:\new_tdx64\PYPlugins\user`
 - 默认 Shell：`PowerShell`
-- 当前日期：`2026-03-29`
+- 当前日期：`2026-03-31`
 - 时区：`Asia/Shanghai`
 
 ## 2. 共享解释器
@@ -17,6 +17,8 @@
   - `python daily_research/tools/doc_guard.py check`
 - 工作区体检：
   - `python daily_research/tools/workspace_maintenance.py report`
+- 工作区归档预演：
+  - `python daily_research/tools/workspace_maintenance.py archive --limit 20`
 - Gemini 标准协同：
   - 当前模块已暂时中止
   - 只保留占位入口：`daily_research\tools\gemini_frontend.cmd status` / `daily_research\tools\gemini_frontend.cmd close`

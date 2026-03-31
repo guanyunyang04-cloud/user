@@ -36,6 +36,16 @@
 - 时间证据写 `episodic_memory.md`
 - 操作链路写 `action_system.md`
 
+### 1.7 热区维护流程
+- 当 `workspace_maintenance.py report` 报出 `cache/output` 热区告警时，先做现状确认，再决定归档或清理。
+- 默认顺序：
+  - 先跑 `python daily_research/tools/workspace_maintenance.py report`
+  - 再跑 `python daily_research/tools/workspace_maintenance.py archive --limit 20`
+  - 确认候选里不包含当前活跃实验产物、最新执行产物与正在使用的比较基线后，再考虑 `--apply`
+- 不要为了降体积而直接删除当前活跃 `deep_alpha` 输出、`execution/` 最新产物或仍被当前分脑引用的 artifact。
+- 若归档策略本身需要调整，先改 `daily_research/archive_policy.json` 或对应分脑，再执行 `archive --apply`。
+- 维护动作结束后，重新跑 `workspace_maintenance.py report`；若同时改了 brain 文档，再补跑 `doc_guard.py check`。
+
 ## 2. Gemini 协同方法
 - 从 `2026-03-29` 起，整个 Gemini 协作模块暂时中止。
 - `daily_research\tools\gemini_frontend.cmd` 只保留停用占位：

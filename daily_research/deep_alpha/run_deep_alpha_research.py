@@ -223,6 +223,37 @@ def _build_score_frame(
     return score.where(valid)
 
 
+def _resolve_manual_score_config(
+    *,
+    base_horizon_weights: dict[int, float],
+    base_downside_penalty: float,
+    task_weights: dict[str, float],
+) -> tuple[dict[int, float], float]:
+    if not task_weights:
+        return dict(base_horizon_weights), float(base_downside_penalty)
+
+    derived_returns: dict[int, float] = {}
+    for horizon in sorted(base_horizon_weights):
+        weight = float(task_weights.get(f"fwd_excess_{int(horizon)}", 0.0))
+        if weight > 0:
+            derived_returns[int(horizon)] = weight
+
+    if not derived_returns:
+        return dict(base_horizon_weights), float(base_downside_penalty)
+
+    total_return_weight = sum(derived_returns.values())
+    horizon_weights = {
+        int(horizon): float(weight / total_return_weight)
+        for horizon, weight in derived_returns.items()
+    }
+
+    downside_penalty = float(base_downside_penalty)
+    risk_weight = float(task_weights.get("risk_downside_20", 0.0))
+    if risk_weight > 0 and total_return_weight > 0:
+        downside_penalty = risk_weight / total_return_weight
+    return horizon_weights, downside_penalty
+
+
 def main():
     args = parse_args()
     if args.liquidity_pool and args.rolling_liquidity_pool:
@@ -353,6 +384,10 @@ def main():
         rolling_membership_frame = rolling_membership_frame.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
     close = df_dict["Close"]
     train_end, valid_start = resolve_split_dates(close.index, cfg.train_end_date, cfg.valid_start_date, cfg.valid_days)
+    close_dates = pd.DatetimeIndex(pd.to_datetime(close.index))
+    valid_start_pos = close_dates.get_loc(pd.Timestamp(valid_start))
+    valid_end_pos = min(len(close_dates) - 1, valid_start_pos + max(int(cfg.valid_days), 1) - 1)
+    valid_end = pd.Timestamp(close_dates[valid_end_pos])
 
     state_frame, state_name_map, state_key = load_cached_or_fit_market_state(
         args=args,
@@ -451,9 +486,14 @@ def main():
     train_target_frames = transform_return_target_frames(target_frames, cfg.return_target_transform)
     target_names = [f"fwd_excess_{h}" for h in cfg.prediction_horizons] + ["risk_downside_20"]
 
-    sample_dates = list(close.index[(close.index >= valid_start) | (close.index <= train_end)])
+    sample_dates = list(
+        close.index[
+            (close.index <= train_end)
+            | ((close.index >= valid_start) & (close.index <= valid_end))
+        ]
+    )
     train_dates = list(close.index[close.index <= train_end])
-    valid_dates = list(close.index[close.index >= valid_start])
+    valid_dates = list(close.index[(close.index >= valid_start) & (close.index <= valid_end)])
 
     corpus_meta = {
         "version": 1,
@@ -465,6 +505,7 @@ def main():
         "max_price": float(cfg.max_price),
         "train_end": str(pd.Timestamp(train_end).date()),
         "valid_start": str(pd.Timestamp(valid_start).date()),
+        "valid_end": str(pd.Timestamp(valid_end).date()),
         "sample_date_count": int(len(sample_dates)),
         "rolling_pool_key": rolling_pool_key,
     }
@@ -495,7 +536,7 @@ def main():
             save_pickle(corpus_path, corpus)
             print(f"      Saved sequence corpus cache: {corpus_path}")
     train_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(end_date=train_end))
-    valid_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(start_date=valid_start))
+    valid_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(start_date=valid_start, end_date=valid_end))
     train_eval_start = resolve_recent_window_start(close.index, train_end, cfg.train_eval_window_days)
     if train_eval_start is None:
         train_eval_indices = corpus.build_index(end_date=train_end)
@@ -691,13 +732,20 @@ def main():
         adaptive_task_weights=bool(args.adaptive_task_weights),
         adaptive_window_days=args.adaptive_task_window_days,
     )
+    applied_score_horizon_weights = dict(cfg.score_horizon_weights)
+    applied_score_downside_penalty = float(cfg.score_downside_penalty)
     if args.score_head_method == "manual":
+        applied_score_horizon_weights, applied_score_downside_penalty = _resolve_manual_score_config(
+            base_horizon_weights=cfg.score_horizon_weights,
+            base_downside_penalty=cfg.score_downside_penalty,
+            task_weights=score_head_artifact.task_weights,
+        )
         score_frame = _build_score_frame(
             pred_df=pred_df,
             target_names=train_ds.target_names,
-            horizon_weights=cfg.score_horizon_weights,
+            horizon_weights=applied_score_horizon_weights,
             score_rank_blend=cfg.score_rank_blend,
-            score_downside_penalty=cfg.score_downside_penalty,
+            score_downside_penalty=applied_score_downside_penalty,
             score_risk_mode=cfg.score_risk_mode,
             score_risk_gate_threshold=cfg.score_risk_gate_threshold,
             all_dates=pd.Index(valid_dates),
@@ -729,7 +777,7 @@ def main():
         )
     research_cfg = ResearchConfig(
         start_date=str(valid_start.date()).replace("-", ""),
-        end_date=str(close.index.max().date()).replace("-", ""),
+        end_date=str(valid_end.date()).replace("-", ""),
         benchmark=cfg.benchmark,
         execution_mode="next_open",
         holding_count=cfg.holding_count,
@@ -800,6 +848,7 @@ def main():
                 "framework": "deep_alpha_research",
                 "train_end": str(train_end.date()),
                 "valid_start": str(valid_start.date()),
+                "valid_end": str(valid_end.date()),
                 "train_samples": len(train_ds),
                 "train_eval_samples": len(train_eval_ds),
                 "valid_samples": len(valid_ds),
@@ -857,8 +906,10 @@ def main():
                 "target_state_protect_rank_weight": cfg.target_state_protect_rank_weight,
                 "target_loss_weights": cfg.target_loss_weights,
                 "score_horizon_weights": cfg.score_horizon_weights,
+                "applied_score_horizon_weights": applied_score_horizon_weights,
                 "score_rank_blend": cfg.score_rank_blend,
                 "score_downside_penalty": cfg.score_downside_penalty,
+                "applied_score_downside_penalty": applied_score_downside_penalty,
                 "score_risk_mode": cfg.score_risk_mode,
                 "score_risk_gate_threshold": cfg.score_risk_gate_threshold,
                 "score_risk_state_thresholds": parse_float_list(args.score_risk_state_thresholds),

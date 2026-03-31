@@ -8649,3 +8649,159 @@ position,000001.SZ,1200,12.38,
    - 激进前沿：`liquid800_ranked`
 3. `relation_layer` 与 `ranked_hold3_w40` 都已正式失败，不再作为这一轮第一优先级。
 4. 这轮虽然把 clean annual frontier 从 `27%` 级抬到了 `38%` 级，但离用户目标的 `100%+` 年化仍有明显距离；后续还需要新的表示能力或更聪明的状态/窗口控制，而不是继续极端集中持仓。
+
+## 2026-03-30 Deep Alpha strict walk-forward 纠偏：liquid800 前沿重算
+
+### 背景
+- 在继续围绕 rolling `liquid800` 做 `plain / ranked` 控制器与新表示分支之前，先回查了 `run_deep_alpha_research.py` 的窗口边界。
+- 结果发现旧 runner 的 `valid_days` 只约束了 `valid_start`，却没有真正构造 `valid_end`；验证数据集、样本切片和 `ResearchConfig.end_date` 都默认滑到了 `close.index.max()`。
+- 这意味着 `2026-03-29` 的 `liquid800` “三窗口 formal” 其实是三个嵌套长 holdout，而不是严格等长 walk-forward。
+
+### 修复
+- 修正了 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - 显式按交易日推导 `valid_end`
+  - 同时截断 `sample_dates`
+  - 截断 `valid_dates`
+  - 截断 `valid_ds`
+  - 截断 `ResearchConfig.end_date`
+  - 并把 `valid_end` 写入 `metrics.json` 与 corpus cache key
+- 修复后重新用 strict 口径重跑 `rolling liquid800` 主候选。
+
+### 产物
+- strict root：
+  - `daily_research/output/deep_alpha_opportunity_liquid800_20260330_strictwf_r1`
+- 汇总文件：
+  - `strict_candidate_window_compare.csv`
+  - `strict_candidate_summary.csv`
+  - `strict_candidate_summary.md`
+- 控制器诊断：
+  - `plain_ranked_controller_analysis/controller_metrics.csv`
+  - `plain_ranked_controller_analysis/state_advantage_summary.csv`
+  - `plain_ranked_controller_analysis/walkforward_state_preferences.csv`
+  - `plain_ranked_controller_analysis/summary.md`
+
+### 结果一：修正后真正的 strict frontier 是 `liquid800_plain`
+- `plain`
+  - `mean_annual_return = 51.02%`
+  - `mean_excess_annual_return = 46.73%`
+  - `mean_excess_sharpe = 1.621`
+  - `min_excess_sharpe = 1.124`
+- `ranked`
+  - `mean_annual_return = 35.50%`
+  - `mean_excess_annual_return = 29.31%`
+  - `mean_excess_sharpe = 1.173`
+  - `min_excess_sharpe = 0.184`
+- 这次修正直接推翻了前一日“`plain` 稳定前沿 + `ranked` 激进前沿”的说法：
+  - `ranked` 依然是正收益分支；
+  - 但它不再和 `plain` 并列为主前沿；
+  - 修正后是 `plain` 明显更强，而且三窗都保持正的 excess Sharpe。
+
+### 结果二：状态 / 窗口控制器没有真正超越 `plain`
+- `plain` stitched diagnostic：
+  - `annual_return = 47.56%`
+  - `excess_annual_return = 45.44%`
+  - `excess_sharpe = 1.508`
+- `walkforward_state_controller`
+  - `annual_return = 44.49%`
+  - `excess_annual_return = 42.41%`
+  - `excess_sharpe = 1.402`
+- `oracle_state_controller`
+  - `annual_return = 49.78%`
+  - `excess_annual_return = 47.63%`
+  - `excess_sharpe = 1.586`
+- `window_oracle`
+  - `annual_return = 48.65%`
+  - `excess_annual_return = 46.52%`
+  - `excess_sharpe = 1.606`
+- 结论很清楚：
+  - 真实可用的 walk-forward state/window controller 没有跑赢 `plain`
+  - 只有 ex-post oracle stitched-return 略高于 `plain`
+  - 所以 `plain/ranked` 控制线目前更适合作为诊断工具，而不是下一条正式主线
+
+### 结果三：新的表示能力分支这轮也没有抬高 strict frontier
+- `relation`
+  - `mean_annual_return = 11.37%`
+  - `mean_excess_annual_return = 4.73%`
+  - `mean_excess_sharpe = 0.061`
+  - `min_excess_sharpe = -1.520`
+- `masked_pretrain`
+  - `mean_annual_return = 17.67%`
+  - `mean_excess_annual_return = 12.85%`
+  - `mean_excess_sharpe = 0.477`
+  - `min_excess_sharpe = -0.346`
+- 这说明：
+  - `relation_layer` 在 strict `liquid800` 下是明确失败
+  - `masked_pretrain` 虽然最新窗口 probe 看起来有年化弹性，但 full strict formal 仍然不成立
+
+### 当前结论
+1. `2026-03-29` 的 `liquid800` ranked/controller 叙事已被 strict-window bug 明确污染，不能继续当主事实源。
+2. 修正后的 `deep_alpha` 当前 clean frontier 是 strict rolling `liquid800_plain`，大致位于 `51%` 年化量级。
+3. `ranked`、`controller`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都没有把 strict frontier 再抬高。
+4. 下一步不应继续在 `plain/ranked/controller` 一圈里细磨，而应把研发资源转去真正新的表示能力或新的收益翻译方式。
+
+## 2026-03-30 Deep Alpha adaptive task weights 复活：先修 dead flag，再做 strict formal
+
+### 背景
+- 在 strict `liquid800_plain` 成为当前主前沿后，尝试重开一个旧烟测里曾有信号、但尚未在 strict `liquid800` 下正式验证的小旋钮：
+  - `manual score + adaptive_task_weights`
+- 首先只在最新窗口 `2025-03-14 -> 2026-03-27` 做 single-switch probe。
+
+### 第一轮异常
+- 第一次 probe 的 `metrics.json` 明确写出了：
+  - `adaptive_task_weights = true`
+  - 非空的 `score_head_task_weights`
+- 但 `latest_scores.csv`、`actions.csv` 与 `holdout_backtest` 却和基线逐项完全一致。
+- 这说明问题不是“adaptive 无效”，而是更像执行链里的 dead flag。
+
+### 代码定位与修复
+- 定位到 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - `fit_score_head(..., method='manual', adaptive_task_weights=true)` 确实算出了 `task_weights`
+  - 但后续 manual scoring 仍直接调用 `_build_score_frame(...)`
+  - 使用的仍是固定 `cfg.score_horizon_weights`
+  - 根本没有消费 `score_head_artifact.task_weights`
+- 修复方式：
+  - 新增 `_resolve_manual_score_config(...)`
+  - 对 manual 路径把 `score_head_artifact.task_weights` 映射成真正生效的 `applied_score_horizon_weights`
+  - 同时把 `applied_score_horizon_weights / applied_score_downside_penalty` 写进 `metrics.json` 方便审计
+
+### 修复后最新窗口 probe
+- 输出：
+  - `daily_research/output/deep_alpha_liquid800_plain_adaptivetask_probe_20260330_latest`
+- 修复后最新窗口从基线：
+  - `annual_return = 38.98%`
+  - `excess_annual_return = 26.00%`
+  - `excess_sharpe = 1.308`
+- 抬到：
+  - `annual_return = 48.41%`
+  - `excess_annual_return = 34.55%`
+  - `excess_sharpe = 1.825`
+- 这说明 adaptive task weights 在 strict `liquid800` 最新窗口里确实有实质收益翻译价值；之前那次“完全没变化”是死开关，不是策略无效。
+
+### strict formal 三窗补跑
+- 第一窗 `2023-02-14 -> 2024-02-27`
+  - `adaptive = -10.43% / 8.13% / 0.219`
+  - `base = 18.66% / 43.26% / 1.124`
+- 第二窗 `2024-02-28 -> 2025-03-13`
+  - `adaptive = 96.45% / 71.86% / 2.481`
+  - `base = 95.41% / 70.94% / 2.430`
+- 第三窗 `2025-03-14 -> 2026-03-27`
+  - `adaptive = 48.41% / 34.55% / 1.825`
+  - `base = 38.98% / 26.00% / 1.308`
+
+### 三窗汇总
+- `adaptive`
+  - `mean_annual_return = 44.81%`
+  - `mean_excess_annual_return = 38.18%`
+  - `mean_excess_sharpe = 1.508`
+  - `min_excess_sharpe = 0.219`
+- `base`
+  - `mean_annual_return = 51.02%`
+  - `mean_excess_annual_return = 46.73%`
+  - `mean_excess_sharpe = 1.621`
+  - `min_excess_sharpe = 1.124`
+
+### 当前结论
+1. `manual + adaptive_task_weights` 之前确实存在 dead flag；现在代码路径已经修通。
+2. 修通后，这个分支在最新窗口有明显收益提升，说明“近期自适应任务权重”不是假信号。
+3. 但 pure adaptive 版 formal 三窗总体仍输给当前 strict `liquid800_plain` 基线，且第一窗退化非常明显。
+4. 因此这条线目前应视为“局部有效、但还不够稳”的新收益翻译候选；下一步如果继续追，方向应是更平滑的 adaptive 版本，而不是直接把 pure adaptive 升成新主前沿。
