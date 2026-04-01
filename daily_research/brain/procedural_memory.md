@@ -129,8 +129,18 @@
 - 单轮实验写 `episodic_memory.md`
 - 可复用方法学写本文件
 
+### 3.1.1 脑文档维护顺序
+- 后续维护默认遵守以下顺序：
+  1. 先改 `semantic_memory.md` 的稳定事实
+  2. 再改 `working_memory.md` 的当前判断
+  3. 流程入口只写进 `action_system.md`
+  4. 长过程、长实验、长证据链一律写进 `episodic_memory.md`
+- 如果一轮改动同时影响多个脑模块，先校正稳定边界，再写当前 verdict，最后补操作入口和实验记录。
+- 不允许把一次性的实验细节反向塞回 `semantic_memory.md` 或 `action_system.md`。
+
 ### 3.2 UTF-8 安全写入
 - 中文文档不再用 shell 重定向直接追加
+- 脑文档正文默认统一使用简体中文；路径、文件名、命令、参数名与代码标识可保留原样
 - 文档改动后默认运行：
   - `python daily_research/tools/doc_guard.py check`
 
@@ -188,33 +198,34 @@
   - 目标到底是人工对话便利，还是 Codex 自动化复核
   - 如果两者目标不同，应拆成不同工具，而不是继续混成一个模块
 
-### 4.5 Dependent runtime sequencing
-- Do not parallelize producer-consumer runtime steps.
-- Typical forbidden pair:
-  - `update_model.py` produces `latest_ml_model.joblib`
-  - `run_trade_plan.py` consumes `latest_ml_model.joblib`
-- If a downstream step reads an artifact produced by the upstream step, run them sequentially and verify the downstream output reflects the new artifact timestamp.
-- If parallel execution was started by mistake, rerun the consumer step after the producer finishes and record the dependency pitfall in `episodic_memory.md`.
-### 4.6 Same-Protocol Bridge Validation
-- When execution default and research live anchor differ mainly by one numeric knob, compare them under the exact same protocol before changing the live default.
-- First lock the shared parts:
-  - same stock pool logic
-  - same `next_open` execution mode
-  - same feature/profile stack
-  - same state-ensemble weights
-  - same walk-forward windows
-- Then compare only the target knob rows. For the 2026-03-29 execution upgrade, the decisive bridge rows were:
+### 4.5 依赖型运行步骤顺序规则
+- 不要并行运行“生产者 -> 消费者”型步骤。
+- 典型禁止组合：
+  - `update_model.py` 产出 `latest_ml_model.joblib`
+  - `run_trade_plan.py` 消费 `latest_ml_model.joblib`
+- 只要下游步骤读取上游刚生成的产物，就必须串行执行，并核对下游输出已经反映新的产物时间戳。
+- 如果误开了并行，等上游完成后要重跑下游消费步骤，并把这次依赖陷阱记录进 `episodic_memory.md`。
+
+### 4.6 同协议桥接验证规则
+- 如果执行默认值与研究 live anchor 主要只差一个数值旋钮，改默认值前必须先做完全同协议比较。
+- 先锁死共同部分：
+  - 相同股票池逻辑
+  - 相同 `next_open` 执行方式
+  - 相同 feature/profile 栈
+  - 相同状态集成权重
+  - 相同 walk-forward 窗口
+- 然后只比较目标旋钮对应的行。对 `2026-03-29` 那轮执行升级，关键桥接行是：
   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 260`
   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
-- Decide from the metric delta table, not from narrative memory. The minimum decision set is:
+- 结论必须来自指标差分表，不能靠叙述记忆。最小决策集合固定为：
   - `full_excess_total_return`
   - `full_excess_sharpe`
-  - weak-window excess total return / Sharpe
-  - focus-state weak-window Sharpe
-  - turnover / drawdown
-- If the winning knob cannot yet pass through the execution entrypoints, patch the CLI / wrapper first; otherwise the project will keep "thinking" it upgraded while the live artifact still runs the old value.
-- Confirm the upgrade on three layers:
-  - formal compare row
-  - artifact internal `ml_config`
-  - downstream consumer output such as `latest_trade_plan.txt`
-- If artifact internal config and outer meta JSON disagree, trust the artifact first, patch the meta writer, and rerun the producer step so later audits do not get misled.
+  - 弱窗口超额总收益与 Sharpe
+  - focus 状态弱窗口 Sharpe
+  - 换手与回撤
+- 如果 winning knob 还不能穿过执行入口，就先修 CLI 或 wrapper；否则项目会误以为自己已经升级，但 live 产物仍在跑旧值。
+- 升级确认固定看三层：
+  - 正式比较行
+  - 产物内部 `ml_config`
+  - 下游消费者输出，例如 `latest_trade_plan.txt`
+- 如果产物内部配置与外层 meta JSON 冲突，优先相信产物本体，先修 meta writer，再重跑 producer，避免后续审计被误导。

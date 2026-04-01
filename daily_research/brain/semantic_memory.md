@@ -1,110 +1,59 @@
-# Daily Research Semantic Memory
+# Daily Research 稳定语义
 
-## 1. 作用
-本文件是 `daily_research` 分脑的语义记忆，负责保存长期稳定、非时间顺序的项目认知。
+快照日期：`2026-04-01`
 
-它回答四个问题：
+## 1. 项目身份
+- `daily_research` 维护一条可运行、可复核、可回退的 A 股日频研究与执行链路。
+- 历史证据写入 `episodic_memory.md`。
+- 当前判断写入 `working_memory.md`。
+- 日常操作入口写入 `action_system.md`。
 
-- 这个分项目是什么
-- 当前稳定执行主线是什么
-- 这个分脑有哪些模块
-- 应该按什么顺序进入其它脑模块
+## 2. 固定边界
+- 市场范围：仅上证 A 股与深证 A 股。
+- 固定剔除：创业板、科创板、ST。
+- 执行方式：盘后生成计划，次日开盘人工执行。
+- 成交假设：`next_open`。
+- 默认 Python 环境：`yolos`。
+- 日常生成计划时不允许静默重训模型。
 
-上级主脑位于：
-
-- `brain/master_brain.md`
-- `brain/brain_manifest.json`
-
-当前接入状态：
-
-- 已接入主脑
-- 已被主脑纳入 `child_brains`
-- 后续 agent 可先接主脑，再顺主脑进入本分脑
-
-## 2. 项目身份
-`daily_research` 是当前正式维护的日线研究与执行分项目，负责三类任务：
-
-1. `baseline / advanced_ml` 的可解释研究、正式回测与执行复核
-2. 盘后更新离线模型，生成次日开盘手工执行建议
-3. `deep_alpha` 表示学习主线研究
-
-## 3. 当前稳定主线
-- 正式执行主线：
+## 3. 当前稳定默认
+- 每日默认执行策略：
   - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
-- 当前 legacy 回退主线：
+- 每日默认入口：
+  - `daily_research/execution/run_trade_plan.py`
+- 每日默认输出：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+## 4. 明确回退
+- 仍保留显式旧主线回退：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
-- 当前交易范围：
-  - 仅限上证 A 股与深证 A 股
-  - 剔除创业板、科创板与 `ST/*ST/SST/S*ST`
-- 调仓语义：
-  - 日频目标更新，默认 `rebalance_freq=1d`
-- 执行方式：
-  - 盘后生成计划，次日开盘人工执行
-- 当前执行后端：
-  - `execution/run_trade_plan.py` 默认走 `regoff_k2_10d_ensemble_native_anchor`
-  - `execution/run_trade_plan_legacy_ml.py` 显式回退到旧机器学习 live-anchor
-  - `execution/update_model.py` / `execution/update_model_legacy_ml.py` 只用于维护 legacy ML 回退链路
-  - 默认注入 `regime_ma_window=50`；legacy ML 回退额外沿用 `enhanced_profile=up_low_breakout_v2`、`trend_up_low_vol=ml:0.25,none:0.25,v2:0.50` 与 `lgbm_n_estimators=520`
-- 当前研究侧对照锚点：
-  - 执行默认：`expanded_v24 + trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
-  - 研究进攻对照：`trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
-- 当前最强执行候选分支：
-  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor`
-  - 这已经是当前日常默认执行策略；旧 `advanced_ml` 仅保留为 legacy 回退
+- 回退入口：
+  - `daily_research/execution/run_trade_plan_legacy_ml.py`
+- 回退维护入口：
+  - `daily_research/execution/update_model_legacy_ml.py`
 
-## 4. 分脑模块
-- `daily_research/brain/semantic_memory.md`
-  - 长期稳定认知
-- `daily_research/brain/brain_architecture.md`
-  - 分脑内部结构与写入路由
-- `daily_research/brain/project_map.md`
-  - 项目背景、主线演化、瓶颈、未来方向
-- `daily_research/brain/working_memory.md`
-  - 当前默认决策、优先级、停止规则
-- `daily_research/brain/procedural_memory.md`
-  - 已验证的方法学、文档技能、以及 Gemini 协作尝试的停用结论
-- `daily_research/brain/environment_model.md`
-  - 解释器、依赖、命令口径与工具入口
-- `daily_research/brain/action_system.md`
-  - 盘后执行链路与操作流程
-- `daily_research/brain/episodic_memory.md`
-  - 时间顺序实验、证据与结论
-- `daily_research/brain/brain_manifest.json`
-  - 机器可读索引
+## 5. 当前研究格局
+- 当前研究主前沿：
+  - `deep_alpha dynamic_graph_v1`
+- 当前默认执行候选：
+  - `regoff_k2_10d_ensemble_native_anchor`
+- 当前更激进收益对照：
+  - `regon_k1_10d_ensemble_native_anchor`
+- 当前高换手无成本对照：
+  - `execalign_auto_r4_topk2_1d_regoff`
+  - 在现实成本下不是每日默认候选。
 
-## 5. 身子与脑子的映射
-- 研究 body：
-  - `daily_research/baseline/`
-- 执行 body：
-  - `daily_research/execution/`
-- 长期研究 body：
-  - `daily_research/deep_alpha/`
-- 工具 body：
-  - `daily_research/tools/`
-- 产物 body：
-  - `daily_research/cache/`
-  - `daily_research/output/`
-  - `daily_research/archive/`
+## 6. 长期风险边界
+- 旧快照时代的极高年化只保留为审计产物，不再作为当前升级目标。
+- 旧 `next_open` 链路存在训练边界上的标签泄漏风险。
+- 后续任何升级都不得绕过：
+  - 显式成本回放
+  - 同窗比较
+  - 多窗口复核
 
-brain 负责解释这些 body 应该如何被理解和接入。
-
-## 6. 进入顺序
-默认进入顺序：
-
-1. 先读本文件
-2. 再读 `brain_architecture.md`
-3. 再读 `project_map.md`
-4. 再读 `working_memory.md`
-5. 需要方法时读 `procedural_memory.md`
-6. 需要命令和环境时读 `environment_model.md`
-7. 需要执行细节时读 `action_system.md`
-8. 需要证据时读 `episodic_memory.md`
-
-## 7. 当前结构判断
-- `deep_alpha -> regoff_k2_10d_ensemble_native_anchor` 继续承担正式日常执行职责
-- `advanced_ml` 降级为显式 legacy 回退职责
-- `deep_alpha` 继续承担长期研究与新机会集探索职责
-- `dynamic_graph_v1` 是当前研究侧 leading branch
-- anchored `target_weight` execution bridge 已升格为当前默认执行主线
-- soft state-conditioned sizing 当前只作为风险塑形与 formal comparator，不是默认执行主线
-- `daily_research` 仍是整个工作区的生产主线分脑
+## 7. 建议阅读顺序
+1. `semantic_memory.md`
+2. `working_memory.md`
+3. `action_system.md`
+4. `project_map.md`
+5. `episodic_memory.md`

@@ -1,7 +1,7 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "daily_research",
-  "brain_version": "2026-03-31",
+  "brain_version": "2026-04-01",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_research/brain/semantic_memory.md",
@@ -99,6 +99,6 @@
       "daily_research/brain/action_system.md",
       "daily_research/brain/episodic_memory.md"
     ],
-    "principle": "Attach to the brain first, then enter baseline/execution/deep_alpha/tools through the declared body_map."
+    "principle": "先接入大脑，再按声明的 body_map 进入 baseline、execution、deep_alpha 与 tools。"
   }
 }
