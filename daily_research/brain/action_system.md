@@ -29,6 +29,15 @@
 ## 3. 当前默认执行口径
 - 主线：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- `2026-03-31` mainboard-only formal revalidation outputs：
+  - `daily_research/output/advanced_ml_current_code_live_anchor_20260331_mainboard_formal_r1`
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260331_mainboard_formal_r1`
+  - `daily_research/output/market_feature_profile_compare_20260331_mainboard_formal_r1`
+  - `daily_research/output/advanced_ml_cross_profile_attack_defense_20260331_mainboard_formal_r1`
+- 当前结论：
+  - live-anchor bridge `v250 @ 504 / 21 / 520` on `20210101 -> 20260327`：`18.09% / 20.83% / 1.034`，但 weak Sharpe 已转负
+  - `20190101 -> 20260327` same-protocol shortlist 已退化为：static defense `3.44% / 0.279`，best same-profile dynamic `3.59% / 0.286`，best cross-profile dynamic `2.23% / 0.222`
+  - 因此 execution 侧不再继续深挖当前 wrapper 参数空间；默认下一步改为把研究侧更强机会集迁到 execution 候选
 - 当前执行后端：
   - 当前仓 `baseline/train_trade_model.py`
   - 当前仓 `baseline/generate_daily_trade_plan.py`
@@ -98,14 +107,155 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `--regime-ma-window=50`
 - 并由当前仓 `baseline/generate_daily_trade_plan.py` 生成计划
 
+### 第 4.5 步：把研究侧分数迁到 execution candidate
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py `
+  --data-source tq `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --external-score-csv daily_research/output/deep_alpha_liquid800_dynamic_graph_20260331_smoke_v2/latest_scores.csv `
+  --candidate-label dynamic_graph_v1_candidate `
+  --experiment-tag dynamic_graph_candidate_bridge_20260331_smoke
+```
+
+- 这个入口专门承接研究侧 `latest_scores.csv`，当前已验证可直接消费 `deep_alpha` 产物
+- 默认仍沿用 `liquid500_latest.txt + next_open + current_positions.csv`
+- 输出写到 `daily_research/execution/output/research_candidates/`，不会覆盖默认 `execution/output/latest_trade_plan.txt`
+- `2026-04-01` 深夜已把这条入口升级成双模式：除 `--external-score-csv` 之外，也支持 `--external-target-weight-csv`，这样候选计划可以直接承接研究端 `daily_target_weight_panel.csv`
+- 当前可直接运行的 `target_weight` 直连候选计划入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py `
+  --data-source tq `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --external-target-weight-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --external-score-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --candidate-label dynamic_graph_v1_target_weight_candidate `
+  --experiment-tag dynamic_graph_target_weight_candidate_20260401_smoke `
+  --no-market-regime-filter
+```
+- 这轮 smoke 已通过；由于 `2026-03-31` 最后一天研究权重本身就是全零，所以当前候选计划输出为“无明确调仓动作”，这代表桥接成功，不代表策略失效。
+
+### 第 4.6 步：把整段研究分数 formal 化成 execution backtest
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260331_smoke/daily_score_panel.csv `
+  --candidate-label deep_alpha_liquid500_dynamic_graph_bridge_smoke `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_execbridge_20260331_smoke
+```
+
+- 这个入口承接 `deep_alpha/run_deep_alpha_research.py` 导出的 `daily_score_panel.csv`
+- 第一条 smoke 已证明链路可用，但也暴露了当前主瓶颈：研究端短窗高收益并不会自动等价成 execution 高收益
+- 若目标是尽快冲击 `100%` 年化，下一阶段应优先围绕“降低 research -> execution 翻译损耗”做实验，而不是继续泛扫旧 wrapper
+- 当前最值得先 formal 化的翻译层方向是：`holding_count=3 + max_weight=0.35 + no_market_regime_filter`。在 `2026-03-31` 的 smoke 快扫里，这组仅靠 execution 翻译层就把同一候选从 `24.82%` 年化抬到了 `34.54%`
+- `2026-04-01` 的正式口径结果已经出来：同一路线在 `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1 -> deep_alpha_liquid500_dynamic_graph_execbridge_20260401_formal_r1` 上没有守住，`holding_count=3 + max_weight=0.35 + no_market_regime_filter` 只跑到 `12.54%` 年化、`-1.80%` 超额年化。
+- 同日晚间对正式分数面板做了 12 格 quickscan，当前 formal best 改成 `holding_count=8 + max_weight=0.25 + no_market_regime_filter`，但也仅有 `16.02%` 年化、`1.24%` 超额年化；因此默认下一步不再是继续死拧这组翻译参数，而是要升级“研究 -> execution”的桥接表达本身。
+- 当前入口已升级成双模式：`run_research_candidate_backtest.py` 既支持 `--score-panel-csv`，也支持 `--target-weight-panel-csv`；bridge metrics 现在会额外落盘 `weeklyized_return / excess_weeklyized_return`，但它们只作为辅指标，不替代年化收益主判据。
+- `2026-04-01` 晚间已完成第一轮 `target_weight` 直连 formal：  
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --candidate-label dynamic_graph_v1_execbridge_weightpanel_formal_r1 `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_execbridge_weightpanel_20260401_formal_r1 `
+  --no-market-regime-filter
+```
+- 这轮结果是 `15.41%` 年化、`0.70%` 超额年化、`0.031` 超额 Sharpe、`-19.88%` 回撤：已经优于默认 aggressive score 重建桥，但仍未超过当日晚间 `holding_count=8 + max_weight=0.25 + no_market_regime_filter` 的 quickscan best。因此默认下一步从“继续调 score->weight 翻译参数”更新为：“以 `target_weight` 直连桥为优先表达，再去研究状态条件仓位控制 / execution objective 对齐”。
+- `2026-04-01` 深夜已把这条线扫到更深处：`target_weight` 直连桥现在支持 `target_weight_top_k / min_weight / power / full_invest / rebalance_offset`，可以直接测试“集中化 + 周期执行 + 相位敏感性”。
+- 当前关键结论：
+  - `1d` 下的小修小补基本无效，桥接收益几乎不动；
+  - `1d + top_k=2` 已能抬到 `21.30%` 年化、`5.84%` 超额年化；
+  - `5d / 10d` 的单 offset 点估值可以冲到 `97%~117%` 年化，但相位极敏感，不能直接当生产方案；
+  - 全 offset 等权 sleeve ensemble 仍能保留很强收益，因此“翻译损耗”方向已经被证实有应用价值。
+- 当前这条方向的默认可复核产物在：
+  - `daily_research/output/dynagraph_target_weight_bridge_scan_20260401_formal_r1/regoff_scan_summary.csv`
+  - `daily_research/output/dynagraph_target_weight_bridge_scan_20260401_formal_r1/regon_scan_summary.csv`
+  - `daily_research/output/dynagraph_target_weight_bridge_scan_20260401_formal_r1/rebalance_focus_scan_summary.csv`
+  - `daily_research/output/dynagraph_target_weight_bridge_scan_20260401_formal_r1/offset_scan_aggregate.csv`
+  - `daily_research/output/dynagraph_target_weight_bridge_scan_20260401_formal_r1/ensemble_summary.csv`
+- 当前默认 verdict：继续沿 `target_weight` 直连桥推进，但主形式从“单 offset N-day 执行”升级为“offset-ensemble / phase-robust execution bridge”；不再把单点高收益 lucky run 当作默认候选。
+- `2026-04-01` 深夜已把这条线原生化成 anchored 入口：`run_research_candidate_backtest.py` / `run_research_candidate_trade_plan.py` 现在都支持 `--rebalance-offset-mode all` 和 `--rebalance-anchor-date`。经验结论是：如果不固定 `rebalance_anchor_date`，all-offset ensemble 的结果会随着历史起点漂移，不能直接当生产口径。
+- 当前默认 anchored formal backtest 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --rebalance-freq 10d `
+  --rebalance-offset-mode all `
+  --rebalance-anchor-date 2025-01-02 `
+  --target-weight-top-k 2 `
+  --candidate-label dynamic_graph_regoff_k2_10d_ensemble_native_anchor `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r3 `
+  --no-market-regime-filter
+```
+- 当前默认 anchored candidate trade-plan 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --external-target-weight-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --external-score-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --rebalance-freq 10d `
+  --rebalance-offset-mode all `
+  --rebalance-anchor-date 2025-01-02 `
+  --target-weight-top-k 2 `
+  --candidate-label dynamic_graph_regoff_k2_10d_ensemble_native_anchor `
+  --experiment-tag dynamic_graph_regoff_k2_10d_ensemble_native_anchor_20260401_candidate_r1 `
+  --no-market-regime-filter
+```
+- 当前 anchored two-finalist formal verdict：
+  - `regon_k1_10d_ensemble_native_anchor = 52.32% / 32.91% / 1.800 / -9.36%`
+  - `regoff_k2_10d_ensemble_native_anchor = 52.14% / 32.75% / 2.188 / -7.72%`
+  - 默认生产候选优先 `regoff_k2_10d_ensemble_native_anchor`，更偏收益上沿的对照保留 `regon_k1_10d_ensemble_native_anchor`
+
+- `2026-04-01` 上午已补齐 exact same-window comparator：`advanced_ml_live_anchor_samewindow_20260401_formal_r1` 里的 `trend_up_low_vol_ml25_none25_v250` 在 `bridge_full (2025-03-18 -> 2026-03-31)` 上是 `24.34% / 10.75% / 0.580 / -14.42%`，因此 anchored `regoff_k2 / regon_k1` 对当前 live-anchor 的领先已经是同窗 formal 结论。
+- `2026-04-01` 上午也把第一版 soft state-conditioned sizing formal 跑完，summary 在 `execution_target_weight_state_conditioned_verdict_20260401_r1`：
+  - `regoff_k2_stateoff` 仍是默认 winner；`quadrant_guard_v1 / trend_guard_v1 / market_state_guard_v1` 都会明显压低年化，只带来有限回撤改善。
+  - `regon_k1_stateoff` 仍是更激进的收益对照；`quadrant_guard_v1` 在当前 hard regime filter 下基本是 no-op，其余 soft profile 也没有拿到升级资格。
+  - 默认执行候选因此不变：继续保留 `regoff_k2_10d_ensemble_native_anchor`。
+
+### 4.7 第一步 soft state-conditioned sizing formal 入口
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --end-date 20260331 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --rebalance-freq 10d `
+  --rebalance-offset-mode all `
+  --rebalance-anchor-date 2025-01-02 `
+  --target-weight-top-k 2 `
+  --candidate-label dynamic_graph_regoff_k2_10d_market_state_guard_v1 `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_market_state_guard_v1_20260401_formal_r1 `
+  --no-market-regime-filter `
+  --soft-state-profile market_state_guard_v1
+```
+- 当前支持的 profile：`quadrant_guard_v1 / trend_guard_v1 / market_state_guard_v1`
+- 这组能力已经同时接到 `run_research_candidate_trade_plan.py`；但截至 `2026-04-01` 上午，soft sizing 仍只是 formal comparator，不是默认生产候选。
+
 ## 5. 关键执行文件
 - `daily_research/execution/update_liquid_pool.py`
 - `daily_research/execution/update_model.py`
 - `daily_research/execution/run_trade_plan.py`
+- `daily_research/execution/run_research_candidate_trade_plan.py`
+- `daily_research/execution/run_research_candidate_backtest.py`
 - `daily_research/execution/current_positions.csv`
 - `daily_research/execution/models/latest_ml_model.joblib`
 - `daily_research/execution/models/latest_ml_model.json`
 - `daily_research/execution/output/latest_trade_plan.txt`
+- `daily_research/execution/output/research_candidates/latest_trade_plan.txt`
 
 ### 5.1 当前研发路线入口
 - 研发路线固定入口仍是 `deep_alpha`，而不是执行端 wrapper。

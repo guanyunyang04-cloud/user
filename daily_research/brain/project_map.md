@@ -180,6 +180,10 @@
   - static defense `13.92% / 0.759 / 1.073 / 1.083`
 - 因此当前执行端的真实瓶颈已进一步收敛为：不是“控制器还没做”，而是“控制器做完后，当前机会集的 clean annual frontier 仍然不够高”。
 - 用户已在 2026-03-28 明确纠偏：坏市场、弱窗口、稳定性都属于从属目标，它们必须服务于“总利润继续抬高”，而不是替代总利润目标本身。
+- `2026-03-31` 的 mainboard-only execution revalidation 又把这件事彻底坐实了：
+  - live-anchor bridge `v250 @ 504 / 21 / 520` on `20210101 -> 20260327` 仍能跑出 `18.09% / 20.83% / 1.034`，但 weak Sharpe 已转负
+  - same-protocol shortlist on `20190101 -> 20260327` 则明显退化：static defense `expanded_v24 + v250 = 3.44% / 0.279`，static offense `legacy_v7 + v255 = -0.34% / 0.096`，best same-profile dynamic `= 3.59% / 0.286`，best cross-profile dynamic `= 2.23% / 0.222`
+  - 旧 `13.92% / 15.54% / 15.49%` 因此只剩旧 universe 参考意义，不能再被表述为当前 execution frontier
 - 这意味着项目的下一阶段不该再把“更稳但更低收益”解释成自然升级，而应回到更原始也更严格的目标：
   - 每个阶段都追求最大利润
   - 不同阶段可以有不同策略
@@ -226,6 +230,26 @@
 
 ### 7.3 第三优先级：保持当前执行主线稳态
 - 当前执行默认值仍应继续停在：`advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- 但默认研发前线已经改变：当前 mainboard-only execution frontier 与用户 `100%` 年化目标相距很远，因此不再继续把 `v250 / v255 / controller` 参数空间当成第一研发前线，而是优先考虑把研究侧更强的新机会集迁到 execution 候选。
+- `2026-03-31` 已把第一条迁移桥接落地为独立入口：`daily_research/execution/run_research_candidate_trade_plan.py` 可以直接消费研究产物 `latest_scores.csv`，并把候选计划写到 `execution/output/research_candidates/`，不覆盖当前生产默认计划文件。
+- 同日晚间又补上了更关键的一层：`deep_alpha/run_deep_alpha_research.py` 会导出整段 `daily_score_panel.csv`，而 `daily_research/execution/run_research_candidate_backtest.py` 可以直接按 execution 口径回测它。第一条端到端 smoke 表明：研究侧高收益并不会自动等价成 execution 高收益，当前主要瓶颈是“翻译损耗”，因此后续最快冲击 `100%` 年化的主方向应优先落在“降低研究 -> execution 迁移损耗”上。
+- `2026-04-01` 已把这条线推进到正式口径，但 formal 结果同样说明：当前 bottleneck 不是“少调几个 execution 参数就能追回研究端收益”。`dynamic_graph_v1` 的正式候选在 `holding_count=3 + max_weight=0.35 + no_market_regime_filter` 下只拿到 `12.54%` 年化、`-1.80%` 超额年化；对同一 formal 分数面板做 12 格 quickscan 后，best 也只有 `16.02%` 年化、`1.24%` 超额年化。因此接下来若继续攻 `100%` 年化，默认主方向应从“继续调翻译参数”升级到“改桥接表达本身”，例如直接承接研究侧权重面板或状态条件仓位控制，而不是继续把当前 static score->weight 翻译器当作主要增益来源。
+- `2026-04-01` 晚间已把这条升级做成真实 formal：`run_research_candidate_backtest.py` 现在可以直接承接研究端 `daily_target_weight_panel.csv`，并额外输出 `weeklyized_return / excess_weeklyized_return` 作为辅指标。第一轮 `target_weight` 直连结果是 `15.41%` 年化、`0.70%` 超额年化、`0.031` 超额 Sharpe，明显优于默认 aggressive score 重建桥的 `12.54% / -1.80% / -0.073`，但仍略低于 score-panel quickscan best 的 `16.02% / 1.24% / 0.058`。因此当前项目图上的默认结论更新为：`target_weight` 直连桥已经证明“桥接表达本身比继续死调 score 翻译参数更重要”，但 execution frontier 仍未被推到足以接近 `100%` 年化的水平。
+- `2026-04-01` 深夜已把这条桥继续打通到候选交易计划：`run_research_candidate_trade_plan.py` 现在也可以直接消费研究端 `daily_target_weight_panel.csv`。第一轮 smoke 已通过，且验证了一个新边界条件：如果外部 `score` 上下文缺失或日期落后，计划入口会自动回退到 `target_weight` 代理显示，不再让“分数展示层”阻断 `target_weight` 直连桥本身。
+- `2026-04-01` 深夜进一步把“翻译损耗”方向扫到底后，项目图上的默认判断已经升级为：
+  - 方向是对的，而且有明显应用价值；
+  - 真正的大头不在“旧 score->weight 翻译器的细调”，而在“`target_weight` 直连桥 + slower/staggered execution cadence”；
+  - 单 offset 的 `5d / 10d` 点估值虽然能冲出 `97%~117%` 年化，但相位敏感性过大，不能直接升格成生产候选；
+  - 把所有 offset 做成等权 sleeve ensemble 后，收益仍可维持在 `40%~52%` 年化、`22%~32%` 超额年化量级，因此这条方向已经被验证为值得继续推进，但下一阶段的重点应转向“phase-robust execution bridge”，而不是继续把 lucky offset 当成研究结论本身。
+- `2026-04-01` 深夜最终又补上了一个决定性工程边界：all-offset ensemble 必须显式固定 `rebalance_anchor_date`，否则结果会随着历史起点漂移。当前 native anchored formal finalists 已落盘在 `execution_target_weight_ensemble_verdict_20260401_r1`：
+  - `native_anchor_regon_k1_10d_ensemble = 52.32%` 年化、`32.91%` 超额年化、`1.800` 超额 Sharpe
+  - `native_anchor_regoff_k2_10d_ensemble = 52.14%` 年化、`32.75%` 超额年化、`2.188` 超额 Sharpe
+  - 默认生产候选应优先 `regoff_k2_10d` 这条 anchored offset-ensemble 形态，`regon_k1_10d` 保留为更激进的收益对照。
+- `2026-04-01` 上午又补齐了 exact same-window live-anchor replay：`advanced_ml_live_anchor_samewindow_20260401_formal_r1` 里的 `trend_up_low_vol_ml25_none25_v250` 在 `bridge_full (2025-03-18 -> 2026-03-31)` 上只有 `24.34%` 年化、`10.75%` 超额年化、`0.580` 超额 Sharpe。到这里为止，anchored ensemble 对当前 live-anchor 的领先已经从“近似窗口强很多”升级成“同窗正式领先很多”。
+- 同日上午，第一版 soft state-conditioned sizing 也已经沿 `target_weight` 直连桥 formal 化到头，verdict 在 `execution_target_weight_state_conditioned_verdict_20260401_r1`：
+  - `regoff_k2_stateoff` 仍是默认 winner，soft profiles 只带来轻微回撤改善，却会把年化从 `52.14%` 压到 `45.56%~46.72%`。
+  - `regon_k1_stateoff` 仍是更激进的收益对照；`quadrant_guard_v1` 在当前 hard regime filter 下基本无变化，`trend_guard_v1 / market_state_guard_v1` 也会牺牲年化。
+  - 因此当前方向判断更新为：soft sizing 是风险塑形工具，不是当前 execution frontier 的新主引擎；默认生产候选继续保持 anchored `regoff_k2_10d`，`regon_k1_10d` 继续做收益上沿对照。
 - cross-profile controller 的 formal 结果应只作为研究 frontier map 使用，不应再触发默认值来回摇摆。
 
 ### 7.4 第四优先级：若重启坏市场专项，必须单独立题

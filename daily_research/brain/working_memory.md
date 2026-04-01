@@ -3,6 +3,40 @@
 ## 1. 当前默认决策
 当前默认执行主线继续保持为：
 - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- `2026-03-31` 已补完 mainboard-only execution formal revalidation：
+  - live-anchor bridge `v250 @ 504 / 21 / 520` on `20210101 -> 20260327`：`full_annual_return = 18.09%`，`full_excess_annual_return = 20.83%`，`full_excess_sharpe = 1.034`，但 `weak_window_20250905_20260319_excess_sharpe = -0.116`
+  - same-protocol shortlist on `20190101 -> 20260327`：static defense `expanded_v24 + v250 = 3.44% / 5.84% / 0.279`，static offense `legacy_v7 + v255 = -0.34% / 1.97% / 0.096`，best same-profile dynamic `= 3.59% / 5.99% / 0.286`，best cross-profile dynamic `= 2.23% / 4.61% / 0.222`
+  - 这意味着当前 execution wrapper frontier 与用户的 `100%` 年化目标仍相距很远；默认下一步不再是继续深拧当前 wrapper，而是把研究侧更强机会集迁到 execution 候选
+- `2026-03-31` 已把第一条“研究侧机会集 -> execution candidate”桥接路径接通：`daily_research/execution/run_research_candidate_trade_plan.py` 现在可以直接消费 `deep_alpha` 的 `latest_scores.csv`，并独立写出到 `daily_research/execution/output/research_candidates/`；技术 smoke `dynamic_graph_candidate_bridge_20260331_smoke` 已通过，没有覆盖生产默认 `latest_trade_plan.txt`
+- 同日晚间又把“整段研究分数 -> execution formal backtest”这条桥接补通：`deep_alpha/run_deep_alpha_research.py` 现在会导出 `daily_score_panel.csv / daily_target_weight_panel.csv`，`daily_research/execution/run_research_candidate_backtest.py` 可以直接按当前 execution 口径回测它们。第一条端到端 smoke 已跑通：
+  - 研究端短窗 `deep_alpha_liquid500_dynamic_graph_bridge_20260331_smoke` 自身 holdout 年化 `154.45%`
+  - 但同一分数面板翻译进 execution 统一口径后，`deep_alpha_liquid500_dynamic_graph_execbridge_20260331_smoke` 只剩 `24.82%` 年化、`3.80%` 超额年化、`0.193` 超额 Sharpe
+  - 这说明当前最该优先攻击的不是“有没有高收益研究信号”，而是“研究信号迁到 execution 时的翻译损耗”
+  - 同一晚还做了最小翻译层快扫：只改 execution 组合构造、不改模型本身时，`holding_count=3 + max_weight=0.35 + no_market_regime_filter` 能把该 smoke 候选抬到 `34.54%` 年化、`11.89%` 超额年化、`0.577` 超额 Sharpe；说明 execution 翻译层确实有可挖空间，但离 `100%` 年化仍远
+- `2026-04-01` 已把这条思路推进到正式口径：`deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 用完整训练配置、固定 `train_end=2025-03-17 / valid_start=2025-03-18 / valid_days=252` 重跑后，研究端自身 holdout 只有 `18.56%` 年化、`5.61%` 超额年化、`0.232` 超额 Sharpe。
+- 同日晚间按前一晚 smoke winner 的 aggressive translation 直接 formal 化，`deep_alpha_liquid500_dynamic_graph_execbridge_20260401_formal_r1` 结果是 `12.54%` 年化、`-1.80%` 超额年化、`-0.073` 超额 Sharpe；说明 `holding_count=3 + max_weight=0.35 + no_market_regime_filter` 没有在正式口径守住。
+- 随后对同一 formal 分数面板做了 12 格翻译层 quickscan；最佳组合改成 `holding_count=8 + max_weight=0.25 + no_market_regime_filter`，但也只有 `16.02%` 年化、`1.24%` 超额年化、`0.058` 超额 Sharpe。结论是：翻译层确实重要，但当前这条 `dynamic_graph_v1 -> static liquid500 execution bridge` 还不足以把 execution frontier 推到新台阶，更谈不上接近 `100%` 年化。
+- `2026-04-01` 晚间已把 execution bridge 升级成双模式：`run_research_candidate_backtest.py` / `backtest_external_score_panel.py` 现在既能吃 `daily_score_panel.csv`，也能直接吃研究端导出的 `daily_target_weight_panel.csv`；同一入口会额外输出 `weeklyized_return / excess_weeklyized_return` 作为辅指标。
+- 这轮正式比较说明“周化收益”不适合替代年化收益当主评估标准：在同一回测窗口里它只是年化收益的单调变换，更适合做读数辅助，不会改变 winner 排序。
+- 同日晚间已对 `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 的 `daily_target_weight_panel.csv` 做正式桥接：`deep_alpha_liquid500_dynamic_graph_execbridge_weightpanel_20260401_formal_r1 = 15.41%` 年化、`0.70%` 超额年化、`0.031` 超额 Sharpe、`-19.88%` 回撤。它明显好于默认 aggressive score 重建桥（`12.54% / -1.80% / -0.073`），但仍略低于同日晚间 score-panel quickscan best（`16.02% / 1.24% / 0.058`），所以当前结论更新为：`target_weight` 直连桥值得作为默认优先桥接表达，但 execution frontier 仍远未接近 `100%` 年化。
+- `2026-04-01` 深夜又把这条桥继续打到候选交易计划：`run_research_candidate_trade_plan.py` / `generate_daily_trade_plan.py` 现在也支持 `--external-target-weight-csv`，可直接消费研究端 `daily_target_weight_panel.csv`，不再强依赖 `latest_scores.csv` 这类“先分数再重建权重”的旧表达。
+- 同一轮 smoke `dynamic_graph_target_weight_candidate_20260401_smoke` 已跑通，产物写到 `daily_research/execution/output/research_candidates/`；当前 `2026-03-31` 这份研究权重最后一天本身就是全零，所以候选计划正确输出为“无明确调仓动作”。另外由于同 run 的 `daily_score_panel.csv` 只到 `2026-03-02`，计划入口已做自动回退：若外部分数上下文缺失，就用 `target_weight` 自身作为显示代理，不让显示层反向卡死直连桥。
+- `2026-04-01` 深夜已把 `offset-ensemble / phase-robust execution bridge` 原生化：`backtest_external_score_panel.py`、`run_research_candidate_backtest.py`、`generate_daily_trade_plan.py`、`run_research_candidate_trade_plan.py` 现在都支持 `rebalance_offset_mode=all` 与 `rebalance_anchor_date`。这轮验证还钉死了一个新边界：如果不给固定 anchor，all-offset ensemble 的结果会受“历史起点从哪天开始加载”影响，不能直接当生产逻辑。
+- anchored native formal finalists 已在同一 bridge window 下复核完成，当前最强两条 execution candidate 是：
+  - `deep_alpha_liquid500_dynamic_graph_execbridge_regon_k1_10d_ensemble_native_anchor_20260401_formal_r3 = 52.32%` 年化、`32.91%` 超额年化、`1.800` 超额 Sharpe、`-9.36%` 回撤
+  - `deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r3 = 52.14%` 年化、`32.75%` 超额年化、`2.188` 超额 Sharpe、`-7.72%` 回撤
+- `regoff_k2_10d` 与 `regon_k1_10d` 的 manual ensemble verify 也已补齐，说明 native anchored bridge 与旧的手工 ensemble 结果已经基本贴合；因此当前默认生产候选应升级为“anchored offset-ensemble”，而不是继续回头拧 `score -> weight` 翻译器。
+- `2026-04-01` 上午已补完 exact same-window live-anchor replay：`advanced_ml_live_anchor_samewindow_20260401_formal_r1` 里的 `trend_up_low_vol_ml25_none25_v250` 在 `bridge_full (2025-03-18 -> 2026-03-31)` 上是 `24.34%` 年化、`10.75%` 超额年化、`0.580` 超额 Sharpe、`-14.42%` 超额回撤；因此 anchored ensemble 对当前 live-anchor 的优势现在已经不是“近似窗口推断”，而是同窗正式结论。
+- `2026-04-01` 上午已把第一版 soft state-conditioned sizing 直接接进 `target_weight` 直连桥和 candidate trade plan，并在 `execution_target_weight_state_conditioned_verdict_20260401_r1` 里把两个 finalists 跑完：
+  - `regoff_k2_stateoff` 仍是默认 winner；`quadrant_guard_v1 / trend_guard_v1 / market_state_guard_v1` 都会把年化从 `52.14%` 压到 `45.56%~46.72%`，虽然回撤能收窄到 `-6.28% ~ -6.82%`，但不够抵消收益损失。
+  - `regon_k1_stateoff` 仍是更激进的收益对照；`quadrant_guard_v1` 在当前 hard regime filter 下基本是 no-op，`trend_guard_v1 / market_state_guard_v1` 会把年化从 `52.32%` 压到 `50.47%`，只换来约 `1.5pct` 的回撤改善。
+  - 因此当前结论更新为：soft state-conditioned sizing 有风险塑形价值，但还没有拿到默认升级资格；默认生产候选继续保持 `regoff_k2_10d_ensemble_native_anchor`，`regon_k1_10d_ensemble_native_anchor` 保留为收益上沿对照。
+- `2026-04-01` 深夜继续把“翻译损耗”方向一次性扫到底后，当前结论已经很明确：
+  - 仅在 `1d` 直连权重桥里做 `power / min_weight / top_k=4/5 / full_invest` 这类小修小补，收益几乎不动；`15.41% / 0.70% / 0.031` 只会在小数点附近摆动。
+  - 真正的大头来自“执行节奏 + 直连权重表达”：`top_k=2` 与 `top_k=1` 集中化在 `1d` 已能把桥接 formal 提到 `21.30% / 5.84% / 0.219` 或 `19.54% / 4.31% / 0.125`。
+  - 进一步把 `rebalance_freq` 扩到 `5d / 10d` 后，单 offset 点估值可以冲到 `97%~117%` 年化，但相位敏感性非常大；不同 offset 下最差会掉回负超额，因此“单一幸运 offset”不具备生产资格。
+  - 但当把所有 offset 做成等权 sleeve ensemble 后，收益依然很强且明显更可用：`regon_k1_10d ensemble = 51.80%` 年化、`32.45%` 超额年化、`1.779` 超额 Sharpe、`-9.28%` 回撤；`regoff_k2_10d ensemble = 50.46% / 31.28% / 2.105 / -7.72%`；即使不做集中化，`regoff_raw_10d ensemble` 也有 `40.05% / 22.20% / 1.680`。
+  - 因此这条方向的最终 verdict 不是“没用”，而是“方向正确且有明显应用价值，但要从 `daily target_weight + slower/staggered execution cadence` 里拿价值，不能把单 offset lucky run 当生产答案”。默认下一步应转向 `offset-ensemble / phase-robust execution bridge`，而不是继续回去拧旧的 `score -> weight` 翻译器。
 但 `2026-03-29` 的代码考古 + 受控 ablation 已钉死一个关键红旗：
 - 在隔离 worktree `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off` 中，只把 `daily_research/baseline/ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`，同口径 `legacy_v7 + no_auto_trim_history + liquid500 + next_open + lgbm` 就会从当前代码的 `151.70% / 0.882` 立即回跳到旧快照的 `958.89% / 2.447`
 - 当前与快照的 `features.py`、`build_ml_target()` 一致，因此旧快照高收益主因不是“因子更强”或“目标公式不同”，而是 `next_open` 训练边界未做 label-safe gap，存在严重 `label leakage / look-ahead bias`；`2026-03-29` 已把执行 wrapper 从旧快照后端切回当前仓当前代码执行链路，并在同口径 bridge validation 后升级到 `lgbm520` live anchor，不再继续默认沿用那条 `958.89%` artifact 链路
@@ -114,6 +148,10 @@
   - 双 profile 控制器确实把弱窗口与 focus-weak 防守补强了；
   - 但它没有把 full 年化推过静态 offense 的 `15.54%`，也没有形成同时压过两组静态控制的单一赢家；
   - 因此按用户的“若控制器不能把年化抬出新台阶，就转向新机会集”规则，当前 `v250 / v255 / 双 profile 控制器` 参数空间不再是第一研发前线。
+- `2026-03-31` 的 mainboard-only revalidation 已进一步确认：
+  - 上面这组 `13.92% / 15.54% / 15.49%` 现在只能保留为旧 universe comparator，不再代表当前 execution frontier
+  - 在新 universe 下，同口径 `20190101 -> 20260327` 已退化为：static defense `3.44% / 0.279`，static offense `-0.34% / 0.096`，best same-profile dynamic `3.59% / 0.286`，best cross-profile dynamic `2.23% / 0.222`
+  - 所有 `weak_window_20250905_20260319` 与 `trend_up_low_vol_weak_window_20250905_20260319` Sharpe 都转负，因此当前 execution shortlist 不再接近“收益优先非降级”的升级条件
 
 ## 3. 当前项目判断
 - `advanced_ml` 继续承担当前正式执行职责，执行后端已稳定落在当前仓当前代码 live-anchor 口径。

@@ -38,6 +38,12 @@ from daily_research.baseline.data_provider import (
     load_style_map_from_tq,
     load_universe_from_tq,
 )
+from daily_research.baseline.external_target_weight_bridge import (
+    build_target_weight_bridge,
+    load_value_panel,
+    sanitize_target_weight_row,
+)
+from daily_research.baseline.soft_state_sizing import apply_soft_state_sizing, resolve_soft_state_profile
 from daily_research.baseline.ml_alpha import (
     MLAplhaConfig,
     blend_scores,
@@ -80,6 +86,14 @@ def parse_args():
     parser.add_argument("--enhanced-profile", default="up_low_breakout_v2", help=argparse.SUPPRESS)
     parser.add_argument("--holding-count", type=int, default=5)
     parser.add_argument("--rebalance-freq", default="1d")
+    parser.add_argument("--rebalance-offset", type=int, default=0, help="Optional rebalance phase offset in trading days for N-day schedules.")
+    parser.add_argument("--rebalance-anchor-date", default="", help="Optional trading-date anchor for rebalance phase alignment, e.g. 2025-01-02.")
+    parser.add_argument(
+        "--rebalance-offset-mode",
+        choices=["single", "all"],
+        default="single",
+        help="single uses one rebalance phase; all averages every offset sleeve into a phase-robust ensemble.",
+    )
     parser.add_argument("--positions-file", default="daily_research/execution/current_positions.csv")
     parser.add_argument("--cash", type=float, default=None, help="Optional cash override. If omitted, will try to read from current_positions.csv account snapshot row.")
     parser.add_argument("--lot-size", type=int, default=100)
@@ -87,6 +101,32 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--model-artifact", default="daily_research/execution/models/latest_ml_model.joblib")
     parser.add_argument("--train-on-the-fly", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--external-score-csv", default="", help="Optional external score snapshot CSV, e.g. deep_alpha latest_scores.csv")
+    parser.add_argument("--external-score-column", default="latest_score", help="Score column name inside external score CSV.")
+    parser.add_argument("--external-target-weight-csv", default="", help="Optional external target-weight CSV, e.g. deep_alpha daily_target_weight_panel.csv")
+    parser.add_argument("--external-target-weight-column", default="target_weight", help="Target-weight column name inside external target-weight CSV.")
+    parser.add_argument("--target-weight-top-k", type=int, default=0, help="Optional top-k crop applied to direct target-weight rows. 0 keeps all names.")
+    parser.add_argument("--target-weight-min-weight", type=float, default=0.0, help="Optional minimum weight threshold applied to direct target-weight rows before renormalization.")
+    parser.add_argument("--target-weight-power", type=float, default=1.0, help="Optional power transform applied to positive direct target weights before renormalization.")
+    parser.add_argument("--target-weight-full-invest", action="store_true", help="When using direct target weights, renormalize positive rows to 100%% gross even if the source leaves cash.")
+    parser.add_argument(
+        "--soft-state-profile",
+        choices=["off", "quadrant_guard_v1", "trend_guard_v1", "market_state_guard_v1"],
+        default="off",
+        help="Optional soft state-conditioned gross exposure overlay applied after target weights are built.",
+    )
+    parser.add_argument(
+        "--soft-state-selector",
+        choices=["quadrant", "market_state", "trend_bucket", "vol_bucket"],
+        default="",
+        help="Optional selector override for soft-state sizing. Defaults to the profile's native selector.",
+    )
+    parser.add_argument(
+        "--soft-state-gross-map",
+        default="",
+        help="Optional label:gross map override, e.g. trend_up_low_vol:1.0,trend_down_high_vol:0.55",
+    )
+    parser.add_argument("--candidate-label", default="", help="Optional label shown in outputs for external score candidates.")
     parser.add_argument("--stale-model-warn-trading-days", type=int, default=1)
     parser.add_argument("--stale-model-max-trading-days", type=int, default=3)
     parser.add_argument("--allow-stale-model", action="store_true")
@@ -397,6 +437,301 @@ def _build_scores_on_the_fly(
     return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
 
 
+def _resolve_column_name(columns: pd.Index, requested: str, *, label: str) -> str:
+    lookup = {str(col).strip().lower(): str(col) for col in columns}
+    key = str(requested or "").strip().lower()
+    if key in lookup:
+        return lookup[key]
+    raise ValueError(f"{label} column not found: {requested}. Available columns: {list(columns)}")
+
+
+def _resolve_external_value_column(columns: pd.Index, requested: str, *, label: str) -> str:
+    candidates = [str(requested or "").strip()]
+    lowered = str(requested or "").strip().lower()
+    if lowered == "latest_score":
+        candidates.append("score")
+    elif lowered == "score":
+        candidates.append("latest_score")
+    elif lowered == "target_weight":
+        candidates.append("weight")
+
+    for candidate in candidates:
+        try:
+            return _resolve_column_name(columns, candidate, label=label)
+        except ValueError:
+            continue
+    raise ValueError(f"{label} column not found: {requested}. Available columns: {list(columns)}")
+
+
+def _load_external_candidate_rows(
+    raw_df: pd.DataFrame,
+    *,
+    stock_column: str,
+    value_column: str,
+    latest_market_date: pd.Timestamp,
+    label: str,
+    requested_date: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.Timestamp]:
+    stock_col = _resolve_column_name(raw_df.columns, stock_column, label="stock")
+    value_col = _resolve_external_value_column(raw_df.columns, value_column, label=label)
+    columns_lower = {str(col).strip().lower(): str(col) for col in raw_df.columns}
+    date_col = columns_lower.get("date")
+
+    working = raw_df.copy()
+    signal_date = pd.Timestamp(latest_market_date)
+    if date_col is not None:
+        working[date_col] = pd.to_datetime(working[date_col], errors="coerce")
+        working = working[working[date_col].notna()].copy()
+        if requested_date is not None:
+            signal_date = pd.Timestamp(requested_date)
+            working = working[working[date_col].eq(signal_date)].copy()
+        else:
+            working = working[working[date_col] <= pd.Timestamp(latest_market_date)].copy()
+            if working.empty:
+                raise ValueError(f"{label} CSV has no usable rows on or before latest market date: {latest_market_date.date()}")
+            signal_date = pd.Timestamp(working[date_col].max())
+            working = working[working[date_col].eq(signal_date)].copy()
+        if working.empty:
+            raise ValueError(f"{label} CSV has no usable rows for signal date: {signal_date.date()}")
+
+    rows = working[[stock_col, value_col]].copy()
+    rows.columns = ["stock", "value"]
+    rows["stock"] = rows["stock"].astype(str).str.upper().str.strip()
+    rows["value"] = pd.to_numeric(rows["value"], errors="coerce")
+    rows = rows[(rows["stock"] != "") & rows["value"].notna()].copy()
+    if rows.empty:
+        raise ValueError(f"No usable stock/{label} rows found in external CSV.")
+    rows = rows.drop_duplicates(subset=["stock"], keep="last").reset_index(drop=True)
+    return rows, signal_date
+
+
+def _build_scores_from_external_csv(
+    cfg: ResearchConfig,
+    prepared_bundle: Dict[str, object],
+    style_map: pd.DataFrame | None,
+    industry_map: pd.Series | None,
+    *,
+    external_score_csv: Path,
+    external_score_column: str,
+    candidate_label: str,
+):
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
+    latest_market_date = pd.Timestamp(factor_bundle["raw_inputs"]["Close"].index.max())
+    if pd.isna(latest_market_date):
+        raise RuntimeError("No valid latest date found while loading external score candidate.")
+
+    score_df = pd.read_csv(external_score_csv)
+    if score_df.empty:
+        raise ValueError(f"External score CSV is empty: {external_score_csv}")
+
+    raw_scores, signal_date = _load_external_candidate_rows(
+        score_df,
+        stock_column="stock",
+        value_column=external_score_column,
+        latest_market_date=latest_market_date,
+        label="external score",
+    )
+    raw_scores = raw_scores.rename(columns={"value": "score"})
+
+    allowed_columns = pd.Index(factor_bundle["raw_inputs"]["Close"].columns.astype(str))
+    usable = raw_scores[raw_scores["stock"].isin(allowed_columns)].copy()
+    dropped = raw_scores[~raw_scores["stock"].isin(allowed_columns)].copy()
+    if usable.empty:
+        raise ValueError(
+            "External score CSV has no overlap with current execution universe. "
+            f"score_csv={external_score_csv}"
+        )
+
+    aligned_scores = pd.Series(np.nan, index=allowed_columns, dtype=float)
+    aligned_scores.loc[usable["stock"]] = usable["score"].to_numpy(dtype=float)
+    final_score_raw = pd.DataFrame([aligned_scores], index=[signal_date])
+    final_score_raw.index.name = "date"
+
+    score_none = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
+    score_v2 = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
+    ml_score = final_score_raw.copy()
+
+    target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
+    final_score = final_score_raw.copy()
+    if cfg.enable_market_regime_filter:
+        target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
+
+    label = str(candidate_label or external_score_csv.resolve().parent.name).strip()
+    training_log = pd.DataFrame(
+        [
+            {
+                "source": "external_score_csv",
+                "candidate_label": label,
+                "score_csv_path": str(external_score_csv),
+                "score_column": str(score_col),
+                "loaded_rows": int(len(raw_scores)),
+                "usable_rows": int(len(usable)),
+                "dropped_rows": int(len(dropped)),
+                "signal_date": str(signal_date.date()),
+                "train_end": "",
+                "trained_at": "",
+            }
+        ]
+    )
+    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+
+
+def _build_scores_from_external_target_weight_csv(
+    cfg: ResearchConfig,
+    prepared_bundle: Dict[str, object],
+    *,
+    external_target_weight_csv: Path,
+    external_target_weight_column: str,
+    candidate_label: str,
+    rebalance_offset: int,
+    rebalance_offset_mode: str,
+    rebalance_anchor_date: str,
+    target_weight_top_k: int,
+    target_weight_min_weight: float,
+    target_weight_power: float,
+    target_weight_full_invest: bool,
+    external_score_csv: Path | None = None,
+    external_score_column: str = "latest_score",
+):
+    factor_bundle = prepared_bundle["factor_bundle"]
+    regime_state = prepared_bundle["regime_state"]
+    latest_market_date = pd.Timestamp(factor_bundle["raw_inputs"]["Close"].index.max())
+    if pd.isna(latest_market_date):
+        raise RuntimeError("No valid latest date found while loading external target-weight candidate.")
+
+    allowed_columns = pd.Index(factor_bundle["raw_inputs"]["Close"].columns.astype(str))
+    market_index = pd.DatetimeIndex(factor_bundle["raw_inputs"]["Close"].index).sort_values().unique()
+
+    weight_df = pd.read_csv(external_target_weight_csv)
+    if weight_df.empty:
+        raise ValueError(f"External target-weight CSV is empty: {external_target_weight_csv}")
+
+    raw_weights, source_signal_date = _load_external_candidate_rows(
+        weight_df,
+        stock_column="stock",
+        value_column=external_target_weight_column,
+        latest_market_date=latest_market_date,
+        label="external target weight",
+    )
+    raw_weights = raw_weights.rename(columns={"value": "target_weight"})
+    usable = raw_weights[raw_weights["stock"].isin(allowed_columns)].copy()
+    dropped = raw_weights[~raw_weights["stock"].isin(allowed_columns)].copy()
+    if usable.empty and not raw_weights.empty:
+        raise ValueError(
+            "External target-weight CSV has no overlap with current execution universe. "
+            f"target_weight_csv={external_target_weight_csv}"
+        )
+
+    target_weight_panel = load_value_panel(
+        external_target_weight_csv,
+        panel_format="auto",
+        date_column="date",
+        stock_column="stock",
+        value_column=external_target_weight_column,
+        panel_label="external target weight",
+        value_name="target_weight",
+    )
+    target_weight_panel = (
+        target_weight_panel.reindex(index=market_index, columns=allowed_columns)
+        .sort_index()
+        .loc[lambda df: df.index <= latest_market_date]
+        .fillna(0.0)
+    )
+    if target_weight_panel.empty:
+        raise ValueError(
+            "External target-weight CSV has no aligned dates inside the current execution calendar. "
+            f"target_weight_csv={external_target_weight_csv}"
+        )
+
+    target_weights, bridge_meta = build_target_weight_bridge(
+        target_weight_panel,
+        rebalance_freq=cfg.rebalance_freq,
+        rebalance_offset=rebalance_offset,
+        rebalance_offset_mode=rebalance_offset_mode,
+        rebalance_anchor_date=rebalance_anchor_date,
+        top_k=target_weight_top_k,
+        min_weight=target_weight_min_weight,
+        power=target_weight_power,
+        full_invest=target_weight_full_invest,
+    )
+    target_weights.index.name = "date"
+    signal_date = pd.Timestamp(target_weights.index.max())
+    aligned_weights = sanitize_target_weight_row(target_weights.loc[signal_date].reindex(allowed_columns).fillna(0.0))
+
+    final_score_row = aligned_weights.copy()
+    score_context_status = "weight_proxy"
+    score_context_warning = ""
+    if external_score_csv is not None:
+        try:
+            score_df = pd.read_csv(external_score_csv)
+            if score_df.empty:
+                raise ValueError(f"External score CSV is empty: {external_score_csv}")
+            raw_scores, score_signal_date = _load_external_candidate_rows(
+                score_df,
+                stock_column="stock",
+                value_column=external_score_column,
+                latest_market_date=latest_market_date,
+                label="external score",
+                requested_date=signal_date,
+            )
+            if pd.Timestamp(score_signal_date) != pd.Timestamp(signal_date):
+                raise ValueError(
+                    "External score CSV signal date does not match target-weight signal date. "
+                    f"score_date={score_signal_date.date()} target_weight_date={signal_date.date()}"
+                )
+            raw_scores = raw_scores.rename(columns={"value": "score"})
+            usable_scores = raw_scores[raw_scores["stock"].isin(allowed_columns)].copy()
+            final_score_row = pd.Series(np.nan, index=allowed_columns, dtype=float)
+            final_score_row.loc[usable_scores["stock"]] = usable_scores["score"].to_numpy(dtype=float)
+            score_context_status = "external_score"
+        except ValueError as exc:
+            score_context_warning = str(exc)
+
+    final_score_raw = pd.DataFrame([final_score_row], index=[signal_date])
+    final_score_raw.index.name = "date"
+    score_none = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
+    score_v2 = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
+    ml_score = final_score_raw.fillna(0.0)
+
+    final_score = final_score_raw.copy()
+    if cfg.enable_market_regime_filter:
+        target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
+
+    label = str(candidate_label or external_target_weight_csv.resolve().parent.name).strip()
+    training_log = pd.DataFrame(
+        [
+            {
+                "source": "external_target_weight_csv",
+                "candidate_label": label,
+                "target_weight_csv_path": str(external_target_weight_csv),
+                "score_csv_path": str(external_score_csv) if external_score_csv is not None else "",
+                "target_weight_column": str(external_target_weight_column),
+                "score_column": str(external_score_column),
+                "loaded_rows": int(len(raw_weights)),
+                "usable_rows": int(len(usable)),
+                "dropped_rows": int(len(dropped)),
+                "source_signal_date": str(pd.Timestamp(source_signal_date).date()),
+                "score_context_status": score_context_status,
+                "score_context_warning": score_context_warning,
+                "signal_date": str(signal_date.date()),
+                "rebalance_freq": str(cfg.rebalance_freq),
+                "rebalance_offset_mode": str(bridge_meta.get("rebalance_offset_mode", rebalance_offset_mode)),
+                "rebalance_offset": bridge_meta.get("rebalance_offset"),
+                "rebalance_sleeve_count": int(bridge_meta.get("rebalance_sleeve_count", 1)),
+                "rebalance_anchor_date": str(bridge_meta.get("rebalance_anchor_date", rebalance_anchor_date or "")),
+                "target_weight_top_k": int(bridge_meta.get("target_weight_top_k", target_weight_top_k)),
+                "target_weight_min_weight": float(bridge_meta.get("target_weight_min_weight", target_weight_min_weight)),
+                "target_weight_power": float(bridge_meta.get("target_weight_power", target_weight_power)),
+                "target_weight_full_invest": bool(bridge_meta.get("target_weight_full_invest", target_weight_full_invest)),
+                "train_end": "",
+                "trained_at": "",
+            }
+        ]
+    )
+    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+
+
 def _round_buy_shares(delta_value: float, price: float, lot_size: int) -> int:
     if delta_value <= 0 or price <= 0:
         return 0
@@ -599,6 +934,41 @@ def _build_watchlist(
     return df.sort_values("final_score", ascending=False).head(top_n).reset_index(drop=True)
 
 
+def _apply_soft_state_overlay(
+    *,
+    args: argparse.Namespace,
+    regime_state: pd.DataFrame,
+    target_weights: pd.DataFrame,
+    model_info: dict[str, Any],
+    training_log: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.Series, dict[str, Any], pd.DataFrame]:
+    profile = resolve_soft_state_profile(
+        profile=args.soft_state_profile,
+        selector=(args.soft_state_selector or None),
+        gross_map_raw=(args.soft_state_gross_map or None),
+    )
+    scaled_weights, soft_state_scale, soft_state_meta = apply_soft_state_sizing(
+        target_weights,
+        regime_state,
+        profile_meta=profile,
+    )
+    model_info.update(soft_state_meta)
+    if training_log is not None and not training_log.empty:
+        training_log.loc[:, "soft_state_profile"] = str(soft_state_meta.get("soft_state_profile", "off"))
+        training_log.loc[:, "soft_state_enabled"] = bool(soft_state_meta.get("soft_state_enabled", False))
+        training_log.loc[:, "soft_state_selector"] = str(soft_state_meta.get("soft_state_selector", "quadrant"))
+        training_log.loc[:, "soft_state_scale_mean"] = float(soft_state_meta.get("soft_state_scale_mean", 1.0))
+        training_log.loc[:, "soft_state_scale_active_ratio"] = float(
+            soft_state_meta.get("soft_state_scale_active_ratio", 0.0)
+        )
+        training_log.loc[:, "soft_state_gross_map"] = json.dumps(
+            soft_state_meta.get("soft_state_gross_map", {}),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    return scaled_weights, soft_state_scale, soft_state_meta, training_log
+
+
 def _write_trade_plan_txt(
     path: Path,
     summary: Dict[str, float],
@@ -630,6 +1000,16 @@ def _write_trade_plan_txt(
     lines.append(f"模型来源: {model_info.get('mode', '')}")
     if model_info.get("artifact_path"):
         lines.append(f"模型文件: {model_info['artifact_path']}")
+    if model_info.get("candidate_label"):
+        lines.append(f"候选标签: {model_info['candidate_label']}")
+    if model_info.get("candidate_score_csv"):
+        lines.append(f"候选分数文件: {model_info['candidate_score_csv']}")
+    if model_info.get("candidate_usable_rows") is not None and model_info.get("candidate_total_rows") is not None:
+        lines.append(
+            "候选分数覆盖: "
+            f"{model_info.get('candidate_usable_rows', 0)}/{model_info.get('candidate_total_rows', 0)} "
+            f"(dropped={model_info.get('candidate_dropped_rows', 0)})"
+        )
     if model_info.get("trained_at"):
         lines.append(f"模型训练时间: {model_info['trained_at']}")
     if model_info.get("train_end"):
@@ -662,6 +1042,14 @@ def _write_trade_plan_txt(
         lines.append(f"LGBM Trees: {model_info['lgbm_n_estimators']}")
     if model_info.get("enhanced_profile"):
         lines.append(f"Enhanced Profile: {model_info['enhanced_profile']}")
+    if model_info.get("soft_state_enabled"):
+        lines.append(
+            "Soft State Sizing: "
+            f"{model_info.get('soft_state_profile', 'custom')} | "
+            f"selector={model_info.get('soft_state_selector', '')} | "
+            f"mean_gross={_fmt_metric(model_info.get('soft_state_scale_mean'))} | "
+            f"active_ratio={_fmt_metric(model_info.get('soft_state_scale_active_ratio'))}"
+        )
     validation_summary = model_info.get("validation_summary")
     if isinstance(validation_summary, dict):
         combined = validation_summary.get("combined")
@@ -796,6 +1184,10 @@ def main():
     artifact = None
     artifact_meta: dict[str, Any] = {}
     artifact_path = Path(args.model_artifact)
+    external_score_path = Path(args.external_score_csv).expanduser() if str(args.external_score_csv).strip() else None
+    external_target_weight_path = (
+        Path(args.external_target_weight_csv).expanduser() if str(args.external_target_weight_csv).strip() else None
+    )
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
     if not args.train_on_the_fly:
@@ -980,6 +1372,13 @@ def main():
         )
 
     print("[9/9] 正在生成盘后策略与次日开盘执行建议...")
+    target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
+        args=args,
+        regime_state=regime_state,
+        target_weights=target_weights,
+        model_info=model_info,
+        training_log=training_log,
+    )
     action_df, summary = _build_trade_plan(
         latest_date=signal_date,
         close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
@@ -1001,6 +1400,7 @@ def main():
         "raw": raw_cache_meta,
         "prepared": prepared_cache_meta,
     }
+    summary.update(soft_state_meta)
     if not args.train_on_the_fly:
         summary["model_artifact"] = str(artifact_path)
         summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
@@ -1055,6 +1455,11 @@ def main():
     hold_df.to_csv(run_dir / "holdings_snapshot.csv", index=False, encoding="utf-8-sig")
     watch_df.to_csv(run_dir / "watchlist.csv", index=False, encoding="utf-8-sig")
     training_log.to_csv(run_dir / "training_log.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame({"date": soft_state_scale.index, "soft_state_scale": soft_state_scale.values}).to_csv(
+        run_dir / "soft_state_scale.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
     with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -1128,12 +1533,23 @@ def main_with_progress():
     artifact = None
     artifact_meta: dict[str, Any] = {}
     artifact_path = Path(args.model_artifact)
+    external_score_path = Path(args.external_score_csv).expanduser() if str(args.external_score_csv).strip() else None
+    external_target_weight_path = (
+        Path(args.external_target_weight_csv).expanduser() if str(args.external_target_weight_csv).strip() else None
+    )
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
 
     with StageProgress(total=9, label="交易计划流程") as progress:
         with progress.stage("准备模型与研究宇宙", f"source={args.data_source}"):
-            if not args.train_on_the_fly:
+            if external_score_path is not None or external_target_weight_path is not None:
+                if args.train_on_the_fly:
+                    raise ValueError("--external-score-csv / --external-target-weight-csv cannot be combined with --train-on-the-fly.")
+                if external_score_path is not None and not external_score_path.exists():
+                    raise FileNotFoundError(f"External score CSV not found: {external_score_path}")
+                if external_target_weight_path is not None and not external_target_weight_path.exists():
+                    raise FileNotFoundError(f"External target-weight CSV not found: {external_target_weight_path}")
+            elif not args.train_on_the_fly:
                 if not artifact_path.exists():
                     raise FileNotFoundError(
                         f"Model artifact not found: {artifact_path}. Run daily_research/execution/update_model.py first."
@@ -1225,8 +1641,113 @@ def main_with_progress():
             if cfg.enable_industry_cap and args.data_source == "tq":
                 industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
 
-        with progress.stage("计算组合分数", "artifact/live"):
-            if args.train_on_the_fly:
+        with progress.stage("计算组合分数", "artifact/live/external"):
+            if external_target_weight_path is not None:
+                (
+                    factor_bundle,
+                    regime_state,
+                    score_none,
+                    score_v2,
+                    ml_score,
+                    final_score_raw,
+                    final_score_filtered,
+                    target_weights,
+                    training_log,
+                ) = _build_scores_from_external_target_weight_csv(
+                    cfg,
+                    prepared_bundle,
+                    external_target_weight_csv=external_target_weight_path,
+                    external_target_weight_column=args.external_target_weight_column,
+                    candidate_label=args.candidate_label,
+                    rebalance_offset=args.rebalance_offset,
+                    rebalance_offset_mode=args.rebalance_offset_mode,
+                    rebalance_anchor_date=args.rebalance_anchor_date,
+                    target_weight_top_k=args.target_weight_top_k,
+                    target_weight_min_weight=args.target_weight_min_weight,
+                    target_weight_power=args.target_weight_power,
+                    target_weight_full_invest=bool(args.target_weight_full_invest),
+                    external_score_csv=external_score_path,
+                    external_score_column=args.external_score_column,
+                )
+                candidate_label = str(training_log.iloc[0].get("candidate_label", "")) if not training_log.empty else ""
+                loaded_rows = int(training_log.iloc[0].get("loaded_rows", 0)) if not training_log.empty else 0
+                usable_rows = int(training_log.iloc[0].get("usable_rows", 0)) if not training_log.empty else 0
+                dropped_rows = int(training_log.iloc[0].get("dropped_rows", 0)) if not training_log.empty else 0
+                model_info = {
+                    "mode": "research_candidate_target_weight_csv",
+                    "candidate_label": candidate_label,
+                    "candidate_target_weight_csv": str(external_target_weight_path),
+                    "candidate_score_csv": str(external_score_path) if external_score_path is not None else "",
+                    "candidate_total_rows": loaded_rows,
+                    "candidate_usable_rows": usable_rows,
+                    "candidate_dropped_rows": dropped_rows,
+                    "rebalance_freq": str(cfg.rebalance_freq),
+                    "rebalance_offset_mode": str(training_log.iloc[0].get("rebalance_offset_mode", args.rebalance_offset_mode)) if not training_log.empty else str(args.rebalance_offset_mode),
+                    "rebalance_offset": training_log.iloc[0].get("rebalance_offset") if not training_log.empty else args.rebalance_offset,
+                    "rebalance_sleeve_count": int(training_log.iloc[0].get("rebalance_sleeve_count", 1)) if not training_log.empty else 1,
+                    "rebalance_anchor_date": str(training_log.iloc[0].get("rebalance_anchor_date", args.rebalance_anchor_date or "")) if not training_log.empty else str(args.rebalance_anchor_date or ""),
+                    "target_weight_top_k": int(training_log.iloc[0].get("target_weight_top_k", args.target_weight_top_k)) if not training_log.empty else int(args.target_weight_top_k),
+                    "target_weight_min_weight": float(training_log.iloc[0].get("target_weight_min_weight", args.target_weight_min_weight)) if not training_log.empty else float(args.target_weight_min_weight),
+                    "target_weight_power": float(training_log.iloc[0].get("target_weight_power", args.target_weight_power)) if not training_log.empty else float(args.target_weight_power),
+                    "target_weight_full_invest": bool(training_log.iloc[0].get("target_weight_full_invest", args.target_weight_full_invest)) if not training_log.empty else bool(args.target_weight_full_invest),
+                    "history_window": history_window_to_dict(history_window),
+                    "enhanced_profile": "external_target_weight_candidate",
+                }
+                warnings: list[str] = []
+                if dropped_rows > 0:
+                    warnings.append(
+                        f"external target-weight rows outside the current execution universe were dropped: {dropped_rows}"
+                    )
+                score_context_warning = (
+                    str(training_log.iloc[0].get("score_context_warning", "")) if not training_log.empty else ""
+                ).strip()
+                if score_context_warning:
+                    warnings.append(f"external score context fallback: {score_context_warning}")
+                if warnings:
+                    model_info["warnings"] = warnings
+                freshness_info: dict[str, Any] = {}
+                validation_summary: dict[str, Any] = {}
+            elif external_score_path is not None:
+                (
+                    factor_bundle,
+                    regime_state,
+                    score_none,
+                    score_v2,
+                    ml_score,
+                    final_score_raw,
+                    final_score_filtered,
+                    target_weights,
+                    training_log,
+                ) = _build_scores_from_external_csv(
+                    cfg,
+                    prepared_bundle,
+                    style_map,
+                    industry_map,
+                    external_score_csv=external_score_path,
+                    external_score_column=args.external_score_column,
+                    candidate_label=args.candidate_label,
+                )
+                candidate_label = str(training_log.iloc[0].get("candidate_label", "")) if not training_log.empty else ""
+                loaded_rows = int(training_log.iloc[0].get("loaded_rows", 0)) if not training_log.empty else 0
+                usable_rows = int(training_log.iloc[0].get("usable_rows", 0)) if not training_log.empty else 0
+                dropped_rows = int(training_log.iloc[0].get("dropped_rows", 0)) if not training_log.empty else 0
+                model_info = {
+                    "mode": "research_candidate_csv",
+                    "candidate_label": candidate_label,
+                    "candidate_score_csv": str(external_score_path),
+                    "candidate_total_rows": loaded_rows,
+                    "candidate_usable_rows": usable_rows,
+                    "candidate_dropped_rows": dropped_rows,
+                    "history_window": history_window_to_dict(history_window),
+                    "enhanced_profile": "external_score_candidate",
+                }
+                if dropped_rows > 0:
+                    model_info["warnings"] = [
+                        f"external score rows outside the current execution universe were dropped: {dropped_rows}"
+                    ]
+                freshness_info: dict[str, Any] = {}
+                validation_summary: dict[str, Any] = {}
+            elif args.train_on_the_fly:
                 (
                     factor_bundle,
                     regime_state,
@@ -1334,6 +1855,13 @@ def main_with_progress():
             signal_date = final_score_raw.dropna(how="all").index.max()
             if pd.isna(signal_date):
                 raise RuntimeError("No valid latest date found for trade plan generation.")
+            target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
+                args=args,
+                regime_state=regime_state,
+                target_weights=target_weights,
+                model_info=model_info,
+                training_log=training_log,
+            )
             action_df, summary = _build_trade_plan(
                 latest_date=signal_date,
                 close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
@@ -1355,7 +1883,22 @@ def main_with_progress():
                 "raw": raw_cache_meta,
                 "prepared": prepared_cache_meta,
             }
-            if not args.train_on_the_fly:
+            summary.update(soft_state_meta)
+            if external_target_weight_path is not None:
+                summary["candidate_target_weight_csv"] = str(external_target_weight_path)
+                if external_score_path is not None:
+                    summary["candidate_score_csv"] = str(external_score_path)
+                summary["candidate_label"] = str(model_info.get("candidate_label", ""))
+                summary["candidate_total_rows"] = int(model_info.get("candidate_total_rows", 0) or 0)
+                summary["candidate_usable_rows"] = int(model_info.get("candidate_usable_rows", 0) or 0)
+                summary["candidate_dropped_rows"] = int(model_info.get("candidate_dropped_rows", 0) or 0)
+            elif external_score_path is not None:
+                summary["candidate_score_csv"] = str(external_score_path)
+                summary["candidate_label"] = str(model_info.get("candidate_label", ""))
+                summary["candidate_total_rows"] = int(model_info.get("candidate_total_rows", 0) or 0)
+                summary["candidate_usable_rows"] = int(model_info.get("candidate_usable_rows", 0) or 0)
+                summary["candidate_dropped_rows"] = int(model_info.get("candidate_dropped_rows", 0) or 0)
+            elif not args.train_on_the_fly:
                 summary["model_artifact"] = str(artifact_path)
                 summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
                 summary["model_freshness"] = freshness_info
@@ -1409,6 +1952,11 @@ def main_with_progress():
             hold_df.to_csv(run_dir / "holdings_snapshot.csv", index=False, encoding="utf-8-sig")
             watch_df.to_csv(run_dir / "watchlist.csv", index=False, encoding="utf-8-sig")
             training_log.to_csv(run_dir / "training_log.csv", index=False, encoding="utf-8-sig")
+            pd.DataFrame({"date": soft_state_scale.index, "soft_state_scale": soft_state_scale.values}).to_csv(
+                run_dir / "soft_state_scale.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
             with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
                 json.dump(summary, f, ensure_ascii=False, indent=2)
 

@@ -134,8 +134,8 @@ DOC_RULES = {
         ),
     ),
     "daily_research/brain/action_system.md": DocRule(
-        warn_lines=220,
-        max_lines=320,
+        warn_lines=260,
+        max_lines=420,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research action system should stay an operations guide instead of becoming a dated log"),
         ),

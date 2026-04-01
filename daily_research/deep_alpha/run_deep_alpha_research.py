@@ -255,6 +255,18 @@ def _build_score_frame(
     return score.where(valid)
 
 
+def _panel_to_long(frame: pd.DataFrame, value_name: str) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=["date", "stock", value_name])
+    return (
+        frame.copy()
+        .rename_axis(index="date", columns="stock")
+        .stack()
+        .rename(value_name)
+        .reset_index()
+    )
+
+
 def _resolve_manual_score_config(
     *,
     base_horizon_weights: dict[int, float],
@@ -872,6 +884,8 @@ def main():
     latest_scores = score_frame.loc[[score_frame.dropna(how="all").index.max()]].T.reset_index()
     latest_scores.columns = ["stock", "latest_score"]
     latest_scores = latest_scores.sort_values("latest_score", ascending=False, na_position="last")
+    daily_score_panel = _panel_to_long(score_frame.reindex(valid_dates), "score")
+    daily_target_weight_panel = _panel_to_long(target_weights.reindex(valid_dates), "target_weight")
 
     history_df.to_csv(run_dir / "train_history.csv", index=False, encoding="utf-8-sig")
     pred_df.to_csv(run_dir / "validation_predictions.csv", index=False, encoding="utf-8-sig")
@@ -879,6 +893,8 @@ def main():
     rankic_summary.to_csv(run_dir / "validation_rankic_summary.csv", index=False, encoding="utf-8-sig")
     state_df.to_csv(run_dir / "market_state_frame.csv", encoding="utf-8-sig")
     latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")
+    daily_score_panel.to_csv(run_dir / "daily_score_panel.csv", index=False, encoding="utf-8-sig")
+    daily_target_weight_panel.to_csv(run_dir / "daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
     equity_export = equity_df.reset_index().rename(columns={equity_df.index.name or "index": "date"})
     equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")
     action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
