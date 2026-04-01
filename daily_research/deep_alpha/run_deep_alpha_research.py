@@ -178,6 +178,9 @@ def parse_args():
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
+    parser.add_argument("--execution-alignment-transaction-cost-bps", type=float, default=0.0)
+    parser.add_argument("--execution-alignment-slippage-bps", type=float, default=0.0)
+    parser.add_argument("--execution-alignment-sell-tax-bps", type=float, default=0.0)
     parser.add_argument(
         "--execution-alignment-mode",
         choices=["off", "profile", "train_eval_auto"],
@@ -976,6 +979,9 @@ def main():
             min_adv20=cfg.min_adv20,
             min_price=cfg.min_price,
             max_price=cfg.max_price,
+            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
+            slippage_bps=args.execution_alignment_slippage_bps,
+            sell_tax_bps=args.execution_alignment_sell_tax_bps,
         )
         execution_aligned_score_frame = execution_alignment_artifact.valid_score_frame.reindex(valid_dates).fillna(0.0)
         execution_aligned_target_weights = execution_alignment_artifact.valid_target_weights.reindex(valid_dates).fillna(0.0)
@@ -992,6 +998,9 @@ def main():
             min_adv20=cfg.min_adv20,
             min_price=cfg.min_price,
             max_price=cfg.max_price,
+            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
+            slippage_bps=args.execution_alignment_slippage_bps,
+            sell_tax_bps=args.execution_alignment_sell_tax_bps,
             enable_market_regime_filter=bool(execution_aligned_metrics.get("market_regime_filter", False)),
             regime_ma_window=50,
             regime_vol_window=20,
@@ -1175,6 +1184,9 @@ def main():
                 "risk_gate_group_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.group_thresholds,
                 "execution_alignment_mode": str(args.execution_alignment_mode),
                 "execution_alignment_objective": str(args.execution_alignment_objective),
+                "execution_alignment_transaction_cost_bps": float(args.execution_alignment_transaction_cost_bps),
+                "execution_alignment_slippage_bps": float(args.execution_alignment_slippage_bps),
+                "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
                 "execution_alignment_profile": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile,
                 "execution_alignment_profile_description": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile_description,
                 "execution_alignment_candidate_profiles": [] if execution_alignment_artifact is None else execution_alignment_artifact.candidate_profiles,

@@ -18,16 +18,19 @@
 `daily_research/execution/` 只负责三件事：
 
 1. 盘后刷新高流动性股票池
-2. 盘后更新离线模型产物
-3. 盘后生成“次日开盘手工执行”的交易建议
+2. 盘后生成“次日开盘手工执行”的交易建议
+3. 在需要 legacy 回退时维护离线机器学习模型产物
 
 这不是自动下单系统。当前执行端固定为：
 
 - 盘后生成建议，次日开盘人工执行
-- 默认读取离线模型，不在生成计划时临时重训
+- 默认读取 anchored `target_weight` execution candidate，不在生成计划时临时重训
+- 旧离线机器学习模型只保留为 explicit legacy fallback
 
 ## 3. 当前默认执行口径
 - 主线：
+  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+- legacy 回退：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 - `2026-03-31` mainboard-only formal revalidation outputs：
   - `daily_research/output/advanced_ml_current_code_live_anchor_20260331_mainboard_formal_r1`
@@ -37,11 +40,14 @@
 - 当前结论：
   - live-anchor bridge `v250 @ 504 / 21 / 520` on `20210101 -> 20260327`：`18.09% / 20.83% / 1.034`，但 weak Sharpe 已转负
   - `20190101 -> 20260327` same-protocol shortlist 已退化为：static defense `3.44% / 0.279`，best same-profile dynamic `3.59% / 0.286`，best cross-profile dynamic `2.23% / 0.222`
-  - 因此 execution 侧不再继续深挖当前 wrapper 参数空间；默认下一步改为把研究侧更强机会集迁到 execution 候选
+  - `advanced_ml_live_anchor_samewindow_20260401_formal_r1` 的同窗 replay 只有 `24.34% / 10.75% / 0.580 / -14.42%`，而 `regoff_k2_realistic` 为 `44.12% / 25.75% / 1.722 / -8.55%`
+  - 因此 execution 侧已不再以旧 wrapper 为日常默认；日常默认已切到 `regoff_k2`，旧机器学习链路只保留 explicit legacy fallback
 - 当前执行后端：
-  - 当前仓 `baseline/train_trade_model.py`
-  - 当前仓 `baseline/generate_daily_trade_plan.py`
-  - 模型产物与计划文件仍写回当前 `daily_research/execution/`
+  - 默认日常入口：`execution/run_trade_plan.py`
+  - explicit legacy 回退：`execution/run_trade_plan_legacy_ml.py`
+  - legacy ML 维护：`execution/update_model.py` / `execution/update_model_legacy_ml.py`
+  - 底层计划生成仍由当前仓 `baseline/generate_daily_trade_plan.py` 承担
+  - 计划文件仍写回当前 `daily_research/execution/`
 - 默认股票池：
   - `universe/liquid500_latest.txt`
 - 成交假设：
@@ -52,12 +58,14 @@
   - `regime_ma_window=50`
   - `regime_max_annual_vol=0.32`
   - `trend_up_low_vol,trend_up_high_vol`
-- 默认模型族：
+- 默认 candidate profile：
+  - `regoff_k2_10d_ensemble_native_anchor`
+- legacy ML 模型族：
   - `lgbm`
-- 默认训练窗口：
+- legacy ML 默认训练窗口：
   - `ml_train_window_days=504`
-- `lgbm_n_estimators=520`
-- 默认状态集成：
+- legacy ML `lgbm_n_estimators=520`
+- legacy ML 默认状态集成：
   - 当前 wrapper 默认注入 `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
   - 当前 wrapper 默认注入 `enhanced_profile=up_low_breakout_v2`
 
@@ -74,6 +82,14 @@ python daily_research/execution/update_liquid_pool.py --start-date 20240101
 ```
 
 ### 第 2 步：更新离线模型产物
+默认日常主线不再需要这一步；它只用于 explicit legacy ML 回退维护。
+
+```bash
+python daily_research/execution/update_model_legacy_ml.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
+```
+
+兼容旧入口：
+
 ```bash
 python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
 ```
@@ -102,10 +118,27 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 
 - `--positions-file=current_positions.csv`
 - `--output-dir=output/`
+- `--candidate-profile=regoff_k2_10d_ensemble_native_anchor`
+- `--stocks-file=universe/liquid500_latest.txt`
+- `--regime-ma-window=50`
+- `--external-score-column=latest_score`
+- `--external-target-weight-column=target_weight`
+- 对外部候选面板启用信号新鲜度保护；若面板明显落后，会直接拦截并要求刷新候选或显式走 legacy 回退
+- 并由当前仓 `baseline/generate_daily_trade_plan.py` 生成计划
+
+### 第 4.1 步：legacy ML 显式回退
+```bash
+python daily_research/execution/run_trade_plan_legacy_ml.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 1d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50
+```
+
+legacy 包装脚本会自动补：
+
+- `--positions-file=current_positions.csv`
+- `--output-dir=output/`
 - `--model-artifact=models/latest_ml_model.joblib`
 - `--stocks-file=universe/liquid500_latest.txt`
 - `--regime-ma-window=50`
-- 并由当前仓 `baseline/generate_daily_trade_plan.py` 生成计划
+- 并由当前仓 `baseline/generate_daily_trade_plan.py` 生成 legacy 计划
 
 ### 第 4.5 步：把研究侧分数迁到 execution candidate
 ```powershell
@@ -231,7 +264,7 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile aggressive
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile aggressive
 ```
-- 当前高收益 upgrade shortlist 入口：
+- 当前高换手 no-cost 对照入口：
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile robust_auto
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile robust_auto
@@ -250,7 +283,37 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - `2026-04-01` 深夜已补完 execution candidate multi-window H2H：
   - `regoff_k2 vs regon_k1`：`regoff_k2` 赢 `4/5` 个窗口的 excess Sharpe，`regon_k1` 赢 `4/5` 个窗口的 excess annual return
   - `regoff_k2 vs execalign_auto_r4`：`execalign_auto_r4` 赢 `5/5` 个窗口的 excess annual return，赢 `4/5` 个窗口的 excess Sharpe
-  - 当前结论因此写死为：`regoff_k2` 继续保留默认生产候选，`execalign_auto_r4_topk2_1d_regoff` 升格到高收益 upgrade shortlist，不能静默替换默认值
+  - 但 `2026-04-01` 深夜的成本现实性 formal 已进一步更新了结论：`regoff_k2` 在 realistic / stress 两档成本假设下都对 `robust_auto` 完成 `5/5` 全胜，因此当前写死为：`regoff_k2` 继续保留默认生产候选，`robust_auto` 只保留为高换手 no-cost 对照
+- 当前 execution candidate 成本现实性 formal 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --candidate-profile default `
+  --transaction-cost-bps 3 `
+  --slippage-bps 7 `
+  --sell-tax-bps 10 `
+  --experiment-tag execution_costreview_regoff_k2_realistic_20260401_r1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --candidate-profile robust_auto `
+  --transaction-cost-bps 3 `
+  --slippage-bps 7 `
+  --sell-tax-bps 10 `
+  --experiment-tag execution_costreview_execalign_auto_r4_realistic_20260401_r1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --candidate-profile default `
+  --transaction-cost-bps 5 `
+  --slippage-bps 10 `
+  --sell-tax-bps 10 `
+  --experiment-tag execution_costreview_regoff_k2_stress_20260401_r1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --candidate-profile robust_auto `
+  --transaction-cost-bps 5 `
+  --slippage-bps 10 `
+  --sell-tax-bps 10 `
+  --experiment-tag execution_costreview_execalign_auto_r4_stress_20260401_r1
+```
 
 ### 4.7 第一步 soft state-conditioned sizing formal 入口
 ```powershell
@@ -347,7 +410,9 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - 第一轮 `dynamic_graph_execution_objective_alignment_20260401_r1`：按 `excess_annual_return` 选中了 `regon_k1_10d_ensemble_native_anchor`，但 aligned export replay 只有 `37.26% / 19.76% / 1.145 / -11.56%`
   - 第二轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4`：按 `robust_composite + train_eval_window_days=252` 选中了 `topk2_1d_regoff`，external export replay 达到 `108.05% / 85.32% / 3.317 / -11.01%`
   - 汇总 verdict 在 `daily_research/output/execution_alignment_robust_upgrade_20260401_r1`
-  - 当前结论：execution-objective alignment 已经产生新的 formal high-upside winner，但它的换手和回撤压力更高，所以当前只升格到 upgrade shortlist，不静默替换默认 `regoff_k2`
+  - 第三轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_costaware_20260401_realistic_r1` 已把 realistic 成本接进 train-side auto alignment：它不再选 `robust_auto`，而是选 `regon_k1_10d_ensemble_native_anchor`；对应 external replay 为 `31.86% / 17.45% / 0.992 / -10.14%`
+  - 汇总 verdict 已被 `daily_research/output/execution_candidate_cost_realism_review_20260401_r1` 覆盖
+  - 当前结论：execution-objective alignment 已具备显式成本假设能力，但 realistic-cost 下还没有打赢 `regoff_k2` 的新候选；后续 promotion 必须同时通过 explicit-cost external replay 和 multi-window H2H
 - 当前动态图研究入口：
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_ablation.py --list-profiles
@@ -457,6 +522,35 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   --execution-alignment-objective robust_composite `
   --train-eval-window-days 252 `
   --experiment-tag deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4
+```
+- 当前带 realistic 成本的 execution-objective alignment 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+  --data-source tq `
+  --liquidity-pool liquid500 `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --train-end-date 20250317 `
+  --valid-start-date 20250318 `
+  --valid-days 252 `
+  --encoder-family patch_transformer `
+  --score-head-method manual `
+  --holding-count 5 `
+  --max-weight 0.25 `
+  --rebalance-freq 1d `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 8 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.15 `
+  --dynamic-graph-style-boost 0.05 `
+  --no-safe-runtime-profile `
+  --execution-alignment-mode train_eval_auto `
+  --execution-alignment-objective robust_composite `
+  --train-eval-window-days 252 `
+  --execution-alignment-transaction-cost-bps 3 `
+  --execution-alignment-slippage-bps 7 `
+  --execution-alignment-sell-tax-bps 10 `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_costaware_20260401_realistic_r1
 ```
 - 当前固定 `regoff_k2` 对照入口：
 ```powershell
@@ -614,5 +708,5 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 
 ## 7. 执行安全边界
 - 日常不启用实时训练
-- 默认启用模型新鲜度保护
-- 研究侧局部高收益候选不得静默替换 live 默认值
+- 默认启用信号 / 模型新鲜度保护
+- 任何新候选不得静默替换当前默认 `regoff_k2_10d_ensemble_native_anchor`

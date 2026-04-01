@@ -144,6 +144,9 @@ def _build_exec_cfg(
     min_adv20: float,
     min_price: float,
     max_price: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+    sell_tax_bps: float,
     profile: ExecutionAlignmentProfile,
 ) -> ResearchConfig:
     return ResearchConfig(
@@ -158,6 +161,9 @@ def _build_exec_cfg(
         min_adv20=min_adv20,
         min_price=min_price,
         max_price=max_price,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        sell_tax_bps=sell_tax_bps,
         enable_market_regime_filter=bool(profile.use_market_regime_filter),
         regime_ma_window=EXECUTION_ALIGNMENT_REGIME_MA_WINDOW,
         regime_vol_window=EXECUTION_ALIGNMENT_REGIME_VOL_WINDOW,
@@ -274,6 +280,9 @@ def evaluate_profile(
     min_adv20: float,
     min_price: float,
     max_price: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+    sell_tax_bps: float,
     profile: ExecutionAlignmentProfile,
 ) -> tuple[dict[str, float], pd.DataFrame, pd.DataFrame, dict[str, object]]:
     aligned_target_weights, bridge_meta = build_target_weight_bridge(
@@ -303,6 +312,9 @@ def evaluate_profile(
         min_adv20=min_adv20,
         min_price=min_price,
         max_price=max_price,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        sell_tax_bps=sell_tax_bps,
         profile=profile,
     )
     regime_state = compute_market_regime_state(benchmark_close, exec_cfg)
@@ -336,6 +348,9 @@ def evaluate_profile(
         "target_weight_power": float(bridge_meta.get("target_weight_power", profile.target_weight_power)),
         "target_weight_full_invest": bool(bridge_meta.get("target_weight_full_invest", profile.target_weight_full_invest)),
         "market_regime_filter": bool(profile.use_market_regime_filter),
+        "transaction_cost_bps": float(transaction_cost_bps),
+        "slippage_bps": float(slippage_bps),
+        "sell_tax_bps": float(sell_tax_bps),
         "rebalance_offsets": bridge_meta.get("rebalance_offsets", [0]),
         "rebalance_sleeve_count": int(bridge_meta.get("rebalance_sleeve_count", 1)),
         "score_rebalance_offset_mode": str(score_schedule_meta.get("rebalance_offset_mode", profile.rebalance_offset_mode)),
@@ -365,6 +380,9 @@ def fit_execution_alignment(
     min_adv20: float,
     min_price: float,
     max_price: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+    sell_tax_bps: float,
 ) -> ExecutionAlignmentArtifact:
     names = [resolve_profile_name(name) for name in candidate_profiles]
     if not names:
@@ -389,6 +407,9 @@ def fit_execution_alignment(
             min_adv20=min_adv20,
             min_price=min_price,
             max_price=max_price,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+            sell_tax_bps=sell_tax_bps,
             profile=profile,
         )
         row = dict(train_meta)
@@ -431,6 +452,9 @@ def fit_execution_alignment(
         min_adv20=min_adv20,
         min_price=min_price,
         max_price=max_price,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        sell_tax_bps=sell_tax_bps,
         profile=selected_profile,
     )
     valid_index = valid_raw_target_weights.index
@@ -445,6 +469,9 @@ def fit_execution_alignment(
         min_adv20=min_adv20,
         min_price=min_price,
         max_price=max_price,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        sell_tax_bps=sell_tax_bps,
         profile=selected_profile,
     )
     valid_regime_state = compute_market_regime_state(benchmark_close, valid_cfg)

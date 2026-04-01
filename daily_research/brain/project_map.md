@@ -22,11 +22,16 @@
   - 时间顺序实验记录、证据与结论
 
 ## 2. 一句话概括项目
-项目已经解决了“如何持续运行一条可信、可执行、可回滚的日线研究与执行链路”，但还没有解决“如何稳定地产生一个跨窗口、跨状态、跨市场环境都优于当前执行主线的新 alpha”。
+项目已经解决了“如何持续运行一条可信、可执行、可回滚的日线研究与执行链路”，并已把当前最强 execution bridge 升格成单一日常默认策略；但还没有解决“如何稳定地产生一个跨窗口、跨状态、跨市场环境都优于当前默认执行主线的新 alpha”。
 
-当前执行默认主线仍是：
+当前执行默认主线已切到：
+
+- `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+
+旧机器学习主线保留为：
 
 - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- 仅作为 explicit legacy fallback
 
 ## 3. 立项以来的主线演化
 ### 阶段 A：从简单规则与打分体系起步
@@ -86,6 +91,8 @@
 
 ### 4.2 执行主线已经稳定存在
 - 当前默认执行主线不是概念性的“AI 选股”，而是非常具体的：
+  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+- 当前 explicit legacy 回退也不是抽象概念，而是：
   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 - 这意味着项目已经有一条可维护、可运行、可解释的生产主线。
 
@@ -153,8 +160,11 @@
 
 ## 6. 当前正在推进的工作
 ### 6.1 正式 live 主线保持稳定，升级候选已经切换
-- 当前正式 live 默认值不变：
+- 当前正式日常默认值已切到：
+  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+- 旧机器学习链路当前保留为：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+  - 仅通过 `execution/run_trade_plan_legacy_ml.py` 显式回退
 - 但“执行端下一步研究”已经不再是旧的 `v250 / v255 / 动态控制器` 参数空间。
 - mainboard-only revalidation 与 exact same-window replay 已经把边界压实：
   - `advanced_ml_live_anchor_samewindow_20260401_formal_r1` 的 `bridge_full (2025-03-18 -> 2026-03-31)` 只有 `24.34%` 年化、`10.75%` 超额年化、`0.580` 超额 Sharpe
@@ -178,6 +188,11 @@
   - `regoff_k2 vs regon_k1` 的 multi-window H2H 已确认两者分工稳定：`regoff_k2` 拿 `4/5` 个窗口的 excess Sharpe，`regon_k1` 拿 `4/5` 个窗口的 excess annual return
   - `robust_composite + train_eval_window_days=252` 的 execution-alignment formal 又选出了新的 high-upside winner：`execalign_auto_r4_topk2_1d_regoff = 108.05% / 85.32% / 3.317 / -11.01%`
   - 这条新候选已产品化为 `robust_auto` alias，但因为换手和回撤压力更大，当前仍不静默替换默认生产候选
+- 但同日晚间的成本现实性 formal 又把这条 no-cost 结论压实成了更真实的版本，汇总在 `execution_candidate_cost_realism_review_20260401_r1`：
+  - realistic `3 / 7 / 10 bps` 下：`regoff_k2 = 44.12% / 25.75% / 1.722 / -8.55%`，`robust_auto = 21.18% / 7.94% / 0.309 / -19.88%`
+  - stress `5 / 10 / 10 bps` 下：`regoff_k2 = 41.54% / 23.50% / 1.572 / -9.18%`，`robust_auto = 1.16% / -9.89% / -0.384 / -23.45%`
+  - realistic 与 stress 两档 multi-window H2H 都是 `regoff_k2` 对 `robust_auto` 的 `5/5` 全胜
+  - 因此 `robust_auto` 当前只保留为高换手 no-cost 对照，不再保留为默认 upgrade shortlist
 - 这里真正重要的新工程边界是：
   - all-offset ensemble 必须固定 `rebalance_anchor_date`
   - 单个 lucky offset 不得直接按生产候选解释
@@ -203,11 +218,10 @@
 - `2026-04-01` 晚间，这条后续研究也已经产品化到 `run_dynamic_graph_ablation.py`，后续可直接按内置 profile 跑 `plain baseline / winner / top-k / no-prior` 几组关键消融，而不再手抄长命令。
 
 ## 7. 接下来最值得投入的研究方向
-### 7.1 第一优先级：把 anchored execution candidate 做成正式候选
-- 当前最值得投入的，不是回去细磨 `v250 / v255 / controller`，而是把已经正式领先的 execution candidate 收成稳定候选。
+### 7.1 第一优先级：围绕 anchored execution default 做升级门槛
+- 当前最值得投入的，不是回去细磨 `v250 / v255 / controller`，而是围绕已经升格的默认执行主线继续做 cost-aware upgrade gate。
 - 默认推进顺序应固定为：
-  - `regoff_k2_10d_ensemble_native_anchor` 作为默认生产候选
-  - `execalign_auto_r4_topk2_1d_regoff` 作为当前最强 formal upgrade shortlist
+  - `regoff_k2_10d_ensemble_native_anchor` 作为默认生产策略
   - `regon_k1_10d_ensemble_native_anchor` 作为更激进收益对照
   - exact same-window formal comparator 作为升格门槛
 - 这条线的研究重点不是“再找一个 lucky offset”，而是：
@@ -245,10 +259,11 @@
   - 第一轮 `dynamic_graph_execution_objective_alignment_20260401_r1` 按 `excess_annual_return` 的 auto selector 没有在 aligned export replay 上打赢 `regoff_k2`
   - 第二轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4` 在 `robust_composite + train_eval_window_days=252` 下选出 `topk2_1d_regoff`
   - `execution_candidate_multiwindow_h2h_regoff_k2_vs_execalign_auto_r4_20260401_r1` 显示：它在 `5/5` 个窗口赢 excess annual return，在 `4/5` 个窗口赢 excess Sharpe
-  - 后续若继续做这条线，必须以 aligned export replay 和 multi-window H2H 为主判据
+  - 第三轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_costaware_20260401_realistic_r1` 把 explicit-cost 假设带进了 auto alignment：它不再选 `robust_auto`，而是回退到 `regon_k1`，但 realistic-cost external replay 仍输给 `regoff_k2`
+  - 后续若继续做这条线，必须以 explicit-cost aligned export replay 和 multi-window H2H 为主判据
 - 所以下一步不应回到旧的 `plain/ranked/controller` 或原始 `mamba` 小修小补，而应继续做：
-  - 只在 aligned export replay + multi-window H2H 口径下继续做 `dynamic_graph_v1` 的 execution objective 对齐
-  - 优先复核 `execalign_auto_r4_topk2_1d_regoff` 的高换手现实性，而不是回头调旧翻译器
+  - 只在 explicit-cost aligned export replay + multi-window H2H 口径下继续做 `dynamic_graph_v1` 的 execution objective 对齐
+  - 优先做“低换手也能守住 alpha”的 cost-aware alignment，而不是回头调旧翻译器
   - 若需要对照，只保留 `dynamic_graph_no_priors / dynamic_graph_topk4` 两条 reference branch
 - 若这条线最终不能稳定守住前沿，再切到 `state-conditioned MoE`；RL 仍只保留在执行层独立分脑。
 

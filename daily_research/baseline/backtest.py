@@ -26,6 +26,19 @@ def _annualized_vol(returns: pd.Series) -> float:
     return float(returns.std() * np.sqrt(252)) if len(returns) > 1 else 0.0
 
 
+def _trading_cost_return(
+    *,
+    turnover: float,
+    buy_turnover: float,
+    sell_turnover: float,
+    config: ResearchConfig,
+) -> float:
+    transaction_cost = max(float(config.transaction_cost_bps), 0.0) / 10000.0
+    slippage_cost = max(float(config.slippage_bps), 0.0) / 10000.0
+    sell_tax = max(float(config.sell_tax_bps), 0.0) / 10000.0
+    return float(turnover * (transaction_cost + slippage_cost) + sell_turnover * sell_tax)
+
+
 def _runtime_override_row(
     daily_position_overrides: pd.DataFrame | None,
     dt: pd.Timestamp,
@@ -78,6 +91,7 @@ def backtest(
     weights = pd.Series(0.0, index=close.columns)
 
     portfolio_equity = 1.0
+    gross_portfolio_equity = 1.0
     benchmark_equity = 1.0
     equity_curve: List[Dict] = []
     action_logs: List[Dict] = []
@@ -93,13 +107,18 @@ def backtest(
                 "signal_date": pd.NaT,
                 "execution_date": initial_dt,
                 "portfolio_equity": portfolio_equity,
+                "gross_portfolio_equity": gross_portfolio_equity,
                 "benchmark_equity": benchmark_equity,
                 "excess_equity": portfolio_equity / benchmark_equity if benchmark_equity > 0 else np.nan,
                 "portfolio_return": 0.0,
+                "gross_portfolio_return": 0.0,
                 "benchmark_return": 0.0,
                 "excess_return": 0.0,
                 "holding_count": 0,
                 "turnover": 0.0,
+                "buy_turnover": 0.0,
+                "sell_turnover": 0.0,
+                "trading_cost_return": 0.0,
                 "regime_on": bool(regime_on.loc[initial_dt]) if regime_on is not None else True,
             }
         )
@@ -122,9 +141,17 @@ def backtest(
             action_logs.extend(actions)
 
             ret_vec = open_df.loc[next_dt] / open_df.loc[execution_dt] - 1.0
-            portfolio_return = float((weights.reindex(ret_vec.index).fillna(0.0) * ret_vec).sum())
+            gross_portfolio_return = float((weights.reindex(ret_vec.index).fillna(0.0) * ret_vec).sum())
+            trading_cost_return = _trading_cost_return(
+                turnover=float(diagnostics.get("turnover", 0.0)),
+                buy_turnover=float(diagnostics.get("buy_turnover", 0.0)),
+                sell_turnover=float(diagnostics.get("sell_turnover", 0.0)),
+                config=config,
+            )
+            portfolio_return = float((1.0 - trading_cost_return) * (1.0 + gross_portfolio_return) - 1.0)
             benchmark_return = float(benchmark_open.loc[next_dt] / benchmark_open.loc[execution_dt] - 1.0)
             portfolio_equity *= 1.0 + portfolio_return
+            gross_portfolio_equity *= 1.0 + gross_portfolio_return
             benchmark_equity *= 1.0 + benchmark_return
 
             equity_curve.append(
@@ -133,13 +160,18 @@ def backtest(
                     "signal_date": signal_dt,
                     "execution_date": execution_dt,
                     "portfolio_equity": portfolio_equity,
+                    "gross_portfolio_equity": gross_portfolio_equity,
                     "benchmark_equity": benchmark_equity,
                     "excess_equity": portfolio_equity / benchmark_equity if benchmark_equity > 0 else np.nan,
                     "portfolio_return": portfolio_return,
+                    "gross_portfolio_return": gross_portfolio_return,
                     "benchmark_return": benchmark_return,
                     "excess_return": portfolio_return - benchmark_return,
                     "holding_count": diagnostics["holding_count"],
                     "turnover": diagnostics["turnover"],
+                    "buy_turnover": diagnostics.get("buy_turnover", 0.0),
+                    "sell_turnover": diagnostics.get("sell_turnover", 0.0),
+                    "trading_cost_return": trading_cost_return,
                     "regime_on": bool(regime_on.loc[signal_dt]) if regime_on is not None else True,
                     "soft_override_active": diagnostics.get("runtime_override_active", False),
                 }
@@ -147,13 +179,23 @@ def backtest(
     else:
         for i, dt in enumerate(dates):
             portfolio_return = 0.0
+            gross_portfolio_return = 0.0
             benchmark_return = 0.0
+            trading_cost_return = 0.0
             if i > 0:
                 prev_dt = dates[i - 1]
                 ret_vec = close.loc[dt] / close.loc[prev_dt] - 1.0
-                portfolio_return = float((weights.reindex(ret_vec.index).fillna(0.0) * ret_vec).sum())
+                gross_portfolio_return = float((weights.reindex(ret_vec.index).fillna(0.0) * ret_vec).sum())
                 benchmark_return = float(benchmark_close.loc[dt] / benchmark_close.loc[prev_dt] - 1.0)
+                trading_cost_return = _trading_cost_return(
+                    turnover=float(diagnostics.get("turnover", 0.0)) if i > 0 else 0.0,
+                    buy_turnover=float(diagnostics.get("buy_turnover", 0.0)) if i > 0 else 0.0,
+                    sell_turnover=float(diagnostics.get("sell_turnover", 0.0)) if i > 0 else 0.0,
+                    config=config,
+                )
+                portfolio_return = float((1.0 - trading_cost_return) * (1.0 + gross_portfolio_return) - 1.0)
                 portfolio_equity *= 1.0 + portfolio_return
+                gross_portfolio_equity *= 1.0 + gross_portfolio_return
                 benchmark_equity *= 1.0 + benchmark_return
 
             runtime_overrides = _runtime_override_row(daily_position_overrides, dt)
@@ -172,13 +214,18 @@ def backtest(
                     "signal_date": dt,
                     "execution_date": dt,
                     "portfolio_equity": portfolio_equity,
+                    "gross_portfolio_equity": gross_portfolio_equity,
                     "benchmark_equity": benchmark_equity,
                     "excess_equity": portfolio_equity / benchmark_equity if benchmark_equity > 0 else np.nan,
                     "portfolio_return": portfolio_return,
+                    "gross_portfolio_return": gross_portfolio_return,
                     "benchmark_return": benchmark_return,
                     "excess_return": portfolio_return - benchmark_return,
                     "holding_count": diagnostics["holding_count"],
                     "turnover": diagnostics["turnover"],
+                    "buy_turnover": diagnostics.get("buy_turnover", 0.0),
+                    "sell_turnover": diagnostics.get("sell_turnover", 0.0),
+                    "trading_cost_return": trading_cost_return,
                     "regime_on": bool(regime_on.loc[dt]) if regime_on is not None else True,
                     "soft_override_active": diagnostics.get("runtime_override_active", False),
                 }
@@ -188,15 +235,20 @@ def backtest(
     action_df = pd.DataFrame(action_logs)
 
     portfolio_returns = equity_df["portfolio_return"].dropna()
+    gross_portfolio_returns = equity_df["gross_portfolio_return"].dropna()
     benchmark_returns = equity_df["benchmark_return"].dropna()
     excess_returns = equity_df["excess_return"].dropna()
 
     portfolio_ann_ret = _annualized_return(equity_df["portfolio_equity"])
+    gross_portfolio_ann_ret = _annualized_return(equity_df["gross_portfolio_equity"])
     benchmark_ann_ret = _annualized_return(equity_df["benchmark_equity"])
     excess_equity = equity_df["excess_equity"].replace([np.inf, -np.inf], np.nan).ffill().dropna()
     excess_ann_ret = _annualized_return(excess_equity) if not excess_equity.empty else 0.0
+    gross_excess_equity = (equity_df["gross_portfolio_equity"] / equity_df["benchmark_equity"]).replace([np.inf, -np.inf], np.nan).ffill().dropna()
+    gross_excess_ann_ret = _annualized_return(gross_excess_equity) if not gross_excess_equity.empty else 0.0
 
     portfolio_ann_vol = _annualized_vol(portfolio_returns)
+    gross_portfolio_ann_vol = _annualized_vol(gross_portfolio_returns)
     excess_ann_vol = _annualized_vol(excess_returns)
 
     metrics = {
@@ -205,14 +257,30 @@ def backtest(
         "annual_vol": float(portfolio_ann_vol),
         "sharpe": float(portfolio_ann_ret / portfolio_ann_vol) if portfolio_ann_vol > 0 else 0.0,
         "max_drawdown": float(_max_drawdown(equity_df["portfolio_equity"])),
+        "gross_total_return": float(equity_df["gross_portfolio_equity"].iloc[-1] - 1.0),
+        "gross_annual_return": float(gross_portfolio_ann_ret),
+        "gross_annual_vol": float(gross_portfolio_ann_vol),
+        "gross_sharpe": float(gross_portfolio_ann_ret / gross_portfolio_ann_vol) if gross_portfolio_ann_vol > 0 else 0.0,
+        "gross_max_drawdown": float(_max_drawdown(equity_df["gross_portfolio_equity"])),
         "benchmark_total_return": float(equity_df["benchmark_equity"].iloc[-1] - 1.0),
         "benchmark_annual_return": float(benchmark_ann_ret),
         "excess_total_return": float(excess_equity.iloc[-1] - 1.0) if not excess_equity.empty else 0.0,
         "excess_annual_return": float(excess_ann_ret),
         "excess_sharpe": float(excess_ann_ret / excess_ann_vol) if excess_ann_vol > 0 else 0.0,
         "excess_max_drawdown": float(_max_drawdown(excess_equity)) if not excess_equity.empty else 0.0,
+        "gross_excess_total_return": float(gross_excess_equity.iloc[-1] - 1.0) if not gross_excess_equity.empty else 0.0,
+        "gross_excess_annual_return": float(gross_excess_ann_ret),
         "avg_holding_count": float(equity_df["holding_count"].mean()),
         "avg_turnover": float(equity_df["turnover"].mean()),
+        "avg_buy_turnover": float(equity_df["buy_turnover"].mean()),
+        "avg_sell_turnover": float(equity_df["sell_turnover"].mean()),
+        "avg_trading_cost_return": float(equity_df["trading_cost_return"].mean()),
+        "total_trading_cost_return": float(equity_df["trading_cost_return"].sum()),
+        "annual_return_cost_drag": float(gross_portfolio_ann_ret - portfolio_ann_ret),
+        "excess_annual_return_cost_drag": float(gross_excess_ann_ret - excess_ann_ret),
+        "transaction_cost_bps": float(config.transaction_cost_bps),
+        "slippage_bps": float(config.slippage_bps),
+        "sell_tax_bps": float(config.sell_tax_bps),
         "hit_rate": float((portfolio_returns > 0).mean()) if not portfolio_returns.empty else 0.0,
     }
     if regime_on is not None and len(regime_on) > 0:

@@ -40,7 +40,7 @@ def _source(name: str) -> str:
 PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     "regoff_k2_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
-        description="Current default execution candidate: 10d anchored all-offset ensemble, top-k 2, regime filter off.",
+        description="Current daily default execution strategy: 10d anchored all-offset ensemble, top-k 2, regime filter off.",
         target_weight_panel_csv=_source("daily_target_weight_panel.csv"),
         score_panel_csv=_source("daily_score_panel.csv"),
         candidate_label="dynamic_graph_regoff_k2_10d_ensemble_native_anchor",
@@ -80,7 +80,7 @@ PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     ),
     "execalign_auto_r4_topk2_1d_regoff": ResearchCandidateProfile(
         name="execalign_auto_r4_topk2_1d_regoff",
-        description="Execution-objective auto-aligned candidate from the 2026-04-01 robust-composite + 252d train_eval formal run.",
+        description="High-turnover no-cost comparator from the 2026-04-01 robust-composite + 252d train_eval formal run; failed realistic-cost review on 2026-04-01.",
         target_weight_panel_csv=str((_EXECALIGN_AUTO_R4_ROOT / "execution_aligned_daily_target_weight_panel.csv").resolve()),
         score_panel_csv=str((_EXECALIGN_AUTO_R4_ROOT / "execution_aligned_daily_score_panel.csv").resolve()),
         candidate_label="dynamic_graph_execalign_auto_r4_topk2_1d_regoff",

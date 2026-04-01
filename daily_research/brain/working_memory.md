@@ -1,8 +1,15 @@
 # Daily Research 研究总纲
 
 ## 1. 当前默认决策
-当前默认执行主线继续保持为：
-- `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+当前默认执行主线已切换为：
+- `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+- 日常默认入口：
+  - `daily_research/execution/run_trade_plan.py`
+- legacy 回退入口：
+  - `daily_research/execution/run_trade_plan_legacy_ml.py`
+- legacy ML 维护入口：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/update_model_legacy_ml.py`
 - `2026-03-31` 已补完 mainboard-only execution formal revalidation：
   - live-anchor bridge `v250 @ 504 / 21 / 520` on `20210101 -> 20260327`：`full_annual_return = 18.09%`，`full_excess_annual_return = 20.83%`，`full_excess_sharpe = 1.034`，但 `weak_window_20250905_20260319_excess_sharpe = -0.116`
   - same-protocol shortlist on `20190101 -> 20260327`：static defense `expanded_v24 + v250 = 3.44% / 5.84% / 0.279`，static offense `legacy_v7 + v255 = -0.34% / 1.97% / 0.096`，best same-profile dynamic `= 3.59% / 5.99% / 0.286`，best cross-profile dynamic `= 2.23% / 4.61% / 0.222`
@@ -37,7 +44,12 @@
   - internal aligned holdout：`118.89% / 94.97% / 3.580 / -11.01%`
   - external export replay：`108.05% / 85.32% / 3.317 / -11.01%`
   - same-window vs 当前默认 `regoff_k2`：赢 `5/5` 个窗口的 excess annual return，赢 `4/5` 个窗口的 excess Sharpe
-- 当前默认决策因此更新为：`regoff_k2_10d_ensemble_native_anchor` 继续保留为低换手、低回撤的默认生产候选；`execalign_auto_r4_topk2_1d_regoff` 升格为当前最强的高收益 formal upgrade shortlist，并已产品化成 `robust_auto` candidate-profile alias。
+- 但 `2026-04-01` 深夜的换手 / 滑点现实性 formal 审判已经把这条 no-cost verdict 改写了，汇总在 `daily_research/output/execution_candidate_cost_realism_review_20260401_r1`：
+  - realistic 成本假设 `3 / 7 / 10 bps` 下：`regoff_k2 = 44.12% / 25.75% / 1.722 / -8.55%`，`robust_auto = 21.18% / 7.94% / 0.309 / -19.88%`
+  - stress 成本假设 `5 / 10 / 10 bps` 下：`regoff_k2 = 41.54% / 23.50% / 1.572 / -9.18%`，`robust_auto = 1.16% / -9.89% / -0.384 / -23.45%`
+  - realistic 与 stress 两档 multi-window H2H 都是 `regoff_k2` 对 `robust_auto` 的 `5/5` 全胜
+  - 同时，cost-aware auto alignment 在 realistic 成本下已不再选 `robust_auto`，而是选 `regon_k1`；它的 external replay 为 `31.86% / 17.45% / 0.992 / -10.14%`，仍被 `regoff_k2_realistic` 以 `4/5` 窗口击败
+- 当前默认决策因此再次更新为：`regoff_k2_10d_ensemble_native_anchor` 继续保留为默认生产候选，也是当前 realistic-cost winner；`execalign_auto_r4_topk2_1d_regoff` 降级为高换手、无成本条件下的研究对照，不再保留为默认 upgrade shortlist。
 - `2026-04-01` 深夜继续把“翻译损耗”方向一次性扫到底后，当前结论已经很明确：
   - 仅在 `1d` 直连权重桥里做 `power / min_weight / top_k=4/5 / full_invest` 这类小修小补，收益几乎不动；`15.41% / 0.70% / 0.031` 只会在小数点附近摆动。
   - 真正的大头来自“执行节奏 + 直连权重表达”：`top_k=2` 与 `top_k=1` 集中化在 `1d` 已能把桥接 formal 提到 `21.30% / 5.84% / 0.219` 或 `19.54% / 4.31% / 0.125`。
@@ -201,7 +213,8 @@
   - 第一轮 `dynamic_graph_execution_objective_alignment_20260401_r1`：按 `excess_annual_return` 选中了 `regon_k1_10d_ensemble_native_anchor`，但 aligned export replay 只有 `37.26% / 19.76% / 1.145 / -11.56%`，输给固定 `regoff_k2` 的 `50.89% / 31.66% / 2.160 / -8.59%`
   - 第二轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4`：按 `robust_composite + train_eval_window_days=252` 选中了 `topk2_1d_regoff`，external export replay 达到 `108.05% / 85.32% / 3.317 / -11.01%`
   - `execution_candidate_multiwindow_h2h_regoff_k2_vs_execalign_auto_r4_20260401_r1` 又补完了同窗 formal：`execalign_auto_r4` 在 `5/5` 个窗口里拿下 excess annual return，并在 `4/5` 个窗口里拿下 excess Sharpe
-  - 因此当前 verdict 更新为：execution-objective alignment 已经从“能力做成但未打赢默认候选”升级成“已产生新的 formal upgrade winner”，但由于换手和回撤压力更高，默认生产候选仍暂留在 `regoff_k2`，而 `execalign_auto_r4_topk2_1d_regoff` 升格到 upgrade shortlist 顶部。
+  - 第三轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_costaware_20260401_realistic_r1` 把 realistic 成本假设正式接进了 execution-alignment：auto selector 不再选 `robust_auto`，而是回退到 `regon_k1_10d_ensemble_native_anchor`；其 external replay 为 `31.86% / 17.45% / 0.992 / -10.14%`，仍输给 `regoff_k2_realistic`
+  - 因此当前 verdict 更新为：execution-objective alignment 已具备显式成本假设能力，但 realistic-cost 下还没有产生能打赢 `regoff_k2` 的新候选；未来这条线若继续做，必须同时通过 explicit-cost external replay 与 multi-window H2H。
 - `plain` 与 `ranked` 的近似 stitched-return controller 也已补完：walk-forward state/window controller 没有跑赢 `plain`；只有 oracle / window-oracle 略高于 `plain`，因此这条控制线目前不再是第一优先级。
 - 底层市场状态层已经完成架构升级：`quadrant` 继续保留为兼容标签；新默认研究输入已同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`；后续策略默认优先接 `regime_state_selector`，而当前 `state_alpha_profile` 若切到更细 selector 会显式报错而不是静默退化。
 - `base_global` 即使经过参数优化，也没有通过当前弱窗口修复门槛，不再作为执行升级主候选。
@@ -213,8 +226,8 @@
 ## 4. 当前优先级
 ### 优先级 A：把 anchored `target_weight` bridge 收成正式执行候选
 目标：
-- 在不动当前 live 默认值的前提下，把已经证明有效的 execution candidate 收成“可复核、可比较、可落地”的正式候选；
-- 默认候选固定为 `regoff_k2_10d_ensemble_native_anchor`，`execalign_auto_r4_topk2_1d_regoff` 作为当前最强 upgrade shortlist，`regon_k1_10d_ensemble_native_anchor` 保留为更激进的收益对照。
+- 把已经证明有效的 execution candidate 固定为单一日常默认执行主线，并维持可复核、可比较、可落地；
+- 默认候选固定为 `regoff_k2_10d_ensemble_native_anchor`，`regon_k1_10d_ensemble_native_anchor` 保留为更激进的收益对照；在新的 realistic-cost formal winner 出现之前，不再给 `robust_auto` 任何默认升级优先级。
 具体动作：
 1. 记住当前同窗正式比较边界：
    - `advanced_ml_live_anchor_samewindow_20260401_formal_r1` 的 `bridge_full (2025-03-18 -> 2026-03-31)` 只有 `24.34% / 10.75% / 0.580 / -14.42%`
@@ -225,9 +238,9 @@
    - exact same-window formal comparator
    - candidate / paper 计划链路核对
    - phase-robust bridge 复核
-   - `execalign_auto_r4` 的换手 / 滑点现实性复核
-4. 不再把旧的 `v250 / v255 / controller` 参数空间当成默认研发前线；它们只保留为 live anchor 与历史 comparator。
-5. 当前这条候选桥已经产品化到 profile 入口：`run_research_candidate_backtest.py` / `run_research_candidate_trade_plan.py` 现在默认直达 `regoff_k2_10d_ensemble_native_anchor`，`aggressive` alias 直达 `regon_k1_10d_ensemble_native_anchor`，`robust_auto` alias 直达 `execalign_auto_r4_topk2_1d_regoff`。
+   - 新候选的 explicit-cost external replay 与 multi-window H2H
+4. 不再把旧的 `v250 / v255 / controller` 参数空间当成默认研发前线；它们只保留为 legacy anchor 与历史 comparator。
+5. 当前这条候选桥已经产品化到 profile 入口：`run_research_candidate_backtest.py` / `run_research_candidate_trade_plan.py` 现在默认直达 `regoff_k2_10d_ensemble_native_anchor`，`aggressive` alias 直达 `regon_k1_10d_ensemble_native_anchor`，`robust_auto` alias 仅保留为高换手 no-cost 对照。
 
 ### 优先级 B：继续攻“研究 -> 执行”的桥接损耗，但只沿正确表达推进
 目标：
@@ -242,8 +255,8 @@
 2. 不再继续把 `holding_count / max_weight / regime_filter` 这类旧翻译参数扫描当成主增益方向。
 3. soft state-conditioned sizing 保留为 formal comparator 与风险塑形工具；在它没有同时抬高前沿之前，不升级成默认执行引擎。
 4. 若继续投入桥接层，优先级应是：
-   - `robust_composite + train_eval_window_days=252` 的 execution-objective 对齐
-   - `execalign_auto_r4_topk2_1d_regoff` 的换手 / 滑点现实性复核
+   - 带 explicit-cost 假设的 execution-objective 对齐
+   - 同一成本假设下的 external replay + multi-window H2H
    - anchored cadence / offset ensemble 的稳定化
    - candidate plan 与回测口径的一致性
 
@@ -259,7 +272,7 @@
 2. 当前研究侧 leading branch 已改成 `dynamic_graph_v1`；它已经正式跑赢旧 `relation baseline` 和当前 `plain`。
 3. 后续默认顺序收口为：
    - `dynamic_graph_v1 / dynamic_graph_no_priors / dynamic_graph_topk4` 的 execution bridge head-to-head 已完成，当前默认 execution winner 仍是 `dynamic_graph_v1`
-   - `dynamic_graph_v1` 的 execution objective auto-alignment 已完成两轮 formal：第一轮失败，第二轮在 `robust_composite + 252d` 下选出 `execalign_auto_r4_topk2_1d_regoff` 并正式打赢 `regoff_k2`
+   - `dynamic_graph_v1` 的 execution objective auto-alignment 已完成三轮 formal：第一轮失败，第二轮在 no-cost `robust_composite + 252d` 下选出 `execalign_auto_r4_topk2_1d_regoff`，第三轮把 realistic 成本接进去后又回退到 `regon_k1`，但仍未打赢 `regoff_k2`
    - 若继续做这条线，必须以 `execution_aligned export replay` 为主判据，不再拿 raw research holdout 或 valid-only raw bridge 代替
    - 若动态图最终不能稳定守住前沿，再切到 `state-conditioned MoE`
 4. 原始 `mamba`、旧 `relation_layer`、`plain/ranked/controller` 的小修小补不再是默认主线。
@@ -269,12 +282,11 @@
 ### 优先级 D：维持当前 live 主线稳态
 目标：
 - 保持当前默认执行链路可用、可回滚、可解释；
-- 避免研究候选静默替换 live 默认值。
+- 保持 `regoff_k2` 为唯一日常默认，同时保留显式 legacy 回退。
 具体动作：
-1. 继续依赖 `latest_ml_model.json` 的验证摘要与模型新鲜度保护。
-2. 继续把正式 live 默认值明确解释为：
-   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
-3. 任何研究候选若未完成同窗 formal 比较，不得口头升格为 live 默认值。
+1. `run_trade_plan.py` 默认走 `regoff_k2_10d_ensemble_native_anchor`，并对外部候选面板启用信号新鲜度保护。
+2. `run_trade_plan_legacy_ml.py` 与 `update_model.py` 只保留为显式 legacy 回退，不再作为日常默认流程。
+3. 任何新的 execution upgrade 候选，仍必须先完成同窗 formal 比较、explicit-cost external replay 与 multi-window H2H，才有资格替换当前默认。
 4. 坏市场专项若重启，仍必须按“坏市场绝对收益”单独立题。
 
 ### 优先级 E：把治理规则变成日常流程
@@ -307,9 +319,10 @@
 
 ## 6. 已明确的边界
 - 当前默认执行主线不是笼统的：
-  - `advanced_ml + liquid500 + next_open`
+  - `deep_alpha dynamic_graph_v1 + target_weight 直连桥 + regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
 - 而是更精确的：
-  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+  - 默认日常入口是 `execution/run_trade_plan.py`
+  - explicit legacy 回退是 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
 - 任何准备接近执行端的新方案，都必须先过：
   - 历史滚动股票池
   - `next_open`

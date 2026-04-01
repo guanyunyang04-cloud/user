@@ -118,8 +118,13 @@ class PositionManager:
                 )
 
         self.weights = new_weights
+        weight_delta = new_weights - current
+        buy_turnover = float(weight_delta.clip(lower=0.0).sum())
+        sell_turnover = float((-weight_delta.clip(upper=0.0)).sum())
         diagnostics = {
-            "turnover": float((new_weights - current).abs().sum()),
+            "turnover": float(weight_delta.abs().sum()),
+            "buy_turnover": buy_turnover,
+            "sell_turnover": sell_turnover,
             "raw_turnover": raw_turnover,
             "turnover_scale": turnover_scale,
             "holding_count": int((new_weights > 0).sum()),

@@ -33,6 +33,7 @@ from daily_research.baseline.cli_utils import (
 )
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
+    get_latest_completed_trading_date,
     get_next_trading_date,
     load_industry_map_from_tq,
     load_style_map_from_tq,
@@ -265,6 +266,25 @@ def _assess_model_freshness(
 
     result["status"] = "fresh"
     result["status_text"] = "最新"
+    return result
+
+
+def _assess_external_signal_freshness(
+    *,
+    source_signal_date: pd.Timestamp,
+    trading_dates: pd.Index,
+    warn_trading_days: int,
+    max_trading_days: int,
+) -> dict[str, Any]:
+    latest_completed = pd.Timestamp(get_latest_completed_trading_date())
+    result = _assess_model_freshness(
+        artifact_meta={"latest_data_date": str(pd.Timestamp(source_signal_date).date())},
+        latest_signal_date=latest_completed,
+        trading_dates=trading_dates,
+        warn_trading_days=warn_trading_days,
+        max_trading_days=max_trading_days,
+    )
+    result["latest_completed_trading_date"] = str(latest_completed.date())
     return result
 
 
@@ -1004,6 +1024,8 @@ def _write_trade_plan_txt(
         lines.append(f"候选标签: {model_info['candidate_label']}")
     if model_info.get("candidate_score_csv"):
         lines.append(f"候选分数文件: {model_info['candidate_score_csv']}")
+    if model_info.get("candidate_target_weight_csv"):
+        lines.append(f"候选权重文件: {model_info['candidate_target_weight_csv']}")
     if model_info.get("candidate_usable_rows") is not None and model_info.get("candidate_total_rows") is not None:
         lines.append(
             "候选分数覆盖: "
@@ -1015,11 +1037,13 @@ def _write_trade_plan_txt(
     if model_info.get("train_end"):
         lines.append(f"模型训练样本截止: {model_info['train_end']}")
     if model_info.get("latest_data_date"):
-        lines.append(f"模型最新数据日: {model_info['latest_data_date']}")
+        lines.append(f"{model_info.get('latest_data_label', '模型最新数据日')}: {model_info['latest_data_date']}")
     if model_info.get("freshness_status"):
-        freshness_line = f"模型新鲜度: {model_info['freshness_status']}"
+        freshness_line = f"{model_info.get('freshness_label', '模型新鲜度')}: {model_info['freshness_status']}"
         if model_info.get("trading_day_lag") is not None:
             freshness_line += f" | 交易日滞后 {model_info['trading_day_lag']}"
+        if model_info.get("latest_completed_trading_date"):
+            freshness_line += f" | 最新完成交易日 {model_info['latest_completed_trading_date']}"
         lines.append(freshness_line)
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):
@@ -1844,7 +1868,9 @@ def main_with_progress():
                 model_info.update(
                     {
                         "latest_data_date": str(artifact_meta.get("latest_data_date", "")),
+                        "latest_data_label": "模型最新数据日",
                         "freshness_status": str(freshness_info.get("status_text", "")),
+                        "freshness_label": "模型新鲜度",
                         "trading_day_lag": freshness_info.get("trading_day_lag"),
                         "warnings": list(freshness_info.get("warnings", [])),
                         "validation_summary": validation_summary,
@@ -1855,6 +1881,36 @@ def main_with_progress():
             signal_date = final_score_raw.dropna(how="all").index.max()
             if pd.isna(signal_date):
                 raise RuntimeError("No valid latest date found for trade plan generation.")
+            if external_score_path is not None or external_target_weight_path is not None:
+                freshness_info = _assess_external_signal_freshness(
+                    source_signal_date=pd.Timestamp(signal_date),
+                    trading_dates=factor_bundle["raw_inputs"]["Close"].index,
+                    warn_trading_days=args.stale_model_warn_trading_days,
+                    max_trading_days=args.stale_model_max_trading_days,
+                )
+                warnings = list(model_info.get("warnings", []))
+                warnings.extend(freshness_info.get("warnings", []))
+                if freshness_info.get("should_block") and args.allow_stale_model:
+                    warnings.append("stale external candidate allowed by --allow-stale-model")
+                for warning in freshness_info.get("warnings", []):
+                    progress.log(f"[warning] {warning}")
+                if freshness_info.get("should_block") and not args.allow_stale_model:
+                    raise RuntimeError(
+                        "External candidate panel reached stale blocking threshold. "
+                        "Refresh the default research candidate, use daily_research/execution/run_trade_plan_legacy_ml.py, "
+                        "or pass --allow-stale-model explicitly."
+                    )
+                model_info.update(
+                    {
+                        "latest_data_date": str(pd.Timestamp(signal_date).date()),
+                        "latest_data_label": "候选信号数据日",
+                        "freshness_status": str(freshness_info.get("status_text", "")),
+                        "freshness_label": "候选信号新鲜度",
+                        "latest_completed_trading_date": freshness_info.get("latest_completed_trading_date"),
+                        "trading_day_lag": freshness_info.get("trading_day_lag"),
+                        "warnings": warnings,
+                    }
+                )
             target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
                 args=args,
                 regime_state=regime_state,

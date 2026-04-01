@@ -70,6 +70,9 @@ def parse_args():
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
+    parser.add_argument("--transaction-cost-bps", type=float, default=0.0, help="Per-turnover transaction fee/commission drag in basis points.")
+    parser.add_argument("--slippage-bps", type=float, default=0.0, help="Per-turnover slippage drag in basis points.")
+    parser.add_argument("--sell-tax-bps", type=float, default=0.0, help="Sell-side tax drag in basis points, applied to sell turnover only.")
     parser.add_argument(
         "--soft-state-profile",
         choices=["off", "quadrant_guard_v1", "trend_guard_v1", "market_state_guard_v1"],
@@ -249,6 +252,9 @@ def main():
         min_adv20=args.min_adv20,
         min_price=args.min_price,
         max_price=args.max_price,
+        transaction_cost_bps=args.transaction_cost_bps,
+        slippage_bps=args.slippage_bps,
+        sell_tax_bps=args.sell_tax_bps,
         enable_market_regime_filter=not args.no_market_regime_filter,
         regime_ma_window=args.regime_ma_window,
         regime_vol_window=args.regime_vol_window,
@@ -444,11 +450,14 @@ def main():
             "rebalance_offsets": bridge_meta.get("rebalance_offsets", [int(args.rebalance_offset)]),
             "rebalance_sleeve_count": int(bridge_meta.get("rebalance_sleeve_count", 1)),
             "rebalance_anchor_date": str(bridge_meta.get("rebalance_anchor_date", args.rebalance_anchor_date or "")),
-            "holding_count_target": int(cfg.holding_count),
-            "market_regime_filter": bool(cfg.enable_market_regime_filter),
-            "raw_cache": raw_cache_meta,
-        }
-    )
+             "holding_count_target": int(cfg.holding_count),
+             "market_regime_filter": bool(cfg.enable_market_regime_filter),
+             "transaction_cost_bps": float(cfg.transaction_cost_bps),
+             "slippage_bps": float(cfg.slippage_bps),
+             "sell_tax_bps": float(cfg.sell_tax_bps),
+             "raw_cache": raw_cache_meta,
+         }
+     )
     metrics.update(soft_state_meta)
 
     output_root = Path(args.output_dir)

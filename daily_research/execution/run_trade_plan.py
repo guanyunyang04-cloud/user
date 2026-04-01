@@ -8,10 +8,19 @@ if __package__ in {None, ""}:
 
 from daily_research.execution.entrypoint_utils import (
     bootstrap_execution_paths,
+    consume_flag_arg,
+    consume_option_arg,
     ensure_default_pool_argument,
     ensure_execution_strategy_defaults,
     ensure_text_file_from_example,
+    has_arg,
     inject_default_arg,
+    is_help_request,
+)
+from daily_research.execution.research_candidate_profiles import (
+    DEFAULT_EXECUTION_CANDIDATE_PROFILE,
+    apply_profile_defaults,
+    list_profile_lines,
 )
 
 
@@ -25,6 +34,19 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(parents=True, exist_ok=True)
 
+    if consume_flag_arg("--list-candidate-profiles"):
+        print("\n".join(list_profile_lines()))
+        return
+    candidate_profile = consume_option_arg("--candidate-profile")
+    legacy_ml = consume_flag_arg("--legacy-ml")
+    explicit_model_artifact = has_arg("--model-artifact")
+    explicit_external_candidate = has_arg("--external-score-csv") or has_arg("--external-target-weight-csv")
+
+    if legacy_ml and candidate_profile:
+        raise ValueError("--legacy-ml cannot be combined with --candidate-profile.")
+    if legacy_ml and explicit_external_candidate:
+        raise ValueError("--legacy-ml cannot be combined with --external-score-csv or --external-target-weight-csv.")
+
     ensure_text_file_from_example(
         positions_file,
         example_file,
@@ -33,9 +55,32 @@ def main():
 
     inject_default_arg("--positions-file", str(positions_file))
     inject_default_arg("--output-dir", str(output_dir))
-    inject_default_arg("--model-artifact", str(model_artifact))
+    inject_default_arg("--external-score-column", "latest_score")
+    inject_default_arg("--external-target-weight-column", "target_weight")
     ensure_default_pool_argument()
     ensure_execution_strategy_defaults()
+
+    if (
+        not legacy_ml
+        and not explicit_model_artifact
+        and not explicit_external_candidate
+        and not candidate_profile
+        and not is_help_request()
+    ):
+        candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
+
+    if is_help_request():
+        print("wrapper_options: --candidate-profile <name> | --list-candidate-profiles | --legacy-ml")
+
+    if candidate_profile:
+        resolved = apply_profile_defaults(candidate_profile, mode="trade_plan")
+        if not is_help_request():
+            print("execution_mode=research_candidate_default")
+            print(f"candidate_profile={resolved.name}")
+    else:
+        inject_default_arg("--model-artifact", str(model_artifact))
+        if (legacy_ml or explicit_model_artifact) and not is_help_request():
+            print("execution_mode=legacy_ml")
 
     from daily_research.baseline.generate_daily_trade_plan import main as generate_daily_trade_plan_main
 

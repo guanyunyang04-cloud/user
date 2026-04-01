@@ -30,6 +30,8 @@
 
 ## 3. 当前稳定主线
 - 正式执行主线：
+  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+- 当前 legacy 回退主线：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
 - 当前交易范围：
   - 仅限上证 A 股与深证 A 股
@@ -39,14 +41,16 @@
 - 执行方式：
   - 盘后生成计划，次日开盘人工执行
 - 当前执行后端：
-  - 当前 `execution/update_model.py` 与 `execution/run_trade_plan.py` 直接走当前仓执行链路
-  - 默认注入 `regime_ma_window=50`、`enhanced_profile=up_low_breakout_v2`、`trend_up_low_vol=ml:0.25,none:0.25,v2:0.50` 与 `lgbm_n_estimators=520`
+  - `execution/run_trade_plan.py` 默认走 `regoff_k2_10d_ensemble_native_anchor`
+  - `execution/run_trade_plan_legacy_ml.py` 显式回退到旧机器学习 live-anchor
+  - `execution/update_model.py` / `execution/update_model_legacy_ml.py` 只用于维护 legacy ML 回退链路
+  - 默认注入 `regime_ma_window=50`；legacy ML 回退额外沿用 `enhanced_profile=up_low_breakout_v2`、`trend_up_low_vol=ml:0.25,none:0.25,v2:0.50` 与 `lgbm_n_estimators=520`
 - 当前研究侧对照锚点：
   - 执行默认：`expanded_v24 + trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
   - 研究进攻对照：`trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
 - 当前最强执行候选分支：
   - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor`
-  - 这是当前最强 execution candidate，不等于正式 live 默认值
+  - 这已经是当前日常默认执行策略；旧 `advanced_ml` 仅保留为 legacy 回退
 
 ## 4. 分脑模块
 - `daily_research/brain/semantic_memory.md`
@@ -97,9 +101,10 @@ brain 负责解释这些 body 应该如何被理解和接入。
 8. 需要证据时读 `episodic_memory.md`
 
 ## 7. 当前结构判断
-- `advanced_ml` 继续承担正式 live 执行职责
+- `deep_alpha -> regoff_k2_10d_ensemble_native_anchor` 继续承担正式日常执行职责
+- `advanced_ml` 降级为显式 legacy 回退职责
 - `deep_alpha` 继续承担长期研究与新机会集探索职责
 - `dynamic_graph_v1` 是当前研究侧 leading branch
-- anchored `target_weight` execution bridge 是当前执行升级主候选
+- anchored `target_weight` execution bridge 已升格为当前默认执行主线
 - soft state-conditioned sizing 当前只作为风险塑形与 formal comparator，不是默认执行主线
 - `daily_research` 仍是整个工作区的生产主线分脑

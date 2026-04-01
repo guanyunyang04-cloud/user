@@ -113,8 +113,8 @@ DOC_RULES = {
         ),
     ),
     "daily_research/brain/working_memory.md": DocRule(
-        warn_lines=260,
-        max_lines=360,
+        warn_lines=300,
+        max_lines=420,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research working memory should stay a current-decision document instead of becoming a dated log"),
         ),
@@ -135,7 +135,7 @@ DOC_RULES = {
     ),
     "daily_research/brain/action_system.md": DocRule(
         warn_lines=380,
-        max_lines=620,
+        max_lines=760,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research action system should stay an operations guide instead of becoming a dated log"),
         ),

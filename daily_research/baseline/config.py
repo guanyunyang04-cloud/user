@@ -41,6 +41,9 @@ class ResearchConfig:
     score_clip: float = 3.0
     turnover_limit: float = 2.00
     min_hold_days: int = 1
+    transaction_cost_bps: float = 0.0
+    slippage_bps: float = 0.0
+    sell_tax_bps: float = 0.0
 
     # Trading filters
     min_price: float = 2.0
