@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
 import argparse
 import json
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -29,6 +30,7 @@ from daily_research.baseline.regime import compute_market_regime_state
 from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, get_cache_root, load_pickle, save_pickle, series_signature
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.execution_alignment import (
+    evaluate_profile as evaluate_execution_alignment_profile,
     fit_execution_alignment,
     get_profile as get_execution_alignment_profile,
     list_profile_lines as list_execution_alignment_profile_lines,
@@ -338,6 +340,183 @@ def _resolve_manual_score_config(
     if risk_weight > 0 and total_return_weight > 0:
         downside_penalty = risk_weight / total_return_weight
     return horizon_weights, downside_penalty
+
+
+def _build_live_inference_outputs(
+    *,
+    cfg: DeepAlphaConfig,
+    close: pd.DataFrame,
+    benchmark_close: pd.Series,
+    benchmark_open: pd.Series,
+    open_df: pd.DataFrame,
+    amount_frame: pd.DataFrame,
+    feature_frames: dict[str, pd.DataFrame],
+    train_target_frames: dict[str, pd.DataFrame],
+    target_frames: dict[str, pd.DataFrame],
+    state_frame: pd.DataFrame,
+    liquidity_bucket_frame: pd.DataFrame | None,
+    structure_label_frame: pd.DataFrame | None,
+    rolling_membership_frame: pd.DataFrame | None,
+    live_start: pd.Timestamp,
+    model: MultiTaskRanker,
+    loader_kwargs: dict[str, Any],
+    device: torch.device,
+    target_names: list[str],
+    score_head_method: str,
+    score_head_artifact: Any,
+    applied_score_horizon_weights: dict[int, float],
+    applied_score_downside_penalty: float,
+    risk_gate_artifact: Any,
+    use_amp: bool,
+) -> dict[str, Any]:
+    latest_market_date = pd.Timestamp(close.index.max())
+    live_dates = list(close.index[(close.index >= live_start) & (close.index <= latest_market_date)])
+    empty_panel = pd.DataFrame(index=pd.Index(live_dates), columns=close.columns, dtype=float)
+    empty_pred = pd.DataFrame(columns=["date", "stock"])
+    empty_emb = pd.DataFrame(columns=["date", "stock"])
+    if not live_dates:
+        return {
+            "live_dates": pd.Index([]),
+            "pred_df": empty_pred,
+            "emb_df": empty_emb,
+            "score_frame": empty_panel.copy(),
+            "target_weights": empty_panel.copy(),
+        }
+
+    live_corpus = build_sequence_corpus(
+        feature_frames=feature_frames,
+        train_target_frames=train_target_frames,
+        raw_target_frames=target_frames,
+        lookback_window=cfg.lookback_window,
+        sample_dates=live_dates,
+        min_adv20=cfg.min_adv20,
+        amount_frame=amount_frame,
+        close_frame=close,
+        min_price=cfg.min_price,
+        max_price=cfg.max_price,
+        state_frame=state_frame,
+        liquidity_bucket_frame=liquidity_bucket_frame,
+        structure_label_frame=structure_label_frame,
+        universe_membership_frame=rolling_membership_frame,
+        require_targets=False,
+    )
+    live_indices = live_corpus.build_index(start_date=live_start, end_date=latest_market_date)
+    if not live_indices:
+        return {
+            "live_dates": pd.Index(live_dates),
+            "pred_df": empty_pred,
+            "emb_df": empty_emb,
+            "score_frame": empty_panel.copy(),
+            "target_weights": empty_panel.copy(),
+        }
+
+    live_ds = StockSequenceDataset(corpus=live_corpus, indices=live_indices)
+    live_loader = DataLoader(
+        live_ds,
+        batch_sampler=DateGroupedBatchSampler(
+            live_ds.meta,
+            batch_size=cfg.batch_size,
+            shuffle_dates=False,
+            random_seed=cfg.random_seed,
+        ),
+        **loader_kwargs,
+    )
+    live_pred_df, live_emb_df = infer_dataset(model, live_loader, device, target_names, use_amp=bool(use_amp))
+    live_index = pd.Index(live_dates)
+    if score_head_method == "manual":
+        live_score_frame = _build_score_frame(
+            pred_df=live_pred_df,
+            target_names=target_names,
+            horizon_weights=applied_score_horizon_weights,
+            score_rank_blend=cfg.score_rank_blend,
+            score_downside_penalty=applied_score_downside_penalty,
+            score_risk_mode=cfg.score_risk_mode,
+            score_risk_gate_threshold=cfg.score_risk_gate_threshold,
+            all_dates=live_index,
+            all_stocks=list(close.columns),
+        )
+    else:
+        live_learned_scores = apply_score_head(score_head_artifact, live_pred_df, target_names)
+        live_score_frame = (
+            live_learned_scores
+            .pivot(index="date", columns="stock", values="learned_score")
+            .reindex(index=live_index, columns=close.columns)
+        )
+    if rolling_membership_frame is not None:
+        membership = rolling_membership_frame.reindex(index=live_score_frame.index, columns=live_score_frame.columns).fillna(False)
+        live_score_frame = live_score_frame.where(membership)
+    if risk_gate_artifact is not None:
+        live_score_frame = apply_state_risk_gate(
+            score_frame=live_score_frame,
+            pred_df=live_pred_df,
+            state_frame=state_frame,
+            artifact=risk_gate_artifact,
+            liquidity_bucket_frame=liquidity_bucket_frame if cfg.score_risk_mode == "state_liquidity_gate" else None,
+        )
+    live_cfg = ResearchConfig(
+        start_date=str(pd.Timestamp(live_start).date()).replace("-", ""),
+        end_date=str(latest_market_date.date()).replace("-", ""),
+        benchmark=cfg.benchmark,
+        execution_mode="next_open",
+        holding_count=cfg.holding_count,
+        weighting_method="score",
+        rebalance_freq=cfg.rebalance_freq,
+        max_weight=cfg.max_weight,
+        min_adv20=cfg.min_adv20,
+        min_price=cfg.min_price,
+        max_price=cfg.max_price,
+    )
+    live_target_weights = build_target_weights(live_score_frame, live_cfg)
+    return {
+        "live_dates": live_index,
+        "pred_df": live_pred_df,
+        "emb_df": live_emb_df,
+        "score_frame": live_score_frame,
+        "target_weights": live_target_weights,
+    }
+
+
+def _build_live_execution_aligned_outputs(
+    *,
+    execution_alignment_artifact: Any,
+    raw_live_score_frame: pd.DataFrame,
+    raw_live_target_weights: pd.DataFrame,
+    close: pd.DataFrame,
+    benchmark_close: pd.Series,
+    open_df: pd.DataFrame,
+    benchmark_open: pd.Series,
+    cfg: DeepAlphaConfig,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+    sell_tax_bps: float,
+) -> dict[str, Any] | None:
+    if execution_alignment_artifact is None:
+        return None
+    profile = get_execution_alignment_profile(execution_alignment_artifact.selected_profile)
+    metrics, aligned_scores, aligned_target_weights, meta = evaluate_execution_alignment_profile(
+        raw_target_weights=raw_live_target_weights.reindex(raw_live_score_frame.index).fillna(0.0),
+        raw_score_frame=raw_live_score_frame.fillna(0.0),
+        close=close,
+        benchmark_close=benchmark_close,
+        open_df=open_df,
+        benchmark_open=benchmark_open,
+        benchmark=cfg.benchmark,
+        holding_count=cfg.holding_count,
+        max_weight=cfg.max_weight,
+        min_adv20=cfg.min_adv20,
+        min_price=cfg.min_price,
+        max_price=cfg.max_price,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        sell_tax_bps=sell_tax_bps,
+        profile=profile,
+    )
+    return {
+        "score_frame": aligned_scores,
+        "target_weights": aligned_target_weights,
+        "metrics": metrics,
+        "meta": meta,
+    }
 
 
 def main():
@@ -1021,6 +1200,74 @@ def main():
             benchmark_open=benchmark_open.reindex(valid_dates),
         )
 
+    live_outputs = _build_live_inference_outputs(
+        cfg=cfg,
+        close=close,
+        benchmark_close=benchmark_close,
+        benchmark_open=benchmark_open,
+        open_df=df_dict["Open"],
+        amount_frame=df_dict["Amount"],
+        feature_frames=feature_frames,
+        train_target_frames=train_target_frames,
+        target_frames=target_frames,
+        state_frame=state_frame,
+        liquidity_bucket_frame=liquidity_bucket_frame,
+        structure_label_frame=structure_label_frame,
+        rolling_membership_frame=rolling_membership_frame,
+        live_start=valid_start,
+        model=model,
+        loader_kwargs=loader_kwargs,
+        device=device,
+        target_names=train_ds.target_names,
+        score_head_method=args.score_head_method,
+        score_head_artifact=score_head_artifact,
+        applied_score_horizon_weights=applied_score_horizon_weights,
+        applied_score_downside_penalty=applied_score_downside_penalty,
+        risk_gate_artifact=risk_gate_artifact,
+        use_amp=bool(cfg.use_amp),
+    )
+    live_score_frame = live_outputs["score_frame"]
+    live_target_weights = live_outputs["target_weights"]
+    live_latest_scores = None
+    live_daily_score_panel = _panel_to_long(live_score_frame, "score")
+    live_daily_target_weight_panel = _panel_to_long(live_target_weights, "target_weight")
+    if not live_score_frame.dropna(how="all").empty:
+        live_latest_scores = live_score_frame.loc[[live_score_frame.dropna(how="all").index.max()]].T.reset_index()
+        live_latest_scores.columns = ["stock", "latest_score"]
+        live_latest_scores = live_latest_scores.sort_values("latest_score", ascending=False, na_position="last")
+
+    execution_aligned_live_outputs = _build_live_execution_aligned_outputs(
+        execution_alignment_artifact=execution_alignment_artifact,
+        raw_live_score_frame=live_score_frame,
+        raw_live_target_weights=live_target_weights,
+        close=close,
+        benchmark_close=benchmark_close,
+        open_df=df_dict["Open"],
+        benchmark_open=benchmark_open,
+        cfg=cfg,
+        transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
+        slippage_bps=args.execution_alignment_slippage_bps,
+        sell_tax_bps=args.execution_alignment_sell_tax_bps,
+    )
+    execution_aligned_live_score_panel = None
+    execution_aligned_live_target_weight_panel = None
+    execution_aligned_live_latest_scores = None
+    if execution_aligned_live_outputs is not None:
+        execution_aligned_live_score_frame = execution_aligned_live_outputs["score_frame"]
+        execution_aligned_live_target_weights = execution_aligned_live_outputs["target_weights"]
+        execution_aligned_live_score_panel = _panel_to_long(execution_aligned_live_score_frame, "score")
+        execution_aligned_live_target_weight_panel = _panel_to_long(execution_aligned_live_target_weights, "target_weight")
+        if not execution_aligned_live_score_frame.dropna(how="all").empty:
+            execution_aligned_live_latest_scores = execution_aligned_live_score_frame.loc[
+                [execution_aligned_live_score_frame.dropna(how="all").index.max()]
+            ].T.reset_index()
+            execution_aligned_live_latest_scores.columns = ["stock", "latest_score"]
+            execution_aligned_live_latest_scores = execution_aligned_live_latest_scores.sort_values(
+                "latest_score",
+                ascending=False,
+                na_position="last",
+            )
+
     print("[8/8] Writing outputs...")
     output_root = Path("daily_research/output")
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1053,6 +1300,10 @@ def main():
     latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")
     daily_score_panel.to_csv(run_dir / "daily_score_panel.csv", index=False, encoding="utf-8-sig")
     daily_target_weight_panel.to_csv(run_dir / "daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
+    if live_latest_scores is not None:
+        live_latest_scores.to_csv(run_dir / "live_latest_scores.csv", index=False, encoding="utf-8-sig")
+    live_daily_score_panel.to_csv(run_dir / "daily_live_score_panel.csv", index=False, encoding="utf-8-sig")
+    live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")
     equity_export = equity_df.reset_index().rename(columns={equity_df.index.name or "index": "date"})
     equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")
     action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
@@ -1062,6 +1313,12 @@ def main():
         execution_aligned_daily_score_panel.to_csv(run_dir / "execution_aligned_daily_score_panel.csv", index=False, encoding="utf-8-sig")
     if execution_aligned_daily_target_weight_panel is not None:
         execution_aligned_daily_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
+    if execution_aligned_live_latest_scores is not None:
+        execution_aligned_live_latest_scores.to_csv(run_dir / "execution_aligned_live_latest_scores.csv", index=False, encoding="utf-8-sig")
+    if execution_aligned_live_score_panel is not None:
+        execution_aligned_live_score_panel.to_csv(run_dir / "execution_aligned_daily_live_score_panel.csv", index=False, encoding="utf-8-sig")
+    if execution_aligned_live_target_weight_panel is not None:
+        execution_aligned_live_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")
     if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
         execution_aligned_equity_export = execution_aligned_equity_df.reset_index().rename(columns={execution_aligned_equity_df.index.name or "index": "date"})
         execution_aligned_equity_export.to_csv(run_dir / "execution_aligned_equity_curve.csv", index=False, encoding="utf-8-sig")
@@ -1092,6 +1349,9 @@ def main():
         },
         run_dir / "deep_alpha_model.pt",
     )
+    save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)
+    if risk_gate_artifact is not None:
+        save_pickle(run_dir / "risk_gate_artifact.pkl", risk_gate_artifact)
     with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -1196,6 +1456,18 @@ def main():
                 "rankic_summary": rankic_summary.to_dict(orient="records"),
                 "holdout_backtest": metrics,
                 "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
+                "live_signal_date": (
+                    ""
+                    if live_score_frame.dropna(how="all").empty
+                    else str(pd.Timestamp(live_score_frame.dropna(how="all").index.max()).date())
+                ),
+                "execution_aligned_live_signal_date": (
+                    ""
+                    if execution_aligned_live_outputs is None
+                    else str(pd.Timestamp(execution_aligned_live_outputs["score_frame"].dropna(how="all").index.max()).date())
+                    if not execution_aligned_live_outputs["score_frame"].dropna(how="all").empty
+                    else ""
+                ),
                 "execution_mode": "next_open",
                 "rebalance_freq": cfg.rebalance_freq,
                 "liquidity_pool": args.liquidity_pool or "",
@@ -1217,7 +1489,14 @@ def main():
             indent=2,
         )
     print(f"Output: {run_dir}")
-    summary = {"holdout_backtest": metrics}
+    summary = {
+        "holdout_backtest": metrics,
+        "live_signal_date": (
+            ""
+            if live_score_frame.dropna(how="all").empty
+            else str(pd.Timestamp(live_score_frame.dropna(how="all").index.max()).date())
+        ),
+    }
     if execution_aligned_metrics is not None and execution_alignment_artifact is not None:
         summary["execution_aligned_holdout_backtest"] = execution_aligned_metrics
         summary["execution_alignment_profile"] = execution_alignment_artifact.selected_profile

@@ -42,6 +42,9 @@
 - 旧 `score -> weight` 不再是默认研究方向。
 - `all-offset ensemble` 只有在固定 `rebalance_anchor_date` 时才有效。
 - 周化收益只保留为辅助读数。
+- 默认执行候选必须使用 `daily_live_*` 面板，而不是验证期 `daily_*_panel.csv`。
+- 候选新鲜度必须按真实 `source_signal_date` 判断，不能用桥接后的执行日冒充“最新”。
+- 当默认候选关闭市场过滤时，计划头部只展示市场状态，不再把它误写成“禁止开仓”。
 - 主判据继续使用：
   - 年化收益
   - 超额年化收益

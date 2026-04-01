@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import pandas as pd
 
+from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.execution.entrypoint_utils import inject_default_arg, inject_flag_arg
 
 
@@ -26,6 +28,7 @@ class ResearchCandidateProfile:
     target_weight_full_invest: bool = False
     use_market_regime_filter: bool = True
     soft_state_profile: str = ""
+    refresh_run_dir: str = ""
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
@@ -41,42 +44,46 @@ PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     "regoff_k2_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
         description="Current daily default execution strategy: 10d anchored all-offset ensemble, top-k 2, regime filter off.",
-        target_weight_panel_csv=_source("daily_target_weight_panel.csv"),
-        score_panel_csv=_source("daily_score_panel.csv"),
+        target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
+        score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_regoff_k2_10d_ensemble_native_anchor",
         target_weight_top_k=2,
         use_market_regime_filter=False,
+        refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
     ),
     "regon_k1_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regon_k1_10d_ensemble_native_anchor",
         description="More aggressive upside comparator: 10d anchored all-offset ensemble, top-k 1, regime filter on.",
-        target_weight_panel_csv=_source("daily_target_weight_panel.csv"),
-        score_panel_csv=_source("daily_score_panel.csv"),
+        target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
+        score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_regon_k1_10d_ensemble_native_anchor",
         target_weight_top_k=1,
         use_market_regime_filter=True,
+        refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
     ),
     "regoff_k2_10d_market_state_guard_v1": ResearchCandidateProfile(
         name="regoff_k2_10d_market_state_guard_v1",
         description="Risk-shaping comparator: regoff_k2 bridge plus soft market_state guard v1.",
-        target_weight_panel_csv=_source("daily_target_weight_panel.csv"),
-        score_panel_csv=_source("daily_score_panel.csv"),
+        target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
+        score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_regoff_k2_10d_market_state_guard_v1",
         target_weight_top_k=2,
         use_market_regime_filter=False,
         soft_state_profile="market_state_guard_v1",
+        refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
     ),
     "target_weight_1d_baseline": ResearchCandidateProfile(
         name="target_weight_1d_baseline",
         description="Direct 1d target-weight bridge baseline for translation-loss comparison.",
-        target_weight_panel_csv=_source("daily_target_weight_panel.csv"),
-        score_panel_csv=_source("daily_score_panel.csv"),
+        target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
+        score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_v1_execbridge_weightpanel_baseline",
         rebalance_freq="1d",
         rebalance_offset_mode="single",
         rebalance_anchor_date="",
         target_weight_top_k=0,
         use_market_regime_filter=False,
+        refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
     ),
     "execalign_auto_r4_topk2_1d_regoff": ResearchCandidateProfile(
         name="execalign_auto_r4_topk2_1d_regoff",
@@ -91,6 +98,7 @@ PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         rebalance_anchor_date="",
         target_weight_top_k=0,
         use_market_regime_filter=False,
+        refresh_run_dir=str(_EXECALIGN_AUTO_R4_ROOT.resolve()),
     ),
 }
 
@@ -133,8 +141,40 @@ def list_profile_lines() -> list[str]:
     return lines
 
 
+def _read_panel_latest_date(path_str: str) -> pd.Timestamp | None:
+    path = Path(path_str)
+    if not path.exists():
+        return None
+    try:
+        frame = pd.read_csv(path, usecols=["date"])
+    except Exception:
+        return None
+    if frame.empty or "date" not in frame.columns:
+        return None
+    dates = pd.to_datetime(frame["date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return pd.Timestamp(dates.max())
+
+
+def _ensure_live_panels(profile: ResearchCandidateProfile) -> None:
+    if not profile.refresh_run_dir:
+        return
+    latest_completed = pd.Timestamp(get_latest_completed_trading_date())
+    latest_panel_date = _read_panel_latest_date(profile.target_weight_panel_csv)
+    if latest_panel_date is not None and latest_panel_date >= latest_completed:
+        return
+    from daily_research.deep_alpha.export_live_panels_from_run import refresh_live_panels_for_run
+
+    refresh_live_panels_for_run(
+        Path(profile.refresh_run_dir),
+        latest_end_date=latest_completed.strftime("%Y%m%d"),
+    )
+
+
 def apply_profile_defaults(profile_name: str, *, mode: str) -> ResearchCandidateProfile:
     profile = get_profile(profile_name)
+    _ensure_live_panels(profile)
     if mode == "backtest":
         inject_default_arg("--data-source", profile.data_source)
         inject_default_arg("--benchmark", profile.benchmark)

@@ -23,6 +23,10 @@
   - `daily_research/execution/run_trade_plan.py`
 - 每日默认输出：
   - `daily_research/execution/output/latest_trade_plan.txt`
+- 默认候选源文件：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_live_score_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_live_target_weight_panel.csv`
+- 默认入口会在不重训的前提下，按已训练模型自动刷新默认候选 live 面板。
 
 ## 4. 明确回退
 - 仍保留显式旧主线回退：
