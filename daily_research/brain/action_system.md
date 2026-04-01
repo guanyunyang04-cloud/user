@@ -217,12 +217,40 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
   - `regon_k1_10d_ensemble_native_anchor = 52.32% / 32.91% / 1.800 / -9.36%`
   - `regoff_k2_10d_ensemble_native_anchor = 52.14% / 32.75% / 2.188 / -7.72%`
   - 默认生产候选优先 `regoff_k2_10d_ensemble_native_anchor`，更偏收益上沿的对照保留 `regon_k1_10d_ensemble_native_anchor`
+- `2026-04-01` 晚间已把这条线产品化成 profile 入口：
+  - `run_research_candidate_backtest.py` / `run_research_candidate_trade_plan.py` 现在支持 `--candidate-profile`
+  - 若不显式传面板路径或 profile，这两个入口都会默认落到当前默认候选 `regoff_k2_10d_ensemble_native_anchor`
+  - 可用 `--list-candidate-profiles` 查看当前内置 profile、alias 与说明
+- 当前一键默认候选入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py
+```
+- 当前激进收益对照入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile aggressive
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile aggressive
+```
+- 当前高收益 upgrade shortlist 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile robust_auto
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile robust_auto
+```
+- 当前 soft sizing comparator 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile soft_guard
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile soft_guard
+```
 
 - `2026-04-01` 上午已补齐 exact same-window comparator：`advanced_ml_live_anchor_samewindow_20260401_formal_r1` 里的 `trend_up_low_vol_ml25_none25_v250` 在 `bridge_full (2025-03-18 -> 2026-03-31)` 上是 `24.34% / 10.75% / 0.580 / -14.42%`，因此 anchored `regoff_k2 / regon_k1` 对当前 live-anchor 的领先已经是同窗 formal 结论。
 - `2026-04-01` 上午也把第一版 soft state-conditioned sizing formal 跑完，summary 在 `execution_target_weight_state_conditioned_verdict_20260401_r1`：
   - `regoff_k2_stateoff` 仍是默认 winner；`quadrant_guard_v1 / trend_guard_v1 / market_state_guard_v1` 都会明显压低年化，只带来有限回撤改善。
   - `regon_k1_stateoff` 仍是更激进的收益对照；`quadrant_guard_v1` 在当前 hard regime filter 下基本是 no-op，其余 soft profile 也没有拿到升级资格。
   - 默认执行候选因此不变：继续保留 `regoff_k2_10d_ensemble_native_anchor`。
+- `2026-04-01` 深夜已补完 execution candidate multi-window H2H：
+  - `regoff_k2 vs regon_k1`：`regoff_k2` 赢 `4/5` 个窗口的 excess Sharpe，`regon_k1` 赢 `4/5` 个窗口的 excess annual return
+  - `regoff_k2 vs execalign_auto_r4`：`execalign_auto_r4` 赢 `5/5` 个窗口的 excess annual return，赢 `4/5` 个窗口的 excess Sharpe
+  - 当前结论因此写死为：`regoff_k2` 继续保留默认生产候选，`execalign_auto_r4_topk2_1d_regoff` 升格到高收益 upgrade shortlist，不能静默替换默认值
 
 ### 4.7 第一步 soft state-conditioned sizing formal 入口
 ```powershell
@@ -291,6 +319,184 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 - 当前已落地的是 `v1 = daily-updated top-k peer graph feature layer`，技术 smoke 产物为 `daily_research/output/deep_alpha_liquid800_dynamic_graph_20260331_smoke_v2`；这只是链路验收，不是正式前沿判决。
 - `2026-03-31` 的 strict formal 旧基线对比也已补完：`deep_alpha_relgraph_h2h_20260331_mainboard_r1` 中，`dynamic_graph_v1` 相对 `relation_baseline` 实现 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜，因此下一条默认 gate 已更新为 `plain vs dynamic_graph_v1`，暂不直接切去 `MoE`。
 - 同日晚间已补完 `plain vs dynamic_graph_v1` 的 strict head-to-head，汇总在 `daily_research/output/deep_alpha_plain_vs_dynagraph_h2h_20260331_mainboard_r1`；`dynamic_graph_v1` 已在均值上跑赢 `plain`，因此当前默认下一步改为：围绕 `dynamic_graph_v1` 做稳健性确认和图参数 / 先验消融，而不是直接切 `MoE`。
+- `2026-04-01` 晚间已把这条后续研究产品化为 wrapper：`daily_research/deep_alpha/run_dynamic_graph_ablation.py`
+  - 默认 profile 为 `dynamic_graph_v1`
+  - 支持 `--list-profiles`
+  - 支持 `plain_baseline / dynamic_graph_v1 / dynamic_graph_topk4 / dynamic_graph_topk12 / dynamic_graph_no_industry_boost / dynamic_graph_no_style_boost / dynamic_graph_no_priors`
+  - wrapper 会自动补齐 strict `liquid800` 研究口径、`patch_transformer + manual`、`next_open` 对应研究配置，并自动生成唯一 `experiment-tag`
+- `2026-04-01` 下午又补上了正式 ablation matrix：`daily_research/deep_alpha/run_dynamic_graph_formal_ablation_matrix.py`
+  - 这条脚本会复用已存在的 `plain_baseline / dynamic_graph_v1` formal runs
+  - 只补跑缺失的 `dynamic_graph_no_priors / dynamic_graph_topk4 / dynamic_graph_topk12`
+  - 自动产出 `ablation_summary.csv / ablation_window_details.csv / ablation_vs_plain_and_winner.csv / summary.md`
+- 当前 formal ablation verdict 已落盘在 `daily_research/output/dynamic_graph_ablation_formal_20260401_r1`：
+  - `dynamic_graph_v1 = 15.64% / 0.534 / -25.71%`，仍是均值超额年化 winner
+  - `dynamic_graph_no_priors = 15.05% / 0.515 / -20.17%`，说明图结构本身确有价值，prior 只提供小幅增益
+  - `dynamic_graph_topk4 = 12.76% / 0.768 / -21.73%`，更像风险收益比对照，不是新的总收益默认 winner
+  - `dynamic_graph_topk12 = 7.21% / 0.324 / -19.56%`，可视为当前 no-go 宽图区间
+- `2026-04-01` 晚间又把 `dynamic_graph_v1 / dynamic_graph_no_priors / dynamic_graph_topk4` 接到了同一条 `liquid500 -> regoff_k2_10d anchored all-offset` execution bridge，汇总在 `daily_research/output/dynamic_graph_execution_bridge_h2h_20260401_r1`：
+  - 研究端 `liquid500` formal holdout：`dynamic_graph_v1 = 18.56% / 5.61% / 0.232`，`dynamic_graph_no_priors = 37.35% / 22.34% / 0.901`，`dynamic_graph_topk4 = 73.81% / 54.82% / 2.667`
+  - execution bridge formal：`dynamic_graph_v1 = 52.14% / 32.75% / 2.188 / -7.72%`
+  - execution bridge formal：`dynamic_graph_no_priors = 36.81% / 19.38% / 1.193 / -12.05%`
+  - execution bridge formal：`dynamic_graph_topk4 = 44.61% / 26.18% / 1.954 / -12.58%`
+  - 当前结论：默认 execution winner 仍是 `dynamic_graph_v1`；`no_priors / topk4` 继续保留为研究对照，不升格为默认候选。
+- `2026-04-01` 深夜已把 `dynamic_graph_v1 -> execution objective` 也产品化到 `run_deep_alpha_research.py`：
+  - 新参数：`--execution-alignment-mode off/profile/train_eval_auto`
+  - `train_eval_auto` 当前扫描：`raw_1d / topk2_1d_regoff / regoff_k2_10d_ensemble_native_anchor / regon_k1_10d_ensemble_native_anchor`
+  - research output 现在会额外落盘：`execution_aligned_daily_score_panel.csv / execution_aligned_daily_target_weight_panel.csv / execution_alignment_objective_rows.csv`
+- current formal verdict 已更新成两阶段：
+  - 第一轮 `dynamic_graph_execution_objective_alignment_20260401_r1`：按 `excess_annual_return` 选中了 `regon_k1_10d_ensemble_native_anchor`，但 aligned export replay 只有 `37.26% / 19.76% / 1.145 / -11.56%`
+  - 第二轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4`：按 `robust_composite + train_eval_window_days=252` 选中了 `topk2_1d_regoff`，external export replay 达到 `108.05% / 85.32% / 3.317 / -11.01%`
+  - 汇总 verdict 在 `daily_research/output/execution_alignment_robust_upgrade_20260401_r1`
+  - 当前结论：execution-objective alignment 已经产生新的 formal high-upside winner，但它的换手和回撤压力更高，所以当前只升格到 upgrade shortlist，不静默替换默认 `regoff_k2`
+- 当前动态图研究入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_ablation.py --list-profiles
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_ablation.py --profile default
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_ablation.py --profile dynamic_graph_no_priors
+```
+- 当前 formal ablation 汇总入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py
+```
+- 当前 `liquid500` execution bridge H2H 复跑入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+  --data-source tq `
+  --liquidity-pool liquid500 `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --train-end-date 20250317 `
+  --valid-start-date 20250318 `
+  --valid-days 252 `
+  --encoder-family patch_transformer `
+  --score-head-method manual `
+  --holding-count 5 `
+  --max-weight 0.25 `
+  --rebalance-freq 1d `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 8 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.0 `
+  --dynamic-graph-style-boost 0.0 `
+  --no-safe-runtime-profile `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_no_priors_bridge_20260401_formal_r1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+  --data-source tq `
+  --liquidity-pool liquid500 `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --train-end-date 20250317 `
+  --valid-start-date 20250318 `
+  --valid-days 252 `
+  --encoder-family patch_transformer `
+  --score-head-method manual `
+  --holding-count 5 `
+  --max-weight 0.25 `
+  --rebalance-freq 1d `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 4 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.15 `
+  --dynamic-graph-style-boost 0.05 `
+  --no-safe-runtime-profile `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_topk4_bridge_20260401_formal_r1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_no_priors_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_no_priors_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --rebalance-freq 10d `
+  --rebalance-offset-mode all `
+  --rebalance-anchor-date 2025-01-02 `
+  --target-weight-top-k 2 `
+  --candidate-label dynamic_graph_no_priors_regoff_k2_10d_ensemble_native_anchor `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_no_priors_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r1 `
+  --no-market-regime-filter
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py `
+  --data-source tq `
+  --start-date 20250101 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_topk4_bridge_20260401_formal_r1/daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_topk4_bridge_20260401_formal_r1/daily_score_panel.csv `
+  --rebalance-freq 10d `
+  --rebalance-offset-mode all `
+  --rebalance-anchor-date 2025-01-02 `
+  --target-weight-top-k 2 `
+  --candidate-label dynamic_graph_topk4_regoff_k2_10d_ensemble_native_anchor `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_topk4_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r1 `
+  --no-market-regime-filter
+```
+- 当前 execution-objective alignment 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --list-execution-alignment-profiles
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+  --data-source tq `
+  --liquidity-pool liquid500 `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --train-end-date 20250317 `
+  --valid-start-date 20250318 `
+  --valid-days 252 `
+  --encoder-family patch_transformer `
+  --score-head-method manual `
+  --holding-count 5 `
+  --max-weight 0.25 `
+  --rebalance-freq 1d `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 8 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.15 `
+  --dynamic-graph-style-boost 0.05 `
+  --no-safe-runtime-profile `
+  --execution-alignment-mode train_eval_auto `
+  --execution-alignment-objective robust_composite `
+  --train-eval-window-days 252 `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4
+```
+- 当前固定 `regoff_k2` 对照入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py `
+  --data-source tq `
+  --liquidity-pool liquid500 `
+  --start-date 20210101 `
+  --benchmark 000300.SH `
+  --train-end-date 20250317 `
+  --valid-start-date 20250318 `
+  --valid-days 252 `
+  --encoder-family patch_transformer `
+  --score-head-method manual `
+  --holding-count 5 `
+  --max-weight 0.25 `
+  --rebalance-freq 1d `
+  --dynamic-graph-layer `
+  --dynamic-graph-top-k 8 `
+  --dynamic-graph-temperature 0.35 `
+  --dynamic-graph-industry-boost 0.15 `
+  --dynamic-graph-style-boost 0.05 `
+  --no-safe-runtime-profile `
+  --execution-alignment-mode profile `
+  --execution-alignment-profile regoff_k2_10d_ensemble_native_anchor `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_v1_execalign_regoff_profile_20260401_formal_r1
+```
+- 当前 execution-aligned export replay 入口：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\baseline\backtest_external_score_panel.py `
+  --data-source tq `
+  --start-date 20250318 `
+  --end-date 20260331 `
+  --benchmark 000300.SH `
+  --target-weight-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4/execution_aligned_daily_target_weight_panel.csv `
+  --score-panel-csv daily_research/output/deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4/execution_aligned_daily_score_panel.csv `
+  --candidate-label execalign_auto_r4_topk2_1d_regoff `
+  --experiment-tag deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_export_replay_20260401_r4 `
+  --rebalance-freq 1d `
+  --no-market-regime-filter
+```
 
 #### D. `dynamic graph` 旧基线入口（可直接运行，用来定义 no-go baseline）
 ```powershell
@@ -363,6 +569,44 @@ python daily_research/execution/run_trade_plan.py --data-source tq --start-date 
 #### H. RL 执行层入口
 - RL 不从 `daily_research` 进入，统一转到：
   - `t0_project/brain/action_system.md`
+
+#### I. Performance Dispersion Diagnostic
+- Use this after any formal run to judge whether results are carried by a few strong phases.
+- Main outputs:
+  - `calendar_year_summary.csv`
+  - `rolling_window_summary.csv`
+  - `named_window_summary.csv`
+  - `summary.md`
+- This is a phase-dispersion diagnostic only; it does not replace full-period CAGR.
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\performance_dispersion_report.py `
+  --run-dir daily_research/output/deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r3
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\performance_dispersion_report.py `
+  --run-dir daily_research/output/advanced_ml_current_code_live_anchor_20260331_mainboard_formal_r1 `
+  --strict-label trend_up_low_vol_ml25_none25_v250
+```
+
+#### J. Execution Candidate Multi-Window H2H
+- Use this after any candidate formal replay to compare phase robustness on the same overlap windows.
+- Main outputs:
+  - `window_metrics_<label>.csv`
+  - `head2head_summary.csv`
+  - `summary.md`
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\execution_candidate_multiwindow_h2h.py `
+  --left-run-dir daily_research/output/deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r3 `
+  --left-label regoff_k2 `
+  --right-run-dir daily_research/output/deep_alpha_liquid500_dynamic_graph_execbridge_regon_k1_10d_ensemble_native_anchor_20260401_formal_r3 `
+  --right-label regon_k1
+
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\execution_candidate_multiwindow_h2h.py `
+  --left-run-dir daily_research/output/deep_alpha_liquid500_dynamic_graph_execbridge_regoff_k2_10d_ensemble_native_anchor_20260401_formal_r3 `
+  --left-label regoff_k2 `
+  --right-run-dir daily_research/output/deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_export_replay_20260401_r4 `
+  --right-label execalign_auto_r4
+```
+
 ## 6. Gemini Final Closeout
 - This step is temporarily disabled.
 - From `2026-03-29`, Gemini is no longer part of the default final-answer workflow.

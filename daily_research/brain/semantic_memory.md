@@ -31,6 +31,9 @@
 ## 3. 当前稳定主线
 - 正式执行主线：
   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+- 当前交易范围：
+  - 仅限上证 A 股与深证 A 股
+  - 剔除创业板、科创板与 `ST/*ST/SST/S*ST`
 - 调仓语义：
   - 日频目标更新，默认 `rebalance_freq=1d`
 - 执行方式：
@@ -41,6 +44,9 @@
 - 当前研究侧对照锚点：
   - 执行默认：`expanded_v24 + trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
   - 研究进攻对照：`trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+- 当前最强执行候选分支：
+  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor`
+  - 这是当前最强 execution candidate，不等于正式 live 默认值
 
 ## 4. 分脑模块
 - `daily_research/brain/semantic_memory.md`
@@ -91,7 +97,9 @@ brain 负责解释这些 body 应该如何被理解和接入。
 8. 需要证据时读 `episodic_memory.md`
 
 ## 7. 当前结构判断
-- `advanced_ml` 继续承担正式执行职责
-- `deep_alpha` 继续承担长期研究职责
-- 动态控制器是当前执行端下一步研发方向
+- `advanced_ml` 继续承担正式 live 执行职责
+- `deep_alpha` 继续承担长期研究与新机会集探索职责
+- `dynamic_graph_v1` 是当前研究侧 leading branch
+- anchored `target_weight` execution bridge 是当前执行升级主候选
+- soft state-conditioned sizing 当前只作为风险塑形与 formal comparator，不是默认执行主线
 - `daily_research` 仍是整个工作区的生产主线分脑

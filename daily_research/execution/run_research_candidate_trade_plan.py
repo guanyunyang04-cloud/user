@@ -8,12 +8,19 @@ if __package__ in {None, ""}:
 
 from daily_research.execution.entrypoint_utils import (
     bootstrap_execution_paths,
+    consume_flag_arg,
+    consume_option_arg,
     ensure_default_pool_argument,
     ensure_execution_strategy_defaults,
     ensure_text_file_from_example,
     has_arg,
     inject_default_arg,
     is_help_request,
+)
+from daily_research.execution.research_candidate_profiles import (
+    DEFAULT_EXECUTION_CANDIDATE_PROFILE,
+    apply_profile_defaults,
+    list_profile_lines,
 )
 
 
@@ -23,6 +30,11 @@ def main():
     example_file = exec_dir / "current_positions.example.csv"
     output_dir = exec_dir / "output" / "research_candidates"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if consume_flag_arg("--list-candidate-profiles"):
+        print("\n".join(list_profile_lines()))
+        return
+    candidate_profile = consume_option_arg("--candidate-profile")
 
     ensure_text_file_from_example(
         positions_file,
@@ -37,12 +49,16 @@ def main():
     ensure_default_pool_argument()
     ensure_execution_strategy_defaults()
 
+    if not candidate_profile and not has_arg("--external-score-csv") and not has_arg("--external-target-weight-csv") and not is_help_request():
+        candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
+    if candidate_profile:
+        resolved = apply_profile_defaults(candidate_profile, mode="trade_plan")
+        print(f"candidate_profile={resolved.name}")
+
     if not has_arg("--external-score-csv") and not has_arg("--external-target-weight-csv") and not is_help_request():
         raise ValueError(
-            "Missing --external-score-csv or --external-target-weight-csv. Example: "
-            "python daily_research/execution/run_research_candidate_trade_plan.py "
-            "--external-target-weight-csv daily_research/output/<run>/daily_target_weight_panel.csv "
-            "--external-score-csv daily_research/output/<run>/daily_score_panel.csv"
+            "Missing --external-score-csv or --external-target-weight-csv. "
+            "Pass --candidate-profile, --list-candidate-profiles, or explicit CSV paths."
         )
 
     from daily_research.baseline.generate_daily_trade_plan import main as generate_daily_trade_plan_main

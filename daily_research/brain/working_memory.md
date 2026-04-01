@@ -31,6 +31,13 @@
   - `regoff_k2_stateoff` 仍是默认 winner；`quadrant_guard_v1 / trend_guard_v1 / market_state_guard_v1` 都会把年化从 `52.14%` 压到 `45.56%~46.72%`，虽然回撤能收窄到 `-6.28% ~ -6.82%`，但不够抵消收益损失。
   - `regon_k1_stateoff` 仍是更激进的收益对照；`quadrant_guard_v1` 在当前 hard regime filter 下基本是 no-op，`trend_guard_v1 / market_state_guard_v1` 会把年化从 `52.32%` 压到 `50.47%`，只换来约 `1.5pct` 的回撤改善。
   - 因此当前结论更新为：soft state-conditioned sizing 有风险塑形价值，但还没有拿到默认升级资格；默认生产候选继续保持 `regoff_k2_10d_ensemble_native_anchor`，`regon_k1_10d_ensemble_native_anchor` 保留为收益上沿对照。
+- `2026-04-01` 深夜又补完了 execution candidate 的 multi-window H2H：`regoff_k2` 拿下 `4/5` 个窗口的 excess Sharpe，`regon_k1` 拿下 `4/5` 个窗口的 excess annual return；因此“`regoff_k2` 更稳、`regon_k1` 更激进”的角色分工现在已经从口头判断升级成 formal 证据。
+- 同晚把 execution-objective alignment 的选择逻辑从“只看收益”升级成 `robust_composite` 之后，又补出了一个关键边界：`train_eval_window_days=126` 只会让 train-side 看见 `63d` rolling windows，phase coverage 不够；必须扩到 `252d`，auto selector 才真正有资格做稳健性判别。
+- 这条 `robust_composite + train_eval_window_days=252` 的 formal 结果已在 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4` 与 `execution_alignment_robust_upgrade_20260401_r1` 收口：
+  - internal aligned holdout：`118.89% / 94.97% / 3.580 / -11.01%`
+  - external export replay：`108.05% / 85.32% / 3.317 / -11.01%`
+  - same-window vs 当前默认 `regoff_k2`：赢 `5/5` 个窗口的 excess annual return，赢 `4/5` 个窗口的 excess Sharpe
+- 当前默认决策因此更新为：`regoff_k2_10d_ensemble_native_anchor` 继续保留为低换手、低回撤的默认生产候选；`execalign_auto_r4_topk2_1d_regoff` 升格为当前最强的高收益 formal upgrade shortlist，并已产品化成 `robust_auto` candidate-profile alias。
 - `2026-04-01` 深夜继续把“翻译损耗”方向一次性扫到底后，当前结论已经很明确：
   - 仅在 `1d` 直连权重桥里做 `power / min_weight / top_k=4/5 / full_invest` 这类小修小补，收益几乎不动；`15.41% / 0.70% / 0.031` 只会在小数点附近摆动。
   - 真正的大头来自“执行节奏 + 直连权重表达”：`top_k=2` 与 `top_k=1` 集中化在 `1d` 已能把桥接 formal 提到 `21.30% / 5.84% / 0.219` 或 `19.54% / 4.31% / 0.125`。
@@ -171,6 +178,30 @@
 - 随后已补完新 universe 下的 strict formal head-to-head：`relation_baseline` 对 `dynamic_graph_v1`，产物在 `daily_research/output/deep_alpha_relgraph_h2h_20260331_mainboard_r1`。结果 `dynamic_graph_v1` 以 `2/3` 窗口 Sharpe 胜、`3/3` 窗口总收益胜通过旧 `relation` baseline；均值上 `dynamic_graph_v1 = 15.48% / 15.64% / 0.534 / -25.71%`，`relation_baseline = -4.09% / -4.10% / -0.117 / -27.47%`。
 - 随后又补完 `plain vs dynamic_graph_v1` 的 strict head-to-head，汇总在 `daily_research/output/deep_alpha_plain_vs_dynagraph_h2h_20260331_mainboard_r1`；该汇总复用了已存在且口径一致的 formal `plain` 与 `dynamic_graph_v1` 三窗口结果，没有重复训练。结果 `dynamic_graph_v1` 已在均值上正式跑赢当前 `plain` 主前沿：`dynamic_graph_v1 = 15.48% / 15.64% / 0.534 / -25.71%`，`plain = 3.66% / 3.71% / 0.137 / -23.84%`；按窗口看是 `2/3` Sharpe 胜、`2/3` 总收益胜。
 - 因此 `dynamic_graph_v1` 当前应上升为 strict rolling `liquid800` 的 leading branch；但它的均值回撤仍深于 `plain`，且第一个窗口总收益未赢，所以默认下一步不是直接切 `MoE`，而是继续做 `dynamic graph` 的稳健性 / 参数确认。
+- `2026-04-01` 下午已把这轮稳健性确认一次做到底，formal ablation 汇总在 `daily_research/output/dynamic_graph_ablation_formal_20260401_r1`：
+  - `dynamic_graph_v1` 仍是均值超额年化 winner：`15.64% / 0.534 / -25.71%`
+  - `dynamic_graph_no_priors` 非常接近：`15.05% / 0.515 / -20.17%`
+  - `dynamic_graph_topk4` 拿到更强的均值超额 Sharpe：`12.76% / 0.768 / -21.73%`，但总收益让位于 `v1`，且最后一个窗口明显失守
+  - `dynamic_graph_topk12` 明显走弱：`7.21% / 0.324 / -19.56%`
+  - 当前结论因此更新为：图结构本身确实有价值，行业/风格先验只提供小幅增益；`top_k` 过宽会伤害前沿；默认研究 winner 继续保持 `dynamic_graph_v1`，`no_priors` 升格为结构确认对照，`topk4` 保留为风险收益比对照。
+- `2026-04-01` 晚间已把这组研究 winner 继续接到当前默认 execution bridge，正式汇总在 `daily_research/output/dynamic_graph_execution_bridge_h2h_20260401_r1`：
+  - 研究端 `liquid500` formal holdout 明显抬升：`dynamic_graph_no_priors = 37.35% / 22.34% / 0.901`，`dynamic_graph_topk4 = 73.81% / 54.82% / 2.667`
+  - 但在同一条 `regoff_k2_10d anchored all-offset` execution bridge 下，当前 winner 仍是 `dynamic_graph_v1 = 52.14% / 32.75% / 2.188 / -7.72%`
+  - `dynamic_graph_no_priors` 只落到 `36.81% / 19.38% / 1.193 / -12.05%`
+  - `dynamic_graph_topk4` 也只落到 `44.61% / 26.18% / 1.954 / -12.58%`
+  - 当前结论因此再次更新为：`no_priors / topk4` 的 edge 已被确认主要停留在研究口径，尚未在默认 execution bridge 下转化成更强候选；默认 execution candidate 继续保持 `dynamic_graph_v1 -> regoff_k2_10d_ensemble_native_anchor`。
+- `2026-04-01` 深夜已把 `dynamic_graph_v1 -> execution objective` 这条线产品化到 `run_deep_alpha_research.py`：
+  - 新增 `execution_alignment_mode=off/profile/train_eval_auto`
+  - train-side auto scan 当前覆盖 `raw_1d / topk2_1d_regoff / regoff_k2_10d_ensemble_native_anchor / regon_k1_10d_ensemble_native_anchor`
+  - 研究 run 会额外导出 `execution_aligned_daily_score_panel.csv / execution_aligned_daily_target_weight_panel.csv / execution_alignment_objective_rows.csv`
+- 同晚已把 formal auto alignment 跑到第二轮并纠正了两个关键边界：
+  - 对 `10d anchored all-offset` 这类 profile，valid 期必须带着 train tail 一起构造 schedule，否则 anchor 会被静默改成 valid 首日，结论不可信。
+  - `robust_composite` 只有在 `train_eval_window_days >= 252` 时才真正有足够的 phase coverage；`126d` 只会看到 `63d` rolling windows，仍可能误选高收益但不够稳的 profile。
+- 当前 formal verdict 已更新为：
+  - 第一轮 `dynamic_graph_execution_objective_alignment_20260401_r1`：按 `excess_annual_return` 选中了 `regon_k1_10d_ensemble_native_anchor`，但 aligned export replay 只有 `37.26% / 19.76% / 1.145 / -11.56%`，输给固定 `regoff_k2` 的 `50.89% / 31.66% / 2.160 / -8.59%`
+  - 第二轮 `deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4`：按 `robust_composite + train_eval_window_days=252` 选中了 `topk2_1d_regoff`，external export replay 达到 `108.05% / 85.32% / 3.317 / -11.01%`
+  - `execution_candidate_multiwindow_h2h_regoff_k2_vs_execalign_auto_r4_20260401_r1` 又补完了同窗 formal：`execalign_auto_r4` 在 `5/5` 个窗口里拿下 excess annual return，并在 `4/5` 个窗口里拿下 excess Sharpe
+  - 因此当前 verdict 更新为：execution-objective alignment 已经从“能力做成但未打赢默认候选”升级成“已产生新的 formal upgrade winner”，但由于换手和回撤压力更高，默认生产候选仍暂留在 `regoff_k2`，而 `execalign_auto_r4_topk2_1d_regoff` 升格到 upgrade shortlist 顶部。
 - `plain` 与 `ranked` 的近似 stitched-return controller 也已补完：walk-forward state/window controller 没有跑赢 `plain`；只有 oracle / window-oracle 略高于 `plain`，因此这条控制线目前不再是第一优先级。
 - 底层市场状态层已经完成架构升级：`quadrant` 继续保留为兼容标签；新默认研究输入已同时提供 `benchmark_trend_gap / benchmark_vol_gap / benchmark_vol_ratio / trend_bucket / vol_bucket / market_state`；后续策略默认优先接 `regime_state_selector`，而当前 `state_alpha_profile` 若切到更细 selector 会显式报错而不是静默退化。
 - `base_global` 即使经过参数优化，也没有通过当前弱窗口修复门槛，不再作为执行升级主候选。
@@ -180,57 +211,73 @@
 - 坏市场专项若重启，主目标固定为“坏市场绝对收益”，不得再用坏市场超额替代坏市场盈利。
 
 ## 4. 当前优先级
-### 优先级 A：转向新机会集
+### 优先级 A：把 anchored `target_weight` bridge 收成正式执行候选
 目标：
-- 在执行端继续稳定保留 `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250)` 的前提下，停止继续深挖当前 `v250 / v255 / 双 profile 控制器` 参数空间；
-- 把研发主线转到“有机会把年化真正抬出新台阶”的新机会集或新 alpha 家族；
-- 继续遵守“利润优先非降级”，不接受只补稳健、不抬前沿的延长战。
+- 在不动当前 live 默认值的前提下，把已经证明有效的 execution candidate 收成“可复核、可比较、可落地”的正式候选；
+- 默认候选固定为 `regoff_k2_10d_ensemble_native_anchor`，`execalign_auto_r4_topk2_1d_regoff` 作为当前最强 upgrade shortlist，`regon_k1_10d_ensemble_native_anchor` 保留为更激进的收益对照。
 具体动作：
-1. 把 `advanced_ml_cross_profile_attack_defense_20260329_formal_r1` 视为当前参数空间的 frontier map，而不是新的默认升级起点。
-2. 记住这组三元边界：
-   - 静态 defense `expanded_v24 + v250 = 13.92% / 0.759 / 1.073 / 1.083`
-   - 静态 offense `legacy_v7 + v255 = 15.54% / 0.860 / 0.819 / 0.751`
-   - 最强 dynamic `= 15.49% / 0.836 / 1.359 / 1.458`
-3. 因为 best dynamic 仍未突破静态 offense 的年化 `15.54%`，当前 `v250 / v255 / controller` family 暂不继续加大扫参投入。
-4. 后续“新机会集”至少应体现为以下之一：
-   - 新 universe / 新容量假设
-   - 新 alpha family / 新表示学习主线
-   - 新组合构建与收益翻译方式
-5. 所有新机会集仍必须走：
-   - 历史滚动高流动性股票池
+1. 记住当前同窗正式比较边界：
+   - `advanced_ml_live_anchor_samewindow_20260401_formal_r1` 的 `bridge_full (2025-03-18 -> 2026-03-31)` 只有 `24.34% / 10.75% / 0.580 / -14.42%`
+   - `regoff_k2_10d_ensemble_native_anchor = 52.14% / 32.75% / 2.188 / -7.72%`
+   - `regon_k1_10d_ensemble_native_anchor = 52.32% / 32.91% / 1.800 / -9.36%`
+2. anchored offset-ensemble 必须显式固定 `rebalance_anchor_date`，否则结果会随历史起点漂移，不得按生产候选解释。
+3. 后续执行侧默认优先做：
+   - exact same-window formal comparator
+   - candidate / paper 计划链路核对
+   - phase-robust bridge 复核
+   - `execalign_auto_r4` 的换手 / 滑点现实性复核
+4. 不再把旧的 `v250 / v255 / controller` 参数空间当成默认研发前线；它们只保留为 live anchor 与历史 comparator。
+5. 当前这条候选桥已经产品化到 profile 入口：`run_research_candidate_backtest.py` / `run_research_candidate_trade_plan.py` 现在默认直达 `regoff_k2_10d_ensemble_native_anchor`，`aggressive` alias 直达 `regon_k1_10d_ensemble_native_anchor`，`robust_auto` alias 直达 `execalign_auto_r4_topk2_1d_regoff`。
+
+### 优先级 B：继续攻“研究 -> 执行”的桥接损耗，但只沿正确表达推进
+目标：
+- 继续降低研究收益迁移到 execution 口径时的损耗；
+- 默认桥接表达固定优先 `target_weight` 直连，而不是旧的 `score -> weight` 重建。
+具体动作：
+1. `weeklyized_return` 只保留为辅指标；主 verdict 继续使用：
+   - 年化收益
+   - 超额年化
+   - Sharpe
+   - 回撤
+2. 不再继续把 `holding_count / max_weight / regime_filter` 这类旧翻译参数扫描当成主增益方向。
+3. soft state-conditioned sizing 保留为 formal comparator 与风险塑形工具；在它没有同时抬高前沿之前，不升级成默认执行引擎。
+4. 若继续投入桥接层，优先级应是：
+   - `robust_composite + train_eval_window_days=252` 的 execution-objective 对齐
+   - `execalign_auto_r4_topk2_1d_regoff` 的换手 / 滑点现实性复核
+   - anchored cadence / offset ensemble 的稳定化
+   - candidate plan 与回测口径的一致性
+
+### 优先级 C：让 `deep_alpha` 继续承担新 alpha 家族探索
+目标：
+- 保持 `deep_alpha` 作为新机会集 / 新表示学习的主承接点；
+- 只在 strict rolling 正式口径下推进真正可能改变前沿的分支。
+具体动作：
+1. 固定研究协议：
+   - mainboard-only 历史滚动股票池
    - `next_open`
    - 多窗口 walk-forward
-6. 在新机会集没有跑出明确新前沿前，执行默认值不变，不允许因为“旧 offense 更高”或“动态更稳”而反复摇摆 live anchor。
-7. 当前这条“新 alpha 家族”主入口已经完成最小矩阵正式收口：`daily_research/deep_alpha/run_minimal_matrix.py --phase backbone / score_head / ranking` 都已落盘，winner 始终保持 `patch + no pretrain + manual + plain`。
-8. 这条线当前最大的时间瓶颈不是矩阵包装层，而是每个 window 里的 `run_deep_alpha_research.py` 全流程重训，尤其是 `[4/8] Building sequence features and targets` 与 `[6/8] Training deep alpha model`；后续新研究必须优先考虑复用 per-window cache 提速。
-9. `deep_alpha` 当前更强的新机会集仍是 strict rolling `liquid800`，但 frontier 已不再分裂成 `plain/ranked` 双主线；修正后应把 `liquid800_plain` 视为唯一主前沿，`ranked`、`controller`、`hold3_w40` 只保留为已验证但未晋级的旁支对照。
+2. 当前研究侧 leading branch 已改成 `dynamic_graph_v1`；它已经正式跑赢旧 `relation baseline` 和当前 `plain`。
+3. 后续默认顺序收口为：
+   - `dynamic_graph_v1 / dynamic_graph_no_priors / dynamic_graph_topk4` 的 execution bridge head-to-head 已完成，当前默认 execution winner 仍是 `dynamic_graph_v1`
+   - `dynamic_graph_v1` 的 execution objective auto-alignment 已完成两轮 formal：第一轮失败，第二轮在 `robust_composite + 252d` 下选出 `execalign_auto_r4_topk2_1d_regoff` 并正式打赢 `regoff_k2`
+   - 若继续做这条线，必须以 `execution_aligned export replay` 为主判据，不再拿 raw research holdout 或 valid-only raw bridge 代替
+   - 若动态图最终不能稳定守住前沿，再切到 `state-conditioned MoE`
+4. 原始 `mamba`、旧 `relation_layer`、`plain/ranked/controller` 的小修小补不再是默认主线。
+5. 新分支默认优先复用 per-window cache 与已落盘 artifact，避免重复全流程重训。
+6. 当前 `dynamic_graph` 后续研究也已产品化到 `run_dynamic_graph_ablation.py`；后续默认先围绕内置 ablation profiles 收口，再决定是否切 `MoE`。
 
-### 优先级 B：维持当前执行主线稳态
+### 优先级 D：维持当前 live 主线稳态
 目标：
-- 保持当前默认执行链路可用、可复核、可回滚。
+- 保持当前默认执行链路可用、可回滚、可解释；
+- 避免研究候选静默替换 live 默认值。
 具体动作：
 1. 继续依赖 `latest_ml_model.json` 的验证摘要与模型新鲜度保护。
-2. 继续把执行端默认值明确解释为：
-   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
-3. 若后续继续做执行端长窗口正式复核，优先沿当前 shortlist 收口，不回退到更早已淘汰参数。
-4. 若重启坏市场专项，统一按“坏市场绝对收益”排序与验收。
+2. 继续把正式 live 默认值明确解释为：
+   - `advanced_ml_current_code_live_anchor (ma50 baseline, lgbm520 v250) + liquid500 + next_open`
+3. 任何研究候选若未完成同窗 formal 比较，不得口头升格为 live 默认值。
+4. 坏市场专项若重启，仍必须按“坏市场绝对收益”单独立题。
 
-### 优先级 C：用 `deep_alpha` 承接新机会集探索
-目标：
-- 把 `deep_alpha` 作为“新机会集 / 新 alpha 家族”的第一承接点之一；
-- 在不打断当前执行默认值的前提下，继续推动真正可能抬升年化前沿的研究线。
-具体动作：
-1. 固定正式框架：
-   - 历史滚动高流动性股票池
-   - `next_open`
-   - 多窗口 walk-forward
-2. 当前 backbone 已选出 `patch_transformer + no pretrain + manual + plain`。
-3. 在 strict rolling `liquid800` 这个更强新机会集里，当前唯一主前沿是 `liquid800_plain`；`ranked`、`controller`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都已在 formal 或 strict formal 下失利。
-4. `2026-03-31` 的新 universe strict head-to-head 也已把原始 `mamba` 降级为首轮失败分支；这条 backbone 先记结论，不再直接追加优化。
-5. 后续若继续做 `deep_alpha`，默认顺序收口为：先围绕 `dynamic_graph_v1` 做稳健性确认与图参数 / 先验消融；若动态图主线最终没法稳定守住新前沿，再切到 `state-conditioned MoE`；不要继续围绕 `plain/ranked/controller`、旧 `relation_layer` 或原始 `mamba` 做小修小补。
-6. 新分支仍应继续优先复用 per-window cache 与已落盘 artifact。
-
-### 优先级 D：把治理规则变成日常流程
+### 优先级 E：把治理规则变成日常流程
 目标：
 - 避免语义记忆、项目地图、工作记忆、环境模型、行动系统与情景记忆再次混写。
 具体动作：
@@ -282,6 +329,9 @@
 6. 所谓“坏市场盈利”若只体现为坏市场超额更高、但坏市场绝对收益仍持续为负，不得按坏市场盈利方案晋级。
 7. 当前 shortlist 的 head-to-head 若不能在同一正式口径下稳定分出胜负，则维持现默认值，不做口头升级。
 8. 若 cross-profile 攻守控制器已在同口径 formal 下证明“稳健性提升但年化不创新高”，则停止继续把当前参数空间当作第一研发前线。
+9. 若 execution 候选的主要优势只来自单个 `rebalance_offset`，而未通过 anchored all-offset ensemble 收口，不得按生产候选解释。
+10. 若旧 `score -> weight` 翻译器未在同口径 formal 下稳定跑赢 `target_weight` 直连桥，不得重新升格为默认桥接主线。
+11. 若 soft sizing 只改善回撤却压低年化前沿，则继续保留为 comparator，不晋级默认执行引擎。
 
 ## 8. 文档维护规则
 - `daily_research/brain/semantic_memory.md`

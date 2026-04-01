@@ -15,9 +15,62 @@ def has_arg(name: str) -> bool:
     return False
 
 
+def get_arg_value(name: str) -> str | None:
+    items = sys.argv[1:]
+    for idx, item in enumerate(items):
+        if item == name:
+            if idx + 1 >= len(items):
+                raise ValueError(f"Argument {name} expects a value.")
+            return items[idx + 1]
+        if item.startswith(name + "="):
+            return item.split("=", 1)[1]
+    return None
+
+
 def inject_default_arg(name: str, value: str) -> None:
     if not has_arg(name):
         sys.argv.extend([name, value])
+
+
+def inject_flag_arg(name: str) -> None:
+    if not has_arg(name):
+        sys.argv.append(name)
+
+
+def consume_option_arg(name: str) -> str | None:
+    items = sys.argv[1:]
+    rewritten = [sys.argv[0]]
+    captured: str | None = None
+    idx = 0
+    while idx < len(items):
+        item = items[idx]
+        if item == name:
+            if idx + 1 >= len(items):
+                raise ValueError(f"Argument {name} expects a value.")
+            captured = items[idx + 1]
+            idx += 2
+            continue
+        if item.startswith(name + "="):
+            captured = item.split("=", 1)[1]
+            idx += 1
+            continue
+        rewritten.append(item)
+        idx += 1
+    sys.argv = rewritten
+    return captured
+
+
+def consume_flag_arg(name: str) -> bool:
+    items = sys.argv[1:]
+    rewritten = [sys.argv[0]]
+    found = False
+    for item in items:
+        if item == name:
+            found = True
+            continue
+        rewritten.append(item)
+    sys.argv = rewritten
+    return found
 
 
 def is_help_request() -> bool:
