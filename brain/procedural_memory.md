@@ -5,6 +5,9 @@
 - 跨项目判断先进入主脑，再进入具体分脑
 - 新 agent 接手时，先读主脑 manifest，再读目标分脑 manifest
 - 若 brain 信息足够，不应先从全仓源码盲扫
+- 默认可执行入口：
+  - `python daily_research/tools/brain_bootstrap.py --child <brain_id>`
+  - 由脚本按 manifest 解出主脑优先的真实 boot order，而不是手工维护一份顺序副本
 
 ### 1.2 分脑自治
 - 分脑负责自身的语义记忆、工作记忆、程序记忆、环境模型、情景记忆与行动系统

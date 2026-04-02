@@ -33,6 +33,7 @@ class ResearchCandidateProfile:
     soft_state_profile: str = ""
     refresh_run_dir: str = ""
     trade_plan_refresh_run_dir: str = ""
+    trade_plan_model_manifest_json: str = ""
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,7 @@ PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         use_market_regime_filter=False,
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
         trade_plan_refresh_run_dir=str(_DYNAMIC_GRAPH_PRODUCTION_ROOT.resolve()),
+        trade_plan_model_manifest_json=str((_DYNAMIC_GRAPH_PRODUCTION_ROOT / "production_retrain_manifest.json").resolve()),
     ),
     "regon_k1_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regon_k1_10d_ensemble_native_anchor",
@@ -233,6 +235,8 @@ def apply_profile_defaults(profile_name: str, *, mode: str) -> ResearchCandidate
         inject_default_arg("--start-date", profile.trade_plan_start_date)
         inject_default_arg("--external-target-weight-csv", _target_weight_path_for_mode(profile, mode))
         inject_default_arg("--external-score-csv", _score_path_for_mode(profile, mode))
+        if profile.trade_plan_model_manifest_json:
+            inject_default_arg("--external-model-manifest", profile.trade_plan_model_manifest_json)
     else:
         raise ValueError(f"Unsupported profile application mode: {mode}")
     inject_default_arg("--candidate-label", _candidate_label_for_mode(profile, mode))

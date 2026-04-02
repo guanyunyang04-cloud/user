@@ -61,7 +61,22 @@
   - 同窗比较
   - 多窗口复核
 
-## 7. 建议阅读顺序
+## 7. `deep_alpha` 重训频率语义
+- `deep_alpha` 的重训频率结论已经有正式矩阵，不再只靠口头猜测。
+- 当前稳定结论只认：
+  - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1/frequency_summary_common_window.csv`
+- 在当前 `dynamic_graph_v1 + liquid500 + next_open` formal 口径下：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+- 因此：
+  - 研究侧不能再把“训练一次直接用一年”当作默认优先答案；
+  - 也不能把“重训越频繁越好”当成默认规律。
+- 这条语义只服务于 formal 研究与上线前重训节奏判断。
+- 生产边界不变：
+  - 每日默认流程不静默重训；
+  - 默认执行仍使用 `production full-fit`；
+  - 日常只刷新 `daily_live_*` 面板。
+
+## 8. 建议阅读顺序
 1. `semantic_memory.md`
 2. `working_memory.md`
 3. `action_system.md`

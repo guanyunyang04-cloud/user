@@ -62,6 +62,16 @@
 6. 读取目标分脑的 `brain_manifest.json`
 7. 按 `semantic -> working -> procedural -> environment -> action -> episodic` 进入
 
+可执行入口：
+
+- 只接主脑：
+  - `python daily_research/tools/brain_bootstrap.py`
+- 接主脑并进入 `daily_research`：
+  - `python daily_research/tools/brain_bootstrap.py --child daily_research`
+- 接主脑并进入其它分脑：
+  - `python daily_research/tools/brain_bootstrap.py --child t0_project`
+  - `python daily_research/tools/brain_bootstrap.py --child daily_stock_analysis-main`
+
 ## 6. 主脑维护动作
 - 新的长期说明、治理规则与协作方法，不再写进根 `README`
 - 分脑结构变更时，主脑与分脑的 `brain_manifest.json` 必须同步更新

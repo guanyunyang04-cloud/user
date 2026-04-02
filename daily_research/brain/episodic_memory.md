@@ -9001,3 +9001,157 @@ position,000001.SZ,1200,12.38,
    - 纯粹单开 `state_context` 不够
    - `state + liquidity + light ranking/listwise` 有真实价值
    - 第一版短线目标改写与额外日线短线输入暂时不成立
+
+## 2026-04-02 `deep_alpha` formal 重训频率矩阵
+
+### 背景
+- 用户明确追问：
+  - `deep_alpha` 是否考虑过模型重训频率对收益的影响；
+  - “训练一次直接用一年”与“隔一段时间重训一次”哪个更优。
+- 当时项目只有研究侧的一年级别 formal holdout 口径，以及生产侧“上线前做一次 production full-fit”的工程规则；
+  - 但还没有把 `deep_alpha` 本身跑成正式的 retrain-frequency comparator。
+- 因此这轮不再口头推断，直接补一份正式矩阵。
+
+### 新增脚本
+- 新增：
+  - `daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py`
+- 作用：
+  - 锚定当前 formal winner；
+  - 复用第一块 source formal slice；
+  - 后续块按指定 cadence 在块前重训；
+  - stitch `equity_curve / actions`；
+  - 同时输出 raw summary 与 common-window summary。
+
+### 协议
+- source formal winner：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+- source 边界：
+  - `train_end = 2025-03-17`
+  - `valid_start = 2025-03-18`
+  - `valid_end = 2026-03-31`
+- 统一口径：
+  - `dynamic_graph_v1`
+  - `liquid500`
+  - `next_open`
+  - 只改重训 cadence，不改 winner config 其他参数
+- 比较频率：
+  - `annual_freeze`
+  - `quarterly_63d`
+  - `monthly_calendar`
+  - `every_21d`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1`
+
+### 关键边界修正
+- 跑完后先发现一个协议细节：
+  - `Freeze 1Y` 的 raw stitched 数据自然落到了 `2026-03-30`
+  - 分块重训频率的 raw stitched 数据实际只落到 `2026-03-27`
+- 若直接混用 raw 末日做 leaderboard，会让 `Freeze 1Y` 多吃最后一个执行日，不够公平。
+- 因此补修 runner：
+  - 保留 `frequency_summary.csv` 作为 raw stitched 汇总
+  - 新增 `frequency_summary_common_window.csv` 作为共同比较窗口汇总
+  - 最终 leaderboard 固定基于共同窗口
+- 这轮共同比较窗口为：
+  - `2025-03-18 -> 2026-03-27`
+
+### 结果
+- 共同比较窗口口径：
+  - `Retrain Monthly`
+    - `excess_annual_return = 36.71%`
+    - `excess_sharpe = 1.484`
+    - `excess_max_drawdown = -16.75%`
+    - `avg_turnover = 1.451`
+  - `Retrain 63D`
+    - `excess_annual_return = 21.47%`
+    - `excess_sharpe = 0.991`
+    - `excess_max_drawdown = -13.35%`
+    - `avg_turnover = 1.357`
+  - `Freeze 1Y`
+    - `excess_annual_return = 6.35%`
+    - `excess_sharpe = 0.262`
+    - `excess_max_drawdown = -19.35%`
+    - `avg_turnover = 1.492`
+  - `Retrain 21D`
+    - `excess_annual_return = 3.68%`
+    - `excess_sharpe = 0.208`
+    - `excess_max_drawdown = -13.47%`
+    - `avg_turnover = 1.405`
+- 排名：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+
+### 运行与校验
+- 正式运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_retrain_frequency_formal_matrix.py --frequencies annual_freeze,quarterly_63d,monthly_calendar,every_21d --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"`
+- 过程里先单独完成了：
+  - `annual_freeze`
+  - `quarterly_63d`
+- 再统一补跑剩余频率并复用已有 block。
+- 脚本校验：
+  - `python -m py_compile daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py`
+- 文档与协议辅助产物：
+  - `block_plan.csv`
+  - `block_detail.csv`
+  - `frequency_summary.csv`
+  - `frequency_summary_common_window.csv`
+  - `summary.md`
+  - `source_runs.json`
+
+### 当前结论
+1. `deep_alpha` 已经有正式实验答案：在当前 formal 口径下，冻结一年明显不是最优。
+2. 更频繁重训确实可能带来显著收益提升，但不是越频繁越好；当前最好的是月度，不是 `21D`。
+3. 这条结论用于研究侧与上线前重训节奏判断，不改变“每日默认流程不静默重训”的 production 边界。
+4. 后续若要继续推进：
+   - 优先围绕 `monthly` 与 `63D` 两档做更长窗或多机会集复验；
+   - 不再把 `Freeze 1Y` 当作 `deep_alpha` 的默认研究解释。
+
+## 2026-04-02 `deep_alpha` 重训频率结论同步到执行端
+
+### 背景
+- formal 矩阵已经给出明确结论：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+- 但执行端此前只检查：
+  - `daily_live_*` 面板是不是最新
+- 这会漏掉一个关键问题：
+  - 面板可以每天刷新，但底层 production 模型可能已经超过应重训的节奏。
+
+### 代码改动
+- 更新：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+  - `daily_research/execution/update_default_candidate_production.py`
+- 同步当前 production manifest：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+
+### 同步内容
+- 默认执行候选现在会把 production manifest 一并注入 `run_trade_plan.py`。
+- `generate_daily_trade_plan.py` 在外部 target-weight 候选模式下，除了检查候选源信号日新鲜度，还会额外检查：
+  - 底层 production 模型最近一次 `launch_cutoff_date`
+  - formal 矩阵同步过来的重训阈值
+- 当前执行侧阈值固定为：
+  - 提醒：`21` 个交易日
+  - 拦截：`63` 个交易日
+- `update_default_candidate_production.py` 以后新写出的 production manifest 也会自动带上这套策略。
+- `train_end_date` 仍保留展示，但只作为监督样本截止信息，不再误当作“上次重训时间”。
+
+### 验证
+- 重新运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py`
+- 新输出目录：
+  - `daily_research/execution/output/20260402`
+- 最新建议文件：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+- 结果显示：
+  - 候选源信号日仍然是最新；
+  - 底层模型 `train_end_date = 2026-03-03` 会单独展示；
+  - 真正用于重训时效判断的是 `launch_cutoff_date = 2026-04-01`
+  - 相对 `2026-04-02` 只滞后 `1` 个交易日
+  - 因而当前状态仍是“最新”，没有误触发月度重训提醒。
+
+### 当前结论
+1. 重训频率实验结果现在已经真正进入执行侧，而不是只停留在研究文档里。
+2. 默认执行仍不静默重训，但现在会区分：
+   - 面板新鲜度
+   - 底层模型最近一次重训上线时效
+3. 下一次 production full-fit 更新，应该优先通过：
+   - `daily_research/execution/update_default_candidate_production.py`
+   来更新这条时效计时器。

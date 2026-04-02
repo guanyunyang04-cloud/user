@@ -106,6 +106,9 @@ def parse_args():
     parser.add_argument("--external-score-column", default="latest_score", help="Score column name inside external score CSV.")
     parser.add_argument("--external-target-weight-csv", default="", help="Optional external target-weight CSV, e.g. deep_alpha daily_target_weight_panel.csv")
     parser.add_argument("--external-target-weight-column", default="target_weight", help="Target-weight column name inside external target-weight CSV.")
+    parser.add_argument("--external-model-manifest", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-model-warn-trading-days", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--external-model-max-trading-days", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--target-weight-top-k", type=int, default=0, help="Optional top-k crop applied to direct target-weight rows. 0 keeps all names.")
     parser.add_argument("--target-weight-min-weight", type=float, default=0.0, help="Optional minimum weight threshold applied to direct target-weight rows before renormalization.")
     parser.add_argument("--target-weight-power", type=float, default=1.0, help="Optional power transform applied to positive direct target weights before renormalization.")
@@ -189,6 +192,15 @@ def _load_artifact_meta(artifact_path: Path) -> dict[str, Any]:
         return {}
     try:
         return json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_json_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -285,6 +297,111 @@ def _assess_external_signal_freshness(
         max_trading_days=max_trading_days,
     )
     result["latest_completed_trading_date"] = str(latest_completed.date())
+    return result
+
+
+def _coerce_positive_int(raw: object) -> int:
+    try:
+        value = int(raw)
+    except Exception:
+        return 0
+    return value if value > 0 else 0
+
+
+def _assess_external_model_retrain_freshness(
+    *,
+    manifest_path: Path,
+    latest_signal_date: pd.Timestamp,
+    trading_dates: pd.Index,
+    warn_trading_days: int,
+    max_trading_days: int,
+) -> dict[str, Any]:
+    manifest = _load_json_payload(manifest_path)
+    policy = manifest.get("retrain_frequency_policy") if isinstance(manifest.get("retrain_frequency_policy"), dict) else {}
+    resolved_warn = _coerce_positive_int(warn_trading_days) or _coerce_positive_int(policy.get("warn_after_trading_days"))
+    resolved_max = _coerce_positive_int(max_trading_days) or _coerce_positive_int(policy.get("block_after_trading_days"))
+    preferred_label = str(policy.get("preferred_label", "")).strip()
+    comparison_window = str(policy.get("comparison_window", "")).strip()
+    leaderboard_csv = str(policy.get("leaderboard_csv", "")).strip()
+    train_end_date = _safe_timestamp(
+        manifest.get("train_end_date")
+        or manifest.get("train_end")
+        or manifest.get("latest_trainable_date")
+    )
+    created_at = _safe_timestamp(manifest.get("created_at"))
+    launch_cutoff_date = _safe_timestamp(manifest.get("launch_cutoff_date"))
+    if launch_cutoff_date is None and created_at is not None:
+        launch_cutoff_date = pd.Timestamp(created_at).normalize()
+    result: dict[str, Any] = {
+        "status": "unknown",
+        "status_text": "未配置",
+        "train_end_date": str(train_end_date.date()) if train_end_date is not None else "",
+        "launch_cutoff_date": str(launch_cutoff_date.date()) if launch_cutoff_date is not None else "",
+        "created_at": str(created_at) if created_at is not None else "",
+        "manifest_path": str(manifest_path),
+        "active_production_run_dir": str(manifest.get("active_production_run_dir", "")),
+        "preferred_label": preferred_label,
+        "comparison_window": comparison_window,
+        "leaderboard_csv": leaderboard_csv,
+        "warn_trading_days": int(resolved_warn),
+        "max_trading_days": int(resolved_max),
+        "trading_day_lag": None,
+        "latest_completed_trading_date": str(pd.Timestamp(latest_signal_date).date()),
+        "warnings": [],
+        "should_block": False,
+    }
+    if not manifest:
+        result["warnings"].append(
+            f"未找到 production manifest：{manifest_path}；无法检查底层模型是否已超过月度重训节奏。"
+        )
+        return result
+    if train_end_date is None:
+        result["warnings"].append(
+            f"production manifest 缺少 train_end_date：{manifest_path}；无法检查底层模型重训时效。"
+        )
+        return result
+    if launch_cutoff_date is None:
+        result["warnings"].append(
+            f"production manifest 缺少 launch_cutoff_date：{manifest_path}；无法检查底层模型最近一次重训上线时效。"
+        )
+        return result
+    if resolved_warn <= 0 and resolved_max <= 0:
+        result["status_text"] = "未设阈值"
+        result["warnings"].append(
+            f"production manifest 未提供重训阈值：{manifest_path}；无法按研究结论检查月度重训时效。"
+        )
+        return result
+
+    freshness = _assess_model_freshness(
+        artifact_meta={
+            "latest_data_date": str(launch_cutoff_date.date()),
+            "trained_at": str(created_at) if created_at is not None else "",
+        },
+        latest_signal_date=pd.Timestamp(latest_signal_date),
+        trading_dates=trading_dates,
+        warn_trading_days=resolved_warn,
+        max_trading_days=resolved_max,
+    )
+    result.update(
+        {
+            "status": str(freshness.get("status", "unknown")),
+            "status_text": str(freshness.get("status_text", "未知")),
+            "trading_day_lag": freshness.get("trading_day_lag"),
+            "should_block": bool(freshness.get("should_block", False)),
+        }
+    )
+    lag = freshness.get("trading_day_lag")
+    latest_signal_text = str(pd.Timestamp(latest_signal_date).date())
+    if freshness.get("status") == "warning":
+        result["warnings"].append(
+            f"production full-fit 最近一次上线截止日={launch_cutoff_date.date()}，相对当前信号日 {latest_signal_text} 已滞后 {lag} 个交易日，达到月度重训提醒阈值 {resolved_warn}；建议尽快运行 daily_research/execution/update_default_candidate_production.py。"
+        )
+    elif freshness.get("status") == "blocked":
+        result["warnings"].append(
+            f"production full-fit 最近一次上线截止日={launch_cutoff_date.date()}，相对当前信号日 {latest_signal_text} 已滞后 {lag} 个交易日，达到重训拦截阈值 {resolved_max}；请先运行 daily_research/execution/update_default_candidate_production.py。"
+        )
+    elif freshness.get("status") == "future":
+        result["warnings"].extend(list(freshness.get("warnings", [])))
     return result
 
 
@@ -1171,6 +1288,23 @@ def _write_trade_plan_txt(
         if model_info.get("latest_completed_trading_date"):
             freshness_line += f" | 最新完成交易日 {model_info['latest_completed_trading_date']}"
         lines.append(freshness_line)
+    if model_info.get("production_model_train_end_date"):
+        lines.append(f"底层模型训练样本截止: {model_info['production_model_train_end_date']}")
+    if model_info.get("production_model_launch_cutoff_date"):
+        lines.append(f"底层模型最近一次上线截止: {model_info['production_model_launch_cutoff_date']}")
+    if model_info.get("production_model_retrain_policy"):
+        lines.append(f"底层模型重训策略: {model_info['production_model_retrain_policy']}")
+    if model_info.get("production_model_retrain_window"):
+        lines.append(f"重训研究比较窗: {model_info['production_model_retrain_window']}")
+    if model_info.get("production_model_retrain_status"):
+        retrain_line = f"{model_info.get('production_model_retrain_label', '底层模型重训时效')}: {model_info['production_model_retrain_status']}"
+        if model_info.get("production_model_retrain_trading_day_lag") is not None:
+            retrain_line += f" | 交易日滞后 {model_info['production_model_retrain_trading_day_lag']}"
+        if model_info.get("production_model_retrain_warn_trading_days"):
+            retrain_line += f" | 提醒阈值 {model_info['production_model_retrain_warn_trading_days']}"
+        if model_info.get("production_model_retrain_max_trading_days"):
+            retrain_line += f" | 拦截阈值 {model_info['production_model_retrain_max_trading_days']}"
+        lines.append(retrain_line)
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):
         lines.append(
@@ -2076,6 +2210,47 @@ def main_with_progress():
                         "warnings": warnings,
                     }
                 )
+                external_model_manifest = (
+                    Path(args.external_model_manifest).expanduser()
+                    if str(args.external_model_manifest).strip()
+                    else None
+                )
+                if external_model_manifest is not None:
+                    retrain_info = _assess_external_model_retrain_freshness(
+                        manifest_path=external_model_manifest,
+                        latest_signal_date=pd.Timestamp(signal_date),
+                        trading_dates=factor_bundle["raw_inputs"]["Close"].index,
+                        warn_trading_days=args.external_model_warn_trading_days,
+                        max_trading_days=args.external_model_max_trading_days,
+                    )
+                    warnings = list(model_info.get("warnings", []))
+                    warnings.extend(retrain_info.get("warnings", []))
+                    if retrain_info.get("should_block") and args.allow_stale_model:
+                        warnings.append("已使用 --allow-stale-model 放行过期 production 重训节奏，请谨慎执行。")
+                    for warning in retrain_info.get("warnings", []):
+                        progress.log(f"[warning] {warning}")
+                    if retrain_info.get("should_block") and not args.allow_stale_model:
+                        raise RuntimeError(
+                            "External candidate underlying production model reached retrain blocking threshold. "
+                            "Run daily_research/execution/update_default_candidate_production.py or pass --allow-stale-model explicitly."
+                        )
+                    model_info.update(
+                        {
+                            "warnings": warnings,
+                            "production_model_train_end_date": str(retrain_info.get("train_end_date", "")),
+                            "production_model_launch_cutoff_date": str(retrain_info.get("launch_cutoff_date", "")),
+                            "production_model_retrain_status": str(retrain_info.get("status_text", "")),
+                            "production_model_retrain_label": "底层模型重训时效",
+                            "production_model_retrain_trading_day_lag": retrain_info.get("trading_day_lag"),
+                            "production_model_retrain_warn_trading_days": retrain_info.get("warn_trading_days"),
+                            "production_model_retrain_max_trading_days": retrain_info.get("max_trading_days"),
+                            "production_model_retrain_manifest": str(retrain_info.get("manifest_path", "")),
+                            "production_model_retrain_policy": str(retrain_info.get("preferred_label", "")),
+                            "production_model_retrain_window": str(retrain_info.get("comparison_window", "")),
+                            "production_model_retrain_leaderboard_csv": str(retrain_info.get("leaderboard_csv", "")),
+                            "production_model_active_run_dir": str(retrain_info.get("active_production_run_dir", "")),
+                        }
+                    )
             target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
                 args=args,
                 regime_state=regime_state,
@@ -2115,6 +2290,16 @@ def main_with_progress():
                 summary["candidate_total_rows"] = int(model_info.get("candidate_total_rows", 0) or 0)
                 summary["candidate_usable_rows"] = int(model_info.get("candidate_usable_rows", 0) or 0)
                 summary["candidate_dropped_rows"] = int(model_info.get("candidate_dropped_rows", 0) or 0)
+                if model_info.get("production_model_train_end_date"):
+                    summary["production_model_train_end_date"] = str(model_info.get("production_model_train_end_date", ""))
+                    summary["production_model_launch_cutoff_date"] = str(model_info.get("production_model_launch_cutoff_date", ""))
+                    summary["production_model_retrain_status"] = str(model_info.get("production_model_retrain_status", ""))
+                    summary["production_model_retrain_trading_day_lag"] = model_info.get("production_model_retrain_trading_day_lag")
+                    summary["production_model_retrain_warn_trading_days"] = model_info.get("production_model_retrain_warn_trading_days")
+                    summary["production_model_retrain_max_trading_days"] = model_info.get("production_model_retrain_max_trading_days")
+                    summary["production_model_retrain_manifest"] = str(model_info.get("production_model_retrain_manifest", ""))
+                    summary["production_model_retrain_policy"] = str(model_info.get("production_model_retrain_policy", ""))
+                    summary["production_model_retrain_window"] = str(model_info.get("production_model_retrain_window", ""))
             elif external_score_path is not None:
                 summary["candidate_score_csv"] = str(external_score_path)
                 summary["candidate_label"] = str(model_info.get("candidate_label", ""))

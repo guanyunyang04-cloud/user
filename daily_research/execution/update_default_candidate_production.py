@@ -330,12 +330,28 @@ def _write_production_manifest(
     train_start_date: str,
 ) -> None:
     timestamp = pd.Timestamp.now().isoformat()
+    retrain_frequency_root = Path("daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1").resolve()
+    retrain_frequency_csv = retrain_frequency_root / "frequency_summary_common_window.csv"
     manifest = {
         "mode": "production_fullfit",
         "policy": {
             "research_protocol": "最近一年 formal holdout 只用于研究判决，不与 production full-fit 混报。",
             "production_protocol": "winner 冻结后，使用截至上线前的全部可标注数据重训一次，再刷新到最新完成交易日上线。",
             "evidence_boundary": "production full-fit 结果不得回填成 formal holdout 证据。",
+        },
+        "retrain_frequency_policy": {
+            "runner": "daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py",
+            "research_output_dir": str(retrain_frequency_root),
+            "leaderboard_csv": str(retrain_frequency_csv),
+            "leaderboard_basis": "common comparison window",
+            "comparison_window": "2025-03-18 -> 2026-03-27",
+            "preferred_cadence": "monthly_calendar",
+            "preferred_label": "Retrain Monthly",
+            "secondary_cadence": "quarterly_63d",
+            "secondary_label": "Retrain 63D",
+            "warn_after_trading_days": 21,
+            "block_after_trading_days": 63,
+            "notes": "2026-04-02 formal matrix: Monthly > 63D > Freeze 1Y > 21D. Execution side should warn once the production model exceeds about one monthly retrain window, and block once it drifts past the 63-trading-day guardrail unless explicitly overridden.",
         },
         "source_formal_run_dir": str(source_run_dir.resolve()),
         "active_production_run_dir": str(run_dir.resolve()),
@@ -361,6 +377,8 @@ def _write_production_manifest(
         f"- launch_cutoff_date: `{latest_completed_date}`",
         f"- internal_monitor_start_date: `{internal_monitor_start_date}`",
         f"- internal_monitor_days: `{internal_monitor_days}`",
+        "- retrain_frequency_policy: `Retrain Monthly` preferred, `Retrain 63D` secondary, warn at `21` trading days, block at `63` trading days",
+        f"- retrain_frequency_leaderboard: `{retrain_frequency_csv.as_posix()}`",
         "- note: 本目录只用于日常 production 信号，不作为 formal holdout 证据。",
     ]
     (production_root / "production_retrain_summary.md").write_text(

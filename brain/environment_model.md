@@ -3,7 +3,7 @@
 ## 1. 根环境
 - 工作区根目录：`H:\new_tdx64\PYPlugins\user`
 - 默认 Shell：`PowerShell`
-- 当前日期：`2026-03-31`
+- 当前日期：`2026-04-02`
 - 时区：`Asia/Shanghai`
 
 ## 2. 共享解释器
@@ -13,6 +13,9 @@
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
 
 ## 3. 共享工具
+- 主脑接入解析：
+  - `python daily_research/tools/brain_bootstrap.py`
+  - `python daily_research/tools/brain_bootstrap.py --child daily_research`
 - 脑网络守卫：
   - `python daily_research/tools/doc_guard.py check`
 - 工作区体检：
@@ -34,3 +37,4 @@
 ## 5. 根级维护原则
 - 根级只维护脑结构、共享工具链和跨项目治理
 - 项目内部环境细节写进各自分脑的 `environment_model.md`
+- 新 agent 默认先用 `brain_bootstrap.py` 解出主脑/分脑接入顺序，再进入具体 body

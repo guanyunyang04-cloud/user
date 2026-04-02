@@ -148,6 +148,9 @@
 - 新 agent 接手 `daily_research` 时，默认先读：
   - `brain/brain_manifest.json`
   - `daily_research/brain/brain_manifest.json`
+- 默认优先直接执行：
+  - `python daily_research/tools/brain_bootstrap.py --child daily_research`
+- 该脚本会先解析主脑，再解析 `daily_research` 分脑，并输出当前 manifest 对应的实际接入顺序
 - 然后再按顺序进入：
   - `semantic_memory.md`
   - `working_memory.md`
@@ -179,6 +182,19 @@
   - 可复用方法写 `procedural_memory.md`
   - 本轮证据链写 `episodic_memory.md`
   - 若结论推翻当前默认判断，再同步 `working_memory.md` 与 `action_system.md`
+
+### 3.5 `next_open` 重训频率矩阵的评分口径
+- 对 `deep_alpha` 这类 `next_open` + blockwise retrain 的 formal 矩阵，排行榜不能直接混用各频率的 raw stitched 末日。
+- 原因是：
+  - source formal freeze 可能自然落到更晚的执行日；
+  - 分块重训 run 的最后一块可能因为实际可执行边界，只落到更早的末日。
+- 标准动作是同时输出两层汇总：
+  - raw stitched summary
+  - common comparison window summary
+- 最终 leaderboard、研究判决与脑内回写，默认一律基于共同比较窗口。
+- 当前 `deep_alpha_retrain_frequency_formal_20260402_r1` 的共同窗口就是：
+  - `2025-03-18 -> 2026-03-27`
+- 这类 runner 若已经按 block 落盘，不要换新 tag 重跑；优先复用同一个 `root-tag`，补逻辑后直接重算 summary。
 
 ## 4. Gemini 协同状态
 ### 4.1 当前结论

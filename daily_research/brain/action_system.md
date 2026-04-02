@@ -54,12 +54,16 @@
   - 保持日常执行稳定
   - 避免把研究阶段的漂移直接带进每日计划
   - 让“默认执行”和“研究升级”分开管理
+- 默认 production 候选还会额外检查：
+  - `production_retrain_manifest.json` 中记录的重训节奏策略
+  - 当前同步口径为：按最近一次 production 上线截止日计算，提醒阈值 `21` 个交易日，拦截阈值 `63` 个交易日
 
 ### 需要重训的情况
 - 股票池边界、交易约束、执行口径发生实质变化。
 - 默认候选正式表现明显退化，或现实成本复核失效。
 - 研究侧出现新的正式 winner，并准备进入执行升级比较。
 - 上游研究 run 需要重新生成正式产物，而不仅仅是刷新 live 面板。
+- 默认 production 候选虽然面板仍是最新，但底层模型已达到月度重训提醒线。
 
 ### 当前默认候选的重训入口
 ```powershell
@@ -76,6 +80,10 @@
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\export_live_panels_from_run.py --run-dir daily_research\output\deep_alpha_liquid500_dynamic_graph_bridge_production_default
 ```
+
+- 注意：
+  - 这一步只能更新 `daily_live_*` 面板的新鲜度；
+  - 不能消除底层 production 模型的重训时效提醒。
 
 ## 5. 显式回退流程
 ### 第 1 步：仅在需要时刷新旧机器学习产物
@@ -146,6 +154,19 @@
 - 当前正式结论：
   - `state_liquidity_listwise_v1` 不是 recent-window lucky run
   - 但第一窗仍退化，下一步先做 execution objective 对齐，不直接升格为默认执行候选
+
+### 运行 `deep_alpha` 重训频率 formal 矩阵
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_retrain_frequency_formal_matrix.py --frequencies annual_freeze,quarterly_63d,monthly_calendar,every_21d --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+- 当前正式输出：
+  - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1`
+- 排行榜读取口径：
+  - `frequency_summary_common_window.csv`
+- 如需补跑中断实验：
+  - 继续复用同一个 `root-tag`
+  - runner 会自动复用已完成 block，不要另起新 tag 从头重训
 
 ## 8. 诊断与维护
 ### 性能分化报告
