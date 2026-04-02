@@ -14,7 +14,7 @@
 - 执行方式：盘后生成计划，次日开盘人工执行。
 - 成交假设：`next_open`。
 - 默认 Python 环境：`yolos`。
-- 日常生成计划时不允许静默重训模型。
+- 日常生成计划时不允许无条件静默重训模型；仅允许默认 production 候选按固定 `Retrain Monthly` 规则自动重训。
 
 ## 3. 当前稳定默认
 - 每日默认执行策略：
@@ -27,7 +27,7 @@
 - 默认候选源文件：
   - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_score_panel.csv`
   - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_target_weight_panel.csv`
-- 默认入口会在不重训的前提下，按已训练模型自动刷新默认候选 live 面板。
+- 默认入口会先按 `Retrain Monthly` 规则检查默认 production 候选是否已跨入新的自然月；若已跨月则先自动重训 production full-fit，否则只按已训练模型刷新默认候选 live 面板。
 - formal 研究证据单独保留在：
   - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
 - production full-fit 证据边界：
@@ -70,11 +70,12 @@
 - 因此：
   - 研究侧不能再把“训练一次直接用一年”当作默认优先答案；
   - 也不能把“重训越频繁越好”当成默认规律。
-- 这条语义只服务于 formal 研究与上线前重训节奏判断。
-- 生产边界不变：
-  - 每日默认流程不静默重训；
+- 这条语义现在同时服务于 formal 研究、上线前重训节奏判断与默认执行自动重训规则。
+- 生产边界当前固定为：
   - 默认执行仍使用 `production full-fit`；
-  - 日常只刷新 `daily_live_*` 面板。
+  - 当最近一次 `launch_cutoff_date` 已跨入新的自然月时，`run_trade_plan.py` 会按 `Retrain Monthly` 自动重训；
+  - 未跨月时只刷新 `daily_live_*` 面板；
+  - 底层模型仍保留 `21` 个交易日提醒与 `63` 个交易日拦截护栏。
 
 ## 8. 建议阅读顺序
 1. `semantic_memory.md`

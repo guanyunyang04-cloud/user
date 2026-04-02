@@ -9155,3 +9155,53 @@ position,000001.SZ,1200,12.38,
 3. 下一次 production full-fit 更新，应该优先通过：
    - `daily_research/execution/update_default_candidate_production.py`
    来更新这条时效计时器。
+
+## 2026-04-02 默认执行按 `Retrain Monthly` 自动重训
+
+### 背景
+- 用户要求把执行端从“只提醒月度重训”进一步推进到“默认按 `Retrain Monthly` 自动重训”。
+- 既有 formal 结论已经明确：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+- 因此这次不再停留在提醒/拦截层，而是把默认执行入口真正接到月度 production 重训上。
+
+### 代码改动
+- 更新：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/update_default_candidate_production.py`
+- 同步当前 live production 策略文件：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_summary.md`
+
+### 实现口径
+- 默认 trade-plan 候选现在会先读取 `production_retrain_manifest.json`。
+- 自动重训只在以下条件满足时触发：
+  - `auto_retrain_enabled = true`
+  - `auto_retrain_mode = monthly_calendar`
+  - 最近一次 `launch_cutoff_date` 相对最新完成交易日已经跨入新的自然月
+- 若尚未跨月：
+  - 不会重训
+  - 仍只刷新 `daily_live_*` 面板
+- 为了不丢掉旧护栏：
+  - manifest 仍保留 `warn_after_trading_days = 21`
+  - 仍保留 `block_after_trading_days = 63`
+  - `generate_daily_trade_plan.py` 继续显示这两层时效状态
+
+### manifest 新增字段
+- `auto_retrain_enabled = true`
+- `auto_retrain_mode = monthly_calendar`
+- `auto_retrain_trigger = next_calendar_month_after_launch_cutoff`
+- `auto_retrain_fallback_trading_days = 21`
+
+### 验证
+- 语法校验：
+  - `python -m py_compile daily_research/execution/research_candidate_profiles.py`
+  - `python -m py_compile daily_research/execution/update_default_candidate_production.py`
+- 实跑：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py`
+- 文档校验：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\doc_guard.py check`
+
+### 当前结果
+1. 默认执行入口已经具备“按 `Retrain Monthly` 自动重训”的能力，不再只是停留在提醒。
+2. 今天的 live manifest `launch_cutoff_date = 2026-04-01`，最新完成交易日也是 `2026-04-02` 所在自然月，因此本次验证运行不会误触发自动重训。
+3. 下一次跨到新的自然月后，默认 `run_trade_plan.py` 会先触发 `production full-fit` 自动重训，再继续生成交易计划。

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
 import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
@@ -40,6 +45,7 @@ _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
 _DYNAMIC_GRAPH_FORMAL_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1"
 _DYNAMIC_GRAPH_PRODUCTION_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_production_default"
 _EXECALIGN_AUTO_R4_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4"
+_UPDATE_DEFAULT_PRODUCTION_SCRIPT = (_DAILY_RESEARCH_ROOT / "execution" / "update_default_candidate_production.py").resolve()
 
 
 def _source(name: str) -> str:
@@ -168,6 +174,127 @@ def _read_panel_latest_date(path_str: str) -> pd.Timestamp | None:
     return pd.Timestamp(dates.max())
 
 
+def _load_json_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _safe_timestamp(raw: object) -> pd.Timestamp | None:
+    if raw in {None, ""}:
+        return None
+    try:
+        return pd.Timestamp(raw)
+    except Exception:
+        return None
+
+
+def _coerce_positive_int(raw: object) -> int:
+    try:
+        value = int(raw)
+    except Exception:
+        return 0
+    return value if value > 0 else 0
+
+
+def _estimate_trading_day_lag(start_date: pd.Timestamp, end_date: pd.Timestamp) -> int:
+    start_ts = pd.Timestamp(start_date).normalize()
+    end_ts = pd.Timestamp(end_date).normalize()
+    if end_ts <= start_ts:
+        return 0
+    return max(len(pd.bdate_range(start=start_ts, end=end_ts)) - 1, 0)
+
+
+def _build_auto_retrain_plan(
+    *,
+    manifest_path: Path,
+    latest_completed: pd.Timestamp,
+) -> dict[str, Any]:
+    manifest = _load_json_payload(manifest_path)
+    policy = manifest.get("retrain_frequency_policy") if isinstance(manifest.get("retrain_frequency_policy"), dict) else {}
+    launch_cutoff_date = _safe_timestamp(manifest.get("launch_cutoff_date"))
+    created_at = _safe_timestamp(manifest.get("created_at"))
+    if launch_cutoff_date is None and created_at is not None:
+        launch_cutoff_date = pd.Timestamp(created_at).normalize()
+    preferred_cadence = str(policy.get("auto_retrain_mode") or policy.get("preferred_cadence") or "").strip()
+    auto_retrain_enabled = bool(policy.get("auto_retrain_enabled", False))
+    fallback_trading_days = (
+        _coerce_positive_int(policy.get("auto_retrain_fallback_trading_days"))
+        or _coerce_positive_int(policy.get("warn_after_trading_days"))
+    )
+    plan: dict[str, Any] = {
+        "enabled": auto_retrain_enabled,
+        "manifest": manifest,
+        "policy": policy,
+        "launch_cutoff_date": launch_cutoff_date,
+        "preferred_cadence": preferred_cadence,
+        "fallback_trading_days": fallback_trading_days,
+        "estimated_trading_day_lag": None,
+        "should_retrain": False,
+        "reason": "",
+    }
+    if not auto_retrain_enabled or launch_cutoff_date is None or latest_completed <= launch_cutoff_date:
+        return plan
+
+    lag = _estimate_trading_day_lag(launch_cutoff_date, latest_completed)
+    plan["estimated_trading_day_lag"] = int(lag)
+
+    if preferred_cadence == "monthly_calendar":
+        if latest_completed.to_period("M") > launch_cutoff_date.to_period("M"):
+            plan["should_retrain"] = True
+            plan["reason"] = (
+                f"launch_cutoff_date={launch_cutoff_date.date()} 已跨到新自然月 "
+                f"{latest_completed.strftime('%Y-%m')}，按 Retrain Monthly 自动重训。"
+            )
+        return plan
+
+    if fallback_trading_days > 0 and lag >= fallback_trading_days:
+        plan["should_retrain"] = True
+        plan["reason"] = (
+            f"launch_cutoff_date={launch_cutoff_date.date()} 相对最新完成交易日 "
+            f"{latest_completed.date()} 估算已滞后 {lag} 个交易日，达到自动重训阈值 {fallback_trading_days}。"
+        )
+    return plan
+
+
+def _maybe_auto_retrain_production(profile: ResearchCandidateProfile, *, mode: str) -> None:
+    if mode != "trade_plan" or not profile.trade_plan_model_manifest_json:
+        return
+    manifest_path = Path(profile.trade_plan_model_manifest_json)
+    latest_completed = pd.Timestamp(get_latest_completed_trading_date())
+    plan = _build_auto_retrain_plan(manifest_path=manifest_path, latest_completed=latest_completed)
+    if not plan.get("enabled"):
+        return
+    if not plan.get("should_retrain"):
+        print(
+            "production_retrain_status=monthly_auto_ready"
+            f" launch_cutoff_date={plan.get('launch_cutoff_date').date() if plan.get('launch_cutoff_date') is not None else ''}"
+            f" latest_completed_date={latest_completed.date()}"
+        )
+        return
+
+    manifest = plan.get("manifest") if isinstance(plan.get("manifest"), dict) else {}
+    cmd = [sys.executable, str(_UPDATE_DEFAULT_PRODUCTION_SCRIPT), "--end-date", latest_completed.strftime("%Y%m%d")]
+    source_run_dir = str(manifest.get("source_formal_run_dir", "")).strip()
+    production_root = str(manifest.get("production_root", "")).strip()
+    if source_run_dir:
+        cmd.extend(["--source-run-dir", source_run_dir])
+    if production_root:
+        cmd.extend(["--production-root", production_root])
+
+    print("production_retrain_status=monthly_auto_triggered")
+    print(f"production_retrain_reason={plan.get('reason', '')}")
+    subprocess.run(
+        cmd,
+        check=True,
+        cwd=str(_DAILY_RESEARCH_ROOT.parent),
+    )
+
+
 def _trade_plan_target_weight_path(profile: ResearchCandidateProfile) -> str:
     return profile.trade_plan_target_weight_panel_csv or profile.target_weight_panel_csv
 
@@ -205,6 +332,7 @@ def _candidate_label_for_mode(profile: ResearchCandidateProfile, mode: str) -> s
 
 
 def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None:
+    _maybe_auto_retrain_production(profile, mode=mode)
     refresh_run_dir = _refresh_run_dir_for_mode(profile, mode)
     if not refresh_run_dir:
         return

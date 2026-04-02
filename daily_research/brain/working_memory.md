@@ -104,16 +104,16 @@
   - 模型不应再按“一次训练直接冻一年”来理解；
   - 月度重训明显优于一年冻结；
   - 但更高频的 `21D` 并没有继续变好，说明不是越频繁越优。
-- 这条结论只用于研究侧判断与上线前重训节奏评估。
-- 日常默认流程仍保持：
+- 这条结论现在已经进入默认执行侧。
+- 日常默认流程当前固定为：
   - 使用 `production full-fit`
-  - 不做静默定时重训
-  - 只刷新 `daily_live_*` 面板
+  - 当最近一次 `launch_cutoff_date` 已跨入新的自然月时，按 `Retrain Monthly` 自动重训
+  - 未跨月时只刷新 `daily_live_*` 面板
 - 执行侧现已同步：
-  - `run_trade_plan.py` 会继续把 `daily_live_*` 面板刷新到最新；
-  - 同时读取 `production_retrain_manifest.json`；
-  - 当底层 production 模型最近一次上线截止日相对当前信号日滞后达到 `21` 个交易日时给出月度重训提醒；
-  - 达到 `63` 个交易日时默认拦截，除非显式 `--allow-stale-model` 放行。
+  - `run_trade_plan.py` 会先读取 `production_retrain_manifest.json`；
+  - 若 `launch_cutoff_date` 已跨入新的自然月，则自动调用 `update_default_candidate_production.py`；
+  - 完成后再把 `daily_live_*` 面板刷新到最新；
+  - 同时仍保留 `21` 个交易日提醒与 `63` 个交易日拦截，除非显式 `--allow-stale-model` 放行。
 
 ## 6. 升级门槛
 - 必须有同窗正式比较。
