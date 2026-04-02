@@ -322,6 +322,7 @@ def build_sequence_features(
     dynamic_graph_temperature: float = 0.35,
     dynamic_graph_industry_boost: float = 0.15,
     dynamic_graph_style_boost: float = 0.05,
+    short_alpha_features: bool = False,
 ) -> Dict[str, pd.DataFrame]:
     close = df_dict["Close"].astype(float)
     open_df = df_dict["Open"].astype(float)
@@ -455,6 +456,44 @@ def build_sequence_features(
                 style_boost=dynamic_graph_style_boost,
             )
         )
+    if short_alpha_features:
+        prev_close = close.shift(1)
+        prev_high_20 = high.rolling(20).max().shift(1)
+        prev_high_60 = high.rolling(60).max().shift(1)
+        vol_std_10 = ret_1.rolling(10).std()
+        vol_std_60 = ret_1.rolling(60).std()
+        gap_open_1 = open_df.div(prev_close.replace(0, np.nan)).sub(1.0).fillna(0.0)
+        close_pos_in_range = close.sub(low).div(high.sub(low).replace(0, np.nan)).fillna(0.5)
+        upper_shadow_ratio = high.sub(pd.concat([open_df, close], axis=0).groupby(level=0).max()).div(
+            high.sub(low).replace(0, np.nan)
+        ).fillna(0.0)
+        lower_shadow_ratio = pd.concat([open_df, close], axis=0).groupby(level=0).min().sub(low).div(
+            high.sub(low).replace(0, np.nan)
+        ).fillna(0.0)
+        breakout_distance_20 = close.div(prev_high_20.replace(0, np.nan)).sub(1.0).fillna(0.0)
+        breakout_distance_60 = close.div(prev_high_60.replace(0, np.nan)).sub(1.0).fillna(0.0)
+        breakout_intraday_high_20 = high.div(prev_high_20.replace(0, np.nan)).sub(1.0).fillna(0.0)
+        compression_10_60 = vol_std_10.div(vol_std_60.replace(0, np.nan)).fillna(1.0)
+        volume_burst_1_5 = volume.div(volume.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        amount_burst_1_5 = amount.div(amount.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        momentum_3 = close.pct_change(3).fillna(0.0)
+        rel_momentum_3 = momentum_3.sub(benchmark_close.pct_change(3).fillna(0.0), axis=0)
+        features.update(
+            {
+                "gap_open_1": gap_open_1,
+                "close_pos_in_range": close_pos_in_range,
+                "upper_shadow_ratio": upper_shadow_ratio,
+                "lower_shadow_ratio": lower_shadow_ratio,
+                "breakout_distance_20": breakout_distance_20,
+                "breakout_distance_60": breakout_distance_60,
+                "breakout_intraday_high_20": breakout_intraday_high_20,
+                "compression_10_60": compression_10_60,
+                "volume_burst_1_5": volume_burst_1_5,
+                "amount_burst_1_5": amount_burst_1_5,
+                "momentum_3": momentum_3,
+                "rel_momentum_3": rel_momentum_3,
+            }
+        )
     return features
 
 
@@ -465,6 +504,11 @@ def build_targets(
     open_df: pd.DataFrame | None = None,
     benchmark_open: pd.Series | None = None,
     execution_mode: str = "close",
+    breakout_event_horizon: int = 5,
+    breakout_event_threshold: float = 0.08,
+    breakout_event_pullback_limit: float = 0.03,
+    breakout_event_task: bool = False,
+    clean_breakout_event_task: bool = False,
 ) -> Dict[str, pd.DataFrame]:
     target_frames: Dict[str, pd.DataFrame] = {}
     mode = str(execution_mode or "close").lower()
@@ -488,6 +532,31 @@ def build_targets(
     else:
         future_min = close.shift(-1).rolling(max(horizons)).min()
         target_frames["risk_downside_20"] = future_min.div(close).sub(1.0)
+    event_horizon = max(int(breakout_event_horizon), 1)
+    if breakout_event_task or clean_breakout_event_task:
+        if mode == "next_open":
+            if open_df is None:
+                raise ValueError("Breakout event targets require open_df under next_open mode.")
+            entry = open_df.shift(-1)
+            future_opens = [open_df.shift(-(step + 1)) for step in range(1, event_horizon + 1)]
+        else:
+            entry = close
+            future_opens = [close.shift(-step) for step in range(1, event_horizon + 1)]
+        future_max = future_opens[0].copy()
+        future_min_path = future_opens[0].copy()
+        for future_frame in future_opens[1:]:
+            future_max = future_max.combine(future_frame, np.fmax)
+            future_min_path = future_min_path.combine(future_frame, np.fmin)
+        max_gain = future_max.div(entry.replace(0, np.nan)).sub(1.0)
+        max_pullback = future_min_path.div(entry.replace(0, np.nan)).sub(1.0)
+        if breakout_event_task:
+            target_frames[f"event_breakout_{event_horizon}"] = (max_gain >= float(breakout_event_threshold)).astype(float)
+        if clean_breakout_event_task:
+            clean_event = (
+                (max_gain >= float(breakout_event_threshold))
+                & (max_pullback >= -float(breakout_event_pullback_limit))
+            )
+            target_frames[f"event_clean_breakout_{event_horizon}"] = clean_event.astype(float)
     return target_frames
 
 

@@ -8806,3 +8806,142 @@ position,000001.SZ,1200,12.38,
 2. 修通后，这个分支在最新窗口有明显收益提升，说明“近期自适应任务权重”不是假信号。
 3. 但 pure adaptive 版 formal 三窗总体仍输给当前 strict `liquid800_plain` 基线，且第一窗退化非常明显。
 4. 因此这条线目前应视为“局部有效、但还不够稳”的新收益翻译候选；下一步如果继续追，方向应是更平滑的 adaptive 版本，而不是直接把 pure adaptive 升成新主前沿。
+## 2026-04-02 默认执行切换为 production full-fit
+
+### 背景
+- 用户确认新的正式制度：
+  - 研究阶段保留最近一年 `formal holdout`
+  - 日常执行不继续使用一年前冻结模型
+  - winner 确认后，要在上线前用最新可标注数据重训一次 production model
+
+### 发现的问题
+- 默认候选虽然已经切到 `regoff_k2_10d_ensemble_native_anchor`，但日常计划仍直接读取：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+- 该 formal run 的训练截止日是：
+  - `2025-03-17`
+- 对 `2026-04-02` 的日常执行来说，这已经偏旧。
+
+### 本轮修复
+- 新增 `daily_research/execution/update_default_candidate_production.py`
+- 该脚本现在会：
+  - 读取当前 formal winner 配置
+  - 自动计算“最新完成交易日”与“最新可标注训练日”
+  - 用全部可标注数据做 production full-fit 重训
+  - 把稳定执行产物同步到：
+    - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+- 同时把默认候选 profile 拆成两层：
+  - backtest / research 继续指向 formal run
+  - trade_plan / 日常默认执行改指向 production root
+
+### 关键边界
+- 第一次 production 重训尝试失败，原因不是模型不能训，而是：
+  - 直接把 `2026-04-01` 当成训练截止日会导致验证集为空
+- 进一步核对后确认：
+  - 最新完成交易日：`2026-04-01`
+  - 最新可标注训练日：`2026-03-03`
+- 对 `next_open + 5/10/20d horizon` 口径，正确解释应为：
+  - “截至上线前的全部可标注数据”
+  - 而不是“截至上线前的全部原始日期”
+
+### 正式结果
+- production full-fit 成功产出：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_fullfit_20260401_r1`
+- 稳定 production 根目录：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+- 默认交易计划已切到 production root：
+  - `candidate_label = dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit`
+  - `candidate_score_csv = ...production_default/daily_live_score_panel.csv`
+  - `candidate_target_weight_csv = ...production_default/daily_live_target_weight_panel.csv`
+
+### 收口结论
+1. formal holdout 判决与日常 production 执行现在已经正式分离。
+2. 默认执行不再继续直接使用 `2025-03-17` 截止的 formal 冻结模型。
+3. 以后默认候选升级，必须同时给出：
+   - formal winner 证据
+   - production full-fit 重训版
+   - 上线后的新样本表现
+
+## 2026-04-02 Short Alpha 首轮实验矩阵
+
+### 背景
+- 用户明确提出三个可实验验证的问题：
+  - 当前模型结构是否还不够强
+  - 短线起爆前信息能不能通过更短目标学到
+  - 输入是否需要增加短线候选特征
+- 因此本轮不再空谈，而是直接在当前 `dynamic_graph_v1` 赢家骨架上做一轮 recent-formal 矩阵。
+
+### 协议
+- 时间窗：
+  - `train_end = 2025-03-17`
+  - `valid_start = 2025-03-18`
+  - `valid_end = 2026-04-01`
+- 范围与假设：
+  - `liquid500`
+  - 主板范围
+  - `next_open`
+  - `patch_transformer + dynamic_graph_v1`
+- 输出目录：
+  - `daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1`
+
+### 设计
+- `baseline_current`
+  - 当前基线
+- `state_context_v1`
+  - 只开 `state_context`
+- `state_liquidity_listwise_v1`
+  - 开 `state_context + liquidity_context`
+  - 加轻量 `ranking/listwise loss`
+- `short_target_v1`
+  - 改成 `1/2/3/5d` 超额目标
+  - 叠加 `5d breakout` 与 `clean breakout` 事件标签
+- `short_input_v1`
+  - 新增突破、压缩、能量类日线特征
+- `short_combo_v1`
+  - 同时启用短线目标与短线输入
+
+### 结果
+- `state_liquidity_listwise_v1`
+  - `excess_annual_return = 82.38%`
+  - `excess_sharpe = 3.876`
+  - `excess_max_drawdown = -8.86%`
+  - `avg_turnover = 1.486`
+- `baseline_current`
+  - `excess_annual_return = 66.49%`
+  - `excess_sharpe = 2.582`
+- `state_context_v1`
+  - `excess_annual_return = 33.81%`
+  - `excess_sharpe = 1.257`
+- `short_input_v1`
+  - `excess_annual_return = 18.62%`
+  - `excess_sharpe = 0.882`
+- `short_target_v1`
+  - `excess_annual_return = 11.25%`
+  - `excess_sharpe = 0.593`
+- `short_combo_v1`
+  - `excess_annual_return = 6.82%`
+  - `excess_sharpe = 0.354`
+
+### 代码改动
+- `daily_research/deep_alpha/config.py`
+  - 增加 `short_alpha_features` 与 breakout event 相关配置
+- `daily_research/deep_alpha/sequence_dataset.py`
+  - 新增突破、压缩、能量类特征
+  - 新增 breakout 事件标签
+- `daily_research/deep_alpha/trainer.py`
+  - 允许 `event_*` 目标走 BCE loss
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 打通新目标、新特征与 CLI
+- `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 固化 profile 注册表
+- `daily_research/deep_alpha/run_short_alpha_experiment_matrix.py`
+  - 固化矩阵入口
+
+### 当前结论
+1. 当前第一优先问题不是“模型还不够大”，而是“上下文与收益排序耦合还不够强”。
+2. 单开 `state_context` 不够，甚至会退化。
+3. `state + liquidity + light ranking/listwise` 在 recent-formal 窗口里明显有效，值得升格成下一条正式验证分支。
+4. 第一版短线目标改写与额外日线短线输入都没有带来增益，暂时不能当默认主线。
+5. 想继续追“单票起爆前”方向，后续更合理的切入点是：
+   - 更直接的执行目标
+   - 或更强的盘中/竞价信息
+   - 而不是继续在这一版日线短线标签上细磨

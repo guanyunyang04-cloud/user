@@ -1,6 +1,6 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-01`
+快照日期：`2026-04-02`
 
 ## 1. 用途
 - 本文件只保留规范化的日常操作入口。
@@ -38,7 +38,12 @@
 
 - 默认候选配置：
   - `regoff_k2_10d_ensemble_native_anchor`
-- 该入口会先检查默认候选的 `daily_live_*` 面板是否落后于最新完成交易日；若落后，会在不重训的前提下自动刷新。
+- 该入口会先检查默认候选的 `production full-fit` 根目录 `daily_live_*` 面板是否落后于最新完成交易日；若落后，会在不重训的前提下自动刷新。
+- 默认日常计划读取：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_score_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_target_weight_panel.csv`
+- formal 研究证据保留在：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
 - 默认输出：
   - `daily_research/execution/output/latest_trade_plan.txt`
 
@@ -58,12 +63,18 @@
 
 ### 当前默认候选的重训入口
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --data-source tq --start-date 20210101 --end-date 20260401 --benchmark 000300.SH --liquidity-pool liquid500 --rolling-liquidity-pool liquid500 --pool-rebalance-days 21 --rebalance-freq 10d --rebalance-offset-mode all --rebalance-anchor-date 2025-01-02 --encoder-family patch_transformer --score-head-method manual --score-risk-mode plain --dynamic-graph-layer --dynamic-graph-top-k 8 --dynamic-graph-temperature 0.35 --dynamic-graph-industry-boost 0.15 --dynamic-graph-style-boost 0.10 --experiment-tag deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py
 ```
+
+- 该入口会：
+  - 保留 formal holdout 研究证据不动
+  - 自动计算“最新可标注训练日”
+  - 用截至上线前的全部可标注数据重训一次 production full-fit
+  - 把稳定日常执行产物同步到 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
 
 ### 只刷新 live 面板，不重训
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\export_live_panels_from_run.py --run-dir daily_research\output\deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\export_live_panels_from_run.py --run-dir daily_research\output\deep_alpha_liquid500_dynamic_graph_bridge_production_default
 ```
 
 ## 5. 显式回退流程
@@ -109,6 +120,23 @@
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py
 ```
+
+### 查看 short-alpha 实验配置列表
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_experiment_matrix.py --list-profiles
+```
+
+### 运行 short-alpha recent-formal 矩阵
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_experiment_matrix.py
+```
+
+- 当前首轮 winner：
+  - `state_liquidity_listwise_v1`
+- 当前首轮降级分支：
+  - `short_target_v1`
+  - `short_input_v1`
+  - `short_combo_v1`
 
 ## 8. 诊断与维护
 ### 性能分化报告

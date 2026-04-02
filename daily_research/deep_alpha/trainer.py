@@ -285,6 +285,14 @@ def _compute_primary_loss(
                 loss_val = (loss_vec * sample_weights).sum() / sample_weights.sum().clamp_min(1e-8)
             losses.append(loss_val * weight)
             return_losses.append(loss_val)
+        elif name.startswith("event_"):
+            valid = torch.isfinite(target_col)
+            if not torch.any(valid):
+                continue
+            labels = target_col[valid].clamp(0.0, 1.0)
+            loss_val = F.binary_cross_entropy_with_logits(pred_col[valid], labels, reduction="mean")
+            losses.append(loss_val * weight)
+            risk_losses.append(loss_val)
         else:
             loss_val = F.smooth_l1_loss(pred_col, target_col, reduction="mean")
             losses.append(loss_val * weight)

@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-01`
+快照日期：`2026-04-02`
 
 ## 1. 用途
 - 本文件解释项目为什么会演化成现在这条主线。
@@ -39,17 +39,25 @@
   - 有价值的是 `target_weight` 直连桥加执行节奏处理
   - 不是旧的 `score -> weight` 翻译器
 - `dynamic_graph_v1` 已被证明是真实研究优胜项，不是 prior 假象。
+- `short_alpha` 首轮矩阵已经说明：
+  - 当前最有效的增益来自上下文容量与轻量排序损失
+  - 不是第一版短线目标改写或额外日线短线输入
 - 旧时代极高收益已因泄漏风险被降级为审计产物。
+- 研究判决与日常执行现在已经正式拆成两层：
+  - formal holdout 继续负责研究 winner 判决
+  - production full-fit 负责默认日常执行
 
 ## 5. 当前瓶颈
 - 研究端 alpha 迁到执行端时仍会损耗。
 - 高收益 execution-alignment 候选往往在现实成本下变得过于高换手。
 - `dynamic_graph_v1` 虽然已在研究端赢过 `plain`，但还没有全面统治执行端。
 - 多窗口重训仍然是当前最大的研究时间成本。
+- 想要在日线主板范围里抓“单票起爆前”信息，当前这第一版短线目标与短线特征仍然不够强。
 
 ## 6. 当前方向
 - 执行侧：
   - 继续以 `regoff_k2_10d_ensemble_native_anchor` 为每日默认
+  - 每日默认已切到 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
   - 继续以 `regon_k1_10d_ensemble_native_anchor` 为收益上沿对照
 - 桥接侧：
   - 继续沿 `target_weight` 直连桥推进
@@ -57,7 +65,9 @@
   - 继续做 cadence 与 ensemble 稳定化
 - 研究侧：
   - 继续以 `dynamic_graph_v1` 为主前沿
+  - 先把 `state_liquidity_listwise_v1` 做成下一条正式验证分支
   - 保留 `dynamic_graph_no_priors` 与 `dynamic_graph_topk4` 作为对照
+  - 暂不继续扩张第一版 `short_target / short_input` 路线
 - 下一代家族只在图路线边际增益放缓后再开：
   - `state-conditioned MoE`
 - RL 不进入当前默认主线：
@@ -68,3 +78,5 @@
 - 当前判断与升级门槛写入 `working_memory.md`。
 - 日常命令写入 `action_system.md`。
 - 长历史和长过程统一留在 `episodic_memory.md`。
+- 上线前重训统一通过：
+  - `daily_research/execution/update_default_candidate_production.py`

@@ -177,6 +177,12 @@ def parse_args():
     parser.add_argument("--dynamic-graph-temperature", type=float, default=0.35)
     parser.add_argument("--dynamic-graph-industry-boost", type=float, default=0.15)
     parser.add_argument("--dynamic-graph-style-boost", type=float, default=0.05)
+    parser.add_argument("--short-alpha-features", action="store_true", help="Add short-line breakout/compression/energy candidate inputs.")
+    parser.add_argument("--breakout-event-horizon", type=int, default=5, help="Forward event horizon used by short-line breakout event targets.")
+    parser.add_argument("--breakout-event-threshold", type=float, default=0.08, help="Required forward max gain for breakout event labels.")
+    parser.add_argument("--breakout-event-pullback-limit", type=float, default=0.03, help="Maximum tolerated pullback before breakout for clean breakout labels.")
+    parser.add_argument("--breakout-event-loss-weight", type=float, default=0.0, help="Auxiliary loss weight for breakout event labels.")
+    parser.add_argument("--clean-breakout-event-loss-weight", type=float, default=0.0, help="Auxiliary loss weight for clean breakout event labels.")
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
@@ -609,6 +615,12 @@ def main():
         dynamic_graph_temperature=args.dynamic_graph_temperature,
         dynamic_graph_industry_boost=args.dynamic_graph_industry_boost,
         dynamic_graph_style_boost=args.dynamic_graph_style_boost,
+        short_alpha_features=args.short_alpha_features,
+        breakout_event_horizon=args.breakout_event_horizon,
+        breakout_event_threshold=args.breakout_event_threshold,
+        breakout_event_pullback_limit=args.breakout_event_pullback_limit,
+        breakout_event_loss_weight=args.breakout_event_loss_weight,
+        clean_breakout_event_loss_weight=args.clean_breakout_event_loss_weight,
         random_seed=args.random_seed,
         market_state_count=args.market_state_count,
         holding_count=args.holding_count,
@@ -622,6 +634,10 @@ def main():
         cfg.encoder_family = "mamba"
     if not cfg.end_date:
         cfg.end_date = pd.Timestamp(get_latest_completed_trading_date()).strftime("%Y%m%d")
+    if float(cfg.breakout_event_loss_weight) > 0:
+        cfg.target_loss_weights[f"event_breakout_{int(cfg.breakout_event_horizon)}"] = float(cfg.breakout_event_loss_weight)
+    if float(cfg.clean_breakout_event_loss_weight) > 0:
+        cfg.target_loss_weights[f"event_clean_breakout_{int(cfg.breakout_event_horizon)}"] = float(cfg.clean_breakout_event_loss_weight)
 
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
@@ -699,7 +715,7 @@ def main():
         except Exception as exc:
             print(f"      Style map unavailable: {exc}")
     feature_meta = {
-        "version": 4,
+        "version": 5,
         "raw_key": raw_key,
         "relation_layer": bool(args.relation_layer),
         "liquidity_layer": bool(cfg.liquidity_layer),
@@ -709,7 +725,13 @@ def main():
         "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
         "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
         "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
+        "short_alpha_features": bool(cfg.short_alpha_features),
         "prediction_horizons": list(cfg.prediction_horizons),
+        "breakout_event_horizon": int(cfg.breakout_event_horizon),
+        "breakout_event_threshold": float(cfg.breakout_event_threshold),
+        "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
+        "breakout_event_task": bool(float(cfg.breakout_event_loss_weight) > 0),
+        "clean_breakout_event_task": bool(float(cfg.clean_breakout_event_loss_weight) > 0),
         "market_state_count": cfg.market_state_count,
         "state_key": state_key,
         "liquidity_bucket_key": liquidity_bucket_key,
@@ -740,6 +762,7 @@ def main():
             dynamic_graph_temperature=cfg.dynamic_graph_temperature,
             dynamic_graph_industry_boost=cfg.dynamic_graph_industry_boost,
             dynamic_graph_style_boost=cfg.dynamic_graph_style_boost,
+            short_alpha_features=cfg.short_alpha_features,
         )
         target_frames = build_targets(
             close,
@@ -748,6 +771,11 @@ def main():
             open_df=df_dict["Open"],
             benchmark_open=benchmark_open,
             execution_mode="next_open",
+            breakout_event_horizon=cfg.breakout_event_horizon,
+            breakout_event_threshold=cfg.breakout_event_threshold,
+            breakout_event_pullback_limit=cfg.breakout_event_pullback_limit,
+            breakout_event_task=bool(float(cfg.breakout_event_loss_weight) > 0),
+            clean_breakout_event_task=bool(float(cfg.clean_breakout_event_loss_weight) > 0),
         )
         structure_label_frame = build_structure_label_frame(
             close=df_dict["Close"].astype(float),
@@ -777,7 +805,7 @@ def main():
             benchmark_close=benchmark_close.astype(float).reindex(df_dict["Close"].index),
         )
     train_target_frames = transform_return_target_frames(target_frames, cfg.return_target_transform)
-    target_names = [f"fwd_excess_{h}" for h in cfg.prediction_horizons] + ["risk_downside_20"]
+    target_names = list(target_frames.keys())
 
     sample_dates = list(
         close.index[
@@ -1430,6 +1458,12 @@ def main():
                 "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
                 "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
                 "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
+                "short_alpha_features": bool(cfg.short_alpha_features),
+                "breakout_event_horizon": int(cfg.breakout_event_horizon),
+                "breakout_event_threshold": float(cfg.breakout_event_threshold),
+                "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
+                "breakout_event_loss_weight": float(cfg.breakout_event_loss_weight),
+                "clean_breakout_event_loss_weight": float(cfg.clean_breakout_event_loss_weight),
                 "safe_runtime_profile": bool(cfg.safe_runtime_profile),
                 "runtime_profile": runtime_profile.__dict__,
                 "training_diagnostics": training_diagnostics.__dict__,

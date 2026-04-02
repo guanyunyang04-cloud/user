@@ -95,6 +95,12 @@ class DeepAlphaConfig:
     dynamic_graph_temperature: float = 0.35
     dynamic_graph_industry_boost: float = 0.15
     dynamic_graph_style_boost: float = 0.05
+    short_alpha_features: bool = False
+    breakout_event_horizon: int = 5
+    breakout_event_threshold: float = 0.08
+    breakout_event_pullback_limit: float = 0.03
+    breakout_event_loss_weight: float = 0.0
+    clean_breakout_event_loss_weight: float = 0.0
     random_seed: int = 7
     market_state_count: int = 4
     holding_count: int = 5

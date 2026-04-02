@@ -15,6 +15,9 @@ class ResearchCandidateProfile:
     target_weight_panel_csv: str
     score_panel_csv: str
     candidate_label: str
+    trade_plan_target_weight_panel_csv: str = ""
+    trade_plan_score_panel_csv: str = ""
+    trade_plan_candidate_label: str = ""
     data_source: str = "tq"
     benchmark: str = "000300.SH"
     backtest_start_date: str = "20250101"
@@ -29,10 +32,12 @@ class ResearchCandidateProfile:
     use_market_regime_filter: bool = True
     soft_state_profile: str = ""
     refresh_run_dir: str = ""
+    trade_plan_refresh_run_dir: str = ""
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
 _DYNAMIC_GRAPH_FORMAL_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1"
+_DYNAMIC_GRAPH_PRODUCTION_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_production_default"
 _EXECALIGN_AUTO_R4_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4"
 
 
@@ -43,13 +48,17 @@ def _source(name: str) -> str:
 PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     "regoff_k2_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
-        description="Current daily default execution strategy: 10d anchored all-offset ensemble, top-k 2, regime filter off.",
+        description="Current daily default execution strategy: formal winner frozen for research evidence, production full-fit model for daily trade plan; 10d anchored all-offset ensemble, top-k 2, regime filter off.",
         target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
         score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_regoff_k2_10d_ensemble_native_anchor",
+        trade_plan_target_weight_panel_csv=str((_DYNAMIC_GRAPH_PRODUCTION_ROOT / "daily_live_target_weight_panel.csv").resolve()),
+        trade_plan_score_panel_csv=str((_DYNAMIC_GRAPH_PRODUCTION_ROOT / "daily_live_score_panel.csv").resolve()),
+        trade_plan_candidate_label="dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit",
         target_weight_top_k=2,
         use_market_regime_filter=False,
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
+        trade_plan_refresh_run_dir=str(_DYNAMIC_GRAPH_PRODUCTION_ROOT.resolve()),
     ),
     "regon_k1_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regon_k1_10d_ensemble_native_anchor",
@@ -157,39 +166,76 @@ def _read_panel_latest_date(path_str: str) -> pd.Timestamp | None:
     return pd.Timestamp(dates.max())
 
 
-def _ensure_live_panels(profile: ResearchCandidateProfile) -> None:
-    if not profile.refresh_run_dir:
+def _trade_plan_target_weight_path(profile: ResearchCandidateProfile) -> str:
+    return profile.trade_plan_target_weight_panel_csv or profile.target_weight_panel_csv
+
+
+def _trade_plan_score_path(profile: ResearchCandidateProfile) -> str:
+    return profile.trade_plan_score_panel_csv or profile.score_panel_csv
+
+
+def _trade_plan_candidate_label(profile: ResearchCandidateProfile) -> str:
+    return profile.trade_plan_candidate_label or profile.candidate_label
+
+
+def _refresh_run_dir_for_mode(profile: ResearchCandidateProfile, mode: str) -> str:
+    if mode == "trade_plan" and profile.trade_plan_refresh_run_dir:
+        return profile.trade_plan_refresh_run_dir
+    return profile.refresh_run_dir
+
+
+def _target_weight_path_for_mode(profile: ResearchCandidateProfile, mode: str) -> str:
+    if mode == "trade_plan":
+        return _trade_plan_target_weight_path(profile)
+    return profile.target_weight_panel_csv
+
+
+def _score_path_for_mode(profile: ResearchCandidateProfile, mode: str) -> str:
+    if mode == "trade_plan":
+        return _trade_plan_score_path(profile)
+    return profile.score_panel_csv
+
+
+def _candidate_label_for_mode(profile: ResearchCandidateProfile, mode: str) -> str:
+    if mode == "trade_plan":
+        return _trade_plan_candidate_label(profile)
+    return profile.candidate_label
+
+
+def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None:
+    refresh_run_dir = _refresh_run_dir_for_mode(profile, mode)
+    if not refresh_run_dir:
         return
     latest_completed = pd.Timestamp(get_latest_completed_trading_date())
-    latest_panel_date = _read_panel_latest_date(profile.target_weight_panel_csv)
+    latest_panel_date = _read_panel_latest_date(_target_weight_path_for_mode(profile, mode))
     if latest_panel_date is not None and latest_panel_date >= latest_completed:
         return
     from daily_research.deep_alpha.export_live_panels_from_run import refresh_live_panels_for_run
 
     refresh_live_panels_for_run(
-        Path(profile.refresh_run_dir),
+        Path(refresh_run_dir),
         latest_end_date=latest_completed.strftime("%Y%m%d"),
     )
 
 
 def apply_profile_defaults(profile_name: str, *, mode: str) -> ResearchCandidateProfile:
     profile = get_profile(profile_name)
-    _ensure_live_panels(profile)
+    _ensure_live_panels(profile, mode=mode)
     if mode == "backtest":
         inject_default_arg("--data-source", profile.data_source)
         inject_default_arg("--benchmark", profile.benchmark)
         inject_default_arg("--start-date", profile.backtest_start_date)
-        inject_default_arg("--target-weight-panel-csv", profile.target_weight_panel_csv)
-        inject_default_arg("--score-panel-csv", profile.score_panel_csv)
+        inject_default_arg("--target-weight-panel-csv", _target_weight_path_for_mode(profile, mode))
+        inject_default_arg("--score-panel-csv", _score_path_for_mode(profile, mode))
     elif mode == "trade_plan":
         inject_default_arg("--data-source", profile.data_source)
         inject_default_arg("--benchmark", profile.benchmark)
         inject_default_arg("--start-date", profile.trade_plan_start_date)
-        inject_default_arg("--external-target-weight-csv", profile.target_weight_panel_csv)
-        inject_default_arg("--external-score-csv", profile.score_panel_csv)
+        inject_default_arg("--external-target-weight-csv", _target_weight_path_for_mode(profile, mode))
+        inject_default_arg("--external-score-csv", _score_path_for_mode(profile, mode))
     else:
         raise ValueError(f"Unsupported profile application mode: {mode}")
-    inject_default_arg("--candidate-label", profile.candidate_label)
+    inject_default_arg("--candidate-label", _candidate_label_for_mode(profile, mode))
     inject_default_arg("--rebalance-freq", profile.rebalance_freq)
     inject_default_arg("--rebalance-offset-mode", profile.rebalance_offset_mode)
     if profile.rebalance_anchor_date:

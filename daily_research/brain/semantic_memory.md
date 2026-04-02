@@ -1,6 +1,6 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-01`
+快照日期：`2026-04-02`
 
 ## 1. 项目身份
 - `daily_research` 维护一条可运行、可复核、可回退的 A 股日频研究与执行链路。
@@ -19,14 +19,19 @@
 ## 3. 当前稳定默认
 - 每日默认执行策略：
   - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
+  - 日常执行使用 `production full-fit` 根目录，而不是继续直接使用 formal holdout 冻结模型。
 - 每日默认入口：
   - `daily_research/execution/run_trade_plan.py`
 - 每日默认输出：
   - `daily_research/execution/output/latest_trade_plan.txt`
 - 默认候选源文件：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_live_score_panel.csv`
-  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1/daily_live_target_weight_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_score_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_target_weight_panel.csv`
 - 默认入口会在不重训的前提下，按已训练模型自动刷新默认候选 live 面板。
+- formal 研究证据单独保留在：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+- production full-fit 证据边界：
+  - 只用于日常执行与上线前重训，不得回填为 formal holdout 证据。
 
 ## 4. 明确回退
 - 仍保留显式旧主线回退：
@@ -41,6 +46,7 @@
   - `deep_alpha dynamic_graph_v1`
 - 当前默认执行候选：
   - `regoff_k2_10d_ensemble_native_anchor`
+  - 日常计划标签：`dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit`
 - 当前更激进收益对照：
   - `regon_k1_10d_ensemble_native_anchor`
 - 当前高换手无成本对照：
