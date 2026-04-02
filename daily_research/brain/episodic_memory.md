@@ -9205,3 +9205,141 @@ position,000001.SZ,1200,12.38,
 1. 默认执行入口已经具备“按 `Retrain Monthly` 自动重训”的能力，不再只是停留在提醒。
 2. 今天的 live manifest `launch_cutoff_date = 2026-04-01`，最新完成交易日也是 `2026-04-02` 所在自然月，因此本次验证运行不会误触发自动重训。
 3. 下一次跨到新的自然月后，默认 `run_trade_plan.py` 会先触发 `production full-fit` 自动重训，再继续生成交易计划。
+
+## 2026-04-02 `deep_alpha` 架构复杂度 / 深度 / 结构正式实验
+
+### 背景
+- 用户要求不要只凭经验判断，而是用较丰富的正式实验去验证：
+  - 模型复杂度 / 网络复杂度
+  - 模型深度 / 网络深度
+  - 模型结构 / 网络结构
+- 这条问题此前在 `deep_alpha` 里没有独立成套 formal 答案。
+- 因此这次专门补两层证据：
+  - recent-formal 同窗矩阵
+  - 多窗口 formal head-to-head
+
+### 一、recent-formal 架构矩阵
+
+#### 代码与协议
+- 新增：
+  - `daily_research/deep_alpha/architecture_profiles.py`
+  - `daily_research/deep_alpha/run_architecture_experiment_matrix.py`
+- 固定协议：
+  - 窗口：`2025-03-18 -> 2026-03-31`
+  - 股票池：`liquid500`
+  - benchmark：`000300.SH`
+  - 固定使用：`top_bottom_bce + manual score head + no execution alignment + next_open`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_matrix_20260402_r1`
+
+#### 实验分组
+- complexity：
+  - `capacity_small_h64`
+  - `capacity_large_h160`
+- depth：
+  - `depth_shallow_l1`
+  - `depth_deep_l4`
+- encoder：
+  - `encoder_transformer_v1`
+  - `encoder_mamba_v1`
+- graph：
+  - `graph_off_plain`
+  - `graph_relation_only`
+  - `graph_topk4`
+- context：
+  - `state_context_only`
+  - `state_liquidity_context`
+- structure：
+  - `structure_context_only`
+  - `structure_aux_task_v1`
+  - `structure_prototype_task_v1`
+
+#### recent-formal 结果
+- 整体 winner 仍是：
+  - `baseline_current = 66.49% / 2.582 / -13.52%`
+- complexity：
+  - `capacity_large_h160 = 48.93% / 2.106`
+  - `capacity_small_h64 = 20.18% / 1.154`
+  - 说明单纯放大或缩小容量都没有超过基线
+- depth：
+  - `depth_deep_l4 = 36.71% / 1.432`
+  - `depth_shallow_l1 = 33.37% / 1.899`
+  - 说明继续加深网络也没有形成收益优势
+- encoder：
+  - `encoder_mamba_v1 = 21.13% / 1.044`
+  - `encoder_transformer_v1 = 18.78% / 0.992`
+  - 说明当前协议下切 backbone 并没有带来正向升级
+- graph：
+  - `graph_off_plain = 55.19% / 1.434`
+  - `graph_topk4 = 36.20% / 1.374`
+  - `graph_relation_only = 22.55% / 0.902`
+  - 说明 dynamic graph 有价值，但 relation-only 并不成立
+- context：
+  - `state_context_only = 33.81% / 1.257`
+  - `state_liquidity_context = 1.21% / 0.053`
+  - 说明仅靠把上下文开关打开并不能自动带来增益
+- structure：
+  - `structure_context_only = 54.58% / 3.000 / -6.03%`
+  - `structure_aux_task_v1 = -14.61% / -0.925`
+  - `structure_prototype_task_v1 = -19.69% / -1.109`
+  - 说明 `structure_context_only` 是唯一接近基线且 Sharpe 更高的结构改动，而附加结构辅助任务在当前协议下明显破坏主线
+
+### 二、三窗 formal architecture head-to-head
+
+#### 代码与协议
+- 新增：
+  - `daily_research/deep_alpha/run_architecture_formal_head2head.py`
+- 固定窗口：
+  - `20230216_20240229`
+  - `20240301_20250317`
+  - `20250318_20260331`
+- 比较集合：
+  - `baseline_current`
+  - `capacity_large_h160`
+  - `depth_shallow_l1`
+  - `depth_deep_l4`
+  - `graph_off_plain`
+  - `structure_context_only`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1`
+
+#### 多窗结果
+- 基线三窗均值：
+  - `baseline_current = 14.61% / 0.448`
+- `structure_context_only`：
+  - 均值 `27.66% / 1.448`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `3/3` 窗取胜
+  - 相对基线均值超额年化多 `13.05%`
+- `graph_off_plain`：
+  - 均值 `22.93% / 0.666`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `2/3` 窗取胜
+- `depth_shallow_l1`：
+  - 均值 `20.00% / 1.051`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `2/3` 窗取胜
+- `capacity_large_h160`：
+  - 均值 `14.71% / 0.657`
+  - 基本只是与基线打平，不构成明确升级
+- `depth_deep_l4`：
+  - 均值 `12.84% / 0.494`
+  - 仍不构成可信升级
+
+### 运行与验证
+- 运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py`
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_formal_head2head.py`
+- recent-formal runner 自动复用了已存在的：
+  - `baseline_current`
+  - `state_context_only`
+  - recent 窗结果，避免重复重训
+- 三窗 head-to-head 也复用了 recent 窗对应 run
+- 运行中出现过 `RankIC` 的 `ConstantInputWarning`，但不影响 metrics 产物落盘，命令整体正常退出
+
+### 当前结论
+1. `deep_alpha` 现在已经有了关于模型复杂度 / 深度 / 结构影响的正式实验答案，不再只凭口头经验。
+2. 在当前 recent-formal 协议下，`baseline_current` 仍是最近窗口收益 winner，因此不能把“复杂一点”误当成默认更优。
+3. 单纯加大容量、继续加深网络、或直接切到 vanilla `transformer` / `mamba`，都没有形成可信升级路径。
+4. `structure_context_only` 是当前最值得继续推进的结构方向：recent 窗口收益接近基线但 Sharpe 更高，多窗口均值和稳健性也明显更强。
+5. 这条结论目前只进入研究判断与下一步研究优先级，还没有直接静默同步到默认执行；下一步应先做 execution objective 与显式成本下的 head-to-head。

@@ -158,6 +158,34 @@
   - `state_liquidity_listwise_v1` 不是 recent-window lucky run
   - 但第一窗仍退化，下一步先做 execution objective 对齐，不直接升格为默认执行候选
 
+### 查看 architecture 配置列表
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py --list-profiles
+```
+
+### 运行 architecture recent-formal 矩阵
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+- 当前正式输出：
+  - `daily_research/output/deep_alpha_architecture_matrix_20260402_r1`
+- 当前 recent-formal 结论：
+  - `baseline_current` 仍是最近窗口收益 winner
+  - `structure_context_only` 是当前最强的风险收益比结构挑战者
+  - 单纯增加容量、增加深度或切换 vanilla `transformer` / `mamba` 都没有超过基线
+
+### 运行 architecture 三窗 formal head-to-head
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+- 当前正式输出：
+  - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1`
+- 当前多窗结论：
+  - `structure_context_only` 是当前最可信的多窗稳健升级方向
+  - `graph_off_plain` 与 `depth_shallow_l1` 也有增益，但仍先保留为研究对照
+
 ### 运行 `deep_alpha` 重训频率 formal 矩阵
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_retrain_frequency_formal_matrix.py --frequencies annual_freeze,quarterly_63d,monthly_calendar,every_21d --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"

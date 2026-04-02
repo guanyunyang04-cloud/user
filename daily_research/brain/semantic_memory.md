@@ -44,6 +44,8 @@
 ## 5. 当前研究格局
 - 当前研究主前沿：
   - `deep_alpha dynamic_graph_v1`
+- 当前多窗最强结构挑战者：
+  - `structure_context_only`
 - 当前默认执行候选：
   - `regoff_k2_10d_ensemble_native_anchor`
   - 日常计划标签：`dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit`
@@ -61,7 +63,21 @@
   - 同窗比较
   - 多窗口复核
 
-## 7. `deep_alpha` 重训频率语义
+## 7. `deep_alpha` 架构复杂度 / 深度 / 结构语义
+- `deep_alpha` 架构复杂度 / 深度 / 结构已经有正式 recent-formal 矩阵与三窗 formal H2H，不再只靠直觉猜。
+- 当前稳定结论只认：
+  - `daily_research/output/deep_alpha_architecture_matrix_20260402_r1/summary.md`
+  - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1/summary.md`
+- 在当前 `liquid500 + top_bottom_bce + manual score head + next_open` formal 口径下：
+  - 默认前沿仍是 `dynamic_graph_v1 / baseline_current`
+  - “继续堆参数量 / 堆层数 / 切 vanilla transformer 或 mamba”不是默认升级方向
+  - `structure_context_only` 是当前最可信的多窗稳健结构升级候选
+  - `graph_off_plain` 与 `depth_shallow_l1` 是有效对照，但还不是默认升格答案
+- 因此：
+  - 架构线下一步优先做 `structure_context_only` 的 execution-objective / 显式成本比较
+  - 在完成显式成本外部回放前，不把它静默切进默认执行
+
+## 8. `deep_alpha` 重训频率语义
 - `deep_alpha` 的重训频率结论已经有正式矩阵，不再只靠口头猜测。
 - 当前稳定结论只认：
   - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1/frequency_summary_common_window.csv`
@@ -77,7 +93,7 @@
   - 未跨月时只刷新 `daily_live_*` 面板；
   - 底层模型仍保留 `21` 个交易日提醒与 `63` 个交易日拦截护栏。
 
-## 8. 建议阅读顺序
+## 9. 建议阅读顺序
 1. `semantic_memory.md`
 2. `working_memory.md`
 3. `action_system.md`

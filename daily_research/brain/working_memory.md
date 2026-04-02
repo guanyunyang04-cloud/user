@@ -33,6 +33,8 @@
 ### 2.2 研究侧
 - 当前研究优胜项：
   - `dynamic_graph_v1`
+- 当前多窗稳健结构挑战者：
+  - `structure_context_only`
 - `short_alpha` 首轮容量优胜项：
   - `state_liquidity_listwise_v1`
 - 结构确认对照：
@@ -74,17 +76,29 @@
   - 均值超额 Sharpe `1.199`，高于基线 `0.448`
   - 按超额年化与 Sharpe 都是 `2/3` 窗取胜
   - 但第一窗 `20230216_20240229` 明显退化，说明它不是 lucky run，也还不是无条件新前沿
+- `deep_alpha` 架构复杂度 / 深度 / 结构 recent-formal 矩阵已完成：
+  - 最近窗口 `2025-03-18 -> 2026-03-31` 的 excess annual winner 仍是 `baseline_current = 66.49% / 2.582`
+  - 单纯加大容量到 `hidden_dim=160`、加深到 `4` 层、或切到 vanilla `transformer` / `mamba` 都没有超过当前基线
+  - `structure_context_only` 是唯一接近基线且风险收益比更优的结构改动：`54.58% / 3.000 / -6.03%`
+- `deep_alpha` 架构三窗 formal head-to-head 已完成：
+  - `structure_context_only = 27.66% / 1.448`，相对基线 `14.61% / 0.448`，超额年化 `2/3` 窗取胜，Sharpe `3/3` 窗取胜
+  - `graph_off_plain` 与 `depth_shallow_l1` 也提高了多窗均值，但最近窗口收益仍落后于基线
+  - `capacity_large_h160` 多窗均值几乎只与基线打平，`depth_deep_l4` 仍不成立
 - 因此当前瓶颈更像“上下文与收益排序耦合不足”，不是“先随手加更多短线标签和更多日线输入”。
+- 因此架构主结论也同步明确为：默认方向不是“继续堆复杂度 / 堆深度”，而是优先验证 `structure_context_only` 这类低增参结构增强。
 
 ## 4. 当前研究优先级
-1. 把 `state_liquidity_listwise_v1` 接入 execution objective，做显式成本下的 head-to-head。
-2. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
-3. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
-4. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
-5. 继续回看 `state_liquidity_listwise_v1` 的第一弱窗，必要时只做弱窗修复型小消融，而不是重开大矩阵。
-6. 只有在图路线边际增益放缓后，才打开 `state-conditioned MoE`。
-7. RL 继续留在 `t0_project` 的执行层范围内，不进入当前默认日频 alpha 主线。
-8. 任何后续默认候选升格，都必须同时给出：
+1. 把 `structure_context_only` 接入 execution objective，做显式成本下的 head-to-head。
+2. 把 `state_liquidity_listwise_v1` 接入 execution objective，做显式成本下的 head-to-head。
+3. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
+4. 把 `graph_off_plain` 与 `depth_shallow_l1` 保留为稳健结构对照，不直接升格为默认执行候选。
+5. 不再把“继续加大 `hidden_dim` / 继续加深层数 / 直接切 vanilla `transformer` 或 `mamba`”当作当前默认研发主方向。
+6. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
+7. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
+8. 继续回看 `state_liquidity_listwise_v1` 的第一弱窗，必要时只做弱窗修复型小消融，而不是重开大矩阵。
+9. 只有在图路线边际增益放缓后，才打开 `state-conditioned MoE`。
+10. RL 继续留在 `t0_project` 的执行层范围内，不进入当前默认日频 alpha 主线。
+11. 任何后续默认候选升格，都必须同时给出：
   - formal holdout winner 证据
   - production full-fit 重训版
   - 上线后的独立 live / paper 新样本
