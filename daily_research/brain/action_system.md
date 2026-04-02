@@ -138,6 +138,15 @@
   - `short_input_v1`
   - `short_combo_v1`
 
+### 运行 short-alpha 三窗 formal head-to-head
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py
+```
+
+- 当前正式结论：
+  - `state_liquidity_listwise_v1` 不是 recent-window lucky run
+  - 但第一窗仍退化，下一步先做 execution objective 对齐，不直接升格为默认执行候选
+
 ## 8. 诊断与维护
 ### 性能分化报告
 ```powershell

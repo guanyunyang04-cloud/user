@@ -69,14 +69,19 @@
   - `state_context` 单开无效，反而明显退化
   - `state + liquidity + light ranking/listwise` 明显抬升了研究端收益与 Sharpe
   - 仅靠第一版短线目标重写与额外日线短线特征，暂时没有带来增益
+- `state_liquidity_listwise_v1` 的三窗 formal head-to-head 已完成：
+  - 均值超额年化 `26.16%`，高于基线 `14.61%`
+  - 均值超额 Sharpe `1.199`，高于基线 `0.448`
+  - 按超额年化与 Sharpe 都是 `2/3` 窗取胜
+  - 但第一窗 `20230216_20240229` 明显退化，说明它不是 lucky run，也还不是无条件新前沿
 - 因此当前瓶颈更像“上下文与收益排序耦合不足”，不是“先随手加更多短线标签和更多日线输入”。
 
 ## 4. 当前研究优先级
-1. 先把 `state_liquidity_listwise_v1` 做成多窗口 formal head-to-head，确认它不是 recent-window lucky run。
-2. 如果 `state_liquidity_listwise_v1` 守住多窗口，再把它接入 execution objective，对比 `regoff_k2_realistic`。
-3. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
-4. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
-5. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
+1. 把 `state_liquidity_listwise_v1` 接入 execution objective，做显式成本下的 head-to-head。
+2. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
+3. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
+4. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
+5. 继续回看 `state_liquidity_listwise_v1` 的第一弱窗，必要时只做弱窗修复型小消融，而不是重开大矩阵。
 6. 只有在图路线边际增益放缓后，才打开 `state-conditioned MoE`。
 7. RL 继续留在 `t0_project` 的执行层范围内，不进入当前默认日频 alpha 主线。
 8. 任何后续默认候选升格，都必须同时给出：

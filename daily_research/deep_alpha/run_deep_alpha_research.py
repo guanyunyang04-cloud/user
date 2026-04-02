@@ -68,6 +68,7 @@ from daily_research.deep_alpha.sequence_dataset import (
     transform_return_target_frames,
 )
 from daily_research.deep_alpha.trainer import collate_batch, compute_rankic, infer_dataset, train_multitask_model
+from daily_research.progress import StageProgress, create_progress, progress_write
 
 
 def parse_args():
@@ -315,6 +316,16 @@ def _panel_to_long(frame: pd.DataFrame, value_name: str) -> pd.DataFrame:
         .rename(value_name)
         .reset_index()
     )
+
+
+def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
+    if not write_tasks:
+        return
+    with create_progress(total=len(write_tasks), desc="写出产物", unit="file", leave=False) as progress:
+        for index, (label, writer) in enumerate(write_tasks, start=1):
+            progress.set_description_str(f"写出 {label} {index}/{len(write_tasks)}")
+            writer()
+            progress.update(1)
 
 
 def _resolve_manual_score_config(
@@ -639,11 +650,15 @@ def main():
     if float(cfg.clean_breakout_event_loss_weight) > 0:
         cfg.target_loss_weights[f"event_clean_breakout_{int(cfg.breakout_event_horizon)}"] = float(cfg.clean_breakout_event_loss_weight)
 
+    stage_progress = StageProgress(total=8, label="DeepAlpha")
+    stage_progress.__enter__()
+    stage_progress.start_stage(1, "加载宇宙与行情")
+
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
     if args.data_source == "tq":
         if args.rolling_liquidity_pool:
-            print(f"[1/8] Loading base universe for rolling {args.rolling_liquidity_pool} research pool...")
+            progress_write(f"加载滚动 {args.rolling_liquidity_pool} 研究股票池基础宇宙")
             try:
                 universe = load_universe_from_tq(cfg.universe_scope)
             except Exception as exc:
@@ -655,9 +670,9 @@ def main():
                 if not fallback_universe:
                     raise
                 universe = fallback_universe
-                print(f"      TQ universe unavailable, using cached rolling-pool union ({len(universe)} stocks): {exc}")
+                progress_write(f"TQ 宇宙不可用，回退到缓存滚动并集（{len(universe)} 只）: {exc}")
         elif not universe and cfg.universe_scope == "all_a":
-            print("[1/8] Loading all-A universe from TQ...")
+            progress_write("从 TQ 加载全A宇宙")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif not universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
@@ -688,6 +703,8 @@ def main():
     valid_end_pos = min(len(close_dates) - 1, valid_start_pos + max(int(cfg.valid_days), 1) - 1)
     valid_end = pd.Timestamp(close_dates[valid_end_pos])
 
+    stage_progress.complete_stage(1)
+    stage_progress.start_stage(2, "构建市场状态与流动性")
     state_frame, state_name_map, state_key = load_cached_or_fit_market_state(
         args=args,
         cfg=cfg,
@@ -701,19 +718,20 @@ def main():
         raw_key=raw_key,
     )
 
-    print("[4/8] Building sequence features and targets...")
+    stage_progress.complete_stage(2)
+    stage_progress.start_stage(3, "构建特征与目标")
     industry_map = None
     style_map = None
     if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "tq":
-        print("      Loading relation priors (industry/style)...")
+        progress_write("加载关系先验：行业/风格")
         try:
             industry_map = load_industry_map_from_tq(list(close.columns))
         except Exception as exc:
-            print(f"      Industry map unavailable: {exc}")
+            progress_write(f"行业映射不可用: {exc}")
         try:
             style_map = load_style_map_from_tq(list(close.columns))
         except Exception as exc:
-            print(f"      Style map unavailable: {exc}")
+            progress_write(f"风格映射不可用: {exc}")
     feature_meta = {
         "version": 5,
         "raw_key": raw_key,
@@ -743,7 +761,7 @@ def main():
     feature_path = get_cache_root() / "features" / f"{feature_key}.pkl"
     feature_cached = load_pickle(feature_path) if args.use_cache and not args.refresh_cache else None
     if feature_cached is not None:
-        print(f"      Loading feature cache: {feature_path.name}")
+        progress_write(f"读取特征缓存: {feature_path.name}")
         feature_frames = feature_cached["feature_frames"]
         target_frames = feature_cached["target_frames"]
         structure_label_frame = feature_cached.get("structure_label_frame")
@@ -794,7 +812,7 @@ def main():
                     "structure_label_frame": structure_label_frame,
                 },
             )
-            print(f"      Saved feature cache: {feature_path}")
+            progress_write(f"写入特征缓存: {feature_path.name}")
     if structure_label_frame is None:
         structure_label_frame = build_structure_label_frame(
             close=df_dict["Close"].astype(float),
@@ -833,10 +851,12 @@ def main():
     corpus_key = cache_key(corpus_meta)
     corpus_path = get_cache_root() / "corpus" / f"{corpus_key}.pkl"
     corpus = load_pickle(corpus_path) if args.use_cache and not args.refresh_cache else None
+    stage_progress.complete_stage(3)
+    stage_progress.start_stage(4, "构建语料与样本")
     if corpus is not None:
-        print(f"      Loading sequence corpus cache: {corpus_path.name}")
+        progress_write(f"读取语料缓存: {corpus_path.name}")
     else:
-        print("      Building sequence corpus once and slicing train/valid views...")
+        progress_write("构建 sequence corpus 并切分 train/valid 视图")
         corpus = build_sequence_corpus(
             feature_frames=feature_frames,
             train_target_frames=train_target_frames,
@@ -855,7 +875,7 @@ def main():
         )
         if args.use_cache:
             save_pickle(corpus_path, corpus)
-            print(f"      Saved sequence corpus cache: {corpus_path}")
+            progress_write(f"写入语料缓存: {corpus_path.name}")
     train_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(end_date=train_end))
     valid_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(start_date=valid_start, end_date=valid_end))
     train_eval_start = resolve_recent_window_start(close.index, train_end, cfg.train_eval_window_days)
@@ -871,9 +891,10 @@ def main():
     if len(train_eval_ds) == 0:
         raise RuntimeError("Deep alpha train-eval dataset is empty. Increase --train-eval-window-days or history length.")
 
-    print(
-        f"[5/8] Training samples={len(train_ds)} validation samples={len(valid_ds)} "
-        f"train_eval_samples={len(train_eval_ds)}"
+    stage_progress.complete_stage(4)
+    stage_progress.start_stage(5, "准备运行时与模型")
+    progress_write(
+        f"样本统计 train={len(train_ds)} valid={len(valid_ds)} train_eval={len(train_eval_ds)}"
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     runtime_profile = resolve_runtime_profile(
@@ -891,7 +912,7 @@ def main():
     cfg.use_amp = runtime_profile.use_amp
     configure_torch_runtime(device, use_amp=bool(cfg.use_amp))
     for note in runtime_profile.applied_notes:
-        print(f"      Runtime tuning: {note}")
+        progress_write(f"运行时调优: {note}")
     pin_memory = bool(cfg.pin_memory and torch.cuda.is_available())
     loader_kwargs = {
         "num_workers": int(cfg.num_workers),
@@ -952,11 +973,11 @@ def main():
         if cfg.encoder_family != "patch_transformer":
             raise ValueError("Pretrained encoder loading is currently only supported with --encoder-family patch_transformer.")
         missing, unexpected = model.encoder.load_state_dict(encoder_state, strict=False)
-        print(f"      Loaded pretrained encoder: {artifact_path.name}")
+        progress_write(f"已加载预训练编码器: {artifact_path.name}")
         if missing:
-            print(f"      Pretrained encoder missing keys: {missing}")
+            progress_write(f"预训练编码器缺失键: {missing}")
         if unexpected:
-            print(f"      Pretrained encoder unexpected keys: {unexpected}")
+            progress_write(f"预训练编码器多余键: {unexpected}")
 
     target_state_ids = sorted(
         {
@@ -966,7 +987,9 @@ def main():
         }
     )
 
-    print("[6/8] Training deep alpha model...")
+    stage_progress.complete_stage(5)
+    stage_progress.start_stage(6, "训练模型")
+    progress_write("开始训练 deep alpha 模型")
     train_result = train_multitask_model(
         model=model,
         train_loader=train_loader,
@@ -1018,13 +1041,15 @@ def main():
     )
     history = train_result.history
     training_diagnostics = train_result.diagnostics
-    print(
-        f"      Training diagnostics: status={training_diagnostics.status}, "
+    progress_write(
+        f"训练诊断 status={training_diagnostics.status}, "
         f"best_epoch={training_diagnostics.best_epoch}/{training_diagnostics.epochs_completed}, "
         f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
     )
 
-    print("[7/8] Running validation inference and simple holdout backtest...")
+    stage_progress.complete_stage(6)
+    stage_progress.start_stage(7, "验证推理与回测")
+    progress_write("执行验证推理与 holdout 回测")
     train_pred_df, _ = infer_dataset(model, train_eval_loader, device, train_ds.target_names, use_amp=bool(cfg.use_amp))
     pred_df, emb_df = infer_dataset(model, valid_loader, device, train_ds.target_names, use_amp=bool(cfg.use_amp))
     rankic_summary = compute_rankic(pred_df, train_ds.target_names)
@@ -1296,7 +1321,9 @@ def main():
                 na_position="last",
             )
 
-    print("[8/8] Writing outputs...")
+    stage_progress.complete_stage(7)
+    stage_progress.start_stage(8, "写出产物")
+    progress_write("整理输出目录并写出文件")
     output_root = Path("daily_research/output")
     output_root.mkdir(parents=True, exist_ok=True)
     run_name = args.experiment_tag.strip() or f"deep_alpha_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -1320,208 +1347,208 @@ def main():
         execution_aligned_daily_score_panel = _panel_to_long(execution_aligned_score_frame.reindex(valid_dates), "score")
         execution_aligned_daily_target_weight_panel = _panel_to_long(execution_aligned_target_weights.reindex(valid_dates), "target_weight")
 
-    history_df.to_csv(run_dir / "train_history.csv", index=False, encoding="utf-8-sig")
-    pred_df.to_csv(run_dir / "validation_predictions.csv", index=False, encoding="utf-8-sig")
-    emb_df.to_csv(run_dir / "validation_embeddings.csv", index=False, encoding="utf-8-sig")
-    rankic_summary.to_csv(run_dir / "validation_rankic_summary.csv", index=False, encoding="utf-8-sig")
-    state_df.to_csv(run_dir / "market_state_frame.csv", encoding="utf-8-sig")
-    latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")
-    daily_score_panel.to_csv(run_dir / "daily_score_panel.csv", index=False, encoding="utf-8-sig")
-    daily_target_weight_panel.to_csv(run_dir / "daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
-    if live_latest_scores is not None:
-        live_latest_scores.to_csv(run_dir / "live_latest_scores.csv", index=False, encoding="utf-8-sig")
-    live_daily_score_panel.to_csv(run_dir / "daily_live_score_panel.csv", index=False, encoding="utf-8-sig")
-    live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")
     equity_export = equity_df.reset_index().rename(columns={equity_df.index.name or "index": "date"})
-    equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")
-    action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_latest_scores is not None:
-        execution_aligned_latest_scores.to_csv(run_dir / "execution_aligned_latest_scores.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_daily_score_panel is not None:
-        execution_aligned_daily_score_panel.to_csv(run_dir / "execution_aligned_daily_score_panel.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_daily_target_weight_panel is not None:
-        execution_aligned_daily_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_live_latest_scores is not None:
-        execution_aligned_live_latest_scores.to_csv(run_dir / "execution_aligned_live_latest_scores.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_live_score_panel is not None:
-        execution_aligned_live_score_panel.to_csv(run_dir / "execution_aligned_daily_live_score_panel.csv", index=False, encoding="utf-8-sig")
-    if execution_aligned_live_target_weight_panel is not None:
-        execution_aligned_live_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")
     if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
         execution_aligned_equity_export = execution_aligned_equity_df.reset_index().rename(columns={execution_aligned_equity_df.index.name or "index": "date"})
-        execution_aligned_equity_export.to_csv(run_dir / "execution_aligned_equity_curve.csv", index=False, encoding="utf-8-sig")
-        execution_aligned_action_df.to_csv(run_dir / "execution_aligned_actions.csv", index=False, encoding="utf-8-sig")
+    metrics_payload = {
+        "framework": "deep_alpha_research",
+        "train_end": str(train_end.date()),
+        "valid_start": str(valid_start.date()),
+        "valid_end": str(valid_end.date()),
+        "train_samples": len(train_ds),
+        "train_eval_samples": len(train_eval_ds),
+        "valid_samples": len(valid_ds),
+        "train_eval_window_days": cfg.train_eval_window_days,
+        "train_eval_start": "" if train_eval_start is None else str(train_eval_start.date()),
+        "device": str(device),
+        "market_state_count": cfg.market_state_count,
+        "feature_count": len(train_ds.feature_names),
+        "target_names": train_ds.target_names,
+        "encoder_family": cfg.encoder_family,
+        "patch_len": cfg.patch_len,
+        "pretrained_encoder_path": cfg.pretrained_encoder_path,
+        "epochs": cfg.epochs,
+        "min_epochs": cfg.min_epochs,
+        "early_stop_patience": cfg.early_stop_patience,
+        "lr_plateau_patience": cfg.lr_plateau_patience,
+        "lr_plateau_factor": cfg.lr_plateau_factor,
+        "min_improvement": cfg.min_improvement,
+        "return_head_mode": cfg.return_head_mode,
+        "context_dim": cfg.context_dim,
+        "state_context": cfg.state_context,
+        "liquidity_context": cfg.liquidity_context,
+        "structure_context": cfg.structure_context,
+        "aux_structure_task": cfg.aux_structure_task,
+        "aux_structure_loss_weight": cfg.aux_structure_loss_weight,
+        "aux_structure_label_smoothing": cfg.aux_structure_label_smoothing,
+        "structure_prototype_task": cfg.structure_prototype_task,
+        "structure_prototype_loss_weight": cfg.structure_prototype_loss_weight,
+        "structure_prototype_temperature": cfg.structure_prototype_temperature,
+        "ranking_loss_weight": cfg.ranking_loss_weight,
+        "listwise_loss_weight": cfg.listwise_loss_weight,
+        "listwise_temperature": cfg.listwise_temperature,
+        "max_rank_pairs_per_group": cfg.max_rank_pairs_per_group,
+        "return_loss_mode": cfg.return_loss_mode,
+        "return_target_transform": cfg.return_target_transform,
+        "return_top_frac": cfg.return_top_frac,
+        "return_bottom_frac": cfg.return_bottom_frac,
+        "liquidity_conditioning_mode": cfg.liquidity_conditioning_mode,
+        "top_liquidity_return_loss_weight": cfg.top_liquidity_return_loss_weight,
+        "other_liquidity_return_loss_weight": cfg.other_liquidity_return_loss_weight,
+        "top_liquidity_rank_loss_weight": cfg.top_liquidity_rank_loss_weight,
+        "other_liquidity_rank_loss_weight": cfg.other_liquidity_rank_loss_weight,
+        "top_liquidity_sample_weight": cfg.top_liquidity_sample_weight,
+        "other_liquidity_sample_weight": cfg.other_liquidity_sample_weight,
+        "structure_conditioning_mode": cfg.structure_conditioning_mode,
+        "top_attack_structure_names": list(cfg.top_attack_structure_names),
+        "other_protect_structure_names": list(cfg.other_protect_structure_names),
+        "top_attack_rank_weight": cfg.top_attack_rank_weight,
+        "other_protect_rank_weight": cfg.other_protect_rank_weight,
+        "target_state_names": list(cfg.target_state_names),
+        "target_state_ids": list(target_state_ids),
+        "target_state_attack_structure_names": list(cfg.target_state_attack_structure_names),
+        "target_state_protect_structure_names": list(cfg.target_state_protect_structure_names),
+        "target_state_rank_weight": cfg.target_state_rank_weight,
+        "target_state_protect_rank_weight": cfg.target_state_protect_rank_weight,
+        "target_loss_weights": cfg.target_loss_weights,
+        "score_horizon_weights": cfg.score_horizon_weights,
+        "applied_score_horizon_weights": applied_score_horizon_weights,
+        "score_rank_blend": cfg.score_rank_blend,
+        "score_downside_penalty": cfg.score_downside_penalty,
+        "applied_score_downside_penalty": applied_score_downside_penalty,
+        "score_risk_mode": cfg.score_risk_mode,
+        "score_risk_gate_threshold": cfg.score_risk_gate_threshold,
+        "score_risk_state_thresholds": parse_float_list(args.score_risk_state_thresholds),
+        "liquidity_layer": bool(cfg.liquidity_layer),
+        "liquidity_bucket_count": int(cfg.liquidity_bucket_count),
+        "dynamic_graph_layer": bool(cfg.dynamic_graph_layer),
+        "dynamic_graph_top_k": int(cfg.dynamic_graph_top_k),
+        "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
+        "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
+        "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
+        "short_alpha_features": bool(cfg.short_alpha_features),
+        "breakout_event_horizon": int(cfg.breakout_event_horizon),
+        "breakout_event_threshold": float(cfg.breakout_event_threshold),
+        "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
+        "breakout_event_loss_weight": float(cfg.breakout_event_loss_weight),
+        "clean_breakout_event_loss_weight": float(cfg.clean_breakout_event_loss_weight),
+        "safe_runtime_profile": bool(cfg.safe_runtime_profile),
+        "runtime_profile": runtime_profile.__dict__,
+        "training_diagnostics": training_diagnostics.__dict__,
+        "score_head_method": args.score_head_method,
+        "adaptive_task_weights": bool(args.adaptive_task_weights),
+        "adaptive_task_window_days": args.adaptive_task_window_days,
+        "score_head_task_weights": score_head_artifact.task_weights,
+        "structure_aux_summary": structure_aux_summary,
+        "structure_prototype_summary": structure_prototype_summary,
+        "risk_gate_global_threshold": None if risk_gate_artifact is None else risk_gate_artifact.global_threshold,
+        "risk_gate_state_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.state_thresholds,
+        "risk_gate_group_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.group_thresholds,
+        "execution_alignment_mode": str(args.execution_alignment_mode),
+        "execution_alignment_objective": str(args.execution_alignment_objective),
+        "execution_alignment_transaction_cost_bps": float(args.execution_alignment_transaction_cost_bps),
+        "execution_alignment_slippage_bps": float(args.execution_alignment_slippage_bps),
+        "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
+        "execution_alignment_profile": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile,
+        "execution_alignment_profile_description": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile_description,
+        "execution_alignment_candidate_profiles": [] if execution_alignment_artifact is None else execution_alignment_artifact.candidate_profiles,
+        "execution_alignment_selected_bridge_meta": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_bridge_meta,
+        "execution_alignment_selected_train_metrics": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_train_metrics,
+        "relation_layer": bool(args.relation_layer),
+        "rankic_summary": rankic_summary.to_dict(orient="records"),
+        "holdout_backtest": metrics,
+        "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
+        "live_signal_date": (
+            ""
+            if live_score_frame.dropna(how="all").empty
+            else str(pd.Timestamp(live_score_frame.dropna(how="all").index.max()).date())
+        ),
+        "execution_aligned_live_signal_date": (
+            ""
+            if execution_aligned_live_outputs is None
+            else str(pd.Timestamp(execution_aligned_live_outputs["score_frame"].dropna(how="all").index.max()).date())
+            if not execution_aligned_live_outputs["score_frame"].dropna(how="all").empty
+            else ""
+        ),
+        "execution_mode": "next_open",
+        "rebalance_freq": cfg.rebalance_freq,
+        "liquidity_pool": args.liquidity_pool or "",
+        "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
+        "rolling_pool_rebalance_days": int(args.pool_rebalance_days),
+        "rolling_pool_adv_window": int(args.pool_adv_window),
+        "rolling_pool_union_size": 0 if rolling_pool_artifact is None else int(rolling_membership_frame.columns[rolling_membership_frame.any(axis=0)].size),
+        "rolling_pool_rebalance_count": 0 if rolling_pool_artifact is None else int(len(rolling_pool_artifact.schedule_df)),
+        "stocks_file": stocks_file or "",
+        "raw_cache_key": raw_key,
+        "rolling_pool_cache_key": rolling_pool_key,
+        "state_cache_key": state_key,
+        "liquidity_bucket_cache_key": liquidity_bucket_key,
+        "feature_cache_key": feature_key,
+        "corpus_cache_key": corpus_key,
+    }
+    model_artifact = {
+        "model_state_dict": model.state_dict(),
+        "feature_names": train_ds.feature_names,
+        "target_names": train_ds.target_names,
+        "config": vars(cfg),
+        "train_end": str(train_end.date()),
+        "valid_start": str(valid_start.date()),
+    }
+
+    def _write_metrics_json() -> None:
+        with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
+            json.dump(metrics_payload, f, ensure_ascii=False, indent=2)
+
+    write_tasks: list[tuple[str, Any]] = [
+        ("train_history.csv", lambda: history_df.to_csv(run_dir / "train_history.csv", index=False, encoding="utf-8-sig")),
+        ("validation_predictions.csv", lambda: pred_df.to_csv(run_dir / "validation_predictions.csv", index=False, encoding="utf-8-sig")),
+        ("validation_embeddings.csv", lambda: emb_df.to_csv(run_dir / "validation_embeddings.csv", index=False, encoding="utf-8-sig")),
+        ("validation_rankic_summary.csv", lambda: rankic_summary.to_csv(run_dir / "validation_rankic_summary.csv", index=False, encoding="utf-8-sig")),
+        ("market_state_frame.csv", lambda: state_df.to_csv(run_dir / "market_state_frame.csv", encoding="utf-8-sig")),
+        ("latest_scores.csv", lambda: latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")),
+        ("daily_score_panel.csv", lambda: daily_score_panel.to_csv(run_dir / "daily_score_panel.csv", index=False, encoding="utf-8-sig")),
+        ("daily_target_weight_panel.csv", lambda: daily_target_weight_panel.to_csv(run_dir / "daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
+        ("daily_live_score_panel.csv", lambda: live_daily_score_panel.to_csv(run_dir / "daily_live_score_panel.csv", index=False, encoding="utf-8-sig")),
+        ("daily_live_target_weight_panel.csv", lambda: live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
+        ("equity_curve.csv", lambda: equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")),
+        ("actions.csv", lambda: action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")),
+        ("deep_alpha_model.pt", lambda: torch.save(model_artifact, run_dir / "deep_alpha_model.pt")),
+        ("score_head_artifact.pkl", lambda: save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)),
+        ("metrics.json", _write_metrics_json),
+    ]
+    if live_latest_scores is not None:
+        write_tasks.append(("live_latest_scores.csv", lambda: live_latest_scores.to_csv(run_dir / "live_latest_scores.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_latest_scores is not None:
+        write_tasks.append(("execution_aligned_latest_scores.csv", lambda: execution_aligned_latest_scores.to_csv(run_dir / "execution_aligned_latest_scores.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_daily_score_panel is not None:
+        write_tasks.append(("execution_aligned_daily_score_panel.csv", lambda: execution_aligned_daily_score_panel.to_csv(run_dir / "execution_aligned_daily_score_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_daily_target_weight_panel is not None:
+        write_tasks.append(("execution_aligned_daily_target_weight_panel.csv", lambda: execution_aligned_daily_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_live_latest_scores is not None:
+        write_tasks.append(("execution_aligned_live_latest_scores.csv", lambda: execution_aligned_live_latest_scores.to_csv(run_dir / "execution_aligned_live_latest_scores.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_live_score_panel is not None:
+        write_tasks.append(("execution_aligned_daily_live_score_panel.csv", lambda: execution_aligned_live_score_panel.to_csv(run_dir / "execution_aligned_daily_live_score_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_live_target_weight_panel is not None:
+        write_tasks.append(("execution_aligned_daily_live_target_weight_panel.csv", lambda: execution_aligned_live_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
+        write_tasks.append(("execution_aligned_equity_curve.csv", lambda: execution_aligned_equity_export.to_csv(run_dir / "execution_aligned_equity_curve.csv", index=False, encoding="utf-8-sig")))
+        write_tasks.append(("execution_aligned_actions.csv", lambda: execution_aligned_action_df.to_csv(run_dir / "execution_aligned_actions.csv", index=False, encoding="utf-8-sig")))
     if rolling_pool_artifact is not None:
-        rolling_pool_artifact.schedule_df.to_csv(run_dir / "rolling_liquidity_schedule.csv", index=False, encoding="utf-8-sig")
-        rolling_pool_artifact.summary_df.to_csv(run_dir / "rolling_liquidity_summary.csv", index=False, encoding="utf-8-sig")
+        write_tasks.append(("rolling_liquidity_schedule.csv", lambda: rolling_pool_artifact.schedule_df.to_csv(run_dir / "rolling_liquidity_schedule.csv", index=False, encoding="utf-8-sig")))
+        write_tasks.append(("rolling_liquidity_summary.csv", lambda: rolling_pool_artifact.summary_df.to_csv(run_dir / "rolling_liquidity_summary.csv", index=False, encoding="utf-8-sig")))
     if risk_gate_artifact is not None and risk_gate_artifact.objective_rows:
-        pd.DataFrame(risk_gate_artifact.objective_rows).to_csv(
-            run_dir / "risk_gate_objective_rows.csv",
-            index=False,
-            encoding="utf-8-sig",
-        )
+        risk_gate_rows = pd.DataFrame(risk_gate_artifact.objective_rows)
+        write_tasks.append(("risk_gate_objective_rows.csv", lambda: risk_gate_rows.to_csv(run_dir / "risk_gate_objective_rows.csv", index=False, encoding="utf-8-sig")))
     if execution_alignment_artifact is not None and execution_alignment_artifact.objective_rows:
-        pd.DataFrame(execution_alignment_artifact.objective_rows).to_csv(
-            run_dir / "execution_alignment_objective_rows.csv",
-            index=False,
-            encoding="utf-8-sig",
-        )
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "feature_names": train_ds.feature_names,
-            "target_names": train_ds.target_names,
-            "config": vars(cfg),
-            "train_end": str(train_end.date()),
-            "valid_start": str(valid_start.date()),
-        },
-        run_dir / "deep_alpha_model.pt",
-    )
-    save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)
+        execution_alignment_rows = pd.DataFrame(execution_alignment_artifact.objective_rows)
+        write_tasks.append(("execution_alignment_objective_rows.csv", lambda: execution_alignment_rows.to_csv(run_dir / "execution_alignment_objective_rows.csv", index=False, encoding="utf-8-sig")))
     if risk_gate_artifact is not None:
-        save_pickle(run_dir / "risk_gate_artifact.pkl", risk_gate_artifact)
-    with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "framework": "deep_alpha_research",
-                "train_end": str(train_end.date()),
-                "valid_start": str(valid_start.date()),
-                "valid_end": str(valid_end.date()),
-                "train_samples": len(train_ds),
-                "train_eval_samples": len(train_eval_ds),
-                "valid_samples": len(valid_ds),
-                "train_eval_window_days": cfg.train_eval_window_days,
-                "train_eval_start": "" if train_eval_start is None else str(train_eval_start.date()),
-                "device": str(device),
-                "market_state_count": cfg.market_state_count,
-                "feature_count": len(train_ds.feature_names),
-                "target_names": train_ds.target_names,
-                "encoder_family": cfg.encoder_family,
-                "patch_len": cfg.patch_len,
-                "pretrained_encoder_path": cfg.pretrained_encoder_path,
-                "epochs": cfg.epochs,
-                "min_epochs": cfg.min_epochs,
-                "early_stop_patience": cfg.early_stop_patience,
-                "lr_plateau_patience": cfg.lr_plateau_patience,
-                "lr_plateau_factor": cfg.lr_plateau_factor,
-                "min_improvement": cfg.min_improvement,
-                "return_head_mode": cfg.return_head_mode,
-                "context_dim": cfg.context_dim,
-                "state_context": cfg.state_context,
-                "liquidity_context": cfg.liquidity_context,
-                "structure_context": cfg.structure_context,
-                "aux_structure_task": cfg.aux_structure_task,
-                "aux_structure_loss_weight": cfg.aux_structure_loss_weight,
-                "aux_structure_label_smoothing": cfg.aux_structure_label_smoothing,
-                "structure_prototype_task": cfg.structure_prototype_task,
-                "structure_prototype_loss_weight": cfg.structure_prototype_loss_weight,
-                "structure_prototype_temperature": cfg.structure_prototype_temperature,
-                "ranking_loss_weight": cfg.ranking_loss_weight,
-                "listwise_loss_weight": cfg.listwise_loss_weight,
-                "listwise_temperature": cfg.listwise_temperature,
-                "max_rank_pairs_per_group": cfg.max_rank_pairs_per_group,
-                "return_loss_mode": cfg.return_loss_mode,
-                "return_target_transform": cfg.return_target_transform,
-                "return_top_frac": cfg.return_top_frac,
-                "return_bottom_frac": cfg.return_bottom_frac,
-                "liquidity_conditioning_mode": cfg.liquidity_conditioning_mode,
-                "top_liquidity_return_loss_weight": cfg.top_liquidity_return_loss_weight,
-                "other_liquidity_return_loss_weight": cfg.other_liquidity_return_loss_weight,
-                "top_liquidity_rank_loss_weight": cfg.top_liquidity_rank_loss_weight,
-                "other_liquidity_rank_loss_weight": cfg.other_liquidity_rank_loss_weight,
-                "top_liquidity_sample_weight": cfg.top_liquidity_sample_weight,
-                "other_liquidity_sample_weight": cfg.other_liquidity_sample_weight,
-                "structure_conditioning_mode": cfg.structure_conditioning_mode,
-                "top_attack_structure_names": list(cfg.top_attack_structure_names),
-                "other_protect_structure_names": list(cfg.other_protect_structure_names),
-                "top_attack_rank_weight": cfg.top_attack_rank_weight,
-                "other_protect_rank_weight": cfg.other_protect_rank_weight,
-                "target_state_names": list(cfg.target_state_names),
-                "target_state_ids": list(target_state_ids),
-                "target_state_attack_structure_names": list(cfg.target_state_attack_structure_names),
-                "target_state_protect_structure_names": list(cfg.target_state_protect_structure_names),
-                "target_state_rank_weight": cfg.target_state_rank_weight,
-                "target_state_protect_rank_weight": cfg.target_state_protect_rank_weight,
-                "target_loss_weights": cfg.target_loss_weights,
-                "score_horizon_weights": cfg.score_horizon_weights,
-                "applied_score_horizon_weights": applied_score_horizon_weights,
-                "score_rank_blend": cfg.score_rank_blend,
-                "score_downside_penalty": cfg.score_downside_penalty,
-                "applied_score_downside_penalty": applied_score_downside_penalty,
-                "score_risk_mode": cfg.score_risk_mode,
-                "score_risk_gate_threshold": cfg.score_risk_gate_threshold,
-                "score_risk_state_thresholds": parse_float_list(args.score_risk_state_thresholds),
-                "liquidity_layer": bool(cfg.liquidity_layer),
-                "liquidity_bucket_count": int(cfg.liquidity_bucket_count),
-                "dynamic_graph_layer": bool(cfg.dynamic_graph_layer),
-                "dynamic_graph_top_k": int(cfg.dynamic_graph_top_k),
-                "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
-                "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
-                "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
-                "short_alpha_features": bool(cfg.short_alpha_features),
-                "breakout_event_horizon": int(cfg.breakout_event_horizon),
-                "breakout_event_threshold": float(cfg.breakout_event_threshold),
-                "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
-                "breakout_event_loss_weight": float(cfg.breakout_event_loss_weight),
-                "clean_breakout_event_loss_weight": float(cfg.clean_breakout_event_loss_weight),
-                "safe_runtime_profile": bool(cfg.safe_runtime_profile),
-                "runtime_profile": runtime_profile.__dict__,
-                "training_diagnostics": training_diagnostics.__dict__,
-                "score_head_method": args.score_head_method,
-                "adaptive_task_weights": bool(args.adaptive_task_weights),
-                "adaptive_task_window_days": args.adaptive_task_window_days,
-                "score_head_task_weights": score_head_artifact.task_weights,
-                "structure_aux_summary": structure_aux_summary,
-                "structure_prototype_summary": structure_prototype_summary,
-                "risk_gate_global_threshold": None if risk_gate_artifact is None else risk_gate_artifact.global_threshold,
-                "risk_gate_state_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.state_thresholds,
-                "risk_gate_group_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.group_thresholds,
-                "execution_alignment_mode": str(args.execution_alignment_mode),
-                "execution_alignment_objective": str(args.execution_alignment_objective),
-                "execution_alignment_transaction_cost_bps": float(args.execution_alignment_transaction_cost_bps),
-                "execution_alignment_slippage_bps": float(args.execution_alignment_slippage_bps),
-                "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
-                "execution_alignment_profile": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile,
-                "execution_alignment_profile_description": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile_description,
-                "execution_alignment_candidate_profiles": [] if execution_alignment_artifact is None else execution_alignment_artifact.candidate_profiles,
-                "execution_alignment_selected_bridge_meta": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_bridge_meta,
-                "execution_alignment_selected_train_metrics": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_train_metrics,
-                "relation_layer": bool(args.relation_layer),
-                "rankic_summary": rankic_summary.to_dict(orient="records"),
-                "holdout_backtest": metrics,
-                "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
-                "live_signal_date": (
-                    ""
-                    if live_score_frame.dropna(how="all").empty
-                    else str(pd.Timestamp(live_score_frame.dropna(how="all").index.max()).date())
-                ),
-                "execution_aligned_live_signal_date": (
-                    ""
-                    if execution_aligned_live_outputs is None
-                    else str(pd.Timestamp(execution_aligned_live_outputs["score_frame"].dropna(how="all").index.max()).date())
-                    if not execution_aligned_live_outputs["score_frame"].dropna(how="all").empty
-                    else ""
-                ),
-                "execution_mode": "next_open",
-                "rebalance_freq": cfg.rebalance_freq,
-                "liquidity_pool": args.liquidity_pool or "",
-                "rolling_liquidity_pool": args.rolling_liquidity_pool or "",
-                "rolling_pool_rebalance_days": int(args.pool_rebalance_days),
-                "rolling_pool_adv_window": int(args.pool_adv_window),
-                "rolling_pool_union_size": 0 if rolling_pool_artifact is None else int(rolling_membership_frame.columns[rolling_membership_frame.any(axis=0)].size),
-                "rolling_pool_rebalance_count": 0 if rolling_pool_artifact is None else int(len(rolling_pool_artifact.schedule_df)),
-                "stocks_file": stocks_file or "",
-                "raw_cache_key": raw_key,
-                "rolling_pool_cache_key": rolling_pool_key,
-                "state_cache_key": state_key,
-                "liquidity_bucket_cache_key": liquidity_bucket_key,
-                "feature_cache_key": feature_key,
-                "corpus_cache_key": corpus_key,
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+        write_tasks.append(("risk_gate_artifact.pkl", lambda: save_pickle(run_dir / "risk_gate_artifact.pkl", risk_gate_artifact)))
+
+    _run_write_tasks(write_tasks)
+    stage_progress.complete_stage(8)
+    stage_progress.complete()
+    stage_progress.close()
     print(f"Output: {run_dir}")
     summary = {
         "holdout_backtest": metrics,

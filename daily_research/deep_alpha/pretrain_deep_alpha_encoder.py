@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
 import argparse
 import json
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -47,6 +48,7 @@ from daily_research.deep_alpha.sequence_dataset import (
     build_targets,
 )
 from daily_research.deep_alpha.trainer import collate_pretrain_batch, train_masked_pretrainer
+from daily_research.progress import StageProgress, create_progress, progress_write
 
 
 def parse_args():
@@ -125,6 +127,16 @@ def _resolve_pretrain_split(train_dates: pd.Index, pretrain_valid_days: int) -> 
     return pd.Timestamp(train_end), pd.Timestamp(valid_start)
 
 
+def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
+    if not write_tasks:
+        return
+    with create_progress(total=len(write_tasks), desc="写出预训练产物", unit="file", leave=False) as progress:
+        for index, (label, writer) in enumerate(write_tasks, start=1):
+            progress.set_description_str(f"写出 {label} {index}/{len(write_tasks)}")
+            writer()
+            progress.update(1)
+
+
 def main():
     args = parse_args()
     if args.liquidity_pool and args.rolling_liquidity_pool:
@@ -176,11 +188,15 @@ def main():
     if not cfg.end_date:
         cfg.end_date = pd.Timestamp(get_latest_completed_trading_date()).strftime("%Y%m%d")
 
+    stage_progress = StageProgress(total=7, label="Pretrain")
+    stage_progress.__enter__()
+    stage_progress.start_stage(1, "加载宇宙与行情")
+
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
     if args.data_source == "tq":
         if args.rolling_liquidity_pool:
-            print(f"[1/7] Loading base universe for rolling {args.rolling_liquidity_pool} pretraining pool...")
+            progress_write(f"加载滚动 {args.rolling_liquidity_pool} 预训练股票池基础宇宙")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif args.liquidity_pool and not universe:
             from daily_research.execution.liquidity_universe import get_named_pool_file
@@ -188,7 +204,7 @@ def main():
             pool_file = get_named_pool_file(args.liquidity_pool)
             universe = load_stocks_from_file(str(pool_file))
         elif not universe and cfg.universe_scope == "all_a":
-            print("[1/7] Loading all-A universe from TQ...")
+            progress_write("从 TQ 加载全A宇宙")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif not universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
@@ -218,6 +234,8 @@ def main():
     train_end, valid_start = resolve_split_dates(close.index, cfg.train_end_date, cfg.valid_start_date, cfg.valid_days)
     pretrain_train_end, pretrain_valid_start = _resolve_pretrain_split(close.index[close.index <= train_end], args.pretrain_valid_days)
 
+    stage_progress.complete_stage(1)
+    stage_progress.start_stage(2, "构建市场状态与流动性")
     state_frame, _state_name_map, state_key = load_cached_or_fit_market_state(
         args=args,
         cfg=cfg,
@@ -231,18 +249,19 @@ def main():
         raw_key=raw_key,
     )
 
-    print("[4/7] Building features for masked pretraining...")
+    stage_progress.complete_stage(2)
+    stage_progress.start_stage(3, "构建特征与目标")
     industry_map = None
     style_map = None
     if args.relation_layer and args.data_source == "tq":
         try:
             industry_map = load_industry_map_from_tq(list(close.columns))
         except Exception as exc:
-            print(f"      Industry map unavailable: {exc}")
+            progress_write(f"行业映射不可用: {exc}")
         try:
             style_map = load_style_map_from_tq(list(close.columns))
         except Exception as exc:
-            print(f"      Style map unavailable: {exc}")
+            progress_write(f"风格映射不可用: {exc}")
 
     feature_meta = {
         "version": 1,
@@ -261,7 +280,7 @@ def main():
     feature_path = get_cache_root() / "features" / f"{feature_key}.pkl"
     feature_cached = load_pickle(feature_path) if args.use_cache and not args.refresh_cache else None
     if feature_cached is not None:
-        print(f"      Loading feature cache: {feature_path.name}")
+        progress_write(f"读取特征缓存: {feature_path.name}")
         feature_frames = feature_cached["feature_frames"]
         target_frames = feature_cached["target_frames"]
         structure_label_frame = feature_cached["structure_label_frame"]
@@ -301,7 +320,7 @@ def main():
                     "structure_label_frame": structure_label_frame,
                 },
             )
-            print(f"      Saved feature cache: {feature_path}")
+            progress_write(f"写入特征缓存: {feature_path.name}")
 
     pretrain_dates = list(close.index[close.index <= train_end])
     corpus_meta = {
@@ -319,10 +338,12 @@ def main():
     corpus_key = cache_key(corpus_meta)
     corpus_path = get_cache_root() / "corpus" / f"{corpus_key}.pkl"
     corpus = load_pickle(corpus_path) if args.use_cache and not args.refresh_cache else None
+    stage_progress.complete_stage(3)
+    stage_progress.start_stage(4, "构建预训练语料")
     if corpus is not None:
-        print(f"      Loading sequence corpus cache: {corpus_path.name}")
+        progress_write(f"读取语料缓存: {corpus_path.name}")
     else:
-        print("      Building pretraining corpus...")
+        progress_write("构建预训练语料")
         corpus = build_sequence_corpus(
             feature_frames=feature_frames,
             train_target_frames=target_frames,
@@ -342,14 +363,16 @@ def main():
         )
         if args.use_cache:
             save_pickle(corpus_path, corpus)
-            print(f"      Saved sequence corpus cache: {corpus_path}")
+            progress_write(f"写入语料缓存: {corpus_path.name}")
 
     train_ds = SequenceOnlyDataset(corpus=corpus, indices=corpus.build_index(end_date=pretrain_train_end))
     valid_ds = SequenceOnlyDataset(corpus=corpus, indices=corpus.build_index(start_date=pretrain_valid_start, end_date=train_end))
     if len(train_ds) == 0 or len(valid_ds) == 0:
         raise RuntimeError("Masked pretraining dataset is empty. Try a longer history or smaller lookback window.")
 
-    print(f"[5/7] Pretraining samples={len(train_ds)} validation samples={len(valid_ds)}")
+    stage_progress.complete_stage(4)
+    stage_progress.start_stage(5, "准备运行时与模型")
+    progress_write(f"样本统计 train={len(train_ds)} valid={len(valid_ds)}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     runtime_profile = resolve_runtime_profile(
         stage="pretrain",
@@ -366,7 +389,7 @@ def main():
     cfg.use_amp = runtime_profile.use_amp
     configure_torch_runtime(device, use_amp=bool(cfg.use_amp))
     for note in runtime_profile.applied_notes:
-        print(f"      Runtime tuning: {note}")
+        progress_write(f"运行时调优: {note}")
     pin_memory = bool(cfg.pin_memory and torch.cuda.is_available())
     loader_kwargs = {
         "batch_size": cfg.batch_size,
@@ -402,7 +425,9 @@ def main():
         mask_ratio=args.mask_ratio,
     )
 
-    print("[6/7] Training masked patch pretrainer...")
+    stage_progress.complete_stage(5)
+    stage_progress.start_stage(6, "训练预训练模型")
+    progress_write("开始训练 masked patch pretrainer")
     pretrain_result = train_masked_pretrainer(
         model=model,
         train_loader=train_loader,
@@ -424,13 +449,15 @@ def main():
     )
     history = pretrain_result.history
     training_diagnostics = pretrain_result.diagnostics
-    print(
-        f"      Pretraining diagnostics: status={training_diagnostics.status}, "
+    progress_write(
+        f"预训练诊断 status={training_diagnostics.status}, "
         f"best_epoch={training_diagnostics.best_epoch}/{training_diagnostics.epochs_completed}, "
         f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
     )
 
-    print("[7/7] Writing pretraining artifacts...")
+    stage_progress.complete_stage(6)
+    stage_progress.start_stage(7, "写出预训练产物")
+    progress_write("整理输出目录并写出预训练文件")
     output_root = Path("daily_research/output")
     output_root.mkdir(parents=True, exist_ok=True)
     run_name = args.experiment_tag.strip() or f"deep_alpha_pretrain_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -438,7 +465,6 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
 
     history_df = pd.DataFrame([record.__dict__ for record in history])
-    history_df.to_csv(run_dir / "pretrain_history.csv", index=False, encoding="utf-8-sig")
 
     artifact = {
         "framework": "deep_alpha_masked_patch_pretrain",
@@ -465,33 +491,40 @@ def main():
         "feature_cache_key": feature_key,
         "corpus_cache_key": corpus_key,
     }
-    torch.save(artifact, run_dir / "pretrained_encoder.pt")
-    with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                **{k: v for k, v in artifact.items() if not k.endswith("_state_dict")},
-                "device": str(device),
-                "train_samples": len(train_ds),
-                "valid_samples": len(valid_ds),
-                "final_train_loss": None if history_df.empty else float(history_df["train_loss"].iloc[-1]),
-                "final_valid_loss": None if history_df.empty else float(history_df["valid_loss"].iloc[-1]),
-                "epochs": cfg.epochs,
-                "min_epochs": cfg.min_epochs,
-                "early_stop_patience": cfg.early_stop_patience,
-                "lr_plateau_patience": cfg.lr_plateau_patience,
-                "lr_plateau_factor": cfg.lr_plateau_factor,
-                "min_improvement": cfg.min_improvement,
-                "auto_extend_undertrained": bool(args.auto_extend_undertrained),
-                "epoch_extend_step": int(args.epoch_extend_step),
-                "max_total_epochs": int(args.max_total_epochs),
-                "safe_runtime_profile": bool(cfg.safe_runtime_profile),
-                "runtime_profile": runtime_profile.__dict__,
-                "training_diagnostics": training_diagnostics.__dict__,
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+    metrics_payload = {
+        **{k: v for k, v in artifact.items() if not k.endswith("_state_dict")},
+        "device": str(device),
+        "train_samples": len(train_ds),
+        "valid_samples": len(valid_ds),
+        "final_train_loss": None if history_df.empty else float(history_df["train_loss"].iloc[-1]),
+        "final_valid_loss": None if history_df.empty else float(history_df["valid_loss"].iloc[-1]),
+        "epochs": cfg.epochs,
+        "min_epochs": cfg.min_epochs,
+        "early_stop_patience": cfg.early_stop_patience,
+        "lr_plateau_patience": cfg.lr_plateau_patience,
+        "lr_plateau_factor": cfg.lr_plateau_factor,
+        "min_improvement": cfg.min_improvement,
+        "auto_extend_undertrained": bool(args.auto_extend_undertrained),
+        "epoch_extend_step": int(args.epoch_extend_step),
+        "max_total_epochs": int(args.max_total_epochs),
+        "safe_runtime_profile": bool(cfg.safe_runtime_profile),
+        "runtime_profile": runtime_profile.__dict__,
+        "training_diagnostics": training_diagnostics.__dict__,
+    }
+
+    def _write_metrics_json() -> None:
+        with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
+            json.dump(metrics_payload, f, ensure_ascii=False, indent=2)
+
+    write_tasks: list[tuple[str, Any]] = [
+        ("pretrain_history.csv", lambda: history_df.to_csv(run_dir / "pretrain_history.csv", index=False, encoding="utf-8-sig")),
+        ("pretrained_encoder.pt", lambda: torch.save(artifact, run_dir / "pretrained_encoder.pt")),
+        ("metrics.json", _write_metrics_json),
+    ]
+    _run_write_tasks(write_tasks)
+    stage_progress.complete_stage(7)
+    stage_progress.complete()
+    stage_progress.close()
     print(f"Output: {run_dir}")
     print(json.dumps({"final_valid_loss": None if history_df.empty else float(history_df['valid_loss'].iloc[-1])}, ensure_ascii=False, indent=2))
 

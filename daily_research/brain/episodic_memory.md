@@ -8945,3 +8945,59 @@ position,000001.SZ,1200,12.38,
    - 更直接的执行目标
    - 或更强的盘中/竞价信息
    - 而不是继续在这一版日线短线标签上细磨
+
+## 2026-04-02 Short Alpha 三窗 formal head-to-head
+
+### 背景
+- `state_liquidity_listwise_v1` 在 recent-formal 窗口里明显赢了 `baseline_current`。
+- 但这个结果还不能直接当正式结论，必须回答它是不是 recent-window lucky run。
+
+### 协议
+- 输出目录：
+  - `daily_research/output/short_alpha_formal_head2head_20260402_r1`
+- 比较对象：
+  - `baseline_current`
+  - `state_liquidity_listwise_v1`
+- 时间窗：
+  - `20230216 -> 20240229`
+  - `20240301 -> 20250317`
+  - `20250318 -> 20260331`
+- 口径保持和 recent-formal 一致：
+  - `liquid500`
+  - `patch_transformer + dynamic_graph_v1`
+  - `top_bottom_bce`
+  - `manual score`
+  - 第三窗直接复用 recent-formal 已跑结果
+
+### 结果
+- 均值汇总：
+  - `state_liquidity_listwise_v1 = 26.16% / 1.199`
+  - `baseline_current = 14.61% / 0.448`
+- 胜负统计：
+  - 按超额年化：`2/3`
+  - 按超额 Sharpe：`2/3`
+- 分窗：
+  - `20230216_20240229`
+    - candidate `-7.97% / -0.433`
+    - baseline `-3.06% / -0.181`
+    - candidate 明显更差
+  - `20240301_20250317`
+    - candidate `4.07% / 0.154`
+    - baseline `-19.60% / -1.056`
+    - candidate 明显更好
+  - `20250318_20260331`
+    - candidate `82.38% / 3.876`
+    - baseline `66.49% / 2.582`
+    - candidate 明显更好
+
+### 当前结论
+1. `state_liquidity_listwise_v1` 不是 recent-window lucky run，已经通过第一轮三窗 formal。
+2. 但它也不是无条件新前沿，因为第一窗退化得很明显。
+3. 因此这条线现在最合理的定位是：
+   - 正式研究候选成立
+   - 有资格进入 execution objective 对齐
+   - 但还不能直接替换当前默认执行候选
+4. 对“模型结构是否还值得继续加强”的当前回答也更具体了：
+   - 纯粹单开 `state_context` 不够
+   - `state + liquidity + light ranking/listwise` 有真实价值
+   - 第一版短线目标改写与额外日线短线输入暂时不成立

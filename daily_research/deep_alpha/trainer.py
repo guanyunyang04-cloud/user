@@ -12,6 +12,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from daily_research.progress import create_progress, progress_write
 from daily_research.deep_alpha.sequence_dataset import STRUCTURE_ID_TO_LABEL, STRUCTURE_LABEL_TO_ID
 
 
@@ -677,142 +678,27 @@ def train_multitask_model(
         for name in target_state_protect_structure_names
         if name in STRUCTURE_LABEL_TO_ID
     ]
+    train_batch_count = max(len(train_loader), 1)
+    valid_batch_count = max(len(valid_loader), 1)
+    progress_total = max(int(epochs), 1) * (train_batch_count + valid_batch_count)
 
-    for epoch in range(1, epochs + 1):
-        model.train()
-        train_losses: List[float] = []
-        train_reg_losses: List[float] = []
-        train_rank_losses: List[float] = []
-        train_listwise_losses: List[float] = []
-        train_aux_losses: List[float] = []
-        train_proto_losses: List[float] = []
-        for x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _ in train_loader:
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
-            state_id = state_id.to(device, non_blocking=True)
-            liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
-            structure_id = structure_id.to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                pred, emb, structure_logits = model(
-                    x,
-                    liquidity_bucket=liquidity_bucket,
-                    state_id=state_id,
-                    structure_id=structure_id,
-                )
-                reg_loss, reg_component = _compute_primary_loss(
-                    pred=pred,
-                    target=y,
-                    dates=dts,
-                    target_names=target_names,
-                    target_weights=normalized_target_loss_weights,
-                    return_loss_mode=return_loss_mode,
-                    return_top_frac=return_top_frac,
-                    return_bottom_frac=return_bottom_frac,
-                    liquidity_bucket=liquidity_bucket,
-                    liquidity_conditioning_mode=liquidity_conditioning_mode,
-                    liquidity_bucket_count=liquidity_bucket_count,
-                    top_liquidity_return_loss_weight=top_liquidity_return_loss_weight,
-                    other_liquidity_return_loss_weight=other_liquidity_return_loss_weight,
-                    top_liquidity_sample_weight=top_liquidity_sample_weight,
-                    other_liquidity_sample_weight=other_liquidity_sample_weight,
-                )
-                rank_loss = _pairwise_rank_loss(
-                    pred,
-                    y,
-                    dts,
-                    rank_target_weight_map,
-                    state_id=state_id,
-                    liquidity_bucket=liquidity_bucket,
-                    structure_id=structure_id,
-                    liquidity_conditioning_mode=liquidity_conditioning_mode,
-                    liquidity_bucket_count=liquidity_bucket_count,
-                    top_liquidity_rank_loss_weight=top_liquidity_rank_loss_weight,
-                    other_liquidity_rank_loss_weight=other_liquidity_rank_loss_weight,
-                    top_liquidity_sample_weight=top_liquidity_sample_weight,
-                    other_liquidity_sample_weight=other_liquidity_sample_weight,
-                    structure_conditioning_mode=structure_conditioning_mode,
-                    top_attack_structure_ids=top_attack_structure_ids,
-                    other_protect_structure_ids=other_protect_structure_ids,
-                    top_attack_rank_weight=top_attack_rank_weight,
-                    other_protect_rank_weight=other_protect_rank_weight,
-                    target_state_ids=target_state_ids,
-                    target_state_attack_structure_ids=target_state_attack_structure_ids,
-                    target_state_protect_structure_ids=target_state_protect_structure_ids,
-                    target_state_rank_weight=target_state_rank_weight,
-                    target_state_protect_rank_weight=target_state_protect_rank_weight,
-                    max_pairs_per_group=max_rank_pairs_per_group,
-                ) if ranking_loss_weight > 0 else pred.new_tensor(0.0)
-                listwise_loss = _listwise_rank_loss(
-                    pred,
-                    y,
-                    dts,
-                    rank_target_weight_map,
-                    state_id=state_id,
-                    liquidity_bucket=liquidity_bucket,
-                    structure_id=structure_id,
-                    liquidity_conditioning_mode=liquidity_conditioning_mode,
-                    liquidity_bucket_count=liquidity_bucket_count,
-                    top_liquidity_rank_loss_weight=top_liquidity_rank_loss_weight,
-                    other_liquidity_rank_loss_weight=other_liquidity_rank_loss_weight,
-                    top_liquidity_sample_weight=top_liquidity_sample_weight,
-                    other_liquidity_sample_weight=other_liquidity_sample_weight,
-                    structure_conditioning_mode=structure_conditioning_mode,
-                    top_attack_structure_ids=top_attack_structure_ids,
-                    other_protect_structure_ids=other_protect_structure_ids,
-                    top_attack_rank_weight=top_attack_rank_weight,
-                    other_protect_rank_weight=other_protect_rank_weight,
-                    target_state_ids=target_state_ids,
-                    target_state_attack_structure_ids=target_state_attack_structure_ids,
-                    target_state_protect_structure_ids=target_state_protect_structure_ids,
-                    target_state_rank_weight=target_state_rank_weight,
-                    target_state_protect_rank_weight=target_state_protect_rank_weight,
-                    temperature=listwise_temperature,
-                ) if listwise_loss_weight > 0 else pred.new_tensor(0.0)
-                aux_loss = _structure_aux_loss(
-                    structure_logits=structure_logits,
-                    structure_id=structure_id,
-                    label_smoothing=aux_structure_label_smoothing,
-                ) if aux_structure_task and aux_structure_loss_weight > 0 else pred.new_tensor(0.0)
-                proto_loss = _structure_prototype_loss(
-                    embedding=emb,
-                    structure_id=structure_id,
-                    prototypes=getattr(model, "structure_prototypes", None),
-                    temperature=structure_prototype_temperature,
-                ) if structure_prototype_task and structure_prototype_loss_weight > 0 else pred.new_tensor(0.0)
-                loss = (
-                    reg_loss
-                    + ranking_loss_weight * rank_loss
-                    + listwise_loss_weight * listwise_loss
-                    + aux_structure_loss_weight * aux_loss
-                    + structure_prototype_loss_weight * proto_loss
-                )
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            scaler.step(optimizer)
-            scaler.update()
-            train_losses.append(float(loss.item()))
-            train_reg_losses.append(float(reg_component.item()))
-            train_rank_losses.append(float(rank_loss.item()))
-            train_listwise_losses.append(float(listwise_loss.item()))
-            train_aux_losses.append(float(aux_loss.item()))
-            train_proto_losses.append(float(proto_loss.item()))
-
-        model.eval()
-        valid_losses: List[float] = []
-        valid_reg_losses: List[float] = []
-        valid_rank_losses: List[float] = []
-        valid_listwise_losses: List[float] = []
-        valid_aux_losses: List[float] = []
-        valid_proto_losses: List[float] = []
-        with torch.no_grad():
-            for x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _ in valid_loader:
+    with create_progress(total=progress_total, desc="训练准备中", unit="batch", leave=False) as progress:
+        for epoch in range(1, epochs + 1):
+            model.train()
+            train_losses: List[float] = []
+            train_reg_losses: List[float] = []
+            train_rank_losses: List[float] = []
+            train_listwise_losses: List[float] = []
+            train_aux_losses: List[float] = []
+            train_proto_losses: List[float] = []
+            for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(train_loader, start=1):
+                progress.set_description_str(f"训练 epoch {epoch}/{epochs} train {batch_idx}/{train_batch_count}")
                 x = x.to(device, non_blocking=True)
                 y = y.to(device, non_blocking=True)
                 state_id = state_id.to(device, non_blocking=True)
                 liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
                 structure_id = structure_id.to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                     pred, emb, structure_logits = model(
                         x,
@@ -900,51 +786,179 @@ def train_multitask_model(
                         prototypes=getattr(model, "structure_prototypes", None),
                         temperature=structure_prototype_temperature,
                     ) if structure_prototype_task and structure_prototype_loss_weight > 0 else pred.new_tensor(0.0)
-                    valid_losses.append(
-                        float(
-                            (
-                                reg_loss
-                                + ranking_loss_weight * rank_loss
-                                + listwise_loss_weight * listwise_loss
-                                + aux_structure_loss_weight * aux_loss
-                                + structure_prototype_loss_weight * proto_loss
-                            ).item()
-                        )
+                    loss = (
+                        reg_loss
+                        + ranking_loss_weight * rank_loss
+                        + listwise_loss_weight * listwise_loss
+                        + aux_structure_loss_weight * aux_loss
+                        + structure_prototype_loss_weight * proto_loss
                     )
-                    valid_reg_losses.append(float(reg_component.item()))
-                    valid_rank_losses.append(float(rank_loss.item()))
-                    valid_listwise_losses.append(float(listwise_loss.item()))
-                    valid_aux_losses.append(float(aux_loss.item()))
-                    valid_proto_losses.append(float(proto_loss.item()))
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+                train_losses.append(float(loss.item()))
+                train_reg_losses.append(float(reg_component.item()))
+                train_rank_losses.append(float(rank_loss.item()))
+                train_listwise_losses.append(float(listwise_loss.item()))
+                train_aux_losses.append(float(aux_loss.item()))
+                train_proto_losses.append(float(proto_loss.item()))
+                progress.update(1)
 
-        epoch_record = EpochRecord(
-            epoch=epoch,
-            train_loss=float(np.mean(train_losses)) if train_losses else np.nan,
-            valid_loss=float(np.mean(valid_losses)) if valid_losses else np.nan,
-            train_reg_loss=float(np.mean(train_reg_losses)) if train_reg_losses else np.nan,
-            train_rank_loss=float(np.mean(train_rank_losses)) if train_rank_losses else np.nan,
-            train_listwise_loss=float(np.mean(train_listwise_losses)) if train_listwise_losses else np.nan,
-            train_aux_loss=float(np.mean(train_aux_losses)) if train_aux_losses else np.nan,
-            train_proto_loss=float(np.mean(train_proto_losses)) if train_proto_losses else np.nan,
-            valid_reg_loss=float(np.mean(valid_reg_losses)) if valid_reg_losses else np.nan,
-            valid_rank_loss=float(np.mean(valid_rank_losses)) if valid_rank_losses else np.nan,
-            valid_listwise_loss=float(np.mean(valid_listwise_losses)) if valid_listwise_losses else np.nan,
-            valid_aux_loss=float(np.mean(valid_aux_losses)) if valid_aux_losses else np.nan,
-            valid_proto_loss=float(np.mean(valid_proto_losses)) if valid_proto_losses else np.nan,
-        )
-        history.append(epoch_record)
-        current_valid = float(epoch_record.valid_loss)
-        if np.isfinite(current_valid):
-            scheduler.step(current_valid)
-            if current_valid < best_valid_loss - float(min_improvement):
-                best_valid_loss = current_valid
-                best_state = deepcopy(model.state_dict())
-                no_improve_epochs = 0
-            else:
-                no_improve_epochs += 1
-            if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):
-                stopped_early = True
-                break
+            model.eval()
+            valid_losses: List[float] = []
+            valid_reg_losses: List[float] = []
+            valid_rank_losses: List[float] = []
+            valid_listwise_losses: List[float] = []
+            valid_aux_losses: List[float] = []
+            valid_proto_losses: List[float] = []
+            with torch.no_grad():
+                for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(valid_loader, start=1):
+                    progress.set_description_str(f"训练 epoch {epoch}/{epochs} valid {batch_idx}/{valid_batch_count}")
+                    x = x.to(device, non_blocking=True)
+                    y = y.to(device, non_blocking=True)
+                    state_id = state_id.to(device, non_blocking=True)
+                    liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
+                    structure_id = structure_id.to(device, non_blocking=True)
+                    with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                        pred, emb, structure_logits = model(
+                            x,
+                            liquidity_bucket=liquidity_bucket,
+                            state_id=state_id,
+                            structure_id=structure_id,
+                        )
+                        reg_loss, reg_component = _compute_primary_loss(
+                            pred=pred,
+                            target=y,
+                            dates=dts,
+                            target_names=target_names,
+                            target_weights=normalized_target_loss_weights,
+                            return_loss_mode=return_loss_mode,
+                            return_top_frac=return_top_frac,
+                            return_bottom_frac=return_bottom_frac,
+                            liquidity_bucket=liquidity_bucket,
+                            liquidity_conditioning_mode=liquidity_conditioning_mode,
+                            liquidity_bucket_count=liquidity_bucket_count,
+                            top_liquidity_return_loss_weight=top_liquidity_return_loss_weight,
+                            other_liquidity_return_loss_weight=other_liquidity_return_loss_weight,
+                            top_liquidity_sample_weight=top_liquidity_sample_weight,
+                            other_liquidity_sample_weight=other_liquidity_sample_weight,
+                        )
+                        rank_loss = _pairwise_rank_loss(
+                            pred,
+                            y,
+                            dts,
+                            rank_target_weight_map,
+                            state_id=state_id,
+                            liquidity_bucket=liquidity_bucket,
+                            structure_id=structure_id,
+                            liquidity_conditioning_mode=liquidity_conditioning_mode,
+                            liquidity_bucket_count=liquidity_bucket_count,
+                            top_liquidity_rank_loss_weight=top_liquidity_rank_loss_weight,
+                            other_liquidity_rank_loss_weight=other_liquidity_rank_loss_weight,
+                            top_liquidity_sample_weight=top_liquidity_sample_weight,
+                            other_liquidity_sample_weight=other_liquidity_sample_weight,
+                            structure_conditioning_mode=structure_conditioning_mode,
+                            top_attack_structure_ids=top_attack_structure_ids,
+                            other_protect_structure_ids=other_protect_structure_ids,
+                            top_attack_rank_weight=top_attack_rank_weight,
+                            other_protect_rank_weight=other_protect_rank_weight,
+                            target_state_ids=target_state_ids,
+                            target_state_attack_structure_ids=target_state_attack_structure_ids,
+                            target_state_protect_structure_ids=target_state_protect_structure_ids,
+                            target_state_rank_weight=target_state_rank_weight,
+                            target_state_protect_rank_weight=target_state_protect_rank_weight,
+                            max_pairs_per_group=max_rank_pairs_per_group,
+                        ) if ranking_loss_weight > 0 else pred.new_tensor(0.0)
+                        listwise_loss = _listwise_rank_loss(
+                            pred,
+                            y,
+                            dts,
+                            rank_target_weight_map,
+                            state_id=state_id,
+                            liquidity_bucket=liquidity_bucket,
+                            structure_id=structure_id,
+                            liquidity_conditioning_mode=liquidity_conditioning_mode,
+                            liquidity_bucket_count=liquidity_bucket_count,
+                            top_liquidity_rank_loss_weight=top_liquidity_rank_loss_weight,
+                            other_liquidity_rank_loss_weight=other_liquidity_rank_loss_weight,
+                            top_liquidity_sample_weight=top_liquidity_sample_weight,
+                            other_liquidity_sample_weight=other_liquidity_sample_weight,
+                            structure_conditioning_mode=structure_conditioning_mode,
+                            top_attack_structure_ids=top_attack_structure_ids,
+                            other_protect_structure_ids=other_protect_structure_ids,
+                            top_attack_rank_weight=top_attack_rank_weight,
+                            other_protect_rank_weight=other_protect_rank_weight,
+                            target_state_ids=target_state_ids,
+                            target_state_attack_structure_ids=target_state_attack_structure_ids,
+                            target_state_protect_structure_ids=target_state_protect_structure_ids,
+                            target_state_rank_weight=target_state_rank_weight,
+                            target_state_protect_rank_weight=target_state_protect_rank_weight,
+                            temperature=listwise_temperature,
+                        ) if listwise_loss_weight > 0 else pred.new_tensor(0.0)
+                        aux_loss = _structure_aux_loss(
+                            structure_logits=structure_logits,
+                            structure_id=structure_id,
+                            label_smoothing=aux_structure_label_smoothing,
+                        ) if aux_structure_task and aux_structure_loss_weight > 0 else pred.new_tensor(0.0)
+                        proto_loss = _structure_prototype_loss(
+                            embedding=emb,
+                            structure_id=structure_id,
+                            prototypes=getattr(model, "structure_prototypes", None),
+                            temperature=structure_prototype_temperature,
+                        ) if structure_prototype_task and structure_prototype_loss_weight > 0 else pred.new_tensor(0.0)
+                        valid_losses.append(
+                            float(
+                                (
+                                    reg_loss
+                                    + ranking_loss_weight * rank_loss
+                                    + listwise_loss_weight * listwise_loss
+                                    + aux_structure_loss_weight * aux_loss
+                                    + structure_prototype_loss_weight * proto_loss
+                                ).item()
+                            )
+                        )
+                        valid_reg_losses.append(float(reg_component.item()))
+                        valid_rank_losses.append(float(rank_loss.item()))
+                        valid_listwise_losses.append(float(listwise_loss.item()))
+                        valid_aux_losses.append(float(aux_loss.item()))
+                        valid_proto_losses.append(float(proto_loss.item()))
+                    progress.update(1)
+
+            epoch_record = EpochRecord(
+                epoch=epoch,
+                train_loss=float(np.mean(train_losses)) if train_losses else np.nan,
+                valid_loss=float(np.mean(valid_losses)) if valid_losses else np.nan,
+                train_reg_loss=float(np.mean(train_reg_losses)) if train_reg_losses else np.nan,
+                train_rank_loss=float(np.mean(train_rank_losses)) if train_rank_losses else np.nan,
+                train_listwise_loss=float(np.mean(train_listwise_losses)) if train_listwise_losses else np.nan,
+                train_aux_loss=float(np.mean(train_aux_losses)) if train_aux_losses else np.nan,
+                train_proto_loss=float(np.mean(train_proto_losses)) if train_proto_losses else np.nan,
+                valid_reg_loss=float(np.mean(valid_reg_losses)) if valid_reg_losses else np.nan,
+                valid_rank_loss=float(np.mean(valid_rank_losses)) if valid_rank_losses else np.nan,
+                valid_listwise_loss=float(np.mean(valid_listwise_losses)) if valid_listwise_losses else np.nan,
+                valid_aux_loss=float(np.mean(valid_aux_losses)) if valid_aux_losses else np.nan,
+                valid_proto_loss=float(np.mean(valid_proto_losses)) if valid_proto_losses else np.nan,
+            )
+            history.append(epoch_record)
+            progress_write(
+                f"epoch {epoch}/{epochs} | train={epoch_record.train_loss:.4f} "
+                f"| valid={epoch_record.valid_loss:.4f} | rank={epoch_record.valid_rank_loss:.4f} "
+                f"| listwise={epoch_record.valid_listwise_loss:.4f}"
+            )
+            current_valid = float(epoch_record.valid_loss)
+            if np.isfinite(current_valid):
+                scheduler.step(current_valid)
+                if current_valid < best_valid_loss - float(min_improvement):
+                    best_valid_loss = current_valid
+                    best_state = deepcopy(model.state_dict())
+                    no_improve_epochs = 0
+                else:
+                    no_improve_epochs += 1
+                if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):
+                    stopped_early = True
+                    break
 
     model.load_state_dict(best_state)
     diagnostics = _build_training_diagnostics(
@@ -968,63 +982,67 @@ def infer_dataset(
     amp_enabled = bool(use_amp and device.type == "cuda")
     pred_rows = []
     embed_rows = []
-    with torch.no_grad():
-        for x, y, y_raw, state_id, liquidity_bucket, structure_id, dts, stocks in loader:
-            x = x.to(device, non_blocking=True)
-            liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
-            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                pred, emb, structure_logits = model(
-                    x,
-                    liquidity_bucket=liquidity_bucket,
-                    state_id=state_id.to(device, non_blocking=True),
-                    structure_id=structure_id.to(device, non_blocking=True),
-                )
-            pred_np = pred.cpu().numpy()
-            emb_np = emb.cpu().numpy()
-            structure_prob_np = None
-            structure_pred_np = None
-            if structure_logits is not None:
-                structure_prob = torch.softmax(structure_logits, dim=1)
-                structure_prob_np = structure_prob.cpu().numpy()
-                structure_pred_np = structure_logits.argmax(dim=1).cpu().numpy()
-            prototype_prob_np = None
-            prototype_pred_np = None
-            structure_similarity_fn = getattr(model, "structure_similarity", None)
-            if callable(structure_similarity_fn):
-                proto_scores = model.structure_similarity(emb)
-                if proto_scores is not None:
-                    proto_prob = torch.softmax(proto_scores, dim=1)
-                    prototype_prob_np = proto_prob.cpu().numpy()
-                    prototype_pred_np = proto_scores.argmax(dim=1).cpu().numpy()
-            y_np = y.numpy()
-            y_raw_np = y_raw.numpy()
-            state_np = state_id.numpy()
-            liquidity_np = liquidity_bucket.cpu().numpy()
-            structure_np = structure_id.numpy()
-            for i, (dt, stock) in enumerate(zip(dts, stocks)):
-                row = {"date": pd.Timestamp(dt), "stock": stock}
-                row["state_id"] = int(state_np[i]) if int(state_np[i]) >= 0 else np.nan
-                row["liquidity_bucket"] = int(liquidity_np[i]) if int(liquidity_np[i]) >= 0 else np.nan
-                row["structure_id"] = int(structure_np[i]) if int(structure_np[i]) >= 0 else np.nan
-                row["structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(structure_np[i])) if int(structure_np[i]) >= 0 else ""
-                if structure_pred_np is not None and structure_prob_np is not None:
-                    row["pred_structure_id"] = int(structure_pred_np[i])
-                    row["pred_structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(structure_pred_np[i]), "")
-                    row["pred_structure_confidence"] = float(structure_prob_np[i, int(structure_pred_np[i])])
-                if prototype_pred_np is not None and prototype_prob_np is not None:
-                    row["pred_prototype_structure_id"] = int(prototype_pred_np[i])
-                    row["pred_prototype_structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(prototype_pred_np[i]), "")
-                    row["pred_prototype_structure_confidence"] = float(prototype_prob_np[i, int(prototype_pred_np[i])])
-                for j, name in enumerate(target_names):
-                    row[f"pred_{name}"] = float(pred_np[i, j])
-                    row[f"label_{name}"] = float(y_np[i, j])
-                    row[f"true_{name}"] = float(y_raw_np[i, j])
-                pred_rows.append(row)
-                emb_row = {"date": pd.Timestamp(dt), "stock": stock}
-                emb_row["liquidity_bucket"] = int(liquidity_np[i]) if int(liquidity_np[i]) >= 0 else np.nan
-                for j in range(emb_np.shape[1]):
-                    emb_row[f"emb_{j}"] = float(emb_np[i, j])
-                embed_rows.append(emb_row)
+    total_batches = max(len(loader), 1)
+    with create_progress(total=total_batches, desc="推理准备中", unit="batch", leave=False) as progress:
+        with torch.no_grad():
+            for batch_idx, (x, y, y_raw, state_id, liquidity_bucket, structure_id, dts, stocks) in enumerate(loader, start=1):
+                progress.set_description_str(f"推理 batch {batch_idx}/{total_batches}")
+                x = x.to(device, non_blocking=True)
+                liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
+                with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                    pred, emb, structure_logits = model(
+                        x,
+                        liquidity_bucket=liquidity_bucket,
+                        state_id=state_id.to(device, non_blocking=True),
+                        structure_id=structure_id.to(device, non_blocking=True),
+                    )
+                pred_np = pred.cpu().numpy()
+                emb_np = emb.cpu().numpy()
+                structure_prob_np = None
+                structure_pred_np = None
+                if structure_logits is not None:
+                    structure_prob = torch.softmax(structure_logits, dim=1)
+                    structure_prob_np = structure_prob.cpu().numpy()
+                    structure_pred_np = structure_logits.argmax(dim=1).cpu().numpy()
+                prototype_prob_np = None
+                prototype_pred_np = None
+                structure_similarity_fn = getattr(model, "structure_similarity", None)
+                if callable(structure_similarity_fn):
+                    proto_scores = model.structure_similarity(emb)
+                    if proto_scores is not None:
+                        proto_prob = torch.softmax(proto_scores, dim=1)
+                        prototype_prob_np = proto_prob.cpu().numpy()
+                        prototype_pred_np = proto_scores.argmax(dim=1).cpu().numpy()
+                y_np = y.numpy()
+                y_raw_np = y_raw.numpy()
+                state_np = state_id.numpy()
+                liquidity_np = liquidity_bucket.cpu().numpy()
+                structure_np = structure_id.numpy()
+                for i, (dt, stock) in enumerate(zip(dts, stocks)):
+                    row = {"date": pd.Timestamp(dt), "stock": stock}
+                    row["state_id"] = int(state_np[i]) if int(state_np[i]) >= 0 else np.nan
+                    row["liquidity_bucket"] = int(liquidity_np[i]) if int(liquidity_np[i]) >= 0 else np.nan
+                    row["structure_id"] = int(structure_np[i]) if int(structure_np[i]) >= 0 else np.nan
+                    row["structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(structure_np[i])) if int(structure_np[i]) >= 0 else ""
+                    if structure_pred_np is not None and structure_prob_np is not None:
+                        row["pred_structure_id"] = int(structure_pred_np[i])
+                        row["pred_structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(structure_pred_np[i]), "")
+                        row["pred_structure_confidence"] = float(structure_prob_np[i, int(structure_pred_np[i])])
+                    if prototype_pred_np is not None and prototype_prob_np is not None:
+                        row["pred_prototype_structure_id"] = int(prototype_pred_np[i])
+                        row["pred_prototype_structure_label"] = STRUCTURE_ID_TO_LABEL.get(int(prototype_pred_np[i]), "")
+                        row["pred_prototype_structure_confidence"] = float(prototype_prob_np[i, int(prototype_pred_np[i])])
+                    for j, name in enumerate(target_names):
+                        row[f"pred_{name}"] = float(pred_np[i, j])
+                        row[f"label_{name}"] = float(y_np[i, j])
+                        row[f"true_{name}"] = float(y_raw_np[i, j])
+                    pred_rows.append(row)
+                    emb_row = {"date": pd.Timestamp(dt), "stock": stock}
+                    emb_row["liquidity_bucket"] = int(liquidity_np[i]) if int(liquidity_np[i]) >= 0 else np.nan
+                    for j in range(emb_np.shape[1]):
+                        emb_row[f"emb_{j}"] = float(emb_np[i, j])
+                    embed_rows.append(emb_row)
+                progress.update(1)
     return pd.DataFrame(pred_rows), pd.DataFrame(embed_rows)
 
 
@@ -1070,76 +1088,88 @@ def train_masked_pretrainer(
     max_epoch_budget = max(int(max_total_epochs or epoch_budget), epoch_budget)
     extend_step = max(int(epoch_extend_step), 1)
     epoch = 0
+    train_batch_count = max(len(train_loader), 1)
+    valid_batch_count = max(len(valid_loader), 1)
+    progress_total = max(max_epoch_budget, 1) * (train_batch_count + valid_batch_count)
 
-    while epoch < epoch_budget:
-        epoch += 1
-        model.train()
-        train_losses: List[float] = []
-        train_mask_ratios: List[float] = []
-        for x, _dts, _stocks in train_loader:
-            x = x.to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                loss, stats = model(x)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            scaler.step(optimizer)
-            scaler.update()
-            train_losses.append(float(loss.item()))
-            train_mask_ratios.append(float(stats.get("mask_ratio", 0.0)))
-
-        model.eval()
-        valid_losses: List[float] = []
-        valid_mask_ratios: List[float] = []
-        with torch.no_grad():
-            for x, _dts, _stocks in valid_loader:
+    with create_progress(total=progress_total, desc="预训练准备中", unit="batch", leave=False) as progress:
+        while epoch < epoch_budget:
+            epoch += 1
+            model.train()
+            train_losses: List[float] = []
+            train_mask_ratios: List[float] = []
+            for batch_idx, (x, _dts, _stocks) in enumerate(train_loader, start=1):
+                progress.set_description_str(f"预训练 epoch {epoch}/{epoch_budget} train {batch_idx}/{train_batch_count}")
                 x = x.to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                     loss, stats = model(x)
-                valid_losses.append(float(loss.item()))
-                valid_mask_ratios.append(float(stats.get("mask_ratio", 0.0)))
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+                train_losses.append(float(loss.item()))
+                train_mask_ratios.append(float(stats.get("mask_ratio", 0.0)))
+                progress.update(1)
 
-        epoch_record = PretrainEpochRecord(
-            epoch=epoch,
-            train_loss=float(np.mean(train_losses)) if train_losses else np.nan,
-            valid_loss=float(np.mean(valid_losses)) if valid_losses else np.nan,
-            train_mask_ratio=float(np.mean(train_mask_ratios)) if train_mask_ratios else np.nan,
-            valid_mask_ratio=float(np.mean(valid_mask_ratios)) if valid_mask_ratios else np.nan,
-        )
-        history.append(epoch_record)
-        current_valid = float(epoch_record.valid_loss)
-        if np.isfinite(current_valid):
-            scheduler.step(current_valid)
-            if current_valid < best_valid_loss - float(min_improvement):
-                best_valid_loss = current_valid
-                best_state = deepcopy(model.state_dict())
-                no_improve_epochs = 0
-            else:
-                no_improve_epochs += 1
-            if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):
-                stopped_early = True
+            model.eval()
+            valid_losses: List[float] = []
+            valid_mask_ratios: List[float] = []
+            with torch.no_grad():
+                for batch_idx, (x, _dts, _stocks) in enumerate(valid_loader, start=1):
+                    progress.set_description_str(f"预训练 epoch {epoch}/{epoch_budget} valid {batch_idx}/{valid_batch_count}")
+                    x = x.to(device, non_blocking=True)
+                    with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                        loss, stats = model(x)
+                    valid_losses.append(float(loss.item()))
+                    valid_mask_ratios.append(float(stats.get("mask_ratio", 0.0)))
+                    progress.update(1)
+
+            epoch_record = PretrainEpochRecord(
+                epoch=epoch,
+                train_loss=float(np.mean(train_losses)) if train_losses else np.nan,
+                valid_loss=float(np.mean(valid_losses)) if valid_losses else np.nan,
+                train_mask_ratio=float(np.mean(train_mask_ratios)) if train_mask_ratios else np.nan,
+                valid_mask_ratio=float(np.mean(valid_mask_ratios)) if valid_mask_ratios else np.nan,
+            )
+            history.append(epoch_record)
+            progress_write(
+                f"pretrain epoch {epoch}/{epoch_budget} | train={epoch_record.train_loss:.4f} "
+                f"| valid={epoch_record.valid_loss:.4f} | mask={epoch_record.valid_mask_ratio:.3f}"
+            )
+            current_valid = float(epoch_record.valid_loss)
+            if np.isfinite(current_valid):
+                scheduler.step(current_valid)
+                if current_valid < best_valid_loss - float(min_improvement):
+                    best_valid_loss = current_valid
+                    best_state = deepcopy(model.state_dict())
+                    no_improve_epochs = 0
+                else:
+                    no_improve_epochs += 1
+                if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):
+                    stopped_early = True
+                    break
+
+            if stopped_early:
                 break
 
-        if stopped_early:
-            break
-
-        if epoch >= epoch_budget and bool(auto_extend_undertrained) and epoch_budget < max_epoch_budget:
-            diagnostics_preview = _build_training_diagnostics(
-                history=history,
-                epochs_requested=epoch_budget,
-                stopped_early=False,
-                learning_rate_final=float(optimizer.param_groups[0]["lr"]),
-                min_improvement=float(min_improvement),
-            )
-            if diagnostics_preview.status == "undertrained":
-                new_budget = min(max_epoch_budget, epoch_budget + extend_step)
-                if new_budget > epoch_budget:
-                    print(
-                        f"      Auto-extending pretraining budget: {epoch_budget} -> {new_budget} "
-                        f"(best_epoch={diagnostics_preview.best_epoch}, best_valid_loss={diagnostics_preview.best_valid_loss:.6f})"
-                    )
-                    epoch_budget = new_budget
+            if epoch >= epoch_budget and bool(auto_extend_undertrained) and epoch_budget < max_epoch_budget:
+                diagnostics_preview = _build_training_diagnostics(
+                    history=history,
+                    epochs_requested=epoch_budget,
+                    stopped_early=False,
+                    learning_rate_final=float(optimizer.param_groups[0]["lr"]),
+                    min_improvement=float(min_improvement),
+                )
+                if diagnostics_preview.status == "undertrained":
+                    new_budget = min(max_epoch_budget, epoch_budget + extend_step)
+                    if new_budget > epoch_budget:
+                        progress_write(
+                            f"Auto-extending pretraining budget: {epoch_budget} -> {new_budget} "
+                            f"(best_epoch={diagnostics_preview.best_epoch}, best_valid_loss={diagnostics_preview.best_valid_loss:.6f})"
+                        )
+                        epoch_budget = new_budget
 
     model.load_state_dict(best_state)
     diagnostics = _build_training_diagnostics(

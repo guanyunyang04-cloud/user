@@ -42,6 +42,9 @@
 - `short_alpha` 首轮矩阵已经说明：
   - 当前最有效的增益来自上下文容量与轻量排序损失
   - 不是第一版短线目标改写或额外日线短线输入
+- `state_liquidity_listwise_v1` 已通过第一轮三窗 formal：
+  - 不是单个 recent-window lucky run
+  - 但第一窗仍明显偏弱
 - 旧时代极高收益已因泄漏风险被降级为审计产物。
 - 研究判决与日常执行现在已经正式拆成两层：
   - formal holdout 继续负责研究 winner 判决
@@ -52,6 +55,7 @@
 - 高收益 execution-alignment 候选往往在现实成本下变得过于高换手。
 - `dynamic_graph_v1` 虽然已在研究端赢过 `plain`，但还没有全面统治执行端。
 - 多窗口重训仍然是当前最大的研究时间成本。
+- 新的 `state_liquidity_listwise_v1` 虽然已通过第一轮 formal，但还没有回答“加上执行翻译与现实成本后是否仍成立”。
 - 想要在日线主板范围里抓“单票起爆前”信息，当前这第一版短线目标与短线特征仍然不够强。
 
 ## 6. 当前方向
@@ -65,7 +69,7 @@
   - 继续做 cadence 与 ensemble 稳定化
 - 研究侧：
   - 继续以 `dynamic_graph_v1` 为主前沿
-  - 先把 `state_liquidity_listwise_v1` 做成下一条正式验证分支
+  - `state_liquidity_listwise_v1` 已升格为下一条执行对齐候选
   - 保留 `dynamic_graph_no_priors` 与 `dynamic_graph_topk4` 作为对照
   - 暂不继续扩张第一版 `short_target / short_input` 路线
 - 下一代家族只在图路线边际增益放缓后再开：

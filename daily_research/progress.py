@@ -5,21 +5,25 @@ from contextlib import contextmanager
 from shutil import get_terminal_size
 from typing import Iterator, TypeVar
 
-try:
-    from tqdm.auto import tqdm as _tqdm
-except Exception:  # pragma: no cover - optional dependency
-    _tqdm = None
-
 
 T = TypeVar("T")
 
+_ACTIVE_STAGE_PROGRESS: "StageProgress | None" = None
 
-def _stage_text(label: str, current: int, total: int, message: str, detail: str = "") -> str:
-    text = f"{label} {int(current)}/{int(total)} {message}"
-    detail = str(detail or "").strip()
-    if detail:
-        return f"{text} | {detail}"
-    return text
+
+def _terminal_width() -> int:
+    return max(get_terminal_size((120, 20)).columns, 60)
+
+
+def _truncate_text(text: str, max_width: int) -> str:
+    clean = str(text or "").strip()
+    if max_width <= 0:
+        return ""
+    if len(clean) <= max_width:
+        return clean
+    if max_width <= 3:
+        return clean[:max_width]
+    return clean[: max_width - 3] + "..."
 
 
 class _SimpleProgress:
@@ -32,7 +36,7 @@ class _SimpleProgress:
         position: int = 0,
     ) -> None:
         self.total = max(int(total), 0)
-        self.desc = str(desc)
+        self.desc = str(desc or "处理中")
         self.unit = str(unit or "step")
         self.leave = bool(leave)
         self.position = int(position)
@@ -48,7 +52,7 @@ class _SimpleProgress:
         self.close()
 
     def set_description_str(self, desc: str) -> None:
-        self.desc = str(desc)
+        self.desc = str(desc or "处理中")
         self.refresh()
 
     def update(self, n: int = 1) -> None:
@@ -59,13 +63,16 @@ class _SimpleProgress:
         if self.closed:
             return
         ratio = 1.0 if self.total <= 0 else min(max(self.n / self.total, 0.0), 1.0)
-        prefix = f"{self.desc} "
-        suffix = f" {self.n}/{self.total} {self.unit}"
-        term_width = max(get_terminal_size((100, 20)).columns, 40)
-        bar_width = max(12, min(36, term_width - len(prefix) - len(suffix) - 8))
+        percent_text = f"{ratio * 100:5.1f}%"
+        term_width = _terminal_width()
+        bar_width = max(16, min(28, term_width // 5))
         filled = int(round(bar_width * ratio))
         bar = "#" * filled + "-" * max(bar_width - filled, 0)
-        line = f"\r{prefix}[{bar}]{suffix}"
+        counts = f"{self.n}/{self.total} {self.unit}".strip()
+        prefix = f"[{bar}] {percent_text} "
+        available_text = max(term_width - len(prefix) - len(counts) - 3, 10)
+        body = _truncate_text(self.desc, available_text)
+        line = f"\r{prefix}{body} | {counts}"
         padding = max(self._last_width - len(line), 0)
         sys.stdout.write(line + (" " * padding))
         sys.stdout.flush()
@@ -83,6 +90,50 @@ class _SimpleProgress:
         self.closed = True
 
 
+class _StageChildProgress:
+    def __init__(
+        self,
+        owner: "StageProgress",
+        total: int,
+        desc: str,
+        unit: str = "step",
+        leave: bool = True,
+        position: int = 0,
+    ) -> None:
+        self.owner = owner
+        self.total = max(int(total), 0)
+        self.desc = str(desc or "处理中")
+        self.unit = str(unit or "step")
+        self.leave = bool(leave)
+        self.position = int(position)
+        self.n = 0
+        self.closed = False
+        self.owner._attach_child(self)
+
+    def __enter__(self) -> "_StageChildProgress":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def set_description_str(self, desc: str) -> None:
+        self.desc = str(desc or "处理中")
+        self.owner._refresh()
+
+    def update(self, n: int = 1) -> None:
+        self.n = min(self.total, self.n + max(int(n), 0))
+        self.owner._refresh()
+
+    def refresh(self) -> None:
+        self.owner._refresh()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.owner._detach_child(self)
+
+
 def create_progress(
     total: int,
     desc: str,
@@ -90,15 +141,14 @@ def create_progress(
     leave: bool = True,
     position: int = 0,
 ):
-    if _tqdm is not None:
-        return _tqdm(
+    if _ACTIVE_STAGE_PROGRESS is not None:
+        return _StageChildProgress(
+            owner=_ACTIVE_STAGE_PROGRESS,
             total=total,
             desc=desc,
             unit=unit,
             leave=leave,
             position=position,
-            dynamic_ncols=True,
-            ascii=True,
         )
     return _SimpleProgress(total=total, desc=desc, unit=unit, leave=leave, position=position)
 
@@ -112,18 +162,6 @@ def iter_progress(
     leave: bool = False,
     position: int = 0,
 ):
-    if _tqdm is not None:
-        return _tqdm(
-            iterable,
-            total=total,
-            desc=desc,
-            unit=unit,
-            leave=leave,
-            position=position,
-            dynamic_ncols=True,
-            ascii=True,
-        )
-
     def _generator() -> Iterator[T]:
         resolved_total = int(total or 0)
         with create_progress(
@@ -141,51 +179,138 @@ def iter_progress(
 
 
 def progress_write(message: str) -> None:
-    if _tqdm is not None:
-        _tqdm.write(str(message))
-    else:
-        print(str(message))
+    if _ACTIVE_STAGE_PROGRESS is not None:
+        _ACTIVE_STAGE_PROGRESS.log(str(message))
+        return
+    print(str(message))
 
 
 class StageProgress:
-    def __init__(self, total: int, label: str, *, position: int = 0) -> None:
+    def __init__(self, total: int, label: str, *, position: int = 0, leave: bool = True) -> None:
         self.total = max(int(total), 1)
         self.label = str(label or "流程")
         self.position = int(position)
+        self.leave = bool(leave)
         self.current = 0
-        self._progress = None
+        self.current_stage_no = 1
+        self.current_message = "准备中"
+        self.current_detail = ""
+        self.note = ""
+        self._active_child: _StageChildProgress | None = None
+        self._closed = False
+        self._last_width = 0
 
     def __enter__(self) -> "StageProgress":
-        self._progress = create_progress(
-            total=self.total,
-            desc=_stage_text(self.label, 0, self.total, "准备中"),
-            unit="step",
-            leave=True,
-            position=self.position,
-        )
+        global _ACTIVE_STAGE_PROGRESS
+        _ACTIVE_STAGE_PROGRESS = self
+        self._refresh()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if self._progress is None:
+        global _ACTIVE_STAGE_PROGRESS
+        if exc_type is None:
+            self.complete()
+        self.close()
+        if _ACTIVE_STAGE_PROGRESS is self:
+            _ACTIVE_STAGE_PROGRESS = None
+
+    def _compose_line(self) -> str:
+        child_ratio = 0.0
+        child_text = ""
+        if self._active_child is not None and self._active_child.total > 0:
+            child_ratio = min(max(self._active_child.n / self._active_child.total, 0.0), 1.0)
+            child_text = f"{self._active_child.desc} {self._active_child.n}/{self._active_child.total} {self._active_child.unit}"
+        ratio = min(max((self.current + child_ratio) / self.total, 0.0), 1.0)
+        percent_text = f"{ratio * 100:5.1f}%"
+        term_width = _terminal_width()
+        bar_width = max(18, min(30, term_width // 5))
+        filled = int(round(bar_width * ratio))
+        bar = "#" * filled + "-" * max(bar_width - filled, 0)
+        stage_prefix = f"{self.label} {min(max(self.current_stage_no, 1), self.total)}/{self.total} {self.current_message}"
+        parts = [stage_prefix]
+        if self.current_detail:
+            parts.append(self.current_detail)
+        if child_text:
+            parts.append(child_text)
+        if self.note:
+            parts.append(self.note)
+        body = " | ".join(part for part in parts if str(part).strip())
+        prefix = f"[{bar}] {percent_text} "
+        available_text = max(term_width - len(prefix) - 1, 16)
+        return f"\r{prefix}{_truncate_text(body, available_text)}"
+
+    def _refresh(self) -> None:
+        if self._closed:
             return
-        if exc_type is None and self.current >= self.total:
-            self._progress.set_description_str(_stage_text(self.label, self.total, self.total, "完成"))
-        self._progress.close()
+        line = self._compose_line()
+        padding = max(self._last_width - len(line), 0)
+        sys.stdout.write(line + (" " * padding))
+        sys.stdout.flush()
+        self._last_width = len(line)
+
+    def _attach_child(self, child: _StageChildProgress) -> None:
+        self._active_child = child
+        self._refresh()
+
+    def _detach_child(self, child: _StageChildProgress) -> None:
+        if self._active_child is child:
+            self._active_child = None
+            self._refresh()
+
+    def start_stage(self, stage_no: int, message: str, detail: str = "") -> None:
+        stage_no = max(1, min(int(stage_no), self.total))
+        if stage_no > 1:
+            self.current = max(self.current, stage_no - 1)
+        self.current_stage_no = stage_no
+        self.current_message = str(message or "处理中")
+        self.current_detail = str(detail or "").strip()
+        self.note = ""
+        self._active_child = None
+        self._refresh()
+
+    def complete_stage(self, stage_no: int | None = None) -> None:
+        if stage_no is None:
+            self.current = max(self.current, min(self.current_stage_no, self.total))
+        else:
+            self.current = max(self.current, min(int(stage_no), self.total))
+        self._active_child = None
+        self._refresh()
+
+    def complete(self) -> None:
+        self.current = self.total
+        self.current_stage_no = self.total
+        self.current_message = "完成"
+        self.current_detail = ""
+        self.note = ""
+        self._active_child = None
+        self._refresh()
+
+    def close(self) -> None:
+        global _ACTIVE_STAGE_PROGRESS
+        if self._closed:
+            return
+        if self.leave:
+            self._refresh()
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write("\r" + (" " * self._last_width) + "\r")
+        sys.stdout.flush()
+        self._closed = True
+        if _ACTIVE_STAGE_PROGRESS is self:
+            _ACTIVE_STAGE_PROGRESS = None
 
     @contextmanager
     def stage(self, message: str, detail: str = "") -> Iterator[None]:
-        if self._progress is None:
-            raise RuntimeError("StageProgress must be entered before creating stages.")
         step_no = min(self.current + 1, self.total)
-        self._progress.set_description_str(_stage_text(self.label, step_no, self.total, message, detail))
+        self.start_stage(step_no, message, detail)
         try:
             yield
         except Exception:
-            progress_write(_stage_text(self.label, step_no, self.total, f"失败: {message}", detail))
+            self.log(f"失败: {message}")
             raise
         else:
-            self._progress.update(step_no - self.current)
-            self.current = step_no
+            self.complete_stage(step_no)
 
     def log(self, message: str) -> None:
-        progress_write(message)
+        self.note = str(message or "").strip()
+        self._refresh()
