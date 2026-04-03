@@ -360,9 +360,9 @@ def _panel_to_long(frame: pd.DataFrame, value_name: str) -> pd.DataFrame:
 def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
     if not write_tasks:
         return
-    with create_progress(total=len(write_tasks), desc="写出产物", unit="file", leave=False) as progress:
+    with create_progress(total=len(write_tasks), desc="Write artifacts", unit="file", leave=False) as progress:
         for index, (label, writer) in enumerate(write_tasks, start=1):
-            progress.set_description_str(f"写出 {label} {index}/{len(write_tasks)}")
+            progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
             writer()
             progress.update(1)
 
@@ -990,13 +990,13 @@ def main():
 
     stage_progress = StageProgress(total=8, label="DeepAlpha")
     stage_progress.__enter__()
-    stage_progress.start_stage(1, "加载宇宙与行情")
+    stage_progress.start_stage(1, "Load universe and market data")
 
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
     if args.data_source == "tq":
         if args.rolling_liquidity_pool:
-            progress_write(f"加载滚动 {args.rolling_liquidity_pool} 研究股票池基础宇宙")
+            progress_write(f"Load rolling {args.rolling_liquidity_pool} base universe for research")
             try:
                 universe = load_universe_from_tq(cfg.universe_scope)
             except Exception as exc:
@@ -1008,9 +1008,11 @@ def main():
                 if not fallback_universe:
                     raise
                 universe = fallback_universe
-                progress_write(f"TQ 宇宙不可用，回退到缓存滚动并集（{len(universe)} 只）: {exc}")
+                progress_write(
+                    f"TQ universe unavailable, fall back to cached rolling union ({len(universe)} names): {exc}"
+                )
         elif not universe and cfg.universe_scope == "all_a":
-            progress_write("从 TQ 加载全A宇宙")
+            progress_write("Load all-A universe from TQ")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif not universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
@@ -1042,7 +1044,7 @@ def main():
     valid_end = pd.Timestamp(close_dates[valid_end_pos])
 
     stage_progress.complete_stage(1)
-    stage_progress.start_stage(2, "构建市场状态与流动性")
+    stage_progress.start_stage(2, "Build market state and liquidity")
     state_frame, state_name_map, state_key = load_cached_or_fit_market_state(
         args=args,
         cfg=cfg,
@@ -1057,19 +1059,19 @@ def main():
     )
 
     stage_progress.complete_stage(2)
-    stage_progress.start_stage(3, "构建特征与目标")
+    stage_progress.start_stage(3, "Build features and targets")
     industry_map = None
     style_map = None
     if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "tq":
-        progress_write("加载关系先验：行业/风格")
+        progress_write("Load relation priors: industry/style")
         try:
             industry_map = load_industry_map_from_tq(list(close.columns))
         except Exception as exc:
-            progress_write(f"行业映射不可用: {exc}")
+            progress_write(f"Industry mapping unavailable: {exc}")
         try:
             style_map = load_style_map_from_tq(list(close.columns))
         except Exception as exc:
-            progress_write(f"风格映射不可用: {exc}")
+            progress_write(f"Style mapping unavailable: {exc}")
     feature_meta = {
         "version": 5,
         "raw_key": raw_key,
@@ -1099,7 +1101,7 @@ def main():
     feature_path = get_cache_root() / "features" / f"{feature_key}.pkl"
     feature_cached = load_pickle(feature_path) if args.use_cache and not args.refresh_cache else None
     if feature_cached is not None:
-        progress_write(f"读取特征缓存: {feature_path.name}")
+        progress_write(f"Load feature cache: {feature_path.name}")
         feature_frames = feature_cached["feature_frames"]
         target_frames = feature_cached["target_frames"]
         structure_label_frame = feature_cached.get("structure_label_frame")
@@ -1150,7 +1152,7 @@ def main():
                     "structure_label_frame": structure_label_frame,
                 },
             )
-            progress_write(f"写入特征缓存: {feature_path.name}")
+            progress_write(f"Write feature cache: {feature_path.name}")
     if structure_label_frame is None:
         structure_label_frame = build_structure_label_frame(
             close=df_dict["Close"].astype(float),
@@ -1190,11 +1192,11 @@ def main():
     corpus_path = get_cache_root() / "corpus" / f"{corpus_key}.pkl"
     corpus = load_pickle(corpus_path) if args.use_cache and not args.refresh_cache else None
     stage_progress.complete_stage(3)
-    stage_progress.start_stage(4, "构建语料与样本")
+    stage_progress.start_stage(4, "Build corpus and samples")
     if corpus is not None:
-        progress_write(f"读取语料缓存: {corpus_path.name}")
+        progress_write(f"Load corpus cache: {corpus_path.name}")
     else:
-        progress_write("构建 sequence corpus 并切分 train/valid 视图")
+        progress_write("Build sequence corpus and split train/valid views")
         corpus = build_sequence_corpus(
             feature_frames=feature_frames,
             train_target_frames=train_target_frames,
@@ -1213,7 +1215,7 @@ def main():
         )
         if args.use_cache:
             save_pickle(corpus_path, corpus)
-            progress_write(f"写入语料缓存: {corpus_path.name}")
+            progress_write(f"Write corpus cache: {corpus_path.name}")
     train_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(end_date=train_end))
     valid_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(start_date=valid_start, end_date=valid_end))
     train_eval_start = resolve_recent_window_start(close.index, train_end, cfg.train_eval_window_days)
@@ -1230,9 +1232,9 @@ def main():
         raise RuntimeError("Deep alpha train-eval dataset is empty. Increase --train-eval-window-days or history length.")
 
     stage_progress.complete_stage(4)
-    stage_progress.start_stage(5, "准备运行时与模型")
+    stage_progress.start_stage(5, "Prepare runtime and model")
     progress_write(
-        f"样本统计 train={len(train_ds)} valid={len(valid_ds)} train_eval={len(train_eval_ds)}"
+        f"Dataset summary train={len(train_ds)} valid={len(valid_ds)} train_eval={len(train_eval_ds)}"
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     runtime_profile = resolve_runtime_profile(
@@ -1250,7 +1252,7 @@ def main():
     cfg.use_amp = runtime_profile.use_amp
     configure_torch_runtime(device, use_amp=bool(cfg.use_amp))
     for note in runtime_profile.applied_notes:
-        progress_write(f"运行时调优: {note}")
+        progress_write(f"Runtime adjustment: {note}")
     pin_memory = bool(cfg.pin_memory and torch.cuda.is_available())
     loader_kwargs = {
         "num_workers": int(cfg.num_workers),
@@ -1311,11 +1313,11 @@ def main():
         if cfg.encoder_family != "patch_transformer":
             raise ValueError("Pretrained encoder loading is currently only supported with --encoder-family patch_transformer.")
         missing, unexpected = model.encoder.load_state_dict(encoder_state, strict=False)
-        progress_write(f"已加载预训练编码器: {artifact_path.name}")
+        progress_write(f"Loaded pretrained encoder: {artifact_path.name}")
         if missing:
-            progress_write(f"预训练编码器缺失键: {missing}")
+            progress_write(f"Missing pretrained encoder keys: {missing}")
         if unexpected:
-            progress_write(f"预训练编码器多余键: {unexpected}")
+            progress_write(f"Unexpected pretrained encoder keys: {unexpected}")
 
     target_state_ids = sorted(
         {
@@ -1326,13 +1328,13 @@ def main():
     )
 
     stage_progress.complete_stage(5)
-    stage_progress.start_stage(6, "训练模型")
-    progress_write("开始训练 deep alpha 模型")
+    stage_progress.start_stage(6, "Train model")
+    progress_write("Start deep alpha training")
     checkpoint_selection_mode = resolve_checkpoint_metric_name(args.checkpoint_selection_objective)
     checkpoint_selection_callback = None
     if checkpoint_selection_mode != "valid_loss":
         def _checkpoint_selection_callback(model_for_eval: MultiTaskRanker, epoch: int) -> dict[str, Any]:
-            progress_write(f"epoch {epoch}: 评估 primary research objective")
+            progress_write(f"epoch {epoch}: evaluate primary research objective")
             evaluation = _evaluate_research_outputs(
                 model=model_for_eval,
                 device=device,
@@ -1418,15 +1420,15 @@ def main():
     history = train_result.history
     training_diagnostics = train_result.diagnostics
     progress_write(
-        f"训练诊断 status={training_diagnostics.status}, "
+        f"Training diagnostics status={training_diagnostics.status}, "
         f"selected_epoch={training_diagnostics.selected_epoch}/{training_diagnostics.epochs_completed}, "
         f"{training_diagnostics.selected_metric_name}={training_diagnostics.selected_metric_value:.6f}, "
         f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
     )
 
     stage_progress.complete_stage(6)
-    stage_progress.start_stage(7, "验证推理与回测")
-    progress_write("执行验证推理与 holdout 回测")
+    stage_progress.start_stage(7, "Validate inference and backtest")
+    progress_write("Run validation inference and holdout backtest")
     evaluation = _evaluate_research_outputs(
         model=model,
         device=device,
@@ -1541,8 +1543,8 @@ def main():
             )
 
     stage_progress.complete_stage(7)
-    stage_progress.start_stage(8, "写出产物")
-    progress_write("整理输出目录并写出文件")
+    stage_progress.start_stage(8, "Write artifacts")
+    progress_write("Prepare output directory and write files")
     output_root = Path("daily_research/output")
     output_root.mkdir(parents=True, exist_ok=True)
     run_name = args.experiment_tag.strip() or f"deep_alpha_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

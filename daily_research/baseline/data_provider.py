@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import io
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -31,6 +33,20 @@ STYLE_SECTOR_CODES = {
 
 MARKET_DATA_FIELDS = ("Open", "High", "Low", "Close", "Volume", "Amount")
 TQ_FETCH_BATCH_SIZE = 64
+
+
+def _run_tq_quietly(func, *args, **kwargs):
+    buffer = io.StringIO()
+    with redirect_stdout(buffer), redirect_stderr(buffer):
+        return func(*args, **kwargs)
+
+
+def _initialize_tq_client(tq) -> None:
+    _run_tq_quietly(tq.initialize, __file__)
+
+
+def _close_tq_client(tq) -> None:
+    _run_tq_quietly(tq.close)
 
 
 def _try_import_tq():
@@ -74,7 +90,7 @@ def align_data_dict(df_dict: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]
 def resolve_benchmark_symbol(benchmark: str) -> str:
     benchmark = str(benchmark or "").strip().upper()
     if not benchmark:
-        raise ValueError("benchmark 不能为空。")
+        raise ValueError("benchmark cannot be empty.")
     return benchmark
 
 
@@ -185,7 +201,7 @@ def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
     if tq is None:
         raise RuntimeError("tqcenter not available. Please ensure t0_project/tqcenter.py exists.")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         stock_list = tq.get_stock_list()
         if not stock_list:
@@ -221,7 +237,7 @@ def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
         return filtered
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
 
@@ -247,7 +263,7 @@ def load_industry_map_from_tq(
     if tq is None:
         raise RuntimeError("tqcenter not available. Please ensure t0_project/tqcenter.py exists.")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         sector_codes = [code for code in tq.get_sector_list() if str(code).startswith("881")]
         if not sector_codes:
@@ -275,7 +291,7 @@ def load_industry_map_from_tq(
         return series
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
 
@@ -306,7 +322,7 @@ def load_style_map_from_tq(
     if tq is None:
         raise RuntimeError("tqcenter not available. Please ensure t0_project/tqcenter.py exists.")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         rows: Dict[str, Dict[str, bool]] = {}
         for style_name, sector_codes in style_sector_codes.items():
@@ -330,7 +346,7 @@ def load_style_map_from_tq(
         return style_df.sort_index()
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
 
@@ -341,20 +357,20 @@ def _fetch_tq_data(
     end_date: str = "",
     count: int = 0,
     dividend_type: str = "front",
-    progress_desc: str = "读取股票日线",
+    progress_desc: str = "Load daily stock bars",
     progress_position: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     tq = _try_import_tq()
     if tq is None:
         raise RuntimeError("tqcenter not available. Please ensure t0_project/tqcenter.py exists.")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         chunk_size = max(1, min(TQ_FETCH_BATCH_SIZE, len(stock_list)))
         collected: Dict[str, list[pd.DataFrame]] = {field: [] for field in MARKET_DATA_FIELDS}
         with create_progress(
             total=len(stock_list),
-            desc=str(progress_desc or "读取股票日线"),
+            desc=str(progress_desc or "Load daily stock bars"),
             unit="stock",
             leave=False,
             position=progress_position,
@@ -390,7 +406,7 @@ def _fetch_tq_data(
         return align_data_dict({k: _ensure_datetime_index(v) for k, v in merged.items()})
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
 
@@ -402,7 +418,7 @@ def load_daily_from_tq(
     count: int = 0,
     dividend_type: str = "front",
     benchmark: str = "",
-    progress_desc: str = "读取股票日线",
+    progress_desc: str = "Load daily stock bars",
     progress_position: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     to_fetch = [s for s in stock_list if s]
@@ -426,7 +442,7 @@ def load_daily_from_tq(
 def load_daily_from_csv(
     folder: str,
     *,
-    progress_desc: str = "读取CSV行情",
+    progress_desc: str = "Load CSV market data",
     progress_position: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     path = Path(folder)
@@ -441,7 +457,7 @@ def load_daily_from_csv(
 
     with create_progress(
         total=len(csv_files),
-        desc=str(progress_desc or "读取CSV行情"),
+        desc=str(progress_desc or "Load CSV market data"),
         unit="file",
         leave=False,
         position=progress_position,
@@ -493,7 +509,7 @@ def get_next_trading_date(anchor_date: str | pd.Timestamp, market: str = "SH") -
     if tq is None:
         return (anchor_ts + pd.offsets.BDay(1)).strftime("%Y-%m-%d")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         end_ts = anchor_ts + timedelta(days=40)
         dates = tq.get_trading_dates(
@@ -508,7 +524,7 @@ def get_next_trading_date(anchor_date: str | pd.Timestamp, market: str = "SH") -
                 return dt.strftime("%Y-%m-%d")
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
     return (anchor_ts + pd.offsets.BDay(1)).strftime("%Y-%m-%d")
@@ -529,7 +545,7 @@ def get_latest_completed_trading_date(
         offset = 0 if include_today else 1
         return (anchor_ts - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
 
-    tq.initialize(__file__)
+    _initialize_tq_client(tq)
     try:
         start_ts = anchor_ts - timedelta(days=40)
         dates = tq.get_trading_dates(
@@ -547,7 +563,7 @@ def get_latest_completed_trading_date(
             return eligible[-1].strftime("%Y-%m-%d")
     finally:
         try:
-            tq.close()
+            _close_tq_client(tq)
         except Exception:
             pass
 

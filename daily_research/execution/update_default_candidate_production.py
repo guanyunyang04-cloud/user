@@ -35,7 +35,7 @@ from daily_research.execution.strategy_manifest import (
 
 
 FORMAL_SOURCE_RUN = Path(
-    "daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1"
+    "daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331"
 )
 PRODUCTION_ROOT = Path(
     "daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default"
@@ -234,7 +234,7 @@ def _resolve_training_dates(
         cfg,
         args,
         universe,
-        progress_desc="生产重训：读取市场数据",
+        progress_desc="Production retrain: load market data",
     )
     benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
     df_dict, benchmark_close = research_main.split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
@@ -410,6 +410,8 @@ def _build_retrain_command(
         metrics.get("execution_alignment_candidate_profiles"),
         fallback=DEFAULT_AUTO_PROFILE_NAMES,
     )
+    if research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE and execution_alignment_profile:
+        execution_alignment_mode = "profile"
     if execution_alignment_mode != "off":
         _append_arg(cmd, "--execution-alignment-mode", execution_alignment_mode)
         _append_arg(cmd, "--execution-alignment-objective", execution_alignment_objective)
@@ -594,6 +596,7 @@ def _activate_strategy(
     payload = build_active_strategy_manifest(
         source_run_dir=source_run_dir,
         production_root=production_root,
+        source_metrics=source_metrics,
         strategy_metrics=strategy_metrics,
         panel_mode=strategy_panel_mode,
         strategy_name=resolved_strategy_name,

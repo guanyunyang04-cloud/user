@@ -1,11 +1,12 @@
 # Daily Research 当前判断
 
-快照日期：`2026-04-02`
+快照日期：`2026-04-03`
 
 ## 1. 当前默认结论
 - 每日默认策略：
-  - `regoff_k2_10d_ensemble_native_anchor`
-  - 日常执行现已切到 `production full-fit` 版本，不再继续直接使用 `2025-03-17` 截止的 formal 冻结模型。
+  - `active_execution_strategy -> baseline_current_execfirst_winner`
+  - formal source 已切到 `deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - 日常执行现已切到 `execution_aligned + production full-fit` 版本，不再继续直接使用旧 raw formal 冻结模型。
 - 每日默认入口：
   - `daily_research/execution/run_trade_plan.py`
 - 旧机器学习主线已不再是每日默认。
@@ -13,9 +14,9 @@
   - 旧机器学习主线在同窗 `2025-03-18 -> 2026-03-31` 上是 `24.34% / 10.75% / 0.580 / -14.42%`
   - `regoff_k2_realistic` 是 `44.12% / 25.75% / 1.722 / -8.55%`
 - 因此：
-  - 日常使用默认 `regoff_k2`
+  - 日常默认已从 legacy raw `regoff_k2` 升格为 execution-first winner
   - 旧机器学习主线仅保留为显式回退
-  - formal winner 判决仍看 `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+  - formal winner 判决现看 `deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
   - 日常 production 候选使用 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
 
 ## 2. 当前候选列表
@@ -38,7 +39,7 @@
   - 仅限 raw holdout 研究侧；尚未通过 execution objective + 显式成本升级门槛
 - 当前 execution-objective recent 升级候选：
   - `baseline_current + regoff_k2_10d_ensemble_native_anchor`
-  - 已在 recent realistic H2H 中明显强于当前默认 `regoff_k2_realistic`，但还不是默认执行
+  - 已完成 execution-first formal 重跑、production full-fit promotion 与默认执行切换
 - `short_alpha` 首轮容量优胜项：
   - `state_liquidity_listwise_v1`
 - 结构确认对照：
@@ -100,14 +101,15 @@
   - raw recent：`54.58% / 3.000`
   - realistic replay recent：`12.86% / 0.921`
   - 对照 `baseline_current` realistic replay recent：`53.61% / 3.134`
-- recent named-window H2H 还出现了新的执行侧信号：
+- recent named-window H2H 先前给出的执行侧信号现已完成闭环验证：
   - `baseline_execalign_realistic` 相对当前默认 `regoff_k2_realistic` 在 `full_available + year + bridge + weak_window` 五个窗口全部取胜
-  - 但这条线还没有 production full-fit 与独立 live 证据，因此当前只升格为“下一优先升级候选”，不直接替换默认执行
+  - 现在这条线已经补齐 execution-first formal rerun 与 production full-fit 证据，并正式替换默认执行
 - 因此当前瓶颈更像“上下文与收益排序耦合不足”，不是“先随手加更多短线标签和更多日线输入”。
 - 因此架构主结论也同步明确为：默认方向不是“继续堆复杂度 / 堆深度”。
  - raw 架构层面，`structure_context_only` 仍是最值得保留的低增参结构挑战者。
  - 但 execution-objective gate 已经说明：`structure_context_only` 的 raw 结构优势目前没有自然传导到执行侧。
- - 当前真正应优先推进的执行升级候选，已经切换为 `baseline_current + regoff_k2 execalign`。
+ - 当前真正已经落地的统一默认 winner，是 `baseline_current + regoff_k2 execalign`。
+ - 下一优先研究升级候选回到 `state_liquidity_listwise_v1` 的 execution-objective 对齐。
 
 ## 4. 当前研究优先级
 1. 把 `baseline_current + regoff_k2 execalign` 推到 production-style full-fit / candidate 升级比较，因为它已在 recent realistic named-window H2H 中明显强于当前默认 `regoff_k2_realistic`。
@@ -179,9 +181,12 @@
 - 默认执行端已经切到 manifest-driven：
   - 当前真源文件：`daily_research/output/active_execution_strategy.json`
   - `run_trade_plan.py` 默认先读 active strategy，再决定默认 profile
-- 当前 active strategy 已成功接线，但还是过渡态：
-  - 现在只是把现有 legacy raw default 显式化为 `active_execution_strategy`
-  - 原因是当前 formal source `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 仍是旧 raw 口径产物，尚未按 execution-first 重跑
-- 因此下一步主任务已经收敛为：
-  - 用统一后的 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 协议重跑正式研究 winner
-  - 再用 `update_default_candidate_production.py --activate-strategy` 做正式晋升
+- 当前 active strategy 已正式上位：
+  - `strategy_name = baseline_current_execfirst_winner`
+  - `panel_mode = execution_aligned`
+  - `execution_alignment_profile = regoff_k2_10d_ensemble_native_anchor`
+  - `run_trade_plan.py` 默认直接读取这条 manifest，不再回落到 legacy raw default
+- 当前 production promotion 语义也已固定：
+  - 先按 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 判定 formal winner
+  - 再冻结 formal winner 的 selected execution profile 做 production full-fit 重训
+  - 不再允许 production full-fit 在 3 天内部监控窗上静默改写 execution profile

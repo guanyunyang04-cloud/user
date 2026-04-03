@@ -1,6 +1,6 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-02`
+快照日期：`2026-04-03`
 
 ## 1. 用途
 - 本文件只保留规范化的日常操作入口。
@@ -37,13 +37,13 @@
 ```
 
 - 默认候选配置：
-  - `regoff_k2_10d_ensemble_native_anchor`
+  - `active_execution_strategy -> baseline_current_execfirst_winner`
 - 该入口会先检查默认候选底层 `production full-fit` 模型是否已跨入新的自然月；若已跨月，会先按 `Retrain Monthly` 自动运行 `update_default_candidate_production.py`，随后再检查 `daily_live_*` 面板是否落后于最新完成交易日并自动刷新。
 - 默认日常计划读取：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_score_panel.csv`
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_target_weight_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_score_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_target_weight_panel.csv`
 - formal 研究证据保留在：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+  - `deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
 - 默认输出：
   - `daily_research/execution/output/latest_trade_plan.txt`
 
@@ -76,6 +76,7 @@
   - 保留 formal holdout 研究证据不动
   - 自动计算“最新可标注训练日”
   - 用截至上线前的全部可标注数据重训一次 production full-fit
+  - 冻结 formal winner 的 selected execution profile，避免 production full-fit 静默改写 execution strategy
   - 把稳定日常执行产物同步到 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
 
 ### 只刷新 live 面板，不重训
@@ -192,11 +193,11 @@
 ```
 
 - 当前正式输出：
-  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1`
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2`
 - 当前 execution-objective 结论：
   - `structure_context_only` 的 raw 优势没有穿过 `train_eval_auto + robust_composite + realistic cost` gate
-  - `baseline_current + regoff_k2 execalign` 是当前 recent execution-upgrade 候选
-  - 但在 production full-fit 与独立 live / paper 复核前，不直接替换默认执行
+  - `baseline_current + regoff_k2 execalign` 已完成 formal 重跑、production full-fit promotion 与默认执行切换
+  - 后续如再升级，必须以这条 execution-first 默认链路为对照
 
 ### 运行 `deep_alpha` 重训频率 formal 矩阵
 ```powershell

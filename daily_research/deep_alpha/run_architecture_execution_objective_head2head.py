@@ -15,6 +15,10 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
+from daily_research.deep_alpha.research_objective import (
+    DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    DEFAULT_RESEARCH_OBJECTIVE_MODE,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -59,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run architecture execution-objective formal head-to-head with realistic external replay."
     )
-    parser.add_argument("--root-tag", default="deep_alpha_architecture_execalign_formal_20260403_r1")
+    parser.add_argument("--root-tag", default="deep_alpha_architecture_execalign_formal_20260403_r2")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument(
         "--profiles",
@@ -71,6 +75,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
+    parser.add_argument(
+        "--research-objective-mode",
+        choices=["execution_first", "raw_holdout"],
+        default=DEFAULT_RESEARCH_OBJECTIVE_MODE,
+    )
+    parser.add_argument(
+        "--checkpoint-selection-objective",
+        choices=["valid_loss", "primary_annual_return", "primary_excess_annual_return", "primary_excess_sharpe"],
+        default=DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    )
+    parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)
     parser.add_argument("--execution-alignment-objective", default="robust_composite")
     return parser.parse_args()
 
@@ -89,6 +104,9 @@ def _build_research_command(
     transaction_cost_bps: float,
     slippage_bps: float,
     sell_tax_bps: float,
+    research_objective_mode: str,
+    checkpoint_selection_objective: str,
+    checkpoint_selection_min_improvement: float,
     execution_alignment_objective: str,
 ) -> list[str]:
     profile = get_profile(profile_name)
@@ -143,6 +161,12 @@ def _build_research_command(
         "0.5",
         "--min-improvement",
         "0.0001",
+        "--research-objective-mode",
+        research_objective_mode,
+        "--checkpoint-selection-objective",
+        checkpoint_selection_objective,
+        "--checkpoint-selection-min-improvement",
+        str(checkpoint_selection_min_improvement),
         "--return-loss-mode",
         "top_bottom_bce",
         "--return-target-transform",
@@ -379,6 +403,9 @@ def main() -> None:
                     transaction_cost_bps=args.transaction_cost_bps,
                     slippage_bps=args.slippage_bps,
                     sell_tax_bps=args.sell_tax_bps,
+                    research_objective_mode=str(args.research_objective_mode),
+                    checkpoint_selection_objective=str(args.checkpoint_selection_objective),
+                    checkpoint_selection_min_improvement=float(args.checkpoint_selection_min_improvement),
                     execution_alignment_objective=str(args.execution_alignment_objective),
                 )
                 _run_command(command)
@@ -589,6 +616,8 @@ def main() -> None:
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
         "- model protocol: `top_bottom_bce + manual score head + next_open`",
+        f"- research objective: `{args.research_objective_mode}`",
+        f"- checkpoint selection: `{args.checkpoint_selection_objective}` (min improvement `{float(args.checkpoint_selection_min_improvement):.4f}`)",
         f"- execution alignment: `train_eval_auto / {args.execution_alignment_objective}`",
         f"- realistic cost: transaction `{float(args.transaction_cost_bps):.1f}` bps, slippage `{float(args.slippage_bps):.1f}` bps, sell-tax `{float(args.sell_tax_bps):.1f}` bps",
         f"- execution candidates scanned: `{', '.join(EXECUTION_ALIGNMENT_CANDIDATES)}`",

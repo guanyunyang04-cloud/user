@@ -38,8 +38,13 @@ def main():
     if not candidate_profile and not has_arg("--score-panel-csv") and not has_arg("--target-weight-panel-csv") and not is_help_request():
         candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
     if candidate_profile:
-        resolved = apply_profile_defaults(candidate_profile, mode="backtest")
-        print(f"candidate_profile={resolved.name}")
+        resolved = apply_profile_defaults(
+            candidate_profile,
+            mode="backtest",
+            ensure_live_panels=not is_help_request(),
+        )
+        if not is_help_request():
+            print(f"candidate_profile={resolved.name}")
 
     if not has_arg("--score-panel-csv") and not has_arg("--target-weight-panel-csv") and not is_help_request():
         raise ValueError(

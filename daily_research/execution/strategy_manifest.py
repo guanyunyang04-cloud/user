@@ -47,11 +47,13 @@ def build_active_strategy_manifest(
     *,
     source_run_dir: Path,
     production_root: Path,
+    source_metrics: dict[str, Any] | None = None,
     strategy_metrics: dict[str, Any],
     panel_mode: str = "auto",
     strategy_name: str = "",
     promoted_at: str = "",
 ) -> dict[str, Any]:
+    source_metrics = source_metrics if isinstance(source_metrics, dict) else {}
     resolved_panel_mode = (
         resolve_primary_panel_mode(strategy_metrics)
         if str(panel_mode or "auto").strip().lower() == "auto"
@@ -92,6 +94,7 @@ def build_active_strategy_manifest(
     if not all((source_run_dir / name).exists() for name in (target_weight_name, score_name)):
         source_panel_root = production_root
     source_panel_origin = "formal_source" if source_panel_root == source_run_dir else "production_fallback"
+    source_panel_metrics = source_metrics if source_panel_origin == "formal_source" else strategy_metrics
     production_manifest_json = production_root / "production_retrain_manifest.json"
     return {
         "strategy_name": str(strategy_name or source_run_dir.name),
@@ -109,9 +112,9 @@ def build_active_strategy_manifest(
         "trade_plan_target_weight_panel_csv": str((production_root / target_weight_name).resolve()),
         "trade_plan_score_panel_csv": str((production_root / score_name).resolve()),
         "trade_plan_candidate_label": candidate_label,
-        "benchmark": str(strategy_metrics.get("benchmark", "000300.SH") or "000300.SH"),
+        "benchmark": str(source_panel_metrics.get("benchmark", "000300.SH") or "000300.SH"),
         "data_source": "tq",
-        "backtest_start_date": str(strategy_metrics.get("valid_start", "20210101") or "20210101").replace("-", ""),
+        "backtest_start_date": str(source_panel_metrics.get("valid_start", "20210101") or "20210101").replace("-", ""),
         "trade_plan_start_date": str(strategy_metrics.get("start_date", "20210101") or "20210101"),
         "rebalance_freq": rebalance_freq,
         "rebalance_offset_mode": rebalance_offset_mode,

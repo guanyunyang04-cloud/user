@@ -130,9 +130,9 @@ def _resolve_pretrain_split(train_dates: pd.Index, pretrain_valid_days: int) -> 
 def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
     if not write_tasks:
         return
-    with create_progress(total=len(write_tasks), desc="写出预训练产物", unit="file", leave=False) as progress:
+    with create_progress(total=len(write_tasks), desc="Write pretrain artifacts", unit="file", leave=False) as progress:
         for index, (label, writer) in enumerate(write_tasks, start=1):
-            progress.set_description_str(f"写出 {label} {index}/{len(write_tasks)}")
+            progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
             writer()
             progress.update(1)
 
@@ -190,13 +190,13 @@ def main():
 
     stage_progress = StageProgress(total=7, label="Pretrain")
     stage_progress.__enter__()
-    stage_progress.start_stage(1, "加载宇宙与行情")
+    stage_progress.start_stage(1, "Load universe and market data")
 
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
     if args.data_source == "tq":
         if args.rolling_liquidity_pool:
-            progress_write(f"加载滚动 {args.rolling_liquidity_pool} 预训练股票池基础宇宙")
+            progress_write(f"Load rolling {args.rolling_liquidity_pool} base universe for pretraining")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif args.liquidity_pool and not universe:
             from daily_research.execution.liquidity_universe import get_named_pool_file
@@ -204,7 +204,7 @@ def main():
             pool_file = get_named_pool_file(args.liquidity_pool)
             universe = load_stocks_from_file(str(pool_file))
         elif not universe and cfg.universe_scope == "all_a":
-            progress_write("从 TQ 加载全A宇宙")
+            progress_write("Load all-A universe from TQ")
             universe = load_universe_from_tq(cfg.universe_scope)
         elif not universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
@@ -235,7 +235,7 @@ def main():
     pretrain_train_end, pretrain_valid_start = _resolve_pretrain_split(close.index[close.index <= train_end], args.pretrain_valid_days)
 
     stage_progress.complete_stage(1)
-    stage_progress.start_stage(2, "构建市场状态与流动性")
+    stage_progress.start_stage(2, "Build market state and liquidity")
     state_frame, _state_name_map, state_key = load_cached_or_fit_market_state(
         args=args,
         cfg=cfg,
@@ -250,18 +250,18 @@ def main():
     )
 
     stage_progress.complete_stage(2)
-    stage_progress.start_stage(3, "构建特征与目标")
+    stage_progress.start_stage(3, "Build features and targets")
     industry_map = None
     style_map = None
     if args.relation_layer and args.data_source == "tq":
         try:
             industry_map = load_industry_map_from_tq(list(close.columns))
         except Exception as exc:
-            progress_write(f"行业映射不可用: {exc}")
+            progress_write(f"Industry mapping unavailable: {exc}")
         try:
             style_map = load_style_map_from_tq(list(close.columns))
         except Exception as exc:
-            progress_write(f"风格映射不可用: {exc}")
+            progress_write(f"Style mapping unavailable: {exc}")
 
     feature_meta = {
         "version": 1,
@@ -280,7 +280,7 @@ def main():
     feature_path = get_cache_root() / "features" / f"{feature_key}.pkl"
     feature_cached = load_pickle(feature_path) if args.use_cache and not args.refresh_cache else None
     if feature_cached is not None:
-        progress_write(f"读取特征缓存: {feature_path.name}")
+        progress_write(f"Load feature cache: {feature_path.name}")
         feature_frames = feature_cached["feature_frames"]
         target_frames = feature_cached["target_frames"]
         structure_label_frame = feature_cached["structure_label_frame"]
@@ -320,7 +320,7 @@ def main():
                     "structure_label_frame": structure_label_frame,
                 },
             )
-            progress_write(f"写入特征缓存: {feature_path.name}")
+            progress_write(f"Write feature cache: {feature_path.name}")
 
     pretrain_dates = list(close.index[close.index <= train_end])
     corpus_meta = {
@@ -339,11 +339,11 @@ def main():
     corpus_path = get_cache_root() / "corpus" / f"{corpus_key}.pkl"
     corpus = load_pickle(corpus_path) if args.use_cache and not args.refresh_cache else None
     stage_progress.complete_stage(3)
-    stage_progress.start_stage(4, "构建预训练语料")
+    stage_progress.start_stage(4, "Build pretrain corpus")
     if corpus is not None:
-        progress_write(f"读取语料缓存: {corpus_path.name}")
+        progress_write(f"Load corpus cache: {corpus_path.name}")
     else:
-        progress_write("构建预训练语料")
+        progress_write("Build pretrain corpus")
         corpus = build_sequence_corpus(
             feature_frames=feature_frames,
             train_target_frames=target_frames,
@@ -363,7 +363,7 @@ def main():
         )
         if args.use_cache:
             save_pickle(corpus_path, corpus)
-            progress_write(f"写入语料缓存: {corpus_path.name}")
+            progress_write(f"Write corpus cache: {corpus_path.name}")
 
     train_ds = SequenceOnlyDataset(corpus=corpus, indices=corpus.build_index(end_date=pretrain_train_end))
     valid_ds = SequenceOnlyDataset(corpus=corpus, indices=corpus.build_index(start_date=pretrain_valid_start, end_date=train_end))
@@ -371,8 +371,8 @@ def main():
         raise RuntimeError("Masked pretraining dataset is empty. Try a longer history or smaller lookback window.")
 
     stage_progress.complete_stage(4)
-    stage_progress.start_stage(5, "准备运行时与模型")
-    progress_write(f"样本统计 train={len(train_ds)} valid={len(valid_ds)}")
+    stage_progress.start_stage(5, "Prepare runtime and model")
+    progress_write(f"Dataset summary train={len(train_ds)} valid={len(valid_ds)}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     runtime_profile = resolve_runtime_profile(
         stage="pretrain",
@@ -389,7 +389,7 @@ def main():
     cfg.use_amp = runtime_profile.use_amp
     configure_torch_runtime(device, use_amp=bool(cfg.use_amp))
     for note in runtime_profile.applied_notes:
-        progress_write(f"运行时调优: {note}")
+        progress_write(f"Runtime adjustment: {note}")
     pin_memory = bool(cfg.pin_memory and torch.cuda.is_available())
     loader_kwargs = {
         "batch_size": cfg.batch_size,
@@ -426,8 +426,8 @@ def main():
     )
 
     stage_progress.complete_stage(5)
-    stage_progress.start_stage(6, "训练预训练模型")
-    progress_write("开始训练 masked patch pretrainer")
+    stage_progress.start_stage(6, "Train pretrainer")
+    progress_write("Start masked patch pretrainer")
     pretrain_result = train_masked_pretrainer(
         model=model,
         train_loader=train_loader,
@@ -450,14 +450,14 @@ def main():
     history = pretrain_result.history
     training_diagnostics = pretrain_result.diagnostics
     progress_write(
-        f"预训练诊断 status={training_diagnostics.status}, "
+        f"Pretrain diagnostics status={training_diagnostics.status}, "
         f"best_epoch={training_diagnostics.best_epoch}/{training_diagnostics.epochs_completed}, "
         f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
     )
 
     stage_progress.complete_stage(6)
-    stage_progress.start_stage(7, "写出预训练产物")
-    progress_write("整理输出目录并写出预训练文件")
+    stage_progress.start_stage(7, "Write pretrain artifacts")
+    progress_write("Prepare output directory and write pretrain files")
     output_root = Path("daily_research/output")
     output_root.mkdir(parents=True, exist_ok=True)
     run_name = args.experiment_tag.strip() or f"deep_alpha_pretrain_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

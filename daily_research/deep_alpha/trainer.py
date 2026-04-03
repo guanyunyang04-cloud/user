@@ -74,6 +74,34 @@ class PretrainRunResult:
     diagnostics: TrainingDiagnostics
 
 
+def _format_training_step_desc(
+    *,
+    phase_label: str,
+    epoch: int,
+    epoch_total: int,
+    batch_idx: int,
+    batch_total: int,
+) -> str:
+    return f"Finetune epoch {epoch}/{epoch_total} {phase_label} batch {batch_idx}/{batch_total}"
+
+
+def _format_pretrain_step_desc(
+    *,
+    phase_label: str,
+    epoch: int,
+    batch_idx: int,
+    batch_total: int,
+    epoch_budget: int,
+    max_epoch_budget: int,
+) -> str:
+    budget_text = (
+        f"budget={epoch_budget}/{max_epoch_budget}"
+        if int(max_epoch_budget) > int(epoch_budget)
+        else f"budget={epoch_budget}"
+    )
+    return f"Pretrain epoch {epoch} {phase_label} batch {batch_idx}/{batch_total} | {budget_text}"
+
+
 def _build_training_diagnostics(
     *,
     history: List[EpochRecord] | List[PretrainEpochRecord],
@@ -711,7 +739,7 @@ def train_multitask_model(
     valid_batch_count = max(len(valid_loader), 1)
     progress_total = max(int(epochs), 1) * (train_batch_count + valid_batch_count)
 
-    with create_progress(total=progress_total, desc="训练准备中", unit="batch", leave=False) as progress:
+    with create_progress(total=progress_total, desc="Finetune setup", unit="batch", leave=False) as progress:
         for epoch in range(1, epochs + 1):
             model.train()
             train_losses: List[float] = []
@@ -721,7 +749,15 @@ def train_multitask_model(
             train_aux_losses: List[float] = []
             train_proto_losses: List[float] = []
             for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(train_loader, start=1):
-                progress.set_description_str(f"训练 epoch {epoch}/{epochs} train {batch_idx}/{train_batch_count}")
+                progress.set_description_str(
+                    _format_training_step_desc(
+                        phase_label="train",
+                        epoch=epoch,
+                        epoch_total=epochs,
+                        batch_idx=batch_idx,
+                        batch_total=train_batch_count,
+                    )
+                )
                 x = x.to(device, non_blocking=True)
                 y = y.to(device, non_blocking=True)
                 state_id = state_id.to(device, non_blocking=True)
@@ -844,7 +880,15 @@ def train_multitask_model(
             valid_proto_losses: List[float] = []
             with torch.no_grad():
                 for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(valid_loader, start=1):
-                    progress.set_description_str(f"训练 epoch {epoch}/{epochs} valid {batch_idx}/{valid_batch_count}")
+                    progress.set_description_str(
+                        _format_training_step_desc(
+                            phase_label="valid",
+                            epoch=epoch,
+                            epoch_total=epochs,
+                            batch_idx=batch_idx,
+                            batch_total=valid_batch_count,
+                        )
+                    )
                     x = x.to(device, non_blocking=True)
                     y = y.to(device, non_blocking=True)
                     state_id = state_id.to(device, non_blocking=True)
@@ -1045,10 +1089,10 @@ def infer_dataset(
     pred_rows = []
     embed_rows = []
     total_batches = max(len(loader), 1)
-    with create_progress(total=total_batches, desc="推理准备中", unit="batch", leave=False) as progress:
+    with create_progress(total=total_batches, desc="Inference setup", unit="batch", leave=False) as progress:
         with torch.no_grad():
             for batch_idx, (x, y, y_raw, state_id, liquidity_bucket, structure_id, dts, stocks) in enumerate(loader, start=1):
-                progress.set_description_str(f"推理 batch {batch_idx}/{total_batches}")
+                progress.set_description_str(f"Inference batch {batch_idx}/{total_batches}")
                 x = x.to(device, non_blocking=True)
                 liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -1154,14 +1198,23 @@ def train_masked_pretrainer(
     valid_batch_count = max(len(valid_loader), 1)
     progress_total = max(max_epoch_budget, 1) * (train_batch_count + valid_batch_count)
 
-    with create_progress(total=progress_total, desc="预训练准备中", unit="batch", leave=False) as progress:
+    with create_progress(total=progress_total, desc="Pretrain setup", unit="batch", leave=False) as progress:
         while epoch < epoch_budget:
             epoch += 1
             model.train()
             train_losses: List[float] = []
             train_mask_ratios: List[float] = []
             for batch_idx, (x, _dts, _stocks) in enumerate(train_loader, start=1):
-                progress.set_description_str(f"预训练 epoch {epoch}/{epoch_budget} train {batch_idx}/{train_batch_count}")
+                progress.set_description_str(
+                    _format_pretrain_step_desc(
+                        phase_label="train",
+                        epoch=epoch,
+                        batch_idx=batch_idx,
+                        batch_total=train_batch_count,
+                        epoch_budget=epoch_budget,
+                        max_epoch_budget=max_epoch_budget,
+                    )
+                )
                 x = x.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -1180,7 +1233,16 @@ def train_masked_pretrainer(
             valid_mask_ratios: List[float] = []
             with torch.no_grad():
                 for batch_idx, (x, _dts, _stocks) in enumerate(valid_loader, start=1):
-                    progress.set_description_str(f"预训练 epoch {epoch}/{epoch_budget} valid {batch_idx}/{valid_batch_count}")
+                    progress.set_description_str(
+                        _format_pretrain_step_desc(
+                            phase_label="valid",
+                            epoch=epoch,
+                            batch_idx=batch_idx,
+                            batch_total=valid_batch_count,
+                            epoch_budget=epoch_budget,
+                            max_epoch_budget=max_epoch_budget,
+                        )
+                    )
                     x = x.to(device, non_blocking=True)
                     with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                         loss, stats = model(x)

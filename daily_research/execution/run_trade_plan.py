@@ -73,7 +73,11 @@ def main():
         print("wrapper_options: --candidate-profile <name> | --list-candidate-profiles | --legacy-ml")
 
     if candidate_profile:
-        resolved = apply_profile_defaults(candidate_profile, mode="trade_plan")
+        resolved = apply_profile_defaults(
+            candidate_profile,
+            mode="trade_plan",
+            ensure_live_panels=not is_help_request(),
+        )
         if not is_help_request():
             print("execution_mode=research_candidate_default")
             print(f"candidate_profile={resolved.name}")

@@ -43,7 +43,13 @@ class ResearchCandidateProfile:
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
-_DYNAMIC_GRAPH_FORMAL_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1"
+_DYNAMIC_GRAPH_FORMAL_ROOT = (
+    _DAILY_RESEARCH_ROOT
+    / "output"
+    / "deep_alpha_architecture_execalign_formal_20260403_r2"
+    / "runs"
+    / "baseline_current_20250318_20260331"
+)
 _DYNAMIC_GRAPH_PRODUCTION_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_bridge_production_default"
 _EXECALIGN_AUTO_R4_ROOT = _DAILY_RESEARCH_ROOT / "output" / "deep_alpha_liquid500_dynamic_graph_v1_execalign_auto_20260401_formal_r4"
 _UPDATE_DEFAULT_PRODUCTION_SCRIPT = (_DAILY_RESEARCH_ROOT / "execution" / "update_default_candidate_production.py").resolve()
@@ -321,16 +327,17 @@ def _build_auto_retrain_plan(
         if latest_completed.to_period("M") > launch_cutoff_date.to_period("M"):
             plan["should_retrain"] = True
             plan["reason"] = (
-                f"launch_cutoff_date={launch_cutoff_date.date()} 已跨到新自然月 "
-                f"{latest_completed.strftime('%Y-%m')}，按 Retrain Monthly 自动重训。"
+                f"launch_cutoff_date={launch_cutoff_date.date()} crossed into a new calendar month "
+                f"{latest_completed.strftime('%Y-%m')}; trigger automatic Retrain Monthly."
             )
         return plan
 
     if fallback_trading_days > 0 and lag >= fallback_trading_days:
         plan["should_retrain"] = True
         plan["reason"] = (
-            f"launch_cutoff_date={launch_cutoff_date.date()} 相对最新完成交易日 "
-            f"{latest_completed.date()} 估算已滞后 {lag} 个交易日，达到自动重训阈值 {fallback_trading_days}。"
+            f"launch_cutoff_date={launch_cutoff_date.date()} is estimated to lag "
+            f"{lag} trading days behind latest_completed_date={latest_completed.date()}, "
+            f"reaching the automatic retrain threshold {fallback_trading_days}."
         )
     return plan
 
@@ -422,9 +429,10 @@ def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None
     )
 
 
-def apply_profile_defaults(profile_name: str, *, mode: str) -> ResearchCandidateProfile:
+def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: bool = True) -> ResearchCandidateProfile:
     profile = get_profile(profile_name)
-    _ensure_live_panels(profile, mode=mode)
+    if ensure_live_panels:
+        _ensure_live_panels(profile, mode=mode)
     if mode == "backtest":
         inject_default_arg("--data-source", profile.data_source)
         inject_default_arg("--benchmark", profile.benchmark)

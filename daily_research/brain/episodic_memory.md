@@ -9516,3 +9516,118 @@ position,000001.SZ,1200,12.38,
 2. 现在研究 winner 可以被定义为“真实执行后净收益最大”，而不是“raw holdout 看起来最强”。
 3. 默认执行也已经不再依赖硬编码 profile，而是依赖 `active_execution_strategy.json`。
 4. 真正还没完成的只剩最后一步：用新协议重跑 formal winner，再做一次正式 promotion，让 active strategy 从“legacy raw default 显式化”升级为“execution-first winner 正式上位”。
+
+## 2026-04-03 项目体检与冗余清理
+
+### 发现的问题一：active strategy 的回测起始窗被 production 监控窗污染
+- 在上一轮把 `active_execution_strategy.json` 接上后，发现 manifest 里的：
+  - `backtest_start_date`
+- 被 production full-fit 的 `valid_start` 覆盖成了内部监控窗起点 `2026-02-27`，而不是 formal source 真正的研究起点 `2025-03-18`。
+- 这会导致：
+  - `run_research_candidate_backtest.py --candidate-profile default`
+  - 默认只回测到过短窗口，不符合 active strategy 作为研究候选真源的设计。
+
+### 修正
+- 已修改 `daily_research/execution/strategy_manifest.py`：
+  - formal source 面板模式下，`backtest_start_date` 现在固定取 source metrics，而不是 production metrics
+- 已重写：
+  - `daily_research/output/active_execution_strategy.json`
+- 当前验证值：
+  - `backtest_start_date = 20250318`
+  - `trade_plan_start_date = 20210101`
+
+### 发现的问题二：wrapper 在 `--help` 下仍会触发重活
+- 之前如果运行：
+  - `run_trade_plan.py --candidate-profile default --help`
+  - `run_research_candidate_trade_plan.py --candidate-profile default --help`
+  - `run_research_candidate_backtest.py --candidate-profile default --help`
+- wrapper 会先做 profile 应用和 live panel 检查，导致 help 查询也可能触发缓存读取、live panel 刷新，甚至 auto retrain 逻辑。
+
+### 修正
+- 已修改：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - `daily_research/execution/run_research_candidate_trade_plan.py`
+  - `daily_research/execution/run_research_candidate_backtest.py`
+- 现在 `apply_profile_defaults(..., ensure_live_panels=...)` 可显式关闭副作用；
+  - help 模式下不再触发 live panel 刷新或 auto retrain。
+
+### 清理
+- `project_map.md` 已收口到当前真实优先级：
+  - 默认执行真源是 `active_execution_strategy.json`
+  - 当前最高优先的 execution-first 升级候选是 `baseline_current + regoff_k2 execalign`
+- `working_memory.md`、`semantic_memory.md`、`action_system.md`、`project_map.md` 的快照日期已统一更新到 `2026-04-03`
+
+### 验证
+- `py_compile` 通过
+- `run_research_candidate_backtest.py --candidate-profile default --help` 通过，且不再触发重活
+- `run_research_candidate_trade_plan.py --candidate-profile default --help` 通过，且不再触发重活
+- `run_trade_plan.py --candidate-profile default --help` 通过，且不再触发重活
+- `doc_guard.py check` 通过
+
+### 当前剩余问题
+1. 代码和默认执行真源已经统一，但当前 active strategy 仍是过渡态，尚未完成“execution-first formal winner 正式上位”。
+2. 这不是实现 bug，而是实验产物还没重跑：
+   - 需要按统一后的 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 协议重跑 formal winner
+   - 再执行一次 production promotion
+
+## 2026-04-03 execution-first formal winner 正式上位
+
+### formal 重跑
+- 已修正 `daily_research/deep_alpha/run_architecture_execution_objective_head2head.py`：
+  - 显式写入 `research_objective_mode = execution_first`
+  - 显式写入 `checkpoint_selection_objective = primary_annual_return`
+  - summary 同步记录协议字段
+- 新正式输出：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2`
+- 新 formal summary：
+  - `baseline_current` 三窗 mean replay excess annual / Sharpe = `16.05% / 0.930`
+  - `structure_context_only` 三窗 mean replay excess annual / Sharpe = `3.72% / 0.272`
+  - recent replay 上，`baseline_execalign_realistic = 53.61% / 3.134`
+  - 继续显著强于旧默认 `regoff_k2_realistic = 25.75% / 1.722`
+- 因此 execution-first formal winner 正式确认为：
+  - `baseline_current + regoff_k2_10d_ensemble_native_anchor`
+
+### promotion 链修正
+- 第一次 promotion 后发现一个统一性缺口：
+  - `update_default_candidate_production.py` 仍保留 `train_eval_auto`
+  - 会让 production full-fit 在仅 `3` 天内部监控窗上重新挑选 `execution_alignment_profile`
+  - 导致 formal winner 与 production execution strategy 再次分裂
+- 已修正：
+  - 当 source run 来自 `execution_first`
+  - 且 formal winner 已选出 `execution_alignment_profile`
+  - production full-fit 自动冻结为 `execution_alignment_mode = profile`
+  - 不再允许在短监控窗上静默改写 execution profile
+
+### 默认执行切换
+- 已用修正后的 promotion 链重新运行：
+  - source formal run = `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - production run = `daily_research/output/deep_alpha_baseline_current_execfirst_production_fullfit_20260403_r2`
+- 当前 production manifest：
+  - `source_formal_run_dir = deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - `active_production_run_dir = deep_alpha_baseline_current_execfirst_production_fullfit_20260403_r2`
+  - `launch_cutoff_date = 20260402`
+  - `train_end_date = 20260304`
+- 当前 active strategy 已正式写成：
+  - `strategy_name = baseline_current_execfirst_winner`
+  - `panel_mode = execution_aligned`
+  - `execution_alignment_mode = profile`
+  - `execution_alignment_profile = regoff_k2_10d_ensemble_native_anchor`
+
+### 验证
+- `py_compile` 通过：
+  - `run_architecture_execution_objective_head2head.py`
+  - `update_default_candidate_production.py`
+- `run_trade_plan.py --list-candidate-profiles` 通过：
+  - `default=active_execution_strategy`
+  - `strategy=baseline_current_execfirst_winner`
+  - `panel_mode=execution_aligned`
+- 默认 production `metrics.json` 已确认：
+  - `research_objective_mode = execution_first`
+  - `execution_alignment_mode = profile`
+  - `execution_alignment_profile = regoff_k2_10d_ensemble_native_anchor`
+
+### 当前结论
+1. execution-first formal winner 已正式重跑并完成上位。
+2. 默认执行不再是 legacy raw default 的显式化，而是正式的 execution-first winner。
+3. production full-fit promotion 现在会冻结 formal winner 的 selected execution profile，避免研究端和执行端再次分裂。

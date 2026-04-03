@@ -115,7 +115,7 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         cfg,
         args,
         universe,
-        progress_desc="刷新 live 候选行情",
+        progress_desc="Refresh live candidate market data",
     )
     benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
     df_dict, benchmark_close = research_main.split_benchmark_from_universe(raw_df_dict, cfg.benchmark)

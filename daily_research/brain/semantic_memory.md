@@ -1,6 +1,6 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-02`
+快照日期：`2026-04-03`
 
 ## 1. 项目身份
 - `daily_research` 维护一条可运行、可复核、可回退的 A 股日频研究与执行链路。
@@ -18,18 +18,19 @@
 
 ## 3. 当前稳定默认
 - 每日默认执行策略：
-  - `deep_alpha dynamic_graph_v1 -> target_weight 直连桥 -> regoff_k2_10d_ensemble_native_anchor + liquid500 + next_open`
-  - 日常执行使用 `production full-fit` 根目录，而不是继续直接使用 formal holdout 冻结模型。
+  - `active_execution_strategy -> baseline_current_execfirst_winner`
+  - execution profile 固定为 `regoff_k2_10d_ensemble_native_anchor`
+  - 日常执行使用 `execution_aligned + production full-fit` 根目录，而不是继续直接使用 formal holdout 冻结模型。
 - 每日默认入口：
   - `daily_research/execution/run_trade_plan.py`
 - 每日默认输出：
   - `daily_research/execution/output/latest_trade_plan.txt`
 - 默认候选源文件：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_score_panel.csv`
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/daily_live_target_weight_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_score_panel.csv`
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_target_weight_panel.csv`
 - 默认入口会先按 `Retrain Monthly` 规则检查默认 production 候选是否已跨入新的自然月；若已跨月则先自动重训 production full-fit，否则只按已训练模型刷新默认候选 live 面板。
 - formal 研究证据单独保留在：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+  - `deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
 - production full-fit 证据边界：
   - 只用于日常执行与上线前重训，不得回填为 formal holdout 证据。
 
@@ -82,13 +83,13 @@
 ## 8. `deep_alpha` 架构 execution-objective 语义
 - `structure_context_only` 虽然是 raw holdout 里的最强多窗结构挑战者，但它已经在 execution-objective + realistic cost gate 里失败。
 - 当前稳定结论只认：
-  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1/summary.md`
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2/summary.md`
 - 在当前 `train_eval_auto + robust_composite + realistic cost` formal 口径下：
   - `baseline_current` 与 `structure_context_only` 都会选到 `regoff_k2_10d_ensemble_native_anchor`
   - 因此 `structure_context_only` 的落后不能再归因于“桥接 profile 选错”
   - `structure_context_only` 没有通过 execution-upgrade 门槛，不是当前默认执行升级答案
-  - `baseline_current + regoff_k2 execalign` 成为当前最值得继续推进的 execution-upgrade 候选
-- 但在 production full-fit 与独立 live / paper 证据补齐前，这条新候选也不能静默替换默认执行
+  - `baseline_current + regoff_k2 execalign` 已完成 formal 重跑、production full-fit promotion 与默认执行切换
+  - 当前默认执行与 formal winner 已经统一
 ## 9. `deep_alpha` 重训频率语义
 - `deep_alpha` 的重训频率结论已经有正式矩阵，不再只靠口头猜测。
 - 当前稳定结论只认：
@@ -128,6 +129,8 @@
   - 不再依赖硬编码默认 profile
   - 先读 `daily_research/output/active_execution_strategy.json`
   - active manifest 才是默认执行候选的单一真源
-- 当前 active manifest 是过渡态真相，不是最终研究判决：
-  - 现阶段 active strategy 只是把当前 legacy raw default 显式化
-  - 真正的 execution-first 默认 winner，要等下一次 formal 重跑和 promotion 完成后再更新
+- 当前 active manifest 已是正式真源：
+  - `strategy_name = baseline_current_execfirst_winner`
+  - `source_formal_run_dir = deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - `panel_mode = execution_aligned`
+  - 默认执行与 formal winner 现在共用同一 execution-first 语义

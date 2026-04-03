@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-02`
+快照日期：`2026-04-03`
 
 ## 1. 用途
 - 本文件解释项目为什么会演化成现在这条主线。
@@ -60,7 +60,8 @@
 
 ## 6. 当前方向
 - 执行侧：
-  - 继续以 `regoff_k2_10d_ensemble_native_anchor` 为每日默认
+  - 每日默认入口改为读取 `active_execution_strategy.json`
+  - 当前 active strategy 已正式解析到 `baseline_current_execfirst_winner`
   - 每日默认已切到 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
   - 继续以 `regon_k1_10d_ensemble_native_anchor` 为收益上沿对照
 - 桥接侧：
@@ -69,7 +70,8 @@
   - 继续做 cadence 与 ensemble 稳定化
 - 研究侧：
   - 继续以 `dynamic_graph_v1` 为主前沿
-  - `state_liquidity_listwise_v1` 已升格为下一条执行对齐候选
+  - `baseline_current + regoff_k2 execalign` 已完成 execution-first 正式上位
+  - `state_liquidity_listwise_v1` 保留为次一级 execution objective 对齐候选
   - 保留 `dynamic_graph_no_priors` 与 `dynamic_graph_topk4` 作为对照
   - 暂不继续扩张第一版 `short_target / short_input` 路线
 - 下一代家族只在图路线边际增益放缓后再开：

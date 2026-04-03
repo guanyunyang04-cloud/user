@@ -226,7 +226,7 @@ def _assess_model_freshness(
     trained_at = _safe_timestamp(artifact_meta.get("trained_at"))
     result: dict[str, Any] = {
         "status": "unknown",
-        "status_text": "未知",
+        "status_text": "unknown",
         "artifact_latest_data_date": str(latest_data_date.date()) if latest_data_date is not None else "",
         "trained_at": str(trained_at) if trained_at is not None else "",
         "trading_day_lag": None,
@@ -236,7 +236,7 @@ def _assess_model_freshness(
     }
 
     if latest_data_date is None:
-        result["warnings"].append("模型元数据缺少 latest_data_date，无法确认是否过期。")
+        result["warnings"].append("Model metadata is missing latest_data_date; freshness cannot be verified.")
         return result
 
     latest_signal_date = pd.Timestamp(latest_signal_date)
@@ -250,34 +250,40 @@ def _assess_model_freshness(
         trading_day_lag = None
 
     if trading_day_lag is None:
-        result["warnings"].append("无法用交易日历计算模型滞后天数，请人工确认模型是否最新。")
+        result["warnings"].append(
+            "Trading-calendar lag could not be computed; verify manually that the model is up to date."
+        )
         return result
 
     if trading_day_lag < 0:
         result["status"] = "future"
-        result["status_text"] = "数据日超前"
-        result["warnings"].append("模型 latest_data_date 晚于当前信号日，请检查数据口径。")
+        result["status_text"] = "future-dated"
+        result["warnings"].append(
+            "Model latest_data_date is later than the current signal date; check the data definition."
+        )
         return result
 
     if max_trading_days > 0 and trading_day_lag >= int(max_trading_days):
         result["status"] = "blocked"
-        result["status_text"] = "过期拦截"
+        result["status_text"] = "blocked"
         result["should_block"] = True
         result["warnings"].append(
-            f"模型 latest_data_date={latest_data_date.date()}，相对当前信号日滞后 {trading_day_lag} 个交易日，达到拦截阈值 {max_trading_days}。"
+            f"Model latest_data_date={latest_data_date.date()} lags the current signal date by "
+            f"{trading_day_lag} trading days, reaching the blocking threshold {max_trading_days}."
         )
         return result
 
     if warn_trading_days > 0 and trading_day_lag >= int(warn_trading_days):
         result["status"] = "warning"
-        result["status_text"] = "过期提醒"
+        result["status_text"] = "warning"
         result["warnings"].append(
-            f"模型 latest_data_date={latest_data_date.date()}，相对当前信号日滞后 {trading_day_lag} 个交易日，请优先先跑 update_model.py。"
+            f"Model latest_data_date={latest_data_date.date()} lags the current signal date by "
+            f"{trading_day_lag} trading days; run update_model.py as soon as possible."
         )
         return result
 
     result["status"] = "fresh"
-    result["status_text"] = "最新"
+    result["status_text"] = "fresh"
     return result
 
 
@@ -334,7 +340,7 @@ def _assess_external_model_retrain_freshness(
         launch_cutoff_date = pd.Timestamp(created_at).normalize()
     result: dict[str, Any] = {
         "status": "unknown",
-        "status_text": "未配置",
+        "status_text": "not-configured",
         "train_end_date": str(train_end_date.date()) if train_end_date is not None else "",
         "launch_cutoff_date": str(launch_cutoff_date.date()) if launch_cutoff_date is not None else "",
         "created_at": str(created_at) if created_at is not None else "",
@@ -352,23 +358,26 @@ def _assess_external_model_retrain_freshness(
     }
     if not manifest:
         result["warnings"].append(
-            f"未找到 production manifest：{manifest_path}；无法检查底层模型是否已超过月度重训节奏。"
+            f"Production manifest not found: {manifest_path}; cannot verify whether the underlying model is "
+            "past its monthly retrain cadence."
         )
         return result
     if train_end_date is None:
         result["warnings"].append(
-            f"production manifest 缺少 train_end_date：{manifest_path}；无法检查底层模型重训时效。"
+            f"Production manifest is missing train_end_date: {manifest_path}; cannot verify retrain freshness."
         )
         return result
     if launch_cutoff_date is None:
         result["warnings"].append(
-            f"production manifest 缺少 launch_cutoff_date：{manifest_path}；无法检查底层模型最近一次重训上线时效。"
+            f"Production manifest is missing launch_cutoff_date: {manifest_path}; cannot verify the freshness of "
+            "the latest retrain deployment."
         )
         return result
     if resolved_warn <= 0 and resolved_max <= 0:
-        result["status_text"] = "未设阈值"
+        result["status_text"] = "thresholds-missing"
         result["warnings"].append(
-            f"production manifest 未提供重训阈值：{manifest_path}；无法按研究结论检查月度重训时效。"
+            f"Production manifest does not provide retrain thresholds: {manifest_path}; cannot verify monthly "
+            "retrain freshness against research conclusions."
         )
         return result
 
@@ -385,7 +394,7 @@ def _assess_external_model_retrain_freshness(
     result.update(
         {
             "status": str(freshness.get("status", "unknown")),
-            "status_text": str(freshness.get("status_text", "未知")),
+            "status_text": str(freshness.get("status_text", "unknown")),
             "trading_day_lag": freshness.get("trading_day_lag"),
             "should_block": bool(freshness.get("should_block", False)),
         }
@@ -394,11 +403,15 @@ def _assess_external_model_retrain_freshness(
     latest_signal_text = str(pd.Timestamp(latest_signal_date).date())
     if freshness.get("status") == "warning":
         result["warnings"].append(
-            f"production full-fit 最近一次上线截止日={launch_cutoff_date.date()}，相对当前信号日 {latest_signal_text} 已滞后 {lag} 个交易日，达到月度重训提醒阈值 {resolved_warn}；建议尽快运行 daily_research/execution/update_default_candidate_production.py。"
+            f"Production full-fit last launch cutoff={launch_cutoff_date.date()} lags current signal date "
+            f"{latest_signal_text} by {lag} trading days, reaching the monthly retrain warning threshold "
+            f"{resolved_warn}; run daily_research/execution/update_default_candidate_production.py soon."
         )
     elif freshness.get("status") == "blocked":
         result["warnings"].append(
-            f"production full-fit 最近一次上线截止日={launch_cutoff_date.date()}，相对当前信号日 {latest_signal_text} 已滞后 {lag} 个交易日，达到重训拦截阈值 {resolved_max}；请先运行 daily_research/execution/update_default_candidate_production.py。"
+            f"Production full-fit last launch cutoff={launch_cutoff_date.date()} lags current signal date "
+            f"{latest_signal_text} by {lag} trading days, reaching the retrain blocking threshold "
+            f"{resolved_max}; run daily_research/execution/update_default_candidate_production.py first."
         )
     elif freshness.get("status") == "future":
         result["warnings"].extend(list(freshness.get("warnings", [])))
@@ -1177,6 +1190,28 @@ def _build_watchlist(
     return df.sort_values("final_score", ascending=False).head(top_n).reset_index(drop=True)
 
 
+_TERMINAL_ACTION_LABELS = {
+    "卖出": "Sell",
+    "减仓": "Trim",
+    "买入": "Buy",
+    "加仓": "Add",
+}
+
+_TERMINAL_REASON_LABELS = {
+    "调出目标组合": "Removed from target portfolio",
+    "目标仓位下降": "Target weight decreased",
+    "进入目标组合": "Entered target portfolio",
+    "目标仓位上升": "Target weight increased",
+}
+
+
+def _terminal_action_preview(action_df: pd.DataFrame) -> pd.DataFrame:
+    preview = action_df[["stock", "action", "shares", "price", "reason"]].copy()
+    preview["action"] = preview["action"].map(lambda value: _TERMINAL_ACTION_LABELS.get(str(value), str(value)))
+    preview["reason"] = preview["reason"].map(lambda value: _TERMINAL_REASON_LABELS.get(str(value), str(value)))
+    return preview
+
+
 def _apply_soft_state_overlay(
     *,
     args: argparse.Namespace,
@@ -1500,7 +1535,7 @@ def main():
     if not args.train_on_the_fly:
         if not artifact_path.exists():
             raise FileNotFoundError(
-                f"模型产物不存在: {artifact_path}。请先运行 daily_research/execution/update_model.py。"
+                f"Model artifact not found: {artifact_path}. Run daily_research/execution/update_model.py first."
             )
         artifact = load_ml_artifact(artifact_path)
         artifact_meta = _load_artifact_meta(artifact_path)
@@ -1510,12 +1545,12 @@ def main():
 
     if args.data_source == "tq":
         if not cfg.universe and cfg.universe_scope == "all_a":
-            print("[1/9] 正在从 TQ 加载全A股票池...")
+            print("[1/9] Loading all-A universe from TQ...")
             cfg.universe = load_universe_from_tq(cfg.universe_scope)
         elif not cfg.universe:
-            raise ValueError("TQ 模式下，未指定 --stocks 时目前仅支持 --universe-scope all_a。")
+            raise ValueError("TQ mode currently requires --universe-scope all_a when --stocks is not provided.")
     elif not args.csv_folder:
-        raise ValueError("CSV 模式需要提供 --csv-folder。")
+        raise ValueError("CSV mode requires --csv-folder.")
 
     history_window = resolve_history_window(
         cfg=cfg,
@@ -1526,10 +1561,10 @@ def main():
         auto_trim_history=not args.no_auto_trim_history,
     )
     print(
-        f"[2/9] 推理历史窗口: {history_window.effective_start_date} -> "
+        f"[2/9] Inference history window: {history_window.effective_start_date} -> "
         f"{history_window.end_date or 'latest'} | required_trading_days={history_window.required_trading_days}"
     )
-    print(f"[3/9] 正在准备行情数据，股票数: {len(cfg.universe)}，基准: {cfg.benchmark}")
+    print(f"[3/9] Preparing market data, stocks={len(cfg.universe)} benchmark={cfg.benchmark}")
     raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
         data_source=args.data_source,
         csv_folder=args.csv_folder,
@@ -1544,7 +1579,7 @@ def main():
         f"{raw_cache_meta['cache_path']}"
     )
 
-    print("[5/9] 正在读取当前账号快照...")
+    print("[5/9] Loading current account snapshot...")
     account_state = _load_account_state(args.positions_file)
     positions_df = account_state.positions_df
     if args.cash is not None:
@@ -1560,8 +1595,8 @@ def main():
         cash_source = "default_zero"
         cash_source_text = "未提供 account 行现金，按 0 处理"
         print(
-            "[warning] 当前 positions 文件未提供 account 行现金，且未传入 --cash；"
-            " 本次按 0 现金生成计划。"
+            "[warning] The current positions file has no account cash row and --cash was not provided; "
+            "build this plan with 0 cash."
         )
 
     prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
@@ -1580,12 +1615,12 @@ def main():
     style_map = None
     industry_map = None
     if cfg.enable_style_cap and args.data_source == "tq":
-        print("[7/9] 正在加载风格映射...")
+        print("[7/9] Loading style mapping...")
         style_map = load_style_map_from_tq(list(df_dict["Close"].columns))
     if cfg.enable_industry_cap and args.data_source == "tq":
         industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
 
-    print("[8/9] 正在计算先进版分数...")
+    print("[8/9] Computing advanced scores...")
     if args.train_on_the_fly:
         factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_on_the_fly(
             cfg, ml_cfg, prepared_bundle, style_map, industry_map
@@ -1655,18 +1690,20 @@ def main():
         )
         if not validation_summary:
             freshness_info.setdefault("warnings", []).append(
-                "模型元数据尚未包含 validation_summary，建议先运行 update_model.py 生成新产物。"
+                "Model metadata does not yet include validation_summary; run update_model.py to build a fresh artifact."
             )
         if freshness_info.get("should_block") and args.allow_stale_model:
-            freshness_info.setdefault("warnings", []).append("已使用 --allow-stale-model 放行过期模型，请谨慎执行。")
+            freshness_info.setdefault("warnings", []).append(
+                "stale model allowed by --allow-stale-model; proceed carefully."
+            )
         for warning in freshness_info.get("warnings", []):
             print(f"[warning] {warning}")
         if freshness_info.get("should_block") and not args.allow_stale_model:
             raise RuntimeError(
-                "模型已达到过期拦截阈值。"
+                "Model freshness reached the blocking threshold."
                 f" latest_data_date={freshness_info.get('artifact_latest_data_date', '')},"
-                f" trading_day_lag={freshness_info.get('trading_day_lag')}。"
-                "请先运行 daily_research/execution/update_model.py；如确需继续，可显式传入 --allow-stale-model。"
+                f" trading_day_lag={freshness_info.get('trading_day_lag')}."
+                " Run daily_research/execution/update_model.py first, or pass --allow-stale-model explicitly."
             )
         model_info.update(
             {
@@ -1678,7 +1715,7 @@ def main():
             }
         )
 
-    print("[9/9] 正在生成盘后策略与次日开盘执行建议...")
+    print("[9/9] Building the post-close plan and next-open execution suggestions...")
     target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
         args=args,
         regime_state=regime_state,
@@ -1736,7 +1773,7 @@ def main():
     action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
     watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")
 
-    print("正在写入输出文件...")
+    print("Writing output files...")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     run_name = args.experiment_tag.strip() or signal_date.strftime("%Y%m%d")
@@ -1776,12 +1813,12 @@ def main():
     with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
-    print(f"输出目录: {run_dir}")
-    print(f"最新建议文件: {latest_txt_path}")
+    print(f"output_dir={run_dir}")
+    print(f"latest_plan_file={latest_txt_path}")
     if not action_df.empty:
-        print(action_df[["stock", "action", "shares", "price", "reason"]].to_string(index=False))
+        print(_terminal_action_preview(action_df).to_string(index=False))
     else:
-        print("今日无明确调仓动作。")
+        print("No rebalance action for today.")
 
 
 def main_with_progress():
@@ -1853,8 +1890,8 @@ def main_with_progress():
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
 
-    with StageProgress(total=9, label="交易计划流程") as progress:
-        with progress.stage("准备模型与研究宇宙", f"source={args.data_source}"):
+    with StageProgress(total=9, label="Trade plan") as progress:
+        with progress.stage("Prepare model and research universe", f"source={args.data_source}"):
             if external_score_path is not None or external_target_weight_path is not None:
                 if args.train_on_the_fly:
                     raise ValueError("--external-score-csv / --external-target-weight-csv cannot be combined with --train-on-the-fly.")
@@ -1882,7 +1919,7 @@ def main_with_progress():
             elif not args.csv_folder:
                 raise ValueError("CSV mode requires --csv-folder.")
 
-        with progress.stage("解析推理历史窗口", args.start_date):
+        with progress.stage("Resolve inference history window", args.start_date):
             history_window = resolve_history_window(
                 cfg=cfg,
                 ml_cfg=effective_ml_cfg,
@@ -1896,7 +1933,7 @@ def main_with_progress():
                 f"{history_window.end_date or 'latest'} | required_trading_days={history_window.required_trading_days}"
             )
 
-        with progress.stage("读取市场行情", f"stocks={len(cfg.universe)} benchmark={cfg.benchmark}"):
+        with progress.stage("Load market data", f"stocks={len(cfg.universe)} benchmark={cfg.benchmark}"):
             raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
                 data_source=args.data_source,
                 csv_folder=args.csv_folder,
@@ -1905,14 +1942,14 @@ def main_with_progress():
                 history_window=history_window,
                 use_cache=not args.no_cache,
                 refresh_cache=args.refresh_cache,
-                progress_desc="读取交易计划行情",
+                progress_desc="Load trade-plan market data",
                 progress_position=1,
             )
             progress.log(
                 f"raw cache: {'hit' if raw_cache_meta['cache_hit'] else 'build'} | {raw_cache_meta['cache_path']}"
             )
 
-        with progress.stage("读取账户快照", Path(args.positions_file).name):
+        with progress.stage("Load account snapshot", Path(args.positions_file).name):
             account_state = _load_account_state(args.positions_file)
             positions_df = account_state.positions_df
             if args.cash is not None:
@@ -1931,7 +1968,7 @@ def main_with_progress():
                     "[warning] positions file has no account cash row and --cash was not provided; fallback to 0."
                 )
 
-        with progress.stage("构建研究缓存输入", effective_profile):
+        with progress.stage("Build prepared research inputs", effective_profile):
             prepared_bundle, prepared_cache_meta = build_prepared_bundle_with_cache(
                 raw_df_dict=raw_df_dict,
                 raw_cache_key=raw_cache_meta["cache_key"],
@@ -1946,7 +1983,7 @@ def main_with_progress():
             )
             df_dict = prepared_bundle["df_dict"]
 
-        with progress.stage("加载约束映射", "industry/style"):
+        with progress.stage("Load constraint mappings", "industry/style"):
             style_map = None
             industry_map = None
             if cfg.enable_style_cap and args.data_source == "tq":
@@ -1954,7 +1991,7 @@ def main_with_progress():
             if cfg.enable_industry_cap and args.data_source == "tq":
                 industry_map = load_industry_map_from_tq(list(df_dict["Close"].columns))
 
-        with progress.stage("计算组合分数", "artifact/live/external"):
+        with progress.stage("Compute portfolio scores", "artifact/live/external"):
             if external_target_weight_path is not None:
                 (
                     factor_bundle,
@@ -2172,7 +2209,7 @@ def main_with_progress():
                     }
                 )
 
-        with progress.stage("生成交易计划数据", cfg.rebalance_freq):
+        with progress.stage("Build trade-plan data", cfg.rebalance_freq):
             signal_date = final_score_raw.dropna(how="all").index.max()
             if pd.isna(signal_date):
                 raise RuntimeError("No valid latest date found for trade plan generation.")
@@ -2226,7 +2263,9 @@ def main_with_progress():
                     warnings = list(model_info.get("warnings", []))
                     warnings.extend(retrain_info.get("warnings", []))
                     if retrain_info.get("should_block") and args.allow_stale_model:
-                        warnings.append("已使用 --allow-stale-model 放行过期 production 重训节奏，请谨慎执行。")
+                        warnings.append(
+                            "stale production retrain cadence allowed by --allow-stale-model; proceed carefully."
+                        )
                     for warning in retrain_info.get("warnings", []):
                         progress.log(f"[warning] {warning}")
                     if retrain_info.get("should_block") and not args.allow_stale_model:
@@ -2331,7 +2370,7 @@ def main_with_progress():
             action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
             watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")
 
-        with progress.stage("写出执行文件", "txt/csv/json"):
+        with progress.stage("Write execution files", "txt/csv/json"):
             output_dir = Path(args.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             run_name = args.experiment_tag.strip() or signal_date.strftime("%Y%m%d")
@@ -2371,12 +2410,12 @@ def main_with_progress():
             with open(run_dir / "plan_summary.json", "w", encoding="utf-8") as f:
                 json.dump(summary, f, ensure_ascii=False, indent=2)
 
-    print(f"输出目录: {run_dir}")
-    print(f"最新建议文件: {latest_txt_path}")
+    print(f"output_dir={run_dir}")
+    print(f"latest_plan_file={latest_txt_path}")
     if not action_df.empty:
-        print(action_df[["stock", "action", "shares", "price", "reason"]].to_string(index=False))
+        print(_terminal_action_preview(action_df).to_string(index=False))
     else:
-        print("今日无明确调仓动作。")
+        print("No rebalance action for today.")
 
 
 main = main_with_progress
