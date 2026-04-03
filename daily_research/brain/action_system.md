@@ -183,8 +183,20 @@
 - 当前正式输出：
   - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1`
 - 当前多窗结论：
-  - `structure_context_only` 是当前最可信的多窗稳健升级方向
+  - `structure_context_only` 是当前最可信的 raw holdout 多窗稳健升级方向
   - `graph_off_plain` 与 `depth_shallow_l1` 也有增益，但仍先保留为研究对照
+
+### 运行 architecture execution-objective 三窗 formal head-to-head
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+- 当前正式输出：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1`
+- 当前 execution-objective 结论：
+  - `structure_context_only` 的 raw 优势没有穿过 `train_eval_auto + robust_composite + realistic cost` gate
+  - `baseline_current + regoff_k2 execalign` 是当前 recent execution-upgrade 候选
+  - 但在 production full-fit 与独立 live / paper 复核前，不直接替换默认执行
 
 ### 运行 `deep_alpha` 重训频率 formal 矩阵
 ```powershell

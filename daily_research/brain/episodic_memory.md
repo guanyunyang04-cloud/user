@@ -9343,3 +9343,110 @@ position,000001.SZ,1200,12.38,
 3. 单纯加大容量、继续加深网络、或直接切到 vanilla `transformer` / `mamba`，都没有形成可信升级路径。
 4. `structure_context_only` 是当前最值得继续推进的结构方向：recent 窗口收益接近基线但 Sharpe 更高，多窗口均值和稳健性也明显更强。
 5. 这条结论目前只进入研究判断与下一步研究优先级，还没有直接静默同步到默认执行；下一步应先做 execution objective 与显式成本下的 head-to-head。
+
+## 2026-04-03 `deep_alpha` 架构 execution-objective + realistic cost formal head-to-head
+
+### 背景
+- 上一轮 raw 架构实验已经说明：
+  - `structure_context_only` 是当前最强多窗结构挑战者
+  - 但它还没有经过 execution objective 与显式成本 gate
+- 因此这次把“raw 研究优势”真正接到执行侧协议上，验证它能不能穿过：
+  - `train_eval_auto`
+  - `robust_composite`
+  - realistic cost
+
+### 代码改动
+- 新增：
+  - `daily_research/deep_alpha/run_architecture_execution_objective_head2head.py`
+- 修正：
+  - `daily_research/deep_alpha/execution_alignment.py`
+- 这次修正点不是改默认执行，而是修 formal 多窗研究边界：
+  - 当 `regoff/regon` 的锚点日期晚于旧窗口交易日历时，execution_alignment 会在该窗口内自动回落到首个可用交易日
+  - 这样老窗口也能复用同一 execution profile 定义，不影响当前默认执行入口
+
+### 协议
+- 比较对象：
+  - `baseline_current`
+  - `structure_context_only`
+- formal 窗口：
+  - `20230216_20240229`
+  - `20240301_20250317`
+  - `20250318_20260331`
+- 模型侧固定：
+  - `liquid500`
+  - `top_bottom_bce`
+  - `manual score head`
+  - `next_open`
+- execution-objective 固定：
+  - `train_eval_auto`
+  - `objective = robust_composite`
+  - candidate profiles:
+    - `raw_1d`
+    - `topk2_1d_regoff`
+    - `regoff_k2_10d_ensemble_native_anchor`
+    - `regon_k1_10d_ensemble_native_anchor`
+- realistic cost 固定：
+  - transaction `3 bps`
+  - slippage `7 bps`
+  - sell-tax `10 bps`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1`
+
+### 结果一：`structure_context_only` 的 raw 优势没有穿过 execution-objective gate
+- raw 三窗均值：
+  - `baseline_current = 14.61% / 0.448`
+  - `structure_context_only = 27.66% / 1.448`
+- 但 execution-objective aligned holdout 三窗均值变成：
+  - `baseline_current = 21.43% / 1.330`
+  - `structure_context_only = 2.81% / 0.235`
+- realistic external replay 三窗均值进一步确认：
+  - `baseline_current = 15.15% / 0.872`
+  - `structure_context_only = 2.09% / 0.205`
+- `structure_context_only` 只在 `20240301_20250317` 这一窗短暂胜出，其余窗口都落后
+
+### 结果二：这次落后不是因为 execution bridge 选错
+- 两个模型在三窗里最终都选到了同一个 execution profile：
+  - `regoff_k2_10d_ensemble_native_anchor`
+- 因此这轮输赢已经不再能解释成：
+  - `structure_context_only` 只是 auto alignment 选错桥接 profile
+- 更准确的解释是：
+  - `structure_context_only` 的 raw 信号优势经同一 bridge 映射到执行侧后，没有稳定保留
+
+### 结果三：recent 窗口里，`structure_context_only` 也没过升级门槛
+- recent realistic replay：
+  - `structure_execalign_realistic = 27.36% / 12.86% / 0.921 / -10.89%`
+  - `baseline_execalign_realistic = 73.35% / 53.61% / 3.134 / -7.03%`
+  - `regoff_k2_realistic = 44.12% / 25.75% / 1.722 / -8.55%`
+- 因此在真正要决定“能不能升级到执行侧”的 recent 口径里：
+  - `structure_context_only` 同时输给 `baseline_current execalign`
+  - 也输给当前默认 `regoff_k2_realistic`
+
+### 结果四：recent 弱窗复核也没有帮 `structure_context_only` 翻案
+- `structure_execalign_realistic` 对当前默认 `regoff_k2_realistic` 的 named-window H2H：
+  - `full_available + year + bridge + weak_window` 五个窗口全部落后
+  - `weak_window_20250905` 的差距更大：
+    - excess annual delta `-41.53%`
+    - excess Sharpe delta `-2.382`
+- `structure_execalign_realistic` 对 `baseline_execalign_realistic` 的 named-window H2H：
+  - 也是五个窗口全部落后
+  - `weak_window_20250905` 进一步拉开到：
+    - excess annual delta `-84.69%`
+    - excess Sharpe delta `-4.119`
+
+### 结果五：真正冒出来的新信号其实是 `baseline_current + regoff_k2 execalign`
+- recent named-window H2H 里：
+  - `baseline_execalign_realistic` 对当前默认 `regoff_k2_realistic` 五个窗口全部取胜
+  - full_available:
+    - excess annual delta `+16.91%`
+    - excess Sharpe delta `+0.645`
+  - `weak_window_20250905`:
+    - excess annual delta `+44.97%`
+    - excess Sharpe delta `+1.793`
+- 这说明 architecture 线真正值得继续推进的不是 `structure_context_only` 升格，而是：
+  - `baseline_current` 接上 execution objective 后，recent execution candidate 质量明显抬升
+
+### 当前结论
+1. `structure_context_only` 作为 raw 架构挑战者成立，但作为 execution-upgrade 候选目前失败，不应继续按“差一步就能上线”的心智去推进。
+2. 这次失败不是桥接 profile 选错，而是它的 raw 结构优势没有稳定穿过同一条 `regoff_k2` 执行映射。
+3. 当前 architecture 线最值得继续推进的新候选已经从 `structure_context_only` 切换为 `baseline_current + regoff_k2 execalign`。
+4. 但这条新候选仍然只完成了 recent realistic 与 named-window H2H；在 production full-fit 与独立 live / paper 证据补齐前，不能静默替换默认执行。

@@ -35,6 +35,10 @@
   - `dynamic_graph_v1`
 - 当前多窗稳健结构挑战者：
   - `structure_context_only`
+  - 仅限 raw holdout 研究侧；尚未通过 execution objective + 显式成本升级门槛
+- 当前 execution-objective recent 升级候选：
+  - `baseline_current + regoff_k2_10d_ensemble_native_anchor`
+  - 已在 recent realistic H2H 中明显强于当前默认 `regoff_k2_realistic`，但还不是默认执行
 - `short_alpha` 首轮容量优胜项：
   - `state_liquidity_listwise_v1`
 - 结构确认对照：
@@ -84,21 +88,40 @@
   - `structure_context_only = 27.66% / 1.448`，相对基线 `14.61% / 0.448`，超额年化 `2/3` 窗取胜，Sharpe `3/3` 窗取胜
   - `graph_off_plain` 与 `depth_shallow_l1` 也提高了多窗均值，但最近窗口收益仍落后于基线
   - `capacity_large_h160` 多窗均值几乎只与基线打平，`depth_deep_l4` 仍不成立
+- `deep_alpha` 架构 execution-objective 三窗 formal head-to-head 已完成：
+  - 协议固定为 `train_eval_auto + robust_composite + realistic cost (3 / 7 / 10 bps)`
+  - `baseline_current` 与 `structure_context_only` 三窗都选到了同一 execution bridge：`regoff_k2_10d_ensemble_native_anchor`
+  - 因此这轮输赢不能再解释成“structure 只是桥没选对”
+  - 三窗均值上，`baseline_current` 明显强于 `structure_context_only`
+  - aligned holdout：`21.43% / 1.330` 对 `2.81% / 0.235`
+  - realistic external replay：`15.15% / 0.872` 对 `2.09% / 0.205`
+  - `structure_context_only` 只在 `20240301_20250317` 这一窗短暂取胜，其余窗口都落后
+- `structure_context_only` 在 recent 窗口的 raw 研究优势没有穿过 execution objective：
+  - raw recent：`54.58% / 3.000`
+  - realistic replay recent：`12.86% / 0.921`
+  - 对照 `baseline_current` realistic replay recent：`53.61% / 3.134`
+- recent named-window H2H 还出现了新的执行侧信号：
+  - `baseline_execalign_realistic` 相对当前默认 `regoff_k2_realistic` 在 `full_available + year + bridge + weak_window` 五个窗口全部取胜
+  - 但这条线还没有 production full-fit 与独立 live 证据，因此当前只升格为“下一优先升级候选”，不直接替换默认执行
 - 因此当前瓶颈更像“上下文与收益排序耦合不足”，不是“先随手加更多短线标签和更多日线输入”。
-- 因此架构主结论也同步明确为：默认方向不是“继续堆复杂度 / 堆深度”，而是优先验证 `structure_context_only` 这类低增参结构增强。
+- 因此架构主结论也同步明确为：默认方向不是“继续堆复杂度 / 堆深度”。
+ - raw 架构层面，`structure_context_only` 仍是最值得保留的低增参结构挑战者。
+ - 但 execution-objective gate 已经说明：`structure_context_only` 的 raw 结构优势目前没有自然传导到执行侧。
+ - 当前真正应优先推进的执行升级候选，已经切换为 `baseline_current + regoff_k2 execalign`。
 
 ## 4. 当前研究优先级
-1. 把 `structure_context_only` 接入 execution objective，做显式成本下的 head-to-head。
-2. 把 `state_liquidity_listwise_v1` 接入 execution objective，做显式成本下的 head-to-head。
-3. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
-4. 把 `graph_off_plain` 与 `depth_shallow_l1` 保留为稳健结构对照，不直接升格为默认执行候选。
-5. 不再把“继续加大 `hidden_dim` / 继续加深层数 / 直接切 vanilla `transformer` 或 `mamba`”当作当前默认研发主方向。
-6. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
-7. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
-8. 继续回看 `state_liquidity_listwise_v1` 的第一弱窗，必要时只做弱窗修复型小消融，而不是重开大矩阵。
-9. 只有在图路线边际增益放缓后，才打开 `state-conditioned MoE`。
-10. RL 继续留在 `t0_project` 的执行层范围内，不进入当前默认日频 alpha 主线。
-11. 任何后续默认候选升格，都必须同时给出：
+1. 把 `baseline_current + regoff_k2 execalign` 推到 production-style full-fit / candidate 升级比较，因为它已在 recent realistic named-window H2H 中明显强于当前默认 `regoff_k2_realistic`。
+2. `structure_context_only` 暂不继续升格执行候选；如需继续，只允许围绕“为什么 raw 优势经 `regoff_k2` bridge 后消失”做小诊断，不重开大矩阵。
+3. 把 `state_liquidity_listwise_v1` 接入 execution objective，做显式成本下的 head-to-head。
+4. 继续把 `dynamic_graph_v1` 向 execution objective 对齐，不回头拧旧翻译器。
+5. 把 `graph_off_plain` 与 `depth_shallow_l1` 保留为稳健结构对照，不直接升格为默认执行候选。
+6. 不再把“继续加大 `hidden_dim` / 继续加深层数 / 直接切 vanilla `transformer` 或 `mamba`”当作当前默认研发主方向。
+7. 把 `no_priors` 与 `topk4` 保留为研究对照，不升格为默认执行候选。
+8. `short_target_v1`、`short_input_v1`、`short_combo_v1` 先降级，不作为当前默认研发主线；除非后续引入更直接的执行目标或更强的盘中/竞价信息。
+9. 继续回看 `state_liquidity_listwise_v1` 的第一弱窗，必要时只做弱窗修复型小消融，而不是重开大矩阵。
+10. 只有在图路线边际增益放缓后，才打开 `state-conditioned MoE`。
+11. RL 继续留在 `t0_project` 的执行层范围内，不进入当前默认日频 alpha 主线。
+12. 任何后续默认候选升格，都必须同时给出：
   - formal holdout winner 证据
   - production full-fit 重训版
   - 上线后的独立 live / paper 新样本

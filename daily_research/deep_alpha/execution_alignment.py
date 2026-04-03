@@ -134,6 +134,17 @@ def list_profile_lines() -> list[str]:
     return lines
 
 
+def _resolve_window_anchor_date(index: pd.Index, rebalance_anchor_date: str) -> str:
+    raw = str(rebalance_anchor_date or "").strip()
+    if not raw or len(index) == 0:
+        return raw
+    dt_index = pd.DatetimeIndex(index)
+    anchor_ts = pd.Timestamp(raw)
+    if anchor_ts > dt_index.max():
+        return str(pd.Timestamp(dt_index[0]).date())
+    return raw
+
+
 def _build_exec_cfg(
     *,
     benchmark: str,
@@ -285,12 +296,13 @@ def evaluate_profile(
     sell_tax_bps: float,
     profile: ExecutionAlignmentProfile,
 ) -> tuple[dict[str, float], pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    resolved_anchor_date = _resolve_window_anchor_date(raw_target_weights.index, profile.rebalance_anchor_date)
     aligned_target_weights, bridge_meta = build_target_weight_bridge(
         raw_target_weights,
         rebalance_freq=profile.rebalance_freq,
         rebalance_offset=0,
         rebalance_offset_mode=profile.rebalance_offset_mode,
-        rebalance_anchor_date=profile.rebalance_anchor_date,
+        rebalance_anchor_date=resolved_anchor_date,
         top_k=profile.target_weight_top_k,
         min_weight=profile.target_weight_min_weight,
         power=profile.target_weight_power,
@@ -301,7 +313,7 @@ def evaluate_profile(
         rebalance_freq=profile.rebalance_freq,
         rebalance_offset=0,
         rebalance_offset_mode=profile.rebalance_offset_mode,
-        rebalance_anchor_date=profile.rebalance_anchor_date,
+        rebalance_anchor_date=resolved_anchor_date,
     )
     exec_cfg = _build_exec_cfg(
         benchmark=benchmark,

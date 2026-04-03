@@ -46,6 +46,8 @@
   - `deep_alpha dynamic_graph_v1`
 - 当前多窗最强结构挑战者：
   - `structure_context_only`
+- 当前最值得继续推进的 execution-upgrade 候选：
+  - `baseline_current + regoff_k2 execalign`
 - 当前默认执行候选：
   - `regoff_k2_10d_ensemble_native_anchor`
   - 日常计划标签：`dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit`
@@ -71,13 +73,23 @@
 - 在当前 `liquid500 + top_bottom_bce + manual score head + next_open` formal 口径下：
   - 默认前沿仍是 `dynamic_graph_v1 / baseline_current`
   - “继续堆参数量 / 堆层数 / 切 vanilla transformer 或 mamba”不是默认升级方向
-  - `structure_context_only` 是当前最可信的多窗稳健结构升级候选
+  - `structure_context_only` 是当前最可信的 raw holdout 多窗稳健结构挑战者
   - `graph_off_plain` 与 `depth_shallow_l1` 是有效对照，但还不是默认升格答案
 - 因此：
-  - 架构线下一步优先做 `structure_context_only` 的 execution-objective / 显式成本比较
-  - 在完成显式成本外部回放前，不把它静默切进默认执行
+  - 这一步 `structure_context_only` 的 execution-objective / 显式成本比较已经完成
+  - raw 结构升级结论不能直接外推成执行升级结论
 
-## 8. `deep_alpha` 重训频率语义
+## 8. `deep_alpha` 架构 execution-objective 语义
+- `structure_context_only` 虽然是 raw holdout 里的最强多窗结构挑战者，但它已经在 execution-objective + realistic cost gate 里失败。
+- 当前稳定结论只认：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1/summary.md`
+- 在当前 `train_eval_auto + robust_composite + realistic cost` formal 口径下：
+  - `baseline_current` 与 `structure_context_only` 都会选到 `regoff_k2_10d_ensemble_native_anchor`
+  - 因此 `structure_context_only` 的落后不能再归因于“桥接 profile 选错”
+  - `structure_context_only` 没有通过 execution-upgrade 门槛，不是当前默认执行升级答案
+  - `baseline_current + regoff_k2 execalign` 成为当前最值得继续推进的 execution-upgrade 候选
+- 但在 production full-fit 与独立 live / paper 证据补齐前，这条新候选也不能静默替换默认执行
+## 9. `deep_alpha` 重训频率语义
 - `deep_alpha` 的重训频率结论已经有正式矩阵，不再只靠口头猜测。
 - 当前稳定结论只认：
   - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1/frequency_summary_common_window.csv`
@@ -93,7 +105,7 @@
   - 未跨月时只刷新 `daily_live_*` 面板；
   - 底层模型仍保留 `21` 个交易日提醒与 `63` 个交易日拦截护栏。
 
-## 9. 建议阅读顺序
+## 10. 建议阅读顺序
 1. `semantic_memory.md`
 2. `working_memory.md`
 3. `action_system.md`
