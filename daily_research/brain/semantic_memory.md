@@ -111,3 +111,23 @@
 3. `action_system.md`
 4. `project_map.md`
 5. `episodic_memory.md`
+
+## 11. Execution-First Stable Semantics
+- `deep_alpha` 的稳定主目标定义为：
+  - maximize after-cost executable net profit
+  - not maximize raw holdout score in isolation
+- 研究默认协议现在固定为：
+  - `research_objective_mode = execution_first`
+  - `execution_alignment_mode = train_eval_auto`
+  - `execution_alignment_objective = robust_composite`
+  - realistic cost = `3 / 7 / 10 bps`
+- production promotion 的稳定语义现在固定为：
+  - 必须继承研究赢家的 execution-alignment 配置，而不是只复制模型结构参数
+  - promotion 完成后必须同时刷新 `active_execution_strategy.json`
+- 默认执行的稳定语义现在固定为：
+  - 不再依赖硬编码默认 profile
+  - 先读 `daily_research/output/active_execution_strategy.json`
+  - active manifest 才是默认执行候选的单一真源
+- 当前 active manifest 是过渡态真相，不是最终研究判决：
+  - 现阶段 active strategy 只是把当前 legacy raw default 显式化
+  - 真正的 execution-first 默认 winner，要等下一次 formal 重跑和 promotion 完成后再更新

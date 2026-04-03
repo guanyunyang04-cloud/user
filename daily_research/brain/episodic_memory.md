@@ -9450,3 +9450,69 @@ position,000001.SZ,1200,12.38,
 2. 这次失败不是桥接 profile 选错，而是它的 raw 结构优势没有稳定穿过同一条 `regoff_k2` 执行映射。
 3. 当前 architecture 线最值得继续推进的新候选已经从 `structure_context_only` 切换为 `baseline_current + regoff_k2 execalign`。
 4. 但这条新候选仍然只完成了 recent realistic 与 named-window H2H；在 production full-fit 与独立 live / paper 证据补齐前，不能静默替换默认执行。
+
+## 2026-04-03 execution-first 项目级统一修正
+
+### 背景
+- 用户明确要求把“执行后净收益最大”直接变成模型学习目标，不接受研究端和执行端继续分裂。
+- 这次不再做最小修补，而是按项目级统一目标整理主链：
+  - 训练目标统一
+  - production promotion 统一
+  - 默认执行真源统一
+
+### 代码改动
+- 新增 `daily_research/deep_alpha/research_objective.py`
+  - 固定 `execution_first` 默认协议
+  - 提供 primary backtest / checkpoint metric 解析
+- 改造 `daily_research/deep_alpha/trainer.py`
+  - best checkpoint 不再被迫只看 `valid_loss`
+  - 支持通过 callback 按 primary research backtest 选择 checkpoint
+- 改造 `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 默认 `research_objective_mode = execution_first`
+  - 默认 `execution_alignment_mode = train_eval_auto`
+  - 默认 `execution_alignment_objective = robust_composite`
+  - 默认 realistic cost = `3 / 7 / 10 bps`
+  - metrics 里新增 `primary_research_backtest*` 语义
+- 改造多个 matrix runner
+  - 统一从 `primary_research_backtest` 读取 winner 指标，不再硬编码只读 raw `holdout_backtest`
+- 新增 `daily_research/execution/strategy_manifest.py`
+  - 提供 `active_execution_strategy.json` 的读写与构建
+- 改造 `daily_research/execution/research_candidate_profiles.py`
+  - 默认执行 profile 改为 manifest-driven
+  - 当 active manifest 存在时，`default` 自动解析成 `active_execution_strategy`
+- 改造 `daily_research/execution/update_default_candidate_production.py`
+  - production full-fit 重训命令会透传 execution-first 研究目标
+  - 会透传 execution alignment 配置与 realistic cost
+  - promotion 完成后可直接写入 `active_execution_strategy.json`
+
+### 当前状态
+- 已用现有 source/prod 产物写出：
+  - `daily_research/output/active_execution_strategy.json`
+- 已确认默认执行入口现在读取：
+  - `active_execution_strategy`
+- 但这仍是过渡态：
+  - 当前 formal source `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 仍是旧 raw 口径 run
+  - 所以 active manifest 现在只是把当前 legacy raw default 显式化，不代表 execution-first 新 winner 已经正式产生
+
+### 验证
+- `py_compile` 通过：
+  - `research_objective.py`
+  - `trainer.py`
+  - `run_deep_alpha_research.py`
+  - 各 formal matrix runner
+  - `strategy_manifest.py`
+  - `research_candidate_profiles.py`
+  - `update_default_candidate_production.py`
+- `run_trade_plan.py --list-candidate-profiles` 通过：
+  - `default=active_execution_strategy`
+- `update_default_candidate_production.py --help` 通过
+- 默认执行烟测通过：
+  - `run_trade_plan.py`
+  - 输出正常
+  - `candidate_profile=active_execution_strategy`
+
+### 当前结论
+1. 研究端与执行端的统一主链已经在代码层接通。
+2. 现在研究 winner 可以被定义为“真实执行后净收益最大”，而不是“raw holdout 看起来最强”。
+3. 默认执行也已经不再依赖硬编码 profile，而是依赖 `active_execution_strategy.json`。
+4. 真正还没完成的只剩最后一步：用新协议重跑 formal winner，再做一次正式 promotion，让 active strategy 从“legacy raw default 显式化”升级为“execution-first winner 正式上位”。

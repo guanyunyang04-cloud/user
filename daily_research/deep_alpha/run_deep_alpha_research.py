@@ -56,6 +56,20 @@ from daily_research.deep_alpha.pipeline_utils import (
 )
 from daily_research.deep_alpha.risk_gate import apply_state_risk_gate, fit_state_risk_gate
 from daily_research.deep_alpha.runtime_profile import configure_torch_runtime, resolve_runtime_profile
+from daily_research.deep_alpha.research_objective import (
+    DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    DEFAULT_EXECUTION_ALIGNMENT_MODE,
+    DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE,
+    DEFAULT_EXECUTION_ALIGNMENT_SELL_TAX_BPS,
+    DEFAULT_EXECUTION_ALIGNMENT_SLIPPAGE_BPS,
+    DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS,
+    DEFAULT_RESEARCH_OBJECTIVE_MODE,
+    resolve_checkpoint_metric_name,
+    resolve_checkpoint_metric_value,
+    resolve_primary_backtest,
+    resolve_primary_backtest_label,
+    resolve_primary_panel_mode,
+)
 from daily_research.deep_alpha.score_head import apply_score_head, fit_score_head
 from daily_research.deep_alpha.sequence_dataset import (
     DateGroupedBatchSampler,
@@ -187,13 +201,38 @@ def parse_args():
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
-    parser.add_argument("--execution-alignment-transaction-cost-bps", type=float, default=0.0)
-    parser.add_argument("--execution-alignment-slippage-bps", type=float, default=0.0)
-    parser.add_argument("--execution-alignment-sell-tax-bps", type=float, default=0.0)
+    parser.add_argument(
+        "--research-objective-mode",
+        choices=["execution_first", "raw_holdout"],
+        default=DEFAULT_RESEARCH_OBJECTIVE_MODE,
+        help="Primary research winner objective. execution_first promotes after-cost executed profit over raw holdout metrics.",
+    )
+    parser.add_argument(
+        "--checkpoint-selection-objective",
+        choices=["valid_loss", "primary_annual_return", "primary_excess_annual_return", "primary_excess_sharpe"],
+        default=DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+        help="Criterion used to keep the best training checkpoint. primary_* objectives are evaluated on the primary research backtest.",
+    )
+    parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=1e-4)
+    parser.add_argument(
+        "--execution-alignment-transaction-cost-bps",
+        type=float,
+        default=DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS,
+    )
+    parser.add_argument(
+        "--execution-alignment-slippage-bps",
+        type=float,
+        default=DEFAULT_EXECUTION_ALIGNMENT_SLIPPAGE_BPS,
+    )
+    parser.add_argument(
+        "--execution-alignment-sell-tax-bps",
+        type=float,
+        default=DEFAULT_EXECUTION_ALIGNMENT_SELL_TAX_BPS,
+    )
     parser.add_argument(
         "--execution-alignment-mode",
         choices=["off", "profile", "train_eval_auto"],
-        default="off",
+        default=DEFAULT_EXECUTION_ALIGNMENT_MODE,
         help="Optional train-side execution-objective alignment applied after raw target-weight construction.",
     )
     parser.add_argument(
@@ -204,7 +243,7 @@ def parse_args():
     parser.add_argument(
         "--execution-alignment-objective",
         choices=["excess_annual_return", "excess_sharpe", "robust_composite"],
-        default="robust_composite",
+        default=DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE,
         help="Train-side selection objective used by --execution-alignment-mode=train_eval_auto.",
     )
     parser.add_argument(
@@ -533,6 +572,305 @@ def _build_live_execution_aligned_outputs(
         "target_weights": aligned_target_weights,
         "metrics": metrics,
         "meta": meta,
+    }
+
+
+def _summarize_structure_outputs(pred_df: pd.DataFrame) -> tuple[dict[str, Any], dict[str, Any]]:
+    structure_aux_summary: dict[str, Any] = {}
+    if {"structure_id", "pred_structure_id"}.issubset(pred_df.columns):
+        valid_structure = pred_df["structure_id"].notna() & pred_df["pred_structure_id"].notna()
+        if bool(valid_structure.any()):
+            structure_aux_summary = {
+                "structure_aux_accuracy": float(
+                    (
+                        pred_df.loc[valid_structure, "structure_id"].astype(int)
+                        == pred_df.loc[valid_structure, "pred_structure_id"].astype(int)
+                    ).mean()
+                ),
+                "structure_aux_samples": int(valid_structure.sum()),
+            }
+    structure_prototype_summary: dict[str, Any] = {}
+    if {"structure_id", "pred_prototype_structure_id"}.issubset(pred_df.columns):
+        valid_proto = pred_df["structure_id"].notna() & pred_df["pred_prototype_structure_id"].notna()
+        if bool(valid_proto.any()):
+            structure_prototype_summary = {
+                "structure_prototype_accuracy": float(
+                    (
+                        pred_df.loc[valid_proto, "structure_id"].astype(int)
+                        == pred_df.loc[valid_proto, "pred_prototype_structure_id"].astype(int)
+                    ).mean()
+                ),
+                "structure_prototype_samples": int(valid_proto.sum()),
+            }
+    return structure_aux_summary, structure_prototype_summary
+
+
+def _evaluate_research_outputs(
+    *,
+    model: MultiTaskRanker,
+    device: torch.device,
+    use_amp: bool,
+    args: argparse.Namespace,
+    cfg: DeepAlphaConfig,
+    close: pd.DataFrame,
+    benchmark_close: pd.Series,
+    open_df: pd.DataFrame,
+    benchmark_open: pd.Series,
+    train_ds: StockSequenceDataset,
+    train_eval_loader: DataLoader,
+    valid_loader: DataLoader,
+    train_eval_dates: list[pd.Timestamp],
+    valid_dates: list[pd.Timestamp],
+    state_frame: pd.DataFrame,
+    liquidity_bucket_frame: pd.DataFrame | None,
+    rolling_membership_frame: pd.DataFrame | None,
+) -> dict[str, Any]:
+    train_pred_df, _ = infer_dataset(model, train_eval_loader, device, train_ds.target_names, use_amp=bool(use_amp))
+    pred_df, emb_df = infer_dataset(model, valid_loader, device, train_ds.target_names, use_amp=bool(use_amp))
+    rankic_summary = compute_rankic(pred_df, train_ds.target_names)
+    structure_aux_summary, structure_prototype_summary = _summarize_structure_outputs(pred_df)
+
+    score_head_artifact = fit_score_head(
+        train_pred_df=train_pred_df,
+        target_names=train_ds.target_names,
+        method=args.score_head_method,
+        adaptive_task_weights=bool(args.adaptive_task_weights),
+        adaptive_window_days=args.adaptive_task_window_days,
+    )
+    applied_score_horizon_weights = dict(cfg.score_horizon_weights)
+    applied_score_downside_penalty = float(cfg.score_downside_penalty)
+    if args.score_head_method == "manual":
+        applied_score_horizon_weights, applied_score_downside_penalty = _resolve_manual_score_config(
+            base_horizon_weights=cfg.score_horizon_weights,
+            base_downside_penalty=cfg.score_downside_penalty,
+            task_weights=score_head_artifact.task_weights,
+        )
+        train_score_frame = _build_score_frame(
+            pred_df=train_pred_df,
+            target_names=train_ds.target_names,
+            horizon_weights=applied_score_horizon_weights,
+            score_rank_blend=cfg.score_rank_blend,
+            score_downside_penalty=applied_score_downside_penalty,
+            score_risk_mode=cfg.score_risk_mode,
+            score_risk_gate_threshold=cfg.score_risk_gate_threshold,
+            all_dates=pd.Index(train_eval_dates),
+            all_stocks=list(close.columns),
+        )
+        score_frame = _build_score_frame(
+            pred_df=pred_df,
+            target_names=train_ds.target_names,
+            horizon_weights=applied_score_horizon_weights,
+            score_rank_blend=cfg.score_rank_blend,
+            score_downside_penalty=applied_score_downside_penalty,
+            score_risk_mode=cfg.score_risk_mode,
+            score_risk_gate_threshold=cfg.score_risk_gate_threshold,
+            all_dates=pd.Index(valid_dates),
+            all_stocks=list(close.columns),
+        )
+    else:
+        train_learned_scores = apply_score_head(score_head_artifact, train_pred_df, train_ds.target_names)
+        train_score_frame = (
+            train_learned_scores
+            .pivot(index="date", columns="stock", values="learned_score")
+            .reindex(index=train_eval_dates, columns=close.columns)
+        )
+        learned_scores = apply_score_head(score_head_artifact, pred_df, train_ds.target_names)
+        score_frame = (
+            learned_scores
+            .pivot(index="date", columns="stock", values="learned_score")
+            .reindex(index=valid_dates, columns=close.columns)
+        )
+    if rolling_membership_frame is not None:
+        train_score_frame = train_score_frame.where(
+            rolling_membership_frame.reindex(index=train_score_frame.index, columns=train_score_frame.columns).fillna(False)
+        )
+        score_frame = score_frame.where(
+            rolling_membership_frame.reindex(index=score_frame.index, columns=score_frame.columns).fillna(False)
+        )
+
+    risk_gate_artifact = None
+    if args.score_risk_mode in {"state_gate", "state_liquidity_gate"}:
+        risk_gate_artifact = fit_state_risk_gate(
+            train_pred_df=train_pred_df,
+            state_frame=state_frame,
+            target_names=train_ds.target_names,
+            horizon_weights=cfg.score_horizon_weights,
+            score_rank_blend=cfg.score_rank_blend,
+            holding_count=cfg.holding_count,
+            candidate_thresholds=parse_float_list(args.score_risk_state_thresholds),
+            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
+        )
+        train_score_frame = apply_state_risk_gate(
+            score_frame=train_score_frame,
+            pred_df=train_pred_df,
+            state_frame=state_frame,
+            artifact=risk_gate_artifact,
+            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
+        )
+        score_frame = apply_state_risk_gate(
+            score_frame=score_frame,
+            pred_df=pred_df,
+            state_frame=state_frame,
+            artifact=risk_gate_artifact,
+            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
+        )
+
+    train_eval_cfg = ResearchConfig(
+        start_date="" if len(train_eval_dates) == 0 else str(pd.Timestamp(train_eval_dates[0]).date()).replace("-", ""),
+        end_date="" if len(train_eval_dates) == 0 else str(pd.Timestamp(train_eval_dates[-1]).date()).replace("-", ""),
+        benchmark=cfg.benchmark,
+        execution_mode="next_open",
+        holding_count=cfg.holding_count,
+        weighting_method="score",
+        rebalance_freq=cfg.rebalance_freq,
+        max_weight=cfg.max_weight,
+        min_adv20=cfg.min_adv20,
+        min_price=cfg.min_price,
+        max_price=cfg.max_price,
+    )
+    research_cfg = ResearchConfig(
+        start_date="" if len(valid_dates) == 0 else str(pd.Timestamp(valid_dates[0]).date()).replace("-", ""),
+        end_date="" if len(valid_dates) == 0 else str(pd.Timestamp(valid_dates[-1]).date()).replace("-", ""),
+        benchmark=cfg.benchmark,
+        execution_mode="next_open",
+        holding_count=cfg.holding_count,
+        weighting_method="score",
+        rebalance_freq=cfg.rebalance_freq,
+        max_weight=cfg.max_weight,
+        min_adv20=cfg.min_adv20,
+        min_price=cfg.min_price,
+        max_price=cfg.max_price,
+    )
+    train_eval_target_weights = build_target_weights(train_score_frame, train_eval_cfg)
+    target_weights = build_target_weights(score_frame, research_cfg)
+    equity_df, action_df, holdout_metrics = backtest(
+        close=close.reindex(valid_dates),
+        benchmark_close=benchmark_close.reindex(valid_dates),
+        target_weights=target_weights.reindex(valid_dates),
+        target_scores=score_frame.reindex(valid_dates).fillna(0.0),
+        config=research_cfg,
+        regime_on=pd.Series(True, index=pd.Index(valid_dates)),
+        open_df=open_df.reindex(valid_dates),
+        benchmark_open=benchmark_open.reindex(valid_dates),
+    )
+
+    execution_alignment_artifact = None
+    execution_aligned_equity_df = None
+    execution_aligned_action_df = None
+    execution_aligned_metrics = None
+    execution_aligned_score_frame = None
+    execution_aligned_target_weights = None
+    if args.execution_alignment_mode != "off":
+        if args.execution_alignment_mode == "profile":
+            candidate_profiles = [get_execution_alignment_profile(args.execution_alignment_profile).name]
+        else:
+            candidate_profiles = parse_execution_alignment_profile_names(args.execution_alignment_candidate_profiles)
+        execution_alignment_artifact = fit_execution_alignment(
+            mode=args.execution_alignment_mode,
+            objective_metric=args.execution_alignment_objective,
+            candidate_profiles=candidate_profiles,
+            train_raw_target_weights=train_eval_target_weights.reindex(train_eval_dates).fillna(0.0),
+            train_raw_score_frame=train_score_frame.reindex(train_eval_dates).fillna(0.0),
+            valid_raw_target_weights=target_weights.reindex(valid_dates).fillna(0.0),
+            valid_raw_score_frame=score_frame.reindex(valid_dates).fillna(0.0),
+            close=close,
+            benchmark_close=benchmark_close,
+            open_df=open_df,
+            benchmark_open=benchmark_open,
+            benchmark=cfg.benchmark,
+            holding_count=cfg.holding_count,
+            max_weight=cfg.max_weight,
+            min_adv20=cfg.min_adv20,
+            min_price=cfg.min_price,
+            max_price=cfg.max_price,
+            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
+            slippage_bps=args.execution_alignment_slippage_bps,
+            sell_tax_bps=args.execution_alignment_sell_tax_bps,
+        )
+        execution_aligned_score_frame = execution_alignment_artifact.valid_score_frame.reindex(valid_dates).fillna(0.0)
+        execution_aligned_target_weights = execution_alignment_artifact.valid_target_weights.reindex(valid_dates).fillna(0.0)
+        execution_aligned_metrics = dict(execution_alignment_artifact.valid_metrics)
+        execution_alignment_backtest_cfg = ResearchConfig(
+            start_date="" if len(valid_dates) == 0 else str(pd.Timestamp(valid_dates[0]).date()).replace("-", ""),
+            end_date="" if len(valid_dates) == 0 else str(pd.Timestamp(valid_dates[-1]).date()).replace("-", ""),
+            benchmark=cfg.benchmark,
+            execution_mode="next_open",
+            holding_count=cfg.holding_count,
+            weighting_method="score",
+            rebalance_freq=str(execution_aligned_metrics.get("rebalance_freq", cfg.rebalance_freq)),
+            max_weight=cfg.max_weight,
+            min_adv20=cfg.min_adv20,
+            min_price=cfg.min_price,
+            max_price=cfg.max_price,
+            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
+            slippage_bps=args.execution_alignment_slippage_bps,
+            sell_tax_bps=args.execution_alignment_sell_tax_bps,
+            enable_market_regime_filter=bool(execution_aligned_metrics.get("market_regime_filter", False)),
+            regime_ma_window=50,
+            regime_vol_window=20,
+            regime_max_annual_vol=0.32,
+            regime_trend_flat_band=0.01,
+            regime_vol_transition_band=0.10,
+            regime_allowed_quadrants=["trend_up_low_vol", "trend_up_high_vol"],
+        )
+        execution_alignment_regime_on = compute_market_regime_state(
+            benchmark_close,
+            execution_alignment_backtest_cfg,
+        )["regime_on"].reindex(valid_dates)
+        execution_aligned_equity_df, execution_aligned_action_df, execution_aligned_metrics = backtest(
+            close=close.reindex(valid_dates),
+            benchmark_close=benchmark_close.reindex(valid_dates),
+            target_weights=execution_aligned_target_weights,
+            target_scores=execution_aligned_score_frame,
+            config=execution_alignment_backtest_cfg,
+            regime_on=execution_alignment_regime_on,
+            open_df=open_df.reindex(valid_dates),
+            benchmark_open=benchmark_open.reindex(valid_dates),
+        )
+
+    primary_metrics_payload = {
+        "holdout_backtest": dict(holdout_metrics),
+        "execution_aligned_holdout_backtest": {}
+        if execution_aligned_metrics is None
+        else dict(execution_aligned_metrics),
+        "research_objective_mode": str(args.research_objective_mode),
+    }
+    primary_backtest_label, primary_backtest = resolve_primary_backtest(
+        primary_metrics_payload,
+        research_objective_mode=args.research_objective_mode,
+    )
+    checkpoint_metric_name, checkpoint_metric_value = resolve_checkpoint_metric_value(
+        primary_backtest,
+        args.checkpoint_selection_objective,
+    )
+    return {
+        "train_pred_df": train_pred_df,
+        "pred_df": pred_df,
+        "emb_df": emb_df,
+        "rankic_summary": rankic_summary,
+        "structure_aux_summary": structure_aux_summary,
+        "structure_prototype_summary": structure_prototype_summary,
+        "score_head_artifact": score_head_artifact,
+        "applied_score_horizon_weights": applied_score_horizon_weights,
+        "applied_score_downside_penalty": applied_score_downside_penalty,
+        "train_score_frame": train_score_frame,
+        "score_frame": score_frame,
+        "risk_gate_artifact": risk_gate_artifact,
+        "train_eval_target_weights": train_eval_target_weights,
+        "target_weights": target_weights,
+        "equity_df": equity_df,
+        "action_df": action_df,
+        "holdout_metrics": dict(holdout_metrics),
+        "execution_alignment_artifact": execution_alignment_artifact,
+        "execution_aligned_equity_df": execution_aligned_equity_df,
+        "execution_aligned_action_df": execution_aligned_action_df,
+        "execution_aligned_metrics": None if execution_aligned_metrics is None else dict(execution_aligned_metrics),
+        "execution_aligned_score_frame": execution_aligned_score_frame,
+        "execution_aligned_target_weights": execution_aligned_target_weights,
+        "primary_backtest_label": primary_backtest_label,
+        "primary_backtest": dict(primary_backtest),
+        "checkpoint_metric_name": checkpoint_metric_name,
+        "checkpoint_metric_value": checkpoint_metric_value,
     }
 
 
@@ -990,6 +1328,41 @@ def main():
     stage_progress.complete_stage(5)
     stage_progress.start_stage(6, "训练模型")
     progress_write("开始训练 deep alpha 模型")
+    checkpoint_selection_mode = resolve_checkpoint_metric_name(args.checkpoint_selection_objective)
+    checkpoint_selection_callback = None
+    if checkpoint_selection_mode != "valid_loss":
+        def _checkpoint_selection_callback(model_for_eval: MultiTaskRanker, epoch: int) -> dict[str, Any]:
+            progress_write(f"epoch {epoch}: 评估 primary research objective")
+            evaluation = _evaluate_research_outputs(
+                model=model_for_eval,
+                device=device,
+                use_amp=bool(cfg.use_amp),
+                args=args,
+                cfg=cfg,
+                close=close,
+                benchmark_close=benchmark_close,
+                open_df=df_dict["Open"],
+                benchmark_open=benchmark_open,
+                train_ds=train_ds,
+                train_eval_loader=train_eval_loader,
+                valid_loader=valid_loader,
+                train_eval_dates=train_eval_dates,
+                valid_dates=valid_dates,
+                state_frame=state_frame,
+                liquidity_bucket_frame=liquidity_bucket_frame,
+                rolling_membership_frame=rolling_membership_frame,
+            )
+            progress_write(
+                f"epoch {epoch}: {evaluation['checkpoint_metric_name']}="
+                f"{float(evaluation['checkpoint_metric_value']):.6f} "
+                f"via {evaluation['primary_backtest_label']}"
+            )
+            return {
+                "metric_name": str(evaluation["checkpoint_metric_name"]),
+                "metric_value": float(evaluation["checkpoint_metric_value"]),
+            }
+
+        checkpoint_selection_callback = _checkpoint_selection_callback
     train_result = train_multitask_model(
         model=model,
         train_loader=train_loader,
@@ -1038,220 +1411,66 @@ def main():
         lr_plateau_patience=cfg.lr_plateau_patience,
         lr_plateau_factor=cfg.lr_plateau_factor,
         min_improvement=cfg.min_improvement,
+        checkpoint_selection_mode=checkpoint_selection_mode,
+        checkpoint_selection_callback=checkpoint_selection_callback,
+        checkpoint_selection_min_improvement=args.checkpoint_selection_min_improvement,
     )
     history = train_result.history
     training_diagnostics = train_result.diagnostics
     progress_write(
         f"训练诊断 status={training_diagnostics.status}, "
-        f"best_epoch={training_diagnostics.best_epoch}/{training_diagnostics.epochs_completed}, "
+        f"selected_epoch={training_diagnostics.selected_epoch}/{training_diagnostics.epochs_completed}, "
+        f"{training_diagnostics.selected_metric_name}={training_diagnostics.selected_metric_value:.6f}, "
         f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
     )
 
     stage_progress.complete_stage(6)
     stage_progress.start_stage(7, "验证推理与回测")
     progress_write("执行验证推理与 holdout 回测")
-    train_pred_df, _ = infer_dataset(model, train_eval_loader, device, train_ds.target_names, use_amp=bool(cfg.use_amp))
-    pred_df, emb_df = infer_dataset(model, valid_loader, device, train_ds.target_names, use_amp=bool(cfg.use_amp))
-    rankic_summary = compute_rankic(pred_df, train_ds.target_names)
-    structure_aux_summary = {}
-    if {"structure_id", "pred_structure_id"}.issubset(pred_df.columns):
-        valid_structure = pred_df["structure_id"].notna() & pred_df["pred_structure_id"].notna()
-        if bool(valid_structure.any()):
-            structure_aux_summary = {
-                "structure_aux_accuracy": float(
-                    (pred_df.loc[valid_structure, "structure_id"].astype(int) == pred_df.loc[valid_structure, "pred_structure_id"].astype(int)).mean()
-                ),
-                "structure_aux_samples": int(valid_structure.sum()),
-            }
-    structure_prototype_summary = {}
-    if {"structure_id", "pred_prototype_structure_id"}.issubset(pred_df.columns):
-        valid_proto = pred_df["structure_id"].notna() & pred_df["pred_prototype_structure_id"].notna()
-        if bool(valid_proto.any()):
-            structure_prototype_summary = {
-                "structure_prototype_accuracy": float(
-                    (pred_df.loc[valid_proto, "structure_id"].astype(int) == pred_df.loc[valid_proto, "pred_prototype_structure_id"].astype(int)).mean()
-                ),
-                "structure_prototype_samples": int(valid_proto.sum()),
-            }
-    score_head_artifact = fit_score_head(
-        train_pred_df=train_pred_df,
-        target_names=train_ds.target_names,
-        method=args.score_head_method,
-        adaptive_task_weights=bool(args.adaptive_task_weights),
-        adaptive_window_days=args.adaptive_task_window_days,
+    evaluation = _evaluate_research_outputs(
+        model=model,
+        device=device,
+        use_amp=bool(cfg.use_amp),
+        args=args,
+        cfg=cfg,
+        close=close,
+        benchmark_close=benchmark_close,
+        open_df=df_dict["Open"],
+        benchmark_open=benchmark_open,
+        train_ds=train_ds,
+        train_eval_loader=train_eval_loader,
+        valid_loader=valid_loader,
+        train_eval_dates=train_eval_dates,
+        valid_dates=valid_dates,
+        state_frame=state_frame,
+        liquidity_bucket_frame=liquidity_bucket_frame,
+        rolling_membership_frame=rolling_membership_frame,
     )
-    applied_score_horizon_weights = dict(cfg.score_horizon_weights)
-    applied_score_downside_penalty = float(cfg.score_downside_penalty)
-    if args.score_head_method == "manual":
-        applied_score_horizon_weights, applied_score_downside_penalty = _resolve_manual_score_config(
-            base_horizon_weights=cfg.score_horizon_weights,
-            base_downside_penalty=cfg.score_downside_penalty,
-            task_weights=score_head_artifact.task_weights,
-        )
-        train_score_frame = _build_score_frame(
-            pred_df=train_pred_df,
-            target_names=train_ds.target_names,
-            horizon_weights=applied_score_horizon_weights,
-            score_rank_blend=cfg.score_rank_blend,
-            score_downside_penalty=applied_score_downside_penalty,
-            score_risk_mode=cfg.score_risk_mode,
-            score_risk_gate_threshold=cfg.score_risk_gate_threshold,
-            all_dates=pd.Index(train_eval_dates),
-            all_stocks=list(close.columns),
-        )
-        score_frame = _build_score_frame(
-            pred_df=pred_df,
-            target_names=train_ds.target_names,
-            horizon_weights=applied_score_horizon_weights,
-            score_rank_blend=cfg.score_rank_blend,
-            score_downside_penalty=applied_score_downside_penalty,
-            score_risk_mode=cfg.score_risk_mode,
-            score_risk_gate_threshold=cfg.score_risk_gate_threshold,
-            all_dates=pd.Index(valid_dates),
-            all_stocks=list(close.columns),
-        )
-    else:
-        train_learned_scores = apply_score_head(score_head_artifact, train_pred_df, train_ds.target_names)
-        train_score_frame = train_learned_scores.pivot(index="date", columns="stock", values="learned_score").reindex(index=train_eval_dates, columns=close.columns)
-        learned_scores = apply_score_head(score_head_artifact, pred_df, train_ds.target_names)
-        score_frame = learned_scores.pivot(index="date", columns="stock", values="learned_score").reindex(index=valid_dates, columns=close.columns)
-    if rolling_membership_frame is not None:
-        train_score_frame = train_score_frame.where(rolling_membership_frame.reindex(index=train_score_frame.index, columns=train_score_frame.columns).fillna(False))
-        score_frame = score_frame.where(rolling_membership_frame.reindex(index=score_frame.index, columns=score_frame.columns).fillna(False))
-    risk_gate_artifact = None
-    if args.score_risk_mode in {"state_gate", "state_liquidity_gate"}:
-        risk_gate_artifact = fit_state_risk_gate(
-            train_pred_df=train_pred_df,
-            state_frame=state_frame,
-            target_names=train_ds.target_names,
-            horizon_weights=cfg.score_horizon_weights,
-            score_rank_blend=cfg.score_rank_blend,
-            holding_count=cfg.holding_count,
-            candidate_thresholds=parse_float_list(args.score_risk_state_thresholds),
-            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
-        )
-        train_score_frame = apply_state_risk_gate(
-            score_frame=train_score_frame,
-            pred_df=train_pred_df,
-            state_frame=state_frame,
-            artifact=risk_gate_artifact,
-            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
-        )
-        score_frame = apply_state_risk_gate(
-            score_frame=score_frame,
-            pred_df=pred_df,
-            state_frame=state_frame,
-            artifact=risk_gate_artifact,
-            liquidity_bucket_frame=liquidity_bucket_frame if args.score_risk_mode == "state_liquidity_gate" else None,
-        )
-    train_eval_cfg = ResearchConfig(
-        start_date="" if train_eval_start is None else str(train_eval_start.date()).replace("-", ""),
-        end_date=str(train_end.date()).replace("-", ""),
-        benchmark=cfg.benchmark,
-        execution_mode="next_open",
-        holding_count=cfg.holding_count,
-        weighting_method="score",
-        rebalance_freq=cfg.rebalance_freq,
-        max_weight=cfg.max_weight,
-        min_adv20=cfg.min_adv20,
-        min_price=cfg.min_price,
-        max_price=cfg.max_price,
-    )
-    research_cfg = ResearchConfig(
-        start_date=str(valid_start.date()).replace("-", ""),
-        end_date=str(valid_end.date()).replace("-", ""),
-        benchmark=cfg.benchmark,
-        execution_mode="next_open",
-        holding_count=cfg.holding_count,
-        weighting_method="score",
-        rebalance_freq=cfg.rebalance_freq,
-        max_weight=cfg.max_weight,
-        min_adv20=cfg.min_adv20,
-        min_price=cfg.min_price,
-        max_price=cfg.max_price,
-    )
-    train_eval_target_weights = build_target_weights(train_score_frame, train_eval_cfg)
-    target_weights = build_target_weights(score_frame, research_cfg)
-    equity_df, action_df, metrics = backtest(
-        close=close.reindex(valid_dates),
-        benchmark_close=benchmark_close.reindex(valid_dates),
-        target_weights=target_weights.reindex(valid_dates),
-        target_scores=score_frame.reindex(valid_dates).fillna(0.0),
-        config=research_cfg,
-        regime_on=pd.Series(True, index=pd.Index(valid_dates)),
-        open_df=df_dict["Open"].reindex(valid_dates),
-        benchmark_open=benchmark_open.reindex(valid_dates),
-    )
-    execution_alignment_artifact = None
-    execution_aligned_equity_df = None
-    execution_aligned_action_df = None
-    execution_aligned_metrics = None
-    execution_aligned_score_frame = None
-    execution_aligned_target_weights = None
-    if args.execution_alignment_mode != "off":
-        if args.execution_alignment_mode == "profile":
-            candidate_profiles = [get_execution_alignment_profile(args.execution_alignment_profile).name]
-        else:
-            candidate_profiles = parse_execution_alignment_profile_names(args.execution_alignment_candidate_profiles)
-        execution_alignment_artifact = fit_execution_alignment(
-            mode=args.execution_alignment_mode,
-            objective_metric=args.execution_alignment_objective,
-            candidate_profiles=candidate_profiles,
-            train_raw_target_weights=train_eval_target_weights.reindex(train_eval_dates).fillna(0.0),
-            train_raw_score_frame=train_score_frame.reindex(train_eval_dates).fillna(0.0),
-            valid_raw_target_weights=target_weights.reindex(valid_dates).fillna(0.0),
-            valid_raw_score_frame=score_frame.reindex(valid_dates).fillna(0.0),
-            close=close,
-            benchmark_close=benchmark_close,
-            open_df=df_dict["Open"],
-            benchmark_open=benchmark_open,
-            benchmark=cfg.benchmark,
-            holding_count=cfg.holding_count,
-            max_weight=cfg.max_weight,
-            min_adv20=cfg.min_adv20,
-            min_price=cfg.min_price,
-            max_price=cfg.max_price,
-            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
-            slippage_bps=args.execution_alignment_slippage_bps,
-            sell_tax_bps=args.execution_alignment_sell_tax_bps,
-        )
-        execution_aligned_score_frame = execution_alignment_artifact.valid_score_frame.reindex(valid_dates).fillna(0.0)
-        execution_aligned_target_weights = execution_alignment_artifact.valid_target_weights.reindex(valid_dates).fillna(0.0)
-        execution_aligned_metrics = dict(execution_alignment_artifact.valid_metrics)
-        execution_alignment_backtest_cfg = ResearchConfig(
-            start_date=str(valid_start.date()).replace("-", ""),
-            end_date=str(valid_end.date()).replace("-", ""),
-            benchmark=cfg.benchmark,
-            execution_mode="next_open",
-            holding_count=cfg.holding_count,
-            weighting_method="score",
-            rebalance_freq=str(execution_aligned_metrics.get("rebalance_freq", cfg.rebalance_freq)),
-            max_weight=cfg.max_weight,
-            min_adv20=cfg.min_adv20,
-            min_price=cfg.min_price,
-            max_price=cfg.max_price,
-            transaction_cost_bps=args.execution_alignment_transaction_cost_bps,
-            slippage_bps=args.execution_alignment_slippage_bps,
-            sell_tax_bps=args.execution_alignment_sell_tax_bps,
-            enable_market_regime_filter=bool(execution_aligned_metrics.get("market_regime_filter", False)),
-            regime_ma_window=50,
-            regime_vol_window=20,
-            regime_max_annual_vol=0.32,
-            regime_trend_flat_band=0.01,
-            regime_vol_transition_band=0.10,
-            regime_allowed_quadrants=["trend_up_low_vol", "trend_up_high_vol"],
-        )
-        execution_alignment_regime_on = compute_market_regime_state(benchmark_close, execution_alignment_backtest_cfg)["regime_on"].reindex(valid_dates)
-        execution_aligned_equity_df, execution_aligned_action_df, execution_aligned_metrics = backtest(
-            close=close.reindex(valid_dates),
-            benchmark_close=benchmark_close.reindex(valid_dates),
-            target_weights=execution_aligned_target_weights,
-            target_scores=execution_aligned_score_frame,
-            config=execution_alignment_backtest_cfg,
-            regime_on=execution_alignment_regime_on,
-            open_df=df_dict["Open"].reindex(valid_dates),
-            benchmark_open=benchmark_open.reindex(valid_dates),
-        )
+    train_pred_df = evaluation["train_pred_df"]
+    pred_df = evaluation["pred_df"]
+    emb_df = evaluation["emb_df"]
+    rankic_summary = evaluation["rankic_summary"]
+    structure_aux_summary = evaluation["structure_aux_summary"]
+    structure_prototype_summary = evaluation["structure_prototype_summary"]
+    score_head_artifact = evaluation["score_head_artifact"]
+    applied_score_horizon_weights = evaluation["applied_score_horizon_weights"]
+    applied_score_downside_penalty = evaluation["applied_score_downside_penalty"]
+    train_score_frame = evaluation["train_score_frame"]
+    score_frame = evaluation["score_frame"]
+    risk_gate_artifact = evaluation["risk_gate_artifact"]
+    train_eval_target_weights = evaluation["train_eval_target_weights"]
+    target_weights = evaluation["target_weights"]
+    equity_df = evaluation["equity_df"]
+    action_df = evaluation["action_df"]
+    metrics = evaluation["holdout_metrics"]
+    execution_alignment_artifact = evaluation["execution_alignment_artifact"]
+    execution_aligned_equity_df = evaluation["execution_aligned_equity_df"]
+    execution_aligned_action_df = evaluation["execution_aligned_action_df"]
+    execution_aligned_metrics = evaluation["execution_aligned_metrics"]
+    execution_aligned_score_frame = evaluation["execution_aligned_score_frame"]
+    execution_aligned_target_weights = evaluation["execution_aligned_target_weights"]
+    primary_backtest_label = str(evaluation["primary_backtest_label"])
+    primary_backtest = dict(evaluation["primary_backtest"])
 
     live_outputs = _build_live_inference_outputs(
         cfg=cfg,
@@ -1435,6 +1654,9 @@ def main():
         "safe_runtime_profile": bool(cfg.safe_runtime_profile),
         "runtime_profile": runtime_profile.__dict__,
         "training_diagnostics": training_diagnostics.__dict__,
+        "research_objective_mode": str(args.research_objective_mode),
+        "checkpoint_selection_objective": str(args.checkpoint_selection_objective),
+        "checkpoint_selection_min_improvement": float(args.checkpoint_selection_min_improvement),
         "score_head_method": args.score_head_method,
         "adaptive_task_weights": bool(args.adaptive_task_weights),
         "adaptive_task_window_days": args.adaptive_task_window_days,
@@ -1458,6 +1680,18 @@ def main():
         "rankic_summary": rankic_summary.to_dict(orient="records"),
         "holdout_backtest": metrics,
         "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
+        "primary_research_backtest_label": str(primary_backtest_label),
+        "primary_research_backtest": primary_backtest,
+        "primary_execution_panel_mode": resolve_primary_panel_mode(
+            {
+                "research_objective_mode": str(args.research_objective_mode),
+                "holdout_backtest": metrics,
+                "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
+                "execution_alignment_profile": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile,
+                "primary_research_backtest_label": str(primary_backtest_label),
+            },
+            research_objective_mode=args.research_objective_mode,
+        ),
         "live_signal_date": (
             ""
             if live_score_frame.dropna(how="all").empty
@@ -1552,6 +1786,8 @@ def main():
     print(f"Output: {run_dir}")
     summary = {
         "holdout_backtest": metrics,
+        "primary_research_backtest_label": str(primary_backtest_label),
+        "primary_research_backtest": primary_backtest,
         "live_signal_date": (
             ""
             if live_score_frame.dropna(how="all").empty

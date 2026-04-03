@@ -235,3 +235,29 @@
   - 多窗口 H2H
 - 不允许升级单个幸运调仓相位。
 - 本文件不记录长实验叙事。
+
+## 10. Execution-First Unified Ops
+### 查看当前 active execution strategy
+```powershell
+Get-Content daily_research\output\active_execution_strategy.json
+```
+
+### 让 production promotion 同时激活默认执行策略
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py --activate-strategy --strategy-panel-mode auto
+```
+
+- 该入口现在会同时做三件事：
+  - 继承研究赢家的 `research_objective_mode`
+  - 继承 `checkpoint_selection_objective`
+  - 继承 `execution_alignment_mode / objective / candidate_profiles / realistic cost`
+- promotion 完成后还会刷新：
+  - `daily_research/output/active_execution_strategy.json`
+
+### 查看默认执行目前读到的 profile
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --list-candidate-profiles
+```
+
+- 如果接线正常，`default=` 应该显示：
+  - `active_execution_strategy`

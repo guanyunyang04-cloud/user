@@ -21,6 +21,7 @@ from daily_research.baseline.data_provider import (
     load_daily_from_csv,
     load_daily_from_tq,
 )
+from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
@@ -638,7 +639,7 @@ def _load_run_record(
     pretrain_dir: Path | None,
 ) -> dict[str, object]:
     metrics = _load_json(run_dir / "metrics.json")
-    holdout = metrics.get("holdout_backtest", {})
+    _, holdout = resolve_primary_backtest(metrics)
     training = metrics.get("training_diagnostics", {})
     record: dict[str, object] = {
         "stage": stage_name,

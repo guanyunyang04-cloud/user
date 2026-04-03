@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.architecture_profiles import get_profile
+from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -273,7 +274,8 @@ def main() -> None:
 
             metrics = _load_metrics(metrics_path)
             artifact_info = _extract_artifact_summary(_resolve_model_path(metrics_path))
-            holdout = dict(metrics.get("holdout_backtest", {}))
+            _, holdout = resolve_primary_backtest(metrics)
+            holdout = dict(holdout)
             source_runs[profile.name][window.label] = str(metrics_path.resolve())
             collected_rows.append(
                 {

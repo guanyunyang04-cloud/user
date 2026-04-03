@@ -17,6 +17,21 @@ import torch
 
 import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.deep_alpha.execution_alignment import DEFAULT_AUTO_PROFILE_NAMES
+from daily_research.deep_alpha.research_objective import (
+    DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    DEFAULT_EXECUTION_ALIGNMENT_MODE,
+    DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE,
+    DEFAULT_EXECUTION_ALIGNMENT_SELL_TAX_BPS,
+    DEFAULT_EXECUTION_ALIGNMENT_SLIPPAGE_BPS,
+    DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS,
+    DEFAULT_RESEARCH_OBJECTIVE_MODE,
+)
+from daily_research.execution.strategy_manifest import (
+    DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST,
+    build_active_strategy_manifest,
+    write_strategy_manifest,
+)
 
 
 FORMAL_SOURCE_RUN = Path(
@@ -44,6 +59,31 @@ def parse_args() -> argparse.Namespace:
         help="Production launch cutoff date. Defaults to latest completed trading date.",
     )
     parser.add_argument("--experiment-tag", default="", help="Optional run tag under daily_research/output.")
+    parser.add_argument(
+        "--strategy-manifest-path",
+        default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST),
+        help="Where to write the active execution strategy manifest after promotion.",
+    )
+    parser.add_argument("--strategy-name", default="", help="Optional name written into the active execution manifest.")
+    parser.add_argument(
+        "--strategy-panel-mode",
+        choices=["auto", "raw", "execution_aligned"],
+        default="auto",
+        help="Panel mode written into the active execution manifest. auto follows the promoted research winner.",
+    )
+    parser.add_argument(
+        "--activate-strategy",
+        dest="activate_strategy",
+        action="store_true",
+        help="Write the promoted strategy into the active execution manifest so daily execution follows it by default.",
+    )
+    parser.add_argument(
+        "--no-activate-strategy",
+        dest="activate_strategy",
+        action="store_false",
+        help="Skip writing the active execution manifest.",
+    )
+    parser.set_defaults(activate_strategy=True)
     return parser.parse_args()
 
 
@@ -93,6 +133,42 @@ def _format_state_thresholds(raw: Any) -> str:
     if isinstance(raw, (list, tuple)):
         return ",".join(str(float(x)) for x in raw)
     return str(raw or "")
+
+
+def _format_name_list(raw: Any, *, fallback: list[str] | tuple[str, ...] | None = None) -> str:
+    values: list[str] = []
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",") if str(item).strip()]
+    elif isinstance(raw, (list, tuple, set)):
+        values = [str(item).strip() for item in raw if str(item).strip()]
+    if not values and fallback is not None:
+        values = [str(item).strip() for item in fallback if str(item).strip()]
+    return ",".join(values)
+
+
+def _load_metrics_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def _has_manifest_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value) > 0
+    return True
+
+
+def _merge_strategy_metrics(source_metrics: dict[str, Any], production_metrics: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(source_metrics)
+    for key, value in production_metrics.items():
+        if _has_manifest_value(value):
+            merged[key] = value
+    return merged
 
 
 def _append_arg(cmd: list[str], flag: str, value: Any) -> None:
@@ -308,6 +384,68 @@ def _build_retrain_command(
     _append_arg(cmd, "--min-adv20", cfg.get("min_adv20", 50_000.0))
     _append_arg(cmd, "--min-price", cfg.get("min_price", 2.0))
     _append_arg(cmd, "--max-price", cfg.get("max_price", 300.0))
+
+    research_objective_mode = str(metrics.get("research_objective_mode", "") or DEFAULT_RESEARCH_OBJECTIVE_MODE).strip()
+    checkpoint_selection_objective = str(
+        metrics.get("checkpoint_selection_objective", "") or DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE
+    ).strip()
+    checkpoint_selection_min_improvement = metrics.get(
+        "checkpoint_selection_min_improvement",
+        cfg.get("min_improvement", 1e-4),
+    )
+    _append_arg(cmd, "--research-objective-mode", research_objective_mode)
+    _append_arg(cmd, "--checkpoint-selection-objective", checkpoint_selection_objective)
+    _append_arg(cmd, "--checkpoint-selection-min-improvement", checkpoint_selection_min_improvement)
+
+    execution_alignment_mode = str(metrics.get("execution_alignment_mode", "") or "").strip()
+    if research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE and execution_alignment_mode in {"", "off"}:
+        execution_alignment_mode = DEFAULT_EXECUTION_ALIGNMENT_MODE
+    elif not execution_alignment_mode:
+        execution_alignment_mode = "off"
+    execution_alignment_objective = str(
+        metrics.get("execution_alignment_objective", "") or DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE
+    ).strip()
+    execution_alignment_profile = str(metrics.get("execution_alignment_profile", "") or "").strip()
+    execution_alignment_candidate_profiles = _format_name_list(
+        metrics.get("execution_alignment_candidate_profiles"),
+        fallback=DEFAULT_AUTO_PROFILE_NAMES,
+    )
+    if execution_alignment_mode != "off":
+        _append_arg(cmd, "--execution-alignment-mode", execution_alignment_mode)
+        _append_arg(cmd, "--execution-alignment-objective", execution_alignment_objective)
+        _append_arg(
+            cmd,
+            "--execution-alignment-transaction-cost-bps",
+            metrics.get(
+                "execution_alignment_transaction_cost_bps",
+                DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS,
+            ),
+        )
+        _append_arg(
+            cmd,
+            "--execution-alignment-slippage-bps",
+            metrics.get(
+                "execution_alignment_slippage_bps",
+                DEFAULT_EXECUTION_ALIGNMENT_SLIPPAGE_BPS,
+            ),
+        )
+        _append_arg(
+            cmd,
+            "--execution-alignment-sell-tax-bps",
+            metrics.get(
+                "execution_alignment_sell_tax_bps",
+                DEFAULT_EXECUTION_ALIGNMENT_SELL_TAX_BPS,
+            ),
+        )
+        if execution_alignment_mode == "profile":
+            _append_arg(
+                cmd,
+                "--execution-alignment-profile",
+                execution_alignment_profile or "regoff_k2_10d_ensemble_native_anchor",
+            )
+        else:
+            _append_arg(cmd, "--execution-alignment-candidate-profiles", execution_alignment_candidate_profiles)
+
     _append_arg(cmd, "--experiment-tag", experiment_tag)
     return cmd
 
@@ -328,6 +466,8 @@ def _write_production_manifest(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     train_start_date: str,
+    strategy_manifest_path: Path | None = None,
+    activate_strategy: bool = False,
 ) -> None:
     timestamp = pd.Timestamp.now().isoformat()
     retrain_frequency_root = Path("daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1").resolve()
@@ -360,6 +500,8 @@ def _write_production_manifest(
         "source_formal_run_dir": str(source_run_dir.resolve()),
         "active_production_run_dir": str(run_dir.resolve()),
         "production_root": str(production_root.resolve()),
+        "active_execution_strategy_manifest": "" if strategy_manifest_path is None else str(strategy_manifest_path.resolve()),
+        "activate_strategy_after_sync": bool(activate_strategy),
         "train_start_date": str(train_start_date),
         "train_end_date": str(latest_trainable_date),
         "launch_cutoff_date": str(latest_completed_date),
@@ -381,6 +523,7 @@ def _write_production_manifest(
         f"- launch_cutoff_date: `{latest_completed_date}`",
         f"- internal_monitor_start_date: `{internal_monitor_start_date}`",
         f"- internal_monitor_days: `{internal_monitor_days}`",
+        f"- active_execution_strategy_manifest: `{'' if strategy_manifest_path is None else strategy_manifest_path.as_posix()}`",
         "- retrain_frequency_policy: `Retrain Monthly` preferred, auto retrain on next calendar month boundary, fallback remind at `21` trading days, block at `63` trading days",
         f"- retrain_frequency_leaderboard: `{retrain_frequency_csv.as_posix()}`",
         "- note: 本目录只用于日常 production 信号，不作为 formal holdout 证据。",
@@ -401,6 +544,8 @@ def _sync_production_root(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     train_start_date: str,
+    strategy_manifest_path: Path | None = None,
+    activate_strategy: bool = False,
 ) -> None:
     production_root.mkdir(parents=True, exist_ok=True)
     for name in [
@@ -425,13 +570,44 @@ def _sync_production_root(
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
+        strategy_manifest_path=strategy_manifest_path,
+        activate_strategy=activate_strategy,
     )
+
+
+def _activate_strategy(
+    *,
+    source_run_dir: Path,
+    production_root: Path,
+    strategy_manifest_path: Path,
+    strategy_name: str,
+    strategy_panel_mode: str,
+) -> tuple[Path, dict[str, Any]]:
+    source_metrics = _load_metrics_payload(source_run_dir / "metrics.json")
+    production_metrics = _load_metrics_payload(production_root / "metrics.json")
+    strategy_metrics = _merge_strategy_metrics(source_metrics, production_metrics)
+    resolved_strategy_name = (
+        str(strategy_name).strip()
+        or str(strategy_metrics.get("experiment_tag", "")).strip()
+        or production_root.name
+    )
+    payload = build_active_strategy_manifest(
+        source_run_dir=source_run_dir,
+        production_root=production_root,
+        strategy_metrics=strategy_metrics,
+        panel_mode=strategy_panel_mode,
+        strategy_name=resolved_strategy_name,
+        promoted_at=pd.Timestamp.now().isoformat(),
+    )
+    manifest_path = write_strategy_manifest(payload, path=strategy_manifest_path)
+    return manifest_path, payload
 
 
 def main() -> None:
     args = parse_args()
     source_run_dir = Path(args.source_run_dir).resolve()
     production_root = Path(args.production_root).resolve()
+    strategy_manifest_path = Path(args.strategy_manifest_path).resolve()
     latest_completed_date = pd.Timestamp(args.end_date or get_latest_completed_trading_date()).strftime("%Y%m%d")
     latest_trainable_date, internal_monitor_start_date, internal_monitor_days = _resolve_training_dates(
         source_run_dir=source_run_dir,
@@ -473,7 +649,21 @@ def main() -> None:
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
+        strategy_manifest_path=strategy_manifest_path,
+        activate_strategy=bool(args.activate_strategy),
     )
+    if args.activate_strategy:
+        active_manifest_path, active_payload = _activate_strategy(
+            source_run_dir=source_run_dir,
+            production_root=production_root,
+            strategy_manifest_path=strategy_manifest_path,
+            strategy_name=args.strategy_name,
+            strategy_panel_mode=args.strategy_panel_mode,
+        )
+        print(f"active_execution_strategy_manifest={active_manifest_path}")
+        print(f"active_execution_strategy_name={active_payload.get('strategy_name', '')}")
+        print(f"active_execution_panel_mode={active_payload.get('panel_mode', '')}")
+        print(f"active_execution_candidate_label={active_payload.get('candidate_label', '')}")
     print(f"production_root={production_root}")
     print(f"active_production_run={run_dir}")
 

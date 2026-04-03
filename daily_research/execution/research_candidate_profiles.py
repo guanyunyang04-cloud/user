@@ -11,6 +11,7 @@ import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.execution.entrypoint_utils import inject_default_arg, inject_flag_arg
+from daily_research.execution.strategy_manifest import load_strategy_manifest
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ def _source(name: str) -> str:
     return str((_DYNAMIC_GRAPH_FORMAL_ROOT / name).resolve())
 
 
-PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
+STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     "regoff_k2_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
         description="Current daily default execution strategy: formal winner frozen for research evidence, production full-fit model for daily trade plan; 10d anchored all-offset ensemble, top-k 2, regime filter off.",
@@ -119,38 +120,111 @@ PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     ),
 }
 
+ACTIVE_EXECUTION_CANDIDATE_PROFILE = "active_execution_strategy"
+LEGACY_DEFAULT_EXECUTION_CANDIDATE_PROFILE = "regoff_k2_10d_ensemble_native_anchor"
+
 PROFILE_ALIASES: dict[str, str] = {
-    "default": "regoff_k2_10d_ensemble_native_anchor",
     "aggressive": "regon_k1_10d_ensemble_native_anchor",
     "soft_guard": "regoff_k2_10d_market_state_guard_v1",
     "baseline": "target_weight_1d_baseline",
     "robust_auto": "execalign_auto_r4_topk2_1d_regoff",
 }
 
-DEFAULT_EXECUTION_CANDIDATE_PROFILE = "regoff_k2_10d_ensemble_native_anchor"
+DEFAULT_EXECUTION_CANDIDATE_PROFILE = ACTIVE_EXECUTION_CANDIDATE_PROFILE
 UPSIDE_EXECUTION_CANDIDATE_PROFILE = "regon_k1_10d_ensemble_native_anchor"
+
+
+def _build_active_execution_profile() -> ResearchCandidateProfile | None:
+    manifest = load_strategy_manifest()
+    if not manifest:
+        return None
+    source_target_weight = str(manifest.get("source_target_weight_panel_csv", "")).strip()
+    source_score = str(manifest.get("source_score_panel_csv", "")).strip()
+    trade_plan_target_weight = str(manifest.get("trade_plan_target_weight_panel_csv", "")).strip()
+    trade_plan_score = str(manifest.get("trade_plan_score_panel_csv", "")).strip()
+    if not source_target_weight or not source_score or not trade_plan_target_weight or not trade_plan_score:
+        return None
+    description = (
+        "Current active execution strategy promoted from the primary research winner; "
+        "default daily execution should follow this manifest instead of a hard-coded profile."
+    )
+    strategy_name = str(manifest.get("strategy_name", "")).strip()
+    panel_mode = str(manifest.get("panel_mode", "")).strip()
+    if strategy_name:
+        description = f"{description} strategy={strategy_name}."
+    if panel_mode:
+        description = f"{description} panel_mode={panel_mode}."
+    return ResearchCandidateProfile(
+        name=ACTIVE_EXECUTION_CANDIDATE_PROFILE,
+        description=description,
+        target_weight_panel_csv=source_target_weight,
+        score_panel_csv=source_score,
+        candidate_label=str(manifest.get("candidate_label", "")).strip() or "active_execution_strategy",
+        trade_plan_target_weight_panel_csv=trade_plan_target_weight,
+        trade_plan_score_panel_csv=trade_plan_score,
+        trade_plan_candidate_label=str(manifest.get("trade_plan_candidate_label", "")).strip()
+        or str(manifest.get("candidate_label", "")).strip()
+        or "active_execution_strategy",
+        data_source=str(manifest.get("data_source", "tq") or "tq"),
+        benchmark=str(manifest.get("benchmark", "000300.SH") or "000300.SH"),
+        backtest_start_date=str(manifest.get("backtest_start_date", "20210101") or "20210101"),
+        trade_plan_start_date=str(manifest.get("trade_plan_start_date", "20210101") or "20210101"),
+        rebalance_freq=str(manifest.get("rebalance_freq", "1d") or "1d"),
+        rebalance_offset_mode=str(manifest.get("rebalance_offset_mode", "single") or "single"),
+        rebalance_anchor_date=str(manifest.get("rebalance_anchor_date", "") or ""),
+        target_weight_top_k=int(manifest.get("target_weight_top_k", 0) or 0),
+        target_weight_min_weight=float(manifest.get("target_weight_min_weight", 0.0) or 0.0),
+        target_weight_power=float(manifest.get("target_weight_power", 1.0) or 1.0),
+        target_weight_full_invest=bool(manifest.get("target_weight_full_invest", False)),
+        use_market_regime_filter=bool(manifest.get("use_market_regime_filter", False)),
+        soft_state_profile=str(manifest.get("soft_state_profile", "")).strip(),
+        refresh_run_dir=str(manifest.get("source_refresh_run_dir", "")).strip()
+        or str(manifest.get("source_run_dir", "")).strip(),
+        trade_plan_refresh_run_dir=str(manifest.get("trade_plan_refresh_run_dir", "")).strip()
+        or str(manifest.get("production_root", "")).strip(),
+        trade_plan_model_manifest_json=str(manifest.get("production_manifest_json", "")).strip(),
+    )
+
+
+def _current_default_profile_name() -> str:
+    active_profile = _build_active_execution_profile()
+    if active_profile is not None:
+        return active_profile.name
+    return LEGACY_DEFAULT_EXECUTION_CANDIDATE_PROFILE
+
+
+def _profile_registry() -> dict[str, ResearchCandidateProfile]:
+    registry = dict(STATIC_PROFILE_REGISTRY)
+    active_profile = _build_active_execution_profile()
+    if active_profile is not None:
+        registry[active_profile.name] = active_profile
+    return registry
 
 
 def resolve_profile_name(name: str) -> str:
     normalized = str(name or "").strip()
     if not normalized:
         raise KeyError("Empty candidate profile name.")
+    if normalized == "default":
+        return _current_default_profile_name()
     return PROFILE_ALIASES.get(normalized, normalized)
 
 
 def get_profile(name: str) -> ResearchCandidateProfile:
     resolved = resolve_profile_name(name)
-    if resolved not in PROFILE_REGISTRY:
-        available = ", ".join(sorted(PROFILE_REGISTRY))
+    registry = _profile_registry()
+    if resolved not in registry:
+        available = ", ".join(sorted(registry))
         aliases = ", ".join(f"{alias}->{target}" for alias, target in sorted(PROFILE_ALIASES.items()))
         raise KeyError(f"Unknown candidate profile: {name}. Available: {available}. Aliases: {aliases}")
-    return PROFILE_REGISTRY[resolved]
+    return registry[resolved]
 
 
 def list_profile_lines() -> list[str]:
-    lines = [f"default={DEFAULT_EXECUTION_CANDIDATE_PROFILE}", f"upside={UPSIDE_EXECUTION_CANDIDATE_PROFILE}", "profiles:"]
-    for key in sorted(PROFILE_REGISTRY):
-        profile = PROFILE_REGISTRY[key]
+    registry = _profile_registry()
+    lines = [f"default={_current_default_profile_name()}", f"upside={UPSIDE_EXECUTION_CANDIDATE_PROFILE}", "profiles:"]
+    for key in sorted(registry):
+        profile = registry[key]
         lines.append(f"- {profile.name}: {profile.description}")
     if PROFILE_ALIASES:
         alias_text = ", ".join(f"{alias}->{target}" for alias, target in sorted(PROFILE_ALIASES.items()))

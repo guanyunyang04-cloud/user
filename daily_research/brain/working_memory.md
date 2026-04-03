@@ -165,3 +165,23 @@
 - 不升级“修了弱窗口却破坏强窗口”的方案。
 - 除非重新正式取胜，否则不回头恢复 `score -> weight`。
 - 长过程和长历史不写这里，统一写入 `episodic_memory.md`。
+
+## Execution-First Unification
+- `deep_alpha` 的默认学习目标已不再是“raw holdout 看起来更强”，而是“真实执行后净收益更高”。
+- 训练侧现在支持直接按 primary research backtest 选 checkpoint：
+  - 默认研究目标：`execution_first`
+  - 默认 checkpoint objective：`primary_annual_return`
+  - 可选：`primary_excess_annual_return` / `primary_excess_sharpe`
+- production promotion 已完整继承研究赢家的执行配置：
+  - `update_default_candidate_production.py` 会透传 `research_objective_mode`
+  - 会透传 `checkpoint_selection_objective`
+  - 会透传 `execution_alignment_mode / objective / candidate_profiles / realistic cost`
+- 默认执行端已经切到 manifest-driven：
+  - 当前真源文件：`daily_research/output/active_execution_strategy.json`
+  - `run_trade_plan.py` 默认先读 active strategy，再决定默认 profile
+- 当前 active strategy 已成功接线，但还是过渡态：
+  - 现在只是把现有 legacy raw default 显式化为 `active_execution_strategy`
+  - 原因是当前 formal source `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 仍是旧 raw 口径产物，尚未按 execution-first 重跑
+- 因此下一步主任务已经收敛为：
+  - 用统一后的 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 协议重跑正式研究 winner
+  - 再用 `update_default_candidate_production.py --activate-strategy` 做正式晋升

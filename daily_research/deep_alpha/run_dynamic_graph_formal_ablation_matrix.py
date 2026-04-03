@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile
+from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -183,7 +184,8 @@ def _load_metrics(path: Path) -> dict:
 
 
 def _extract_holdout(metrics: dict) -> dict:
-    return dict(metrics.get("holdout_backtest", {}))
+    _, holdout = resolve_primary_backtest(metrics)
+    return dict(holdout)
 
 
 def _summarize_profile(profile_name: str, profile_rows: list[dict]) -> dict:

@@ -19,6 +19,7 @@ from daily_research.deep_alpha.architecture_profiles import (
     get_profile,
     list_profile_lines,
 )
+from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -309,7 +310,8 @@ def main() -> None:
         model_path = _resolve_model_path(metrics_path)
         artifact_info = _extract_artifact_summary(model_path)
         config = artifact_info["config"] if isinstance(artifact_info.get("config"), dict) else {}
-        holdout = dict(metrics.get("holdout_backtest", {}))
+        _, holdout = resolve_primary_backtest(metrics)
+        holdout = dict(holdout)
         source_runs[profile.name] = str(metrics_path.resolve())
         rows.append(
             {
