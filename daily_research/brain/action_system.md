@@ -262,3 +262,119 @@ Get-Content daily_research\output\active_execution_strategy.json
 
 - 如果接线正常，`default=` 应该显示：
   - `active_execution_strategy`
+## Monthly Research Commands
+### 月度正式研究入口
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --research-time-unit calendar_months --valid-months 12 --train-eval-window-months 6 --adaptive-task-window-months 6
+```
+
+- 若只想缩短正式验证窗，可直接改：
+  - `--valid-months`
+- 若只想缩短 train-side score head / risk gate / adaptive 权重窗口，可直接改：
+  - `--train-eval-window-months`
+  - `--adaptive-task-window-months`
+
+### 月度预训练入口
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\pretrain_deep_alpha_encoder.py --research-time-unit calendar_months --valid-months 12 --pretrain-valid-months 3
+```
+
+### 显式短窗优先级
+- 若命令已经显式给出：
+  - `--train-end-date`
+  - `--valid-start-date`
+  - `--valid-days`
+- 则验证窗按显式交易日执行。
+- 只有在未显式给出日窗，或主动把 `--valid-days 0` 交给月度协议时，`valid_months` 才主导验证窗长度。
+# 2026-04-04 rich experiment 重跑入口
+
+## 重新生成 monthly execution-first architecture execution H2H
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260403_monthly_r1
+```
+
+## 重新生成 monthly execution-first short-alpha formal H2H
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_formal_head2head_20260403_monthly_r1
+```
+
+## 重新生成 monthly execution-first dynamic-graph formal ablation
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag dynamic_graph_ablation_formal_20260403_monthly_r1
+```
+
+## TQ 波动时的 raw cache 强制复用入口
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --force-raw-cache-path daily_research\cache\deep_alpha\raw\fc86ee4ed74716c2.pkl
+```
+
+## 当前已确认的新结果目录
+- `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
+- `daily_research/output/short_alpha_formal_head2head_20260403_monthly_r1`
+- `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1`
+
+## Finetune Epoch 预算充分性 formal
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_epoch_budget_formal_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --epoch-budgets 4,8,12,16
+```
+
+- 输出目录：
+  - `daily_research/output/deep_alpha_epoch_budget_formal_20260404_r1`
+- 当前判决：
+  - `baseline_current` 在 monthly execution-first 三窗下，`16` epoch 的 mean replay excess annual / Sharpe = `8.50% / 0.494`
+  - 当前参考 `8` epoch = `4.72% / 0.258`
+  - `12` epoch 与 `8` epoch 基本相同；真正的提升出现在 `16` epoch
+  - 提升集中在窗口 `20240301_20250317`，selected checkpoint 从 `epoch 7` 延后到 `epoch 13`
+  - 四档 `undertrained_count` 都是 `0/3`，说明当前基于 `valid_loss` 的 undertrained 诊断不足以替代 execution-first 预算验证
+## 训练续训与家族级 frontier 协议
+
+### strict resume
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --resume-run-dir daily_research\output\<old_run> --resume-mode strict --epochs 16
+```
+
+- `strict` 现在会恢复：
+  - `last_model_state_dict`
+  - `optimizer_state_dict`
+  - `scheduler_state_dict`
+  - `scaler_state_dict`
+  - sampler epoch 与历史 `train_history`
+
+### warm-start continue
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --resume-run-dir daily_research\output\<old_run> --resume-mode warm_start --epochs 16
+```
+
+- `warm_start` 只加载选中模型参数，不继承 optimizer / scheduler / scaler 状态。
+
+### 家族级 epoch frontier 校准
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_family_epoch_frontier_calibration.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+- 默认家族：
+  - `baseline`
+  - `structure`
+  - `short_alpha`
+  - `dynamic_graph`
+- 默认协议：
+  - 先跑 `4/8/12/16`
+  - 如果最右边界仍是最优，或仍有 objective-aligned budget pressure，再扩到 `24/32`
+- 最新冻结预算 manifest：
+  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+- 当前已冻结的家族预算：
+  - `baseline -> 12`
+  - `structure -> 12`
+  - `short_alpha -> 32`
+  - `dynamic_graph -> 16`
+- 当前 frontier 结果目录：
+  - `daily_research/output/deep_alpha_family_epoch_frontier_20260404_r2`
+
+### rich experiment 读取冻结预算
+- `run_architecture_execution_objective_head2head.py`
+- `run_short_alpha_formal_head2head.py`
+- `run_dynamic_graph_formal_ablation_matrix.py`
+
+- 这三条 formal runner 现在默认都会读取：
+  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+- 因此后续 rich experiment 默认不再手填统一 `--epochs`；除非显式做 budget stress test，否则应让 runner 直接读取家族预算 manifest

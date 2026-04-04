@@ -129,5 +129,9 @@ def build_active_strategy_manifest(
         "execution_alignment_profile": execution_profile,
         "primary_research_backtest_label": str(strategy_metrics.get("primary_research_backtest_label", "") or ""),
         "research_objective_mode": str(strategy_metrics.get("research_objective_mode", "") or ""),
+        "research_time_unit": str(strategy_metrics.get("research_time_unit", "") or ""),
+        "valid_months": int(strategy_metrics.get("valid_months", 0) or 0),
+        "train_eval_window_months": int(strategy_metrics.get("train_eval_window_months", 0) or 0),
+        "adaptive_task_window_months": int(strategy_metrics.get("adaptive_task_window_months", 0) or 0),
         "promoted_at": str(promoted_at or ""),
     }

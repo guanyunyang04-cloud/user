@@ -27,15 +27,18 @@ from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, ge
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.models import MaskedPatchPretrainer
 from daily_research.deep_alpha.pipeline_utils import (
+    RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    RESEARCH_TIME_UNIT_TRADING_DAYS,
     build_target_loss_weights,
     load_cached_or_build_liquidity_buckets,
     load_cached_or_build_rolling_pool,
     load_cached_or_fit_market_state,
     load_raw_market_data,
     load_stocks_from_file,
+    normalize_research_time_unit,
     parse_horizons,
     parse_stocks,
-    resolve_split_dates,
+    resolve_split_window,
     resolve_stocks_file,
     subset_df_dict_to_stocks,
 )
@@ -67,10 +70,18 @@ def parse_args():
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--lookback-window", type=int, default=120)
     parser.add_argument("--prediction-horizons", default="5,10,20")
+    parser.add_argument(
+        "--research-time-unit",
+        choices=[RESEARCH_TIME_UNIT_TRADING_DAYS, RESEARCH_TIME_UNIT_CALENDAR_MONTHS],
+        default=RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+        help="Window protocol used to derive downstream train/valid boundaries for pretraining.",
+    )
     parser.add_argument("--train-end-date", default="")
     parser.add_argument("--valid-start-date", default="")
     parser.add_argument("--valid-days", type=int, default=252, help="Downstream formal holdout size; pretraining never uses dates after the implied train_end.")
+    parser.add_argument("--valid-months", type=int, default=12, help="Downstream formal holdout size in calendar months when research-time-unit=calendar_months.")
     parser.add_argument("--pretrain-valid-days", type=int, default=63, help="Last N train-side trading days reserved for self-supervised validation.")
+    parser.add_argument("--pretrain-valid-months", type=int, default=3, help="Last N train-side calendar months reserved for self-supervised validation.")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--pin-memory", action="store_true")
@@ -118,12 +129,21 @@ def parse_args():
     return parser.parse_args()
 
 
-def _resolve_pretrain_split(train_dates: pd.Index, pretrain_valid_days: int) -> tuple[pd.Timestamp, pd.Timestamp]:
-    dates = pd.to_datetime(train_dates)
-    if len(dates) <= max(pretrain_valid_days + 1, 5):
-        raise RuntimeError("Not enough train-side dates for pretraining split.")
-    valid_start = dates[max(0, len(dates) - int(pretrain_valid_days))]
-    train_end = dates[dates.get_loc(valid_start) - 1]
+def _resolve_pretrain_split(
+    train_dates: pd.Index,
+    pretrain_valid_days: int,
+    *,
+    research_time_unit: str,
+    pretrain_valid_months: int,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    train_end, valid_start, _valid_end = resolve_split_window(
+        train_dates,
+        "",
+        "",
+        pretrain_valid_days,
+        research_time_unit=research_time_unit,
+        valid_months=pretrain_valid_months,
+    )
     return pd.Timestamp(train_end), pd.Timestamp(valid_start)
 
 
@@ -139,6 +159,7 @@ def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
 
 def main():
     args = parse_args()
+    args.research_time_unit = normalize_research_time_unit(args.research_time_unit)
     if args.liquidity_pool and args.rolling_liquidity_pool:
         raise ValueError("Use either --liquidity-pool or --rolling-liquidity-pool, not both.")
     if args.rolling_liquidity_pool and (args.stocks or args.stocks_file):
@@ -154,9 +175,11 @@ def main():
         universe_scope=args.universe_scope,
         lookback_window=args.lookback_window,
         prediction_horizons=horizons,
+        research_time_unit=args.research_time_unit,
         train_end_date=args.train_end_date,
         valid_start_date=args.valid_start_date,
         valid_days=args.valid_days,
+        valid_months=args.valid_months,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
@@ -231,8 +254,20 @@ def main():
         rolling_membership_frame = rolling_membership_frame.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
 
     close = df_dict["Close"]
-    train_end, valid_start = resolve_split_dates(close.index, cfg.train_end_date, cfg.valid_start_date, cfg.valid_days)
-    pretrain_train_end, pretrain_valid_start = _resolve_pretrain_split(close.index[close.index <= train_end], args.pretrain_valid_days)
+    train_end, _valid_start, _valid_end = resolve_split_window(
+        close.index,
+        cfg.train_end_date,
+        cfg.valid_start_date,
+        cfg.valid_days,
+        research_time_unit=cfg.research_time_unit,
+        valid_months=cfg.valid_months,
+    )
+    pretrain_train_end, pretrain_valid_start = _resolve_pretrain_split(
+        close.index[close.index <= train_end],
+        args.pretrain_valid_days,
+        research_time_unit=cfg.research_time_unit,
+        pretrain_valid_months=args.pretrain_valid_months,
+    )
 
     stage_progress.complete_stage(1)
     stage_progress.start_stage(2, "Build market state and liquidity")
@@ -477,6 +512,11 @@ def main():
         "transformer_layers": cfg.transformer_layers,
         "dropout": cfg.dropout,
         "mask_ratio": args.mask_ratio,
+        "research_time_unit": str(cfg.research_time_unit),
+        "valid_days": int(cfg.valid_days),
+        "valid_months": int(cfg.valid_months),
+        "pretrain_valid_days": int(args.pretrain_valid_days),
+        "pretrain_valid_months": int(args.pretrain_valid_months),
         "train_end": str(train_end.date()),
         "pretrain_train_end": str(pretrain_train_end.date()),
         "pretrain_valid_start": str(pretrain_valid_start.date()),

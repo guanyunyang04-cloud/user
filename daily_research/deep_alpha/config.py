@@ -11,10 +11,14 @@ class DeepAlphaConfig:
     universe_scope: str = "all_a"
     lookback_window: int = 120
     prediction_horizons: tuple[int, ...] = (5, 10, 20)
+    research_time_unit: str = "calendar_months"
     train_end_date: str = ""
     valid_start_date: str = ""
     valid_days: int = 252
+    valid_months: int = 12
     train_eval_window_days: int = 126
+    train_eval_window_months: int = 6
+    adaptive_task_window_months: int = 6
     batch_size: int = 256
     num_workers: int = 0
     pin_memory: bool = True

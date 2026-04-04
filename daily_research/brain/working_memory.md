@@ -190,3 +190,93 @@
   - 先按 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 判定 formal winner
   - 再冻结 formal winner 的 selected execution profile 做 production full-fit 重训
   - 不再允许 production full-fit 在 3 天内部监控窗上静默改写 execution profile
+## Monthly Research Protocol
+- `deep_alpha` 主研究协议现在已经支持并默认采用 `calendar_months` 作为时间单位。
+- 当前月度默认窗口为：
+  - `valid_months = 12`
+  - `train_eval_window_months = 6`
+  - `adaptive_task_window_months = 6`
+- 月度协议不是把底层行情改成月线；底层仍然使用日频数据与 `next_open` 回测，但训练/验证切窗、近期训练评估窗口、自适应任务加权窗口，以及正式评估汇总都改为按自然月组织。
+- 研究产物现在必须同时落盘月度证据：
+  - `validation_rankic_monthly_summary.csv`
+  - `monthly_score_panel.csv`
+  - `monthly_target_weight_panel.csv`
+  - `monthly_backtest_summary.csv`
+- 若存在 execution-aligned 分支，还必须同时输出：
+  - `execution_aligned_monthly_score_panel.csv`
+  - `execution_aligned_monthly_target_weight_panel.csv`
+  - `execution_aligned_monthly_backtest_summary.csv`
+- 显式短窗仍保留日优先级：当命令已经明确给出 `train_end_date + valid_start_date + valid_days` 时，验证窗按显式交易日执行，而不是被月度默认窗口放大。
+- 这条优先级是为了保证 production internal monitor、blockwise retrain 与历史 formal runner 不会被月度默认值误伤。
+# 2026-04-04 月度 execution-first rich experiment 重跑结论
+
+- 已完成的正式重跑：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
+  - `daily_research/output/short_alpha_formal_head2head_20260403_monthly_r1`
+  - `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1`
+- 当前最重要结论没有被推翻：
+  - `baseline_current` 仍是统一后的 execution-first formal winner
+  - 三窗 realistic replay 均值：`4.72% / 0.258`
+  - `structure_context_only` 仍未通过 execution upgrade gate：`1.17% / 0.128`
+- `short_alpha` 线出现了新的可跟进候选：
+  - `state_liquidity_listwise_v1` 三窗 mean excess annual = `23.25%`
+  - 基线 `baseline_current` = `22.71%`
+  - 但 mean excess Sharpe 仍低于基线：`1.444 < 1.488`
+  - 当前判定是“值得推进到 execution-objective 对齐”，不是“直接升格默认执行”
+- `dynamic_graph` 线的旧结论被改写：
+  - `dynamic_graph_no_priors` 三窗 mean excess annual / Sharpe = `20.98% / 1.083`
+  - 明显强于 `dynamic_graph_v1` 的 `14.67% / 0.786`
+  - 当前解释：在月度 execution-first 主板 formal 协议下，industry/style priors 现在更像噪声源而不是稳定增益
+- 本轮还顺手修了两条研究基础设施：
+  - `run_dynamic_graph_formal_ablation_matrix.py` 现在显式传 `--end-date 20260401`
+  - `run_deep_alpha_research.py` / `pipeline_utils.py` 新增 `--force-raw-cache-path`，用于 TQ 波动时直接复用已落盘 raw cache
+  - `baseline/data_provider.py` 对 TQ 初始化增加了独立 session 文件与 close/retry
+
+# 2026-04-04 finetune epoch 预算充分性 formal 结论
+
+- 输出目录：
+  - `daily_research/output/deep_alpha_epoch_budget_formal_20260404_r1`
+- 当前统一判决：
+  - `baseline_current` 在 monthly execution-first 三窗下，当前 `8` epoch 不足
+  - `16` epoch 的 mean replay excess annual / Sharpe = `8.50% / 0.494`
+  - `8` epoch = `4.72% / 0.258`
+  - `4` epoch = `4.95% / 0.266`
+  - `12` epoch 与 `8` epoch 基本相同
+- 关键暴露：
+  - 真正的提升集中在窗口 `20240301_20250317`
+  - selected checkpoint 从 `epoch 7` 延后到 `epoch 13`
+  - execution profile 保持不变，说明增益来自训练预算而不是桥接 profile 偶然变化
+  - 四档 `undertrained_count = 0/3` 且 `selected_epoch_hits_cap = 0/3`，说明当前基于 `valid_loss` 的 undertrained 诊断会漏掉 execution-first 的晚出现收益 checkpoint
+- 当前建议：
+  - 后续凡是重跑 `baseline_current` monthly execution-first formal，对照预算应以 `16` epoch 作为主参考
+## 训练协议主线更新
+
+- `deep_alpha` 训练主链现已支持两种继续训练协议：
+  - `strict resume`
+  - `warm_start continue`
+- `strict resume` 会恢复：
+  - `last_model_state_dict`
+  - `optimizer / scheduler / scaler`
+  - sampler epoch
+  - 既有 `train_history`
+- `warm_start` 只恢复选中模型参数，不继承旧 optimizer 路径。
+- execution-first 预算压力诊断现已与 `valid_loss` 脱钩，主看：
+  - `selected_epoch_ratio`
+  - `selected_in_tail`
+  - `selected_at_right_boundary`
+  - `objective_aligned_budget_pressure`
+- 家族级 epoch budget 现在必须先在 calibration windows 上冻结，再去跑正式 rich experiment。
+- 当前冻结预算 manifest 真源：
+  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+- `2026-04-04` 家族级 monthly execution-first frontier 已正式落盘到：
+  - `daily_research/output/deep_alpha_family_epoch_frontier_20260404_r2`
+- 当前冻结预算判决更新为：
+  - `baseline_current -> 12`
+  - `structure_context_only -> 12`
+  - `state_liquidity_listwise_v1 -> 32`
+  - `dynamic_graph_no_priors -> 16`
+- 当前应对这些预算的解释是：
+  - `baseline` 在 `32` 右边界仍有 budget pressure，因此 `12` 只是当前 tested frontier 最优，不是“已证实训够”的终点
+  - `structure` 在 `12/16` 打平且 `16` 无 budget pressure，当前可视为已基本训够
+  - `short_alpha` 在 `32` 右边界仍是最优，说明该家族当前最吃预算，后续仍值得继续扩 frontier
+  - `dynamic_graph` 在 `16/24` 打平且 `24` 无 budget pressure，当前可视为 `16` 已够用

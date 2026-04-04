@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.short_alpha_profiles import get_profile
+from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
@@ -26,7 +27,7 @@ class FormalWindow:
     label: str
     train_end: str
     valid_start: str
-    valid_days: int = 252
+    valid_months: int = 12
 
 
 WINDOWS: tuple[FormalWindow, ...] = (
@@ -34,22 +35,22 @@ WINDOWS: tuple[FormalWindow, ...] = (
     FormalWindow(label="20240301_20250317", train_end="2024-02-29", valid_start="2024-03-01"),
     FormalWindow(label="20250318_20260331", train_end="2025-03-17", valid_start="2025-03-18"),
 )
+RESEARCH_TIME_UNIT = "calendar_months"
+TRAIN_EVAL_WINDOW_MONTHS = 6
 
 PROFILES_TO_RUN: tuple[str, ...] = ("baseline_current", "state_liquidity_listwise_v1")
 
-REUSE_METRICS: dict[str, dict[str, str]] = {
-    "baseline_current": {
-        "20250318_20260331": "daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1/runs/baseline_current/metrics.json",
-    },
-    "state_liquidity_listwise_v1": {
-        "20250318_20260331": "daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1/runs/state_liquidity_listwise_v1/metrics.json",
-    },
-}
+REUSE_METRICS: dict[str, dict[str, str]] = {}
+
+
+def _resolve_family_key(profile_name: str) -> str:
+    normalized = str(profile_name or "").strip().lower()
+    return "baseline" if normalized == "baseline_current" else "short_alpha"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run formal multi-window head-to-head for the short-alpha state_liquidity_listwise candidate.")
-    parser.add_argument("--root-tag", default="short_alpha_formal_head2head_20260402_r1")
+    parser.add_argument("--root-tag", default="short_alpha_formal_head2head_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument(
@@ -57,6 +58,7 @@ def parse_args() -> argparse.Namespace:
         default=",".join(PROFILES_TO_RUN),
         help="Comma-separated short-alpha profile names from short_alpha_profiles.py",
     )
+    parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
     return parser.parse_args()
 
 
@@ -65,8 +67,17 @@ def _run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, cwd=PROJECT_ROOT)
 
 
-def _build_command(*, python_executable: str, experiment_tag: str, profile_name: str, window: FormalWindow) -> list[str]:
+def _build_command(
+    *,
+    python_executable: str,
+    experiment_tag: str,
+    profile_name: str,
+    window: FormalWindow,
+    family_epoch_budget_manifest: str,
+) -> list[str]:
     profile = get_profile(profile_name)
+    family_key = _resolve_family_key(profile_name)
+    epoch_budget = resolve_epoch_budget_for_family(family_key, manifest_path=family_epoch_budget_manifest, fallback_epochs=8)
     cmd = [
         python_executable,
         str(RUN_SCRIPT),
@@ -80,12 +91,16 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "000300.SH",
         "--liquidity-pool",
         "liquid500",
+        "--research-time-unit",
+        RESEARCH_TIME_UNIT,
         "--train-end-date",
         window.train_end,
         "--valid-start-date",
         window.valid_start,
         "--valid-days",
-        str(window.valid_days),
+        "0",
+        "--valid-months",
+        str(window.valid_months),
         "--lookback-window",
         "120",
         "--batch-size",
@@ -107,11 +122,11 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--weight-decay",
         "0.0001",
         "--epochs",
-        "8",
+        str(epoch_budget),
         "--min-epochs",
         "1",
         "--early-stop-patience",
-        "8",
+        str(max(int(epoch_budget), 8)),
         "--lr-plateau-patience",
         "4",
         "--lr-plateau-factor",
@@ -127,7 +142,9 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--score-head-method",
         "manual",
         "--train-eval-window-days",
-        "126",
+        "0",
+        "--train-eval-window-months",
+        str(TRAIN_EVAL_WINDOW_MONTHS),
         "--dynamic-graph-layer",
         "--dynamic-graph-top-k",
         "8",
@@ -223,11 +240,13 @@ def main() -> None:
                         experiment_tag=experiment_tag,
                         profile_name=profile.name,
                         window=window,
+                        family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
                     )
                     _run_command(command)
             metrics = _load_metrics(metrics_path)
             _, holdout = resolve_primary_backtest(metrics)
             holdout = dict(holdout)
+            family_key = _resolve_family_key(profile.name)
             source_runs[profile.name][window.label] = str(metrics_path.resolve())
             collected_rows.append(
                 {
@@ -235,6 +254,8 @@ def main() -> None:
                     "window_label": window.label,
                     "metrics_path": str(metrics_path.resolve()),
                     "reused_existing": reused_existing,
+                    "family_key": family_key,
+                    "epoch_budget": int(metrics.get("epochs", 0) or resolve_epoch_budget_for_family(family_key, manifest_path=str(args.family_epoch_budget_manifest), fallback_epochs=8)),
                     "feature_count": int(metrics.get("feature_count", 0)),
                     "state_context": bool(metrics.get("state_context", False)),
                     "liquidity_context": bool(metrics.get("liquidity_context", False)),
@@ -294,6 +315,7 @@ def main() -> None:
                 "mean_excess_sharpe": float(frame["excess_sharpe"].mean()),
                 "mean_excess_max_drawdown": float(frame["excess_max_drawdown"].mean()),
                 "mean_avg_turnover": float(frame["avg_turnover"].mean()),
+                "epoch_budget": int(frame["epoch_budget"].max()),
                 "wins_by_excess_annual_return": int(compare_df["wins_excess_annual_return"].sum()) if profile_name == candidate_name else 0,
                 "wins_by_excess_sharpe": int(compare_df["wins_excess_sharpe"].sum()) if profile_name == candidate_name else 0,
                 "reused_window_count": int(frame["reused_existing"].sum()),
@@ -315,11 +337,15 @@ def main() -> None:
         "",
         "## Protocol",
         "- window_count: `3`",
+        f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOWS[0].valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
         "- backbone: `patch_transformer + dynamic_graph_v1`",
+        "- objective: `execution_first + train_eval_auto execution alignment`",
         "- candidate: `state_liquidity_listwise_v1`",
         "- baseline: `baseline_current`",
+        f"- epoch_budget_baseline: `{int(baseline_summary['epoch_budget'])}`",
+        f"- epoch_budget_candidate: `{int(candidate_summary['epoch_budget'])}`",
         "",
         "## Mean Summary",
         f"- candidate excess annual: `{_format_pct(float(candidate_summary['mean_excess_annual_return']))}`",

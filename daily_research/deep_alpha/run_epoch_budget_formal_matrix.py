@@ -9,13 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import torch
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
-from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
+from daily_research.deep_alpha.architecture_profiles import get_profile
 from daily_research.deep_alpha.research_objective import (
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
     DEFAULT_RESEARCH_OBJECTIVE_MODE,
@@ -26,11 +24,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_research.py"
 EXTERNAL_REPLAY_SCRIPT = PROJECT_ROOT / "daily_research" / "baseline" / "backtest_external_score_panel.py"
-RECENT_H2H_SCRIPT = PROJECT_ROOT / "daily_research" / "tools" / "execution_candidate_multiwindow_h2h.py"
-
-CURRENT_DEFAULT_REALISTIC_RUN = (
-    PROJECT_ROOT / "daily_research" / "output" / "execution_costreview_regoff_k2_realistic_20260401_r1"
-)
 
 EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (
     "raw_1d",
@@ -56,24 +49,15 @@ WINDOWS: tuple[FormalWindow, ...] = (
 RESEARCH_TIME_UNIT = "calendar_months"
 TRAIN_EVAL_WINDOW_MONTHS = 12
 
-DEFAULT_PROFILES: tuple[str, ...] = (
-    "baseline_current",
-    "structure_context_only",
-)
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run architecture execution-objective formal head-to-head with realistic external replay."
+        description="Run a monthly execution-first formal sensitivity study for finetune epoch budget."
     )
-    parser.add_argument("--root-tag", default="deep_alpha_architecture_execalign_formal_20260403_monthly_r1")
+    parser.add_argument("--root-tag", default="deep_alpha_epoch_budget_formal_20260404_r1")
     parser.add_argument("--python-executable", default=sys.executable)
-    parser.add_argument(
-        "--profiles",
-        default=",".join(DEFAULT_PROFILES),
-        help="Comma-separated architecture profile names from architecture_profiles.py",
-    )
-    parser.add_argument("--list-profiles", action="store_true")
+    parser.add_argument("--profile", default="baseline_current")
+    parser.add_argument("--epoch-budgets", default="4,8,12,16")
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
@@ -90,7 +74,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)
     parser.add_argument("--execution-alignment-objective", default="robust_composite")
-    parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
     return parser.parse_args()
 
 
@@ -99,11 +82,28 @@ def _run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, cwd=PROJECT_ROOT)
 
 
+def _parse_epoch_budgets(raw: str) -> list[int]:
+    values: list[int] = []
+    for item in str(raw or "").split(","):
+        token = item.strip()
+        if not token:
+            continue
+        value = int(token)
+        if value <= 0:
+            raise ValueError(f"Epoch budget must be positive: {token}")
+        values.append(value)
+    ordered = sorted(set(values))
+    if not ordered:
+        raise ValueError("No epoch budgets were provided.")
+    return ordered
+
+
 def _build_research_command(
     *,
     python_executable: str,
     experiment_tag: str,
     profile_name: str,
+    epoch_budget: int,
     window: FormalWindow,
     transaction_cost_bps: float,
     slippage_bps: float,
@@ -112,11 +112,8 @@ def _build_research_command(
     checkpoint_selection_objective: str,
     checkpoint_selection_min_improvement: float,
     execution_alignment_objective: str,
-    family_epoch_budget_manifest: str,
 ) -> list[str]:
     profile = get_profile(profile_name)
-    family_key = "structure" if str(profile.category) == "structure" else "baseline"
-    epoch_budget = resolve_epoch_budget_for_family(family_key, manifest_path=family_epoch_budget_manifest, fallback_epochs=8)
     cmd = [
         python_executable,
         str(RUN_SCRIPT),
@@ -311,45 +308,12 @@ def _build_external_replay_command(
     ]
 
 
-def _build_recent_h2h_command(
-    *,
-    python_executable: str,
-    run_a: Path,
-    label_a: str,
-    run_b: Path,
-    label_b: str,
-    output_dir: Path,
-) -> list[str]:
-    return [
-        python_executable,
-        str(RECENT_H2H_SCRIPT),
-        "--run-a",
-        str(run_a),
-        "--label-a",
-        label_a,
-        "--run-b",
-        str(run_b),
-        "--label-b",
-        label_b,
-        "--bridge-start",
-        "2025-03-18",
-        "--weak-start",
-        "2025-09-05",
-        "--output-dir",
-        str(output_dir),
-    ]
+def _resolve_metrics_path(root_tag: str, profile_name: str, epoch_budget: int, window: FormalWindow) -> Path:
+    return OUTPUT_ROOT / root_tag / "runs" / f"{profile_name}_e{epoch_budget}_{window.label}" / "metrics.json"
 
 
-def _resolve_metrics_path(root_tag: str, profile_name: str, window: FormalWindow) -> Path:
-    return OUTPUT_ROOT / root_tag / "runs" / f"{profile_name}_{window.label}" / "metrics.json"
-
-
-def _resolve_replay_metrics_path(root_tag: str, profile_name: str, window: FormalWindow) -> Path:
-    return OUTPUT_ROOT / root_tag / "replays" / f"{profile_name}_{window.label}" / "metrics.json"
-
-
-def _resolve_model_path(metrics_path: Path) -> Path:
-    return metrics_path.parent / "deep_alpha_model.pt"
+def _resolve_replay_metrics_path(root_tag: str, profile_name: str, epoch_budget: int, window: FormalWindow) -> Path:
+    return OUTPUT_ROOT / root_tag / "replays" / f"{profile_name}_e{epoch_budget}_{window.label}" / "metrics.json"
 
 
 def _load_metrics(path: Path) -> dict[str, Any]:
@@ -358,19 +322,6 @@ def _load_metrics(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"metrics.json is not a JSON object: {path}")
     return payload
-
-
-def _extract_artifact_summary(model_path: Path) -> dict[str, Any]:
-    artifact = torch.load(model_path, map_location="cpu", weights_only=False)
-    if not isinstance(artifact, dict):
-        raise ValueError(f"Unexpected model artifact payload: {model_path}")
-    config = artifact.get("config") if isinstance(artifact.get("config"), dict) else {}
-    state_dict = artifact.get("model_state_dict") if isinstance(artifact.get("model_state_dict"), dict) else {}
-    parameter_count = int(sum(int(tensor.numel()) for tensor in state_dict.values()))
-    return {
-        "config": config,
-        "parameter_count": parameter_count,
-    }
 
 
 def _format_pct(value: float) -> str:
@@ -383,35 +334,28 @@ def _format_float(value: float) -> str:
 
 def main() -> None:
     args = parse_args()
-    if args.list_profiles:
-        print("\n".join(list_profile_lines()))
-        return
-
     root_tag = str(args.root_tag).strip()
-    profile_names = [item.strip() for item in str(args.profiles).split(",") if item.strip()]
-    if not profile_names:
-        raise ValueError("No architecture profiles were provided.")
-    if "baseline_current" not in profile_names:
-        raise ValueError("The execution-objective head-to-head requires baseline_current to be included.")
-    if "structure_context_only" not in profile_names:
-        raise ValueError("The execution-objective head-to-head requires structure_context_only to be included.")
+    profile_name = str(args.profile).strip()
+    epoch_budgets = _parse_epoch_budgets(args.epoch_budgets)
+    profile = get_profile(profile_name)
 
     collected_rows: list[dict[str, Any]] = []
     source_runs: dict[str, dict[str, str]] = {}
     replay_runs: dict[str, dict[str, str]] = {}
 
-    for profile_name in profile_names:
-        profile = get_profile(profile_name)
-        source_runs[profile.name] = {}
-        replay_runs[profile.name] = {}
+    for epoch_budget in epoch_budgets:
+        budget_key = f"e{epoch_budget}"
+        source_runs[budget_key] = {}
+        replay_runs[budget_key] = {}
         for window in WINDOWS:
-            metrics_path = _resolve_metrics_path(root_tag, profile.name, window)
+            metrics_path = _resolve_metrics_path(root_tag, profile.name, epoch_budget, window)
             if not metrics_path.exists() or args.force_rerun:
-                experiment_tag = f"{root_tag}/runs/{profile.name}_{window.label}"
+                experiment_tag = f"{root_tag}/runs/{profile.name}_e{epoch_budget}_{window.label}"
                 command = _build_research_command(
                     python_executable=args.python_executable,
                     experiment_tag=experiment_tag,
                     profile_name=profile.name,
+                    epoch_budget=epoch_budget,
                     window=window,
                     transaction_cost_bps=args.transaction_cost_bps,
                     slippage_bps=args.slippage_bps,
@@ -420,20 +364,18 @@ def main() -> None:
                     checkpoint_selection_objective=str(args.checkpoint_selection_objective),
                     checkpoint_selection_min_improvement=float(args.checkpoint_selection_min_improvement),
                     execution_alignment_objective=str(args.execution_alignment_objective),
-                    family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
                 )
                 _run_command(command)
 
             metrics = _load_metrics(metrics_path)
-            model_summary = _extract_artifact_summary(_resolve_model_path(metrics_path))
             run_dir = metrics_path.parent
-            replay_metrics_path = _resolve_replay_metrics_path(root_tag, profile.name, window)
+            replay_metrics_path = _resolve_replay_metrics_path(root_tag, profile.name, epoch_budget, window)
             if not replay_metrics_path.exists() or args.force_rerun:
                 replay_command = _build_external_replay_command(
                     python_executable=args.python_executable,
                     output_root=OUTPUT_ROOT / root_tag,
-                    replay_tag=f"replays/{profile.name}_{window.label}",
-                    candidate_label=f"{profile.name}_execalign_realistic_{window.label}",
+                    replay_tag=f"replays/{profile.name}_e{epoch_budget}_{window.label}",
+                    candidate_label=f"{profile.name}_e{epoch_budget}_{window.label}",
                     score_panel_csv=run_dir / "execution_aligned_daily_score_panel.csv",
                     target_weight_panel_csv=run_dir / "execution_aligned_daily_target_weight_panel.csv",
                     valid_start=window.valid_start,
@@ -446,34 +388,43 @@ def main() -> None:
 
             raw_holdout = dict(metrics.get("holdout_backtest", {}))
             aligned_holdout = dict(metrics.get("execution_aligned_holdout_backtest", {}))
+            training = dict(metrics.get("training_diagnostics", {}))
             selected_train = dict(metrics.get("execution_alignment_selected_train_metrics", {}))
 
-            source_runs[profile.name][window.label] = str(metrics_path.resolve())
-            replay_runs[profile.name][window.label] = str(replay_metrics_path.resolve())
+            source_runs[budget_key][window.label] = str(metrics_path.resolve())
+            replay_runs[budget_key][window.label] = str(replay_metrics_path.resolve())
+            epochs_completed = int(training.get("epochs_completed", 0) or 0)
+            selected_epoch = int(training.get("selected_epoch", 0) or 0)
+            best_epoch = int(training.get("best_epoch", 0) or 0)
             collected_rows.append(
                 {
                     "profile_name": profile.name,
-                    "category": profile.category,
+                    "epoch_budget": int(epoch_budget),
                     "window_label": window.label,
                     "metrics_path": str(metrics_path.resolve()),
                     "replay_metrics_path": str(replay_metrics_path.resolve()),
-                    "parameter_count": int(model_summary["parameter_count"]),
-                    "feature_count": int(metrics.get("feature_count", 0)),
                     "selected_execution_profile": str(metrics.get("execution_alignment_profile", "")),
-                    "selected_execution_profile_description": str(metrics.get("execution_alignment_profile_description", "")),
                     "raw_excess_annual_return": float(raw_holdout.get("excess_annual_return", 0.0)),
                     "raw_excess_sharpe": float(raw_holdout.get("excess_sharpe", 0.0)),
-                    "raw_excess_max_drawdown": float(raw_holdout.get("excess_max_drawdown", 0.0)),
-                    "raw_avg_turnover": float(raw_holdout.get("avg_turnover", 0.0)),
                     "aligned_excess_annual_return": float(aligned_holdout.get("excess_annual_return", 0.0)),
                     "aligned_excess_sharpe": float(aligned_holdout.get("excess_sharpe", 0.0)),
-                    "aligned_excess_max_drawdown": float(aligned_holdout.get("excess_max_drawdown", 0.0)),
                     "aligned_avg_turnover": float(aligned_holdout.get("avg_turnover", 0.0)),
                     "replay_excess_annual_return": float(replay_metrics.get("excess_annual_return", 0.0)),
                     "replay_excess_sharpe": float(replay_metrics.get("excess_sharpe", 0.0)),
                     "replay_excess_max_drawdown": float(replay_metrics.get("excess_max_drawdown", 0.0)),
                     "replay_avg_turnover": float(replay_metrics.get("avg_turnover", 0.0)),
-                    "replay_annual_return": float(replay_metrics.get("annual_return", 0.0)),
+                    "epochs_requested": int(training.get("epochs_requested", 0) or 0),
+                    "epochs_completed": epochs_completed,
+                    "best_epoch": best_epoch,
+                    "selected_epoch": selected_epoch,
+                    "best_valid_loss": float(training.get("best_valid_loss", float("nan"))),
+                    "final_valid_loss": float(training.get("final_valid_loss", float("nan"))),
+                    "training_status": str(training.get("status", "")),
+                    "still_improving": bool(training.get("still_improving", False)),
+                    "selected_metric_name": str(training.get("selected_metric_name", "")),
+                    "selected_metric_value": float(training.get("selected_metric_value", float("nan"))),
+                    "selected_epoch_hits_cap": bool(selected_epoch == epochs_completed and epochs_completed > 0),
+                    "best_epoch_hits_cap": bool(best_epoch == epochs_completed and epochs_completed > 0),
                     "train_mean_window_excess_annual_return": float(
                         selected_train.get("mean_window_excess_annual_return", float("nan"))
                     ),
@@ -486,63 +437,22 @@ def main() -> None:
                 }
             )
 
-    detail_df = pd.DataFrame(collected_rows).sort_values(["profile_name", "window_label"]).reset_index(drop=True)
-    baseline_name = "baseline_current"
-    baseline_lookup = (
-        detail_df[detail_df["profile_name"] == baseline_name]
-        .set_index("window_label")[
-            [
-                "raw_excess_annual_return",
-                "raw_excess_sharpe",
-                "aligned_excess_annual_return",
-                "aligned_excess_sharpe",
-                "replay_excess_annual_return",
-                "replay_excess_sharpe",
-            ]
-        ]
-        .to_dict(orient="index")
-    )
-
-    comparison_rows: list[dict[str, Any]] = []
-    for _, row in detail_df[detail_df["profile_name"] != baseline_name].iterrows():
-        base = baseline_lookup[str(row["window_label"])]
-        comparison_rows.append(
-            {
-                "profile_name": row["profile_name"],
-                "window_label": row["window_label"],
-                "selected_execution_profile": row["selected_execution_profile"],
-                "delta_raw_excess_annual_return": float(row["raw_excess_annual_return"] - base["raw_excess_annual_return"]),
-                "delta_raw_excess_sharpe": float(row["raw_excess_sharpe"] - base["raw_excess_sharpe"]),
-                "delta_aligned_excess_annual_return": float(
-                    row["aligned_excess_annual_return"] - base["aligned_excess_annual_return"]
-                ),
-                "delta_aligned_excess_sharpe": float(row["aligned_excess_sharpe"] - base["aligned_excess_sharpe"]),
-                "delta_replay_excess_annual_return": float(
-                    row["replay_excess_annual_return"] - base["replay_excess_annual_return"]
-                ),
-                "delta_replay_excess_sharpe": float(row["replay_excess_sharpe"] - base["replay_excess_sharpe"]),
-                "wins_aligned_excess_annual_return": bool(
-                    row["aligned_excess_annual_return"] > base["aligned_excess_annual_return"]
-                ),
-                "wins_aligned_excess_sharpe": bool(row["aligned_excess_sharpe"] > base["aligned_excess_sharpe"]),
-                "wins_replay_excess_annual_return": bool(
-                    row["replay_excess_annual_return"] > base["replay_excess_annual_return"]
-                ),
-                "wins_replay_excess_sharpe": bool(row["replay_excess_sharpe"] > base["replay_excess_sharpe"]),
-            }
-        )
-
-    comparison_df = pd.DataFrame(comparison_rows).sort_values(["profile_name", "window_label"]).reset_index(drop=True)
-
+    detail_df = pd.DataFrame(collected_rows).sort_values(["epoch_budget", "window_label"]).reset_index(drop=True)
     summary_rows: list[dict[str, Any]] = []
-    for profile_name in profile_names:
-        frame = detail_df[detail_df["profile_name"] == profile_name]
-        compare_frame = comparison_df[comparison_df["profile_name"] == profile_name]
+    for epoch_budget in epoch_budgets:
+        frame = detail_df[detail_df["epoch_budget"] == epoch_budget]
         summary_rows.append(
             {
-                "profile_name": profile_name,
+                "epoch_budget": int(epoch_budget),
                 "window_count": int(len(frame)),
                 "selected_execution_profiles": ",".join(sorted(set(str(x) for x in frame["selected_execution_profile"]))),
+                "stable_count": int(frame["training_status"].eq("stable").sum()),
+                "undertrained_count": int(frame["training_status"].eq("undertrained").sum()),
+                "plateaued_count": int(frame["training_status"].eq("plateaued").sum()),
+                "selected_epoch_hits_cap_count": int(frame["selected_epoch_hits_cap"].sum()),
+                "best_epoch_hits_cap_count": int(frame["best_epoch_hits_cap"].sum()),
+                "mean_selected_epoch": float(frame["selected_epoch"].mean()),
+                "mean_best_epoch": float(frame["best_epoch"].mean()),
                 "mean_raw_excess_annual_return": float(frame["raw_excess_annual_return"].mean()),
                 "mean_raw_excess_sharpe": float(frame["raw_excess_sharpe"].mean()),
                 "mean_aligned_excess_annual_return": float(frame["aligned_excess_annual_return"].mean()),
@@ -551,143 +461,78 @@ def main() -> None:
                 "mean_replay_excess_sharpe": float(frame["replay_excess_sharpe"].mean()),
                 "mean_replay_excess_max_drawdown": float(frame["replay_excess_max_drawdown"].mean()),
                 "mean_replay_avg_turnover": float(frame["replay_avg_turnover"].mean()),
-                "wins_aligned_excess_annual_return": int(compare_frame["wins_aligned_excess_annual_return"].sum())
-                if not compare_frame.empty
-                else 0,
-                "wins_aligned_excess_sharpe": int(compare_frame["wins_aligned_excess_sharpe"].sum())
-                if not compare_frame.empty
-                else 0,
-                "wins_replay_excess_annual_return": int(compare_frame["wins_replay_excess_annual_return"].sum())
-                if not compare_frame.empty
-                else 0,
-                "wins_replay_excess_sharpe": int(compare_frame["wins_replay_excess_sharpe"].sum())
-                if not compare_frame.empty
-                else 0,
+                "mean_selected_metric_value": float(frame["selected_metric_value"].mean()),
             }
         )
     summary_df = pd.DataFrame(summary_rows).sort_values(
-        ["mean_replay_excess_sharpe", "mean_replay_excess_annual_return"], ascending=[False, False]
+        ["mean_replay_excess_sharpe", "mean_replay_excess_annual_return"],
+        ascending=[False, False],
     ).reset_index(drop=True)
 
-    recent_window_label = "20250318_20260331"
-    recent_baseline_replay_run = (_resolve_replay_metrics_path(root_tag, baseline_name, WINDOWS[-1])).parent
-    current_default_run = CURRENT_DEFAULT_REALISTIC_RUN.resolve()
-    current_default_metrics = _load_metrics(current_default_run / "metrics.json")
-    recent_structure_run = (_resolve_replay_metrics_path(root_tag, "structure_context_only", WINDOWS[-1])).parent
-    current_h2h_dir = OUTPUT_ROOT / root_tag / "recent_h2h_structure_vs_current_default"
-    baseline_h2h_dir = OUTPUT_ROOT / root_tag / "recent_h2h_structure_vs_baseline_execalign"
-    baseline_vs_current_h2h_dir = OUTPUT_ROOT / root_tag / "recent_h2h_baseline_execalign_vs_current_default"
-    _run_command(
-        _build_recent_h2h_command(
-            python_executable=args.python_executable,
-            run_a=recent_structure_run,
-            label_a="structure_execalign_realistic",
-            run_b=current_default_run,
-            label_b="regoff_k2_realistic",
-            output_dir=current_h2h_dir,
-        )
-    )
-    _run_command(
-        _build_recent_h2h_command(
-            python_executable=args.python_executable,
-            run_a=recent_structure_run,
-            label_a="structure_execalign_realistic",
-            run_b=recent_baseline_replay_run,
-            label_b="baseline_execalign_realistic",
-            output_dir=baseline_h2h_dir,
-        )
-    )
-    _run_command(
-        _build_recent_h2h_command(
-            python_executable=args.python_executable,
-            run_a=recent_baseline_replay_run,
-            label_a="baseline_execalign_realistic",
-            run_b=current_default_run,
-            label_b="regoff_k2_realistic",
-            output_dir=baseline_vs_current_h2h_dir,
-        )
-    )
-
-    weakest_row = comparison_df.loc[comparison_df["profile_name"] == "structure_context_only"].sort_values(
-        "delta_replay_excess_annual_return"
-    ).iloc[0]
-    recent_structure_metrics = _load_metrics(recent_structure_run / "metrics.json")
-    recent_baseline_metrics = _load_metrics(recent_baseline_replay_run / "metrics.json")
+    best_budget = int(summary_df.iloc[0]["epoch_budget"])
+    current_budget = 8 if 8 in epoch_budgets else int(epoch_budgets[0])
+    current_row = summary_df[summary_df["epoch_budget"] == current_budget].iloc[0]
+    best_row = summary_df.iloc[0]
+    weakest_replay_row = detail_df.sort_values("replay_excess_annual_return").iloc[0]
 
     output_dir = OUTPUT_ROOT / root_tag
     output_dir.mkdir(parents=True, exist_ok=True)
     detail_df.to_csv(output_dir / "window_detail.csv", index=False, encoding="utf-8-sig")
-    comparison_df.to_csv(output_dir / "baseline_comparison.csv", index=False, encoding="utf-8-sig")
-    summary_df.to_csv(output_dir / "profile_summary.csv", index=False, encoding="utf-8-sig")
+    summary_df.to_csv(output_dir / "epoch_budget_summary.csv", index=False, encoding="utf-8-sig")
     (output_dir / "source_runs.json").write_text(json.dumps(source_runs, ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "replay_runs.json").write_text(json.dumps(replay_runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     lines = [
-        "# Architecture Execution Objective Head-to-Head",
+        "# Finetune Epoch Budget Formal Sensitivity",
         "",
         "## Protocol",
-        "- window_count: `3`",
+        f"- profile: `{profile.name}`",
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
+        "- window_count: `3`",
+        f"- epoch_budgets: `{', '.join(str(x) for x in epoch_budgets)}`",
         "- model protocol: `top_bottom_bce + manual score head + next_open`",
         f"- research objective: `{args.research_objective_mode}`",
         f"- checkpoint selection: `{args.checkpoint_selection_objective}` (min improvement `{float(args.checkpoint_selection_min_improvement):.4f}`)",
         f"- execution alignment: `train_eval_auto / {args.execution_alignment_objective}`",
         f"- realistic cost: transaction `{float(args.transaction_cost_bps):.1f}` bps, slippage `{float(args.slippage_bps):.1f}` bps, sell-tax `{float(args.sell_tax_bps):.1f}` bps",
-        f"- execution candidates scanned: `{', '.join(EXECUTION_ALIGNMENT_CANDIDATES)}`",
         "",
         "## Mean Summary",
     ]
     for _, row in summary_df.iterrows():
         lines.append(
             "- "
-            f"`{row['profile_name']}`: "
-            f"mean aligned excess annual {_format_pct(row['mean_aligned_excess_annual_return'])}, "
-            f"mean aligned excess Sharpe {_format_float(row['mean_aligned_excess_sharpe'])}, "
+            f"`{int(row['epoch_budget'])}` epochs: "
             f"mean replay excess annual {_format_pct(row['mean_replay_excess_annual_return'])}, "
             f"mean replay excess Sharpe {_format_float(row['mean_replay_excess_sharpe'])}, "
+            f"mean aligned excess annual {_format_pct(row['mean_aligned_excess_annual_return'])}, "
+            f"undertrained windows {int(row['undertrained_count'])}/3, "
+            f"selected-at-cap {int(row['selected_epoch_hits_cap_count'])}/3, "
             f"selected profiles `{row['selected_execution_profiles']}`"
         )
-
     lines.extend(
         [
             "",
-            "## Baseline vs Structure",
+            "## Verdict",
             "- "
-            f"`structure_context_only` aligned wins: excess annual {int(summary_df.loc[summary_df['profile_name'] == 'structure_context_only', 'wins_aligned_excess_annual_return'].iloc[0])}/3, "
-            f"excess Sharpe {int(summary_df.loc[summary_df['profile_name'] == 'structure_context_only', 'wins_aligned_excess_sharpe'].iloc[0])}/3",
+            f"best replay budget: `{best_budget}` epochs "
+            f"(mean replay excess annual {_format_pct(best_row['mean_replay_excess_annual_return'])}, "
+            f"mean replay excess Sharpe {_format_float(best_row['mean_replay_excess_sharpe'])})",
             "- "
-            f"`structure_context_only` external replay wins: excess annual {int(summary_df.loc[summary_df['profile_name'] == 'structure_context_only', 'wins_replay_excess_annual_return'].iloc[0])}/3, "
-            f"excess Sharpe {int(summary_df.loc[summary_df['profile_name'] == 'structure_context_only', 'wins_replay_excess_sharpe'].iloc[0])}/3",
+            f"current reference budget: `{current_budget}` epochs "
+            f"(mean replay excess annual {_format_pct(current_row['mean_replay_excess_annual_return'])}, "
+            f"mean replay excess Sharpe {_format_float(current_row['mean_replay_excess_sharpe'])})",
             "- "
-            f"weakest replay window vs baseline: `{weakest_row['window_label']}` "
-            f"(delta excess annual {_format_pct(weakest_row['delta_replay_excess_annual_return'])}, "
-            f"delta excess Sharpe {_format_float(weakest_row['delta_replay_excess_sharpe'])})",
+            f"weakest replay window overall: budget `{int(weakest_replay_row['epoch_budget'])}` / "
+            f"`{weakest_replay_row['window_label']}` "
+            f"(excess annual {_format_pct(weakest_replay_row['replay_excess_annual_return'])}, "
+            f"excess Sharpe {_format_float(weakest_replay_row['replay_excess_sharpe'])})",
             "",
-            "## Recent Upgrade Gate",
-            "- "
-            f"recent `structure_execalign_realistic`: annual {_format_pct(recent_structure_metrics['annual_return'])}, "
-            f"excess annual {_format_pct(recent_structure_metrics['excess_annual_return'])}, "
-            f"excess Sharpe {_format_float(recent_structure_metrics['excess_sharpe'])}, "
-            f"max drawdown {_format_pct(recent_structure_metrics['max_drawdown'])}",
-            "- "
-            f"recent `baseline_execalign_realistic`: annual {_format_pct(recent_baseline_metrics['annual_return'])}, "
-            f"excess annual {_format_pct(recent_baseline_metrics['excess_annual_return'])}, "
-            f"excess Sharpe {_format_float(recent_baseline_metrics['excess_sharpe'])}, "
-            f"max drawdown {_format_pct(recent_baseline_metrics['max_drawdown'])}",
-            "- "
-            f"current default `regoff_k2_realistic`: annual {_format_pct(current_default_metrics['annual_return'])}, "
-            f"excess annual {_format_pct(current_default_metrics['excess_annual_return'])}, "
-            f"excess Sharpe {_format_float(current_default_metrics['excess_sharpe'])}, "
-            f"max drawdown {_format_pct(current_default_metrics['max_drawdown'])}",
-            "",
-            "## Weak-Window Review",
-            "- recent named-window H2H vs current default:",
-            f"  - `{current_h2h_dir.resolve() / 'summary.md'}`",
-            "- recent named-window H2H vs baseline execalign:",
-            f"  - `{baseline_h2h_dir.resolve() / 'summary.md'}`",
-            "- recent named-window H2H: baseline execalign vs current default:",
-            f"  - `{baseline_vs_current_h2h_dir.resolve() / 'summary.md'}`",
+            "## Artifacts",
+            f"- summary_csv: `daily_research/output/{root_tag}/epoch_budget_summary.csv`",
+            f"- detail_csv: `daily_research/output/{root_tag}/window_detail.csv`",
+            f"- source_runs: `daily_research/output/{root_tag}/source_runs.json`",
+            f"- replay_runs: `daily_research/output/{root_tag}/replay_runs.json`",
         ]
     )
     (output_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")

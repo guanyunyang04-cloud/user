@@ -19,6 +19,7 @@ from daily_research.execution.update_default_candidate_production import (
     _append_arg,
     _append_flag,
     _format_prediction_horizons,
+    _infer_research_time_unit,
     _format_score_horizon_weights,
     _format_state_thresholds,
     _format_task_loss_weights,
@@ -243,12 +244,16 @@ def _build_block_command(
     _append_arg(cmd, "--score-risk-state-thresholds", _format_state_thresholds(metrics.get("score_risk_state_thresholds")))
     _append_arg(cmd, "--score-head-method", metrics.get("score_head_method", "manual"))
     _append_flag(cmd, "--adaptive-task-weights", bool(metrics.get("adaptive_task_weights", False)))
+    _append_arg(cmd, "--research-time-unit", _infer_research_time_unit(metrics, cfg))
     _append_arg(cmd, "--adaptive-task-window-days", metrics.get("adaptive_task_window_days", cfg.get("train_eval_window_days", 126)))
+    _append_arg(cmd, "--adaptive-task-window-months", metrics.get("adaptive_task_window_months", cfg.get("adaptive_task_window_months", 6)))
 
     _append_arg(cmd, "--train-end-date", block.train_end)
     _append_arg(cmd, "--valid-start-date", block.valid_start)
     _append_arg(cmd, "--valid-days", int(block.valid_days))
+    _append_arg(cmd, "--valid-months", 0)
     _append_arg(cmd, "--train-eval-window-days", cfg.get("train_eval_window_days", 126))
+    _append_arg(cmd, "--train-eval-window-months", cfg.get("train_eval_window_months", 6))
 
     _append_arg(cmd, "--batch-size", cfg.get("batch_size", 256))
     _append_arg(cmd, "--num-workers", cfg.get("num_workers", 0))

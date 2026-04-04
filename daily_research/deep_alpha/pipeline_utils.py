@@ -19,6 +19,167 @@ from daily_research.execution.liquidity_universe import build_rolling_liquidity_
 from daily_research.progress import progress_write
 
 
+RESEARCH_TIME_UNIT_TRADING_DAYS = "trading_days"
+RESEARCH_TIME_UNIT_CALENDAR_MONTHS = "calendar_months"
+SUPPORTED_RESEARCH_TIME_UNITS = (
+    RESEARCH_TIME_UNIT_TRADING_DAYS,
+    RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+)
+
+
+def normalize_research_time_unit(raw: str | None, *, default: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS) -> str:
+    normalized = str(raw or "").strip().lower()
+    if normalized in {"", "default"}:
+        return default
+    aliases = {
+        "day": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "days": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "trading_day": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "trading_days": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "trading-day": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "trading-days": RESEARCH_TIME_UNIT_TRADING_DAYS,
+        "month": RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+        "months": RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+        "calendar_month": RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+        "calendar_months": RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    }
+    resolved = aliases.get(normalized, normalized)
+    if resolved not in SUPPORTED_RESEARCH_TIME_UNITS:
+        raise ValueError(
+            f"Unsupported research_time_unit: {raw}. "
+            f"Expected one of: {', '.join(SUPPORTED_RESEARCH_TIME_UNITS)}."
+        )
+    return resolved
+
+
+def _as_datetime_index(index: pd.Index) -> pd.DatetimeIndex:
+    dates = pd.DatetimeIndex(pd.to_datetime(index))
+    if dates.empty:
+        raise RuntimeError("Date index is empty.")
+    return dates.sort_values().unique()
+
+
+def _coerce_on_or_after(dates: pd.DatetimeIndex, raw_date: str | pd.Timestamp) -> pd.Timestamp:
+    target = pd.Timestamp(raw_date)
+    eligible = dates[dates >= target]
+    if eligible.empty:
+        raise RuntimeError(f"Requested start date {target.date()} is after the available history.")
+    return pd.Timestamp(eligible[0])
+
+
+def _coerce_on_or_before(dates: pd.DatetimeIndex, raw_date: str | pd.Timestamp) -> pd.Timestamp:
+    target = pd.Timestamp(raw_date)
+    eligible = dates[dates <= target]
+    if eligible.empty:
+        raise RuntimeError(f"Requested end date {target.date()} is before the available history.")
+    return pd.Timestamp(eligible[-1])
+
+
+def _resolve_day_window_from_start(
+    dates: pd.DatetimeIndex,
+    start_date: pd.Timestamp,
+    window_days: int,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    start_pos = dates.get_loc(pd.Timestamp(start_date))
+    end_pos = min(len(dates) - 1, start_pos + max(int(window_days), 1) - 1)
+    return pd.Timestamp(dates[start_pos]), pd.Timestamp(dates[end_pos])
+
+
+def _resolve_calendar_month_window_from_end(
+    dates: pd.DatetimeIndex,
+    window_months: int,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    if int(window_months) <= 0:
+        raise ValueError("window_months must be positive for calendar_months mode.")
+    month_periods = dates.to_period("M")
+    unique_months = month_periods.unique()
+    selected_months = unique_months[-min(int(window_months), len(unique_months)) :]
+    mask = month_periods.isin(selected_months)
+    selected_dates = dates[mask]
+    return pd.Timestamp(selected_dates[0]), pd.Timestamp(selected_dates[-1])
+
+
+def _resolve_calendar_month_window_from_start(
+    dates: pd.DatetimeIndex,
+    start_date: pd.Timestamp,
+    window_months: int,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    if int(window_months) <= 0:
+        raise ValueError("window_months must be positive for calendar_months mode.")
+    eligible = dates[dates >= pd.Timestamp(start_date)]
+    if eligible.empty:
+        raise RuntimeError("No dates remain after the requested start date.")
+    month_periods = eligible.to_period("M")
+    unique_months = month_periods.unique()
+    selected_months = unique_months[: min(int(window_months), len(unique_months))]
+    mask = month_periods.isin(selected_months)
+    selected_dates = eligible[mask]
+    return pd.Timestamp(selected_dates[0]), pd.Timestamp(selected_dates[-1])
+
+
+def resolve_split_window(
+    index: pd.Index,
+    train_end_date: str,
+    valid_start_date: str,
+    valid_days: int,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    valid_months: int | None = None,
+) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+    dates = _as_datetime_index(index)
+    time_unit = normalize_research_time_unit(research_time_unit)
+    month_window = int(valid_months or 0)
+
+    if train_end_date and valid_start_date:
+        valid_start = _coerce_on_or_after(dates, valid_start_date)
+        prior_dates = dates[dates < valid_start]
+        if prior_dates.empty:
+            raise RuntimeError("Not enough history before the requested validation start date.")
+        train_end = _coerce_on_or_before(prior_dates, train_end_date)
+        if int(valid_days) > 0:
+            valid_start, valid_end = _resolve_day_window_from_start(dates, valid_start, int(valid_days))
+        elif month_window > 0 and time_unit == RESEARCH_TIME_UNIT_CALENDAR_MONTHS:
+            valid_start, valid_end = _resolve_calendar_month_window_from_start(dates, valid_start, month_window)
+        else:
+            valid_end = pd.Timestamp(dates[-1])
+        return pd.Timestamp(train_end), pd.Timestamp(valid_start), pd.Timestamp(valid_end)
+
+    if time_unit == RESEARCH_TIME_UNIT_CALENDAR_MONTHS:
+        valid_start, valid_end = _resolve_calendar_month_window_from_end(dates, max(month_window, 1))
+    else:
+        valid_start = pd.Timestamp(dates[max(0, len(dates) - max(int(valid_days), 1))])
+        _valid_start, valid_end = _resolve_day_window_from_start(dates, valid_start, int(valid_days))
+        valid_start = _valid_start
+
+    prior_dates = dates[dates < valid_start]
+    if prior_dates.empty:
+        raise RuntimeError("Not enough history before the derived validation start date.")
+    train_end = pd.Timestamp(prior_dates[-1])
+    return pd.Timestamp(train_end), pd.Timestamp(valid_start), pd.Timestamp(valid_end)
+
+
+def resolve_window_dates(
+    index: pd.Index,
+    end_date: pd.Timestamp,
+    window_days: int,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    window_months: int | None = None,
+) -> pd.DatetimeIndex:
+    dates = _as_datetime_index(index)
+    eligible = dates[dates <= pd.Timestamp(end_date)]
+    if eligible.empty:
+        return pd.DatetimeIndex([])
+    time_unit = normalize_research_time_unit(research_time_unit)
+    if time_unit == RESEARCH_TIME_UNIT_CALENDAR_MONTHS and int(window_months or 0) > 0:
+        start_date, resolved_end = _resolve_calendar_month_window_from_end(eligible, int(window_months or 0))
+        return eligible[(eligible >= start_date) & (eligible <= resolved_end)]
+    if int(window_days) <= 0:
+        return eligible
+    start_pos = max(0, len(eligible) - int(window_days))
+    return eligible[start_pos:]
+
+
 def parse_stocks(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -127,24 +288,39 @@ def resolve_split_dates(
     train_end_date: str,
     valid_start_date: str,
     valid_days: int,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    valid_months: int | None = None,
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
-    dates = pd.to_datetime(index)
-    if train_end_date and valid_start_date:
-        return pd.Timestamp(train_end_date), pd.Timestamp(valid_start_date)
-    valid_start = dates[max(0, len(dates) - valid_days)]
-    train_end = dates[dates.get_loc(valid_start) - 1]
-    return pd.Timestamp(train_end), pd.Timestamp(valid_start)
+    train_end, valid_start, _valid_end = resolve_split_window(
+        index,
+        train_end_date,
+        valid_start_date,
+        valid_days,
+        research_time_unit=research_time_unit,
+        valid_months=valid_months,
+    )
+    return train_end, valid_start
 
 
-def resolve_recent_window_start(index: pd.Index, end_date: pd.Timestamp, window_days: int) -> pd.Timestamp | None:
-    if int(window_days) <= 0:
+def resolve_recent_window_start(
+    index: pd.Index,
+    end_date: pd.Timestamp,
+    window_days: int,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    window_months: int | None = None,
+) -> pd.Timestamp | None:
+    window_dates = resolve_window_dates(
+        index,
+        end_date,
+        window_days,
+        research_time_unit=research_time_unit,
+        window_months=window_months,
+    )
+    if len(window_dates) == 0:
         return None
-    dates = pd.to_datetime(index)
-    eligible = dates[dates <= pd.Timestamp(end_date)]
-    if len(eligible) == 0:
-        return None
-    start_pos = max(0, len(eligible) - int(window_days))
-    return pd.Timestamp(eligible[start_pos])
+    return pd.Timestamp(window_dates[0])
 
 
 def subset_df_dict_to_stocks(df_dict: dict[str, pd.DataFrame], stocks: list[str]) -> dict[str, pd.DataFrame]:
@@ -157,10 +333,12 @@ def load_raw_market_data(
     args: Any,
     universe: list[str],
     *,
-    progress_desc: str = "读取股票日线",
+    progress_desc: str = "Load daily bars",
     progress_position: int = 0,
 ) -> tuple[dict[str, pd.DataFrame], str]:
     cache_root = get_cache_root() / "raw"
+    force_raw_cache = str(getattr(args, "force_raw_cache_path", "") or "").strip()
+    forced_raw_cache_path = Path(force_raw_cache) if force_raw_cache else None
     raw_meta = {
         "version": 1,
         "data_source": args.data_source,
@@ -173,6 +351,20 @@ def load_raw_market_data(
     }
     raw_key = cache_key(raw_meta)
     raw_path = cache_root / f"{raw_key}.pkl"
+    if forced_raw_cache_path is not None:
+        forced_cached = load_pickle(forced_raw_cache_path)
+        if forced_cached is None:
+            raise FileNotFoundError(f"Forced raw cache not found or unreadable: {forced_raw_cache_path}")
+        progress_write(f"forced raw cache: {forced_raw_cache_path.name}")
+        forced_key = cache_key(
+            {
+                **raw_meta,
+                "forced_raw_cache_path": forced_raw_cache_path.resolve().as_posix(),
+                "forced_raw_cache_size": int(forced_raw_cache_path.stat().st_size),
+                "forced_raw_cache_mtime_ns": int(forced_raw_cache_path.stat().st_mtime_ns),
+            }
+        )
+        return forced_cached, forced_key
     if args.data_source == "tq":
         if args.use_cache and not args.refresh_cache:
             cached = load_pickle(raw_path)

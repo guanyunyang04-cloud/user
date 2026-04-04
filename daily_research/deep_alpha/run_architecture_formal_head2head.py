@@ -28,7 +28,7 @@ class FormalWindow:
     label: str
     train_end: str
     valid_start: str
-    valid_days: int = 252
+    valid_months: int = 12
 
 
 WINDOWS: tuple[FormalWindow, ...] = (
@@ -36,6 +36,8 @@ WINDOWS: tuple[FormalWindow, ...] = (
     FormalWindow(label="20240301_20250317", train_end="2024-02-29", valid_start="2024-03-01"),
     FormalWindow(label="20250318_20260331", train_end="2025-03-17", valid_start="2025-03-18"),
 )
+RESEARCH_TIME_UNIT = "calendar_months"
+TRAIN_EVAL_WINDOW_MONTHS = 6
 
 DEFAULT_PROFILES: tuple[str, ...] = (
     "baseline_current",
@@ -49,7 +51,7 @@ DEFAULT_PROFILES: tuple[str, ...] = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run formal multi-window head-to-head for key deep_alpha architecture variants.")
-    parser.add_argument("--root-tag", default="deep_alpha_architecture_formal_head2head_20260402_r1")
+    parser.add_argument("--root-tag", default="deep_alpha_architecture_formal_head2head_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument(
         "--profiles",
@@ -58,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--recent-root-tag",
-        default="deep_alpha_architecture_matrix_20260402_r1",
+        default="deep_alpha_architecture_matrix_20260403_monthly_r1",
         help="Recent architecture matrix root used to reuse the latest-window metrics when available.",
     )
     parser.add_argument("--force-rerun", action="store_true")
@@ -85,12 +87,16 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "000300.SH",
         "--liquidity-pool",
         "liquid500",
+        "--research-time-unit",
+        RESEARCH_TIME_UNIT,
         "--train-end-date",
         window.train_end,
         "--valid-start-date",
         window.valid_start,
         "--valid-days",
-        str(window.valid_days),
+        "0",
+        "--valid-months",
+        str(window.valid_months),
         "--lookback-window",
         "120",
         "--batch-size",
@@ -132,7 +138,9 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--score-head-method",
         "manual",
         "--train-eval-window-days",
-        "126",
+        "0",
+        "--train-eval-window-months",
+        str(TRAIN_EVAL_WINDOW_MONTHS),
         "--num-workers",
         "0",
         "--pin-memory",
@@ -373,9 +381,10 @@ def main() -> None:
         "",
         "## Protocol",
         "- window_count: `3`",
+        f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOWS[0].valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
-        "- invariant settings: `top_bottom_bce + manual score head + no execution alignment + next_open`",
+        "- invariant settings: `execution_first + train_eval_auto execution alignment + top_bottom_bce + manual score head + next_open`",
         "- baseline: `baseline_current`",
         "",
         "## Baseline Mean",

@@ -29,10 +29,12 @@ RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_re
 class RecentFormalWindow:
     train_end: str = "2025-03-17"
     valid_start: str = "2025-03-18"
-    valid_days: int = 252
+    valid_months: int = 12
 
 
 WINDOW = RecentFormalWindow()
+RESEARCH_TIME_UNIT = "calendar_months"
+TRAIN_EVAL_WINDOW_MONTHS = 6
 DEFAULT_PROFILES = (
     "baseline_current",
     "state_context_v1",
@@ -45,7 +47,7 @@ DEFAULT_PROFILES = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the short-alpha experiment matrix on the current deep_alpha winner.")
-    parser.add_argument("--root-tag", default="deep_alpha_short_alpha_matrix_20260402_r1")
+    parser.add_argument("--root-tag", default="deep_alpha_short_alpha_matrix_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument(
         "--profiles",
@@ -77,12 +79,16 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "000300.SH",
         "--liquidity-pool",
         "liquid500",
+        "--research-time-unit",
+        RESEARCH_TIME_UNIT,
         "--train-end-date",
         WINDOW.train_end,
         "--valid-start-date",
         WINDOW.valid_start,
         "--valid-days",
-        str(WINDOW.valid_days),
+        "0",
+        "--valid-months",
+        str(WINDOW.valid_months),
         "--lookback-window",
         "120",
         "--batch-size",
@@ -124,7 +130,9 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--score-head-method",
         "manual",
         "--train-eval-window-days",
-        "126",
+        "0",
+        "--train-eval-window-months",
+        str(TRAIN_EVAL_WINDOW_MONTHS),
         "--dynamic-graph-layer",
         "--dynamic-graph-top-k",
         "8",
@@ -266,9 +274,11 @@ def main() -> None:
         "",
         "## Protocol",
         f"- window: `{WINDOW.valid_start} -> 2026-04-01`",
+        f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOW.valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
         "- backbone: `patch_transformer + dynamic_graph_v1` unless a profile explicitly changes inputs/targets/losses",
+        "- objective: `execution_first + train_eval_auto execution alignment`",
         "",
         "## Winner",
         f"- best_excess_annual_return: `{best_row['profile_name']}` = {_format_pct(float(best_row['excess_annual_return']))}",

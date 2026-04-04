@@ -16,7 +16,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from daily_research.baseline.backtest import backtest
+from daily_research.baseline.backtest import backtest, summarize_backtest_by_month
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
     get_latest_completed_trading_date,
@@ -38,11 +38,14 @@ from daily_research.deep_alpha.execution_alignment import (
 )
 from daily_research.deep_alpha.models import MultiTaskRanker
 from daily_research.deep_alpha.pipeline_utils import (
+    RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    RESEARCH_TIME_UNIT_TRADING_DAYS,
     build_score_horizon_weights,
     build_target_loss_weights,
     load_cached_or_build_liquidity_buckets,
     load_cached_or_build_rolling_pool,
     load_cached_or_fit_market_state,
+    normalize_research_time_unit,
     load_raw_market_data,
     load_stocks_from_file,
     parse_float_list,
@@ -50,7 +53,7 @@ from daily_research.deep_alpha.pipeline_utils import (
     parse_name_list,
     parse_stocks,
     resolve_recent_window_start,
-    resolve_split_dates,
+    resolve_split_window,
     resolve_stocks_file,
     subset_df_dict_to_stocks,
 )
@@ -81,7 +84,13 @@ from daily_research.deep_alpha.sequence_dataset import (
     build_targets,
     transform_return_target_frames,
 )
-from daily_research.deep_alpha.trainer import collate_batch, compute_rankic, infer_dataset, train_multitask_model
+from daily_research.deep_alpha.trainer import (
+    collate_batch,
+    compute_rankic,
+    compute_rankic_timeseries,
+    infer_dataset,
+    train_multitask_model,
+)
 from daily_research.progress import StageProgress, create_progress, progress_write
 
 
@@ -89,6 +98,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Deep alpha research branch: market state + sequence encoder + cross-sectional ranking")
     parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
     parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--force-raw-cache-path", default="")
     parser.add_argument("--stocks", default=None)
     parser.add_argument("--stocks-file", default=None, help="Path to txt/csv file containing stock codes.")
     parser.add_argument("--liquidity-pool", choices=["liquid300", "liquid500", "liquid800"], default="", help="Use the latest daily-updated high-liquidity pool from daily_research/execution/universe/.")
@@ -136,11 +146,20 @@ def parse_args():
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
     parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm"], default="manual")
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
+    parser.add_argument(
+        "--research-time-unit",
+        choices=[RESEARCH_TIME_UNIT_TRADING_DAYS, RESEARCH_TIME_UNIT_CALENDAR_MONTHS],
+        default=RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+        help="Window protocol used for train/valid splits and monthly research outputs.",
+    )
     parser.add_argument("--adaptive-task-window-days", type=int, default=126, help="Recent train-window length for adaptive task weights.")
+    parser.add_argument("--adaptive-task-window-months", type=int, default=6, help="Recent train-window length for adaptive task weights in calendar_months mode.")
     parser.add_argument("--train-end-date", default="")
     parser.add_argument("--valid-start-date", default="")
     parser.add_argument("--valid-days", type=int, default=252)
+    parser.add_argument("--valid-months", type=int, default=12, help="Formal holdout size in calendar months when research-time-unit=calendar_months.")
     parser.add_argument("--train-eval-window-days", type=int, default=126, help="Only use the most recent N train-side trading days to fit score_head and state_gate. Use 0 to evaluate on the full train span.")
+    parser.add_argument("--train-eval-window-months", type=int, default=6, help="Only use the most recent N train-side calendar months to fit score_head and state_gate when research-time-unit=calendar_months.")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--pin-memory", action="store_true", help="Enable DataLoader pin_memory.")
@@ -149,6 +168,14 @@ def parse_args():
     parser.add_argument("--encoder-family", choices=["gru", "transformer", "patch_transformer", "mamba", "ssm"], default="gru")
     parser.add_argument("--patch-len", type=int, default=5)
     parser.add_argument("--pretrained-encoder-path", default="", help="Optional path to a masked-pretrained patch encoder artifact for ranking fine-tuning.")
+    parser.add_argument("--resume-run-dir", default="", help="Existing deep_alpha run directory containing deep_alpha_model.pt and train_history.csv.")
+    parser.add_argument("--resume-model-path", default="", help="Direct path to a deep_alpha_model.pt artifact. Overrides --resume-run-dir when provided.")
+    parser.add_argument(
+        "--resume-mode",
+        choices=["off", "strict", "warm_start"],
+        default="off",
+        help="strict restores last-epoch optimizer/scheduler/scaler state; warm_start only loads the selected model weights.",
+    )
     parser.add_argument("--return-head-mode", choices=["shared", "liquidity_switch"], default="shared")
     parser.add_argument("--context-dim", type=int, default=16)
     parser.add_argument("--state-context", action="store_true", help="Use learned market-state embeddings as lightweight context.")
@@ -357,6 +384,32 @@ def _panel_to_long(frame: pd.DataFrame, value_name: str) -> pd.DataFrame:
     )
 
 
+def _select_month_end_panel(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    work = frame.copy()
+    work.index = pd.DatetimeIndex(pd.to_datetime(work.index))
+    last_in_month = work.index.to_series().groupby(work.index.to_period("M")).transform("max")
+    return work.loc[work.index == pd.DatetimeIndex(last_in_month)]
+
+
+def _summarize_rankic_by_month(rankic_ts: pd.DataFrame) -> pd.DataFrame:
+    columns = ["month", "target", "rankic_mean", "rankic_std", "rankic_ir", "observation_count"]
+    if rankic_ts.empty:
+        return pd.DataFrame(columns=columns)
+    work = rankic_ts.copy()
+    work["date"] = pd.to_datetime(work["date"])
+    work["month"] = work["date"].dt.to_period("M").astype(str)
+    summary = (
+        work.groupby(["month", "target"], sort=True)["rankic"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+        .rename(columns={"mean": "rankic_mean", "std": "rankic_std", "count": "observation_count"})
+    )
+    summary["rankic_ir"] = summary["rankic_mean"] / summary["rankic_std"].replace(0, np.nan)
+    return summary[columns]
+
+
 def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
     if not write_tasks:
         return
@@ -365,6 +418,68 @@ def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
             progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
             writer()
             progress.update(1)
+
+
+def _resolve_resume_context(args: argparse.Namespace) -> dict[str, Any] | None:
+    resume_mode = str(getattr(args, "resume_mode", "off") or "off").strip().lower()
+    resume_model_path = str(getattr(args, "resume_model_path", "") or "").strip()
+    resume_run_dir = str(getattr(args, "resume_run_dir", "") or "").strip()
+    if resume_mode == "off":
+        if resume_model_path or resume_run_dir:
+            raise ValueError("Set --resume-mode strict|warm_start when providing --resume-model-path or --resume-run-dir.")
+        return None
+
+    if resume_model_path:
+        artifact_path = Path(resume_model_path).expanduser().resolve()
+        run_dir = artifact_path.parent
+    elif resume_run_dir:
+        run_dir = Path(resume_run_dir).expanduser().resolve()
+        artifact_path = run_dir / "deep_alpha_model.pt"
+    else:
+        raise ValueError("--resume-mode requires --resume-model-path or --resume-run-dir.")
+
+    if not artifact_path.exists():
+        raise FileNotFoundError(f"Resume artifact not found: {artifact_path}")
+    artifact = torch.load(artifact_path, map_location="cpu", weights_only=False)
+    if not isinstance(artifact, dict):
+        raise ValueError(f"Resume artifact is not a dict: {artifact_path}")
+
+    history_rows: list[dict[str, Any]] = []
+    history_path = run_dir / "train_history.csv"
+    if history_path.exists():
+        history_df = pd.read_csv(history_path)
+        history_rows = history_df.to_dict(orient="records")
+
+    metrics_path = run_dir / "metrics.json"
+    metrics_payload: dict[str, Any] = {}
+    if metrics_path.exists():
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            loaded_metrics = json.load(f)
+        if isinstance(loaded_metrics, dict):
+            metrics_payload = loaded_metrics
+
+    training_resume_state = artifact.get("training_resume_state") or artifact.get("training_state") or {}
+    if resume_mode == "strict":
+        if not artifact.get("last_model_state_dict"):
+            raise ValueError(
+                "Strict resume requires an artifact with last_model_state_dict. "
+                "This source run was saved before strict-resume support was added; use --resume-mode warm_start instead."
+            )
+        if not training_resume_state:
+            raise ValueError(
+                "Strict resume requires training_resume_state in the source artifact. "
+                "This source run does not have resumable optimizer/scheduler state."
+            )
+
+    return {
+        "resume_mode": resume_mode,
+        "artifact_path": artifact_path,
+        "run_dir": run_dir,
+        "artifact": artifact,
+        "history_rows": history_rows,
+        "metrics": metrics_payload,
+        "training_resume_state": dict(training_resume_state),
+    }
 
 
 def _resolve_manual_score_config(
@@ -627,7 +742,9 @@ def _evaluate_research_outputs(
 ) -> dict[str, Any]:
     train_pred_df, _ = infer_dataset(model, train_eval_loader, device, train_ds.target_names, use_amp=bool(use_amp))
     pred_df, emb_df = infer_dataset(model, valid_loader, device, train_ds.target_names, use_amp=bool(use_amp))
+    rankic_timeseries = compute_rankic_timeseries(pred_df, train_ds.target_names)
     rankic_summary = compute_rankic(pred_df, train_ds.target_names)
+    monthly_rankic_summary = _summarize_rankic_by_month(rankic_timeseries)
     structure_aux_summary, structure_prototype_summary = _summarize_structure_outputs(pred_df)
 
     score_head_artifact = fit_score_head(
@@ -636,6 +753,8 @@ def _evaluate_research_outputs(
         method=args.score_head_method,
         adaptive_task_weights=bool(args.adaptive_task_weights),
         adaptive_window_days=args.adaptive_task_window_days,
+        research_time_unit=cfg.research_time_unit,
+        adaptive_window_months=cfg.adaptive_task_window_months,
     )
     applied_score_horizon_weights = dict(cfg.score_horizon_weights)
     applied_score_downside_penalty = float(cfg.score_downside_penalty)
@@ -753,6 +872,7 @@ def _evaluate_research_outputs(
         open_df=open_df.reindex(valid_dates),
         benchmark_open=benchmark_open.reindex(valid_dates),
     )
+    monthly_backtest_summary = summarize_backtest_by_month(equity_df, action_df)
 
     execution_alignment_artifact = None
     execution_aligned_equity_df = None
@@ -760,6 +880,7 @@ def _evaluate_research_outputs(
     execution_aligned_metrics = None
     execution_aligned_score_frame = None
     execution_aligned_target_weights = None
+    execution_aligned_monthly_backtest_summary = None
     if args.execution_alignment_mode != "off":
         if args.execution_alignment_mode == "profile":
             candidate_profiles = [get_execution_alignment_profile(args.execution_alignment_profile).name]
@@ -827,6 +948,10 @@ def _evaluate_research_outputs(
             open_df=open_df.reindex(valid_dates),
             benchmark_open=benchmark_open.reindex(valid_dates),
         )
+        execution_aligned_monthly_backtest_summary = summarize_backtest_by_month(
+            execution_aligned_equity_df,
+            execution_aligned_action_df,
+        )
 
     primary_metrics_payload = {
         "holdout_backtest": dict(holdout_metrics),
@@ -847,7 +972,9 @@ def _evaluate_research_outputs(
         "train_pred_df": train_pred_df,
         "pred_df": pred_df,
         "emb_df": emb_df,
+        "rankic_timeseries": rankic_timeseries,
         "rankic_summary": rankic_summary,
+        "monthly_rankic_summary": monthly_rankic_summary,
         "structure_aux_summary": structure_aux_summary,
         "structure_prototype_summary": structure_prototype_summary,
         "score_head_artifact": score_head_artifact,
@@ -860,6 +987,7 @@ def _evaluate_research_outputs(
         "target_weights": target_weights,
         "equity_df": equity_df,
         "action_df": action_df,
+        "monthly_backtest_summary": monthly_backtest_summary,
         "holdout_metrics": dict(holdout_metrics),
         "execution_alignment_artifact": execution_alignment_artifact,
         "execution_aligned_equity_df": execution_aligned_equity_df,
@@ -867,6 +995,7 @@ def _evaluate_research_outputs(
         "execution_aligned_metrics": None if execution_aligned_metrics is None else dict(execution_aligned_metrics),
         "execution_aligned_score_frame": execution_aligned_score_frame,
         "execution_aligned_target_weights": execution_aligned_target_weights,
+        "execution_aligned_monthly_backtest_summary": execution_aligned_monthly_backtest_summary,
         "primary_backtest_label": primary_backtest_label,
         "primary_backtest": dict(primary_backtest),
         "checkpoint_metric_name": checkpoint_metric_name,
@@ -876,6 +1005,8 @@ def _evaluate_research_outputs(
 
 def main():
     args = parse_args()
+    args.research_time_unit = normalize_research_time_unit(args.research_time_unit)
+    resume_context = _resolve_resume_context(args)
     if args.liquidity_pool and args.rolling_liquidity_pool:
         raise ValueError("Use either --liquidity-pool or --rolling-liquidity-pool, not both.")
     if args.rolling_liquidity_pool and (args.stocks or args.stocks_file):
@@ -891,10 +1022,14 @@ def main():
         universe_scope=args.universe_scope,
         lookback_window=args.lookback_window,
         prediction_horizons=horizons,
+        research_time_unit=args.research_time_unit,
         train_end_date=args.train_end_date,
         valid_start_date=args.valid_start_date,
         valid_days=args.valid_days,
+        valid_months=args.valid_months,
         train_eval_window_days=args.train_eval_window_days,
+        train_eval_window_months=args.train_eval_window_months,
+        adaptive_task_window_months=args.adaptive_task_window_months,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
@@ -1037,11 +1172,14 @@ def main():
         df_dict = subset_df_dict_to_stocks(df_dict, rolling_union)
         rolling_membership_frame = rolling_membership_frame.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
     close = df_dict["Close"]
-    train_end, valid_start = resolve_split_dates(close.index, cfg.train_end_date, cfg.valid_start_date, cfg.valid_days)
-    close_dates = pd.DatetimeIndex(pd.to_datetime(close.index))
-    valid_start_pos = close_dates.get_loc(pd.Timestamp(valid_start))
-    valid_end_pos = min(len(close_dates) - 1, valid_start_pos + max(int(cfg.valid_days), 1) - 1)
-    valid_end = pd.Timestamp(close_dates[valid_end_pos])
+    train_end, valid_start, valid_end = resolve_split_window(
+        close.index,
+        cfg.train_end_date,
+        cfg.valid_start_date,
+        cfg.valid_days,
+        research_time_unit=cfg.research_time_unit,
+        valid_months=cfg.valid_months,
+    )
 
     stage_progress.complete_stage(1)
     stage_progress.start_stage(2, "Build market state and liquidity")
@@ -1218,7 +1356,13 @@ def main():
             progress_write(f"Write corpus cache: {corpus_path.name}")
     train_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(end_date=train_end))
     valid_ds = StockSequenceDataset(corpus=corpus, indices=corpus.build_index(start_date=valid_start, end_date=valid_end))
-    train_eval_start = resolve_recent_window_start(close.index, train_end, cfg.train_eval_window_days)
+    train_eval_start = resolve_recent_window_start(
+        close.index,
+        train_end,
+        cfg.train_eval_window_days,
+        research_time_unit=cfg.research_time_unit,
+        window_months=cfg.train_eval_window_months,
+    )
     if train_eval_start is None:
         train_eval_indices = corpus.build_index(end_date=train_end)
         train_eval_dates = list(close.index[close.index <= train_end])
@@ -1229,7 +1373,10 @@ def main():
     if len(train_ds) == 0 or len(valid_ds) == 0:
         raise RuntimeError("Deep alpha dataset is empty. Try a longer history or smaller lookback window.")
     if len(train_eval_ds) == 0:
-        raise RuntimeError("Deep alpha train-eval dataset is empty. Increase --train-eval-window-days or history length.")
+        raise RuntimeError(
+            "Deep alpha train-eval dataset is empty. "
+            "Increase --train-eval-window-days/--train-eval-window-months or history length."
+        )
 
     stage_progress.complete_stage(4)
     stage_progress.start_stage(5, "Prepare runtime and model")
@@ -1302,6 +1449,7 @@ def main():
         transformer_heads=cfg.transformer_heads,
         transformer_layers=cfg.transformer_layers,
     )
+    training_resume_payload: dict[str, Any] | None = None
     if cfg.pretrained_encoder_path:
         artifact_path = Path(cfg.pretrained_encoder_path)
         if not artifact_path.exists():
@@ -1318,6 +1466,35 @@ def main():
             progress_write(f"Missing pretrained encoder keys: {missing}")
         if unexpected:
             progress_write(f"Unexpected pretrained encoder keys: {unexpected}")
+    if resume_context is not None:
+        resume_artifact = dict(resume_context["artifact"])
+        resume_feature_names = list(resume_artifact.get("feature_names", []) or [])
+        resume_target_names = list(resume_artifact.get("target_names", []) or [])
+        if resume_feature_names and list(train_ds.feature_names) != resume_feature_names:
+            raise ValueError("Resume artifact feature_names do not match the current dataset; strict continuation would be invalid.")
+        if resume_target_names and list(train_ds.target_names) != resume_target_names:
+            raise ValueError("Resume artifact target_names do not match the current dataset; strict continuation would be invalid.")
+        resume_mode = str(resume_context["resume_mode"])
+        selected_model_state = resume_artifact.get("selected_model_state_dict") or resume_artifact.get("model_state_dict")
+        if selected_model_state is None:
+            raise ValueError(f"Resume artifact missing model weights: {resume_context['artifact_path']}")
+        if resume_mode == "warm_start":
+            model.load_state_dict(selected_model_state)
+            progress_write(f"Warm-start model loaded from {resume_context['artifact_path'].name}")
+        else:
+            training_resume_payload = {
+                "history": list(resume_context["history_rows"]),
+                "selected_model_state_dict": selected_model_state,
+                "last_model_state_dict": resume_artifact.get("last_model_state_dict"),
+                "optimizer_state_dict": resume_artifact.get("optimizer_state_dict"),
+                "scheduler_state_dict": resume_artifact.get("scheduler_state_dict"),
+                "scaler_state_dict": resume_artifact.get("scaler_state_dict"),
+                "training_state": dict(resume_context["training_resume_state"]),
+            }
+            progress_write(
+                f"Strict resume prepared from {resume_context['artifact_path'].name} "
+                f"(epochs_completed={int(training_resume_payload['training_state'].get('epochs_completed', 0) or 0)})"
+            )
 
     target_state_ids = sorted(
         {
@@ -1416,6 +1593,7 @@ def main():
         checkpoint_selection_mode=checkpoint_selection_mode,
         checkpoint_selection_callback=checkpoint_selection_callback,
         checkpoint_selection_min_improvement=args.checkpoint_selection_min_improvement,
+        resume_payload=training_resume_payload,
     )
     history = train_result.history
     training_diagnostics = train_result.diagnostics
@@ -1423,7 +1601,8 @@ def main():
         f"Training diagnostics status={training_diagnostics.status}, "
         f"selected_epoch={training_diagnostics.selected_epoch}/{training_diagnostics.epochs_completed}, "
         f"{training_diagnostics.selected_metric_name}={training_diagnostics.selected_metric_value:.6f}, "
-        f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}"
+        f"best_valid_loss={training_diagnostics.best_valid_loss:.6f}, "
+        f"budget_pressure={training_diagnostics.objective_aligned_budget_pressure}"
     )
 
     stage_progress.complete_stage(6)
@@ -1451,7 +1630,9 @@ def main():
     train_pred_df = evaluation["train_pred_df"]
     pred_df = evaluation["pred_df"]
     emb_df = evaluation["emb_df"]
+    rankic_timeseries = evaluation["rankic_timeseries"]
     rankic_summary = evaluation["rankic_summary"]
+    monthly_rankic_summary = evaluation["monthly_rankic_summary"]
     structure_aux_summary = evaluation["structure_aux_summary"]
     structure_prototype_summary = evaluation["structure_prototype_summary"]
     score_head_artifact = evaluation["score_head_artifact"]
@@ -1464,6 +1645,7 @@ def main():
     target_weights = evaluation["target_weights"]
     equity_df = evaluation["equity_df"]
     action_df = evaluation["action_df"]
+    monthly_backtest_summary = evaluation["monthly_backtest_summary"]
     metrics = evaluation["holdout_metrics"]
     execution_alignment_artifact = evaluation["execution_alignment_artifact"]
     execution_aligned_equity_df = evaluation["execution_aligned_equity_df"]
@@ -1471,6 +1653,7 @@ def main():
     execution_aligned_metrics = evaluation["execution_aligned_metrics"]
     execution_aligned_score_frame = evaluation["execution_aligned_score_frame"]
     execution_aligned_target_weights = evaluation["execution_aligned_target_weights"]
+    execution_aligned_monthly_backtest_summary = evaluation["execution_aligned_monthly_backtest_summary"]
     primary_backtest_label = str(evaluation["primary_backtest_label"])
     primary_backtest = dict(evaluation["primary_backtest"])
 
@@ -1558,28 +1741,44 @@ def main():
     latest_scores = latest_scores.sort_values("latest_score", ascending=False, na_position="last")
     daily_score_panel = _panel_to_long(score_frame.reindex(valid_dates), "score")
     daily_target_weight_panel = _panel_to_long(target_weights.reindex(valid_dates), "target_weight")
+    monthly_score_panel = _panel_to_long(_select_month_end_panel(score_frame.reindex(valid_dates)), "score")
+    monthly_target_weight_panel = _panel_to_long(_select_month_end_panel(target_weights.reindex(valid_dates)), "target_weight")
     execution_aligned_latest_scores = None
     execution_aligned_daily_score_panel = None
     execution_aligned_daily_target_weight_panel = None
+    execution_aligned_monthly_score_panel = None
+    execution_aligned_monthly_target_weight_panel = None
     if execution_aligned_score_frame is not None and execution_aligned_target_weights is not None:
         execution_aligned_latest_scores = execution_aligned_score_frame.loc[[execution_aligned_score_frame.dropna(how="all").index.max()]].T.reset_index()
         execution_aligned_latest_scores.columns = ["stock", "latest_score"]
         execution_aligned_latest_scores = execution_aligned_latest_scores.sort_values("latest_score", ascending=False, na_position="last")
         execution_aligned_daily_score_panel = _panel_to_long(execution_aligned_score_frame.reindex(valid_dates), "score")
         execution_aligned_daily_target_weight_panel = _panel_to_long(execution_aligned_target_weights.reindex(valid_dates), "target_weight")
+        execution_aligned_monthly_score_panel = _panel_to_long(
+            _select_month_end_panel(execution_aligned_score_frame.reindex(valid_dates)),
+            "score",
+        )
+        execution_aligned_monthly_target_weight_panel = _panel_to_long(
+            _select_month_end_panel(execution_aligned_target_weights.reindex(valid_dates)),
+            "target_weight",
+        )
 
     equity_export = equity_df.reset_index().rename(columns={equity_df.index.name or "index": "date"})
     if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
         execution_aligned_equity_export = execution_aligned_equity_df.reset_index().rename(columns={execution_aligned_equity_df.index.name or "index": "date"})
     metrics_payload = {
         "framework": "deep_alpha_research",
+        "research_time_unit": str(cfg.research_time_unit),
         "train_end": str(train_end.date()),
         "valid_start": str(valid_start.date()),
         "valid_end": str(valid_end.date()),
         "train_samples": len(train_ds),
         "train_eval_samples": len(train_eval_ds),
         "valid_samples": len(valid_ds),
+        "valid_days": int(cfg.valid_days),
+        "valid_months": int(cfg.valid_months),
         "train_eval_window_days": cfg.train_eval_window_days,
+        "train_eval_window_months": int(cfg.train_eval_window_months),
         "train_eval_start": "" if train_eval_start is None else str(train_eval_start.date()),
         "device": str(device),
         "market_state_count": cfg.market_state_count,
@@ -1588,6 +1787,14 @@ def main():
         "encoder_family": cfg.encoder_family,
         "patch_len": cfg.patch_len,
         "pretrained_encoder_path": cfg.pretrained_encoder_path,
+        "resume_mode": "" if resume_context is None else str(resume_context["resume_mode"]),
+        "resume_source_run_dir": "" if resume_context is None else str(Path(resume_context["run_dir"]).resolve()),
+        "resume_source_model_path": "" if resume_context is None else str(Path(resume_context["artifact_path"]).resolve()),
+        "resume_source_epochs_completed": (
+            0
+            if resume_context is None
+            else int(resume_context["training_resume_state"].get("epochs_completed", 0) or 0)
+        ),
         "epochs": cfg.epochs,
         "min_epochs": cfg.min_epochs,
         "early_stop_patience": cfg.early_stop_patience,
@@ -1662,6 +1869,7 @@ def main():
         "score_head_method": args.score_head_method,
         "adaptive_task_weights": bool(args.adaptive_task_weights),
         "adaptive_task_window_days": args.adaptive_task_window_days,
+        "adaptive_task_window_months": int(cfg.adaptive_task_window_months),
         "score_head_task_weights": score_head_artifact.task_weights,
         "structure_aux_summary": structure_aux_summary,
         "structure_prototype_summary": structure_prototype_summary,
@@ -1723,7 +1931,13 @@ def main():
         "corpus_cache_key": corpus_key,
     }
     model_artifact = {
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": train_result.selected_model_state_dict,
+        "selected_model_state_dict": train_result.selected_model_state_dict,
+        "last_model_state_dict": train_result.last_model_state_dict,
+        "optimizer_state_dict": train_result.optimizer_state_dict,
+        "scheduler_state_dict": train_result.scheduler_state_dict,
+        "scaler_state_dict": train_result.scaler_state_dict,
+        "training_resume_state": train_result.training_state,
         "feature_names": train_ds.feature_names,
         "target_names": train_ds.target_names,
         "config": vars(cfg),
@@ -1739,14 +1953,19 @@ def main():
         ("train_history.csv", lambda: history_df.to_csv(run_dir / "train_history.csv", index=False, encoding="utf-8-sig")),
         ("validation_predictions.csv", lambda: pred_df.to_csv(run_dir / "validation_predictions.csv", index=False, encoding="utf-8-sig")),
         ("validation_embeddings.csv", lambda: emb_df.to_csv(run_dir / "validation_embeddings.csv", index=False, encoding="utf-8-sig")),
+        ("validation_rankic_timeseries.csv", lambda: rankic_timeseries.to_csv(run_dir / "validation_rankic_timeseries.csv", index=False, encoding="utf-8-sig")),
         ("validation_rankic_summary.csv", lambda: rankic_summary.to_csv(run_dir / "validation_rankic_summary.csv", index=False, encoding="utf-8-sig")),
+        ("validation_rankic_monthly_summary.csv", lambda: monthly_rankic_summary.to_csv(run_dir / "validation_rankic_monthly_summary.csv", index=False, encoding="utf-8-sig")),
         ("market_state_frame.csv", lambda: state_df.to_csv(run_dir / "market_state_frame.csv", encoding="utf-8-sig")),
         ("latest_scores.csv", lambda: latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")),
         ("daily_score_panel.csv", lambda: daily_score_panel.to_csv(run_dir / "daily_score_panel.csv", index=False, encoding="utf-8-sig")),
         ("daily_target_weight_panel.csv", lambda: daily_target_weight_panel.to_csv(run_dir / "daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
+        ("monthly_score_panel.csv", lambda: monthly_score_panel.to_csv(run_dir / "monthly_score_panel.csv", index=False, encoding="utf-8-sig")),
+        ("monthly_target_weight_panel.csv", lambda: monthly_target_weight_panel.to_csv(run_dir / "monthly_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
         ("daily_live_score_panel.csv", lambda: live_daily_score_panel.to_csv(run_dir / "daily_live_score_panel.csv", index=False, encoding="utf-8-sig")),
         ("daily_live_target_weight_panel.csv", lambda: live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
         ("equity_curve.csv", lambda: equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")),
+        ("monthly_backtest_summary.csv", lambda: monthly_backtest_summary.to_csv(run_dir / "monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")),
         ("actions.csv", lambda: action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")),
         ("deep_alpha_model.pt", lambda: torch.save(model_artifact, run_dir / "deep_alpha_model.pt")),
         ("score_head_artifact.pkl", lambda: save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)),
@@ -1760,6 +1979,10 @@ def main():
         write_tasks.append(("execution_aligned_daily_score_panel.csv", lambda: execution_aligned_daily_score_panel.to_csv(run_dir / "execution_aligned_daily_score_panel.csv", index=False, encoding="utf-8-sig")))
     if execution_aligned_daily_target_weight_panel is not None:
         write_tasks.append(("execution_aligned_daily_target_weight_panel.csv", lambda: execution_aligned_daily_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_monthly_score_panel is not None:
+        write_tasks.append(("execution_aligned_monthly_score_panel.csv", lambda: execution_aligned_monthly_score_panel.to_csv(run_dir / "execution_aligned_monthly_score_panel.csv", index=False, encoding="utf-8-sig")))
+    if execution_aligned_monthly_target_weight_panel is not None:
+        write_tasks.append(("execution_aligned_monthly_target_weight_panel.csv", lambda: execution_aligned_monthly_target_weight_panel.to_csv(run_dir / "execution_aligned_monthly_target_weight_panel.csv", index=False, encoding="utf-8-sig")))
     if execution_aligned_live_latest_scores is not None:
         write_tasks.append(("execution_aligned_live_latest_scores.csv", lambda: execution_aligned_live_latest_scores.to_csv(run_dir / "execution_aligned_live_latest_scores.csv", index=False, encoding="utf-8-sig")))
     if execution_aligned_live_score_panel is not None:
@@ -1768,6 +1991,7 @@ def main():
         write_tasks.append(("execution_aligned_daily_live_target_weight_panel.csv", lambda: execution_aligned_live_target_weight_panel.to_csv(run_dir / "execution_aligned_daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")))
     if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
         write_tasks.append(("execution_aligned_equity_curve.csv", lambda: execution_aligned_equity_export.to_csv(run_dir / "execution_aligned_equity_curve.csv", index=False, encoding="utf-8-sig")))
+        write_tasks.append(("execution_aligned_monthly_backtest_summary.csv", lambda: execution_aligned_monthly_backtest_summary.to_csv(run_dir / "execution_aligned_monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")))
         write_tasks.append(("execution_aligned_actions.csv", lambda: execution_aligned_action_df.to_csv(run_dir / "execution_aligned_actions.csv", index=False, encoding="utf-8-sig")))
     if rolling_pool_artifact is not None:
         write_tasks.append(("rolling_liquidity_schedule.csv", lambda: rolling_pool_artifact.schedule_df.to_csv(run_dir / "rolling_liquidity_schedule.csv", index=False, encoding="utf-8-sig")))

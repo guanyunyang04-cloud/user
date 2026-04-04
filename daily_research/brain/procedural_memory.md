@@ -245,3 +245,44 @@
   - 产物内部 `ml_config`
   - 下游消费者输出，例如 `latest_trade_plan.txt`
 - 如果产物内部配置与外层 meta JSON 冲突，优先相信产物本体，先修 meta writer，再重跑 producer，避免后续审计被误导。
+### 2.14 Calendar-Month 协议落地规则
+- 当用户要求“以月为单位研究”时，默认不要把数据源改成月线；优先保留日频样本与 `next_open` 执行假设，只把时间切分、近期窗口与评估汇总改成自然月协议。
+- `deep_alpha` 当前月度协议的标准落地点包括四层：
+  - train/valid split
+  - train_eval recent window
+  - adaptive task weighting recent window
+  - monthly evaluation artifacts
+- monthly evaluation artifacts 当前固定至少包含：
+  - `validation_rankic_monthly_summary.csv`
+  - `monthly_score_panel.csv`
+  - `monthly_target_weight_panel.csv`
+  - `monthly_backtest_summary.csv`
+- 如果存在 execution-aligned 分支，还要同步输出 execution-aligned 的月度 score / weight / backtest 汇总。
+- 生产或 blockwise runner 若显式给出 `valid_start_date + valid_days`，必须遵循“显式短窗优先”；不要让月度默认值把内部监控窗放大。
+- 对旧 runner 做时间协议升级时，先保护显式短窗兼容，再推进自动切窗改成月度；不要先改默认值再让历史 formal runner 静默漂移。
+## 2.15 Finetune 续训与家族预算校准规则
+- 当研究问题是“同一模型家族到底要训多少轮”时，优先使用 continuation 协议，而不是每一档 budget 都从头重跑。
+- continuation 分两类：
+  - `strict resume`
+  - `warm_start continue`
+- `strict resume` 只应用于同一条训练链的预算扩展，例如 `8 -> 12 -> 16 -> 24`。
+- `warm_start continue` 只应用于：
+  - 老 run 缺少 strict resume 状态
+  - 想复用模型参数但故意重开 optimizer 路径
+- 预算 frontier 的停止规则不能只看 `valid_loss`；至少要同时检查：
+  - realistic replay objective
+  - `selected_epoch_ratio`
+  - `selected_in_tail`
+  - `selected_at_right_boundary`
+  - `objective_aligned_budget_pressure`
+- rich experiment 与 budget calibration 必须分层：
+  - 先用 calibration windows 冻结家族预算
+  - 再用 formal windows 跑正式 rich experiment
+- 不允许在同一 formal 窗口里一边调 epoch budget，一边下最终 winner 结论。
+- calibration windows 可以按家族分化，不要求全家族共用同一组窗口；只要满足两条：
+  - 该家族在对应协议下样本非空
+  - 不与正式 formal verdict 窗口混用
+- `dynamic_graph` 当前就是标准例子：
+  - 由于固定 `start-date=20220101 + lookback_window=120 + liquid800 rolling pool`
+  - 其 frontier 校准窗口必须晚于 `baseline / structure / short_alpha`
+  - 这不是特殊豁免，而是“窗口必须服从家族真实样本起点”的正式规则

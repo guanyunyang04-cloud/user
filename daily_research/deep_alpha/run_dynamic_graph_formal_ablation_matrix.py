@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile
+from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
@@ -34,6 +35,9 @@ WINDOWS: tuple[FormalWindow, ...] = (
     FormalWindow(label="20240301_20250317", train_end="2024-02-29", valid_start="2024-03-01"),
     FormalWindow(label="20250318_20260331", train_end="2025-03-17", valid_start="2025-03-18"),
 )
+RESEARCH_TIME_UNIT = "calendar_months"
+FORMAL_VALID_MONTHS = 12
+TRAIN_EVAL_WINDOW_MONTHS = 6
 
 PROFILES_TO_RUN: tuple[str, ...] = (
     "plain_baseline",
@@ -43,23 +47,17 @@ PROFILES_TO_RUN: tuple[str, ...] = (
     "dynamic_graph_topk12",
 )
 
-REUSE_METRICS: dict[str, dict[str, str]] = {
-    "plain_baseline": {
-        "20230216_20240229": "daily_research/output/deep_alpha_mamba_patch_head2head_20260331_mainboard_r2/runs/enc-patch__pre-nopre__score-manual__rank-plain_20230216_20240229/metrics.json",
-        "20240301_20250317": "daily_research/output/deep_alpha_mamba_patch_head2head_20260331_mainboard_r2/runs/enc-patch__pre-nopre__score-manual__rank-plain_20240301_20250317/metrics.json",
-        "20250318_20260331": "daily_research/output/deep_alpha_mamba_patch_head2head_20260331_mainboard_r2/runs/enc-patch__pre-nopre__score-manual__rank-plain_20250318_20260331/metrics.json",
-    },
-    "dynamic_graph_v1": {
-        "20230216_20240229": "daily_research/output/deep_alpha_relgraph_h2h_20260331_mainboard_r1__dynamic_graph_v1__20230216_20240229/metrics.json",
-        "20240301_20250317": "daily_research/output/deep_alpha_relgraph_h2h_20260331_mainboard_r1__dynamic_graph_v1__20240301_20250317/metrics.json",
-        "20250318_20260331": "daily_research/output/deep_alpha_relgraph_h2h_20260331_mainboard_r1__dynamic_graph_v1__20250318_20260331/metrics.json",
-    },
-}
+REUSE_METRICS: dict[str, dict[str, str]] = {}
+
+
+def _resolve_family_key(profile_name: str) -> str:
+    normalized = str(profile_name or "").strip().lower()
+    return "baseline" if normalized == "plain_baseline" else "dynamic_graph"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the formal dynamic-graph ablation matrix under the strict liquid800 mainboard protocol.")
-    parser.add_argument("--root-tag", default="dynamic_graph_ablation_formal_20260401_r1")
+    parser.add_argument("--root-tag", default="dynamic_graph_ablation_formal_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument(
@@ -67,6 +65,7 @@ def parse_args() -> argparse.Namespace:
         default=",".join(PROFILES_TO_RUN),
         help="Comma-separated profile names from dynamic_graph_profiles.py",
     )
+    parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
     return parser.parse_args()
 
 
@@ -75,7 +74,7 @@ def _run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, cwd=PROJECT_ROOT)
 
 
-def _build_base_command(python_executable: str, experiment_tag: str, window: FormalWindow) -> list[str]:
+def _build_base_command(python_executable: str, experiment_tag: str, window: FormalWindow, epoch_budget: int) -> list[str]:
     return [
         python_executable,
         str(RUN_SCRIPT),
@@ -89,18 +88,24 @@ def _build_base_command(python_executable: str, experiment_tag: str, window: For
         "20",
         "--start-date",
         "20220101",
+        "--end-date",
+        "20260401",
         "--benchmark",
         "000300.SH",
         "--lookback-window",
         "120",
         "--prediction-horizons",
         "5,10,20",
+        "--research-time-unit",
+        RESEARCH_TIME_UNIT,
         "--train-end-date",
         window.train_end,
         "--valid-start-date",
         window.valid_start,
         "--valid-days",
-        "252",
+        "0",
+        "--valid-months",
+        str(FORMAL_VALID_MONTHS),
         "--batch-size",
         "256",
         "--hidden-dim",
@@ -120,11 +125,11 @@ def _build_base_command(python_executable: str, experiment_tag: str, window: For
         "--weight-decay",
         "0.0001",
         "--epochs",
-        "8",
+        str(epoch_budget),
         "--min-epochs",
         "4",
         "--early-stop-patience",
-        "2",
+        str(max(int(epoch_budget), 4)),
         "--lr-plateau-patience",
         "1",
         "--lr-plateau-factor",
@@ -142,7 +147,9 @@ def _build_base_command(python_executable: str, experiment_tag: str, window: For
         "--score-head-method",
         "manual",
         "--train-eval-window-days",
-        "126",
+        "0",
+        "--train-eval-window-months",
+        str(TRAIN_EVAL_WINDOW_MONTHS),
         "--ranking-loss-weight",
         "0.0",
         "--listwise-loss-weight",
@@ -193,6 +200,7 @@ def _summarize_profile(profile_name: str, profile_rows: list[dict]) -> dict:
     return {
         "profile_name": profile_name,
         "window_count": int(len(frame)),
+        "mean_epoch_budget": float(frame["epoch_budget"].mean()),
         "mean_excess_total_return": float(frame["excess_total_return"].mean()),
         "mean_excess_annual_return": float(frame["excess_annual_return"].mean()),
         "mean_excess_sharpe": float(frame["excess_sharpe"].mean()),
@@ -237,7 +245,13 @@ def main() -> None:
                 reused_existing = False
                 if not metrics_path.exists() or args.force_rerun:
                     experiment_tag = f"{root_tag}/runs/{profile.name}_{window.label}"
-                    command = _build_base_command(args.python_executable, experiment_tag, window)
+                    family_key = _resolve_family_key(profile.name)
+                    epoch_budget = resolve_epoch_budget_for_family(
+                        family_key,
+                        manifest_path=str(args.family_epoch_budget_manifest),
+                        fallback_epochs=8,
+                    )
+                    command = _build_base_command(args.python_executable, experiment_tag, window, epoch_budget)
                     if profile.dynamic_graph_layer:
                         command.extend(
                             [
@@ -255,6 +269,7 @@ def main() -> None:
                     _run_command(command)
             metrics = _load_metrics(metrics_path)
             holdout = _extract_holdout(metrics)
+            family_key = _resolve_family_key(profile.name)
             source_runs[profile.name][window.label] = str(metrics_path.resolve())
             collected_rows.append(
                 {
@@ -262,6 +277,8 @@ def main() -> None:
                     "window_label": window.label,
                     "metrics_path": str(metrics_path.resolve()),
                     "reused_existing": reused_existing,
+                    "family_key": family_key,
+                    "epoch_budget": int(metrics.get("epochs", 0) or resolve_epoch_budget_for_family(family_key, manifest_path=str(args.family_epoch_budget_manifest), fallback_epochs=8)),
                     "feature_count": int(metrics.get("feature_count", 0)),
                     "dynamic_graph_layer": bool(metrics.get("dynamic_graph_layer", False)),
                     "dynamic_graph_top_k": int(metrics.get("dynamic_graph_top_k", 0)) if metrics.get("dynamic_graph_layer", False) else 0,
@@ -324,8 +341,11 @@ def main() -> None:
         "",
         f"- generated_at: {datetime.now():%Y-%m-%d %H:%M:%S}",
         f"- root_tag: `{root_tag}`",
-        "- protocol: strict rolling `liquid800` / mainboard-only / `next_open` / 3 equal walk-forward windows",
-        "- reused_existing: `plain_baseline` and `dynamic_graph_v1` reused prior matched formal outputs; only missing ablations were retrained.",
+        (
+            "- protocol: strict rolling `liquid800` / mainboard-only / `next_open` / 3 equal walk-forward windows / "
+            f"`{RESEARCH_TIME_UNIT}` with `valid_months={FORMAL_VALID_MONTHS}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`"
+        ),
+        "- reused_existing: `0`; all profiles were rerun under the monthly execution-first protocol.",
         "",
         "## Mean Summary",
     ]
@@ -333,6 +353,7 @@ def main() -> None:
         verdict_lines.append(
             "- "
             f"{row['profile_name']}: "
+            f"epoch budget {int(row['mean_epoch_budget'])}, "
             f"excess annual {_format_pct(row['mean_excess_annual_return'])}, "
             f"excess Sharpe {_format_float(row['mean_excess_sharpe'])}, "
             f"excess max drawdown {_format_pct(row['mean_excess_max_drawdown'])}, "

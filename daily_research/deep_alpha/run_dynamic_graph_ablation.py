@@ -38,7 +38,11 @@ def main() -> None:
     inject_default_arg("--benchmark", "000300.SH")
     inject_default_arg("--encoder-family", "patch_transformer")
     inject_default_arg("--score-head-method", "manual")
-    inject_default_arg("--valid-days", "252")
+    inject_default_arg("--research-time-unit", "calendar_months")
+    inject_default_arg("--valid-days", "0")
+    inject_default_arg("--valid-months", "12")
+    inject_default_arg("--train-eval-window-days", "0")
+    inject_default_arg("--train-eval-window-months", "6")
     inject_flag_arg("--safe-runtime-profile")
 
     if profile.dynamic_graph_layer:

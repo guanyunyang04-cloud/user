@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import io
+import os
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import timedelta
 from pathlib import Path
@@ -41,8 +43,32 @@ def _run_tq_quietly(func, *args, **kwargs):
         return func(*args, **kwargs)
 
 
+def _tq_session_path() -> str:
+    session_dir = Path(__file__).resolve().parents[1] / "cache" / "tq_sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_path = session_dir / f"data_provider_{os.getpid()}.session"
+    if not session_path.exists():
+        session_path.write_text("daily_research tq session\n", encoding="utf-8")
+    return str(session_path)
+
+
 def _initialize_tq_client(tq) -> None:
-    _run_tq_quietly(tq.initialize, __file__)
+    last_error: Exception | None = None
+    session_path = _tq_session_path()
+    for attempt in range(3):
+        try:
+            _run_tq_quietly(tq.initialize, session_path)
+            return
+        except Exception as exc:
+            last_error = exc
+            try:
+                _run_tq_quietly(tq.close)
+            except Exception:
+                pass
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _close_tq_client(tq) -> None:

@@ -146,6 +146,18 @@ def _format_name_list(raw: Any, *, fallback: list[str] | tuple[str, ...] | None 
     return ",".join(values)
 
 
+def _infer_research_time_unit(metrics: dict[str, Any], cfg: dict[str, Any]) -> str:
+    explicit = str(metrics.get("research_time_unit", cfg.get("research_time_unit", "")) or "").strip().lower()
+    if explicit in {"trading_days", "calendar_months"}:
+        return explicit
+    if any(
+        key in metrics or key in cfg
+        for key in ("valid_months", "train_eval_window_months", "adaptive_task_window_months")
+    ):
+        return "calendar_months"
+    return "trading_days"
+
+
 def _load_metrics_payload(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -326,12 +338,17 @@ def _build_retrain_command(
     _append_arg(cmd, "--score-risk-state-thresholds", _format_state_thresholds(metrics.get("score_risk_state_thresholds")))
     _append_arg(cmd, "--score-head-method", metrics.get("score_head_method", "manual"))
     _append_flag(cmd, "--adaptive-task-weights", bool(metrics.get("adaptive_task_weights", False)))
+    research_time_unit = _infer_research_time_unit(metrics, cfg)
+    _append_arg(cmd, "--research-time-unit", research_time_unit)
     _append_arg(cmd, "--adaptive-task-window-days", metrics.get("adaptive_task_window_days", cfg.get("train_eval_window_days", 126)))
+    _append_arg(cmd, "--adaptive-task-window-months", metrics.get("adaptive_task_window_months", cfg.get("adaptive_task_window_months", 6)))
 
     _append_arg(cmd, "--train-end-date", latest_trainable_date)
     _append_arg(cmd, "--valid-start-date", internal_monitor_start_date)
     _append_arg(cmd, "--valid-days", internal_monitor_days)
+    _append_arg(cmd, "--valid-months", 0)
     _append_arg(cmd, "--train-eval-window-days", cfg.get("train_eval_window_days", 126))
+    _append_arg(cmd, "--train-eval-window-months", cfg.get("train_eval_window_months", 6))
 
     _append_arg(cmd, "--batch-size", cfg.get("batch_size", 256))
     _append_arg(cmd, "--num-workers", cfg.get("num_workers", 0))

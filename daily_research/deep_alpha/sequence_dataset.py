@@ -786,3 +786,10 @@ class DateGroupedBatchSampler(BatchSampler):
 
     def __len__(self) -> int:
         return self._length
+
+    def state_dict(self) -> dict[str, int]:
+        return {"epoch": int(self._epoch)}
+
+    def load_state_dict(self, state: dict[str, int] | None) -> None:
+        payload = dict(state or {})
+        self._epoch = max(int(payload.get("epoch", 0) or 0), 0)

@@ -9631,3 +9631,160 @@ position,000001.SZ,1200,12.38,
 1. execution-first formal winner 已正式重跑并完成上位。
 2. 默认执行不再是 legacy raw default 的显式化，而是正式的 execution-first winner。
 3. production full-fit promotion 现在会冻结 formal winner 的 selected execution profile，避免研究端和执行端再次分裂。
+## 2026-04-03 Monthly Research Protocol Unification
+- 用户要求把 `deep_alpha` 的研究单位从交易日协议提升为自然月协议，并且要求训练、推理、回测、评估一体化，不接受只改表层参数名。
+- 本轮完成的代码改动：
+  - `deep_alpha/config.py` 新增 `research_time_unit / valid_months / train_eval_window_months / adaptive_task_window_months`
+  - `deep_alpha/pipeline_utils.py` 新增月度切窗解析与显式短窗优先级
+  - `deep_alpha/score_head.py` 让 adaptive task weighting 支持按月取近期窗口
+  - `deep_alpha/trainer.py` 补出 RankIC timeseries，供月度汇总复用
+  - `baseline/backtest.py` 新增 `summarize_backtest_by_month()`
+  - `run_deep_alpha_research.py` 接入月度协议，并新增月度 RankIC / score / target_weight / backtest 产物导出
+  - `pretrain_deep_alpha_encoder.py` 接入月度协议与月度 pretrain-valid split
+  - `execution/update_default_candidate_production.py` 与 `run_retrain_frequency_formal_matrix.py` 继承新时间协议，但保留显式短窗优先
+  - `execution/strategy_manifest.py` 新增月度协议元数据透传
+- 关键边界修正：
+  - 显式给出 `train_end_date + valid_start_date + valid_days` 时，验证窗继续按交易日执行
+  - 这条优先级是为了保护 production internal monitor 与 blockwise retrain，不让月度默认值把短监控窗错误放大
+- `yolos` 下的真实验证：
+  - `py_compile` 通过
+  - `run_deep_alpha_research.py --help` 通过
+  - `pretrain_deep_alpha_encoder.py --help` 通过
+  - `update_default_candidate_production.py --help` 通过
+  - 月度研究 smoke run 通过：`deep_alpha_monthly_protocol_smoke_20260403_r1`
+  - 月度预训练 smoke run 通过：`deep_alpha_pretrain_monthly_protocol_smoke_20260403_r1`
+- 月度研究 smoke run 已确认落出：
+  - `validation_rankic_monthly_summary.csv`
+  - `monthly_score_panel.csv`
+  - `monthly_target_weight_panel.csv`
+  - `monthly_backtest_summary.csv`
+- smoke run 的关键元数据已确认：
+  - `research_time_unit = calendar_months`
+  - `valid_months = 2`
+  - `train_eval_window_months = 1`
+  - `adaptive_task_window_months = 1`
+  - `valid_start = 2025-02-05`
+  - `valid_end = 2025-03-31`
+  - `train_eval_start = 2025-01-02`
+## 2026-04-04 monthly execution-first rich experiment 重跑
+
+### 一、architecture execution-objective formal H2H 重跑完成
+- 输出目录：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
+- 结论：
+  - `baseline_current` 仍然是统一后的 execution-first formal winner
+  - mean aligned excess annual / Sharpe = `15.87% / 0.985`
+  - mean replay excess annual / Sharpe = `4.72% / 0.258`
+  - `structure_context_only` = `11.92% / 0.657`（aligned），`1.17% / 0.128`（replay）
+  - 因此 `structure_context_only` 仍未通过 execution upgrade gate
+
+### 二、short-alpha formal H2H 重跑完成
+- 输出目录：
+  - `daily_research/output/short_alpha_formal_head2head_20260403_monthly_r1`
+- 结论：
+  - `state_liquidity_listwise_v1` mean excess annual = `23.25%`
+  - `baseline_current` mean excess annual = `22.71%`
+  - candidate 在 `2/3` 窗口按 excess annual 与 Sharpe 取胜
+  - 但 candidate mean excess Sharpe = `1.444` 仍低于 baseline 的 `1.488`
+  - 当前判定是推进到 execution-objective 对齐，而不是直接升格默认执行
+
+### 三、dynamic-graph formal ablation 重跑完成
+- 输出目录：
+  - `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1`
+- 结论：
+  - `dynamic_graph_no_priors` = `20.98% / 1.083`
+  - `dynamic_graph_v1` = `14.67% / 0.786`
+  - `plain_baseline` = `9.37% / 0.478`
+  - 这说明在当前 monthly execution-first 主板 formal 口径下，industry/style priors 不是稳定增益，反而可能在拖累表现
+
+### 四、复跑过程中的基础设施修正
+- `daily_research/deep_alpha/run_dynamic_graph_formal_ablation_matrix.py`
+  - 显式补上 `--end-date 20260401`，避免子进程为推断最新交易日再次触发 TQ 初始化
+- `daily_research/baseline/data_provider.py`
+  - TQ 初始化改为独立 session 文件，并在失败时 close/retry
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+- `daily_research/deep_alpha/pipeline_utils.py`
+  - 新增 `--force-raw-cache-path`
+  - 当 TQ 抖动但同协议 raw 数据已缓存时，可直接复用 raw cache 补完正式实验
+
+## 2026-04-04 monthly execution-first finetune epoch 预算充分性 formal
+
+### 一、实验目的
+- 在整体切到 monthly execution-first 协议后，先验证当前主赢家 `baseline_current` 的 finetune 训练次数是否足够。
+- 这轮只验证 finetune epoch budget，不混入 masked pretraining 变量。
+
+### 二、协议
+- 入口：
+  - `daily_research/deep_alpha/run_epoch_budget_formal_matrix.py`
+- 输出目录：
+  - `daily_research/output/deep_alpha_epoch_budget_formal_20260404_r1`
+- 协议固定：
+  - profile = `baseline_current`
+  - windows = `20230216_20240229 / 20240301_20250317 / 20250318_20260331`
+  - research objective = `execution_first`
+  - checkpoint objective = `primary_annual_return`
+  - execution alignment = `train_eval_auto / robust_composite`
+  - realistic cost = `3 / 7 / 10 bps`
+  - epoch budgets = `4 / 8 / 12 / 16`
+
+### 三、结果
+- 三窗均值：
+  - `16` epoch = `8.50% / 0.494`（mean replay excess annual / Sharpe）
+  - `8` epoch = `4.72% / 0.258`
+  - `4` epoch = `4.95% / 0.266`
+  - `12` epoch = `4.72% / 0.258`
+- 因此当前 `8` epoch 不足；`16` epoch 是本轮 tested budgets 里的最优 replay 预算。
+
+### 四、关键细节
+- 提升不是来自 execution bridge 变化：
+  - 四档在对应窗口里选到的 execution profile 没有本质变化，主差异来自 checkpoint 本身。
+- 提升高度集中在窗口 `20240301_20250317`：
+  - `8` epoch 的 selected checkpoint = `epoch 7`
+  - `16` epoch 的 selected checkpoint = `epoch 13`
+  - 该窗 replay excess annual / Sharpe 从 `-7.10% / -0.441` 改善到 `4.25% / 0.268`
+- 月度拆解也支持“不是单月 lucky spike”：
+  - 该窗口正收益月份从 `4` 个月提升到 `6` 个月
+  - `2024-06`、`2024-07`、`2025-01` 改善最明显
+  - 平均换手还略降：`0.182 -> 0.170`
+
+### 五、暴露的问题
+- 当前 `training_diagnostics` 的 `undertrained` 判断主要盯 `valid_loss`，这轮四档都是 `0/3` undertrained。
+- 但 execution-first 目标下，真正更赚钱的 checkpoint 可能在更后面的 epoch 才出现，即使 `valid_loss` 早已不再改善。
+- 因此：
+  - `valid_loss stable` 不等于 execution-first 目标已经训够
+  - 仅靠现有 undertrained flag 会漏掉“晚出现但更赚钱”的 checkpoint
+
+### 六、当前判决
+- 对 `baseline_current` 的 monthly execution-first formal 复跑，当前主参考预算应上调到 `16` epoch。
+- `12` epoch 没有解决问题，说明这条线不是简单的“从 8 稍微多训一点就够”。
+## 2026-04-04 训练续训与家族 budget frontier 接线
+- 为解决 “epoch budget 可能没训够、但从头重跑浪费算力” 的问题，已把 `strict resume + warm_start continue + family-based frontier stop rule` 接入 `deep_alpha` 主链。
+- 代码侧新增：
+  - `run_deep_alpha_research.py` 支持 `--resume-run-dir / --resume-model-path / --resume-mode`
+  - `trainer.py` 保存并恢复 `last_model_state_dict + optimizer/scheduler/scaler + sampler epoch + history`
+  - `run_family_epoch_frontier_calibration.py` 负责先在 calibration windows 上冻结家族 budget
+  - `family_epoch_budget.py` 负责输出与读取 `deep_alpha_family_epoch_budget_latest.json`
+- formal runner 侧已接线：
+  - `run_architecture_execution_objective_head2head.py`
+  - `run_short_alpha_formal_head2head.py`
+  - `run_dynamic_graph_formal_ablation_matrix.py`
+- 真实 smoke 已验证：
+  - `base_e2` 产物已包含 resumable state
+  - `strict_to_e4` 能在同一训练链上从 `epoch 3/4` 继续
+  - `warmstart_to_e4` 会重新从 `epoch 1/4` 起步，但继承已有模型权重
+- 同日晚些时候继续把 family frontier 真正跑完：
+  - 初版统一 calibration windows 里，`baseline` 能跑但暴露出两个 runner bug：external replay 输出路径错位、summary objective 取错列名；两者都已修复
+  - 统一窗口随后又暴露 `dynamic_graph` 样本起点更晚：根因不是模型坏，而是该家族固定 `start-date=20220101 + lookback_window=120 + liquid800 rolling pool`，导致最早有效 sample date 天然晚于 baseline 线
+  - 之后把 `run_family_epoch_frontier_calibration.py` 升成 family-specific calibration windows，`dynamic_graph` 改用更晚的 pre-formal 月度窗口，实验得以完整跑通
+  - 最终产物目录为 `daily_research/output/deep_alpha_family_epoch_frontier_20260404_r2`
+  - 最终冻结预算为：
+    - `baseline -> 12`
+    - `structure -> 12`
+    - `short_alpha -> 32`
+    - `dynamic_graph -> 16`
+  - 其中：
+    - `baseline` 到 `32` 右边界仍有 budget pressure，说明当前 frontier 还没完全封顶
+    - `short_alpha` 到 `32` 右边界仍是最优，说明该家族最吃训练预算
+    - `structure` 的 `12/16` 打平且右边界无 pressure
+    - `dynamic_graph` 的 `16/24` 打平且右边界无 pressure
+  - 完成后再次用四家族全量重扫同一 `root-tag`，把 `daily_research/output/deep_alpha_family_epoch_budget_latest.json` 固化为完整 manifest

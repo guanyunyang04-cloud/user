@@ -32,10 +32,12 @@ class RecentFormalWindow:
     end_date: str = "20260401"
     train_end: str = "2025-03-17"
     valid_start: str = "2025-03-18"
-    valid_days: int = 252
+    valid_months: int = 12
 
 
 WINDOW = RecentFormalWindow()
+RESEARCH_TIME_UNIT = "calendar_months"
+TRAIN_EVAL_WINDOW_MONTHS = 6
 DEFAULT_PROFILES: tuple[str, ...] = (
     "baseline_current",
     "capacity_small_h64",
@@ -54,15 +56,12 @@ DEFAULT_PROFILES: tuple[str, ...] = (
     "structure_prototype_task_v1",
 )
 
-REUSE_METRICS: dict[str, str] = {
-    "baseline_current": "daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1/runs/baseline_current/metrics.json",
-    "state_context_only": "daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1/runs/state_context_v1/metrics.json",
-}
+REUSE_METRICS: dict[str, str] = {}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a recent-formal deep_alpha architecture matrix for complexity, depth, and structure effects.")
-    parser.add_argument("--root-tag", default="deep_alpha_architecture_matrix_20260402_r1")
+    parser.add_argument("--root-tag", default="deep_alpha_architecture_matrix_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument(
         "--profiles",
@@ -94,12 +93,16 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "000300.SH",
         "--liquidity-pool",
         "liquid500",
+        "--research-time-unit",
+        RESEARCH_TIME_UNIT,
         "--train-end-date",
         WINDOW.train_end,
         "--valid-start-date",
         WINDOW.valid_start,
         "--valid-days",
-        str(WINDOW.valid_days),
+        "0",
+        "--valid-months",
+        str(WINDOW.valid_months),
         "--lookback-window",
         "120",
         "--batch-size",
@@ -141,7 +144,9 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--score-head-method",
         "manual",
         "--train-eval-window-days",
-        "126",
+        "0",
+        "--train-eval-window-months",
+        str(TRAIN_EVAL_WINDOW_MONTHS),
         "--num-workers",
         "0",
         "--pin-memory",
@@ -389,10 +394,11 @@ def main() -> None:
         "",
         "## Protocol",
         f"- window: `{WINDOW.valid_start} -> 2026-03-31`",
+        f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOW.valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
-        "- invariant settings: `top_bottom_bce + manual score head + no execution alignment + next_open`",
-        "- purpose: isolate model complexity / depth / structure changes under the current recent-formal protocol",
+        "- invariant settings: `execution_first + train_eval_auto execution alignment + top_bottom_bce + manual score head + next_open`",
+        "- purpose: isolate model complexity / depth / structure changes under the monthly execution-first protocol",
         "",
         "## Winner",
         f"- best_excess_annual_return: `{winner['profile_name']}` = {_format_pct(float(winner['excess_annual_return']))}",

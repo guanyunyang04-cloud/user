@@ -8,6 +8,11 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.linear_model import Ridge
 
+from daily_research.deep_alpha.pipeline_utils import (
+    RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    resolve_window_dates,
+)
+
 try:
     from lightgbm import LGBMRegressor
 except Exception:  # pragma: no cover
@@ -68,13 +73,27 @@ def compute_task_rankic_summary(pred_df: pd.DataFrame, target_names: List[str]) 
     return summary.rename(columns={"mean": "rankic_mean", "std": "rankic_std"})
 
 
-def _slice_recent_window(pred_df: pd.DataFrame, window_days: int | None) -> pd.DataFrame:
-    if not window_days or window_days <= 0:
+def _slice_recent_window(
+    pred_df: pd.DataFrame,
+    window_days: int | None,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    window_months: int | None = None,
+) -> pd.DataFrame:
+    if (not window_days or window_days <= 0) and (not window_months or window_months <= 0):
         return pred_df
     dates = sorted(pd.to_datetime(pred_df["date"]).unique())
     if not dates:
         return pred_df
-    selected = set(dates[-min(window_days, len(dates)):])
+    selected = set(
+        resolve_window_dates(
+            pd.Index(dates),
+            pd.Timestamp(dates[-1]),
+            int(window_days or 0),
+            research_time_unit=research_time_unit,
+            window_months=window_months,
+        )
+    )
     out = pred_df[pd.to_datetime(pred_df["date"]).isin(selected)].copy()
     return out if not out.empty else pred_df
 
@@ -83,8 +102,19 @@ def derive_adaptive_task_weights(
     pred_df: pd.DataFrame,
     target_names: List[str],
     recent_window_days: int | None = None,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    recent_window_months: int | None = None,
 ) -> Dict[str, float]:
-    summary = compute_task_rankic_summary(_slice_recent_window(pred_df, recent_window_days), target_names)
+    summary = compute_task_rankic_summary(
+        _slice_recent_window(
+            pred_df,
+            recent_window_days,
+            research_time_unit=research_time_unit,
+            window_months=recent_window_months,
+        ),
+        target_names,
+    )
     weights: Dict[str, float] = {}
     for target_name in target_names:
         row = summary.loc[summary["target"] == target_name]
@@ -118,16 +148,37 @@ def fit_score_head(
     method: str = "ridge",
     adaptive_task_weights: bool = True,
     adaptive_window_days: int | None = None,
+    *,
+    research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
+    adaptive_window_months: int | None = None,
 ) -> ScoreHeadArtifact:
     if method == "manual":
-        task_weights = derive_adaptive_task_weights(train_pred_df, target_names, recent_window_days=adaptive_window_days) if adaptive_task_weights else {}
+        task_weights = (
+            derive_adaptive_task_weights(
+                train_pred_df,
+                target_names,
+                recent_window_days=adaptive_window_days,
+                research_time_unit=research_time_unit,
+                recent_window_months=adaptive_window_months,
+            )
+            if adaptive_task_weights
+            else {}
+        )
         return ScoreHeadArtifact(method="manual", feature_columns=[], task_weights=task_weights, model=None)
 
     features = _build_feature_frame(train_pred_df, target_names)
     indexed_features = features.set_index(["date", "stock"]).sort_index()
-    task_weights = derive_adaptive_task_weights(train_pred_df, target_names, recent_window_days=adaptive_window_days) if adaptive_task_weights else {
-        name: 1.0 / len(target_names) for name in target_names
-    }
+    task_weights = (
+        derive_adaptive_task_weights(
+            train_pred_df,
+            target_names,
+            recent_window_days=adaptive_window_days,
+            research_time_unit=research_time_unit,
+            recent_window_months=adaptive_window_months,
+        )
+        if adaptive_task_weights
+        else {name: 1.0 / len(target_names) for name in target_names}
+    )
     target = _build_training_target(train_pred_df, task_weights)
     aligned = indexed_features.join(target, how="inner").dropna()
     if aligned.empty:

@@ -134,3 +134,73 @@
   - `source_formal_run_dir = deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
   - `panel_mode = execution_aligned`
   - 默认执行与 formal winner 现在共用同一 execution-first 语义
+## Monthly Time Semantics
+- `deep_alpha` 的稳定时间协议新增 `calendar_months`，并作为当前主研究默认单位。
+- 该协议的稳定含义是：
+  - 训练/验证切分按自然月组织；
+  - `train_eval` 近期窗口按自然月组织；
+  - adaptive task weighting 的近期窗口按自然月组织；
+  - 正式研究评估必须提供月度回测与月度 RankIC 汇总。
+- 月度协议仍然建立在日频行情、日频样本与 `next_open` 回测之上；变化的是时间切窗与评估聚合口径，而不是把研究降采样成月线模型。
+- 当调用方显式给出 `valid_start_date` 且同时给出 `valid_days` 时，系统稳定遵循“显式短窗优先”，优先按交易日截断验证窗。
+- 这条显式短窗优先级是稳定语义，不是临时 workaround；它用于保护 production internal monitor、blockwise retrain 与旧 formal runner 的可复现性。
+# 2026-04-04 稳定语义补充
+
+- `deep_alpha` 当前稳定默认 winner 仍然是：
+  - `baseline_current_execfirst_winner`
+  - 证据目录：`daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
+- `structure_context_only` 的稳定语义更新为：
+  - raw 结构挑战者仍成立
+  - 但在 monthly execution-first + realistic replay gate 下仍不成立
+  - 不能直接作为默认执行升级答案
+- `state_liquidity_listwise_v1` 的稳定语义更新为：
+  - 已通过 monthly execution-first formal raw head-to-head
+  - 当前是 `short_alpha` 线最值得继续推进到 execution-objective 对齐的候选
+  - 还不是默认执行 winner
+- `dynamic_graph_v1` 的稳定语义需要降级为：
+  - 不再默认视为 dynamic graph 线最优结构
+  - 在 `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1/summary.md` 下，`dynamic_graph_no_priors` 已成为新的 formal winner
+- 长矩阵复跑的稳定韧性口径新增：
+  - 遇到 TQ 抖动时，正式研究允许通过 `--force-raw-cache-path` 直接复用同协议 raw cache
+  - 这属于研究韧性增强，不改变 formal 指标定义
+
+## Finetune Epoch 预算稳定语义
+
+- `baseline_current` 在 monthly execution-first 三窗下，`8` epoch 不是当前稳定充分预算。
+- 当前已验证预算集合 `4 / 8 / 12 / 16` 中，`16` epoch 是最优 replay 预算：
+  - mean replay excess annual / Sharpe = `8.50% / 0.494`
+  - 对照 `8` epoch = `4.72% / 0.258`
+- `12` epoch 与 `8` epoch 基本一致，说明这条线不是“线性多训一点就持续变好”，而是存在晚出现的有效 checkpoint。
+- 当前 `training_diagnostics.status=stable` 只代表 `valid_loss` 未显示继续改善，不等于 execution-first 目标已经训够。
+- 因此，对 `baseline_current` 的 monthly execution-first formal 复跑，应把 `16` epoch 视为当前主参考预算，直到新的正式矩阵推翻它。
+## Finetune Resume 与 Budget Frontier 稳定语义
+
+- `deep_alpha` 当前稳定支持：
+  - `resume_mode = strict`
+  - `resume_mode = warm_start`
+- `strict` 的稳定语义是：
+  - 继续同一条训练链
+  - 恢复 last epoch 权重与 optimizer/scheduler/scaler 状态
+  - 恢复 sampler epoch 与历史训练轨迹
+- `warm_start` 的稳定语义是：
+  - 只加载选中模型权重
+  - 把继续训练当作新的优化路径重新开始
+- execution-first 预算是否充足，当前稳定判据不再以 `valid_loss` 单独决定，而是以 objective-aligned budget pressure 为准。
+- objective-aligned budget pressure 当前稳定包含：
+  - `selected_in_tail`
+  - `selected_at_right_boundary`
+  - `still_improving` under current checkpoint objective
+- rich experiment 的稳定预算来源不再是脚本内固定 `8`，而是：
+  - 先运行 `run_family_epoch_frontier_calibration.py`
+  - 冻结到 `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+  - 再由 formal runner 默认读取这份 manifest
+- 当前稳定冻结预算语义为：
+  - `baseline -> 12`
+  - `structure -> 12`
+  - `short_alpha -> 32`
+  - `dynamic_graph -> 16`
+- `dynamic_graph` 的预算校准窗口允许晚于其他家族，这是稳定规则，不是临时例外；原因是该家族当前固定使用：
+  - `start-date = 20220101`
+  - `lookback_window = 120`
+  - `rolling_liquidity_pool = liquid800`
+  - 因而最早有效 sample date 天然晚于 `baseline / structure / short_alpha`

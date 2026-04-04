@@ -55,6 +55,76 @@ def _runtime_override_row(
     }
 
 
+def summarize_backtest_by_month(
+    equity_df: pd.DataFrame,
+    action_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "month",
+        "start_date",
+        "end_date",
+        "portfolio_return",
+        "gross_portfolio_return",
+        "benchmark_return",
+        "excess_return",
+        "gross_excess_return",
+        "avg_holding_count",
+        "avg_turnover",
+        "avg_buy_turnover",
+        "avg_sell_turnover",
+        "total_trading_cost_return",
+        "regime_active_ratio",
+        "action_count",
+        "portfolio_equity_end",
+        "benchmark_equity_end",
+        "excess_equity_end",
+    ]
+    if equity_df is None or equity_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    work = equity_df.reset_index().copy()
+    date_col = "date" if "date" in work.columns else work.columns[0]
+    work["date"] = pd.to_datetime(work[date_col])
+    work["month"] = work["date"].dt.to_period("M").astype(str)
+
+    action_counts: dict[str, int] = {}
+    if action_df is not None and not action_df.empty and "execution_date" in action_df.columns:
+        action_work = action_df.copy()
+        action_work["execution_date"] = pd.to_datetime(action_work["execution_date"])
+        action_counts = action_work.groupby(action_work["execution_date"].dt.to_period("M").astype(str)).size().to_dict()
+
+    rows: List[Dict[str, Any]] = []
+    for month, group in work.groupby("month", sort=True):
+        portfolio_growth = float((1.0 + group["portfolio_return"].fillna(0.0)).prod())
+        gross_growth = float((1.0 + group["gross_portfolio_return"].fillna(0.0)).prod())
+        benchmark_growth = float((1.0 + group["benchmark_return"].fillna(0.0)).prod())
+        excess_growth = portfolio_growth / benchmark_growth if benchmark_growth > 0 else np.nan
+        gross_excess_growth = gross_growth / benchmark_growth if benchmark_growth > 0 else np.nan
+        rows.append(
+            {
+                "month": str(month),
+                "start_date": str(pd.Timestamp(group["date"].iloc[0]).date()),
+                "end_date": str(pd.Timestamp(group["date"].iloc[-1]).date()),
+                "portfolio_return": portfolio_growth - 1.0,
+                "gross_portfolio_return": gross_growth - 1.0,
+                "benchmark_return": benchmark_growth - 1.0,
+                "excess_return": excess_growth - 1.0 if np.isfinite(excess_growth) else np.nan,
+                "gross_excess_return": gross_excess_growth - 1.0 if np.isfinite(gross_excess_growth) else np.nan,
+                "avg_holding_count": float(group["holding_count"].fillna(0.0).mean()),
+                "avg_turnover": float(group["turnover"].fillna(0.0).mean()),
+                "avg_buy_turnover": float(group["buy_turnover"].fillna(0.0).mean()),
+                "avg_sell_turnover": float(group["sell_turnover"].fillna(0.0).mean()),
+                "total_trading_cost_return": float(group["trading_cost_return"].fillna(0.0).sum()),
+                "regime_active_ratio": float(group["regime_on"].fillna(False).mean()) if "regime_on" in group.columns else np.nan,
+                "action_count": int(action_counts.get(str(month), 0)),
+                "portfolio_equity_end": float(group["portfolio_equity"].iloc[-1]),
+                "benchmark_equity_end": float(group["benchmark_equity"].iloc[-1]),
+                "excess_equity_end": float(group["excess_equity"].iloc[-1]) if "excess_equity" in group.columns else np.nan,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def backtest(
     close: pd.DataFrame,
     benchmark_close: pd.Series,

@@ -55,8 +55,14 @@ class TrainingDiagnostics:
     checkpoint_selection_mode: str
     selected_metric_name: str
     selected_metric_value: float
+    selection_metric_final_value: float
+    selected_epoch_ratio: float
+    selected_epoch_gap_to_budget: int
+    selected_in_tail: bool
+    selected_at_right_boundary: bool
     stopped_early: bool
     still_improving: bool
+    objective_aligned_budget_pressure: bool
     learning_rate_final: float
     status: str
     recommendation: str
@@ -66,6 +72,12 @@ class TrainingDiagnostics:
 class TrainingRunResult:
     history: List[EpochRecord]
     diagnostics: TrainingDiagnostics
+    selected_model_state_dict: Dict[str, Any]
+    last_model_state_dict: Dict[str, Any]
+    optimizer_state_dict: Dict[str, Any]
+    scheduler_state_dict: Dict[str, Any]
+    scaler_state_dict: Dict[str, Any]
+    training_state: Dict[str, Any]
 
 
 @dataclass
@@ -113,7 +125,13 @@ def _build_training_diagnostics(
     checkpoint_selection_mode: str = "valid_loss",
     selected_metric_name: str = "valid_loss",
     selected_metric_value: float = float("nan"),
+    checkpoint_selection_min_improvement: float | None = None,
 ) -> TrainingDiagnostics:
+    normalized_selection_mode = str(checkpoint_selection_mode or "valid_loss").strip().lower() or "valid_loss"
+    selection_improvement = float(
+        min_improvement if checkpoint_selection_min_improvement is None else checkpoint_selection_min_improvement
+    )
+
     if not history:
         return TrainingDiagnostics(
             epochs_requested=int(epochs_requested),
@@ -122,11 +140,17 @@ def _build_training_diagnostics(
             best_valid_loss=float("nan"),
             final_valid_loss=float("nan"),
             selected_epoch=0,
-            checkpoint_selection_mode=str(checkpoint_selection_mode),
+            checkpoint_selection_mode=str(normalized_selection_mode),
             selected_metric_name=str(selected_metric_name),
             selected_metric_value=float(selected_metric_value),
+            selection_metric_final_value=float("nan"),
+            selected_epoch_ratio=0.0,
+            selected_epoch_gap_to_budget=0,
+            selected_in_tail=False,
+            selected_at_right_boundary=False,
             stopped_early=bool(stopped_early),
             still_improving=False,
+            objective_aligned_budget_pressure=False,
             learning_rate_final=float(learning_rate_final),
             status="empty",
             recommendation="No training history was produced.",
@@ -144,24 +168,43 @@ def _build_training_diagnostics(
         best_valid = float("nan")
     final_valid = float(valid_losses[-1])
 
-    still_improving = False
-    if len(valid_losses) >= 2 and np.isfinite(final_valid):
-        prior_best = np.nanmin(valid_losses[:-1])
-        if np.isfinite(prior_best) and final_valid < prior_best - float(min_improvement):
-            still_improving = True
+    selected_epoch_value = int(selected_epoch or history[best_pos].epoch)
+    selected_epoch_ratio = float(selected_epoch_value) / float(max(len(history), 1))
+    selected_epoch_gap_to_budget = max(len(history) - int(selected_epoch_value), 0)
+    selected_at_right_boundary = selected_epoch_value >= len(history)
+    selected_in_tail = selected_epoch_ratio >= 0.80
 
-    if still_improving and not stopped_early:
+    if normalized_selection_mode == "valid_loss":
+        selection_values = np.asarray([float(record.valid_loss) for record in history], dtype=float)
+        final_selection_value = float(selection_values[-1])
+        still_improving = False
+        if len(selection_values) >= 2 and np.isfinite(final_selection_value):
+            prior_best = np.nanmin(selection_values[:-1])
+            if np.isfinite(prior_best) and final_selection_value < prior_best - float(selection_improvement):
+                still_improving = True
+    else:
+        selection_values = np.asarray([float(getattr(record, "selection_metric_value", float("nan"))) for record in history], dtype=float)
+        final_selection_value = float(selection_values[-1])
+        still_improving = False
+        if len(selection_values) >= 2 and np.isfinite(final_selection_value):
+            prior_best = np.nanmax(selection_values[:-1])
+            if np.isfinite(prior_best) and final_selection_value > prior_best + float(selection_improvement):
+                still_improving = True
+
+    objective_aligned_budget_pressure = bool(still_improving or selected_at_right_boundary or selected_in_tail)
+
+    if objective_aligned_budget_pressure:
         status = "undertrained"
         recommendation = (
-            "Validation loss was still improving at the final epoch. "
-            "Increase max epochs before judging this recipe."
+            f"{selected_metric_name} remained budget-sensitive near the right edge. "
+            "Extend epochs before freezing this recipe."
         )
     elif stopped_early:
         status = "plateaued"
-        recommendation = "Validation loss plateaued; best checkpoint was restored."
+        recommendation = f"{selected_metric_name} plateaued; the selected checkpoint was restored."
     else:
         status = "stable"
-        recommendation = "Validation loss stabilized under the current epoch budget."
+        recommendation = f"{selected_metric_name} stabilized under the current epoch budget."
 
     return TrainingDiagnostics(
         epochs_requested=int(epochs_requested),
@@ -169,12 +212,18 @@ def _build_training_diagnostics(
         best_epoch=int(history[best_pos].epoch),
         best_valid_loss=best_valid,
         final_valid_loss=final_valid,
-        selected_epoch=int(selected_epoch or history[best_pos].epoch),
-        checkpoint_selection_mode=str(checkpoint_selection_mode),
+        selected_epoch=selected_epoch_value,
+        checkpoint_selection_mode=str(normalized_selection_mode),
         selected_metric_name=str(selected_metric_name),
         selected_metric_value=float(selected_metric_value),
+        selection_metric_final_value=final_selection_value,
+        selected_epoch_ratio=float(selected_epoch_ratio),
+        selected_epoch_gap_to_budget=int(selected_epoch_gap_to_budget),
+        selected_in_tail=bool(selected_in_tail),
+        selected_at_right_boundary=bool(selected_at_right_boundary),
         stopped_early=bool(stopped_early),
         still_improving=bool(still_improving),
+        objective_aligned_budget_pressure=bool(objective_aligned_budget_pressure),
         learning_rate_final=float(learning_rate_final),
         status=status,
         recommendation=recommendation,
@@ -684,6 +733,7 @@ def train_multitask_model(
     checkpoint_selection_mode: str = "valid_loss",
     checkpoint_selection_callback: Callable[[nn.Module, int], dict[str, Any]] | None = None,
     checkpoint_selection_min_improvement: float | None = None,
+    resume_payload: Dict[str, Any] | None = None,
 ) -> TrainingRunResult:
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -695,12 +745,12 @@ def train_multitask_model(
         threshold_mode="abs",
         min_lr=max(float(learning_rate) * 0.1, 1e-6),
     )
-    history: List[EpochRecord] = []
     model.to(device)
     amp_enabled = bool(use_amp and device.type == "cuda")
     scaler = torch.amp.GradScaler(device="cuda", enabled=amp_enabled)
     best_valid_loss = float("inf")
     best_state = deepcopy(model.state_dict())
+    last_state = deepcopy(model.state_dict())
     no_improve_epochs = 0
     stopped_early = False
     normalized_selection_mode = str(checkpoint_selection_mode or "valid_loss").strip().lower() or "valid_loss"
@@ -735,12 +785,108 @@ def train_multitask_model(
         for name in target_state_protect_structure_names
         if name in STRUCTURE_LABEL_TO_ID
     ]
+
+    train_batch_sampler = getattr(train_loader, "batch_sampler", None)
+    history: List[EpochRecord] = []
+    epochs_completed = 0
+    if resume_payload:
+        payload_history = resume_payload.get("history", [])
+        history = [
+            record
+            if isinstance(record, EpochRecord)
+            else EpochRecord(
+                epoch=int(record["epoch"]),
+                train_loss=float(record["train_loss"]),
+                valid_loss=float(record["valid_loss"]),
+                train_reg_loss=float(record["train_reg_loss"]),
+                train_rank_loss=float(record["train_rank_loss"]),
+                train_listwise_loss=float(record["train_listwise_loss"]),
+                train_aux_loss=float(record.get("train_aux_loss", 0.0)),
+                train_proto_loss=float(record.get("train_proto_loss", 0.0)),
+                valid_reg_loss=float(record["valid_reg_loss"]),
+                valid_rank_loss=float(record["valid_rank_loss"]),
+                valid_listwise_loss=float(record["valid_listwise_loss"]),
+                valid_aux_loss=float(record.get("valid_aux_loss", 0.0)),
+                valid_proto_loss=float(record.get("valid_proto_loss", 0.0)),
+                selection_metric_name=str(record.get("selection_metric_name", "valid_loss")),
+                selection_metric_value=float(record.get("selection_metric_value", float("nan"))),
+            )
+            for record in payload_history
+        ]
+        training_state = dict(resume_payload.get("training_state", {}))
+        epochs_completed = int(training_state.get("epochs_completed", len(history)) or len(history))
+        selected_state_dict = resume_payload.get("selected_model_state_dict") or resume_payload.get("model_state_dict")
+        last_model_state_dict = resume_payload.get("last_model_state_dict")
+        if last_model_state_dict:
+            model.load_state_dict(last_model_state_dict)
+            last_state = deepcopy(last_model_state_dict)
+        if selected_state_dict:
+            best_state = deepcopy(selected_state_dict)
+        optimizer_state_dict = resume_payload.get("optimizer_state_dict")
+        if optimizer_state_dict:
+            optimizer.load_state_dict(optimizer_state_dict)
+        scheduler_state_dict = resume_payload.get("scheduler_state_dict")
+        if scheduler_state_dict:
+            scheduler.load_state_dict(scheduler_state_dict)
+        scaler_state_dict = resume_payload.get("scaler_state_dict")
+        if scaler_state_dict:
+            scaler.load_state_dict(scaler_state_dict)
+        best_valid_loss = float(training_state.get("best_valid_loss", best_valid_loss))
+        no_improve_epochs = int(training_state.get("no_improve_epochs", no_improve_epochs) or no_improve_epochs)
+        best_selection_metric = float(training_state.get("best_selection_metric", best_selection_metric))
+        selected_epoch = int(training_state.get("selected_epoch", selected_epoch) or selected_epoch)
+        selected_metric_name = str(training_state.get("selected_metric_name", selected_metric_name))
+        selected_metric_value = float(training_state.get("selected_metric_value", selected_metric_value))
+        if train_batch_sampler is not None and hasattr(train_batch_sampler, "load_state_dict"):
+            train_batch_sampler.load_state_dict(training_state.get("train_sampler_state", {}))
+
+    if int(epochs) <= int(epochs_completed):
+        model.load_state_dict(best_state)
+        diagnostics = _build_training_diagnostics(
+            history=history,
+            epochs_requested=epochs,
+            stopped_early=stopped_early,
+            learning_rate_final=float(optimizer.param_groups[0]["lr"]),
+            min_improvement=float(min_improvement),
+            selected_epoch=selected_epoch or None,
+            checkpoint_selection_mode=normalized_selection_mode,
+            selected_metric_name=selected_metric_name,
+            selected_metric_value=selected_metric_value,
+            checkpoint_selection_min_improvement=selection_improvement,
+        )
+        training_state = {
+            "epochs_completed": int(epochs_completed),
+            "best_valid_loss": float(best_valid_loss),
+            "best_selection_metric": float(best_selection_metric),
+            "selected_epoch": int(selected_epoch),
+            "selected_metric_name": str(selected_metric_name),
+            "selected_metric_value": float(selected_metric_value),
+            "no_improve_epochs": int(no_improve_epochs),
+            "checkpoint_selection_mode": str(normalized_selection_mode),
+            "selection_improvement": float(selection_improvement),
+            "stopped_early": bool(stopped_early),
+            "train_sampler_state": {}
+            if train_batch_sampler is None or not hasattr(train_batch_sampler, "state_dict")
+            else dict(train_batch_sampler.state_dict()),
+        }
+        return TrainingRunResult(
+            history=history,
+            diagnostics=diagnostics,
+            selected_model_state_dict=deepcopy(best_state),
+            last_model_state_dict=deepcopy(last_state),
+            optimizer_state_dict=deepcopy(optimizer.state_dict()),
+            scheduler_state_dict=deepcopy(scheduler.state_dict()),
+            scaler_state_dict=deepcopy(scaler.state_dict()),
+            training_state=training_state,
+        )
+
     train_batch_count = max(len(train_loader), 1)
     valid_batch_count = max(len(valid_loader), 1)
-    progress_total = max(int(epochs), 1) * (train_batch_count + valid_batch_count)
+    remaining_epochs = max(int(epochs) - int(epochs_completed), 0)
+    progress_total = max(int(remaining_epochs), 1) * (train_batch_count + valid_batch_count)
 
     with create_progress(total=progress_total, desc="Finetune setup", unit="batch", leave=False) as progress:
-        for epoch in range(1, epochs + 1):
+        for epoch in range(int(epochs_completed) + 1, int(epochs) + 1):
             model.train()
             train_losses: List[float] = []
             train_reg_losses: List[float] = []
@@ -881,11 +1027,11 @@ def train_multitask_model(
             with torch.no_grad():
                 for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(valid_loader, start=1):
                     progress.set_description_str(
-                        _format_training_step_desc(
-                            phase_label="valid",
-                            epoch=epoch,
-                            epoch_total=epochs,
-                            batch_idx=batch_idx,
+                    _format_training_step_desc(
+                        phase_label="valid",
+                        epoch=epoch,
+                        epoch_total=epochs,
+                        batch_idx=batch_idx,
                             batch_total=valid_batch_count,
                         )
                     )
@@ -1013,7 +1159,7 @@ def train_multitask_model(
                 valid_listwise_loss=float(np.mean(valid_listwise_losses)) if valid_listwise_losses else np.nan,
                 valid_aux_loss=float(np.mean(valid_aux_losses)) if valid_aux_losses else np.nan,
                 valid_proto_loss=float(np.mean(valid_proto_losses)) if valid_proto_losses else np.nan,
-            )
+                )
             current_valid = float(epoch_record.valid_loss)
             if normalized_selection_mode != "valid_loss" and checkpoint_selection_callback is not None:
                 callback_payload = checkpoint_selection_callback(model, epoch) or {}
@@ -1030,6 +1176,7 @@ def train_multitask_model(
                 epoch_record.selection_metric_name = "valid_loss"
                 epoch_record.selection_metric_value = current_valid
             history.append(epoch_record)
+            last_state = deepcopy(model.state_dict())
             progress_write(
                 f"epoch {epoch}/{epochs} | train={epoch_record.train_loss:.4f} "
                 f"| valid={epoch_record.valid_loss:.4f} | rank={epoch_record.valid_rank_loss:.4f} "
@@ -1073,8 +1220,33 @@ def train_multitask_model(
         checkpoint_selection_mode=normalized_selection_mode,
         selected_metric_name=selected_metric_name,
         selected_metric_value=selected_metric_value,
+        checkpoint_selection_min_improvement=selection_improvement,
     )
-    return TrainingRunResult(history=history, diagnostics=diagnostics)
+    training_state = {
+        "epochs_completed": int(len(history)),
+        "best_valid_loss": float(best_valid_loss),
+        "best_selection_metric": float(best_selection_metric),
+        "selected_epoch": int(selected_epoch),
+        "selected_metric_name": str(selected_metric_name),
+        "selected_metric_value": float(selected_metric_value),
+        "no_improve_epochs": int(no_improve_epochs),
+        "checkpoint_selection_mode": str(normalized_selection_mode),
+        "selection_improvement": float(selection_improvement),
+        "stopped_early": bool(stopped_early),
+        "train_sampler_state": {}
+        if train_batch_sampler is None or not hasattr(train_batch_sampler, "state_dict")
+        else dict(train_batch_sampler.state_dict()),
+    }
+    return TrainingRunResult(
+        history=history,
+        diagnostics=diagnostics,
+        selected_model_state_dict=deepcopy(best_state),
+        last_model_state_dict=deepcopy(last_state),
+        optimizer_state_dict=deepcopy(optimizer.state_dict()),
+        scheduler_state_dict=deepcopy(scheduler.state_dict()),
+        scaler_state_dict=deepcopy(scaler.state_dict()),
+        training_state=training_state,
+    )
 
 
 def infer_dataset(
@@ -1306,7 +1478,7 @@ def train_masked_pretrainer(
     return PretrainRunResult(history=history, diagnostics=diagnostics)
 
 
-def compute_rankic(pred_df: pd.DataFrame, target_names: List[str]) -> pd.DataFrame:
+def compute_rankic_timeseries(pred_df: pd.DataFrame, target_names: List[str]) -> pd.DataFrame:
     rows = []
     for target_name in target_names:
         pred_col = f"pred_{target_name}"
@@ -1316,7 +1488,11 @@ def compute_rankic(pred_df: pd.DataFrame, target_names: List[str]) -> pd.DataFra
                 continue
             ic = spearmanr(g[pred_col], g[true_col], nan_policy="omit").correlation
             rows.append({"date": dt, "target": target_name, "rankic": float(ic) if ic is not None else np.nan})
-    out = pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=["date", "target", "rankic"])
+
+
+def compute_rankic(pred_df: pd.DataFrame, target_names: List[str]) -> pd.DataFrame:
+    out = compute_rankic_timeseries(pred_df, target_names)
     if out.empty:
         return pd.DataFrame(columns=["target", "rankic_mean", "rankic_std", "rankic_ir"])
     summary = out.groupby("target")["rankic"].agg(["mean", "std"]).reset_index()
