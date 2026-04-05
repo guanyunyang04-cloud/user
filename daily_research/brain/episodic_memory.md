@@ -9891,3 +9891,22 @@ position,000001.SZ,1200,12.38,
 - 另外补跑了轻量 smoke：
   - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
   - 已验证新文件真实落盘，且 `primary_research_monthly_diagnostics` 会直接出现在终端 summary 里
+
+### 预算归一化后月度总判已重做
+- 为避免继续沿用 `2026-04-03 monthly_r1` 的旧排序，新增统一复盘入口：
+  - `daily_research/deep_alpha/run_monthly_landscape_review.py`
+- 当前最新汇总输出：
+  - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1/report.md`
+  - `track_profile_summary.csv`
+  - `pairwise_compare_summary.csv`
+  - `monthly_panel_long.csv`
+- 这次总判使用的证据集合：
+  - `deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
+  - `short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+  - `dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
+  - `short_alpha_production_promotion_eval_20260405_r1`
+- 更新后的核心结论：
+  - `structure_context_only` 的旧月度判断大体仍成立，但只保留为结构诊断，不再作为执行升级方向
+  - `short_alpha` 的旧“更稳但不够爆”判断被预算归一化 formal 推翻；当前应视为 liquid500 主执行升级线
+  - `dynamic_graph_no_priors` 仍是 mainboard / liquid800 主研究线，但更精确的表述应是：priors 没能带来更高的净收益兑现
+- production 月度拆解也一并纳入，但当前真正有信息量的 production 月份主要集中在 `2026-03` 上线之后；prelaunch 月份基本相同，因此 production 月度样本仍需继续累计

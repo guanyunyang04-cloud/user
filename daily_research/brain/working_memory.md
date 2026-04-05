@@ -12,6 +12,9 @@
   - `state_liquidity_listwise_v1 + regoff_k2_10d_ensemble_native_anchor` 已完成 `formal -> recent gate -> production full-fit -> active default` 全链闭环
 - 当前 liquid800 / mainboard 研究线最重要的新结论是：
   - `dynamic_graph_no_priors` 明显优于 `dynamic_graph_v1`
+- 新版月度总判已经以预算归一化 formal + production replay 重做完毕：
+  - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1/report.md`
+  - 旧 `2026-04-03 monthly_r1` 分析现在只保留为阶段性诊断，不再作为当前排序结论
 
 ## 2. 预算归一化 formal 结论
 - family epoch budget 已冻结为：
@@ -42,7 +45,23 @@
   - multi-window 胜负 = `4/4`
 - 因此 liquid500 默认执行已不再停留在“研究赢家”，而是已经切到 production 复核后的新赢家。
 
-## 4. 当前默认执行状态
+## 4. 月度总判更新
+- `structure_context_only` 的旧判断基本仍成立：
+  - 它仍更像防守型结构先验
+  - 月度兑现能力仍不足
+  - 当前不再占用执行升级优先级
+- `short_alpha` 的旧判断已被后续实验改写：
+  - 它不再只是“更稳但不够爆”
+  - 预算归一化后，它同时改善了月度胜率、月度中位数和坏月
+  - 当前应把它视为 liquid500 主执行升级线，而不是备选 challenger
+- `dynamic_graph_no_priors` 仍是 mainboard / liquid800 主研究线：
+  - 但更精确的月度结论是：`v1` 在平滑性上未必更差
+  - 真正的问题是 priors 没有带来更高的净收益兑现
+- 当前月度研究的主任务已经从“谁看起来更稳”转成：
+  - 谁能在按月统计的净收益上持续兑现
+  - 谁的优势不是由极少数幸运月份撑起来
+
+## 5. 当前默认执行状态
 - 当前 active strategy 指向：
   - `daily_research/output/active_execution_strategy.json`
   - `strategy_name = state_liquidity_listwise_v1_execfirst_winner`
@@ -58,18 +77,19 @@
   - `objective_aligned_budget_pressure = true`
   - 因此这条线虽然已上线，但下一步仍应继续做 production recipe 的 epoch extension
 
-## 5. 当前优先级
+## 6. 当前优先级
 1. 先把 `state_liquidity_listwise_v1` 的 production recipe 继续做 epoch frontier extension，重点看 `24 -> 32 -> 40` 是否还能稳定提升。
-2. 所有 rich experiment 与 candidate review 先读 `Monthly Priority Summary` / `primary_research_monthly_diagnostics`，用它定位问题和优化方向。
-3. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立研究线推进，不与 liquid500 默认执行判断混写。
-4. 把旧 baseline production root 保留为显式回退对照，而不是继续作为默认执行真源。
+2. 把月度目标进一步前推到训练判决里，至少把月度胜率、中位数超额、坏月惩罚、收益集中度惩罚纳入正式 review。
+3. 所有 rich experiment 与 candidate review 先读 `Monthly Priority Summary` / `primary_research_monthly_diagnostics`，用它定位问题和优化方向。
+4. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立研究线推进，不与 liquid500 默认执行判断混写。
+5. 把旧 baseline production root 保留为显式回退对照，而不是继续作为默认执行真源。
 
-## 6. 暂不优先做的事
+## 7. 暂不优先做的事
 - 不再重开 `structure_context_only` 大矩阵。
 - 不再手工给所有家族统一写死同一个 `--epochs`。
 - 不把 liquid800 研究 winner 直接静默混入 liquid500 默认执行。
 
-## 7. 当前关键证据目录
+## 8. 当前关键证据目录
 - active execution manifest：
   - `daily_research/output/active_execution_strategy.json`
 - active production root：
@@ -80,6 +100,8 @@
   - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
 - short-alpha production promotion eval：
   - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1`
+- monthly landscape review：
+  - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - monthly-priority smoke：
   - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
 - dynamic-graph budget-normalized formal：

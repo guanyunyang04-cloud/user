@@ -75,6 +75,7 @@
   - 先看 `primary_research_monthly_diagnostics`
   - 再看 `Monthly Priority Summary`
   - 最后才看整窗 mean annual / Sharpe
+- 若已存在更晚的 budget-normalized monthly landscape review，则更早的 `monthly_r1` 结论只保留为阶段性诊断，不再作为当前排序结论。
 - 当前月度重点字段固定包括：
   - positive-month ratio
   - median monthly excess return

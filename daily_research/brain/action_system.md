@@ -259,6 +259,18 @@ promotion 后必须检查：
 - 单个 run 里的 `primary_research_monthly_diagnostics.json`
 - candidate replay 里的 `monthly_backtest_summary.csv` / `monthly_backtest_diagnostics.json`
 
+### 月度总判复盘入口
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_monthly_landscape_review.py
+```
+
+- 当前 latest output：
+  - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
+- 先读：
+  - `report.md`
+  - `track_profile_summary.csv`
+  - `pairwise_compare_summary.csv`
+
 ### architecture execution-objective formal
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1
@@ -301,6 +313,7 @@ promotion 后必须检查：
 - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
 - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
 - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1`
+- `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
