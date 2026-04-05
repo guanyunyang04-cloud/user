@@ -91,16 +91,19 @@ def bootstrap_execution_paths(entry_file: str) -> Path:
 def ensure_default_pool_argument() -> None:
     if has_arg("--stocks") or has_arg("--stocks-file"):
         return
-    from daily_research.execution.liquidity_universe import get_default_pool_file
+    from daily_research.execution.liquidity_universe import ensure_default_pool_file, get_default_pool_file
     from daily_research.baseline.data_provider import find_universe_violations, load_cached_stock_name_map
 
-    pool_file = get_default_pool_file()
+    if is_help_request():
+        pool_file = get_default_pool_file()
+    else:
+        pool_file = ensure_default_pool_file()
     if not pool_file.exists() and not is_help_request():
         raise FileNotFoundError(
-            f"Default liquid500 universe file not found: {pool_file}. "
+            f"Default liquid500 universe file not found after preflight: {pool_file}. "
             "Please run daily_research/execution/update_liquid_pool.py after close first."
         )
-    if pool_file.exists():
+    if pool_file.exists() and not is_help_request():
         raw_stocks = [
             line.strip().upper()
             for line in pool_file.read_text(encoding="utf-8-sig").splitlines()

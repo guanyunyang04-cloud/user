@@ -52,6 +52,38 @@ def get_default_pool_file(pool_size: int = DEFAULT_POOL_SIZE) -> Path:
     return get_universe_dir() / f"liquid{int(pool_size)}_latest.txt"
 
 
+def get_liquidity_pool_summary_file() -> Path:
+    return get_universe_dir() / "liquidity_pool_summary_latest.csv"
+
+
+def get_latest_pool_snapshot(
+    pool_size: int = DEFAULT_POOL_SIZE,
+) -> dict[str, Any]:
+    summary_csv = get_liquidity_pool_summary_file()
+    if not summary_csv.exists():
+        return {}
+    try:
+        summary_df = pd.read_csv(summary_csv)
+    except Exception:
+        return {}
+    if summary_df.empty or "pool_name" not in summary_df.columns:
+        return {}
+    pool_name = f"liquid{int(pool_size)}"
+    working = summary_df.copy()
+    working["pool_name"] = working["pool_name"].astype(str).str.strip().str.lower()
+    matched = working.loc[working["pool_name"].eq(pool_name)]
+    if matched.empty:
+        return {}
+    row = matched.iloc[-1].to_dict()
+    payload: dict[str, Any] = {}
+    for key, value in row.items():
+        if pd.isna(value):
+            payload[str(key)] = ""
+        else:
+            payload[str(key)] = value
+    return payload
+
+
 def get_named_pool_file(pool_name: str) -> Path:
     name = str(pool_name or "").strip().lower()
     if not name:
@@ -244,6 +276,8 @@ def build_liquidity_rankings(
         history_window=history_window,
         use_cache=use_cache,
         refresh_cache=refresh_cache,
+        progress_desc="Load liquidity-pool market data",
+        progress_position=1,
     )
 
     close_frame = raw_df_dict["Close"].copy()
@@ -367,16 +401,57 @@ def ensure_default_pool_file(
     *,
     pool_size: int = DEFAULT_POOL_SIZE,
     start_date: str = "20240101",
+    signal_date: str | None = None,
     use_cache: bool = True,
     refresh_cache: bool = False,
+    auto_refresh_stale: bool = True,
 ) -> Path:
     default_file = get_default_pool_file(pool_size)
-    if default_file.exists() and not refresh_cache:
+    expected_signal_date = pd.Timestamp(signal_date or get_latest_completed_trading_date()).strftime("%Y-%m-%d")
+    snapshot = get_latest_pool_snapshot(pool_size)
+    current_signal_date = str(snapshot.get("signal_date", "")).strip()
+    latest_file_text = str(snapshot.get("latest_file", "")).strip()
+    latest_file_matches = False
+    if latest_file_text:
+        try:
+            latest_file_matches = Path(latest_file_text).resolve() == default_file.resolve()
+        except Exception:
+            latest_file_matches = False
+    is_fresh = (
+        default_file.exists()
+        and not refresh_cache
+        and current_signal_date == expected_signal_date
+        and latest_file_matches
+    )
+    if is_fresh:
         return default_file
+    if not auto_refresh_stale:
+        if not default_file.exists():
+            raise FileNotFoundError(
+                f"Default liquid{int(pool_size)} universe file not found: {default_file}. "
+                "Please run daily_research/execution/update_liquid_pool.py after close first."
+            )
+        raise RuntimeError(
+            f"Default liquid{int(pool_size)} universe file is stale: "
+            f"current_signal_date={current_signal_date or 'missing'} expected_signal_date={expected_signal_date}. "
+            "Please run daily_research/execution/update_liquid_pool.py after close first."
+        )
     artifacts = update_liquidity_pool_files(
         pool_sizes=DEFAULT_POOL_SIZES,
         start_date=start_date,
+        signal_date=expected_signal_date,
         use_cache=use_cache,
         refresh_cache=refresh_cache,
     )
-    return artifacts.latest_files[int(pool_size)]
+    refreshed_file = artifacts.latest_files[int(pool_size)]
+    refreshed_signal_date = pd.Timestamp(artifacts.signal_date).strftime("%Y-%m-%d")
+    if refreshed_signal_date != expected_signal_date:
+        raise RuntimeError(
+            f"Auto-refresh produced an unexpected liquid{int(pool_size)} signal date: "
+            f"refreshed_signal_date={refreshed_signal_date} expected_signal_date={expected_signal_date}."
+        )
+    if not refreshed_file.exists():
+        raise FileNotFoundError(
+            f"Auto-refresh completed but default liquid{int(pool_size)} universe file is still missing: {refreshed_file}"
+        )
+    return refreshed_file

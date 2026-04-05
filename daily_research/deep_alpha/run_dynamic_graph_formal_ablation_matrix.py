@@ -60,6 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-tag", default="dynamic_graph_ablation_formal_20260403_monthly_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--force-rerun", action="store_true")
+    parser.add_argument("--force-raw-cache-path", default="")
     parser.add_argument(
         "--profiles",
         default=",".join(PROFILES_TO_RUN),
@@ -74,8 +75,15 @@ def _run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, cwd=PROJECT_ROOT)
 
 
-def _build_base_command(python_executable: str, experiment_tag: str, window: FormalWindow, epoch_budget: int) -> list[str]:
-    return [
+def _build_base_command(
+    python_executable: str,
+    experiment_tag: str,
+    window: FormalWindow,
+    epoch_budget: int,
+    *,
+    force_raw_cache_path: str = "",
+) -> list[str]:
+    command = [
         python_executable,
         str(RUN_SCRIPT),
         "--data-source",
@@ -178,6 +186,9 @@ def _build_base_command(python_executable: str, experiment_tag: str, window: For
         "--experiment-tag",
         experiment_tag,
     ]
+    if str(force_raw_cache_path or "").strip():
+        command.extend(["--force-raw-cache-path", str(force_raw_cache_path).strip()])
+    return command
 
 
 def _resolve_metrics_path(root_tag: str, profile_name: str, window: FormalWindow) -> Path:
@@ -251,7 +262,13 @@ def main() -> None:
                         manifest_path=str(args.family_epoch_budget_manifest),
                         fallback_epochs=8,
                     )
-                    command = _build_base_command(args.python_executable, experiment_tag, window, epoch_budget)
+                    command = _build_base_command(
+                        args.python_executable,
+                        experiment_tag,
+                        window,
+                        epoch_budget,
+                        force_raw_cache_path=str(args.force_raw_cache_path),
+                    )
                     if profile.dynamic_graph_layer:
                         command.extend(
                             [

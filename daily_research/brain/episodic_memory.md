@@ -9788,3 +9788,52 @@ position,000001.SZ,1200,12.38,
     - `structure` 的 `12/16` 打平且右边界无 pressure
     - `dynamic_graph` 的 `16/24` 打平且右边界无 pressure
   - 完成后再次用四家族全量重扫同一 `root-tag`，把 `daily_research/output/deep_alpha_family_epoch_budget_latest.json` 固化为完整 manifest
+
+## 2026-04-05
+
+### 预算归一化 rich experiment 全量收口
+- 先完成了 second-stage family frontier：
+  - `daily_research/output/deep_alpha_family_epoch_frontier_baseline_stage2_20260404_r1`
+  - `daily_research/output/deep_alpha_family_epoch_frontier_short_alpha_stage2_20260404_r1`
+- latest manifest 因而更新为：
+  - `baseline -> 4`
+  - `structure -> 12`
+  - `short_alpha -> 24`
+  - `dynamic_graph -> 16`
+- 然后按这套冻结预算重跑了三套 monthly execution-first formal：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+  - `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
+
+### architecture 线：structure 彻底失去升级资格
+- `baseline_current` mean replay excess annual / Sharpe = `4.95% / 0.266`
+- `structure_context_only` = `1.66% / 0.156`
+- 说明 `structure_context_only` 在预算归一化后仍没有穿过 execution-upgrade gate
+
+### short_alpha 线：state_liquidity_listwise_v1 从候选升级为首选
+- `state_liquidity_listwise_v1` mean excess annual / Sharpe = `31.86% / 1.797`
+- `baseline_current` = `15.72% / 0.934`
+- 三窗 formal 为 `3/3` 同时取胜
+- 之后补做了 recent realistic replay gate：
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/recent_replays/state_liquidity_listwise_v1_20250318_20260331`
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/recent_h2h_short_alpha_vs_current_default/summary.md`
+- 结果：
+  - `short_alpha_execalign_realistic` full-period annual / excess annual / excess Sharpe = `71.19% / 51.70% / 2.964`
+  - 当前默认 `regoff_k2_realistic` = `44.12% / 25.75% / 1.722`
+  - named-window 胜负为 `4/5`
+- 因此 short-alpha 线已不再只是“值得继续研究”的候选，而是新的 liquid500 execution-upgrade 首选
+
+### dynamic_graph 线：no_priors 优势被进一步放大
+- `dynamic_graph_no_priors` mean excess annual / Sharpe = `34.94% / 1.393`
+- `dynamic_graph_v1` = `19.97% / 1.044`
+- `plain_baseline` = `0.33% / -0.059`
+- 这说明在 rolling liquid800 monthly execution-first formal 下，industry/style priors 不是稳健增益，而是净拖累
+
+### 过程性修正
+- `run_short_alpha_formal_head2head.py` 已改为让 `baseline_current` 读取 `baseline` 家族预算，而不是误继承 `short_alpha` 预算
+- `run_dynamic_graph_formal_ablation_matrix.py` 已改为让 `plain_baseline` 读取 `baseline` 家族预算，而不是误继承 `dynamic_graph` 预算
+- `run_family_epoch_frontier_calibration.py` 已支持：
+  - `late_preformal` calibration preset
+  - subset rerun 后 merge 回 latest manifest
+- `run_dynamic_graph_formal_ablation_matrix.py` 还新增了 `--force-raw-cache-path`
+- dynamic-graph 补跑时曾在 `dynamic_graph_topk4_20250318_20260331` 遇到 TQ 初始化失败；最终通过复用 `daily_research/cache/deep_alpha/raw/6e5203c8cdec3a61.pkl` 成功续跑并收口

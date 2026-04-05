@@ -1,380 +1,288 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-03`
+快照日期：`2026-04-05`
 
-## 1. 用途
-- 本文件只保留规范化的日常操作入口。
-- 稳定事实写入 `semantic_memory.md`。
-- 当前判断写入 `working_memory.md`。
-- 长过程与实验细节写入 `episodic_memory.md`。
+## 1. 使用原则
+- 正式研究、训练、回测、执行统一使用：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
+- 本文件保留“当前仍高频使用、可直接执行、且有明确边界”的入口。
+- 历史过程、旧结论、废弃主线统一写入 `episodic_memory.md`，不在本文件堆积。
+- 默认执行的真源不是某个脚本参数，而是：
+  - `daily_research/output/active_execution_strategy.json`
 
-## 2. 固定操作边界
-- 正式研究与执行脚本统一使用 `yolos`。
-- 市场范围固定为主板范围：
-  - 上证 A 股 + 深证 A 股
-  - 剔除创业板、科创板、ST
-- 执行方式固定为：
-  - 盘后生成计划
-  - 次日开盘人工执行
-- 成交假设固定为：
-  - `next_open`
-- 日常默认流程不允许无条件静默重训模型；仅允许默认 production 候选按固定 `Retrain Monthly` 规则自动重训。
-- 外部候选信号新鲜度保护必须保持开启。
+## 2. 执行端详细使用指南
 
-## 3. 每日默认流程
-### 第 1 步：刷新高流动性股票池
+### 2.1 执行端当前是怎么接线的
+- 日常默认执行入口：
+  - `daily_research/execution/run_trade_plan.py`
+- 默认执行先读取：
+  - `daily_research/output/active_execution_strategy.json`
+- active strategy 会告诉执行端：
+  - 当前默认策略名
+  - 当前默认读取哪份 live score / target-weight panel
+  - 当前是否使用 `execution_aligned` 面板
+  - 当前 production root 在哪里
+  - 当前底层模型的 execution profile / retrain 语义
+- 结论：
+  - “默认执行到底跑谁”，以 `active_execution_strategy.json` 为准
+  - 不是以某个 formal run 名字、也不是以脑内口述为准
+
+### 2.2 当前默认执行快照
+- 当前 active strategy：
+  - `baseline_current_execfirst_winner`
+- 当前 panel mode：
+  - `execution_aligned`
+- 当前 execution profile：
+  - `regoff_k2_10d_ensemble_native_anchor`
+- 当前 production root：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+
+### 2.3 每日默认执行标准流程
+1. 先确认默认候选和 active strategy 没有意外切换：
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_liquid_pool.py --start-date 20240101
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --list-candidate-profiles
 ```
 
-### 第 2 步：更新账户快照
-- 维护文件：
-  - `daily_research/execution/current_positions.csv`
+2. 如需确认默认真源，直接查看：
+  - `daily_research/output/active_execution_strategy.json`
 
-### 第 3 步：生成每日默认交易计划
+3. 确认持仓输入文件：
+  - 默认路径：`daily_research/execution/current_positions.csv`
+  - `run_trade_plan.py` 默认会把这个文件注入 `--positions-file`
+  - 如果账户现金不写在文件里，可以单独传 `--cash`
+
+4. 生成默认次日开盘执行计划：
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py
 ```
 
-- 默认候选配置：
-  - `active_execution_strategy -> baseline_current_execfirst_winner`
-- 该入口会先检查默认候选底层 `production full-fit` 模型是否已跨入新的自然月；若已跨月，会先按 `Retrain Monthly` 自动运行 `update_default_candidate_production.py`，随后再检查 `daily_live_*` 面板是否落后于最新完成交易日并自动刷新。
-- 默认日常计划读取：
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_score_panel.csv`
-  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default/execution_aligned_daily_live_target_weight_panel.csv`
-- formal 研究证据保留在：
-  - `deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
-- 默认输出：
-  - `daily_research/execution/output/latest_trade_plan.txt`
+  - preflight 现在会检查 `liquid500_latest.txt` 是否过期
+  - 若默认池滞后于最新完成交易日，会先自动刷新
+  - 若自动刷新失败，才会明确报错并中止执行
 
-## 4. 模型重训规则
-- 每日默认流程不是“无条件每天重训”，而是“按固定月度规则自动重训”。
-- `run_trade_plan.py` 当前会先读取 `production_retrain_manifest.json`：
-  - 若最近一次 `launch_cutoff_date` 已跨入新的自然月，则先自动运行 `daily_research/execution/update_default_candidate_production.py`
-  - 若尚未跨月，则只基于现有已训练模型刷新 `daily_live_*` 面板
-- 这样做的目的：
-  - 让默认执行直接遵循 formal 已验证的 `Retrain Monthly` 结论
-  - 避免继续把“冻结很久但面板每天刷新”的旧模型误当作最新 production
-  - 继续把研究 winner 判决与 production 证据边界分开管理
-- 默认 production 候选还会保留两层护栏：
-  - 月度自动重训之外，仍显示 `21` 个交易日提醒阈值
-  - 达到 `63` 个交易日时默认拦截，除非显式 `--allow-stale-model` 放行
+5. 执行后优先检查两个输出：
+  - 文本计划：`daily_research/execution/output/latest_trade_plan.txt`
+  - 结构化摘要：`daily_research/execution/output/<YYYYMMDD>/plan_summary.json`
 
-### 需要重训的情况
-- 股票池边界、交易约束、执行口径发生实质变化。
-- 默认候选正式表现明显退化，或现实成本复核失效。
-- 研究侧出现新的正式 winner，并准备进入执行升级比较。
-- 上游研究 run 需要重新生成正式产物，而不仅仅是刷新 live 面板。
-- 默认 production 候选最近一次 `launch_cutoff_date` 已跨入新的自然月。
+6. 重点核对 `plan_summary.json` 里的这些字段：
+  - `candidate_label`
+  - `signal_date`
+  - `candidate_freshness`
+  - `model_retrain_freshness`
+  - `trade_plan_target_weight_panel_csv`
+  - `source_run_dir` 或 active manifest 对应的 production root
 
-### 当前默认候选的重训入口
+### 2.4 常用执行命令
+
+#### 只列出当前可用候选，不生成计划
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --list-candidate-profiles
+```
+
+#### 用默认 active strategy 生成计划
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py
+```
+
+#### 显式指定现金
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --cash 200000
+```
+
+#### 显式指定持仓文件
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --positions-file daily_research\execution\current_positions.csv
+```
+
+#### 临时放宽 stale model 拦截
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --allow-stale-model
+```
+
+#### 临时关闭市场过滤
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --no-market-regime-filter
+```
+
+### 2.5 什么时候用默认执行，什么时候不用
+- 用默认执行：
+  - 你要生成“当前默认生产候选”的次日开盘计划
+  - 你要检查当前 active strategy 是否还能正常落地
+- 不要用默认执行：
+  - 你只是想试跑某个研究候选，但不想影响默认生产
+  - 你只是想做候选回测，不想出次日交易单
+  - 你准备切换默认策略，但还没做 production promotion
+
+### 2.6 研究候选试跑，但不切换默认执行
+当你只是想把某个研究 run 的 score panel / target-weight panel 过一遍执行端，使用研究候选入口，不要直接改 active strategy。
+
+#### 用候选 target-weight / score 生成试跑版交易计划
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --external-score-csv "<score_panel.csv>" --external-target-weight-csv "<target_weight_panel.csv>" --candidate-label "<candidate_label>"
+```
+
+适用场景：
+- 不改默认执行，只看研究候选如果今天上，会生成什么计划
+- 检查候选在执行层是否因为桥接、持仓、过滤、软状态而被明显改写
+
+关键可调参数：
+- `--target-weight-top-k`
+- `--target-weight-min-weight`
+- `--target-weight-power`
+- `--target-weight-full-invest`
+- `--soft-state-profile`
+- `--no-market-regime-filter`
+
+### 2.7 研究候选回测复核
+当你要比较某个研究候选在执行约束下的历史净收益，而不是只看今天计划，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --score-panel-csv "<score_panel.csv>" --target-weight-panel-csv "<target_weight_panel.csv>" --candidate-label "<candidate_label>" --output-dir "<output_dir>" --experiment-tag "<tag>"
+```
+
+最重要的可控参数：
+- 交易成本：
+  - `--transaction-cost-bps`
+  - `--slippage-bps`
+  - `--sell-tax-bps`
+- 调仓口径：
+  - `--rebalance-freq`
+  - `--rebalance-offset-mode`
+  - `--rebalance-anchor-date`
+- 桥接限制：
+  - `--target-weight-top-k`
+  - `--target-weight-power`
+  - `--target-weight-full-invest`
+- 风控覆盖：
+  - `--soft-state-profile`
+  - `--no-market-regime-filter`
+
+适用场景：
+- recent realistic replay
+- 与当前默认执行做 head-to-head
+- 验证某个研究赢家是否真的穿过 execution gate
+
+### 2.8 默认执行升级：promotion 标准流程
+默认执行不能直接指向 formal run 目录。正式切换必须经过 production promotion。
+
+#### 用当前 formal winner 生成 production full-fit
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py
 ```
 
-- 该入口会：
-  - 保留 formal holdout 研究证据不动
-  - 自动计算“最新可标注训练日”
-  - 用截至上线前的全部可标注数据重训一次 production full-fit
-  - 冻结 formal winner 的 selected execution profile，避免 production full-fit 静默改写 execution strategy
-  - 把稳定日常执行产物同步到 `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
-
-### 只刷新 live 面板，不重训
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\export_live_panels_from_run.py --run-dir daily_research\output\deep_alpha_liquid500_dynamic_graph_bridge_production_default
-```
-
-- 注意：
-  - 这一步只能更新 `daily_live_*` 面板的新鲜度；
-  - 不能替代默认入口里的月度自动重训逻辑；
-  - 也不能消除底层 production 模型的重训时效提醒/拦截状态。
-
-## 5. 显式回退流程
-### 第 1 步：仅在需要时刷新旧机器学习产物
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_model_legacy_ml.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504
-```
-
-### 第 2 步：生成显式旧主线回退计划
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan_legacy_ml.py
-```
-
-## 6. 候选工具
-### 查看候选配置列表
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --list-candidate-profiles
-```
-
-### 生成候选交易计划
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_trade_plan.py --candidate-profile default
-```
-
-常用别名：
-- `default`
-- `aggressive`
-- `robust_auto`
-- `soft_guard`
-
-### 生成候选回测
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_research_candidate_backtest.py --candidate-profile default
-```
-
-## 7. 研究入口
-### 查看 dynamic-graph 配置列表
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_ablation.py --list-profiles
-```
-
-### 运行 dynamic-graph 正式消融矩阵
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py
-```
-
-### 查看 short-alpha 实验配置列表
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_experiment_matrix.py --list-profiles
-```
-
-### 运行 short-alpha recent-formal 矩阵
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_experiment_matrix.py
-```
-
-- 当前首轮 winner：
-  - `state_liquidity_listwise_v1`
-- 当前首轮降级分支：
-  - `short_target_v1`
-  - `short_input_v1`
-  - `short_combo_v1`
-
-### 运行 short-alpha 三窗 formal head-to-head
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py
-```
-
-- 当前正式结论：
-  - `state_liquidity_listwise_v1` 不是 recent-window lucky run
-  - 但第一窗仍退化，下一步先做 execution objective 对齐，不直接升格为默认执行候选
-
-### 查看 architecture 配置列表
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py --list-profiles
-```
-
-### 运行 architecture recent-formal 矩阵
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
-```
-
-- 当前正式输出：
-  - `daily_research/output/deep_alpha_architecture_matrix_20260402_r1`
-- 当前 recent-formal 结论：
-  - `baseline_current` 仍是最近窗口收益 winner
-  - `structure_context_only` 是当前最强的风险收益比结构挑战者
-  - 单纯增加容量、增加深度或切换 vanilla `transformer` / `mamba` 都没有超过基线
-
-### 运行 architecture 三窗 formal head-to-head
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
-```
-
-- 当前正式输出：
-  - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1`
-- 当前多窗结论：
-  - `structure_context_only` 是当前最可信的 raw holdout 多窗稳健升级方向
-  - `graph_off_plain` 与 `depth_shallow_l1` 也有增益，但仍先保留为研究对照
-
-### 运行 architecture execution-objective 三窗 formal head-to-head
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
-```
-
-- 当前正式输出：
-  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2`
-- 当前 execution-objective 结论：
-  - `structure_context_only` 的 raw 优势没有穿过 `train_eval_auto + robust_composite + realistic cost` gate
-  - `baseline_current + regoff_k2 execalign` 已完成 formal 重跑、production full-fit promotion 与默认执行切换
-  - 后续如再升级，必须以这条 execution-first 默认链路为对照
-
-### 运行 `deep_alpha` 重训频率 formal 矩阵
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_retrain_frequency_formal_matrix.py --frequencies annual_freeze,quarterly_63d,monthly_calendar,every_21d --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
-```
-
-- 当前正式输出：
-  - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1`
-- 排行榜读取口径：
-  - `frequency_summary_common_window.csv`
-- 如需补跑中断实验：
-  - 继续复用同一个 `root-tag`
-  - runner 会自动复用已完成 block，不要另起新 tag 从头重训
-
-## 8. 诊断与维护
-### 性能分化报告
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\performance_dispersion_report.py --help
-```
-
-### 脑文档守卫
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\doc_guard.py check
-```
-
-### 工作区维护
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\workspace_maintenance.py report
-```
-
-## 9. 升级纪律
-- 不允许静默替换默认入口。
-- 新候选若未通过以下项目，不得升级：
-  - 同窗正式比较
-  - 显式成本外部回放
-  - 多窗口 H2H
-- 不允许升级单个幸运调仓相位。
-- 本文件不记录长实验叙事。
-
-## 10. Execution-First Unified Ops
-### 查看当前 active execution strategy
-```powershell
-Get-Content daily_research\output\active_execution_strategy.json
-```
-
-### 让 production promotion 同时激活默认执行策略
+#### promotion 后，把新 production 策略写入 active strategy
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py --activate-strategy --strategy-panel-mode auto
 ```
 
-- 该入口现在会同时做三件事：
-  - 继承研究赢家的 `research_objective_mode`
-  - 继承 `checkpoint_selection_objective`
-  - 继承 `execution_alignment_mode / objective / candidate_profiles / realistic cost`
-- promotion 完成后还会刷新：
+#### 指定研究 run 做 promotion 并直接激活
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py --source-run-dir "<formal_run_dir>" --strategy-name "<strategy_name>" --activate-strategy --strategy-panel-mode auto
+```
+
+promotion 后必须检查：
+- active manifest：
   - `daily_research/output/active_execution_strategy.json`
+- production manifest：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+- 默认执行真实落盘结果：
+  - `daily_research/execution/output/latest_trade_plan.txt`
 
-### 查看默认执行目前读到的 profile
+### 2.9 执行端常见误区
+- 误区 1：formal run 赢了，就等于默认执行已经切换
+  - 错。formal 只是研究证据；默认执行真正读取的是 active strategy manifest。
+- 误区 2：直接把某个 run 的 panel 路径塞进日常执行，就等于完成升级
+  - 错。这样会绕过 production full-fit、live panel 刷新和 retrain 语义。
+- 误区 3：`--list-candidate-profiles` 会改默认执行
+  - 错。它只是查看，不会写 manifest。
+- 误区 4：研究候选试跑应该改 `active_execution_strategy.json`
+  - 错。候选试跑走 `run_research_candidate_trade_plan.py` / `run_research_candidate_backtest.py`。
+
+### 2.10 执行端排错
+- 看到 stale model warning：
+  - 先查 active strategy 和 production manifest 的训练截止日、上线截止日
+  - 再决定是允许临时执行，还是先做 production retrain
+- 计划里信号日不新鲜：
+  - 优先查 active strategy 指向的 panel 文件是否更新
+  - 再查 production root 的 live panel 是否刷新成功
+- 默认池文件过期：
+  - 现在默认 preflight 会自动刷新 `daily_research/execution/universe/liquid500_latest.txt`
+  - 若仍失败，再单独运行 `daily_research/execution/update_liquid_pool.py`
+- 想确认今天到底读了哪份 panel：
+  - 看 `plan_summary.json`
+  - 不要靠终端印象判断
+- TQ 临时抖动时：
+  - 执行侧优先重试 `run_trade_plan.py`
+  - 研究侧需要 raw cache 续跑时，再用 `--force-raw-cache-path`
+
+## 3. 家族级训练预算校准
+
+### 查看可校准家族
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py --list-candidate-profiles
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_family_epoch_frontier_calibration.py --list-families
 ```
 
-- 如果接线正常，`default=` 应该显示：
-  - `active_execution_strategy`
-## Monthly Research Commands
-### 月度正式研究入口
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --research-time-unit calendar_months --valid-months 12 --train-eval-window-months 6 --adaptive-task-window-months 6
-```
-
-- 若只想缩短正式验证窗，可直接改：
-  - `--valid-months`
-- 若只想缩短 train-side score head / risk gate / adaptive 权重窗口，可直接改：
-  - `--train-eval-window-months`
-  - `--adaptive-task-window-months`
-
-### 月度预训练入口
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\pretrain_deep_alpha_encoder.py --research-time-unit calendar_months --valid-months 12 --pretrain-valid-months 3
-```
-
-### 显式短窗优先级
-- 若命令已经显式给出：
-  - `--train-end-date`
-  - `--valid-start-date`
-  - `--valid-days`
-- 则验证窗按显式交易日执行。
-- 只有在未显式给出日窗，或主动把 `--valid-days 0` 交给月度协议时，`valid_months` 才主导验证窗长度。
-# 2026-04-04 rich experiment 重跑入口
-
-## 重新生成 monthly execution-first architecture execution H2H
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260403_monthly_r1
-```
-
-## 重新生成 monthly execution-first short-alpha formal H2H
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_formal_head2head_20260403_monthly_r1
-```
-
-## 重新生成 monthly execution-first dynamic-graph formal ablation
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag dynamic_graph_ablation_formal_20260403_monthly_r1
-```
-
-## TQ 波动时的 raw cache 强制复用入口
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --force-raw-cache-path daily_research\cache\deep_alpha\raw\fc86ee4ed74716c2.pkl
-```
-
-## 当前已确认的新结果目录
-- `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
-- `daily_research/output/short_alpha_formal_head2head_20260403_monthly_r1`
-- `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1`
-
-## Finetune Epoch 预算充分性 formal
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_epoch_budget_formal_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --epoch-budgets 4,8,12,16
-```
-
-- 输出目录：
-  - `daily_research/output/deep_alpha_epoch_budget_formal_20260404_r1`
-- 当前判决：
-  - `baseline_current` 在 monthly execution-first 三窗下，`16` epoch 的 mean replay excess annual / Sharpe = `8.50% / 0.494`
-  - 当前参考 `8` epoch = `4.72% / 0.258`
-  - `12` epoch 与 `8` epoch 基本相同；真正的提升出现在 `16` epoch
-  - 提升集中在窗口 `20240301_20250317`，selected checkpoint 从 `epoch 7` 延后到 `epoch 13`
-  - 四档 `undertrained_count` 都是 `0/3`，说明当前基于 `valid_loss` 的 undertrained 诊断不足以替代 execution-first 预算验证
-## 训练续训与家族级 frontier 协议
-
-### strict resume
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --resume-run-dir daily_research\output\<old_run> --resume-mode strict --epochs 16
-```
-
-- `strict` 现在会恢复：
-  - `last_model_state_dict`
-  - `optimizer_state_dict`
-  - `scheduler_state_dict`
-  - `scaler_state_dict`
-  - sampler epoch 与历史 `train_history`
-
-### warm-start continue
-```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --resume-run-dir daily_research\output\<old_run> --resume-mode warm_start --epochs 16
-```
-
-- `warm_start` 只加载选中模型参数，不继承 optimizer / scheduler / scaler 状态。
-
-### 家族级 epoch frontier 校准
+### family-default frontier
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_family_epoch_frontier_calibration.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-- 默认家族：
-  - `baseline`
-  - `structure`
-  - `short_alpha`
-  - `dynamic_graph`
-- 默认协议：
-  - 先跑 `4/8/12/16`
-  - 如果最右边界仍是最优，或仍有 objective-aligned budget pressure，再扩到 `24/32`
-- 最新冻结预算 manifest：
+### late-preformal second-stage frontier
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_family_epoch_frontier_calibration.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --families baseline --calibration-window-preset late_preformal --initial-budgets 4,8,12,16 --extension-budgets 24,32,40,48,64 --root-tag deep_alpha_family_epoch_frontier_baseline_stage2_20260404_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_family_epoch_frontier_calibration.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --families short_alpha --calibration-window-preset late_preformal --initial-budgets 4,8,12,16 --extension-budgets 24,32,40,48,64 --root-tag deep_alpha_family_epoch_frontier_short_alpha_stage2_20260404_r1
+```
+
+- 当前 latest manifest：
   - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
-- 当前已冻结的家族预算：
-  - `baseline -> 12`
+- 当前冻结预算：
+  - `baseline -> 4`
   - `structure -> 12`
-  - `short_alpha -> 32`
+  - `short_alpha -> 24`
   - `dynamic_graph -> 16`
-- 当前 frontier 结果目录：
-  - `daily_research/output/deep_alpha_family_epoch_frontier_20260404_r2`
 
-### rich experiment 读取冻结预算
-- `run_architecture_execution_objective_head2head.py`
-- `run_short_alpha_formal_head2head.py`
-- `run_dynamic_graph_formal_ablation_matrix.py`
+## 4. 当前正式 rich experiment
 
-- 这三条 formal runner 现在默认都会读取：
-  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
-- 因此后续 rich experiment 默认不再手填统一 `--epochs`；除非显式做 budget stress test，否则应让 runner 直接读取家族预算 manifest
+### architecture execution-objective formal
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1
+```
+
+### short-alpha formal
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1
+```
+
+### dynamic-graph formal
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1 --force-raw-cache-path daily_research\cache\deep_alpha\raw\6e5203c8cdec3a61.pkl
+```
+
+## 5. short-alpha 最近窗升级 gate
+
+### 生成 short-alpha recent realistic replay
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\baseline\backtest_external_score_panel.py --data-source tq --benchmark 000300.SH --start-date 20250318 --end-date 20260401 --score-panel-csv daily_research\output\short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1\runs\state_liquidity_listwise_v1_20250318_20260331\execution_aligned_daily_score_panel.csv --target-weight-panel-csv daily_research\output\short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1\runs\state_liquidity_listwise_v1_20250318_20260331\execution_aligned_daily_target_weight_panel.csv --candidate-label short_alpha_execalign_realistic --rebalance-freq 1d --rebalance-offset-mode single --rebalance-anchor-date 20250318 --transaction-cost-bps 3 --slippage-bps 7 --sell-tax-bps 10 --no-market-regime-filter --output-dir daily_research\output\short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1 --experiment-tag recent_replays/state_liquidity_listwise_v1_20250318_20260331
+```
+
+### 与当前默认执行做 multi-window H2H
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\execution_candidate_multiwindow_h2h.py --run-a daily_research\output\short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1\recent_replays\state_liquidity_listwise_v1_20250318_20260331 --label-a short_alpha_execalign_realistic --run-b daily_research\output\execution_costreview_regoff_k2_realistic_20260401_r1 --label-b regoff_k2_realistic --output-dir daily_research\output\short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1\recent_h2h_short_alpha_vs_current_default
+```
+
+## 6. TQ 抖动兜底
+
+### 直接强制复用 raw cache
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --force-raw-cache-path daily_research\cache\deep_alpha\raw\6e5203c8cdec3a61.pkl
+```
+
+- 当前已验证可用的 dynamic-graph raw cache：
+  - `daily_research/cache/deep_alpha/raw/6e5203c8cdec3a61.pkl`
+
+## 7. 当前关键输出目录
+- `daily_research/output/active_execution_strategy.json`
+- `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+- `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
+- `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+- `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
