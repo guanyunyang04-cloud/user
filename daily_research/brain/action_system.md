@@ -29,13 +29,17 @@
 
 ### 2.2 当前默认执行快照
 - 当前 active strategy：
-  - `baseline_current_execfirst_winner`
+  - `state_liquidity_listwise_v1_execfirst_winner`
 - 当前 panel mode：
   - `execution_aligned`
 - 当前 execution profile：
   - `regoff_k2_10d_ensemble_native_anchor`
 - 当前 production root：
-  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+- 当前仍需额外关注：
+  - production full-fit 内部监控显示 `selected_epoch = 21 / 24`
+  - `objective_aligned_budget_pressure = true`
+  - 因此当前默认执行虽已切到 short-alpha，但后续仍应继续做 production recipe 的 epoch extension
 
 ### 2.3 每日默认执行标准流程
 1. 先确认默认候选和 active strategy 没有意外切换：
@@ -170,6 +174,10 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py
 ```
 
+  - 当前无参默认值已指向 liquid500 现役主线：
+    - source formal run = `state_liquidity_listwise_v1`
+    - production root = `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+
 #### promotion 后，把新 production 策略写入 active strategy
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\update_default_candidate_production.py --activate-strategy --strategy-panel-mode auto
@@ -184,7 +192,7 @@ promotion 后必须检查：
 - active manifest：
   - `daily_research/output/active_execution_strategy.json`
 - production manifest：
-  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default/production_retrain_manifest.json`
 - 默认执行真实落盘结果：
   - `daily_research/execution/output/latest_trade_plan.txt`
 
@@ -202,6 +210,9 @@ promotion 后必须检查：
 - 看到 stale model warning：
   - 先查 active strategy 和 production manifest 的训练截止日、上线截止日
   - 再决定是允许临时执行，还是先做 production retrain
+- 当前 active default 为 `short_alpha` 且内部监控仍有 budget pressure：
+  - 优先考虑做同 profile、同 objective 的 epoch extension
+  - 不要因为监控提示就直接回退到旧 baseline，除非 replay 复核也一起转弱
 - 计划里信号日不新鲜：
   - 优先查 active strategy 指向的 panel 文件是否更新
   - 再查 production root 的 live panel 是否刷新成功
@@ -243,6 +254,11 @@ promotion 后必须检查：
 
 ## 4. 当前正式 rich experiment
 
+先读各目录下的：
+- `summary.md` 里的 `Monthly Priority Summary`
+- 单个 run 里的 `primary_research_monthly_diagnostics.json`
+- candidate replay 里的 `monthly_backtest_summary.csv` / `monthly_backtest_diagnostics.json`
+
 ### architecture execution-objective formal
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1
@@ -283,6 +299,9 @@ promotion 后必须检查：
 ## 7. 当前关键输出目录
 - `daily_research/output/active_execution_strategy.json`
 - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+- `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+- `daily_research/output/short_alpha_production_promotion_eval_20260405_r1`
+- `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`

@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.short_alpha_profiles import get_profile
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
@@ -202,6 +203,37 @@ def _load_metrics(path: Path) -> dict:
         return json.load(f)
 
 
+def _load_primary_monthly_diagnostics(run_dir: Path, metrics: dict) -> dict:
+    explicit = metrics.get("primary_research_monthly_diagnostics")
+    if isinstance(explicit, dict) and explicit:
+        return dict(explicit)
+    monthly_label = str(metrics.get("primary_research_monthly_summary_label", "")).strip()
+    if not monthly_label:
+        monthly_label = (
+            "execution_aligned_monthly_backtest_summary"
+            if str(metrics.get("primary_research_backtest_label", "")).strip() == "execution_aligned_holdout_backtest"
+            else "monthly_backtest_summary"
+        )
+    monthly_filename = f"{monthly_label}.csv"
+    monthly_path = run_dir / monthly_filename
+    if monthly_path.exists():
+        monthly_df = pd.read_csv(monthly_path)
+        return summarize_monthly_diagnostics(monthly_df, return_column="excess_return")
+    equity_filename = "execution_aligned_equity_curve.csv" if monthly_label.startswith("execution_aligned_") else "equity_curve.csv"
+    actions_filename = "execution_aligned_actions.csv" if monthly_label.startswith("execution_aligned_") else "actions.csv"
+    equity_path = run_dir / equity_filename
+    if not equity_path.exists():
+        return summarize_monthly_diagnostics(pd.DataFrame(), return_column="excess_return")
+    equity_df = pd.read_csv(equity_path)
+    if "date" in equity_df.columns:
+        equity_df["date"] = pd.to_datetime(equity_df["date"], errors="coerce")
+        equity_df = equity_df.dropna(subset=["date"]).set_index("date")
+    actions_path = run_dir / actions_filename
+    action_df = pd.read_csv(actions_path) if actions_path.exists() else pd.DataFrame()
+    monthly_df = summarize_backtest_by_month(equity_df, action_df)
+    return summarize_monthly_diagnostics(monthly_df, return_column="excess_return")
+
+
 def _format_pct(value: float) -> str:
     return f"{value:.2%}"
 
@@ -246,6 +278,7 @@ def main() -> None:
             metrics = _load_metrics(metrics_path)
             _, holdout = resolve_primary_backtest(metrics)
             holdout = dict(holdout)
+            monthly_diagnostics = _load_primary_monthly_diagnostics(metrics_path.parent, metrics)
             family_key = _resolve_family_key(profile.name)
             source_runs[profile.name][window.label] = str(metrics_path.resolve())
             collected_rows.append(
@@ -268,6 +301,12 @@ def main() -> None:
                     "excess_max_drawdown": float(holdout.get("excess_max_drawdown", 0.0)),
                     "avg_turnover": float(holdout.get("avg_turnover", 0.0)),
                     "avg_holding_count": float(holdout.get("avg_holding_count", 0.0)),
+                    "monthly_positive_ratio": float(monthly_diagnostics.get("positive_month_ratio", 0.0)),
+                    "monthly_median_excess_return": float(monthly_diagnostics.get("median_monthly_return", 0.0)),
+                    "monthly_worst_excess_return": float(monthly_diagnostics.get("worst_monthly_return", 0.0)),
+                    "monthly_top3_positive_share": float(monthly_diagnostics.get("top3_positive_month_share", 0.0)),
+                    "monthly_longest_negative_streak": int(monthly_diagnostics.get("longest_negative_streak", 0)),
+                    "monthly_issue_flags": ",".join(monthly_diagnostics.get("issue_flags", [])),
                 }
             )
 
@@ -315,13 +354,28 @@ def main() -> None:
                 "mean_excess_sharpe": float(frame["excess_sharpe"].mean()),
                 "mean_excess_max_drawdown": float(frame["excess_max_drawdown"].mean()),
                 "mean_avg_turnover": float(frame["avg_turnover"].mean()),
+                "mean_monthly_positive_ratio": float(frame["monthly_positive_ratio"].mean()),
+                "mean_monthly_median_excess_return": float(frame["monthly_median_excess_return"].mean()),
+                "worst_monthly_excess_return": float(frame["monthly_worst_excess_return"].min()),
+                "mean_monthly_top3_positive_share": float(frame["monthly_top3_positive_share"].mean()),
+                "max_monthly_negative_streak": int(frame["monthly_longest_negative_streak"].max()),
                 "epoch_budget": int(frame["epoch_budget"].max()),
                 "wins_by_excess_annual_return": int(compare_df["wins_excess_annual_return"].sum()) if profile_name == candidate_name else 0,
                 "wins_by_excess_sharpe": int(compare_df["wins_excess_sharpe"].sum()) if profile_name == candidate_name else 0,
                 "reused_window_count": int(frame["reused_existing"].sum()),
             }
         )
-    summary_df = pd.DataFrame(summary_rows).sort_values("mean_excess_sharpe", ascending=False).reset_index(drop=True)
+    summary_df = pd.DataFrame(summary_rows).sort_values(
+        [
+            "mean_monthly_positive_ratio",
+            "mean_monthly_median_excess_return",
+            "worst_monthly_excess_return",
+            "mean_monthly_top3_positive_share",
+            "mean_excess_sharpe",
+            "mean_excess_annual_return",
+        ],
+        ascending=[False, False, False, True, False, False],
+    ).reset_index(drop=True)
 
     output_dir = OUTPUT_ROOT / root_tag
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -346,6 +400,16 @@ def main() -> None:
         "- baseline: `baseline_current`",
         f"- epoch_budget_baseline: `{int(baseline_summary['epoch_budget'])}`",
         f"- epoch_budget_candidate: `{int(candidate_summary['epoch_budget'])}`",
+        "",
+        "## Monthly Priority Summary",
+        f"- candidate positive-month ratio: `{float(candidate_summary['mean_monthly_positive_ratio']):.2%}`",
+        f"- candidate median monthly excess: `{_format_pct(float(candidate_summary['mean_monthly_median_excess_return']))}`",
+        f"- candidate worst month excess: `{_format_pct(float(candidate_summary['worst_monthly_excess_return']))}`",
+        f"- candidate top3 positive-month share: `{float(candidate_summary['mean_monthly_top3_positive_share']):.2%}`",
+        f"- baseline positive-month ratio: `{float(baseline_summary['mean_monthly_positive_ratio']):.2%}`",
+        f"- baseline median monthly excess: `{_format_pct(float(baseline_summary['mean_monthly_median_excess_return']))}`",
+        f"- baseline worst month excess: `{_format_pct(float(baseline_summary['worst_monthly_excess_return']))}`",
+        f"- baseline top3 positive-month share: `{float(baseline_summary['mean_monthly_top3_positive_share']):.2%}`",
         "",
         "## Mean Summary",
         f"- candidate excess annual: `{_format_pct(float(candidate_summary['mean_excess_annual_return']))}`",

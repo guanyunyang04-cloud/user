@@ -14,7 +14,7 @@ import pandas as pd
 
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow, load_raw_data_with_cache
 from daily_research.baseline.alpha import build_filter_mask
-from daily_research.baseline.backtest import backtest
+from daily_research.baseline.backtest import backtest, summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.baseline.external_target_weight_bridge import (
     apply_rebalance_frequency,
     apply_rebalance_schedule,
@@ -420,6 +420,11 @@ def main():
         benchmark_open=benchmark_open,
     )
     _add_weeklyized_metrics(metrics, equity_df)
+    monthly_backtest_summary = summarize_backtest_by_month(equity_df, action_df)
+    monthly_backtest_diagnostics = summarize_monthly_diagnostics(
+        monthly_backtest_summary,
+        return_column="excess_return",
+    )
 
     latest_scores = _build_latest_scores(score_for_backtest, target_weights, filter_mask.reindex_like(score_for_backtest).fillna(False))
     primary_input_path = target_weight_panel_path or score_panel_path
@@ -456,6 +461,7 @@ def main():
              "slippage_bps": float(cfg.slippage_bps),
              "sell_tax_bps": float(cfg.sell_tax_bps),
              "raw_cache": raw_cache_meta,
+             "monthly_backtest_diagnostics": monthly_backtest_diagnostics,
          }
      )
     metrics.update(soft_state_meta)
@@ -469,6 +475,7 @@ def main():
     equity_export = equity_df.reset_index().rename(columns={equity_df.index.name or "index": "date"})
     equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")
     action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")
+    monthly_backtest_summary.to_csv(run_dir / "monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")
     latest_scores.to_csv(run_dir / "latest_scores.csv", index=False, encoding="utf-8-sig")
     _panel_to_long(score_for_backtest, "score").to_csv(run_dir / "aligned_daily_score_panel.csv", index=False, encoding="utf-8-sig")
     _panel_to_long(target_weights, "target_weight").to_csv(run_dir / "aligned_daily_target_weight_panel.csv", index=False, encoding="utf-8-sig")
@@ -478,6 +485,8 @@ def main():
         encoding="utf-8-sig",
     )
     regime_state.to_csv(run_dir / "regime_state.csv", encoding="utf-8-sig")
+    with open(run_dir / "monthly_backtest_diagnostics.json", "w", encoding="utf-8") as f:
+        json.dump(monthly_backtest_diagnostics, f, ensure_ascii=False, indent=2)
     with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 

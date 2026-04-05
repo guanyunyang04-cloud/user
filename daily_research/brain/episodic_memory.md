@@ -9837,3 +9837,57 @@ position,000001.SZ,1200,12.38,
   - subset rerun 后 merge 回 latest manifest
 - `run_dynamic_graph_formal_ablation_matrix.py` 还新增了 `--force-raw-cache-path`
 - dynamic-graph 补跑时曾在 `dynamic_graph_topk4_20250318_20260331` 遇到 TQ 初始化失败；最终通过复用 `daily_research/cache/deep_alpha/raw/6e5203c8cdec3a61.pkl` 成功续跑并收口
+
+### short_alpha production promotion 与 active default 切换完成
+- 先把 `state_liquidity_listwise_v1` 按 production full-fit 路线重训到：
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - active production run = `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260403_r1`
+- 随后补做 production 口径 recent realistic replay：
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_replays/short_alpha_production_20260403`
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_replays/baseline_current_production_20260403`
+- multi-window H2H 结果写入：
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_h2h_short_alpha_production_vs_baseline_current_production/summary.md`
+- production 口径结论：
+  - `short_alpha_production_realistic` full-period annual / excess annual / excess Sharpe = `0.68% / -10.21% / -0.618`
+  - `baseline_current_production_realistic` = `-10.36% / -20.06% / -1.288`
+  - excess annual wins = `4/4`
+  - excess Sharpe wins = `4/4`
+- 因此将 active execution strategy 正式切换为：
+  - `daily_research/output/active_execution_strategy.json`
+  - `strategy_name = state_liquidity_listwise_v1_execfirst_winner`
+  - `production_root = daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+- 切换后已用 `yolos` 实跑默认 `run_trade_plan.py`：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+  - `target_position_count = 19`
+  - `production_model_retrain_status = fresh`
+- 仍需保留的风险：
+  - 当前 short-alpha production full-fit 的 `training_diagnostics` 显示 `selected_epoch = 21 / 24`
+  - `objective_aligned_budget_pressure = true`
+- 因此默认执行虽然已切换成功，但下一步维护重点不是换回旧 baseline，而是继续做 short-alpha production recipe 的 epoch extension
+
+### 月度分析提升为研究主视角
+- 为了把“按月暴露问题、按月找优化方向”放到最重要位置，补上了统一月度诊断链路：
+  - `daily_research/baseline/backtest.py` 新增月度诊断函数
+  - `daily_research/deep_alpha/run_deep_alpha_research.py` 现在会写：
+    - `primary_research_monthly_summary.csv`
+    - `primary_research_monthly_diagnostics.json`
+    - `monthly_backtest_diagnostics.json`
+    - `execution_aligned_monthly_backtest_diagnostics.json`
+  - `daily_research/baseline/backtest_external_score_panel.py` 现在会写：
+    - `monthly_backtest_summary.csv`
+    - `monthly_backtest_diagnostics.json`
+- 三套 formal summary 也改成月度优先：
+  - `deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1/summary.md`
+  - `short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/summary.md`
+  - `dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1/summary.md`
+  - 现在都先写 `Monthly Priority Summary`，再写 `Mean Summary`
+- 统一关注字段固定为：
+  - `positive_month_ratio`
+  - `median_monthly_return`
+  - `worst_monthly_return`
+  - `top3_positive_month_share`
+  - `longest_negative_streak`
+- 另外补跑了轻量 smoke：
+  - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
+  - 已验证新文件真实落盘，且 `primary_research_monthly_diagnostics` 会直接出现在终端 summary 里

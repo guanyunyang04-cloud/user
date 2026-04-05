@@ -14,6 +14,10 @@ DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE = "primary_annual_return"
 RAW_HOLDOUT_LABEL = "holdout_backtest"
 EXECUTION_HOLDOUT_LABEL = "execution_aligned_holdout_backtest"
 PRIMARY_HOLDOUT_LABEL = "primary_research_backtest"
+RAW_MONTHLY_LABEL = "monthly_backtest_summary"
+EXECUTION_MONTHLY_LABEL = "execution_aligned_monthly_backtest_summary"
+PRIMARY_MONTHLY_LABEL = "primary_research_monthly_summary"
+PRIMARY_MONTHLY_DIAGNOSTICS_LABEL = "primary_research_monthly_diagnostics"
 
 
 def normalize_research_objective_mode(raw: Any) -> str:
@@ -58,6 +62,20 @@ def resolve_primary_panel_mode(metrics: dict[str, Any], research_objective_mode:
     if label == EXECUTION_HOLDOUT_LABEL and execution_profile:
         return "execution_aligned"
     return "raw"
+
+
+def resolve_primary_monthly_summary_label(metrics: dict[str, Any], research_objective_mode: str = "") -> str:
+    label = resolve_primary_backtest_label(metrics, research_objective_mode=research_objective_mode)
+    if label == EXECUTION_HOLDOUT_LABEL:
+        return EXECUTION_MONTHLY_LABEL
+    return RAW_MONTHLY_LABEL
+
+
+def resolve_primary_monthly_diagnostics_label(metrics: dict[str, Any], research_objective_mode: str = "") -> str:
+    label = resolve_primary_monthly_summary_label(metrics, research_objective_mode=research_objective_mode)
+    if label == EXECUTION_MONTHLY_LABEL:
+        return "execution_aligned_monthly_backtest_diagnostics"
+    return "monthly_backtest_diagnostics"
 
 
 def resolve_checkpoint_metric_name(objective: str) -> str:

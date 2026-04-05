@@ -29,7 +29,7 @@
 
 ## 4. 当前两条主线
 - liquid500 默认执行升级线：
-  - 当前最强候选是 `state_liquidity_listwise_v1 + regoff_k2_10d_ensemble_native_anchor`
+  - 当前 active default 已是 `state_liquidity_listwise_v1 + regoff_k2_10d_ensemble_native_anchor`
 - liquid800 / mainboard 研究升级线：
   - 当前最强候选是 `dynamic_graph_no_priors`
 
@@ -43,11 +43,11 @@
   - 已被 formal -> recent gate -> production promotion 三层协议取代
 
 ## 6. 当前瓶颈
-- `short_alpha` 虽然已经在 formal 与 recent gate 里胜出，但还没有完成 production full-fit promotion。
+- `short_alpha` 虽然已经完成 production full-fit promotion 并切成 active default，但当前 production recipe 仍显示 budget pressure，后续还要补 epoch extension。
 - `dynamic_graph_no_priors` 虽然是 liquid800 研究 winner，但还未证明自己适合作为 liquid500 默认执行替代。
 - 多窗口、大矩阵与 production promotion 仍然是主要时间成本。
 
 ## 7. 当前下一阶段
-1. 先把 `state_liquidity_listwise_v1` 推到 production full-fit promotion。
-2. 再决定是否替换 active strategy。
+1. 先把 `state_liquidity_listwise_v1` 的 production recipe 做 second-stage epoch frontier。
+2. 用 production replay 复核扩预算后的 short-alpha 是否继续优于当前 active default。
 3. 继续把 `dynamic_graph_no_priors` 保持为独立研究线，而不是直接混入 liquid500 默认执行升级判断。

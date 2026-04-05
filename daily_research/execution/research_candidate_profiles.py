@@ -62,7 +62,7 @@ def _source(name: str) -> str:
 STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
     "regoff_k2_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
-        description="Current daily default execution strategy: formal winner frozen for research evidence, production full-fit model for daily trade plan; 10d anchored all-offset ensemble, top-k 2, regime filter off.",
+        description="Prior baseline production comparator: old liquid500 default before the 2026-04-05 short_alpha promotion; 10d anchored all-offset ensemble, top-k 2, regime filter off.",
         target_weight_panel_csv=_source("daily_live_target_weight_panel.csv"),
         score_panel_csv=_source("daily_live_score_panel.csv"),
         candidate_label="dynamic_graph_regoff_k2_10d_ensemble_native_anchor",

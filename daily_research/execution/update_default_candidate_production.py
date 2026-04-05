@@ -35,10 +35,10 @@ from daily_research.execution.strategy_manifest import (
 
 
 FORMAL_SOURCE_RUN = Path(
-    "daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331"
+    "daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/runs/state_liquidity_listwise_v1_20250318_20260331"
 )
 PRODUCTION_ROOT = Path(
-    "daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default"
+    "daily_research/output/deep_alpha_short_alpha_execalign_production_default"
 )
 
 
@@ -637,7 +637,7 @@ def main() -> None:
     train_start_date = str(cfg.get("start_date", "20210101"))
     experiment_tag = (
         args.experiment_tag.strip()
-        or f"deep_alpha_liquid500_dynamic_graph_bridge_production_fullfit_{latest_completed_date}_r1"
+        or f"deep_alpha_short_alpha_execfirst_production_fullfit_{latest_completed_date}_r1"
     )
 
     cmd = _build_retrain_command(

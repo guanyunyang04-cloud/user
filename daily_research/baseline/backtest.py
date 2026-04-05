@@ -125,6 +125,111 @@ def summarize_backtest_by_month(
     return pd.DataFrame(rows, columns=columns)
 
 
+def _longest_sign_streak(values: pd.Series, *, positive: bool) -> int:
+    if values.empty:
+        return 0
+    longest = 0
+    current = 0
+    for value in values.astype(float):
+        is_match = value > 0.0 if positive else value < 0.0
+        if is_match:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return int(longest)
+
+
+def summarize_monthly_diagnostics(
+    monthly_summary: pd.DataFrame,
+    *,
+    return_column: str = "excess_return",
+) -> Dict[str, Any]:
+    diagnostics: Dict[str, Any] = {
+        "return_column": str(return_column),
+        "month_count": 0,
+        "start_month": "",
+        "end_month": "",
+        "positive_month_count": 0,
+        "nonnegative_month_count": 0,
+        "negative_month_count": 0,
+        "positive_month_ratio": 0.0,
+        "nonnegative_month_ratio": 0.0,
+        "negative_month_ratio": 0.0,
+        "mean_monthly_return": 0.0,
+        "median_monthly_return": 0.0,
+        "std_monthly_return": 0.0,
+        "upside_mean_monthly_return": 0.0,
+        "downside_mean_monthly_return": 0.0,
+        "best_monthly_return": 0.0,
+        "worst_monthly_return": 0.0,
+        "top3_positive_month_share": 0.0,
+        "bottom3_negative_month_share": 0.0,
+        "longest_positive_streak": 0,
+        "longest_negative_streak": 0,
+        "issue_flags": [],
+    }
+    if monthly_summary is None or monthly_summary.empty or return_column not in monthly_summary.columns:
+        return diagnostics
+
+    work = monthly_summary.copy()
+    values = pd.to_numeric(work[return_column], errors="coerce").dropna()
+    if values.empty:
+        return diagnostics
+
+    positive = values[values > 0.0]
+    nonnegative = values[values >= 0.0]
+    negative = values[values < 0.0]
+    month_count = int(len(values))
+    positive_sum = float(positive.sum()) if not positive.empty else 0.0
+    negative_abs_sum = float(np.abs(negative).sum()) if not negative.empty else 0.0
+    top3_positive_sum = float(positive.nlargest(min(3, len(positive))).sum()) if not positive.empty else 0.0
+    bottom3_negative_abs_sum = float(np.abs(negative.nsmallest(min(3, len(negative)))).sum()) if not negative.empty else 0.0
+
+    diagnostics.update(
+        {
+            "month_count": month_count,
+            "start_month": str(work["month"].iloc[0]) if "month" in work.columns and not work.empty else "",
+            "end_month": str(work["month"].iloc[-1]) if "month" in work.columns and not work.empty else "",
+            "positive_month_count": int(len(positive)),
+            "nonnegative_month_count": int(len(nonnegative)),
+            "negative_month_count": int(len(negative)),
+            "positive_month_ratio": float(len(positive) / month_count),
+            "nonnegative_month_ratio": float(len(nonnegative) / month_count),
+            "negative_month_ratio": float(len(negative) / month_count),
+            "mean_monthly_return": float(values.mean()),
+            "median_monthly_return": float(values.median()),
+            "std_monthly_return": float(values.std(ddof=0)) if month_count > 1 else 0.0,
+            "upside_mean_monthly_return": float(positive.mean()) if not positive.empty else 0.0,
+            "downside_mean_monthly_return": float(negative.mean()) if not negative.empty else 0.0,
+            "best_monthly_return": float(values.max()),
+            "worst_monthly_return": float(values.min()),
+            "top3_positive_month_share": float(top3_positive_sum / positive_sum) if positive_sum > 0 else 0.0,
+            "bottom3_negative_month_share": float(bottom3_negative_abs_sum / negative_abs_sum)
+            if negative_abs_sum > 0
+            else 0.0,
+            "longest_positive_streak": _longest_sign_streak(values, positive=True),
+            "longest_negative_streak": _longest_sign_streak(values, positive=False),
+        }
+    )
+
+    issue_flags: list[str] = []
+    if diagnostics["positive_month_ratio"] < 0.55:
+        issue_flags.append("low_positive_month_ratio")
+    if diagnostics["median_monthly_return"] <= 0.0:
+        issue_flags.append("negative_monthly_median")
+    if diagnostics["worst_monthly_return"] <= -0.05:
+        issue_flags.append("deep_bad_month")
+    if diagnostics["top3_positive_month_share"] >= 0.65 and diagnostics["positive_month_count"] >= 3:
+        issue_flags.append("concentrated_positive_months")
+    if diagnostics["mean_monthly_return"] > 0.0 and diagnostics["median_monthly_return"] < 0.0:
+        issue_flags.append("mean_median_gap")
+    if diagnostics["longest_negative_streak"] >= 3:
+        issue_flags.append("multi_month_drawdown_streak")
+    diagnostics["issue_flags"] = issue_flags
+    return diagnostics
+
+
 def backtest(
     close: pd.DataFrame,
     benchmark_close: pd.Series,

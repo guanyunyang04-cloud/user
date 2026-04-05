@@ -86,6 +86,20 @@
   - train-side eval window
   - adaptive task window
   - monthly summary artifacts
+- 研究判读顺序固定为：
+  - 先看月度诊断
+  - 再看窗口均值
+  - 最后才看单个 headline annual / Sharpe
+- 月度诊断至少检查：
+  - `positive_month_ratio`
+  - `median_monthly_return`
+  - `worst_monthly_return`
+  - `top3_positive_month_share`
+  - `longest_negative_streak`
+- rich experiment summary 必须把 `Monthly Priority Summary` 放在 `Mean Summary` 之前。
+- 单个 run 必须优先读取：
+  - `primary_research_monthly_summary.csv`
+  - `primary_research_monthly_diagnostics.json`
 - 若命令已显式给出 `train_end_date + valid_start_date + valid_days`，则显式短窗优先。
 
 ## 11. 默认值升级规则

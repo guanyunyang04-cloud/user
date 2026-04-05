@@ -16,7 +16,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from daily_research.baseline.backtest import backtest, summarize_backtest_by_month
+from daily_research.baseline.backtest import backtest, summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import (
     get_latest_completed_trading_date,
@@ -71,6 +71,8 @@ from daily_research.deep_alpha.research_objective import (
     resolve_checkpoint_metric_value,
     resolve_primary_backtest,
     resolve_primary_backtest_label,
+    resolve_primary_monthly_diagnostics_label,
+    resolve_primary_monthly_summary_label,
     resolve_primary_panel_mode,
 )
 from daily_research.deep_alpha.score_head import apply_score_head, fit_score_head
@@ -418,6 +420,10 @@ def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
             progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
             writer()
             progress.update(1)
+
+
+def _write_json_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _resolve_resume_context(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -873,6 +879,10 @@ def _evaluate_research_outputs(
         benchmark_open=benchmark_open.reindex(valid_dates),
     )
     monthly_backtest_summary = summarize_backtest_by_month(equity_df, action_df)
+    monthly_backtest_diagnostics = summarize_monthly_diagnostics(
+        monthly_backtest_summary,
+        return_column="excess_return",
+    )
 
     execution_alignment_artifact = None
     execution_aligned_equity_df = None
@@ -881,6 +891,7 @@ def _evaluate_research_outputs(
     execution_aligned_score_frame = None
     execution_aligned_target_weights = None
     execution_aligned_monthly_backtest_summary = None
+    execution_aligned_monthly_backtest_diagnostics = None
     if args.execution_alignment_mode != "off":
         if args.execution_alignment_mode == "profile":
             candidate_profiles = [get_execution_alignment_profile(args.execution_alignment_profile).name]
@@ -952,6 +963,10 @@ def _evaluate_research_outputs(
             execution_aligned_equity_df,
             execution_aligned_action_df,
         )
+        execution_aligned_monthly_backtest_diagnostics = summarize_monthly_diagnostics(
+            execution_aligned_monthly_backtest_summary,
+            return_column="excess_return",
+        )
 
     primary_metrics_payload = {
         "holdout_backtest": dict(holdout_metrics),
@@ -964,6 +979,24 @@ def _evaluate_research_outputs(
         primary_metrics_payload,
         research_objective_mode=args.research_objective_mode,
     )
+    primary_monthly_summary_label = resolve_primary_monthly_summary_label(
+        primary_metrics_payload,
+        research_objective_mode=args.research_objective_mode,
+    )
+    primary_monthly_diagnostics_label = resolve_primary_monthly_diagnostics_label(
+        primary_metrics_payload,
+        research_objective_mode=args.research_objective_mode,
+    )
+    if primary_monthly_summary_label == "execution_aligned_monthly_backtest_summary" and execution_aligned_monthly_backtest_summary is not None:
+        primary_monthly_summary = execution_aligned_monthly_backtest_summary
+        primary_monthly_diagnostics = (
+            execution_aligned_monthly_backtest_diagnostics
+            if isinstance(execution_aligned_monthly_backtest_diagnostics, dict)
+            else summarize_monthly_diagnostics(execution_aligned_monthly_backtest_summary, return_column="excess_return")
+        )
+    else:
+        primary_monthly_summary = monthly_backtest_summary
+        primary_monthly_diagnostics = monthly_backtest_diagnostics
     checkpoint_metric_name, checkpoint_metric_value = resolve_checkpoint_metric_value(
         primary_backtest,
         args.checkpoint_selection_objective,
@@ -988,6 +1021,7 @@ def _evaluate_research_outputs(
         "equity_df": equity_df,
         "action_df": action_df,
         "monthly_backtest_summary": monthly_backtest_summary,
+        "monthly_backtest_diagnostics": dict(monthly_backtest_diagnostics),
         "holdout_metrics": dict(holdout_metrics),
         "execution_alignment_artifact": execution_alignment_artifact,
         "execution_aligned_equity_df": execution_aligned_equity_df,
@@ -996,8 +1030,15 @@ def _evaluate_research_outputs(
         "execution_aligned_score_frame": execution_aligned_score_frame,
         "execution_aligned_target_weights": execution_aligned_target_weights,
         "execution_aligned_monthly_backtest_summary": execution_aligned_monthly_backtest_summary,
+        "execution_aligned_monthly_backtest_diagnostics": None
+        if execution_aligned_monthly_backtest_diagnostics is None
+        else dict(execution_aligned_monthly_backtest_diagnostics),
         "primary_backtest_label": primary_backtest_label,
         "primary_backtest": dict(primary_backtest),
+        "primary_monthly_summary_label": str(primary_monthly_summary_label),
+        "primary_monthly_summary": primary_monthly_summary,
+        "primary_monthly_diagnostics_label": str(primary_monthly_diagnostics_label),
+        "primary_monthly_diagnostics": dict(primary_monthly_diagnostics),
         "checkpoint_metric_name": checkpoint_metric_name,
         "checkpoint_metric_value": checkpoint_metric_value,
     }
@@ -1646,6 +1687,7 @@ def main():
     equity_df = evaluation["equity_df"]
     action_df = evaluation["action_df"]
     monthly_backtest_summary = evaluation["monthly_backtest_summary"]
+    monthly_backtest_diagnostics = dict(evaluation["monthly_backtest_diagnostics"])
     metrics = evaluation["holdout_metrics"]
     execution_alignment_artifact = evaluation["execution_alignment_artifact"]
     execution_aligned_equity_df = evaluation["execution_aligned_equity_df"]
@@ -1654,8 +1696,17 @@ def main():
     execution_aligned_score_frame = evaluation["execution_aligned_score_frame"]
     execution_aligned_target_weights = evaluation["execution_aligned_target_weights"]
     execution_aligned_monthly_backtest_summary = evaluation["execution_aligned_monthly_backtest_summary"]
+    execution_aligned_monthly_backtest_diagnostics = (
+        None
+        if evaluation["execution_aligned_monthly_backtest_diagnostics"] is None
+        else dict(evaluation["execution_aligned_monthly_backtest_diagnostics"])
+    )
     primary_backtest_label = str(evaluation["primary_backtest_label"])
     primary_backtest = dict(evaluation["primary_backtest"])
+    primary_monthly_summary_label = str(evaluation["primary_monthly_summary_label"])
+    primary_monthly_summary = evaluation["primary_monthly_summary"]
+    primary_monthly_diagnostics_label = str(evaluation["primary_monthly_diagnostics_label"])
+    primary_monthly_diagnostics = dict(evaluation["primary_monthly_diagnostics"])
 
     live_outputs = _build_live_inference_outputs(
         cfg=cfg,
@@ -1889,9 +1940,16 @@ def main():
         "relation_layer": bool(args.relation_layer),
         "rankic_summary": rankic_summary.to_dict(orient="records"),
         "holdout_backtest": metrics,
+        "monthly_backtest_diagnostics": monthly_backtest_diagnostics,
         "execution_aligned_holdout_backtest": {} if execution_aligned_metrics is None else execution_aligned_metrics,
+        "execution_aligned_monthly_backtest_diagnostics": (
+            {} if execution_aligned_monthly_backtest_diagnostics is None else execution_aligned_monthly_backtest_diagnostics
+        ),
         "primary_research_backtest_label": str(primary_backtest_label),
         "primary_research_backtest": primary_backtest,
+        "primary_research_monthly_summary_label": str(primary_monthly_summary_label),
+        "primary_research_monthly_diagnostics_label": str(primary_monthly_diagnostics_label),
+        "primary_research_monthly_diagnostics": primary_monthly_diagnostics,
         "primary_execution_panel_mode": resolve_primary_panel_mode(
             {
                 "research_objective_mode": str(args.research_objective_mode),
@@ -1966,6 +2024,9 @@ def main():
         ("daily_live_target_weight_panel.csv", lambda: live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
         ("equity_curve.csv", lambda: equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")),
         ("monthly_backtest_summary.csv", lambda: monthly_backtest_summary.to_csv(run_dir / "monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")),
+        ("monthly_backtest_diagnostics.json", lambda: _write_json_payload(run_dir / "monthly_backtest_diagnostics.json", monthly_backtest_diagnostics)),
+        ("primary_research_monthly_summary.csv", lambda: primary_monthly_summary.to_csv(run_dir / "primary_research_monthly_summary.csv", index=False, encoding="utf-8-sig")),
+        ("primary_research_monthly_diagnostics.json", lambda: _write_json_payload(run_dir / "primary_research_monthly_diagnostics.json", primary_monthly_diagnostics)),
         ("actions.csv", lambda: action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")),
         ("deep_alpha_model.pt", lambda: torch.save(model_artifact, run_dir / "deep_alpha_model.pt")),
         ("score_head_artifact.pkl", lambda: save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)),
@@ -1992,6 +2053,15 @@ def main():
     if execution_aligned_equity_df is not None and execution_aligned_action_df is not None:
         write_tasks.append(("execution_aligned_equity_curve.csv", lambda: execution_aligned_equity_export.to_csv(run_dir / "execution_aligned_equity_curve.csv", index=False, encoding="utf-8-sig")))
         write_tasks.append(("execution_aligned_monthly_backtest_summary.csv", lambda: execution_aligned_monthly_backtest_summary.to_csv(run_dir / "execution_aligned_monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")))
+        write_tasks.append(
+            (
+                "execution_aligned_monthly_backtest_diagnostics.json",
+                lambda: _write_json_payload(
+                    run_dir / "execution_aligned_monthly_backtest_diagnostics.json",
+                    {} if execution_aligned_monthly_backtest_diagnostics is None else execution_aligned_monthly_backtest_diagnostics,
+                ),
+            )
+        )
         write_tasks.append(("execution_aligned_actions.csv", lambda: execution_aligned_action_df.to_csv(run_dir / "execution_aligned_actions.csv", index=False, encoding="utf-8-sig")))
     if rolling_pool_artifact is not None:
         write_tasks.append(("rolling_liquidity_schedule.csv", lambda: rolling_pool_artifact.schedule_df.to_csv(run_dir / "rolling_liquidity_schedule.csv", index=False, encoding="utf-8-sig")))
@@ -2014,6 +2084,8 @@ def main():
         "holdout_backtest": metrics,
         "primary_research_backtest_label": str(primary_backtest_label),
         "primary_research_backtest": primary_backtest,
+        "primary_research_monthly_summary_label": str(primary_monthly_summary_label),
+        "primary_research_monthly_diagnostics": primary_monthly_diagnostics,
         "live_signal_date": (
             ""
             if live_score_frame.dropna(how="all").empty

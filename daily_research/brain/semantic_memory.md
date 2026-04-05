@@ -29,14 +29,14 @@
 - production full-fit 结果不得回填为 formal 研究证据。
 
 ## 4. 当前默认执行语义
-- 当前 active execution strategy 仍为：
-  - `baseline_current_execfirst_winner`
+- 当前 active execution strategy 为：
+  - `state_liquidity_listwise_v1_execfirst_winner`
 - 当前 active manifest 真源为：
   - `daily_research/output/active_execution_strategy.json`
 - 当前默认执行入口为：
   - `daily_research/execution/run_trade_plan.py`
 - 当前默认 production root 为：
-  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
 - 当前默认 execution profile 为：
   - `regoff_k2_10d_ensemble_native_anchor`
 
@@ -47,8 +47,9 @@
 - `state_liquidity_listwise_v1` 的稳定语义：
   - 它已通过 budget-normalized monthly execution-first formal H2H。
   - 它已通过 recent realistic replay gate。
-  - 它是当前 liquid500 默认执行升级的最强候选。
-  - 在 production full-fit promotion 完成前，它还不是 active default。
+  - 它已通过 production full-fit replay gate。
+  - 它是当前 liquid500 active default。
+  - 它当前仍有 production recipe 的预算压力，下一步应继续做 epoch extension，而不是回退到旧 baseline。
 - `dynamic_graph_no_priors` 的稳定语义：
   - 它是当前 rolling liquid800 / mainboard monthly execution-first formal winner。
   - 当前默认不再把 industry/style priors 当作稳定增益。
@@ -70,6 +71,16 @@
   - train-side eval window
   - adaptive task window
   - monthly summary artifacts
+- 月度分析是当前研究判读的第一视角：
+  - 先看 `primary_research_monthly_diagnostics`
+  - 再看 `Monthly Priority Summary`
+  - 最后才看整窗 mean annual / Sharpe
+- 当前月度重点字段固定包括：
+  - positive-month ratio
+  - median monthly excess return
+  - worst monthly excess return
+  - top3 positive-month share
+  - longest negative streak
 - 月度协议不改变底层数据频率；底层仍然是日频样本与 `next_open` 回测。
 
 ## 8. 文档分工语义

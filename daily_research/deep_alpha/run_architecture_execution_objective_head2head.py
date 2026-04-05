@@ -14,6 +14,7 @@ import torch
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import (
@@ -360,6 +361,28 @@ def _load_metrics(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_monthly_diagnostics_from_run(run_dir: Path, *, monthly_prefix: str = "") -> dict[str, Any]:
+    prefix = str(monthly_prefix or "").strip()
+    monthly_name = f"{prefix}monthly_backtest_summary.csv"
+    monthly_path = run_dir / monthly_name
+    if monthly_path.exists():
+        monthly_df = pd.read_csv(monthly_path)
+        return summarize_monthly_diagnostics(monthly_df, return_column="excess_return")
+    equity_name = f"{prefix}equity_curve.csv"
+    actions_name = f"{prefix}actions.csv"
+    equity_path = run_dir / equity_name
+    if not equity_path.exists():
+        return summarize_monthly_diagnostics(pd.DataFrame(), return_column="excess_return")
+    equity_df = pd.read_csv(equity_path)
+    if "date" in equity_df.columns:
+        equity_df["date"] = pd.to_datetime(equity_df["date"], errors="coerce")
+        equity_df = equity_df.dropna(subset=["date"]).set_index("date")
+    actions_path = run_dir / actions_name
+    action_df = pd.read_csv(actions_path) if actions_path.exists() else pd.DataFrame()
+    monthly_df = summarize_backtest_by_month(equity_df, action_df)
+    return summarize_monthly_diagnostics(monthly_df, return_column="excess_return")
+
+
 def _extract_artifact_summary(model_path: Path) -> dict[str, Any]:
     artifact = torch.load(model_path, map_location="cpu", weights_only=False)
     if not isinstance(artifact, dict):
@@ -443,6 +466,8 @@ def main() -> None:
                 )
                 _run_command(replay_command)
             replay_metrics = _load_metrics(replay_metrics_path)
+            aligned_monthly_diagnostics = _load_monthly_diagnostics_from_run(run_dir, monthly_prefix="execution_aligned_")
+            replay_monthly_diagnostics = _load_monthly_diagnostics_from_run(replay_metrics_path.parent)
 
             raw_holdout = dict(metrics.get("holdout_backtest", {}))
             aligned_holdout = dict(metrics.get("execution_aligned_holdout_backtest", {}))
@@ -474,6 +499,16 @@ def main() -> None:
                     "replay_excess_max_drawdown": float(replay_metrics.get("excess_max_drawdown", 0.0)),
                     "replay_avg_turnover": float(replay_metrics.get("avg_turnover", 0.0)),
                     "replay_annual_return": float(replay_metrics.get("annual_return", 0.0)),
+                    "aligned_monthly_positive_ratio": float(aligned_monthly_diagnostics.get("positive_month_ratio", 0.0)),
+                    "aligned_monthly_median_excess_return": float(aligned_monthly_diagnostics.get("median_monthly_return", 0.0)),
+                    "aligned_monthly_worst_excess_return": float(aligned_monthly_diagnostics.get("worst_monthly_return", 0.0)),
+                    "aligned_monthly_top3_positive_share": float(aligned_monthly_diagnostics.get("top3_positive_month_share", 0.0)),
+                    "replay_monthly_positive_ratio": float(replay_monthly_diagnostics.get("positive_month_ratio", 0.0)),
+                    "replay_monthly_median_excess_return": float(replay_monthly_diagnostics.get("median_monthly_return", 0.0)),
+                    "replay_monthly_worst_excess_return": float(replay_monthly_diagnostics.get("worst_monthly_return", 0.0)),
+                    "replay_monthly_top3_positive_share": float(replay_monthly_diagnostics.get("top3_positive_month_share", 0.0)),
+                    "replay_monthly_longest_negative_streak": int(replay_monthly_diagnostics.get("longest_negative_streak", 0)),
+                    "replay_monthly_issue_flags": ",".join(replay_monthly_diagnostics.get("issue_flags", [])),
                     "train_mean_window_excess_annual_return": float(
                         selected_train.get("mean_window_excess_annual_return", float("nan"))
                     ),
@@ -551,6 +586,14 @@ def main() -> None:
                 "mean_replay_excess_sharpe": float(frame["replay_excess_sharpe"].mean()),
                 "mean_replay_excess_max_drawdown": float(frame["replay_excess_max_drawdown"].mean()),
                 "mean_replay_avg_turnover": float(frame["replay_avg_turnover"].mean()),
+                "mean_aligned_monthly_positive_ratio": float(frame["aligned_monthly_positive_ratio"].mean()),
+                "mean_aligned_monthly_median_excess_return": float(frame["aligned_monthly_median_excess_return"].mean()),
+                "worst_aligned_monthly_excess_return": float(frame["aligned_monthly_worst_excess_return"].min()),
+                "mean_replay_monthly_positive_ratio": float(frame["replay_monthly_positive_ratio"].mean()),
+                "mean_replay_monthly_median_excess_return": float(frame["replay_monthly_median_excess_return"].mean()),
+                "worst_replay_monthly_excess_return": float(frame["replay_monthly_worst_excess_return"].min()),
+                "mean_replay_monthly_top3_positive_share": float(frame["replay_monthly_top3_positive_share"].mean()),
+                "max_replay_monthly_negative_streak": int(frame["replay_monthly_longest_negative_streak"].max()),
                 "wins_aligned_excess_annual_return": int(compare_frame["wins_aligned_excess_annual_return"].sum())
                 if not compare_frame.empty
                 else 0,
@@ -566,7 +609,15 @@ def main() -> None:
             }
         )
     summary_df = pd.DataFrame(summary_rows).sort_values(
-        ["mean_replay_excess_sharpe", "mean_replay_excess_annual_return"], ascending=[False, False]
+        [
+            "mean_replay_monthly_positive_ratio",
+            "mean_replay_monthly_median_excess_return",
+            "worst_replay_monthly_excess_return",
+            "mean_replay_monthly_top3_positive_share",
+            "mean_replay_excess_sharpe",
+            "mean_replay_excess_annual_return",
+        ],
+        ascending=[False, False, False, True, False, False],
     ).reset_index(drop=True)
 
     recent_window_label = "20250318_20260331"
@@ -636,8 +687,25 @@ def main() -> None:
         f"- realistic cost: transaction `{float(args.transaction_cost_bps):.1f}` bps, slippage `{float(args.slippage_bps):.1f}` bps, sell-tax `{float(args.sell_tax_bps):.1f}` bps",
         f"- execution candidates scanned: `{', '.join(EXECUTION_ALIGNMENT_CANDIDATES)}`",
         "",
-        "## Mean Summary",
+        "## Monthly Priority Summary",
     ]
+    for _, row in summary_df.iterrows():
+        lines.append(
+            "- "
+            f"`{row['profile_name']}`: "
+            f"replay positive-month ratio {float(row['mean_replay_monthly_positive_ratio']):.2%}, "
+            f"replay median monthly excess {_format_pct(row['mean_replay_monthly_median_excess_return'])}, "
+            f"replay worst month {_format_pct(row['worst_replay_monthly_excess_return'])}, "
+            f"replay top3 positive-month share {float(row['mean_replay_monthly_top3_positive_share']):.2%}, "
+            f"max negative streak {int(row['max_replay_monthly_negative_streak'])}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Mean Summary",
+        ]
+    )
     for _, row in summary_df.iterrows():
         lines.append(
             "- "
