@@ -10,6 +10,15 @@ DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS = 3.0
 DEFAULT_EXECUTION_ALIGNMENT_SLIPPAGE_BPS = 7.0
 DEFAULT_EXECUTION_ALIGNMENT_SELL_TAX_BPS = 10.0
 DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE = "primary_annual_return"
+CHECKPOINT_SELECTION_OBJECTIVES = (
+    "valid_loss",
+    "primary_annual_return",
+    "primary_excess_annual_return",
+    "primary_excess_sharpe",
+    "primary_monthly_positive_ratio",
+    "primary_monthly_median_return",
+    "primary_monthly_robust_score",
+)
 
 RAW_HOLDOUT_LABEL = "holdout_backtest"
 EXECUTION_HOLDOUT_LABEL = "execution_aligned_holdout_backtest"
@@ -18,6 +27,37 @@ RAW_MONTHLY_LABEL = "monthly_backtest_summary"
 EXECUTION_MONTHLY_LABEL = "execution_aligned_monthly_backtest_summary"
 PRIMARY_MONTHLY_LABEL = "primary_research_monthly_summary"
 PRIMARY_MONTHLY_DIAGNOSTICS_LABEL = "primary_research_monthly_diagnostics"
+
+
+def summarize_primary_monthly_objectives(primary_monthly_diagnostics: dict[str, Any] | None) -> dict[str, float]:
+    diagnostics = primary_monthly_diagnostics if isinstance(primary_monthly_diagnostics, dict) else {}
+    positive_ratio = float(diagnostics.get("positive_month_ratio", 0.0) or 0.0)
+    median_monthly_return = float(diagnostics.get("median_monthly_return", 0.0) or 0.0)
+    mean_monthly_return = float(diagnostics.get("mean_monthly_return", 0.0) or 0.0)
+    worst_monthly_return = float(diagnostics.get("worst_monthly_return", 0.0) or 0.0)
+    top3_positive_share = float(diagnostics.get("top3_positive_month_share", 0.0) or 0.0)
+    longest_negative_streak = int(diagnostics.get("longest_negative_streak", 0) or 0)
+
+    downside_penalty = max(-worst_monthly_return, 0.0)
+    concentration_penalty = max(top3_positive_share - 0.60, 0.0)
+    streak_penalty = max(longest_negative_streak - 2, 0)
+    monthly_robust_score = (
+        mean_monthly_return
+        + median_monthly_return
+        + 0.05 * (positive_ratio - 0.50)
+        - 0.35 * downside_penalty
+        - 0.05 * concentration_penalty
+        - 0.01 * float(streak_penalty)
+    )
+    return {
+        "primary_monthly_positive_ratio": positive_ratio,
+        "primary_monthly_median_return": median_monthly_return,
+        "primary_monthly_mean_return": mean_monthly_return,
+        "primary_monthly_worst_return": worst_monthly_return,
+        "primary_monthly_top3_positive_share": top3_positive_share,
+        "primary_monthly_longest_negative_streak": float(longest_negative_streak),
+        "primary_monthly_robust_score": float(monthly_robust_score),
+    }
 
 
 def normalize_research_objective_mode(raw: Any) -> str:
@@ -80,24 +120,30 @@ def resolve_primary_monthly_diagnostics_label(metrics: dict[str, Any], research_
 
 def resolve_checkpoint_metric_name(objective: str) -> str:
     normalized = str(objective or "").strip().lower()
-    if normalized == "valid_loss":
-        return "valid_loss"
-    if normalized == "primary_annual_return":
-        return "primary_annual_return"
-    if normalized == "primary_excess_annual_return":
-        return "primary_excess_annual_return"
-    if normalized == "primary_excess_sharpe":
-        return "primary_excess_sharpe"
+    if normalized in CHECKPOINT_SELECTION_OBJECTIVES:
+        return normalized
     raise ValueError(
         f"Unsupported checkpoint selection objective: {objective}. "
-        "Expected one of: valid_loss, primary_annual_return, primary_excess_annual_return, primary_excess_sharpe."
+        f"Expected one of: {', '.join(CHECKPOINT_SELECTION_OBJECTIVES)}."
     )
 
 
-def resolve_checkpoint_metric_value(primary_backtest: dict[str, Any], objective: str) -> tuple[str, float]:
+def resolve_checkpoint_metric_value(
+    primary_backtest: dict[str, Any],
+    objective: str,
+    *,
+    primary_monthly_diagnostics: dict[str, Any] | None = None,
+) -> tuple[str, float]:
     metric_name = resolve_checkpoint_metric_name(objective)
     if metric_name == "valid_loss":
         return metric_name, float("nan")
+    if metric_name.startswith("primary_monthly_"):
+        monthly_objectives = summarize_primary_monthly_objectives(primary_monthly_diagnostics)
+        try:
+            value = float(monthly_objectives.get(metric_name, float("nan")))
+        except Exception:
+            value = float("nan")
+        return metric_name, value
     key = {
         "primary_annual_return": "annual_return",
         "primary_excess_annual_return": "excess_annual_return",

@@ -60,6 +60,7 @@ from daily_research.deep_alpha.pipeline_utils import (
 from daily_research.deep_alpha.risk_gate import apply_state_risk_gate, fit_state_risk_gate
 from daily_research.deep_alpha.runtime_profile import configure_torch_runtime, resolve_runtime_profile
 from daily_research.deep_alpha.research_objective import (
+    CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
     DEFAULT_EXECUTION_ALIGNMENT_MODE,
     DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE,
@@ -74,6 +75,7 @@ from daily_research.deep_alpha.research_objective import (
     resolve_primary_monthly_diagnostics_label,
     resolve_primary_monthly_summary_label,
     resolve_primary_panel_mode,
+    summarize_primary_monthly_objectives,
 )
 from daily_research.deep_alpha.score_head import apply_score_head, fit_score_head
 from daily_research.deep_alpha.sequence_dataset import (
@@ -238,7 +240,7 @@ def parse_args():
     )
     parser.add_argument(
         "--checkpoint-selection-objective",
-        choices=["valid_loss", "primary_annual_return", "primary_excess_annual_return", "primary_excess_sharpe"],
+        choices=list(CHECKPOINT_SELECTION_OBJECTIVES),
         default=DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
         help="Criterion used to keep the best training checkpoint. primary_* objectives are evaluated on the primary research backtest.",
     )
@@ -1000,7 +1002,9 @@ def _evaluate_research_outputs(
     checkpoint_metric_name, checkpoint_metric_value = resolve_checkpoint_metric_value(
         primary_backtest,
         args.checkpoint_selection_objective,
+        primary_monthly_diagnostics=primary_monthly_diagnostics,
     )
+    primary_monthly_objectives = summarize_primary_monthly_objectives(primary_monthly_diagnostics)
     return {
         "train_pred_df": train_pred_df,
         "pred_df": pred_df,
@@ -1039,6 +1043,7 @@ def _evaluate_research_outputs(
         "primary_monthly_summary": primary_monthly_summary,
         "primary_monthly_diagnostics_label": str(primary_monthly_diagnostics_label),
         "primary_monthly_diagnostics": dict(primary_monthly_diagnostics),
+        "primary_monthly_objectives": dict(primary_monthly_objectives),
         "checkpoint_metric_name": checkpoint_metric_name,
         "checkpoint_metric_value": checkpoint_metric_value,
     }
@@ -1707,6 +1712,7 @@ def main():
     primary_monthly_summary = evaluation["primary_monthly_summary"]
     primary_monthly_diagnostics_label = str(evaluation["primary_monthly_diagnostics_label"])
     primary_monthly_diagnostics = dict(evaluation["primary_monthly_diagnostics"])
+    primary_monthly_objectives = dict(evaluation["primary_monthly_objectives"])
 
     live_outputs = _build_live_inference_outputs(
         cfg=cfg,
@@ -1950,6 +1956,7 @@ def main():
         "primary_research_monthly_summary_label": str(primary_monthly_summary_label),
         "primary_research_monthly_diagnostics_label": str(primary_monthly_diagnostics_label),
         "primary_research_monthly_diagnostics": primary_monthly_diagnostics,
+        "primary_research_monthly_objectives": primary_monthly_objectives,
         "primary_execution_panel_mode": resolve_primary_panel_mode(
             {
                 "research_objective_mode": str(args.research_objective_mode),
@@ -2027,6 +2034,7 @@ def main():
         ("monthly_backtest_diagnostics.json", lambda: _write_json_payload(run_dir / "monthly_backtest_diagnostics.json", monthly_backtest_diagnostics)),
         ("primary_research_monthly_summary.csv", lambda: primary_monthly_summary.to_csv(run_dir / "primary_research_monthly_summary.csv", index=False, encoding="utf-8-sig")),
         ("primary_research_monthly_diagnostics.json", lambda: _write_json_payload(run_dir / "primary_research_monthly_diagnostics.json", primary_monthly_diagnostics)),
+        ("primary_research_monthly_objectives.json", lambda: _write_json_payload(run_dir / "primary_research_monthly_objectives.json", primary_monthly_objectives)),
         ("actions.csv", lambda: action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")),
         ("deep_alpha_model.pt", lambda: torch.save(model_artifact, run_dir / "deep_alpha_model.pt")),
         ("score_head_artifact.pkl", lambda: save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)),
@@ -2086,6 +2094,7 @@ def main():
         "primary_research_backtest": primary_backtest,
         "primary_research_monthly_summary_label": str(primary_monthly_summary_label),
         "primary_research_monthly_diagnostics": primary_monthly_diagnostics,
+        "primary_research_monthly_objectives": primary_monthly_objectives,
         "live_signal_date": (
             ""
             if live_score_frame.dropna(how="all").empty

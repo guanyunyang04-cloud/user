@@ -102,7 +102,18 @@
   - `primary_research_monthly_diagnostics.json`
 - 若命令已显式给出 `train_end_date + valid_start_date + valid_days`，则显式短窗优先。
 
-## 11. 默认值升级规则
+## 11. checkpoint 选择与续训规则
+- `deep_alpha` 主链现已支持月度 checkpoint objective，至少包括：
+  - `primary_monthly_positive_ratio`
+  - `primary_monthly_median_return`
+  - `primary_monthly_robust_score`
+- 若要比较不同 checkpoint objective，优先使用：
+  - fresh run
+  - 或 warm-start restart
+- strict resume continuation 必须保持同一个 `checkpoint_selection_objective`，不得在同一训练链中途切换。
+- 现有 short-alpha production recipe 的 `24 -> 32 -> 40` extension 是 strict resume continuation，因此保持 `primary_annual_return`，只把月度 objective 作为下一轮 fresh-run 比较对象。
+
+## 12. 默认值升级规则
 - 只有同一执行口径下同时满足以下条件，才允许升级默认执行：
   - formal rich experiment 胜出
   - recent realistic replay gate 胜出

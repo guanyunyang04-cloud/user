@@ -20,7 +20,7 @@ from daily_research.deep_alpha.family_epoch_budget import (
     list_family_budget_lines,
     load_family_epoch_budget_manifest,
 )
-from daily_research.deep_alpha.research_objective import DEFAULT_RESEARCH_OBJECTIVE_MODE
+from daily_research.deep_alpha.research_objective import CHECKPOINT_SELECTION_OBJECTIVES, DEFAULT_RESEARCH_OBJECTIVE_MODE
 from daily_research.deep_alpha.short_alpha_profiles import get_profile as get_short_alpha_profile
 
 
@@ -110,7 +110,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--checkpoint-selection-objective",
-        choices=["valid_loss", "primary_annual_return", "primary_excess_annual_return", "primary_excess_sharpe"],
+        choices=list(CHECKPOINT_SELECTION_OBJECTIVES),
         default="primary_excess_annual_return",
     )
     parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)

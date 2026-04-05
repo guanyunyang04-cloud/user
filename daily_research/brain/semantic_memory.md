@@ -24,6 +24,10 @@
   - `execution_alignment_mode = train_eval_auto`
   - `execution_alignment_objective = robust_composite`
   - realistic cost = `3 / 7 / 10 bps`
+- `deep_alpha` 主链现已支持月度 checkpoint objective：
+  - `primary_monthly_positive_ratio`
+  - `primary_monthly_median_return`
+  - `primary_monthly_robust_score`
 - formal holdout 负责研究判决。
 - production full-fit 负责默认执行。
 - production full-fit 结果不得回填为 formal 研究证据。
@@ -48,8 +52,11 @@
   - 它已通过 budget-normalized monthly execution-first formal H2H。
   - 它已通过 recent realistic replay gate。
   - 它已通过 production full-fit replay gate。
+  - 它已完成 production recipe `24 -> 32 -> 40` strict-resume epoch extension。
+  - 当前 active production run 为 `short_alpha_production_e40`。
+  - 当前 production recipe 已解除 `objective_aligned_budget_pressure`。
   - 它是当前 liquid500 active default。
-  - 它当前仍有 production recipe 的预算压力，下一步应继续做 epoch extension，而不是回退到旧 baseline。
+  - 后续若要改用月度 checkpoint objective，应从 fresh run 或 warm-start restart 开始，而不是在现有 strict-resume 链中途切换。
 - `dynamic_graph_no_priors` 的稳定语义：
   - 它是当前 rolling liquid800 / mainboard monthly execution-first formal winner。
   - 当前默认不再把 industry/style priors 当作稳定增益。
@@ -82,6 +89,8 @@
   - worst monthly excess return
   - top3 positive-month share
   - longest negative streak
+- 单次 run 现会额外落盘：
+  - `primary_research_monthly_objectives.json`
 - 月度协议不改变底层数据频率；底层仍然是日频样本与 `next_open` 回测。
 
 ## 8. 文档分工语义

@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 
 from daily_research.deep_alpha.architecture_profiles import get_profile
 from daily_research.deep_alpha.research_objective import (
+    CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
     DEFAULT_RESEARCH_OBJECTIVE_MODE,
 )
@@ -69,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--checkpoint-selection-objective",
-        choices=["valid_loss", "primary_annual_return", "primary_excess_annual_return", "primary_excess_sharpe"],
+        choices=list(CHECKPOINT_SELECTION_OBJECTIVES),
         default=DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
     )
     parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)

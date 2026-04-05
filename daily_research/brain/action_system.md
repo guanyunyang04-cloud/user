@@ -36,10 +36,12 @@
   - `regoff_k2_10d_ensemble_native_anchor`
 - 当前 production root：
   - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
-- 当前仍需额外关注：
-  - production full-fit 内部监控显示 `selected_epoch = 21 / 24`
-  - `objective_aligned_budget_pressure = true`
-  - 因此当前默认执行虽已切到 short-alpha，但后续仍应继续做 production recipe 的 epoch extension
+- 当前 active production run：
+  - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1/runs/short_alpha_production_e40`
+- 当前 production recipe 最新状态：
+  - `selected_epoch = 25 / 40`
+  - `objective_aligned_budget_pressure = false`
+  - 当前默认执行已不再处于 recipe budget pressure 状态
 
 ### 2.3 每日默认执行标准流程
 1. 先确认默认候选和 active strategy 没有意外切换：
@@ -196,6 +198,28 @@ promotion 后必须检查：
 - 默认执行真实落盘结果：
   - `daily_research/execution/output/latest_trade_plan.txt`
 
+### 2.8.1 short-alpha production recipe epoch extension
+当默认执行已切到 short-alpha，且你要继续沿同一 production recipe 扩训练预算，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_production_epoch_extension.py
+```
+
+这条入口会：
+- 从当前 production manifest 读取 active production run
+- 默认按 `24 -> 32 -> 40` 做 strict-resume continuation
+- 对每个 budget 生成 recent replay
+- 按月度优先 ranking 选择 best recipe
+- 若新 recipe 更优，则自动同步 production root、刷新 active strategy，并重跑默认 `run_trade_plan.py`
+
+当前 latest output：
+- `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
+
+当前 latest 结果：
+- best recipe = `e40`
+- `selected_epoch / budget = 25 / 40`
+- `objective_aligned_budget_pressure = false`
+
 ### 2.9 执行端常见误区
 - 误区 1：formal run 赢了，就等于默认执行已经切换
   - 错。formal 只是研究证据；默认执行真正读取的是 active strategy manifest。
@@ -213,6 +237,9 @@ promotion 后必须检查：
 - 当前 active default 为 `short_alpha` 且内部监控仍有 budget pressure：
   - 优先考虑做同 profile、同 objective 的 epoch extension
   - 不要因为监控提示就直接回退到旧 baseline，除非 replay 复核也一起转弱
+- 当前 active default 已完成 `e40` epoch extension 且 budget pressure = false：
+  - 默认不需要继续机械加练
+  - 只有当后续 fresh retrain / 新 production recipe 再次出现 pressure，或你要切到月度 checkpoint objective fresh run 时，才重开 extension
 - 计划里信号日不新鲜：
   - 优先查 active strategy 指向的 panel 文件是否更新
   - 再查 production root 的 live panel 是否刷新成功
@@ -271,6 +298,18 @@ promotion 后必须检查：
   - `track_profile_summary.csv`
   - `pairwise_compare_summary.csv`
 
+### fresh run 使用月度 checkpoint objective
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_deep_alpha_research.py --checkpoint-selection-objective primary_monthly_robust_score
+```
+
+- 适用场景：
+  - 你要正式比较“按年化选 checkpoint”和“按月度稳健度选 checkpoint”
+  - 你准备重做 fresh formal / fresh production retrain，而不是沿旧 strict-resume 链继续
+- 注意：
+  - 不要在已经开始的 strict-resume training chain 里中途切 `--checkpoint-selection-objective`
+  - 当前 production epoch extension 之所以仍保持 `primary_annual_return`，就是为了保证同一 resume 链历史可比
+
 ### architecture execution-objective formal
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1
@@ -313,6 +352,7 @@ promotion 后必须检查：
 - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
 - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
 - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1`
+- `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`

@@ -9910,3 +9910,56 @@ position,000001.SZ,1200,12.38,
   - `short_alpha` 的旧“更稳但不够爆”判断被预算归一化 formal 推翻；当前应视为 liquid500 主执行升级线
   - `dynamic_graph_no_priors` 仍是 mainboard / liquid800 主研究线，但更精确的表述应是：priors 没能带来更高的净收益兑现
 - production 月度拆解也一并纳入，但当前真正有信息量的 production 月份主要集中在 `2026-03` 上线之后；prelaunch 月份基本相同，因此 production 月度样本仍需继续累计
+
+### 月度 checkpoint objective 正式接入主链
+- 为了把“月度兑现质量”进一步前推到训练判决，正式扩充了 checkpoint objective：
+  - `daily_research/deep_alpha/research_objective.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+- 新增可直接选用的月度目标至少包括：
+  - `primary_monthly_positive_ratio`
+  - `primary_monthly_median_return`
+  - `primary_monthly_robust_score`
+- 单次 run 现在会新增落盘：
+  - `primary_research_monthly_objectives.json`
+- `run_architecture_execution_objective_head2head.py`
+- `run_epoch_budget_formal_matrix.py`
+- `run_family_epoch_frontier_calibration.py`
+  也都同步接受新的 checkpoint objective 枚举
+- 这样后续 fresh run / fresh frontier / fresh production retrain 已经可以直接研究：
+  - 按 `primary_annual_return` 选 checkpoint
+  - 与按 `primary_monthly_robust_score` 选 checkpoint
+  哪条更能兑现成执行净收益
+
+### short-alpha production recipe 的 strict-resume epoch extension 完成
+- 为了不浪费已经训练出的 checkpoint，同时验证当前 production recipe 是否还存在预算压力，新增入口：
+  - `daily_research/deep_alpha/run_short_alpha_production_epoch_extension.py`
+- 这条入口默认读取：
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default/production_retrain_manifest.json`
+  - 然后沿当前 production recipe 做 `24 -> 32 -> 40` strict resume continuation
+- 本次真实输出目录为：
+  - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
+- recent replay 月度优先 ranking 结果为：
+  - `e24`: excess annual / Sharpe = `-10.21% / -0.618`，`budget_pressure = true`
+  - `e32`: excess annual / Sharpe = `-8.76% / -0.499`，`budget_pressure = false`
+  - `e40`: 与 `e32` replay 基本打平，但作为当前 latest best recipe 被正式同步到 production root
+- 最新 production root 指向：
+  - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1/runs/short_alpha_production_e40`
+- production root 内部 `metrics.json` 当前显示：
+  - `resume_mode = strict`
+  - `selected_epoch = 25 / 40`
+  - `objective_aligned_budget_pressure = false`
+  - `status = stable`
+- `production_retrain_manifest.json` 也同步更新为：
+  - `active_production_run_dir = short_alpha_production_e40`
+- 之后已再次用 `yolos` 实跑默认 `run_trade_plan.py`：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+  - `target_position_count = 13`
+  - `production_model_retrain_status = fresh`
+
+### 这次 production extension 的方法学边界
+- 这次 `24 -> 32 -> 40` extension 虽然已经完成，但它走的是 strict resume continuation
+- 为了保证同一训练链历史可比，整个 production chain 继续保持：
+  - `checkpoint_selection_objective = primary_annual_return`
+- 因而“月度 checkpoint objective 是否优于年化 objective”这件事，并没有在这次 strict resume extension 里混做
+- 这条问题已留给下一轮 fresh run / warm-start restart 去正式比较
