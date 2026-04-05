@@ -4,12 +4,54 @@ import json
 from pathlib import Path
 from typing import Any
 
+from daily_research.deep_alpha.execution_alignment import resolve_profile
 from daily_research.deep_alpha.research_objective import resolve_primary_panel_mode
 
 
 DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST = Path(
     "daily_research/output/active_execution_strategy.json"
 ).resolve()
+
+
+def normalize_liquidity_pool_name(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return ""
+    if text.startswith("liquid") and text[6:].isdigit():
+        return text
+    if text.isdigit():
+        return f"liquid{int(text)}"
+    return ""
+
+
+def liquidity_pool_size_from_name(pool_name: str) -> int:
+    normalized = normalize_liquidity_pool_name(pool_name)
+    if normalized.startswith("liquid") and normalized[6:].isdigit():
+        return int(normalized[6:])
+    return 0
+
+
+def resolve_manifest_liquidity_pool_name(payload: dict[str, Any] | None) -> str:
+    manifest = payload if isinstance(payload, dict) else {}
+    explicit = normalize_liquidity_pool_name(manifest.get("liquidity_pool_name", ""))
+    if explicit:
+        return explicit
+    for key in ("rolling_liquidity_pool", "liquidity_pool"):
+        resolved = normalize_liquidity_pool_name(manifest.get(key, ""))
+        if resolved:
+            return resolved
+    explicit_size = liquidity_pool_size_from_name(str(manifest.get("liquidity_pool_size", "") or ""))
+    if explicit_size > 0:
+        return f"liquid{explicit_size}"
+    return ""
+
+
+def infer_liquidity_pool_name(*metrics_payloads: dict[str, Any] | None) -> str:
+    for payload in metrics_payloads:
+        resolved = resolve_manifest_liquidity_pool_name(payload)
+        if resolved:
+            return resolved
+    return ""
 
 
 def load_strategy_manifest(path: Path | None = None) -> dict[str, Any]:
@@ -61,9 +103,26 @@ def build_active_strategy_manifest(
     )
     target_weight_name, score_name = resolve_panel_filenames(resolved_panel_mode)
     execution_profile = str(strategy_metrics.get("execution_alignment_profile", "") or "").strip()
+    execution_profile_spec = (
+        strategy_metrics.get("execution_alignment_selected_profile_spec")
+        if isinstance(strategy_metrics.get("execution_alignment_selected_profile_spec"), dict)
+        else {}
+    )
+    if not execution_profile_spec and isinstance(source_metrics.get("execution_alignment_selected_profile_spec"), dict):
+        execution_profile_spec = dict(source_metrics.get("execution_alignment_selected_profile_spec") or {})
+    if not execution_profile_spec and execution_profile:
+        execution_profile_spec = dict(resolve_profile(name=execution_profile).__dict__)
+    execution_policy_label = str(
+        execution_profile
+        or execution_profile_spec.get("name", "")
+        or strategy_metrics.get("execution_policy_label", "")
+        or ""
+    ).strip()
+    liquidity_pool_name = infer_liquidity_pool_name(strategy_metrics, source_metrics)
+    liquidity_pool_size = liquidity_pool_size_from_name(liquidity_pool_name)
     candidate_label = str(strategy_metrics.get("experiment_tag", "") or source_run_dir.name).strip()
-    if resolved_panel_mode == "execution_aligned" and execution_profile:
-        candidate_label = f"{candidate_label}__{execution_profile}__active"
+    if execution_policy_label:
+        candidate_label = f"{candidate_label}__{execution_policy_label}__active"
     elif candidate_label:
         candidate_label = f"{candidate_label}__active"
 
@@ -114,6 +173,12 @@ def build_active_strategy_manifest(
         "trade_plan_candidate_label": candidate_label,
         "benchmark": str(source_panel_metrics.get("benchmark", "000300.SH") or "000300.SH"),
         "data_source": "tq",
+        "liquidity_pool_name": liquidity_pool_name,
+        "liquidity_pool_size": int(liquidity_pool_size),
+        "liquidity_pool": str(strategy_metrics.get("liquidity_pool", "") or source_metrics.get("liquidity_pool", "") or ""),
+        "rolling_liquidity_pool": str(strategy_metrics.get("rolling_liquidity_pool", "") or source_metrics.get("rolling_liquidity_pool", "") or ""),
+        "rolling_pool_rebalance_days": int(strategy_metrics.get("rolling_pool_rebalance_days", source_metrics.get("rolling_pool_rebalance_days", 0)) or 0),
+        "rolling_pool_adv_window": int(strategy_metrics.get("rolling_pool_adv_window", source_metrics.get("rolling_pool_adv_window", 0)) or 0),
         "backtest_start_date": str(source_panel_metrics.get("valid_start", "20210101") or "20210101").replace("-", ""),
         "trade_plan_start_date": str(strategy_metrics.get("start_date", "20210101") or "20210101"),
         "rebalance_freq": rebalance_freq,
@@ -127,6 +192,17 @@ def build_active_strategy_manifest(
         "execution_alignment_mode": str(strategy_metrics.get("execution_alignment_mode", "") or ""),
         "execution_alignment_objective": str(strategy_metrics.get("execution_alignment_objective", "") or ""),
         "execution_alignment_profile": execution_profile,
+        "execution_policy_label": execution_policy_label,
+        "execution_alignment_selected_profile_spec": execution_profile_spec,
+        "execution_alignment_selected_bridge_meta": (
+            strategy_metrics.get("execution_alignment_selected_bridge_meta")
+            if isinstance(strategy_metrics.get("execution_alignment_selected_bridge_meta"), dict)
+            else (
+                source_metrics.get("execution_alignment_selected_bridge_meta")
+                if isinstance(source_metrics.get("execution_alignment_selected_bridge_meta"), dict)
+                else {}
+            )
+        ),
         "primary_research_backtest_label": str(strategy_metrics.get("primary_research_backtest_label", "") or ""),
         "research_objective_mode": str(strategy_metrics.get("research_objective_mode", "") or ""),
         "research_time_unit": str(strategy_metrics.get("research_time_unit", "") or ""),

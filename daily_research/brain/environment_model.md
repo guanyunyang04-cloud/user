@@ -11,6 +11,7 @@
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
 - 不依赖“当前 shell 已激活 conda 环境”的隐式状态。
 - 对外写命令时，优先写解释器绝对路径。
+- brain 文档默认使用简体中文；终端运行时输出默认使用英文。
 
 ## 2. Python 环境
 - `base`
@@ -33,7 +34,14 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py
 ```
 
-## 5. 缓存与产物热区
+## 5. 编码与读取提示
+- PowerShell 直接读取中文 markdown 时可能出现显示乱码。
+- 需要精确检查中文 brain 文档时，优先使用：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" -c "from pathlib import Path; print(Path(r'H:\new_tdx64\PYPlugins\user\daily_research\brain\working_memory.md').read_text(encoding='utf-8'))"
+```
+
+## 6. 缓存与产物热区
 - 研究缓存根目录：
   - `daily_research/cache/deep_alpha`
 - 研究产物根目录：
@@ -41,13 +49,13 @@
 - dynamic-graph 当前已验证可复用 raw cache：
   - `daily_research/cache/deep_alpha/raw/6e5203c8cdec3a61.pkl`
 
-## 6. 工作区维护入口
+## 7. 工作区维护入口
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\workspace_maintenance.py report
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\workspace_maintenance.py archive --limit 20
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\workspace_maintenance.py clean --targets pycache
 ```
 
-## 7. 适用范围
+## 8. 适用范围
 - 本文件只维护运行环境与工具基线。
 - 研究判决不写入本文件。

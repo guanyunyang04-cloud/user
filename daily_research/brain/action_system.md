@@ -1,6 +1,6 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-05`
+快照日期：`2026-04-06`
 
 ## 1. 使用原则
 - 正式研究、训练、回测、执行统一使用：
@@ -9,6 +9,8 @@
 - 历史过程、旧结论、废弃主线统一写入 `episodic_memory.md`，不在本文件堆积。
 - 默认执行的真源不是某个脚本参数，而是：
   - `daily_research/output/active_execution_strategy.json`
+- 本文件默认讨论 liquid500 当前 active default。
+- liquid800 / mainboard 研究线命令只作为独立研究入口，不与 liquid500 默认执行混写。
 
 ## 2. 执行端详细使用指南
 
@@ -19,21 +21,24 @@
   - `daily_research/output/active_execution_strategy.json`
 - active strategy 会告诉执行端：
   - 当前默认策略名
+  - 当前默认股票池（`liquidity_pool_name`）
   - 当前默认读取哪份 live score / target-weight panel
   - 当前是否使用 `execution_aligned` 面板
   - 当前 production root 在哪里
-  - 当前底层模型的 execution profile / retrain 语义
+  - 当前底层模型的 execution profile / retrain 语义，以及被研究 winner 选中的精确 execution policy label / spec
 - 结论：
   - “默认执行到底跑谁”，以 `active_execution_strategy.json` 为准
   - 不是以某个 formal run 名字、也不是以脑内口述为准
-
 ### 2.2 当前默认执行快照
 - 当前 active strategy：
-  - `state_liquidity_listwise_v1_execfirst_winner`
+  - `state_liquidity_listwise_v1_execfirst_profitmax_global_winner`
+- 当前 liquidity pool：
+  - `liquid500`
 - 当前 panel mode：
-  - `execution_aligned`
+  - `raw`
 - 当前 execution profile：
-  - `regoff_k2_10d_ensemble_native_anchor`
+  - `regoff_k1_5d_ensemble_native_anchor`
+  - 现在应理解为“当前 active winner 的执行法”；后续 fresh formal 默认扫描 `profit_max_v1`，不是只扫旧四档 profile
 - 当前 production root：
   - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
 - 当前 active production run：
@@ -62,9 +67,19 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py
 ```
 
-  - preflight 现在会检查 `liquid500_latest.txt` 是否过期
+  - preflight 现在会先读 active manifest 里的 `liquidity_pool_name`
+  - 再检查对应的 `liquid500_latest.txt` / `liquid800_latest.txt` 是否过期
   - 若默认池滞后于最新完成交易日，会先自动刷新
   - 若自动刷新失败，才会明确报错并中止执行
+
+### 2.3.1 如需重做全局最高口径
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_global_deployable_strategy_leaderboard.py
+```
+
+  - 该命令会读取各主线的 formal execution-policy review
+  - 按 `global_deployable_non_capacity_adjusted_v1` 口径重排当前全局 deployable winner
+  - 并把 `active_execution_strategy.json` 同步成当前第一名
 
 5. 执行后优先检查两个输出：
   - 文本计划：`daily_research/execution/output/latest_trade_plan.txt`
@@ -205,20 +220,69 @@ promotion 后必须检查：
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_production_epoch_extension.py
 ```
 
+这条入口会从当前 production manifest 读取 active production run，按 `24 -> 32 -> 40` 做 strict-resume continuation，生成 recent replay，按月度优先 ranking 选择 best recipe，并在更优时自动同步 production root、刷新 active strategy、重跑默认 `run_trade_plan.py`。
+当前 latest output：`daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
+当前 latest 结果：`best recipe = e40`，`selected_epoch / budget = 25 / 40`，`objective_aligned_budget_pressure = false`
+### 2.8.2 short-alpha checkpoint objective formal compare
+当你要正式比较 liquid500 short-alpha 主线到底该按“年化”还是“月度稳健度”选 checkpoint，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_checkpoint_objective_comparison.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+这条入口会复用 `short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`，新跑或续跑 `short_alpha_formal_head2head_20260405_monthly_checkpoint_r1`，并输出 `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`。
+当前 latest 判决：更优 objective 仍是 `primary_annual_return`；`monthly_robust` 会把 candidate 和 baseline 都抬高，但 baseline 追得更多，所以当前不把它前推为 liquid500 short-alpha 主线默认值。
+
+### 2.8.3 execution policy profit-max audit
+当你怀疑“当前执行法并不是这条研究线最赚钱的执行法”时，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_execution_policy_audit.py --run-dir "<run_dir>" --panel-scope formal --selection-objective excess_annual_return --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+当前 latest liquid500 结论：三窗 formal profit-max execution policy review 已确认 `regoff_k1_5d_ensemble_native_anchor` 优于旧 `regoff_k2_10d_ensemble_native_anchor`，因此 active strategy 已切到 `raw panel + regoff_k1_5d_ensemble_native_anchor`。
+
+### 2.8.4 short-alpha weak-month review
+当你要先搞清楚“当前主线到底是在哪些月份、哪些 regime 下掉收益”，而不是直接盲改模型或 execution policy，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_weak_month_review.py
+```
+
+当前 latest output：`daily_research/output/short_alpha_weak_month_review_20260405_r1`
+当前 latest 结论：
+- `36` 个月里有 `16` 个 weak months
+- 弱月主要集中在 `trend_down_low_vol` 与 `trend_up_low_vol`
+- 弱月里最优 policy 相对当前 `regoff_k1_5d_ensemble_native_anchor` 仍有平均 `8.04%` lift
+
+### 2.8.5 short-alpha conditional execution policy review
+当你怀疑“与其固定一个 execution policy，不如按 regime 条件切换”时，先做 leave-window-out review：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_conditional_execution_policy_review.py
+```
+
+当前 latest output：`daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+当前 latest 结论：
+- 简单的 month-start-regime conditioned policy 对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败
+- 当前不把这种简单 conditional policy 推到 active default
+
+### 2.8.6 short-alpha profit-max production refresh
+当你已经找到更赚钱的 liquid500 execution policy，但想确认“fresh production full-fit 按这套执行语义重训后，到底值不值得替换当前 production root”时，使用：
+
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_profitmax_production_refresh.py
+```
+
 这条入口会：
-- 从当前 production manifest 读取 active production run
-- 默认按 `24 -> 32 -> 40` 做 strict-resume continuation
-- 对每个 budget 生成 recent replay
-- 按月度优先 ranking 选择 best recipe
-- 若新 recipe 更优，则自动同步 production root、刷新 active strategy，并重跑默认 `run_trade_plan.py`
+- 先把 fresh review retrain 落到独立 review root
+- 再用同一条 execution policy 做 recent live replay
+- 只有 review root 在同一 policy 下打赢当前 production root，才回写默认执行
 
-当前 latest output：
-- `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
-
-当前 latest 结果：
-- best recipe = `e40`
-- `selected_epoch / budget = 25 / 40`
-- `objective_aligned_budget_pressure = false`
+当前 latest output：`daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
+当前 latest 结论：
+- fresh review 在同一 policy 下 recent replay `0/2` named-window 全败
+- 默认 production root 保持不变
 
 ### 2.9 执行端常见误区
 - 误区 1：formal run 赢了，就等于默认执行已经切换
@@ -238,8 +302,9 @@ promotion 后必须检查：
   - 优先考虑做同 profile、同 objective 的 epoch extension
   - 不要因为监控提示就直接回退到旧 baseline，除非 replay 复核也一起转弱
 - 当前 active default 已完成 `e40` epoch extension 且 budget pressure = false：
-  - 默认不需要继续机械加练
-  - 只有当后续 fresh retrain / 新 production recipe 再次出现 pressure，或你要切到月度 checkpoint objective fresh run 时，才重开 extension
+  - 默认不需要继续机械加练；只有当后续 fresh retrain / 新 production recipe 再次出现 pressure，或你要切到月度 checkpoint objective fresh run 时，才重开 extension
+- 当前 short-alpha objective compare 已完成且 annual objective 仍胜出：
+  - 默认不需要把 `update_default_candidate_production.py` 改成 monthly checkpoint objective；若之后再做 monthly objective 研究，优先放到 challenger 或非主线家族
 - 计划里信号日不新鲜：
   - 优先查 active strategy 指向的 panel 文件是否更新
   - 再查 production root 的 live panel 是否刷新成功
@@ -308,7 +373,7 @@ promotion 后必须检查：
   - 你准备重做 fresh formal / fresh production retrain，而不是沿旧 strict-resume 链继续
 - 注意：
   - 不要在已经开始的 strict-resume training chain 里中途切 `--checkpoint-selection-objective`
-  - 当前 production epoch extension 之所以仍保持 `primary_annual_return`，就是为了保证同一 resume 链历史可比
+  - 当前 production epoch extension 之所以仍保持 `primary_annual_return`，一方面是为了保证同一 resume 链历史可比，另一方面也是因为 liquid500 short-alpha fresh formal compare 当前仍支持 annual objective 留在默认位
 
 ### architecture execution-objective formal
 ```powershell
@@ -324,6 +389,18 @@ promotion 后必须检查：
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_formal_ablation_matrix.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1 --force-raw-cache-path daily_research\cache\deep_alpha\raw\6e5203c8cdec3a61.pkl
 ```
+
+### dynamic-graph liquid500 同宇宙 challenger H2H
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_dynamic_graph_liquid500_challenger_head2head.py
+```
+
+- 当前 latest output：
+  - `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`
+- 当前 latest 结论：
+  - `dynamic_graph_no_priors` 已补完 liquid500 同宇宙 formal challenger
+  - 但 mean excess annual / Sharpe 仍低于 `state_liquidity_listwise_v1`
+  - 当前不进入 liquid500 默认执行升级链
 
 ## 5. short-alpha 最近窗升级 gate
 
@@ -353,8 +430,13 @@ promotion 后必须检查：
 - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
 - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1`
 - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
+- `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
+- `daily_research/output/short_alpha_weak_month_review_20260405_r1`
+- `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+- `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
+- `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`

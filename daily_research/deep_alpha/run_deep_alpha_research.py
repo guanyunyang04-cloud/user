@@ -30,11 +30,13 @@ from daily_research.baseline.regime import compute_market_regime_state
 from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, get_cache_root, load_pickle, save_pickle, series_signature
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.execution_alignment import (
+    default_auto_profile_argument,
     evaluate_profile as evaluate_execution_alignment_profile,
     fit_execution_alignment,
     get_profile as get_execution_alignment_profile,
     list_profile_lines as list_execution_alignment_profile_lines,
     parse_profile_name_list as parse_execution_alignment_profile_names,
+    resolve_profile as resolve_execution_alignment_profile,
 )
 from daily_research.deep_alpha.models import MultiTaskRanker
 from daily_research.deep_alpha.pipeline_utils import (
@@ -280,7 +282,10 @@ def parse_args():
     parser.add_argument(
         "--execution-alignment-candidate-profiles",
         default="",
-        help="Optional comma-separated override for train_eval_auto execution alignment profiles.",
+        help=(
+            "Optional comma-separated override for train_eval_auto execution alignment profiles or profile sets. "
+            f"Empty defaults to `{default_auto_profile_argument()}`."
+        ),
     )
     parser.add_argument(
         "--list-execution-alignment-profiles",
@@ -671,7 +676,10 @@ def _build_live_execution_aligned_outputs(
 ) -> dict[str, Any] | None:
     if execution_alignment_artifact is None:
         return None
-    profile = get_execution_alignment_profile(execution_alignment_artifact.selected_profile)
+    profile = resolve_execution_alignment_profile(
+        name=str(getattr(execution_alignment_artifact, "selected_profile", "") or ""),
+        spec=getattr(execution_alignment_artifact, "selected_profile_spec", None),
+    )
     metrics, aligned_scores, aligned_target_weights, meta = evaluate_execution_alignment_profile(
         raw_target_weights=raw_live_target_weights.reindex(raw_live_score_frame.index).fillna(0.0),
         raw_score_frame=raw_live_score_frame.fillna(0.0),
@@ -1940,6 +1948,7 @@ def main():
         "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
         "execution_alignment_profile": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile,
         "execution_alignment_profile_description": "" if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile_description,
+        "execution_alignment_selected_profile_spec": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_profile_spec,
         "execution_alignment_candidate_profiles": [] if execution_alignment_artifact is None else execution_alignment_artifact.candidate_profiles,
         "execution_alignment_selected_bridge_meta": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_bridge_meta,
         "execution_alignment_selected_train_metrics": {} if execution_alignment_artifact is None else execution_alignment_artifact.selected_train_metrics,

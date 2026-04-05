@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.architecture_profiles import get_profile
+from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.research_objective import (
     CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
@@ -26,12 +27,7 @@ OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_research.py"
 EXTERNAL_REPLAY_SCRIPT = PROJECT_ROOT / "daily_research" / "baseline" / "backtest_external_score_panel.py"
 
-EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (
-    "raw_1d",
-    "topk2_1d_regoff",
-    "regoff_k2_10d_ensemble_native_anchor",
-    "regon_k1_10d_ensemble_native_anchor",
-)
+EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (default_auto_profile_argument(),)
 
 
 @dataclass(frozen=True)

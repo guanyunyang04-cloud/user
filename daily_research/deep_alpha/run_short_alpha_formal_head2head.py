@@ -13,14 +13,21 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
+from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.short_alpha_profiles import get_profile
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
-from daily_research.deep_alpha.research_objective import resolve_primary_backtest
+from daily_research.deep_alpha.research_objective import (
+    CHECKPOINT_SELECTION_OBJECTIVES,
+    DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    DEFAULT_RESEARCH_OBJECTIVE_MODE,
+    resolve_primary_backtest,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_research.py"
+EXECUTION_ALIGNMENT_PROFILE_SET = default_auto_profile_argument()
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,18 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated short-alpha profile names from short_alpha_profiles.py",
     )
     parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
+    parser.add_argument(
+        "--research-objective-mode",
+        choices=["execution_first", "raw_holdout"],
+        default=DEFAULT_RESEARCH_OBJECTIVE_MODE,
+    )
+    parser.add_argument(
+        "--checkpoint-selection-objective",
+        choices=list(CHECKPOINT_SELECTION_OBJECTIVES),
+        default=DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
+    )
+    parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)
+    parser.add_argument("--execution-alignment-objective", default="robust_composite")
     return parser.parse_args()
 
 
@@ -75,6 +94,10 @@ def _build_command(
     profile_name: str,
     window: FormalWindow,
     family_epoch_budget_manifest: str,
+    research_objective_mode: str,
+    checkpoint_selection_objective: str,
+    checkpoint_selection_min_improvement: float,
+    execution_alignment_objective: str,
 ) -> list[str]:
     profile = get_profile(profile_name)
     family_key = _resolve_family_key(profile_name)
@@ -134,6 +157,12 @@ def _build_command(
         "0.5",
         "--min-improvement",
         "0.0001",
+        "--research-objective-mode",
+        research_objective_mode,
+        "--checkpoint-selection-objective",
+        checkpoint_selection_objective,
+        "--checkpoint-selection-min-improvement",
+        str(checkpoint_selection_min_improvement),
         "--return-loss-mode",
         "top_bottom_bce",
         "--return-target-transform",
@@ -142,6 +171,18 @@ def _build_command(
         "subtract",
         "--score-head-method",
         "manual",
+        "--execution-alignment-mode",
+        "train_eval_auto",
+        "--execution-alignment-objective",
+        execution_alignment_objective,
+        "--execution-alignment-candidate-profiles",
+        EXECUTION_ALIGNMENT_PROFILE_SET,
+        "--execution-alignment-transaction-cost-bps",
+        "3",
+        "--execution-alignment-slippage-bps",
+        "7",
+        "--execution-alignment-sell-tax-bps",
+        "10",
         "--train-eval-window-days",
         "0",
         "--train-eval-window-months",
@@ -273,6 +314,10 @@ def main() -> None:
                         profile_name=profile.name,
                         window=window,
                         family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
+                        research_objective_mode=str(args.research_objective_mode),
+                        checkpoint_selection_objective=str(args.checkpoint_selection_objective),
+                        checkpoint_selection_min_improvement=float(args.checkpoint_selection_min_improvement),
+                        execution_alignment_objective=str(args.execution_alignment_objective),
                     )
                     _run_command(command)
             metrics = _load_metrics(metrics_path)
@@ -395,7 +440,8 @@ def main() -> None:
         "- benchmark: `000300.SH`",
         "- universe: `liquid500`",
         "- backbone: `patch_transformer + dynamic_graph_v1`",
-        "- objective: `execution_first + train_eval_auto execution alignment`",
+        f"- objective: `{args.research_objective_mode} + train_eval_auto execution alignment`",
+        f"- checkpoint_selection_objective: `{args.checkpoint_selection_objective}`",
         "- candidate: `state_liquidity_listwise_v1`",
         "- baseline: `baseline_current`",
         f"- epoch_budget_baseline: `{int(baseline_summary['epoch_budget'])}`",

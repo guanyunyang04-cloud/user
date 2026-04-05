@@ -49,7 +49,6 @@
 - 结论：
 - 下一步动作：
 
-
 ## 2026-03-17 第一轮全A结果与实现方式选择
 - 基线调优版：`all_a_stage1_tuned_concentrated_20240101`
   - 配置：`equal + 1d`
@@ -9963,3 +9962,172 @@ position,000001.SZ,1200,12.38,
   - `checkpoint_selection_objective = primary_annual_return`
 - 因而“月度 checkpoint objective 是否优于年化 objective”这件事，并没有在这次 strict resume extension 里混做
 - 这条问题已留给下一轮 fresh run / warm-start restart 去正式比较
+
+### liquid500 short-alpha fresh checkpoint objective compare 完成
+- 为了把“年化 objective vs 月度 objective”真正从口头判断变成 formal 证据，新增入口：
+  - `daily_research/deep_alpha/run_short_alpha_checkpoint_objective_comparison.py`
+- 同时把 `run_short_alpha_formal_head2head.py` 升成可显式接收：
+  - `--research-objective-mode`
+  - `--checkpoint-selection-objective`
+  - `--checkpoint-selection-min-improvement`
+  - `--execution-alignment-objective`
+- 这样 short-alpha formal 可以正式对照：
+  - `primary_annual_return`
+  - `primary_monthly_robust_score`
+- 为了避免重复烧一整轮 annual 算力，这次 annual 侧复用的是当前稳定 budget-normalized baseline：
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+- monthly 侧新鲜重跑到：
+  - `daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1`
+- 对照总表落在：
+  - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
+
+### 这次 objective compare 的核心结果
+- `primary_monthly_robust_score` 并不是无效。
+- 它让 `state_liquidity_listwise_v1` 的绝对指标变得更高：
+  - mean excess annual：`31.86% -> 33.78%`
+  - mean excess Sharpe：`1.797 -> 1.985`
+  - positive-month ratio：`66.67% -> 69.44%`
+  - median monthly excess：`1.52% -> 2.78%`
+- 但它也把 `baseline_current` 抬得更多：
+  - baseline mean excess annual：`15.72% -> 22.66%`
+  - baseline mean excess Sharpe：`0.934 -> 1.655`
+  - baseline positive-month ratio：`58.33% -> 63.89%`
+  - baseline median monthly excess：`0.77% -> 1.69%`
+- 结果就是 candidate 相对 baseline 的净优势反而被压缩：
+  - excess annual delta：`16.15% -> 11.12%`
+  - excess Sharpe delta：`0.863 -> 0.330`
+  - Sharpe wins：`3/3 -> 1/3`
+- 因此当前 liquid500 short-alpha 主线的正式判决是：
+  - `checkpoint_selection_objective` 仍保持 `primary_annual_return`
+  - `primary_monthly_robust_score` 继续保留为 fresh-run challenger objective，而不是主线默认 objective
+
+### production fresh retrain 侧的处理
+- 这轮没有把 monthly objective 继续推进到 production fresh retrain 实跑。
+- 原因不是入口不通，而是 formal objective compare 已经给出足够明确的否定信号：
+  - monthly objective 提高了绝对水平
+  - 但削弱了 liquid500 主线 candidate 相对 baseline 的 discrimination
+- 与此同时，也把 `daily_research/execution/update_default_candidate_production.py` 的 CLI 补成了可显式 override：
+  - `--research-objective-mode`
+  - `--checkpoint-selection-objective`
+  - `--checkpoint-selection-min-improvement`
+  - `--execution-alignment-objective`
+- 这样后续若某个家族/候选真的在 formal 层证明 monthly objective 更优，就可以直接推到 production fresh retrain，而不需要再改代码
+
+## 2026-04-05 - liquid500 short_alpha execution policy profit-max audit
+- 为解决“执行端不该被固定成少数旧 profile”这个问题，扩展了 `daily_research/deep_alpha/execution_alignment.py`：
+  - 新增 `profit_max_v1` execution policy set
+  - 默认 `train_eval_auto` 现在扫描更宽的 execution policy 空间，而不是只扫旧四档 profile
+  - execution alignment artifact / metrics / active strategy manifest 现在会显式保存 `execution_policy_label` 与 `execution_alignment_selected_profile_spec`
+- 新增 `daily_research/deep_alpha/run_execution_policy_audit.py`，可以直接对任意 deep_alpha run 的 raw/formal/live panels 做 execution policy replay scan。
+- 对 `state_liquidity_listwise_v1` 当前三窗 formal runs 做了 `excess_annual_return` 目标下的 execution policy 审计：
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20230216_20240229_20260405_r1`
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20240301_20250317_20260405_r1`
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20260405_r1`
+- 聚合总表在 `daily_research/output/short_alpha_execution_policy_formal_review_20260405_r1`。
+- 三窗 formal 的 mean excess annual / Sharpe 聚合结果：
+  - `regoff_k1_5d_ensemble_native_anchor = 53.29% / 2.170`
+  - 旧 active policy `regoff_k2_10d_ensemble_native_anchor = 28.93% / 1.655`
+- 因此把 active strategy 从“execution_aligned panel + regoff_k2_10d”切成了“raw panel + regoff_k1_5d execution policy spec”：
+  - `strategy_name = state_liquidity_listwise_v1_execfirst_profitmax_execution_winner`
+  - `panel_mode = raw`
+  - `execution_policy_label = regoff_k1_5d_ensemble_native_anchor`
+- 默认 `run_trade_plan.py` 已用新 active strategy 实跑通过：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+- `candidate_label = state_liquidity_listwise_v1_20250318_20260331__regoff_k1_5d_ensemble_native_anchor__active`
+- `target_position_count = 4`
+
+## 2026-04-05 - liquid500 short-alpha weak-month / conditional policy / profit-max refresh / dynamic_graph challenger 收口
+- 为把“当前 liquid500 主线到底还差什么”从口头判断变成正式证据，新增了三条入口：
+  - `daily_research/deep_alpha/run_short_alpha_weak_month_review.py`
+  - `daily_research/deep_alpha/run_short_alpha_conditional_execution_policy_review.py`
+  - `daily_research/deep_alpha/run_short_alpha_profitmax_production_refresh.py`
+- 同时补了一条 liquid500 同宇宙 challenger formal：
+  - `daily_research/deep_alpha/run_dynamic_graph_liquid500_challenger_head2head.py`
+- 先修了 production refresh 基础设施：
+  - `daily_research/execution/update_default_candidate_production.py` 新增显式 override：
+    - `--execution-alignment-mode`
+    - `--execution-alignment-profile`
+    - `--execution-alignment-candidate-profiles`
+  - 这样 production fresh retrain 现在可以被显式锁到某条 execution policy，而不是只能继承 source run 的旧 policy
+- weak-month review 正式输出在：
+  - `daily_research/output/short_alpha_weak_month_review_20260405_r1`
+- 这轮 weak-month review 的核心结果：
+  - `state_liquidity_listwise_v1` 在 `36` 个月里有 `16` 个弱月
+  - 弱月主要集中在 `trend_down_low_vol` 与 `trend_up_low_vol`
+  - 弱月里 candidate 相对 baseline 的平均 excess 月收益差为 `-4.43%`
+  - 同期最优 policy 相对当前 `regoff_k1_5d_ensemble_native_anchor` 仍有平均 `8.04%` lift
+  - 典型坏月包括：
+    - `2025-07`
+    - `2024-01`
+    - `2025-10`
+- 条件化 execution policy review 正式输出在：
+  - `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+- 这轮 conditional review 采用的是 leave-window-out 的 month-start-regime mapping；结果对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败：
+  - conditional mean excess annual / Sharpe = `37.28% / 1.366`
+  - static mean excess annual / Sharpe = `53.29% / 2.170`
+  - 结论：当前不把简单 regime-conditioned execution policy 推到 active default
+- profit-max production fresh refresh 正式输出在：
+  - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
+- 这轮 refresh 的 protocol 是：
+  - source formal run 仍用 `state_liquidity_listwise_v1_20250318_20260331`
+  - review retrain 显式锁到 `execution_alignment_mode = profile`
+  - profile = `regoff_k1_5d_ensemble_native_anchor`
+  - review retrain 先落到独立 review root，再在同一 policy 下与当前 production root 做 recent live replay H2H
+- refresh 结果很明确：
+  - current production 在同一 `regoff_k1_5d_ensemble_native_anchor` 下的 recent replay = `7.77% / 0.517`
+  - review production = `-15.03% / -0.910`
+  - full-period delta = `-21.85% / -1.368`
+  - named-window annual wins/losses = `0/2`
+  - named-window Sharpe wins/losses = `0/2`
+  - 结论：fresh review 不晋升，当前 production root 与 active strategy 保持不变
+- dynamic_graph liquid500 同宇宙 challenger 正式输出在：
+  - `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`
+- 这轮同宇宙 formal 的核心结果：
+  - `state_liquidity_listwise_v1 = 34.85% / 2.196`
+  - `dynamic_graph_no_priors = 33.21% / 1.956`
+  - `baseline_current = 16.48% / 1.147`
+  - `dynamic_graph_no_priors` 前两窗领先，但最近窗 `20250318_20260331` 明显落后：
+    - excess annual delta = `-33.93%`
+    - excess Sharpe delta = `-1.714`
+  - 结论：`dynamic_graph_no_priors` 仍保留为 liquid800 / mainboard 主研究线，但当前不是 liquid500 默认执行升级答案
+- 这轮总判决：
+  - liquid500 当前最该做的不是“简单切条件化 policy”或“立即 fresh retrain 替换 current production”
+  - 而是围绕 `trend_down_low_vol` / `trend_up_low_vol` 的 weak months 做 targeted repair
+  - `dynamic_graph_no_priors` 也已不再是 liquid500 侧的高优先级 challenger；它继续留在 liquid800 / mainboard 独立推进
+
+## 2026-04-06 全局 deployable leaderboard 接线
+- 目标：
+  - 不再把 `liquid500` 默认执行写死在 wrapper 里
+  - 建立跨 `liquid500 / liquid800` 的统一 deployable leaderboard
+  - 让默认执行直接跟随当前全局第一名
+- 代码改动：
+  - `daily_research/execution/strategy_manifest.py`
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/entrypoint_utils.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - `daily_research/deep_alpha/run_formal_execution_policy_review.py`
+  - `daily_research/execution/run_global_deployable_strategy_leaderboard.py`
+- 新协议：
+  - active manifest 新增 `liquidity_pool_name / liquidity_pool_size`
+  - 默认执行 preflight 先读 active winner 的 pool，再自动刷新对应 `liquid500` 或 `liquid800`
+  - “全项目最高”只允许在 `global_deployable_non_capacity_adjusted_v1` 口径下表述
+- dynamic_graph 同口径补验：
+  - 输出目录：`daily_research/output/dynamic_graph_no_priors_execution_policy_formal_review_20260406_r1`
+  - 最优 execution policy：`regoff_k3_5d_ensemble_native_anchor`
+  - mean excess annual / Sharpe：`33.27% / 1.290`
+- 全局 deployable leaderboard：
+  - 输出目录：`daily_research/output/global_deployable_strategy_leaderboard_20260406_r1`
+  - rank 1：`state_liquidity_listwise_v1 + regoff_k1_5d_ensemble_native_anchor = 53.29% / 2.170`
+  - rank 2：`dynamic_graph_no_priors + regoff_k3_5d_ensemble_native_anchor = 33.27% / 1.290`
+- active default 同步：
+  - `active_execution_strategy.json` 已改写为 `state_liquidity_listwise_v1_execfirst_profitmax_global_winner`
+  - 当前 active manifest 已保存：
+    - `liquidity_pool_name = liquid500`
+    - `execution_policy_label = regoff_k1_5d_ensemble_native_anchor`
+    - `global_deployable_summary_rows`
+- 验证：
+  - `py_compile`
+  - `run_trade_plan.py`
+  - `doc_guard.py check`
+  - 额外验证 `liquid800` pool preflight 可正确解析并返回 `liquid800_latest.txt`

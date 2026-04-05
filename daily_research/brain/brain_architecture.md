@@ -1,64 +1,54 @@
 # Daily Research Brain Architecture
 
 ## 1. 结构目标
-`daily_research/brain/` 是 `daily_research` 分脑，不再承担传统 README 职责，而是按脑模块分层保存认知。
+`daily_research/brain/` 不是传统 README，而是项目分脑。它负责把项目知识拆成稳定事实、当前判决、方法规则、操作入口和时间证据，避免同一结论散落在多处重复维护。
 
-它由上级主脑治理：
+## 2. 推荐读取顺序
+1. `brain_manifest.json`
+   - 机器可读入口、读写路由、模块清单
+2. `semantic_memory.md`
+   - 稳定事实与长期边界
+3. `brain_architecture.md`
+   - 文档结构与职责
+4. `project_map.md`
+   - 项目结构、主线地图、决策闭环
+5. `working_memory.md`
+   - 当前默认值、优先级、边界
+6. `procedural_memory.md`
+   - 可复用方法学
+7. `environment_model.md`
+   - 环境、解释器、编码口径
+8. `action_system.md`
+   - 高频命令与执行入口
+9. `episodic_memory.md`
+   - 历史过程与原始证据
 
-- `brain/master_brain.md`
-- `brain/brain_manifest.json`
+## 3. 模块职责
+- `semantic_memory.md`
+  - 只写稳定事实、固定边界、长期有效语义
+- `project_map.md`
+  - 只写项目结构、主线地图、决策闭环、当前瓶颈
+- `working_memory.md`
+  - 只写当前判决、当前默认值、当前优先级
+- `procedural_memory.md`
+  - 只写“怎么做”的规则，不写单次结论
+- `environment_model.md`
+  - 只写运行环境、解释器、编码与工具基线
+- `action_system.md`
+  - 只写可直接执行的高频入口
+- `episodic_memory.md`
+  - 只写按时间顺序保存的过程证据
 
-## 2. 分脑分层
-### 2.1 语义记忆
-- `daily_research/brain/semantic_memory.md`
-  - 当前稳定主线、项目身份、脑模块目录
+## 4. 写入路由
+- 新证据先进入 `working_memory.md`。
+- 证据稳定后再沉淀进 `semantic_memory.md`。
+- 单次实验细节、路径、时间序列过程进入 `episodic_memory.md`。
+- 命令口径变化进入 `action_system.md`。
+- 结构变化先改本文件，再改 `brain_manifest.json`。
 
-### 2.2 项目地图
-- `daily_research/brain/project_map.md`
-  - 项目背景、主线演化、瓶颈、未来方向
-
-### 2.3 工作记忆
-- `daily_research/brain/working_memory.md`
-  - 当前默认值、升级 gate、优先级、停止规则
-
-### 2.4 程序记忆
-- `daily_research/brain/procedural_memory.md`
-  - 已验证方法学、写入路由、以及 Gemini 协作尝试的停用结论
-
-### 2.5 环境模型
-- `daily_research/brain/environment_model.md`
-  - 解释器、依赖、命令与工具入口
-
-### 2.6 行动系统
-- `daily_research/brain/action_system.md`
-  - 盘后执行流程、模型更新、计划生成、执行边界
-
-### 2.7 情景记忆
-- `daily_research/brain/episodic_memory.md`
-  - 按时间顺序保存实验、产物、证据与结论
-
-### 2.8 机器索引
-- `daily_research/brain/brain_manifest.json`
-  - 机器可读读写路由与父子脑关系
-
-## 3. 写入路由
-- 当前稳定状态：
-  - `semantic_memory.md`
-- 项目演化与瓶颈：
-  - `project_map.md`
-- 当前默认决策与优先级：
-  - `working_memory.md`
-- 可复用方法学：
-  - `procedural_memory.md`
-- 环境与命令口径：
-  - `environment_model.md`
-- 执行流程：
-  - `action_system.md`
-- 单轮实验与时间证据：
-  - `episodic_memory.md`
-
-## 4. 去冗余规则
-- 不再维护 `daily_research/README.md`
-- 不再维护 `daily_research/execution/README.md`
-- 不再把执行口径、环境、默认决策重复写进多个入口
-- 结构变更先改本文件，再改 `brain_manifest.json`
+## 5. 维护原则
+- 同一件事只保留一个真源。
+- `working_memory.md` 可以快，但不能和 `semantic_memory.md` 冲突。
+- `project_map.md` 必须反映当前主线，不能停留在旧执行法或旧瓶颈。
+- `action_system.md` 只保留仍在使用的入口，不堆历史命令。
+- `episodic_memory.md` 允许保留旧结论，但必须以时间顺序呈现，不得冒充当前默认值。

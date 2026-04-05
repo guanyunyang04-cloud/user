@@ -11,7 +11,11 @@ import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.execution.entrypoint_utils import inject_default_arg, inject_flag_arg
-from daily_research.execution.strategy_manifest import load_strategy_manifest
+from daily_research.execution.strategy_manifest import (
+    infer_liquidity_pool_name,
+    liquidity_pool_size_from_name,
+    load_strategy_manifest,
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,8 @@ class ResearchCandidateProfile:
     refresh_run_dir: str = ""
     trade_plan_refresh_run_dir: str = ""
     trade_plan_model_manifest_json: str = ""
+    liquidity_pool_name: str = ""
+    liquidity_pool_size: int = 0
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +80,8 @@ STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
         trade_plan_refresh_run_dir=str(_DYNAMIC_GRAPH_PRODUCTION_ROOT.resolve()),
         trade_plan_model_manifest_json=str((_DYNAMIC_GRAPH_PRODUCTION_ROOT / "production_retrain_manifest.json").resolve()),
+        liquidity_pool_name="liquid500",
+        liquidity_pool_size=500,
     ),
     "regon_k1_10d_ensemble_native_anchor": ResearchCandidateProfile(
         name="regon_k1_10d_ensemble_native_anchor",
@@ -84,6 +92,8 @@ STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         target_weight_top_k=1,
         use_market_regime_filter=True,
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
+        liquidity_pool_name="liquid500",
+        liquidity_pool_size=500,
     ),
     "regoff_k2_10d_market_state_guard_v1": ResearchCandidateProfile(
         name="regoff_k2_10d_market_state_guard_v1",
@@ -95,6 +105,8 @@ STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         use_market_regime_filter=False,
         soft_state_profile="market_state_guard_v1",
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
+        liquidity_pool_name="liquid500",
+        liquidity_pool_size=500,
     ),
     "target_weight_1d_baseline": ResearchCandidateProfile(
         name="target_weight_1d_baseline",
@@ -108,6 +120,8 @@ STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         target_weight_top_k=0,
         use_market_regime_filter=False,
         refresh_run_dir=str(_DYNAMIC_GRAPH_FORMAL_ROOT.resolve()),
+        liquidity_pool_name="liquid500",
+        liquidity_pool_size=500,
     ),
     "execalign_auto_r4_topk2_1d_regoff": ResearchCandidateProfile(
         name="execalign_auto_r4_topk2_1d_regoff",
@@ -123,6 +137,8 @@ STATIC_PROFILE_REGISTRY: dict[str, ResearchCandidateProfile] = {
         target_weight_top_k=0,
         use_market_regime_filter=False,
         refresh_run_dir=str(_EXECALIGN_AUTO_R4_ROOT.resolve()),
+        liquidity_pool_name="liquid500",
+        liquidity_pool_size=500,
     ),
 }
 
@@ -156,10 +172,14 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
     )
     strategy_name = str(manifest.get("strategy_name", "")).strip()
     panel_mode = str(manifest.get("panel_mode", "")).strip()
+    execution_policy_label = str(manifest.get("execution_policy_label", "") or manifest.get("execution_alignment_profile", "")).strip()
     if strategy_name:
         description = f"{description} strategy={strategy_name}."
     if panel_mode:
         description = f"{description} panel_mode={panel_mode}."
+    if execution_policy_label:
+        description = f"{description} execution_policy={execution_policy_label}."
+    liquidity_pool_name = infer_liquidity_pool_name(manifest)
     return ResearchCandidateProfile(
         name=ACTIVE_EXECUTION_CANDIDATE_PROFILE,
         description=description,
@@ -189,6 +209,8 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         trade_plan_refresh_run_dir=str(manifest.get("trade_plan_refresh_run_dir", "")).strip()
         or str(manifest.get("production_root", "")).strip(),
         trade_plan_model_manifest_json=str(manifest.get("production_manifest_json", "")).strip(),
+        liquidity_pool_name=liquidity_pool_name,
+        liquidity_pool_size=liquidity_pool_size_from_name(liquidity_pool_name),
     )
 
 

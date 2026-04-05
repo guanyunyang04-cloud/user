@@ -19,6 +19,7 @@ import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.deep_alpha.execution_alignment import DEFAULT_AUTO_PROFILE_NAMES
 from daily_research.deep_alpha.research_objective import (
+    CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
     DEFAULT_EXECUTION_ALIGNMENT_MODE,
     DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE,
@@ -59,6 +60,46 @@ def parse_args() -> argparse.Namespace:
         help="Production launch cutoff date. Defaults to latest completed trading date.",
     )
     parser.add_argument("--experiment-tag", default="", help="Optional run tag under daily_research/output.")
+    parser.add_argument(
+        "--research-objective-mode",
+        default="",
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
+    parser.add_argument(
+        "--checkpoint-selection-objective",
+        default="",
+        help=(
+            "Optional override passed to the production fresh retrain. "
+            f"Available values include: {', '.join(CHECKPOINT_SELECTION_OBJECTIVES)}. "
+            "Empty means inherit from the formal source run."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-min-improvement",
+        type=float,
+        default=None,
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
+    parser.add_argument(
+        "--execution-alignment-objective",
+        default="",
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
+    parser.add_argument(
+        "--execution-alignment-mode",
+        default="",
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
+    parser.add_argument(
+        "--execution-alignment-profile",
+        default="",
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
+    parser.add_argument(
+        "--execution-alignment-candidate-profiles",
+        default="",
+        help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
+    )
     parser.add_argument(
         "--strategy-manifest-path",
         default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST),
@@ -302,6 +343,13 @@ def _build_retrain_command(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     experiment_tag: str,
+    research_objective_mode_override: str = "",
+    checkpoint_selection_objective_override: str = "",
+    checkpoint_selection_min_improvement_override: float | None = None,
+    execution_alignment_objective_override: str = "",
+    execution_alignment_mode_override: str = "",
+    execution_alignment_profile_override: str = "",
+    execution_alignment_candidate_profiles_override: str = "",
 ) -> list[str]:
     metrics, cfg = _load_source_config(source_run_dir)
     script_path = Path("daily_research/deep_alpha/run_deep_alpha_research.py").resolve()
@@ -402,29 +450,46 @@ def _build_retrain_command(
     _append_arg(cmd, "--min-price", cfg.get("min_price", 2.0))
     _append_arg(cmd, "--max-price", cfg.get("max_price", 300.0))
 
-    research_objective_mode = str(metrics.get("research_objective_mode", "") or DEFAULT_RESEARCH_OBJECTIVE_MODE).strip()
-    checkpoint_selection_objective = str(
-        metrics.get("checkpoint_selection_objective", "") or DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE
+    research_objective_mode = str(
+        research_objective_mode_override
+        or metrics.get("research_objective_mode", "")
+        or DEFAULT_RESEARCH_OBJECTIVE_MODE
     ).strip()
-    checkpoint_selection_min_improvement = metrics.get(
-        "checkpoint_selection_min_improvement",
-        cfg.get("min_improvement", 1e-4),
+    checkpoint_selection_objective = str(
+        checkpoint_selection_objective_override
+        or metrics.get("checkpoint_selection_objective", "")
+        or DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE
+    ).strip()
+    checkpoint_selection_min_improvement = (
+        checkpoint_selection_min_improvement_override
+        if checkpoint_selection_min_improvement_override is not None
+        else metrics.get("checkpoint_selection_min_improvement", cfg.get("min_improvement", 1e-4))
     )
     _append_arg(cmd, "--research-objective-mode", research_objective_mode)
     _append_arg(cmd, "--checkpoint-selection-objective", checkpoint_selection_objective)
     _append_arg(cmd, "--checkpoint-selection-min-improvement", checkpoint_selection_min_improvement)
 
-    execution_alignment_mode = str(metrics.get("execution_alignment_mode", "") or "").strip()
+    execution_alignment_mode = str(
+        execution_alignment_mode_override
+        or metrics.get("execution_alignment_mode", "")
+        or ""
+    ).strip()
     if research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE and execution_alignment_mode in {"", "off"}:
         execution_alignment_mode = DEFAULT_EXECUTION_ALIGNMENT_MODE
     elif not execution_alignment_mode:
         execution_alignment_mode = "off"
     execution_alignment_objective = str(
-        metrics.get("execution_alignment_objective", "") or DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE
+        execution_alignment_objective_override
+        or metrics.get("execution_alignment_objective", "")
+        or DEFAULT_EXECUTION_ALIGNMENT_OBJECTIVE
     ).strip()
-    execution_alignment_profile = str(metrics.get("execution_alignment_profile", "") or "").strip()
+    execution_alignment_profile = str(
+        execution_alignment_profile_override
+        or metrics.get("execution_alignment_profile", "")
+        or ""
+    ).strip()
     execution_alignment_candidate_profiles = _format_name_list(
-        metrics.get("execution_alignment_candidate_profiles"),
+        execution_alignment_candidate_profiles_override or metrics.get("execution_alignment_candidate_profiles"),
         fallback=DEFAULT_AUTO_PROFILE_NAMES,
     )
     if research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE and execution_alignment_profile:
@@ -647,6 +712,13 @@ def main() -> None:
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         experiment_tag=experiment_tag,
+        research_objective_mode_override=str(args.research_objective_mode or ""),
+        checkpoint_selection_objective_override=str(args.checkpoint_selection_objective or ""),
+        checkpoint_selection_min_improvement_override=args.checkpoint_selection_min_improvement,
+        execution_alignment_objective_override=str(args.execution_alignment_objective or ""),
+        execution_alignment_mode_override=str(args.execution_alignment_mode or ""),
+        execution_alignment_profile_override=str(args.execution_alignment_profile or ""),
+        execution_alignment_candidate_profiles_override=str(args.execution_alignment_candidate_profiles or ""),
     )
     print("production_mode=full_fit_retrain")
     print(f"source_formal_run={source_run_dir}")
@@ -655,6 +727,20 @@ def main() -> None:
     print(f"latest_trainable_date={latest_trainable_date}")
     print(f"internal_monitor_start_date={internal_monitor_start_date}")
     print(f"internal_monitor_days={internal_monitor_days}")
+    if args.research_objective_mode:
+        print(f"override_research_objective_mode={args.research_objective_mode}")
+    if args.checkpoint_selection_objective:
+        print(f"override_checkpoint_selection_objective={args.checkpoint_selection_objective}")
+    if args.checkpoint_selection_min_improvement is not None:
+        print(f"override_checkpoint_selection_min_improvement={args.checkpoint_selection_min_improvement}")
+    if args.execution_alignment_objective:
+        print(f"override_execution_alignment_objective={args.execution_alignment_objective}")
+    if args.execution_alignment_mode:
+        print(f"override_execution_alignment_mode={args.execution_alignment_mode}")
+    if args.execution_alignment_profile:
+        print(f"override_execution_alignment_profile={args.execution_alignment_profile}")
+    if args.execution_alignment_candidate_profiles:
+        print(f"override_execution_alignment_candidate_profiles={args.execution_alignment_candidate_profiles}")
     subprocess.run(cmd, check=True)
 
     run_dir = (Path("daily_research/output") / experiment_tag).resolve()

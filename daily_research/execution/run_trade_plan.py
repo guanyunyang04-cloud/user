@@ -20,6 +20,7 @@ from daily_research.execution.entrypoint_utils import (
 from daily_research.execution.research_candidate_profiles import (
     DEFAULT_EXECUTION_CANDIDATE_PROFILE,
     apply_profile_defaults,
+    get_profile,
     list_profile_lines,
 )
 
@@ -57,8 +58,6 @@ def main():
     inject_default_arg("--output-dir", str(output_dir))
     inject_default_arg("--external-score-column", "latest_score")
     inject_default_arg("--external-target-weight-column", "target_weight")
-    ensure_default_pool_argument()
-    ensure_execution_strategy_defaults()
 
     if (
         not legacy_ml
@@ -68,6 +67,16 @@ def main():
         and not is_help_request()
     ):
         candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
+
+    pool_name_hint = ""
+    if candidate_profile:
+        try:
+            pool_name_hint = str(get_profile(candidate_profile).liquidity_pool_name or "").strip()
+        except Exception:
+            pool_name_hint = ""
+
+    ensure_default_pool_argument(pool_name=pool_name_hint)
+    ensure_execution_strategy_defaults()
 
     if is_help_request():
         print("wrapper_options: --candidate-profile <name> | --list-candidate-profiles | --legacy-ml")

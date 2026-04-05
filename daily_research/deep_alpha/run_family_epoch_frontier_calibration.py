@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
 
 from daily_research.deep_alpha.architecture_profiles import get_profile as get_architecture_profile
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile as get_dynamic_graph_profile
+from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
     get_family_budget_spec,
@@ -29,12 +30,7 @@ OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_research.py"
 EXTERNAL_REPLAY_SCRIPT = PROJECT_ROOT / "daily_research" / "baseline" / "backtest_external_score_panel.py"
 
-EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (
-    "raw_1d",
-    "topk2_1d_regoff",
-    "regoff_k2_10d_ensemble_native_anchor",
-    "regon_k1_10d_ensemble_native_anchor",
-)
+EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (default_auto_profile_argument(),)
 
 
 @dataclass(frozen=True)

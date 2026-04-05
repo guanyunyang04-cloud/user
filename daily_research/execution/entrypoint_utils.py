@@ -88,19 +88,48 @@ def bootstrap_execution_paths(entry_file: str) -> Path:
     return exec_dir
 
 
-def ensure_default_pool_argument() -> None:
+def _resolve_requested_pool_size(*, pool_name: str = "", pool_size: int = 0) -> int:
+    if int(pool_size or 0) > 0:
+        return int(pool_size)
+    if pool_name:
+        from daily_research.execution.strategy_manifest import liquidity_pool_size_from_name
+
+        resolved = liquidity_pool_size_from_name(pool_name)
+        if resolved > 0:
+            return resolved
+    try:
+        from daily_research.execution.strategy_manifest import (
+            liquidity_pool_size_from_name,
+            load_strategy_manifest,
+            resolve_manifest_liquidity_pool_name,
+        )
+
+        manifest = load_strategy_manifest()
+        resolved = liquidity_pool_size_from_name(resolve_manifest_liquidity_pool_name(manifest))
+        if resolved > 0:
+            return resolved
+    except Exception:
+        pass
+    from daily_research.execution.liquidity_universe import DEFAULT_POOL_SIZE
+
+    return int(DEFAULT_POOL_SIZE)
+
+
+def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> None:
     if has_arg("--stocks") or has_arg("--stocks-file"):
         return
     from daily_research.execution.liquidity_universe import ensure_default_pool_file, get_default_pool_file
     from daily_research.baseline.data_provider import find_universe_violations, load_cached_stock_name_map
 
+    resolved_pool_size = _resolve_requested_pool_size(pool_name=pool_name, pool_size=pool_size)
+    resolved_pool_name = f"liquid{resolved_pool_size}"
     if is_help_request():
-        pool_file = get_default_pool_file()
+        pool_file = get_default_pool_file(resolved_pool_size)
     else:
-        pool_file = ensure_default_pool_file()
+        pool_file = ensure_default_pool_file(pool_size=resolved_pool_size)
     if not pool_file.exists() and not is_help_request():
         raise FileNotFoundError(
-            f"Default liquid500 universe file not found after preflight: {pool_file}. "
+            f"Default {resolved_pool_name} universe file not found after preflight: {pool_file}. "
             "Please run daily_research/execution/update_liquid_pool.py after close first."
         )
     if pool_file.exists() and not is_help_request():

@@ -16,6 +16,7 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
+from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import (
     CHECKPOINT_SELECTION_OBJECTIVES,
@@ -34,12 +35,7 @@ CURRENT_DEFAULT_REALISTIC_RUN = (
     PROJECT_ROOT / "daily_research" / "output" / "execution_costreview_regoff_k2_realistic_20260401_r1"
 )
 
-EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (
-    "raw_1d",
-    "topk2_1d_regoff",
-    "regoff_k2_10d_ensemble_native_anchor",
-    "regon_k1_10d_ensemble_native_anchor",
-)
+EXECUTION_ALIGNMENT_CANDIDATES: tuple[str, ...] = (default_auto_profile_argument(),)
 
 
 @dataclass(frozen=True)

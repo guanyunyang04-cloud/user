@@ -348,9 +348,17 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         live_latest_scores.to_csv(run_dir / "live_latest_scores.csv", index=False, encoding="utf-8-sig")
 
     execution_aligned_profile = str(metrics.get("execution_alignment_profile", "") or "")
+    execution_aligned_profile_spec = (
+        metrics.get("execution_alignment_selected_profile_spec")
+        if isinstance(metrics.get("execution_alignment_selected_profile_spec"), dict)
+        else {}
+    )
     if execution_aligned_profile:
         execution_aligned_live_outputs = research_main._build_live_execution_aligned_outputs(
-            execution_alignment_artifact=SimpleNamespace(selected_profile=execution_aligned_profile),
+            execution_alignment_artifact=SimpleNamespace(
+                selected_profile=execution_aligned_profile,
+                selected_profile_spec=execution_aligned_profile_spec,
+            ),
             raw_live_score_frame=live_score_frame,
             raw_live_target_weights=live_target_weights,
             close=close,

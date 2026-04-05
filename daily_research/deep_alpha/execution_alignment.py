@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable
+from dataclasses import asdict, dataclass
+from typing import Any, Iterable
 
 import pandas as pd
 import numpy as np
@@ -44,6 +44,7 @@ class ExecutionAlignmentArtifact:
     objective_metric: str
     selected_profile: str
     selected_profile_description: str
+    selected_profile_spec: dict[str, object]
     candidate_profiles: list[str]
     objective_rows: list[dict]
     selected_bridge_meta: dict[str, object]
@@ -53,15 +54,27 @@ class ExecutionAlignmentArtifact:
     valid_target_weights: pd.DataFrame
 
 
-PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
+_BASE_PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
     "raw_1d": ExecutionAlignmentProfile(
         name="raw_1d",
         description="Keep raw 1d target-weight output with no additional execution alignment.",
+    ),
+    "topk1_1d_regoff": ExecutionAlignmentProfile(
+        name="topk1_1d_regoff",
+        description="1d direct target-weight bridge cropped to top-k 1 with market regime filter off.",
+        target_weight_top_k=1,
+        use_market_regime_filter=False,
     ),
     "topk2_1d_regoff": ExecutionAlignmentProfile(
         name="topk2_1d_regoff",
         description="1d direct target-weight bridge cropped to top-k 2 with market regime filter off.",
         target_weight_top_k=2,
+        use_market_regime_filter=False,
+    ),
+    "topk3_1d_regoff": ExecutionAlignmentProfile(
+        name="topk3_1d_regoff",
+        description="1d direct target-weight bridge cropped to top-k 3 with market regime filter off.",
+        target_weight_top_k=3,
         use_market_regime_filter=False,
     ),
     "regoff_k2_10d_ensemble_native_anchor": ExecutionAlignmentProfile(
@@ -84,12 +97,199 @@ PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
     ),
 }
 
-DEFAULT_AUTO_PROFILE_NAMES = [
-    "raw_1d",
-    "topk2_1d_regoff",
-    "regoff_k2_10d_ensemble_native_anchor",
-    "regon_k1_10d_ensemble_native_anchor",
-]
+
+def _build_curated_profit_profile(
+    *,
+    name: str,
+    description: str,
+    rebalance_freq: str,
+    rebalance_offset_mode: str,
+    target_weight_top_k: int,
+    use_market_regime_filter: bool,
+) -> ExecutionAlignmentProfile:
+    return ExecutionAlignmentProfile(
+        name=name,
+        description=description,
+        rebalance_freq=rebalance_freq,
+        rebalance_offset_mode=rebalance_offset_mode,
+        rebalance_anchor_date="" if str(rebalance_freq) == "1d" else "2025-01-02",
+        target_weight_top_k=target_weight_top_k,
+        use_market_regime_filter=use_market_regime_filter,
+    )
+
+
+_CURATED_PROFIT_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
+    "regoff_k1_3d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k1_3d_ensemble_native_anchor",
+        description="3d anchored all-offset ensemble, top-k 1, regime filter off.",
+        rebalance_freq="3d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=1,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k2_3d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k2_3d_ensemble_native_anchor",
+        description="3d anchored all-offset ensemble, top-k 2, regime filter off.",
+        rebalance_freq="3d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k1_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k1_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 1, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=1,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k2_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k2_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 2, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k3_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k3_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 3, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=3,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k1_10d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k1_10d_ensemble_native_anchor",
+        description="10d anchored all-offset ensemble, top-k 1, regime filter off.",
+        rebalance_freq="10d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=1,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k3_10d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k3_10d_ensemble_native_anchor",
+        description="10d anchored all-offset ensemble, top-k 3, regime filter off.",
+        rebalance_freq="10d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=3,
+        use_market_regime_filter=False,
+    ),
+    "regon_k2_10d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regon_k2_10d_ensemble_native_anchor",
+        description="10d anchored all-offset ensemble, top-k 2, regime filter on.",
+        rebalance_freq="10d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        use_market_regime_filter=True,
+    ),
+    "regoff_k1_20d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k1_20d_ensemble_native_anchor",
+        description="20d anchored all-offset ensemble, top-k 1, regime filter off.",
+        rebalance_freq="20d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=1,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k2_20d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k2_20d_ensemble_native_anchor",
+        description="20d anchored all-offset ensemble, top-k 2, regime filter off.",
+        rebalance_freq="20d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        use_market_regime_filter=False,
+    ),
+}
+
+PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
+    **_BASE_PROFILE_REGISTRY,
+    **_CURATED_PROFIT_REGISTRY,
+}
+
+LEGACY_CORE_PROFILE_SET_NAME = "legacy_core_v1"
+PROFIT_MAX_PROFILE_SET_NAME = "profit_max_v1"
+PROFILE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
+    LEGACY_CORE_PROFILE_SET_NAME: (
+        "raw_1d",
+        "topk2_1d_regoff",
+        "regoff_k2_10d_ensemble_native_anchor",
+        "regon_k1_10d_ensemble_native_anchor",
+    ),
+    PROFIT_MAX_PROFILE_SET_NAME: (
+        "raw_1d",
+        "topk1_1d_regoff",
+        "topk2_1d_regoff",
+        "topk3_1d_regoff",
+        "regoff_k1_3d_ensemble_native_anchor",
+        "regoff_k2_3d_ensemble_native_anchor",
+        "regoff_k1_5d_ensemble_native_anchor",
+        "regoff_k2_5d_ensemble_native_anchor",
+        "regoff_k3_5d_ensemble_native_anchor",
+        "regoff_k1_10d_ensemble_native_anchor",
+        "regoff_k2_10d_ensemble_native_anchor",
+        "regoff_k3_10d_ensemble_native_anchor",
+        "regon_k1_10d_ensemble_native_anchor",
+        "regon_k2_10d_ensemble_native_anchor",
+        "regoff_k1_20d_ensemble_native_anchor",
+        "regoff_k2_20d_ensemble_native_anchor",
+    ),
+}
+DEFAULT_AUTO_PROFILE_SET_NAME = PROFIT_MAX_PROFILE_SET_NAME
+DEFAULT_AUTO_PROFILE_NAMES = list(PROFILE_SET_REGISTRY[DEFAULT_AUTO_PROFILE_SET_NAME])
+
+
+def default_auto_profile_argument() -> str:
+    return DEFAULT_AUTO_PROFILE_SET_NAME
+
+
+def _normalize_bool(raw: Any, default: bool = False) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if raw in {None, ""}:
+        return default
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(raw)
+
+
+def profile_to_spec(profile: ExecutionAlignmentProfile) -> dict[str, object]:
+    return dict(asdict(profile))
+
+
+def build_profile_from_spec(
+    spec: dict[str, Any] | None,
+    *,
+    fallback_name: str = "custom_policy",
+    fallback_description: str = "",
+) -> ExecutionAlignmentProfile:
+    payload = spec if isinstance(spec, dict) else {}
+    return ExecutionAlignmentProfile(
+        name=str(payload.get("name", "") or fallback_name).strip() or fallback_name,
+        description=str(payload.get("description", "") or fallback_description).strip()
+        or "Custom execution policy resolved from the promoted research artifact.",
+        rebalance_freq=str(payload.get("rebalance_freq", "1d") or "1d"),
+        rebalance_offset_mode=str(payload.get("rebalance_offset_mode", "single") or "single"),
+        rebalance_anchor_date=str(payload.get("rebalance_anchor_date", "") or ""),
+        target_weight_top_k=int(payload.get("target_weight_top_k", 0) or 0),
+        target_weight_min_weight=float(payload.get("target_weight_min_weight", 0.0) or 0.0),
+        target_weight_power=float(payload.get("target_weight_power", 1.0) or 1.0),
+        target_weight_full_invest=_normalize_bool(payload.get("target_weight_full_invest", False), False),
+        use_market_regime_filter=_normalize_bool(payload.get("use_market_regime_filter", False), False),
+    )
+
+
+def resolve_profile(*, name: str = "", spec: dict[str, Any] | None = None) -> ExecutionAlignmentProfile:
+    if isinstance(spec, dict) and spec:
+        return build_profile_from_spec(
+            spec,
+            fallback_name=str(name or "custom_policy"),
+            fallback_description="Execution policy restored from serialized strategy metadata.",
+        )
+    return get_profile(name)
 
 
 def resolve_profile_name(name: str) -> str:
@@ -115,11 +315,15 @@ def parse_profile_name_list(raw: str | None) -> list[str]:
         name = str(item).strip()
         if not name:
             continue
-        resolved = resolve_profile_name(name)
-        if resolved in seen:
-            continue
-        out.append(resolved)
-        seen.add(resolved)
+        if name in PROFILE_SET_REGISTRY:
+            expanded = PROFILE_SET_REGISTRY[name]
+        else:
+            expanded = (resolve_profile_name(name),)
+        for resolved in expanded:
+            if resolved in seen:
+                continue
+            out.append(resolved)
+            seen.add(resolved)
     if not out:
         raise ValueError("Execution alignment profile list resolved to empty.")
     return out
@@ -130,6 +334,10 @@ def list_profile_lines() -> list[str]:
     for key in sorted(PROFILE_REGISTRY):
         profile = PROFILE_REGISTRY[key]
         lines.append(f"- {profile.name}: {profile.description}")
+    lines.append("profile_sets:")
+    for key in sorted(PROFILE_SET_REGISTRY):
+        lines.append(f"- {key}: {', '.join(PROFILE_SET_REGISTRY[key])}")
+    lines.append(f"default_auto_profile_set: {DEFAULT_AUTO_PROFILE_SET_NAME}")
     lines.append(f"default_auto_profiles: {', '.join(DEFAULT_AUTO_PROFILE_NAMES)}")
     return lines
 
@@ -520,6 +728,7 @@ def fit_execution_alignment(
         objective_metric=str(objective_metric),
         selected_profile=selected_profile.name,
         selected_profile_description=selected_profile.description,
+        selected_profile_spec=profile_to_spec(selected_profile),
         candidate_profiles=names,
         objective_rows=objective_rows,
         selected_bridge_meta=valid_meta,
