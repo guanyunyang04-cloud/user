@@ -89,6 +89,19 @@
   - weak-month 里最优 execution policy 相对当前 policy 的 lift
 - 如果 weak months 主要集中在少数 regime，优先做 targeted repair，不默认上升到全局 regime-conditioned execution policy。
 - 如果扩大的静态 bridge/profile 搜索仍不能打赢当前 formal winner，则停止继续扩大静态集合，转向 targeted weak-month repair。
+- targeted weak-month repair 做法默认分两层：
+  - 先在 weak months 上学候选 trigger 与候选 policy
+  - 再在全部 training months 上给 repair plan 打分，防止靠牺牲强月换取表面弱月修复
+- 如果粗 `month_start_regime` trigger 仍伤均值收益，不要回到 broad conditional policy；优先细化到：
+  - `month_start_market_state`
+  - `regime_market_state`
+  - 或其它 month-trigger 级触发键
+- finer trigger review 如果只在旧窗触发、而最新窗保持 `static_only`：
+  - 记为 monitored repair candidate
+  - 不得直接宣称 active default 已可升级
+- 当前已验证的一条可复用经验是：
+  - `regime_market_state` 比粗 `regime` 更适合做窄触发修复
+  - 但 support 不够宽时，仍应保持 static fallback，而不是强行全局切换
 
 ## 10. 条件化 execution policy 规则
 - simple regime-conditioned execution policy 如要进入默认执行，至少先过 leave-window-out formal review。

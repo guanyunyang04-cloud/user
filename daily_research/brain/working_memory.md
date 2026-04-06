@@ -62,6 +62,16 @@
 - simple regime-conditioned execution policy 已被正式否定：
   - leave-window-out 对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败
   - mean excess annual / Sharpe 从 `53.29% / 2.170` 降到 `37.28% / 1.366`
+- targeted weak-month repair 两轮 leave-window-out 复核已完成：
+  - 粗 `month_start_regime` 触发仍不成立：`50.46% / 2.108`
+  - 对静态 `regoff_k1_5d_ensemble_native_anchor = 53.29% / 2.170` 仍是均值落后
+  - `trend_vol` 触发也没有形成有效映射，最终退回 `static_only`
+  - 细化到 `regime_market_state` 后，出现窄触发正结果：`56.19% / 2.301`
+  - 当前真正有证据的修复映射收敛为：
+    - `not_ready|unknown -> topk1_1d_regoff`
+  - 这条修复只在最早窗触发并带来 `+8.70% / +0.392` 改善，其余两窗保持静态不动
+  - 结论：后续 targeted repair 应继续下钻到 month-start trigger / month-trigger 级别，而不是回到 broad conditional policy
+  - 当前 support 仍窄，且最新窗仍是 `static_only`，暂不进入 active default 升级链
 - profit-max production fresh refresh 已被正式否定：
   - 同一 execution policy 下，fresh review production recent replay = `-15.03% / -0.910`
   - 当前 production = `7.77% / 0.517`
@@ -95,14 +105,17 @@
    - `median monthly excess`
    - `worst month`
    - `top3 positive-month share`
-2. liquid500 当前最高优先级是 short-alpha 的 targeted weak-month repair，优先盯：
-   - `trend_down_low_vol`
-   - `trend_up_low_vol`
-   - `2025-07`
-   - `2024-01`
-   - `2025-10`
+2. liquid500 当前最高优先级是 short-alpha 的 targeted weak-month repair，改为优先盯：
+   - month-start trigger 级修复，而不是粗 regime 条件化
+   - 当前唯一转正的窄映射：`not_ready|unknown -> topk1_1d_regoff`
+   - 仍待继续拆开的弱区：`trend_down_low_vol`
+   - 仍待继续拆开的弱区：`trend_up_low_vol`
+   - 重点月份：`2025-07`
+   - 重点月份：`2024-01`
+   - 重点月份：`2025-10`
 3. short-alpha 后续不再优先扩大静态 bridge/profile 搜索；优先做：
    - weak-month 定向修复
+   - month-trigger 设计
    - score-to-weight 映射
    - 执行兑现质量
 4. 新的 liquid500 challenger 如要晋级，默认顺序仍是：
@@ -149,6 +162,12 @@
   - `daily_research/output/short_alpha_weak_month_review_20260405_r1`
 - liquid500 short-alpha conditional execution policy review：
   - `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+- liquid500 short-alpha targeted weak-month repair review（粗 trigger 失败）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`regime_market_state` 转正）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`trend_vol` 退回静态）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_trend_vol_review_20260406_r1`
 - liquid500 short-alpha profit-max production refresh：
   - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - liquid500 short-alpha production epoch extension：

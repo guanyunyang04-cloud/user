@@ -189,17 +189,22 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_conditional_execution_policy_review.py
 ```
 
-### 4.13 short-alpha profit-max production refresh
+### 4.13 short-alpha targeted weak-month repair review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_market_state
+```
+
+### 4.14 short-alpha profit-max production refresh
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_profitmax_production_refresh.py
 ```
 
-### 4.14 short-alpha production epoch extension
+### 4.15 short-alpha production epoch extension
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_production_epoch_extension.py
 ```
 
-### 4.15 short-alpha checkpoint objective compare
+### 4.16 short-alpha checkpoint objective compare
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_checkpoint_objective_comparison.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
@@ -213,6 +218,11 @@
   - `encoder_transformer_v1` 上行潜力真实存在，但当前稳定性仍不足以过 gate
 - `run_short_alpha_conditional_execution_policy_review.py`
   - simple regime-conditioned policy 当前不成立
+- `run_short_alpha_targeted_weak_month_repair_review.py`
+  - 粗 `regime` trigger 仍不成立，`trend_vol` trigger 退回 `static_only`
+  - `regime_market_state` 找到窄触发正结果：
+    - `not_ready|unknown -> topk1_1d_regoff`
+  - 当前仍只算 monitored repair candidate，不算 active default 升级
 - `run_short_alpha_profitmax_production_refresh.py`
   - fresh profit-max production refresh 当前不成立
 
@@ -247,6 +257,8 @@
 - `daily_research/output/short_alpha_score_weight_repair_review_20260406_r1`
 - `daily_research/output/short_alpha_weak_month_review_20260405_r1`
 - `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
 - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`

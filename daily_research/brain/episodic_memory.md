@@ -10362,3 +10362,190 @@ position,000001.SZ,1200,12.38,
   - `run_short_alpha_score_weight_repair_review.py`
   - `run_graph_off_plain_budget_review.py`
   - `run_encoder_transformer_stability_review.py`
+
+## 2026-04-06 - workspace maintenance + hotset trim
+
+### 背景
+- 用户要求先总览 `daily_research` 当前项目状态，再做整理维护，并清理不重要缓存。
+- 本轮目标不是改研究判决，而是：
+  - 先按分脑规则确认什么是活跃真源、什么是可安全处理的热区
+  - 再只对“已有策略声明、且不影响当前执行真源”的缓存做维护
+
+### 项目总览结论
+- `daily_research` 当前仍是正式生产主线：
+  - active strategy 真源仍是 `daily_research/output/active_execution_strategy.json`
+  - 当前默认执行与当前研究判决没有变化
+- 当前体积压力主要来自：
+  - `daily_research/cache`
+  - 不是 `execution/models` 或 `execution/output`
+- `daily_research/output` 虽然体积很大，但按当前 `archive_policy.json` 规则：
+  - 没有超出热集的候选
+  - 主要因为最近输出都在 `keep_recent_days` / `keep_recent_count` 保护范围内
+  - 不应为了降体积而盲动最近实验产物
+
+### 维护前快照
+- `workspace_maintenance.py report` 显示：
+  - `daily_research = 518.78 GB`
+  - `daily_research/cache = 448.32 GB`
+  - `daily_research/output = 64.39 GB`
+  - 归档候选合计 `430.34 GB`
+- 归档候选主要来自：
+  - `deep_alpha/corpus = 378.00 GB`
+  - `deep_alpha/features = 19.16 GB`
+  - `advanced_ml/raw = 2.80 GB`
+  - `advanced_ml/prepared = 28.33 GB`
+  - `advanced_ml/ml_scores = 2.05 GB`
+- 同时检测到：
+  - `__pycache__ dirs = 5`
+  - `*.pyc files = 55`
+
+### 本轮维护动作
+- 执行官方缓存归档：
+  - `workspace_maintenance.py archive --apply --batch-name 20260406_hotset_trim_r1`
+- 归档结果：
+  - moved items = `269`
+  - moved size = `430.34 GB`
+  - manifest：
+    - `daily_research/archive/manifests/archive_20260406_hotset_trim_r1.json`
+- 执行字节码缓存清理：
+  - `workspace_maintenance.py clean --targets pycache --apply`
+- 清理结果：
+  - matched items = `60`
+  - removed size = `2.66 MB`
+
+### 维护后快照
+- 复跑 `workspace_maintenance.py report` 后：
+  - `daily_research/cache = 17.98 GB`
+  - `daily_research/output = 64.39 GB`
+  - `daily_research/archive = 436.40 GB`
+  - `archive candidates = 0`
+  - `__pycache__ dirs = 0`
+  - `*.pyc files = 0`
+
+### 剩余告警与判读
+- `daily_research/output` 仍高于通用阈值，但当前没有符合策略的归档候选：
+  - 说明问题不是“忘了清理旧输出”
+  - 而是最近几天活跃实验本身较重
+- `deep_alpha/corpus` 与 `deep_alpha/features` 仍高于各自 hot budget：
+  - 不是旧缓存没清掉
+  - 而是当前最新 hot set 体积本身已经超过 policy 里的硬预算
+- 当前不应静默把 `keep_recent_count` 继续下调来追求表面达标：
+  - 这些剩余文件全部是最新热集
+  - 需要在后续专门确认“是否接受更激进的 hot-set 收缩”后，才适合改 `archive_policy.json`
+
+### 同步
+- 本轮只更新：
+  - `daily_research/brain/episodic_memory.md`
+- 不更新：
+  - `working_memory.md`
+  - `semantic_memory.md`
+  - `project_map.md`
+- 原因：
+  - 当前研究判决、active default、项目边界都没有变化
+  - 变化只属于一次带日期的维护动作
+
+### 验证
+- 官方维护脚本实跑通过：
+  - `daily_research/tools/workspace_maintenance.py report`
+  - `daily_research/tools/workspace_maintenance.py archive --apply`
+  - `daily_research/tools/workspace_maintenance.py clean --targets pycache --apply`
+
+## 2026-04-06 - targeted weak-month repair implementation + leave-window-out review
+
+### 背景
+- 用户要求不要只停留在“下一步建议”，而是认真规划后续工作并直接做完。
+- 当前 short-alpha 主线已知事实是：
+  - 扩大的静态 score-to-weight / bridge 搜索没有翻案
+  - simple regime-conditioned execution policy 已正式失败
+  - 因此最合理的下一步是把 weak-month repair 从“泛条件化”收窄到“窄触发局部覆写”
+
+### 这轮规划
+- 先补一个新的 targeted repair runner：
+  - `daily_research/deep_alpha/run_short_alpha_targeted_weak_month_repair_review.py`
+- 做法分四步：
+  - 先复用 `run_short_alpha_weak_month_review.py` 生成 weak-month 真表
+  - 再在 training windows 的 weak months 上学习 trigger -> policy 候选
+  - 但 plan 选择不只看 weak months，而是在全部 training months 上打分
+  - 最后对 test window 拼接 hybrid target-weight panel 并做真实 replay
+
+### 第一轮：粗 trigger `month_start_regime`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `50.46% / 2.108`
+  - static = `53.29% / 2.170`
+  - delta = `-2.83% / -0.062`
+- 逐窗：
+  - `20230216_20240130`：
+    - `not_ready -> topk1_1d_regoff`
+    - 相对静态改善 `+8.70% / +0.392`
+  - `20240301_20250227`：
+    - `static_only`
+  - `20250318_20260226`：
+    - `trend_down_low_vol -> regon_k1_10d_ensemble_native_anchor`
+    - 相对静态退化 `-17.20% / -0.577`
+- 结论：
+  - 粗 `regime` trigger 仍然太宽
+  - 这条线不能作为 default upgrade 答案
+
+### 第二轮：更细 trigger 复核
+- 我把 runner 扩展成可切换 trigger 粒度：
+  - `regime`
+  - `market_state`
+  - `trend_vol`
+  - `regime_market_state`
+
+### 第二轮 A：`trend_vol`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_trend_vol_review_20260406_r1`
+- 结果：
+  - 所有窗都退回 `static_only`
+  - mean excess annual / Sharpe 与静态完全一致：`53.29% / 2.170`
+- 结论：
+  - `trend_bucket + vol_bucket` 本身不够形成有效修复触发键
+
+### 第二轮 B：`regime_market_state`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `56.19% / 2.301`
+  - static = `53.29% / 2.170`
+  - delta = `+2.90% / +0.131`
+- 逐窗：
+  - `20230216_20240130`：
+    - `not_ready|unknown -> topk1_1d_regoff`
+    - 相对静态改善 `+8.70% / +0.392`
+  - `20240301_20250227`：
+    - `static_only`
+  - `20250318_20260226`：
+    - `static_only`
+- 直接判决：
+  - 细化到 `regime_market_state` 后，targeted weak-month repair 首次转正
+  - 当前唯一有证据的窄触发映射是：
+    - `not_ready|unknown -> topk1_1d_regoff`
+  - 但它目前只在最早窗触发；中窗与最新窗仍保持静态
+  - 因此它现在只算 monitored repair candidate，不算 active default 升级
+
+### 这轮之后的总判决
+- broad conditional policy 仍然不成立。
+- targeted weak-month repair 这条线没有被否定，但必须继续下钻到：
+  - month-start trigger
+  - month-trigger
+  - score-to-weight / 执行兑现链
+- 当前最值得保留的结论是：
+  - `regime_market_state` 比粗 `regime` 更适合作为 weak-month repair 触发键
+  - `not_ready|unknown -> topk1_1d_regoff` 是第一条转正的窄映射
+
+### 同步
+- 已同步更新：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+### 验证
+- `py_compile` 通过：
+  - `daily_research/deep_alpha/run_short_alpha_targeted_weak_month_repair_review.py`
+- 真实 `yolos` 实跑通过：
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime`
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode trend_vol`
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime_market_state`
