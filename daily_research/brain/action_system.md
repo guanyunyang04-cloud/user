@@ -193,6 +193,14 @@
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_market_state
 ```
+当前推荐口径：
+- 保持默认 `min-regime-support = 2`
+- 不要为了让最新窗也触发而降到 `1`
+- 可继续下钻的 month-start 权重签名 trigger：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_weight_count
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_signal_shape
+```
 
 ### 4.14 short-alpha profit-max production refresh
 ```powershell
@@ -209,6 +217,14 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_checkpoint_objective_comparison.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
+### 4.17 short-alpha short-horizon expert review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+
+# latest controlled-budget probe
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json
+```
+
 ## 5. 当前命令对应的最新判决
 - `run_short_alpha_score_weight_repair_review.py`
   - 扩大的静态 bridge/profile 集合仍未翻掉 `regoff_k1_5d_ensemble_native_anchor`
@@ -222,7 +238,19 @@
   - 粗 `regime` trigger 仍不成立，`trend_vol` trigger 退回 `static_only`
   - `regime_market_state` 找到窄触发正结果：
     - `not_ready|unknown -> topk1_1d_regoff`
+  - `market_state` 单独使用没有形成有效触发
+  - `regime_market_state` 如降到 `min-regime-support = 1` 会重新转负，不应用来硬推最新窗
+  - `regime_signal_shape` 明显失败：`45.71% / 1.895`，`0/3` 全败
+  - `regime_weight_count` 更接近可用线，但仍失败：`51.83% / 2.106`，`0/3` 全败
+  - 这说明 month-start 权重签名本身有信息，但还不足以单独完成修复
   - 当前仍只算 monitored repair candidate，不算 active default 升级
+  - 从当前节点起，不再横向追加新的 broad execution policy review；后续只继续 `month-start / first-week trigger / score -> weight -> execution` 修复
+- `run_short_alpha_short_horizon_expert_review.py`
+  - latest controlled-budget probe winner = `short_expert_monthly_v1`
+  - `91.76% / 4.852`，月度正收益占比 `83.33%`
+  - 相对当前主线 `state_liquidity_listwise_v1`：坏月更浅、胜率更高、monthly robust score 更高
+  - 但月度中位数超额仍略低：`4.61% < 5.26%`
+  - 当前只算 latest-window strong candidate；下一步必须补 multi-window formal，不能直接宣称 active default 可升级
 - `run_short_alpha_profitmax_production_refresh.py`
   - fresh profit-max production refresh 当前不成立
 
@@ -259,9 +287,14 @@
 - `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
 - `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
 - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_support1_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_market_state_support1_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
 - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
+- `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
 - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
 - `daily_research/output/graph_off_plain_budget_review_20260406_r1`

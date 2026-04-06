@@ -3,6 +3,13 @@
 快照日期：`2026-04-06`
 
 ## 1. 当前总判断
+- 用户北极星目标已明确为：
+  - 月度正收益 `> 30%`
+- 这个目标当前只应作为长期方向，不应直接替代 deployable formal gate：
+  - 因为当前 liquid500 最强线的月度中位数超额仍只有 `1.49%`
+  - 月度正收益占比是 `66.67%`
+  - 最差月份仍是 `-8.24%`
+  - 说明“月收益 30%+”与当前可部署前沿之间仍有数量级差距
 - 当前全局 deployable winner 仍是：
   - `state_liquidity_listwise_v1_execfirst_profitmax_global_winner`
   - `liquid500 + raw panel + regoff_k1_5d_ensemble_native_anchor`
@@ -70,8 +77,16 @@
   - 当前真正有证据的修复映射收敛为：
     - `not_ready|unknown -> topk1_1d_regoff`
   - 这条修复只在最早窗触发并带来 `+8.70% / +0.392` 改善，其余两窗保持静态不动
+  - 对 `regime_market_state` 做 `min_support = 1` 敏感性放宽后重新转负：`49.84% / 2.040`
+  - 最近窗如果强行把 `not_ready|unknown -> topk1_1d_regoff` 推进去，会带来 `-19.07% / -0.782` 回撤
+  - 继续下钻到 month-start 权重签名后：
+    - `regime_signal_shape = 45.71% / 1.895`，`0/3` 全败
+    - `regime_weight_count = 51.83% / 2.106`，虽然比 `signal_shape` 更接近，但仍 `0/3` 全败
+  - `regime_weight_count` 当前学到的映射主要落在 `trend_down_low_vol|count3/5 -> regon_k1_10d_ensemble_native_anchor`
+  - 这说明“month-start 持仓宽度”本身有信息，但还不足以单独构成可推广修复
   - 结论：后续 targeted repair 应继续下钻到 month-start trigger / month-trigger 级别，而不是回到 broad conditional policy
-  - 当前 support 仍窄，且最新窗仍是 `static_only`，暂不进入 active default 升级链
+  - 当前必须保持 `min_support >= 2` 的保守门槛；support 仍窄，且最新窗仍是 `static_only`，暂不进入 active default 升级链
+  - 下一步应从“单点 month-start 标签”继续下钻到多日 `score / weight` 触发，而不是再细分更多静态 month-start 类别
 - profit-max production fresh refresh 已被正式否定：
   - 同一 execution policy 下，fresh review production recent replay = `-15.03% / -0.910`
   - 当前 production = `7.77% / 0.517`
@@ -98,6 +113,18 @@
   - refreshed three-window mean = `34.68% / 1.343`
   - 但旧弱窗稳定性仍不够，且 `budget_pressure = true`
   - 结论：high-upside but unstable，当前仍不通过 liquid500 challenger gate
+- short-line expert 训练包已落地并完成 latest-window 受控预算探针：
+  - 新 profile：`short_expert_monthly_v1`
+  - 训练改动聚焦于更短 horizon、event 辅助头、扩展 short_alpha feature pack、`ridge` score head 与 `adaptive_task_weights`
+  - latest formal monthly-first `e4` probe = `91.76% / 4.852`
+  - 月度正收益占比 `83.33%`，明显高于当前主线 `75.00%`
+  - 最差月 `-3.73%`，也浅于当前主线 `-4.48%`
+  - 月度 robust score = `0.1012`，高于当前主线 `0.0897`
+  - 但月度中位数超额 `4.61%` 仍低于当前主线 `5.26%`
+  - 当前结论：这是一个有证据的新 short-line model-side candidate，但仍只完成 latest-window controlled probe，下一步必须补 multi-window formal，不能直接宣称 active default 可升级
+- short-line expert latest probe 的 execution alignment 结果值得单独记录：
+  - 选中的不是更快的 `1d/3d` 壳，而是 `regoff_k1_20d_ensemble_native_anchor`
+  - 这说明当前 uplift 更像来自“短线目标训练后带来的月度兑现质量提升”，而不是简单切到更快 execution policy
 
 ## 4. 当前优先级
 1. 持续累积 liquid500 short-alpha 上线后的月度样本，重点监控：
@@ -105,33 +132,47 @@
    - `median monthly excess`
    - `worst month`
    - `top3 positive-month share`
+   - 与“月收益 30%+”北极星的差距缩小速度
 2. liquid500 当前最高优先级是 short-alpha 的 targeted weak-month repair，改为优先盯：
    - month-start trigger 级修复，而不是粗 regime 条件化
    - 当前唯一转正的窄映射：`not_ready|unknown -> topk1_1d_regoff`
+   - 继续验证这条映射能否被更细 month-trigger 替代，而不是靠放松 support 硬推到最新窗
+   - 从当前节点起，不再横向撒网试更多 execution policy；除非 active strategy 或 formal protocol 变化，否则不重开 broad execution-policy sweep
+   - month-start `weight_count / signal_shape` 已验证仍不够，后续主攻改为多日 `score / weight` 触发
    - 仍待继续拆开的弱区：`trend_down_low_vol`
    - 仍待继续拆开的弱区：`trend_up_low_vol`
    - 重点月份：`2025-07`
    - 重点月份：`2024-01`
    - 重点月份：`2025-10`
-3. short-alpha 后续不再优先扩大静态 bridge/profile 搜索；优先做：
+3. short-alpha 后续不再横向扩大 execution policy / bridge / profile 搜索；只沿以下链路下钻：
    - weak-month 定向修复
+   - month-start / first-week trigger
    - month-trigger 设计
-   - score-to-weight 映射
-   - 执行兑现质量
-4. 新的 liquid500 challenger 如要晋级，默认顺序仍是：
+   - score -> weight -> execution 修复
+   - 执行兑现质量复核
+4. model-side 新高优先级支线已明确为 `short_expert_monthly_v1`：
+   - 保持 `primary_monthly_robust_score`
+   - 保持更短 horizon + event 头 + expanded short_alpha inputs + learned score head
+   - 下一步先补 multi-window formal，再决定是否进入 recent realistic gate
+   - 在 multi-window formal 完成前，它只算 recent strong candidate，不算默认执行升级答案
+5. “月收益 30%+”当前只作为 north star，不作为短期默认晋级门槛：
+   - 短期仍先追月度中位数抬升、弱月收浅、胜率提高
+   - 只有当这几项持续抬升后，才有资格讨论更激进的收益目标
+6. 新的 liquid500 challenger 如要晋级，默认顺序仍是：
    - budget-normalized formal
    - recent realistic gate
    - production promotion
    - 必要时再做 execution policy audit
-5. architecture 线若继续推进，优先顺序改为：
+7. architecture 线若继续推进，优先顺序改为：
    - `encoder_transformer_v1` 稳定性与弱窗修复
    - `graph_off_plain` 作为监控分支按需复核
    - 不再把“更大、更深”本身视为默认升级方向
-6. 月度 checkpoint objective 继续优先放在：
+8. 月度 checkpoint objective 继续优先放在：
    - `dynamic_graph_no_priors`
+   - `short_expert_monthly_v1`
    - 非默认 liquid500 challenger
    而不是直接改当前 active default 的 fresh retrain 默认值
-7. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源
+9. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源
 
 ## 5. 当前边界
 - formal holdout 负责研究 winner 判决
@@ -166,14 +207,24 @@
   - `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
 - liquid500 short-alpha targeted weak-month repair review（`regime_market_state` 转正）：
   - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`regime_market_state` support1 退化）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_support1_review_20260406_r1`
 - liquid500 short-alpha targeted weak-month repair review（`trend_vol` 退回静态）：
   - `daily_research/output/short_alpha_targeted_weak_month_repair_trend_vol_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`market_state` 无有效触发）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_market_state_support1_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`regime_signal_shape` 失败）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`regime_weight_count` 接近但仍失败）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
 - liquid500 short-alpha profit-max production refresh：
   - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - liquid500 short-alpha production epoch extension：
   - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - liquid500 short-alpha checkpoint objective compare：
   - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
+- liquid500 short-alpha short-horizon expert review：
+  - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
 - monthly landscape review：
   - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - architecture protocol refresh：

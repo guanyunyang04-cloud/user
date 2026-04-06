@@ -9,6 +9,7 @@ class ShortAlphaProfile:
     description: str
     state_context: bool = False
     liquidity_context: bool = False
+    structure_context: bool = False
     ranking_loss_weight: float = 0.0
     listwise_loss_weight: float = 0.0
     listwise_temperature: float = 0.35
@@ -21,6 +22,10 @@ class ShortAlphaProfile:
     breakout_event_pullback_limit: float = 0.03
     breakout_event_loss_weight: float = 0.0
     clean_breakout_event_loss_weight: float = 0.0
+    score_head_method: str = ""
+    adaptive_task_weights: bool = False
+    research_objective_mode: str = ""
+    checkpoint_selection_objective: str = ""
 
 
 PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
@@ -72,6 +77,54 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         breakout_event_loss_weight=0.20,
         clean_breakout_event_loss_weight=0.20,
     ),
+    "short_expert_v1": ShortAlphaProfile(
+        name="short_expert_v1",
+        description=(
+            "Short-line expert candidate: shorter horizons + breakout auxiliaries + "
+            "expanded short-alpha inputs + state/liquidity context + learned score head."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="ridge",
+        adaptive_task_weights=True,
+    ),
+    "short_expert_monthly_v1": ShortAlphaProfile(
+        name="short_expert_monthly_v1",
+        description=(
+            "Monthly-first short-line expert candidate: short_expert_v1 plus "
+            "monthly robust checkpoint selection."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="ridge",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
 }
 
 PROFILE_ALIASES: dict[str, str] = {
@@ -82,6 +135,8 @@ PROFILE_ALIASES: dict[str, str] = {
     "target": "short_target_v1",
     "input": "short_input_v1",
     "combo": "short_combo_v1",
+    "expert": "short_expert_v1",
+    "expert_monthly": "short_expert_monthly_v1",
 }
 
 DEFAULT_SHORT_ALPHA_PROFILE = "baseline_current"
@@ -101,6 +156,50 @@ def get_profile(name: str) -> ShortAlphaProfile:
         aliases = ", ".join(f"{alias}->{target}" for alias, target in sorted(PROFILE_ALIASES.items()))
         raise KeyError(f"Unknown short-alpha profile: {name}. Available: {available}. Aliases: {aliases}")
     return PROFILE_REGISTRY[resolved]
+
+
+def build_profile_cli_args(profile: ShortAlphaProfile, *, include_objective_overrides: bool = True) -> list[str]:
+    args = [
+        "--prediction-horizons",
+        profile.prediction_horizons,
+        "--task-loss-weights",
+        profile.task_loss_weights,
+        "--score-horizon-weights",
+        profile.score_horizon_weights,
+        "--ranking-loss-weight",
+        str(profile.ranking_loss_weight),
+        "--listwise-loss-weight",
+        str(profile.listwise_loss_weight),
+        "--listwise-temperature",
+        str(profile.listwise_temperature),
+        "--breakout-event-horizon",
+        str(profile.breakout_event_horizon),
+        "--breakout-event-threshold",
+        str(profile.breakout_event_threshold),
+        "--breakout-event-pullback-limit",
+        str(profile.breakout_event_pullback_limit),
+        "--breakout-event-loss-weight",
+        str(profile.breakout_event_loss_weight),
+        "--clean-breakout-event-loss-weight",
+        str(profile.clean_breakout_event_loss_weight),
+    ]
+    if profile.score_head_method:
+        args.extend(["--score-head-method", profile.score_head_method])
+    if include_objective_overrides and profile.research_objective_mode:
+        args.extend(["--research-objective-mode", profile.research_objective_mode])
+    if include_objective_overrides and profile.checkpoint_selection_objective:
+        args.extend(["--checkpoint-selection-objective", profile.checkpoint_selection_objective])
+    if profile.adaptive_task_weights:
+        args.append("--adaptive-task-weights")
+    if profile.state_context:
+        args.append("--state-context")
+    if profile.liquidity_context:
+        args.append("--liquidity-context")
+    if profile.structure_context:
+        args.append("--structure-context")
+    if profile.short_alpha_features:
+        args.append("--short-alpha-features")
+    return args
 
 
 def list_profile_lines() -> list[str]:

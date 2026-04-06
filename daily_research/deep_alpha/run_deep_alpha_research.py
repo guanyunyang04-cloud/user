@@ -1265,7 +1265,7 @@ def main():
         except Exception as exc:
             progress_write(f"Style mapping unavailable: {exc}")
     feature_meta = {
-        "version": 5,
+        "version": 6,
         "raw_key": raw_key,
         "relation_layer": bool(args.relation_layer),
         "liquidity_layer": bool(cfg.liquidity_layer),

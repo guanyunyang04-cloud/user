@@ -24,6 +24,10 @@
 ## 3. 目标函数规则
 - 默认目标函数是“执行后净收益最大”，不是“raw holdout 指标最大”。
 - 如果用户没有明确改目标函数，禁止用“更稳”替代“更赚钱”。
+- 如果用户给出明显高于当前前沿的收益目标：
+  - 先把它记为 north star
+  - 再把当前 formal / production gate 与长期北极星拆开
+  - 不得直接把 aspirational target 改写成当期默认晋级门槛
 - execution policy 本身属于研究对象，而不是固定后置适配器。
 - 禁止把新研究候选强行塞回旧默认执行壳，再据此宣称“执行端不支持”。
 - 如果目标是“净收益最大”，execution policy 的 formal 复核默认优先按 `excess_annual_return` 排序，而不是先用保守 profile 锁死执行层。
@@ -32,6 +36,12 @@
   - 当前特征空间
   - 当前执行桥接
   - 当前现实成本
+- 如果目标是把模型练成“短线高手”，默认优先顺序是：
+  - 先改 `prediction_horizons / task_loss_weights / score_horizon_weights`
+  - 再加 `event_breakout / event_clean_breakout` 与 ranking/listwise loss
+  - 再扩 `short_alpha_features` 与 score head
+  - 最后才讨论更深 / 更复杂的 encoder
+- 如果修改了 `short_alpha_features` 的定义，必须同步 bump `run_deep_alpha_research.py` 里的 feature cache version，避免旧 feature cache 混入新实验
 
 ## 4. formal 判决规则
 - formal holdout 负责研究 winner 判决。
@@ -96,9 +106,19 @@
   - `month_start_market_state`
   - `regime_market_state`
   - 或其它 month-trigger 级触发键
+- 如果 broad conditional policy 与扩大的静态 bridge/profile 搜索都已失败：
+  - 冻结新的横向 execution-policy 扫描
+  - 除非 active strategy 或 formal protocol 发生变化，否则不重开同类 broad sweep
+  - 后续只沿 `month_start_*` / `month-trigger` / `score -> weight -> execution` 修复链继续下钻
+- 如果 `regime_signal_shape` 与 `regime_weight_count` 这类 month-start 权重签名 trigger 仍打不赢静态线：
+  - 不要继续横向细分更多静态 month-start 类别
+  - 把下一步升级为多日 `score / weight` 触发，例如 first-week dispersion、signal persistence、weight concentration drift
 - finer trigger review 如果只在旧窗触发、而最新窗保持 `static_only`：
   - 记为 monitored repair candidate
   - 不得直接宣称 active default 已可升级
+- 如果某条窄 trigger 只有在 `min_support = 1` 时才扩展到最新窗，但均值收益反而转负：
+  - 不得为了“让最新窗也触发”而降低 support 门槛
+  - 这类结果应视为 overfit warning，而不是 promotion 依据
 - 当前已验证的一条可复用经验是：
   - `regime_market_state` 比粗 `regime` 更适合做窄触发修复
   - 但 support 不够宽时，仍应保持 static fallback，而不是强行全局切换
@@ -146,6 +166,7 @@
   - `primary_monthly_positive_ratio`
   - `primary_monthly_median_return`
   - `primary_monthly_robust_score`
+- short-line expert 这类“月度兑现优先”的候选，默认优先看 `primary_monthly_robust_score`，而不是先回到 `primary_annual_return`
 - 如果要比较不同 checkpoint objective，优先使用：
   - fresh run
   - 或 warm-start restart

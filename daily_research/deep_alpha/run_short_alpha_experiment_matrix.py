@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
 
 from daily_research.deep_alpha.short_alpha_profiles import (
     DEFAULT_SHORT_ALPHA_PROFILE,
+    build_profile_cli_args,
     get_profile,
     list_profile_lines,
 )
@@ -127,8 +128,6 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "raw",
         "--score-risk-mode",
         "subtract",
-        "--score-head-method",
-        "manual",
         "--train-eval-window-days",
         "0",
         "--train-eval-window-months",
@@ -147,37 +146,10 @@ def _build_command(*, python_executable: str, experiment_tag: str, profile_name:
         "--pin-memory",
         "--use-amp",
         "--no-safe-runtime-profile",
-        "--prediction-horizons",
-        profile.prediction_horizons,
-        "--task-loss-weights",
-        profile.task_loss_weights,
-        "--score-horizon-weights",
-        profile.score_horizon_weights,
-        "--ranking-loss-weight",
-        str(profile.ranking_loss_weight),
-        "--listwise-loss-weight",
-        str(profile.listwise_loss_weight),
-        "--listwise-temperature",
-        str(profile.listwise_temperature),
-        "--breakout-event-horizon",
-        str(profile.breakout_event_horizon),
-        "--breakout-event-threshold",
-        str(profile.breakout_event_threshold),
-        "--breakout-event-pullback-limit",
-        str(profile.breakout_event_pullback_limit),
-        "--breakout-event-loss-weight",
-        str(profile.breakout_event_loss_weight),
-        "--clean-breakout-event-loss-weight",
-        str(profile.clean_breakout_event_loss_weight),
         "--experiment-tag",
         experiment_tag,
     ]
-    if profile.state_context:
-        cmd.append("--state-context")
-    if profile.liquidity_context:
-        cmd.append("--liquidity-context")
-    if profile.short_alpha_features:
-        cmd.append("--short-alpha-features")
+    cmd.extend(build_profile_cli_args(profile, include_objective_overrides=True))
     return cmd
 
 
@@ -237,6 +209,14 @@ def main() -> None:
                 "state_context": bool(metrics.get("state_context", False)),
                 "liquidity_context": bool(metrics.get("liquidity_context", False)),
                 "short_alpha_features": bool(metrics.get("short_alpha_features", False)),
+                "score_head_method": str(metrics.get("score_head_method", profile.score_head_method or "manual")),
+                "adaptive_task_weights": bool(metrics.get("adaptive_task_weights", profile.adaptive_task_weights)),
+                "checkpoint_selection_objective": str(
+                    metrics.get("checkpoint_selection_objective", profile.checkpoint_selection_objective or "primary_annual_return")
+                ),
+                "research_objective_mode": str(
+                    metrics.get("research_objective_mode", profile.research_objective_mode or "execution_first")
+                ),
                 "ranking_loss_weight": float(metrics.get("ranking_loss_weight", 0.0)),
                 "listwise_loss_weight": float(metrics.get("listwise_loss_weight", 0.0)),
                 "breakout_event_loss_weight": float(metrics.get("breakout_event_loss_weight", 0.0)),

@@ -22,7 +22,10 @@ from daily_research.deep_alpha.research_objective import (
     DEFAULT_RESEARCH_OBJECTIVE_MODE,
     resolve_primary_backtest,
 )
-from daily_research.deep_alpha.short_alpha_profiles import get_profile as get_short_alpha_profile
+from daily_research.deep_alpha.short_alpha_profiles import (
+    build_profile_cli_args as build_short_alpha_profile_cli_args,
+    get_profile as get_short_alpha_profile,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -216,30 +219,9 @@ def _build_command(
                 "0.15",
                 "--dynamic-graph-style-boost",
                 "0.05",
-                "--ranking-loss-weight",
-                str(profile.ranking_loss_weight),
-                "--listwise-loss-weight",
-                str(profile.listwise_loss_weight),
-                "--listwise-temperature",
-                str(profile.listwise_temperature),
-                "--breakout-event-horizon",
-                str(profile.breakout_event_horizon),
-                "--breakout-event-threshold",
-                str(profile.breakout_event_threshold),
-                "--breakout-event-pullback-limit",
-                str(profile.breakout_event_pullback_limit),
-                "--breakout-event-loss-weight",
-                str(profile.breakout_event_loss_weight),
-                "--clean-breakout-event-loss-weight",
-                str(profile.clean_breakout_event_loss_weight),
             ]
         )
-        if profile.state_context:
-            cmd.append("--state-context")
-        if profile.liquidity_context:
-            cmd.append("--liquidity-context")
-        if profile.short_alpha_features:
-            cmd.append("--short-alpha-features")
+        cmd.extend(build_short_alpha_profile_cli_args(profile, include_objective_overrides=False))
         return cmd
 
     profile = get_dynamic_graph_profile(profile_name)

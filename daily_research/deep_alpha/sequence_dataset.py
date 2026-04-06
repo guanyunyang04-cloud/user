@@ -460,7 +460,9 @@ def build_sequence_features(
         prev_close = close.shift(1)
         prev_high_20 = high.rolling(20).max().shift(1)
         prev_high_60 = high.rolling(60).max().shift(1)
+        benchmark_momentum_2 = benchmark_close.pct_change(2).fillna(0.0)
         vol_std_10 = ret_1.rolling(10).std()
+        vol_std_3 = ret_1.rolling(3).std()
         vol_std_60 = ret_1.rolling(60).std()
         gap_open_1 = open_df.div(prev_close.replace(0, np.nan)).sub(1.0).fillna(0.0)
         close_pos_in_range = close.sub(low).div(high.sub(low).replace(0, np.nan)).fillna(0.5)
@@ -474,8 +476,16 @@ def build_sequence_features(
         breakout_distance_60 = close.div(prev_high_60.replace(0, np.nan)).sub(1.0).fillna(0.0)
         breakout_intraday_high_20 = high.div(prev_high_20.replace(0, np.nan)).sub(1.0).fillna(0.0)
         compression_10_60 = vol_std_10.div(vol_std_60.replace(0, np.nan)).fillna(1.0)
+        volatility_ratio_3_10 = vol_std_3.div(vol_std_10.replace(0, np.nan)).fillna(1.0)
+        range_expansion_1_5 = range_pct.div(range_pct.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        body_strength_1_5 = intraday_body.abs().div(intraday_body.abs().rolling(5).mean().replace(0, np.nan)).fillna(1.0)
         volume_burst_1_5 = volume.div(volume.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        volume_burst_1_3 = volume.div(volume.rolling(3).mean().replace(0, np.nan)).fillna(1.0)
         amount_burst_1_5 = amount.div(amount.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        amount_burst_1_3 = amount.div(amount.rolling(3).mean().replace(0, np.nan)).fillna(1.0)
+        signal_persistence_5 = ret_1.gt(0.0).rolling(5).mean().fillna(0.5)
+        momentum_2 = close.pct_change(2).fillna(0.0)
+        rel_momentum_2 = momentum_2.sub(benchmark_momentum_2, axis=0)
         momentum_3 = close.pct_change(3).fillna(0.0)
         rel_momentum_3 = momentum_3.sub(benchmark_close.pct_change(3).fillna(0.0), axis=0)
         features.update(
@@ -488,8 +498,16 @@ def build_sequence_features(
                 "breakout_distance_60": breakout_distance_60,
                 "breakout_intraday_high_20": breakout_intraday_high_20,
                 "compression_10_60": compression_10_60,
+                "volatility_ratio_3_10": volatility_ratio_3_10,
+                "range_expansion_1_5": range_expansion_1_5,
+                "body_strength_1_5": body_strength_1_5,
                 "volume_burst_1_5": volume_burst_1_5,
+                "volume_burst_1_3": volume_burst_1_3,
                 "amount_burst_1_5": amount_burst_1_5,
+                "amount_burst_1_3": amount_burst_1_3,
+                "signal_persistence_5": signal_persistence_5,
+                "momentum_2": momentum_2,
+                "rel_momentum_2": rel_momentum_2,
                 "momentum_3": momentum_3,
                 "rel_momentum_3": rel_momentum_3,
             }

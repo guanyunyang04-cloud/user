@@ -10523,8 +10523,68 @@ position,000001.SZ,1200,12.38,
   - 细化到 `regime_market_state` 后，targeted weak-month repair 首次转正
   - 当前唯一有证据的窄触发映射是：
     - `not_ready|unknown -> topk1_1d_regoff`
-  - 但它目前只在最早窗触发；中窗与最新窗仍保持静态
-  - 因此它现在只算 monitored repair candidate，不算 active default 升级
+- 但它目前只在最早窗触发；中窗与最新窗仍保持静态
+- 因此它现在只算 monitored repair candidate，不算 active default 升级
+
+### 第三轮：support / trigger 敏感性复核
+- 我继续补了两条敏感性检查，目的是确认上一条转正结论不是靠放松门槛硬推出来的。
+
+#### 3A. `regime_market_state` + `min_support = 1`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_support1_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `49.84% / 2.040`
+  - static = `53.29% / 2.170`
+  - delta = `-3.45% / -0.130`
+- 最新窗的影响最明显：
+  - 被强行推广成 `not_ready|unknown -> topk1_1d_regoff`
+  - recent window 直接退化 `-19.07% / -0.782`
+- 结论：
+  - 不能为了让最新窗也触发而把 support 放宽到 `1`
+  - 这会把 monitored repair candidate 推成 overfit
+
+#### 3B. `market_state` 单独触发
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_market_state_support1_review_20260406_r1`
+- 结果：
+  - 所有窗都退回 `static_only`
+  - mean excess annual / Sharpe 与静态完全一致：`53.29% / 2.170`
+- 结论：
+  - `market_state` 单独使用不够形成有效 month-start repair trigger
+
+### 第四轮：month-start 权重签名触发复核
+- 为了继续往 `score -> weight -> execution` 推进，我没有再扩 execution policy 集合，而是给 targeted repair runner 增加了：
+  - `regime_signal_shape`
+  - `regime_weight_count`
+- 这两个 trigger 都来自当前静态线月初 target-weight 面板：
+  - `signal_shape` 用 `zero / tight / mid / broad`
+  - `weight_count` 用月初非零持仓数 `count0 / count2 / count3 / count4 / count5`
+
+#### 4A. `regime_signal_shape`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `45.71% / 1.895`
+  - static = `53.29% / 2.170`
+  - delta = `-7.59% / -0.275`
+  - `0/3` 窗口全败
+- 结论：
+  - 粗 month-start 权重形状过于宽，不能形成可推广修复
+
+#### 4B. `regime_weight_count`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `51.83% / 2.106`
+  - static = `53.29% / 2.170`
+  - delta = `-1.46% / -0.064`
+  - 也是 `0/3` 窗口全败，但明显比 `signal_shape` 更接近静态线
+- 学到的主要映射：
+  - `trend_down_low_vol|count3 -> regon_k1_10d_ensemble_native_anchor`
+  - `trend_down_low_vol|count5 -> regon_k1_10d_ensemble_native_anchor`
+- 结论：
+  - month-start 持仓宽度本身确实有信息量
+  - 但它单独仍不足以成为可靠 trigger，不能继续靠细分更多静态 month-start 类别推进
 
 ### 这轮之后的总判决
 - broad conditional policy 仍然不成立。
@@ -10532,9 +10592,14 @@ position,000001.SZ,1200,12.38,
   - month-start trigger
   - month-trigger
   - score-to-weight / 执行兑现链
+- 从这个节点开始，不再横向撒网试更多 execution policy；除非 active strategy 或 formal protocol 变化，否则不重开 broad execution-policy sweep。
 - 当前最值得保留的结论是：
   - `regime_market_state` 比粗 `regime` 更适合作为 weak-month repair 触发键
   - `not_ready|unknown -> topk1_1d_regoff` 是第一条转正的窄映射
+  - 但必须保留 `min_support >= 2` 的保守门槛
+  - 不能为了覆盖最新窗而放松成 `support = 1`
+  - month-start `weight_count / signal_shape` 只能提供弱信息，不足以单独完成修复
+  - 下一步应转向多日 `score / weight` 触发，而不是继续细分静态 month-start 类别
 
 ### 同步
 - 已同步更新：
@@ -10549,3 +10614,86 @@ position,000001.SZ,1200,12.38,
   - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime`
   - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode trend_vol`
   - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime_market_state`
+
+## 2026-04-06 - user north-star target aligned
+- 用户明确给出新的北极星目标：
+  - 月度正收益 `> 30%`
+- 我把它接入当前判断，但没有把它直接改写成 formal gate：
+  - 当前 liquid500 最强线月度中位数超额仍只有 `1.49%`
+  - 月度正收益占比 `66.67%`
+  - 最差月份 `-8.24%`
+  - 说明目标与当前可部署前沿之间仍有数量级差距
+- 当前执行口径因此调整为：
+  - 把“月收益 30%+”作为长期 north star
+  - 短期仍先追月度中位数抬升、弱月修复、坏月收浅与执行兑现改善
+  - 避免为了追北极星而把当前研究直接推向过拟合
+
+## 2026-04-06 - short-line expert training package + recent probe
+- 我把“把模型练成短线高手”这件事收敛成了一个可落地工作包，没有去直接堆更深网络，而是先改：
+  - short-alpha profile 体系
+  - short_alpha feature pack
+  - score head / checkpoint objective 穿透
+  - latest-window expert review runner
+- 代码层新增与改动：
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - 新增 `short_expert_v1`
+    - 新增 `short_expert_monthly_v1`
+    - 新增 profile -> CLI 参数桥接函数
+  - `daily_research/deep_alpha/sequence_dataset.py`
+    - 在 `short_alpha_features` 下新增多日短线特征：
+      - `volatility_ratio_3_10`
+      - `range_expansion_1_5`
+      - `body_strength_1_5`
+      - `volume_burst_1_3`
+      - `amount_burst_1_3`
+      - `signal_persistence_5`
+      - `momentum_2`
+      - `rel_momentum_2`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - feature cache version 从 `5` bump 到 `6`
+  - 新增：
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+- 我先尝试按 native short_alpha budget 直接跑完整 recent review，但在当前机器上超时，没有留下可用收口产物。
+- 为了把这轮工作在本回合内做完，我补了一个受控预算探针：
+  - 生成 `daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json`
+  - 把 `short_alpha` budget 暂时压到 `4`
+  - 在 latest formal monthly window 上跑 `short_expert_monthly_v1`
+- 输出目录：
+  - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
+- 结果：
+  - `short_expert_monthly_v1 = 91.76% / 4.852`
+  - 月度正收益占比 `83.33%`
+  - 月度中位数超额 `4.61%`
+  - 最差月 `-3.73%`
+  - monthly robust score `0.1012`
+- 对当前 monthly-first 主线 `state_liquidity_listwise_v1` 的同窗对照：
+  - 当前主线 = `65.90% / 3.856`
+  - 月度正收益占比 `75.00%`
+  - 月度中位数超额 `5.26%`
+  - 最差月 `-4.48%`
+  - monthly robust score `0.0897`
+- 直接判决：
+  - `short_expert_monthly_v1` 已经形成了有证据的 short-line model-side candidate
+  - 它赢在更高胜率、更浅坏月、更高 annual / Sharpe 与更高 monthly robust score
+  - 但它并没有在“月度中位数超额”这一项上全面压过当前主线
+  - 所以当前结论应该写成“latest-window strong candidate”，而不是“默认已可升级”
+- 这次还有一个重要副产物：
+  - execution alignment 最终选中的不是更快的 `1d/3d` 壳
+  - 而是 `regoff_k1_20d_ensemble_native_anchor`
+  - 说明这条 uplift 更像是训练目标与输出头改进后带来的月度兑现改善，而不只是靠更快 execution policy
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+- 验证：
+  - `py_compile` 通过：
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/sequence_dataset.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_short_alpha_experiment_matrix.py`
+    - `daily_research/deep_alpha/run_short_alpha_formal_head2head.py`
+    - `daily_research/deep_alpha/run_family_epoch_frontier_calibration.py`
+    - `daily_research/deep_alpha/run_dynamic_graph_liquid500_challenger_head2head.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - latest review 实跑通过：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json`

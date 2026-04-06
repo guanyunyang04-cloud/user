@@ -58,7 +58,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--current-policy", default=DEFAULT_STATIC_PROFILE)
     parser.add_argument(
         "--trigger-mode",
-        choices=["regime", "market_state", "trend_vol", "regime_market_state"],
+        choices=[
+            "regime",
+            "market_state",
+            "trend_vol",
+            "regime_market_state",
+            "regime_weight_count",
+            "regime_signal_shape",
+        ],
         default="regime",
         help="Which month-start trigger key the targeted repair plan should learn on.",
     )
@@ -194,10 +201,16 @@ def _apply_trigger_key(frame: pd.DataFrame, *, trigger_mode: str) -> pd.DataFram
         enriched["month_start_trend_bucket"] = ""
     if "month_start_vol_bucket" not in enriched.columns:
         enriched["month_start_vol_bucket"] = ""
+    if "month_start_weight_count" not in enriched.columns:
+        enriched["month_start_weight_count"] = "count0"
+    if "month_start_signal_shape" not in enriched.columns:
+        enriched["month_start_signal_shape"] = "zero"
     enriched["month_start_regime"] = enriched["month_start_regime"].map(lambda x: _normalize_text(x, "not_ready"))
     enriched["month_start_market_state"] = enriched["month_start_market_state"].map(lambda x: _normalize_text(x, "unknown"))
     enriched["month_start_trend_bucket"] = enriched["month_start_trend_bucket"].map(lambda x: _normalize_text(x, "unknown"))
     enriched["month_start_vol_bucket"] = enriched["month_start_vol_bucket"].map(lambda x: _normalize_text(x, "unknown"))
+    enriched["month_start_weight_count"] = enriched["month_start_weight_count"].map(lambda x: _normalize_text(x, "count0"))
+    enriched["month_start_signal_shape"] = enriched["month_start_signal_shape"].map(lambda x: _normalize_text(x, "zero"))
 
     if trigger_mode == "market_state":
         enriched["trigger_key"] = enriched["month_start_market_state"]
@@ -212,6 +225,18 @@ def _apply_trigger_key(frame: pd.DataFrame, *, trigger_mode: str) -> pd.DataFram
             enriched["month_start_regime"].astype(str)
             + "|"
             + enriched["month_start_market_state"].astype(str)
+        )
+    elif trigger_mode == "regime_weight_count":
+        enriched["trigger_key"] = (
+            enriched["month_start_regime"].astype(str)
+            + "|"
+            + enriched["month_start_weight_count"].astype(str)
+        )
+    elif trigger_mode == "regime_signal_shape":
+        enriched["trigger_key"] = (
+            enriched["month_start_regime"].astype(str)
+            + "|"
+            + enriched["month_start_signal_shape"].astype(str)
         )
     else:
         enriched["trigger_key"] = enriched["month_start_regime"]
@@ -500,6 +525,55 @@ def _load_static_metrics(window: AuditWindow, static_profile: str) -> tuple[dict
     raise FileNotFoundError(f"Static profile {static_profile} not found under {window.audit_root}")
 
 
+def _derive_signal_shape(nonzero_weight_count: int) -> str:
+    if nonzero_weight_count <= 0:
+        return "zero"
+    if nonzero_weight_count <= 3:
+        return "tight"
+    if nonzero_weight_count == 4:
+        return "mid"
+    return "broad"
+
+
+def _load_month_start_signal_diagnostics(static_run_dir: Path) -> pd.DataFrame:
+    score = pd.read_csv(static_run_dir / "aligned_daily_score_panel.csv")
+    weight = pd.read_csv(static_run_dir / "aligned_daily_target_weight_panel.csv")
+    score["date"] = pd.to_datetime(score["date"], errors="coerce")
+    weight["date"] = pd.to_datetime(weight["date"], errors="coerce")
+    score = score.dropna(subset=["date"]).copy()
+    weight = weight.dropna(subset=["date"]).copy()
+
+    rows: list[dict[str, Any]] = []
+    for month, month_scores in score.groupby(score["date"].dt.to_period("M"), sort=True):
+        first_date = pd.to_datetime(month_scores["date"], errors="coerce").min()
+        first_scores = month_scores.loc[month_scores["date"].eq(first_date), "score"].astype(float)
+        first_weights = weight.loc[weight["date"].eq(first_date), "target_weight"].astype(float)
+        first_scores = first_scores.sort_values(ascending=False).reset_index(drop=True)
+        first_weights = first_weights.sort_values(ascending=False).reset_index(drop=True)
+
+        nonzero_weight_count = int((first_weights > 0.0).sum())
+        top1_weight = float(first_weights.iloc[0]) if not first_weights.empty else 0.0
+        top2_weight_sum = float(first_weights.head(2).sum()) if not first_weights.empty else 0.0
+        positive_share = float((first_scores > 0.0).mean()) if not first_scores.empty else 0.0
+        gap_1_5 = (
+            float(first_scores.iloc[0] - first_scores.iloc[min(4, len(first_scores) - 1)])
+            if not first_scores.empty
+            else 0.0
+        )
+        rows.append(
+            {
+                "month": str(month),
+                "month_start_weight_count": f"count{nonzero_weight_count}",
+                "month_start_signal_shape": _derive_signal_shape(nonzero_weight_count),
+                "month_start_top1_weight": top1_weight,
+                "month_start_top2_weight_sum": top2_weight_sum,
+                "month_start_score_positive_share": positive_share,
+                "month_start_score_gap_1_5": gap_1_5,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("month").reset_index(drop=True)
+
+
 def _run_replay(
     *,
     python_executable: str,
@@ -604,25 +678,45 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_root).resolve() / str(args.root_tag).strip()
     output_dir.mkdir(parents=True, exist_ok=True)
+    static_profile = str(args.static_profile).strip()
 
     weak_month_dir = _run_weak_month_review(args, output_dir)
     weak_df = pd.read_csv(weak_month_dir / "weak_month_review.csv")
     weak_df["month"] = weak_df["month"].astype(str)
-    weak_df = _apply_trigger_key(weak_df, trigger_mode=str(args.trigger_mode))
 
     audit_roots = [Path(token.strip()).resolve() for token in str(args.audit_roots or "").split(",") if token.strip()]
     windows = [_discover_window(path) for path in audit_roots]
     monthly_by_window = {window.window_key: _load_window_audit_monthly(window) for window in windows}
     all_audit_monthly = pd.concat(monthly_by_window.values(), ignore_index=True)
     all_audit_monthly["month"] = all_audit_monthly["month"].astype(str)
+
+    diagnostic_frames: list[pd.DataFrame] = []
+    for window in windows:
+        _, static_run_dir = _load_static_metrics(window, static_profile)
+        signal_diag = _load_month_start_signal_diagnostics(static_run_dir)
+        signal_diag.insert(0, "window_key", window.window_key)
+        diagnostic_frames.append(signal_diag)
+    month_start_diagnostics = pd.concat(diagnostic_frames, ignore_index=True)
+    month_start_diagnostics.to_csv(output_dir / "month_start_signal_diagnostics.csv", index=False, encoding="utf-8-sig")
+
+    diagnostic_cols = [
+        "month",
+        "month_start_weight_count",
+        "month_start_signal_shape",
+        "month_start_top1_weight",
+        "month_start_top2_weight_sum",
+        "month_start_score_positive_share",
+        "month_start_score_gap_1_5",
+    ]
+    weak_df = weak_df.merge(month_start_diagnostics[diagnostic_cols], on="month", how="left")
+    all_audit_monthly = all_audit_monthly.merge(month_start_diagnostics[diagnostic_cols], on="month", how="left")
+    weak_df = _apply_trigger_key(weak_df, trigger_mode=str(args.trigger_mode))
     all_audit_monthly = _apply_trigger_key(all_audit_monthly, trigger_mode=str(args.trigger_mode))
 
     compare_rows: list[dict[str, Any]] = []
     month_choice_exports: list[pd.DataFrame] = []
     plan_search_exports: list[pd.DataFrame] = []
     regime_export_rows: list[pd.DataFrame] = []
-
-    static_profile = str(args.static_profile).strip()
 
     for window in windows:
         test_months = sorted(monthly_by_window[window.window_key]["month"].astype(str).unique().tolist())
@@ -650,7 +744,19 @@ def main() -> None:
         regime_export_rows.append(regime_summary)
 
         test_month_meta = (
-            _apply_trigger_key(monthly_by_window[window.window_key], trigger_mode=str(args.trigger_mode))[["window_key", "month", "month_start_regime", "trigger_key"]]
+            _apply_trigger_key(
+                monthly_by_window[window.window_key].merge(month_start_diagnostics[diagnostic_cols], on="month", how="left"),
+                trigger_mode=str(args.trigger_mode),
+            )[
+                [
+                    "window_key",
+                    "month",
+                    "month_start_regime",
+                    "month_start_weight_count",
+                    "month_start_signal_shape",
+                    "trigger_key",
+                ]
+            ]
             .drop_duplicates()
             .sort_values("month")
             .reset_index(drop=True)

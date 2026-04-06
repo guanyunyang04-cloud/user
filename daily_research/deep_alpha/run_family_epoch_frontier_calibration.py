@@ -22,7 +22,10 @@ from daily_research.deep_alpha.family_epoch_budget import (
     load_family_epoch_budget_manifest,
 )
 from daily_research.deep_alpha.research_objective import CHECKPOINT_SELECTION_OBJECTIVES, DEFAULT_RESEARCH_OBJECTIVE_MODE
-from daily_research.deep_alpha.short_alpha_profiles import get_profile as get_short_alpha_profile
+from daily_research.deep_alpha.short_alpha_profiles import (
+    build_profile_cli_args as build_short_alpha_profile_cli_args,
+    get_profile as get_short_alpha_profile,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -435,8 +438,6 @@ def _build_short_alpha_command(
         "raw",
         "--score-risk-mode",
         "subtract",
-        "--score-head-method",
-        "manual",
         "--train-eval-window-days",
         "0",
         "--train-eval-window-months",
@@ -455,28 +456,6 @@ def _build_short_alpha_command(
         "--pin-memory",
         "--use-amp",
         "--no-safe-runtime-profile",
-        "--prediction-horizons",
-        profile.prediction_horizons,
-        "--task-loss-weights",
-        profile.task_loss_weights,
-        "--score-horizon-weights",
-        profile.score_horizon_weights,
-        "--ranking-loss-weight",
-        str(profile.ranking_loss_weight),
-        "--listwise-loss-weight",
-        str(profile.listwise_loss_weight),
-        "--listwise-temperature",
-        str(profile.listwise_temperature),
-        "--breakout-event-horizon",
-        str(profile.breakout_event_horizon),
-        "--breakout-event-threshold",
-        str(profile.breakout_event_threshold),
-        "--breakout-event-pullback-limit",
-        str(profile.breakout_event_pullback_limit),
-        "--breakout-event-loss-weight",
-        str(profile.breakout_event_loss_weight),
-        "--clean-breakout-event-loss-weight",
-        str(profile.clean_breakout_event_loss_weight),
         "--experiment-tag",
         f"{root_tag}/families/{family_key}/runs/{profile.name}_e{epoch_budget}_{window.label}",
     ]
@@ -493,12 +472,7 @@ def _build_short_alpha_command(
     )
     if resume_run_dir is not None:
         cmd.extend(["--resume-run-dir", str(resume_run_dir), "--resume-mode", "strict"])
-    if profile.state_context:
-        cmd.append("--state-context")
-    if profile.liquidity_context:
-        cmd.append("--liquidity-context")
-    if profile.short_alpha_features:
-        cmd.append("--short-alpha-features")
+    cmd.extend(build_short_alpha_profile_cli_args(profile, include_objective_overrides=False))
     return cmd
 
 
