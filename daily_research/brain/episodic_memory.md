@@ -10248,3 +10248,117 @@ position,000001.SZ,1200,12.38,
   - `recent_category_winners.csv`
   - `formal_window_detail.csv`
   - `formal_profile_summary.csv`
+
+## 2026-04-06 - short-alpha score-to-weight repair + graph_off_plain budget review + encoder_transformer stability review
+
+### 背景
+- 用户要求不要只停留在“后续方向”，而是把计划真正落地。
+- 上一轮留下的三条明确待办是：
+  - liquid500 short-alpha 主线继续做 weak-month repair、score-to-weight 映射和执行兑现质量
+  - `graph_off_plain` 做预算补齐与旧窗复核
+  - `encoder_transformer_v1` 做弱窗与稳定性复核
+- 这次目标不是再写规划，而是把这三条链全部跑完，并据此重排真正的后续优先级。
+
+### 新增入口
+- `daily_research/deep_alpha/run_short_alpha_score_weight_repair_review.py`
+- `daily_research/deep_alpha/run_graph_off_plain_budget_review.py`
+- `daily_research/deep_alpha/run_encoder_transformer_stability_review.py`
+- 同时扩展了 `daily_research/deep_alpha/execution_alignment.py`：
+  - 新增 `weak_month_repair_v1`
+  - 补进更强集中度 / 更强幂次 / 更长持有期的静态 bridge / score-to-weight profile
+
+### short-alpha score-to-weight / weak-month repair review
+- 输出目录：
+  - `daily_research/output/short_alpha_score_weight_repair_review_20260406_r1`
+- 核心结果：
+  - `weak_month_repair_v1` 的最优 profile 仍是 `regoff_k1_5d_ensemble_native_anchor`
+  - best mean excess annual / Sharpe = `53.29% / 2.170`
+  - 与当前 active policy 完全持平，没有新的静态 bridge/profile 翻案
+- weak-month 侧补充结论：
+  - weak months = `16 / 36`
+  - weak-month ratio = `44.44%`
+  - avg best-policy lift vs current = `7.55%`
+  - avg candidate gap vs best policy = `7.80%`
+  - top weak-month repair profiles 包括：
+    - `regoff_k1_20d_ensemble_native_anchor`
+    - `topk1_1d_regoff`
+    - `regon_k1_10d_ensemble_native_anchor`
+- 直接判决：
+  - 扩大静态 score-to-weight / bridge 搜索空间已经不再是当前 liquid500 主线的最高 ROI 动作
+  - 后续要转向 targeted weak-month repair，而不是继续扩大静态 profile 集合
+
+### graph_off_plain 预算补齐与旧窗复核
+- 输出目录：
+  - `daily_research/output/graph_off_plain_budget_review_20260406_r1`
+- 这条链的做法是：
+  - 直接复用 architecture refresh 里的旧窗 `graph_off_plain` run
+  - 对旧窗继续扩预算
+  - 再和 baseline 以及 recent window 一起拼成 refreshed three-window summary
+- 关键结果：
+  - `20230216_20240229` 的高预算 annual / Sharpe 有提升，但 monthly-first 仍落在 `e4`
+  - `20240301_20250317` 的高预算 annual / Sharpe 也有提升，但 monthly-first 仍落在 `e4`
+  - refreshed three-window mean excess annual / Sharpe = `17.47% / 1.027`
+  - baseline_current = `22.46% / 1.695`
+  - annual wins vs baseline = `1/3`
+  - Sharpe wins vs baseline = `0/3`
+- 直接判决：
+  - `graph_off_plain` 预算补齐后仍不通过 liquid500 challenger gate
+  - 这条线当前只保留为 monitored architecture branch，不再占主优先级
+
+### encoder_transformer_v1 弱窗与稳定性复核
+- 输出目录：
+  - `daily_research/output/encoder_transformer_stability_review_20260406_r1`
+- 复核中先尝试 strict resume continuation：
+  - 失败原因是 resume artifact 的 `feature_names` 与当前 dataset 不一致
+  - 系统拒绝把这类 continuation 视为同一训练链
+- 随后尝试 warm-start continue：
+  - 同样因为 `feature_names` 一致性校验而失败
+- 因此这条 review 最终改成 fresh rerun：
+  - 对预算压力最大的窗口 `20240301_20250317` 重新跑 `4 / 8 / 12 / 16 / 24`
+  - 再与其余两窗现有 run 拼成 refreshed three-window stability summary
+- 核心结果：
+  - weak window best budget = `e24`
+  - weak-window best excess annual / Sharpe = `25.19% / 1.546`
+  - 但 `budget_pressure = true`
+  - refreshed three-window mean excess annual / Sharpe = `34.68% / 1.343`
+  - baseline_current = `22.46% / 1.695`
+  - annual wins vs baseline = `2/3`
+  - Sharpe wins vs baseline = `2/3`
+  - 但 encoder 的：
+    - mean positive-month ratio = `61.11%`
+    - worst month = `-15.30%`
+    - mean top3 positive-month share = `79.27%`
+- 直接判决：
+  - `encoder_transformer_v1` 的上行潜力是真的
+  - 但它当前仍属于 high-upside but unstable
+  - 现在还不通过 liquid500 challenger gate
+
+### 这轮之后的总判决
+- liquid500 主线的最优下一步不是继续扩大静态 bridge/profile 搜索。
+- liquid500 主线的最优下一步是：
+  - targeted weak-month repair
+  - score-to-weight 映射
+  - 执行兑现质量
+- architecture 线如果继续推进，优先顺序应改成：
+  - 先做 `encoder_transformer_v1` 的稳定性修复
+  - `graph_off_plain` 仅做监控性复核
+  - 不再把“更大、更深”本身当作默认升级方向
+
+### 同步
+- 已同步更新：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+### 验证
+- `py_compile` 通过：
+  - `daily_research/deep_alpha/execution_alignment.py`
+  - `daily_research/deep_alpha/run_short_alpha_score_weight_repair_review.py`
+  - `daily_research/deep_alpha/run_graph_off_plain_budget_review.py`
+  - `daily_research/deep_alpha/run_encoder_transformer_stability_review.py`
+- 真实 `yolos` 实跑通过：
+  - `run_short_alpha_score_weight_repair_review.py`
+  - `run_graph_off_plain_budget_review.py`
+  - `run_encoder_transformer_stability_review.py`

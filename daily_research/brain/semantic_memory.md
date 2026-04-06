@@ -3,12 +3,10 @@
 快照日期：`2026-04-06`
 
 ## 1. 项目身份
-- `daily_research` 维护一条可运行、可复核、可回退的 A 股日频研究与执行链路。
-- 当前主目标固定为：
-  - 执行后净收益最大
-- 历史实验与时序证据写入 `episodic_memory.md`。
-- 当前判断写入 `working_memory.md`。
-- 日常命令与固定入口写入 `action_system.md`。
+- `daily_research` 维护一条面向主板 A 股、以执行后净收益最大为唯一主目标的研究-执行统一链路。
+- 历史过程与时序证据写入 `episodic_memory.md`。
+- 当前判决写入 `working_memory.md`。
+- 日常入口与固定命令写入 `action_system.md`。
 
 ## 2. 固定边界
 - 市场范围固定为主板 A 股：
@@ -20,7 +18,7 @@
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
 - brain 文档默认使用简体中文。
 - shell 运行时输出、终端日志、进度条文本默认使用英文。
-- 日常生成计划不允许无条件静默重训模型；默认 production 候选仅按 `Retrain Monthly` 规则自动重训。
+- 日常生成计划不允许无条件静默重训模型；默认 production 仅按 `Retrain Monthly` 自动重训。
 
 ## 3. 研究与执行统一目标
 - 当前统一目标不是“raw holdout 指标最大”，而是“执行后净收益最大”。
@@ -29,7 +27,7 @@
   - `execution_alignment_mode = train_eval_auto`
   - `execution_alignment_objective = robust_composite`
   - realistic cost = `3 / 7 / 10 bps`
-- execution policy 本身属于研究对象，不再是固定后置适配器。
+- execution policy 本身属于研究对象，不再是固定后置适配壳。
 - formal holdout 负责研究判决。
 - production full-fit 负责默认执行。
 - production full-fit 结果不得回填为 formal 研究证据。
@@ -46,59 +44,33 @@
 - 当前默认 execution policy 为：
   - `regoff_k1_5d_ensemble_native_anchor`
 - 当前 active default 通过 `panel_mode = raw` + 精确 bridge spec 执行，不依赖预先导出的 `execution_aligned` panel。
-- active manifest 会显式保存：
+- active manifest 显式保存：
   - `liquidity_pool_name`
   - `liquidity_pool_size`
   - `execution_policy_label`
   - `execution_alignment_selected_profile_spec`
-- `execution_alignment_mode = train_eval_auto` 的默认搜索集合已扩展为：
-  - `profit_max_v1`
 - 当前“全项目最高”的唯一正式口径为：
   - `global_deployable_non_capacity_adjusted_v1`
-  - 即同一当前成本引擎、同一 execution-policy audit 搜索空间下的跨 universe deployable leaderboard
+  - 即同一成本引擎、同一 execution-policy audit 搜索空间下的跨 universe deployable leaderboard
 
 ## 5. 当前稳定研究结论
-- `structure_context_only`：
-  - 可保留为 raw 架构 challenger
-  - 不是当前 execution-upgrade 答案
-  - 在 `deep_alpha_architecture_protocol_refresh_20260406_r1` 里是当前最强 raw 架构 challenger：
-    - formal mean excess annual / Sharpe = `31.57% / 1.717`
-  - 但它的正收益月份占比低于 `baseline_current`，坏月更深，因此当前不进入默认执行升级链
-- 当前架构复杂度 / 深度 / 结构 refresh 结论：
-  - recent category winners 为：
-    - `capacity_small_h64`
-    - `depth_deep_l4`
-    - `encoder_transformer_v1`
-    - `graph_off_plain`
-    - `state_context_only`
-    - `structure_context_only`
-  - formal 月度优先总判仍由 `baseline_current` 排名第一：
-    - `22.46% / 1.695`
-  - `encoder_transformer_v1` 的 recent 爆发力很强，但 formal 稳定性不足，且仍有一窗 budget pressure
-  - `graph_off_plain` 在 formal 上仍保留信号，但两条旧窗仍有 budget pressure，负结论暂不封死
-  - 因此当前主瓶颈不是继续盲目加深/加大/换 backbone，而是 weak-month repair、兑现链和执行映射
-- `state_liquidity_listwise_v1`：
-  - 已通过 budget-normalized monthly execution-first formal H2H
-  - 已通过 recent realistic replay gate
-  - 已通过 production full-fit replay gate
-  - 已完成 production recipe `24 -> 32 -> 40` strict-resume epoch extension
-  - 当前 active production run 为 `short_alpha_production_e40`
-  - 当前 production recipe 已解除 `objective_aligned_budget_pressure`
-  - 是当前 liquid500 active default
-  - 当前 liquid500 short-alpha fresh formal objective compare 已显示：
-    - `primary_annual_return` 优于 `primary_monthly_robust_score`
-  - 当前 liquid500 short-alpha 弱月主要集中在：
-    - `trend_down_low_vol`
-    - `trend_up_low_vol`
-  - 简单的 month-start-regime conditioned execution policy 未能优于静态 `regoff_k1_5d_ensemble_native_anchor`
-  - 显式按 `regoff_k1_5d_ensemble_native_anchor` 做的 fresh production refresh 未能战胜当前 production root，因此当前 production 默认不切换
-- `dynamic_graph_no_priors`：
-  - 是当前 rolling liquid800 / mainboard monthly execution-first formal winner
-  - 当前默认不再把 industry/style priors 当作稳定增益
-  - 当前同口径 profit-max execution-policy formal review 最优为：
-    - `regoff_k3_5d_ensemble_native_anchor = 33.27% / 1.290`
-  - 已补完 liquid500 同宇宙 challenger formal，但当前仍弱于 `state_liquidity_listwise_v1`，因此不是 liquid500 active-default candidate
-  - 已补完跨 universe deployable leaderboard，对当前 liquid500 short-alpha 仍未翻盘，因此当前全局 rank = `2`
+- `state_liquidity_listwise_v1` 是当前 liquid500 active default。
+- liquid500 short-alpha 主线默认 checkpoint objective 仍是：
+  - `primary_annual_return`
+- `primary_monthly_robust_score` 当前只保留为 fresh-run challenger objective，不作为 liquid500 主线默认值。
+- `weak_month_repair_v1` 扩展静态 score-to-weight / bridge 搜索没有翻掉：
+  - `regoff_k1_5d_ensemble_native_anchor`
+  - 因此 liquid500 当前剩余修复方向是 targeted weak-month repair，而不是继续扩大静态桥接集合。
+- simple regime-conditioned execution policy 当前不成立：
+  - leave-window-out formal review 对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败。
+- 显式按 `regoff_k1_5d_ensemble_native_anchor` 做的 fresh production refresh 当前不成立：
+  - 同一 policy 下打不赢当前 production root。
+- `dynamic_graph_no_priors` 是当前 rolling liquid800 / mainboard monthly execution-first formal winner。
+- 当前默认不再把 industry/style priors 当作稳定增益。
+- `dynamic_graph_no_priors` 已补 liquid500 同宇宙 challenger formal，但当前仍不超过 liquid500 short-alpha 主线，因此不是 liquid500 active-default candidate。
+- `structure_context_only` 保留为 raw 架构 challenger，不是当前 execution-upgrade 答案。
+- `encoder_transformer_v1` 是当前 high-upside but unstable 的主要 architecture 候选。
+- `graph_off_plain` 已做预算补齐复核，但仍未通过 liquid500 challenger gate，只保留为 monitored architecture branch。
 
 ## 6. 训练预算与月度协议语义
 - family epoch budget 的唯一真源为：
@@ -115,20 +87,20 @@
   - adaptive task window
   - monthly summary artifacts
 - 月度分析是当前研究判读的第一视角。
-- 单次 run 现会额外落盘：
+- 单次 run 现在会额外落盘：
   - `primary_research_monthly_objectives.json`
 
 ## 7. 结果解释边界
 - liquid500 默认执行 winner 与 liquid800 / mainboard 研究 winner 仍需分开叙述。
-- 旧的不同股票池、不同成本口径、不同 gate 协议结果，不能直接混成单一“全项目最高”排行榜。
-- 若用户明确要“当前全项目最高净收益”，必须先进入：
+- 不同股票池、不同成本口径、不同 gate 协议下的结果，不得直接混成单一“全项目最高”结论。
+- 如果用户明确要“当前全项目最高净收益”，必须先进入：
   - 同一成本引擎
   - 同一 execution-policy audit
   - 同一 `global_deployable_non_capacity_adjusted_v1`
-  再做跨 universe 排名。
+  然后再做跨 universe 排名。
 
 ## 8. 文档分工语义
-- `semantic_memory.md` 只保留稳定事实与长期有效边界。
+- `semantic_memory.md` 只保留稳定事实与长期边界。
 - `project_map.md` 只保留项目结构、主线地图与决策闭环。
 - `working_memory.md` 只保留当前判决、优先级与下一步。
 - `procedural_memory.md` 只保留可复用方法学规则。

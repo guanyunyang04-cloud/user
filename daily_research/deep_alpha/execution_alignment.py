@@ -106,6 +106,9 @@ def _build_curated_profit_profile(
     rebalance_offset_mode: str,
     target_weight_top_k: int,
     use_market_regime_filter: bool,
+    target_weight_min_weight: float = 0.0,
+    target_weight_power: float = 1.0,
+    target_weight_full_invest: bool = False,
 ) -> ExecutionAlignmentProfile:
     return ExecutionAlignmentProfile(
         name=name,
@@ -114,6 +117,9 @@ def _build_curated_profit_profile(
         rebalance_offset_mode=rebalance_offset_mode,
         rebalance_anchor_date="" if str(rebalance_freq) == "1d" else "2025-01-02",
         target_weight_top_k=target_weight_top_k,
+        target_weight_min_weight=target_weight_min_weight,
+        target_weight_power=target_weight_power,
+        target_weight_full_invest=target_weight_full_invest,
         use_market_regime_filter=use_market_regime_filter,
     )
 
@@ -157,6 +163,42 @@ _CURATED_PROFIT_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
         rebalance_freq="5d",
         rebalance_offset_mode="all",
         target_weight_top_k=3,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k2p15_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k2p15_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 2, power 1.5, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        target_weight_power=1.5,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k2p20_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k2p20_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 2, power 2.0, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=2,
+        target_weight_power=2.0,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k3p15_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k3p15_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 3, power 1.5, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=3,
+        target_weight_power=1.5,
+        use_market_regime_filter=False,
+    ),
+    "regoff_k3p20_5d_ensemble_native_anchor": _build_curated_profit_profile(
+        name="regoff_k3p20_5d_ensemble_native_anchor",
+        description="5d anchored all-offset ensemble, top-k 3, power 2.0, regime filter off.",
+        rebalance_freq="5d",
+        rebalance_offset_mode="all",
+        target_weight_top_k=3,
+        target_weight_power=2.0,
         use_market_regime_filter=False,
     ),
     "regoff_k1_10d_ensemble_native_anchor": _build_curated_profit_profile(
@@ -208,6 +250,7 @@ PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
 
 LEGACY_CORE_PROFILE_SET_NAME = "legacy_core_v1"
 PROFIT_MAX_PROFILE_SET_NAME = "profit_max_v1"
+WEAK_MONTH_REPAIR_PROFILE_SET_NAME = "weak_month_repair_v1"
 PROFILE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
     LEGACY_CORE_PROFILE_SET_NAME: (
         "raw_1d",
@@ -232,6 +275,19 @@ PROFILE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
         "regon_k2_10d_ensemble_native_anchor",
         "regoff_k1_20d_ensemble_native_anchor",
         "regoff_k2_20d_ensemble_native_anchor",
+    ),
+    WEAK_MONTH_REPAIR_PROFILE_SET_NAME: (
+        "topk1_1d_regoff",
+        "regoff_k1_3d_ensemble_native_anchor",
+        "regoff_k1_5d_ensemble_native_anchor",
+        "regoff_k2_5d_ensemble_native_anchor",
+        "regoff_k3_5d_ensemble_native_anchor",
+        "regoff_k2p15_5d_ensemble_native_anchor",
+        "regoff_k2p20_5d_ensemble_native_anchor",
+        "regoff_k3p15_5d_ensemble_native_anchor",
+        "regoff_k3p20_5d_ensemble_native_anchor",
+        "regon_k1_10d_ensemble_native_anchor",
+        "regoff_k1_20d_ensemble_native_anchor",
     ),
 }
 DEFAULT_AUTO_PROFILE_SET_NAME = PROFIT_MAX_PROFILE_SET_NAME
