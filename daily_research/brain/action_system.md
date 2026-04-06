@@ -375,10 +375,22 @@ promotion 后必须检查：
   - 不要在已经开始的 strict-resume training chain 里中途切 `--checkpoint-selection-objective`
   - 当前 production epoch extension 之所以仍保持 `primary_annual_return`，一方面是为了保证同一 resume 链历史可比，另一方面也是因为 liquid500 short-alpha fresh formal compare 当前仍支持 annual objective 留在默认位
 
-### architecture execution-objective formal
+### architecture protocol refresh
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_execution_objective_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_protocol_refresh.py
 ```
+
+- 当前 latest output：
+  - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
+- 这条入口会一次性完成：
+  - recent complexity/depth/encoder/graph/context/structure 全矩阵
+  - recent category winner 选择
+  - multi-window formal H2H
+  - 月度诊断 + RankIC + budget pressure 汇总
+- 当前 latest 结论：
+  - `baseline_current` 仍是 formal 月度优先 rank 1
+  - `structure_context_only` 是当前最强 raw 架构 challenger，但不进入默认执行升级链
+  - `encoder_transformer_v1` 与 `graph_off_plain` 保留为需要继续做稳定性 / 预算复核的候选
 
 ### short-alpha formal
 ```powershell

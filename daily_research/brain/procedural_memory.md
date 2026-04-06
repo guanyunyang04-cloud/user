@@ -129,6 +129,24 @@
   - `primary_research_monthly_diagnostics.json`
 - 若命令已显式给出 `train_end_date + valid_start_date + valid_days`，则显式短窗优先。
 
+## 11. 架构 refresh 规则
+- 重做 `deep_alpha` 架构复杂度 / 深度 / 结构实验时，不再使用旧的固定 `8 epoch` runner 直接下结论。
+- 当前正式口径应走：
+  - recent 全矩阵
+  - recent category winners
+  - multi-window formal H2H
+  - family epoch budget manifest
+  - execution-first + `profit_max_v1`
+- category winner 的挑选顺序固定为：
+  - 先看 `objective_aligned_budget_pressure`
+  - 再看 `positive_month_ratio`
+  - 再看 `median_monthly_return`
+  - 再看 `worst_monthly_return`
+  - 再看 `top3_positive_month_share`
+  - 最后才看 excess annual / Sharpe
+- 若某架构分支 formal 仍有 budget pressure，不直接下封死负结论；先标记为“预算仍不充分的候选”。
+- 若某架构分支 recent 爆发很强，但 formal 月度稳定性不足，不得直接升格为默认执行候选。
+
 ## 11. checkpoint 选择与续训规则
 - `deep_alpha` 主链现已支持月度 checkpoint objective，至少包括：
   - `primary_monthly_positive_ratio`

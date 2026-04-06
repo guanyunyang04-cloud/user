@@ -61,6 +61,22 @@
 - `structure_context_only`：
   - 可保留为 raw 架构 challenger
   - 不是当前 execution-upgrade 答案
+  - 在 `deep_alpha_architecture_protocol_refresh_20260406_r1` 里是当前最强 raw 架构 challenger：
+    - formal mean excess annual / Sharpe = `31.57% / 1.717`
+  - 但它的正收益月份占比低于 `baseline_current`，坏月更深，因此当前不进入默认执行升级链
+- 当前架构复杂度 / 深度 / 结构 refresh 结论：
+  - recent category winners 为：
+    - `capacity_small_h64`
+    - `depth_deep_l4`
+    - `encoder_transformer_v1`
+    - `graph_off_plain`
+    - `state_context_only`
+    - `structure_context_only`
+  - formal 月度优先总判仍由 `baseline_current` 排名第一：
+    - `22.46% / 1.695`
+  - `encoder_transformer_v1` 的 recent 爆发力很强，但 formal 稳定性不足，且仍有一窗 budget pressure
+  - `graph_off_plain` 在 formal 上仍保留信号，但两条旧窗仍有 budget pressure，负结论暂不封死
+  - 因此当前主瓶颈不是继续盲目加深/加大/换 backbone，而是 weak-month repair、兑现链和执行映射
 - `state_liquidity_listwise_v1`：
   - 已通过 budget-normalized monthly execution-first formal H2H
   - 已通过 recent realistic replay gate

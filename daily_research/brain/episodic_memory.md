@@ -10131,3 +10131,120 @@ position,000001.SZ,1200,12.38,
   - `run_trade_plan.py`
   - `doc_guard.py check`
   - 额外验证 `liquid800` pool preflight 可正确解析并返回 `liquid800_latest.txt`
+
+## 2026-04-06 `deep_alpha` 架构复杂度 / 深度 / 结构实验按当前协议重做
+
+### 背景
+- 用户指出 `2026-04-02` 那套架构复杂度 / 深度 / 结构实验仍受到旧训练预算与旧协议限制。
+- 需要按当前正式协议重做，而不是继续引用旧的 `8 epoch` 时代结论。
+- 这次的目标不是只看 headline 年化，而是基于：
+  - current family epoch budget
+  - `execution_first`
+  - `profit_max_v1`
+  - 月度优先判读
+  重新判定当前架构线到底还有哪些有效信号、哪些已被推翻。
+
+### 新入口
+- 新增统一 runner：
+  - `daily_research/deep_alpha/run_architecture_protocol_refresh.py`
+- 这条入口会顺序完成：
+  - recent complexity / depth / encoder / graph / context / structure 全矩阵
+  - recent category winner 选择
+  - multi-window formal H2H
+  - 月度诊断、RankIC 与 training budget pressure 汇总
+
+### 当前协议
+- universe：
+  - `liquid500`
+- benchmark：
+  - `000300.SH`
+- research objective：
+  - `execution_first`
+- checkpoint objective：
+  - `primary_annual_return`
+- execution alignment：
+  - `train_eval_auto / robust_composite / profit_max_v1`
+- realistic cost：
+  - `3 / 7 / 10 bps`
+- family epoch budget manifest：
+  - `baseline -> 4`
+  - `structure -> 12`
+- 输出目录：
+  - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
+
+### recent 全矩阵 category winners
+- complexity：
+  - `capacity_small_h64`
+  - `14.01% / 1.015`
+- depth：
+  - `depth_deep_l4`
+  - `25.17% / 1.449`
+- encoder：
+  - `encoder_transformer_v1`
+  - `87.47% / 2.915`
+- graph：
+  - `graph_off_plain`
+  - `36.41% / 2.155`
+- context：
+  - `state_context_only`
+  - `20.52% / 1.185`
+- structure：
+  - `structure_context_only`
+  - `48.59% / 2.543`
+
+### formal 月度优先总判
+- `baseline_current`：
+  - formal mean excess annual / Sharpe = `22.46% / 1.695`
+  - mean positive-month ratio = `72.22%`
+  - worst month = `-6.39%`
+  - 月度优先总判 rank 1
+- `structure_context_only`：
+  - formal mean excess annual / Sharpe = `31.57% / 1.717`
+  - 但 mean positive-month ratio 只有 `58.33%`
+  - worst month = `-8.99%`
+  - 说明它的 raw 架构优势部分成立，但坏月和稳定性仍落后 baseline
+- `encoder_transformer_v1`：
+  - formal mean excess annual / Sharpe = `27.07% / 0.874`
+  - `20240301_20250317` 仍有 budget pressure
+  - recent 爆发很强，但 formal 稳定性不足
+- `graph_off_plain`：
+  - formal mean excess annual / Sharpe = `17.47% / 1.027`
+  - 两条旧窗仍有 budget pressure
+  - 说明 plain graph 方向并未失效，但当前负结论还不能封死
+- `depth_deep_l4`：
+  - formal mean excess annual / Sharpe = `15.40% / 0.920`
+  - 改善了月度中位数，但没有打赢 baseline
+- `state_context_only`：
+  - formal mean excess annual / Sharpe = `4.04% / 0.247`
+  - 当前不是主升级方向
+- `capacity_small_h64`：
+  - formal mean excess annual / Sharpe = `9.28% / 0.629`
+  - 说明当前主线问题不是“模型容量不够”
+
+### 当前判断
+- 当前架构线最重要的新结论不是“谁 recent 爆得最高”，而是：
+  - `baseline_current` 在 current-protocol formal 下仍是月度优先 rank 1
+  - 因此主瓶颈仍不是继续盲目加深 / 加大 / 换 backbone
+- `structure_context_only` 应继续保留为 raw 架构 challenger，但不再按“差一步就能上线”的心智推进。
+- `encoder_transformer_v1` 与 `graph_off_plain` 是当前最值得继续跟进的两条架构候选：
+  - 前者问题是稳定性与 regime 泛化
+  - 后者问题是旧窗 budget pressure 尚未解除
+- `state_context_only` 与容量线当前都没有提供足够强的新证据。
+
+### 后续方向
+1. liquid500 主线仍优先做 weak-month repair、score-to-weight 映射和执行兑现质量。
+2. architecture 线如需继续推进，优先顺序改为：
+   - `graph_off_plain` 预算补齐与旧窗复核
+   - `encoder_transformer_v1` 弱窗与稳定性复核
+   - 再决定是否值得进入 liquid500 challenger gate
+3. 不再把“更大、更深”本身视为默认升级方向。
+
+### 验证
+- `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_protocol_refresh.py`
+- `py_compile daily_research/deep_alpha/run_architecture_protocol_refresh.py`
+- 输出产物：
+  - `report.md`
+  - `recent_matrix_summary.csv`
+  - `recent_category_winners.csv`
+  - `formal_window_detail.csv`
+  - `formal_profile_summary.csv`

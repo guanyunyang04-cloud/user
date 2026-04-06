@@ -55,9 +55,19 @@
   - `state_liquidity_listwise_v1 -> 24`
   - `dynamic_graph_no_priors -> 16`
 - architecture 线：
-  - `baseline_current = 4.95% / 0.266`
-  - `structure_context_only = 1.66% / 0.156`
-  - 结论：`structure_context_only` 保留为 raw 结构 challenger，但不占用执行升级优先级。
+  - `deep_alpha_architecture_protocol_refresh_20260406_r1` 已按当前协议重做。
+  - recent category winners：
+    - `capacity_small_h64`
+    - `depth_deep_l4`
+    - `encoder_transformer_v1`
+    - `graph_off_plain`
+    - `state_context_only`
+    - `structure_context_only`
+  - formal 月度优先总判仍由 `baseline_current` 排名第一：`22.46% / 1.695`
+  - `structure_context_only` 是当前最强 raw 架构 challenger：formal mean `31.57% / 1.717`，但正收益月份占比更低、坏月更深，不占用执行升级优先级。
+  - `encoder_transformer_v1` recent 爆发力最强，但 formal 稳定性不足，且 `20240301_20250317` 仍有 budget pressure。
+  - `graph_off_plain` recent 与 formal 都有信号，但两条旧窗仍处于 budget pressure，当前只保留为继续校准预算的架构候选。
+  - 结论：当前主瓶颈仍不是“继续加深/加大/换 backbone”，而是 weak-month repair、score-to-weight 映射和执行兑现质量。
 - short-alpha 线：
   - `state_liquidity_listwise_v1 = 31.86% / 1.797`
   - `baseline_current = 15.72% / 0.934`
@@ -129,8 +139,12 @@
    - `dynamic_graph_no_priors`
    - 非默认 liquid500 challenger
    而不是直接改当前 active default 的 fresh retrain 默认值。
-5. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立研究线推进；它虽已补完 liquid500 同宇宙 formal challenger，但当前证据仍不足以替代 short-alpha 主线。
-6. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源。
+5. architecture 线后续若继续推进，优先顺序为：
+   - 先补 `graph_off_plain` / `encoder_transformer_v1` 的预算与弱窗稳定性复核
+   - 再决定是否值得进入 liquid500 challenger gate
+   - 不再把“更大、更深”本身当成默认升级方向
+6. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立研究线推进；它虽已补完 liquid500 同宇宙 formal challenger，但当前证据仍不足以替代 short-alpha 主线。
+7. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源。
 
 ## 5. 当前边界
 - formal holdout 负责研究 winner 判决。

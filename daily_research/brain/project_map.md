@@ -63,12 +63,17 @@
 - 简单的 regime-conditioned execution policy 已正式验证不优于静态 `regoff_k1_5d_ensemble_native_anchor`。
 - 显式按 `regoff_k1_5d_ensemble_native_anchor` 做的 fresh production retrain review 未能打赢当前 production root。
 - liquid800 / mainboard 的 `dynamic_graph_no_priors` 虽强，但已补完 liquid500 同宇宙 formal challenger，当前仍未超过 short-alpha 主线。
+- 架构复杂度 / 深度 / 结构在当前协议下已正式重做：
+  - `baseline_current` 仍是 formal 月度优先 rank 1
+  - 真正剩余的问题是弱月、兑现链与执行映射，不是继续盲目加深/加大
 - 工作区缓存与历史产物体量很大，维护成本高，需持续按归档策略治理。
 
 ## 7. 当前不再是主线的方向
 - `structure_context_only`
   - 保留为 raw 架构 challenger
   - 不再占用执行升级主优先级
+- “只因 recent 爆发就直接把新架构推到默认执行”
+  - 已被 current-protocol formal + 月度优先判读取代
 - “所有家族统一 epoch”
   - 已被 family budget manifest 取代
 - “raw winner 直接上执行”
