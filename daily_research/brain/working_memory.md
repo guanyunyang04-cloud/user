@@ -159,13 +159,27 @@
    - month-trigger 设计
    - score -> weight -> execution 修复
    - 执行兑现质量复核
+   - 其中 `first-week / multi-day score-weight trigger` 已首次出现正式转正分支：
+     - `regime_firstweek_combo` review = `61.67% / 2.575`
+     - 相对静态 `53.29% / 2.170`
+     - `delta_excess_annual = +8.38%`
+     - `annual wins = 2/3`
+     - 当前最有效映射：
+       - `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+       - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor`
+     - 结论：弱月修复已从“方向判断”进入“有正证据的窄分支”，后续应继续沿这条 repair branch 收敛，而不是回到 broad execution-policy sweep
 4. model-side 新高优先级支线已明确为 `short_expert_monthly_v1`：
    - 保持 `primary_monthly_robust_score`
    - 保持更短 horizon + event 头 + expanded short_alpha inputs + `ridge` score head
-   - 下一步先补 multi-window formal，再决定是否进入 recent realistic gate
-   - 在 multi-window formal 完成前，它只算 recent strong candidate，不算默认执行升级答案
+   - multi-window formal 已完成：`24` 前两窗 undertrained，`32` 中间窗稳定且整体最亮眼，`48` 最老窗稳定但显著回撤
+   - fully-stabilized formal 汇总（`r4_shortalpha48`）：`41.45% / 2.411` vs `33.78% / 1.985`，月度正收益占比 `72.22% > 69.44%`，最差月 `-4.06% > -6.68%`，但月度中位数超额仍略低 `2.742% < 2.779%`
+   - 当前结论：它已经从 latest-window candidate 升级为 formal strong challenger，但还不是 clean promotion answer
+   - 在没有打赢 monthly-median 这类核心月度兑现指标前，不直接进入 recent realistic gate，也不升级 active default
    - `short_expert_scorehead_monthly_v1` 仅保留为 output-head monitored branch；只有先打赢 `short_expert_monthly_v1` 的 monthly-first 指标，才允许升级为主候选
-   - 在用户明确要求“最有效优先、训练不吝啬”后，这条线当前应高于继续做零散微调；先回答它能不能成为 formal winner
+   - 在用户明确要求“最有效优先、训练不吝啬”后，这条线已经完成 formal 回答；后续不再重复用“可能没训够”解释其边界
+   - `short_expert_monthly_v2` 已完成 latest-window `24 -> 32 -> 48` 预算补齐：`24 = 47.58% / 3.121` undertrained，`32 = 52.41% / 2.983` 仍在 tail，`48 = 57.55% / 3.015` stable
+   - fully-stabilized latest-window 结论：它虽把月度正收益占比抬到 `83.33%`，但月度中位数超额、年化、Sharpe 仍明显落后于 `short_expert_monthly_v1`
+   - 当前 model-side 口径：`short_expert_monthly_v1` 继续保留为 formal strong challenger；`short_expert_monthly_v2` 作为已补齐预算的负证据分支保留，不再继续沿同一 bundle 无差别加码
 5. “月收益 30%+”当前只作为 north star，不作为短期默认晋级门槛：
    - 短期仍先追月度中位数抬升、弱月收浅、胜率提高
    - 只有当这几项持续抬升后，才有资格讨论更激进的收益目标
@@ -185,10 +199,11 @@
    而不是直接改当前 active default 的 fresh retrain 默认值
 9. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源
 10. 接下来默认按“最有效而非最小改动”推进，阶段顺序固定为：
-   - 先用 native family budget 把 `short_expert_monthly_v1` 推进到 multi-window formal
-   - 若 formal 转正，再进 recent realistic gate，评估是否形成默认执行升级路径
-   - 与此同时只保留一条高 ROI 修复线：把 weak-month repair 下钻到 `first-week / multi-day score-weight trigger`
-   - 在上述两步给出新结论前，不再优先做零散 output-head 小修或横向 execution-policy 扩搜
+   - 第一优先级：沿已转正的 `regime_firstweek_combo` repair branch 继续收敛，验证它能否形成更稳定的 limited regime-scoped repair candidate
+   - 第二优先级：把 `short_expert_monthly_v1` 保持为 formal strong challenger，不再重复补同类 formal
+   - `short_expert_monthly_v2` 已给出 budget-stable 负证据后，后续 model-side 默认改做拆分式 ablation，而不是继续堆新的 monolithic bundle
+   - ablation 优先顺序：先分开验证 `first-week / breadth / failure-risk` 特征增量 与 `state-targeted downside / false-positive` 惩罚增量，并继续保持 monthly-first checkpoint objective
+   - 在上述两条主线给出新增证据前，不再优先做零散 output-head 小修或横向 execution-policy 扩搜
 
 ## 5. 当前边界
 - formal holdout 负责研究 winner 判决
@@ -233,12 +248,26 @@
   - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
 - liquid500 short-alpha targeted weak-month repair review（`regime_weight_count` 接近但仍失败）：
   - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
+- liquid500 short-alpha targeted weak-month repair review（`regime_firstweek_combo` 转正）：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_review_20260407_r1`
 - liquid500 short-alpha profit-max production refresh：
   - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - liquid500 short-line expert latest-window full-budget review：
   - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
 - liquid500 short-line expert score-head latest-window full-budget review：
   - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
+- liquid500 short-line expert v2 latest-window review（native 24）：
+  - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r1_fullbudget`
+- liquid500 short-line expert v2 latest-window review（short_alpha 32）：
+  - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r2_shortalpha32`
+- liquid500 short-line expert v2 latest-window review（short_alpha 48，stable）：
+  - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48`
+- liquid500 short-line expert multi-window formal（monthly checkpoint, native 24）：
+  - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r2_monthlycheckpoint`
+- liquid500 short-line expert multi-window formal（monthly checkpoint, short_alpha 32）：
+  - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32`
+- liquid500 short-line expert multi-window formal（monthly checkpoint, short_alpha 48, stabilized oldest window）：
+  - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r4_shortalpha48`
 - liquid500 short-alpha production epoch extension：
   - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - liquid500 short-alpha checkpoint objective compare：

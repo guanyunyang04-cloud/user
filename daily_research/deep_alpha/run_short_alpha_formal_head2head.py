@@ -49,6 +49,22 @@ TRAIN_EVAL_WINDOW_MONTHS = 6
 PROFILES_TO_RUN: tuple[str, ...] = ("baseline_current", "state_liquidity_listwise_v1")
 
 REUSE_METRICS: dict[str, dict[str, str]] = {}
+REUSE_METRICS = {
+    "baseline_current": {
+        "20230216_20240229": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/baseline_current_20230216_20240229/metrics.json",
+        "20240301_20250317": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/baseline_current_20240301_20250317/metrics.json",
+        "20250318_20260331": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/baseline_current_20250318_20260331/metrics.json",
+    },
+    "state_liquidity_listwise_v1": {
+        "20230216_20240229": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/state_liquidity_listwise_v1_20230216_20240229/metrics.json",
+        "20240301_20250317": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/state_liquidity_listwise_v1_20240301_20250317/metrics.json",
+        "20250318_20260331": "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/runs/state_liquidity_listwise_v1_20250318_20260331/metrics.json",
+    },
+    "short_expert_monthly_v1": {
+        "20240301_20250317": "daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32/runs/short_expert_monthly_v1_20240301_20250317/metrics.json",
+        "20250318_20260331": "daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget/runs/short_expert_monthly_v1/metrics.json",
+    },
+}
 
 
 def _resolve_family_key(profile_name: str) -> str:

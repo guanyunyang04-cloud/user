@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-06`
+快照日期：`2026-04-07`
 
 ## 1. 一句话概括
 - `daily_research` 是一条面向主板 A 股、以执行后净收益最大为唯一主目标的研究-执行统一链路。
@@ -59,7 +59,17 @@
 ## 6. 当前瓶颈
 - liquid500 当前主线的主要问题已经收敛到 targeted weak-month repair，而不是继续做一轮通用 execution policy 改写。
 - `weak_month_repair_v1` 已经证明：扩大静态 bridge/profile 搜索本身不足以翻案。
-- liquid500 当前主线的月度 checkpoint objective 尚未证明优于 annual objective。
+- `first-week / multi-day score-weight trigger` 已首次出现转正修复分支：
+  - `regime_firstweek_combo = 61.67% / 2.575`
+  - 说明真正有效的提升口不在 broad execution-policy sweep，而在更细的兑现链触发
+- `short_expert_monthly_v1` 已经补齐 multi-window formal：
+  - 已从 latest strong candidate 升级为 formal strong challenger
+  - 但 fully-stabilized 视图下仍未形成 clean promotion answer
+  - 主要卡点不是“没训够”，而是 oldest stable window 暴露的月度中位数边界
+- `short_expert_monthly_v2` 已完成 latest-window `24 -> 32 -> 48` 预算补齐：
+  - 在 `48` 下已稳定
+  - 但仍明显落后 `short_expert_monthly_v1`
+  - 说明“更大 bundle 的特征+loss+状态惩罚”并没有自动形成更好 short-line 候选
 - simple regime-conditioned execution policy 已正式验证不优于静态 `regoff_k1_5d_ensemble_native_anchor`。
 - 显式按 `regoff_k1_5d_ensemble_native_anchor` 做的 fresh production retrain review 未能打赢当前 production root。
 - liquid800 / mainboard 的 `dynamic_graph_no_priors` 虽强，但已补 liquid500 同宇宙 challenger formal，当前仍未超过 short-alpha 主线。
@@ -92,10 +102,12 @@
   - 是否已经包含 execution policy promotion
 
 ## 9. 当前下一阶段
-1. 继续积累 liquid500 short-alpha 上线后的月度净收益样本。
-2. 以 `trend_down_low_vol` 与 `trend_up_low_vol` 为主，做 short-alpha 的 targeted weak-month repair。
-3. 对新的 liquid500 challenger 默认先做 budget-normalized formal、recent realistic gate 与 execution policy audit。
-4. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立推进。
-5. architecture 线如果继续，只优先看：
+1. 以 `trend_down_low_vol` 与 `trend_up_low_vol` 为主，继续沿 `first-week / multi-day score-weight trigger` 收敛 short-alpha 的 targeted weak-month repair。
+2. 将 `short_expert_monthly_v1` 保持为 formal strong challenger，不再重复同类 formal。
+3. 若继续推进 model-side，默认改做 `short_expert_v2` 的拆分式 ablation，而不是继续扩大同类 bundle。
+4. 对新的 liquid500 challenger 仍默认先做 budget-normalized formal、recent realistic gate 与 execution policy audit。
+5. 继续积累 liquid500 short-alpha 上线后的月度净收益样本。
+6. 保持 `dynamic_graph_no_priors` 在 liquid800 / mainboard 独立推进。
+7. architecture 线如果继续，只优先看：
    - `encoder_transformer_v1` 稳定性修复
    - `graph_off_plain` 监控性复核

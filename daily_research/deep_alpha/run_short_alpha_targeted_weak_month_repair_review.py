@@ -65,6 +65,9 @@ def parse_args() -> argparse.Namespace:
             "regime_market_state",
             "regime_weight_count",
             "regime_signal_shape",
+            "regime_firstweek_weight_drift",
+            "regime_firstweek_score_followthrough",
+            "regime_firstweek_combo",
         ],
         default="regime",
         help="Which month-start trigger key the targeted repair plan should learn on.",
@@ -205,12 +208,21 @@ def _apply_trigger_key(frame: pd.DataFrame, *, trigger_mode: str) -> pd.DataFram
         enriched["month_start_weight_count"] = "count0"
     if "month_start_signal_shape" not in enriched.columns:
         enriched["month_start_signal_shape"] = "zero"
+    if "first_week_weight_drift" not in enriched.columns:
+        enriched["first_week_weight_drift"] = "stable"
+    if "first_week_score_followthrough" not in enriched.columns:
+        enriched["first_week_score_followthrough"] = "flat"
+    if "first_week_combo" not in enriched.columns:
+        enriched["first_week_combo"] = "flat|stable"
     enriched["month_start_regime"] = enriched["month_start_regime"].map(lambda x: _normalize_text(x, "not_ready"))
     enriched["month_start_market_state"] = enriched["month_start_market_state"].map(lambda x: _normalize_text(x, "unknown"))
     enriched["month_start_trend_bucket"] = enriched["month_start_trend_bucket"].map(lambda x: _normalize_text(x, "unknown"))
     enriched["month_start_vol_bucket"] = enriched["month_start_vol_bucket"].map(lambda x: _normalize_text(x, "unknown"))
     enriched["month_start_weight_count"] = enriched["month_start_weight_count"].map(lambda x: _normalize_text(x, "count0"))
     enriched["month_start_signal_shape"] = enriched["month_start_signal_shape"].map(lambda x: _normalize_text(x, "zero"))
+    enriched["first_week_weight_drift"] = enriched["first_week_weight_drift"].map(lambda x: _normalize_text(x, "stable"))
+    enriched["first_week_score_followthrough"] = enriched["first_week_score_followthrough"].map(lambda x: _normalize_text(x, "flat"))
+    enriched["first_week_combo"] = enriched["first_week_combo"].map(lambda x: _normalize_text(x, "flat|stable"))
 
     if trigger_mode == "market_state":
         enriched["trigger_key"] = enriched["month_start_market_state"]
@@ -237,6 +249,24 @@ def _apply_trigger_key(frame: pd.DataFrame, *, trigger_mode: str) -> pd.DataFram
             enriched["month_start_regime"].astype(str)
             + "|"
             + enriched["month_start_signal_shape"].astype(str)
+        )
+    elif trigger_mode == "regime_firstweek_weight_drift":
+        enriched["trigger_key"] = (
+            enriched["month_start_regime"].astype(str)
+            + "|"
+            + enriched["first_week_weight_drift"].astype(str)
+        )
+    elif trigger_mode == "regime_firstweek_score_followthrough":
+        enriched["trigger_key"] = (
+            enriched["month_start_regime"].astype(str)
+            + "|"
+            + enriched["first_week_score_followthrough"].astype(str)
+        )
+    elif trigger_mode == "regime_firstweek_combo":
+        enriched["trigger_key"] = (
+            enriched["month_start_regime"].astype(str)
+            + "|"
+            + enriched["first_week_combo"].astype(str)
         )
     else:
         enriched["trigger_key"] = enriched["month_start_regime"]
@@ -535,6 +565,51 @@ def _derive_signal_shape(nonzero_weight_count: int) -> str:
     return "broad"
 
 
+def _derive_first_week_weight_drift(
+    start_weight_count: int,
+    end_weight_count: int,
+    start_top1_weight: float,
+    end_top1_weight: float,
+) -> str:
+    count_delta = int(end_weight_count) - int(start_weight_count)
+    top1_delta = float(end_top1_weight) - float(start_top1_weight)
+    if count_delta <= -1 or top1_delta >= 0.02:
+        return "tighten"
+    if count_delta >= 1 or top1_delta <= -0.02:
+        return "loosen"
+    return "stable"
+
+
+def _derive_first_week_score_followthrough(
+    start_positive_share: float,
+    end_positive_share: float,
+    start_gap_1_5: float,
+    end_gap_1_5: float,
+) -> str:
+    breadth_delta = float(end_positive_share) - float(start_positive_share)
+    gap_delta = float(end_gap_1_5) - float(start_gap_1_5)
+    if breadth_delta >= 0.08 or gap_delta >= 0.03:
+        return "expand"
+    if breadth_delta <= -0.08 or gap_delta <= -0.03:
+        return "fade"
+    return "flat"
+
+
+def _summarize_score_panel(score_frame: pd.DataFrame) -> tuple[float, float]:
+    ordered = score_frame["score"].astype(float).sort_values(ascending=False).reset_index(drop=True)
+    positive_share = float((ordered > 0.0).mean()) if not ordered.empty else 0.0
+    gap_1_5 = float(ordered.iloc[0] - ordered.iloc[min(4, len(ordered) - 1)]) if not ordered.empty else 0.0
+    return positive_share, gap_1_5
+
+
+def _summarize_weight_panel(weight_frame: pd.DataFrame) -> tuple[int, float, float]:
+    ordered = weight_frame["target_weight"].astype(float).sort_values(ascending=False).reset_index(drop=True)
+    nonzero_weight_count = int((ordered > 0.0).sum())
+    top1_weight = float(ordered.iloc[0]) if not ordered.empty else 0.0
+    top2_weight_sum = float(ordered.head(2).sum()) if not ordered.empty else 0.0
+    return nonzero_weight_count, top1_weight, top2_weight_sum
+
+
 def _load_month_start_signal_diagnostics(static_run_dir: Path) -> pd.DataFrame:
     score = pd.read_csv(static_run_dir / "aligned_daily_score_panel.csv")
     weight = pd.read_csv(static_run_dir / "aligned_daily_target_weight_panel.csv")
@@ -545,30 +620,78 @@ def _load_month_start_signal_diagnostics(static_run_dir: Path) -> pd.DataFrame:
 
     rows: list[dict[str, Any]] = []
     for month, month_scores in score.groupby(score["date"].dt.to_period("M"), sort=True):
-        first_date = pd.to_datetime(month_scores["date"], errors="coerce").min()
-        first_scores = month_scores.loc[month_scores["date"].eq(first_date), "score"].astype(float)
-        first_weights = weight.loc[weight["date"].eq(first_date), "target_weight"].astype(float)
-        first_scores = first_scores.sort_values(ascending=False).reset_index(drop=True)
-        first_weights = first_weights.sort_values(ascending=False).reset_index(drop=True)
+        month_dates = sorted(pd.to_datetime(month_scores["date"], errors="coerce").dropna().unique().tolist())
+        if not month_dates:
+            continue
+        first_date = pd.Timestamp(month_dates[0])
+        first_week_dates = [pd.Timestamp(item) for item in month_dates[:5]]
+        last_first_week_date = first_week_dates[-1]
 
-        nonzero_weight_count = int((first_weights > 0.0).sum())
-        top1_weight = float(first_weights.iloc[0]) if not first_weights.empty else 0.0
-        top2_weight_sum = float(first_weights.head(2).sum()) if not first_weights.empty else 0.0
-        positive_share = float((first_scores > 0.0).mean()) if not first_scores.empty else 0.0
-        gap_1_5 = (
-            float(first_scores.iloc[0] - first_scores.iloc[min(4, len(first_scores) - 1)])
-            if not first_scores.empty
-            else 0.0
+        first_score_frame = month_scores.loc[month_scores["date"].eq(first_date), ["stock", "score"]].copy()
+        first_weight_frame = weight.loc[weight["date"].eq(first_date), ["stock", "target_weight"]].copy()
+        first_positive_share, first_gap_1_5 = _summarize_score_panel(first_score_frame)
+        first_nonzero_weight_count, first_top1_weight, first_top2_weight_sum = _summarize_weight_panel(first_weight_frame)
+
+        week_score_daily: list[dict[str, Any]] = []
+        week_weight_daily: list[dict[str, Any]] = []
+        for current_date in first_week_dates:
+            score_day = month_scores.loc[month_scores["date"].eq(current_date), ["stock", "score"]].copy()
+            weight_day = weight.loc[weight["date"].eq(current_date), ["stock", "target_weight"]].copy()
+            positive_share, gap_1_5 = _summarize_score_panel(score_day)
+            nonzero_weight_count, top1_weight, top2_weight_sum = _summarize_weight_panel(weight_day)
+            week_score_daily.append(
+                {
+                    "date": current_date,
+                    "positive_share": positive_share,
+                    "gap_1_5": gap_1_5,
+                }
+            )
+            week_weight_daily.append(
+                {
+                    "date": current_date,
+                    "nonzero_weight_count": nonzero_weight_count,
+                    "top1_weight": top1_weight,
+                    "top2_weight_sum": top2_weight_sum,
+                }
+            )
+
+        last_score_daily = week_score_daily[-1]
+        last_weight_daily = week_weight_daily[-1]
+        first_week_score_positive_share_mean = float(pd.DataFrame(week_score_daily)["positive_share"].mean())
+        first_week_score_gap_1_5_mean = float(pd.DataFrame(week_score_daily)["gap_1_5"].mean())
+        first_week_weight_count_mean = float(pd.DataFrame(week_weight_daily)["nonzero_weight_count"].mean())
+        first_week_top1_weight_mean = float(pd.DataFrame(week_weight_daily)["top1_weight"].mean())
+        first_week_top2_weight_sum_mean = float(pd.DataFrame(week_weight_daily)["top2_weight_sum"].mean())
+        first_week_weight_drift = _derive_first_week_weight_drift(
+            start_weight_count=first_nonzero_weight_count,
+            end_weight_count=int(last_weight_daily["nonzero_weight_count"]),
+            start_top1_weight=first_top1_weight,
+            end_top1_weight=float(last_weight_daily["top1_weight"]),
+        )
+        first_week_score_followthrough = _derive_first_week_score_followthrough(
+            start_positive_share=first_positive_share,
+            end_positive_share=float(last_score_daily["positive_share"]),
+            start_gap_1_5=first_gap_1_5,
+            end_gap_1_5=float(last_score_daily["gap_1_5"]),
         )
         rows.append(
             {
                 "month": str(month),
-                "month_start_weight_count": f"count{nonzero_weight_count}",
-                "month_start_signal_shape": _derive_signal_shape(nonzero_weight_count),
-                "month_start_top1_weight": top1_weight,
-                "month_start_top2_weight_sum": top2_weight_sum,
-                "month_start_score_positive_share": positive_share,
-                "month_start_score_gap_1_5": gap_1_5,
+                "month_start_weight_count": f"count{first_nonzero_weight_count}",
+                "month_start_signal_shape": _derive_signal_shape(first_nonzero_weight_count),
+                "month_start_top1_weight": first_top1_weight,
+                "month_start_top2_weight_sum": first_top2_weight_sum,
+                "month_start_score_positive_share": first_positive_share,
+                "month_start_score_gap_1_5": first_gap_1_5,
+                "first_week_last_date": str(last_first_week_date.date()),
+                "first_week_weight_count_mean": first_week_weight_count_mean,
+                "first_week_top1_weight_mean": first_week_top1_weight_mean,
+                "first_week_top2_weight_sum_mean": first_week_top2_weight_sum_mean,
+                "first_week_score_positive_share_mean": first_week_score_positive_share_mean,
+                "first_week_score_gap_1_5_mean": first_week_score_gap_1_5_mean,
+                "first_week_weight_drift": first_week_weight_drift,
+                "first_week_score_followthrough": first_week_score_followthrough,
+                "first_week_combo": f"{first_week_score_followthrough}|{first_week_weight_drift}",
             }
         )
     return pd.DataFrame(rows).sort_values("month").reset_index(drop=True)
@@ -707,6 +830,15 @@ def main() -> None:
         "month_start_top2_weight_sum",
         "month_start_score_positive_share",
         "month_start_score_gap_1_5",
+        "first_week_last_date",
+        "first_week_weight_count_mean",
+        "first_week_top1_weight_mean",
+        "first_week_top2_weight_sum_mean",
+        "first_week_score_positive_share_mean",
+        "first_week_score_gap_1_5_mean",
+        "first_week_weight_drift",
+        "first_week_score_followthrough",
+        "first_week_combo",
     ]
     weak_df = weak_df.merge(month_start_diagnostics[diagnostic_cols], on="month", how="left")
     all_audit_monthly = all_audit_monthly.merge(month_start_diagnostics[diagnostic_cols], on="month", how="left")
@@ -754,6 +886,9 @@ def main() -> None:
                     "month_start_regime",
                     "month_start_weight_count",
                     "month_start_signal_shape",
+                    "first_week_weight_drift",
+                    "first_week_score_followthrough",
+                    "first_week_combo",
                     "trigger_key",
                 ]
             ]

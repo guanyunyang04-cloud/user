@@ -43,6 +43,11 @@ def _cross_sectional_zscore_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return z.fillna(0.0)
 
 
+def _broadcast_series_to_frame(series: pd.Series, columns: pd.Index) -> pd.DataFrame:
+    values = np.repeat(series.to_numpy(dtype=float).reshape(-1, 1), len(columns), axis=1)
+    return pd.DataFrame(values, index=series.index, columns=columns, dtype=float).fillna(0.0)
+
+
 def build_liquidity_bucket_frame(
     amount_frame: pd.DataFrame,
     window: int = 20,
@@ -483,11 +488,41 @@ def build_sequence_features(
         volume_burst_1_3 = volume.div(volume.rolling(3).mean().replace(0, np.nan)).fillna(1.0)
         amount_burst_1_5 = amount.div(amount.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
         amount_burst_1_3 = amount.div(amount.rolling(3).mean().replace(0, np.nan)).fillna(1.0)
+        intraday_return = close.div(open_df.replace(0, np.nan)).sub(1.0).fillna(0.0)
+        signal_persistence_3 = ret_1.gt(0.0).rolling(3).mean().fillna(0.5)
         signal_persistence_5 = ret_1.gt(0.0).rolling(5).mean().fillna(0.5)
         momentum_2 = close.pct_change(2).fillna(0.0)
         rel_momentum_2 = momentum_2.sub(benchmark_momentum_2, axis=0)
         momentum_3 = close.pct_change(3).fillna(0.0)
         rel_momentum_3 = momentum_3.sub(benchmark_close.pct_change(3).fillna(0.0), axis=0)
+        gap_direction = np.sign(gap_open_1)
+        gap_followthrough_1 = gap_direction.mul(intraday_return).fillna(0.0)
+        gap_followthrough_3 = gap_followthrough_1.rolling(3).mean().fillna(0.0)
+        gap_reversal_3 = gap_followthrough_1.lt(0.0).astype(float).rolling(3).mean().fillna(0.0)
+        volume_decay_3_5 = volume.rolling(3).mean().div(volume.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        amount_decay_3_5 = amount.rolling(3).mean().div(amount.rolling(5).mean().replace(0, np.nan)).fillna(1.0)
+        breakout_failure_1 = (
+            breakout_intraday_high_20.gt(0.0)
+            & (breakout_distance_20.lt(0.0) | close_pos_in_range.lt(0.35))
+        ).astype(float)
+        breakout_failure_5 = breakout_failure_1.rolling(5).mean().fillna(0.0)
+        breakout_success_1 = (
+            breakout_intraday_high_20.gt(0.0)
+            & breakout_distance_20.ge(0.0)
+            & close_pos_in_range.gt(0.55)
+        ).astype(float)
+        breakout_success_5 = breakout_success_1.rolling(5).mean().fillna(0.0)
+        breakout_failure_pressure_5 = breakout_failure_5.sub(breakout_success_5).fillna(0.0)
+        breadth_positive_5_series = ret_1.gt(0.0).mean(axis=1).rolling(5).mean().fillna(0.5)
+        breadth_breakout_20_series = breakout_distance_20.gt(0.0).mean(axis=1).rolling(5).mean().fillna(0.0)
+        breadth_above_ma20_series = close.gt(close.rolling(20).mean()).mean(axis=1).rolling(5).mean().fillna(0.5)
+        breadth_positive_delta_5_series = breadth_positive_5_series.diff(5).fillna(0.0)
+        breadth_breakout_delta_5_series = breadth_breakout_20_series.diff(5).fillna(0.0)
+        breadth_positive_5 = _broadcast_series_to_frame(breadth_positive_5_series, close.columns)
+        breadth_breakout_20 = _broadcast_series_to_frame(breadth_breakout_20_series, close.columns)
+        breadth_above_ma20 = _broadcast_series_to_frame(breadth_above_ma20_series, close.columns)
+        breadth_positive_delta_5 = _broadcast_series_to_frame(breadth_positive_delta_5_series, close.columns)
+        breadth_breakout_delta_5 = _broadcast_series_to_frame(breadth_breakout_delta_5_series, close.columns)
         features.update(
             {
                 "gap_open_1": gap_open_1,
@@ -505,11 +540,24 @@ def build_sequence_features(
                 "volume_burst_1_3": volume_burst_1_3,
                 "amount_burst_1_5": amount_burst_1_5,
                 "amount_burst_1_3": amount_burst_1_3,
+                "signal_persistence_3": signal_persistence_3,
                 "signal_persistence_5": signal_persistence_5,
                 "momentum_2": momentum_2,
                 "rel_momentum_2": rel_momentum_2,
                 "momentum_3": momentum_3,
                 "rel_momentum_3": rel_momentum_3,
+                "gap_followthrough_3": gap_followthrough_3,
+                "gap_reversal_3": gap_reversal_3,
+                "volume_decay_3_5": volume_decay_3_5,
+                "amount_decay_3_5": amount_decay_3_5,
+                "breakout_failure_5": breakout_failure_5,
+                "breakout_success_5": breakout_success_5,
+                "breakout_failure_pressure_5": breakout_failure_pressure_5,
+                "breadth_positive_5": breadth_positive_5,
+                "breadth_breakout_20": breadth_breakout_20,
+                "breadth_above_ma20": breadth_above_ma20,
+                "breadth_positive_delta_5": breadth_positive_delta_5,
+                "breadth_breakout_delta_5": breadth_breakout_delta_5,
             }
         )
     return features

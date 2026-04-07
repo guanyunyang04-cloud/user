@@ -148,8 +148,14 @@
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1
 
-# current highest-ROI next step: promote short_expert into full multi-window formal
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_expert_formal_head2head_20260407_r1 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1
+# monthly-first multi-window formal for short_expert
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_expert_formal_head2head_20260407_r2_monthlycheckpoint --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1 --checkpoint-selection-objective primary_monthly_robust_score
+
+# extend short_alpha family budget to 32 when historical windows still show budget pressure
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1 --checkpoint-selection-objective primary_monthly_robust_score --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha32_20260407.json
+
+# resolve remaining oldest-window budget pressure at 48 and use this as stabilized view
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_expert_formal_head2head_20260407_r4_shortalpha48 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1 --checkpoint-selection-objective primary_monthly_robust_score --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha48_20260407.json
 ```
 
 ### 4.5 dynamic-graph formal
@@ -195,14 +201,23 @@
 ### 4.13 short-alpha targeted weak-month repair review
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_market_state
+
+# first validated first-week / multi-day repair branch
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_combo --root-tag short_alpha_targeted_weak_month_repair_regime_firstweek_combo_review_20260407_r1
 ```
 当前推荐口径：
 - 保持默认 `min-regime-support = 2`
 - 不要为了让最新窗也触发而降到 `1`
-- 可继续下钻的 month-start 权重签名 trigger：
+- 已验证有效的 first-week trigger：
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_combo
+```
+- 可继续下钻但暂未转正的 trigger：
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_weight_count
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_signal_shape
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_weight_drift
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_score_followthrough
 ```
 
 ### 4.14 short-alpha profit-max production refresh
@@ -235,11 +250,23 @@
 
 # output-head native family full-budget rerun (`short_alpha -> 24`)
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1
+
+# richer feature+loss bundle review (`short_alpha -> 24/32/48`)
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_v2_review_20260407_r1_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1,short_expert_monthly_v2
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_v2_review_20260407_r2_shortalpha32 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1,short_expert_monthly_v2 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha32_20260407.json
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1,short_expert_monthly_v2 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha48_20260407.json
 ```
 
 ## 5. 当前命令对应的最新判决
 - `run_short_alpha_score_weight_repair_review.py`
   - 扩大的静态 bridge/profile 集合仍未翻掉 `regoff_k1_5d_ensemble_native_anchor`
+- `run_short_alpha_targeted_weak_month_repair_review.py`
+  - `regime_firstweek_combo` 已转正：`61.67% / 2.575` vs 静态 `53.29% / 2.170`
+  - `delta_excess_annual = +8.38%`，`wins = 2/3`
+  - 当前最有效映射：
+    - `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+    - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor`
+  - 结论：弱月修复主线已进入 first-week / multi-day score-weight trigger 阶段，不再回到 broad execution-policy 扩搜
 - `run_graph_off_plain_budget_review.py`
   - `graph_off_plain` 预算补齐后仍未通过 liquid500 challenger gate
 - `run_encoder_transformer_stability_review.py`
@@ -263,12 +290,27 @@
   - 相对当前主线 `state_liquidity_listwise_v1`：坏月更浅、胜率更高、monthly robust score 更高
   - 但月度中位数超额仍略低：`4.61% < 5.26%`
   - full-budget 训练诊断：`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
-  - 当前只算 latest-window strong candidate；在“最有效优先、训练不吝啬”的新口径下，下一步最高优先级就是补 multi-window formal
+  - 作为 latest-window 结果，它已经完成后续 multi-window formal 追证
   - `short_expert_scorehead_monthly_v1` output-head branch 在 `e4` 与 native `24` full-budget 下同样复现 `81.41% / 4.871`
   - 它只在坏月更浅 `-3.10% > -3.73%` 与 Sharpe 略高 `4.871 > 4.852` 上占优
   - 但月度正收益占比 `75.00% < 83.33%`、月度中位数超额 `3.69% < 4.61%`、monthly robust score `0.0857 < 0.1012`
   - full-budget 训练诊断同样稳定：`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
   - 当前只保留为 output-head experimental branch，不替代 `short_expert_monthly_v1`，且不能再把它的落后归因于“训练次数不够”
+  - `short_expert_monthly_v2` 已补齐 `24 -> 32 -> 48`：`24 = 47.58% / 3.121` 且 in-tail，`32 = 52.41% / 2.983` 仍 in-tail，`48 = 57.55% / 3.015` 且已 stable
+  - fully-stabilized latest-window 视图下：月度正收益占比 `83.33%`，但月度中位数超额 `3.19% < 4.61%`，excess annual / Sharpe `57.55% / 3.015 < 91.76% / 4.852`
+  - 结论：`short_expert_monthly_v2` 只保留为 monitored negative branch，不再沿同一大包 recipe 继续堆料；若要继续 model-side，改做 ablation
+- `run_short_alpha_formal_head2head.py`
+  - `short_expert_monthly_v1` 的 monthly-first formal 已补齐：
+    - `24 epoch`：前两窗 `undertrained`
+    - `32 epoch`：中间窗稳定，整体最亮眼，但最老窗仍 `undertrained`
+    - `48 epoch`：最老窗稳定，但该窗明显回撤
+  - fully-stabilized formal 视图（`r4_shortalpha48`）：
+    - `short_expert_monthly_v1 = 41.45% / 2.411`
+    - `state_liquidity_listwise_v1 = 33.78% / 1.985`
+    - 月度正收益占比：`72.22% > 69.44%`
+    - 最差月：`-4.06% > -6.68%`
+    - 月度中位数超额仍略低：`2.742% < 2.779%`
+  - 结论：它已经是 formal strong challenger，但还不是 clean promotion answer；而 `short_expert_v2` 的 latest-window budget-stable 结果也未打赢它
 - `run_short_alpha_profitmax_production_refresh.py`
   - fresh profit-max production refresh 当前不成立
 
@@ -309,6 +351,7 @@
 - `daily_research/output/short_alpha_targeted_weak_month_repair_market_state_support1_review_20260406_r1`
 - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
 - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
+- `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_review_20260407_r1`
 - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
 - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
@@ -316,6 +359,14 @@
 - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4`
 - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
 - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
+- `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r1_fullbudget`
+- `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r2_shortalpha32`
+- `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48`
+- `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r2_monthlycheckpoint`
+- `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32`
+- `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r4_shortalpha48`
+- `daily_research/output/deep_alpha_family_epoch_budget_short_alpha32_20260407.json`
+- `daily_research/output/deep_alpha_family_epoch_budget_short_alpha48_20260407.json`
 - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
 - `daily_research/output/graph_off_plain_budget_review_20260406_r1`

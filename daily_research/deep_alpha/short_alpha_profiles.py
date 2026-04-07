@@ -26,6 +26,13 @@ class ShortAlphaProfile:
     adaptive_task_weights: bool = False
     research_objective_mode: str = ""
     checkpoint_selection_objective: str = ""
+    score_downside_penalty: float | None = None
+    structure_conditioning_mode: str = ""
+    target_state_names: str = ""
+    target_state_attack_structures: str = ""
+    target_state_protect_structures: str = ""
+    target_state_rank_weight: float | None = None
+    target_state_protect_rank_weight: float | None = None
 
 
 PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
@@ -173,6 +180,70 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
     ),
+    "short_expert_v2": ShortAlphaProfile(
+        name="short_expert_v2",
+        description=(
+            "State-targeted short-line expert v2: stronger downside-aware monthly recipe "
+            "with richer first-week/breadth/failure inputs."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        structure_context=True,
+        ranking_loss_weight=0.04,
+        listwise_loss_weight=0.08,
+        listwise_temperature=0.28,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.28,3:0.30,5:0.22,10:0.10,downside:0.55",
+        score_horizon_weights="1:0.38,3:0.32,5:0.20,10:0.10",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.20,
+        clean_breakout_event_loss_weight=0.25,
+        score_head_method="ridge",
+        adaptive_task_weights=True,
+        score_downside_penalty=0.35,
+        structure_conditioning_mode="state_targeted_rank",
+        target_state_names="trend_down_low_vol,trend_up_low_vol",
+        target_state_attack_structures="neutral_mixed,pullback_rebound,trend_breakout,high_vol_expansion",
+        target_state_protect_structures="low_vol_trend",
+        target_state_rank_weight=1.35,
+        target_state_protect_rank_weight=1.10,
+    ),
+    "short_expert_monthly_v2": ShortAlphaProfile(
+        name="short_expert_monthly_v2",
+        description=(
+            "Monthly-first short-line expert v2: short_expert_v2 plus monthly robust "
+            "checkpoint selection."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        structure_context=True,
+        ranking_loss_weight=0.04,
+        listwise_loss_weight=0.08,
+        listwise_temperature=0.28,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.28,3:0.30,5:0.22,10:0.10,downside:0.55",
+        score_horizon_weights="1:0.38,3:0.32,5:0.20,10:0.10",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.20,
+        clean_breakout_event_loss_weight=0.25,
+        score_head_method="ridge",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+        score_downside_penalty=0.35,
+        structure_conditioning_mode="state_targeted_rank",
+        target_state_names="trend_down_low_vol,trend_up_low_vol",
+        target_state_attack_structures="neutral_mixed,pullback_rebound,trend_breakout,high_vol_expansion",
+        target_state_protect_structures="low_vol_trend",
+        target_state_rank_weight=1.35,
+        target_state_protect_rank_weight=1.10,
+    ),
 }
 
 PROFILE_ALIASES: dict[str, str] = {
@@ -187,6 +258,8 @@ PROFILE_ALIASES: dict[str, str] = {
     "expert_monthly": "short_expert_monthly_v1",
     "expert_head": "short_expert_scorehead_v1",
     "expert_head_monthly": "short_expert_scorehead_monthly_v1",
+    "expert_v2": "short_expert_v2",
+    "expert_monthly_v2": "short_expert_monthly_v2",
 }
 
 DEFAULT_SHORT_ALPHA_PROFILE = "baseline_current"
@@ -239,6 +312,20 @@ def build_profile_cli_args(profile: ShortAlphaProfile, *, include_objective_over
         args.extend(["--research-objective-mode", profile.research_objective_mode])
     if include_objective_overrides and profile.checkpoint_selection_objective:
         args.extend(["--checkpoint-selection-objective", profile.checkpoint_selection_objective])
+    if profile.score_downside_penalty is not None:
+        args.extend(["--score-downside-penalty", str(profile.score_downside_penalty)])
+    if profile.structure_conditioning_mode:
+        args.extend(["--structure-conditioning-mode", profile.structure_conditioning_mode])
+    if profile.target_state_names:
+        args.extend(["--target-state-names", profile.target_state_names])
+    if profile.target_state_attack_structures:
+        args.extend(["--target-state-attack-structures", profile.target_state_attack_structures])
+    if profile.target_state_protect_structures:
+        args.extend(["--target-state-protect-structures", profile.target_state_protect_structures])
+    if profile.target_state_rank_weight is not None:
+        args.extend(["--target-state-rank-weight", str(profile.target_state_rank_weight)])
+    if profile.target_state_protect_rank_weight is not None:
+        args.extend(["--target-state-protect-rank-weight", str(profile.target_state_protect_rank_weight)])
     if profile.adaptive_task_weights:
         args.append("--adaptive-task-weights")
     if profile.state_context:

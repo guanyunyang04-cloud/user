@@ -10822,3 +10822,129 @@ position,000001.SZ,1200,12.38,
 - 同步：
   - `daily_research/brain/working_memory.md`
   - `daily_research/brain/procedural_memory.md`
+
+## 2026-04-07 - first-week / multi-day weak-month repair 首次转正
+- 执行：
+  - 扩展 `run_short_alpha_targeted_weak_month_repair_review.py`
+  - 新增 trigger mode：
+    - `regime_firstweek_weight_drift`
+    - `regime_firstweek_score_followthrough`
+    - `regime_firstweek_combo`
+  - 从 `aligned_daily_score_panel.csv` 与 `aligned_daily_target_weight_panel.csv` 提取首周多日诊断：
+    - `first_week_weight_drift`
+    - `first_week_score_followthrough`
+    - `first_week_combo`
+- 正式复核：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_review_20260407_r1`
+- 结果：
+  - targeted mean excess annual = `61.67%`
+  - targeted mean excess Sharpe = `2.575`
+  - static mean excess annual = `53.29%`
+  - static mean excess Sharpe = `2.170`
+  - `delta_excess_annual = +8.38%`
+  - `wins = 2/3`
+- 学到的有效映射：
+  - `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor`
+- 判断：
+  - 这是 first-week / multi-day `score -> weight -> execution` 修复线首次出现正式正证据
+  - 说明 weak-month repair 的下一步应继续沿 limited regime-scoped repair branch 收敛
+  - 不再回到 broad execution-policy sweep
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - short_expert_monthly_v1 multi-window formal 补齐到稳定视图
+- 初始动作：
+  - 先跑 `short_alpha_short_expert_formal_head2head_20260407_r1`
+  - 之后核对发现 formal runner 若不显式传参，会回落到 `primary_annual_return`
+  - 因此这条 `r1` 不能作为 `short_expert_monthly_v1` 的 monthly-first formal 证据
+- 正式 monthly-first 复核链：
+  - `r2_monthlycheckpoint`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r2_monthlycheckpoint`
+    - 显式使用 `--checkpoint-selection-objective primary_monthly_robust_score`
+    - 结果：两段历史窗仍 `undertrained`
+      - `20230216_20240229`
+      - `20240301_20250317`
+  - `r3_shortalpha32`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32`
+    - 新增 `deep_alpha_family_epoch_budget_short_alpha32_20260407.json`
+    - 结果：`20240301_20250317` 稳定；`20230216_20240229` 仍 `undertrained`
+    - 这一版 headline 最亮眼：
+      - `46.44% / 2.825`
+      - 月度正收益占比 `75.00%`
+      - 月度中位数超额 `3.142%`
+  - `r4_shortalpha48`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r4_shortalpha48`
+    - 新增 `deep_alpha_family_epoch_budget_short_alpha48_20260407.json`
+    - 结果：最老窗终于稳定，但该窗显著回撤
+      - `selected_epoch = 20`
+      - `selected_in_tail = false`
+      - `objective_aligned_budget_pressure = false`
+      - `status = stable`
+- fully-stabilized formal 汇总（以 `r4_shortalpha48` 为准）：
+  - `short_expert_monthly_v1 = 41.45% / 2.411`
+  - `state_liquidity_listwise_v1 = 33.78% / 1.985`
+  - 月度正收益占比：`72.22% > 69.44%`
+  - 最差月：`-4.06% > -6.68%`
+  - 但月度中位数超额仍略低：`2.742% < 2.779%`
+- 判断：
+  - `short_expert_monthly_v1` 已经不是 latest-window 偶然 uplift，而是有 formal 支撑的 strong challenger
+  - 但在 fully-stabilized 视图下，它仍没有形成 clean promotion answer
+  - 原因不是“没训够”，而是 oldest stable window 暴露了真实边界
+  - 后续若继续推进 model-side，不应重复补同类 formal，而应直接进入更有效的 `short_expert_v2`
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - short_expert_monthly_v2 latest-window 补齐到预算稳定
+- 背景：
+  - 在 `short_expert_monthly_v1` 已经成为 formal strong challenger 后，我继续按“最有效优先”方向，把剩余的 first-week / breadth / failure-risk 特征与 state-targeted downside / false-positive 惩罚打包成 `short_expert_monthly_v2`
+  - 代码侧同时更新了：
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/sequence_dataset.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+- 新增点：
+  - `short_expert_monthly_v2`
+    - 更高 `ranking/listwise`
+    - 更高 `downside` 权重
+    - `state_targeted_rank`
+    - 首周 follow-through / breadth / breakout-failure 特征
+  - feature cache version 从 `6` bump 到 `7`
+- latest-window 复核链：
+  - `r1_fullbudget`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r1_fullbudget`
+    - `47.58% / 3.121`
+    - `selected_epoch = 22/24`
+    - `selected_in_tail = true`
+    - `objective_aligned_budget_pressure = true`
+  - `r2_shortalpha32`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r2_shortalpha32`
+    - `52.41% / 2.983`
+    - `selected_epoch = 30/32`
+    - 仍 `selected_in_tail = true`
+  - `r3_shortalpha48`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48`
+    - `57.55% / 3.015`
+    - `selected_epoch = 36/48`
+    - `selected_in_tail = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- fully-stabilized latest-window 判断：
+  - `short_expert_monthly_v2` 虽把月度正收益占比抬到 `83.33%`
+  - 但月度中位数超额只有 `3.19%`
+  - excess annual / Sharpe 只有 `57.55% / 3.015`
+  - 整体仍显著落后 `short_expert_monthly_v1 = 91.76% / 4.852`
+- 结论：
+  - `short_expert_monthly_v2` 不是“还没训够”的假阴性，`48` 后已经 budget-stable
+  - 这条大包 recipe 只能记为 monitored negative branch
+  - 负证据针对的是“这整包改动的组合方式”，不是 short-line 方向整体失效
+  - 后续 model-side 如继续，应拆成 feature-only / penalty-only ablation，而不是继续往同一个 bundle 里堆更多改动
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/project_map.md`

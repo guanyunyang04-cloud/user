@@ -49,6 +49,10 @@
   - 优先先把它推进到 full-budget multi-window formal
   - 再决定是否继续加新特征 / 新 loss / 新输出头
   - 不默认在 candidate 尚未 formal 化前继续堆更多旁支实验
+- 如果要做更大更强的 recipe bundle（例如同时改特征、loss、状态惩罚）：
+  - 必须先作为独立 opt-in profile 落地
+  - 并在补齐预算后决定它是否真的有效
+  - 若 budget-stable 后仍输当前主候选，后续默认拆成可归因 ablation，而不是继续叠更多改动
 - 如果 short-line expert 要尝试更复杂的输出头：
   - 先注册成独立 opt-in profile（例如 `*_scorehead_*`）
   - 不得直接覆盖已经验证过的 `ridge` 主候选
@@ -67,33 +71,24 @@
 
 ## 5. 训练预算规则
 - rich experiment 之前必须先冻结 family epoch budget manifest。
-- family epoch budget 的真源固定为：
-  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
-- 当前冻结预算为：
-  - `baseline -> 4`
-  - `structure -> 12`
-  - `short_alpha -> 24`
-  - `dynamic_graph -> 16`
+- family epoch budget 的真源固定为 `daily_research/output/deep_alpha_family_epoch_budget_latest.json`。
+- 当前冻结预算：`baseline -> 4`，`structure -> 12`，`short_alpha -> 24`，`dynamic_graph -> 16`。
 - formal runner 默认读取 manifest，不手填统一 `--epochs`。
 - 除非是在当前回合内为了快速探针验证可行性，否则不要主动把 native family budget 压低到 `e4` 之类的临时预算。
-- 用户已经明确要求“不要吝啬训练资源、不要轻易中断实验”后，默认动作是：
-  - 优先跑 native family budget
-  - 非硬错误不轻易中断长实验
-  - `e4` 结果只记为 probe/smoke evidence，不记为最终预算判决
+- 用户已经明确要求“不要吝啬训练资源、不要轻易中断实验”后，默认动作是：优先跑 native family budget，非硬错误不轻易中断长实验，`e4` 结果只记为 probe/smoke evidence。
+- 如果补预算后某窗从 `undertrained` 变成 `stable`，但核心指标明显退化：
+  - 必须把它记为“预算补齐后真实泛化边界暴露”
+  - 不得继续把中间阶段更亮眼的结果当作最终可推广证据，也不得再用“可能还没训够”掩盖该窗口已经稳定后的退化
 
 ## 6. frontier 校准规则
-- frontier 默认先跑：
-  - `4 / 8 / 12 / 16`
-- 如果最优点落在最右边界，或右边界仍有 objective-aligned budget pressure，再扩到：
-  - `24 / 32`
-  - 必要时继续到 `40 / 48 / 64`
+- frontier 默认先跑 `4 / 8 / 12 / 16`。
+- 如果最优点落在最右边界，或右边界仍有 objective-aligned budget pressure，再扩到 `24 / 32`，必要时继续到 `40 / 48 / 64`。
 - family-default calibration windows 只用于第一阶段。
+- 如果某窗在 `32` 仍存在 `objective_aligned_budget_pressure`，但到 `48` 已稳定且结论回撤：
+  - 默认停止继续盲目加预算，将其归类为“该窗口对当前 recipe 不形成 clean promotion evidence”
+  - 后续优先转向更有效的 recipe/feature/loss 改动，而不是继续单纯加 epoch
 - dynamic_graph 允许使用更晚 calibration windows，因为天然有效样本起点更晚。
-- 只有在出现以下任一信号时，才允许把“没训够”当作正式判断：
-  - `selected_in_tail = true`
-  - `selected_at_right_boundary = true`
-  - `still_improving = true`
-  - `objective_aligned_budget_pressure = true`
+- 只有在出现以下任一信号时，才允许把“没训够”当作正式判断：`selected_in_tail = true`、`selected_at_right_boundary = true`、`still_improving = true`、`objective_aligned_budget_pressure = true`。
 - 如果某条线在 `e4` 探针和 native family full-budget 下给出相同的 selected checkpoint 与同结论结果，则在该窗口上记为 budget-stable，不再把分支优劣归因于 epoch 不足。
 
 ## 7. runner 公平性规则
@@ -183,7 +178,19 @@
   - 再视需要监控 `graph_off_plain`
   - 不再把“更大、更深”本身视为默认升级方向
 
-## 13. checkpoint 选择与续训规则
+## 13. execution-side repair 规则
+- short-alpha 执行侧后续默认不再横向扫更多 `execution policy / bridge / profile`。
+- 如果 month-start 单点 trigger 已证明信息不足，下一步应优先下钻 `first-week / multi-day score trigger`、`first-week / multi-day weight trigger` 与 `score -> weight -> execution` 的多日兑现链。
+- `regime_firstweek_combo` 已经形成正证据后：
+  - 视为当前已验证的高 ROI repair class，默认优先于继续追加新的静态 `month-start` 分类器
+  - 后续应围绕它做收敛和稳健性验证，而不是回到 broad conditional policy
+## 14. short-line expert bundle 规则
+- `short_expert_monthly_v1` 是当前已验证的 short-line model-side 主候选。
+- `short_expert_monthly_v2` 这类“first-week 特征 + state-targeted loss/penalty”大包方案，如果在 `24 -> 32 -> 48` 后变成 budget-stable 仍落后：
+  - 记为 monitored negative branch，结论是“这一整包 recipe 没有打赢主候选”，不是“short-line 方向无效”
+  - 后续默认拆分成 feature-only / penalty-only ablation
+- 不要因为 bundle 更大、更完整，就默认把它当成更高优先级主线。
+## 15. checkpoint 选择与续训规则
 - `deep_alpha` 主链支持月度 checkpoint objective：
   - `primary_monthly_positive_ratio`
   - `primary_monthly_median_return`
@@ -199,7 +206,7 @@
 - 比较不同 checkpoint objective 时，不能只看 candidate 绝对指标是否提高，还要看相对 baseline 的 discrimination 是否变强。
 - 如果某 objective 同时抬高 candidate 和 baseline，但 baseline 提升更多，则不得切换主线默认 objective。
 
-## 14. 默认值升级规则
+## 16. 默认值升级规则
 - 只有同一执行口径下同时满足以下条件，才允许升级默认执行：
   - formal rich experiment 胜出
   - recent realistic replay gate 胜出
@@ -207,7 +214,7 @@
 - 如果 challenger 来自不同股票池主线，必须先补同宇宙 formal；只凭跨股票池 headline 更高，不得进入默认执行升级链。
 - 在 production promotion 完成前，研究 winner 只算“候选”，不算“active default”。
 
-## 15. 语言与编码规则
+## 17. 语言与编码规则
 - brain 文档默认使用简体中文。
 - shell 运行时输出、进度条文本、运行日志默认使用英文。
 - PowerShell 直接读中文 markdown 如果出现乱码，优先用 `yolos` 的 UTF-8 Python 读取，不要误判成文件损坏。

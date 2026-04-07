@@ -52,6 +52,10 @@ REUSE_METRICS: dict[str, str] = {
         "daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1/"
         "runs/state_liquidity_listwise_v1_20250318_20260331/metrics.json"
     ),
+    "short_expert_monthly_v1": (
+        "daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget/"
+        "runs/short_expert_monthly_v1/metrics.json"
+    ),
 }
 
 
