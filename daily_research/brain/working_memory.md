@@ -113,15 +113,24 @@
   - refreshed three-window mean = `34.68% / 1.343`
   - 但旧弱窗稳定性仍不够，且 `budget_pressure = true`
   - 结论：high-upside but unstable，当前仍不通过 liquid500 challenger gate
-- short-line expert 训练包已落地并完成 latest-window 受控预算探针：
+- short-line expert 训练包已落地，并完成 `e4` 探针加 native family full-budget 复跑：
   - 新 profile：`short_expert_monthly_v1`
   - 训练改动聚焦于更短 horizon、event 辅助头、扩展 short_alpha feature pack、`ridge` score head 与 `adaptive_task_weights`
   - latest formal monthly-first `e4` probe = `91.76% / 4.852`
+  - native family budget 复跑使用 `short_alpha -> 24`，full-budget 结果仍是 `91.76% / 4.852`
   - 月度正收益占比 `83.33%`，明显高于当前主线 `75.00%`
   - 最差月 `-3.73%`，也浅于当前主线 `-4.48%`
   - 月度 robust score = `0.1012`，高于当前主线 `0.0897`
   - 但月度中位数超额 `4.61%` 仍低于当前主线 `5.26%`
-  - 当前结论：这是一个有证据的新 short-line model-side candidate，但仍只完成 latest-window controlled probe，下一步必须补 multi-window formal，不能直接宣称 active default 可升级
+  - full-budget 训练诊断：`epochs_requested/completed = 24/24`，`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
+  - 当前结论：这条 latest-window candidate 不是“没训够”造成的表观结果；它是预算稳定的 recent strong candidate，但下一步仍必须补 multi-window formal，不能直接宣称 active default 可升级
+- `short_expert` 输出头分支已补做 `e4` 探针与 native family full-budget 复跑，并与主候选正式分离：
+  - 新 opt-in profile：`short_expert_scorehead_monthly_v1`
+  - `e4` probe 与 full-budget 结果一致：`81.41% / 4.871`
+  - 月度正收益占比 `75.00%`，月度中位数超额 `3.69%`，最差月 `-3.10%`，monthly robust score `0.0857`
+  - full-budget 训练诊断同样稳定：`epochs_requested/completed = 24/24`，`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
+  - 相对 `ridge` 主候选，它只在坏月更浅、回撤更浅、Sharpe 略高上占优，但 annual / 正收益占比 / 月度中位数 / monthly robust score 全部回撤
+  - 当前结论：保留 `short_expert` score head 代码路径与独立 profile，但它的落后也不是因为“训练次数不够”；在打赢 `short_expert_monthly_v1` 前，它只保留为 output-head monitored branch
 - short-line expert latest probe 的 execution alignment 结果值得单独记录：
   - 选中的不是更快的 `1d/3d` 壳，而是 `regoff_k1_20d_ensemble_native_anchor`
   - 这说明当前 uplift 更像来自“短线目标训练后带来的月度兑现质量提升”，而不是简单切到更快 execution policy
@@ -152,9 +161,11 @@
    - 执行兑现质量复核
 4. model-side 新高优先级支线已明确为 `short_expert_monthly_v1`：
    - 保持 `primary_monthly_robust_score`
-   - 保持更短 horizon + event 头 + expanded short_alpha inputs + learned score head
+   - 保持更短 horizon + event 头 + expanded short_alpha inputs + `ridge` score head
    - 下一步先补 multi-window formal，再决定是否进入 recent realistic gate
    - 在 multi-window formal 完成前，它只算 recent strong candidate，不算默认执行升级答案
+   - `short_expert_scorehead_monthly_v1` 仅保留为 output-head monitored branch；只有先打赢 `short_expert_monthly_v1` 的 monthly-first 指标，才允许升级为主候选
+   - 在用户明确要求“最有效优先、训练不吝啬”后，这条线当前应高于继续做零散微调；先回答它能不能成为 formal winner
 5. “月收益 30%+”当前只作为 north star，不作为短期默认晋级门槛：
    - 短期仍先追月度中位数抬升、弱月收浅、胜率提高
    - 只有当这几项持续抬升后，才有资格讨论更激进的收益目标
@@ -173,6 +184,11 @@
    - 非默认 liquid500 challenger
    而不是直接改当前 active default 的 fresh retrain 默认值
 9. 旧 baseline production root 仅保留为显式回退对照，不再作为默认执行真源
+10. 接下来默认按“最有效而非最小改动”推进，阶段顺序固定为：
+   - 先用 native family budget 把 `short_expert_monthly_v1` 推进到 multi-window formal
+   - 若 formal 转正，再进 recent realistic gate，评估是否形成默认执行升级路径
+   - 与此同时只保留一条高 ROI 修复线：把 weak-month repair 下钻到 `first-week / multi-day score-weight trigger`
+   - 在上述两步给出新结论前，不再优先做零散 output-head 小修或横向 execution-policy 扩搜
 
 ## 5. 当前边界
 - formal holdout 负责研究 winner 判决
@@ -219,12 +235,18 @@
   - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
 - liquid500 short-alpha profit-max production refresh：
   - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
+- liquid500 short-line expert latest-window full-budget review：
+  - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
+- liquid500 short-line expert score-head latest-window full-budget review：
+  - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
 - liquid500 short-alpha production epoch extension：
   - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - liquid500 short-alpha checkpoint objective compare：
   - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
 - liquid500 short-alpha short-horizon expert review：
   - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
+- liquid500 short-alpha short-horizon expert score-head review：
+  - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4`
 - monthly landscape review：
   - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - architecture protocol refresh：

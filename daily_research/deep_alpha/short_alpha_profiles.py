@@ -125,6 +125,54 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
     ),
+    "short_expert_scorehead_v1": ShortAlphaProfile(
+        name="short_expert_scorehead_v1",
+        description=(
+            "Short-line expert output-head probe: short_expert_v1 with a learned "
+            "selection/confidence/sizing score head."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="short_expert",
+        adaptive_task_weights=True,
+    ),
+    "short_expert_scorehead_monthly_v1": ShortAlphaProfile(
+        name="short_expert_scorehead_monthly_v1",
+        description=(
+            "Monthly-first short-line output-head probe: short_expert_scorehead_v1 "
+            "with monthly robust checkpoint selection."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="short_expert",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
 }
 
 PROFILE_ALIASES: dict[str, str] = {
@@ -137,6 +185,8 @@ PROFILE_ALIASES: dict[str, str] = {
     "combo": "short_combo_v1",
     "expert": "short_expert_v1",
     "expert_monthly": "short_expert_monthly_v1",
+    "expert_head": "short_expert_scorehead_v1",
+    "expert_head_monthly": "short_expert_scorehead_monthly_v1",
 }
 
 DEFAULT_SHORT_ALPHA_PROFILE = "baseline_current"

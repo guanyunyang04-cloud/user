@@ -10697,3 +10697,128 @@ position,000001.SZ,1200,12.38,
     - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
   - latest review 实跑通过：
     - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json`
+
+## 2026-04-06 - `short_expert` 输出头分支落地并与主候选分离
+- 我继续把“输出头升级”这件事补齐成代码，而不是停留在方案层：
+  - `daily_research/deep_alpha/score_head.py`
+    - 新增 `short_expert` score head
+    - 把输出拆成 `selection_score / confidence_score / sizing_score / learned_score`
+    - 其中 `learned_score = selection_signal * sizing_score`，这样主回测链不需要改组合构建接口
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `--score-head-method` 新增 `short_expert`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - 为了避免把未验证分支误覆盖主候选，把 profile 拆成两组：
+      - `short_expert_monthly_v1` 回到已验证的 `ridge`
+      - `short_expert_scorehead_v1 / short_expert_scorehead_monthly_v1` 专门承载输出头实验
+- 我按同一 latest formal monthly window 补跑了规范命名的受控预算探针：
+  - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4`
+- probe 结果：
+  - `short_expert_scorehead_monthly_v1 = 81.41% / 4.871`
+  - 月度正收益占比 `75.00%`
+  - 月度中位数超额 `3.69%`
+  - 最差月 `-3.10%`
+  - monthly robust score `0.0857`
+- 与当前主候选 `short_expert_monthly_v1`（`ridge` 版）直接对比：
+  - `ridge` 主候选 = `91.76% / 4.852`
+  - 月度正收益占比 `83.33%`
+  - 月度中位数超额 `4.61%`
+  - 最差月 `-3.73%`
+  - monthly robust score `0.1012`
+- 判决：
+  - 当前这版 `short_expert` 输出头只在坏月更浅、最大回撤更浅、Sharpe 略高上占优
+  - 但它没有打赢 monthly-first 主目标，尤其 `positive_month_ratio / median_monthly_excess / monthly_robust_score` 都回撤
+  - 所以它现在只能作为 output-head experimental branch 保留，不能替代 `short_expert_monthly_v1`
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+- 验证：
+  - `py_compile` 通过：
+    - `daily_research/deep_alpha/score_head.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - canonical review 实跑通过：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1`
+
+## 2026-04-06 - `short_expert` full-budget 复跑，确认 latest 结论不是“没训够”
+- 用户明确要求：
+  - 不要吝啬训练资源
+  - 实验时不要轻易中断
+  - 需要核实 recent `short_expert` 结论是否被低预算扭曲
+- 我先回查了当前正式训练预算真源：
+  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+  - 其中 `short_alpha` family 的冻结预算本来就是 `24`
+  - 所以前一轮 `e4` 只应该被视为“回合内快速探针”，不该继续当成最终预算证据
+- 我补跑了 native family full-budget 的 ridge 主候选复核：
+  - 命令：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1`
+  - 输出目录：
+    - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
+  - full-budget 结果与 `e4` probe 完全一致：
+    - `short_expert_monthly_v1 = 91.76% / 4.852`
+    - 月度正收益占比 `83.33%`
+    - 月度中位数超额 `4.61%`
+    - 最差月 `-3.73%`
+    - monthly robust score `0.1012`
+  - 训练诊断：
+    - `epochs_requested/completed = 24/24`
+    - `selected_epoch = 1`
+    - `selected_in_tail = false`
+    - `selected_at_right_boundary = false`
+    - `still_improving = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- 我也补跑了 output-head 分支的 native family full-budget 复核：
+  - 命令：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1`
+  - 输出目录：
+    - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
+  - full-budget 结果同样与 `e4` probe 一致：
+    - `short_expert_scorehead_monthly_v1 = 81.41% / 4.871`
+    - 月度正收益占比 `75.00%`
+    - 月度中位数超额 `3.69%`
+    - 最差月 `-3.10%`
+    - monthly robust score `0.0857`
+  - 训练诊断同样稳定：
+    - `epochs_requested/completed = 24/24`
+    - `selected_epoch = 1`
+    - `selected_in_tail = false`
+    - `selected_at_right_boundary = false`
+    - `still_improving = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- 这轮新增判断：
+  - 对 latest-window 的 `short_expert_monthly_v1` 与 `short_expert_scorehead_monthly_v1`，当前没有证据表明“训练次数不够”是主要问题
+  - `short_expert_monthly_v1` 的优势和 `short_expert_scorehead_monthly_v1` 的落后，都在 native family budget 下复现了
+  - 后续默认口径应改为：
+    - 先跑 native family budget
+    - 不轻易中断长实验
+    - 只有看到 `selected_in_tail / selected_at_right_boundary / still_improving / objective_aligned_budget_pressure` 之一为真，才正式讨论“没训够”
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - 后续工作重排为“最有效优先、训练不吝啬”
+- 用户新增明确要求：
+  - 后续改动不要追求最小
+  - 应优先追求最有效
+  - 训练资源不要吝啬
+- 基于当前证据，我把后续工作顺序重排为三阶段：
+  - 第一阶段：先用 native family budget 把 `short_expert_monthly_v1` 推进到 multi-window formal
+    - 原因：它已经是 latest-window strong candidate，且 uplift 不是低预算假象
+    - 要优先回答的不是“还能不能再加一点小特征”，而是“它能不能正式成为 multi-window winner”
+  - 第二阶段：只保留一条 execution-side 高 ROI 修复线
+    - 不再横向扩 execution policy / profile
+    - 继续把 weak-month repair 下钻到 `first-week / multi-day score-weight trigger`
+    - 重点针对 `trend_down_low_vol`、`trend_up_low_vol` 与 `2025-07 / 2024-01 / 2025-10`
+  - 第三阶段：只有在前两步给出新结论后，才决定是否继续扩大 model-side 配方
+    - 若 `short_expert_monthly_v1` formal 转正，再进 recent realistic gate
+    - 若仍不过，再做更大但更有效的 `short_expert_v2`，补齐剩余 first-week 特征与状态化 downside / false-positive 惩罚
+- 这次同步的核心口径：
+  - 在当前节点上，最该避免的是“为了保持 diff 小而继续做零散小修”
+  - 应优先做能够改变 formal / gate 结论的大动作
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`

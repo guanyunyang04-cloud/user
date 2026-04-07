@@ -147,6 +147,9 @@
 ### 4.4 short-alpha formal
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1
+
+# current highest-ROI next step: promote short_expert into full multi-window formal
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_formal_head2head.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_expert_formal_head2head_20260407_r1 --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1
 ```
 
 ### 4.5 dynamic-graph formal
@@ -223,6 +226,15 @@
 
 # latest controlled-budget probe
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json
+
+# output-head controlled-budget probe
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1
+
+# native family full-budget rerun (`short_alpha -> 24`)
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1
+
+# output-head native family full-budget rerun (`short_alpha -> 24`)
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1
 ```
 
 ## 5. 当前命令对应的最新判决
@@ -246,11 +258,17 @@
   - 当前仍只算 monitored repair candidate，不算 active default 升级
   - 从当前节点起，不再横向追加新的 broad execution policy review；后续只继续 `month-start / first-week trigger / score -> weight -> execution` 修复
 - `run_short_alpha_short_horizon_expert_review.py`
-  - latest controlled-budget probe winner = `short_expert_monthly_v1`
-  - `91.76% / 4.852`，月度正收益占比 `83.33%`
+  - latest ridge winner = `short_expert_monthly_v1`
+  - `e4` probe 与 native `24` full-budget 同结论：`91.76% / 4.852`，月度正收益占比 `83.33%`
   - 相对当前主线 `state_liquidity_listwise_v1`：坏月更浅、胜率更高、monthly robust score 更高
   - 但月度中位数超额仍略低：`4.61% < 5.26%`
-  - 当前只算 latest-window strong candidate；下一步必须补 multi-window formal，不能直接宣称 active default 可升级
+  - full-budget 训练诊断：`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
+  - 当前只算 latest-window strong candidate；在“最有效优先、训练不吝啬”的新口径下，下一步最高优先级就是补 multi-window formal
+  - `short_expert_scorehead_monthly_v1` output-head branch 在 `e4` 与 native `24` full-budget 下同样复现 `81.41% / 4.871`
+  - 它只在坏月更浅 `-3.10% > -3.73%` 与 Sharpe 略高 `4.871 > 4.852` 上占优
+  - 但月度正收益占比 `75.00% < 83.33%`、月度中位数超额 `3.69% < 4.61%`、monthly robust score `0.0857 < 0.1012`
+  - full-budget 训练诊断同样稳定：`selected_epoch = 1`，`selected_in_tail = false`，`selected_at_right_boundary = false`，`still_improving = false`，`objective_aligned_budget_pressure = false`
+  - 当前只保留为 output-head experimental branch，不替代 `short_expert_monthly_v1`，且不能再把它的落后归因于“训练次数不够”
 - `run_short_alpha_profitmax_production_refresh.py`
   - fresh profit-max production refresh 当前不成立
 
@@ -295,6 +313,9 @@
 - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
 - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
 - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
+- `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4`
+- `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
+- `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
 - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1`
 - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
 - `daily_research/output/graph_off_plain_budget_review_20260406_r1`

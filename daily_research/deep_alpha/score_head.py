@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List
 
 import numpy as np
@@ -29,6 +29,7 @@ class ScoreHeadArtifact:
     feature_columns: List[str]
     task_weights: Dict[str, float]
     model: object | None
+    extra: Dict[str, float] = field(default_factory=dict)
 
 
 def _cross_sectional_standardize(series: pd.Series) -> pd.Series:
@@ -142,6 +143,34 @@ def _build_training_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]
     return target
 
 
+def _build_confidence_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]) -> pd.Series:
+    indexed = pred_df.set_index(["date", "stock"]).sort_index()
+    confidence = pd.Series(0.0, index=indexed.index, dtype=float)
+    breakout_series: pd.Series | None = None
+    clean_breakout_series: pd.Series | None = None
+    for target_name, weight in task_weights.items():
+        true_col = f"true_{target_name}"
+        if true_col not in indexed.columns:
+            continue
+        series = indexed[true_col].astype(float)
+        if target_name.startswith("fwd_excess_"):
+            confidence = confidence.add(series.clip(lower=0.0) * float(weight), fill_value=0.0)
+        elif target_name == RISK_TARGET_NAME:
+            confidence = confidence.add(series.clip(upper=0.0) * float(weight), fill_value=0.0)
+        elif target_name.startswith("event_breakout_"):
+            breakout_series = series.clip(lower=0.0, upper=1.0)
+            confidence = confidence.add(breakout_series * max(float(weight), 0.05), fill_value=0.0)
+        elif target_name.startswith("event_clean_breakout_"):
+            clean_breakout_series = series.clip(lower=0.0, upper=1.0)
+            confidence = confidence.add(clean_breakout_series * max(float(weight), 0.10) * 1.5, fill_value=0.0)
+    if breakout_series is not None and clean_breakout_series is not None:
+        false_breakout = (breakout_series - clean_breakout_series).clip(lower=0.0)
+        confidence = confidence.sub(false_breakout * 0.25, fill_value=0.0)
+    target = _cross_sectional_rank(confidence)
+    target.name = "confidence_target"
+    return target
+
+
 def fit_score_head(
     train_pred_df: pd.DataFrame,
     target_names: List[str],
@@ -179,15 +208,27 @@ def fit_score_head(
         if adaptive_task_weights
         else {name: 1.0 / len(target_names) for name in target_names}
     )
-    target = _build_training_target(train_pred_df, task_weights)
-    aligned = indexed_features.join(target, how="inner").dropna()
+    selection_target = _build_training_target(train_pred_df, task_weights)
+    if method == "short_expert":
+        confidence_target = _build_confidence_target(train_pred_df, task_weights)
+        aligned = indexed_features.join(selection_target, how="inner").join(confidence_target, how="inner").dropna()
+    else:
+        aligned = indexed_features.join(selection_target, how="inner").dropna()
     if aligned.empty:
         raise RuntimeError("Score head training data is empty.")
-    X = aligned.drop(columns=["score_target"])
-    y = aligned["score_target"].values
+    X = aligned.drop(columns=[col for col in ["score_target", "confidence_target"] if col in aligned.columns])
     if method == "ridge":
+        y = aligned["score_target"].values
         model = Ridge(alpha=1.0, random_state=7)
+        model.fit(X, y)
+        return ScoreHeadArtifact(
+            method=method,
+            feature_columns=list(X.columns),
+            task_weights=task_weights,
+            model=model,
+        )
     elif method == "lgbm":
+        y = aligned["score_target"].values
         if LGBMRegressor is None:
             raise RuntimeError("LightGBM is not available in current environment.")
         model = LGBMRegressor(
@@ -198,15 +239,34 @@ def fit_score_head(
             colsample_bytree=0.9,
             random_state=7,
         )
+        model.fit(X, y)
+        return ScoreHeadArtifact(
+            method=method,
+            feature_columns=list(X.columns),
+            task_weights=task_weights,
+            model=model,
+        )
+    elif method == "short_expert":
+        selection_model = Ridge(alpha=1.0, random_state=7)
+        confidence_model = Ridge(alpha=2.0, random_state=7)
+        selection_model.fit(X, aligned["score_target"].values)
+        confidence_model.fit(X, aligned["confidence_target"].values)
+        return ScoreHeadArtifact(
+            method=method,
+            feature_columns=list(X.columns),
+            task_weights=task_weights,
+            model={
+                "selection_model": selection_model,
+                "confidence_model": confidence_model,
+            },
+            extra={
+                "selection_rank_blend": 0.35,
+                "confidence_floor": 0.50,
+                "confidence_scale": 0.50,
+            },
+        )
     else:
         raise ValueError(f"Unsupported score head method: {method}")
-    model.fit(X, y)
-    return ScoreHeadArtifact(
-        method=method,
-        feature_columns=list(aligned.drop(columns=["score_target"]).columns),
-        task_weights=task_weights,
-        model=model,
-    )
 
 
 def apply_score_head(
@@ -219,7 +279,30 @@ def apply_score_head(
     features = _build_feature_frame(pred_df, target_names)
     indexed = features.set_index(["date", "stock"]).sort_index()
     aligned = indexed.reindex(columns=artifact.feature_columns).fillna(0.0)
-    score = artifact.model.predict(aligned)
     out = aligned.reset_index()[["date", "stock"]].copy()
+    if artifact.method == "short_expert":
+        model_dict = artifact.model if isinstance(artifact.model, dict) else {}
+        selection_model = model_dict.get("selection_model")
+        confidence_model = model_dict.get("confidence_model")
+        if selection_model is None or confidence_model is None:
+            raise ValueError("short_expert score head requires selection_model and confidence_model.")
+        selection_raw = pd.Series(selection_model.predict(aligned), index=aligned.index, dtype=float)
+        confidence_raw = pd.Series(confidence_model.predict(aligned), index=aligned.index, dtype=float)
+        selection_rank_blend = float(artifact.extra.get("selection_rank_blend", 0.35))
+        confidence_floor = float(artifact.extra.get("confidence_floor", 0.50))
+        confidence_scale = float(artifact.extra.get("confidence_scale", 0.50))
+        selection_signal = (
+            _cross_sectional_standardize(selection_raw) * (1.0 - selection_rank_blend)
+            + (_cross_sectional_rank(selection_raw) - 0.5) * 2.0 * selection_rank_blend
+        )
+        confidence_rank = _cross_sectional_rank(confidence_raw)
+        sizing_score = confidence_floor + confidence_scale * confidence_rank
+        learned_score = selection_signal * sizing_score
+        out["selection_score"] = selection_signal.values
+        out["confidence_score"] = confidence_rank.values
+        out["sizing_score"] = sizing_score.values
+        out["learned_score"] = learned_score.values
+        return out
+    score = artifact.model.predict(aligned)
     out["learned_score"] = score
     return out

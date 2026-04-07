@@ -150,7 +150,7 @@ def parse_args():
     parser.add_argument("--score-risk-mode", choices=["subtract", "gate", "state_gate", "state_liquidity_gate"], default="subtract")
     parser.add_argument("--score-risk-gate-threshold", type=float, default=0.35)
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
-    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm"], default="manual")
+    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert"], default="manual")
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
     parser.add_argument(
         "--research-time-unit",

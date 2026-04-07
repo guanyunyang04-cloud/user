@@ -24,6 +24,10 @@
 ## 3. 目标函数规则
 - 默认目标函数是“执行后净收益最大”，不是“raw holdout 指标最大”。
 - 如果用户没有明确改目标函数，禁止用“更稳”替代“更赚钱”。
+- 用户明确要求后续改动“不要追求最小，而要追求最有效”后，默认执行原则改为：
+  - 优先选择最可能改变 formal / gate / production 结论的改动
+  - 不为了保持 diff 小而拆成过多低收益微调
+  - 若存在“局部小修”和“更有效但更大”的两个方案，默认优先后者
 - 如果用户给出明显高于当前前沿的收益目标：
   - 先把它记为 north star
   - 再把当前 formal / production gate 与长期北极星拆开
@@ -41,6 +45,13 @@
   - 再加 `event_breakout / event_clean_breakout` 与 ranking/listwise loss
   - 再扩 `short_alpha_features` 与 score head
   - 最后才讨论更深 / 更复杂的 encoder
+- 如果当前已有 candidate 已经在 latest window 上显示出明显 uplift：
+  - 优先先把它推进到 full-budget multi-window formal
+  - 再决定是否继续加新特征 / 新 loss / 新输出头
+  - 不默认在 candidate 尚未 formal 化前继续堆更多旁支实验
+- 如果 short-line expert 要尝试更复杂的输出头：
+  - 先注册成独立 opt-in profile（例如 `*_scorehead_*`）
+  - 不得直接覆盖已经验证过的 `ridge` 主候选
 - 如果修改了 `short_alpha_features` 的定义，必须同步 bump `run_deep_alpha_research.py` 里的 feature cache version，避免旧 feature cache 混入新实验
 
 ## 4. formal 判决规则
@@ -64,6 +75,11 @@
   - `short_alpha -> 24`
   - `dynamic_graph -> 16`
 - formal runner 默认读取 manifest，不手填统一 `--epochs`。
+- 除非是在当前回合内为了快速探针验证可行性，否则不要主动把 native family budget 压低到 `e4` 之类的临时预算。
+- 用户已经明确要求“不要吝啬训练资源、不要轻易中断实验”后，默认动作是：
+  - 优先跑 native family budget
+  - 非硬错误不轻易中断长实验
+  - `e4` 结果只记为 probe/smoke evidence，不记为最终预算判决
 
 ## 6. frontier 校准规则
 - frontier 默认先跑：
@@ -73,6 +89,12 @@
   - 必要时继续到 `40 / 48 / 64`
 - family-default calibration windows 只用于第一阶段。
 - dynamic_graph 允许使用更晚 calibration windows，因为天然有效样本起点更晚。
+- 只有在出现以下任一信号时，才允许把“没训够”当作正式判断：
+  - `selected_in_tail = true`
+  - `selected_at_right_boundary = true`
+  - `still_improving = true`
+  - `objective_aligned_budget_pressure = true`
+- 如果某条线在 `e4` 探针和 native family full-budget 下给出相同的 selected checkpoint 与同结论结果，则在该窗口上记为 budget-stable，不再把分支优劣归因于 epoch 不足。
 
 ## 7. runner 公平性规则
 - specialized formal runner 做家族比较时，必须给每个 profile 解析自己的 native family budget。
@@ -167,6 +189,7 @@
   - `primary_monthly_median_return`
   - `primary_monthly_robust_score`
 - short-line expert 这类“月度兑现优先”的候选，默认优先看 `primary_monthly_robust_score`，而不是先回到 `primary_annual_return`
+- 如果 output-head experimental branch 没有打赢当前 `ridge` candidate 的 `primary_monthly_robust_score`，即使 annual / Sharpe 或 worst month 略优，也不得覆盖主候选
 - 如果要比较不同 checkpoint objective，优先使用：
   - fresh run
   - 或 warm-start restart
