@@ -10963,3 +10963,194 @@ position,000001.SZ,1200,12.38,
 - 判断：
   - 新 feature pack 单独不够，真正有效的增量来自 state-targeted downside / rank penalty
   - 后续 model-side 如继续，应从 `short_expert_penalty_only_monthly_v1` 往下做，而不是回到 `short_expert_monthly_v2`
+## 2026-04-08 - execution single-mapping candidate pipeline + penalty-only narrow ablation launch
+- 今天先把 execution-side 的 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 从 summary 级证据推进成了真正的 candidate pipeline：
+  - 补跑 source live audit：`short_alpha_active_source_execution_policy_audit_20260408_r1`
+  - 补跑 production live audit：`short_alpha_production_execution_policy_audit_20260408_r1`
+  - 用 forced mapping 复核 recent gate：`short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_review_20260408_r1`
+  - 物化 candidate root：`short_alpha_execution_single_mapping_candidate_pipeline_20260408_r1`
+- 这次把口径彻底理顺了：
+  - candidate comparison 应使用 execution-aligned direct panel，而不是把 raw panel 再次按 profile bridge
+  - full-bridge direct H2H 下，candidate `85.31% / 3.201`，静态 `64.53% / 2.434`
+  - `full_available` delta = `+20.65% / +0.762`
+  - weak window delta = `+84.42% / +2.495`
+- 更关键的新发现是触发非常窄：
+  - full-bridge 只有 `2025-06`、`2025-10` 两个月命中 `trend_up_low_vol|expand|stable`
+  - latest recent (`2026-03`, `2026-04`) `nonstatic_count = 0`
+  - 所以这条线现在是“已经物化的 monitored repair candidate”，但不是“今天 live 会切掉当前静态线”的答案
+- model-side 同步启动了下一轮真正高 ROI 的窄 ablation：
+  - root = `short_alpha_penalty_only_narrow_ablation_review_20260408_r1_shortalpha48`
+  - profiles = `short_expert_penalty_only_light_monthly_v1`, `short_expert_penalty_only_heavy_monthly_v1`, `short_expert_penalty_only_upstate_monthly_v1`, `short_expert_penalty_only_downstate_monthly_v1`
+  - baseline current / current line / original penalty-only 复用既有稳定结果
+  - 当前训练仍在运行中，按“不轻易中断长实验”口径保持继续
+## 2026-04-08 - 用户明确收紧训练与执行 handoff 纪律
+- 用户今天又把默认纪律明确收紧了一层：
+  - 以后跑长实验时默认耐心等待，不因为中途慢、耗时长就主动打断
+  - 凡是准备“转移过去”的候选，不管是 execution-side、production candidate 还是 monthly refresh，都必须先训练成最新模型
+  - 这一步默认使用该 family 当前最高预算，不再满足于旧模型、低预算 probe 或只补 native budget
+- 我对这条要求的理解已经固定：
+  - 用户要避免 execution 测被 stale / undertrained model 污染
+  - 用户要避免月更链因为赶时间而拿低预算结果直接进 production 判断
+  - 用户要的是“先把模型真实能力补到当前上限，再看 execution / 月更是否成立”，这样结论才干净
+- 因此从这个节点开始，execution audit、recent gate、trade-plan replay、default candidate promotion、monthly refresh 都必须建立在“最新模型 + 当前最高预算”之上；否则只记为不够资格的中间证据
+## 2026-04-08 - 用户新增“同模型扩预算一律续训”纪律
+- 用户又把 budget extension 规则收紧了一层：
+  - 同一模型、同一 recipe、同一窗口下如果只是扩 epoch budget，不再 fresh rerun
+  - 默认必须使用 strict resume continuation
+  - 只有 resume chain 被一致性校验拒绝时，才允许退回 fresh rerun，并显式记成 fallback
+- 这条规则直接命中了当前 `short_expert_penalty_only_heavy_monthly_v1` 的 `48 -> 64`：
+  - 我刚才启动的是 fresh rerun，不符合新纪律
+  - 从这一刻开始，类似 `48 -> 64` 的扩预算都必须优先走 strict resume
+## 2026-04-08 - 用户新增 GPU-only 训练纪律
+- 用户明确要求后续训练一律使用 GPU。
+- 我已把这条规则固化为两层：
+  - 记忆层：分脑默认把“GPU-only training”当成正式训练纪律
+  - 代码层：`run_deep_alpha_research.py` 不再允许在 CUDA 不可用时静默回落到 CPU
+- 这意味着后续如果机器上没有可用 GPU，系统会直接报阻塞，而不是偷偷在 CPU 上继续跑出一份低效训练结果
+## 2026-04-08 - penalty-only narrow ablation completed with strict-resume heavy extension
+- 我把上轮未收口的 model-side 工作完整收口了，核心动作有两步：
+  - `run_short_alpha_short_horizon_expert_review.py` 新增 `--resume-run-dir-map`，让 same-model epoch extension 可以在 review runner 里直接走 strict resume
+  - `short_expert_penalty_only_heavy_monthly_v1` 按新纪律从 `48 -> 64` 完成 strict resume，而不是 fresh rerun
+- 实际 strict-resume 命令：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --profiles baseline_current,state_liquidity_listwise_v1,short_expert_penalty_only_monthly_v1,short_expert_penalty_only_heavy_monthly_v1 --short-alpha-epoch-budget-override 64 --resume-run-dir-map "short_expert_penalty_only_heavy_monthly_v1=H:\new_tdx64\PYPlugins\user\daily_research\output\short_alpha_penalty_only_narrow_ablation_review_20260408_r2_shortalpha48_complete\runs\short_expert_penalty_only_heavy_monthly_v1" --root-tag short_alpha_penalty_only_heavy_review_20260408_r2_shortalpha64_resume`
+- strict-resume 结果：
+  - `resume_mode = strict`
+  - `resume_source_epochs_completed = 48`
+  - `device = cuda`
+  - `selected_epoch = 43`
+  - `selected_in_tail = false`
+  - `objective_aligned_budget_pressure = false`
+  - 稳定后落到 `39.46% / 3.054`, monthly robust `0.0458`
+- 最终 unified summary root：
+  - `daily_research/output/short_alpha_penalty_only_narrow_ablation_final_20260408_r1`
+- 最终判断：
+  - no narrow split produced a clean promotion answer over `state_liquidity_listwise_v1`
+  - best reusable restart point remains `short_expert_penalty_only_monthly_v1`: `63.93% / 4.696`, monthly robust `0.0835`
+  - strongest split challenger is `short_expert_penalty_only_light_monthly_v1`: positive `83.33%`, median `2.92%`, monthly robust `0.0822`
+  - `short_expert_penalty_only_heavy_monthly_v1` 在 strict-resume `48 -> 64` 后确认是 stable negative branch，不再继续沿这条更重惩罚线堆预算
+## 2026-04-08 - project brain consolidation and current-state cleanup
+- 今天对 `daily_research` 分脑做了一次结构化整理，目标不是追加新实验，而是把“项目从立项以来的主线演进、当前判断、操作纪律、执行入口”压缩成更短、更准、更一致的口径。
+- 这次重写了四个核心脑文档：
+  - `project_map.md`
+  - `working_memory.md`
+  - `procedural_memory.md`
+  - `action_system.md`
+- 调整原则：
+  - 删掉重复叙述
+  - 删掉已失效的“进行中”状态
+  - 把历史过程留在 `episodic_memory.md`
+  - 把当前项目口径收敛成“当前主线、当前瓶颈、明确停止项、下一步”
+- 本次整理后的正式项目判断：
+  - active default 仍是 `state_liquidity_listwise_v1 + regoff_k1_5d_ensemble_native_anchor`
+  - execution-side 当前只保留 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 作为 monitored repair candidate
+  - model-side 当前只保留 `short_expert_penalty_only_monthly_v1` 作为 best restart point
+  - 不再重开 broad execution-policy sweep，不再把 `short_expert_monthly_v2 / heavy penalty` 视为当前主修复线
+- 结果：
+  - `project_map.md` 收缩到项目地图与阶段演进
+  - `working_memory.md` 收缩到当前判断
+  - `procedural_memory.md` 收缩到方法和纪律
+  - `action_system.md` 收缩到高频命令和当前操作清单
+  - `brain_manifest.json` 版本同步更新到 `2026-04-08`
+- `python daily_research/tools/doc_guard.py check` 已通过，且这次整理清掉了此前 `working_memory / procedural_memory / action_system` 的结构超长告警
+## 2026-04-08 - execution single-mapping candidate promoted to active default
+- 先把 execution-side 单映射 candidate 从 `summary / monitored` 状态推进成真正可执行的 active default：
+  - 新增脚本：
+    - `daily_research/execution/run_short_alpha_execution_single_mapping_candidate_pipeline.py`
+    - `daily_research/execution/activate_execution_single_mapping_candidate.py`
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 现在会：
+    - 物化 formal candidate/static panel
+    - 输出 `formal_trigger_tradeoff_summary.json`
+    - 输出 `live_trigger_monitor.json`
+    - 输出 `daily_live_target_weight_panel.csv`
+  - current pipeline root：
+    - `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260408_r2`
+- 新 pipeline 的正式结论：
+  - mapping：`trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - formal full-period candidate vs static：`51.42% / 2.253` vs `39.85% / 1.738`
+  - full-period delta：`+11.54% / +0.514`
+  - trigger coverage：`3/36 = 8.33%`
+  - triggered mean monthly delta：`+8.50%`
+  - latest live month `2026-04` 未触发，`candidate_active_now=false`
+  - 在未触发时，`daily_live_target_weight_panel.csv` 直接复用当前静态 production live panel，因此 active 切换不会改变当前未触发月份的实际执行结果
+- active manifest 已切换：
+  - `daily_research/output/active_execution_strategy.json`
+  - strategy：`state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
+  - execution policy label：`trend_up_low_vol|expand|stable->topk3_1d_regoff`
+  - production root：`daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260408_r2`
+  - 已加入 `trade_plan_refresh_command`，默认 trade plan 会先刷新 single-mapping pipeline，再读取 active target-weight panel
+- 现场验证：
+  - `run_trade_plan.py --cash 100000` 已通过，终端明确显示 `candidate_profile=active_execution_strategy`
+  - `python daily_research/tools/doc_guard.py check` 已通过
+- 这次用户临时把优先级切回 execution-side，所以中途停掉了正在跑的 `short_alpha_penalty_only_refine_review_20260408_r1_shortalpha64`，没有继续占 GPU；模型侧后续恢复时再从新的优先级接。
+
+## 2026-04-08 - execution pipeline light refresh + 32-start production refresh completed
+- 按用户新纪律把 execution-side 剩余收尾一次做完：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 新增 `--live-only`
+  - heavy mode 继续负责 formal replay / H2H / trigger tradeoff
+  - live-only mode 只刷新 `live_trigger_monitor.json`、`daily_live_target_weight_panel.csv`、`daily_live_score_panel.csv`
+  - pipeline root 现在额外输出 `daily_live_score_reference.json`，明确 score 只是 static reference view
+- `activate_execution_single_mapping_candidate.py` 同步升级：
+  - active manifest 的 `trade_plan_refresh_command` 改走 `live-only`
+  - `source_score_panel_csv / trade_plan_score_panel_csv` 都改指向 candidate pipeline root 内部的 companion score panel
+- `research_candidate_profiles.py` 也补了 freshness 检查：
+  - custom refresh 之后同时检查 target weight panel 与 score panel
+  - 避免只刷新 target weight 而 score 仍停在旧文件
+- 训练预算纪律正式下沉到代码入口：
+  - `family_epoch_budget.py` 现在默认把所有 family 的起训预算 floor 到 `32`
+  - 如果 manifest 推荐更高预算，则直接服从更高预算
+  - 同模型扩预算仍保持 strict resume continuation
+- production side 也已按这条纪律补齐：
+  - 执行 `update_default_candidate_production.py --no-activate-strategy`
+  - refreshed run root = `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260408_r1`
+  - production root = `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - launch cutoff 更新到 `20260408`
+  - train end 更新到 `20260309`
+  - 本轮 fresh full-fit 以 `32` epoch 起训，且不覆盖当前 execution candidate active manifest
+- 本轮 production refresh 的训练判断：
+  - train history best epoch = `15/32`
+  - last epoch = `32`
+  - 最佳点不在右边界，所以当前没有“32 还没训够、必须立刻继续续训”的直接证据
+- production refresh 完成后，重新执行了：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py --live-only`
+  - `activate_execution_single_mapping_candidate.py`
+  - `run_trade_plan.py --cash 100000`
+- 刷新后的 latest trade plan 发生了有效变化，最新建议买入变为：
+  - `603979.SH`
+  - `001369.SZ`
+  - `000723.SZ`
+  - `600352.SH`
+- 当前正式口径因此进一步稳定为：
+  - active execution 继续保持 `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
+  - 日常 trade plan 走轻刷新，不再为候选管线每日重跑 formal replay
+  - 底层 production root 已更新到最新 full-fit，且满足 `GPU only + 32 起训 + 不覆盖 active candidate`
+## 2026-04-08 - consistency cleanup and regression guard completed
+- 对项目现行主链做了一次“前后口径 / 过期入口 / dated root / 旧默认值”专项清理，重点不是开新实验，而是把训练、执行、文档和脚本入口重新对齐。
+- 训练侧修正：
+  - `run_deep_alpha_research.py` 默认起训改为 `32`，默认 `min_epochs` 跟随预算抬升
+  - `pretrain_deep_alpha_encoder.py` 同步改为 `32` 起训，且强制 `GPU only`
+  - `run_minimal_matrix.py`、`run_epoch_budget_formal_matrix.py`、`run_graph_off_plain_budget_review.py`、`run_encoder_transformer_stability_review.py`、`run_short_alpha_production_epoch_extension.py` 的默认预算口径全部抬到 `32+`
+- 执行侧修正：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 与 `activate_execution_single_mapping_candidate.py` 不再硬编码 dated review root / audit root / pipeline root
+  - default candidate 刷新命令改为依赖动态解析，不再把旧批次产物写死进 active manifest
+  - external target-weight 语义正式写回脑文档：`research_raw_target_weight` + `follow_research_raw_no_global_cap`
+- 旧入口与旧提示修正：
+  - `generate_daily_trade_plan.py` 不再建议回退 `run_trade_plan_legacy_ml.py`
+  - `run_trade_plan_legacy_ml.py`、`update_model_legacy_ml.py` 改为显式 deprecated wrapper
+  - `execution_alignment.py` 内旧 `regoff_k2_10d_ensemble_native_anchor` 的“current default”描述已改成 legacy comparator
+- 为防同类问题复发，新增 `daily_research/tools/project_consistency_check.py`
+  - 检查训练/预训练默认预算
+  - 检查 GPU-only 约束
+  - 检查 active manifest 的 raw target-weight 语义
+  - 检查 single-mapping pipeline / activation 脚本不再硬编码 dated operational roots
+  - 检查关键 brain 文档已同步当前统一口径
+## 2026-04-08 - latest-user-requirement priority formalized
+- 用户补充项目级纪律：
+  - 不准再出现前后矛盾和过期冗余
+  - 最新提出的要求必须拥有最高优先级
+  - 新要求必须前后一致地同步到默认入口与 brain 文档
+- 已将这条纪律写入：
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/project_map.md`
+- `daily_research/tools/project_consistency_check.py` 也已增加对应检查，避免后续再次只改一半。

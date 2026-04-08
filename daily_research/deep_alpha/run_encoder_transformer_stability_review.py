@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-tag", default="encoder_transformer_stability_review_20260406_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--extend-window-label", default=DEFAULT_EXTEND_WINDOW)
-    parser.add_argument("--epoch-budgets", default="4,8,12,16,24,32")
+    parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--end-date", default="20260403")
     parser.add_argument("--benchmark", default="000300.SH")

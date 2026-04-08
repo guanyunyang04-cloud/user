@@ -224,39 +224,40 @@ class StageProgress:
 
     def _compose_line(self) -> str:
         child = self._child_stack[-1] if self._child_stack else None
-        primary_child_ratio = 0.0
-        if self._primary_child is not None and self._primary_child.total > 0:
-            primary_child_ratio = min(
-                max(self._primary_child.n / self._primary_child.total, 0.0),
-                1.0,
-            )
-        ratio = min(max((self.current + primary_child_ratio) / self.total, 0.0), 1.0)
-        percent_text = f"{ratio * 100:5.1f}%"
         term_width = _terminal_width()
-        bar_width = max(18, min(30, term_width // 5))
-        filled = int(round(bar_width * ratio))
-        bar = "#" * filled + "-" * max(bar_width - filled, 0)
-        spinner = (
-            self._SPINNER_FRAMES[self._refresh_tick % len(self._SPINNER_FRAMES)]
-            if child is not None
-            else "-"
-        )
         stage_prefix = (
             f"{self.label} {min(max(self.current_stage_no, 1), self.total)}/{self.total} "
             f"{self.current_message}"
         )
+        if child is None:
+            spinner = self._SPINNER_FRAMES[self._refresh_tick % len(self._SPINNER_FRAMES)]
+            parts = [stage_prefix]
+            if self.current_detail:
+                parts.append(self.current_detail)
+            if self.note:
+                parts.append(self.note)
+            body = " | ".join(part for part in parts if str(part).strip())
+            prefix = f"[{spinner}] "
+            available_text = max(term_width - len(prefix) - 1, 24)
+            return f"\r{prefix}{_truncate_text(body, available_text)}"
+
+        ratio = 1.0 if child.total <= 0 else min(max(child.n / child.total, 0.0), 1.0)
+        percent_text = f"{ratio * 100:5.1f}%"
+        bar_width = max(18, min(30, term_width // 5))
+        filled = int(round(bar_width * ratio))
+        bar = "#" * filled + "-" * max(bar_width - filled, 0)
+        child_counts = f"{child.n}/{child.total} {child.unit}".strip()
         parts = [stage_prefix]
         if self.current_detail:
             parts.append(self.current_detail)
-        if child is not None:
-            child_counts = f"{child.n}/{child.total} {child.unit}".strip()
-            parts.append(f"{child.desc} [{child_counts}]")
+        parts.append(child.desc)
         if self.note:
             parts.append(self.note)
         body = " | ".join(part for part in parts if str(part).strip())
-        prefix = f"[{bar}] {percent_text} {spinner} "
-        available_text = max(term_width - len(prefix) - 1, 16)
-        return f"\r{prefix}{_truncate_text(body, available_text)}"
+        prefix = f"[{bar}] {percent_text} "
+        suffix = f" | {child_counts}"
+        available_text = max(term_width - len(prefix) - len(suffix) - 1, 24)
+        return f"\r{prefix}{_truncate_text(body, available_text)}{suffix}"
 
     def _refresh(self) -> None:
         if self._closed:
@@ -273,6 +274,7 @@ class StageProgress:
         if child in self._child_stack:
             self._child_stack = [item for item in self._child_stack if item is not child]
         self._child_stack.append(child)
+        self.note = ""
         if is_root_child and self._primary_child is None:
             self._primary_child = child
         self._refresh()

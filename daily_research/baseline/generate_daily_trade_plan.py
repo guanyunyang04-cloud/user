@@ -106,6 +106,11 @@ def parse_args():
     parser.add_argument("--external-score-column", default="latest_score", help="Score column name inside external score CSV.")
     parser.add_argument("--external-target-weight-csv", default="", help="Optional external target-weight CSV, e.g. deep_alpha daily_target_weight_panel.csv")
     parser.add_argument("--external-target-weight-column", default="target_weight", help="Target-weight column name inside external target-weight CSV.")
+    parser.add_argument("--external-target-weight-semantics", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-target-weight-cap-mode", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-target-weight-cap-note", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-score-panel-role", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-score-reference-metadata-json", default="", help=argparse.SUPPRESS)
     parser.add_argument("--external-model-manifest", default="", help=argparse.SUPPRESS)
     parser.add_argument("--external-model-warn-trading-days", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--external-model-max-trading-days", type=int, default=0, help=argparse.SUPPRESS)
@@ -355,6 +360,11 @@ def _assess_external_model_retrain_freshness(
         "latest_completed_trading_date": str(pd.Timestamp(latest_signal_date).date()),
         "warnings": [],
         "should_block": False,
+        "target_weight_semantics": str(manifest.get("target_weight_semantics", "")),
+        "target_weight_cap_mode": str(manifest.get("target_weight_cap_mode", "")),
+        "target_weight_cap_note": str(manifest.get("target_weight_cap_note", "")),
+        "score_panel_role": str(manifest.get("score_panel_role", "")),
+        "score_reference_metadata_json": str(manifest.get("score_reference_metadata_json", "")),
     }
     if not manifest:
         result["warnings"].append(
@@ -894,9 +904,9 @@ def _resolve_candidate_display_config(model_info: Dict[str, Any]) -> Dict[str, A
     status = str(model_info.get("score_context_status", "")).strip().lower()
     if mode == "research_candidate_target_weight_csv":
         return {
-            "execution_score_label": "执行代理分数",
+            "execution_score_label": "参考排序分数",
             "show_source_score": status == "external_score",
-            "source_score_label": "源候选分数",
+            "source_score_label": "源候选参考分数",
         }
     return {
         "execution_score_label": "候选分数",
@@ -1271,6 +1281,10 @@ def _write_trade_plan_txt(
     show_source_score = bool(candidate_display.get("show_source_score", False))
     source_score_label = str(candidate_display.get("source_score_label", "源候选分数"))
     candidate_mode = str(model_info.get("mode", "")).strip()
+    target_weight_semantics = str(model_info.get("target_weight_semantics", "")).strip()
+    target_weight_cap_mode = str(model_info.get("target_weight_cap_mode", "")).strip()
+    target_weight_cap_note = str(model_info.get("target_weight_cap_note", "")).strip()
+    score_panel_role = str(model_info.get("score_panel_role", "")).strip()
     lines: List[str] = []
     lines.append("每日盘后策略（次日开盘执行）")
     lines.append("=" * 36)
@@ -1306,6 +1320,15 @@ def _write_trade_plan_txt(
         lines.append(f"执行排序口径: 先按目标权重，再按{execution_score_label}")
         if show_source_score:
             lines.append(f"{source_score_label}: 仅作来源参考，不参与执行排序")
+        if candidate_mode == "research_candidate_target_weight_csv":
+            if target_weight_semantics:
+                lines.append(f"权重语义: {target_weight_semantics}")
+            if target_weight_cap_mode:
+                lines.append(f"单票上限语义: {target_weight_cap_mode}")
+            if target_weight_cap_note:
+                lines.append(f"权重说明: {target_weight_cap_note}")
+            if score_panel_role:
+                lines.append(f"分数面板角色: {score_panel_role}")
     if model_info.get("trained_at"):
         lines.append(f"模型训练时间: {model_info['trained_at']}")
     if model_info.get("train_end"):
@@ -2045,6 +2068,11 @@ def main_with_progress():
                     "score_context_status": str(training_log.iloc[0].get("score_context_status", "")) if not training_log.empty else "",
                     "history_window": history_window_to_dict(history_window),
                     "enhanced_profile": "external_target_weight_candidate",
+                    "target_weight_semantics": str(args.external_target_weight_semantics or ""),
+                    "target_weight_cap_mode": str(args.external_target_weight_cap_mode or ""),
+                    "target_weight_cap_note": str(args.external_target_weight_cap_note or ""),
+                    "score_panel_role": str(args.external_score_panel_role or ""),
+                    "score_reference_metadata_json": str(args.external_score_reference_metadata_json or ""),
                 }
                 warnings: list[str] = []
                 if dropped_rows > 0:
@@ -2233,8 +2261,9 @@ def main_with_progress():
                 if freshness_info.get("should_block") and not args.allow_stale_model:
                     raise RuntimeError(
                         "External candidate panel reached stale blocking threshold. "
-                        "Refresh the default research candidate, use daily_research/execution/run_trade_plan_legacy_ml.py, "
-                        "or pass --allow-stale-model explicitly."
+                        "Refresh the active manifest-driven research candidate pipeline, "
+                        "or pass --allow-stale-model explicitly. "
+                        "Use --legacy-ml only when you intentionally want the old legacy chain."
                     )
                 model_info.update(
                     {
@@ -2288,6 +2317,22 @@ def main_with_progress():
                             "production_model_retrain_window": str(retrain_info.get("comparison_window", "")),
                             "production_model_retrain_leaderboard_csv": str(retrain_info.get("leaderboard_csv", "")),
                             "production_model_active_run_dir": str(retrain_info.get("active_production_run_dir", "")),
+                            "target_weight_semantics": str(
+                                retrain_info.get("target_weight_semantics", "") or model_info.get("target_weight_semantics", "")
+                            ),
+                            "target_weight_cap_mode": str(
+                                retrain_info.get("target_weight_cap_mode", "") or model_info.get("target_weight_cap_mode", "")
+                            ),
+                            "target_weight_cap_note": str(
+                                retrain_info.get("target_weight_cap_note", "") or model_info.get("target_weight_cap_note", "")
+                            ),
+                            "score_panel_role": str(
+                                retrain_info.get("score_panel_role", "") or model_info.get("score_panel_role", "")
+                            ),
+                            "score_reference_metadata_json": str(
+                                retrain_info.get("score_reference_metadata_json", "")
+                                or model_info.get("score_reference_metadata_json", "")
+                            ),
                         }
                     )
             target_weights, soft_state_scale, soft_state_meta, training_log = _apply_soft_state_overlay(
@@ -2326,6 +2371,11 @@ def main_with_progress():
                 if external_score_path is not None:
                     summary["candidate_score_csv"] = str(external_score_path)
                 summary["candidate_label"] = str(model_info.get("candidate_label", ""))
+                summary["target_weight_semantics"] = str(model_info.get("target_weight_semantics", ""))
+                summary["target_weight_cap_mode"] = str(model_info.get("target_weight_cap_mode", ""))
+                summary["target_weight_cap_note"] = str(model_info.get("target_weight_cap_note", ""))
+                summary["score_panel_role"] = str(model_info.get("score_panel_role", ""))
+                summary["score_reference_metadata_json"] = str(model_info.get("score_reference_metadata_json", ""))
                 summary["candidate_total_rows"] = int(model_info.get("candidate_total_rows", 0) or 0)
                 summary["candidate_usable_rows"] = int(model_info.get("candidate_usable_rows", 0) or 0)
                 summary["candidate_dropped_rows"] = int(model_info.get("candidate_dropped_rows", 0) or 0)

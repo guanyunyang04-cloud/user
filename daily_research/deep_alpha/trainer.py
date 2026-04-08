@@ -882,11 +882,15 @@ def train_multitask_model(
 
     train_batch_count = max(len(train_loader), 1)
     valid_batch_count = max(len(valid_loader), 1)
-    remaining_epochs = max(int(epochs) - int(epochs_completed), 0)
-    progress_total = max(int(remaining_epochs), 1) * (train_batch_count + valid_batch_count)
 
-    with create_progress(total=progress_total, desc="Finetune setup", unit="batch", leave=False) as progress:
-        for epoch in range(int(epochs_completed) + 1, int(epochs) + 1):
+    for epoch in range(int(epochs_completed) + 1, int(epochs) + 1):
+        epoch_batch_total = train_batch_count + valid_batch_count
+        with create_progress(
+            total=epoch_batch_total,
+            desc=f"Finetune epoch {epoch}/{epochs} setup",
+            unit="batch",
+            leave=False,
+        ) as progress:
             model.train()
             train_losses: List[float] = []
             train_reg_losses: List[float] = []
@@ -1027,11 +1031,11 @@ def train_multitask_model(
             with torch.no_grad():
                 for batch_idx, (x, y, _y_raw, state_id, liquidity_bucket, structure_id, dts, _) in enumerate(valid_loader, start=1):
                     progress.set_description_str(
-                    _format_training_step_desc(
-                        phase_label="valid",
-                        epoch=epoch,
-                        epoch_total=epochs,
-                        batch_idx=batch_idx,
+                        _format_training_step_desc(
+                            phase_label="valid",
+                            epoch=epoch,
+                            epoch_total=epochs,
+                            batch_idx=batch_idx,
                             batch_total=valid_batch_count,
                         )
                     )
@@ -1159,7 +1163,7 @@ def train_multitask_model(
                 valid_listwise_loss=float(np.mean(valid_listwise_losses)) if valid_listwise_losses else np.nan,
                 valid_aux_loss=float(np.mean(valid_aux_losses)) if valid_aux_losses else np.nan,
                 valid_proto_loss=float(np.mean(valid_proto_losses)) if valid_proto_losses else np.nan,
-                )
+            )
             current_valid = float(epoch_record.valid_loss)
             if normalized_selection_mode != "valid_loss" and checkpoint_selection_callback is not None:
                 callback_payload = checkpoint_selection_callback(model, epoch) or {}
@@ -1255,16 +1259,18 @@ def infer_dataset(
     device: torch.device,
     target_names: List[str],
     use_amp: bool = True,
+    task_label: str = "Inference",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     model.eval()
     amp_enabled = bool(use_amp and device.type == "cuda")
     pred_rows = []
     embed_rows = []
     total_batches = max(len(loader), 1)
-    with create_progress(total=total_batches, desc="Inference setup", unit="batch", leave=False) as progress:
+    task_name = str(task_label or "Inference").strip() or "Inference"
+    with create_progress(total=total_batches, desc=f"{task_name} setup", unit="batch", leave=False) as progress:
         with torch.no_grad():
             for batch_idx, (x, y, y_raw, state_id, liquidity_bucket, structure_id, dts, stocks) in enumerate(loader, start=1):
-                progress.set_description_str(f"Inference batch {batch_idx}/{total_batches}")
+                progress.set_description_str(f"{task_name} batch {batch_idx}/{total_batches}")
                 x = x.to(device, non_blocking=True)
                 liquidity_bucket = liquidity_bucket.to(device, non_blocking=True)
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
@@ -1368,10 +1374,14 @@ def train_masked_pretrainer(
     epoch = 0
     train_batch_count = max(len(train_loader), 1)
     valid_batch_count = max(len(valid_loader), 1)
-    progress_total = max(max_epoch_budget, 1) * (train_batch_count + valid_batch_count)
-
-    with create_progress(total=progress_total, desc="Pretrain setup", unit="batch", leave=False) as progress:
-        while epoch < epoch_budget:
+    while epoch < epoch_budget:
+        epoch_batch_total = train_batch_count + valid_batch_count
+        with create_progress(
+            total=epoch_batch_total,
+            desc=f"Pretrain epoch {epoch + 1}/{epoch_budget}",
+            unit="batch",
+            leave=False,
+        ) as progress:
             epoch += 1
             model.train()
             train_losses: List[float] = []

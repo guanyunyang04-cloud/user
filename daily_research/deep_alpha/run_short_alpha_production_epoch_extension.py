@@ -41,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--production-manifest", default=str(DEFAULT_PRODUCTION_MANIFEST))
     parser.add_argument("--production-root", default=str(DEFAULT_PRODUCTION_ROOT))
     parser.add_argument("--strategy-manifest-path", default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST))
-    parser.add_argument("--epoch-budgets", default="24,32,40")
+    parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--root-tag", default="short_alpha_production_epoch_extension_20260405_r1")
     parser.add_argument("--replay-start-date", default="")
     parser.add_argument("--replay-end-date", default="")

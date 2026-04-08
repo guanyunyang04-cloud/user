@@ -38,6 +38,10 @@ from daily_research.deep_alpha.execution_alignment import (
     parse_profile_name_list as parse_execution_alignment_profile_names,
     resolve_profile as resolve_execution_alignment_profile,
 )
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_MIN_START_EPOCH_BUDGET,
+    default_min_epochs_for_budget,
+)
 from daily_research.deep_alpha.models import MultiTaskRanker
 from daily_research.deep_alpha.pipeline_utils import (
     RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
@@ -97,7 +101,7 @@ from daily_research.deep_alpha.trainer import (
     infer_dataset,
     train_multitask_model,
 )
-from daily_research.progress import StageProgress, create_progress, progress_write
+from daily_research.progress import StageProgress, progress_write
 
 
 def parse_args():
@@ -198,8 +202,8 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--min-epochs", type=int, default=4)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_MIN_START_EPOCH_BUDGET)
+    parser.add_argument("--min-epochs", type=int, default=default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET))
     parser.add_argument("--early-stop-patience", type=int, default=2)
     parser.add_argument("--lr-plateau-patience", type=int, default=1)
     parser.add_argument("--lr-plateau-factor", type=float, default=0.5)
@@ -298,6 +302,8 @@ def parse_args():
     parser.set_defaults(pin_memory=True, use_amp=True, safe_runtime_profile=True)
     parser.set_defaults(use_cache=True)
     args = parser.parse_args()
+    if "--min-epochs" not in sys.argv:
+        args.min_epochs = max(int(args.min_epochs), default_min_epochs_for_budget(int(args.epochs)))
     if args.list_execution_alignment_profiles:
         for line in list_execution_alignment_profile_lines():
             print(line)
@@ -422,11 +428,10 @@ def _summarize_rankic_by_month(rankic_ts: pd.DataFrame) -> pd.DataFrame:
 def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
     if not write_tasks:
         return
-    with create_progress(total=len(write_tasks), desc="Write artifacts", unit="file", leave=False) as progress:
-        for index, (label, writer) in enumerate(write_tasks, start=1):
-            progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
-            writer()
-            progress.update(1)
+    total = len(write_tasks)
+    for index, (label, writer) in enumerate(write_tasks, start=1):
+        progress_write(f"Write artifact {index}/{total}: {label}")
+        writer()
 
 
 def _write_json_payload(path: Path, payload: dict[str, Any]) -> None:
@@ -605,7 +610,14 @@ def _build_live_inference_outputs(
         ),
         **loader_kwargs,
     )
-    live_pred_df, live_emb_df = infer_dataset(model, live_loader, device, target_names, use_amp=bool(use_amp))
+    live_pred_df, live_emb_df = infer_dataset(
+        model,
+        live_loader,
+        device,
+        target_names,
+        use_amp=bool(use_amp),
+        task_label="Inference live",
+    )
     live_index = pd.Index(live_dates)
     if score_head_method == "manual":
         live_score_frame = _build_score_frame(
@@ -756,8 +768,22 @@ def _evaluate_research_outputs(
     liquidity_bucket_frame: pd.DataFrame | None,
     rolling_membership_frame: pd.DataFrame | None,
 ) -> dict[str, Any]:
-    train_pred_df, _ = infer_dataset(model, train_eval_loader, device, train_ds.target_names, use_amp=bool(use_amp))
-    pred_df, emb_df = infer_dataset(model, valid_loader, device, train_ds.target_names, use_amp=bool(use_amp))
+    train_pred_df, _ = infer_dataset(
+        model,
+        train_eval_loader,
+        device,
+        train_ds.target_names,
+        use_amp=bool(use_amp),
+        task_label="Inference train_eval",
+    )
+    pred_df, emb_df = infer_dataset(
+        model,
+        valid_loader,
+        device,
+        train_ds.target_names,
+        use_amp=bool(use_amp),
+        task_label="Inference holdout",
+    )
     rankic_timeseries = compute_rankic_timeseries(pred_df, train_ds.target_names)
     rankic_summary = compute_rankic(pred_df, train_ds.target_names)
     monthly_rankic_summary = _summarize_rankic_by_month(rankic_timeseries)
@@ -1437,7 +1463,12 @@ def main():
     progress_write(
         f"Dataset summary train={len(train_ds)} valid={len(valid_ds)} train_eval={len(train_eval_ds)}"
     )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "GPU training is required for deep_alpha research. "
+            "No CUDA device is available, so the run must stop instead of silently falling back to CPU."
+        )
+    device = torch.device("cuda")
     runtime_profile = resolve_runtime_profile(
         stage="finetune",
         encoder_family=cfg.encoder_family,

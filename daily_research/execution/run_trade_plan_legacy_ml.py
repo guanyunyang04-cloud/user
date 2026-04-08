@@ -11,6 +11,10 @@ from daily_research.execution.run_trade_plan import main as run_trade_plan_main
 
 
 def main():
+    print(
+        "warning=run_trade_plan_legacy_ml.py is deprecated; prefer run_trade_plan.py and only use --legacy-ml intentionally.",
+        file=sys.stderr,
+    )
     inject_flag_arg("--legacy-ml")
     run_trade_plan_main()
 

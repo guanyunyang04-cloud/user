@@ -7,7 +7,9 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 DEFAULT_LATEST_MANIFEST_PATH = OUTPUT_ROOT / "deep_alpha_family_epoch_budget_latest.json"
-DEFAULT_FALLBACK_EPOCH_BUDGET = 8
+DEFAULT_FALLBACK_EPOCH_BUDGET = 32
+DEFAULT_MIN_START_EPOCH_BUDGET = 32
+DEFAULT_MIN_EPOCH_FLOOR = 16
 
 
 @dataclass(frozen=True)
@@ -88,8 +90,13 @@ def resolve_epoch_budget_for_family(
     if recommended is not None:
         value = int(recommended)
         if value > 0:
-            return value
+            return max(value, DEFAULT_MIN_START_EPOCH_BUDGET)
     spec = get_family_budget_spec(family_key)
     base = spec.fallback_epochs if fallback_epochs is None else int(fallback_epochs)
-    return max(int(base), 1)
+    return max(int(base), DEFAULT_MIN_START_EPOCH_BUDGET, 1)
 
+
+def default_min_epochs_for_budget(epoch_budget: int | None = None) -> int:
+    budget = DEFAULT_MIN_START_EPOCH_BUDGET if epoch_budget in {None, ""} else int(epoch_budget)
+    budget = max(int(budget), DEFAULT_MIN_START_EPOCH_BUDGET, 1)
+    return max(DEFAULT_MIN_EPOCH_FLOOR, budget // 2)

@@ -171,6 +171,12 @@ def build_active_strategy_manifest(
         "trade_plan_target_weight_panel_csv": str((production_root / target_weight_name).resolve()),
         "trade_plan_score_panel_csv": str((production_root / score_name).resolve()),
         "trade_plan_candidate_label": candidate_label,
+        "target_weight_semantics": "research_raw_target_weight",
+        "target_weight_cap_mode": "follow_research_raw_no_global_cap",
+        "target_weight_cap_note": (
+            "Execution follows the research target-weight panel directly. "
+            "Do not impose the generic max_weight cap on the external target-weight path."
+        ),
         "benchmark": str(source_panel_metrics.get("benchmark", "000300.SH") or "000300.SH"),
         "data_source": "tq",
         "liquidity_pool_name": liquidity_pool_name,

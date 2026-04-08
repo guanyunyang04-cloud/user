@@ -11,6 +11,10 @@ from typing import Iterable
 
 import pandas as pd
 
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_MIN_START_EPOCH_BUDGET,
+    default_min_epochs_for_budget,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -129,8 +133,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--min-epochs", type=int, default=4)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_MIN_START_EPOCH_BUDGET)
+    parser.add_argument("--min-epochs", type=int, default=default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET))
     parser.add_argument("--early-stop-patience", type=int, default=2)
     parser.add_argument("--lr-plateau-patience", type=int, default=1)
     parser.add_argument("--lr-plateau-factor", type=float, default=0.5)
@@ -141,8 +145,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--pretrain-learning-rate", type=float, default=1e-3)
     parser.add_argument("--pretrain-weight-decay", type=float, default=1e-4)
-    parser.add_argument("--pretrain-epochs", type=int, default=12)
-    parser.add_argument("--pretrain-min-epochs", type=int, default=8)
+    parser.add_argument("--pretrain-epochs", type=int, default=DEFAULT_MIN_START_EPOCH_BUDGET)
+    parser.add_argument("--pretrain-min-epochs", type=int, default=default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET))
     parser.add_argument("--pretrain-early-stop-patience", type=int, default=3)
     parser.add_argument("--pretrain-lr-plateau-patience", type=int, default=2)
     parser.add_argument("--pretrain-lr-plateau-factor", type=float, default=0.5)
@@ -152,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-extend-undertrained", action="store_true")
     parser.add_argument("--no-auto-extend-undertrained", dest="auto_extend_undertrained", action="store_false")
     parser.add_argument("--epoch-extend-step", type=int, default=4)
-    parser.add_argument("--max-total-epochs", type=int, default=20)
+    parser.add_argument("--max-total-epochs", type=int, default=64)
 
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false")
@@ -165,7 +169,17 @@ def parse_args() -> argparse.Namespace:
         auto_extend_undertrained=True,
         use_cache=True,
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if "--min-epochs" not in sys.argv:
+        args.min_epochs = max(int(args.min_epochs), default_min_epochs_for_budget(int(args.epochs)))
+    if "--pretrain-min-epochs" not in sys.argv:
+        args.pretrain_min_epochs = max(
+            int(args.pretrain_min_epochs),
+            default_min_epochs_for_budget(int(args.pretrain_epochs)),
+        )
+    if "--max-total-epochs" not in sys.argv:
+        args.max_total_epochs = max(int(args.max_total_epochs), int(args.pretrain_epochs))
+    return args
 
 
 def _parse_score_head_candidates(raw: str) -> list[str]:

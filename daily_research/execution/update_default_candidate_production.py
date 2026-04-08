@@ -17,6 +17,10 @@ import torch
 
 import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_LATEST_MANIFEST_PATH,
+    resolve_epoch_budget_for_family,
+)
 from daily_research.deep_alpha.execution_alignment import DEFAULT_AUTO_PROFILE_NAMES
 from daily_research.deep_alpha.research_objective import (
     CHECKPOINT_SELECTION_OBJECTIVES,
@@ -104,6 +108,11 @@ def parse_args() -> argparse.Namespace:
         "--strategy-manifest-path",
         default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST),
         help="Where to write the active execution strategy manifest after promotion.",
+    )
+    parser.add_argument(
+        "--family-epoch-budget-manifest",
+        default=str(DEFAULT_LATEST_MANIFEST_PATH),
+        help="Family epoch budget manifest used to choose the starting production retrain budget.",
     )
     parser.add_argument("--strategy-name", default="", help="Optional name written into the active execution manifest.")
     parser.add_argument(
@@ -197,6 +206,17 @@ def _infer_research_time_unit(metrics: dict[str, Any], cfg: dict[str, Any]) -> s
     ):
         return "calendar_months"
     return "trading_days"
+
+
+def _infer_family_key_for_source(source_run_dir: Path, cfg: dict[str, Any]) -> str:
+    run_hint = str(source_run_dir).lower()
+    if "dynamic_graph" in run_hint:
+        return "dynamic_graph"
+    if "state_liquidity" in run_hint or "short_alpha" in run_hint:
+        return "short_alpha"
+    if bool(cfg.get("structure_context", False)) or bool(cfg.get("aux_structure_task", False)) or bool(cfg.get("structure_prototype_task", False)):
+        return "structure"
+    return "baseline"
 
 
 def _load_metrics_payload(path: Path) -> dict[str, Any]:
@@ -338,6 +358,7 @@ def _resolve_training_dates(
 def _build_retrain_command(
     *,
     source_run_dir: Path,
+    family_epoch_budget_manifest: str,
     latest_completed_date: str,
     latest_trainable_date: str,
     internal_monitor_start_date: str,
@@ -352,6 +373,12 @@ def _build_retrain_command(
     execution_alignment_candidate_profiles_override: str = "",
 ) -> list[str]:
     metrics, cfg = _load_source_config(source_run_dir)
+    family_key = _infer_family_key_for_source(source_run_dir, cfg)
+    epoch_budget = resolve_epoch_budget_for_family(
+        family_key,
+        manifest_path=family_epoch_budget_manifest,
+        fallback_epochs=int(cfg.get("epochs", 8) or 8),
+    )
     script_path = Path("daily_research/deep_alpha/run_deep_alpha_research.py").resolve()
     cmd: list[str] = [sys.executable, str(script_path)]
 
@@ -421,7 +448,7 @@ def _build_retrain_command(
     _append_arg(cmd, "--dropout", cfg.get("dropout", 0.10))
     _append_arg(cmd, "--learning-rate", cfg.get("learning_rate", 1e-3))
     _append_arg(cmd, "--weight-decay", cfg.get("weight_decay", 1e-4))
-    _append_arg(cmd, "--epochs", cfg.get("epochs", 8))
+    _append_arg(cmd, "--epochs", epoch_budget)
     _append_arg(cmd, "--min-epochs", 1)
     _append_arg(cmd, "--early-stop-patience", max(int(cfg.get("early_stop_patience", 2)), 8))
     _append_arg(cmd, "--lr-plateau-patience", max(int(cfg.get("lr_plateau_patience", 1)), 4))
@@ -707,6 +734,7 @@ def main() -> None:
 
     cmd = _build_retrain_command(
         source_run_dir=source_run_dir,
+        family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
         latest_completed_date=latest_completed_date,
         latest_trainable_date=latest_trainable_date,
         internal_monitor_start_date=internal_monitor_start_date,

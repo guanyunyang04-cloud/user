@@ -25,6 +25,10 @@ from daily_research.baseline.data_provider import (
 )
 from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, get_cache_root, load_pickle, save_pickle, series_signature
 from daily_research.deep_alpha.config import DeepAlphaConfig
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_MIN_START_EPOCH_BUDGET,
+    default_min_epochs_for_budget,
+)
 from daily_research.deep_alpha.models import MaskedPatchPretrainer
 from daily_research.deep_alpha.pipeline_utils import (
     RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
@@ -51,7 +55,7 @@ from daily_research.deep_alpha.sequence_dataset import (
     build_targets,
 )
 from daily_research.deep_alpha.trainer import collate_pretrain_batch, train_masked_pretrainer
-from daily_research.progress import StageProgress, create_progress, progress_write
+from daily_research.progress import StageProgress, progress_write
 
 
 def parse_args():
@@ -93,8 +97,8 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=12)
-    parser.add_argument("--min-epochs", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_MIN_START_EPOCH_BUDGET)
+    parser.add_argument("--min-epochs", type=int, default=default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET))
     parser.add_argument("--early-stop-patience", type=int, default=3)
     parser.add_argument("--lr-plateau-patience", type=int, default=2)
     parser.add_argument("--lr-plateau-factor", type=float, default=0.5)
@@ -102,7 +106,7 @@ def parse_args():
     parser.add_argument("--auto-extend-undertrained", action="store_true", help="Auto-extend pretraining when diagnostics still show undertrained at the current cap.")
     parser.add_argument("--no-auto-extend-undertrained", dest="auto_extend_undertrained", action="store_false")
     parser.add_argument("--epoch-extend-step", type=int, default=4, help="Epochs added each time auto-extension triggers.")
-    parser.add_argument("--max-total-epochs", type=int, default=20, help="Hard ceiling for adaptive pretraining extension.")
+    parser.add_argument("--max-total-epochs", type=int, default=64, help="Hard ceiling for adaptive pretraining extension.")
     parser.add_argument("--mask-ratio", type=float, default=0.40)
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--no-amp", dest="use_amp", action="store_false")
@@ -126,7 +130,12 @@ def parse_args():
         safe_runtime_profile=True,
         auto_extend_undertrained=True,
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if "--min-epochs" not in sys.argv:
+        args.min_epochs = max(int(args.min_epochs), default_min_epochs_for_budget(int(args.epochs)))
+    if "--max-total-epochs" not in sys.argv:
+        args.max_total_epochs = max(int(args.max_total_epochs), int(args.epochs))
+    return args
 
 
 def _resolve_pretrain_split(
@@ -150,11 +159,10 @@ def _resolve_pretrain_split(
 def _run_write_tasks(write_tasks: list[tuple[str, Any]]) -> None:
     if not write_tasks:
         return
-    with create_progress(total=len(write_tasks), desc="Write pretrain artifacts", unit="file", leave=False) as progress:
-        for index, (label, writer) in enumerate(write_tasks, start=1):
-            progress.set_description_str(f"Write {label} {index}/{len(write_tasks)}")
-            writer()
-            progress.update(1)
+    total = len(write_tasks)
+    for index, (label, writer) in enumerate(write_tasks, start=1):
+        progress_write(f"Write artifact {index}/{total}: {label}")
+        writer()
 
 
 def main():
@@ -408,7 +416,12 @@ def main():
     stage_progress.complete_stage(4)
     stage_progress.start_stage(5, "Prepare runtime and model")
     progress_write(f"Dataset summary train={len(train_ds)} valid={len(valid_ds)}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "GPU training is required for deep_alpha pretraining. "
+            "No CUDA device is available, so the run must stop instead of silently falling back to CPU."
+        )
+    device = torch.device("cuda")
     runtime_profile = resolve_runtime_profile(
         stage="pretrain",
         encoder_family="patch_transformer",

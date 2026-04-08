@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-tag", default="deep_alpha_epoch_budget_formal_20260404_r1")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--profile", default="baseline_current")
-    parser.add_argument("--epoch-budgets", default="4,8,12,16")
+    parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)

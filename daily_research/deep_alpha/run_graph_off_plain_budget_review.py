@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-root-tag", default=DEFAULT_SOURCE_ROOT_TAG)
     parser.add_argument("--root-tag", default="graph_off_plain_budget_review_20260406_r1")
     parser.add_argument("--python-executable", default=sys.executable)
-    parser.add_argument("--epoch-budgets", default="4,8,12,16,24,32")
+    parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--window-labels", default="20230216_20240229,20240301_20250317")
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--end-date", default="20260403")

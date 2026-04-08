@@ -18,6 +18,7 @@ from daily_research.deep_alpha.execution_alignment import default_auto_profile_a
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
+from daily_research.progress import StageProgress, progress_write
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +61,14 @@ REUSE_METRICS: dict[str, str] = {
         "daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48/"
         "runs/short_expert_monthly_v2/metrics.json"
     ),
+    "short_expert_penalty_only_monthly_v1": (
+        "daily_research/output/short_alpha_short_horizon_feature_penalty_ablation_review_20260407_r1_shortalpha48/"
+        "runs/short_expert_penalty_only_monthly_v1/metrics.json"
+    ),
+    "short_expert_penalty_only_light_monthly_v1": (
+        "daily_research/output/short_alpha_penalty_only_narrow_ablation_review_20260408_r2_shortalpha48_complete/"
+        "runs/short_expert_penalty_only_light_monthly_v1/metrics.json"
+    ),
 }
 
 
@@ -85,6 +94,16 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Optional explicit epoch budget for non-baseline short-alpha profiles in this review.",
     )
+    parser.add_argument(
+        "--resume-run-dir-map",
+        default="",
+        help="Optional comma-separated profile=run_dir mappings for strict-resume budget extensions.",
+    )
+    parser.add_argument(
+        "--disable-reuse-profiles",
+        default="",
+        help="Optional comma-separated profiles that should ignore REUSE_METRICS and run fresh/resume under this root.",
+    )
     return parser.parse_args()
 
 
@@ -93,7 +112,7 @@ def _resolve_family_key(profile_name: str) -> str:
 
 
 def _run_command(command: list[str]) -> None:
-    print("Running:", " ".join(command))
+    progress_write("Running: " + " ".join(command))
     subprocess.run(command, check=True, cwd=PROJECT_ROOT)
 
 
@@ -142,6 +161,7 @@ def _build_command(
     profile_name: str,
     family_epoch_budget_manifest: str,
     short_alpha_epoch_budget_override: int,
+    resume_run_dir: Path | None = None,
 ) -> list[str]:
     profile = get_profile(profile_name)
     family_key = _resolve_family_key(profile_name)
@@ -243,7 +263,33 @@ def _build_command(
         experiment_tag,
     ]
     cmd.extend(build_profile_cli_args(profile, include_objective_overrides=True))
+    if resume_run_dir is not None:
+        cmd.extend(["--resume-run-dir", str(resume_run_dir), "--resume-mode", "strict"])
     return cmd
+
+
+def _parse_resume_run_dir_map(raw: str) -> dict[str, Path]:
+    mapping: dict[str, Path] = {}
+    text = str(raw or "").strip()
+    if not text:
+        return mapping
+    for chunk in text.split(","):
+        item = str(chunk).strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"Invalid resume-run-dir mapping: {item!r}. Expected profile=run_dir.")
+        profile_name, run_dir = item.split("=", 1)
+        key = str(profile_name).strip()
+        value = str(run_dir).strip()
+        if not key or not value:
+            raise ValueError(f"Invalid resume-run-dir mapping: {item!r}.")
+        mapping[key] = Path(value).expanduser().resolve()
+    return mapping
+
+
+def _parse_name_set(raw: str) -> set[str]:
+    return {item.strip() for item in str(raw or "").split(",") if item.strip()}
 
 
 def _pct(value: Any) -> str:
@@ -264,127 +310,145 @@ def main() -> None:
     args = parse_args()
     root_tag = str(args.root_tag).strip()
     profile_names = [item.strip() for item in str(args.profiles).split(",") if item.strip()]
+    resume_run_dir_map = _parse_resume_run_dir_map(args.resume_run_dir_map)
+    disable_reuse_profiles = _parse_name_set(args.disable_reuse_profiles)
     if not profile_names:
         raise ValueError("No short-alpha profiles were provided.")
 
     rows: list[dict[str, Any]] = []
     source_runs: dict[str, str] = {}
 
-    for profile_name in profile_names:
-        profile = get_profile(profile_name)
-        reused_existing = False
-        metrics_path = _resolve_metrics_path(root_tag, profile.name)
-        reuse_path_str = REUSE_METRICS.get(profile.name, "")
-        if reuse_path_str and not args.force_rerun:
-            candidate_path = (PROJECT_ROOT / reuse_path_str).resolve()
-            if candidate_path.exists():
-                metrics_path = candidate_path
-                reused_existing = True
-        if not metrics_path.exists() or args.force_rerun:
-            experiment_tag = f"{root_tag}/runs/{profile.name}"
-            command = _build_command(
-                python_executable=str(args.python_executable),
-                experiment_tag=experiment_tag,
-                profile_name=profile.name,
-                family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
-                short_alpha_epoch_budget_override=int(args.short_alpha_epoch_budget_override),
-            )
-            _run_command(command)
-            metrics_path = _resolve_metrics_path(root_tag, profile.name)
-            reused_existing = False
-        metrics = _load_json(metrics_path)
-        _, holdout = resolve_primary_backtest(metrics, research_objective_mode=str(metrics.get("research_objective_mode", "")))
-        holdout = dict(holdout)
-        monthly_diagnostics = _load_primary_monthly_diagnostics(metrics_path.parent, metrics)
-        source_runs[profile.name] = str(metrics_path.resolve())
-        rows.append(
-            {
-                "profile_name": profile.name,
-                "description": profile.description,
-                "metrics_path": str(metrics_path.resolve()),
-                "reused_existing": reused_existing,
-                "feature_count": int(metrics.get("feature_count", 0)),
-                "target_names": ",".join(metrics.get("target_names", [])),
-                "score_head_method": str(metrics.get("score_head_method", profile.score_head_method or "manual")),
-                "adaptive_task_weights": bool(metrics.get("adaptive_task_weights", profile.adaptive_task_weights)),
-                "checkpoint_selection_objective": str(
-                    metrics.get("checkpoint_selection_objective", profile.checkpoint_selection_objective or "primary_annual_return")
-                ),
-                "research_objective_mode": str(metrics.get("research_objective_mode", profile.research_objective_mode or "execution_first")),
-                "annual_return": float(holdout.get("annual_return", 0.0)),
-                "excess_total_return": float(holdout.get("excess_total_return", 0.0)),
-                "excess_annual_return": float(holdout.get("excess_annual_return", 0.0)),
-                "excess_sharpe": float(holdout.get("excess_sharpe", 0.0)),
-                "excess_max_drawdown": float(holdout.get("excess_max_drawdown", 0.0)),
-                "avg_turnover": float(holdout.get("avg_turnover", 0.0)),
-                "avg_holding_count": float(holdout.get("avg_holding_count", 0.0)),
-                "monthly_positive_ratio": float(monthly_diagnostics.get("positive_month_ratio", 0.0)),
-                "monthly_median_excess_return": float(monthly_diagnostics.get("median_monthly_return", 0.0)),
-                "monthly_worst_excess_return": float(monthly_diagnostics.get("worst_monthly_return", 0.0)),
-                "monthly_top3_positive_share": float(monthly_diagnostics.get("top3_positive_month_share", 0.0)),
-                "monthly_longest_negative_streak": int(monthly_diagnostics.get("longest_negative_streak", 0)),
-            }
-        )
+    with StageProgress(total=len(profile_names) + 1, label="ShortExpertReview") as stage_progress:
+        for index, profile_name in enumerate(profile_names, start=1):
+            profile = get_profile(profile_name)
+            with stage_progress.stage("Review profile", f"{index}/{len(profile_names)} {profile.name}"):
+                reused_existing = False
+                metrics_path = _resolve_metrics_path(root_tag, profile.name)
+                reuse_path_str = REUSE_METRICS.get(profile.name, "")
+                if reuse_path_str and not args.force_rerun and profile.name not in disable_reuse_profiles:
+                    candidate_path = (PROJECT_ROOT / reuse_path_str).resolve()
+                    if candidate_path.exists():
+                        metrics_path = candidate_path
+                        reused_existing = True
+                        progress_write(f"Reuse metrics: {candidate_path}")
+                if not metrics_path.exists() or args.force_rerun:
+                    experiment_tag = f"{root_tag}/runs/{profile.name}"
+                    resume_run_dir = resume_run_dir_map.get(profile.name)
+                    if resume_run_dir is not None:
+                        progress_write(f"Strict resume source: {resume_run_dir}")
+                    command = _build_command(
+                        python_executable=str(args.python_executable),
+                        experiment_tag=experiment_tag,
+                        profile_name=profile.name,
+                        family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
+                        short_alpha_epoch_budget_override=int(args.short_alpha_epoch_budget_override),
+                        resume_run_dir=resume_run_dir,
+                    )
+                    _run_command(command)
+                    metrics_path = _resolve_metrics_path(root_tag, profile.name)
+                    reused_existing = False
+                metrics = _load_json(metrics_path)
+                _, holdout = resolve_primary_backtest(metrics, research_objective_mode=str(metrics.get("research_objective_mode", "")))
+                holdout = dict(holdout)
+                monthly_diagnostics = _load_primary_monthly_diagnostics(metrics_path.parent, metrics)
+                source_runs[profile.name] = str(metrics_path.resolve())
+                rows.append(
+                    {
+                        "profile_name": profile.name,
+                        "description": profile.description,
+                        "metrics_path": str(metrics_path.resolve()),
+                        "reused_existing": reused_existing,
+                        "feature_count": int(metrics.get("feature_count", 0)),
+                        "target_names": ",".join(metrics.get("target_names", [])),
+                        "score_head_method": str(metrics.get("score_head_method", profile.score_head_method or "manual")),
+                        "adaptive_task_weights": bool(metrics.get("adaptive_task_weights", profile.adaptive_task_weights)),
+                        "checkpoint_selection_objective": str(
+                            metrics.get("checkpoint_selection_objective", profile.checkpoint_selection_objective or "primary_annual_return")
+                        ),
+                        "research_objective_mode": str(metrics.get("research_objective_mode", profile.research_objective_mode or "execution_first")),
+                        "annual_return": float(holdout.get("annual_return", 0.0)),
+                        "excess_total_return": float(holdout.get("excess_total_return", 0.0)),
+                        "excess_annual_return": float(holdout.get("excess_annual_return", 0.0)),
+                        "excess_sharpe": float(holdout.get("excess_sharpe", 0.0)),
+                        "excess_max_drawdown": float(holdout.get("excess_max_drawdown", 0.0)),
+                        "avg_turnover": float(holdout.get("avg_turnover", 0.0)),
+                        "avg_holding_count": float(holdout.get("avg_holding_count", 0.0)),
+                        "monthly_positive_ratio": float(monthly_diagnostics.get("positive_month_ratio", 0.0)),
+                        "monthly_median_excess_return": float(monthly_diagnostics.get("median_monthly_return", 0.0)),
+                        "monthly_worst_excess_return": float(monthly_diagnostics.get("worst_monthly_return", 0.0)),
+                        "monthly_top3_positive_share": float(monthly_diagnostics.get("top3_positive_month_share", 0.0)),
+                        "monthly_longest_negative_streak": int(monthly_diagnostics.get("longest_negative_streak", 0)),
+                    }
+                )
+                progress_write(
+                    f"profile {profile.name} done | reused={reused_existing} | "
+                    f"excess_annual={_pct(holdout.get('excess_annual_return', 0.0))} | "
+                    f"excess_sharpe={_num(holdout.get('excess_sharpe', 0.0))}"
+                )
 
-    summary_df = pd.DataFrame(rows).sort_values(
-        [
-            "monthly_positive_ratio",
-            "monthly_median_excess_return",
-            "monthly_worst_excess_return",
-            "monthly_top3_positive_share",
-            "excess_sharpe",
-            "excess_annual_return",
-        ],
-        ascending=[False, False, False, True, False, False],
-    ).reset_index(drop=True)
+        with stage_progress.stage("Write review summary", root_tag):
+            summary_df = pd.DataFrame(rows).sort_values(
+                [
+                    "monthly_positive_ratio",
+                    "monthly_median_excess_return",
+                    "monthly_worst_excess_return",
+                    "monthly_top3_positive_share",
+                    "excess_sharpe",
+                    "excess_annual_return",
+                ],
+                ascending=[False, False, False, True, False, False],
+            ).reset_index(drop=True)
 
-    output_dir = OUTPUT_ROOT / root_tag
-    output_dir.mkdir(parents=True, exist_ok=True)
-    summary_df.to_csv(output_dir / "profile_summary.csv", index=False, encoding="utf-8-sig")
-    (output_dir / "source_runs.json").write_text(json.dumps(source_runs, ensure_ascii=False, indent=2), encoding="utf-8")
+            output_dir = OUTPUT_ROOT / root_tag
+            output_dir.mkdir(parents=True, exist_ok=True)
+            summary_df.to_csv(output_dir / "profile_summary.csv", index=False, encoding="utf-8-sig")
+            progress_write(f"Write artifact 1/3: {output_dir / 'profile_summary.csv'}")
+            (output_dir / "source_runs.json").write_text(json.dumps(source_runs, ensure_ascii=False, indent=2), encoding="utf-8")
+            progress_write(f"Write artifact 2/3: {output_dir / 'source_runs.json'}")
 
-    best = summary_df.iloc[0]
-    current_row = summary_df.loc[summary_df["profile_name"] == "state_liquidity_listwise_v1"].iloc[0]
-    lines = [
-        "# Short Alpha Short-Horizon Expert Review",
-        "",
-        "## Protocol",
-        f"- window: `{WINDOW.valid_start} -> 2026-04-01`",
-        f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOW.valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
-        "- universe: `liquid500`",
-        "- benchmark: `000300.SH`",
-        "- backbone: `patch_transformer + dynamic_graph_v1`",
-        "- comparison goal: current monthly-first short-alpha line vs short-horizon expert profile",
-        "",
-        "## Direct Answer",
-        f"- current best profile under monthly-first ranking on the latest formal window is `{best['profile_name']}`.",
-        f"- best positive-month ratio: `{_pct(best['monthly_positive_ratio'])}`.",
-        f"- best median monthly excess: `{_pct(best['monthly_median_excess_return'])}`.",
-        f"- best worst-month excess: `{_pct(best['monthly_worst_excess_return'])}`.",
-        f"- best excess annual / Sharpe: `{_pct(best['excess_annual_return'])} / {_num(best['excess_sharpe'])}`.",
-        "",
-        "## Current Main Line vs Short-Horizon Expert",
-    ]
-    for _, row in summary_df.iterrows():
-        delta_month = float(row["monthly_median_excess_return"]) - float(current_row["monthly_median_excess_return"])
-        delta_annual = float(row["excess_annual_return"]) - float(current_row["excess_annual_return"])
-        reuse_label = "reused" if bool(row["reused_existing"]) else "fresh"
-        lines.append(
-            "- "
-            f"`{row['profile_name']}` [{reuse_label}]: "
-            f"positive-month `{_pct(row['monthly_positive_ratio'])}`, "
-            f"median monthly excess `{_pct(row['monthly_median_excess_return'])}`, "
-            f"worst month `{_pct(row['monthly_worst_excess_return'])}`, "
-            f"top3 share `{_pct(row['monthly_top3_positive_share'])}`, "
-            f"excess annual `{_pct(row['excess_annual_return'])}`, "
-            f"excess Sharpe `{_num(row['excess_sharpe'])}`, "
-            f"delta vs current median monthly `{_pct(delta_month)}`, "
-            f"delta vs current excess annual `{_pct(delta_annual)}`, "
-            f"score_head `{row['score_head_method']}`, "
-            f"checkpoint `{row['checkpoint_selection_objective']}`"
-        )
-    (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"summary_dir={output_dir}")
+            best = summary_df.iloc[0]
+            current_row = summary_df.loc[summary_df["profile_name"] == "state_liquidity_listwise_v1"].iloc[0]
+            lines = [
+                "# Short Alpha Short-Horizon Expert Review",
+                "",
+                "## Protocol",
+                f"- window: `{WINDOW.valid_start} -> 2026-04-01`",
+                f"- research_time_unit: `{RESEARCH_TIME_UNIT}` with `valid_months={WINDOW.valid_months}` and `train_eval_window_months={TRAIN_EVAL_WINDOW_MONTHS}`",
+                "- universe: `liquid500`",
+                "- benchmark: `000300.SH`",
+                "- backbone: `patch_transformer + dynamic_graph_v1`",
+                "- comparison goal: current monthly-first short-alpha line vs short-horizon expert profile",
+                "",
+                "## Direct Answer",
+                f"- current best profile under monthly-first ranking on the latest formal window is `{best['profile_name']}`.",
+                f"- best positive-month ratio: `{_pct(best['monthly_positive_ratio'])}`.",
+                f"- best median monthly excess: `{_pct(best['monthly_median_excess_return'])}`.",
+                f"- best worst-month excess: `{_pct(best['monthly_worst_excess_return'])}`.",
+                f"- best excess annual / Sharpe: `{_pct(best['excess_annual_return'])} / {_num(best['excess_sharpe'])}`.",
+                "",
+                "## Current Main Line vs Short-Horizon Expert",
+            ]
+            for _, row in summary_df.iterrows():
+                delta_month = float(row["monthly_median_excess_return"]) - float(current_row["monthly_median_excess_return"])
+                delta_annual = float(row["excess_annual_return"]) - float(current_row["excess_annual_return"])
+                reuse_label = "reused" if bool(row["reused_existing"]) else "fresh"
+                lines.append(
+                    "- "
+                    f"`{row['profile_name']}` [{reuse_label}]: "
+                    f"positive-month `{_pct(row['monthly_positive_ratio'])}`, "
+                    f"median monthly excess `{_pct(row['monthly_median_excess_return'])}`, "
+                    f"worst month `{_pct(row['monthly_worst_excess_return'])}`, "
+                    f"top3 share `{_pct(row['monthly_top3_positive_share'])}`, "
+                    f"excess annual `{_pct(row['excess_annual_return'])}`, "
+                    f"excess Sharpe `{_num(row['excess_sharpe'])}`, "
+                    f"delta vs current median monthly `{_pct(delta_month)}`, "
+                    f"delta vs current excess annual `{_pct(delta_annual)}`, "
+                    f"score_head `{row['score_head_method']}`, "
+                    f"checkpoint `{row['checkpoint_selection_objective']}`"
+                )
+            (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            progress_write(f"Write artifact 3/3: {output_dir / 'summary.md'}")
+            print(f"summary_dir={output_dir}")
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ _BASE_PROFILE_REGISTRY: dict[str, ExecutionAlignmentProfile] = {
     ),
     "regoff_k2_10d_ensemble_native_anchor": ExecutionAlignmentProfile(
         name="regoff_k2_10d_ensemble_native_anchor",
-        description="Current default execution candidate: 10d anchored all-offset ensemble, top-k 2, regime filter off.",
+        description="Legacy 10d anchored all-offset ensemble comparator, top-k 2, regime filter off.",
         rebalance_freq="10d",
         rebalance_offset_mode="all",
         rebalance_anchor_date="2025-01-02",

@@ -44,8 +44,14 @@ class ResearchCandidateProfile:
     refresh_run_dir: str = ""
     trade_plan_refresh_run_dir: str = ""
     trade_plan_model_manifest_json: str = ""
+    trade_plan_refresh_command: tuple[str, ...] = ()
     liquidity_pool_name: str = ""
     liquidity_pool_size: int = 0
+    target_weight_semantics: str = ""
+    target_weight_cap_mode: str = ""
+    target_weight_cap_note: str = ""
+    score_panel_role: str = ""
+    score_reference_metadata_json: str = ""
 
 
 _DAILY_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
@@ -166,6 +172,12 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
     trade_plan_score = str(manifest.get("trade_plan_score_panel_csv", "")).strip()
     if not source_target_weight or not source_score or not trade_plan_target_weight or not trade_plan_score:
         return None
+    refresh_command_raw = manifest.get("trade_plan_refresh_command")
+    refresh_command: tuple[str, ...] = ()
+    if isinstance(refresh_command_raw, (list, tuple)):
+        refresh_command = tuple(str(item).strip() for item in refresh_command_raw if str(item).strip())
+    elif isinstance(refresh_command_raw, str) and refresh_command_raw.strip():
+        refresh_command = (refresh_command_raw.strip(),)
     description = (
         "Current active execution strategy promoted from the primary research winner; "
         "default daily execution should follow this manifest instead of a hard-coded profile."
@@ -173,12 +185,18 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
     strategy_name = str(manifest.get("strategy_name", "")).strip()
     panel_mode = str(manifest.get("panel_mode", "")).strip()
     execution_policy_label = str(manifest.get("execution_policy_label", "") or manifest.get("execution_alignment_profile", "")).strip()
+    target_weight_semantics = str(manifest.get("target_weight_semantics", "")).strip()
+    target_weight_cap_mode = str(manifest.get("target_weight_cap_mode", "")).strip()
     if strategy_name:
         description = f"{description} strategy={strategy_name}."
     if panel_mode:
         description = f"{description} panel_mode={panel_mode}."
     if execution_policy_label:
         description = f"{description} execution_policy={execution_policy_label}."
+    if target_weight_semantics:
+        description = f"{description} target_weight_semantics={target_weight_semantics}."
+    if target_weight_cap_mode:
+        description = f"{description} cap_mode={target_weight_cap_mode}."
     liquidity_pool_name = infer_liquidity_pool_name(manifest)
     return ResearchCandidateProfile(
         name=ACTIVE_EXECUTION_CANDIDATE_PROFILE,
@@ -209,8 +227,14 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         trade_plan_refresh_run_dir=str(manifest.get("trade_plan_refresh_run_dir", "")).strip()
         or str(manifest.get("production_root", "")).strip(),
         trade_plan_model_manifest_json=str(manifest.get("production_manifest_json", "")).strip(),
+        trade_plan_refresh_command=refresh_command,
         liquidity_pool_name=liquidity_pool_name,
         liquidity_pool_size=liquidity_pool_size_from_name(liquidity_pool_name),
+        target_weight_semantics=target_weight_semantics,
+        target_weight_cap_mode=target_weight_cap_mode,
+        target_weight_cap_note=str(manifest.get("target_weight_cap_note", "")).strip(),
+        score_panel_role=str(manifest.get("score_panel_role", "")).strip(),
+        score_reference_metadata_json=str(manifest.get("score_reference_metadata_json", "")).strip(),
     )
 
 
@@ -274,6 +298,16 @@ def _read_panel_latest_date(path_str: str) -> pd.Timestamp | None:
     if dates.empty:
         return None
     return pd.Timestamp(dates.max())
+
+
+def _panel_is_fresh(path_str: str, latest_completed: pd.Timestamp) -> bool:
+    path = Path(path_str)
+    if not path.exists():
+        return False
+    latest_date = _read_panel_latest_date(path_str)
+    if latest_date is None:
+        return True
+    return latest_date >= latest_completed
 
 
 def _load_json_payload(path: Path) -> dict[str, Any]:
@@ -438,10 +472,23 @@ def _ensure_live_panels(profile: ResearchCandidateProfile, *, mode: str) -> None
     _maybe_auto_retrain_production(profile, mode=mode)
     refresh_run_dir = _refresh_run_dir_for_mode(profile, mode)
     if not refresh_run_dir:
-        return
+        refresh_run_dir = ""
     latest_completed = pd.Timestamp(get_latest_completed_trading_date())
-    latest_panel_date = _read_panel_latest_date(_target_weight_path_for_mode(profile, mode))
-    if latest_panel_date is not None and latest_panel_date >= latest_completed:
+    target_path = _target_weight_path_for_mode(profile, mode)
+    score_path = _score_path_for_mode(profile, mode)
+    if _panel_is_fresh(target_path, latest_completed) and _panel_is_fresh(score_path, latest_completed):
+        return
+    if mode == "trade_plan" and profile.trade_plan_refresh_command:
+        print("custom_refresh_status=triggered")
+        print("custom_refresh_command=" + " ".join(profile.trade_plan_refresh_command))
+        subprocess.run(
+            list(profile.trade_plan_refresh_command),
+            check=True,
+            cwd=str(_DAILY_RESEARCH_ROOT.parent),
+        )
+        if _panel_is_fresh(target_path, latest_completed) and _panel_is_fresh(score_path, latest_completed):
+            return
+    if not refresh_run_dir:
         return
     from daily_research.deep_alpha.export_live_panels_from_run import refresh_live_panels_for_run
 
@@ -469,6 +516,16 @@ def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: 
         inject_default_arg("--external-score-csv", _score_path_for_mode(profile, mode))
         if profile.trade_plan_model_manifest_json:
             inject_default_arg("--external-model-manifest", profile.trade_plan_model_manifest_json)
+        if profile.target_weight_semantics:
+            inject_default_arg("--external-target-weight-semantics", profile.target_weight_semantics)
+        if profile.target_weight_cap_mode:
+            inject_default_arg("--external-target-weight-cap-mode", profile.target_weight_cap_mode)
+        if profile.target_weight_cap_note:
+            inject_default_arg("--external-target-weight-cap-note", profile.target_weight_cap_note)
+        if profile.score_panel_role:
+            inject_default_arg("--external-score-panel-role", profile.score_panel_role)
+        if profile.score_reference_metadata_json:
+            inject_default_arg("--external-score-reference-metadata-json", profile.score_reference_metadata_json)
     else:
         raise ValueError(f"Unsupported profile application mode: {mode}")
     inject_default_arg("--candidate-label", _candidate_label_for_mode(profile, mode))
