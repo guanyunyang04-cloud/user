@@ -19,12 +19,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 WEAK_MONTH_REVIEW_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_short_alpha_weak_month_review.py"
 EXTERNAL_REPLAY_SCRIPT = PROJECT_ROOT / "daily_research" / "baseline" / "backtest_external_score_panel.py"
+RECENT_BACKTEST_SCRIPT = PROJECT_ROOT / "daily_research" / "execution" / "run_research_candidate_backtest.py"
+RECENT_H2H_SCRIPT = PROJECT_ROOT / "daily_research" / "tools" / "execution_candidate_multiwindow_h2h.py"
 DEFAULT_FORMAL_ROOT = OUTPUT_ROOT / "short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1"
 DEFAULT_AUDIT_ROOTS = (
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20230216_20240229_20260405_r1",
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20240301_20250317_20260405_r1",
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20260405_r1",
 )
+DEFAULT_RECENT_AUDIT_ROOT = OUTPUT_ROOT / "short_alpha_production_execution_policy_audit_20260405_r1"
 DEFAULT_STATIC_PROFILE = "regoff_k1_5d_ensemble_native_anchor"
 
 
@@ -78,6 +81,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-targeted-regimes", type=int, default=2)
     parser.add_argument("--max-profiles-per-regime", type=int, default=2)
     parser.add_argument("--selection-objective", choices=["mean_excess_return", "monthly_robust_score"], default="mean_excess_return")
+    parser.add_argument(
+        "--forced-mapping-json",
+        default="",
+        help="Optional fixed trigger->profile mapping to evaluate instead of searching on training windows.",
+    )
+    parser.add_argument(
+        "--recent-audit-root",
+        default=str(DEFAULT_RECENT_AUDIT_ROOT),
+        help="Recent execution-policy audit root used for the realistic replay gate.",
+    )
+    parser.add_argument("--run-recent-gate", action="store_true")
+    parser.add_argument("--recent-bridge-start", default="2025-03-18")
+    parser.add_argument("--recent-weak-start", default="2025-09-05")
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default="short_alpha_targeted_weak_month_repair_review_20260406_r1")
@@ -87,6 +103,46 @@ def parse_args() -> argparse.Namespace:
 def _load_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _parse_mapping_json(raw: str) -> dict[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("--forced-mapping-json must decode to an object.")
+        mapping: dict[str, str] = {}
+        for key, value in payload.items():
+            key_text = str(key or "").strip()
+            value_text = str(value or "").strip()
+            if not key_text or not value_text:
+                raise ValueError(f"Forced mapping entries must be non-empty strings: {payload}")
+            mapping[key_text] = value_text
+        return mapping
+    except json.JSONDecodeError:
+        mapping = {}
+        for item in text.split(";"):
+            token = str(item or "").strip()
+            if not token:
+                continue
+            if "->" in token:
+                key_text, value_text = token.split("->", 1)
+            elif "=" in token:
+                key_text, value_text = token.split("=", 1)
+            else:
+                raise ValueError(
+                    "--forced-mapping-json must be valid JSON or use shell-safe `trigger=profile;...` syntax."
+                )
+            key_text = str(key_text or "").strip()
+            value_text = str(value_text or "").strip()
+            if not key_text or not value_text:
+                raise ValueError(f"Forced mapping entries must be non-empty strings: {text}")
+            mapping[key_text] = value_text
+        if not mapping:
+            raise ValueError("--forced-mapping-json did not contain any valid mapping entries.")
+        return mapping
 
 
 def _load_long_panel(path: Path, value_name: str) -> pd.DataFrame:
@@ -355,6 +411,29 @@ def _mapping_label(mapping: dict[str, str]) -> str:
     return ";".join(items)
 
 
+def _build_forced_plan_search_frame(
+    train_audit_monthly: pd.DataFrame,
+    *,
+    static_profile: str,
+    mapping: dict[str, str],
+) -> pd.DataFrame:
+    _, metrics = _evaluate_plan_on_monthly(
+        train_audit_monthly,
+        static_profile=static_profile,
+        mapping=mapping,
+    )
+    return pd.DataFrame(
+        [
+            {
+                "plan_label": _mapping_label(mapping),
+                "targeted_regime_count": int(len(mapping)),
+                "mapping_json": json.dumps(mapping, ensure_ascii=False, sort_keys=True),
+                **metrics,
+            }
+        ]
+    )
+
+
 def _evaluate_plan_on_monthly(
     audit_monthly: pd.DataFrame,
     *,
@@ -548,6 +627,13 @@ def _build_hybrid_target_weight_panel(window: AuditWindow, month_choice_df: pd.D
     return hybrid.fillna(0.0)
 
 
+def _locate_profile_run_dir(window: AuditWindow, profile_name: str) -> Path:
+    for path in sorted(window.profiles_root.iterdir()):
+        if path.is_dir() and _parse_profile_name(path) == profile_name:
+            return path
+    raise FileNotFoundError(f"Profile run not found for {profile_name} under {window.audit_root}")
+
+
 def _load_static_metrics(window: AuditWindow, static_profile: str) -> tuple[dict[str, Any], Path]:
     for path in window.profiles_root.iterdir():
         if path.is_dir() and _parse_profile_name(path) == static_profile:
@@ -709,7 +795,7 @@ def _run_replay(
 ) -> Path:
     cmd = [
         str(python_executable),
-        str(EXTERNAL_REPLAY_SCRIPT),
+        str(RECENT_BACKTEST_SCRIPT),
         "--target-weight-panel-csv",
         str(hybrid_panel_path),
         "--data-source",
@@ -742,6 +828,39 @@ def _run_replay(
     return output_dir / experiment_tag
 
 
+def _run_recent_h2h(
+    *,
+    python_executable: str,
+    candidate_run_dir: Path,
+    static_run_dir: Path,
+    output_dir: Path,
+    label_a: str,
+    label_b: str,
+    bridge_start: str,
+    weak_start: str,
+) -> Path:
+    cmd = [
+        str(python_executable),
+        str(RECENT_H2H_SCRIPT),
+        "--run-a",
+        str(candidate_run_dir),
+        "--label-a",
+        label_a,
+        "--run-b",
+        str(static_run_dir),
+        "--label-b",
+        label_b,
+        "--bridge-start",
+        bridge_start,
+        "--weak-start",
+        weak_start,
+        "--output-dir",
+        str(output_dir),
+    ]
+    _run_command(cmd)
+    return output_dir
+
+
 def _format_pct(value: Any) -> str:
     try:
         return f"{float(value):.2%}"
@@ -761,6 +880,8 @@ def _write_report(
     *,
     summary: dict[str, Any],
     compare_df: pd.DataFrame,
+    full_mapping: dict[str, str],
+    recent_gate_summary: dict[str, Any] | None,
 ) -> None:
     lines = [
         "# Short Alpha Targeted Weak-Month Repair Review",
@@ -777,6 +898,9 @@ def _write_report(
         f"- annual wins: `{summary['wins_excess_annual_return']}/{summary['window_count']}`",
         f"- Sharpe wins: `{summary['wins_excess_sharpe']}/{summary['window_count']}`",
         "",
+        "## Full-Train Candidate",
+        f"- full_training_mapping: `{_mapping_label(full_mapping)}`",
+        "",
         "## Window Results",
     ]
     for _, row in compare_df.iterrows():
@@ -785,8 +909,25 @@ def _write_report(
             f"`{row['window_key']}`: targeted `{_format_pct(row['targeted_excess_annual_return'])}` vs static `{_format_pct(row['static_excess_annual_return'])}` "
             f"(delta `{_format_pct(row['delta_excess_annual_return'])}`), mapping `{row['selected_plan_label']}`"
         )
+    if recent_gate_summary is not None:
+        lines.extend(
+            [
+                "",
+                "## Recent Gate",
+                f"- recent_window: `{recent_gate_summary['window_key']}`",
+                f"- targeted recent excess annual: `{_format_pct(recent_gate_summary['targeted_excess_annual_return'])}`",
+                f"- static recent excess annual: `{_format_pct(recent_gate_summary['static_excess_annual_return'])}`",
+                f"- delta recent excess annual: `{_format_pct(recent_gate_summary['delta_excess_annual_return'])}`",
+                f"- targeted recent excess Sharpe: `{_format_num(recent_gate_summary['targeted_excess_sharpe'])}`",
+                f"- static recent excess Sharpe: `{_format_num(recent_gate_summary['static_excess_sharpe'])}`",
+                f"- delta recent excess Sharpe: `{_format_num(recent_gate_summary['delta_excess_sharpe'])}`",
+                f"- recent mapping: `{recent_gate_summary['selected_plan_label']}`",
+            ]
+        )
     lines.extend(["", "## Direct Answer"])
-    if float(summary["delta_mean_excess_annual_return"]) > 0.0:
+    if float(summary["delta_mean_excess_annual_return"]) > 0.0 and (
+        recent_gate_summary is None or float(recent_gate_summary["delta_excess_annual_return"]) > 0.0
+    ):
         lines.append(
             "- A narrow weak-month repair plan now beats the static policy on average, so the next step should move from broad execution-policy search to a limited regime-scoped repair branch."
         )
@@ -802,6 +943,7 @@ def main() -> None:
     output_dir = Path(args.output_root).resolve() / str(args.root_tag).strip()
     output_dir.mkdir(parents=True, exist_ok=True)
     static_profile = str(args.static_profile).strip()
+    forced_mapping = _parse_mapping_json(str(args.forced_mapping_json))
 
     weak_month_dir = _run_weak_month_review(args, output_dir)
     weak_df = pd.read_csv(weak_month_dir / "weak_month_review.csv")
@@ -857,23 +999,41 @@ def main() -> None:
         if train_audit_monthly.empty or train_weak_df.empty:
             raise RuntimeError(f"Training split became empty for {window.window_key}")
 
-        best_mapping, plan_search_df, regime_summary = _select_best_training_plan(
-            train_audit_monthly,
-            train_weak_df,
-            static_profile=static_profile,
-            trigger_mode=str(args.trigger_mode),
-            min_regime_support=int(args.min_regime_support),
-            min_regime_lift=float(args.min_regime_lift),
-            max_regimes_considered=int(args.max_regimes_considered),
-            max_targeted_regimes=int(args.max_targeted_regimes),
-            max_profiles_per_regime=int(args.max_profiles_per_regime),
-            selection_objective=str(args.selection_objective),
-        )
+        if forced_mapping:
+            best_mapping = dict(forced_mapping)
+            plan_search_df = _build_forced_plan_search_frame(
+                train_audit_monthly,
+                static_profile=static_profile,
+                mapping=best_mapping,
+            )
+            regime_summary = pd.DataFrame(
+                [
+                    {
+                        "trigger_key": key,
+                        "forced_profile_name": value,
+                    }
+                    for key, value in sorted(best_mapping.items())
+                ]
+            )
+        else:
+            best_mapping, plan_search_df, regime_summary = _select_best_training_plan(
+                train_audit_monthly,
+                train_weak_df,
+                static_profile=static_profile,
+                trigger_mode=str(args.trigger_mode),
+                min_regime_support=int(args.min_regime_support),
+                min_regime_lift=float(args.min_regime_lift),
+                max_regimes_considered=int(args.max_regimes_considered),
+                max_targeted_regimes=int(args.max_targeted_regimes),
+                max_profiles_per_regime=int(args.max_profiles_per_regime),
+                selection_objective=str(args.selection_objective),
+            )
         plan_search_df.insert(0, "test_window_key", window.window_key)
         plan_search_exports.append(plan_search_df)
 
-        regime_summary.insert(0, "test_window_key", window.window_key)
-        regime_export_rows.append(regime_summary)
+        if not regime_summary.empty:
+            regime_summary.insert(0, "test_window_key", window.window_key)
+            regime_export_rows.append(regime_summary)
 
         test_month_meta = (
             _apply_trigger_key(
@@ -951,6 +1111,136 @@ def main() -> None:
     if regime_export_rows:
         pd.concat(regime_export_rows, ignore_index=True).to_csv(output_dir / "training_regime_summary.csv", index=False, encoding="utf-8-sig")
 
+    if forced_mapping:
+        full_mapping = dict(forced_mapping)
+        full_plan_search_df = _build_forced_plan_search_frame(
+            all_audit_monthly,
+            static_profile=static_profile,
+            mapping=full_mapping,
+        )
+        full_regime_summary = pd.DataFrame(
+            [
+                {
+                    "trigger_key": key,
+                    "forced_profile_name": value,
+                }
+                for key, value in sorted(full_mapping.items())
+            ]
+        )
+    else:
+        full_mapping, full_plan_search_df, full_regime_summary = _select_best_training_plan(
+            all_audit_monthly,
+            weak_df,
+            static_profile=static_profile,
+            trigger_mode=str(args.trigger_mode),
+            min_regime_support=int(args.min_regime_support),
+            min_regime_lift=float(args.min_regime_lift),
+            max_regimes_considered=int(args.max_regimes_considered),
+            max_targeted_regimes=int(args.max_targeted_regimes),
+            max_profiles_per_regime=int(args.max_profiles_per_regime),
+            selection_objective=str(args.selection_objective),
+        )
+    full_plan_search_df.to_csv(output_dir / "full_training_plan_search.csv", index=False, encoding="utf-8-sig")
+    if not full_regime_summary.empty:
+        full_regime_summary.to_csv(output_dir / "full_training_regime_summary.csv", index=False, encoding="utf-8-sig")
+    (output_dir / "full_training_mapping.json").write_text(
+        json.dumps(
+            {
+                "trigger_mode": str(args.trigger_mode),
+                "selection_objective": str(args.selection_objective),
+                "mapping": full_mapping,
+                "mapping_label": _mapping_label(full_mapping),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    recent_gate_summary: dict[str, Any] | None = None
+    if bool(args.run_recent_gate):
+        recent_audit_root = Path(str(args.recent_audit_root or "")).resolve()
+        if recent_audit_root.exists():
+            recent_window = _discover_window(recent_audit_root)
+            recent_monthly = _load_window_audit_monthly(recent_window)
+            static_metrics, recent_static_run_dir = _load_static_metrics(recent_window, static_profile)
+            recent_diagnostics = _load_month_start_signal_diagnostics(recent_static_run_dir)
+            recent_diagnostics.to_csv(output_dir / "recent_month_start_signal_diagnostics.csv", index=False, encoding="utf-8-sig")
+            recent_monthly = recent_monthly.merge(recent_diagnostics[diagnostic_cols], on="month", how="left")
+            recent_monthly = _apply_trigger_key(recent_monthly, trigger_mode=str(args.trigger_mode))
+            recent_month_meta = (
+                recent_monthly[
+                    [
+                        "window_key",
+                        "month",
+                        "month_start_regime",
+                        "month_start_weight_count",
+                        "month_start_signal_shape",
+                        "first_week_weight_drift",
+                        "first_week_score_followthrough",
+                        "first_week_combo",
+                        "trigger_key",
+                    ]
+                ]
+                .drop_duplicates()
+                .sort_values("month")
+                .reset_index(drop=True)
+            )
+            recent_month_meta["selected_profile"] = recent_month_meta["trigger_key"].map(full_mapping).fillna(static_profile)
+            recent_month_meta.insert(1, "selected_plan_label", _mapping_label(full_mapping))
+            recent_month_meta.to_csv(output_dir / "recent_month_policy_choices.csv", index=False, encoding="utf-8-sig")
+
+            if full_mapping:
+                recent_hybrid_panel = _build_hybrid_target_weight_panel(recent_window, recent_month_meta)
+                recent_hybrid_panel_path = output_dir / f"recent_hybrid_target_weight_panel_{recent_window.window_key}.csv"
+                recent_hybrid_panel.to_csv(recent_hybrid_panel_path, index_label="date", encoding="utf-8-sig")
+                recent_replay_dir = _run_replay(
+                    python_executable=str(args.python_executable),
+                    hybrid_panel_path=recent_hybrid_panel_path,
+                    start_date=recent_window.start_date,
+                    end_date=recent_window.end_date,
+                    output_dir=output_dir,
+                    experiment_tag=f"recent_replays/{recent_window.window_key}",
+                    candidate_label=f"targeted_weak_month_repair_recent_{recent_window.window_key}",
+                )
+                targeted_metrics = _load_json(recent_replay_dir / "metrics.json")
+            else:
+                recent_replay_dir = recent_static_run_dir
+                targeted_metrics = dict(static_metrics)
+
+            recent_gate_summary = {
+                "window_key": recent_window.window_key,
+                "selected_plan_label": _mapping_label(full_mapping),
+                "selected_mapping_json": json.dumps(full_mapping, ensure_ascii=False, sort_keys=True),
+                "targeted_excess_annual_return": float(targeted_metrics.get("excess_annual_return", 0.0) or 0.0),
+                "targeted_excess_sharpe": float(targeted_metrics.get("excess_sharpe", 0.0) or 0.0),
+                "static_excess_annual_return": float(static_metrics.get("excess_annual_return", 0.0) or 0.0),
+                "static_excess_sharpe": float(static_metrics.get("excess_sharpe", 0.0) or 0.0),
+                "delta_excess_annual_return": float(targeted_metrics.get("excess_annual_return", 0.0) or 0.0)
+                - float(static_metrics.get("excess_annual_return", 0.0) or 0.0),
+                "delta_excess_sharpe": float(targeted_metrics.get("excess_sharpe", 0.0) or 0.0)
+                - float(static_metrics.get("excess_sharpe", 0.0) or 0.0),
+                "targeted_run_dir": str(recent_replay_dir),
+                "static_run_dir": str(recent_static_run_dir),
+            }
+            if recent_replay_dir != recent_static_run_dir:
+                recent_h2h_dir = output_dir / "recent_h2h_targeted_vs_static"
+                _run_recent_h2h(
+                    python_executable=str(args.python_executable),
+                    candidate_run_dir=recent_replay_dir,
+                    static_run_dir=recent_static_run_dir,
+                    output_dir=recent_h2h_dir,
+                    label_a="targeted_recent",
+                    label_b="static_recent",
+                    bridge_start=str(args.recent_bridge_start),
+                    weak_start=str(args.recent_weak_start),
+                )
+                recent_gate_summary["recent_h2h_dir"] = str(recent_h2h_dir)
+            (output_dir / "recent_gate_summary.json").write_text(
+                json.dumps(recent_gate_summary, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
     summary = {
         "static_profile": static_profile,
         "window_count": int(len(compare_df)),
@@ -965,9 +1255,16 @@ def main() -> None:
         "selection_objective": str(args.selection_objective),
         "trigger_mode": str(args.trigger_mode),
         "review_root": str(output_dir),
+        "full_training_mapping": full_mapping,
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    _write_report(output_dir, summary=summary, compare_df=compare_df)
+    _write_report(
+        output_dir,
+        summary=summary,
+        compare_df=compare_df,
+        full_mapping=full_mapping,
+        recent_gate_summary=recent_gate_summary,
+    )
     print(json.dumps(summary, ensure_ascii=True, indent=2))
 
 

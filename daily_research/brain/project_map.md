@@ -111,3 +111,14 @@
 7. architecture 线如果继续，只优先看：
    - `encoder_transformer_v1` 稳定性修复
    - `graph_off_plain` 监控性复核
+## 0. 2026-04-08 latest map
+- execution-side winner:
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_review_20260407_r2_recentgate`
+  - current repair candidate = `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+- execution-side supporting branch:
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_fade_tighten_regon_review_20260407_r1`
+  - supporting mapping = `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor`
+- model-side ablation root:
+  - `daily_research/output/short_alpha_short_horizon_feature_penalty_ablation_review_20260407_r1_shortalpha48`
+  - `feature-only` = negative evidence
+  - `penalty-only` = nearest useful ablation

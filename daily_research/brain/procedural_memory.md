@@ -218,3 +218,12 @@
 - brain 文档默认使用简体中文。
 - shell 运行时输出、进度条文本、运行日志默认使用英文。
 - PowerShell 直接读中文 markdown 如果出现乱码，优先用 `yolos` 的 UTF-8 Python 读取，不要误判成文件损坏。
+## 0. 2026-04-08 update
+- 对 `first-week` execution repair，默认流程必须包含：
+  - component ablation
+  - mapping ablation
+  - recent realistic gate
+- 如果单组件都失败、但某条单映射 formal `3/3` 全胜且 recent gate 为正，则单映射优先级高于 multi-key combo
+- 对 `short_expert_v2` 这类 bundle，如果 `feature-only` 弱、`penalty-only` 强且两者都 stable：
+  - 结论写成“真正有效的是 state-targeted penalty increment”
+  - 不再把 uplift 归因成 feature pack 本身已经足够

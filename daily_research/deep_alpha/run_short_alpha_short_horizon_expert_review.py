@@ -56,6 +56,10 @@ REUSE_METRICS: dict[str, str] = {
         "daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget/"
         "runs/short_expert_monthly_v1/metrics.json"
     ),
+    "short_expert_monthly_v2": (
+        "daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48/"
+        "runs/short_expert_monthly_v2/metrics.json"
+    ),
 }
 
 
@@ -75,6 +79,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
+    parser.add_argument(
+        "--short-alpha-epoch-budget-override",
+        type=int,
+        default=0,
+        help="Optional explicit epoch budget for non-baseline short-alpha profiles in this review.",
+    )
     return parser.parse_args()
 
 
@@ -131,10 +141,13 @@ def _build_command(
     experiment_tag: str,
     profile_name: str,
     family_epoch_budget_manifest: str,
+    short_alpha_epoch_budget_override: int,
 ) -> list[str]:
     profile = get_profile(profile_name)
     family_key = _resolve_family_key(profile_name)
     epoch_budget = resolve_epoch_budget_for_family(family_key, manifest_path=family_epoch_budget_manifest, fallback_epochs=8)
+    if family_key == "short_alpha" and int(short_alpha_epoch_budget_override) > 0:
+        epoch_budget = int(short_alpha_epoch_budget_override)
     cmd = [
         python_executable,
         str(RUN_SCRIPT),
@@ -274,6 +287,7 @@ def main() -> None:
                 experiment_tag=experiment_tag,
                 profile_name=profile.name,
                 family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
+                short_alpha_epoch_budget_override=int(args.short_alpha_epoch_budget_override),
             )
             _run_command(command)
             metrics_path = _resolve_metrics_path(root_tag, profile.name)

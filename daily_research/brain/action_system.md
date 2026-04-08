@@ -374,3 +374,17 @@
 - `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
 - `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`
 - `daily_research/output/dynamic_graph_no_priors_execution_policy_formal_review_20260406_r1`
+## 0. 2026-04-08 latest actions
+- first-week repair refinement:
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_weight_drift --root-tag short_alpha_targeted_weak_month_repair_regime_firstweek_weight_drift_review_20260407_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_score_followthrough --root-tag short_alpha_targeted_weak_month_repair_regime_firstweek_score_followthrough_review_20260407_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_targeted_weak_month_repair_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --trigger-mode regime_firstweek_combo --forced-mapping-json "trend_up_low_vol|expand|stable=topk3_1d_regoff" --run-recent-gate --root-tag short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_review_20260407_r2_recentgate
+```
+- short-expert feature vs penalty ablation:
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --profiles baseline_current,state_liquidity_listwise_v1,short_expert_feature_only_monthly_v1,short_expert_penalty_only_monthly_v1,short_expert_monthly_v2 --short-alpha-epoch-budget-override 48 --root-tag short_alpha_short_horizon_feature_penalty_ablation_review_20260407_r1_shortalpha48
+```
+- current verdict:
+  - execution-side current winner = single-mapping `expand|stable -> topk3`
+  - model-side current next starting point = `short_expert_penalty_only_monthly_v1`

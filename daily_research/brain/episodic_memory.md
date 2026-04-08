@@ -10948,3 +10948,18 @@ position,000001.SZ,1200,12.38,
   - `daily_research/brain/procedural_memory.md`
   - `daily_research/brain/action_system.md`
   - `daily_research/brain/project_map.md`
+## 2026-04-08 - execution refinement + feature/penalty ablation completed
+- 执行侧：
+  - `weight_drift` 与 `score_followthrough` 单组件都失败
+  - 真正更强的 repair candidate 收敛为单条 `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - formal `65.75% / 2.826`，annual / Sharpe `3/3` 全胜
+  - recent realistic gate `16.68% / 1.097` vs static `7.77% / 0.517`
+  - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor` 保留为 supporting mapping
+- 模型侧：
+  - `short_expert_feature_only_monthly_v1` fully stable but weak: `41.57% / 3.352`
+  - `short_expert_penalty_only_monthly_v1` fully stable and near current line: `63.93% / 4.696`
+  - current line `state_liquidity_listwise_v1` = `65.90% / 3.856`
+  - `short_expert_monthly_v2` = `57.55% / 3.015`
+- 判断：
+  - 新 feature pack 单独不够，真正有效的增量来自 state-targeted downside / rank penalty
+  - 后续 model-side 如继续，应从 `short_expert_penalty_only_monthly_v1` 往下做，而不是回到 `short_expert_monthly_v2`

@@ -290,3 +290,24 @@
   - `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`
 - dynamic_graph 同口径 execution-policy review：
   - `daily_research/output/dynamic_graph_no_priors_execution_policy_formal_review_20260406_r1`
+## 0. 2026-04-08 latest update
+- execution-side refined verdict:
+  - `regime_firstweek_weight_drift` = `48.74% / 2.096`, delta vs static `-4.56% / -0.074`
+  - `regime_firstweek_score_followthrough` = `46.24% / 1.974`, delta vs static `-7.05% / -0.196`
+  - 单组件都失败，说明 first-week repair 的有效信息不在单轴标签
+- execution-side current winner:
+  - 单条 `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - formal `65.75% / 2.826`
+  - annual / Sharpe `3/3` 全胜
+  - recent realistic gate `16.68% / 1.097` vs static `7.77% / 0.517`
+  - 双映射 combo 改为 supporting evidence，不再作为默认 repair winner
+- model-side latest-window ablation (`short_alpha -> 48`, all stable):
+  - `short_expert_feature_only_monthly_v1` = `41.57% / 3.352`, positive `83.33%`, median `2.80%`, worst `-1.20%`, monthly robust `0.0673`, `selected_epoch = 3`
+  - `short_expert_penalty_only_monthly_v1` = `63.93% / 4.696`, positive `75.00%`, median `3.81%`, worst `-1.64%`, monthly robust `0.0835`, `selected_epoch = 5`
+  - `state_liquidity_listwise_v1` current line = `65.90% / 3.856`, positive `75.00%`, median `5.26%`, worst `-4.48%`, monthly robust `0.0897`
+  - `short_expert_monthly_v2` = `57.55% / 3.015`, positive `83.33%`, median `3.19%`, worst `-4.39%`, monthly robust `0.0684`
+- current model-side judgment:
+  - refreshed first-week / breadth / failure-risk features alone are not enough
+  - state-targeted downside / rank penalty is the effective increment
+  - `penalty-only` is the next model-side starting point if this line reopens
+  - `short_expert_monthly_v2` stays a monitored negative branch
