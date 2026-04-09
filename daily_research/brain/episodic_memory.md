@@ -11154,3 +11154,18 @@ position,000001.SZ,1200,12.38,
   - `daily_research/brain/action_system.md`
   - `daily_research/brain/project_map.md`
 - `daily_research/tools/project_consistency_check.py` 也已增加对应检查，避免后续再次只改一半。
+## 2026-04-09 - raw fallback unified and production e64 synced
+- production full-fit fresh `32` run judged undertrained, then strict-resume extended to stable `64`.
+- current stable production run: `daily_research/output/short_alpha_production_epoch_extension_20260409_r1/runs/short_alpha_production_e64`
+- production root now materializes `daily_live_target_weight_panel.csv`, `portfolio_capped_daily_live_target_weight_panel.csv`, and `static_fallback_daily_live_target_weight_panel.csv`.
+- active pipeline was refreshed to `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260409_r1`.
+- current active candidate backtest now defaults to manifest/profile cost settings `3 / 7 / 10` bps.
+- latest costed recent recheck root: `daily_research/output/recheck_active_execution_candidate_20260409_r3_unified_costed`
+- latest result: full chain semantics became cleaner, but recent realized performance weakened versus the old capped fallback.
+## 2026-04-09 09:48 Consistency Closure
+- 本轮把“代码主链已统一，但 manifest / trade plan / 底层默认值仍残留旧口径”的尾巴收完。
+- `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 现在会把 `effective_execution_profile / effective_execution_bridge_meta / weight_generation_note` 写进 `daily_live_score_reference.json`。
+- `activate_execution_single_mapping_candidate.py` 现在会把 current live execution state 同步写进 `active_execution_strategy.json`，包括 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_weight_generation_note`。
+- `generate_daily_trade_plan.py` 现在会加载 score reference metadata，并在 plan 里解释 bridge 造成的“raw score 与最终权重非单调”现象。
+- `DeepAlphaConfig` 已同步到 `32 / 16`；`run_deep_alpha_research.py` 和 `run_retrain_frequency_formal_matrix.py` 的 stale execution-alignment default 已切到 `regoff_k1_5d_ensemble_native_anchor`。
+- `project_consistency_check.py` 已扩展为检查 dataclass 默认值、stale execution profile fallback、active manifest 的 effective live 字段，以及 trade plan 对 effective execution explanation 的支持。

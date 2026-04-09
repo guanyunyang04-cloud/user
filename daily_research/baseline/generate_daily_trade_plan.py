@@ -139,6 +139,9 @@ def parse_args():
     parser.add_argument("--stale-model-warn-trading-days", type=int, default=1)
     parser.add_argument("--stale-model-max-trading-days", type=int, default=3)
     parser.add_argument("--allow-stale-model", action="store_true")
+    parser.add_argument("--transaction-cost-bps", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--slippage-bps", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--sell-tax-bps", type=float, default=None, help=argparse.SUPPRESS)
 
     parser.add_argument("--min-adv20", type=float, default=50_000.0)
     parser.add_argument("--min-price", type=float, default=2.0)
@@ -365,6 +368,9 @@ def _assess_external_model_retrain_freshness(
         "target_weight_cap_note": str(manifest.get("target_weight_cap_note", "")),
         "score_panel_role": str(manifest.get("score_panel_role", "")),
         "score_reference_metadata_json": str(manifest.get("score_reference_metadata_json", "")),
+        "transaction_cost_bps": manifest.get("transaction_cost_bps"),
+        "slippage_bps": manifest.get("slippage_bps"),
+        "sell_tax_bps": manifest.get("sell_tax_bps"),
     }
     if not manifest:
         result["warnings"].append(
@@ -896,26 +902,86 @@ def _resolve_plan_display_mode(model_info: Dict[str, Any]) -> str:
     mode = str(model_info.get("mode", "")).strip()
     if mode in {"research_candidate_target_weight_csv", "research_candidate_csv"}:
         return "research_candidate"
-    return "legacy_ml"
+    return "native_model"
+
+
+def _load_optional_json_dict(path_like: Any) -> Dict[str, Any]:
+    path_text = str(path_like or "").strip()
+    if not path_text:
+        return {}
+    path = Path(path_text).expanduser()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _merge_score_reference_metadata(model_info: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(model_info)
+    payload = _load_optional_json_dict(model_info.get("score_reference_metadata_json", ""))
+    if not payload:
+        return merged
+    if "candidate_active_now" in payload:
+        merged["effective_live_candidate_active"] = bool(payload.get("candidate_active_now", False))
+    if payload.get("latest_month"):
+        merged["effective_live_month"] = str(payload.get("latest_month", ""))
+    if payload.get("latest_trigger_key"):
+        merged["effective_live_trigger_key"] = str(payload.get("latest_trigger_key", ""))
+    if payload.get("latest_selected_profile"):
+        merged["effective_live_execution_profile"] = str(payload.get("latest_selected_profile", ""))
+    if payload.get("effective_execution_profile"):
+        merged["effective_live_execution_profile"] = str(payload.get("effective_execution_profile", ""))
+    if payload.get("effective_execution_profile_description"):
+        merged["effective_live_execution_profile_description"] = str(payload.get("effective_execution_profile_description", ""))
+    if payload.get("live_target_weight_mode"):
+        merged["effective_live_target_weight_mode"] = str(payload.get("live_target_weight_mode", ""))
+    if isinstance(payload.get("effective_execution_bridge_meta"), dict):
+        merged["effective_live_execution_bridge_meta"] = dict(payload.get("effective_execution_bridge_meta", {}))
+    if payload.get("note"):
+        merged["effective_live_score_note"] = str(payload.get("note", ""))
+    if payload.get("weight_generation_note"):
+        merged["effective_live_weight_generation_note"] = str(payload.get("weight_generation_note", ""))
+    return merged
 
 
 def _resolve_candidate_display_config(model_info: Dict[str, Any]) -> Dict[str, Any]:
     mode = str(model_info.get("mode", "")).strip()
     status = str(model_info.get("score_context_status", "")).strip().lower()
+    score_panel_role = str(model_info.get("score_panel_role", "")).strip().lower()
     if mode == "research_candidate_target_weight_csv":
+        if score_panel_role == "execution_preweight_score_panel":
+            return {
+                "execution_score_label": "转权重前分数",
+                "show_source_score": False,
+                "source_score_label": "",
+                "execution_proxy_source": "ml_score",
+                "source_candidate_source": "",
+            }
         return {
             "execution_score_label": "参考排序分数",
             "show_source_score": status == "external_score",
             "source_score_label": "源候选参考分数",
+            "execution_proxy_source": "final_score",
+            "source_candidate_source": "ml_score",
         }
     return {
         "execution_score_label": "候选分数",
         "show_source_score": False,
         "source_score_label": "",
+        "execution_proxy_source": "final_score",
+        "source_candidate_source": "ml_score",
     }
 
 
-def _decorate_candidate_display_fields(df: pd.DataFrame) -> pd.DataFrame:
+def _decorate_candidate_display_fields(
+    df: pd.DataFrame,
+    *,
+    execution_proxy_source: str = "final_score",
+    source_candidate_source: str = "ml_score",
+) -> pd.DataFrame:
     if df.empty:
         out = df.copy()
         if "execution_proxy_score" not in out.columns:
@@ -924,8 +990,11 @@ def _decorate_candidate_display_fields(df: pd.DataFrame) -> pd.DataFrame:
             out["source_candidate_score"] = pd.Series(dtype=float)
         return out
     out = df.copy()
-    out["execution_proxy_score"] = pd.to_numeric(out.get("final_score"), errors="coerce")
-    out["source_candidate_score"] = pd.to_numeric(out.get("ml_score"), errors="coerce")
+    out["execution_proxy_score"] = pd.to_numeric(out.get(execution_proxy_source), errors="coerce")
+    if source_candidate_source:
+        out["source_candidate_score"] = pd.to_numeric(out.get(source_candidate_source), errors="coerce")
+    else:
+        out["source_candidate_score"] = np.nan
     return out
 
 
@@ -995,7 +1064,9 @@ def _build_trade_plan(
     positions_df: pd.DataFrame,
     cash: float,
     lot_size: int,
-    display_mode: str = "legacy_ml",
+    display_mode: str = "native_model",
+    execution_proxy_source: str = "final_score",
+    source_candidate_source: str = "ml_score",
 ) -> tuple[pd.DataFrame, Dict[str, float]]:
     latest_price = close_row.dropna()
     pos = positions_df.copy()
@@ -1103,7 +1174,11 @@ def _build_trade_plan(
         )
 
     action_df = pd.DataFrame(rows)
-    action_df = _decorate_candidate_display_fields(action_df)
+    action_df = _decorate_candidate_display_fields(
+        action_df,
+        execution_proxy_source=execution_proxy_source,
+        source_candidate_source=source_candidate_source,
+    )
     if not action_df.empty:
         action_priority = {"卖出": 0, "减仓": 1, "买入": 2, "加仓": 3}
         action_df["action_priority"] = action_df["action"].map(action_priority).fillna(99)
@@ -1177,7 +1252,9 @@ def _build_watchlist(
     score_v2_row: pd.Series,
     ml_score_row: pd.Series,
     top_n: int = 15,
-    display_mode: str = "legacy_ml",
+    display_mode: str = "native_model",
+    execution_proxy_source: str = "final_score",
+    source_candidate_source: str = "ml_score",
 ) -> pd.DataFrame:
     df = pd.DataFrame(
         {
@@ -1190,7 +1267,11 @@ def _build_watchlist(
             "ml_score": ml_score_row.reindex(final_score_row.index).values,
         }
     )
-    df = _decorate_candidate_display_fields(df)
+    df = _decorate_candidate_display_fields(
+        df,
+        execution_proxy_source=execution_proxy_source,
+        source_candidate_source=source_candidate_source,
+    )
     if display_mode == "research_candidate":
         return (
             df.sort_values(["target_weight", "execution_proxy_score", "stock"], ascending=[False, False, True])
@@ -1285,6 +1366,20 @@ def _write_trade_plan_txt(
     target_weight_cap_mode = str(model_info.get("target_weight_cap_mode", "")).strip()
     target_weight_cap_note = str(model_info.get("target_weight_cap_note", "")).strip()
     score_panel_role = str(model_info.get("score_panel_role", "")).strip()
+    effective_live_target_weight_mode = str(model_info.get("effective_live_target_weight_mode", "")).strip()
+    effective_live_execution_profile = str(model_info.get("effective_live_execution_profile", "")).strip()
+    effective_live_execution_profile_description = str(model_info.get("effective_live_execution_profile_description", "")).strip()
+    effective_live_trigger_key = str(model_info.get("effective_live_trigger_key", "")).strip()
+    effective_live_score_note = str(model_info.get("effective_live_score_note", "")).strip()
+    effective_live_weight_generation_note = str(model_info.get("effective_live_weight_generation_note", "")).strip()
+    effective_live_bridge_meta = (
+        model_info.get("effective_live_execution_bridge_meta", {})
+        if isinstance(model_info.get("effective_live_execution_bridge_meta"), dict)
+        else {}
+    )
+    transaction_cost_bps = model_info.get("transaction_cost_bps")
+    slippage_bps = model_info.get("slippage_bps")
+    sell_tax_bps = model_info.get("sell_tax_bps")
     lines: List[str] = []
     lines.append("每日盘后策略（次日开盘执行）")
     lines.append("=" * 36)
@@ -1304,7 +1399,10 @@ def _write_trade_plan_txt(
     if model_info.get("candidate_label"):
         lines.append(f"候选标签: {model_info['candidate_label']}")
     if model_info.get("candidate_score_csv"):
-        score_file_label = "源候选分数文件" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数文件"
+        if candidate_mode == "research_candidate_target_weight_csv" and score_panel_role == "execution_preweight_score_panel":
+            score_file_label = "转权重前分数文件"
+        else:
+            score_file_label = "源候选分数文件" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数文件"
         lines.append(f"{score_file_label}: {model_info['candidate_score_csv']}")
     if model_info.get("candidate_target_weight_csv"):
         lines.append(f"候选权重文件: {model_info['candidate_target_weight_csv']}")
@@ -1329,6 +1427,40 @@ def _write_trade_plan_txt(
                 lines.append(f"权重说明: {target_weight_cap_note}")
             if score_panel_role:
                 lines.append(f"分数面板角色: {score_panel_role}")
+            if transaction_cost_bps is not None and slippage_bps is not None and sell_tax_bps is not None:
+                lines.append(
+                    "成本口径: "
+                    f"transaction {float(transaction_cost_bps):.1f} bps | "
+                    f"slippage {float(slippage_bps):.1f} bps | "
+                    f"sell_tax {float(sell_tax_bps):.1f} bps"
+                )
+            if effective_live_target_weight_mode or effective_live_execution_profile:
+                live_parts: list[str] = []
+                if effective_live_target_weight_mode:
+                    live_parts.append(f"mode={effective_live_target_weight_mode}")
+                if effective_live_execution_profile:
+                    live_parts.append(f"profile={effective_live_execution_profile}")
+                if effective_live_trigger_key:
+                    live_parts.append(f"trigger={effective_live_trigger_key}")
+                if effective_live_bridge_meta:
+                    bridge_parts: list[str] = []
+                    if effective_live_bridge_meta.get("rebalance_freq"):
+                        bridge_parts.append(str(effective_live_bridge_meta.get("rebalance_freq", "")))
+                    if effective_live_bridge_meta.get("rebalance_offset_mode"):
+                        bridge_parts.append(f"offset={effective_live_bridge_meta.get('rebalance_offset_mode', '')}")
+                    if effective_live_bridge_meta.get("rebalance_sleeve_count") is not None:
+                        bridge_parts.append(f"sleeves={effective_live_bridge_meta.get('rebalance_sleeve_count')}")
+                    if effective_live_bridge_meta.get("target_weight_top_k") is not None:
+                        bridge_parts.append(f"topk={effective_live_bridge_meta.get('target_weight_top_k')}")
+                    if bridge_parts:
+                        live_parts.append("bridge=" + "/".join(str(part) for part in bridge_parts if str(part)))
+                lines.append("褰撳墠鏈夋晥鎵ц鎬? " + " | ".join(live_parts))
+            if effective_live_execution_profile_description:
+                lines.append(f"鏈夋晥鎵ц璇存槑: {effective_live_execution_profile_description}")
+            if effective_live_score_note:
+                lines.append(f"鍒嗘暟璇存槑: {effective_live_score_note}")
+            if effective_live_weight_generation_note:
+                lines.append(f"鏉冮噸鐢熸垚璇存槑: {effective_live_weight_generation_note}")
     if model_info.get("trained_at"):
         lines.append(f"模型训练时间: {model_info['trained_at']}")
     if model_info.get("train_end"):
@@ -1747,6 +1879,7 @@ def main():
         training_log=training_log,
     )
     display_mode = _resolve_plan_display_mode(model_info)
+    candidate_display = _resolve_candidate_display_config(model_info)
     display_score_frame = final_score_filtered if display_mode == "research_candidate" else final_score_raw
     action_df, summary = _build_trade_plan(
         latest_date=signal_date,
@@ -1760,6 +1893,8 @@ def main():
         cash=effective_cash,
         lot_size=args.lot_size,
         display_mode=display_mode,
+        execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+        source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
     )
     summary["positions_source"] = str(account_state.path)
     summary["positions_source_mode"] = str(account_state.source)
@@ -1792,6 +1927,8 @@ def main():
         ml_score_row=ml_score.loc[signal_date],
         top_n=15,
         display_mode=display_mode,
+        execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+        source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
     )
     action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
     watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")
@@ -2073,7 +2210,11 @@ def main_with_progress():
                     "target_weight_cap_note": str(args.external_target_weight_cap_note or ""),
                     "score_panel_role": str(args.external_score_panel_role or ""),
                     "score_reference_metadata_json": str(args.external_score_reference_metadata_json or ""),
+                    "transaction_cost_bps": args.transaction_cost_bps,
+                    "slippage_bps": args.slippage_bps,
+                    "sell_tax_bps": args.sell_tax_bps,
                 }
+                model_info = _merge_score_reference_metadata(model_info)
                 warnings: list[str] = []
                 if dropped_rows > 0:
                     warnings.append(
@@ -2318,20 +2459,35 @@ def main_with_progress():
                             "production_model_retrain_leaderboard_csv": str(retrain_info.get("leaderboard_csv", "")),
                             "production_model_active_run_dir": str(retrain_info.get("active_production_run_dir", "")),
                             "target_weight_semantics": str(
-                                retrain_info.get("target_weight_semantics", "") or model_info.get("target_weight_semantics", "")
+                                model_info.get("target_weight_semantics", "") or retrain_info.get("target_weight_semantics", "")
                             ),
                             "target_weight_cap_mode": str(
-                                retrain_info.get("target_weight_cap_mode", "") or model_info.get("target_weight_cap_mode", "")
+                                model_info.get("target_weight_cap_mode", "") or retrain_info.get("target_weight_cap_mode", "")
                             ),
                             "target_weight_cap_note": str(
-                                retrain_info.get("target_weight_cap_note", "") or model_info.get("target_weight_cap_note", "")
+                                model_info.get("target_weight_cap_note", "") or retrain_info.get("target_weight_cap_note", "")
                             ),
                             "score_panel_role": str(
-                                retrain_info.get("score_panel_role", "") or model_info.get("score_panel_role", "")
+                                model_info.get("score_panel_role", "") or retrain_info.get("score_panel_role", "")
                             ),
                             "score_reference_metadata_json": str(
-                                retrain_info.get("score_reference_metadata_json", "")
-                                or model_info.get("score_reference_metadata_json", "")
+                                model_info.get("score_reference_metadata_json", "")
+                                or retrain_info.get("score_reference_metadata_json", "")
+                            ),
+                            "transaction_cost_bps": (
+                                retrain_info.get("transaction_cost_bps")
+                                if retrain_info.get("transaction_cost_bps") is not None
+                                else model_info.get("transaction_cost_bps")
+                            ),
+                            "slippage_bps": (
+                                retrain_info.get("slippage_bps")
+                                if retrain_info.get("slippage_bps") is not None
+                                else model_info.get("slippage_bps")
+                            ),
+                            "sell_tax_bps": (
+                                retrain_info.get("sell_tax_bps")
+                                if retrain_info.get("sell_tax_bps") is not None
+                                else model_info.get("sell_tax_bps")
                             ),
                         }
                     )
@@ -2342,6 +2498,7 @@ def main_with_progress():
                 model_info=model_info,
                 training_log=training_log,
             )
+            candidate_display = _resolve_candidate_display_config(model_info)
             display_score_frame = final_score_filtered if display_mode == "research_candidate" else final_score_raw
             action_df, summary = _build_trade_plan(
                 latest_date=signal_date,
@@ -2355,6 +2512,8 @@ def main_with_progress():
                 cash=effective_cash,
                 lot_size=args.lot_size,
                 display_mode=display_mode,
+                execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+                source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
             )
             summary["positions_source"] = str(account_state.path)
             summary["positions_source_mode"] = str(account_state.source)
@@ -2376,6 +2535,14 @@ def main_with_progress():
                 summary["target_weight_cap_note"] = str(model_info.get("target_weight_cap_note", ""))
                 summary["score_panel_role"] = str(model_info.get("score_panel_role", ""))
                 summary["score_reference_metadata_json"] = str(model_info.get("score_reference_metadata_json", ""))
+                summary["effective_live_target_weight_mode"] = str(model_info.get("effective_live_target_weight_mode", ""))
+                summary["effective_live_execution_profile"] = str(model_info.get("effective_live_execution_profile", ""))
+                summary["effective_live_trigger_key"] = str(model_info.get("effective_live_trigger_key", ""))
+                summary["effective_live_score_note"] = str(model_info.get("effective_live_score_note", ""))
+                summary["effective_live_weight_generation_note"] = str(model_info.get("effective_live_weight_generation_note", ""))
+                summary["transaction_cost_bps"] = model_info.get("transaction_cost_bps")
+                summary["slippage_bps"] = model_info.get("slippage_bps")
+                summary["sell_tax_bps"] = model_info.get("sell_tax_bps")
                 summary["candidate_total_rows"] = int(model_info.get("candidate_total_rows", 0) or 0)
                 summary["candidate_usable_rows"] = int(model_info.get("candidate_usable_rows", 0) or 0)
                 summary["candidate_dropped_rows"] = int(model_info.get("candidate_dropped_rows", 0) or 0)
@@ -2416,6 +2583,8 @@ def main_with_progress():
                 ml_score_row=ml_score.loc[signal_date],
                 top_n=15,
                 display_mode=display_mode,
+                execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+                source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
             )
             action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
             watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")

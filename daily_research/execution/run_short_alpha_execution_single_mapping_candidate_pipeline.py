@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,11 +16,14 @@ from daily_research.deep_alpha.run_short_alpha_targeted_weak_month_repair_review
     DEFAULT_STATIC_PROFILE,
     _build_hybrid_target_weight_panel,
     _discover_window,
+    _load_long_panel,
+    _locate_profile_run_dir,
     _load_window_audit_monthly,
     _mapping_label,
     _run_recent_h2h,
     _run_replay,
 )
+from daily_research.deep_alpha.execution_alignment import resolve_profile
 from daily_research.execution.output_root_resolver import (
     OUTPUT_ROOT,
     STATIC_PRODUCTION_ROOT,
@@ -32,7 +36,7 @@ from daily_research.progress import StageProgress, progress_write
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_FALLBACK_LIVE_TARGET_WEIGHT_PANEL = STATIC_PRODUCTION_ROOT / "daily_live_target_weight_panel.csv"
+DEFAULT_FALLBACK_LIVE_TARGET_WEIGHT_PANEL = STATIC_PRODUCTION_ROOT / "static_fallback_daily_live_target_weight_panel.csv"
 DEFAULT_FALLBACK_LIVE_SCORE_PANEL = STATIC_PRODUCTION_ROOT / "daily_live_score_panel.csv"
 
 
@@ -67,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fallback-live-score-panel-csv",
         default=str(DEFAULT_FALLBACK_LIVE_SCORE_PANEL),
-        help="Static live score panel copied into the candidate pipeline root as the companion reference score view.",
+        help="Optional auxiliary reference score panel copied into the candidate pipeline root for diagnostics only.",
     )
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default="")
@@ -205,6 +209,86 @@ def _copy_csv(src: Path, dst: Path) -> None:
     frame.to_csv(dst, index=False, encoding="utf-8-sig")
 
 
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _resolve_execution_profile_payload(profile_name: str) -> dict[str, Any]:
+    normalized = str(profile_name or "").strip()
+    if not normalized:
+        return {}
+    try:
+        profile = resolve_profile(name=normalized)
+    except Exception:
+        return {"name": normalized}
+    return {
+        "name": str(profile.name),
+        "description": str(profile.description),
+        "rebalance_freq": str(profile.rebalance_freq),
+        "rebalance_offset_mode": str(profile.rebalance_offset_mode),
+        "rebalance_anchor_date": str(profile.rebalance_anchor_date),
+        "target_weight_top_k": int(profile.target_weight_top_k),
+        "target_weight_min_weight": float(profile.target_weight_min_weight),
+        "target_weight_power": float(profile.target_weight_power),
+        "target_weight_full_invest": bool(profile.target_weight_full_invest),
+        "use_market_regime_filter": bool(profile.use_market_regime_filter),
+    }
+
+
+def _build_hybrid_preweight_score_panel(window: Any, month_choice_df: pd.DataFrame) -> pd.DataFrame:
+    panels: dict[str, pd.DataFrame] = {}
+    for profile_name in sorted(month_choice_df["selected_profile"].astype(str).unique()):
+        profile_run_dir = _locate_profile_run_dir(window, profile_name)
+        panels[profile_name] = _load_long_panel(profile_run_dir / "aligned_daily_score_panel.csv", "score")
+
+    stitched: list[pd.DataFrame] = []
+    for _, row in month_choice_df.sort_values("month").iterrows():
+        period = pd.Period(str(row["month"]), freq="M")
+        panel = panels[str(row["selected_profile"])]
+        month_panel = panel.loc[panel.index.to_period("M") == period]
+        if not month_panel.empty:
+            stitched.append(month_panel)
+    if not stitched:
+        raise RuntimeError(f"No hybrid pre-weight score panels were constructed for {window.window_key}")
+    hybrid = pd.concat(stitched).sort_index()
+    hybrid = hybrid.loc[~hybrid.index.duplicated(keep="last")]
+    return hybrid.fillna(0.0)
+
+
+def _seed_live_only_formal_reference(output_dir: Path) -> Path | None:
+    reference_roots = sorted(
+        [
+            path.resolve()
+            for path in OUTPUT_ROOT.glob("short_alpha_execution_single_mapping_candidate_pipeline_*")
+            if path.resolve() != output_dir.resolve()
+        ],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for root in reference_roots:
+        summary_path = root / "formal_trigger_tradeoff_summary.json"
+        if not summary_path.exists():
+            continue
+        shutil.copy2(summary_path, output_dir / "formal_trigger_tradeoff_summary.json")
+        for name in ("formal_trigger_summary_by_year.csv", "formal_trigger_summary_by_key.csv", "formal_month_outcomes.csv"):
+            src = root / name
+            if src.exists():
+                shutil.copy2(src, output_dir / name)
+        fullbridge_src = root / "fullbridge_h2h" / "summary.md"
+        if fullbridge_src.exists():
+            fullbridge_dst = output_dir / "fullbridge_h2h" / "summary.md"
+            fullbridge_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(fullbridge_src, fullbridge_dst)
+        return root
+    return None
+
+
 def _refresh_live_outputs(
     *,
     output_dir: Path,
@@ -222,6 +306,14 @@ def _refresh_live_outputs(
     live_target_weight_panel_path = output_dir / "daily_live_target_weight_panel.csv"
     live_score_panel_path = output_dir / "daily_live_score_panel.csv"
     score_reference_meta_path = output_dir / "daily_live_score_reference.json"
+    auxiliary_score_panel_path = output_dir / "aux_reference_score_panel.csv"
+    fallback_live_meta_path = fallback_live_target_weight_panel.with_name("static_fallback_daily_live_target_weight_meta.json")
+    fallback_live_meta = _load_json_file(fallback_live_meta_path)
+    selected_score_source = Path()
+    selected_score_note = ""
+    weight_generation_note = ""
+    effective_profile_payload: dict[str, Any] = {}
+    effective_bridge_meta: dict[str, Any] = {}
 
     if not recent_choices.empty:
         recent_choices = recent_choices.sort_values("month").reset_index(drop=True)
@@ -246,6 +338,20 @@ def _refresh_live_outputs(
             index_label="date",
             encoding="utf-8-sig",
         )
+        recent_candidate_score_panel = _build_hybrid_preweight_score_panel(recent_window, recent_choices)
+        recent_candidate_score_panel_path = candidate_panels_dir / "recent_candidate_preweight_score_panel.csv"
+        recent_candidate_score_panel.to_csv(
+            recent_candidate_score_panel_path,
+            index_label="date",
+            encoding="utf-8-sig",
+        )
+        recent_static_score_panel = _build_hybrid_preweight_score_panel(recent_window, recent_static_choice)
+        recent_static_score_panel_path = candidate_panels_dir / "recent_static_preweight_score_panel.csv"
+        recent_static_score_panel.to_csv(
+            recent_static_score_panel_path,
+            index_label="date",
+            encoding="utf-8-sig",
+        )
         latest = recent_choices.iloc[-1].to_dict()
         live_triggered = recent_choices["selected_profile"].astype(str).ne(str(static_profile))
         live_monitor: dict[str, Any] = {
@@ -266,9 +372,57 @@ def _refresh_live_outputs(
             _copy_csv(fallback_live_target_weight_panel, live_target_weight_panel_path)
             live_monitor["daily_live_panel_source"] = str(fallback_live_target_weight_panel)
             live_monitor["live_target_weight_mode"] = "static_fallback"
+            live_monitor["fallback_target_weight_semantics"] = "research_raw_target_weight"
+            live_monitor["fallback_target_weight_cap_mode"] = "follow_research_raw_no_global_cap"
+            if fallback_live_score_panel.exists():
+                _copy_csv(fallback_live_score_panel, live_score_panel_path)
+                selected_score_source = fallback_live_score_panel
+                selected_score_note = "Live score panel uses the fallback profile's pre-weight raw score panel."
+            else:
+                recent_static_score_panel.to_csv(live_score_panel_path, index_label="date", encoding="utf-8-sig")
+                selected_score_source = recent_static_score_panel_path
+                selected_score_note = "Live score panel uses the static fallback profile's pre-weight raw score panel reconstructed from the recent audit root."
+            effective_profile_payload = _resolve_execution_profile_payload(str(live_monitor.get("latest_selected_profile", "")))
+            effective_bridge_meta = (
+                dict(fallback_live_meta.get("bridge_meta", {}))
+                if isinstance(fallback_live_meta.get("bridge_meta"), dict)
+                else {}
+            )
+            if (
+                effective_profile_payload
+                and not effective_profile_payload.get("description")
+                and fallback_live_meta.get("static_fallback_profile_description")
+            ):
+                effective_profile_payload["description"] = str(fallback_live_meta.get("static_fallback_profile_description", ""))
+            weight_generation_note = (
+                "Current live weights come from the static fallback execution bridge over recent raw target weights; "
+                "the displayed pre-weight score is the signal-day raw score only, so it does not need to be monotonic with final weight."
+            )
         else:
             live_monitor["daily_live_panel_source"] = str(live_target_weight_panel_path)
             live_monitor["live_target_weight_mode"] = "candidate_triggered"
+            recent_candidate_score_panel.to_csv(live_score_panel_path, index_label="date", encoding="utf-8-sig")
+            selected_score_source = recent_candidate_score_panel_path
+            selected_score_note = "Live score panel uses the selected execution profile's pre-weight raw score panel before weight conversion."
+            effective_profile_payload = _resolve_execution_profile_payload(str(live_monitor.get("latest_selected_profile", "")))
+            effective_bridge_meta = {
+                key: effective_profile_payload.get(key)
+                for key in (
+                    "rebalance_freq",
+                    "rebalance_offset_mode",
+                    "rebalance_anchor_date",
+                    "target_weight_top_k",
+                    "target_weight_min_weight",
+                    "target_weight_power",
+                    "target_weight_full_invest",
+                    "use_market_regime_filter",
+                )
+                if key in effective_profile_payload
+            }
+            weight_generation_note = (
+                "Current live weights come from the selected execution profile applied after research raw target-weight generation; "
+                "the displayed pre-weight score is the raw score observed before that profile transforms weights."
+            )
     else:
         live_monitor = {
             "mapping": mapping,
@@ -285,31 +439,65 @@ def _refresh_live_outputs(
         if fallback_live_target_weight_panel.exists():
             _copy_csv(fallback_live_target_weight_panel, live_target_weight_panel_path)
             live_monitor["daily_live_panel_source"] = str(fallback_live_target_weight_panel)
-
+            live_monitor["fallback_target_weight_semantics"] = "research_raw_target_weight"
+            live_monitor["fallback_target_weight_cap_mode"] = "follow_research_raw_no_global_cap"
+        if fallback_live_score_panel.exists():
+            _copy_csv(fallback_live_score_panel, live_score_panel_path)
+            selected_score_source = fallback_live_score_panel
+            selected_score_note = "Live score panel uses the fallback profile's pre-weight raw score panel."
+        effective_profile_payload = _resolve_execution_profile_payload(str(live_monitor.get("latest_selected_profile", "") or static_profile))
+        effective_bridge_meta = (
+            dict(fallback_live_meta.get("bridge_meta", {}))
+            if isinstance(fallback_live_meta.get("bridge_meta"), dict)
+            else {}
+        )
+        if (
+            effective_profile_payload
+            and not effective_profile_payload.get("description")
+            and fallback_live_meta.get("static_fallback_profile_description")
+        ):
+            effective_profile_payload["description"] = str(fallback_live_meta.get("static_fallback_profile_description", ""))
+        weight_generation_note = (
+            "Current live weights come from the static fallback execution bridge over recent raw target weights; "
+            "the displayed pre-weight score is the signal-day raw score only, so it does not need to be monotonic with final weight."
+        )
+    if effective_profile_payload:
+        live_monitor["effective_execution_profile"] = str(effective_profile_payload.get("name", ""))
+        live_monitor["effective_execution_profile_description"] = str(effective_profile_payload.get("description", ""))
+    if effective_bridge_meta:
+        live_monitor["effective_execution_bridge_meta"] = effective_bridge_meta
     score_reference_meta: dict[str, Any] = {
-        "role": "static_reference_score_panel",
-        "source_score_panel_csv": "",
+        "role": "execution_preweight_score_panel",
+        "source_score_panel_csv": str(selected_score_source) if str(selected_score_source) else "",
         "local_score_panel_csv": str(live_score_panel_path),
         "candidate_active_now": bool(live_monitor.get("candidate_active_now", False)),
         "latest_month": str(live_monitor.get("latest_month", "")),
         "latest_selected_profile": str(live_monitor.get("latest_selected_profile", "")),
-        "note": "Companion live score panel remains a static reference view; target weights drive actual execution.",
+        "latest_trigger_key": str(live_monitor.get("latest_trigger_key", "")),
+        "live_target_weight_mode": str(live_monitor.get("live_target_weight_mode", "")),
+        "effective_execution_profile": str(effective_profile_payload.get("name", "")),
+        "effective_execution_profile_description": str(effective_profile_payload.get("description", "")),
+        "effective_execution_bridge_meta": effective_bridge_meta,
+        "note": selected_score_note or "Live score panel stores the pre-weight raw score used before weight conversion for the selected execution path.",
+        "weight_generation_note": weight_generation_note or "Final live weight may additionally reflect execution-side bridge transforms after the displayed pre-weight score.",
     }
-    if fallback_live_score_panel.exists():
-        _copy_csv(fallback_live_score_panel, live_score_panel_path)
-        score_reference_meta["source_score_panel_csv"] = str(fallback_live_score_panel)
-    elif live_score_panel_path.exists():
-        score_reference_meta["role"] = "existing_local_score_panel"
-        score_reference_meta["source_score_panel_csv"] = str(live_score_panel_path)
+    if fallback_live_score_panel.exists() and (
+        not str(selected_score_source) or selected_score_source.resolve() != fallback_live_score_panel.resolve()
+    ):
+        _copy_csv(fallback_live_score_panel, auxiliary_score_panel_path)
+        score_reference_meta["auxiliary_reference_score_panel_csv"] = str(auxiliary_score_panel_path)
     else:
-        score_reference_meta["role"] = "missing"
+        score_reference_meta["auxiliary_reference_score_panel_csv"] = ""
 
     score_reference_meta_path.write_text(
         json.dumps(score_reference_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    live_monitor["daily_live_score_panel_source"] = str(score_reference_meta.get("source_score_panel_csv", ""))
+    live_monitor["daily_live_score_panel_source"] = str(score_reference_meta.get("local_score_panel_csv", ""))
     live_monitor["daily_live_score_reference_mode"] = str(score_reference_meta.get("role", ""))
+    live_monitor["auxiliary_reference_score_panel_source"] = str(
+        score_reference_meta.get("auxiliary_reference_score_panel_csv", "")
+    )
     return live_monitor
 
 
@@ -514,7 +702,14 @@ def main() -> None:
                 )
         else:
             with progress.stage("Load formal references", output_dir.name):
-                trigger_summary = _extract_trigger_summary(_load_json(output_dir / "formal_trigger_tradeoff_summary.json"))
+                reference_root: Path | None = None
+                summary_path = output_dir / "formal_trigger_tradeoff_summary.json"
+                if not summary_path.exists():
+                    reference_root = _seed_live_only_formal_reference(output_dir)
+                    summary_path = output_dir / "formal_trigger_tradeoff_summary.json"
+                    if reference_root is not None:
+                        progress_write(f"Seeded live-only formal references from {reference_root.name}")
+                trigger_summary = _extract_trigger_summary(_load_json(summary_path)) if summary_path.exists() else _empty_trigger_summary()
                 if trigger_summary["month_count"] <= 0:
                     progress_write("Live-only refresh is reusing an output root without formal trigger summary; keeping zeroed tradeoff summary.")
 

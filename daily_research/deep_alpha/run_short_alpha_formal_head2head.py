@@ -15,7 +15,11 @@ if __package__ in {None, ""}:
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
-from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_LATEST_MANIFEST_PATH,
+    default_min_epochs_for_budget,
+    resolve_epoch_budget_for_family,
+)
 from daily_research.deep_alpha.research_objective import (
     CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
@@ -78,6 +82,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument(
+        "--force-rerun-profiles",
+        default="",
+        help="Comma-separated profile names that must rerun fresh under this root even when reuse metrics exist.",
+    )
+    parser.add_argument(
         "--profiles",
         default=",".join(PROFILES_TO_RUN),
         help="Comma-separated short-alpha profile names from short_alpha_profiles.py",
@@ -96,6 +105,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=0.0001)
     parser.add_argument("--execution-alignment-objective", default="robust_composite")
     return parser.parse_args()
+
+
+def _parse_name_list(raw: str) -> set[str]:
+    return {item.strip() for item in str(raw or "").split(",") if item.strip()}
 
 
 def _run_command(command: list[str]) -> None:
@@ -164,7 +177,7 @@ def _build_command(
         "--epochs",
         str(epoch_budget),
         "--min-epochs",
-        "1",
+        str(default_min_epochs_for_budget(epoch_budget)),
         "--early-stop-patience",
         str(max(int(epoch_budget), 8)),
         "--lr-plateau-patience",
@@ -274,6 +287,7 @@ def main() -> None:
     args = parse_args()
     root_tag = str(args.root_tag).strip()
     profile_names = [item.strip() for item in str(args.profiles).split(",") if item.strip()]
+    force_rerun_profiles = _parse_name_list(args.force_rerun_profiles)
     if not profile_names:
         raise ValueError("No short-alpha profiles were provided.")
 
@@ -285,7 +299,8 @@ def main() -> None:
         source_runs[profile.name] = {}
         for window in WINDOWS:
             reuse_path_str = REUSE_METRICS.get(profile.name, {}).get(window.label, "")
-            if reuse_path_str and not args.force_rerun:
+            profile_force_rerun = bool(args.force_rerun or profile.name in force_rerun_profiles)
+            if reuse_path_str and not profile_force_rerun:
                 metrics_path = (PROJECT_ROOT / reuse_path_str).resolve()
                 if not metrics_path.exists():
                     raise FileNotFoundError(f"Expected reuse metrics not found: {metrics_path}")
@@ -293,7 +308,7 @@ def main() -> None:
             else:
                 metrics_path = _resolve_metrics_path(root_tag, profile.name, window)
                 reused_existing = False
-                if not metrics_path.exists() or args.force_rerun:
+                if not metrics_path.exists() or profile_force_rerun:
                     experiment_tag = f"{root_tag}/runs/{profile.name}_{window.label}"
                     command = _build_command(
                         python_executable=args.python_executable,

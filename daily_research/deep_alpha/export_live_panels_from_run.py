@@ -329,6 +329,7 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
     )
     live_score_frame = live_outputs["score_frame"]
     live_target_weights = live_outputs["target_weights"]
+    portfolio_capped_live_target_weights = live_outputs["portfolio_capped_target_weights"]
     live_latest_scores = None
     if not live_score_frame.dropna(how="all").empty:
         live_latest_scores = live_score_frame.loc[[live_score_frame.dropna(how="all").index.max()]].T.reset_index()
@@ -341,6 +342,11 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
     )
     research_main._panel_to_long(live_target_weights, "target_weight").to_csv(
         run_dir / "daily_live_target_weight_panel.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+    research_main._panel_to_long(portfolio_capped_live_target_weights, "target_weight").to_csv(
+        run_dir / "portfolio_capped_daily_live_target_weight_panel.csv",
         index=False,
         encoding="utf-8-sig",
     )

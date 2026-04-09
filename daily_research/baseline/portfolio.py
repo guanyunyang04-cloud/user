@@ -63,10 +63,16 @@ def _select_with_exposure_caps(
     config: ResearchConfig,
     industry_map: pd.Series | None,
     style_map: pd.DataFrame | None,
+    *,
+    apply_max_weight_cap: bool = True,
 ) -> pd.Series:
     candidate_count = max(config.holding_count * max(int(config.industry_candidate_buffer), 1), config.holding_count)
     ranked_pool = ranked_scores.iloc[:candidate_count]
-    approx_name_weight = min(float(config.max_weight), 1.0 / max(int(config.holding_count), 1))
+    approx_name_weight = (
+        min(float(config.max_weight), 1.0 / max(int(config.holding_count), 1))
+        if apply_max_weight_cap
+        else 1.0 / max(int(config.holding_count), 1)
+    )
     max_names_per_industry = max(1, int(float(config.max_industry_weight) / max(approx_name_weight, 1e-8)))
     max_names_per_style = max(1, int(float(config.max_style_weight) / max(approx_name_weight, 1e-8)))
 
@@ -139,6 +145,8 @@ def _enforce_exposure_caps(
     config: ResearchConfig,
     industry_map: pd.Series | None,
     style_map: pd.DataFrame | None,
+    *,
+    apply_max_weight_cap: bool = True,
 ) -> pd.Series:
     if weights.empty:
         return weights
@@ -147,7 +155,7 @@ def _enforce_exposure_caps(
     priorities = scores.reindex(weights.index).fillna(0.0).sort_values(ascending=False)
     max_industry_weight = float(config.max_industry_weight)
     max_style_weight = float(config.max_style_weight)
-    max_weight = float(config.max_weight)
+    max_weight = float(config.max_weight) if apply_max_weight_cap else 1.0
 
     for _ in range(5):
         changed = False
@@ -176,7 +184,11 @@ def _enforce_exposure_caps(
         return weights
 
     for stock in priorities.index:
-        stock_slack = max(0.0, max_weight - float(weights.get(stock, 0.0)))
+        stock_slack = (
+            max(0.0, max_weight - float(weights.get(stock, 0.0)))
+            if apply_max_weight_cap
+            else residual
+        )
         if stock_slack <= 1e-12:
             continue
 
@@ -206,6 +218,8 @@ def build_target_weights(
     industry_map: pd.Series | None = None,
     style_map: pd.DataFrame | None = None,
     daily_config_overrides: pd.DataFrame | None = None,
+    *,
+    apply_max_weight_cap: bool = True,
 ) -> pd.DataFrame:
     if daily_config_overrides is not None:
         daily_config_overrides = daily_config_overrides.reindex(scores.index)
@@ -223,7 +237,13 @@ def build_target_weights(
             continue
 
         s = s.sort_values(ascending=False)
-        s = _select_with_exposure_caps(s, run_cfg, industry_map, style_map)
+        s = _select_with_exposure_caps(
+            s,
+            run_cfg,
+            industry_map,
+            style_map,
+            apply_max_weight_cap=apply_max_weight_cap,
+        )
 
         if run_cfg.weighting_method == "score":
             min_v = s.min()
@@ -232,11 +252,36 @@ def build_target_weights(
         else:
             w = pd.Series(1.0 / len(s), index=s.index, name=dt)
 
-        w = _apply_weight_cap(w, run_cfg.max_weight)
-        w = _enforce_exposure_caps(w, s, run_cfg, industry_map, style_map)
+        if apply_max_weight_cap:
+            w = _apply_weight_cap(w, run_cfg.max_weight)
+        w = _enforce_exposure_caps(
+            w,
+            s,
+            run_cfg,
+            industry_map,
+            style_map,
+            apply_max_weight_cap=apply_max_weight_cap,
+        )
         w.name = dt
         targets.append(w)
 
     weights = pd.DataFrame(targets).fillna(0.0)
     weights.index = scores.index
     return weights
+
+
+def build_research_raw_target_weights(
+    scores: pd.DataFrame,
+    config: ResearchConfig,
+    industry_map: pd.Series | None = None,
+    style_map: pd.DataFrame | None = None,
+    daily_config_overrides: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    return build_target_weights(
+        scores,
+        config,
+        industry_map=industry_map,
+        style_map=style_map,
+        daily_config_overrides=daily_config_overrides,
+        apply_max_weight_cap=False,
+    )

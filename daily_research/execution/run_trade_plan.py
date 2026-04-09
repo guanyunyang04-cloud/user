@@ -93,7 +93,7 @@ def main():
     else:
         inject_default_arg("--model-artifact", str(model_artifact))
         if (legacy_ml or explicit_model_artifact) and not is_help_request():
-            print("execution_mode=legacy_ml")
+            print("execution_mode=model_artifact")
 
     from daily_research.baseline.generate_daily_trade_plan import main as generate_daily_trade_plan_main
 

@@ -315,7 +315,7 @@ def _build_block_command(
 
     execution_alignment_mode = str(metrics.get("execution_alignment_mode", "off") or "off")
     _append_arg(cmd, "--execution-alignment-mode", execution_alignment_mode)
-    _append_arg(cmd, "--execution-alignment-profile", metrics.get("execution_alignment_profile", "regoff_k2_10d_ensemble_native_anchor"))
+    _append_arg(cmd, "--execution-alignment-profile", metrics.get("execution_alignment_profile", "regoff_k1_5d_ensemble_native_anchor"))
     _append_arg(cmd, "--execution-alignment-objective", metrics.get("execution_alignment_objective", "robust_composite"))
     candidate_profiles = metrics.get("execution_alignment_candidate_profiles", [])
     if isinstance(candidate_profiles, list) and candidate_profiles:

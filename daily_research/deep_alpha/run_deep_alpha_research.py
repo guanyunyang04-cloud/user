@@ -25,7 +25,10 @@ from daily_research.baseline.data_provider import (
     load_universe_from_tq,
     split_benchmark_from_universe,
 )
-from daily_research.baseline.portfolio import build_target_weights
+from daily_research.baseline.portfolio import (
+    build_research_raw_target_weights,
+    build_target_weights,
+)
 from daily_research.baseline.regime import compute_market_regime_state
 from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, get_cache_root, load_pickle, save_pickle, series_signature
 from daily_research.deep_alpha.config import DeepAlphaConfig
@@ -274,7 +277,7 @@ def parse_args():
     )
     parser.add_argument(
         "--execution-alignment-profile",
-        default="regoff_k2_10d_ensemble_native_anchor",
+        default="regoff_k1_5d_ensemble_native_anchor",
         help="Profile used when --execution-alignment-mode=profile.",
     )
     parser.add_argument(
@@ -662,13 +665,15 @@ def _build_live_inference_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    live_target_weights = build_target_weights(live_score_frame, live_cfg)
+    portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
+    live_target_weights = build_research_raw_target_weights(live_score_frame, live_cfg)
     return {
         "live_dates": live_index,
         "pred_df": live_pred_df,
         "emb_df": live_emb_df,
         "score_frame": live_score_frame,
         "target_weights": live_target_weights,
+        "portfolio_capped_target_weights": portfolio_live_target_weights,
     }
 
 
@@ -1781,9 +1786,14 @@ def main():
     )
     live_score_frame = live_outputs["score_frame"]
     live_target_weights = live_outputs["target_weights"]
+    portfolio_capped_live_target_weights = live_outputs["portfolio_capped_target_weights"]
     live_latest_scores = None
     live_daily_score_panel = _panel_to_long(live_score_frame, "score")
     live_daily_target_weight_panel = _panel_to_long(live_target_weights, "target_weight")
+    portfolio_capped_live_daily_target_weight_panel = _panel_to_long(
+        portfolio_capped_live_target_weights,
+        "target_weight",
+    )
     if not live_score_frame.dropna(how="all").empty:
         live_latest_scores = live_score_frame.loc[[live_score_frame.dropna(how="all").index.max()]].T.reset_index()
         live_latest_scores.columns = ["stock", "latest_score"]
@@ -2069,6 +2079,14 @@ def main():
         ("monthly_target_weight_panel.csv", lambda: monthly_target_weight_panel.to_csv(run_dir / "monthly_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
         ("daily_live_score_panel.csv", lambda: live_daily_score_panel.to_csv(run_dir / "daily_live_score_panel.csv", index=False, encoding="utf-8-sig")),
         ("daily_live_target_weight_panel.csv", lambda: live_daily_target_weight_panel.to_csv(run_dir / "daily_live_target_weight_panel.csv", index=False, encoding="utf-8-sig")),
+        (
+            "portfolio_capped_daily_live_target_weight_panel.csv",
+            lambda: portfolio_capped_live_daily_target_weight_panel.to_csv(
+                run_dir / "portfolio_capped_daily_live_target_weight_panel.csv",
+                index=False,
+                encoding="utf-8-sig",
+            ),
+        ),
         ("equity_curve.csv", lambda: equity_export.to_csv(run_dir / "equity_curve.csv", index=False, encoding="utf-8-sig")),
         ("monthly_backtest_summary.csv", lambda: monthly_backtest_summary.to_csv(run_dir / "monthly_backtest_summary.csv", index=False, encoding="utf-8-sig")),
         ("monthly_backtest_diagnostics.json", lambda: _write_json_payload(run_dir / "monthly_backtest_diagnostics.json", monthly_backtest_diagnostics)),

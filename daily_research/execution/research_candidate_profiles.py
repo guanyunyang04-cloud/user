@@ -47,6 +47,9 @@ class ResearchCandidateProfile:
     trade_plan_refresh_command: tuple[str, ...] = ()
     liquidity_pool_name: str = ""
     liquidity_pool_size: int = 0
+    transaction_cost_bps: float = 3.0
+    slippage_bps: float = 7.0
+    sell_tax_bps: float = 10.0
     target_weight_semantics: str = ""
     target_weight_cap_mode: str = ""
     target_weight_cap_note: str = ""
@@ -230,6 +233,33 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         trade_plan_refresh_command=refresh_command,
         liquidity_pool_name=liquidity_pool_name,
         liquidity_pool_size=liquidity_pool_size_from_name(liquidity_pool_name),
+        transaction_cost_bps=float(
+            manifest.get(
+                "transaction_cost_bps",
+                manifest.get("execution_alignment_selected_bridge_meta", {}).get("transaction_cost_bps", 3.0)
+                if isinstance(manifest.get("execution_alignment_selected_bridge_meta"), dict)
+                else 3.0,
+            )
+            or 3.0
+        ),
+        slippage_bps=float(
+            manifest.get(
+                "slippage_bps",
+                manifest.get("execution_alignment_selected_bridge_meta", {}).get("slippage_bps", 7.0)
+                if isinstance(manifest.get("execution_alignment_selected_bridge_meta"), dict)
+                else 7.0,
+            )
+            or 7.0
+        ),
+        sell_tax_bps=float(
+            manifest.get(
+                "sell_tax_bps",
+                manifest.get("execution_alignment_selected_bridge_meta", {}).get("sell_tax_bps", 10.0)
+                if isinstance(manifest.get("execution_alignment_selected_bridge_meta"), dict)
+                else 10.0,
+            )
+            or 10.0
+        ),
         target_weight_semantics=target_weight_semantics,
         target_weight_cap_mode=target_weight_cap_mode,
         target_weight_cap_note=str(manifest.get("target_weight_cap_note", "")).strip(),
@@ -531,6 +561,9 @@ def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: 
     inject_default_arg("--candidate-label", _candidate_label_for_mode(profile, mode))
     inject_default_arg("--rebalance-freq", profile.rebalance_freq)
     inject_default_arg("--rebalance-offset-mode", profile.rebalance_offset_mode)
+    inject_default_arg("--transaction-cost-bps", str(profile.transaction_cost_bps))
+    inject_default_arg("--slippage-bps", str(profile.slippage_bps))
+    inject_default_arg("--sell-tax-bps", str(profile.sell_tax_bps))
     if profile.rebalance_anchor_date:
         inject_default_arg("--rebalance-anchor-date", profile.rebalance_anchor_date)
     inject_default_arg("--target-weight-top-k", str(profile.target_weight_top_k))

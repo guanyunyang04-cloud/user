@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from daily_research.deep_alpha.family_epoch_budget import (
+    DEFAULT_MIN_START_EPOCH_BUDGET,
+    default_min_epochs_for_budget,
+)
+
 
 @dataclass
 class DeepAlphaConfig:
@@ -42,8 +47,8 @@ class DeepAlphaConfig:
     dropout: float = 0.10
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
-    epochs: int = 8
-    min_epochs: int = 4
+    epochs: int = DEFAULT_MIN_START_EPOCH_BUDGET
+    min_epochs: int = default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET)
     early_stop_patience: int = 2
     lr_plateau_patience: int = 1
     lr_plateau_factor: float = 0.5

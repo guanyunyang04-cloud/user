@@ -17,11 +17,13 @@ import torch
 
 import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.baseline.external_target_weight_bridge import build_target_weight_bridge
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
+    default_min_epochs_for_budget,
     resolve_epoch_budget_for_family,
 )
-from daily_research.deep_alpha.execution_alignment import DEFAULT_AUTO_PROFILE_NAMES
+from daily_research.deep_alpha.execution_alignment import DEFAULT_AUTO_PROFILE_NAMES, resolve_profile
 from daily_research.deep_alpha.research_objective import (
     CHECKPOINT_SELECTION_OBJECTIVES,
     DEFAULT_CHECKPOINT_SELECTION_OBJECTIVE,
@@ -35,6 +37,7 @@ from daily_research.deep_alpha.research_objective import (
 from daily_research.execution.strategy_manifest import (
     DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST,
     build_active_strategy_manifest,
+    load_strategy_manifest,
     write_strategy_manifest,
 )
 
@@ -45,6 +48,7 @@ FORMAL_SOURCE_RUN = Path(
 PRODUCTION_ROOT = Path(
     "daily_research/output/deep_alpha_short_alpha_execalign_production_default"
 )
+DEFAULT_STATIC_FALLBACK_PROFILE = "regoff_k1_5d_ensemble_native_anchor"
 
 
 def parse_args() -> argparse.Namespace:
@@ -257,6 +261,94 @@ def _append_flag(cmd: list[str], flag: str, enabled: bool, *, negative_flag: str
         cmd.append(negative_flag)
 
 
+def _load_long_target_weight_panel(path: Path) -> pd.DataFrame:
+    raw = pd.read_csv(path)
+    raw["date"] = pd.to_datetime(raw["date"], errors="coerce")
+    raw["stock"] = raw["stock"].astype(str).str.upper().str.strip()
+    raw["target_weight"] = pd.to_numeric(raw["target_weight"], errors="coerce")
+    raw = raw.dropna(subset=["date", "stock", "target_weight"])
+    return (
+        raw.sort_values(["date", "stock"])
+        .drop_duplicates(subset=["date", "stock"], keep="last")
+        .pivot(index="date", columns="stock", values="target_weight")
+        .sort_index()
+        .fillna(0.0)
+    )
+
+
+def _panel_to_long(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=["date", "stock", "target_weight"])
+    return (
+        frame.stack(dropna=False)
+        .rename("target_weight")
+        .reset_index()
+        .rename(columns={"level_0": "date", "level_1": "stock"})
+    )
+
+
+def _resolve_default_static_execution_profile() -> str:
+    manifest = load_strategy_manifest(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST)
+    rows = manifest.get("global_deployable_summary_rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            candidate_name = str(row.get("candidate_name", "") or "").strip().lower()
+            best_profile = str(row.get("best_profile", "") or "").strip()
+            if candidate_name == "state_liquidity_listwise_v1" and best_profile:
+                return best_profile
+    return DEFAULT_STATIC_FALLBACK_PROFILE
+
+
+def _materialize_static_fallback_panel(
+    *,
+    production_root: Path,
+    static_profile: str,
+) -> None:
+    raw_panel_path = production_root / "daily_live_target_weight_panel.csv"
+    if not raw_panel_path.exists():
+        raise FileNotFoundError(f"Missing research raw live target-weight panel: {raw_panel_path}")
+    raw_panel = _load_long_target_weight_panel(raw_panel_path)
+    profile = resolve_profile(name=static_profile)
+    bridged_panel, bridge_meta = build_target_weight_bridge(
+        raw_panel,
+        rebalance_freq=profile.rebalance_freq,
+        rebalance_offset=0,
+        rebalance_offset_mode=profile.rebalance_offset_mode,
+        rebalance_anchor_date=profile.rebalance_anchor_date,
+        top_k=profile.target_weight_top_k,
+        min_weight=profile.target_weight_min_weight,
+        power=profile.target_weight_power,
+        full_invest=bool(profile.target_weight_full_invest),
+    )
+    _panel_to_long(bridged_panel).to_csv(
+        production_root / "static_fallback_daily_live_target_weight_panel.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+    (production_root / "static_fallback_daily_live_target_weight_meta.json").write_text(
+        json.dumps(
+            {
+                "static_fallback_profile": profile.name,
+                "static_fallback_profile_description": profile.description,
+                "target_weight_semantics": "research_raw_target_weight",
+                "target_weight_cap_mode": "follow_research_raw_no_global_cap",
+                "target_weight_cap_note": (
+                    "Static fallback is derived from the uncapped research raw live target-weight panel, "
+                    "then bridged with the current default execution profile."
+                ),
+                "bridge_meta": bridge_meta,
+                "source_raw_panel_csv": str(raw_panel_path.resolve()),
+                "output_panel_csv": str((production_root / "static_fallback_daily_live_target_weight_panel.csv").resolve()),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def _load_universe_for_source(cfg: research_main.DeepAlphaConfig, args: SimpleNamespace) -> list[str]:
     stocks_file = args.stocks_file or None
     universe = research_main.load_stocks_from_file(stocks_file) if stocks_file else []
@@ -379,6 +471,7 @@ def _build_retrain_command(
         manifest_path=family_epoch_budget_manifest,
         fallback_epochs=int(cfg.get("epochs", 8) or 8),
     )
+    resolved_default_static_profile = _resolve_default_static_execution_profile()
     script_path = Path("daily_research/deep_alpha/run_deep_alpha_research.py").resolve()
     cmd: list[str] = [sys.executable, str(script_path)]
 
@@ -449,7 +542,7 @@ def _build_retrain_command(
     _append_arg(cmd, "--learning-rate", cfg.get("learning_rate", 1e-3))
     _append_arg(cmd, "--weight-decay", cfg.get("weight_decay", 1e-4))
     _append_arg(cmd, "--epochs", epoch_budget)
-    _append_arg(cmd, "--min-epochs", 1)
+    _append_arg(cmd, "--min-epochs", default_min_epochs_for_budget(epoch_budget))
     _append_arg(cmd, "--early-stop-patience", max(int(cfg.get("early_stop_patience", 2)), 8))
     _append_arg(cmd, "--lr-plateau-patience", max(int(cfg.get("lr_plateau_patience", 1)), 4))
     _append_arg(cmd, "--lr-plateau-factor", cfg.get("lr_plateau_factor", 0.5))
@@ -512,6 +605,7 @@ def _build_retrain_command(
     ).strip()
     execution_alignment_profile = str(
         execution_alignment_profile_override
+        or resolved_default_static_profile
         or metrics.get("execution_alignment_profile", "")
         or ""
     ).strip()
@@ -552,7 +646,7 @@ def _build_retrain_command(
             _append_arg(
                 cmd,
                 "--execution-alignment-profile",
-                execution_alignment_profile or "regoff_k2_10d_ensemble_native_anchor",
+                execution_alignment_profile or resolved_default_static_profile,
             )
         else:
             _append_arg(cmd, "--execution-alignment-candidate-profiles", execution_alignment_candidate_profiles)
@@ -577,6 +671,7 @@ def _write_production_manifest(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     train_start_date: str,
+    static_fallback_profile: str,
     strategy_manifest_path: Path | None = None,
     activate_strategy: bool = False,
 ) -> None:
@@ -611,6 +706,19 @@ def _write_production_manifest(
         "source_formal_run_dir": str(source_run_dir.resolve()),
         "active_production_run_dir": str(run_dir.resolve()),
         "production_root": str(production_root.resolve()),
+        "target_weight_semantics": "research_raw_target_weight",
+        "target_weight_cap_mode": "follow_research_raw_no_global_cap",
+        "raw_live_target_weight_panel_csv": str((production_root / "daily_live_target_weight_panel.csv").resolve()),
+        "portfolio_capped_live_target_weight_panel_csv": str(
+            (production_root / "portfolio_capped_daily_live_target_weight_panel.csv").resolve()
+        ),
+        "static_fallback_profile": str(static_fallback_profile),
+        "static_fallback_daily_live_target_weight_panel_csv": str(
+            (production_root / "static_fallback_daily_live_target_weight_panel.csv").resolve()
+        ),
+        "static_fallback_daily_live_target_weight_meta_json": str(
+            (production_root / "static_fallback_daily_live_target_weight_meta.json").resolve()
+        ),
         "active_execution_strategy_manifest": "" if strategy_manifest_path is None else str(strategy_manifest_path.resolve()),
         "activate_strategy_after_sync": bool(activate_strategy),
         "train_start_date": str(train_start_date),
@@ -634,6 +742,12 @@ def _write_production_manifest(
         f"- launch_cutoff_date: `{latest_completed_date}`",
         f"- internal_monitor_start_date: `{internal_monitor_start_date}`",
         f"- internal_monitor_days: `{internal_monitor_days}`",
+        f"- target_weight_semantics: `research_raw_target_weight`",
+        f"- target_weight_cap_mode: `follow_research_raw_no_global_cap`",
+        f"- raw_live_target_weight_panel_csv: `{(production_root / 'daily_live_target_weight_panel.csv').as_posix()}`",
+        f"- portfolio_capped_live_target_weight_panel_csv: `{(production_root / 'portfolio_capped_daily_live_target_weight_panel.csv').as_posix()}`",
+        f"- static_fallback_profile: `{static_fallback_profile}`",
+        f"- static_fallback_daily_live_target_weight_panel_csv: `{(production_root / 'static_fallback_daily_live_target_weight_panel.csv').as_posix()}`",
         f"- active_execution_strategy_manifest: `{'' if strategy_manifest_path is None else strategy_manifest_path.as_posix()}`",
         "- retrain_frequency_policy: `Retrain Monthly` preferred, auto retrain on next calendar month boundary, fallback remind at `21` trading days, block at `63` trading days",
         f"- retrain_frequency_leaderboard: `{retrain_frequency_csv.as_posix()}`",
@@ -655,10 +769,12 @@ def _sync_production_root(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     train_start_date: str,
+    static_fallback_profile: str = "",
     strategy_manifest_path: Path | None = None,
     activate_strategy: bool = False,
 ) -> None:
     production_root.mkdir(parents=True, exist_ok=True)
+    resolved_static_fallback_profile = str(static_fallback_profile or _resolve_default_static_execution_profile()).strip()
     for name in [
         "metrics.json",
         "deep_alpha_model.pt",
@@ -668,10 +784,15 @@ def _sync_production_root(
         "train_history.csv",
         "daily_live_score_panel.csv",
         "daily_live_target_weight_panel.csv",
+        "portfolio_capped_daily_live_target_weight_panel.csv",
         "execution_aligned_daily_live_score_panel.csv",
         "execution_aligned_daily_live_target_weight_panel.csv",
     ]:
         _copy_if_exists(run_dir / name, production_root / name)
+    _materialize_static_fallback_panel(
+        production_root=production_root,
+        static_profile=resolved_static_fallback_profile,
+    )
     _write_production_manifest(
         production_root=production_root,
         source_run_dir=source_run_dir,
@@ -681,6 +802,7 @@ def _sync_production_root(
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
+        static_fallback_profile=resolved_static_fallback_profile,
         strategy_manifest_path=strategy_manifest_path,
         activate_strategy=activate_strategy,
     )
@@ -755,6 +877,7 @@ def main() -> None:
     print(f"latest_trainable_date={latest_trainable_date}")
     print(f"internal_monitor_start_date={internal_monitor_start_date}")
     print(f"internal_monitor_days={internal_monitor_days}")
+    print(f"default_static_fallback_profile={_resolve_default_static_execution_profile()}")
     if args.research_objective_mode:
         print(f"override_research_objective_mode={args.research_objective_mode}")
     if args.checkpoint_selection_objective:
@@ -783,6 +906,7 @@ def main() -> None:
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
+        static_fallback_profile=_resolve_default_static_execution_profile(),
         strategy_manifest_path=strategy_manifest_path,
         activate_strategy=bool(args.activate_strategy),
     )

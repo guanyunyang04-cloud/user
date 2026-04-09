@@ -1,108 +1,56 @@
 # Daily Research 当前判断
 
-快照日期：`2026-04-08`
+快照日期：`2026-04-09`
 
-## 1. 当前总判断
-- 用户的北极星目标仍是“月度正收益 `> 30%`”，但它当前只作为长期方向，不作为正式晋级门槛。
-- 当前全局 deployable winner 仍是：
-  - `state_liquidity_listwise_v1`
-  - `liquid500`
-  - 基础执行壳仍来自 `regoff_k1_5d_ensemble_native_anchor`
-- 当前日常执行真源仍是：
-  - `daily_research/output/active_execution_strategy.json`
+## 1. 当前主线
+- 当前底层最强模型仍是 `state_liquidity_listwise_v1`，正式复核根为 `daily_research/output/short_alpha_formal_head2head_20260409_recheck_r1`。
+- 当前日常执行真源仍是 `daily_research/output/active_execution_strategy.json`。
+- 当前 active default 仍是 `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`。
+- 当前 active execution pipeline root 是 `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260409_r1`。
+- 当前统一权重语义是 `research_raw_target_weight`。
+- 当前统一上限语义是 `follow_research_raw_no_global_cap`。
 
-## 2. 执行侧正式结论
-- broad execution-policy sweep 已结束。
-- 当前唯一高证据 repair candidate 是：
-  - `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
-- 它已经物化成 active default：
-  - strategy：`state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
-  - pipeline root：`daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260408_r2`
-- 当前 active execution 的语义也已经收口：
-  - `research_raw_target_weight`
-  - `follow_research_raw_no_global_cap`
-  - 研究面板给多少 raw target weight，执行就按多少走；external target-weight 链不再隐含通用 `max_weight=0.25`
-- 当前 formal full-period H2H 结果是：
-  - candidate `51.42% / 2.253`
-  - static `39.85% / 1.738`
-  - full-period delta `+11.54% / +0.514`
-- recent realistic gate 也保持相对正增量：
-  - targeted `-13.60% / -0.788`
-  - static `-34.61% / -1.850`
-  - delta 仍为正
-- 这条映射的触发覆盖率是：
-  - `3/36 = 8.33%`
-  - triggered mean monthly delta `+8.50%`
-- 当前 live 月份没有触发这条映射：
-  - `2026-04` 仍回到 `regoff_k1_5d_ensemble_native_anchor`
-  - 因此当前 active live panel 实际等价于旧静态默认，但 manifest 已切成 candidate pipeline
-- 当前 candidate pipeline 已完成执行层轻量化：
-  - trade plan refresh 改走 `live-only`，不再每日重跑 formal replay / H2H
-  - pipeline root 内部现已同时物化 `daily_live_target_weight_panel.csv` 与 companion `daily_live_score_panel.csv`
-  - score 明确只作为 static reference view，真实执行仍由 target weight panel 决定
+## 2. 执行侧结论
+- 当前唯一正式保留的 execution repair 仍是 `trend_up_low_vol|expand|stable -> topk3_1d_regoff`。
+- 当前 live 月 `2026-04` 仍未触发这条映射，所以 live panel 走的是 `static_fallback_daily_live_target_weight_panel.csv`。
+- 这个 fallback 已不再吃旧的 `25%` capped panel，而是从 production raw panel 重新桥接出来。
+- 最新 trade plan 已按统一语义切到 `40% / 20% / 20% / 20%`，不再是假性 `25%` fallback。
 
-## 3. 模型侧正式结论
-- `penalty-only narrow ablation` 已完整收口。
-- 统一结论是：
-  - no narrow split produced a clean promotion answer over `state_liquidity_listwise_v1`
-- 当前 best reusable restart point：
-  - `short_expert_penalty_only_monthly_v1`
-  - `63.93% / 4.696`
-  - monthly robust `0.0835`
-- strongest split challenger：
-  - `short_expert_penalty_only_light_monthly_v1`
-  - positive `83.33%`
-  - median `2.92%`
-  - monthly robust `0.0822`
-  - 仍未超过当前线 `median 5.26% / robust 0.0897`
-- `short_expert_penalty_only_heavy_monthly_v1`
-  - 已 strict resume `48 -> 64`
-  - 预算压力清除后稳定到 `39.46% / 3.054`
-  - monthly robust `0.0458`
-  - 已确认为负证据
+## 3. 生产模型状态
+- 最新 production full-fit fresh run 是 `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260409_r1`。
+- 这轮 `32` 起训后被判为 undertrained，所以又按 strict resume 补到了 `64`。
+- 当前稳定 production run 是 `daily_research/output/short_alpha_production_epoch_extension_20260409_r1/runs/short_alpha_production_e64`。
+- 当前 production root `daily_research/output/deep_alpha_short_alpha_execalign_production_default` 已同步到这个 `e64` 版本。
+- 当前 production root 同时保留三张 panel：
+- `daily_live_target_weight_panel.csv` = research raw uncapped
+- `portfolio_capped_daily_live_target_weight_panel.csv` = capped reference only
+- `static_fallback_daily_live_target_weight_panel.csv` = raw panel 经过 `regoff_k1_5d_ensemble_native_anchor` bridge 的正式 fallback
 
-## 4. 当前一致性修正
-- 训练/预训练默认起训已经统一到 `32`，同模型扩预算默认只走 strict resume。
-- GPU only 已下沉到训练与预训练入口，不能再静默回落到 CPU。
-- single-mapping candidate pipeline 与 activation 脚本已移除 dated operational root 默认值，改为按最新产物动态解析。
-- 项目已新增 `daily_research/tools/project_consistency_check.py`，以后用它兜住这类前后口径分叉。
-- 当前新增的项目级规则是：
-  - 用户最新要求拥有最高优先级
-  - 不允许把旧口径、旧默认值、旧包装脚本继续留在默认主链里生效
+## 4. 最新收益判断
+- strongest model 本体能力仍成立，但当前短板仍在最近阶段的执行兑现。
+- 最新 costed active-candidate recent recheck 根是 `daily_research/output/recheck_active_execution_candidate_20260409_r3_unified_costed`。
+- 这轮结果是 annual `7.30%`、excess annual `-4.74%`、excess Sharpe `-0.226`。
+- 它比旧的 capped fallback 语义更统一，但最近区间兑现更弱。
+- 当前结论因此不是“统一后收益更高”，而是“统一后语义更干净，但最近收益更差”。
 
-## 4. 当前核心问题
-- 当前问题不是“默认主线错了”。
-- 当前问题是：
-  - 执行侧 candidate 已升级为 active default，但触发稀疏，真正的收益兑现仍取决于未来 live 月份是否出现命中
-  - 模型侧已有有效增量，但还没有干净跨过当前线的月度中位数与整体 monthly robust 边界
+## 5. 当前问题
+- 当前问题不是主模型失效，而是 live 月没有触发最强映射。
+- 当前问题也不是预算不够；production 这条线已经补到 `64` 且预算压力解除。
+- 当前真正的未解问题是：如果目标是最大真实收益，项目后续需要回答“研究 raw 无上限语义”是否应继续作为全链默认，还是应回到“全链统一 capped 语义”重新比较。
 
-## 5. 当前明确停止项
-- 不再继续 broad execution-policy sweep。
-- 不再继续 `short_expert_monthly_v2`、`heavy penalty` 这类已证伪分支。
-- 不再把“可能没训够”当作默认解释。
-- 不再允许 execution-bound / monthly-refresh 结果来自：
-  - 旧模型
-  - 低预算模型
-  - CPU 训练
-  - fresh rerun 取代 strict resume 的同模型扩预算
+## 6. 当前纪律
+- 用户最新提出的要求拥有最高优先级。
+- 默认目标是最有效，不是最小改动。
+- 训练默认从 `32` 起步。
+- 同模型扩预算只允许 `strict resume`。
+- 训练一律 `GPU`。
+- active candidate backtest 默认必须带真实成本，不允许再靠手工 CLI 临时补。
 
-## 6. 当前下一步
-1. 执行侧
-- 继续围绕 `expand|stable -> topk3` 收集真实触发与最近月样本。
-- 月更或 production refresh 后，优先用最新模型重刷 single-mapping candidate pipeline。
-
-2. 模型侧
-- 如重新开线，只从 `short_expert_penalty_only_monthly_v1` 或 `light` 这种窄修复继续。
-- 目标只盯月度中位数和 monthly robust 修复。
-
-3. 生产纪律
-- 所有 execution / monthly refresh 候选都必须先补成：
-  - latest model
-  - highest family budget
-  - GPU training
-  - strict resume if same-model budget extension
-- `2026-04-08` 已完成一次不覆盖 active candidate 的 production full-fit refresh：
-  - refreshed root = `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260408_r1`
-  - production root launch cutoff 已更新到 `20260408`
-  - 本轮按新纪律从 `32` epoch 起训
-  - train history best epoch 落在 `15/32`，不是右边界，因此当前没有继续续训的证据
+## 7. 下一步
+- 第一优先级不是再找新映射，而是正面回答 `raw no-cap` 与 `global cap` 哪条全链收益更高。
+- 第二优先级才是继续观察 `expand|stable -> topk3` 的真实触发样本。
+- 模型侧如重开，仍只从 `penalty-only` 窄修复继续。
+- `2026-04-09` 一致性补充：
+- active manifest 现在显式记录 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_execution_bridge_meta / effective_live_weight_generation_note`，不再只靠 `live_trigger_monitor.json` 侧面判断当前实际执行态。
+- latest trade plan 现在会解释 bridge 语义；若当前 live 月走 `static_fallback + regoff_k1_5d_ensemble_native_anchor`，会明确提示这是 `5d / all-offset / topk1` bridge，`转权重前分数` 只是信号日 raw score，不要求与最终权重单调一致。
+- `DeepAlphaConfig` 也已同步到 `32 / 16` 默认训练预算；训练侧旧 execution-alignment 默认 `regoff_k2_10d_ensemble_native_anchor` 已从主入口和 retrain-frequency fallback 中移除。

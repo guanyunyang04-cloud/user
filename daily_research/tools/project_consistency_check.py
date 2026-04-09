@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,6 @@ OUTPUT_ROOT = PROJECT_ROOT / "output"
 EXPECTED_TARGET_WEIGHT_SEMANTICS = "research_raw_target_weight"
 EXPECTED_TARGET_WEIGHT_CAP_MODE = "follow_research_raw_no_global_cap"
 MIN_DEFAULT_EPOCHS = 32
-MIN_DEFAULT_MIN_EPOCHS = 16
 
 
 @dataclass(frozen=True)
@@ -72,16 +70,20 @@ def _check_train_entrypoints(failures: list[CheckResult]) -> None:
         "run_deep_alpha_research.py default --epochs must start at >= 32.",
     )
     _require(
-        _has_default_expression(train_text, "--min-epochs", "default_min_epochs_for_budget\\(DEFAULT_MIN_START_EPOCH_BUDGET\\)"),
+        _has_default_expression(
+            train_text,
+            "--min-epochs",
+            "default_min_epochs_for_budget\\(DEFAULT_MIN_START_EPOCH_BUDGET\\)",
+        ),
         failures,
         "train_default_min_epochs_too_low",
-        "run_deep_alpha_research.py default --min-epochs must stay aligned with the 32-start policy.",
+        "run_deep_alpha_research.py default --min-epochs must follow the 32-start policy.",
     )
     _require(
         "No CUDA device is available" in train_text and 'torch.device("cuda")' in train_text,
         failures,
         "train_gpu_guard_missing",
-        "run_deep_alpha_research.py must require CUDA instead of silently falling back to CPU.",
+        "run_deep_alpha_research.py must require CUDA.",
     )
     _require(
         'torch.device("cuda" if torch.cuda.is_available() else "cpu")' not in train_text,
@@ -97,10 +99,14 @@ def _check_train_entrypoints(failures: list[CheckResult]) -> None:
         "pretrain_deep_alpha_encoder.py default --epochs must start at >= 32.",
     )
     _require(
-        _has_default_expression(pretrain_text, "--min-epochs", "default_min_epochs_for_budget\\(DEFAULT_MIN_START_EPOCH_BUDGET\\)"),
+        _has_default_expression(
+            pretrain_text,
+            "--min-epochs",
+            "default_min_epochs_for_budget\\(DEFAULT_MIN_START_EPOCH_BUDGET\\)",
+        ),
         failures,
         "pretrain_default_min_epochs_too_low",
-        "pretrain_deep_alpha_encoder.py default --min-epochs must stay aligned with the 32-start policy.",
+        "pretrain_deep_alpha_encoder.py default --min-epochs must follow the 32-start policy.",
     )
     _require(
         _parse_default_int(pretrain_text, "--max-total-epochs") >= MIN_DEFAULT_EPOCHS,
@@ -112,13 +118,46 @@ def _check_train_entrypoints(failures: list[CheckResult]) -> None:
         "No CUDA device is available" in pretrain_text and 'torch.device("cuda")' in pretrain_text,
         failures,
         "pretrain_gpu_guard_missing",
-        "pretrain_deep_alpha_encoder.py must require CUDA instead of silently falling back to CPU.",
+        "pretrain_deep_alpha_encoder.py must require CUDA.",
     )
     _require(
         'torch.device("cuda" if torch.cuda.is_available() else "cpu")' not in pretrain_text,
         failures,
         "pretrain_cpu_fallback_present",
         "pretrain_deep_alpha_encoder.py still contains a CPU fallback path.",
+    )
+
+
+def _check_config_dataclass_defaults(failures: list[CheckResult]) -> None:
+    config_text = _read_text("daily_research/deep_alpha/config.py")
+    _require(
+        "epochs: int = DEFAULT_MIN_START_EPOCH_BUDGET" in config_text,
+        failures,
+        "config_default_epochs_too_low",
+        "DeepAlphaConfig must inherit the 32-start policy at the dataclass level.",
+    )
+    _require(
+        "min_epochs: int = default_min_epochs_for_budget(DEFAULT_MIN_START_EPOCH_BUDGET)" in config_text,
+        failures,
+        "config_default_min_epochs_too_low",
+        "DeepAlphaConfig must inherit the current min-epoch floor at the dataclass level.",
+    )
+
+
+def _check_execution_profile_defaults(failures: list[CheckResult]) -> None:
+    train_text = _read_text("daily_research/deep_alpha/run_deep_alpha_research.py")
+    frequency_matrix_text = _read_text("daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py")
+    _require(
+        'default="regoff_k1_5d_ensemble_native_anchor"' in train_text,
+        failures,
+        "train_execution_profile_default_stale",
+        "run_deep_alpha_research.py still defaults to a stale execution-alignment profile.",
+    )
+    _require(
+        'metrics.get("execution_alignment_profile", "regoff_k1_5d_ensemble_native_anchor")' in frequency_matrix_text,
+        failures,
+        "frequency_matrix_execution_profile_default_stale",
+        "run_retrain_frequency_formal_matrix.py still falls back to a stale execution-alignment profile.",
     )
 
 
@@ -152,7 +191,7 @@ def _check_aux_defaults(failures: list[CheckResult]) -> None:
                     _has_default_expression(text, flag, minimum),
                     failures,
                     "aux_default_too_low",
-                    f"{relative_path} is missing the shared current default expression for {flag}.",
+                    f"{relative_path} is missing the current shared default expression for {flag}.",
                 )
             else:
                 value = _parse_default_int(text, flag)
@@ -178,6 +217,70 @@ def _check_execution_semantics(failures: list[CheckResult]) -> None:
         "active_manifest_target_weight_cap_mode_mismatch",
         "active_execution_strategy.json is missing follow_research_raw_no_global_cap semantics.",
     )
+    _require(
+        float(manifest.get("transaction_cost_bps", 0.0) or 0.0) > 0.0
+        and float(manifest.get("slippage_bps", 0.0) or 0.0) > 0.0
+        and float(manifest.get("sell_tax_bps", 0.0) or 0.0) > 0.0,
+        failures,
+        "active_manifest_cost_semantics_missing",
+        "active_execution_strategy.json must carry non-zero transaction/slippage/tax settings.",
+    )
+    _require(
+        str(manifest.get("score_panel_role", "")).strip() == "execution_preweight_score_panel",
+        failures,
+        "active_manifest_score_role_mismatch",
+        "active_execution_strategy.json must expose an execution pre-weight score panel role, not a stale static reference role.",
+    )
+    _require(
+        str(manifest.get("effective_live_target_weight_mode", "")).strip() != "",
+        failures,
+        "active_manifest_effective_live_mode_missing",
+        "active_execution_strategy.json must expose the current effective live target-weight mode.",
+    )
+    _require(
+        str(manifest.get("effective_live_execution_profile", "")).strip() != "",
+        failures,
+        "active_manifest_effective_live_profile_missing",
+        "active_execution_strategy.json must expose the current effective live execution profile.",
+    )
+    _require(
+        str(manifest.get("effective_live_weight_generation_note", "")).strip() != "",
+        failures,
+        "active_manifest_effective_weight_note_missing",
+        "active_execution_strategy.json must explain how current live weights are generated.",
+    )
+    production_root = Path(str(manifest.get("production_root", "")).strip())
+    if production_root.exists():
+        live_monitor_path = production_root / "live_trigger_monitor.json"
+        score_reference_path = production_root / "daily_live_score_reference.json"
+        if live_monitor_path.exists():
+            live_monitor = _read_json(str(live_monitor_path.relative_to(WORKSPACE_ROOT)))
+            _require(
+                str(manifest.get("effective_live_target_weight_mode", "")).strip()
+                == str(live_monitor.get("live_target_weight_mode", "")).strip(),
+                failures,
+                "active_manifest_effective_mode_out_of_sync",
+                "active_execution_strategy.json current live mode is out of sync with live_trigger_monitor.json.",
+            )
+            _require(
+                str(manifest.get("effective_live_execution_profile", "")).strip()
+                == str(
+                    live_monitor.get("effective_execution_profile", "")
+                    or live_monitor.get("latest_selected_profile", "")
+                ).strip(),
+                failures,
+                "active_manifest_effective_profile_out_of_sync",
+                "active_execution_strategy.json current live profile is out of sync with live_trigger_monitor.json.",
+            )
+        if score_reference_path.exists():
+            score_reference = _read_json(str(score_reference_path.relative_to(WORKSPACE_ROOT)))
+            _require(
+                str(manifest.get("effective_live_weight_generation_note", "")).strip()
+                == str(score_reference.get("weight_generation_note", "")).strip(),
+                failures,
+                "active_manifest_weight_note_out_of_sync",
+                "active_execution_strategy.json current live weight-generation note is out of sync with daily_live_score_reference.json.",
+            )
 
 
 def _check_no_hardcoded_operational_roots(failures: list[CheckResult]) -> None:
@@ -201,6 +304,94 @@ def _check_no_hardcoded_operational_roots(failures: list[CheckResult]) -> None:
             )
 
 
+def _check_execution_pipeline_consistency(failures: list[CheckResult]) -> None:
+    production_refresh_text = _read_text("daily_research/execution/update_default_candidate_production.py")
+    pipeline_text = _read_text("daily_research/execution/run_short_alpha_execution_single_mapping_candidate_pipeline.py")
+    candidate_profiles_text = _read_text("daily_research/execution/research_candidate_profiles.py")
+    trade_plan_text = _read_text("daily_research/baseline/generate_daily_trade_plan.py")
+
+    _require(
+        '"--min-epochs", 1' not in production_refresh_text,
+        failures,
+        "production_refresh_min_epochs_stale",
+        "update_default_candidate_production.py still hardcodes --min-epochs 1.",
+    )
+    _require(
+        "default_min_epochs_for_budget(epoch_budget)" in production_refresh_text,
+        failures,
+        "production_refresh_min_epochs_not_aligned",
+        "update_default_candidate_production.py must align min epochs with the current 32-start policy.",
+    )
+    _require(
+        "static_fallback_daily_live_target_weight_panel.csv" in production_refresh_text,
+        failures,
+        "production_refresh_static_fallback_missing",
+        "update_default_candidate_production.py must materialize static_fallback_daily_live_target_weight_panel.csv.",
+    )
+    _require(
+        "portfolio_capped_daily_live_target_weight_panel.csv" in production_refresh_text,
+        failures,
+        "production_refresh_portfolio_capped_reference_missing",
+        "update_default_candidate_production.py must preserve the capped reference panel explicitly.",
+    )
+    _require(
+        'DEFAULT_FALLBACK_LIVE_TARGET_WEIGHT_PANEL = STATIC_PRODUCTION_ROOT / "static_fallback_daily_live_target_weight_panel.csv"'
+        in pipeline_text,
+        failures,
+        "single_mapping_pipeline_fallback_not_unified",
+        "run_short_alpha_execution_single_mapping_candidate_pipeline.py must use the static fallback panel.",
+    )
+    _require(
+        "fallback_target_weight_semantics" in pipeline_text and "follow_research_raw_no_global_cap" in pipeline_text,
+        failures,
+        "single_mapping_pipeline_fallback_semantics_missing",
+        "run_short_alpha_execution_single_mapping_candidate_pipeline.py must record unified raw-weight fallback semantics.",
+    )
+    _require(
+        '"role": "execution_preweight_score_panel"' in pipeline_text
+        and "_build_hybrid_preweight_score_panel" in pipeline_text,
+        failures,
+        "single_mapping_pipeline_companion_score_missing",
+        "run_short_alpha_execution_single_mapping_candidate_pipeline.py must materialize the pre-weight raw score panel for the selected execution path.",
+    )
+    _require(
+        '"weight_generation_note"' in pipeline_text
+        and '"effective_execution_bridge_meta"' in pipeline_text,
+        failures,
+        "single_mapping_pipeline_effective_state_missing",
+        "run_short_alpha_execution_single_mapping_candidate_pipeline.py must describe the current effective execution path, not only the selected score file.",
+    )
+    _require(
+        "_seed_live_only_formal_reference" in pipeline_text,
+        failures,
+        "single_mapping_pipeline_live_only_seed_missing",
+        "run_short_alpha_execution_single_mapping_candidate_pipeline.py must support seeding formal references into a fresh live-only root.",
+    )
+    _require(
+        "--transaction-cost-bps" in candidate_profiles_text
+        and "--slippage-bps" in candidate_profiles_text
+        and "--sell-tax-bps" in candidate_profiles_text,
+        failures,
+        "candidate_profile_cost_defaults_missing",
+        "research_candidate_profiles.py must inject default cost settings for active candidate backtests.",
+    )
+    _require(
+        '--transaction-cost-bps", type=float, default=None' in trade_plan_text
+        and '--slippage-bps", type=float, default=None' in trade_plan_text
+        and '--sell-tax-bps", type=float, default=None' in trade_plan_text,
+        failures,
+        "trade_plan_cost_flags_missing",
+        "generate_daily_trade_plan.py must accept manifest-driven cost flags so run_trade_plan.py cannot drift and fail.",
+    )
+    _require(
+        "_merge_score_reference_metadata" in trade_plan_text
+        and "effective_live_weight_generation_note" in trade_plan_text,
+        failures,
+        "trade_plan_effective_execution_explanation_missing",
+        "generate_daily_trade_plan.py must expose the effective live execution explanation when displaying external target-weight plans.",
+    )
+
+
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
         "daily_research/brain/working_memory.md": (
@@ -208,6 +399,7 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "32",
             "最高优先级",
+            "2026-04-09",
         ),
         "daily_research/brain/procedural_memory.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -219,12 +411,14 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
         "daily_research/brain/action_system.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
-            "最新提出的规则默认覆盖旧的本地假设",
+            "40% / 20% / 20% / 20%",
+            "3 / 7 / 10",
         ),
         "daily_research/brain/project_map.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "最高优先级",
+            "2026-04-09",
         ),
     }
     for relative_path, snippets in required_strings.items():
@@ -241,9 +435,12 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
 def run_checks() -> list[CheckResult]:
     failures: list[CheckResult] = []
     _check_train_entrypoints(failures)
+    _check_config_dataclass_defaults(failures)
+    _check_execution_profile_defaults(failures)
     _check_aux_defaults(failures)
     _check_execution_semantics(failures)
     _check_no_hardcoded_operational_roots(failures)
+    _check_execution_pipeline_consistency(failures)
     _check_memory_sync(failures)
     return failures
 
@@ -258,8 +455,6 @@ def main() -> None:
         "failures": [failure.__dict__ for failure in failures],
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-    if failures:
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH
 from daily_research.deep_alpha.research_objective import summarize_primary_monthly_objectives
 from daily_research.execution.update_default_candidate_production import (
     DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST,
@@ -41,6 +42,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--production-manifest", default=str(DEFAULT_PRODUCTION_MANIFEST))
     parser.add_argument("--production-root", default=str(DEFAULT_PRODUCTION_ROOT))
     parser.add_argument("--strategy-manifest-path", default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST))
+    parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
     parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--root-tag", default="short_alpha_production_epoch_extension_20260405_r1")
     parser.add_argument("--replay-start-date", default="")
@@ -102,6 +104,7 @@ def _build_resume_command(
     *,
     python_executable: str,
     resume_run_dir: Path,
+    family_epoch_budget_manifest: str,
     epoch_budget: int,
     latest_completed_date: str,
     latest_trainable_date: str,
@@ -111,6 +114,7 @@ def _build_resume_command(
 ) -> list[str]:
     cmd = _build_retrain_command(
         source_run_dir=resume_run_dir,
+        family_epoch_budget_manifest=family_epoch_budget_manifest,
         latest_completed_date=latest_completed_date,
         latest_trainable_date=latest_trainable_date,
         internal_monitor_start_date=internal_monitor_start_date,
@@ -319,6 +323,7 @@ def main() -> None:
         cmd = _build_resume_command(
             python_executable=args.python_executable,
             resume_run_dir=previous_run_dir,
+            family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
             epoch_budget=budget,
             latest_completed_date=latest_completed_date,
             latest_trainable_date=latest_trainable_date,

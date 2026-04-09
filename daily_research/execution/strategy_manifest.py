@@ -146,6 +146,17 @@ def build_active_strategy_manifest(
         target_weight_power = float(bridge_meta.get("target_weight_power", 1.0) or 1.0)
         target_weight_full_invest = bool(bridge_meta.get("target_weight_full_invest", False))
         use_market_regime_filter = bool(bridge_meta.get("market_regime_filter", False))
+    bridge_meta = strategy_metrics.get("execution_alignment_selected_bridge_meta")
+    bridge_meta = bridge_meta if isinstance(bridge_meta, dict) else {}
+    transaction_cost_bps = float(
+        strategy_metrics.get("transaction_cost_bps", bridge_meta.get("transaction_cost_bps", 3.0)) or 3.0
+    )
+    slippage_bps = float(
+        strategy_metrics.get("slippage_bps", bridge_meta.get("slippage_bps", 7.0)) or 7.0
+    )
+    sell_tax_bps = float(
+        strategy_metrics.get("sell_tax_bps", bridge_meta.get("sell_tax_bps", 10.0)) or 10.0
+    )
 
     source_run_dir = source_run_dir.resolve()
     production_root = production_root.resolve()
@@ -187,6 +198,9 @@ def build_active_strategy_manifest(
         "rolling_pool_adv_window": int(strategy_metrics.get("rolling_pool_adv_window", source_metrics.get("rolling_pool_adv_window", 0)) or 0),
         "backtest_start_date": str(source_panel_metrics.get("valid_start", "20210101") or "20210101").replace("-", ""),
         "trade_plan_start_date": str(strategy_metrics.get("start_date", "20210101") or "20210101"),
+        "transaction_cost_bps": float(transaction_cost_bps),
+        "slippage_bps": float(slippage_bps),
+        "sell_tax_bps": float(sell_tax_bps),
         "rebalance_freq": rebalance_freq,
         "rebalance_offset_mode": rebalance_offset_mode,
         "rebalance_anchor_date": rebalance_anchor_date,
