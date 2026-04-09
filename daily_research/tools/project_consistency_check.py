@@ -394,12 +394,22 @@ def _check_execution_pipeline_consistency(failures: list[CheckResult]) -> None:
 
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
+        "daily_research/brain/semantic_memory.md": (
+            "研究模型只允许使用 formal 评估开始前一天及更早的可标注数据",
+            "最近 `12` 个自然月",
+            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
+            "formal = 研究保留评估窗",
+            "recent = live 监控切片",
+            "live = 当前生产执行语义与面板",
+        ),
         "daily_research/brain/working_memory.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "32",
             "最高优先级",
             "2026-04-09",
+            "研究模型协议已经锁死",
+            "当前 recent/live 监控窗口不是“最近一年”",
         ),
         "daily_research/brain/procedural_memory.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -407,18 +417,23 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "strict resume",
             "GPU",
             "最高优先级",
+            "研究模型只允许使用 formal 评估开始前一天及更早的可标注数据",
+            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
         ),
         "daily_research/brain/action_system.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "weight_generation_note",
             "3 / 7 / 10",
+            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
         ),
         "daily_research/brain/project_map.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "最高优先级",
             "2026-04-09",
+            "研究环",
+            "执行环",
         ),
     }
     for relative_path, snippets in required_strings.items():

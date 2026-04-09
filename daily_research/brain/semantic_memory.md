@@ -14,13 +14,21 @@
   - 深证 A 股
   - 默认剔除创业板、科创板、ST
 - 成交假设固定为 `next_open`。
-- 正式研究、训练、回测、执行默认解释器固定为：
-  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
+- 正式研究、训练、回测、执行默认解释器固定为 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`。
 - brain 文档默认使用简体中文。
 - shell 运行时输出、终端日志、进度条文本默认使用英文。
 - 日常生成计划不允许无条件静默重训模型；默认 production 仅按 `Retrain Monthly` 自动重训。
 
-## 3. 研究与执行统一目标
+## 3. 双模型协议
+- 研究模型只允许使用 formal 评估开始前一天及更早的可标注数据。
+- formal 评估窗固定预留最近 `12` 个自然月，不允许任何 research run 把这 `12` 个月重新并回训练集。
+- 只有执行模型才允许使用最新可标注数据做 `production full-fit`。
+- `production full-fit` 的职责是物化最新 live panel 和默认执行，不是制造新的 formal 证据。
+- `formal = 研究保留评估窗`。
+- `recent = live 监控切片`。
+- `live = 当前生产执行语义与面板`。
+
+## 4. 研究与执行统一目标
 - 当前统一目标不是“raw holdout 指标最大”，而是“执行后净收益最大”。
 - 默认研究口径固定为：
   - `research_objective_mode = execution_first`
@@ -33,21 +41,14 @@
 - production full-fit 结果不得回填为 formal 研究证据。
 - 在用户已明确改写目标的前提下，当前默认裁决顺序为“月度收益优先、模型偏短线”；年化与 Sharpe 保留为辅助指标。
 
-## 4. 当前默认执行语义
-- 当前 active execution strategy 为：
-  - `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
-- 当前 active manifest 真源为：
-  - `daily_research/output/active_execution_strategy.json`
-- 当前默认执行入口为：
-  - `daily_research/execution/run_trade_plan.py`
-- 当前默认 production root 为：
-  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
-- 当前统一权重语义为：
-  - `research_raw_target_weight`
-- 当前统一上限语义为：
-  - `follow_research_raw_no_global_cap`
-- 当前 live 默认静态基线为：
-  - `regoff_k2_5d_ensemble_native_anchor`
+## 5. 当前默认执行语义
+- 当前 active execution strategy 为 `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`。
+- 当前 active manifest 真源为 `daily_research/output/active_execution_strategy.json`。
+- 当前默认执行入口为 `daily_research/execution/run_trade_plan.py`。
+- 当前默认 production root 为 `daily_research/output/deep_alpha_short_alpha_execalign_production_default`。
+- 当前统一权重语义为 `research_raw_target_weight`。
+- 当前统一上限语义为 `follow_research_raw_no_global_cap`。
+- 当前 live 默认静态基线为 `regoff_k2_5d_ensemble_native_anchor`。
 - 当前 active default 通过 raw panel 加精确 bridge spec 执行，不依赖预先导出的 `execution_aligned` panel，也不回退到旧的通用 `25% cap` fallback。
 - active manifest 必须显式保存当前 live 执行态，包括：
   - `effective_live_target_weight_mode`
@@ -56,10 +57,9 @@
   - `effective_live_weight_generation_note`
   - `monthly_first_*` 裁决字段
 
-## 5. 当前稳定研究与执行结论
+## 6. 当前稳定研究与执行结论
 - `state_liquidity_listwise_v1` 仍是当前 short-alpha 主线最强 base model。
-- execution-side 当前稳定主线已经切到：
-  - `raw + regoff_k2_5d_ensemble_native_anchor`
+- execution-side 当前稳定主线已经切到 `raw + regoff_k2_5d_ensemble_native_anchor`。
 - `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 只保留为历史 targeted repair 候选与观察分支，不再作为当前默认 repair 叙事。
 - broad execution-policy sweep 已停止；后续执行侧升级默认只沿 `month-start / first-week / signal-to-weight / month-trigger / execution` 下钻。
 - 任何 simple regime-conditioned repair，只有在同窗、同成本、同协议、月度优先口径下打赢当前 `k2` 静态基线后，才允许再次进入 promotion 讨论。
@@ -70,32 +70,13 @@
 - `encoder_transformer_v1` 仍是 high-upside but unstable 的主要 architecture 候选。
 - `graph_off_plain` 已做预算补齐复核，但仍未通过 liquid500 challenger gate，只保留为 monitored architecture branch。
 
-## 6. 训练预算与月度协议语义
-- family epoch budget 的唯一真源为：
-  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
-- 当前冻结预算为：
-  - `baseline -> 4`
-  - `structure -> 12`
-  - `short_alpha -> 24`
-  - `dynamic_graph -> 16`
-- `deep_alpha` 当前主研究时间单位为 `calendar_months`。
-- 月度协议作用于：
-  - train/valid 切窗
-  - train-side eval window
-  - adaptive task window
-  - monthly summary artifacts
-- 月度分析是当前研究判读的第一视角。
-- 单次 run 现在会额外落盘：
-  - `primary_research_monthly_objectives.json`
-
 ## 7. 结果解释边界
 - short-alpha 默认执行 winner 与 liquid800 / mainboard 研究 winner 仍需分开叙述。
 - 不同股票池、不同成本口径、不同 gate 协议下的结果，不得直接混成单一“全项目最高”结论。
-- 如果用户明确要“当前全项目最高净收益”，必须先进入：
-  - 同一成本引擎
-  - 同一 execution-policy audit
-  - 同一 `global_deployable_non_capacity_adjusted_v1`
-  然后再做跨 universe 排名。
+- 不得拿 `production full-fit` 的最新训练截止去反推 formal 协议被破坏。
+- 不得把 recent/live 回放结果直接表述成 formal 研究证据。
+- 如果 recent/live 变弱，默认先查市场状态、execution bridge 和 live 约束，不允许先把原因偷换成“研究训练数据不够新”。
+- 如果用户明确要“当前全项目最高净收益”，必须先进入同一成本引擎、同一 execution-policy audit、同一 `global_deployable_non_capacity_adjusted_v1`，然后再做跨 universe 排名。
 
 ## 8. 文档分工语义
 - `semantic_memory.md` 只保留稳定事实与长期边界。

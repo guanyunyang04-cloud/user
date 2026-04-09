@@ -11178,3 +11178,41 @@ position,000001.SZ,1200,12.38,
 - 已修复 `run_short_alpha_targeted_weak_month_repair_review.py`，使 static comparison 与 targeted replay 使用完全相同的 clipped window，去掉了旧的一天错位。
 - same-window clipping 之后，强制映射 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 在前两个 formal 窗口中性、在最新主窗口落败，在 recent gate 里也再次中性，因为最近月份仍然选到 `k2`。
 - 当前 execution-side mainline 保持为 `raw + regoff_k2_5d_ensemble_native_anchor`；`topk3_1d_regoff` 已降级为 monitored observation branch。
+## 2026-04-09 - 30% 强月 signal-to-weight verdict
+- 新增工具：`daily_research/tools/monthly_attack_signal_weight_verdict.py`
+- 这轮研究不再只问“月度稳不稳”，而是显式问“能不能更接近 30% 强月目标”。
+- verdict 根：`daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`
+- 关键方法修正：
+  - 自定义 challenger 必须改成“先过可交易过滤，再做 bridge”，否则 recent/live 结果会和官方 audit 打架。
+  - tool 已按这个顺序修正，并把 `equal_top5 -> k1/k2/k3` 的 formal 攻击桥一起纳入对照。
+- formal attack scoreboard 结果：
+  - winner：`formal_current_equal_top5_k1_bridge`
+  - annual `124.82%`
+  - excess annual `88.44%`
+  - best monthly return `25.88%`
+  - strong_month_30_count `0`
+- recent/live gate 结果：
+  - winner：`recent_current_live_k2_static`
+  - 当前 custom attack challenger 都没有打赢 live `k2`
+- 结论收口：
+  - 目前还没有任何方案实现稳定 `30%+` 月收益
+  - `formal_current_equal_top5_k1_bridge` 应记为 research attack branch
+  - `regoff_k2_5d_ensemble_native_anchor` 继续保留为 live mainline
+
+## 2026-04-09 - 研究模型与执行模型协议钉死并完成分脑整理
+- 用户明确补充硬规则：
+  - 研究模型训练时，模型能用到的最新数据只能到 formal 评估开始前一天
+  - 最近 `12` 个月数据必须完整预留做评估
+  - 只有执行时才允许训练最新的 `production full-fit` 模型
+- 这轮同步把该规则正式写入：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/brain_architecture.md`
+- 同步整理点：
+  - 把 `formal / recent / live` 三个术语的职责和证据边界写清楚
+  - 把“研究环”和“执行环”的闭环拆开，避免其它 agent 再把 formal 与 production 混报
+  - 在 `project_consistency_check.py` 里增加对应守卫，避免后续文档回退
+- 这次没有修改策略结论和生产默认值，只做治理层与分脑层统一。
