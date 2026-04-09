@@ -411,7 +411,7 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
         "daily_research/brain/action_system.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
-            "40% / 20% / 20% / 20%",
+            "weight_generation_note",
             "3 / 7 / 10",
         ),
         "daily_research/brain/project_map.md": (

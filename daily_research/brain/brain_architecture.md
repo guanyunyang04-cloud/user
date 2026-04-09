@@ -1,4 +1,4 @@
-# Daily Research Brain Architecture
+# Daily Research 分脑架构
 
 ## 1. 结构目标
 `daily_research/brain/` 不是传统 README，而是项目分脑。它负责把项目知识拆成稳定事实、当前判决、方法规则、操作入口和时间证据，避免同一结论散落在多处重复维护。

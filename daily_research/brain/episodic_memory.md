@@ -11154,14 +11154,14 @@ position,000001.SZ,1200,12.38,
   - `daily_research/brain/action_system.md`
   - `daily_research/brain/project_map.md`
 - `daily_research/tools/project_consistency_check.py` 也已增加对应检查，避免后续再次只改一半。
-## 2026-04-09 - raw fallback unified and production e64 synced
-- production full-fit fresh `32` run judged undertrained, then strict-resume extended to stable `64`.
-- current stable production run: `daily_research/output/short_alpha_production_epoch_extension_20260409_r1/runs/short_alpha_production_e64`
-- production root now materializes `daily_live_target_weight_panel.csv`, `portfolio_capped_daily_live_target_weight_panel.csv`, and `static_fallback_daily_live_target_weight_panel.csv`.
-- active pipeline was refreshed to `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260409_r1`.
-- current active candidate backtest now defaults to manifest/profile cost settings `3 / 7 / 10` bps.
-- latest costed recent recheck root: `daily_research/output/recheck_active_execution_candidate_20260409_r3_unified_costed`
-- latest result: full chain semantics became cleaner, but recent realized performance weakened versus the old capped fallback.
+## 2026-04-09 - raw fallback 统一且 production e64 同步完成
+- production full-fit fresh `32` run 被判 undertrained，随后按 strict resume 扩到稳定 `64`。
+- 当前稳定 production run：`daily_research/output/short_alpha_production_epoch_extension_20260409_r1/runs/short_alpha_production_e64`
+- production root 现已同时物化 `daily_live_target_weight_panel.csv`、`portfolio_capped_daily_live_target_weight_panel.csv` 与 `static_fallback_daily_live_target_weight_panel.csv`。
+- active pipeline 已刷新到 `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260409_r1`。
+- 当前 active candidate backtest 已默认跟随 manifest/profile 成本设置 `3 / 7 / 10` bps。
+- 最新带成本 recent recheck 根：`daily_research/output/recheck_active_execution_candidate_20260409_r3_unified_costed`
+- 当时结论是：全链语义更干净，但 recent 已兑现收益弱于旧 capped fallback。
 ## 2026-04-09 09:48 Consistency Closure
 - 本轮把“代码主链已统一，但 manifest / trade plan / 底层默认值仍残留旧口径”的尾巴收完。
 - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 现在会把 `effective_execution_profile / effective_execution_bridge_meta / weight_generation_note` 写进 `daily_live_score_reference.json`。
@@ -11169,3 +11169,12 @@ position,000001.SZ,1200,12.38,
 - `generate_daily_trade_plan.py` 现在会加载 score reference metadata，并在 plan 里解释 bridge 造成的“raw score 与最终权重非单调”现象。
 - `DeepAlphaConfig` 已同步到 `32 / 16`；`run_deep_alpha_research.py` 和 `run_retrain_frequency_formal_matrix.py` 的 stale execution-alignment default 已切到 `regoff_k1_5d_ensemble_native_anchor`。
 - `project_consistency_check.py` 已扩展为检查 dataclass 默认值、stale execution profile fallback、active manifest 的 effective live 字段，以及 trade plan 对 effective execution explanation 的支持。
+
+## 2026-04-09 - 月度优先执行裁决与 same-window targeted review 修复
+- 新增 recent audit 根：`daily_research/output/short_alpha_production_execution_policy_audit_20260409_r2`
+- `k1 / k2 / k3 / topk3` 的 recent monthly-first 排序现已明确把 `regoff_k2_5d_ensemble_native_anchor` 放在第一。
+- 新增 `daily_research/tools/monthly_first_execution_scoreboard.py`
+- 落盘 scoreboard 根：`daily_research/output/short_alpha_monthly_first_execution_scoreboard_20260409_r1`
+- 已修复 `run_short_alpha_targeted_weak_month_repair_review.py`，使 static comparison 与 targeted replay 使用完全相同的 clipped window，去掉了旧的一天错位。
+- same-window clipping 之后，强制映射 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 在前两个 formal 窗口中性、在最新主窗口落败，在 recent gate 里也再次中性，因为最近月份仍然选到 `k2`。
+- 当前 execution-side mainline 保持为 `raw + regoff_k2_5d_ensemble_native_anchor`；`topk3_1d_regoff` 已降级为 monitored observation branch。

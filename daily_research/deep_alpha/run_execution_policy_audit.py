@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--start-date", default="", help="Optional replay start-date override.")
     parser.add_argument("--end-date", default="", help="Optional replay end-date override.")
+    parser.add_argument(
+        "--current-profile-override",
+        default="",
+        help="Optional explicit current profile label for audit summaries.",
+    )
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--python-executable", default=sys.executable)
@@ -223,7 +228,7 @@ def main() -> None:
     start_date = str(args.start_date or panel_start)
     end_date = str(args.end_date or panel_end)
     profile_names = parse_profile_name_list(args.profile_set)
-    current_profile = str(metrics.get("execution_alignment_profile", "") or "").strip()
+    current_profile = str(args.current_profile_override or "").strip() or str(metrics.get("execution_alignment_profile", "") or "").strip()
     if current_profile and current_profile not in profile_names:
         profile_names.append(current_profile)
 

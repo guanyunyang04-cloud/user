@@ -1,4 +1,4 @@
-# Main Procedural Memory
+# 主脑方法记忆
 
 ## 1. 工作区级方法学
 ### 1.1 Brain-first 接管
@@ -55,9 +55,9 @@
   - `status`
   - `close`
 - 不再要求 Gemini `ask / closeout / doctor / pin / unpin / sessions / open`。
-- Dependent runtime sequencing:
-  - Do not parallelize producer-consumer steps where one command writes an artifact and the next command reads it.
-  - If that mistake happens, rerun the consumer after the producer finishes and write the pitfall back into the project brain.
+- 依赖型运行步骤不并行：
+  - 若上一步负责产生产物、下一步立即读取该产物，这两步不得并行执行。
+  - 如果误并行导致读到旧结果，必须在产物写完后重跑消费步骤，并把这类坑写回对应项目分脑。
 - 当前只保留一个最小结论：
   - 我们尝试过 Gemini 自动化协作，但现阶段先停用；若未来重启，应重新设计而不是直接恢复旧规则。
 - 已知边界：
@@ -68,13 +68,13 @@
 - 主脑与分脑 manifest 必须互相可解析、可追踪
 - 新增项目时，先补脑，再接入主脑 child_brains
 - 任何脑网络调整完成后，必须跑 `doc_guard.py check`
-## 3.1 Live-Path Parameter Upgrade Discipline
-- If the chosen better config differs from the current live path by only one knob, do not upgrade by narrative memory alone.
-- First prove it with same-protocol rows.
-- Then check whether the live entrypoints can actually express that knob.
-- If the CLI / wrapper cannot express it yet, patch that path before declaring the upgrade "done".
-- Final verification should cover three layers:
-  - formal comparison evidence
-  - producer artifact internal config
-  - downstream consumer output
-- If producer artifact and outer summary/meta disagree, trust the artifact first, fix the summary writer, and rerun the producer so the audit trail stays consistent.
+## 3.1 Live 路径参数升级纪律
+- 如果更优配置相对当前 live 路径只差一个旋钮，不能只靠叙述性记忆宣布升级完成。
+- 必须先用同协议对照行证明它更好。
+- 然后再检查当前 live 入口是否真的能表达这个旋钮。
+- 如果 CLI 或 wrapper 还表达不了，先补那条路径，再宣布升级完成。
+- 最终验证至少覆盖三层：
+  - formal 对照证据
+  - 产生产物内部配置
+  - 下游消费输出
+- 如果 producer 产物和外层 summary 或 meta 不一致，先信产物，再修 summary 写入器，并重跑 producer，保持审计链一致。

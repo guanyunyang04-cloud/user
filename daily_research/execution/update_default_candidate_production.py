@@ -109,6 +109,15 @@ def parse_args() -> argparse.Namespace:
         help="Optional override passed to the production fresh retrain. Empty means inherit from the formal source run.",
     )
     parser.add_argument(
+        "--static-fallback-profile",
+        default="",
+        help=(
+            "Optional static fallback execution profile written into production_root. "
+            "Empty means reuse the current production manifest value when available, "
+            "otherwise fall back to the active strategy leaderboard default."
+        ),
+    )
+    parser.add_argument(
         "--strategy-manifest-path",
         default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST),
         help="Where to write the active execution strategy manifest after promotion.",
@@ -288,6 +297,10 @@ def _panel_to_long(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _resolve_default_static_execution_profile() -> str:
+    production_manifest = _load_metrics_payload(PRODUCTION_ROOT / "production_retrain_manifest.json")
+    manifest_profile = str(production_manifest.get("static_fallback_profile", "") or "").strip()
+    if manifest_profile:
+        return manifest_profile
     manifest = load_strategy_manifest(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST)
     rows = manifest.get("global_deployable_summary_rows")
     if isinstance(rows, list):
@@ -463,6 +476,7 @@ def _build_retrain_command(
     execution_alignment_mode_override: str = "",
     execution_alignment_profile_override: str = "",
     execution_alignment_candidate_profiles_override: str = "",
+    static_fallback_profile_override: str = "",
 ) -> list[str]:
     metrics, cfg = _load_source_config(source_run_dir)
     family_key = _infer_family_key_for_source(source_run_dir, cfg)
@@ -471,7 +485,9 @@ def _build_retrain_command(
         manifest_path=family_epoch_budget_manifest,
         fallback_epochs=int(cfg.get("epochs", 8) or 8),
     )
-    resolved_default_static_profile = _resolve_default_static_execution_profile()
+    resolved_default_static_profile = str(
+        static_fallback_profile_override or _resolve_default_static_execution_profile()
+    ).strip()
     script_path = Path("daily_research/deep_alpha/run_deep_alpha_research.py").resolve()
     cmd: list[str] = [sys.executable, str(script_path)]
 
@@ -869,6 +885,7 @@ def main() -> None:
         execution_alignment_mode_override=str(args.execution_alignment_mode or ""),
         execution_alignment_profile_override=str(args.execution_alignment_profile or ""),
         execution_alignment_candidate_profiles_override=str(args.execution_alignment_candidate_profiles or ""),
+        static_fallback_profile_override=str(args.static_fallback_profile or ""),
     )
     print("production_mode=full_fit_retrain")
     print(f"source_formal_run={source_run_dir}")
@@ -877,7 +894,10 @@ def main() -> None:
     print(f"latest_trainable_date={latest_trainable_date}")
     print(f"internal_monitor_start_date={internal_monitor_start_date}")
     print(f"internal_monitor_days={internal_monitor_days}")
-    print(f"default_static_fallback_profile={_resolve_default_static_execution_profile()}")
+    print(
+        "default_static_fallback_profile="
+        f"{str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip()}"
+    )
     if args.research_objective_mode:
         print(f"override_research_objective_mode={args.research_objective_mode}")
     if args.checkpoint_selection_objective:
@@ -892,6 +912,8 @@ def main() -> None:
         print(f"override_execution_alignment_profile={args.execution_alignment_profile}")
     if args.execution_alignment_candidate_profiles:
         print(f"override_execution_alignment_candidate_profiles={args.execution_alignment_candidate_profiles}")
+    if args.static_fallback_profile:
+        print(f"override_static_fallback_profile={args.static_fallback_profile}")
     subprocess.run(cmd, check=True)
 
     run_dir = (Path("daily_research/output") / experiment_tag).resolve()
@@ -906,7 +928,7 @@ def main() -> None:
         internal_monitor_start_date=internal_monitor_start_date,
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
-        static_fallback_profile=_resolve_default_static_execution_profile(),
+        static_fallback_profile=str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip(),
         strategy_manifest_path=strategy_manifest_path,
         activate_strategy=bool(args.activate_strategy),
     )

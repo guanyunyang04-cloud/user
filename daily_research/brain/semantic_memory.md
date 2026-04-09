@@ -1,9 +1,9 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-06`
+快照日期：`2026-04-09`
 
 ## 1. 项目身份
-- `daily_research` 维护一条面向主板 A 股、以执行后净收益最大为唯一主目标的研究-执行统一链路。
+- `daily_research` 维护一条面向主板 A 股、以执行后净收益最大化为主目标的研究-执行统一链路。
 - 历史过程与时序证据写入 `episodic_memory.md`。
 - 当前判决写入 `working_memory.md`。
 - 日常入口与固定命令写入 `action_system.md`。
@@ -31,45 +31,43 @@
 - formal holdout 负责研究判决。
 - production full-fit 负责默认执行。
 - production full-fit 结果不得回填为 formal 研究证据。
+- 在用户已明确改写目标的前提下，当前默认裁决顺序为“月度收益优先、模型偏短线”；年化与 Sharpe 保留为辅助指标。
 
 ## 4. 当前默认执行语义
 - 当前 active execution strategy 为：
-  - `state_liquidity_listwise_v1_execfirst_profitmax_global_winner`
+  - `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
 - 当前 active manifest 真源为：
   - `daily_research/output/active_execution_strategy.json`
 - 当前默认执行入口为：
   - `daily_research/execution/run_trade_plan.py`
 - 当前默认 production root 为：
   - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
-- 当前默认 execution policy 为：
-  - `regoff_k1_5d_ensemble_native_anchor`
-- 当前 active default 通过 `panel_mode = raw` + 精确 bridge spec 执行，不依赖预先导出的 `execution_aligned` panel。
-- active manifest 显式保存：
-  - `liquidity_pool_name`
-  - `liquidity_pool_size`
-  - `execution_policy_label`
-  - `execution_alignment_selected_profile_spec`
-- 当前“全项目最高”的唯一正式口径为：
-  - `global_deployable_non_capacity_adjusted_v1`
-  - 即同一成本引擎、同一 execution-policy audit 搜索空间下的跨 universe deployable leaderboard
+- 当前统一权重语义为：
+  - `research_raw_target_weight`
+- 当前统一上限语义为：
+  - `follow_research_raw_no_global_cap`
+- 当前 live 默认静态基线为：
+  - `regoff_k2_5d_ensemble_native_anchor`
+- 当前 active default 通过 raw panel 加精确 bridge spec 执行，不依赖预先导出的 `execution_aligned` panel，也不回退到旧的通用 `25% cap` fallback。
+- active manifest 必须显式保存当前 live 执行态，包括：
+  - `effective_live_target_weight_mode`
+  - `effective_live_execution_profile`
+  - `effective_live_execution_bridge_meta`
+  - `effective_live_weight_generation_note`
+  - `monthly_first_*` 裁决字段
 
-## 5. 当前稳定研究结论
-- `state_liquidity_listwise_v1` 是当前 liquid500 active default。
-- liquid500 short-alpha 主线默认 checkpoint objective 仍是：
-  - `primary_annual_return`
-- `primary_monthly_robust_score` 当前只保留为 fresh-run challenger objective，不作为 liquid500 主线默认值。
-- `weak_month_repair_v1` 扩展静态 score-to-weight / bridge 搜索没有翻掉：
-  - `regoff_k1_5d_ensemble_native_anchor`
-  - 因此 liquid500 当前剩余修复方向是 targeted weak-month repair，而不是继续扩大静态桥接集合。
-- simple regime-conditioned execution policy 当前不成立：
-  - leave-window-out formal review 对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败。
-- 显式按 `regoff_k1_5d_ensemble_native_anchor` 做的 fresh production refresh 当前不成立：
-  - 同一 policy 下打不赢当前 production root。
+## 5. 当前稳定研究与执行结论
+- `state_liquidity_listwise_v1` 仍是当前 short-alpha 主线最强 base model。
+- execution-side 当前稳定主线已经切到：
+  - `raw + regoff_k2_5d_ensemble_native_anchor`
+- `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 只保留为历史 targeted repair 候选与观察分支，不再作为当前默认 repair 叙事。
+- broad execution-policy sweep 已停止；后续执行侧升级默认只沿 `month-start / first-week / signal-to-weight / month-trigger / execution` 下钻。
+- 任何 simple regime-conditioned repair，只有在同窗、同成本、同协议、月度优先口径下打赢当前 `k2` 静态基线后，才允许再次进入 promotion 讨论。
 - `dynamic_graph_no_priors` 是当前 rolling liquid800 / mainboard monthly execution-first formal winner。
 - 当前默认不再把 industry/style priors 当作稳定增益。
-- `dynamic_graph_no_priors` 已补 liquid500 同宇宙 challenger formal，但当前仍不超过 liquid500 short-alpha 主线，因此不是 liquid500 active-default candidate。
+- `dynamic_graph_no_priors` 已补 liquid500 同宇宙 challenger formal，但当前仍不超过 short-alpha 主线，因此不是当前 active-default candidate。
 - `structure_context_only` 保留为 raw 架构 challenger，不是当前 execution-upgrade 答案。
-- `encoder_transformer_v1` 是当前 high-upside but unstable 的主要 architecture 候选。
+- `encoder_transformer_v1` 仍是 high-upside but unstable 的主要 architecture 候选。
 - `graph_off_plain` 已做预算补齐复核，但仍未通过 liquid500 challenger gate，只保留为 monitored architecture branch。
 
 ## 6. 训练预算与月度协议语义
@@ -91,7 +89,7 @@
   - `primary_research_monthly_objectives.json`
 
 ## 7. 结果解释边界
-- liquid500 默认执行 winner 与 liquid800 / mainboard 研究 winner 仍需分开叙述。
+- short-alpha 默认执行 winner 与 liquid800 / mainboard 研究 winner 仍需分开叙述。
 - 不同股票池、不同成本口径、不同 gate 协议下的结果，不得直接混成单一“全项目最高”结论。
 - 如果用户明确要“当前全项目最高净收益”，必须先进入：
   - 同一成本引擎
@@ -106,3 +104,4 @@
 - `procedural_memory.md` 只保留可复用方法学规则。
 - `environment_model.md` 只保留环境、解释器、工具与编码口径。
 - `action_system.md` 只保留高频操作入口。
+- `episodic_memory.md` 只保留历史过程与原始证据。

@@ -1,4 +1,4 @@
-# Main Environment Model
+# 主脑环境模型
 
 ## 1. 根环境
 - 工作区根目录：`H:\new_tdx64\PYPlugins\user`
@@ -31,6 +31,7 @@
 
 ## 4. 编码与读取口径
 - 脑文件统一使用 UTF-8
+- 主脑与分脑 brain 文档默认使用简体中文；终端运行输出默认使用英文
 - Windows 下读取脑文件时，优先显式使用：
   - `Get-Content -Encoding UTF8 <path>`
 

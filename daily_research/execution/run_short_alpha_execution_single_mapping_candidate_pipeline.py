@@ -219,6 +219,13 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _resolve_static_profile_name(static_profile: str, fallback_live_meta: dict[str, Any]) -> str:
+    meta_profile = str(fallback_live_meta.get("static_fallback_profile", "")).strip()
+    if meta_profile:
+        return meta_profile
+    return str(static_profile or DEFAULT_STATIC_PROFILE).strip() or DEFAULT_STATIC_PROFILE
+
+
 def _resolve_execution_profile_payload(profile_name: str) -> dict[str, Any]:
     normalized = str(profile_name or "").strip()
     if not normalized:
@@ -309,6 +316,7 @@ def _refresh_live_outputs(
     auxiliary_score_panel_path = output_dir / "aux_reference_score_panel.csv"
     fallback_live_meta_path = fallback_live_target_weight_panel.with_name("static_fallback_daily_live_target_weight_meta.json")
     fallback_live_meta = _load_json_file(fallback_live_meta_path)
+    resolved_static_profile = _resolve_static_profile_name(static_profile, fallback_live_meta)
     selected_score_source = Path()
     selected_score_note = ""
     weight_generation_note = ""
@@ -330,8 +338,16 @@ def _refresh_live_outputs(
             index_label="date",
             encoding="utf-8-sig",
         )
+        non_triggered_choice = ""
+        if "trigger_key" in recent_choices.columns and "selected_profile" in recent_choices.columns:
+            non_triggered = recent_choices.loc[
+                ~recent_choices["trigger_key"].astype(str).isin(set(mapping.keys())),
+                "selected_profile",
+            ]
+            non_triggered_choice = str(non_triggered.iloc[-1]).strip() if not non_triggered.empty else ""
+        audit_static_profile = non_triggered_choice or str(static_profile).strip() or DEFAULT_STATIC_PROFILE
         recent_static_choice = recent_choices.copy()
-        recent_static_choice["selected_profile"] = str(static_profile)
+        recent_static_choice["selected_profile"] = audit_static_profile
         recent_static_panel = _build_hybrid_target_weight_panel(recent_window, recent_static_choice)
         recent_static_panel.to_csv(
             candidate_panels_dir / "recent_static_target_weight_panel.csv",
@@ -353,16 +369,21 @@ def _refresh_live_outputs(
             encoding="utf-8-sig",
         )
         latest = recent_choices.iloc[-1].to_dict()
-        live_triggered = recent_choices["selected_profile"].astype(str).ne(str(static_profile))
+        latest_trigger_key = str(latest.get("trigger_key", ""))
+        latest_selected_profile = str(mapping.get(latest_trigger_key, resolved_static_profile))
+        if "trigger_key" in recent_choices.columns:
+            live_triggered = recent_choices["trigger_key"].astype(str).isin(set(mapping.keys()))
+        else:
+            live_triggered = recent_choices["selected_profile"].astype(str).ne(audit_static_profile)
         live_monitor: dict[str, Any] = {
             "mapping": mapping,
             "mapping_label": mapping_label,
             "trigger_mode": trigger_mode,
             "latest_month": str(latest.get("month", "")),
-            "latest_trigger_key": str(latest.get("trigger_key", "")),
+            "latest_trigger_key": latest_trigger_key,
             "latest_regime": str(latest.get("month_start_regime", "")),
-            "latest_selected_profile": str(latest.get("selected_profile", "")),
-            "candidate_active_now": bool(str(latest.get("selected_profile", "")) != str(static_profile)),
+            "latest_selected_profile": latest_selected_profile,
+            "candidate_active_now": bool(latest_trigger_key in mapping),
             "live_month_count": int(len(recent_choices)),
             "live_triggered_month_count": int(live_triggered.sum()),
             "live_trigger_coverage_ratio": float(live_triggered.mean()) if len(recent_choices) else 0.0,
@@ -382,7 +403,9 @@ def _refresh_live_outputs(
                 recent_static_score_panel.to_csv(live_score_panel_path, index_label="date", encoding="utf-8-sig")
                 selected_score_source = recent_static_score_panel_path
                 selected_score_note = "Live score panel uses the static fallback profile's pre-weight raw score panel reconstructed from the recent audit root."
-            effective_profile_payload = _resolve_execution_profile_payload(str(live_monitor.get("latest_selected_profile", "")))
+            effective_profile_payload = _resolve_execution_profile_payload(
+                str(fallback_live_meta.get("static_fallback_profile", "") or live_monitor.get("latest_selected_profile", ""))
+            )
             effective_bridge_meta = (
                 dict(fallback_live_meta.get("bridge_meta", {}))
                 if isinstance(fallback_live_meta.get("bridge_meta"), dict)
@@ -445,7 +468,13 @@ def _refresh_live_outputs(
             _copy_csv(fallback_live_score_panel, live_score_panel_path)
             selected_score_source = fallback_live_score_panel
             selected_score_note = "Live score panel uses the fallback profile's pre-weight raw score panel."
-        effective_profile_payload = _resolve_execution_profile_payload(str(live_monitor.get("latest_selected_profile", "") or static_profile))
+        effective_profile_payload = _resolve_execution_profile_payload(
+            str(
+                fallback_live_meta.get("static_fallback_profile", "")
+                or live_monitor.get("latest_selected_profile", "")
+                or resolved_static_profile
+            )
+        )
         effective_bridge_meta = (
             dict(fallback_live_meta.get("bridge_meta", {}))
             if isinstance(fallback_live_meta.get("bridge_meta"), dict)
@@ -570,6 +599,10 @@ def main() -> None:
     recent_audit_root = resolve_recent_execution_audit_root(args.recent_audit_root)
     fallback_live_target_weight_panel = Path(str(args.fallback_live_target_weight_panel_csv or "")).resolve()
     fallback_live_score_panel = Path(str(args.fallback_live_score_panel_csv or "")).resolve()
+    resolved_static_profile = _resolve_static_profile_name(
+        str(args.static_profile),
+        _load_json_file(fallback_live_target_weight_panel.with_name("static_fallback_daily_live_target_weight_meta.json")),
+    )
     trigger_summary = _empty_trigger_summary()
     fullbridge_summary_path = output_dir / "fullbridge_h2h" / "summary.md"
 
@@ -595,12 +628,12 @@ def main() -> None:
                     if month_choice.empty:
                         raise RuntimeError(f"Review root is missing month choices for {window.window_key}")
                     audit_monthly = _load_window_audit_monthly(window)
-                    month_outcomes = _build_month_outcomes(audit_monthly, month_choice, static_profile=str(args.static_profile))
+                    month_outcomes = _build_month_outcomes(audit_monthly, month_choice, static_profile=resolved_static_profile)
                     outcome_rows.append(month_outcomes)
                     candidate_panel = _build_hybrid_target_weight_panel(window, month_choice)
                     candidate_panels.append(candidate_panel)
                     static_choice = month_choice.copy()
-                    static_choice["selected_profile"] = str(args.static_profile)
+                    static_choice["selected_profile"] = str(resolved_static_profile)
                     static_panels.append(_build_hybrid_target_weight_panel(window, static_choice))
 
             with progress.stage("Write candidate panels", output_dir.name):
@@ -631,7 +664,7 @@ def main() -> None:
                     end_date=formal_end,
                     output_dir=output_dir,
                     experiment_tag="formal_replays/static_reference",
-                    candidate_label=f"static_{args.static_profile}",
+                    candidate_label=f"static_{resolved_static_profile}",
                 )
                 _run_recent_h2h(
                     python_executable=str(args.python_executable),
@@ -639,7 +672,7 @@ def main() -> None:
                     static_run_dir=static_run_dir,
                     output_dir=output_dir / "fullbridge_h2h",
                     label_a=str(args.candidate_label),
-                    label_b=f"static_{args.static_profile}".replace("_ensemble_native_anchor", ""),
+                    label_b=f"static_{resolved_static_profile}".replace("_ensemble_native_anchor", ""),
                     bridge_start=str(args.bridge_start),
                     weak_start=str(args.weak_start),
                 )
@@ -723,7 +756,7 @@ def main() -> None:
                 recent_choices=recent_choices,
                 recent_gate_summary=recent_gate_summary,
                 recent_audit_root=recent_audit_root,
-                static_profile=str(args.static_profile),
+                static_profile=resolved_static_profile,
                 fallback_live_target_weight_panel=fallback_live_target_weight_panel,
                 fallback_live_score_panel=fallback_live_score_panel,
             )
@@ -736,7 +769,7 @@ def main() -> None:
                 mapping_label=mapping_label,
                 trigger_mode=trigger_mode,
                 candidate_label=str(args.candidate_label),
-                static_profile=str(args.static_profile),
+                static_profile=resolved_static_profile,
                 trigger_summary=trigger_summary,
                 live_monitor=live_monitor,
                 fullbridge_summary_path=fullbridge_summary_path,

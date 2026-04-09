@@ -22,7 +22,7 @@ DEFAULT_AUDIT_ROOTS = (
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20240301_20250317_20260405_r1",
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20260405_r1",
 )
-DEFAULT_STATIC_PROFILE = "regoff_k1_5d_ensemble_native_anchor"
+DEFAULT_STATIC_PROFILE = "regoff_k2_5d_ensemble_native_anchor"
 
 
 @dataclass(frozen=True)

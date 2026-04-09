@@ -14,6 +14,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.execution.output_root_resolver import resolve_recent_execution_audit_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
@@ -27,8 +28,7 @@ DEFAULT_AUDIT_ROOTS = (
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20240301_20250317_20260405_r1",
     OUTPUT_ROOT / "short_alpha_formal_execution_policy_audit_20260405_r1",
 )
-DEFAULT_RECENT_AUDIT_ROOT = OUTPUT_ROOT / "short_alpha_production_execution_policy_audit_20260405_r1"
-DEFAULT_STATIC_PROFILE = "regoff_k1_5d_ensemble_native_anchor"
+DEFAULT_STATIC_PROFILE = "regoff_k2_5d_ensemble_native_anchor"
 
 
 @dataclass(frozen=True)
@@ -88,8 +88,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--recent-audit-root",
-        default=str(DEFAULT_RECENT_AUDIT_ROOT),
-        help="Recent execution-policy audit root used for the realistic replay gate.",
+        default="",
+        help="Recent execution-policy audit root used for the realistic replay gate. Defaults to the latest audit root.",
     )
     parser.add_argument("--run-recent-gate", action="store_true")
     parser.add_argument("--recent-bridge-start", default="2025-03-18")
@@ -641,6 +641,30 @@ def _load_static_metrics(window: AuditWindow, static_profile: str) -> tuple[dict
     raise FileNotFoundError(f"Static profile {static_profile} not found under {window.audit_root}")
 
 
+def _replay_static_window(
+    *,
+    window: AuditWindow,
+    static_profile: str,
+    static_source_run_dir: Path,
+    python_executable: str,
+    output_dir: Path,
+    experiment_tag: str,
+) -> tuple[dict[str, Any], Path]:
+    static_panel_path = static_source_run_dir / "aligned_daily_target_weight_panel.csv"
+    if not static_panel_path.exists():
+        raise FileNotFoundError(f"Static aligned target-weight panel is missing: {static_panel_path}")
+    static_replay_dir = _run_replay(
+        python_executable=python_executable,
+        hybrid_panel_path=static_panel_path,
+        start_date=window.start_date,
+        end_date=window.end_date,
+        output_dir=output_dir,
+        experiment_tag=experiment_tag,
+        candidate_label=f"static_{static_profile}_{window.window_key}",
+    )
+    return _load_json(static_replay_dir / "metrics.json"), static_replay_dir
+
+
 def _derive_signal_shape(nonzero_weight_count: int) -> str:
     if nonzero_weight_count <= 0:
         return "zero"
@@ -1060,7 +1084,15 @@ def main() -> None:
         test_month_meta.insert(1, "selected_plan_label", _mapping_label(best_mapping))
         month_choice_exports.append(test_month_meta.copy())
 
-        static_metrics, static_run_dir = _load_static_metrics(window, static_profile)
+        _, static_source_run_dir = _load_static_metrics(window, static_profile)
+        static_metrics, static_run_dir = _replay_static_window(
+            window=window,
+            static_profile=static_profile,
+            static_source_run_dir=static_source_run_dir,
+            python_executable=str(args.python_executable),
+            output_dir=output_dir,
+            experiment_tag=f"static_replays/{window.window_key}",
+        )
         if best_mapping:
             hybrid_panel = _build_hybrid_target_weight_panel(window, test_month_meta)
             hybrid_panel_path = output_dir / f"hybrid_target_weight_panel_{window.window_key}.csv"
@@ -1101,6 +1133,7 @@ def main() -> None:
                 "wins_excess_sharpe": bool(float(targeted_metrics.get("excess_sharpe", 0.0) or 0.0) > float(static_metrics.get("excess_sharpe", 0.0) or 0.0)),
                 "targeted_run_dir": str(replay_run_dir),
                 "static_run_dir": str(static_run_dir),
+                "static_source_run_dir": str(static_source_run_dir),
             }
         )
 
@@ -1159,12 +1192,20 @@ def main() -> None:
 
     recent_gate_summary: dict[str, Any] | None = None
     if bool(args.run_recent_gate):
-        recent_audit_root = Path(str(args.recent_audit_root or "")).resolve()
+        recent_audit_root = resolve_recent_execution_audit_root(str(args.recent_audit_root or ""))
         if recent_audit_root.exists():
             recent_window = _discover_window(recent_audit_root)
             recent_monthly = _load_window_audit_monthly(recent_window)
-            static_metrics, recent_static_run_dir = _load_static_metrics(recent_window, static_profile)
-            recent_diagnostics = _load_month_start_signal_diagnostics(recent_static_run_dir)
+            _, recent_static_source_run_dir = _load_static_metrics(recent_window, static_profile)
+            static_metrics, recent_static_run_dir = _replay_static_window(
+                window=recent_window,
+                static_profile=static_profile,
+                static_source_run_dir=recent_static_source_run_dir,
+                python_executable=str(args.python_executable),
+                output_dir=output_dir,
+                experiment_tag=f"recent_static_replays/{recent_window.window_key}",
+            )
+            recent_diagnostics = _load_month_start_signal_diagnostics(recent_static_source_run_dir)
             recent_diagnostics.to_csv(output_dir / "recent_month_start_signal_diagnostics.csv", index=False, encoding="utf-8-sig")
             recent_monthly = recent_monthly.merge(recent_diagnostics[diagnostic_cols], on="month", how="left")
             recent_monthly = _apply_trigger_key(recent_monthly, trigger_mode=str(args.trigger_mode))
@@ -1222,6 +1263,7 @@ def main() -> None:
                 - float(static_metrics.get("excess_sharpe", 0.0) or 0.0),
                 "targeted_run_dir": str(recent_replay_dir),
                 "static_run_dir": str(recent_static_run_dir),
+                "static_source_run_dir": str(recent_static_source_run_dir),
             }
             if recent_replay_dir != recent_static_run_dir:
                 recent_h2h_dir = output_dir / "recent_h2h_targeted_vs_static"
