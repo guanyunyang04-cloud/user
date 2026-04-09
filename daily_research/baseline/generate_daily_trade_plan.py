@@ -1454,13 +1454,13 @@ def _write_trade_plan_txt(
                         bridge_parts.append(f"topk={effective_live_bridge_meta.get('target_weight_top_k')}")
                     if bridge_parts:
                         live_parts.append("bridge=" + "/".join(str(part) for part in bridge_parts if str(part)))
-                lines.append("褰撳墠鏈夋晥鎵ц鎬? " + " | ".join(live_parts))
+                lines.append("当前有效执行态: " + " | ".join(live_parts))
             if effective_live_execution_profile_description:
-                lines.append(f"鏈夋晥鎵ц璇存槑: {effective_live_execution_profile_description}")
+                lines.append(f"有效执行说明: {effective_live_execution_profile_description}")
             if effective_live_score_note:
-                lines.append(f"鍒嗘暟璇存槑: {effective_live_score_note}")
+                lines.append(f"分数说明: {effective_live_score_note}")
             if effective_live_weight_generation_note:
-                lines.append(f"鏉冮噸鐢熸垚璇存槑: {effective_live_weight_generation_note}")
+                lines.append(f"权重生成说明: {effective_live_weight_generation_note}")
     if model_info.get("trained_at"):
         lines.append(f"模型训练时间: {model_info['trained_at']}")
     if model_info.get("train_end"):

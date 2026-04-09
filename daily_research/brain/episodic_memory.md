@@ -11216,3 +11216,95 @@ position,000001.SZ,1200,12.38,
   - 把“研究环”和“执行环”的闭环拆开，避免其它 agent 再把 formal 与 production 混报
   - 在 `project_consistency_check.py` 里增加对应守卫，避免后续文档回退
 - 这次没有修改策略结论和生产默认值，只做治理层与分脑层统一。
+
+## 2026-04-09 - strongest-model gate 重新裁决完成
+- 新增 strongest-model verdict 工具：`daily_research/tools/refresh_strongest_model_verdict.py`
+- verdict 根：`daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`
+- 当前 winner gate 固定为：
+  - `liquid500`
+  - `execution_first`
+  - `formal 3 windows`
+  - `primary_monthly_robust_score`
+  - `window_count = 3`
+- 机器结果：
+  - winner：`short_expert_monthly_v1`
+  - mean excess annual `41.45%`
+  - mean excess Sharpe `2.411`
+  - mean positive-month ratio `72.22%`
+  - worst month excess `-4.06%`
+- runner-up：
+  - `state_liquidity_listwise_v1`
+  - mean excess annual `33.78%`
+  - mean excess Sharpe `1.985`
+- reference only：
+  - `state_liquidity_listwise_v1__annual_checkpoint_reference = 33.13% / 2.348`
+  - `dynamic_graph_no_priors__cross_family_reference = 33.21% / 1.956`
+- 结论收口：
+  - 当前 strongest research model 已改记为 `short_expert_monthly_v1`
+  - `state_liquidity_listwise_v1` 保留为 strongest stable base model
+  - 当前 live 默认链路暂不变，仍由 `state_liquidity_listwise_v1 + regoff_k2_5d_ensemble_native_anchor` 承担
+  - 下一步应进入 `short_expert_monthly_v1 -> production full-fit -> recent/live gate -> execution audit` 的晋升闭环，而不是直接静默 promotion
+
+## 2026-04-09 - strongest-model 协议改写为“formal 每窗最新 + recent 必报 + 研究 winner 可直达执行默认”
+- 用户新增三条高优先级规矩：
+  - formal 验证时，每个窗口都要使用该窗口起点前最新可标注数据训练的当时最新模型
+  - recent 验证不能缺席
+  - 研究出来的最强模型可以直接作为执行默认
+- 这轮同步修改了：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/brain_architecture.md`
+  - `daily_research/tools/project_consistency_check.py`
+  - `daily_research/tools/refresh_strongest_model_verdict.py`
+- 新口径要点：
+  - strongest-model 不再允许只讲 formal、不讲 recent
+  - strongest-model 不再额外卡一层独立 promotion 哲学流程
+  - `production full-fit` 现在被解释为“把 strongest winner 物化成当前默认执行”，而不是“只有 execution 才能用最新模型”的唯一例外
+
+## 2026-04-09 - recent 定义纠偏为最近一年 12 个月
+- 用户再次明确：`recent` 不是一个月短监控切片，而是最近一年 `12` 个月窗口。
+- 这轮同步修正了：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/tools/project_consistency_check.py`
+- 当前口径改为：
+  - recent 默认按截至当前评估时点回看最近 `12` 个月
+  - 以当前 latest completed date `2026-04-08` 计，recent 应理解为 `2025-04-09 -> 2026-04-08`
+  - 先前用 `2026-03-05 -> 2026-04-08` 的短窗说法属于旧口径，不能再冒充 current recent 定义
+
+## 2026-04-09 - strongest-model recent 一年补齐并完成 short_expert 默认接管
+- 这轮先修了 `short_expert_monthly_v1` 的 live/recent 导出兼容性：
+  - `daily_research/deep_alpha/export_live_panels_from_run.py`
+  - 关键修正是把 `short_alpha_features` 与 breakout-event 目标配置纳入 cache / target 解析，并按 artifact 里的 `feature_names / target_names` 重排导出面板
+  - 修正后，`short_expert_monthly_v1` 已能顺利导出 live panel，不再报 `Unexpected feature dim 39, expected 59`
+- strongest-model 工具升级成 `formal + recent` 一体裁决：
+  - `daily_research/tools/refresh_strongest_model_verdict.py`
+  - strongest-model verdict 根仍是 `daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`
+  - recent 窗口现在实际按当前 latest completed date `2026-04-09` 回看 `2025-04-10 -> 2026-04-09`
+- 机器结果：
+  - formal strongest research model：`short_expert_monthly_v1`
+  - recent 一年 companion winner：`state_liquidity_listwise_v1`
+  - `state_liquidity_listwise_v1` recent excess annual `40.71%`、recent excess Sharpe `2.194`
+  - `short_expert_monthly_v1` recent excess annual `20.11%`、recent excess Sharpe `1.154`
+- 按用户最新协议，研究 strongest winner 允许直接作为执行默认，因此本轮没有停在“结论层”，而是继续完成 latest-data 默认物化：
+  - 修了 `daily_research/execution/update_default_candidate_production.py`
+  - 修了 `daily_research/execution/strategy_manifest.py`
+  - `production full-fit` 已落到 `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260409_r1`
+  - `production root` 仍为 `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - 当前 `launch_cutoff_date = 2026-04-09`
+  - 当前 production 选出的 execution profile 仍是 `regoff_k2_5d_ensemble_native_anchor`
+- active default 已切换为：
+  - strategy：`deep_alpha_short_alpha_execalign_production_default`
+  - candidate label：`short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - `daily_research/output/active_execution_strategy.json` 已同步到新的 production root
+  - `daily_research/execution/output/latest_trade_plan.txt` 已重刷到新的 default source
+- 这轮也顺手补齐了 production promotion 后的 manifest 可观测性：
+  - active manifest 现在由 production promotion 直接写出 `score_panel_role`
+  - 并写出 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_execution_bridge_meta / effective_live_weight_generation_note`
+  - 避免 strongest winner 接管后，trade plan 与 consistency guard 继续读到空白 live 解释字段

@@ -85,6 +85,71 @@ def resolve_panel_filenames(panel_mode: str) -> tuple[str, str]:
     )
 
 
+def _load_optional_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_effective_live_metadata(
+    *,
+    production_root: Path,
+    resolved_panel_mode: str,
+    execution_policy_label: str,
+    execution_profile_spec: dict[str, Any],
+    bridge_meta: dict[str, Any],
+) -> dict[str, Any]:
+    score_reference_path = production_root / "daily_live_score_reference.json"
+    static_fallback_meta = _load_optional_json(
+        production_root / "static_fallback_daily_live_target_weight_meta.json"
+    )
+    effective_bridge_meta = dict(bridge_meta)
+    if not effective_bridge_meta and isinstance(static_fallback_meta.get("bridge_meta"), dict):
+        effective_bridge_meta = dict(static_fallback_meta.get("bridge_meta", {}))
+
+    profile_description = str(
+        execution_profile_spec.get("description", "")
+        or execution_profile_spec.get("profile_description", "")
+        or static_fallback_meta.get("static_fallback_profile_description", "")
+        or ""
+    ).strip()
+
+    if resolved_panel_mode == "execution_aligned":
+        weight_generation_note = (
+            "Current live weights come from the promoted production full-fit "
+            "execution-aligned live target-weight panel; the displayed pre-weight "
+            "score is the signal-day execution-preweight score only, so it does not "
+            "need to be monotonic with final weight."
+        )
+        score_note = (
+            "Displayed score is the execution pre-weight score from the promoted "
+            "production full-fit live panel."
+        )
+        live_mode = "execution_aligned_live"
+    else:
+        weight_generation_note = str(
+            static_fallback_meta.get("target_weight_cap_note", "")
+            or "Current live weights come from the promoted production live panel."
+        ).strip()
+        score_note = "Displayed score is the pre-weight score associated with the current live target-weight panel."
+        live_mode = "raw_live_panel"
+
+    return {
+        "score_panel_role": "execution_preweight_score_panel",
+        "score_reference_metadata_json": str(score_reference_path.resolve()) if score_reference_path.exists() else "",
+        "effective_live_target_weight_mode": live_mode,
+        "effective_live_execution_profile": str(execution_policy_label or "").strip(),
+        "effective_live_execution_profile_description": profile_description,
+        "effective_live_execution_bridge_meta": effective_bridge_meta,
+        "effective_live_score_note": score_note,
+        "effective_live_weight_generation_note": weight_generation_note,
+    }
+
+
 def build_active_strategy_manifest(
     *,
     source_run_dir: Path,
@@ -166,6 +231,13 @@ def build_active_strategy_manifest(
     source_panel_origin = "formal_source" if source_panel_root == source_run_dir else "production_fallback"
     source_panel_metrics = source_metrics if source_panel_origin == "formal_source" else strategy_metrics
     production_manifest_json = production_root / "production_retrain_manifest.json"
+    effective_live_metadata = _build_effective_live_metadata(
+        production_root=production_root,
+        resolved_panel_mode=resolved_panel_mode,
+        execution_policy_label=execution_policy_label,
+        execution_profile_spec=execution_profile_spec if isinstance(execution_profile_spec, dict) else {},
+        bridge_meta=bridge_meta,
+    )
     return {
         "strategy_name": str(strategy_name or source_run_dir.name),
         "candidate_label": candidate_label,
@@ -212,6 +284,8 @@ def build_active_strategy_manifest(
         "execution_alignment_mode": str(strategy_metrics.get("execution_alignment_mode", "") or ""),
         "execution_alignment_objective": str(strategy_metrics.get("execution_alignment_objective", "") or ""),
         "execution_alignment_profile": execution_profile,
+        "score_panel_role": str(effective_live_metadata.get("score_panel_role", "") or ""),
+        "score_reference_metadata_json": str(effective_live_metadata.get("score_reference_metadata_json", "") or ""),
         "execution_policy_label": execution_policy_label,
         "execution_alignment_selected_profile_spec": execution_profile_spec,
         "execution_alignment_selected_bridge_meta": (
@@ -222,6 +296,24 @@ def build_active_strategy_manifest(
                 if isinstance(source_metrics.get("execution_alignment_selected_bridge_meta"), dict)
                 else {}
             )
+        ),
+        "effective_live_target_weight_mode": str(
+            effective_live_metadata.get("effective_live_target_weight_mode", "") or ""
+        ),
+        "effective_live_execution_profile": str(
+            effective_live_metadata.get("effective_live_execution_profile", "") or ""
+        ),
+        "effective_live_execution_profile_description": str(
+            effective_live_metadata.get("effective_live_execution_profile_description", "") or ""
+        ),
+        "effective_live_execution_bridge_meta": (
+            effective_live_metadata.get("effective_live_execution_bridge_meta")
+            if isinstance(effective_live_metadata.get("effective_live_execution_bridge_meta"), dict)
+            else {}
+        ),
+        "effective_live_score_note": str(effective_live_metadata.get("effective_live_score_note", "") or ""),
+        "effective_live_weight_generation_note": str(
+            effective_live_metadata.get("effective_live_weight_generation_note", "") or ""
         ),
         "primary_research_backtest_label": str(strategy_metrics.get("primary_research_backtest_label", "") or ""),
         "research_objective_mode": str(strategy_metrics.get("research_objective_mode", "") or ""),

@@ -362,6 +362,49 @@ def _materialize_static_fallback_panel(
     )
 
 
+def _write_execution_aligned_score_reference(*, production_root: Path) -> None:
+    metrics = _load_metrics_payload(production_root / "metrics.json")
+    static_meta = _load_metrics_payload(production_root / "static_fallback_daily_live_target_weight_meta.json")
+    execution_profile = str(metrics.get("execution_alignment_profile", "") or "").strip()
+    execution_profile_spec = (
+        dict(metrics.get("execution_alignment_selected_profile_spec", {}))
+        if isinstance(metrics.get("execution_alignment_selected_profile_spec"), dict)
+        else {}
+    )
+    effective_bridge_meta = (
+        dict(metrics.get("execution_alignment_selected_bridge_meta", {}))
+        if isinstance(metrics.get("execution_alignment_selected_bridge_meta"), dict)
+        else {}
+    )
+    if not effective_bridge_meta and isinstance(static_meta.get("bridge_meta"), dict):
+        effective_bridge_meta = dict(static_meta.get("bridge_meta", {}))
+    effective_profile_description = str(
+        execution_profile_spec.get("description", "")
+        or execution_profile_spec.get("profile_description", "")
+        or static_meta.get("static_fallback_profile_description", "")
+        or ""
+    ).strip()
+    payload = {
+        "role": "execution_preweight_score_panel",
+        "effective_execution_profile": execution_profile,
+        "effective_execution_profile_description": effective_profile_description,
+        "latest_selected_profile": execution_profile,
+        "live_target_weight_mode": "execution_aligned_live",
+        "effective_execution_bridge_meta": effective_bridge_meta,
+        "note": "Displayed score is the execution pre-weight score from the promoted production full-fit live panel.",
+        "weight_generation_note": (
+            "Current live weights come from the promoted production full-fit "
+            "execution-aligned live target-weight panel; the displayed pre-weight "
+            "score is the signal-day execution-preweight score only, so it does not "
+            "need to be monotonic with final weight."
+        ),
+    }
+    (production_root / "daily_live_score_reference.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _load_universe_for_source(cfg: research_main.DeepAlphaConfig, args: SimpleNamespace) -> list[str]:
     stocks_file = args.stocks_file or None
     universe = research_main.load_stocks_from_file(stocks_file) if stocks_file else []
@@ -432,6 +475,9 @@ def _resolve_training_dates(
             )
         df_dict = research_main.subset_df_dict_to_stocks(df_dict, rolling_union)
     close = df_dict["Close"]
+    target_names = list(metrics.get("target_names", []) or [])
+    breakout_event_task = any(str(name).startswith("event_breakout_") for name in target_names)
+    clean_breakout_event_task = any(str(name).startswith("event_clean_breakout_") for name in target_names)
     target_frames = research_main.build_targets(
         close,
         benchmark_close,
@@ -439,6 +485,15 @@ def _resolve_training_dates(
         open_df=df_dict["Open"],
         benchmark_open=benchmark_open,
         execution_mode="next_open",
+        breakout_event_horizon=int(metrics.get("breakout_event_horizon", getattr(cfg, "breakout_event_horizon", 5)) or 5),
+        breakout_event_threshold=float(
+            metrics.get("breakout_event_threshold", getattr(cfg, "breakout_event_threshold", 0.08)) or 0.08
+        ),
+        breakout_event_pullback_limit=float(
+            metrics.get("breakout_event_pullback_limit", getattr(cfg, "breakout_event_pullback_limit", 0.03)) or 0.03
+        ),
+        breakout_event_task=breakout_event_task,
+        clean_breakout_event_task=clean_breakout_event_task,
     )
 
     valid_mask: pd.DataFrame | None = None
@@ -582,6 +637,28 @@ def _build_retrain_command(
     _append_arg(cmd, "--dynamic-graph-temperature", cfg.get("dynamic_graph_temperature", 0.35))
     _append_arg(cmd, "--dynamic-graph-industry-boost", cfg.get("dynamic_graph_industry_boost", 0.15))
     _append_arg(cmd, "--dynamic-graph-style-boost", cfg.get("dynamic_graph_style_boost", 0.05))
+    _append_flag(cmd, "--short-alpha-features", bool(metrics.get("short_alpha_features", cfg.get("short_alpha_features", False))))
+    _append_arg(cmd, "--breakout-event-horizon", metrics.get("breakout_event_horizon", cfg.get("breakout_event_horizon", 5)))
+    _append_arg(
+        cmd,
+        "--breakout-event-threshold",
+        metrics.get("breakout_event_threshold", cfg.get("breakout_event_threshold", 0.08)),
+    )
+    _append_arg(
+        cmd,
+        "--breakout-event-pullback-limit",
+        metrics.get("breakout_event_pullback_limit", cfg.get("breakout_event_pullback_limit", 0.03)),
+    )
+    _append_arg(
+        cmd,
+        "--breakout-event-loss-weight",
+        metrics.get("breakout_event_loss_weight", cfg.get("breakout_event_loss_weight", 0.0)),
+    )
+    _append_arg(
+        cmd,
+        "--clean-breakout-event-loss-weight",
+        metrics.get("clean_breakout_event_loss_weight", cfg.get("clean_breakout_event_loss_weight", 0.0)),
+    )
     _append_arg(cmd, "--min-adv20", cfg.get("min_adv20", 50_000.0))
     _append_arg(cmd, "--min-price", cfg.get("min_price", 2.0))
     _append_arg(cmd, "--max-price", cfg.get("max_price", 300.0))
@@ -621,16 +698,15 @@ def _build_retrain_command(
     ).strip()
     execution_alignment_profile = str(
         execution_alignment_profile_override
-        or resolved_default_static_profile
         or metrics.get("execution_alignment_profile", "")
         or ""
     ).strip()
+    if not execution_alignment_profile and research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE:
+        execution_alignment_profile = resolved_default_static_profile
     execution_alignment_candidate_profiles = _format_name_list(
         execution_alignment_candidate_profiles_override or metrics.get("execution_alignment_candidate_profiles"),
         fallback=DEFAULT_AUTO_PROFILE_NAMES,
     )
-    if research_objective_mode == DEFAULT_RESEARCH_OBJECTIVE_MODE and execution_alignment_profile:
-        execution_alignment_mode = "profile"
     if execution_alignment_mode != "off":
         _append_arg(cmd, "--execution-alignment-mode", execution_alignment_mode)
         _append_arg(cmd, "--execution-alignment-objective", execution_alignment_objective)
@@ -809,6 +885,7 @@ def _sync_production_root(
         production_root=production_root,
         static_profile=resolved_static_fallback_profile,
     )
+    _write_execution_aligned_score_reference(production_root=production_root)
     _write_production_manifest(
         production_root=production_root,
         source_run_dir=source_run_dir,

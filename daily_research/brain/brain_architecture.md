@@ -26,7 +26,7 @@
 ## 3. 模块职责
 - `semantic_memory.md`
   - 只写稳定事实、固定边界、长期有效语义
-  - 尤其负责锁定 formal / recent / live 的定义，以及研究模型与执行模型的边界
+  - 尤其负责锁定 formal / recent / live 的定义，以及“formal 每窗最新模型 + recent 必报 + strongest model 可直达执行默认”的硬协议
 - `project_map.md`
   - 只写项目结构、主线地图、决策闭环、当前瓶颈
   - 尤其负责把研究环和执行环的关系讲清楚

@@ -395,11 +395,13 @@ def _check_execution_pipeline_consistency(failures: list[CheckResult]) -> None:
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
         "daily_research/brain/semantic_memory.md": (
-            "研究模型只允许使用 formal 评估开始前一天及更早的可标注数据",
-            "最近 `12` 个自然月",
-            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
-            "formal = 研究保留评估窗",
-            "recent = live 监控切片",
+            "formal 验证采用滚动窗口协议",
+            "每个 formal 窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型",
+            "recent 验证是研究闭环必备伴随证据",
+            "研究最强模型默认可以直接作为执行默认",
+            "最终写入默认执行的产物",
+            "formal = 滚动 formal 评估窗",
+            "recent = 截至当前评估时点的最近一年 12 个月窗口",
             "live = 当前生产执行语义与面板",
         ),
         "daily_research/brain/working_memory.md": (
@@ -408,8 +410,10 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "32",
             "最高优先级",
             "2026-04-09",
-            "研究模型协议已经锁死",
-            "当前 recent/live 监控窗口不是“最近一年”",
+            "formal 验证采用滚动窗口",
+            "recent 验证现在是 strongest-model research verdict 的必备伴随证据",
+            "latest-data `production full-fit + highest family budget`",
+            "当前 recent 窗口按最近一年 `12` 个月定义",
         ),
         "daily_research/brain/procedural_memory.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -417,15 +421,18 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "strict resume",
             "GPU",
             "最高优先级",
-            "研究模型只允许使用 formal 评估开始前一天及更早的可标注数据",
-            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
+            "formal 验证采用滚动窗口协议",
+            "strongest research model 默认可以直接作为执行默认",
+            "latest-data `production full-fit`",
         ),
         "daily_research/brain/action_system.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "weight_generation_note",
             "3 / 7 / 10",
-            "只有执行模型才允许使用最新可标注数据做 `production full-fit`",
+            "formal 每个窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型",
+            "strongest-model 讨论必须同步并报 recent 验证",
+            "highest family budget",
         ),
         "daily_research/brain/project_map.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -434,6 +441,8 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "2026-04-09",
             "研究环",
             "执行环",
+            "strongest research winner 可直接进入默认执行物化",
+            "当前最高 family budget",
         ),
     }
     for relative_path, snippets in required_strings.items():

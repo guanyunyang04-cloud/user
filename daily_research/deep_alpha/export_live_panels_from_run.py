@@ -51,6 +51,26 @@ def _panel_latest_date(path: Path) -> pd.Timestamp | None:
     return pd.Timestamp(dates.max())
 
 
+def _ordered_feature_frames(
+    feature_frames: dict[str, pd.DataFrame],
+    expected_feature_names: list[str],
+) -> dict[str, pd.DataFrame]:
+    missing = [name for name in expected_feature_names if name not in feature_frames]
+    if missing:
+        raise KeyError(f"Missing expected feature frames: {missing[:10]}")
+    return {name: feature_frames[name] for name in expected_feature_names}
+
+
+def _ordered_target_frames(
+    target_frames: dict[str, pd.DataFrame],
+    expected_target_names: list[str],
+) -> dict[str, pd.DataFrame]:
+    missing = [name for name in expected_target_names if name not in target_frames]
+    if missing:
+        raise KeyError(f"Missing expected target frames: {missing[:10]}")
+    return {name: target_frames[name] for name in expected_target_names}
+
+
 def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = None) -> dict[str, Any]:
     run_dir = Path(run_dir).resolve()
     metrics_path = run_dir / "metrics.json"
@@ -171,6 +191,11 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         except Exception:
             style_map = None
 
+    target_names = list(artifact["target_names"])
+    feature_names = list(artifact["feature_names"])
+    breakout_event_task = any(str(name).startswith("event_breakout_") for name in target_names)
+    clean_breakout_event_task = any(str(name).startswith("event_clean_breakout_") for name in target_names)
+
     feature_meta = {
         "version": 4,
         "raw_key": raw_key,
@@ -182,7 +207,13 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
         "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
         "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
+        "short_alpha_features": bool(cfg.short_alpha_features),
         "prediction_horizons": list(cfg.prediction_horizons),
+        "breakout_event_horizon": int(cfg.breakout_event_horizon),
+        "breakout_event_threshold": float(cfg.breakout_event_threshold),
+        "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
+        "breakout_event_task": bool(breakout_event_task),
+        "clean_breakout_event_task": bool(clean_breakout_event_task),
         "market_state_count": cfg.market_state_count,
         "state_key": state_key,
         "liquidity_bucket_key": liquidity_bucket_key,
@@ -212,6 +243,7 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
             dynamic_graph_temperature=cfg.dynamic_graph_temperature,
             dynamic_graph_industry_boost=cfg.dynamic_graph_industry_boost,
             dynamic_graph_style_boost=cfg.dynamic_graph_style_boost,
+            short_alpha_features=cfg.short_alpha_features,
         )
         target_frames = research_main.build_targets(
             close,
@@ -220,6 +252,11 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
             open_df=df_dict["Open"],
             benchmark_open=benchmark_open,
             execution_mode="next_open",
+            breakout_event_horizon=cfg.breakout_event_horizon,
+            breakout_event_threshold=cfg.breakout_event_threshold,
+            breakout_event_pullback_limit=cfg.breakout_event_pullback_limit,
+            breakout_event_task=breakout_event_task,
+            clean_breakout_event_task=clean_breakout_event_task,
         )
         structure_label_frame = research_main.build_structure_label_frame(
             close=df_dict["Close"].astype(float),
@@ -237,6 +274,8 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
                 "structure_label_frame": structure_label_frame,
             },
         )
+    feature_frames = _ordered_feature_frames(feature_frames, feature_names)
+    target_frames = _ordered_target_frames(target_frames, target_names)
     if structure_label_frame is None:
         structure_label_frame = research_main.build_structure_label_frame(
             close=df_dict["Close"].astype(float),
@@ -248,9 +287,9 @@ def refresh_live_panels_for_run(run_dir: Path, latest_end_date: str | None = Non
         )
 
     train_target_frames = research_main.transform_return_target_frames(target_frames, cfg.return_target_transform)
-    target_names = list(artifact["target_names"])
+    train_target_frames = _ordered_target_frames(train_target_frames, target_names)
     model = research_main.MultiTaskRanker(
-        input_dim=len(artifact["feature_names"]),
+        input_dim=len(feature_names),
         hidden_dim=cfg.hidden_dim,
         output_dim=len(target_names),
         return_output_dim=sum(1 for name in target_names if name.startswith("fwd_excess_")),
