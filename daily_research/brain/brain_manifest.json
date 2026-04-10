@@ -1,7 +1,7 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "daily_research",
-  "brain_version": "2026-04-09",
+  "brain_version": "2026-04-10",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_research/brain/semantic_memory.md",

@@ -1,6 +1,6 @@
 # Daily Research 方法记忆
 
-快照日期：`2026-04-09`
+快照日期：`2026-04-10`
 
 ## 1. 总原则
 - 用户最新提出的要求拥有最高优先级。
@@ -55,7 +55,7 @@
 
 ## 8. execution-side 规则
 - broad execution-policy sweep 已停止。
-- 当前 execution-side 只沿 `month-start / first-week / signal-to-weight / month-trigger / execution` 下钻。
+- 当前 execution-side 只沿 `month-start / first-week / cash sizing / month-trigger / signal-to-weight / execution` 下钻。
 - 当前经过验证的 execution-side 静态基线与主线是 `regoff_k2_5d_ensemble_native_anchor`。
 - `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 当前只保留为 observation-only 的历史 targeted repair 分支，不再作为默认 repair 故事。
 - daily trade plan 默认只走 `live-only` refresh。
@@ -64,6 +64,15 @@
 ## 9. model-side 规则
 - 当前模型侧如重开，只从 `penalty-only` 窄修复继续。
 - 已被证伪的大 bundle、`v2`、`heavy penalty` 不再回到默认主线。
+- 优先把“分数 -> 候选池 -> 原始目标权重 -> 总仓位”推进到可学习的 `policy_v1` 类 score head，而不是继续手写更多静态桥接细参。
+- 新的 learned policy head 至少先过 `validation panel smoke -> formal 3 windows -> recent 12 个月` 三层，再讨论 `production full-fit`。
+- 单纯加深 backbone 不再被视为默认升级方向；任何 deep challenger 都必须先过 same-protocol latest-window formal 对照，再过 recent 12 个月。
+- 如果 strongest winner 的 recent 一年 readout 仍是“有正超额，但月度分布偏弱”，默认先修 `cash sizing / month-trigger`，再修 `signal-to-weight / concentration`，不先继续堆 depth。
+- 如果 strongest winner 的 recent 一年 readout 仍是“有正超额，但月度分布偏弱”，正式拆因顺序应先做 `recent_root_cause_breakdown`，优先检查 `market_state / score_to_weight / cash_control`，再讨论 `stock_pool`。
+- 如果 `current_default_signal_cash_repair_verdict` 显示 `market_state_guard / cash-sizing guard` 优于纯 `signal-to-weight` challenger，则默认把前者当 current-default 第一修补方向，不允许继续把“先修 signal-to-weight”写成主叙事。
+- 如果某条 `score_weight` challenger 主要抬高年化、却显著压坏 `monthly_robust_score`，则默认把它记为 attack bridge，不把它当 monthly-first repair winner。
+- 如果 winner 与 companion 使用的是同一个固定股票池，则默认不允许先把 recent 差距归咎为“池子太窄”；只有根因拆解或单独 same-protocol pool 对照给出新证据时，才允许把股票池提升为第一嫌疑。
+- 如某 encoder family 在当前硬件上无法完成同协议 wall-clock 评估，例如 `short_expert_mamba_policy_v1` on `RTX 2060 6GB`，则不得直接进入 winner 讨论或默认升级。
 
 ## 10. 月度优先与强月纪律
 - 以后默认按“月度收益优先、模型偏短线”推进。

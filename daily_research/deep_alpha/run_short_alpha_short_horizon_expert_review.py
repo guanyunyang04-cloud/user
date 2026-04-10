@@ -57,6 +57,10 @@ REUSE_METRICS: dict[str, str] = {
         "daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget/"
         "runs/short_expert_monthly_v1/metrics.json"
     ),
+    "short_expert_policy_v1": (
+        "daily_research/output/short_alpha_policy_v1_review_20260409_r1/"
+        "runs/short_expert_policy_v1/metrics.json"
+    ),
     "short_expert_monthly_v2": (
         "daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48/"
         "runs/short_expert_monthly_v2/metrics.json"
@@ -407,7 +411,14 @@ def main() -> None:
             progress_write(f"Write artifact 2/3: {output_dir / 'source_runs.json'}")
 
             best = summary_df.iloc[0]
-            current_row = summary_df.loc[summary_df["profile_name"] == "state_liquidity_listwise_v1"].iloc[0]
+            current_candidates = summary_df.loc[summary_df["profile_name"] == "state_liquidity_listwise_v1"]
+            current_row = current_candidates.iloc[0] if not current_candidates.empty else best
+            current_name = str(current_row["profile_name"])
+            comparison_heading = (
+                "## Current Main Line vs Short-Horizon Expert"
+                if current_name == "state_liquidity_listwise_v1"
+                else "## Profile Snapshot"
+            )
             lines = [
                 "# Short Alpha Short-Horizon Expert Review",
                 "",
@@ -426,8 +437,15 @@ def main() -> None:
                 f"- best worst-month excess: `{_pct(best['monthly_worst_excess_return'])}`.",
                 f"- best excess annual / Sharpe: `{_pct(best['excess_annual_return'])} / {_num(best['excess_sharpe'])}`.",
                 "",
-                "## Current Main Line vs Short-Horizon Expert",
+                comparison_heading,
             ]
+            if current_name != "state_liquidity_listwise_v1":
+                lines.extend(
+                    [
+                        f"- this run does not include `state_liquidity_listwise_v1`; deltas below are computed against `{current_name}`.",
+                        "",
+                    ]
+                )
             for _, row in summary_df.iterrows():
                 delta_month = float(row["monthly_median_excess_return"]) - float(current_row["monthly_median_excess_return"])
                 delta_annual = float(row["excess_annual_return"]) - float(current_row["excess_annual_return"])

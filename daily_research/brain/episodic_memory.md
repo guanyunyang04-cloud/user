@@ -11308,3 +11308,154 @@ position,000001.SZ,1200,12.38,
   - active manifest 现在由 production promotion 直接写出 `score_panel_role`
   - 并写出 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_execution_bridge_meta / effective_live_weight_generation_note`
   - 避免 strongest winner 接管后，trade plan 与 consistency guard 继续读到空白 live 解释字段
+
+## 2026-04-09 - `short_expert_policy_v1` 首版落地并完成 smoke
+- 为了把“模型输出分数 -> 规则选股/配仓”的旧链路进一步内生化，这轮没有再扩新的 execution policy，而是直接把可学习 policy head 接进了 research 主链。
+- 代码层改动：
+  - `daily_research/deep_alpha/score_head.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+- 新增方法：
+  - `score_head_method = policy_v1`
+  - profile：`short_expert_policy_v1`
+- `policy_v1` 当前学习四件事：
+  - `selection_model`：选股排序
+  - `gate_model`：候选池进入强度
+  - `weight_model`：相对权重
+  - `hold_model + cash_model`：持有强度与总仓位
+- 当前输出已经不止 `learned_score`，还包括：
+  - `selection_score / gate_score / weight_score / hold_score / cash_score / gross_exposure_target`
+- 在 `short_expert_monthly_v1` 的 validation panel 上做了真实 smoke：
+  - 窗口：`2025-03-18 -> 2026-02-27`
+  - 交易日数：`230`
+  - 股票数：`465`
+  - 平均 gross exposure：约 `0.676`
+  - 平均正持仓数：`10`
+- smoke 中顺手修掉了一个 `gross_exposure_target` 缺省兜底的长度不匹配 bug；修正后 `policy_v1` 已能稳定导出 learned target-weight panel。
+- 当前收口：
+  - `short_expert_policy_v1` 已经是正式 research branch
+  - 但它还没有 formal 3 windows 与 recent 12 个月证据
+  - 因此当前不能替代默认执行 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+
+## 2026-04-09 - `short_expert_policy_v1` latest formal single-window review 完成
+- 新 root：`daily_research/output/short_alpha_policy_v1_review_20260409_r1`
+- 为了让 `policy_v1` 可以单 profile 独立 review，这轮顺手修了：
+  - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - 原问题是 summary writer 默认假设一定存在 `state_liquidity_listwise_v1`，导致单 profile review 在收尾时 `IndexError`
+- 实验口径：
+  - formal latest single window：`2025-03-18 -> 2026-02-27`
+  - family budget：`32`
+  - score head：`policy_v1`
+- `short_expert_policy_v1` 结果：
+  - excess annual `65.84%`
+  - excess Sharpe `3.901`
+  - positive month ratio `75.00%`
+  - median monthly excess `3.53%`
+  - worst month excess `-3.28%`
+- 与同窗 `short_expert_monthly_v1` 对比：
+  - `short_expert_monthly_v1 = 91.76% / 4.852`
+  - `policy_v1` 目前仍然更弱
+- 当前收口：
+  - `policy_v1` 证明了“让模型学习 score -> weight / gross exposure”是可落地的
+  - 但第一版 learned policy head 还没有打赢当前 strongest research model
+  - 因此当前它继续保留为 research branch，下一步应优先补 formal 3 windows 与 recent 12 个月，而不是抢默认位
+
+## 2026-04-10 - deep challenger 对照完成并补齐 strongest winner 的 recent 一年回放
+- 这轮围绕“更深 backbone 能不能直接增强当前主线”做了三条 same-protocol challenger：
+  - `short_expert_monthly_v1_deep`
+  - `short_expert_policy_v1_deep`
+  - `short_expert_mamba_policy_v1`
+- 为了让 deep challenger 可以正式接入研究链，这轮扩了：
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 新增深层 profile 参数：`hidden_dim / encoder_family / transformer_heads / transformer_layers`
+  - 新增 profile：
+    - `short_expert_monthly_v1_deep`
+    - `short_expert_policy_v1_deep`
+    - `short_expert_mamba_policy_v1`
+- latest-window formal review root：
+  - `daily_research/output/short_alpha_deep_capacity_review_20260409_r1`
+- completed challenger 结果：
+  - `short_expert_monthly_v1_deep`：excess annual `57.29%`、excess Sharpe `2.841`、positive month `66.67%`、median monthly excess `4.48%`、worst month `-6.38%`
+  - `short_expert_policy_v1_deep`：excess annual `61.97%`、excess Sharpe `3.244`、positive month `75.00%`、median monthly excess `5.23%`、worst month `-4.25%`
+  - 当前 mainline `short_expert_monthly_v1` 仍是 same-window winner：excess annual `91.76%`、excess Sharpe `4.852`、positive month `83.33%`、median monthly excess `4.61%`
+- `short_expert_mamba_policy_v1` 也尝试启动过，但在当前 `RTX 2060 6GB` 上同协议 wall-clock 吞吐过慢，未能在这轮完成可比 formal 产物。
+- 这轮同步补齐了 strongest winner 的 recent 一年回放：
+  - root：`daily_research/output/short_alpha_deep_capacity_recent_eval_20260410_r1`
+  - winner：`short_expert_monthly_v1`
+  - recent window：`2025-04-10 -> 2026-04-09`
+  - recent excess annual `20.11%`
+  - recent excess Sharpe `1.154`
+  - positive month ratio `53.85%`
+  - median monthly excess `0.02%`
+  - worst month `-6.89%`
+- 当前收口：
+  - “单纯加深 backbone”这条路已经做过一轮同协议验证，但没有打赢当前主线
+  - `policy_v1` 方向仍值得继续，因为 deep 版月度中位数更高，但它还没有跨过 mainline
+  - strongest winner 在 recent 一年里“有正超额，但月度分布偏弱”
+  - 下一步默认方向应回到 `short_expert + k2` 的 `signal-to-weight / month-trigger / concentration` 修补，而不是继续盲目堆深
+
+## 2026-04-10 - recent 一年根因拆解完成
+- 新增工具：`daily_research/tools/recent_root_cause_breakdown.py`
+- 根因拆解 root：`daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`
+- 这轮不再停留在“感觉像市场状态或股票池”的口头判断，而是把 recent 一年差距明确拆成四块：
+  - `market_state`
+  - `stock_pool`
+  - `score_to_weight`
+  - `cash_control`
+- 拆解对象：
+  - winner：`short_expert_monthly_v1`
+  - companion：`state_liquidity_listwise_v1`
+  - recent window：`2025-04-10 -> 2026-04-09`
+- 机器结论：
+  - 当前月度分布不稳的第一主因，更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”
+  - 不是“模型完全不会看状态”
+  - 也不是“股票池就是第一主因”
+- 关键数字：
+  - winner 在 `trend_up_low_vol` 的日均超额约 `0.1683%`
+  - companion 在同状态的日均超额约 `0.2745%`
+  - winner 的 active-date score/weight Spearman 约 `0.206`
+  - companion 的 active-date score/weight Spearman 约 `0.235`
+  - winner 的 down/up gross exposure 比例约 `1.032`
+  - companion 的 down/up gross exposure 比例约 `0.992`
+- 股票池结论：
+  - 两条 recent 线当前使用的是同一个固定 `liquid500` 池
+  - winner 负月份里 all-A top20 5d 强势股入池占比约 `33.17%`
+  - 非负月份约 `34.05%`
+  - 说明池子更像收益天花板约束，不是解释 winner 与 companion 差距的第一主因
+- 当前收口：
+  - 默认修补顺序应改成 `signal-to-weight -> month-trigger / cash sizing -> concentration`
+  - 只有在上述方向收效有限后，才应把“固定池 vs 动态 rolling pool”提升为独立主议题
+
+## 2026-04-10 - current default signal/cash repair verdict 完成并修复空动作 trade plan 导出
+- 新增工具：`daily_research/tools/current_default_signal_cash_repair_verdict.py`
+- repair verdict root：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`
+- 这轮把 current default 的 same-protocol recent 一年修补只收敛到一小包 challenger：
+  - `winner_current_target_static`
+  - `winner_current_target_power125_cash_preserved`
+  - `winner_current_target_market_state_guard_v1`
+  - `winner_current_target_power125_market_state_guard_v1`
+  - `winner_current_target_attack_defense_v1`
+  - `winner_score_weight_k2_static`
+  - `winner_score_weight_k2_market_state_guard_v1`
+  - `companion_current_target_static`
+- 机器结论：
+  - overall recent winner 仍是 `state_liquidity_listwise_v1` companion baseline
+  - current-default 自己内部的 repair winner 已变成 `winner_current_target_market_state_guard_v1`
+  - 这说明当前默认链第一修补方向应是 `cash-sizing guard / market_state_guard`，不是更激进的 `score_weight_k2`
+- 关键数字：
+  - `companion_current_target_static` 的 `monthly_robust_score = 0.0726`
+  - 当前 default `winner_current_target_static` 的 `monthly_robust_score = 0.0456`
+  - repair winner `winner_current_target_market_state_guard_v1` 的 `monthly_robust_score = 0.0519`
+  - `winner_score_weight_k2_static` 虽然 excess annual 到了 `49.69%`，但 `monthly_robust_score` 只有 `0.0136`
+- 这轮同时补了 current live preview：
+  - preview trade plan：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`
+  - `2026-04-09` 信号对应的 state 仍是 `trend_down_low_vol`
+  - 预览结果没有建议动作
+- 为了让 preview plan 可稳定导出，这轮还修了真实脚本 bug：
+  - 文件：`daily_research/baseline/generate_daily_trade_plan.py`
+  - 问题：`action/watch` frame 为空时，列重排会直接报错
+  - 修复：为空时先补齐所需列，再导出空表
+- 当前收口：
+  - 根因拆解之后，第一包小修已经证明“先修 cash sizing”比“先修 signal-to-weight”更接近正确方向
+  - 高年化但低 `monthly_robust_score` 的 `score_weight_k2` 路线保留为 attack bridge 观察分支，不直接晋升为 monthly-first repair winner

@@ -1017,6 +1017,14 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
             "target_weight",
             "cost_price",
         ]
+        if out.empty:
+            for column in base_columns:
+                if column not in out.columns:
+                    out[column] = pd.Series(dtype=float if "weight" in column or column in {"price", "est_value", "cost_price"} else object)
+            if "execution_proxy_score" not in out.columns:
+                out["execution_proxy_score"] = pd.Series(dtype=float)
+            if "source_candidate_score" not in out.columns:
+                out["source_candidate_score"] = pd.Series(dtype=float)
         if mode == "research_candidate_target_weight_csv":
             out = out[base_columns + ["execution_proxy_score", "source_candidate_score"]]
         else:
@@ -1026,6 +1034,14 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
 
     if frame_kind == "watch":
         base_columns = ["date", "stock", "target_weight"]
+        if out.empty:
+            for column in base_columns:
+                if column not in out.columns:
+                    out[column] = pd.Series(dtype=float if column == "target_weight" else object)
+            if "execution_proxy_score" not in out.columns:
+                out["execution_proxy_score"] = pd.Series(dtype=float)
+            if "source_candidate_score" not in out.columns:
+                out["source_candidate_score"] = pd.Series(dtype=float)
         if mode == "research_candidate_target_weight_csv":
             out = out[base_columns + ["execution_proxy_score", "source_candidate_score"]]
         else:

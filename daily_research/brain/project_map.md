@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-09`
+快照日期：`2026-04-10`
 
 ## 1. 项目定义
 - `daily_research` 是一条以执行后净收益最大化为目标的研究-执行统一链路。
@@ -34,6 +34,7 @@
 
 ## 5. 当前主线
 - strongest research model：`short_expert_monthly_v1`
+- 当前默认接管基线批次仍锚定在 `2026-04-09` 这轮 strongest-model / production 物化体系上。
 - strongest-model verdict root：`daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`
 - strongest stable base model：`state_liquidity_listwise_v1`
 - active execution strategy：`deep_alpha_short_alpha_execalign_production_default`
@@ -60,14 +61,19 @@
 - recent attack recheck 根：`daily_research/output/short_alpha_production_execution_policy_audit_20260409_r3_attack_recheck`
 - same-window targeted review 根：`daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_monthly_k2_review_20260409_r3`
 - 30% 强月 verdict 根：`daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`
+- recent 根因拆解根：`daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`
+- current default signal/cash repair verdict 根：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`
 
 ## 8. 当前主问题
 - strongest-model research 层问题已经收口完成：formal winner、recent companion evidence、latest-data production full-fit 与默认执行接管都已打通。
 - live 层当前主问题：如何让 `short_expert_monthly_v1 + k2` 新默认链，在最近一年 `12` 个月口径下缩小或反超 `state_liquidity_listwise_v1` 的 companion 优势。
+- current default 的 recent 一年主因已经有第一轮量化拆解：问题更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”，不是“模型完全不会看市场状态”。
+- 股票池当前更像是天花板约束，而不是 recent 差距的第一主因；winner 与 companion 当前使用的是同一个固定 `liquid500` 池。
 - execution optimization 层问题：如何在 `k2` 主线之上继续改善月度分布、弱月修复与集中度，同时维持当前 raw 统一语义。
+- current-default 小修包已经有第一轮 same-protocol verdict：`winner_current_target_market_state_guard_v1` 是当前默认链自己内部的 repair winner，说明眼下最值得先补的是状态化总仓位，不是更激进的 `score_weight_k2`。
 - research attack 层问题：如何把 `formal_current_equal_top5_k1_bridge` 这类更强攻击桥，在 recent/live 上复现而不退化。
 - 当前还没有任何 challenger 实现稳定 `30%+` 月收益门槛。
-- 因此下一阶段最高优先级不再是重新决定谁上线，而是围绕当前已上线的 `short_expert + k2` 默认链继续做月度优先优化，并用同协议 recent 一年窗口持续和 `state_liquidity` 对照。
+- 因此下一阶段最高优先级不再是重新决定谁上线，而是围绕当前已上线的 `short_expert + k2` 默认链，先做 `cash sizing / month-trigger` 修补，再做 `signal-to-weight` 窄修补，并用同协议 recent 一年窗口持续和 `state_liquidity` 对照。
 
 ## 9. 决策闭环
 - rolling formal head-to-head + recent validation 负责确认 strongest model 与 stable base model。

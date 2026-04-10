@@ -1,6 +1,6 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-09`
+快照日期：`2026-04-10`
 
 ## 1. 接管前先判型
 - `formal` 问题：先看 formal 根，不先看 production full-fit。
@@ -51,17 +51,27 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\monthly_attack_signal_weight_verdict.py
 ```
 
-### 3.7 重刷 single-mapping 观察分支
+### 3.7 recent 一年根因拆解
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\recent_root_cause_breakdown.py
+```
+
+### 3.8 current default signal/cash repair verdict
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\current_default_signal_cash_repair_verdict.py
+```
+
+### 3.9 重刷 single-mapping 观察分支
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_short_alpha_execution_single_mapping_candidate_pipeline.py --live-only --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_execution_single_mapping_candidate_pipeline_20260409_r2
 ```
 
-### 3.8 重新激活 single-mapping 观察分支
+### 3.10 重新激活 single-mapping 观察分支
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\activate_execution_single_mapping_candidate.py --pipeline-root daily_research\output\short_alpha_execution_single_mapping_candidate_pipeline_20260409_r2 --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.9 一致性检查
+### 3.11 一致性检查
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\project_consistency_check.py
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\doc_guard.py check
@@ -78,6 +88,12 @@
 - 被问到“当前 strongest research model / formal 最强研究模型是什么”时，优先引用 `daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`。
 - 被问到 strongest-model 是否完整成立时，除 strongest-model verdict 外，必须补报对应 recent 验证，不允许只报 formal。
 - 被问到“当前稳定 base model 是什么”时，优先引用 `daily_research/output/short_alpha_formal_head2head_20260409_recheck_r1`。
+- 被问到“模型能不能自己学选股和持仓转换”时，优先引用 `daily_research/output/short_alpha_policy_model_v1_design_20260409.md`，并明确当前研究分支名为 `short_expert_policy_v1`。
+- 被问到“`short_expert_policy_v1` 现在到底强不强”时，优先引用 `daily_research/output/short_alpha_policy_v1_review_20260409_r1`，并同步对照 `short_alpha_short_horizon_expert_review_20260406_r2_fullbudget` 下的 `short_expert_monthly_v1` 同窗结果。
+- 被问到“加深网络 / 更深 backbone 这轮有没有用”时，优先引用 `daily_research/output/short_alpha_deep_capacity_review_20260409_r1`，并明确 completed formal latest-window winner 仍是 `short_expert_monthly_v1`。
+- 被问到“当前 strongest winner 在 recent 一年到底表现怎样”时，优先引用 `daily_research/output/short_alpha_deep_capacity_recent_eval_20260410_r1`。
+- 被问到“为什么 current default 的月度分布不稳、问题到底出在哪”时，优先引用 `daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`。
+- 被问到“current default 下一包 signal-to-weight / cash sizing 修补谁最强”时，优先引用 `daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`。
 - 被问到“当前 execution mainline 是什么”时，优先引用：
   - `daily_research/output/active_execution_strategy.json`
   - `daily_research/output/deep_alpha_short_alpha_execalign_production_default/production_retrain_manifest.json`
@@ -115,3 +131,11 @@
 - 当前没有任何 challenger 达到稳定 `30%+` 月收益门槛。
 - formal attack winner：`formal_current_equal_top5_k1_bridge`
 - 当前操作含义：`short_expert_monthly_v1` 已经完成 production full-fit 并接管默认执行；`formal_current_equal_top5_k1_bridge` 继续作为 research attack branch 微调，不再抢当前默认位。
+- 当前 deep capacity 结论：纯加深 `patch_transformer` 没有带来 formal uplift，`short_expert_policy_v1_deep` 接近但仍未胜出；`short_expert_mamba_policy_v1` 因当前 GPU wall-clock 过慢未完成同协议评估。
+- 当前 strongest winner 的 recent 一年 readout：`short_expert_monthly_v1` excess annual `20.11%`、excess Sharpe `1.154`、positive month ratio `53.85%`、median monthly excess `0.02%`、worst month `-6.89%`，属于“有正超额，但月度分布偏弱”。
+- 当前 recent 根因拆解结论：月度分布不稳的第一主因更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”；股票池是上限约束，但不是 winner 与 companion 差距的第一主因。
+- 当前 current-default repair 结论：overall recent winner 仍是 `state_liquidity_listwise_v1` companion baseline，但 current-default 自己内部的 repair winner 已经变成 `winner_current_target_market_state_guard_v1`；这说明眼下该优先修的是 `cash sizing guard`，不是更激进的 `score_weight_k2`。
+- current-default repair winner 的 current live preview 已落到 `daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`。
+- 当前 `policy_v1` 状态：`short_expert_policy_v1` 已接入训练/推理主链，并通过 validation-panel smoke；但 formal / recent 证据尚未补齐，当前仍是 research branch，不得冒充默认执行。
+- 当前 `policy_v1` latest-formal 状态：单窗 review 已补齐，但仍落后于 `short_expert_monthly_v1`，所以当前只能继续作为 research branch。
+- 当前 `policy_v1` deep 状态：`short_expert_policy_v1_deep` 已完成 latest-window formal 对照，但仍未超过当前 mainline；因此“可学习选股/持仓转换”方向保留，单纯加深不单独晋升。

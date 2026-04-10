@@ -86,7 +86,11 @@ from daily_research.deep_alpha.research_objective import (
     resolve_primary_panel_mode,
     summarize_primary_monthly_objectives,
 )
-from daily_research.deep_alpha.score_head import apply_score_head, fit_score_head
+from daily_research.deep_alpha.score_head import (
+    apply_score_head,
+    build_policy_target_weight_frame,
+    fit_score_head,
+)
 from daily_research.deep_alpha.sequence_dataset import (
     DateGroupedBatchSampler,
     StockSequenceDataset,
@@ -157,7 +161,7 @@ def parse_args():
     parser.add_argument("--score-risk-mode", choices=["subtract", "gate", "state_gate", "state_liquidity_gate"], default="subtract")
     parser.add_argument("--score-risk-gate-threshold", type=float, default=0.35)
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
-    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert"], default="manual")
+    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1"], default="manual")
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
     parser.add_argument(
         "--research-time-unit",
@@ -622,6 +626,7 @@ def _build_live_inference_outputs(
         task_label="Inference live",
     )
     live_index = pd.Index(live_dates)
+    live_score_outputs = pd.DataFrame()
     if score_head_method == "manual":
         live_score_frame = _build_score_frame(
             pred_df=live_pred_df,
@@ -635,9 +640,9 @@ def _build_live_inference_outputs(
             all_stocks=list(close.columns),
         )
     else:
-        live_learned_scores = apply_score_head(score_head_artifact, live_pred_df, target_names)
+        live_score_outputs = apply_score_head(score_head_artifact, live_pred_df, target_names)
         live_score_frame = (
-            live_learned_scores
+            live_score_outputs
             .pivot(index="date", columns="stock", values="learned_score")
             .reindex(index=live_index, columns=close.columns)
         )
@@ -666,7 +671,16 @@ def _build_live_inference_outputs(
         max_price=cfg.max_price,
     )
     portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
-    live_target_weights = build_research_raw_target_weights(live_score_frame, live_cfg)
+    if score_head_method == "policy_v1":
+        live_target_weights = build_policy_target_weight_frame(
+            live_score_outputs,
+            all_dates=live_index,
+            all_stocks=list(close.columns),
+            holding_count=cfg.holding_count,
+            artifact=score_head_artifact,
+        )
+    else:
+        live_target_weights = build_research_raw_target_weights(live_score_frame, live_cfg)
     return {
         "live_dates": live_index,
         "pred_df": live_pred_df,
@@ -802,9 +816,12 @@ def _evaluate_research_outputs(
         adaptive_window_days=args.adaptive_task_window_days,
         research_time_unit=cfg.research_time_unit,
         adaptive_window_months=cfg.adaptive_task_window_months,
+        holding_count=cfg.holding_count,
     )
     applied_score_horizon_weights = dict(cfg.score_horizon_weights)
     applied_score_downside_penalty = float(cfg.score_downside_penalty)
+    train_score_outputs = pd.DataFrame()
+    score_outputs = pd.DataFrame()
     if args.score_head_method == "manual":
         applied_score_horizon_weights, applied_score_downside_penalty = _resolve_manual_score_config(
             base_horizon_weights=cfg.score_horizon_weights,
@@ -834,15 +851,15 @@ def _evaluate_research_outputs(
             all_stocks=list(close.columns),
         )
     else:
-        train_learned_scores = apply_score_head(score_head_artifact, train_pred_df, train_ds.target_names)
+        train_score_outputs = apply_score_head(score_head_artifact, train_pred_df, train_ds.target_names)
         train_score_frame = (
-            train_learned_scores
+            train_score_outputs
             .pivot(index="date", columns="stock", values="learned_score")
             .reindex(index=train_eval_dates, columns=close.columns)
         )
-        learned_scores = apply_score_head(score_head_artifact, pred_df, train_ds.target_names)
+        score_outputs = apply_score_head(score_head_artifact, pred_df, train_ds.target_names)
         score_frame = (
-            learned_scores
+            score_outputs
             .pivot(index="date", columns="stock", values="learned_score")
             .reindex(index=valid_dates, columns=close.columns)
         )
@@ -907,8 +924,24 @@ def _evaluate_research_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    train_eval_target_weights = build_target_weights(train_score_frame, train_eval_cfg)
-    target_weights = build_target_weights(score_frame, research_cfg)
+    if args.score_head_method == "policy_v1":
+        train_eval_target_weights = build_policy_target_weight_frame(
+            train_score_outputs,
+            all_dates=pd.Index(train_eval_dates),
+            all_stocks=list(close.columns),
+            holding_count=cfg.holding_count,
+            artifact=score_head_artifact,
+        )
+        target_weights = build_policy_target_weight_frame(
+            score_outputs,
+            all_dates=pd.Index(valid_dates),
+            all_stocks=list(close.columns),
+            holding_count=cfg.holding_count,
+            artifact=score_head_artifact,
+        )
+    else:
+        train_eval_target_weights = build_target_weights(train_score_frame, train_eval_cfg)
+        target_weights = build_target_weights(score_frame, research_cfg)
     equity_df, action_df, holdout_metrics = backtest(
         close=close.reindex(valid_dates),
         benchmark_close=benchmark_close.reindex(valid_dates),
@@ -1977,6 +2010,7 @@ def main():
         "adaptive_task_window_days": args.adaptive_task_window_days,
         "adaptive_task_window_months": int(cfg.adaptive_task_window_months),
         "score_head_task_weights": score_head_artifact.task_weights,
+        "score_head_extra": score_head_artifact.extra,
         "structure_aux_summary": structure_aux_summary,
         "structure_prototype_summary": structure_prototype_summary,
         "risk_gate_global_threshold": None if risk_gate_artifact is None else risk_gate_artifact.global_threshold,

@@ -7,6 +7,10 @@ from dataclasses import dataclass
 class ShortAlphaProfile:
     name: str
     description: str
+    hidden_dim: int | None = None
+    encoder_family: str = ""
+    transformer_heads: int | None = None
+    transformer_layers: int | None = None
     state_context: bool = False
     liquidity_context: bool = False
     structure_context: bool = False
@@ -128,6 +132,118 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         breakout_event_loss_weight=0.15,
         clean_breakout_event_loss_weight=0.20,
         score_head_method="ridge",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v1": ShortAlphaProfile(
+        name="short_expert_policy_v1",
+        description=(
+            "Policy-head short-line expert candidate: keep the short_expert_monthly_v1 "
+            "backbone but let a learned policy head decide candidate pool, raw target weights "
+            "and gross exposure before execution alignment."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v1",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_monthly_v1_deep": ShortAlphaProfile(
+        name="short_expert_monthly_v1_deep",
+        description=(
+            "Deeper monthly-first short-line expert candidate: keep the short_expert_monthly_v1 "
+            "protocol but deepen the patch-transformer backbone to test pure capacity uplift."
+        ),
+        hidden_dim=128,
+        encoder_family="patch_transformer",
+        transformer_heads=4,
+        transformer_layers=4,
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="ridge",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v1_deep": ShortAlphaProfile(
+        name="short_expert_policy_v1_deep",
+        description=(
+            "Deeper policy-head short-line expert candidate: deepen the patch-transformer "
+            "backbone while keeping the learned policy_v1 score-to-weight head."
+        ),
+        hidden_dim=128,
+        encoder_family="patch_transformer",
+        transformer_heads=4,
+        transformer_layers=4,
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v1",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_mamba_policy_v1": ShortAlphaProfile(
+        name="short_expert_mamba_policy_v1",
+        description=(
+            "Hybrid deep challenger: switch to a deeper Mamba encoder and keep the learned "
+            "policy_v1 head to test whether sequence memory helps short-line policy learning."
+        ),
+        hidden_dim=128,
+        encoder_family="mamba",
+        transformer_layers=4,
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v1",
         adaptive_task_weights=True,
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
@@ -605,6 +721,9 @@ PROFILE_ALIASES: dict[str, str] = {
     "expert_head_monthly": "short_expert_scorehead_monthly_v1",
     "expert_v2": "short_expert_v2",
     "expert_monthly_v2": "short_expert_monthly_v2",
+    "expert_monthly_deep": "short_expert_monthly_v1_deep",
+    "expert_policy_deep": "short_expert_policy_v1_deep",
+    "expert_mamba_policy": "short_expert_mamba_policy_v1",
 }
 
 DEFAULT_SHORT_ALPHA_PROFILE = "baseline_current"
@@ -651,6 +770,14 @@ def build_profile_cli_args(profile: ShortAlphaProfile, *, include_objective_over
         "--clean-breakout-event-loss-weight",
         str(profile.clean_breakout_event_loss_weight),
     ]
+    if profile.hidden_dim is not None:
+        args.extend(["--hidden-dim", str(profile.hidden_dim)])
+    if profile.encoder_family:
+        args.extend(["--encoder-family", profile.encoder_family])
+    if profile.transformer_heads is not None:
+        args.extend(["--transformer-heads", str(profile.transformer_heads)])
+    if profile.transformer_layers is not None:
+        args.extend(["--transformer-layers", str(profile.transformer_layers)])
     if profile.score_head_method:
         args.extend(["--score-head-method", profile.score_head_method])
     if include_objective_overrides and profile.research_objective_mode:

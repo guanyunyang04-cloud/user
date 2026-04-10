@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,13 @@ except Exception:  # pragma: no cover
 RETURN_TARGET_PREFIX = "fwd_excess_"
 RISK_TARGET_NAME = "risk_downside_20"
 
+POLICY_V1_GATE_MULTIPLIER = 2.0
+POLICY_V1_MIN_GROSS_EXPOSURE = 0.35
+POLICY_V1_MAX_GROSS_EXPOSURE = 1.0
+POLICY_V1_WEIGHT_POWER = 1.35
+POLICY_V1_HOLD_BOOST = 0.30
+POLICY_V1_CANDIDATE_MULTIPLIER = 2.5
+
 
 @dataclass
 class ScoreHeadArtifact:
@@ -29,7 +36,7 @@ class ScoreHeadArtifact:
     feature_columns: List[str]
     task_weights: Dict[str, float]
     model: object | None
-    extra: Dict[str, float] = field(default_factory=dict)
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 def _cross_sectional_standardize(series: pd.Series) -> pd.Series:
@@ -65,7 +72,13 @@ def compute_task_rankic_summary(pred_df: pd.DataFrame, target_names: List[str]) 
             if len(g) < 5:
                 continue
             corr = spearmanr(g[pred_col], g[true_col], nan_policy="omit").correlation
-            rows.append({"date": dt, "target": target_name, "rankic": float(corr) if corr is not None and np.isfinite(corr) else np.nan})
+            rows.append(
+                {
+                    "date": dt,
+                    "target": target_name,
+                    "rankic": float(corr) if corr is not None and np.isfinite(corr) else np.nan,
+                }
+            )
     out = pd.DataFrame(rows)
     if out.empty:
         return pd.DataFrame(columns=["target", "rankic_mean", "rankic_std", "rankic_ir"])
@@ -130,7 +143,7 @@ def derive_adaptive_task_weights(
     return {k: v / total for k, v in weights.items()}
 
 
-def _build_training_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]) -> pd.Series:
+def _build_utility_series(pred_df: pd.DataFrame, task_weights: Dict[str, float]) -> pd.Series:
     indexed = pred_df.set_index(["date", "stock"]).sort_index()
     utility = pd.Series(0.0, index=indexed.index, dtype=float)
     for target_name, weight in task_weights.items():
@@ -138,7 +151,12 @@ def _build_training_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]
         if true_col not in indexed.columns:
             continue
         utility = utility.add(indexed[true_col].astype(float) * float(weight), fill_value=0.0)
-    target = _cross_sectional_rank(utility)
+    utility.name = "utility_target"
+    return utility
+
+
+def _build_training_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]) -> pd.Series:
+    target = _cross_sectional_rank(_build_utility_series(pred_df, task_weights))
     target.name = "score_target"
     return target
 
@@ -171,6 +189,146 @@ def _build_confidence_target(pred_df: pd.DataFrame, task_weights: Dict[str, floa
     return target
 
 
+def _build_topk_binary_target(signal: pd.Series, top_k: int) -> pd.Series:
+    top_k = max(int(top_k), 1)
+    out_parts: list[pd.Series] = []
+    for _, group in signal.groupby(level=0):
+        ordered = group.sort_values(ascending=False)
+        selected = ordered.iloc[: min(len(ordered), top_k)]
+        part = pd.Series(0.0, index=group.index, dtype=float)
+        part.loc[selected.index] = 1.0
+        out_parts.append(part)
+    out = pd.concat(out_parts).sort_index() if out_parts else pd.Series(dtype=float)
+    out.name = "gate_target"
+    return out
+
+
+def _build_weight_target(utility_target: pd.Series, gate_target: pd.Series) -> pd.Series:
+    out_parts: list[pd.Series] = []
+    for dt, utility_group in utility_target.groupby(level=0):
+        gate_group = gate_target.loc[utility_group.index].fillna(0.0)
+        selected_mask = gate_group > 0.5
+        selected_utility = utility_group.loc[selected_mask].clip(lower=0.0)
+        part = pd.Series(0.0, index=utility_group.index, dtype=float)
+        if selected_utility.empty or float(selected_utility.sum()) <= 0.0:
+            selected_index = gate_group.loc[selected_mask].index
+            if len(selected_index) > 0:
+                part.loc[selected_index] = 1.0 / float(len(selected_index))
+        else:
+            normalized = selected_utility / float(selected_utility.sum())
+            part.loc[normalized.index] = normalized.astype(float)
+        part.name = dt
+        out_parts.append(part)
+    out = pd.concat(out_parts).sort_index() if out_parts else pd.Series(dtype=float)
+    out.name = "weight_target"
+    return out
+
+
+def _build_hold_target(pred_df: pd.DataFrame, task_weights: Dict[str, float]) -> pd.Series:
+    indexed = pred_df.set_index(["date", "stock"]).sort_index()
+    persistence = pd.Series(0.0, index=indexed.index, dtype=float)
+    for target_name, weight in task_weights.items():
+        true_col = f"true_{target_name}"
+        if true_col not in indexed.columns:
+            continue
+        series = indexed[true_col].astype(float)
+        if target_name.startswith("fwd_excess_"):
+            try:
+                horizon = int(target_name.replace("fwd_excess_", ""))
+            except Exception:
+                horizon = 0
+            horizon_scale = 1.15 if horizon >= 5 else 0.75
+            persistence = persistence.add(series.clip(lower=0.0) * float(weight) * horizon_scale, fill_value=0.0)
+        elif target_name == RISK_TARGET_NAME:
+            persistence = persistence.add(series.clip(upper=0.0) * float(weight) * 0.75, fill_value=0.0)
+        elif target_name.startswith("event_clean_breakout_"):
+            persistence = persistence.add(series.clip(lower=0.0, upper=1.0) * max(float(weight), 0.10) * 1.25, fill_value=0.0)
+        elif target_name.startswith("event_breakout_"):
+            persistence = persistence.add(series.clip(lower=0.0, upper=1.0) * max(float(weight), 0.05) * 0.50, fill_value=0.0)
+    target = _cross_sectional_rank(persistence)
+    target.name = "hold_target"
+    return target
+
+
+def _group_top_mean(series: pd.Series, top_n: int) -> pd.Series:
+    top_n = max(int(top_n), 1)
+    return series.groupby(level=0).apply(lambda group: float(group.sort_values(ascending=False).head(min(len(group), top_n)).mean()))
+
+
+def _group_top_std(series: pd.Series, top_n: int) -> pd.Series:
+    top_n = max(int(top_n), 1)
+    return series.groupby(level=0).apply(
+        lambda group: float(group.sort_values(ascending=False).head(min(len(group), top_n)).std(ddof=0) or 0.0)
+    )
+
+
+def _group_positive_share(series: pd.Series) -> pd.Series:
+    return series.groupby(level=0).apply(lambda group: float((group > 0.0).mean()))
+
+
+def _build_policy_cash_target(
+    pred_df: pd.DataFrame,
+    utility_target: pd.Series,
+    *,
+    holding_count: int,
+    min_gross_exposure: float,
+    max_gross_exposure: float,
+) -> pd.Series:
+    indexed = pred_df.set_index(["date", "stock"]).sort_index()
+    downside = indexed.get(f"true_{RISK_TARGET_NAME}", pd.Series(0.0, index=indexed.index, dtype=float)).astype(float)
+    clean_breakout = pd.Series(0.0, index=indexed.index, dtype=float)
+    for column in indexed.columns:
+        if str(column).startswith("true_event_clean_breakout_"):
+            clean_breakout = clean_breakout.add(indexed[column].astype(float), fill_value=0.0)
+    date_signal: dict[pd.Timestamp, float] = {}
+    top_n = max(int(holding_count), 3)
+    for dt, utility_group in utility_target.groupby(level=0):
+        ordered = utility_group.sort_values(ascending=False).head(min(len(utility_group), top_n))
+        if ordered.empty:
+            date_signal[pd.Timestamp(dt)] = float(min_gross_exposure)
+            continue
+        opportunity = float(ordered.clip(lower=0.0).mean())
+        downside_penalty = float((-downside.loc[ordered.index].clip(upper=0.0)).mean()) if len(ordered.index) > 0 else 0.0
+        breakout_bonus = float(clean_breakout.loc[ordered.index].clip(lower=0.0).mean()) if len(ordered.index) > 0 else 0.0
+        date_signal[pd.Timestamp(dt)] = opportunity + 0.35 * breakout_bonus - 0.50 * downside_penalty
+    signal_series = pd.Series(date_signal, dtype=float).sort_index()
+    ranked = signal_series.rank(pct=True).fillna(0.5)
+    gross = float(min_gross_exposure) + (float(max_gross_exposure) - float(min_gross_exposure)) * ranked
+    gross.name = "cash_target"
+    return gross.astype(float)
+
+
+def _build_policy_cash_feature_frame(
+    selection_signal: pd.Series,
+    gate_signal: pd.Series,
+    weight_signal: pd.Series,
+    hold_signal: pd.Series,
+    *,
+    top_n: int,
+) -> pd.DataFrame:
+    frame = pd.DataFrame(
+        {
+            "selection_top_mean": _group_top_mean(selection_signal, top_n),
+            "selection_top_std": _group_top_std(selection_signal, top_n),
+            "gate_top_mean": _group_top_mean(gate_signal, top_n),
+            "gate_positive_share": _group_positive_share(gate_signal),
+            "weight_top_mean": _group_top_mean(weight_signal, top_n),
+            "weight_top_std": _group_top_std(weight_signal, top_n),
+            "hold_top_mean": _group_top_mean(hold_signal, top_n),
+            "hold_top_std": _group_top_std(hold_signal, top_n),
+        }
+    ).fillna(0.0)
+    frame.index = pd.DatetimeIndex(pd.to_datetime(frame.index))
+    return frame.sort_index()
+
+
+def _blend_selection_signal(selection_raw: pd.Series, *, rank_blend: float) -> pd.Series:
+    return (
+        _cross_sectional_standardize(selection_raw) * (1.0 - float(rank_blend))
+        + (_cross_sectional_rank(selection_raw) - 0.5) * 2.0 * float(rank_blend)
+    )
+
+
 def fit_score_head(
     train_pred_df: pd.DataFrame,
     target_names: List[str],
@@ -180,6 +338,7 @@ def fit_score_head(
     *,
     research_time_unit: str = RESEARCH_TIME_UNIT_CALENDAR_MONTHS,
     adaptive_window_months: int | None = None,
+    holding_count: int = 5,
 ) -> ScoreHeadArtifact:
     if method == "manual":
         task_weights = (
@@ -212,11 +371,24 @@ def fit_score_head(
     if method == "short_expert":
         confidence_target = _build_confidence_target(train_pred_df, task_weights)
         aligned = indexed_features.join(selection_target, how="inner").join(confidence_target, how="inner").dropna()
+    elif method == "policy_v1":
+        utility_target = _build_utility_series(train_pred_df, task_weights)
+        gate_target_count = max(int(holding_count), int(round(float(holding_count) * POLICY_V1_GATE_MULTIPLIER)))
+        gate_target = _build_topk_binary_target(selection_target, gate_target_count)
+        weight_target = _build_weight_target(utility_target, gate_target)
+        hold_target = _build_hold_target(train_pred_df, task_weights)
+        aligned = (
+            indexed_features.join(selection_target, how="inner")
+            .join(gate_target, how="inner")
+            .join(weight_target, how="inner")
+            .join(hold_target, how="inner")
+            .dropna()
+        )
     else:
         aligned = indexed_features.join(selection_target, how="inner").dropna()
     if aligned.empty:
         raise RuntimeError("Score head training data is empty.")
-    X = aligned.drop(columns=[col for col in ["score_target", "confidence_target"] if col in aligned.columns])
+    X = aligned.drop(columns=[col for col in ["score_target", "confidence_target", "gate_target", "weight_target", "hold_target"] if col in aligned.columns])
     if method == "ridge":
         y = aligned["score_target"].values
         model = Ridge(alpha=1.0, random_state=7)
@@ -227,7 +399,7 @@ def fit_score_head(
             task_weights=task_weights,
             model=model,
         )
-    elif method == "lgbm":
+    if method == "lgbm":
         y = aligned["score_target"].values
         if LGBMRegressor is None:
             raise RuntimeError("LightGBM is not available in current environment.")
@@ -246,7 +418,7 @@ def fit_score_head(
             task_weights=task_weights,
             model=model,
         )
-    elif method == "short_expert":
+    if method == "short_expert":
         selection_model = Ridge(alpha=1.0, random_state=7)
         confidence_model = Ridge(alpha=2.0, random_state=7)
         selection_model.fit(X, aligned["score_target"].values)
@@ -265,8 +437,63 @@ def fit_score_head(
                 "confidence_scale": 0.50,
             },
         )
-    else:
-        raise ValueError(f"Unsupported score head method: {method}")
+    if method == "policy_v1":
+        selection_model = Ridge(alpha=1.0, random_state=7)
+        gate_model = Ridge(alpha=1.5, random_state=7)
+        weight_model = Ridge(alpha=2.0, random_state=7)
+        hold_model = Ridge(alpha=2.0, random_state=7)
+        selection_model.fit(X, aligned["score_target"].values)
+        gate_model.fit(X, aligned["gate_target"].values)
+        weight_model.fit(X, aligned["weight_target"].values)
+        hold_model.fit(X, aligned["hold_target"].values)
+
+        selection_raw = pd.Series(selection_model.predict(X), index=aligned.index, dtype=float)
+        selection_signal = _blend_selection_signal(selection_raw, rank_blend=0.35)
+        gate_signal = _cross_sectional_rank(pd.Series(gate_model.predict(X), index=aligned.index, dtype=float))
+        weight_signal = _cross_sectional_rank(pd.Series(weight_model.predict(X), index=aligned.index, dtype=float))
+        hold_signal = _cross_sectional_rank(pd.Series(hold_model.predict(X), index=aligned.index, dtype=float))
+        cash_target = _build_policy_cash_target(
+            train_pred_df,
+            utility_target,
+            holding_count=holding_count,
+            min_gross_exposure=POLICY_V1_MIN_GROSS_EXPOSURE,
+            max_gross_exposure=POLICY_V1_MAX_GROSS_EXPOSURE,
+        )
+        cash_feature_frame = _build_policy_cash_feature_frame(
+            selection_signal,
+            gate_signal,
+            weight_signal,
+            hold_signal,
+            top_n=gate_target_count,
+        )
+        cash_feature_aligned = cash_feature_frame.join(cash_target, how="inner").dropna()
+        cash_columns = [col for col in cash_feature_aligned.columns if col != "cash_target"]
+        cash_model = Ridge(alpha=2.5, random_state=7)
+        cash_model.fit(cash_feature_aligned[cash_columns], cash_feature_aligned["cash_target"].values)
+        return ScoreHeadArtifact(
+            method=method,
+            feature_columns=list(X.columns),
+            task_weights=task_weights,
+            model={
+                "selection_model": selection_model,
+                "gate_model": gate_model,
+                "weight_model": weight_model,
+                "hold_model": hold_model,
+                "cash_model": cash_model,
+            },
+            extra={
+                "selection_rank_blend": 0.35,
+                "holding_count": int(holding_count),
+                "gate_target_count": int(gate_target_count),
+                "policy_min_gross_exposure": float(POLICY_V1_MIN_GROSS_EXPOSURE),
+                "policy_max_gross_exposure": float(POLICY_V1_MAX_GROSS_EXPOSURE),
+                "policy_weight_power": float(POLICY_V1_WEIGHT_POWER),
+                "policy_hold_boost": float(POLICY_V1_HOLD_BOOST),
+                "policy_candidate_multiplier": float(POLICY_V1_CANDIDATE_MULTIPLIER),
+                "cash_feature_columns": list(cash_columns),
+            },
+        )
+    raise ValueError(f"Unsupported score head method: {method}")
 
 
 def apply_score_head(
@@ -291,10 +518,7 @@ def apply_score_head(
         selection_rank_blend = float(artifact.extra.get("selection_rank_blend", 0.35))
         confidence_floor = float(artifact.extra.get("confidence_floor", 0.50))
         confidence_scale = float(artifact.extra.get("confidence_scale", 0.50))
-        selection_signal = (
-            _cross_sectional_standardize(selection_raw) * (1.0 - selection_rank_blend)
-            + (_cross_sectional_rank(selection_raw) - 0.5) * 2.0 * selection_rank_blend
-        )
+        selection_signal = _blend_selection_signal(selection_raw, rank_blend=selection_rank_blend)
         confidence_rank = _cross_sectional_rank(confidence_raw)
         sizing_score = confidence_floor + confidence_scale * confidence_rank
         learned_score = selection_signal * sizing_score
@@ -303,6 +527,108 @@ def apply_score_head(
         out["sizing_score"] = sizing_score.values
         out["learned_score"] = learned_score.values
         return out
+    if artifact.method == "policy_v1":
+        model_dict = artifact.model if isinstance(artifact.model, dict) else {}
+        selection_model = model_dict.get("selection_model")
+        gate_model = model_dict.get("gate_model")
+        weight_model = model_dict.get("weight_model")
+        hold_model = model_dict.get("hold_model")
+        cash_model = model_dict.get("cash_model")
+        if any(model is None for model in (selection_model, gate_model, weight_model, hold_model, cash_model)):
+            raise ValueError("policy_v1 score head requires selection/gate/weight/hold/cash models.")
+        selection_raw = pd.Series(selection_model.predict(aligned), index=aligned.index, dtype=float)
+        gate_raw = pd.Series(gate_model.predict(aligned), index=aligned.index, dtype=float)
+        weight_raw = pd.Series(weight_model.predict(aligned), index=aligned.index, dtype=float)
+        hold_raw = pd.Series(hold_model.predict(aligned), index=aligned.index, dtype=float)
+
+        selection_signal = _blend_selection_signal(
+            selection_raw,
+            rank_blend=float(artifact.extra.get("selection_rank_blend", 0.35)),
+        )
+        gate_rank = _cross_sectional_rank(gate_raw)
+        weight_rank = _cross_sectional_rank(weight_raw)
+        hold_rank = _cross_sectional_rank(hold_raw)
+        learned_score = selection_signal * (0.65 + 0.35 * gate_rank) * (0.55 + 0.45 * weight_rank)
+
+        cash_feature_frame = _build_policy_cash_feature_frame(
+            selection_signal,
+            gate_rank,
+            weight_rank,
+            hold_rank,
+            top_n=int(artifact.extra.get("gate_target_count", artifact.extra.get("holding_count", 5))),
+        )
+        cash_feature_columns = [
+            str(col)
+            for col in artifact.extra.get("cash_feature_columns", list(cash_feature_frame.columns))
+        ]
+        cash_aligned = cash_feature_frame.reindex(columns=cash_feature_columns).fillna(0.0)
+        cash_pred = pd.Series(cash_model.predict(cash_aligned), index=cash_aligned.index, dtype=float)
+        min_gross = float(artifact.extra.get("policy_min_gross_exposure", POLICY_V1_MIN_GROSS_EXPOSURE))
+        max_gross = float(artifact.extra.get("policy_max_gross_exposure", POLICY_V1_MAX_GROSS_EXPOSURE))
+        cash_pred = cash_pred.clip(lower=min_gross, upper=max_gross)
+
+        out["selection_score"] = selection_signal.values
+        out["gate_score"] = gate_rank.values
+        out["weight_score"] = weight_rank.values
+        out["hold_score"] = hold_rank.values
+        out["learned_score"] = learned_score.values
+        out["cash_score"] = pd.to_datetime(out["date"]).map(cash_pred).astype(float)
+        out["gross_exposure_target"] = out["cash_score"].astype(float)
+        return out
     score = artifact.model.predict(aligned)
     out["learned_score"] = score
     return out
+
+
+def build_policy_target_weight_frame(
+    policy_output_df: pd.DataFrame,
+    *,
+    all_dates: pd.Index,
+    all_stocks: list[str],
+    holding_count: int,
+    artifact: ScoreHeadArtifact,
+) -> pd.DataFrame:
+    if policy_output_df.empty:
+        return pd.DataFrame(0.0, index=pd.Index(all_dates), columns=all_stocks, dtype=float)
+    required = {"date", "stock", "learned_score", "gate_score", "weight_score", "hold_score"}
+    missing = required.difference(policy_output_df.columns)
+    if missing:
+        raise KeyError(f"policy_v1 output is missing required columns: {sorted(missing)}")
+
+    min_gross = float(artifact.extra.get("policy_min_gross_exposure", POLICY_V1_MIN_GROSS_EXPOSURE))
+    max_gross = float(artifact.extra.get("policy_max_gross_exposure", POLICY_V1_MAX_GROSS_EXPOSURE))
+    weight_power = float(artifact.extra.get("policy_weight_power", POLICY_V1_WEIGHT_POWER))
+    hold_boost = float(artifact.extra.get("policy_hold_boost", POLICY_V1_HOLD_BOOST))
+    candidate_multiplier = float(artifact.extra.get("policy_candidate_multiplier", POLICY_V1_CANDIDATE_MULTIPLIER))
+
+    indexed = policy_output_df.copy()
+    indexed["date"] = pd.to_datetime(indexed["date"])
+    indexed["stock"] = indexed["stock"].astype(str).str.upper().str.strip()
+    indexed = indexed.set_index(["date", "stock"]).sort_index()
+    result = pd.DataFrame(0.0, index=pd.Index(pd.to_datetime(all_dates)), columns=list(all_stocks), dtype=float)
+
+    base_holding_count = max(int(holding_count), 1)
+    max_candidates = max(base_holding_count, int(round(base_holding_count * candidate_multiplier)))
+
+    for dt, group in indexed.groupby(level=0):
+        frame = group.reset_index(level=0, drop=True).copy()
+        frame = frame.sort_values(["gate_score", "learned_score"], ascending=False)
+        if "gross_exposure_target" in frame.columns and not frame["gross_exposure_target"].empty:
+            gross = float(frame["gross_exposure_target"].iloc[0])
+        else:
+            gross = float(max_gross)
+        gross = float(np.clip(gross, min_gross, max_gross))
+        candidate_count = int(round(base_holding_count + (max_candidates - base_holding_count) * gross))
+        candidate_count = max(base_holding_count, min(candidate_count, len(frame)))
+        selected = frame.head(candidate_count).copy()
+        raw = selected["weight_score"].astype(float).clip(lower=0.0)
+        if float(raw.sum()) <= 0.0:
+            raw = selected["learned_score"].rank(method="first", pct=True).astype(float).clip(lower=0.0)
+        hold_scale = 1.0 + hold_boost * (selected["hold_score"].astype(float).fillna(0.5) - 0.5) * 2.0
+        raw = raw.mul(hold_scale.clip(lower=0.25), fill_value=0.0)
+        raw = raw.pow(max(weight_power, 1e-6)).clip(lower=0.0)
+        if float(raw.sum()) <= 0.0:
+            raw = pd.Series(1.0, index=selected.index, dtype=float)
+        weights = raw / float(raw.sum()) * gross
+        result.loc[pd.Timestamp(dt), weights.index] = weights.astype(float).values
+    return result.fillna(0.0)
