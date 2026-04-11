@@ -1,0 +1,422 @@
+{
+  "generated_at": "2026-04-11T09:15:32",
+  "hot_cache_candidates_deleted": [
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\0ad909002b5faf3b.pkl",
+      "size_bytes": 897202874
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\2e593b8255170ab5.pkl",
+      "size_bytes": 897202874
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\9826fa481644de80.pkl",
+      "size_bytes": 897202887
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\481bf21e00656314.pkl",
+      "size_bytes": 897202874
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\647aeb8b23a3c0e3.pkl",
+      "size_bytes": 190679821
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\01ca25e91d1dd337.pkl",
+      "size_bytes": 8602452
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\4c8252f517d68750.pkl",
+      "size_bytes": 190342537
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\a9cf64dc42792983.pkl",
+      "size_bytes": 190342577
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\8c78292a76bbcfb2.pkl",
+      "size_bytes": 172583167
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\c6cf9cbf4b7e3434.pkl",
+      "size_bytes": 118290696
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\eae8298a738cdddf.pkl",
+      "size_bytes": 154484054
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\1d7126caf424128c.pkl",
+      "size_bytes": 190679821
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\9b02ea385a5b721b.pkl",
+      "size_bytes": 294233270
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\ab7e01c5198efe63.pkl",
+      "size_bytes": 190342577
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\2ba4b691b566f111.pkl",
+      "size_bytes": 190846707
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\14060fdb36ed423e.pkl",
+      "size_bytes": 294231510
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\34a8cc03fa15edf9.pkl",
+      "size_bytes": 352955421
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\4be3c8686b744a74.pkl",
+      "size_bytes": 191015657
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\f5ead4e154e6b5c7.pkl",
+      "size_bytes": 352955618
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\feca16d66d1dafb0.pkl",
+      "size_bytes": 191015697
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\3da22d3922fabc17.pkl",
+      "size_bytes": 190341100
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\0500fa1290ab42e2.pkl",
+      "size_bytes": 195547851
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\features\\fc7d2ef1dc47adac.pkl",
+      "size_bytes": 354206290
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\f522ac49b6e55f99.pkl",
+      "size_bytes": 1989332677
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\7dd7d304eae58829.pkl",
+      "size_bytes": 713793675
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\1fd9bc46ba5971a3.pkl",
+      "size_bytes": 1144961646
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\b974ba28591a1072.pkl",
+      "size_bytes": 1821340497
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\476257fd11767729.pkl",
+      "size_bytes": 2537704154
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\4cc503117dcfd8a9.pkl",
+      "size_bytes": 3522656195
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\8b4863a2e1b4b0e1.pkl",
+      "size_bytes": 5317942628
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\49fe0f74c4312a39.pkl",
+      "size_bytes": 1380545765
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\e5223d0dd3af7cb5.pkl",
+      "size_bytes": 2214468155
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\b037a4f58c6bf508.pkl",
+      "size_bytes": 3522656195
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\03bc4400f0141422.pkl",
+      "size_bytes": 2084125304
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\342601725ced8352.pkl",
+      "size_bytes": 3343047926
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\89e8c552d21dd869.pkl",
+      "size_bytes": 2064339355
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\06e9cce8d1fdbbdf.pkl",
+      "size_bytes": 6406781340
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\8d2db56af427bb49.pkl",
+      "size_bytes": 6417415301
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\345bf9757e9cd752.pkl",
+      "size_bytes": 3535479420
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\fe5be8d3536dade6.pkl",
+      "size_bytes": 1370461034
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\a8c75e81a3cbb360.pkl",
+      "size_bytes": 2194581947
+    },
+    {
+      "path": "daily_research\\cache\\deep_alpha\\corpus\\0a42ad9b8b7c0340.pkl",
+      "size_bytes": 3487472892
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\e6e20443b310d4da7420.pkl",
+      "size_bytes": 6210835
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\9c7d5ab57ec93fe156d5.pkl",
+      "size_bytes": 17680531
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\9c0fdcfe87c23142df61.pkl",
+      "size_bytes": 6596371
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\ea7e961dbdf2144c949f.pkl",
+      "size_bytes": 12180831
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\53c4023d76d1e5767144.pkl",
+      "size_bytes": 6090343
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\37cf16aa1ea3d68fa5ca.pkl",
+      "size_bytes": 596333
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\2ff614a9223f811ebb98.pkl",
+      "size_bytes": 6114439
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\a62d1fc7f1c0c130ea2e.pkl",
+      "size_bytes": 620429
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\e9f39694e5efbd0119ab.pkl",
+      "size_bytes": 572237
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\881a2da2b05876e06033.pkl",
+      "size_bytes": 5536135
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\3429b94acd3cc75a6c50.pkl",
+      "size_bytes": 5801191
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\b26a86dfb64181c41f21.pkl",
+      "size_bytes": 5704807
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\1f058e22b59ac5f7f9d1.pkl",
+      "size_bytes": 6596371
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\5528146ea3e74122a741.pkl",
+      "size_bytes": 12180831
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\f4e3d39e913ee2ea1d25.pkl",
+      "size_bytes": 15407696
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\c892209c00f4a709c152.pkl",
+      "size_bytes": 12045579
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\ea3947c7310ed74a7280.pkl",
+      "size_bytes": 8684870
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\2228424d826d81ac6877.pkl",
+      "size_bytes": 5183207
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\c7f9310924224aadc896.pkl",
+      "size_bytes": 4252553
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\ff039daa8665c9a64c3f.pkl",
+      "size_bytes": 3170412
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\487beea3ecb3765e80f2.pkl",
+      "size_bytes": 4270217
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\086a51f143a061a30711.pkl",
+      "size_bytes": 3183804
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\3ff3077d0890ca78fb7b.pkl",
+      "size_bytes": 5205767
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\80ae9e5b02c9d37c80b8.pkl",
+      "size_bytes": 596333
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\dbab7e1d22b2ee573443.pkl",
+      "size_bytes": 6162631
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\af7cc85836bf49059474.pkl",
+      "size_bytes": 6162631
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\9734250c64a49848d907.pkl",
+      "size_bytes": 6620467
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\13c8450ce1d3cb23253e.pkl",
+      "size_bytes": 12327999
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\2d787e99cceea0089527.pkl",
+      "size_bytes": 18909427
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\cc048da5cc3ce2bac81b.pkl",
+      "size_bytes": 19969651
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\raw\\a1990aed373458c77c90.pkl",
+      "size_bytes": 21415411
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\prepared\\8b1c80ee696866b71fc1.pkl",
+      "size_bytes": 84437819
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\prepared\\3635451ec18633cdcf88.pkl",
+      "size_bytes": 84437819
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\prepared\\67ce50cb6f92c8c9a433.pkl",
+      "size_bytes": 84746889
+    },
+    {
+      "path": "daily_research\\cache\\advanced_ml\\prepared\\7e741bf2262c442ab926.pkl",
+      "size_bytes": 84746889
+    }
+  ],
+  "archive_cache_deleted": [
+    {
+      "path": "daily_research\\archive\\cache\\deep_alpha",
+      "size_bytes": 426448835445
+    },
+    {
+      "path": "daily_research\\archive\\cache\\advanced_ml",
+      "size_bytes": 42128838107
+    }
+  ],
+  "tmp_output_deleted": [
+    {
+      "path": "daily_research\\output\\tmp_formal_attack_recheck_20260409_r1",
+      "size_bytes": 20117770
+    },
+    {
+      "path": "daily_research\\output\\tmp_month_attack_probe_20260409_r1",
+      "size_bytes": 26725999
+    },
+    {
+      "path": "daily_research\\output\\tmp_policy_v2_k2_10d_probe",
+      "size_bytes": 7314662
+    },
+    {
+      "path": "daily_research\\output\\tmp_policy_v2_k2_20d_probe",
+      "size_bytes": 7447863
+    },
+    {
+      "path": "daily_research\\output\\tmp_policy_v2_k2_3d_probe",
+      "size_bytes": 7217771
+    },
+    {
+      "path": "daily_research\\output\\tmp_policy_v2_k2_5d_probe",
+      "size_bytes": 7240374
+    },
+    {
+      "path": "daily_research\\output\\tmp_policy_v2_raw_1d_probe",
+      "size_bytes": 7577970
+    },
+    {
+      "path": "daily_research\\output\\tmp_recent_attack_probe_20260409_r1",
+      "size_bytes": 1411715
+    }
+  ],
+  "monitor_files_deleted": [
+    {
+      "path": "daily_research\\output\\recent_protocol_completion_monitor_20260410_r1.log",
+      "size_bytes": 487
+    },
+    {
+      "path": "daily_research\\output\\recent_protocol_completion_monitor_20260410_r1.json",
+      "size_bytes": 465
+    }
+  ],
+  "pycache_deleted": [
+    {
+      "path": "t0_project\\__pycache__",
+      "size_bytes": 186699,
+      "kind": "dir"
+    },
+    {
+      "path": "daily_research\\__pycache__",
+      "size_bytes": 53942,
+      "kind": "dir"
+    },
+    {
+      "path": "daily_research\\baseline\\__pycache__",
+      "size_bytes": 711870,
+      "kind": "dir"
+    },
+    {
+      "path": "daily_research\\execution\\__pycache__",
+      "size_bytes": 390856,
+      "kind": "dir"
+    },
+    {
+      "path": "daily_research\\deep_alpha\\__pycache__",
+      "size_bytes": 1374733,
+      "kind": "dir"
+    },
+    {
+      "path": "daily_research\\tools\\__pycache__",
+      "size_bytes": 464364,
+      "kind": "dir"
+    }
+  ],
+  "summary": {
+    "hot_cache_candidates_deleted": {
+      "count": 77,
+      "size_bytes": 63256034193
+    },
+    "archive_cache_deleted": {
+      "count": 2,
+      "size_bytes": 468577673552
+    },
+    "tmp_output_deleted": {
+      "count": 8,
+      "size_bytes": 85054124
+    },
+    "monitor_files_deleted": {
+      "count": 2,
+      "size_bytes": 952
+    },
+    "pycache_deleted": {
+      "count": 6,
+      "size_bytes": 3182464
+    }
+  },
+  "total_deleted_bytes": 531921945285
+}

@@ -11613,3 +11613,61 @@ position,000001.SZ,1200,12.38,
   - 但它没有修复 `policy_v2` 的 formal gap，也没有成为 latest recent 一年 winner
   - 因此 learned-control 主研究分支继续保持为 `short_expert_policy_v2`
   - 当前默认执行不变，继续维持 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+
+## 2026-04-11 - independent recent 协议纠偏与全项目收口
+
+- strongest-model 的 recent 层正式从 replay recent 改成了 `independent_recent_model_as_of_recent_start`。
+- 当前 strongest-model 的 corrected recent 窗口固定为 `2025-04-11 -> 2026-04-10`，对应训练截止 `2025-04-10`。
+- corrected strongest 结果收口为：
+  - `formal winner = short_expert_monthly_v1`
+  - `recent winner = baseline_current`
+  - `promotable winner = short_expert_monthly_v1`
+- corrected recent 关键读数：
+  - `baseline_current`: robust `0.0982`, recent excess annual `84.38%`, profile `regoff_k1_20d_ensemble_native_anchor`
+  - `short_expert_monthly_v1`: robust `0.0778`, recent excess annual `55.11%`, profile `regoff_k2_5d_ensemble_native_anchor`
+  - `state_liquidity_listwise_v1`: robust `-0.0019`, recent excess annual `15.53%`
+- corrected learned-control recent 结果收口为：
+  - `policy_v2`: robust `0.0871`, recent excess annual `93.01%`
+  - `policy_v1`: robust `0.0744`
+  - `policy_v3`: robust `0.0390`, recent excess annual `45.84%`
+- 因此 learned-control 主研究分支继续保持为 `short_expert_policy_v2`，`policy_v3` 不进入默认执行晋升链。
+- 本轮同步修复了 strongest / policy recent verdict 工具的 `summary.md` 输出文案，避免继续生成乱码决策段。
+- 本机训练纪律也正式钉死为：
+  - `yolos`
+  - 前台执行
+  - `num_workers = 0`
+  - `pin_memory = false`
+  - 未经用户明确允许，不重新启用 CPU 并行供数
+
+## 2026-04-11 - 第二轮 replay-based 入口瘦身归档
+
+- 新增 `daily_research/archive/output/replay_based_reference_index.md`
+- 新增 `daily_research/archive/output/replay_based_reference_index.json`
+- 这次归档是“入口级归档”，不是 payload 物理搬迁；原始根仍保留在 `daily_research/output/`。
+- 当前 brain 主文档里的旧 replay-based recent、current-default repair、gross-control sweep、execution audit 与 targeted repair 入口，已统一收口到上述索引。
+- 从这个节点开始：
+  - `project_map.md` 只保留当前正式真源与单点 archive 入口
+  - `working_memory.md` 只保留当前结论，不再散落直引旧 replay-based 根
+  - `action_system.md` 先给 archive index，再按需下钻旧 replay-based 原始根
+
+## 2026-04-11 - 热区冗余与缓存实删清理
+
+- 先执行了 `workspace_maintenance.py report` 与 `archive` dry-run，确认当时热区压力主要来自：
+  - `daily_research/cache = 96.86 GB`
+  - `daily_research/output = 71.85 GB`
+  - 其中 `deep_alpha/corpus` 与 `deep_alpha/features` 是最大 cache 热点
+- 随后按“只删可重建 cache 与明显临时产物”的原则做了真实删除，不走后台，不动当前默认执行真源。
+- 本轮新增清理 manifest：
+  - `daily_research/archive/manifests/cleanup_20260411_disk_trim_r1.json`
+- 本轮实删汇总：
+  - 热区旧 cache 候选：`77` 项，约 `58.91 GB`
+  - 冷区 archived cache payload：`2` 个大目录，约 `436.40 GB`
+  - `daily_research/output/tmp_*` 临时 probe 目录：`8` 个，约 `81.11 MB`
+  - paused monitor 残留：`2` 个文件
+  - `__pycache__ / *.pyc`：`6` 项目录级缓存
+- 合计真实删除约 `495.39 GB`
+- 清理后复查：
+  - `daily_research/cache` 下降到 `37.95 GB`
+  - `daily_research/archive` 下降到近乎空壳，只保留 README、manifest 与索引
+  - `__pycache__` 与 `*.pyc` 已清零
+- 本轮没有继续删除 `daily_research/output` 里的大实验根，因为其中多项仍被脚本默认值、工具入口或历史真源直接引用；只清掉了确认无引用的 `tmp_*` 临时 probe 输出。

@@ -41,7 +41,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def _source_rows() -> list[dict[str, Any]]:
-    short_alpha_monthly_root = OUTPUT_ROOT / "short_alpha_formal_head2head_20260405_monthly_checkpoint_r1"
     return [
         {
             "entry_name": "short_expert_monthly_v1__monthly_first_formal",
@@ -269,8 +268,8 @@ def _build_summary(rows: pd.DataFrame, recent_df: pd.DataFrame, recent_summary: 
         [
             "",
             "## Decision",
-            f"- 当前 formal strongest research model 是 `{winner['profile_name']}`；recent 已按独立 recent-start 最新模型补齐。",
-            f"- 当前 recent 12 个月 winner 是 `{recent_summary.get('recent_winner_profile_name', '')}`；它只回答最近一年兑现情况，不回填替代 formal strongest gate。",
+            f"- 当前 formal strongest research model 是 `{winner['profile_name']}`，recent 已按独立 recent-start 最新模型补齐。",
+            f"- 当前 recent 12 个月 winner 是 `{recent_summary.get('recent_winner_profile_name', '')}`；它只回答最近一年兑现质量，不替代 formal strongest gate。",
             f"- 当前 promotable winner 单独展示为 `{promotable_winner.get('profile_name', '')}`；这样 formal / recent / default 三层语义不再混写。",
             f"- 按当前治理协议，后续默认执行若要变更，仍应先把 `{promotable_winner.get('profile_name', '')}` 物化成 latest-data `production full-fit + highest family budget`。",
         ]

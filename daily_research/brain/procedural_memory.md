@@ -1,6 +1,6 @@
 # Daily Research 方法记忆
 
-快照日期：`2026-04-10`
+快照日期：`2026-04-11`
 
 ## 1. 总原则
 - 用户最新提出的要求拥有最高优先级。
@@ -105,3 +105,12 @@
   - 正式训练、formal 回放、recent 回放与最终 summary 默认统一使用 `yolos` 环境；其它环境只允许做非正式探查，不得混入正式 verdict。
   - 如果 `policy_v2` 的 constrained formal review 显示 `k2_20d` 仍是 best constrained answer，就不允许再把 formal gap 简化表述成“桥太慢”；必须分开讨论“桥选择问题”和“learned score-to-weight 本体问题”。
   - 如果 `policy_v3` 这类更接近端到端执行的 learned-control 分支，同时没打赢 current mainline 的 formal monthly-first gate，也没打赢 companion 的 recent 12 个月 gate，就必须保留既有默认执行不动，只把它记为研究分支，不得越级 promotion。
+
+## 12. 当前协议维护规则
+- 被问到 strongest-model 的 recent 结论时，只允许引用独立 recent-start 最新模型产物，不再引用 replay recent。
+- strongest-model 现在必须分成三层回答：`formal winner`、`recent winner`、`promotable winner`；三层不得再混写成单一“当前最强模型”。
+- 当前 strongest-model 三层标准答案是：`formal winner = short_expert_monthly_v1`，`recent winner = baseline_current`，`promotable winner = short_expert_monthly_v1`。
+- 被问到 learned-control recent 结论时，当前标准答案是：`policy_v2 > current default > policy_v1 > policy_v3 > state_liquidity_listwise_v1`，其中 `policy_v2` 是 corrected recent winner。
+- 旧的 replay-recent 输出若与 corrected recent 冲突，一律降级为参考读数，不得继续写成当前口径。
+- 旧 replay-based 机制根统一经 `daily_research/archive/output/replay_based_reference_index.md` 引用；`project_map / working_memory / action_system` 不再散落直引这些路径。
+- 本机正式训练纪律补充为：`yolos`、前台执行、`num_workers = 0`、`pin_memory = false`；未经用户明确批准，不重新启用 CPU 并行供数。

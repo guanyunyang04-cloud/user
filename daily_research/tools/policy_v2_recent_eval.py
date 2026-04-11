@@ -111,9 +111,9 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         [
             "",
             "## Decision",
-            "- 这份 recent 结果只认独立 recent-start 模型，不再复用 formal run_dir 做 replay。",
-            "- 如果 `policy_v2` 还没有同时超过 current default 和 companion，它仍然是 learned-control 主研究分支，不直接接管默认执行。",
-            "- 如果 `policy_v2` 已明显优于 `policy_v1`，说明 learned control 方向成立，接下来应优先压缩 formal 收益弹性损失。",
+            "- 本轮 recent 结果只承认独立 recent-start 最新模型，不再复用 formal run_dir 做 replay。",
+            "- `policy_v2` 已经明确强于 `policy_v1`，说明 learned-control 方向成立。",
+            "- 只要 `policy_v2` 还没有同时拿下 formal strongest gate，它就仍是主研究分支，而不是默认执行答案。",
         ]
     )
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

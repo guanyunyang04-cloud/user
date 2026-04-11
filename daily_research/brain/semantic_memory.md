@@ -1,6 +1,6 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-09`
+快照日期：`2026-04-11`
 
 ## 1. 项目身份
 - `daily_research` 维护一条面向主板 A 股、以执行后净收益最大化为主目标的研究-执行统一链路。
@@ -62,7 +62,7 @@
 
 ## 6. 当前稳定研究与执行结论
 - 在 `liquid500 + execution_first + formal 3 windows + primary_monthly_robust_score + window_count=3` strongest-model gate 下，`short_expert_monthly_v1` 是当前 strongest research model。
-- `state_liquidity_listwise_v1` 是当前 recent 一年 `12` 个月窗口里的 companion winner，用于回答最近一年兑现质量。
+- `baseline_current` 是当前 strongest-model recent 一年 `12` 个月窗口里的 recent winner，用于回答最近一年兑现质量。
 - `state_liquidity_listwise_v1` 仍是当前 short-alpha 主线最强 stable base model。
 - 按当前新协议，研究最强模型默认可以直接作为执行默认，不再额外设置独立 promotion 哲学阻塞层。
 - 但最终写入默认执行的产物，仍必须先用最新可标注数据做一次 `production full-fit`，并默认使用该 family 当前最高预算；不允许为了省算力沿用旧模型、低预算 probe 或未重训产物。
@@ -94,3 +94,13 @@
 - `environment_model.md` 只保留环境、解释器、工具与编码口径。
 - `action_system.md` 只保留高频操作入口。
 - `episodic_memory.md` 只保留历史过程与原始证据。
+
+## 9. 当前协议补充
+- strongest-model 的 recent 层现在只承认 `independent_recent_model_as_of_recent_start`，不再复用 formal run_dir 做 replay recent。
+- 当前 strongest research model 仍是 `short_expert_monthly_v1`。
+- 当前 strongest-model 的 recent winner 是 `baseline_current`，对应 recent 一年 `monthly_robust_score = 0.0982`。
+- 当前 strongest-model 的 promotable winner 仍是 `short_expert_monthly_v1`；formal / recent / promotable 三层语义必须分开叙述。
+- `state_liquidity_listwise_v1` 仍是当前 short-alpha 主线最强 stable base model，但不再表述成 strongest-model 的 recent winner。
+- learned-control 分支里，当前 corrected recent winner 是 `short_expert_policy_v2`；`policy_v3` 目前没有打赢 `policy_v2`。
+- 旧 replay-based 机制根统一由 `daily_research/archive/output/replay_based_reference_index.md` 管理；主脑正文不再散落直引这些路径。
+- 本机正式训练纪律补充为：`yolos` + 前台执行 + `num_workers = 0` + `pin_memory = false`；未经用户明确允许，不重新启用 CPU 并行供数。

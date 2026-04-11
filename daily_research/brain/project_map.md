@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-10`
+快照日期：`2026-04-11`
 
 ## 1. 项目定义
 - `daily_research` 是一条以执行后净收益最大化为目标的研究-执行统一链路。
@@ -57,22 +57,16 @@
 - formal base-model verdict 根：`daily_research/output/short_alpha_formal_head2head_20260409_recheck_r1`
 - execution semantic verdict 根：`daily_research/output/short_alpha_execution_semantic_concentration_verdict_20260409_r1`
 - monthly-first scoreboard 根：`daily_research/output/short_alpha_monthly_first_execution_scoreboard_20260409_r1`
-- recent audit 根：`daily_research/output/short_alpha_production_execution_policy_audit_20260409_r2`
-- recent attack recheck 根：`daily_research/output/short_alpha_production_execution_policy_audit_20260409_r3_attack_recheck`
-- same-window targeted review 根：`daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_monthly_k2_review_20260409_r3`
 - 30% 强月 verdict 根：`daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`
-- recent 根因拆解根：`daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`
-- current default signal/cash repair verdict 根：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`
-- current default follow-up repair verdict 根：`daily_research/output/short_alpha_current_default_followup_repair_20260410_r1`
-- current default gross-control sweep 根：`daily_research/output/short_alpha_current_default_gross_control_sweep_20260410_r1`
 - policy_v2 constrained formal review 根：`daily_research/output/short_alpha_policy_v2_constrained_execution_review_20260410_r1`
 - policy_v2 formal loss breakdown 根：`daily_research/output/short_alpha_policy_v2_formal_loss_breakdown_20260410_r1`
 - policy_v3 latest formal review 根：`daily_research/output/short_alpha_policy_v3_review_20260410_r1`
 - policy_v3 latest recent eval 根：`daily_research/output/short_alpha_policy_v3_recent_eval_20260410_r1`
+- 旧 replay-based / 历史机制参考索引：`daily_research/archive/output/replay_based_reference_index.md`
 
 ## 8. 当前主问题
-- strongest-model research 层问题已经收口完成：formal winner、recent companion evidence、latest-data production full-fit 与默认执行接管都已打通。
-- live 层当前主问题：如何让 `short_expert_monthly_v1 + k2` 新默认链，在最近一年 `12` 个月口径下缩小或反超 `state_liquidity_listwise_v1` 的 companion 优势。
+- strongest-model research 层问题已经收口完成：formal winner、corrected recent evidence、latest-data production full-fit 与默认执行接管都已打通。
+- live 层当前主问题：如何让 `short_expert_monthly_v1 + k2` 新默认链，在最近一年 `12` 个月 corrected recent 口径下解释并收敛与 `baseline_current` 的差异。
 - current default 的 recent 一年主因已经有第一轮量化拆解：问题更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”，不是“模型完全不会看市场状态”。
 - 股票池当前更像是天花板约束，而不是 recent 差距的第一主因；winner 与 companion 当前使用的是同一个固定 `liquid500` 池。
 - execution optimization 层问题：如何在 `k2` 主线之上继续改善月度分布、弱月修复与集中度，同时维持当前 raw 统一语义。
@@ -94,5 +88,18 @@
   - current default 主线的 hand-crafted 控制层目前已经基本收敛：best gross-only 修补是 `winner_gross_map_u097_f098_d088`，提升真实存在，但仍未超过 companion。
   - `policy_v2` 的 constrained formal review 已证明：best constrained answer 仍是 `regoff_k2_20d_ensemble_native_anchor`，所以当前 formal gap 不能再简单归因成“桥太慢”。
   - `policy_v2` 的 formal loss breakdown 已证明：`raw_1d` 不是可部署答案，手工收紧候选数与 gross band 也没有单独救回 formal gap；下一步 learned-control 应优先改 learned score-to-weight 本体，而不是继续堆更多手工稀疏化。
-  - `policy_v3` 的 latest-window formal / recent 都已补齐；它 formal `monthly_robust_score = 0.0786`、recent `monthly_robust_score = -0.0143`，都没有打赢 `policy_v2` 或 companion，因此当前 learned-control 主研究分支仍是 `short_expert_policy_v2`，不是 `policy_v3`。
+  - `policy_v3` 的 latest-window formal / corrected recent 都已补齐；它 formal `monthly_robust_score = 0.0786`、corrected recent `monthly_robust_score = 0.0390`，都没有打赢 `policy_v2`，因此当前 learned-control 主研究分支仍是 `short_expert_policy_v2`，不是 `policy_v3`。
   - 本轮所有正式训练、formal / recent 回放与结论生成均已锁定 `yolos` 环境。
+
+## 9. 当前地图修正
+- strongest-model 主线现在要分三层看：
+  - `formal winner = short_expert_monthly_v1`
+  - `recent winner = baseline_current`
+  - `promotable winner = short_expert_monthly_v1`
+- 因此当前研究层主矛盾不再是“`short_expert` 如何打赢 `state_liquidity` 的 recent companion”，而是“`short_expert` 这条默认执行主线如何解释并收敛与 `baseline_current` 的 corrected recent 差异”。
+- learned-control 层当前也要分两层看：
+  - `formal main research branch = short_expert_policy_v2`
+  - `recent winner inside learned-control/default/companion pack = short_expert_policy_v2`
+- `policy_v3` 目前 formal 和 corrected recent 都没有打赢 `policy_v2`，因此不进入默认执行晋升主线。
+- 旧 replay-recent 口径下的 recent root-cause、cash-sizing repair、follow-up repair、execution audit 与 targeted repair 原始根，现统一收口到 `daily_research/archive/output/replay_based_reference_index.md`，不再在主地图散落直引。
+- 本机正式训练地图补充为：`yolos` + 前台 + `num_workers = 0` + `pin_memory = false`。

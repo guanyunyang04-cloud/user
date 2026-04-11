@@ -111,9 +111,9 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         [
             "",
             "## Decision",
-            "- 这份 recent 结果只认独立 recent-start 模型，不再复用 formal run_dir 做 replay。",
-            "- `policy_v3` 只有在同时打赢 `policy_v2`、current default 和 companion 时，才具备默认候选资格。",
-            "- 如果 `policy_v3` 仍弱于 `policy_v2`，说明“再多学一点执行动作”这一步还没有转化成更强的最近一年月度兑现。",
+            "- 本轮 recent 结果只承认独立 recent-start 最新模型，不再复用 formal run_dir 做 replay。",
+            "- `policy_v3` 只有在同窗 recent 里同时打赢 `policy_v2`、current default 和 companion，才具备默认候选资格。",
+            "- 当前 `policy_v3` 没有满足这个条件，所以 learned-control 主研究分支仍然保持为 `policy_v2`。",
         ]
     )
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

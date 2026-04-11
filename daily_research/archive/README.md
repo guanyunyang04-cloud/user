@@ -25,6 +25,15 @@
 - `daily_research/archive_policy.json`
 - `daily_research/archive/manifests/` 下的归档清单
 
+## 入口级归档
+
+- 第二轮瘦身后，旧 `replay-based` 产物默认不再在 brain 主文档中散落直引。
+- 当前统一入口：
+  - `daily_research/archive/output/replay_based_reference_index.md`
+  - `daily_research/archive/output/replay_based_reference_index.json`
+- 这属于“入口级归档”，不等于立即物理搬运 payload；原始实验根仍保留在 `daily_research/output/`，但语义上统一降级为 `mechanism_reference_only`。
+- 若旧 `replay-based` 读数与 corrected recent、current default 或最新 strongest verdict 冲突，一律以后者为准。
+
 ## 默认归档纪律
 
 1. 先保留热区最近一段时间的结果，避免打断正在复盘的研究。
