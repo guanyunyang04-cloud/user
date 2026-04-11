@@ -61,17 +61,22 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\current_default_signal_cash_repair_verdict.py
 ```
 
-### 3.9 重刷 single-mapping 观察分支
+### 3.9 current default follow-up repair verdict
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\current_default_followup_repair_verdict.py
+```
+
+### 3.10 重刷 single-mapping 观察分支
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_short_alpha_execution_single_mapping_candidate_pipeline.py --live-only --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --root-tag short_alpha_execution_single_mapping_candidate_pipeline_20260409_r2
 ```
 
-### 3.10 重新激活 single-mapping 观察分支
+### 3.11 重新激活 single-mapping 观察分支
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\activate_execution_single_mapping_candidate.py --pipeline-root daily_research\output\short_alpha_execution_single_mapping_candidate_pipeline_20260409_r2 --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.11 一致性检查
+### 3.12 一致性检查
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\project_consistency_check.py
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\doc_guard.py check
@@ -94,6 +99,7 @@
 - 被问到“当前 strongest winner 在 recent 一年到底表现怎样”时，优先引用 `daily_research/output/short_alpha_deep_capacity_recent_eval_20260410_r1`。
 - 被问到“为什么 current default 的月度分布不稳、问题到底出在哪”时，优先引用 `daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`。
 - 被问到“current default 下一包 signal-to-weight / cash sizing 修补谁最强”时，优先引用 `daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`。
+- 被问到“current default 第二轮 follow-up 修补谁最强、gross-control 是否真的是主因”时，优先引用 `daily_research/output/short_alpha_current_default_followup_repair_20260410_r1`。
 - 被问到“当前 execution mainline 是什么”时，优先引用：
   - `daily_research/output/active_execution_strategy.json`
   - `daily_research/output/deep_alpha_short_alpha_execalign_production_default/production_retrain_manifest.json`
@@ -134,8 +140,66 @@
 - 当前 deep capacity 结论：纯加深 `patch_transformer` 没有带来 formal uplift，`short_expert_policy_v1_deep` 接近但仍未胜出；`short_expert_mamba_policy_v1` 因当前 GPU wall-clock 过慢未完成同协议评估。
 - 当前 strongest winner 的 recent 一年 readout：`short_expert_monthly_v1` excess annual `20.11%`、excess Sharpe `1.154`、positive month ratio `53.85%`、median monthly excess `0.02%`、worst month `-6.89%`，属于“有正超额，但月度分布偏弱”。
 - 当前 recent 根因拆解结论：月度分布不稳的第一主因更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”；股票池是上限约束，但不是 winner 与 companion 差距的第一主因。
-- 当前 current-default repair 结论：overall recent winner 仍是 `state_liquidity_listwise_v1` companion baseline，但 current-default 自己内部的 repair winner 已经变成 `winner_current_target_market_state_guard_v1`；这说明眼下该优先修的是 `cash sizing guard`，不是更激进的 `score_weight_k2`。
-- current-default repair winner 的 current live preview 已落到 `daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`。
+- 当前 current-default repair 结论：第一轮 same-protocol 小修里，winner-side repair winner 是 `winner_current_target_market_state_guard_v1`；这一步先证明了“先修 cash sizing 比先修 signal-to-weight 更对”。
+- 当前 current-default follow-up 结论：第二轮 winner-side repair winner 已进一步进到 `winner_current_target_market_state_guard_v2_balance`；它把 monthly_robust_score 从 `0.046` 抬到 `0.060`，但 overall recent winner 仍是 `state_liquidity_listwise_v1` companion baseline 的 `0.073`。
+- 当前控制层迁移结论：winner 借用 companion 的 gross 会变好、companion 借用 winner 的 gross 会变差，说明 gross-control 已经是 current default gap 的有证据主因之一。
+- current-default follow-up repair winner 的 current live preview 已落到 `daily_research/output/short_alpha_current_default_followup_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`。
 - 当前 `policy_v1` 状态：`short_expert_policy_v1` 已接入训练/推理主链，并通过 validation-panel smoke；但 formal / recent 证据尚未补齐，当前仍是 research branch，不得冒充默认执行。
 - 当前 `policy_v1` latest-formal 状态：单窗 review 已补齐，但仍落后于 `short_expert_monthly_v1`，所以当前只能继续作为 research branch。
 - 当前 `policy_v1` deep 状态：`short_expert_policy_v1_deep` 已完成 latest-window formal 对照，但仍未超过当前 mainline；因此“可学习选股/持仓转换”方向保留，单纯加深不单独晋升。
+- 2026-04-10 最新补充：
+  - 被问到“current default 的 gross-control 这条线还能不能继续压”时，优先引用 `daily_research/output/short_alpha_current_default_gross_control_sweep_20260410_r1`。
+  - 被问到“`policy_v2` 到底有没有比 `policy_v1` 更强”时，先同时引用：
+    - `daily_research/output/short_alpha_policy_v2_review_20260410_r1`
+    - `daily_research/output/short_alpha_policy_v2_recent_eval_20260410_r1`
+  - 当前 learned-control 正式口径：
+    - `policy_v2` formal 还不是 winner
+    - `policy_v2` recent 一年明显优于 current default 与 `policy_v1`
+    - `policy_v2` recent robust 已几乎追平 companion
+  - 当前 learned-control 默认动作不是 promotion，而是继续围绕 `short_expert_policy_v2` 排查 execution-alignment profile 漂移与收益弹性损失。
+  - 被问到“`policy_v2` 的 formal gap 是不是只是桥太慢”时，优先引用：
+    - `daily_research/output/short_alpha_policy_v2_constrained_execution_review_20260410_r1`
+    - `daily_research/output/short_alpha_policy_v2_formal_loss_breakdown_20260410_r1`
+  - 当前对此问题的正式答案是：
+    - `policy_v2` 的 constrained formal best 仍是 `regoff_k2_20d_ensemble_native_anchor`
+    - formal gap 不能再被简化成“桥太慢”
+    - 下一步应优先改 learned score-to-weight 本体，而不是继续堆手工 candidate cap / gross band
+  - 被问到“`policy_v3` 有没有资格接默认”时，优先引用：
+    - `daily_research/output/short_alpha_policy_v3_review_20260410_r1`
+    - `daily_research/output/short_alpha_policy_v3_recent_eval_20260410_r1`
+  - 当前 `policy_v3` 正式口径：
+    - formal profile 仍是 `regoff_k2_20d_ensemble_native_anchor`
+    - formal `monthly_robust_score = 0.0786`，低于 current mainline `0.1012`、companion `0.0897`、`policy_v2 = 0.0830`
+    - recent `monthly_robust_score = -0.0143`，虽高于 current default `-0.0370`，但低于 `policy_v2 = -0.0061` 与 companion `0.0588`
+    - 因此 `policy_v3` 当前不是默认候选，当前默认执行保持不变
+  - 本轮正式训练、formal 回放、recent 回放与结论生成已统一锁定 `yolos` 环境。
+
+### 3.13 current default gross-control sweep verdict
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\current_default_gross_control_sweep_verdict.py
+```
+
+### 3.14 policy_v2 recent eval
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_recent_eval.py
+```
+
+### 3.15 policy_v2 constrained formal review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_constrained_execution_review.py
+```
+
+### 3.16 policy_v2 formal loss breakdown
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_formal_loss_breakdown.py
+```
+
+### 3.17 policy_v3 formal review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v3_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --execution-alignment-candidate-profiles "raw_1d,topk2_1d_regoff,regoff_k2_3d_ensemble_native_anchor,regoff_k2_5d_ensemble_native_anchor,regoff_k2_10d_ensemble_native_anchor,regoff_k2_20d_ensemble_native_anchor"
+```
+
+### 3.18 policy_v3 recent eval
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v3_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```

@@ -30,7 +30,7 @@ from daily_research.deep_alpha.research_objective import resolve_primary_backtes
 
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 STAGE_SEQUENCE = ("backbone", "score_head", "ranking", "relation")
-SCORE_HEAD_CHOICES = ("manual", "ridge", "lgbm", "policy_v1")
+SCORE_HEAD_CHOICES = ("manual", "ridge", "lgbm", "policy_v1", "policy_v2", "policy_v3")
 
 
 @dataclass(frozen=True)
@@ -129,7 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--score-risk-mode", choices=["subtract", "gate", "state_gate", "state_liquidity_gate"], default="state_gate")
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
     parser.add_argument("--train-eval-window-days", type=int, default=126)
-    parser.add_argument("--score-head-candidates", default="manual,ridge,lgbm,policy_v1")
+    parser.add_argument("--score-head-candidates", default="manual,ridge,lgbm,policy_v1,policy_v2,policy_v3")
 
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)

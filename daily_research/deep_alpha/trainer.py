@@ -33,6 +33,7 @@ class EpochRecord:
     valid_proto_loss: float
     selection_metric_name: str = "valid_loss"
     selection_metric_value: float = float("nan")
+    selection_metric_skipped: bool = False
 
 
 @dataclass
@@ -810,6 +811,7 @@ def train_multitask_model(
                 valid_proto_loss=float(record.get("valid_proto_loss", 0.0)),
                 selection_metric_name=str(record.get("selection_metric_name", "valid_loss")),
                 selection_metric_value=float(record.get("selection_metric_value", float("nan"))),
+                selection_metric_skipped=bool(record.get("selection_metric_skipped", False)),
             )
             for record in payload_history
         ]
@@ -1176,16 +1178,23 @@ def train_multitask_model(
                     )
                 except Exception:
                     epoch_record.selection_metric_value = float("nan")
+                epoch_record.selection_metric_skipped = bool(callback_payload.get("skip_selection_update", False))
             else:
                 epoch_record.selection_metric_name = "valid_loss"
                 epoch_record.selection_metric_value = current_valid
+                epoch_record.selection_metric_skipped = False
             history.append(epoch_record)
             last_state = deepcopy(model.state_dict())
+            selection_display = (
+                "skipped"
+                if epoch_record.selection_metric_skipped
+                else f"{epoch_record.selection_metric_value:.4f}"
+            )
             progress_write(
                 f"epoch {epoch}/{epochs} | train={epoch_record.train_loss:.4f} "
                 f"| valid={epoch_record.valid_loss:.4f} | rank={epoch_record.valid_rank_loss:.4f} "
                 f"| listwise={epoch_record.valid_listwise_loss:.4f} | "
-                f"{epoch_record.selection_metric_name}={epoch_record.selection_metric_value:.4f}"
+                f"{epoch_record.selection_metric_name}={selection_display}"
             )
             if np.isfinite(current_valid):
                 scheduler.step(current_valid)
@@ -1197,16 +1206,19 @@ def train_multitask_model(
                         best_selection_metric = current_valid
                         improved = True
                 else:
-                    metric_value = float(epoch_record.selection_metric_value)
-                    if np.isfinite(metric_value) and metric_value > best_selection_metric + float(selection_improvement):
-                        best_selection_metric = metric_value
-                        improved = True
+                    if not epoch_record.selection_metric_skipped:
+                        metric_value = float(epoch_record.selection_metric_value)
+                        if np.isfinite(metric_value) and metric_value > best_selection_metric + float(selection_improvement):
+                            best_selection_metric = metric_value
+                            improved = True
                 if improved:
                     best_state = deepcopy(model.state_dict())
                     selected_epoch = int(epoch)
                     selected_metric_name = str(epoch_record.selection_metric_name)
                     selected_metric_value = float(epoch_record.selection_metric_value)
                     no_improve_epochs = 0
+                elif normalized_selection_mode != "valid_loss" and epoch_record.selection_metric_skipped:
+                    no_improve_epochs = int(no_improve_epochs)
                 else:
                     no_improve_epochs += 1
                 if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):

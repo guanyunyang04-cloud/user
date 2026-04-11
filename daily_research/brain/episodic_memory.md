@@ -11459,3 +11459,157 @@ position,000001.SZ,1200,12.38,
 - 当前收口：
   - 根因拆解之后，第一包小修已经证明“先修 cash sizing”比“先修 signal-to-weight”更接近正确方向
   - 高年化但低 `monthly_robust_score` 的 `score_weight_k2` 路线保留为 attack bridge 观察分支，不直接晋升为 monthly-first repair winner
+
+## 2026-04-10 - current default follow-up repair verdict 完成，gross-control 主因进一步坐实
+- 新增工具：`daily_research/tools/current_default_followup_repair_verdict.py`
+- follow-up verdict root：`daily_research/output/short_alpha_current_default_followup_repair_20260410_r1`
+- 这轮把 current default 的第二包 same-protocol recent 一年修补扩成三类：
+  - `market_state_guard_v2`
+  - 控制层迁移（winner/companion 互换 row gross 与 state gross）
+  - 窄版 `signal-to-weight`（低波动 score blend / mild power）
+- 关键 challenger：
+  - `winner_current_target_market_state_guard_v2_companion_transfer`
+  - `winner_current_target_market_state_guard_v2_balance`
+  - `winner_current_target_month_state_guard_v2_companion_transfer`
+  - `winner_current_target_month_state_attack_defense_v2`
+  - `winner_current_target_market_state_guard_v2_balance_scoreblend15`
+  - `companion_current_target_winner_row_gross_transfer`
+  - `companion_current_target_winner_state_gross_transfer`
+- 机器结论：
+  - overall winner 仍是 `companion_current_target_static`
+  - winner-side repair winner 已从上一轮的 `winner_current_target_market_state_guard_v1` 进一步推进到 `winner_current_target_market_state_guard_v2_balance`
+  - 这说明 current default 的当前最强修补答案已经不是笼统的 “cash-sizing guard”，而是更具体的 `gross-control / market_state_guard_v2_balance`
+- 关键数字：
+  - current default `winner_current_target_static`：`monthly_robust_score = 0.0456`
+  - 第一轮 winner-side best repair `winner_current_target_market_state_guard_v1_reference`：`0.0519`
+  - 第二轮 winner-side best repair `winner_current_target_market_state_guard_v2_balance`：`0.0599`
+  - companion baseline `companion_current_target_static`：`0.0726`
+- 控制层迁移读数：
+  - winner 借用 companion 的逐日 gross 后，`monthly_robust_score` 提高约 `+0.0116`
+  - winner 借用 companion 的状态 gross 后，`monthly_robust_score` 提高约 `+0.0124`
+  - companion 借用 winner 的逐日 gross 后，`monthly_robust_score` 下降约 `-0.0056`
+  - companion 借用 winner 的状态 gross 后，`monthly_robust_score` 下降约 `-0.0025`
+- 这轮还给出了更具体的 gross map：
+  - winner 当前 state gross：`up 0.922 / flat 0.905 / down 0.973`
+  - companion state gross：`up 0.953 / flat 0.959 / down 0.960`
+  - balance map：`up 0.953 / flat 0.959 / down 0.893`
+- signal-to-weight 读数：
+  - `scoreblend15` 确实把 `score/weight Spearman` 从 `0.206` 抬到约 `0.218`
+  - 但 `monthly_robust_score` 仍低于 `market_state_guard_v2_balance`
+  - 因此窄版 `signal-to-weight` 当前只能做 secondary branch，不能抢 gross-control 的第一优先级
+- current live preview：
+  - plan：`daily_research/output/short_alpha_current_default_followup_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`
+  - `2026-04-09` 信号对应 `trend_down_low_vol`
+  - 预览结果仍无明确调仓动作
+- 当前收口：
+  - gross-control 已从“嫌疑”升级成“有同向迁移证据支持的主因之一”
+  - 下一步默认应继续围绕 `market_state_guard_v2_balance` 微调，而不是把精力重新打回更激进的 `score_weight_k2`
+## 2026-04-10 - current default gross-control sweep 完成，hand-crafted 控制层基本压到头
+- 新增工具：`daily_research/tools/current_default_gross_control_sweep_verdict.py`
+- verdict 根：`daily_research/output/short_alpha_current_default_gross_control_sweep_20260410_r1`
+- 这轮在 `market_state_guard_v2_balance` 基础上继续做窄版 gross-control sweep，并把轻量 `month-trigger` / 窄版 `score-to-weight` overlay 一起纳入 same-protocol recent 一年回放。
+- 结果：
+  - overall winner 仍是 `state_liquidity_listwise_v1` companion baseline，`monthly_robust_score = 0.0726`
+  - winner-side gross-only best 是 `winner_gross_map_u097_f098_d088`
+  - 它把 current default 的 `monthly_robust_score` 从 `0.0456` 拉到 `0.0616`
+  - 但它仍低于 companion，robust gap 约 `-0.011`
+- 重要判断：
+  - 轻量 `month-trigger` overlay 与窄版 `score overlay` 都没有继续推翻 gross-only winner
+  - 说明 hand-crafted 控制层还有效，但已经接近当前上限
+  - 后续最高性价比动作不再是继续广扫手工控制层，而是把 best gross-control 当老师信号交给 learned control 学
+
+## 2026-04-10 - `short_expert_policy_v2` formal / recent 首轮评估完成
+- 新 profile：`short_expert_policy_v2`
+- 代码接线：
+  - `daily_research/deep_alpha/score_head.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+- 设计要点：
+  - 在 `policy_v1` 基础上收紧 gross exposure 区间到 `0.88 -> 0.98`
+  - 用更贴近当前 best gross-control 的 cash target teacher
+  - 强化 learned control 的日期级 cash/gross feature frame
+  - 让 target-weight 构造同时吸收 `weight/gate/hold`
+- formal latest-window review 根：`daily_research/output/short_alpha_policy_v2_review_20260410_r1`
+- formal 结果：
+  - `positive month ratio = 83.33%`
+  - `median monthly excess = 3.59%`
+  - `worst month = -1.12%`
+  - `top3 positive share = 50.88%`
+  - `excess annual = 55.83%`
+  - `excess Sharpe = 3.817`
+- formal 解读：
+  - `policy_v2` 明显优于 `policy_v1` 的月度稳定性
+  - 但它没有打赢 `short_expert_monthly_v1`
+  - 它还自动漂到 `regoff_k2_20d_ensemble_native_anchor`，平均持仓数升到约 `30.3`
+  - 当前 formal 收益折损大概率和 learned control 过度分散 / profile 漂移有关
+- recent 一年评估工具：`daily_research/tools/policy_v2_recent_eval.py`
+- recent 根：`daily_research/output/short_alpha_policy_v2_recent_eval_20260410_r1`
+- recent 结果：
+  - `state_liquidity_listwise_v1`: robust `0.0154`
+  - `short_expert_policy_v2`: robust `0.0149`
+  - `short_expert_monthly_v1`: robust `-0.0117`
+  - `short_expert_policy_v1`: robust `-0.0470`
+  - `policy_v2` recent excess annual `22.21%`，高于 current default `20.11%`
+- 最终判断：
+  - `policy_v2 > policy_v1`
+  - `policy_v2` recent 一年明显优于 current default
+  - `policy_v2` recent robust 已几乎追平 companion
+  - 但 formal 仍未打赢 `short_expert_monthly_v1`
+  - 因此 `policy_v2` 已成为 learned-control 主研究分支，但当前还不能升为新的默认执行
+
+## 2026-04-10 - `policy_v2` constrained review / `policy_v3` formal+recent 补齐，learned-control 主线继续停在 `policy_v2`
+- 这轮按“先 formal 拆因，再 recent 验证，再决定是否晋升默认”的顺序，把 `policy_v2` 和 `policy_v3` 的后续链路补完了。
+- 环境纪律：
+  - 这轮正式训练、formal 回放、recent 回放与 summary 生成全部锁定在 `yolos` 环境
+  - 其它环境只允许做非正式探查，不再混进正式结论
+- `policy_v2` constrained formal review：
+  - 根：`daily_research/output/short_alpha_policy_v2_constrained_execution_review_20260410_r1`
+  - best constrained variant 仍是 `policy_v2_current_k2_20d`
+  - formal `monthly_robust_score = 0.0919`
+  - 相对 current mainline formal `0.1012` 仍落后约 `-0.0093`
+  - 这直接推翻了“formal gap 主要只是桥太慢”的简单解释
+- `policy_v2` formal loss breakdown：
+  - 根：`daily_research/output/short_alpha_policy_v2_formal_loss_breakdown_20260410_r1`
+  - `raw_1d` 依然是坏答案，不能直接拿来替代执行桥
+  - 手工 candidate cap 和更紧 gross band 也没有单独救回 formal gap
+  - 因此下一代 learned-control 不能只靠继续手工稀疏化，重点应回到 learned score-to-weight 本体
+- `policy_v3` 代码接线：
+  - 新增 `policy_v3` score head，继续学习 `selection / gate / weight / hold / gross / candidate_count`
+  - 接线文件：
+    - `daily_research/deep_alpha/score_head.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_minimal_matrix.py`
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 新工具：
+    - `daily_research/tools/policy_v3_formal_review.py`
+    - `daily_research/tools/policy_v3_recent_eval.py`
+- `policy_v3` formal latest-window review：
+  - 根：`daily_research/output/short_alpha_policy_v3_review_20260410_r1`
+  - 初始 summary 把 run_dir 误判成 `runs/short_expert_policy_v3`，后来已修复为兼容 direct-root run layout
+  - 正式 formal 结果：
+    - profile 仍是 `regoff_k2_20d_ensemble_native_anchor`
+    - `excess annual = 58.17%`
+    - `excess Sharpe = 4.645`
+    - `monthly_robust_score = 0.0786`
+  - 对照：
+    - 低于 `short_expert_monthly_v1 = 0.1012`
+    - 低于 `state_liquidity_listwise_v1 = 0.0897`
+    - 也低于 `policy_v2 = 0.0830`
+- `policy_v3` recent 一年评估：
+  - 根：`daily_research/output/short_alpha_policy_v3_recent_eval_20260410_r1`
+  - 窗口：`2025-04-11 -> 2026-04-10`
+  - 结果：
+    - `state_liquidity_listwise_v1`: robust `0.0588`
+    - `short_expert_policy_v2`: robust `-0.0061`
+    - `short_expert_policy_v3`: robust `-0.0143`
+    - `short_expert_monthly_v1`: robust `-0.0370`
+  - 解释：
+    - `policy_v3` 虽然比 current default 好
+    - 但它没有打赢 `policy_v2`
+    - 更没有打赢 companion
+- 最终结论：
+  - `policy_v3` 证明了“把更多控制动作继续学进去”是可以落地的
+  - 但它没有修复 `policy_v2` 的 formal gap，也没有成为 latest recent 一年 winner
+  - 因此 learned-control 主研究分支继续保持为 `short_expert_policy_v2`
+  - 当前默认执行不变，继续维持 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`

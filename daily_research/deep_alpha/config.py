@@ -26,7 +26,7 @@ class DeepAlphaConfig:
     adaptive_task_window_months: int = 6
     batch_size: int = 256
     num_workers: int = 0
-    pin_memory: bool = True
+    pin_memory: bool = False
     hidden_dim: int = 96
     encoder_family: str = "gru"
     patch_len: int = 5

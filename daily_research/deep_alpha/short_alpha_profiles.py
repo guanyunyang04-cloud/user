@@ -162,6 +162,58 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
     ),
+    "short_expert_policy_v2": ShortAlphaProfile(
+        name="short_expert_policy_v2",
+        description=(
+            "Policy-head short-line expert v2: keep the same monthly-first short-expert "
+            "backbone, but let a tighter learned control layer absorb the best current "
+            "gross-control / cash-sizing evidence before execution alignment."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v2",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v3": ShortAlphaProfile(
+        name="short_expert_policy_v3",
+        description=(
+            "Policy-head short-line expert v3: internalize the current best constrained "
+            "gross-control evidence, learn candidate-count sparsity directly, and push "
+            "the model one step closer to end-to-end execution."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v3",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
     "short_expert_monthly_v1_deep": ShortAlphaProfile(
         name="short_expert_monthly_v1_deep",
         description=(
@@ -722,6 +774,7 @@ PROFILE_ALIASES: dict[str, str] = {
     "expert_v2": "short_expert_v2",
     "expert_monthly_v2": "short_expert_monthly_v2",
     "expert_monthly_deep": "short_expert_monthly_v1_deep",
+    "expert_policy_v2": "short_expert_policy_v2",
     "expert_policy_deep": "short_expert_policy_v1_deep",
     "expert_mamba_policy": "short_expert_mamba_policy_v1",
 }

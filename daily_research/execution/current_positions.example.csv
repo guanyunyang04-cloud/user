@@ -1,5 +1,5 @@
-record_type,stock,shares,cost_price,available_cash
-account,,,,200000
-position,600000.SH,1000,10.52,
-position,600036.SH,800,42.10,
-position,000001.SZ,1200,12.38,
+record_type, stock    , shares, cost_price, available_cash
+account    ,          ,       ,           ,         200000
+position   , 600000.SH,   1000,      10.52,               
+position   , 600036.SH,    800,      42.10,               
+position   , 000001.SZ,   1200,      12.38,               

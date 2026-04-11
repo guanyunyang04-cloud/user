@@ -637,11 +637,25 @@ def evaluate_profile(
     return metrics, aligned_scores, aligned_target_weights, meta
 
 
+def _slice_screen_window(
+    target_weights: pd.DataFrame,
+    score_frame: pd.DataFrame,
+    screen_window_days: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    normalized_window = max(int(screen_window_days or 0), 0)
+    if normalized_window <= 0 or len(target_weights.index) <= normalized_window:
+        return target_weights, score_frame
+    screen_index = target_weights.index[-normalized_window:]
+    return target_weights.reindex(screen_index).fillna(0.0), score_frame.reindex(screen_index).fillna(0.0)
+
+
 def fit_execution_alignment(
     *,
     mode: str,
     objective_metric: str,
     candidate_profiles: Iterable[str],
+    shortlist_size: int,
+    screen_window_days: int,
     train_raw_target_weights: pd.DataFrame,
     train_raw_score_frame: pd.DataFrame,
     valid_raw_target_weights: pd.DataFrame,
@@ -665,10 +679,68 @@ def fit_execution_alignment(
         raise ValueError("Execution alignment candidate profile list is empty.")
 
     objective_rows: list[dict] = []
+    full_eval_names = list(names)
+    shortlist_cap = max(int(shortlist_size or 0), 0)
+    screen_window = max(int(screen_window_days or 0), 0)
+    if len(names) > 1 and shortlist_cap > 0 and screen_window > 0:
+        screen_target_weights, screen_score_frame = _slice_screen_window(
+            train_raw_target_weights,
+            train_raw_score_frame,
+            screen_window,
+        )
+        screen_rows: list[dict] = []
+        for profile_name in names:
+            profile = get_profile(profile_name)
+            screen_metrics, _, _, screen_meta = evaluate_profile(
+                raw_target_weights=screen_target_weights,
+                raw_score_frame=screen_score_frame,
+                close=close,
+                benchmark_close=benchmark_close,
+                open_df=open_df,
+                benchmark_open=benchmark_open,
+                benchmark=benchmark,
+                holding_count=holding_count,
+                max_weight=max_weight,
+                min_adv20=min_adv20,
+                min_price=min_price,
+                max_price=max_price,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
+                sell_tax_bps=sell_tax_bps,
+                profile=profile,
+            )
+            row = dict(screen_meta)
+            row.update(
+                {
+                    "phase": "train_eval_screen",
+                    "objective_metric": str(objective_metric),
+                    "screen_window_days": int(screen_window),
+                    "annual_return": float(screen_metrics.get("annual_return", 0.0)),
+                    "excess_annual_return": float(screen_metrics.get("excess_annual_return", 0.0)),
+                    "excess_sharpe": float(screen_metrics.get("excess_sharpe", 0.0)),
+                    "mean_window_excess_annual_return": float(screen_metrics.get("mean_window_excess_annual_return", float("nan"))),
+                    "weak_window_excess_annual_return": float(screen_metrics.get("weak_window_excess_annual_return", float("nan"))),
+                    "worst_window_excess_sharpe": float(screen_metrics.get("worst_window_excess_sharpe", float("nan"))),
+                    "worst_window_excess_max_drawdown": float(screen_metrics.get("worst_window_excess_max_drawdown", float("nan"))),
+                    "max_drawdown": float(screen_metrics.get("max_drawdown", 0.0)),
+                    "avg_turnover": float(screen_metrics.get("avg_turnover", 0.0)),
+                }
+            )
+            objective_rows.append(row)
+            screen_rows.append(row)
+        ranked_screen_rows = sorted(
+            screen_rows,
+            key=lambda payload: _rank_key(payload, objective_metric),
+            reverse=True,
+        )
+        full_eval_names = [str(row["profile_name"]) for row in ranked_screen_rows[: min(shortlist_cap, len(ranked_screen_rows))]]
+        if not full_eval_names:
+            full_eval_names = list(names)
+
     best_name = names[0]
     best_metrics: dict[str, float] | None = None
     best_meta: dict[str, object] = {}
-    for profile_name in names:
+    for profile_name in full_eval_names:
         profile = get_profile(profile_name)
         train_metrics, _, _, train_meta = evaluate_profile(
             raw_target_weights=train_raw_target_weights,

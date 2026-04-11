@@ -70,7 +70,9 @@
 - 如果 strongest winner 的 recent 一年 readout 仍是“有正超额，但月度分布偏弱”，默认先修 `cash sizing / month-trigger`，再修 `signal-to-weight / concentration`，不先继续堆 depth。
 - 如果 strongest winner 的 recent 一年 readout 仍是“有正超额，但月度分布偏弱”，正式拆因顺序应先做 `recent_root_cause_breakdown`，优先检查 `market_state / score_to_weight / cash_control`，再讨论 `stock_pool`。
 - 如果 `current_default_signal_cash_repair_verdict` 显示 `market_state_guard / cash-sizing guard` 优于纯 `signal-to-weight` challenger，则默认把前者当 current-default 第一修补方向，不允许继续把“先修 signal-to-weight”写成主叙事。
+- 如果 `current_default_followup_repair_verdict` 进一步显示 `market_state_guard_v2_balance` 胜过 `v1` 和窄版 `score blend`，则默认把 `gross-control tuning` 当 current-default 当前最高优先级，不允许跳过它直接重开更激进的 weight transform。
 - 如果某条 `score_weight` challenger 主要抬高年化、却显著压坏 `monthly_robust_score`，则默认把它记为 attack bridge，不把它当 monthly-first repair winner。
+- 如果控制层迁移实验出现“winner 借 donor gross 变好、companion 借 winner gross 变差”的同向结果，则默认把 `cash_control / gross map` 升为 current-default gap 的已验证主因之一，而不再只把它表述为猜想。
 - 如果 winner 与 companion 使用的是同一个固定股票池，则默认不允许先把 recent 差距归咎为“池子太窄”；只有根因拆解或单独 same-protocol pool 对照给出新证据时，才允许把股票池提升为第一嫌疑。
 - 如某 encoder family 在当前硬件上无法完成同协议 wall-clock 评估，例如 `short_expert_mamba_policy_v1` on `RTX 2060 6GB`，则不得直接进入 winner 讨论或默认升级。
 
@@ -96,3 +98,10 @@
 - 只要 active execution 仍是 external target-weight 链，就必须同时同步四层：`live target-weight panel`、`daily_live_score_reference.json`、`active_execution_strategy.json` 的 `effective_live_*` 字段、以及 `latest_trade_plan.txt` 的解释文本。
 - 如果当前 live 权重来自 bridge 而不是同日 raw score 直达，trade plan 必须显式写明 `weight_generation_note`，不允许再出现“今天分数为什么对不上今天权重”的解释断层。
 - 训练纪律不仅要写在入口脚本，也要沉到底层 dataclass 默认值；`DeepAlphaConfig`、主 runner、matrix fallback 三层必须同口径保持 `32` 起训，并清掉 stale execution profile default。
+- 2026-04-10 最新补充：
+  - 当 `current_default_gross_control_sweep_verdict` 显示 gross-only winner 仍低于 companion，但 overlay 已经不再带来稳定增益时，默认视为 hand-crafted 控制层进入冻结阶段；此后优先级应从继续广扫手工规则，切换到 learned-control 分支。
+  - `policy_v2` 类 learned-control 分支必须同时回答两件事：formal 是否继续掉收益弹性，recent 一年是否继续保住稳健性；只要 formal 仍输给 `short_expert_monthly_v1`，就不得直接切默认。
+  - 当前 learned-control 的正式主分支已经从 `policy_v1` 更新为 `policy_v2`；后续如果继续推进，优先排查 execution-alignment profile 漂移、候选数过多、以及 `20d` 锚定导致的 formal 收益折损，不优先回到继续堆深 backbone。
+  - 正式训练、formal 回放、recent 回放与最终 summary 默认统一使用 `yolos` 环境；其它环境只允许做非正式探查，不得混入正式 verdict。
+  - 如果 `policy_v2` 的 constrained formal review 显示 `k2_20d` 仍是 best constrained answer，就不允许再把 formal gap 简化表述成“桥太慢”；必须分开讨论“桥选择问题”和“learned score-to-weight 本体问题”。
+  - 如果 `policy_v3` 这类更接近端到端执行的 learned-control 分支，同时没打赢 current mainline 的 formal monthly-first gate，也没打赢 companion 的 recent 12 个月 gate，就必须保留既有默认执行不动，只把它记为研究分支，不得越级 promotion。

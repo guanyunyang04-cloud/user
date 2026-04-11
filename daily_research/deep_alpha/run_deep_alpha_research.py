@@ -161,7 +161,7 @@ def parse_args():
     parser.add_argument("--score-risk-mode", choices=["subtract", "gate", "state_gate", "state_liquidity_gate"], default="subtract")
     parser.add_argument("--score-risk-gate-threshold", type=float, default=0.35)
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
-    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1"], default="manual")
+    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1", "policy_v2", "policy_v3"], default="manual")
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
     parser.add_argument(
         "--research-time-unit",
@@ -259,6 +259,18 @@ def parse_args():
     )
     parser.add_argument("--checkpoint-selection-min-improvement", type=float, default=1e-4)
     parser.add_argument(
+        "--checkpoint-eval-interval",
+        type=int,
+        default=1,
+        help="Evaluate expensive primary_* checkpoint objectives every N epochs. Final epoch is always evaluated.",
+    )
+    parser.add_argument(
+        "--checkpoint-eval-start-epoch",
+        type=int,
+        default=1,
+        help="First epoch that may run an expensive primary_* checkpoint evaluation.",
+    )
+    parser.add_argument(
         "--execution-alignment-transaction-cost-bps",
         type=float,
         default=DEFAULT_EXECUTION_ALIGNMENT_TRANSACTION_COST_BPS,
@@ -299,6 +311,18 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--execution-alignment-shortlist-size",
+        type=int,
+        default=8,
+        help="When train_eval_auto is used, keep only the top-N screen-stage profiles for full train-eval backtesting. Use 0 to disable shortlist screening.",
+    )
+    parser.add_argument(
+        "--execution-alignment-screen-window-days",
+        type=int,
+        default=63,
+        help="Trading-day lookback used by the fast screen stage before full train-eval execution alignment.",
+    )
+    parser.add_argument(
         "--list-execution-alignment-profiles",
         action="store_true",
         help="List available execution alignment profiles and exit.",
@@ -306,7 +330,7 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false", help="Disable deep_alpha raw/feature cache.")
     parser.add_argument("--refresh-cache", action="store_true", help="Ignore existing cache files and rebuild.")
-    parser.set_defaults(pin_memory=True, use_amp=True, safe_runtime_profile=True)
+    parser.set_defaults(pin_memory=False, use_amp=True, safe_runtime_profile=True)
     parser.set_defaults(use_cache=True)
     args = parser.parse_args()
     if "--min-epochs" not in sys.argv:
@@ -343,6 +367,22 @@ def _load_cached_rolling_pool_union(pool_name: str, start_date: str, end_date: s
         if union:
             return sorted({str(stock) for stock in union})
     return []
+
+
+def _should_run_checkpoint_objective_eval(
+    *,
+    epoch: int,
+    total_epochs: int,
+    start_epoch: int,
+    interval: int,
+) -> bool:
+    normalized_start = max(int(start_epoch), 1)
+    normalized_interval = max(int(interval), 1)
+    if int(epoch) == int(total_epochs):
+        return True
+    if int(epoch) < normalized_start:
+        return False
+    return (int(epoch) - normalized_start) % normalized_interval == 0
 
 
 def _cross_sectional_signal(pivot: pd.DataFrame, rank_blend: float) -> pd.DataFrame:
@@ -671,7 +711,7 @@ def _build_live_inference_outputs(
         max_price=cfg.max_price,
     )
     portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
-    if score_head_method == "policy_v1":
+    if score_head_method in {"policy_v1", "policy_v2", "policy_v3"}:
         live_target_weights = build_policy_target_weight_frame(
             live_score_outputs,
             all_dates=live_index,
@@ -924,7 +964,7 @@ def _evaluate_research_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    if args.score_head_method == "policy_v1":
+    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v3"}:
         train_eval_target_weights = build_policy_target_weight_frame(
             train_score_outputs,
             all_dates=pd.Index(train_eval_dates),
@@ -975,6 +1015,8 @@ def _evaluate_research_outputs(
             mode=args.execution_alignment_mode,
             objective_metric=args.execution_alignment_objective,
             candidate_profiles=candidate_profiles,
+            shortlist_size=int(args.execution_alignment_shortlist_size),
+            screen_window_days=int(args.execution_alignment_screen_window_days),
             train_raw_target_weights=train_eval_target_weights.reindex(train_eval_dates).fillna(0.0),
             train_raw_score_frame=train_score_frame.reindex(train_eval_dates).fillna(0.0),
             valid_raw_target_weights=target_weights.reindex(valid_dates).fillna(0.0),
@@ -1633,7 +1675,24 @@ def main():
     checkpoint_selection_mode = resolve_checkpoint_metric_name(args.checkpoint_selection_objective)
     checkpoint_selection_callback = None
     if checkpoint_selection_mode != "valid_loss":
+        checkpoint_eval_interval = max(int(args.checkpoint_eval_interval), 1)
+        checkpoint_eval_start_epoch = max(int(args.checkpoint_eval_start_epoch), 1)
         def _checkpoint_selection_callback(model_for_eval: MultiTaskRanker, epoch: int) -> dict[str, Any]:
+            if not _should_run_checkpoint_objective_eval(
+                epoch=int(epoch),
+                total_epochs=int(cfg.epochs),
+                start_epoch=checkpoint_eval_start_epoch,
+                interval=checkpoint_eval_interval,
+            ):
+                progress_write(
+                    f"epoch {epoch}: skip expensive primary research objective "
+                    f"(start={checkpoint_eval_start_epoch}, interval={checkpoint_eval_interval})"
+                )
+                return {
+                    "metric_name": str(args.checkpoint_selection_objective),
+                    "metric_value": float("nan"),
+                    "skip_selection_update": True,
+                }
             progress_write(f"epoch {epoch}: evaluate primary research objective")
             evaluation = _evaluate_research_outputs(
                 model=model_for_eval,
@@ -1662,6 +1721,7 @@ def main():
             return {
                 "metric_name": str(evaluation["checkpoint_metric_name"]),
                 "metric_value": float(evaluation["checkpoint_metric_value"]),
+                "skip_selection_update": False,
             }
 
         checkpoint_selection_callback = _checkpoint_selection_callback
