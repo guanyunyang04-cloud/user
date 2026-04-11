@@ -1,5 +1,7 @@
 # T0 Project Procedural Memory
 
+快照日期：`2026-04-12`
+
 ## 1. 作用
 本文档保存 `t0_project` 已验证的研究与实现规则。
 
@@ -13,10 +15,20 @@
 - 最后才讨论真实自动交易接口
 
 ### 2.3 写入路由
+- 身份、交接包写：
+  - `identity_layer.md`
+  - `handoff_packet.md`
 - 稳定边界写 `semantic_memory.md`
+- 规则、教训、时态状态写：
+  - `rule_memory.md`
+  - `lesson_memory.md`
+  - `temporal_state.md`
 - 当前优先级写 `working_memory.md`
 - 环境与命令写 `environment_model.md`
 - 执行抽象与流程写 `action_system.md`
+- 接管纪律与治理写：
+  - `handoff_rules.md`
+  - `governance_layer.md`
 - 单轮实验写 `episodic_memory.md`
 
 ### 2.4 主脑协同协议

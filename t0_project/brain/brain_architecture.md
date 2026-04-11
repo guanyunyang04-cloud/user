@@ -3,13 +3,29 @@
 ## 1. 结构目标
 `t0_project/brain/` 是 `t0_project` 的分脑，由主脑治理，用来保存盘中实验项目的长期认知和安全边界。
 
+当前升级目标是把它从“基础分脑”补齐为“可替换 agent / 不可替换大脑”的实验分脑。
+
 ## 2. 分脑模块
+- `identity_layer.md`
+  - 项目身份、目标、禁区
+- `handoff_packet.md`
+  - 标准交接包
 - `semantic_memory.md`
   - 项目身份、稳定边界、body_map 摘要
+- `rule_memory.md`
+  - 高优先级规则
+- `lesson_memory.md`
+  - 可复用教训
+- `temporal_state.md`
+  - `Past / Present / Future`
 - `working_memory.md`
   - 当前优先级、实验边界、隔离要求
 - `procedural_memory.md`
   - 实验纪律、写入路由、升级约束
+- `handoff_rules.md`
+  - 接管纪律
+- `governance_layer.md`
+  - 自检、反偏移、修复
 - `environment_model.md`
   - 运行环境、维护命令
 - `action_system.md`
@@ -20,12 +36,24 @@
   - 父子脑关系、读写路由、body_map、handoff_contract
 
 ## 3. 写入路由
+- 身份与禁区：
+  - `identity_layer.md`
+- 标准交接包：
+  - `handoff_packet.md`
 - 稳定认知：
   - `semantic_memory.md`
+- 规则与教训：
+  - `rule_memory.md`
+  - `lesson_memory.md`
+- 时态状态：
+  - `temporal_state.md`
 - 当前优先级：
   - `working_memory.md`
 - 可复用方法：
   - `procedural_memory.md`
+- 接管纪律与治理：
+  - `handoff_rules.md`
+  - `governance_layer.md`
 - 环境与命令：
   - `environment_model.md`
 - 执行抽象与操作链路：
@@ -37,3 +65,4 @@
 - 不再维护 `t0_project/README.md` 作为 AI 入口
 - 不再维护 `t0_project/execution/README.md` 作为 AI 入口
 - 行动细节统一收口到 `action_system.md`
+- 默认接管不再从 `episodic_memory.md` 开始，而是从 `identity_layer.md` 和 `handoff_packet.md` 开始

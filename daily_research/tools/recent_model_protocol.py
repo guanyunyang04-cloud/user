@@ -101,6 +101,242 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_long_value_panel(path: Path, value_name: str) -> pd.DataFrame:
+    frame = pd.read_csv(path)
+    if frame.empty:
+        return pd.DataFrame()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["stock"] = frame["stock"].astype(str).str.upper().str.strip()
+    frame[value_name] = pd.to_numeric(frame[value_name], errors="coerce")
+    frame = frame.dropna(subset=["date", "stock", value_name])
+    if frame.empty:
+        return pd.DataFrame()
+    return (
+        frame[["date", "stock", value_name]]
+        .drop_duplicates(subset=["date", "stock"], keep="last")
+        .pivot(index="date", columns="stock", values=value_name)
+        .sort_index()
+        .fillna(0.0)
+    )
+
+
+def _load_regime_state_panel(path: Path) -> pd.DataFrame:
+    frame = pd.read_csv(path)
+    if frame.empty:
+        return pd.DataFrame()
+    if "date" in frame.columns:
+        date_col = "date"
+    elif "Date" in frame.columns:
+        date_col = "Date"
+    else:
+        date_col = str(frame.columns[0])
+    frame[date_col] = pd.to_datetime(frame[date_col], errors="coerce")
+    frame = frame.dropna(subset=[date_col])
+    if frame.empty:
+        return pd.DataFrame()
+    frame = frame.set_index(date_col).sort_index()
+
+    def _normalize_label_series(series: pd.Series) -> pd.Series:
+        normalized = series.astype("string").str.strip().str.lower()
+        normalized = normalized.mask(normalized.eq(""), pd.NA)
+        return normalized
+
+    if "market_state" in frame.columns:
+        frame["market_state"] = _normalize_label_series(frame["market_state"])
+    if "quadrant" in frame.columns:
+        frame["quadrant"] = _normalize_label_series(frame["quadrant"])
+    if "trend_bucket" in frame.columns:
+        frame["trend_bucket"] = _normalize_label_series(frame["trend_bucket"])
+    if "vol_bucket" in frame.columns:
+        frame["vol_bucket"] = _normalize_label_series(frame["vol_bucket"])
+
+    trend_source = ""
+    for candidate in ("benchmark_trend_gap", "trend_gap_60", "trend_gap_20"):
+        if candidate in frame.columns:
+            trend_source = candidate
+            break
+    vol_source = ""
+    for candidate in ("benchmark_annual_vol", "vol_20", "vol_60"):
+        if candidate in frame.columns:
+            vol_source = candidate
+            break
+
+    if trend_source:
+        trend_gap = pd.to_numeric(frame[trend_source], errors="coerce")
+        if "benchmark_trend_gap" not in frame.columns:
+            frame["benchmark_trend_gap"] = trend_gap
+        trend_pass = trend_gap.gt(0.0)
+        if "trend_pass" not in frame.columns:
+            frame["trend_pass"] = trend_pass.fillna(False).astype(bool)
+        if "trend_bucket" not in frame.columns:
+            trend_bucket = pd.Series("trend_flat", index=frame.index, dtype="object")
+            trend_bucket.loc[trend_gap > 0.01] = "trend_up"
+            trend_bucket.loc[trend_gap < -0.01] = "trend_down"
+            trend_bucket.loc[trend_gap.isna()] = pd.NA
+            frame["trend_bucket"] = _normalize_label_series(trend_bucket)
+
+    if vol_source:
+        annual_vol = pd.to_numeric(frame[vol_source], errors="coerce")
+        if "benchmark_annual_vol" not in frame.columns:
+            frame["benchmark_annual_vol"] = annual_vol
+        if "benchmark_vol_gap" not in frame.columns:
+            frame["benchmark_vol_gap"] = annual_vol.sub(0.28)
+        if "benchmark_vol_ratio" not in frame.columns:
+            frame["benchmark_vol_ratio"] = annual_vol.div(0.28).replace([float("inf"), float("-inf")], pd.NA)
+        vol_pass = annual_vol.le(0.28)
+        if "vol_pass" not in frame.columns:
+            frame["vol_pass"] = vol_pass.fillna(False).astype(bool)
+        if "vol_bucket" not in frame.columns:
+            vol_bucket = pd.Series("vol_mid", index=frame.index, dtype="object")
+            vol_bucket.loc[annual_vol <= 0.252] = "vol_low"
+            vol_bucket.loc[annual_vol > 0.308] = "vol_high"
+            vol_bucket.loc[annual_vol.isna()] = pd.NA
+            frame["vol_bucket"] = _normalize_label_series(vol_bucket)
+
+    if "trend_bucket" in frame.columns and "vol_bucket" in frame.columns and "market_state" not in frame.columns:
+        trend_bucket = _normalize_label_series(frame["trend_bucket"])
+        vol_bucket = _normalize_label_series(frame["vol_bucket"])
+        market_state = trend_bucket.str.cat(vol_bucket, sep="_")
+        market_state.loc[trend_bucket.isna() | vol_bucket.isna()] = pd.NA
+        frame["market_state"] = _normalize_label_series(market_state)
+
+    if "quadrant" not in frame.columns and "benchmark_trend_gap" in frame.columns and "benchmark_annual_vol" in frame.columns:
+        trend_gap = pd.to_numeric(frame["benchmark_trend_gap"], errors="coerce")
+        annual_vol = pd.to_numeric(frame["benchmark_annual_vol"], errors="coerce")
+        quadrant = pd.Series(pd.NA, index=frame.index, dtype="object")
+        trend_up = trend_gap.gt(0.0)
+        low_vol = annual_vol.le(0.28)
+        ready = trend_gap.notna() & annual_vol.notna()
+        quadrant.loc[trend_up & low_vol] = "trend_up_low_vol"
+        quadrant.loc[trend_up & ~low_vol] = "trend_up_high_vol"
+        quadrant.loc[~trend_up & low_vol] = "trend_down_low_vol"
+        quadrant.loc[~trend_up & ~low_vol] = "trend_down_high_vol"
+        quadrant.loc[~ready] = pd.NA
+        frame["quadrant"] = _normalize_label_series(quadrant)
+
+    if "quadrant" not in frame.columns and "state_name" in frame.columns:
+        state_name = _normalize_label_series(frame["state_name"])
+        legacy_mask = state_name.isin(
+            [
+                "trend_up_low_vol",
+                "trend_up_high_vol",
+                "trend_down_low_vol",
+                "trend_down_high_vol",
+            ]
+        )
+        if bool(legacy_mask.any()):
+            frame["quadrant"] = state_name.where(legacy_mask)
+
+    if "market_state" not in frame.columns and "quadrant" in frame.columns:
+        quadrant = _normalize_label_series(frame["quadrant"])
+        quadrant_to_market = {
+            "trend_up_low_vol": "trend_up_vol_low",
+            "trend_up_high_vol": "trend_up_vol_high",
+            "trend_down_low_vol": "trend_down_vol_low",
+            "trend_down_high_vol": "trend_down_vol_high",
+        }
+        frame["market_state"] = _normalize_label_series(quadrant.map(quadrant_to_market))
+
+    if "regime_ready" not in frame.columns:
+        readiness_sources = [col for col in ("benchmark_trend_gap", "benchmark_annual_vol", "quadrant", "market_state") if col in frame.columns]
+        if readiness_sources:
+            ready_mask = pd.Series(True, index=frame.index, dtype=bool)
+            for column_name in readiness_sources[:2]:
+                ready_mask = ready_mask & frame[column_name].notna()
+            frame["regime_ready"] = ready_mask.astype(bool)
+
+    if "regime_on" not in frame.columns and "quadrant" in frame.columns:
+        quadrant = _normalize_label_series(frame["quadrant"])
+        ready_mask = frame["regime_ready"].astype(bool) if "regime_ready" in frame.columns else quadrant.notna()
+        frame["regime_on"] = quadrant.isin({"trend_up_low_vol", "trend_up_high_vol"}).fillna(False) & ready_mask
+
+    return frame
+
+
+def resolve_recent_result_dir(summary_entry: dict[str, Any]) -> Path:
+    for key in ("run_dir", "recent_replay_run_dir"):
+        raw = str(summary_entry.get(key, "") or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    return Path()
+
+
+def resolve_repair_companion_entry(
+    summary_payload: dict[str, Any],
+    *,
+    winner_entry: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    winner_dir = resolve_recent_result_dir(winner_entry or {})
+    for key in ("recent_winner", "runner_up_recent"):
+        entry = summary_payload.get(key, {})
+        if not isinstance(entry, dict) or not entry:
+            continue
+        entry_dir = resolve_recent_result_dir(entry)
+        if winner_dir and entry_dir and entry_dir == winner_dir:
+            continue
+        return entry, key
+    return {}, ""
+
+
+def load_recent_protocol_bundle(summary_entry: dict[str, Any]) -> dict[str, Any]:
+    run_dir = resolve_recent_result_dir(summary_entry)
+    if not run_dir.exists():
+        raise FileNotFoundError(f"Recent protocol run dir not found: {run_dir}")
+
+    score_candidates = (
+        "execution_aligned_daily_score_panel.csv",
+        "aligned_daily_score_panel.csv",
+        "daily_score_panel.csv",
+    )
+    target_candidates = (
+        "execution_aligned_daily_target_weight_panel.csv",
+        "aligned_daily_target_weight_panel.csv",
+        "daily_target_weight_panel.csv",
+    )
+    regime_candidates = (
+        "market_state_frame.csv",
+        "regime_state.csv",
+    )
+
+    score_panel = pd.DataFrame()
+    score_panel_csv = Path()
+    for filename in score_candidates:
+        candidate = run_dir / filename
+        if candidate.exists():
+            score_panel = _load_long_value_panel(candidate, "score")
+            score_panel_csv = candidate
+            break
+
+    target_panel = pd.DataFrame()
+    target_panel_csv = Path()
+    for filename in target_candidates:
+        candidate = run_dir / filename
+        if candidate.exists():
+            target_panel = _load_long_value_panel(candidate, "target_weight")
+            target_panel_csv = candidate
+            break
+
+    regime_state = pd.DataFrame()
+    regime_state_csv = Path()
+    for filename in regime_candidates:
+        candidate = run_dir / filename
+        if candidate.exists():
+            regime_state = _load_regime_state_panel(candidate)
+            regime_state_csv = candidate
+            break
+
+    return {
+        "run_dir": run_dir,
+        "score_panel": score_panel,
+        "target_panel": target_panel,
+        "regime_state": regime_state,
+        "score_panel_csv": score_panel_csv,
+        "target_panel_csv": target_panel_csv,
+        "regime_state_csv": regime_state_csv,
+        "protocol": "corrected_recent_execution_aligned" if score_panel_csv.name.startswith("execution_aligned_") else "legacy_recent_replay",
+    }
+
+
 def _load_primary_monthly_diagnostics(run_dir: Path, metrics: dict[str, Any]) -> dict[str, Any]:
     explicit = metrics.get("primary_research_monthly_diagnostics")
     if isinstance(explicit, dict) and explicit:

@@ -735,6 +735,7 @@ def train_multitask_model(
     checkpoint_selection_callback: Callable[[nn.Module, int], dict[str, Any]] | None = None,
     checkpoint_selection_min_improvement: float | None = None,
     resume_payload: Dict[str, Any] | None = None,
+    epoch_end_callback: Callable[[Dict[str, Any]], None] | None = None,
 ) -> TrainingRunResult:
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -842,6 +843,38 @@ def train_multitask_model(
         if train_batch_sampler is not None and hasattr(train_batch_sampler, "load_state_dict"):
             train_batch_sampler.load_state_dict(training_state.get("train_sampler_state", {}))
 
+    def _build_training_state_snapshot() -> Dict[str, Any]:
+        return {
+            "epochs_completed": int(len(history)),
+            "best_valid_loss": float(best_valid_loss),
+            "best_selection_metric": float(best_selection_metric),
+            "selected_epoch": int(selected_epoch),
+            "selected_metric_name": str(selected_metric_name),
+            "selected_metric_value": float(selected_metric_value),
+            "no_improve_epochs": int(no_improve_epochs),
+            "checkpoint_selection_mode": str(normalized_selection_mode),
+            "selection_improvement": float(selection_improvement),
+            "stopped_early": bool(stopped_early),
+            "train_sampler_state": {}
+            if train_batch_sampler is None or not hasattr(train_batch_sampler, "state_dict")
+            else dict(train_batch_sampler.state_dict()),
+        }
+
+    def _emit_epoch_end_snapshot() -> None:
+        if epoch_end_callback is None:
+            return
+        epoch_end_callback(
+            {
+                "history": [dict(record.__dict__) for record in history],
+                "selected_model_state_dict": deepcopy(best_state),
+                "last_model_state_dict": deepcopy(last_state),
+                "optimizer_state_dict": deepcopy(optimizer.state_dict()),
+                "scheduler_state_dict": deepcopy(scheduler.state_dict()),
+                "scaler_state_dict": deepcopy(scaler.state_dict()),
+                "training_state": _build_training_state_snapshot(),
+            }
+        )
+
     if int(epochs) <= int(epochs_completed):
         model.load_state_dict(best_state)
         diagnostics = _build_training_diagnostics(
@@ -856,21 +889,7 @@ def train_multitask_model(
             selected_metric_value=selected_metric_value,
             checkpoint_selection_min_improvement=selection_improvement,
         )
-        training_state = {
-            "epochs_completed": int(epochs_completed),
-            "best_valid_loss": float(best_valid_loss),
-            "best_selection_metric": float(best_selection_metric),
-            "selected_epoch": int(selected_epoch),
-            "selected_metric_name": str(selected_metric_name),
-            "selected_metric_value": float(selected_metric_value),
-            "no_improve_epochs": int(no_improve_epochs),
-            "checkpoint_selection_mode": str(normalized_selection_mode),
-            "selection_improvement": float(selection_improvement),
-            "stopped_early": bool(stopped_early),
-            "train_sampler_state": {}
-            if train_batch_sampler is None or not hasattr(train_batch_sampler, "state_dict")
-            else dict(train_batch_sampler.state_dict()),
-        }
+        training_state = _build_training_state_snapshot()
         return TrainingRunResult(
             history=history,
             diagnostics=diagnostics,
@@ -1221,6 +1240,7 @@ def train_multitask_model(
                     no_improve_epochs = int(no_improve_epochs)
                 else:
                     no_improve_epochs += 1
+                _emit_epoch_end_snapshot()
                 if epoch >= max(int(min_epochs), 1) and no_improve_epochs >= max(int(early_stop_patience), 1):
                     stopped_early = True
                     break
@@ -1238,21 +1258,7 @@ def train_multitask_model(
         selected_metric_value=selected_metric_value,
         checkpoint_selection_min_improvement=selection_improvement,
     )
-    training_state = {
-        "epochs_completed": int(len(history)),
-        "best_valid_loss": float(best_valid_loss),
-        "best_selection_metric": float(best_selection_metric),
-        "selected_epoch": int(selected_epoch),
-        "selected_metric_name": str(selected_metric_name),
-        "selected_metric_value": float(selected_metric_value),
-        "no_improve_epochs": int(no_improve_epochs),
-        "checkpoint_selection_mode": str(normalized_selection_mode),
-        "selection_improvement": float(selection_improvement),
-        "stopped_early": bool(stopped_early),
-        "train_sampler_state": {}
-        if train_batch_sampler is None or not hasattr(train_batch_sampler, "state_dict")
-        else dict(train_batch_sampler.state_dict()),
-    }
+    training_state = _build_training_state_snapshot()
     return TrainingRunResult(
         history=history,
         diagnostics=diagnostics,

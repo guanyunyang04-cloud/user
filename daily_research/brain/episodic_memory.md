@@ -11671,3 +11671,84 @@ position,000001.SZ,1200,12.38,
   - `daily_research/archive` 下降到近乎空壳，只保留 README、manifest 与索引
   - `__pycache__` 与 `*.pyc` 已清零
 - 本轮没有继续删除 `daily_research/output` 里的大实验根，因为其中多项仍被脚本默认值、工具入口或历史真源直接引用；只清掉了确认无引用的 `tmp_*` 临时 probe 输出。
+
+## 2026-04-11 - handoff 纪律固化与前台续训闭环
+
+- 新增 `daily_research/brain/handoff_rules.md`，并把它写入 `brain_manifest.json` 的 `read_order / write_routes / modules / handoff_contract.entry_sequence`，让后续 agent 接管时先读这份纪律。
+- 用户把正式实验纪律显式收口为四条：
+  - 所有正式实验都必须具备续训能力
+  - 最低要求是同一 `experiment-tag / run_dir` 的 `strict resume`
+  - 长实验只允许前台执行
+  - 终端默认超时预算按 `10` 小时处理
+- 用户同日再次明确：后续改法不应追求最小，而应优先追求最有效；只要风险可控、语义收口、代码与 brain 能同步更新，就不为了保守故意做成低效小修。
+- `deep_alpha` 训练入口已补上 epoch 级 resume artifact 持久化、同 run_dir 自动 strict resume，以及 family formal review 的 partial-run 显式续训。
+- `short_alpha_policy_v2_family_pipeline_20260411_r1` 已按前台纪律跑完 formal family review、constrained execution review、recent family eval、`project_consistency_check.py` 与 `doc_guard.py check`，说明这套 front-only + resume 纪律已经从规则变成了可运行闭环。
+
+## 2026-04-11 - policy_v2 family 结果收口与下一步重排
+
+- `short_alpha_policy_v2_family_formal_review_20260411_r1` 已完成：
+  - overall formal winner 仍是 `short_expert_monthly_v1 = 0.1012`
+  - family formal best 仍是老 `short_expert_policy_v2 = 0.0830`
+  - 新分支 formal 排名为 `policy_v2 > policy_v2b = 0.0803 > policy_v2c = 0.0777 > policy_v2a = 0.0505`
+- `short_alpha_policy_v2_family_recent_eval_20260411_r1` 已完成：
+  - corrected recent winner 已前移到 `short_expert_policy_v2c = 0.1046`
+  - `short_expert_policy_v2b = 0.1020` 也是显著 recent 前沿
+  - 二者都超过 `baseline_current = 0.0982` 与 current default `0.0778`
+- 同轮 `short_alpha_policy_v2_family_pipeline_20260411_r1_status.json` 也明确暴露了一个关键缺口：
+  - family pipeline 名义上跑了 constrained step
+  - 但实际只对老 `policy_v2` 跑了 `policy_v2_constrained_execution_review.py`
+  - `v2b / v2c` 仍没有同规格 constrained formal 证据
+- 从这个节点开始，learned-control 的主矛盾正式改写为：
+  - recent frontier 已经从 `policy_v2` 前移到 `policy_v2c / v2b`
+  - formal main branch 仍停留在老 `policy_v2`
+  - 下一步最高优先级不再是继续证明 `policy_v2 > policy_v1`
+  - 而是补齐 `v2b / v2c` constrained formal review，并拆清 recent 强、formal 弱到底来自 profile 漂移、集中度，还是 gross / hold control 本体
+
+## 2026-04-12 - `policy_v2 family` constrained / `policy_v4 family` 第一轮闭环完成
+
+- `short_alpha_policy_v2_family_constrained_execution_review_20260411_r2` 已按前台纪律补齐：
+  - family constrained best 已前移到 `short_expert_policy_v2b__k1_20d = 0.1104`
+  - 这个读数已经高于 current mainline formal `short_expert_monthly_v1 = 0.1012`
+  - `short_expert_policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`
+  - 但 selected slow bridge `k1_20d` 只有 `0.0846`
+- `short_alpha_policy_family_formal_loss_breakdown_20260411_r1` 已把 learned-control 当前 formal 叙事收口成：
+  - `short_expert_policy_v2b` 是当前最强 constrained / deployable learned-control candidate
+  - `short_expert_policy_v2c` 的 formal gap 更像 bridge / control 敏感，而不是 recent 偶然值
+  - 下一代设计假设收口为：`v4a = execution-stability`、`v4b = concentration regularization`、`v4c = gross teacher` 仅作可选
+- `short_alpha_policy_v4_family_pipeline_20260411_r1` 也已按前台 + strict-resume 纪律跑完 formal / constrained / recent / consistency / doc_guard：
+  - `short_expert_policy_v4b` 的 fresh formal family best 到了 `0.1008`
+  - `short_expert_policy_v4b` 的 corrected recent 到了 `0.1387`，成为新的 learned-control recent frontier
+  - 但它的 constrained best 只有 `0.0687`
+  - `short_expert_policy_v4a` 的 constrained best 更低到 `0.0458`
+- 因此 current learned-control 需要明确分三层讲：
+  - constrained formal front-runner = `short_expert_policy_v2b`
+  - corrected recent winner = `short_expert_policy_v4b`
+  - live 默认执行继续冻结在 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 这也把下一轮主问题改写成：
+  - 不再是“`v2b / v2c` 有没有 constrained formal”
+  - 而是“如何保住 `policy_v4b` 的 recent 强度，同时把 constrained formal 拉回 `policy_v2b` 水平以上”
+
+## 2026-04-12 - 主脑 / 分脑接管结构升级为六层项目大脑
+
+- 本轮把 `daily_research/brain/` 从“已有记忆分层的分脑”继续升级成更像人脑工作流的项目认知中枢：
+  - 新增 `identity_layer.md`
+  - 新增 `rule_memory.md`
+  - 新增 `lesson_memory.md`
+  - 新增 `temporal_state.md`
+  - 新增 `handoff_packet.md`
+  - 新增 `governance_layer.md`
+- 同轮也把根主脑升级成配套结构：
+  - 新增 `brain/identity_layer.md`
+  - 新增 `brain/handoff_packet.md`
+  - 新增 `brain/governance_layer.md`
+- manifest 与 bootstrap 已同步切换到新的接管顺序：
+  - 主脑：`identity -> handoff packet -> master / architecture / working / procedural / governance`
+  - `daily_research`：`identity -> handoff packet -> semantic -> rule -> lesson -> temporal -> working -> action -> episodic`
+- 这次升级的核心目标不是多几份文档，而是把项目设计成：
+  - `agent 可替换，大脑不可替换`
+  - `Agent 无状态，项目大脑有状态`
+- 本轮还同步补上了治理闭环：
+  - `brain_bootstrap.py` 现在会暴露 `identity / handoff / rule / lesson / temporal / governance` 路径
+  - `doc_guard.py` 已覆盖这些新脑区
+  - `project_consistency_check.py` 已把新脑区纳入一致性检查
+- 结果是：后续 agent 接管时，不再默认从长 `episodic_memory.md` 起步，而是先接标准状态包，再按需下钻证据。

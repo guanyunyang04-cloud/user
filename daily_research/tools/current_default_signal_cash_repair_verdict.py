@@ -17,6 +17,7 @@ from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.external_target_weight_bridge import build_target_weight_bridge
 from daily_research.baseline.portfolio import build_research_raw_target_weights
 from daily_research.baseline.soft_state_sizing import apply_soft_state_sizing, resolve_soft_state_profile
+from daily_research.tools.recent_model_protocol import load_recent_protocol_bundle, resolve_repair_companion_entry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -481,6 +482,9 @@ def _write_summary(
     month_plan: pd.DataFrame,
     repair_winner: dict[str, Any],
     live_preview_payload: dict[str, Any],
+    recent_protocol: str,
+    companion_source: str,
+    companion_profile_name: str,
 ) -> None:
     winner = scoreboard.iloc[0].to_dict() if not scoreboard.empty else {}
     current_row = scoreboard.loc[scoreboard["variant_name"].eq("winner_current_target_static")].iloc[0].to_dict()
@@ -494,6 +498,9 @@ def _write_summary(
         "thresholds": thresholds,
         "month_state_counts": month_state_counts,
         "live_preview": live_preview_payload,
+        "recent_protocol": str(recent_protocol),
+        "companion_source": str(companion_source),
+        "companion_profile_name": str(companion_profile_name),
     }
     (output_dir / "summary.json").write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -502,7 +509,7 @@ def _write_summary(
         "",
         "## Objective",
         "- 在不推翻当前 `short_expert + k2` 默认链的前提下，先修 `signal-to-weight`，再修 `month-trigger / cash sizing`。",
-        "- recent 窗口固定为最近一年 `12` 个月，winner 与 companion 都按同一协议回放。",
+        f"- recent 窗口固定为最近一年 `12` 个月，winner 与 companion 都按同一 corrected recent 协议评估：`{recent_protocol}`。",
         "",
         "## Month Plan",
         f"- aggressive_top1 threshold: `{_num(thresholds.get('aggressive_top1'))}`",
@@ -636,29 +643,31 @@ def main() -> None:
     summary = _load_json(Path(args.strongest_summary).expanduser())
     active_manifest = _load_json(Path(args.active_manifest).expanduser())
     winner_recent = summary.get("winner_recent", {})
-    companion_recent = summary.get("runner_up_recent", {})
-    winner_recent_dir = Path(str(winner_recent.get("recent_replay_run_dir", "")).strip())
-    companion_recent_dir = Path(str(companion_recent.get("recent_replay_run_dir", "")).strip())
-    if not winner_recent_dir.exists():
-        raise FileNotFoundError(f"Winner recent replay dir not found: {winner_recent_dir}")
-    if not companion_recent_dir.exists():
-        raise FileNotFoundError(f"Companion recent replay dir not found: {companion_recent_dir}")
+    companion_recent, companion_source = resolve_repair_companion_entry(
+        summary,
+        winner_entry=winner_recent if isinstance(winner_recent, dict) else {},
+    )
+    winner_recent_bundle = load_recent_protocol_bundle(winner_recent if isinstance(winner_recent, dict) else {})
+    companion_recent_bundle = load_recent_protocol_bundle(companion_recent if isinstance(companion_recent, dict) else {})
+    winner_recent_dir = Path(winner_recent_bundle["run_dir"])
+    companion_recent_dir = Path(companion_recent_bundle["run_dir"])
+    recent_protocol = str(summary.get("recent_validation_protocol", "") or winner_recent_bundle.get("protocol", ""))
 
     recent_start = str(summary.get("recent_start_date", "")).strip()
     recent_end = str(summary.get("recent_end_date", "")).strip()
     if not recent_start or not recent_end:
         raise RuntimeError("Strongest-model summary is missing recent_start_date / recent_end_date.")
 
-    winner_score_panel = _load_long_panel(winner_recent_dir / "aligned_daily_score_panel.csv", "score")
-    winner_target_panel = _load_long_panel(winner_recent_dir / "aligned_daily_target_weight_panel.csv", "target_weight")
-    companion_score_panel = _load_long_panel(companion_recent_dir / "aligned_daily_score_panel.csv", "score")
-    companion_target_panel = _load_long_panel(companion_recent_dir / "aligned_daily_target_weight_panel.csv", "target_weight")
-    winner_regime_state = _load_regime_state(winner_recent_dir / "regime_state.csv")
+    winner_score_panel = winner_recent_bundle["score_panel"]
+    winner_target_panel = winner_recent_bundle["target_panel"]
+    companion_score_panel = companion_recent_bundle["score_panel"]
+    companion_target_panel = companion_recent_bundle["target_panel"]
+    winner_regime_state = winner_recent_bundle["regime_state"]
 
     if winner_score_panel.empty or winner_target_panel.empty:
-        raise RuntimeError("Winner recent replay panels are empty.")
+        raise RuntimeError("Winner corrected recent panels are empty.")
     if companion_target_panel.empty:
-        raise RuntimeError("Companion recent replay target panel is empty.")
+        raise RuntimeError("Companion corrected recent target panel is empty.")
 
     month_features = _build_month_features(winner_score_panel, winner_target_panel, winner_regime_state)
     thresholds = _derive_thresholds(month_features)
@@ -747,10 +756,10 @@ def main() -> None:
     for variant_name, panel in variant_panels.items():
         panel_csv = panels_dir / f"{variant_name}.csv"
         _wide_to_long(panel, "target_weight").to_csv(panel_csv, index=False, encoding="utf-8-sig")
-        score_panel_csv = winner_recent_dir / "aligned_daily_score_panel.csv"
+        score_panel_csv = Path(winner_recent_bundle["score_panel_csv"])
         score_panel = winner_score_panel
         if variant_name.startswith("companion_"):
-            score_panel_csv = companion_recent_dir / "aligned_daily_score_panel.csv"
+            score_panel_csv = Path(companion_recent_bundle["score_panel_csv"])
             score_panel = companion_score_panel
         run_dir = _run_external_backtest(
             python_executable=str(args.python_executable),
@@ -790,6 +799,9 @@ def main() -> None:
         month_plan=month_plan,
         repair_winner=repair_winner,
         live_preview_payload=live_preview_payload,
+        recent_protocol=recent_protocol,
+        companion_source=companion_source,
+        companion_profile_name=str(companion_recent.get("profile_name", "") or summary.get("recent_winner_profile_name", "")),
     )
     print(
         json.dumps(

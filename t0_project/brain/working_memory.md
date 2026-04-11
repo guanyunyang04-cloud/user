@@ -1,5 +1,7 @@
 # T0 Project Working Memory
 
+快照日期：`2026-04-12`
+
 ## 1. 当前优先级
 - 保持 `t0_project` 与 `daily_research` 正式执行主线隔离
 - 继续把盘中实验定位为研究原型，而不是可直接实盘部署系统
@@ -13,5 +15,5 @@
 
 ## 3. 当前接管原则
 - agent 先接主脑，再接本分脑
-- 本分脑内部先读 `semantic -> working -> procedural -> environment -> action`
+- 本分脑内部先读 `identity -> handoff -> semantic -> rule -> lesson -> temporal -> working -> procedural -> environment -> action`
 - 若任务跨到 `daily_research` 正式执行结论，必须回到主脑和 `daily_research` 分脑重新确认

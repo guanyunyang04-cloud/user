@@ -1,7 +1,20 @@
 # T0 Project Action System
 
+快照日期：`2026-04-12`
+
 ## 1. 作用
 本文件保存 `t0_project` 的执行抽象设计与运行边界。
+
+## 1.1 接管快路
+- 当前默认接管入口先看：
+  - `t0_project/brain/identity_layer.md`
+  - `t0_project/brain/handoff_packet.md`
+  - `t0_project/brain/temporal_state.md`
+
+### Bootstrap
+```powershell
+python daily_research/tools/brain_bootstrap.py --child t0_project --json
+```
 
 ## 2. 目标分层
 系统拆成四层：

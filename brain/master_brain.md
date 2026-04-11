@@ -3,6 +3,13 @@
 ## 1. 作用
 `brain/` 是 `user/` 工作区的主脑，也是整个工作区的 AI 控制面。
 
+主脑先回答一个根问题：
+
+- 这个工作区不要设计成“某个 agent 很强”
+- 而要设计成“agent 可替换，大脑不可替换”
+- 核心原则是：
+  - `Agent 无状态，项目大脑有状态。`
+
 主脑只负责四类事情：
 
 - 维护主脑与分脑的拓扑、边界和接管顺序
@@ -30,6 +37,8 @@
 ## 3. 主脑治理原则
 - `brain-first`
   - agent 先接主脑，再接分脑，再进入 body
+- `state-externalization`
+  - 当前目标、规则、风险、计划、教训、交接包必须外显，不得只存在于单个 agent 会话里
 - `body-brain match`
   - 每个项目的 brain 必须和源码、脚本、配置、测试、产物目录高度匹配
 - `non-silent-upgrade`
@@ -55,12 +64,17 @@
 默认接管顺序如下：
 
 1. `brain/brain_manifest.json`
-2. `brain/master_brain.md`
-3. `brain/brain_architecture.md`
-4. `brain/working_memory.md`
-5. 按任务进入目标分脑
-6. 读取目标分脑的 `brain_manifest.json`
-7. 按 `semantic -> working -> procedural -> environment -> action -> episodic` 进入
+2. `brain/identity_layer.md`
+3. `brain/handoff_packet.md`
+4. `brain/rule_memory.md`
+5. `brain/lesson_memory.md`
+6. `brain/temporal_state.md`
+7. `brain/master_brain.md`
+8. `brain/brain_architecture.md`
+9. `brain/working_memory.md`
+10. 按任务进入目标分脑
+11. 读取目标分脑的 `brain_manifest.json`
+12. 按 `identity -> handoff -> semantic -> rule -> lesson -> temporal -> working -> procedural -> governance -> environment -> action -> episodic` 进入
 
 可执行入口：
 
@@ -77,3 +91,7 @@
 - 分脑结构变更时，主脑与分脑的 `brain_manifest.json` 必须同步更新
 - 新增项目时，必须先补齐 `brain/`、`body_map` 与 `handoff_contract`
 - `doc_guard.py check` 是当前脑网络的最低守卫
+- 工作区级当前交接摘要统一收口到 `brain/handoff_packet.md`
+- 工作区级身份、治理与反偏移机制统一收口到：
+  - `brain/identity_layer.md`
+  - `brain/governance_layer.md`

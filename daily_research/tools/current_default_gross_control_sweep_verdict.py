@@ -48,6 +48,7 @@ from daily_research.tools.current_default_signal_cash_repair_verdict import (
     _variant_kind_summary,
     _wide_to_long,
 )
+from daily_research.tools.recent_model_protocol import load_recent_protocol_bundle, resolve_repair_companion_entry
 
 
 DEFAULT_ROOT_TAG = "short_alpha_current_default_gross_control_sweep_20260410_r1"
@@ -116,6 +117,8 @@ def _write_summary(
     state_map_catalog: dict[str, Any],
     repair_winner: dict[str, Any],
     live_preview_payload: dict[str, Any],
+    companion_source: str,
+    companion_profile_name: str,
 ) -> None:
     winner = scoreboard.iloc[0].to_dict() if not scoreboard.empty else {}
     current_row = scoreboard.loc[scoreboard["variant_name"].eq("winner_current_target_static")].iloc[0].to_dict()
@@ -138,6 +141,8 @@ def _write_summary(
         "state_map_catalog": state_map_catalog,
         "live_preview": live_preview_payload,
         "best_gross_rows": _best_gross_map_rows(base_gross_scoreboard),
+        "companion_source": str(companion_source),
+        "companion_profile_name": str(companion_profile_name),
     }
     (output_dir / "summary.json").write_text(
         json.dumps(summary_payload, ensure_ascii=False, indent=2),
@@ -263,21 +268,26 @@ def main() -> None:
     followup_summary = _load_json(Path(args.followup_summary).expanduser())
 
     winner_recent = strongest_summary.get("winner_recent", {})
-    companion_recent = strongest_summary.get("runner_up_recent", {})
-    winner_recent_dir = Path(str(winner_recent.get("recent_replay_run_dir", "")).strip())
-    companion_recent_dir = Path(str(companion_recent.get("recent_replay_run_dir", "")).strip())
+    companion_recent, companion_source = resolve_repair_companion_entry(
+        strongest_summary,
+        winner_entry=winner_recent if isinstance(winner_recent, dict) else {},
+    )
+    winner_recent_bundle = load_recent_protocol_bundle(winner_recent if isinstance(winner_recent, dict) else {})
+    companion_recent_bundle = load_recent_protocol_bundle(companion_recent if isinstance(companion_recent, dict) else {})
+    winner_recent_dir = Path(winner_recent_bundle["run_dir"])
+    companion_recent_dir = Path(companion_recent_bundle["run_dir"])
     recent_start = str(strongest_summary.get("recent_start_date", "")).strip()
     recent_end = str(strongest_summary.get("recent_end_date", "")).strip()
     if not winner_recent_dir.exists() or not companion_recent_dir.exists():
-        raise FileNotFoundError("Winner/companion recent replay dirs are missing.")
+        raise FileNotFoundError("Winner/companion corrected recent dirs are missing.")
 
-    winner_score_panel = _load_long_panel(winner_recent_dir / "aligned_daily_score_panel.csv", "score")
-    winner_target_panel = _load_long_panel(winner_recent_dir / "aligned_daily_target_weight_panel.csv", "target_weight")
-    companion_score_panel = _load_long_panel(companion_recent_dir / "aligned_daily_score_panel.csv", "score")
-    companion_target_panel = _load_long_panel(companion_recent_dir / "aligned_daily_target_weight_panel.csv", "target_weight")
-    winner_regime_state = _load_regime_state(winner_recent_dir / "regime_state.csv")
+    winner_score_panel = winner_recent_bundle["score_panel"]
+    winner_target_panel = winner_recent_bundle["target_panel"]
+    companion_score_panel = companion_recent_bundle["score_panel"]
+    companion_target_panel = companion_recent_bundle["target_panel"]
+    winner_regime_state = winner_recent_bundle["regime_state"]
     if winner_score_panel.empty or winner_target_panel.empty or companion_target_panel.empty:
-        raise RuntimeError("Recent replay panels are empty.")
+        raise RuntimeError("Corrected recent panels are empty.")
 
     month_features = _build_month_features(winner_score_panel, winner_target_panel, winner_regime_state)
     thresholds = _derive_thresholds(month_features)
@@ -315,10 +325,10 @@ def main() -> None:
     for variant_name, panel in variant_panels.items():
         panel_csv = panels_dir / f"{variant_name}.csv"
         _wide_to_long(panel, "target_weight").to_csv(panel_csv, index=False, encoding="utf-8-sig")
-        score_panel_csv = winner_recent_dir / "aligned_daily_score_panel.csv"
+        score_panel_csv = Path(winner_recent_bundle["score_panel_csv"])
         score_panel = winner_score_panel
         if variant_name.startswith("companion_"):
-            score_panel_csv = companion_recent_dir / "aligned_daily_score_panel.csv"
+            score_panel_csv = Path(companion_recent_bundle["score_panel_csv"])
             score_panel = companion_score_panel
         run_dir = _run_external_backtest(
             python_executable=str(args.python_executable),
@@ -383,7 +393,7 @@ def main() -> None:
             python_executable=str(args.python_executable),
             output_root=recent_runs_dir,
             variant_name=variant_name,
-            score_panel_csv=winner_recent_dir / "aligned_daily_score_panel.csv",
+            score_panel_csv=Path(winner_recent_bundle["score_panel_csv"]),
             target_weight_panel_csv=panel_csv,
             start_date=recent_start,
             end_date=recent_end,
@@ -440,6 +450,8 @@ def main() -> None:
         state_map_catalog=catalog,
         repair_winner=repair_winner,
         live_preview_payload=live_preview_payload,
+        companion_source=companion_source,
+        companion_profile_name=str(companion_recent.get("profile_name", "") or strongest_summary.get("recent_winner_profile_name", "")),
     )
 
 

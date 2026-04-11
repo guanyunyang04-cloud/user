@@ -53,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--current-formal-run-dir", default=str(DEFAULT_CURRENT_FORMAL_RUN_DIR))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
+    parser.add_argument("--variant-prefix", default="policy_v2")
+    parser.add_argument("--display-name", default="policy_v2")
     return parser.parse_args()
 
 
@@ -401,16 +403,18 @@ def main() -> None:
     slippage_bps = float(metrics.get("execution_alignment_slippage_bps", 7.0) or 7.0)
     sell_tax_bps = float(metrics.get("execution_alignment_sell_tax_bps", 10.0) or 10.0)
 
+    prefix = str(args.variant_prefix).strip() or "policy_v2"
+    display_name = str(args.display_name).strip() or prefix
     variants = [
-        VariantSpec("policy_v2_raw_1d", "Original learned target weights with no execution bridge.", "raw_1d"),
-        VariantSpec("policy_v2_current_k2_3d", "Original learned target weights locked to k2 3d ensemble.", "regoff_k2_3d_ensemble_native_anchor"),
-        VariantSpec("policy_v2_current_k2_5d", "Original learned target weights locked to k2 5d ensemble.", "regoff_k2_5d_ensemble_native_anchor"),
-        VariantSpec("policy_v2_current_k2_10d", "Original learned target weights locked to k2 10d ensemble.", "regoff_k2_10d_ensemble_native_anchor"),
-        VariantSpec("policy_v2_current_k2_20d", "Current selected policy_v2 execution profile.", "regoff_k2_20d_ensemble_native_anchor"),
-        VariantSpec("policy_v2_cap6_k2_5d", "Cap learned candidates at 6 names before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=6),
-        VariantSpec("policy_v2_cap4_k2_5d", "Cap learned candidates at 4 names before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=4),
-        VariantSpec("policy_v2_cap6_g090_096_k2_5d", "Cap to 6 names and clip gross to 0.90-0.96 before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=6, gross_floor=0.90, gross_cap=0.96),
-        VariantSpec("policy_v2_cap4_g092_098_k2_5d", "Cap to 4 names and clip gross to 0.92-0.98 before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=4, gross_floor=0.92, gross_cap=0.98),
+        VariantSpec(f"{prefix}_raw_1d", "Original learned target weights with no execution bridge.", "raw_1d"),
+        VariantSpec(f"{prefix}_current_k2_3d", "Original learned target weights locked to k2 3d ensemble.", "regoff_k2_3d_ensemble_native_anchor"),
+        VariantSpec(f"{prefix}_current_k2_5d", "Original learned target weights locked to k2 5d ensemble.", "regoff_k2_5d_ensemble_native_anchor"),
+        VariantSpec(f"{prefix}_current_k2_10d", "Original learned target weights locked to k2 10d ensemble.", "regoff_k2_10d_ensemble_native_anchor"),
+        VariantSpec(f"{prefix}_current_k2_20d", f"Current selected {display_name} execution profile.", "regoff_k2_20d_ensemble_native_anchor"),
+        VariantSpec(f"{prefix}_cap6_k2_5d", "Cap learned candidates at 6 names before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=6),
+        VariantSpec(f"{prefix}_cap4_k2_5d", "Cap learned candidates at 4 names before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=4),
+        VariantSpec(f"{prefix}_cap6_g090_096_k2_5d", "Cap to 6 names and clip gross to 0.90-0.96 before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=6, gross_floor=0.90, gross_cap=0.96),
+        VariantSpec(f"{prefix}_cap4_g092_098_k2_5d", "Cap to 4 names and clip gross to 0.92-0.98 before k2 5d bridge.", "regoff_k2_5d_ensemble_native_anchor", candidate_cap=4, gross_floor=0.92, gross_cap=0.98),
     ]
 
     rows: list[dict[str, Any]] = []
@@ -497,7 +501,8 @@ def main() -> None:
     scoreboard.to_csv(output_dir / "variant_scoreboard.csv", index=False, encoding="utf-8-sig")
 
     best_row = scoreboard.iloc[0].to_dict()
-    selected_row = scoreboard.loc[scoreboard["variant_name"] == "policy_v2_current_k2_20d"].iloc[0].to_dict()
+    selected_variant_name = f"{prefix}_current_k2_20d"
+    selected_row = scoreboard.loc[scoreboard["variant_name"] == selected_variant_name].iloc[0].to_dict()
     reference_row = _reference_row(current_formal_run_dir)
     summary_payload = {
         "run_dir": str(run_dir),
@@ -538,9 +543,9 @@ def main() -> None:
         [
             "",
             "## Readout",
-            "- `raw_1d` remains a bad answer, so the issue is not that execution bridge should disappear immediately.",
-            "- If constrained `k2_3d / k2_5d / k2_10d` beat the current selected `k2_20d`, the formal loss is more likely coming from bridge drift that is too slow, not from the learned-control direction itself.",
-            "- If capped candidate-count variants improve together with the faster bridge, `policy_v3` should internalize narrower candidate counts and a tighter gross band instead of widening the raw panel further.",
+            f"- `{display_name}` raw 1d remains a bad answer when it ranks at the bottom, so the issue is not that the execution bridge should disappear immediately.",
+            f"- If constrained `k2_3d / k2_5d / k2_10d` beat the current selected `k2_20d`, the formal loss is more likely coming from bridge drift that is too slow, not from the learned-control direction itself.",
+            f"- If capped candidate-count variants improve together with the faster bridge, the next `{display_name}` branch should internalize narrower candidate counts and a tighter gross band instead of widening the raw panel further.",
         ]
     )
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

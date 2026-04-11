@@ -36,6 +36,88 @@ POLICY_V2_WEIGHT_POWER = 1.18
 POLICY_V2_HOLD_BOOST = 0.18
 POLICY_V2_CANDIDATE_MULTIPLIER = 2.2
 
+POLICY_V2_FAMILY_CONFIGS: Dict[str, Dict[str, float]] = {
+    "policy_v2": {
+        "gate_multiplier": POLICY_V2_GATE_MULTIPLIER,
+        "min_gross_exposure": POLICY_V2_MIN_GROSS_EXPOSURE,
+        "max_gross_exposure": POLICY_V2_MAX_GROSS_EXPOSURE,
+        "weight_power": POLICY_V2_WEIGHT_POWER,
+        "hold_boost": POLICY_V2_HOLD_BOOST,
+        "candidate_multiplier": POLICY_V2_CANDIDATE_MULTIPLIER,
+        "selection_rank_blend": 0.45,
+        "cash_model_alpha": 1.6,
+        "build_weight_mix": 0.65,
+        "build_gate_mix": 0.25,
+        "build_hold_mix": 0.10,
+    },
+    "policy_v2a": {
+        "gate_multiplier": 1.90,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.98,
+        "weight_power": 1.28,
+        "hold_boost": 0.20,
+        "candidate_multiplier": 1.80,
+        "selection_rank_blend": 0.40,
+        "cash_model_alpha": 1.5,
+        "build_weight_mix": 0.72,
+        "build_gate_mix": 0.18,
+        "build_hold_mix": 0.10,
+    },
+    "policy_v2b": {
+        "gate_multiplier": 2.00,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.96,
+        "weight_power": 1.24,
+        "hold_boost": 0.22,
+        "candidate_multiplier": 2.00,
+        "selection_rank_blend": 0.42,
+        "cash_model_alpha": 1.4,
+        "build_weight_mix": 0.68,
+        "build_gate_mix": 0.18,
+        "build_hold_mix": 0.14,
+    },
+    "policy_v2c": {
+        "gate_multiplier": 1.90,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.98,
+        "weight_power": 1.22,
+        "hold_boost": 0.30,
+        "candidate_multiplier": 1.80,
+        "selection_rank_blend": 0.48,
+        "cash_model_alpha": 1.5,
+        "build_weight_mix": 0.55,
+        "build_gate_mix": 0.15,
+        "build_hold_mix": 0.30,
+    },
+    "policy_v4a": {
+        "gate_multiplier": 2.00,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.96,
+        "weight_power": 1.16,
+        "hold_boost": 0.20,
+        "candidate_multiplier": 2.20,
+        "selection_rank_blend": 0.44,
+        "cash_model_alpha": 2.0,
+        "build_weight_mix": 0.60,
+        "build_gate_mix": 0.24,
+        "build_hold_mix": 0.16,
+    },
+    "policy_v4b": {
+        "gate_multiplier": 2.10,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.98,
+        "weight_power": 1.10,
+        "hold_boost": 0.16,
+        "candidate_multiplier": 2.60,
+        "selection_rank_blend": 0.46,
+        "cash_model_alpha": 1.8,
+        "build_weight_mix": 0.48,
+        "build_gate_mix": 0.30,
+        "build_hold_mix": 0.22,
+    },
+}
+POLICY_V2_METHODS = frozenset(POLICY_V2_FAMILY_CONFIGS)
+
 POLICY_V3_GATE_MULTIPLIER = 1.8
 POLICY_V3_MIN_GROSS_EXPOSURE = 0.90
 POLICY_V3_MAX_GROSS_EXPOSURE = 0.98
@@ -577,6 +659,13 @@ def _blend_selection_signal(selection_raw: pd.Series, *, rank_blend: float) -> p
     )
 
 
+def _get_policy_v2_config(method: str) -> Dict[str, float]:
+    normalized = str(method).strip().lower()
+    if normalized not in POLICY_V2_FAMILY_CONFIGS:
+        raise KeyError(f"Unsupported policy_v2-family method: {method}")
+    return dict(POLICY_V2_FAMILY_CONFIGS[normalized])
+
+
 def fit_score_head(
     train_pred_df: pd.DataFrame,
     target_names: List[str],
@@ -619,12 +708,12 @@ def fit_score_head(
     if method == "short_expert":
         confidence_target = _build_confidence_target(train_pred_df, task_weights)
         aligned = indexed_features.join(selection_target, how="inner").join(confidence_target, how="inner").dropna()
-    elif method in {"policy_v1", "policy_v2", "policy_v3"}:
+    elif method in {"policy_v1", "policy_v3"} or method in POLICY_V2_METHODS:
         utility_target = _build_utility_series(train_pred_df, task_weights)
         if method == "policy_v1":
             gate_multiplier = POLICY_V1_GATE_MULTIPLIER
-        elif method == "policy_v2":
-            gate_multiplier = POLICY_V2_GATE_MULTIPLIER
+        elif method in POLICY_V2_METHODS:
+            gate_multiplier = float(_get_policy_v2_config(method)["gate_multiplier"])
         else:
             gate_multiplier = POLICY_V3_GATE_MULTIPLIER
         gate_target_count = max(int(holding_count), int(round(float(holding_count) * gate_multiplier)))
@@ -747,7 +836,8 @@ def fit_score_head(
                 "cash_feature_columns": list(cash_columns),
             },
         )
-    if method == "policy_v2":
+    if method in POLICY_V2_METHODS:
+        config = _get_policy_v2_config(method)
         selection_model = Ridge(alpha=1.0, random_state=7)
         gate_model = Ridge(alpha=1.2, random_state=7)
         weight_model = Ridge(alpha=1.8, random_state=7)
@@ -758,7 +848,7 @@ def fit_score_head(
         hold_model.fit(X, aligned["hold_target"].values)
 
         selection_raw = pd.Series(selection_model.predict(X), index=aligned.index, dtype=float)
-        selection_signal = _blend_selection_signal(selection_raw, rank_blend=0.45)
+        selection_signal = _blend_selection_signal(selection_raw, rank_blend=float(config["selection_rank_blend"]))
         gate_signal = _cross_sectional_rank(pd.Series(gate_model.predict(X), index=aligned.index, dtype=float))
         weight_signal = _cross_sectional_rank(pd.Series(weight_model.predict(X), index=aligned.index, dtype=float))
         hold_signal = _cross_sectional_rank(pd.Series(hold_model.predict(X), index=aligned.index, dtype=float))
@@ -766,8 +856,8 @@ def fit_score_head(
             train_pred_df,
             utility_target,
             holding_count=holding_count,
-            min_gross_exposure=POLICY_V2_MIN_GROSS_EXPOSURE,
-            max_gross_exposure=POLICY_V2_MAX_GROSS_EXPOSURE,
+            min_gross_exposure=float(config["min_gross_exposure"]),
+            max_gross_exposure=float(config["max_gross_exposure"]),
         )
         cash_feature_frame = _build_policy_cash_feature_frame_v2(
             selection_signal,
@@ -778,7 +868,7 @@ def fit_score_head(
         )
         cash_feature_aligned = cash_feature_frame.join(cash_target, how="inner").dropna()
         cash_columns = [col for col in cash_feature_aligned.columns if col != "cash_target"]
-        cash_model = Ridge(alpha=1.6, random_state=7)
+        cash_model = Ridge(alpha=float(config["cash_model_alpha"]), random_state=7)
         cash_model.fit(cash_feature_aligned[cash_columns], cash_feature_aligned["cash_target"].values)
         return ScoreHeadArtifact(
             method=method,
@@ -792,18 +882,18 @@ def fit_score_head(
                 "cash_model": cash_model,
             },
             extra={
-                "selection_rank_blend": 0.45,
+                "selection_rank_blend": float(config["selection_rank_blend"]),
                 "holding_count": int(holding_count),
                 "gate_target_count": int(gate_target_count),
-                "policy_min_gross_exposure": float(POLICY_V2_MIN_GROSS_EXPOSURE),
-                "policy_max_gross_exposure": float(POLICY_V2_MAX_GROSS_EXPOSURE),
-                "policy_weight_power": float(POLICY_V2_WEIGHT_POWER),
-                "policy_hold_boost": float(POLICY_V2_HOLD_BOOST),
-                "policy_candidate_multiplier": float(POLICY_V2_CANDIDATE_MULTIPLIER),
+                "policy_min_gross_exposure": float(config["min_gross_exposure"]),
+                "policy_max_gross_exposure": float(config["max_gross_exposure"]),
+                "policy_weight_power": float(config["weight_power"]),
+                "policy_hold_boost": float(config["hold_boost"]),
+                "policy_candidate_multiplier": float(config["candidate_multiplier"]),
                 "cash_feature_columns": list(cash_columns),
-                "policy_build_weight_mix": 0.65,
-                "policy_build_gate_mix": 0.25,
-                "policy_build_hold_mix": 0.10,
+                "policy_build_weight_mix": float(config["build_weight_mix"]),
+                "policy_build_gate_mix": float(config["build_gate_mix"]),
+                "policy_build_hold_mix": float(config["build_hold_mix"]),
             },
         )
     if method == "policy_v3":
@@ -960,7 +1050,8 @@ def apply_score_head(
         out["cash_score"] = pd.to_datetime(out["date"]).map(cash_pred).astype(float)
         out["gross_exposure_target"] = out["cash_score"].astype(float)
         return out
-    if artifact.method == "policy_v2":
+    if artifact.method in POLICY_V2_METHODS:
+        config = _get_policy_v2_config(artifact.method)
         model_dict = artifact.model if isinstance(artifact.model, dict) else {}
         selection_model = model_dict.get("selection_model")
         gate_model = model_dict.get("gate_model")
@@ -968,7 +1059,7 @@ def apply_score_head(
         hold_model = model_dict.get("hold_model")
         cash_model = model_dict.get("cash_model")
         if any(model is None for model in (selection_model, gate_model, weight_model, hold_model, cash_model)):
-            raise ValueError("policy_v2 score head requires selection/gate/weight/hold/cash models.")
+            raise ValueError(f"{artifact.method} score head requires selection/gate/weight/hold/cash models.")
         selection_raw = pd.Series(selection_model.predict(aligned), index=aligned.index, dtype=float)
         gate_raw = pd.Series(gate_model.predict(aligned), index=aligned.index, dtype=float)
         weight_raw = pd.Series(weight_model.predict(aligned), index=aligned.index, dtype=float)
@@ -976,7 +1067,7 @@ def apply_score_head(
 
         selection_signal = _blend_selection_signal(
             selection_raw,
-            rank_blend=float(artifact.extra.get("selection_rank_blend", 0.45)),
+            rank_blend=float(artifact.extra.get("selection_rank_blend", config["selection_rank_blend"])),
         )
         gate_rank = _cross_sectional_rank(gate_raw)
         weight_rank = _cross_sectional_rank(weight_raw)
@@ -996,8 +1087,8 @@ def apply_score_head(
         ]
         cash_aligned = cash_feature_frame.reindex(columns=cash_feature_columns).fillna(0.0)
         cash_pred = pd.Series(cash_model.predict(cash_aligned), index=cash_aligned.index, dtype=float)
-        min_gross = float(artifact.extra.get("policy_min_gross_exposure", POLICY_V2_MIN_GROSS_EXPOSURE))
-        max_gross = float(artifact.extra.get("policy_max_gross_exposure", POLICY_V2_MAX_GROSS_EXPOSURE))
+        min_gross = float(artifact.extra.get("policy_min_gross_exposure", config["min_gross_exposure"]))
+        max_gross = float(artifact.extra.get("policy_max_gross_exposure", config["max_gross_exposure"]))
         cash_pred = cash_pred.clip(lower=min_gross, upper=max_gross)
 
         out["selection_score"] = selection_signal.values
@@ -1093,12 +1184,13 @@ def build_policy_target_weight_frame(
         default_weight_power = POLICY_V1_WEIGHT_POWER
         default_hold_boost = POLICY_V1_HOLD_BOOST
         default_candidate_multiplier = POLICY_V1_CANDIDATE_MULTIPLIER
-    elif artifact.method == "policy_v2":
-        default_min_gross = POLICY_V2_MIN_GROSS_EXPOSURE
-        default_max_gross = POLICY_V2_MAX_GROSS_EXPOSURE
-        default_weight_power = POLICY_V2_WEIGHT_POWER
-        default_hold_boost = POLICY_V2_HOLD_BOOST
-        default_candidate_multiplier = POLICY_V2_CANDIDATE_MULTIPLIER
+    elif artifact.method in POLICY_V2_METHODS:
+        config = _get_policy_v2_config(artifact.method)
+        default_min_gross = float(config["min_gross_exposure"])
+        default_max_gross = float(config["max_gross_exposure"])
+        default_weight_power = float(config["weight_power"])
+        default_hold_boost = float(config["hold_boost"])
+        default_candidate_multiplier = float(config["candidate_multiplier"])
     else:
         default_min_gross = POLICY_V3_MIN_GROSS_EXPOSURE
         default_max_gross = POLICY_V3_MAX_GROSS_EXPOSURE
@@ -1137,10 +1229,10 @@ def build_policy_target_weight_frame(
         else:
             candidate_count = int(round(base_holding_count + (max_candidates - base_holding_count) * gross))
             candidate_count = max(base_holding_count, min(candidate_count, len(frame)))
-        if artifact.method in {"policy_v2", "policy_v3"}:
+        if artifact.method in POLICY_V2_METHODS or artifact.method == "policy_v3":
             frame = frame.sort_values(["gate_score", "hold_score", "learned_score"], ascending=False)
         selected = frame.head(candidate_count).copy()
-        if artifact.method == "policy_v2":
+        if artifact.method in POLICY_V2_METHODS:
             raw = (
                 selected["weight_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_weight_mix", 0.65))
                 + selected["gate_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_gate_mix", 0.25))

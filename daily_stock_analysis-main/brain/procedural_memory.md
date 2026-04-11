@@ -1,5 +1,7 @@
 # Daily Stock Analysis Procedural Memory
 
+快照日期：`2026-04-12`
+
 ## 1. 仓库级技能
 ### 1.1 目录边界优先
 - 后端逻辑优先放在 `src/`、`data_provider/`、`api/`、`bot/`
@@ -34,8 +36,18 @@
   - `npm run build`
 
 ## 3. 分脑写入路由
+- 身份、交接包写：
+  - `identity_layer.md`
+  - `handoff_packet.md`
 - 稳定认知写 `semantic_memory.md`
+- 规则、教训、时态状态写：
+  - `rule_memory.md`
+  - `lesson_memory.md`
+  - `temporal_state.md`
 - 当前优先级写 `working_memory.md`
 - 运行口径写 `environment_model.md`
 - 系统入口与模块分层写 `action_system.md`
+- 接管纪律与治理写：
+  - `handoff_rules.md`
+  - `governance_layer.md`
 - 时间顺序改动写 `episodic_memory.md`

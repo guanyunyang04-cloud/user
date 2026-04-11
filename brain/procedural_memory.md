@@ -8,6 +8,9 @@
 - 默认可执行入口：
   - `python daily_research/tools/brain_bootstrap.py --child <brain_id>`
   - 由脚本按 manifest 解出主脑优先的真实 boot order，而不是手工维护一份顺序副本
+- 当前推荐接管顺序升级为：
+  - `identity -> handoff packet -> rule/lesson -> temporal -> working -> action`
+- 如果目标分脑已经具备 `handoff_packet.md`，默认先读 packet，再决定是否下钻 `episodic_memory.md`
 
 ### 1.2 分脑自治
 - 分脑负责自身的语义记忆、工作记忆、程序记忆、环境模型、情景记忆与行动系统
@@ -38,6 +41,11 @@
 - 环境基线写 `environment_model.md`
 - 时间证据写 `episodic_memory.md`
 - 操作链路写 `action_system.md`
+- 身份、北极星和禁区写 `identity_layer.md`
+- 教训写 `lesson_memory.md`
+- 规则写 `rule_memory.md`
+- 过去 / 当下 / 未来统一状态写 `temporal_state.md`
+- 标准接管摘要写 `handoff_packet.md`
 
 ### 1.7 热区维护流程
 - 当 `workspace_maintenance.py report` 报出 `cache/output` 热区告警时，先做现状确认，再决定归档或清理。
@@ -68,6 +76,11 @@
 - 主脑与分脑 manifest 必须互相可解析、可追踪
 - 新增项目时，先补脑，再接入主脑 child_brains
 - 任何脑网络调整完成后，必须跑 `doc_guard.py check`
+- 任何正式生产型分脑升级后，默认还要确认：
+  - 身份层是否清楚
+  - 规则记忆是否同步
+  - 教训是否从 episodic 提炼成长期资产
+  - handoff packet 是否足够支持新 agent 接管
 ## 3.1 Live 路径参数升级纪律
 - 如果更优配置相对当前 live 路径只差一个旋钮，不能只靠叙述性记忆宣布升级完成。
 - 必须先用同协议对照行证明它更好。

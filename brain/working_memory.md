@@ -2,6 +2,8 @@
 
 ## 1. 当前全局优先级
 - 一级优先级：
+  - 把主脑和三个分脑统一升级并维持在“agent 可替换、大脑不可替换”的接管结构
+- 一级优先级：
   - 巩固主脑与三个分脑的结构一致性、接管顺序和 manifest contract
 - 一级优先级：
   - 维持 `daily_research` 作为当前正式生产主线
@@ -31,5 +33,11 @@
 ## 4. 当前治理动作
 - 工作区只保留 brain 体系作为长期认知载体
 - 主脑持续维护 child_brains、body_root、attach_status 与 handoff contract
+- 工作区级当前快照统一写入 `brain/handoff_packet.md`
+- 工作区级身份和治理规则统一写入：
+  - `brain/identity_layer.md`
+  - `brain/governance_layer.md`
+- 当前三个 child_brain 已统一升级到：
+  - `identity / handoff / rule / lesson / temporal / governance` 接管骨架
 - 新增分项目时，必须先建立完整分脑，再允许接入主脑
 - 当 `workspace_maintenance.py report` 出现热区告警时，优先走 `archive` dry-run 收敛 `daily_research/cache` 与 `daily_research/output`

@@ -1,9 +1,11 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-11`
+快照日期：`2026-04-12`
 
 ## 1. 项目身份
 - `daily_research` 维护一条面向主板 A 股、以执行后净收益最大化为主目标的研究-执行统一链路。
+- 当前项目级接管原则已升级为：
+  - `Agent 无状态，项目大脑有状态。`
 - 历史过程与时序证据写入 `episodic_memory.md`。
 - 当前判决写入 `working_memory.md`。
 - 日常入口与固定命令写入 `action_system.md`。
@@ -87,10 +89,16 @@
 - 如果用户明确要“当前全项目最高净收益”，必须先进入同一成本引擎、同一 execution-policy audit、同一 `global_deployable_non_capacity_adjusted_v1`，然后再做跨 universe 排名。
 
 ## 8. 文档分工语义
+- `identity_layer.md` 只保留项目使命、北极星、硬约束与禁区。
+- `handoff_packet.md` 只保留标准交接包与当前最小完备状态。
 - `semantic_memory.md` 只保留稳定事实与长期边界。
+- `rule_memory.md` 只保留高优先级规则。
+- `lesson_memory.md` 只保留可复用教训。
+- `temporal_state.md` 只保留 `Past Ledger / Present State / Future Map`。
 - `project_map.md` 只保留项目结构、主线地图与决策闭环。
 - `working_memory.md` 只保留当前判决、优先级与下一步。
 - `procedural_memory.md` 只保留可复用方法学规则。
+- `governance_layer.md` 只保留自检、反偏移、修复和写回闭环。
 - `environment_model.md` 只保留环境、解释器、工具与编码口径。
 - `action_system.md` 只保留高频操作入口。
 - `episodic_memory.md` 只保留历史过程与原始证据。
@@ -101,6 +109,11 @@
 - 当前 strongest-model 的 recent winner 是 `baseline_current`，对应 recent 一年 `monthly_robust_score = 0.0982`。
 - 当前 strongest-model 的 promotable winner 仍是 `short_expert_monthly_v1`；formal / recent / promotable 三层语义必须分开叙述。
 - `state_liquidity_listwise_v1` 仍是当前 short-alpha 主线最强 stable base model，但不再表述成 strongest-model 的 recent winner。
-- learned-control 分支里，当前 corrected recent winner 是 `short_expert_policy_v2`；`policy_v3` 目前没有打赢 `policy_v2`。
+- learned-control 分支里，当前要分两层讲：
+  - constrained formal front-runner 已前移到 `short_expert_policy_v2b__k1_20d = 0.1104`
+  - corrected recent winner 已前移到 `short_expert_policy_v4b = 0.1387`
+- `short_expert_policy_v4b` 也是当前 direct formal family 的 fresh best，formal `0.1008` 接近 mainline `0.1012`；但它的 constrained best 只有 `0.0687`，还不能直接讲成 promotable winner。
+- `short_expert_policy_v2c = 0.1046` 与 `short_expert_policy_v2b = 0.1020` 仍是上一轮 `policy_v2 family` 的 recent 前沿；`policy_v3` 目前没有打赢这些 learned-control 前沿。
+- 当前 learned-control 的主问题已经从“补 `v2b / v2c` constrained formal 缺口”切到“如何保住 `policy_v4b` 的 recent 强度并把 deployable constrained formal 拉回 `policy_v2b` 水平以上”。
 - 旧 replay-based 机制根统一由 `daily_research/archive/output/replay_based_reference_index.md` 管理；主脑正文不再散落直引这些路径。
 - 本机正式训练纪律补充为：`yolos` + 前台执行 + `num_workers = 0` + `pin_memory = false`；未经用户明确允许，不重新启用 CPU 并行供数。

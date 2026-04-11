@@ -1,6 +1,6 @@
 # Daily Research 项目地图
 
-快照日期：`2026-04-11`
+快照日期：`2026-04-12`
 
 ## 1. 项目定义
 - `daily_research` 是一条以执行后净收益最大化为目标的研究-执行统一链路。
@@ -12,6 +12,17 @@
 - 这次问题属于 `formal`、`recent` 还是 `live`。
 - 这次工作属于研究环、执行环，还是 promotion 边界。
 - 这次引用的结果是在比较 base model、execution mainline，还是 attack challenger。
+
+## 2.1 当前接管快路
+- 当前默认接管不再从 `episodic_memory.md` 开始。
+- 当前接管快路是：
+  - `identity_layer.md`
+  - `handoff_packet.md`
+  - `rule_memory.md`
+  - `lesson_memory.md`
+  - `temporal_state.md`
+  - 然后再进入 `working / action / episodic`
+- 目标是让新 agent 先接状态，再接历史，而不是先淹没在长日志里。
 
 ## 3. 双环闭环
 - 研究环：
@@ -60,6 +71,15 @@
 - 30% 强月 verdict 根：`daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`
 - policy_v2 constrained formal review 根：`daily_research/output/short_alpha_policy_v2_constrained_execution_review_20260410_r1`
 - policy_v2 formal loss breakdown 根：`daily_research/output/short_alpha_policy_v2_formal_loss_breakdown_20260410_r1`
+- policy_v2 family formal review 根：`daily_research/output/short_alpha_policy_v2_family_formal_review_20260411_r1`
+- policy_v2 family recent eval 根：`daily_research/output/short_alpha_policy_v2_family_recent_eval_20260411_r1`
+- policy_v2 family constrained formal review 根：`daily_research/output/short_alpha_policy_v2_family_constrained_execution_review_20260411_r2`
+- policy family formal loss breakdown 根：`daily_research/output/short_alpha_policy_family_formal_loss_breakdown_20260411_r1`
+- policy_v2 family constrained pipeline 根：`daily_research/output/short_alpha_policy_v2_family_pipeline_20260411_r1_status.json`
+- policy_v4 family formal review 根：`daily_research/output/short_alpha_policy_v4_family_formal_review_20260411_r1`
+- policy_v4 family constrained formal review 根：`daily_research/output/short_alpha_policy_v4_family_constrained_execution_review_20260411_r1`
+- policy_v4 family recent eval 根：`daily_research/output/short_alpha_policy_v4_family_recent_eval_20260411_r1`
+- policy_v4 family pipeline 根：`daily_research/output/short_alpha_policy_v4_family_pipeline_20260411_r1_status.json`
 - policy_v3 latest formal review 根：`daily_research/output/short_alpha_policy_v3_review_20260410_r1`
 - policy_v3 latest recent eval 根：`daily_research/output/short_alpha_policy_v3_recent_eval_20260410_r1`
 - 旧 replay-based / 历史机制参考索引：`daily_research/archive/output/replay_based_reference_index.md`
@@ -75,6 +95,7 @@
 - research attack 层问题：如何把 `formal_current_equal_top5_k1_bridge` 这类更强攻击桥，在 recent/live 上复现而不退化。
 - 当前还没有任何 challenger 实现稳定 `30%+` 月收益门槛。
 - 因此下一阶段最高优先级不再是重新决定谁上线，而是围绕当前已上线的 `short_expert + k2` 默认链，先做 `market_state_guard_v2_balance` 一类的 `cash sizing / gross-control` 修补，再做 `month-trigger` 与窄版 `signal-to-weight`，并用同协议 recent 一年窗口持续和 `state_liquidity` 对照。
+- learned-control 层的新主矛盾已经再次更新为：`short_expert_policy_v2b` 已经给出 `0.1104` 的 constrained / deployable formal 证据，而 `short_expert_policy_v4b` 给出了 `0.1387` 的 corrected recent 前沿；当前最该补的不再是“有没有 constrained formal”，而是如何把 `v4b` 的 recent 强度转成不坍塌的 deployable formal。
 
 ## 9. 决策闭环
 - rolling formal head-to-head + recent validation 负责确认 strongest model 与 stable base model。
@@ -90,6 +111,8 @@
   - `policy_v2` 的 formal loss breakdown 已证明：`raw_1d` 不是可部署答案，手工收紧候选数与 gross band 也没有单独救回 formal gap；下一步 learned-control 应优先改 learned score-to-weight 本体，而不是继续堆更多手工稀疏化。
   - `policy_v3` 的 latest-window formal / corrected recent 都已补齐；它 formal `monthly_robust_score = 0.0786`、corrected recent `monthly_robust_score = 0.0390`，都没有打赢 `policy_v2`，因此当前 learned-control 主研究分支仍是 `short_expert_policy_v2`，不是 `policy_v3`。
   - 本轮所有正式训练、formal / recent 回放与结论生成均已锁定 `yolos` 环境。
+  - `policy_v2 family` constrained review 已补齐：`short_expert_policy_v2b__k1_20d = 0.1104` 已高于 current mainline `0.1012`，成为 learned-control 当前最强 constrained / deployable 候选；`policy_v2c` 的 constrained best 只有 `0.0953`，而 selected slow bridge 更低到 `0.0846`。
+  - `policy_v4 family` 第一轮也已跑完：`policy_v4b` formal family best `0.1008`、recent `0.1387` 都很强，但 constrained best 只有 `0.0687`；`policy_v4a` formal / constrained 都没有解题。当前 learned-control 新主问题已经变成“如何保住 `policy_v4b` 的 recent 优势，同时不丢掉 `policy_v2b` 的 deployable constrained formal 能力”。
 
 ## 9. 当前地图修正
 - strongest-model 主线现在要分三层看：
@@ -97,9 +120,11 @@
   - `recent winner = baseline_current`
   - `promotable winner = short_expert_monthly_v1`
 - 因此当前研究层主矛盾不再是“`short_expert` 如何打赢 `state_liquidity` 的 recent companion”，而是“`short_expert` 这条默认执行主线如何解释并收敛与 `baseline_current` 的 corrected recent 差异”。
-- learned-control 层当前也要分两层看：
-  - `formal main research branch = short_expert_policy_v2`
-  - `recent winner inside learned-control/default/companion pack = short_expert_policy_v2`
-- `policy_v3` 目前 formal 和 corrected recent 都没有打赢 `policy_v2`，因此不进入默认执行晋升主线。
+- learned-control 层当前要分三层看：
+  - `constrained formal front-runner = short_expert_policy_v2b__k1_20d`
+  - `corrected recent winner = short_expert_policy_v4b`
+  - `fresh formal family best = short_expert_policy_v4b`
+- `short_expert_policy_v4b` 当前不是 promotion 答案，因为它的 constrained best 只有 `0.0687`；`short_expert_policy_v2b` 才是当前最强 deployable learned-control candidate。`policy_v3` 目前 formal 和 corrected recent 都没有打赢这些前沿，因此不进入默认执行晋升主线。
+- 当前 learned-control 最重要的下一步不是广扫新模型，而是围绕“保住 `policy_v4b` 的 recent 强度并让 constrained formal 不坍塌”做窄迭代，同时保留 `policy_v2b` 作为 deployable 对照锚点。
 - 旧 replay-recent 口径下的 recent root-cause、cash-sizing repair、follow-up repair、execution audit 与 targeted repair 原始根，现统一收口到 `daily_research/archive/output/replay_based_reference_index.md`，不再在主地图散落直引。
 - 本机正式训练地图补充为：`yolos` + 前台 + `num_workers = 0` + `pin_memory = false`。

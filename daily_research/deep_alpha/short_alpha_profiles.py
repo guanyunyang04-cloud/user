@@ -188,6 +188,135 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
     ),
+    "short_expert_policy_v2a": ShortAlphaProfile(
+        name="short_expert_policy_v2a",
+        description=(
+            "Policy-head short-line expert v2a: keep the policy_v2 backbone but tighten "
+            "candidate concentration so the learned control layer spends less breadth on "
+            "formal windows."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v2a",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v2b": ShortAlphaProfile(
+        name="short_expert_policy_v2b",
+        description=(
+            "Policy-head short-line expert v2b: keep the policy_v2 backbone but pull the "
+            "learned gross band closer to the strongest current execution evidence."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v2b",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v2c": ShortAlphaProfile(
+        name="short_expert_policy_v2c",
+        description=(
+            "Policy-head short-line expert v2c: keep the policy_v2 backbone but lean harder "
+            "on hold-aware control so the learned layer can stabilize state-conditioned "
+            "gross and concentration decisions."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v2c",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v4a": ShortAlphaProfile(
+        name="short_expert_policy_v4a",
+        description=(
+            "Policy-head short-line expert v4a: start from the current v2 family winner set, "
+            "but regularize the learned control layer toward more execution-stable slow-bridge "
+            "behavior so recent/formal profile drift shrinks."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v4a",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v4b": ShortAlphaProfile(
+        name="short_expert_policy_v4b",
+        description=(
+            "Policy-head short-line expert v4b: keep the current learned-control backbone, "
+            "but explicitly regularize toward broader candidate usage and lower concentration "
+            "so fast-bridge gains do not depend on extreme few-name portfolios."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v4b",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
     "short_expert_policy_v3": ShortAlphaProfile(
         name="short_expert_policy_v3",
         description=(
@@ -775,6 +904,11 @@ PROFILE_ALIASES: dict[str, str] = {
     "expert_monthly_v2": "short_expert_monthly_v2",
     "expert_monthly_deep": "short_expert_monthly_v1_deep",
     "expert_policy_v2": "short_expert_policy_v2",
+    "expert_policy_v2a": "short_expert_policy_v2a",
+    "expert_policy_v2b": "short_expert_policy_v2b",
+    "expert_policy_v2c": "short_expert_policy_v2c",
+    "expert_policy_v4a": "short_expert_policy_v4a",
+    "expert_policy_v4b": "short_expert_policy_v4b",
     "expert_policy_deep": "short_expert_policy_v1_deep",
     "expert_mamba_policy": "short_expert_mamba_policy_v1",
 }

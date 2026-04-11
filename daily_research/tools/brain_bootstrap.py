@@ -8,11 +8,28 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
+OPTIONAL_BRAIN_KEYS = (
+    "identity_path",
+    "rule_memory_path",
+    "lesson_memory_path",
+    "temporal_state_path",
+    "handoff_packet_path",
+    "governance_path",
+)
 
 
 def _read_json(rel_path: Path) -> dict[str, Any]:
     path = ROOT / rel_path
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _collect_optional_brain_paths(prefix: str, manifest: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key in OPTIONAL_BRAIN_KEYS:
+        value = str(manifest.get(key, "")).strip()
+        if value:
+            out[f"{prefix}_{key}"] = value
+    return out
 
 
 def _ensure_exists(rel_path: Path) -> None:
@@ -96,6 +113,7 @@ def build_bootstrap_payload(child_id: str | None) -> dict[str, Any]:
         "main_entrypoint": str(main_manifest.get("entrypoint", "")),
         "main_boot_order": [path.as_posix() for path in main_order],
     }
+    payload.update(_collect_optional_brain_paths("main", main_manifest))
 
     if child_id is None:
         payload["boot_order"] = payload["main_boot_order"]
@@ -122,6 +140,7 @@ def build_bootstrap_payload(child_id: str | None) -> dict[str, Any]:
             "boot_order": [path.as_posix() for path in boot_order],
         }
     )
+    payload.update(_collect_optional_brain_paths("child", child_manifest))
     return payload
 
 
@@ -131,6 +150,13 @@ def _print_text(payload: dict[str, Any], absolute: bool) -> None:
         print(f"Attached main brain -> {child_brain}")
     else:
         print("Attached main brain")
+
+    for key in ("main_identity_path", "main_handoff_packet_path", "child_identity_path", "child_handoff_packet_path"):
+        if key not in payload:
+            continue
+        label = key.replace("_path", "").replace("_", " ")
+        path = (ROOT / payload[key]).resolve() if absolute else Path(payload[key])
+        print(f"{label}: {path}")
 
     for index, rel in enumerate(payload["boot_order"], start=1):
         path = (ROOT / rel).resolve() if absolute else Path(rel)

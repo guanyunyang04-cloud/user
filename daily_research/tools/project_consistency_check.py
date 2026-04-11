@@ -394,6 +394,20 @@ def _check_execution_pipeline_consistency(failures: list[CheckResult]) -> None:
 
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
+        "daily_research/brain/identity_layer.md": (
+            "Agent 无状态，项目大脑有状态",
+            "正式生产研究与执行主线",
+            "strict resume",
+            "前台执行",
+            "默认追求最有效",
+        ),
+        "daily_research/brain/handoff_packet.md": (
+            "当前状态摘要",
+            "当前正在处理的问题",
+            "已完成动作及证据",
+            "推荐下一步",
+            "禁止重复尝试的无效路径",
+        ),
         "daily_research/brain/semantic_memory.md": (
             "formal 验证采用滚动窗口协议",
             "每个 formal 窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型",
@@ -403,6 +417,27 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "formal = 滚动 formal 评估窗",
             "recent = 截至当前评估时点的最近一年 12 个月窗口",
             "live = 当前生产执行语义与面板",
+        ),
+        "daily_research/brain/rule_memory.md": (
+            "宪法级规则",
+            "策略级规则",
+            "经验级规则",
+            "strict resume",
+            "formal、recent、live、promotion",
+        ),
+        "daily_research/brain/lesson_memory.md": (
+            "事件：",
+            "场景：",
+            "根因：",
+            "预防：",
+            "升级动作：",
+        ),
+        "daily_research/brain/temporal_state.md": (
+            "Past Ledger",
+            "Present State",
+            "Future Map",
+            "已验证事实",
+            "待验证假设",
         ),
         "daily_research/brain/working_memory.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -424,6 +459,13 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "formal 验证采用滚动窗口协议",
             "strongest research model 默认可以直接作为执行默认",
             "latest-data `production full-fit`",
+        ),
+        "daily_research/brain/governance_layer.md": (
+            "目标一致性检查",
+            "规则冲突检查",
+            "经验教训检查",
+            "依赖完整性检查",
+            "project_consistency_check.py",
         ),
         "daily_research/brain/action_system.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,

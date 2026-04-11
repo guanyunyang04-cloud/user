@@ -1,18 +1,53 @@
 {
   "brain_type": "main",
-  "brain_version": "2026-03-31",
-  "entrypoint": "brain/master_brain.md",
+  "brain_version": "2026-04-12",
+  "entrypoint": "brain/identity_layer.md",
   "read_order": [
+    "brain/identity_layer.md",
+    "brain/handoff_packet.md",
+    "brain/rule_memory.md",
+    "brain/lesson_memory.md",
+    "brain/temporal_state.md",
     "brain/master_brain.md",
     "brain/brain_architecture.md",
     "brain/working_memory.md",
     "brain/procedural_memory.md",
+    "brain/governance_layer.md",
     "brain/environment_model.md"
   ],
+  "identity_path": "brain/identity_layer.md",
+  "rule_memory_path": "brain/rule_memory.md",
+  "lesson_memory_path": "brain/lesson_memory.md",
+  "temporal_state_path": "brain/temporal_state.md",
+  "governance_path": "brain/governance_layer.md",
+  "handoff_packet_path": "brain/handoff_packet.md",
   "governance": {
     "default_objective_policy": "profit_first_non_regression_for_production_brains",
     "brain_body_match_required": true,
     "cross_project_rules_write_first": "brain/master_brain.md"
+  },
+  "cognition_contract": {
+    "core_principle": "Agent 无状态，项目大脑有状态。",
+    "layers": [
+      "identity",
+      "memory",
+      "cognition",
+      "decision",
+      "execution",
+      "governance"
+    ],
+    "required_preflight": [
+      "goal_alignment",
+      "rule_conflict",
+      "lesson_check",
+      "dependency_integrity"
+    ],
+    "post_task_writeback": [
+      "facts",
+      "lessons",
+      "next_action",
+      "handoff_packet"
+    ]
   },
   "brain_contract": {
     "required_sub_brain_keys": [
@@ -27,6 +62,15 @@
       "body_map",
       "modules",
       "handoff_contract"
+    ],
+    "recommended_sub_brain_keys": [
+      "identity_path",
+      "rule_memory_path",
+      "lesson_memory_path",
+      "temporal_state_path",
+      "handoff_packet_path",
+      "governance_path",
+      "cognition_contract"
     ]
   },
   "child_brains": [
@@ -36,7 +80,7 @@
       "role": "production_research_and_execution",
       "control_level": "managed_by_main_brain",
       "body_root": "daily_research",
-      "entrypoint": "daily_research/brain/semantic_memory.md",
+      "entrypoint": "daily_research/brain/identity_layer.md",
       "attach_status": "attached"
     },
     {
@@ -45,7 +89,7 @@
       "role": "intraday_experiment_and_rl",
       "control_level": "managed_by_main_brain",
       "body_root": "t0_project",
-      "entrypoint": "t0_project/brain/semantic_memory.md",
+      "entrypoint": "t0_project/brain/identity_layer.md",
       "attach_status": "attached"
     },
     {
@@ -54,20 +98,33 @@
       "role": "multi_market_ai_stock_analysis",
       "control_level": "managed_by_main_brain",
       "body_root": "daily_stock_analysis-main",
-      "entrypoint": "daily_stock_analysis-main/brain/semantic_memory.md",
+      "entrypoint": "daily_stock_analysis-main/brain/identity_layer.md",
       "attach_status": "attached"
     }
   ],
   "write_routes": {
-    "workspace_identity": "brain/master_brain.md",
+    "workspace_identity": "brain/identity_layer.md",
+    "workspace_rule_memory": "brain/rule_memory.md",
+    "workspace_lesson_memory": "brain/lesson_memory.md",
+    "workspace_temporal_state": "brain/temporal_state.md",
+    "workspace_topology": "brain/master_brain.md",
     "workspace_priorities": "brain/working_memory.md",
     "workspace_methods": "brain/procedural_memory.md",
+    "workspace_governance": "brain/governance_layer.md",
+    "workspace_handoff": "brain/handoff_packet.md",
     "workspace_environment": "brain/environment_model.md"
   },
   "handoff_contract": {
     "agent_boot_order": [
       "brain/brain_manifest.json",
+      "brain/identity_layer.md",
+      "brain/handoff_packet.md",
+      "brain/rule_memory.md",
+      "brain/lesson_memory.md",
+      "brain/temporal_state.md",
       "<child>/brain/brain_manifest.json",
+      "<child>/brain/identity_layer.md if present else entrypoint",
+      "<child>/brain/handoff_packet.md if present",
       "<child>/brain/semantic_memory.md",
       "<child>/brain/working_memory.md",
       "<child>/brain/procedural_memory.md",

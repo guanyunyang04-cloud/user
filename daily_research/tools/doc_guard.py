@@ -9,33 +9,60 @@ from typing import Iterable
 
 
 DEFAULT_DOCS = [
+    "brain/identity_layer.md",
+    "brain/handoff_packet.md",
+    "brain/rule_memory.md",
+    "brain/lesson_memory.md",
+    "brain/temporal_state.md",
     "brain/master_brain.md",
     "brain/brain_architecture.md",
     "brain/working_memory.md",
     "brain/procedural_memory.md",
+    "brain/governance_layer.md",
     "brain/environment_model.md",
     "brain/brain_manifest.json",
+    "daily_research/brain/identity_layer.md",
+    "daily_research/brain/handoff_packet.md",
     "daily_research/brain/semantic_memory.md",
+    "daily_research/brain/rule_memory.md",
+    "daily_research/brain/lesson_memory.md",
+    "daily_research/brain/temporal_state.md",
     "daily_research/brain/brain_architecture.md",
     "daily_research/brain/project_map.md",
     "daily_research/brain/working_memory.md",
     "daily_research/brain/procedural_memory.md",
+    "daily_research/brain/handoff_rules.md",
+    "daily_research/brain/governance_layer.md",
     "daily_research/brain/environment_model.md",
     "daily_research/brain/action_system.md",
     "daily_research/brain/episodic_memory.md",
     "daily_research/brain/brain_manifest.json",
+    "t0_project/brain/identity_layer.md",
+    "t0_project/brain/handoff_packet.md",
     "t0_project/brain/semantic_memory.md",
+    "t0_project/brain/rule_memory.md",
+    "t0_project/brain/lesson_memory.md",
+    "t0_project/brain/temporal_state.md",
     "t0_project/brain/brain_architecture.md",
     "t0_project/brain/working_memory.md",
     "t0_project/brain/procedural_memory.md",
+    "t0_project/brain/handoff_rules.md",
+    "t0_project/brain/governance_layer.md",
     "t0_project/brain/environment_model.md",
     "t0_project/brain/action_system.md",
     "t0_project/brain/episodic_memory.md",
     "t0_project/brain/brain_manifest.json",
+    "daily_stock_analysis-main/brain/identity_layer.md",
+    "daily_stock_analysis-main/brain/handoff_packet.md",
     "daily_stock_analysis-main/brain/semantic_memory.md",
+    "daily_stock_analysis-main/brain/rule_memory.md",
+    "daily_stock_analysis-main/brain/lesson_memory.md",
+    "daily_stock_analysis-main/brain/temporal_state.md",
     "daily_stock_analysis-main/brain/brain_architecture.md",
     "daily_stock_analysis-main/brain/working_memory.md",
     "daily_stock_analysis-main/brain/procedural_memory.md",
+    "daily_stock_analysis-main/brain/handoff_rules.md",
+    "daily_stock_analysis-main/brain/governance_layer.md",
     "daily_stock_analysis-main/brain/environment_model.md",
     "daily_stock_analysis-main/brain/action_system.md",
     "daily_stock_analysis-main/brain/episodic_memory.md",
@@ -52,6 +79,41 @@ class DocRule:
 
 
 DOC_RULES = {
+    "brain/identity_layer.md": DocRule(
+        warn_lines=160,
+        max_lines=240,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main identity layer should stay a current identity document instead of becoming a dated log"),
+        ),
+    ),
+    "brain/handoff_packet.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main handoff packet should stay a current packet instead of becoming a dated log"),
+        ),
+    ),
+    "brain/rule_memory.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main rule memory should stay a current rule document instead of becoming a dated log"),
+        ),
+    ),
+    "brain/lesson_memory.md": DocRule(
+        warn_lines=220,
+        max_lines=320,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main lesson memory should stay a structured lessons document instead of becoming a dated log"),
+        ),
+    ),
+    "brain/temporal_state.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main temporal state should stay a temporal model instead of becoming a dated log"),
+        ),
+    ),
     "brain/master_brain.md": DocRule(
         warn_lines=180,
         max_lines=260,
@@ -80,6 +142,13 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
+    "brain/governance_layer.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "main governance layer should stay a governance document instead of becoming a dated log"),
+        ),
+    ),
     "brain/environment_model.md": DocRule(
         warn_lines=160,
         max_lines=220,
@@ -96,6 +165,41 @@ DOC_RULES = {
         max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research semantic memory should stay a current-state document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/identity_layer.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research identity layer should stay a current identity document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/handoff_packet.md": DocRule(
+        warn_lines=220,
+        max_lines=320,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research handoff packet should stay a current packet instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/rule_memory.md": DocRule(
+        warn_lines=200,
+        max_lines=300,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research rule memory should stay a current rule document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/lesson_memory.md": DocRule(
+        warn_lines=260,
+        max_lines=420,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research lesson memory should stay a structured lessons document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/temporal_state.md": DocRule(
+        warn_lines=220,
+        max_lines=320,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research temporal state should stay a temporal model instead of becoming a dated log"),
         ),
     ),
     "daily_research/brain/brain_architecture.md": DocRule(
@@ -126,6 +230,20 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research procedural memory should stay a reusable methods document instead of becoming a dated log"),
         ),
     ),
+    "daily_research/brain/handoff_rules.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research handoff rules should stay a rules document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_research/brain/governance_layer.md": DocRule(
+        warn_lines=220,
+        max_lines=320,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research governance layer should stay a governance document instead of becoming a dated log"),
+        ),
+    ),
     "daily_research/brain/environment_model.md": DocRule(
         warn_lines=180,
         max_lines=260,
@@ -154,6 +272,41 @@ DOC_RULES = {
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 semantic memory should stay a current-state document instead of becoming a dated log"),
         ),
     ),
+    "t0_project/brain/identity_layer.md": DocRule(
+        warn_lines=160,
+        max_lines=240,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 identity layer should stay a current identity document instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/handoff_packet.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 handoff packet should stay a current packet instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/rule_memory.md": DocRule(
+        warn_lines=160,
+        max_lines=240,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 rule memory should stay a current rule document instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/lesson_memory.md": DocRule(
+        warn_lines=200,
+        max_lines=320,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 lesson memory should stay a structured lessons document instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/temporal_state.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 temporal state should stay a temporal model instead of becoming a dated log"),
+        ),
+    ),
     "t0_project/brain/brain_architecture.md": DocRule(
         warn_lines=160,
         max_lines=240,
@@ -173,6 +326,20 @@ DOC_RULES = {
         max_lines=220,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 procedural memory should stay a reusable methods document instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/handoff_rules.md": DocRule(
+        warn_lines=160,
+        max_lines=220,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 handoff rules should stay a rules document instead of becoming a dated log"),
+        ),
+    ),
+    "t0_project/brain/governance_layer.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "t0 governance layer should stay a governance document instead of becoming a dated log"),
         ),
     ),
     "t0_project/brain/environment_model.md": DocRule(
@@ -197,14 +364,49 @@ DOC_RULES = {
         ),
     ),
     "t0_project/brain/brain_manifest.json": DocRule(
-        warn_lines=180,
-        max_lines=260,
+        warn_lines=220,
+        max_lines=320,
     ),
     "daily_stock_analysis-main/brain/semantic_memory.md": DocRule(
         warn_lines=180,
         max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis semantic memory should stay a current-state document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/identity_layer.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis identity layer should stay a current identity document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/handoff_packet.md": DocRule(
+        warn_lines=200,
+        max_lines=300,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis handoff packet should stay a current packet instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/rule_memory.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis rule memory should stay a current rule document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/lesson_memory.md": DocRule(
+        warn_lines=220,
+        max_lines=340,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis lesson memory should stay a structured lessons document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/temporal_state.md": DocRule(
+        warn_lines=200,
+        max_lines=300,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis temporal state should stay a temporal model instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/brain_architecture.md": DocRule(
@@ -226,6 +428,20 @@ DOC_RULES = {
         max_lines=280,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis procedural memory should stay a reusable methods document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/handoff_rules.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis handoff rules should stay a rules document instead of becoming a dated log"),
+        ),
+    ),
+    "daily_stock_analysis-main/brain/governance_layer.md": DocRule(
+        warn_lines=200,
+        max_lines=300,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_stock_analysis governance layer should stay a governance document instead of becoming a dated log"),
         ),
     ),
     "daily_stock_analysis-main/brain/environment_model.md": DocRule(
@@ -316,6 +532,17 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
     if normalized == "brain/brain_manifest.json":
         if data.get("brain_type") != "main":
             issues.append("main_manifest_brain_type_must_be_main")
+        for optional_key in (
+            "identity_path",
+            "rule_memory_path",
+            "lesson_memory_path",
+            "temporal_state_path",
+            "handoff_packet_path",
+            "governance_path",
+        ):
+            optional_path = str(data.get(optional_key, "")).strip()
+            if optional_path and not Path(optional_path).exists():
+                issues.append(f"main_optional_brain_path_missing:{optional_key}:{optional_path}")
         child_brains = data.get("child_brains")
         if not isinstance(child_brains, list) or not child_brains:
             issues.append("main_manifest_child_brains_missing_or_empty")
@@ -453,6 +680,22 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
                 for item in entry_sequence:
                     if not Path(str(item)).exists():
                         issues.append(f"handoff_entry_path_missing:{item}")
+
+        for optional_key in (
+            "identity_path",
+            "rule_memory_path",
+            "lesson_memory_path",
+            "temporal_state_path",
+            "handoff_packet_path",
+            "governance_path",
+        ):
+            optional_path = str(data.get(optional_key, "")).strip()
+            if not optional_path:
+                continue
+            if not Path(optional_path).exists():
+                issues.append(f"optional_brain_path_missing:{optional_key}:{optional_path}")
+            if optional_key == "identity_path" and Path(optional_path) != entrypoint:
+                issues.append("identity_path_should_match_entrypoint")
 
     return issues
 

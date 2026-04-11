@@ -1,9 +1,13 @@
 # Daily Research 当前判断
 
-快照日期：`2026-04-11`
+快照日期：`2026-04-12`
 
 ## 1. 当前锁定协议
 - 用户最新提出的要求仍是最高优先级。
+- 当前接管规则已经升级为：
+  - 先读 `identity_layer.md`
+  - 再读 `handoff_packet.md`
+  - 再读 `rule_memory.md / lesson_memory.md / temporal_state.md`
 - formal 验证采用滚动窗口；每个 formal 窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型。
 - 当前 formal 主窗示例仍是 `train_end = 2025-03-17`、`valid_start = 2025-03-18`、`valid_end = 2026-03-31`，它代表“该窗起点前最新模型”，不是“故意落后一整年”的旧解释。
 - recent 验证现在是 strongest-model research verdict 的必备伴随证据，不允许只报 formal。
@@ -107,6 +111,15 @@
   - `short_alpha_policy_v3_review_20260410_r1` 已补齐；`short_expert_policy_v3` 的 formal profile 仍是 `regoff_k2_20d_ensemble_native_anchor`，formal `monthly_robust_score = 0.0786`，低于 `policy_v2 = 0.0830`、`state_liquidity_listwise_v1 = 0.0897` 和当前 mainline `0.1012`，不是 formal winner。
   - `short_alpha_policy_v3_recent_eval_20260410_r1` 已按 corrected recent 协议重刷；在 `2025-04-11 -> 2026-04-10` recent 一年窗口里，`short_expert_policy_v3` 的 `monthly_robust_score = 0.0390`，仍低于 current default `0.0778` 与 `policy_v2 = 0.0871`，也不是 recent winner。
   - learned-control 当前主研究分支仍应保持为 `short_expert_policy_v2`；`policy_v3` 第一版证明“把更多控制动作学进去”本身可行，但它既没有解决 formal gap，也没有在 latest recent 一年里打赢 `policy_v2`。
+- 2026-04-11 最新补充：
+  - `short_alpha_policy_v2_family_formal_review_20260411_r1` 已补齐；family formal 排名是 `policy_v2 = 0.0830 > policy_v2b = 0.0803 > policy_v2c = 0.0777 > policy_v2a = 0.0505`，因此 learned-control 的 formal main research branch 仍是 `short_expert_policy_v2`，没有被 `v2b / v2c` 接管。
+  - 同一 formal family review 也再次确认：当前 overall formal winner 仍是 `short_expert_monthly_v1 = 0.1012`；本轮 family 结果没有触发默认执行切换。
+  - `short_alpha_policy_v2_family_recent_eval_20260411_r1` 已补齐；corrected recent 一年 family 排名改写为 `policy_v2c = 0.1046 > policy_v2b = 0.1020 > baseline_current = 0.0982 > policy_v2 = 0.0871 ≈ policy_v2a = 0.0870 > current default = 0.0778`。
+  - 这说明 learned-control 的 recent frontier 已经从老 `policy_v2` 前移到 `policy_v2c`，`policy_v2b` 是强 runner-up；两者都已经超过 `baseline_current` 与当前默认执行链。
+  - `short_alpha_policy_v2_family_constrained_execution_review_20260411_r2` 已补齐；family constrained best 已前移到 `short_expert_policy_v2b__k1_20d = 0.1104`，高于当前 mainline formal `0.1012`；`policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`，但 selected slow bridge `k1_20d` 只有 `0.0846`。
+  - `short_alpha_policy_family_formal_loss_breakdown_20260411_r1` 已补齐；当前 learned-control 最强 deployable / constrained formal 候选应前移到 `short_expert_policy_v2b`，而 `policy_v2c` 的 formal gap 更像 bridge/control 敏感，而不是 recent 偶然值。
+  - `short_alpha_policy_v4_family_pipeline_20260411_r1` 已按前台 + strict-resume 纪律跑完 formal / constrained / recent / consistency / doc_guard；`policy_v4b` 的 direct formal family best 已到 `0.1008`、corrected recent 已到 `0.1387`，但 constrained best 只有 `0.0687`，还不能直接进入 promotion；`policy_v4a` formal / constrained 都没有解题。
+  - 因此 learned-control 当前要分三层讲：direct formal family fresh best = `policy_v4b`，constrained formal best = `policy_v2b`，corrected recent best = `policy_v4b`；live 默认执行继续冻结不变。
 - 当前默认执行不变，继续维持 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`；本轮不触发新的 production promotion。
 
 ## 当前协议修正收口
@@ -118,6 +131,12 @@
 - `state_liquidity_listwise_v1` 的 corrected recent 一年读数应改为：`monthly_robust_score = -0.0019`、`recent_excess_annual_return = 15.53%`；它仍是 stable base model，但不再是 strongest-model 的 recent winner。
 - 旧的 replay-recent strongest 叙事与由其衍生的 current-default / companion recent 对照，现阶段都只保留为参考读数，不再当正式 promotion 证据。
 - 旧 replay-based 机制根现统一收口到 `daily_research/archive/output/replay_based_reference_index.md`；当前 working memory 不再散落直引这些路径。
-- learned-control 的 corrected recent 层已经收口为：`short_expert_policy_v2` 是当前 recent winner，`monthly_robust_score = 0.0871`、`recent_excess_annual_return = 93.01%`；它高于 current default 的 `0.0778`，也高于 `policy_v1 = 0.0744`。
-- `short_expert_policy_v3` 的 corrected recent 读数是 `monthly_robust_score = 0.0390`、`recent_excess_annual_return = 45.84%`，明显落后于 `policy_v2`，因此当前 learned-control 主研究分支仍然保持为 `short_expert_policy_v2`。
+- learned-control 的 direct formal family fresh layer 最新读数是：`short_expert_policy_v4b = 0.1008`，已经非常接近 current mainline `0.1012`；但这只是 fresh family formal readout，不代表 deployable verdict。
+- learned-control 的 constrained formal 层当前已改写为：`short_expert_policy_v2b__k1_20d = 0.1104` 是 strongest deployable candidate，已高于 current mainline `0.1012`；`policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`，而 selected slow bridge `k1_20d` 只有 `0.0846`。
+- learned-control 的 corrected recent 层当前已前移到 `short_expert_policy_v4b = 0.1387`；`policy_v4a = 0.1070`、`policy_v2c = 0.1046`、`policy_v2b = 0.1020` 也都高于 `baseline_current = 0.0982`。
+- `short_expert_policy_v3` 的 corrected recent 读数是 `monthly_robust_score = 0.0390`、`recent_excess_annual_return = 45.84%`，明显落后于 `policy_v2 family` 前沿，因此当前 learned-control 主研究分支仍然保持为 `short_expert_policy_v2` / `policy_v2 family`，不是 `policy_v3`。
+- `policy_v4b` 目前不能直接讲成 promotion 结论，因为它的 constrained formal best 只有 `0.0687`；`policy_v4a` 的 constrained best 更低到 `0.0458`，说明 recent 强势还没有转成 deployable formal。
+- 因此当前 learned-control 的最强 deployable research candidate 是 `short_expert_policy_v2b`，而“如何保住 `policy_v4b` 的 recent 强度并让 constrained formal 不坍塌”成为下一轮新主问题。
 - 本机正式训练纪律补充为：`yolos`、前台执行、`num_workers = 0`、`pin_memory = false`；后续若继续 recent / formal 正式训练，不再启用 CPU 并行供数。
+- `2026-04-11` 用户把接管纪律进一步钉死为：所有正式实验都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`，长实验只允许前台执行，终端默认超时预算按 `10` 小时处理。
+- 同日用户再次明确：后续改法默认优先追求“最有效解决主问题”，不再把“最小改动”当默认目标；若两者冲突，默认选更有效方案，并同步更新代码与 brain。

@@ -1,6 +1,6 @@
 # Daily Research 方法记忆
 
-快照日期：`2026-04-11`
+快照日期：`2026-04-12`
 
 ## 1. 总原则
 - 用户最新提出的要求拥有最高优先级。
@@ -9,6 +9,15 @@
 - 不允许保留会误导判断的前后矛盾和过期冗余。
 
 ## 2. 接管前判型
+- 当前接管默认不再从 `episodic_memory.md` 起步。
+- 当前最小完备接管顺序是：
+  - `identity_layer.md`
+  - `handoff_packet.md`
+  - `semantic_memory.md`
+  - `rule_memory.md`
+  - `lesson_memory.md`
+  - `temporal_state.md`
+  - `working_memory.md`
 - 任何问题先判定它属于 `formal`、`recent` 还是 `live`。
 - 任何问题再判定它属于研究环、执行环，还是 promotion 边界。
 - 研究问题默认先看 formal 根，不先看 production full-fit。
@@ -90,6 +99,13 @@
 - 只要改动训练默认值、active manifest、candidate pipeline 或 brain 文档，收尾必须跑：
   - `python daily_research/tools/project_consistency_check.py`
   - `python daily_research/tools/doc_guard.py check`
+- 如果这轮改动涉及接管结构，还必须同步检查：
+  - `identity_layer.md`
+  - `rule_memory.md`
+  - `lesson_memory.md`
+  - `temporal_state.md`
+  - `handoff_packet.md`
+  - `governance_layer.md`
 - 如果 active execution 语义变了，还必须重刷：
   - production root
   - single-mapping candidate pipeline
@@ -114,3 +130,8 @@
 - 旧的 replay-recent 输出若与 corrected recent 冲突，一律降级为参考读数，不得继续写成当前口径。
 - 旧 replay-based 机制根统一经 `daily_research/archive/output/replay_based_reference_index.md` 引用；`project_map / working_memory / action_system` 不再散落直引这些路径。
 - 本机正式训练纪律补充为：`yolos`、前台执行、`num_workers = 0`、`pin_memory = false`；未经用户明确批准，不重新启用 CPU 并行供数。
+- 当前接管治理补充为：
+  - 先看 `handoff_packet.md`，再看 `temporal_state.md`
+  - 当前规则写进 `rule_memory.md`
+  - 当前教训写进 `lesson_memory.md`
+  - 当前反偏移与执行前四检写进 `governance_layer.md`

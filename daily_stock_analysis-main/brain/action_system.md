@@ -1,5 +1,18 @@
 # Daily Stock Analysis Action System
 
+快照日期：`2026-04-12`
+
+## 0. 接管快路
+- 当前默认接管入口先看：
+  - `daily_stock_analysis-main/brain/identity_layer.md`
+  - `daily_stock_analysis-main/brain/handoff_packet.md`
+  - `daily_stock_analysis-main/brain/temporal_state.md`
+
+### Bootstrap
+```powershell
+python daily_research/tools/brain_bootstrap.py --child daily_stock_analysis-main --json
+```
+
 ## 1. 系统入口
 - `main.py`
   - 分析任务主入口与调度器

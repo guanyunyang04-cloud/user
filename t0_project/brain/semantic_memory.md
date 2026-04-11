@@ -1,5 +1,7 @@
 # T0 Project Semantic Memory
 
+快照日期：`2026-04-12`
+
 ## 1. 项目身份
 `t0_project/` 是通达信盘中 T+0、监控与强化学习的独立实验分项目，负责验证：
 
@@ -16,6 +18,8 @@
 
 - 已接入主脑
 - 不承担 `daily_research` 的正式默认值职责
+- 当前接管原则也升级为：
+  - `Agent 无状态，项目大脑有状态。`
 
 ## 2. 当前稳定认知
 - 主策略入口：
@@ -49,10 +53,11 @@
   - `t0_project/tqcenter.py`
 
 ## 5. 默认进入顺序
-1. 先读本文件
-2. 再读 `brain_architecture.md`
-3. 再读 `working_memory.md`
-4. 再读 `procedural_memory.md`
-5. 需要命令时读 `environment_model.md`
-6. 需要执行边界时读 `action_system.md`
-7. 需要实验时间证据时读 `episodic_memory.md`
+1. 先读 `identity_layer.md`
+2. 再读 `handoff_packet.md`
+3. 再读本文件
+4. 再读 `rule_memory.md / lesson_memory.md / temporal_state.md`
+5. 再读 `working_memory.md / procedural_memory.md`
+6. 需要命令时读 `environment_model.md`
+7. 需要执行边界时读 `action_system.md`
+8. 需要实验时间证据时读 `episodic_memory.md`

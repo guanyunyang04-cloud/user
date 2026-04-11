@@ -1,8 +1,12 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-11`
+快照日期：`2026-04-12`
 
 ## 1. 接管前先判型
+- 当前默认接管入口先看：
+  - `daily_research/brain/identity_layer.md`
+  - `daily_research/brain/handoff_packet.md`
+  - `daily_research/brain/temporal_state.md`
 - `formal` 问题：先看 formal 根，不先看 production full-fit。
 - `recent` 问题：先看最近一年 `12` 个月窗口的审计与回放，不先把它说成 formal 证据。
 - `live` 问题：先看 `active_execution_strategy.json`、production root、pipeline sidecar 与 `latest_trade_plan.txt`。
@@ -20,6 +24,11 @@
 - 当前默认成本：`3 / 7 / 10` bps
 
 ## 3. 高频命令
+### 3.0 主脑优先接管顺序
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\brain_bootstrap.py --child daily_research --json
+```
+
 ### 3.1 生成默认次日交易计划
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py
@@ -172,42 +181,96 @@
     - corrected recent `monthly_robust_score = 0.0390`，低于 current default `0.0778`，也明显低于 `policy_v2 = 0.0871`
     - 因此 `policy_v3` 当前不是默认候选，当前默认执行保持不变
   - 本轮正式训练、formal 回放、recent 回放与结论生成已统一锁定 `yolos` 环境。
+  - 被问到“`policy_v2 family` 最新谁在 recent 更强、formal 还卡在哪”时，优先同时引用：
+    - `daily_research/output/short_alpha_policy_v2_family_formal_review_20260411_r1`
+    - `daily_research/output/short_alpha_policy_v2_family_recent_eval_20260411_r1`
+    - `daily_research/output/short_alpha_policy_v2_family_constrained_execution_review_20260411_r2`
+    - `daily_research/output/short_alpha_policy_family_formal_loss_breakdown_20260411_r1`
+  - 当前 `policy_v2 family` 正式口径：
+    - direct formal family best 仍是 `policy_v2 = 0.0830`
+    - constrained formal front-runner 已前移到 `policy_v2b__k1_20d = 0.1104`
+    - `policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`，但 selected slow bridge `k1_20d` 只有 `0.0846`
+    - 因此当前最强 deployable learned-control candidate 已经从老 `policy_v2` 前移到 `short_expert_policy_v2b`
+  - 被问到“`policy_v4` 值不值得接主线”时，优先同时引用：
+    - `daily_research/output/short_alpha_policy_v4_family_formal_review_20260411_r1`
+    - `daily_research/output/short_alpha_policy_v4_family_constrained_execution_review_20260411_r1`
+    - `daily_research/output/short_alpha_policy_v4_family_recent_eval_20260411_r1`
+  - 当前 `policy_v4` 正式口径：
+    - `policy_v4b` 是 fresh formal family best，formal `0.1008`
+    - `policy_v4b` 也是当前 learned-control corrected recent winner，recent `0.1387`
+    - 但 `policy_v4b` 的 constrained best 只有 `0.0687`，`policy_v4a` 更低到 `0.0458`
+    - 因此 `policy_v4b` 现在只能讲成 recent frontier，不能直接讲成 promotable winner
 
 ### 3.13 current default gross-control sweep verdict
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\current_default_gross_control_sweep_verdict.py
 ```
 
-### 3.14 policy_v2 recent eval
+### 3.14 policy_v2 family formal review
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_recent_eval.py
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_family_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.15 policy_v2 constrained formal review
+### 3.15 policy_v2 family recent eval
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_family_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+### 3.16 policy_v2 family pipeline
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\run_policy_v2_family_pipeline.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+### 3.17 policy_v2 constrained formal review
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_constrained_execution_review.py
 ```
 
-### 3.16 policy_v2 formal loss breakdown
+### 3.18 policy_v2 formal loss breakdown
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_formal_loss_breakdown.py
 ```
 
-### 3.17 policy_v3 formal review
+### 3.19 policy_v3 formal review
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v3_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --execution-alignment-candidate-profiles "raw_1d,topk2_1d_regoff,regoff_k2_3d_ensemble_native_anchor,regoff_k2_5d_ensemble_native_anchor,regoff_k2_10d_ensemble_native_anchor,regoff_k2_20d_ensemble_native_anchor"
 ```
 
-### 3.18 policy_v3 recent eval
+### 3.20 policy_v3 recent eval
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v3_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.19 corrected recent protocol refresh
+### 3.21 corrected recent protocol refresh
 ```powershell
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\refresh_strongest_model_verdict.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --recent-model-root-tag short_alpha_recent_model_protocol_20260410_r1
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --recent-model-root-tag short_alpha_recent_model_protocol_20260410_r1
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v3_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --recent-model-root-tag short_alpha_recent_model_protocol_20260410_r1
+```
+
+### 3.22 policy_v2 family constrained formal review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_family_constrained_execution_review.py --family-formal-summary daily_research\output\short_alpha_policy_v2_family_formal_review_20260411_r1\summary.json --family-profiles short_expert_policy_v2,short_expert_policy_v2b,short_expert_policy_v2c
+```
+
+### 3.23 policy family formal loss breakdown
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_family_formal_loss_breakdown.py
+```
+
+### 3.24 policy_v4 family formal review
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v4_family_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+### 3.25 policy_v4 family recent eval
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v4_family_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+```
+
+### 3.26 policy_v4 family pipeline
+```powershell
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\run_policy_v4_family_pipeline.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
 ## 4. 当前接管口径覆盖
@@ -221,8 +284,14 @@
   - `recent_monthly_robust_score = 0.0778`
   - `recent_excess_annual_return = 55.11%`
   - `execution_alignment_profile = regoff_k2_5d_ensemble_native_anchor`
-- 当前 learned-control 的 corrected recent 标准答案：
-  - `policy_v2` 是 recent winner，`monthly_robust_score = 0.0871`
+- 当前 learned-control 要分三层讲：
+  - constrained formal front-runner = `policy_v2b__k1_20d = 0.1104`
+  - corrected recent winner = `policy_v4b = 0.1387`
+  - fresh formal family best = `policy_v4b = 0.1008`
+- 当前 learned-control 的正式解释：
+  - `policy_v2b` 是当前最强 deployable research candidate
+  - `policy_v4b` 是新的 recent frontier，但 constrained best 只有 `0.0687`，不能直接讲成 promotable winner
+  - `policy_v4a` 的 constrained best 只有 `0.0458`
   - `policy_v3` 只有 `monthly_robust_score = 0.0390`，当前不能接默认
 - 本机正式训练纪律：
   - 固定 `yolos`

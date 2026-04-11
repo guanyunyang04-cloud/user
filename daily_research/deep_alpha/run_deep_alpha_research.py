@@ -161,7 +161,11 @@ def parse_args():
     parser.add_argument("--score-risk-mode", choices=["subtract", "gate", "state_gate", "state_liquidity_gate"], default="subtract")
     parser.add_argument("--score-risk-gate-threshold", type=float, default=0.35)
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
-    parser.add_argument("--score-head-method", choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1", "policy_v2", "policy_v3"], default="manual")
+    parser.add_argument(
+        "--score-head-method",
+        choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v3"],
+        default="manual",
+    )
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
     parser.add_argument(
         "--research-time-unit",
@@ -485,6 +489,43 @@ def _write_json_payload(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(text, encoding=encoding)
+    tmp_path.replace(path)
+
+
+def _atomic_write_csv(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    df.to_csv(tmp_path, index=False, encoding="utf-8-sig")
+    tmp_path.replace(path)
+
+
+def _atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(path)
+
+
+def _write_resume_artifacts(
+    *,
+    run_dir: Path,
+    model_artifact: dict[str, Any],
+    history_rows: list[dict[str, Any]],
+    status_payload: dict[str, Any],
+) -> None:
+    _atomic_write_csv(pd.DataFrame(history_rows), run_dir / "train_history.csv")
+    _atomic_torch_save(model_artifact, run_dir / "deep_alpha_model.pt")
+    _atomic_write_text(
+        run_dir / "resume_status.json",
+        json.dumps(status_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _resolve_resume_context(args: argparse.Namespace) -> dict[str, Any] | None:
     resume_mode = str(getattr(args, "resume_mode", "off") or "off").strip().lower()
     resume_model_path = str(getattr(args, "resume_model_path", "") or "").strip()
@@ -711,7 +752,7 @@ def _build_live_inference_outputs(
         max_price=cfg.max_price,
     )
     portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
-    if score_head_method in {"policy_v1", "policy_v2", "policy_v3"}:
+    if score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v3"}:
         live_target_weights = build_policy_target_weight_frame(
             live_score_outputs,
             all_dates=live_index,
@@ -964,7 +1005,7 @@ def _evaluate_research_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v3"}:
+    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v3"}:
         train_eval_target_weights = build_policy_target_weight_frame(
             train_score_outputs,
             all_dates=pd.Index(train_eval_dates),
@@ -1166,6 +1207,18 @@ def _evaluate_research_outputs(
 def main():
     args = parse_args()
     args.research_time_unit = normalize_research_time_unit(args.research_time_unit)
+    output_root = Path("daily_research/output")
+    output_root.mkdir(parents=True, exist_ok=True)
+    run_name = args.experiment_tag.strip() or f"deep_alpha_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir = output_root / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    explicit_resume_requested = bool(str(args.resume_run_dir or "").strip() or str(args.resume_model_path or "").strip())
+    if not explicit_resume_requested and str(args.resume_mode or "off").strip().lower() == "off":
+        resume_artifact_path = run_dir / "deep_alpha_model.pt"
+        if resume_artifact_path.exists():
+            args.resume_run_dir = str(run_dir.resolve())
+            args.resume_mode = "strict"
+            progress_write(f"Auto strict resume from existing run_dir: {run_dir.resolve()}")
     resume_context = _resolve_resume_context(args)
     if args.liquidity_pool and args.rolling_liquidity_pool:
         raise ValueError("Use either --liquidity-pool or --rolling-liquidity-pool, not both.")
@@ -1661,6 +1714,47 @@ def main():
                 f"(epochs_completed={int(training_resume_payload['training_state'].get('epochs_completed', 0) or 0)})"
             )
 
+    def _build_resume_model_artifact_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "model_state_dict": snapshot["selected_model_state_dict"],
+            "selected_model_state_dict": snapshot["selected_model_state_dict"],
+            "last_model_state_dict": snapshot["last_model_state_dict"],
+            "optimizer_state_dict": snapshot["optimizer_state_dict"],
+            "scheduler_state_dict": snapshot["scheduler_state_dict"],
+            "scaler_state_dict": snapshot["scaler_state_dict"],
+            "training_resume_state": snapshot["training_state"],
+            "feature_names": train_ds.feature_names,
+            "target_names": train_ds.target_names,
+            "config": vars(cfg),
+            "train_end": str(train_end.date()),
+            "valid_start": str(valid_start.date()),
+        }
+
+    def _persist_training_resume_snapshot(snapshot: dict[str, Any]) -> None:
+        history_rows = list(snapshot.get("history", []))
+        training_state = dict(snapshot.get("training_state", {}))
+        status_payload = {
+            "run_dir": str(run_dir.resolve()),
+            "last_saved_at": datetime.now().isoformat(timespec="seconds"),
+            "resume_ready": True,
+            "epochs_completed": int(training_state.get("epochs_completed", len(history_rows)) or len(history_rows)),
+            "selected_epoch": int(training_state.get("selected_epoch", 0) or 0),
+            "selected_metric_name": str(training_state.get("selected_metric_name", "") or ""),
+            "selected_metric_value": float(training_state.get("selected_metric_value", float("nan"))),
+            "checkpoint_selection_mode": str(training_state.get("checkpoint_selection_mode", "") or ""),
+            "stopped_early": bool(training_state.get("stopped_early", False)),
+        }
+        _write_resume_artifacts(
+            run_dir=run_dir,
+            model_artifact=_build_resume_model_artifact_from_snapshot(snapshot),
+            history_rows=history_rows,
+            status_payload=status_payload,
+        )
+        progress_write(
+            f"Saved resumable checkpoint at epoch {status_payload['epochs_completed']} "
+            f"under {run_dir.name}"
+        )
+
     target_state_ids = sorted(
         {
             int(state_id)
@@ -1777,6 +1871,7 @@ def main():
         checkpoint_selection_callback=checkpoint_selection_callback,
         checkpoint_selection_min_improvement=args.checkpoint_selection_min_improvement,
         resume_payload=training_resume_payload,
+        epoch_end_callback=_persist_training_resume_snapshot,
     )
     history = train_result.history
     training_diagnostics = train_result.diagnostics
@@ -1927,11 +2022,6 @@ def main():
     stage_progress.complete_stage(7)
     stage_progress.start_stage(8, "Write artifacts")
     progress_write("Prepare output directory and write files")
-    output_root = Path("daily_research/output")
-    output_root.mkdir(parents=True, exist_ok=True)
-    run_name = args.experiment_tag.strip() or f"deep_alpha_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_dir = output_root / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     history_df = pd.DataFrame([record.__dict__ for record in history])
     state_df = state_frame.copy()
