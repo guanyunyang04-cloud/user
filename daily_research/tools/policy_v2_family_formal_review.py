@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import assert_expected_run_fields, resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
 
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a narrow formal family review for policy_v2 / v2a / v2b / v2c against the current mainline."
     )
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
     parser.add_argument("--execution-alignment-candidate-profiles", default=DEFAULT_EXECUTION_PROFILES)
@@ -119,14 +120,70 @@ def _run_dir_for_profile(root_tag: str, profile_name: str) -> Path:
     return OUTPUT_ROOT / str(root_tag).strip() / "runs" / str(profile_name).strip()
 
 
+def _expected_formal_run_fields(
+    *,
+    profile_name: str,
+    execution_alignment_candidate_profiles: str,
+) -> dict[str, Any]:
+    profile = get_profile(profile_name)
+    return {
+        "framework": "deep_alpha_research",
+        "research_time_unit": "calendar_months",
+        "benchmark": "000300.SH",
+        "liquidity_pool": "liquid500",
+        "train_end": "2025-03-17",
+        "valid_start": "2025-03-18",
+        "valid_end": "2026-02-27",
+        "valid_months": 12,
+        "encoder_family": "patch_transformer",
+        "patch_len": 5,
+        "score_head_method": str(profile.score_head_method or "manual"),
+        "state_context": bool(profile.state_context),
+        "liquidity_context": bool(profile.liquidity_context),
+        "structure_context": bool(profile.structure_context),
+        "ranking_loss_weight": float(profile.ranking_loss_weight),
+        "listwise_loss_weight": float(profile.listwise_loss_weight),
+        "listwise_temperature": float(profile.listwise_temperature),
+        "short_alpha_features": bool(profile.short_alpha_features),
+        "adaptive_task_weights": bool(profile.adaptive_task_weights),
+        "research_objective_mode": str(profile.research_objective_mode or "execution_first"),
+        "checkpoint_selection_objective": str(profile.checkpoint_selection_objective or "primary_monthly_robust_score"),
+        "execution_alignment_mode": "train_eval_auto",
+        "execution_alignment_objective": "robust_composite",
+        "execution_alignment_transaction_cost_bps": 3.0,
+        "execution_alignment_slippage_bps": 7.0,
+        "execution_alignment_sell_tax_bps": 10.0,
+        "execution_alignment_candidate_profiles": [
+            part.strip() for part in str(execution_alignment_candidate_profiles).split(",") if part.strip()
+        ],
+        "dynamic_graph_layer": True,
+    }
+
+
 def _ensure_profile_run(profile_name: str, args: argparse.Namespace) -> tuple[Path, str]:
     if profile_name == "short_expert_policy_v2" and not args.force_rerun:
         existing = Path(args.existing_policy_v2_run_dir).resolve()
         if (existing / "metrics.json").exists():
+            assert_expected_run_fields(
+                existing,
+                _expected_formal_run_fields(
+                    profile_name=profile_name,
+                    execution_alignment_candidate_profiles=str(args.execution_alignment_candidate_profiles),
+                ),
+                label=f"formal_family_existing:{profile_name}",
+            )
             return existing, "policy_v2_reused_existing"
 
     run_dir = _run_dir_for_profile(str(args.root_tag), profile_name)
     if (run_dir / "metrics.json").exists() and not args.force_rerun:
+        assert_expected_run_fields(
+            run_dir,
+            _expected_formal_run_fields(
+                profile_name=profile_name,
+                execution_alignment_candidate_profiles=str(args.execution_alignment_candidate_profiles),
+            ),
+            label=f"formal_family:{profile_name}",
+        )
         return run_dir, "family_reused_existing"
     resume_run_dir = None if args.force_rerun else run_dir if (run_dir / "deep_alpha_model.pt").exists() else None
 

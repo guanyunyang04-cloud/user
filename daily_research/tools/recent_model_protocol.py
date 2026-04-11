@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
+from daily_research.deep_alpha.experiment_guardrails import assert_expected_run_fields, resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
     default_min_epochs_for_budget,
@@ -375,6 +376,38 @@ def resolve_recent_metrics_path(root_tag: str, profile_name: str) -> Path:
     return OUTPUT_ROOT / f"{str(root_tag).strip()}__{str(profile_name).strip()}" / "metrics.json"
 
 
+def _expected_recent_run_fields(*, profile_name: str, window: RecentModelWindow) -> dict[str, Any]:
+    profile = get_profile(profile_name)
+    return {
+        "framework": "deep_alpha_research",
+        "research_time_unit": "calendar_months",
+        "benchmark": "000300.SH",
+        "liquidity_pool": "liquid500",
+        "train_end": str(pd.Timestamp(window.train_end_date).date()),
+        "valid_start": str(pd.Timestamp(window.valid_start_date).date()),
+        "valid_end": str(pd.Timestamp(window.recent_end_date).date()),
+        "valid_months": int(window.valid_months),
+        "encoder_family": "patch_transformer",
+        "patch_len": 5,
+        "score_head_method": str(profile.score_head_method or "manual"),
+        "state_context": bool(profile.state_context),
+        "liquidity_context": bool(profile.liquidity_context),
+        "structure_context": bool(profile.structure_context),
+        "ranking_loss_weight": float(profile.ranking_loss_weight),
+        "listwise_loss_weight": float(profile.listwise_loss_weight),
+        "listwise_temperature": float(profile.listwise_temperature),
+        "short_alpha_features": bool(profile.short_alpha_features),
+        "adaptive_task_weights": bool(profile.adaptive_task_weights),
+        "research_objective_mode": str(profile.research_objective_mode or "execution_first"),
+        "checkpoint_selection_objective": str(profile.checkpoint_selection_objective or "primary_monthly_robust_score"),
+        "execution_alignment_mode": "train_eval_auto",
+        "execution_alignment_objective": "robust_composite",
+        "execution_alignment_transaction_cost_bps": 3.0,
+        "execution_alignment_slippage_bps": 7.0,
+        "execution_alignment_sell_tax_bps": 10.0,
+    }
+
+
 def _build_recent_research_command(
     *,
     python_executable: str,
@@ -529,7 +562,13 @@ def ensure_recent_model_run(
     force_rerun: bool = False,
 ) -> Path:
     metrics_path = resolve_recent_metrics_path(root_tag, profile_name)
+    expected_fields = _expected_recent_run_fields(profile_name=profile_name, window=window)
     if metrics_path.exists() and not force_rerun:
+        assert_expected_run_fields(
+            metrics_path.parent,
+            expected_fields,
+            label=f"recent_model:{profile_name}",
+        )
         return metrics_path
     resume_run_dir = None if force_rerun else resolve_recent_resume_run_dir(root_tag, profile_name)
     command = _build_recent_research_command(
@@ -583,7 +622,7 @@ def ensure_recent_model_matrix(
     root_tag: str = DEFAULT_RECENT_MODEL_ROOT_TAG,
     recent_end_date: str = "",
     recent_window_months: int = 12,
-    python_executable: str = sys.executable,
+    python_executable: str = resolve_project_python_executable(sys.executable),
     family_epoch_budget_manifest: str = str(DEFAULT_LATEST_MANIFEST_PATH),
     force_rerun: bool = False,
     notes_by_profile: dict[str, str] | None = None,

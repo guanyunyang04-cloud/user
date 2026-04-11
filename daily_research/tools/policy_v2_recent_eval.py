@@ -10,6 +10,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.tools.recent_model_protocol import (
     DEFAULT_RECENT_MODEL_ROOT_TAG,
     OUTPUT_ROOT,
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
     parser.add_argument("--recent-end-date", default="")
     parser.add_argument("--recent-window-months", type=int, default=12)
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--recent-model-root-tag", default=DEFAULT_RECENT_MODEL_ROOT_TAG)
     parser.add_argument("--force-rerun-recent-models", action="store_true")
     return parser.parse_args()

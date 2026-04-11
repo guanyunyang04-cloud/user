@@ -41,6 +41,13 @@ from daily_research.deep_alpha.execution_alignment import (
     parse_profile_name_list as parse_execution_alignment_profile_names,
     resolve_profile as resolve_execution_alignment_profile,
 )
+from daily_research.deep_alpha.experiment_guardrails import (
+    DEFAULT_FOREGROUND_TIMEOUT_HOURS,
+    DEFAULT_RESUME_DISCIPLINE,
+    compare_expected_fields,
+    contract_fingerprint,
+    runtime_metadata,
+)
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_MIN_START_EPOCH_BUDGET,
     default_min_epochs_for_budget,
@@ -524,6 +531,306 @@ def _write_resume_artifacts(
         json.dumps(status_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _build_resume_invariant_contract(
+    *,
+    args: argparse.Namespace,
+    cfg: DeepAlphaConfig,
+    train_end: pd.Timestamp,
+    valid_start: pd.Timestamp,
+    valid_end: pd.Timestamp,
+    feature_names: list[str],
+    target_names: list[str],
+    stocks_file: str | None,
+) -> dict[str, Any]:
+    return {
+        "framework": "deep_alpha_research",
+        "data_source": str(args.data_source),
+        "start_date": str(cfg.start_date),
+        "end_date": str(cfg.end_date),
+        "benchmark": str(cfg.benchmark),
+        "universe_scope": str(cfg.universe_scope),
+        "stocks_file": str(stocks_file or ""),
+        "liquidity_pool": str(args.liquidity_pool or ""),
+        "rolling_liquidity_pool": str(args.rolling_liquidity_pool or ""),
+        "pool_rebalance_days": int(args.pool_rebalance_days),
+        "pool_adv_window": int(args.pool_adv_window),
+        "research_time_unit": str(cfg.research_time_unit),
+        "train_end": str(train_end.date()),
+        "valid_start": str(valid_start.date()),
+        "valid_end": str(valid_end.date()),
+        "valid_days": int(cfg.valid_days),
+        "valid_months": int(cfg.valid_months),
+        "train_eval_window_days": int(cfg.train_eval_window_days),
+        "train_eval_window_months": int(cfg.train_eval_window_months),
+        "lookback_window": int(cfg.lookback_window),
+        "prediction_horizons": [int(item) for item in cfg.prediction_horizons],
+        "feature_names": list(feature_names),
+        "target_names": list(target_names),
+        "hidden_dim": int(cfg.hidden_dim),
+        "encoder_family": str(cfg.encoder_family),
+        "patch_len": int(cfg.patch_len),
+        "return_head_mode": str(cfg.return_head_mode),
+        "context_dim": int(cfg.context_dim),
+        "state_context": bool(cfg.state_context),
+        "liquidity_context": bool(cfg.liquidity_context),
+        "structure_context": bool(cfg.structure_context),
+        "aux_structure_task": bool(cfg.aux_structure_task),
+        "aux_structure_loss_weight": float(cfg.aux_structure_loss_weight),
+        "aux_structure_label_smoothing": float(cfg.aux_structure_label_smoothing),
+        "structure_prototype_task": bool(cfg.structure_prototype_task),
+        "structure_prototype_loss_weight": float(cfg.structure_prototype_loss_weight),
+        "structure_prototype_temperature": float(cfg.structure_prototype_temperature),
+        "transformer_heads": int(cfg.transformer_heads),
+        "transformer_layers": int(cfg.transformer_layers),
+        "dropout": float(cfg.dropout),
+        "learning_rate": float(cfg.learning_rate),
+        "weight_decay": float(cfg.weight_decay),
+        "return_loss_mode": str(cfg.return_loss_mode),
+        "return_target_transform": str(cfg.return_target_transform),
+        "return_top_frac": float(cfg.return_top_frac),
+        "return_bottom_frac": float(cfg.return_bottom_frac),
+        "target_loss_weights": dict(cfg.target_loss_weights),
+        "score_horizon_weights": dict(cfg.score_horizon_weights),
+        "score_rank_blend": float(cfg.score_rank_blend),
+        "score_downside_penalty": float(cfg.score_downside_penalty),
+        "score_risk_mode": str(cfg.score_risk_mode),
+        "score_risk_gate_threshold": float(cfg.score_risk_gate_threshold),
+        "score_risk_state_thresholds": parse_float_list(args.score_risk_state_thresholds),
+        "score_head_method": str(args.score_head_method),
+        "adaptive_task_weights": bool(args.adaptive_task_weights),
+        "adaptive_task_window_days": int(args.adaptive_task_window_days),
+        "adaptive_task_window_months": int(args.adaptive_task_window_months),
+        "ranking_loss_weight": float(cfg.ranking_loss_weight),
+        "listwise_loss_weight": float(cfg.listwise_loss_weight),
+        "listwise_temperature": float(cfg.listwise_temperature),
+        "max_rank_pairs_per_group": int(cfg.max_rank_pairs_per_group),
+        "liquidity_conditioning_mode": str(cfg.liquidity_conditioning_mode),
+        "top_liquidity_return_loss_weight": float(cfg.top_liquidity_return_loss_weight),
+        "other_liquidity_return_loss_weight": float(cfg.other_liquidity_return_loss_weight),
+        "top_liquidity_rank_loss_weight": float(cfg.top_liquidity_rank_loss_weight),
+        "other_liquidity_rank_loss_weight": float(cfg.other_liquidity_rank_loss_weight),
+        "top_liquidity_sample_weight": float(cfg.top_liquidity_sample_weight),
+        "other_liquidity_sample_weight": float(cfg.other_liquidity_sample_weight),
+        "structure_conditioning_mode": str(cfg.structure_conditioning_mode),
+        "top_attack_structure_names": list(cfg.top_attack_structure_names),
+        "other_protect_structure_names": list(cfg.other_protect_structure_names),
+        "top_attack_rank_weight": float(cfg.top_attack_rank_weight),
+        "other_protect_rank_weight": float(cfg.other_protect_rank_weight),
+        "target_state_names": list(cfg.target_state_names),
+        "target_state_attack_structure_names": list(cfg.target_state_attack_structure_names),
+        "target_state_protect_structure_names": list(cfg.target_state_protect_structure_names),
+        "target_state_rank_weight": float(cfg.target_state_rank_weight),
+        "target_state_protect_rank_weight": float(cfg.target_state_protect_rank_weight),
+        "market_state_count": int(cfg.market_state_count),
+        "holding_count": int(cfg.holding_count),
+        "rebalance_freq": str(cfg.rebalance_freq),
+        "max_weight": float(cfg.max_weight),
+        "min_adv20": float(cfg.min_adv20),
+        "min_price": float(cfg.min_price),
+        "max_price": float(cfg.max_price),
+        "liquidity_layer": bool(cfg.liquidity_layer),
+        "liquidity_bucket_count": int(cfg.liquidity_bucket_count),
+        "dynamic_graph_layer": bool(cfg.dynamic_graph_layer),
+        "dynamic_graph_top_k": int(cfg.dynamic_graph_top_k),
+        "dynamic_graph_temperature": float(cfg.dynamic_graph_temperature),
+        "dynamic_graph_industry_boost": float(cfg.dynamic_graph_industry_boost),
+        "dynamic_graph_style_boost": float(cfg.dynamic_graph_style_boost),
+        "short_alpha_features": bool(cfg.short_alpha_features),
+        "breakout_event_horizon": int(cfg.breakout_event_horizon),
+        "breakout_event_threshold": float(cfg.breakout_event_threshold),
+        "breakout_event_pullback_limit": float(cfg.breakout_event_pullback_limit),
+        "breakout_event_loss_weight": float(cfg.breakout_event_loss_weight),
+        "clean_breakout_event_loss_weight": float(cfg.clean_breakout_event_loss_weight),
+        "research_objective_mode": str(args.research_objective_mode),
+        "checkpoint_selection_objective": str(args.checkpoint_selection_objective),
+        "checkpoint_selection_min_improvement": float(args.checkpoint_selection_min_improvement),
+        "checkpoint_eval_interval": int(args.checkpoint_eval_interval),
+        "checkpoint_eval_start_epoch": int(args.checkpoint_eval_start_epoch),
+        "execution_alignment_mode": str(args.execution_alignment_mode),
+        "execution_alignment_objective": str(args.execution_alignment_objective),
+        "execution_alignment_candidate_profiles": parse_execution_alignment_profile_names(
+            args.execution_alignment_candidate_profiles
+        ),
+        "execution_alignment_shortlist_size": int(args.execution_alignment_shortlist_size),
+        "execution_alignment_screen_window_days": int(args.execution_alignment_screen_window_days),
+        "execution_alignment_transaction_cost_bps": float(args.execution_alignment_transaction_cost_bps),
+        "execution_alignment_slippage_bps": float(args.execution_alignment_slippage_bps),
+        "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
+        "random_seed": int(cfg.random_seed),
+        "pretrained_encoder_path": str(cfg.pretrained_encoder_path or ""),
+    }
+
+
+def _build_run_contract(
+    *,
+    args: argparse.Namespace,
+    run_dir: Path,
+    resume_invariant_contract: dict[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        "contract_schema_version": 1,
+        "experiment_tag": str(args.experiment_tag or "").strip(),
+        "run_dir": str(run_dir.resolve()),
+        "epochs": int(args.epochs),
+        "min_epochs": int(args.min_epochs),
+        "early_stop_patience": int(args.early_stop_patience),
+        "lr_plateau_patience": int(args.lr_plateau_patience),
+        "lr_plateau_factor": float(args.lr_plateau_factor),
+        "min_improvement": float(args.min_improvement),
+        "batch_size": int(args.batch_size),
+        "num_workers": int(args.num_workers),
+        "pin_memory": bool(args.pin_memory),
+        "use_amp": bool(args.use_amp),
+        "safe_runtime_profile": bool(args.safe_runtime_profile),
+        **runtime_metadata(),
+        **resume_invariant_contract,
+    }
+    payload["resume_invariant_contract_fingerprint"] = contract_fingerprint(resume_invariant_contract)
+    payload["run_contract_fingerprint"] = contract_fingerprint(payload)
+    return payload
+
+
+def _build_legacy_resume_contract(
+    *,
+    artifact: dict[str, Any],
+    metrics: dict[str, Any],
+) -> dict[str, Any]:
+    config = dict(artifact.get("config") or {})
+    observed: dict[str, Any] = {}
+    field_sources = (
+        metrics,
+        config,
+        artifact,
+    )
+    keys = [
+        "framework",
+        "data_source",
+        "start_date",
+        "end_date",
+        "benchmark",
+        "universe_scope",
+        "stocks_file",
+        "liquidity_pool",
+        "rolling_liquidity_pool",
+        "pool_rebalance_days",
+        "pool_adv_window",
+        "research_time_unit",
+        "train_end",
+        "valid_start",
+        "valid_end",
+        "valid_days",
+        "valid_months",
+        "train_eval_window_days",
+        "train_eval_window_months",
+        "lookback_window",
+        "prediction_horizons",
+        "feature_names",
+        "target_names",
+        "hidden_dim",
+        "encoder_family",
+        "patch_len",
+        "return_head_mode",
+        "context_dim",
+        "state_context",
+        "liquidity_context",
+        "structure_context",
+        "aux_structure_task",
+        "aux_structure_loss_weight",
+        "aux_structure_label_smoothing",
+        "structure_prototype_task",
+        "structure_prototype_loss_weight",
+        "structure_prototype_temperature",
+        "transformer_heads",
+        "transformer_layers",
+        "dropout",
+        "learning_rate",
+        "weight_decay",
+        "return_loss_mode",
+        "return_target_transform",
+        "return_top_frac",
+        "return_bottom_frac",
+        "target_loss_weights",
+        "score_horizon_weights",
+        "score_rank_blend",
+        "score_downside_penalty",
+        "score_risk_mode",
+        "score_risk_gate_threshold",
+        "score_risk_state_thresholds",
+        "score_head_method",
+        "adaptive_task_weights",
+        "adaptive_task_window_days",
+        "adaptive_task_window_months",
+        "ranking_loss_weight",
+        "listwise_loss_weight",
+        "listwise_temperature",
+        "max_rank_pairs_per_group",
+        "liquidity_conditioning_mode",
+        "top_liquidity_return_loss_weight",
+        "other_liquidity_return_loss_weight",
+        "top_liquidity_rank_loss_weight",
+        "other_liquidity_rank_loss_weight",
+        "top_liquidity_sample_weight",
+        "other_liquidity_sample_weight",
+        "structure_conditioning_mode",
+        "top_attack_structure_names",
+        "other_protect_structure_names",
+        "top_attack_rank_weight",
+        "other_protect_rank_weight",
+        "target_state_names",
+        "target_state_attack_structure_names",
+        "target_state_protect_structure_names",
+        "target_state_rank_weight",
+        "target_state_protect_rank_weight",
+        "market_state_count",
+        "holding_count",
+        "rebalance_freq",
+        "max_weight",
+        "min_adv20",
+        "min_price",
+        "max_price",
+        "liquidity_layer",
+        "liquidity_bucket_count",
+        "dynamic_graph_layer",
+        "dynamic_graph_top_k",
+        "dynamic_graph_temperature",
+        "dynamic_graph_industry_boost",
+        "dynamic_graph_style_boost",
+        "short_alpha_features",
+        "breakout_event_horizon",
+        "breakout_event_threshold",
+        "breakout_event_pullback_limit",
+        "breakout_event_loss_weight",
+        "clean_breakout_event_loss_weight",
+        "research_objective_mode",
+        "checkpoint_selection_objective",
+        "checkpoint_selection_min_improvement",
+        "checkpoint_eval_interval",
+        "checkpoint_eval_start_epoch",
+        "execution_alignment_mode",
+        "execution_alignment_objective",
+        "execution_alignment_candidate_profiles",
+        "execution_alignment_shortlist_size",
+        "execution_alignment_screen_window_days",
+        "execution_alignment_transaction_cost_bps",
+        "execution_alignment_slippage_bps",
+        "execution_alignment_sell_tax_bps",
+        "random_seed",
+        "pretrained_encoder_path",
+    ]
+    for key in keys:
+        for source in field_sources:
+            if key not in source:
+                continue
+            value = source.get(key)
+            if value in (None, "", {}):
+                continue
+            observed[key] = value
+            break
+    if "framework" not in observed:
+        observed["framework"] = "deep_alpha_research"
+    return observed
 
 
 def _resolve_resume_context(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -1667,6 +1974,26 @@ def main():
         transformer_heads=cfg.transformer_heads,
         transformer_layers=cfg.transformer_layers,
     )
+    resume_invariant_contract = _build_resume_invariant_contract(
+        args=args,
+        cfg=cfg,
+        train_end=train_end,
+        valid_start=valid_start,
+        valid_end=valid_end,
+        feature_names=list(train_ds.feature_names),
+        target_names=list(train_ds.target_names),
+        stocks_file=stocks_file,
+    )
+    run_contract = _build_run_contract(
+        args=args,
+        run_dir=run_dir,
+        resume_invariant_contract=resume_invariant_contract,
+    )
+    _atomic_write_text(
+        run_dir / "run_contract.json",
+        json.dumps(run_contract, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     training_resume_payload: dict[str, Any] | None = None
     if cfg.pretrained_encoder_path:
         artifact_path = Path(cfg.pretrained_encoder_path)
@@ -1693,6 +2020,35 @@ def main():
         if resume_target_names and list(train_ds.target_names) != resume_target_names:
             raise ValueError("Resume artifact target_names do not match the current dataset; strict continuation would be invalid.")
         resume_mode = str(resume_context["resume_mode"])
+        if resume_mode == "strict" and Path(resume_context["run_dir"]).resolve() != run_dir.resolve():
+            raise ValueError(
+                "Strict resume is only allowed back into the same run_dir / experiment-tag. "
+                "Use the original run_dir or switch to --resume-mode warm_start."
+            )
+        observed_resume_contract = resume_artifact.get("resume_invariant_contract")
+        if not isinstance(observed_resume_contract, dict) or not observed_resume_contract:
+            observed_resume_contract = _build_legacy_resume_contract(
+                artifact=resume_artifact,
+                metrics=dict(resume_context.get("metrics", {})),
+            )
+            if observed_resume_contract:
+                progress_write(
+                    "Resume source is legacy and missing resume_invariant_contract; "
+                    "fall back to partial contract validation."
+                )
+        if observed_resume_contract:
+            expected_subset = {
+                key: resume_invariant_contract[key]
+                for key in observed_resume_contract.keys()
+                if key in resume_invariant_contract
+            }
+            contract_mismatches = compare_expected_fields(observed_resume_contract, expected_subset)
+            if contract_mismatches:
+                mismatch_preview = "; ".join(contract_mismatches[:8])
+                raise ValueError(
+                    "Resume artifact protocol mismatch. Strict continuation would mix experiments. "
+                    f"Mismatches: {mismatch_preview}"
+                )
         selected_model_state = resume_artifact.get("selected_model_state_dict") or resume_artifact.get("model_state_dict")
         if selected_model_state is None:
             raise ValueError(f"Resume artifact missing model weights: {resume_context['artifact_path']}")
@@ -1728,6 +2084,8 @@ def main():
             "config": vars(cfg),
             "train_end": str(train_end.date()),
             "valid_start": str(valid_start.date()),
+            "run_contract": run_contract,
+            "resume_invariant_contract": resume_invariant_contract,
         }
 
     def _persist_training_resume_snapshot(snapshot: dict[str, Any]) -> None:
@@ -1743,6 +2101,9 @@ def main():
             "selected_metric_value": float(training_state.get("selected_metric_value", float("nan"))),
             "checkpoint_selection_mode": str(training_state.get("checkpoint_selection_mode", "") or ""),
             "stopped_early": bool(training_state.get("stopped_early", False)),
+            "resume_invariant_contract_fingerprint": str(run_contract.get("resume_invariant_contract_fingerprint", "")),
+            "run_contract_fingerprint": str(run_contract.get("run_contract_fingerprint", "")),
+            **runtime_metadata(),
         }
         _write_resume_artifacts(
             run_dir=run_dir,
@@ -2057,6 +2418,7 @@ def main():
         execution_aligned_equity_export = execution_aligned_equity_df.reset_index().rename(columns={execution_aligned_equity_df.index.name or "index": "date"})
     metrics_payload = {
         "framework": "deep_alpha_research",
+        "contract_schema_version": 1,
         "research_time_unit": str(cfg.research_time_unit),
         "train_end": str(train_end.date()),
         "valid_start": str(valid_start.date()),
@@ -2073,8 +2435,11 @@ def main():
         "market_state_count": cfg.market_state_count,
         "feature_count": len(train_ds.feature_names),
         "target_names": train_ds.target_names,
+        "hidden_dim": int(cfg.hidden_dim),
         "encoder_family": cfg.encoder_family,
         "patch_len": cfg.patch_len,
+        "transformer_heads": int(cfg.transformer_heads),
+        "transformer_layers": int(cfg.transformer_layers),
         "pretrained_encoder_path": cfg.pretrained_encoder_path,
         "resume_mode": "" if resume_context is None else str(resume_context["resume_mode"]),
         "resume_source_run_dir": "" if resume_context is None else str(Path(resume_context["run_dir"]).resolve()),
@@ -2084,6 +2449,8 @@ def main():
             if resume_context is None
             else int(resume_context["training_resume_state"].get("epochs_completed", 0) or 0)
         ),
+        "resume_invariant_contract_fingerprint": str(run_contract.get("resume_invariant_contract_fingerprint", "")),
+        "run_contract_fingerprint": str(run_contract.get("run_contract_fingerprint", "")),
         "epochs": cfg.epochs,
         "min_epochs": cfg.min_epochs,
         "early_stop_patience": cfg.early_stop_patience,
@@ -2151,6 +2518,7 @@ def main():
         "clean_breakout_event_loss_weight": float(cfg.clean_breakout_event_loss_weight),
         "safe_runtime_profile": bool(cfg.safe_runtime_profile),
         "runtime_profile": runtime_profile.__dict__,
+        **runtime_metadata(),
         "training_diagnostics": training_diagnostics.__dict__,
         "research_objective_mode": str(args.research_objective_mode),
         "checkpoint_selection_objective": str(args.checkpoint_selection_objective),
@@ -2168,6 +2536,8 @@ def main():
         "risk_gate_group_thresholds": {} if risk_gate_artifact is None else risk_gate_artifact.group_thresholds,
         "execution_alignment_mode": str(args.execution_alignment_mode),
         "execution_alignment_objective": str(args.execution_alignment_objective),
+        "execution_alignment_shortlist_size": int(args.execution_alignment_shortlist_size),
+        "execution_alignment_screen_window_days": int(args.execution_alignment_screen_window_days),
         "execution_alignment_transaction_cost_bps": float(args.execution_alignment_transaction_cost_bps),
         "execution_alignment_slippage_bps": float(args.execution_alignment_slippage_bps),
         "execution_alignment_sell_tax_bps": float(args.execution_alignment_sell_tax_bps),
@@ -2242,6 +2612,8 @@ def main():
         "config": vars(cfg),
         "train_end": str(train_end.date()),
         "valid_start": str(valid_start.date()),
+        "run_contract": run_contract,
+        "resume_invariant_contract": resume_invariant_contract,
     }
 
     def _write_metrics_json() -> None:
@@ -2279,6 +2651,7 @@ def main():
         ("primary_research_monthly_objectives.json", lambda: _write_json_payload(run_dir / "primary_research_monthly_objectives.json", primary_monthly_objectives)),
         ("actions.csv", lambda: action_df.to_csv(run_dir / "actions.csv", index=False, encoding="utf-8-sig")),
         ("deep_alpha_model.pt", lambda: torch.save(model_artifact, run_dir / "deep_alpha_model.pt")),
+        ("run_contract.json", lambda: _write_json_payload(run_dir / "run_contract.json", run_contract)),
         ("score_head_artifact.pkl", lambda: save_pickle(run_dir / "score_head_artifact.pkl", score_head_artifact)),
         ("metrics.json", _write_metrics_json),
     ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -8,11 +9,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable, runtime_metadata
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 TOOLS_ROOT = PROJECT_ROOT / "daily_research" / "tools"
-PYTHON = sys.executable
+DEFAULT_PYTHON = resolve_project_python_executable(sys.executable)
 
 FORMAL_ROOT_TAG = "short_alpha_policy_v2_family_formal_review_20260411_r1"
 RECENT_ROOT_TAG = "short_alpha_policy_v2_family_recent_eval_20260411_r1"
@@ -26,6 +32,12 @@ CURRENT_FORMAL_RUN_DIR = (
 EXISTING_POLICY_V2_RUN_DIR = OUTPUT_ROOT / "short_alpha_policy_v2_review_20260410_r1" / "runs" / "short_expert_policy_v2"
 FORMAL_PID_PATH = OUTPUT_ROOT / FORMAL_ROOT_TAG / "formal_review_pid.txt"
 FORMAL_SUMMARY_PATH = OUTPUT_ROOT / FORMAL_ROOT_TAG / "summary.json"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Wait for the formal policy_v2 family review, then run the foreground follow-through chain.")
+    parser.add_argument("--python-executable", default=DEFAULT_PYTHON)
+    return parser.parse_args()
 
 
 def _write_status(payload: dict[str, Any]) -> None:
@@ -77,6 +89,7 @@ def _wait_for_formal_summary(status: dict[str, Any], poll_seconds: int = 30) -> 
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "formal_summary_path": str(FORMAL_SUMMARY_PATH),
             "formal_pid_path": str(FORMAL_PID_PATH),
+            **runtime_metadata(),
         }
     )
     _write_status(status)
@@ -111,6 +124,7 @@ def _run_step(name: str, command: list[str], status: dict[str, Any]) -> None:
             "status": "running",
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "command": command,
+            **runtime_metadata(),
         }
     )
     _write_status(status)
@@ -133,6 +147,8 @@ def _resolve_family_winner_run_dir(formal_summary: dict[str, Any]) -> Path:
 
 
 def main() -> None:
+    args = parse_args()
+    python_executable = str(args.python_executable)
     LOGICAL_ROOT.mkdir(parents=True, exist_ok=True)
     status: dict[str, Any] = {
         "started_at": datetime.now().isoformat(timespec="seconds"),
@@ -142,6 +158,7 @@ def main() -> None:
         "constrained_root_tag": CONSTRAINED_ROOT_TAG,
         "recent_root_tag": RECENT_ROOT_TAG,
         "steps": [],
+        **runtime_metadata(),
     }
     _write_status(status)
 
@@ -158,7 +175,7 @@ def main() -> None:
         _run_step(
             "constrained_execution_review",
             [
-                PYTHON,
+                python_executable,
                 str(TOOLS_ROOT / "policy_v2_family_constrained_execution_review.py"),
                 "--family-formal-summary",
                 str(_summary_json(FORMAL_ROOT_TAG)),
@@ -175,26 +192,26 @@ def main() -> None:
         _run_step(
             "recent_family_eval",
             [
-                PYTHON,
+                python_executable,
                 str(TOOLS_ROOT / "policy_v2_family_recent_eval.py"),
                 "--output-root",
                 str(OUTPUT_ROOT),
                 "--root-tag",
                 RECENT_ROOT_TAG,
                 "--python-executable",
-                PYTHON,
+                python_executable,
             ],
             status,
         )
 
         _run_step(
             "project_consistency_check",
-            [PYTHON, str(TOOLS_ROOT / "project_consistency_check.py")],
+            [python_executable, str(TOOLS_ROOT / "project_consistency_check.py")],
             status,
         )
         _run_step(
             "doc_guard_check",
-            [PYTHON, str(TOOLS_ROOT / "doc_guard.py"), "check"],
+            [python_executable, str(TOOLS_ROOT / "doc_guard.py"), "check"],
             status,
         )
 

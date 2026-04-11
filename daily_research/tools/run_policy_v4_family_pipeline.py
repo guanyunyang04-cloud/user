@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -7,11 +8,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable, runtime_metadata
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 TOOLS_ROOT = PROJECT_ROOT / "daily_research" / "tools"
-PYTHON = sys.executable
+DEFAULT_PYTHON = resolve_project_python_executable(sys.executable)
 
 FORMAL_ROOT_TAG = "short_alpha_policy_v4_family_formal_review_20260411_r1"
 CONSTRAINED_ROOT_TAG = "short_alpha_policy_v4_family_constrained_execution_review_20260411_r1"
@@ -21,6 +27,12 @@ CURRENT_FORMAL_RUN_DIR = (
     OUTPUT_ROOT / "short_alpha_short_horizon_expert_review_20260406_r2_fullbudget" / "runs" / "short_expert_monthly_v1"
 )
 FAMILY_PROFILES = "short_expert_policy_v4a,short_expert_policy_v4b"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the policy_v4 family foreground pipeline under the current discipline.")
+    parser.add_argument("--python-executable", default=DEFAULT_PYTHON)
+    return parser.parse_args()
 
 
 def _write_status(payload: dict[str, Any]) -> None:
@@ -36,6 +48,7 @@ def _run_step(name: str, command: list[str], status: dict[str, Any]) -> None:
             "status": "running",
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "command": command,
+            **runtime_metadata(),
         }
     )
     _write_status(status)
@@ -46,6 +59,8 @@ def _run_step(name: str, command: list[str], status: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    args = parse_args()
+    python_executable = str(args.python_executable)
     status: dict[str, Any] = {
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "current_step": "starting",
@@ -54,6 +69,7 @@ def main() -> None:
         "constrained_root_tag": CONSTRAINED_ROOT_TAG,
         "recent_root_tag": RECENT_ROOT_TAG,
         "steps": [],
+        **runtime_metadata(),
     }
     _write_status(status)
 
@@ -61,10 +77,10 @@ def main() -> None:
         _run_step(
             "formal_family_review",
             [
-                PYTHON,
+                python_executable,
                 str(TOOLS_ROOT / "policy_v4_family_formal_review.py"),
                 "--python-executable",
-                PYTHON,
+                python_executable,
                 "--output-root",
                 str(OUTPUT_ROOT),
                 "--root-tag",
@@ -77,7 +93,7 @@ def main() -> None:
         _run_step(
             "constrained_execution_review",
             [
-                PYTHON,
+                python_executable,
                 str(TOOLS_ROOT / "policy_v2_family_constrained_execution_review.py"),
                 "--family-formal-summary",
                 str(family_formal_summary),
@@ -96,26 +112,26 @@ def main() -> None:
         _run_step(
             "recent_family_eval",
             [
-                PYTHON,
+                python_executable,
                 str(TOOLS_ROOT / "policy_v4_family_recent_eval.py"),
                 "--output-root",
                 str(OUTPUT_ROOT),
                 "--root-tag",
                 RECENT_ROOT_TAG,
                 "--python-executable",
-                PYTHON,
+                python_executable,
             ],
             status,
         )
 
         _run_step(
             "project_consistency_check",
-            [PYTHON, str(TOOLS_ROOT / "project_consistency_check.py")],
+            [python_executable, str(TOOLS_ROOT / "project_consistency_check.py")],
             status,
         )
         _run_step(
             "doc_guard_check",
-            [PYTHON, str(TOOLS_ROOT / "doc_guard.py"), "check"],
+            [python_executable, str(TOOLS_ROOT / "doc_guard.py"), "check"],
             status,
         )
 
