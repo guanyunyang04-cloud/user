@@ -17,6 +17,7 @@ if __package__ in {None, ""}:
 from daily_research.baseline.backtest import summarize_monthly_diagnostics
 from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
     resolve_epoch_budget_for_family,
@@ -79,7 +80,7 @@ def parse_args() -> argparse.Namespace:
         description="Refresh the deep_alpha architecture complexity/depth/structure formal experiments under the current protocol."
     )
     parser.add_argument("--root-tag", default="deep_alpha_architecture_protocol_refresh_20260406_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--recent-profiles",
         default=",".join(DEFAULT_RECENT_PROFILES),

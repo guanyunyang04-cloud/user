@@ -122,6 +122,22 @@ def _build_diagnosis(
     return notes
 
 
+def _next_design_hypotheses(focus_profiles: list[str]) -> list[str]:
+    ordered = [str(name).strip() for name in focus_profiles if str(name).strip()]
+    if not ordered:
+        return [
+            "Prioritize execution-stability regularization when recent and constrained formal disagree on bridge speed.",
+            "Prioritize candidate-count / concentration regularization when deployable variants still rely on too few names.",
+            "Only keep gross-teacher distillation if gross-control remains the main bottleneck after stability + concentration fixes.",
+        ]
+    labels = ordered + ["candidate_branch", "teacher_branch"]
+    return [
+        f"{labels[0]} should prioritize execution-stability regularization when recent and constrained formal disagree on bridge speed.",
+        f"{labels[1]} should prioritize candidate-count / concentration regularization when the best constrained answer still relies on very few names or high top-1 weight.",
+        f"{labels[2]} should only keep gross-teacher distillation if the family still loses mainly on gross-control after stability + concentration fixes.",
+    ]
+
+
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_root).resolve() / str(args.root_tag).strip()
@@ -177,11 +193,7 @@ def main() -> None:
         "current_mainline_reference": current_reference,
         "family_best_constrained_variant": constrained_summary.get("family_best_variant", {}),
         "analyses": analyses,
-        "next_design_hypotheses": [
-            "policy_v4a should prioritize execution-stability regularization when recent and constrained formal disagree on bridge speed.",
-            "policy_v4b should prioritize concentration / candidate-count regularization when the best constrained answer still relies on very few names or high top-1 weight.",
-            "policy_v4c should stay optional until a new family still shows gross-control as the primary bottleneck after stability + concentration fixes.",
-        ],
+        "next_design_hypotheses": _next_design_hypotheses(focus_profiles),
     }
     (output_dir / "summary.json").write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -220,11 +232,10 @@ def main() -> None:
         [
             "",
             "## Next Design Hypotheses",
-            "- `policy_v4a`: add execution-stability regularization to reduce recent/formal bridge drift.",
-            "- `policy_v4b`: add candidate-count / concentration regularization so fast-bridge wins do not rely on extreme concentration.",
-            "- `policy_v4c`: only add gross-teacher distillation if the next family still loses mainly on gross-control after the first two fixes.",
         ]
     )
+    for note in _next_design_hypotheses(focus_profiles):
+        lines.append(f"- {note}")
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

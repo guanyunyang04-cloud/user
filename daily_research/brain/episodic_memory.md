@@ -11752,3 +11752,43 @@ position,000001.SZ,1200,12.38,
   - `doc_guard.py` 已覆盖这些新脑区
   - `project_consistency_check.py` 已把新脑区纳入一致性检查
 - 结果是：后续 agent 接管时，不再默认从长 `episodic_memory.md` 起步，而是先接标准状态包，再按需下钻证据。
+
+## 2026-04-12 - recent 协议修正、`policy_v5 family` 收口与脑内口径重写
+
+- `recent_model_protocol.py` 已完成一次关键协议修正：
+  - `requested_recent_end_date` 与 `effective validation end` 现在被显式分离
+  - 当前 strongest-model / family recent 使用的正式根改为 `short_alpha_recent_model_protocol_20260412_r1`
+  - 在该根下，requested recent cutoff 仍是 `20260410`
+  - 但 effective validation window 实际是 `2025-04-11 -> 2026-03-31`
+- `short_alpha_strongest_model_verdict_20260412_r1` 已按新 recent 协议重刷：
+  - strongest-model formal winner = `short_expert_monthly_v1`
+  - strongest-model recent winner = `short_expert_monthly_v1`
+  - strongest-model promotable winner = `short_expert_monthly_v1`
+  - 这意味着 strongest-model 三层重新对齐，不再延续旧的 `baseline_current` recent winner 叙事
+- `short_alpha_policy_v5_family_pipeline_20260412_r1` 已按前台 + strict-resume + `10h` 预算纪律完整跑完：
+  - `policy_v5b` corrected recent `monthly_robust_score = 0.1200`
+  - `policy_v5b__k1_20d` constrained formal `monthly_robust_score = 0.1177`
+  - `policy_v5a__k1_20d = 0.1018`
+  - `policy_v5c__k1_20d = 0.1010`
+  - active `v5 family` fresh formal best 仍是 `policy_v5b = 0.0839`
+- 当前 learned-control 叙事因此被整体改写：
+  - 当前最强 deployable learned-control candidate 前移到 `short_expert_policy_v5b__k1_20d`
+  - 当前 learned-control recent winner 也前移到 `short_expert_policy_v5b`
+  - 历史 cross-family fresh formal best 仍是 `short_expert_policy_v4b = 0.1008`
+  - 但当前 active family 与当前主研究锚点都已经切到 `policy_v5`
+- 主问题也随之重排：
+  - 不再是“current default 如何在 corrected recent 里追 `baseline_current`”
+  - 也不再是“如何把 `policy_v4b` 的 recent 强度转成 deployable constrained formal”
+  - 当前真正的问题已经变成：如何保住 `policy_v5b` 的 recent / constrained 优势，同时把它的 fresh-formal gap 缩到接近乃至打穿 current overall formal mainline `short_expert_monthly_v1 = 0.1012`
+- 同轮已把高频脑区全部按新真相重写：
+  - `identity_layer.md`
+  - `handoff_packet.md`
+  - `temporal_state.md`
+  - `rule_memory.md`
+  - `semantic_memory.md`
+  - `project_map.md`
+  - `lesson_memory.md`
+  - `procedural_memory.md`
+  - `working_memory.md`
+  - `action_system.md`
+- 这次写回的重点不是增量修补，而是直接清掉旧的 `baseline_current / policy_v2b / policy_v4b` 当前口径，保证后续 agent 接管时先看到的是 `2026-04-12` 新协议和 `policy_v5` 新主线。

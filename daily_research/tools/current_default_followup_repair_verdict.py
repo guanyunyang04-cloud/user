@@ -11,6 +11,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.baseline.regime import resolve_regime_label_series
 from daily_research.tools.current_default_signal_cash_repair_verdict import (
     DEFAULT_ACTIVE_MANIFEST,
@@ -59,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--preview-cash", type=float, default=100000.0)
     return parser.parse_args()
 

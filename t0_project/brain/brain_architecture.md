@@ -1,68 +1,40 @@
 # T0 Project Brain Architecture
 
-## 1. 结构目标
-`t0_project/brain/` 是 `t0_project` 的分脑，由主脑治理，用来保存盘中实验项目的长期认知和安全边界。
+## 1. 分脑定位
+`t0_project/brain/` 是 `t0_project` 的实验型分脑，由主脑治理。
 
-当前升级目标是把它从“基础分脑”补齐为“可替换 agent / 不可替换大脑”的实验分脑。
+它在整个脑网络中的角色是：
 
-## 2. 分脑模块
-- `identity_layer.md`
-  - 项目身份、目标、禁区
-- `handoff_packet.md`
-  - 标准交接包
-- `semantic_memory.md`
-  - 项目身份、稳定边界、body_map 摘要
-- `rule_memory.md`
-  - 高优先级规则
-- `lesson_memory.md`
-  - 可复用教训
-- `temporal_state.md`
-  - `Past / Present / Future`
+- 保存盘中实验、执行抽象和 RL 原型的长期认知
+- 与 `daily_research` 的正式生产主线保持清晰隔离
+- 为后续接管者提供实验边界、安全边界和 body 入口
+
+## 2. 继承的标准合同
+`t0_project` 继承主脑定义的标准附着分脑合同，统一结构与读写顺序以 [brain/brain_architecture.md](H:/new_tdx64/PYPlugins/user/brain/brain_architecture.md) 为准。
+
+因此本文件不再重复展开整套通用模块定义，只保留本项目相对标准合同的特有强调。
+
+## 3. 本项目的特有强调
 - `working_memory.md`
-  - 当前优先级、实验边界、隔离要求
+  - 必须始终强调与 `daily_research` 的隔离边界
 - `procedural_memory.md`
-  - 实验纪律、写入路由、升级约束
-- `handoff_rules.md`
-  - 接管纪律
-- `governance_layer.md`
-  - 自检、反偏移、修复
-- `environment_model.md`
-  - 运行环境、维护命令
+  - 重点沉淀实验纪律、RL 原型边界和接入限制
 - `action_system.md`
-  - 执行抽象层、运行模式、接入顺序
-- `episodic_memory.md`
-  - 时间顺序实验记录
-- `brain_manifest.json`
-  - 父子脑关系、读写路由、body_map、handoff_contract
+  - 重点保留 `strategy / execution / rl / gateway` 的进入顺序
 
-## 3. 写入路由
-- 身份与禁区：
-  - `identity_layer.md`
-- 标准交接包：
-  - `handoff_packet.md`
-- 稳定认知：
-  - `semantic_memory.md`
-- 规则与教训：
-  - `rule_memory.md`
-  - `lesson_memory.md`
-- 时态状态：
-  - `temporal_state.md`
-- 当前优先级：
-  - `working_memory.md`
-- 可复用方法：
-  - `procedural_memory.md`
-- 接管纪律与治理：
-  - `handoff_rules.md`
-  - `governance_layer.md`
-- 环境与命令：
-  - `environment_model.md`
-- 执行抽象与操作链路：
-  - `action_system.md`
-- 单轮实验：
-  - `episodic_memory.md`
+## 4. body 进入顺序
+本项目的 body 主要从以下区域进入：
 
-## 4. 去冗余规则
-- 不再维护 `t0_project/README.md` 作为 AI 入口
-- 不再维护 `t0_project/execution/README.md` 作为 AI 入口
-- 行动细节统一收口到 `action_system.md`
-- 默认接管不再从 `episodic_memory.md` 开始，而是从 `identity_layer.md` 和 `handoff_packet.md` 开始
+- `t0_project/strategy`
+- `t0_project/execution`
+- `t0_project/rl`
+- `t0_project/gateway`
+
+默认原则：
+
+- 先确认实验边界和隔离规则
+- 再进入具体代码目录
+
+## 5. 去冗余原则
+- 通用分脑结构只在主脑 `brain_architecture.md` 定义一次。
+- 本文件只保留 `t0_project` 的实验边界和 body 差异。

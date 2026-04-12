@@ -9,6 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLS_ROOT = PROJECT_ROOT / "daily_research" / "tools"
@@ -22,10 +27,10 @@ def parse_args() -> argparse.Namespace:
             "the current strongest-model training process."
         )
     )
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--wait-pid", type=int, default=0)
     parser.add_argument("--poll-seconds", type=int, default=120)
-    parser.add_argument("--recent-model-root-tag", default="short_alpha_recent_model_protocol_20260410_r1")
+    parser.add_argument("--recent-model-root-tag", default="short_alpha_recent_model_protocol_20260412_r1")
     parser.add_argument("--status-json", default=str(OUTPUT_ROOT / "recent_protocol_completion_monitor_20260410_r1.json"))
     parser.add_argument("--log-path", default=str(OUTPUT_ROOT / "recent_protocol_completion_monitor_20260410_r1.log"))
     return parser.parse_args()

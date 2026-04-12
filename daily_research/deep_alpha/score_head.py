@@ -115,6 +115,58 @@ POLICY_V2_FAMILY_CONFIGS: Dict[str, Dict[str, float]] = {
         "build_gate_mix": 0.30,
         "build_hold_mix": 0.22,
     },
+    "policy_v5a": {
+        "gate_multiplier": 2.00,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.96,
+        "weight_power": 1.14,
+        "hold_boost": 0.24,
+        "candidate_multiplier": 2.20,
+        "selection_rank_blend": 0.43,
+        "cash_model_alpha": 2.2,
+        "build_score_mix": 0.10,
+        "build_weight_mix": 0.46,
+        "build_gate_mix": 0.24,
+        "build_hold_mix": 0.20,
+        "teacher_cash_blend": 0.35,
+        "cash_feature_mode": "v3",
+    },
+    "policy_v5b": {
+        "gate_multiplier": 2.10,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.98,
+        "weight_power": 1.02,
+        "hold_boost": 0.20,
+        "candidate_multiplier": 2.80,
+        "selection_rank_blend": 0.46,
+        "cash_model_alpha": 1.9,
+        "build_score_mix": 0.18,
+        "build_weight_mix": 0.32,
+        "build_gate_mix": 0.24,
+        "build_hold_mix": 0.26,
+        "teacher_cash_blend": 0.15,
+        "cash_feature_mode": "v3",
+        "candidate_target_mode": "v3",
+        "candidate_model_alpha": 1.1,
+    },
+    "policy_v5c": {
+        "gate_multiplier": 2.00,
+        "min_gross_exposure": 0.90,
+        "max_gross_exposure": 0.96,
+        "weight_power": 1.08,
+        "hold_boost": 0.26,
+        "candidate_multiplier": 2.40,
+        "selection_rank_blend": 0.44,
+        "cash_model_alpha": 2.4,
+        "build_score_mix": 0.16,
+        "build_weight_mix": 0.34,
+        "build_gate_mix": 0.22,
+        "build_hold_mix": 0.28,
+        "teacher_cash_blend": 0.55,
+        "cash_feature_mode": "v3",
+        "candidate_target_mode": "v3",
+        "candidate_model_alpha": 1.0,
+    },
 }
 POLICY_V2_METHODS = frozenset(POLICY_V2_FAMILY_CONFIGS)
 
@@ -520,6 +572,78 @@ def _build_policy_cash_target_v3(
     return gross.astype(float)
 
 
+def _build_policy_cash_target_teacher(
+    pred_df: pd.DataFrame,
+    utility_target: pd.Series,
+    *,
+    holding_count: int,
+    min_gross_exposure: float,
+    max_gross_exposure: float,
+) -> pd.Series:
+    indexed = pred_df.set_index(["date", "stock"]).sort_index()
+    downside = indexed.get(f"true_{RISK_TARGET_NAME}", pd.Series(0.0, index=indexed.index, dtype=float)).astype(float)
+    breakout = pd.Series(0.0, index=indexed.index, dtype=float)
+    clean_breakout = pd.Series(0.0, index=indexed.index, dtype=float)
+    for column in indexed.columns:
+        if str(column).startswith("true_event_breakout_"):
+            breakout = breakout.add(indexed[column].astype(float), fill_value=0.0)
+        if str(column).startswith("true_event_clean_breakout_"):
+            clean_breakout = clean_breakout.add(indexed[column].astype(float), fill_value=0.0)
+
+    top_n = max(int(holding_count), 3)
+    signal_rows: dict[pd.Timestamp, float] = {}
+    downside_rows: dict[pd.Timestamp, float] = {}
+    for dt, utility_group in utility_target.groupby(level=0):
+        ordered = utility_group.sort_values(ascending=False).head(min(len(utility_group), top_n))
+        if ordered.empty:
+            signal_rows[pd.Timestamp(dt)] = 0.0
+            downside_rows[pd.Timestamp(dt)] = 1.0
+            continue
+        top1 = float(ordered.head(1).clip(lower=0.0).mean())
+        top3 = float(ordered.head(min(len(ordered), 3)).clip(lower=0.0).mean())
+        topn_mean = float(ordered.clip(lower=0.0).mean())
+        breadth = float((ordered > 0.0).mean())
+        concentration = max(top1 - top3, 0.0)
+        downside_penalty = float((-downside.loc[ordered.index].clip(upper=0.0)).mean()) if len(ordered.index) > 0 else 0.0
+        breakout_bonus = float(clean_breakout.loc[ordered.index].clip(lower=0.0).mean()) if len(ordered.index) > 0 else 0.0
+        false_breakout = float((breakout.loc[ordered.index] - clean_breakout.loc[ordered.index]).clip(lower=0.0).mean()) if len(ordered.index) > 0 else 0.0
+        signal_rows[pd.Timestamp(dt)] = (
+            0.95 * top1
+            + 0.75 * top3
+            + 0.35 * topn_mean
+            + 0.18 * breadth
+            + 0.10 * breakout_bonus
+            - 1.05 * downside_penalty
+            - 0.35 * false_breakout
+            - 0.45 * concentration
+        )
+        downside_rows[pd.Timestamp(dt)] = downside_penalty
+
+    signal_series = pd.Series(signal_rows, dtype=float).sort_index()
+    downside_series = pd.Series(downside_rows, dtype=float).sort_index()
+    signal_rank = signal_series.rank(pct=True).fillna(0.5)
+    downside_rank = downside_series.rank(pct=True).fillna(0.5)
+    composite = (0.62 * signal_rank + 0.38 * (1.0 - downside_rank)).clip(0.0, 1.0)
+    gross = float(min_gross_exposure) + (float(max_gross_exposure) - float(min_gross_exposure)) * composite
+    aggressive_mask = signal_rank >= 0.78
+    defensive_mask = (signal_rank <= 0.40) | (downside_rank >= 0.65)
+    gross.loc[aggressive_mask] = float(max_gross_exposure)
+    gross.loc[defensive_mask] = float(min_gross_exposure)
+    gross.name = "cash_target"
+    return gross.astype(float)
+
+
+def _blend_policy_cash_targets(primary: pd.Series, teacher: pd.Series, blend: float) -> pd.Series:
+    blend = float(np.clip(blend, 0.0, 1.0))
+    if blend <= 0.0:
+        return primary.astype(float)
+    aligned = pd.concat([primary.rename("primary"), teacher.rename("teacher")], axis=1)
+    aligned = aligned.ffill().bfill()
+    out = aligned["primary"] * (1.0 - blend) + aligned["teacher"] * blend
+    out.name = "cash_target"
+    return out.astype(float)
+
+
 def _build_policy_cash_feature_frame(
     selection_signal: pd.Series,
     gate_signal: pd.Series,
@@ -859,42 +983,83 @@ def fit_score_head(
             min_gross_exposure=float(config["min_gross_exposure"]),
             max_gross_exposure=float(config["max_gross_exposure"]),
         )
-        cash_feature_frame = _build_policy_cash_feature_frame_v2(
-            selection_signal,
-            gate_signal,
-            weight_signal,
-            hold_signal,
-            top_n=gate_target_count,
-        )
+        teacher_cash_blend = float(config.get("teacher_cash_blend", 0.0) or 0.0)
+        if teacher_cash_blend > 0.0:
+            teacher_cash_target = _build_policy_cash_target_teacher(
+                train_pred_df,
+                utility_target,
+                holding_count=holding_count,
+                min_gross_exposure=float(config["min_gross_exposure"]),
+                max_gross_exposure=float(config["max_gross_exposure"]),
+            )
+            cash_target = _blend_policy_cash_targets(cash_target, teacher_cash_target, teacher_cash_blend)
+        cash_feature_mode = str(config.get("cash_feature_mode", "v2") or "v2").strip().lower()
+        if cash_feature_mode == "v3":
+            cash_feature_frame = _build_policy_cash_feature_frame_v3(
+                selection_signal,
+                gate_signal,
+                weight_signal,
+                hold_signal,
+                top_n=gate_target_count,
+            )
+        else:
+            cash_feature_frame = _build_policy_cash_feature_frame_v2(
+                selection_signal,
+                gate_signal,
+                weight_signal,
+                hold_signal,
+                top_n=gate_target_count,
+            )
         cash_feature_aligned = cash_feature_frame.join(cash_target, how="inner").dropna()
         cash_columns = [col for col in cash_feature_aligned.columns if col != "cash_target"]
         cash_model = Ridge(alpha=float(config["cash_model_alpha"]), random_state=7)
         cash_model.fit(cash_feature_aligned[cash_columns], cash_feature_aligned["cash_target"].values)
+        model_dict: Dict[str, Any] = {
+            "selection_model": selection_model,
+            "gate_model": gate_model,
+            "weight_model": weight_model,
+            "hold_model": hold_model,
+            "cash_model": cash_model,
+        }
+        extra: Dict[str, Any] = {
+            "selection_rank_blend": float(config["selection_rank_blend"]),
+            "holding_count": int(holding_count),
+            "gate_target_count": int(gate_target_count),
+            "policy_min_gross_exposure": float(config["min_gross_exposure"]),
+            "policy_max_gross_exposure": float(config["max_gross_exposure"]),
+            "policy_weight_power": float(config["weight_power"]),
+            "policy_hold_boost": float(config["hold_boost"]),
+            "policy_candidate_multiplier": float(config["candidate_multiplier"]),
+            "cash_feature_columns": list(cash_columns),
+            "cash_feature_mode": cash_feature_mode,
+            "teacher_cash_blend": teacher_cash_blend,
+            "policy_build_score_mix": float(config.get("build_score_mix", 0.0) or 0.0),
+            "policy_build_weight_mix": float(config["build_weight_mix"]),
+            "policy_build_gate_mix": float(config["build_gate_mix"]),
+            "policy_build_hold_mix": float(config["build_hold_mix"]),
+        }
+        if str(config.get("candidate_target_mode", "") or "").strip().lower() == "v3":
+            max_candidates = max(int(holding_count), int(round(float(holding_count) * float(config["candidate_multiplier"]))))
+            candidate_target = _build_policy_candidate_target_v3(
+                train_pred_df,
+                utility_target,
+                holding_count=holding_count,
+                max_candidates=max_candidates,
+            )
+            candidate_feature_aligned = cash_feature_frame.join(candidate_target, how="inner").dropna()
+            candidate_columns = [col for col in candidate_feature_aligned.columns if col != "candidate_target"]
+            candidate_model = Ridge(alpha=float(config.get("candidate_model_alpha", 1.2) or 1.2), random_state=7)
+            candidate_model.fit(candidate_feature_aligned[candidate_columns], candidate_feature_aligned["candidate_target"].values)
+            model_dict["candidate_model"] = candidate_model
+            extra["policy_candidate_min_count"] = int(holding_count)
+            extra["policy_candidate_max_count"] = int(max_candidates)
+            extra["candidate_feature_columns"] = list(candidate_columns)
         return ScoreHeadArtifact(
             method=method,
             feature_columns=list(X.columns),
             task_weights=task_weights,
-            model={
-                "selection_model": selection_model,
-                "gate_model": gate_model,
-                "weight_model": weight_model,
-                "hold_model": hold_model,
-                "cash_model": cash_model,
-            },
-            extra={
-                "selection_rank_blend": float(config["selection_rank_blend"]),
-                "holding_count": int(holding_count),
-                "gate_target_count": int(gate_target_count),
-                "policy_min_gross_exposure": float(config["min_gross_exposure"]),
-                "policy_max_gross_exposure": float(config["max_gross_exposure"]),
-                "policy_weight_power": float(config["weight_power"]),
-                "policy_hold_boost": float(config["hold_boost"]),
-                "policy_candidate_multiplier": float(config["candidate_multiplier"]),
-                "cash_feature_columns": list(cash_columns),
-                "policy_build_weight_mix": float(config["build_weight_mix"]),
-                "policy_build_gate_mix": float(config["build_gate_mix"]),
-                "policy_build_hold_mix": float(config["build_hold_mix"]),
-            },
+            model=model_dict,
+            extra=extra,
         )
     if method == "policy_v3":
         selection_model = Ridge(alpha=0.9, random_state=7)
@@ -1058,6 +1223,7 @@ def apply_score_head(
         weight_model = model_dict.get("weight_model")
         hold_model = model_dict.get("hold_model")
         cash_model = model_dict.get("cash_model")
+        candidate_model = model_dict.get("candidate_model")
         if any(model is None for model in (selection_model, gate_model, weight_model, hold_model, cash_model)):
             raise ValueError(f"{artifact.method} score head requires selection/gate/weight/hold/cash models.")
         selection_raw = pd.Series(selection_model.predict(aligned), index=aligned.index, dtype=float)
@@ -1074,13 +1240,23 @@ def apply_score_head(
         hold_rank = _cross_sectional_rank(hold_raw)
         learned_score = selection_signal * (0.60 + 0.25 * gate_rank + 0.15 * hold_rank) * (0.60 + 0.40 * weight_rank)
 
-        cash_feature_frame = _build_policy_cash_feature_frame_v2(
-            selection_signal,
-            gate_rank,
-            weight_rank,
-            hold_rank,
-            top_n=int(artifact.extra.get("gate_target_count", artifact.extra.get("holding_count", 5))),
-        )
+        cash_feature_mode = str(artifact.extra.get("cash_feature_mode", "v2") or "v2").strip().lower()
+        if cash_feature_mode == "v3":
+            cash_feature_frame = _build_policy_cash_feature_frame_v3(
+                selection_signal,
+                gate_rank,
+                weight_rank,
+                hold_rank,
+                top_n=int(artifact.extra.get("gate_target_count", artifact.extra.get("holding_count", 5))),
+            )
+        else:
+            cash_feature_frame = _build_policy_cash_feature_frame_v2(
+                selection_signal,
+                gate_rank,
+                weight_rank,
+                hold_rank,
+                top_n=int(artifact.extra.get("gate_target_count", artifact.extra.get("holding_count", 5))),
+            )
         cash_feature_columns = [
             str(col)
             for col in artifact.extra.get("cash_feature_columns", list(cash_feature_frame.columns))
@@ -1098,6 +1274,22 @@ def apply_score_head(
         out["learned_score"] = learned_score.values
         out["cash_score"] = pd.to_datetime(out["date"]).map(cash_pred).astype(float)
         out["gross_exposure_target"] = out["cash_score"].astype(float)
+        if candidate_model is not None:
+            candidate_columns = [
+                str(col)
+                for col in artifact.extra.get("candidate_feature_columns", list(cash_feature_frame.columns))
+            ]
+            candidate_aligned = cash_feature_frame.reindex(columns=candidate_columns).fillna(0.0)
+            candidate_pred = pd.Series(candidate_model.predict(candidate_aligned), index=candidate_aligned.index, dtype=float)
+            candidate_min = int(artifact.extra.get("policy_candidate_min_count", artifact.extra.get("holding_count", 5)))
+            candidate_max = int(
+                artifact.extra.get(
+                    "policy_candidate_max_count",
+                    max(candidate_min, int(round(candidate_min * float(config["candidate_multiplier"])))),
+                )
+            )
+            candidate_pred = candidate_pred.clip(lower=float(candidate_min), upper=float(candidate_max))
+            out["candidate_count_target"] = pd.to_datetime(out["date"]).map(candidate_pred).astype(float)
         return out
     if artifact.method == "policy_v3":
         model_dict = artifact.model if isinstance(artifact.model, dict) else {}
@@ -1221,7 +1413,7 @@ def build_policy_target_weight_frame(
         else:
             gross = float(max_gross)
         gross = float(np.clip(gross, min_gross, max_gross))
-        if artifact.method == "policy_v3" and "candidate_count_target" in frame.columns and not frame["candidate_count_target"].empty:
+        if "candidate_count_target" in frame.columns and not frame["candidate_count_target"].empty:
             candidate_min = int(artifact.extra.get("policy_candidate_min_count", base_holding_count))
             candidate_max = int(artifact.extra.get("policy_candidate_max_count", max_candidates))
             candidate_count = int(round(float(frame["candidate_count_target"].iloc[0])))
@@ -1233,8 +1425,10 @@ def build_policy_target_weight_frame(
             frame = frame.sort_values(["gate_score", "hold_score", "learned_score"], ascending=False)
         selected = frame.head(candidate_count).copy()
         if artifact.method in POLICY_V2_METHODS:
+            learned_rank = selected["learned_score"].rank(method="first", pct=True).astype(float).clip(lower=0.0)
             raw = (
-                selected["weight_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_weight_mix", 0.65))
+                learned_rank * float(artifact.extra.get("policy_build_score_mix", 0.0))
+                + selected["weight_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_weight_mix", 0.65))
                 + selected["gate_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_gate_mix", 0.25))
                 + selected["hold_score"].astype(float).clip(lower=0.0) * float(artifact.extra.get("policy_build_hold_mix", 0.10))
             )

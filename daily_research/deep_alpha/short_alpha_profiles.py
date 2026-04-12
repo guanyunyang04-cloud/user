@@ -317,6 +317,84 @@ PROFILE_REGISTRY: dict[str, ShortAlphaProfile] = {
         research_objective_mode="execution_first",
         checkpoint_selection_objective="primary_monthly_robust_score",
     ),
+    "short_expert_policy_v5a": ShortAlphaProfile(
+        name="short_expert_policy_v5a",
+        description=(
+            "Policy-head short-line expert v5a: preserve the v4 recent edge, but add "
+            "execution-stability pressure and a softer deployable-gross teacher blend "
+            "so constrained formal stops drifting."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v5a",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v5b": ShortAlphaProfile(
+        name="short_expert_policy_v5b",
+        description=(
+            "Policy-head short-line expert v5b: keep the v4 recent edge, but explicitly "
+            "learn candidate-count control and flatter concentration so deployable bridges "
+            "do not depend on a few-name portfolio."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v5b",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
+    "short_expert_policy_v5c": ShortAlphaProfile(
+        name="short_expert_policy_v5c",
+        description=(
+            "Policy-head short-line expert v5c: on top of v5b, add a stronger deployable-gross "
+            "teacher blend so the model absorbs more of the current v2b execution discipline "
+            "without giving up end-to-end learned control."
+        ),
+        state_context=True,
+        liquidity_context=True,
+        ranking_loss_weight=0.03,
+        listwise_loss_weight=0.06,
+        listwise_temperature=0.30,
+        prediction_horizons="1,3,5,10",
+        task_loss_weights="1:0.30,3:0.30,5:0.25,10:0.15,downside:0.35",
+        score_horizon_weights="1:0.35,3:0.30,5:0.20,10:0.15",
+        short_alpha_features=True,
+        breakout_event_horizon=5,
+        breakout_event_threshold=0.08,
+        breakout_event_pullback_limit=0.03,
+        breakout_event_loss_weight=0.15,
+        clean_breakout_event_loss_weight=0.20,
+        score_head_method="policy_v5c",
+        adaptive_task_weights=True,
+        research_objective_mode="execution_first",
+        checkpoint_selection_objective="primary_monthly_robust_score",
+    ),
     "short_expert_policy_v3": ShortAlphaProfile(
         name="short_expert_policy_v3",
         description=(
@@ -909,6 +987,9 @@ PROFILE_ALIASES: dict[str, str] = {
     "expert_policy_v2c": "short_expert_policy_v2c",
     "expert_policy_v4a": "short_expert_policy_v4a",
     "expert_policy_v4b": "short_expert_policy_v4b",
+    "expert_policy_v5a": "short_expert_policy_v5a",
+    "expert_policy_v5b": "short_expert_policy_v5b",
+    "expert_policy_v5c": "short_expert_policy_v5c",
     "expert_policy_deep": "short_expert_policy_v1_deep",
     "expert_mamba_policy": "short_expert_mamba_policy_v1",
 }

@@ -1,25 +1,46 @@
-# Daily Stock Analysis Working Memory
+# Daily Stock Analysis 当前判断
 
 快照日期：`2026-04-12`
 
-## 1. 当前优先级
-- 保持本项目分脑与主脑 contract 一致
-- 保持 brain 与 body 高匹配，避免只靠人类 README 维持理解
-- 后续若有 agent 接手，默认从 brain 进入，不先全仓盲扫
+## 1. 角色定位
+- `daily_stock_analysis-main` 是独立的多市场 AI 股票分析产品分脑。
+- 它服务于产品线接管与多入口协作，不替代 `daily_research` 执行主线。
 
-## 2. 当前边界
-- 本项目是独立产品线，不直接替代 `daily_research` 的正式执行默认值
-- 若未来修改本项目，优先遵守现有仓库约束与目录边界
-- 本地尚未建立连续的时间证据链，后续重要改动应写入 `episodic_memory.md`
+## 2. 当前状态
+- 本分脑已经接入主脑统一附着合同与接管快路。
+- 当前仓库是多入口结构，核心入口已覆盖：
+  - main entry
+  - API
+  - Web / Desktop
+  - Bot / Agent
+  - data
+  - ops
+  - tests
+- 当前尚未建立连续时间证据链。
 
-## 3. 当前接管顺序
-1. `brain/brain_manifest.json`
-2. `daily_stock_analysis-main/brain/brain_manifest.json`
-3. `identity_layer.md`
-4. `handoff_packet.md`
-5. `semantic_memory.md`
-6. `rule_memory.md / lesson_memory.md / temporal_state.md`
-7. `working_memory.md`
-8. `procedural_memory.md`
-9. `environment_model.md`
-10. `action_system.md`
+## 3. 当前优先级
+- 保持本分脑与主脑 contract 一致。
+- 保持 brain 与 body 高匹配，不依赖零散 `README` 承担接管。
+- 默认让接管从 brain-first 入口开始，而不是先做全仓盲扫。
+- 若继续开发，优先补时间证据链和任务级交接模板。
+
+## 4. 当前边界
+- 本项目是独立产品线，不接管 `daily_research` 的正式执行默认值。
+- 结构变更必须尊重现有仓库边界与多入口模块划分。
+- 若结构变化影响仓库内 AI 资产，需同步 brain 与 `AGENTS.md / CLAUDE.md`。
+
+## 5. 当前主问题
+- 当前主问题不是“哪个入口最重要”。
+- 当前主问题是：
+  - 如何让多入口产品仓库在不盲扫全仓的前提下，
+  - 保持可接管、可定位、可持续维护。
+
+## 6. 当前风险
+- 多入口仓库容易边界失焦。
+- 若 brain 与 `AGENTS.md / CLAUDE.md` 不同步，后续接管会分裂。
+- 若不持续记录时间证据，长期状态会重新隐入会话上下文。
+
+## 7. 推荐下一步
+- 若恢复活跃开发，先建立连续时间证据链。
+- 先把任务级交接模板与入口级验证矩阵补齐。
+- 后续改动优先按“单入口视角 -> 跨入口协调”顺序推进。

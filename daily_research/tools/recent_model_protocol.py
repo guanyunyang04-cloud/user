@@ -13,7 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
-from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.baseline.data_provider import get_latest_completed_trading_date, load_daily_from_tq
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.experiment_guardrails import assert_expected_run_fields, resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import (
@@ -21,6 +21,7 @@ from daily_research.deep_alpha.family_epoch_budget import (
     default_min_epochs_for_budget,
     resolve_epoch_budget_for_family,
 )
+from daily_research.deep_alpha.pipeline_utils import resolve_split_window
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
 
@@ -29,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
 RUN_SCRIPT = PROJECT_ROOT / "daily_research" / "deep_alpha" / "run_deep_alpha_research.py"
 EXECUTION_ALIGNMENT_PROFILE_SET = default_auto_profile_argument()
-DEFAULT_RECENT_MODEL_ROOT_TAG = "short_alpha_recent_model_protocol_20260410_r1"
+DEFAULT_RECENT_MODEL_ROOT_TAG = "short_alpha_recent_model_protocol_20260412_r1"
 
 
 @dataclass(frozen=True)
@@ -37,21 +38,44 @@ class RecentModelWindow:
     label: str
     recent_start_date: str
     recent_end_date: str
+    requested_recent_end_date: str
     train_end_date: str
     valid_start_date: str
+    valid_end_date: str
     valid_months: int
 
 
 def build_recent_model_window(end_date: str = "", months: int = 12) -> RecentModelWindow:
-    end_ts = pd.Timestamp(end_date or get_latest_completed_trading_date()).normalize()
-    start_ts = (end_ts - pd.DateOffset(months=int(months)) + pd.Timedelta(days=1)).normalize()
+    requested_end_ts = pd.Timestamp(end_date or get_latest_completed_trading_date()).normalize()
+    start_ts = (requested_end_ts - pd.DateOffset(months=int(months)) + pd.Timedelta(days=1)).normalize()
     train_end_ts = (start_ts - pd.Timedelta(days=1)).normalize()
+    benchmark_dict = load_daily_from_tq(
+        stock_list=[],
+        benchmark="000300.SH",
+        start_date=train_end_ts.strftime("%Y%m%d"),
+        end_date=requested_end_ts.strftime("%Y%m%d"),
+        progress_desc="Resolve recent protocol trading calendar",
+    )
+    benchmark_close = benchmark_dict.get("Close")
+    if benchmark_close is None or benchmark_close.empty or "000300.SH" not in benchmark_close.columns:
+        raise RuntimeError("Failed to resolve benchmark trading calendar for recent model protocol.")
+    trade_index = pd.DatetimeIndex(pd.to_datetime(benchmark_close.index)).sort_values().unique()
+    _train_end, valid_start_ts, valid_end_ts = resolve_split_window(
+        trade_index,
+        train_end_ts.strftime("%Y-%m-%d"),
+        start_ts.strftime("%Y-%m-%d"),
+        0,
+        research_time_unit="calendar_months",
+        valid_months=int(months),
+    )
     return RecentModelWindow(
-        label=f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}",
-        recent_start_date=start_ts.strftime("%Y%m%d"),
-        recent_end_date=end_ts.strftime("%Y%m%d"),
+        label=f"{valid_start_ts.strftime('%Y%m%d')}_{valid_end_ts.strftime('%Y%m%d')}",
+        recent_start_date=valid_start_ts.strftime("%Y%m%d"),
+        recent_end_date=valid_end_ts.strftime("%Y%m%d"),
+        requested_recent_end_date=requested_end_ts.strftime("%Y%m%d"),
         train_end_date=train_end_ts.strftime("%Y-%m-%d"),
-        valid_start_date=start_ts.strftime("%Y-%m-%d"),
+        valid_start_date=valid_start_ts.strftime("%Y-%m-%d"),
+        valid_end_date=valid_end_ts.strftime("%Y-%m-%d"),
         valid_months=int(months),
     )
 
@@ -385,7 +409,7 @@ def _expected_recent_run_fields(*, profile_name: str, window: RecentModelWindow)
         "liquidity_pool": "liquid500",
         "train_end": str(pd.Timestamp(window.train_end_date).date()),
         "valid_start": str(pd.Timestamp(window.valid_start_date).date()),
-        "valid_end": str(pd.Timestamp(window.recent_end_date).date()),
+        "valid_end": str(pd.Timestamp(window.valid_end_date).date()),
         "valid_months": int(window.valid_months),
         "encoder_family": "patch_transformer",
         "patch_len": 5,
@@ -577,7 +601,7 @@ def ensure_recent_model_run(
         profile_name=profile_name,
         window=window,
         family_epoch_budget_manifest=family_epoch_budget_manifest,
-        end_date=window.recent_end_date,
+        end_date=window.requested_recent_end_date,
         resume_run_dir=resume_run_dir,
     )
     _run_command(command)
@@ -663,6 +687,8 @@ def ensure_recent_model_matrix(
         "recent_window_label": str(window.label),
         "recent_start_date": str(window.recent_start_date),
         "recent_end_date": str(window.recent_end_date),
+        "recent_requested_end_date": str(window.requested_recent_end_date),
+        "recent_validation_end_date": str(window.valid_end_date),
         "recent_train_end_date": str(window.train_end_date),
         "recent_window_months": int(window.valid_months),
         "recent_winner_profile_name": str(frame.iloc[0]["profile_name"]) if not frame.empty else "",

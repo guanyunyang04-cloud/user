@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow, load_raw_data_with_cache
 from daily_research.baseline.alpha import build_filter_mask
 from daily_research.baseline.backtest import summarize_monthly_diagnostics
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default="short_alpha_monthly_attack_signal_weight_verdict_20260409_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     return parser.parse_args()
 
 

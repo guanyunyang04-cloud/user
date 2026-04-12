@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
@@ -84,7 +85,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--profiles",
         default=",".join(DEFAULT_PROFILES),

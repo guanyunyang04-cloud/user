@@ -14,6 +14,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.execution_alignment import resolve_profile
 from daily_research.execution.output_root_resolver import OUTPUT_ROOT, STATIC_PRODUCTION_ROOT
 
@@ -91,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--production-root", default=str(STATIC_PRODUCTION_ROOT))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--start-date", default="20250318")
     parser.add_argument("--end-date", default="20260408")
     parser.add_argument("--bridge-start", default="2025-03-18")

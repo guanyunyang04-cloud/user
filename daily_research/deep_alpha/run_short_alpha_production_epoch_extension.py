@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH
 from daily_research.deep_alpha.research_objective import summarize_primary_monthly_objectives
 from daily_research.execution.update_default_candidate_production import (
@@ -38,7 +39,7 @@ def _parse_args() -> argparse.Namespace:
             "replay the candidates, and optionally promote the best epoch budget back into production."
         )
     )
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--production-manifest", default=str(DEFAULT_PRODUCTION_MANIFEST))
     parser.add_argument("--production-root", default=str(DEFAULT_PRODUCTION_ROOT))
     parser.add_argument("--strategy-manifest-path", default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST))

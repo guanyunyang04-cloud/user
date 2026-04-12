@@ -2,141 +2,74 @@
 
 快照日期：`2026-04-12`
 
-## 1. 当前锁定协议
-- 用户最新提出的要求仍是最高优先级。
-- 当前接管规则已经升级为：
-  - 先读 `identity_layer.md`
-  - 再读 `handoff_packet.md`
-  - 再读 `rule_memory.md / lesson_memory.md / temporal_state.md`
-- formal 验证采用滚动窗口；每个 formal 窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型。
-- 当前 formal 主窗示例仍是 `train_end = 2025-03-17`、`valid_start = 2025-03-18`、`valid_end = 2026-03-31`，它代表“该窗起点前最新模型”，不是“故意落后一整年”的旧解释。
-- recent 验证现在是 strongest-model research verdict 的必备伴随证据，不允许只报 formal。
-- 执行物化仍使用当前可标注最新数据做 `production full-fit`，当前 production `launch_cutoff_date = 2026-04-09`。
-- 最后真正写入默认执行的 winner，必须先做 latest-data `production full-fit + highest family budget`，不允许省算力。
-- 当前 recent 窗口按最近一年 `12` 个月定义；若以当前 latest completed date `2026-04-10` 计，默认 recent 区间应理解为 `2025-04-11 -> 2026-04-10`。
-- 当前默认判决顺序是“月度收益优先、模型偏短线”。
+## 1. 角色定位
+- `daily_research` 是当前工作区的正式生产研究与执行主线。
+- 它负责 strongest-model、learned-control、production full-fit 和 live 默认执行的统一闭环。
 
-## 2. 当前主线
-- 当前 strongest-model gate 已固定为 `liquid500 + execution_first + rolling formal 3 windows + as-of-window latest model + primary_monthly_robust_score + window_count=3`，裁决根为 `daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`。
-- 当前最强研究模型是 `short_expert_monthly_v1`。
-- 当前最新“让模型学习 score -> candidate pool -> raw target weight -> gross exposure”的研究分支是 `short_expert_policy_v1`，设计稿在 `daily_research/output/short_alpha_policy_model_v1_design_20260409.md`。
-- `short_expert_policy_v1` 已完成 validation-panel smoke：基于 `short_expert_monthly_v1` 的 `2025-03-18 -> 2026-02-27` 验证面板可稳定导出 learned target-weight，`230` 个交易日平均 gross exposure 约 `0.676`，平均正持仓数 `10`。
-- 按当前新协议，研究最强模型可以直接作为执行默认；不再额外保留独立 promotion 哲学阻塞层。
-- 当前稳定 base model 仍是 `state_liquidity_listwise_v1`，正式复核根为 `daily_research/output/short_alpha_formal_head2head_20260409_recheck_r1`。
-- 当前日常执行真源仍是 `daily_research/output/active_execution_strategy.json`。
-- 当前 active strategy 是 `deep_alpha_short_alpha_execalign_production_default`。
-- 当前 active candidate label 是 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`。
-- 当前 active production root 是 `daily_research/output/deep_alpha_short_alpha_execalign_production_default`。
-- 当前 active production full-fit run 是 `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260409_r1`。
-- 当前统一权重语义是 `research_raw_target_weight`。
-- 当前统一上限语义是 `follow_research_raw_no_global_cap`。
+## 2. 当前状态
+- strongest-model 当前三层答案已经重新对齐：
+  - `formal winner = short_expert_monthly_v1`
+  - `recent winner = short_expert_monthly_v1`
+  - `promotable winner = short_expert_monthly_v1`
+- 当前 strongest-model 叙事是从 `2026-04-09` 之后持续重刷并收口到现口径的。
+- strongest-model 当前 recent root：
+  - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1`
+- requested recent cutoff：
+  - `20260410`
+- effective validation window：
+  - `2025-04-11 -> 2026-03-31`
+- 当前统一权重语义：
+  - `research_raw_target_weight`
+- 当前统一上限语义：
+  - `follow_research_raw_no_global_cap`
+- 当前 live 默认执行：
+  - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 当前 learned-control 关键状态：
+  - deployable winner = `short_expert_policy_v5b__k1_20d = 0.1177`
+  - recent winner = `short_expert_policy_v5b = 0.1200`
+  - active v5 family fresh formal best = `short_expert_policy_v5b = 0.0839`
+  - historical cross-family fresh formal best = `short_expert_policy_v4b = 0.1008`
 
-## 3. 当前 live 执行态
-- 当前默认交易计划直接读取 production root 下的 `execution_aligned_daily_live_target_weight_panel.csv` 与 `execution_aligned_daily_live_score_panel.csv`。
-- 当前 live effective mode 是 `execution_aligned_live`。
-- 当前 live effective profile 是 `regoff_k2_5d_ensemble_native_anchor`。
-- 当前默认执行已经切到 `short_expert_monthly_v1 + k2` 这条 latest-data production full-fit 主线。
-- `static_fallback_daily_live_target_weight_panel.csv` 仍保留在 production root 里作为运维安全基线，但它不再是当前默认 target-weight 来源。
-- `topk3_1d_regoff` 现在只保留为 observation-only 的 targeted repair 分支，不再是当前默认 repair 叙事。
-- 最新交易计划已经重刷到 `2026-04-09` 信号、`2026-04-10` 执行，候选标签与 production root 都已切到 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`。
+## 3. 当前优先级
+- 当前最高优先级：
+  - 以 `policy_v5b` 为主线缩小 fresh-formal gap，而不是重开 broad sweep。
+- 冻结当前 live 默认执行，不做静默切换。
+- 以 `policy_v5b` 为主线做窄迭代，重点缩小 fresh-formal gap。
+- 保留 `policy_v5a / policy_v5c` 作为执行稳定性与 gross-teacher 对照。
+- 继续把 `contract / project-python / strict-resume` 纪律压到剩余活跃脚本。
+- 每轮实验后立即写回 handoff、temporal、lesson、working。
 
-## 4. 当前 formal / recent / live 裁决
-- strongest-model verdict：`short_expert_monthly_v1` 已在当前 monthly-first formal strongest-model gate 下胜出，根为 `daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`。
-- strongest-model recent 验证已经补齐；同一根下最近一年 `12` 个月 corrected recent winner 是 `baseline_current`。
-- formal stable-base verdict：`state_liquidity_listwise_v1` 仍成立，根为 `daily_research/output/short_alpha_formal_head2head_20260409_recheck_r1`。
-- learned policy review verdict：`short_expert_policy_v1` 已完成 latest formal single-window review，根为 `daily_research/output/short_alpha_policy_v1_review_20260409_r1`；结果为 excess annual `65.84%`、excess Sharpe `3.901`、positive month `75.00%`、median monthly excess `3.53%`。
-- 但 `short_expert_policy_v1` 仍弱于同窗 `short_expert_monthly_v1` 的 excess annual `91.76%`、excess Sharpe `4.852`、positive month `83.33%`、median monthly excess `4.61%`，因此当前它还是 promising research branch，不是 strongest winner。
-- deep capacity verdict：`short_alpha_deep_capacity_review_20260409_r1` 已补齐；纯加深 `patch_transformer` 没有带来 formal uplift，`short_expert_policy_v1_deep` 虽然接近，但仍未打赢 `short_expert_monthly_v1`。
-- `short_expert_mamba_policy_v1` 已尝试启动，但在当前 `RTX 2060 6GB` 上同协议 wall-clock 吞吐过慢，未纳入这轮 formal winner 判定。
-- 旧 replay-based recent / repair / execution audit 入口现已统一收口到 `daily_research/archive/output/replay_based_reference_index.md`。
-- 旧 replay-based strongest recent readout 现在只保留为历史参考，不再作为 strongest-model 当前 recent 正式证据。
-- 旧第一轮 signal/cash repair 仍可作为 replay-based 机制参考；其中 current-default repair winner 是 `winner_current_target_market_state_guard_v1`，但它不再直接代表 corrected strongest-model recent 层。
-- 这轮 current-default repair 的直接结论是：`cash-sizing guard` 比 `signal-to-weight` 更接近正确方向。`winner_current_target_market_state_guard_v1` 的 monthly_robust_score 为 `0.052`，高于当前 default `0.046`；而 `winner_score_weight_k2_static` 虽然 excess annual 冲到 `49.69%`，但 monthly_robust_score 只有 `0.014`，说明它更像高波动攻击桥，不是当前要的月度稳健修补。
-- repair winner 的 live preview 也统一归档在上述 replay-based 索引下；当前 `2026-04-09` 信号对应的 market state 仍是 `trend_down_low_vol`，预览计划没有建议动作。
-- current default follow-up repair 只保留为旧 replay-based 机制参考；第二轮 winner-side repair winner 已进一步收口到 `winner_current_target_market_state_guard_v2_balance`。
-- follow-up 结论是：`market_state_guard_v2_balance` 把 monthly_robust_score 从当前 default 的 `0.046` 提到 `0.060`，也高于上一轮 `v1` 的 `0.052`；但它仍未追平 companion baseline 的 `0.073`，所以当前正确定位仍是“最强 repair candidate”，不是“已经足以直接替代 companion 的最终答案”。
-- follow-up 里的控制层迁移结果是同向的：winner 借用 companion 的逐日 gross / 状态 gross 后，monthly_robust 分别提高约 `0.012 / 0.012`；companion 借用 winner 的逐日 gross / 状态 gross 后，monthly_robust 分别下降约 `0.006 / 0.002`。这说明 gross-control 的确是 current default 与 companion 差距的重要来源。
-- follow-up 也说明：低波动 `score blend` 虽然能把 score/weight Spearman 从 `0.206` 推到约 `0.218`，但 monthly_robust 仍低于 `market_state_guard_v2_balance`；因此 narrow `signal-to-weight` 还不是当前第一修补主线。
-- execution semantic verdict：`raw + k2` 明确胜过当前 `k1` 与 capped direct，根为 `daily_research/output/short_alpha_execution_semantic_concentration_verdict_20260409_r1`。
-- monthly-first execution verdict：`k2` 仍是 execution-side mainline，根为 `daily_research/output/short_alpha_monthly_first_execution_scoreboard_20260409_r1`。
-- 旧 recent audit、recent attack recheck 与 same-window targeted repair 的原始根也都统一收口到 `daily_research/archive/output/replay_based_reference_index.md`。
-- 这些旧 replay-based 读数当前仍可用来解释 `k2 > k1 > k3 > topk3` 与 `topk3` 被降级的历史原因，但不再充当 corrected recent 主证据。
+## 4. 当前边界
+- formal 验证采用滚动窗口协议。
+- recent 验证现在是 strongest-model research verdict 的必备伴随证据。
+- 当前 recent 窗口按最近一年 `12` 个月定义。
+- `requested_recent_end_date` 与 `effective recent validation end` 必须分开叙述。
+- 默认执行写入前仍必须走 latest-data `production full-fit + highest family budget`。
+- 正式训练与预训练默认起始 epoch 预算继续遵守 `32` start policy。
+- broad hand-crafted repair sweep 继续冻结。
+- broad backbone / Mamba / TSFM / RL 不进入当前主线。
 
-## 5. 30% 强月裁决
-- 30% 强月 verdict 根为 `daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`。
-- 当前没有任何 challenger 命中 `portfolio_return >= 30%` 的稳定强月门槛。
-- formal attack winner 是 `formal_current_equal_top5_k1_bridge`。
-- 但默认执行已经不再等待 `k1 attack bridge` 晋升；当前 production default 已经按 strongest research winner 物化到 `short_expert_monthly_v1 + k2`。
-- 当前最重要的攻击分支问题变成：如何让 `formal_current_equal_top5_k1_bridge` 在最近一年 `12` 个月口径下，真正打赢当前已上线的 `short_expert + k2` 默认链。
+## 5. 当前主问题
+- strongest-model 层的主问题已经收口，不再是“current default 如何追 `baseline_current`”。
+- 当前真正的主问题已经改写成：
+  - 如何保住 `policy_v5b` 的 recent / constrained 优势，
+  - 同时把它的 fresh-formal 表现从 `0.0839` 拉向当前 overall formal mainline `0.1012`。
 
-## 6. 当前真正问题
-- 当前问题不是“谁是最强研究模型”还没定；这件事已经由 strongest-model verdict 收口为 `short_expert_monthly_v1`，而且已经完成默认执行物化。
-- 当前问题也不是 `recent` 定义还模糊；当前 recent 已固定为最近一年 `12` 个月。
-- 当前问题也不是预算不够；current default 已按 latest-data `production full-fit + highest family budget` 物化。
-- 如何让新的 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor` 默认链，在最近一年 `12` 个月 corrected recent 口径下解释并收敛与 `baseline_current` 的差异。
-- 如何在当前 `k2` 主线之上改善月度分布、弱月修复与集中度，同时保持当前 raw 统一语义。
-- 旧 replay-based recent 主因拆解已经给出：当前月度分布不稳的第一主因更像是“顺风状态兑现不足 + 现金/总仓位不够状态化 + score-to-weight 转换偏弱”，不是“模型完全不会看状态”。
-- 同一根 recent 拆解还表明：股票池是天花板约束，但不是当前 winner 与 companion 差距的第一主因；两条线使用的是同一个固定 `liquid500` 池。
-- 当前最明确的三条量化信号是：winner 在 `trend_up_low_vol` 的日均超额只有 `0.1683%`，低于 companion 的 `0.2745%`；winner 的 active-date score/weight Spearman 为 `0.206`，低于 companion 的 `0.235`；winner 的 down/up gross exposure 比例为 `1.032`，说明它没有在弱状态里明显更保守。
-- 现在 current-default repair verdict 进一步把优先级压实了：第一包小修里，`market_state_guard_v1` 能把 monthly_robust_score 从 `0.046` 提到 `0.052`，但还打不到 companion 的 `0.073`；纯 `score_weight_k2` 路线虽然把年化拉高，却把月度稳健性拖坏了。
-- 第二轮 current-default follow-up repair verdict 又把方向继续压实了一步：`market_state_guard_v2_balance` 能把 monthly_robust_score 进一步抬到 `0.060`，同时控制层迁移实验显示 gross-control 改好时 winner 会同步改善、companion 会同步变差；因此“先修 gross-control / cash sizing，再修窄版 signal-to-weight”已经不再只是猜测，而是有同向迁移证据支持的判断。
-- 如何把 `formal_current_equal_top5_k1_bridge` 这类更强攻击桥，在 same-protocol recent/live 上复现而不退化。
-- 如何让 `short_expert_policy_v1` 在 formal 3 windows 与 recent 12 个月上证明“学出来的选股/持仓转换”优于当前 `short_expert_monthly_v1 + k2` 默认链。
-- deepening 本身已经做过一轮同窗验证；下一步不该再把“单纯加深 backbone”当默认升级方向。
+## 6. 当前风险
+- `policy_v5b` 容易被误读成已经应当替换 live 默认。
+- 如果只看 constrained formal，会低估 `policy_v5b` 的 fresh-formal gap。
+- 如果只看 fresh formal，又会错过 `policy_v5b` 已经建立的 deployable 优势。
+- 如果不持续写回 brain，接管者仍可能沿用 `baseline_current / policy_v2b / policy_v4b` 的旧叙事。
 
-## 7. 下一步
-- 第一优先级已经从“先修 signal-to-weight”收口成“先修 cash sizing / gross-control”：当前最强 repair candidate 已从 `winner_current_target_market_state_guard_v1` 进到 `winner_current_target_market_state_guard_v2_balance`，说明 `short_expert + k2` 现阶段最值得先补的是状态化总仓位，而不是更激进的 score bridge。
-- 第二优先级是在 current default 主线上继续把旧 repair 线的 gross-control 机制收干净，但这些 repair 读数只保留为参考，不再直接代表 corrected strongest-model recent 层。
-- 第三优先级才是围绕 `signal-to-weight` 做更窄修补，只保留不破坏 monthly_robust_score 的版本；第二轮 follow-up 里 `score blend` 虽然抬高了对分数排序的跟随度，但仍未超过 `market_state_guard_v2_balance`，因此它现在只能做 secondary branch。
-- 第四优先级如果继续做机制对照，优先把“当前已上线 `short_expert + k2` 默认链”与 `baseline_current` 的 corrected recent 差异讲清；`state_liquidity + k2` 更适合作为 stable-base 参考，不再默认充当 strongest recent 对照。
-- 第五优先级并行保留 `short_expert_policy_v1` 研究分支，优先验证它能否把 score-to-weight 的手写桥接进一步内生化，而不是继续单纯堆深 backbone。
-- 第六优先级才是单独评估“固定 `liquid500` vs 动态 rolling pool”；在同池 recent 拆解已经完成前，不允许先把问题归咎为池子太窄。
-- 第七优先级是围绕 `formal_current_equal_top5_k1_bridge` 做阈值微调、月状态定义收敛和 recent/live 扩样，只把它当 research attack branch。
-- 第八优先级是持续保持 active manifest、production root、latest trade plan 和 brain 文档四者同源一致。
-- broad execution-policy sweep 继续停止。
-- 训练默认仍从 `32` 起步；如不够，只允许同模型 `strict resume`。
-- 模型侧如重开，仍只从短周期、弱月修补、`penalty-only` 一类窄修复继续。
-- active manifest 现在必须显式记录 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_execution_bridge_meta / effective_live_weight_generation_note`，不再允许 production promotion 后留空。
-- latest trade plan 现在会解释当前 effective live mode 与权重生成语义；当前默认模式下，`转权重前分数` 是 promoted production full-fit 的 execution pre-weight score，不要求与最终权重单调一致。
-- 2026-04-10 最新补充：
-  - 旧 replay-based gross-control sweep 已补齐；winner-side 最强 gross-only 修补为 `winner_gross_map_u097_f098_d088`，`monthly_robust_score = 0.0616`，相对 current default `0.0456` 提升约 `+0.0160`，但仍低于 companion `0.0726`。
-  - 这轮说明 hand-crafted 控制层已经接近当前上限：`month-trigger` overlay 与窄版 `score-to-weight` overlay 都没有继续推翻 gross-only winner，所以“先冻结 best gross-control，再让 learned control 去学它”已经成立。
-  - `short_alpha_policy_v2_review_20260410_r1` 已补齐；`short_expert_policy_v2` 在 same-window formal 里把 `positive month ratio` 提到 `83.33%`、把 `worst month` 收窄到 `-1.12%`、把 `top3 positive share` 降到 `50.88%`，明显强于 `policy_v1` 的月度稳定性，但 `excess annual = 55.83%`，仍低于 `short_expert_monthly_v1` 的 `91.76%`，也低于 `policy_v1` 的 `65.84%`。
-  - `short_alpha_policy_v2_recent_eval_20260410_r1` 已按 corrected recent 协议重刷；`short_expert_policy_v2` 的 recent 一年 `monthly_robust_score = 0.0871`，高于 current default `0.0778` 与 `policy_v1 = 0.0744`；recent `excess annual = 93.01%`。
-  - learned-control 当前结论已经更新为：`policy_v2 > current default > policy_v1 > policy_v3 > state_liquidity_listwise_v1`；其中 `policy_v2` 在 corrected recent 一年里已经明显强于同包里的 current default 与 companion，但 formal 仍未打赢 `short_expert_monthly_v1`，所以它现在是最有前途的 learned-control research branch，还不是新的默认执行 winner。
-  - 接下来 learned-control 主线不再是继续讨论 `policy_v1`，而是围绕 `short_expert_policy_v2` 压缩 formal 收益弹性损失，重点排查它为什么自动漂到 `regoff_k2_20d_ensemble_native_anchor`，以及如何在保住 recent 稳健性的同时，把 formal excess annual 拉回到当前主线附近。
-  - 本轮 formal / recent 的正式训练、回放与汇总已统一锁定在 `yolos` 环境；其它环境结果不得再作为正式证据引用。
-  - `short_alpha_policy_v2_constrained_execution_review_20260410_r1` 已补齐；`policy_v2` 的 constrained formal best 仍是 `regoff_k2_20d_ensemble_native_anchor`，`monthly_robust_score = 0.0919`，相对当前 mainline formal `0.1012` 仍落后约 `-0.0093`。这说明 `policy_v2` 的 formal 收益折损不能再简单归因成“桥太慢”。
-  - `short_alpha_policy_v2_formal_loss_breakdown_20260410_r1` 已补齐；`raw_1d` 明确不可部署，手工候选数收缩与更紧 gross band 也没有单独救回 formal gap，因此下一代 learned-control 不能只靠继续手工稀疏化。
-  - `short_alpha_policy_v3_review_20260410_r1` 已补齐；`short_expert_policy_v3` 的 formal profile 仍是 `regoff_k2_20d_ensemble_native_anchor`，formal `monthly_robust_score = 0.0786`，低于 `policy_v2 = 0.0830`、`state_liquidity_listwise_v1 = 0.0897` 和当前 mainline `0.1012`，不是 formal winner。
-  - `short_alpha_policy_v3_recent_eval_20260410_r1` 已按 corrected recent 协议重刷；在 `2025-04-11 -> 2026-04-10` recent 一年窗口里，`short_expert_policy_v3` 的 `monthly_robust_score = 0.0390`，仍低于 current default `0.0778` 与 `policy_v2 = 0.0871`，也不是 recent winner。
-  - learned-control 当前主研究分支仍应保持为 `short_expert_policy_v2`；`policy_v3` 第一版证明“把更多控制动作学进去”本身可行，但它既没有解决 formal gap，也没有在 latest recent 一年里打赢 `policy_v2`。
-- 2026-04-11 最新补充：
-  - `short_alpha_policy_v2_family_formal_review_20260411_r1` 已补齐；family formal 排名是 `policy_v2 = 0.0830 > policy_v2b = 0.0803 > policy_v2c = 0.0777 > policy_v2a = 0.0505`，因此 learned-control 的 formal main research branch 仍是 `short_expert_policy_v2`，没有被 `v2b / v2c` 接管。
-  - 同一 formal family review 也再次确认：当前 overall formal winner 仍是 `short_expert_monthly_v1 = 0.1012`；本轮 family 结果没有触发默认执行切换。
-  - `short_alpha_policy_v2_family_recent_eval_20260411_r1` 已补齐；corrected recent 一年 family 排名改写为 `policy_v2c = 0.1046 > policy_v2b = 0.1020 > baseline_current = 0.0982 > policy_v2 = 0.0871 ≈ policy_v2a = 0.0870 > current default = 0.0778`。
-  - 这说明 learned-control 的 recent frontier 已经从老 `policy_v2` 前移到 `policy_v2c`，`policy_v2b` 是强 runner-up；两者都已经超过 `baseline_current` 与当前默认执行链。
-  - `short_alpha_policy_v2_family_constrained_execution_review_20260411_r2` 已补齐；family constrained best 已前移到 `short_expert_policy_v2b__k1_20d = 0.1104`，高于当前 mainline formal `0.1012`；`policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`，但 selected slow bridge `k1_20d` 只有 `0.0846`。
-  - `short_alpha_policy_family_formal_loss_breakdown_20260411_r1` 已补齐；当前 learned-control 最强 deployable / constrained formal 候选应前移到 `short_expert_policy_v2b`，而 `policy_v2c` 的 formal gap 更像 bridge/control 敏感，而不是 recent 偶然值。
-  - `short_alpha_policy_v4_family_pipeline_20260411_r1` 已按前台 + strict-resume 纪律跑完 formal / constrained / recent / consistency / doc_guard；`policy_v4b` 的 direct formal family best 已到 `0.1008`、corrected recent 已到 `0.1387`，但 constrained best 只有 `0.0687`，还不能直接进入 promotion；`policy_v4a` formal / constrained 都没有解题。
-  - 因此 learned-control 当前要分三层讲：direct formal family fresh best = `policy_v4b`，constrained formal best = `policy_v2b`，corrected recent best = `policy_v4b`；live 默认执行继续冻结不变。
-- 当前默认执行不变，继续维持 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`；本轮不触发新的 production promotion。
-
-## 当前协议修正收口
-- strongest-model 的 recent 层已经按 `independent_recent_model_as_of_recent_start` 补齐，窗口是 `2025-04-11 -> 2026-04-10`，训练截止是 `2025-04-10`。
-- 当前 strongest-model 的 formal winner 仍是 `short_expert_monthly_v1`。
-- 当前 strongest-model 的 recent winner 改为 `baseline_current`，recent 一年 `monthly_robust_score = 0.0982`，`recent_excess_annual_return = 84.38%`，执行 profile 是 `regoff_k1_20d_ensemble_native_anchor`。
-- 当前 strongest-model 的 promotable winner 仍是 `short_expert_monthly_v1`，因为当前治理规则仍是 `formal_winner_direct_default_under_current_policy`。
-- `short_expert_monthly_v1` 的 corrected recent 一年读数应改为：`monthly_robust_score = 0.0778`、`recent_excess_annual_return = 55.11%`、`recent_positive_month_ratio = 91.67%`、`recent_worst_monthly_return = -2.94%`。
-- `state_liquidity_listwise_v1` 的 corrected recent 一年读数应改为：`monthly_robust_score = -0.0019`、`recent_excess_annual_return = 15.53%`；它仍是 stable base model，但不再是 strongest-model 的 recent winner。
-- 旧的 replay-recent strongest 叙事与由其衍生的 current-default / companion recent 对照，现阶段都只保留为参考读数，不再当正式 promotion 证据。
-- 旧 replay-based 机制根现统一收口到 `daily_research/archive/output/replay_based_reference_index.md`；当前 working memory 不再散落直引这些路径。
-- learned-control 的 direct formal family fresh layer 最新读数是：`short_expert_policy_v4b = 0.1008`，已经非常接近 current mainline `0.1012`；但这只是 fresh family formal readout，不代表 deployable verdict。
-- learned-control 的 constrained formal 层当前已改写为：`short_expert_policy_v2b__k1_20d = 0.1104` 是 strongest deployable candidate，已高于 current mainline `0.1012`；`policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`，而 selected slow bridge `k1_20d` 只有 `0.0846`。
-- learned-control 的 corrected recent 层当前已前移到 `short_expert_policy_v4b = 0.1387`；`policy_v4a = 0.1070`、`policy_v2c = 0.1046`、`policy_v2b = 0.1020` 也都高于 `baseline_current = 0.0982`。
-- `short_expert_policy_v3` 的 corrected recent 读数是 `monthly_robust_score = 0.0390`、`recent_excess_annual_return = 45.84%`，明显落后于 `policy_v2 family` 前沿，因此当前 learned-control 主研究分支仍然保持为 `short_expert_policy_v2` / `policy_v2 family`，不是 `policy_v3`。
-- `policy_v4b` 目前不能直接讲成 promotion 结论，因为它的 constrained formal best 只有 `0.0687`；`policy_v4a` 的 constrained best 更低到 `0.0458`，说明 recent 强势还没有转成 deployable formal。
-- 因此当前 learned-control 的最强 deployable research candidate 是 `short_expert_policy_v2b`，而“如何保住 `policy_v4b` 的 recent 强度并让 constrained formal 不坍塌”成为下一轮新主问题。
-- 本机正式训练纪律补充为：`yolos`、前台执行、`num_workers = 0`、`pin_memory = false`；后续若继续 recent / formal 正式训练，不再启用 CPU 并行供数。
-- `2026-04-11` 用户把接管纪律进一步钉死为：所有正式实验都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`，长实验只允许前台执行，终端默认超时预算按 `10` 小时处理。
-- 同日用户再次明确：后续改法默认优先追求“最有效解决主问题”，不再把“最小改动”当默认目标；若两者冲突，默认选更有效方案，并同步更新代码与 brain。
+## 7. 推荐下一步
+- 下一轮只开窄版 `policy_v5` 后继分支：
+  - execution-stability regularization
+  - candidate-count / concentration regularization
+  - 必要时保留 gross-teacher distillation
+- 每个新分支都必须同时跑：
+  - formal
+  - constrained formal
+  - recent
+- 收尾固定跑：
+  - `python daily_research/tools/project_consistency_check.py`
+  - `python daily_research/tools/doc_guard.py check`

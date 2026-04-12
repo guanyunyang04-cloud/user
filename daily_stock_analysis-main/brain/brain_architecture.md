@@ -1,71 +1,43 @@
 # Daily Stock Analysis Brain Architecture
 
-## 1. 结构目标
-`daily_stock_analysis-main/brain/` 是该项目的 AI 控制面，用来把复杂的产品 body 映射成可交接的脑结构。
+## 1. 分脑定位
+`daily_stock_analysis-main/brain/` 是 `daily_stock_analysis-main` 的产品型分脑。
 
-当前升级目标是把它从“基础产品分脑”补齐为“可替换 agent / 不可替换大脑”的多入口产品分脑。
+它在整个脑网络中的角色是：
 
-## 2. 分脑模块
-- `identity_layer.md`
-  - 项目身份、目标、禁区
-- `handoff_packet.md`
-  - 标准交接包
+- 保存多市场 AI 股票分析产品的稳定认知
+- 为 `src / api / apps / bot / data_provider / tests` 提供统一接管入口
+- 与 `daily_research` 的正式执行主线保持边界清晰
+
+## 2. 继承的标准合同
+`daily_stock_analysis-main` 继承主脑定义的标准附着分脑合同，统一结构与读写顺序以 [brain/brain_architecture.md](H:/new_tdx64/PYPlugins/user/brain/brain_architecture.md) 为准。
+
+因此本文件不再重复展开整套通用模块定义，只保留本项目相对标准合同的特有强调。
+
+## 3. 本项目的特有强调
 - `semantic_memory.md`
-  - 项目身份、核心入口、body_map
-- `rule_memory.md`
-  - 高优先级规则
-- `lesson_memory.md`
-  - 可复用教训
-- `temporal_state.md`
-  - `Past / Present / Future`
+  - 重点锁定产品入口、模块边界和 body_map
 - `working_memory.md`
-  - 当前优先级、改动边界、近期治理目标
-- `procedural_memory.md`
-  - 仓库约束、验证矩阵、AI 协作规则
-- `handoff_rules.md`
-  - 接管纪律
-- `governance_layer.md`
-  - 自检、反偏移、修复
-- `environment_model.md`
-  - Python / Web / API / 测试命令口径
+  - 重点保存当前产品治理目标和近期改动边界
 - `action_system.md`
-  - 系统入口、模块分层、执行链路
-- `episodic_memory.md`
-  - 后续本地按时间记录的重要改动与证据
-- `brain_manifest.json`
-  - 机器可读读写路由、body_map、handoff_contract
+  - 重点保留 `src / api / apps / bot / data_provider / tests` 的进入顺序
 
-## 3. 写入路由
-- 身份与禁区：
-  - `identity_layer.md`
-- 标准交接包：
-  - `handoff_packet.md`
-- 稳定认知：
-  - `semantic_memory.md`
-- 规则、教训、时态状态：
-  - `rule_memory.md`
-  - `lesson_memory.md`
-  - `temporal_state.md`
-- 当前优先级：
-  - `working_memory.md`
-- 可复用仓库规则：
-  - `procedural_memory.md`
-- 接管纪律与治理：
-  - `handoff_rules.md`
-  - `governance_layer.md`
-- 环境与命令：
-  - `environment_model.md`
-- 系统入口与模块路由：
-  - `action_system.md`
-- 时间顺序证据：
-  - `episodic_memory.md`
+## 4. body 进入顺序
+本项目的 body 主要从以下区域进入：
 
-## 4. Body 映射原则
-- brain 不重复保存源码细节
-- brain 只负责说明源码 body 应该如何被理解与进入
-- agent 先接 brain，再进入 `src/ api/ apps/ bot/ data_provider/ tests/`
+- `daily_stock_analysis-main/src`
+- `daily_stock_analysis-main/api`
+- `daily_stock_analysis-main/apps`
+- `daily_stock_analysis-main/bot`
+- `daily_stock_analysis-main/data_provider`
+- `daily_stock_analysis-main/tests`
 
-## 5. 去冗余规则
-- 现有 `README.md`、`docs/`、`AGENTS.md`、`CLAUDE.md` 等可保留为 body 历史资产或上游说明
-- 但当前 AI 接管入口以本分脑为准
-- 默认接管不再从 `episodic_memory.md` 开始，而是从 `identity_layer.md` 和 `handoff_packet.md` 开始
+默认原则：
+
+- 先接 brain
+- 再按 body_map 进入产品代码
+- 不把 `README / docs / AGENTS.md / CLAUDE.md` 当成主入口
+
+## 5. 去冗余原则
+- 通用分脑结构只在主脑 `brain_architecture.md` 定义一次。
+- 本文件只保留产品特有入口、边界和 body 差异。

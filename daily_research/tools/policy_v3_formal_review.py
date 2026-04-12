@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
 
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a formal latest-window review for short_expert_policy_v3 against the current mainline and key references."
     )
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
     parser.add_argument("--execution-alignment-candidate-profiles", default=DEFAULT_EXECUTION_PROFILES)

@@ -20,20 +20,21 @@ from daily_research.tools.recent_model_protocol import (
 )
 
 
-DEFAULT_ROOT_TAG = "short_alpha_policy_v4_family_recent_eval_20260411_r1"
+DEFAULT_ROOT_TAG = "short_alpha_policy_v5_family_recent_eval_20260412_r1"
 PROFILE_NAMES = [
     "baseline_current",
     "short_expert_monthly_v1",
     "short_expert_policy_v2b",
-    "short_expert_policy_v2c",
-    "short_expert_policy_v4a",
     "short_expert_policy_v4b",
+    "short_expert_policy_v5a",
+    "short_expert_policy_v5b",
+    "short_expert_policy_v5c",
 ]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Recent 12-month evaluation for the narrow policy_v4 family under the independent recent-start protocol."
+        description="Recent 12-month evaluation for the narrow policy_v5 family under the independent recent-start protocol."
     )
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default=DEFAULT_ROOT_TAG)
@@ -50,9 +51,10 @@ def _notes_by_profile() -> dict[str, str]:
         "baseline_current": "recent winner baseline reference",
         "short_expert_monthly_v1": "current default strongest research model",
         "short_expert_policy_v2b": "current constrained formal winner reference",
-        "short_expert_policy_v2c": "current recent learned-control winner reference",
-        "short_expert_policy_v4a": "policy_v4a execution-stability branch",
-        "short_expert_policy_v4b": "policy_v4b concentration-regularized branch",
+        "short_expert_policy_v4b": "current recent learned-control winner reference",
+        "short_expert_policy_v5a": "policy_v5a execution-stability branch",
+        "short_expert_policy_v5b": "policy_v5b candidate-count / concentration branch",
+        "short_expert_policy_v5c": "policy_v5c deployable-gross teacher branch",
     }
 
 
@@ -63,11 +65,14 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
     baseline = lookup.get("baseline_current", {})
     current = lookup.get("short_expert_monthly_v1", {})
     policy_v2b = lookup.get("short_expert_policy_v2b", {})
-    policy_v2c = lookup.get("short_expert_policy_v2c", {})
-    policy_v4a = lookup.get("short_expert_policy_v4a", {})
     policy_v4b = lookup.get("short_expert_policy_v4b", {})
+    policy_v5a = lookup.get("short_expert_policy_v5a", {})
+    policy_v5b = lookup.get("short_expert_policy_v5b", {})
+    policy_v5c = lookup.get("short_expert_policy_v5c", {})
     winner = recent_df.iloc[0].to_dict() if not recent_df.empty else {}
-    family_rows = recent_df.loc[recent_df["profile_name"].isin(["short_expert_policy_v4a", "short_expert_policy_v4b"])].copy()
+    family_rows = recent_df.loc[
+        recent_df["profile_name"].isin(["short_expert_policy_v5a", "short_expert_policy_v5b", "short_expert_policy_v5c"])
+    ].copy()
     family_winner = family_rows.iloc[0].to_dict() if not family_rows.empty else {}
 
     summary = {
@@ -83,14 +88,15 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         "baseline_current": baseline,
         "current_default": current,
         "policy_v2b": policy_v2b,
-        "policy_v2c": policy_v2c,
-        "policy_v4a": policy_v4a,
         "policy_v4b": policy_v4b,
+        "policy_v5a": policy_v5a,
+        "policy_v5b": policy_v5b,
+        "policy_v5c": policy_v5c,
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     lines = [
-        "# Policy V4 Family Recent Eval",
+        "# Policy V5 Family Recent Eval",
         "",
         "## Scope",
         "- protocol: `independent recent-start latest model`",
@@ -98,14 +104,14 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         f"- requested recent cutoff: `{recent_summary.get('recent_requested_end_date', '')}`",
         f"- effective validation window: `{recent_summary.get('recent_start_date', '')} -> {recent_summary.get('recent_end_date', '')}`",
         f"- recent train_end: `{recent_summary.get('recent_train_end_date', '')}`",
-        "- compared profiles: `baseline_current`, `short_expert_monthly_v1`, `short_expert_policy_v2b`, `short_expert_policy_v2c`, `short_expert_policy_v4a`, `short_expert_policy_v4b`",
+        "- compared profiles: `baseline_current`, `short_expert_monthly_v1`, `short_expert_policy_v2b`, `short_expert_policy_v4b`, `short_expert_policy_v5a`, `short_expert_policy_v5b`, `short_expert_policy_v5c`",
         "",
         "## Direct Answer",
         f"- overall recent winner: `{winner.get('profile_name', 'n/a')}`",
         f"- family recent winner: `{family_winner.get('profile_name', 'n/a')}`",
         f"- family winner monthly robust: `{format_num(family_winner.get('recent_monthly_robust_score'))}`",
         f"- delta vs policy_v2b: `{format_num(float(family_winner.get('recent_monthly_robust_score', 0.0) or 0.0) - float(policy_v2b.get('recent_monthly_robust_score', 0.0) or 0.0))}`",
-        f"- delta vs policy_v2c: `{format_num(float(family_winner.get('recent_monthly_robust_score', 0.0) or 0.0) - float(policy_v2c.get('recent_monthly_robust_score', 0.0) or 0.0))}`",
+        f"- delta vs policy_v4b: `{format_num(float(family_winner.get('recent_monthly_robust_score', 0.0) or 0.0) - float(policy_v4b.get('recent_monthly_robust_score', 0.0) or 0.0))}`",
         f"- delta vs current default: `{format_num(float(family_winner.get('recent_monthly_robust_score', 0.0) or 0.0) - float(current.get('recent_monthly_robust_score', 0.0) or 0.0))}`",
         f"- delta vs baseline_current: `{format_num(float(family_winner.get('recent_monthly_robust_score', 0.0) or 0.0) - float(baseline.get('recent_monthly_robust_score', 0.0) or 0.0))}`",
         "",
@@ -125,8 +131,8 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         [
             "",
             "## Decision",
-            "- The next learned-control branch should try to preserve the current v2 family recent edge while avoiding a new formal-only overfit story.",
-            "- Beating `policy_v2c` is the stronger recent target; beating `policy_v2b` is the stronger formal-compatibility target.",
+            "- Beating `policy_v4b` is the true recent frontier target.",
+            "- Beating or approaching `policy_v2b` under constrained formal is the deployable target.",
         ]
     )
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

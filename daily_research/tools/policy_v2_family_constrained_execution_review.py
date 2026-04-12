@@ -46,10 +46,12 @@ VariantSpec = single_review.VariantSpec
 
 VARIANT_SPECS = (
     VariantSpec("raw_1d", "Original learned target weights with no execution bridge.", "raw_1d"),
+    VariantSpec("k1_3d", "Ultra-fast bridge: k1 3d ensemble.", "regoff_k1_3d_ensemble_native_anchor"),
     VariantSpec("k1_5d", "Core fast bridge: k1 5d ensemble.", "regoff_k1_5d_ensemble_native_anchor"),
     VariantSpec("k1_20d", "Core slow bridge: k1 20d ensemble.", "regoff_k1_20d_ensemble_native_anchor"),
     VariantSpec("k2_5d", "Current deployable comparator: k2 5d ensemble.", "regoff_k2_5d_ensemble_native_anchor"),
     VariantSpec("k2_20d", "Current slow deployable comparator: k2 20d ensemble.", "regoff_k2_20d_ensemble_native_anchor"),
+    VariantSpec("cap6_k1_3d", "Cap learned candidates at 6 names before k1 3d bridge.", "regoff_k1_3d_ensemble_native_anchor", candidate_cap=6),
     VariantSpec("cap6_k1_5d", "Cap learned candidates at 6 names before k1 5d bridge.", "regoff_k1_5d_ensemble_native_anchor", candidate_cap=6),
     VariantSpec(
         "cap4_g092_098_k1_5d",
