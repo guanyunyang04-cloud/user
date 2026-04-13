@@ -1,53 +1,57 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "t0_project",
-  "brain_version": "2026-04-12",
+  "brain_version": "2026-04-13",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "t0_project/brain/identity_layer.md",
   "body_root": "t0_project",
+  "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract",
+  "regional_specialization": {
+    "role": "intraday_execution_and_rl_lab",
+    "priority_regions": [
+      "orientation_system",
+      "long_term_memory",
+      "executive_control",
+      "sensorimotor_loop"
+    ],
+    "focus_modules": [
+      "state_center",
+      "knowledge_center",
+      "operations_center"
+    ],
+    "body_entry_priority": [
+      "t0_project/integrated_tq_strategy.py",
+      "t0_project/backtest_integrated_strategy.py",
+      "t0_project/select_stocks_only.py",
+      "t0_project/my_t0_monitor.py",
+      "t0_project/execution",
+      "t0_project/rl_agent",
+      "t0_project/tqcenter.py"
+    ]
+  },
   "identity_path": "t0_project/brain/identity_layer.md",
-  "rule_memory_path": "t0_project/brain/rule_memory.md",
-  "lesson_memory_path": "t0_project/brain/lesson_memory.md",
-  "temporal_state_path": "t0_project/brain/temporal_state.md",
-  "handoff_packet_path": "t0_project/brain/handoff_packet.md",
+  "state_path": "t0_project/brain/state_center.md",
+  "knowledge_path": "t0_project/brain/knowledge_center.md",
+  "operations_path": "t0_project/brain/operations_center.md",
   "governance_path": "t0_project/brain/governance_layer.md",
-  "read_order": [
-    "t0_project/brain/identity_layer.md",
-    "t0_project/brain/handoff_packet.md",
-    "t0_project/brain/semantic_memory.md",
-    "t0_project/brain/rule_memory.md",
-    "t0_project/brain/lesson_memory.md",
-    "t0_project/brain/temporal_state.md",
-    "t0_project/brain/brain_architecture.md",
-    "t0_project/brain/working_memory.md",
-    "t0_project/brain/procedural_memory.md",
-    "t0_project/brain/handoff_rules.md",
-    "t0_project/brain/governance_layer.md",
-    "t0_project/brain/environment_model.md",
-    "t0_project/brain/action_system.md",
-    "t0_project/brain/episodic_memory.md"
-  ],
   "write_routes": {
     "identity": "t0_project/brain/identity_layer.md",
-    "handoff_packet": "t0_project/brain/handoff_packet.md",
-    "stable_state": "t0_project/brain/semantic_memory.md",
-    "rule_memory": "t0_project/brain/rule_memory.md",
-    "lesson_memory": "t0_project/brain/lesson_memory.md",
-    "temporal_state": "t0_project/brain/temporal_state.md",
-    "current_priorities": "t0_project/brain/working_memory.md",
-    "methods": "t0_project/brain/procedural_memory.md",
-    "handoff_rules": "t0_project/brain/handoff_rules.md",
+    "state": "t0_project/brain/state_center.md",
+    "knowledge": "t0_project/brain/knowledge_center.md",
+    "operations": "t0_project/brain/operations_center.md",
     "governance": "t0_project/brain/governance_layer.md",
-    "runtime": "t0_project/brain/environment_model.md",
-    "execution_design": "t0_project/brain/action_system.md",
-    "dated_experiments": "t0_project/brain/episodic_memory.md"
+    "episodic": "t0_project/brain/episodic_memory.md",
+    "brain_structure": "t0_project/brain/brain_architecture.md"
   },
   "body_map": {
     "strategy": [
       "t0_project/integrated_tq_strategy.py",
       "t0_project/backtest_integrated_strategy.py",
       "t0_project/select_stocks_only.py"
+    ],
+    "monitoring": [
+      "t0_project/my_t0_monitor.py"
     ],
     "execution": [
       "t0_project/execution"
@@ -59,29 +63,6 @@
       "t0_project/tqcenter.py"
     ]
   },
-  "cognition_contract": {
-    "core_principle": "Agent 无状态，项目大脑有状态。",
-    "layers": [
-      "identity",
-      "memory",
-      "cognition",
-      "decision",
-      "execution",
-      "governance"
-    ],
-    "required_preflight": [
-      "goal_alignment",
-      "rule_conflict",
-      "lesson_check",
-      "dependency_integrity"
-    ],
-    "post_task_writeback": [
-      "facts",
-      "lessons",
-      "next_action",
-      "handoff_packet"
-    ]
-  },
   "modules": [
     {
       "id": "identity_layer",
@@ -90,33 +71,15 @@
       ]
     },
     {
-      "id": "handoff_packet",
+      "id": "state_center",
       "paths": [
-        "t0_project/brain/handoff_packet.md"
+        "t0_project/brain/state_center.md"
       ]
     },
     {
-      "id": "semantic_memory",
+      "id": "knowledge_center",
       "paths": [
-        "t0_project/brain/semantic_memory.md"
-      ]
-    },
-    {
-      "id": "rule_memory",
-      "paths": [
-        "t0_project/brain/rule_memory.md"
-      ]
-    },
-    {
-      "id": "lesson_memory",
-      "paths": [
-        "t0_project/brain/lesson_memory.md"
-      ]
-    },
-    {
-      "id": "temporal_state",
-      "paths": [
-        "t0_project/brain/temporal_state.md"
+        "t0_project/brain/knowledge_center.md"
       ]
     },
     {
@@ -126,39 +89,15 @@
       ]
     },
     {
-      "id": "working_memory",
+      "id": "operations_center",
       "paths": [
-        "t0_project/brain/working_memory.md"
-      ]
-    },
-    {
-      "id": "procedural_memory",
-      "paths": [
-        "t0_project/brain/procedural_memory.md"
-      ]
-    },
-    {
-      "id": "handoff_rules",
-      "paths": [
-        "t0_project/brain/handoff_rules.md"
+        "t0_project/brain/operations_center.md"
       ]
     },
     {
       "id": "governance_layer",
       "paths": [
         "t0_project/brain/governance_layer.md"
-      ]
-    },
-    {
-      "id": "environment_model",
-      "paths": [
-        "t0_project/brain/environment_model.md"
-      ]
-    },
-    {
-      "id": "action_system",
-      "paths": [
-        "t0_project/brain/action_system.md"
       ]
     },
     {
@@ -169,23 +108,14 @@
     }
   ],
   "handoff_contract": {
-    "entry_sequence": [
-      "t0_project/brain/brain_manifest.json",
-      "t0_project/brain/identity_layer.md",
-      "t0_project/brain/handoff_packet.md",
-      "t0_project/brain/semantic_memory.md",
-      "t0_project/brain/rule_memory.md",
-      "t0_project/brain/lesson_memory.md",
-      "t0_project/brain/temporal_state.md",
-      "t0_project/brain/brain_architecture.md",
-      "t0_project/brain/working_memory.md",
-      "t0_project/brain/procedural_memory.md",
-      "t0_project/brain/handoff_rules.md",
-      "t0_project/brain/governance_layer.md",
-      "t0_project/brain/environment_model.md",
-      "t0_project/brain/action_system.md",
-      "t0_project/brain/episodic_memory.md"
+    "derive_entry_sequence_from_shared_contract": true,
+    "body_entry_priority": [
+      "strategy",
+      "monitoring",
+      "execution",
+      "reinforcement_learning",
+      "gateway"
     ],
-    "principle": "Attach to the brain first, read identity and handoff packet, then enter strategy/execution/rl/gateway through the declared body_map."
+    "principle": "Attach to the brain first, then read identity、state、knowledge、operations、governance，再进入 strategy、monitor、execution、RL 或 gateway."
   }
 }

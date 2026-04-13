@@ -1,47 +1,47 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "daily_stock_analysis-main",
-  "brain_version": "2026-04-12",
+  "brain_version": "2026-04-13",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_stock_analysis-main/brain/identity_layer.md",
   "body_root": "daily_stock_analysis-main",
+  "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract",
+  "regional_specialization": {
+    "role": "multi_market_product_cortex",
+    "priority_regions": [
+      "orientation_system",
+      "long_term_memory",
+      "executive_control",
+      "sensorimotor_loop"
+    ],
+    "focus_modules": [
+      "state_center",
+      "knowledge_center",
+      "operations_center"
+    ],
+    "body_entry_priority": [
+      "daily_stock_analysis-main/src",
+      "daily_stock_analysis-main/api",
+      "daily_stock_analysis-main/apps",
+      "daily_stock_analysis-main/bot",
+      "daily_stock_analysis-main/data_provider",
+      "daily_stock_analysis-main/tests"
+    ]
+  },
   "identity_path": "daily_stock_analysis-main/brain/identity_layer.md",
-  "rule_memory_path": "daily_stock_analysis-main/brain/rule_memory.md",
-  "lesson_memory_path": "daily_stock_analysis-main/brain/lesson_memory.md",
-  "temporal_state_path": "daily_stock_analysis-main/brain/temporal_state.md",
-  "handoff_packet_path": "daily_stock_analysis-main/brain/handoff_packet.md",
+  "state_path": "daily_stock_analysis-main/brain/state_center.md",
+  "knowledge_path": "daily_stock_analysis-main/brain/knowledge_center.md",
+  "operations_path": "daily_stock_analysis-main/brain/operations_center.md",
   "governance_path": "daily_stock_analysis-main/brain/governance_layer.md",
-  "read_order": [
-    "daily_stock_analysis-main/brain/identity_layer.md",
-    "daily_stock_analysis-main/brain/handoff_packet.md",
-    "daily_stock_analysis-main/brain/semantic_memory.md",
-    "daily_stock_analysis-main/brain/rule_memory.md",
-    "daily_stock_analysis-main/brain/lesson_memory.md",
-    "daily_stock_analysis-main/brain/temporal_state.md",
-    "daily_stock_analysis-main/brain/brain_architecture.md",
-    "daily_stock_analysis-main/brain/working_memory.md",
-    "daily_stock_analysis-main/brain/procedural_memory.md",
-    "daily_stock_analysis-main/brain/handoff_rules.md",
-    "daily_stock_analysis-main/brain/governance_layer.md",
-    "daily_stock_analysis-main/brain/environment_model.md",
-    "daily_stock_analysis-main/brain/action_system.md",
-    "daily_stock_analysis-main/brain/episodic_memory.md"
-  ],
   "write_routes": {
     "identity": "daily_stock_analysis-main/brain/identity_layer.md",
-    "handoff_packet": "daily_stock_analysis-main/brain/handoff_packet.md",
-    "stable_state": "daily_stock_analysis-main/brain/semantic_memory.md",
-    "rule_memory": "daily_stock_analysis-main/brain/rule_memory.md",
-    "lesson_memory": "daily_stock_analysis-main/brain/lesson_memory.md",
-    "temporal_state": "daily_stock_analysis-main/brain/temporal_state.md",
-    "current_priorities": "daily_stock_analysis-main/brain/working_memory.md",
-    "methods": "daily_stock_analysis-main/brain/procedural_memory.md",
-    "handoff_rules": "daily_stock_analysis-main/brain/handoff_rules.md",
+    "state": "daily_stock_analysis-main/brain/state_center.md",
+    "knowledge": "daily_stock_analysis-main/brain/knowledge_center.md",
+    "operations": "daily_stock_analysis-main/brain/operations_center.md",
     "governance": "daily_stock_analysis-main/brain/governance_layer.md",
-    "runtime": "daily_stock_analysis-main/brain/environment_model.md",
-    "system_entry_and_modules": "daily_stock_analysis-main/brain/action_system.md",
-    "dated_changes": "daily_stock_analysis-main/brain/episodic_memory.md"
+    "episodic": "daily_stock_analysis-main/brain/episodic_memory.md",
+    "brain_structure": "daily_stock_analysis-main/brain/brain_architecture.md"
   },
   "body_map": {
     "core_backend": [
@@ -66,29 +66,6 @@
       "daily_stock_analysis-main/tests"
     ]
   },
-  "cognition_contract": {
-    "core_principle": "Agent 无状态，项目大脑有状态。",
-    "layers": [
-      "identity",
-      "memory",
-      "cognition",
-      "decision",
-      "execution",
-      "governance"
-    ],
-    "required_preflight": [
-      "goal_alignment",
-      "rule_conflict",
-      "lesson_check",
-      "dependency_integrity"
-    ],
-    "post_task_writeback": [
-      "facts",
-      "lessons",
-      "next_action",
-      "handoff_packet"
-    ]
-  },
   "modules": [
     {
       "id": "identity_layer",
@@ -97,33 +74,15 @@
       ]
     },
     {
-      "id": "handoff_packet",
+      "id": "state_center",
       "paths": [
-        "daily_stock_analysis-main/brain/handoff_packet.md"
+        "daily_stock_analysis-main/brain/state_center.md"
       ]
     },
     {
-      "id": "semantic_memory",
+      "id": "knowledge_center",
       "paths": [
-        "daily_stock_analysis-main/brain/semantic_memory.md"
-      ]
-    },
-    {
-      "id": "rule_memory",
-      "paths": [
-        "daily_stock_analysis-main/brain/rule_memory.md"
-      ]
-    },
-    {
-      "id": "lesson_memory",
-      "paths": [
-        "daily_stock_analysis-main/brain/lesson_memory.md"
-      ]
-    },
-    {
-      "id": "temporal_state",
-      "paths": [
-        "daily_stock_analysis-main/brain/temporal_state.md"
+        "daily_stock_analysis-main/brain/knowledge_center.md"
       ]
     },
     {
@@ -133,39 +92,15 @@
       ]
     },
     {
-      "id": "working_memory",
+      "id": "operations_center",
       "paths": [
-        "daily_stock_analysis-main/brain/working_memory.md"
-      ]
-    },
-    {
-      "id": "procedural_memory",
-      "paths": [
-        "daily_stock_analysis-main/brain/procedural_memory.md"
-      ]
-    },
-    {
-      "id": "handoff_rules",
-      "paths": [
-        "daily_stock_analysis-main/brain/handoff_rules.md"
+        "daily_stock_analysis-main/brain/operations_center.md"
       ]
     },
     {
       "id": "governance_layer",
       "paths": [
         "daily_stock_analysis-main/brain/governance_layer.md"
-      ]
-    },
-    {
-      "id": "environment_model",
-      "paths": [
-        "daily_stock_analysis-main/brain/environment_model.md"
-      ]
-    },
-    {
-      "id": "action_system",
-      "paths": [
-        "daily_stock_analysis-main/brain/action_system.md"
       ]
     },
     {
@@ -176,23 +111,15 @@
     }
   ],
   "handoff_contract": {
-    "entry_sequence": [
-      "daily_stock_analysis-main/brain/brain_manifest.json",
-      "daily_stock_analysis-main/brain/identity_layer.md",
-      "daily_stock_analysis-main/brain/handoff_packet.md",
-      "daily_stock_analysis-main/brain/semantic_memory.md",
-      "daily_stock_analysis-main/brain/rule_memory.md",
-      "daily_stock_analysis-main/brain/lesson_memory.md",
-      "daily_stock_analysis-main/brain/temporal_state.md",
-      "daily_stock_analysis-main/brain/brain_architecture.md",
-      "daily_stock_analysis-main/brain/working_memory.md",
-      "daily_stock_analysis-main/brain/procedural_memory.md",
-      "daily_stock_analysis-main/brain/handoff_rules.md",
-      "daily_stock_analysis-main/brain/governance_layer.md",
-      "daily_stock_analysis-main/brain/environment_model.md",
-      "daily_stock_analysis-main/brain/action_system.md",
-      "daily_stock_analysis-main/brain/episodic_memory.md"
+    "derive_entry_sequence_from_shared_contract": true,
+    "body_entry_priority": [
+      "core_backend",
+      "web_and_desktop",
+      "bot_and_agent",
+      "data_sources",
+      "operations",
+      "tests"
     ],
-    "principle": "Attach to the brain first, read identity and handoff packet, then enter src/api/apps/bot/data_provider/tests through the declared body_map."
+    "principle": "Attach to the brain first, then read identity、state、knowledge、operations、governance，再进入正确的产品 surface."
   }
 }

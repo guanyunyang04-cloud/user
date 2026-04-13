@@ -6,6 +6,7 @@ applyTo: "README.md,docs/**,AGENTS.md,CLAUDE.md,.github/**,.claude/skills/**,scr
 
 - Keep commands, file paths, workflow names, config keys, release paths, and directory references aligned with the executable repository state.
 - `AGENTS.md` is the canonical AI collaboration document; if its meaning changes, sync `CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, and repository skills as needed.
+- `brain/state_center.md` and `brain/operations_center.md` are the workspace-level handoff hub; repository governance text must stay aligned with them.
 - Root `SKILL.md` and `docs/openclaw-skill-integration.md` describe product or external integration behavior, not repository governance.
 - Explain which pipeline, release path, deployment path, review automation, or governance asset is affected and what the rollback path is.
 - Avoid widening permissions, secret exposure, or destructive automation without a clearly documented need.

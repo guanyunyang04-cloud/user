@@ -1,6 +1,7 @@
 # Repository Instructions
 
 Canonical source: [`AGENTS.md`](../AGENTS.md).
+Workspace handoff source: [`brain/state_center.md`](../brain/state_center.md) and [`brain/operations_center.md`](../brain/operations_center.md).
 
 If any instruction in this file conflicts with `AGENTS.md`, follow `AGENTS.md`.
 
@@ -30,6 +31,7 @@ If any instruction in this file conflicts with `AGENTS.md`, follow `AGENTS.md`.
 ## AI Asset Governance
 
 - `AGENTS.md` is the single source of truth for repository AI collaboration rules.
-- `CLAUDE.md` must remain a symlink to `AGENTS.md`.
+- `brain/` remains the workspace-level handoff hub; do not invent repository guidance that is absent from brain.
+- `CLAUDE.md` should remain a symlink to `AGENTS.md` when the platform permits it; otherwise keep the minimal `AGENTS.md` shim content.
 - Use `.github/instructions/*.instructions.md` for path-specific guidance.
 - Current repository collaboration skills live in `.claude/skills/`; keep them aligned with `AGENTS.md`.

@@ -1,49 +1,46 @@
 {
   "brain_type": "sub_brain",
   "brain_id": "daily_research",
-  "brain_version": "2026-04-12",
+  "brain_version": "2026-04-13",
   "parent_brain": "brain/brain_manifest.json",
   "attach_status": "attached_to_main_brain",
   "entrypoint": "daily_research/brain/identity_layer.md",
   "body_root": "daily_research",
+  "shared_contract_source": "brain/brain_manifest.json#shared_regional_brain_contract",
+  "regional_specialization": {
+    "role": "production_research_and_execution_cortex",
+    "priority_regions": [
+      "orientation_system",
+      "long_term_memory",
+      "executive_control",
+      "sensorimotor_loop"
+    ],
+    "focus_modules": [
+      "state_center",
+      "knowledge_center",
+      "operations_center"
+    ],
+    "body_entry_priority": [
+      "daily_research/baseline",
+      "daily_research/execution",
+      "daily_research/deep_alpha",
+      "daily_research/tools",
+      "daily_research/output",
+      "daily_research/archive"
+    ]
+  },
   "identity_path": "daily_research/brain/identity_layer.md",
-  "rule_memory_path": "daily_research/brain/rule_memory.md",
-  "lesson_memory_path": "daily_research/brain/lesson_memory.md",
-  "temporal_state_path": "daily_research/brain/temporal_state.md",
-  "handoff_packet_path": "daily_research/brain/handoff_packet.md",
+  "state_path": "daily_research/brain/state_center.md",
+  "knowledge_path": "daily_research/brain/knowledge_center.md",
+  "operations_path": "daily_research/brain/operations_center.md",
   "governance_path": "daily_research/brain/governance_layer.md",
-  "read_order": [
-    "daily_research/brain/identity_layer.md",
-    "daily_research/brain/handoff_packet.md",
-    "daily_research/brain/semantic_memory.md",
-    "daily_research/brain/rule_memory.md",
-    "daily_research/brain/lesson_memory.md",
-    "daily_research/brain/temporal_state.md",
-    "daily_research/brain/brain_architecture.md",
-    "daily_research/brain/project_map.md",
-    "daily_research/brain/working_memory.md",
-    "daily_research/brain/procedural_memory.md",
-    "daily_research/brain/handoff_rules.md",
-    "daily_research/brain/governance_layer.md",
-    "daily_research/brain/environment_model.md",
-    "daily_research/brain/action_system.md",
-    "daily_research/brain/episodic_memory.md"
-  ],
   "write_routes": {
     "identity": "daily_research/brain/identity_layer.md",
-    "stable_state": "daily_research/brain/semantic_memory.md",
-    "rule_memory": "daily_research/brain/rule_memory.md",
-    "lesson_memory": "daily_research/brain/lesson_memory.md",
-    "temporal_state": "daily_research/brain/temporal_state.md",
-    "project_context": "daily_research/brain/project_map.md",
-    "current_priorities": "daily_research/brain/working_memory.md",
-    "methods": "daily_research/brain/procedural_memory.md",
-    "handoff_rules": "daily_research/brain/handoff_rules.md",
-    "handoff_packet": "daily_research/brain/handoff_packet.md",
+    "state": "daily_research/brain/state_center.md",
+    "knowledge": "daily_research/brain/knowledge_center.md",
+    "operations": "daily_research/brain/operations_center.md",
     "governance": "daily_research/brain/governance_layer.md",
-    "runtime_and_tools": "daily_research/brain/environment_model.md",
-    "execution_operations": "daily_research/brain/action_system.md",
-    "dated_experiments": "daily_research/brain/episodic_memory.md",
+    "episodic": "daily_research/brain/episodic_memory.md",
     "brain_structure": "daily_research/brain/brain_architecture.md"
   },
   "body_map": {
@@ -73,33 +70,15 @@
       ]
     },
     {
-      "id": "handoff_packet",
+      "id": "state_center",
       "paths": [
-        "daily_research/brain/handoff_packet.md"
+        "daily_research/brain/state_center.md"
       ]
     },
     {
-      "id": "semantic_memory",
+      "id": "knowledge_center",
       "paths": [
-        "daily_research/brain/semantic_memory.md"
-      ]
-    },
-    {
-      "id": "rule_memory",
-      "paths": [
-        "daily_research/brain/rule_memory.md"
-      ]
-    },
-    {
-      "id": "lesson_memory",
-      "paths": [
-        "daily_research/brain/lesson_memory.md"
-      ]
-    },
-    {
-      "id": "temporal_state",
-      "paths": [
-        "daily_research/brain/temporal_state.md"
+        "daily_research/brain/knowledge_center.md"
       ]
     },
     {
@@ -109,27 +88,9 @@
       ]
     },
     {
-      "id": "project_map",
+      "id": "operations_center",
       "paths": [
-        "daily_research/brain/project_map.md"
-      ]
-    },
-    {
-      "id": "working_memory",
-      "paths": [
-        "daily_research/brain/working_memory.md"
-      ]
-    },
-    {
-      "id": "procedural_memory",
-      "paths": [
-        "daily_research/brain/procedural_memory.md"
-      ]
-    },
-    {
-      "id": "handoff_rules",
-      "paths": [
-        "daily_research/brain/handoff_rules.md"
+        "daily_research/brain/operations_center.md"
       ]
     },
     {
@@ -139,71 +100,26 @@
       ]
     },
     {
-      "id": "environment_model",
-      "paths": [
-        "daily_research/brain/environment_model.md"
-      ]
-    },
-    {
-      "id": "action_system",
-      "paths": [
-        "daily_research/brain/action_system.md"
-      ]
-    },
-    {
       "id": "episodic_memory",
       "paths": [
         "daily_research/brain/episodic_memory.md"
       ]
     }
   ],
-  "cognition_contract": {
-    "core_principle": "Agent 无状态，项目大脑有状态。",
-    "layers": [
-      "identity",
-      "memory",
-      "cognition",
-      "decision",
-      "execution",
-      "governance"
-    ],
-    "required_preflight": [
-      "goal_alignment",
-      "rule_conflict",
-      "lesson_check",
-      "dependency_integrity"
-    ],
-    "post_task_writeback": [
-      "facts",
-      "lessons",
-      "next_action",
-      "handoff_packet"
-    ]
-  },
   "tooling": {
     "doc_guard": "daily_research/tools/doc_guard.py",
     "gemini_frontend_cmd": "daily_research/tools/gemini_frontend.cmd",
     "gemini_frontend_ps1": "daily_research/tools/gemini_frontend.ps1"
   },
   "handoff_contract": {
-    "entry_sequence": [
-      "daily_research/brain/brain_manifest.json",
-      "daily_research/brain/identity_layer.md",
-      "daily_research/brain/handoff_packet.md",
-      "daily_research/brain/semantic_memory.md",
-      "daily_research/brain/rule_memory.md",
-      "daily_research/brain/lesson_memory.md",
-      "daily_research/brain/temporal_state.md",
-      "daily_research/brain/brain_architecture.md",
-      "daily_research/brain/project_map.md",
-      "daily_research/brain/working_memory.md",
-      "daily_research/brain/procedural_memory.md",
-      "daily_research/brain/handoff_rules.md",
-      "daily_research/brain/governance_layer.md",
-      "daily_research/brain/environment_model.md",
-      "daily_research/brain/action_system.md",
-      "daily_research/brain/episodic_memory.md"
+    "derive_entry_sequence_from_shared_contract": true,
+    "body_entry_priority": [
+      "research",
+      "execution",
+      "long_horizon_research",
+      "tools",
+      "artifacts"
     ],
-    "principle": "先接入分脑，再先读 identity 和 handoff packet，随后按 body_map 进入 baseline、execution、deep_alpha 与 tools。"
+    "principle": "先接入分脑，再读取 identity、state、knowledge、operations、governance，最后进入 strongest-model、learned-control 与 live 所需 body。"
   }
 }

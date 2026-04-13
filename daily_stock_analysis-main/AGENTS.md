@@ -4,6 +4,9 @@
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。
 
+工作区级接管与长期状态的权威正文收口在 `daily_stock_analysis-main/brain/`。
+本文件保留为仓库原生 AI 生态兼容入口，必须与 `brain/state_center.md` 和 `brain/operations_center.md` 保持一致，不得单独漂移。
+
 ## 1. 硬规则
 
 - 遵循现有目录边界：
@@ -25,8 +28,8 @@
 
 ## 2. AI 协作资产治理
 
-- `AGENTS.md` 是仓库内 AI 协作规则的唯一真源。
-- `CLAUDE.md` 必须是指向 `AGENTS.md` 的软链接，用于兼容 Claude 生态。
+- `AGENTS.md` 是仓库原生 AI 生态的兼容真源；工作区级接管真源仍收口在 `brain/`。
+- `CLAUDE.md` 优先保持为指向 `AGENTS.md` 的软链接；若当前平台无建链权限，则退化为仅包含 `AGENTS.md` 的最小兼容入口。
 - `.github/copilot-instructions.md` 与 `.github/instructions/*.instructions.md` 是 GitHub Copilot / Coding Agent 的镜像或分层补充；若与本文件冲突，以 `AGENTS.md` 为准。
 - 仓库协作 skill 存放在 `.claude/skills/`，分析产物存放在 `.claude/reviews/`；前者可以入库，后者默认视为本地产物。
 - 根目录 `SKILL.md` 与 `docs/openclaw-skill-integration.md` 属于产品或外部集成说明，不是仓库协作规则真源。
@@ -51,13 +54,13 @@ python scripts/check_ai_assets.py
   - `src/core/`：主流程编排
   - `src/services/`：业务服务层
   - `src/repositories/`：数据访问层
-  - `src/reports/`：报告生成
   - `src/schemas/`：Schema / 数据结构
+  - `src/data/`：本地数据与缓存读写
   - `data_provider/`：多数据源适配与 fallback
   - `api/`：FastAPI API
   - `bot/`：机器人接入
   - `scripts/`：本地脚本
-  - `.github/scripts/`：GitHub 自动化脚本
+  - `.github/`：GitHub 工作流与协作模板
   - `tests/`：pytest 测试
   - `docs/`：文档与说明
 
