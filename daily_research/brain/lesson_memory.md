@@ -1,6 +1,6 @@
 # Daily Research 教训记忆
 
-快照日期：`2026-04-12`
+快照日期：`2026-04-13`
 
 ## L001 - recent 胜利不能直接当 promotion 结论
 - 事件：
@@ -127,3 +127,24 @@
   - 每次 recent 协议重刷后，必须同步刷新 handoff / temporal / working / action。
 - 升级动作：
   - 写入 brain 高优先入口文件。
+
+## L008 - external cap 包装与温和平滑 successor 不足以修复 `policy_v5b` 的快桥脆弱性
+- 事件：
+  - `policy_v5b bridge sensitivity audit` 显示 `k1_3d` constrained 只有 `0.0248`，同时 `policy_v5d / policy_v5e` 首轮 successor 都未超过 `policy_v5b`。
+- 场景：
+  - `policy_v5b` 已经拿到 deployable anchor 之后，尝试用 moderate stability / concentration smoothing 或 external cap wrapper 做窄修复。
+- 根因：
+  - 当前主要问题不是“再做一点平滑”就能解决，而是 bridge-speed sensitivity 和 execution semantics 内生化不足。
+- 信号：
+  - `k1_20d = 0.1177`，但 `k1_3d = 0.0248`
+  - `cap6_k1_5d` 与 `cap4_g092_098_k1_5d` 对 `k1_5d` 是 no-op
+  - `policy_v5d = 0.0676 / 0.0925 / 0.1071`
+  - `policy_v5e = 0.0812 / 0.0867 / 0.0934`
+- 影响：
+  - 如果继续沿同一路径试错，会消耗训练预算，同时削弱对真正瓶颈的识别。
+- 修复：
+  - 保留 `policy_v5b` 作为锚点，冻结 `policy_v5d / policy_v5e`，把下一轮假设转向 bridge-speed consistency / internalized execution semantics。
+- 预防：
+  - 以后 successor 若不能同时满足 `constrained >= 0.110`、`recent >= 0.110` 且 `fresh formal > 0.0839`，应直接停止续跑。
+- 升级动作：
+  - 写入 handoff、temporal、working、action，并作为下一轮建模的前置约束。

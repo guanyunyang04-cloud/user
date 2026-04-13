@@ -21,11 +21,16 @@ from daily_research.tools.recent_model_protocol import (
 
 
 DEFAULT_ROOT_TAG = "short_alpha_policy_v5_family_recent_eval_20260412_r1"
-PROFILE_NAMES = [
+DEFAULT_PROFILE_NAMES = [
     "baseline_current",
     "short_expert_monthly_v1",
     "short_expert_policy_v2b",
     "short_expert_policy_v4b",
+    "short_expert_policy_v5a",
+    "short_expert_policy_v5b",
+    "short_expert_policy_v5c",
+]
+DEFAULT_FAMILY_PROFILES = [
     "short_expert_policy_v5a",
     "short_expert_policy_v5b",
     "short_expert_policy_v5c",
@@ -43,11 +48,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--recent-model-root-tag", default=DEFAULT_RECENT_MODEL_ROOT_TAG)
     parser.add_argument("--force-rerun-recent-models", action="store_true")
+    parser.add_argument("--profile-names", default=",".join(DEFAULT_PROFILE_NAMES))
+    parser.add_argument("--family-profiles", default=",".join(DEFAULT_FAMILY_PROFILES))
     return parser.parse_args()
 
 
-def _notes_by_profile() -> dict[str, str]:
-    return {
+def _parse_names(raw: str) -> list[str]:
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
+def _profile_key(profile_name: str) -> str:
+    return str(profile_name).replace("short_expert_", "")
+
+
+def _notes_by_profile(profile_names: list[str]) -> dict[str, str]:
+    known = {
         "baseline_current": "recent winner baseline reference",
         "short_expert_monthly_v1": "current default strongest research model",
         "short_expert_policy_v2b": "current constrained formal winner reference",
@@ -55,10 +70,28 @@ def _notes_by_profile() -> dict[str, str]:
         "short_expert_policy_v5a": "policy_v5a execution-stability branch",
         "short_expert_policy_v5b": "policy_v5b candidate-count / concentration branch",
         "short_expert_policy_v5c": "policy_v5c deployable-gross teacher branch",
+        "short_expert_policy_v5d": "policy_v5d stability-balanced successor branch",
+        "short_expert_policy_v5e": "policy_v5e concentration-smoothed successor branch",
     }
+    notes: dict[str, str] = {}
+    for profile_name in profile_names:
+        if profile_name in known:
+            notes[profile_name] = known[profile_name]
+        elif profile_name.startswith("short_expert_"):
+            notes[profile_name] = f"{profile_name.replace('short_expert_', '')} recent reference"
+        else:
+            notes[profile_name] = f"{profile_name} recent reference"
+    return notes
 
 
-def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], output_dir: Path) -> None:
+def _build_summary(
+    recent_df: pd.DataFrame,
+    recent_summary: dict[str, object],
+    output_dir: Path,
+    *,
+    family_profiles: list[str],
+    profile_names: list[str],
+) -> None:
     recent_df.to_csv(output_dir / "recent_family_scoreboard.csv", index=False, encoding="utf-8-sig")
 
     lookup = recent_df.set_index("profile_name").to_dict("index")
@@ -66,13 +99,8 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
     current = lookup.get("short_expert_monthly_v1", {})
     policy_v2b = lookup.get("short_expert_policy_v2b", {})
     policy_v4b = lookup.get("short_expert_policy_v4b", {})
-    policy_v5a = lookup.get("short_expert_policy_v5a", {})
-    policy_v5b = lookup.get("short_expert_policy_v5b", {})
-    policy_v5c = lookup.get("short_expert_policy_v5c", {})
     winner = recent_df.iloc[0].to_dict() if not recent_df.empty else {}
-    family_rows = recent_df.loc[
-        recent_df["profile_name"].isin(["short_expert_policy_v5a", "short_expert_policy_v5b", "short_expert_policy_v5c"])
-    ].copy()
+    family_rows = recent_df.loc[recent_df["profile_name"].isin(family_profiles)].copy()
     family_winner = family_rows.iloc[0].to_dict() if not family_rows.empty else {}
 
     summary = {
@@ -85,14 +113,17 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         "recent_train_end_date": str(recent_summary.get("recent_train_end_date", "")),
         "recent_winner_profile_name": str(recent_summary.get("recent_winner_profile_name", "")),
         "family_recent_winner_profile_name": str(family_winner.get("profile_name", "")),
+        "profile_names": list(profile_names),
+        "family_profiles": list(family_profiles),
         "baseline_current": baseline,
         "current_default": current,
         "policy_v2b": policy_v2b,
         "policy_v4b": policy_v4b,
-        "policy_v5a": policy_v5a,
-        "policy_v5b": policy_v5b,
-        "policy_v5c": policy_v5c,
+        "rows_by_profile": lookup,
+        "family_rows": family_rows.to_dict("records"),
     }
+    for profile_name, row in lookup.items():
+        summary[_profile_key(profile_name)] = row
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     lines = [
@@ -104,7 +135,7 @@ def _build_summary(recent_df: pd.DataFrame, recent_summary: dict[str, object], o
         f"- requested recent cutoff: `{recent_summary.get('recent_requested_end_date', '')}`",
         f"- effective validation window: `{recent_summary.get('recent_start_date', '')} -> {recent_summary.get('recent_end_date', '')}`",
         f"- recent train_end: `{recent_summary.get('recent_train_end_date', '')}`",
-        "- compared profiles: `baseline_current`, `short_expert_monthly_v1`, `short_expert_policy_v2b`, `short_expert_policy_v4b`, `short_expert_policy_v5a`, `short_expert_policy_v5b`, `short_expert_policy_v5c`",
+        f"- compared profiles: `{', '.join(profile_names)}`",
         "",
         "## Direct Answer",
         f"- overall recent winner: `{winner.get('profile_name', 'n/a')}`",
@@ -142,21 +173,33 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_root).resolve() / str(args.root_tag).strip()
     output_dir.mkdir(parents=True, exist_ok=True)
+    profile_names = _parse_names(str(args.profile_names))
+    family_profiles = _parse_names(str(args.family_profiles))
+    if not profile_names:
+        raise ValueError("profile-names must not be empty")
+    if not family_profiles:
+        raise ValueError("family-profiles must not be empty")
 
     recent_df, recent_summary, recent_source_runs = ensure_recent_model_matrix(
-        profile_names=PROFILE_NAMES,
+        profile_names=profile_names,
         root_tag=str(args.recent_model_root_tag),
         recent_end_date=str(args.recent_end_date),
         recent_window_months=int(args.recent_window_months),
         python_executable=str(args.python_executable),
         force_rerun=bool(args.force_rerun_recent_models),
-        notes_by_profile=_notes_by_profile(),
+        notes_by_profile=_notes_by_profile(profile_names),
     )
     (output_dir / "recent_model_source_runs.json").write_text(
         json.dumps(recent_source_runs, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    _build_summary(recent_df, recent_summary, output_dir)
+    _build_summary(
+        recent_df,
+        recent_summary,
+        output_dir,
+        family_profiles=family_profiles,
+        profile_names=profile_names,
+    )
 
 
 if __name__ == "__main__":

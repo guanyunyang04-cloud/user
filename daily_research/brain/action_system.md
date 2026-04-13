@@ -1,6 +1,6 @@
 # Daily Research 行动系统
 
-快照日期：`2026-04-12`
+快照日期：`2026-04-13`
 
 ## 1. 接管前先判型
 - 当前默认接管入口先看：
@@ -9,7 +9,7 @@
   - `daily_research/brain/temporal_state.md`
 - `formal` 问题：先看 formal 根，不先看 production full-fit。
 - `recent` 问题：先看 `short_alpha_recent_model_protocol_20260412_r1` 与对应 summary。
-- `learned-control` 问题：先看 `policy_v5 family` 四个根。
+- `learned-control` 问题：先看 `policy_v5b bridge sensitivity audit` 与 `policy_v5 successor` 四个根，再回看 `policy_v5 family` 四个根。
 - `live` 问题：先看 `active_execution_strategy.json`、production root、`latest_trade_plan.txt`。
 - formal 每个窗口都必须使用该窗口起点前最新可标注数据训练当时最新模型。
 - strongest-model 讨论必须同步并报 recent 验证。
@@ -51,24 +51,24 @@
 & "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\run_policy_v5_family_pipeline.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.6 v5 family formal review
+### 3.6 v5b bridge sensitivity audit
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v5_family_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v5b_bridge_sensitivity_audit.py --output-root daily_research\output --root-tag short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1
 ```
 
-### 3.7 v5 family recent eval
+### 3.7 v5 successor 全流程
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v5_family_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --recent-model-root-tag short_alpha_recent_model_protocol_20260412_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\run_policy_v5_successor_pipeline.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"
 ```
 
-### 3.8 family constrained formal review
+### 3.8 v5 successor formal review
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v2_family_constrained_execution_review.py --family-formal-summary daily_research\output\short_alpha_policy_v5_family_formal_review_20260412_r1\summary.json --family-profiles short_expert_policy_v5a,short_expert_policy_v5b,short_expert_policy_v5c --output-root daily_research\output --root-tag short_alpha_policy_v5_family_constrained_execution_review_20260412_r1 --current-formal-run-dir daily_research\output\short_alpha_short_horizon_expert_review_20260406_r2_fullbudget\runs\short_expert_monthly_v1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v5_family_formal_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --family-profiles short_expert_policy_v5b,short_expert_policy_v5d,short_expert_policy_v5e --root-tag short_alpha_policy_v5_successor_formal_review_20260412_r1
 ```
 
-### 3.9 family formal loss breakdown
+### 3.9 v5 successor recent eval
 ```powershell
-& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_family_formal_loss_breakdown.py --formal-summary daily_research\output\short_alpha_policy_v5_family_formal_review_20260412_r1\summary.json --recent-summary daily_research\output\short_alpha_policy_v5_family_recent_eval_20260412_r1\summary.json --constrained-summary daily_research\output\short_alpha_policy_v5_family_constrained_execution_review_20260412_r1\summary.json --focus-profiles short_expert_policy_v5a,short_expert_policy_v5b,short_expert_policy_v5c --output-root daily_research\output --root-tag short_alpha_policy_v5_family_formal_loss_breakdown_20260412_r1
+& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\policy_v5_family_recent_eval.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --recent-model-root-tag short_alpha_recent_model_protocol_20260412_r1 --profile-names short_expert_policy_v5b,short_expert_policy_v5d,short_expert_policy_v5e --family-profiles short_expert_policy_v5b,short_expert_policy_v5d,short_expert_policy_v5e --root-tag short_alpha_policy_v5_successor_recent_eval_20260412_r1
 ```
 
 ### 3.10 strongest winner 默认执行物化
@@ -97,12 +97,20 @@
   - `short_alpha_policy_v5_family_constrained_execution_review_20260412_r1`
   - `short_alpha_policy_v5_family_recent_eval_20260412_r1`
   - `short_alpha_policy_v5_family_formal_loss_breakdown_20260412_r1`
+  - `short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1`
+  - `short_alpha_policy_v5_successor_formal_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_constrained_execution_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_recent_eval_20260412_r1`
+  - `short_alpha_policy_v5_successor_formal_loss_breakdown_20260412_r1`
 
 ## 5. 当前禁止事项
 - 不再用旧 `20260410_r1` recent root 充当 current recent 口径。
 - 不再把 `baseline_current` 写成 strongest-model current recent winner。
 - 不再把 `policy_v2b` 写成 current learned-control deployable 答案。
 - 不再把 `policy_v4b` 写成 current learned-control recent 答案。
+- 不再把 `policy_v5d / policy_v5e` 写成新的 current learned-control answer。
+- 不再沿 `policy_v5d / policy_v5e` 这种温和平滑路径盲目续跑。
+- 不再把 external cap wrapper 当成 `policy_v5b` 当前主修复手段。
 - 不再把 `production full-fit` 的最新训练数据混报成 formal 证据。
 
 ## 6. 当前结论
@@ -112,6 +120,11 @@
 - 当前 learned-control deployable front-runner：`policy_v5b__k1_20d = 0.1177`
 - 当前 learned-control recent winner：`policy_v5b = 0.1200`
 - 当前 learned-control active v5 family fresh formal best：`policy_v5b = 0.0839`
+- 当前 bridge audit 结论：
+  - `k1_20d` 是 deployable anchor
+  - `k1_3d` 是主要 fast-bridge tail-risk 来源
+- 当前 successor 结论：
+  - `policy_v5d` 与 `policy_v5e` 都已被否决
 - 当前操作含义：
   - live 默认执行不变
-  - learned-control 主问题改成缩小 `policy_v5b` 的 fresh-formal gap
+  - learned-control 主问题改成在不重复 `v5d / v5e` 路径的前提下缩小 `policy_v5b` 的 fresh-formal gap

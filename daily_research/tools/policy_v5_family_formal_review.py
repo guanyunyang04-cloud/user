@@ -34,7 +34,7 @@ DEFAULT_CURRENT_FORMAL_RUN_DIR = (
 DEFAULT_COMPANION_FORMAL_RUN_DIR = (
     OUTPUT_ROOT / "short_alpha_formal_head2head_20260405_monthly_checkpoint_r1" / "runs" / "state_liquidity_listwise_v1_20250318_20260331"
 )
-FAMILY_PROFILES = (
+DEFAULT_FAMILY_PROFILES = (
     "short_expert_policy_v5a",
     "short_expert_policy_v5b",
     "short_expert_policy_v5c",
@@ -52,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))
     parser.add_argument("--current-formal-run-dir", default=str(DEFAULT_CURRENT_FORMAL_RUN_DIR))
     parser.add_argument("--companion-formal-run-dir", default=str(DEFAULT_COMPANION_FORMAL_RUN_DIR))
+    parser.add_argument("--family-profiles", default=",".join(DEFAULT_FAMILY_PROFILES))
     parser.add_argument("--force-rerun", action="store_true")
     return parser.parse_args()
 
@@ -113,6 +114,10 @@ def _run_command(command: list[str]) -> None:
 
 def _run_dir_for_profile(root_tag: str, profile_name: str) -> Path:
     return OUTPUT_ROOT / str(root_tag).strip() / "runs" / str(profile_name).strip()
+
+
+def _parse_family_profiles(raw: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in str(raw).split(",") if part.strip())
 
 
 def _expected_formal_run_fields(*, profile_name: str, execution_alignment_candidate_profiles: str) -> dict[str, Any]:
@@ -251,10 +256,13 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_root).resolve() / str(args.root_tag).strip()
     output_dir.mkdir(parents=True, exist_ok=True)
+    family_profiles = _parse_family_profiles(str(args.family_profiles))
+    if not family_profiles:
+        raise ValueError("family-profiles must not be empty")
 
     source_runs: dict[str, str] = {}
     family_rows: list[dict[str, Any]] = []
-    for profile_name in FAMILY_PROFILES:
+    for profile_name in family_profiles:
         run_dir, source_label = _ensure_profile_run(profile_name, args)
         source_runs[profile_name] = str(run_dir)
         family_rows.append(_build_row(profile_name, run_dir, source_label))
@@ -275,7 +283,7 @@ def main() -> None:
     (output_dir / "family_source_runs.json").write_text(json.dumps(source_runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     overall_winner = scoreboard.iloc[0].to_dict() if not scoreboard.empty else {}
-    family_scoreboard = scoreboard.loc[scoreboard["profile_name"].isin(FAMILY_PROFILES)].copy()
+    family_scoreboard = scoreboard.loc[scoreboard["profile_name"].isin(family_profiles)].copy()
     family_winner = family_scoreboard.iloc[0].to_dict() if not family_scoreboard.empty else {}
     current_row = scoreboard.loc[scoreboard["profile_name"] == "short_expert_monthly_v1"].iloc[0].to_dict()
     companion_row = scoreboard.loc[scoreboard["profile_name"] == "state_liquidity_listwise_v1"].iloc[0].to_dict()
@@ -286,6 +294,7 @@ def main() -> None:
         "family_formal_winner_row": family_winner,
         "current_row": current_row,
         "companion_row": companion_row,
+        "family_profiles": list(family_profiles),
         "family_rows": family_scoreboard.to_dict("records"),
         "execution_alignment_candidate_profiles": str(args.execution_alignment_candidate_profiles),
         "source_runs": source_runs,
@@ -299,7 +308,7 @@ def main() -> None:
         "- window: `2025-03-18 -> 2026-02-27`",
         "- protocol: `execution_first + primary_monthly_robust_score`",
         f"- constrained execution profile set: `{args.execution_alignment_candidate_profiles}`",
-        "- compared family: `short_expert_policy_v5a`, `short_expert_policy_v5b`, `short_expert_policy_v5c`",
+        f"- compared family: `{', '.join(family_profiles)}`",
         "",
         "## Direct Answer",
         f"- overall formal winner: `{overall_winner.get('profile_name', 'n/a')}`",

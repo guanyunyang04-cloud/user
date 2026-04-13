@@ -11792,3 +11792,67 @@ position,000001.SZ,1200,12.38,
   - `working_memory.md`
   - `action_system.md`
 - 这次写回的重点不是增量修补，而是直接清掉旧的 `baseline_current / policy_v2b / policy_v4b` 当前口径，保证后续 agent 接管时先看到的是 `2026-04-12` 新协议和 `policy_v5` 新主线。
+
+## 2026-04-12 - 接管校验完成，主线与下一步保持不变
+
+- 本轮接管先按主脑 + `daily_research` 高优先脑区读取：
+  - 主脑确认当前工作区正式生产主线仍是 `daily_research`
+  - `t0_project` 与 `daily_stock_analysis-main` 继续保持分脑边界，不改写当前生产主线
+- 现场状态已核对：
+  - `git status --short` 为空，当前工作区没有未提交改动干扰接管判断
+  - `active_execution_strategy.json` 仍指向 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - `short_alpha_strongest_model_verdict_20260412_r1/summary.json` 与 `policy_v5 family` 各 summary 的关键数值和 brain 当前口径一致
+- 接管链路已通过项目自检：
+  - `brain_bootstrap.py --child daily_research --json` 返回 `child_attach_status = attached_to_main_brain`
+  - 主脑与分脑 boot order 与当前 handoff 入口一致，没有发现入口漂移或规则冲突
+- 当前没有发现 `2026-04-12 r1` 之后的新 `policy_v5` 后继实验根：
+  - `handoff_packet.md` 中“新一轮窄迭代还未开始”的状态仍成立
+  - 输出目录里也未见晚于 `policy_v5 family` 收口结果的后继 `policy_v5` 窄迭代根
+- 因此这次接管后的结论不改写项目目标，只确认当前下一步仍应是：
+  - 以 `policy_v5b` 为锚点设计并启动窄版后继分支
+  - 目标是保住 recent / constrained 优势，并缩小 fresh-formal gap
+
+## 2026-04-13 - `policy_v5b` 桥接敏感性审计完成，`policy_v5d / policy_v5e` successor 首轮被否决
+
+- 本轮先围绕 `policy_v5b` 补齐了只读诊断，而不是直接继续盲开新训练：
+  - 新增脚本 `daily_research/tools/policy_v5b_bridge_sensitivity_audit.py`
+  - 输出根为 `daily_research/output/short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1`
+- 审计结果把当前 deployable / recent 分裂的原因看清为“快桥脆弱性”而不是“还差一点外部修补”：
+  - constrained deployable anchor 仍是 `policy_v5b__k1_20d = 0.1177`
+  - `k1_5d = 0.0834`
+  - `k1_3d = 0.0248`
+  - `raw_1d = -0.1177`
+  - `k1_3d` 下 aligned names 只有 `2.817`
+  - `top1 = 38.99%`
+  - `top2 = 72.46%`
+  - `HHI = 0.376`
+  - `cap6_k1_5d` 与 `cap4_g092_098_k1_5d` 对 `k1_5d` 是 no-op
+- 随后围绕这个结论做了首轮 successor 实现，而不是重开 broad sweep：
+  - 在 `daily_research/deep_alpha/short_alpha_profiles.py` 中新增 `short_expert_policy_v5d`、`short_expert_policy_v5e`
+  - 在 `daily_research/deep_alpha/score_head.py` 中新增 `policy_v5d`、`policy_v5e`
+  - 在 `daily_research/deep_alpha/run_deep_alpha_research.py` 中补齐 method allowlist
+  - 将 `daily_research/tools/policy_v5_family_formal_review.py` 与 `daily_research/tools/policy_v5_family_recent_eval.py` 泛化到 successor family
+  - 新增 `daily_research/tools/run_policy_v5_successor_pipeline.py`
+- 全流程严格按前台 + strict-resume + `10h` 预算执行，并完整跑完：
+  - `short_alpha_policy_v5_successor_formal_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_constrained_execution_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_recent_eval_20260412_r1`
+  - `short_alpha_policy_v5_successor_formal_loss_breakdown_20260412_r1`
+- 三层结果明确否决了 `policy_v5d / policy_v5e`：
+  - `policy_v5b = formal 0.0839 / constrained 0.1177 / recent 0.1200`
+  - `policy_v5d = formal 0.0676 / constrained 0.0925 / recent 0.1071`
+  - `policy_v5e = formal 0.0812 / constrained 0.0867 / recent 0.0934`
+- 这轮结果说明：
+  - `policy_v5b` 仍是当前 learned-control deployable + recent 双锚点
+  - `policy_v5d / policy_v5e` 都不能进入 promotion 讨论
+  - “温和 stability / concentration smoothing + external cap wrapper” 不再是下一轮默认方向
+- 同轮已把高优先脑区同步改写到新状态：
+  - `working_memory.md`
+  - `handoff_packet.md`
+  - `temporal_state.md`
+  - `semantic_memory.md`
+  - `action_system.md`
+  - `lesson_memory.md`
+- 收尾校验要求保持不变：
+  - `project_consistency_check.py`
+  - `doc_guard.py check`

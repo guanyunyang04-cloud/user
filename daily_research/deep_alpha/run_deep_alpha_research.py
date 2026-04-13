@@ -170,7 +170,7 @@ def parse_args():
     parser.add_argument("--score-risk-state-thresholds", default="0.0,0.2,0.35,0.5,0.65")
     parser.add_argument(
         "--score-head-method",
-        choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v3"],
+        choices=["manual", "ridge", "lgbm", "short_expert", "policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v5d", "policy_v5e", "policy_v3"],
         default="manual",
     )
     parser.add_argument("--adaptive-task-weights", action="store_true", help="Learn task importance from train-period RankIC instead of using only fixed manual weights.")
@@ -1059,7 +1059,7 @@ def _build_live_inference_outputs(
         max_price=cfg.max_price,
     )
     portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
-    if score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v3"}:
+    if score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v5d", "policy_v5e", "policy_v3"}:
         live_target_weights = build_policy_target_weight_frame(
             live_score_outputs,
             all_dates=live_index,
@@ -1312,7 +1312,7 @@ def _evaluate_research_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v3"}:
+    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v5d", "policy_v5e", "policy_v3"}:
         train_eval_target_weights = build_policy_target_weight_frame(
             train_score_outputs,
             all_dates=pd.Index(train_eval_dates),

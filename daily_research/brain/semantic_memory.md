@@ -1,6 +1,6 @@
 # Daily Research 稳定语义
 
-快照日期：`2026-04-12`
+快照日期：`2026-04-13`
 
 ## 1. 项目身份
 - `daily_research` 维护一条面向主板 A 股、以执行后净收益最大化为主目标的研究-执行统一链路。
@@ -73,7 +73,15 @@
   - `short_expert_policy_v5b = 0.0839`
 - historical cross-family learned-control fresh formal best 仍是：
   - `short_expert_policy_v4b = 0.1008`
+- `policy_v5b bridge sensitivity audit` 已确认：
+  - deployable anchor 仍是 `k1_20d = 0.1177`
+  - fast bridge `k1_3d` constrained 只有 `0.0248`
+  - external cap wrapper 对当前 `k1_5d` 变体是 no-op
+- `policy_v5d / policy_v5e` successor 首轮没有取代 `policy_v5b`：
+  - `policy_v5d = formal 0.0676 / constrained 0.0925 / recent 0.1071`
+  - `policy_v5e = formal 0.0812 / constrained 0.0867 / recent 0.0934`
 - 因此 learned-control 当前不能再用 `policy_v2b / policy_v4b` 作为默认标准答案。
+- 因此 learned-control 当前也不能把 `policy_v5d / policy_v5e` 写成新的 current answer。
 
 ## 8. 结果解释边界
 - short-alpha 默认执行 winner 与 learned-control research frontier 必须分开叙述。
