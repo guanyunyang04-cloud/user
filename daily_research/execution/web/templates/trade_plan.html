@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% set page_id = "trade-plan" %}
+
+{% block eyebrow %}产物{% endblock %}
+{% block title %}最新交易计划{% endblock %}
+
+{% block content %}
+<section class="surface-panel">
+  <div class="panel-heading">
+    <p class="section-kicker">预览</p>
+    <h3>latest_trade_plan.txt</h3>
+    <p class="path-value">{{ artifact.path }}</p>
+  </div>
+  <pre class="log-pane log-pane--artifact" id="trade-plan-artifact-preview">{{ artifact.preview_lines|join('\n') }}</pre>
+</section>
+{% endblock %}

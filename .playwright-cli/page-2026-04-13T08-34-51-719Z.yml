@@ -1,0 +1,254 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - paragraph [ref=e5]: 本地控制台
+      - heading "Daily Research 执行控制台" [level=1] [ref=e6]
+      - paragraph [ref=e7]: 本地执行、监控、恢复与产物查看控制面。
+    - navigation [ref=e8]:
+      - link "总览" [ref=e9] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e10]: 总览
+      - link "任务" [ref=e11] [cursor=pointer]:
+        - /url: /tasks
+        - generic [ref=e12]: 任务
+      - link "作业" [ref=e13] [cursor=pointer]:
+        - /url: /jobs
+        - generic [ref=e14]: 作业
+      - link "体检" [ref=e15] [cursor=pointer]:
+        - /url: /doctor
+        - generic [ref=e16]: 体检
+      - link "交易计划" [ref=e17] [cursor=pointer]:
+        - /url: /artifacts/trade-plan
+        - generic [ref=e18]: 交易计划
+      - link "模拟账户" [ref=e19] [cursor=pointer]:
+        - /url: /account
+        - generic [ref=e20]: 模拟账户
+      - link "使用教程" [ref=e21] [cursor=pointer]:
+        - /url: /guide
+        - generic [ref=e22]: 使用教程
+      - link "运行时" [ref=e23] [cursor=pointer]:
+        - /url: /settings/runtime
+        - generic [ref=e24]: 运行时
+    - generic [ref=e25]:
+      - paragraph [ref=e26]:
+        - text: 运行时解释器固定锚定在
+        - code [ref=e27]: yolos
+        - text: 。
+      - paragraph [ref=e28]:
+        - text: 全部作业状态统一写入
+        - code [ref=e29]: daily_research/output/execution_app
+        - text: 。
+  - main [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - paragraph [ref=e33]: 总览
+        - heading "执行总览" [level=2] [ref=e34]
+      - generic [ref=e35]:
+        - link "启动任务" [ref=e36] [cursor=pointer]:
+          - /url: /tasks
+        - link "管理账户" [ref=e37] [cursor=pointer]:
+          - /url: /account
+        - link "使用教程" [ref=e38] [cursor=pointer]:
+          - /url: /guide
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - paragraph [ref=e42]: 运行时
+          - heading "用一个本地界面完成启动、监控、恢复与审计。" [level=3] [ref=e43]
+          - paragraph [ref=e44]: 总览页会追踪锁状态、当前作业、active manifest、最近作业和最新交易计划产物。
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - term [ref=e47]: 当前作业
+            - definition [ref=e48]: 空闲
+          - generic [ref=e49]:
+            - term [ref=e50]: 锁状态
+            - definition [ref=e51]: 未锁定
+          - generic [ref=e52]:
+            - term [ref=e53]: yolos Python
+            - definition [ref=e54]: C:\Users\ASUS\miniconda3\envs\yolos\python.exe
+          - generic [ref=e55]:
+            - term [ref=e56]: 更新时间
+            - definition [ref=e57]: 2026-04-13T15:42:44+08:00
+      - generic [ref=e58]:
+        - article [ref=e59]:
+          - generic [ref=e60]:
+            - paragraph [ref=e61]: 当前 Manifest
+            - heading "当前默认执行链路" [level=3] [ref=e62]
+          - generic [ref=e63]:
+            - generic [ref=e64]:
+              - term [ref=e65]: 策略
+              - definition [ref=e66]: deep_alpha_short_alpha_execalign_production_default
+            - generic [ref=e67]:
+              - term [ref=e68]: 候选
+              - definition [ref=e69]: short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active
+            - generic [ref=e70]:
+              - term [ref=e71]: 股票池
+              - definition [ref=e72]: liquid500
+            - generic [ref=e73]:
+              - term [ref=e74]: 执行配置
+              - definition [ref=e75]: regoff_k2_5d_ensemble_native_anchor
+            - generic [ref=e76]:
+              - term [ref=e77]: 实时权重模式
+              - definition [ref=e78]: execution_aligned_live
+            - generic [ref=e79]:
+              - term [ref=e80]: 交易计划面板
+              - definition [ref=e81]: H:\new_tdx64\PYPlugins\user\daily_research\output\deep_alpha_short_alpha_execalign_production_default\execution_aligned_daily_live_target_weight_panel.csv
+        - article [ref=e82]:
+          - generic [ref=e83]:
+            - paragraph [ref=e84]: 体检
+            - heading "健康检查快照" [level=3] [ref=e85]
+          - generic [ref=e86]:
+            - generic [ref=e87]: 正常
+            - paragraph [ref=e88]: 已完成 12 项检查。
+          - list [ref=e89]:
+            - listitem [ref=e90]:
+              - text: environment_source
+              - generic [ref=e91]: 应存在：H:\new_tdx64\PYPlugins\user\daily_research\environment.yml
+            - listitem [ref=e92]:
+              - text: yolos_python
+              - generic [ref=e93]: C:\Users\ASUS\miniconda3\envs\yolos\python.exe
+            - listitem [ref=e94]:
+              - text: active_manifest
+              - generic [ref=e95]: H:\new_tdx64\PYPlugins\user\daily_research\output\active_execution_strategy.json
+            - listitem [ref=e96]:
+              - text: current_positions
+              - generic [ref=e97]: H:\new_tdx64\PYPlugins\user\daily_research\execution\current_positions.csv 行数=1
+            - listitem [ref=e98]:
+              - text: positions_example
+              - generic [ref=e99]: H:\new_tdx64\PYPlugins\user\daily_research\execution\current_positions.example.csv
+            - listitem [ref=e100]:
+              - text: task_registry_scripts
+              - generic [ref=e101]: 全部任务脚本存在
+        - article [ref=e102]:
+          - generic [ref=e103]:
+            - paragraph [ref=e104]: 当前持仓
+            - heading "交易计划输入源" [level=3] [ref=e105]
+          - generic [ref=e106]:
+            - generic [ref=e107]:
+              - term [ref=e108]: 文件
+              - definition [ref=e109]: H:\new_tdx64\PYPlugins\user\daily_research\execution\current_positions.csv
+            - generic [ref=e110]:
+              - term [ref=e111]: 持仓数
+              - definition [ref=e112]: "1"
+            - generic [ref=e113]:
+              - term [ref=e114]: 可用现金
+              - definition [ref=e115]: "396.5"
+            - generic [ref=e116]:
+              - term [ref=e117]: 表头
+              - definition [ref=e118]: 正常
+            - generic [ref=e119]:
+              - term [ref=e120]: 股票
+              - definition [ref=e121]: 600982.SH
+            - generic [ref=e122]:
+              - term [ref=e123]: 最近修改
+              - definition [ref=e124]: 2026-04-11T00:22:36+08:00
+          - link "前往管理模拟账户" [ref=e126] [cursor=pointer]:
+            - /url: /account
+        - article [ref=e127]:
+          - generic [ref=e128]:
+            - paragraph [ref=e129]: 最近作业
+            - heading "执行历史" [level=3] [ref=e130]
+          - table [ref=e132]:
+            - rowgroup [ref=e133]:
+              - row "作业 任务 状态 开始时间 完成时间" [ref=e134]:
+                - columnheader "作业" [ref=e135]
+                - columnheader "任务" [ref=e136]
+                - columnheader "状态" [ref=e137]
+                - columnheader "开始时间" [ref=e138]
+                - columnheader "完成时间" [ref=e139]
+            - rowgroup [ref=e140]:
+              - row "trade-plan_20260413_154234_961197 trade-plan 成功 2026-04-13T15:42:35+08:00 2026-04-13T15:42:44+08:00" [ref=e141]:
+                - cell "trade-plan_20260413_154234_961197" [ref=e142]:
+                  - link "trade-plan_20260413_154234_961197" [ref=e143] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_154234_961197
+                - cell "trade-plan" [ref=e144]
+                - cell "成功" [ref=e145]:
+                  - generic [ref=e146]: 成功
+                - cell "2026-04-13T15:42:35+08:00" [ref=e147]
+                - cell "2026-04-13T15:42:44+08:00" [ref=e148]
+              - row "trade-plan_20260413_154142_199528 trade-plan 阻塞 暂无 2026-04-13T15:41:42+08:00" [ref=e149]:
+                - cell "trade-plan_20260413_154142_199528" [ref=e150]:
+                  - link "trade-plan_20260413_154142_199528" [ref=e151] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_154142_199528
+                - cell "trade-plan" [ref=e152]
+                - cell "阻塞" [ref=e153]:
+                  - generic [ref=e154]: 阻塞
+                - cell "暂无" [ref=e155]
+                - cell "2026-04-13T15:41:42+08:00" [ref=e156]
+              - row "trade-plan_20260413_154135_685048 trade-plan 阻塞 暂无 2026-04-13T15:41:35+08:00" [ref=e157]:
+                - cell "trade-plan_20260413_154135_685048" [ref=e158]:
+                  - link "trade-plan_20260413_154135_685048" [ref=e159] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_154135_685048
+                - cell "trade-plan" [ref=e160]
+                - cell "阻塞" [ref=e161]:
+                  - generic [ref=e162]: 阻塞
+                - cell "暂无" [ref=e163]
+                - cell "2026-04-13T15:41:35+08:00" [ref=e164]
+              - row "trade-plan_20260413_153942_291214 trade-plan 成功 2026-04-13T15:39:43+08:00 2026-04-13T15:42:02+08:00" [ref=e165]:
+                - cell "trade-plan_20260413_153942_291214" [ref=e166]:
+                  - link "trade-plan_20260413_153942_291214" [ref=e167] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_153942_291214
+                - cell "trade-plan" [ref=e168]
+                - cell "成功" [ref=e169]:
+                  - generic [ref=e170]: 成功
+                - cell "2026-04-13T15:39:43+08:00" [ref=e171]
+                - cell "2026-04-13T15:42:02+08:00" [ref=e172]
+              - row "trade-plan_20260413_150458_447371 trade-plan 成功 2026-04-13T15:04:58+08:00 2026-04-13T15:04:58+08:00" [ref=e173]:
+                - cell "trade-plan_20260413_150458_447371" [ref=e174]:
+                  - link "trade-plan_20260413_150458_447371" [ref=e175] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_150458_447371
+                - cell "trade-plan" [ref=e176]
+                - cell "成功" [ref=e177]:
+                  - generic [ref=e178]: 成功
+                - cell "2026-04-13T15:04:58+08:00" [ref=e179]
+                - cell "2026-04-13T15:04:58+08:00" [ref=e180]
+              - row "trade-plan_20260413_150457_839599 trade-plan 成功 2026-04-13T15:04:57+08:00 2026-04-13T15:04:58+08:00" [ref=e181]:
+                - cell "trade-plan_20260413_150457_839599" [ref=e182]:
+                  - link "trade-plan_20260413_150457_839599" [ref=e183] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_150457_839599
+                - cell "trade-plan" [ref=e184]
+                - cell "成功" [ref=e185]:
+                  - generic [ref=e186]: 成功
+                - cell "2026-04-13T15:04:57+08:00" [ref=e187]
+                - cell "2026-04-13T15:04:58+08:00" [ref=e188]
+              - row "trade-plan_20260413_150325 trade-plan 成功 2026-04-13T15:03:25+08:00 2026-04-13T15:03:26+08:00" [ref=e189]:
+                - cell "trade-plan_20260413_150325" [ref=e190]:
+                  - link "trade-plan_20260413_150325" [ref=e191] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_150325
+                - cell "trade-plan" [ref=e192]
+                - cell "成功" [ref=e193]:
+                  - generic [ref=e194]: 成功
+                - cell "2026-04-13T15:03:25+08:00" [ref=e195]
+                - cell "2026-04-13T15:03:26+08:00" [ref=e196]
+              - row "trade-plan_20260413_140923 trade-plan 成功 2026-04-13T14:09:23+08:00 2026-04-13T14:09:33+08:00" [ref=e197]:
+                - cell "trade-plan_20260413_140923" [ref=e198]:
+                  - link "trade-plan_20260413_140923" [ref=e199] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_140923
+                - cell "trade-plan" [ref=e200]
+                - cell "成功" [ref=e201]:
+                  - generic [ref=e202]: 成功
+                - cell "2026-04-13T14:09:23+08:00" [ref=e203]
+                - cell "2026-04-13T14:09:33+08:00" [ref=e204]
+              - row "trade-plan_20260413_140903 trade-plan 失败 2026-04-13T14:09:03+08:00 2026-04-13T14:09:07+08:00" [ref=e205]:
+                - cell "trade-plan_20260413_140903" [ref=e206]:
+                  - link "trade-plan_20260413_140903" [ref=e207] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_140903
+                - cell "trade-plan" [ref=e208]
+                - cell "失败" [ref=e209]:
+                  - generic [ref=e210]: 失败
+                - cell "2026-04-13T14:09:03+08:00" [ref=e211]
+                - cell "2026-04-13T14:09:07+08:00" [ref=e212]
+              - row "trade-plan_20260413_140337 trade-plan 成功 2026-04-13T14:03:37+08:00 2026-04-13T14:03:38+08:00" [ref=e213]:
+                - cell "trade-plan_20260413_140337" [ref=e214]:
+                  - link "trade-plan_20260413_140337" [ref=e215] [cursor=pointer]:
+                    - /url: /jobs/trade-plan_20260413_140337
+                - cell "trade-plan" [ref=e216]
+                - cell "成功" [ref=e217]:
+                  - generic [ref=e218]: 成功
+                - cell "2026-04-13T14:03:37+08:00" [ref=e219]
+                - cell "2026-04-13T14:03:38+08:00" [ref=e220]
+        - article [ref=e221]:
+          - generic [ref=e222]:
+            - paragraph [ref=e223]: 最新交易计划
+            - heading "产物预览" [level=3] [ref=e224]
+          - generic [ref=e225]: 三、研究候选观察名单 - 600019.SH | 目标权重 14.21% | 转权重前分数 0.5639 - 002897.SZ | 目标权重 13.84% | 转权重前分数 0.5515 - 000060.SZ | 目标权重 10.04% | 转权重前分数 0.5712 - 002484.SZ | 目标权重 10.00% | 转权重前分数 0.5742 - 601169.SH | 目标权重 10.00% | 转权重前分数 0.5737 - 600577.SH | 目标权重 10.00% | 转权重前分数 0.5699 - 002422.SZ | 目标权重 10.00% | 转权重前分数 0.5601 - 600699.SH | 目标权重 9.96% | 转权重前分数 0.5426 - 601816.SH | 目标权重 6.16% | 转权重前分数 0.5712 - 002027.SZ | 目标权重 5.79% | 转权重前分数 0.5765 - 002379.SZ | 目标权重 0.00% | 转权重前分数 0.5722 - 002645.SZ | 目标权重 0.00% | 转权重前分数 0.5714 - 601958.SH | 目标权重 0.00% | 转权重前分数 0.5705 - 000034.SZ | 目标权重 0.00% | 转权重前分数 0.5700 - 000572.SZ | 目标权重 0.00% | 转权重前分数 0.5691 四、执行提示 - 本文件用于盘后生成、次日开盘执行。 - 次日开盘前先核对可用现金、持仓与竞价情况。 - 先处理卖出/减仓，再处理买入/加仓。 - 若次日开盘出现明显跳空，请优先按目标权重而不是按估算股数机械执行。 - 若实际可用资金与本文件不同，请以卖出后实际资金为准调整买入数量。

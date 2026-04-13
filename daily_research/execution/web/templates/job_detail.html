@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set page_id = "job-detail" %}
+
+{% block eyebrow %}作业详情{% endblock %}
+{% block title %}{{ job.job_id }}{% endblock %}
+
+{% block header_actions %}
+<button class="action-button action-button--ghost" id="job-rerun-button" data-job-id="{{ job.job_id }}">再次运行</button>
+{% endblock %}
+
+{% block content %}
+<section class="hero-strip hero-strip--compact">
+  <div class="hero-copy">
+    <p class="hero-label">任务</p>
+    <h3 id="job-task-name">{{ job.task_name }}</h3>
+    <p id="job-summary-note">{{ job.metadata.summary_note or "已记录执行作业。" }}</p>
+  </div>
+  <dl class="hero-stats">
+    <div><dt>状态</dt><dd id="job-status"><span class="status-pill status-{{ job.status }}">{{ job.status|status_label }}</span></dd></div>
+    <div><dt>开始时间</dt><dd id="job-started">{{ job.metadata.started_at or "暂无" }}</dd></div>
+    <div><dt>完成时间</dt><dd id="job-completed">{{ job.metadata.completed_at or "暂无" }}</dd></div>
+    <div><dt>退出码</dt><dd id="job-exit-code">{{ job.metadata.exit_code }}</dd></div>
+  </dl>
+</section>
+
+<section class="surface-grid surface-grid--detail">
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">元数据</p>
+      <h3>执行记录</h3>
+    </div>
+    <dl class="detail-list detail-list--dense">
+      <div><dt>任务</dt><dd id="detail-task">{{ job.metadata.task_name }}</dd></div>
+      <div><dt>作业标签</dt><dd id="detail-label">{{ job.metadata.job_label or "未填写" }}</dd></div>
+      <div><dt>Python</dt><dd class="path-value" id="detail-python">{{ job.metadata.python_executable }}</dd></div>
+      <div><dt>命令</dt><dd class="path-value" id="detail-command">{{ job.metadata.command_display }}</dd></div>
+      <div><dt>标准输出</dt><dd class="path-value">{{ job.metadata.stdout_log }}</dd></div>
+      <div><dt>错误输出</dt><dd class="path-value">{{ job.metadata.stderr_log }}</dd></div>
+    </dl>
+  </article>
+
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">操作</p>
+      <h3>恢复控制</h3>
+    </div>
+    <div class="action-stack">
+      <button class="action-button" id="job-resume-button" data-job-id="{{ job.job_id }}">按记录元数据恢复</button>
+      <a class="action-link" href="/jobs">返回作业列表</a>
+    </div>
+  </article>
+
+  <article class="surface-panel surface-panel--wide">
+    <div class="panel-heading">
+      <p class="section-kicker">标准输出</p>
+      <h3>实时尾部</h3>
+    </div>
+    <pre class="log-pane" id="stdout-tail">{{ job.stdout_tail|join('\n') }}</pre>
+  </article>
+
+  <article class="surface-panel surface-panel--wide">
+    <div class="panel-heading">
+      <p class="section-kicker">错误输出</p>
+      <h3>错误尾部</h3>
+    </div>
+    <pre class="log-pane" id="stderr-tail">{{ job.stderr_tail|join('\n') }}</pre>
+  </article>
+</section>
+{% endblock %}

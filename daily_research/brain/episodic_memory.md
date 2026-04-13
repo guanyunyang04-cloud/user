@@ -11926,3 +11926,169 @@ position,000001.SZ,1200,12.38,
 - 本轮复盘：
   - 这次不是简单补一句规则，而是把规则下沉成了 helper 默认、脚本入口默认和 consistency 守卫
   - 以后如果有人再把默认解释器改回当前 shell Python 或旧 `quant`，守卫应直接报错，而不是等到运行时才暴露
+
+## 2026-04-13 - execution 侧从脚本集合升级为统一应用骨架
+
+- 触发原因：
+  - 执行侧虽然已有较多业务脚本，但缺少统一任务入口、运行状态、日志、锁、恢复和健康检查
+  - 这会让日常执行、排障、交接和扩展都过度依赖“知道该跑哪一个脚本”
+- 本轮动作：
+  - 新增 `daily_research/execution/app.py` 作为 execution application 核心 CLI
+  - 新增 `daily_research/execution/run_execution_app.py` 与 `python -m daily_research.execution` 双入口
+  - 新增 `daily_research/execution/app_tasks.py`，把 execution 常用任务收口成 task registry
+  - 新增 `daily_research/execution/app_runtime.py`，统一管理：
+    - `runtime_state.json`
+    - `events.jsonl`
+    - `jobs/<job_id>/metadata.json`
+    - `stdout.log / stderr.log`
+    - execution app lock
+  - execution app 当前已提供：
+    - `tasks`
+    - `status`
+    - `doctor`
+    - `run`
+    - `resume`
+    - `tail`
+    - `unlock`
+- 本轮验证：
+  - `python daily_research/execution/run_execution_app.py --help` 通过
+  - `python daily_research/execution/run_execution_app.py tasks` 通过
+  - `python daily_research/execution/run_execution_app.py status --json` 通过
+  - `python daily_research/execution/run_execution_app.py doctor --json` 通过
+  - `python daily_research/execution/run_execution_app.py run --task trade-plan -- --help` 成功产出作业日志
+  - `tail` 与 `resume --job-id <job_id>` 已做真实回放验证
+- 本轮复盘：
+  - 这次不是重写执行业务，而是在现有脚本之上补齐统一应用层
+  - 后续新增 execution 能力时，优先扩 task registry 和统一运行时，而不是继续散落新的单点脚本入口
+
+## 2026-04-13 - execution 本地 Web 控制台落地
+
+- 触发原因：
+  - 用户明确选择本地 Web 控制台作为 execution 前端
+  - 现有 execution app 已经具备任务、状态、日志、恢复能力，适合作为 Web 层后端内核
+- 本轮动作：
+  - 新增 `daily_research/execution/web_server.py`
+  - 新增 `daily_research/execution/web_service.py`
+  - 新增 `daily_research/execution/web_models.py`
+  - 新增 `daily_research/execution/run_execution_web.py`
+  - 新增 `daily_research/execution/web/templates/*`
+  - 新增 `daily_research/execution/web/static/execution_console.css`
+  - 新增 `daily_research/execution/web/static/execution_console.js`
+  - 将 execution CLI 重构为 service-backed 薄壳，并新增 `web` 子命令
+  - 将 task registry 扩展为“脚本路径 + 表单元数据”，供 Web 页自动渲染 launcher
+  - 将 `FastAPI / uvicorn / jinja2` 写入 `daily_research/environment.yml`
+- 当前页面：
+  - Dashboard
+  - Tasks
+  - Jobs
+  - Job Detail
+  - Doctor
+  - Trade Plan
+  - Runtime
+- 当前 API：
+  - `GET /api/status`
+  - `GET /api/doctor`
+  - `GET /api/tasks`
+  - `GET /api/jobs`
+  - `GET /api/jobs/{job_id}`
+  - `POST /api/run`
+  - `POST /api/resume`
+  - `POST /api/unlock`
+- 设计原则：
+  - 不重写 execution 内核
+  - Web 只作为本地控制面
+  - 继续沿用 `execution_app` 的状态、锁、日志、恢复目录
+  - 默认仅绑定 `127.0.0.1`
+
+## 2026-04-13 - execution Web 控制台完成联调收尾，并修复模板签名与 job_id 碰撞
+
+- 触发原因：
+  - 用户要求按顺序把本地 Web 控制台从规划直接做到“可运行、可监控、可恢复、可扩展”的落地态
+  - 首轮实现后需要做真实 `yolos` 环境联调，而不是停留在静态代码完成
+- 本轮动作：
+  - 用 `conda env update -f daily_research/environment.yml --prune` 把 `FastAPI / uvicorn / jinja2` 真正装进 `yolos`
+  - 把 `run_execution_web.py` 与 `run_execution_app.py web` 的缺依赖报错改成显式指向 `daily_research/environment.yml` 的项目化提示
+  - 给 Dashboard 补上 doctor 轮询刷新
+  - 给 Runtime 页面补上 stale lock `force unlock` Web 操作
+  - 修复 `web_server.py` 的 `TemplateResponse` 调用签名，使其兼容当前 `FastAPI / Starlette` 版本
+  - 修复 `app_runtime.py` 的 job_id 生成逻辑，从秒级时间戳升级到微秒级唯一 ID，并在落盘前继续做目录存在性检查
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -c "import fastapi, uvicorn, jinja2; print('ok')"` 通过
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/execution/run_execution_app.py doctor --json` 返回 `status=ok`
+  - 真实本地联调通过：
+    - `GET /healthz` 返回 `ok`
+    - `GET /` 返回 `200`
+    - `GET /api/status` / `GET /api/doctor` 正常
+    - `POST /api/unlock` 正常
+    - `POST /api/run` 以 `trade-plan --help` 后台触发成功
+    - `POST /api/resume` 对该作业回放成功
+    - 修复后 `run_job_id != resume_job_id`
+- 本轮复盘：
+  - 真正有价值的问题不是静态代码里能看到的，而是联调里暴露的版本签名差异与同秒作业覆盖风险
+  - Web 控制台现在已经不是“前端草图”，而是和 execution runtime 真实打通的本地应用
+
+## 2026-04-13 - execution Web 控制台切换为简体中文，并补齐使用教程
+
+- 触发原因：
+  - 用户明确要求控制台语言统一为简体中文，并补一份实际可用的使用教程
+- 本轮动作：
+  - 将 Web 控制台的导航、标题、按钮、动态提示、状态文案和页面说明统一改为简体中文
+  - 将 task registry 中供 Web 使用的任务描述、字段标签、帮助文本和 launcher notes 切到简体中文
+  - 新增 `daily_research/execution/web/templates/guide.html`，提供内置教程页 `/guide`
+  - 新增 `daily_research/execution/使用教程.md`，提供仓库内可直接阅读的 Markdown 教程
+  - 将教程入口写回 `operations_center.md`，并把“简体中文 + 教程”同步到 `state_center.md`、`knowledge_center.md`
+  - 更新 `project_consistency_check.py`，把教程页与教程文档纳入守卫
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+- 本轮复盘：
+  - 语言切换如果只改静态模板、不改前端动态提示和任务注册表，用户体验仍会前后割裂
+  - 教程最好同时有“Web 内可点击版本”和“仓库内可接管版本”，这样执行与接管两条链路都能直接复用
+
+## 2026-04-13 - 修复 execution Web 页面错位，并补齐前端模拟账户管理
+
+- 触发原因：
+  - 用户反馈 Dashboard / Guide / Runtime 页面存在桌面端错位、重叠和窄列塌陷
+  - 用户要求前端可以直接管理模拟持仓账户，而不是只读展示
+- 本轮动作：
+  - 给 `guide.html`、`runtime.html`、`account.html` 接入页面专属 `surface-grid` 布局约束
+  - 在 `execution_console.css` 为 hero / panel / detail 区域补 `min-width: 0`、路径换行和断词规则，修复长路径与时间戳互相挤压
+  - 在 `app_service.py` 新增 `load_account_snapshot()`、`save_account_snapshot()`、`reset_account_snapshot_from_example()`，统一把 `current_positions.csv` 作为模拟账户真源
+  - 在 `web_server.py` 新增 `/account` 页面和 `GET /api/account`、`POST /api/account`、`POST /api/account/reset-example`
+  - 新增 `daily_research/execution/web/templates/account.html`，支持编辑现金、持仓、删除行、新增行和示例重置
+  - 在 `execution_console.js` 新增账户页前端逻辑，并让 Dashboard 同步显示可用现金与最近修改时间
+  - 在 `project_consistency_check.py` 中将 `account.html` 纳入 execution app 守卫
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - 真实本地浏览器截图已确认：
+    - `dashboard.png` 不再出现 YOLOS Python 路径与更新时间重叠
+    - `guide.png` 不再出现窄列堆叠
+    - `runtime.png` 不再出现纵向挤压
+    - `account.png` 页面可正常展示账户编辑器
+  - 真实前端操作联调通过：
+    - 在 `/account` 页面通过浏览器将可用现金改为 `54321.98`
+    - 通过“新增持仓”添加 `300750.SZ / 500 / 245.5`
+    - 点击“保存账户”后，`GET /api/account` 回读结果为 `saved_cash=54321.98`、`saved_position_count=4`
+    - 随后调用示例重置恢复到 `reset_cash=200000.0`、`reset_position_count=3`
+- 本轮复盘：
+  - 页面型控制台不能只靠通用栅格；Guide / Runtime / Account 这类信息密度差异大的页面必须给明确列契约
+  - 模拟账户如果只做读接口，仍然是“后台工具”；只有把保存、重置和前端表格编辑打通，才算真正可管理
+
+## 2026-04-13 - 将 `Start-Job` 明确为 agent 联调默认，而不是用户启动默认
+
+- 触发原因：
+  - 用户进一步澄清，“后台 job 方式设为默认”指的是 `agent` 在本地查看、截图、验收和短期服务联调时的默认口径
+  - 不是要求把用户侧公开教程的默认启动方式切成 `Start-Job`
+- 本轮动作：
+  - 将 `state_center.md` 中 execution Web 控制台默认口径改成 `agent` 专用表述
+  - 在 `knowledge_center.md` 中补入 `agent` 联调默认使用同一 PowerShell 会话 `Start-Job` 的规则与边界
+  - 在 `operations_center.md` 中补入 `agent` 本地验收后台模板与“用户侧默认不变”的说明
+- 本轮复盘：
+  - `Start-Job` 适合作为 `agent` 的短期联调默认，是因为它更适合当前终端环境下的可控验证闭环
+  - 但它绑定当前 PowerShell 会话，所以不能被偷换成用户侧长期运行的公开默认

@@ -18,6 +18,8 @@
 - 任何问题先判定属于 `formal`、`recent`、`learned-control` 还是 `live`
 - 任何问题再判定属于研究环、执行环，还是 promotion 边界
 - 新要求一旦改变默认链路，必须先统一代码、脚本入口、manifest、trade plan 展示和 brain 文档
+- `agent` 做本地 Web 控制台联调、截图、前端验收或短期临时服务检查时，默认在同一 PowerShell 会话中用 `Start-Job` 拉起服务
+- 这条 `Start-Job` 默认只属于 `agent` 运行口径，不改用户侧公开教程默认
 
 ## 3. 协议方法
 - formal 验证采用滚动窗口协议
@@ -38,6 +40,25 @@
   - `python daily_research/tools/recent_protocol_completion_monitor.py --help`
 - 默认次日交易计划：
   - `python daily_research/execution/run_trade_plan.py --help`
+- execution app 统一入口：
+  - `python daily_research/execution/run_execution_app.py --help`
+  - `python daily_research/execution/run_execution_app.py tasks`
+  - `python daily_research/execution/run_execution_app.py status`
+  - `python daily_research/execution/run_execution_app.py doctor`
+  - `python daily_research/execution/run_execution_app.py run --task trade-plan -- --candidate-profile active_execution_strategy`
+  - `python daily_research/execution/run_execution_app.py resume --job-id <job_id>`
+  - `python daily_research/execution/run_execution_app.py tail --job-id <job_id>`
+  - `python daily_research/execution/run_execution_app.py web --port 8765`
+- execution Web 控制台独立入口：
+  - `python daily_research/execution/run_execution_web.py --port 8765`
+  - `agent` 本地验收默认后台模板：
+    - `$job = Start-Job -Name daily_research_execution_web -ScriptBlock { Set-Location 'H:\new_tdx64\PYPlugins\user'; & 'C:\Users\ASUS\miniconda3\envs\yolos\python.exe' 'daily_research/execution/run_execution_web.py' '--host' '127.0.0.1' '--port' '8765' }`
+- execution 使用教程文档：
+  - `daily_research/execution/使用教程.md`
+- execution 模拟账户入口：
+  - 页面：`/account`
+  - 数据文件：`daily_research/execution/current_positions.csv`
+  - API：`GET /api/account`、`POST /api/account`、`POST /api/account/reset-example`
 - v5 successor 全流程：
   - `python daily_research/tools/run_policy_v5_successor_pipeline.py --help`
 - 一致性检查：
@@ -59,7 +80,60 @@
 - `t0_project/tqcenter.py` 是工作区内本地依赖，不由 conda 安装
 - brain 文档统一使用 UTF-8
 
-## 6. 写回路由
+## 6. execution app 运行时
+- 统一运行时目录：
+  - `daily_research/output/execution_app`
+- 核心落盘：
+  - `runtime_state.json`
+  - `events.jsonl`
+  - `jobs/<job_id>/metadata.json`
+  - `jobs/<job_id>/stdout.log`
+  - `jobs/<job_id>/stderr.log`
+- 默认流程：
+  - 用 `tasks` 看任务注册
+  - 用 `doctor` 做健康检查
+  - 用 `run --task ...` 触发任务
+  - 用 `status` / `tail` 监控
+  - 用 `resume` 恢复失败或阻塞作业
+  - 用 `unlock --force` 清理确认已失效的 stale lock
+
+## 7. Web 控制台
+- 技术栈：
+  - `FastAPI`
+  - `Jinja2`
+  - 原生 JS 轮询
+- 页面：
+  - `/`
+  - `/tasks`
+  - `/jobs`
+  - `/jobs/<job_id>`
+  - `/doctor`
+  - `/artifacts/trade-plan`
+  - `/account`
+  - `/guide`
+  - `/settings/runtime`
+- API：
+  - `/api/status`
+  - `/api/doctor`
+  - `/api/tasks`
+  - `/api/jobs`
+  - `/api/account`
+  - `/api/run`
+  - `/api/resume`
+  - `/api/unlock`
+- 本地启动：
+  - 默认只监听 `127.0.0.1`
+  - 启动前先确保 `yolos` 已同步 `daily_research/environment.yml`
+  - `agent` 联调默认：同一 PowerShell 会话内使用 `Start-Job`
+  - 用户侧公开启动默认不因这条 `agent` 约定而变化
+ - 页面职责：
+  - `Tasks` 负责后台触发任务
+  - `Jobs / Job Detail` 负责日志、状态与 resume
+  - `Account` 负责维护模拟现金、持仓与示例重置
+  - `Guide` 负责首次上手、常用流程、恢复与高风险提示
+  - `Runtime` 负责 stale lock `force unlock`
+
+## 8. 写回路由
 - 当前状态、当前优先级、当前时态、当前 handoff：
   - `state_center.md`
 - 稳定事实、规则、教训：

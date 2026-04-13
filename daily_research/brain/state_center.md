@@ -21,6 +21,18 @@
 - `2026-04-13` 统一运行口径已升级：
   - `daily_research` 任何程序都必须在 `yolos` 环境下运行
   - 脚本默认解释器与脚本内部转调不得再回退到 `quant` 或当前 shell Python
+- `2026-04-13` 执行侧已升级为统一应用骨架：
+  - 统一入口：`daily_research/execution/run_execution_app.py`
+  - 已具备任务注册、运行日志、状态面板、锁、tail、resume、unlock
+  - 运行时目录统一落到 `daily_research/output/execution_app`
+- `2026-04-13` execution Web 控制台已落地：
+  - 启动入口：`daily_research/execution/run_execution_web.py`
+  - 也可通过 `run_execution_app.py web` 启动
+  - 当前已具备 Dashboard / Tasks / Jobs / Job Detail / Doctor / Trade Plan / Runtime 页面
+  - 当前界面文案已统一切到简体中文，并新增 `/guide` 使用教程页与 `daily_research/execution/使用教程.md`
+  - `yolos` 已完成 `FastAPI / uvicorn / jinja2` 实装同步
+  - 已做真实 smoke test：`/`、`/api/status`、`/api/doctor`、`/api/run`、`/api/resume`、`/api/unlock` 均通过
+  - execution job_id 已升级为微秒级唯一 ID，避免同秒连续触发覆盖旧作业
 
 ## 2. 当前状态
 - 当前统一权重语义：
@@ -35,6 +47,19 @@
   - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_monthly_v1`
 - 当前 live 默认执行：
   - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 当前 execution app 统一入口：
+  - `python daily_research/execution/run_execution_app.py status`
+- 当前 execution Web 控制台入口：
+  - `agent` 本地验收默认口径：在同一 PowerShell 会话内用 `Start-Job` 后台启动 `run_execution_web.py`
+  - 这条默认只作用于 `agent` 联调 / 截图 / 验收，不改用户侧公开教程默认
+  - 前台调试入口：`python daily_research/execution/run_execution_web.py --port 8765`
+- 当前 execution Web 控制台已验证能力：
+  - 页面可打开
+  - `trade-plan --help` 可经 Web API 后台触发
+  - Job Detail 可跟踪日志并执行 resume
+  - Runtime 页面可做 stale lock `force unlock`
+  - Dashboard / Guide / Runtime 页面布局已做桌面端错位修复
+  - `/account` 页面可直接前端维护模拟现金与持仓，并写回 `daily_research/execution/current_positions.csv`
 - 当前 learned-control 主锚点：
   - `deployable = short_expert_policy_v5b__k1_20d = 0.1177`
   - `recent = short_expert_policy_v5b = 0.1200`

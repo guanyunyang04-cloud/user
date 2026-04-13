@@ -80,13 +80,13 @@ def is_help_request() -> bool:
 def missing_runtime_dependency_error(exc: ModuleNotFoundError, *, command_hint: str) -> SystemExit:
     missing = str(getattr(exc, "name", "") or exc).strip()
     detail = (
-        f"Missing dependency `{missing}` for daily_research runtime. "
-        "Bootstrap the authoritative environment with "
+        f"`daily_research` 运行时缺少依赖 `{missing}`。"
+        "请先执行 "
         "`conda env update -f daily_research/environment.yml --prune` "
-        "and rerun with the explicit `yolos` python."
+        "同步权威环境，再使用显式的 `yolos` python 重试。"
     )
     if command_hint:
-        detail = f"{detail} Failing entrypoint: `{command_hint}`."
+        detail = f"{detail} 出错入口：`{command_hint}`。"
     return SystemExit(detail)
 
 

@@ -4,6 +4,12 @@
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理
 - strongest-model research winner、deployable learned-control、live mainline 必须显式区分
 - `daily_research/environment.yml` 现在是依赖环境真源
+- `daily_research/execution/run_execution_app.py` 现在是执行侧统一应用入口
+- `daily_research/execution/run_execution_web.py` 现在是执行侧本地 Web 控制台入口
+- 执行侧运行时状态、事件、锁与作业日志统一落到 `daily_research/output/execution_app`
+- execution Web 控制台不是纯脚手架，已经在 `yolos` 下做过真实页面 / API / 后台任务联调
+- execution Web 控制台当前用户界面与使用教程统一使用简体中文
+- execution Web 控制台当前已具备 `/account` 模拟账户页，可直接维护 `daily_research/execution/current_positions.csv`
 - 当前 strongest-model 稳定结论：
   - `formal = short_expert_monthly_v1`
   - `recent = short_expert_monthly_v1`
@@ -24,6 +30,10 @@
 - 依赖环境必须先写入真源文件，再谈“环境基线已满足”
 - `daily_research` 任何程序都必须在 `yolos` 环境下运行
 - 脚本默认解释器与内部 subprocess 统一收口到 `yolos`，不得回退到 `quant` 或当前 shell Python
+- 新执行能力优先注册到 execution app task registry，而不是继续追加孤立脚本入口
+- execution 侧默认通过统一应用入口运行、监控、恢复；直接裸跑底层脚本只应用于调试或局部排障
+- execution Web 控制台基于 FastAPI + Jinja2，本地只监听 `127.0.0.1`
+- `agent` 在本地联调 Web 控制台或短期临时服务时，默认使用同一 PowerShell 会话内的 `Start-Job` 后台方式，而不是 `Start-Process`
 - 正式训练前台窗口限时统一为 `10` 小时
 
 ## 3. 已验证教训
@@ -37,6 +47,9 @@
 - external cap 包装与温和平滑 successor 不足以修复 `policy_v5b` 的快桥脆弱性
 - 只在 brain 里写“环境基线”而不把依赖环境物化成真源，最终会退化成隐式环境依赖
 - 只把部分流程锁到 `yolos` 而放任其他脚本跟随当前 shell Python，最终仍会退化成环境漂移
+- execution job_id 如果只精确到秒，在 Web/CLI 连续触发时会覆盖旧作业；运行时 ID 必须保证真正唯一
+- 页面如果直接复用通用 `surface-grid` 而没有给 Guide / Runtime / Account 这类页面补明确列布局，桌面端会退化成窄列错位
+- `Start-Job` 绑定当前 PowerShell 会话，所以这条默认只属于 `agent` 联调口径，不应误写成用户侧公开启动默认
 
 ## 4. 文档边界
 - `identity_layer.md`

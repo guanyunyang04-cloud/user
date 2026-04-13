@@ -415,6 +415,9 @@ def _check_environment_source_of_truth(failures: list[CheckResult]) -> None:
         "- lightgbm",
         "- pytorch",
         "- pytorch-cuda=12.4",
+        "- fastapi",
+        "- uvicorn",
+        "- jinja2",
     )
     for snippet in required_snippets:
         _require(
@@ -462,6 +465,50 @@ def _check_project_python_runtime_contract(failures: list[CheckResult]) -> None:
     )
 
 
+def _check_execution_application_contract(failures: list[CheckResult]) -> None:
+    required_files = (
+        "daily_research/execution/app.py",
+        "daily_research/execution/app_runtime.py",
+        "daily_research/execution/app_service.py",
+        "daily_research/execution/app_tasks.py",
+        "daily_research/execution/run_execution_app.py",
+        "daily_research/execution/__main__.py",
+        "daily_research/execution/web_server.py",
+        "daily_research/execution/web_service.py",
+        "daily_research/execution/web_models.py",
+        "daily_research/execution/run_execution_web.py",
+        "daily_research/execution/web/templates/base.html",
+        "daily_research/execution/web/templates/dashboard.html",
+        "daily_research/execution/web/templates/tasks.html",
+        "daily_research/execution/web/templates/jobs.html",
+        "daily_research/execution/web/templates/job_detail.html",
+        "daily_research/execution/web/templates/doctor.html",
+        "daily_research/execution/web/templates/trade_plan.html",
+        "daily_research/execution/web/templates/guide.html",
+        "daily_research/execution/web/templates/runtime.html",
+        "daily_research/execution/web/templates/account.html",
+        "daily_research/execution/web/static/execution_console.css",
+        "daily_research/execution/web/static/execution_console.js",
+        "daily_research/execution/使用教程.md",
+    )
+    for relative_path in required_files:
+        _require(
+            (WORKSPACE_ROOT / relative_path).exists(),
+            failures,
+            "execution_app_file_missing",
+            f"{relative_path} must exist as part of the unified execution application.",
+        )
+
+    app_text = _read_text("daily_research/execution/app.py")
+    for snippet in ('"tasks"', '"status"', '"doctor"', '"run"', '"resume"', '"tail"', '"unlock"', '"web"'):
+        _require(
+            snippet in app_text,
+            failures,
+            "execution_app_command_missing",
+            f"execution app is missing required command registration: {snippet}",
+        )
+
+
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
         "daily_research/brain/identity_layer.md": (
@@ -480,6 +527,9 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "当前边界",
             "当前时态",
             "任何程序都必须在 `yolos` 环境下运行",
+            "run_execution_app.py",
+            "Web 控制台",
+            "Start-Job",
         ),
         "daily_research/brain/knowledge_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -489,6 +539,11 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "recent 验证现在是 strongest-model 研究闭环必备伴随证据",
             "recent 胜利不能直接当 promotion 结论",
             "任何程序都必须在 `yolos` 环境下运行",
+            "run_execution_app.py",
+            "execution_app",
+            "FastAPI",
+            "简体中文",
+            "Start-Job",
         ),
         "daily_research/brain/governance_layer.md": (
             "目标一致性检查",
@@ -505,6 +560,11 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "环境基线",
             "写回路由",
             "任何程序都必须在 `yolos` 环境下运行",
+            "run_execution_app.py",
+            "execution app 运行时",
+            "run_execution_web.py",
+            "使用教程",
+            "Start-Job",
         ),
     }
     for relative_path, snippets in required_strings.items():
@@ -529,6 +589,7 @@ def run_checks() -> list[CheckResult]:
     _check_execution_pipeline_consistency(failures)
     _check_environment_source_of_truth(failures)
     _check_project_python_runtime_contract(failures)
+    _check_execution_application_contract(failures)
     _check_memory_sync(failures)
     return failures
 

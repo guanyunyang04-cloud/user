@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% set page_id = "guide" %}
+
+{% block eyebrow %}教程{% endblock %}
+{% block title %}使用教程{% endblock %}
+{% block header_actions %}
+<a class="action-link" href="/tasks">打开任务页</a>
+<a class="action-link" href="/doctor">打开体检页</a>
+{% endblock %}
+
+{% block content %}
+<section class="hero-strip">
+  <div class="hero-copy">
+    <p class="hero-label">上手路径</p>
+    <h3>按固定顺序使用控制台，能把误操作和无效排查降到最低。</h3>
+    <p>推荐顺序是：先确认环境，再做体检，然后启动任务，最后到作业页和运行时页监控与恢复。</p>
+  </div>
+  <dl class="hero-stats">
+    <div><dt>环境</dt><dd>固定使用 <code>yolos</code></dd></div>
+    <div><dt>入口</dt><dd><code>run_execution_web.py</code></dd></div>
+    <div><dt>监听地址</dt><dd><code>127.0.0.1</code></dd></div>
+    <div><dt>教程文档</dt><dd class="path-value">{{ tutorial_markdown_path }}</dd></div>
+  </dl>
+</section>
+
+<section class="surface-grid surface-grid--guide">
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">第一步</p>
+      <h3>启动前检查</h3>
+    </div>
+    <ul class="compact-checks">
+      <li class="is-good"><span>确认当前程序运行在 <code>yolos</code> 环境中。</span><small>不要依赖当前 shell 恰好激活了什么环境。</small></li>
+      <li class="is-good"><span>如果刚升级过环境，先执行 <code>conda env update -f daily_research/environment.yml --prune</code>。</span></li>
+      <li class="is-good"><span>用 <code>python daily_research/execution/run_execution_app.py doctor</code> 或控制台的“体检”页确认关键依赖、manifest、持仓和运行时目录正常。</span></li>
+    </ul>
+  </article>
+
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">第二步</p>
+      <h3>启动控制台</h3>
+    </div>
+    <pre class="log-pane">conda run -n yolos python daily_research/execution/run_execution_web.py --port 8765</pre>
+    <ul class="compact-checks">
+      <li class="is-good"><span>浏览器打开 <code>http://127.0.0.1:8765</code>。</span></li>
+      <li class="is-good"><span>如果你更习惯统一入口，也可以使用 <code>python daily_research/execution/run_execution_app.py web --port 8765</code>。</span></li>
+    </ul>
+  </article>
+
+  <article class="surface-panel surface-panel--wide">
+    <div class="panel-heading">
+      <p class="section-kicker">第三步</p>
+      <h3>页面职责分工</h3>
+    </div>
+    <ul class="compact-checks">
+      <li class="is-good"><span>总览：</span><small>看当前作业、锁状态、active manifest、最近作业和最新交易计划。</small></li>
+      <li class="is-good"><span>任务：</span><small>从注册表里选择任务，填写表单参数，后台提交执行。</small></li>
+      <li class="is-good"><span>作业：</span><small>查看最近作业列表，确认状态是否从排队中进入运行中并最终结束。</small></li>
+      <li class="is-good"><span>作业详情：</span><small>跟踪 stdout/stderr，必要时对失败或阻塞作业执行恢复。</small></li>
+      <li class="is-good"><span>体检：</span><small>检查依赖、运行时、manifest、持仓和关键产物是否齐全。</small></li>
+      <li class="is-good"><span>交易计划：</span><small>预览 <code>latest_trade_plan.txt</code> 内容。</small></li>
+      <li class="is-good"><span>运行时：</span><small>查看锁、活动线程、告警与完整 JSON 快照，并在确认作业失效后执行强制解锁。</small></li>
+    </ul>
+  </article>
+
+  <article class="surface-panel surface-panel--wide">
+    <div class="panel-heading">
+      <p class="section-kicker">第四步</p>
+      <h3>推荐操作流程</h3>
+    </div>
+    <ol class="compact-checks">
+      <li class="is-good"><span>先打开“体检”页。</span><small>如果状态不是“正常”，优先修环境或输入文件，不要急着重跑任务。</small></li>
+      <li class="is-good"><span>再去“任务”页启动目标任务。</span><small>常见入口是 <code>trade-plan</code>、<code>candidate-trade-plan</code>、<code>candidate-backtest</code>。</small></li>
+      <li class="is-good"><span>提交后自动跳转到作业详情。</span><small>先看 stdout/stderr 是否正常滚动，再判断是否需要切回总览或作业列表。</small></li>
+      <li class="is-good"><span>任务结束后查看“交易计划”或相关产物。</span><small>不要只看作业成功与否，还要确认结果文件内容是否符合预期。</small></li>
+    </ol>
+  </article>
+
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">恢复</p>
+      <h3>失败后的处理方式</h3>
+    </div>
+    <ul class="compact-checks">
+      <li class="is-bad"><span>作业失败：</span><small>先看作业详情里的 stderr，再决定是否点击“按记录元数据恢复”。</small></li>
+      <li class="is-bad"><span>作业阻塞：</span><small>先到运行时页检查锁归属和活动线程，确认旧作业确实已经消失后，再执行“强制解锁”。</small></li>
+      <li class="is-good"><span>恢复后会生成新的 job_id。</span><small>不要把恢复后的作业和原作业当成同一次记录。</small></li>
+    </ul>
+  </article>
+
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">注意</p>
+      <h3>高风险操作提示</h3>
+    </div>
+    <ul class="compact-checks">
+      <li class="is-bad"><span>不要把控制台绑定到公网地址。</span><small>当前设计就是本地控制面，默认仅监听 <code>127.0.0.1</code>。</small></li>
+      <li class="is-bad"><span>不要在未确认旧作业退出时强制解锁。</span><small>否则可能出现并发写状态或误覆盖结果。</small></li>
+      <li class="is-bad"><span>不要绕过 <code>yolos</code> 直接用当前 shell Python。</span><small>环境漂移会被误判成代码故障。</small></li>
+    </ul>
+  </article>
+</section>
+{% endblock %}

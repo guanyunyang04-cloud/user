@@ -199,6 +199,7 @@ DOCUMENT_REDIRECTS = {
 }
 
 ALLOWED_EXTERNAL_DOCS = {
+    "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
     "daily_stock_analysis-main/CLAUDE.md",
     "daily_stock_analysis-main/README.md",
