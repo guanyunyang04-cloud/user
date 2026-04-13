@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile as get_dynamic_graph_profile
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import (
@@ -55,7 +56,7 @@ def parse_args() -> argparse.Namespace:
         description="Run liquid500 same-protocol formal head-to-head for dynamic_graph_no_priors against the current short_alpha main line."
     )
     parser.add_argument("--root-tag", default="dynamic_graph_liquid500_challenger_20260405_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--profiles", default=",".join(DEFAULT_PROFILES))
     parser.add_argument("--family-epoch-budget-manifest", default=str(DEFAULT_LATEST_MANIFEST_PATH))

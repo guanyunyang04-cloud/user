@@ -14,17 +14,29 @@ from daily_research.execution.entrypoint_utils import (
     has_arg,
     inject_default_arg,
     is_help_request,
-)
-from daily_research.execution.research_candidate_profiles import (
-    DEFAULT_EXECUTION_CANDIDATE_PROFILE,
-    apply_profile_defaults,
-    list_profile_lines,
+    missing_runtime_dependency_error,
 )
 
 
 def main():
     exec_dir = bootstrap_execution_paths(__file__)
     output_dir = exec_dir.parent / "output"
+
+    if is_help_request():
+        print("wrapper_options: --candidate-profile <name> | --list-candidate-profiles")
+        return
+
+    try:
+        from daily_research.execution.research_candidate_profiles import (
+            DEFAULT_EXECUTION_CANDIDATE_PROFILE,
+            apply_profile_defaults,
+            list_profile_lines,
+        )
+    except ModuleNotFoundError as exc:
+        raise missing_runtime_dependency_error(
+            exc,
+            command_hint="python daily_research/execution/run_research_candidate_backtest.py",
+        ) from exc
 
     if consume_flag_arg("--list-candidate-profiles"):
         print("\n".join(list_profile_lines()))
@@ -52,7 +64,13 @@ def main():
             "Pass --candidate-profile, --list-candidate-profiles, or explicit CSV paths."
         )
 
-    from daily_research.baseline.backtest_external_score_panel import main as backtest_external_score_panel_main
+    try:
+        from daily_research.baseline.backtest_external_score_panel import main as backtest_external_score_panel_main
+    except ModuleNotFoundError as exc:
+        raise missing_runtime_dependency_error(
+            exc,
+            command_hint="python daily_research/execution/run_research_candidate_backtest.py",
+        ) from exc
 
     backtest_external_score_panel_main()
 

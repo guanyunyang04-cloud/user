@@ -11,6 +11,16 @@
   - `knowledge_center.md`
   - `operations_center.md`
   - `governance_layer.md`
+- `2026-04-13` 接管复核已完成：
+  - `project_consistency_check.py` 与 `doc_guard.py check` 已通过
+  - `active_execution_strategy.json` 仍对齐 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+  - `operations_center.md` 的 recent / verdict 入口已纠偏到真实脚本
+- `2026-04-13` 依赖环境真源已补齐：
+  - `daily_research/environment.yml` 已创建并接入守卫
+  - 当前 shell 若不在该环境内，运行报错应先判定为环境偏差而不是直接判定代码回归
+- `2026-04-13` 统一运行口径已升级：
+  - `daily_research` 任何程序都必须在 `yolos` 环境下运行
+  - 脚本默认解释器与脚本内部转调不得再回退到 `quant` 或当前 shell Python
 
 ## 2. 当前状态
 - 当前统一权重语义：
@@ -69,6 +79,8 @@
 - 如果只看 constrained formal，会低估 fresh-formal gap
 - 如果只看 fresh formal，又会错过 deployable 优势
 - 如果不持续写回中枢，新 agent 仍可能沿用旧叙事
+- 如果后续环境升级只改本机、不改 `daily_research/environment.yml`，依赖真源还会再次漂移
+- 如果程序入口继续跟随当前 shell Python 而不是 `yolos`，环境漂移会被误判成代码问题
 
 ## 8. 推荐下一步
 - 继续以 `policy_v5b` 作为 learned-control 主锚点

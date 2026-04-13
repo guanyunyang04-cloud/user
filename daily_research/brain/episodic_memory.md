@@ -11856,3 +11856,73 @@ position,000001.SZ,1200,12.38,
 - 收尾校验要求保持不变：
   - `project_consistency_check.py`
   - `doc_guard.py check`
+
+## 2026-04-13 - 接管复核完成，操作入口纠偏，主线判断保持不变
+
+- 本轮先按当前治理入口读取：
+  - `identity_layer.md -> state_center.md -> knowledge_center.md -> operations_center.md -> governance_layer.md`
+- 执行前四检结果：
+  - 事实：当前主问题仍是 `policy_v5b` 的 successor 方向选择，而不是 strongest-model 重开
+  - 事实：formal / recent / promotion / live 分层规则没有变化
+  - 事实：输出目录中没有晚于 `2026-04-12` successor 收口批次的新 `policy_v5` 正式实验根
+  - 推断：当前不应跳过纠偏直接重跑实验，先修正接管入口更能降低后续误操作风险
+- 本轮现场校验：
+  - 事实：`git status --short` 为空，当前工作区没有新增未提交改动
+  - 事实：`python daily_research/tools/project_consistency_check.py` 返回 `status = ok`
+  - 事实：`python daily_research/tools/doc_guard.py check` 未发现 `daily_research/brain` 结构问题
+  - 事实：`daily_research/output/active_execution_strategy.json` 仍指向 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - 事实：`daily_research/tools/run_short_alpha_recent_model_protocol.py` 不存在
+  - 事实：当前可执行的 strongest-model / recent 相关入口分别是 `refresh_strongest_model_verdict.py` 与 `recent_protocol_completion_monitor.py`
+- 本轮动作：
+  - 将 `daily_research/brain/operations_center.md` 中错误的 recent / verdict 命令入口纠偏为真实脚本
+  - 将接管复核结果写回 `daily_research/brain/state_center.md`
+- 本轮复盘：
+  - 这次没有发现主线结论漂移，发现的是“操作入口文档漂移”
+  - 先修入口比先开实验更重要，因为错误命令会直接破坏后续接管效率
+  - 下一步仍保持不变：围绕 `policy_v5b` 设计 `1-2` 个与“温和平滑”显式不同的新 successor，并同时跑 `formal + constrained formal + recent`
+
+## 2026-04-13 - `daily_research` 依赖环境补成真源，并接入守卫
+
+- 触发原因：
+  - 这轮排查发现 `daily_research/brain` 已经写了环境基线，但 `daily_research/` 下没有 `requirements.txt`、`pyproject.toml`、`environment.yml` 之类可复现依赖真源
+  - `python daily_research/execution/run_trade_plan.py --help` 在当前 shell 下因为缺 `pandas` 直接失败，说明“环境规则存在”不等于“环境真源存在”
+- 本轮动作：
+  - 新增 `daily_research/environment.yml` 作为当前 authoritative runtime dependency source
+  - 环境名统一定为 `yolos`
+  - 依赖真源显式列出：
+    - `python=3.11`
+    - `numpy`
+    - `pandas`
+    - `scipy`
+    - `scikit-learn`
+    - `joblib`
+    - `lightgbm`
+    - `pytorch`
+    - `pytorch-cuda=12.4`
+  - 在 `daily_research/tools/project_consistency_check.py` 中新增环境真源守卫，防止 `environment.yml` 缺失或关键依赖漂移
+  - 在 `daily_research/execution/entrypoint_utils.py` 与相关 execution entrypoints 中补了缺依赖时的显式报错路径，并让 `--help` 优先于重依赖导入
+  - 在 `daily_research/brain/operations_center.md`、`knowledge_center.md`、`state_center.md` 写回了新环境口径
+- 额外结论：
+  - `t0_project/tqcenter.py` 仍是工作区内本地依赖，不由 conda 安装
+  - 今后判断环境是否满足，应该以 `daily_research/environment.yml` 为真源，而不是以“这台机器上某个 shell 恰好能跑”为真
+
+## 2026-04-13 - `yolos` 升级为 `daily_research` 全项目统一运行解释器
+
+- 触发原因：
+  - 用户明确要求：以后此项目任何程序均在 `yolos` 环境下运行
+  - 现场排查发现两类残留漂移：
+    - `daily_research/deep_alpha/experiment_guardrails.py` 仍保留旧 `quant` fallback
+    - 多个 orchestration / review / execution 脚本仍把 `sys.executable` 当作默认解释器或内部 subprocess 解释器
+- 本轮事实：
+  - `daily_research/environment.yml` 已经把 `yolos` 物化成依赖环境真源
+  - 仅靠 brain 写“环境基线”仍不足以约束代码默认行为
+  - `resolve_project_python_executable(sys.executable)` 若 helper 不做纠偏，也会继续跟随当前 shell Python
+- 本轮动作：
+  - 把 project python anchor 收口到 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
+  - 删除旧 `quant` fallback
+  - 将 `daily_research` 下相关脚本的默认 `--python-executable` 与内部 Python 转调统一切到 `resolve_project_python_executable(sys.executable)`
+  - 在 `project_consistency_check.py` 中新增 project runtime contract 守卫，防止后续重新出现 raw `sys.executable` 默认值 / 转调
+  - 将 `state_center.md`、`knowledge_center.md`、`operations_center.md` 的环境口径升级为“任何程序都必须在 `yolos` 环境下运行”
+- 本轮复盘：
+  - 这次不是简单补一句规则，而是把规则下沉成了 helper 默认、脚本入口默认和 consistency 守卫
+  - 以后如果有人再把默认解释器改回当前 shell Python 或旧 `quant`，守卫应直接报错，而不是等到运行时才暴露

@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
 
 from daily_research.deep_alpha.architecture_profiles import get_profile as get_architecture_profile
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile as get_dynamic_graph_profile
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
@@ -78,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         description="Calibrate family-specific epoch budgets with strict resume and execution-first frontier stop rules."
     )
     parser.add_argument("--root-tag", default="deep_alpha_family_epoch_frontier_20260404_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--families",
         default="baseline,structure,short_alpha,dynamic_graph",

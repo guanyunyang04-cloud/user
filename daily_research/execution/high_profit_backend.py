@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+
 
 LEGACY_PROFIT_SNAPSHOT_COMMIT = "e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d"
 LEGACY_PROFIT_WORKTREE_NAME = "user_snapshot_codex_e7d0f8d"
@@ -42,7 +44,7 @@ def run_legacy_profit_backend(entry_file: str, script_relative_path: str, defaul
         raise FileNotFoundError(f"Legacy profit backend script not found: {script_path}")
 
     cmd = [
-        sys.executable,
+        resolve_project_python_executable(sys.executable),
         str(script_path),
         *default_args,
         *sys.argv[1:],

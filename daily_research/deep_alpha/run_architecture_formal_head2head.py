@@ -14,6 +14,7 @@ import torch
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.architecture_profiles import get_profile
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
@@ -52,7 +53,7 @@ DEFAULT_PROFILES: tuple[str, ...] = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run formal multi-window head-to-head for key deep_alpha architecture variants.")
     parser.add_argument("--root-tag", default="deep_alpha_architecture_formal_head2head_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--profiles",
         default=",".join(DEFAULT_PROFILES),

@@ -77,6 +77,19 @@ def is_help_request() -> bool:
     return any(item in {"-h", "--help"} for item in sys.argv[1:])
 
 
+def missing_runtime_dependency_error(exc: ModuleNotFoundError, *, command_hint: str) -> SystemExit:
+    missing = str(getattr(exc, "name", "") or exc).strip()
+    detail = (
+        f"Missing dependency `{missing}` for daily_research runtime. "
+        "Bootstrap the authoritative environment with "
+        "`conda env update -f daily_research/environment.yml --prune` "
+        "and rerun with the explicit `yolos` python."
+    )
+    if command_hint:
+        detail = f"{detail} Failing entrypoint: `{command_hint}`."
+    return SystemExit(detail)
+
+
 def bootstrap_execution_paths(entry_file: str) -> Path:
     exec_dir = Path(entry_file).resolve().parent
     baseline_dir = exec_dir.parent / "baseline"
@@ -116,7 +129,7 @@ def _resolve_requested_pool_size(*, pool_name: str = "", pool_size: int = 0) -> 
 
 
 def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> None:
-    if has_arg("--stocks") or has_arg("--stocks-file"):
+    if has_arg("--stocks") or has_arg("--stocks-file") or is_help_request():
         return
     from daily_research.execution.liquidity_universe import ensure_default_pool_file, get_default_pool_file
     from daily_research.baseline.data_provider import find_universe_violations, load_cached_stock_name_map

@@ -16,6 +16,7 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
 from daily_research.deep_alpha.architecture_profiles import get_profile, list_profile_lines
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import (
@@ -65,7 +66,7 @@ def parse_args() -> argparse.Namespace:
         description="Run architecture execution-objective formal head-to-head with realistic external replay."
     )
     parser.add_argument("--root-tag", default="deep_alpha_architecture_execalign_formal_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--profiles",
         default=",".join(DEFAULT_PROFILES),

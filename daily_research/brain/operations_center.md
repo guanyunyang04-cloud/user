@@ -29,10 +29,13 @@
 - recent/live 监控负责解释兑现情况，不负责改写 formal winner
 
 ## 4. 高频命令
+- 以下 `python ...` 示例默认都指向 `conda run -n yolos python ...` 或显式 `yolos` python
 - 主脑优先接管：
   - `python daily_research/tools/brain_bootstrap.py --child daily_research --json`
 - strongest-model verdict 刷新：
-  - `python daily_research/tools/run_short_alpha_recent_model_protocol.py --help`
+  - `python daily_research/tools/refresh_strongest_model_verdict.py --help`
+- recent protocol 串行收尾 / 监控：
+  - `python daily_research/tools/recent_protocol_completion_monitor.py --help`
 - 默认次日交易计划：
   - `python daily_research/execution/run_trade_plan.py --help`
 - v5 successor 全流程：
@@ -40,11 +43,20 @@
 - 一致性检查：
   - `python daily_research/tools/project_consistency_check.py`
   - `python daily_research/tools/doc_guard.py check`
+- 依赖环境真源：
+  - `daily_research/environment.yml`
+- 环境创建 / 同步：
+  - `conda env create -f daily_research/environment.yml`
+  - `conda env update -f daily_research/environment.yml --prune`
 
 ## 5. 环境基线
-- 正式训练、formal 回放、recent 回放与最终 summary 默认统一使用 `yolos`
+- 依赖环境真源统一收口到 `daily_research/environment.yml`
+- `daily_research` 任何程序都必须在 `yolos` 环境下运行
+- 命令里的裸 `python` 只是一种简写；真实执行必须绑定到 `conda run -n yolos python` 或显式 `yolos` python
+- 脚本内部转调也必须显式落到 `yolos` python，不得回退到 `quant` 或当前 shell Python
 - 训练一律使用 GPU；没有 CUDA 就视为阻塞
 - 不依赖“当前 shell 已激活 conda 环境”的隐式状态
+- `t0_project/tqcenter.py` 是工作区内本地依赖，不由 conda 安装
 - brain 文档统一使用 UTF-8
 
 ## 6. 写回路由

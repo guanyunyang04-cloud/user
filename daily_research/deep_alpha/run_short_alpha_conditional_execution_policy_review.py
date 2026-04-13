@@ -13,6 +13,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--static-profile", default=DEFAULT_STATIC_PROFILE)
     parser.add_argument("--min-regime-support", type=int, default=2)
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default="short_alpha_conditional_execution_policy_review_20260405_r1")
     return parser.parse_args()

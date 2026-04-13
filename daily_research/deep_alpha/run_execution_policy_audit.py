@@ -18,6 +18,7 @@ from daily_research.deep_alpha.execution_alignment import (
     get_profile,
     parse_profile_name_list,
 )
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -59,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--experiment-tag", default="")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     return parser.parse_args()
 
 

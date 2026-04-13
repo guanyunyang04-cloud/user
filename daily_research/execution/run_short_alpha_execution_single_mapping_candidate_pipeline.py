@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.run_short_alpha_targeted_weak_month_repair_review import (
     DEFAULT_STATIC_PROFILE,
     _build_hybrid_target_weight_panel,
@@ -62,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-label", default="candidate_expand_stable_topk3")
     parser.add_argument("--bridge-start", default="2025-03-18")
     parser.add_argument("--weak-start", default="2025-09-05")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--fallback-live-target-weight-panel-csv",
         default=str(DEFAULT_FALLBACK_LIVE_TARGET_WEIGHT_PANEL),

@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.short_alpha_profiles import (
     DEFAULT_SHORT_ALPHA_PROFILE,
     build_profile_cli_args,
@@ -49,7 +50,7 @@ DEFAULT_PROFILES = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the short-alpha experiment matrix on the current deep_alpha winner.")
     parser.add_argument("--root-tag", default="deep_alpha_short_alpha_matrix_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--profiles",
         default=",".join(DEFAULT_PROFILES),

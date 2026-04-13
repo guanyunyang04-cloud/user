@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest, summarize_primary_monthly_objectives
 from daily_research.deep_alpha.run_architecture_protocol_refresh import (
     FORMAL_WINDOWS,
@@ -36,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--source-root-tag", default=DEFAULT_SOURCE_ROOT_TAG)
     parser.add_argument("--root-tag", default="encoder_transformer_stability_review_20260406_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--extend-window-label", default=DEFAULT_EXTEND_WINDOW)
     parser.add_argument("--epoch-budgets", default="32,48,64")
     parser.add_argument("--force-rerun", action="store_true")

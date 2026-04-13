@@ -16,11 +16,7 @@ from daily_research.execution.entrypoint_utils import (
     has_arg,
     inject_default_arg,
     is_help_request,
-)
-from daily_research.execution.research_candidate_profiles import (
-    DEFAULT_EXECUTION_CANDIDATE_PROFILE,
-    apply_profile_defaults,
-    list_profile_lines,
+    missing_runtime_dependency_error,
 )
 
 
@@ -30,6 +26,22 @@ def main():
     example_file = exec_dir / "current_positions.example.csv"
     output_dir = exec_dir / "output" / "research_candidates"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if is_help_request():
+        print("wrapper_options: --candidate-profile <name> | --list-candidate-profiles")
+        return
+
+    try:
+        from daily_research.execution.research_candidate_profiles import (
+            DEFAULT_EXECUTION_CANDIDATE_PROFILE,
+            apply_profile_defaults,
+            list_profile_lines,
+        )
+    except ModuleNotFoundError as exc:
+        raise missing_runtime_dependency_error(
+            exc,
+            command_hint="python daily_research/execution/run_research_candidate_trade_plan.py",
+        ) from exc
 
     if consume_flag_arg("--list-candidate-profiles"):
         print("\n".join(list_profile_lines()))
@@ -66,7 +78,13 @@ def main():
             "Pass --candidate-profile, --list-candidate-profiles, or explicit CSV paths."
         )
 
-    from daily_research.baseline.generate_daily_trade_plan import main as generate_daily_trade_plan_main
+    try:
+        from daily_research.baseline.generate_daily_trade_plan import main as generate_daily_trade_plan_main
+    except ModuleNotFoundError as exc:
+        raise missing_runtime_dependency_error(
+            exc,
+            command_hint="python daily_research/execution/run_research_candidate_trade_plan.py",
+        ) from exc
 
     generate_daily_trade_plan_main()
 

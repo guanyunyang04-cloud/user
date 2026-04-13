@@ -14,6 +14,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.output_root_resolver import resolve_recent_execution_audit_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -94,7 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-recent-gate", action="store_true")
     parser.add_argument("--recent-bridge-start", default="2025-03-18")
     parser.add_argument("--recent-weak-start", default="2025-09-05")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--root-tag", default="short_alpha_targeted_weak_month_repair_review_20260406_r1")
     return parser.parse_args()

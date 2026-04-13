@@ -12,6 +12,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = PROJECT_ROOT / "daily_research" / "output"
@@ -32,7 +33,7 @@ def parse_args() -> argparse.Namespace:
             "vs monthly-robust checkpoint selection."
         )
     )
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--annual-root-tag", default=DEFAULT_ANNUAL_ROOT)
     parser.add_argument("--monthly-root-tag", default=DEFAULT_MONTHLY_ROOT)
     parser.add_argument("--comparison-root-tag", default=DEFAULT_COMPARISON_ROOT)

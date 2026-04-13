@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.dynamic_graph_profiles import get_profile
 from daily_research.deep_alpha.family_epoch_budget import DEFAULT_LATEST_MANIFEST_PATH, resolve_epoch_budget_for_family
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
@@ -59,7 +60,7 @@ def _resolve_family_key(profile_name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the formal dynamic-graph ablation matrix under the strict liquid800 mainboard protocol.")
     parser.add_argument("--root-tag", default="dynamic_graph_ablation_formal_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument("--force-raw-cache-path", default="")
     parser.add_argument(

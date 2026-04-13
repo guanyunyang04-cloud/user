@@ -25,6 +25,7 @@ from daily_research.baseline.data_provider import (
     load_daily_from_csv,
     load_daily_from_tq,
 )
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
@@ -429,7 +430,7 @@ def _build_pretrain_cmd(
     window: WalkForwardWindow,
 ) -> list[str]:
     cmd = [
-        sys.executable,
+        resolve_project_python_executable(sys.executable),
         "daily_research/deep_alpha/pretrain_deep_alpha_encoder.py",
         "--data-source",
         args.data_source,
@@ -521,7 +522,7 @@ def _build_finetune_cmd(
     pretrained_artifact: Path | None,
 ) -> list[str]:
     cmd = [
-        sys.executable,
+        resolve_project_python_executable(sys.executable),
         "daily_research/deep_alpha/run_deep_alpha_research.py",
         "--data-source",
         args.data_source,

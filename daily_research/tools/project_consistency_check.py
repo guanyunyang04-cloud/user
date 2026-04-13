@@ -392,6 +392,76 @@ def _check_execution_pipeline_consistency(failures: list[CheckResult]) -> None:
     )
 
 
+def _check_environment_source_of_truth(failures: list[CheckResult]) -> None:
+    env_path = PROJECT_ROOT / "environment.yml"
+    _require(
+        env_path.exists(),
+        failures,
+        "environment_source_missing",
+        "daily_research/environment.yml must exist as the authoritative dependency environment source.",
+    )
+    if not env_path.exists():
+        return
+
+    env_text = env_path.read_text(encoding="utf-8")
+    required_snippets = (
+        "name: yolos",
+        "- python=3.11",
+        "- numpy",
+        "- pandas",
+        "- scipy",
+        "- scikit-learn",
+        "- joblib",
+        "- lightgbm",
+        "- pytorch",
+        "- pytorch-cuda=12.4",
+    )
+    for snippet in required_snippets:
+        _require(
+            snippet in env_text,
+            failures,
+            "environment_source_incomplete",
+            f"daily_research/environment.yml is missing required runtime dependency marker: {snippet}",
+        )
+
+
+def _check_project_python_runtime_contract(failures: list[CheckResult]) -> None:
+    guardrails_text = _read_text("daily_research/deep_alpha/experiment_guardrails.py")
+    _require(
+        r"C:\Users\ASUS\miniconda3\envs\yolos\python.exe" in guardrails_text,
+        failures,
+        "project_python_yolos_anchor_missing",
+        "experiment_guardrails.py must anchor the project runtime to the yolos python.",
+    )
+    _require(
+        r"C:\Users\ASUS\miniconda3\envs\quant\python.exe" not in guardrails_text,
+        failures,
+        "project_python_quant_fallback_present",
+        "experiment_guardrails.py must not keep the old quant python fallback.",
+    )
+
+    raw_runtime_patterns = (
+        re.compile(r"default\s*=\s*sys\.executable"),
+        re.compile(r"\[\s*sys\.executable\s*,", flags=re.DOTALL),
+    )
+    offenders: list[str] = []
+    for path in PROJECT_ROOT.rglob("*.py"):
+        relative_path = path.relative_to(WORKSPACE_ROOT).as_posix()
+        if relative_path == "daily_research/deep_alpha/experiment_guardrails.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if any(pattern.search(text) for pattern in raw_runtime_patterns):
+            offenders.append(relative_path)
+    _require(
+        not offenders,
+        failures,
+        "project_python_default_not_locked_to_yolos",
+        "daily_research scripts still contain raw sys.executable defaults or subprocess launches: "
+        + ", ".join(offenders[:12])
+        + (" ..." if len(offenders) > 12 else ""),
+    )
+
+
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
         "daily_research/brain/identity_layer.md": (
@@ -409,6 +479,7 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "当前优先级",
             "当前边界",
             "当前时态",
+            "任何程序都必须在 `yolos` 环境下运行",
         ),
         "daily_research/brain/knowledge_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -417,6 +488,7 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "formal 验证采用滚动窗口协议",
             "recent 验证现在是 strongest-model 研究闭环必备伴随证据",
             "recent 胜利不能直接当 promotion 结论",
+            "任何程序都必须在 `yolos` 环境下运行",
         ),
         "daily_research/brain/governance_layer.md": (
             "目标一致性检查",
@@ -432,6 +504,7 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "高频命令",
             "环境基线",
             "写回路由",
+            "任何程序都必须在 `yolos` 环境下运行",
         ),
     }
     for relative_path, snippets in required_strings.items():
@@ -454,6 +527,8 @@ def run_checks() -> list[CheckResult]:
     _check_execution_semantics(failures)
     _check_no_hardcoded_operational_roots(failures)
     _check_execution_pipeline_consistency(failures)
+    _check_environment_source_of_truth(failures)
+    _check_project_python_runtime_contract(failures)
     _check_memory_sync(failures)
     return failures
 

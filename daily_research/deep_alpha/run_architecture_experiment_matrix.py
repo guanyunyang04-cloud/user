@@ -19,6 +19,7 @@ from daily_research.deep_alpha.architecture_profiles import (
     get_profile,
     list_profile_lines,
 )
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.research_objective import resolve_primary_backtest
 
 
@@ -62,7 +63,7 @@ REUSE_METRICS: dict[str, str] = {}
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a recent-formal deep_alpha architecture matrix for complexity, depth, and structure effects.")
     parser.add_argument("--root-tag", default="deep_alpha_architecture_matrix_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument(
         "--profiles",
         default=",".join(DEFAULT_PROFILES),

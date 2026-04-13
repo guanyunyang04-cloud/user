@@ -9,6 +9,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.output_root_resolver import (
     OUTPUT_ROOT,
     resolve_single_mapping_pipeline_root,
@@ -29,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--pipeline-root", default="")
     parser.add_argument("--active-manifest", default=str(DEFAULT_ACTIVE_MANIFEST))
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     return parser.parse_args()
 
 

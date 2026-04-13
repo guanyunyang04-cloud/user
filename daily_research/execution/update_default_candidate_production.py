@@ -18,6 +18,7 @@ import torch
 import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.baseline.external_target_weight_bridge import build_target_weight_bridge
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
     default_min_epochs_for_budget,
@@ -544,7 +545,7 @@ def _build_retrain_command(
         static_fallback_profile_override or _resolve_default_static_execution_profile()
     ).strip()
     script_path = Path("daily_research/deep_alpha/run_deep_alpha_research.py").resolve()
-    cmd: list[str] = [sys.executable, str(script_path)]
+    cmd: list[str] = [resolve_project_python_executable(sys.executable), str(script_path)]
 
     _append_arg(cmd, "--data-source", "tq")
     _append_arg(cmd, "--start-date", cfg.get("start_date", "20210101"))

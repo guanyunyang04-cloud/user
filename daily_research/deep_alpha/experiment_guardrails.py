@@ -11,9 +11,9 @@ DEFAULT_FOREGROUND_TIMEOUT_HOURS = 10
 DEFAULT_EXECUTION_DISCIPLINE = "foreground_only"
 DEFAULT_RESUME_DISCIPLINE = "strict_same_run_dir_only"
 RUN_CONTRACT_FILENAME = "run_contract.json"
+YOLOS_PROJECT_PYTHON = Path(r"C:\Users\ASUS\miniconda3\envs\yolos\python.exe")
 PREFERRED_PROJECT_PYTHONS = (
-    Path(r"C:\Users\ASUS\miniconda3\envs\yolos\python.exe"),
-    Path(r"C:\Users\ASUS\miniconda3\envs\quant\python.exe"),
+    YOLOS_PROJECT_PYTHON,
 )
 
 
@@ -25,13 +25,31 @@ def runtime_metadata() -> dict[str, Any]:
     }
 
 
+def _normalize_python_path(raw: str | Path | None) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(Path(text).expanduser().resolve())
+    except Exception:
+        return text
+
+
+def _is_yolos_python(raw: str | Path | None) -> bool:
+    normalized = _normalize_python_path(raw).replace("/", "\\").lower()
+    expected = _normalize_python_path(YOLOS_PROJECT_PYTHON).replace("/", "\\").lower()
+    return bool(normalized) and (normalized == expected or "\\envs\\yolos\\" in normalized)
+
+
 def resolve_project_python_executable(explicit: str | None = None) -> str:
     raw = str(explicit or "").strip()
-    if raw:
+    if raw and _is_yolos_python(raw):
         return raw
     for candidate in PREFERRED_PROJECT_PYTHONS:
         if candidate.exists():
             return str(candidate)
+    if raw:
+        return raw
     return str(sys.executable)
 
 

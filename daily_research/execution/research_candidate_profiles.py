@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.entrypoint_utils import inject_default_arg, inject_flag_arg
 from daily_research.execution.strategy_manifest import (
     infer_liquidity_pool_name,
@@ -445,7 +446,12 @@ def _maybe_auto_retrain_production(profile: ResearchCandidateProfile, *, mode: s
         return
 
     manifest = plan.get("manifest") if isinstance(plan.get("manifest"), dict) else {}
-    cmd = [sys.executable, str(_UPDATE_DEFAULT_PRODUCTION_SCRIPT), "--end-date", latest_completed.strftime("%Y%m%d")]
+    cmd = [
+        resolve_project_python_executable(sys.executable),
+        str(_UPDATE_DEFAULT_PRODUCTION_SCRIPT),
+        "--end-date",
+        latest_completed.strftime("%Y%m%d"),
+    ]
     source_run_dir = str(manifest.get("source_formal_run_dir", "")).strip()
     production_root = str(manifest.get("production_root", "")).strip()
     if source_run_dir:

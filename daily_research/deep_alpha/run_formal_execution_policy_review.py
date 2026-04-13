@@ -14,6 +14,7 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.run_execution_policy_audit import _rank_tuple
 
 
@@ -42,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--current-profile", default="", help="Optional current execution profile label. Empty means infer from run metrics.")
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
     parser.add_argument("--experiment-tag", default="")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     return parser.parse_args()
 
 

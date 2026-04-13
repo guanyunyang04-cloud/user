@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.backtest import summarize_backtest_by_month, summarize_monthly_diagnostics
+from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.deep_alpha.execution_alignment import default_auto_profile_argument
 from daily_research.deep_alpha.short_alpha_profiles import build_profile_cli_args, get_profile
 from daily_research.deep_alpha.family_epoch_budget import (
@@ -79,7 +80,7 @@ def _resolve_family_key(profile_name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run formal multi-window head-to-head for the short-alpha state_liquidity_listwise candidate.")
     parser.add_argument("--root-tag", default="short_alpha_formal_head2head_20260403_monthly_r1")
-    parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
     parser.add_argument("--force-rerun", action="store_true")
     parser.add_argument(
         "--force-rerun-profiles",

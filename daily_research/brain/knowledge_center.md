@@ -3,6 +3,7 @@
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理
 - strongest-model research winner、deployable learned-control、live mainline 必须显式区分
+- `daily_research/environment.yml` 现在是依赖环境真源
 - 当前 strongest-model 稳定结论：
   - `formal = short_expert_monthly_v1`
   - `recent = short_expert_monthly_v1`
@@ -20,7 +21,9 @@
 - 当前统一上限语义是 `follow_research_raw_no_global_cap`
 - 默认只做窄实验，不做无边界广扫
 - 正式训练默认从 `32` 起步；不够就 `strict resume`
-- 正式训练、formal 回放、recent 回放与最终 summary 默认统一使用 `yolos`
+- 依赖环境必须先写入真源文件，再谈“环境基线已满足”
+- `daily_research` 任何程序都必须在 `yolos` 环境下运行
+- 脚本默认解释器与内部 subprocess 统一收口到 `yolos`，不得回退到 `quant` 或当前 shell Python
 - 正式训练前台窗口限时统一为 `10` 小时
 
 ## 3. 已验证教训
@@ -32,6 +35,8 @@
 - requested recent cutoff 不等于 effective validation end
 - strongest-model recent 口径修正后，主问题会整体重排
 - external cap 包装与温和平滑 successor 不足以修复 `policy_v5b` 的快桥脆弱性
+- 只在 brain 里写“环境基线”而不把依赖环境物化成真源，最终会退化成隐式环境依赖
+- 只把部分流程锁到 `yolos` 而放任其他脚本跟随当前 shell Python，最终仍会退化成环境漂移
 
 ## 4. 文档边界
 - `identity_layer.md`
