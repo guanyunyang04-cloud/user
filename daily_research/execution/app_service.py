@@ -12,6 +12,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
+from daily_research.continuous_policy.runtime import (
+    CONTINUOUS_POLICY_ROOT,
+    LATEST_EVALUATION_SUMMARY_PATH,
+    LATEST_EXPORT_SUMMARY_PATH,
+    LATEST_PROTOCOL_SUMMARY_PATH,
+    LATEST_TRAIN_SUMMARY_PATH,
+    RUNTIME_STATE_PATH as CONTINUOUS_POLICY_RUNTIME_STATE_PATH,
+)
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
@@ -256,6 +264,40 @@ def latest_trade_plan_summary(*, max_lines: int = 80) -> dict[str, Any]:
     }
 
 
+def _read_csv_preview(path: Path, *, limit: int = 12) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, str]] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows.append({str(key): str(value or "") for key, value in row.items()})
+            if len(rows) >= max(int(limit), 0):
+                break
+    return rows
+
+
+def continuous_policy_summary(*, action_rows_limit: int = 12) -> dict[str, Any]:
+    train_summary = _read_json(LATEST_TRAIN_SUMMARY_PATH)
+    evaluation_summary = _read_json(LATEST_EVALUATION_SUMMARY_PATH)
+    export_summary = _read_json(LATEST_EXPORT_SUMMARY_PATH)
+    protocol_summary = _read_json(LATEST_PROTOCOL_SUMMARY_PATH)
+    runtime_summary = _read_json(CONTINUOUS_POLICY_RUNTIME_STATE_PATH)
+    action_panel_path = Path(str(export_summary.get("action_panel_csv", "") or "")).expanduser()
+    return {
+        "root": str(CONTINUOUS_POLICY_ROOT.resolve()),
+        "exists": CONTINUOUS_POLICY_ROOT.exists(),
+        "latest_train": train_summary,
+        "latest_evaluation": evaluation_summary,
+        "latest_export": export_summary,
+        "latest_protocol": protocol_summary,
+        "runtime_state": runtime_summary,
+        "action_panel_preview": _read_csv_preview(action_panel_path, limit=action_rows_limit)
+        if action_panel_path and action_panel_path.exists()
+        else [],
+    }
+
+
 def save_account_snapshot(
     *,
     available_cash: float | int | str | None,
@@ -358,6 +400,7 @@ def build_status_payload(*, history_limit: int = 8) -> dict[str, Any]:
         "active_manifest": active_manifest_summary(),
         "current_positions": positions_summary(),
         "latest_trade_plan": latest_trade_plan_summary(max_lines=24),
+        "continuous_policy": continuous_policy_summary(action_rows_limit=8),
         "warnings": warnings,
         "updated_at": state.get("updated_at", ""),
     }

@@ -10,6 +10,8 @@
   - 进入 `daily_research/tools`
 - live 默认执行与交易计划问题：
   - 进入 `daily_research/execution`
+- 连续型组合策略代理问题：
+  - 进入 `daily_research/continuous_policy`
 - 产物与归档：
   - 查看 `daily_research/output`、`daily_research/archive`
 
@@ -24,6 +26,9 @@
 ## 3. 协议方法
 - formal 验证采用滚动窗口协议
 - 每个 formal 窗口都必须写清 `train_end / valid_start / valid_end`
+- 实验设计默认按“最高效、最合理”执行：如果某设定可能只在更强模型上有效，可以重开验证，但必须先写清要验证的假设、额外成本和停止条件
+- `epoch formal candidate` 默认先给足 `32` epoch 起步预算；若证据还不够，优先沿同一 `experiment-tag / run_dir` 做 `strict resume`，不优先 fresh rerun
+- `non-epoch shadow prototype` 只允许 teacher / shadow / ablation，不适用 `32 epoch` 判决线，也不得直接 promotion
 - strongest-model recent 现在只承认 `independent_recent_model_as_of_recent_start`
 - 默认执行物化必须使用当前可标注最新数据做 `production full-fit`
 - 当前统一权重语义是 `research_raw_target_weight`
@@ -59,6 +64,20 @@
   - 页面：`/account`
   - 数据文件：`daily_research/execution/current_positions.csv`
   - API：`GET /api/account`、`POST /api/account`、`POST /api/account/reset-example`
+- continuous_policy 高频入口：
+  - `python daily_research/continuous_policy/run_continuous_policy_protocol.py --help`
+  - `python daily_research/continuous_policy/train_policy.py --help`
+  - `python daily_research/continuous_policy/evaluate_policy.py --help`
+  - `python daily_research/continuous_policy/export_action_panel.py --help`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260413 --shadow-start-date 20260401 --shadow-end-date 20260413`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend prototype_gbdt_v1 --pool-name liquid500 --label-preset swing_v2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-evaluate -- --label-preset swing_v2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-export -- --signal-date 20260413`
+  - 当前正式 protocol 参考：
+    - `formal_liquid500_20260413_r2_swing_v2`：当前收益/Sharpe 最强的 shadow 参考
+    - `formal_liquid500_20260413_r2_balanced_v2`：当前平衡版参考
+    - `formal_liquid500_20260413_r2_defensive_v2`：当前防守版参考
 - v5 successor 全流程：
   - `python daily_research/tools/run_policy_v5_successor_pipeline.py --help`
 - 一致性检查：
@@ -76,6 +95,7 @@
 - 命令里的裸 `python` 只是一种简写；真实执行必须绑定到 `conda run -n yolos python` 或显式 `yolos` python
 - 脚本内部转调也必须显式落到 `yolos` python，不得回退到 `quant` 或当前 shell Python
 - 训练一律使用 GPU；没有 CUDA 就视为阻塞
+- continuous_policy 的这条 GPU 约束只对 `formal_torch_v2` 生效；`prototype_gbdt_v1` 保持 shadow 原型身份，不计入正式训练合规
 - 不依赖“当前 shell 已激活 conda 环境”的隐式状态
 - `t0_project/tqcenter.py` 是工作区内本地依赖，不由 conda 安装
 - brain 文档统一使用 UTF-8
@@ -109,6 +129,7 @@
   - `/jobs/<job_id>`
   - `/doctor`
   - `/artifacts/trade-plan`
+  - `/continuous-policy`
   - `/account`
   - `/guide`
   - `/settings/runtime`
@@ -117,6 +138,7 @@
   - `/api/doctor`
   - `/api/tasks`
   - `/api/jobs`
+  - `/api/continuous-policy`
   - `/api/account`
   - `/api/run`
   - `/api/resume`
@@ -129,6 +151,7 @@
  - 页面职责：
   - `Tasks` 负责后台触发任务
   - `Jobs / Job Detail` 负责日志、状态与 resume
+  - `Continuous Policy` 负责展示连续策略最新 train / evaluate / protocol / export / runtime state
   - `Account` 负责维护模拟现金、持仓与示例重置
   - `Guide` 负责首次上手、常用流程、恢复与高风险提示
   - `Runtime` 负责 stale lock `force unlock`

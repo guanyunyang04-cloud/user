@@ -12092,3 +12092,251 @@ position,000001.SZ,1200,12.38,
 - 本轮复盘：
   - `Start-Job` 适合作为 `agent` 的短期联调默认，是因为它更适合当前终端环境下的可控验证闭环
   - 但它绑定当前 PowerShell 会话，所以不能被偷换成用户侧长期运行的公开默认
+
+## 2026-04-13 - continuous_policy 并行连续策略栈落地并接入 execution app / Web
+
+- 触发原因：
+  - 用户明确要求把执行侧往“更自由、更连续、更像人类高手”的方向升级
+  - 需求不是继续微调固定执行桥，而是把“每日组合状态 -> 每日动作决策”的连续代理真正落地
+- 本轮事实：
+  - 现有 live 默认链路仍是 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+  - 当前 trade plan 仍然主要是 `current holdings vs target weight` 的差分翻译，不是逐票连续生命史驱动
+  - 项目已存在足够可复用的数据层、执行 app、Web 控制台和模拟账户真源，可以承接连续策略新栈
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/`
+  - 落地：
+    - `runtime.py`
+    - `state_builder.py`
+    - `label_builder.py`
+    - `portfolio_simulator.py`
+    - `model.py`
+    - `pipeline_utils.py`
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+  - 将 `continuous-policy-train / continuous-policy-evaluate / continuous-policy-export` 接入 `execution/app_tasks.py`
+  - 在 `app_service.py` 中新增 continuous-policy 最新产物摘要读取
+  - 在 Web 控制台新增 `/continuous-policy` 页面与 `/api/continuous-policy`
+  - 将连续策略入口、shadow 边界和产物目录写回 `state_center.md`、`knowledge_center.md`、`operations_center.md`
+- 本轮真实验证：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m compileall -q daily_research/continuous_policy` 通过
+  - `train_policy.py --help`、`evaluate_policy.py --help`、`export_action_panel.py --help` 通过
+  - 真实 smoke train 通过：
+    - `--pool-name liquid300 --start-date 20260102 --end-date 20260331 --max-universe-size 30`
+    - 产出 `continuous_policy_artifact.pkl`
+  - 真实 smoke evaluate 通过：
+    - 产出连续策略 / teacher 上限 / active manifest 参考摘要
+  - 真实 smoke export 通过：
+    - 产出 `daily_live_action_panel.csv`
+    - 产出 `daily_execution_reasoning.json`
+    - 产出 `portfolio_state.json`
+- 本轮复盘：
+  - 正确方向不是继续叠加 hand-crafted bridge，而是新建连续策略栈并保持 live 默认冻结
+  - 连续策略如果没有统一输出目录、runtime state、execution app task registry 和 Web 摘要页，很快就会退化成新的孤立脚本集合
+  - smoke 结果证明新栈已经可运行，但当前仍只是 shadow 并行主线；promotion 仍需要更大股票池、更长窗口和更稳的 account/runtime continuity 证据
+
+## 2026-04-13 - 将 continuous_policy 与模拟账户补入正式教程口径
+
+- 触发原因：
+  - continuous_policy 栈、`/continuous-policy` 页面和模拟账户管理已经落地
+  - 但正式教程文档与 Web `/guide` 页面还没有完整覆盖这两块能力
+- 本轮动作：
+  - 更新 `daily_research/execution/使用教程.md`
+  - 在“页面说明”中补入 `连续策略` 和 `模拟账户`
+  - 在“常见操作”中补入 `continuous-policy-train / evaluate / export`
+  - 在排障建议中补入“连续策略页面没有数据”的处理路径
+  - 更新 Web `guide.html`，把连续策略与模拟账户纳入页面职责和推荐操作顺序
+- 本轮复盘：
+  - 新能力如果只存在于代码与页面，不进入正式教程，很容易在接管时被漏用或误用
+  - continuous_policy 的正确操作顺序必须始终强调 `train -> evaluate -> export`，否则容易把影子导出误当成独立入口
+
+## 2026-04-13 - continuous_policy 正式 protocol、连续性指标与参考对照落地
+
+- 触发原因：
+  - 用户要求不要停在 smoke，而是按顺序把 continuous_policy 推进到正式协议、连续性指标和真实 shadow continuity
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - 将 continuous_policy 正式高层入口接入 `execution/app_tasks.py`，任务名为 `continuous-policy-protocol`
+  - 扩展 `pipeline_utils.py`：
+    - 新增 action outcome 计算
+    - 新增连续性指标
+    - 评估结果新增 `continuity_metrics`
+    - 参考 panel 评估新增 `avg_gross_exposure / avg_holding_count / avg_cash_weight`
+  - 扩展 `evaluate_policy.py`：
+    - 新增 `--reference-panel`
+    - 新增 `daily_action_outcomes.csv`
+  - 扩展 Web `/continuous-policy`：
+    - 新增 protocol 摘要
+    - 新增行为连续性摘要
+  - 同步更新：
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+    - `execution/使用教程.md`
+    - `web/templates/guide.html`
+    - `project_consistency_check.py`
+- 本轮真实 protocol：
+  - 运行命令：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/continuous_policy/run_continuous_policy_protocol.py --pool-name liquid500 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260413 --shadow-start-date 20260401 --shadow-end-date 20260413 --force-bootstrap-from-account --tag formal_liquid500_20260413_r1`
+  - 训练结果：
+    - `sample_rows=203745`
+    - `feature_count=66`
+    - `daily_feature_count=23`
+  - 评估结果：
+    - continuous_policy：年化 `0.4763` / Sharpe `1.7685` / 最大回撤 `-0.0946`
+    - active manifest：年化 `0.5002` / Sharpe `3.7327` / 最大回撤 `-0.0263`
+    - `policy_v5b`：年化 `11.3075` / Sharpe `6.7309` / 最大回撤 `-0.0897`
+  - 连续性指标：
+    - `open_win_rate_5d=0.3966`
+    - `reduce_success_rate_5d=0.4615`
+    - `exit_timeliness_rate_5d=0.4074`
+    - `cash_timing_quality_1d=0.0250`
+  - shadow continuity：
+    - 窗口 `2026-04-01 -> 2026-04-13`
+    - 年化 `0.0301`
+    - Sharpe `0.2849`
+    - `cash_timing_quality_1d=-0.5624`
+  - 最新导出：
+    - `signal_date=2026-04-13`
+    - `action_counts={"减仓": 1}`
+    - `runtime_alignment_gap=0.1813`
+- 本轮复盘：
+  - protocol 已经把 continuous_policy 从“能跑脚本”升级成“有正式入口、有参考对照、有 shadow continuity 的并行主线”
+  - 但首轮正式协议同时证明：当前最大问题已经从“缺骨架”切换成“行为质量不够强”
+  - 下一轮不该继续优先补页面，而应优先修 teacher 标签、动作头与现金时机判断
+
+## 2026-04-13 - continuous_policy r2 lifecycle preset comparison 完成
+- 触发原因：
+  - 用户要求按顺序继续把 continuous_policy 从“能跑 protocol”推进到“正式多预设对照 + 行为质量判决”
+  - 当前目标不是再补界面，而是直接验证 `balanced_v2 / swing_v2 / defensive_v2` 三种 lifecycle preset
+- 本轮动作：
+  - 在 `train_policy.py / evaluate_policy.py / run_continuous_policy_protocol.py / export_action_panel.py` 正式接入 `--label-preset`
+  - 在 `execution/app_tasks.py` 把 `continuous-policy-protocol / train / evaluate` 接入 lifecycle preset 表单字段
+  - 在 `pipeline_utils.py` 扩展连续性指标：
+    - `hold_share`
+    - `hold_retention_quality_5d`
+    - `reduce_preservation_quality_5d`
+    - `reentry_quality_10d`
+    - `immediate_reversal_rate_3d`
+    - `avg_position_cap_target`
+    - `avg_hold_bias_target`
+  - 在 `model.py` 增加空仓开仓回补与 quality-ranking fallback，修复“评估期全程空仓”的塌缩
+  - 在 `label_builder.py` 收紧生命周期标签输出，消除 `entry_quality` 等监督目标里的 `NaN`
+  - 在 `state_builder.py` 修复 `vol_20d=0` 时的除零告警
+  - 在 `/continuous-policy` 页面补充 preset、promotion gate 和新增连续性指标展示
+- 本轮真实验证：
+  - smoke：
+    - `smoke_lifecycle_balanced_20260413_r2`
+    - 已从首轮 smoke 的“评估全空仓”修到会开仓 / 加仓 / 减仓 / 导出
+  - formal：
+    - `formal_liquid500_20260413_r2_balanced_v2`
+      - 年化 `0.3820` / Sharpe `1.6199` / 最大回撤 `-0.0916`
+      - `open/reduce/exit = 0.3603 / 0.4831 / 0.4597`
+    - `formal_liquid500_20260413_r2_swing_v2`
+      - 年化 `0.4157` / Sharpe `1.8885` / 最大回撤 `-0.0941`
+      - `open/reduce/exit = 0.4457 / 0.5315 / 0.5714`
+    - `formal_liquid500_20260413_r2_defensive_v2`
+      - 年化 `-0.1281` / Sharpe `-0.8824` / 最大回撤 `-0.1063`
+      - `open/reduce/exit = 0.5038 / 0.5711 / 0.5254`
+    - 对照：
+      - active manifest：年化 `0.5002` / Sharpe `3.7327` / 最大回撤 `-0.0263`
+      - `policy_v5b`：年化 `11.3075` / Sharpe `6.7309` / 最大回撤 `-0.0897`
+- 本轮结论：
+  - `swing_v2` 当前是 r2 三预设里收益/Sharpe 最强的 shadow 参考
+  - `defensive_v2` 虽然 `open/reduce/exit` 行为指标更强，但收益已经转负
+  - 三个 r2 preset 全部仍是 `shadow_only`
+  - 共同瓶颈已经收缩到：
+    - `hold_share` 近乎为 `0`
+    - `cash_timing_quality_1d` 仍弱
+    - `avg_turnover` 仍显著高于 active manifest
+- 本轮复盘：
+  - 先做 lifecycle preset formal comparison 是对的，它把问题从“抽象想法”收缩成了明确的三类 tradeoff
+  - 当前 continuous_policy 已经会开 / 加 / 减 / 退，但还不会像高手那样稳定持有和主动留现金
+  - 下轮最该修的是 `hold_share / cash_timing / turnover`，而不是继续扩 protocol 或页面
+## 2026-04-14 - 补回正式训练至少 `32` epoch 起步纪律
+- 触发原因：
+  - 用户指出主脑里把“正式训练至少 `32` epoch 起步；不够再 `strict resume` 续训”这条纪律写淡了
+  - 代码守卫仍保留 `MIN_DEFAULT_EPOCHS = 32`，但 brain 表述不够显眼，容易在接管时被忽略
+- 本轮动作：
+  - 在 `identity_layer.md` 明确补回硬约束：正式训练至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume`
+  - 在 `operations_center.md` 的协议方法中补回默认预算纪律，并显式写明不优先 fresh rerun
+  - 在 `state_center.md` 补回当前纠偏与边界说明，明确不足 `32` epoch 不构成完整训练判决
+  - 同步收紧 `project_consistency_check.py` 的 memory sync，防止以后再次只剩代码里记得、brain 里忘了
+- 本轮复盘：
+  - 这次问题不是代码规则丢了，而是主脑显式性不够，属于“可执行纪律未被足够前置”
+  - 以后凡是 formal 训练预算类纪律，必须同时存在于代码守卫、identity、operations 和 state，不能只留在 `knowledge_center.md`
+
+## 2026-04-14 - continuous_policy 训练合同拆分并落地 `formal_torch_v2`
+- 触发原因：
+  - 用户追问“新主线是否满足正式训练要求”，暴露出 continuous_policy 现有 `v1` 树模型并不具备 `epoch / strict resume / GPU-only` 训练合同
+  - 继续沿用单一“至少 `32` epoch”口径，会把 `prototype_gbdt_v1` 和真正可 promotion 的训练栈混写
+- 本轮动作：
+  - 新增 `continuous_policy/training_contracts.py`，把连续策略训练合同拆成：
+    - `prototype_gbdt_v1 = non-epoch shadow prototype`
+    - `formal_torch_v2 = epoch_resume_formal_candidate`
+  - 新增 `continuous_policy/model_v2.py`，落地 PyTorch 多头模型训练器：
+    - `GPU only`
+    - `>=32` epoch 起步
+    - `strict resume`
+    - `checkpoint_last.pt / checkpoint_best.pt / training_diagnostics.json`
+    - `continuous_policy_v2_artifact.pt`
+  - 重写 `train_policy.py`，正式接入：
+    - `--trainer-backend`
+    - `--epochs`
+    - `--min-epochs`
+    - `--resume-mode`
+  - 更新 `evaluate_policy.py / export_action_panel.py / run_continuous_policy_protocol.py`，统一把：
+    - `trainer_backend`
+    - `training_contract`
+    - `training_diagnostics`
+    写入 summary / protocol / export reasoning
+  - 修正 `export_action_panel.py` 的 runtime 时态回退问题：
+    - 当目标 `signal_date` 早于 runtime 的 `last_signal_date` 时，不再误用旧 runtime，而是回退到账户快照重建
+  - execution app / Web 控制台已同步：
+    - `continuous-policy-protocol / train` 任务表单新增 `trainer_backend / epochs / resume_mode`
+    - `/continuous-policy` 页面新增训练后端、合同类型、完成 epoch、promotion 资格展示
+  - 主脑与守卫已同步：
+    - `identity_layer.md / knowledge_center.md / operations_center.md / state_center.md`
+    - `project_consistency_check.py`
+- 本轮真实验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - `conda run -n yolos python daily_research/continuous_policy/train_policy.py --help` 通过
+  - `conda run -n yolos python daily_research/continuous_policy/run_continuous_policy_protocol.py --help` 通过
+  - `formal_torch_v2` smoke protocol：
+    - `smoke_cp_v2_protocol_20260414__*` 首次跑通 train/evaluate，但在 export 暴露 runtime 时态回退 bug
+    - 修 bug 后 `smoke_cp_v2_protocol_20260414_r2` 完整跑通 `train -> evaluate -> shadow -> export -> gate`
+    - 训练侧：
+      - `device = cuda`
+      - `completed_epochs = 32`
+      - `best_epoch = 32`
+      - `resume_mode = strict`
+    - 协议结论：
+      - `promotion_gate = shadow_only`
+      - 当前失败项：
+        - `reduce_success_rate_5d`
+        - `cash_timing_quality_1d`
+        - `hold_share`
+- 本轮复盘：
+  - 这轮已经把 continuous_policy 从“训练合同不清晰的原型栈”推进到“有 formal 候选后端的可审计研究栈”
+  - 当前主瓶颈已从“合同是否合规”切换成“行为质量是否足够好”
+  - 下一轮应直接围绕 `reduce_success_rate / cash_timing / hold_share` 修状态、标签和解码器，而不是再补训练合同本身
+
+## 2026-04-14 - 实验口径改为“最高效、最合理”
+- 触发原因：
+  - 用户指出：“先做窄实验，不做无边界广扫”容易误伤一种情况：某些设定在弱模型上表现差，但在更强模型上可能更合适
+  - 用户要求把默认实验口径改成“做最高效、最合理的实验”
+- 本轮动作：
+  - 在 `identity_layer.md` 明确写入：
+    - 默认追求最高效、最合理，不追求最小改动
+    - 某设定在较弱模型上失效，不等于在更强模型上永久淘汰
+  - 在 `knowledge_center.md` 把原先“默认只做窄实验，不做无边界广扫”改成：
+    - 默认做最高效、最合理的实验
+    - 允许为验证“某设定是否只在更强模型上成立”而扩实验
+    - 但必须先写清假设、成本边界、停止条件
+  - 在 `operations_center.md` 和 `state_center.md` 同步新的实验纪律
+  - 在 `project_consistency_check.py` 的记忆同步守卫中更新这条口径，避免以后退回旧表述
+- 本轮复盘：
+  - 这次纠偏的核心不是鼓励无边界广扫，而是把“实验边界”从规模导向改成信息增益导向
+  - 以后判断某条线该不该重开，不再只问“是不是窄实验”，而是问“它是否是当前最高效、最合理的信息获取方式”

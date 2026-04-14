@@ -1,0 +1,577 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from daily_research.baseline.ml_alpha import build_ml_target
+from daily_research.continuous_policy.state_builder import PreparedPolicyInputs
+
+
+LABEL_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
+
+
+@dataclass(frozen=True)
+class LifecycleLabelConfig:
+    name: str
+    min_hold_days: int
+    open_entry_threshold: float
+    open_signal_threshold: float
+    add_quality_threshold: float
+    reduce_quality_threshold: float
+    exit_urgency_threshold: float
+    catastrophic_exit_threshold: float
+    gross_scale: float
+    min_gross_target: float
+    max_gross_target: float
+    base_turnover_budget: float
+    max_turnover_budget: float
+    defensive_cash_bias: float
+    reentry_cooldown_days: int
+    hold_support_bonus: float
+    cash_regime_sensitivity: float
+    turnover_sensitivity: float
+    profit_take_penalty: float
+
+
+LABEL_CONFIGS: dict[str, LifecycleLabelConfig] = {
+    "balanced_v2": LifecycleLabelConfig(
+        name="balanced_v2",
+        min_hold_days=2,
+        open_entry_threshold=0.085,
+        open_signal_threshold=0.025,
+        add_quality_threshold=0.095,
+        reduce_quality_threshold=0.115,
+        exit_urgency_threshold=0.165,
+        catastrophic_exit_threshold=0.290,
+        gross_scale=0.185,
+        min_gross_target=0.22,
+        max_gross_target=0.94,
+        base_turnover_budget=0.15,
+        max_turnover_budget=0.90,
+        defensive_cash_bias=0.00,
+        reentry_cooldown_days=4,
+        hold_support_bonus=0.08,
+        cash_regime_sensitivity=0.12,
+        turnover_sensitivity=0.08,
+        profit_take_penalty=0.06,
+    ),
+    "swing_v2": LifecycleLabelConfig(
+        name="swing_v2",
+        min_hold_days=4,
+        open_entry_threshold=0.095,
+        open_signal_threshold=0.035,
+        add_quality_threshold=0.105,
+        reduce_quality_threshold=0.130,
+        exit_urgency_threshold=0.180,
+        catastrophic_exit_threshold=0.300,
+        gross_scale=0.175,
+        min_gross_target=0.20,
+        max_gross_target=0.90,
+        base_turnover_budget=0.12,
+        max_turnover_budget=0.72,
+        defensive_cash_bias=0.03,
+        reentry_cooldown_days=5,
+        hold_support_bonus=0.10,
+        cash_regime_sensitivity=0.15,
+        turnover_sensitivity=0.10,
+        profit_take_penalty=0.08,
+    ),
+    "defensive_v2": LifecycleLabelConfig(
+        name="defensive_v2",
+        min_hold_days=1,
+        open_entry_threshold=0.110,
+        open_signal_threshold=0.045,
+        add_quality_threshold=0.125,
+        reduce_quality_threshold=0.100,
+        exit_urgency_threshold=0.145,
+        catastrophic_exit_threshold=0.240,
+        gross_scale=0.155,
+        min_gross_target=0.16,
+        max_gross_target=0.82,
+        base_turnover_budget=0.11,
+        max_turnover_budget=0.68,
+        defensive_cash_bias=0.08,
+        reentry_cooldown_days=5,
+        hold_support_bonus=0.08,
+        cash_regime_sensitivity=0.18,
+        turnover_sensitivity=0.12,
+        profit_take_penalty=0.04,
+    ),
+    "holdcash_v3": LifecycleLabelConfig(
+        name="holdcash_v3",
+        min_hold_days=5,
+        open_entry_threshold=0.102,
+        open_signal_threshold=0.036,
+        add_quality_threshold=0.112,
+        reduce_quality_threshold=0.152,
+        exit_urgency_threshold=0.190,
+        catastrophic_exit_threshold=0.315,
+        gross_scale=0.168,
+        min_gross_target=0.18,
+        max_gross_target=0.84,
+        base_turnover_budget=0.10,
+        max_turnover_budget=0.56,
+        defensive_cash_bias=0.06,
+        reentry_cooldown_days=6,
+        hold_support_bonus=0.16,
+        cash_regime_sensitivity=0.24,
+        turnover_sensitivity=0.16,
+        profit_take_penalty=0.12,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class FuturePathMetrics:
+    frames: dict[str, pd.DataFrame]
+    horizons: tuple[int, ...] = LABEL_HORIZONS
+
+
+def resolve_label_config(value: str | LifecycleLabelConfig | None = None) -> LifecycleLabelConfig:
+    if isinstance(value, LifecycleLabelConfig):
+        return value
+    key = str(value or "balanced_v2").strip().lower() or "balanced_v2"
+    resolved = LABEL_CONFIGS.get(key)
+    if resolved is None:
+        available = ", ".join(sorted(LABEL_CONFIGS))
+        raise KeyError(f"Unknown lifecycle label preset: {value}. Available presets: {available}")
+    return resolved
+
+
+def _future_window_extreme(close: pd.DataFrame, window: int, *, mode: str) -> pd.DataFrame:
+    shifted = close.shift(-1)
+    reversed_frame = shifted.iloc[::-1]
+    if mode == "max":
+        rolled = reversed_frame.rolling(window, min_periods=1).max()
+    elif mode == "min":
+        rolled = reversed_frame.rolling(window, min_periods=1).min()
+    else:
+        raise ValueError(f"Unsupported future extreme mode: {mode}")
+    return rolled.iloc[::-1]
+
+
+def build_future_path_metrics(prepared: PreparedPolicyInputs) -> FuturePathMetrics:
+    close = prepared.close
+    benchmark_close = prepared.benchmark_close
+    frames: dict[str, pd.DataFrame] = {}
+    for horizon in LABEL_HORIZONS:
+        frames[f"fwd_excess_{horizon}d"] = build_ml_target(close, benchmark_close, horizon, execution_mode="close")
+        future_max = _future_window_extreme(close, horizon, mode="max")
+        future_min = _future_window_extreme(close, horizon, mode="min")
+        frames[f"future_max_up_{horizon}d"] = future_max.div(close).sub(1.0)
+        frames[f"future_min_down_{horizon}d"] = future_min.div(close).sub(1.0)
+    return FuturePathMetrics(frames=frames)
+
+
+def _row_metric(metrics: FuturePathMetrics, name: str, date: pd.Timestamp, stocks: pd.Index) -> pd.Series:
+    frame = metrics.frames[name]
+    return frame.loc[date].reindex(stocks).astype(float)
+
+
+def build_action_labels_for_date(
+    *,
+    date: pd.Timestamp | str,
+    state_frame: pd.DataFrame,
+    future_metrics: FuturePathMetrics,
+    label_config: str | LifecycleLabelConfig | None = None,
+) -> pd.DataFrame:
+    config = resolve_label_config(label_config)
+    signal_dt = pd.Timestamp(date).normalize()
+    working = state_frame.copy()
+    stocks = pd.Index(working["stock"].astype(str))
+
+    def _numeric(column: str, default: float = 0.0) -> np.ndarray:
+        if column not in working.columns:
+            return np.full(len(working), float(default), dtype=float)
+        return (
+            working[column]
+            .astype(float)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(float(default))
+            .to_numpy(dtype=float)
+        )
+
+    fwd1 = _row_metric(future_metrics, "fwd_excess_1d", signal_dt, stocks)
+    fwd3 = _row_metric(future_metrics, "fwd_excess_3d", signal_dt, stocks)
+    fwd5 = _row_metric(future_metrics, "fwd_excess_5d", signal_dt, stocks)
+    fwd10 = _row_metric(future_metrics, "fwd_excess_10d", signal_dt, stocks)
+    fwd20 = _row_metric(future_metrics, "fwd_excess_20d", signal_dt, stocks)
+    max_up5 = _row_metric(future_metrics, "future_max_up_5d", signal_dt, stocks)
+    max_up10 = _row_metric(future_metrics, "future_max_up_10d", signal_dt, stocks)
+    max_up20 = _row_metric(future_metrics, "future_max_up_20d", signal_dt, stocks)
+    min_down5 = _row_metric(future_metrics, "future_min_down_5d", signal_dt, stocks)
+    min_down10 = _row_metric(future_metrics, "future_min_down_10d", signal_dt, stocks)
+    min_down20 = _row_metric(future_metrics, "future_min_down_20d", signal_dt, stocks)
+    metric_columns = (
+        "score_delta_5d",
+        "score_delta_accel",
+        "score_blend",
+        "ret_5d",
+        "ret_accel_5_20",
+        "vol_20d",
+        "volatility_expansion",
+        "score_rank_pct",
+        "distance_to_20d_high",
+        "distance_to_60d_high",
+        "drawdown_from_peak",
+        "current_weight",
+        "unrealized_pnl",
+        "holding_flag",
+        "hold_days",
+        "in_pool",
+        "days_since_last_buy",
+        "days_since_last_sell",
+        "reentry_cooldown",
+        "portfolio_cash_weight",
+        "portfolio_recent_turnover_5d",
+        "portfolio_turnover_pressure",
+        "portfolio_cash_deficit",
+        "portfolio_drawdown_20d",
+        "benchmark_trend_gap",
+        "benchmark_vol_ratio",
+        "recent_buy_flag",
+        "recent_sell_flag",
+    )
+    for column in metric_columns:
+        if column in working.columns:
+            working[column] = working[column].astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fwd1 = fwd1.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fwd3 = fwd3.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fwd5 = fwd5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fwd10 = fwd10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fwd20 = fwd20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    max_up5 = max_up5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    max_up10 = max_up10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    max_up20 = max_up20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    min_down5 = min_down5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    min_down10 = min_down10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    min_down20 = min_down20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_trend_gap = _numeric("benchmark_trend_gap")
+    benchmark_vol_ratio = _numeric("benchmark_vol_ratio")
+    portfolio_cash_weight = _numeric("portfolio_cash_weight", default=1.0)
+    portfolio_recent_turnover_5d = _numeric("portfolio_recent_turnover_5d")
+    portfolio_turnover_pressure = _numeric("portfolio_turnover_pressure")
+    portfolio_cash_deficit = _numeric("portfolio_cash_deficit")
+    portfolio_drawdown_20d = _numeric("portfolio_drawdown_20d")
+    reentry_cooldown = _numeric("reentry_cooldown")
+    recent_buy_flag = _numeric("recent_buy_flag")
+    recent_sell_flag = _numeric("recent_sell_flag")
+    days_since_last_buy = _numeric("days_since_last_buy", default=99.0)
+
+    short_edge = 0.55 * fwd1 + 0.45 * fwd3
+    mid_edge = 0.35 * fwd3 + 0.65 * fwd5
+    long_edge = 0.20 * fwd5 + 0.35 * fwd10 + 0.45 * fwd20
+    edge = 0.15 * short_edge + 0.35 * mid_edge + 0.50 * long_edge
+    opportunity = 0.25 * max_up5 + 0.35 * max_up10 + 0.40 * max_up20
+    downside = 0.25 * min_down5.clip(upper=0).abs() + 0.35 * min_down10.clip(upper=0).abs() + 0.40 * min_down20.clip(upper=0).abs()
+    momentum = (
+        0.28 * working["score_delta_5d"].fillna(0.0).to_numpy(dtype=float)
+        + 0.12 * working["score_delta_accel"].fillna(0.0).to_numpy(dtype=float)
+        + 0.15 * working["score_blend"].fillna(0.0).to_numpy(dtype=float)
+        + 0.12 * working["ret_5d"].fillna(0.0).to_numpy(dtype=float)
+        + 0.08 * working["ret_accel_5_20"].fillna(0.0).to_numpy(dtype=float)
+        - 0.08 * working["vol_20d"].fillna(0.0).to_numpy(dtype=float)
+        - 0.08 * working["volatility_expansion"].fillna(0.0).to_numpy(dtype=float)
+        + 0.10 * working["score_rank_pct"].fillna(0.0).to_numpy(dtype=float)
+        + 0.07 * working["distance_to_20d_high"].fillna(0.0).to_numpy(dtype=float)
+        + 0.04 * working["distance_to_60d_high"].fillna(0.0).to_numpy(dtype=float)
+    )
+    persistence = (
+        0.15 * fwd3.to_numpy(dtype=float)
+        + 0.25 * fwd5.to_numpy(dtype=float)
+        + 0.30 * fwd10.to_numpy(dtype=float)
+        + 0.30 * fwd20.to_numpy(dtype=float)
+    )
+    frontload_gap = max_up5.to_numpy(dtype=float) - max_up20.to_numpy(dtype=float)
+    action_signal = (
+        edge.to_numpy(dtype=float)
+        + 0.30 * opportunity.to_numpy(dtype=float)
+        + 0.22 * momentum
+        + 0.18 * persistence
+        - 0.90 * downside.to_numpy(dtype=float)
+        - 0.12 * frontload_gap
+    )
+    urgency = downside.to_numpy(dtype=float) + np.clip(-short_edge.to_numpy(dtype=float), 0.0, None) - 0.55 * persistence
+    defensive_market = (
+        0.55 * np.clip(-benchmark_trend_gap, 0.0, None)
+        + 0.25 * np.clip(benchmark_vol_ratio, 0.0, None)
+        + 0.20 * np.clip(-portfolio_drawdown_20d - 0.02, 0.0, None)
+    )
+    turnover_drag = np.clip(portfolio_recent_turnover_5d, 0.0, None) * float(config.turnover_sensitivity)
+    cash_pressure = (
+        defensive_market * float(config.cash_regime_sensitivity)
+        + portfolio_cash_deficit * 0.45
+        + turnover_drag
+        + float(config.defensive_cash_bias)
+    )
+
+    duration_bucket: list[str] = []
+    duration_days: list[int] = []
+    for idx in range(len(working)):
+        if float(long_edge.iloc[idx]) > 0.035 and float(opportunity.iloc[idx]) > float(downside.iloc[idx]) * 1.25:
+            duration_bucket.append("extended")
+            duration_days.append(15)
+        elif float(mid_edge.iloc[idx]) > 0.018 and float(opportunity.iloc[idx]) > float(downside.iloc[idx]) * 1.10:
+            duration_bucket.append("swing")
+            duration_days.append(8)
+        elif float(short_edge.iloc[idx]) > 0.0 or float(opportunity.iloc[idx]) > float(downside.iloc[idx]):
+            duration_bucket.append("short")
+            duration_days.append(3)
+        else:
+            duration_bucket.append("avoid")
+            duration_days.append(0)
+
+    working["teacher_edge"] = edge.to_numpy(dtype=float)
+    working["teacher_opportunity"] = opportunity.to_numpy(dtype=float)
+    working["teacher_downside"] = downside.to_numpy(dtype=float)
+    working["teacher_signal"] = action_signal
+    working["teacher_urgency"] = urgency
+    working["entry_quality"] = (
+        0.52 * working["teacher_signal"].to_numpy(dtype=float)
+        + 0.28 * opportunity.to_numpy(dtype=float)
+        + 0.12 * persistence
+        - 0.72 * downside.to_numpy(dtype=float)
+        + 0.05 * np.clip(working["score_rank_pct"].fillna(0.0).to_numpy(dtype=float) - 0.75, 0.0, None)
+        - 0.22 * reentry_cooldown
+        - 0.18 * cash_pressure
+    )
+    working["hold_quality"] = (
+        0.48 * persistence
+        + 0.22 * opportunity.to_numpy(dtype=float)
+        + 0.14 * working["teacher_signal"].to_numpy(dtype=float)
+        - 0.55 * downside.to_numpy(dtype=float)
+        - 0.10 * np.clip(-working["drawdown_from_peak"].fillna(0.0).to_numpy(dtype=float) - 0.06, 0.0, None)
+        + float(config.hold_support_bonus) * np.clip(1.0 - recent_buy_flag * 0.25, 0.0, None)
+        + 0.08 * np.clip(np.asarray(duration_days, dtype=float) - working["hold_days"].fillna(0.0).to_numpy(dtype=float), 0.0, None) / 10.0
+        - 0.18 * turnover_drag
+        - 0.10 * defensive_market
+    )
+    working["add_quality"] = (
+        0.40 * working["hold_quality"].to_numpy(dtype=float)
+        + 0.40 * np.clip(working["entry_quality"].to_numpy(dtype=float), 0.0, None)
+        + 0.10 * np.clip(working["score_delta_accel"].fillna(0.0).to_numpy(dtype=float), 0.0, None)
+        - 0.12 * np.clip(working["current_weight"].fillna(0.0).to_numpy(dtype=float) - 0.12, 0.0, None)
+        - 0.08 * cash_pressure
+    )
+    working["reduce_quality"] = (
+        0.42 * downside.to_numpy(dtype=float)
+        + 0.24 * np.clip(-working["drawdown_from_peak"].fillna(0.0).to_numpy(dtype=float), 0.0, None)
+        + 0.18 * np.clip(-working["teacher_signal"].to_numpy(dtype=float), 0.0, None)
+        + 0.08 * np.clip(-working["score_delta_5d"].fillna(0.0).to_numpy(dtype=float), 0.0, None)
+        + 0.07 * np.clip(working["volatility_expansion"].fillna(0.0).to_numpy(dtype=float), 0.0, None)
+        - float(config.profit_take_penalty) * np.clip(working["unrealized_pnl"].fillna(0.0).to_numpy(dtype=float) - 0.06, 0.0, None) * np.clip(persistence, 0.0, None)
+        - 0.15 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, None)
+    )
+    working["reentry_readiness"] = np.clip(
+        0.65 * working["entry_quality"].to_numpy(dtype=float)
+        - 0.35 * working["teacher_urgency"].to_numpy(dtype=float),
+        0.0,
+        None,
+    )
+    working["planned_holding_bucket"] = duration_bucket
+    working["planned_holding_days"] = duration_days
+
+    labels: list[str] = []
+    delta_hints: list[float] = []
+    priorities: list[float] = []
+    for row in working.itertuples(index=False):
+        held = float(getattr(row, "holding_flag", 0.0) or 0.0) > 0.5
+        in_pool = float(getattr(row, "in_pool", 0.0) or 0.0) > 0.5
+        signal = float(getattr(row, "teacher_signal", 0.0) or 0.0)
+        current_weight = float(getattr(row, "current_weight", 0.0) or 0.0)
+        pnl = float(getattr(row, "unrealized_pnl", 0.0) or 0.0)
+        drawdown = float(getattr(row, "drawdown_from_peak", 0.0) or 0.0)
+        hold_days = float(getattr(row, "hold_days", 0.0) or 0.0)
+        urgency_value = float(getattr(row, "teacher_urgency", 0.0) or 0.0)
+        entry_quality = float(getattr(row, "entry_quality", 0.0) or 0.0)
+        hold_quality = float(getattr(row, "hold_quality", 0.0) or 0.0)
+        add_quality = float(getattr(row, "add_quality", 0.0) or 0.0)
+        reduce_quality = float(getattr(row, "reduce_quality", 0.0) or 0.0)
+        duration_name = str(getattr(row, "planned_holding_bucket", "avoid") or "avoid").strip().lower()
+        duration_target = float(getattr(row, "planned_holding_days", 0.0) or 0.0)
+        raw_days_since_buy = getattr(row, "days_since_last_buy", 99.0)
+        raw_days_since_sell = getattr(row, "days_since_last_sell", 99.0)
+        days_since_buy = float(raw_days_since_buy) if raw_days_since_buy is not None else 99.0
+        days_since_sell = float(raw_days_since_sell) if raw_days_since_sell is not None else 99.0
+        reentry_block = float(getattr(row, "reentry_cooldown", 0.0) or 0.0)
+        cash_pressure_value = float(getattr(row, "portfolio_cash_deficit", 0.0) or 0.0) + float(getattr(row, "portfolio_turnover_pressure", 0.0) or 0.0) * 0.12
+        catastrophic_exit = urgency_value >= float(config.catastrophic_exit_threshold) or drawdown <= -0.14
+        force_hold_window = hold_days < float(config.min_hold_days) and not catastrophic_exit
+        long_horizon = duration_name in {"swing", "extended"}
+        recent_add_window = held and days_since_buy <= max(float(config.min_hold_days), 3.0)
+        unfinished_lifecycle = long_horizon and hold_days < max(duration_target - 1.0, float(config.min_hold_days))
+
+        if held:
+            if (not in_pool) or catastrophic_exit:
+                action = "exit"
+                delta_hint = -1.0
+            elif recent_add_window and urgency_value < float(config.exit_urgency_threshold) * 1.10 and hold_quality > -0.05:
+                action = "hold"
+                delta_hint = min(0.04, max(0.0, hold_quality) * 0.28)
+            elif force_hold_window and hold_quality > -0.03:
+                action = "hold"
+                delta_hint = min(0.03, max(0.0, hold_quality) * 0.25)
+            elif unfinished_lifecycle and hold_quality > reduce_quality - 0.03 and urgency_value < float(config.exit_urgency_threshold) * 1.05:
+                action = "hold"
+                delta_hint = min(0.05, max(0.0, hold_quality) * 0.32 + max(duration_target - hold_days, 0.0) / 220.0)
+            elif urgency_value >= float(config.exit_urgency_threshold) and (hold_days >= float(config.min_hold_days) or pnl < 0.0):
+                action = "exit"
+                delta_hint = -1.0
+            elif reduce_quality >= float(config.reduce_quality_threshold) or (signal < -0.01 and drawdown < -0.06):
+                action = "reduce"
+                delta_hint = -min(0.70, 0.16 + reduce_quality * 1.2 + max(-signal, 0.0))
+            elif add_quality >= float(config.add_quality_threshold) and long_horizon and hold_days >= 1:
+                action = "add"
+                delta_hint = min(0.18, 0.02 + add_quality * 0.85 + duration_target / 120.0)
+            else:
+                action = "hold"
+                delta_hint = min(0.08, max(0.0, hold_quality) * 0.45 + max(duration_target - 3.0, 0.0) / 240.0)
+        else:
+            if (
+                in_pool
+                and duration_name != "avoid"
+                and signal >= float(config.open_signal_threshold)
+                and entry_quality >= float(config.open_entry_threshold)
+                and not (days_since_sell <= float(config.reentry_cooldown_days) and entry_quality < float(config.open_entry_threshold) + 0.035)
+                and not (reentry_block > 0.25 and cash_pressure_value > 0.05)
+            ):
+                action = "open"
+                delta_hint = min(0.18, 0.03 + entry_quality * 0.72 + duration_target / 140.0)
+            else:
+                action = "skip"
+                delta_hint = 0.0
+
+        if action == "open":
+            priority = max(0.0, entry_quality) + max(duration_target - 3.0, 0.0) / 40.0
+        elif action == "add":
+            priority = max(0.0, add_quality) + current_weight * 0.35 + duration_target / 80.0
+        elif action == "hold":
+            priority = max(0.0, hold_quality) + current_weight * 0.25 + duration_target / 120.0
+        elif action == "reduce":
+            priority = max(0.0, reduce_quality)
+        else:
+            priority = 0.0
+        if action == "exit":
+            priority = 0.0
+        labels.append(action)
+        delta_hints.append(float(delta_hint))
+        priorities.append(float(priority))
+
+    working["action_label"] = labels
+    working["target_delta_hint"] = delta_hints
+    working["teacher_priority"] = priorities
+    working["exit_urgency"] = working["teacher_urgency"].clip(lower=0.0)
+    working["label_preset"] = config.name
+    numeric_output_columns = (
+        "teacher_edge",
+        "teacher_opportunity",
+        "teacher_downside",
+        "teacher_signal",
+        "teacher_urgency",
+        "entry_quality",
+        "hold_quality",
+        "add_quality",
+        "reduce_quality",
+        "reentry_readiness",
+        "target_delta_hint",
+        "teacher_priority",
+        "exit_urgency",
+    )
+    for column in numeric_output_columns:
+        working[column] = working[column].astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return working
+
+
+def build_teacher_global_targets(
+    label_frame: pd.DataFrame,
+    *,
+    label_config: str | LifecycleLabelConfig | None = None,
+) -> dict[str, float]:
+    config = resolve_label_config(label_config)
+    positive = label_frame.loc[label_frame["action_label"].isin({"open", "add", "hold"})].copy()
+    strong_positive = positive.loc[positive["teacher_priority"] > 0]
+    candidate_budget = int(np.clip(len(strong_positive), 2, 12)) if len(strong_positive) else 2
+    avg_duration_days = float(strong_positive["planned_holding_days"].mean()) if len(strong_positive) else 0.0
+    concentration_signal = float(strong_positive["teacher_priority"].nlargest(min(3, len(strong_positive))).sum()) if len(strong_positive) else 0.0
+    benchmark_trend_gap = float(label_frame.get("benchmark_trend_gap", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
+    benchmark_vol_ratio = float(label_frame.get("benchmark_vol_ratio", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
+    portfolio_recent_turnover_5d = float(label_frame.get("portfolio_recent_turnover_5d", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
+    portfolio_drawdown_20d = float(label_frame.get("portfolio_drawdown_20d", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
+    hold_share = float((label_frame["action_label"] == "hold").mean()) if len(label_frame) else 0.0
+    defensive_market = (
+        0.55 * max(-benchmark_trend_gap, 0.0)
+        + 0.25 * max(benchmark_vol_ratio, 0.0)
+        + 0.20 * max(-portfolio_drawdown_20d - 0.02, 0.0)
+    )
+    cash_regime = defensive_market * float(config.cash_regime_sensitivity) + portfolio_recent_turnover_5d * float(config.turnover_sensitivity)
+    gross_target = (
+        float(np.clip(strong_positive["teacher_priority"].sum() * float(config.gross_scale), float(config.min_gross_target), float(config.max_gross_target)))
+        if len(strong_positive)
+        else float(config.min_gross_target)
+    )
+    gross_target = float(
+        np.clip(
+            gross_target - float(config.defensive_cash_bias) - cash_regime * 0.24,
+            0.12,
+            float(config.max_gross_target),
+        )
+    )
+
+    exits = int((label_frame["action_label"] == "exit").sum())
+    reduces = int((label_frame["action_label"] == "reduce").sum())
+    opens = int((label_frame["action_label"] == "open").sum())
+    adds = int((label_frame["action_label"] == "add").sum())
+    turnover_budget = float(
+        np.clip(
+            float(config.base_turnover_budget)
+            + opens * 0.025
+            + adds * 0.018
+            + reduces * 0.020
+            + exits * 0.030
+            - avg_duration_days * 0.002,
+            0.10,
+            float(config.max_turnover_budget),
+        )
+    )
+    turnover_budget = float(np.clip(turnover_budget - cash_regime * 0.18, 0.08, float(config.max_turnover_budget)))
+    candidate_budget = int(np.clip(round(candidate_budget - cash_regime * 4.0), 2, 12))
+    max_position_weight_target = float(
+        np.clip(
+            0.10 + concentration_signal * 0.025 + max(avg_duration_days - 3.0, 0.0) * 0.002 - cash_regime * 0.04,
+            0.08,
+            0.26,
+        )
+    )
+    hold_bias_target = float(np.clip(0.18 + avg_duration_days * 0.035 + hold_share * 0.10 + cash_regime * 0.12, 0.12, 0.92))
+    return {
+        "gross_exposure_target": gross_target,
+        "candidate_budget": float(candidate_budget),
+        "turnover_budget": turnover_budget,
+        "max_position_weight_target": max_position_weight_target,
+        "hold_bias_target": hold_bias_target,
+    }
+
+
+def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
+    working = label_frame.set_index("stock").copy()
+    policy = pd.DataFrame(index=working.index)
+    policy["action_label"] = working["action_label"].astype(str)
+    policy["action_strength"] = working["teacher_priority"].astype(float).clip(lower=0.0)
+    policy["target_delta_hint"] = working["target_delta_hint"].astype(float)
+    policy["entry_quality"] = working["entry_quality"].astype(float)
+    policy["hold_quality"] = working["hold_quality"].astype(float)
+    policy["add_quality"] = working["add_quality"].astype(float)
+    policy["reduce_quality"] = working["reduce_quality"].astype(float)
+    policy["reentry_readiness"] = working["reentry_readiness"].astype(float)
+    policy["planned_holding_days"] = working["planned_holding_days"].astype(float)
+    policy["planned_holding_bucket"] = working["planned_holding_bucket"].astype(str)
+    policy["hold_boost"] = np.where(
+        working["action_label"].isin({"hold", "add"}),
+        working["hold_quality"].astype(float).clip(lower=0.0) + working["teacher_priority"].astype(float).clip(lower=0.0) * 0.60,
+        0.0,
+    )
+    policy["exit_urgency"] = working["exit_urgency"].astype(float).clip(lower=0.0)
+    return policy

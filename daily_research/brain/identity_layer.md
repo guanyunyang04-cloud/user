@@ -20,16 +20,19 @@
 - formal、recent、live、promotion 四层必须分开且始终能对齐到真源。
 - strongest-model 的 `formal winner / recent winner / promotable winner` 必须可明确区分。
 - learned-control 的 `fresh formal / constrained formal / recent` 也必须分层表述。
-- 任何正式实验都必须支持 `strict resume`、前台执行、可追溯证据和项目解释器一致性。
+- 任何正式实验都必须支持可追溯证据、前台执行、项目解释器一致性，并明确声明自己属于 `epoch formal candidate` 还是 `non-epoch shadow prototype`。
 - 任意新 agent 在不通读整份 `episodic_memory.md` 的前提下，也能完成接管。
 
 ## 4. 当前硬约束
 - formal / recent / live / promotion 不得混写。
-- 正式训练必须 GPU only。
+- `deep_alpha` 与可 promotion 的 `continuous_policy formal_torch_v2` 都属于 `epoch formal candidate`：必须 GPU only。
+- `epoch formal candidate` 至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume` 续训。
+- `continuous_policy prototype_gbdt_v1` 明确属于 `non-epoch shadow prototype`：只允许 shadow / teacher / ablation，不计入 formal 完整判决，不得直接 promotion。
 - 长实验只允许前台执行。
-- 所有正式实验都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`。
+- 所有 `epoch formal candidate` 都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`。
 - 默认终端超时预算按 `10` 小时处理。
-- 默认追求最有效，不追求最小改动。
+- 默认追求最高效、最合理，不追求最小改动。
+- 某设定在较弱模型上失效，不等于在更强模型上永久淘汰；是否重开验证，取决于预期信息增益是否足够高。
 - `requested_recent_end_date` 与 `effective recent validation end` 必须分开记录。
 - live 默认执行不得被单次 recent 结果静默改写。
 

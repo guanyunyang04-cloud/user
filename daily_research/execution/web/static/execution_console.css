@@ -314,6 +314,21 @@ pre {
   grid-column: span 6;
 }
 
+.surface-grid--continuous-policy > :nth-child(1),
+.surface-grid--continuous-policy > :nth-child(2),
+.surface-grid--continuous-policy > :nth-child(3) {
+  grid-column: span 4;
+}
+
+.surface-grid--continuous-policy > :nth-child(4) {
+  grid-column: 1 / -1;
+}
+
+.surface-grid--continuous-policy > :nth-child(5),
+.surface-grid--continuous-policy > :nth-child(6) {
+  grid-column: span 6;
+}
+
 .surface-panel {
   padding: 1.4rem 1.5rem;
   display: grid;
@@ -630,6 +645,11 @@ pre {
   .surface-grid--guide > :nth-child(6),
   .surface-grid--account > :nth-child(2),
   .surface-grid--account > :nth-child(3),
+  .surface-grid--continuous-policy > :nth-child(1),
+  .surface-grid--continuous-policy > :nth-child(2),
+  .surface-grid--continuous-policy > :nth-child(3),
+  .surface-grid--continuous-policy > :nth-child(5),
+  .surface-grid--continuous-policy > :nth-child(6),
   .surface-grid--dashboard > .surface-panel:nth-child(1),
   .surface-grid--dashboard > .surface-panel:nth-child(2),
   .surface-grid--dashboard > .surface-panel:nth-child(3) {

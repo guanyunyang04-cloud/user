@@ -467,6 +467,19 @@ def _check_project_python_runtime_contract(failures: list[CheckResult]) -> None:
 
 def _check_execution_application_contract(failures: list[CheckResult]) -> None:
     required_files = (
+        "daily_research/continuous_policy/__init__.py",
+        "daily_research/continuous_policy/runtime.py",
+        "daily_research/continuous_policy/state_builder.py",
+        "daily_research/continuous_policy/label_builder.py",
+        "daily_research/continuous_policy/portfolio_simulator.py",
+        "daily_research/continuous_policy/model.py",
+        "daily_research/continuous_policy/model_v2.py",
+        "daily_research/continuous_policy/pipeline_utils.py",
+        "daily_research/continuous_policy/training_contracts.py",
+        "daily_research/continuous_policy/train_policy.py",
+        "daily_research/continuous_policy/evaluate_policy.py",
+        "daily_research/continuous_policy/export_action_panel.py",
+        "daily_research/continuous_policy/run_continuous_policy_protocol.py",
         "daily_research/execution/app.py",
         "daily_research/execution/app_runtime.py",
         "daily_research/execution/app_service.py",
@@ -484,6 +497,7 @@ def _check_execution_application_contract(failures: list[CheckResult]) -> None:
         "daily_research/execution/web/templates/job_detail.html",
         "daily_research/execution/web/templates/doctor.html",
         "daily_research/execution/web/templates/trade_plan.html",
+        "daily_research/execution/web/templates/continuous_policy.html",
         "daily_research/execution/web/templates/guide.html",
         "daily_research/execution/web/templates/runtime.html",
         "daily_research/execution/web/templates/account.html",
@@ -509,14 +523,73 @@ def _check_execution_application_contract(failures: list[CheckResult]) -> None:
         )
 
 
+def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> None:
+    train_text = _read_text("daily_research/continuous_policy/train_policy.py")
+    protocol_text = _read_text("daily_research/continuous_policy/run_continuous_policy_protocol.py")
+    model_v2_text = _read_text("daily_research/continuous_policy/model_v2.py")
+    contracts_text = _read_text("daily_research/continuous_policy/training_contracts.py")
+    for snippet, label in (
+        ("--trainer-backend", "train_policy backend selector"),
+        ("--epochs", "train_policy epoch budget"),
+        ("--resume-mode", "train_policy strict resume"),
+        ("formal_torch_v2", "train_policy promotable backend"),
+        ("prototype_gbdt_v1", "train_policy prototype backend"),
+    ):
+        _require(
+            snippet in train_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy train entrypoint is missing required contract marker: {label}",
+        )
+    for snippet, label in (
+        ("--trainer-backend", "protocol backend selector"),
+        ("contract_promotable", "protocol promotion gate contract check"),
+        ("training_contract", "protocol contract summary"),
+    ):
+        _require(
+            snippet in protocol_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy protocol is missing required contract marker: {label}",
+        )
+    for snippet, label in (
+        ("checkpoint_last.pt", "checkpoint last"),
+        ("checkpoint_best.pt", "checkpoint best"),
+        ("strict resume", "strict resume wording"),
+        ("torch.cuda.is_available", "cuda contract check"),
+        ("continuous_policy_v2_artifact.pt", "formal artifact path"),
+    ):
+        _require(
+            snippet in model_v2_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy torch v2 backend is missing required contract marker: {label}",
+        )
+    for snippet, label in (
+        ("epoch_resume_formal_candidate", "formal contract class"),
+        ("non_epoch_shadow_prototype", "prototype contract class"),
+        ("promotable", "promotion eligibility flag"),
+        ("resume_capable", "resume capability flag"),
+    ):
+        _require(
+            snippet in contracts_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy training contracts are missing required marker: {label}",
+        )
+
+
 def _check_memory_sync(failures: list[CheckResult]) -> None:
     required_strings = {
         "daily_research/brain/identity_layer.md": (
             "Agent 无状态，项目大脑有状态",
             "正式生产研究与执行主线",
             "strict resume",
+            "至少从 `32` epoch 起步",
+            "non-epoch shadow prototype",
+            "formal_torch_v2",
             "前台执行",
-            "默认追求最有效",
+            "默认追求最高效、最合理",
         ),
         "daily_research/brain/state_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -530,11 +603,20 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "run_execution_app.py",
             "Web 控制台",
             "Start-Job",
+            "continuous_policy",
+            "run_continuous_policy_protocol.py",
+            "不足 `32` epoch 不构成完整判决",
+            "默认最高效、最合理实验",
         ),
         "daily_research/brain/knowledge_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "strict resume",
+            "至少从 `32` epoch 起步",
+            "默认做最高效、最合理的实验",
+            "不做无目的广扫",
+            "prototype_gbdt_v1",
+            "formal_torch_v2",
             "formal 验证采用滚动窗口协议",
             "recent 验证现在是 strongest-model 研究闭环必备伴随证据",
             "recent 胜利不能直接当 promotion 结论",
@@ -544,6 +626,9 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "FastAPI",
             "简体中文",
             "Start-Job",
+            "continuous_policy",
+            "/continuous-policy",
+            "run_continuous_policy_protocol.py",
         ),
         "daily_research/brain/governance_layer.md": (
             "目标一致性检查",
@@ -565,6 +650,14 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "run_execution_web.py",
             "使用教程",
             "Start-Job",
+            "默认先给足 `32` epoch 起步预算",
+            "最高效、最合理",
+            "prototype_gbdt_v1",
+            "formal_torch_v2",
+            "continuous-policy-protocol",
+            "continuous-policy-train",
+            "/continuous-policy",
+            "run_continuous_policy_protocol.py",
         ),
     }
     for relative_path, snippets in required_strings.items():
@@ -590,6 +683,7 @@ def run_checks() -> list[CheckResult]:
     _check_environment_source_of_truth(failures)
     _check_project_python_runtime_contract(failures)
     _check_execution_application_contract(failures)
+    _check_continuous_policy_training_contract(failures)
     _check_memory_sync(failures)
     return failures
 

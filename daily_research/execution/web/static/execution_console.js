@@ -270,6 +270,182 @@
     startPolling(refresh, 5000);
   }
 
+  function initContinuousPolicy() {
+    const renderPreviewRows = (rows) =>
+      (rows || [])
+        .map(
+          (row) => `
+            <tr>
+              <td>${escapeHtml(row.stock || "")}</td>
+              <td>${escapeHtml(row.share_action || row.execution_action || "暂无")}</td>
+              <td>${escapeHtml(row.current_weight || "0")}</td>
+              <td>${escapeHtml(row.target_weight || "0")}</td>
+              <td>${escapeHtml(row.current_shares || "0")}</td>
+              <td>${escapeHtml(row.target_shares || "0")}</td>
+              <td>${escapeHtml(row.reason_summary || "见 reasoning.json")}</td>
+            </tr>
+          `
+        )
+        .join("");
+
+    const refresh = async () => {
+      const payload = await fetchJson("/api/continuous-policy");
+      const train = payload.latest_train || {};
+      const evaluation = payload.latest_evaluation || {};
+      const continuousMetrics = evaluation.continuous_policy_metrics || {};
+      const continuityMetrics = evaluation.continuity_metrics || {};
+      const teacherMetrics = evaluation.teacher_oracle_metrics || {};
+      const referenceMetrics = evaluation.active_manifest_reference?.metrics || {};
+      const latestExport = payload.latest_export || {};
+      const latestProtocol = payload.latest_protocol || {};
+      const protocolShadow = latestProtocol.shadow || {};
+      const protocolTrainWindow = latestProtocol.train_window || {};
+      const protocolEvalWindow = latestProtocol.evaluation_window || {};
+      const protocolShadowWindow = latestProtocol.shadow_window || {};
+      const runtimeState = payload.runtime_state || {};
+
+      updateText("#cp-latest-model", train.model_artifact_path || "暂无");
+      updateText("#cp-latest-signal", latestExport.signal_date || "暂无");
+      updateText("#cp-latest-protocol", latestProtocol.run_tag || "暂无");
+      updateText("#cp-runtime-holdings", String(Object.keys(runtimeState.holdings || {}).length));
+      updateText(
+        "#cp-runtime-gap",
+        latestExport.runtime_alignment_gap !== null && latestExport.runtime_alignment_gap !== undefined
+          ? String(latestExport.runtime_alignment_gap)
+          : "暂无"
+      );
+
+      updateText("#cp-train-tag", train.run_tag || "暂无");
+      updateText("#cp-train-at", train.trained_at || "暂无");
+      updateText("#cp-train-backend", train.trainer_backend || "暂无");
+      updateText("#cp-train-contract", train.training_contract?.contract_class || "暂无");
+      updateText("#cp-train-pool", train.pool_name || "暂无");
+      updateText("#cp-train-preset", train.label_preset || "暂无");
+      updateText("#cp-train-samples", train.sample_rows !== undefined ? String(train.sample_rows) : "暂无");
+      updateText("#cp-train-features", train.feature_count !== undefined ? String(train.feature_count) : "暂无");
+      updateText(
+        "#cp-train-epochs",
+        train.training_diagnostics?.completed_epochs !== undefined ? String(train.training_diagnostics.completed_epochs) : "暂无"
+      );
+      updateText(
+        "#cp-train-best-epoch",
+        train.training_diagnostics?.best_epoch !== undefined ? String(train.training_diagnostics.best_epoch) : "暂无"
+      );
+      updateText("#cp-train-path", train.model_artifact_path || "暂无");
+
+      updateText("#cp-eval-annual", continuousMetrics.annual_return !== undefined ? String(continuousMetrics.annual_return) : "暂无");
+      updateText("#cp-eval-sharpe", continuousMetrics.sharpe !== undefined ? String(continuousMetrics.sharpe) : "暂无");
+      updateText("#cp-eval-mdd", continuousMetrics.max_drawdown !== undefined ? String(continuousMetrics.max_drawdown) : "暂无");
+      updateText("#cp-eval-turnover", continuousMetrics.avg_turnover !== undefined ? String(continuousMetrics.avg_turnover) : "暂无");
+      updateText("#cp-teacher-annual", teacherMetrics.annual_return !== undefined ? String(teacherMetrics.annual_return) : "暂无");
+      updateText("#cp-reference-annual", referenceMetrics.annual_return !== undefined ? String(referenceMetrics.annual_return) : "暂无");
+      updateText("#cp-cont-add-win", continuityMetrics.add_win_rate_5d !== undefined ? String(continuityMetrics.add_win_rate_5d) : "暂无");
+      updateText(
+        "#cp-cont-reduce",
+        continuityMetrics.reduce_success_rate_5d !== undefined ? String(continuityMetrics.reduce_success_rate_5d) : "暂无"
+      );
+      updateText(
+        "#cp-cont-exit",
+        continuityMetrics.exit_timeliness_rate_5d !== undefined ? String(continuityMetrics.exit_timeliness_rate_5d) : "暂无"
+      );
+      updateText(
+        "#cp-cont-cash",
+        continuityMetrics.cash_timing_quality_1d !== undefined ? String(continuityMetrics.cash_timing_quality_1d) : "暂无"
+      );
+      updateText(
+        "#cp-cont-hold",
+        continuityMetrics.avg_hold_days_before_action !== undefined ? String(continuityMetrics.avg_hold_days_before_action) : "暂无"
+      );
+      updateText(
+        "#cp-cont-reentry",
+        continuityMetrics.reentry_within_10d_rate !== undefined ? String(continuityMetrics.reentry_within_10d_rate) : "暂无"
+      );
+      updateText(
+        "#cp-cont-hold-share",
+        continuityMetrics.hold_share !== undefined ? String(continuityMetrics.hold_share) : "暂无"
+      );
+      updateText(
+        "#cp-cont-hold-quality",
+        continuityMetrics.hold_retention_quality_5d !== undefined ? String(continuityMetrics.hold_retention_quality_5d) : "暂无"
+      );
+      updateText(
+        "#cp-cont-reduce-quality",
+        continuityMetrics.reduce_preservation_quality_5d !== undefined ? String(continuityMetrics.reduce_preservation_quality_5d) : "暂无"
+      );
+      updateText(
+        "#cp-cont-reversal",
+        continuityMetrics.immediate_reversal_rate_3d !== undefined ? String(continuityMetrics.immediate_reversal_rate_3d) : "暂无"
+      );
+      updateText("#cp-protocol-tag", latestProtocol.run_tag || "暂无");
+      updateText("#cp-protocol-backend", latestProtocol.trainer_backend || train.trainer_backend || "暂无");
+      updateText("#cp-protocol-contract", latestProtocol.training_contract?.contract_class || train.training_contract?.contract_class || "暂无");
+      updateText(
+        "#cp-protocol-train-window",
+        protocolTrainWindow.start_date && protocolTrainWindow.end_date
+          ? `${protocolTrainWindow.start_date} -> ${protocolTrainWindow.end_date}`
+          : "暂无"
+      );
+      updateText(
+        "#cp-protocol-eval-window",
+        protocolEvalWindow.start_date && protocolEvalWindow.end_date
+          ? `${protocolEvalWindow.start_date} -> ${protocolEvalWindow.end_date}`
+          : "暂无"
+      );
+      updateText(
+        "#cp-protocol-shadow-window",
+        protocolShadowWindow.start_date && protocolShadowWindow.end_date
+          ? `${protocolShadowWindow.start_date} -> ${protocolShadowWindow.end_date}`
+          : "暂无"
+      );
+      updateText("#cp-protocol-preset", latestProtocol.label_preset || train.label_preset || "暂无");
+      updateText(
+        "#cp-protocol-shadow-annual",
+        protocolShadow.metrics?.annual_return !== undefined ? String(protocolShadow.metrics.annual_return) : "暂无"
+      );
+      updateText(
+        "#cp-protocol-promotable",
+        latestProtocol.training_contract?.promotable ? "是" : latestProtocol.training_contract ? "否" : "暂无"
+      );
+      updateText(
+        "#cp-protocol-gate",
+        latestProtocol.promotion_gate?.status ? String(latestProtocol.promotion_gate.status) : "暂无"
+      );
+      updateText("#cp-protocol-summary-json", latestProtocol.protocol_summary_json || protocolShadow.shadow_summary_json || "暂无");
+
+      updateText("#cp-export-date", latestExport.signal_date || "暂无");
+      updateText("#cp-export-dir", latestExport.export_dir || "暂无");
+      updateText("#cp-export-csv", latestExport.action_panel_csv || "暂无");
+      updateText("#cp-export-reasoning", latestExport.reasoning_json || "暂无");
+      updateText("#cp-export-runtime", latestExport.runtime_state_json || "暂无");
+      updateText(
+        "#cp-export-gap",
+        latestExport.runtime_alignment_gap !== null && latestExport.runtime_alignment_gap !== undefined
+          ? String(latestExport.runtime_alignment_gap)
+          : "暂无"
+      );
+
+      updateText("#cp-runtime-date", runtimeState.last_signal_date || "暂无");
+      updateText(
+        "#cp-runtime-cash",
+        runtimeState.cash_weight !== null && runtimeState.cash_weight !== undefined ? String(runtimeState.cash_weight) : "暂无"
+      );
+      updateText("#cp-runtime-count", String(Object.keys(runtimeState.holdings || {}).length));
+      updateText("#cp-runtime-model", runtimeState.latest_model_artifact || "暂无");
+      updateText("#cp-runtime-export-dir", runtimeState.latest_export_dir || "暂无");
+      updateText(
+        "#cp-runtime-gap-detail",
+        runtimeState.runtime_alignment_gap !== null && runtimeState.runtime_alignment_gap !== undefined
+          ? String(runtimeState.runtime_alignment_gap)
+          : "暂无"
+      );
+
+      const tableBody = $("#cp-action-table-body");
+      if (tableBody) tableBody.innerHTML = renderPreviewRows(payload.action_panel_preview || []);
+    };
+
+    startPolling(refresh, 4500);
+  }
+
   function buildAccountRow(position) {
     const row = position || {};
     return `
@@ -463,6 +639,7 @@
     if (page === "job-detail") initJobDetail();
     if (page === "doctor") initDoctor();
     if (page === "trade-plan") initTradePlan();
+    if (page === "continuous-policy") initContinuousPolicy();
     if (page === "account") initAccount();
     if (page === "runtime") initRuntime();
   });

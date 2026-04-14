@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -13,6 +13,7 @@ from daily_research.execution.web_models import AccountSnapshotRequest, ResumeRe
 from daily_research.execution.web_service import (
     account_context,
     base_context,
+    continuous_policy_context,
     dashboard_context,
     doctor_context,
     guide_context,
@@ -87,6 +88,10 @@ def create_app() -> FastAPI:
     def trade_plan_page(request: Request) -> HTMLResponse:
         return _render_template(request, "trade_plan.html", active_path="/artifacts/trade-plan", context=trade_plan_context())
 
+    @app.get("/continuous-policy", response_class=HTMLResponse)
+    def continuous_policy_page(request: Request) -> HTMLResponse:
+        return _render_template(request, "continuous_policy.html", active_path="/continuous-policy", context=continuous_policy_context())
+
     @app.get("/account", response_class=HTMLResponse)
     def account_page(request: Request) -> HTMLResponse:
         return _render_template(request, "account.html", active_path="/account", context=account_context())
@@ -145,6 +150,10 @@ def create_app() -> FastAPI:
     @app.get("/api/trade-plan")
     def api_trade_plan() -> dict[str, Any]:
         return app_service.latest_trade_plan_summary(max_lines=240)
+
+    @app.get("/api/continuous-policy")
+    def api_continuous_policy() -> dict[str, Any]:
+        return app_service.continuous_policy_summary(action_rows_limit=16)
 
     @app.get("/api/account")
     def api_account() -> dict[str, Any]:
