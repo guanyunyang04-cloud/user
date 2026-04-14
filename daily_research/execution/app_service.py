@@ -14,6 +14,8 @@ from typing import Any, TextIO
 
 from daily_research.continuous_policy.runtime import (
     CONTINUOUS_POLICY_ROOT,
+    LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH,
+    LATEST_CONCLUSION_LEDGER_PATH,
     LATEST_EVALUATION_SUMMARY_PATH,
     LATEST_EXPORT_SUMMARY_PATH,
     LATEST_PROTOCOL_SUMMARY_PATH,
@@ -282,6 +284,8 @@ def continuous_policy_summary(*, action_rows_limit: int = 12) -> dict[str, Any]:
     evaluation_summary = _read_json(LATEST_EVALUATION_SUMMARY_PATH)
     export_summary = _read_json(LATEST_EXPORT_SUMMARY_PATH)
     protocol_summary = _read_json(LATEST_PROTOCOL_SUMMARY_PATH)
+    behavior_audit_summary = _read_json(LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH)
+    conclusion_ledger_summary = _read_json(LATEST_CONCLUSION_LEDGER_PATH)
     runtime_summary = _read_json(CONTINUOUS_POLICY_RUNTIME_STATE_PATH)
     action_panel_path = Path(str(export_summary.get("action_panel_csv", "") or "")).expanduser()
     return {
@@ -291,6 +295,8 @@ def continuous_policy_summary(*, action_rows_limit: int = 12) -> dict[str, Any]:
         "latest_evaluation": evaluation_summary,
         "latest_export": export_summary,
         "latest_protocol": protocol_summary,
+        "latest_behavior_audit": behavior_audit_summary,
+        "latest_conclusion_ledger": conclusion_ledger_summary,
         "runtime_state": runtime_summary,
         "action_panel_preview": _read_csv_preview(action_panel_path, limit=action_rows_limit)
         if action_panel_path and action_panel_path.exists()

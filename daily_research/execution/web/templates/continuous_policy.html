@@ -51,6 +51,7 @@
       <div><dt>运行标签</dt><dd id="cp-train-tag">{{ continuous_policy.latest_train.run_tag or "暂无" }}</dd></div>
       <div><dt>训练时间</dt><dd id="cp-train-at">{{ continuous_policy.latest_train.trained_at or "暂无" }}</dd></div>
       <div><dt>训练后端</dt><dd id="cp-train-backend">{{ continuous_policy.latest_train.trainer_backend or "暂无" }}</dd></div>
+      <div><dt>解码预设</dt><dd id="cp-train-decoder">{{ continuous_policy.latest_train.decoder_profile or "暂无" }}</dd></div>
       <div><dt>合同类型</dt><dd id="cp-train-contract">{{ continuous_policy.latest_train.training_contract.contract_class if continuous_policy.latest_train.training_contract else "暂无" }}</dd></div>
       <div><dt>股票池</dt><dd id="cp-train-pool">{{ continuous_policy.latest_train.pool_name or "暂无" }}</dd></div>
       <div><dt>标签预设</dt><dd id="cp-train-preset">{{ continuous_policy.latest_train.label_preset or "暂无" }}</dd></div>
@@ -104,6 +105,7 @@
     <dl class="detail-list detail-list--dense">
       <div><dt>协议标签</dt><dd id="cp-protocol-tag">{{ continuous_policy.latest_protocol.run_tag or "暂无" }}</dd></div>
       <div><dt>训练后端</dt><dd id="cp-protocol-backend">{{ continuous_policy.latest_protocol.trainer_backend or "暂无" }}</dd></div>
+      <div><dt>解码预设</dt><dd id="cp-protocol-decoder">{{ continuous_policy.latest_protocol.decoder_profile or "暂无" }}</dd></div>
       <div><dt>合同类型</dt><dd id="cp-protocol-contract">{{ continuous_policy.latest_protocol.training_contract.contract_class if continuous_policy.latest_protocol.training_contract else "暂无" }}</dd></div>
       <div><dt>训练窗口</dt><dd id="cp-protocol-train-window">{{ continuous_policy.latest_protocol.train_window.start_date ~ " -> " ~ continuous_policy.latest_protocol.train_window.end_date if continuous_policy.latest_protocol.train_window else "暂无" }}</dd></div>
       <div><dt>评估窗口</dt><dd id="cp-protocol-eval-window">{{ continuous_policy.latest_protocol.evaluation_window.start_date ~ " -> " ~ continuous_policy.latest_protocol.evaluation_window.end_date if continuous_policy.latest_protocol.evaluation_window else "暂无" }}</dd></div>
@@ -113,6 +115,19 @@
       <div><dt>可 Promotion</dt><dd id="cp-protocol-promotable">{{ "是" if continuous_policy.latest_protocol.training_contract and continuous_policy.latest_protocol.training_contract.promotable else "否" }}</dd></div>
       <div><dt>Promotion Gate</dt><dd id="cp-protocol-gate">{{ continuous_policy.latest_protocol.promotion_gate.status if continuous_policy.latest_protocol.promotion_gate else "暂无" }}</dd></div>
       <div><dt>协议摘要</dt><dd class="path-value" id="cp-protocol-summary-json">{{ continuous_policy.latest_protocol.protocol_summary_json or "暂无" }}</dd></div>
+    </dl>
+  </article>
+
+  <article class="surface-panel">
+    <div class="panel-heading">
+      <p class="section-kicker">审计</p>
+      <h3>行为差距与结论账本</h3>
+    </div>
+    <dl class="detail-list detail-list--dense">
+      <div><dt>最新行为审计</dt><dd class="path-value" id="cp-audit-path">{{ continuous_policy.latest_behavior_audit.output_path or "暂无" }}</dd></div>
+      <div><dt>首要瓶颈</dt><dd id="cp-audit-top">{{ continuous_policy.latest_behavior_audit.bottlenecks[0].name if continuous_policy.latest_behavior_audit.bottlenecks else "暂无" }}</dd></div>
+      <div><dt>最新结论账本</dt><dd class="path-value" id="cp-ledger-path">{{ continuous_policy.latest_conclusion_ledger.output_path or "暂无" }}</dd></div>
+      <div><dt>阶段结论数</dt><dd id="cp-ledger-stage-count">{{ continuous_policy.latest_conclusion_ledger.stage_local_conclusions|length if continuous_policy.latest_conclusion_ledger.stage_local_conclusions else 0 }}</dd></div>
     </dl>
   </article>
 

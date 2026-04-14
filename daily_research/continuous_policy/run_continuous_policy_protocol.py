@@ -12,6 +12,8 @@ if __package__ in {None, ""}:
 import pandas as pd
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.continuous_policy.analyze_behavior_gap import main as behavior_audit_main
+from daily_research.continuous_policy.conclusion_ledger import main as conclusion_ledger_main
 from daily_research.continuous_policy.label_builder import LABEL_CONFIGS
 from daily_research.continuous_policy.evaluate_policy import main as evaluate_main
 from daily_research.continuous_policy.export_action_panel import main as export_main
@@ -47,6 +49,12 @@ PROMOTION_THRESHOLDS = {
     "hold_share": 0.15,
     "avg_turnover_max": 0.25,
     "max_drawdown_min": -0.06,
+}
+
+TRAINING_EVIDENCE_THRESHOLDS = {
+    "min_train_day_count": 180,
+    "min_teacher_action_rows": 10000,
+    "best_epoch_edge_margin": 2,
 }
 
 
@@ -94,6 +102,7 @@ def _build_promotion_gate(
     train_summary: dict[str, Any],
     evaluation_summary: dict[str, Any],
     shadow_summary: dict[str, Any],
+    training_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     training_contract = dict(
         train_summary.get("training_contract", {})
@@ -113,6 +122,7 @@ def _build_promotion_gate(
             break
     checks = {
         "contract_promotable": bool(training_contract.get("promotable", False)),
+        "training_evidence_sufficient": str(training_evidence.get("status", "") or "") == "sufficient",
         "open_win_rate_5d": float(continuity.get("open_win_rate_5d", 0.0) or 0.0) >= PROMOTION_THRESHOLDS["open_win_rate_5d"],
         "reduce_success_rate_5d": float(continuity.get("reduce_success_rate_5d", 0.0) or 0.0) >= PROMOTION_THRESHOLDS["reduce_success_rate_5d"],
         "exit_timeliness_rate_5d": float(continuity.get("exit_timeliness_rate_5d", 0.0) or 0.0) >= PROMOTION_THRESHOLDS["exit_timeliness_rate_5d"],
@@ -130,6 +140,59 @@ def _build_promotion_gate(
         "status": "eligible" if not failed_checks else "shadow_only",
         "failed_checks": failed_checks,
         "checks": checks,
+    }
+
+
+def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = dict(train_summary.get("training_diagnostics", {}) or {})
+    teacher_summary = dict(train_summary.get("teacher_summary", {}) or {})
+    completed_epochs = int(diagnostics.get("completed_epochs", 0) or 0)
+    best_epoch = int(diagnostics.get("best_epoch", 0) or 0)
+    train_day_count = int(
+        diagnostics.get("train_day_count", train_summary.get("daily_rows", 0)) or 0
+    )
+    validation_day_count = int(diagnostics.get("validation_day_count", 0) or 0)
+    train_sample_rows = int(
+        diagnostics.get("train_sample_rows", teacher_summary.get("train_sample_rows", train_summary.get("sample_rows", 0)))
+        or 0
+    )
+    teacher_action_rows = int(teacher_summary.get("action_rows", 0) or 0)
+    edge_margin = int(TRAINING_EVIDENCE_THRESHOLDS["best_epoch_edge_margin"])
+    best_epoch_not_at_edge = completed_epochs > 0 and best_epoch <= max(completed_epochs - edge_margin, 0)
+    checks = {
+        "train_day_count": train_day_count >= int(TRAINING_EVIDENCE_THRESHOLDS["min_train_day_count"]),
+        "teacher_action_rows": teacher_action_rows >= int(TRAINING_EVIDENCE_THRESHOLDS["min_teacher_action_rows"]),
+        "best_epoch_not_at_edge": bool(best_epoch_not_at_edge),
+    }
+    failed_checks = [name for name, ok in checks.items() if not ok]
+    status = "sufficient" if not failed_checks else "insufficient"
+    recommended_actions: list[str] = []
+    if not checks["best_epoch_not_at_edge"] and completed_epochs > 0:
+        recommended_actions.append(
+            f"best_epoch={best_epoch} 仍贴近 completed_epochs={completed_epochs} 边缘；先沿同一 run_dir 做 strict resume，把预算至少加到 {completed_epochs + 16} epoch。"
+        )
+    if not checks["train_day_count"]:
+        recommended_actions.append(
+            f"当前 train_day_count={train_day_count} 低于 {TRAINING_EVIDENCE_THRESHOLDS['min_train_day_count']}；下一轮应显式向前扩训练窗口。"
+        )
+    if not checks["teacher_action_rows"]:
+        recommended_actions.append(
+            f"当前 teacher_action_rows={teacher_action_rows} 低于 {TRAINING_EVIDENCE_THRESHOLDS['min_teacher_action_rows']}；应扩样本窗口或降低过度稀疏的标签过滤。"
+        )
+    if not recommended_actions:
+        recommended_actions.append("当前训练预算与样本覆盖已达到本轮正式证据下限。")
+    return {
+        "status": status,
+        "failed_checks": failed_checks,
+        "checks": checks,
+        "thresholds": dict(TRAINING_EVIDENCE_THRESHOLDS),
+        "completed_epochs": completed_epochs,
+        "best_epoch": best_epoch,
+        "train_day_count": train_day_count,
+        "validation_day_count": validation_day_count,
+        "train_sample_rows": train_sample_rows,
+        "teacher_action_rows": teacher_action_rows,
+        "recommended_actions": recommended_actions,
     }
 
 
@@ -452,12 +515,44 @@ def main(argv: list[str] | None = None) -> int:
             "export_summary_json": str((EXPORTS_ROOT / export_tag / "export_summary.json").resolve()),
         },
     }
+    summary_payload["training_evidence"] = _build_training_evidence_assessment(train_summary)
     summary_payload["promotion_gate"] = _build_promotion_gate(
         train_summary=train_summary,
         evaluation_summary=evaluation_summary,
         shadow_summary=shadow_summary,
+        training_evidence=summary_payload["training_evidence"],
     )
-    write_json(protocol_root / "protocol_summary.json", summary_payload)
+    protocol_summary_path = protocol_root / "protocol_summary.json"
+    write_json(protocol_summary_path, summary_payload)
+    audit_tag = f"{protocol_tag}__audit"
+    _call_stage(
+        "behavior-audit",
+        behavior_audit_main,
+        [
+            "--evaluation-summary",
+            str((EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json").resolve()),
+            "--tag",
+            audit_tag,
+        ],
+    )
+    ledger_tag = f"{protocol_tag}__ledger"
+    _call_stage(
+        "conclusion-ledger",
+        conclusion_ledger_main,
+        [
+            "--protocol-summary",
+            str(protocol_summary_path.resolve()),
+            "--tag",
+            ledger_tag,
+        ],
+    )
+    summary_payload["latest_behavior_audit"] = _read_json(
+        OUTPUT_ROOT / "continuous_policy" / "analysis" / "behavior_audits" / f"{audit_tag}.json"
+    )
+    summary_payload["latest_conclusion_ledger"] = _read_json(
+        OUTPUT_ROOT / "continuous_policy" / "analysis" / "conclusion_ledgers" / f"{ledger_tag}.json"
+    )
+    write_json(protocol_summary_path, summary_payload)
     update_latest_summary("protocol", summary_payload)
     print(json.dumps(summary_payload, ensure_ascii=False, indent=2))
     return 0

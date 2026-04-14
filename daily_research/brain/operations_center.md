@@ -14,6 +14,8 @@
   - 进入 `daily_research/continuous_policy`
 - 产物与归档：
   - 查看 `daily_research/output`、`daily_research/archive`
+- 项目路线与阶段成果派生总览（非权威摘要）：
+  - 查看 `daily_research/output/project_review/latest_project_route_review.md`
 
 ## 2. 默认操作纪律
 - 当前接管默认不从 `episodic_memory.md` 起步
@@ -29,6 +31,8 @@
 - 实验设计默认按“最高效、最合理”执行：如果某设定可能只在更强模型上有效，可以重开验证，但必须先写清要验证的假设、额外成本和停止条件
 - `epoch formal candidate` 默认先给足 `32` epoch 起步预算；若证据还不够，优先沿同一 `experiment-tag / run_dir` 做 `strict resume`，不优先 fresh rerun
 - `non-epoch shadow prototype` 只允许 teacher / shadow / ablation，不适用 `32 epoch` 判决线，也不得直接 promotion
+- `formal_torch_seq_v3` 是 stronger temporal branch；只有当 `v2` 的 `hold / reduce / cash` 仍受限时才进入主计划，但一旦进入就沿正式合同执行
+- `formal_torch_hier_v4` 是 hierarchical temporal portfolio branch；当前用于验证“market / portfolio / cross-section interaction”这条更自由的分层神经网络路线
 - strongest-model recent 现在只承认 `independent_recent_model_as_of_recent_start`
 - 默认执行物化必须使用当前可标注最新数据做 `production full-fit`
 - 当前统一权重语义是 `research_raw_target_weight`
@@ -69,8 +73,34 @@
   - `python daily_research/continuous_policy/train_policy.py --help`
   - `python daily_research/continuous_policy/evaluate_policy.py --help`
   - `python daily_research/continuous_policy/export_action_panel.py --help`
+  - `python daily_research/continuous_policy/analyze_behavior_gap.py --help`
+  - `python daily_research/continuous_policy/conclusion_ledger.py --help`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260413 --shadow-start-date 20260401 --shadow-end-date 20260413`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v3 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_holdcash_r2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_holdcash_v5_formal_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_hier_v4 --decoder-profile holdcash_v5 --epochs 44 --min-epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_hier_v4_holdcash_r5`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile reduceexit_v4 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v4 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_reduceexit_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile cash_v4 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v4 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_cash_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile reduceexit_cash_v4 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v4 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_reduceexit_cash_r1`
+  - 当前 stronger temporal 默认锚点：`cp_v3_seq_holdcash_r1`
+  - 当前 stronger temporal 最新 `holdcash_v5` 修补真源：`cp_v3_seq_holdcash_r2`
+    - 它把 `cash_timing_quality_1d` 与 `immediate_reversal_rate_3d` 明显修好
+    - 但 `hold_share` 掉到 `0.0777`，所以 `latest_*` 仍不跟随它
+  - 当前 stronger temporal 长窗正式真源：`cp_v3_seq_holdcash_v5_formal_r1`
+    - `training_evidence` 已过线：`train_day_count = 409`、`teacher_action_rows = 22604`、`best_epoch = 45 / 48`
+    - 但 `hold_share = 0.0`、`reduce_success_rate_5d = 0.0`、`cash_timing_quality_1d = -0.0908`
+    - 说明它当前失败已不能再归因于“单纯预算/样本不足”
+  - 当前 hierarchical temporal 最新修复真源：`cp_hier_v4_holdcash_r5`
+    - `r3` 暴露 stock index 错位，`r4` 修复 formal 非零交易回放，`r5` 再沿同一 `run_dir` strict resume 到 `44` epoch
+    - `r5` 已把 `immediate_reversal_rate_3d` 压到 `0.0883`，但 `hold_share` 仍是 `0`
+  - 当前 stronger temporal repair 对照结论：
+    - 短窗 `holdcash_v5 / reduceexit_v4 / cash_v4 / reduceexit_cash_v4` 都只作为 repair / 局部修补对照
+    - 若 `training_evidence` 不足，就先 strict resume / 扩窗口，不把该 run 当终局证据
+    - 对照完成后 `latest_*` 已回切到 `cp_v3_seq_holdcash_r1`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_hier_v4 --decoder-profile holdcash_v5 --epochs 44 --min-epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend prototype_gbdt_v1 --pool-name liquid500 --label-preset swing_v2`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-evaluate -- --label-preset swing_v2`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-export -- --signal-date 20260413`
@@ -95,7 +125,11 @@
 - 命令里的裸 `python` 只是一种简写；真实执行必须绑定到 `conda run -n yolos python` 或显式 `yolos` python
 - 脚本内部转调也必须显式落到 `yolos` python，不得回退到 `quant` 或当前 shell Python
 - 训练一律使用 GPU；没有 CUDA 就视为阻塞
-- continuous_policy 的这条 GPU 约束只对 `formal_torch_v2` 生效；`prototype_gbdt_v1` 保持 shadow 原型身份，不计入正式训练合规
+- continuous_policy 的 GPU 正式训练约束适用于 `formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4`；`prototype_gbdt_v1` 保持 shadow 原型身份，不计入正式训练合规
+- continuous_policy 的正式证据判断还要额外看：
+  - `training_evidence.train_day_count`
+  - `training_evidence.teacher_action_rows`
+  - `training_evidence.best_epoch_not_at_edge`
 - 不依赖“当前 shell 已激活 conda 环境”的隐式状态
 - `t0_project/tqcenter.py` 是工作区内本地依赖，不由 conda 安装
 - brain 文档统一使用 UTF-8

@@ -5,9 +5,13 @@ from typing import Any
 
 TRAINER_BACKEND_PROTOTYPE_V1 = "prototype_gbdt_v1"
 TRAINER_BACKEND_FORMAL_V2 = "formal_torch_v2"
+TRAINER_BACKEND_FORMAL_SEQ_V3 = "formal_torch_seq_v3"
+TRAINER_BACKEND_FORMAL_HIER_V4 = "formal_torch_hier_v4"
 TRAINER_BACKENDS = (
     TRAINER_BACKEND_PROTOTYPE_V1,
     TRAINER_BACKEND_FORMAL_V2,
+    TRAINER_BACKEND_FORMAL_SEQ_V3,
+    TRAINER_BACKEND_FORMAL_HIER_V4,
 )
 
 
@@ -24,6 +28,16 @@ def normalize_trainer_backend(value: str | None) -> str:
         "torch_v2": TRAINER_BACKEND_FORMAL_V2,
         "v2": TRAINER_BACKEND_FORMAL_V2,
         "formal": TRAINER_BACKEND_FORMAL_V2,
+        "seq": TRAINER_BACKEND_FORMAL_SEQ_V3,
+        "seq_v3": TRAINER_BACKEND_FORMAL_SEQ_V3,
+        "torch_seq_v3": TRAINER_BACKEND_FORMAL_SEQ_V3,
+        "formal_seq_v3": TRAINER_BACKEND_FORMAL_SEQ_V3,
+        "v3": TRAINER_BACKEND_FORMAL_SEQ_V3,
+        "hier": TRAINER_BACKEND_FORMAL_HIER_V4,
+        "hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
+        "torch_hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
+        "formal_hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
+        "v4": TRAINER_BACKEND_FORMAL_HIER_V4,
     }
     canonical = aliases.get(text, text)
     if canonical not in TRAINER_BACKENDS:
@@ -41,11 +55,26 @@ def build_training_contract(
 ) -> dict[str, Any]:
     backend = normalize_trainer_backend(trainer_backend)
     resume_mode_text = str(resume_mode or "").strip().lower()
-    if backend == TRAINER_BACKEND_FORMAL_V2:
+    if backend in {TRAINER_BACKEND_FORMAL_V2, TRAINER_BACKEND_FORMAL_SEQ_V3, TRAINER_BACKEND_FORMAL_HIER_V4}:
         requested_epochs = max(int(requested_epochs or 0), 32)
         min_epochs = max(int(min_epochs or 0), 32)
         if not resume_mode_text:
             resume_mode_text = "strict"
+        notes = [
+            "Formal continuous-policy candidates must run in yolos with CUDA enabled.",
+            "Initial formal budget starts at 32 epochs; additional budget must continue via strict resume.",
+            "Promotion evaluation is allowed only for this contract class.",
+        ]
+        if backend == TRAINER_BACKEND_FORMAL_SEQ_V3:
+            notes.insert(
+                1,
+                "formal_torch_seq_v3 is the stronger temporal sequence branch used when v2 remains behaviorally constrained.",
+            )
+        if backend == TRAINER_BACKEND_FORMAL_HIER_V4:
+            notes.insert(
+                1,
+                "formal_torch_hier_v4 is the hierarchical temporal portfolio branch with market/portfolio/cross-section interaction.",
+            )
         return {
             "trainer_backend": backend,
             "contract_class": "epoch_resume_formal_candidate",
@@ -58,11 +87,7 @@ def build_training_contract(
             "requested_epochs": requested_epochs,
             "min_epochs": min_epochs,
             "resume_mode": resume_mode_text,
-            "notes": [
-                "Formal continuous-policy candidates must run in yolos with CUDA enabled.",
-                "Initial formal budget starts at 32 epochs; additional budget must continue via strict resume.",
-                "Promotion evaluation is allowed only for this contract class.",
-            ],
+            "notes": notes,
         }
     return {
         "trainer_backend": backend,

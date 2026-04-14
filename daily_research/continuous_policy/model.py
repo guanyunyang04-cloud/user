@@ -63,6 +63,18 @@ class ContinuousPolicyArtifact:
 def load_artifact(path: str | Path) -> Any:
     resolved = Path(path)
     if resolved.suffix.lower() == ".pt":
+        import torch
+
+        payload = torch.load(resolved, map_location="cpu", weights_only=False)
+        artifact_type = str(payload.get("artifact_type", "") or "")
+        if artifact_type == "continuous_policy_torch_hier_v4":
+            from daily_research.continuous_policy.model_hier_v4 import load_torch_hier_v4_artifact
+
+            return load_torch_hier_v4_artifact(resolved)
+        if artifact_type == "continuous_policy_torch_seq_v3":
+            from daily_research.continuous_policy.model_seq_v3 import load_torch_seq_artifact
+
+            return load_torch_seq_artifact(resolved)
         from daily_research.continuous_policy.model_v2 import load_torch_artifact
 
         return load_torch_artifact(resolved)
@@ -231,10 +243,16 @@ def predict_policy(
     daily_features: dict[str, float],
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     if not isinstance(artifact, ContinuousPolicyArtifact):
+        from daily_research.continuous_policy.model_hier_v4 import TorchContinuousPolicyHierV4Artifact, predict_policy_v4
+        from daily_research.continuous_policy.model_seq_v3 import TorchContinuousPolicySeqArtifact, predict_policy_v3
         from daily_research.continuous_policy.model_v2 import TorchContinuousPolicyArtifact, predict_policy_v2
 
         if isinstance(artifact, TorchContinuousPolicyArtifact):
             return predict_policy_v2(artifact, state_frame=state_frame, daily_features=daily_features)
+        if isinstance(artifact, TorchContinuousPolicySeqArtifact):
+            return predict_policy_v3(artifact, state_frame=state_frame, daily_features=daily_features)
+        if isinstance(artifact, TorchContinuousPolicyHierV4Artifact):
+            return predict_policy_v4(artifact, state_frame=state_frame, daily_features=daily_features)
         raise TypeError(f"Unsupported continuous-policy artifact type: {type(artifact)!r}")
     if state_frame.empty:
         raise ValueError("state_frame is empty.")

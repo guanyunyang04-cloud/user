@@ -217,6 +217,17 @@ def compute_continuity_metrics(
         metrics["hold_positive_rate_5d"] = float((hold_forward_5d > 0).mean()) if not hold_forward_5d.empty else 0.0
         metrics["hold_retention_quality_5d"] = float(hold_forward_5d.mean()) if not hold_forward_5d.empty else 0.0
         metrics["reduce_success_rate_5d"] = float((reduce_forward_5d <= 0).mean()) if not reduce_forward_5d.empty else 0.0
+        metrics["wrong_side_reduce_share"] = float((reduce_forward_5d > 0).mean()) if not reduce_forward_5d.empty else 0.0
+        metrics["profit_take_too_early_share"] = (
+            float(
+                (
+                    (reduce_rows["unrealized_pnl_before"].fillna(0.0) > 0.05)
+                    & (reduce_rows["forward_excess_5d"].fillna(0.0) > 0.0)
+                ).mean()
+            )
+            if not reduce_rows.empty
+            else 0.0
+        )
         metrics["reduce_preservation_quality_5d"] = (
             float((-reduce_forward_5d).clip(lower=0.0).mean()) if not reduce_forward_5d.empty else 0.0
         )
@@ -227,6 +238,7 @@ def compute_continuity_metrics(
         metrics["exit_missed_upside_5d"] = (
             float(exit_forward_5d.clip(lower=0.0).mean()) if not exit_forward_5d.empty else 0.0
         )
+        metrics["exit_then_rebound_cost"] = metrics["exit_missed_upside_5d"]
         metrics["avg_unrealized_pnl_before_action"] = (
             float(held_rows["unrealized_pnl_before"].mean()) if not held_rows.empty else 0.0
         )
@@ -235,6 +247,25 @@ def compute_continuity_metrics(
         )
         metrics["hold_share"] = float(metrics["hold_count"] / max(metrics["action_rows"], 1.0))
         metrics["churn_ratio"] = float(action_lookup.isin({"open", "add", "reduce", "exit"}).mean())
+        metrics["early_reduce_share"] = (
+            float((reduce_rows["hold_days_before"].fillna(999.0) <= 3.0).mean()) if not reduce_rows.empty else 0.0
+        )
+        metrics["early_exit_share"] = (
+            float((exit_rows["hold_days_before"].fillna(999.0) <= 3.0).mean()) if not exit_rows.empty else 0.0
+        )
+        metrics["profitable_reduce_share"] = (
+            float((reduce_rows["unrealized_pnl_before"].fillna(0.0) > 0.05).mean()) if not reduce_rows.empty else 0.0
+        )
+
+        if not open_rows.empty:
+            open_positions = open_rows["date"].map(date_positions).dropna().astype(int)
+            evaluation_start_pos = int(action_outcomes["date"].map(date_positions).dropna().astype(int).min())
+            first_open_pos = int(open_positions.min())
+            metrics["days_to_first_open"] = float(max(first_open_pos - evaluation_start_pos, 0))
+            metrics["cold_start_open_rate"] = float((open_positions <= evaluation_start_pos + 2).mean())
+        else:
+            metrics["days_to_first_open"] = float(len(date_positions))
+            metrics["cold_start_open_rate"] = 0.0
 
         action_events = action_outcomes.loc[:, ["date", "stock", "execution_action", "forward_excess_5d"]].copy()
         action_events["signal_pos"] = action_events["date"].map(date_positions)
@@ -242,6 +273,10 @@ def compute_continuity_metrics(
         reversal_hits = 0
         reversal_base = 0
         reentry_hits = 0
+        reduce_reversal_hits = 0
+        reduce_reversal_base = 0
+        exit_reversal_hits = 0
+        exit_reversal_base = 0
         reentry_quality_rows: list[pd.Series] = []
         for _, stock_rows in action_events.groupby("stock", sort=False):
             stock_rows = stock_rows.reset_index(drop=True)
@@ -273,6 +308,14 @@ def compute_continuity_metrics(
                 next_group = 1 if next_action in {"open", "add"} else -1 if next_action in {"reduce", "exit"} else 0
                 if next_group != 0 and next_group != current_group:
                     reversal_hits += 1
+                if current_action == "reduce":
+                    reduce_reversal_base += 1
+                    if next_action in {"open", "add"}:
+                        reduce_reversal_hits += 1
+                if current_action == "exit":
+                    exit_reversal_base += 1
+                    if next_action in {"open", "add"}:
+                        exit_reversal_hits += 1
 
         if not exit_rows.empty:
             exit_events = exit_rows.loc[:, ["date", "stock"]].copy()
@@ -288,12 +331,35 @@ def compute_continuity_metrics(
                 if not later_open.empty:
                     continue
             metrics["reentry_within_10d_rate"] = float(reentry_hits / len(exit_events)) if len(exit_events) else 0.0
+            metrics["reentry_after_exit_3d_rate"] = (
+                float(
+                    sum(
+                        1
+                        for exit_event in exit_events.itertuples(index=False)
+                        if not open_events.loc[
+                            (open_events["stock"] == exit_event.stock)
+                            & (open_events["signal_pos"] > exit_event.signal_pos)
+                            & (open_events["signal_pos"] <= exit_event.signal_pos + 3)
+                        ].empty
+                    )
+                    / len(exit_events)
+                )
+                if len(exit_events)
+                else 0.0
+            )
         else:
             metrics["reentry_within_10d_rate"] = 0.0
+            metrics["reentry_after_exit_3d_rate"] = 0.0
         metrics["reentry_quality_10d"] = (
             float(pd.DataFrame(reentry_quality_rows)["forward_excess_5d"].gt(0).mean()) if reentry_quality_rows else 0.0
         )
         metrics["immediate_reversal_rate_3d"] = float(reversal_hits / reversal_base) if reversal_base else 0.0
+        metrics["reversal_after_reduce_3d_rate"] = (
+            float(reduce_reversal_hits / reduce_reversal_base) if reduce_reversal_base else 0.0
+        )
+        metrics["reversal_after_exit_3d_rate"] = (
+            float(exit_reversal_hits / exit_reversal_base) if exit_reversal_base else 0.0
+        )
     else:
         for key in (
             "open_count",
@@ -312,17 +378,28 @@ def compute_continuity_metrics(
             "hold_positive_rate_5d",
             "hold_retention_quality_5d",
             "reduce_success_rate_5d",
+            "wrong_side_reduce_share",
+            "profit_take_too_early_share",
             "reduce_preservation_quality_5d",
             "exit_timeliness_rate_5d",
             "exit_avoided_loss_5d",
             "exit_missed_upside_5d",
+            "exit_then_rebound_cost",
             "avg_unrealized_pnl_before_action",
             "avg_drawdown_before_action",
             "reentry_within_10d_rate",
+            "reentry_after_exit_3d_rate",
             "reentry_quality_10d",
             "hold_share",
             "churn_ratio",
+            "early_reduce_share",
+            "early_exit_share",
+            "profitable_reduce_share",
+            "days_to_first_open",
+            "cold_start_open_rate",
             "immediate_reversal_rate_3d",
+            "reversal_after_reduce_3d_rate",
+            "reversal_after_exit_3d_rate",
         ):
             metrics[key] = 0.0
 
@@ -349,16 +426,24 @@ def compute_continuity_metrics(
         metrics["high_cash_down_market_hit_rate"] = (
             float((benchmark_series.loc[high_cash_mask] < 0).mean()) if bool(high_cash_mask.any()) else 0.0
         )
+        metrics["risk_off_cash_hit_rate"] = metrics["high_cash_down_market_hit_rate"]
     else:
         metrics["cash_timing_quality_1d"] = 0.0
         metrics["high_cash_share"] = 0.0
         metrics["high_cash_down_market_hit_rate"] = 0.0
+        metrics["risk_off_cash_hit_rate"] = 0.0
     if not turnover_frame.empty:
         metrics["avg_position_cap_target"] = float(turnover_frame["max_position_weight_target"].mean())
         metrics["avg_hold_bias_target"] = float(turnover_frame["hold_bias_target"].mean())
+        metrics["avg_reduce_bias_target"] = float(turnover_frame["reduce_bias_target"].mean()) if "reduce_bias_target" in turnover_frame.columns else 0.0
+        metrics["avg_exit_patience_target"] = float(turnover_frame["exit_patience_target"].mean()) if "exit_patience_target" in turnover_frame.columns else 0.0
+        metrics["avg_reentry_guard_target"] = float(turnover_frame["reentry_guard_target"].mean()) if "reentry_guard_target" in turnover_frame.columns else 0.0
     else:
         metrics["avg_position_cap_target"] = 0.0
         metrics["avg_hold_bias_target"] = 0.0
+        metrics["avg_reduce_bias_target"] = 0.0
+        metrics["avg_exit_patience_target"] = 0.0
+        metrics["avg_reentry_guard_target"] = 0.0
 
     return metrics, action_outcomes
 

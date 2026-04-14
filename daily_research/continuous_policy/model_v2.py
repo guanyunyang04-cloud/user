@@ -37,6 +37,10 @@ DECODER_PROFILES: dict[str, dict[str, float]] = {
         "reentry_penalty": 0.0,
         "hold_delta_bonus": 0.0,
         "reduce_delta_softener": 0.0,
+        "reduce_bias_bonus": 0.0,
+        "exit_patience_bonus": 0.0,
+        "reversal_cooldown_bonus": 0.0,
+        "risk_off_open_penalty": 0.0,
     },
     "budget_v3": {
         "defensive_cash_scale": 0.18,
@@ -50,6 +54,10 @@ DECODER_PROFILES: dict[str, dict[str, float]] = {
         "reentry_penalty": 0.06,
         "hold_delta_bonus": 0.010,
         "reduce_delta_softener": 0.08,
+        "reduce_bias_bonus": 0.04,
+        "exit_patience_bonus": 0.02,
+        "reversal_cooldown_bonus": 0.04,
+        "risk_off_open_penalty": 0.01,
     },
     "holdcash_v3": {
         "defensive_cash_scale": 0.28,
@@ -63,6 +71,78 @@ DECODER_PROFILES: dict[str, dict[str, float]] = {
         "reentry_penalty": 0.10,
         "hold_delta_bonus": 0.020,
         "reduce_delta_softener": 0.14,
+        "reduce_bias_bonus": 0.08,
+        "exit_patience_bonus": 0.06,
+        "reversal_cooldown_bonus": 0.08,
+        "risk_off_open_penalty": 0.02,
+    },
+    "holdcash_v5": {
+        "defensive_cash_scale": 0.26,
+        "candidate_defensive_penalty": 2.8,
+        "turnover_defensive_penalty": 0.34,
+        "position_cap_defensive_penalty": 0.05,
+        "hold_bias_bonus": 0.24,
+        "hold_override_margin": 0.08,
+        "reduce_gate_bonus": 0.10,
+        "open_gate_bonus": 0.020,
+        "reentry_penalty": 0.16,
+        "hold_delta_bonus": 0.024,
+        "reduce_delta_softener": 0.22,
+        "reduce_bias_bonus": 0.04,
+        "exit_patience_bonus": 0.12,
+        "reversal_cooldown_bonus": 0.20,
+        "risk_off_open_penalty": 0.04,
+    },
+    "reduceexit_v4": {
+        "defensive_cash_scale": 0.20,
+        "candidate_defensive_penalty": 2.5,
+        "turnover_defensive_penalty": 0.18,
+        "position_cap_defensive_penalty": 0.04,
+        "hold_bias_bonus": 0.12,
+        "hold_override_margin": 0.04,
+        "reduce_gate_bonus": 0.08,
+        "open_gate_bonus": 0.020,
+        "reentry_penalty": 0.14,
+        "hold_delta_bonus": 0.018,
+        "reduce_delta_softener": 0.05,
+        "reduce_bias_bonus": 0.16,
+        "exit_patience_bonus": 0.12,
+        "reversal_cooldown_bonus": 0.12,
+        "risk_off_open_penalty": 0.03,
+    },
+    "cash_v4": {
+        "defensive_cash_scale": 0.40,
+        "candidate_defensive_penalty": 4.2,
+        "turnover_defensive_penalty": 0.36,
+        "position_cap_defensive_penalty": 0.06,
+        "hold_bias_bonus": 0.14,
+        "hold_override_margin": 0.05,
+        "reduce_gate_bonus": 0.05,
+        "open_gate_bonus": 0.030,
+        "reentry_penalty": 0.10,
+        "hold_delta_bonus": 0.015,
+        "reduce_delta_softener": 0.10,
+        "reduce_bias_bonus": 0.08,
+        "exit_patience_bonus": 0.08,
+        "reversal_cooldown_bonus": 0.10,
+        "risk_off_open_penalty": 0.05,
+    },
+    "reduceexit_cash_v4": {
+        "defensive_cash_scale": 0.42,
+        "candidate_defensive_penalty": 4.5,
+        "turnover_defensive_penalty": 0.34,
+        "position_cap_defensive_penalty": 0.07,
+        "hold_bias_bonus": 0.16,
+        "hold_override_margin": 0.06,
+        "reduce_gate_bonus": 0.09,
+        "open_gate_bonus": 0.035,
+        "reentry_penalty": 0.18,
+        "hold_delta_bonus": 0.020,
+        "reduce_delta_softener": 0.04,
+        "reduce_bias_bonus": 0.18,
+        "exit_patience_bonus": 0.15,
+        "reversal_cooldown_bonus": 0.18,
+        "risk_off_open_penalty": 0.06,
     },
 }
 DECODER_PROFILE_NAMES = tuple(sorted(DECODER_PROFILES))
@@ -603,44 +683,76 @@ def predict_policy_v2(
 
     decoder_profile_name, decoder_profile = resolve_decoder_profile(artifact.train_summary.get("decoder_profile"))
     defensive_score = (
-        0.55 * max(-_daily_feature_scalar(daily_features, "benchmark_trend_gap"), 0.0)
-        + 0.20 * max(_daily_feature_scalar(daily_features, "benchmark_vol_ratio"), 0.0)
+        0.40 * max(-_daily_feature_scalar(daily_features, "benchmark_trend_gap"), 0.0)
+        + 0.15 * max(_daily_feature_scalar(daily_features, "benchmark_vol_ratio"), 0.0)
         + 0.15 * max(-_daily_feature_scalar(daily_features, "portfolio_drawdown_20d") - 0.02, 0.0)
         + 0.10 * max(_daily_feature_scalar(daily_features, "portfolio_turnover_pressure") - 0.80, 0.0)
     )
+    risk_off_score = (
+        defensive_score
+        + 0.25 * max(_daily_feature_scalar(daily_features, "market_downside_pressure"), 0.0)
+        + 0.20 * max(_daily_feature_scalar(daily_features, "portfolio_cash_pressure"), 0.0)
+        + 0.18 * max(_daily_feature_scalar(daily_features, "recent_reversal_rate_20d") - 0.18, 0.0)
+    )
     global_targets["gross_exposure_target"] = float(
         np.clip(
-            global_targets["gross_exposure_target"] - defensive_score * decoder_profile["defensive_cash_scale"],
+            global_targets["gross_exposure_target"] - risk_off_score * decoder_profile["defensive_cash_scale"],
             0.12,
             0.98,
         )
     )
     global_targets["candidate_budget"] = float(
         np.clip(
-            global_targets["candidate_budget"] - defensive_score * decoder_profile["candidate_defensive_penalty"],
+            global_targets["candidate_budget"] - risk_off_score * decoder_profile["candidate_defensive_penalty"],
             2.0,
             12.0,
         )
     )
     global_targets["turnover_budget"] = float(
         np.clip(
-            global_targets["turnover_budget"] * (1.0 - defensive_score * decoder_profile["turnover_defensive_penalty"]),
+            global_targets["turnover_budget"] * (1.0 - risk_off_score * decoder_profile["turnover_defensive_penalty"]),
             0.08,
             1.00,
         )
     )
     global_targets["max_position_weight_target"] = float(
         np.clip(
-            global_targets["max_position_weight_target"] - defensive_score * decoder_profile["position_cap_defensive_penalty"],
+            global_targets["max_position_weight_target"] - risk_off_score * decoder_profile["position_cap_defensive_penalty"],
             0.08,
             0.28,
         )
     )
     global_targets["hold_bias_target"] = float(
         np.clip(
-            global_targets["hold_bias_target"] + defensive_score * decoder_profile["hold_bias_bonus"],
+            global_targets["hold_bias_target"] + risk_off_score * decoder_profile["hold_bias_bonus"] - _daily_feature_scalar(daily_features, "recent_reversal_rate_20d") * 0.04,
             0.10,
             0.95,
+        )
+    )
+    global_targets["reduce_bias_target"] = float(
+        np.clip(
+            0.10
+            + risk_off_score * 0.28
+            + _daily_feature_scalar(daily_features, "recent_reversal_rate_20d") * 0.12
+            + decoder_profile["reduce_bias_bonus"],
+            0.0,
+            0.65,
+        )
+    )
+    global_targets["exit_patience_target"] = float(
+        np.clip(
+            global_targets["hold_bias_target"] + decoder_profile["exit_patience_bonus"] - risk_off_score * 0.20,
+            0.05,
+            0.95,
+        )
+    )
+    global_targets["reentry_guard_target"] = float(
+        np.clip(
+            decoder_profile["reversal_cooldown_bonus"]
+            + _daily_feature_scalar(daily_features, "recent_reversal_rate_20d") * 0.20
+            + risk_off_score * 0.18,
+            0.0,
+            0.45,
         )
     )
     global_targets = {
@@ -649,39 +761,64 @@ def predict_policy_v2(
         "turnover_budget": float(np.clip(_finite_scalar(global_targets["turnover_budget"], default=0.18), 0.08, 1.00)),
         "max_position_weight_target": float(np.clip(_finite_scalar(global_targets["max_position_weight_target"], default=0.12), 0.08, 0.28)),
         "hold_bias_target": float(np.clip(_finite_scalar(global_targets["hold_bias_target"], default=0.24), 0.10, 0.95)),
+        "reduce_bias_target": float(np.clip(_finite_scalar(global_targets["reduce_bias_target"], default=0.10), 0.0, 0.65)),
+        "exit_patience_target": float(np.clip(_finite_scalar(global_targets["exit_patience_target"], default=0.20), 0.05, 0.95)),
+        "reentry_guard_target": float(np.clip(_finite_scalar(global_targets["reentry_guard_target"], default=0.0), 0.0, 0.45)),
     }
 
     probability_map = {label: action_prob[:, idx] for idx, label in enumerate(ACTION_CLASSES)}
     current_weight = state_frame["current_weight"].astype(float).to_numpy(dtype=float) if "current_weight" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     hold_days = state_frame["hold_days"].astype(float).to_numpy(dtype=float) if "hold_days" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     days_since_last_buy = state_frame["days_since_last_buy"].astype(float).to_numpy(dtype=float) if "days_since_last_buy" in state_frame.columns else np.full(len(state_frame), 99.0, dtype=float)
+    days_since_last_reduce = state_frame["days_since_last_reduce"].astype(float).to_numpy(dtype=float) if "days_since_last_reduce" in state_frame.columns else np.full(len(state_frame), 99.0, dtype=float)
+    days_since_last_exit = state_frame["days_since_last_exit"].astype(float).to_numpy(dtype=float) if "days_since_last_exit" in state_frame.columns else np.full(len(state_frame), 99.0, dtype=float)
     reentry_cooldown = state_frame["reentry_cooldown"].astype(float).to_numpy(dtype=float) if "reentry_cooldown" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    signal_decay_speed = state_frame["signal_decay_speed"].astype(float).to_numpy(dtype=float) if "signal_decay_speed" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    market_downside_pressure = state_frame["market_downside_pressure"].astype(float).to_numpy(dtype=float) if "market_downside_pressure" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    portfolio_cash_pressure = state_frame["portfolio_cash_pressure"].astype(float).to_numpy(dtype=float) if "portfolio_cash_pressure" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    recent_reversal_rate = state_frame["recent_reversal_rate_20d"].astype(float).to_numpy(dtype=float) if "recent_reversal_rate_20d" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    drawdown_from_peak = state_frame["drawdown_from_peak"].astype(float).to_numpy(dtype=float) if "drawdown_from_peak" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     duration_days = np.asarray([HOLDING_DAYS_BY_BUCKET.get(str(label), 0.0) for label in predicted_duration_labels], dtype=float)
     adjusted_labels = predicted_labels.astype(object).copy()
+    reduce_bias_target = float(global_targets["reduce_bias_target"])
+    exit_patience_target = float(global_targets["exit_patience_target"])
+    reentry_guard_target = float(global_targets["reentry_guard_target"])
     for idx in range(len(adjusted_labels)):
         label = str(adjusted_labels[idx])
         held = float(current_weight[idx]) > 1e-8
         duration_name = str(predicted_duration_labels[idx])
         if held:
+            if label in {"reduce", "exit"} and market_downside_pressure[idx] < 0.12 and signal_decay_speed[idx] < 0.05 and drawdown_from_peak[idx] > -0.05 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
+                label = "hold"
             if label in {"reduce", "exit"} and hold_days[idx] < 2 and exit_urgency[idx] < 0.24 and hold_quality[idx] > -0.02:
                 label = "hold"
             if label in {"reduce", "exit"} and days_since_last_buy[idx] <= max(3.0, hold_days[idx]) and exit_urgency[idx] < 0.26 and hold_quality[idx] > -0.04:
                 label = "hold"
-            if label == "exit" and exit_urgency[idx] < 0.18 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"]:
+            if label == "reduce" and days_since_last_reduce[idx] <= 2.0 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
+                label = "hold"
+            if label == "exit" and exit_urgency[idx] < 0.18 + exit_patience_target * 0.06 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"]:
                 label = "reduce" if reduce_quality[idx] > 0.08 else "hold"
             if label == "reduce" and reduce_quality[idx] < 0.09 + decoder_profile["reduce_gate_bonus"] and hold_quality[idx] > 0.03 - decoder_profile["hold_override_margin"]:
                 label = "hold"
             if label in {"reduce", "exit"} and duration_name in {"swing", "extended"} and hold_quality[idx] >= reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
+            if label in {"hold", "skip"} and (market_downside_pressure[idx] > 0.18 or portfolio_cash_pressure[idx] > 0.18 or signal_decay_speed[idx] > 0.10) and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02:
+                label = "reduce"
             if label in {"hold", "skip"} and add_quality[idx] > 0.14 and duration_name in {"swing", "extended"} and current_weight[idx] < 0.12:
                 label = "add"
         else:
-            open_gate = 0.08 + defensive_score * decoder_profile["open_gate_bonus"] + reentry_cooldown[idx] * decoder_profile["reentry_penalty"]
+            open_gate = (
+                0.08
+                + risk_off_score * decoder_profile["open_gate_bonus"]
+                + reentry_cooldown[idx] * decoder_profile["reentry_penalty"]
+                + reentry_guard_target
+                + market_downside_pressure[idx] * decoder_profile["risk_off_open_penalty"]
+            )
             if label == "open" and (entry_quality[idx] < open_gate or duration_name == "avoid"):
                 label = "skip"
             if label in {"skip", "hold"} and duration_name != "avoid" and (entry_quality[idx] > (0.075 + defensive_score * 0.01) or (entry_quality[idx] > 0.055 and probability_map["open"][idx] > 0.035)):
                 if probability_map["open"][idx] > 0.035 or duration_name in {"swing", "extended"}:
-                    if reentry_cooldown[idx] <= 0.25 or entry_quality[idx] > open_gate + 0.035:
+                    if (reentry_cooldown[idx] <= 0.25 and days_since_last_exit[idx] > 3.0) or entry_quality[idx] > open_gate + 0.035:
                         label = "open"
         adjusted_labels[idx] = label
 
@@ -715,13 +852,32 @@ def predict_policy_v2(
         elif label == "hold":
             blended_delta[idx] = np.clip(max(blended_delta[idx] * 0.30, 0.0) + hold_quality[idx] * 0.10 + decoder_profile["hold_delta_bonus"], 0.0, 0.08 + decoder_profile["hold_delta_bonus"])
             action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25, 0.0, None)
-            hold_boost[idx] = np.clip(hold_quality[idx] + duration_bonus * 0.30 + decoder_profile["hold_bias_bonus"] * 0.35, 0.0, None)
+            hold_boost[idx] = np.clip(hold_quality[idx] + duration_bonus * 0.30 + decoder_profile["hold_bias_bonus"] * (0.20 + exit_patience_target), 0.0, None)
         elif label == "reduce":
-            blended_delta[idx] = -np.clip(max(-blended_delta[idx], 0.10 + reduce_quality[idx] * (0.35 - decoder_profile["reduce_delta_softener"])), 0.0, 0.70)
-            action_strength[idx] = np.clip(reduce_quality[idx] + probability_map["reduce"][idx] * 0.35, 0.0, None)
+            blended_delta[idx] = -np.clip(
+                max(
+                    -blended_delta[idx],
+                    0.08
+                    + reduce_quality[idx] * (0.28 + reduce_bias_target - decoder_profile["reduce_delta_softener"])
+                    + market_downside_pressure[idx] * 0.16
+                    + signal_decay_speed[idx] * 0.18
+                    - hold_quality[idx] * 0.08,
+                ),
+                0.0,
+                0.75,
+            )
+            action_strength[idx] = np.clip(reduce_quality[idx] + probability_map["reduce"][idx] * 0.35 + reduce_bias_target * 0.25, 0.0, None)
         elif label == "exit":
             blended_delta[idx] = -1.0
-            action_strength[idx] = np.clip(exit_urgency[idx] + probability_map["exit"][idx] * 0.45, 0.0, None)
+            action_strength[idx] = np.clip(
+                exit_urgency[idx]
+                + probability_map["exit"][idx] * 0.45
+                + market_downside_pressure[idx] * 0.12
+                + signal_decay_speed[idx] * 0.15
+                - exit_patience_target * 0.10,
+                0.0,
+                None,
+            )
         else:
             blended_delta[idx] = 0.0
             action_strength[idx] = probability_map["skip"][idx] * 0.20

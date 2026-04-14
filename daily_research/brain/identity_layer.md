@@ -1,6 +1,6 @@
 # Daily Research 身份层
 
-快照日期：`2026-04-12`
+快照日期：`2026-04-14`
 
 ## 1. 我是谁
 - `daily_research` 是当前工作区的正式生产研究与执行主线。
@@ -15,6 +15,10 @@
   - 让研究、执行、文档、交接和复盘形成统一真源，而不是依赖某个会话记忆。
 - 第三北极星：
   - 让任何接管者都能先读状态、再做事、做完能写回，并把错误转化成长期资产。
+- 第四北极星：
+  - 构建一个以日为单位进行连续决策的交易执行模型，而不是继续围绕固定调仓频率、固定持有周期或人工执行桥做局部优化。
+  - 这个模型应直接从市场全局状态、个股演化路径与持仓上下文中学习 `open / hold / add / reduce / exit / cash` 的动态最优执行。
+  - 它追求的是在尽量少的人为约束下，综合权衡未来收益、风险与成本，并做出当前条件下最优的动态执行判断。
 
 ## 3. 成功判定标准
 - formal、recent、live、promotion 四层必须分开且始终能对齐到真源。
@@ -25,9 +29,11 @@
 
 ## 4. 当前硬约束
 - formal / recent / live / promotion 不得混写。
-- `deep_alpha` 与可 promotion 的 `continuous_policy formal_torch_v2` 都属于 `epoch formal candidate`：必须 GPU only。
+- `deep_alpha` 与可 promotion 的 `continuous_policy formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4` 都属于 `epoch formal candidate`：必须 GPU only。
 - `epoch formal candidate` 至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume` 续训。
 - `continuous_policy prototype_gbdt_v1` 明确属于 `non-epoch shadow prototype`：只允许 shadow / teacher / ablation，不计入 formal 完整判决，不得直接 promotion。
+- `continuous_policy formal_torch_seq_v3` 是 stronger temporal sequence branch：只在 `v2` 仍受 `hold / reduce / cash` 行为瓶颈约束时进入正式主计划，但一旦启用，仍必须遵守 `GPU only + >=32 epoch + strict resume`。
+- `continuous_policy formal_torch_hier_v4` 是 market / portfolio / cross-section interaction 的分层时序分支：一旦启用，同样必须遵守 `GPU only + >=32 epoch + strict resume`，并先以 `shadow_only` 方式验证。
 - 长实验只允许前台执行。
 - 所有 `epoch formal candidate` 都必须支持同一 `experiment-tag / run_dir` 的 `strict resume`。
 - 默认终端超时预算按 `10` 小时处理。

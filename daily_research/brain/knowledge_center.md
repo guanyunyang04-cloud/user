@@ -8,13 +8,39 @@
 - `daily_research/execution/run_execution_web.py` 现在是执行侧本地 Web 控制台入口
 - 执行侧运行时状态、事件、锁与作业日志统一落到 `daily_research/output/execution_app`
 - `daily_research/continuous_policy/` 现在是并行的连续型组合策略代理研究栈
+- continuous_policy 的终局目标已经明确：
+  - 不是继续优化固定调仓频率、固定持有周期或人工执行桥
+  - 而是构建一个以日为单位进行连续决策的交易执行模型
+  - 让模型直接从市场全局状态、个股演化路径与持仓上下文中学习动态执行
 - continuous_policy 的训练、评估、导出产物统一落到 `daily_research/output/continuous_policy`
 - `daily_research/continuous_policy/run_continuous_policy_protocol.py` 现在是 continuous_policy 的正式高层协议入口
 - continuous_policy 当前已拆成两类训练合同：
   - `prototype_gbdt_v1 = non-epoch shadow prototype`
   - `formal_torch_v2 = epoch formal candidate`
+- `formal_torch_seq_v3` 现在已落地为 stronger temporal sequence branch，同样属于 `epoch formal candidate`
+- `formal_torch_hier_v4` 现在已落地为 hierarchical temporal portfolio branch，同样属于 `epoch formal candidate`
 - continuous_policy 正式 protocol 当前支持 `balanced_v2 / swing_v2 / defensive_v2` 三种 lifecycle label preset
+- continuous_policy 正式 protocol 现在也支持 `holdcash_v3 / holdcash_v4 / holdcash_v5` label preset 与 `default_v2 / budget_v3 / holdcash_v3 / reduceexit_v4 / cash_v4 / reduceexit_cash_v4 / holdcash_v5` decoder profile
 - `formal_liquid500_20260413_r2_swing_v2` 当前是 continuous_policy r2 三预设里收益/Sharpe 最强的 shadow 参考
+- `cp_v3_seq_holdcash_r1` 是当前第一轮强时序 smoke 证据：
+  - `hold_share = 0.30`
+  - `reduce_success_rate_5d = 0.4286`
+  - `cash_timing_quality_1d = -0.4564`
+  - `promotion_gate = shadow_only`
+- `cp_v3_seq_holdcash_r2` 证明：
+  - `holdcash_v5` 可以把 `cash_timing_quality_1d` 从 `-0.4564` 改善到 `-0.0352`
+  - 也能把 `immediate_reversal_rate_3d` 从 `0.5357` 压到 `0.3684`
+  - 但如果 `hold_share` 同时掉到 `0.0777`，它仍不是新的 strongest temporal 锚点
+- `cp_v3_seq_holdcash_v5_formal_r1` 证明：
+  - 长窗 `20240102 -> 20251231` + `48` epoch 后，`training_evidence` 已达正式证据下限
+  - 但 `holdcash_v5` 仍把 `hold_share` 打成 `0.0`，并且 `reduce_success_rate_5d = 0.0`
+  - 所以当前主问题不能再被解释成“只是训练次数不够/样本不够”
+- `cp_v3_seq_holdcash_r1` 仍是当前 strongest temporal 默认锚点；`latest_*` 指针已从 `v4` repair 实验回切到它
+- `cp_hier_v4_holdcash_r5` 现在是 `formal_torch_hier_v4` 的最新完整真源：
+  - `r3` 暴露的根因是 `state_frame` 行索引丢失真实股票代码，导致 `predict_policy -> portfolio.step` 对票失败
+  - 修复后 `r5` 的 formal 评估已不再全现金塌缩，并把 `immediate_reversal_rate_3d` 压到 `0.0883`
+  - 但当前仍明显不够 promotable：`hold_share = 0.0`、`cash_timing_quality_1d = -0.0207`、`reduce_success_rate_5d = 0.4230`、年化与 Sharpe 仍为负，因此继续 `shadow_only`
+- `daily_research/output/continuous_policy/latest_behavior_audit_summary.json` 与 `latest_conclusion_ledger.json` 现在是 continuous_policy 的标准分析真源
 - execution Web 控制台不是纯脚手架，已经在 `yolos` 下做过真实页面 / API / 后台任务联调
 - execution Web 控制台当前用户界面与使用教程统一使用简体中文
 - execution Web 控制台当前已具备 `/account` 模拟账户页，可直接维护 `daily_research/execution/current_positions.csv`
@@ -37,17 +63,32 @@
 - 默认做最高效、最合理的实验；允许为了验证“某设定是否只在更强模型上成立”而扩实验，但必须先写清假设、成本边界与停止条件，不做无目的广扫
 - `epoch formal candidate` 至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume`，不优先 fresh rerun
 - `non-epoch shadow prototype` 不适用 `32 epoch` 口径，但必须显式标记为 shadow-only，不得冒充 promotable formal 结果
+- `formal_torch_seq_v3` 与 `formal_torch_v2 / formal_torch_hier_v4` 同样受 `GPU only + >=32 epoch + strict resume` 约束
 - 依赖环境必须先写入真源文件，再谈“环境基线已满足”
 - `daily_research` 任何程序都必须在 `yolos` 环境下运行
 - 脚本默认解释器与内部 subprocess 统一收口到 `yolos`，不得回退到 `quant` 或当前 shell Python
 - 新执行能力优先注册到 execution app task registry，而不是继续追加孤立脚本入口
 - 连续策略研究也必须先接 execution app task registry，再谈 Web、shadow export 或 promotion
 - continuous_policy 的正式运行默认优先走 `run_continuous_policy_protocol.py`，而不是人工拼接 `train -> evaluate -> export`
-- continuous_policy 若要进入 promotion 讨论，默认必须切到 `formal_torch_v2`，并满足 GPU / >=32 epoch / strict resume 的正式合同
+- continuous_policy 若要进入 promotion 讨论，默认必须切到 `formal_torch_v2`、`formal_torch_seq_v3` 或 `formal_torch_hier_v4`，并满足 GPU / >=32 epoch / strict resume 的正式合同
+- continuous_policy formal protocol 现在还必须显式产出 `training_evidence`
+  - 当前正式证据下限：
+    - `train_day_count >= 180`
+    - `teacher_action_rows >= 10000`
+    - `best_epoch` 不能贴着 `completed_epochs` 边缘
+  - 如果不满足，就先做 strict resume 或扩训练窗口，不把该 run 当成最终判决
+- continuous_policy 的目标形态是“日频连续决策代理”，不是“固定执行桥上的更优参数组”
+- `top-k / 3d / 5d / 20d / ensemble / regime filter` 这类人工执行桥只保留为基线、参考或 fallback，不应再被当作终局执行形态
+- 模型应在尽量少的人为约束下，直接学习收益—风险—成本综合权衡后的动态执行，而不是先写死频率和持有规则再做局部优化
 - execution 侧默认通过统一应用入口运行、监控、恢复；直接裸跑底层脚本只应用于调试或局部排障
 - execution Web 控制台基于 FastAPI + Jinja2，本地只监听 `127.0.0.1`
 - `agent` 在本地联调 Web 控制台或短期临时服务时，默认使用同一 PowerShell 会话内的 `Start-Job` 后台方式，而不是 `Start-Process`
 - 正式训练前台窗口限时统一为 `10` 小时
+- continuous_policy 当前下一阶段已从“先解决 hold_share”收敛到更具体的三件事：
+  - 修 `reduce` 过早且站错边
+  - 修 `cash timing` 负收益
+  - 修 `early exit bias / shadow reversal`
+  - 修上述三项时显式保住 `hold_share` 不再塌回 `< 0.10`
 
 ## 3. 已验证教训
 - recent 胜利不能直接当 promotion 结论
@@ -67,7 +108,13 @@
 - 连续策略即使已有 protocol，如果不把连续性指标和参考对照一起固化，仍然会退化成“只看收益数字”的假进展
 - 连续策略 export 若盲信旧 runtime state，会在回放旧 `signal_date` 时被未来 runtime 污染；当 runtime 时态晚于目标信号日时必须回退到账户快照重建
 - lifecycle preset 会形成清晰的行为-收益权衡：`swing_v2` 当前更接近收益最优，`defensive_v2` 当前更接近行为保守，但可能把收益打成负值
-- 当前 continuous_policy 的共同短板已经收缩到两件事：`hold_share` 近乎为 `0`，以及 `cash_timing_quality_1d` 仍然很弱
+- stronger temporal branch 已证明 `hold_share` 不是永久瓶颈；`cp_v3_seq_holdcash_r1` 已把它抬到 `0.30`
+- 当前 continuous_policy 的主要剩余短板已从 `hold_share` 塌缩收敛到：`reduce` 站错边、`cash_timing_quality_1d` 为负，以及 `early exit / shadow reversal`
+- `cp_v3_seq_reduceexit_r1 / cp_v3_seq_cash_r1 / cp_v3_seq_reduceexit_cash_r1` 证明：单点修 `reduce / cash` 可以把局部指标拉高，但如果不同时保住持有连续性，整体收益与 `hold_share` 会重新塌掉
+- `cp_v3_seq_holdcash_r2` 进一步证明：即使 cash / reversal 同时改善，只要 `hold_share` 掉回 `< 0.10`，也不能视为 stronger temporal 升级成功
+- `cp_v3_seq_holdcash_v5_formal_r1` 进一步证明：当训练证据充足后 `holdcash_v5` 仍然失败，因此下一步应优先修标签、状态与 decoder，而不是机械继续加 epoch
+- `cp_hier_v4_holdcash_r5` 进一步证明：hierarchical branch 可以先在 reversal 上领先，但如果还没有学出 `hold`，它仍然只是 research branch
+- `latest_*` 如果总是跟随最近一次实验而不回指当前最强锚点，控制台会漂成“最新但更差”的误导态；比较完成后必须回切到当前最强版本
 
 ## 4. 文档边界
 - `identity_layer.md`

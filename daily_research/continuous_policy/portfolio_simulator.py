@@ -37,7 +37,10 @@ class PortfolioState:
     holdings: dict[str, HoldingState] = field(default_factory=dict)
     last_buy_dates: dict[str, str] = field(default_factory=dict)
     last_sell_dates: dict[str, str] = field(default_factory=dict)
+    last_reduce_dates: dict[str, str] = field(default_factory=dict)
+    last_exit_dates: dict[str, str] = field(default_factory=dict)
     last_action_labels: dict[str, str] = field(default_factory=dict)
+    recent_action_events: list[dict[str, Any]] = field(default_factory=list)
     recent_turnovers: list[float] = field(default_factory=list)
     recent_returns: list[float] = field(default_factory=list)
     recent_cash_weights: list[float] = field(default_factory=list)
@@ -63,6 +66,12 @@ class PortfolioState:
 
     def last_sell_date_map(self) -> dict[str, str]:
         return {str(stock): str(value or "") for stock, value in self.last_sell_dates.items()}
+
+    def last_reduce_date_map(self) -> dict[str, str]:
+        return {str(stock): str(value or "") for stock, value in self.last_reduce_dates.items()}
+
+    def last_exit_date_map(self) -> dict[str, str]:
+        return {str(stock): str(value or "") for stock, value in self.last_exit_dates.items()}
 
     def last_action_label_map(self) -> dict[str, str]:
         return {str(stock): str(value or "") for stock, value in self.last_action_labels.items()}
@@ -90,6 +99,54 @@ class PortfolioState:
         recent_turnover_20d = float(np.mean(recent_turnovers_20d)) if recent_turnovers_20d else 0.0
         turnover_pressure = float(recent_turnover_5d / max(float(self.turnover_limit), 1e-6))
         recent_positive_share = float((recent_returns > 0).mean()) if recent_returns.size > 0 else 0.0
+        recent_events = list(self.recent_action_events[-240:])
+        recent_reversal_count = 0
+        reversal_base = 0
+        recent_reduce_count_10d = 0
+        recent_exit_count_10d = 0
+        recent_add_count_10d = 0
+        recent_open_count_10d = 0
+        if recent_events:
+            events_by_stock: dict[str, list[dict[str, Any]]] = {}
+            for event in recent_events:
+                stock = str(event.get("stock", "") or "").strip().upper()
+                if not stock:
+                    continue
+                events_by_stock.setdefault(stock, []).append(event)
+                action = str(event.get("execution_action", "") or "").strip().lower()
+                day_offset = int(event.get("days_ago", 999) or 999)
+                if day_offset <= 10:
+                    if action == "reduce":
+                        recent_reduce_count_10d += 1
+                    elif action == "exit":
+                        recent_exit_count_10d += 1
+                    elif action == "add":
+                        recent_add_count_10d += 1
+                    elif action == "open":
+                        recent_open_count_10d += 1
+            for stock_rows in events_by_stock.values():
+                stock_rows = sorted(stock_rows, key=lambda item: (str(item.get("date", "")), str(item.get("stock", ""))))
+                for idx in range(len(stock_rows) - 1):
+                    current = stock_rows[idx]
+                    nxt = stock_rows[idx + 1]
+                    current_action = str(current.get("execution_action", "") or "").strip().lower()
+                    next_action = str(nxt.get("execution_action", "") or "").strip().lower()
+                    current_group = 1 if current_action in {"open", "add"} else -1 if current_action in {"reduce", "exit"} else 0
+                    next_group = 1 if next_action in {"open", "add"} else -1 if next_action in {"reduce", "exit"} else 0
+                    if current_group == 0 or next_group == 0:
+                        continue
+                    reversal_base += 1
+                    try:
+                        current_ts = pd.Timestamp(str(current.get("date", "") or ""))
+                    except Exception:
+                        current_ts = pd.NaT
+                    try:
+                        next_ts = pd.Timestamp(str(nxt.get("date", "") or ""))
+                    except Exception:
+                        next_ts = pd.NaT
+                    if pd.notna(current_ts) and pd.notna(next_ts) and next_group != current_group and (next_ts - current_ts).days <= 3:
+                        recent_reversal_count += 1
+        recent_reversal_rate_20d = float(recent_reversal_count / reversal_base) if reversal_base > 0 else 0.0
         return {
             "cash_weight": float(self.cash_weight),
             "gross_exposure": gross_exposure,
@@ -108,6 +165,12 @@ class PortfolioState:
             "recent_positive_return_share_20d": recent_positive_share,
             "portfolio_drawdown_20d": drawdown_20d,
             "return_vol_20d": return_vol_20d,
+            "recent_reversal_count_20d": float(recent_reversal_count),
+            "recent_reversal_rate_20d": recent_reversal_rate_20d,
+            "recent_reduce_count_10d": float(recent_reduce_count_10d),
+            "recent_exit_count_10d": float(recent_exit_count_10d),
+            "recent_add_count_10d": float(recent_add_count_10d),
+            "recent_open_count_10d": float(recent_open_count_10d),
         }
 
     def record_realized_return(self, value: float) -> None:
@@ -124,7 +187,10 @@ class PortfolioState:
             "holdings": {stock: asdict(state) for stock, state in sorted(self.holdings.items())},
             "last_buy_dates": {stock: str(value or "") for stock, value in sorted(self.last_buy_dates.items())},
             "last_sell_dates": {stock: str(value or "") for stock, value in sorted(self.last_sell_dates.items())},
+            "last_reduce_dates": {stock: str(value or "") for stock, value in sorted(self.last_reduce_dates.items())},
+            "last_exit_dates": {stock: str(value or "") for stock, value in sorted(self.last_exit_dates.items())},
             "last_action_labels": {stock: str(value or "") for stock, value in sorted(self.last_action_labels.items())},
+            "recent_action_events": list(self.recent_action_events[-240:]),
             "recent_turnovers": [float(item) for item in self.recent_turnovers[-60:]],
             "recent_returns": [float(item) for item in self.recent_returns[-60:]],
             "recent_cash_weights": [float(item) for item in self.recent_cash_weights[-60:]],
@@ -153,7 +219,19 @@ class PortfolioState:
             holdings=holdings,
             last_buy_dates={str(stock): str(value or "") for stock, value in (data.get("last_buy_dates", {}) or {}).items()},
             last_sell_dates={str(stock): str(value or "") for stock, value in (data.get("last_sell_dates", {}) or {}).items()},
+            last_reduce_dates={str(stock): str(value or "") for stock, value in (data.get("last_reduce_dates", {}) or {}).items()},
+            last_exit_dates={str(stock): str(value or "") for stock, value in (data.get("last_exit_dates", {}) or {}).items()},
             last_action_labels={str(stock): str(value or "") for stock, value in (data.get("last_action_labels", {}) or {}).items()},
+            recent_action_events=[
+                {
+                    "date": str((item or {}).get("date", "") or ""),
+                    "stock": str((item or {}).get("stock", "") or "").strip().upper(),
+                    "execution_action": str((item or {}).get("execution_action", "") or "").strip().lower(),
+                    "days_ago": int((item or {}).get("days_ago", 999) or 999),
+                }
+                for item in (data.get("recent_action_events", []) or [])
+                if isinstance(item, dict)
+            ][-240:],
             recent_turnovers=[float(item) for item in data.get("recent_turnovers", [])][-60:],
             recent_returns=[float(item) for item in data.get("recent_returns", [])][-60:],
             recent_cash_weights=[float(item) for item in data.get("recent_cash_weights", [])][-60:],
@@ -272,9 +350,25 @@ class PortfolioState:
         position_cap_target = float(np.clip(position_cap_target, 0.05, 0.35))
         hold_bias_target = float((global_targets or {}).get("hold_bias_target", 0.25) or 0.25)
         hold_bias_target = float(np.clip(hold_bias_target, 0.05, 0.98))
+        reduce_bias_target = float((global_targets or {}).get("reduce_bias_target", 0.10) or 0.10)
+        reduce_bias_target = float(np.clip(reduce_bias_target, 0.0, 0.65))
+        exit_patience_target = float((global_targets or {}).get("exit_patience_target", 0.20) or 0.20)
+        exit_patience_target = float(np.clip(exit_patience_target, 0.05, 0.95))
+        reentry_guard_target = float((global_targets or {}).get("reentry_guard_target", 0.0) or 0.0)
+        reentry_guard_target = float(np.clip(reentry_guard_target, 0.0, 0.45))
+
+        def _days_since(mapping: dict[str, str], stock: str) -> float:
+            raw_value = str(mapping.get(stock, "") or "").strip()
+            if not raw_value:
+                return 999.0
+            try:
+                return float((signal_dt - pd.Timestamp(raw_value).normalize()).days)
+            except Exception:
+                return 999.0
 
         desired_strength = pd.Series(0.0, index=prices.index, dtype=float)
         forced_zero = pd.Series(False, index=prices.index, dtype=bool)
+        protected_floor = pd.Series(0.0, index=prices.index, dtype=float)
         for stock in prices.index:
             action = str(policy.at[stock, "action_label"] or "skip").strip().lower()
             strength = float(policy.at[stock, "action_strength"] or 0.0)
@@ -286,29 +380,69 @@ class PortfolioState:
             reduce_quality = float(policy.at[stock, "reduce_quality"] or 0.0) if "reduce_quality" in policy.columns else 0.0
             planned_holding_days = float(policy.at[stock, "planned_holding_days"] or 0.0) if "planned_holding_days" in policy.columns else 0.0
             current_weight = float(current.get(stock, 0.0))
+            days_since_last_sell = _days_since(self.last_sell_dates, stock)
+            days_since_last_reduce = _days_since(self.last_reduce_dates, stock)
             if action == "exit":
                 forced_zero.at[stock] = True
                 continue
             if action == "reduce":
-                reduction_scale = max(0.12, 1.0 + delta_hint - reduce_quality * 0.20 + hold_bias_target * 0.08)
+                reduction_scale = max(
+                    0.08,
+                    1.0
+                    + delta_hint
+                    - reduce_quality * (0.18 + reduce_bias_target * 0.12)
+                    + hold_bias_target * 0.08
+                    + exit_patience_target * 0.05,
+                )
                 desired_strength.at[stock] = max(current_weight * reduction_scale, 0.0)
+                if current_weight > 1e-8 and hold_boost > 0.02 and days_since_last_reduce <= 2.0:
+                    protected_floor.at[stock] = max(
+                        protected_floor.at[stock],
+                        current_weight * np.clip(0.70 + hold_bias_target * 0.08, 0.60, 0.86),
+                    )
                 continue
             if action == "hold":
-                hold_scale = 1.0 + hold_bias_target * 0.06 + max(planned_holding_days - 3.0, 0.0) / 120.0
+                hold_scale = 1.0 + hold_bias_target * 0.06 + exit_patience_target * 0.04 + max(planned_holding_days - 3.0, 0.0) / 120.0
                 desired_strength.at[stock] = max(
                     current_weight * hold_scale,
                     current_weight + max(0.0, hold_boost + hold_quality) * (0.025 + hold_bias_target * 0.030),
                 )
+                if current_weight > 1e-8:
+                    protected_floor.at[stock] = max(
+                        protected_floor.at[stock],
+                        current_weight
+                        * np.clip(
+                            0.82
+                            + hold_bias_target * 0.10
+                            + exit_patience_target * 0.05
+                            + max(planned_holding_days - 3.0, 0.0) / 180.0,
+                            0.72,
+                            0.97,
+                        ),
+                    )
                 continue
             if action == "add":
                 desired_strength.at[stock] = max(
                     current_weight + max(0.015, strength * 0.55 + add_quality * 0.15 + planned_holding_days / 300.0),
                     current_weight,
                 )
+                if current_weight > 1e-8:
+                    protected_floor.at[stock] = max(
+                        protected_floor.at[stock],
+                        current_weight * np.clip(0.90 + hold_bias_target * 0.04, 0.85, 0.98),
+                    )
                 continue
             if action == "open":
+                reentry_penalty = np.clip((4.0 - min(days_since_last_sell, days_since_last_reduce)) / 4.0, 0.0, 1.0)
                 desired_strength.at[stock] = max(
-                    strength * (0.85 + hold_bias_target * 0.15),
+                    strength
+                    * max(
+                        0.25,
+                        0.85
+                        + hold_bias_target * 0.15
+                        - reentry_guard_target * 0.30
+                        - reentry_penalty * (0.22 + reentry_guard_target * 0.55),
+                    ),
                     max(delta_hint, 0.02 + entry_quality * 0.20 + planned_holding_days / 320.0),
                 )
                 continue
@@ -324,6 +458,19 @@ class PortfolioState:
             gross_exposure_target,
             position_cap=position_cap_target,
         )
+        protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
+        if float(protected_floor.sum()) > float(gross_exposure_target) > 0.0:
+            protected_floor = protected_floor / float(protected_floor.sum()) * float(gross_exposure_target)
+        if bool((protected_floor > 1e-8).any()):
+            target_weights = target_weights.where(target_weights >= protected_floor, protected_floor)
+            excess = float(target_weights.sum() - gross_exposure_target)
+            if excess > 1e-8:
+                reducible = (target_weights - protected_floor).clip(lower=0.0)
+                reducible_sum = float(reducible.sum())
+                if reducible_sum > 1e-8:
+                    target_weights = target_weights - reducible / reducible_sum * excess
+                elif float(target_weights.sum()) > 1e-8:
+                    target_weights = target_weights / float(target_weights.sum()) * float(gross_exposure_target)
         delta = target_weights - current
         raw_turnover = float(delta.abs().sum())
         if raw_turnover > turnover_budget > 0:
@@ -392,6 +539,8 @@ class PortfolioState:
         next_holdings: dict[str, HoldingState] = {}
         next_last_buy_dates = dict(self.last_buy_dates)
         next_last_sell_dates = dict(self.last_sell_dates)
+        next_last_reduce_dates = dict(self.last_reduce_dates)
+        next_last_exit_dates = dict(self.last_exit_dates)
         next_last_action_labels = dict(self.last_action_labels)
         for stock, weight in new_weights.items():
             weight_value = float(weight)
@@ -427,10 +576,16 @@ class PortfolioState:
                 next_last_buy_dates[stock] = signal_date_text
             if execution_action in {"reduce", "exit"}:
                 next_last_sell_dates[stock] = signal_date_text
+            if execution_action == "reduce":
+                next_last_reduce_dates[stock] = signal_date_text
+            if execution_action == "exit":
+                next_last_exit_dates[stock] = signal_date_text
 
         self.holdings = next_holdings
         self.last_buy_dates = next_last_buy_dates
         self.last_sell_dates = next_last_sell_dates
+        self.last_reduce_dates = next_last_reduce_dates
+        self.last_exit_dates = next_last_exit_dates
         self.last_action_labels = next_last_action_labels
         weight_delta = new_weights - current
         realized_turnover = float(weight_delta.abs().sum())
@@ -442,6 +597,22 @@ class PortfolioState:
         self.recent_cash_weights.append(float(self.cash_weight))
         if len(self.recent_cash_weights) > 60:
             self.recent_cash_weights = self.recent_cash_weights[-60:]
+        for event in self.recent_action_events:
+            event["days_ago"] = int(event.get("days_ago", 999) or 999) + 1
+        self.recent_action_events = [event for event in self.recent_action_events if int(event.get("days_ago", 999) or 999) <= 30]
+        for item in actions:
+            execution_action = str(item.get("execution_action", "") or "").strip().lower()
+            if execution_action not in {"open", "add", "reduce", "exit"}:
+                continue
+            self.recent_action_events.append(
+                {
+                    "date": signal_date_text,
+                    "stock": str(item.get("stock", "") or "").strip().upper(),
+                    "execution_action": execution_action,
+                    "days_ago": 0,
+                }
+            )
+        self.recent_action_events = self.recent_action_events[-240:]
         self.last_signal_date = signal_date_text
         diagnostics = {
             "gross_exposure_target": gross_exposure_target,
@@ -449,6 +620,10 @@ class PortfolioState:
             "turnover_budget": turnover_budget,
             "max_position_weight_target": position_cap_target,
             "hold_bias_target": hold_bias_target,
+            "reduce_bias_target": reduce_bias_target,
+            "exit_patience_target": exit_patience_target,
+            "reentry_guard_target": reentry_guard_target,
+            "recent_reversal_rate_20d": float(self.portfolio_features().get("recent_reversal_rate_20d", 0.0)),
             "raw_turnover": raw_turnover,
             "realized_turnover": realized_turnover,
             "buy_turnover": buy_turnover,

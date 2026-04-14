@@ -76,7 +76,7 @@
       <li class="is-good"><span>再去“任务”页启动目标任务。</span><small>常见入口是 <code>trade-plan</code>、<code>candidate-trade-plan</code>、<code>candidate-backtest</code>。</small></li>
       <li class="is-good"><span>提交后自动跳转到作业详情。</span><small>先看 stdout/stderr 是否正常滚动，再判断是否需要切回总览或作业列表。</small></li>
       <li class="is-good"><span>任务结束后查看“交易计划”或相关产物。</span><small>不要只看作业成功与否，还要确认结果文件内容是否符合预期。</small></li>
-      <li class="is-good"><span>如果在推进连续策略。</span><small>优先直接运行 <code>continuous-policy-protocol</code>；它会按 <code>train -> evaluate -> shadow continuity -> export</code> 的顺序串联执行。正式候选默认选 <code>formal_torch_v2</code>，它要求 GPU、至少 <code>32</code> epoch 和 <code>strict resume</code>；<code>prototype_gbdt_v1</code> 只保留给 shadow / teacher。</small></li>
+      <li class="is-good"><span>如果在推进连续策略。</span><small>优先直接运行 <code>continuous-policy-protocol</code>；它会按 <code>train -> evaluate -> shadow continuity -> export</code> 的顺序串联执行。正式候选后端现在包括 <code>formal_torch_v2</code>、<code>formal_torch_seq_v3</code> 和 <code>formal_torch_hier_v4</code>，它们都要求 GPU、至少 <code>32</code> epoch 和 <code>strict resume</code>；<code>prototype_gbdt_v1</code> 只保留给 shadow / teacher。</small></li>
       <li class="is-good"><span>如果要做影子账户联调。</span><small>先在“模拟账户”页校准现金与持仓，再执行交易计划或连续策略导出，避免输入状态失真。</small></li>
     </ol>
   </article>

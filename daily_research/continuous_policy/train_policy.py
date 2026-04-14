@@ -12,7 +12,9 @@ if __package__ in {None, ""}:
 
 from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_future_path_metrics
 from daily_research.continuous_policy.model import fit_policy_models
+from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES, fit_policy_models_v2
+from daily_research.continuous_policy.model_seq_v3 import fit_policy_models_v3
 from daily_research.continuous_policy.pipeline_utils import (
     build_training_matrices,
     select_daily_feature_columns,
@@ -22,7 +24,9 @@ from daily_research.continuous_policy.runtime import MODELS_ROOT, now_iso, times
 from daily_research.continuous_policy.state_builder import prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_HIER_V4,
     TRAINER_BACKEND_FORMAL_V2,
+    TRAINER_BACKEND_FORMAL_SEQ_V3,
     TRAINER_BACKEND_PROTOTYPE_V1,
     build_training_contract,
     normalize_trainer_backend,
@@ -58,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--trainer-backend",
         default=TRAINER_BACKEND_FORMAL_V2,
         choices=TRAINER_BACKENDS,
-        help="prototype_gbdt_v1 stays shadow-only; formal_torch_v2 is the promotable epoch/resume backend.",
+        help="prototype_gbdt_v1 stays shadow-only; formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4 are promotable epoch/resume backends.",
     )
     parser.add_argument(
         "--decoder-profile",
@@ -201,6 +205,55 @@ def main(argv: list[str] | None = None) -> int:
             resume_mode=args.resume_mode,
         )
         artifact_path = run_root / "continuous_policy_v2_artifact.pt"
+        training_diagnostics = dict(artifact.training_diagnostics or {})
+    elif backend == TRAINER_BACKEND_FORMAL_HIER_V4:
+        artifact = fit_policy_models_v4(
+            sample_frame=sample_frame,
+            daily_frame=daily_frame,
+            feature_names=feature_names,
+            daily_feature_names=daily_feature_names,
+            random_seed=args.random_seed,
+            train_summary=train_summary,
+            trained_at=trained_at,
+            training_contract=training_contract,
+            run_root=run_root,
+            epochs=args.epochs,
+            min_epochs=args.min_epochs,
+            batch_size=max(2, min(int(args.batch_size), 8)),
+            learning_rate=min(float(args.learning_rate), 1.0e-3),
+            model_dim=max(int(args.hidden_dim), 256),
+            temporal_layers=3,
+            cross_layers=3,
+            dropout=max(float(args.dropout), 0.10),
+            early_stop_patience=args.early_stop_patience,
+            resume_mode=args.resume_mode,
+        )
+        artifact_path = run_root / "continuous_policy_hier_v4_artifact.pt"
+        training_diagnostics = dict(artifact.training_diagnostics or {})
+    elif backend == TRAINER_BACKEND_FORMAL_SEQ_V3:
+        artifact = fit_policy_models_v3(
+            sample_frame=sample_frame,
+            daily_frame=daily_frame,
+            feature_names=feature_names,
+            daily_feature_names=daily_feature_names,
+            random_seed=args.random_seed,
+            train_summary=train_summary,
+            trained_at=trained_at,
+            training_contract=training_contract,
+            run_root=run_root,
+            epochs=args.epochs,
+            min_epochs=args.min_epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            hidden_dim=max(int(args.hidden_dim), 224),
+            sequence_hidden_dim=max(int(args.hidden_dim // 2), 96),
+            daily_hidden_dim=args.daily_hidden_dim,
+            dropout=max(float(args.dropout), 0.10),
+            daily_dropout=args.daily_dropout,
+            early_stop_patience=args.early_stop_patience,
+            resume_mode=args.resume_mode,
+        )
+        artifact_path = run_root / "continuous_policy_v3_seq_artifact.pt"
         training_diagnostics = dict(artifact.training_diagnostics or {})
     else:
         artifact = fit_policy_models(

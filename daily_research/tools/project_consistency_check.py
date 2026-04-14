@@ -474,12 +474,16 @@ def _check_execution_application_contract(failures: list[CheckResult]) -> None:
         "daily_research/continuous_policy/portfolio_simulator.py",
         "daily_research/continuous_policy/model.py",
         "daily_research/continuous_policy/model_v2.py",
+        "daily_research/continuous_policy/model_seq_v3.py",
+        "daily_research/continuous_policy/model_hier_v4.py",
         "daily_research/continuous_policy/pipeline_utils.py",
         "daily_research/continuous_policy/training_contracts.py",
         "daily_research/continuous_policy/train_policy.py",
         "daily_research/continuous_policy/evaluate_policy.py",
         "daily_research/continuous_policy/export_action_panel.py",
         "daily_research/continuous_policy/run_continuous_policy_protocol.py",
+        "daily_research/continuous_policy/analyze_behavior_gap.py",
+        "daily_research/continuous_policy/conclusion_ledger.py",
         "daily_research/execution/app.py",
         "daily_research/execution/app_runtime.py",
         "daily_research/execution/app_service.py",
@@ -533,6 +537,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("--epochs", "train_policy epoch budget"),
         ("--resume-mode", "train_policy strict resume"),
         ("formal_torch_v2", "train_policy promotable backend"),
+        ("TRAINER_BACKEND_FORMAL_SEQ_V3", "train_policy stronger sequence backend"),
+        ("TRAINER_BACKEND_FORMAL_HIER_V4", "train_policy hierarchical backend"),
         ("prototype_gbdt_v1", "train_policy prototype backend"),
     ):
         _require(
@@ -545,6 +551,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("--trainer-backend", "protocol backend selector"),
         ("contract_promotable", "protocol promotion gate contract check"),
         ("training_contract", "protocol contract summary"),
+        ("decoder_profile", "protocol decoder profile"),
     ):
         _require(
             snippet in protocol_text,
@@ -565,11 +572,45 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
             "continuous_policy_contract_missing",
             f"continuous_policy torch v2 backend is missing required contract marker: {label}",
         )
+    model_seq_v3_text = _read_text("daily_research/continuous_policy/model_seq_v3.py")
+    for snippet, label in (
+        ("continuous_policy_torch_seq_v3", "seq artifact type"),
+        ("continuous_policy_v3_seq_artifact.pt", "seq artifact path"),
+        ("checkpoint_last.pt", "seq checkpoint last"),
+        ("checkpoint_best.pt", "seq checkpoint best"),
+        ("strict resume", "seq strict resume wording"),
+        ("torch.cuda.is_available", "seq cuda contract check"),
+        ("sequence_step_count", "seq diagnostics"),
+    ):
+        _require(
+            snippet in model_seq_v3_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy torch seq v3 backend is missing required contract marker: {label}",
+        )
+    model_hier_v4_text = _read_text("daily_research/continuous_policy/model_hier_v4.py")
+    for snippet, label in (
+        ("continuous_policy_torch_hier_v4", "hier artifact type"),
+        ("continuous_policy_hier_v4_artifact.pt", "hier artifact path"),
+        ("checkpoint_last.pt", "hier checkpoint last"),
+        ("checkpoint_best.pt", "hier checkpoint best"),
+        ("strict resume", "hier strict resume wording"),
+        ("torch.cuda.is_available", "hier cuda contract check"),
+        ("global_target_count", "hier diagnostics"),
+    ):
+        _require(
+            snippet in model_hier_v4_text,
+            failures,
+            "continuous_policy_contract_missing",
+            f"continuous_policy torch hier v4 backend is missing required contract marker: {label}",
+        )
     for snippet, label in (
         ("epoch_resume_formal_candidate", "formal contract class"),
         ("non_epoch_shadow_prototype", "prototype contract class"),
         ("promotable", "promotion eligibility flag"),
         ("resume_capable", "resume capability flag"),
+        ("formal_torch_seq_v3", "seq backend contract"),
+        ("formal_torch_hier_v4", "hier backend contract"),
     ):
         _require(
             snippet in contracts_text,
@@ -588,6 +629,9 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "至少从 `32` epoch 起步",
             "non-epoch shadow prototype",
             "formal_torch_v2",
+            "formal_torch_seq_v3",
+            "formal_torch_hier_v4",
+            "以日为单位进行连续决策的交易执行模型",
             "前台执行",
             "默认追求最高效、最合理",
         ),
@@ -607,6 +651,18 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "run_continuous_policy_protocol.py",
             "不足 `32` epoch 不构成完整判决",
             "默认最高效、最合理实验",
+            "formal_torch_seq_v3",
+            "formal_torch_hier_v4",
+            "cp_v3_seq_holdcash_r1",
+            "cp_v3_seq_holdcash_r2",
+            "cp_v3_seq_holdcash_v5_formal_r1",
+            "cp_hier_v4_holdcash_r5",
+            "holdcash_v5",
+            "training_evidence",
+            "latest_behavior_audit_summary.json",
+            "latest_conclusion_ledger.json",
+            "固定调仓频率",
+            "日频连续决策",
         ),
         "daily_research/brain/knowledge_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -617,6 +673,17 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "不做无目的广扫",
             "prototype_gbdt_v1",
             "formal_torch_v2",
+            "formal_torch_seq_v3",
+            "formal_torch_hier_v4",
+            "holdcash_v3",
+            "holdcash_v5",
+            "training_evidence",
+            "train_day_count",
+            "teacher_action_rows",
+            "以日为单位进行连续决策的交易执行模型",
+            "固定调仓频率",
+            "固定持有周期",
+            "人工执行桥",
             "formal 验证采用滚动窗口协议",
             "recent 验证现在是 strongest-model 研究闭环必备伴随证据",
             "recent 胜利不能直接当 promotion 结论",
@@ -629,6 +696,12 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "continuous_policy",
             "/continuous-policy",
             "run_continuous_policy_protocol.py",
+            "cp_v3_seq_holdcash_r1",
+            "cp_v3_seq_holdcash_r2",
+            "cp_v3_seq_holdcash_v5_formal_r1",
+            "cp_hier_v4_holdcash_r5",
+            "latest_behavior_audit_summary.json",
+            "latest_conclusion_ledger.json",
         ),
         "daily_research/brain/governance_layer.md": (
             "目标一致性检查",
@@ -654,10 +727,23 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "最高效、最合理",
             "prototype_gbdt_v1",
             "formal_torch_v2",
+            "formal_torch_seq_v3",
+            "formal_torch_hier_v4",
+            "holdcash_v3",
+            "holdcash_v5",
+            "training_evidence",
+            "train_day_count",
+            "teacher_action_rows",
             "continuous-policy-protocol",
             "continuous-policy-train",
             "/continuous-policy",
             "run_continuous_policy_protocol.py",
+            "analyze_behavior_gap.py",
+            "conclusion_ledger.py",
+            "cp_v3_seq_holdcash_r1",
+            "cp_v3_seq_holdcash_r2",
+            "cp_v3_seq_holdcash_v5_formal_r1",
+            "cp_hier_v4_holdcash_r5",
         ),
     }
     for relative_path, snippets in required_strings.items():
@@ -668,6 +754,29 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
                 failures,
                 "brain_memory_not_synced",
                 f"{relative_path} is missing current consistency marker: {snippet}",
+            )
+
+
+def _check_no_stale_brain_phrases(failures: list[CheckResult]) -> None:
+    forbidden_strings = {
+        "daily_research/brain/state_center.md": (
+            "但共同卡点仍然是 `hold_share` 近乎为 `0`、`cash_timing_quality_1d` 只有 `0.0077` 量级、`avg_turnover` 仍高于 active manifest",
+        ),
+        "daily_research/brain/knowledge_center.md": (
+            "当前 continuous_policy 的共同短板已经收缩到两件事：`hold_share` 近乎为 `0`，以及 `cash_timing_quality_1d` 仍然很弱",
+        ),
+        "daily_research/brain/operations_center.md": (
+            "continuous_policy 的这条 GPU 约束只对 `formal_torch_v2` 生效",
+        ),
+    }
+    for relative_path, snippets in forbidden_strings.items():
+        text = _read_text(relative_path)
+        for snippet in snippets:
+            _require(
+                snippet not in text,
+                failures,
+                "brain_stale_phrase_present",
+                f"{relative_path} still contains stale phrase: {snippet}",
             )
 
 
@@ -685,6 +794,7 @@ def run_checks() -> list[CheckResult]:
     _check_execution_application_contract(failures)
     _check_continuous_policy_training_contract(failures)
     _check_memory_sync(failures)
+    _check_no_stale_brain_phrases(failures)
     return failures
 
 

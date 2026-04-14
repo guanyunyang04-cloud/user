@@ -413,6 +413,8 @@ def build_cross_section_state(
     hold_day_map = getattr(portfolio_state, "hold_days_map", lambda: {})()
     last_buy_map = getattr(portfolio_state, "last_buy_date_map", lambda: {})()
     last_sell_map = getattr(portfolio_state, "last_sell_date_map", lambda: {})()
+    last_reduce_map = getattr(portfolio_state, "last_reduce_date_map", lambda: {})()
+    last_exit_map = getattr(portfolio_state, "last_exit_date_map", lambda: {})()
     last_action_map = getattr(portfolio_state, "last_action_label_map", lambda: {})()
     portfolio_features = getattr(portfolio_state, "portfolio_features", lambda: {})()
 
@@ -422,6 +424,8 @@ def build_cross_section_state(
     hold_days = pd.Series({stock: float(hold_day_map.get(stock, 0) or 0) for stock in universe}, dtype=float)
     days_since_last_buy = _days_since_for_mapping(last_buy_map if isinstance(last_buy_map, dict) else {}, universe=universe, signal_dt=signal_dt)
     days_since_last_sell = _days_since_for_mapping(last_sell_map if isinstance(last_sell_map, dict) else {}, universe=universe, signal_dt=signal_dt)
+    days_since_last_reduce = _days_since_for_mapping(last_reduce_map if isinstance(last_reduce_map, dict) else {}, universe=universe, signal_dt=signal_dt)
+    days_since_last_exit = _days_since_for_mapping(last_exit_map if isinstance(last_exit_map, dict) else {}, universe=universe, signal_dt=signal_dt)
     last_action = pd.Series({stock: str((last_action_map or {}).get(stock, "") or "").strip().lower() for stock in universe}, dtype=object)
     holding_flag = (current_weight > 1e-8).astype(float)
 
@@ -436,6 +440,8 @@ def build_cross_section_state(
             "hold_days": hold_days.to_numpy(dtype=float),
             "days_since_last_buy": days_since_last_buy.to_numpy(dtype=float),
             "days_since_last_sell": days_since_last_sell.to_numpy(dtype=float),
+            "days_since_last_reduce": days_since_last_reduce.to_numpy(dtype=float),
+            "days_since_last_exit": days_since_last_exit.to_numpy(dtype=float),
         }
     )
     row.index = universe
@@ -514,6 +520,12 @@ def build_cross_section_state(
         out=np.zeros_like(vol20, dtype=float),
         where=vol20 > 1e-8,
     )
+    row["pnl_from_entry"] = row["unrealized_pnl"].astype(float)
+    row["price_from_local_peak"] = (-pd.Series(row["distance_to_20d_high"], index=universe).fillna(0.0)).to_numpy(dtype=float)
+    row["signal_decay_speed"] = (
+        np.clip(-pd.Series(row["score_delta_1d"], index=universe).fillna(0.0).to_numpy(dtype=float), 0.0, None) * 0.55
+        + np.clip(-pd.Series(row["score_delta_accel"], index=universe).fillna(0.0).to_numpy(dtype=float), 0.0, None) * 0.45
+    )
     held_pnl = pd.Series(row["unrealized_pnl"], index=universe).where(holding_flag > 0.5)
     row["pnl_rank_in_portfolio"] = held_pnl.rank(pct=True, method="average").fillna(0.0).to_numpy(dtype=float)
     held_drawdown = pd.Series(row["drawdown_from_peak"], index=universe).where(holding_flag > 0.5)
@@ -550,7 +562,57 @@ def build_cross_section_state(
     row["portfolio_recent_positive_return_share_20d"] = float(aggregate.get("recent_positive_return_share_20d", 0.0))
     row["portfolio_drawdown_20d"] = float(aggregate.get("portfolio_drawdown_20d", 0.0))
     row["portfolio_return_vol_20d"] = float(aggregate.get("return_vol_20d", 0.0))
-    return row.reset_index(drop=True)
+    row["recent_reversal_count_20d"] = float(aggregate.get("recent_reversal_count_20d", 0.0))
+    row["recent_reversal_rate_20d"] = float(aggregate.get("recent_reversal_rate_20d", 0.0))
+    row["recent_reduce_count_10d"] = float(aggregate.get("recent_reduce_count_10d", 0.0))
+    row["recent_exit_count_10d"] = float(aggregate.get("recent_exit_count_10d", 0.0))
+    row["recent_add_count_10d"] = float(aggregate.get("recent_add_count_10d", 0.0))
+    row["recent_open_count_10d"] = float(aggregate.get("recent_open_count_10d", 0.0))
+    benchmark_trend_gap_value = float(row["benchmark_trend_gap"].iloc[0]) if "benchmark_trend_gap" in row.columns else 0.0
+    benchmark_vol_ratio_value = float(row["benchmark_vol_ratio"].iloc[0]) if "benchmark_vol_ratio" in row.columns else 0.0
+    benchmark_trend_gap_value = benchmark_trend_gap_value if np.isfinite(benchmark_trend_gap_value) else 0.0
+    benchmark_vol_ratio_value = benchmark_vol_ratio_value if np.isfinite(benchmark_vol_ratio_value) else 0.0
+    portfolio_drawdown_value = float(row["portfolio_drawdown_20d"].iloc[0]) if "portfolio_drawdown_20d" in row.columns else 0.0
+    portfolio_drawdown_value = portfolio_drawdown_value if np.isfinite(portfolio_drawdown_value) else 0.0
+    portfolio_cash_deficit_value = float(row["portfolio_cash_deficit"].iloc[0]) if "portfolio_cash_deficit" in row.columns else 0.0
+    portfolio_cash_deficit_value = portfolio_cash_deficit_value if np.isfinite(portfolio_cash_deficit_value) else 0.0
+    turnover_pressure_value = float(row["portfolio_turnover_pressure"].iloc[0]) if "portfolio_turnover_pressure" in row.columns else 0.0
+    turnover_pressure_value = turnover_pressure_value if np.isfinite(turnover_pressure_value) else 0.0
+    reversal_rate_value = float(row["recent_reversal_rate_20d"].iloc[0]) if "recent_reversal_rate_20d" in row.columns else 0.0
+    reversal_rate_value = reversal_rate_value if np.isfinite(reversal_rate_value) else 0.0
+    row["market_downside_pressure"] = (
+        0.55 * max(-benchmark_trend_gap_value, 0.0)
+        + 0.25 * max(benchmark_vol_ratio_value, 0.0)
+        + 0.20 * max(-portfolio_drawdown_value - 0.02, 0.0)
+    )
+    row["portfolio_cash_pressure"] = (
+        portfolio_cash_deficit_value
+        + 0.35 * max(turnover_pressure_value - 0.75, 0.0)
+        + 0.18 * max(reversal_rate_value - 0.18, 0.0)
+    )
+    row["reduce_reversal_pressure"] = (
+        0.45 * row["recent_reversal_rate_20d"].astype(float)
+        + 0.30 * np.clip(row["recent_reduce_count_10d"].astype(float) / 6.0, 0.0, 1.0)
+        + 0.25 * np.clip(row["signal_decay_speed"].astype(float), 0.0, 1.0)
+    )
+    row["exit_reentry_pressure"] = (
+        0.40 * row["reentry_cooldown"].astype(float)
+        + 0.30 * row["recent_sell_flag"].astype(float)
+        + 0.30 * row["recent_reversal_rate_20d"].astype(float)
+    )
+    row["cash_regime_pressure"] = (
+        0.55 * row["market_downside_pressure"].astype(float)
+        + 0.30 * row["portfolio_cash_pressure"].astype(float)
+        + 0.15 * np.clip(row["portfolio_turnover_pressure"].astype(float), 0.0, 1.0)
+    )
+    row["hold_continuity_pressure"] = (
+        0.40 * row["holding_age_short"].astype(float)
+        + 0.35 * np.clip(row["position_age_phase"].astype(float), 0.0, 1.0)
+        + 0.25 * np.clip(row["score_rank_pct"].astype(float) - 0.70, 0.0, 1.0)
+    )
+    row.index = pd.Index([str(stock).strip().upper() for stock in universe], name="stock_code")
+    row["stock"] = [str(stock).strip().upper() for stock in universe]
+    return row
 
 
 def build_daily_state_features(state_frame: pd.DataFrame) -> dict[str, float]:
@@ -596,6 +658,18 @@ def build_daily_state_features(state_frame: pd.DataFrame) -> dict[str, float]:
         "portfolio_recent_positive_return_share_20d",
         "portfolio_drawdown_20d",
         "portfolio_return_vol_20d",
+        "recent_reversal_count_20d",
+        "recent_reversal_rate_20d",
+        "recent_reduce_count_10d",
+        "recent_exit_count_10d",
+        "recent_add_count_10d",
+        "recent_open_count_10d",
+        "market_downside_pressure",
+        "portfolio_cash_pressure",
+        "reduce_reversal_pressure",
+        "exit_reentry_pressure",
+        "cash_regime_pressure",
+        "hold_continuity_pressure",
         "benchmark_trend_gap",
         "benchmark_annual_vol",
         "benchmark_vol_gap",

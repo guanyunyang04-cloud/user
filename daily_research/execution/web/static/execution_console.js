@@ -298,6 +298,8 @@
       const referenceMetrics = evaluation.active_manifest_reference?.metrics || {};
       const latestExport = payload.latest_export || {};
       const latestProtocol = payload.latest_protocol || {};
+      const latestAudit = payload.latest_behavior_audit || {};
+      const latestLedger = payload.latest_conclusion_ledger || {};
       const protocolShadow = latestProtocol.shadow || {};
       const protocolTrainWindow = latestProtocol.train_window || {};
       const protocolEvalWindow = latestProtocol.evaluation_window || {};
@@ -318,6 +320,7 @@
       updateText("#cp-train-tag", train.run_tag || "暂无");
       updateText("#cp-train-at", train.trained_at || "暂无");
       updateText("#cp-train-backend", train.trainer_backend || "暂无");
+      updateText("#cp-train-decoder", train.decoder_profile || "暂无");
       updateText("#cp-train-contract", train.training_contract?.contract_class || "暂无");
       updateText("#cp-train-pool", train.pool_name || "暂无");
       updateText("#cp-train-preset", train.label_preset || "暂无");
@@ -378,6 +381,7 @@
       );
       updateText("#cp-protocol-tag", latestProtocol.run_tag || "暂无");
       updateText("#cp-protocol-backend", latestProtocol.trainer_backend || train.trainer_backend || "暂无");
+      updateText("#cp-protocol-decoder", latestProtocol.decoder_profile || train.decoder_profile || "暂无");
       updateText("#cp-protocol-contract", latestProtocol.training_contract?.contract_class || train.training_contract?.contract_class || "暂无");
       updateText(
         "#cp-protocol-train-window",
@@ -411,6 +415,13 @@
         latestProtocol.promotion_gate?.status ? String(latestProtocol.promotion_gate.status) : "暂无"
       );
       updateText("#cp-protocol-summary-json", latestProtocol.protocol_summary_json || protocolShadow.shadow_summary_json || "暂无");
+      updateText("#cp-audit-path", latestAudit.output_path || "暂无");
+      updateText("#cp-audit-top", latestAudit.bottlenecks?.[0]?.name || "暂无");
+      updateText("#cp-ledger-path", latestLedger.output_path || "暂无");
+      updateText(
+        "#cp-ledger-stage-count",
+        Array.isArray(latestLedger.stage_local_conclusions) ? String(latestLedger.stage_local_conclusions.length) : "0"
+      );
 
       updateText("#cp-export-date", latestExport.signal_date || "暂无");
       updateText("#cp-export-dir", latestExport.export_dir || "暂无");

@@ -12340,3 +12340,431 @@ position,000001.SZ,1200,12.38,
 - 本轮复盘：
   - 这次纠偏的核心不是鼓励无边界广扫，而是把“实验边界”从规模导向改成信息增益导向
   - 以后判断某条线该不该重开，不再只问“是不是窄实验”，而是问“它是否是当前最高效、最合理的信息获取方式”
+
+## 2026-04-14 - continuous_policy 结论账本 / 行为审计 / 强时序分支首轮 smoke
+- 触发原因：
+  - 用户要求在“默认做最高效、最合理实验”的前提下，回顾旧结论是否合理，并把后续高优先级工作按顺序直接做完
+  - 已完成 `conclusion ledger`、`behavior audit`、`v2` 状态/标签/decoder 升级与三组高信息 protocol 后，结果表明 `v2` 仍受明显行为瓶颈约束，需要进入 stronger sequence branch
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/conclusion_ledger.py`
+    - 生成 `stable_conclusions / stage_local_conclusions / strong_model_recheck_conclusions / next_actions`
+    - 写回 `daily_research/output/continuous_policy/latest_conclusion_ledger.json`
+  - 新增 `daily_research/continuous_policy/analyze_behavior_gap.py`
+    - 生成 teacher-vs-model 行为差距、micro signals 与 bottleneck
+    - 写回 `daily_research/output/continuous_policy/latest_behavior_audit_summary.json`
+  - 升级 `continuous_policy v2`：
+    - `state_builder.py` 新增 `days_since_last_buy/sell`、`reentry_cooldown`、`position_age_phase`、组合 cash/turnover 状态与 lagged sequence features
+    - `label_builder.py` 新增 `holdcash_v3`，并强化 `hold / reduce / cash` teacher 逻辑
+    - `portfolio_simulator.py` 新增 buy/sell/action memory 与组合 cash/turnover 统计
+    - `model_v2.py` 新增 `budget_v3 / holdcash_v3` decoder profile，并修掉 global target NaN 污染
+  - 已真实跑完三组高信息 `v2` protocol：
+    - `cp_v2_holdcash_r2`
+    - `cp_v2_decoder_r1`
+    - `cp_v2_holdcash_decoder_r1`
+    - 共同结论：`hold_share` 仍塌缩到 `0.0`，因此满足“v2 仍受限 -> 转入 stronger model branch”的条件
+  - 新增 `formal_torch_seq_v3`：
+    - 文件：`model_seq_v3.py`
+    - 训练合同：`GPU only + >=32 epoch + strict resume`
+    - 载入/分发：`model.py`
+    - 训练入口：`train_policy.py`
+    - 执行侧摘要：`app_service.py`
+  - 已真实跑通第一轮 stronger temporal smoke：
+    - tag：`cp_v3_seq_holdcash_r1`
+    - backend：`formal_torch_seq_v3`
+    - decoder：`holdcash_v3`
+    - train/evaluate/shadow/export 全链路通过
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 训练侧：
+    - `device = cuda`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sequence_base_count = 9`
+    - `sequence_step_count = 5`
+  - `cp_v3_seq_holdcash_r1` 评估侧：
+    - 年化 `0.6196`
+    - Sharpe `5.9867`
+    - 最大回撤 `-0.0152`
+    - `avg_turnover = 0.0721`
+    - `hold_share = 0.30`
+    - `reduce_success_rate_5d = 0.4286`
+    - `cash_timing_quality_1d = -0.4564`
+    - `promotion_gate = shadow_only`
+  - `behavior_audit_20260414_r2` 当前 top bottlenecks：
+    - `reduce_too_early_or_wrong_side`
+    - `cash_timing_not_learned`
+    - `early_exit_bias`
+  - `conclusion_ledger_20260414_r2` 已把旧结论重分成：
+    - 稳定结论
+    - 阶段性结论
+    - 强模型复核结论
+- 本轮推断：
+  - `hold_share` 已不再是 continuous_policy 当前第一瓶颈，说明 stronger temporal branch 对“持有连续性”确实有增益
+  - 当前最值得继续打的不是再证明“要不要更强模型”，而是基于 `seq_v3` 继续修 `reduce / cash / reversal`
+  - 旧结论现在不该再用“永久淘汰”口吻表述；凡是弱模型、旧状态表达、旧动作空间下的失败，都应当进入“强模型复核池”
+- 本轮写回：
+  - `identity_layer.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `state_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research/continuous_policy daily_research/execution` 通过
+  - `cp_v3_seq_holdcash_r1` protocol 真实跑通
+  - `behavior_audit_20260414_r2` 真实生成
+  - `conclusion_ledger_20260414_r2` 真实生成
+- 本轮复盘：
+  - 这轮已经把“先做结论清洗 -> 再做行为审计 -> 再做 stronger temporal 验证”的闭环真正落地
+  - continuous_policy 现在不再只是“有更强模型设想”，而是已经有可审计的 `seq_v3` 真实证据
+  - 下一轮不该回到泛化规划，而应直接围绕 `reduce / cash / early exit` 继续做高信息增益改动
+
+## 2026-04-14 - continuous_policy 目标定义收口为“日频连续决策代理”
+- 触发原因：
+  - 用户明确给出目标定义：希望构建的是一个以日为单位进行连续决策的交易执行模型，而不是依赖固定调仓频率、固定持有周期或人工执行桥接规则的系统
+- 本轮动作：
+  - 将这条目标定义正式写入：
+    - `identity_layer.md`
+    - `knowledge_center.md`
+    - `state_center.md`
+    - `project_consistency_check.py`
+- 本轮写回要点：
+  - continuous_policy 的终局目标不是“继续优化固定执行桥”
+  - 而是：
+    - 日频连续决策
+    - 逐票异质持有逻辑
+    - 从市场全局状态、个股演化路径与持仓上下文直接学习动态执行
+    - 在尽量少的人为约束下综合权衡收益、风险与成本
+  - `top-k / 3d / 5d / 20d / ensemble / regime filter` 这类桥接规则从此只保留为基线、参考或 fallback，不再作为终局目标本身
+- 本轮复盘：
+  - 这次不是新增实验，而是收紧了“我们到底在建什么”的目标边界
+  - 以后评价 continuous_policy 的进展，不能只看是否超过某个固定桥基线，还必须看它是否越来越接近日频连续、逐票异质、全局动态优化的目标形态
+
+## 2026-04-14 - 主脑与分析真源精炼整理
+- 触发原因：
+  - 用户要求总览立项以来的路线和成果，并对整个项目做详细审阅、整理、维护和修复，使其满足“逻辑严谨一致，条理清晰，精炼简洁”
+- 本轮动作：
+  - 在 `state_center.md / knowledge_center.md / operations_center.md` 清理了已过时的旧阶段叙事：
+    - 移除了把 `hold_share` 继续写成当前第一瓶颈的表述
+    - 修正了把 continuous_policy GPU 正式训练约束误写成只作用于 `formal_torch_v2` 的表述
+  - 新增非权威派生摘要：
+    - `daily_research/output/project_review/latest_project_route_review.md`
+  - 修正分析真源生成逻辑：
+    - `analyze_behavior_gap.py` 的 `recommended_focus` 改为按当前指标动态生成，不再默认“先提升 hold_share”
+    - `conclusion_ledger.py` 的局部瓶颈结论改为按当前 gate 与影子 reversal 动态生成，并把 `formal_torch_seq_v3` 纳入正式合同叙事
+  - 在 `project_consistency_check.py` 新增 stale phrase 守卫，防止旧结论回流进当前主脑
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 当前仍是 stronger temporal 最新 smoke 证据
+  - 当前主脑口径已经统一为：
+    - `hold_share` 已改善，不再是第一瓶颈
+    - 当前更集中要修的是 `reduce / cash / early exit / shadow reversal`
+- 本轮验证：
+  - 重新生成 `latest_behavior_audit_summary.json`
+  - 重新生成 `latest_conclusion_ledger.json`
+  - `project_consistency_check.py` 通过
+  - `doc_guard.py check` 通过
+  - `compileall` 通过
+- 本轮复盘：
+  - 这轮不是新增一条研究线，而是把已有路线、成果、边界和当前问题真正收口成一致真源
+  - 以后接管时，不再需要在“旧瓶颈”“新瓶颈”“训练合同范围”之间做人工去歧义
+
+## 2026-04-14 - seq_v3 `v4` repair matrix 跑完并回切 latest 指针
+- 触发原因：
+  - 用户要求按顺序把“先改 `reduce / cash / reversal`，再跑高价值 protocol，对比后写回主脑”的后续工作直接做完
+  - 我已先完成 `holdcash_v4` 标签、`reduceexit_v4 / cash_v4 / reduceexit_cash_v4` decoder 与行为审计增强，接下来需要把剩余两组真实 protocol 跑完并收口阶段结论
+- 本轮动作：
+  - 完整跑通三组 seq_v3 `v4` repair protocol：
+    - `cp_v3_seq_reduceexit_r1`
+    - `cp_v3_seq_cash_r1`
+    - `cp_v3_seq_reduceexit_cash_r1`
+  - `run_continuous_policy_protocol.py` 已自动串联：
+    - `train`
+    - `evaluate`
+    - `shadow`
+    - `export`
+    - `behavior audit`
+    - `conclusion ledger`
+  - 新增的行为归因指标已进入 protocol / audit：
+    - `wrong_side_reduce_share`
+    - `profit_take_too_early_share`
+    - `reentry_after_exit_3d_rate`
+    - `exit_then_rebound_cost`
+    - `risk_off_cash_hit_rate`
+  - 为避免控制台默认漂到“最近一次但更差”的版本，我把：
+    - `latest_train_summary.json`
+    - `latest_evaluation_summary.json`
+    - `latest_export_summary.json`
+    - `latest_protocol_summary.json`
+    - `latest_behavior_audit_summary.json`
+    - `latest_conclusion_ledger.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+- 本轮关键事实：
+  - `cp_v3_seq_reduceexit_r1`
+    - 年化 `-0.1497`
+    - Sharpe `-1.6263`
+    - `hold_share = 0.0833`
+    - `reduce_success_rate_5d = 0.6296`
+    - `cash_timing_quality_1d = -0.0398`
+    - `shadow_cash_timing_quality_1d = 0.5177`
+  - `cp_v3_seq_cash_r1`
+    - 年化 `0.0062`
+    - Sharpe `0.1111`
+    - `hold_share = 0.0417`
+    - `reduce_success_rate_5d = 0.6538`
+    - `cash_timing_quality_1d = -0.0665`
+    - `shadow_cash_timing_quality_1d = 0.5177`
+  - `cp_v3_seq_reduceexit_cash_r1`
+    - 年化 `0.0062`
+    - Sharpe `0.1111`
+    - `hold_share = 0.0417`
+    - `reduce_success_rate_5d = 0.6538`
+    - `cash_timing_quality_1d = -0.0658`
+    - 与 `cp_v3_seq_cash_r1` 基本等价，没有带来额外增益
+  - `cp_v3_seq_holdcash_r1`
+    - 仍是当前 strongest temporal 综合最强锚点
+    - 年化 `0.6196`
+    - Sharpe `5.9867`
+    - `hold_share = 0.30`
+    - 但仍卡在 `reduce_success_rate_5d / cash_timing_quality_1d / shadow_reversal`
+- 本轮推断：
+  - `v4` repair matrix 证明了一个更清晰的阶段边界：
+    - 单点修 `reduce / cash` 可以显著修好局部指标
+    - 但如果没有显式保护持有连续性，`hold_share` 和总收益会一起塌掉
+  - 当前最值得继续打的不是再广扫 profile，而是：
+    - 修 `reduce_too_early_or_wrong_side`
+    - 修 `cash_timing_not_learned`
+    - 修 `early_exit_bias / shadow reversal`
+    - 同时显式保住 `hold_share >= 0.20`
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+- 本轮验证：
+  - `cp_v3_seq_cash_r1` protocol 真实跑通
+  - `cp_v3_seq_reduceexit_cash_r1` protocol 真实跑通
+  - `latest_*` 指针已真实回切到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-14 - `formal_torch_hier_v4` 分层时序分支落地并完成首轮 smoke
+- 背景事实：
+  - 用户明确要求不要再停留在蓝图层，而是把“更强、最合理的神经网络架构”直接接进项目
+  - 当时 continuous_policy 只有 `prototype_gbdt_v1 / formal_torch_v2 / formal_torch_seq_v3`
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/model_hier_v4.py`
+  - 实现 `formal_torch_hier_v4`：
+    - 按交易日分组训练
+    - 个股静态特征编码 + 个股时序路径编码
+    - market / portfolio / universe token
+    - cross-section interaction encoder
+    - 全局预算头 + 生命周期动作头
+  - 同步接入：
+    - `training_contracts.py`
+    - `model.py`
+    - `train_policy.py`
+    - `runtime.py`
+    - `app_tasks.py`
+    - `analyze_behavior_gap.py`
+- 真实验证：
+  - 已前台在 `yolos` 中跑通：
+    - `cp_hier_v4_holdcash_r1`
+    - `cp_hier_v4_holdcash_r2`
+    - `cp_hier_v4_holdcash_r3`
+  - `r1` 暴露 `analyze_behavior_gap.py` 对空 `action_outcomes_csv` 不稳；本轮已修复
+  - `r3` 已完整通过：
+    - `train -> evaluate -> shadow continuity -> export -> behavior audit -> conclusion ledger`
+    - `device = cuda`
+    - `completed_epochs = 32`
+    - `best_epoch = 32`
+- 关键事实：
+  - `formal_torch_hier_v4` 已满足：
+    - `GPU only`
+    - `>=32 epoch`
+    - `strict resume`
+    - `checkpoint_last.pt / checkpoint_best.pt / training_diagnostics.json`
+    - `continuous_policy_hier_v4_artifact.pt`
+  - 但 `cp_hier_v4_holdcash_r3` 的 formal 评估侧仍出现：
+    - `action_rows = 0`
+    - `avg_gross_exposure = 0`
+    - `hold_share = 0`
+  - 说明当前 `hier_v4` 已经是正式存在的新研究分支，但行为层仍有全现金塌缩
+- 本轮推断：
+  - `formal_torch_hier_v4` 已经从设想变成项目内第四类 continuous_policy 训练后端
+  - 但它当前不能替代 `cp_v3_seq_holdcash_r1`
+  - 当前 strongest temporal 锚点仍然是 `formal_torch_seq_v3`
+  - `hier_v4` 下一步优先修：
+    - 正式评估侧全现金塌缩
+    - `open / hold` 不出手
+    - decoder 与组合预算头过度保守耦合
+- 本轮写回：
+  - `identity_layer.md`
+  - `knowledge_center.md`
+  - `state_center.md`
+  - `operations_center.md`
+  - `execution/使用教程.md`
+  - `execution/web/templates/guide.html`
+- 本轮复盘：
+  - 这轮最大的收获不是立即得到新 strongest model，而是把更强分层神经网络路线变成了可训练、可评估、可导出、可写回的正式项目分支
+  - 同时也明确收口了一条阶段性结论：
+    - `seq_v3` 仍是当前 strongest temporal 锚点
+    - `hier_v4` 已落地，但现在仍只是 `shadow_only` 起点
+- 本轮复盘：
+  - 这轮最大的收获不是又多了两个 tag，而是把“局部修补”和“当前最强锚点”真正区分开了
+  - 后续如果再跑 repair 变体，默认不能让控制台自动漂到最近一次实验，必须在比较完成后主动收口到当前最强版本
+
+## 2026-04-14 - `formal_torch_hier_v4` stock index 错位修复并完成 `cp_hier_v4_holdcash_r4`
+- 背景事实：
+  - 用户要求继续把更强架构真正落到可用状态，而不是停在“新分支已接通”
+  - `cp_hier_v4_holdcash_r3` 当时的 formal 评估侧表现为全零：`action_rows = 0 / avg_gross_exposure = 0 / hold_share = 0`
+- 本轮排查：
+  - 先直接抽样 `predict_policy_v4` 在 empty-portfolio formal 首日的输出
+  - 结果发现模型其实已经能给出非零 `open` 与非零 `target_weight`
+  - 再对比 `portfolio.step()` 的输入输出，确认真正根因不是模型完全失效，而是 `build_cross_section_state()` 末尾把真实股票代码索引重置成了 `0..N-1`
+  - 这样 `predict_policy` 产出的 policy frame 与 `prices.index` 对票失败，formal rollout 被统一回填成 `skip`
+- 本轮动作：
+  - 修复 `daily_research/continuous_policy/state_builder.py`
+    - 保留真实股票代码为 cross-section state 的索引
+    - 同时保留 `stock` 列
+  - 先用既有 artifact 快速验证：
+    - `cp_hier_v4_holdcash_r3__evaluate_after_index_fix`
+  - 再完整重跑：
+    - `cp_hier_v4_holdcash_r4__train`
+    - `cp_hier_v4_holdcash_r4__evaluate`
+    - `cp_hier_v4_holdcash_r4` shadow continuity
+    - `cp_hier_v4_holdcash_r4__export`
+    - `cp_hier_v4_holdcash_r4__audit`
+    - `cp_hier_v4_holdcash_r4__ledger`
+  - 同步写回：
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+    - `project_consistency_check.py`
+- 关键事实：
+  - `formal_torch_hier_v4` 的根因已确认不是“不会开仓”，而是 stock index 错位
+  - 修复后 `cp_hier_v4_holdcash_r4` 的 formal 评估已恢复为非零交易回放：
+    - 年化 `-0.1657`
+    - Sharpe `-1.6595`
+    - `avg_turnover = 0.0761`
+    - `avg_gross_exposure = 0.3223`
+    - `open / add / reduce / exit = 10 / 43 / 61 / 2`
+  - 但当前仍明显不够 promotable：
+    - `hold_share = 0.0`
+    - `cash_timing_quality_1d = 0.0216`
+    - `immediate_reversal_rate_3d = 0.5172`
+    - `promotion_gate = shadow_only`
+- 本轮推断：
+  - `formal_torch_hier_v4` 已从“结构已接通但 formal 全零”推进到“能真实交易回放，但行为质量仍差”
+  - `r3` 的全现金塌缩已不再是当前现状，后续接管不能再沿用那个旧判断
+  - 当前 `hier_v4` 的主瓶颈已经切换为：
+    - `hold_share` 仍为 `0`
+    - `early_exit_bias`
+    - `shadow_reversal`
+  - 当前 strongest temporal 锚点仍然是 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-14 - `holdcash_v5` repair 跑完，`latest_*` 保持回指 strongest temporal 锚点
+- 触发原因：
+  - 用户要求按顺序把“behavior audit -> state/label/decoder 修补 -> 高信息增益 protocol -> 写回主脑”这一轮连续策略工作直接做完
+  - 我已先完成 `holdcash_v5` 的状态、标签、decoder 与组合预算修补，接下来需要真实验证它到底是在修行为，还是只是把 strongest temporal 锚点打坏
+- 本轮动作：
+  - 真实跑完 `cp_v3_seq_holdcash_r2`
+    - `formal_torch_seq_v3 + holdcash_v5`
+    - `32` epoch / `strict resume`
+  - 真实修完 `formal_torch_hier_v4` 的两个实现 bug 后，沿同一 `run_dir` 连续 strict resume，最终跑完 `cp_hier_v4_holdcash_r5`
+    - `32 -> 40 -> 44` epoch
+  - 刷新 `cp_v3_seq_holdcash_r1` 的 behavior audit / conclusion ledger
+  - 把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json / latest_behavior_audit_summary.json / latest_conclusion_ledger.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r2`
+    - 年化 `0.4996`
+    - Sharpe `2.7879`
+    - `hold_share = 0.0777`
+    - `reduce_success_rate_5d = 0.3810`
+    - `cash_timing_quality_1d = -0.0352`
+    - `immediate_reversal_rate_3d = 0.3684`
+  - 与 `cp_v3_seq_holdcash_r1` 相比：
+    - `cash_timing_quality_1d` 从 `-0.4564` 改善到 `-0.0352`
+    - `immediate_reversal_rate_3d` 从 `0.5357` 下降到 `0.3684`
+    - 但 `hold_share` 从 `0.30` 回落到 `0.0777`
+  - `cp_hier_v4_holdcash_r5`
+    - `completed_epochs = 44`
+    - `best_epoch = 11`
+    - 年化 `-0.0702`
+    - Sharpe `-0.7293`
+    - `hold_share = 0.0`
+    - `reduce_success_rate_5d = 0.4230`
+    - `cash_timing_quality_1d = -0.0207`
+    - `immediate_reversal_rate_3d = 0.0883`
+- 本轮推断：
+  - `holdcash_v5` 方向本身没有错，因为它确实同时改善了 cash / reversal
+  - 但当前 `seq_v3` 实现里，只要这些修法没有显式保护持有连续性，`hold_share` 就会重新塌掉
+  - `hier_v4` 当前已经从“结构 bug”阶段推进到“低反手但仍不会持有”的研究阶段
+  - strongest temporal 当前仍应锚定 `cp_v3_seq_holdcash_r1`
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research`
+  - `python -X utf8 daily_research/tools/project_consistency_check.py`
+  - `python -X utf8 daily_research/tools/doc_guard.py check`
+
+## 2026-04-14 - continuous_policy 训练充分性复核并补跑长窗正式证据
+- 触发原因：
+  - 用户追问“这些实验的训练次数和训练数据是否足够；如果不够就加”
+  - 我先复核了当前 strongest temporal / repair / hierarchical 几条主线的真实训练诊断
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sample_rows = 44268`
+    - 当前窗口只有 `106` 个交易日
+  - `cp_v3_seq_holdcash_r2`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sample_rows = 15672`
+    - `teacher_action_rows = 5081`
+    - 当前窗口同样只有 `106` 个交易日
+  - `cp_hier_v4_holdcash_r5`
+    - `completed_epochs = 44`
+    - `best_epoch = 11`
+    - `train_day_count = 93`
+    - `teacher_action_rows = 5081`
+  - 结论：
+    - `r1 / r2 / r5` 这批短窗 repair run 的训练证据都偏紧
+    - 其中 `seq_v3` 还存在 best_epoch 贴边，说明不该把 `32` epoch 当成已经完全训够
+- 本轮动作：
+  - 在 `run_continuous_policy_protocol.py` 里新增 `training_evidence`
+    - `train_day_count >= 180`
+    - `teacher_action_rows >= 10000`
+    - `best_epoch_not_at_edge`
+  - 把 `training_evidence_sufficient` 接进 promotion gate
+  - 把 `seq_v3` 训练诊断补齐 `train_day_count / validation_day_count / train_sample_rows / validation_sample_rows`
+  - 真实补跑长窗正式 protocol：
+    - `cp_v3_seq_holdcash_v5_formal_r1`
+    - `formal_torch_seq_v3 + holdcash_v5`
+    - `train_start = 20240102`
+    - `train_end = 20251231`
+    - `epochs = 48`
+- 长窗正式结果：
+  - 训练证据已过线：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 22604`
+    - `best_epoch = 45 / 48`
+    - `training_evidence.status = sufficient`
+  - 但行为仍失败：
+    - 年化 `0.4688`
+    - Sharpe `3.8311`
+    - `hold_share = 0.0`
+    - `reduce_success_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.0908`
+    - `immediate_reversal_rate_3d = 0.1757`
+- 本轮推断：
+  - 这次长窗 formal 已证明：当前 `holdcash_v5` 的主问题不再能解释成“只是 epoch 不够/样本不够”
+  - 下一步应优先修标签、状态与 decoder，而不是机械继续加 epoch
+  - `cp_v3_seq_holdcash_r1` 仍是当前 strongest temporal 锚点，所以 `latest_*` 再次回切到它
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research`
+  - `python -X utf8 daily_research/tools/project_consistency_check.py`
+  - `python -X utf8 daily_research/tools/doc_guard.py check`

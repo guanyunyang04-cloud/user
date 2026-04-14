@@ -91,6 +91,7 @@ def resolve_latest_model_artifact(explicit_path: str = "") -> Path:
 
     candidates = sorted(
         [
+            *MODELS_ROOT.glob("*/continuous_policy_hier_v4_artifact.pt"),
             *MODELS_ROOT.glob("*/continuous_policy_v3_seq_artifact.pt"),
             *MODELS_ROOT.glob("*/continuous_policy_v2_artifact.pt"),
             *MODELS_ROOT.glob("*/continuous_policy_artifact.pkl"),
