@@ -243,3 +243,23 @@
   - `exit_timeliness_rate_5d` 还没站到 gate 内
   - `cash_timing_quality_1d` 仍然为负
 - 训练合同或监督结构只要再发生一次结构升级，strict resume 的签名就必须继续显式滚动；本轮固定新增的是 `seq_v3_continuous_dual_channel_r1`
+
+- inference-only quick eval 仍然有价值，但它更适合作为“方向筛查器”，不是 formal verdict 替代品；`formal_r10` 已证明：
+  - quick eval 能提前暴露 `cash_timing_quality_1d` 向上修复的方向
+  - 但完整 retrain 后，defensive calibration 可能被进一步放大，导致收益与 open quality 明显回撤
+- `exit / cash` 校准已经不再是“能不能学会”的问题，而是“校准强度如何不压坏 long-side”：
+  - `formal_r10` 把 `exit_timeliness_rate_5d` 推到 `0.5000`
+  - 同时把 `cash_timing_quality_1d` 拉到 `0.0090`
+  - 但也把 `annual_return` 打到负值、`open_win_rate_5d` 压到 `0.4375`、`trend_capture_rate_10d` 压到 `0.1225`
+- 因此后续任何 `cash_defense_score / exit_patience / hold_bias / turnover_budget` 联动修补，都不能只盯剩余 gate 项；至少要同时守住：
+  - `open_win_rate_5d`
+  - `annual_return_vs_active`
+  - `sharpe_vs_active`
+  - `trend_capture_rate_10d`
+- `cash_timing_quality_1d` 当前更适合被理解为“预算头校准问题”，而不是越高越好：
+  - teacher 本身在这一项上仍是负值
+  - 所以模型在这一项逼近 `0` 是进步，但如果以牺牲 long-side deployment 为代价，就不构成真实 promotion
+- 当前 capped 全A主线最值得保留的三条参考线已经分工明确：
+  - `formal_r5` = balanced cash / repair reference
+  - `formal_r9` = dual-channel continuous 主研究基线
+  - `formal_r10` = exit/cash calibration proof reference

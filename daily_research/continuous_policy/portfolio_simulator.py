@@ -343,6 +343,7 @@ class PortfolioState:
                 "reduce_fraction": 0.0,
                 "exit_hazard": 0.0,
                 "sell_pressure": 0.0,
+                "exit_timing_pressure": 0.0,
             }
         )
 
@@ -394,6 +395,7 @@ class PortfolioState:
         forced_zero = pd.Series(False, index=prices.index, dtype=bool)
         protected_floor = pd.Series(0.0, index=prices.index, dtype=float)
         weak_tail_zero_candidate = pd.Series(False, index=prices.index, dtype=bool)
+        exit_timing_pressure_values = pd.Series(0.0, index=prices.index, dtype=float)
         for stock in prices.index:
             action = str(policy.at[stock, "action_label"] or "skip").strip().lower()
             strength = float(policy.at[stock, "action_strength"] or 0.0)
@@ -411,6 +413,12 @@ class PortfolioState:
                 if "sell_pressure" in policy.columns
                 else float(np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0))
             )
+            exit_timing_pressure = (
+                float(policy.at[stock, "exit_timing_pressure"] or 0.0)
+                if "exit_timing_pressure" in policy.columns
+                else float(np.clip(exit_hazard * 0.62 + sell_pressure * 0.28 + exit_urgency * 0.10, 0.0, 1.0))
+            )
+            exit_timing_pressure_values.at[stock] = exit_timing_pressure
             planned_holding_days = float(policy.at[stock, "planned_holding_days"] or 0.0) if "planned_holding_days" in policy.columns else 0.0
             current_weight = float(current.get(stock, 0.0))
             current_hold_days = float(self.holdings.get(stock).hold_days) if stock in self.holdings else 0.0
@@ -420,14 +428,15 @@ class PortfolioState:
                 current_weight > 1e-8
                 and current_hold_days >= 8.0
                 and (
-                    (action == "exit" and (exit_urgency >= 0.18 or exit_hazard >= 0.42))
+                    (action == "exit" and (exit_urgency >= 0.18 or exit_hazard >= 0.42 or exit_timing_pressure >= 0.50))
                     or (
                         action in {"hold", "reduce", "skip"}
                         and (
                             exit_urgency >= 0.26 + exit_patience_target * 0.06
                             or exit_hazard >= 0.34 + exit_patience_target * 0.04
+                            or exit_timing_pressure >= 0.44 + exit_patience_target * 0.06
                         )
-                        and (reduce_quality >= hold_quality + 0.04 or reduce_fraction >= 0.18)
+                        and (reduce_quality >= hold_quality + 0.04 or reduce_fraction >= 0.18 or exit_timing_pressure >= 0.52)
                         and sell_pressure >= 0.20
                         and delta_hint <= max(0.01, hold_boost)
                         and add_quality <= hold_quality + 0.02
@@ -443,7 +452,7 @@ class PortfolioState:
                         max(
                             reduce_fraction,
                             max(-delta_hint, 0.0),
-                            0.06 + sell_pressure * 0.10 + exit_hazard * 0.08,
+                            0.06 + sell_pressure * 0.10 + exit_hazard * 0.08 + exit_timing_pressure * 0.14,
                         ),
                         0.06,
                         0.96,
@@ -458,9 +467,10 @@ class PortfolioState:
                             + reduce_quality * 0.08
                             + sell_pressure * 0.12
                             + exit_hazard * 0.08
+                            + exit_timing_pressure * 0.14
                             - hold_bias_target * 0.10
                         ),
-                        0.04 if exit_hazard > 0.55 else 0.08,
+                        0.02 if (exit_hazard > 0.55 or exit_timing_pressure > 0.68) else 0.08,
                         0.92,
                     )
                 )
@@ -472,6 +482,7 @@ class PortfolioState:
                     and target_reduce_fraction < 0.24
                     and exit_hazard < 0.22
                     and sell_pressure < 0.22
+                    and exit_timing_pressure < 0.24
                 ):
                     protected_floor.at[stock] = max(
                         protected_floor.at[stock],
@@ -486,11 +497,12 @@ class PortfolioState:
                     + max(planned_holding_days - 3.0, 0.0) / 120.0
                     - sell_pressure * 0.18
                     - exit_hazard * 0.08
+                    - exit_timing_pressure * 0.16
                 )
                 desired_strength.at[stock] = max(
-                    current_weight * max(0.72, hold_scale),
+                    current_weight * max(0.54 if exit_timing_pressure > 0.62 else 0.72, hold_scale),
                     current_weight
-                    + max(0.0, hold_boost + hold_quality - sell_pressure * 0.35 - exit_hazard * 0.18)
+                    + max(0.0, hold_boost + hold_quality - sell_pressure * 0.35 - exit_hazard * 0.18 - exit_timing_pressure * 0.22)
                     * (0.025 + hold_bias_target * 0.030),
                 )
                 if current_weight > 1e-8:
@@ -502,7 +514,7 @@ class PortfolioState:
                             + hold_bias_target * 0.10
                             + exit_patience_target * 0.05
                             + max(planned_holding_days - 3.0, 0.0) / 180.0,
-                            0.62 + max(0.0, 0.10 - sell_pressure * 0.08),
+                            0.56 + max(0.0, 0.08 - sell_pressure * 0.08 - exit_timing_pressure * 0.08),
                             0.97,
                         ),
                     )
@@ -510,11 +522,11 @@ class PortfolioState:
             if action == "add":
                 add_increment = max(
                     0.0,
-                    strength * 0.55 + add_quality * 0.15 + planned_holding_days / 300.0 - sell_pressure * 0.14 - exit_hazard * 0.10,
+                    strength * 0.55 + add_quality * 0.15 + planned_holding_days / 300.0 - sell_pressure * 0.14 - exit_hazard * 0.10 - exit_timing_pressure * 0.18,
                 )
                 desired_strength.at[stock] = (
                     current_weight
-                    if (sell_pressure > 0.26 or exit_hazard > 0.20)
+                    if (sell_pressure > 0.26 or exit_hazard > 0.20 or exit_timing_pressure > 0.24)
                     else max(current_weight + max(0.015, add_increment), current_weight)
                 )
                 if current_weight > 1e-8:
@@ -523,6 +535,7 @@ class PortfolioState:
                         exit_urgency < 0.16
                         and exit_hazard < 0.18
                         and sell_pressure < 0.18
+                        and exit_timing_pressure < 0.20
                         and add_quality > max(0.10, hold_quality - 0.02)
                         and reduce_quality < hold_quality + 0.04
                     ):
@@ -614,6 +627,7 @@ class PortfolioState:
             previous_entry_price = float(existing.entry_price) if existing is not None else 0.0
             previous_peak_price = float(existing.peak_price) if existing is not None else 0.0
             current_price = float(prices.get(stock, np.nan))
+            exit_timing_pressure = float(exit_timing_pressure_values.get(stock, 0.0))
             unrealized_pnl_before = (
                 float(current_price / previous_entry_price - 1.0)
                 if previous_weight > 1e-8 and previous_entry_price > 0 and np.isfinite(current_price)
@@ -667,12 +681,15 @@ class PortfolioState:
                     or (model_action_name == "add" and delta_weight < 0.0)
                     or (model_action_name == "reduce" and delta_weight > 0.0)
                 )
+                if exit_timing_pressure >= 0.28 and delta_weight < 0.0:
+                    contradictory_micro_rebalance = False
                 contradictory_intent_trim = (
                     model_action_name == "add"
                     and delta_weight < 0.0
                     and new_weight > 1e-8
                     and previous_hold_days < 18
                     and exit_urgency < 0.16
+                    and exit_timing_pressure < 0.24
                     and drawdown_from_peak_before > -0.04
                     and unrealized_pnl_before > -0.02
                     and abs(delta_weight) <= max(effective_deadband * 2.5, previous_weight * 0.12)
@@ -708,6 +725,7 @@ class PortfolioState:
                     "reduce_fraction": float(policy.at[stock, "reduce_fraction"] or 0.0) if "reduce_fraction" in policy.columns else 0.0,
                     "exit_hazard": float(policy.at[stock, "exit_hazard"] or 0.0) if "exit_hazard" in policy.columns else 0.0,
                     "sell_pressure": float(policy.at[stock, "sell_pressure"] or 0.0) if "sell_pressure" in policy.columns else 0.0,
+                    "exit_timing_pressure": float(policy.at[stock, "exit_timing_pressure"] or 0.0) if "exit_timing_pressure" in policy.columns else 0.0,
                     "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
                     "contradictory_micro_rebalance": bool(contradictory_micro_rebalance),
                     "state_update_action": state_update_action,

@@ -353,6 +353,30 @@
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py`
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\doc_guard.py check`
 
+## 2026-04-15 formal_r10 操作补充
+- 本轮先做了既有 artifact quick eval，命令固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\models\cp_v3_seq_learned_all_a_holdcash_v3_formal_r9__train\continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --max-universe-size 1200 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --label-preset holdcash_v3 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r10_quick_eval`
+- quick eval 的经验口径固定为：
+  - 若 `cash_timing_quality_1d` 与 `exit_timeliness_rate_5d` 同向改善，说明 patch 值得进入完整 formal retrain
+  - 但 quick eval 不作为 promotion 判断依据，formal retrain 结果仍然是唯一正式结论
+- 本轮正式 protocol 命令固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --pool-name learned_all_a --max-universe-size 1200 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --random-seed 7 --skip-multiplier 2.0 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --batch-size 512 --learning-rate 0.0015 --hidden-dim 192 --sequence-layers 1 --daily-hidden-dim 96 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 10 --resume-mode strict --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r10`
+- 本轮正式实现位点固定为：
+  - `daily_research/continuous_policy/label_builder.py`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+- 本轮新增操作纪律固定为：
+  - `exit_timing_pressure` 必须同时进入 inference 和 execution；只在模型侧生成而不在 simulator 消费，会把 sell-side 连续信号重新丢回报表层
+  - `cash_defense_score` 这类预算头校准，一旦进入 formal retrain，必须同步监控 `open_win_rate_5d / annual_return_vs_active / sharpe_vs_active`
+- `formal_r10` 完成后确认仍为 `shadow_only`，因此默认运行态继续按同一治理口径回切：
+  - `latest_train_summary.json`
+  - `latest_evaluation_summary.json`
+  - `latest_export_summary.json`
+  - `latest_protocol_summary.json`
+  - `latest_behavior_audit_summary.json`
+  - `latest_conclusion_ledger.json`
+  - `output/continuous_policy/runtime/portfolio_state.json`
+
 ## 2026-04-15 formal_r9 操作补充
 - 本轮从“continuous-primary”推进到“双通道连续监督”后，正式 protocol 命令固定为：
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --pool-name learned_all_a --max-universe-size 1200 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --random-seed 7 --skip-multiplier 2.0 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --batch-size 512 --learning-rate 0.0015 --hidden-dim 192 --sequence-layers 1 --daily-hidden-dim 96 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 10 --resume-mode strict --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r9`

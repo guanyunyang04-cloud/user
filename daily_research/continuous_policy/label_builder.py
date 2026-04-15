@@ -777,6 +777,18 @@ def build_teacher_global_targets(
         + cash_regime_pressure * 0.16
         + recent_reversal_rate_20d * 0.05
     )
+    cash_defense_pressure = float(
+        np.clip(
+            0.34 * max(market_downside_pressure, 0.0)
+            + 0.26 * max(cash_regime_pressure, 0.0)
+            + 0.16 * max(portfolio_cash_pressure, 0.0)
+            + 0.14 * max(-benchmark_trend_gap, 0.0)
+            + 0.10 * sell_pressure_target
+            + 0.08 * avg_exit_hazard_target,
+            0.0,
+            1.0,
+        )
+    )
     gross_target = (
         float(np.clip(strong_positive["teacher_priority"].sum() * float(config.gross_scale), float(config.min_gross_target), float(config.max_gross_target)))
         if len(strong_positive)
@@ -784,7 +796,12 @@ def build_teacher_global_targets(
     )
     gross_target = float(
         np.clip(
-            gross_target - float(config.defensive_cash_bias) - cash_regime * 0.24 - sell_pressure_target * 0.18 - avg_exit_hazard_target * 0.06,
+            gross_target
+            - float(config.defensive_cash_bias)
+            - cash_regime * 0.24
+            - sell_pressure_target * 0.18
+            - avg_exit_hazard_target * 0.06
+            - cash_defense_pressure * 0.12,
             0.12,
             float(config.max_gross_target),
         )
@@ -820,12 +837,18 @@ def build_teacher_global_targets(
     )
     turnover_budget = float(
         np.clip(
-            turnover_budget - reduce_reversal_pressure * 0.08,
+            turnover_budget - reduce_reversal_pressure * 0.08 + cash_defense_pressure * 0.08,
             0.08,
             float(config.max_turnover_budget),
         )
     )
-    candidate_budget = int(np.clip(round(candidate_budget - cash_regime * 4.0), 2, 12))
+    candidate_budget = int(
+        np.clip(
+            round(candidate_budget - cash_regime * 4.0 - cash_defense_pressure * 2.0),
+            2,
+            12,
+        )
+    )
     max_position_weight_target = float(
         np.clip(
             0.10
@@ -834,6 +857,13 @@ def build_teacher_global_targets(
             - cash_regime * 0.04
             - recent_reversal_rate_20d * 0.03
             - sell_pressure_target * 0.03,
+            0.08,
+            0.26,
+        )
+    )
+    max_position_weight_target = float(
+        np.clip(
+            max_position_weight_target - cash_defense_pressure * 0.025,
             0.08,
             0.26,
         )
@@ -847,6 +877,7 @@ def build_teacher_global_targets(
             - recent_reversal_rate_20d * 0.05
             - sell_pressure_target * 0.18
             - avg_exit_hazard_target * 0.06
+            - cash_defense_pressure * 0.14
             + max(0.0, 0.18 - reduce_reversal_pressure) * 0.10,
             0.12,
             0.92,

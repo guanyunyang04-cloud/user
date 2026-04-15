@@ -580,3 +580,50 @@
   - `formal_r5` 继续保留为 balanced cash / repair reference
   - `formal_r8` 继续保留为 long-side continuous-learning reference
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 protocol 后再次回切到它
+
+## 2026-04-15 formal_r9 后续主线收敛
+- 当前主线研究底座已切换为：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r9` = dual-channel continuous 主研究基线
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` = balanced cash / repair reference
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r8` = long-side continuous reference
+  - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+- 当前最高 ROI 的主线任务已收敛到：
+  - 先修 `exit` 时点，而不是继续放大 sell-side 总量
+  - 再修 `cash / gross / turnover / hold_bias / exit_patience` 的预算头校准
+  - 明确目标是“卖得更准、现金时点更准”，而不是“卖得更多”或“更激进 risk-off”
+- 当前明确后置冻结的方向是：
+  - 暂不扩 `max_universe_size`
+  - 暂不让 depth / `hier_v4` 抢主线
+  - 暂不继续扩更大范围的连续化（如 `target_weight / soft sparsity`）直到 `formal_r9` 系列先把 `exit / cash` 修稳
+
+## 2026-04-15 formal_r10 exit/cash 校准回合
+- 最新完整执行的 capped 全A protocol 已推进到 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r10`，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 36633`
+  - `best_epoch = 39 / 48`
+- `formal_r10` 的评估侧结果是：
+  - `annual_return = -0.1310`
+  - `sharpe = -1.8718`
+  - `max_drawdown = -0.0247`
+  - `avg_gross_exposure = 0.3702`
+  - `open_win_rate_5d = 0.4375`
+  - `hold_share = 0.7687`
+  - `reduce_success_rate_5d = 0.6000`
+  - `exit_timeliness_rate_5d = 0.5000`
+  - `cash_timing_quality_1d = 0.0090`
+  - `immediate_reversal_rate_3d = 0.1231`
+  - `trend_capture_rate_10d = 0.1225`
+  - `missed_main_leg_rate_10d = 0.1250`
+- `formal_r10` 相比 `formal_r9` 的位置已经清晰：
+  - `exit_timeliness_rate_5d: 0.4000 -> 0.5000`
+  - `cash_timing_quality_1d: -0.2470 -> 0.0090`
+  - `hold_share: 0.5087 -> 0.7687`
+  - 但 `annual_return: 0.4185 -> -0.1310`
+  - `open_win_rate_5d: 0.6471 -> 0.4375`
+  - `trend_capture_rate_10d: 0.3520 -> 0.1225`
+  - `avg_gross_exposure: 0.3969 -> 0.3702`
+- 当前稳定收敛更新为：
+  - `formal_r9` 继续保留为 dual-channel continuous 主研究基线
+  - `formal_r10` 定义为 exit/cash calibration proof challenger，而不是新的 promotable baseline
+  - 当前剩余主矛盾不再是“cash/exit 完全学不会”，而是“cash/exit 校准一旦过强，就会压坏 open quality / trend capture / annual return”
+  - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 `formal_r10` 后再次回切到它
