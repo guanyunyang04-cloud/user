@@ -160,3 +160,11 @@
   - 只保留治理闭环与接管纪律
 - `episodic_memory.md`
   - 只保留时间顺序过程与原始证据
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 进一步证明：
+  - 对 capped 全A主线，最值得优先修的仍然是 held-path 的 `reduce / exit` 形成，而不是继续扩 `universe` 或直接切深网络
+  - 只做一个很小的 held-path `exit rescue`，就能在同协议下同时把 `annual_return / sharpe / hold_share / reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d` 都往正确方向推一点
+  - 但这类修补还不足以让它 promotion：`exit_timeliness_rate_5d` 仍为 `0.0`，shadow 年化仍为负，说明 `exit` 形成和 `cash timing` 还没真正学稳
+- 当前稳定结论更新为：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
+  - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 比较 challenger 时可以让 `latest_*` 临时跟随最新 run，但只要 gate 未过，默认指针必须回切到当前 strongest 锚点

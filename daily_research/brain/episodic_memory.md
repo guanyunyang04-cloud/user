@@ -13085,9 +13085,6 @@ position,000001.SZ,1200,12.38,
   - 不把“reversal 有潜力”误写成“现在就该切 backbone”
 - 本轮写回：
   - `daily_research/brain/episodic_memory.md`
-- 本轮复盘：
-  - 这次规划更新把下一步从“扩大候选域”纠偏成“先修形成机制”
-  - 这样可以避免重复“先把问题放大，再回头做归因”的低 ROI 路径
 
 ## 2026-04-15 - 修复 capped 全A formal 的执行层持有塌缩口径，并完成 formal_r2 复跑
 - 触发原因：
@@ -13336,3 +13333,209 @@ position,000001.SZ,1200,12.38,
 - 本轮复盘：
   - 本轮规划的关键价值，是把“主线修行为形成机制”和“侧翼验证结构升级价值”明确分流
   - 这样既不会错过潜在的架构增益，也不会重复过去那种多变量同时变化、最后无法解释成败的低效路径
+
+## 2026-04-15 - 基于 formal_r3 与 depth_r1，再次从“高瞻远瞩的策略规划者”视角收敛下一步：主线继续修形成机制，深度保留侧翼，暂不扩 universe
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散设想路径，再收敛为清晰、详细且高效的下一步行动方案
+- 关键事实：
+  - `cp_v3_seq_holdcash_r1` 仍是 strongest temporal 默认锚点，`latest_*` 与 runtime 已回切到它
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 现在是主线 capped 全A challenger：
+    - `hold_share = 0.3876`
+    - `cash_timing_quality_1d = -0.1468`
+    - `reduce_success_rate_5d = 0.3200`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `immediate_reversal_rate_3d = 0.2982`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 证明 `GRU 1 -> 2` 有局部容量增益：
+    - `hold_share = 0.4607`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.3846`
+    - `immediate_reversal_rate_3d = 0.1615`
+    - 但 `avg_gross_exposure = 0.18`、`high_cash_share = 0.7667`、`annual_return = 0.1909`
+- 发散路径：
+  - 路径 A：继续沿 `formal_r3` 修 `teacher / decoder / global target` 的 `reduce / exit / cash`
+    - 优点：变量最少，直接命中当前未过 gate 的真实瓶颈
+    - 风险：短期内不像“架构升级”那样显眼，但因果最清楚
+  - 路径 B：把 `depth_r1` 直接升级成主线
+    - 优点：局部连续性指标明显更好
+    - 风险：当前改善很大程度来自极高现金和极低暴露，不是可直接接管主线的收益形态
+  - 路径 C：继续增加 `sequence_layers` 或同步放大 `hidden_dim`
+    - 优点：可继续验证容量上限
+    - 风险：会把“容量变化”和“形成机制未修好”重新混在一起
+  - 路径 D：继续扩大 `max_universe_size`
+    - 优点：更接近最终全A目标
+    - 风险：会在当前 `reduce / exit / cash` 还不稳定时放大噪声
+  - 路径 E：让 `hier_v4` 重新接管 capped 全A主线
+    - 优点：对 reversal 可能更有潜力
+    - 风险：又会把“候选域问题”和“backbone 切换问题”叠在一起
+- 收敛判断：
+  - 最高 ROI 路径仍是 A，不是 B/C/D/E
+  - `depth_r1` 的价值已经从“要不要试”变成“保留为侧翼 challenger，等主线修稳后再决定是否提升优先级”
+  - 当前不能把 `depth_r1` 的局部改进误写成“可以接主线”，也不能把 `formal_r3` 的持有修复误写成“主线已经过 gate”
+- 优先级排序：
+  - `P0`：冻结主线基线为 `learned_all_a + max_universe_size = 1200 + holdcash_v3 + execution deadband + formal_r3 repair`
+  - `P1`：优先做 `reduce / exit / cash` 的更细粒度 teacher-vs-model 归因
+    - 重点确认：
+      - `reduce_success_rate_5d` 为何在 `formal_r3` 仍下降
+      - `exit_timeliness_rate_5d` 为何仍为 `0`
+      - `cash_timing_quality_1d` 为何只小幅改善却仍为负
+  - `P2`：做最小范围的形成机制修补
+    - 只动：
+      - `reduce / exit` 标签阈值
+      - `reduce / exit / cash` 相关 decoder 或 global-target 映射
+    - 明确保住：
+      - `hold_share >= 0.20`
+      - `avg_gross_exposure` 不再被异常压缩
+  - `P3`：按完全同协议重跑下一轮 formal
+    - 只有当：
+      - `training_evidence = sufficient`
+      - `hold_share >= 0.20`
+      - `reduce_success_rate_5d` 明显改善
+      - `exit_timeliness_rate_5d` 从 `0` 抬起
+      - `cash_timing_quality_1d` 至少接近 `0`
+    - 才算主线真正进入下一阶段
+  - `P4`：深度继续只做 side challenger
+    - 下一轮若继续试 depth，应优先保持：
+      - `sequence_layers` 单变量变化
+      - 其他协议不变
+    - 并新增约束：
+      - 不接受靠 `avg_gross_exposure` 大幅塌缩换来的“好看指标”
+- `P5`：暂不扩 `max_universe_size`，暂不让 `hier_v4` 接主线
+  - 只有主线先把行为质量站稳，才讨论更大 universe 或更深 backbone
+- 本轮假设：
+  - 用户当前要的是“把全A连续策略推进成可验证主线”，不是“立刻切换到更深网络或更大 universe”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+
+## 2026-04-15 11:00 formal_r4 repair 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - 当前主线计划已收敛到 `formal_r3` 基线上继续修 `reduce / exit / cash`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 是当前 capped 全A主线 challenger，但仍为 `shadow_only`
+  - 推断：
+    - 最小变量集合应优先锁定在 `seq_v3` 的 held-path 推断层，而不是重开标签体系或扩 `universe`
+  - 假设：
+    - 如果 held-path 的 `reduce / exit` 形成被纠偏，evaluation 指标有机会先改善，再决定是否值得继续修 teacher 侧
+- 归因补全：
+  - `formal_r3` evaluation 侧真实问题不是“模型大量显式打 exit/reduce”，而是几乎不显式产出 `reduce / exit`
+  - 评估窗里 `model_action` 只出现了 `open / add / hold`，没有 `reduce / exit`
+  - held-path 尾部存在一个关键错位：
+    - 一批 `prob_reduce` 或 `prob_exit` 已经很高的仓位，会在后处理末尾重新被抬回 `add`
+  - 同时，teacher held 标签分布并非没有 `exit`，所以主问题更像 decoder / inference 形成，而不是 teacher 完全不给信号
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 的 held-path 推断中加入小范围 `exit rescue`
+  - 先用现有 `formal_r3` artifact 做快速 evaluation 复测，确认方向后再跑完整 formal protocol
+  - 快速复测显示：只保留 `exit rescue` 的版本，相比 `formal_r3` 能同时改善
+    - `annual_return`
+    - `sharpe`
+    - `hold_share`
+    - `reduce_success_rate_5d`
+    - `cash_timing_quality_1d`
+    - `immediate_reversal_rate_3d`
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37020`
+    - `best_epoch = 45 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9652`
+    - `sharpe = 5.7715`
+    - `hold_share = 0.4055`
+    - `reduce_success_rate_5d = 0.3250`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1415`
+    - `immediate_reversal_rate_3d = 0.2769`
+  - 相比 `formal_r3`：
+    - `annual_return: 0.8452 -> 0.9652`
+    - `sharpe: 5.3089 -> 5.7715`
+    - `hold_share: 0.3876 -> 0.4055`
+    - `reduce_success_rate_5d: 0.3200 -> 0.3250`
+    - `cash_timing_quality_1d: -0.1468 -> -0.1415`
+    - `immediate_reversal_rate_3d: 0.2982 -> 0.2769`
+  - shadow 侧：
+    - `annual_return = -0.3766`
+    - `sharpe = -2.8162`
+    - `hold_share = 0.5566`
+    - `reduce_success_rate_5d = 1.0`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.4274`
+    - `immediate_reversal_rate_3d = 0.0213`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r4` 已经取代 `formal_r3`，成为最新 capped 全A challenger
+    - 这次 held-path `exit rescue` 是正向修补，但力度还不足以把 `exit_timeliness_rate_5d` 从 `0` 抬起来
+  - 推断：
+    - 当前下一优先级仍是继续修 `reduce / exit / cash`
+    - `exit` 形成仍然是最硬的剩余缺口之一
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是更精确的 `exit` 形成与 `cash timing` 联动，而不是重新扩大 `reduce` 修补范围
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 challenger 接管
+
+## 2026-04-15 planner 视角收敛
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_holdcash_r1` 仍是 strongest temporal 默认锚点
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
+    - `formal_r4` 相比 `formal_r3` 已改善 `annual_return / sharpe / hold_share / reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d`
+    - 但 `formal_r4` 仍为 `shadow_only`，失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `depth_r1` 证明加深有局部增益，但伴随明显高现金/低暴露副作用
+  - 推断：
+    - 当前最高 ROI 主线仍是继续修 `formal_r4` 的 `reduce / exit / cash`
+    - 继续扩 `universe` 或直接让 depth 接主线，都不是当前最优顺序
+  - 假设：
+    - 用户当前要的是把 capped 全A研究线继续推向可验证主线，而不是立刻切换架构战略
+- 发散路径：
+  - 路径 A：继续在 `seq_v3 + formal_r4` 上做局部行为形成修补
+  - 路径 B：把 teacher 的离散边界连续化，做 hybrid teacher / hybrid supervision
+  - 路径 C：继续尝试 depth / hier_v4 这类容量路线
+  - 路径 D：继续修 execution / allocation，把组合级再平衡噪声和个股意图进一步解耦
+  - 路径 E：扩 `max_universe_size`，向更完整全A逼近
+- 收敛判断：
+  - 路径 A 是当前主线
+  - 路径 B 是最值得并行准备的中期升级方向
+  - 路径 C 只保留 side challenger 地位
+  - 路径 D 作为路径 A 的局部子模块保留
+  - 路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结基线为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4`
+    - 不扩 `universe`
+    - 不换 backbone
+    - 不让 depth 接主线
+  - `P1`：优先做 `formal_r4` 的 `exit` 形成归因
+    - 精确比对 evaluation / shadow 中 teacher 想 `exit`、模型仍 `hold/add` 的样本
+    - 区分是 teacher 边界问题、held-path rescue 不足，还是 execution / allocation 又把 exit 吃掉
+  - `P2`：同步做 `cash timing` 归因
+    - 查清是 `gross_exposure_target / candidate_budget / hold_bias_target` 哪个头在把现金时机拖坏
+    - 明确是“现金过高”还是“现金日期错”
+  - `P3`：只做最小修补
+    - 优先顺序：`exit formation` > `cash head/global target` > `reduce boundary`
+    - 继续显式保住 `hold_share >= 0.20`
+    - 拒绝为追求 `reduce_success_rate_5d` 而把暴露打塌
+  - `P4`：按完全同协议重跑下一轮 formal
+    - 只有当 `exit_timeliness_rate_5d` 从 `0` 抬起，且 `reduce_success_rate_5d / cash_timing_quality_1d` 同向改善时，才算主线进入下一阶段
+  - `P5`：把 teacher 连续化作为中期研究支线启动
+    - 先不推翻现有主线
+    - 先设计 `target_delta_weight / expected_holding_days / soft sparsity target` 这类连续 supervision 替代方案
+  - `P6`：depth / hier_v4 暂不升级为主线
+    - 只有当 `formal_r4` 系列已把 `exit / cash` 机制修稳，但仍被容量上限卡住时，才重新提升优先级
+- 动作后复盘：
+  - 当前最优顺序已进一步收敛成：
+    - 先修 `formal_r4` 的 `exit / cash`
+    - 再准备 teacher 连续化
+    - 最后才讨论更深架构或更大全A
+- 本轮复盘：
+  - 这次规划更新把下一步从“扩大候选域”纠偏成“先修形成机制”
+  - 这样可以避免重复“先把问题放大，再回头做归因”的低 ROI 路径

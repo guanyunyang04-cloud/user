@@ -243,3 +243,18 @@
   - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 只保留为 depth side challenger
   - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
 - challenger 比较完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime_state` 必须回切到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-15 formal_r4 更新
+- 本轮新增 protocol 命令：
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --sequence-layers 1 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r4`
+- 本轮执行口径更新：
+  - 仅在 `model_seq_v3` 的 held-path 推断里加入小范围 `exit rescue`
+  - 不改 `label_preset`
+  - 不扩 `max_universe_size`
+  - 不让 depth 分支接主线
+- 本轮治理动作：
+  - 允许 `latest_*` 在 protocol 运行期间短暂跟随 `formal_r4`
+  - protocol 完成且确认 `shadow_only` 后，立即把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 回切到 `cp_v3_seq_holdcash_r1`
+- 当前研究口径：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
+  - 下一轮仍围绕 `formal_r4` 修 `reduce / exit / cash`

@@ -721,6 +721,9 @@ def predict_policy_v3(
         label = str(adjusted_labels[idx])
         held = float(current_weight[idx]) > 1e-8
         duration_name = str(predicted_duration_labels[idx])
+        add_prob = float(probability_map["add"][idx])
+        reduce_prob = float(probability_map["reduce"][idx])
+        exit_prob = float(probability_map["exit"][idx])
         if held:
             if label in {"reduce", "exit"} and market_downside_pressure[idx] < 0.12 and signal_decay_speed[idx] < 0.05 and drawdown_from_peak[idx] > -0.05 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
@@ -740,9 +743,29 @@ def predict_policy_v3(
                 label = "hold"
             if label in {"reduce", "exit"} and duration_name in {"swing", "extended"} and hold_quality[idx] >= reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
+            exit_rescue = (
+                exit_prob > 0.55
+                and hold_days[idx] >= 8.0
+                and (
+                    exit_urgency[idx] > 0.34
+                    or drawdown_from_peak[idx] < -0.12
+                    or (market_downside_pressure[idx] > 0.16 and signal_decay_speed[idx] > 0.04)
+                )
+            )
+            if exit_rescue and not (
+                hold_quality[idx] > add_quality[idx] + 0.14
+                and drawdown_from_peak[idx] > -0.05
+                and market_downside_pressure[idx] < 0.12
+            ):
+                label = "exit"
             if label in {"hold", "skip"} and (market_downside_pressure[idx] > 0.18 or portfolio_cash_pressure[idx] > 0.18 or signal_decay_speed[idx] > 0.10) and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02 and drawdown_from_peak[idx] < -0.03:
                 label = "reduce"
-            if label in {"hold", "skip"} and add_quality[idx] > 0.14 and duration_name in {"swing", "extended"} and current_weight[idx] < 0.12:
+            if (
+                label in {"hold", "skip"}
+                and add_quality[idx] > 0.14
+                and duration_name in {"swing", "extended"}
+                and current_weight[idx] < 0.12
+            ):
                 label = "add"
         else:
             open_gate = (

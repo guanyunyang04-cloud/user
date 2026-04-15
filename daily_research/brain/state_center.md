@@ -362,3 +362,28 @@
   - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
   - `latest_*` 与 `runtime/portfolio_state.json` 已回切到 `cp_v3_seq_holdcash_r1`
   - 下一轮主线继续围绕 `formal_r3` 修 `reduce / exit / cash`，不扩 `max_universe_size`
+
+## 2026-04-15 formal_r4 更新
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 现在是新的 capped 全A主线 challenger：
+  - `annual_return = 0.9652`
+  - `sharpe = 5.7715`
+  - `hold_share = 0.4055`
+  - `reduce_success_rate_5d = 0.3250`
+  - `cash_timing_quality_1d = -0.1415`
+  - `immediate_reversal_rate_3d = 0.2769`
+- 相比 `formal_r3`，`formal_r4` 已经同时改善了：
+  - `annual_return: 0.8452 -> 0.9652`
+  - `sharpe: 5.3089 -> 5.7715`
+  - `hold_share: 0.3876 -> 0.4055`
+  - `reduce_success_rate_5d: 0.3200 -> 0.3250`
+  - `cash_timing_quality_1d: -0.1468 -> -0.1415`
+  - `immediate_reversal_rate_3d: 0.2982 -> 0.2769`
+- 但它仍然不是 promotable：
+  - evaluation 侧 `exit_timeliness_rate_5d = 0.0`
+  - promotion gate 仍失败在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - shadow 侧仍为负年化，且 `cash_timing_quality_1d = -0.4274`
+- 因此当前治理口径更新为：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 取代 `formal_r3`，成为最新 capped 全A challenger
+  - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
+  - `latest_*` 与 `runtime/portfolio_state.json` 已在本轮 protocol 后再次回切到 `cp_v3_seq_holdcash_r1`
+  - 下一轮主线继续围绕 `formal_r4` 修 `reduce / exit / cash`，不扩 `max_universe_size`
