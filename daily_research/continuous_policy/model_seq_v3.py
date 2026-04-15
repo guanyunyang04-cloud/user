@@ -545,7 +545,7 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r1"
+    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r2"
     signature_payload["sample_scalar_loss_weights"] = dict(SAMPLE_SCALAR_LOSS_WEIGHTS)
     signature_payload["daily_target_loss_weights"] = dict(DAILY_TARGET_LOSS_WEIGHTS)
     signature_payload["multi_objective_loss_weights"] = dict(MULTI_OBJECTIVE_LOSS_WEIGHTS)
@@ -903,14 +903,23 @@ def predict_policy_v3(
         + 0.20 * max(_daily_feature_scalar(daily_features, "portfolio_cash_pressure"), 0.0)
         + 0.18 * max(_daily_feature_scalar(daily_features, "cash_regime_pressure") - 0.12, 0.0)
     )
-    cash_defense_score = float(
+    open_risk_off_score = float(
         np.clip(
-            0.42 * max(_daily_feature_scalar(daily_features, "market_downside_pressure") - 0.08, 0.0)
-            + 0.30 * max(_daily_feature_scalar(daily_features, "cash_regime_pressure") - 0.10, 0.0)
-            + 0.18 * max(-_daily_feature_scalar(daily_features, "benchmark_trend_gap") - 0.01, 0.0)
-            + 0.16 * max(_daily_feature_scalar(daily_features, "portfolio_cash_pressure") - 0.08, 0.0)
-            + 0.12 * max(portfolio_sell_pressure - 0.20, 0.0)
-            + 0.10 * max(portfolio_exit_hazard - 0.18, 0.0),
+            0.48 * max(_daily_feature_scalar(daily_features, "market_downside_pressure") - 0.12, 0.0)
+            + 0.24 * max(_daily_feature_scalar(daily_features, "cash_regime_pressure") - 0.16, 0.0)
+            + 0.16 * max(-_daily_feature_scalar(daily_features, "benchmark_trend_gap") - 0.03, 0.0)
+            + 0.12 * max(_daily_feature_scalar(daily_features, "portfolio_cash_pressure") - 0.18, 0.0),
+            0.0,
+            1.0,
+        )
+    )
+    held_exit_support_score = float(
+        np.clip(
+            0.34 * max(portfolio_sell_pressure - 0.18, 0.0)
+            + 0.30 * max(portfolio_exit_hazard - 0.16, 0.0)
+            + 0.14 * max(_daily_feature_scalar(daily_features, "market_downside_pressure") - 0.08, 0.0)
+            + 0.12 * max(_daily_feature_scalar(daily_features, "cash_regime_pressure") - 0.10, 0.0)
+            + 0.10 * max(-_daily_feature_scalar(daily_features, "benchmark_trend_gap") - 0.01, 0.0),
             0.0,
             1.0,
         )
@@ -1042,56 +1051,56 @@ def predict_policy_v3(
     )
     global_targets["gross_exposure_target"] = float(
         np.clip(
-            global_targets["gross_exposure_target"] - cash_defense_score * 0.16,
+            global_targets["gross_exposure_target"] - open_risk_off_score * 0.08 - held_exit_support_score * 0.02,
             min_gross_exposure_target,
             0.98,
         )
     )
     global_targets["candidate_budget"] = float(
         np.clip(
-            global_targets["candidate_budget"] - cash_defense_score * 1.20,
+            global_targets["candidate_budget"] - open_risk_off_score * 0.55 - held_exit_support_score * 0.10,
             min_candidate_budget,
             12.0,
         )
     )
     global_targets["turnover_budget"] = float(
         np.clip(
-            global_targets["turnover_budget"] + cash_defense_score * 0.10,
+            global_targets["turnover_budget"] + held_exit_support_score * 0.08 + open_risk_off_score * 0.02,
             0.08,
             1.00,
         )
     )
     global_targets["max_position_weight_target"] = float(
         np.clip(
-            global_targets["max_position_weight_target"] - cash_defense_score * 0.018,
+            global_targets["max_position_weight_target"] - open_risk_off_score * 0.010 - held_exit_support_score * 0.004,
             min_position_cap_target,
             0.28,
         )
     )
     global_targets["hold_bias_target"] = float(
         np.clip(
-            global_targets["hold_bias_target"] - cash_defense_score * 0.18,
+            global_targets["hold_bias_target"] - open_risk_off_score * 0.06 - held_exit_support_score * 0.02,
             0.10,
             0.95,
         )
     )
     global_targets["reduce_bias_target"] = float(
         np.clip(
-            global_targets["reduce_bias_target"] + cash_defense_score * 0.10,
+            global_targets["reduce_bias_target"] + held_exit_support_score * 0.08 + open_risk_off_score * 0.02,
             0.0,
             0.65,
         )
     )
     global_targets["exit_patience_target"] = float(
         np.clip(
-            global_targets["exit_patience_target"] - cash_defense_score * 0.22,
+            global_targets["exit_patience_target"] - held_exit_support_score * 0.16 - open_risk_off_score * 0.04,
             0.10 if is_holdcash_v3_decoder else 0.05,
             0.95,
         )
     )
     global_targets["reentry_guard_target"] = float(
         np.clip(
-            global_targets["reentry_guard_target"] + cash_defense_score * 0.05,
+            global_targets["reentry_guard_target"] + open_risk_off_score * 0.02,
             0.0,
             0.35 if is_holdcash_v3_decoder else 0.45,
         )
@@ -1341,10 +1350,10 @@ def predict_policy_v3(
         min_open_score = float(
             np.clip(
                 0.06
-                + cash_defense_score * 0.07
-                + max(portfolio_sell_pressure - 0.18, 0.0) * 0.08,
+                + open_risk_off_score * 0.035
+                + max(portfolio_sell_pressure - 0.22, 0.0) * 0.04,
                 0.06,
-                0.18,
+                0.14,
             )
         )
         for idx in np.argsort(open_candidate_scores)[::-1]:
@@ -1352,7 +1361,7 @@ def predict_policy_v3(
                 promoted >= missing_candidates
                 or float(open_candidate_scores[idx]) < min_open_score
                 or current_weight[idx] > 1e-8
-                or (cash_defense_score > 0.28 and market_downside_pressure[idx] > 0.12)
+                or (open_risk_off_score > 0.46 and market_downside_pressure[idx] > 0.18)
             ):
                 continue
             adjusted_labels[idx] = "open"
@@ -1367,7 +1376,7 @@ def predict_policy_v3(
         sell_drag = sell_pressure[idx] * 0.55 + exit_hazard[idx] * 0.12 + exit_timing_pressure * 0.10
         if label == "open":
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.02 + entry_quality[idx] * 0.55 + duration_bonus * 0.05) * (1.0 - sell_drag * 0.30), 0.0, 0.22)
-            action_strength[idx] = np.clip(entry_quality[idx] + probability_map["open"][idx] * 0.55 + duration_bonus * 0.40 - exit_reentry_pressure[idx] * 0.12 - sell_drag * 0.20 - cash_defense_score * 0.10, 0.0, None)
+            action_strength[idx] = np.clip(entry_quality[idx] + probability_map["open"][idx] * 0.55 + duration_bonus * 0.40 - exit_reentry_pressure[idx] * 0.12 - sell_drag * 0.20 - open_risk_off_score * 0.04, 0.0, None)
             hold_boost[idx] = np.clip(reentry_readiness[idx] * 0.25 + duration_bonus * 0.20 - sell_drag * 0.10, 0.0, None)
         elif label == "add":
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.01 + add_quality[idx] * 0.35 + duration_bonus * 0.03) * (1.0 - sell_drag * 0.55), 0.0, 0.18)

@@ -14368,3 +14368,104 @@ position,000001.SZ,1200,12.38,
 - 治理收口：
   - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 `formal_r10` 静默接管
+
+## 2026-04-15 formal_r11 受约束合流执行闭环
+- 触发：
+  - 用户要求基于既定计划继续一次性执行并完整交付，不停在建议层
+- 动作前自检：
+  - 事实：
+    - `formal_r10` 已证明 `exit / cash` 校准方向有效，但它通过过强的全局 defensive 压制牺牲了 `open_win_rate_5d / annual_return / trend_capture_rate_10d`
+    - 最新收敛已固定：下一步不是继续推高 `cash_defense_score`，而是把 `formal_r10` 的 `exit/cash` 改善，转成“只对该卖的持仓更准地卖”
+    - `formal_r9` 仍是当前 dual-channel 主研究基线
+  - 推断：
+    - 当前最有效路径，是做一次“受约束合流”：
+      - 保留 `formal_r9` 的 long-side / trend 能力
+      - 只迁移 `formal_r10` 中真正对 held-exit 与现金时点有帮助的局部校准
+    - 若把 held-exit 校准和 open suppression 继续绑成同一个全局 defensive 分数，会再次重复 `formal_r10` 的误伤
+  - 假设：
+    - 如果把 `cash_defense_score` 拆成 `open_risk_off_score + held_exit_support_score`，并同步减弱 teacher global target 侧的预算压制，long-side 有机会恢复，而 `cash timing` 仍能保留部分改善
+- 实施：
+  - 代码层：
+    - 在 `label_builder.py` 中减弱 `cash_defense_pressure` 对 `gross / candidate_budget / max_position_weight / hold_bias` 的压制
+    - 在 `model_seq_v3.py` 中把原先单一的 `cash_defense_score` 拆成：
+      - `open_risk_off_score`
+      - `held_exit_support_score`
+    - 保留 held-path 的 `exit_timing_pressure` 修补，但不再让同一层全局 defensive 信号直接重压 `open promotion / gross / candidate_budget`
+    - strict resume 签名同步升级到 `sequence_model_revision = seq_v3_continuous_dual_channel_r2`
+  - 静态验证：
+    - `python -m compileall -q daily_research`
+    - `project_consistency_check.py`
+    - 均通过
+- quick eval：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11_quick_eval`
+  - 结果：
+    - `annual_return = 0.4198`
+    - `open_win_rate_5d = 0.7647`
+    - `hold_share = 0.7276`
+    - `reduce_success_rate_5d = 0.5714`
+    - `exit_timeliness_rate_5d = 0.3333`
+    - `cash_timing_quality_1d = -0.0908`
+    - `trend_capture_rate_10d = 0.3571`
+  - quick eval 复盘：
+    - 事实：
+      - 相比 `formal_r9`，`cash_timing_quality_1d` 明显改善
+      - `open_win_rate_5d / annual_return / trend_capture_rate_10d` 没有像 `formal_r10` 那样被压坏
+      - `exit_timeliness_rate_5d` 仍然没有真正站起来
+    - 推断：
+      - 这说明“分层合流”的方向是对的
+      - 也说明 retrain 后最需要观察的，将不再是 long-side 是否塌掉，而是 sell-side timing 会不会继续回落
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36634`
+    - `best_epoch = 40 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.4881`
+    - `sharpe = 4.2806`
+    - `max_drawdown = -0.0205`
+    - `avg_gross_exposure = 0.3646`
+    - `open_win_rate_5d = 0.9091`
+    - `hold_share = 0.6959`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.2000`
+    - `cash_timing_quality_1d = -0.1556`
+    - `immediate_reversal_rate_3d = 0.1778`
+    - `trend_capture_rate_10d = 0.4462`
+    - `missed_main_leg_rate_10d = 0.4167`
+  - 相比 `formal_r9`：
+    - `annual_return: 0.4185 -> 0.4881`
+    - `sharpe: 3.4923 -> 4.2806`
+    - `open_win_rate_5d: 0.6471 -> 0.9091`
+    - `hold_share: 0.5087 -> 0.6959`
+    - `cash_timing_quality_1d: -0.2470 -> -0.1556`
+    - `trend_capture_rate_10d: 0.3520 -> 0.4462`
+    - 但 `reduce_success_rate_5d: 0.7368 -> 0.5000`
+    - `exit_timeliness_rate_5d: 0.4000 -> 0.2000`
+    - `immediate_reversal_rate_3d: 0.1268 -> 0.1778`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项收口为：
+      - `reduce_success_rate_5d`
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r11` 已成功把 `formal_r10` 误伤的 long-side 指标大幅拉回
+    - `open_win_rate_5d / annual_return / sharpe / trend_capture_rate_10d` 全部重新站到比 `formal_r9` 更强的位置
+    - 但 sell-side timing 又明显回落，特别是 `exit_timeliness_rate_5d`
+  - 推断：
+    - “受约束合流”方向是成立的，`formal_r11` 比 `formal_r10` 更接近真正可 promotion 的形态
+    - 当前主矛盾已进一步收敛成：
+      - 以 `formal_r11` 为底座
+      - 定向补回 `formal_r9` 的 `reduce / exit` timing
+      - 而不是再整体推高 defensive budget
+  - 假设：
+    - 如果下一轮继续只做最有效修补，最值得优先借用的已经不是 `formal_r10` 的全局防御，而是 `formal_r9` 的 sell-side 分界与 timing 能力
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r11` 静默接管

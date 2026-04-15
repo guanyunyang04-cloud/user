@@ -627,3 +627,44 @@
   - `formal_r10` 定义为 exit/cash calibration proof challenger，而不是新的 promotable baseline
   - 当前剩余主矛盾不再是“cash/exit 完全学不会”，而是“cash/exit 校准一旦过强，就会压坏 open quality / trend capture / annual return”
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 `formal_r10` 后再次回切到它
+
+## 2026-04-15 formal_r11 受约束合流回合
+- 最新完整执行的 capped 全A protocol 已推进到 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11`，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 36634`
+  - `best_epoch = 40 / 48`
+- 本轮 quick eval 已先证明“受约束合流”方向成立：
+  - `annual_return = 0.4198`
+  - `open_win_rate_5d = 0.7647`
+  - `exit_timeliness_rate_5d = 0.3333`
+  - `cash_timing_quality_1d = -0.0908`
+  - `trend_capture_rate_10d = 0.3571`
+- `formal_r11` 的评估侧结果是：
+  - `annual_return = 0.4881`
+  - `sharpe = 4.2806`
+  - `max_drawdown = -0.0205`
+  - `avg_gross_exposure = 0.3646`
+  - `open_win_rate_5d = 0.9091`
+  - `hold_share = 0.6959`
+  - `reduce_success_rate_5d = 0.5000`
+  - `exit_timeliness_rate_5d = 0.2000`
+  - `cash_timing_quality_1d = -0.1556`
+  - `immediate_reversal_rate_3d = 0.1778`
+  - `trend_capture_rate_10d = 0.4462`
+  - `missed_main_leg_rate_10d = 0.4167`
+- `formal_r11` 相比 `formal_r9` 的位置已经清晰：
+  - `annual_return: 0.4185 -> 0.4881`
+  - `sharpe: 3.4923 -> 4.2806`
+  - `open_win_rate_5d: 0.6471 -> 0.9091`
+  - `hold_share: 0.5087 -> 0.6959`
+  - `cash_timing_quality_1d: -0.2470 -> -0.1556`
+  - `trend_capture_rate_10d: 0.3520 -> 0.4462`
+  - 但 `reduce_success_rate_5d: 0.7368 -> 0.5000`
+  - `exit_timeliness_rate_5d: 0.4000 -> 0.2000`
+  - `immediate_reversal_rate_3d: 0.1268 -> 0.1778`
+- 当前稳定收敛更新为：
+  - `formal_r11` 现在是新的 constrained-merge challenger，也是更高质量的 long-side / performance / cash-tradeoff 基线
+  - `formal_r9` 继续保留为 sell-side reference
+  - `formal_r10` 继续保留为 exit/cash proof reference
+  - 当前主矛盾已经进一步收敛为：“如何在 `formal_r11` 的 long-side 质量上，补回 `formal_r9` 的 `reduce / exit` 时点能力”
+  - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 `formal_r11` 后再次回切到它

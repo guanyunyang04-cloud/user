@@ -377,6 +377,30 @@
   - `latest_conclusion_ledger.json`
   - `output/continuous_policy/runtime/portfolio_state.json`
 
+## 2026-04-15 formal_r11 操作补充
+- 本轮先做了既有 artifact quick eval，命令固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\models\cp_v3_seq_learned_all_a_holdcash_v3_formal_r9__train\continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --max-universe-size 1200 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --label-preset holdcash_v3 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r11_quick_eval`
+- 本轮正式 protocol 命令固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --pool-name learned_all_a --max-universe-size 1200 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --random-seed 7 --skip-multiplier 2.0 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --batch-size 512 --learning-rate 0.0015 --hidden-dim 192 --sequence-layers 1 --daily-hidden-dim 96 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 10 --resume-mode strict --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r11`
+- 本轮正式实现位点固定为：
+  - `daily_research/continuous_policy/label_builder.py`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+- 本轮新增操作纪律固定为：
+  - 不再允许把 held-exit 校准与 open suppression 绑成同一个全局 defensive 分数
+  - 推断侧至少要分成：
+    - `open_risk_off_score`
+    - `held_exit_support_score`
+  - teacher global target 侧也要同步减弱 `cash_defense_pressure` 对 `candidate_budget / hold_bias / max_position_weight_target` 的联动压制
+  - 只要这种分层逻辑发生结构变化，就必须继续滚动 strict resume 签名；本轮已升级到 `seq_v3_continuous_dual_channel_r2`
+- `formal_r11` 完成后确认仍为 `shadow_only`，因此默认运行态继续按同一治理口径回切：
+  - `latest_train_summary.json`
+  - `latest_evaluation_summary.json`
+  - `latest_export_summary.json`
+  - `latest_protocol_summary.json`
+  - `latest_behavior_audit_summary.json`
+  - `latest_conclusion_ledger.json`
+  - `output/continuous_policy/runtime/portfolio_state.json`
+
 ## 2026-04-15 formal_r9 操作补充
 - 本轮从“continuous-primary”推进到“双通道连续监督”后，正式 protocol 命令固定为：
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --pool-name learned_all_a --max-universe-size 1200 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --random-seed 7 --skip-multiplier 2.0 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --batch-size 512 --learning-rate 0.0015 --hidden-dim 192 --sequence-layers 1 --daily-hidden-dim 96 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 10 --resume-mode strict --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r9`

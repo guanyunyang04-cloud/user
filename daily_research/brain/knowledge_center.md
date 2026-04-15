@@ -263,3 +263,17 @@
   - `formal_r5` = balanced cash / repair reference
   - `formal_r9` = dual-channel continuous 主研究基线
   - `formal_r10` = exit/cash calibration proof reference
+
+- `formal_r11` 证明“受约束合流”是有效方向：
+  - 只要把 `formal_r10` 的全局 defensive 压制拆成“held-exit 支持”和“open risk-off 抑制”两层，long-side 质量可以明显恢复
+  - `formal_r11` 相比 `formal_r10` 把 `annual_return / sharpe / open_win_rate_5d / trend_capture_rate_10d` 全部拉回来了
+  - 同时 `cash_timing_quality_1d` 仍比 `formal_r9` 更接近 `0`
+- 但 `formal_r11` 也证明了另一条边界：
+  - long-side 质量和 sell-side 时点能力目前还没有被同一轮 patch 同时拿住
+  - 一旦把全局压制减轻，`reduce_success_rate_5d / exit_timeliness_rate_5d` 又会明显回落
+- 因此当前最合理的知识收口是：
+  - `formal_r11` 不是“`formal_r10` 失败后的回退”，而是新的 constrained-merge base
+  - `formal_r9` 不是“旧版本”，而是当前最有价值的 sell-side timing 参考线
+  - 后续优化应明确以“`formal_r11` 为底座 + 定向移植 `formal_r9` 的 sell-side 能力”为主，而不是再整体推大 defensive budget
+- strict resume lineage 这轮应继续显式滚动；本轮固定新增的是：
+  - `sequence_model_revision = seq_v3_continuous_dual_channel_r2`
