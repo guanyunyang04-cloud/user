@@ -43,6 +43,8 @@ SAMPLE_SCALAR_LOSS_WEIGHTS: dict[str, float] = {
     "exit_urgency": 1.10,
     "reentry_readiness": 0.45,
     "holding_days_ratio": 1.35,
+    "reduce_fraction": 1.30,
+    "exit_hazard": 1.40,
 }
 DAILY_TARGET_LOSS_WEIGHTS: dict[str, float] = {
     "gross_exposure_target": 1.05,
@@ -101,6 +103,17 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
     reduce_quality = np.clip(sample_frame["reduce_quality"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
     exit_urgency = np.clip(sample_frame["exit_urgency"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
     reentry_readiness = np.clip(sample_frame["reentry_readiness"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    reduce_fraction = np.clip(
+        sample_frame.get("reduce_fraction_target", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    exit_hazard = np.clip(
+        sample_frame.get("exit_hazard_target", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    sell_pressure = np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0)
     action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
 
     for idx in range(row_count):
@@ -122,22 +135,32 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
             scores[action_lookup["reduce"]] = (
                 0.05
                 + reduce_quality[idx] * 0.90
+                + reduce_fraction[idx] * 1.10
                 + max(-float(delta_hint[idx]), 0.0) * 0.30
                 + max(signal_decay[idx], 0.0) * 0.12
             )
             scores[action_lookup["exit"]] = (
                 0.03
                 + exit_urgency[idx] * 1.05
+                + exit_hazard[idx] * 1.15
                 + max(-float(delta_hint[idx]) - 0.12, 0.0) * 0.45
                 + max(-drawdown[idx] - 0.06, 0.0) * 0.18
                 + max(market_downside[idx], 0.0) * 0.10
             )
             scores[action_lookup["skip"]] = 0.01
             scores[action_lookup["open"]] = 0.01
+            scores[action_lookup["hold"]] *= float(np.clip(1.0 - sell_pressure[idx] * 0.32, 0.62, 1.08))
+            scores[action_lookup["add"]] *= float(np.clip(1.0 - sell_pressure[idx] * 0.52, 0.34, 1.00))
+            scores[action_lookup["reduce"]] += sell_pressure[idx] * 0.24
+            scores[action_lookup["exit"]] += sell_pressure[idx] * 0.20
             if duration_ratio[idx] > 0.45 and hold_quality[idx] >= reduce_quality[idx] - 0.02:
                 scores[action_lookup["hold"]] += 0.12
             if hold_days[idx] >= 6.0 and exit_urgency[idx] > 0.20:
                 scores[action_lookup["exit"]] += 0.06
+            if sell_pressure[idx] > 0.26 and hold_days[idx] >= 4.0:
+                scores[action_lookup["reduce"]] += 0.08
+            if exit_hazard[idx] > 0.42 and hold_days[idx] >= 7.0:
+                scores[action_lookup["exit"]] += 0.08
         else:
             scores[action_lookup["skip"]] = (
                 0.12
@@ -228,6 +251,8 @@ class TemporalSamplePolicyNet(nn.Module):
         self.exit_head = nn.Linear(int(hidden_dim), 1)
         self.reentry_head = nn.Linear(int(hidden_dim), 1)
         self.holding_days_head = nn.Linear(int(hidden_dim), 1)
+        self.reduce_fraction_head = nn.Linear(int(hidden_dim), 1)
+        self.exit_hazard_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -245,6 +270,8 @@ class TemporalSamplePolicyNet(nn.Module):
             "exit_urgency": self.exit_head(fused).squeeze(-1),
             "reentry_readiness": self.reentry_head(fused).squeeze(-1),
             "holding_days_ratio": torch.sigmoid(self.holding_days_head(fused).squeeze(-1)),
+            "reduce_fraction": torch.sigmoid(self.reduce_fraction_head(fused).squeeze(-1)),
+            "exit_hazard": torch.sigmoid(self.exit_hazard_head(fused).squeeze(-1)),
         }
 
 
@@ -357,7 +384,14 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     sample_unexpected = set(getattr(sample_load, "unexpected_keys", []) or [])
     daily_missing = set(getattr(daily_load, "missing_keys", []) or [])
     daily_unexpected = set(getattr(daily_load, "unexpected_keys", []) or [])
-    allowed_sample_missing = {"holding_days_head.weight", "holding_days_head.bias"}
+    allowed_sample_missing = {
+        "holding_days_head.weight",
+        "holding_days_head.bias",
+        "reduce_fraction_head.weight",
+        "reduce_fraction_head.bias",
+        "exit_hazard_head.weight",
+        "exit_hazard_head.bias",
+    }
     if sample_unexpected or (sample_missing - allowed_sample_missing):
         raise RuntimeError(
             "continuous_policy seq_v3 artifact load failed because stored sample model weights are incompatible with the current architecture."
@@ -369,7 +403,12 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     sample_model.eval()
     daily_model.eval()
     training_diagnostics = dict(payload.get("training_diagnostics", {}) or {})
-    training_diagnostics["supports_holding_days_head"] = not bool(sample_missing)
+    missing_key_names = {str(name) for name in sample_missing}
+    training_diagnostics["supports_holding_days_head"] = not any(name.startswith("holding_days_head.") for name in missing_key_names)
+    training_diagnostics["supports_sell_heads"] = not any(
+        name.startswith("reduce_fraction_head.") or name.startswith("exit_hazard_head.")
+        for name in missing_key_names
+    )
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -464,6 +503,16 @@ def fit_policy_models_v3(
             0.0,
             1.0,
         ),
+        "reduce_fraction": np.clip(
+            sample_frame.get("reduce_fraction_target", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "exit_hazard": np.clip(
+            sample_frame.get("exit_hazard_target", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
     }
     daily_targets = {
         "gross_exposure_target": daily_frame["gross_exposure_target"].astype(float).to_numpy(dtype=np.float32),
@@ -496,7 +545,7 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_continuous_primary_r1"
+    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r1"
     signature_payload["sample_scalar_loss_weights"] = dict(SAMPLE_SCALAR_LOSS_WEIGHTS)
     signature_payload["daily_target_loss_weights"] = dict(DAILY_TARGET_LOSS_WEIGHTS)
     signature_payload["multi_objective_loss_weights"] = dict(MULTI_OBJECTIVE_LOSS_WEIGHTS)
@@ -570,6 +619,8 @@ def fit_policy_models_v3(
                 exit_batch,
                 reentry_batch,
                 holding_days_batch,
+                reduce_fraction_batch,
+                exit_hazard_batch,
             ) = batch
             outputs = sample_model(static_batch, sequence_batch)
             action_ce_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
@@ -594,6 +645,8 @@ def fit_policy_models_v3(
                     "exit_urgency": exit_batch,
                     "reentry_readiness": reentry_batch,
                     "holding_days_ratio": holding_days_batch,
+                    "reduce_fraction": reduce_fraction_batch,
+                    "exit_hazard": exit_hazard_batch,
                 },
                 SAMPLE_SCALAR_LOSS_WEIGHTS,
             )
@@ -700,6 +753,7 @@ def fit_policy_models_v3(
         "validation_sample_rows": int(len(val_idx)),
         "history_tail": history[-8:],
         "supports_holding_days_head": True,
+        "supports_sell_heads": True,
         "sample_scalar_loss_weights": dict(SAMPLE_SCALAR_LOSS_WEIGHTS),
         "daily_target_loss_weights": dict(DAILY_TARGET_LOSS_WEIGHTS),
         "multi_objective_loss_weights": dict(MULTI_OBJECTIVE_LOSS_WEIGHTS),
@@ -777,6 +831,34 @@ def predict_policy_v3(
         exit_urgency = np.clip(outputs["exit_urgency"].cpu().numpy(), 0.0, None)
         reentry_readiness = np.clip(outputs["reentry_readiness"].cpu().numpy(), 0.0, None)
         holding_days_ratio = np.clip(outputs["holding_days_ratio"].cpu().numpy(), 0.0, 1.0)
+        supports_sell_heads = bool(artifact.training_diagnostics.get("supports_sell_heads", True))
+        reduce_fraction = (
+            np.clip(outputs["reduce_fraction"].cpu().numpy(), 0.0, 1.0)
+            if supports_sell_heads
+            else None
+        )
+        exit_hazard = (
+            np.clip(outputs["exit_hazard"].cpu().numpy(), 0.0, 1.0)
+            if supports_sell_heads
+            else None
+        )
+        if reduce_fraction is None:
+            reduce_fraction = np.clip(
+                0.18 * np.clip(-delta_hint, 0.0, None)
+                + 0.42 * np.clip(reduce_quality, 0.0, None)
+                + 0.10 * np.clip(exit_urgency, 0.0, None),
+                0.0,
+                1.0,
+            )
+        if exit_hazard is None:
+            exit_hazard = np.clip(
+                0.18 * np.clip(-delta_hint - 0.05, 0.0, None)
+                + 0.48 * np.clip(exit_urgency, 0.0, None)
+                + 0.10 * np.clip(reduce_quality, 0.0, None),
+                0.0,
+                1.0,
+            )
+        sell_pressure = np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0)
 
         daily_row = pd.DataFrame([{name: float(daily_features.get(name, 0.0) or 0.0) for name in artifact.daily_feature_names}])
         daily_x = torch.as_tensor(
@@ -797,6 +879,11 @@ def predict_policy_v3(
             "max_position_weight_target": float(np.clip(_finite_scalar(daily_out["max_position_weight_target"], default=0.12), 0.08, 0.28)),
             "hold_bias_target": float(np.clip(_finite_scalar(daily_out["hold_bias_target"], default=0.24), 0.10, 0.95)),
         }
+
+    current_weight = state_frame["current_weight"].astype(float).to_numpy(dtype=float) if "current_weight" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    held_mask = current_weight > 1e-8
+    portfolio_sell_pressure = float(np.nanmean(sell_pressure[held_mask])) if bool(np.any(held_mask)) else (float(np.nanmean(sell_pressure)) if len(sell_pressure) else 0.0)
+    portfolio_exit_hazard = float(np.nanmean(exit_hazard[held_mask])) if bool(np.any(held_mask)) else (float(np.nanmean(exit_hazard)) if len(exit_hazard) else 0.0)
 
     decoder_profile_name, decoder_profile = resolve_decoder_profile(artifact.train_summary.get("decoder_profile"))
     defensive_score = (
@@ -890,6 +977,55 @@ def predict_policy_v3(
             + risk_off_score * (0.04 if is_holdcash_v3_decoder else 0.08),
             0.0,
             0.35 if is_holdcash_v3_decoder else 0.45,
+        )
+    )
+    global_targets["gross_exposure_target"] = float(
+        np.clip(
+            global_targets["gross_exposure_target"] - portfolio_sell_pressure * 0.14 - portfolio_exit_hazard * 0.06,
+            min_gross_exposure_target,
+            0.98,
+        )
+    )
+    global_targets["candidate_budget"] = float(
+        np.clip(
+            global_targets["candidate_budget"] - portfolio_sell_pressure * 1.00 - portfolio_exit_hazard * 0.35,
+            min_candidate_budget,
+            12.0,
+        )
+    )
+    global_targets["turnover_budget"] = float(
+        np.clip(
+            global_targets["turnover_budget"] + portfolio_sell_pressure * 0.12 + portfolio_exit_hazard * 0.08,
+            0.08,
+            1.00,
+        )
+    )
+    global_targets["max_position_weight_target"] = float(
+        np.clip(
+            global_targets["max_position_weight_target"] - portfolio_sell_pressure * 0.020,
+            min_position_cap_target,
+            0.28,
+        )
+    )
+    global_targets["hold_bias_target"] = float(
+        np.clip(
+            global_targets["hold_bias_target"] - portfolio_sell_pressure * 0.16 - portfolio_exit_hazard * 0.08,
+            0.10,
+            0.95,
+        )
+    )
+    global_targets["reduce_bias_target"] = float(
+        np.clip(
+            global_targets["reduce_bias_target"] + portfolio_sell_pressure * 0.16 + portfolio_exit_hazard * 0.07,
+            0.0,
+            0.65,
+        )
+    )
+    global_targets["exit_patience_target"] = float(
+        np.clip(
+            global_targets["exit_patience_target"] - portfolio_exit_hazard * 0.22 - portfolio_sell_pressure * 0.08,
+            0.10 if is_holdcash_v3_decoder else 0.05,
+            0.95,
         )
     )
     global_targets = {
@@ -996,27 +1132,28 @@ def predict_policy_v3(
         if held:
             if label in {"reduce", "exit"} and market_downside_pressure[idx] < 0.12 and signal_decay_speed[idx] < 0.05 and drawdown_from_peak[idx] > -0.05 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
-            if label in {"reduce", "exit"} and hold_days[idx] < 2 and exit_urgency[idx] < 0.24 and hold_quality[idx] > -0.02:
+            if label in {"reduce", "exit"} and hold_days[idx] < 2 and exit_urgency[idx] < 0.24 and exit_hazard[idx] < 0.20 and hold_quality[idx] > -0.02:
                 label = "hold"
-            if label in {"reduce", "exit"} and days_since_last_buy[idx] <= max(3.0, hold_days[idx]) and exit_urgency[idx] < 0.26 and hold_quality[idx] > -0.04:
+            if label in {"reduce", "exit"} and days_since_last_buy[idx] <= max(3.0, hold_days[idx]) and exit_urgency[idx] < 0.26 and exit_hazard[idx] < 0.24 and hold_quality[idx] > -0.04:
                 label = "hold"
-            if label in {"reduce", "exit"} and hold_continuity_pressure[idx] > 0.24 and hold_quality[idx] > reduce_quality[idx] - 0.05 and market_downside_pressure[idx] < 0.20:
+            if label in {"reduce", "exit"} and hold_continuity_pressure[idx] > 0.24 and hold_quality[idx] > reduce_quality[idx] - 0.05 and market_downside_pressure[idx] < 0.20 and sell_pressure[idx] < 0.26:
                 label = "hold"
-            if label == "reduce" and days_since_last_reduce[idx] <= 2.0 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
+            if label == "reduce" and days_since_last_reduce[idx] <= 2.0 and reduce_fraction[idx] < 0.22 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
-            if label == "reduce" and reduce_reversal_pressure[idx] > 0.22 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"] and drawdown_from_peak[idx] > -0.08:
+            if label == "reduce" and reduce_reversal_pressure[idx] > 0.22 and reduce_fraction[idx] < 0.28 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"] and drawdown_from_peak[idx] > -0.08:
                 label = "hold"
-            if label == "exit" and exit_urgency[idx] < 0.18 + exit_patience_target * 0.06 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"]:
+            if label == "exit" and exit_urgency[idx] < 0.18 + exit_patience_target * 0.06 and exit_hazard[idx] < 0.44 and hold_quality[idx] > reduce_quality[idx] - decoder_profile["reduce_gate_bonus"]:
                 label = "reduce" if reduce_quality[idx] > 0.08 else "hold"
-            if label == "reduce" and reduce_quality[idx] < 0.09 + decoder_profile["reduce_gate_bonus"] and hold_quality[idx] > 0.03 - decoder_profile["hold_override_margin"]:
+            if label == "reduce" and reduce_fraction[idx] < 0.18 and reduce_quality[idx] < 0.09 + decoder_profile["reduce_gate_bonus"] and hold_quality[idx] > 0.03 - decoder_profile["hold_override_margin"]:
                 label = "hold"
-            if label in {"reduce", "exit"} and duration_name in {"swing", "extended"} and hold_quality[idx] >= reduce_quality[idx] - decoder_profile["hold_override_margin"]:
+            if label in {"reduce", "exit"} and duration_name in {"swing", "extended"} and sell_pressure[idx] < 0.26 and hold_quality[idx] >= reduce_quality[idx] - decoder_profile["hold_override_margin"]:
                 label = "hold"
             exit_rescue = (
-                exit_prob > 0.55
-                and hold_days[idx] >= 8.0
+                (exit_prob > 0.55 or exit_hazard[idx] > 0.46)
+                and hold_days[idx] >= 6.0
                 and (
                     exit_urgency[idx] > 0.34
+                    or exit_hazard[idx] > 0.54
                     or drawdown_from_peak[idx] < -0.12
                     or (market_downside_pressure[idx] > 0.16 and signal_decay_speed[idx] > 0.04)
                 )
@@ -1025,16 +1162,18 @@ def predict_policy_v3(
                 hold_quality[idx] > add_quality[idx] + 0.14
                 and drawdown_from_peak[idx] > -0.05
                 and market_downside_pressure[idx] < 0.12
+                and exit_hazard[idx] < 0.52
             ):
                 label = "exit"
             reduce_rescue = (
-                reduce_prob > max(0.16 + reduce_bias_target * 0.08, exit_prob - 0.10)
-                and hold_days[idx] >= 4.0
-                and reduce_quality[idx] > hold_quality[idx] + 0.03
+                (reduce_prob > max(0.16 + reduce_bias_target * 0.08, exit_prob - 0.10) or reduce_fraction[idx] > 0.28)
+                and hold_days[idx] >= 3.0
+                and (reduce_quality[idx] + reduce_fraction[idx] * 0.35) > hold_quality[idx] + 0.03
                 and (
                     signal_decay_speed[idx] > 0.05
                     or market_downside_pressure[idx] > 0.14
                     or exit_urgency[idx] > 0.18
+                    or sell_pressure[idx] > 0.22
                     or drawdown_from_peak[idx] < -0.05
                 )
             )
@@ -1043,10 +1182,22 @@ def predict_policy_v3(
                 and hold_quality[idx] > reduce_quality[idx] - 0.01
                 and exit_urgency[idx] < 0.14
                 and market_downside_pressure[idx] < 0.12
+                and sell_pressure[idx] < 0.20
             ):
                 label = "reduce"
+            if (
+                label == "add"
+                and (
+                    sell_pressure[idx] > 0.20
+                    or exit_hazard[idx] > 0.18
+                    or reduce_fraction[idx] > 0.16
+                )
+            ):
+                label = "reduce" if (reduce_fraction[idx] > 0.26 and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02) else "hold"
             if label in {"hold", "skip"} and (market_downside_pressure[idx] > 0.18 or portfolio_cash_pressure[idx] > 0.18 or signal_decay_speed[idx] > 0.10) and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02 and drawdown_from_peak[idx] < -0.03:
                 label = "reduce"
+            if label in {"hold", "skip"} and sell_pressure[idx] > 0.32 and hold_days[idx] >= 4.0 and current_weight[idx] > 0.025:
+                label = "exit" if exit_hazard[idx] > 0.58 else "reduce"
             if (
                 label in {"hold", "skip"}
                 and add_quality[idx] > 0.14
@@ -1054,6 +1205,7 @@ def predict_policy_v3(
                 and current_weight[idx] < 0.12
                 and reduce_quality[idx] < hold_quality[idx] + 0.03
                 and exit_urgency[idx] < 0.18
+                and sell_pressure[idx] < 0.18
                 and signal_decay_speed[idx] < 0.08
                 and market_downside_pressure[idx] < 0.16
             ):
@@ -1093,17 +1245,22 @@ def predict_policy_v3(
     hold_boost = np.zeros(len(state_frame), dtype=float)
     for idx, label in enumerate(adjusted_labels):
         duration_bonus = max(duration_days[idx] - 3.0, 0.0) / 20.0
+        sell_drag = sell_pressure[idx] * 0.55 + exit_hazard[idx] * 0.12
         if label == "open":
-            blended_delta[idx] = np.clip(max(blended_delta[idx], 0.02 + entry_quality[idx] * 0.55 + duration_bonus * 0.05), 0.0, 0.22)
-            action_strength[idx] = np.clip(entry_quality[idx] + probability_map["open"][idx] * 0.55 + duration_bonus * 0.40 - exit_reentry_pressure[idx] * 0.12, 0.0, None)
-            hold_boost[idx] = np.clip(reentry_readiness[idx] * 0.25 + duration_bonus * 0.20, 0.0, None)
+            blended_delta[idx] = np.clip(max(blended_delta[idx], 0.02 + entry_quality[idx] * 0.55 + duration_bonus * 0.05) * (1.0 - sell_drag * 0.30), 0.0, 0.22)
+            action_strength[idx] = np.clip(entry_quality[idx] + probability_map["open"][idx] * 0.55 + duration_bonus * 0.40 - exit_reentry_pressure[idx] * 0.12 - sell_drag * 0.20, 0.0, None)
+            hold_boost[idx] = np.clip(reentry_readiness[idx] * 0.25 + duration_bonus * 0.20 - sell_drag * 0.10, 0.0, None)
         elif label == "add":
-            blended_delta[idx] = np.clip(max(blended_delta[idx], 0.01 + add_quality[idx] * 0.35 + duration_bonus * 0.03), 0.0, 0.18)
-            action_strength[idx] = np.clip(add_quality[idx] + probability_map["add"][idx] * 0.45 + duration_bonus * 0.30, 0.0, None)
-            hold_boost[idx] = np.clip(hold_quality[idx] + duration_bonus * 0.25, 0.0, None)
+            blended_delta[idx] = np.clip(max(blended_delta[idx], 0.01 + add_quality[idx] * 0.35 + duration_bonus * 0.03) * (1.0 - sell_drag * 0.55), 0.0, 0.18)
+            action_strength[idx] = np.clip(add_quality[idx] + probability_map["add"][idx] * 0.45 + duration_bonus * 0.30 - sell_drag * 0.35, 0.0, None)
+            hold_boost[idx] = np.clip(hold_quality[idx] + duration_bonus * 0.25 - sell_drag * 0.18, 0.0, None)
         elif label == "hold":
-            blended_delta[idx] = np.clip(max(blended_delta[idx] * 0.30, 0.0) + hold_quality[idx] * 0.10 + decoder_profile["hold_delta_bonus"], 0.0, 0.08 + decoder_profile["hold_delta_bonus"])
-            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25, 0.0, None)
+            blended_delta[idx] = np.clip(
+                (max(blended_delta[idx] * 0.30, 0.0) + hold_quality[idx] * 0.10 + decoder_profile["hold_delta_bonus"]) * (1.0 - sell_drag * 0.60),
+                0.0,
+                0.08 + decoder_profile["hold_delta_bonus"],
+            )
+            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25 - sell_drag * 0.24, 0.0, None)
             hold_boost[idx] = np.clip(
                 hold_quality[idx]
                 + duration_bonus * 0.30
@@ -1116,8 +1273,10 @@ def predict_policy_v3(
             blended_delta[idx] = -np.clip(
                 max(
                     -blended_delta[idx],
-                    0.08
+                    reduce_fraction[idx]
+                    + 0.04
                     + reduce_quality[idx] * (0.28 + reduce_bias_target - decoder_profile["reduce_delta_softener"])
+                    + sell_pressure[idx] * 0.18
                     + market_downside_pressure[idx] * 0.16
                     + signal_decay_speed[idx] * 0.18
                     + cash_regime_pressure[idx] * 0.10
@@ -1129,6 +1288,8 @@ def predict_policy_v3(
             action_strength[idx] = np.clip(
                 reduce_quality[idx]
                 + probability_map["reduce"][idx] * 0.35
+                + reduce_fraction[idx] * 0.45
+                + exit_hazard[idx] * 0.08
                 + reduce_bias_target * 0.25
                 - reduce_reversal_pressure[idx] * 0.12,
                 0.0,
@@ -1138,6 +1299,7 @@ def predict_policy_v3(
             blended_delta[idx] = -1.0
             action_strength[idx] = np.clip(
                 exit_urgency[idx]
+                + exit_hazard[idx] * 0.60
                 + probability_map["exit"][idx] * 0.45
                 + market_downside_pressure[idx] * 0.12
                 + signal_decay_speed[idx] * 0.15
@@ -1156,12 +1318,15 @@ def predict_policy_v3(
             "action_strength": action_strength,
             "target_delta_hint": blended_delta,
             "hold_boost": hold_boost,
-            "exit_urgency": exit_urgency + probability_map["exit"] * 0.55 + probability_map["reduce"] * 0.35 + np.clip(-blended_delta, 0.0, None),
+            "exit_urgency": exit_urgency + exit_hazard * 0.65 + probability_map["exit"] * 0.55 + probability_map["reduce"] * 0.35 + np.clip(-blended_delta, 0.0, None),
             "entry_quality": entry_quality,
             "hold_quality": hold_quality,
             "add_quality": add_quality,
             "reduce_quality": reduce_quality,
+            "reduce_fraction": reduce_fraction,
             "reentry_readiness": reentry_readiness,
+            "exit_hazard": exit_hazard,
+            "sell_pressure": sell_pressure,
             "planned_holding_bucket": predicted_duration_labels,
             "planned_holding_days": duration_days,
             "planned_holding_days_bucket": bucket_duration_days,

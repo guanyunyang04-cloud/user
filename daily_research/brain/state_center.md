@@ -544,3 +544,39 @@
   - `formal_r7` 继续保留为综合 performance challenger
   - `formal_r8` 继续保留为 continuous-learning reference
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 protocol 后再次回切到它
+
+## 2026-04-15 formal_r9 双通道连续监督升级
+- 这轮 capped 全A主线已经从“continuous-primary 只强化 long-side”推进到“long-side + sell-side 双通道连续监督”：
+  - `label_builder / pipeline_utils / model_seq_v3 / portfolio_simulator` 已把 `reduce_fraction / exit_hazard` 接成正式连续目标，并让 execution / budget coupling 同步消费这些 sell-side 信号
+  - strict resume signature 已继续显式升级到 `sequence_model_revision = seq_v3_continuous_dual_channel_r1`
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r9` 已完整跑完，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 36635`
+  - `best_epoch = 39 / 48`
+- `formal_r9` 的评估侧结果是：
+  - `annual_return = 0.4185`
+  - `sharpe = 3.4923`
+  - `max_drawdown = -0.0240`
+  - `avg_gross_exposure = 0.3969`
+  - `hold_share = 0.5087`
+  - `reduce_success_rate_5d = 0.7368`
+  - `exit_timeliness_rate_5d = 0.4000`
+  - `cash_timing_quality_1d = -0.2470`
+  - `immediate_reversal_rate_3d = 0.1268`
+  - `trend_capture_rate_10d = 0.3520`
+  - `missed_main_leg_rate_10d = 0.3448`
+- `formal_r9` 相比 `formal_r8` 的位置已经明显收敛：
+  - `reduce_success_rate_5d: 0.0000 -> 0.7368`
+  - `exit_timeliness_rate_5d: 0.0000 -> 0.4000`
+  - `hold_share: 0.4378 -> 0.5087`
+  - `max_drawdown: -0.0614 -> -0.0240`
+  - `cash_timing_quality_1d: -0.3132 -> -0.2470`
+  - 但 `annual_return: 0.9094 -> 0.4185`
+  - `trend_capture_rate_10d: 0.4195 -> 0.3520`
+  - `immediate_reversal_rate_3d: 0.0143 -> 0.1268`
+- 当前结论更新为：
+  - `formal_r9` 是新的 dual-channel continuous challenger，但仍为 `shadow_only`
+  - promotion gate 已从四项失败收敛到只剩 `exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - `formal_r5` 继续保留为 balanced cash / repair reference
+  - `formal_r8` 继续保留为 long-side continuous-learning reference
+  - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 protocol 后再次回切到它

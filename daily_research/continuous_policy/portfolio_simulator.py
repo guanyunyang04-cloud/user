@@ -340,6 +340,9 @@ class PortfolioState:
                 "target_delta_hint": 0.0,
                 "hold_boost": 0.0,
                 "exit_urgency": 0.0,
+                "reduce_fraction": 0.0,
+                "exit_hazard": 0.0,
+                "sell_pressure": 0.0,
             }
         )
 
@@ -401,6 +404,13 @@ class PortfolioState:
             add_quality = float(policy.at[stock, "add_quality"] or 0.0) if "add_quality" in policy.columns else 0.0
             reduce_quality = float(policy.at[stock, "reduce_quality"] or 0.0) if "reduce_quality" in policy.columns else 0.0
             exit_urgency = float(policy.at[stock, "exit_urgency"] or 0.0) if "exit_urgency" in policy.columns else 0.0
+            reduce_fraction = float(policy.at[stock, "reduce_fraction"] or 0.0) if "reduce_fraction" in policy.columns else max(-delta_hint, 0.0)
+            exit_hazard = float(policy.at[stock, "exit_hazard"] or 0.0) if "exit_hazard" in policy.columns else float(np.clip(exit_urgency, 0.0, 1.0))
+            sell_pressure = (
+                float(policy.at[stock, "sell_pressure"] or 0.0)
+                if "sell_pressure" in policy.columns
+                else float(np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0))
+            )
             planned_holding_days = float(policy.at[stock, "planned_holding_days"] or 0.0) if "planned_holding_days" in policy.columns else 0.0
             current_weight = float(current.get(stock, 0.0))
             current_hold_days = float(self.holdings.get(stock).hold_days) if stock in self.holdings else 0.0
@@ -410,11 +420,15 @@ class PortfolioState:
                 current_weight > 1e-8
                 and current_hold_days >= 8.0
                 and (
-                    (action == "exit" and exit_urgency >= 0.18)
+                    (action == "exit" and (exit_urgency >= 0.18 or exit_hazard >= 0.42))
                     or (
                         action in {"hold", "reduce", "skip"}
-                        and exit_urgency >= 0.26 + exit_patience_target * 0.06
-                        and reduce_quality >= hold_quality + 0.04
+                        and (
+                            exit_urgency >= 0.26 + exit_patience_target * 0.06
+                            or exit_hazard >= 0.34 + exit_patience_target * 0.04
+                        )
+                        and (reduce_quality >= hold_quality + 0.04 or reduce_fraction >= 0.18)
+                        and sell_pressure >= 0.20
                         and delta_hint <= max(0.01, hold_boost)
                         and add_quality <= hold_quality + 0.02
                     )
@@ -424,26 +438,60 @@ class PortfolioState:
                 forced_zero.at[stock] = True
                 continue
             if action == "reduce":
-                reduction_scale = max(
-                    0.08,
-                    1.0
-                    + delta_hint
-                    - reduce_quality * (0.18 + reduce_bias_target * 0.12)
-                    + hold_bias_target * 0.08
-                    + exit_patience_target * 0.05,
+                target_reduce_fraction = float(
+                    np.clip(
+                        max(
+                            reduce_fraction,
+                            max(-delta_hint, 0.0),
+                            0.06 + sell_pressure * 0.10 + exit_hazard * 0.08,
+                        ),
+                        0.06,
+                        0.96,
+                    )
                 )
-                desired_strength.at[stock] = max(current_weight * reduction_scale, 0.0)
-                if current_weight > 1e-8 and hold_boost > 0.02 and days_since_last_reduce <= 2.0:
+                keep_ratio = float(
+                    np.clip(
+                        1.0
+                        - target_reduce_fraction
+                        * (
+                            0.82
+                            + reduce_quality * 0.08
+                            + sell_pressure * 0.12
+                            + exit_hazard * 0.08
+                            - hold_bias_target * 0.10
+                        ),
+                        0.04 if exit_hazard > 0.55 else 0.08,
+                        0.92,
+                    )
+                )
+                desired_strength.at[stock] = max(current_weight * keep_ratio, 0.0)
+                if (
+                    current_weight > 1e-8
+                    and hold_boost > 0.02
+                    and days_since_last_reduce <= 2.0
+                    and target_reduce_fraction < 0.24
+                    and exit_hazard < 0.22
+                    and sell_pressure < 0.22
+                ):
                     protected_floor.at[stock] = max(
                         protected_floor.at[stock],
                         current_weight * np.clip(0.70 + hold_bias_target * 0.08, 0.60, 0.86),
                     )
                 continue
             if action == "hold":
-                hold_scale = 1.0 + hold_bias_target * 0.06 + exit_patience_target * 0.04 + max(planned_holding_days - 3.0, 0.0) / 120.0
+                hold_scale = (
+                    1.0
+                    + hold_bias_target * 0.06
+                    + exit_patience_target * 0.04
+                    + max(planned_holding_days - 3.0, 0.0) / 120.0
+                    - sell_pressure * 0.18
+                    - exit_hazard * 0.08
+                )
                 desired_strength.at[stock] = max(
-                    current_weight * hold_scale,
-                    current_weight + max(0.0, hold_boost + hold_quality) * (0.025 + hold_bias_target * 0.030),
+                    current_weight * max(0.72, hold_scale),
+                    current_weight
+                    + max(0.0, hold_boost + hold_quality - sell_pressure * 0.35 - exit_hazard * 0.18)
+                    * (0.025 + hold_bias_target * 0.030),
                 )
                 if current_weight > 1e-8:
                     protected_floor.at[stock] = max(
@@ -454,20 +502,27 @@ class PortfolioState:
                             + hold_bias_target * 0.10
                             + exit_patience_target * 0.05
                             + max(planned_holding_days - 3.0, 0.0) / 180.0,
-                            0.72,
+                            0.62 + max(0.0, 0.10 - sell_pressure * 0.08),
                             0.97,
                         ),
                     )
                 continue
             if action == "add":
-                desired_strength.at[stock] = max(
-                    current_weight + max(0.015, strength * 0.55 + add_quality * 0.15 + planned_holding_days / 300.0),
-                    current_weight,
+                add_increment = max(
+                    0.0,
+                    strength * 0.55 + add_quality * 0.15 + planned_holding_days / 300.0 - sell_pressure * 0.14 - exit_hazard * 0.10,
+                )
+                desired_strength.at[stock] = (
+                    current_weight
+                    if (sell_pressure > 0.26 or exit_hazard > 0.20)
+                    else max(current_weight + max(0.015, add_increment), current_weight)
                 )
                 if current_weight > 1e-8:
                     floor_ratio = float(np.clip(0.90 + hold_bias_target * 0.04, 0.85, 0.98))
                     if (
                         exit_urgency < 0.16
+                        and exit_hazard < 0.18
+                        and sell_pressure < 0.18
                         and add_quality > max(0.10, hold_quality - 0.02)
                         and reduce_quality < hold_quality + 0.04
                     ):
@@ -489,9 +544,11 @@ class PortfolioState:
                         0.85
                         + hold_bias_target * 0.15
                         - reentry_guard_target * 0.30
-                        - reentry_penalty * (0.22 + reentry_guard_target * 0.55),
+                        - reentry_penalty * (0.22 + reentry_guard_target * 0.55)
+                        - sell_pressure * 0.20
+                        - exit_hazard * 0.12,
                     ),
-                    max(delta_hint, 0.02 + entry_quality * 0.20 + planned_holding_days / 320.0),
+                    max(delta_hint, 0.02 + entry_quality * 0.20 + planned_holding_days / 320.0) * max(0.65, 1.0 - sell_pressure * 0.35),
                 )
                 continue
             desired_strength.at[stock] = current_weight * (1.0 + hold_bias_target * 0.02)
@@ -648,6 +705,9 @@ class PortfolioState:
                     "action_strength": float(policy.at[stock, "action_strength"] or 0.0),
                     "target_delta_hint": float(policy.at[stock, "target_delta_hint"] or 0.0),
                     "exit_urgency": float(policy.at[stock, "exit_urgency"] or 0.0),
+                    "reduce_fraction": float(policy.at[stock, "reduce_fraction"] or 0.0) if "reduce_fraction" in policy.columns else 0.0,
+                    "exit_hazard": float(policy.at[stock, "exit_hazard"] or 0.0) if "exit_hazard" in policy.columns else 0.0,
+                    "sell_pressure": float(policy.at[stock, "sell_pressure"] or 0.0) if "sell_pressure" in policy.columns else 0.0,
                     "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
                     "contradictory_micro_rebalance": bool(contradictory_micro_rebalance),
                     "state_update_action": state_update_action,

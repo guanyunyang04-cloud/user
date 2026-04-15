@@ -14051,3 +14051,156 @@ position,000001.SZ,1200,12.38,
 - 治理收口：
   - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 `formal_r8` 静默接管
+
+## 2026-04-15 planner 视角再收敛：从局部 repair 转向“双通道连续学习”
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散设想可能路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 仍是当前 capped 全A最平衡的 repair baseline
+    - `formal_r7` 仍是当前 capped 全A的综合 performance challenger
+    - `formal_r8` 已证明 continuous-primary supervision 能显著压低 `immediate_reversal_rate_3d`，并把“主升浪捕获/错失”变成正式指标
+    - 但 `formal_r8` 同时把 `reduce / exit` 压得过弱，评估侧已经出现 `reduce = 0 / exit = 3`
+  - 推断：
+    - 下一步最高 ROI 已不再是继续强化 long-side persistence，也不是回到纯局部 sell-side 小修
+    - 更合理的主线是把当前升级推进到“long-side continuous supervision + sell-side continuous supervision”对称结构
+  - 假设：
+    - 如果 sell-side 也被连续化为正式主监督，模型有机会保住 `formal_r8` 的 reversal / trend 学习增益，同时恢复 `reduce / exit`
+- 发散路径：
+  - 路径 A：继续沿 `formal_r8` 加强 long-side continuous supervision
+    - 优点：最贴近当前已出现的正信号
+    - 风险：会进一步把动作分布推向 `open / add / hold`
+  - 路径 B：退回 `formal_r5 / formal_r7`，继续做离散 sell-side repair
+    - 优点：最稳、最接近现有主线
+    - 风险：又回到局部 patch，学习范式升级被中断
+  - 路径 C：把 continuous upgrade 推到 sell-side，对 `reduce / exit` 也建立连续主监督
+    - 优点：最符合这轮暴露出来的真实结构缺口
+    - 风险：实现面比纯局部 repair 更大，需要控制变量
+  - 路径 D：继续加深 backbone 或切 `hier_v4`
+    - 优点：可能突破容量上限
+    - 风险：会把“监督问题”和“容量问题”重新混在一起
+  - 路径 E：继续扩 `max_universe_size`
+    - 优点：更接近完整全A目标
+    - 风险：会把当前未修稳的行为问题放大
+- 收敛判断：
+  - 主线应选 `路径 C`
+  - `路径 B` 保留为局部 fallback 参考，而不是下一阶段主路径
+  - `路径 A` 只作为 `路径 C` 的一部分保留，不再单独前进
+  - `路径 D / E` 继续后置冻结
+- 优先级：
+  - `P0`：冻结当前参考角色
+    - `formal_r5` = balanced baseline
+    - `formal_r7` = 综合 performance challenger
+    - `formal_r8` = continuous-learning reference
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `P1`：优先把 sell-side 连续监督正式化
+    - 不再只让 `reduce / exit` 主要靠离散 label 学
+    - 下一轮最值得接入的是：
+      - `reduce_fraction`
+      - `exit_hazard` 或等价的连续退出强度
+      - 让 sell-side 与现有 `target_delta_hint / holding_days_ratio` 处于同等主监督地位
+  - `P2`：同步约束 daily/global budget 头
+    - 当前 `formal_r8` 的 `avg_gross_exposure = 0.8173` 与 `cash_timing_quality_1d = -0.3132`
+    - 说明 continuous upgrade 不能只改 sample head，必须一起约束 `gross / turnover / hold_bias`
+  - `P3`：下一轮 formal 的最低目标固定为
+    - 保住 `immediate_reversal_rate_3d` 不明显反弹
+    - 保住主升浪相关指标可见且不退化成空壳
+    - 让 `reduce_success_rate_5d > 0`
+    - 让 `exit_timeliness_rate_5d > 0`
+    - 把 `max_drawdown` 拉回 gate 内
+  - `P4`：如果 `P1-P3` 成立，再讨论把连续监督进一步扩到：
+    - `target_weight`
+    - `soft sparsity`
+    - 更完整的持仓生命周期建模
+  - `P5`：depth / `hier_v4` / 更大全A继续冻结
+    - 只有当双通道连续监督已站稳，但仍明显卡容量上限时，才重新提升优先级
+- 动作后复盘：
+  - 当前最优顺序已经从“继续 patch sell-side”收敛为：
+    - 先把 continuous-primary 升级补成双通道
+    - 再让预算头跟上
+    - 最后才重新讨论更深 backbone 或更大全A
+  - 这次收敛的核心价值，是避免把 `formal_r8` 的真实增益误判成“方向错了”，也避免把它的真实副作用误判成“只要继续加深就会好”
+
+## 2026-04-15 双通道连续监督升级与 formal_r9 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，且明确强调“注重最有效而不是最小改动”
+- 动作前自检：
+  - 事实：
+    - 当前主线计划已收敛到：从 `formal_r8` 的 continuous-primary supervision 继续推进到“long-side + sell-side 双通道连续学习”
+    - `formal_r8` 已证明连续主监督方向有效，但评估侧真实动作分布已经塌成 `reduce = 0 / exit = 3`
+    - `formal_r5` 仍是 balanced repair baseline，`formal_r7` 仍是综合 performance challenger，`cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 当前最高 ROI 不是继续加深 backbone，也不是继续扩 `universe`
+    - 最有效的下一步是把 `reduce / exit` 也正式连续化，并让 budget / execution 同步消费 sell-side continuous signals
+  - 假设：
+    - 如果 `reduce_fraction / exit_hazard` 真能贯穿 teacher、sample、decoder 与 execution，模型有机会保住 `formal_r8` 的趋势/连续学习增益，同时恢复真实 sell-side
+- 实施：
+  - 在 `daily_research/continuous_policy/label_builder.py` 中：
+    - 新增 `reduce_fraction_target / exit_hazard_target`
+    - 同步让 teacher global target 显式吸收 sell pressure
+  - 在 `daily_research/continuous_policy/pipeline_utils.py` 中：
+    - 把新 sell-side target 列纳入 sample label 边界，确保不会混进 feature matrix
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中：
+    - 新增 `reduce_fraction / exit_hazard` 连续头
+    - 把二者纳入 sample scalar loss 与 `soft action target`
+    - 在推断侧把 sell-side signal 接进 held-path label repair 与 daily/global budget coupling
+    - strict resume signature 升级为 `seq_v3_continuous_dual_channel_r1`
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中：
+    - 让 `reduce_fraction / exit_hazard / sell_pressure` 真正参与 `reduce / hold / add / open` 的目标权重形成
+    - 让 weak-tail forced-zero 与 budget moderation 同步吸收 sell-side continuous signal
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r9`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36635`
+    - `best_epoch = 39 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.4185`
+    - `sharpe = 3.4923`
+    - `max_drawdown = -0.0240`
+    - `avg_gross_exposure = 0.3969`
+    - `hold_share = 0.5087`
+    - `reduce_success_rate_5d = 0.7368`
+    - `exit_timeliness_rate_5d = 0.4000`
+    - `cash_timing_quality_1d = -0.2470`
+    - `immediate_reversal_rate_3d = 0.1268`
+    - `trend_capture_rate_10d = 0.3520`
+    - `missed_main_leg_rate_10d = 0.3448`
+  - 相比 `formal_r8`：
+    - `reduce_success_rate_5d: 0.0000 -> 0.7368`
+    - `exit_timeliness_rate_5d: 0.0000 -> 0.4000`
+    - `hold_share: 0.4378 -> 0.5087`
+    - `max_drawdown: -0.0614 -> -0.0240`
+    - `cash_timing_quality_1d: -0.3132 -> -0.2470`
+    - 但 `annual_return: 0.9094 -> 0.4185`
+    - `trend_capture_rate_10d: 0.4195 -> 0.3520`
+    - `immediate_reversal_rate_3d: 0.0143 -> 0.1268`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项已收敛到只剩 `exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - shadow 侧：
+    - `annual_return = -0.1052`
+    - `sharpe = -2.0674`
+    - `avg_gross_exposure = 0.2719`
+    - `hold_share = 0.8000`
+    - `reduce_success_rate_5d = 1.0000`
+    - `exit_timeliness_rate_5d = 0.0000`
+    - `cash_timing_quality_1d = -0.1053`
+    - `immediate_reversal_rate_3d = 0.0000`
+- 动作后复盘：
+  - 事实：
+    - 双通道连续监督已经把 `formal_r8` 的 sell-side starvation 真正拉回来了
+    - `reduce / exit` 不再是 `0`
+    - `max_drawdown` 也重新回到 gate 内
+  - 推断：
+    - continuous-learning 这条线已经被证明是有效主线，而不再只是概念性 upgrade
+    - 当前 capped 全A主线的第一瓶颈已从“sell-side 学不会”收敛成“`exit` 时点还不够准 + `cash timing` 仍为负”
+    - `formal_r9` 现在更适合作为下一轮主研究底座；`formal_r5` 与 `formal_r8` 分别保留为 cash / long-side reference
+  - 假设：
+    - 如果下一轮继续只做高 ROI repair，最值得优先补的是 `exit` 时点校准与 budget head calibration，而不是继续扩池或加深 backbone
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r9` 静默接管

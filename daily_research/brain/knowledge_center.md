@@ -227,3 +227,19 @@
   - `sequence_model_revision`
   - objective / loss 权重
   显式纳入签名，否则会把旧 checkpoint 当成同 lineage 继续训练，导致假连续
+
+- 连续主监督如果只覆盖 long-side，而不把 sell-side 也变成正式连续目标，模型会明显退化成“更会 `open / add / hold`，但几乎不给 `reduce / exit`”；`formal_r8` 已经把这个结构性副作用暴露得很清楚
+- 当 `reduce_fraction / exit_hazard` 与 `target_delta_hint / holding_days_ratio` 处于同等级别主监督，并让 execution / budget 头同步消费这些信号后，sell-side 可以被实质性拉回：
+  - `formal_r8 -> formal_r9`
+  - `reduce_success_rate_5d: 0.0000 -> 0.7368`
+  - `exit_timeliness_rate_5d: 0.0000 -> 0.4000`
+  - `hold_share: 0.4378 -> 0.5087`
+  - `max_drawdown: -0.0614 -> -0.0240`
+- 但 dual-channel continuous learning 也不会自动把一切都学会；`formal_r9` 已证明：
+  - `cash_timing_quality_1d` 仍为负
+  - `trend_capture_rate_10d` 与 `annual_return` 会在 sell-side 恢复过程中出现回撤
+  - 所以下一阶段必须把 budget head calibration 与 `exit` 时点校准单独继续做，而不是误以为“只要 continuous 化就已经收工”
+- capped 全A主线当前的第一瓶颈已不再是 `reduce = 0` 或 `hold_share` 塌缩，而是：
+  - `exit_timeliness_rate_5d` 还没站到 gate 内
+  - `cash_timing_quality_1d` 仍然为负
+- 训练合同或监督结构只要再发生一次结构升级，strict resume 的签名就必须继续显式滚动；本轮固定新增的是 `seq_v3_continuous_dual_channel_r1`

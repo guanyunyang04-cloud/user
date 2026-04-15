@@ -501,6 +501,8 @@ def build_action_labels_for_date(
     labels: list[str] = []
     delta_hints: list[float] = []
     priorities: list[float] = []
+    reduce_fraction_targets: list[float] = []
+    exit_hazard_targets: list[float] = []
     for row in working.itertuples(index=False):
         held = float(getattr(row, "holding_flag", 0.0) or 0.0) > 0.5
         in_pool = float(getattr(row, "in_pool", 0.0) or 0.0) > 0.5
@@ -648,14 +650,69 @@ def build_action_labels_for_date(
             priority = 0.0
         if action == "exit":
             priority = 0.0
+
+        sell_pressure = float(
+            np.clip(
+                0.38 * max(reduce_quality, 0.0)
+                + 0.24 * max(urgency_value, 0.0)
+                + 0.10 * max(-signal, 0.0)
+                + 0.10 * max(signal_decay_value, 0.0)
+                + 0.08 * max(market_downside_value, 0.0)
+                + 0.10 * max(-drawdown - 0.04, 0.0)
+                - 0.12 * max(hold_quality, 0.0)
+                - 0.05 * max(hold_continuity_value, 0.0),
+                0.0,
+                1.0,
+            )
+        )
+        exit_pressure = float(
+            np.clip(
+                0.52 * max(urgency_value, 0.0)
+                + 0.14 * max(signal_decay_value, 0.0)
+                + 0.14 * max(market_downside_value, 0.0)
+                + 0.10 * max(-drawdown - 0.05, 0.0)
+                + 0.10 * max(-signal, 0.0)
+                - 0.12 * max(hold_quality, 0.0)
+                - 0.06 * max(hold_continuity_value, 0.0),
+                0.0,
+                1.0,
+            )
+        )
+        delta_fraction = 0.0
+        if held:
+            denominator = max(current_weight, 0.04)
+            delta_fraction = float(np.clip(max(-float(delta_hint), 0.0) / denominator, 0.0, 1.0))
+        if action == "reduce":
+            reduce_fraction_target = float(np.clip(max(delta_fraction, 0.12 + sell_pressure * 0.88), 0.12, 0.96))
+            exit_hazard_target = float(
+                np.clip(
+                    exit_pressure * 0.55
+                    + (0.08 if signal_decay_value > 0.08 or market_downside_value > 0.20 else 0.0),
+                    0.0,
+                    0.82,
+                )
+            )
+        elif action == "exit":
+            reduce_fraction_target = 1.0 if held else 0.0
+            exit_hazard_target = float(np.clip(max(0.82, exit_pressure), 0.0, 1.0)) if held else 0.0
+        elif held and action in {"hold", "add"}:
+            reduce_fraction_target = float(np.clip(sell_pressure * (0.10 if action == "add" else 0.16), 0.0, 0.28))
+            exit_hazard_target = float(np.clip(exit_pressure * (0.08 if action == "add" else 0.14), 0.0, 0.24))
+        else:
+            reduce_fraction_target = 0.0
+            exit_hazard_target = 0.0
         labels.append(action)
         delta_hints.append(float(delta_hint))
         priorities.append(float(priority))
+        reduce_fraction_targets.append(float(reduce_fraction_target))
+        exit_hazard_targets.append(float(exit_hazard_target))
 
     working["action_label"] = labels
     working["target_delta_hint"] = delta_hints
     working["teacher_priority"] = priorities
     working["exit_urgency"] = working["teacher_urgency"].clip(lower=0.0)
+    working["reduce_fraction_target"] = reduce_fraction_targets
+    working["exit_hazard_target"] = exit_hazard_targets
     working["label_preset"] = config.name
     numeric_output_columns = (
         "teacher_edge",
@@ -671,6 +728,8 @@ def build_action_labels_for_date(
         "target_delta_hint",
         "teacher_priority",
         "exit_urgency",
+        "reduce_fraction_target",
+        "exit_hazard_target",
     )
     for column in numeric_output_columns:
         working[column] = working[column].astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -698,6 +757,13 @@ def build_teacher_global_targets(
     cash_regime_pressure = float(label_frame.get("cash_regime_pressure", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
     reduce_reversal_pressure = float(label_frame.get("reduce_reversal_pressure", pd.Series([0.0])).astype(float).iloc[0]) if not label_frame.empty else 0.0
     hold_share = float((label_frame["action_label"] == "hold").mean()) if len(label_frame) else 0.0
+    avg_reduce_fraction_target = (
+        float(label_frame.get("reduce_fraction_target", pd.Series([0.0])).astype(float).mean()) if not label_frame.empty else 0.0
+    )
+    avg_exit_hazard_target = (
+        float(label_frame.get("exit_hazard_target", pd.Series([0.0])).astype(float).mean()) if not label_frame.empty else 0.0
+    )
+    sell_pressure_target = float(np.clip(0.55 * avg_reduce_fraction_target + 0.45 * avg_exit_hazard_target, 0.0, 1.0))
     defensive_market = (
         0.55 * max(-benchmark_trend_gap, 0.0)
         + 0.25 * max(benchmark_vol_ratio, 0.0)
@@ -718,7 +784,7 @@ def build_teacher_global_targets(
     )
     gross_target = float(
         np.clip(
-            gross_target - float(config.defensive_cash_bias) - cash_regime * 0.24,
+            gross_target - float(config.defensive_cash_bias) - cash_regime * 0.24 - sell_pressure_target * 0.18 - avg_exit_hazard_target * 0.06,
             0.12,
             float(config.max_gross_target),
         )
@@ -742,7 +808,12 @@ def build_teacher_global_targets(
     )
     turnover_budget = float(
         np.clip(
-            turnover_budget - cash_regime * 0.18 - recent_reversal_rate_20d * 0.10 + min((reduces + exits) * 0.01, 0.06),
+            turnover_budget
+            - cash_regime * 0.18
+            - recent_reversal_rate_20d * 0.10
+            + min((reduces + exits) * 0.01, 0.06)
+            + sell_pressure_target * 0.10
+            + avg_exit_hazard_target * 0.05,
             0.08,
             float(config.max_turnover_budget),
         )
@@ -757,7 +828,12 @@ def build_teacher_global_targets(
     candidate_budget = int(np.clip(round(candidate_budget - cash_regime * 4.0), 2, 12))
     max_position_weight_target = float(
         np.clip(
-            0.10 + concentration_signal * 0.025 + max(avg_duration_days - 3.0, 0.0) * 0.002 - cash_regime * 0.04 - recent_reversal_rate_20d * 0.03,
+            0.10
+            + concentration_signal * 0.025
+            + max(avg_duration_days - 3.0, 0.0) * 0.002
+            - cash_regime * 0.04
+            - recent_reversal_rate_20d * 0.03
+            - sell_pressure_target * 0.03,
             0.08,
             0.26,
         )
@@ -769,6 +845,8 @@ def build_teacher_global_targets(
             + hold_share * 0.16
             - market_downside_pressure * 0.05
             - recent_reversal_rate_20d * 0.05
+            - sell_pressure_target * 0.18
+            - avg_exit_hazard_target * 0.06
             + max(0.0, 0.18 - reduce_reversal_pressure) * 0.10,
             0.12,
             0.92,
@@ -794,6 +872,8 @@ def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
     policy["add_quality"] = working["add_quality"].astype(float)
     policy["reduce_quality"] = working["reduce_quality"].astype(float)
     policy["reentry_readiness"] = working["reentry_readiness"].astype(float)
+    policy["reduce_fraction"] = working.get("reduce_fraction_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
+    policy["exit_hazard"] = working.get("exit_hazard_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["planned_holding_days"] = working["planned_holding_days"].astype(float)
     policy["planned_holding_bucket"] = working["planned_holding_bucket"].astype(str)
     policy["hold_boost"] = np.where(

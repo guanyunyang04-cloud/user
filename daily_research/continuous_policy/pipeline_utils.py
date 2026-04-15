@@ -38,6 +38,8 @@ SAMPLE_LABEL_COLUMNS = {
     "reduce_quality",
     "reentry_readiness",
     "planned_holding_days",
+    "reduce_fraction_target",
+    "exit_hazard_target",
     "label_preset",
 }
 NON_FEATURE_COLUMNS = {"date", "stock", *SAMPLE_LABEL_COLUMNS}
