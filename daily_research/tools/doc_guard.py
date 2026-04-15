@@ -199,6 +199,7 @@ DOCUMENT_REDIRECTS = {
 }
 
 ALLOWED_EXTERNAL_DOCS = {
+    "daily_research/README.md",
     "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",
     "daily_stock_analysis-main/CLAUDE.md",
@@ -224,6 +225,21 @@ REQUIRED_DOC_SNIPPETS = {
 }
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
+MOJIBAKE_TOKENS = (
+    "銆",
+    "锛",
+    "€",
+    "identity銆",
+    "state銆",
+    "knowledge銆",
+    "operations銆",
+    "governance锛",
+    "鏃犵姸鎬",
+    "鍏堟帴",
+    "澶ц剳",
+    "韬唤",
+    "body 鍦板浘",
+)
 
 
 def _read_text(path: Path) -> str:
@@ -325,6 +341,17 @@ def _suspicious_question_lines(lines: Iterable[str]) -> list[str]:
         if stripped.startswith("```"):
             continue
         if "?" in line:
+            out.append(line)
+    return out
+
+
+def _suspicious_mojibake_lines(lines: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("```"):
+            continue
+        if any(token in line for token in MOJIBAKE_TOKENS):
             out.append(line)
     return out
 
@@ -669,17 +696,21 @@ def cmd_check(args: argparse.Namespace) -> int:
         replacement_count = text.count("\ufffd")
         tail = _tail_lines(text, args.tail_lines)
         tail_question_lines = _suspicious_question_lines(tail)
+        mojibake_lines = _suspicious_mojibake_lines(lines)
         rule = _resolve_rule(path)
 
         print(f"[check] {path}")
         print(f"  line_count={line_count}")
         print(f"  replacement_char_count={replacement_count}")
         print(f"  suspicious_question_lines_in_tail={len(tail_question_lines)}")
+        print(f"  suspicious_mojibake_lines={len(mojibake_lines)}")
 
-        if replacement_count or tail_question_lines:
+        if replacement_count or tail_question_lines or mojibake_lines:
             has_issue = True
             for line in tail_question_lines[: args.show_lines]:
                 print(f"    ? {line}")
+            for line in mojibake_lines[: args.show_lines]:
+                print(f"    ! {line}")
 
         if rule and rule.warn_lines is not None and line_count > rule.warn_lines:
             print(f"  structural_warning=line_count_exceeds_warning ({line_count} > {rule.warn_lines})")

@@ -390,6 +390,7 @@ class PortfolioState:
         desired_strength = pd.Series(0.0, index=prices.index, dtype=float)
         forced_zero = pd.Series(False, index=prices.index, dtype=bool)
         protected_floor = pd.Series(0.0, index=prices.index, dtype=float)
+        weak_tail_zero_candidate = pd.Series(False, index=prices.index, dtype=bool)
         for stock in prices.index:
             action = str(policy.at[stock, "action_label"] or "skip").strip().lower()
             strength = float(policy.at[stock, "action_strength"] or 0.0)
@@ -402,8 +403,22 @@ class PortfolioState:
             exit_urgency = float(policy.at[stock, "exit_urgency"] or 0.0) if "exit_urgency" in policy.columns else 0.0
             planned_holding_days = float(policy.at[stock, "planned_holding_days"] or 0.0) if "planned_holding_days" in policy.columns else 0.0
             current_weight = float(current.get(stock, 0.0))
+            current_hold_days = float(self.holdings.get(stock).hold_days) if stock in self.holdings else 0.0
             days_since_last_sell = _days_since(self.last_sell_dates, stock)
             days_since_last_reduce = _days_since(self.last_reduce_dates, stock)
+            weak_tail_zero_candidate.at[stock] = bool(
+                current_weight > 1e-8
+                and current_hold_days >= 6.0
+                and action in {"hold", "reduce", "skip"}
+                and (
+                    exit_urgency >= 0.22 + exit_patience_target * 0.08
+                    or (
+                        reduce_quality >= hold_quality + 0.02
+                        and delta_hint <= max(0.02, hold_boost + 0.01)
+                    )
+                )
+                and add_quality <= hold_quality + 0.03
+            )
             if action == "exit":
                 forced_zero.at[stock] = True
                 continue
@@ -480,9 +495,14 @@ class PortfolioState:
                 continue
             desired_strength.at[stock] = current_weight * (1.0 + hold_bias_target * 0.02)
 
+        budget_dropped = pd.Series(False, index=prices.index, dtype=bool)
         if candidate_budget < len(desired_strength):
             keep = desired_strength.nlargest(candidate_budget).index
+            budget_dropped = ~desired_strength.index.isin(keep)
             desired_strength = desired_strength.where(desired_strength.index.isin(keep), 0.0)
+            dropped_tail_zero = budget_dropped & weak_tail_zero_candidate
+            forced_zero = forced_zero | dropped_tail_zero
+            protected_floor = protected_floor.where(~dropped_tail_zero, 0.0)
         desired_strength = desired_strength.where(~forced_zero, 0.0)
 
         target_weights = self._allocate_with_cap(
@@ -506,7 +526,21 @@ class PortfolioState:
         delta = target_weights - current
         raw_turnover = float(delta.abs().sum())
         if raw_turnover > turnover_budget > 0:
-            delta = delta * (turnover_budget / raw_turnover)
+            forced_sell_delta = (-delta.where((forced_zero) & (delta < 0.0), 0.0)).clip(lower=0.0)
+            forced_sell_turnover = float(forced_sell_delta.sum())
+            if forced_sell_turnover >= turnover_budget > 0:
+                delta = -forced_sell_delta / forced_sell_turnover * turnover_budget
+            else:
+                remaining_budget = float(max(turnover_budget - forced_sell_turnover, 0.0))
+                residual_delta = delta.where(~((forced_zero) & (delta < 0.0)), 0.0)
+                residual_turnover = float(residual_delta.abs().sum())
+                if residual_turnover > remaining_budget > 0:
+                    residual_delta = residual_delta * (remaining_budget / residual_turnover)
+                elif remaining_budget <= 0:
+                    residual_delta = residual_delta * 0.0
+                delta = residual_delta
+                if forced_sell_turnover > 0:
+                    delta = delta.where(~((forced_zero) & (forced_sell_delta > 0.0)), -forced_sell_delta)
         new_weights = (current + delta).clip(lower=0.0)
         if float(new_weights.sum()) > 0.999:
             new_weights = new_weights / float(new_weights.sum())
@@ -714,6 +748,8 @@ class PortfolioState:
             "realized_turnover": realized_turnover,
             "buy_turnover": buy_turnover,
             "sell_turnover": sell_turnover,
+            "forced_zero_count": int(forced_zero.sum()),
+            "budget_drop_count": int(budget_dropped.sum()),
             "cash_weight": float(self.cash_weight),
             "holding_count": int(sum(1 for value in self.holdings.values() if value.weight > 1e-8)),
         }

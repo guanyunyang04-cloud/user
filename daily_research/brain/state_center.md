@@ -410,3 +410,51 @@
   - `hold_share` 不再是 capped 全A第一瓶颈
   - 下一优先级继续锁定 `exit` 形成与 `cash timing`
 - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部回切到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-15 项目维护更新
+- 本轮项目级整理已完成一轮可执行收口：
+  - `python -m compileall -q daily_research`
+  - `project_consistency_check.py`
+  - `doc_guard.py check`
+  均已通过
+- 项目当前结构状态同步更新为：
+  - `daily_research/README.md` 已建立为人工接管入口
+  - `daily_research/environment.yml` 已显式补齐 `pydantic`
+  - `brain/brain_manifest.json` 与各子脑 `brain_manifest.json` 的 UTF-8 乱码已修复
+  - 主脑 manifest 行数已从告警态压回到守卫阈值内
+- 当前维护结论：
+  - 代码层没有新增一致性失败
+  - 文档层当前最需要持续保持的是 manifest UTF-8 正常、README 与 brain 口径同步、守卫对乱码持续生效
+
+## 2026-04-15 planner 收敛
+- 截至 `2026-04-15`，当前最优研究顺序已进一步收敛为：
+  - 冻结 capped 全A主线基线为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+  - `cp_v3_seq_holdcash_r1` 继续只作为 strongest temporal 默认锚点，不回退成研究主线
+- 当前关键分歧已经更清楚：
+  - `formal_r5` 的优势是 `hold_share / reduce_success_rate_5d / immediate_reversal_rate_3d / avg_gross_exposure`
+  - `cp_v3_seq_holdcash_r1` 的优势是 `exit_timeliness_rate_5d`
+  - teacher 侧 `cash_timing_quality_1d` 仍为负，因此 `cash timing` 不能只靠 teacher imitation 解决
+- 因此下一优先级固定为：
+  - 先修 `formal_r5` 的 `exit` 形成
+  - 再单独修 `cash / gross / turnover` 预算头
+  - 暂不扩 `max_universe_size`
+  - 暂不把 depth / hier_v4 升成主线
+
+## 2026-04-15 formal_r6 更新
+- 最新执行完成的 capped 全A formal protocol 是 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r6`，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 34440`
+  - `best_epoch = 43 / 48`
+- `formal_r6` 相比 `formal_r5` 的关键变化是：
+  - `annual_return: 0.9652 -> 1.7010`
+  - `hold_share: 0.4726 -> 0.5216`
+  - `exit_timeliness_rate_5d: 0.0 -> 1.0`
+  - `immediate_reversal_rate_3d: 0.1965 -> 0.0181`
+  - 但 `reduce_success_rate_5d: 0.3889 -> 0.0`
+  - `cash_timing_quality_1d: -0.1415 -> -0.3172`
+  - `avg_gross_exposure: 0.5089 -> 0.9234`
+- 当前主线收敛口径更新为：
+  - `formal_r6` 已证明“turnover ramp + weak-tail exit release”能把 `exit` 从饥饿状态里抬出来
+  - 但它同时把 `reduce` 挤没，并把暴露推得过高，所以暂不取代 `formal_r5` 作为 capped 全A的 balanced repair baseline
+  - `formal_r5` 继续保留为当前更平衡的 capped 全A修补基线；`formal_r6` 作为 exit-lift proof challenger 保留
+  - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已再次回切到它

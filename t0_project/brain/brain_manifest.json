@@ -116,6 +116,6 @@
       "reinforcement_learning",
       "gateway"
     ],
-    "principle": "Attach to the brain first, then read identity、state、knowledge、operations、governance，再进入 strategy、monitor、execution、RL 或 gateway."
+    "principle": "Attach to the brain first, then read identity, state, knowledge, operations, governance, then enter strategy, monitoring, execution, reinforcement learning, or gateway."
   }
 }

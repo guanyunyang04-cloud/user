@@ -13482,7 +13482,7 @@ position,000001.SZ,1200,12.38,
   - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 challenger 接管
 
-## 2026-04-15 planner 视角收敛
+## 2026-04-15 planner 视角收敛（formal_r4 阶段）
 - 触发：
   - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
 - 动作前自检：
@@ -13616,3 +13616,226 @@ position,000001.SZ,1200,12.38,
 - 治理收口：
   - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 challenger 接管
+
+## 2026-04-15 项目级审阅整理修复
+- 触发：
+  - 用户要求以严谨、统一、清晰的方式系统审阅、整理、维护并修复整个项目，并要求把能完成的部分一次性交付
+- 动作前自检：
+  - 事实：
+    - `daily_research` 当前已有稳定 brain 与守卫体系
+    - `project_consistency_check.py`、`doc_guard.py`、`compileall` 都是现成可执行体检入口
+    - 主脑与子脑 manifest 是跨项目 handoff 的共享契约
+  - 推断：
+    - 本轮最高 ROI 的项目级修补不在策略行为本身，而在编码一致性、依赖声明、入口文档与守卫完备性
+  - 假设：
+    - 如果先把项目结构与治理地基补稳，后续任何策略迭代和多项目接管都会更稳定
+- 结构审阅：
+  - 盘点确认 `daily_research` 主要由 `baseline / continuous_policy / deep_alpha / execution / tools / brain / output / archive` 组成
+  - `daily_research` 缺少顶层人工说明入口，只有 archive README，人工接管成本偏高
+- 依赖审阅：
+  - 静态导入确认 `daily_research/execution/web_models.py` 直接使用 `pydantic`
+  - `daily_research/environment.yml` 之前未显式声明 `pydantic`
+  - `t0_project/tqcenter.py` 仍是工作区本地依赖，这一点已在既有 brain 中存在事实依据
+- 一致性审阅：
+  - 主脑 `brain/brain_manifest.json` 与多个子脑 `brain_manifest.json` 存在 UTF-8 mojibake 文本
+  - 原 `doc_guard.py` 只查 replacement char 和尾部问号，无法拦截这类乱码
+  - 主脑 manifest 还存在 `line_count_exceeds_warning (212 > 200)` 的结构告警
+- 实施：
+  - 在 `daily_research/tools/doc_guard.py` 新增常见 mojibake token 检查
+  - 新增 `daily_research/README.md`，统一项目入口、模块边界、环境前置与验证命令
+  - 在 `daily_research/environment.yml` 显式补齐 `pydantic`
+  - 重写主脑与三个子脑 `brain_manifest.json`，修复 handoff contract 乱码并保持语义不漂移
+  - 顺手将主脑 manifest 压缩整理到守卫警戒线以内
+- 验证：
+  - `python -m compileall -q daily_research` 通过
+  - `project_consistency_check.py` 通过
+  - `doc_guard.py check` 通过
+  - 主脑 manifest 校验结果更新为：
+    - `line_count = 113`
+    - `manifest_semantic_issues = 0`
+    - `suspicious_mojibake_lines = 0`
+- 动作后复盘：
+  - 事实：
+    - 本轮修补没有改策略训练逻辑、评估口径或默认 strongest temporal 指针
+    - 项目级入口、依赖声明、manifest 语义和文档守卫都更完整了
+  - 推断：
+    - 这轮修的是“维护可持续性”，不是“策略主线方向”
+    - 之后再做模型或 protocol 研究时，接管成本和误判成本都会更低
+  - 假设：
+    - 只要后续继续沿同一守卫口径写回，manifest 乱码和环境声明漂移这两类问题应能显著减少
+
+## 2026-04-15 planner 视角收敛（formal_r5 阶段）
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进任务：先发散设想可能路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - 当前 capped 全A最新 challenger 是 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+    - `formal_r5` 已把 `hold_share` 提到 `0.4726`，并把 `immediate_reversal_rate_3d` 压到 `0.1965`
+    - 但 `formal_r5` 仍失败在 `reduce_success_rate_5d = 0.3889`、`exit_timeliness_rate_5d = 0.0`、`cash_timing_quality_1d = -0.1415`
+    - 默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - `cp_v3_seq_holdcash_r1` 的 `exit_timeliness_rate_5d = 0.8333`，但它的 `cash_timing_quality_1d = -0.4564`、`immediate_reversal_rate_3d = 0.5357`、`avg_gross_exposure = 0.1695`
+    - teacher recomputed 在 `formal_r5` 上的 `exit_timeliness_rate_5d = 0.8556`，但 `cash_timing_quality_1d = -0.4053`
+  - 推断：
+    - 当前最值得“借”的不是锚点的整体配置，而是它的 `exit` 形成能力
+    - `cash timing` 不能简单靠 teacher imitation 解决，因为 teacher 自己在这个指标上也是负的
+    - 最高 ROI 顺序不是扩 `universe`、不是加深网络，而是先把 `formal_r5` 的 `exit` 与 `cash` 拆开修
+  - 假设：
+    - 如果把 `exit` 形成从 `0.0` 抬起，同时不破坏 `formal_r5` 现有的 `hold_share / reversal / exposure`，capped 全A主线才有机会真正跨过 promotion gate
+- 发散路径：
+  - 路径 A：继续沿 `formal_r5` 做最小 repair，优先修 `exit` 形成，再修 `cash` 预算头
+  - 路径 B：回退到 `cp_v3_seq_holdcash_r1` 的行为风格，尝试把锚点的 `exit` 能力整套搬回 capped 全A
+  - 路径 C：继续做 teacher 连续化，把 `target_delta_weight / expected_holding_days / soft sparsity` 推成新监督主线
+  - 路径 D：继续加深 `seq_v3` 或让 `hier_v4` 接主线
+  - 路径 E：继续扩 `max_universe_size`，逼近更完整全A
+- 收敛判断：
+  - 路径 A 是当前主线
+  - 路径 B 只应做“局部移植”，不能整体回退到锚点风格
+  - 路径 C 是中期升级线，但不应抢当前主线
+  - 路径 D 继续只保留 side challenger 地位
+  - 路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结当前主线基线为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+    - 不扩 `max_universe_size`
+    - 不切换 backbone
+    - 不让 depth / hier_v4 接主线
+  - `P1`：先做 `exit` 形成的定向归因
+    - 核心问题不是“模型整体不会卖”，而是 capped 全A主线几乎没学出有效 `exit`
+    - 重点应查清三件事：
+      - teacher 想 `exit` 而模型继续 `hold/add` 的样本簇
+      - `formal_r5` 的 `exit` 是否被 held-path / decoder 分界吞掉
+      - execution / allocation 是否仍在个别场景把 `exit` 吃回 `reduce/hold`
+  - `P2`：把 `cash timing` 从 teacher imitation 中拆开，单独处理
+    - 因为 teacher 自己的 `cash_timing_quality_1d` 仍为负，不能再把“更像 teacher”当成 `cash timing` 的唯一目标
+    - 下一轮应把 `gross_exposure_target / turnover_budget / hold_bias_target` 的预算头单独审视
+    - 目标是修“现金时点”，而不是盲目抬高现金
+  - `P3`：只做最小 repair，顺序固定为：
+    - `exit formation`
+    - `cash / gross / turnover` 预算头
+    - `reduce boundary`
+    - 同时显式保住：
+      - `hold_share >= 0.40`
+      - `avg_gross_exposure` 不重新塌回锚点级别
+      - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：按同协议重跑下一轮 formal
+    - 只有当：
+      - `exit_timeliness_rate_5d` 从 `0.0` 实质抬起
+      - `reduce_success_rate_5d` 继续改善
+      - `cash_timing_quality_1d` 继续向 `0` 靠近
+      - `hold_share` 与 `avg_gross_exposure` 不回撤
+      才算主线进入下一阶段
+  - `P5`：teacher 连续化继续作为中期支线准备
+    - 先设计 hybrid supervision
+    - 不在当前主线上直接替换
+  - `P6`：depth / hier_v4 与更大全A继续后置
+    - 只有当 `formal_r5` 系列把 `exit / cash` 修稳后仍明显卡上限，才提高优先级
+- 动作后复盘：
+  - 当前最优顺序已经进一步明确成：
+    - 先保住 `formal_r5` 的连续性优势
+    - 再把锚点的 `exit` 能力做局部移植
+    - 最后才讨论 teacher 连续化、深网络和更大全A
+  - 这次收敛避免了两条低 ROI 路径：
+    - 为了追 `exit` 而整体回退到高现金、低暴露、高手续的锚点风格
+    - 在 `cash timing` 还没拆清之前，过早把问题放大到更深网络或更大 `universe`
+
+## 2026-04-15 formal_r6 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 是当前 capped 全A主线的平衡基线
+    - `formal_r5` 的硬缺口是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 最小变量集合应优先锁定在 inference / execution 形成机制，而不是重开 teacher 或扩 `universe`
+    - 当前最值得同时修的两处，是高现金阶段的 `turnover_budget` 爬坡，以及被 candidate budget 淘汰的弱尾仓退出释放
+  - 假设：
+    - 如果只在这两处做最小 repair，就能先回答“exit 饥饿是不是能被解开”，再决定是否值得继续推进更大改动
+- 归因补全：
+  - `formal_r5` 的 same-state teacher 对模型当前真实持仓并不想做大面积 `exit`
+  - 真正更硬的问题是：
+    - 高现金早期 `gross_exposure_target` 已经不低，但 `turnover_budget` 太保守，导致部署明显滞后
+    - candidate budget 淘汰了弱尾仓后，组合层仍会用 protected floor 把一部分仓位留住
+    - 在 turnover 受限时，forced zero 卖出也会被和其他 delta 一起等比例缩小，导致应退出的仓位只变成小幅 `reduce`
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中加入 deployment-gap / cash-pressure 驱动的受控 `turnover_budget` ramp relief
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中加入 weak-tail exit release，并在 turnover 受限时优先兑现 forced zero 卖出
+- 快速复测：
+  - 先复用 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5__train` artifact 做同窗口 quick eval
+  - quick eval 结果说明方向是正的：
+    - `annual_return = 1.1082`
+    - `hold_share = 0.4620`
+    - `exit_timeliness_rate_5d = 0.25`
+    - `avg_gross_exposure = 0.5277`
+    - 但 `cash_timing_quality_1d = -0.1449` 仍未转正
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r6`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 34440`
+    - `best_epoch = 43 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 1.7010`
+    - `sharpe = 4.5815`
+    - `avg_gross_exposure = 0.9234`
+    - `hold_share = 0.5216`
+    - `reduce_success_rate_5d = 0.0`
+    - `exit_timeliness_rate_5d = 1.0`
+    - `cash_timing_quality_1d = -0.3172`
+    - `immediate_reversal_rate_3d = 0.0181`
+  - 相比 `formal_r5`：
+    - `annual_return: 0.9652 -> 1.7010`
+    - `hold_share: 0.4726 -> 0.5216`
+    - `exit_timeliness_rate_5d: 0.0 -> 1.0`
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.0181`
+    - 但 `reduce_success_rate_5d: 0.3889 -> 0.0`
+    - `cash_timing_quality_1d: -0.1415 -> -0.3172`
+    - `avg_gross_exposure: 0.5089 -> 0.9234`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项收口为 `reduce_success_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - 这轮补丁已经证明 `exit` 饥饿不是无解，`formal_r6` 的 `exit_timeliness_rate_5d` 已从 `0.0` 抬到 `1.0`
+    - 但它同时把 `reduce` 挤没，并明显推高了组合暴露
+  - 推断：
+    - `formal_r6` 更像 exit-lift proof branch，而不是新的平衡主线
+    - capped 全A主线下一轮的真正目标，不再是“继续找 exit”，而是“在保住 `formal_r6` 的 exit 能力前提下，把 `reduce` 选择性和 `cash / gross / turnover` 节制补回来”
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是 `reduce` 再引入与 gross / turnover moderation，而不是再一次扩大 risk-on 爬坡力度
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r6` 静默接管
+
+## 2026-04-15 planner 视角收敛（formal_r6 阶段）
+- 触发：
+  - 用户要求按既定计划直接执行并完整交付后，收口当前阶段的真实结论
+- 动作前自检：
+  - 事实：
+    - `formal_r6` 已证明 `exit` 可以被抬起来
+    - `formal_r6` 同时暴露出 `reduce` 消失与 gross 过高的新问题
+    - `formal_r5` 仍保留更平衡的 `reduce / hold / exposure` 结构
+  - 推断：
+    - 当前最优研究顺序已经不再是“继续追 exit”，而是把 `formal_r5` 与 `formal_r6` 的长处做有约束的合流
+  - 假设：
+    - 只要下一轮能保住 `exit_timeliness_rate_5d > 0`，同时恢复非零 `reduce_success_rate_5d` 并把 `cash_timing_quality_1d` 拉回 `formal_r5` 水平附近，capped 全A主线就会更接近真正可比较状态
+- 收敛判断：
+  - `formal_r5` 保留为 balanced repair baseline
+  - `formal_r6` 保留为 exit-lift proof challenger
+  - `cp_v3_seq_holdcash_r1` 继续只做默认 strongest temporal 锚点，不回退成 capped 全A的研究主线
+- 优先级：
+  - `P0`：冻结 capped 全A下一轮起点为 “`formal_r5` 基线 + `formal_r6` 的 exit 证据”，不扩 `max_universe_size`
+  - `P1`：优先把 `reduce` 选择性补回来，避免 `exit` 抬起后把所有 sell-side 行为都挤成 `exit`
+  - `P2`：同步给 `gross / turnover / cash` 预算头加回节制，目标是压住 `avg_gross_exposure`，而不是重新打回高现金
+  - `P3`：继续显式保住：
+    - `hold_share >= 0.40`
+    - `exit_timeliness_rate_5d > 0`
+    - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：暂不扩 `universe`，暂不让 depth / hier_v4 接主线，暂不把 teacher 连续化提前到当前主线实现
+- 动作后复盘：
+  - 当前阶段最优顺序已经更新为：
+    - 先做 `reduce` 再引入与 `gross / turnover / cash` moderation
+    - 再观察是否能把 `formal_r5` 和 `formal_r6` 合流成新的平衡 challenger
+    - 最后才讨论 teacher 连续化、深时序 backbone 或更大全A

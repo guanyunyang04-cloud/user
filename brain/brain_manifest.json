@@ -2,15 +2,7 @@
   "brain_type": "main",
   "brain_version": "2026-04-13",
   "entrypoint": "brain/identity_layer.md",
-  "read_order": [
-    "brain/identity_layer.md",
-    "brain/state_center.md",
-    "brain/knowledge_center.md",
-    "brain/master_brain.md",
-    "brain/brain_architecture.md",
-    "brain/operations_center.md",
-    "brain/governance_layer.md"
-  ],
+  "read_order": ["brain/identity_layer.md", "brain/state_center.md", "brain/knowledge_center.md", "brain/master_brain.md", "brain/brain_architecture.md", "brain/operations_center.md", "brain/governance_layer.md"],
   "identity_path": "brain/identity_layer.md",
   "state_path": "brain/state_center.md",
   "knowledge_path": "brain/knowledge_center.md",
@@ -24,138 +16,55 @@
   "cognition_contract": {
     "core_principle": "Agent 无状态，项目大脑有状态。",
     "architecture_style": "lean_shared_main_brain_kernel_with_regional_sub_brains",
-    "layers": [
-      "identity",
-      "memory",
-      "cognition",
-      "decision",
-      "execution",
-      "governance"
-    ],
+    "layers": ["identity", "memory", "cognition", "decision", "execution", "governance"],
     "regional_model": [
       {
         "id": "orientation_system",
         "function": "完成身份定向、当前状态定位和结构定位。",
-        "modules": [
-          "identity_layer",
-          "state_center",
-          "brain_architecture"
-        ]
+        "modules": ["identity_layer", "state_center", "brain_architecture"]
       },
       {
         "id": "long_term_memory",
         "function": "沉淀稳定事实、硬规则和可复用教训。",
-        "modules": [
-          "knowledge_center"
-        ]
+        "modules": ["knowledge_center"]
       },
       {
         "id": "executive_control",
         "function": "给出当前优先级、治理闭环和执行边界。",
-        "modules": [
-          "state_center",
-          "governance_layer"
-        ]
+        "modules": ["state_center", "governance_layer"]
       },
       {
         "id": "sensorimotor_loop",
         "function": "定义 body 地图、环境基线、命令入口和操作流程。",
-        "modules": [
-          "operations_center"
-        ]
+        "modules": ["operations_center"]
       },
       {
         "id": "experience_buffer",
         "function": "保存时间顺序证据，按需下钻。",
-        "modules": [
-          "episodic_memory"
-        ]
+        "modules": ["episodic_memory"]
       }
     ],
-    "required_preflight": [
-      "goal_alignment",
-      "rule_conflict",
-      "lesson_check",
-      "dependency_integrity"
-    ],
-    "post_task_writeback": [
-      "state",
-      "knowledge",
-      "next_action",
-      "governance"
-    ]
+    "required_preflight": ["goal_alignment", "rule_conflict", "lesson_check", "dependency_integrity"],
+    "post_task_writeback": ["state", "knowledge", "next_action", "governance"]
   },
   "shared_regional_brain_contract": {
     "contract_source": "brain/brain_architecture.md",
     "derive_read_order_from_modules": true,
-    "default_module_order": [
-      "identity_layer",
-      "state_center",
-      "knowledge_center",
-      "brain_architecture",
-      "operations_center",
-      "governance_layer",
-      "episodic_memory"
-    ],
-    "required_modules": [
-      "identity_layer",
-      "state_center",
-      "knowledge_center",
-      "brain_architecture",
-      "operations_center",
-      "governance_layer",
-      "episodic_memory"
-    ],
+    "default_module_order": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
+    "required_modules": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
     "optional_modules": [],
-    "fast_handoff_modules": [
-      "identity_layer",
-      "state_center",
-      "knowledge_center",
-      "operations_center"
-    ],
+    "fast_handoff_modules": ["identity_layer", "state_center", "knowledge_center", "operations_center"],
     "region_bindings": {
-      "orientation_system": [
-        "identity_layer",
-        "state_center",
-        "brain_architecture"
-      ],
-      "long_term_memory": [
-        "knowledge_center"
-      ],
-      "executive_control": [
-        "state_center",
-        "governance_layer"
-      ],
-      "sensorimotor_loop": [
-        "operations_center"
-      ],
-      "experience_buffer": [
-        "episodic_memory"
-      ]
+      "orientation_system": ["identity_layer", "state_center", "brain_architecture"],
+      "long_term_memory": ["knowledge_center"],
+      "executive_control": ["state_center", "governance_layer"],
+      "sensorimotor_loop": ["operations_center"],
+      "experience_buffer": ["episodic_memory"]
     }
   },
   "brain_contract": {
-    "required_sub_brain_keys": [
-      "brain_type",
-      "brain_id",
-      "parent_brain",
-      "attach_status",
-      "entrypoint",
-      "body_root",
-      "shared_contract_source",
-      "regional_specialization",
-      "write_routes",
-      "body_map",
-      "modules",
-      "handoff_contract"
-    ],
-    "recommended_sub_brain_keys": [
-      "identity_path",
-      "state_path",
-      "knowledge_path",
-      "operations_path",
-      "governance_path"
-    ]
+    "required_sub_brain_keys": ["brain_type", "brain_id", "parent_brain", "attach_status", "entrypoint", "body_root", "shared_contract_source", "regional_specialization", "write_routes", "body_map", "modules", "handoff_contract"],
+    "recommended_sub_brain_keys": ["identity_path", "state_path", "knowledge_path", "operations_path", "governance_path"]
   },
   "child_brains": [
     {
@@ -198,15 +107,7 @@
     "workspace_governance": "brain/governance_layer.md"
   },
   "handoff_contract": {
-    "agent_boot_order": [
-      "brain/brain_manifest.json",
-      "brain/identity_layer.md",
-      "brain/state_center.md",
-      "brain/knowledge_center.md",
-      "<child>/brain/brain_manifest.json",
-      "<child>/brain files derived from brain/brain_manifest.json#shared_regional_brain_contract",
-      "<child>/brain/episodic_memory.md if evidence is needed"
-    ],
+    "agent_boot_order": ["brain/brain_manifest.json", "brain/identity_layer.md", "brain/state_center.md", "brain/knowledge_center.md", "<child>/brain/brain_manifest.json", "<child>/brain files derived from brain/brain_manifest.json#shared_regional_brain_contract", "<child>/brain/episodic_memory.md if evidence is needed"],
     "principle": "Agents should attach to brains first, resolve the minimal centers, then enter body modules through the declared body_map."
   }
 }

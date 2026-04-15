@@ -120,6 +120,6 @@
       "tools",
       "artifacts"
     ],
-    "principle": "先接入分脑，再读取 identity、state、knowledge、operations、governance，最后进入 strongest-model、learned-control 与 live 所需 body。"
+    "principle": "先接入分脑，再读 identity、state、knowledge、operations、governance，最后进入 strongest-model、learned-control 与 live 所需 body。"
   }
 }

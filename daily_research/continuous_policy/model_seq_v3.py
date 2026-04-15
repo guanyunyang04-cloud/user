@@ -712,6 +712,44 @@ def predict_policy_v3(
     cash_regime_pressure = state_frame["cash_regime_pressure"].astype(float).to_numpy(dtype=float) if "cash_regime_pressure" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     hold_continuity_pressure = state_frame["hold_continuity_pressure"].astype(float).to_numpy(dtype=float) if "hold_continuity_pressure" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     drawdown_from_peak = state_frame["drawdown_from_peak"].astype(float).to_numpy(dtype=float) if "drawdown_from_peak" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
+    current_gross_exposure = float(np.clip(np.nansum(current_weight), 0.0, 1.0))
+    deployment_gap = float(
+        np.clip(
+            global_targets["gross_exposure_target"] - current_gross_exposure,
+            0.0,
+            1.0,
+        )
+    )
+    cash_pressure_scalar = float(np.clip(np.nanmean(portfolio_cash_pressure), 0.0, 1.0)) if len(portfolio_cash_pressure) else 0.0
+    turnover_ramp_bonus = float(
+        np.clip(
+            max(deployment_gap - 0.06, 0.0) * (0.42 if is_holdcash_v3_decoder else 0.34)
+            + max(cash_pressure_scalar - 0.10, 0.0) * 0.18
+            - reversal_pressure * 0.04,
+            0.0,
+            0.18 if is_holdcash_v3_decoder else 0.14,
+        )
+    )
+    if deployment_gap > 0.12 or cash_pressure_scalar > 0.18:
+        turnover_floor = float(
+            np.clip(
+                0.14
+                + max(deployment_gap - 0.10, 0.0) * 0.40
+                + max(cash_pressure_scalar - 0.14, 0.0) * 0.16,
+                0.14,
+                0.34 if is_holdcash_v3_decoder else 0.30,
+            )
+        )
+        global_targets["turnover_budget"] = float(
+            np.clip(
+                max(
+                    global_targets["turnover_budget"] + turnover_ramp_bonus,
+                    turnover_floor,
+                ),
+                0.08,
+                1.00,
+            )
+        )
     duration_days = np.asarray([HOLDING_DAYS_BY_BUCKET.get(str(label), 0.0) for label in predicted_duration_labels], dtype=float)
     adjusted_labels = predicted_labels.astype(object).copy()
     reduce_bias_target = float(global_targets["reduce_bias_target"])
