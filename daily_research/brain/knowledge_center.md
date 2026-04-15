@@ -21,6 +21,28 @@
 - `formal_torch_hier_v4` 现在已落地为 hierarchical temporal portfolio branch，同样属于 `epoch formal candidate`
 - continuous_policy 正式 protocol 当前支持 `balanced_v2 / swing_v2 / defensive_v2` 三种 lifecycle label preset
 - continuous_policy 正式 protocol 现在也支持 `holdcash_v3 / holdcash_v4 / holdcash_v5` label preset 与 `default_v2 / budget_v3 / holdcash_v3 / reduceexit_v4 / cash_v4 / reduceexit_cash_v4 / holdcash_v5` decoder profile
+- continuous_policy 底层候选域并不受 `liquid500` 架构硬限制：
+  - `prepare_policy_inputs()` 本来就能从 `all_a` 加载全上证+深证 A 股
+  - 过去固定 `liquid500` 主要是正式协议默认值与算力友好约束，而不是模型能力上限
+- continuous_policy 现在已支持显式 `pool_name = all_a / learned_all_a`
+  - 这表示不再使用外生 rolling liquidity membership mask，而是在全A候选域内学习选股 + 执行
+  - 但它仍必须遵守现金、换手、仓位、交易成本与 promotion gate 等治理约束
+- `cp_v3_seq_learned_all_a_smoke_r1` 证明：
+  - `learned_all_a + holdcash_v5` 的第一轮 capped smoke 会把评估侧 `hold_share` 直接打成 `0.0`
+  - 同时 shadow 侧年化 `-0.5546` / Sharpe `-2.3499`，并且 `training_evidence` 仍不足
+  - 所以全A方向的第一个失败点首先是 `holdcash_v5` 这套标签 / decoder 组合，而不是“接口没接通”
+- `cp_v3_seq_learned_all_a_holdcash_v3_r1` 证明：
+  - 在同样的 `learned_all_a + 1200` capped 候选域内，把 `holdcash_v5` 换成 `holdcash_v3` 后，评估侧 `hold_share` 可回到 `0.2532`
+  - `cash_timing_quality_1d` 也可从负值转正到 `0.0598`
+  - 因此 capped 全A方向本身没有被一轮 smoke 直接证伪；真正需要优先修的是标签 / decoder / 状态表征
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 进一步证明：
+  - 当训练窗口扩到 `20240102 -> 20251231`、`48` epoch 且 `training_evidence` 充足后，评估侧 `hold_share` 仍会回落到 `0.0`
+  - shadow 侧虽然年化转正到 `0.2585`，但 `cash_timing_quality_1d = -0.2839`、`immediate_reversal_rate_3d = 0.2857`、`hold_share = 0.0`
+  - 因此当前 capped 全A learned selection 仍只能保留为 `shadow_only` research line，不能进入 universe 扩张或 promotion 讨论
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 进一步证明：
+  - 在不改训练窗口与协议、只修执行层微幅矛盾再平衡口径后，评估侧 `hold_share` 已回到 `0.2809`，`immediate_reversal_rate_3d` 降到 `0.3086`
+  - shadow 侧 `hold_share = 0.5189`、`immediate_reversal_rate_3d = 0.0196`，说明 `hold_share` 塌缩的一部分根因确实在执行层
+  - 但它仍未过正式 gate：`reduce_success_rate_5d = 0.3448`、`cash_timing_quality_1d = -0.1555`，因此仍是 `shadow_only`
 - `formal_liquid500_20260413_r2_swing_v2` 当前是 continuous_policy r2 三预设里收益/Sharpe 最强的 shadow 参考
 - `cp_v3_seq_holdcash_r1` 是当前第一轮强时序 smoke 证据：
   - `hold_share = 0.30`
@@ -35,7 +57,7 @@
   - 长窗 `20240102 -> 20251231` + `48` epoch 后，`training_evidence` 已达正式证据下限
   - 但 `holdcash_v5` 仍把 `hold_share` 打成 `0.0`，并且 `reduce_success_rate_5d = 0.0`
   - 所以当前主问题不能再被解释成“只是训练次数不够/样本不够”
-- `cp_v3_seq_holdcash_r1` 仍是当前 strongest temporal 默认锚点；`latest_*` 指针已从 `v4` repair 实验回切到它
+- `cp_v3_seq_holdcash_r1` 仍是当前 strongest temporal 默认锚点；即使 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 成为新 challenger，`latest_*` 也继续回指它
 - `cp_hier_v4_holdcash_r5` 现在是 `formal_torch_hier_v4` 的最新完整真源：
   - `r3` 暴露的根因是 `state_frame` 行索引丢失真实股票代码，导致 `predict_policy -> portfolio.step` 对票失败
   - 修复后 `r5` 的 formal 评估已不再全现金塌缩，并把 `immediate_reversal_rate_3d` 压到 `0.0883`
@@ -110,11 +132,20 @@
 - lifecycle preset 会形成清晰的行为-收益权衡：`swing_v2` 当前更接近收益最优，`defensive_v2` 当前更接近行为保守，但可能把收益打成负值
 - stronger temporal branch 已证明 `hold_share` 不是永久瓶颈；`cp_v3_seq_holdcash_r1` 已把它抬到 `0.30`
 - 当前 continuous_policy 的主要剩余短板已从 `hold_share` 塌缩收敛到：`reduce` 站错边、`cash_timing_quality_1d` 为负，以及 `early exit / shadow reversal`
+- capped 全A分支的最新稳定认知是：先把执行层微幅再平衡与个股动作意图区分开，再在这个基线上修 `reduce / cash`，不要重新把所有问题混成“继续扩 universe”
 - `cp_v3_seq_reduceexit_r1 / cp_v3_seq_cash_r1 / cp_v3_seq_reduceexit_cash_r1` 证明：单点修 `reduce / cash` 可以把局部指标拉高，但如果不同时保住持有连续性，整体收益与 `hold_share` 会重新塌掉
 - `cp_v3_seq_holdcash_r2` 进一步证明：即使 cash / reversal 同时改善，只要 `hold_share` 掉回 `< 0.10`，也不能视为 stronger temporal 升级成功
 - `cp_v3_seq_holdcash_v5_formal_r1` 进一步证明：当训练证据充足后 `holdcash_v5` 仍然失败，因此下一步应优先修标签、状态与 decoder，而不是机械继续加 epoch
+- `learned_all_a` 当前也已经出现同类教训：短窗 smoke 的局部正信号，必须经过长窗 formal + `training_evidence` 复核后才能当真
 - `cp_hier_v4_holdcash_r5` 进一步证明：hierarchical branch 可以先在 reversal 上领先，但如果还没有学出 `hold`，它仍然只是 research branch
 - `latest_*` 如果总是跟随最近一次实验而不回指当前最强锚点，控制台会漂成“最新但更差”的误导态；比较完成后必须回切到当前最强版本
+- `holdcash_v3` 的 seq_v3 model-side repair 已证明：先下调 `reduce_bias / exit_patience / reentry_guard`，再把 `position_cap_target` 从底线 `0.08` 拉回 `0.10`，可以先把 `hold_share` 从 `0.2809` 修到 `0.3876`
+- 但这类 model-side repair 还不足以单独解决主问题：`cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 的 `reduce_success_rate_5d` 反而从 `0.3448` 降到 `0.3200`，说明 `reduce / exit` 的形成机制还没有真正学稳
+- `seq_v3` 现在已经支持正式 `sequence_layers` 超参，可以做干净的 `GRU 1 -> 2` 对照，不用再为一次 depth experiment 写临时分叉
+- `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 证明：加深可以带来局部连续性增益，但会把 `avg_gross_exposure` 压到 `0.18`
+- 因此当前稳定知识是：
+  - 加深“值得试”，但只值得作为 side challenger
+  - mainline 仍应继续以 `formal_r3` 为基线，优先修 `teacher / decoder / global target` 的 `reduce / exit / cash` 形成机制
 
 ## 4. 文档边界
 - `identity_layer.md`

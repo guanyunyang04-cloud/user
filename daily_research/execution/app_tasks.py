@@ -260,7 +260,7 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
                 label="股票池",
                 arg_flag="--pool-name",
                 default_value="liquid500",
-                help_text="协议统一使用的流动性股票池。",
+                help_text="协议统一使用的股票池；也可以填 `all_a` 或 `learned_all_a`，让模型在全A候选域内学习选股。",
                 section="selection",
             ),
             TaskFieldSpec(
@@ -400,7 +400,7 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
                 label="股票池",
                 arg_flag="--pool-name",
                 default_value="liquid500",
-                help_text="默认跟随当前 active manifest 的流动性股票池。",
+                help_text="默认跟随当前 active manifest 的流动性股票池；也可以填 `all_a` 或 `learned_all_a` 启用全A学习选股。",
                 section="selection",
             ),
             TaskFieldSpec(
@@ -514,7 +514,7 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
                 label="股票池",
                 arg_flag="--pool-name",
                 default_value="liquid500",
-                help_text="评估时使用的流动性股票池。",
+                help_text="评估时使用的股票池；也可以填 `all_a` 或 `learned_all_a` 做全A评估。",
                 section="selection",
             ),
             TaskFieldSpec(
@@ -589,7 +589,7 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
                 label="股票池",
                 arg_flag="--pool-name",
                 default_value="liquid500",
-                help_text="导出动作面板时使用的流动性股票池。",
+                help_text="导出动作面板时使用的股票池；也可以填 `all_a` 或 `learned_all_a` 导出全A learned selection 结果。",
                 section="selection",
             ),
             TaskFieldSpec(

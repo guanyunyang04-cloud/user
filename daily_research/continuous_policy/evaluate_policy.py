@@ -51,7 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     defaults = resolve_active_policy_defaults()
     parser = argparse.ArgumentParser(description="Evaluate the continuous portfolio policy shadow stack.")
     parser.add_argument("--model-path", default="")
-    parser.add_argument("--pool-name", default=defaults["pool_name"] or "liquid500")
+    parser.add_argument(
+        "--pool-name",
+        default=defaults["pool_name"] or "liquid500",
+        help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to evaluate whole-A learned selection.",
+    )
     parser.add_argument("--start-date", default=defaults["start_date"] or "20250318")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")

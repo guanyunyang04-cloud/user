@@ -12768,3 +12768,571 @@ position,000001.SZ,1200,12.38,
   - `python -X utf8 -m compileall -q daily_research`
   - `python -X utf8 daily_research/tools/project_consistency_check.py`
   - `python -X utf8 daily_research/tools/doc_guard.py check`
+
+## 2026-04-14 - 持续接管复核：最小入口、守卫与运行口径再次确认
+- 触发原因：
+  - 新一轮接管明确要求先理解再行动、区分事实/推断/假设，并在关键动作后复盘写回
+  - 因此本轮不直接重做研究或改代码，而是先按当前治理规则做一次最小接管复核
+- 执行前四检：
+  - 目标一致性：
+    - 当前主线仍是 `daily_research`
+    - 当前主问题仍是 continuous_policy 行为质量收敛，而不是 strongest-model 主线重开
+  - 规则冲突检查：
+    - 当前没有发现 formal / recent / live / promotion 混写
+    - continuous_policy 仍处于 `shadow_only`
+  - 经验教训检查：
+    - 不再从 `episodic_memory.md` 全量起步
+    - 不把短窗 `32` epoch repair run 直接当终局结论
+  - 依赖完整性检查：
+    - `yolos` 环境存在
+    - brain 文档最小入口完整
+- 本轮动作：
+  - 读取 `identity_layer.md / state_center.md / knowledge_center.md / operations_center.md / governance_layer.md`
+  - 复核工作区状态：`git status --short` 为空
+  - 复核环境：`conda env list` 确认 `yolos` 存在
+  - 用 `conda run -n yolos python -X utf8 daily_research/tools/project_consistency_check.py` 复跑守卫
+  - 用显式 `yolos` Python 复跑 `daily_research/tools/doc_guard.py check`
+- 本轮关键事实：
+  - `project_consistency_check.py` 返回：
+    - `status = ok`
+    - `failure_count = 0`
+  - 显式 `yolos` Python 运行 `doc_guard.py check` 返回：
+    - `documentation_layout_issues = 0`
+    - 各 brain 文档未见 replacement char、tail 可疑问句或 heading 失真
+    - 当前仅见主脑 `brain_manifest.json` 的 `line_count_exceeds_warning (212 > 200)` 结构告警，但无语义问题
+  - 当前接管结论与主状态一致：
+    - stronger temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - 下一轮优先修 `reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d`
+    - 修法必须显式保住 `hold_share >= 0.20`
+- 本轮推断：
+  - 目前 brain 真源、守卫结果与主线叙事仍一致，未发现目标偏移或计划失效
+  - 之前 `conda run -n yolos ... doc_guard.py check` 的尾部异常输出更像 Windows 调用噪声，而不是 `doc_guard.py` 本身失败，因为显式 `yolos` Python 复跑结果干净且退出码正常
+- 暂不采纳的假设：
+  - 不因为本轮接管复核就改写 strongest temporal、promotion gate 或 live 默认执行
+  - 不因为 `conda run` 噪声就假设文档体系存在新的结构损坏
+- 本轮写回：
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次接管没有产生新的模型结论，价值在于把“当前方向没偏、守卫真实能过、命令口径怎么更稳”重新固定为项目资产
+  - 后续继续推进 continuous_policy 时，可以直接在当前真源上前进，不需要再重复做一轮全量考古
+
+## 2026-04-14 - continuous_policy 显式接入 `learned_all_a`，把固定股票池从隐式前置改成可学习候选域
+- 触发原因：
+  - 用户明确提出：股票池也不应再是定好的，而应让模型自己学会在整个上证+深证 A 股里选股
+  - 我先复核了当前实现，确认“fixed liquid500”更多是正式协议默认值，而不是 continuous_policy 架构硬上限
+- 本轮关键事实：
+  - `daily_research/baseline/data_provider.py` 的 `load_universe_from_tq("all_a")` 本来就能加载全 A 候选域
+  - `continuous_policy/state_builder.py` 此前如果 `pool_name` 为空，会隐式回退到全 A universe，但这不是正式、可追踪的接口
+  - 同时 `_build_membership_frame()` 之前只认 rolling liquidity pool；如果显式传 `all_a`，反而会落到 unsupported pool name
+- 本轮动作：
+  - 在 `continuous_policy/state_builder.py` 新增：
+    - `normalize_policy_pool_name()`
+    - `is_learned_all_a_pool_name()`
+    - `LEARNED_ALL_A_POOL_NAMES`
+  - 把 `all_a / learned_all_a / full_a / whole_a` 统一归一为 `learned_all_a`
+  - 让 `resolve_policy_universe()` 在 `learned_all_a` 下显式加载全 A，而不是再靠空字符串隐式回退
+  - 让 `_build_membership_frame()` 在 `learned_all_a` 下直接返回全市场 `membership = close.notna()`
+  - 同步更新：
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+    - `run_continuous_policy_protocol.py`
+    的 CLI help，使 `all_a / learned_all_a` 成为正式入口
+  - 更新 `execution/app_tasks.py` 与 brain 文档，明确：
+    - `liquid500` 继续是当前 frozen shadow 参考
+    - `learned_all_a` 是新的研究方向，不等于 live 默认已切换
+- 本轮推断：
+  - 这次改动解决的是“目标和接口口径不一致”问题，而不是已经证明全 A learned selection 优于 `liquid500`
+  - 下一轮真正要验证的是：
+    - 同协议下 `liquid500` vs `learned_all_a` 是否带来净信息增益
+    - 这种增益是否值得额外的训练样本、显存和 runtime 成本
+- 本轮暂不采纳的假设：
+  - 不把这次接口接通误写成“已经可以静默 promotion 到 live”
+  - 不把 `liquid500` 直接删掉；它仍应保留为 same-protocol 对照和预算友好参考
+  - 不直接宣称 `hier_v4` 已适合无上限全 A 正式训练；这需要单独预算和实跑证据
+- 本轮写回：
+  - `daily_research/continuous_policy/state_builder.py`
+  - `daily_research/continuous_policy/train_policy.py`
+  - `daily_research/continuous_policy/evaluate_policy.py`
+  - `daily_research/continuous_policy/export_action_panel.py`
+  - `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - `daily_research/execution/app_tasks.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮预期验证：
+  - `resolve_policy_universe(pool_name="all_a")` 与 `resolve_policy_universe(pool_name="learned_all_a")` 应显式得到全 A universe
+  - `learned_all_a` 下的 membership 应为全市场可观测股票的全量 `True`
+  - `project_consistency_check.py` 与 `doc_guard.py check` 应继续通过
+
+## 2026-04-14 - 以“高瞻远瞩的策略规划者”视角收敛 continuous_policy 下一步：先验证候选域，再修行为，再谈全A正式扩窗
+- 触发原因：
+  - 用户要求从更高层的策略规划视角推进：先发散设想多条路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 本轮关键事实：
+  - `learned_all_a` 已经成为 continuous_policy 的正式候选域入口，但目前还没有 same-protocol 的正式对照证据证明它优于 `liquid500`
+  - 当前 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 当前已收敛的核心行为问题仍是：
+    - `reduce_success_rate_5d`
+    - `cash_timing_quality_1d`
+    - `immediate_reversal_rate_3d`
+    - 且修这些问题时必须显式保住 `hold_share >= 0.20`
+  - `liquid500` 当前仍是 frozen shadow 参考与预算友好对照，不应在尚无新证据前被直接删除
+- 本轮发散评估过的路径：
+  - 路径 A：直接上 `learned_all_a` 全A长窗 formal
+    - 优点：最接近用户最终目标
+    - 风险：会把“候选域放开”的效果与“样本量、显存、训练稳定性”混在一起，难以解释成败原因
+  - 路径 B：先做 `learned_all_a` 的 same-protocol capped smoke，再和 `liquid500` 对照
+    - 优点：变量最少，能先确认候选域放开是否带来净信息增益
+    - 风险：不是最终形态，但能最大化下一步决策质量
+  - 路径 C：暂时不碰全A，继续只在 `liquid500` 上修 `reduce / cash / reversal`
+    - 优点：最稳、最省算力
+    - 风险：会偏离“模型自己学会在全A选股”的新目标
+  - 路径 D：直接让 `hier_v4` 承担全A主线
+    - 优点：它在 reversal 上已有领先迹象
+    - 风险：当前 `hold_share` 仍为 `0`，如果现在切主线，会把“架构切换”与“候选域切换”叠在一起，解释性最差
+- 本轮推断：
+  - 路径 B 是当前最高 ROI 的收敛方案，因为它同时满足：
+    - 不偏离“全A学习选股”的新方向
+    - 不丢失 `liquid500` 对照组
+    - 不把架构切换、标签修补、候选域扩张三件事混成一次高噪声实验
+  - 在候选域效应还没分离出来之前，不应直接宣布“下一步就是全A长窗 formal”或“hier_v4 改当主线”
+- 收敛后的优先级行动方案：
+  - `P0`：先跑 same-protocol 候选域对照 smoke
+    - 目标：用最小变量变化确认 `learned_all_a` 是否真的带来净信息增益
+    - 口径：优先复用 `formal_torch_seq_v3 + holdcash_v5` 与现有 `cp_v3_seq_holdcash_r2` 同窗口，只把 `pool_name` 切到 `learned_all_a`，并保留 `max_universe_size`
+    - 重点观察：
+      - `hold_share`
+      - `reduce_success_rate_5d`
+      - `cash_timing_quality_1d`
+      - `immediate_reversal_rate_3d`
+      - `training_evidence`
+      - 训练时长、显存与运行稳定性
+    - 停止条件：
+      - 明显 OOM / runtime 不稳定
+      - `training_evidence` 不达标
+      - `hold_share` 相比 `cp_v3_seq_holdcash_r1` 再次显著塌缩
+  - `P1`：基于对照结果做行为归因，而不是立刻扩大搜索
+    - 如果 `learned_all_a` 在 capped smoke 下没有明显恶化 `hold_share`，就进入行为归因
+    - 归因目标是区分：
+      - 问题主要来自候选域放开本身
+      - 还是主要来自 teacher 标签、decoder 或组合分配逻辑
+    - 只有归因清楚后，下一轮 repair 才继续围绕 `reduce / cash / reversal` 做精修
+  - `P2`：只有在 `P0` 证明候选域放开有正信号后，才做 universe 扩张
+    - 先从更大的 `max_universe_size` 扩到近全A
+    - 再决定是否值得进入真正的全A长窗 formal
+    - 如果 `P0` 失败，则先回到 `liquid500` 对照组继续修行为，而不是盲目加预算
+  - `P3`：`hier_v4` 保持 research branch 身份，暂不接主线
+    - 只有当 `seq_v3` 在 `learned_all_a` 下证明“候选域方向成立，但 reversal 仍卡住”时，才值得让 `hier_v4` 作为定向 challenger 进入
+- 本轮暂不采纳的假设：
+  - 不把“支持 `learned_all_a`”误写成“已经证实全A优于 `liquid500`”
+  - 不把“用户希望全A学习选股”误解成“现在就该放弃一切对照、直接全A正式扩窗”
+  - 不把 `hier_v4` 当前 reversal 优势误读成“它已经具备全A主线接管条件”
+- 本轮写回：
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次规划动作的核心价值，不是新增模型证据，而是把“全A方向”的推进顺序明确成：
+    - 先确认候选域净信息增益
+    - 再修行为
+    - 最后才扩大预算与主线切换
+  - 这样能避免重复历史上“多变量同时变化，最后无法解释为什么成败”的低效路径
+
+## 2026-04-14 - 按顺序完成 learned_all_a 的 capped 对照、归因与长窗正式验证；结论是暂不扩 universe
+- 触发原因：
+  - 用户要求按既定优先级把 `learned_all_a` 这条线顺序推进完，而不是只停留在规划
+- 本轮关键事实：
+  - `cp_v3_seq_learned_all_a_smoke_r1` 已真实跑完：
+    - 口径：`formal_torch_seq_v3 + holdcash_v5 + learned_all_a + max_universe_size=1200`
+    - 评估侧：
+      - `annual_return = 2.1015`
+      - `hold_share = 0.0`
+      - `reduce_success_rate_5d = 0.4154`
+      - `cash_timing_quality_1d = -0.2190`
+      - `immediate_reversal_rate_3d = 0.3212`
+    - shadow 侧：
+      - `annual_return = -0.5546`
+      - `sharpe = -2.3499`
+      - `hold_share = 0.0`
+      - `cash_timing_quality_1d = -0.5199`
+    - `training_evidence = insufficient`
+      - `train_day_count = 93`
+      - `teacher_action_rows = 9516`
+  - 在停止条件被触发后，我没有直接扩 universe，而是先做了同域归因：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_r1`
+    - 只把 `holdcash_v5` 换成 `holdcash_v3`，其余窗口、模型、候选域保持不变
+    - 评估侧：
+      - `annual_return = 1.5912`
+      - `hold_share = 0.2532`
+      - `cash_timing_quality_1d = 0.0598`
+      - `avg_turnover = 0.0611`
+    - 但 shadow 侧仍为负：
+      - `annual_return = -0.4554`
+      - `hold_share = 0.2182`
+      - `cash_timing_quality_1d = -0.3669`
+      - `immediate_reversal_rate_3d = 0.5581`
+    - 同时 `training_evidence` 仍不足：
+      - `train_day_count = 93`
+      - `teacher_action_rows = 9533`
+      - `best_epoch = 31 / 32`
+  - 为把“短窗正信号是否只是幻觉”真正验清，我继续跑了长窗正式验证：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1`
+    - 口径：`20240102 -> 20251231`、`48` epoch、`min_epochs = 32`
+    - 这次 `training_evidence` 已充足：
+      - `train_day_count = 409`
+      - `teacher_action_rows = 37130`
+      - `best_epoch = 43 / 48`
+    - 评估侧：
+      - `annual_return = 0.9403`
+      - `hold_share = 0.0`
+      - `reduce_success_rate_5d = 0.4195`
+      - `cash_timing_quality_1d = -0.1311`
+      - `immediate_reversal_rate_3d = 0.4607`
+    - shadow 侧：
+      - `annual_return = 0.2585`
+      - `sharpe = 1.3484`
+      - `hold_share = 0.0`
+      - `cash_timing_quality_1d = -0.2839`
+      - `immediate_reversal_rate_3d = 0.2857`
+- 本轮推断：
+  - `learned_all_a` 方向本身没有被第一轮 smoke 直接判死，因为同域换成 `holdcash_v3` 后，短窗下 `hold_share` 和 `cash_timing_quality_1d` 能明显修复
+  - 但这个正信号在长窗正式口径下没有站住；一旦训练证据充足，`hold_share` 又塌回 `0.0`
+  - 因此当前 capped 全A的主要问题不是“接口没接上”或“只是预算不够”，而是：
+    - teacher 标签
+    - decoder 行为偏置
+    - 状态表征
+    这三者在 `learned_all_a` 上仍未稳定
+- 本轮纠偏：
+  - 原规划里的 `P2 = universe 扩张` 已被本轮真实证据否决
+  - 当前更正确的下一步不再是把 `max_universe_size` 往上推，而是先留在 capped `1200` 范围内修行为质量
+- 本轮治理动作：
+  - 跑完三组 `learned_all_a` 对照后，我已把：
+    - `latest_train_summary.json`
+    - `latest_evaluation_summary.json`
+    - `latest_export_summary.json`
+    - `latest_protocol_summary.json`
+    - `latest_behavior_audit_summary.json`
+    - `latest_conclusion_ledger.json`
+    - `runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 这样执行控制台不会漂到“最新但治理上更弱”的 learned_all_a run
+- 本轮暂不采纳的假设：
+  - 不把 `cp_v3_seq_learned_all_a_holdcash_v3_r1` 的短窗正信号误写成“全A方向已经稳定成立”
+  - 不因为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 的 shadow 年化转正，就忽略它在 `hold_share / cash_timing_quality_1d` 上仍然失败
+  - 不让 `hier_v4` 因为 reversal 指标有潜力而直接接管 capped 全A主线
+- 本轮写回：
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次顺序推进最大的价值，是把 `learned_all_a` 从“方向设想”推进成了“有三层证据约束的真实研究线”
+  - 当前正式结论已经足够清楚：
+    - `learned_all_a` 继续保留
+    - 但只保留为 capped `1200` 的 `shadow_only` research line
+    - 下一轮先修标签 / decoder / 状态表征
+    - 在这些问题没稳住前，不再继续扩 universe
+
+## 2026-04-14 - 基于已完成的 learned_all_a 三层证据，重新收敛下一步：先修行为形成机制，再谈 capped 全A升级
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散设想路径，再收敛为清晰、详细且高效的下一步行动方案
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 仍是当前 stronger temporal 锚点，`latest_*` 已回切到它
+  - `cp_v3_seq_learned_all_a_smoke_r1` 证明 `holdcash_v5` 在 capped 全A上会把 `hold_share` 打成 `0`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_r1` 证明 capped 全A方向本身并未被判死，但这个正信号只成立在短窗且 `training_evidence` 不足
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 证明：当 `training_evidence` 充足后，`hold_share` 又回落到 `0`
+- 本轮发散过的路径：
+  - 路径 A：继续扩大 `max_universe_size`
+    - 优点：更接近最终全A目标
+    - 风险：会在行为机制尚未稳定时，把问题进一步放大，复用低质量 teacher / decoder 失稳
+  - 路径 B：固定 `max_universe_size = 1200`，优先修 `holdcash_v3` 侧的标签 / decoder / 状态表征
+    - 优点：变量最少，能直接作用到当前已经被证实的失稳来源
+    - 风险：短期内看起来不像“向更大全A推进”，但决策质量最高
+  - 路径 C：直接改让 `hier_v4` 接管 capped 全A
+    - 优点：reversal 指标有潜力
+    - 风险：会把“候选域问题”和“架构切换问题”重新叠在一起
+  - 路径 D：放弃 capped 全A，完全退回 `liquid500`
+    - 优点：最稳
+    - 风险：会失去这轮已经确认存在的全A方向信息
+- 本轮推断：
+  - 当前最高 ROI 路径是 B，而不是继续扩大 universe、也不是马上切到 `hier_v4`
+  - 下一轮最值得验证的不是“能不能跑更大候选域”，而是：
+    - `hold_share` 为何在短窗和长窗之间失稳
+    - `cash_timing_quality_1d` 为什么在短窗能转正、长窗又回负
+    - `reduce_success_rate_5d / shadow reversal` 为何始终没有稳定过线
+- 收敛后的优先级行动方案：
+  - `P0`：固定 `learned_all_a + max_universe_size = 1200 + holdcash_v3`，优先做 teacher 标签归因
+    - 目标：确认是哪些标签逻辑把长窗 `hold_share` 再次打回 `0`
+    - 重点排查：
+      - `hold / reduce / exit` 的 teacher 分布在短窗 vs 长窗的漂移
+      - `teacher_action_rows` 扩大后，`hold` 与 `reduce` 的相对比例是否结构性恶化
+      - `cash_timing_quality_1d` 在 teacher 侧本身是否就已经被写坏
+  - `P1`：在不扩 universe 的前提下，做最小 decoder repair
+    - 目标：显式保住 `hold_share >= 0.20`
+    - 范围只限于 `holdcash_v3` 相关的 `reduce / exit / cash` 偏置，不重开大范围 profile 扫描
+  - `P2`：只有当 capped 全A在正式长窗下重新满足：
+    - `training_evidence = sufficient`
+    - `hold_share >= 0.20`
+    - `cash_timing_quality_1d >= 0`
+    - `shadow_reversal` 显著下降
+    才讨论是否扩 `max_universe_size`
+  - `P3`：`hier_v4` 继续只作为 reversal challenger 预备线
+    - 只有当 `seq_v3` 在 capped 全A上已稳定住 `hold_share`，但 reversal 仍明显顽固时，才让它进入主比较
+- 本轮暂不采纳的假设：
+  - 不把“shadow 年化转正”误写成“可进入 universe 扩张”
+  - 不把“短窗正信号存在”误写成“长窗正式已成立”
+  - 不把“reversal 有潜力”误写成“现在就该切 backbone”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次规划更新把下一步从“扩大候选域”纠偏成“先修形成机制”
+  - 这样可以避免重复“先把问题放大，再回头做归因”的低 ROI 路径
+
+## 2026-04-15 - 修复 capped 全A formal 的执行层持有塌缩口径，并完成 formal_r2 复跑
+- 触发原因：
+  - 用户要求按既定优先级继续顺序执行，不停留在规划
+  - 上一轮已收敛出下一步应先查 `PortfolioState.step()`，确认 `hold_share` 长窗塌缩是否来自执行层
+- 本轮关键事实：
+  - 我先复核了 `portfolio_simulator.py` 与已有评估面板，确认：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 里 `model_action = hold` 的 43 条全部被执行层记成了 `reduce`
+    - 这些条目的 `abs(delta_weight)` 大多很小：中位数约 `0.0011`、`95%` 小于 `0.0039`
+    - 同时存在大量 `model_action = add` 却被 realized 成 `reduce` 的记录，说明组合级再平衡正在污染个股动作语义
+  - 我进一步核对了连续性指标的计算口径，确认：
+    - `hold_share / reduce_success_rate_5d / immediate_reversal_rate_3d` 都来自 `execution_action`
+    - `cash_timing_quality_1d` 来自 `cash_weight` 与 benchmark forward return 的相关性，而不是来自 `execution_action`
+  - 因此可以把“微幅、且与模型意图相矛盾的再平衡”从个股 `reduce/add` 中剥离出来，而不会把现金时机信号一起抹掉
+- 本轮执行动作：
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中新增 execution deadband：
+    - 只在 `previous_weight > 0` 且变动很小时生效
+    - `model_action = hold` 时，微幅增减统一回落为 `hold`
+    - `model_action = add` 但 realized 轻微减仓、或 `model_action = reduce` 但 realized 轻微加仓时，也回落为 `hold`
+    - 同时把 `execution_deadband` 与 `contradictory_micro_rebalance` 写入 action panel / diagnostics，方便后续复盘
+  - 之后按完全相同协议重跑了：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`
+    - 命令口径保持：
+      - `formal_torch_seq_v3 + holdcash_v3 + learned_all_a + max_universe_size = 1200`
+      - `train = 20240102 -> 20251231`
+      - `eval = 20260102 -> 20260213`
+      - `shadow = 20260202 -> 20260213`
+      - `epochs = 48`、`min_epochs = 32`、`resume_mode = strict`
+- 本轮结果：
+  - 训练证据继续充足：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37009`
+    - `best_epoch = 45 / 48`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 评估侧：
+    - `annual_return = 1.0161`
+    - `sharpe = 5.5305`
+    - `hold_share = 0.2809`
+    - `reduce_success_rate_5d = 0.3448`
+    - `cash_timing_quality_1d = -0.1555`
+    - `immediate_reversal_rate_3d = 0.3086`
+  - 与 `formal_r1` 对比：
+    - `hold_share: 0.0 -> 0.2809`
+    - `immediate_reversal_rate_3d: 0.4607 -> 0.3086`
+    - `annual_return: 0.9403 -> 1.0161`
+    - 但 `reduce_success_rate_5d: 0.4195 -> 0.3448`
+    - 且 `cash_timing_quality_1d: -0.1311 -> -0.1555`
+  - `shadow` 侧也同步改善了持有连续性：
+    - `hold_share = 0.5189`
+    - `immediate_reversal_rate_3d = 0.0196`
+    - 但 `cash_timing_quality_1d = -0.4126`
+  - promotion gate 结果：
+    - `hold_share` 已过线
+    - `shadow_reversal` 已过线
+    - 仍失败在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 本轮推断：
+  - capped 全A的 `hold_share` 塌缩并不是单纯的 teacher / decoder 问题；执行层对微幅矛盾再平衡的计数方式也是直接根因之一
+  - 修掉这一层后，当前 capped 全A主问题已从“先救持有连续性”收敛成“继续修 reduce / cash”
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 现在是最强的 capped 全A challenger，但还不够替代 `cp_v3_seq_holdcash_r1`
+- 本轮治理动作：
+  - 我把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json`
+    以及 `latest_behavior_audit_summary.json / latest_conclusion_ledger.json / runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 这样默认控制台与 runtime 不会漂到尚未过 gate 的 `formal_r2`
+- 本轮暂不采纳的假设：
+  - 不把 `formal_r2` 的 `hold_share` 修复误写成“全A方向已经可以接管 strongest temporal 默认锚点”
+  - 不因为 `shadow_reversal` 过线，就忽略 `reduce_success_rate_5d / cash_timing_quality_1d` 仍未过 gate
+  - 不在这一轮继续扩大 `max_universe_size`
+- 本轮写回：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次顺序推进真正完成了“先纠偏再执行”的要求：先把 `hold_share` 塌缩的直接机制查清，再做最小修补并用同协议 formal 复跑验证
+  - 当前下一步已比上一轮更聚焦：保留 execution deadband 作为固定基线，随后在 capped 全A上继续修 `reduce / cash`
+
+## 2026-04-15 - 基于 formal_r2 与当前架构状态，再次从“高瞻远瞩的策略规划者”视角收敛下一步：主线先修 reduce/cash，架构加深只做侧翼 challenger
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散路径，再收敛成清晰、详细且高效的下一步行动方案
+  - 紧接着用户又问到“神经网络架构能否继续升级、网络深度是否要尝试”，因此本轮规划必须把“结构升级”放回全局优先级中，而不是孤立讨论
+- 本轮关键事实：
+  - 当前默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - 评估侧：`hold_share = 0.30`、`reduce_success_rate_5d = 0.4286`、`cash_timing_quality_1d = -0.4564`
+    - `latest_protocol_summary.json` 仍回指它，而不是回指更新但未过 gate 的 run
+  - 当前 capped 全A最强 challenger 已更新为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`
+    - 评估侧：`annual_return = 1.0161`、`hold_share = 0.2809`、`reduce_success_rate_5d = 0.3448`、`cash_timing_quality_1d = -0.1555`、`immediate_reversal_rate_3d = 0.3086`
+    - promotion gate 仍失败在：`reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - `seq_v3` 当前并不算深：
+    - sample model 是 `1` 层 GRU + 浅层 MLP fusion
+    - 训练入口目前只暴露 `hidden_dim / dropout`，没有把层数做成正式 CLI 超参
+  - `hier_v4` 已经是更深的结构分支：
+    - 它已有 temporal transformer + cross transformer
+    - 但当前最新 `cp_hier_v4_holdcash_r5` 仍未解决 promotable 所需的 `hold_share / reduce / cash`
+  - 因此“当前主瓶颈是否主要来自模型容量不足”这件事，还没有被现有证据证明
+- 本轮发散出的可选路径：
+  - 路径 A：继续沿 `learned_all_a + 1200 + holdcash_v3 + execution deadband` 主线，优先修 `reduce / cash`
+    - 优点：最贴合当前已验证瓶颈，变量最少，ROI 最高
+    - 风险：短期内看起来不像“架构升级”，但最容易形成可解释闭环
+  - 路径 B：立刻把 `seq_v3` 加深，试 `GRU 1 -> 2` 或更深 fusion
+    - 优点：可以验证当前主瓶颈是否部分来自容量不足
+    - 风险：会把“形成机制未修好”和“模型容量变化”重新混在一起
+  - 路径 C：让 `hier_v4` 直接重新接手 capped 全A主线
+    - 优点：它对 reversal 更有潜力
+    - 风险：现有证据还不足以说明 `seq_v3` 已到结构天花板；贸然切主线会重复“多变量同变”的历史低效路径
+  - 路径 D：先不碰主线，只做架构 sidecar experiment
+    - 优点：可以保留主线收敛速度，同时验证“加深是否值得”
+    - 风险：如果 sidecar 设计不够克制，会偷偷演变成第二主线
+  - 路径 E：继续扩大 `max_universe_size`
+    - 优点：更接近终局全A
+    - 风险：当前 `reduce / cash` 未修前扩大 universe，会放大噪声，重复已知低效路径
+- 本轮推断：
+  - 当前最高 ROI 主线仍是路径 A，不是直接上路径 B/C/E
+  - 但“结构升级”不该被永久排除；更合理的位置是作为路径 D 的受控 sidecar
+  - 也就是说：
+    - 主线目标：先把 `reduce_success_rate_5d / cash_timing_quality_1d` 修到能过正式 gate 的方向
+    - 侧翼目标：用最小代价确认 `seq_v3` 是否存在明显容量瓶颈
+- 收敛后的下一步行动方案：
+  - `P0`：固定当前基线，不扩 universe、不换 backbone
+    - 基线固定为：`learned_all_a + max_universe_size = 1200 + holdcash_v3 + execution deadband`
+    - 目的：避免后续所有实验再次失去可解释性
+  - `P1`：优先做 `reduce / cash` 的 teacher-vs-model 定向归因
+    - 重点查：
+      - 哪些 `reduce` 在 teacher 侧本身就站错边
+      - 哪些 `cash_timing` 失真来自 global target 侧，而不是 sample action 侧
+      - `exit_timeliness_rate_5d` 失败是否本质上是 `reduce/exit` 分界错位
+    - 停止条件：
+      - 如果归因后发现主问题仍是执行层误差，再回到执行层；否则进入标签/decoder 修补
+  - `P2`：做最小范围的标签/decoder repair
+    - 只允许改：
+      - `holdcash_v3` 相关 teacher 标签阈值
+      - `reduce / exit / cash` 相关 decoder 偏置
+      - 必要的 global target 映射
+    - 不允许同时改：
+      - backbone
+      - universe
+      - training contract
+    - 明确 keep gate：
+      - `hold_share >= 0.20`
+  - `P3`：基于修补后的主线重跑 same-protocol formal
+    - 只有当：
+      - `training_evidence = sufficient`
+      - `hold_share >= 0.20`
+      - `reduce_success_rate_5d` 明显改善
+      - `cash_timing_quality_1d` 至少不再继续恶化
+    - 才认为主线进入下一阶段
+  - `P4`：把架构加深作为侧翼 challenger，而不是主线
+    - 第一轮只做一个克制实验：
+      - `seq_v3_depth_r1 = GRU num_layers 1 -> 2`
+      - 其他协议全部保持不变
+    - 不在同一轮同时放大：
+      - `hidden_dim`
+      - `epochs`
+      - `max_universe_size`
+      - decoder/profile
+    - 目的：单独回答“当前是否存在明显容量瓶颈”
+  - `P5`：只有满足以下任一条件，才提升结构升级优先级
+    - 主线 `reduce / cash` 已基本修稳，但指标仍长期卡在同一上限
+    - `seq_v3_depth_r1` 在同协议下显示出一致且可重复的净增益
+
+## 2026-04-15 - 按顺序完成 reduce/cash mainline repair、formal_r3 与 depth_r1；结论是“主线维持 r3，加深只做 side challenger”
+- 触发原因：
+  - 用户要求“按顺序直接把你说的都做完”，因此这一轮不再停在规划，而是顺着既定优先级完成：
+    - `P1` 归因
+    - `P2` 最小范围 `decoder/global-target/execution` repair
+    - `P3` same-protocol `formal_r3`
+    - `P4` `GRU 1 -> 2` 的 `depth_r1`
+- 关键动作前自检：
+  - 事实：`formal_r2` 已经把 capped 全A的 `hold_share` 从 `0` 修回 `0.2809`，但仍卡在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - 事实：`seq_v3` 还没有正式 `depth` 超参入口；如果不先收口，后续 depth 对照会退化成一次性分叉
+  - 推断：这一轮必须把“主线修行为形成机制”和“架构加深验证”拆开，否则又会回到多变量混改、无法解释因果的旧路径
+  - 假设：只要 `formal_r3` 先形成干净新基线，`depth_r1` 就能单独回答“加深是否值得”
+- 本轮执行动作：
+  - 在 `model_v2.py` 中下调 `holdcash_v3` 的 `reduce / exit / reentry` 防御偏置
+  - 在 `model_seq_v3.py` 中：
+    - 为 `holdcash_v3` 收敛 `gross_exposure / candidate_budget / position_cap` 的下限
+    - 显式下调 `reduce_bias_target / exit_patience_target / reentry_guard_target`
+    - 把 `sequence_layers` 做成正式 artifact + train/protocol 超参
+  - 在 `portfolio_simulator.py` 中进一步放宽 `hold/add -> reduce` 的反意图微幅再平衡 deadband
+  - 完整重跑：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1`
+- 本轮事实：
+  - `formal_r3` 评估侧：
+    - `annual_return = 0.8452`
+    - `sharpe = 5.3089`
+    - `hold_share = 0.3876`
+    - `reduce_success_rate_5d = 0.3200`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1468`
+    - `immediate_reversal_rate_3d = 0.2982`
+    - `avg_position_cap_target = 0.10`
+    - `avg_reduce_bias_target = 0.1040`
+    - `avg_exit_patience_target = 0.2650`
+  - `formal_r3` 相对 `formal_r2`：
+    - `hold_share: 0.2809 -> 0.3876`
+    - `cash_timing_quality_1d: -0.1555 -> -0.1468`
+    - `immediate_reversal_rate_3d: 0.3086 -> 0.2982`
+    - 但 `reduce_success_rate_5d: 0.3448 -> 0.3200`
+    - 且 `exit_timeliness_rate_5d` 仍为 `0.0`
+  - `depth_r1` 评估侧：
+    - `annual_return = 0.1909`
+    - `sharpe = 3.8464`
+    - `avg_gross_exposure = 0.18`
+    - `high_cash_share = 0.7667`
+    - `hold_share = 0.4607`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.3846`
+    - `cash_timing_quality_1d = -0.1458`
+    - `immediate_reversal_rate_3d = 0.1615`
+  - `depth_r1` 的 shadow 侧 `immediate_reversal_rate_3d = 0.2090`，仍高于 gate `0.18`
+  - 两个 run 的 `training_evidence` 都为 `sufficient`
+- 本轮推断：
+  - `formal_r3` 证明主线 repair 方向是对的，因为它确实把 `hold_share / cash / reversal` 往对的方向推了一步
+  - `depth_r1` 证明加深确实有局部容量增益，因为 `hold_share / reduce_success / exit_timeliness / reversal` 同时改善
+  - 但 `depth_r1` 是用“超高现金、超低暴露”换来了指标改善，因此它并不是当前可以接管主线的形态
+- 本轮结论收敛：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 是当前 capped 全A主线 challenger
+  - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 是 depth side challenger，不接主线
+  - strongest temporal 默认锚点仍然是 `cp_v3_seq_holdcash_r1`
+- 动作后复盘与写回：
+  - 我已把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json / latest_behavior_audit_summary.json / latest_conclusion_ledger.json / runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 原因：`formal_r3` 和 `depth_r1` 都仍是 `shadow_only`，不应该把默认执行口径带偏
+- 本轮避免的历史错误：
+  - 没有把 mainline repair 和 depth experiment 混成一轮
+  - 没有因为 `hold_share` 修复就误判主线已经过 gate
+  - 没有因为 depth 指标更好就忽略它的 `gross exposure` 塌缩
+- 本轮写回：
+  - `daily_research/continuous_policy/model_v2.py`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/continuous_policy/train_policy.py`
+  - `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+    - `hier_v4` 在 sidecar 中证明自己不仅 reversal 更低，而且 `hold_share / reduce / cash` 也同步变好
+- 本轮暂不采纳的假设：
+  - 不把“网络可以加深”误写成“当前主问题就是容量不够”
+  - 不把 `hier_v4` 已存在误写成“更深结构天然更优”
+  - 不把 `formal_r2` 的阶段性修复误写成“现在可以扩大 universe”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 本轮规划的关键价值，是把“主线修行为形成机制”和“侧翼验证结构升级价值”明确分流
+  - 这样既不会错过潜在的架构增益，也不会重复过去那种多变量同时变化、最后无法解释成败的低效路径

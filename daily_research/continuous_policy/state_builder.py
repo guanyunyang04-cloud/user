@@ -29,6 +29,15 @@ DEFAULT_LABEL_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 DEFAULT_POOL_REBALANCE_DAYS = 21
 DEFAULT_POOL_ADV_WINDOW = 20
 DEFAULT_SCORE_BLEND_WEIGHTS = (0.5, 0.5)
+LEARNED_ALL_A_POOL_NAMES: frozenset[str] = frozenset(
+    {
+        "all_a",
+        "learned_all_a",
+        "full_a",
+        "full_market_a",
+        "whole_a",
+    }
+)
 STATE_SEQUENCE_BASES: tuple[str, ...] = (
     "score_blend",
     "score_delta_1d",
@@ -122,6 +131,17 @@ def resolve_active_policy_defaults() -> dict[str, str]:
     }
 
 
+def normalize_policy_pool_name(pool_name: str | None) -> str:
+    resolved = str(pool_name or "").strip().lower()
+    if resolved in LEARNED_ALL_A_POOL_NAMES:
+        return "learned_all_a"
+    return resolved
+
+
+def is_learned_all_a_pool_name(pool_name: str | None) -> bool:
+    return normalize_policy_pool_name(pool_name) == "learned_all_a"
+
+
 def resolve_policy_universe(
     *,
     pool_name: str,
@@ -129,9 +149,11 @@ def resolve_policy_universe(
     max_universe_size: int = 0,
 ) -> list[str]:
     extras = _unique_preserve_order(extra_stocks or [])
-    resolved_pool_name = str(pool_name or "").strip().lower()
+    resolved_pool_name = normalize_policy_pool_name(pool_name)
     universe: list[str] = []
-    if resolved_pool_name:
+    if is_learned_all_a_pool_name(resolved_pool_name):
+        universe = load_universe_from_tq("all_a")
+    elif resolved_pool_name:
         try:
             pool_file = get_named_pool_file(resolved_pool_name)
             if pool_file.exists():
@@ -192,14 +214,24 @@ def _build_membership_frame(
     pool_rebalance_days: int,
     pool_adv_window: int,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if not str(pool_name or "").strip():
+    resolved_pool_name = normalize_policy_pool_name(pool_name)
+    if is_learned_all_a_pool_name(resolved_pool_name):
+        membership = close.notna().astype(bool)
+        return membership, {
+            "pool_name": resolved_pool_name,
+            "selection_scope": "all_a",
+            "selection_mode": "learned_full_market",
+            "member_count_median": int(membership.sum(axis=1).median()) if not membership.empty else 0,
+        }
+
+    if not resolved_pool_name:
         membership = close.notna().astype(bool)
         return membership, {"pool_name": "", "member_count_median": int(membership.sum(axis=1).median()) if not membership.empty else 0}
 
     artifact = build_rolling_liquidity_membership(
         close_frame=close,
         amount_frame=amount,
-        pool_name=pool_name,
+        pool_name=resolved_pool_name,
         signal_start_date=requested_start_date,
         signal_end_date=end_date,
         rebalance_every_days=int(pool_rebalance_days),
@@ -209,6 +241,8 @@ def _build_membership_frame(
     )
     summary = {
         "pool_name": artifact.pool_name,
+        "selection_scope": "rolling_liquidity_pool",
+        "selection_mode": "exogenous_pool_mask",
         "pool_size": int(artifact.pool_size),
         "signal_start_date": artifact.signal_start_date,
         "signal_end_date": artifact.signal_end_date,
@@ -235,7 +269,7 @@ def prepare_policy_inputs(
     refresh_cache: bool = False,
     progress_desc: str = "continuous policy prepare",
 ) -> PreparedPolicyInputs:
-    resolved_pool_name = str(pool_name or "").strip().lower()
+    resolved_pool_name = normalize_policy_pool_name(pool_name)
     universe = resolve_policy_universe(
         pool_name=resolved_pool_name,
         extra_stocks=extra_stocks,

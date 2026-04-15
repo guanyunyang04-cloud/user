@@ -255,6 +255,17 @@
       - `early_exit_bias / shadow reversal`
       - 修上述三点时必须显式保 `hold_share` 不再回塌到 `< 0.10`
   - 下一轮需要继续以 continuous_policy 为主线，但目标已从“落地骨架”切到“提升行为质量并缩小与参考链路差距”
+  - 用户已明确要求：股票池不应再被视为固定前置输入
+    - 下一轮应把 `liquid500` 从默认固定 universe 降级为对照/预算友好参考
+    - 并把目标推进到“在全上证+深证 A 股候选域内同时学习选股 + 执行”
+  - `learned_all_a` 首轮 same-protocol 验证已真实完成：
+    - `cp_v3_seq_learned_all_a_smoke_r1` 证明 `holdcash_v5` 在 capped 全A上会把 `hold_share` 直接打成 `0`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_r1` 证明全A方向本身并未被判死：短窗下 `hold_share` 可回到 `0.2532`、`cash_timing_quality_1d` 可转正到 `0.0598`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 进一步证明：当 `training_evidence` 充足后，这个短窗正信号并未站稳，`hold_share` 又回落到 `0.0`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 进一步证明：执行层加入微幅矛盾再平衡 deadband 后，评估侧 `hold_share` 已回到 `0.2809`、`immediate_reversal_rate_3d` 降到 `0.3086`
+  - 因此当前 learned_all_a 结论已经收口为：
+    - 方向可继续研究，但还不能进入 universe 扩张
+    - 当前症结更像 teacher 标签 / decoder / 状态表征在 capped 全A上的失稳，而不是“只是样本不够”
 
 ## 4. 当前优先级
 - 保持 `policy_v5b` 作为 learned-control 主研究锚点
@@ -262,9 +273,12 @@
 - 保持 continuous_policy 为并行 shadow 主线，默认优先走 `run_continuous_policy_protocol.py`
 - 保持 `formal_torch_seq_v3` 为当前 stronger-model 主分支，但仍只处于 `shadow_only`
 - 保持 `formal_torch_hier_v4` 为新分层时序研究分支，但当前不替代 `formal_torch_seq_v3` 锚点
+- 保持 live / strongest-model 当前仍冻结在既有口径，但把 continuous_policy 新方向扩展为 `learned_all_a`
+- `liquid500` 继续作为当前 strongest shadow 参考与算力友好对照，而不再被视为终局固定股票池假设
 - 实验口径已从“默认窄实验”调整为“默认最高效、最合理实验”：若旧设定可能只在更强模型上成立，允许重开，但必须先给出明确假设与收益/成本判断
 - continuous_policy 的主方向已经收口为：
   - 日频连续决策
+  - 全A候选域内的 learned selection
   - 逐票异质持有逻辑
   - 全局动态收益—风险—成本权衡
   - 尽量少的人为执行桥约束
@@ -274,6 +288,7 @@
   - `early exit / shadow reversal`
   - 修上述三项时显式保住 `hold_share >= 0.20`
   - 对 repair run 先看 `training_evidence`；若 `train_day_count < 180`、`teacher_action_rows < 10000` 或 `best_epoch` 贴边，则先 strict resume / 扩窗口，再谈更强结论
+  - `learned_all_a` 当前继续保持 `max_universe_size = 1200` 的 capped research 口径，先修标签 / decoder / 状态表征，不做 universe 扩张
 - 把 `policy_v5d / policy_v5e` 明确记为已证伪首轮 successor
 - 下一轮只做 `1-2` 个新 successor，且必须显式区别于本轮平滑思路
 - 每轮实验后立即写回中枢与证据库
@@ -317,10 +332,33 @@
 - 保持 `formal_liquid500_20260413_r2_swing_v2` 作为 continuous_policy 当前最强 shadow 参考，但不进入 promotion
 - 保持 `cp_v3_seq_holdcash_r1` 作为 stronger temporal 当前最强锚点，并让 `latest_*` 默认继续指向它
 - 把 `cp_v3_seq_reduceexit_r1 / cp_v3_seq_cash_r1 / cp_v3_seq_reduceexit_cash_r1` 视为局部修补对照，不进入 promotion
-- 下轮优先围绕 `reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d` 修正 teacher 标签、动作头与组合分配逻辑
-- 下轮修正时显式加入 `hold_share >= 0.20` 的行为底线，避免局部修补再次把持有连续性打坏
-- 再跑下一轮正式 protocol，与 active manifest 和 `policy_v5b` 做同窗对照
+- `learned_all_a` 的 same-protocol 对照已完成，当前结论不是扩 universe，而是保留 capped 全A研究线
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 已把 `hold_share` 修回 `0.2809`，并让 `shadow_reversal` gate 过线；它是当前最强 capped 全A challenger
+- 下轮优先围绕 `reduce_success_rate_5d / cash_timing_quality_1d` 修正 learned_all_a 侧的 teacher 标签、动作头与组合分配逻辑
+- 下轮修正时显式加入 `hold_share >= 0.20` 的行为底线，避免 capped 全A repair 再次把持有连续性打坏
+- 下一轮若继续跑 learned_all_a，应先保持 `max_universe_size = 1200`，等行为质量站稳后再讨论 universe 扩张
+- `formal_torch_hier_v4` 暂不接 `learned_all_a` 主线；只有当 `seq_v3` 在 capped 全A上先稳定住行为后，才考虑让它作为 reversal challenger 进入
 - 下一轮 keep gate 继续使用：
   - `constrained formal >= 0.110`
   - `recent >= 0.110`
   - `fresh formal > 0.0839`
+
+## 2026-04-15 更新
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 是当前 capped 全A主线 challenger：
+  - `hold_share = 0.3876`
+  - `cash_timing_quality_1d = -0.1468`
+  - `reduce_success_rate_5d = 0.3200`
+  - `immediate_reversal_rate_3d = 0.2982`
+  - `avg_position_cap_target = 0.10`
+  - promotion gate 仍失败在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 证明 `GRU 1 -> 2` 有局部容量增益：
+  - `hold_share = 0.4607`
+  - `reduce_success_rate_5d = 0.5000`
+  - `exit_timeliness_rate_5d = 0.3846`
+  - `immediate_reversal_rate_3d = 0.1615`
+  - 但 `avg_gross_exposure = 0.18`、`high_cash_share = 0.7667`、`annual_return = 0.1909`
+  - 因此它只保留为 side challenger，不接主线
+- 当前治理结论：
+  - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
+  - `latest_*` 与 `runtime/portfolio_state.json` 已回切到 `cp_v3_seq_holdcash_r1`
+  - 下一轮主线继续围绕 `formal_r3` 修 `reduce / exit / cash`，不扩 `max_universe_size`

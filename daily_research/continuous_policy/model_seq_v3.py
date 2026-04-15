@@ -63,15 +63,17 @@ class TemporalSamplePolicyNet(nn.Module):
         sequence_steps: int,
         hidden_dim: int = 224,
         sequence_hidden_dim: int = 128,
+        sequence_layers: int = 1,
         dropout: float = 0.10,
     ) -> None:
         super().__init__()
         self.sequence_steps = int(sequence_steps)
         self.sequence_feature_dim = int(sequence_feature_dim)
+        self.sequence_layers = max(1, int(sequence_layers))
         self.sequence_encoder = nn.GRU(
             input_size=self.sequence_feature_dim,
             hidden_size=int(sequence_hidden_dim),
-            num_layers=1,
+            num_layers=self.sequence_layers,
             batch_first=True,
         )
         self.static_backbone = nn.Sequential(
@@ -189,6 +191,7 @@ class TorchContinuousPolicySeqArtifact:
                 "sequence_steps": len(self.sequence_steps),
                 "hidden_dim": int(self.sample_model.static_backbone[0].out_features),
                 "sequence_hidden_dim": int(self.sample_model.sequence_encoder.hidden_size),
+                "sequence_layers": int(getattr(self.sample_model, "sequence_layers", 1)),
                 "dropout": float(self.sample_model.static_backbone[2].p),
             },
             "daily_model_config": {
@@ -263,6 +266,7 @@ def fit_policy_models_v3(
     learning_rate: float = 1.2e-3,
     hidden_dim: int = 224,
     sequence_hidden_dim: int = 128,
+    sequence_layers: int = 1,
     daily_hidden_dim: int = 96,
     dropout: float = 0.12,
     daily_dropout: float = 0.05,
@@ -327,6 +331,7 @@ def fit_policy_models_v3(
         sequence_steps=len(SEQUENCE_STEP_ORDER),
         hidden_dim=hidden_dim,
         sequence_hidden_dim=sequence_hidden_dim,
+        sequence_layers=sequence_layers,
         dropout=dropout,
     ).to(device)
     daily_model = DailyControllerNet(len(daily_feature_names), hidden_dim=daily_hidden_dim, dropout=daily_dropout).to(device)
@@ -604,17 +609,22 @@ def predict_policy_v3(
         + 0.20 * max(_daily_feature_scalar(daily_features, "portfolio_cash_pressure"), 0.0)
         + 0.18 * max(_daily_feature_scalar(daily_features, "cash_regime_pressure") - 0.12, 0.0)
     )
+    is_holdcash_v3_decoder = decoder_profile_name == "holdcash_v3"
+    min_gross_exposure_target = 0.18 if is_holdcash_v3_decoder else 0.12
+    min_candidate_budget = 4.0 if is_holdcash_v3_decoder else 2.0
+    min_position_cap_target = 0.10 if is_holdcash_v3_decoder else 0.08
+
     global_targets["gross_exposure_target"] = float(
         np.clip(
             global_targets["gross_exposure_target"] - risk_off_score * decoder_profile["defensive_cash_scale"],
-            0.12,
+            min_gross_exposure_target,
             0.98,
         )
     )
     global_targets["candidate_budget"] = float(
         np.clip(
             global_targets["candidate_budget"] - risk_off_score * decoder_profile["candidate_defensive_penalty"],
-            2.0,
+            min_candidate_budget,
             12.0,
         )
     )
@@ -628,22 +638,22 @@ def predict_policy_v3(
     global_targets["max_position_weight_target"] = float(
         np.clip(
             global_targets["max_position_weight_target"] - risk_off_score * decoder_profile["position_cap_defensive_penalty"],
-            0.08,
+            min_position_cap_target,
             0.28,
         )
     )
     global_targets["hold_bias_target"] = float(
         np.clip(
-            global_targets["hold_bias_target"] + risk_off_score * decoder_profile["hold_bias_bonus"] + reversal_pressure * 0.04,
+            global_targets["hold_bias_target"] + risk_off_score * decoder_profile["hold_bias_bonus"] + reversal_pressure * (0.02 if is_holdcash_v3_decoder else 0.04),
             0.10,
             0.95,
         )
     )
     global_targets["reduce_bias_target"] = float(
         np.clip(
-            0.10
-            + risk_off_score * 0.22
-            + reversal_pressure * 0.06
+            (0.08 if is_holdcash_v3_decoder else 0.10)
+            + risk_off_score * (0.12 if is_holdcash_v3_decoder else 0.22)
+            + reversal_pressure * (0.05 if is_holdcash_v3_decoder else 0.06)
             + decoder_profile["reduce_bias_bonus"],
             0.0,
             0.65,
@@ -651,29 +661,39 @@ def predict_policy_v3(
     )
     global_targets["exit_patience_target"] = float(
         np.clip(
-            global_targets["hold_bias_target"] + decoder_profile["exit_patience_bonus"] - risk_off_score * 0.20,
-            0.05,
+            (
+                0.18
+                + global_targets["hold_bias_target"] * 0.16
+                + decoder_profile["exit_patience_bonus"]
+                + reversal_pressure * 0.08
+                - risk_off_score * (0.08 if is_holdcash_v3_decoder else 0.20)
+            )
+            if is_holdcash_v3_decoder
+            else (
+                global_targets["hold_bias_target"] + decoder_profile["exit_patience_bonus"] - risk_off_score * 0.20
+            ),
+            0.10 if is_holdcash_v3_decoder else 0.05,
             0.95,
         )
     )
     global_targets["reentry_guard_target"] = float(
         np.clip(
             decoder_profile["reversal_cooldown_bonus"]
-            + reversal_pressure * 0.28
-            + risk_off_score * 0.08,
+            + reversal_pressure * (0.22 if is_holdcash_v3_decoder else 0.28)
+            + risk_off_score * (0.04 if is_holdcash_v3_decoder else 0.08),
             0.0,
-            0.45,
+            0.35 if is_holdcash_v3_decoder else 0.45,
         )
     )
     global_targets = {
-        "gross_exposure_target": float(np.clip(_finite_scalar(global_targets["gross_exposure_target"], default=0.35), 0.15, 0.98)),
-        "candidate_budget": float(np.clip(_finite_scalar(global_targets["candidate_budget"], default=4.0), 2.0, 12.0)),
+        "gross_exposure_target": float(np.clip(_finite_scalar(global_targets["gross_exposure_target"], default=0.35), min_gross_exposure_target, 0.98)),
+        "candidate_budget": float(np.clip(_finite_scalar(global_targets["candidate_budget"], default=4.0), min_candidate_budget, 12.0)),
         "turnover_budget": float(np.clip(_finite_scalar(global_targets["turnover_budget"], default=0.18), 0.08, 1.00)),
-        "max_position_weight_target": float(np.clip(_finite_scalar(global_targets["max_position_weight_target"], default=0.12), 0.08, 0.28)),
+        "max_position_weight_target": float(np.clip(_finite_scalar(global_targets["max_position_weight_target"], default=0.12), min_position_cap_target, 0.28)),
         "hold_bias_target": float(np.clip(_finite_scalar(global_targets["hold_bias_target"], default=0.24), 0.10, 0.95)),
         "reduce_bias_target": float(np.clip(_finite_scalar(global_targets["reduce_bias_target"], default=0.10), 0.0, 0.65)),
-        "exit_patience_target": float(np.clip(_finite_scalar(global_targets["exit_patience_target"], default=0.20), 0.05, 0.95)),
-        "reentry_guard_target": float(np.clip(_finite_scalar(global_targets["reentry_guard_target"], default=0.0), 0.0, 0.45)),
+        "exit_patience_target": float(np.clip(_finite_scalar(global_targets["exit_patience_target"], default=0.20), 0.10 if is_holdcash_v3_decoder else 0.05, 0.95)),
+        "reentry_guard_target": float(np.clip(_finite_scalar(global_targets["reentry_guard_target"], default=0.0), 0.0, 0.35 if is_holdcash_v3_decoder else 0.45)),
     }
 
     probability_map = {label: action_prob[:, idx] for idx, label in enumerate(ACTION_CLASSES)}

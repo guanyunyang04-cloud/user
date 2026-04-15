@@ -33,7 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     defaults = resolve_active_policy_defaults()
     parser = argparse.ArgumentParser(description="Export the latest continuous-policy shadow action panel.")
     parser.add_argument("--model-path", default="")
-    parser.add_argument("--pool-name", default=defaults["pool_name"] or "liquid500")
+    parser.add_argument(
+        "--pool-name",
+        default=defaults["pool_name"] or "liquid500",
+        help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to export whole-A learned selection actions.",
+    )
     parser.add_argument("--signal-date", default=get_latest_completed_trading_date())
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
     parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))

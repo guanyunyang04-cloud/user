@@ -10,6 +10,8 @@ import pandas as pd
 DEFAULT_MAX_POSITIONS = 8
 DEFAULT_MAX_POSITION_WEIGHT = 0.20
 DEFAULT_TURNOVER_LIMIT = 0.60
+DEFAULT_EXECUTION_DEADBAND_ABS = 0.0010
+DEFAULT_EXECUTION_DEADBAND_REL = 0.04
 
 
 @dataclass
@@ -356,6 +358,25 @@ class PortfolioState:
         exit_patience_target = float(np.clip(exit_patience_target, 0.05, 0.95))
         reentry_guard_target = float((global_targets or {}).get("reentry_guard_target", 0.0) or 0.0)
         reentry_guard_target = float(np.clip(reentry_guard_target, 0.0, 0.45))
+        execution_deadband_abs = float(
+            np.clip(
+                max(
+                    DEFAULT_EXECUTION_DEADBAND_ABS,
+                    min(position_cap_target * 0.02, turnover_budget * 0.01),
+                ),
+                DEFAULT_EXECUTION_DEADBAND_ABS,
+                0.0030,
+            )
+        )
+        execution_deadband_rel = float(
+            np.clip(
+                DEFAULT_EXECUTION_DEADBAND_REL
+                + hold_bias_target * 0.015
+                + exit_patience_target * 0.010,
+                DEFAULT_EXECUTION_DEADBAND_REL,
+                0.06,
+            )
+        )
 
         def _days_since(mapping: dict[str, str], stock: str) -> float:
             raw_value = str(mapping.get(stock, "") or "").strip()
@@ -512,6 +533,38 @@ class PortfolioState:
                 execution_action = "reduce"
             else:
                 execution_action = "hold"
+            delta_weight = float(new_weight - previous_weight)
+            contradictory_micro_rebalance = False
+            if previous_weight > 1e-8:
+                deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
+                effective_deadband = deadband
+                model_action_name = model_action.strip().lower()
+                if model_action_name == "hold" and delta_weight < 0.0:
+                    effective_deadband = max(
+                        deadband,
+                        execution_deadband_abs * 1.75,
+                        previous_weight * (execution_deadband_rel + 0.025),
+                    )
+                elif model_action_name == "add" and delta_weight < 0.0:
+                    effective_deadband = max(
+                        deadband,
+                        execution_deadband_abs * 1.50,
+                        previous_weight * (execution_deadband_rel + 0.020),
+                    )
+                elif model_action_name == "reduce" and delta_weight > 0.0:
+                    effective_deadband = max(
+                        deadband,
+                        execution_deadband_abs * 1.25,
+                        previous_weight * (execution_deadband_rel + 0.010),
+                    )
+                contradictory_micro_rebalance = abs(delta_weight) <= effective_deadband and (
+                    model_action_name == "hold"
+                    or (model_action_name == "add" and delta_weight < 0.0)
+                    or (model_action_name == "reduce" and delta_weight > 0.0)
+                )
+                if contradictory_micro_rebalance:
+                    execution_action = "hold"
+                deadband = effective_deadband
 
             actions.append(
                 {
@@ -522,7 +575,7 @@ class PortfolioState:
                     "execution_action": execution_action,
                     "current_weight": previous_weight,
                     "target_weight": new_weight,
-                    "delta_weight": new_weight - previous_weight,
+                    "delta_weight": delta_weight,
                     "current_price": current_price,
                     "entry_price_before": previous_entry_price,
                     "peak_price_before": previous_peak_price,
@@ -533,6 +586,8 @@ class PortfolioState:
                     "action_strength": float(policy.at[stock, "action_strength"] or 0.0),
                     "target_delta_hint": float(policy.at[stock, "target_delta_hint"] or 0.0),
                     "exit_urgency": float(policy.at[stock, "exit_urgency"] or 0.0),
+                    "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
+                    "contradictory_micro_rebalance": bool(contradictory_micro_rebalance),
                 }
             )
 
@@ -623,6 +678,8 @@ class PortfolioState:
             "reduce_bias_target": reduce_bias_target,
             "exit_patience_target": exit_patience_target,
             "reentry_guard_target": reentry_guard_target,
+            "execution_deadband_abs": execution_deadband_abs,
+            "execution_deadband_rel": execution_deadband_rel,
             "recent_reversal_rate_20d": float(self.portfolio_features().get("recent_reversal_rate_20d", 0.0)),
             "raw_turnover": raw_turnover,
             "realized_turnover": realized_turnover,

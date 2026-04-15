@@ -24,6 +24,8 @@
 - 新要求一旦改变默认链路，必须先统一代码、脚本入口、manifest、trade plan 展示和 brain 文档
 - `agent` 做本地 Web 控制台联调、截图、前端验收或短期临时服务检查时，默认在同一 PowerShell 会话中用 `Start-Job` 拉起服务
 - 这条 `Start-Job` 默认只属于 `agent` 运行口径，不改用户侧公开教程默认
+- Windows 下做 `project_consistency_check.py`、`doc_guard.py check` 这类守卫验收时，若需要干净输出，优先显式使用 `yolos` 环境里的 `python.exe`
+- `conda run -n yolos ...` 在 Windows 上可能追加非脚本噪声尾输出；只要显式 `yolos` Python 复跑通过，就不要把这类噪声误判成守卫失败
 
 ## 3. 协议方法
 - formal 验证采用滚动窗口协议
@@ -75,7 +77,15 @@
   - `python daily_research/continuous_policy/export_action_panel.py --help`
   - `python daily_research/continuous_policy/analyze_behavior_gap.py --help`
   - `python daily_research/continuous_policy/conclusion_ledger.py --help`
+  - `all_a` / `learned_all_a` 现在是 continuous_policy 的显式候选域入口；不再需要靠空 `pool_name` 隐式回退全A
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260413 --shadow-start-date 20260401 --shadow-end-date 20260413`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v5 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_learned_all_a_smoke_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_learned_all_a_holdcash_v3_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --sequence-layers 1 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r3`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --sequence-layers 2 --tag cp_v3_seq_learned_all_a_holdcash_v3_depth_r1`
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-evaluate -- --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v5`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v3 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5 --train-start-date 20250701 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_holdcash_r2`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --tag cp_v3_seq_holdcash_v5_formal_r1`
@@ -98,6 +108,30 @@
     - 短窗 `holdcash_v5 / reduceexit_v4 / cash_v4 / reduceexit_cash_v4` 都只作为 repair / 局部修补对照
     - 若 `training_evidence` 不足，就先 strict resume / 扩窗口，不把该 run 当终局证据
     - 对照完成后 `latest_*` 已回切到 `cp_v3_seq_holdcash_r1`
+  - 当目标切到 `learned_all_a` 时：
+    - `liquid500` 继续保留为 same-protocol 对照组
+    - `cp_v3_seq_learned_all_a_smoke_r1`：
+      - `holdcash_v5` 在 capped 全A smoke 下评估侧 `hold_share = 0.0`
+      - shadow 侧年化 `-0.5546` / Sharpe `-2.3499`
+      - `training_evidence = insufficient`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_r1`：
+      - 同域改成 `holdcash_v3` 后，评估侧 `hold_share = 0.2532`
+      - `cash_timing_quality_1d = 0.0598`
+      - 但 shadow 侧仍为负，且 `training_evidence = insufficient`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1`：
+      - `training_evidence` 已充足：`train_day_count = 409`、`teacher_action_rows = 37130`、`best_epoch = 43 / 48`
+      - 但评估侧 `hold_share = 0.0`、`cash_timing_quality_1d = -0.1311`
+      - shadow 侧虽然年化转正到 `0.2585`，但 `hold_share = 0.0`、`cash_timing_quality_1d = -0.2839`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`：
+      - 在 `portfolio_simulator.py` 增加 execution deadband 后，只改执行层口径，不改 train window / decoder profile / pool
+      - 评估侧 `hold_share = 0.2809`、`immediate_reversal_rate_3d = 0.3086`、`annual_return = 1.0161`
+      - shadow 侧 `hold_share = 0.5189`、`immediate_reversal_rate_3d = 0.0196`
+      - promotion gate 仍失败在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - 当前收敛结论：
+      - capped 全A方向仍可继续研究，但暂不做 universe 扩张
+      - execution deadband 已成为新的固定基线；下一轮优先修 `learned_all_a` 侧的 `reduce / cash`
+      - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 是当前最强 capped 全A challenger，但默认 `latest_*` 仍不跟随它
+      - 比较完成后 `latest_*` 已重新回切到 `cp_v3_seq_holdcash_r1`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_v2 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset swing_v2`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v5 --epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5`
   - `python daily_research/execution/run_execution_app.py run --task continuous-policy-train -- --trainer-backend formal_torch_hier_v4 --decoder-profile holdcash_v5 --epochs 44 --min-epochs 32 --resume-mode strict --pool-name liquid500 --label-preset holdcash_v5`
@@ -201,3 +235,11 @@
   - `governance_layer.md`
 - 时间顺序过程和原始证据：
   - `episodic_memory.md`
+
+## 2026-04-15 更新
+- `seq_v3` 现在已经支持正式 `--sequence-layers`；后续 depth 对照统一走 protocol，不再走临时分叉
+- 本轮口径固定：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 保留为当前主线 capped 全A challenger
+  - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 只保留为 depth side challenger
+  - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
+- challenger 比较完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime_state` 必须回切到 `cp_v3_seq_holdcash_r1`

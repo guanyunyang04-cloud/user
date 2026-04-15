@@ -37,7 +37,11 @@ from daily_research.continuous_policy.training_contracts import (
 def build_parser() -> argparse.ArgumentParser:
     defaults = resolve_active_policy_defaults()
     parser = argparse.ArgumentParser(description="Train the continuous portfolio policy stack.")
-    parser.add_argument("--pool-name", default=defaults["pool_name"] or "liquid500")
+    parser.add_argument(
+        "--pool-name",
+        default=defaults["pool_name"] or "liquid500",
+        help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to let the policy learn selection over the whole A-share universe.",
+    )
     parser.add_argument("--start-date", default=defaults["start_date"] or "20250318")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
@@ -75,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=1.5e-3)
     parser.add_argument("--hidden-dim", type=int, default=192)
+    parser.add_argument("--sequence-layers", type=int, default=1)
     parser.add_argument("--daily-hidden-dim", type=int, default=96)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
@@ -247,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=args.learning_rate,
             hidden_dim=max(int(args.hidden_dim), 224),
             sequence_hidden_dim=max(int(args.hidden_dim // 2), 96),
+            sequence_layers=max(int(args.sequence_layers), 1),
             daily_hidden_dim=args.daily_hidden_dim,
             dropout=max(float(args.dropout), 0.10),
             daily_dropout=args.daily_dropout,
