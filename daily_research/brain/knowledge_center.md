@@ -168,3 +168,13 @@
   - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
   - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
   - 比较 challenger 时可以让 `latest_*` 临时跟随最新 run，但只要 gate 未过，默认指针必须回切到当前 strongest 锚点
+
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 进一步证明：
+  - 对 capped 全A主线，组合级再平衡语义与个股级策略意图必须继续显式分开
+  - continuity 报表里的 `execution_action` 可以按策略意图把“强 add 但被组合归一化挤成小减仓”的个股记成 `hold`
+  - 但内部 portfolio state 不能因此丢失真实 sell-side 历史；需要额外保留 `state_update_action`
+  - 否则 future state 会被报表语义污染，收益轨迹会出现假性漂移
+- 这类“报表语义与状态记账解耦”的 repair，已经在不损失 `annual_return / sharpe` 的前提下，把 capped 全A主线的 `hold_share / reduce_success_rate_5d / immediate_reversal_rate_3d` 同时往正确方向推进
+- `formal_r5` 也进一步确认：
+  - 当前最硬的剩余缺口已经不是 `hold_share`
+  - 而是 `exit_timeliness_rate_5d` 与 `cash_timing_quality_1d`

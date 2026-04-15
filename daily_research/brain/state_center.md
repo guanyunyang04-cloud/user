@@ -387,3 +387,26 @@
   - `cp_v3_seq_holdcash_r1` 继续作为 strongest temporal 默认锚点
   - `latest_*` 与 `runtime/portfolio_state.json` 已在本轮 protocol 后再次回切到 `cp_v3_seq_holdcash_r1`
   - 下一轮主线继续围绕 `formal_r4` 修 `reduce / exit / cash`，不扩 `max_universe_size`
+
+## 2026-04-15 formal_r5 更新
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 已取代 `formal_r4`，成为新的 capped 全A主线 challenger
+- 本轮只做了 execution semantics 最小 repair：
+  - 对“`model_action = add` 但被组合归一化挤成小幅减仓”的个股，continuity 报表改记 `hold`
+  - 同时保留 `state_update_action` 写回真实 sell-side 历史，避免 future state 被报表语义污染
+- 相比 `formal_r4`，`formal_r5` 在不损失收益的前提下改善了：
+  - `annual_return: 0.9652 -> 0.9652`
+  - `sharpe: 5.7715 -> 5.7715`
+  - `hold_share: 0.4055 -> 0.4726`
+  - `reduce_success_rate_5d: 0.3250 -> 0.3889`
+  - `profit_take_too_early_share: 0.2879 -> 0.1364`
+  - `immediate_reversal_rate_3d: 0.2769 -> 0.1965`
+  - shadow `hold_share: 0.5566 -> 0.5849`
+  - shadow `immediate_reversal_rate_3d: 0.0213 -> 0.0`
+- promotion gate 仍未通过：
+  - `reduce_success_rate_5d = 0.3889`
+  - `exit_timeliness_rate_5d = 0.0`
+  - `cash_timing_quality_1d = -0.1415`
+- 当前局部瓶颈已进一步收口：
+  - `hold_share` 不再是 capped 全A第一瓶颈
+  - 下一优先级继续锁定 `exit` 形成与 `cash timing`
+- `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部回切到 `cp_v3_seq_holdcash_r1`

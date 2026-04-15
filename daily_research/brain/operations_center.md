@@ -258,3 +258,19 @@
 - 当前研究口径：
   - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
   - 下一轮仍围绕 `formal_r4` 修 `reduce / exit / cash`
+
+## 2026-04-15 formal_r5 更新
+- 本轮新增 protocol 命令：
+  - `python daily_research/execution/run_execution_app.py run --task continuous-policy-protocol -- --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --resume-mode strict --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --sequence-layers 1 --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+- 本轮新增执行层纪律：
+  - 对新增的 `intent trim` 路径，continuity 报表使用 `execution_action`
+  - future state 使用 `state_update_action`
+  - 原有 `deadband` 微调继续沿旧口径处理，不改历史基线
+- 本轮治理收口：
+  - `formal_r5` protocol 完成后确认仍为 `shadow_only`
+  - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已再次回切到 `cp_v3_seq_holdcash_r1`
+- 当前研究口径改为：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 是最新 capped 全A challenger
+  - 下一轮优先修 `exit / cash`
+  - 不扩 `max_universe_size`
+  - 不让 depth 接主线

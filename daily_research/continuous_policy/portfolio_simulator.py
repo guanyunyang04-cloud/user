@@ -399,6 +399,7 @@ class PortfolioState:
             hold_quality = float(policy.at[stock, "hold_quality"] or 0.0) if "hold_quality" in policy.columns else 0.0
             add_quality = float(policy.at[stock, "add_quality"] or 0.0) if "add_quality" in policy.columns else 0.0
             reduce_quality = float(policy.at[stock, "reduce_quality"] or 0.0) if "reduce_quality" in policy.columns else 0.0
+            exit_urgency = float(policy.at[stock, "exit_urgency"] or 0.0) if "exit_urgency" in policy.columns else 0.0
             planned_holding_days = float(policy.at[stock, "planned_holding_days"] or 0.0) if "planned_holding_days" in policy.columns else 0.0
             current_weight = float(current.get(stock, 0.0))
             days_since_last_sell = _days_since(self.last_sell_dates, stock)
@@ -448,9 +449,19 @@ class PortfolioState:
                     current_weight,
                 )
                 if current_weight > 1e-8:
+                    floor_ratio = float(np.clip(0.90 + hold_bias_target * 0.04, 0.85, 0.98))
+                    if (
+                        exit_urgency < 0.16
+                        and add_quality > max(0.10, hold_quality - 0.02)
+                        and reduce_quality < hold_quality + 0.04
+                    ):
+                        floor_ratio = max(
+                            floor_ratio,
+                            float(np.clip(0.96 + hold_bias_target * 0.02, 0.94, 1.00)),
+                        )
                     protected_floor.at[stock] = max(
                         protected_floor.at[stock],
-                        current_weight * np.clip(0.90 + hold_bias_target * 0.04, 0.85, 0.98),
+                        current_weight * floor_ratio,
                     )
                 continue
             if action == "open":
@@ -533,8 +544,10 @@ class PortfolioState:
                 execution_action = "reduce"
             else:
                 execution_action = "hold"
+            state_update_action = execution_action
             delta_weight = float(new_weight - previous_weight)
             contradictory_micro_rebalance = False
+            contradictory_intent_trim = False
             if previous_weight > 1e-8:
                 deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
                 effective_deadband = deadband
@@ -562,7 +575,21 @@ class PortfolioState:
                     or (model_action_name == "add" and delta_weight < 0.0)
                     or (model_action_name == "reduce" and delta_weight > 0.0)
                 )
+                contradictory_intent_trim = (
+                    model_action_name == "add"
+                    and delta_weight < 0.0
+                    and new_weight > 1e-8
+                    and previous_hold_days < 18
+                    and exit_urgency < 0.16
+                    and drawdown_from_peak_before > -0.04
+                    and unrealized_pnl_before > -0.02
+                    and abs(delta_weight) <= max(effective_deadband * 2.5, previous_weight * 0.12)
+                    and new_weight >= previous_weight * 0.86
+                )
                 if contradictory_micro_rebalance:
+                    execution_action = "hold"
+                    state_update_action = "hold"
+                elif contradictory_intent_trim:
                     execution_action = "hold"
                 deadband = effective_deadband
 
@@ -588,6 +615,7 @@ class PortfolioState:
                     "exit_urgency": float(policy.at[stock, "exit_urgency"] or 0.0),
                     "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
                     "contradictory_micro_rebalance": bool(contradictory_micro_rebalance),
+                    "state_update_action": state_update_action,
                 }
             )
 
@@ -624,16 +652,17 @@ class PortfolioState:
         for item in actions:
             stock = str(item.get("stock", "") or "")
             execution_action = str(item.get("execution_action", "") or "").strip().lower()
-            if not stock or execution_action not in {"open", "add", "reduce", "exit", "hold"}:
+            state_update_action = str(item.get("state_update_action", execution_action) or execution_action).strip().lower()
+            if not stock or state_update_action not in {"open", "add", "reduce", "exit", "hold"}:
                 continue
-            next_last_action_labels[stock] = execution_action
-            if execution_action in {"open", "add"}:
+            next_last_action_labels[stock] = state_update_action
+            if state_update_action in {"open", "add"}:
                 next_last_buy_dates[stock] = signal_date_text
-            if execution_action in {"reduce", "exit"}:
+            if state_update_action in {"reduce", "exit"}:
                 next_last_sell_dates[stock] = signal_date_text
-            if execution_action == "reduce":
+            if state_update_action == "reduce":
                 next_last_reduce_dates[stock] = signal_date_text
-            if execution_action == "exit":
+            if state_update_action == "exit":
                 next_last_exit_dates[stock] = signal_date_text
 
         self.holdings = next_holdings
@@ -656,14 +685,14 @@ class PortfolioState:
             event["days_ago"] = int(event.get("days_ago", 999) or 999) + 1
         self.recent_action_events = [event for event in self.recent_action_events if int(event.get("days_ago", 999) or 999) <= 30]
         for item in actions:
-            execution_action = str(item.get("execution_action", "") or "").strip().lower()
-            if execution_action not in {"open", "add", "reduce", "exit"}:
+            state_update_action = str(item.get("state_update_action", item.get("execution_action", "")) or "").strip().lower()
+            if state_update_action not in {"open", "add", "reduce", "exit"}:
                 continue
             self.recent_action_events.append(
                 {
                     "date": signal_date_text,
                     "stock": str(item.get("stock", "") or "").strip().upper(),
-                    "execution_action": execution_action,
+                    "execution_action": state_update_action,
                     "days_ago": 0,
                 }
             )

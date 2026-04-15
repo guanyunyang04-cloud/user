@@ -13539,3 +13539,80 @@ position,000001.SZ,1200,12.38,
 - 本轮复盘：
   - 这次规划更新把下一步从“扩大候选域”纠偏成“先修形成机制”
   - 这样可以避免重复“先把问题放大，再回头做归因”的低 ROI 路径
+
+## 2026-04-15 formal_r5 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议或下一步
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是当前 capped 全A主线 challenger
+    - 当前最硬剩余瓶颈是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 下一轮最高 ROI 不在扩 `universe`，而在继续修执行层语义与 `reduce` 形成
+  - 假设：
+    - 如果把“组合归一化带来的非意图性小减仓”从 continuity 口径中剥出来，`reduce_success_rate_5d` 与 `reversal` 有机会继续改善
+- 归因：
+  - 用 `formal_r4` evaluation 样本级复盘后确认：
+    - `66` 个 evaluation `reduce` 里，`64` 个在同状态 teacher 口径下其实是 `hold`
+    - 其中 `53` 个还是 `model_action = add`，说明主要问题不是 teacher 完全不给信号，而是组合归一化把强 `add` 仓位挤成了 `execution reduce`
+    - 失败 `reduce` 的共同形态更像“短持有、低 `exit_urgency`、浅回撤、小幅减重”，而不是 teacher 风格的真实防守性减仓
+  - 同时确认：
+    - 直接额外放大 `exit` 升级会伤收益，但不够抬起 `exit_timeliness_rate_5d`
+    - 所以本轮最优补丁应聚焦 execution semantics，而不是重开 teacher 或 held-path 大修
+- 实施：
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中加入新的 `intent trim` 路径：
+    - 对 `model_action = add`、`exit_urgency` 低、浅回撤、轻微减重的仓位，continuity 报表改记 `hold`
+  - 同时新增 `state_update_action`：
+    - continuity / 报表使用 `execution_action`
+    - future state 继续用 `state_update_action` 记录真实 sell-side 历史
+  - 这样避免再次犯“为了修报表语义，把 portfolio state 也一起改坏”的低 ROI 错误
+- 快速烟测：
+  - `formal_r4_patch_eval_r1` 证明：如果顺手扩大 `exit` 升级，会伤 `annual_return / sharpe`
+  - `formal_r4_patch_eval_r2` 证明：只保留语义纠偏方向是对的，但如果 portfolio state 也跟着改 `hold`，收益路径会漂
+  - `formal_r4_patch_eval_r5` 证明：把 `execution_action` 与 `state_update_action` 解耦后，可以在不损失收益的前提下改善 continuity 指标
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37020`
+    - `best_epoch = 45 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9652`
+    - `sharpe = 5.7715`
+    - `hold_share = 0.4726`
+    - `reduce_success_rate_5d = 0.3889`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1415`
+    - `immediate_reversal_rate_3d = 0.1965`
+  - 相比 `formal_r4`：
+    - `annual_return: 0.9652 -> 0.9652`
+    - `sharpe: 5.7715 -> 5.7715`
+    - `hold_share: 0.4055 -> 0.4726`
+    - `reduce_success_rate_5d: 0.3250 -> 0.3889`
+    - `profit_take_too_early_share: 0.2879 -> 0.1364`
+    - `immediate_reversal_rate_3d: 0.2769 -> 0.1965`
+    - `cash_timing_quality_1d` 基本未动，仍是 `-0.1415`
+  - shadow 侧：
+    - `hold_share = 0.5849`
+    - `immediate_reversal_rate_3d = 0.0`
+    - `cash_timing_quality_1d = -0.4274`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r5` 已取代 `formal_r4`，成为最新 capped 全A challenger
+    - 这轮最有效的不是扩大 action space，而是把 execution semantics 和 state accounting 解耦
+    - `hold_share` 已进一步抬升，`immediate_reversal_rate_3d` 已明显下降
+  - 推断：
+    - 当前 `hold_share` 已不再是 capped 全A第一瓶颈
+    - 下一优先级继续锁定 `exit` 形成与 `cash timing`
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是 `exit` 形成与 `gross / turnover / cash` 预算头联动，而不是重新扩大 `universe`
+- 治理收口：
+  - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 challenger 接管
