@@ -408,16 +408,17 @@ class PortfolioState:
             days_since_last_reduce = _days_since(self.last_reduce_dates, stock)
             weak_tail_zero_candidate.at[stock] = bool(
                 current_weight > 1e-8
-                and current_hold_days >= 6.0
-                and action in {"hold", "reduce", "skip"}
+                and current_hold_days >= 8.0
                 and (
-                    exit_urgency >= 0.22 + exit_patience_target * 0.08
+                    (action == "exit" and exit_urgency >= 0.18)
                     or (
-                        reduce_quality >= hold_quality + 0.02
-                        and delta_hint <= max(0.02, hold_boost + 0.01)
+                        action in {"hold", "reduce", "skip"}
+                        and exit_urgency >= 0.26 + exit_patience_target * 0.06
+                        and reduce_quality >= hold_quality + 0.04
+                        and delta_hint <= max(0.01, hold_boost)
+                        and add_quality <= hold_quality + 0.02
                     )
                 )
-                and add_quality <= hold_quality + 0.03
             )
             if action == "exit":
                 forced_zero.at[stock] = True

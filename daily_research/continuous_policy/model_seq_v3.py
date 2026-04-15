@@ -723,21 +723,21 @@ def predict_policy_v3(
     cash_pressure_scalar = float(np.clip(np.nanmean(portfolio_cash_pressure), 0.0, 1.0)) if len(portfolio_cash_pressure) else 0.0
     turnover_ramp_bonus = float(
         np.clip(
-            max(deployment_gap - 0.06, 0.0) * (0.42 if is_holdcash_v3_decoder else 0.34)
-            + max(cash_pressure_scalar - 0.10, 0.0) * 0.18
+            max(deployment_gap - 0.08, 0.0) * (0.24 if is_holdcash_v3_decoder else 0.20)
+            + max(cash_pressure_scalar - 0.12, 0.0) * 0.10
             - reversal_pressure * 0.04,
             0.0,
-            0.18 if is_holdcash_v3_decoder else 0.14,
+            0.08 if is_holdcash_v3_decoder else 0.06,
         )
     )
     if deployment_gap > 0.12 or cash_pressure_scalar > 0.18:
         turnover_floor = float(
             np.clip(
-                0.14
-                + max(deployment_gap - 0.10, 0.0) * 0.40
-                + max(cash_pressure_scalar - 0.14, 0.0) * 0.16,
-                0.14,
-                0.34 if is_holdcash_v3_decoder else 0.30,
+                0.12
+                + max(deployment_gap - 0.12, 0.0) * 0.18
+                + max(cash_pressure_scalar - 0.18, 0.0) * 0.08,
+                0.12,
+                0.22 if is_holdcash_v3_decoder else 0.18,
             )
         )
         global_targets["turnover_budget"] = float(
@@ -748,6 +748,23 @@ def predict_policy_v3(
                 ),
                 0.08,
                 1.00,
+            )
+        )
+        gross_relief_cap = float(
+            np.clip(
+                0.74
+                + min(current_gross_exposure, 0.22) * 0.35
+                + max(cash_pressure_scalar - 0.18, 0.0) * 0.14
+                + max(global_targets["hold_bias_target"] - 0.55, 0.0) * 0.05,
+                0.74,
+                0.88 if is_holdcash_v3_decoder else 0.84,
+            )
+        )
+        global_targets["gross_exposure_target"] = float(
+            np.clip(
+                min(global_targets["gross_exposure_target"], gross_relief_cap),
+                min_gross_exposure_target,
+                0.98,
             )
         )
     duration_days = np.asarray([HOLDING_DAYS_BY_BUCKET.get(str(label), 0.0) for label in predicted_duration_labels], dtype=float)
@@ -796,6 +813,24 @@ def predict_policy_v3(
                 and market_downside_pressure[idx] < 0.12
             ):
                 label = "exit"
+            reduce_rescue = (
+                reduce_prob > max(0.16 + reduce_bias_target * 0.08, exit_prob - 0.10)
+                and hold_days[idx] >= 4.0
+                and reduce_quality[idx] > hold_quality[idx] + 0.03
+                and (
+                    signal_decay_speed[idx] > 0.05
+                    or market_downside_pressure[idx] > 0.14
+                    or exit_urgency[idx] > 0.18
+                    or drawdown_from_peak[idx] < -0.05
+                )
+            )
+            if reduce_rescue and label not in {"exit"} and not (
+                add_quality[idx] > reduce_quality[idx] + 0.08
+                and hold_quality[idx] > reduce_quality[idx] - 0.01
+                and exit_urgency[idx] < 0.14
+                and market_downside_pressure[idx] < 0.12
+            ):
+                label = "reduce"
             if label in {"hold", "skip"} and (market_downside_pressure[idx] > 0.18 or portfolio_cash_pressure[idx] > 0.18 or signal_decay_speed[idx] > 0.10) and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02 and drawdown_from_peak[idx] < -0.03:
                 label = "reduce"
             if (
@@ -803,6 +838,10 @@ def predict_policy_v3(
                 and add_quality[idx] > 0.14
                 and duration_name in {"swing", "extended"}
                 and current_weight[idx] < 0.12
+                and reduce_quality[idx] < hold_quality[idx] + 0.03
+                and exit_urgency[idx] < 0.18
+                and signal_decay_speed[idx] < 0.08
+                and market_downside_pressure[idx] < 0.16
             ):
                 label = "add"
         else:

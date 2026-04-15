@@ -13839,3 +13839,138 @@ position,000001.SZ,1200,12.38,
     - 先做 `reduce` 再引入与 `gross / turnover / cash` moderation
     - 再观察是否能把 `formal_r5` 和 `formal_r6` 合流成新的平衡 challenger
     - 最后才讨论 teacher 连续化、深时序 backbone 或更大全A
+
+## 2026-04-15 planner 视角推进（formal_r6 后续）
+- 触发：
+  - 用户要求继续以“高瞻远瞩的策略规划者”视角推进：先发散，再收敛，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 仍是当前最平衡的 capped 全A基线
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r6` 已证明 `exit` 可以被抬起，但同时把 `reduce` 挤成 `0`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点，不是 capped 全A的主研究基线
+  - 推断：
+    - 当前最优路径不再是继续单点追 `exit`
+    - 更高 ROI 的方向是把 `formal_r5` 的平衡性与 `formal_r6` 的 exit 能力做受约束合流
+  - 假设：
+    - 如果能在保住 `exit_timeliness_rate_5d > 0` 的前提下恢复非零 `reduce`，并把 `cash / gross / turnover` 拉回节制区间，capped 全A主线会进入新的可比较状态
+- 发散路径：
+  - 路径 A：直接沿 `formal_r6` 继续加大 risk-on 爬坡，争取保持高收益与高 exit 命中
+  - 路径 B：从 `formal_r5` 出发，只局部移植 `formal_r6` 的 exit 释放能力
+  - 路径 C：显式做 sell-side 双通道修补，让 `reduce` 与 `exit` 不再相互挤压
+  - 路径 D：提前切 teacher 连续化或更深 backbone，试图一次性学出更干净的 sell-side 结构
+  - 路径 E：继续扩 `max_universe_size`，把 capped 全A直接向更完整全A推进
+- 收敛判断：
+  - 路径 A 风险最高，当前不取
+  - 路径 B + C 的组合是当前主线
+  - 路径 D 继续后置为中期升级线
+  - 路径 E 继续冻结
+- 优先级：
+  - `P0`：冻结研究角色分工
+    - `formal_r5` = balanced baseline
+    - `formal_r6` = exit-lift proof challenger
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `P1`：优先修 sell-side 结构
+    - 目标不是增加更多 `exit`
+    - 而是把 `reduce` 从 `0` 恢复成“非零且有选择性”的中间动作，避免 sell-side 全部挤成 `exit`
+  - `P2`：同步压回 `formal_r6` 的过冲预算头
+    - 重点是 `gross / turnover / cash`
+    - 目标是把 `avg_gross_exposure` 从过高区间拉回可控范围，而不是重新打回高现金冻结
+  - `P3`：守住当前已经得到的正资产
+    - `hold_share >= 0.40`
+    - `exit_timeliness_rate_5d > 0`
+    - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：继续冻结这些后置路径
+    - 不扩 `max_universe_size`
+    - 不让 depth / hier_v4 接主线
+    - 不把 teacher 连续化提前到当前主线实现
+- 动作后复盘：
+  - 当前最优顺序已经进一步收敛为：
+    - 先修 sell-side 双通道与 budget moderation
+    - 再观察 `formal_r5` 与 `formal_r6` 是否能合流成新的平衡 challenger
+    - 最后才讨论 teacher 连续化、更深架构与更大全A
+
+## 2026-04-15 formal_r7 执行闭环
+- 触发：
+  - 用户要求基于既定计划继续一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 是当前 capped 全A更平衡的 baseline
+    - `formal_r6` 已证明 `exit` 可以被抬起，但把 `reduce` 挤成 `0`
+    - 当前主计划已经收敛到 “sell-side 双通道 + budget moderation”
+  - 推断：
+    - 最小变量集合应优先锁定在 held-path 的 `reduce` 恢复，以及 `gross / turnover / cash` 的过冲收束
+    - 如果只改这一层，最值得先看的不是收益本身，而是 `reduce / exit / cash` 三个行为指标能否同时保住至少两项
+  - 假设：
+    - 如果 quick eval 能把 capped 全A拉回“非零 reduce + 不过冲 gross”区间，就值得重跑完整 formal protocol
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中进一步：
+    - 收紧高现金阶段的 `turnover_budget` ramp
+    - 给 `gross_exposure_target` 加入受控 moderation cap
+    - 新增 held-path 的 `reduce_rescue`
+    - 收紧无条件 `add` 升级门槛
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中收紧 weak-tail forced-zero 条件，避免 budget-drop 把过多 `reduce` 吃成 `exit`
+- quick eval：
+  - 用 `formal_r5__train` artifact 复测后得到：
+    - `annual_return = 0.7661`
+    - `hold_share = 0.4118`
+    - `reduce_success_rate_5d = 0.4231`
+    - `exit_timeliness_rate_5d = 0.5`
+    - `cash_timing_quality_1d = -0.1927`
+  - 用 `formal_r6__train` artifact 复测后得到：
+    - `annual_return = 1.4539`
+    - `hold_share = 0.5269`
+    - `reduce_success_rate_5d = 0.6667`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `avg_gross_exposure = 0.8223`
+  - 这说明本轮补丁方向更像“把主线拉回有 reduce、不过冲的平衡区”，而不是继续放大 `formal_r6` 的 exit-risk-on 风格
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r7`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36291`
+    - `best_epoch = 44 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 1.4352`
+    - `sharpe = 6.8519`
+    - `avg_gross_exposure = 0.5507`
+    - `avg_turnover = 0.0644`
+    - `hold_share = 0.4632`
+    - `reduce_success_rate_5d = 0.2917`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.2561`
+    - `immediate_reversal_rate_3d = 0.1143`
+  - 相比 `formal_r6`：
+    - `avg_gross_exposure: 0.9234 -> 0.5507`
+    - `avg_turnover: 0.0882 -> 0.0644`
+    - `reduce_success_rate_5d: 0.0000 -> 0.2917`
+    - `immediate_reversal_rate_3d: 0.0181 -> 0.1143`
+    - `sharpe: 4.5815 -> 6.8519`
+    - 但 `exit_timeliness_rate_5d: 1.0 -> 0.0`
+  - 相比 `formal_r5`：
+    - `annual_return: 0.9652 -> 1.4352`
+    - `sharpe: 5.7715 -> 6.8519`
+    - `avg_gross_exposure: 0.5089 -> 0.5507`
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.1143`
+    - 但 `reduce_success_rate_5d: 0.3889 -> 0.2917`
+    - `cash_timing_quality_1d: -0.1415 -> -0.2561`
+    - `exit_timeliness_rate_5d` 仍然是 `0.0`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项继续是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r7` 没有延续 quick eval 里出现的局部 `exit` 改善
+    - 但它确实把 `formal_r6` 的 gross 过冲拉了回来，也把 `reduce` 从 `0` 抬回了非零
+    - 同时收益、夏普和 reversal 相比 `formal_r5` 都更强
+  - 推断：
+    - `formal_r7` 是新的 capped 全A综合 challenger
+    - 但当前最硬的剩余缺口重新收口成：`exit` 没站住、`reduce` 仍偏 wrong-side、`cash timing` 仍为负
+    - 这也再次证明 quick eval 能筛方向，但不能替代 retrain 后的正式 verdict
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是更精确的 `exit / reduce` 双通道分界，而不是再一次去放大 risk-on 或扩 `universe`
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r7` 静默接管

@@ -457,4 +457,45 @@
   - `formal_r6` 已证明“turnover ramp + weak-tail exit release”能把 `exit` 从饥饿状态里抬出来
   - 但它同时把 `reduce` 挤没，并把暴露推得过高，所以暂不取代 `formal_r5` 作为 capped 全A的 balanced repair baseline
   - `formal_r5` 继续保留为当前更平衡的 capped 全A修补基线；`formal_r6` 作为 exit-lift proof challenger 保留
+- `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已再次回切到它
+
+## 2026-04-15 planner 再收敛
+- 当前 capped 全A的主研究口径不再是单点追 `exit`，而是以“`formal_r5` 的平衡性 + `formal_r6` 的 exit 能力”做受约束合流
+- 当前最优起点固定为：
+  - balanced baseline：`cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+  - exit-lift proof challenger：`cp_v3_seq_learned_all_a_holdcash_v3_formal_r6`
+  - 默认 strongest temporal 锚点：`cp_v3_seq_holdcash_r1`
+- 下一优先级固定为：
+  - 先补回非零且有选择性的 `reduce`
+  - 再给 `gross / turnover / cash` 预算头加回节制，避免 `formal_r6` 式 risk-on 过冲
+  - 继续显式保住 `hold_share >= 0.40`、`exit_timeliness_rate_5d > 0`、`immediate_reversal_rate_3d` 不明显反弹
+  - 暂不扩 `max_universe_size`
+  - 暂不把 depth / hier_v4 或 teacher 连续化提前到当前主线实现
+
+## 2026-04-15 formal_r7 更新
+- 最新完整执行的 capped 全A formal protocol 已推进到 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r7`，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 36291`
+  - `best_epoch = 44 / 48`
+- `formal_r7` 相比前两条 capped 全A challenger 的位置已经更清楚：
+  - 相比 `formal_r6`：
+    - `avg_gross_exposure: 0.9234 -> 0.5507`
+    - `avg_turnover: 0.0882 -> 0.0644`
+    - `reduce_success_rate_5d: 0.0000 -> 0.2917`
+    - `immediate_reversal_rate_3d: 0.0181 -> 0.1143`
+    - `sharpe: 4.5815 -> 6.8519`
+    - 但 `exit_timeliness_rate_5d: 1.0 -> 0.0`
+  - 相比 `formal_r5`：
+    - `annual_return: 0.9652 -> 1.4352`
+    - `sharpe: 5.7715 -> 6.8519`
+    - `avg_gross_exposure: 0.5089 -> 0.5507`
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.1143`
+    - 但 `reduce_success_rate_5d: 0.3889 -> 0.2917`
+    - `cash_timing_quality_1d: -0.1415 -> -0.2561`
+    - `exit_timeliness_rate_5d` 仍然是 `0.0`
+- 当前主线收敛更新为：
+  - `formal_r7` 现在是新的 capped 全A综合 challenger
+  - 但它仍未过 gate，失败项继续是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - `formal_r5` 继续保留为 reduce / cash 更平衡的 repair reference
+  - `formal_r6` 继续保留为 exit-lift proof reference
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已再次回切到它

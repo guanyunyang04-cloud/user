@@ -194,3 +194,14 @@
   - 把 `formal_r5` 视为更平衡的 continuity / reduce 基线
   - 把 `formal_r6` 视为 exit-lift proof branch
   - 下一轮在两者之间补回 `reduce` 选择性与 `cash / gross / turnover` 节制
+
+- inference-only quick eval 对 execution / decoder patch 的方向判断很有价值，但它不能替代完整 retrain 后的 formal verdict；`formal_r7` 已再次证明，quick eval 中出现的局部 `exit` 改善不一定会在新 artifact 上稳定保留
+- sell-side 双通道修补时，最容易出现的结构性回摆不是“收益变差”，而是：
+  - `exit` 回落到 `0`
+  - `reduce` 变成高比例 wrong-side profit-taking
+  - `cash_timing_quality_1d` 仍然为负
+- 因此 capped 全A 主线当前最可靠的判断口径，不能只看 `annual_return / sharpe`，必须同时盯住：
+  - `reduce_success_rate_5d`
+  - `exit_timeliness_rate_5d`
+  - `cash_timing_quality_1d`
+  - `immediate_reversal_rate_3d`
