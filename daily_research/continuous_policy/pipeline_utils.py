@@ -140,6 +140,34 @@ def _build_forward_benchmark_return(prepared: PreparedPolicyInputs, horizon: int
     return prepared.benchmark_close.shift(-horizon).div(prepared.benchmark_close).sub(1.0)
 
 
+def _future_window_extreme(close: pd.DataFrame, window: int, *, mode: str) -> pd.DataFrame:
+    shifted = close.shift(-1)
+    reversed_frame = shifted.iloc[::-1]
+    if mode == "max":
+        rolled = reversed_frame.rolling(window, min_periods=1).max()
+    elif mode == "min":
+        rolled = reversed_frame.rolling(window, min_periods=1).min()
+    else:
+        raise ValueError(f"Unsupported future extreme mode: {mode}")
+    return rolled.iloc[::-1]
+
+
+def _build_future_max_up_frame(prepared: PreparedPolicyInputs, horizon: int) -> pd.DataFrame:
+    horizon = int(horizon)
+    if horizon <= 0:
+        raise ValueError(f"Future max-up horizon must be positive, got {horizon}.")
+    future_max = _future_window_extreme(prepared.close, horizon, mode="max")
+    return future_max.div(prepared.close).sub(1.0)
+
+
+def _build_future_min_down_frame(prepared: PreparedPolicyInputs, horizon: int) -> pd.DataFrame:
+    horizon = int(horizon)
+    if horizon <= 0:
+        raise ValueError(f"Future min-down horizon must be positive, got {horizon}.")
+    future_min = _future_window_extreme(prepared.close, horizon, mode="min")
+    return future_min.div(prepared.close).sub(1.0)
+
+
 def build_action_outcome_frame(
     *,
     prepared: PreparedPolicyInputs,
@@ -158,6 +186,8 @@ def build_action_outcome_frame(
     for horizon in horizons:
         excess_frame = _build_forward_excess_frame(prepared, int(horizon))
         benchmark_return = _build_forward_benchmark_return(prepared, int(horizon))
+        max_up_frame = _build_future_max_up_frame(prepared, int(horizon))
+        min_down_frame = _build_future_min_down_frame(prepared, int(horizon))
         working[f"forward_excess_{int(horizon)}d"] = [
             float(excess_frame.at[date_value, stock_value])
             if date_value in date_lookup and stock_value in column_lookup
@@ -167,6 +197,18 @@ def build_action_outcome_frame(
         working[f"forward_benchmark_return_{int(horizon)}d"] = [
             float(benchmark_return.loc[date_value]) if date_value in date_lookup else np.nan
             for date_value in working["date"]
+        ]
+        working[f"future_max_up_{int(horizon)}d"] = [
+            float(max_up_frame.at[date_value, stock_value])
+            if date_value in date_lookup and stock_value in column_lookup
+            else np.nan
+            for date_value, stock_value in zip(working["date"], working["stock"])
+        ]
+        working[f"future_min_down_{int(horizon)}d"] = [
+            float(min_down_frame.at[date_value, stock_value])
+            if date_value in date_lookup and stock_value in column_lookup
+            else np.nan
+            for date_value, stock_value in zip(working["date"], working["stock"])
         ]
     working["date"] = working["date"].dt.strftime("%Y-%m-%d")
     return working
@@ -205,6 +247,14 @@ def compute_continuity_metrics(
         open_forward_5d = open_rows["forward_excess_5d"].dropna()
         reduce_forward_5d = reduce_rows["forward_excess_5d"].dropna()
         exit_forward_5d = exit_rows["forward_excess_5d"].dropna()
+        open_add_rows = action_outcomes.loc[action_lookup.isin({"open", "add"})]
+        position_rows = action_outcomes.loc[action_lookup.isin({"open", "add", "hold"})]
+        sell_rows = action_outcomes.loc[action_lookup.isin({"reduce", "exit"})]
+        main_leg_threshold_10d = 0.06
+        entry_max_up_10d = open_add_rows["future_max_up_10d"].dropna()
+        hold_max_up_10d = hold_rows["future_max_up_10d"].dropna()
+        sell_leg_frame = sell_rows.loc[:, ["future_max_up_10d", "future_min_down_10d"]].dropna()
+        position_max_up_10d = position_rows["future_max_up_10d"].dropna()
 
         metrics["avg_hold_days_before_action"] = float(held_rows["hold_days_before"].mean()) if not held_rows.empty else 0.0
         metrics["median_hold_days_before_action"] = float(held_rows["hold_days_before"].median()) if not held_rows.empty else 0.0
@@ -255,6 +305,28 @@ def compute_continuity_metrics(
         )
         metrics["profitable_reduce_share"] = (
             float((reduce_rows["unrealized_pnl_before"].fillna(0.0) > 0.05).mean()) if not reduce_rows.empty else 0.0
+        )
+        metrics["main_leg_threshold_10d"] = float(main_leg_threshold_10d)
+        metrics["trend_capture_rate_10d"] = (
+            float((position_max_up_10d >= main_leg_threshold_10d).mean()) if not position_max_up_10d.empty else 0.0
+        )
+        metrics["entry_trend_capture_rate_10d"] = (
+            float((entry_max_up_10d >= main_leg_threshold_10d).mean()) if not entry_max_up_10d.empty else 0.0
+        )
+        metrics["entry_trend_capture_quality_10d"] = float(entry_max_up_10d.mean()) if not entry_max_up_10d.empty else 0.0
+        metrics["hold_trend_capture_quality_10d"] = float(hold_max_up_10d.mean()) if not hold_max_up_10d.empty else 0.0
+        metrics["missed_main_leg_rate_10d"] = (
+            float((sell_leg_frame["future_max_up_10d"] >= main_leg_threshold_10d).mean()) if not sell_leg_frame.empty else 0.0
+        )
+        metrics["premature_sell_share_10d"] = (
+            float(
+                (
+                    (sell_leg_frame["future_max_up_10d"] >= main_leg_threshold_10d)
+                    & (sell_leg_frame["future_min_down_10d"] > -0.04)
+                ).mean()
+            )
+            if not sell_leg_frame.empty
+            else 0.0
         )
 
         if not open_rows.empty:
@@ -395,6 +467,13 @@ def compute_continuity_metrics(
             "early_reduce_share",
             "early_exit_share",
             "profitable_reduce_share",
+            "main_leg_threshold_10d",
+            "trend_capture_rate_10d",
+            "entry_trend_capture_rate_10d",
+            "entry_trend_capture_quality_10d",
+            "hold_trend_capture_quality_10d",
+            "missed_main_leg_rate_10d",
+            "premature_sell_share_10d",
             "days_to_first_open",
             "cold_start_open_rate",
             "immediate_reversal_rate_3d",

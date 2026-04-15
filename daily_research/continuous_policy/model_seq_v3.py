@@ -23,7 +23,6 @@ from daily_research.continuous_policy.model_v2 import (
     _prepare_matrix,
     _resolve_device,
     _save_checkpoint,
-    _scalar_heads_loss,
     _signature_hash,
     _signature_payload,
     _split_indices,
@@ -34,6 +33,135 @@ from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_
 
 
 SEQUENCE_STEP_ORDER: tuple[int, ...] = tuple(sorted(STATE_SEQUENCE_LAGS, reverse=True)) + (0,)
+MAX_CONTINUOUS_HOLDING_DAYS = 20.0
+SAMPLE_SCALAR_LOSS_WEIGHTS: dict[str, float] = {
+    "target_delta_hint": 1.30,
+    "entry_quality": 0.60,
+    "hold_quality": 1.00,
+    "add_quality": 0.70,
+    "reduce_quality": 0.95,
+    "exit_urgency": 1.10,
+    "reentry_readiness": 0.45,
+    "holding_days_ratio": 1.35,
+}
+DAILY_TARGET_LOSS_WEIGHTS: dict[str, float] = {
+    "gross_exposure_target": 1.05,
+    "candidate_budget": 0.60,
+    "turnover_budget": 0.90,
+    "max_position_weight_target": 0.55,
+    "hold_bias_target": 1.15,
+}
+MULTI_OBJECTIVE_LOSS_WEIGHTS: dict[str, float] = {
+    "action_hard": 0.55,
+    "action_soft": 0.45,
+    "action_total": 0.72,
+    "duration_total": 0.18,
+    "scalar_total": 1.18,
+    "daily_total": 0.35,
+}
+
+
+def _weighted_scalar_heads_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    weights: dict[str, float] | None = None,
+) -> torch.Tensor:
+    device = next(iter(outputs.values())).device
+    total_loss = torch.tensor(0.0, device=device)
+    total_weight = 0.0
+    for name, target in targets.items():
+        head_weight = float((weights or {}).get(name, 1.0))
+        total_loss = total_loss + nn.functional.smooth_l1_loss(outputs[name], target) * head_weight
+        total_weight += head_weight
+    if total_weight <= 0.0:
+        return total_loss
+    return total_loss / float(total_weight)
+
+
+def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
+    row_count = int(len(sample_frame))
+    soft_targets = np.full((row_count, len(ACTION_CLASSES)), 1.0e-4, dtype=np.float32)
+    held_mask = (
+        sample_frame.get("holding_flag", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float) > 0.5
+    )
+    current_weight = sample_frame.get("current_weight", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float)
+    hold_days = sample_frame.get("hold_days", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float)
+    drawdown = sample_frame.get("drawdown_from_peak", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float)
+    market_downside = sample_frame.get("market_downside_pressure", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float)
+    signal_decay = sample_frame.get("signal_decay_speed", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=float)
+    duration_ratio = np.clip(
+        sample_frame["planned_holding_days"].astype(float).to_numpy(dtype=np.float32) / float(MAX_CONTINUOUS_HOLDING_DAYS),
+        0.0,
+        1.0,
+    )
+    delta_hint = sample_frame["target_delta_hint"].astype(float).to_numpy(dtype=np.float32)
+    entry_quality = np.clip(sample_frame["entry_quality"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    hold_quality = np.clip(sample_frame["hold_quality"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    add_quality = np.clip(sample_frame["add_quality"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    reduce_quality = np.clip(sample_frame["reduce_quality"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    exit_urgency = np.clip(sample_frame["exit_urgency"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    reentry_readiness = np.clip(sample_frame["reentry_readiness"].astype(float).to_numpy(dtype=np.float32), 0.0, None)
+    action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
+
+    for idx in range(row_count):
+        held = bool(held_mask[idx] or current_weight[idx] > 1.0e-8)
+        scores = soft_targets[idx]
+        if held:
+            scores[action_lookup["hold"]] = (
+                0.22
+                + hold_quality[idx] * 1.10
+                + duration_ratio[idx] * 0.30
+                + max(float(delta_hint[idx]), 0.0) * 0.12
+            )
+            scores[action_lookup["add"]] = (
+                0.06
+                + add_quality[idx] * 0.95
+                + max(float(delta_hint[idx]), 0.0) * 0.12
+                + max(0.10 - current_weight[idx], 0.0) * 0.08
+            )
+            scores[action_lookup["reduce"]] = (
+                0.05
+                + reduce_quality[idx] * 0.90
+                + max(-float(delta_hint[idx]), 0.0) * 0.30
+                + max(signal_decay[idx], 0.0) * 0.12
+            )
+            scores[action_lookup["exit"]] = (
+                0.03
+                + exit_urgency[idx] * 1.05
+                + max(-float(delta_hint[idx]) - 0.12, 0.0) * 0.45
+                + max(-drawdown[idx] - 0.06, 0.0) * 0.18
+                + max(market_downside[idx], 0.0) * 0.10
+            )
+            scores[action_lookup["skip"]] = 0.01
+            scores[action_lookup["open"]] = 0.01
+            if duration_ratio[idx] > 0.45 and hold_quality[idx] >= reduce_quality[idx] - 0.02:
+                scores[action_lookup["hold"]] += 0.12
+            if hold_days[idx] >= 6.0 and exit_urgency[idx] > 0.20:
+                scores[action_lookup["exit"]] += 0.06
+        else:
+            scores[action_lookup["skip"]] = (
+                0.12
+                + max(-float(delta_hint[idx]), 0.0) * 0.12
+                + max(0.06 - entry_quality[idx], 0.0) * 0.15
+            )
+            scores[action_lookup["open"]] = (
+                0.18
+                + entry_quality[idx] * 1.10
+                + duration_ratio[idx] * 0.24
+                + max(float(delta_hint[idx]), 0.0) * 0.16
+                + reentry_readiness[idx] * 0.10
+            )
+            scores[action_lookup["hold"]] = 0.01
+            scores[action_lookup["add"]] = 0.01
+            scores[action_lookup["reduce"]] = 0.01
+            scores[action_lookup["exit"]] = 0.01
+
+        hard_label = str(sample_frame.iloc[idx]["action_label"])
+        if hard_label in action_lookup:
+            scores[action_lookup[hard_label]] += 0.28
+        score_sum = float(scores.sum())
+        soft_targets[idx] = scores / score_sum if score_sum > 0.0 else np.full(len(ACTION_CLASSES), 1.0 / len(ACTION_CLASSES), dtype=np.float32)
+    return soft_targets.astype(np.float32)
 
 
 def _sequence_column_name(base_name: str, step: int) -> str:
@@ -99,6 +227,7 @@ class TemporalSamplePolicyNet(nn.Module):
         self.reduce_head = nn.Linear(int(hidden_dim), 1)
         self.exit_head = nn.Linear(int(hidden_dim), 1)
         self.reentry_head = nn.Linear(int(hidden_dim), 1)
+        self.holding_days_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -115,6 +244,7 @@ class TemporalSamplePolicyNet(nn.Module):
             "reduce_quality": self.reduce_head(fused).squeeze(-1),
             "exit_urgency": self.exit_head(fused).squeeze(-1),
             "reentry_readiness": self.reentry_head(fused).squeeze(-1),
+            "holding_days_ratio": torch.sigmoid(self.holding_days_head(fused).squeeze(-1)),
         }
 
 
@@ -221,10 +351,25 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     daily_cfg = dict(payload.get("daily_model_config", {}) or {})
     sample_model = TemporalSamplePolicyNet(**sample_cfg)
     daily_model = DailyControllerNet(**daily_cfg)
-    sample_model.load_state_dict(payload["sample_model_state_dict"])
-    daily_model.load_state_dict(payload["daily_model_state_dict"])
+    sample_load = sample_model.load_state_dict(payload["sample_model_state_dict"], strict=False)
+    daily_load = daily_model.load_state_dict(payload["daily_model_state_dict"], strict=False)
+    sample_missing = set(getattr(sample_load, "missing_keys", []) or [])
+    sample_unexpected = set(getattr(sample_load, "unexpected_keys", []) or [])
+    daily_missing = set(getattr(daily_load, "missing_keys", []) or [])
+    daily_unexpected = set(getattr(daily_load, "unexpected_keys", []) or [])
+    allowed_sample_missing = {"holding_days_head.weight", "holding_days_head.bias"}
+    if sample_unexpected or (sample_missing - allowed_sample_missing):
+        raise RuntimeError(
+            "continuous_policy seq_v3 artifact load failed because stored sample model weights are incompatible with the current architecture."
+        )
+    if daily_missing or daily_unexpected:
+        raise RuntimeError(
+            "continuous_policy seq_v3 artifact load failed because stored daily model weights are incompatible with the current architecture."
+        )
     sample_model.eval()
     daily_model.eval()
+    training_diagnostics = dict(payload.get("training_diagnostics", {}) or {})
+    training_diagnostics["supports_holding_days_head"] = not bool(sample_missing)
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -243,7 +388,7 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         daily_means=np.asarray(payload.get("daily_means", []), dtype=np.float32),
         daily_stds=np.asarray(payload.get("daily_stds", []), dtype=np.float32),
         train_summary=dict(payload.get("train_summary", {}) or {}),
-        training_diagnostics=dict(payload.get("training_diagnostics", {}) or {}),
+        training_diagnostics=training_diagnostics,
         training_contract=dict(payload.get("training_contract", {}) or {}),
         trained_at=str(payload.get("trained_at", "") or ""),
     )
@@ -304,6 +449,7 @@ def fit_policy_models_v3(
         duration_lookup.get(str(value), 0)
         for value in sample_frame["planned_holding_bucket"].astype(str).where(sample_frame["planned_holding_bucket"].astype(str).isin(DURATION_CLASSES), "avoid")
     ], dtype=np.int64)
+    y_action_soft = _build_action_soft_targets(sample_frame)
 
     sample_targets = {
         "target_delta_hint": sample_frame["target_delta_hint"].astype(float).to_numpy(dtype=np.float32),
@@ -313,6 +459,11 @@ def fit_policy_models_v3(
         "reduce_quality": sample_frame["reduce_quality"].astype(float).to_numpy(dtype=np.float32),
         "exit_urgency": sample_frame["exit_urgency"].astype(float).to_numpy(dtype=np.float32),
         "reentry_readiness": sample_frame["reentry_readiness"].astype(float).to_numpy(dtype=np.float32),
+        "holding_days_ratio": np.clip(
+            sample_frame["planned_holding_days"].astype(float).to_numpy(dtype=np.float32) / float(MAX_CONTINUOUS_HOLDING_DAYS),
+            0.0,
+            1.0,
+        ),
     }
     daily_targets = {
         "gross_exposure_target": daily_frame["gross_exposure_target"].astype(float).to_numpy(dtype=np.float32),
@@ -345,6 +496,10 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
+    signature_payload["sequence_model_revision"] = "seq_v3_continuous_primary_r1"
+    signature_payload["sample_scalar_loss_weights"] = dict(SAMPLE_SCALAR_LOSS_WEIGHTS)
+    signature_payload["daily_target_loss_weights"] = dict(DAILY_TARGET_LOSS_WEIGHTS)
+    signature_payload["multi_objective_loss_weights"] = dict(MULTI_OBJECTIVE_LOSS_WEIGHTS)
     signature_hash = _signature_hash(signature_payload)
     checkpoint_last = run_root / "checkpoint_last.pt"
     checkpoint_best = run_root / "checkpoint_best.pt"
@@ -378,6 +533,7 @@ def fit_policy_models_v3(
         torch.as_tensor(X_sequence[train_idx], dtype=torch.float32),
         torch.as_tensor(y_action[train_idx], dtype=torch.long),
         torch.as_tensor(y_duration[train_idx], dtype=torch.long),
+        torch.as_tensor(y_action_soft[train_idx], dtype=torch.float32),
         *[torch.as_tensor(sample_targets[name][train_idx], dtype=torch.float32) for name in sample_targets],
     )
     loader = DataLoader(dataset, batch_size=max(32, int(batch_size)), shuffle=True, drop_last=False)
@@ -385,6 +541,7 @@ def fit_policy_models_v3(
     X_sequence_val = torch.as_tensor(X_sequence[val_idx], dtype=torch.float32, device=device)
     y_action_val = torch.as_tensor(y_action[val_idx], dtype=torch.long, device=device)
     y_duration_val = torch.as_tensor(y_duration[val_idx], dtype=torch.long, device=device)
+    y_action_soft_val = torch.as_tensor(y_action_soft[val_idx], dtype=torch.float32, device=device)
     val_targets = {name: torch.as_tensor(values[val_idx], dtype=torch.float32, device=device) for name, values in sample_targets.items()}
     X_daily_train = torch.as_tensor(X_daily[daily_train_idx], dtype=torch.float32, device=device)
     X_daily_val = torch.as_tensor(X_daily[daily_val_idx], dtype=torch.float32, device=device)
@@ -399,11 +556,34 @@ def fit_policy_models_v3(
         batch_count = 0
         for batch in loader:
             batch = [item.to(device) for item in batch]
-            static_batch, sequence_batch, action_batch, duration_batch, delta_batch, entry_batch, hold_batch, add_batch, reduce_batch, exit_batch, reentry_batch = batch
+            (
+                static_batch,
+                sequence_batch,
+                action_batch,
+                duration_batch,
+                action_soft_batch,
+                delta_batch,
+                entry_batch,
+                hold_batch,
+                add_batch,
+                reduce_batch,
+                exit_batch,
+                reentry_batch,
+                holding_days_batch,
+            ) = batch
             outputs = sample_model(static_batch, sequence_batch)
-            action_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
+            action_ce_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
+            action_soft_loss = nn.functional.kl_div(
+                nn.functional.log_softmax(outputs["action_logits"], dim=-1),
+                action_soft_batch,
+                reduction="batchmean",
+            )
+            action_loss = (
+                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_hard"] * action_ce_loss
+                + MULTI_OBJECTIVE_LOSS_WEIGHTS["action_soft"] * action_soft_loss
+            )
             duration_loss = nn.functional.cross_entropy(outputs["duration_logits"], duration_batch)
-            scalar_loss = _scalar_heads_loss(
+            scalar_loss = _weighted_scalar_heads_loss(
                 outputs,
                 {
                     "target_delta_hint": delta_batch,
@@ -413,9 +593,15 @@ def fit_policy_models_v3(
                     "reduce_quality": reduce_batch,
                     "exit_urgency": exit_batch,
                     "reentry_readiness": reentry_batch,
+                    "holding_days_ratio": holding_days_batch,
                 },
+                SAMPLE_SCALAR_LOSS_WEIGHTS,
             )
-            loss = action_loss + 0.55 * duration_loss + 0.40 * scalar_loss
+            loss = (
+                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_total"] * action_loss
+                + MULTI_OBJECTIVE_LOSS_WEIGHTS["duration_total"] * duration_loss
+                + MULTI_OBJECTIVE_LOSS_WEIGHTS["scalar_total"] * scalar_loss
+            )
             sample_optimizer.zero_grad(set_to_none=True)
             loss.backward()
             nn.utils.clip_grad_norm_(sample_model.parameters(), max_norm=2.0)
@@ -424,7 +610,7 @@ def fit_policy_models_v3(
             batch_count += 1
 
         daily_outputs = daily_model(X_daily_train)
-        daily_loss = _scalar_heads_loss(daily_outputs, daily_targets_train)
+        daily_loss = _weighted_scalar_heads_loss(daily_outputs, daily_targets_train, DAILY_TARGET_LOSS_WEIGHTS)
         daily_optimizer.zero_grad(set_to_none=True)
         daily_loss.backward()
         nn.utils.clip_grad_norm_(daily_model.parameters(), max_norm=2.0)
@@ -434,12 +620,28 @@ def fit_policy_models_v3(
         daily_model.eval()
         with torch.no_grad():
             val_outputs = sample_model(X_static_val, X_sequence_val)
-            val_action_loss = nn.functional.cross_entropy(val_outputs["action_logits"], y_action_val, weight=action_weight_tensor)
+            val_action_ce_loss = nn.functional.cross_entropy(val_outputs["action_logits"], y_action_val, weight=action_weight_tensor)
+            val_action_soft_loss = nn.functional.kl_div(
+                nn.functional.log_softmax(val_outputs["action_logits"], dim=-1),
+                y_action_soft_val,
+                reduction="batchmean",
+            )
+            val_action_loss = (
+                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_hard"] * val_action_ce_loss
+                + MULTI_OBJECTIVE_LOSS_WEIGHTS["action_soft"] * val_action_soft_loss
+            )
             val_duration_loss = nn.functional.cross_entropy(val_outputs["duration_logits"], y_duration_val)
-            val_scalar_loss = _scalar_heads_loss(val_outputs, val_targets)
+            val_scalar_loss = _weighted_scalar_heads_loss(val_outputs, val_targets, SAMPLE_SCALAR_LOSS_WEIGHTS)
             val_daily_outputs = daily_model(X_daily_val)
-            val_daily_loss = _scalar_heads_loss(val_daily_outputs, daily_targets_val)
-            val_loss = float((val_action_loss + 0.55 * val_duration_loss + 0.40 * val_scalar_loss + 0.30 * val_daily_loss).detach().cpu())
+            val_daily_loss = _weighted_scalar_heads_loss(val_daily_outputs, daily_targets_val, DAILY_TARGET_LOSS_WEIGHTS)
+            val_loss = float(
+                (
+                    MULTI_OBJECTIVE_LOSS_WEIGHTS["action_total"] * val_action_loss
+                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["duration_total"] * val_duration_loss
+                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["scalar_total"] * val_scalar_loss
+                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["daily_total"] * val_daily_loss
+                ).detach().cpu()
+            )
 
         train_loss = float(epoch_sample_loss / max(batch_count, 1))
         history.append({"epoch": int(epoch), "train_loss": train_loss, "validation_loss": val_loss})
@@ -497,6 +699,10 @@ def fit_policy_models_v3(
         "train_sample_rows": int(len(train_idx)),
         "validation_sample_rows": int(len(val_idx)),
         "history_tail": history[-8:],
+        "supports_holding_days_head": True,
+        "sample_scalar_loss_weights": dict(SAMPLE_SCALAR_LOSS_WEIGHTS),
+        "daily_target_loss_weights": dict(DAILY_TARGET_LOSS_WEIGHTS),
+        "multi_objective_loss_weights": dict(MULTI_OBJECTIVE_LOSS_WEIGHTS),
     }
     artifact = TorchContinuousPolicySeqArtifact(
         sample_model=sample_model.cpu(),
@@ -570,6 +776,7 @@ def predict_policy_v3(
         reduce_quality = outputs["reduce_quality"].cpu().numpy()
         exit_urgency = np.clip(outputs["exit_urgency"].cpu().numpy(), 0.0, None)
         reentry_readiness = np.clip(outputs["reentry_readiness"].cpu().numpy(), 0.0, None)
+        holding_days_ratio = np.clip(outputs["holding_days_ratio"].cpu().numpy(), 0.0, 1.0)
 
         daily_row = pd.DataFrame([{name: float(daily_features.get(name, 0.0) or 0.0) for name in artifact.daily_feature_names}])
         daily_x = torch.as_tensor(
@@ -767,7 +974,14 @@ def predict_policy_v3(
                 0.98,
             )
         )
-    duration_days = np.asarray([HOLDING_DAYS_BY_BUCKET.get(str(label), 0.0) for label in predicted_duration_labels], dtype=float)
+    bucket_duration_days = np.asarray([HOLDING_DAYS_BY_BUCKET.get(str(label), 0.0) for label in predicted_duration_labels], dtype=float)
+    supports_holding_days_head = bool(artifact.training_diagnostics.get("supports_holding_days_head", True))
+    regressed_duration_days = np.clip(holding_days_ratio * float(MAX_CONTINUOUS_HOLDING_DAYS), 0.0, float(MAX_CONTINUOUS_HOLDING_DAYS))
+    duration_days = (
+        np.clip(bucket_duration_days * 0.58 + regressed_duration_days * 0.42, 0.0, float(MAX_CONTINUOUS_HOLDING_DAYS))
+        if supports_holding_days_head
+        else bucket_duration_days
+    )
     adjusted_labels = predicted_labels.astype(object).copy()
     reduce_bias_target = float(global_targets["reduce_bias_target"])
     exit_patience_target = float(global_targets["exit_patience_target"])
@@ -950,6 +1164,8 @@ def predict_policy_v3(
             "reentry_readiness": reentry_readiness,
             "planned_holding_bucket": predicted_duration_labels,
             "planned_holding_days": duration_days,
+            "planned_holding_days_bucket": bucket_duration_days,
+            "planned_holding_days_regressed": regressed_duration_days,
             "decoder_profile": decoder_profile_name,
         }
     ).set_index("stock")

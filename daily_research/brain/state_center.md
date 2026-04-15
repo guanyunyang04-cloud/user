@@ -499,3 +499,48 @@
   - `formal_r5` 继续保留为 reduce / cash 更平衡的 repair reference
   - `formal_r6` 继续保留为 exit-lift proof reference
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已再次回切到它
+
+## 2026-04-15 formal_r8 连续主监督升级
+- 这轮主线实现已经从“局部 sell-side repair”升级到“continuous-primary supervision”：
+  - `daily_research/continuous_policy/model_seq_v3.py` 新增 `holding_days_ratio` 连续头
+  - sample loss 现在引入 `soft action target + weighted scalar heads`，并把 `target_delta_hint / hold_quality / exit_urgency / planned_holding_days` 抬成主监督
+  - evaluation / behavior audit 新增 `trend_capture_rate_10d / entry_trend_capture_rate_10d / missed_main_leg_rate_10d`
+  - strict resume signature 现已显式包含 `sequence_model_revision = seq_v3_continuous_primary_r1` 与 loss 权重，避免新旧 checkpoint 混跑
+- `cp_v3_seq_learned_all_a_holdcash_v3_formal_r8` 已完整跑完，且 `training_evidence = sufficient`：
+  - `train_day_count = 409`
+  - `teacher_action_rows = 36291`
+  - `best_epoch = 40 / 48`
+- `formal_r8` 的评估侧结果是：
+  - `annual_return = 0.9094`
+  - `sharpe = 2.8921`
+  - `max_drawdown = -0.0614`
+  - `avg_gross_exposure = 0.8173`
+  - `hold_share = 0.4378`
+  - `reduce_success_rate_5d = 0.0`
+  - `exit_timeliness_rate_5d = 0.0`
+  - `cash_timing_quality_1d = -0.3132`
+  - `immediate_reversal_rate_3d = 0.0143`
+  - `trend_capture_rate_10d = 0.4195`
+  - `entry_trend_capture_rate_10d = 0.3881`
+  - `missed_main_leg_rate_10d = 0.3333`
+- `formal_r8` 相比当前两条 capped 全A参考线的位置已经更清楚：
+  - 相比 `formal_r7`：
+    - `immediate_reversal_rate_3d: 0.1143 -> 0.0143`
+    - 但 `annual_return: 1.4352 -> 0.9094`
+    - `max_drawdown: -0.0173 -> -0.0614`
+    - `avg_gross_exposure: 0.5507 -> 0.8173`
+    - `reduce_success_rate_5d: 0.2917 -> 0.0`
+  - 相比 `formal_r5`：
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.0143`
+    - 新增了可直接观测的主升浪相关指标
+    - 但 `hold_share: 0.4726 -> 0.4378`
+    - `cash_timing_quality_1d: -0.1415 -> -0.3132`
+    - `reduce_success_rate_5d: 0.3889 -> 0.0`
+- 当前结论更新为：
+  - `formal_r8` 是新的 continuous-primary learning challenger，但仍是 `shadow_only`
+  - 这轮升级已经证明：更强的连续监督能显著压低 reversal，并把“主升浪捕获/错失”正式纳入可验证指标
+  - 但当前 sell-side channel 被压得过弱，模型动作分布已明显偏向 `open / add / hold`，尚未学稳 `reduce / exit`
+  - `formal_r5` 继续保留为 balanced repair baseline
+  - `formal_r7` 继续保留为综合 performance challenger
+  - `formal_r8` 继续保留为 continuous-learning reference
+  - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 protocol 后再次回切到它

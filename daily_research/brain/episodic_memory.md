@@ -13974,3 +13974,80 @@ position,000001.SZ,1200,12.38,
 - 治理收口：
   - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 `formal_r7` 静默接管
+
+## 2026-04-15 连续主监督升级与 formal_r8 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接完整执行，并且强调“注重最有效而不是最小改动”
+  - 当前判断是：继续做局部 sell-side 小修已经不是最高 ROI，最值得真正落地的是 continuous-primary supervision
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 仍是当前 capped 全A 的 balanced repair baseline
+    - `formal_r7` 仍是当前 capped 全A 的综合 challenger
+    - 当前项目里已经有大量连续信号，但训练时仍以离散 `action_label / planned_holding_bucket` 为主
+  - 推断：
+    - 真正的高 ROI 升级不是单纯加深网络，而是把 sample learning 的重心从“学硬标签”推向“学连续目标 + 学软动作分布”
+  - 假设：
+    - 如果连续监督真的有价值，它应该先在两件事上出现信号：
+      - `immediate_reversal_rate_3d` 明显下降
+      - 主升浪捕获可以被正式量化，而不是只靠收益侧间接猜
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中：
+    - 新增 `holding_days_ratio` 连续头
+    - 新增 `soft action target` 构造
+    - 把 sample loss 改成 `hard action + soft action + weighted scalar heads` 的连续优先组合
+    - 把 strict resume signature 显式升级为 `seq_v3_continuous_primary_r1`
+    - 允许旧 seq_v3 artifact 在缺少新 head 时安全回退到 bucket duration 口径
+  - 在 `daily_research/continuous_policy/pipeline_utils.py` 中：
+    - 新增 `future_max_up / future_min_down` 评估口径
+    - 把 `trend_capture_rate_10d / entry_trend_capture_rate_10d / missed_main_leg_rate_10d / premature_sell_share_10d` 接成正式 continuity 指标
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r8`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36291`
+    - `best_epoch = 40 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9094`
+    - `sharpe = 2.8921`
+    - `max_drawdown = -0.0614`
+    - `avg_gross_exposure = 0.8173`
+    - `hold_share = 0.4378`
+    - `reduce_success_rate_5d = 0.0`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.3132`
+    - `immediate_reversal_rate_3d = 0.0143`
+    - `trend_capture_rate_10d = 0.4195`
+    - `entry_trend_capture_rate_10d = 0.3881`
+    - `missed_main_leg_rate_10d = 0.3333`
+  - teacher-vs-model 新趋势指标对照：
+    - teacher `trend_capture_rate_10d = 0.8592`
+    - model `trend_capture_rate_10d = 0.4195`
+    - teacher `entry_trend_capture_rate_10d = 0.9307`
+    - model `entry_trend_capture_rate_10d = 0.3881`
+    - teacher `missed_main_leg_rate_10d = 0.2906`
+    - model `missed_main_leg_rate_10d = 0.3333`
+  - 动作分布也更清楚地暴露了这轮升级的偏置：
+    - `open = 13`
+    - `add = 124`
+    - `reduce = 0`
+    - `exit = 3`
+    - `hold = 109`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项更新为 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d / max_drawdown`
+- 动作后复盘：
+  - 事实：
+    - 连续主监督升级确实显著压低了 `immediate_reversal_rate_3d`
+    - 主升浪捕获/错失现在已经成为正式 continuity 指标，而不是概念性目标
+    - 但 sell-side channel 在 `formal_r8` 里被明显压弱，`reduce` 已经被压到 `0`
+  - 推断：
+    - 这轮升级方向是对的，但它当前更像“趋势学习增强器”，还不是“完整买卖策略”
+    - 下一阶段如果继续沿这条路走，最值得优先补的是显式 sell-side supervision，而不是继续单边强化持有和加仓
+  - 假设：
+    - 如果后续把 `reduce / exit` 的连续监督也补成和 long-side 同等级别，这条路线有机会真正变成更强的学习范式，而不只是单边 persistence amplifier
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r8` 静默接管

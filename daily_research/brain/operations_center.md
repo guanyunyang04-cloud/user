@@ -323,3 +323,32 @@
   - `latest_behavior_audit_summary.json`
   - `latest_conclusion_ledger.json`
   - `output/continuous_policy/runtime/portfolio_state.json`
+
+## 2026-04-15 formal_r8 操作补充
+- 本轮从“局部 repair”切到“连续主监督升级”后，正式 protocol 命令固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --pool-name learned_all_a --max-universe-size 1200 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260213 --shadow-start-date 20260202 --shadow-end-date 20260213 --benchmark 000300.SH --data-source tq --pool-rebalance-days 21 --pool-adv-window 20 --transaction-cost-bps 3.0 --slippage-bps 7.0 --sell-tax-bps 10.0 --random-seed 7 --skip-multiplier 2.0 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile holdcash_v3 --epochs 48 --min-epochs 32 --batch-size 512 --learning-rate 0.0015 --hidden-dim 192 --sequence-layers 1 --daily-hidden-dim 96 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 10 --resume-mode strict --tag cp_v3_seq_learned_all_a_holdcash_v3_formal_r8`
+- 本轮新增的正式实现位点固定为：
+  - `daily_research/continuous_policy/model_seq_v3.py`
+  - `daily_research/continuous_policy/pipeline_utils.py`
+- 本轮实现后需要记住两个新的操作纪律：
+  - 只要 `seq_v3` 的 objective / supervision 发生结构性变化，就必须让 strict resume signature 同步变化；这轮固定新增了 `sequence_model_revision = seq_v3_continuous_primary_r1`
+  - 旧 `seq_v3` artifact 可以继续加载，但推断侧必须允许无 `holding_days_head` 的 artifact 自动回退到 bucket duration 口径
+- 本轮新增的正式 continuity 指标口径固定为：
+  - `trend_capture_rate_10d`
+  - `entry_trend_capture_rate_10d`
+  - `entry_trend_capture_quality_10d`
+  - `hold_trend_capture_quality_10d`
+  - `missed_main_leg_rate_10d`
+  - `premature_sell_share_10d`
+- `formal_r8` 完成后确认仍为 `shadow_only`，因此默认运行态继续按同一治理口径回切：
+  - `latest_train_summary.json`
+  - `latest_evaluation_summary.json`
+  - `latest_export_summary.json`
+  - `latest_protocol_summary.json`
+  - `latest_behavior_audit_summary.json`
+  - `latest_conclusion_ledger.json`
+  - `output/continuous_policy/runtime/portfolio_state.json`
+- 本轮完成后的标准校验口径继续固定为：
+  - `python -m compileall -q daily_research`
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py`
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\doc_guard.py check`

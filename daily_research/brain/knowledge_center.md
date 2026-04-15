@@ -205,3 +205,25 @@
   - `exit_timeliness_rate_5d`
   - `cash_timing_quality_1d`
   - `immediate_reversal_rate_3d`
+
+- `seq_v3` 的“连续化升级”当前最有效的切入口，不是直接推翻 teacher，而是：
+  - 保留离散 `action_label / duration bucket` 作为辅助监督
+  - 把 `target_delta_hint / hold_quality / exit_urgency / planned_holding_days` 抬成主监督
+  - 再用 `soft action target` 把连续质量分数回灌到动作分布学习里
+- `holding_days_ratio` 这类连续持有时长头，确实能把模型往更强的持有连续性和更低 reversal 推过去；`formal_r8` 已经验证了这一点
+- 但如果连续化只增强 long-side persistence，而没有同步增强 sell-side channel，模型很容易退化成“更会 open / add / hold，但几乎不给 reduce / exit”：
+  - `formal_r8` 评估侧真实动作分布已经收缩到 `open = 13 / add = 124 / reduce = 0 / exit = 3 / hold = 109`
+  - 所以连续监督不是不能做，而是必须显式补 sell-side 分界与预算头节制
+- “主升浪捕获”现在已经不是纯概念，而是项目内正式 continuity 指标的一部分：
+  - `trend_capture_rate_10d`
+  - `entry_trend_capture_rate_10d`
+  - `missed_main_leg_rate_10d`
+  - 这允许后续 upgrade 不再只用 `annual_return / sharpe` 代替趋势学习质量
+- `formal_r8` 还证明了一个更细的事实：
+  - 模型的 `trend_capture_rate_10d = 0.4195`
+  - teacher 的 `trend_capture_rate_10d = 0.8592`
+  - 说明连续监督方向是对的，但当前距离“真正不漏主升浪”还有很大 gap
+- 训练目标或架构一旦发生结构性变化，strict resume 的 lineage 不能只看 feature set 和时间窗；还必须把：
+  - `sequence_model_revision`
+  - objective / loss 权重
+  显式纳入签名，否则会把旧 checkpoint 当成同 lineage 继续训练，导致假连续
