@@ -425,3 +425,82 @@
   - `python -m compileall -q daily_research`
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py`
   - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\doc_guard.py check`
+## 2026-04-16 self-opt study 操作补充
+- 自动研究入口固定为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --study-tag <study_tag>`
+- 第一轮正式执行命令已固化为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --study-tag cp_v3_seq_self_opt_focused_r1`
+- study 输出目录固定为：
+  - `daily_research/output/continuous_policy/studies/<study_tag>/study_plan.json`
+  - `daily_research/output/continuous_policy/studies/<study_tag>/trial_ranking.csv`
+  - `daily_research/output/continuous_policy/studies/<study_tag>/study_summary.json`
+  - `daily_research/output/continuous_policy/latest_study_summary.json`
+- 自动研究层的治理纪律固定为：
+  - study 允许并行比较多个 protocol trial，但不允许把 screening trial 留在 `latest_*`
+  - `run_self_optimizing_study.py` 必须在 trial 全部结束后自动 restore：
+    - `latest_train_summary.json`
+    - `latest_evaluation_summary.json`
+    - `latest_export_summary.json`
+    - `latest_protocol_summary.json`
+    - `latest_behavior_audit_summary.json`
+    - `latest_conclusion_ledger.json`
+    - `output/continuous_policy/runtime/portfolio_state.json`
+- 自动研究层的执行纪律固定为：
+  - screening 默认用 `yolos` Python，不能再用系统 `python`
+  - screening champion 不能直接 promotion
+  - 只有当某个 trial 同时满足 score、promotion gate 和 training evidence 后，才值得单独重跑更长预算 formal protocol
+
+## 2026-04-16 self-opt confirmatory 操作补充
+- 两阶段 confirmatory 入口已固化为：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --seed-study-tag cp_v3_seq_self_opt_focused_r1 --skip-screening --study-tag cp_v3_seq_self_opt_confirmatory_r1`
+- 当前 confirmatory runner 已固定支持这些正式参数：
+  - `--seed-study-tag`
+  - `--skip-screening`
+  - `--disable-confirmatory`
+  - `--confirmatory-max-candidates`
+  - `--confirmatory-epochs`
+  - `--confirmatory-min-epochs`
+- confirmatory 候选角色选择纪律已固定为：
+  - `performance_champion` = screening 中 `performance_score` 最高者
+  - `stability_champion` = screening 中 `stability_score` 最高者
+  - `depth_challenger` = `sequence_layers > baseline` 且在 gate/stability 上最接近可提升者
+  - 同一 study 内角色允许去重收口，避免重复重跑相同 trial
+- 当前 v2 评分纪律已固定为：
+  - `study_summary.json` 同时输出 `performance_score / stability_score / composite_score`
+  - `reversal / shadow_reversal / reversal_excess / threshold_gap / training_evidence` 全部进入正式打分
+  - study summary 现在同时保留 `run_tag` 与 `study_tag`，避免后续 handoff 时再出现字段语义不统一
+- 当前 confirmatory study 的标准产物目录固定为：
+  - `daily_research/output/continuous_policy/studies/cp_v3_seq_self_opt_confirmatory_r1/study_summary.json`
+  - `daily_research/output/continuous_policy/studies/cp_v3_seq_self_opt_confirmatory_r1/trial_ranking.csv`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_seq_self_opt_confirmatory_r1__confirm_01/protocol_summary.json`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_seq_self_opt_confirmatory_r1__confirm_02/protocol_summary.json`
+- 本轮执行后的默认治理纪律继续保持：
+  - confirmatory trial 允许产生自己的 protocol summary
+  - 但 study 完成后必须 restore `latest_*` 与 `runtime/portfolio_state.json`
+  - 当前 restore 的目标仍固定为 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 self-opt return_recovery 操作补充
+- Windows + `yolos` 环境下运行 `run_self_optimizing_study.py` 时，若出现 OpenMP 重复初始化，当前稳定口径是：
+  - PowerShell 前缀：`$env:KMP_DUPLICATE_LIB_OK='TRUE';`
+- 本轮 focused study 的 dry-run 命令已固化为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v1 --trial-count 3 --study-tag cp_v3_seq_self_opt_return_recovery_r1 --dry-run`
+- 本轮正式执行命令已固化为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v1 --trial-count 3 --study-tag cp_v3_seq_self_opt_return_recovery_r1`
+- 新 study profile 的执行纪律已固定为：
+  - `seq2_return_recovery_v1` 只允许搜索 `loss_profile`
+  - 其余变量固定在：
+    - `decoder_profile = budget_v3`
+    - `sequence_layers = 2`
+    - `learning_rate = 0.0012`
+    - `hidden_dim = 224`
+    - `daily_hidden_dim = 128`
+    - `dropout = 0.12`
+    - `daily_dropout = 0.08`
+    - `batch_size = 512`
+- `loss_profile` 现在已经是正式 protocol 参数，后续凡是 seq_v3 formal / self-opt 运行，都必须显式记录：
+  - `dual_channel_default_v1`
+  - `teacher_aux_continuous_v1`
+  - `teacher_aux_return_recovery_v1`
+- 本轮执行后的治理收口继续固定为：
+  - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
+  - study 完成后必须恢复到 `cp_v3_seq_holdcash_r1`

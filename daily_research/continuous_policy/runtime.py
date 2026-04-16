@@ -13,6 +13,7 @@ MODELS_ROOT = CONTINUOUS_POLICY_ROOT / "models"
 EVALUATIONS_ROOT = CONTINUOUS_POLICY_ROOT / "evaluations"
 EXPORTS_ROOT = CONTINUOUS_POLICY_ROOT / "exports"
 PROTOCOLS_ROOT = CONTINUOUS_POLICY_ROOT / "protocols"
+STUDIES_ROOT = CONTINUOUS_POLICY_ROOT / "studies"
 RUNTIME_ROOT = CONTINUOUS_POLICY_ROOT / "runtime"
 LATEST_TRAIN_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_train_summary.json"
 LATEST_EVALUATION_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_evaluation_summary.json"
@@ -20,6 +21,7 @@ LATEST_EXPORT_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_export_summary.jso
 LATEST_PROTOCOL_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_protocol_summary.json"
 LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_behavior_audit_summary.json"
 LATEST_CONCLUSION_LEDGER_PATH = CONTINUOUS_POLICY_ROOT / "latest_conclusion_ledger.json"
+LATEST_STUDY_SUMMARY_PATH = CONTINUOUS_POLICY_ROOT / "latest_study_summary.json"
 RUNTIME_STATE_PATH = RUNTIME_ROOT / "portfolio_state.json"
 
 
@@ -29,6 +31,7 @@ def ensure_layout() -> None:
     EVALUATIONS_ROOT.mkdir(parents=True, exist_ok=True)
     EXPORTS_ROOT.mkdir(parents=True, exist_ok=True)
     PROTOCOLS_ROOT.mkdir(parents=True, exist_ok=True)
+    STUDIES_ROOT.mkdir(parents=True, exist_ok=True)
     RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
 
 
@@ -73,6 +76,8 @@ def update_latest_summary(kind: str, payload: dict[str, Any]) -> Path:
         return write_json(LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH, payload)
     if normalized == "conclusion_ledger":
         return write_json(LATEST_CONCLUSION_LEDGER_PATH, payload)
+    if normalized == "study":
+        return write_json(LATEST_STUDY_SUMMARY_PATH, payload)
     raise ValueError(f"Unsupported continuous-policy latest summary kind: {kind}")
 
 

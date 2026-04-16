@@ -277,3 +277,74 @@
   - 后续优化应明确以“`formal_r11` 为底座 + 定向移植 `formal_r9` 的 sell-side 能力”为主，而不是再整体推大 defensive budget
 - strict resume lineage 这轮应继续显式滚动；本轮固定新增的是：
   - `sequence_model_revision = seq_v3_continuous_dual_channel_r2`
+- `continuous_policy` 现有 protocol 已经暴露出足够多的正式可搜索超参：
+  - `decoder_profile`
+  - `learning_rate`
+  - `hidden_dim`
+  - `sequence_layers`
+  - `daily_hidden_dim`
+  - `dropout / daily_dropout`
+  - `batch_size`
+  这意味着“自动研究 / 自动调优”不必等到重构完 teacher 或 loss 才能启动，先在 protocol 外包一层 study orchestration 就已经有实用价值。
+- 自动 study 与单次 protocol 的治理要求不同：
+  - protocol 会写入 `latest_*` 和 `runtime/portfolio_state.json`
+  - 如果 study 不先 snapshot 再 restore，就会把 screening trial 错写成默认运行态
+  - 因此 `run_self_optimizing_study.py` 必须内建 latest-state snapshot / restore，而不是依赖人工回切
+- 40 epoch 的 auto-study 更适合作为 screening layer，而不是 promotion verdict：
+  - 这轮 `cp_v3_seq_self_opt_focused_r1` 的 3 个 trial 全部失败在 `training_evidence_sufficient`
+  - 根因不是“模型完全学不会”，而是 `best_epoch` 仍贴边，screening budget 不足以支撑 promotable 结论
+  - 因此 search champion 与 promotion candidate 需要显式区分
+- composite objective 与 promotion gate 不是一回事：
+  - search score 的作用是帮助系统在多个 shadow-only trial 之间做相对排序
+  - promotion gate 的作用是决定能否接管默认主线
+  - `trial_02` 能成为本轮 score champion，但仍因 `shadow_reversal / cash / timing / evidence` 失败而不能 promotion
+- 日期口径也属于自动研究的治理约束：
+  - study runner 默认日期必须规范到 `YYYYMMDD`
+  - `shadow_start_date` 更适合留空，由 protocol 内部按 `shadow_end_date` 自动回推短窗
+  - 否则容易把不同时期的长 shadow window 混进 screening score，放大 `shadow_reversal` 的解释噪声
+
+- self-opt 正式升级成“两阶段研究流水线”后，`performance champion`、`stability champion` 与 `promotion candidate` 必须显式拆开：
+  - `cp_v3_seq_self_opt_focused_r1__trial_02` 仍然可以是 screen performance champion
+  - 但它在 confirmatory rerun 后仍维持高 reversal / shadow_reversal，不能代表最稳的下一主线
+  - `cp_v3_seq_self_opt_focused_r1__trial_03` 虽然 screening 收益为负，但在 v2 评分与 confirmatory 复核下更接近真正值得继续投资训练预算的分支
+- v2 自动研究评分已经证明：只要显著加大 `reversal / shadow_reversal / threshold gap` 惩罚，并把 `training_evidence` 纳入显式加减分，排行榜就不会再被高反转的短期高分 run 轻易误占
+- `sequence_layers = 2` 的 `budget_v3` 分支在 confirmatory rerun 里已经把 `training_evidence` 从 `insufficient` 修到 `sufficient`，同时保住：
+  - `reduce_success_rate_5d = 0.6444`
+  - `exit_timeliness_rate_5d = 0.5278`
+  - `shadow_reversal_rate_3d = 0.0000`
+  这说明“更深一层是否值得继续”这个问题已经从猜测变成了有证据支撑的 yes，但剩余主矛盾转移到了收益、回撤与现金时点
+- 因此当前 self-opt 主线最稳的知识收口是：
+  - screening 层负责快速筛掉高 reversal / 低潜力分支
+  - confirmatory 层负责验证 `training_evidence` 与真实稳定性
+  - 当前最值得继续投入的分支是 `trial_03 -> confirm_02`，而不是旧的 score-only 冠军 `trial_02`
+- “更自由 / 更全面”的主线不自动等于“更高收益”的主因，当前已经比较清楚：
+  - 更大的候选域与更连续的动作空间，会显著放大样本复杂度与优化难度
+  - 如果训练目标仍主要是 teacher / gate / surrogate metric，而不是直接长期 active return，那么自由度增加后更容易学到“更平衡”而不是“更赚钱”
+  - `cp_v3_seq_holdcash_r1` 这类旧主线虽然更窄，但它自带强 inductive bias：固定 `liquid500`、更短的近端训练窗、极强的 entry/exit precision 偏置；这些约束本身就是收益正则
+  - 因此旧主线最值得借的不是“把世界重新缩回去”，而是：
+  - recent-regime specialization
+  - 高精度 entry gating
+  - 强 sell-side timing bias
+  - 把候选域自由度和预算头自由度分阶段放开，而不是一次性全放开
+
+- `teacher` 在当前项目里更准确的角色不是“最优老师”，而是“带未来信息的启发式脚手架”：
+  - 它适合作为 warm start / auxiliary prior
+  - 不适合作为长期主目标的天花板
+- `seq_v3` 现在已正式支持把 teacher 从主老师降级为辅助先验：
+  - 通过 `loss_profile` 显式切换训练合同
+  - `loss_profile` 已进入 strict resume lineage、train summary、protocol summary 和 self-opt trial config
+- 本轮新证据表明：
+  - `teacher_aux_continuous_v1` 这种“泛化式连续优先”会让 sell-side 连续头更强，但如果不兼顾收益恢复，容易把 `cash_timing_quality_1d / reversal / return` 一起打坏
+  - `teacher_aux_return_recovery_v1` 在 `seq2 + budget_v3` 的 40-epoch screening 上出现了当前最强的综合正信号：
+    - 正收益
+    - `reduce / exit` 双双过当前 gate 线
+    - `shadow_reversal_rate_3d = 0`
+  - 但同一 profile 在 confirmatory 长预算下没有稳定保住这些优势，说明当前问题已经不是“方向错了”，而是“长预算稳定性与收益恢复尚未学稳”
+- 这轮最重要的学习范式结论是：
+  - “teacher 降级 + 连续主监督 + self-opt 搜索”是可执行、可验证、而且已经产生了正信号的破局方向
+  - 但它暂时还没有自动变成 promotable 主线，原因主要不是 sell-side 学不会，而是长预算下：
+    - `annual_return`
+    - `sharpe`
+    - `cash_timing_quality_1d`
+    - `max_drawdown`
+    仍未稳定站住

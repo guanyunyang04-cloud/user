@@ -18,6 +18,7 @@ from daily_research.continuous_policy.label_builder import LABEL_CONFIGS
 from daily_research.continuous_policy.evaluate_policy import main as evaluate_main
 from daily_research.continuous_policy.export_action_panel import main as export_main
 from daily_research.continuous_policy.model import load_artifact
+from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE, LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES
 from daily_research.continuous_policy.pipeline_utils import run_policy_rollout
 from daily_research.continuous_policy.portfolio_simulator import PortfolioState
@@ -246,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--daily-hidden-dim", type=int, default=96)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
+    parser.add_argument("--loss-profile", default=DEFAULT_LOSS_PROFILE, choices=LOSS_PROFILE_NAMES)
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--force-bootstrap-from-account", action="store_true")
@@ -288,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         args.trainer_backend,
         "--decoder-profile",
         args.decoder_profile,
+        "--loss-profile",
+        args.loss_profile,
         "--transaction-cost-bps",
         str(args.transaction_cost_bps),
         "--slippage-bps",
@@ -478,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         "label_preset": args.label_preset,
         "trainer_backend": str(train_summary.get("trainer_backend", args.trainer_backend) or args.trainer_backend),
         "decoder_profile": str(train_summary.get("decoder_profile", args.decoder_profile) or args.decoder_profile),
+        "loss_profile": str(train_summary.get("loss_profile", args.loss_profile) or args.loss_profile),
         "training_contract": dict(train_summary.get("training_contract", {}) or {}),
         "model_artifact_path": str(artifact_path),
         "protocol_summary_json": str((protocol_root / "protocol_summary.json").resolve()),
@@ -490,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             "label_preset": train_summary.get("label_preset", args.label_preset),
             "trainer_backend": train_summary.get("trainer_backend", args.trainer_backend),
             "decoder_profile": train_summary.get("decoder_profile", args.decoder_profile),
+            "loss_profile": train_summary.get("loss_profile", args.loss_profile),
             "training_contract": train_summary.get("training_contract", {}),
             "training_diagnostics": train_summary.get("training_diagnostics", {}),
             "sample_rows": train_summary.get("sample_rows"),

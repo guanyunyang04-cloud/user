@@ -34,33 +34,111 @@ from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_
 
 SEQUENCE_STEP_ORDER: tuple[int, ...] = tuple(sorted(STATE_SEQUENCE_LAGS, reverse=True)) + (0,)
 MAX_CONTINUOUS_HOLDING_DAYS = 20.0
-SAMPLE_SCALAR_LOSS_WEIGHTS: dict[str, float] = {
-    "target_delta_hint": 1.30,
-    "entry_quality": 0.60,
-    "hold_quality": 1.00,
-    "add_quality": 0.70,
-    "reduce_quality": 0.95,
-    "exit_urgency": 1.10,
-    "reentry_readiness": 0.45,
-    "holding_days_ratio": 1.35,
-    "reduce_fraction": 1.30,
-    "exit_hazard": 1.40,
+LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
+    "dual_channel_default_v1": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.30,
+            "entry_quality": 0.60,
+            "hold_quality": 1.00,
+            "add_quality": 0.70,
+            "reduce_quality": 0.95,
+            "exit_urgency": 1.10,
+            "reentry_readiness": 0.45,
+            "holding_days_ratio": 1.35,
+            "reduce_fraction": 1.30,
+            "exit_hazard": 1.40,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.05,
+            "candidate_budget": 0.60,
+            "turnover_budget": 0.90,
+            "max_position_weight_target": 0.55,
+            "hold_bias_target": 1.15,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.55,
+            "action_soft": 0.45,
+            "action_total": 0.72,
+            "duration_total": 0.18,
+            "scalar_total": 1.18,
+            "daily_total": 0.35,
+        },
+    },
+    "teacher_aux_continuous_v1": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.55,
+            "entry_quality": 0.72,
+            "hold_quality": 1.05,
+            "add_quality": 0.82,
+            "reduce_quality": 1.05,
+            "exit_urgency": 1.20,
+            "reentry_readiness": 0.40,
+            "holding_days_ratio": 1.55,
+            "reduce_fraction": 1.55,
+            "exit_hazard": 1.65,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.20,
+            "candidate_budget": 0.55,
+            "turnover_budget": 1.00,
+            "max_position_weight_target": 0.50,
+            "hold_bias_target": 1.05,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.50,
+            "action_soft": 0.50,
+            "action_total": 0.60,
+            "duration_total": 0.12,
+            "scalar_total": 1.35,
+            "daily_total": 0.48,
+        },
+    },
+    "teacher_aux_return_recovery_v1": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.75,
+            "entry_quality": 0.95,
+            "hold_quality": 1.10,
+            "add_quality": 0.95,
+            "reduce_quality": 1.10,
+            "exit_urgency": 1.18,
+            "reentry_readiness": 0.52,
+            "holding_days_ratio": 1.45,
+            "reduce_fraction": 1.45,
+            "exit_hazard": 1.52,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.35,
+            "candidate_budget": 0.50,
+            "turnover_budget": 1.10,
+            "max_position_weight_target": 0.48,
+            "hold_bias_target": 0.98,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.48,
+            "action_soft": 0.52,
+            "action_total": 0.56,
+            "duration_total": 0.10,
+            "scalar_total": 1.40,
+            "daily_total": 0.56,
+        },
+    },
 }
-DAILY_TARGET_LOSS_WEIGHTS: dict[str, float] = {
-    "gross_exposure_target": 1.05,
-    "candidate_budget": 0.60,
-    "turnover_budget": 0.90,
-    "max_position_weight_target": 0.55,
-    "hold_bias_target": 1.15,
-}
-MULTI_OBJECTIVE_LOSS_WEIGHTS: dict[str, float] = {
-    "action_hard": 0.55,
-    "action_soft": 0.45,
-    "action_total": 0.72,
-    "duration_total": 0.18,
-    "scalar_total": 1.18,
-    "daily_total": 0.35,
-}
+DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
+LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
+
+
+def resolve_loss_profile(loss_profile: str | None) -> tuple[str, dict[str, dict[str, float]]]:
+    profile_name = str(loss_profile or DEFAULT_LOSS_PROFILE).strip() or DEFAULT_LOSS_PROFILE
+    if profile_name not in LOSS_PROFILE_CONFIGS:
+        raise ValueError(
+            f"Unsupported seq_v3 loss profile: {profile_name}. Available: {', '.join(LOSS_PROFILE_NAMES)}"
+        )
+    config = LOSS_PROFILE_CONFIGS[profile_name]
+    return profile_name, {
+        "sample_scalar_loss_weights": dict(config["sample_scalar_loss_weights"]),
+        "daily_target_loss_weights": dict(config["daily_target_loss_weights"]),
+        "multi_objective_loss_weights": dict(config["multi_objective_loss_weights"]),
+    }
 
 
 def _weighted_scalar_heads_loss(
@@ -456,6 +534,7 @@ def fit_policy_models_v3(
     daily_dropout: float = 0.05,
     early_stop_patience: int = 10,
     resume_mode: str = "strict",
+    loss_profile: str = DEFAULT_LOSS_PROFILE,
 ) -> TorchContinuousPolicySeqArtifact:
     if sample_frame.empty or daily_frame.empty:
         raise ValueError("continuous_policy formal_torch_seq_v3 received empty training data.")
@@ -466,6 +545,10 @@ def fit_policy_models_v3(
     torch.manual_seed(int(random_seed))
     np.random.seed(int(random_seed))
     run_root.mkdir(parents=True, exist_ok=True)
+    resolved_loss_profile, loss_config = resolve_loss_profile(loss_profile)
+    sample_scalar_loss_weights = dict(loss_config["sample_scalar_loss_weights"])
+    daily_target_loss_weights = dict(loss_config["daily_target_loss_weights"])
+    multi_objective_loss_weights = dict(loss_config["multi_objective_loss_weights"])
 
     sequence_base_names, sequence_columns = resolve_sequence_columns(feature_names)
     static_feature_names = [name for name in feature_names if name not in set(sequence_columns)]
@@ -545,10 +628,11 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r2"
-    signature_payload["sample_scalar_loss_weights"] = dict(SAMPLE_SCALAR_LOSS_WEIGHTS)
-    signature_payload["daily_target_loss_weights"] = dict(DAILY_TARGET_LOSS_WEIGHTS)
-    signature_payload["multi_objective_loss_weights"] = dict(MULTI_OBJECTIVE_LOSS_WEIGHTS)
+    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r3"
+    signature_payload["loss_profile"] = resolved_loss_profile
+    signature_payload["sample_scalar_loss_weights"] = dict(sample_scalar_loss_weights)
+    signature_payload["daily_target_loss_weights"] = dict(daily_target_loss_weights)
+    signature_payload["multi_objective_loss_weights"] = dict(multi_objective_loss_weights)
     signature_hash = _signature_hash(signature_payload)
     checkpoint_last = run_root / "checkpoint_last.pt"
     checkpoint_best = run_root / "checkpoint_best.pt"
@@ -630,8 +714,8 @@ def fit_policy_models_v3(
                 reduction="batchmean",
             )
             action_loss = (
-                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_hard"] * action_ce_loss
-                + MULTI_OBJECTIVE_LOSS_WEIGHTS["action_soft"] * action_soft_loss
+                multi_objective_loss_weights["action_hard"] * action_ce_loss
+                + multi_objective_loss_weights["action_soft"] * action_soft_loss
             )
             duration_loss = nn.functional.cross_entropy(outputs["duration_logits"], duration_batch)
             scalar_loss = _weighted_scalar_heads_loss(
@@ -648,12 +732,12 @@ def fit_policy_models_v3(
                     "reduce_fraction": reduce_fraction_batch,
                     "exit_hazard": exit_hazard_batch,
                 },
-                SAMPLE_SCALAR_LOSS_WEIGHTS,
+                sample_scalar_loss_weights,
             )
             loss = (
-                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_total"] * action_loss
-                + MULTI_OBJECTIVE_LOSS_WEIGHTS["duration_total"] * duration_loss
-                + MULTI_OBJECTIVE_LOSS_WEIGHTS["scalar_total"] * scalar_loss
+                multi_objective_loss_weights["action_total"] * action_loss
+                + multi_objective_loss_weights["duration_total"] * duration_loss
+                + multi_objective_loss_weights["scalar_total"] * scalar_loss
             )
             sample_optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -663,7 +747,7 @@ def fit_policy_models_v3(
             batch_count += 1
 
         daily_outputs = daily_model(X_daily_train)
-        daily_loss = _weighted_scalar_heads_loss(daily_outputs, daily_targets_train, DAILY_TARGET_LOSS_WEIGHTS)
+        daily_loss = _weighted_scalar_heads_loss(daily_outputs, daily_targets_train, daily_target_loss_weights)
         daily_optimizer.zero_grad(set_to_none=True)
         daily_loss.backward()
         nn.utils.clip_grad_norm_(daily_model.parameters(), max_norm=2.0)
@@ -680,19 +764,19 @@ def fit_policy_models_v3(
                 reduction="batchmean",
             )
             val_action_loss = (
-                MULTI_OBJECTIVE_LOSS_WEIGHTS["action_hard"] * val_action_ce_loss
-                + MULTI_OBJECTIVE_LOSS_WEIGHTS["action_soft"] * val_action_soft_loss
+                multi_objective_loss_weights["action_hard"] * val_action_ce_loss
+                + multi_objective_loss_weights["action_soft"] * val_action_soft_loss
             )
             val_duration_loss = nn.functional.cross_entropy(val_outputs["duration_logits"], y_duration_val)
-            val_scalar_loss = _weighted_scalar_heads_loss(val_outputs, val_targets, SAMPLE_SCALAR_LOSS_WEIGHTS)
+            val_scalar_loss = _weighted_scalar_heads_loss(val_outputs, val_targets, sample_scalar_loss_weights)
             val_daily_outputs = daily_model(X_daily_val)
-            val_daily_loss = _weighted_scalar_heads_loss(val_daily_outputs, daily_targets_val, DAILY_TARGET_LOSS_WEIGHTS)
+            val_daily_loss = _weighted_scalar_heads_loss(val_daily_outputs, daily_targets_val, daily_target_loss_weights)
             val_loss = float(
                 (
-                    MULTI_OBJECTIVE_LOSS_WEIGHTS["action_total"] * val_action_loss
-                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["duration_total"] * val_duration_loss
-                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["scalar_total"] * val_scalar_loss
-                    + MULTI_OBJECTIVE_LOSS_WEIGHTS["daily_total"] * val_daily_loss
+                    multi_objective_loss_weights["action_total"] * val_action_loss
+                    + multi_objective_loss_weights["duration_total"] * val_duration_loss
+                    + multi_objective_loss_weights["scalar_total"] * val_scalar_loss
+                    + multi_objective_loss_weights["daily_total"] * val_daily_loss
                 ).detach().cpu()
             )
 
@@ -739,6 +823,7 @@ def fit_policy_models_v3(
         "best_epoch": int(best_epoch),
         "best_validation_loss": float(best_val_loss),
         "resume_mode": str(resume_mode or ""),
+        "loss_profile": resolved_loss_profile,
         "resumed_from_checkpoint": resumed_from,
         "checkpoint_last": str(checkpoint_last.resolve()),
         "checkpoint_best": str(checkpoint_best.resolve()) if checkpoint_best.exists() else "",
@@ -754,9 +839,9 @@ def fit_policy_models_v3(
         "history_tail": history[-8:],
         "supports_holding_days_head": True,
         "supports_sell_heads": True,
-        "sample_scalar_loss_weights": dict(SAMPLE_SCALAR_LOSS_WEIGHTS),
-        "daily_target_loss_weights": dict(DAILY_TARGET_LOSS_WEIGHTS),
-        "multi_objective_loss_weights": dict(MULTI_OBJECTIVE_LOSS_WEIGHTS),
+        "sample_scalar_loss_weights": dict(sample_scalar_loss_weights),
+        "daily_target_loss_weights": dict(daily_target_loss_weights),
+        "multi_objective_loss_weights": dict(multi_objective_loss_weights),
     }
     artifact = TorchContinuousPolicySeqArtifact(
         sample_model=sample_model.cpu(),

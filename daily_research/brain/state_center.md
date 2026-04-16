@@ -668,3 +668,118 @@
   - `formal_r10` 继续保留为 exit/cash proof reference
   - 当前主矛盾已经进一步收敛为：“如何在 `formal_r11` 的 long-side 质量上，补回 `formal_r9` 的 `reduce / exit` 时点能力”
   - `cp_v3_seq_holdcash_r1` 继续是默认 strongest temporal 锚点，`latest_*` 与 `runtime/portfolio_state.json` 已在 `formal_r11` 后再次回切到它
+## 2026-04-16 self-opt study 自动研究层
+- 已新增正式自动研究入口：
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `daily_research/output/continuous_policy/studies/`
+  - `daily_research/output/continuous_policy/latest_study_summary.json`
+- 第一轮 bounded study 已完成：
+  - `cp_v3_seq_self_opt_focused_r1`
+  - 搜索范围固定在 `learned_all_a + holdcash_v3 + formal_torch_seq_v3`
+  - 共完成 `3` 个 trial，全部执行成功
+- 这轮 study 的角色分工已明确：
+  - `trial_01` = auto-study baseline（`holdcash_v3 / lr=0.0015 / batch=512 / seq=1`）
+  - `trial_02` = 本轮 composite-score 冠军（`reduceexit_v4 / lr=0.0010 / batch=384 / seq=1`）
+  - `trial_03` = capacity challenger（`budget_v3 / seq=2 / daily_hidden_dim=128`）
+- 当前收口判断：
+  - `trial_02` 是 search champion，不是 promotion champion
+  - `trial_02` 虽然 `annual_return / open_win_rate_5d / exit_timeliness_rate_5d` 在本轮 trial 中最强，但 `immediate_reversal_rate_3d = 0.5649`、`shadow_reversal_rate_3d = 0.5333` 过高，仍然只能 `shadow_only`
+  - `trial_03` 说明更深一层 `seq_v3` 可以把 `reduce / exit` 拉过当前 gate 线附近，但在本轮 40 epoch screen 里仍把 `annual_return` 打成负值
+  - 当前自动研究层已经可用，但更准确的定位是“正式筛选层”，不是“可直接接管默认运行态的 promotion 层”
+- 治理状态保持不变：
+  - study 结束后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已自动恢复到 `cp_v3_seq_holdcash_r1`
+  - 当前默认 strongest temporal 锚点没有被 study trial 静默接管
+
+## 2026-04-16 self-opt confirmatory_r1 两阶段研究收口
+- 两阶段自动研究流水线已经从“只筛选”升级到“筛选 + confirmatory formal 复核”：
+  - seed screening study = `cp_v3_seq_self_opt_focused_r1`
+  - confirmatory study = `cp_v3_seq_self_opt_confirmatory_r1`
+  - current objective profile = `promotion_balanced_v2`
+- 当前角色分工已经更新为：
+  - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `cp_v3_seq_self_opt_focused_r1__trial_02` = screen performance champion
+  - `cp_v3_seq_self_opt_focused_r1__trial_03` = screen stability champion + screen depth challenger
+  - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` = 当前 self-opt confirmatory champion
+- `confirm_01` 对 `trial_02` 的高预算复核已经完成，且 `training_evidence = sufficient`：
+  - `annual_return = -0.0144`
+  - `sharpe = -0.0281`
+  - `reduce_success_rate_5d = 0.5000`
+  - `exit_timeliness_rate_5d = 0.5135`
+  - `cash_timing_quality_1d = -0.2124`
+  - `immediate_reversal_rate_3d = 0.3136`
+  - `shadow_reversal_rate_3d = 0.3288`
+  - promotion 仍为 `shadow_only`
+- `confirm_02` 对 `trial_03` 的高预算复核已经完成，且 `training_evidence = sufficient`：
+  - `annual_return = -0.1007`
+  - `sharpe = -0.6605`
+  - `max_drawdown = -0.1029`
+  - `avg_gross_exposure = 0.4956`
+  - `hold_share = 0.7193`
+  - `reduce_success_rate_5d = 0.6444`
+  - `exit_timeliness_rate_5d = 0.5278`
+  - `cash_timing_quality_1d = -0.2463`
+  - `immediate_reversal_rate_3d = 0.1750`
+  - `shadow_reversal_rate_3d = 0.0000`
+  - promotion 仍为 `shadow_only`
+- 当前最重要的状态更新是：
+  - 更深一层 `seq_v3` 这条线已经通过 confirmatory rerun 证明：当前不再卡在 `training_evidence`
+  - 当前自优化主线的瓶颈已经收敛到：`cash_timing_quality_1d / max_drawdown / annual_return_vs_active / sharpe_vs_active`
+  - `reduce / exit` 已经不再是 confirmatory depth challenger 的第一瓶颈
+- 默认治理状态保持不变：
+  - confirmatory study 完成后，`latest_*` 与 `runtime/portfolio_state.json` 已再次自动恢复到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 confirmatory 之后的主线收敛
+- 当前研究角色已经进一步固定：
+  - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11` = 手工 constrained-merge long-side reference
+  - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` = 当前最值得继续投入的 self-opt depth 基线
+  - live `latest_trade_plan.txt` 仍来自 external target-weight production 路径，不由本研究线直接接管
+- 当前主线判断已经从“继续修 `formal_r11`”收敛到：
+  - 围绕 `confirm_02` 做收益 / 回撤 / 现金时点恢复
+  - 而不是回到高强度手工 patch，或立刻扩大 `universe / objective` 搜索面
+- 当前剩余核心瓶颈明确为：
+  - `cash_timing_quality_1d`
+  - `max_drawdown`
+  - `annual_return_vs_active`
+  - `sharpe_vs_active`
+  - `reduce / exit` 已不再是这条 confirmatory depth 基线的第一瓶颈
+
+## 2026-04-16 self-opt return_recovery_r1 收口
+- `seq_v3` 现已正式支持可搜索的 `loss_profile`：
+  - `dual_channel_default_v1`
+  - `teacher_aux_continuous_v1`
+  - `teacher_aux_return_recovery_v1`
+- strict resume lineage 已继续显式滚动到：
+  - `sequence_model_revision = seq_v3_continuous_dual_channel_r3`
+  - `loss_profile` 已进入签名与 training diagnostics，不再允许不同训练目标误走同一 lineage
+- 本轮 focused self-opt 已完成：
+  - `study_tag = cp_v3_seq_self_opt_return_recovery_r1`
+  - `search_profile = seq2_return_recovery_v1`
+  - 固定 `learned_all_a + holdcash_v3 + budget_v3 + sequence_layers = 2`
+  - 只搜索 `loss_profile`
+- screening 结果已明确：
+  - `trial_03 = teacher_aux_return_recovery_v1` 是本轮 screen performance / stability 双冠军
+  - 关键指标：
+    - `annual_return = 0.1327`
+    - `sharpe = 0.9732`
+    - `reduce_success_rate_5d = 0.6364`
+    - `exit_timeliness_rate_5d = 0.5370`
+    - `cash_timing_quality_1d = -0.1243`
+    - `immediate_reversal_rate_3d = 0.1706`
+- confirmatory 结果也已落地：
+  - `confirm_01 = cp_v3_seq_self_opt_return_recovery_r1__confirm_01`
+  - `loss_profile = teacher_aux_return_recovery_v1`
+  - `training_evidence = sufficient`
+  - 但正式长预算下退化为：
+    - `annual_return = -0.1814`
+    - `sharpe = -1.6036`
+    - `reduce_success_rate_5d = 0.4737`
+    - `exit_timeliness_rate_5d = 0.6099`
+    - `cash_timing_quality_1d = -0.4792`
+- 当前最准确的状态判断是：
+  - “teacher 降级为辅助先验”这条方向已经被正式接通，而且在 seq2 short-budget screening 上出现了真实正信号
+  - 但 `teacher_aux_return_recovery_v1` 目前还只是 screening-level promising profile，不是 confirmatory-stable promotable 配置
+  - 当前瓶颈已更清楚地落在：
+    - 长预算下的 `annual_return / sharpe`
+    - `cash_timing_quality_1d`
+    - `max_drawdown`

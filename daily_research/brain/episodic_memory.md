@@ -14469,3 +14469,446 @@ position,000001.SZ,1200,12.38,
 - 治理收口：
   - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
   - 避免默认运行态被仍未过 gate 的 `formal_r11` 静默接管
+## 2026-04-16 self-opt study 自动研究层执行闭环
+- 触发：
+  - 用户明确要求从局部 repair mode 继续推进到更偏“自己学、自己调”的方向，并要求基于既定计划直接执行，不只停在建议层
+- 动作前自检：
+  - 事实：
+    - `continuous_policy` 现有 formal protocol 已经暴露了可正式搜索的超参面：`decoder_profile / learning_rate / hidden_dim / sequence_layers / daily_hidden_dim / dropout / daily_dropout / batch_size`
+    - 当前主线仍没有 promotable 的 capped 全A challenger
+    - 当前默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 推断：
+    - 现阶段最有效的不是继续手工 patch 单一 protocol，而是先把“自动研究层”接到现有 protocol 上，让系统至少能自动筛 trial、自动评分、自动回滚 latest
+  - 假设：
+    - 在当前信息下，最可行的第一步不是立刻重构 teacher / loss 全栈，而是先做 bounded study orchestration
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/runtime.py` 中新增：
+      - `STUDIES_ROOT`
+      - `LATEST_STUDY_SUMMARY_PATH`
+      - `update_latest_summary("study", ...)`
+    - 新增 `daily_research/continuous_policy/run_self_optimizing_study.py`
+      - 负责 trial 采样
+      - 调用 `run_continuous_policy_protocol`
+      - 基于 protocol summary 计算 composite score
+      - 输出 `study_plan / trial_ranking / study_summary`
+      - 在 study 结束后自动 restore `latest_*` 与 `runtime/portfolio_state.json`
+  - smoke：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --dry-run --study-tag self_opt_smoke_r1`
+    - dry-run 通过，确认了 3 个 trial 的 sampling 口径
+  - 执行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --study-tag cp_v3_seq_self_opt_focused_r1`
+- 运行事实：
+  - study tag：
+    - `cp_v3_seq_self_opt_focused_r1`
+  - 研究范围：
+    - `pool_name = learned_all_a`
+    - `trainer_backend = formal_torch_seq_v3`
+    - `label_preset = holdcash_v3`
+    - trial 数 = `3`
+  - 三个 trial：
+    - `trial_01`
+      - `decoder_profile = holdcash_v3`
+      - `learning_rate = 0.0015`
+      - `hidden_dim = 224`
+      - `sequence_layers = 1`
+      - `batch_size = 512`
+      - `epochs = 40`
+    - `trial_02`
+      - `decoder_profile = reduceexit_v4`
+      - `learning_rate = 0.0010`
+      - `hidden_dim = 224`
+      - `sequence_layers = 1`
+      - `batch_size = 384`
+      - `epochs = 40`
+    - `trial_03`
+      - `decoder_profile = budget_v3`
+      - `learning_rate = 0.0012`
+      - `hidden_dim = 224`
+      - `sequence_layers = 2`
+      - `daily_hidden_dim = 128`
+      - `dropout = 0.12`
+      - `daily_dropout = 0.08`
+      - `batch_size = 512`
+      - `epochs = 40`
+- 结果：
+  - `trial_02` 成为本轮 composite-score 冠军：
+    - `composite_score = 2.986128`
+    - `annual_return = 0.1896`
+    - `sharpe = 0.9015`
+    - `open_win_rate_5d = 0.6667`
+    - `reduce_success_rate_5d = 0.5106`
+    - `exit_timeliness_rate_5d = 0.4667`
+    - `cash_timing_quality_1d = -0.2305`
+    - `immediate_reversal_rate_3d = 0.5649`
+    - `shadow_reversal_rate_3d = 0.5333`
+    - promotion gate 仍为 `shadow_only`
+  - `trial_01` 作为 baseline：
+    - `composite_score = 2.692268`
+    - `annual_return = 0.1584`
+    - `sharpe = 0.7290`
+    - `reduce_success_rate_5d = 0.5600`
+    - `exit_timeliness_rate_5d = 0.4412`
+    - `cash_timing_quality_1d = -0.0849`
+    - `avg_gross_exposure = 0.8780`
+  - `trial_03` 作为 capacity challenger：
+    - `composite_score = 1.660975`
+    - `annual_return = -0.1007`
+    - `sharpe = -0.6605`
+    - `reduce_success_rate_5d = 0.6444`
+    - `exit_timeliness_rate_5d = 0.5278`
+    - `cash_timing_quality_1d = -0.2463`
+    - `hold_share = 0.7193`
+    - `avg_gross_exposure = 0.4956`
+  - 三个 trial 全部共同失败于：
+    - `training_evidence_sufficient`
+    - 没有任何一个 trial 达到 promotable 状态
+- 动作后复盘：
+  - 事实：
+    - 自动研究层已经真正接通，不再只是口头计划
+    - `run_self_optimizing_study.py` 已能独立完成 bounded screen、生成 study report、并自动回滚 latest
+    - 本轮最强 score champion 与 promotion candidate 并不相同；`trial_02` 虽然 score 第一，但 reversal 风险过高，不能直接视为主线升级
+    - `trial_03` 证明 `sequence_layers = 2` 在当前线下能明显抬高 `reduce / exit`，但 40 epoch screen 下收益仍明显失真
+  - 推断：
+    - 当前自动研究层已经足够承担“筛方向”的职责
+    - 但 40 epoch budget 还不足以承担“给 promotable verdict”的职责
+    - 当前 objective 对 reversal / shadow_reversal 的惩罚仍然偏软，下一轮若继续走 self-opt，应把“search champion”与“stability champion”继续拆开
+  - 假设：
+    - 如果后续继续推进，最高 ROI 的下一层不是重新回到手工 patch，而是：
+      - 保留这套 study orchestration
+      - 提高 champion / safe baseline 的训练预算
+      - 再决定是否继续把 loss / objective 也纳入自动搜索
+- 补充纠偏：
+  - 本轮 study 执行完成后，又顺手把 runner 的默认口径进一步收紧：
+    - 日期默认值规范到 `YYYYMMDD`
+    - 后续默认 `shadow_start_date` 留空，由 protocol 内部自动回推短窗
+    - historical leaderboard 进一步收窄到同一 `label_preset`
+- 治理收口：
+  - study 完成后确认：
+    - `latest_protocol_summary.json` 已恢复为 `cp_v3_seq_holdcash_r1`
+    - 默认运行态没有被任何 study trial 静默接管
+## 2026-04-16 planner 视角收敛：self-opt 之后
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角继续推进：先发散路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_focused_r1` 已把自动研究层正式接通，但当前只完成了 `3` 个 40-epoch screening trial
+    - 本轮 search champion 是 `trial_02 = reduceexit_v4 / lr=0.0010 / batch=384 / seq=1`
+    - `trial_02` 虽然 score 第一，但 `immediate_reversal_rate_3d = 0.5649`、`shadow_reversal_rate_3d = 0.5333` 过高，仍是 `shadow_only`
+    - `trial_03 = budget_v3 / seq=2` 证明更深一层 `seq_v3` 能把 `reduce / exit` 拉高，但在 40 epoch screening 下 `annual_return < 0`
+    - `latest_protocol_summary.json` 已恢复到 `cp_v3_seq_holdcash_r1`
+    - 当前 live 执行仍来自 `deep_alpha_short_alpha_execalign_production_default` 的 external target-weight 路径，不受本轮 continuous_policy study 直接接管
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 单个 protocol，也不是立刻扩大 `universe`
+    - 更合理的是把“自动研究层”从 v1 screening 升级成“筛选 + 复核”两阶段研究流水线
+  - 假设：
+    - 如果让 self-opt 先负责筛方向，再让更高预算的 confirmatory formal 负责裁决，就能减少当前反复在局部 patch 与单次 formal 之间来回摆动的低效率
+- 发散路径：
+  - 路径 A：回到 `formal_r11` 主线，继续手工修 `reduce / exit / cash`
+  - 路径 B：把 self-opt 保留为筛选层，并把冠军 trial 提升到更高预算做 confirmatory rerun
+  - 路径 C：继续扩 self-opt 的搜索空间，把 `loss / objective / search score` 也纳入自动搜索
+  - 路径 D：把 `sequence_layers = 2` 直接升成主线假设
+  - 路径 E：把 continuous_policy 继续后置，转而优先处理 live 执行路径
+- 收敛判断：
+  - 路径 B 是当前主线
+  - 路径 C 是最值得并行准备的中期升级
+  - 路径 A 只保留为局部 fallback
+  - 路径 D 只保留为 confirmatory challenger，不直接接主线
+  - 路径 E 当前不取，因为 live 执行仍稳定走独立 production 路径，本轮研究不应打扰它
+- 优先级：
+  - `P0`：冻结角色分工
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+    - `formal_r11` = 手工 constrained-merge reference
+    - `cp_v3_seq_self_opt_focused_r1__trial_02` = search champion
+    - `cp_v3_seq_self_opt_focused_r1__trial_03` = depth confirmatory challenger
+  - `P1`：把 self-opt 从“单阶段 screening”升级到“两阶段研究”
+    - 第一阶段：小预算 screening
+    - 第二阶段：对 top-1 / top-2 做更高 epoch 的 confirmatory formal rerun
+    - 明确区分 `search champion` 与 `promotion candidate`
+  - `P2`：下一轮优先复核 `trial_03`
+    - 因为它在当前 40 epoch 下已经把 `reduce_success_rate_5d / exit_timeliness_rate_5d` 推到最接近 gate 的位置
+    - 当前最值得验证的是：增加训练预算后，`annual_return` 是否能从负值修回，而不是继续猜测
+  - `P3`：同步重打分逻辑
+    - 当前 objective 对 `reversal / shadow_reversal` 惩罚偏软
+    - 下一轮 self-opt 必须把 stability champion 与 performance champion 拆开，避免 `trial_02` 这类高 reversal run 继续当总冠军
+  - `P4`：暂不扩大搜索到 `loss/objective` 全空间
+    - 先把“search -> confirmatory rerun”闭环跑顺
+    - 只有当这条两阶段流水线稳定后，再把更深的 objective auto-tuning 纳入正式搜索面
+- 动作后复盘：
+  - 当前最优顺序已进一步收敛成：
+    - 先把 self-opt 升级成两阶段研究流水线
+    - 再优先复核 `trial_03`
+    - 再修 composite objective，使 search champion 不再被高 reversal run 误占
+
+## 2026-04-16 self-opt confirmatory_r1 执行闭环
+- 触发：
+  - 用户要求基于既定计划继续直接执行，不停在建议层；本轮目标是把刚接通的 self-opt 从“只筛选”推进到正式“两阶段研究流水线”
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_focused_r1` 已完成 3 个 screening trial
+    - `trial_02` 是旧口径下的 screen performance champion，但 `immediate_reversal_rate_3d = 0.5649`、`shadow_reversal_rate_3d = 0.5333`
+    - `trial_03` 是当前最接近 gate 的 depth challenger，但 40 epoch screening 下 `annual_return < 0`
+    - 默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 某一个 `formal_r*`
+    - 而是把 self-opt 从单阶段 screening 升级成“screening + confirmatory rerun”的正式研究流水线
+  - 假设：
+    - 如果 confirmatory rerun 能把 `trial_03` 的 `training_evidence` 补足，就能更准确判断这条更深 `seq_v3` 分支是否值得继续投入
+- 实施：
+  - 代码层：
+    - 升级 `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `performance_score / stability_score / composite_score`
+    - 显式加入 `reversal / shadow_reversal / reversal_excess / training_evidence` 惩罚与加减分
+    - 新增 seed-study 读取、confirmatory 候选选择、confirmatory protocol 参数构建
+    - 新增 `screen_performance_champion / screen_stability_champion / screen_depth_challenger / confirmatory_trials / confirmatory_completed_trial_count`
+    - 新增 `study_tag` 字段别名，补齐 study handoff 语义
+  - dry-run：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --seed-study-tag cp_v3_seq_self_opt_focused_r1 --skip-screening --study-tag self_opt_confirm_smoke_r1 --dry-run`
+    - 结果：通过；确认会基于 seed study 直接选择 confirmatory candidates
+  - 正式执行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --seed-study-tag cp_v3_seq_self_opt_focused_r1 --skip-screening --study-tag cp_v3_seq_self_opt_confirmatory_r1`
+- 运行事实：
+  - study tag：
+    - `cp_v3_seq_self_opt_confirmatory_r1`
+  - seed study：
+    - `cp_v3_seq_self_opt_focused_r1`
+  - 角色选择：
+    - `performance_champion = cp_v3_seq_self_opt_focused_r1__trial_02`
+    - `depth_challenger = cp_v3_seq_self_opt_focused_r1__trial_03`
+    - `screen_stability_champion` 也收敛到 `trial_03`
+  - confirmatory epoch 预算：
+    - `epochs = 64`
+    - `min_epochs = 48`
+  - confirmatory 使用的 shadow 窗口已自动收口为短窗：
+    - `20260401 -> 20260415`
+- 结果：
+  - `confirm_01 = cp_v3_seq_self_opt_confirmatory_r1__confirm_01`
+    - 来源：`trial_02`
+    - 角色：`performance_champion`
+    - `training_evidence = sufficient`
+    - `completed_epochs = 64`
+    - `best_epoch = 57`
+    - `annual_return = -0.0144`
+    - `sharpe = -0.0281`
+    - `open_win_rate_5d = 0.5098`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.5135`
+    - `cash_timing_quality_1d = -0.2124`
+    - `immediate_reversal_rate_3d = 0.3136`
+    - `shadow_reversal_rate_3d = 0.3288`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `reduce_success_rate_5d`
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `shadow_reversal`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+  - `confirm_02 = cp_v3_seq_self_opt_confirmatory_r1__confirm_02`
+    - 来源：`trial_03`
+    - 角色：`depth_challenger`
+    - `training_evidence = sufficient`
+    - `completed_epochs = 49`
+    - `best_epoch = 39`
+    - `annual_return = -0.1007`
+    - `sharpe = -0.6605`
+    - `max_drawdown = -0.1029`
+    - `avg_gross_exposure = 0.4956`
+    - `open_win_rate_5d = 0.5000`
+    - `hold_share = 0.7193`
+    - `reduce_success_rate_5d = 0.6444`
+    - `exit_timeliness_rate_5d = 0.5278`
+    - `cash_timing_quality_1d = -0.2463`
+    - `immediate_reversal_rate_3d = 0.1750`
+    - `shadow_reversal_rate_3d = 0.0000`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+  - confirmatory champion：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02`
+    - `performance_score = 2.267823`
+    - `stability_score = 0.526811`
+    - `composite_score = 2.794634`
+- 动作后复盘：
+  - 事实：
+    - 两阶段自动研究流水线已经真实跑通，不再只是规划
+    - `trial_02` 虽然仍是 screen performance champion，但 confirmatory 后依然暴露高 reversal / shadow_reversal，不适合作为当前最稳的后续投入对象
+    - `trial_03` 在 confirmatory 后把 `training_evidence` 从不足修到充足，且继续保持较强的 `reduce / exit`
+  - 推断：
+    - 当前 self-opt 主线最值得继续投入的是 `trial_03 -> confirm_02`
+    - 当前瓶颈已经不是“更深一层 `seq_v3` 能不能学会 sell-side”，而是“在保住 sell-side 的前提下，如何修回 `annual_return / sharpe / drawdown / cash timing`”
+    - v2 评分已经成功把“高 reversal 的短期高分 run”从总冠军位置上挤下来
+  - 假设：
+    - 如果后续继续推进，最高 ROI 的动作将不再是回到单次 screening 或回到手工 patch，而是围绕 `confirm_02` 这条 depth confirmatory 线继续修收益和预算头
+- 治理收口：
+  - study 完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部自动恢复到 `cp_v3_seq_holdcash_r1`
+  - 默认运行态没有被任何 confirmatory trial 静默接管
+
+## 2026-04-16 planner 视角收敛：confirmatory 之后
+- 触发：
+  - 用户要求继续以“高瞻远瞩的策略规划者”视角推进：先发散可能路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` 已经成为当前 self-opt confirmatory champion
+    - `confirm_02` 的 `training_evidence = sufficient`，且 `reduce_success_rate_5d = 0.6444`、`exit_timeliness_rate_5d = 0.5278`、`shadow_reversal_rate_3d = 0.0000`
+    - `confirm_02` 仍失败在 `cash_timing_quality_1d / max_drawdown / annual_return_vs_active / sharpe_vs_active`
+    - `formal_r11` 仍是当前手工 constrained-merge 的 long-side / trend reference
+    - 当前 live 执行与 `latest_trade_plan.txt` 仍走 external target-weight production 路径，不受本研究线直接接管
+  - 推断：
+    - 当前最高 ROI 已不再是继续手工 patch `formal_r11`
+    - 也不是立刻把 `loss / objective / universe` 全部扩大到更大自动搜索面
+    - 最合理的是把主线切到“围绕 `confirm_02` 做 return-recovery 型 focused self-opt”
+  - 假设：
+    - 如果能在不破坏 `confirm_02` 已经拿到的 sell-side 稳定性前提下，把收益、回撤和现金时点修回来，这条更深一层 `seq_v3` 线才真正可能进入 promotable 比较区
+- 发散路径：
+  - 路径 A：回到 `formal_r11`，继续手工修 `reduce / exit / cash`
+  - 路径 B：以 `confirm_02` 为底座，做 focused self-opt return-recovery family
+  - 路径 C：直接把 `loss / objective / promotion score` 全面纳入下一轮大搜索
+  - 路径 D：继续扩大 `max_universe_size` 或让更深 backbone 抢主线
+  - 路径 E：提前把这条研究线接到 live 执行
+- 收敛判断：
+  - 路径 B 是当前主线
+  - 路径 C 是下一层中期升级，不应抢在 B 前面
+  - 路径 A 只保留为 reference / fallback
+  - 路径 D 和路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结角色分工
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+    - `formal_r11` = 手工 constrained-merge reference
+    - `confirm_01` = 高收益但高 reversal 的反例 reference
+    - `confirm_02` = 当前最值得继续投入的 depth confirmatory 基线
+  - `P1`：下一轮主线改为 `confirm_02` 的 return-recovery focused self-opt
+    - 固定 `sequence_layers = 2`
+    - 固定当前更稳的 short-shadow confirmatory 口径
+    - 不再重新回到“先证明 sell-side 会不会”的问题
+    - 主目标改成修 `annual_return / sharpe / max_drawdown / cash_timing_quality_1d`
+  - `P2`：focused 搜索只允许围绕收益恢复相关变量做小范围收敛
+    - 优先搜索训练与部署平衡变量，而不是再扩大结构变量
+    - 显式拒绝把 `reduce / exit` 再度打塌来换收益表观修复
+  - `P3`：评分逻辑继续服务于“稳定可晋级”，不是“短期高分”
+    - `performance champion / stability champion / promotion candidate` 继续分离
+    - 后续排行榜应更看重 active return、drawdown 与 cash timing，而不再只看局部动作指标
+  - `P4`：暂不扩大到全量 objective auto-tuning
+    - 先把 `confirm_02` 这条线跑到真正能比较 promotion 的程度
+    - 只有当 focused family 已证明“收益恢复空间有限”时，才提升 objective-level 搜索优先级
+  - `P5`：暂不让研究线碰 live 默认执行
+    - live 继续走独立 production 路径
+    - 研究线继续只在 shadow / confirmatory 层积累证据
+- 动作后复盘：
+  - 当前最优顺序已经收敛成：
+    - 先围绕 `confirm_02` 做 return-recovery focused self-opt
+    - 再决定是否值得把 objective / loss 自动调优抬成下一层主线
+    - 在此之前，不回到高频手工 patch，也不提前扩大 `universe` 或接管 live
+
+
+## 2026-04-16 self-opt return_recovery_r1 执行闭环
+- 触发：
+  - 用户要求基于当前最优计划直接一次性执行并完整交付，不只停在建议层
+  - 当前最优计划已收敛到：
+    - 把 teacher 从主老师降为辅助先验
+    - 把这件事接成正式、可搜索的训练合同
+    - 围绕 `confirm_02` 做 focused self-opt return-recovery
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` 已证明 `seq_v3 + sequence_layers = 2` 这条线不再卡在 `training_evidence`
+    - 当前更像是卡在 `annual_return / sharpe / cash_timing_quality_1d / max_drawdown`
+    - 现有 `seq_v3` 虽然已有连续头，但 loss 合同仍是固定写死的，self-opt 也还搜不到这一层
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 某个 `formal_r*`
+    - 而是把“teacher 降级为辅助先验”正式接进训练合同，然后用 focused self-opt 验证它在 `seq2` 深层分支上能否恢复收益
+  - 假设：
+    - 如果 teacher 退居辅助先验后真的有价值，最先出现正信号的地方不会是 confirmatory 直接 promotion，而会是 short-budget screening 上的收益/现金时点修复
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/model_seq_v3.py` 新增正式 `loss_profile`
+    - 新增 profile：
+      - `dual_channel_default_v1`
+      - `teacher_aux_continuous_v1`
+      - `teacher_aux_return_recovery_v1`
+    - strict resume lineage 升级为：
+      - `sequence_model_revision = seq_v3_continuous_dual_channel_r3`
+      - `loss_profile`、sample/daily/multi-objective 权重全部进入 signature
+    - 在 `daily_research/continuous_policy/train_policy.py` 和 `run_continuous_policy_protocol.py` 接通 `--loss-profile`
+    - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 接通：
+      - `loss_profile` 进入 trial config 与 protocol args
+      - 新 search profile：`seq2_return_recovery_v1`
+      - 固定 `budget_v3 + sequence_layers = 2`
+      - 只搜索 `loss_profile`
+  - 预检：
+    - `python -m compileall -q daily_research`
+    - `run_self_optimizing_study.py --search-profile seq2_return_recovery_v1 --trial-count 3 --dry-run`
+    - Windows 下因 OpenMP duplicate init，正式口径切换为：
+      - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe ...`
+  - 正式执行：
+    - `study_tag = cp_v3_seq_self_opt_return_recovery_r1`
+    - `search_profile = seq2_return_recovery_v1`
+    - screening `epochs = 40 / min_epochs = 32`
+    - confirmatory `epochs = 64 / min_epochs = 48`
+- 结果：
+  - screening：
+    - `trial_01 = dual_channel_default_v1`
+      - `annual_return = -0.1007`
+      - `sharpe = -0.6605`
+      - `reduce_success_rate_5d = 0.6444`
+      - `exit_timeliness_rate_5d = 0.5278`
+      - `cash_timing_quality_1d = -0.2463`
+    - `trial_02 = teacher_aux_continuous_v1`
+      - `annual_return = -0.0547`
+      - `sharpe = -0.3559`
+      - `reduce_success_rate_5d = 0.5000`
+      - `exit_timeliness_rate_5d = 0.5750`
+      - `cash_timing_quality_1d = -0.3278`
+    - `trial_03 = teacher_aux_return_recovery_v1`
+      - `annual_return = 0.1327`
+      - `sharpe = 0.9732`
+      - `reduce_success_rate_5d = 0.6364`
+      - `exit_timeliness_rate_5d = 0.5370`
+      - `cash_timing_quality_1d = -0.1243`
+      - `immediate_reversal_rate_3d = 0.1706`
+      - `shadow_reversal_rate_3d = 0.0000`
+      - 成为本轮 screen performance / stability 双冠军
+  - confirmatory：
+    - `confirm_01 = cp_v3_seq_self_opt_return_recovery_r1__confirm_01`
+    - 来源：
+      - `trial_03 = teacher_aux_return_recovery_v1`
+    - `training_evidence = sufficient`
+      - `completed_epochs = 52`
+      - `best_epoch = 42`
+      - `train_day_count = 409`
+      - `teacher_action_rows = 36634`
+    - 但正式长预算下结果退化：
+      - `annual_return = -0.1814`
+      - `sharpe = -1.6036`
+      - `max_drawdown = -0.0996`
+      - `reduce_success_rate_5d = 0.4737`
+      - `exit_timeliness_rate_5d = 0.6099`
+      - `cash_timing_quality_1d = -0.4792`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `reduce_success_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - “teacher 降级为辅助先验”已不再只是概念，而是正式训练合同和 self-opt 搜索维度
+    - `teacher_aux_return_recovery_v1` 在 `seq2` 短预算 screening 上确实给出了当前最强的收益恢复正信号
+    - 但同一 profile 在 confirmatory 长预算下没有稳定住收益、回撤与现金时点
+  - 推断：
+    - 当前不是“这条方向无效”，而是“这条方向还没学稳”
+    - 当前最值得保留的是：
+      - `loss_profile` 作为正式搜索维度
+      - `teacher_aux_return_recovery_v1` 作为 screening-promising profile
+    - 当前最需要警惕的是：
+      - 不要把 screening 正信号误当成 confirmatory verdict
+  - 假设：
+    - 如果后续继续推进，最高 ROI 会是围绕 `teacher_aux_return_recovery_v1` 做更窄的 return-recovery family，而不是回到高频手工 patch
+- 治理收口：
+  - study 完成后已确认：
+    - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
+    - 已全部恢复到 `cp_v3_seq_holdcash_r1`

@@ -14,7 +14,11 @@ from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_
 from daily_research.continuous_policy.model import fit_policy_models
 from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES, fit_policy_models_v2
-from daily_research.continuous_policy.model_seq_v3 import fit_policy_models_v3
+from daily_research.continuous_policy.model_seq_v3 import (
+    DEFAULT_LOSS_PROFILE,
+    LOSS_PROFILE_NAMES,
+    fit_policy_models_v3,
+)
 from daily_research.continuous_policy.pipeline_utils import (
     build_training_matrices,
     select_daily_feature_columns,
@@ -83,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--daily-hidden-dim", type=int, default=96)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--loss-profile",
+        default=DEFAULT_LOSS_PROFILE,
+        choices=LOSS_PROFILE_NAMES,
+        help="Loss contract for seq_v3: use default imitation balance or teacher-aux continuous-primary profiles.",
+    )
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--tag", default="")
@@ -117,6 +127,7 @@ def _build_common_train_summary(
         "label_preset": str(teacher_summary.get("label_preset", args.label_preset)),
         "trainer_backend": str(training_contract.get("trainer_backend", "") or ""),
         "decoder_profile": str(getattr(args, "decoder_profile", "default_v2") or "default_v2"),
+        "loss_profile": str(getattr(args, "loss_profile", DEFAULT_LOSS_PROFILE) or DEFAULT_LOSS_PROFILE),
         "training_contract": summarize_training_contract(training_contract),
         "action_distribution": {
             str(key): int(value)
@@ -258,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             daily_dropout=args.daily_dropout,
             early_stop_patience=args.early_stop_patience,
             resume_mode=args.resume_mode,
+            loss_profile=args.loss_profile,
         )
         artifact_path = run_root / "continuous_policy_v3_seq_artifact.pt"
         training_diagnostics = dict(artifact.training_diagnostics or {})
