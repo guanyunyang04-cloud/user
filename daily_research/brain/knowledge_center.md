@@ -348,3 +348,17 @@
     - `cash_timing_quality_1d`
     - `max_drawdown`
     仍未稳定站住
+
+- `return_recovery_v2` 评分目标已证明有实际价值：
+  - 它会显式惩罚负 `annual_return / sharpe`、过深 `max_drawdown`、过差 `cash_timing_quality_1d` 与不足的 `trend_capture_rate_10d`
+  - 因而不会再把 screening 上短期更亮眼、但 confirmatory 更脆弱的 profile 自动推成总冠军
+- 同一 `seq2 + budget_v3` 家族内，`teacher_aux_return_recovery_v1` 与 `teacher_aux_return_recovery_balanced_v2` 的分工已经变清楚：
+  - `teacher_aux_return_recovery_v1` = screening-strong、长预算 fragile
+  - `teacher_aux_return_recovery_balanced_v2` = confirmatory 下更能保住正收益、正夏普与 `shadow_reversal_rate_3d = 0`
+- narrow focused study 不应该只 rerun 角色冠军：
+  - 当 `performance_champion / stability_champion` 指向同一 trial 时，保留 `composite_runner_up` confirmatory fallback 是有价值的
+  - 这轮正是因为补了该 fallback，`teacher_aux_return_recovery_balanced_v2` 才没有被遗漏
+- 当前 return-recovery 主线的剩余主矛盾不再是“teacher 降级方向是否有效”，而是：
+  - 如何在保住 `reduce / exit` 的前提下，把 `exit_timeliness_rate_5d` 从 `0.50` 再抬过 gate
+  - 如何把 `cash_timing_quality_1d` 从 `-0.1270` 继续拉向 `0`
+  - 如何把 `max_drawdown` 从 `-0.0804` 再压回正式 promotion 阈值以内

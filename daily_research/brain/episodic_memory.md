@@ -14912,3 +14912,118 @@ position,000001.SZ,1200,12.38,
   - study 完成后已确认：
     - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
     - 已全部恢复到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 self-opt return_recovery_r2 执行闭环
+- 触发：
+  - 用户要求基于最优计划继续一次性执行并完整交付，不停在建议层
+  - 当前最优计划已收敛到：
+    - 不再回到手工 `formal_r*` patch 主线
+    - 围绕 `seq2 + teacher-aux return-recovery` 做 confirmatory-oriented focused self-opt
+    - 让评分目标更贴近长预算下的真实生存能力
+- 动作前自检：
+  - 事实：
+    - `teacher_aux_return_recovery_v1` 在 `return_recovery_r1` 的 screening 上最强，但 confirmatory 长预算明显退化
+    - 现有 study runner 已能搜索 `loss_profile`，但当前 objective 仍不足以把“screening 亮眼”和“confirmatory 能活下来”充分分开
+    - `confirmatory-max-candidates` 虽已可配，但 narrow family 下若角色重叠，容易只 rerun 一个 trial
+  - 推断：
+    - 当前最高 ROI 不是扩大搜索面，而是把 focused family 的评分目标和 confirmatory 选拔做得更贴近长期稳定性
+    - 如果这步成立，下一轮最可能浮出的，不会是更激进的 profile，而是更平衡的 return-recovery 变体
+  - 假设：
+    - 同一 `seq2 + budget_v3` 家族内，存在一个比 `teacher_aux_return_recovery_v1` 更适合 confirmatory 长预算的 balanced 分支
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/model_seq_v3.py` 新增：
+      - `teacher_aux_return_recovery_balanced_v2`
+      - `teacher_aux_return_recovery_stable_v2`
+    - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 新增：
+      - `search_profile = seq2_return_recovery_v2`
+      - `objective_profile = return_recovery_v2`
+      - `SEARCH_PROFILE_DEFAULT_OBJECTIVES`
+      - confirmatory 候选补位 `composite_runner_up`
+    - `return_recovery_v2` objective 显式加强对以下项的惩罚：
+      - 负 `annual_return`
+      - 负 `sharpe`
+      - 过深 `max_drawdown`
+      - 过差 `cash_timing_quality_1d`
+      - 过低 `trend_capture_rate_10d`
+  - 预检：
+    - `git status --short` 确认本轮只在 `model_seq_v3.py` 与 `run_self_optimizing_study.py` 上继续演进
+    - `run_self_optimizing_study.py --search-profile seq2_return_recovery_v2 --trial-count 4 --confirmatory-max-candidates 2 --dry-run`
+    - dry-run 已确认本轮 4 个筛选 trial 全部落在预期 family 内
+  - 正式执行：
+    - `study_tag = cp_v3_seq_self_opt_return_recovery_r2`
+    - `search_profile = seq2_return_recovery_v2`
+    - `objective_profile = return_recovery_v2`
+    - `trial_count = 4`
+    - `confirmatory_max_candidates = 2`
+- 结果：
+  - screening：
+    - `trial_01 = teacher_aux_return_recovery_v1`
+      - `annual_return = 0.1327`
+      - `sharpe = 0.9732`
+      - `max_drawdown = -0.0680`
+      - `reduce_success_rate_5d = 0.6364`
+      - `exit_timeliness_rate_5d = 0.5370`
+      - `cash_timing_quality_1d = -0.1243`
+      - `trend_capture_rate_10d = 0.3529`
+      - `training_evidence = insufficient`
+      - 成为本轮 screen performance / stability 双冠军
+    - 其余 family 也已完成 screening：
+      - `teacher_aux_return_recovery_stable_v2`
+      - `dual_channel_default_v1`
+      - `teacher_aux_return_recovery_balanced_v2`
+  - confirmatory：
+    - `confirm_01 = cp_v3_seq_self_opt_return_recovery_r2__confirm_01`
+      - 来源：`trial_01 = teacher_aux_return_recovery_v1`
+      - `training_evidence = sufficient`
+      - 但长预算下退化为：
+        - `annual_return = -0.1814`
+        - `sharpe = -1.6036`
+        - `max_drawdown = -0.0996`
+        - `reduce_success_rate_5d = 0.4737`
+        - `exit_timeliness_rate_5d = 0.6099`
+        - `cash_timing_quality_1d = -0.4792`
+      - 说明它仍是 screening-strong、confirmatory-fragile profile
+    - `confirm_02 = cp_v3_seq_self_opt_return_recovery_r2__confirm_02`
+      - 来源：`trial_04 = teacher_aux_return_recovery_balanced_v2`
+      - 角色：`composite_runner_up`
+      - `training_evidence = sufficient`
+      - 长预算结果为：
+        - `annual_return = 0.0906`
+        - `sharpe = 0.6595`
+        - `max_drawdown = -0.0804`
+        - `reduce_success_rate_5d = 0.5342`
+        - `exit_timeliness_rate_5d = 0.5000`
+        - `cash_timing_quality_1d = -0.1270`
+        - `trend_capture_rate_10d = 0.3906`
+        - `shadow_reversal_rate_3d = 0.0000`
+      - 成为本轮新的 confirmatory champion
+      - promotion 仍为 `shadow_only`
+      - failed checks：
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+        - `annual_return_vs_active`
+        - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - `return_recovery_v2` 没有把 study 推向更激进的短期冠军，反而把更能在 confirmatory 长预算下活下来的 `balanced_v2` 提到了冠军位
+    - `teacher_aux_return_recovery_balanced_v2` 是当前第一条在 confirmatory 下同时保住：
+      - 正 `annual_return`
+      - 正 `sharpe`
+      - `shadow_reversal_rate_3d = 0.0000`
+      的 return-recovery family 分支
+  - 推断：
+    - 当前最值得继续推进的已不再是 `teacher_aux_return_recovery_v1`
+    - 而是 `teacher_aux_return_recovery_balanced_v2` 这条更接近 confirmatory-stable 的分支
+    - 下一阶段主矛盾已经进一步压缩到：
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active / sharpe_vs_active`
+  - 假设：
+    - 若后续继续沿最优路径推进，最高 ROI 会是围绕 `balanced_v2` 做更窄的 confirmatory repair，而不是重新扩大 objective 或回到手工 patch
+- 治理收口：
+  - study 完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
+  - 已再次自动恢复到 `cp_v3_seq_holdcash_r1`
+  - 默认运行态未被任何新 trial 静默接管

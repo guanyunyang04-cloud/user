@@ -504,3 +504,28 @@
 - 本轮执行后的治理收口继续固定为：
   - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
   - study 完成后必须恢复到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 self-opt return_recovery_r2 操作补充
+- 当前 confirmatory-oriented focused study 的 dry-run 命令固化为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v2 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_seq_self_opt_return_recovery_r2 --dry-run`
+- 当前正式执行命令固化为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v2 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_seq_self_opt_return_recovery_r2`
+- `seq2_return_recovery_v2` 的固定执行纪律为：
+  - 继续固定 `learned_all_a + holdcash_v3 + budget_v3 + sequence_layers = 2`
+  - 固定 `learning_rate = 0.0012`
+  - 固定 `hidden_dim = 224`
+  - 固定 `daily_hidden_dim = 128`
+  - 固定 `dropout = 0.12`
+  - 固定 `daily_dropout = 0.08`
+  - 固定 `batch_size = 512`
+  - 只搜索 `loss_profile`
+- `seq2_return_recovery_v2` 默认 objective 已固定为：
+  - `objective_profile = return_recovery_v2`
+  - 若不显式传 `--objective-profile`，runner 现在会按 search profile 自动绑定该 objective
+- 本轮新增的正式 `loss_profile` 分支为：
+  - `teacher_aux_return_recovery_balanced_v2`
+  - `teacher_aux_return_recovery_stable_v2`
+- confirmatory 候选补位纪律已进一步固定为：
+  - 先按 `performance_champion / stability_champion / depth_challenger` 去重
+  - 若仍不足 `--confirmatory-max-candidates`，则按 `composite_score` 继续补 `composite_runner_up`
+  - 避免 narrow family study 因角色重叠而漏掉潜在更稳的 runner-up

@@ -783,3 +783,43 @@
     - 长预算下的 `annual_return / sharpe`
     - `cash_timing_quality_1d`
     - `max_drawdown`
+
+## 2026-04-16 self-opt return_recovery_r2 收口
+- 当前 focused self-opt 主线已从 `return_recovery_r1` 进一步升级到：
+  - `study_tag = cp_v3_seq_self_opt_return_recovery_r2`
+  - `search_profile = seq2_return_recovery_v2`
+  - `objective_profile = return_recovery_v2`
+- 当前研究角色进一步固定为：
+  - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `cp_v3_seq_self_opt_return_recovery_r2__trial_01` = 新一轮 screen performance / stability 双冠军
+  - `cp_v3_seq_self_opt_return_recovery_r2__confirm_02` = 当前最值得继续投入的 confirmatory-stable challenger
+- 本轮 screen champion 事实为：
+  - `loss_profile = teacher_aux_return_recovery_v1`
+  - `annual_return = 0.1327`
+  - `sharpe = 0.9732`
+  - `reduce_success_rate_5d = 0.6364`
+  - `exit_timeliness_rate_5d = 0.5370`
+  - `cash_timing_quality_1d = -0.1243`
+  - `training_evidence = insufficient`
+- 本轮 confirmatory champion 事实为：
+  - `run_tag = cp_v3_seq_self_opt_return_recovery_r2__confirm_02`
+  - `loss_profile = teacher_aux_return_recovery_balanced_v2`
+  - `training_evidence = sufficient`
+  - `annual_return = 0.0906`
+  - `sharpe = 0.6595`
+  - `max_drawdown = -0.0804`
+  - `reduce_success_rate_5d = 0.5342`
+  - `exit_timeliness_rate_5d = 0.5000`
+  - `cash_timing_quality_1d = -0.1270`
+  - `trend_capture_rate_10d = 0.3906`
+  - `shadow_reversal_rate_3d = 0.0000`
+- promotion 结论仍为 `shadow_only`，剩余失败项已经收敛到：
+  - `exit_timeliness_rate_5d`
+  - `cash_timing_quality_1d`
+  - `max_drawdown`
+  - `annual_return_vs_active`
+  - `sharpe_vs_active`
+- 当前最准确的主线判断是：
+  - `teacher_aux_return_recovery_v1` 继续保留为 screening-strong reference
+  - `teacher_aux_return_recovery_balanced_v2` 取代它，成为更值得继续推进的 confirmatory-stable return-recovery 分支
+  - study 完成后默认治理已自动恢复到 `cp_v3_seq_holdcash_r1`

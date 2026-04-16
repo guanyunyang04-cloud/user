@@ -83,6 +83,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "seq2_return_recovery_v2": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": [
+            DEFAULT_LOSS_PROFILE,
+            "teacher_aux_return_recovery_v1",
+            "teacher_aux_return_recovery_balanced_v2",
+            "teacher_aux_return_recovery_stable_v2",
+        ],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -111,6 +128,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "seq2_return_recovery_v2": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "teacher_aux_return_recovery_v1",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
+}
+
+
+SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
+    "focused_seq_v1": "promotion_balanced_v2",
+    "seq2_return_recovery_v1": "return_recovery_v2",
+    "seq2_return_recovery_v2": "return_recovery_v2",
 }
 
 
@@ -134,7 +170,11 @@ def _exposure_penalty(avg_gross_exposure: float) -> float:
     return min((exposure - 0.70) * 1.5, 0.60)
 
 
-def _score_protocol_summary(protocol_summary: dict[str, Any]) -> dict[str, Any]:
+def _score_protocol_summary(
+    protocol_summary: dict[str, Any],
+    *,
+    objective_profile: str = "promotion_balanced_v2",
+) -> dict[str, Any]:
     evaluation = dict(protocol_summary.get("evaluation", {}) or {})
     metrics = dict(evaluation.get("continuous_policy_metrics", {}) or {})
     continuity = dict(evaluation.get("continuity_metrics", {}) or {})
@@ -168,6 +208,11 @@ def _score_protocol_summary(protocol_summary: dict[str, Any]) -> dict[str, Any]:
         max(0.0, reversal - 0.25) * 3.0
         + max(0.0, shadow_reversal - 0.18) * 2.5
     )
+    negative_return_penalty = max(0.0, -annual_return)
+    negative_sharpe_penalty = max(0.0, -sharpe)
+    drawdown_excess_penalty = max(0.0, abs(min(max_drawdown, 0.0)) - 0.08)
+    cash_floor_penalty = max(0.0, -0.08 - cash_timing)
+    trend_floor_penalty = max(0.0, 0.30 - trend_capture)
     active_alignment_bonus = 0.0
     if gate_checks.get("annual_return_vs_active") is True:
         active_alignment_bonus += 0.20
@@ -182,33 +227,72 @@ def _score_protocol_summary(protocol_summary: dict[str, Any]) -> dict[str, Any]:
     total_checks = max(len(gate_checks), 1)
     gate_pass_ratio = passed_checks / float(total_checks)
 
-    performance_breakdown = {
-        "annual_return": annual_return * 2.40,
-        "sharpe": sharpe * 0.28,
-        "open_win_rate_5d": open_win * 1.20,
-        "reduce_success_rate_5d": reduce_success * 1.35,
-        "exit_timeliness_rate_5d": exit_timeliness * 1.50,
-        "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 1.05,
-        "hold_share": hold_share * 0.45,
-        "trend_capture_rate_10d": trend_capture * 1.00,
-        "active_alignment_bonus": active_alignment_bonus,
-        "gate_pass_ratio": gate_pass_ratio * 0.40,
-        "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.20,
-        "exposure_penalty": -_exposure_penalty(avg_gross_exposure),
-    }
-    stability_breakdown = {
-        "gate_pass_ratio": gate_pass_ratio * 0.65,
-        "reduce_success_rate_5d": reduce_success * 0.55,
-        "exit_timeliness_rate_5d": exit_timeliness * 0.60,
-        "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.45,
-        "hold_share": hold_share * 0.20,
-        "reversal_penalty": -reversal * 1.30,
-        "shadow_reversal_penalty": -shadow_reversal * 1.25,
-        "reversal_excess_penalty": -reversal_excess_penalty,
-        "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.20,
-        "threshold_gap_penalty": -threshold_gap_penalty,
-        "training_evidence_bonus": 0.35 if training_evidence_ok else -0.35,
-    }
+    if str(objective_profile or "promotion_balanced_v2") == "return_recovery_v2":
+        performance_breakdown = {
+            "annual_return": annual_return * 3.10,
+            "sharpe": sharpe * 0.42,
+            "open_win_rate_5d": open_win * 1.10,
+            "reduce_success_rate_5d": reduce_success * 1.20,
+            "exit_timeliness_rate_5d": exit_timeliness * 1.25,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.90,
+            "hold_share": hold_share * 0.28,
+            "trend_capture_rate_10d": trend_capture * 1.10,
+            "active_alignment_bonus": active_alignment_bonus,
+            "gate_pass_ratio": gate_pass_ratio * 0.48,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.70,
+            "exposure_penalty": -_exposure_penalty(avg_gross_exposure),
+            "negative_return_penalty": -negative_return_penalty * 3.80,
+            "negative_sharpe_penalty": -negative_sharpe_penalty * 0.72,
+            "cash_floor_penalty": -cash_floor_penalty * 2.00,
+            "drawdown_excess_penalty": -drawdown_excess_penalty * 5.20,
+            "trend_floor_penalty": -trend_floor_penalty * 0.90,
+        }
+        stability_breakdown = {
+            "gate_pass_ratio": gate_pass_ratio * 0.78,
+            "reduce_success_rate_5d": reduce_success * 0.58,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.62,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.56,
+            "hold_share": hold_share * 0.16,
+            "reversal_penalty": -reversal * 1.20,
+            "shadow_reversal_penalty": -shadow_reversal * 1.20,
+            "reversal_excess_penalty": -reversal_excess_penalty,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.90,
+            "threshold_gap_penalty": -threshold_gap_penalty * 1.35,
+            "training_evidence_bonus": 0.32 if training_evidence_ok else -0.40,
+            "negative_return_penalty": -negative_return_penalty * 2.60,
+            "negative_sharpe_penalty": -negative_sharpe_penalty * 0.60,
+            "cash_floor_penalty": -cash_floor_penalty * 2.25,
+            "drawdown_excess_penalty": -drawdown_excess_penalty * 4.80,
+            "trend_floor_penalty": -trend_floor_penalty * 0.65,
+        }
+    else:
+        performance_breakdown = {
+            "annual_return": annual_return * 2.40,
+            "sharpe": sharpe * 0.28,
+            "open_win_rate_5d": open_win * 1.20,
+            "reduce_success_rate_5d": reduce_success * 1.35,
+            "exit_timeliness_rate_5d": exit_timeliness * 1.50,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 1.05,
+            "hold_share": hold_share * 0.45,
+            "trend_capture_rate_10d": trend_capture * 1.00,
+            "active_alignment_bonus": active_alignment_bonus,
+            "gate_pass_ratio": gate_pass_ratio * 0.40,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.20,
+            "exposure_penalty": -_exposure_penalty(avg_gross_exposure),
+        }
+        stability_breakdown = {
+            "gate_pass_ratio": gate_pass_ratio * 0.65,
+            "reduce_success_rate_5d": reduce_success * 0.55,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.60,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.45,
+            "hold_share": hold_share * 0.20,
+            "reversal_penalty": -reversal * 1.30,
+            "shadow_reversal_penalty": -shadow_reversal * 1.25,
+            "reversal_excess_penalty": -reversal_excess_penalty,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.20,
+            "threshold_gap_penalty": -threshold_gap_penalty,
+            "training_evidence_bonus": 0.35 if training_evidence_ok else -0.35,
+        }
     performance_score = round(sum(performance_breakdown.values()), 6)
     stability_score = round(sum(stability_breakdown.values()), 6)
     composite_score = round(performance_score + stability_score, 6)
@@ -224,6 +308,7 @@ def _score_protocol_summary(protocol_summary: dict[str, Any]) -> dict[str, Any]:
         "gate_pass_ratio": gate_pass_ratio,
         "passed_check_count": passed_checks,
         "total_check_count": total_checks,
+        "objective_profile": str(objective_profile or "promotion_balanced_v2"),
         "primary_metrics": {
             "annual_return": annual_return,
             "sharpe": sharpe,
@@ -299,11 +384,12 @@ def _build_trial_result_from_protocol(
     trial_tag: str,
     trial_config: dict[str, Any],
     protocol_summary_path: Path,
+    objective_profile: str,
 ) -> "TrialResult":
     protocol_summary = read_json(protocol_summary_path)
     if not protocol_summary:
         raise FileNotFoundError(f"Missing protocol summary: {protocol_summary_path}")
-    score_payload = _score_protocol_summary(protocol_summary)
+    score_payload = _score_protocol_summary(protocol_summary, objective_profile=objective_profile)
     promotion_gate = dict(protocol_summary.get("promotion_gate", {}) or {})
     return TrialResult(
         trial_id=trial_id,
@@ -346,7 +432,11 @@ def _restore_latest_state(snapshot: dict[str, str | None]) -> None:
         path.write_text(payload, encoding="utf-8")
 
 
-def _read_seed_study_trials(seed_study_tag: str) -> tuple[dict[str, Any], list["TrialResult"]]:
+def _read_seed_study_trials(
+    seed_study_tag: str,
+    *,
+    objective_profile: str,
+) -> tuple[dict[str, Any], list["TrialResult"]]:
     study_summary_path = STUDIES_ROOT / str(seed_study_tag) / "study_summary.json"
     study_summary = read_json(study_summary_path)
     if not study_summary:
@@ -361,6 +451,7 @@ def _read_seed_study_trials(seed_study_tag: str) -> tuple[dict[str, Any], list["
             trial_tag=str(item.get("trial_tag", f"seed_trial_{index:02d}")),
             trial_config=dict(item.get("trial_config", {}) or {}),
             protocol_summary_path=protocol_summary_path,
+            objective_profile=objective_profile,
         )
         seeded_trials.append(seeded_result)
     return study_summary, seeded_trials
@@ -371,6 +462,7 @@ def _historical_leaderboard(
     pool_name: str,
     trainer_backend: str,
     label_preset: str,
+    objective_profile: str,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     leaderboard: list[dict[str, Any]] = []
@@ -384,7 +476,7 @@ def _historical_leaderboard(
             continue
         if str(payload.get("label_preset", "") or "") != str(label_preset):
             continue
-        score_payload = _score_protocol_summary(payload)
+        score_payload = _score_protocol_summary(payload, objective_profile=objective_profile)
         leaderboard.append(
             {
                 "run_tag": str(payload.get("run_tag", "")),
@@ -572,6 +664,15 @@ def _pick_confirmatory_candidates(
         unique.append((role, trial))
         if len(unique) >= int(max_candidates):
             break
+    if len(unique) < int(max_candidates):
+        remaining = sorted(completed_trials, key=lambda item: float(item.composite_score), reverse=True)
+        for trial in remaining:
+            if trial.trial_tag in seen_tags:
+                continue
+            seen_tags.add(trial.trial_tag)
+            unique.append(("composite_runner_up", trial))
+            if len(unique) >= int(max_candidates):
+                break
     return unique
 
 
@@ -604,6 +705,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-epochs", type=int, default=32)
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--search-profile", default="focused_seq_v1", choices=tuple(sorted(SEARCH_PROFILES)))
+    parser.add_argument("--objective-profile", default="")
     parser.add_argument("--trial-count", type=int, default=3)
     parser.add_argument("--seed-study-tag", default="")
     parser.add_argument("--skip-screening", action="store_true")
@@ -625,6 +727,10 @@ def main(argv: list[str] | None = None) -> int:
     study_tag = str(args.study_tag or timestamp_tag("self_opt_study"))
     study_root = STUDIES_ROOT / study_tag
     study_root.mkdir(parents=True, exist_ok=True)
+    objective_profile = str(
+        args.objective_profile
+        or SEARCH_PROFILE_DEFAULT_OBJECTIVES.get(args.search_profile, "promotion_balanced_v2")
+    )
 
     base_trial = {
         **dict(SEARCH_PROFILE_BASE_TRIALS[args.search_profile]),
@@ -640,13 +746,17 @@ def main(argv: list[str] | None = None) -> int:
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
     if str(args.seed_study_tag or "").strip():
-        seed_study_summary, screening_seed_trials = _read_seed_study_trials(str(args.seed_study_tag).strip())
+        seed_study_summary, screening_seed_trials = _read_seed_study_trials(
+            str(args.seed_study_tag).strip(),
+            objective_profile=objective_profile,
+        )
         if screening_seed_trials:
             selected_trials = [dict(item.trial_config) for item in screening_seed_trials]
     study_plan = {
         "run_tag": study_tag,
         "created_at": now_iso(),
         "search_profile": args.search_profile,
+        "objective_profile": objective_profile,
         "seed_study_tag": str(args.seed_study_tag or ""),
         "skip_screening": bool(args.skip_screening),
         "confirmatory_enabled": not bool(args.disable_confirmatory),
@@ -684,6 +794,7 @@ def main(argv: list[str] | None = None) -> int:
                             trial_tag=trial_tag,
                             trial_config=trial_config,
                             protocol_summary_path=protocol_summary_path,
+                            objective_profile=objective_profile,
                         )
                     )
                 except Exception as exc:
@@ -738,6 +849,7 @@ def main(argv: list[str] | None = None) -> int:
                             "min_epochs": int(args.confirmatory_min_epochs),
                         },
                         protocol_summary_path=protocol_summary_path,
+                        objective_profile=objective_profile,
                     )
                     built.phase = "confirmatory"
                     built.role = role
@@ -826,13 +938,14 @@ def main(argv: list[str] | None = None) -> int:
         pool_name=args.pool_name,
         trainer_backend=args.trainer_backend,
         label_preset=str(base_trial["label_preset"]),
+        objective_profile=objective_profile,
         limit=max(args.top_k, 5),
     )
     study_summary = {
         "run_tag": study_tag,
         "study_tag": study_tag,
         "executed_at": now_iso(),
-        "objective_profile": "promotion_balanced_v2",
+        "objective_profile": objective_profile,
         "search_profile": args.search_profile,
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
