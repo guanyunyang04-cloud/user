@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-04-14`
+快照日期：`2026-04-16`
 
 ## 1. 当前接管摘要
 - `daily_research` 是当前工作区的正式生产研究与执行主线
@@ -13,7 +13,6 @@
   - `governance_layer.md`
 - `2026-04-13` 接管复核已完成：
   - `project_consistency_check.py` 与 `doc_guard.py check` 已通过
-  - `active_execution_strategy.json` 仍对齐 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
   - `operations_center.md` 的 recent / verdict 入口已纠偏到真实脚本
 - `2026-04-13` 依赖环境真源已补齐：
   - `daily_research/environment.yml` 已创建并接入守卫
@@ -76,7 +75,7 @@
 - strongest-model 当前 recent winner root：
   - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_monthly_v1`
 - 当前 live 默认执行：
-  - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+  - `short_expert_policy_v5b + regoff_k1_3d_ensemble_native_anchor`
 - 当前 execution app 统一入口：
   - `python daily_research/execution/run_execution_app.py status`
 - 当前 execution Web 控制台入口：
@@ -823,3 +822,44 @@
   - `teacher_aux_return_recovery_v1` 继续保留为 screening-strong reference
   - `teacher_aux_return_recovery_balanced_v2` 取代它，成为更值得继续推进的 confirmatory-stable return-recovery 分支
   - study 完成后默认治理已自动恢复到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 live 默认执行显式切换到 `policy_v5b` recent strongest branch
+- 当前 live 默认执行真源已显式切换为：
+  - `daily_research/output/active_execution_strategy.json`
+  - `strategy_name = short_expert_policy_v5b_recent_winner_active`
+  - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+  - `panel_mode = execution_aligned`
+- 当前 trade plan 真源也已同步切换为：
+  - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b/execution_aligned_daily_live_target_weight_panel.csv`
+  - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b/execution_aligned_daily_live_score_panel.csv`
+- `latest_trade_plan.txt` 当前事实：
+  - `候选标签 = short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b__regoff_k1_3d_ensemble_native_anchor__active`
+  - `候选源信号日 = 2026-04-16`
+  - `候选信号新鲜度 = fresh`
+- 当前 strongest-model 三层判决没有因此被改写：
+  - `formal / recent / promotable` 的 strongest-model 结论仍保持在原研究判决口径
+  - 这次变更属于用户显式指定 live 默认执行，不等于 recent winner 已完成 formal promotion
+- 当前最准确的治理解释是：
+  - strongest-model 判决层与 live 默认执行层现在被显式分离
+  - live 默认执行暂以 `policy_v5b` 的 recent strongest fast bridge 运行
+  - 若后续要回滚，上一条稳定默认仍是 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 当前 active live 默认执行已从 `policy_v5b` recent fast bridge 回切到：
+  - `strategy_name = short_expert_policy_v5b_deployable_anchor_active`
+  - `candidate_label = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+  - `source_run_dir = daily_research/output/short_alpha_policy_v5_family_formal_review_20260412_r1/runs/short_expert_policy_v5b`
+  - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+  - `selection_basis = constrained_deployable_anchor`
+- 当前 live 默认切换依据不再是 recent strongest fast bridge，而是 prior constrained execution review 已确认的 deployable anchor：
+  - `policy_v5b__k1_20d`
+  - `monthly_robust_score = 0.11767040627525917`
+- 当前 `latest_trade_plan.txt` 已与新默认一致：
+  - `候选标签 = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+  - `信号日期 = 2026-04-16`
+  - 建议动作从先前的 `3` 只平均 `33.33%`，恢复为更符合 `k1_20d` 慢桥分散语义的：
+    - `600531.SH = 15%`
+    - `000555.SZ = 10%`
+    - 其余多只 `5%`
+    - `600982.SH` 保留 `5%` 而非清仓
+- 执行侧任务前端当前已新增安全分层：
+  - `global-strategy-leaderboard` 默认只读，不再默认改写 `active_execution_strategy`
+  - 前端会显式标记哪些任务“默认只读”，哪些任务“会改默认”

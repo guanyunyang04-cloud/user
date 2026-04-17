@@ -102,6 +102,7 @@ def _build_effective_live_metadata(
     execution_policy_label: str,
     execution_profile_spec: dict[str, Any],
     bridge_meta: dict[str, Any],
+    has_production_manifest: bool,
 ) -> dict[str, Any]:
     score_reference_path = production_root / "daily_live_score_reference.json"
     static_fallback_meta = _load_optional_json(
@@ -119,16 +120,28 @@ def _build_effective_live_metadata(
     ).strip()
 
     if resolved_panel_mode == "execution_aligned":
-        weight_generation_note = (
-            "Current live weights come from the promoted production full-fit "
-            "execution-aligned live target-weight panel; the displayed pre-weight "
-            "score is the signal-day execution-preweight score only, so it does not "
-            "need to be monotonic with final weight."
-        )
-        score_note = (
-            "Displayed score is the execution pre-weight score from the promoted "
-            "production full-fit live panel."
-        )
+        if has_production_manifest:
+            weight_generation_note = (
+                "Current live weights come from the promoted production full-fit "
+                "execution-aligned live target-weight panel; the displayed pre-weight "
+                "score is the signal-day execution-preweight score only, so it does not "
+                "need to be monotonic with final weight."
+            )
+            score_note = (
+                "Displayed score is the execution pre-weight score from the promoted "
+                "production full-fit live panel."
+            )
+        else:
+            weight_generation_note = (
+                "Current live weights come from the selected active "
+                "execution-aligned live target-weight panel; the displayed pre-weight "
+                "score is the signal-day execution-preweight score only, so it does not "
+                "need to be monotonic with final weight."
+            )
+            score_note = (
+                "Displayed score is the execution pre-weight score from the selected "
+                "active live panel."
+            )
         live_mode = "execution_aligned_live"
     else:
         weight_generation_note = str(
@@ -231,12 +244,14 @@ def build_active_strategy_manifest(
     source_panel_origin = "formal_source" if source_panel_root == source_run_dir else "production_fallback"
     source_panel_metrics = source_metrics if source_panel_origin == "formal_source" else strategy_metrics
     production_manifest_json = production_root / "production_retrain_manifest.json"
+    has_production_manifest = production_manifest_json.exists()
     effective_live_metadata = _build_effective_live_metadata(
         production_root=production_root,
         resolved_panel_mode=resolved_panel_mode,
         execution_policy_label=execution_policy_label,
         execution_profile_spec=execution_profile_spec if isinstance(execution_profile_spec, dict) else {},
         bridge_meta=bridge_meta,
+        has_production_manifest=has_production_manifest,
     )
     return {
         "strategy_name": str(strategy_name or source_run_dir.name),
@@ -247,7 +262,7 @@ def build_active_strategy_manifest(
         "source_panel_origin": source_panel_origin,
         "production_root": str(production_root),
         "trade_plan_refresh_run_dir": str(production_root),
-        "production_manifest_json": str(production_manifest_json.resolve()),
+        "production_manifest_json": str(production_manifest_json.resolve()) if has_production_manifest else "",
         "panel_mode": resolved_panel_mode,
         "source_target_weight_panel_csv": str((source_panel_root / target_weight_name).resolve()),
         "source_score_panel_csv": str((source_panel_root / score_name).resolve()),

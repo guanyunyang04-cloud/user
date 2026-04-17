@@ -13,10 +13,12 @@ class TaskFieldSpec:
     name: str
     label: str
     arg_flag: str
+    false_arg_flag: str = ""
     field_type: str = "text"
     placeholder: str = ""
     help_text: str = ""
     default_value: str = ""
+    default_checked: bool = False
     choices: tuple[str, ...] = ()
     section: str = "common"
 
@@ -31,6 +33,8 @@ class ExecutionTaskSpec:
     form_fields: tuple[TaskFieldSpec, ...] = ()
     allow_raw_args: bool = True
     launcher_notes: tuple[str, ...] = ()
+    safety_level: str = "safe"
+    safety_summary: str = ""
 
     @property
     def script_path(self) -> Path:
@@ -157,6 +161,8 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
             ),
         ),
         launcher_notes=("此任务可能会更新 production_root 和当前 active execution manifest。",),
+        safety_level="danger",
+        safety_summary="会重建 production_root，并可能改写当前默认执行。",
     ),
     ExecutionTaskSpec(
         name="refresh-production-static-fallback",
@@ -183,17 +189,25 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
     ExecutionTaskSpec(
         name="global-strategy-leaderboard",
         script_relative_path="daily_research/execution/run_global_deployable_strategy_leaderboard.py",
-        description="刷新可部署执行策略排行榜。",
+        description="刷新可部署执行策略排行榜（默认只读）。",
         form_fields=(
             TaskFieldSpec(
-                name="activate_best",
-                label="激活最佳结果",
-                arg_flag="--activate-best",
+                name="activate_winner",
+                label="同步改写当前默认执行（危险）",
+                arg_flag="--activate-winner",
+                false_arg_flag="--no-activate-winner",
                 field_type="boolean",
-                help_text="把最佳可部署策略写入 active manifest。",
+                help_text="默认关闭。关闭时只刷新排行榜产物；开启后才会把冠军写入 active manifest。",
+                default_checked=False,
                 section="manifest",
             ),
         ),
+        launcher_notes=(
+            "默认行为已改为只读刷新，不会再静默切走 active_execution_strategy。",
+            "只有显式勾选“同步改写当前默认执行（危险）”后，才会覆盖当前默认执行。",
+        ),
+        safety_level="caution",
+        safety_summary="默认只读；只有勾选危险开关后才会改写当前默认执行。",
     ),
     ExecutionTaskSpec(
         name="single-mapping-pipeline",
@@ -248,6 +262,8 @@ TASK_SPECS: tuple[ExecutionTaskSpec, ...] = (
                 section="source",
             ),
         ),
+        safety_level="danger",
+        safety_summary="会直接改写当前 active execution manifest。",
     ),
     ExecutionTaskSpec(
         name="continuous-policy-protocol",
@@ -672,10 +688,12 @@ def serialize_task_field(field: TaskFieldSpec) -> dict[str, Any]:
         "name": field.name,
         "label": field.label,
         "arg_flag": field.arg_flag,
+        "false_arg_flag": field.false_arg_flag,
         "field_type": field.field_type,
         "placeholder": field.placeholder,
         "help_text": field.help_text,
         "default_value": field.default_value,
+        "default_checked": field.default_checked,
         "choices": list(field.choices),
         "section": field.section,
     }
@@ -691,4 +709,6 @@ def serialize_task_spec(spec: ExecutionTaskSpec) -> dict[str, Any]:
         "form_fields": [serialize_task_field(field) for field in spec.form_fields],
         "allow_raw_args": bool(spec.allow_raw_args),
         "launcher_notes": list(spec.launcher_notes),
+        "safety_level": spec.safety_level,
+        "safety_summary": spec.safety_summary,
     }

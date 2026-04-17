@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_title }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='execution_console.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='execution_console.css') }}?v={{ ui_asset_version }}">
 </head>
 <body class="console-shell">
   <div class="shell-frame">
@@ -41,7 +41,7 @@
       </section>
     </main>
   </div>
-  <script src="{{ url_for('static', path='execution_console.js') }}"></script>
+  <script src="{{ url_for('static', path='execution_console.js') }}?v={{ ui_asset_version }}"></script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

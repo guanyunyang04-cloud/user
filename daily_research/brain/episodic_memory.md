@@ -15027,3 +15027,193 @@ position,000001.SZ,1200,12.38,
   - study 完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
   - 已再次自动恢复到 `cp_v3_seq_holdcash_r1`
   - 默认运行态未被任何新 trial 静默接管
+
+## 2026-04-16 trade plan 中 `policy_v5b` 分数/权重语义纠偏
+- 触发：
+  - 用户发现 `latest_trade_plan.txt` 里：
+    - 被买入的 `600021.SH / 601728.SH / 002027.SZ` 都显示负的“转权重前分数”
+    - 被卖出的 `600982.SH` 反而显示更高分
+  - 用户质疑“最佳权重”和“分数”是否互相矛盾
+- 动作前自检：
+  - 事实：
+    - `execution_aligned_daily_live_target_weight_panel.csv` 的 `2026-04-16` 非零权重确实是：
+      - `600021.SH / 601728.SH / 002027.SZ`
+    - `execution_aligned_daily_live_score_panel.csv` 同日对应分数里，这三只票确实是负数
+    - 代码里 `research_candidate_target_weight_csv + execution_preweight_score_panel` 的显示配置，原先把：
+      - `execution_proxy_source = ml_score`
+      - `execution_score_label = 转权重前分数`
+      直接拿去当 trade plan 主显示
+    - 但真实排序逻辑仍是：
+      - 先按 `target_weight`
+      - 再按 `final_score`
+  - 推断：
+    - 这是 trade plan 显示语义错误，不是模型真的“用负分票做正权重”
+    - 当前 live 路径里，上游 score 与桥接后的最终 target weight 不是同一个量
+  - 假设：
+    - 若把主显示切回真正参与执行排序的字段，并把 preweight score 降为参考项，用户看到的矛盾会消失
+- 实施：
+  - 修改 `daily_research/baseline/generate_daily_trade_plan.py`
+  - 对 `execution_preweight_score_panel` 改成：
+    - 主显示：`执行后排序值`
+    - 参考显示：`转权重前分数`
+  - 并新增一句显式说明：
+    - 最终执行以桥接后的目标权重与执行后排序值为准；转权重前分数只是上游参考，不保证与最终权重单调一致
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+- 结果：
+  - `latest_trade_plan.txt` 已改成：
+    - `执行排序口径: 先按目标权重，再按执行后排序值`
+    - 被买入的三只票现在显示：
+      - `目标权重 33.33% | 执行后排序值 0.3333 | 转权重前分数 ...`
+    - 被卖出的 `600982.SH` 现在显示：
+      - `目标权重 0.00% | 执行后排序值 0.0000 | 转权重前分数 0.4600`
+- 动作后复盘：
+  - 事实：
+    - 当前问题是展示误导，不是权重本身算错
+    - `execution_preweight_score_panel` 不能再直接当“最终买卖分数”解释
+  - 推断：
+    - 今后凡是 execution-aligned 多 sleeve / bridge 路径，都应优先看：
+      - `target_weight`
+      - `执行后排序值`
+    - 再把 `转权重前分数` 当上游线索
+
+## 2026-04-16 用户显式切换 live 默认执行到 `policy_v5b` recent strongest branch
+- 触发：
+  - 用户明确要求：不用 deployable 慢桥，直接切到 `policy_v5b` 的 recent 最强分支
+- 动作前自检：
+  - 事实：
+    - 当前 active manifest 与 `latest_trade_plan` 口径存在分叉：
+      - manifest 仍写 `state_liquidity_listwise_v1 + regoff_k1_5d`
+      - trade plan 实际展示成 `execution_aligned_live + regoff_k2_5d`
+    - `short_alpha_policy_v5_successor_recent_eval_20260412_r1/summary.json` 已明确：
+      - `recent_winner_profile_name = short_expert_policy_v5b`
+      - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+      - `recent_monthly_robust_score = 0.1200`
+    - 目标 run `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b` 已自带：
+      - `execution_aligned_daily_live_score_panel.csv`
+      - `execution_aligned_daily_live_target_weight_panel.csv`
+  - 推断：
+    - 最稳妥的切法不是手改 JSON，而是复用 `strategy_manifest.py` 的 builder 生成新的 `active_execution_strategy.json`
+  - 假设：
+    - 用户这次要的是显式 live 默认切换，不要求先补一轮新的 production full-fit
+- 实施：
+  - 用 `build_active_strategy_manifest(...)` 生成新的 active manifest：
+    - `strategy_name = short_expert_policy_v5b_recent_winner_active`
+    - `panel_mode = execution_aligned`
+    - `production_root = short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+  - 随后运行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+  - 让系统自动把该 run 的 execution-aligned live panel 刷新到 `2026-04-16`
+- 结果：
+  - `daily_research/output/active_execution_strategy.json` 已切成：
+    - `short_expert_policy_v5b_recent_winner_active`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+    - `effective_live_target_weight_mode = execution_aligned_live`
+  - `daily_research/execution/output/latest_trade_plan.txt` 已同步切成：
+    - `候选标签 = short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b__regoff_k1_3d_ensemble_native_anchor__active`
+    - `候选源信号日 = 2026-04-16`
+    - `候选信号新鲜度 = fresh`
+  - trade plan 当前建议动作变成：
+    - 卖出 `600982.SH`
+    - 买入 `600021.SH / 601728.SH / 002027.SZ`
+- 动作后复盘：
+  - 事实：
+    - 切换已真正落到 live 默认执行真源，而不是只停在建议层
+    - `project_consistency_check.py` 在切换后继续通过
+  - 推断：
+    - 当前 live 默认执行已经不再是 strongest-model overall mainline，而是用户显式指定的 `policy_v5b` recent fast bridge
+    - strongest-model 研究判决层与 live 默认执行层现在被有意分离
+  - 假设：
+    - 若后续用户改变偏好或实盘观察不满意，最自然的回滚点仍是：
+      - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+## 2026-04-17 live 默认执行从 `policy_v5b` fast bridge 回切到 deployable anchor
+- 触发：
+  - 用户在复盘 `latest_trade_plan.txt` 后指出：
+    - `policy_v5b + regoff_k1_3d_ensemble_native_anchor` 下出现了明显不合理的 `3` 只平均 `33.33%` 聚合
+    - 要求把“之前得到的最强最合适模型”替换为执行默认
+- 动作前自检：
+  - 事实：
+    - 当前 active live 默认仍是 `short_expert_policy_v5b_recent_winner_active`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+    - prior constrained execution review 已明确给出：
+      - `family_best_variant = policy_v5b__k1_20d`
+      - `monthly_robust_score = 0.11767040627525917`
+    - `short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1` 已明确写出：
+      - `Fast 3d bridge is the main tail-risk source under constrained replay`
+  - 推断：
+    - 当前 live 默认并不符合“最强最合适”的既有研究结论
+    - 应该从 recent strongest fast bridge 回切到 prior audit 已确认的 deployable anchor
+  - 假设：
+    - 用户此刻要的是“按既有研究证据选择最适合 live 默认的版本”，而不是继续保留先前显式指定的高攻击性 fast bridge
+- 实施：
+  - 用 `policy_v5b` formal/constrained run 直接作为 active live 真源，不做新的 production retrain
+  - 运行：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; ... refresh_live_panels_for_run(short_expert_policy_v5b formal run)`
+  - 用 `build_active_strategy_manifest(...)` 生成新的：
+    - `daily_research/output/active_execution_strategy.json`
+  - 关键字段切为：
+    - `strategy_name = short_expert_policy_v5b_deployable_anchor_active`
+    - `candidate_label = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+    - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+    - `selection_basis = constrained_deployable_anchor`
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+  - 额外纠偏：
+    - 把 manifest 里的 `production_manifest_json` 留空
+    - 把 `effective_live_*_note` 改成 deployable-anchor 语义，避免误写成 production full-fit
+- 结果：
+  - `active_execution_strategy.json` 当前已切为：
+    - `short_expert_policy_v5b_deployable_anchor_active`
+    - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+  - `latest_trade_plan.txt` 当前已同步切为：
+    - `候选标签 = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+    - `信号日期 = 2026-04-16`
+    - `候选信号新鲜度 = fresh`
+  - 建议动作已不再是 fast bridge 的 `3` 只平均 `33.33%`：
+    - `600982.SH` 从清仓改为减仓保留 `5%`
+    - 新增：
+      - `600531.SH = 15%`
+      - `000555.SZ = 10%`
+      - 多只 `5%` 的慢桥分散持仓
+- 动作后复盘：
+  - 事实：
+    - 这次回切后，live 默认再次与 prior constrained execution review 的正式结论一致
+    - 当前 trade plan 的权重结构也重新回到更符合 `k1_20d` 慢桥语义的分散组合
+  - 推断：
+    - 先前 `policy_v5b` recent strongest branch 适合做高攻击性 live 试验，但不适合作为“之前得到的最强最合适模型”的长期默认
+  - 假设：
+    - 若后续用户再次显式要求回到 recent strongest fast bridge，应当把它视作偏好覆盖，而不是研究结论变更
+
+## 2026-04-17 execution 前端 leaderboard 安全修复
+- 触发：
+  - 用户指出执行侧前端的 `global-strategy-leaderboard` 看起来像只刷新榜单，但曾意外把默认执行切走，要求彻底修复并顺手优化相关前端设置
+- 动作前自检：
+  - 事实：
+    - 前端任务卡片文案只写“刷新可部署执行策略排行榜”，没有显式提示会改默认执行
+    - `run_global_deployable_strategy_leaderboard.py` 的 CLI 默认是 `activate_winner=True`
+    - 任务表单字段却错误绑定成 `--activate-best`，而脚本真正识别的是 `--activate-winner/--no-activate-winner`
+  - 推断：
+    - 之前即使用户不勾选任何危险开关，任务也会沿用脚本默认值，导致意外改写 `active_execution_strategy`
+  - 假设：
+    - 最有效修复不是只改文案，而是同时修脚本默认值、前端参数绑定和任务安全提示
+- 实施：
+  - 将 `run_global_deployable_strategy_leaderboard.py` 改成默认只读：`activate_winner=False`
+  - 在任务注册层为布尔字段加入 `false_arg_flag`，让未勾选状态也能显式传 `--no-activate-winner`
+  - 修正 `global-strategy-leaderboard` 的前端字段绑定为真实参数 `--activate-winner/--no-activate-winner`
+  - 任务页新增安全标记与说明：
+    - `默认只读`
+    - `会改默认`
+    - 选中任务时显示安全摘要
+- 验证：
+  - `build_passthrough_args_from_form(task_name='global-strategy-leaderboard', form_payload={'activate_winner': False})` 返回 `['--no-activate-winner']`
+  - `build_passthrough_args_from_form(..., {'activate_winner': True})` 返回 `['--activate-winner']`
+  - 直接运行 `run_global_deployable_strategy_leaderboard.py` 后，`active_execution_strategy.json` 的 SHA256 前后完全一致，确认默认只读生效
+- 动作后复盘：
+  - 事实：
+    - 这次修复后，用户再点 `global-strategy-leaderboard` 不会因为隐藏默认值而静默切走默认执行
+    - 前端也不再把“查看榜单”和“改默认执行”混成一个无提示动作
+  - 推断：
+    - 执行侧前端当前最危险的一处误导性交互已经被机制级消除，而不是只靠使用习惯规避
+  - 假设：
+    - 若后续继续新增会改 `active_execution_strategy` 的任务，应复用同样的安全分层和显式危险提示

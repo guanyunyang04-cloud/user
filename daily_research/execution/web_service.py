@@ -52,11 +52,18 @@ def section_label(value: str) -> str:
 
 
 def base_context(*, active_path: str) -> dict[str, Any]:
+    paths = ui_paths()
+    css_path = paths["static"] / "execution_console.css"
+    js_path = paths["static"] / "execution_console.js"
     return {
         "app_title": APP_TITLE,
         "app_subtitle": APP_SUBTITLE,
         "nav_items": NAV_ITEMS,
         "active_path": active_path,
+        "ui_asset_version": max(
+            int(css_path.stat().st_mtime) if css_path.exists() else 0,
+            int(js_path.stat().st_mtime) if js_path.exists() else 0,
+        ),
     }
 
 

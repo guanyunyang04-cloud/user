@@ -954,11 +954,11 @@ def _resolve_candidate_display_config(model_info: Dict[str, Any]) -> Dict[str, A
     if mode == "research_candidate_target_weight_csv":
         if score_panel_role == "execution_preweight_score_panel":
             return {
-                "execution_score_label": "转权重前分数",
-                "show_source_score": False,
-                "source_score_label": "",
-                "execution_proxy_source": "ml_score",
-                "source_candidate_source": "",
+                "execution_score_label": "执行后排序值",
+                "show_source_score": True,
+                "source_score_label": "转权重前分数",
+                "execution_proxy_source": "final_score",
+                "source_candidate_source": "ml_score",
             }
         return {
             "execution_score_label": "参考排序分数",
@@ -1434,6 +1434,8 @@ def _write_trade_plan_txt(
         lines.append(f"执行排序口径: 先按目标权重，再按{execution_score_label}")
         if show_source_score:
             lines.append(f"{source_score_label}: 仅作来源参考，不参与执行排序")
+        if candidate_mode == "research_candidate_target_weight_csv" and score_panel_role == "execution_preweight_score_panel":
+            lines.append("执行语义说明: 最终执行以桥接后的目标权重与执行后排序值为准；转权重前分数只是上游参考，不保证与最终权重单调一致。")
         if candidate_mode == "research_candidate_target_weight_csv":
             if target_weight_semantics:
                 lines.append(f"权重语义: {target_weight_semantics}")

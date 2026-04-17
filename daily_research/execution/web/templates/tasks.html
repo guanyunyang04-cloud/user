@@ -14,7 +14,14 @@
     <div class="task-list">
       {% for task in tasks %}
       <a class="task-link{% if task.name == selected_task_name %} is-active{% endif %}" href="/tasks?task={{ task.name }}">
-        <span class="task-name">{{ task.name }}</span>
+        <span class="task-link-row">
+          <span class="task-name">{{ task.name }}</span>
+          {% if task.safety_level == "danger" %}
+          <span class="task-badge task-badge--danger">会改默认</span>
+          {% elif task.safety_level == "caution" %}
+          <span class="task-badge task-badge--caution">默认只读</span>
+          {% endif %}
+        </span>
         <small>{{ task.description }}</small>
       </a>
       {% endfor %}
@@ -27,6 +34,11 @@
       <h3>{{ selected_task.name }}</h3>
       <p>{{ selected_task.description }}</p>
     </div>
+    {% if selected_task.safety_summary %}
+    <div class="task-safety task-safety--{{ selected_task.safety_level or 'safe' }}">
+      {{ selected_task.safety_summary }}
+    </div>
+    {% endif %}
     <form id="task-launch-form" class="task-form">
       {% for section in ["selection", "source", "window", "mode", "manifest", "runtime", "common"] %}
       {% set fields = selected_task.form_fields | selectattr("section", "equalto", section) | list %}
@@ -38,7 +50,7 @@
           <label class="form-field" data-field-type="{{ field.field_type }}">
             <span>{{ field.label }}</span>
             {% if field.field_type == "boolean" %}
-            <input type="checkbox" name="{{ field.name }}" data-arg-flag="{{ field.arg_flag }}">
+            <input type="checkbox" name="{{ field.name }}" data-arg-flag="{{ field.arg_flag }}" data-false-arg-flag="{{ field.false_arg_flag }}" {% if field.default_checked %}checked{% endif %}>
             {% elif field.choices %}
             <select name="{{ field.name }}" data-arg-flag="{{ field.arg_flag }}">
               <option value=""></option>

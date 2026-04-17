@@ -825,6 +825,8 @@ def build_passthrough_args_from_form(
         if field.field_type == "boolean":
             if bool(raw_value):
                 args.append(field.arg_flag)
+            elif field.false_arg_flag:
+                args.append(field.false_arg_flag)
             continue
         value = str(raw_value or "").strip()
         if not value:

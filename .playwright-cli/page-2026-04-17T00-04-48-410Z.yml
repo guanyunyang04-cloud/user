@@ -1,0 +1,157 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - paragraph [ref=e5]: 本地控制台
+      - heading "Daily Research 执行控制台" [level=1] [ref=e6]
+      - paragraph [ref=e7]: 本地执行、监控、恢复与产物查看控制面。
+    - navigation [ref=e8]:
+      - link "总览" [ref=e9] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e10]: 总览
+      - link "任务" [ref=e11] [cursor=pointer]:
+        - /url: /tasks
+        - generic [ref=e12]: 任务
+      - link "作业" [ref=e13] [cursor=pointer]:
+        - /url: /jobs
+        - generic [ref=e14]: 作业
+      - link "体检" [ref=e15] [cursor=pointer]:
+        - /url: /doctor
+        - generic [ref=e16]: 体检
+      - link "交易计划" [ref=e17] [cursor=pointer]:
+        - /url: /artifacts/trade-plan
+        - generic [ref=e18]: 交易计划
+      - link "连续策略" [ref=e19] [cursor=pointer]:
+        - /url: /continuous-policy
+        - generic [ref=e20]: 连续策略
+      - link "模拟账户" [ref=e21] [cursor=pointer]:
+        - /url: /account
+        - generic [ref=e22]: 模拟账户
+      - link "使用教程" [ref=e23] [cursor=pointer]:
+        - /url: /guide
+        - generic [ref=e24]: 使用教程
+      - link "运行时" [ref=e25] [cursor=pointer]:
+        - /url: /settings/runtime
+        - generic [ref=e26]: 运行时
+    - generic [ref=e27]:
+      - paragraph [ref=e28]:
+        - text: 运行时解释器固定锚定在
+        - code [ref=e29]: yolos
+        - text: 。
+      - paragraph [ref=e30]:
+        - text: 全部作业状态统一写入
+        - code [ref=e31]: daily_research/output/execution_app
+        - text: 。
+  - main [ref=e32]:
+    - generic [ref=e34]:
+      - paragraph [ref=e35]: 任务
+      - heading "任务中心" [level=2] [ref=e36]
+    - generic [ref=e38]:
+      - complementary [ref=e39]:
+        - generic [ref=e40]:
+          - paragraph [ref=e41]: 注册表
+          - heading "任务列表" [level=3] [ref=e42]
+        - generic [ref=e43]:
+          - link "trade-plan 生成默认次日交易计划。" [ref=e44] [cursor=pointer]:
+            - /url: /tasks?task=trade-plan
+            - generic [ref=e46]: trade-plan
+            - generic [ref=e47]: 生成默认次日交易计划。
+          - link "candidate-trade-plan 基于候选配置生成研究候选交易计划。" [ref=e48] [cursor=pointer]:
+            - /url: /tasks?task=candidate-trade-plan
+            - generic [ref=e50]: candidate-trade-plan
+            - generic [ref=e51]: 基于候选配置生成研究候选交易计划。
+          - link "candidate-backtest 基于候选配置回放研究候选执行路径。" [ref=e52] [cursor=pointer]:
+            - /url: /tasks?task=candidate-backtest
+            - generic [ref=e54]: candidate-backtest
+            - generic [ref=e55]: 基于候选配置回放研究候选执行路径。
+          - link "update-liquid-pool 刷新执行侧使用的 liquid300/500/800 股票池。" [ref=e56] [cursor=pointer]:
+            - /url: /tasks?task=update-liquid-pool
+            - generic [ref=e58]: update-liquid-pool
+            - generic [ref=e59]: 刷新执行侧使用的 liquid300/500/800 股票池。
+          - link "refresh-production-default 会改默认 从 formal winner 构建 production full-fit，并可选更新 active manifest。" [ref=e60] [cursor=pointer]:
+            - /url: /tasks?task=refresh-production-default
+            - generic [ref=e61]:
+              - generic [ref=e62]: refresh-production-default
+              - generic [ref=e63]: 会改默认
+            - generic [ref=e64]: 从 formal winner 构建 production full-fit，并可选更新 active manifest。
+          - link "refresh-production-static-fallback 刷新 production_root 的静态 fallback 产物与 manifest 元数据。" [ref=e65] [cursor=pointer]:
+            - /url: /tasks?task=refresh-production-static-fallback
+            - generic [ref=e67]: refresh-production-static-fallback
+            - generic [ref=e68]: 刷新 production_root 的静态 fallback 产物与 manifest 元数据。
+          - link "global-strategy-leaderboard 默认只读 刷新可部署执行策略排行榜（默认只读）。" [ref=e69] [cursor=pointer]:
+            - /url: /tasks?task=global-strategy-leaderboard
+            - generic [ref=e70]:
+              - generic [ref=e71]: global-strategy-leaderboard
+              - generic [ref=e72]: 默认只读
+            - generic [ref=e73]: 刷新可部署执行策略排行榜（默认只读）。
+          - link "single-mapping-pipeline 刷新 single-mapping 执行候选 pipeline 和 live monitor。" [ref=e74] [cursor=pointer]:
+            - /url: /tasks?task=single-mapping-pipeline
+            - generic [ref=e76]: single-mapping-pipeline
+            - generic [ref=e77]: 刷新 single-mapping 执行候选 pipeline 和 live monitor。
+          - link "activate-single-mapping 会改默认 把 single-mapping 候选提升为当前 active execution manifest。" [ref=e78] [cursor=pointer]:
+            - /url: /tasks?task=activate-single-mapping
+            - generic [ref=e79]:
+              - generic [ref=e80]: activate-single-mapping
+              - generic [ref=e81]: 会改默认
+            - generic [ref=e82]: 把 single-mapping 候选提升为当前 active execution manifest。
+          - link "continuous-policy-protocol 按正式顺序执行 continuous policy train -> evaluate -> shadow continuity -> export。" [ref=e83] [cursor=pointer]:
+            - /url: /tasks?task=continuous-policy-protocol
+            - generic [ref=e85]: continuous-policy-protocol
+            - generic [ref=e86]: 按正式顺序执行 continuous policy train -> evaluate -> shadow continuity -> export。
+          - link "continuous-policy-train 训练连续型组合策略代理，产出 shadow model artifact 与 teacher 上限摘要。" [ref=e87] [cursor=pointer]:
+            - /url: /tasks?task=continuous-policy-train
+            - generic [ref=e89]: continuous-policy-train
+            - generic [ref=e90]: 训练连续型组合策略代理，产出 shadow model artifact 与 teacher 上限摘要。
+          - link "continuous-policy-evaluate 评估连续型组合策略代理，并对照 teacher 上限与当前 active manifest 参考链路。" [ref=e91] [cursor=pointer]:
+            - /url: /tasks?task=continuous-policy-evaluate
+            - generic [ref=e93]: continuous-policy-evaluate
+            - generic [ref=e94]: 评估连续型组合策略代理，并对照 teacher 上限与当前 active manifest 参考链路。
+          - link "continuous-policy-export 导出连续型组合策略的最新 shadow 动作面板，并写回组合连续状态。" [ref=e95] [cursor=pointer]:
+            - /url: /tasks?task=continuous-policy-export
+            - generic [ref=e97]: continuous-policy-export
+            - generic [ref=e98]: 导出连续型组合策略的最新 shadow 动作面板，并写回组合连续状态。
+          - link "update-model 旧版 ML 模型刷新入口。" [ref=e99] [cursor=pointer]:
+            - /url: /tasks?task=update-model
+            - generic [ref=e101]: update-model
+            - generic [ref=e102]: 旧版 ML 模型刷新入口。
+          - link "update-model-legacy-ml 旧版 ML 模型刷新兼容入口。" [ref=e103] [cursor=pointer]:
+            - /url: /tasks?task=update-model-legacy-ml
+            - generic [ref=e105]: update-model-legacy-ml
+            - generic [ref=e106]: 旧版 ML 模型刷新兼容入口。
+          - link "trade-plan-legacy-ml 旧版 ML 交易计划兼容入口。" [ref=e107] [cursor=pointer]:
+            - /url: /tasks?task=trade-plan-legacy-ml
+            - generic [ref=e109]: trade-plan-legacy-ml
+            - generic [ref=e110]: 旧版 ML 交易计划兼容入口。
+      - article [ref=e111]:
+        - generic [ref=e112]:
+          - paragraph [ref=e113]: 启动器
+          - heading "global-strategy-leaderboard" [level=3] [ref=e114]
+          - paragraph [ref=e115]: 刷新可部署执行策略排行榜（默认只读）。
+        - generic [ref=e116]: 默认只读；只有勾选危险开关后才会改写当前默认执行。
+        - generic [ref=e117]:
+          - generic [ref=e118]:
+            - heading "Manifest 参数" [level=4] [ref=e119]
+            - generic [ref=e121]:
+              - generic [ref=e122]: 同步改写当前默认执行（危险）
+              - checkbox "同步改写当前默认执行（危险） 默认关闭。关闭时只刷新排行榜产物；开启后才会把冠军写入 active manifest。" [ref=e123]
+              - generic [ref=e124]: 默认关闭。关闭时只刷新排行榜产物；开启后才会把冠军写入 active manifest。
+          - generic [ref=e125]:
+            - heading "启动参数" [level=4] [ref=e126]
+            - generic [ref=e127]:
+              - generic [ref=e128]:
+                - generic [ref=e129]: 作业标签
+                - textbox "作业标签 适合在重复运行同一任务时做区分。" [ref=e130]:
+                  - /placeholder: 可选标签
+                - generic [ref=e131]: 适合在重复运行同一任务时做区分。
+              - generic [ref=e132]:
+                - generic [ref=e133]: 原始参数
+                - textbox "原始参数 高级场景可直接补充透传参数。" [ref=e134]:
+                  - /placeholder: "--flag value --another-flag"
+                - generic [ref=e135]: 高级场景可直接补充透传参数。
+          - list [ref=e136]:
+            - listitem [ref=e137]: 默认行为已改为只读刷新，不会再静默切走 active_execution_strategy。
+            - listitem [ref=e138]: 只有显式勾选“同步改写当前默认执行（危险）”后，才会覆盖当前默认执行。
+          - generic [ref=e139]:
+            - button "后台运行" [ref=e140] [cursor=pointer]
+            - link "查看任务 JSON" [ref=e141] [cursor=pointer]:
+              - /url: /api/tasks/global-strategy-leaderboard
+        - paragraph [ref=e143]: 当前还没有从这个页面提交过任务。

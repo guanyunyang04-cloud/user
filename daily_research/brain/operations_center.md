@@ -529,3 +529,72 @@
   - 先按 `performance_champion / stability_champion / depth_challenger` 去重
   - 若仍不足 `--confirmatory-max-candidates`，则按 `composite_score` 继续补 `composite_runner_up`
   - 避免 narrow family study 因角色重叠而漏掉潜在更稳的 runner-up
+
+## 2026-04-16 trade plan 显示语义纠偏
+- 当 `run_trade_plan.py` 读取：
+  - `research_candidate_target_weight_csv`
+  - 且 `score_panel_role = execution_preweight_score_panel`
+  - trade plan 不应再把 `转权重前分数` 当作执行排序主字段
+- 当前正确口径已修正为：
+  - `执行排序口径: 先按目标权重，再按执行后排序值`
+  - `转权重前分数` 只保留为来源参考
+- 若再次看到“选中股票分数为负、未选股票分数更高”的现象，先检查是否是：
+  - execution-aligned bridge
+  - 多 offset sleeve 持仓续持
+  - 上游 preweight score 与最终 bridged target weight 被误混
+
+## 2026-04-16 live 默认执行切换到 `policy_v5b` recent strongest branch
+- 这次切换不是 research promotion，而是用户显式指定 live 默认执行切换。
+- 当前正式切换口径已固化为：
+  - 目标 run：
+    - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b`
+  - 目标 execution profile：
+    - `regoff_k1_3d_ensemble_native_anchor`
+  - manifest 语义：
+    - `panel_mode = execution_aligned`
+    - `effective_live_target_weight_mode = execution_aligned_live`
+- 当前稳定执行步骤为：
+  - 先用 `daily_research/execution/strategy_manifest.py` 的 `build_active_strategy_manifest(...)` 生成新 manifest
+  - 再运行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+  - 让 `research_candidate_profiles.py` 自动把该 run 的 execution-aligned live panel 刷到最新完成交易日
+- 本轮切换后的核验要点固定为：
+  - `active_execution_strategy.json` 中：
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+    - `production_root = ...short_expert_policy_v5b`
+  - `latest_trade_plan.txt` 中：
+    - `候选标签` 已切到 `short_expert_policy_v5b...__active`
+    - `候选源信号日` 必须刷新到最新完成交易日
+    - `候选信号新鲜度 = fresh`
+  - `project_consistency_check.py` 必须继续通过
+- 当前回滚参考也要固定写清：
+  - 若要退回此前默认执行，回滚目标是：
+    - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 当用户要求“把之前得到的最强最合适模型替换为执行默认”且 `policy_v5b` 家族已存在 prior constrained execution review 时，默认操作口径固定为：
+  - 优先检查 `short_alpha_policy_v5_family_constrained_execution_review_20260412_r1/summary.json`
+  - 若该 review 已明确给出 `family_best_variant = policy_v5b__k1_20d`，则不要继续沿用 recent strongest fast bridge
+- 当前稳定切换步骤已固化为：
+  - 先用：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; ...python -X utf8 -`
+    - 调 `refresh_live_panels_for_run(source_run_dir)`
+  - 再用 `build_active_strategy_manifest(...)` 生成新 `active_execution_strategy.json`
+  - `source_run_dir` 与 `production_root` 都直接指向：
+    - `daily_research/output/short_alpha_policy_v5_family_formal_review_20260412_r1/runs/short_expert_policy_v5b`
+  - `panel_mode = execution_aligned`
+  - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+  - 若不是 production full-fit root，`production_manifest_json` 应显式留空，避免 trade plan 误报 retrain manifest 缺失
+  - 然后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+- 本轮切换后的核验口径固定为：
+  - `active_execution_strategy.json` 中：
+    - `strategy_name = short_expert_policy_v5b_deployable_anchor_active`
+    - `candidate_label = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+    - `selection_basis = constrained_deployable_anchor`
+  - `latest_trade_plan.txt` 中：
+    - 候选标签同步切到 `...k1_20d...__active`
+    - 建议权重不再出现 `3` 只平均 `33.33%` 的 fast-sleeve 聚合形态
+    - 当前票 `600982.SH` 应变为减仓保留 `5%`，而不是完全清仓
+- 执行侧前端任务页的新安全口径：
+  - `global-strategy-leaderboard` 必须默认传 `--no-activate-winner`
+  - 只有用户显式勾选“同步改写当前默认执行（危险）”时，才允许传 `--activate-winner`
+  - 若只是查看/刷新排行榜，不应再触碰 `active_execution_strategy.json`

@@ -72,7 +72,7 @@
   - `recent = short_expert_monthly_v1`
   - `promotable = short_expert_monthly_v1`
 - 当前 live 默认执行稳定语义：
-  - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+  - `short_expert_policy_v5b + regoff_k1_3d_ensemble_native_anchor`
 
 ## 2. 硬规则
 - 必须 `brain-first`
@@ -362,3 +362,45 @@
   - 如何在保住 `reduce / exit` 的前提下，把 `exit_timeliness_rate_5d` 从 `0.50` 再抬过 gate
   - 如何把 `cash_timing_quality_1d` 从 `-0.1270` 继续拉向 `0`
   - 如何把 `max_drawdown` 从 `-0.0804` 再压回正式 promotion 阈值以内
+
+- `execution_preweight_score_panel` 的显示语义必须单独记住：
+  - 当 live 路径走 `research_candidate_target_weight_csv + execution_aligned` 时，最终执行真源是桥接后的 `target_weight`
+  - 面板里的上游 score 只是“转权重前分数”，不保证与最终目标权重单调一致
+  - 因此 trade plan 正确展示应是：
+    - 主显示：`执行后排序值`
+    - 辅显示：`转权重前分数`
+  - 不能再把 `转权重前分数` 直接当成“为什么这只票被买入/卖出”的唯一解释
+
+- `active_execution_strategy` 的默认切换并不要求先做新的 production full-fit；如果用户明确指定切到某条已有 recent / formal run，当前项目也支持：
+  - 直接把该 run 的 execution-aligned live panel 写成新的 active manifest 真源
+  - 再由 `run_trade_plan.py --candidate-profile active_execution_strategy` 自动补刷新到最新完成交易日
+- 这次切到 `policy_v5b` recent strongest branch 后，项目已经证明：
+  - live 默认执行可以显式跟随 `policy_v5b + regoff_k1_3d_ensemble_native_anchor`
+  - 并且不会自动改写 strongest-model 的 formal / recent / promotable 三层研究判决
+- `policy_v5b` recent strongest branch 的核心特征要明确记住：
+  - 优势是当前 recent 证据下的高收益、高 robust score
+  - 代价是 `avg_turnover` 明显更高，属于快桥、高频、更激进的 live 执行形态
+  - 因此它是用户显式选择后的 active live branch，不应被误写成“研究层已经统一证明的全局最优”
+- `policy_v5b` 的 live 默认选择必须区分：
+  - `recent strongest branch`：代表近端高攻击性证据，不等于最适合 live 默认
+  - `deployable anchor`：代表 constrained / bridge-sensitivity 审核后的更稳默认
+- 对 `policy_v5b` 而言，当前更适合 live 默认的是：
+  - `policy_v5b__k1_20d`
+  - 而不是 `policy_v5b + regoff_k1_3d_ensemble_native_anchor`
+- 直接原因已经被 prior audit 证明：
+  - `k1_3d` 在 `short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1` 中被明确识别为 fast bridge tail-risk source
+  - `k1_20d` 才是 constrained deployable anchor
+- 因此当用户目标从“显式切到 recent strongest”重新收敛回“替换为之前得到的最强最合适模型”时，正确回切点应是：
+  - `policy_v5b__k1_20d`
+  - 而不是继续保留 `k1_3d`
+- `execution_aligned` live 面板下，最终执行应该看：
+  - `目标权重`
+  - `执行后排序值`
+  - 上游 `转权重前分数` 只作来源参考
+  这条语义在 `k1_20d` 默认下依然成立
+- `global-strategy-leaderboard` 这个入口过去之所以“看起来像只刷新榜单，却把默认执行切走”，根因不是用户误操作，而是两处机制叠加：
+  - 脚本默认 `activate_winner=True`
+  - 前端布尔开关错误地绑定成了不存在的 `--activate-best`，导致未勾选时仍沿用危险默认
+- 修正后正确语义是：
+  - 默认行为：只读刷新 leaderboard 产物
+  - 显式勾选危险开关后：才允许覆盖 `active_execution_strategy`

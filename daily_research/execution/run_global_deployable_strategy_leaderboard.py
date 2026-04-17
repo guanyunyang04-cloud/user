@@ -47,8 +47,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Rank current cross-universe deployable strategy lines under a single "
-            "same-cost, non-capacity-adjusted leaderboard and sync the active "
-            "execution manifest to the current global winner."
+            "same-cost, non-capacity-adjusted leaderboard. By default this is a "
+            "read-only refresh; use --activate-winner only when you explicitly "
+            "want to overwrite the active execution manifest."
         )
     )
     parser.add_argument("--output-root", default=str(OUTPUT_ROOT))
@@ -56,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy-manifest-path", default=str(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST))
     parser.add_argument("--activate-winner", dest="activate_winner", action="store_true")
     parser.add_argument("--no-activate-winner", dest="activate_winner", action="store_false")
-    parser.set_defaults(activate_winner=True)
+    parser.set_defaults(activate_winner=False)
     return parser.parse_args()
 
 
