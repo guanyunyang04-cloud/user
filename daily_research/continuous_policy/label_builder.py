@@ -256,6 +256,12 @@ def build_action_labels_for_date(
         "vol_20d",
         "volatility_expansion",
         "score_rank_pct",
+        "alpha_prior_score_z",
+        "alpha_prior_rank_pct",
+        "alpha_prior_target_weight",
+        "alpha_prior_selected",
+        "alpha_prior_score_delta_1d",
+        "alpha_prior_weight_delta_1d",
         "distance_to_20d_high",
         "distance_to_60d_high",
         "drawdown_from_peak",
@@ -332,6 +338,21 @@ def build_action_labels_for_date(
     exit_reentry_pressure = _numeric("exit_reentry_pressure")
     cash_regime_pressure = _numeric("cash_regime_pressure")
     hold_continuity_pressure = _numeric("hold_continuity_pressure")
+    alpha_score_z = _numeric("alpha_prior_score_z")
+    alpha_rank_pct = _numeric("alpha_prior_rank_pct")
+    alpha_target_weight = _numeric("alpha_prior_target_weight")
+    alpha_selected = _numeric("alpha_prior_selected")
+    alpha_score_delta_1d = _numeric("alpha_prior_score_delta_1d")
+    alpha_weight_delta_1d = _numeric("alpha_prior_weight_delta_1d")
+    alpha_weight_scaled = np.clip(alpha_target_weight / 0.12, 0.0, 1.0)
+    alpha_support = np.clip(
+        0.42 * np.clip(alpha_score_z / 2.0, -1.0, 1.0)
+        + 0.30 * ((np.clip(alpha_rank_pct, 0.0, 1.0) - 0.5) * 2.0)
+        + 0.18 * alpha_weight_scaled
+        + 0.10 * np.clip(alpha_score_delta_1d + alpha_weight_delta_1d * 4.0, -0.5, 0.5),
+        -1.0,
+        1.0,
+    )
     recent_reduce_cooldown = np.clip((4.0 - days_since_last_reduce) / 4.0, 0.0, 1.0)
     recent_exit_cooldown = np.clip((5.0 - days_since_last_exit) / 5.0, 0.0, 1.0)
 
@@ -352,6 +373,8 @@ def build_action_labels_for_date(
         + 0.10 * working["score_rank_pct"].fillna(0.0).to_numpy(dtype=float)
         + 0.07 * working["distance_to_20d_high"].fillna(0.0).to_numpy(dtype=float)
         + 0.04 * working["distance_to_60d_high"].fillna(0.0).to_numpy(dtype=float)
+        + 0.10 * alpha_support
+        + 0.03 * alpha_selected
     )
     persistence = (
         0.15 * fwd3.to_numpy(dtype=float)
@@ -365,6 +388,7 @@ def build_action_labels_for_date(
         + 0.30 * opportunity.to_numpy(dtype=float)
         + 0.22 * momentum
         + 0.18 * persistence
+        + 0.08 * alpha_support
         - 0.90 * downside.to_numpy(dtype=float)
         - 0.12 * frontload_gap
     )
@@ -430,6 +454,9 @@ def build_action_labels_for_date(
         + 0.12 * persistence
         - 0.72 * downside.to_numpy(dtype=float)
         + 0.05 * np.clip(working["score_rank_pct"].fillna(0.0).to_numpy(dtype=float) - 0.75, 0.0, None)
+        + 0.10 * np.clip(alpha_support, 0.0, None)
+        + 0.04 * alpha_selected
+        + 0.04 * alpha_weight_scaled
         - 0.22 * reentry_cooldown
         - 0.18 * cash_pressure
         - 0.22 * market_downside_pressure
@@ -453,6 +480,8 @@ def build_action_labels_for_date(
         + 0.10 * hold_continuity_pressure
         + 0.06 * reduce_reversal_pressure
         + 0.08 * np.clip(pnl_from_entry, 0.0, None)
+        + 0.07 * np.clip(alpha_support, 0.0, None)
+        + 0.04 * alpha_selected
     )
     working["add_quality"] = (
         0.40 * working["hold_quality"].to_numpy(dtype=float)
@@ -463,6 +492,8 @@ def build_action_labels_for_date(
         - 0.10 * market_downside_pressure
         - 0.08 * recent_reversal_rate_20d
         - 0.08 * cash_regime_pressure
+        + 0.06 * np.clip(alpha_support, 0.0, None)
+        + 0.04 * alpha_weight_scaled
     )
     working["reduce_quality"] = (
         0.42 * downside.to_numpy(dtype=float)
@@ -479,6 +510,8 @@ def build_action_labels_for_date(
         - 0.08 * recent_reduce_cooldown
         - 0.12 * hold_continuity_pressure
         - 0.14 * reduce_reversal_pressure
+        - 0.08 * np.clip(alpha_support, 0.0, None)
+        - 0.05 * alpha_selected
     )
     working["reentry_readiness"] = np.clip(
         0.65 * working["entry_quality"].to_numpy(dtype=float)

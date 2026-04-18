@@ -20,7 +20,11 @@ from daily_research.continuous_policy.export_action_panel import main as export_
 from daily_research.continuous_policy.model import load_artifact
 from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE, LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES
-from daily_research.continuous_policy.pipeline_utils import run_policy_rollout
+from daily_research.continuous_policy.pipeline_utils import (
+    BUDGET_OBJECTIVE_CHOICES,
+    DEFAULT_BUDGET_OBJECTIVE,
+    run_policy_rollout,
+)
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_CHOICES,
     BUDGET_SEMANTICS_CHOICES,
@@ -40,7 +44,7 @@ from daily_research.continuous_policy.runtime import (
     update_latest_summary,
     write_json,
 )
-from daily_research.continuous_policy.state_builder import prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
 from daily_research.execution import app_service
@@ -250,6 +254,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional portfolio-level gross/candidate/turnover calibration.",
     )
     parser.add_argument(
+        "--budget-objective",
+        default=DEFAULT_BUDGET_OBJECTIVE,
+        choices=BUDGET_OBJECTIVE_CHOICES,
+        help="Daily budget target objective propagated to training and teacher-oracle evaluation.",
+    )
+    parser.add_argument(
+        "--alpha-prior-source",
+        default=DEFAULT_ALPHA_PRIOR_SOURCE,
+        help="Alpha prior source propagated to train/evaluate/shadow/export state builders.",
+    )
+    parser.add_argument("--alpha-prior-score-panel", default="")
+    parser.add_argument("--alpha-prior-target-weight-panel", default="")
+    parser.add_argument(
         "--label-preset",
         default="balanced_v2",
         choices=tuple(sorted(LABEL_CONFIGS)),
@@ -316,6 +333,14 @@ def main(argv: list[str] | None = None) -> int:
         str(args.budget_semantics),
         "--budget-calibration",
         str(args.budget_calibration),
+        "--budget-objective",
+        str(args.budget_objective),
+        "--alpha-prior-source",
+        str(args.alpha_prior_source),
+        "--alpha-prior-score-panel",
+        str(args.alpha_prior_score_panel),
+        "--alpha-prior-target-weight-panel",
+        str(args.alpha_prior_target_weight_panel),
         "--label-preset",
         args.label_preset,
         "--trainer-backend",
@@ -397,6 +422,14 @@ def main(argv: list[str] | None = None) -> int:
         str(args.budget_semantics),
         "--budget-calibration",
         str(args.budget_calibration),
+        "--budget-objective",
+        str(args.budget_objective),
+        "--alpha-prior-source",
+        str(args.alpha_prior_source),
+        "--alpha-prior-score-panel",
+        str(args.alpha_prior_score_panel),
+        "--alpha-prior-target-weight-panel",
+        str(args.alpha_prior_target_weight_panel),
         "--label-preset",
         args.label_preset,
         "--tag",
@@ -429,6 +462,9 @@ def main(argv: list[str] | None = None) -> int:
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,
+        alpha_prior_source=args.alpha_prior_source,
+        alpha_prior_score_panel=args.alpha_prior_score_panel,
+        alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy protocol shadow",
     )
@@ -452,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_semantics=args.execution_semantics,
         budget_semantics=args.budget_semantics,
         budget_calibration=args.budget_calibration,
+        budget_objective=args.budget_objective,
     )
 
     shadow_action_panel_path = protocol_root / "shadow_daily_action_panel.csv"
@@ -474,6 +511,10 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": str(args.budget_objective),
+        "alpha_prior_source": str(args.alpha_prior_source),
+        "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
+        "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
         "action_panel_csv": str(shadow_action_panel_path.resolve()),
         "action_outcomes_csv": str(shadow_action_outcomes_path.resolve()),
         "turnover_csv": str(shadow_turnover_path.resolve()),
@@ -512,6 +553,12 @@ def main(argv: list[str] | None = None) -> int:
         str(args.budget_semantics),
         "--budget-calibration",
         str(args.budget_calibration),
+        "--alpha-prior-source",
+        str(args.alpha_prior_source),
+        "--alpha-prior-score-panel",
+        str(args.alpha_prior_score_panel),
+        "--alpha-prior-target-weight-panel",
+        str(args.alpha_prior_target_weight_panel),
         "--tag",
         export_tag,
     ]
@@ -536,6 +583,10 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": str(args.budget_objective),
+        "alpha_prior_source": str(args.alpha_prior_source),
+        "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
+        "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
         "training_contract": dict(train_summary.get("training_contract", {}) or {}),
         "model_artifact_path": str(artifact_path),
         "protocol_summary_json": str((protocol_root / "protocol_summary.json").resolve()),
@@ -552,6 +603,8 @@ def main(argv: list[str] | None = None) -> int:
             "execution_semantics": train_summary.get("execution_semantics", args.execution_semantics),
             "budget_semantics": train_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": train_summary.get("budget_calibration", args.budget_calibration),
+            "budget_objective": train_summary.get("budget_objective", args.budget_objective),
+            "alpha_prior_source": train_summary.get("alpha_prior_source", args.alpha_prior_source),
             "training_contract": train_summary.get("training_contract", {}),
             "training_diagnostics": train_summary.get("training_diagnostics", {}),
             "sample_rows": train_summary.get("sample_rows"),
@@ -568,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
             "execution_semantics": evaluation_summary.get("execution_semantics", args.execution_semantics),
             "budget_semantics": evaluation_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": evaluation_summary.get("budget_calibration", args.budget_calibration),
+            "budget_objective": evaluation_summary.get("budget_objective", args.budget_objective),
+            "alpha_prior_source": evaluation_summary.get("alpha_prior_source", args.alpha_prior_source),
             "continuous_policy_metrics": evaluation_summary.get("continuous_policy_metrics", {}),
             "continuity_metrics": evaluation_summary.get("continuity_metrics", {}),
             "teacher_oracle_metrics": evaluation_summary.get("teacher_oracle_metrics", {}),
@@ -580,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
             "execution_semantics": shadow_summary.get("execution_semantics", args.execution_semantics),
             "budget_semantics": shadow_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": shadow_summary.get("budget_calibration", args.budget_calibration),
+            "budget_objective": shadow_summary.get("budget_objective", args.budget_objective),
+            "alpha_prior_source": shadow_summary.get("alpha_prior_source", args.alpha_prior_source),
             "shadow_summary_json": str(shadow_summary_path.resolve()),
         },
         "latest_export": {
@@ -590,6 +647,8 @@ def main(argv: list[str] | None = None) -> int:
             "execution_semantics": export_summary.get("execution_semantics", args.execution_semantics),
             "budget_semantics": export_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": export_summary.get("budget_calibration", args.budget_calibration),
+            "budget_objective": export_summary.get("budget_objective", args.budget_objective),
+            "alpha_prior_source": export_summary.get("alpha_prior_source", args.alpha_prior_source),
             "export_summary_json": str((EXPORTS_ROOT / export_tag / "export_summary.json").resolve()),
         },
     }

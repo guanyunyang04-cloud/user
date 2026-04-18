@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,6 +30,21 @@ DEFAULT_LABEL_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 DEFAULT_POOL_REBALANCE_DAYS = 21
 DEFAULT_POOL_ADV_WINDOW = 20
 DEFAULT_SCORE_BLEND_WEIGHTS = (0.5, 0.5)
+ALPHA_PRIOR_NONE = "none"
+ALPHA_PRIOR_ACTIVE_EXECUTION = "active_execution_strategy"
+DEFAULT_ALPHA_PRIOR_SOURCE = ALPHA_PRIOR_NONE
+ALPHA_PRIOR_NONE_ALIASES: frozenset[str] = frozenset({"", "none", "off", "false", "0"})
+ALPHA_PRIOR_FRAME_NAMES: tuple[str, ...] = (
+    "alpha_prior_score_raw",
+    "alpha_prior_score_z",
+    "alpha_prior_rank_pct",
+    "alpha_prior_target_weight",
+    "alpha_prior_selected",
+    "alpha_prior_score_delta_1d",
+    "alpha_prior_score_delta_5d",
+    "alpha_prior_weight_delta_1d",
+    "alpha_prior_coverage",
+)
 LEARNED_ALL_A_POOL_NAMES: frozenset[str] = frozenset(
     {
         "all_a",
@@ -48,6 +64,10 @@ STATE_SEQUENCE_BASES: tuple[str, ...] = (
     "vol_20d",
     "volatility_expansion",
     "distance_to_20d_high",
+    "alpha_prior_score_z",
+    "alpha_prior_rank_pct",
+    "alpha_prior_target_weight",
+    "alpha_prior_selected",
 )
 STATE_SEQUENCE_LAGS: tuple[int, ...] = (1, 2, 3, 4)
 
@@ -80,6 +100,7 @@ class PreparedPolicyInputs:
     market_features: dict[str, pd.Series]
     membership_frame: pd.DataFrame
     rolling_pool_summary: dict[str, Any]
+    alpha_prior_summary: dict[str, Any]
     derived_frames: dict[str, pd.DataFrame]
 
     def to_summary(self) -> dict[str, Any]:
@@ -96,6 +117,7 @@ class PreparedPolicyInputs:
             "raw_cache_meta": dict(self.raw_cache_meta),
             "prepared_cache_meta": dict(self.prepared_cache_meta),
             "rolling_pool_summary": dict(self.rolling_pool_summary),
+            "alpha_prior_summary": dict(self.alpha_prior_summary),
         }
 
 
@@ -253,6 +275,199 @@ def _build_membership_frame(
     return artifact.membership_frame.astype(bool), summary
 
 
+def _empty_alpha_prior_frames(close: pd.DataFrame, *, summary: dict[str, Any] | None = None) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    zero = pd.DataFrame(0.0, index=close.index, columns=close.columns, dtype=float)
+    frames = {name: zero.copy() for name in ALPHA_PRIOR_FRAME_NAMES}
+    payload = {
+        "source": ALPHA_PRIOR_NONE,
+        "status": "disabled",
+        "score_panel_csv": "",
+        "target_weight_panel_csv": "",
+        "coverage_mean": 0.0,
+        "selected_count_mean": 0.0,
+        "selected_weight_mean": 0.0,
+    }
+    if summary:
+        payload.update(summary)
+    return frames, payload
+
+
+def _resolve_manifest_alpha_paths(manifest: dict[str, Any]) -> tuple[str, str]:
+    score_panel = str(
+        manifest.get("source_score_panel_csv", "")
+        or manifest.get("trade_plan_score_panel_csv", "")
+        or ""
+    ).strip()
+    target_weight_panel = str(
+        manifest.get("source_target_weight_panel_csv", "")
+        or manifest.get("trade_plan_target_weight_panel_csv", "")
+        or ""
+    ).strip()
+    return score_panel, target_weight_panel
+
+
+def _first_existing_path(base_dir: Path, names: Iterable[str]) -> str:
+    for name in names:
+        candidate = base_dir / str(name)
+        if candidate.exists():
+            return str(candidate.resolve())
+    return ""
+
+
+def _resolve_alpha_prior_paths(
+    *,
+    source: str,
+    score_panel: str = "",
+    target_weight_panel: str = "",
+) -> dict[str, Any]:
+    source_text = str(source or DEFAULT_ALPHA_PRIOR_SOURCE).strip()
+    explicit_score = str(score_panel or "").strip()
+    explicit_target = str(target_weight_panel or "").strip()
+    if source_text.lower() in ALPHA_PRIOR_NONE_ALIASES and not (explicit_score or explicit_target):
+        return {"source": ALPHA_PRIOR_NONE, "status": "disabled", "score_panel_csv": "", "target_weight_panel_csv": ""}
+
+    resolved_source = source_text or "explicit"
+    resolved_score = explicit_score
+    resolved_target = explicit_target
+    source_meta: dict[str, Any] = {}
+    source_lower = source_text.lower()
+
+    if source_lower in {ALPHA_PRIOR_ACTIVE_EXECUTION, "active", "active_manifest", "manifest"}:
+        manifest = load_strategy_manifest()
+        manifest_score, manifest_target = _resolve_manifest_alpha_paths(manifest)
+        resolved_score = resolved_score or manifest_score
+        resolved_target = resolved_target or manifest_target
+        source_meta = {
+            "manifest_strategy_name": str(manifest.get("strategy_name", "") or ""),
+            "manifest_candidate_label": str(manifest.get("candidate_label", "") or ""),
+            "manifest_score_panel_role": str(manifest.get("score_panel_role", "") or ""),
+        }
+        resolved_source = ALPHA_PRIOR_ACTIVE_EXECUTION
+    elif source_text:
+        candidate = Path(source_text).expanduser()
+        if candidate.exists() and candidate.is_file() and candidate.suffix.lower() == ".json":
+            manifest = json.loads(candidate.read_text(encoding="utf-8-sig"))
+            manifest_score, manifest_target = _resolve_manifest_alpha_paths(manifest if isinstance(manifest, dict) else {})
+            resolved_score = resolved_score or manifest_score
+            resolved_target = resolved_target or manifest_target
+            source_meta = {"manifest_json": str(candidate.resolve())}
+            resolved_source = str(candidate.resolve())
+        elif candidate.exists() and candidate.is_dir():
+            resolved_score = resolved_score or _first_existing_path(
+                candidate,
+                (
+                    "execution_aligned_daily_live_score_panel.csv",
+                    "execution_aligned_daily_score_panel.csv",
+                    "daily_live_score_panel.csv",
+                    "daily_score_panel.csv",
+                    "score_panel.csv",
+                ),
+            )
+            resolved_target = resolved_target or _first_existing_path(
+                candidate,
+                (
+                    "execution_aligned_daily_live_target_weight_panel.csv",
+                    "execution_aligned_daily_target_weight_panel.csv",
+                    "daily_live_target_weight_panel.csv",
+                    "daily_target_weight_panel.csv",
+                    "target_weight_panel.csv",
+                ),
+            )
+            resolved_source = str(candidate.resolve())
+        elif candidate.exists() and candidate.is_file() and candidate.suffix.lower() == ".csv":
+            resolved_score = resolved_score or str(candidate.resolve())
+            resolved_source = str(candidate.resolve())
+
+    return {
+        "source": resolved_source,
+        "status": "resolved",
+        "score_panel_csv": str(Path(resolved_score).expanduser().resolve()) if resolved_score else "",
+        "target_weight_panel_csv": str(Path(resolved_target).expanduser().resolve()) if resolved_target else "",
+        **source_meta,
+    }
+
+
+def _load_long_value_panel(panel_path: str | Path, value_column: str) -> pd.DataFrame:
+    path = Path(panel_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Alpha-prior panel file not found: {path}")
+    panel = pd.read_csv(path)
+    required = {"date", "stock", value_column}
+    missing = sorted(required - set(panel.columns))
+    if missing:
+        raise ValueError(f"Alpha-prior panel {path} is missing columns: {missing}")
+    working = panel.loc[:, ["date", "stock", value_column]].copy()
+    working["date"] = pd.to_datetime(working["date"]).dt.normalize()
+    working["stock"] = working["stock"].astype(str).str.strip().str.upper()
+    working[value_column] = pd.to_numeric(working[value_column], errors="coerce")
+    return working.pivot_table(index="date", columns="stock", values=value_column, aggfunc="last").sort_index()
+
+
+def _build_alpha_prior_frames(
+    *,
+    close: pd.DataFrame,
+    source: str = DEFAULT_ALPHA_PRIOR_SOURCE,
+    score_panel: str = "",
+    target_weight_panel: str = "",
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    resolved = _resolve_alpha_prior_paths(source=source, score_panel=score_panel, target_weight_panel=target_weight_panel)
+    if str(resolved.get("status", "")) == "disabled":
+        return _empty_alpha_prior_frames(close, summary=resolved)
+
+    score_path = str(resolved.get("score_panel_csv", "") or "").strip()
+    target_path = str(resolved.get("target_weight_panel_csv", "") or "").strip()
+    if not score_path and not target_path:
+        return _empty_alpha_prior_frames(close, summary={**resolved, "status": "missing_panels"})
+
+    try:
+        raw_score = _load_long_value_panel(score_path, "score") if score_path else pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
+        raw_target = (
+            _load_long_value_panel(target_path, "target_weight")
+            if target_path
+            else pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
+        )
+    except Exception as exc:
+        return _empty_alpha_prior_frames(close, summary={**resolved, "status": "load_failed", "error": str(exc)})
+
+    aligned_score = raw_score.reindex(index=close.index, columns=close.columns)
+    aligned_target = raw_target.reindex(index=close.index, columns=close.columns)
+    coverage = (aligned_score.notna() | aligned_target.notna()).astype(float)
+
+    score_mean = aligned_score.mean(axis=1)
+    score_std = aligned_score.std(axis=1, ddof=0).replace(0.0, np.nan)
+    score_z = aligned_score.sub(score_mean, axis=0).div(score_std, axis=0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    rank_pct = aligned_score.rank(axis=1, pct=True, method="average").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    score_raw = aligned_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    target_weight = aligned_target.replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0)
+    selected = (target_weight > 1e-8).astype(float)
+
+    frames = {
+        "alpha_prior_score_raw": score_raw,
+        "alpha_prior_score_z": score_z,
+        "alpha_prior_rank_pct": rank_pct,
+        "alpha_prior_target_weight": target_weight,
+        "alpha_prior_selected": selected,
+        "alpha_prior_score_delta_1d": score_z.diff(1).replace([np.inf, -np.inf], np.nan).fillna(0.0),
+        "alpha_prior_score_delta_5d": score_z.diff(5).replace([np.inf, -np.inf], np.nan).fillna(0.0),
+        "alpha_prior_weight_delta_1d": target_weight.diff(1).replace([np.inf, -np.inf], np.nan).fillna(0.0),
+        "alpha_prior_coverage": coverage.fillna(0.0),
+    }
+    summary = {
+        **resolved,
+        "status": "loaded",
+        "score_panel_rows": int(raw_score.count().sum()) if not raw_score.empty else 0,
+        "target_weight_panel_rows": int(raw_target.count().sum()) if not raw_target.empty else 0,
+        "coverage_mean": float(frames["alpha_prior_coverage"].mean().mean()) if not close.empty else 0.0,
+        "selected_count_mean": float(frames["alpha_prior_selected"].sum(axis=1).mean()) if not close.empty else 0.0,
+        "selected_weight_mean": float(frames["alpha_prior_target_weight"].sum(axis=1).mean()) if not close.empty else 0.0,
+        "score_date_min": str(raw_score.index.min().date()) if not raw_score.empty else "",
+        "score_date_max": str(raw_score.index.max().date()) if not raw_score.empty else "",
+        "target_weight_date_min": str(raw_target.index.min().date()) if not raw_target.empty else "",
+        "target_weight_date_max": str(raw_target.index.max().date()) if not raw_target.empty else "",
+    }
+    return frames, summary
+
+
 def prepare_policy_inputs(
     *,
     pool_name: str,
@@ -266,6 +481,9 @@ def prepare_policy_inputs(
     pool_rebalance_days: int = DEFAULT_POOL_REBALANCE_DAYS,
     pool_adv_window: int = DEFAULT_POOL_ADV_WINDOW,
     label_horizons: Iterable[int] = DEFAULT_LABEL_HORIZONS,
+    alpha_prior_source: str = DEFAULT_ALPHA_PRIOR_SOURCE,
+    alpha_prior_score_panel: str = "",
+    alpha_prior_target_weight_panel: str = "",
     refresh_cache: bool = False,
     progress_desc: str = "continuous policy prepare",
 ) -> PreparedPolicyInputs:
@@ -325,6 +543,12 @@ def prepare_policy_inputs(
         pool_rebalance_days=pool_rebalance_days,
         pool_adv_window=pool_adv_window,
     )
+    alpha_prior_frames, alpha_prior_summary = _build_alpha_prior_frames(
+        close=close,
+        source=alpha_prior_source,
+        score_panel=alpha_prior_score_panel,
+        target_weight_panel=alpha_prior_target_weight_panel,
+    )
 
     returns_1d = _safe_pct_change(close, 1)
     rolling_high_20 = close.rolling(20, min_periods=1).max()
@@ -350,6 +574,7 @@ def prepare_policy_inputs(
         "distance_to_20d_low": close.div(rolling_low_20.replace(0, np.nan)).sub(1.0),
         "volatility_expansion": returns_1d.rolling(5).std().div(returns_1d.rolling(20).std().replace(0, np.nan)).sub(1.0),
         "adv_ratio_5_20": amount.rolling(5).mean().div(amount.rolling(20).mean().replace(0, np.nan)).sub(1.0),
+        **alpha_prior_frames,
     }
     for base_name in STATE_SEQUENCE_BASES:
         frame = derived_frames.get(base_name)
@@ -385,6 +610,7 @@ def prepare_policy_inputs(
         market_features={key: value.copy().sort_index() for key, value in bundle["market_features"].items()},
         membership_frame=membership_frame.reindex(index=close.index, columns=close.columns, fill_value=False),
         rolling_pool_summary=rolling_pool_summary,
+        alpha_prior_summary=alpha_prior_summary,
         derived_frames=derived_frames,
     )
 
@@ -508,6 +734,7 @@ def build_cross_section_state(
         "distance_to_20d_low",
         "volatility_expansion",
         "adv_ratio_5_20",
+        *ALPHA_PRIOR_FRAME_NAMES,
         *[f"{base_name}_lag{lag}" for base_name in STATE_SEQUENCE_BASES for lag in STATE_SEQUENCE_LAGS],
     ):
         frame = prepared.derived_frames[frame_name]
@@ -674,6 +901,29 @@ def build_daily_state_features(state_frame: pd.DataFrame) -> dict[str, float]:
             else 0.0
         ),
     }
+    alpha_score = numeric.get("alpha_prior_score_z", pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan)
+    alpha_rank = numeric.get("alpha_prior_rank_pct", pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan)
+    alpha_weight = numeric.get("alpha_prior_target_weight", pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    alpha_selected = numeric.get("alpha_prior_selected", pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    alpha_coverage = numeric.get("alpha_prior_coverage", pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if "alpha_prior_score_z" in state_frame.columns:
+        alpha_top = state_frame.nlargest(min(5, len(state_frame)), "alpha_prior_score_z")
+    else:
+        alpha_top = pd.DataFrame()
+    summary.update(
+        {
+            "alpha_prior_coverage_mean": float(alpha_coverage.mean()) if len(alpha_coverage) else 0.0,
+            "alpha_prior_selected_count": float((alpha_selected > 0.5).sum()) if len(alpha_selected) else 0.0,
+            "alpha_prior_selected_weight": float(alpha_weight.sum()) if len(alpha_weight) else 0.0,
+            "alpha_prior_score_mean": float(alpha_score.mean()) if len(alpha_score.dropna()) else 0.0,
+            "alpha_prior_score_top5_mean": float(alpha_top["alpha_prior_score_z"].mean()) if not alpha_top.empty else 0.0,
+            "alpha_prior_rank_top10_mean": (
+                float(state_frame.nlargest(min(10, len(state_frame)), "alpha_prior_rank_pct")["alpha_prior_rank_pct"].mean())
+                if "alpha_prior_rank_pct" in state_frame.columns and len(alpha_rank.dropna())
+                else 0.0
+            ),
+        }
+    )
     for key in (
         "portfolio_cash_weight",
         "portfolio_gross_exposure",

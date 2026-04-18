@@ -209,6 +209,35 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "daily_total": 0.42,
         },
     },
+    "alpha_result_value_budget_v1": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.58,
+            "entry_quality": 0.92,
+            "hold_quality": 1.12,
+            "add_quality": 0.90,
+            "reduce_quality": 1.04,
+            "exit_urgency": 1.12,
+            "reentry_readiness": 0.50,
+            "holding_days_ratio": 1.44,
+            "reduce_fraction": 1.38,
+            "exit_hazard": 1.44,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.42,
+            "candidate_budget": 0.72,
+            "turnover_budget": 1.16,
+            "max_position_weight_target": 0.64,
+            "hold_bias_target": 1.12,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.48,
+            "action_soft": 0.52,
+            "action_total": 0.58,
+            "duration_total": 0.12,
+            "scalar_total": 1.32,
+            "daily_total": 0.62,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -715,7 +744,7 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_continuous_dual_channel_r3"
+    signature_payload["sequence_model_revision"] = "seq_v3_alpha_result_value_budget_r1"
     signature_payload["loss_profile"] = resolved_loss_profile
     signature_payload["sample_scalar_loss_weights"] = dict(sample_scalar_loss_weights)
     signature_payload["daily_target_loss_weights"] = dict(daily_target_loss_weights)

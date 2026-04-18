@@ -32,7 +32,13 @@ from daily_research.continuous_policy.runtime import (
     write_json,
     load_runtime_state,
 )
-from daily_research.continuous_policy.state_builder import build_cross_section_state, build_daily_state_features, prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.continuous_policy.state_builder import (
+    DEFAULT_ALPHA_PRIOR_SOURCE,
+    build_cross_section_state,
+    build_daily_state_features,
+    prepare_policy_inputs,
+    resolve_active_policy_defaults,
+)
 from daily_research.execution import app_service
 from daily_research.execution.strategy_manifest import load_strategy_manifest
 
@@ -74,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=BUDGET_CALIBRATION_CHOICES,
         help="Optional portfolio-level gross/candidate/turnover calibration.",
     )
+    parser.add_argument("--alpha-prior-source", default="", help="Empty uses the model artifact alpha-prior source.")
+    parser.add_argument("--alpha-prior-score-panel", default="")
+    parser.add_argument("--alpha-prior-target-weight-panel", default="")
     parser.add_argument("--force-bootstrap-from-account", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--tag", default="")
@@ -112,6 +121,24 @@ def main(argv: list[str] | None = None) -> int:
             runtime_is_usable = False
     last_signal_date = runtime_last_signal_date if runtime_is_usable else ""
     requested_start_date = last_signal_date or str(args.signal_date)
+    alpha_prior_source = str(
+        args.alpha_prior_source
+        or artifact.train_summary.get("alpha_prior_source")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("source")
+        or DEFAULT_ALPHA_PRIOR_SOURCE
+    ).strip()
+    alpha_prior_score_panel = str(
+        args.alpha_prior_score_panel
+        or artifact.train_summary.get("alpha_prior_score_panel")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("score_panel_csv")
+        or ""
+    ).strip()
+    alpha_prior_target_weight_panel = str(
+        args.alpha_prior_target_weight_panel
+        or artifact.train_summary.get("alpha_prior_target_weight_panel")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("target_weight_panel_csv")
+        or ""
+    ).strip()
     prepared = prepare_policy_inputs(
         pool_name=args.pool_name,
         start_date=requested_start_date,
@@ -123,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,
+        alpha_prior_source=alpha_prior_source,
+        alpha_prior_score_panel=alpha_prior_score_panel,
+        alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy export",
     )
@@ -243,6 +273,14 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": str(
+            artifact.train_summary.get("budget_objective")
+            or artifact.train_summary.get("teacher_summary", {}).get("budget_objective")
+            or ""
+        ),
+        "alpha_prior_source": alpha_prior_source,
+        "alpha_prior_score_panel": alpha_prior_score_panel,
+        "alpha_prior_target_weight_panel": alpha_prior_target_weight_panel,
         "portfolio_runtime_snapshot": runtime_snapshot,
         "current_account_path": account_snapshot.get("path", ""),
         "action_panel_csv": str(action_panel_path.resolve()),
@@ -270,6 +308,14 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": str(
+            artifact.train_summary.get("budget_objective")
+            or artifact.train_summary.get("teacher_summary", {}).get("budget_objective")
+            or ""
+        ),
+        "alpha_prior_source": alpha_prior_source,
+        "alpha_prior_score_panel": alpha_prior_score_panel,
+        "alpha_prior_target_weight_panel": alpha_prior_target_weight_panel,
         "pool_name": prepared.pool_name,
         "benchmark": prepared.benchmark,
         "export_dir": str(export_root.resolve()),

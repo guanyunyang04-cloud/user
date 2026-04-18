@@ -11,6 +11,8 @@ if __package__ in {None, ""}:
 from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_future_path_metrics
 from daily_research.continuous_policy.model import load_artifact
 from daily_research.continuous_policy.pipeline_utils import (
+    BUDGET_OBJECTIVE_CHOICES,
+    DEFAULT_BUDGET_OBJECTIVE,
     evaluate_reference_panel,
     load_target_weight_panel,
     run_policy_rollout,
@@ -31,7 +33,7 @@ from daily_research.continuous_policy.runtime import (
     update_latest_summary,
     write_json,
 )
-from daily_research.continuous_policy.state_builder import prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.execution.strategy_manifest import load_strategy_manifest
 
 
@@ -94,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional portfolio-level gross/candidate/turnover calibration.",
     )
     parser.add_argument(
+        "--budget-objective",
+        default="",
+        choices=("", *BUDGET_OBJECTIVE_CHOICES),
+        help="Teacher-oracle budget objective override. Empty uses the model artifact setting.",
+    )
+    parser.add_argument("--alpha-prior-source", default="", help="Empty uses the model artifact alpha-prior source.")
+    parser.add_argument("--alpha-prior-score-panel", default="")
+    parser.add_argument("--alpha-prior-target-weight-panel", default="")
+    parser.add_argument(
         "--label-preset",
         default="",
         choices=("", *tuple(sorted(LABEL_CONFIGS))),
@@ -120,6 +131,30 @@ def main(argv: list[str] | None = None) -> int:
         or artifact.train_summary.get("teacher_summary", {}).get("label_preset")
         or "balanced_v2"
     ).strip()
+    alpha_prior_source = str(
+        args.alpha_prior_source
+        or artifact.train_summary.get("alpha_prior_source")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("source")
+        or DEFAULT_ALPHA_PRIOR_SOURCE
+    ).strip()
+    alpha_prior_score_panel = str(
+        args.alpha_prior_score_panel
+        or artifact.train_summary.get("alpha_prior_score_panel")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("score_panel_csv")
+        or ""
+    ).strip()
+    alpha_prior_target_weight_panel = str(
+        args.alpha_prior_target_weight_panel
+        or artifact.train_summary.get("alpha_prior_target_weight_panel")
+        or artifact.train_summary.get("prepared_summary", {}).get("alpha_prior_summary", {}).get("target_weight_panel_csv")
+        or ""
+    ).strip()
+    budget_objective = str(
+        args.budget_objective
+        or artifact.train_summary.get("budget_objective")
+        or artifact.train_summary.get("teacher_summary", {}).get("budget_objective")
+        or DEFAULT_BUDGET_OBJECTIVE
+    ).strip()
     run_tag = str(args.tag or timestamp_tag("evaluation"))
     run_root = EVALUATIONS_ROOT / run_tag
     run_root.mkdir(parents=True, exist_ok=True)
@@ -134,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,
+        alpha_prior_source=alpha_prior_source,
+        alpha_prior_score_panel=alpha_prior_score_panel,
+        alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy evaluate",
     )
@@ -150,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_semantics=args.execution_semantics,
         budget_semantics=args.budget_semantics,
         budget_calibration=args.budget_calibration,
+        budget_objective=budget_objective,
     )
     teacher_rollout = run_policy_rollout(
         prepared=prepared,
@@ -165,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_semantics=args.execution_semantics,
         budget_semantics=args.budget_semantics,
         budget_calibration=args.budget_calibration,
+        budget_objective=budget_objective,
     )
 
     manifest = load_strategy_manifest()
@@ -246,6 +286,10 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": budget_objective,
+        "alpha_prior_source": alpha_prior_source,
+        "alpha_prior_score_panel": alpha_prior_score_panel,
+        "alpha_prior_target_weight_panel": alpha_prior_target_weight_panel,
         "prepared_summary": prepared.to_summary(),
         "continuous_policy_metrics": model_rollout["metrics"],
         "continuity_metrics": model_rollout["continuity_metrics"],

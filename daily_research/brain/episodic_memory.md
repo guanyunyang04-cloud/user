@@ -15493,3 +15493,150 @@ position,000001.SZ,1200,12.38,
   - 事实：P2 已从同窗切换推进到训练级 ablation，证明 split+cash 有潜力但尚不稳定。
   - 推断：当前瓶颈已不是“能否拆预算语义”，而是“预算/value/head 的结果信用分配是否学稳”。
   - 决策：不 promotion r2；稳定默认继续保留 `semantic_preserving_v1 + legacy_total_candidate + none`；下一阶段应优先接入 alpha prior 或结果驱动 budget/value objective。
+
+## 2026-04-18 continuous_policy alpha prior + result/value budget r1 落地
+- 触发：
+  - 用户要求基于上一轮方案继续一次性交付，并强调当前目标是日频连续决策交易执行模型，不要回到固定桥接规则或纯建议。
+- 动作前自检：
+  - 事实：
+    - `cp_v3_budget_layer_ablation_r2` 已证明 `action_budget_split_v1 + cash_exit_guard_v1` 有收益潜力但 confirmatory 仍 `shadow_only`。
+    - 当前稳定默认仍是 `semantic_preserving_v1 + legacy_total_candidate + none`。
+    - active manifest 已暴露 policy_v5b 的 score panel 与 target_weight panel，可作为 alpha prior。
+    - seq_v3 daily controller 当前只有 5 个预算输出头，直接扩 head 会破坏旧 artifact 兼容性。
+  - 推断：
+    - 最高 ROI 是先把 `deep_alpha/policy_v5b` 的强 alpha 作为可观测机会先验接入，再用结果驱动目标修正预算信用分配。
+    - 第一版不应新增 controller head，而应通过状态特征、既有五个预算目标和 loss profile 完成兼容落地。
+  - 假设：
+    - 如果收益差距主要来自“从零学习机会识别 + 预算信用分配错位”，则 active alpha prior + result_value budget 应在正式训练中改善收益与现金/退出质量。
+- 实施：
+  - `state_builder.py`
+    - 新增 `alpha_prior_source`、`alpha_prior_score_panel`、`alpha_prior_target_weight_panel`。
+    - 新增 `alpha_prior_score_raw / score_z / rank_pct / target_weight / selected / deltas / coverage` 状态帧与日频汇总。
+    - `active_execution_strategy` 自动读取 active manifest 的 score/target_weight panel。
+  - `label_builder.py`
+    - 将 alpha prior 作为机会支持项进入 `momentum / action_signal / entry_quality / hold_quality / add_quality / reduce_quality`。
+  - `pipeline_utils.py`
+    - 新增 `budget_objective = teacher_imitation / result_value_v1`。
+    - `result_value_v1` 用未来 edge/opportunity/downside、alpha alignment、risk/sell pressure 调整既有 `gross_exposure_target / candidate_budget / turnover_budget / max_position_weight_target / hold_bias_target`。
+  - `model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_v1` loss profile。
+    - strict resume signature 升级为 `seq_v3_alpha_result_value_budget_r1`。
+  - CLI 链路：
+    - `train_policy.py / evaluate_policy.py / export_action_panel.py / run_continuous_policy_protocol.py / run_self_optimizing_study.py` 均已接入 alpha prior 参数。
+    - `train/evaluate/protocol/run_self` 接入 `--budget-objective`。
+  - 新增反事实入口：
+    - `daily_research/continuous_policy/run_execution_counterfactuals.py`
+    - 固定模型比较 `legacy_total_candidate / action_budget_split_v1 / cash_exit_guard_v1` 执行层影响，输出 ranking 与各 variant 面板。
+  - 新增 study profile：
+    - `alpha_result_value_budget_r1`
+    - 四格对照：无 alpha + teacher、active alpha + teacher、无 alpha + result_value、active alpha + result_value。
+- 验证：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m compileall -q daily_research/continuous_policy` 通过。
+  - 默认 shell `python` 缺 `pandas`，被确认为环境偏差；按项目规则切回显式 `yolos`。
+  - 首次 dry-run 遇到 Windows/OpenMP `libiomp5md.dll already initialized`，按既有经验仅对验证命令临时设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - dry-run 通过命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1__dry_run --dry-run`
+  - dry-run 展开事实：
+    - `trial_count=4`
+    - baseline 为 `alpha_prior_source=none + budget_objective=teacher_imitation`
+    - 其余三格分别覆盖 `active_execution_strategy + result_value_v1`、`active_execution_strategy + teacher_imitation`、`none + result_value_v1`
+  - 真实数据 smoke 通过：
+    - `max_universe_size=40`
+    - `20251103-20260213`
+    - `alpha_prior_source=active_execution_strategy`
+    - `budget_objective=result_value_v1`
+    - `alpha_status=loaded`
+    - `alpha_coverage_mean=1.0`
+    - `alpha_selected_count_mean=0.465753`
+    - `sample_rows=2120`
+    - `daily_rows=53`
+    - `feature_has_alpha=True`
+    - 既有 5 个 daily target columns 齐全。
+- 动作后复盘：
+  - 事实：
+    - 这次已经完成可运行入口、训练目标、alpha 特征、study profile、反事实工具与文档写回。
+    - 尚未启动正式 10h 训练；当前证据只证明链路可运行，不证明收益已提升。
+  - 推断：
+    - 当前路线已经从“修语义/拆预算”推进到“机会先验 + 结果价值预算目标”的信用分配阶段。
+    - 若正式 study 仍无法改善收益，则下一步才应考虑更显式的 value head/offline RL，而不是继续人工 cash guard。
+  - 决策：
+    - 下一次正式执行应使用新 tag `cp_v3_alpha_result_value_budget_r1`，不要覆盖 r2。
+    - 继续遵守用户规则：训练窗口统一 10h；不要中断无关训练。
+
+## 2026-04-18 cp_v3_alpha_result_value_budget_r1 正式 study 与反事实复盘
+- 触发：
+  - 在完成实现、dry-run、smoke 与守卫后，按用户“训练窗口统一 10h、前台执行、不只给建议”的规则继续启动正式 study。
+- 动作前自检：
+  - 事实：
+    - `Get-Process python,pythonw` 未发现正在运行的 Python 训练进程。
+    - `yolos` 是项目唯一有效解释器；裸 `python` 缺 `pandas`。
+  - 推断：
+    - 可以启动前台 study，不会中断已有训练。
+  - 假设：
+    - 10h 窗口足够完成 4 screening + 2 confirmatory。
+- 执行：
+  - 正式命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1`
+  - 结果文件：
+    - `daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/trial_ranking.csv`
+  - 运行事实：
+    - 用时约 64 分钟。
+    - `latest_state_restored=true`。
+    - `confirmatory_completed_trial_count=2`。
+- 正式结果事实：
+  - screening 冠军：
+    - `trial_02 = active_execution_strategy + result_value_v1`
+    - `annual_return=2.8597648652`
+    - `sharpe=5.0897803152`
+    - `max_drawdown=-0.0518498473`
+    - `reduce_success_rate_5d=0.59375`
+    - `exit_timeliness_rate_5d=0.5555555556`
+    - `cash_timing_quality_1d=-0.2318420741`
+    - `training_evidence_status=insufficient`
+    - `promotion_status=shadow_only`
+  - screening baseline：
+    - `trial_01 = none + teacher_imitation`
+    - `annual_return=0.9151075764`
+    - `sharpe=2.3006946907`
+    - `cash_timing_quality_1d=-0.2428994547`
+    - `promotion_status=shadow_only`
+  - confirmatory active+result：
+    - `confirm_01 = active_execution_strategy + result_value_v1`
+    - `annual_return=-0.0491195330`
+    - `sharpe=-0.0237242857`
+    - `max_drawdown=-0.1352626456`
+    - `reduce_success_rate_5d=0.6129032258`
+    - `exit_timeliness_rate_5d=0.5`
+    - `cash_timing_quality_1d=-0.3185323813`
+    - `promotion_status=shadow_only`
+  - confirmatory no-alpha teacher：
+    - `confirm_02 = none + teacher_imitation`
+    - `annual_return=0.1339029638`
+    - `sharpe=0.5899171432`
+    - `max_drawdown=-0.1464942375`
+    - `reduce_success_rate_5d=0.7391304348`
+    - `exit_timeliness_rate_5d=0.4545454545`
+    - `cash_timing_quality_1d=-0.2400597945`
+    - `promotion_status=shadow_only`
+- 反事实执行：
+  - 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_execution_counterfactuals --model-path daily_research/output/continuous_policy/models/cp_v3_alpha_result_value_budget_r1__confirm_01__train/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --max-universe-size 1200 --start-date 20260102 --end-date 20260417 --benchmark 000300.SH --data-source tq --tag cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals`
+  - 输出：
+    - `daily_research/output/continuous_policy/analysis/counterfactuals/cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals/counterfactual_ranking.csv`
+  - 关键事实：
+    - legacy/default：`annual_return=0.0984`，`sharpe=0.4781`，但 `avg_semantic_conflict_rate=0.6429`，`avg_order_translation_conflict_rate=0.8560`。
+    - split + cash：`annual_return=-0.0491`，`sharpe=-0.0237`，`avg_semantic_conflict_rate=0.0037`，`avg_order_translation_conflict_rate=0.4564`。
+    - split + none：`annual_return=-0.3240`，`sharpe=-1.0363`。
+- 动作后复盘：
+  - 事实：
+    - `active alpha + result_value` 明显提升了 screening 表现，但 confirmatory 失败，不能 promotion。
+    - legacy 预算可制造较好收益表象，但语义污染极重，不符合北极星合同。
+    - split/cash 能保持语义干净，却不能保证收益稳定。
+  - 推断：
+    - 结构与收益的矛盾没有消失，只是从“执行层改写动作”推进到了“训练信用分配/confirmatory 泛化/cash timing”。
+    - alpha prior 方向有信号价值，但当前 r1 目标仍过于不稳，尤其现金时机仍负。
+  - 决策：
+    - 不 promotion `cp_v3_alpha_result_value_budget_r1`。
+    - 不回退到语义污染的 legacy 收益表象作为胜利结论。
+    - 下一轮应聚焦 `cash_timing_quality_1d` 的结果目标、训练证据充分性和 active alpha 的稳定融合，而不是单纯继续放大模型或延长同一 r1。

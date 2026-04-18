@@ -16,6 +16,10 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE
+from daily_research.continuous_policy.pipeline_utils import (
+    BUDGET_OBJECTIVE_CHOICES,
+    DEFAULT_BUDGET_OBJECTIVE,
+)
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_CHOICES,
     BUDGET_SEMANTICS_CHOICES,
@@ -139,6 +143,22 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "alpha_result_value_budget_r1": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_v1"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_exit_guard_v1"],
+        "budget_objective": [DEFAULT_BUDGET_OBJECTIVE, "result_value_v1"],
+        "alpha_prior_source": ["none", "active_execution_strategy"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -207,6 +227,22 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "alpha_result_value_budget_r1": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_v1",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_exit_guard_v1",
+        "budget_objective": DEFAULT_BUDGET_OBJECTIVE,
+        "alpha_prior_source": "none",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -216,6 +252,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "seq2_return_recovery_v2": "return_recovery_v2",
     "seq2_return_recovery_v3": "return_recovery_v2",
     "budget_layer_ablation_v1": "return_recovery_v2",
+    "alpha_result_value_budget_r1": "return_recovery_v2",
 }
 
 
@@ -629,6 +666,14 @@ def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any],
         str(trial_config.get("budget_semantics", args.budget_semantics)),
         "--budget-calibration",
         str(trial_config.get("budget_calibration", args.budget_calibration)),
+        "--budget-objective",
+        str(trial_config.get("budget_objective", args.budget_objective)),
+        "--alpha-prior-source",
+        str(trial_config.get("alpha_prior_source", args.alpha_prior_source)),
+        "--alpha-prior-score-panel",
+        str(trial_config.get("alpha_prior_score_panel", args.alpha_prior_score_panel)),
+        "--alpha-prior-target-weight-panel",
+        str(trial_config.get("alpha_prior_target_weight_panel", args.alpha_prior_target_weight_panel)),
         "--label-preset",
         str(trial_config["label_preset"]),
         "--trainer-backend",
@@ -812,6 +857,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_BUDGET_CALIBRATION,
         choices=BUDGET_CALIBRATION_CHOICES,
     )
+    parser.add_argument("--budget-objective", default=DEFAULT_BUDGET_OBJECTIVE, choices=BUDGET_OBJECTIVE_CHOICES)
+    parser.add_argument("--alpha-prior-source", default="none")
+    parser.add_argument("--alpha-prior-score-panel", default="")
+    parser.add_argument("--alpha-prior-target-weight-panel", default="")
     parser.add_argument("--trainer-backend", default=TRAINER_BACKEND_FORMAL_SEQ_V3, choices=TRAINER_BACKENDS)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--epochs", type=int, default=40)
@@ -879,6 +928,10 @@ def main(argv: list[str] | None = None) -> int:
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
+        "budget_objective": str(args.budget_objective),
+        "alpha_prior_source": str(args.alpha_prior_source),
+        "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
+        "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
@@ -1016,6 +1069,8 @@ def main(argv: list[str] | None = None) -> int:
                 "source_trial_tag": row["source_trial_tag"],
                 "budget_semantics": str(dict(row.get("trial_config", {}) or {}).get("budget_semantics", args.budget_semantics)),
                 "budget_calibration": str(dict(row.get("trial_config", {}) or {}).get("budget_calibration", args.budget_calibration)),
+                "budget_objective": str(dict(row.get("trial_config", {}) or {}).get("budget_objective", args.budget_objective)),
+                "alpha_prior_source": str(dict(row.get("trial_config", {}) or {}).get("alpha_prior_source", args.alpha_prior_source)),
                 "performance_score": row["performance_score"],
                 "stability_score": row["stability_score"],
                 "composite_score": row["composite_score"],

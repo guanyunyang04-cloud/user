@@ -20,6 +20,8 @@ from daily_research.continuous_policy.model_seq_v3 import (
     fit_policy_models_v3,
 )
 from daily_research.continuous_policy.pipeline_utils import (
+    BUDGET_OBJECTIVE_CHOICES,
+    DEFAULT_BUDGET_OBJECTIVE,
     build_training_matrices,
     select_daily_feature_columns,
     select_feature_columns,
@@ -33,7 +35,7 @@ from daily_research.continuous_policy.portfolio_simulator import (
     EXECUTION_SEMANTICS_CHOICES,
 )
 from daily_research.continuous_policy.runtime import MODELS_ROOT, now_iso, timestamp_tag, update_latest_summary, write_json
-from daily_research.continuous_policy.state_builder import prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_HIER_V4,
@@ -82,6 +84,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=BUDGET_CALIBRATION_CHOICES,
         help="Optional portfolio-level gross/candidate/turnover calibration.",
     )
+    parser.add_argument(
+        "--budget-objective",
+        default=DEFAULT_BUDGET_OBJECTIVE,
+        choices=BUDGET_OBJECTIVE_CHOICES,
+        help="Daily budget target objective. result_value_v1 adjusts the five controller targets from future return/risk value signals.",
+    )
+    parser.add_argument(
+        "--alpha-prior-source",
+        default=DEFAULT_ALPHA_PRIOR_SOURCE,
+        help="Alpha prior source: none, active_execution_strategy, a manifest JSON, a run directory, or an explicit CSV source.",
+    )
+    parser.add_argument("--alpha-prior-score-panel", default="")
+    parser.add_argument("--alpha-prior-target-weight-panel", default="")
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
@@ -157,6 +172,10 @@ def _build_common_train_summary(
         "execution_semantics": str(getattr(args, "execution_semantics", DEFAULT_EXECUTION_SEMANTICS) or DEFAULT_EXECUTION_SEMANTICS),
         "budget_semantics": str(getattr(args, "budget_semantics", DEFAULT_BUDGET_SEMANTICS) or DEFAULT_BUDGET_SEMANTICS),
         "budget_calibration": str(getattr(args, "budget_calibration", DEFAULT_BUDGET_CALIBRATION) or DEFAULT_BUDGET_CALIBRATION),
+        "budget_objective": str(getattr(args, "budget_objective", DEFAULT_BUDGET_OBJECTIVE) or DEFAULT_BUDGET_OBJECTIVE),
+        "alpha_prior_source": str(getattr(args, "alpha_prior_source", DEFAULT_ALPHA_PRIOR_SOURCE) or DEFAULT_ALPHA_PRIOR_SOURCE),
+        "alpha_prior_score_panel": str(getattr(args, "alpha_prior_score_panel", "") or ""),
+        "alpha_prior_target_weight_panel": str(getattr(args, "alpha_prior_target_weight_panel", "") or ""),
         "training_contract": summarize_training_contract(training_contract),
         "action_distribution": {
             str(key): int(value)
@@ -195,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,
+        alpha_prior_source=args.alpha_prior_source,
+        alpha_prior_score_panel=args.alpha_prior_score_panel,
+        alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy train",
     )
@@ -213,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_semantics=args.execution_semantics,
         budget_semantics=args.budget_semantics,
         budget_calibration=args.budget_calibration,
+        budget_objective=args.budget_objective,
     )
     feature_names = select_feature_columns(sample_frame)
     daily_feature_names = select_daily_feature_columns(daily_frame)

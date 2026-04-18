@@ -966,3 +966,40 @@
   - 不 promotion `budget_layer_ablation_r2` 的任何 trial/confirm。
   - 默认执行口径继续保留 `semantic_preserving_v1 + legacy_total_candidate + none`，latest evaluation/audit 仍恢复到 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_legacy_budget_eval/audit`。
   - `action_budget_split_v1 + cash_exit_guard_v1` 保留为结果驱动预算头和 alpha prior 融合前的候选机制，不再作为手工规则继续单独加码。
+
+## 2026-04-18 continuous_policy alpha_result_value_budget_r1 当前状态
+- 已完成的事实：
+  - `alpha prior` 已进入 `state_builder.py`，支持从 active execution strategy / manifest / run dir / explicit panel 读取 score 与 target weight。
+  - `result_value_v1` 已进入 `build_training_matrices`，通过未来收益、机会、下行、alpha 对齐度与风险压力调整既有五个日频预算目标，不新增 controller head。
+  - CLI 链路已贯通 `train_policy.py / evaluate_policy.py / export_action_panel.py / run_continuous_policy_protocol.py / run_self_optimizing_study.py`。
+  - 新增 `run_execution_counterfactuals.py`，用于固定模型下比较 `legacy_total_candidate / action_budget_split_v1 / cash_exit_guard_v1` 的执行层影响。
+- 验证事实：
+  - `yolos` 下 `compileall -q daily_research/continuous_policy` 通过。
+  - `run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --dry-run` 通过，并展开四格对照。
+  - 真实数据 smoke：`max_universe_size=40`、`20251103-20260213`、`alpha_prior_source=active_execution_strategy`、`budget_objective=result_value_v1` 通过，`alpha_status=loaded`，`sample_rows=2120`，`daily_rows=53`。
+- 当前推断：
+  - 下一条主线应正式训练 `alpha_result_value_budget_r1`，而不是继续单独加人工 cash guard 或只磨 loss-profile。
+  - 这次实现只是把正确学习入口打通；是否提升收益必须由 10h 正式 study 的 screening + confirmatory 决定。
+
+## 2026-04-18 cp_v3_alpha_result_value_budget_r1 正式结果
+- 正式 study 已完成：
+  - `study_summary.json`：`daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/study_summary.json`
+  - `trial_ranking.csv`：`daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/trial_ranking.csv`
+  - `latest_state_restored = true`
+- screening 事实：
+  - 冠军 `trial_02 = active_execution_strategy + result_value_v1`
+  - `annual_return=2.8598`，`sharpe=5.0898`，`max_drawdown=-0.0518`
+  - `reduce_success_rate_5d=0.5938`，`exit_timeliness_rate_5d=0.5556`
+  - 失败项：`training_evidence_status=insufficient`，`cash_timing_quality_1d=-0.2318`
+- confirmatory 事实：
+  - `confirm_01 = active_execution_strategy + result_value_v1` 回落为 `annual_return=-0.0491`，`sharpe=-0.0237`，`cash_timing_quality_1d=-0.3185`
+  - `confirm_02 = none + teacher_imitation` 为 `annual_return=0.1339`，`sharpe=0.5899`，`max_drawdown=-0.1465`
+  - 两个 confirmatory 均为 `shadow_only`
+- 反事实事实：
+  - `confirm_01` 固定模型执行层 counterfactual 已输出到 `daily_research/output/continuous_policy/analysis/counterfactuals/cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals`
+  - legacy 预算收益略正但语义冲突极高：`annual_return=0.0984`，`avg_semantic_conflict_rate=0.6429`，`avg_order_translation_conflict_rate=0.8560`
+  - split/cash 语义干净但收益转负：`annual_return=-0.0491`，`avg_semantic_conflict_rate=0.0037`，`avg_order_translation_conflict_rate=0.4564`
+- 当前决策：
+  - 不 promotion `cp_v3_alpha_result_value_budget_r1`。
+  - `active alpha + result_value` 保留为高潜力但不稳定方向，不能覆盖当前默认。
+  - 下一轮应优先解决 confirmatory 稳定性与 cash timing 信用分配，而不是把 screening 高收益直接解释为模型机制成功。

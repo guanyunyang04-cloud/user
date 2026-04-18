@@ -700,3 +700,23 @@
   - 不要用 r1 的 failed trial 做任何排名或决策。
   - 不要把 r2 screening 的 `trial_02` 高收益直接 promotion；它的 confirmatory 版本仍未过 `training_evidence / exit / cash / annual_return_vs_active` 等约束。
   - 下一轮如果继续推进，应显式新建 study tag，优先做 `alpha prior + result/value budget objective`，而不是覆盖 r2 产物。
+
+## 2026-04-18 alpha_result_value_budget_r1 操作口径
+- 标准 dry-run 验证：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1__dry_run --dry-run`
+- 正式 10h 前台 study 建议命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1`
+- 反事实审计入口：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_execution_counterfactuals --model-path <artifact> --pool-name liquid500 --start-date <start> --end-date <end>`
+- 操作约束：
+  - 默认解释器仍必须显式使用 `yolos`；当前 shell 的裸 `python` 缺少 `pandas`，不能作为验收依据。
+  - Windows/OpenMP dry-run 若触发 `libiomp5md.dll already initialized`，只对当前验证命令临时设置 `KMP_DUPLICATE_LIB_OK=TRUE`；不要把它误写成模型逻辑。
+  - `alpha prior` 是可观测机会先验，不是新的固定调仓桥接规则；正式结论仍以 protocol / behavior audit / conclusion ledger 为准。
+- 已完成正式 study：
+  - `cp_v3_alpha_result_value_budget_r1`
+  - 用时约 64 分钟，4 screening + 2 confirmatory 全部完成。
+  - 所有 trial/confirm 仍为 `shadow_only`；不要 promotion。
+  - 后续若继续训练，必须使用新 tag，不要覆盖 `cp_v3_alpha_result_value_budget_r1`。
+- 已完成反事实：
+  - `cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals`
+  - 该结果说明 legacy 预算可给 confirm_01 带来略正收益但语义污染极重，split/cash 可清洁语义但收益为负；后续不要把这类收益视为“干净执行模型”成功。

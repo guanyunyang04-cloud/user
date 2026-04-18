@@ -73,3 +73,16 @@
   - `annual_return / sharpe / max_drawdown` 达到 promotion 口径；
   - `exit_timeliness_rate_5d / cash_timing_quality_1d` 不再成为主要失败项。
 - 若上述条件继续不满足，下一步应推进结果驱动 `budget/value head` 或接入 `deep_alpha / policy_v5b` alpha prior，而不是继续叠加人工 cash guard。
+
+## 11. 2026-04-18 alpha prior 与 result/value budget r1 合同
+- 当前可交付事实：`state_builder.py` 已支持 `alpha_prior_source = none / active_execution_strategy / manifest json / run dir / explicit panel`，并把 active policy_v5b 的 score/target_weight 转成可观测日频状态特征。
+- 当前可交付事实：`budget_objective = result_value_v1` 已接入训练目标生成，但保持 daily controller 的既有 5 个输出头不变，避免破坏历史 artifact 兼容性。
+- 当前可交付事实：`alpha_result_value_budget_r1` 自优化 profile 已固化为四格对照：无 alpha + teacher、active alpha + teacher、无 alpha + result_value、active alpha + result_value。
+- 当前可交付事实：`run_execution_counterfactuals.py` 已提供固定模型下的执行预算语义反事实入口，用来拆分“模型动作能力”和“执行/预算翻译层影响”。
+- 推断：下一条最高 ROI 主线不是继续扩大 backbone，也不是继续单独打磨 loss-profile，而是验证 `active_execution_strategy alpha prior + result_value_v1 budget objective` 是否能在语义干净的前提下恢复收益与现金/退出质量。
+- 假设：r1 只是让策略学到更好的信用分配入口；是否真正提升收益，仍必须由 10h 正式训练窗口下的 `screening + confirmatory` 结果决定，不能由 smoke 或 dry-run 直接判断。
+- 禁止项：不得把 active alpha prior 当成新的人工调仓桥接规则。它只能作为可观测机会先验进入状态/目标，continuous_policy 仍必须学习日频连续执行。
+- 正式实证事实：`cp_v3_alpha_result_value_budget_r1` 已完成 4 screening + 2 confirmatory，所有 trial 仍为 `shadow_only`。
+- 正式实证事实：screening 冠军是 `active_execution_strategy + result_value_v1`，`annual_return=2.8598`、`sharpe=5.0898`，但 `training_evidence_status=insufficient` 且 `cash_timing_quality_1d=-0.2318`。
+- 正式实证事实：confirmatory 中 `active_execution_strategy + result_value_v1` 回落为 `annual_return=-0.0491`、`sharpe=-0.0237`、`cash_timing_quality_1d=-0.3185`，不能 promotion。
+- 复盘结论：alpha prior + result/value budget 已证明有 screening 潜力，但当前 r1 没有证明稳定泛化；下一步不得直接升默认，应继续围绕训练证据充分性、cash timing 信用分配和 confirmatory 稳定性推进。

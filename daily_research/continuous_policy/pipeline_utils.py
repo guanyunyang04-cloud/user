@@ -56,7 +56,21 @@ DAILY_TARGET_COLUMNS = {
     "max_position_weight_target",
     "hold_bias_target",
 }
+DEFAULT_BUDGET_OBJECTIVE = "teacher_imitation"
+BUDGET_OBJECTIVE_RESULT_VALUE_V1 = "result_value_v1"
+BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (DEFAULT_BUDGET_OBJECTIVE, BUDGET_OBJECTIVE_RESULT_VALUE_V1)
 DEFAULT_OUTCOME_HORIZONS = (1, 3, 5, 10, 20)
+
+
+def resolve_budget_objective(budget_objective: str | None) -> str:
+    objective = str(budget_objective or DEFAULT_BUDGET_OBJECTIVE).strip() or DEFAULT_BUDGET_OBJECTIVE
+    if objective in {"teacher", "imitation", "none", "default"}:
+        objective = DEFAULT_BUDGET_OBJECTIVE
+    if objective not in BUDGET_OBJECTIVE_CHOICES:
+        raise ValueError(
+            f"Unsupported budget objective: {objective}. Available: {', '.join(BUDGET_OBJECTIVE_CHOICES)}"
+        )
+    return objective
 
 
 def signal_dates_between(prepared: PreparedPolicyInputs, *, start_date: str, end_date: str = "", max_forward_horizon: int = 10) -> list[pd.Timestamp]:
@@ -546,6 +560,207 @@ def compute_continuity_metrics(
     return metrics, action_outcomes
 
 
+def _safe_label_column(label_frame: pd.DataFrame, column: str, *, default: float = 0.0) -> pd.Series:
+    if column not in label_frame.columns:
+        return pd.Series(float(default), index=label_frame.index, dtype=float)
+    return pd.to_numeric(label_frame[column], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(float(default)).astype(float)
+
+
+def _first_label_scalar(label_frame: pd.DataFrame, column: str, *, default: float = 0.0) -> float:
+    series = _safe_label_column(label_frame, column, default=default)
+    if series.empty:
+        return float(default)
+    value = float(series.iloc[0])
+    return value if np.isfinite(value) else float(default)
+
+
+def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
+    if label_frame.empty:
+        return {
+            "deploy_score": 0.0,
+            "risk_score": 0.0,
+            "alpha_alignment": 0.0,
+            "edge_top_mean": 0.0,
+            "downside_top_mean": 0.0,
+            "sell_pressure": 0.0,
+            "candidate_count_hint": 0.0,
+        }
+    priority = _safe_label_column(label_frame, "teacher_priority")
+    edge = _safe_label_column(label_frame, "teacher_edge")
+    opportunity = _safe_label_column(label_frame, "teacher_opportunity")
+    downside = _safe_label_column(label_frame, "teacher_downside")
+    alpha_score = _safe_label_column(label_frame, "alpha_prior_score_z")
+    alpha_rank = _safe_label_column(label_frame, "alpha_prior_rank_pct")
+    alpha_weight = _safe_label_column(label_frame, "alpha_prior_target_weight")
+    alpha_selected = _safe_label_column(label_frame, "alpha_prior_selected")
+    actions = label_frame.get("action_label", pd.Series("", index=label_frame.index)).astype(str)
+
+    positive_mask = actions.isin({"open", "add", "hold"})
+    sell_mask = actions.isin({"reduce", "exit"})
+    top_count = max(1, min(8, int(positive_mask.sum()) or len(label_frame)))
+    top_index = priority.nlargest(top_count).index if len(priority) else label_frame.index[:0]
+    edge_top_mean = float(edge.reindex(top_index).mean()) if len(top_index) else 0.0
+    opportunity_top_mean = float(opportunity.reindex(top_index).mean()) if len(top_index) else 0.0
+    downside_top_mean = float(downside.reindex(top_index).mean()) if len(top_index) else 0.0
+    alpha_selected_top = float(alpha_selected.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    alpha_rank_top = float(alpha_rank.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    alpha_score_top = float(np.clip(alpha_score.reindex(top_index).mean() / 2.0, -1.0, 1.0)) if len(top_index) else 0.0
+    alpha_weight_sum = float(alpha_weight.clip(lower=0.0).sum())
+    alpha_alignment = float(
+        np.clip(
+            0.42 * alpha_selected_top
+            + 0.28 * alpha_rank_top
+            + 0.20 * max(alpha_score_top, 0.0)
+            + 0.10 * np.clip(alpha_weight_sum / 0.45, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+    )
+
+    market_downside = _first_label_scalar(label_frame, "market_downside_pressure")
+    cash_regime = _first_label_scalar(label_frame, "cash_regime_pressure")
+    portfolio_cash_pressure = _first_label_scalar(label_frame, "portfolio_cash_pressure")
+    reversal_rate = _first_label_scalar(label_frame, "recent_reversal_rate_20d")
+    edge_score = float(np.clip(edge_top_mean / 0.055, -1.0, 1.0))
+    opportunity_score = float(np.clip(opportunity_top_mean / 0.10, 0.0, 1.0))
+    downside_score = float(np.clip(downside_top_mean / 0.08, 0.0, 1.0))
+    risk_score = float(
+        np.clip(
+            0.34 * np.clip(market_downside / 0.24, 0.0, 1.0)
+            + 0.24 * np.clip(cash_regime / 0.24, 0.0, 1.0)
+            + 0.18 * np.clip(portfolio_cash_pressure / 0.22, 0.0, 1.0)
+            + 0.14 * downside_score
+            + 0.10 * np.clip(reversal_rate / 0.28, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+    )
+    deploy_score = float(
+        np.clip(
+            0.22
+            + 0.30 * max(edge_score, 0.0)
+            + 0.22 * opportunity_score
+            + 0.24 * alpha_alignment
+            - 0.34 * risk_score
+            + 0.08 * max(edge_score, -0.4),
+            0.0,
+            1.0,
+        )
+    )
+    sell_pressure = float(
+        np.clip(
+            sell_mask.mean() * 0.32
+            + downside_score * 0.28
+            + risk_score * 0.26
+            - max(edge_score, 0.0) * 0.16
+            - alpha_alignment * 0.10,
+            0.0,
+            1.0,
+        )
+    )
+    candidate_count_hint = float(
+        np.clip(
+            positive_mask.sum() * 0.45
+            + (alpha_selected.clip(0.0, 1.0).sum() * 0.40)
+            + deploy_score * 4.0
+            - risk_score * 3.0,
+            2.0,
+            14.0,
+        )
+    )
+    return {
+        "deploy_score": deploy_score,
+        "risk_score": risk_score,
+        "alpha_alignment": alpha_alignment,
+        "edge_top_mean": edge_top_mean,
+        "downside_top_mean": downside_top_mean,
+        "sell_pressure": sell_pressure,
+        "candidate_count_hint": candidate_count_hint,
+    }
+
+
+def _apply_budget_objective_targets(
+    *,
+    label_frame: pd.DataFrame,
+    global_targets: dict[str, float],
+    budget_objective: str,
+) -> tuple[dict[str, float], dict[str, float]]:
+    objective = resolve_budget_objective(budget_objective)
+    signals = _result_value_budget_signals(label_frame)
+    diagnostics = {f"result_value_{key}": float(value) for key, value in signals.items()}
+    diagnostics["budget_objective_is_result_value"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V1 else 0.0
+    if objective != BUDGET_OBJECTIVE_RESULT_VALUE_V1:
+        return dict(global_targets), diagnostics
+
+    deploy = float(signals["deploy_score"])
+    risk = float(signals["risk_score"])
+    alpha_alignment = float(signals["alpha_alignment"])
+    sell_pressure = float(signals["sell_pressure"])
+    candidate_hint = float(signals["candidate_count_hint"])
+    edge_top = float(signals["edge_top_mean"])
+
+    adjusted = dict(global_targets)
+    base_gross = float(adjusted.get("gross_exposure_target", 0.0) or 0.0)
+    adjusted["gross_exposure_target"] = float(
+        np.clip(
+            base_gross
+            + 0.16 * (deploy - 0.42)
+            + 0.05 * alpha_alignment
+            - 0.18 * max(risk - deploy, 0.0)
+            - 0.04 * sell_pressure,
+            0.12,
+            0.94,
+        )
+    )
+    adjusted["candidate_budget"] = float(
+        int(
+            np.clip(
+                round(
+                    0.55 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                    + 0.45 * candidate_hint
+                    + 1.5 * max(deploy - risk, 0.0)
+                    - 1.0 * max(risk - deploy, 0.0)
+                ),
+                2,
+                14,
+            )
+        )
+    )
+    adjusted["turnover_budget"] = float(
+        np.clip(
+            float(adjusted.get("turnover_budget", 0.10) or 0.10)
+            + 0.10 * sell_pressure
+            + 0.04 * max(deploy - 0.45, 0.0)
+            + 0.03 * max(risk - deploy, 0.0)
+            - 0.03 * alpha_alignment * max(deploy - risk, 0.0),
+            0.08,
+            0.82,
+        )
+    )
+    adjusted["max_position_weight_target"] = float(
+        np.clip(
+            float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
+            + 0.024 * alpha_alignment
+            + 0.014 * max(deploy - risk, 0.0)
+            - 0.018 * sell_pressure,
+            0.07,
+            0.28,
+        )
+    )
+    adjusted["hold_bias_target"] = float(
+        np.clip(
+            float(adjusted.get("hold_bias_target", 0.18) or 0.18)
+            + 0.16 * max(edge_top / 0.055, 0.0)
+            + 0.12 * alpha_alignment
+            - 0.20 * sell_pressure
+            - 0.08 * max(risk - deploy, 0.0),
+            0.10,
+            0.95,
+        )
+    )
+    return adjusted, diagnostics
+
+
 def build_training_matrices(
     *,
     prepared: PreparedPolicyInputs,
@@ -561,8 +776,10 @@ def build_training_matrices(
     execution_semantics: str = DEFAULT_EXECUTION_SEMANTICS,
     budget_semantics: str = DEFAULT_BUDGET_SEMANTICS,
     budget_calibration: str = DEFAULT_BUDGET_CALIBRATION,
+    budget_objective: str = DEFAULT_BUDGET_OBJECTIVE,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     resolved_label_config = resolve_label_config(label_preset)
+    resolved_budget_objective = resolve_budget_objective(budget_objective)
     dates = signal_dates_between(
         prepared,
         start_date=start_date,
@@ -578,6 +795,7 @@ def build_training_matrices(
     daily_rows: list[dict[str, Any]] = []
     action_rows: list[dict[str, Any]] = []
     teacher_returns: list[float] = []
+    budget_diagnostic_rows: list[dict[str, float]] = []
 
     for idx, signal_dt in enumerate(dates):
         state_frame = build_cross_section_state(prepared, date=signal_dt, portfolio_state=portfolio)
@@ -589,6 +807,12 @@ def build_training_matrices(
         )
         daily_features = build_daily_state_features(state_frame)
         global_targets = build_teacher_global_targets(label_frame, label_config=resolved_label_config)
+        global_targets, budget_diagnostics = _apply_budget_objective_targets(
+            label_frame=label_frame,
+            global_targets=global_targets,
+            budget_objective=resolved_budget_objective,
+        )
+        budget_diagnostic_rows.append(budget_diagnostics)
         teacher_policy = build_teacher_policy_frame(label_frame)
         step_result = portfolio.step(
             date=signal_dt,
@@ -638,6 +862,11 @@ def build_training_matrices(
         "execution_semantics": str(execution_semantics),
         "budget_semantics": str(budget_semantics),
         "budget_calibration": str(budget_calibration),
+        "budget_objective": str(resolved_budget_objective),
+        "budget_objective_diagnostics_mean": {
+            str(column): float(pd.DataFrame(budget_diagnostic_rows)[column].mean())
+            for column in (pd.DataFrame(budget_diagnostic_rows).columns if budget_diagnostic_rows else [])
+        },
         "teacher_action_distribution": {
             str(key): int(value)
             for key, value in full_sample_frame["action_label"].astype(str).value_counts().sort_index().items()
@@ -668,7 +897,9 @@ def run_policy_rollout(
     execution_semantics: str = DEFAULT_EXECUTION_SEMANTICS,
     budget_semantics: str = DEFAULT_BUDGET_SEMANTICS,
     budget_calibration: str = DEFAULT_BUDGET_CALIBRATION,
+    budget_objective: str = DEFAULT_BUDGET_OBJECTIVE,
 ) -> dict[str, Any]:
+    resolved_budget_objective = resolve_budget_objective(budget_objective)
     dates = signal_dates_between(prepared, start_date=start_date, end_date=end_date, max_forward_horizon=0)
     if len(dates) < 2:
         raise ValueError("Continuous-policy rollout requires at least two signal dates.")
@@ -693,6 +924,11 @@ def run_policy_rollout(
             )
             policy_frame = build_teacher_policy_frame(label_frame)
             global_targets = build_teacher_global_targets(label_frame, label_config=label_preset)
+            global_targets, _ = _apply_budget_objective_targets(
+                label_frame=label_frame,
+                global_targets=global_targets,
+                budget_objective=resolved_budget_objective,
+            )
         else:
             policy_frame, global_targets = predict_policy(artifact, state_frame=state_frame, daily_features=daily_features)
 
@@ -776,6 +1012,7 @@ def run_policy_rollout(
         "execution_semantics": str(execution_semantics),
         "budget_semantics": str(budget_semantics),
         "budget_calibration": str(budget_calibration),
+        "budget_objective": str(resolved_budget_objective),
         "returns": returns_series,
         "metrics": metrics,
         "continuity_metrics": continuity_metrics,
