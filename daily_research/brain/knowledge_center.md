@@ -404,3 +404,76 @@
 - 修正后正确语义是：
   - 默认行为：只读刷新 leaderboard 产物
   - 显式勾选危险开关后：才允许覆盖 `active_execution_strategy`
+- 当前 return-recovery 主线的最小增量假设也已收口为：
+  - 不再扩大搜索面
+  - 不再回到高强度手工 patch
+  - 而是在 `teacher_aux_return_recovery_balanced_v2` 与 `teacher_aux_return_recovery_stable_v2` 之间插入一个更窄的插值候选 `teacher_aux_return_recovery_balanced_v3`
+  - 它的角色是“下一轮待验证候选”，不是当前新冠军，也不是既成研究结论
+
+- `continuous_policy` 的绑定设计合同已经被显式落档：
+  - `daily_research/brain/continuous_policy_design_contract.md`
+  - 它要求把当前系统从“teacher 驱动的连续分类器”推进到“结果驱动的自治执行策略”
+- 当前最需要长期记住的架构性结论是：
+  - `teacher` 更适合作为辅助先验，而不是主监督天花板
+  - 个股动作语义与组合预算语义必须分层
+  - 执行层如果继续改写 `model_action -> execution_action`，模型就无法真正学稳生命周期策略
+- 因此下一阶段最重要的不是继续扩大 search profile，而是先回答三件事：
+  - 动作头是否仍被执行层语义污染
+  - 预算头是否仍在系统性吞掉 `reduce / exit`
+  - `cash timing` 是否仍主要来自 teacher 脚手架，而非结果驱动校准
+- `behavior_audit` 现在已经正式承担这部分职责：
+  - 不只看 teacher-vs-model gap
+  - 还会审计动作语义漂移、微幅再平衡污染、预算裁剪日的语义冲突，以及高现金与次日市场方向的错位
+
+- 2026-04-18 的 `semantic_guard` 实证结论需要长期记住：
+  - 只把 `execution_action` 从真实权重变化里解耦出来是不够的，必须同时保留 `weight_change_action`
+  - 最合理的语义账本是：
+    - `execution_action` = 模型生命周期意图
+    - `weight_change_action` = 预算/订单翻译后的真实权重变化
+  - `semantic_conflict_rate` 回答“执行层是否还在改写策略语义”
+  - `order_translation_conflict_rate` 回答“预算/权重翻译是否还在吞掉动作意图”
+- 在 `confirm_02` 同窗重评估里，`semantic_guard` 已经证明：
+  - `semantic_conflict_rate` 可以从旧审计的 `0.1636` 降到 `0.0000`
+  - `order_translation_conflict_rate` 在加入权重层语义保护后为 `0.2328`，明显低于未加保护时的 `0.7896`
+  - `annual_return / sharpe / reduce_success_rate_5d / avg_turnover / immediate_reversal_rate_3d` 同步改善
+  - 但 `exit_timeliness_rate_5d / cash_timing_quality_1d / max_drawdown` 仍变差或不过关
+- 因此当前新的本质判断是：
+  - 执行语义净化是必要且有效的地基
+  - 它不是收益-风险-现金时机的完整答案
+  - 下一轮最有效的结构工作应从 `execution semantics` 转入 `budget/cash calibration`
+
+## 2026-04-18 continuous_policy budget split ablation 知识沉淀
+- 事实：
+  - 新增预算层双开关后，系统已经能区分三件事：模型生命周期动作、真实权重变化、组合预算部署。
+  - `action_budget_split_v1` 把已有持仓生命周期动作从 candidate budget 裁剪中保护出来，候选预算主要约束新开仓。
+  - `cash_exit_guard_v1` 只调整组合层预算，不改写 `model_action`。
+- 同窗证据：
+  - `legacy_total_candidate` 维持最高收益与 Sharpe：`annual_return=0.1672`, `sharpe=1.0340`。
+  - `action_budget_split_v1` 降低 `immediate_reversal_rate_3d`：`0.1647 -> 0.1009`，但 `annual_return` 降到 `0.0384`，`exit_timeliness_rate_5d` 降到 `0.3333`。
+  - `cash_exit_guard_v1` 把 `risk_off_cash_hit_rate` 提到 `0.5294`，但 `cash_timing_quality_1d` 仍为 `-0.2025`，且收益转弱。
+- 推断：
+  - 预算结构和收益出现矛盾，不是因为分层思想错，而是因为旧模型的 action/value 信号没有按新预算语义训练；预算层一旦不再替模型“误删/误缩”持仓，就暴露了 action head 自身的错误信用分配。
+  - `cash_timing_quality_1d` 的本质不是简单提高现金，而是现金提高的日期必须领先下跌；规则式 risk-off guard 能提高部分下跌命中率，但不能稳定改善相关性。
+- 经验规则：
+  - 语义层成功的验收是 `semantic_conflict_rate -> 0`。
+  - 预算层成功的验收不能只看 `budget_drop_count` 下降，还必须看 `annual_return / sharpe / cash_timing_quality_1d / order_translation_conflict_rate` 是否同步不恶化。
+  - 若旧模型推理期切换预算语义导致收益下降，应把它视为“需要训练级 ablation”的证据，而不是立刻把分层回滚为无效思想。
+
+## 2026-04-18 budget_layer_ablation_r2 知识沉淀
+- 事实：
+  - 干净训练级 ablation `cp_v3_budget_layer_ablation_r2` 完成 4 个 screening 与 2 个 confirmatory，所有正式 trial 状态均为 completed。
+  - screening 中 `action_budget_split_v1 + cash_exit_guard_v1` 明显最强：`annual_return=1.2597`，`sharpe=2.8915`，`trend_capture_rate_10d=0.4752`，但 `max_drawdown=-0.1017`，`cash_timing_quality_1d=-0.2267`，`training_evidence_status=insufficient`。
+  - confirmatory 中同一配置回落为 `annual_return=0.3124`，`sharpe=1.7115`，`max_drawdown=-0.0599`，`exit_timeliness_rate_5d=0.3333`，`cash_timing_quality_1d=-0.1670`，仍 `shadow_only`。
+  - `legacy_total_candidate + none` 的 confirmatory 训练证据充足，但收益转负：`annual_return=-0.0402`，`sharpe=-0.2210`。
+- 推断：
+  - 训练级证据比旧模型同窗切换更乐观：预算分层 + cash guard 确实能产生强 screening 收益，而不是纯规则噪声。
+  - 但 confirmatory 回落证明“结构更合理”不等价于“目标已学稳”；预算分层解决的是语义与部署边界，尚未解决结果信用分配。
+  - `cash_timing_quality_1d` 继续为负，说明 cash head 仍像风险偏置而非成熟交易者式择时器；它没有稳定学会在市场转弱前提高现金。
+  - `order_translation_conflict_rate` 在高收益 split+cash 路径上升到约 `0.306`，说明预算/仓位翻译仍在吞噬部分个股动作意图。
+- 经验规则：
+  - screening champion 只能回答“有无潜力”，confirmatory champion 才能回答“是否可作为下一主线”；二者不能混用。
+  - 当 split+cash screening 高收益但 confirmatory 不稳时，应升级 objective/value/alpha prior，而不是继续堆手工 cash guard。
+  - `training_evidence_status=sufficient` 不是 promotion 充分条件；如果收益、夏普、现金择时或退出时机不过关，仍必须 `shadow_only`。
+- 下一知识假设：
+  - continuous_policy 不应从零学习所有机会选择；更合理的是接入 `deep_alpha / policy_v5b` 的 alpha prior，让连续执行模型学习生命周期和预算节奏。
+  - 预算头最终应从 teacher/rule imitation 迁移到结果驱动：收益、回撤、成本、趋势捕获、现金时机和订单翻译漂移共同进入目标。

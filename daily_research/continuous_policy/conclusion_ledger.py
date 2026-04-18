@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ if __package__ in {None, ""}:
 
 from daily_research.continuous_policy.runtime import (
     CONTINUOUS_POLICY_ROOT,
+    LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH,
     LATEST_PROTOCOL_SUMMARY_PATH,
     now_iso,
     read_json,
@@ -53,6 +55,55 @@ def _safe_float(mapping: dict[str, Any], key: str) -> float:
     return float(mapping.get(key, 0.0) or 0.0)
 
 
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _select_behavior_audit(protocol_summary: dict[str, Any]) -> dict[str, Any]:
+    protocol_audit = dict(protocol_summary.get("latest_behavior_audit", {}) or {})
+    try:
+        latest_audit = dict(read_json(LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH) or {})
+    except FileNotFoundError:
+        latest_audit = {}
+
+    if not latest_audit:
+        return protocol_audit
+    if not protocol_audit:
+        return latest_audit
+
+    expected_evaluation_summary = str(
+        dict(protocol_summary.get("evaluation", {}) or {}).get("evaluation_summary_json", "") or ""
+    )
+    latest_matches_protocol = (
+        bool(expected_evaluation_summary)
+        and str(latest_audit.get("evaluation_summary_path", "") or "") == expected_evaluation_summary
+    )
+    protocol_has_semantic = bool(dict(protocol_audit.get("semantic_conflicts", {}) or {}))
+    latest_has_semantic = bool(dict(latest_audit.get("semantic_conflicts", {}) or {}))
+
+    if latest_matches_protocol and latest_has_semantic and not protocol_has_semantic:
+        return latest_audit
+
+    if latest_matches_protocol:
+        protocol_generated_at = _parse_iso_datetime(protocol_audit.get("generated_at"))
+        latest_generated_at = _parse_iso_datetime(latest_audit.get("generated_at"))
+        if (
+            latest_has_semantic
+            and latest_generated_at is not None
+            and protocol_generated_at is not None
+            and latest_generated_at > protocol_generated_at
+        ):
+            return latest_audit
+
+    return protocol_audit
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     protocol_summary_path = Path(str(args.protocol_summary or "")).expanduser().resolve()
@@ -64,6 +115,16 @@ def main(argv: list[str] | None = None) -> int:
     shadow_continuity = dict(shadow.get("continuity_metrics", {}) or {})
     train = dict(protocol_summary.get("train", {}) or {})
     training_evidence = dict(protocol_summary.get("training_evidence", {}) or {})
+    behavior_audit = _select_behavior_audit(protocol_summary)
+    semantic_conflicts = dict(behavior_audit.get("semantic_conflicts", {}) or {})
+    semantic_conflict_rate = float(semantic_conflicts.get("semantic_conflict_rate", 0.0) or 0.0)
+    order_translation_conflict_rate = float(
+        semantic_conflicts.get(
+            "order_translation_conflict_rate",
+            semantic_conflicts.get("weight_change_conflict_rate", semantic_conflict_rate),
+        )
+        or 0.0
+    )
     latest_label_preset = str(protocol_summary.get("label_preset", "") or train.get("label_preset", "") or "")
     latest_backend = str(protocol_summary.get("trainer_backend", "") or train.get("trainer_backend", "") or "")
     failed_checks = {str(item) for item in (promotion_gate.get("failed_checks", []) or [])}
@@ -81,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
         local_bottleneck_parts.append(f"cash_timing_quality_1d={cash_timing_quality:.4f}")
     if "shadow_reversal" in failed_checks or shadow_immediate_reversal > 0.35:
         local_bottleneck_parts.append(f"shadow_immediate_reversal_rate_3d={shadow_immediate_reversal:.4f}")
+    if semantic_conflict_rate >= 0.05:
+        local_bottleneck_parts.append(f"semantic_conflict_rate={semantic_conflict_rate:.4f}")
+    if order_translation_conflict_rate >= 0.08:
+        local_bottleneck_parts.append(f"order_translation_conflict_rate={order_translation_conflict_rate:.4f}")
     if local_bottleneck_parts:
         behavior_bottleneck_statement = "当前 continuous_policy 的局部瓶颈已收口为：" + "、".join(local_bottleneck_parts)
         if hold_share >= 0.12:
@@ -179,6 +244,42 @@ def main(argv: list[str] | None = None) -> int:
                 revisit_trigger="当 training_evidence.status 变为 sufficient 后，才能把不足证据从阶段结论里移除。",
             )
         )
+    if semantic_conflict_rate >= 0.05:
+        stage_local.append(
+            _entry(
+                conclusion_id="current_execution_layer_still_rewrites_policy_semantics",
+                title="执行层仍在改写策略语义",
+                statement=(
+                    "最新 behavior audit 显示 execution layer 仍会把模型动作重写成别的动作；"
+                    f"semantic_conflict_rate={semantic_conflict_rate:.4f}，"
+                    "因此当前训练闭环里的“模型策略”与回测里的“实际策略”还不是同一个对象。"
+                ),
+                confidence="high",
+                evidence=[
+                    str(protocol_summary_path),
+                    str(behavior_audit.get("output_path", "") or LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH),
+                ],
+                revisit_trigger="只有当 semantic_conflict_rate 明显降到低位后，才能把动作头学习结果当成真正稳定的策略语义。",
+            )
+        )
+    if order_translation_conflict_rate >= 0.08:
+        stage_local.append(
+            _entry(
+                conclusion_id="current_weight_translation_still_drifts_from_policy_intent",
+                title="权重翻译仍偏离策略意图",
+                statement=(
+                    "最新 behavior audit 显示模型生命周期语义与真实权重变化仍存在偏离；"
+                    f"order_translation_conflict_rate={order_translation_conflict_rate:.4f}。"
+                    "这不再必然代表执行层改写语义，但说明预算/权重翻译层仍需继续分层校准。"
+                ),
+                confidence="high",
+                evidence=[
+                    str(protocol_summary_path),
+                    str(behavior_audit.get("output_path", "") or LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH),
+                ],
+                revisit_trigger="只有当 order_translation_conflict_rate 与预算裁剪日订单偏离同步下降后，才能认为预算层不再吞掉个股动作语义。",
+            )
+        )
 
     strong_model_recheck = [
         _entry(
@@ -212,6 +313,18 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if str(training_evidence.get("status", "") or "") != "sufficient":
         next_actions = list(training_evidence.get("recommended_actions", []) or []) + next_actions
+    if semantic_conflict_rate >= 0.05:
+        next_actions = [
+            "先把 execution layer 退回“语义翻译器”角色，停止把 model_action 改写成 execution_action。",
+            "把预算头与个股动作头分层，避免 turnover / cash 预算继续吞掉 reduce / exit 语义。",
+            *next_actions,
+        ]
+    elif order_translation_conflict_rate >= 0.08:
+        next_actions = [
+            "继续校准权重翻译层，在保留 model_action 生命周期语义的同时，减少真实订单方向与模型意图的偏离。",
+            "把预算头与个股动作头分层，避免 turnover / cash 预算继续吞掉 reduce / exit 语义。",
+            *next_actions,
+        ]
 
     payload = {
         "run_tag": str(args.tag or timestamp_tag("conclusion_ledger")),

@@ -24,6 +24,14 @@ from daily_research.continuous_policy.pipeline_utils import (
     select_daily_feature_columns,
     select_feature_columns,
 )
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CHOICES,
+    BUDGET_SEMANTICS_CHOICES,
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    EXECUTION_SEMANTICS_CHOICES,
+)
 from daily_research.continuous_policy.runtime import MODELS_ROOT, now_iso, timestamp_tag, update_latest_summary, write_json
 from daily_research.continuous_policy.state_builder import prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
@@ -56,6 +64,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-universe-size", type=int, default=0)
     parser.add_argument("--random-seed", type=int, default=7)
     parser.add_argument("--skip-multiplier", type=float, default=2.0)
+    parser.add_argument(
+        "--execution-semantics",
+        default=DEFAULT_EXECUTION_SEMANTICS,
+        choices=EXECUTION_SEMANTICS_CHOICES,
+        help="How portfolio execution records lifecycle actions: semantic_preserving_v1 keeps model intent separate from weight-change orders.",
+    )
+    parser.add_argument(
+        "--budget-semantics",
+        default=DEFAULT_BUDGET_SEMANTICS,
+        choices=BUDGET_SEMANTICS_CHOICES,
+        help="How candidate budget is applied: action_budget_split_v1 protects existing lifecycle actions and budgets new entries separately.",
+    )
+    parser.add_argument(
+        "--budget-calibration",
+        default=DEFAULT_BUDGET_CALIBRATION,
+        choices=BUDGET_CALIBRATION_CHOICES,
+        help="Optional portfolio-level gross/candidate/turnover calibration.",
+    )
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
@@ -128,6 +154,9 @@ def _build_common_train_summary(
         "trainer_backend": str(training_contract.get("trainer_backend", "") or ""),
         "decoder_profile": str(getattr(args, "decoder_profile", "default_v2") or "default_v2"),
         "loss_profile": str(getattr(args, "loss_profile", DEFAULT_LOSS_PROFILE) or DEFAULT_LOSS_PROFILE),
+        "execution_semantics": str(getattr(args, "execution_semantics", DEFAULT_EXECUTION_SEMANTICS) or DEFAULT_EXECUTION_SEMANTICS),
+        "budget_semantics": str(getattr(args, "budget_semantics", DEFAULT_BUDGET_SEMANTICS) or DEFAULT_BUDGET_SEMANTICS),
+        "budget_calibration": str(getattr(args, "budget_calibration", DEFAULT_BUDGET_CALIBRATION) or DEFAULT_BUDGET_CALIBRATION),
         "training_contract": summarize_training_contract(training_contract),
         "action_distribution": {
             str(key): int(value)
@@ -181,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         random_seed=args.random_seed,
         skip_multiplier=args.skip_multiplier,
         label_preset=args.label_preset,
+        execution_semantics=args.execution_semantics,
+        budget_semantics=args.budget_semantics,
+        budget_calibration=args.budget_calibration,
     )
     feature_names = select_feature_columns(sample_frame)
     daily_feature_names = select_daily_feature_columns(daily_frame)

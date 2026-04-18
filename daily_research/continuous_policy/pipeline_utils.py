@@ -14,7 +14,12 @@ from daily_research.continuous_policy.label_builder import (
     build_teacher_policy_frame,
 )
 from daily_research.continuous_policy.model import predict_policy
-from daily_research.continuous_policy.portfolio_simulator import PortfolioState
+from daily_research.continuous_policy.portfolio_simulator import (
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    PortfolioState,
+)
 from daily_research.continuous_policy.state_builder import (
     PreparedPolicyInputs,
     build_cross_section_state,
@@ -519,12 +524,24 @@ def compute_continuity_metrics(
         metrics["avg_reduce_bias_target"] = float(turnover_frame["reduce_bias_target"].mean()) if "reduce_bias_target" in turnover_frame.columns else 0.0
         metrics["avg_exit_patience_target"] = float(turnover_frame["exit_patience_target"].mean()) if "exit_patience_target" in turnover_frame.columns else 0.0
         metrics["avg_reentry_guard_target"] = float(turnover_frame["reentry_guard_target"].mean()) if "reentry_guard_target" in turnover_frame.columns else 0.0
+        metrics["avg_budget_risk_off_score"] = float(turnover_frame["budget_risk_off_score"].mean()) if "budget_risk_off_score" in turnover_frame.columns else 0.0
+        metrics["avg_budget_deploy_score"] = float(turnover_frame["budget_deploy_score"].mean()) if "budget_deploy_score" in turnover_frame.columns else 0.0
+        metrics["avg_budget_entry_candidate_count"] = float(turnover_frame["budget_entry_candidate_count"].mean()) if "budget_entry_candidate_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_entry_keep_count"] = float(turnover_frame["budget_entry_keep_count"].mean()) if "budget_entry_keep_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_held_protected_count"] = float(turnover_frame["budget_held_protected_count"].mean()) if "budget_held_protected_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_split_bound_guard_count"] = float(turnover_frame["budget_split_bound_guard_count"].mean()) if "budget_split_bound_guard_count" in turnover_frame.columns else 0.0
     else:
         metrics["avg_position_cap_target"] = 0.0
         metrics["avg_hold_bias_target"] = 0.0
         metrics["avg_reduce_bias_target"] = 0.0
         metrics["avg_exit_patience_target"] = 0.0
         metrics["avg_reentry_guard_target"] = 0.0
+        metrics["avg_budget_risk_off_score"] = 0.0
+        metrics["avg_budget_deploy_score"] = 0.0
+        metrics["avg_budget_entry_candidate_count"] = 0.0
+        metrics["avg_budget_entry_keep_count"] = 0.0
+        metrics["avg_budget_held_protected_count"] = 0.0
+        metrics["avg_budget_split_bound_guard_count"] = 0.0
 
     return metrics, action_outcomes
 
@@ -541,6 +558,9 @@ def build_training_matrices(
     random_seed: int = 7,
     skip_multiplier: float = 2.0,
     label_preset: str = "balanced_v2",
+    execution_semantics: str = DEFAULT_EXECUTION_SEMANTICS,
+    budget_semantics: str = DEFAULT_BUDGET_SEMANTICS,
+    budget_calibration: str = DEFAULT_BUDGET_CALIBRATION,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     resolved_label_config = resolve_label_config(label_preset)
     dates = signal_dates_between(
@@ -576,6 +596,9 @@ def build_training_matrices(
             policy_frame=teacher_policy,
             global_targets=global_targets,
             source_label="teacher",
+            execution_semantics=execution_semantics,
+            budget_semantics=budget_semantics,
+            budget_calibration=budget_calibration,
         )
 
         sample_frames.append(label_frame)
@@ -612,6 +635,9 @@ def build_training_matrices(
     teacher_metrics = compute_curve_metrics(pd.Series(teacher_returns, index=[dt.strftime("%Y-%m-%d") for dt in dates[1:]], dtype=float))
     summary = {
         "label_preset": resolved_label_config.name,
+        "execution_semantics": str(execution_semantics),
+        "budget_semantics": str(budget_semantics),
+        "budget_calibration": str(budget_calibration),
         "teacher_action_distribution": {
             str(key): int(value)
             for key, value in full_sample_frame["action_label"].astype(str).value_counts().sort_index().items()
@@ -639,6 +665,9 @@ def run_policy_rollout(
     sell_tax_bps: float = 10.0,
     source_label: str = "model",
     label_preset: str = "balanced_v2",
+    execution_semantics: str = DEFAULT_EXECUTION_SEMANTICS,
+    budget_semantics: str = DEFAULT_BUDGET_SEMANTICS,
+    budget_calibration: str = DEFAULT_BUDGET_CALIBRATION,
 ) -> dict[str, Any]:
     dates = signal_dates_between(prepared, start_date=start_date, end_date=end_date, max_forward_horizon=0)
     if len(dates) < 2:
@@ -673,6 +702,9 @@ def run_policy_rollout(
             policy_frame=policy_frame,
             global_targets=global_targets,
             source_label=source_label,
+            execution_semantics=execution_semantics,
+            budget_semantics=budget_semantics,
+            budget_calibration=budget_calibration,
         )
         action_rows.extend(step_result.actions)
         turnover_rows.append({"date": step_result.date, **step_result.diagnostics})
@@ -703,15 +735,35 @@ def run_policy_rollout(
         metrics["avg_sell_turnover"] = float(turnover_frame["sell_turnover"].mean())
         metrics["avg_gross_exposure"] = float(1.0 - turnover_frame["cash_weight"].mean())
         metrics["avg_holding_count"] = float(turnover_frame["holding_count"].mean())
+        metrics["avg_semantic_conflict_rate"] = float(turnover_frame["semantic_conflict_rate"].mean()) if "semantic_conflict_rate" in turnover_frame.columns else 0.0
+        metrics["avg_order_translation_conflict_rate"] = float(turnover_frame["order_translation_conflict_rate"].mean()) if "order_translation_conflict_rate" in turnover_frame.columns else 0.0
+        metrics["avg_budget_risk_off_score"] = float(turnover_frame["budget_risk_off_score"].mean()) if "budget_risk_off_score" in turnover_frame.columns else 0.0
+        metrics["avg_budget_deploy_score"] = float(turnover_frame["budget_deploy_score"].mean()) if "budget_deploy_score" in turnover_frame.columns else 0.0
+        metrics["avg_budget_entry_candidate_count"] = float(turnover_frame["budget_entry_candidate_count"].mean()) if "budget_entry_candidate_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_entry_keep_count"] = float(turnover_frame["budget_entry_keep_count"].mean()) if "budget_entry_keep_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_held_protected_count"] = float(turnover_frame["budget_held_protected_count"].mean()) if "budget_held_protected_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_split_bound_guard_count"] = float(turnover_frame["budget_split_bound_guard_count"].mean()) if "budget_split_bound_guard_count" in turnover_frame.columns else 0.0
     else:
         metrics["avg_turnover"] = 0.0
         metrics["avg_buy_turnover"] = 0.0
         metrics["avg_sell_turnover"] = 0.0
         metrics["avg_gross_exposure"] = 0.0
         metrics["avg_holding_count"] = 0.0
+        metrics["avg_semantic_conflict_rate"] = 0.0
+        metrics["avg_order_translation_conflict_rate"] = 0.0
+        metrics["avg_budget_risk_off_score"] = 0.0
+        metrics["avg_budget_deploy_score"] = 0.0
+        metrics["avg_budget_entry_candidate_count"] = 0.0
+        metrics["avg_budget_entry_keep_count"] = 0.0
+        metrics["avg_budget_held_protected_count"] = 0.0
+        metrics["avg_budget_split_bound_guard_count"] = 0.0
     metrics["action_counts"] = {
         str(key): int(value)
         for key, value in action_panel["execution_action"].astype(str).value_counts().sort_index().items()
+    } if not action_panel.empty else {}
+    metrics["weight_change_action_counts"] = {
+        str(key): int(value)
+        for key, value in action_panel.get("weight_change_action", action_panel.get("execution_action", pd.Series(dtype=str))).astype(str).value_counts().sort_index().items()
     } if not action_panel.empty else {}
     continuity_metrics, action_outcomes = compute_continuity_metrics(
         prepared=prepared,
@@ -721,6 +773,9 @@ def run_policy_rollout(
     )
     return {
         "dates": [dt.strftime("%Y-%m-%d") for dt in dates],
+        "execution_semantics": str(execution_semantics),
+        "budget_semantics": str(budget_semantics),
+        "budget_calibration": str(budget_calibration),
         "returns": returns_series,
         "metrics": metrics,
         "continuity_metrics": continuity_metrics,

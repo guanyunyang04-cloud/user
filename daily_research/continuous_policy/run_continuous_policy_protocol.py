@@ -21,7 +21,15 @@ from daily_research.continuous_policy.model import load_artifact
 from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE, LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES
 from daily_research.continuous_policy.pipeline_utils import run_policy_rollout
-from daily_research.continuous_policy.portfolio_simulator import PortfolioState
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CHOICES,
+    BUDGET_SEMANTICS_CHOICES,
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    EXECUTION_SEMANTICS_CHOICES,
+    PortfolioState,
+)
 from daily_research.continuous_policy.runtime import (
     EVALUATIONS_ROOT,
     EXPORTS_ROOT,
@@ -224,6 +232,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--random-seed", type=int, default=7)
     parser.add_argument("--skip-multiplier", type=float, default=2.0)
     parser.add_argument(
+        "--execution-semantics",
+        default=DEFAULT_EXECUTION_SEMANTICS,
+        choices=EXECUTION_SEMANTICS_CHOICES,
+        help="semantic_preserving_v1 keeps lifecycle intent separate from actual weight-change orders.",
+    )
+    parser.add_argument(
+        "--budget-semantics",
+        default=DEFAULT_BUDGET_SEMANTICS,
+        choices=BUDGET_SEMANTICS_CHOICES,
+        help="action_budget_split_v1 protects existing lifecycle actions and budgets new entries separately.",
+    )
+    parser.add_argument(
+        "--budget-calibration",
+        default=DEFAULT_BUDGET_CALIBRATION,
+        choices=BUDGET_CALIBRATION_CHOICES,
+        help="Optional portfolio-level gross/candidate/turnover calibration.",
+    )
+    parser.add_argument(
         "--label-preset",
         default="balanced_v2",
         choices=tuple(sorted(LABEL_CONFIGS)),
@@ -284,6 +310,12 @@ def main(argv: list[str] | None = None) -> int:
         str(args.random_seed),
         "--skip-multiplier",
         str(args.skip_multiplier),
+        "--execution-semantics",
+        str(args.execution_semantics),
+        "--budget-semantics",
+        str(args.budget_semantics),
+        "--budget-calibration",
+        str(args.budget_calibration),
         "--label-preset",
         args.label_preset,
         "--trainer-backend",
@@ -359,6 +391,12 @@ def main(argv: list[str] | None = None) -> int:
         str(args.slippage_bps),
         "--sell-tax-bps",
         str(args.sell_tax_bps),
+        "--execution-semantics",
+        str(args.execution_semantics),
+        "--budget-semantics",
+        str(args.budget_semantics),
+        "--budget-calibration",
+        str(args.budget_calibration),
         "--label-preset",
         args.label_preset,
         "--tag",
@@ -411,6 +449,9 @@ def main(argv: list[str] | None = None) -> int:
         slippage_bps=args.slippage_bps,
         sell_tax_bps=args.sell_tax_bps,
         source_label="continuous_policy_shadow",
+        execution_semantics=args.execution_semantics,
+        budget_semantics=args.budget_semantics,
+        budget_calibration=args.budget_calibration,
     )
 
     shadow_action_panel_path = protocol_root / "shadow_daily_action_panel.csv"
@@ -430,6 +471,9 @@ def main(argv: list[str] | None = None) -> int:
         "signal_date_count": len(shadow_rollout["dates"]),
         "metrics": shadow_rollout["metrics"],
         "continuity_metrics": shadow_rollout["continuity_metrics"],
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "action_panel_csv": str(shadow_action_panel_path.resolve()),
         "action_outcomes_csv": str(shadow_action_outcomes_path.resolve()),
         "turnover_csv": str(shadow_turnover_path.resolve()),
@@ -462,6 +506,12 @@ def main(argv: list[str] | None = None) -> int:
         str(args.slippage_bps),
         "--sell-tax-bps",
         str(args.sell_tax_bps),
+        "--execution-semantics",
+        str(args.execution_semantics),
+        "--budget-semantics",
+        str(args.budget_semantics),
+        "--budget-calibration",
+        str(args.budget_calibration),
         "--tag",
         export_tag,
     ]
@@ -483,6 +533,9 @@ def main(argv: list[str] | None = None) -> int:
         "trainer_backend": str(train_summary.get("trainer_backend", args.trainer_backend) or args.trainer_backend),
         "decoder_profile": str(train_summary.get("decoder_profile", args.decoder_profile) or args.decoder_profile),
         "loss_profile": str(train_summary.get("loss_profile", args.loss_profile) or args.loss_profile),
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "training_contract": dict(train_summary.get("training_contract", {}) or {}),
         "model_artifact_path": str(artifact_path),
         "protocol_summary_json": str((protocol_root / "protocol_summary.json").resolve()),
@@ -496,6 +549,9 @@ def main(argv: list[str] | None = None) -> int:
             "trainer_backend": train_summary.get("trainer_backend", args.trainer_backend),
             "decoder_profile": train_summary.get("decoder_profile", args.decoder_profile),
             "loss_profile": train_summary.get("loss_profile", args.loss_profile),
+            "execution_semantics": train_summary.get("execution_semantics", args.execution_semantics),
+            "budget_semantics": train_summary.get("budget_semantics", args.budget_semantics),
+            "budget_calibration": train_summary.get("budget_calibration", args.budget_calibration),
             "training_contract": train_summary.get("training_contract", {}),
             "training_diagnostics": train_summary.get("training_diagnostics", {}),
             "sample_rows": train_summary.get("sample_rows"),
@@ -509,6 +565,9 @@ def main(argv: list[str] | None = None) -> int:
             "trainer_backend": evaluation_summary.get("trainer_backend", train_summary.get("trainer_backend", args.trainer_backend)),
             "training_contract": evaluation_summary.get("training_contract", train_summary.get("training_contract", {})),
             "training_diagnostics": evaluation_summary.get("training_diagnostics", train_summary.get("training_diagnostics", {})),
+            "execution_semantics": evaluation_summary.get("execution_semantics", args.execution_semantics),
+            "budget_semantics": evaluation_summary.get("budget_semantics", args.budget_semantics),
+            "budget_calibration": evaluation_summary.get("budget_calibration", args.budget_calibration),
             "continuous_policy_metrics": evaluation_summary.get("continuous_policy_metrics", {}),
             "continuity_metrics": evaluation_summary.get("continuity_metrics", {}),
             "teacher_oracle_metrics": evaluation_summary.get("teacher_oracle_metrics", {}),
@@ -518,6 +577,9 @@ def main(argv: list[str] | None = None) -> int:
         "shadow": {
             "metrics": shadow_summary.get("metrics", {}),
             "continuity_metrics": shadow_summary.get("continuity_metrics", {}),
+            "execution_semantics": shadow_summary.get("execution_semantics", args.execution_semantics),
+            "budget_semantics": shadow_summary.get("budget_semantics", args.budget_semantics),
+            "budget_calibration": shadow_summary.get("budget_calibration", args.budget_calibration),
             "shadow_summary_json": str(shadow_summary_path.resolve()),
         },
         "latest_export": {
@@ -525,6 +587,9 @@ def main(argv: list[str] | None = None) -> int:
             "trainer_backend": export_summary.get("trainer_backend", train_summary.get("trainer_backend", args.trainer_backend)),
             "action_counts": export_summary.get("action_counts", {}),
             "runtime_alignment_gap": export_summary.get("runtime_alignment_gap"),
+            "execution_semantics": export_summary.get("execution_semantics", args.execution_semantics),
+            "budget_semantics": export_summary.get("budget_semantics", args.budget_semantics),
+            "budget_calibration": export_summary.get("budget_calibration", args.budget_calibration),
             "export_summary_json": str((EXPORTS_ROOT / export_tag / "export_summary.json").resolve()),
         },
     }
@@ -548,6 +613,11 @@ def main(argv: list[str] | None = None) -> int:
             audit_tag,
         ],
     )
+    latest_behavior_audit = _read_json(
+        OUTPUT_ROOT / "continuous_policy" / "analysis" / "behavior_audits" / f"{audit_tag}.json"
+    )
+    summary_payload["latest_behavior_audit"] = latest_behavior_audit
+    write_json(protocol_summary_path, summary_payload)
     ledger_tag = f"{protocol_tag}__ledger"
     _call_stage(
         "conclusion-ledger",
@@ -558,9 +628,6 @@ def main(argv: list[str] | None = None) -> int:
             "--tag",
             ledger_tag,
         ],
-    )
-    summary_payload["latest_behavior_audit"] = _read_json(
-        OUTPUT_ROOT / "continuous_policy" / "analysis" / "behavior_audits" / f"{audit_tag}.json"
     )
     summary_payload["latest_conclusion_ledger"] = _read_json(
         OUTPUT_ROOT / "continuous_policy" / "analysis" / "conclusion_ledgers" / f"{ledger_tag}.json"

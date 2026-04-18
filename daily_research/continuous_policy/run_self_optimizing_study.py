@@ -16,6 +16,14 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CHOICES,
+    BUDGET_SEMANTICS_CHOICES,
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    EXECUTION_SEMANTICS_CHOICES,
+)
 from daily_research.continuous_policy.run_continuous_policy_protocol import (
     PROMOTION_THRESHOLDS,
     main as protocol_main,
@@ -100,6 +108,37 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "seq2_return_recovery_v3": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": [
+            "teacher_aux_return_recovery_v1",
+            "teacher_aux_return_recovery_balanced_v2",
+            "teacher_aux_return_recovery_balanced_v3",
+            "teacher_aux_return_recovery_stable_v2",
+        ],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
+    "budget_layer_ablation_v1": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["teacher_aux_return_recovery_balanced_v2"],
+        "budget_semantics": ["legacy_total_candidate", "action_budget_split_v1"],
+        "budget_calibration": ["none", "cash_exit_guard_v1"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -140,6 +179,34 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "seq2_return_recovery_v3": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "teacher_aux_return_recovery_balanced_v2",
+        "budget_semantics": "legacy_total_candidate",
+        "budget_calibration": "none",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
+    "budget_layer_ablation_v1": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "teacher_aux_return_recovery_balanced_v2",
+        "budget_semantics": "legacy_total_candidate",
+        "budget_calibration": "none",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -147,6 +214,8 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "focused_seq_v1": "promotion_balanced_v2",
     "seq2_return_recovery_v1": "return_recovery_v2",
     "seq2_return_recovery_v2": "return_recovery_v2",
+    "seq2_return_recovery_v3": "return_recovery_v2",
+    "budget_layer_ablation_v1": "return_recovery_v2",
 }
 
 
@@ -181,6 +250,8 @@ def _score_protocol_summary(
     promotion_gate = dict(protocol_summary.get("promotion_gate", {}) or {})
     gate_checks = dict(promotion_gate.get("checks", {}) or {})
     training_evidence = dict(protocol_summary.get("training_evidence", {}) or {})
+    behavior_audit = dict(protocol_summary.get("latest_behavior_audit", {}) or {})
+    semantic_conflicts = dict(behavior_audit.get("semantic_conflicts", {}) or {})
     shadow = dict(protocol_summary.get("shadow", {}) or {})
     shadow_continuity = dict(shadow.get("continuity_metrics", {}) or {})
 
@@ -197,6 +268,14 @@ def _score_protocol_summary(
     reversal = float(continuity.get("immediate_reversal_rate_3d", 0.0) or 0.0)
     shadow_reversal = float(shadow_continuity.get("immediate_reversal_rate_3d", 0.0) or 0.0)
     training_evidence_ok = str(training_evidence.get("status", "") or "") == "sufficient"
+    semantic_conflict_rate = float(semantic_conflicts.get("semantic_conflict_rate", 0.0) or 0.0)
+    order_translation_conflict_rate = float(
+        semantic_conflicts.get(
+            "order_translation_conflict_rate",
+            semantic_conflicts.get("weight_change_conflict_rate", semantic_conflict_rate),
+        )
+        or 0.0
+    )
 
     threshold_gap_penalty = (
         max(0.0, PROMOTION_THRESHOLDS["open_win_rate_5d"] - open_win) * 1.00
@@ -246,6 +325,8 @@ def _score_protocol_summary(
             "cash_floor_penalty": -cash_floor_penalty * 2.00,
             "drawdown_excess_penalty": -drawdown_excess_penalty * 5.20,
             "trend_floor_penalty": -trend_floor_penalty * 0.90,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.60,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.55,
         }
         stability_breakdown = {
             "gate_pass_ratio": gate_pass_ratio * 0.78,
@@ -264,6 +345,8 @@ def _score_protocol_summary(
             "cash_floor_penalty": -cash_floor_penalty * 2.25,
             "drawdown_excess_penalty": -drawdown_excess_penalty * 4.80,
             "trend_floor_penalty": -trend_floor_penalty * 0.65,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 2.10,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.70,
         }
     else:
         performance_breakdown = {
@@ -279,6 +362,8 @@ def _score_protocol_summary(
             "gate_pass_ratio": gate_pass_ratio * 0.40,
             "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.20,
             "exposure_penalty": -_exposure_penalty(avg_gross_exposure),
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.45,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.45,
         }
         stability_breakdown = {
             "gate_pass_ratio": gate_pass_ratio * 0.65,
@@ -292,6 +377,8 @@ def _score_protocol_summary(
             "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.20,
             "threshold_gap_penalty": -threshold_gap_penalty,
             "training_evidence_bonus": 0.35 if training_evidence_ok else -0.35,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.95,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.60,
         }
     performance_score = round(sum(performance_breakdown.values()), 6)
     stability_score = round(sum(stability_breakdown.values()), 6)
@@ -322,6 +409,8 @@ def _score_protocol_summary(
             "trend_capture_rate_10d": trend_capture,
             "immediate_reversal_rate_3d": reversal,
             "shadow_reversal_rate_3d": shadow_reversal,
+            "semantic_conflict_rate": semantic_conflict_rate,
+            "order_translation_conflict_rate": order_translation_conflict_rate,
             "training_evidence_status": str(training_evidence.get("status", "") or ""),
         },
     }
@@ -483,6 +572,9 @@ def _historical_leaderboard(
                 "label_preset": str(payload.get("label_preset", "")),
                 "decoder_profile": str(payload.get("decoder_profile", "")),
                 "loss_profile": str(payload.get("loss_profile", "")),
+                "execution_semantics": str(payload.get("execution_semantics", "")),
+                "budget_semantics": str(payload.get("budget_semantics", "")),
+                "budget_calibration": str(payload.get("budget_calibration", "")),
                 "promotion_status": str(dict(payload.get("promotion_gate", {}) or {}).get("status", "")),
                 "protocol_summary_json": str(summary_path.resolve()),
                 "performance_score": score_payload["performance_score"],
@@ -531,6 +623,12 @@ def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any],
         str(args.random_seed),
         "--skip-multiplier",
         str(args.skip_multiplier),
+        "--execution-semantics",
+        str(args.execution_semantics),
+        "--budget-semantics",
+        str(trial_config.get("budget_semantics", args.budget_semantics)),
+        "--budget-calibration",
+        str(trial_config.get("budget_calibration", args.budget_calibration)),
         "--label-preset",
         str(trial_config["label_preset"]),
         "--trainer-backend",
@@ -699,6 +797,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
     parser.add_argument("--random-seed", type=int, default=7)
     parser.add_argument("--skip-multiplier", type=float, default=2.0)
+    parser.add_argument(
+        "--execution-semantics",
+        default=DEFAULT_EXECUTION_SEMANTICS,
+        choices=EXECUTION_SEMANTICS_CHOICES,
+    )
+    parser.add_argument(
+        "--budget-semantics",
+        default=DEFAULT_BUDGET_SEMANTICS,
+        choices=BUDGET_SEMANTICS_CHOICES,
+    )
+    parser.add_argument(
+        "--budget-calibration",
+        default=DEFAULT_BUDGET_CALIBRATION,
+        choices=BUDGET_CALIBRATION_CHOICES,
+    )
     parser.add_argument("--trainer-backend", default=TRAINER_BACKEND_FORMAL_SEQ_V3, choices=TRAINER_BACKENDS)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--epochs", type=int, default=40)
@@ -763,6 +876,9 @@ def main(argv: list[str] | None = None) -> int:
         "confirmatory_max_candidates": int(args.confirmatory_max_candidates),
         "confirmatory_epochs": int(args.confirmatory_epochs),
         "confirmatory_min_epochs": int(args.confirmatory_min_epochs),
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
@@ -898,6 +1014,8 @@ def main(argv: list[str] | None = None) -> int:
                 "phase": row["phase"],
                 "role": row["role"],
                 "source_trial_tag": row["source_trial_tag"],
+                "budget_semantics": str(dict(row.get("trial_config", {}) or {}).get("budget_semantics", args.budget_semantics)),
+                "budget_calibration": str(dict(row.get("trial_config", {}) or {}).get("budget_calibration", args.budget_calibration)),
                 "performance_score": row["performance_score"],
                 "stability_score": row["stability_score"],
                 "composite_score": row["composite_score"],
@@ -950,6 +1068,9 @@ def main(argv: list[str] | None = None) -> int:
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
         "trainer_backend": args.trainer_backend,
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "study_plan_json": str((study_root / "study_plan.json").resolve()),
         "trial_ranking_csv": str((study_root / "trial_ranking.csv").resolve()),
         "trial_count": len(selected_trials),

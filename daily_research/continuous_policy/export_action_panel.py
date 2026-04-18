@@ -13,7 +13,15 @@ if __package__ in {None, ""}:
 from daily_research.continuous_policy.model import load_artifact, predict_policy
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.continuous_policy.pipeline_utils import build_reason_summary, translate_target_weights_to_share_actions
-from daily_research.continuous_policy.portfolio_simulator import PortfolioState
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CHOICES,
+    BUDGET_SEMANTICS_CHOICES,
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    EXECUTION_SEMANTICS_CHOICES,
+    PortfolioState,
+)
 from daily_research.continuous_policy.runtime import (
     EXPORTS_ROOT,
     now_iso,
@@ -48,6 +56,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
+    parser.add_argument(
+        "--execution-semantics",
+        default=DEFAULT_EXECUTION_SEMANTICS,
+        choices=EXECUTION_SEMANTICS_CHOICES,
+        help="Use semantic_preserving_v1 to keep lifecycle intent separate from weight-change orders.",
+    )
+    parser.add_argument(
+        "--budget-semantics",
+        default=DEFAULT_BUDGET_SEMANTICS,
+        choices=BUDGET_SEMANTICS_CHOICES,
+        help="How candidate budget is applied during export.",
+    )
+    parser.add_argument(
+        "--budget-calibration",
+        default=DEFAULT_BUDGET_CALIBRATION,
+        choices=BUDGET_CALIBRATION_CHOICES,
+        help="Optional portfolio-level gross/candidate/turnover calibration.",
+    )
     parser.add_argument("--force-bootstrap-from-account", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--tag", default="")
@@ -131,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
             policy_frame=policy_frame,
             global_targets=global_targets,
             source_label="continuous_policy",
+            execution_semantics=args.execution_semantics,
+            budget_semantics=args.budget_semantics,
+            budget_calibration=args.budget_calibration,
         )
         if idx + 1 < len(process_dates):
             next_dt = process_dates[idx + 1]
@@ -211,6 +240,9 @@ def main(argv: list[str] | None = None) -> int:
             or "balanced_v2"
         ),
         "global_targets": final_global_targets,
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "portfolio_runtime_snapshot": runtime_snapshot,
         "current_account_path": account_snapshot.get("path", ""),
         "action_panel_csv": str(action_panel_path.resolve()),
@@ -235,6 +267,9 @@ def main(argv: list[str] | None = None) -> int:
             or artifact.train_summary.get("teacher_summary", {}).get("label_preset")
             or "balanced_v2"
         ),
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "pool_name": prepared.pool_name,
         "benchmark": prepared.benchmark,
         "export_dir": str(export_root.resolve()),

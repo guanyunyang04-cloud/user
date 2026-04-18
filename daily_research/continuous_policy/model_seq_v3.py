@@ -151,6 +151,35 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "daily_total": 0.48,
         },
     },
+    "teacher_aux_return_recovery_balanced_v3": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.54,
+            "entry_quality": 0.83,
+            "hold_quality": 1.07,
+            "add_quality": 0.84,
+            "reduce_quality": 1.09,
+            "exit_urgency": 1.15,
+            "reentry_readiness": 0.47,
+            "holding_days_ratio": 1.39,
+            "reduce_fraction": 1.44,
+            "exit_hazard": 1.50,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.16,
+            "candidate_budget": 0.53,
+            "turnover_budget": 0.98,
+            "max_position_weight_target": 0.51,
+            "hold_bias_target": 1.04,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.52,
+            "action_soft": 0.48,
+            "action_total": 0.62,
+            "duration_total": 0.12,
+            "scalar_total": 1.30,
+            "daily_total": 0.44,
+        },
+    },
     "teacher_aux_return_recovery_stable_v2": {
         "sample_scalar_loss_weights": {
             "target_delta_hint": 1.48,

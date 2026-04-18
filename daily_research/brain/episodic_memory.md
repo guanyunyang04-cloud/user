@@ -15217,3 +15217,279 @@ position,000001.SZ,1200,12.38,
     - 执行侧前端当前最危险的一处误导性交互已经被机制级消除，而不是只靠使用习惯规避
   - 假设：
     - 若后续继续新增会改 `active_execution_strategy` 的任务，应复用同样的安全分层和显式危险提示
+
+## 2026-04-17 self-opt return_recovery_r3 预置
+- 触发：
+  - 接管后复核发现：项目当前最新主线已经推进到 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02`
+  - 当前真正剩余失败项已收口到：
+    - `exit_timeliness_rate_5d = 0.5000`，仅略低于 gate `0.52`
+    - `cash_timing_quality_1d = -0.1270`
+    - `max_drawdown = -0.0804`
+    - `annual_return_vs_active / sharpe_vs_active`
+  - 同时又不能回到大范围搜索或高强度手工 patch
+- 动作前自检：
+  - 事实：
+    - `teacher_aux_return_recovery_balanced_v2` 是当前 confirmatory-stable challenger
+    - `teacher_aux_return_recovery_stable_v2` 在 screening 上更偏稳定，但没有被证明更适合 confirmatory 接管
+    - 当前 search profile `seq2_return_recovery_v2` 还没有一个明确位于 `balanced_v2 -> stable_v2` 之间的插值候选
+  - 推断：
+    - 最高 ROI 的下一步不是扩大搜索维度，而是只新增一个更窄的 loss-profile 插值候选
+    - 这样既能保持严格对照，也能把下一轮结论聚焦到“是否存在更好的 balanced/stable 折中”
+  - 假设：
+    - 通过略微提高 action hard 比重、略收紧 `gross_exposure / turnover` 预算，并保留 `budget_v3 + seq2` 骨架，有机会先把 `exit_timeliness_rate_5d / max_drawdown` 往 gate 推近，而不必立即牺牲全部收益质量
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中新增：
+    - `teacher_aux_return_recovery_balanced_v3`
+  - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 中新增：
+    - `seq2_return_recovery_v3`
+  - 固定：
+    - 不扩 `universe`
+    - 不改 `decoder_profile = budget_v3`
+    - 不改 `sequence_layers = 2`
+    - 只继续搜索 `loss_profile`
+  - 同时把：
+    - dry-run 命令
+    - 正式 study 命令
+    - 治理边界
+    写回 brain 文档，避免后续接管把“实验预置”误读成“实验已完成”
+- 验证：
+  - 计划在补丁后先跑：
+    - `compileall`
+    - `project_consistency_check.py`
+    - `doc_guard.py check`
+    - `run_self_optimizing_study --search-profile seq2_return_recovery_v3 --dry-run`
+- 动作后复盘：
+  - 事实：
+    - 这次只完成了下一轮 focused self-opt 的代码预置与命令预置
+    - 当前 strongest temporal 锚点与 confirmatory champion 都没有被改写
+  - 推断：
+    - 后续如果 `balanced_v3` 仍不能同时改善 `exit / cash / drawdown`，就应优先承认这条 loss-profile 插值线收益有限，而不是继续无边界细磨
+  - 假设：
+    - 若 dry-run 与守卫都通过，这条预置就足够支撑下一轮最小充分实验，不需要再先做额外脚手架改造
+
+## 2026-04-17 continuous_policy 绑定设计合同与语义审计闭环
+- 触发：
+  - 用户明确收敛北极星：要构建的是“以日为单位进行连续决策的交易执行模型”，不依赖固定调仓频率、固定持有周期或人工执行桥接规则，而要让模型像成熟交易者一样，直接从市场全局状态、个股演化路径和持仓上下文中学习动态执行。
+  - 用户随后要求不要只停留在建议层，而是按最优计划把当前能完成的部分一次性完整交付。
+- 动作前自检：
+  - 事实：
+    - `daily_research/brain/identity_layer.md` 已把 continuous_policy 的目标写成“日频连续决策执行模型”，当前北极星本身没有偏移。
+    - `daily_research/continuous_policy/label_builder.py` 仍在大量生成 `teacher_signal / teacher_urgency / teacher_global_targets`，说明 teacher 仍不只是 warm-start prior。
+    - `daily_research/continuous_policy/model_seq_v3.py` 仍含有较强的组合预算与行为偏置脚手架，如 `gross_exposure_target / turnover_budget / hold_bias_target / exit_patience_target`。
+    - 旧版 `behavior_audit` 更偏 teacher-vs-model gap，对“model_action 是否在 execution layer 被重写”缺少直接量化。
+    - `cp_v3_seq_self_opt_return_recovery_r2__confirm_02` 的最新 confirmatory 结果仍为 `shadow_only`，并且剩余失败项已收口到 `cash_timing_quality_1d / exit_timeliness_rate_5d / max_drawdown / annual_return_vs_active / sharpe_vs_active`。
+  - 推断：
+    - 现在的关键问题不是继续堆更深模型或更大搜索，而是先把“动作语义、预算语义、执行翻译”三层彻底分清，否则收益提升会持续被结构性冲突吞掉。
+    - 如果不把这条判断沉淀成绑定合同与可复验审计，后续接管很容易又回到“继续磨 loss profile”而忽略真正的信用分配错位。
+  - 假设：
+    - 只要能把语义冲突量化出来，并把它正式纳入 protocol/ledger/brain 三层链路，后续研究就能从“模糊直觉”切到“有实证约束的结构改造”。
+- 实施：
+  - 新建 `daily_research/brain/continuous_policy_design_contract.md`，把以下内容正式固化成绑定设计合同：
+    - teacher 只是 warm-start / auxiliary prior，不是最终老师
+    - `cash timing` 不能主要依赖 teacher imitation
+    - 个股生命周期语义与组合预算语义必须分层
+    - execution layer 只能翻译，不应改写策略语义
+    - 评估必须使用 execution-aligned 可比口径
+  - 升级 `daily_research/continuous_policy/analyze_behavior_gap.py`：
+    - 新增 `semantic_conflicts` 审计块
+    - 量化 `semantic_conflict_rate / micro_rebalance_conflict_rate / budget_clipped_conflict_rate / high_cash_up_market_share / high_cash_down_market_share`
+    - 输出 top action-pair / conflict-pair 与针对性 `recommended_focus`
+  - 升级 `daily_research/continuous_policy/run_continuous_policy_protocol.py`：
+    - 在生成 conclusion ledger 之前，先把 `latest_behavior_audit` 写入 protocol summary
+  - 升级 `daily_research/continuous_policy/conclusion_ledger.py`：
+    - 如果 protocol 内嵌的旧版 behavior audit 缺少 `semantic_conflicts`，就优先回落到“同一 evaluation 且更新、且带语义冲突字段”的 latest behavior audit
+    - 让 stage-local 结论和 `next_actions` 能显式吸收 `semantic_conflict_rate`
+  - 写回：
+    - `daily_research/brain/state_center.md`
+    - `daily_research/brain/knowledge_center.md`
+    - `daily_research/brain/operations_center.md`
+- 验证：
+  - 运行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__evaluate/evaluation_summary.json --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_audit`
+  - 实际得到的关键事实：
+    - `semantic_conflict_rate = 0.1636`
+    - `micro_rebalance_conflict_rate = 0.6158`
+    - `budget_clipped_day_share = 0.1515`
+    - `budget_clipped_conflict_rate = 0.0781`
+    - `unclipped_conflict_rate = 0.1882`
+    - `avg_budget_drop_count = 1192.0`
+    - `high_cash_up_market_share = 0.1364`
+    - `high_cash_down_market_share = 0.1212`
+    - top conflict pairs 包括：
+      - `add -> hold = 40`
+      - `reduce -> exit = 37`
+      - `hold -> reduce = 33`，且 `avg_forward_excess_5d ≈ 0.0308`
+      - `add -> reduce = 16`，且 `avg_forward_excess_5d ≈ 0.0273`
+  - 审计直接给出的诊断：
+    - `execution layer still rewrites model semantics non-trivially`
+    - `micro rebalancing still contaminates stock lifecycle semantics`
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.conclusion_ledger --protocol-summary daily_research/output/continuous_policy/protocols/cp_v3_seq_self_opt_return_recovery_r2__confirm_02/protocol_summary.json --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_ledger_r2`
+  - 补丁后 ledger 已能稳定消费较新的同源 behavior audit，而不是被 protocol 里旧版 audit 静默覆盖。
+  - 守卫验证：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m compileall -q daily_research`
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/tools/project_consistency_check.py`
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/tools/doc_guard.py check`
+    均通过。
+- 动作后复盘：
+  - 事实：
+    - 这次不只是提出了“要拆语义层”的建议，而是已经把设计合同、审计工具、protocol 链路、ledger 回落逻辑和 brain 文档全部补齐。
+    - `confirm_02` 现在已有明确实证，证明问题不只是 `cash timing` 或 `exit` 指标低，而是 `execution_action` 仍在系统性改写 `model_action`。
+  - 推断：
+    - 当前 continuous_policy 的第一结构性矛盾，已经可以从“直觉判断”升级为“经审计证实的语义漂移问题”。
+    - 在这个问题被压下去之前，继续期待通过更强 loss-profile 微调获得大幅收益跃升，不符合现有证据。
+  - 假设：
+    - 如果后续把 execution layer 真正退回翻译器角色，并把 budget head 与 stock action head 分层，收益与结构之间的假矛盾有望显著缓解；但这一步还需要后续正式实验继续验证。
+
+## 2026-04-18 continuous_policy semantic_guard 执行层净化
+- 触发：
+  - 用户要求基于最优计划直接完整执行，不停留在建议层。
+  - 上一轮已确认当前第一结构性矛盾是 `model_action -> execution_action` 被执行层改写，且 `confirm_02` 旧审计的 `semantic_conflict_rate = 0.1636`。
+- 动作前自检：
+  - 事实：
+    - `PortfolioState.step()` 是真实改写路径：模型先输出 `action_label`，然后组合预算、候选预算和 turnover 预算通过目标权重变化推导出 `execution_action`。
+    - 旧 action panel 没有稳定区分“策略语义”和“真实权重变化”，导致 `hold -> reduce` 这类微幅再平衡被记成生命周期减仓。
+    - 只把 `execution_action` 改成等于 `model_action` 会制造假好看，因为真实订单层仍可能在反向变化。
+  - 推断：
+    - 必须做“双账本”：`execution_action` 记录模型生命周期语义，`weight_change_action` 记录真实权重变化。
+    - 必须把部分语义保护前移到权重翻译层，直接阻止低风险、微幅、反向的无意义变化，而不是只在事后改标签。
+  - 假设：
+    - 如果当前主要污染来自微幅再平衡，那么语义保护应能显著降低 `semantic_conflict_rate` 与 `order_translation_conflict_rate`，同时不应破坏收益。
+- 实施：
+  - 修改 `daily_research/continuous_policy/portfolio_simulator.py`：
+    - 新增 `execution_semantics`
+    - 新默认 `semantic_preserving_v1`
+    - 保留旧口径 `legacy_weight_derived`
+    - 新增 `weight_change_action`
+    - 新增 `semantic_delta_guarded`
+    - 新增 `semantic_translation_reason`
+    - 对 `hold -> small reduce`、`add -> small reduce`、`reduce -> small add` 等低风险微幅反向变化做权重层保护
+  - 修改 `daily_research/continuous_policy/pipeline_utils.py`：
+    - `build_training_matrices` 与 `run_policy_rollout` 接入 `execution_semantics`
+    - rollout metrics 新增 `weight_change_action_counts`
+  - 修改 CLI 链路：
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+    - `run_continuous_policy_protocol.py`
+    - `run_self_optimizing_study.py`
+    均接入 `--execution-semantics`
+  - 修改 `analyze_behavior_gap.py`：
+    - 保留 `semantic_conflict_rate`
+    - 新增 `order_translation_conflict_rate`
+    - 新增 `budget_clipped_order_translation_conflict_rate`
+    - 新增 `top_order_translation_conflict_pairs`
+  - 修改 `conclusion_ledger.py`：
+    - 将“执行层语义改写”和“权重翻译偏离策略意图”拆成两个阶段性结论
+  - 写回：
+    - `continuous_policy_design_contract.md`
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+- 验证：
+  - 先运行 `compileall`，发现并修复一个旧隐患：
+    - `budget_dropped = ~desired_strength.index.isin(keep)` 会产生 numpy array
+    - 已改为显式 `pd.Series(..., index=desired_strength.index)`
+  - 第一次只做语义双账本、未做权重层保护时，同窗结果为：
+    - `annual_return = -0.0420`
+    - `sharpe = -0.2113`
+    - `semantic_conflict_rate = 0.0000`
+    - `order_translation_conflict_rate = 0.7896`
+    - 结论：只净化标签不够，订单层仍严重偏离模型意图
+  - 加入权重层 `semantic_delta_guard` 后，对 `confirm_02` 同窗重评估得到：
+    - `run_tag = cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_eval`
+    - `annual_return = 0.1672`
+    - `sharpe = 1.0340`
+    - `max_drawdown = -0.0918`
+    - `avg_turnover = 0.0873`
+    - `reduce_success_rate_5d = 0.5833`
+    - `exit_timeliness_rate_5d = 0.4444`
+    - `cash_timing_quality_1d = -0.1934`
+    - `immediate_reversal_rate_3d = 0.1647`
+  - 新审计 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_audit` 得到：
+    - `semantic_conflict_rate = 0.0000`
+    - `order_translation_conflict_rate = 0.2328`
+    - `small_delta_order_translation_conflict_rate = 0.1642`
+    - `budget_clipped_order_translation_conflict_rate = 0.2336`
+    - top 剩余偏离为：
+      - `add -> hold = 87`
+      - `hold -> add = 17`
+      - `reduce -> exit = 16`
+      - `hold -> reduce = 11`
+      - `add -> reduce = 8`
+- 动作后复盘：
+  - 事实：
+    - `semantic_guard` 已把旧的执行语义改写问题压到 `0`
+    - 权重层保护把未保护状态下的 `order_translation_conflict_rate = 0.7896` 压到 `0.2328`
+    - 相比旧 `confirm_02`，同窗 `annual_return / sharpe / reduce_success / avg_turnover / immediate_reversal` 均改善
+    - 但 `exit_timeliness / cash_timing / max_drawdown` 仍未达 promotion 要求
+  - 推断：
+    - 这轮证明“执行层语义净化”是必要且有效的结构地基
+    - 它同时证明下一瓶颈已经转移到预算/现金/退出校准，不应继续把所有问题归咎于语义改写
+  - 假设：
+    - 下一轮如果对 budget/cash 层做结果驱动校准，有机会在保住 `semantic_conflict_rate = 0` 的前提下，继续修复 `cash_timing_quality_1d / exit_timeliness_rate_5d / max_drawdown`
+    - 但在这些指标过线前，`semantic_guard` 只能作为结构性进展，不能作为 promotion 结论
+
+## 2026-04-18 continuous_policy budget split ablation
+- 触发：
+  - 用户要求基于“先净化 execution，再拆 action/budget，再做四格对照”的方案直接完整执行。
+- 动作前自检：
+  - 事实：
+    - `semantic_guard` 已经把 `semantic_conflict_rate` 压到 `0`，但 `order_translation_conflict_rate / cash_timing_quality_1d / exit_timeliness_rate_5d` 仍未解决。
+    - 旧执行器的 candidate budget 会裁剪全体目标强度，可能把已有持仓生命周期动作和新开仓预算混在一起。
+  - 推断：
+    - 下一步最有效的不是继续调 loss，而是把预算层做成显式可审计口径，并跑同窗 ablation。
+  - 假设：
+    - 如果预算层吞动作语义是主要矛盾，`action_budget_split_v1` 应该在不牺牲收益的前提下降低订单漂移；如果旧模型未按新语义训练，则可能先出现结构干净但收益变差。
+- 实施：
+  - 在 `portfolio_simulator.py` 新增：
+    - `budget_semantics = legacy_total_candidate / action_budget_split_v1`
+    - `budget_calibration = none / cash_exit_guard_v1`
+    - `budget_risk_off_score / budget_deploy_score / budget_entry_candidate_count / budget_entry_keep_count / budget_held_protected_count / budget_split_bound_guard_count`
+  - 在 `pipeline_utils.py`、`train_policy.py`、`evaluate_policy.py`、`export_action_panel.py`、`run_continuous_policy_protocol.py`、`run_self_optimizing_study.py` 串起 `--budget-semantics` 与 `--budget-calibration`。
+  - 在 `run_self_optimizing_study.py` 新增 `budget_layer_ablation_v1`，允许训练级搜索 `legacy_total_candidate / action_budget_split_v1 / cash_exit_guard_v1`。
+  - 在 `analyze_behavior_gap.py` 增加预算口径计数和预算层诊断字段。
+- 同窗验证：
+  - `semantic_guard + legacy_total_candidate`：
+    - `annual_return=0.1672`, `sharpe=1.0340`, `max_drawdown=-0.0918`
+    - `reduce_success_rate_5d=0.5833`, `exit_timeliness_rate_5d=0.4444`, `cash_timing_quality_1d=-0.1934`
+    - `semantic_conflict_rate=0.0000`, `order_translation_conflict_rate=0.2328`
+  - `semantic_guard + action_budget_split_v1`：
+    - `annual_return=0.0384`, `sharpe=0.3074`, `max_drawdown=-0.0923`
+    - `reduce_success_rate_5d=0.5313`, `exit_timeliness_rate_5d=0.3333`, `cash_timing_quality_1d=-0.1844`
+    - `immediate_reversal_rate_3d` 从 `0.1647` 降到 `0.1009`
+  - `semantic_guard + action_budget_split_v1 + cash_exit_guard_v1`：
+    - `annual_return=-0.0023`, `sharpe=0.0642`, `max_drawdown=-0.0977`
+    - `reduce_success_rate_5d=0.5200`, `exit_timeliness_rate_5d=0.4706`, `cash_timing_quality_1d=-0.2025`
+    - `risk_off_cash_hit_rate` 升到 `0.5294`
+- 动作后复盘：
+  - 事实：
+    - 预算分层是已落地能力，但旧模型同窗 rollout 直接切换会压低收益。
+    - `cash_exit_guard_v1` 改善局部风险命中和 exit/reversal，但没有解决现金择时相关性。
+  - 推断：
+    - 结构和收益的矛盾来自训练信用分配不匹配：旧模型是在旧预算语义下学到的，推理期强行换预算语义会暴露 action head 的错误，而不是自动提升收益。
+  - 决策：
+    - 当前默认预算口径保留 `legacy_total_candidate`。
+    - `action_budget_split_v1` 进入训练级 ablation，而不是直接 promotion。
+    - 下一轮若要真正验证 P2，必须训练 `budget_layer_ablation_v1`，不能只继续手工调现金 guard。
+
+## 2026-04-18 continuous_policy budget_layer_ablation_r2 前台训练级交付
+- 触发：
+  - 用户要求继续下一步并完整交付，随后明确要求关闭后台训练进程并换到前台执行。
+- 动作前自检：
+  - 事实：后台 `cp_v3_budget_layer_ablation_r1` 已开始但未完成，关闭后会污染同 tag 的 `trial_01`。
+  - 推断：若继续沿用 r1，会把人为中断误写成研究失败；必须用新 tag 干净重跑。
+  - 假设：前台 10h 窗口足够完成 4 个 screening + 2 个 confirmatory。
+- 执行：
+  - 按用户要求关闭了匹配 `cp_v3_budget_layer_ablation_r1` 命令行的训练进程，未触碰其它 Python 进程。
+  - r1 前台补跑完成但 `trial_01=failed`，因此仅保留为中断痕迹。
+  - 恢复 latest evaluation/audit 到 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_legacy_budget_eval/audit`。
+  - 以前台执行 `cp_v3_budget_layer_ablation_r2`，完成全部正式对照。
+- 结果事实：
+  - `r2` screening performance champion：`trial_02 = action_budget_split_v1 + cash_exit_guard_v1`，`annual_return=1.2597`，`sharpe=2.8915`，但 `training_evidence_status=insufficient`。
+  - `r2` confirmatory champion：`confirm_01`，同配置 64 epoch 后 `annual_return=0.3124`，`sharpe=1.7115`，`max_drawdown=-0.0599`，但 `exit_timeliness_rate_5d=0.3333`，`cash_timing_quality_1d=-0.1670`，仍 `shadow_only`。
+  - `r2` confirmatory baseline：`confirm_02 = legacy_total_candidate + none`，`training_evidence_status=sufficient`，但 `annual_return=-0.0402`，`sharpe=-0.2210`。
+- 动作后复盘：
+  - 事实：P2 已从同窗切换推进到训练级 ablation，证明 split+cash 有潜力但尚不稳定。
+  - 推断：当前瓶颈已不是“能否拆预算语义”，而是“预算/value/head 的结果信用分配是否学稳”。
+  - 决策：不 promotion r2；稳定默认继续保留 `semantic_preserving_v1 + legacy_total_candidate + none`；下一阶段应优先接入 alpha prior 或结果驱动 budget/value objective。

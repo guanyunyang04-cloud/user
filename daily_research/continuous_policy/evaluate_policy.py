@@ -15,6 +15,14 @@ from daily_research.continuous_policy.pipeline_utils import (
     load_target_weight_panel,
     run_policy_rollout,
 )
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CHOICES,
+    BUDGET_SEMANTICS_CHOICES,
+    DEFAULT_BUDGET_CALIBRATION,
+    DEFAULT_BUDGET_SEMANTICS,
+    DEFAULT_EXECUTION_SEMANTICS,
+    EXECUTION_SEMANTICS_CHOICES,
+)
 from daily_research.continuous_policy.runtime import (
     EVALUATIONS_ROOT,
     now_iso,
@@ -67,6 +75,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transaction-cost-bps", type=float, default=3.0)
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
+    parser.add_argument(
+        "--execution-semantics",
+        default=DEFAULT_EXECUTION_SEMANTICS,
+        choices=EXECUTION_SEMANTICS_CHOICES,
+        help="Use semantic_preserving_v1 to keep lifecycle intent separate from weight-change orders.",
+    )
+    parser.add_argument(
+        "--budget-semantics",
+        default=DEFAULT_BUDGET_SEMANTICS,
+        choices=BUDGET_SEMANTICS_CHOICES,
+        help="How candidate budget is applied during rollout.",
+    )
+    parser.add_argument(
+        "--budget-calibration",
+        default=DEFAULT_BUDGET_CALIBRATION,
+        choices=BUDGET_CALIBRATION_CHOICES,
+        help="Optional portfolio-level gross/candidate/turnover calibration.",
+    )
     parser.add_argument(
         "--label-preset",
         default="",
@@ -121,6 +147,9 @@ def main(argv: list[str] | None = None) -> int:
         slippage_bps=args.slippage_bps,
         sell_tax_bps=args.sell_tax_bps,
         source_label="continuous_policy",
+        execution_semantics=args.execution_semantics,
+        budget_semantics=args.budget_semantics,
+        budget_calibration=args.budget_calibration,
     )
     teacher_rollout = run_policy_rollout(
         prepared=prepared,
@@ -133,6 +162,9 @@ def main(argv: list[str] | None = None) -> int:
         sell_tax_bps=args.sell_tax_bps,
         source_label="teacher_oracle",
         label_preset=label_preset,
+        execution_semantics=args.execution_semantics,
+        budget_semantics=args.budget_semantics,
+        budget_calibration=args.budget_calibration,
     )
 
     manifest = load_strategy_manifest()
@@ -211,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         "start_date": args.start_date,
         "end_date": args.end_date or prepared.end_date,
         "label_preset": label_preset,
+        "execution_semantics": str(args.execution_semantics),
+        "budget_semantics": str(args.budget_semantics),
+        "budget_calibration": str(args.budget_calibration),
         "prepared_summary": prepared.to_summary(),
         "continuous_policy_metrics": model_rollout["metrics"],
         "continuity_metrics": model_rollout["continuity_metrics"],

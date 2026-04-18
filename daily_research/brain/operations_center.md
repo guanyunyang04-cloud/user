@@ -598,3 +598,105 @@
   - `global-strategy-leaderboard` 必须默认传 `--no-activate-winner`
   - 只有用户显式勾选“同步改写当前默认执行（危险）”时，才允许传 `--activate-winner`
   - 若只是查看/刷新排行榜，不应再触碰 `active_execution_strategy.json`
+
+## 2026-04-17 self-opt return_recovery_r3 预置
+- 当前下一轮 focused self-opt 的 dry-run 命令固化为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v3 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_seq_self_opt_return_recovery_r3 --dry-run`
+- 当前正式执行命令预置为：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile seq2_return_recovery_v3 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_seq_self_opt_return_recovery_r3`
+- `seq2_return_recovery_v3` 的固定纪律为：
+  - 继续固定 `learned_all_a + holdcash_v3 + budget_v3 + sequence_layers = 2`
+  - 继续固定 `learning_rate = 0.0012`
+  - 继续固定 `hidden_dim = 224`
+  - 继续固定 `daily_hidden_dim = 128`
+  - 继续固定 `dropout = 0.12`
+  - 继续固定 `daily_dropout = 0.08`
+  - 继续固定 `batch_size = 512`
+  - 只搜索 `loss_profile`
+- 本轮预置的 `loss_profile` 集合固定为：
+  - `teacher_aux_return_recovery_v1`
+  - `teacher_aux_return_recovery_balanced_v2`
+  - `teacher_aux_return_recovery_balanced_v3`
+  - `teacher_aux_return_recovery_stable_v2`
+- 这轮预置的治理边界固定为：
+  - 只是下一轮实验入口预置，不代表结果已经发生
+  - 若未完成真实 study 与 confirmatory，不改写当前 `confirm_02` 的 challenger 地位
+  - study 完成后仍必须自动恢复 `latest_*` 与 `runtime/portfolio_state.json` 到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-17 continuous_policy 语义审计与设计合同固化
+- 当前绑定设计合同文档：
+  - `daily_research/brain/continuous_policy_design_contract.md`
+- `behavior_audit` 当前新增固定输出：
+  - `semantic_conflicts.semantic_conflict_rate`
+  - `semantic_conflicts.micro_rebalance_conflict_rate`
+  - `semantic_conflicts.budget_clipped_day_share`
+  - `semantic_conflicts.budget_clipped_conflict_rate`
+  - `semantic_conflicts.high_cash_up_market_share`
+  - `semantic_conflicts.high_cash_down_market_share`
+  - `semantic_conflicts.top_conflict_pairs`
+- 当前 protocol 固定纪律新增为：
+  - 先完成 `behavior_audit`
+  - 再把 `latest_behavior_audit` 写回 `protocol_summary.json`
+  - 再生成 `conclusion_ledger`
+  - 避免 ledger 在没有最新语义审计的情况下做阶段结论
+- 独立重跑最新语义审计的命令口径：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/latest_evaluation_summary.json --tag cp_semantic_audit_latest`
+- 独立刷新最新结论账本的命令口径：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.conclusion_ledger --protocol-summary daily_research/output/continuous_policy/latest_protocol_summary.json --tag cp_conclusion_refresh_latest`
+
+## 2026-04-18 continuous_policy semantic_guard 执行口径
+- 新增固定执行语义：
+  - `semantic_preserving_v1` = 默认新口径
+  - `legacy_weight_derived` = 旧口径回放
+- 所有正式 protocol / evaluate / export / self-opt 调用均应显式记录或继承：
+  - `--execution-semantics semantic_preserving_v1`
+- 当前 action panel 双账本字段：
+  - `model_action`
+  - `execution_action`
+  - `weight_change_action`
+  - `semantic_delta_guarded`
+  - `semantic_translation_reason`
+  - `execution_semantics`
+- 复现实证评估命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__train/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260415 --benchmark 000300.SH --max-universe-size 1200 --label-preset holdcash_v3 --execution-semantics semantic_preserving_v1 --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_eval`
+- 复现实证审计命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_eval/evaluation_summary.json --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_audit`
+- 当前验收口径：
+  - `semantic_conflict_rate` 必须优先接近 0
+  - `order_translation_conflict_rate` 不能被混同为语义改写，但必须作为预算/权重翻译漂移继续压低
+  - 如果 `cash_timing_quality_1d / exit_timeliness_rate_5d / max_drawdown` 继续不过关，不允许 promotion
+
+## 2026-04-18 continuous_policy budget split 实验口径
+- 当前稳定默认：
+  - `--execution-semantics semantic_preserving_v1`
+  - `--budget-semantics legacy_total_candidate`
+  - `--budget-calibration none`
+- 预算分层实验命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__train/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260415 --benchmark 000300.SH --max-universe-size 1200 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration none --label-preset holdcash_v3 --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__budget_split_eval`
+- 预算分层 + 现金保护实验命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__train/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260415 --benchmark 000300.SH --max-universe-size 1200 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_exit_guard_v1 --label-preset holdcash_v3 --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__budget_split_cash_exit_eval`
+- 训练级预算 ablation dry-run：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile budget_layer_ablation_v1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_budget_layer_ablation_r1 --dry-run`
+- 操作约束：
+  - 不要把 `action_budget_split_v1` 静默设为生产默认；当前它只适合显式 ablation。
+  - 如果只在旧模型推理期打开 budget split，必须把收益下降视为结构未重训的证据，而不是直接判定分层思想失败。
+  - 若要评估 budget split 是否真正有效，必须训练级比较，而不是只做 rollout 期切换。
+
+## 2026-04-18 budget_layer_ablation_r2 正式执行记录
+- 前台干净 study 命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile budget_layer_ablation_v1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_budget_layer_ablation_r2`
+- 产物路径：
+  - `daily_research/output/continuous_policy/studies/cp_v3_budget_layer_ablation_r2/study_summary.json`
+  - `daily_research/output/continuous_policy/studies/cp_v3_budget_layer_ablation_r2/trial_ranking.csv`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_budget_layer_ablation_r2__trial_01/protocol_summary.json`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_budget_layer_ablation_r2__trial_02/protocol_summary.json`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_budget_layer_ablation_r2__confirm_01/protocol_summary.json`
+  - `daily_research/output/continuous_policy/protocols/cp_v3_budget_layer_ablation_r2__confirm_02/protocol_summary.json`
+- 执行复盘：
+  - `cp_v3_budget_layer_ablation_r1` 因后台训练被用户显式要求关闭，留下 failed `trial_01`，不得作为干净结论使用。
+  - 已在重跑 r2 前恢复 latest evaluation/audit 到稳定基线，避免 study snapshot 继承中断状态。
+  - r2 完成后 `latest_study_summary.json` 指向 `cp_v3_budget_layer_ablation_r2`；`latest_evaluation_summary.json` 与 `latest_behavior_audit_summary.json` 仍恢复到稳定 `semantic_guard_legacy_budget` 基线。
+- 当前操作约束：
+  - 不要用 r1 的 failed trial 做任何排名或决策。
+  - 不要把 r2 screening 的 `trial_02` 高收益直接 promotion；它的 confirmatory 版本仍未过 `training_evidence / exit / cash / annual_return_vs_active` 等约束。
+  - 下一轮如果继续推进，应显式新建 study tag，优先做 `alpha prior + result/value budget objective`，而不是覆盖 r2 产物。
