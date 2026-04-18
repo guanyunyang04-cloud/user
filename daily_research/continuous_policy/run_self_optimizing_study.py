@@ -15,7 +15,11 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
-from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE
+from daily_research.continuous_policy.model_seq_v3 import (
+    DAILY_HEAD_LAYOUT_CHOICES,
+    DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
+    DEFAULT_LOSS_PROFILE,
+)
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
     DEFAULT_BUDGET_OBJECTIVE,
@@ -159,6 +163,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_cash_timing_r1": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v2"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_exit_guard_v1"],
+        "budget_objective": [DEFAULT_BUDGET_OBJECTIVE, "result_value_v2"],
+        "alpha_prior_source": ["none", "active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -243,6 +264,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_cash_timing_r1": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v2",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_exit_guard_v1",
+        "budget_objective": DEFAULT_BUDGET_OBJECTIVE,
+        "alpha_prior_source": "none",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -253,6 +291,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "seq2_return_recovery_v3": "return_recovery_v2",
     "budget_layer_ablation_v1": "return_recovery_v2",
     "alpha_result_value_budget_r1": "return_recovery_v2",
+    "split_heads_cash_timing_r1": "return_recovery_v2",
 }
 
 
@@ -696,6 +735,8 @@ def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any],
         str(trial_config["sequence_layers"]),
         "--daily-hidden-dim",
         str(trial_config["daily_hidden_dim"]),
+        "--daily-head-layout",
+        str(trial_config.get("daily_head_layout", args.daily_head_layout)),
         "--dropout",
         str(trial_config["dropout"]),
         "--daily-dropout",
@@ -866,6 +907,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--min-epochs", type=int, default=32)
     parser.add_argument("--early-stop-patience", type=int, default=10)
+    parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
     parser.add_argument("--search-profile", default="focused_seq_v1", choices=tuple(sorted(SEARCH_PROFILES)))
     parser.add_argument("--objective-profile", default="")
     parser.add_argument("--trial-count", type=int, default=3)
@@ -929,6 +971,7 @@ def main(argv: list[str] | None = None) -> int:
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
         "budget_objective": str(args.budget_objective),
+        "daily_head_layout": str(args.daily_head_layout),
         "alpha_prior_source": str(args.alpha_prior_source),
         "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
         "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
@@ -1070,6 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
                 "budget_semantics": str(dict(row.get("trial_config", {}) or {}).get("budget_semantics", args.budget_semantics)),
                 "budget_calibration": str(dict(row.get("trial_config", {}) or {}).get("budget_calibration", args.budget_calibration)),
                 "budget_objective": str(dict(row.get("trial_config", {}) or {}).get("budget_objective", args.budget_objective)),
+                "daily_head_layout": str(dict(row.get("trial_config", {}) or {}).get("daily_head_layout", args.daily_head_layout)),
                 "alpha_prior_source": str(dict(row.get("trial_config", {}) or {}).get("alpha_prior_source", args.alpha_prior_source)),
                 "performance_score": row["performance_score"],
                 "stability_score": row["stability_score"],

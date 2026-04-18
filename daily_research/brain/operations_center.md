@@ -720,3 +720,35 @@
 - 已完成反事实：
   - `cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals`
   - 该结果说明 legacy 预算可给 confirm_01 带来略正收益但语义污染极重，split/cash 可清洁语义但收益为负；后续不要把这类收益视为“干净执行模型”成功。
+
+## 2026-04-18 split heads cash timing v2 操作口径
+- 新增 dry-run 验证命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r1 --trial-count 4 --study-tag cp_split_heads_cash_timing_r1_dryrun --dry-run`
+- 已完成 smoke train：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.train_policy --pool-name learned_all_a --start-date 20250701 --end-date 20251231 --benchmark 000300.SH --data-source tq --max-universe-size 80 --random-seed 7 --skip-multiplier 1.5 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_exit_guard_v1 --budget-objective result_value_v2 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v2 --epochs 2 --min-epochs 1 --batch-size 256 --learning-rate 0.0012 --hidden-dim 128 --sequence-layers 2 --daily-hidden-dim 96 --daily-head-layout split_v2 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 2 --resume-mode fresh --tag cp_split_heads_cash_timing_smoke_train_r2`
+- 已完成 smoke eval：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_split_heads_cash_timing_smoke_train_r2/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260331 --benchmark 000300.SH --data-source tq --max-universe-size 80 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_exit_guard_v1 --tag cp_split_heads_cash_timing_smoke_eval_r2`
+- 已完成 smoke audit：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_split_heads_cash_timing_smoke_eval_r2/evaluation_summary.json --tag cp_split_heads_cash_timing_smoke_audit_r2`
+- 已完成 warning 复验：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_split_heads_cash_timing_smoke_train_r2/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260214 --benchmark 000300.SH --data-source tq --max-universe-size 80 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_exit_guard_v1 --tag cp_split_heads_cash_timing_smoke_eval_r3`
+- 下一步正式口径：
+  - 若进入正式 10h 前台 study，应直接使用 `split_heads_cash_timing_r1`；不要把 smoke tag 复用为正式结果。
+  - 正式验收必须同时看 `annual_return / sharpe / max_drawdown / cash_timing_quality_1d / budget_model_cash_timing_quality_1d / avg_order_translation_conflict_rate / immediate_reversal_rate_3d`。
+  - 若正式 study 仍然只得到“语义干净但 cash timing 负、translation drift 高”，则下一轮应优先修 budget credit assignment 与 translation layer，而不是退回 monolithic 或继续叠加规则。
+
+## 2026-04-18 split heads cash timing v2 正式运行记录
+- 已完成正式 10h 前台 study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r1`
+- study 结果位置：
+  - `daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r1/study_summary.json`
+  - `daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r1/trial_ranking.csv`
+- 已完成 champion 行为审计：
+  - `$env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r1__confirm_01__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r1__confirm_01__behavior_audit`
+- 当前运行结论：
+  - screening / confirmatory 最优均为 `active_execution_strategy + result_value_v2 + split_v2`
+  - 已恢复正收益与正 sharpe，但仍未通过 `training_evidence_sufficient` 与 `cash_timing_quality_1d`
+  - 语义冲突已降到低位，但 `order_translation_conflict_rate` 仍不足以 promotion
+- 后续操作约束：
+  - 不得覆盖 `cp_v3_split_heads_cash_timing_r1`
+  - 若继续训练，必须用新 tag，并把重点放在 budget/value credit assignment 与 translation layer 校准

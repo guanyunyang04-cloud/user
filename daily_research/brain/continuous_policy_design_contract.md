@@ -86,3 +86,21 @@
 - 正式实证事实：screening 冠军是 `active_execution_strategy + result_value_v1`，`annual_return=2.8598`、`sharpe=5.0898`，但 `training_evidence_status=insufficient` 且 `cash_timing_quality_1d=-0.2318`。
 - 正式实证事实：confirmatory 中 `active_execution_strategy + result_value_v1` 回落为 `annual_return=-0.0491`、`sharpe=-0.0237`、`cash_timing_quality_1d=-0.3185`，不能 promotion。
 - 复盘结论：alpha prior + result/value budget 已证明有 screening 潜力，但当前 r1 没有证明稳定泛化；下一步不得直接升默认，应继续围绕训练证据充分性、cash timing 信用分配和 confirmatory 稳定性推进。
+
+## 12. 2026-04-18 split heads 与 result/value budget v2 合同
+- 当前可交付事实：`model_seq_v3.py` 已落地 `daily_head_layout = monolithic_v1 / split_v2`；`split_v2` 将 daily controller 拆为 exposure / deployment / lifecycle / signal 四类子头，不再把全部预算与生命周期语义压进单一 5 维头。
+- 当前可交付事实：teacher/global daily target 已从原 5 项扩展为 8 项控制目标与 4 项辅助预算信号，新增 `reduce_bias_target / exit_patience_target / reentry_guard_target` 以及 `budget_risk/deploy/cash_timing/alpha_focus_signal_target`。
+- 当前可交付事实：`budget_objective = result_value_v2` 已接入 pipeline，并显式把 `cash_timing_score / reentry_guard_score / opportunity_concentration / risk_deploy_gap` 写入训练目标与评估审计。
+- 当前可交付事实：新的 study profile `split_heads_cash_timing_r1` 已固化到 `run_self_optimizing_study.py`，用于在 `split_v2` 结构下做 `teacher_imitation / result_value_v2` 与 `alpha prior on/off` 的四格对照。
+- 当前可交付事实：评估指标已新增 `budget_model_risk_timing_quality_1d / budget_model_deploy_timing_quality_1d / budget_model_cash_timing_quality_1d / budget_model_risk_deploy_gap_quality_1d`，允许把生命周期学习与预算学习分开审计。
+- smoke 事实：`cp_split_heads_cash_timing_smoke_train_r2` 已完成训练，artifact 明确记录 `daily_head_layout=split_v2`、`loss_profile=alpha_result_value_budget_split_v2`、`budget_objective=result_value_v2`、`alpha_prior_source=active_execution_strategy`。
+- smoke 事实：`cp_split_heads_cash_timing_smoke_eval_r2` 与 `r3` 已证明 split head 链路可端到端运行，且 `avg_semantic_conflict_rate=0.0`，说明模型级动作/预算拆分没有重新引入旧式语义改写。
+- smoke 事实：尽管语义保持干净，`cash_timing_quality_1d` 仍接近 0 或为负，且 `immediate_reversal_rate_3d / reversal_after_reduce_3d_rate / order_translation_conflict_rate` 仍偏高，说明真正瓶颈已前移到现金时机与执行翻译信用分配，而非“是否做了分头”本身。
+- 推断：`split_v2 + result_value_v2` 已把“结构化分工”从理念推进到可训练实现，但它只是修好了学习接口，并没有自动解决 cash timing 的长期价值学习。
+- 决策：下一条主线可以正式围绕 `split_heads_cash_timing_r1` 开展 10h 前台 study，但在 confirmatory 证据充分前，不得把 split smoke 的轻微收益或语义干净直接解释为机制完成。
+- 正式实证事实：`cp_v3_split_heads_cash_timing_r1` 已完成 4 screening + 2 confirmatory，最佳 screening 与 confirmatory 均来自 `active_execution_strategy + result_value_v2 + split_v2`。
+- 正式实证事实：冠军 `cp_v3_split_heads_cash_timing_r1__confirm_01` 取得 `annual_return=0.9918`、`sharpe=3.4369`、`max_drawdown=-0.0536`，说明分头结构没有牺牲基础收益能力。
+- 正式实证事实：同一冠军仍为 `shadow_only`，失败项只有两个但都关键：`training_evidence_status=insufficient` 与 `cash_timing_quality_1d=-0.1861`。
+- 正式实证事实：行为审计显示 `budget_model_cash_timing_quality_1d=-0.1775`，说明 cash timing 的问题已经明确落在 budget/value 学习本体，而不再主要是执行层语义污染。
+- 正式实证事实：语义冲突已被压到低位，`semantic_conflict_rate=0.0108`；但 `order_translation_conflict_rate=0.2366` 仍偏高，说明生命周期动作与真实权重翻译仍未完全对齐。
+- 复盘结论：`split_v2 + result_value_v2 + active alpha prior` 是当前最合理、最有潜力的主线，但它证明的是“结构修正方向正确”，而不是“cash timing 已经学会”。后续主攻点必须是 budget credit assignment 与 translation drift，而不是回退到 monolithic 或 legacy 收益表象。

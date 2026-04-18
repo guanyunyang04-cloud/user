@@ -55,10 +55,22 @@ DAILY_TARGET_COLUMNS = {
     "turnover_budget",
     "max_position_weight_target",
     "hold_bias_target",
+    "reduce_bias_target",
+    "exit_patience_target",
+    "reentry_guard_target",
+    "budget_risk_signal_target",
+    "budget_deploy_signal_target",
+    "budget_cash_timing_signal_target",
+    "budget_alpha_focus_signal_target",
 }
 DEFAULT_BUDGET_OBJECTIVE = "teacher_imitation"
 BUDGET_OBJECTIVE_RESULT_VALUE_V1 = "result_value_v1"
-BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (DEFAULT_BUDGET_OBJECTIVE, BUDGET_OBJECTIVE_RESULT_VALUE_V1)
+BUDGET_OBJECTIVE_RESULT_VALUE_V2 = "result_value_v2"
+BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
+    DEFAULT_BUDGET_OBJECTIVE,
+    BUDGET_OBJECTIVE_RESULT_VALUE_V1,
+    BUDGET_OBJECTIVE_RESULT_VALUE_V2,
+)
 DEFAULT_OUTCOME_HORIZONS = (1, 3, 5, 10, 20)
 
 
@@ -143,6 +155,24 @@ def compute_curve_metrics(daily_returns: pd.Series) -> dict[str, float]:
         "daily_return_mean": float(clean.mean()),
         "daily_return_std": float(clean.std(ddof=0)),
     }
+
+
+def _safe_corrcoef(left: pd.Series, right: pd.Series) -> float:
+    aligned = pd.concat(
+        [
+            pd.to_numeric(left, errors="coerce").replace([np.inf, -np.inf], np.nan),
+            pd.to_numeric(right, errors="coerce").replace([np.inf, -np.inf], np.nan),
+        ],
+        axis=1,
+    ).dropna()
+    if len(aligned) < 2:
+        return 0.0
+    left_std = float(aligned.iloc[:, 0].std(ddof=0))
+    right_std = float(aligned.iloc[:, 1].std(ddof=0))
+    if left_std <= 1.0e-12 or right_std <= 1.0e-12:
+        return 0.0
+    corr = float(np.corrcoef(aligned.iloc[:, 0], aligned.iloc[:, 1])[0, 1])
+    return corr if np.isfinite(corr) else 0.0
 
 
 def _build_forward_excess_frame(prepared: PreparedPolicyInputs, horizon: int) -> pd.DataFrame:
@@ -516,10 +546,26 @@ def compute_continuity_metrics(
         benchmark_series = aligned["benchmark_forward_return_1d"].astype(float)
         valid = cash_series.notna() & benchmark_series.notna()
         if int(valid.sum()) >= 2:
-            corr = float(np.corrcoef(cash_series.loc[valid], benchmark_series.loc[valid])[0, 1])
+            corr = _safe_corrcoef(cash_series.loc[valid], benchmark_series.loc[valid])
             metrics["cash_timing_quality_1d"] = float(-corr) if np.isfinite(corr) else 0.0
         else:
             metrics["cash_timing_quality_1d"] = 0.0
+        for signal_column, metric_name, preferred_sign in (
+            ("budget_model_risk_signal", "budget_model_risk_timing_quality_1d", -1.0),
+            ("budget_model_deploy_signal", "budget_model_deploy_timing_quality_1d", 1.0),
+            ("budget_model_cash_timing_signal", "budget_model_cash_timing_quality_1d", -1.0),
+            ("budget_model_risk_deploy_gap", "budget_model_risk_deploy_gap_quality_1d", -1.0),
+        ):
+            if signal_column in aligned.columns:
+                signal_series = aligned[signal_column].astype(float)
+                signal_valid = signal_series.notna() & benchmark_series.notna()
+                if int(signal_valid.sum()) >= 2:
+                    corr = _safe_corrcoef(signal_series.loc[signal_valid], benchmark_series.loc[signal_valid])
+                    metrics[metric_name] = float(corr * preferred_sign) if np.isfinite(corr) else 0.0
+                else:
+                    metrics[metric_name] = 0.0
+            else:
+                metrics[metric_name] = 0.0
         high_cash_threshold = float(cash_series.quantile(0.75)) if len(cash_series) else 0.0
         high_cash_mask = valid & (cash_series >= high_cash_threshold)
         metrics["high_cash_share"] = float(high_cash_mask.mean()) if len(cash_series) else 0.0
@@ -529,6 +575,10 @@ def compute_continuity_metrics(
         metrics["risk_off_cash_hit_rate"] = metrics["high_cash_down_market_hit_rate"]
     else:
         metrics["cash_timing_quality_1d"] = 0.0
+        metrics["budget_model_risk_timing_quality_1d"] = 0.0
+        metrics["budget_model_deploy_timing_quality_1d"] = 0.0
+        metrics["budget_model_cash_timing_quality_1d"] = 0.0
+        metrics["budget_model_risk_deploy_gap_quality_1d"] = 0.0
         metrics["high_cash_share"] = 0.0
         metrics["high_cash_down_market_hit_rate"] = 0.0
         metrics["risk_off_cash_hit_rate"] = 0.0
@@ -544,6 +594,10 @@ def compute_continuity_metrics(
         metrics["avg_budget_entry_keep_count"] = float(turnover_frame["budget_entry_keep_count"].mean()) if "budget_entry_keep_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_held_protected_count"] = float(turnover_frame["budget_held_protected_count"].mean()) if "budget_held_protected_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_split_bound_guard_count"] = float(turnover_frame["budget_split_bound_guard_count"].mean()) if "budget_split_bound_guard_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_risk_signal"] = float(turnover_frame["budget_model_risk_signal"].mean()) if "budget_model_risk_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_deploy_signal"] = float(turnover_frame["budget_model_deploy_signal"].mean()) if "budget_model_deploy_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_cash_timing_signal"] = float(turnover_frame["budget_model_cash_timing_signal"].mean()) if "budget_model_cash_timing_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_alpha_focus_signal"] = float(turnover_frame["budget_model_alpha_focus_signal"].mean()) if "budget_model_alpha_focus_signal" in turnover_frame.columns else 0.0
     else:
         metrics["avg_position_cap_target"] = 0.0
         metrics["avg_hold_bias_target"] = 0.0
@@ -556,6 +610,10 @@ def compute_continuity_metrics(
         metrics["avg_budget_entry_keep_count"] = 0.0
         metrics["avg_budget_held_protected_count"] = 0.0
         metrics["avg_budget_split_bound_guard_count"] = 0.0
+        metrics["avg_budget_model_risk_signal"] = 0.0
+        metrics["avg_budget_model_deploy_signal"] = 0.0
+        metrics["avg_budget_model_cash_timing_signal"] = 0.0
+        metrics["avg_budget_model_alpha_focus_signal"] = 0.0
 
     return metrics, action_outcomes
 
@@ -584,6 +642,13 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
             "downside_top_mean": 0.0,
             "sell_pressure": 0.0,
             "candidate_count_hint": 0.0,
+            "cash_timing_score": 0.0,
+            "reentry_guard_score": 0.0,
+            "opportunity_concentration": 0.0,
+            "risk_deploy_gap": 0.0,
+            "market_downside": 0.0,
+            "cash_regime": 0.0,
+            "reversal_rate": 0.0,
         }
     priority = _safe_label_column(label_frame, "teacher_priority")
     edge = _safe_label_column(label_frame, "teacher_edge")
@@ -668,6 +733,39 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
             14.0,
         )
     )
+    opportunity_concentration = float(
+        np.clip(
+            max(edge_top_mean, 0.0) / 0.06 * 0.42
+            + max(opportunity_top_mean, 0.0) / 0.10 * 0.34
+            + alpha_alignment * 0.24,
+            0.0,
+            1.0,
+        )
+    )
+    cash_timing_score = float(
+        np.clip(
+            risk_score * 0.48
+            + downside_score * 0.22
+            + np.clip(cash_regime / 0.26, 0.0, 1.0) * 0.18
+            + np.clip(reversal_rate / 0.28, 0.0, 1.0) * 0.14
+            - deploy_score * 0.26
+            - alpha_alignment * 0.08,
+            0.0,
+            1.0,
+        )
+    )
+    reentry_guard_score = float(
+        np.clip(
+            np.clip(reversal_rate / 0.28, 0.0, 1.0) * 0.42
+            + np.clip(cash_regime / 0.24, 0.0, 1.0) * 0.22
+            + sell_pressure * 0.18
+            + cash_timing_score * 0.18
+            - alpha_alignment * 0.10,
+            0.0,
+            1.0,
+        )
+    )
+    risk_deploy_gap = float(np.clip(risk_score - deploy_score, -1.0, 1.0))
     return {
         "deploy_score": deploy_score,
         "risk_score": risk_score,
@@ -676,6 +774,13 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
         "downside_top_mean": downside_top_mean,
         "sell_pressure": sell_pressure,
         "candidate_count_hint": candidate_count_hint,
+        "cash_timing_score": cash_timing_score,
+        "reentry_guard_score": reentry_guard_score,
+        "opportunity_concentration": opportunity_concentration,
+        "risk_deploy_gap": risk_deploy_gap,
+        "market_downside": market_downside,
+        "cash_regime": cash_regime,
+        "reversal_rate": reversal_rate,
     }
 
 
@@ -688,9 +793,16 @@ def _apply_budget_objective_targets(
     objective = resolve_budget_objective(budget_objective)
     signals = _result_value_budget_signals(label_frame)
     diagnostics = {f"result_value_{key}": float(value) for key, value in signals.items()}
-    diagnostics["budget_objective_is_result_value"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V1 else 0.0
-    if objective != BUDGET_OBJECTIVE_RESULT_VALUE_V1:
-        return dict(global_targets), diagnostics
+    diagnostics["budget_objective_is_result_value"] = 1.0 if objective != DEFAULT_BUDGET_OBJECTIVE else 0.0
+    diagnostics["budget_objective_is_result_value_v2"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V2 else 0.0
+
+    adjusted = dict(global_targets)
+    adjusted["budget_risk_signal_target"] = float(np.clip(signals["risk_score"], 0.0, 1.0))
+    adjusted["budget_deploy_signal_target"] = float(np.clip(signals["deploy_score"], 0.0, 1.0))
+    adjusted["budget_cash_timing_signal_target"] = float(np.clip(signals["cash_timing_score"], 0.0, 1.0))
+    adjusted["budget_alpha_focus_signal_target"] = float(np.clip(signals["alpha_alignment"], 0.0, 1.0))
+    if objective == DEFAULT_BUDGET_OBJECTIVE:
+        return adjusted, diagnostics
 
     deploy = float(signals["deploy_score"])
     risk = float(signals["risk_score"])
@@ -698,15 +810,110 @@ def _apply_budget_objective_targets(
     sell_pressure = float(signals["sell_pressure"])
     candidate_hint = float(signals["candidate_count_hint"])
     edge_top = float(signals["edge_top_mean"])
-
-    adjusted = dict(global_targets)
     base_gross = float(adjusted.get("gross_exposure_target", 0.0) or 0.0)
+    if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V1:
+        adjusted["gross_exposure_target"] = float(
+            np.clip(
+                base_gross
+                + 0.16 * (deploy - 0.42)
+                + 0.05 * alpha_alignment
+                - 0.18 * max(risk - deploy, 0.0)
+                - 0.04 * sell_pressure,
+                0.12,
+                0.94,
+            )
+        )
+        adjusted["candidate_budget"] = float(
+            int(
+                np.clip(
+                    round(
+                        0.55 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                        + 0.45 * candidate_hint
+                        + 1.5 * max(deploy - risk, 0.0)
+                        - 1.0 * max(risk - deploy, 0.0)
+                    ),
+                    2,
+                    14,
+                )
+            )
+        )
+        adjusted["turnover_budget"] = float(
+            np.clip(
+                float(adjusted.get("turnover_budget", 0.10) or 0.10)
+                + 0.10 * sell_pressure
+                + 0.04 * max(deploy - 0.45, 0.0)
+                + 0.03 * max(risk - deploy, 0.0)
+                - 0.03 * alpha_alignment * max(deploy - risk, 0.0),
+                0.08,
+                0.82,
+            )
+        )
+        adjusted["max_position_weight_target"] = float(
+            np.clip(
+                float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
+                + 0.024 * alpha_alignment
+                + 0.014 * max(deploy - risk, 0.0)
+                - 0.018 * sell_pressure,
+                0.07,
+                0.28,
+            )
+        )
+        adjusted["hold_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("hold_bias_target", 0.18) or 0.18)
+                + 0.16 * max(edge_top / 0.055, 0.0)
+                + 0.12 * alpha_alignment
+                - 0.20 * sell_pressure
+                - 0.08 * max(risk - deploy, 0.0),
+                0.10,
+                0.95,
+            )
+        )
+        adjusted["reduce_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("reduce_bias_target", 0.10) or 0.10)
+                + 0.12 * sell_pressure
+                + 0.08 * max(risk - deploy, 0.0)
+                - 0.04 * alpha_alignment,
+                0.0,
+                0.65,
+            )
+        )
+        adjusted["exit_patience_target"] = float(
+            np.clip(
+                float(adjusted.get("exit_patience_target", 0.20) or 0.20)
+                + 0.10 * alpha_alignment
+                + 0.08 * max(edge_top / 0.055, 0.0)
+                - 0.18 * sell_pressure
+                - 0.08 * max(risk - deploy, 0.0),
+                0.05,
+                0.95,
+            )
+        )
+        adjusted["reentry_guard_target"] = float(
+            np.clip(
+                float(adjusted.get("reentry_guard_target", 0.0) or 0.0)
+                + 0.08 * max(risk - deploy, 0.0)
+                + 0.12 * signals["reentry_guard_score"]
+                - 0.04 * alpha_alignment,
+                0.0,
+                0.45,
+            )
+        )
+        return adjusted, diagnostics
+
+    cash_timing = float(signals["cash_timing_score"])
+    reentry_guard = float(signals["reentry_guard_score"])
+    opportunity_concentration = float(signals["opportunity_concentration"])
+    risk_deploy_gap = float(signals["risk_deploy_gap"])
     adjusted["gross_exposure_target"] = float(
         np.clip(
             base_gross
-            + 0.16 * (deploy - 0.42)
-            + 0.05 * alpha_alignment
-            - 0.18 * max(risk - deploy, 0.0)
+            + 0.14 * (deploy - 0.40)
+            + 0.06 * alpha_alignment
+            + 0.04 * opportunity_concentration
+            - 0.22 * cash_timing
+            - 0.12 * max(risk_deploy_gap, 0.0)
             - 0.04 * sell_pressure,
             0.12,
             0.94,
@@ -716,10 +923,12 @@ def _apply_budget_objective_targets(
         int(
             np.clip(
                 round(
-                    0.55 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
-                    + 0.45 * candidate_hint
-                    + 1.5 * max(deploy - risk, 0.0)
-                    - 1.0 * max(risk - deploy, 0.0)
+                    0.45 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                    + 0.40 * candidate_hint
+                    + 2.0 * max(deploy - risk, 0.0)
+                    + 1.2 * alpha_alignment
+                    - 2.2 * cash_timing
+                    - 0.8 * max(risk_deploy_gap, 0.0)
                 ),
                 2,
                 14,
@@ -729,20 +938,24 @@ def _apply_budget_objective_targets(
     adjusted["turnover_budget"] = float(
         np.clip(
             float(adjusted.get("turnover_budget", 0.10) or 0.10)
-            + 0.10 * sell_pressure
-            + 0.04 * max(deploy - 0.45, 0.0)
-            + 0.03 * max(risk - deploy, 0.0)
+            + 0.12 * sell_pressure
+            + 0.08 * cash_timing
+            + 0.03 * reentry_guard
+            + 0.02 * max(deploy - 0.45, 0.0)
+            - 0.03 * opportunity_concentration
             - 0.03 * alpha_alignment * max(deploy - risk, 0.0),
             0.08,
-            0.82,
+            0.90,
         )
     )
     adjusted["max_position_weight_target"] = float(
         np.clip(
             float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
-            + 0.024 * alpha_alignment
-            + 0.014 * max(deploy - risk, 0.0)
-            - 0.018 * sell_pressure,
+            + 0.032 * alpha_alignment
+            + 0.020 * opportunity_concentration
+            + 0.010 * max(deploy - risk, 0.0)
+            - 0.026 * cash_timing
+            - 0.014 * sell_pressure,
             0.07,
             0.28,
         )
@@ -750,12 +963,51 @@ def _apply_budget_objective_targets(
     adjusted["hold_bias_target"] = float(
         np.clip(
             float(adjusted.get("hold_bias_target", 0.18) or 0.18)
-            + 0.16 * max(edge_top / 0.055, 0.0)
+            + 0.14 * max(edge_top / 0.055, 0.0)
             + 0.12 * alpha_alignment
-            - 0.20 * sell_pressure
-            - 0.08 * max(risk - deploy, 0.0),
+            + 0.06 * opportunity_concentration
+            - 0.18 * sell_pressure
+            - 0.12 * cash_timing
+            - 0.08 * max(risk_deploy_gap, 0.0),
             0.10,
             0.95,
+        )
+    )
+    adjusted["reduce_bias_target"] = float(
+        np.clip(
+            float(adjusted.get("reduce_bias_target", 0.10) or 0.10)
+            + 0.18 * sell_pressure
+            + 0.16 * cash_timing
+            + 0.10 * max(risk_deploy_gap, 0.0)
+            - 0.04 * alpha_alignment
+            - 0.03 * max(deploy - risk, 0.0),
+            0.0,
+            0.65,
+        )
+    )
+    adjusted["exit_patience_target"] = float(
+        np.clip(
+            float(adjusted.get("exit_patience_target", 0.20) or 0.20)
+            + 0.12 * alpha_alignment
+            + 0.08 * opportunity_concentration
+            + 0.05 * max(edge_top / 0.055, 0.0)
+            - 0.18 * sell_pressure
+            - 0.16 * cash_timing
+            - 0.06 * max(risk_deploy_gap, 0.0),
+            0.05,
+            0.95,
+        )
+    )
+    adjusted["reentry_guard_target"] = float(
+        np.clip(
+            float(adjusted.get("reentry_guard_target", 0.0) or 0.0)
+            + 0.18 * reentry_guard
+            + 0.10 * cash_timing
+            + 0.06 * max(risk_deploy_gap, 0.0)
+            - 0.06 * alpha_alignment
+            - 0.03 * max(deploy - risk, 0.0),
+            0.0,
+            0.45,
         )
     )
     return adjusted, diagnostics

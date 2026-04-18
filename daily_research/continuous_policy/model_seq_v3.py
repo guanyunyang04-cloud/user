@@ -238,9 +238,68 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "daily_total": 0.62,
         },
     },
+    "alpha_result_value_budget_split_v2": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.56,
+            "entry_quality": 0.90,
+            "hold_quality": 1.14,
+            "add_quality": 0.88,
+            "reduce_quality": 1.08,
+            "exit_urgency": 1.16,
+            "reentry_readiness": 0.52,
+            "holding_days_ratio": 1.46,
+            "reduce_fraction": 1.44,
+            "exit_hazard": 1.48,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.34,
+            "candidate_budget": 0.80,
+            "turnover_budget": 1.20,
+            "max_position_weight_target": 0.66,
+            "hold_bias_target": 1.08,
+            "reduce_bias_target": 1.00,
+            "exit_patience_target": 0.96,
+            "reentry_guard_target": 0.86,
+            "budget_risk_signal_target": 0.82,
+            "budget_deploy_signal_target": 0.78,
+            "budget_cash_timing_signal_target": 1.12,
+            "budget_alpha_focus_signal_target": 0.70,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.48,
+            "action_soft": 0.52,
+            "action_total": 0.58,
+            "duration_total": 0.12,
+            "scalar_total": 1.34,
+            "daily_total": 0.70,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
+DAILY_HEAD_LAYOUT_MONOLITHIC_V1 = "monolithic_v1"
+DAILY_HEAD_LAYOUT_SPLIT_V2 = "split_v2"
+DAILY_HEAD_LAYOUT_CHOICES: tuple[str, ...] = (
+    DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
+    DAILY_HEAD_LAYOUT_SPLIT_V2,
+)
+DAILY_CONTROL_TARGET_NAMES: tuple[str, ...] = (
+    "gross_exposure_target",
+    "candidate_budget",
+    "turnover_budget",
+    "max_position_weight_target",
+    "hold_bias_target",
+    "reduce_bias_target",
+    "exit_patience_target",
+    "reentry_guard_target",
+)
+DAILY_AUX_TARGET_NAMES: tuple[str, ...] = (
+    "budget_risk_signal_target",
+    "budget_deploy_signal_target",
+    "budget_cash_timing_signal_target",
+    "budget_alpha_focus_signal_target",
+)
+ALL_DAILY_TARGET_NAMES: tuple[str, ...] = DAILY_CONTROL_TARGET_NAMES + DAILY_AUX_TARGET_NAMES
 
 
 def resolve_loss_profile(loss_profile: str | None) -> tuple[str, dict[str, dict[str, float]]]:
@@ -470,8 +529,18 @@ class TemporalSamplePolicyNet(nn.Module):
 
 
 class DailyControllerNet(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 96, dropout: float = 0.05) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 96,
+        dropout: float = 0.05,
+        head_layout: str = DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
+    ) -> None:
         super().__init__()
+        layout = str(head_layout or DAILY_HEAD_LAYOUT_MONOLITHIC_V1).strip() or DAILY_HEAD_LAYOUT_MONOLITHIC_V1
+        if layout not in DAILY_HEAD_LAYOUT_CHOICES:
+            raise ValueError(f"Unsupported daily controller head layout: {layout}")
+        self.head_layout = layout
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -480,16 +549,68 @@ class DailyControllerNet(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
         )
-        self.output = nn.Linear(hidden_dim, 5)
+        if self.head_layout == DAILY_HEAD_LAYOUT_MONOLITHIC_V1:
+            self.output = nn.Linear(hidden_dim, 5)
+        else:
+            tower_dim = max(32, hidden_dim // 2)
+            self.exposure_tower = nn.Sequential(
+                nn.Linear(hidden_dim, tower_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.deployment_tower = nn.Sequential(
+                nn.Linear(hidden_dim, tower_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.lifecycle_tower = nn.Sequential(
+                nn.Linear(hidden_dim, tower_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.signal_tower = nn.Sequential(
+                nn.Linear(tower_dim * 3, tower_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.exposure_head = nn.Linear(tower_dim, 2)
+            self.deployment_head = nn.Linear(tower_dim, 2)
+            self.lifecycle_head = nn.Linear(tower_dim, 4)
+            self.signal_head = nn.Linear(tower_dim, 4)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        raw = self.output(self.backbone(x))
+        hidden = self.backbone(x)
+        if self.head_layout == DAILY_HEAD_LAYOUT_MONOLITHIC_V1:
+            raw = self.output(hidden)
+            return {
+                "gross_exposure_target": raw[:, 0],
+                "candidate_budget": raw[:, 1],
+                "turnover_budget": raw[:, 2],
+                "max_position_weight_target": raw[:, 3],
+                "hold_bias_target": raw[:, 4],
+            }
+
+        exposure_hidden = self.exposure_tower(hidden)
+        deployment_hidden = self.deployment_tower(hidden)
+        lifecycle_hidden = self.lifecycle_tower(hidden)
+        signal_hidden = self.signal_tower(torch.cat([exposure_hidden, deployment_hidden, lifecycle_hidden], dim=-1))
+        exposure = self.exposure_head(exposure_hidden)
+        deployment = self.deployment_head(deployment_hidden)
+        lifecycle = self.lifecycle_head(lifecycle_hidden)
+        signals = torch.sigmoid(self.signal_head(signal_hidden))
         return {
-            "gross_exposure_target": raw[:, 0],
-            "candidate_budget": raw[:, 1],
-            "turnover_budget": raw[:, 2],
-            "max_position_weight_target": raw[:, 3],
-            "hold_bias_target": raw[:, 4],
+            "gross_exposure_target": exposure[:, 0],
+            "max_position_weight_target": exposure[:, 1],
+            "candidate_budget": deployment[:, 0],
+            "turnover_budget": deployment[:, 1],
+            "hold_bias_target": lifecycle[:, 0],
+            "reduce_bias_target": lifecycle[:, 1],
+            "exit_patience_target": lifecycle[:, 2],
+            "reentry_guard_target": lifecycle[:, 3],
+            "budget_risk_signal_target": signals[:, 0],
+            "budget_deploy_signal_target": signals[:, 1],
+            "budget_cash_timing_signal_target": signals[:, 2],
+            "budget_alpha_focus_signal_target": signals[:, 3],
         }
 
 
@@ -549,6 +670,7 @@ class TorchContinuousPolicySeqArtifact:
                 "input_dim": len(self.daily_feature_names),
                 "hidden_dim": int(self.daily_model.backbone[0].out_features),
                 "dropout": float(self.daily_model.backbone[2].p),
+                "head_layout": str(getattr(self.daily_model, "head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1) or DAILY_HEAD_LAYOUT_MONOLITHIC_V1),
             },
             "train_summary": self.train_summary,
             "training_diagnostics": self.training_diagnostics,
@@ -648,6 +770,7 @@ def fit_policy_models_v3(
     daily_hidden_dim: int = 96,
     dropout: float = 0.12,
     daily_dropout: float = 0.05,
+    daily_head_layout: str = DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
     early_stop_patience: int = 10,
     resume_mode: str = "strict",
     loss_profile: str = DEFAULT_LOSS_PROFILE,
@@ -662,6 +785,11 @@ def fit_policy_models_v3(
     np.random.seed(int(random_seed))
     run_root.mkdir(parents=True, exist_ok=True)
     resolved_loss_profile, loss_config = resolve_loss_profile(loss_profile)
+    resolved_daily_head_layout = str(daily_head_layout or DAILY_HEAD_LAYOUT_MONOLITHIC_V1).strip() or DAILY_HEAD_LAYOUT_MONOLITHIC_V1
+    if resolved_daily_head_layout not in DAILY_HEAD_LAYOUT_CHOICES:
+        raise ValueError(
+            f"Unsupported daily head layout: {resolved_daily_head_layout}. Available: {', '.join(DAILY_HEAD_LAYOUT_CHOICES)}"
+        )
     sample_scalar_loss_weights = dict(loss_config["sample_scalar_loss_weights"])
     daily_target_loss_weights = dict(loss_config["daily_target_loss_weights"])
     multi_objective_loss_weights = dict(loss_config["multi_objective_loss_weights"])
@@ -714,12 +842,43 @@ def fit_policy_models_v3(
         ),
     }
     daily_targets = {
-        "gross_exposure_target": daily_frame["gross_exposure_target"].astype(float).to_numpy(dtype=np.float32),
-        "candidate_budget": daily_frame["candidate_budget"].astype(float).to_numpy(dtype=np.float32),
-        "turnover_budget": daily_frame["turnover_budget"].astype(float).to_numpy(dtype=np.float32),
-        "max_position_weight_target": daily_frame["max_position_weight_target"].astype(float).to_numpy(dtype=np.float32),
-        "hold_bias_target": daily_frame["hold_bias_target"].astype(float).to_numpy(dtype=np.float32),
+        name: daily_frame[name].astype(float).to_numpy(dtype=np.float32)
+        for name in ALL_DAILY_TARGET_NAMES
+        if name in daily_frame.columns
     }
+    if resolved_daily_head_layout == DAILY_HEAD_LAYOUT_MONOLITHIC_V1:
+        daily_targets = {
+            name: values
+            for name, values in daily_targets.items()
+            if name in {
+                "gross_exposure_target",
+                "candidate_budget",
+                "turnover_budget",
+                "max_position_weight_target",
+                "hold_bias_target",
+            }
+        }
+    if resolved_daily_head_layout == DAILY_HEAD_LAYOUT_SPLIT_V2:
+        required_daily_targets = {
+            "gross_exposure_target",
+            "candidate_budget",
+            "turnover_budget",
+            "max_position_weight_target",
+            "hold_bias_target",
+            "reduce_bias_target",
+            "exit_patience_target",
+            "reentry_guard_target",
+            "budget_risk_signal_target",
+            "budget_deploy_signal_target",
+            "budget_cash_timing_signal_target",
+            "budget_alpha_focus_signal_target",
+        }
+        missing_daily_targets = sorted(required_daily_targets - set(daily_targets))
+        if missing_daily_targets:
+            raise ValueError(
+                "split_v2 daily controller requires expanded daily targets, missing columns: "
+                + ", ".join(missing_daily_targets)
+            )
 
     train_idx, val_idx = _split_indices(len(sample_frame), random_seed)
     daily_train_idx, daily_val_idx = _split_indices(len(daily_frame), random_seed + 17)
@@ -733,7 +892,12 @@ def fit_policy_models_v3(
         sequence_layers=sequence_layers,
         dropout=dropout,
     ).to(device)
-    daily_model = DailyControllerNet(len(daily_feature_names), hidden_dim=daily_hidden_dim, dropout=daily_dropout).to(device)
+    daily_model = DailyControllerNet(
+        len(daily_feature_names),
+        hidden_dim=daily_hidden_dim,
+        dropout=daily_dropout,
+        head_layout=resolved_daily_head_layout,
+    ).to(device)
     sample_optimizer = torch.optim.AdamW(sample_model.parameters(), lr=float(learning_rate), weight_decay=1e-4)
     daily_optimizer = torch.optim.AdamW(daily_model.parameters(), lr=float(learning_rate), weight_decay=1e-4)
     action_weight_tensor = _action_weights(sample_frame).to(device)
@@ -744,8 +908,9 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_alpha_result_value_budget_r1"
+    signature_payload["sequence_model_revision"] = "seq_v3_alpha_result_value_budget_r2"
     signature_payload["loss_profile"] = resolved_loss_profile
+    signature_payload["daily_head_layout"] = resolved_daily_head_layout
     signature_payload["sample_scalar_loss_weights"] = dict(sample_scalar_loss_weights)
     signature_payload["daily_target_loss_weights"] = dict(daily_target_loss_weights)
     signature_payload["multi_objective_loss_weights"] = dict(multi_objective_loss_weights)
@@ -958,6 +1123,8 @@ def fit_policy_models_v3(
         "sample_scalar_loss_weights": dict(sample_scalar_loss_weights),
         "daily_target_loss_weights": dict(daily_target_loss_weights),
         "multi_objective_loss_weights": dict(multi_objective_loss_weights),
+        "daily_head_layout": resolved_daily_head_layout,
+        "supports_extended_budget_heads": resolved_daily_head_layout == DAILY_HEAD_LAYOUT_SPLIT_V2,
     }
     artifact = TorchContinuousPolicySeqArtifact(
         sample_model=sample_model.cpu(),
@@ -1073,6 +1240,38 @@ def predict_policy_v3(
             dtype=torch.float32,
         )
         daily_out = artifact.daily_model(daily_x)
+        supports_extended_budget_heads = bool(
+            artifact.training_diagnostics.get("supports_extended_budget_heads", False)
+            or getattr(artifact.daily_model, "head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1) == DAILY_HEAD_LAYOUT_SPLIT_V2
+        )
+        budget_model_risk_signal = float(
+            np.clip(
+                _finite_scalar(daily_out.get("budget_risk_signal_target", 0.0), default=0.0),
+                0.0,
+                1.0,
+            )
+        )
+        budget_model_deploy_signal = float(
+            np.clip(
+                _finite_scalar(daily_out.get("budget_deploy_signal_target", 0.0), default=0.0),
+                0.0,
+                1.0,
+            )
+        )
+        budget_model_cash_timing_signal = float(
+            np.clip(
+                _finite_scalar(daily_out.get("budget_cash_timing_signal_target", 0.0), default=0.0),
+                0.0,
+                1.0,
+            )
+        )
+        budget_model_alpha_focus_signal = float(
+            np.clip(
+                _finite_scalar(daily_out.get("budget_alpha_focus_signal_target", 0.0), default=0.0),
+                0.0,
+                1.0,
+            )
+        )
         global_targets = {
             "gross_exposure_target": float(np.clip(_finite_scalar(daily_out["gross_exposure_target"], default=0.35), 0.15, 0.98)),
             "candidate_budget": float(np.clip(_finite_scalar(daily_out["candidate_budget"], default=4.0), 2.0, 12.0)),
@@ -1080,6 +1279,22 @@ def predict_policy_v3(
             "max_position_weight_target": float(np.clip(_finite_scalar(daily_out["max_position_weight_target"], default=0.12), 0.08, 0.28)),
             "hold_bias_target": float(np.clip(_finite_scalar(daily_out["hold_bias_target"], default=0.24), 0.10, 0.95)),
         }
+        if supports_extended_budget_heads:
+            global_targets["reduce_bias_target"] = float(
+                np.clip(_finite_scalar(daily_out.get("reduce_bias_target", 0.10), default=0.10), 0.0, 0.65)
+            )
+            global_targets["exit_patience_target"] = float(
+                np.clip(_finite_scalar(daily_out.get("exit_patience_target", 0.20), default=0.20), 0.05, 0.95)
+            )
+            global_targets["reentry_guard_target"] = float(
+                np.clip(_finite_scalar(daily_out.get("reentry_guard_target", 0.0), default=0.0), 0.0, 0.45)
+            )
+        global_targets["budget_model_risk_signal"] = budget_model_risk_signal
+        global_targets["budget_model_deploy_signal"] = budget_model_deploy_signal
+        global_targets["budget_model_cash_timing_signal"] = budget_model_cash_timing_signal
+        global_targets["budget_model_alpha_focus_signal"] = budget_model_alpha_focus_signal
+        global_targets["budget_model_risk_deploy_gap"] = float(np.clip(budget_model_risk_signal - budget_model_deploy_signal, -1.0, 1.0))
+        global_targets["budget_head_layout"] = str(getattr(artifact.daily_model, "head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1))
 
     current_weight = state_frame["current_weight"].astype(float).to_numpy(dtype=float) if "current_weight" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
     held_mask = current_weight > 1e-8
@@ -1129,48 +1344,74 @@ def predict_policy_v3(
     min_gross_exposure_target = 0.18 if is_holdcash_v3_decoder else 0.12
     min_candidate_budget = 4.0 if is_holdcash_v3_decoder else 2.0
     min_position_cap_target = 0.10 if is_holdcash_v3_decoder else 0.08
+    blended_budget_risk = float(np.clip(0.55 * risk_off_score + 0.45 * budget_model_risk_signal, 0.0, 1.0))
+    blended_budget_deploy = float(np.clip(0.55 * budget_model_deploy_signal + 0.25 * budget_model_alpha_focus_signal + 0.20 * max(1.0 - blended_budget_risk, 0.0), 0.0, 1.0))
+    blended_cash_timing = float(np.clip(0.55 * budget_model_cash_timing_signal + 0.45 * blended_budget_risk, 0.0, 1.0))
+    predicted_reduce_bias = float(global_targets.get("reduce_bias_target", 0.10) or 0.10)
+    predicted_exit_patience = float(global_targets.get("exit_patience_target", 0.20) or 0.20)
+    predicted_reentry_guard = float(global_targets.get("reentry_guard_target", 0.0) or 0.0)
 
     global_targets["gross_exposure_target"] = float(
         np.clip(
-            global_targets["gross_exposure_target"] - risk_off_score * decoder_profile["defensive_cash_scale"],
+            global_targets["gross_exposure_target"]
+            - blended_budget_risk * decoder_profile["defensive_cash_scale"]
+            - blended_cash_timing * 0.08
+            + blended_budget_deploy * 0.04,
             min_gross_exposure_target,
             0.98,
         )
     )
     global_targets["candidate_budget"] = float(
         np.clip(
-            global_targets["candidate_budget"] - risk_off_score * decoder_profile["candidate_defensive_penalty"],
+            global_targets["candidate_budget"]
+            - blended_budget_risk * decoder_profile["candidate_defensive_penalty"]
+            - blended_cash_timing * 0.85
+            + blended_budget_deploy * 0.95,
             min_candidate_budget,
             12.0,
         )
     )
     global_targets["turnover_budget"] = float(
         np.clip(
-            global_targets["turnover_budget"] * (1.0 - risk_off_score * decoder_profile["turnover_defensive_penalty"] - reversal_pressure * 0.20),
+            global_targets["turnover_budget"]
+            * (1.0 - blended_budget_risk * decoder_profile["turnover_defensive_penalty"] - reversal_pressure * 0.20)
+            + blended_cash_timing * 0.05,
             0.08,
             1.00,
         )
     )
     global_targets["max_position_weight_target"] = float(
         np.clip(
-            global_targets["max_position_weight_target"] - risk_off_score * decoder_profile["position_cap_defensive_penalty"],
+            global_targets["max_position_weight_target"]
+            - blended_budget_risk * decoder_profile["position_cap_defensive_penalty"]
+            - blended_cash_timing * 0.010
+            + budget_model_alpha_focus_signal * 0.012,
             min_position_cap_target,
             0.28,
         )
     )
     global_targets["hold_bias_target"] = float(
         np.clip(
-            global_targets["hold_bias_target"] + risk_off_score * decoder_profile["hold_bias_bonus"] + reversal_pressure * (0.02 if is_holdcash_v3_decoder else 0.04),
+            global_targets["hold_bias_target"]
+            + blended_budget_risk * decoder_profile["hold_bias_bonus"]
+            + reversal_pressure * (0.02 if is_holdcash_v3_decoder else 0.04)
+            + budget_model_alpha_focus_signal * 0.06
+            - blended_cash_timing * 0.06,
             0.10,
             0.95,
         )
     )
     global_targets["reduce_bias_target"] = float(
         np.clip(
-            (0.08 if is_holdcash_v3_decoder else 0.10)
-            + risk_off_score * (0.12 if is_holdcash_v3_decoder else 0.22)
-            + reversal_pressure * (0.05 if is_holdcash_v3_decoder else 0.06)
-            + decoder_profile["reduce_bias_bonus"],
+            predicted_reduce_bias * 0.58
+            + (
+                (0.08 if is_holdcash_v3_decoder else 0.10)
+                + blended_budget_risk * (0.12 if is_holdcash_v3_decoder else 0.22)
+                + blended_cash_timing * 0.10
+                + reversal_pressure * (0.05 if is_holdcash_v3_decoder else 0.06)
+                + decoder_profile["reduce_bias_bonus"]
+            )
+            * 0.42,
             0.0,
             0.65,
         )
@@ -1178,15 +1419,29 @@ def predict_policy_v3(
     global_targets["exit_patience_target"] = float(
         np.clip(
             (
-                0.18
-                + global_targets["hold_bias_target"] * 0.16
-                + decoder_profile["exit_patience_bonus"]
-                + reversal_pressure * 0.08
-                - risk_off_score * (0.08 if is_holdcash_v3_decoder else 0.20)
+                predicted_exit_patience * 0.60
+                + (
+                    0.18
+                    + global_targets["hold_bias_target"] * 0.16
+                    + decoder_profile["exit_patience_bonus"]
+                    + reversal_pressure * 0.08
+                    - blended_budget_risk * (0.08 if is_holdcash_v3_decoder else 0.20)
+                    - blended_cash_timing * 0.12
+                    + budget_model_alpha_focus_signal * 0.04
+                )
+                * 0.40
             )
             if is_holdcash_v3_decoder
             else (
-                global_targets["hold_bias_target"] + decoder_profile["exit_patience_bonus"] - risk_off_score * 0.20
+                predicted_exit_patience * 0.60
+                + (
+                    global_targets["hold_bias_target"]
+                    + decoder_profile["exit_patience_bonus"]
+                    - blended_budget_risk * 0.20
+                    - blended_cash_timing * 0.12
+                    + budget_model_alpha_focus_signal * 0.04
+                )
+                * 0.40
             ),
             0.10 if is_holdcash_v3_decoder else 0.05,
             0.95,
@@ -1194,9 +1449,14 @@ def predict_policy_v3(
     )
     global_targets["reentry_guard_target"] = float(
         np.clip(
-            decoder_profile["reversal_cooldown_bonus"]
-            + reversal_pressure * (0.22 if is_holdcash_v3_decoder else 0.28)
-            + risk_off_score * (0.04 if is_holdcash_v3_decoder else 0.08),
+            predicted_reentry_guard * 0.60
+            + (
+                decoder_profile["reversal_cooldown_bonus"]
+                + reversal_pressure * (0.22 if is_holdcash_v3_decoder else 0.28)
+                + blended_budget_risk * (0.04 if is_holdcash_v3_decoder else 0.08)
+                + blended_cash_timing * 0.10
+            )
+            * 0.40,
             0.0,
             0.35 if is_holdcash_v3_decoder else 0.45,
         )
@@ -1315,6 +1575,12 @@ def predict_policy_v3(
         "reduce_bias_target": float(np.clip(_finite_scalar(global_targets["reduce_bias_target"], default=0.10), 0.0, 0.65)),
         "exit_patience_target": float(np.clip(_finite_scalar(global_targets["exit_patience_target"], default=0.20), 0.10 if is_holdcash_v3_decoder else 0.05, 0.95)),
         "reentry_guard_target": float(np.clip(_finite_scalar(global_targets["reentry_guard_target"], default=0.0), 0.0, 0.35 if is_holdcash_v3_decoder else 0.45)),
+        "budget_model_risk_signal": float(budget_model_risk_signal),
+        "budget_model_deploy_signal": float(budget_model_deploy_signal),
+        "budget_model_cash_timing_signal": float(budget_model_cash_timing_signal),
+        "budget_model_alpha_focus_signal": float(budget_model_alpha_focus_signal),
+        "budget_model_risk_deploy_gap": float(np.clip(budget_model_risk_signal - budget_model_deploy_signal, -1.0, 1.0)),
+        "budget_head_layout": str(getattr(artifact.daily_model, "head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1)),
     }
 
     probability_map = {label: action_prob[:, idx] for idx, label in enumerate(ACTION_CLASSES)}

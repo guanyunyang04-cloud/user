@@ -15,6 +15,8 @@ from daily_research.continuous_policy.model import fit_policy_models
 from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES, fit_policy_models_v2
 from daily_research.continuous_policy.model_seq_v3 import (
+    DAILY_HEAD_LAYOUT_CHOICES,
+    DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
     DEFAULT_LOSS_PROFILE,
     LOSS_PROFILE_NAMES,
     fit_policy_models_v3,
@@ -126,6 +128,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-dim", type=int, default=192)
     parser.add_argument("--sequence-layers", type=int, default=1)
     parser.add_argument("--daily-hidden-dim", type=int, default=96)
+    parser.add_argument(
+        "--daily-head-layout",
+        default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
+        choices=DAILY_HEAD_LAYOUT_CHOICES,
+        help="Daily controller architecture. split_v2 separates exposure/deployment/lifecycle heads and enables budget timing auxiliaries.",
+    )
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
     parser.add_argument(
@@ -169,6 +177,7 @@ def _build_common_train_summary(
         "trainer_backend": str(training_contract.get("trainer_backend", "") or ""),
         "decoder_profile": str(getattr(args, "decoder_profile", "default_v2") or "default_v2"),
         "loss_profile": str(getattr(args, "loss_profile", DEFAULT_LOSS_PROFILE) or DEFAULT_LOSS_PROFILE),
+        "daily_head_layout": str(getattr(args, "daily_head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1) or DAILY_HEAD_LAYOUT_MONOLITHIC_V1),
         "execution_semantics": str(getattr(args, "execution_semantics", DEFAULT_EXECUTION_SEMANTICS) or DEFAULT_EXECUTION_SEMANTICS),
         "budget_semantics": str(getattr(args, "budget_semantics", DEFAULT_BUDGET_SEMANTICS) or DEFAULT_BUDGET_SEMANTICS),
         "budget_calibration": str(getattr(args, "budget_calibration", DEFAULT_BUDGET_CALIBRATION) or DEFAULT_BUDGET_CALIBRATION),
@@ -320,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
             sequence_hidden_dim=max(int(args.hidden_dim // 2), 96),
             sequence_layers=max(int(args.sequence_layers), 1),
             daily_hidden_dim=args.daily_hidden_dim,
+            daily_head_layout=args.daily_head_layout,
             dropout=max(float(args.dropout), 0.10),
             daily_dropout=args.daily_dropout,
             early_stop_patience=args.early_stop_patience,

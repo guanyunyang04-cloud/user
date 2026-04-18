@@ -278,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         "decoder_profile": str(artifact.train_summary.get("decoder_profile", "") or "default_v2"),
         "training_contract": dict(artifact.train_summary.get("training_contract", {}) or getattr(artifact, "training_contract", {}) or {}),
         "training_diagnostics": dict(artifact.train_summary.get("training_diagnostics", {}) or getattr(artifact, "training_diagnostics", {}) or {}),
+        "daily_head_layout": str(artifact.train_summary.get("daily_head_layout", "") or ""),
         "pool_name": prepared.pool_name,
         "benchmark": prepared.benchmark,
         "start_date": args.start_date,

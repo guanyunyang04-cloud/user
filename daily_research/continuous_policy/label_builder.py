@@ -914,12 +914,57 @@ def build_teacher_global_targets(
             0.92,
         )
     )
+    reduce_bias_target = float(
+        np.clip(
+            0.06
+            + sell_pressure_target * 0.34
+            + avg_exit_hazard_target * 0.14
+            + recent_reversal_rate_20d * 0.12
+            + reduce_reversal_pressure * 0.16
+            + cash_regime * 0.10
+            + cash_defense_pressure * 0.08
+            - hold_share * 0.06
+            - max(avg_duration_days - 6.0, 0.0) * 0.004,
+            0.0,
+            0.65,
+        )
+    )
+    exit_patience_target = float(
+        np.clip(
+            0.14
+            + hold_bias_target * 0.42
+            + max(avg_duration_days - 4.0, 0.0) * 0.008
+            + max(benchmark_trend_gap, 0.0) * 0.05
+            - sell_pressure_target * 0.24
+            - avg_exit_hazard_target * 0.22
+            - cash_regime * 0.12
+            - cash_defense_pressure * 0.10,
+            0.05,
+            0.95,
+        )
+    )
+    reentry_guard_target = float(
+        np.clip(
+            0.02
+            + recent_reversal_rate_20d * 0.20
+            + reduce_reversal_pressure * 0.26
+            + cash_regime * 0.10
+            + cash_defense_pressure * 0.08
+            + avg_exit_hazard_target * 0.08
+            - max(hold_bias_target - 0.40, 0.0) * 0.08,
+            0.0,
+            0.45,
+        )
+    )
     return {
         "gross_exposure_target": gross_target,
         "candidate_budget": float(candidate_budget),
         "turnover_budget": turnover_budget,
         "max_position_weight_target": max_position_weight_target,
         "hold_bias_target": hold_bias_target,
+        "reduce_bias_target": reduce_bias_target,
+        "exit_patience_target": exit_patience_target,
+        "reentry_guard_target": reentry_guard_target,
     }
 
 

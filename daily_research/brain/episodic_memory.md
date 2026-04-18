@@ -15640,3 +15640,71 @@ position,000001.SZ,1200,12.38,
     - 不 promotion `cp_v3_alpha_result_value_budget_r1`。
     - 不回退到语义污染的 legacy 收益表象作为胜利结论。
     - 下一轮应聚焦 `cash_timing_quality_1d` 的结果目标、训练证据充分性和 active alpha 的稳定融合，而不是单纯继续放大模型或延长同一 r1。
+
+## 2026-04-18 split heads cash timing v2 实施记忆
+- 背景：
+  - 用户要求不要再停留在规划层，而是直接把“alpha 只做机会先验、lifecycle 与 budget 真分头、现金时机单独作为核心问题”的方案落成可运行实现。
+- 关键动作：
+  - 在 `label_builder.py` 中把 teacher/global daily target 从 5 项扩展到 8 项控制目标，并为预算学习加入 4 项辅助信号目标。
+  - 在 `pipeline_utils.py` 中新增 `budget_objective=result_value_v2`，把 `cash_timing_score / reentry_guard_score / opportunity_concentration / risk_deploy_gap` 等结果驱动信号映射到训练目标。
+  - 在 `model_seq_v3.py` 中落地 `daily_head_layout=split_v2`，把 daily controller 拆为 exposure / deployment / lifecycle / signal 四类子头，并让评估 artifact 显式记录 `daily_head_layout`。
+  - 在 `portfolio_simulator.py` 与 `evaluate_policy.py` 中把预算模型输出写入 turnover diagnostics 与 evaluation summary，支持模块级 timing 审计。
+  - 在 `train_policy.py`、`run_continuous_policy_protocol.py`、`run_self_optimizing_study.py` 中打通 `--daily-head-layout` 参数，并新增 study profile `split_heads_cash_timing_r1`。
+  - 在 `pipeline_utils.py` 中增加 `_safe_corrcoef`，修复近常数序列下相关性计算 warning。
+- 动作后验证：
+  - dry-run：`split_heads_cash_timing_r1` 四格试验计划生成成功，证明 study plumbing 已打通。
+  - smoke train：`cp_split_heads_cash_timing_smoke_train_r2` 成功生成 artifact，且诊断中明确显示 `daily_head_layout=split_v2`、`supports_extended_budget_heads=true`。
+  - smoke eval：`cp_split_heads_cash_timing_smoke_eval_r2` 得到 `annual_return=0.0092`、`sharpe=0.1892`、`cash_timing_quality_1d=-0.0033`、`avg_semantic_conflict_rate=0.0`、`avg_order_translation_conflict_rate=0.1518`。
+  - smoke audit：`cp_split_heads_cash_timing_smoke_audit_r2` 明确指出 `cash_timing_not_learned` 为高优先级失败项，`shadow_reversal_still_high` 与 `order_translation_drift` 为中优先级失败项。
+  - warning 复验：`cp_split_heads_cash_timing_smoke_eval_r3` 无 numpy 相关性 warning，但 `cash_timing_quality_1d=-0.1587`，说明问题没有被技术噪声掩盖。
+- 复盘：
+  - 事实：
+    - 这轮已经把“多结构分工”从概念推进到模型级实现，且动作语义保持干净。
+    - `result_value_v2` 与 split heads 已可训练、可评估、可做 self-optimizing study。
+    - cash timing、reversal 与 translation drift 仍是当前主瓶颈。
+  - 推断：
+    - 真正卡点不再是“结构是否分开”，而是“分开后 budget/value 学习是否真的拿到长期信用分配”。
+    - 继续回退到 monolithic 或继续叠加人工 guard，都只会掩盖而不是解决问题。
+  - 决策：
+    - 保留 `split_heads_cash_timing_r1` 为下一条正式 10h 前台 study 主线。
+    - 不把 smoke 结果误写为 promotion 证据。
+    - 下一轮若继续实现，应优先打 `cash timing` 与 `translation drift`，而不是再做大规模结构扩张。
+
+## 2026-04-18 split heads cash timing v2 正式 study 记忆
+- 动作：
+  - 直接以前台方式完成正式 study：`cp_v3_split_heads_cash_timing_r1`
+  - study 配置为 4 screening + 2 confirmatory，核心变量只比较 `budget_objective = teacher_imitation / result_value_v2` 与 `alpha_prior_source = none / active_execution_strategy`，统一 `daily_head_layout=split_v2`
+  - 追加 champion 行为审计：`cp_v3_split_heads_cash_timing_r1__confirm_01__behavior_audit`
+- 关键结果：
+  - 最优 screening 与 confirmatory 都是 `active_execution_strategy + result_value_v2 + split_v2`
+  - 冠军 `cp_v3_split_heads_cash_timing_r1__confirm_01`：
+    - `annual_return=0.9918`
+    - `sharpe=3.4369`
+    - `max_drawdown=-0.0536`
+    - `reduce_success_rate_5d=0.6038`
+    - `exit_timeliness_rate_5d=0.5833`
+    - `cash_timing_quality_1d=-0.1861`
+    - `semantic_conflict_rate=0.0108`
+    - `order_translation_conflict_rate=0.2366`
+    - `training_evidence_status=insufficient`
+  - `confirm_02 = active alpha + teacher_imitation + split_v2` 作为 runner-up：
+    - `annual_return=0.5271`
+    - `sharpe=1.8304`
+    - `cash_timing_quality_1d=-0.2853`
+    - `order_translation_conflict_rate=0.4220`
+- 审计结论：
+  - `cash_timing_not_learned` 仍是高优先级失败项，且 `budget_model_cash_timing_quality_1d=-0.1775`
+  - `order_translation_drift` 为中优先级失败项，核心冲突仍集中在 `hold -> add` 与 `add -> hold`
+  - 相比旧 r1，当前结果说明“结构分头 + active alpha + result budget”已经能恢复更可用的收益/回撤组合，但并没有学会真正稳定的现金时机
+- 复盘：
+  - 事实：
+    - 这轮已经把“结构合理但收益不稳”的问题推进到更窄的核心：`cash timing` 和 `translation drift`
+    - confirmatory 没有崩成负收益，说明 split 主线比上一轮更接近正确方向
+    - 但 promotion 仍不成立，不能把“正收益”误当成“北极星完成”
+  - 推断：
+    - 当前已经不需要再争论是否要分头；这个问题已被实证回答
+    - 真正剩下的难点是 budget/value 的长期信用分配，而不是结构骨架
+  - 决策：
+    - 把 `active alpha + result_value_v2 + split_v2` 记为当前最优主线
+    - 不 promotion
+    - 下一轮优先修 `cash timing` 和 `translation drift`，不要回退到 monolithic 或 legacy 表象收益

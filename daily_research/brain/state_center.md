@@ -1003,3 +1003,62 @@
   - 不 promotion `cp_v3_alpha_result_value_budget_r1`。
   - `active alpha + result_value` 保留为高潜力但不稳定方向，不能覆盖当前默认。
   - 下一轮应优先解决 confirmatory 稳定性与 cash timing 信用分配，而不是把 screening 高收益直接解释为模型机制成功。
+
+## 2026-04-18 split heads cash timing v2 当前状态
+- 新实现状态：
+  - `daily_research/continuous_policy/model_seq_v3.py` 已支持 `daily_head_layout=split_v2`。
+  - `daily_research/continuous_policy/pipeline_utils.py` 已支持 `budget_objective=result_value_v2` 与预算模块级 timing 审计指标。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 已新增 `split_heads_cash_timing_r1` profile。
+- smoke 训练事实：
+  - tag：`cp_split_heads_cash_timing_smoke_train_r2`
+  - artifact：`daily_research/output/continuous_policy/models/cp_split_heads_cash_timing_smoke_train_r2/continuous_policy_v3_seq_artifact.pt`
+  - `daily_head_layout=split_v2`
+  - `loss_profile=alpha_result_value_budget_split_v2`
+  - `budget_objective=result_value_v2`
+  - `alpha_prior_source=active_execution_strategy`
+  - `training_diagnostics.supports_extended_budget_heads=true`
+- smoke 评估事实：
+  - `cp_split_heads_cash_timing_smoke_eval_r2`：`annual_return=0.0092`，`sharpe=0.1892`，`max_drawdown=-0.0173`
+  - `cash_timing_quality_1d=-0.0033`
+  - `budget_model_deploy_timing_quality_1d=0.0226`
+  - `budget_model_cash_timing_quality_1d=0.0196`
+  - `avg_semantic_conflict_rate=0.0`
+  - `avg_order_translation_conflict_rate=0.1518`
+  - `immediate_reversal_rate_3d=0.4048`
+  - `reversal_after_reduce_3d_rate=0.7000`
+- smoke 复验事实：
+  - `cp_split_heads_cash_timing_smoke_eval_r3` 已验证新的 `_safe_corrcoef` 修复生效，不再出现相关性计算 warning。
+  - 较短窗口下 `annual_return=0.1026`、`sharpe=1.7220`，但 `cash_timing_quality_1d=-0.1587`，说明 cash timing 学习仍未稳定。
+- 行为审计事实：
+  - 审计文件：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_split_heads_cash_timing_smoke_audit_r2.json`
+  - 高优先级失败项：`cash_timing_not_learned`
+  - 中优先级失败项：`shadow_reversal_still_high`、`order_translation_drift`
+- 当前判断：
+  - 分头结构已真实落地，并且动作语义保持干净。
+  - 当前主矛盾已从“模型是否把动作和预算混在一起”推进到“budget/cash timing 是否真的学会、执行翻译是否仍有漂移”。
+
+## 2026-04-18 split heads cash timing v2 正式 study 状态
+- study 输出：
+  - `study_summary.json`：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r1/study_summary.json`
+  - `trial_ranking.csv`：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r1/trial_ranking.csv`
+  - `latest_state_restored = true`
+- screening 事实：
+  - 冠军 `trial_02 = active_execution_strategy + result_value_v2 + split_v2`
+  - `annual_return=0.9918`，`sharpe=3.4369`，`max_drawdown=-0.0536`
+  - `reduce_success_rate_5d=0.6038`，`exit_timeliness_rate_5d=0.5833`
+  - 失败项：`training_evidence_status=insufficient`，`cash_timing_quality_1d=-0.1861`
+- confirmatory 事实：
+  - `confirm_01` 复现了同一冠军，关键指标与 screening champion 一致，仍为 `shadow_only`
+  - `confirm_02 = active_execution_strategy + teacher_imitation + split_v2`
+  - `annual_return=0.5271`，`sharpe=1.8304`，`max_drawdown=-0.0823`
+  - `cash_timing_quality_1d=-0.2853`，`order_translation_conflict_rate=0.4220`
+- champion 行为审计事实：
+  - 审计文件：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_split_heads_cash_timing_r1__confirm_01__behavior_audit.json`
+  - `budget_model_cash_timing_quality_1d=-0.1775`
+  - `order_translation_conflict_rate=0.2366`
+  - 高优先级失败项：`cash_timing_not_learned`
+  - 中优先级失败项：`order_translation_drift`
+- 当前决策：
+  - 不 promotion `cp_v3_split_heads_cash_timing_r1`
+  - `active alpha + result_value_v2 + split_v2` 晋升为当前结构主线，但仍是 `shadow_only`
+  - 下一轮必须围绕 `cash timing` 与 `translation drift` 深挖，不能因为收益恢复到正区间就误判为机制已完成

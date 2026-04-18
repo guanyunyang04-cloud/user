@@ -18,7 +18,12 @@ from daily_research.continuous_policy.label_builder import LABEL_CONFIGS
 from daily_research.continuous_policy.evaluate_policy import main as evaluate_main
 from daily_research.continuous_policy.export_action_panel import main as export_main
 from daily_research.continuous_policy.model import load_artifact
-from daily_research.continuous_policy.model_seq_v3 import DEFAULT_LOSS_PROFILE, LOSS_PROFILE_NAMES
+from daily_research.continuous_policy.model_seq_v3 import (
+    DAILY_HEAD_LAYOUT_CHOICES,
+    DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
+    DEFAULT_LOSS_PROFILE,
+    LOSS_PROFILE_NAMES,
+)
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
@@ -288,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-dim", type=int, default=192)
     parser.add_argument("--sequence-layers", type=int, default=1)
     parser.add_argument("--daily-hidden-dim", type=int, default=96)
+    parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
     parser.add_argument("--loss-profile", default=DEFAULT_LOSS_PROFILE, choices=LOSS_PROFILE_NAMES)
@@ -369,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
         str(args.sequence_layers),
         "--daily-hidden-dim",
         str(args.daily_hidden_dim),
+        "--daily-head-layout",
+        str(args.daily_head_layout),
         "--dropout",
         str(args.dropout),
         "--daily-dropout",
@@ -512,6 +520,7 @@ def main(argv: list[str] | None = None) -> int:
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
         "budget_objective": str(args.budget_objective),
+        "daily_head_layout": str(args.daily_head_layout),
         "alpha_prior_source": str(args.alpha_prior_source),
         "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
         "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
@@ -580,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         "trainer_backend": str(train_summary.get("trainer_backend", args.trainer_backend) or args.trainer_backend),
         "decoder_profile": str(train_summary.get("decoder_profile", args.decoder_profile) or args.decoder_profile),
         "loss_profile": str(train_summary.get("loss_profile", args.loss_profile) or args.loss_profile),
+        "daily_head_layout": str(train_summary.get("daily_head_layout", args.daily_head_layout) or args.daily_head_layout),
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": str(args.budget_semantics),
         "budget_calibration": str(args.budget_calibration),
@@ -600,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
             "trainer_backend": train_summary.get("trainer_backend", args.trainer_backend),
             "decoder_profile": train_summary.get("decoder_profile", args.decoder_profile),
             "loss_profile": train_summary.get("loss_profile", args.loss_profile),
+            "daily_head_layout": train_summary.get("daily_head_layout", args.daily_head_layout),
             "execution_semantics": train_summary.get("execution_semantics", args.execution_semantics),
             "budget_semantics": train_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": train_summary.get("budget_calibration", args.budget_calibration),
@@ -622,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
             "budget_semantics": evaluation_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": evaluation_summary.get("budget_calibration", args.budget_calibration),
             "budget_objective": evaluation_summary.get("budget_objective", args.budget_objective),
+            "daily_head_layout": train_summary.get("daily_head_layout", args.daily_head_layout),
             "alpha_prior_source": evaluation_summary.get("alpha_prior_source", args.alpha_prior_source),
             "continuous_policy_metrics": evaluation_summary.get("continuous_policy_metrics", {}),
             "continuity_metrics": evaluation_summary.get("continuity_metrics", {}),
@@ -636,6 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             "budget_semantics": shadow_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": shadow_summary.get("budget_calibration", args.budget_calibration),
             "budget_objective": shadow_summary.get("budget_objective", args.budget_objective),
+            "daily_head_layout": train_summary.get("daily_head_layout", args.daily_head_layout),
             "alpha_prior_source": shadow_summary.get("alpha_prior_source", args.alpha_prior_source),
             "shadow_summary_json": str(shadow_summary_path.resolve()),
         },
@@ -648,6 +661,7 @@ def main(argv: list[str] | None = None) -> int:
             "budget_semantics": export_summary.get("budget_semantics", args.budget_semantics),
             "budget_calibration": export_summary.get("budget_calibration", args.budget_calibration),
             "budget_objective": export_summary.get("budget_objective", args.budget_objective),
+            "daily_head_layout": train_summary.get("daily_head_layout", args.daily_head_layout),
             "alpha_prior_source": export_summary.get("alpha_prior_source", args.alpha_prior_source),
             "export_summary_json": str((EXPORTS_ROOT / export_tag / "export_summary.json").resolve()),
         },
