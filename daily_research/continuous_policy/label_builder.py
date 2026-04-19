@@ -611,6 +611,16 @@ def build_action_labels_for_date(
         ),
         0.0,
     )
+    sell_rank_score = np.zeros(len(working), dtype=float)
+    if bool(np.any(held_mask)):
+        held_index = working.index[held_mask]
+        held_positions = np.flatnonzero(held_mask)
+        if len(held_index) >= 2:
+            rank_series = working.loc[held_index, "sell_attribution_score"].rank(method="average", pct=True)
+            sell_rank_score[held_positions] = rank_series.to_numpy(dtype=float)
+        else:
+            sell_rank_score[held_positions] = working.loc[held_index, "sell_attribution_score"].to_numpy(dtype=float)
+    working["sell_rank_score"] = sell_rank_score
     working["reentry_readiness"] = np.clip(
         0.65 * working["entry_quality"].to_numpy(dtype=float)
         - 0.35 * working["teacher_urgency"].to_numpy(dtype=float),
@@ -850,6 +860,178 @@ def build_action_labels_for_date(
     working["exit_urgency"] = working["teacher_urgency"].clip(lower=0.0)
     working["reduce_fraction_target"] = reduce_fraction_targets
     working["exit_hazard_target"] = exit_hazard_targets
+    action_series = pd.Series(labels, index=working.index, dtype=str)
+    held_float = pd.Series(held_mask.astype(float), index=working.index, dtype=float)
+    sell_action_boost = action_series.isin({"reduce", "exit"}).astype(float)
+    keep_action_boost = action_series.isin({"hold", "add"}).astype(float)
+    working["lifecycle_sell_gate"] = np.where(
+        held_mask,
+        np.clip(
+            0.30 * working["sell_attribution_score"].to_numpy(dtype=float)
+            + 0.26 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.18 * np.clip(working["reduce_quality"].to_numpy(dtype=float), 0.0, None)
+            + 0.14 * np.asarray(reduce_fraction_targets, dtype=float)
+            + 0.12 * np.asarray(exit_hazard_targets, dtype=float)
+            + 0.10 * sell_action_boost.to_numpy(dtype=float)
+            - 0.18 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, None)
+            - 0.08 * keep_action_boost.to_numpy(dtype=float)
+            - 0.08 * np.clip(alpha_support, 0.0, None),
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    stock_forward_return_1d = fwd1.to_numpy(dtype=float) + benchmark_fwd1.to_numpy(dtype=float)
+    large_upside_1d_target = np.clip(stock_forward_return_1d / 0.095, 0.0, 1.0)
+    forward_edge_5d = fwd5.to_numpy(dtype=float)
+    forward_edge_10d = fwd10.to_numpy(dtype=float)
+    opportunity_array = opportunity.to_numpy(dtype=float)
+    downside_array = downside.to_numpy(dtype=float)
+    edge_array = edge.to_numpy(dtype=float)
+    alpha_positive = np.clip(alpha_support, 0.0, 1.0)
+    cash_defense_value = np.clip(
+        0.30 * market_forward_downside
+        + 0.18 * np.clip(market_downside_pressure / 0.24, 0.0, 1.0)
+        + 0.16 * np.clip(cash_regime_pressure / 0.24, 0.0, 1.0)
+        + 0.14 * np.clip(portfolio_cash_pressure / 0.22, 0.0, 1.0)
+        + 0.10 * np.clip(recent_reversal_rate_20d / 0.28, 0.0, 1.0)
+        + 0.12 * np.clip(downside_array / 0.08, 0.0, 1.0)
+        - 0.16 * alpha_positive
+        - 0.08 * large_upside_1d_target,
+        0.0,
+        1.0,
+    )
+    alpha_opportunity_value = np.clip(
+        0.24 * np.clip(forward_edge_5d / 0.055, 0.0, 1.0)
+        + 0.20 * np.clip(opportunity_array / 0.12, 0.0, 1.0)
+        + 0.18 * np.clip(edge_array / 0.055, 0.0, 1.0)
+        + 0.16 * large_upside_1d_target
+        + 0.14 * alpha_positive
+        + 0.08 * np.clip(alpha_selected, 0.0, 1.0)
+        - 0.18 * cash_defense_value
+        - 0.12 * np.clip(downside_array / 0.08, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    hold_continuation_value = np.where(
+        held_mask,
+        np.clip(
+            0.28 * np.clip(forward_edge_5d / 0.055, 0.0, 1.0)
+            + 0.16 * np.clip(forward_edge_10d / 0.09, 0.0, 1.0)
+            + 0.20 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, 1.0)
+            + 0.14 * alpha_opportunity_value
+            + 0.10 * np.clip(hold_continuity_pressure, 0.0, 1.0)
+            + 0.08 * large_upside_1d_target
+            + 0.04 * np.clip(working["add_quality"].to_numpy(dtype=float), 0.0, 1.0)
+            - 0.20 * working["sell_attribution_score"].to_numpy(dtype=float)
+            - 0.14 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+            - 0.10 * cash_defense_value,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    sell_release_value = np.where(
+        held_mask,
+        np.clip(
+            0.24 * np.clip(-forward_edge_5d / 0.055, 0.0, 1.0)
+            + 0.14 * np.clip(-fwd1.to_numpy(dtype=float) / 0.025, 0.0, 1.0)
+            + 0.20 * working["sell_attribution_score"].to_numpy(dtype=float)
+            + 0.16 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.14 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+            + 0.12 * cash_defense_value
+            + 0.08 * np.asarray(reduce_fraction_targets, dtype=float)
+            + 0.08 * np.asarray(exit_hazard_targets, dtype=float)
+            - 0.16 * alpha_opportunity_value
+            - 0.10 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, 1.0),
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    deployment_opportunity_cost = np.clip(
+        0.28 * alpha_opportunity_value
+        + 0.18 * large_upside_1d_target
+        + 0.18 * np.clip(working["entry_quality"].to_numpy(dtype=float), 0.0, 1.0)
+        + 0.12 * np.clip(working["add_quality"].to_numpy(dtype=float), 0.0, 1.0)
+        + 0.12 * np.clip(edge_array / 0.055, 0.0, 1.0)
+        + 0.08 * np.clip(alpha_selected, 0.0, 1.0)
+        + 0.04 * np.clip(portfolio_cash_weight / 0.45, 0.0, 1.0)
+        - 0.18 * cash_defense_value
+        - 0.10 * sell_release_value,
+        0.0,
+        1.0,
+    )
+    deploy_action_value = np.clip(
+        0.52 * deployment_opportunity_cost
+        + 0.32 * alpha_opportunity_value
+        + 0.16 * large_upside_1d_target
+        - 0.22 * cash_defense_value
+        - 0.12 * sell_release_value,
+        0.0,
+        1.0,
+    )
+    keep_action_value = np.clip(
+        0.58 * hold_continuation_value
+        + 0.24 * alpha_opportunity_value
+        + 0.10 * large_upside_1d_target
+        + 0.08 * np.clip(hold_continuity_pressure, 0.0, 1.0)
+        - 0.24 * sell_release_value
+        - 0.10 * cash_defense_value,
+        0.0,
+        1.0,
+    )
+    sell_action_value = np.clip(
+        0.58 * sell_release_value
+        + 0.26 * cash_defense_value
+        + 0.10 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+        + 0.06 * working["sell_rank_score"].to_numpy(dtype=float)
+        - 0.18 * hold_continuation_value,
+        0.0,
+        1.0,
+    )
+    cash_action_value = np.clip(
+        0.62 * cash_defense_value
+        + 0.20 * np.clip(1.0 - alpha_opportunity_value, 0.0, 1.0)
+        + 0.18 * market_forward_downside
+        - 0.14 * deployment_opportunity_cost,
+        0.0,
+        1.0,
+    )
+    action_values = np.select(
+        [
+            action_series.isin({"open", "add"}).to_numpy(dtype=bool),
+            action_series.isin({"hold"}).to_numpy(dtype=bool),
+            action_series.isin({"reduce", "exit"}).to_numpy(dtype=bool),
+        ],
+        [deploy_action_value, keep_action_value, sell_action_value],
+        default=cash_action_value,
+    )
+    capital_value = np.maximum(deploy_action_value, keep_action_value)
+    defensive_value = np.maximum(sell_action_value, cash_action_value)
+    deploy_value_target = np.clip(capital_value, 0.0, 1.0)
+    release_value_target = np.clip(sell_action_value, 0.0, 1.0)
+    defense_value_target = np.clip(cash_action_value, 0.0, 1.0)
+    gate_denominator = deploy_value_target + release_value_target + defense_value_target + 1.0e-6
+    deploy_gate_target = np.clip(deploy_value_target / gate_denominator, 0.0, 1.0)
+    release_gate_target = np.clip(release_value_target / gate_denominator, 0.0, 1.0)
+    defense_gate_target = np.clip(defense_value_target / gate_denominator, 0.0, 1.0)
+    working["large_upside_1d_target"] = large_upside_1d_target
+    working["alpha_opportunity_value"] = alpha_opportunity_value
+    working["hold_continuation_value"] = hold_continuation_value
+    working["sell_release_value"] = sell_release_value
+    working["cash_defense_value"] = cash_defense_value
+    working["deployment_opportunity_cost"] = deployment_opportunity_cost
+    working["risk_adjusted_action_value"] = np.clip(action_values, 0.0, 1.0)
+    working["value_arbitration_target"] = np.clip(0.50 + 0.55 * (capital_value - defensive_value), 0.0, 1.0)
+    working["deploy_value_target"] = deploy_value_target
+    working["release_value_target"] = release_value_target
+    working["defense_value_target"] = defense_value_target
+    working["deploy_gate_target"] = deploy_gate_target
+    working["release_gate_target"] = release_gate_target
+    working["defense_gate_target"] = defense_gate_target
+    working["clipped_intent_risk"] = 0.0
+    working["holding_flag_target"] = held_float
     working["forward_benchmark_return_1d"] = benchmark_fwd1.to_numpy(dtype=float)
     working["forward_benchmark_return_3d"] = benchmark_fwd3.to_numpy(dtype=float)
     working["forward_benchmark_return_5d"] = benchmark_fwd5.to_numpy(dtype=float)
@@ -873,6 +1055,24 @@ def build_action_labels_for_date(
         "reduce_fraction_target",
         "exit_hazard_target",
         "sell_attribution_score",
+        "sell_rank_score",
+        "lifecycle_sell_gate",
+        "large_upside_1d_target",
+        "alpha_opportunity_value",
+        "hold_continuation_value",
+        "sell_release_value",
+        "cash_defense_value",
+        "deployment_opportunity_cost",
+        "risk_adjusted_action_value",
+        "value_arbitration_target",
+        "deploy_value_target",
+        "release_value_target",
+        "defense_value_target",
+        "deploy_gate_target",
+        "release_gate_target",
+        "defense_gate_target",
+        "clipped_intent_risk",
+        "holding_flag_target",
         "forward_benchmark_return_1d",
         "forward_benchmark_return_3d",
         "forward_benchmark_return_5d",

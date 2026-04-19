@@ -148,6 +148,15 @@ def _build_semantic_conflicts(
             "avg_budget_held_protected_count": 0.0,
             "avg_budget_split_bound_guard_count": 0.0,
             "avg_budget_sell_priority_guard_count": 0.0,
+            "avg_sell_rank_score": 0.0,
+            "avg_lifecycle_sell_gate": 0.0,
+            "avg_alpha_opportunity_value": 0.0,
+            "avg_hold_continuation_value": 0.0,
+            "avg_sell_release_value": 0.0,
+            "avg_cash_defense_value": 0.0,
+            "avg_value_arbitration_target": 0.0,
+            "avg_clipped_intent_risk": 0.0,
+            "clipped_intent_risk_conflict_gap": 0.0,
             "high_cash_up_market_share": 0.0,
             "high_cash_down_market_share": 0.0,
             "top_action_pairs": [],
@@ -165,6 +174,14 @@ def _build_semantic_conflicts(
             "execution_deadband",
             "forward_excess_5d",
             "forward_benchmark_return_1d",
+            "sell_rank_score",
+            "lifecycle_sell_gate",
+            "alpha_opportunity_value",
+            "hold_continuation_value",
+            "sell_release_value",
+            "cash_defense_value",
+            "value_arbitration_target",
+            "clipped_intent_risk",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -313,6 +330,52 @@ def _build_semantic_conflicts(
     unclipped_order_translation_conflict_rate = (
         _safe_mean(unclipped_days["order_translation_conflict_rate"]) if not unclipped_days.empty else 0.0
     )
+    avg_sell_rank_score = _safe_mean(working.get("sell_rank_score", pd.Series(0.0, index=working.index)).fillna(0.0))
+    avg_lifecycle_sell_gate = _safe_mean(
+        working.get("lifecycle_sell_gate", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_alpha_opportunity_value = _safe_mean(
+        working.get("alpha_opportunity_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_hold_continuation_value = _safe_mean(
+        working.get("hold_continuation_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_sell_release_value = _safe_mean(
+        working.get("sell_release_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_cash_defense_value = _safe_mean(
+        working.get("cash_defense_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_value_arbitration_target = _safe_mean(
+        working.get("value_arbitration_target", pd.Series(0.5, index=working.index)).fillna(0.5)
+    )
+    avg_deploy_value_target = _safe_mean(
+        working.get("deploy_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_release_value_target = _safe_mean(
+        working.get("release_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_defense_value_target = _safe_mean(
+        working.get("defense_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_deploy_gate_target = _safe_mean(
+        working.get("deploy_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_release_gate_target = _safe_mean(
+        working.get("release_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_defense_gate_target = _safe_mean(
+        working.get("defense_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    clipped_intent_series = working.get("clipped_intent_risk", pd.Series(0.0, index=working.index)).fillna(0.0)
+    avg_clipped_intent_risk = _safe_mean(clipped_intent_series)
+    if bool(working["is_order_translation_conflict"].any()) and bool((~working["is_order_translation_conflict"]).any()):
+        clipped_intent_risk_conflict_gap = float(
+            clipped_intent_series.loc[working["is_order_translation_conflict"]].mean()
+            - clipped_intent_series.loc[~working["is_order_translation_conflict"]].mean()
+        )
+    else:
+        clipped_intent_risk_conflict_gap = 0.0
     if semantic_conflict_rate >= 0.05:
         diagnoses.append("执行层仍在非小概率地重写模型动作语义，策略学习闭环还不干净。")
     if order_translation_conflict_rate >= 0.05:
@@ -377,6 +440,21 @@ def _build_semantic_conflicts(
         "avg_budget_held_protected_count": _safe_mean(day_merge.get("budget_held_protected_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_split_bound_guard_count": _safe_mean(day_merge.get("budget_split_bound_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_sell_priority_guard_count": _safe_mean(day_merge.get("budget_sell_priority_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_sell_rank_score": avg_sell_rank_score,
+        "avg_lifecycle_sell_gate": avg_lifecycle_sell_gate,
+        "avg_alpha_opportunity_value": avg_alpha_opportunity_value,
+        "avg_hold_continuation_value": avg_hold_continuation_value,
+        "avg_sell_release_value": avg_sell_release_value,
+        "avg_cash_defense_value": avg_cash_defense_value,
+        "avg_value_arbitration_target": avg_value_arbitration_target,
+        "avg_deploy_value_target": avg_deploy_value_target,
+        "avg_release_value_target": avg_release_value_target,
+        "avg_defense_value_target": avg_defense_value_target,
+        "avg_deploy_gate_target": avg_deploy_gate_target,
+        "avg_release_gate_target": avg_release_gate_target,
+        "avg_defense_gate_target": avg_defense_gate_target,
+        "avg_clipped_intent_risk": avg_clipped_intent_risk,
+        "clipped_intent_risk_conflict_gap": clipped_intent_risk_conflict_gap,
         "high_cash_up_market_share": high_cash_up_market_share,
         "high_cash_down_market_share": high_cash_down_market_share,
         "top_action_pairs": pair_rows,
@@ -500,6 +578,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     bottlenecks: list[dict[str, Any]] = []
+    recommended_focus: list[str] = []
     model_hold_share = _safe_float(model_continuity, "hold_share")
     teacher_hold_share = _safe_float(teacher_continuity, "hold_share")
     if model_hold_share < max(0.12, teacher_hold_share * 0.70):
@@ -546,6 +625,74 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }
         )
+    if (
+        _safe_float(model_continuity, "sell_rank_forward_alignment_5d") < 0.01
+        or _safe_float(model_continuity, "lifecycle_sell_gate_forward_alignment_5d") < 0.01
+    ):
+        bottlenecks.append(
+            {
+                "name": "lifecycle_sell_arbitration_not_aligned",
+                "severity": "high",
+                "diagnosis": "新增的卖出排序/生命周期卖出门控尚未和后续收益形成稳定负相关，说明个股生命周期仲裁仍没有真正学会“该卖哪只”。",
+                "evidence": {
+                    "model_sell_rank_forward_alignment_5d": _safe_float(model_continuity, "sell_rank_forward_alignment_5d"),
+                    "teacher_sell_rank_forward_alignment_5d": _safe_float(teacher_continuity, "sell_rank_forward_alignment_5d"),
+                    "model_lifecycle_sell_gate_forward_alignment_5d": _safe_float(model_continuity, "lifecycle_sell_gate_forward_alignment_5d"),
+                    "teacher_lifecycle_sell_gate_forward_alignment_5d": _safe_float(teacher_continuity, "lifecycle_sell_gate_forward_alignment_5d"),
+                    "avg_clipped_intent_risk": _safe_float(model_continuity, "avg_clipped_intent_risk"),
+                    "clipped_intent_risk_conflict_gap": _safe_float(model_continuity, "clipped_intent_risk_conflict_gap"),
+                },
+            }
+        )
+    if (
+        _safe_float(model_continuity, "sell_rank_forward_alignment_5d") < 0.01
+        or _safe_float(model_continuity, "lifecycle_sell_gate_forward_alignment_5d") < 0.01
+    ):
+        recommended_focus.append("优先训练并验证生命周期卖出仲裁：卖出排序、卖出门控和预算剪裁风险必须共同解释真实 reduce / exit，而不是只靠动作分类。")
+    if (
+        _safe_float(model_continuity, "value_arbitration_forward_alignment_5d") < 0.02
+        or _safe_float(model_continuity, "alpha_opportunity_forward_alignment_5d") < 0.02
+        or _safe_float(model_continuity, "cash_defense_timing_quality_1d") < 0.0
+    ):
+        bottlenecks.append(
+            {
+                "name": "unified_value_arbitration_not_aligned",
+                "severity": "high",
+                "diagnosis": "r6 的核心价值仲裁还没有稳定对齐后验收益：机会、持有、卖出释放与现金防御仍可能在互相抵消，而不是形成统一资金去留判断。",
+                "evidence": {
+                    "model_value_arbitration_forward_alignment_5d": _safe_float(model_continuity, "value_arbitration_forward_alignment_5d"),
+                    "teacher_value_arbitration_forward_alignment_5d": _safe_float(teacher_continuity, "value_arbitration_forward_alignment_5d"),
+                    "model_alpha_opportunity_forward_alignment_5d": _safe_float(model_continuity, "alpha_opportunity_forward_alignment_5d"),
+                    "model_cash_defense_timing_quality_1d": _safe_float(model_continuity, "cash_defense_timing_quality_1d"),
+                    "avg_alpha_opportunity_value": float(semantic_conflicts.get("avg_alpha_opportunity_value", 0.0) or 0.0),
+                    "avg_sell_release_value": float(semantic_conflicts.get("avg_sell_release_value", 0.0) or 0.0),
+                    "avg_cash_defense_value": float(semantic_conflicts.get("avg_cash_defense_value", 0.0) or 0.0),
+                    "avg_value_arbitration_target": float(semantic_conflicts.get("avg_value_arbitration_target", 0.0) or 0.0),
+                },
+            }
+        )
+        recommended_focus.append("优先检查 r6 价值仲裁是否真正区分“值得继续部署资金”和“应该释放资金/留现金”，避免 alpha 机会、卖出释放、现金防御被平均成一个折中信号。")
+    if (
+        _safe_float(model_continuity, "deploy_gate_forward_alignment_5d") < 0.02
+        or _safe_float(model_continuity, "release_gate_forward_alignment_5d") < 0.02
+        or _safe_float(model_continuity, "defense_gate_timing_quality_1d") < 0.0
+    ):
+        bottlenecks.append(
+            {
+                "name": "three_value_gate_not_aligned",
+                "severity": "high",
+                "diagnosis": "r6b 三值门控尚未稳定形成资金边际价值竞争：deploy 应对齐正向收益，release 应对齐持仓后续弱势，defense 应对齐市场下行。",
+                "evidence": {
+                    "model_deploy_gate_forward_alignment_5d": _safe_float(model_continuity, "deploy_gate_forward_alignment_5d"),
+                    "model_release_gate_forward_alignment_5d": _safe_float(model_continuity, "release_gate_forward_alignment_5d"),
+                    "model_defense_gate_timing_quality_1d": _safe_float(model_continuity, "defense_gate_timing_quality_1d"),
+                    "avg_deploy_gate_target": float(semantic_conflicts.get("avg_deploy_gate_target", 0.0) or 0.0),
+                    "avg_release_gate_target": float(semantic_conflicts.get("avg_release_gate_target", 0.0) or 0.0),
+                    "avg_defense_gate_target": float(semantic_conflicts.get("avg_defense_gate_target", 0.0) or 0.0),
+                },
+            }
+        )
+        recommended_focus.append("优先验证 r6b 三值门控是否形成 deploy/release/defense 的真实竞争；若 deploy gate 仍不对齐正收益，不要继续扩大模型。")
     if _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02:
         bottlenecks.append(
             {
@@ -654,7 +801,6 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
 
-    recommended_focus: list[str] = []
     if model_hold_share < 0.12:
         recommended_focus.append("先把 hold_share 拉过最低连续持有阈值，再去追求更复杂的收益最优行为。")
     else:

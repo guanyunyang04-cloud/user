@@ -146,3 +146,27 @@
 - 本质判断：当前矛盾不是“模型不够强”或“信号完全没进来”，而是生命周期动作仲裁仍缺失。模型能预测一部分卖出归因，但在 add/hold/reduce/exit 同时竞争、预算剪裁介入时，sell-side ranking 会被部署收益与翻译约束覆盖。
 - 决策：不 promotion `cp_v3_split_heads_cash_timing_r4`；不让 `result_value_v4b` 直接替代 `result_value_v2`；r4 保留为 cash timing 进展证据与 sell-side 分支诊断，不覆盖 r2 的当前收益主线。
 - 下一轮约束：优先做 lifecycle action arbitration，而不是继续调 v4b 权重。下一步应把 `sell_attribution_score` 升级为持仓内 pairwise/rank 约束，并加入 clipped-intent loss，使模型在训练时看见预算剪裁后的动作漂移成本。
+
+## 16. 2026-04-19 lifecycle arbitration r5 合同
+- 当前可交付事实：`label_builder.py` 已把 `sell_attribution_score` 升级为可排序的 `sell_rank_score`，并新增 `lifecycle_sell_gate / clipped_intent_risk / holding_flag_target`，用于把“该卖哪只”和“执行剪裁会不会扭曲意图”写入训练目标。
+- 当前可交付事实：`model_seq_v3.py` 已新增 `alpha_result_value_budget_split_v5`、`sell_rank_head`、`lifecycle_sell_gate_head`、`clipped_intent_head`，以及生命周期动作仲裁 loss、held-only pairwise sell-rank loss、clipped-intent loss。
+- 当前可交付事实：`portfolio_simulator.py` 已让 `sell_rank_score / lifecycle_sell_gate / clipped_intent_risk` 参与真实执行翻译，避免新 head 只停留在训练诊断层。
+- 当前可交付事实：`pipeline_utils.py` 与 `analyze_behavior_gap.py` 已新增排序对齐与剪裁风险审计指标，r5 不再只看传统 `sell_selection_quality_5d`。
+- 正式实证事实：`cp_v3_lifecycle_arbitration_r5` 已完成 4 screening + 2 confirmatory，所有 trial/confirm 仍为 `shadow_only`，因此不能 promotion。
+- 正式实证事实：final champion `cp_v3_lifecycle_arbitration_r5__confirm_02` 取得 `annual_return=0.1529`、`sharpe=0.6942`、`max_drawdown=-0.0941`、`reduce_success_rate_5d=0.5957`、`exit_timeliness_rate_5d=0.7333`、`cash_timing_quality_1d=-0.1379`、`sell_selection_quality_5d=0.0207`。
+- 正式实证事实：r5 的 `sell_rank_forward_alignment_5d=0.1188`、`lifecycle_sell_gate_forward_alignment_5d=0.1335`，说明生命周期卖出排序/门控已经出现可学习证据。
+- 正式实证事实：r5 的 `semantic_conflict_rate=0.0163`、`order_translation_conflict_rate=0.0380`，说明相对 r4 sell guard 分支，执行/订单翻译更干净。
+- 复盘结论：r5 证明“生命周期动作仲裁结构”是有效诊断与学习方向，但没有证明它已经恢复收益；它把矛盾从“卖出排序是否可学”推进到“alpha/deployment、sell lifecycle、cash/budget 三者如何统一仲裁”。
+- 当前禁止项：不得把 `alpha_result_value_budget_split_v5` 直接升为默认主线；不得因 `exit_timeliness_rate_5d=0.7333` 单项改善而忽略 `cash_timing_quality_1d=-0.1379` 与收益/sharpe 退化。
+- 当前决策：不 promotion `cp_v3_lifecycle_arbitration_r5`；r5 作为 sell-rank/action-arbitration 结构证据保留；收益主线仍不得覆盖 r2，cash timing 进展证据仍不得覆盖 r4。
+- 下一轮合同：优先设计 `cash/deployment/value arbitration`，让 alpha opportunity、sell rank、cash risk 在同一结果驱动价值头或门控混合器里竞争；只有当该三方仲裁闭环后，才考虑更强 backbone、offline RL 或更大搜索。
+
+## r6 value arbitration 实证补充
+- 正式实证事实：`cp_v3_value_arbitration_r6` 已完成 4 screening + 2 confirmatory，所有候选仍为 `shadow_only`。
+- 正式实证事实：r6 confirm_01 将 `semantic_conflict_rate` 压到 `0.0019`，说明动作语义污染已经基本被控制。
+- 正式实证事实：r6 confirm_01 的 `reduce_success_rate_5d=1.0000`、`exit_timeliness_rate_5d=0.7500`、`sell_release_forward_alignment_5d=0.2593`，说明卖出释放价值被模型强烈学到。
+- 正式实证事实：r6 confirm_01 的 `annual_return=-0.0913`、`sharpe=-0.4327`、`value_arbitration_forward_alignment_5d=-0.0625`、`alpha_opportunity_forward_alignment_5d=-0.0739`，说明统一单标量价值仲裁没有学稳高 alpha 部署。
+- 复盘结论：r6 证明“三方价值仲裁”必须做，但不能继续压成一个单一 scalar；deploy、release、defense 三类价值的学习难度和交易含义不同，必须拆成可竞争的门控结构。
+- 当前禁止项：不得把 `alpha_result_value_budget_split_v6` 或 `result_value_v5` 设为默认主线；不得因 sell-side 指标改善而覆盖收益/sharpe 退化；不得通过扩大 backbone 替代价值目标重构。
+- 下一轮合同：优先推进 r6b 三值门控，明确区分 `deploy_value`、`release_value`、`defense_value`；预算层只能做容量、风险和成本约束，不得静默吞掉高价值生命周期动作。
+- 治理合同：训练证据中的 `teacher_action_rows` 必须使用日频持仓容量自适应有效下限；原始 10000 行阈值只能作为参考，不得再把容量受限的日频执行教师误判为训练证据不足。

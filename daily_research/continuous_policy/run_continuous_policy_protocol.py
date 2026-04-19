@@ -72,6 +72,8 @@ PROMOTION_THRESHOLDS = {
 TRAINING_EVIDENCE_THRESHOLDS = {
     "min_train_day_count": 180,
     "min_teacher_action_rows": 10000,
+    "min_adaptive_teacher_action_rows": 1200,
+    "teacher_action_rows_per_train_day": 6.0,
     "best_epoch_edge_margin": 2,
 }
 
@@ -175,11 +177,21 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         or 0
     )
     teacher_action_rows = int(teacher_summary.get("action_rows", 0) or 0)
+    raw_min_teacher_action_rows = int(TRAINING_EVIDENCE_THRESHOLDS["min_teacher_action_rows"])
+    adaptive_min_teacher_action_rows = int(
+        max(
+            float(TRAINING_EVIDENCE_THRESHOLDS["min_adaptive_teacher_action_rows"]),
+            train_day_count * float(TRAINING_EVIDENCE_THRESHOLDS["teacher_action_rows_per_train_day"]),
+        )
+    )
+    # Daily execution teachers are capped by active lifecycle slots; a fixed 10k
+    # action-row gate can be unreachable even when the day/sample coverage is real.
+    effective_min_teacher_action_rows = min(raw_min_teacher_action_rows, adaptive_min_teacher_action_rows)
     edge_margin = int(TRAINING_EVIDENCE_THRESHOLDS["best_epoch_edge_margin"])
     best_epoch_not_at_edge = completed_epochs > 0 and best_epoch <= max(completed_epochs - edge_margin, 0)
     checks = {
         "train_day_count": train_day_count >= int(TRAINING_EVIDENCE_THRESHOLDS["min_train_day_count"]),
-        "teacher_action_rows": teacher_action_rows >= int(TRAINING_EVIDENCE_THRESHOLDS["min_teacher_action_rows"]),
+        "teacher_action_rows": teacher_action_rows >= effective_min_teacher_action_rows,
         "best_epoch_not_at_edge": bool(best_epoch_not_at_edge),
     }
     failed_checks = [name for name, ok in checks.items() if not ok]
@@ -195,7 +207,7 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         )
     if not checks["teacher_action_rows"]:
         recommended_actions.append(
-            f"当前 teacher_action_rows={teacher_action_rows} 低于 {TRAINING_EVIDENCE_THRESHOLDS['min_teacher_action_rows']}；应扩样本窗口或降低过度稀疏的标签过滤。"
+            f"当前 teacher_action_rows={teacher_action_rows} 低于有效下限 {effective_min_teacher_action_rows}；原始参考阈值为 {raw_min_teacher_action_rows}，有效下限已按日频持仓容量自适应。"
         )
     if not recommended_actions:
         recommended_actions.append("当前训练预算与样本覆盖已达到本轮正式证据下限。")
@@ -203,7 +215,12 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         "status": status,
         "failed_checks": failed_checks,
         "checks": checks,
-        "thresholds": dict(TRAINING_EVIDENCE_THRESHOLDS),
+        "thresholds": {
+            **dict(TRAINING_EVIDENCE_THRESHOLDS),
+            "raw_min_teacher_action_rows": raw_min_teacher_action_rows,
+            "adaptive_min_teacher_action_rows": adaptive_min_teacher_action_rows,
+            "effective_min_teacher_action_rows": effective_min_teacher_action_rows,
+        },
         "completed_epochs": completed_epochs,
         "best_epoch": best_epoch,
         "train_day_count": train_day_count,

@@ -1165,3 +1165,69 @@
   - 不让 `result_value_v4b` 替代 `result_value_v2`
   - 当前收益/sharpe 最优继承证据仍是 r2 confirm_02；当前 cash timing 进展证据是 r4 confirm_01；当前 sell/exit 质量诊断证据是 r4 confirm_02。
   - 下一轮优先实现 lifecycle action arbitration、持仓内 sell rank/pairwise 约束与 clipped-intent loss，而不是继续扩大同一 v4b 搜索。
+
+## 2026-04-19 lifecycle arbitration r5 当前状态
+- 已完成实现：
+  - `label_builder.py` 已支持 `sell_rank_score / lifecycle_sell_gate / clipped_intent_risk / holding_flag_target`。
+  - `pipeline_utils.py` 已支持执行反馈写回与新审计指标：`sell_rank_forward_alignment_5d / lifecycle_sell_gate_forward_alignment_5d / clipped_intent_risk_conflict_gap`。
+  - `model_seq_v3.py` 已支持 `alpha_result_value_budget_split_v5`、三个新 head、生命周期动作仲裁 loss、held-only pairwise sell-rank loss 与 clipped-intent loss。
+  - `portfolio_simulator.py` 已让新信号进入执行层预算收缩、保护地板、开仓/加仓剪裁和 action diagnostics。
+  - `run_self_optimizing_study.py` 已新增 `split_heads_lifecycle_arbitration_r5` profile。
+- 验证事实：
+  - smoke 修复过一次字段污染：`clipped_intent_risk_feedback` 不得进入 feature set，修复后 `feature_count=179`。
+  - `cp_lifecycle_arbitration_smoke_eval_r2` 成功闭环，`semantic_conflict_rate=0.0000`，`order_translation_conflict_rate=0.0625`。
+  - `cp_v3_lifecycle_arbitration_r5` 正式 study 已完成 4 screening + 2 confirmatory，实际用时约 81 分钟，`latest_state_restored=true`。
+- 正式结果：
+  - final champion 为 `cp_v3_lifecycle_arbitration_r5__confirm_02`，状态仍为 `shadow_only`。
+  - confirm_02 指标：`annual_return=0.1529`，`sharpe=0.6942`，`max_drawdown=-0.0941`，`avg_gross_exposure=0.7624`，`reduce_success_rate_5d=0.5957`，`exit_timeliness_rate_5d=0.7333`，`cash_timing_quality_1d=-0.1379`，`sell_selection_quality_5d=0.0207`。
+  - 新仲裁指标：`sell_rank_forward_alignment_5d=0.1188`，`lifecycle_sell_gate_forward_alignment_5d=0.1335`。
+  - 语义指标：`semantic_conflict_rate=0.0163`，`order_translation_conflict_rate=0.0380`。
+- 当前判断：
+  - r5 不 promotion，不覆盖 r2/r4 的主线地位。
+  - r5 的价值是证明生命周期卖出排序/门控可以学出正向审计证据，并显著压低订单翻译漂移。
+  - r5 的失败是收益恢复和 cash timing：`cash_timing_quality_1d=-0.1379`，且收益/sharpe 低于 r2/r4。
+  - 本质矛盾从“卖出排序是否可学”推进到“alpha deployment、sell lifecycle、cash/budget 三方如何统一仲裁”。
+- 当前继承关系：
+  - 收益/sharpe 最强继承证据仍是 r2 confirm_02。
+  - cash timing 收敛证据仍是 r4 confirm_01。
+  - sell/exit 质量和动作仲裁证据更新为 r5 confirm_02，但只能作为结构证据，不能作为收益主线。
+- 下一轮优先级：
+  - P0：不 promotion r5，不把 `alpha_result_value_budget_split_v5` 设为默认主线。
+  - P1：把 alpha opportunity、sell rank、cash risk 统一进结果驱动的 value/arbitration head。
+  - P2：修复 `cash_timing_quality_1d` 与 `max_drawdown`，否则强 sell arbitration 会继续牺牲收益。
+  - P3：只有当三方仲裁闭环后，才考虑更强 backbone / offline RL。
+
+## 2026-04-19 value arbitration r6 当前状态
+- 已完成实现：
+  - r6 统一价值仲裁链路已经贯通 label、budget objective、model heads、inference、portfolio simulator、behavior audit 与 study profile。
+  - 新增核心目标/信号包括 `alpha_opportunity_value`、`hold_continuation_value`、`sell_release_value`、`cash_defense_value`、`deployment_opportunity_cost`、`risk_adjusted_action_value`、`value_arbitration_target`。
+  - 新增正式 profile：`split_heads_value_arbitration_r6`。
+- 验证状态：
+  - `py_compile` 通过。
+  - dry-run 通过。
+  - smoke 初次失败源于 value signals NaN 污染预算，已修复 finite guard；`cp_v3_value_arbitration_r6__smoke02` 已完整通过。
+  - 正式 study `cp_v3_value_arbitration_r6` 已完成 4 screening + 2 confirmatory，耗时约 1h46m，符合 10h 训练窗口要求。
+- 正式结论：
+  - r6 全部 trial/confirm 仍为 `shadow_only`，不得 promotion。
+  - screening champion `trial_01` 有恢复迹象：`annual_return=0.4621`，`sharpe=1.8533`，`cash_timing_quality_1d=-0.0026`。
+  - confirmatory champion `confirm_01` 未站住：`annual_return=-0.0913`，`sharpe=-0.4327`，`max_drawdown=-0.0829`，`cash_timing_quality_1d=-0.0033`。
+  - confirm_01 的 sell-side 很强：`reduce_success_rate_5d=1.0000`，`exit_timeliness_rate_5d=0.7500`，`sell_release_forward_alignment_5d=0.2593`。
+  - confirm_01 的 deploy/value 失败：`value_arbitration_forward_alignment_5d=-0.0625`，`alpha_opportunity_forward_alignment_5d=-0.0739`，`cash_defense_timing_quality_1d=-0.0304`。
+- 当前本质判断：
+  - 动作语义污染已基本不是主瓶颈，`semantic_conflict_rate=0.0019`。
+  - r6 证明“统一价值仲裁”方向可运行，但单一 value scalar 会偏向更容易学习的 sell release，不能稳定保护 alpha deployment。
+  - 当前主矛盾升级为：deploy value、release value、defense value 三种价值的门控仲裁，以及预算剪裁不能吞掉高价值生命周期意图。
+- 当前继承关系：
+  - 收益/sharpe 最强继承证据仍是 r2 confirm_02。
+  - cash timing 收敛证据仍是 r4 confirm_01。
+  - sell/exit 与动作仲裁结构证据是 r5 confirm_02。
+  - r6 是价值仲裁初版证据：可运行、能学 sell release，但不能替代收益主线。
+- 治理状态：
+  - `run_continuous_policy_protocol.py` 已修复固定 `teacher_action_rows >= 10000` 阈值的结构性误判，新增自适应有效下限。
+  - r6 confirm_01 复算后训练证据可满足有效下限，但 promotion 仍被收益、回撤、cash timing 与 active 对照否决。
+- 下一轮优先级：
+  - P0：不 promotion r6，不改 live/default 主线。
+  - P1：实现 r6b 三值仲裁：`deploy_value` 负责高 alpha 部署，`release_value` 负责卖出释放资金，`defense_value` 负责现金防御。
+  - P2：把预算层改成容量/风险约束器，而不是动作意图吞噬器；重点压低 clipped order translation drift。
+  - P3：重新做 4 格正式 study，只比较三值门控与预算剪裁修复，不扩大 backbone。
+  - P4：只有 r6b 同时恢复收益与价值对齐后，再考虑 deep_alpha prior 融合或 offline RL。

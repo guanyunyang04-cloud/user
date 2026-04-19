@@ -807,3 +807,59 @@
   - r4 的价值是把问题进一步缩窄：现金时机已接近过线，但卖出排序与动作仲裁没有稳定合一。
   - 若继续下一轮，必须使用新 tag；不要复用 `cp_v3_split_heads_cash_timing_r4`。
   - 下一轮优先实现 `lifecycle_action_arbitration`、held-only sell rank/pairwise loss 与 budget clipped-intent loss。
+
+## 2026-04-19 split_heads_lifecycle_arbitration_r5 操作记录
+- 已完成 dry-run：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_lifecycle_arbitration_r5 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_lifecycle_arbitration_r5__dry_run --dry-run`
+  - dry-run 验证了四格候选：`result_value_v2/result_value_v4b` × `cash_translation_guard_v2/cash_translation_sell_guard_v3`，固定 `active_execution_strategy + split_v2 + alpha_result_value_budget_split_v5`。
+- 已完成 smoke：
+  - 首次 smoke eval 发现 `clipped_intent_risk_feedback` 泄露成 feature，已修复；后续不要重新引入任何 `*_feedback` label 写回列作为 feature。
+  - 干净 smoke train：`cp_lifecycle_arbitration_smoke_train_r2`
+  - 干净 smoke eval：`cp_lifecycle_arbitration_smoke_eval_r2`
+  - 干净 smoke audit：`cp_lifecycle_arbitration_smoke_audit_r2`
+  - smoke 关键指标：`sell_rank_forward_alignment_5d=0.1089`，`lifecycle_sell_gate_forward_alignment_5d=0.1419`，`cash_timing_quality_1d=0.0419`，`semantic_conflict_rate=0.0000`，`order_translation_conflict_rate=0.0625`。
+- 已完成正式 10h 前台 study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_lifecycle_arbitration_r5 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_lifecycle_arbitration_r5`
+  - 实际用时约 81 分钟，未中断既有训练，`completed_trial_count=4`，`confirmatory_completed_trial_count=2`，`latest_state_restored=true`。
+- 产物路径：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_lifecycle_arbitration_r5/study_summary.json`
+  - ranking：`daily_research/output/continuous_policy/studies/cp_v3_lifecycle_arbitration_r5/trial_ranking.csv`
+  - final protocol：`daily_research/output/continuous_policy/protocols/cp_v3_lifecycle_arbitration_r5__confirm_02/protocol_summary.json`
+  - final audit：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_lifecycle_arbitration_r5__confirm_02__audit.json`
+  - final ledger：`daily_research/output/continuous_policy/analysis/conclusion_ledgers/cp_v3_lifecycle_arbitration_r5__confirm_02__ledger.json`
+- 当前操作结论：
+  - r5 不 promotion，所有 trial/confirm 仍为 `shadow_only`。
+  - final champion `confirm_02` 指标：`annual_return=0.1529`，`sharpe=0.6942`，`max_drawdown=-0.0941`，`reduce_success_rate_5d=0.5957`，`exit_timeliness_rate_5d=0.7333`，`cash_timing_quality_1d=-0.1379`，`semantic_conflict_rate=0.0163`，`order_translation_conflict_rate=0.0380`。
+  - 不要把 r5 当作收益主线；它是生命周期动作仲裁与卖出排序学习证据。
+  - 若继续下一轮，必须使用新 tag；不要复用 `cp_v3_lifecycle_arbitration_r5`。
+  - 下一轮优先实现 `cash/deployment/value arbitration`，让 alpha opportunity、sell rank、cash risk 在同一结果价值目标下仲裁，而不是继续单独堆 sell-side loss。
+
+## 2026-04-19 r6 操作状态
+- 已执行命令族：
+  - dry-run：`run_self_optimizing_study --search-profile split_heads_value_arbitration_r6 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_value_arbitration_r6__dry_run --dry-run`
+  - smoke：`cp_v3_value_arbitration_r6__smoke02` 已完整闭环。
+  - formal：`run_self_optimizing_study --search-profile split_heads_value_arbitration_r6 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_value_arbitration_r6`
+- 输出位置：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_value_arbitration_r6/study_summary.json`
+  - trial ranking：`daily_research/output/continuous_policy/studies/cp_v3_value_arbitration_r6/trial_ranking.csv`
+  - champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_value_arbitration_r6__confirm_01/protocol_summary.json`
+  - champion audit：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_value_arbitration_r6__confirm_01__audit.json`
+- 当前操作结论：
+  - r6 不 promotion，所有 trial/confirm 仍为 `shadow_only`。
+  - 不得把 `cp_v3_value_arbitration_r6__confirm_01` 切到 live/default。
+  - 不得把 `alpha_result_value_budget_split_v6` 或 `result_value_v5` 设为默认主线。
+  - r6 的可继承资产是：value/arbitration labels、heads、diagnostics、study profile、finite guard，以及“单标量仲裁偏向 sell release”的实证结论。
+- 下一次执行禁区：
+  - 不要继续单纯加大 r6 loss 权重。
+  - 不要扩 backbone 或延长训练来掩盖 deploy/value 对齐为负的问题。
+  - 不要因为 `reduce_success_rate_5d=1.0000` 与 `exit_timeliness_rate_5d=0.7500` 单项好看就忽略负收益。
+- 下一次执行建议 tag：
+  - `cp_v3_value_arbitration_r6b_three_value_gate`
+- 下一次优先实现：
+  - 把单一 `value_arbitration_target` 拆成 `deploy_value_target / release_value_target / defense_value_target`。
+  - 增加三值门控或 mixture arbitration，让 deploy/release/defense 竞争而不是平均。
+  - 预算层新增 clipped-intent preservation：高 deploy/hold value 时不得被剪成不可见 add/hold，小权重死区必须进入 loss/diagnostics。
+  - study 固定 4 格小矩阵，先验证三值门控与预算剪裁修复，再谈更大模型。
+- 训练证据门槛：
+  - 已修复固定 `teacher_action_rows >= 10000` 的结构性误判；未来 protocol 会输出 `effective_min_teacher_action_rows`。
+  - 该修正不代表任何历史 run 自动 promotion；所有 promotion 仍必须同时过收益、回撤、cash timing、active 对照与 shadow continuity。

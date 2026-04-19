@@ -46,6 +46,24 @@ SAMPLE_LABEL_COLUMNS = {
     "reduce_fraction_target",
     "exit_hazard_target",
     "sell_attribution_score",
+    "sell_rank_score",
+    "lifecycle_sell_gate",
+    "large_upside_1d_target",
+    "alpha_opportunity_value",
+    "hold_continuation_value",
+    "sell_release_value",
+    "cash_defense_value",
+    "deployment_opportunity_cost",
+    "risk_adjusted_action_value",
+    "value_arbitration_target",
+    "deploy_value_target",
+    "release_value_target",
+    "defense_value_target",
+    "deploy_gate_target",
+    "release_gate_target",
+    "defense_gate_target",
+    "clipped_intent_risk",
+    "holding_flag_target",
     "forward_benchmark_return_1d",
     "forward_benchmark_return_3d",
     "forward_benchmark_return_5d",
@@ -75,6 +93,8 @@ BUDGET_OBJECTIVE_RESULT_VALUE_V2 = "result_value_v2"
 BUDGET_OBJECTIVE_RESULT_VALUE_V3 = "result_value_v3"
 BUDGET_OBJECTIVE_RESULT_VALUE_V4 = "result_value_v4"
 BUDGET_OBJECTIVE_RESULT_VALUE_V4B = "result_value_v4b"
+BUDGET_OBJECTIVE_RESULT_VALUE_V5 = "result_value_v5"
+BUDGET_OBJECTIVE_RESULT_VALUE_V6 = "result_value_v6"
 BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
     DEFAULT_BUDGET_OBJECTIVE,
     BUDGET_OBJECTIVE_RESULT_VALUE_V1,
@@ -82,6 +102,8 @@ BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
     BUDGET_OBJECTIVE_RESULT_VALUE_V3,
     BUDGET_OBJECTIVE_RESULT_VALUE_V4,
     BUDGET_OBJECTIVE_RESULT_VALUE_V4B,
+    BUDGET_OBJECTIVE_RESULT_VALUE_V5,
+    BUDGET_OBJECTIVE_RESULT_VALUE_V6,
 )
 DEFAULT_OUTCOME_HORIZONS = (1, 3, 5, 10, 20)
 
@@ -277,6 +299,67 @@ def build_action_outcome_frame(
     return working
 
 
+def _annotate_label_frame_with_execution_feedback(
+    label_frame: pd.DataFrame,
+    step_actions: list[dict[str, Any]],
+) -> pd.DataFrame:
+    if label_frame.empty:
+        return label_frame
+    working = label_frame.copy()
+    if not step_actions:
+        working["clipped_intent_risk"] = 0.0
+        return working
+    feedback = pd.DataFrame(step_actions)
+    if feedback.empty or "stock" not in feedback.columns:
+        working["clipped_intent_risk"] = 0.0
+        return working
+    feedback["stock"] = feedback["stock"].astype(str).str.upper()
+    active_intent = feedback.get("model_action", pd.Series("", index=feedback.index)).astype(str).str.lower().isin(
+        {"open", "add", "reduce", "exit"}
+    )
+    weight_change = feedback.get("weight_change_action", pd.Series("", index=feedback.index)).astype(str).str.lower()
+    model_action = feedback.get("model_action", pd.Series("", index=feedback.index)).astype(str).str.lower()
+    order_drift = active_intent & (model_action != weight_change)
+    drift_sources = pd.DataFrame(index=feedback.index)
+    for column in (
+        "budget_dropped",
+        "semantic_delta_guarded",
+        "budget_split_bound_guarded",
+        "forced_zero",
+    ):
+        drift_sources[column] = feedback.get(column, pd.Series(False, index=feedback.index)).astype(bool)
+    clipped_risk = (
+        order_drift.astype(float) * 0.60
+        + drift_sources["budget_dropped"].astype(float) * 0.55
+        + drift_sources["semantic_delta_guarded"].astype(float) * 0.35
+        + drift_sources["budget_split_bound_guarded"].astype(float) * 0.35
+        + drift_sources["forced_zero"].astype(float) * 0.20
+    ).clip(0.0, 1.0)
+    feedback = feedback.assign(
+        stock_key=feedback["stock"].astype(str).str.upper(),
+        clipped_intent_risk_feedback=clipped_risk.to_numpy(dtype=float),
+    )
+    working["_feedback_stock_key"] = working["stock"].astype(str).str.upper()
+    merged = working.merge(
+        feedback.loc[:, ["stock_key", "clipped_intent_risk_feedback"]],
+        how="left",
+        left_on="_feedback_stock_key",
+        right_on="stock_key",
+        suffixes=("", "_feedback"),
+    )
+    merged.index = working.index
+    merged = merged.drop(columns=[column for column in ("_feedback_stock_key", "stock_key") if column in merged.columns])
+    feedback_risk = (
+        merged.pop("clipped_intent_risk_feedback")
+        if "clipped_intent_risk_feedback" in merged.columns
+        else pd.Series(0.0, index=merged.index, dtype=float)
+    )
+    merged["clipped_intent_risk"] = (
+        pd.to_numeric(feedback_risk, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    )
+    return merged
+
+
 def compute_continuity_metrics(
     *,
     prepared: PreparedPolicyInputs,
@@ -305,6 +388,27 @@ def compute_continuity_metrics(
         hold_rows = action_outcomes.loc[action_lookup == "hold"]
         open_rows = action_outcomes.loc[action_lookup == "open"]
         reduce_rows = action_outcomes.loc[action_lookup == "reduce"]
+        for optional_column in (
+            "sell_rank_score",
+            "lifecycle_sell_gate",
+            "large_upside_1d_target",
+            "alpha_opportunity_value",
+            "hold_continuation_value",
+            "sell_release_value",
+            "cash_defense_value",
+            "deployment_opportunity_cost",
+            "risk_adjusted_action_value",
+            "value_arbitration_target",
+            "deploy_value_target",
+            "release_value_target",
+            "defense_value_target",
+            "deploy_gate_target",
+            "release_gate_target",
+            "defense_gate_target",
+            "clipped_intent_risk",
+        ):
+            if optional_column not in action_outcomes.columns:
+                action_outcomes[optional_column] = 0.0
         add_forward_5d = add_rows["forward_excess_5d"].dropna()
         hold_forward_5d = hold_rows["forward_excess_5d"].dropna()
         open_forward_5d = open_rows["forward_excess_5d"].dropna()
@@ -417,6 +521,131 @@ def compute_continuity_metrics(
         metrics["sell_selection_hit_rate_5d"] = (
             float(sell_selection_hits / len(sell_selection_spreads)) if sell_selection_spreads else 0.0
         )
+        arbitration_forward_5d = pd.to_numeric(action_outcomes["forward_excess_5d"], errors="coerce")
+        alpha_signal_all = pd.to_numeric(action_outcomes["alpha_opportunity_value"], errors="coerce")
+        value_signal_all = pd.to_numeric(action_outcomes["value_arbitration_target"], errors="coerce")
+        deployment_signal_all = pd.to_numeric(action_outcomes["deployment_opportunity_cost"], errors="coerce")
+        large_upside_signal_all = pd.to_numeric(action_outcomes["large_upside_1d_target"], errors="coerce")
+        risk_action_signal_all = pd.to_numeric(action_outcomes["risk_adjusted_action_value"], errors="coerce")
+        deploy_value_signal_all = pd.to_numeric(action_outcomes["deploy_value_target"], errors="coerce")
+        deploy_gate_signal_all = pd.to_numeric(action_outcomes["deploy_gate_target"], errors="coerce")
+        for signal_name, signal_values, metric_name in (
+            ("alpha_opportunity_value", alpha_signal_all, "alpha_opportunity_forward_alignment_5d"),
+            ("value_arbitration_target", value_signal_all, "value_arbitration_forward_alignment_5d"),
+            ("deployment_opportunity_cost", deployment_signal_all, "deployment_opportunity_forward_alignment_5d"),
+            ("large_upside_1d_target", large_upside_signal_all, "large_upside_forward_alignment_5d"),
+            ("risk_adjusted_action_value", risk_action_signal_all, "risk_adjusted_action_forward_alignment_5d"),
+            ("deploy_value_target", deploy_value_signal_all, "deploy_value_forward_alignment_5d"),
+            ("deploy_gate_target", deploy_gate_signal_all, "deploy_gate_forward_alignment_5d"),
+        ):
+            valid_signal = signal_values.notna() & arbitration_forward_5d.notna()
+            metrics[metric_name] = (
+                float(_safe_corrcoef(signal_values.loc[valid_signal], arbitration_forward_5d.loc[valid_signal]))
+                if int(valid_signal.sum()) >= 2
+                else 0.0
+            )
+        cash_defense_signal_all = pd.to_numeric(action_outcomes["cash_defense_value"], errors="coerce")
+        defense_value_signal_all = pd.to_numeric(action_outcomes["defense_value_target"], errors="coerce")
+        defense_gate_signal_all = pd.to_numeric(action_outcomes["defense_gate_target"], errors="coerce")
+        benchmark_1d_all = pd.to_numeric(action_outcomes["forward_benchmark_return_1d"], errors="coerce")
+        cash_valid = cash_defense_signal_all.notna() & benchmark_1d_all.notna()
+        metrics["cash_defense_timing_quality_1d"] = (
+            float(-_safe_corrcoef(cash_defense_signal_all.loc[cash_valid], benchmark_1d_all.loc[cash_valid]))
+            if int(cash_valid.sum()) >= 2
+            else 0.0
+        )
+        defense_value_valid = defense_value_signal_all.notna() & benchmark_1d_all.notna()
+        metrics["defense_value_timing_quality_1d"] = (
+            float(-_safe_corrcoef(defense_value_signal_all.loc[defense_value_valid], benchmark_1d_all.loc[defense_value_valid]))
+            if int(defense_value_valid.sum()) >= 2
+            else 0.0
+        )
+        defense_gate_valid = defense_gate_signal_all.notna() & benchmark_1d_all.notna()
+        metrics["defense_gate_timing_quality_1d"] = (
+            float(-_safe_corrcoef(defense_gate_signal_all.loc[defense_gate_valid], benchmark_1d_all.loc[defense_gate_valid]))
+            if int(defense_gate_valid.sum()) >= 2
+            else 0.0
+        )
+        metrics["avg_alpha_opportunity_value"] = float(alpha_signal_all.fillna(0.0).mean())
+        metrics["avg_hold_continuation_value"] = float(pd.to_numeric(action_outcomes["hold_continuation_value"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_sell_release_value"] = float(pd.to_numeric(action_outcomes["sell_release_value"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_cash_defense_value"] = float(cash_defense_signal_all.fillna(0.0).mean())
+        metrics["avg_deployment_opportunity_cost"] = float(deployment_signal_all.fillna(0.0).mean())
+        metrics["avg_value_arbitration_target"] = float(value_signal_all.fillna(0.0).mean())
+        metrics["avg_deploy_value_target"] = float(deploy_value_signal_all.fillna(0.0).mean())
+        metrics["avg_release_value_target"] = float(pd.to_numeric(action_outcomes["release_value_target"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_defense_value_target"] = float(defense_value_signal_all.fillna(0.0).mean())
+        metrics["avg_deploy_gate_target"] = float(deploy_gate_signal_all.fillna(0.0).mean())
+        metrics["avg_release_gate_target"] = float(pd.to_numeric(action_outcomes["release_gate_target"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_defense_gate_target"] = float(defense_gate_signal_all.fillna(0.0).mean())
+        held_rank_rows = held_decision_rows.copy()
+        if not held_rank_rows.empty:
+            rank_signal = pd.to_numeric(held_rank_rows["sell_rank_score"], errors="coerce")
+            lifecycle_signal = pd.to_numeric(held_rank_rows["lifecycle_sell_gate"], errors="coerce")
+            sell_release_signal = pd.to_numeric(held_rank_rows["sell_release_value"], errors="coerce")
+            release_value_signal = pd.to_numeric(held_rank_rows["release_value_target"], errors="coerce")
+            release_gate_signal = pd.to_numeric(held_rank_rows["release_gate_target"], errors="coerce")
+            hold_value_signal = pd.to_numeric(held_rank_rows["hold_continuation_value"], errors="coerce")
+            clip_signal = pd.to_numeric(held_rank_rows["clipped_intent_risk"], errors="coerce")
+            forward_5d = pd.to_numeric(held_rank_rows["forward_excess_5d"], errors="coerce")
+            valid_rank = rank_signal.notna() & forward_5d.notna()
+            metrics["sell_rank_forward_alignment_5d"] = (
+                float(-_safe_corrcoef(rank_signal.loc[valid_rank], forward_5d.loc[valid_rank]))
+                if int(valid_rank.sum()) >= 2
+                else 0.0
+            )
+            valid_gate = lifecycle_signal.notna() & forward_5d.notna()
+            metrics["lifecycle_sell_gate_forward_alignment_5d"] = (
+                float(-_safe_corrcoef(lifecycle_signal.loc[valid_gate], forward_5d.loc[valid_gate]))
+                if int(valid_gate.sum()) >= 2
+                else 0.0
+            )
+            valid_sell_release = sell_release_signal.notna() & forward_5d.notna()
+            metrics["sell_release_forward_alignment_5d"] = (
+                float(-_safe_corrcoef(sell_release_signal.loc[valid_sell_release], forward_5d.loc[valid_sell_release]))
+                if int(valid_sell_release.sum()) >= 2
+                else 0.0
+            )
+            valid_release_value = release_value_signal.notna() & forward_5d.notna()
+            metrics["release_value_forward_alignment_5d"] = (
+                float(-_safe_corrcoef(release_value_signal.loc[valid_release_value], forward_5d.loc[valid_release_value]))
+                if int(valid_release_value.sum()) >= 2
+                else 0.0
+            )
+            valid_release_gate = release_gate_signal.notna() & forward_5d.notna()
+            metrics["release_gate_forward_alignment_5d"] = (
+                float(-_safe_corrcoef(release_gate_signal.loc[valid_release_gate], forward_5d.loc[valid_release_gate]))
+                if int(valid_release_gate.sum()) >= 2
+                else 0.0
+            )
+            valid_hold_value = hold_value_signal.notna() & forward_5d.notna()
+            metrics["hold_continuation_forward_alignment_5d"] = (
+                float(_safe_corrcoef(hold_value_signal.loc[valid_hold_value], forward_5d.loc[valid_hold_value]))
+                if int(valid_hold_value.sum()) >= 2
+                else 0.0
+            )
+            metrics["avg_sell_rank_score"] = float(rank_signal.fillna(0.0).mean())
+            metrics["avg_lifecycle_sell_gate"] = float(lifecycle_signal.fillna(0.0).mean())
+            metrics["avg_clipped_intent_risk"] = float(clip_signal.fillna(0.0).mean())
+            order_conflict = held_rank_rows.get("weight_change_action", held_rank_rows.get("execution_action", pd.Series("", index=held_rank_rows.index))).astype(str) != held_rank_rows.get("model_action", pd.Series("", index=held_rank_rows.index)).astype(str)
+            if bool(order_conflict.any()) and bool((~order_conflict).any()):
+                metrics["clipped_intent_risk_conflict_gap"] = float(
+                    clip_signal.loc[order_conflict].fillna(0.0).mean()
+                    - clip_signal.loc[~order_conflict].fillna(0.0).mean()
+                )
+            else:
+                metrics["clipped_intent_risk_conflict_gap"] = 0.0
+        else:
+            metrics["sell_rank_forward_alignment_5d"] = 0.0
+            metrics["lifecycle_sell_gate_forward_alignment_5d"] = 0.0
+            metrics["sell_release_forward_alignment_5d"] = 0.0
+            metrics["release_value_forward_alignment_5d"] = 0.0
+            metrics["release_gate_forward_alignment_5d"] = 0.0
+            metrics["hold_continuation_forward_alignment_5d"] = 0.0
+            metrics["avg_sell_rank_score"] = 0.0
+            metrics["avg_lifecycle_sell_gate"] = 0.0
+            metrics["avg_clipped_intent_risk"] = 0.0
+            metrics["clipped_intent_risk_conflict_gap"] = 0.0
 
         if not open_rows.empty:
             open_positions = open_rows["date"].map(date_positions).dropna().astype(int)
@@ -565,6 +794,38 @@ def compute_continuity_metrics(
             "premature_sell_share_10d",
             "sell_selection_quality_5d",
             "sell_selection_hit_rate_5d",
+            "alpha_opportunity_forward_alignment_5d",
+            "value_arbitration_forward_alignment_5d",
+            "deployment_opportunity_forward_alignment_5d",
+            "large_upside_forward_alignment_5d",
+            "risk_adjusted_action_forward_alignment_5d",
+            "deploy_value_forward_alignment_5d",
+            "deploy_gate_forward_alignment_5d",
+            "cash_defense_timing_quality_1d",
+            "defense_value_timing_quality_1d",
+            "defense_gate_timing_quality_1d",
+            "sell_rank_forward_alignment_5d",
+            "lifecycle_sell_gate_forward_alignment_5d",
+            "sell_release_forward_alignment_5d",
+            "release_value_forward_alignment_5d",
+            "release_gate_forward_alignment_5d",
+            "hold_continuation_forward_alignment_5d",
+            "avg_sell_rank_score",
+            "avg_lifecycle_sell_gate",
+            "avg_alpha_opportunity_value",
+            "avg_hold_continuation_value",
+            "avg_sell_release_value",
+            "avg_cash_defense_value",
+            "avg_deployment_opportunity_cost",
+            "avg_value_arbitration_target",
+            "avg_deploy_value_target",
+            "avg_release_value_target",
+            "avg_defense_value_target",
+            "avg_deploy_gate_target",
+            "avg_release_gate_target",
+            "avg_defense_gate_target",
+            "avg_clipped_intent_risk",
+            "clipped_intent_risk_conflict_gap",
             "days_to_first_open",
             "cold_start_open_rate",
             "immediate_reversal_rate_3d",
@@ -641,6 +902,21 @@ def compute_continuity_metrics(
         metrics["avg_budget_model_deploy_signal"] = float(turnover_frame["budget_model_deploy_signal"].mean()) if "budget_model_deploy_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_cash_timing_signal"] = float(turnover_frame["budget_model_cash_timing_signal"].mean()) if "budget_model_cash_timing_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_alpha_focus_signal"] = float(turnover_frame["budget_model_alpha_focus_signal"].mean()) if "budget_model_alpha_focus_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_value_arbitration_signal"] = float(turnover_frame["budget_model_value_arbitration_signal"].mean()) if "budget_model_value_arbitration_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_alpha_opportunity_signal"] = float(turnover_frame["budget_model_alpha_opportunity_signal"].mean()) if "budget_model_alpha_opportunity_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_cash_defense_signal"] = float(turnover_frame["budget_model_cash_defense_signal"].mean()) if "budget_model_cash_defense_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_deploy_value_signal"] = float(turnover_frame["budget_model_deploy_value_signal"].mean()) if "budget_model_deploy_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_release_value_signal"] = float(turnover_frame["budget_model_release_value_signal"].mean()) if "budget_model_release_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_defense_value_signal"] = float(turnover_frame["budget_model_defense_value_signal"].mean()) if "budget_model_defense_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_deploy_gate_signal"] = float(turnover_frame["budget_model_deploy_gate_signal"].mean()) if "budget_model_deploy_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_release_gate_signal"] = float(turnover_frame["budget_model_release_gate_signal"].mean()) if "budget_model_release_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_defense_gate_signal"] = float(turnover_frame["budget_model_defense_gate_signal"].mean()) if "budget_model_defense_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_value_arbitration_target"] = float(turnover_frame["avg_value_arbitration_target"].mean()) if "avg_value_arbitration_target" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_alpha_opportunity_value"] = float(turnover_frame["avg_alpha_opportunity_value"].mean()) if "avg_alpha_opportunity_value" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_cash_defense_value"] = float(turnover_frame["avg_cash_defense_value"].mean()) if "avg_cash_defense_value" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_deploy_gate_target"] = float(turnover_frame["avg_deploy_gate_target"].mean()) if "avg_deploy_gate_target" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_release_gate_target"] = float(turnover_frame["avg_release_gate_target"].mean()) if "avg_release_gate_target" in turnover_frame.columns else 0.0
+        metrics["avg_turnover_defense_gate_target"] = float(turnover_frame["avg_defense_gate_target"].mean()) if "avg_defense_gate_target" in turnover_frame.columns else 0.0
     else:
         metrics["avg_position_cap_target"] = 0.0
         metrics["avg_hold_bias_target"] = 0.0
@@ -660,6 +936,21 @@ def compute_continuity_metrics(
         metrics["avg_budget_model_deploy_signal"] = 0.0
         metrics["avg_budget_model_cash_timing_signal"] = 0.0
         metrics["avg_budget_model_alpha_focus_signal"] = 0.0
+        metrics["avg_budget_model_value_arbitration_signal"] = 0.0
+        metrics["avg_budget_model_alpha_opportunity_signal"] = 0.0
+        metrics["avg_budget_model_cash_defense_signal"] = 0.0
+        metrics["avg_budget_model_deploy_value_signal"] = 0.0
+        metrics["avg_budget_model_release_value_signal"] = 0.0
+        metrics["avg_budget_model_defense_value_signal"] = 0.0
+        metrics["avg_budget_model_deploy_gate_signal"] = 0.0
+        metrics["avg_budget_model_release_gate_signal"] = 0.0
+        metrics["avg_budget_model_defense_gate_signal"] = 0.0
+        metrics["avg_turnover_value_arbitration_target"] = 0.0
+        metrics["avg_turnover_alpha_opportunity_value"] = 0.0
+        metrics["avg_turnover_cash_defense_value"] = 0.0
+        metrics["avg_turnover_deploy_gate_target"] = 0.0
+        metrics["avg_turnover_release_gate_target"] = 0.0
+        metrics["avg_turnover_defense_gate_target"] = 0.0
 
     return metrics, action_outcomes
 
@@ -701,6 +992,23 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
             "sell_selection_pressure": 0.0,
             "opportunity_cost_pressure": 0.0,
             "deployment_floor_pressure": 0.0,
+            "alpha_opportunity_value": 0.0,
+            "hold_continuation_value": 0.0,
+            "sell_release_value": 0.0,
+            "cash_defense_value": 0.0,
+            "deployment_opportunity_cost": 0.0,
+            "risk_adjusted_action_value": 0.0,
+            "value_arbitration_target": 0.0,
+            "deploy_value_target": 0.0,
+            "release_value_target": 0.0,
+            "defense_value_target": 0.0,
+            "deploy_gate_target": 0.0,
+            "release_gate_target": 0.0,
+            "defense_gate_target": 0.0,
+            "large_upside_1d_target": 0.0,
+            "arbitration_deploy_pressure": 0.0,
+            "arbitration_sell_pressure": 0.0,
+            "arbitration_cash_pressure": 0.0,
         }
     priority = _safe_label_column(label_frame, "teacher_priority")
     edge = _safe_label_column(label_frame, "teacher_edge")
@@ -713,6 +1021,68 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
     current_weight = _safe_label_column(label_frame, "current_weight")
     holding_flag = _safe_label_column(label_frame, "holding_flag")
     sell_attribution = _safe_label_column(label_frame, "sell_attribution_score")
+    alpha_value = _safe_label_column(label_frame, "alpha_opportunity_value")
+    hold_value = _safe_label_column(label_frame, "hold_continuation_value")
+    sell_release_value = _safe_label_column(label_frame, "sell_release_value")
+    cash_defense_value = _safe_label_column(label_frame, "cash_defense_value")
+    deployment_cost_value = _safe_label_column(label_frame, "deployment_opportunity_cost")
+    risk_adjusted_action_value = _safe_label_column(label_frame, "risk_adjusted_action_value")
+    value_arbitration_target = _safe_label_column(label_frame, "value_arbitration_target", default=0.5)
+    fallback_deploy_value = pd.Series(
+        np.maximum(
+            np.clip(0.56 * deployment_cost_value + 0.34 * alpha_value + 0.10 * _safe_label_column(label_frame, "large_upside_1d_target"), 0.0, 1.0),
+            np.clip(0.62 * hold_value + 0.24 * alpha_value + 0.14 * _safe_label_column(label_frame, "large_upside_1d_target"), 0.0, 1.0),
+        ),
+        index=label_frame.index,
+    )
+    fallback_release_value = pd.Series(
+        np.clip(
+            0.62 * sell_release_value + 0.24 * cash_defense_value + 0.14 * _safe_label_column(label_frame, "lifecycle_sell_gate"),
+            0.0,
+            1.0,
+        ),
+        index=label_frame.index,
+    )
+    fallback_defense_value = pd.Series(
+        np.clip(
+            0.68 * cash_defense_value + 0.20 * (1.0 - alpha_value.clip(0.0, 1.0)) + 0.12 * _safe_label_column(label_frame, "clipped_intent_risk"),
+            0.0,
+            1.0,
+        ),
+        index=label_frame.index,
+    )
+    deploy_value = (
+        _safe_label_column(label_frame, "deploy_value_target", default=0.0).clip(0.0, 1.0)
+        if "deploy_value_target" in label_frame.columns
+        else fallback_deploy_value.clip(0.0, 1.0)
+    )
+    release_value = (
+        _safe_label_column(label_frame, "release_value_target", default=0.0).clip(0.0, 1.0)
+        if "release_value_target" in label_frame.columns
+        else fallback_release_value.clip(0.0, 1.0)
+    )
+    defense_value = (
+        _safe_label_column(label_frame, "defense_value_target", default=0.0).clip(0.0, 1.0)
+        if "defense_value_target" in label_frame.columns
+        else fallback_defense_value.clip(0.0, 1.0)
+    )
+    gate_denominator = deploy_value + release_value + defense_value + 1.0e-6
+    deploy_gate = (
+        _safe_label_column(label_frame, "deploy_gate_target", default=0.0).clip(0.0, 1.0)
+        if "deploy_gate_target" in label_frame.columns
+        else (deploy_value / gate_denominator).clip(0.0, 1.0)
+    )
+    release_gate = (
+        _safe_label_column(label_frame, "release_gate_target", default=0.0).clip(0.0, 1.0)
+        if "release_gate_target" in label_frame.columns
+        else (release_value / gate_denominator).clip(0.0, 1.0)
+    )
+    defense_gate = (
+        _safe_label_column(label_frame, "defense_gate_target", default=0.0).clip(0.0, 1.0)
+        if "defense_gate_target" in label_frame.columns
+        else (defense_value / gate_denominator).clip(0.0, 1.0)
+    )
+    large_upside_target = _safe_label_column(label_frame, "large_upside_1d_target")
     actions = label_frame.get("action_label", pd.Series("", index=label_frame.index)).astype(str)
 
     positive_mask = actions.isin({"open", "add", "hold"})
@@ -878,6 +1248,67 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
             1.0,
         )
     )
+    alpha_value_top = float(alpha_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    deployment_cost_top = float(deployment_cost_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    large_upside_top = float(large_upside_target.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    deploy_value_top = float(deploy_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    deploy_gate_top = float(deploy_gate.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    value_arbitration_mean = float(value_arbitration_target.clip(0.0, 1.0).mean()) if len(value_arbitration_target) else 0.0
+    risk_adjusted_action_mean = float(risk_adjusted_action_value.clip(0.0, 1.0).mean()) if len(risk_adjusted_action_value) else 0.0
+    cash_defense_mean = float(cash_defense_value.clip(0.0, 1.0).mean()) if len(cash_defense_value) else 0.0
+    defense_value_mean = float(defense_value.clip(0.0, 1.0).mean()) if len(defense_value) else 0.0
+    defense_gate_mean = float(defense_gate.clip(0.0, 1.0).mean()) if len(defense_gate) else 0.0
+    hold_value_mean = float(hold_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    if held_weight_total > 1.0e-8:
+        sell_release_mean = float((sell_release_value.clip(0.0, 1.0).where(held_mask, 0.0) * held_weight).sum())
+        release_value_mean = float((release_value.clip(0.0, 1.0).where(held_mask, 0.0) * held_weight).sum())
+        release_gate_mean = float((release_gate.clip(0.0, 1.0).where(held_mask, 0.0) * held_weight).sum())
+    else:
+        sell_release_mean = float(sell_release_value.clip(0.0, 1.0).mean()) if len(sell_release_value) else 0.0
+        release_value_mean = float(release_value.clip(0.0, 1.0).mean()) if len(release_value) else 0.0
+        release_gate_mean = float(release_gate.clip(0.0, 1.0).mean()) if len(release_gate) else 0.0
+    arbitration_deploy_pressure = float(
+        np.clip(
+            0.28 * deploy_value_top
+            + 0.22 * deploy_gate_top
+            + 0.20 * alpha_value_top
+            + 0.16 * deployment_cost_top
+            + 0.08 * large_upside_top
+            + 0.08 * opportunity_cost_pressure
+            - 0.18 * defense_gate_mean
+            - 0.10 * release_gate_mean,
+            0.0,
+            1.0,
+        )
+    )
+    arbitration_sell_pressure = float(
+        np.clip(
+            0.34 * release_value_mean
+            + 0.24 * release_gate_mean
+            + 0.16 * sell_release_mean
+            + 0.12 * sell_selection_pressure
+            + 0.12 * held_sell_pressure
+            + 0.06 * defense_gate_mean
+            - 0.14 * deploy_gate_top
+            - 0.08 * hold_value_mean,
+            0.0,
+            1.0,
+        )
+    )
+    arbitration_cash_pressure = float(
+        np.clip(
+            0.34 * defense_value_mean
+            + 0.26 * defense_gate_mean
+            + 0.16 * cash_defense_mean
+            + 0.14 * forward_benchmark_downside
+            + 0.08 * release_gate_mean
+            + 0.08 * max(risk_score - deploy_score, 0.0)
+            - 0.22 * deploy_gate_top
+            - 0.10 * deploy_value_top,
+            0.0,
+            1.0,
+        )
+    )
     cash_timing_score = float(
         np.clip(
             risk_score * 0.54
@@ -928,6 +1359,23 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
         "sell_selection_pressure": sell_selection_pressure,
         "opportunity_cost_pressure": opportunity_cost_pressure,
         "deployment_floor_pressure": deployment_floor_pressure,
+        "alpha_opportunity_value": alpha_value_top,
+        "hold_continuation_value": hold_value_mean,
+        "sell_release_value": sell_release_mean,
+        "cash_defense_value": cash_defense_mean,
+        "deployment_opportunity_cost": deployment_cost_top,
+        "risk_adjusted_action_value": risk_adjusted_action_mean,
+        "value_arbitration_target": value_arbitration_mean,
+        "deploy_value_target": deploy_value_top,
+        "release_value_target": release_value_mean,
+        "defense_value_target": defense_value_mean,
+        "deploy_gate_target": deploy_gate_top,
+        "release_gate_target": release_gate_mean,
+        "defense_gate_target": defense_gate_mean,
+        "large_upside_1d_target": large_upside_top,
+        "arbitration_deploy_pressure": arbitration_deploy_pressure,
+        "arbitration_sell_pressure": arbitration_sell_pressure,
+        "arbitration_cash_pressure": arbitration_cash_pressure,
     }
 
 
@@ -945,6 +1393,8 @@ def _apply_budget_objective_targets(
     diagnostics["budget_objective_is_result_value_v3"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V3 else 0.0
     diagnostics["budget_objective_is_result_value_v4"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V4 else 0.0
     diagnostics["budget_objective_is_result_value_v4b"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V4B else 0.0
+    diagnostics["budget_objective_is_result_value_v5"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V5 else 0.0
+    diagnostics["budget_objective_is_result_value_v6"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V6 else 0.0
 
     adjusted = dict(global_targets)
     adjusted["budget_risk_signal_target"] = float(np.clip(signals["risk_score"], 0.0, 1.0))
@@ -1061,6 +1511,394 @@ def _apply_budget_objective_targets(
     forward_benchmark_downside = float(signals["forward_benchmark_downside"])
     opportunity_cost = float(signals["opportunity_cost_pressure"])
     deployment_floor = float(signals["deployment_floor_pressure"])
+    alpha_opportunity_value = float(signals["alpha_opportunity_value"])
+    hold_continuation_value = float(signals["hold_continuation_value"])
+    sell_release_value = float(signals["sell_release_value"])
+    cash_defense_value = float(signals["cash_defense_value"])
+    deployment_opportunity_cost = float(signals["deployment_opportunity_cost"])
+    value_arbitration_target = float(signals["value_arbitration_target"])
+    deploy_value_target = float(signals["deploy_value_target"])
+    release_value_target = float(signals["release_value_target"])
+    defense_value_target = float(signals["defense_value_target"])
+    deploy_gate_target = float(signals["deploy_gate_target"])
+    release_gate_target = float(signals["release_gate_target"])
+    defense_gate_target = float(signals["defense_gate_target"])
+    large_upside_1d_target = float(signals["large_upside_1d_target"])
+    arbitration_deploy_pressure = float(signals["arbitration_deploy_pressure"])
+    arbitration_sell_pressure = float(signals["arbitration_sell_pressure"])
+    arbitration_cash_pressure = float(signals["arbitration_cash_pressure"])
+    if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V6:
+        release_dominance = max(release_gate_target - deploy_gate_target, 0.0)
+        defense_dominance = max(defense_gate_target - deploy_gate_target, 0.0)
+        deploy_dominance = max(deploy_gate_target - max(release_gate_target, defense_gate_target), 0.0)
+        deploy_release_spread = deploy_value_target - release_value_target
+        deploy_defense_spread = deploy_value_target - defense_value_target
+        sharpened_risk = float(
+            np.clip(
+                0.42 * risk
+                + 0.22 * release_value_target
+                + 0.18 * defense_value_target
+                + 0.12 * release_gate_target
+                + 0.12 * defense_gate_target
+                + 0.08 * forward_benchmark_downside
+                - 0.14 * deploy_gate_target
+                - 0.10 * deploy_value_target,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_deploy = float(
+            np.clip(
+                0.34 * deploy
+                + 0.24 * deploy_value_target
+                + 0.18 * deploy_gate_target
+                + 0.14 * alpha_opportunity_value
+                + 0.10 * deployment_opportunity_cost
+                + 0.08 * large_upside_1d_target
+                - 0.14 * defense_gate_target
+                - 0.10 * release_gate_target,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_cash = float(
+            np.clip(
+                0.36 * cash_timing
+                + 0.24 * defense_value_target
+                + 0.20 * defense_gate_target
+                + 0.10 * max(risk_deploy_gap, 0.0)
+                + 0.08 * release_gate_target
+                - 0.22 * deploy_gate_target
+                - 0.12 * deploy_value_target,
+                0.0,
+                1.0,
+            )
+        )
+        min_gross = float(
+            np.clip(
+                0.24
+                + 0.30 * deployment_floor
+                + 0.22 * deploy_gate_target
+                + 0.12 * deploy_dominance
+                - 0.18 * defense_gate_target
+                - 0.10 * release_dominance,
+                0.20,
+                0.72,
+            )
+        )
+        min_candidate = int(
+            np.clip(
+                round(2.0 + deploy_gate_target * 5.0 + deploy_dominance * 3.0 + large_upside_1d_target * 2.0 - defense_gate_target * 1.4),
+                2,
+                9,
+            )
+        )
+        adjusted["budget_risk_signal_target"] = sharpened_risk
+        adjusted["budget_deploy_signal_target"] = sharpened_deploy
+        adjusted["budget_cash_timing_signal_target"] = sharpened_cash
+        adjusted["budget_alpha_focus_signal_target"] = float(
+            np.clip(
+                0.34 * alpha_alignment
+                + 0.24 * deploy_value_target
+                + 0.20 * deploy_gate_target
+                + 0.14 * alpha_opportunity_value
+                + 0.08 * large_upside_1d_target,
+                0.0,
+                1.0,
+            )
+        )
+        adjusted["gross_exposure_target"] = float(
+            np.clip(
+                base_gross
+                + 0.16 * (sharpened_deploy - 0.36)
+                + 0.10 * deploy_dominance
+                + 0.08 * max(deploy_release_spread, 0.0)
+                + 0.05 * alpha_opportunity_value
+                - 0.14 * sharpened_cash
+                - 0.10 * defense_dominance
+                - 0.08 * release_dominance,
+                min_gross,
+                0.96,
+            )
+        )
+        adjusted["candidate_budget"] = float(
+            int(
+                np.clip(
+                    round(
+                        0.36 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                        + 0.26 * candidate_hint
+                        + 2.6 * deploy_gate_target
+                        + 1.5 * deploy_dominance
+                        + 1.0 * alpha_opportunity_value
+                        - 1.3 * defense_gate_target
+                        - 0.7 * release_gate_target
+                    ),
+                    min_candidate,
+                    14,
+                )
+            )
+        )
+        adjusted["turnover_budget"] = float(
+            np.clip(
+                float(adjusted.get("turnover_budget", 0.10) or 0.10)
+                + 0.10 * release_gate_target
+                + 0.08 * release_value_target
+                + 0.06 * max(deploy_release_spread, 0.0)
+                + 0.04 * deploy_gate_target
+                + 0.04 * sharpened_cash
+                - 0.04 * defense_dominance,
+                0.08,
+                0.86,
+            )
+        )
+        adjusted["max_position_weight_target"] = float(
+            np.clip(
+                float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
+                + 0.020 * deploy_gate_target
+                + 0.016 * deploy_value_target
+                + 0.010 * alpha_opportunity_value
+                - 0.012 * defense_gate_target
+                - 0.008 * release_gate_target,
+                0.07,
+                0.29,
+            )
+        )
+        adjusted["hold_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("hold_bias_target", 0.18) or 0.18)
+                + 0.14 * hold_continuation_value
+                + 0.14 * deploy_gate_target
+                + 0.10 * deploy_value_target
+                + 0.06 * alpha_opportunity_value
+                - 0.14 * release_gate_target
+                - 0.08 * defense_gate_target,
+                0.10,
+                0.96,
+            )
+        )
+        adjusted["reduce_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("reduce_bias_target", 0.10) or 0.10)
+                + 0.18 * release_gate_target
+                + 0.14 * release_value_target
+                + 0.06 * defense_gate_target
+                - 0.08 * deploy_gate_target
+                - 0.06 * deploy_value_target,
+                0.0,
+                0.66,
+            )
+        )
+        adjusted["exit_patience_target"] = float(
+            np.clip(
+                float(adjusted.get("exit_patience_target", 0.20) or 0.20)
+                + 0.12 * deploy_gate_target
+                + 0.10 * deploy_value_target
+                + 0.08 * hold_continuation_value
+                - 0.16 * release_gate_target
+                - 0.10 * defense_gate_target,
+                0.05,
+                0.95,
+            )
+        )
+        adjusted["reentry_guard_target"] = float(
+            np.clip(
+                float(adjusted.get("reentry_guard_target", 0.0) or 0.0)
+                + 0.10 * reentry_guard
+                + 0.10 * defense_gate_target
+                + 0.08 * max(-deploy_defense_spread, 0.0)
+                + 0.04 * release_gate_target
+                - 0.10 * deploy_gate_target,
+                0.0,
+                0.45,
+            )
+        )
+        return adjusted, diagnostics
+    if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V5:
+        positive_gap = max(risk_deploy_gap, 0.0)
+        opportunity_gap = max(arbitration_deploy_pressure - arbitration_cash_pressure, 0.0)
+        value_capital_bias = max(value_arbitration_target - 0.50, 0.0) * 2.0
+        value_defense_bias = max(0.50 - value_arbitration_target, 0.0) * 2.0
+        sharpened_risk = float(
+            np.clip(
+                0.56 * risk
+                + 0.24 * cash_defense_value
+                + 0.16 * arbitration_cash_pressure
+                + 0.16 * arbitration_sell_pressure
+                + 0.10 * forward_benchmark_downside
+                - 0.12 * arbitration_deploy_pressure
+                - 0.08 * alpha_opportunity_value,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_deploy = float(
+            np.clip(
+                0.42 * deploy
+                + 0.24 * arbitration_deploy_pressure
+                + 0.18 * alpha_opportunity_value
+                + 0.12 * deployment_opportunity_cost
+                + 0.08 * large_upside_1d_target
+                + 0.06 * opportunity_cost
+                - 0.16 * arbitration_cash_pressure
+                - 0.10 * cash_defense_value,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_cash = float(
+            np.clip(
+                0.42 * cash_timing
+                + 0.26 * arbitration_cash_pressure
+                + 0.16 * cash_defense_value
+                + 0.10 * positive_gap
+                + 0.08 * arbitration_sell_pressure
+                + 0.06 * value_defense_bias
+                - 0.24 * arbitration_deploy_pressure
+                - 0.14 * alpha_opportunity_value,
+                0.0,
+                1.0,
+            )
+        )
+        min_gross = float(
+            np.clip(
+                0.20
+                + 0.28 * deployment_floor
+                + 0.18 * arbitration_deploy_pressure
+                + 0.08 * value_capital_bias
+                - 0.16 * sharpened_cash,
+                0.18,
+                0.64,
+            )
+        )
+        min_candidate = int(
+            np.clip(
+                round(2.0 + arbitration_deploy_pressure * 5.0 + large_upside_1d_target * 2.0 - sharpened_cash * 1.2),
+                2,
+                8,
+            )
+        )
+        adjusted["budget_risk_signal_target"] = sharpened_risk
+        adjusted["budget_deploy_signal_target"] = sharpened_deploy
+        adjusted["budget_cash_timing_signal_target"] = sharpened_cash
+        adjusted["budget_alpha_focus_signal_target"] = float(
+            np.clip(
+                0.50 * alpha_alignment
+                + 0.24 * alpha_opportunity_value
+                + 0.14 * deployment_opportunity_cost
+                + 0.12 * large_upside_1d_target,
+                0.0,
+                1.0,
+            )
+        )
+        adjusted["gross_exposure_target"] = float(
+            np.clip(
+                base_gross
+                + 0.14 * (sharpened_deploy - 0.38)
+                + 0.07 * arbitration_deploy_pressure
+                + 0.05 * alpha_opportunity_value
+                + 0.04 * value_capital_bias
+                - 0.16 * sharpened_cash
+                - 0.10 * arbitration_sell_pressure
+                - 0.08 * max(sharpened_risk - sharpened_deploy, 0.0),
+                min_gross,
+                0.95,
+            )
+        )
+        adjusted["candidate_budget"] = float(
+            int(
+                np.clip(
+                    round(
+                        0.40 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                        + 0.30 * candidate_hint
+                        + 2.1 * arbitration_deploy_pressure
+                        + 1.2 * alpha_opportunity_value
+                        + 0.9 * large_upside_1d_target
+                        - 1.4 * sharpened_cash
+                        - 0.8 * arbitration_sell_pressure
+                    ),
+                    min_candidate,
+                    14,
+                )
+            )
+        )
+        adjusted["turnover_budget"] = float(
+            np.clip(
+                float(adjusted.get("turnover_budget", 0.10) or 0.10)
+                + 0.11 * arbitration_sell_pressure
+                + 0.08 * sell_release_value
+                + 0.06 * sharpened_cash
+                + 0.05 * opportunity_gap
+                + 0.03 * large_upside_1d_target
+                - 0.04 * value_capital_bias
+                - 0.04 * alpha_opportunity_value * max(sharpened_deploy - sharpened_risk, 0.0),
+                0.08,
+                0.86,
+            )
+        )
+        adjusted["max_position_weight_target"] = float(
+            np.clip(
+                float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
+                + 0.022 * alpha_opportunity_value
+                + 0.018 * arbitration_deploy_pressure
+                + 0.010 * large_upside_1d_target
+                - 0.014 * sharpened_cash
+                - 0.010 * arbitration_sell_pressure,
+                0.07,
+                0.28,
+            )
+        )
+        adjusted["hold_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("hold_bias_target", 0.18) or 0.18)
+                + 0.16 * hold_continuation_value
+                + 0.12 * alpha_opportunity_value
+                + 0.08 * value_capital_bias
+                + 0.05 * large_upside_1d_target
+                - 0.18 * arbitration_sell_pressure
+                - 0.08 * sharpened_cash,
+                0.10,
+                0.95,
+            )
+        )
+        adjusted["reduce_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("reduce_bias_target", 0.10) or 0.10)
+                + 0.20 * arbitration_sell_pressure
+                + 0.12 * sell_release_value
+                + 0.06 * sharpened_cash
+                - 0.05 * hold_continuation_value
+                - 0.05 * alpha_opportunity_value,
+                0.0,
+                0.66,
+            )
+        )
+        adjusted["exit_patience_target"] = float(
+            np.clip(
+                float(adjusted.get("exit_patience_target", 0.20) or 0.20)
+                + 0.12 * hold_continuation_value
+                + 0.10 * alpha_opportunity_value
+                + 0.06 * value_capital_bias
+                - 0.18 * arbitration_sell_pressure
+                - 0.10 * sharpened_cash
+                - 0.08 * value_defense_bias,
+                0.05,
+                0.95,
+            )
+        )
+        adjusted["reentry_guard_target"] = float(
+            np.clip(
+                float(adjusted.get("reentry_guard_target", 0.0) or 0.0)
+                + 0.12 * reentry_guard
+                + 0.08 * sharpened_cash
+                + 0.08 * arbitration_cash_pressure
+                + 0.06 * sell_release_value
+                - 0.08 * arbitration_deploy_pressure
+                - 0.05 * alpha_opportunity_value,
+                0.0,
+                0.45,
+            )
+        )
+        return adjusted, diagnostics
     if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V3:
         sharpened_risk = float(np.clip(risk + max(risk_deploy_gap, 0.0) * 0.22 + sell_pressure * 0.08, 0.0, 1.0))
         sharpened_deploy = float(np.clip(deploy + alpha_alignment * 0.08 + opportunity_concentration * 0.06 - cash_timing * 0.12, 0.0, 1.0))
@@ -1659,6 +2497,7 @@ def build_training_matrices(
             budget_semantics=budget_semantics,
             budget_calibration=budget_calibration,
         )
+        label_frame = _annotate_label_frame_with_execution_feedback(label_frame, step_result.actions)
 
         sample_frames.append(label_frame)
         daily_rows.append({"date": signal_dt.strftime("%Y-%m-%d"), **daily_features, **global_targets})
@@ -1814,6 +2653,15 @@ def run_policy_rollout(
         metrics["avg_budget_entry_keep_count"] = float(turnover_frame["budget_entry_keep_count"].mean()) if "budget_entry_keep_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_held_protected_count"] = float(turnover_frame["budget_held_protected_count"].mean()) if "budget_held_protected_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_split_bound_guard_count"] = float(turnover_frame["budget_split_bound_guard_count"].mean()) if "budget_split_bound_guard_count" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_value_arbitration_signal"] = float(turnover_frame["budget_model_value_arbitration_signal"].mean()) if "budget_model_value_arbitration_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_alpha_opportunity_signal"] = float(turnover_frame["budget_model_alpha_opportunity_signal"].mean()) if "budget_model_alpha_opportunity_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_cash_defense_signal"] = float(turnover_frame["budget_model_cash_defense_signal"].mean()) if "budget_model_cash_defense_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_deploy_value_signal"] = float(turnover_frame["budget_model_deploy_value_signal"].mean()) if "budget_model_deploy_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_release_value_signal"] = float(turnover_frame["budget_model_release_value_signal"].mean()) if "budget_model_release_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_defense_value_signal"] = float(turnover_frame["budget_model_defense_value_signal"].mean()) if "budget_model_defense_value_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_deploy_gate_signal"] = float(turnover_frame["budget_model_deploy_gate_signal"].mean()) if "budget_model_deploy_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_release_gate_signal"] = float(turnover_frame["budget_model_release_gate_signal"].mean()) if "budget_model_release_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_budget_model_defense_gate_signal"] = float(turnover_frame["budget_model_defense_gate_signal"].mean()) if "budget_model_defense_gate_signal" in turnover_frame.columns else 0.0
     else:
         metrics["avg_turnover"] = 0.0
         metrics["avg_buy_turnover"] = 0.0
@@ -1828,6 +2676,15 @@ def run_policy_rollout(
         metrics["avg_budget_entry_keep_count"] = 0.0
         metrics["avg_budget_held_protected_count"] = 0.0
         metrics["avg_budget_split_bound_guard_count"] = 0.0
+        metrics["avg_budget_model_value_arbitration_signal"] = 0.0
+        metrics["avg_budget_model_alpha_opportunity_signal"] = 0.0
+        metrics["avg_budget_model_cash_defense_signal"] = 0.0
+        metrics["avg_budget_model_deploy_value_signal"] = 0.0
+        metrics["avg_budget_model_release_value_signal"] = 0.0
+        metrics["avg_budget_model_defense_value_signal"] = 0.0
+        metrics["avg_budget_model_deploy_gate_signal"] = 0.0
+        metrics["avg_budget_model_release_gate_signal"] = 0.0
+        metrics["avg_budget_model_defense_gate_signal"] = 0.0
     metrics["action_counts"] = {
         str(key): int(value)
         for key, value in action_panel["execution_action"].astype(str).value_counts().sort_index().items()
