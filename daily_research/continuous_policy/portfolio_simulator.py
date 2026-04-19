@@ -22,8 +22,15 @@ DEFAULT_BUDGET_SEMANTICS = BUDGET_SEMANTICS_LEGACY
 BUDGET_SEMANTICS_CHOICES = (BUDGET_SEMANTICS_LEGACY, BUDGET_SEMANTICS_SPLIT)
 BUDGET_CALIBRATION_NONE = "none"
 BUDGET_CALIBRATION_CASH_EXIT = "cash_exit_guard_v1"
+BUDGET_CALIBRATION_CASH_TRANSLATION = "cash_translation_guard_v2"
+BUDGET_CALIBRATION_CASH_TRANSLATION_SELL = "cash_translation_sell_guard_v3"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
-BUDGET_CALIBRATION_CHOICES = (BUDGET_CALIBRATION_NONE, BUDGET_CALIBRATION_CASH_EXIT)
+BUDGET_CALIBRATION_CHOICES = (
+    BUDGET_CALIBRATION_NONE,
+    BUDGET_CALIBRATION_CASH_EXIT,
+    BUDGET_CALIBRATION_CASH_TRANSLATION,
+    BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+)
 
 
 def normalize_execution_semantics(value: str | None) -> str:
@@ -74,6 +81,14 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_exit": BUDGET_CALIBRATION_CASH_EXIT,
         "cash_exit_guard": BUDGET_CALIBRATION_CASH_EXIT,
         "cash_exit_guard_v1": BUDGET_CALIBRATION_CASH_EXIT,
+        "cash_translation": BUDGET_CALIBRATION_CASH_TRANSLATION,
+        "cash_translation_guard": BUDGET_CALIBRATION_CASH_TRANSLATION,
+        "cash_translation_guard_v2": BUDGET_CALIBRATION_CASH_TRANSLATION,
+        "cash_translation_sell": BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+        "cash_translation_sell_guard": BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+        "cash_translation_sell_guard_v3": BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+        "cash_translation_guard_v3": BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+        "sell_attribution_guard": BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
     }
     if text not in aliases:
         raise ValueError(
@@ -427,6 +442,37 @@ class PortfolioState:
             target = capped + (free_strength / float(free_strength.sum())) * residual
         return target.clip(lower=0.0, upper=cap)
 
+    def _shrink_to_target_by_priority(
+        self,
+        weights: pd.Series,
+        *,
+        target_total: float,
+        floor: pd.Series,
+        priority: pd.Series,
+    ) -> tuple[pd.Series, pd.Series]:
+        result = pd.to_numeric(weights, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float).copy()
+        floor_series = pd.to_numeric(floor.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        priority_series = pd.to_numeric(priority.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        guarded = pd.Series(False, index=result.index, dtype=bool)
+        residual_excess = max(float(result.sum()) - float(target_total), 0.0)
+        for _ in range(10):
+            reducible = (result - floor_series).clip(lower=0.0)
+            reducible_sum = float(reducible.sum())
+            if residual_excess <= 1e-8 or reducible_sum <= 1e-8:
+                break
+            priority_mass = reducible * priority_series.clip(lower=0.0)
+            if float(priority_mass.sum()) <= 1e-8:
+                priority_mass = reducible
+            step = (priority_mass / float(priority_mass.sum())) * residual_excess
+            step = np.minimum(step.to_numpy(dtype=float), reducible.to_numpy(dtype=float))
+            step_series = pd.Series(step, index=result.index, dtype=float)
+            if float(step_series.sum()) <= 1e-8:
+                break
+            guarded = guarded | (step_series > 1e-8)
+            result = (result - step_series).clip(lower=floor_series)
+            residual_excess = max(float(result.sum()) - float(target_total), 0.0)
+        return result, guarded
+
     def step(
         self,
         *,
@@ -457,6 +503,7 @@ class PortfolioState:
                 "reduce_fraction": 0.0,
                 "exit_hazard": 0.0,
                 "sell_pressure": 0.0,
+                "sell_attribution_score": 0.0,
                 "exit_timing_pressure": 0.0,
             }
         )
@@ -480,6 +527,12 @@ class PortfolioState:
         exit_patience_target = float(np.clip(exit_patience_target, 0.05, 0.95))
         reentry_guard_target = float((global_targets or {}).get("reentry_guard_target", 0.0) or 0.0)
         reentry_guard_target = float(np.clip(reentry_guard_target, 0.0, 0.45))
+        budget_model_risk_signal = float((global_targets or {}).get("budget_model_risk_signal", 0.0) or 0.0)
+        budget_model_deploy_signal = float((global_targets or {}).get("budget_model_deploy_signal", 0.0) or 0.0)
+        budget_model_cash_timing_signal = float((global_targets or {}).get("budget_model_cash_timing_signal", 0.0) or 0.0)
+        budget_model_alpha_focus_signal = float((global_targets or {}).get("budget_model_alpha_focus_signal", 0.0) or 0.0)
+        budget_model_risk_deploy_gap = float((global_targets or {}).get("budget_model_risk_deploy_gap", 0.0) or 0.0)
+        use_sell_priority_guard = budget_calibration == BUDGET_CALIBRATION_CASH_TRANSLATION_SELL
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
 
@@ -504,10 +557,12 @@ class PortfolioState:
         held_add_action_share = float((action_names.loc[held_mask] == "add").mean()) if held_count_before else 0.0
         flat_entry_action_share = float((action_names.loc[flat_mask].isin({"open", "add"})).mean()) if int(flat_mask.sum()) else 0.0
         sell_pressure_series = _policy_numeric("sell_pressure")
+        sell_attribution_series = _policy_numeric("sell_attribution_score")
         exit_timing_pressure_series = _policy_numeric("exit_timing_pressure")
         exit_hazard_series = _policy_numeric("exit_hazard")
         entry_quality_series = _policy_numeric("entry_quality")
         held_sell_pressure = _masked_mean(sell_pressure_series, held_mask)
+        held_sell_attribution = _masked_mean(sell_attribution_series, held_mask)
         held_exit_timing_pressure = _masked_mean(exit_timing_pressure_series, held_mask)
         held_exit_hazard = _masked_mean(exit_hazard_series, held_mask)
         flat_entry_quality = _masked_mean(entry_quality_series.clip(lower=0.0), flat_mask)
@@ -568,6 +623,67 @@ class PortfolioState:
             position_cap_target = float(
                 np.clip(position_cap_target - budget_risk_off_score * 0.025 + budget_deploy_score * 0.006, 0.05, 0.35)
             )
+        elif budget_calibration in {BUDGET_CALIBRATION_CASH_TRANSLATION, BUDGET_CALIBRATION_CASH_TRANSLATION_SELL}:
+            positive_gap = max(budget_model_risk_deploy_gap, 0.0)
+            sell_priority_bonus = held_sell_attribution * 0.08 if use_sell_priority_guard else 0.0
+            risk_cut = (
+                budget_risk_off_score * (0.08 + current_gross_exposure * 0.14)
+                + budget_model_cash_timing_signal * 0.12
+                + positive_gap * 0.08
+                + sell_priority_bonus
+            )
+            deploy_boost = (
+                budget_deploy_score * 0.045
+                + budget_model_alpha_focus_signal * 0.015
+                if budget_risk_off_score < 0.32 and budget_model_cash_timing_signal < 0.32
+                else 0.0
+            )
+            gross_exposure_target = float(
+                np.clip(
+                    gross_exposure_target - risk_cut + deploy_boost,
+                    0.16,
+                    min(0.90, max(gross_exposure_target_raw + 0.04, 0.30)),
+                )
+            )
+            candidate_budget = int(
+                np.clip(
+                    round(
+                        candidate_budget
+                        - budget_risk_off_score * 2.2
+                        - budget_model_cash_timing_signal * 2.0
+                        - positive_gap * 1.2
+                        - held_sell_attribution * (0.8 if use_sell_priority_guard else 0.0)
+                        + budget_deploy_score * 1.4
+                        + budget_model_alpha_focus_signal * 0.6
+                    ),
+                    1,
+                    int(self.max_positions),
+                )
+            )
+            turnover_budget = float(
+                np.clip(
+                    turnover_budget
+                    + budget_risk_off_score * 0.18
+                    + budget_model_cash_timing_signal * 0.10
+                    + held_exit_action_share * 0.07
+                    + held_sell_attribution * (0.08 if use_sell_priority_guard else 0.0)
+                    - budget_deploy_score * 0.03,
+                    0.08,
+                    1.00,
+                )
+            )
+            position_cap_target = float(
+                np.clip(
+                    position_cap_target
+                    - budget_risk_off_score * 0.030
+                    - budget_model_cash_timing_signal * 0.012
+                    - held_sell_attribution * (0.008 if use_sell_priority_guard else 0.0)
+                    + budget_deploy_score * 0.008
+                    + budget_model_alpha_focus_signal * 0.006,
+                    0.05,
+                    0.32,
+                )
+            )
         execution_deadband_abs = float(
             np.clip(
                 max(
@@ -618,6 +734,11 @@ class PortfolioState:
                 float(policy.at[stock, "sell_pressure"] or 0.0)
                 if "sell_pressure" in policy.columns
                 else float(np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0))
+            )
+            sell_attribution_score = (
+                float(policy.at[stock, "sell_attribution_score"] or 0.0)
+                if "sell_attribution_score" in policy.columns
+                else float(np.clip(reduce_quality * 0.42 + exit_hazard * 0.20 - hold_quality * 0.16, 0.0, 1.0))
             )
             exit_timing_pressure = (
                 float(policy.at[stock, "exit_timing_pressure"] or 0.0)
@@ -674,6 +795,7 @@ class PortfolioState:
                             + sell_pressure * 0.12
                             + exit_hazard * 0.08
                             + exit_timing_pressure * 0.14
+                            + sell_attribution_score * 0.16
                             - hold_bias_target * 0.10
                         ),
                         0.02 if (exit_hazard > 0.55 or exit_timing_pressure > 0.68) else 0.08,
@@ -692,7 +814,7 @@ class PortfolioState:
                 ):
                     protected_floor.at[stock] = max(
                         protected_floor.at[stock],
-                        current_weight * np.clip(0.70 + hold_bias_target * 0.08, 0.60, 0.86),
+                        current_weight * np.clip(0.72 + hold_bias_target * 0.08 - sell_attribution_score * 0.08, 0.56, 0.86),
                     )
                 continue
             if action == "hold":
@@ -704,11 +826,12 @@ class PortfolioState:
                     - sell_pressure * 0.18
                     - exit_hazard * 0.08
                     - exit_timing_pressure * 0.16
+                    - sell_attribution_score * 0.10
                 )
                 desired_strength.at[stock] = max(
                     current_weight * max(0.54 if exit_timing_pressure > 0.62 else 0.72, hold_scale),
                     current_weight
-                    + max(0.0, hold_boost + hold_quality - sell_pressure * 0.35 - exit_hazard * 0.18 - exit_timing_pressure * 0.22)
+                    + max(0.0, hold_boost + hold_quality - sell_pressure * 0.35 - exit_hazard * 0.18 - exit_timing_pressure * 0.22 - sell_attribution_score * 0.10)
                     * (0.025 + hold_bias_target * 0.030),
                 )
                 if current_weight > 1e-8:
@@ -720,7 +843,7 @@ class PortfolioState:
                             + hold_bias_target * 0.10
                             + exit_patience_target * 0.05
                             + max(planned_holding_days - 3.0, 0.0) / 180.0,
-                            0.56 + max(0.0, 0.08 - sell_pressure * 0.08 - exit_timing_pressure * 0.08),
+                            0.56 + max(0.0, 0.08 - sell_pressure * 0.08 - exit_timing_pressure * 0.08 - sell_attribution_score * 0.06),
                             0.97,
                         ),
                     )
@@ -736,7 +859,7 @@ class PortfolioState:
                     else max(current_weight + max(0.015, add_increment), current_weight)
                 )
                 if current_weight > 1e-8:
-                    floor_ratio = float(np.clip(0.90 + hold_bias_target * 0.04, 0.85, 0.98))
+                    floor_ratio = float(np.clip(0.90 + hold_bias_target * 0.04 - sell_attribution_score * 0.04, 0.82, 0.98))
                     if (
                         exit_urgency < 0.16
                         and exit_hazard < 0.18
@@ -806,6 +929,13 @@ class PortfolioState:
             budget_dropped = entry_candidate_mask & (~entry_keep_mask)
             desired_strength = desired_strength.where(keep_mask, 0.0)
         desired_strength = desired_strength.where(~forced_zero, 0.0)
+        sell_reduction_priority = (
+            sell_attribution_series.clip(0.0, 1.0) * 0.56
+            + sell_pressure_series.clip(0.0, 1.0) * 0.22
+            + exit_timing_pressure_series.clip(0.0, 1.0) * 0.14
+            + action_names.isin({"reduce", "exit"}).astype(float) * 0.14
+            - action_names.isin({"hold", "add"}).astype(float) * 0.06
+        ).clip(lower=0.0)
 
         target_weights = self._allocate_with_cap(
             desired_strength,
@@ -815,16 +945,26 @@ class PortfolioState:
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
         if float(protected_floor.sum()) > float(gross_exposure_target) > 0.0:
             protected_floor = protected_floor / float(protected_floor.sum()) * float(gross_exposure_target)
+        sell_priority_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if bool((protected_floor > 1e-8).any()):
             target_weights = target_weights.where(target_weights >= protected_floor, protected_floor)
             excess = float(target_weights.sum() - gross_exposure_target)
             if excess > 1e-8:
-                reducible = (target_weights - protected_floor).clip(lower=0.0)
-                reducible_sum = float(reducible.sum())
-                if reducible_sum > 1e-8:
-                    target_weights = target_weights - reducible / reducible_sum * excess
-                elif float(target_weights.sum()) > 1e-8:
-                    target_weights = target_weights / float(target_weights.sum()) * float(gross_exposure_target)
+                if use_sell_priority_guard:
+                    target_weights, shrink_guarded = self._shrink_to_target_by_priority(
+                        target_weights,
+                        target_total=float(gross_exposure_target),
+                        floor=protected_floor,
+                        priority=sell_reduction_priority,
+                    )
+                    sell_priority_guarded = sell_priority_guarded | shrink_guarded
+                else:
+                    reducible = (target_weights - protected_floor).clip(lower=0.0)
+                    reducible_sum = float(reducible.sum())
+                    if reducible_sum > 1e-8:
+                        target_weights = target_weights - reducible / reducible_sum * excess
+                    elif float(target_weights.sum()) > 1e-8:
+                        target_weights = target_weights / float(target_weights.sum()) * float(gross_exposure_target)
         budget_split_bound_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if execution_semantics == EXECUTION_SEMANTICS_SEMANTIC and budget_semantics == BUDGET_SEMANTICS_SPLIT:
             for stock in prices.index:
@@ -838,6 +978,94 @@ class PortfolioState:
                 if target_value > previous_weight + 1e-8:
                     target_weights.at[stock] = previous_weight
                     budget_split_bound_guarded.at[stock] = True
+        translation_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        translation_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        translation_floor = protected_floor.copy()
+        translation_cap = pd.Series(position_cap_target, index=prices.index, dtype=float)
+        if (
+            execution_semantics == EXECUTION_SEMANTICS_SEMANTIC
+            and budget_semantics == BUDGET_SEMANTICS_SPLIT
+            and budget_calibration in {BUDGET_CALIBRATION_CASH_TRANSLATION, BUDGET_CALIBRATION_CASH_TRANSLATION_SELL}
+        ):
+            for stock in prices.index:
+                previous_weight = float(current.get(stock, 0.0))
+                target_value = float(target_weights.get(stock, 0.0))
+                if bool(forced_zero.get(stock, False)):
+                    translation_cap.at[stock] = 0.0
+                    if target_value > 1e-12:
+                        target_weights.at[stock] = 0.0
+                        translation_cap_guarded.at[stock] = True
+                    continue
+                model_action_name = str(policy.at[stock, "action_label"] or "skip").strip().lower()
+                if model_action_name not in {"skip", "open", "hold", "add", "reduce", "exit"}:
+                    continue
+                if previous_weight > 1e-8:
+                    deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
+                    if model_action_name == "hold":
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), previous_weight)
+                        translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), previous_weight)
+                        if target_value > previous_weight + 1e-12:
+                            target_weights.at[stock] = previous_weight
+                            translation_cap_guarded.at[stock] = True
+                        elif target_value < previous_weight - 1e-12:
+                            target_weights.at[stock] = previous_weight
+                            translation_floor_guarded.at[stock] = True
+                    elif model_action_name == "add":
+                        min_add_weight = min(
+                            position_cap_target,
+                            previous_weight + max(deadband * 1.35, previous_weight * (0.035 + budget_model_deploy_signal * 0.040), 0.0035),
+                        )
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), min_add_weight)
+                        if target_value < min_add_weight - 1e-12:
+                            target_weights.at[stock] = min_add_weight
+                            translation_floor_guarded.at[stock] = True
+                    elif model_action_name == "reduce":
+                        max_reduce_weight = max(
+                            0.0,
+                            previous_weight - max(deadband * 1.25, previous_weight * (0.040 + max(budget_model_cash_timing_signal, budget_risk_off_score) * 0.040), 0.0030),
+                        )
+                        translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), max_reduce_weight)
+                        if target_value > max_reduce_weight + 1e-12:
+                            target_weights.at[stock] = max_reduce_weight
+                            translation_cap_guarded.at[stock] = True
+                    elif model_action_name == "exit":
+                        translation_cap.at[stock] = 0.0
+                        if target_value > 1e-12:
+                            target_weights.at[stock] = 0.0
+                            translation_cap_guarded.at[stock] = True
+                else:
+                    if model_action_name in {"open", "add"} and target_value > 1e-12:
+                        min_open_weight = min(
+                            position_cap_target,
+                            max(execution_deadband_abs * 2.5, 0.012 + budget_model_deploy_signal * 0.010 + budget_model_alpha_focus_signal * 0.006),
+                        )
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), min_open_weight)
+                        if target_value < min_open_weight - 1e-12:
+                            target_weights.at[stock] = min_open_weight
+                            translation_floor_guarded.at[stock] = True
+                    elif model_action_name in {"hold", "skip", "reduce", "exit"} and target_value > 1e-12:
+                        translation_cap.at[stock] = 0.0
+                        target_weights.at[stock] = 0.0
+                        translation_cap_guarded.at[stock] = True
+            target_weights = target_weights.clip(lower=translation_floor, upper=translation_cap)
+            effective_floor = pd.concat([protected_floor.rename("protected"), translation_floor.rename("translation")], axis=1).max(axis=1)
+            excess = float(target_weights.sum() - gross_exposure_target)
+            if excess > 1e-8:
+                if use_sell_priority_guard:
+                    target_weights, shrink_guarded = self._shrink_to_target_by_priority(
+                        target_weights,
+                        target_total=float(gross_exposure_target),
+                        floor=effective_floor,
+                        priority=sell_reduction_priority,
+                    )
+                    sell_priority_guarded = sell_priority_guarded | shrink_guarded
+                else:
+                    reducible = (target_weights - effective_floor).clip(lower=0.0)
+                    reducible_sum = float(reducible.sum())
+                    if reducible_sum > 1e-8:
+                        target_weights = target_weights - reducible / reducible_sum * excess
+                    elif float(target_weights.sum()) > 1e-8:
+                        target_weights = target_weights / float(target_weights.sum()) * float(gross_exposure_target)
         delta = target_weights - current
         raw_turnover = float(delta.abs().sum())
         if raw_turnover > turnover_budget > 0:
@@ -1022,6 +1250,7 @@ class PortfolioState:
                     "reduce_fraction": float(policy.at[stock, "reduce_fraction"] or 0.0) if "reduce_fraction" in policy.columns else 0.0,
                     "exit_hazard": float(policy.at[stock, "exit_hazard"] or 0.0) if "exit_hazard" in policy.columns else 0.0,
                     "sell_pressure": float(policy.at[stock, "sell_pressure"] or 0.0) if "sell_pressure" in policy.columns else 0.0,
+                    "sell_attribution_score": float(policy.at[stock, "sell_attribution_score"] or 0.0) if "sell_attribution_score" in policy.columns else 0.0,
                     "exit_timing_pressure": float(policy.at[stock, "exit_timing_pressure"] or 0.0) if "exit_timing_pressure" in policy.columns else 0.0,
                     "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
                     "contradictory_micro_rebalance": bool(contradictory_micro_rebalance),
@@ -1150,11 +1379,15 @@ class PortfolioState:
             "held_add_action_share": held_add_action_share,
             "flat_entry_action_share": flat_entry_action_share,
             "held_sell_pressure": held_sell_pressure,
+            "held_sell_attribution": held_sell_attribution,
             "held_exit_timing_pressure": held_exit_timing_pressure,
             "held_exit_hazard": held_exit_hazard,
             "budget_entry_candidate_count": int(budget_entry_candidate_count),
             "budget_entry_keep_count": int(budget_entry_keep_count),
             "budget_held_protected_count": int(budget_held_protected_count),
+            "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
+            "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),
+            "budget_sell_priority_guard_count": int(sell_priority_guarded.sum()),
             "execution_deadband_abs": execution_deadband_abs,
             "execution_deadband_rel": execution_deadband_rel,
             "recent_reversal_rate_20d": float(self.portfolio_features().get("recent_reversal_rate_20d", 0.0)),

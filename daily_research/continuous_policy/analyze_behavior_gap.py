@@ -147,6 +147,7 @@ def _build_semantic_conflicts(
             "avg_budget_entry_keep_count": 0.0,
             "avg_budget_held_protected_count": 0.0,
             "avg_budget_split_bound_guard_count": 0.0,
+            "avg_budget_sell_priority_guard_count": 0.0,
             "high_cash_up_market_share": 0.0,
             "high_cash_down_market_share": 0.0,
             "top_action_pairs": [],
@@ -219,6 +220,7 @@ def _build_semantic_conflicts(
             "budget_entry_keep_count",
             "budget_held_protected_count",
             "budget_split_bound_guard_count",
+            "budget_sell_priority_guard_count",
         ],
     )
     if turnover_working.empty:
@@ -244,6 +246,7 @@ def _build_semantic_conflicts(
             "budget_entry_keep_count",
             "budget_held_protected_count",
             "budget_split_bound_guard_count",
+            "budget_sell_priority_guard_count",
         ):
             if optional_column not in turnover_working.columns:
                 turnover_working[optional_column] = 0.0
@@ -268,6 +271,7 @@ def _build_semantic_conflicts(
                     "budget_entry_keep_count",
                     "budget_held_protected_count",
                     "budget_split_bound_guard_count",
+                    "budget_sell_priority_guard_count",
                 ]
             ],
             how="left",
@@ -372,6 +376,7 @@ def _build_semantic_conflicts(
         "avg_budget_entry_keep_count": _safe_mean(day_merge.get("budget_entry_keep_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_held_protected_count": _safe_mean(day_merge.get("budget_held_protected_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_split_bound_guard_count": _safe_mean(day_merge.get("budget_split_bound_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_budget_sell_priority_guard_count": _safe_mean(day_merge.get("budget_sell_priority_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "high_cash_up_market_share": high_cash_up_market_share,
         "high_cash_down_market_share": high_cash_down_market_share,
         "top_action_pairs": pair_rows,
@@ -469,6 +474,12 @@ def main(argv: list[str] | None = None) -> int:
             preferred_direction="higher_better",
         ),
         _gap_row(
+            "sell_selection_quality_5d",
+            teacher=_safe_float(teacher_continuity, "sell_selection_quality_5d"),
+            model=_safe_float(model_continuity, "sell_selection_quality_5d"),
+            preferred_direction="higher_better",
+        ),
+        _gap_row(
             "avg_turnover",
             teacher=_safe_float(teacher_metrics, "avg_turnover"),
             model=_safe_float(model_metrics, "avg_turnover"),
@@ -517,6 +528,21 @@ def main(argv: list[str] | None = None) -> int:
                     "wrong_side_reduce_share": wrong_side_reduce_share,
                     "profit_take_too_early_share": profit_take_too_early_share,
                     "reversal_after_reduce_3d_rate": reversal_after_reduce_3d_rate,
+                },
+            }
+        )
+    if _safe_float(model_continuity, "sell_selection_quality_5d") < 0.01:
+        bottlenecks.append(
+            {
+                "name": "sell_selection_not_learned",
+                "severity": "high",
+                "diagnosis": "组合需要收缩时，模型仍没有稳定选对该减仓/退出的持仓，卖出对象选择质量不足。",
+                "evidence": {
+                    "model_sell_selection_quality_5d": _safe_float(model_continuity, "sell_selection_quality_5d"),
+                    "teacher_sell_selection_quality_5d": _safe_float(teacher_continuity, "sell_selection_quality_5d"),
+                    "model_sell_selection_hit_rate_5d": _safe_float(model_continuity, "sell_selection_hit_rate_5d"),
+                    "teacher_sell_selection_hit_rate_5d": _safe_float(teacher_continuity, "sell_selection_hit_rate_5d"),
+                    "wrong_side_reduce_share": wrong_side_reduce_share,
                 },
             }
         )
@@ -635,6 +661,8 @@ def main(argv: list[str] | None = None) -> int:
         recommended_focus.append("保住当前持有连续性，不要在修 reduce / cash / reversal 时把 hold_share 再打回塌缩。")
     if _safe_float(model_continuity, "reduce_success_rate_5d") < 0.45:
         recommended_focus.append("优先把 reduce 聚焦到真正的信号衰减与防守切换，而不是盈利后的机械落袋。")
+    if _safe_float(model_continuity, "sell_selection_quality_5d") < 0.01:
+        recommended_focus.append("把预算收缩映射到明确的卖出归因上，确保需要降风险时优先减的是低后续收益、高卖出压力的持仓。")
     if _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02:
         recommended_focus.append("继续强化组合层 cash / gross / turnover 预算头，让市场转弱时能主动降暴露。")
     if early_exit_share > 0.20:

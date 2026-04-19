@@ -274,6 +274,115 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "daily_total": 0.70,
         },
     },
+    "alpha_result_value_budget_split_v3": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.58,
+            "entry_quality": 0.88,
+            "hold_quality": 1.12,
+            "add_quality": 0.90,
+            "reduce_quality": 1.10,
+            "exit_urgency": 1.18,
+            "reentry_readiness": 0.56,
+            "holding_days_ratio": 1.44,
+            "reduce_fraction": 1.46,
+            "exit_hazard": 1.52,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.40,
+            "candidate_budget": 0.92,
+            "turnover_budget": 1.28,
+            "max_position_weight_target": 0.76,
+            "hold_bias_target": 1.00,
+            "reduce_bias_target": 1.08,
+            "exit_patience_target": 1.02,
+            "reentry_guard_target": 0.94,
+            "budget_risk_signal_target": 0.96,
+            "budget_deploy_signal_target": 0.90,
+            "budget_cash_timing_signal_target": 1.52,
+            "budget_alpha_focus_signal_target": 0.76,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.46,
+            "action_soft": 0.54,
+            "action_total": 0.56,
+            "duration_total": 0.12,
+            "scalar_total": 1.38,
+            "daily_total": 0.82,
+        },
+    },
+    "alpha_result_value_budget_split_v4": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.56,
+            "entry_quality": 0.86,
+            "hold_quality": 1.10,
+            "add_quality": 0.88,
+            "reduce_quality": 1.18,
+            "exit_urgency": 1.20,
+            "reentry_readiness": 0.52,
+            "holding_days_ratio": 1.42,
+            "reduce_fraction": 1.56,
+            "exit_hazard": 1.62,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.36,
+            "candidate_budget": 0.88,
+            "turnover_budget": 1.30,
+            "max_position_weight_target": 0.78,
+            "hold_bias_target": 0.98,
+            "reduce_bias_target": 1.12,
+            "exit_patience_target": 1.06,
+            "reentry_guard_target": 0.96,
+            "budget_risk_signal_target": 1.00,
+            "budget_deploy_signal_target": 0.92,
+            "budget_cash_timing_signal_target": 1.64,
+            "budget_alpha_focus_signal_target": 0.80,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.46,
+            "action_soft": 0.54,
+            "action_total": 0.58,
+            "duration_total": 0.12,
+            "scalar_total": 1.42,
+            "daily_total": 0.84,
+        },
+    },
+    "alpha_result_value_budget_split_v4b": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.54,
+            "entry_quality": 0.88,
+            "hold_quality": 1.14,
+            "add_quality": 0.90,
+            "reduce_quality": 1.14,
+            "exit_urgency": 1.16,
+            "reentry_readiness": 0.54,
+            "holding_days_ratio": 1.42,
+            "reduce_fraction": 1.50,
+            "exit_hazard": 1.56,
+            "sell_attribution_score": 1.38,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.42,
+            "candidate_budget": 0.94,
+            "turnover_budget": 1.24,
+            "max_position_weight_target": 0.80,
+            "hold_bias_target": 1.06,
+            "reduce_bias_target": 1.12,
+            "exit_patience_target": 1.08,
+            "reentry_guard_target": 0.92,
+            "budget_risk_signal_target": 0.96,
+            "budget_deploy_signal_target": 1.02,
+            "budget_cash_timing_signal_target": 1.46,
+            "budget_alpha_focus_signal_target": 0.84,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.46,
+            "action_soft": 0.54,
+            "action_total": 0.56,
+            "duration_total": 0.12,
+            "scalar_total": 1.48,
+            "daily_total": 0.86,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -325,6 +434,8 @@ def _weighted_scalar_heads_loss(
     total_loss = torch.tensor(0.0, device=device)
     total_weight = 0.0
     for name, target in targets.items():
+        if weights is not None and name not in weights:
+            continue
         head_weight = float((weights or {}).get(name, 1.0))
         total_loss = total_loss + nn.functional.smooth_l1_loss(outputs[name], target) * head_weight
         total_weight += head_weight
@@ -366,6 +477,11 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
         0.0,
         1.0,
     )
+    sell_attribution = np.clip(
+        sample_frame.get("sell_attribution_score", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
     sell_pressure = np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0)
     action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
 
@@ -404,15 +520,17 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
             scores[action_lookup["open"]] = 0.01
             scores[action_lookup["hold"]] *= float(np.clip(1.0 - sell_pressure[idx] * 0.32, 0.62, 1.08))
             scores[action_lookup["add"]] *= float(np.clip(1.0 - sell_pressure[idx] * 0.52, 0.34, 1.00))
-            scores[action_lookup["reduce"]] += sell_pressure[idx] * 0.24
-            scores[action_lookup["exit"]] += sell_pressure[idx] * 0.20
+            scores[action_lookup["hold"]] *= float(np.clip(1.0 - sell_attribution[idx] * 0.22, 0.60, 1.05))
+            scores[action_lookup["add"]] *= float(np.clip(1.0 - sell_attribution[idx] * 0.26, 0.50, 1.00))
+            scores[action_lookup["reduce"]] += sell_pressure[idx] * 0.24 + sell_attribution[idx] * 0.34
+            scores[action_lookup["exit"]] += sell_pressure[idx] * 0.20 + sell_attribution[idx] * 0.22
             if duration_ratio[idx] > 0.45 and hold_quality[idx] >= reduce_quality[idx] - 0.02:
                 scores[action_lookup["hold"]] += 0.12
             if hold_days[idx] >= 6.0 and exit_urgency[idx] > 0.20:
                 scores[action_lookup["exit"]] += 0.06
-            if sell_pressure[idx] > 0.26 and hold_days[idx] >= 4.0:
+            if (sell_pressure[idx] > 0.26 or sell_attribution[idx] > 0.34) and hold_days[idx] >= 4.0:
                 scores[action_lookup["reduce"]] += 0.08
-            if exit_hazard[idx] > 0.42 and hold_days[idx] >= 7.0:
+            if (exit_hazard[idx] > 0.42 or sell_attribution[idx] > 0.52) and hold_days[idx] >= 7.0:
                 scores[action_lookup["exit"]] += 0.08
         else:
             scores[action_lookup["skip"]] = (
@@ -506,6 +624,7 @@ class TemporalSamplePolicyNet(nn.Module):
         self.holding_days_head = nn.Linear(int(hidden_dim), 1)
         self.reduce_fraction_head = nn.Linear(int(hidden_dim), 1)
         self.exit_hazard_head = nn.Linear(int(hidden_dim), 1)
+        self.sell_attribution_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -525,6 +644,7 @@ class TemporalSamplePolicyNet(nn.Module):
             "holding_days_ratio": torch.sigmoid(self.holding_days_head(fused).squeeze(-1)),
             "reduce_fraction": torch.sigmoid(self.reduce_fraction_head(fused).squeeze(-1)),
             "exit_hazard": torch.sigmoid(self.exit_hazard_head(fused).squeeze(-1)),
+            "sell_attribution_score": torch.sigmoid(self.sell_attribution_head(fused).squeeze(-1)),
         }
 
 
@@ -707,6 +827,8 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "reduce_fraction_head.bias",
         "exit_hazard_head.weight",
         "exit_hazard_head.bias",
+        "sell_attribution_head.weight",
+        "sell_attribution_head.bias",
     }
     if sample_unexpected or (sample_missing - allowed_sample_missing):
         raise RuntimeError(
@@ -725,6 +847,10 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         name.startswith("reduce_fraction_head.") or name.startswith("exit_hazard_head.")
         for name in missing_key_names
     )
+    if any(name.startswith("sell_attribution_head.") for name in missing_key_names):
+        training_diagnostics["supports_sell_attribution_head"] = False
+    elif "supports_sell_attribution_head" not in training_diagnostics:
+        training_diagnostics["supports_sell_attribution_head"] = True
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -840,6 +966,11 @@ def fit_policy_models_v3(
             0.0,
             1.0,
         ),
+        "sell_attribution_score": np.clip(
+            sample_frame.get("sell_attribution_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
     }
     daily_targets = {
         name: daily_frame[name].astype(float).to_numpy(dtype=np.float32)
@@ -908,7 +1039,7 @@ def fit_policy_models_v3(
         train_summary=dict(train_summary or {}),
         training_contract=contract,
     )
-    signature_payload["sequence_model_revision"] = "seq_v3_alpha_result_value_budget_r2"
+    signature_payload["sequence_model_revision"] = "seq_v3_alpha_result_value_budget_r3"
     signature_payload["loss_profile"] = resolved_loss_profile
     signature_payload["daily_head_layout"] = resolved_daily_head_layout
     signature_payload["sample_scalar_loss_weights"] = dict(sample_scalar_loss_weights)
@@ -942,13 +1073,14 @@ def fit_policy_models_v3(
     if resume_mode == "strict" and checkpoint_last.exists() and int(epochs) <= int(start_epoch):
         raise RuntimeError(f"continuous_policy v3 strict resume requires epochs > completed epochs ({start_epoch}), got {epochs}.")
 
+    sample_target_names = tuple(sample_targets.keys())
     dataset = TensorDataset(
         torch.as_tensor(X_static[train_idx], dtype=torch.float32),
         torch.as_tensor(X_sequence[train_idx], dtype=torch.float32),
         torch.as_tensor(y_action[train_idx], dtype=torch.long),
         torch.as_tensor(y_duration[train_idx], dtype=torch.long),
         torch.as_tensor(y_action_soft[train_idx], dtype=torch.float32),
-        *[torch.as_tensor(sample_targets[name][train_idx], dtype=torch.float32) for name in sample_targets],
+        *[torch.as_tensor(sample_targets[name][train_idx], dtype=torch.float32) for name in sample_target_names],
     )
     loader = DataLoader(dataset, batch_size=max(32, int(batch_size)), shuffle=True, drop_last=False)
     X_static_val = torch.as_tensor(X_static[val_idx], dtype=torch.float32, device=device)
@@ -970,23 +1102,11 @@ def fit_policy_models_v3(
         batch_count = 0
         for batch in loader:
             batch = [item.to(device) for item in batch]
-            (
-                static_batch,
-                sequence_batch,
-                action_batch,
-                duration_batch,
-                action_soft_batch,
-                delta_batch,
-                entry_batch,
-                hold_batch,
-                add_batch,
-                reduce_batch,
-                exit_batch,
-                reentry_batch,
-                holding_days_batch,
-                reduce_fraction_batch,
-                exit_hazard_batch,
-            ) = batch
+            static_batch, sequence_batch, action_batch, duration_batch, action_soft_batch, *sample_target_batches = batch
+            sample_batch_targets = {
+                name: tensor
+                for name, tensor in zip(sample_target_names, sample_target_batches, strict=False)
+            }
             outputs = sample_model(static_batch, sequence_batch)
             action_ce_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
             action_soft_loss = nn.functional.kl_div(
@@ -1001,18 +1121,7 @@ def fit_policy_models_v3(
             duration_loss = nn.functional.cross_entropy(outputs["duration_logits"], duration_batch)
             scalar_loss = _weighted_scalar_heads_loss(
                 outputs,
-                {
-                    "target_delta_hint": delta_batch,
-                    "entry_quality": entry_batch,
-                    "hold_quality": hold_batch,
-                    "add_quality": add_batch,
-                    "reduce_quality": reduce_batch,
-                    "exit_urgency": exit_batch,
-                    "reentry_readiness": reentry_batch,
-                    "holding_days_ratio": holding_days_batch,
-                    "reduce_fraction": reduce_fraction_batch,
-                    "exit_hazard": exit_hazard_batch,
-                },
+                sample_batch_targets,
                 sample_scalar_loss_weights,
             )
             loss = (
@@ -1120,6 +1229,7 @@ def fit_policy_models_v3(
         "history_tail": history[-8:],
         "supports_holding_days_head": True,
         "supports_sell_heads": True,
+        "supports_sell_attribution_head": "sell_attribution_score" in sample_scalar_loss_weights,
         "sample_scalar_loss_weights": dict(sample_scalar_loss_weights),
         "daily_target_loss_weights": dict(daily_target_loss_weights),
         "multi_objective_loss_weights": dict(multi_objective_loss_weights),
@@ -1208,6 +1318,12 @@ def predict_policy_v3(
         exit_hazard = (
             np.clip(outputs["exit_hazard"].cpu().numpy(), 0.0, 1.0)
             if supports_sell_heads
+            else None
+        )
+        supports_sell_attribution_head = bool(artifact.training_diagnostics.get("supports_sell_attribution_head", False))
+        predicted_sell_attribution = (
+            np.clip(outputs["sell_attribution_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_sell_attribution_head
             else None
         )
         if reduce_fraction is None:
@@ -1344,9 +1460,72 @@ def predict_policy_v3(
     min_gross_exposure_target = 0.18 if is_holdcash_v3_decoder else 0.12
     min_candidate_budget = 4.0 if is_holdcash_v3_decoder else 2.0
     min_position_cap_target = 0.10 if is_holdcash_v3_decoder else 0.08
+    budget_objective_name = str(artifact.train_summary.get("budget_objective", "") or "").strip().lower()
+    if budget_objective_name == "result_value_v4b":
+        opportunity_floor = float(
+            np.clip(
+                0.24
+                + budget_model_alpha_focus_signal * 0.18
+                + budget_model_deploy_signal * 0.16
+                - budget_model_cash_timing_signal * 0.12
+                - budget_model_risk_signal * 0.10,
+                0.22,
+                0.55,
+            )
+        )
+        min_gross_exposure_target = max(float(min_gross_exposure_target), opportunity_floor)
+        min_candidate_budget = max(float(min_candidate_budget), float(np.clip(3.0 + budget_model_alpha_focus_signal * 2.0, 3.0, 6.0)))
+        min_position_cap_target = max(float(min_position_cap_target), 0.09)
     blended_budget_risk = float(np.clip(0.55 * risk_off_score + 0.45 * budget_model_risk_signal, 0.0, 1.0))
-    blended_budget_deploy = float(np.clip(0.55 * budget_model_deploy_signal + 0.25 * budget_model_alpha_focus_signal + 0.20 * max(1.0 - blended_budget_risk, 0.0), 0.0, 1.0))
-    blended_cash_timing = float(np.clip(0.55 * budget_model_cash_timing_signal + 0.45 * blended_budget_risk, 0.0, 1.0))
+    blended_budget_deploy = float(
+        np.clip(
+            0.55 * budget_model_deploy_signal
+            + 0.25 * budget_model_alpha_focus_signal
+            + 0.20 * max(1.0 - blended_budget_risk, 0.0),
+            0.0,
+            1.0,
+        )
+    )
+    if budget_objective_name in {"result_value_v3", "result_value_v4", "result_value_v4b"}:
+        cash_regime_feature = float(np.clip(_daily_feature_scalar(daily_features, "cash_regime_pressure"), 0.0, 1.0))
+        risk_gap = float(np.clip(blended_budget_risk - blended_budget_deploy, 0.0, 1.0))
+        if budget_objective_name == "result_value_v3":
+            cash_blend = 0.50
+            deploy_cash_penalty = 0.10
+            alpha_rebound = 0.04
+            opportunity_cash_offset = 0.0
+        elif budget_objective_name == "result_value_v4b":
+            cash_blend = 0.48
+            deploy_cash_penalty = 0.08
+            alpha_rebound = 0.07
+            opportunity_cash_offset = 0.08 * budget_model_alpha_focus_signal + 0.04 * max(blended_budget_deploy - blended_budget_risk, 0.0)
+        else:
+            cash_blend = 0.54
+            deploy_cash_penalty = 0.14
+            alpha_rebound = 0.03
+            opportunity_cash_offset = 0.0
+        blended_cash_timing = float(
+            np.clip(
+                cash_blend * budget_model_cash_timing_signal
+                + 0.22 * blended_budget_risk
+                + 0.18 * risk_gap
+                + 0.10 * cash_regime_feature
+                - opportunity_cash_offset,
+                0.0,
+                1.0,
+            )
+        )
+        blended_budget_deploy = float(
+            np.clip(
+                blended_budget_deploy
+                - blended_cash_timing * deploy_cash_penalty
+                + budget_model_alpha_focus_signal * alpha_rebound,
+                0.0,
+                1.0,
+            )
+        )
+    else:
+        blended_cash_timing = float(np.clip(0.55 * budget_model_cash_timing_signal + 0.45 * blended_budget_risk, 0.0, 1.0))
     predicted_reduce_bias = float(global_targets.get("reduce_bias_target", 0.10) or 0.10)
     predicted_exit_patience = float(global_targets.get("exit_patience_target", 0.20) or 0.20)
     predicted_reentry_guard = float(global_targets.get("reentry_guard_target", 0.0) or 0.0)
@@ -1908,6 +2087,41 @@ def predict_policy_v3(
             blended_delta[idx] = 0.0
             action_strength[idx] = probability_map["skip"][idx] * 0.20
 
+    sell_attribution_score = np.zeros(len(state_frame), dtype=float)
+    for idx, label in enumerate(adjusted_labels):
+        if current_weight[idx] <= 1e-8:
+            continue
+        profit_protected = float(
+            np.clip(
+                max(pnl_rank_in_portfolio[idx], 0.0) * max(score_rank_pct[idx] - 0.55, 0.0),
+                0.0,
+                1.0,
+            )
+        )
+        fallback_sell_attribution = float(
+            np.clip(
+                0.34 * max(reduce_quality[idx], 0.0)
+                + 0.18 * reduce_fraction[idx]
+                + 0.16 * exit_hazard[idx]
+                + 0.14 * exit_timing_pressure_values[idx]
+                + 0.10 * max(drawdown_rank_in_portfolio[idx], 0.0)
+                + 0.10 * max(budget_model_cash_timing_signal, blended_budget_risk)
+                + (0.06 if label in {"reduce", "exit"} else 0.0)
+                - 0.24 * max(hold_quality[idx], 0.0)
+                - 0.10 * max(add_quality[idx], 0.0)
+                - 0.10 * max(score_rank_pct[idx], 0.0)
+                - 0.10 * profit_protected,
+                0.0,
+                1.0,
+            )
+        )
+        if predicted_sell_attribution is not None:
+            sell_attribution_score[idx] = float(
+                np.clip(0.72 * float(predicted_sell_attribution[idx]) + 0.28 * fallback_sell_attribution, 0.0, 1.0)
+            )
+        else:
+            sell_attribution_score[idx] = fallback_sell_attribution
+
     policy = pd.DataFrame(
         {
             "stock": state_frame["stock"].astype(str).to_numpy(),
@@ -1924,6 +2138,7 @@ def predict_policy_v3(
             "reentry_readiness": reentry_readiness,
             "exit_hazard": exit_hazard,
             "sell_pressure": sell_pressure,
+            "sell_attribution_score": sell_attribution_score,
             "exit_timing_pressure": exit_timing_pressure_values,
             "planned_holding_bucket": predicted_duration_labels,
             "planned_holding_days": duration_days,

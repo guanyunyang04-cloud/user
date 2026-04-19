@@ -169,6 +169,7 @@ LABEL_CONFIGS: dict[str, LifecycleLabelConfig] = {
 @dataclass(frozen=True)
 class FuturePathMetrics:
     frames: dict[str, pd.DataFrame]
+    benchmark_returns: dict[str, pd.Series]
     horizons: tuple[int, ...] = LABEL_HORIZONS
 
 
@@ -199,18 +200,28 @@ def build_future_path_metrics(prepared: PreparedPolicyInputs) -> FuturePathMetri
     close = prepared.close
     benchmark_close = prepared.benchmark_close
     frames: dict[str, pd.DataFrame] = {}
+    benchmark_returns: dict[str, pd.Series] = {}
     for horizon in LABEL_HORIZONS:
         frames[f"fwd_excess_{horizon}d"] = build_ml_target(close, benchmark_close, horizon, execution_mode="close")
         future_max = _future_window_extreme(close, horizon, mode="max")
         future_min = _future_window_extreme(close, horizon, mode="min")
         frames[f"future_max_up_{horizon}d"] = future_max.div(close).sub(1.0)
         frames[f"future_min_down_{horizon}d"] = future_min.div(close).sub(1.0)
-    return FuturePathMetrics(frames=frames)
+        benchmark_returns[f"benchmark_return_{horizon}d"] = benchmark_close.shift(-horizon).div(benchmark_close).sub(1.0)
+    return FuturePathMetrics(frames=frames, benchmark_returns=benchmark_returns)
 
 
 def _row_metric(metrics: FuturePathMetrics, name: str, date: pd.Timestamp, stocks: pd.Index) -> pd.Series:
     frame = metrics.frames[name]
     return frame.loc[date].reindex(stocks).astype(float)
+
+
+def _row_benchmark_metric(metrics: FuturePathMetrics, name: str, date: pd.Timestamp, stocks: pd.Index) -> pd.Series:
+    series = metrics.benchmark_returns.get(name)
+    value = float(series.loc[date]) if series is not None and date in series.index else 0.0
+    if not np.isfinite(value):
+        value = 0.0
+    return pd.Series(value, index=stocks, dtype=float)
 
 
 def build_action_labels_for_date(
@@ -241,6 +252,11 @@ def build_action_labels_for_date(
     fwd5 = _row_metric(future_metrics, "fwd_excess_5d", signal_dt, stocks)
     fwd10 = _row_metric(future_metrics, "fwd_excess_10d", signal_dt, stocks)
     fwd20 = _row_metric(future_metrics, "fwd_excess_20d", signal_dt, stocks)
+    benchmark_fwd1 = _row_benchmark_metric(future_metrics, "benchmark_return_1d", signal_dt, stocks)
+    benchmark_fwd3 = _row_benchmark_metric(future_metrics, "benchmark_return_3d", signal_dt, stocks)
+    benchmark_fwd5 = _row_benchmark_metric(future_metrics, "benchmark_return_5d", signal_dt, stocks)
+    benchmark_fwd10 = _row_benchmark_metric(future_metrics, "benchmark_return_10d", signal_dt, stocks)
+    benchmark_fwd20 = _row_benchmark_metric(future_metrics, "benchmark_return_20d", signal_dt, stocks)
     max_up5 = _row_metric(future_metrics, "future_max_up_5d", signal_dt, stocks)
     max_up10 = _row_metric(future_metrics, "future_max_up_10d", signal_dt, stocks)
     max_up20 = _row_metric(future_metrics, "future_max_up_20d", signal_dt, stocks)
@@ -306,6 +322,11 @@ def build_action_labels_for_date(
     fwd5 = fwd5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     fwd10 = fwd10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     fwd20 = fwd20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_fwd1 = benchmark_fwd1.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_fwd3 = benchmark_fwd3.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_fwd5 = benchmark_fwd5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_fwd10 = benchmark_fwd10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    benchmark_fwd20 = benchmark_fwd20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     max_up5 = max_up5.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     max_up10 = max_up10.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     max_up20 = max_up20.replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -413,6 +434,12 @@ def build_action_labels_for_date(
         + turnover_drag
         + float(config.defensive_cash_bias)
     )
+    market_forward_downside = np.clip(
+        np.clip(-benchmark_fwd1.to_numpy(dtype=float), 0.0, None) / 0.012 * 0.42
+        + np.clip(-benchmark_fwd3.to_numpy(dtype=float), 0.0, None) / 0.028 * 0.58,
+        0.0,
+        1.0,
+    )
 
     duration_bucket: list[str] = []
     duration_days: list[int] = []
@@ -495,6 +522,57 @@ def build_action_labels_for_date(
         + 0.06 * np.clip(alpha_support, 0.0, None)
         + 0.04 * alpha_weight_scaled
     )
+    held_mask = working["holding_flag"].fillna(0.0).to_numpy(dtype=float) > 0.5
+    laggard_rank = np.zeros(len(working), dtype=float)
+    held_downside_rank = np.zeros(len(working), dtype=float)
+    held_decay_rank = np.zeros(len(working), dtype=float)
+    held_profit_rank = np.zeros(len(working), dtype=float)
+    held_keep_rank = np.zeros(len(working), dtype=float)
+    if bool(np.any(held_mask)):
+        held_index = working.index[held_mask]
+        held_positions = np.flatnonzero(held_mask)
+        held_keep_basis = pd.Series(
+            0.52 * long_edge.to_numpy(dtype=float)
+            + 0.18 * opportunity.to_numpy(dtype=float)
+            - 0.62 * downside.to_numpy(dtype=float)
+            + 0.12 * alpha_support
+            + 0.10 * hold_continuity_pressure
+            - 0.08 * signal_decay_speed,
+            index=working.index,
+            dtype=float,
+        )
+        held_keep_rank_series = held_keep_basis.loc[held_index].rank(method="average", pct=True)
+        held_keep_rank[held_positions] = held_keep_rank_series.to_numpy(dtype=float)
+        laggard_rank[held_positions] = 1.0 - held_keep_rank_series.to_numpy(dtype=float)
+        held_downside_rank_series = pd.Series(downside.to_numpy(dtype=float), index=working.index).loc[held_index].rank(method="average", pct=True)
+        held_downside_rank[held_positions] = held_downside_rank_series.to_numpy(dtype=float)
+        held_decay_rank_series = pd.Series(signal_decay_speed, index=working.index).loc[held_index].rank(method="average", pct=True)
+        held_decay_rank[held_positions] = held_decay_rank_series.to_numpy(dtype=float)
+        held_profit_rank_series = pd.Series(
+            working["unrealized_pnl"].fillna(0.0).to_numpy(dtype=float),
+            index=working.index,
+        ).loc[held_index].rank(method="average", pct=True)
+        held_profit_rank[held_positions] = held_profit_rank_series.to_numpy(dtype=float)
+    profit_protected_strength = np.clip(held_profit_rank * np.clip(held_keep_rank - 0.45, 0.0, 1.0), 0.0, 1.0)
+    sell_attribution_core = np.where(
+        held_mask,
+        np.clip(
+            0.34 * laggard_rank
+            + 0.20 * held_downside_rank
+            + 0.14 * held_decay_rank
+            + 0.10 * held_profit_rank * np.clip(1.0 - held_keep_rank, 0.0, 1.0)
+            + 0.10 * market_forward_downside
+            + 0.08 * market_downside_pressure
+            + 0.08 * portfolio_cash_pressure
+            + 0.06 * cash_regime_pressure
+            - 0.16 * hold_continuity_pressure
+            - 0.10 * np.clip(alpha_support, 0.0, None)
+            - 0.18 * profit_protected_strength,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
     working["reduce_quality"] = (
         0.42 * downside.to_numpy(dtype=float)
         + 0.24 * np.clip(-working["drawdown_from_peak"].fillna(0.0).to_numpy(dtype=float), 0.0, None)
@@ -512,6 +590,26 @@ def build_action_labels_for_date(
         - 0.14 * reduce_reversal_pressure
         - 0.08 * np.clip(alpha_support, 0.0, None)
         - 0.05 * alpha_selected
+        + 0.24 * sell_attribution_core
+        + 0.10 * market_forward_downside
+        - 0.14 * held_keep_rank
+    )
+    working["sell_attribution_score"] = np.where(
+        held_mask,
+        np.clip(
+            0.34 * np.clip(working["reduce_quality"].to_numpy(dtype=float), 0.0, None)
+            + 0.20 * sell_attribution_core
+            + 0.12 * market_forward_downside
+            + 0.10 * market_downside_pressure
+            + 0.08 * portfolio_cash_pressure
+            + 0.08 * cash_regime_pressure
+            - 0.22 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, None)
+            - 0.10 * np.clip(alpha_support, 0.0, None)
+            - 0.10 * profit_protected_strength,
+            0.0,
+            1.0,
+        ),
+        0.0,
     )
     working["reentry_readiness"] = np.clip(
         0.65 * working["entry_quality"].to_numpy(dtype=float)
@@ -564,6 +662,7 @@ def build_action_labels_for_date(
         exit_reentry_value = float(getattr(row, "exit_reentry_pressure", 0.0) or 0.0)
         cash_regime_value = float(getattr(row, "cash_regime_pressure", 0.0) or 0.0)
         hold_continuity_value = float(getattr(row, "hold_continuity_pressure", 0.0) or 0.0)
+        sell_attribution_score = float(getattr(row, "sell_attribution_score", 0.0) or 0.0)
         cash_pressure_value = float(getattr(row, "portfolio_cash_deficit", 0.0) or 0.0) + float(getattr(row, "portfolio_turnover_pressure", 0.0) or 0.0) * 0.12
         catastrophic_exit = urgency_value >= float(config.catastrophic_exit_threshold) or drawdown <= -0.14
         force_hold_window = hold_days < float(config.min_hold_days) and not catastrophic_exit
@@ -583,6 +682,7 @@ def build_action_labels_for_date(
             and hold_continuity_value > 0.22
             and signal > -0.015
             and drawdown > -0.08
+            and sell_attribution_score < 0.58
         )
 
         if held:
@@ -612,6 +712,7 @@ def build_action_labels_for_date(
                 and signal > -0.01
                 and drawdown > -0.08
                 and market_downside_value < 0.18
+                and sell_attribution_score < 0.42
             ):
                 action = "hold"
                 delta_hint = min(0.04, max(0.0, hold_quality) * 0.26 + hold_continuity_value * 0.02)
@@ -626,15 +727,15 @@ def build_action_labels_for_date(
             elif (
                 reduce_quality >= float(config.reduce_quality_threshold)
                 or (signal < -0.01 and drawdown < -0.06)
-                or (risk_off_reduce and hold_days >= float(config.min_hold_days))
+                or (risk_off_reduce and hold_days >= float(config.min_hold_days) and sell_attribution_score > 0.20)
                 or (reversal_rate_value > 0.22 and signal_decay_value > 0.04)
-            ) and not wrong_side_profit_take and not (continuation_hold and reduce_reversal_value > 0.18):
+            ) and not wrong_side_profit_take and not (continuation_hold and reduce_reversal_value > 0.18 and sell_attribution_score < 0.35):
                 if signal_decay_value > 0.09 or drawdown < -0.11 or market_downside_value > 0.24:
                     action = "exit" if hold_days >= float(config.min_hold_days) else "reduce"
-                    delta_hint = -1.0 if action == "exit" else -min(0.65, 0.14 + reduce_quality * 1.15 + max(market_downside_value, 0.0))
+                    delta_hint = -1.0 if action == "exit" else -min(0.72, 0.14 + reduce_quality * 1.05 + sell_attribution_score * 0.18 + max(market_downside_value, 0.0))
                 else:
                     action = "reduce"
-                    delta_hint = -min(0.70, 0.16 + reduce_quality * 1.2 + max(-signal, 0.0) + market_downside_value * 0.25)
+                    delta_hint = -min(0.76, 0.14 + reduce_quality * 1.08 + sell_attribution_score * 0.22 + max(-signal, 0.0) + market_downside_value * 0.20)
             elif add_quality >= float(config.add_quality_threshold) and long_horizon and hold_days >= 1 and market_downside_value < 0.18 and portfolio_cash_pressure_value < 0.16 and cash_regime_value < 0.22:
                 action = "add"
                 delta_hint = min(0.18, 0.02 + add_quality * 0.85 + duration_target / 120.0)
@@ -692,6 +793,7 @@ def build_action_labels_for_date(
                 + 0.10 * max(signal_decay_value, 0.0)
                 + 0.08 * max(market_downside_value, 0.0)
                 + 0.10 * max(-drawdown - 0.04, 0.0)
+                + 0.12 * max(sell_attribution_score, 0.0)
                 - 0.12 * max(hold_quality, 0.0)
                 - 0.05 * max(hold_continuity_value, 0.0),
                 0.0,
@@ -705,6 +807,7 @@ def build_action_labels_for_date(
                 + 0.14 * max(market_downside_value, 0.0)
                 + 0.10 * max(-drawdown - 0.05, 0.0)
                 + 0.10 * max(-signal, 0.0)
+                + 0.10 * max(sell_attribution_score, 0.0)
                 - 0.12 * max(hold_quality, 0.0)
                 - 0.06 * max(hold_continuity_value, 0.0),
                 0.0,
@@ -716,10 +819,11 @@ def build_action_labels_for_date(
             denominator = max(current_weight, 0.04)
             delta_fraction = float(np.clip(max(-float(delta_hint), 0.0) / denominator, 0.0, 1.0))
         if action == "reduce":
-            reduce_fraction_target = float(np.clip(max(delta_fraction, 0.12 + sell_pressure * 0.88), 0.12, 0.96))
+            reduce_fraction_target = float(np.clip(max(delta_fraction, 0.12 + sell_pressure * 0.72 + sell_attribution_score * 0.22), 0.12, 0.96))
             exit_hazard_target = float(
                 np.clip(
                     exit_pressure * 0.55
+                    + sell_attribution_score * 0.12
                     + (0.08 if signal_decay_value > 0.08 or market_downside_value > 0.20 else 0.0),
                     0.0,
                     0.82,
@@ -746,6 +850,11 @@ def build_action_labels_for_date(
     working["exit_urgency"] = working["teacher_urgency"].clip(lower=0.0)
     working["reduce_fraction_target"] = reduce_fraction_targets
     working["exit_hazard_target"] = exit_hazard_targets
+    working["forward_benchmark_return_1d"] = benchmark_fwd1.to_numpy(dtype=float)
+    working["forward_benchmark_return_3d"] = benchmark_fwd3.to_numpy(dtype=float)
+    working["forward_benchmark_return_5d"] = benchmark_fwd5.to_numpy(dtype=float)
+    working["forward_benchmark_return_10d"] = benchmark_fwd10.to_numpy(dtype=float)
+    working["forward_benchmark_return_20d"] = benchmark_fwd20.to_numpy(dtype=float)
     working["label_preset"] = config.name
     numeric_output_columns = (
         "teacher_edge",
@@ -763,6 +872,12 @@ def build_action_labels_for_date(
         "exit_urgency",
         "reduce_fraction_target",
         "exit_hazard_target",
+        "sell_attribution_score",
+        "forward_benchmark_return_1d",
+        "forward_benchmark_return_3d",
+        "forward_benchmark_return_5d",
+        "forward_benchmark_return_10d",
+        "forward_benchmark_return_20d",
     )
     for column in numeric_output_columns:
         working[column] = working[column].astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -981,6 +1096,7 @@ def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
     policy["reentry_readiness"] = working["reentry_readiness"].astype(float)
     policy["reduce_fraction"] = working.get("reduce_fraction_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["exit_hazard"] = working.get("exit_hazard_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
+    policy["sell_attribution_score"] = working.get("sell_attribution_score", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["planned_holding_days"] = working["planned_holding_days"].astype(float)
     policy["planned_holding_bucket"] = working["planned_holding_bucket"].astype(str)
     policy["hold_boost"] = np.where(

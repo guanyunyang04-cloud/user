@@ -104,3 +104,45 @@
 - 正式实证事实：行为审计显示 `budget_model_cash_timing_quality_1d=-0.1775`，说明 cash timing 的问题已经明确落在 budget/value 学习本体，而不再主要是执行层语义污染。
 - 正式实证事实：语义冲突已被压到低位，`semantic_conflict_rate=0.0108`；但 `order_translation_conflict_rate=0.2366` 仍偏高，说明生命周期动作与真实权重翻译仍未完全对齐。
 - 复盘结论：`split_v2 + result_value_v2 + active alpha prior` 是当前最合理、最有潜力的主线，但它证明的是“结构修正方向正确”，而不是“cash timing 已经学会”。后续主攻点必须是 budget credit assignment 与 translation drift，而不是回退到 monolithic 或 legacy 收益表象。
+
+## 13. 2026-04-18 translation guard v2 与 result/value budget r3 合同
+- 当前可交付事实：`portfolio_simulator.py` 已新增 `budget_calibration = cash_translation_guard_v2`，执行层开始显式约束 `hold` 不再静默变成加减仓，`open/add/reduce/exit` 必须在真实权重变化上留下可审计痕迹。
+- 当前可交付事实：`pipeline_utils.py` 已新增 `budget_objective = result_value_v3`，并强化 `cash_timing_score` 的 shaping，使其更直接对齐 `cash_timing_quality_1d` 所代表的风险回避目标。
+- 当前可交付事实：`model_seq_v3.py` 已新增 `alpha_result_value_budget_split_v3` loss profile，并在推理阶段对 `result_value_v3` 的 budget signal 做专门融合，避免训练目标被旧融合逻辑稀释。
+- 当前可交付事实：新的正式 study `cp_v3_split_heads_cash_timing_r2` 已完成 4 screening + 2 confirmatory；其核心只比较 `cash_exit_guard_v1 / cash_translation_guard_v2` 与 `result_value_v2 / result_value_v3`，固定 `active alpha + split_v2`。
+- 正式实证事实：screening 最优是 `cash_translation_guard_v2 + result_value_v3`，`annual_return=1.2183`、`sharpe=3.1359`、`order_translation_conflict_rate=0.0534`，说明 translation guard 明显压低了权重翻译漂移。
+- 正式实证事实：但 `result_value_v3` 在 confirmatory 中没有稳住，`cp_v3_split_heads_cash_timing_r2__confirm_01` 退化为 `annual_return=0.1101`、`sharpe=0.5080`、`max_drawdown=-0.1766`，不能作为新主线。
+- 正式实证事实：最终 confirmatory 冠军变为 `cash_translation_guard_v2 + result_value_v2`，`annual_return=1.3904`、`sharpe=3.7228`、`max_drawdown=-0.0709`、`order_translation_conflict_rate=0.0801`，相对 r1 的 `0.2366` 有显著改善，但 `cash_timing_quality_1d=-0.1555` 仍未过线。
+- 正式实证事实：behavior audit 显示当前新增高优先级瓶颈是 `reduce_too_early_or_wrong_side`，同时 `budget_action_entanglement` 仍存在，即预算/换手约束仍会放大动作层偏离。
+- 复盘结论：这一轮真正被证明有效的是 `translation_guard_v2`，不是 `result_value_v3`。也就是说，执行翻译层的语义约束继续往正确方向推进，但 cash timing 的训练目标本体还没有稳定泛化。
+- 决策：后续主线应保留 `cash_translation_guard_v2`，并回到 `result_value_v2` 基础上继续做 cash/reduce 的信用分配；不要把 `result_value_v3` 的 screening 表现误写成 confirmatory 成功。
+## 14. 2026-04-19 sell attribution 与 result/value budget v4 合同
+- 当前可交付事实：`label_builder.py` 已把真实 `forward_benchmark_return_1d/3d/5d/10d/20d` 写入训练 label frame，并把这些列列入 label-only 字段，避免未来信息进入模型特征。
+- 当前可交付事实：训练标签已新增 `sell_attribution_score`，用于刻画持仓中“该卖谁”的未来归因，降低把组合风险收缩平均摊到所有持仓上的错误信用分配。
+- 当前可交付事实：`pipeline_utils.py` 已新增 `budget_objective = result_value_v4`，并把真实 forward benchmark downside、held sell pressure、sell selection pressure 接入预算目标；行为审计新增 `sell_selection_quality_5d / sell_selection_hit_rate_5d`。
+- 当前可交付事实：`portfolio_simulator.py` 已新增 `budget_calibration = cash_translation_sell_guard_v3`，在组合需要收缩时优先按 `sell_attribution_score` 缩减高卖出归因持仓，而不是对持仓做无差别比例压缩。
+- 当前可交付事实：`model_seq_v3.py` 已新增 `alpha_result_value_budget_split_v4`，并在推理阶段输出可审计的 `sell_attribution_score`。
+- 正式实证事实：`cp_v3_split_heads_cash_timing_r3` 已完成 4 screening + 2 confirmatory，全部仍为 `shadow_only`，`latest_state_restored=true`。
+- 正式实证事实：r3 confirmatory 冠军为 `cp_v3_split_heads_cash_timing_r3__confirm_01 = active_execution_strategy + split_v2 + result_value_v2 + cash_translation_sell_guard_v3 + alpha_result_value_budget_split_v4`，指标为 `annual_return=0.5762`、`sharpe=2.2604`、`max_drawdown=-0.1116`、`cash_timing_quality_1d=-0.0945`、`semantic_conflict_rate=0.0000`、`order_translation_conflict_rate=0.0597`。
+- 正式实证事实：`result_value_v4` 对应的 confirmatory 分支 `confirm_02` 取得 `annual_return=0.1565`、`sharpe=0.8738`、`max_drawdown=-0.0906`、`cash_timing_quality_1d=-0.0762`、`exit_timeliness_rate_5d=0.5455`，收益与稳定性不足以替代 `result_value_v2`。
+- 行为审计事实：r3 冠军 `sell_selection_quality_5d=0.0001`，而 teacher recomputed 为 `0.2531`；`wrong_side_reduce_share=0.5128`，说明模型仍没有稳定学会“该减谁/该退谁”。
+- 行为审计事实：r3 冠军 `budget_model_cash_timing_quality_1d=-0.0990`，`cash_timing_quality_1d=-0.0945`，说明 cash timing 的泛化仍未过线。
+- 复盘结论：r3 把旧问题从“执行层改写动作语义”进一步推进为“卖出对象选择与现金时机的信用分配失败”。语义层已经基本干净，主要矛盾不再是 `semantic_conflict_rate`，而是 sell-side rank learning、cash/deployment timing 与预算剪裁下的动作偏离。
+- 决策：不 promotion `cp_v3_split_heads_cash_timing_r3`；不让 `result_value_v4` 替代 `result_value_v2`；`cash_translation_sell_guard_v3` 与 `sell_attribution_score` 保留为候选机制，但必须通过下一轮更稳的 sell-selection/cash objective 验证后才可升主线。
+- 下一轮约束：不要继续单纯扩大模型或延长同一目标训练；优先设计 `result_value_v4b` 或等价目标，把 `sell_selection_quality_5d`、错边 reduce、现金机会成本和部署下限同时纳入训练/审计闭环。
+## 15. 2026-04-19 sell attribution head 与 deployment opportunity floor v4b 合同
+- 当前可交付事实：`pipeline_utils.py` 已新增 `budget_objective = result_value_v4b`，在 v4 的 sell-side attribution 基础上加入 `forward_benchmark_upside / opportunity_cost_pressure / deployment_floor_pressure`，避免模型把风险控制误学成长期低暴露。
+- 当前可交付事实：`model_seq_v3.py` 已新增 `alpha_result_value_budget_split_v4b` loss profile 与独立 `sell_attribution_head`，并让动作 soft target 在高卖出归因样本上显式压低 hold/add、提高 reduce/exit。
+- 当前可交付事实：推理阶段已支持 v4b 专用 deployment floor：当 alpha focus、deploy signal 与机会成本较高时，提高 `min_gross_exposure_target / min_candidate_budget / min_position_cap_target`，防止 cash head 过度防守吞掉机会。
+- 当前可交付事实：`run_self_optimizing_study.py` 已新增 `split_heads_cash_timing_r4` profile，固定 `active_execution_strategy + split_v2 + alpha_result_value_budget_split_v4b`，只比较 `cash_translation_guard_v2 / cash_translation_sell_guard_v3` 与 `result_value_v2 / result_value_v4b`。
+- smoke 事实：`cp_split_heads_cash_timing_smoke_train_r5` 训练成功，artifact 记录 `supports_sell_attribution_head=true`，且 v4b 诊断中 `result_value_opportunity_cost_pressure=0.4621`、`result_value_deployment_floor_pressure=0.5521`。
+- smoke 事实：加入推理 deployment floor 后，`cp_split_heads_cash_timing_smoke_eval_r7` 相比修复前把 `avg_gross_exposure` 从 `0.1351` 拉到 `0.1960`，`sell_selection_quality_5d=0.0165`，但 `cash_timing_quality_1d=-0.1155` 仍为负。
+- 正式实证事实：`cp_v3_split_heads_cash_timing_r4` 已完成 4 screening + 2 confirmatory，运行约 73 分钟，所有 trial/confirm 仍为 `shadow_only`，`latest_state_restored=true`。
+- 正式实证事实：r4 performance champion 为 `cp_v3_split_heads_cash_timing_r4__confirm_01 = result_value_v2 + cash_translation_guard_v2 + alpha_result_value_budget_split_v4b`，指标为 `annual_return=1.1745`、`sharpe=3.0222`、`max_drawdown=-0.0911`、`avg_gross_exposure=0.8057`、`cash_timing_quality_1d=-0.0414`、`semantic_conflict_rate=0.0147`、`order_translation_conflict_rate=0.0772`。
+- 正式实证事实：r4 stability/sell-side champion 为 `cp_v3_split_heads_cash_timing_r4__confirm_02 = result_value_v2 + cash_translation_sell_guard_v3 + alpha_result_value_budget_split_v4b`，指标为 `annual_return=0.2190`、`sharpe=1.2970`、`max_drawdown=-0.0690`、`reduce_success_rate_5d=0.5429`、`exit_timeliness_rate_5d=0.6190`、`sell_selection_quality_5d=0.0228`、`cash_timing_quality_1d=-0.0673`、`order_translation_conflict_rate=0.1749`。
+- 行为审计事实：r4 confirm_01 仍触发 `sell_selection_not_learned / cash_timing_not_learned / budget_action_entanglement`，`sell_selection_quality_5d=0.0036`、`wrong_side_reduce_share=0.5526`，说明高收益分支没有真正学会“该卖谁”。
+- 行为审计事实：r4 confirm_02 未触发 `sell_selection_not_learned`，`sell_selection_hit_rate_5d=0.6757`、`exit_timeliness_rate_5d=0.6190`，但收益显著低且 `order_translation_conflict_rate=0.1749`，说明 sell guard 能改善卖出质量，却会通过预算剪裁/动作漂移牺牲收益。
+- 复盘结论：v4b 证明“机会成本 + 部署下限”能修复一部分过度现金化，并把 `cash_timing_quality_1d` 从 r2 的 `-0.1555`、r3 的 `-0.0945` 收窄到 r4 performance champion 的 `-0.0414`；但 direct sell head 只在部分分支生效，尚未成为稳定收益机制。
+- 本质判断：当前矛盾不是“模型不够强”或“信号完全没进来”，而是生命周期动作仲裁仍缺失。模型能预测一部分卖出归因，但在 add/hold/reduce/exit 同时竞争、预算剪裁介入时，sell-side ranking 会被部署收益与翻译约束覆盖。
+- 决策：不 promotion `cp_v3_split_heads_cash_timing_r4`；不让 `result_value_v4b` 直接替代 `result_value_v2`；r4 保留为 cash timing 进展证据与 sell-side 分支诊断，不覆盖 r2 的当前收益主线。
+- 下一轮约束：优先做 lifecycle action arbitration，而不是继续调 v4b 权重。下一步应把 `sell_attribution_score` 升级为持仓内 pairwise/rank 约束，并加入 clipped-intent loss，使模型在训练时看见预算剪裁后的动作漂移成本。

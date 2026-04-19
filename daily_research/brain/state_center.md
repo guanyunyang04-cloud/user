@@ -1062,3 +1062,106 @@
   - 不 promotion `cp_v3_split_heads_cash_timing_r1`
   - `active alpha + result_value_v2 + split_v2` 晋升为当前结构主线，但仍是 `shadow_only`
   - 下一轮必须围绕 `cash timing` 与 `translation drift` 深挖，不能因为收益恢复到正区间就误判为机制已完成
+
+## 2026-04-18 translation guard v2 正式状态
+- 新实现状态：
+  - `daily_research/continuous_policy/portfolio_simulator.py` 已支持 `budget_calibration=cash_translation_guard_v2`
+  - `daily_research/continuous_policy/pipeline_utils.py` 已支持 `budget_objective=result_value_v3`
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 已新增 `split_heads_cash_timing_r2` profile
+- smoke 事实：
+  - `cp_split_heads_cash_timing_smoke_eval_r4` 在 `result_value_v3 + cash_translation_guard_v2` 下把 `cash_timing_quality_1d` 拉到 `0.1278`
+  - 但同一 smoke 的 `annual_return=-0.0476`、`avg_gross_exposure=0.1574`、`order_translation_conflict_rate=0.5357`，说明该组合有过度收缩风险，不能直接据此 promotion
+- 正式 study 输出：
+  - `study_summary.json`：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r2/study_summary.json`
+  - `trial_ranking.csv`：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r2/trial_ranking.csv`
+  - `latest_state_restored = true`
+- screening 事实：
+  - 冠军 `trial_02 = cash_translation_guard_v2 + result_value_v3`
+  - `annual_return=1.2183`，`sharpe=3.1359`，`max_drawdown=-0.0957`
+  - `order_translation_conflict_rate=0.0534`，相较 r1 的 `0.2366` 显著下降
+  - 失败项：`training_evidence_status=insufficient`，`cash_timing_quality_1d=-0.1319`，`max_drawdown` 仍未过线
+- confirmatory 事实：
+  - `confirm_01 = result_value_v3 + cash_translation_guard_v2` 退化到 `annual_return=0.1101`，`sharpe=0.5080`，`max_drawdown=-0.1766`
+  - 最终冠军是 `confirm_02 = result_value_v2 + cash_translation_guard_v2`
+  - `annual_return=1.3904`，`sharpe=3.7228`，`max_drawdown=-0.0709`
+  - `cash_timing_quality_1d=-0.1555`
+  - `order_translation_conflict_rate=0.0801`
+  - `semantic_conflict_rate=0.0310`
+- champion 行为审计事实：
+  - 审计文件：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_split_heads_cash_timing_r2__confirm_02__behavior_audit.json`
+  - 高优先级失败项：`reduce_too_early_or_wrong_side`、`cash_timing_not_learned`、`budget_action_entanglement`
+  - 中优先级失败项：`order_translation_drift`
+- 当前决策：
+  - 不 promotion `cp_v3_split_heads_cash_timing_r2`
+  - `cash_translation_guard_v2` 证明有效，应保留到下一轮主线
+  - `result_value_v3` 未经 confirmatory 证明，不应替代 `result_value_v2`
+  - 当前最优可继承主线更新为：`active alpha + split_v2 + result_value_v2 + cash_translation_guard_v2`
+## 2026-04-19 split heads cash timing r3 当前状态
+- 已完成实现事实：
+  - `forward_benchmark_return_*` 已进入 label-only 训练目标链路，修复预算 objective 无法直接看到未来 benchmark outcome 的问题。
+  - `sell_attribution_score` 已进入 teacher label、训练目标、推理输出、组合模拟 diagnostics 与行为审计。
+  - 新增 `budget_objective=result_value_v4`、`loss_profile=alpha_result_value_budget_split_v4`、`budget_calibration=cash_translation_sell_guard_v3`、study profile `split_heads_cash_timing_r3`。
+- smoke 事实：
+  - `cp_split_heads_cash_timing_smoke_eval_r5` 中 `cash_timing_quality_1d=0.2170`，`sell_selection_quality_5d=0.0137`，说明新目标能打开 cash/sell 学习入口。
+  - 同一 smoke `avg_gross_exposure=0.1442`、`annual_return=-0.0448`，说明 v4 目标有过度防守和欠部署风险。
+- 正式 study 事实：
+  - study 输出：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r3/study_summary.json`
+  - ranking 输出：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r3/trial_ranking.csv`
+  - `completed_trial_count=4`、`confirmatory_completed_trial_count=2`、`latest_state_restored=true`
+- confirmatory 冠军事实：
+  - 冠军：`cp_v3_split_heads_cash_timing_r3__confirm_01`
+  - 配置：`active_execution_strategy + split_v2 + result_value_v2 + cash_translation_sell_guard_v3 + alpha_result_value_budget_split_v4`
+  - 指标：`annual_return=0.5762`、`sharpe=2.2604`、`max_drawdown=-0.1116`
+  - 结构指标：`cash_timing_quality_1d=-0.0945`、`reduce_success_rate_5d=0.4872`、`exit_timeliness_rate_5d=0.2500`
+  - 语义指标：`semantic_conflict_rate=0.0000`、`order_translation_conflict_rate=0.0597`
+  - 状态：`promotion_status=shadow_only`
+- behavior audit 事实：
+  - `confirm_01` 审计输出：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_split_heads_cash_timing_r3__confirm_01__behavior_audit.json`
+  - 高优先级失败项：`sell_selection_not_learned`、`cash_timing_not_learned`
+  - `sell_selection_quality_5d=0.0001`，teacher recomputed 为 `0.2531`
+  - `wrong_side_reduce_share=0.5128`
+  - `budget_model_cash_timing_quality_1d=-0.0990`
+- 当前推断：
+  - r3 证明真实 forward benchmark 与 sell attribution 的方向是有信息量的，但当前 v4 shaping 在 confirmatory 中没有稳定兑现。
+  - 当前主矛盾已经从执行语义污染，转为卖出对象选择、现金时机泛化、预算剪裁下动作偏离三者的信用分配。
+- 当前决策：
+  - 不 promotion `cp_v3_split_heads_cash_timing_r3`
+  - 不让 `result_value_v4` 替代 `result_value_v2`
+  - 当前最优可继承主线仍是：`active alpha + split_v2 + result_value_v2 + cash_translation_guard_v2`
+  - `cash_translation_sell_guard_v3` 与 `sell_attribution_score` 作为下一轮候选机制保留，但需要重新校准目标，避免过度防守和错误减仓。
+## 2026-04-19 split heads cash timing r4 当前状态
+- 新实现状态：
+  - `daily_research/continuous_policy/pipeline_utils.py` 已支持 `budget_objective=result_value_v4b`，新增机会成本、benchmark upside 与部署下限压力。
+  - `daily_research/continuous_policy/model_seq_v3.py` 已支持 `alpha_result_value_budget_split_v4b` 与独立 `sell_attribution_head`，并保持旧 artifact 兼容。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 已新增 `split_heads_cash_timing_r4` profile。
+- smoke 事实：
+  - `cp_split_heads_cash_timing_smoke_train_r5` 成功训练，`supports_sell_attribution_head=true`。
+  - `cp_split_heads_cash_timing_smoke_eval_r7` 在 deployment floor 修复后取得 `annual_return=-0.0087`、`avg_gross_exposure=0.1960`、`sell_selection_quality_5d=0.0165`、`cash_timing_quality_1d=-0.1155`。
+  - smoke audit 未触发 `sell_selection_not_learned`，但仍触发 `cash_timing_not_learned` 与 `budget_action_entanglement`。
+- 正式 study 事实：
+  - study 输出：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r4/study_summary.json`
+  - ranking 输出：`daily_research/output/continuous_policy/studies/cp_v3_split_heads_cash_timing_r4/trial_ranking.csv`
+  - `completed_trial_count=4`、`confirmatory_completed_trial_count=2`、`latest_state_restored=true`
+  - 所有 r4 trial/confirm 均为 `shadow_only`
+- performance champion 事实：
+  - 冠军：`cp_v3_split_heads_cash_timing_r4__confirm_01`
+  - 配置：`active_execution_strategy + split_v2 + result_value_v2 + cash_translation_guard_v2 + alpha_result_value_budget_split_v4b`
+  - 指标：`annual_return=1.1745`、`sharpe=3.0222`、`max_drawdown=-0.0911`
+  - 结构指标：`avg_gross_exposure=0.8057`、`reduce_success_rate_5d=0.4474`、`exit_timeliness_rate_5d=0.3333`、`cash_timing_quality_1d=-0.0414`
+  - 语义指标：`semantic_conflict_rate=0.0147`、`order_translation_conflict_rate=0.0772`
+  - 失败项：`training_evidence_sufficient`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`
+- stability / sell-side champion 事实：
+  - runner-up：`cp_v3_split_heads_cash_timing_r4__confirm_02`
+  - 配置：`active_execution_strategy + split_v2 + result_value_v2 + cash_translation_sell_guard_v3 + alpha_result_value_budget_split_v4b`
+  - 指标：`annual_return=0.2190`、`sharpe=1.2970`、`max_drawdown=-0.0690`
+  - 结构指标：`reduce_success_rate_5d=0.5429`、`exit_timeliness_rate_5d=0.6190`、`sell_selection_quality_5d=0.0228`、`cash_timing_quality_1d=-0.0673`
+  - 语义指标：`semantic_conflict_rate=0.0053`、`order_translation_conflict_rate=0.1749`
+- 当前推断：
+  - v4b 明显改善了部署与现金过防守问题，尤其 performance champion 的 `cash_timing_quality_1d=-0.0414` 是当前 formal confirmatory 中最接近过线的 cash timing 信号。
+  - 但 v4b 没有稳定解决 sell selection。高收益分支仍 `sell_selection_not_learned`，sell guard 分支则以收益和翻译漂移为代价换来更好的 reduce/exit。
+  - 本质矛盾已经收敛为生命周期动作仲裁问题：不是没有 sell 信号，而是模型缺少在 `add / hold / reduce / exit` 冲突时保护正确 sell-side ranking 的结构约束。
+- 当前决策：
+  - 不 promotion `cp_v3_split_heads_cash_timing_r4`
+  - 不让 `result_value_v4b` 替代 `result_value_v2`
+  - 当前收益/sharpe 最优继承证据仍是 r2 confirm_02；当前 cash timing 进展证据是 r4 confirm_01；当前 sell/exit 质量诊断证据是 r4 confirm_02。
+  - 下一轮优先实现 lifecycle action arbitration、持仓内 sell rank/pairwise 约束与 clipped-intent loss，而不是继续扩大同一 v4b 搜索。

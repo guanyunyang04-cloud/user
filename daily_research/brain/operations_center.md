@@ -752,3 +752,58 @@
 - 后续操作约束：
   - 不得覆盖 `cp_v3_split_heads_cash_timing_r1`
   - 若继续训练，必须用新 tag，并把重点放在 budget/value credit assignment 与 translation layer 校准
+
+## 2026-04-18 translation guard v2 操作口径
+- 已完成 smoke train：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.train_policy --pool-name learned_all_a --start-date 20250701 --end-date 20251231 --benchmark 000300.SH --data-source tq --max-universe-size 80 --random-seed 7 --skip-multiplier 1.5 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_guard_v2 --budget-objective result_value_v3 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v3 --epochs 2 --min-epochs 1 --batch-size 256 --learning-rate 0.0012 --hidden-dim 128 --sequence-layers 2 --daily-hidden-dim 96 --daily-head-layout split_v2 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 2 --resume-mode fresh --tag cp_split_heads_cash_timing_smoke_train_r3`
+- 已完成 smoke eval：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_split_heads_cash_timing_smoke_train_r3/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260331 --benchmark 000300.SH --data-source tq --max-universe-size 80 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_guard_v2 --tag cp_split_heads_cash_timing_smoke_eval_r4`
+- 已完成正式 10h 前台 study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r2 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r2`
+- 已完成 champion 行为审计：
+  - `$env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r2__confirm_02__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r2__confirm_02__behavior_audit`
+- 当前运行结论：
+  - `cash_translation_guard_v2` 对压低 `order_translation_conflict_rate` 有明确帮助
+  - `result_value_v3` 适合继续保留为探索分支，但当前不能覆盖 `result_value_v2`
+  - 若继续正式训练，默认应从 `split_heads_cash_timing_r2` 的 confirmatory champion 配置出发，而不是从 `result_value_v3` screening 冠军出发
+## 2026-04-19 split_heads_cash_timing_r3 操作口径
+- 已完成 dry-run 验证：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r3 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r3__dry_run --dry-run`
+- 已完成 smoke train：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.train_policy --pool-name learned_all_a --start-date 20250701 --end-date 20251231 --benchmark 000300.SH --data-source tq --max-universe-size 80 --random-seed 7 --skip-multiplier 1.5 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_sell_guard_v3 --budget-objective result_value_v4 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v4 --epochs 2 --min-epochs 1 --batch-size 256 --learning-rate 0.0012 --hidden-dim 128 --sequence-layers 2 --daily-hidden-dim 96 --daily-head-layout split_v2 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 2 --resume-mode fresh --tag cp_split_heads_cash_timing_smoke_train_r4`
+- 已完成 smoke eval：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path daily_research/output/continuous_policy/models/cp_split_heads_cash_timing_smoke_train_r4/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --start-date 20260102 --end-date 20260331 --benchmark 000300.SH --data-source tq --max-universe-size 80 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_sell_guard_v3 --tag cp_split_heads_cash_timing_smoke_eval_r5`
+- 已完成正式 10h 前台 study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r3 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r3`
+- 已完成 confirm 行为审计：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r3__confirm_01__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r3__confirm_01__behavior_audit`
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r3__confirm_02__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r3__confirm_02__behavior_audit`
+- 已完成最终检查：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m compileall -q daily_research/continuous_policy`
+  - `git diff --check`
+- 当前操作结论：
+  - r3 不 promotion，所有 trial/confirm 仍为 `shadow_only`。
+  - 不覆盖 `cp_v3_split_heads_cash_timing_r2` 的当前最优可继承主线。
+  - 若继续下一轮，必须使用新 tag；不要复用 `cp_v3_split_heads_cash_timing_r3`。
+  - 下一轮优先从 `result_value_v2 + cash_translation_guard_v2` 稳定主线出发，吸收 `sell_attribution_score` 的审计/排序信号，而不是直接继承 v4 的高防守 shaping。
+## 2026-04-19 split_heads_cash_timing_r4 操作口径
+- 已完成 dry-run 验证：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r4 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r4__dry_run --dry-run`
+- 已完成 smoke train：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.train_policy --pool-name learned_all_a --start-date 20250701 --end-date 20251231 --benchmark 000300.SH --data-source tq --max-universe-size 80 --random-seed 7 --skip-multiplier 1.5 --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_guard_v2 --budget-objective result_value_v4b --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v4b --epochs 2 --min-epochs 1 --batch-size 256 --learning-rate 0.0012 --hidden-dim 128 --sequence-layers 2 --daily-hidden-dim 96 --daily-head-layout split_v2 --dropout 0.10 --daily-dropout 0.05 --early-stop-patience 2 --resume-mode fresh --tag cp_split_heads_cash_timing_smoke_train_r5`
+- 已完成 smoke eval 与行为审计：
+  - `cp_split_heads_cash_timing_smoke_eval_r7`：deployment floor 修复后的主 smoke，`avg_gross_exposure=0.1960`、`sell_selection_quality_5d=0.0165`、`cash_timing_quality_1d=-0.1155`。
+  - `cp_split_heads_cash_timing_smoke_eval_r8`：sell guard 对照 smoke，未显著优于 r7。
+  - `cp_split_heads_cash_timing_smoke_eval_r7__behavior_audit`：仍显示 `cash_timing_not_learned` 与 `budget_action_entanglement`。
+- 已完成正式 10h 前台 study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_cash_timing_r4 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r4`
+  - 实际用时约 73 分钟，未中断既有训练，`latest_state_restored=true`。
+- 已完成 confirm 行为审计：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r4__confirm_01__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r4__confirm_01__behavior_audit`
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_split_heads_cash_timing_r4__confirm_02__evaluate/evaluation_summary.json --tag cp_v3_split_heads_cash_timing_r4__confirm_02__behavior_audit`
+- 当前操作结论：
+  - r4 不 promotion，所有 trial/confirm 仍为 `shadow_only`。
+  - 不覆盖 r2 confirm_02 的当前收益主线，也不直接继承 v4b 作为默认 objective。
+  - r4 的价值是把问题进一步缩窄：现金时机已接近过线，但卖出排序与动作仲裁没有稳定合一。
+  - 若继续下一轮，必须使用新 tag；不要复用 `cp_v3_split_heads_cash_timing_r4`。
+  - 下一轮优先实现 `lifecycle_action_arbitration`、held-only sell rank/pairwise loss 与 budget clipped-intent loss。
