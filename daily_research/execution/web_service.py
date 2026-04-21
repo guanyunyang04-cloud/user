@@ -8,7 +8,7 @@ from daily_research.execution.app_tasks import get_task_spec, serialize_task_spe
 
 
 APP_TITLE = "Daily Research 执行控制台"
-APP_SUBTITLE = "本地执行、监控、恢复与产物查看控制面。"
+APP_SUBTITLE = "本地执行、监控、恢复与产物查看控制面板"
 NAV_ITEMS = (
     {"path": "/", "label": "总览"},
     {"path": "/tasks", "label": "任务"},
@@ -74,8 +74,9 @@ def dashboard_context() -> dict[str, Any]:
 
 
 def tasks_context(*, selected_task: str = "") -> dict[str, Any]:
-    tasks = app_service.list_tasks_payload()
-    resolved = selected_task or (tasks[0]["name"] if tasks else "")
+    tasks = app_service.list_tasks_payload(core_only=True)
+    visible_names = {task["name"] for task in tasks}
+    resolved = selected_task if selected_task in visible_names else (tasks[0]["name"] if tasks else "")
     selected = serialize_task_spec(get_task_spec(resolved)) if resolved else {}
     return {
         "tasks": tasks,
@@ -114,9 +115,7 @@ def runtime_context() -> dict[str, Any]:
 
 def guide_context() -> dict[str, Any]:
     return {
-        "tutorial_markdown_path": str(
-            (Path(__file__).resolve().parent / "使用教程.md").resolve()
-        ),
+        "tutorial_markdown_path": str((Path(__file__).resolve().parent / "使用教程.md").resolve()),
     }
 
 

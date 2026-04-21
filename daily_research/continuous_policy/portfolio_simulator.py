@@ -25,6 +25,7 @@ BUDGET_CALIBRATION_CASH_EXIT = "cash_exit_guard_v1"
 BUDGET_CALIBRATION_CASH_TRANSLATION = "cash_translation_guard_v2"
 BUDGET_CALIBRATION_CASH_TRANSLATION_SELL = "cash_translation_sell_guard_v3"
 BUDGET_CALIBRATION_CASH_CONSTRAINT = "cash_constraint_guard_v4"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT = "cash_constraint_intent_guard_v5"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -32,6 +33,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_TRANSLATION,
     BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
     BUDGET_CALIBRATION_CASH_CONSTRAINT,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
 )
 
 
@@ -95,6 +97,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT,
         "cash_constraint_guard_v4": BUDGET_CALIBRATION_CASH_CONSTRAINT,
         "constraint_only_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT,
+        "cash_constraint_intent": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        "cash_constraint_intent_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        "cash_constraint_intent_guard_v5": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        "intent_preserving_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
     }
     if text not in aliases:
         raise ValueError(
@@ -479,6 +485,79 @@ class PortfolioState:
             residual_excess = max(float(result.sum()) - float(target_total), 0.0)
         return result, guarded
 
+    def _lift_to_soft_floor_by_priority(
+        self,
+        weights: pd.Series,
+        *,
+        target_total: float,
+        hard_floor: pd.Series,
+        soft_floor: pd.Series,
+        cap: pd.Series,
+        priority: pd.Series,
+    ) -> tuple[pd.Series, pd.Series]:
+        result = pd.to_numeric(weights, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float).copy()
+        hard_floor_series = pd.to_numeric(hard_floor.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        soft_floor_series = pd.to_numeric(soft_floor.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        cap_series = pd.to_numeric(cap.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(np.inf).astype(float)
+        priority_series = pd.to_numeric(priority.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        guarded = pd.Series(False, index=result.index, dtype=bool)
+        result = result.clip(lower=hard_floor_series, upper=cap_series)
+        residual_capacity = max(float(target_total) - float(result.sum()), 0.0)
+        for _ in range(10):
+            if residual_capacity <= 1e-8:
+                break
+            needed = (soft_floor_series - result).clip(lower=0.0)
+            needed = np.minimum(needed.to_numpy(dtype=float), (cap_series - result).clip(lower=0.0).to_numpy(dtype=float))
+            needed_series = pd.Series(needed, index=result.index, dtype=float)
+            needed_sum = float(needed_series.sum())
+            if needed_sum <= 1e-8:
+                break
+            priority_mass = needed_series * priority_series.clip(lower=0.0)
+            if float(priority_mass.sum()) <= 1e-8:
+                priority_mass = needed_series
+            step = (priority_mass / float(priority_mass.sum())) * residual_capacity
+            step = np.minimum(step.to_numpy(dtype=float), needed_series.to_numpy(dtype=float))
+            step_series = pd.Series(step, index=result.index, dtype=float)
+            if float(step_series.sum()) <= 1e-8:
+                break
+            guarded = guarded | (step_series > 1e-8)
+            result = (result + step_series).clip(lower=hard_floor_series, upper=cap_series)
+            residual_capacity = max(float(target_total) - float(result.sum()), 0.0)
+        return result, guarded
+
+    def _trim_delta_to_turnover_by_priority(
+        self,
+        delta: pd.Series,
+        *,
+        target_turnover: float,
+        priority: pd.Series,
+    ) -> tuple[pd.Series, pd.Series]:
+        result = pd.to_numeric(delta, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float).copy()
+        priority_series = pd.to_numeric(priority.reindex(result.index), errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        guarded = pd.Series(False, index=result.index, dtype=bool)
+        residual_excess = max(float(result.abs().sum()) - float(target_turnover), 0.0)
+        for _ in range(10):
+            if residual_excess <= 1e-8:
+                break
+            reducible = result.abs()
+            reducible_sum = float(reducible.sum())
+            if reducible_sum <= 1e-8:
+                break
+            trim_preference = reducible * (1.05 - priority_series.clip(lower=0.0, upper=1.0))
+            trim_preference = trim_preference.clip(lower=0.05) * (reducible > 1e-8).astype(float)
+            if float(trim_preference.sum()) <= 1e-8:
+                trim_preference = reducible
+            step = (trim_preference / float(trim_preference.sum())) * residual_excess
+            step = np.minimum(step.to_numpy(dtype=float), reducible.to_numpy(dtype=float))
+            step_series = pd.Series(step, index=result.index, dtype=float)
+            if float(step_series.sum()) <= 1e-8:
+                break
+            guarded = guarded | (step_series > 1e-8)
+            result = np.sign(result.to_numpy(dtype=float)) * np.maximum(reducible.to_numpy(dtype=float) - step_series.to_numpy(dtype=float), 0.0)
+            result = pd.Series(result, index=delta.index, dtype=float)
+            residual_excess = max(float(result.abs().sum()) - float(target_turnover), 0.0)
+        return result, guarded
+
     def step(
         self,
         *,
@@ -567,10 +646,20 @@ class PortfolioState:
         budget_model_hierarchical_mode = float((global_targets or {}).get("budget_model_hierarchical_mode", 0.0) or 0.0)
         budget_model_constraint_only_mode = float((global_targets or {}).get("budget_model_constraint_only_mode", 0.0) or 0.0)
         hierarchical_budget_mode = budget_model_hierarchical_mode > 0.5
-        constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT
+        constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        }
+        intent_preserving_constraint_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT
+        translation_guard_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_TRANSLATION,
+            BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -1407,6 +1496,17 @@ class PortfolioState:
             - value_arbitration_series.clip(0.0, 1.0) * 0.04
             - action_names.isin({"hold", "add"}).astype(float) * 0.06
         ).clip(lower=0.0)
+        deploy_intent_priority = (
+            alpha_opportunity_series.clip(0.0, 1.0) * 0.30
+            + deployment_opportunity_series.clip(0.0, 1.0) * 0.22
+            + deploy_value_series.clip(0.0, 1.0) * 0.18
+            + decision_deploy_gate_series.clip(0.0, 1.0) * 0.16
+            + hold_continuation_series.clip(0.0, 1.0) * 0.08
+            + action_names.isin({"open", "add"}).astype(float) * 0.16
+            + action_names.eq("hold").astype(float) * 0.08
+            - sell_reduction_priority.clip(0.0, 1.0) * 0.10
+            - cash_defense_series.clip(0.0, 1.0) * (0.06 if constraint_only_budget_mode else 0.10)
+        ).clip(lower=0.0)
 
         target_weights = self._allocate_with_cap(
             desired_strength,
@@ -1451,12 +1551,14 @@ class PortfolioState:
                     budget_split_bound_guarded.at[stock] = True
         translation_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
         translation_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        translation_soft_lift_guarded = pd.Series(False, index=prices.index, dtype=bool)
         translation_floor = protected_floor.copy()
+        translation_soft_floor = protected_floor.copy()
         translation_cap = pd.Series(position_cap_target, index=prices.index, dtype=float)
         if (
             execution_semantics == EXECUTION_SEMANTICS_SEMANTIC
             and budget_semantics == BUDGET_SEMANTICS_SPLIT
-            and budget_calibration in {BUDGET_CALIBRATION_CASH_TRANSLATION, BUDGET_CALIBRATION_CASH_TRANSLATION_SELL}
+            and translation_guard_mode
         ):
             for stock in prices.index:
                 previous_weight = float(current.get(stock, 0.0))
@@ -1474,6 +1576,7 @@ class PortfolioState:
                     deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
                     if model_action_name == "hold":
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), previous_weight)
+                        translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), previous_weight)
                         translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), previous_weight)
                         if target_value > previous_weight + 1e-12:
                             target_weights.at[stock] = previous_weight
@@ -1486,9 +1589,11 @@ class PortfolioState:
                             position_cap_target,
                             previous_weight + max(deadband * 1.35, previous_weight * (0.035 + budget_model_deploy_signal * 0.040), 0.0035),
                         )
-                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), min_add_weight)
-                        if target_value < min_add_weight - 1e-12:
-                            target_weights.at[stock] = min_add_weight
+                        hard_add_floor = previous_weight if intent_preserving_constraint_mode else min_add_weight
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_add_floor)
+                        translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), min_add_weight)
+                        if target_value < hard_add_floor - 1e-12:
+                            target_weights.at[stock] = hard_add_floor
                             translation_floor_guarded.at[stock] = True
                     elif model_action_name == "reduce":
                         max_reduce_weight = max(
@@ -1510,15 +1615,27 @@ class PortfolioState:
                             position_cap_target,
                             max(execution_deadband_abs * 2.5, 0.012 + budget_model_deploy_signal * 0.010 + budget_model_alpha_focus_signal * 0.006),
                         )
-                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), min_open_weight)
-                        if target_value < min_open_weight - 1e-12:
-                            target_weights.at[stock] = min_open_weight
+                        hard_open_floor = 0.0 if intent_preserving_constraint_mode else min_open_weight
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_open_floor)
+                        translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), min_open_weight)
+                        if target_value < hard_open_floor - 1e-12:
+                            target_weights.at[stock] = hard_open_floor
                             translation_floor_guarded.at[stock] = True
                     elif model_action_name in {"hold", "skip", "reduce", "exit"} and target_value > 1e-12:
                         translation_cap.at[stock] = 0.0
                         target_weights.at[stock] = 0.0
                         translation_cap_guarded.at[stock] = True
             target_weights = target_weights.clip(lower=translation_floor, upper=translation_cap)
+            if intent_preserving_constraint_mode:
+                target_weights, soft_guarded = self._lift_to_soft_floor_by_priority(
+                    target_weights,
+                    target_total=float(gross_exposure_target),
+                    hard_floor=translation_floor,
+                    soft_floor=translation_soft_floor,
+                    cap=translation_cap,
+                    priority=deploy_intent_priority,
+                )
+                translation_soft_lift_guarded = translation_soft_lift_guarded | soft_guarded
             effective_floor = pd.concat([protected_floor.rename("protected"), translation_floor.rename("translation")], axis=1).max(axis=1)
             excess = float(target_weights.sum() - gross_exposure_target)
             if excess > 1e-8:
@@ -1539,6 +1656,7 @@ class PortfolioState:
                         target_weights = target_weights / float(target_weights.sum()) * float(gross_exposure_target)
         delta = target_weights - current
         raw_turnover = float(delta.abs().sum())
+        turnover_intent_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if raw_turnover > turnover_budget > 0:
             forced_sell_delta = (-delta.where((forced_zero) & (delta < 0.0), 0.0)).clip(lower=0.0)
             forced_sell_turnover = float(forced_sell_delta.sum())
@@ -1549,7 +1667,24 @@ class PortfolioState:
                 residual_delta = delta.where(~((forced_zero) & (delta < 0.0)), 0.0)
                 residual_turnover = float(residual_delta.abs().sum())
                 if residual_turnover > remaining_budget > 0:
-                    residual_delta = residual_delta * (remaining_budget / residual_turnover)
+                    if intent_preserving_constraint_mode:
+                        turnover_preservation_priority = pd.Series(
+                            np.where(
+                                residual_delta.to_numpy(dtype=float) < 0.0,
+                                sell_reduction_priority.reindex(residual_delta.index).to_numpy(dtype=float),
+                                deploy_intent_priority.reindex(residual_delta.index).to_numpy(dtype=float),
+                            ),
+                            index=residual_delta.index,
+                            dtype=float,
+                        )
+                        residual_delta, turnover_guarded = self._trim_delta_to_turnover_by_priority(
+                            residual_delta,
+                            target_turnover=remaining_budget,
+                            priority=turnover_preservation_priority,
+                        )
+                        turnover_intent_guarded = turnover_intent_guarded | turnover_guarded
+                    else:
+                        residual_delta = residual_delta * (remaining_budget / residual_turnover)
                 elif remaining_budget <= 0:
                     residual_delta = residual_delta * 0.0
                 delta = residual_delta
@@ -1592,12 +1727,20 @@ class PortfolioState:
                     and sell_rank_value < 0.68
                     and abs(delta_value) <= max(deadband * 3.00, previous_weight * 0.14)
                 )
+                protect_hold_add = (
+                    model_action_name == "hold"
+                    and delta_value > 0.0
+                    and exit_timing_pressure < 0.26
+                    and sell_pressure < 0.24
+                    and lifecycle_gate_value < 0.42
+                    and abs(delta_value) <= max(deadband * 2.50, previous_weight * 0.08)
+                )
                 protect_reduce_add = (
                     model_action_name == "reduce"
                     and delta_value > 0.0
                     and abs(delta_value) <= max(deadband * 2.00, previous_weight * 0.08)
                 )
-                if protect_hold_trim or protect_add_trim or protect_reduce_add:
+                if protect_hold_trim or protect_add_trim or protect_hold_add or protect_reduce_add:
                     delta.at[stock] = 0.0
                     semantic_delta_guarded.at[stock] = True
         new_weights = (current + delta).clip(lower=0.0)
@@ -1709,6 +1852,8 @@ class PortfolioState:
                     "forced_zero": bool(forced_zero.get(stock, False)),
                     "semantic_delta_guarded": bool(semantic_delta_guarded.get(stock, False)),
                     "budget_split_bound_guarded": bool(budget_split_bound_guarded.get(stock, False)),
+                    "translation_soft_lift_guarded": bool(translation_soft_lift_guarded.get(stock, False)),
+                    "turnover_intent_guarded": bool(turnover_intent_guarded.get(stock, False)),
                     "desired_strength": float(desired_strength.get(stock, 0.0)),
                     "protected_floor": float(protected_floor.get(stock, 0.0)),
                     "current_weight": previous_weight,
@@ -1908,6 +2053,7 @@ class PortfolioState:
             "budget_held_protected_count": int(budget_held_protected_count),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),
+            "budget_translation_soft_lift_guard_count": int(translation_soft_lift_guarded.sum()),
             "budget_sell_priority_guard_count": int(sell_priority_guarded.sum()),
             "execution_deadband_abs": execution_deadband_abs,
             "execution_deadband_rel": execution_deadband_rel,
@@ -1921,6 +2067,7 @@ class PortfolioState:
             "order_translation_conflict_count": int(order_translation_conflict_count),
             "order_translation_conflict_rate": float(order_translation_conflict_count / action_count),
             "semantic_delta_guard_count": int(semantic_delta_guarded.sum()),
+            "turnover_intent_guard_count": int(turnover_intent_guarded.sum()),
             "budget_split_bound_guard_count": int(budget_split_bound_guarded.sum()),
             "forced_zero_count": int(forced_zero.sum()),
             "budget_drop_count": int(budget_dropped.sum()),

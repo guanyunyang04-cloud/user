@@ -28,6 +28,8 @@ class ResearchCandidateProfile:
     candidate_label: str
     trade_plan_target_weight_panel_csv: str = ""
     trade_plan_score_panel_csv: str = ""
+    research_candidate_target_weight_panel_csv: str = ""
+    research_candidate_score_panel_csv: str = ""
     trade_plan_candidate_label: str = ""
     data_source: str = "tq"
     benchmark: str = "000300.SH"
@@ -210,6 +212,10 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         candidate_label=str(manifest.get("candidate_label", "")).strip() or "active_execution_strategy",
         trade_plan_target_weight_panel_csv=trade_plan_target_weight,
         trade_plan_score_panel_csv=trade_plan_score,
+        research_candidate_target_weight_panel_csv=str(
+            manifest.get("research_candidate_target_weight_panel_csv", "")
+        ).strip(),
+        research_candidate_score_panel_csv=str(manifest.get("research_candidate_score_panel_csv", "")).strip(),
         trade_plan_candidate_label=str(manifest.get("trade_plan_candidate_label", "")).strip()
         or str(manifest.get("candidate_label", "")).strip()
         or "active_execution_strategy",
@@ -376,6 +382,15 @@ def _estimate_trading_day_lag(start_date: pd.Timestamp, end_date: pd.Timestamp) 
     return max(len(pd.bdate_range(start=start_ts, end=end_ts)) - 1, 0)
 
 
+def _shift_business_days(anchor_date: pd.Timestamp, offset: int) -> pd.Timestamp:
+    anchor_ts = pd.Timestamp(anchor_date).normalize()
+    if offset == 0:
+        return anchor_ts
+    if offset > 0:
+        return (anchor_ts + pd.offsets.BDay(int(offset))).normalize()
+    return (anchor_ts - pd.offsets.BDay(int(abs(offset)))).normalize()
+
+
 def _build_auto_retrain_plan(
     *,
     manifest_path: Path,
@@ -389,9 +404,23 @@ def _build_auto_retrain_plan(
         launch_cutoff_date = pd.Timestamp(created_at).normalize()
     preferred_cadence = str(policy.get("auto_retrain_mode") or policy.get("preferred_cadence") or "").strip()
     auto_retrain_enabled = bool(policy.get("auto_retrain_enabled", False))
+    trading_day_interval = _coerce_positive_int(policy.get("trading_day_interval"))
     fallback_trading_days = (
         _coerce_positive_int(policy.get("auto_retrain_fallback_trading_days"))
         or _coerce_positive_int(policy.get("warn_after_trading_days"))
+    )
+    label_horizon_guard_trading_days = _coerce_positive_int(policy.get("label_horizon_guard_trading_days"))
+    minimum_new_trainable_trading_days = _coerce_positive_int(policy.get("minimum_new_trainable_trading_days"))
+    train_end_date = _safe_timestamp(manifest.get("train_end_date") or manifest.get("latest_trainable_date"))
+    latest_trainable_candidate = (
+        _shift_business_days(latest_completed, -label_horizon_guard_trading_days)
+        if label_horizon_guard_trading_days > 0
+        else latest_completed.normalize()
+    )
+    new_trainable_trading_days = (
+        _estimate_trading_day_lag(train_end_date, latest_trainable_candidate)
+        if train_end_date is not None
+        else None
     )
     plan: dict[str, Any] = {
         "enabled": auto_retrain_enabled,
@@ -400,6 +429,12 @@ def _build_auto_retrain_plan(
         "launch_cutoff_date": launch_cutoff_date,
         "preferred_cadence": preferred_cadence,
         "fallback_trading_days": fallback_trading_days,
+        "trading_day_interval": trading_day_interval,
+        "train_end_date": train_end_date,
+        "latest_trainable_candidate": latest_trainable_candidate,
+        "label_horizon_guard_trading_days": label_horizon_guard_trading_days,
+        "minimum_new_trainable_trading_days": minimum_new_trainable_trading_days,
+        "new_trainable_trading_days": new_trainable_trading_days,
         "estimated_trading_day_lag": None,
         "should_retrain": False,
         "reason": "",
@@ -410,22 +445,57 @@ def _build_auto_retrain_plan(
     lag = _estimate_trading_day_lag(launch_cutoff_date, latest_completed)
     plan["estimated_trading_day_lag"] = int(lag)
 
+    cadence_reason = ""
+    cadence_met = False
     if preferred_cadence == "monthly_calendar":
-        if latest_completed.to_period("M") > launch_cutoff_date.to_period("M"):
-            plan["should_retrain"] = True
-            plan["reason"] = (
+        cadence_met = latest_completed.to_period("M") > launch_cutoff_date.to_period("M")
+        if cadence_met:
+            cadence_reason = (
                 f"launch_cutoff_date={launch_cutoff_date.date()} crossed into a new calendar month "
-                f"{latest_completed.strftime('%Y-%m')}; trigger automatic Retrain Monthly."
+                f"{latest_completed.strftime('%Y-%m')}"
             )
-        return plan
-
-    if fallback_trading_days > 0 and lag >= fallback_trading_days:
-        plan["should_retrain"] = True
-        plan["reason"] = (
+    elif preferred_cadence in {"trading_day_interval", "fixed_trading_day_interval"}:
+        interval = trading_day_interval or fallback_trading_days
+        cadence_met = interval > 0 and lag >= interval
+        if cadence_met:
+            cadence_reason = (
+                f"launch_cutoff_date={launch_cutoff_date.date()} is estimated to lag "
+                f"{lag} trading days behind latest_completed_date={latest_completed.date()}, "
+                f"reaching the automatic retrain interval {interval} trading days"
+            )
+    elif fallback_trading_days > 0 and lag >= fallback_trading_days:
+        cadence_met = True
+        cadence_reason = (
             f"launch_cutoff_date={launch_cutoff_date.date()} is estimated to lag "
             f"{lag} trading days behind latest_completed_date={latest_completed.date()}, "
-            f"reaching the automatic retrain threshold {fallback_trading_days}."
+            f"reaching the automatic retrain threshold {fallback_trading_days}"
         )
+
+    if not cadence_met:
+        return plan
+
+    if (
+        minimum_new_trainable_trading_days > 0
+        and train_end_date is not None
+        and new_trainable_trading_days is not None
+        and new_trainable_trading_days < minimum_new_trainable_trading_days
+    ):
+        plan["reason"] = (
+            f"{cadence_reason}, but latest_trainable_candidate={latest_trainable_candidate.date()} only advances "
+            f"{new_trainable_trading_days} trading days beyond prior_train_end_date={train_end_date.date()} "
+            f"(minimum required={minimum_new_trainable_trading_days}, label_guard={label_horizon_guard_trading_days})."
+        )
+        return plan
+
+    plan["should_retrain"] = True
+    if train_end_date is not None and new_trainable_trading_days is not None:
+        plan["reason"] = (
+            f"{cadence_reason}, and latest_trainable_candidate={latest_trainable_candidate.date()} advances "
+            f"{new_trainable_trading_days} trading days beyond prior_train_end_date={train_end_date.date()} "
+            f"(label_guard={label_horizon_guard_trading_days})."
+        )
+    else:
+        plan["reason"] = cadence_reason + "."
     return plan
 
 
@@ -439,10 +509,12 @@ def _maybe_auto_retrain_production(profile: ResearchCandidateProfile, *, mode: s
         return
     if not plan.get("should_retrain"):
         print(
-            "production_retrain_status=monthly_auto_ready"
+            "production_retrain_status=auto_ready"
             f" launch_cutoff_date={plan.get('launch_cutoff_date').date() if plan.get('launch_cutoff_date') is not None else ''}"
             f" latest_completed_date={latest_completed.date()}"
         )
+        if plan.get("reason"):
+            print(f"production_retrain_note={plan.get('reason', '')}")
         return
 
     manifest = plan.get("manifest") if isinstance(plan.get("manifest"), dict) else {}
@@ -459,7 +531,7 @@ def _maybe_auto_retrain_production(profile: ResearchCandidateProfile, *, mode: s
     if production_root:
         cmd.extend(["--production-root", production_root])
 
-    print("production_retrain_status=monthly_auto_triggered")
+    print("production_retrain_status=auto_triggered")
     print(f"production_retrain_reason={plan.get('reason', '')}")
     subprocess.run(
         cmd,
@@ -474,6 +546,14 @@ def _trade_plan_target_weight_path(profile: ResearchCandidateProfile) -> str:
 
 def _trade_plan_score_path(profile: ResearchCandidateProfile) -> str:
     return profile.trade_plan_score_panel_csv or profile.score_panel_csv
+
+
+def _trade_plan_research_target_weight_path(profile: ResearchCandidateProfile) -> str:
+    return profile.research_candidate_target_weight_panel_csv or profile.target_weight_panel_csv
+
+
+def _trade_plan_research_score_path(profile: ResearchCandidateProfile) -> str:
+    return profile.research_candidate_score_panel_csv or profile.score_panel_csv
 
 
 def _trade_plan_candidate_label(profile: ResearchCandidateProfile) -> str:
@@ -550,6 +630,17 @@ def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: 
         inject_default_arg("--start-date", profile.trade_plan_start_date)
         inject_default_arg("--external-target-weight-csv", _target_weight_path_for_mode(profile, mode))
         inject_default_arg("--external-score-csv", _score_path_for_mode(profile, mode))
+        inject_default_arg(
+            "--external-watch-target-weight-csv",
+            _trade_plan_research_target_weight_path(profile),
+        )
+        inject_default_arg(
+            "--external-watch-score-csv",
+            _trade_plan_research_score_path(profile),
+        )
+        inject_default_arg("--external-watch-target-weight-column", "target_weight")
+        inject_default_arg("--external-watch-score-column", "score")
+        inject_default_arg("--external-score-column", "score")
         if profile.trade_plan_model_manifest_json:
             inject_default_arg("--external-model-manifest", profile.trade_plan_model_manifest_json)
         if profile.target_weight_semantics:

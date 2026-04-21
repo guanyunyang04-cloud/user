@@ -8,9 +8,10 @@
 <section class="surface-grid surface-grid--tasks">
   <aside class="surface-panel task-browser">
     <div class="panel-heading">
-      <p class="section-kicker">注册表</p>
+      <p class="section-kicker">核心入口</p>
       <h3>任务列表</h3>
     </div>
+    <p class="panel-caption">前端只保留最常用的核心任务，其余高级入口仍可通过 CLI / API 使用。</p>
     <div class="task-list">
       {% for task in tasks %}
       <a class="task-link{% if task.name == selected_task_name %} is-active{% endif %}" href="/tasks?task={{ task.name }}">

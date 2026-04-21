@@ -171,6 +171,13 @@ pre {
   line-height: 1.45;
 }
 
+.panel-caption {
+  margin: 0 0 0.9rem;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
 .shell-footnote {
   margin-top: auto;
   display: grid;

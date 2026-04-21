@@ -113,13 +113,13 @@ def create_app() -> FastAPI:
         return app_service.build_doctor_payload()
 
     @app.get("/api/tasks")
-    def api_tasks() -> list[dict[str, Any]]:
-        return app_service.list_tasks_payload()
+    def api_tasks(core_only: bool = Query(default=True)) -> list[dict[str, Any]]:
+        return app_service.list_tasks_payload(core_only=core_only)
 
     @app.get("/api/tasks/{task_name}")
     def api_task(task_name: str) -> dict[str, Any]:
         try:
-            return next(item for item in app_service.list_tasks_payload() if item["name"] == task_name)
+            return next(item for item in app_service.list_tasks_payload(core_only=False) if item["name"] == task_name)
         except StopIteration as exc:
             raise HTTPException(status_code=404, detail=f"未找到任务：{task_name}") from exc
 

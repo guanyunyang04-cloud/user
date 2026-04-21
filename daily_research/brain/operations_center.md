@@ -1030,3 +1030,110 @@
     - `budget-clipped intent drift`
     - held-side `sell-selection preservation`
   - 正式 study 仍固定小矩阵，不扩大 backbone。
+## 2026-04-21 r9 intent-preserving translation 执行记录
+- 代码落点：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT`
+    - 新增 `_lift_to_soft_floor_by_priority(...)`
+    - 新增 `_trim_delta_to_turnover_by_priority(...)`
+    - 在 `cash_constraint_intent_guard_v5` 下，对 held-side `add`、flat-side `open/add` 使用 soft floor + priority trim，尽量保留 deploy intent
+    - 新增 `translation_soft_lift_guarded`、`turnover_intent_guarded`
+    - 新增 `budget_translation_soft_lift_guard_count`、`turnover_intent_guard_count`
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `split_heads_intent_preserving_translation_r9`
+- 已完成验证：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过
+- 已完成 smoke：
+  - 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_intent_preserving_translation_r9__smoke01 --max-universe-size 80 --epochs 2 --min-epochs 1 --resume-mode fresh --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v7 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_intent_guard_v5 --budget-objective result_value_v8 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512`
+  - 关键结果：
+    - `budget_clipped_day_share=0.0161`
+    - `cash_timing_quality_1d=-0.0127`
+    - 主要冲突对为 `add -> hold`
+- 已完成 formal study：
+  - 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_intent_preserving_translation_r9 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_intent_preserving_translation_r9`
+  - 产物：
+    - `daily_research/output/continuous_policy/studies/cp_v3_intent_preserving_translation_r9/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_intent_preserving_translation_r9/trial_ranking.csv`
+  - 说明：
+    - shell 工具在长时运行中超时退出，但 study 进程继续前台完成，summary 已落盘，且后续检查确认无残留正式训练进程。
+    - raw study 中 `confirm_02` 因 `[Errno 22] Invalid argument` 失败，不应直接视作研究结论。
+- 已完成 confirmatory 补充重跑：
+  - 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_intent_preserving_translation_r9__confirm_02_rerun --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v7 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_intent_guard_v5 --budget-objective result_value_v8 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512 --epochs 64 --min-epochs 48 --resume-mode fresh`
+  - 补充重跑关键结果：
+    - `annual_return=0.7873`
+    - `sharpe=2.9992`
+    - `cash_timing_quality_1d=0.0194`
+    - `order_translation_conflict_rate=0.4630`
+    - `budget_clipped_day_share=0.0145`
+    - top conflict pair: `add -> hold`
+- 当前执行结论：
+  - r9 全轮已闭环，无未收口正式训练残留。
+  - 不 promotion `cp_v3_intent_preserving_translation_r9`。
+  - r9 证明 v5 的价值在“降低 clip”，但没有证明“deploy intent 已可执行”。
+## 2026-04-21 Default Execution Operations Update
+
+- Code paths updated:
+  - `daily_research/execution/update_default_candidate_production.py`
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+- New production retrain controls:
+  - convergence hard gate before promotion
+  - trading-cadence + new-trainable-data dual trigger
+  - lock + heartbeat + show-status + cancel-existing-run
+  - explicit strict resume for existing run dirs
+  - bootstrap defaults now resolve from the current active execution manifest instead of the stale legacy production root
+- Default execution stock-pool refresh correction:
+  - patched production-root `metrics.json` during sync so live-panel refresh no longer reuses only the static pool from the last retrain
+  - enforced:
+    - `rolling_liquidity_pool = liquid500`
+    - `rolling_pool_rebalance_days = 1`
+    - `rolling_pool_adv_window = 20`
+    - `daily_pool_refresh_policy = rolling_liquidity_pool_daily`
+  - re-synced production root and rebuilt live panels once under the new rule
+- Output/schema cleanup now enforced on the default execution chain:
+  - no `ml_score` in latest trade plan / actions CSV / watchlist CSV
+  - `转权重前分数` replaced by `上游参考分`
+  - research watchlist now shows raw model selection with `model_score`
+- Post-change operational step that must not be skipped:
+  - re-sync the active production root after governance/schema changes so that `production_retrain_manifest.json` and the active strategy manifest carry the latest policy fields.
+
+## 2026-04-21 Frontend Task Surface Simplification
+
+- Verified default execution remains healthy after the frontend cleanup:
+  - active execution profile is still `regoff_k1_20d_ensemble_native_anchor`
+  - production root remains `short_expert_policy_v5b_execalign_production_default`
+  - retrain policy remains nested in `production_retrain_manifest.json -> retrain_frequency_policy`
+  - stock-pool refresh remains daily through `rolling_liquidity_pool = liquid500` and `rolling_pool_rebalance_days = 1`
+- Simplified the frontend task surface without deleting backend capability:
+  - task center now exposes only:
+    - `trade-plan`
+    - `refresh-production-default`
+    - `continuous-policy-protocol`
+  - advanced/legacy tasks remain available through CLI / API and are no longer shown in the default web task launcher
+- Files touched for the frontend reduction:
+  - `daily_research/execution/app_tasks.py`
+  - `daily_research/execution/app_service.py`
+  - `daily_research/execution/web_service.py`
+  - `daily_research/execution/web_server.py`
+  - `daily_research/execution/web/templates/tasks.html`
+  - `daily_research/execution/web/static/execution_console.css`
+
+## 2026-04-21 Frontend Simplified Chinese Encoding Repair
+
+- Fixed frontend mojibake at the source level, not just in the browser:
+  - rewrote visible template text to Simplified Chinese
+  - rewrote navigation/status labels in `web_service.py`
+  - rewrote task-center task descriptions and core form labels in `app_tasks.py`
+  - rewrote dynamic frontend messages in `execution_console.js`
+  - rewrote service-layer user-facing errors, doctor details, and runtime messages in `app_service.py`
+- Validation completed:
+  - `py_compile` passed for frontend service modules
+  - FastAPI TestClient rendered all main pages with HTTP 200
+  - scanned frontend/source files for common mojibake markers; no remaining hits in active frontend files

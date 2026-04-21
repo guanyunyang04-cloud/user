@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -38,18 +41,37 @@ from daily_research.deep_alpha.research_objective import (
 from daily_research.execution.strategy_manifest import (
     DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST,
     build_active_strategy_manifest,
+    infer_liquidity_pool_name,
     load_strategy_manifest,
     write_strategy_manifest,
 )
 
 
-FORMAL_SOURCE_RUN = Path(
-    "daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/runs/state_liquidity_listwise_v1_20250318_20260331"
-)
-PRODUCTION_ROOT = Path(
-    "daily_research/output/deep_alpha_short_alpha_execalign_production_default"
-)
-DEFAULT_STATIC_FALLBACK_PROFILE = "regoff_k1_5d_ensemble_native_anchor"
+def _resolve_default_bootstrap_inputs() -> tuple[Path, Path, str]:
+    fallback_source_run = Path(
+        "daily_research/output/short_alpha_policy_v5_family_formal_review_20260412_r1/runs/short_expert_policy_v5b"
+    )
+    fallback_production_root = Path(
+        "daily_research/output/short_expert_policy_v5b_execalign_production_default"
+    )
+    fallback_profile = "regoff_k1_20d_ensemble_native_anchor"
+
+    manifest = load_strategy_manifest(DEFAULT_ACTIVE_EXECUTION_STRATEGY_MANIFEST)
+    source_run_dir = Path(str(manifest.get("source_run_dir", "")).strip() or fallback_source_run)
+    production_root = Path(str(manifest.get("production_root", "")).strip() or fallback_production_root)
+    selected_spec = manifest.get("execution_alignment_selected_profile_spec")
+    selected_profile = ""
+    if isinstance(selected_spec, dict):
+        selected_profile = str(selected_spec.get("name", "")).strip()
+    static_profile = (
+        selected_profile
+        or str(manifest.get("execution_alignment_profile", "")).strip()
+        or fallback_profile
+    )
+    return source_run_dir, production_root, static_profile
+
+
+FORMAL_SOURCE_RUN, PRODUCTION_ROOT, DEFAULT_STATIC_FALLBACK_PROFILE = _resolve_default_bootstrap_inputs()
 
 
 def parse_args() -> argparse.Namespace:
@@ -128,6 +150,28 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_LATEST_MANIFEST_PATH),
         help="Family epoch budget manifest used to choose the starting production retrain budget.",
     )
+    parser.add_argument(
+        "--resume-existing-run",
+        dest="resume_existing_run",
+        action="store_true",
+        help="Resume the same experiment-tag in place when an unfinished production full-fit run already exists.",
+    )
+    parser.add_argument(
+        "--no-resume-existing-run",
+        dest="resume_existing_run",
+        action="store_false",
+        help="Always start a fresh run, even if the same experiment-tag already has resumable artifacts.",
+    )
+    parser.add_argument(
+        "--cancel-existing-run",
+        action="store_true",
+        help="Cancel the currently running production retrain for this production root and exit.",
+    )
+    parser.add_argument(
+        "--show-run-status",
+        action="store_true",
+        help="Print the current production retrain lock/run status and exit.",
+    )
     parser.add_argument("--strategy-name", default="", help="Optional name written into the active execution manifest.")
     parser.add_argument(
         "--strategy-panel-mode",
@@ -147,7 +191,7 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Skip writing the active execution manifest.",
     )
-    parser.set_defaults(activate_strategy=True)
+    parser.set_defaults(activate_strategy=True, resume_existing_run=True)
     return parser.parse_args()
 
 
@@ -238,6 +282,56 @@ def _load_metrics_payload(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _write_metrics_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _enforce_daily_refresh_pool_metrics(
+    *,
+    production_root: Path,
+    source_run_dir: Path,
+    strategy_manifest_path: Path | None,
+) -> dict[str, Any]:
+    metrics_path = production_root / "metrics.json"
+    metrics = _load_metrics_payload(metrics_path)
+    if not metrics:
+        return {}
+    source_metrics = _load_metrics_payload(source_run_dir / "metrics.json")
+    strategy_manifest = load_strategy_manifest(strategy_manifest_path) if strategy_manifest_path is not None else {}
+    resolved_pool_name = infer_liquidity_pool_name(metrics, source_metrics, strategy_manifest)
+    if not resolved_pool_name:
+        return metrics
+    changed = False
+    if str(metrics.get("liquidity_pool", "") or "").strip() != resolved_pool_name:
+        metrics["liquidity_pool"] = resolved_pool_name
+        changed = True
+    if str(metrics.get("rolling_liquidity_pool", "") or "").strip() != resolved_pool_name:
+        metrics["rolling_liquidity_pool"] = resolved_pool_name
+        changed = True
+    if int(metrics.get("rolling_pool_rebalance_days", 0) or 0) != 1:
+        metrics["rolling_pool_rebalance_days"] = 1
+        changed = True
+    adv_window = int(metrics.get("rolling_pool_adv_window", 20) or 20)
+    if adv_window <= 0:
+        metrics["rolling_pool_adv_window"] = 20
+        changed = True
+    elif int(metrics.get("rolling_pool_adv_window", 20) or 20) != adv_window:
+        metrics["rolling_pool_adv_window"] = adv_window
+        changed = True
+    if str(metrics.get("universe_scope", "") or "").strip() != "all_a":
+        metrics["universe_scope"] = "all_a"
+        changed = True
+    if not bool(metrics.get("daily_pool_refresh_enabled", False)):
+        metrics["daily_pool_refresh_enabled"] = True
+        changed = True
+    if str(metrics.get("daily_pool_refresh_policy", "") or "").strip() != "rolling_liquidity_pool_daily":
+        metrics["daily_pool_refresh_policy"] = "rolling_liquidity_pool_daily"
+        changed = True
+    if changed:
+        _write_metrics_payload(metrics_path, metrics)
+    return metrics
 
 
 def _has_manifest_value(value: Any) -> bool:
@@ -536,11 +630,13 @@ def _build_retrain_command(
 ) -> list[str]:
     metrics, cfg = _load_source_config(source_run_dir)
     family_key = _infer_family_key_for_source(source_run_dir, cfg)
-    epoch_budget = resolve_epoch_budget_for_family(
+    recommended_epoch_budget = resolve_epoch_budget_for_family(
         family_key,
         manifest_path=family_epoch_budget_manifest,
         fallback_epochs=int(cfg.get("epochs", 8) or 8),
     )
+    source_epoch_budget = int(cfg.get("epochs", 0) or metrics.get("epochs", 0) or 0)
+    epoch_budget = max(recommended_epoch_budget, source_epoch_budget, 32)
     resolved_default_static_profile = str(
         static_fallback_profile_override or _resolve_default_static_execution_profile()
     ).strip()
@@ -560,7 +656,9 @@ def _build_retrain_command(
         _append_arg(cmd, "--pool-rebalance-days", int(metrics.get("rolling_pool_rebalance_days", 21) or 21))
         _append_arg(cmd, "--pool-adv-window", int(metrics.get("rolling_pool_adv_window", 20) or 20))
     elif liquidity_pool:
-        _append_arg(cmd, "--liquidity-pool", liquidity_pool)
+        _append_arg(cmd, "--rolling-liquidity-pool", liquidity_pool)
+        _append_arg(cmd, "--pool-rebalance-days", int(metrics.get("rolling_pool_rebalance_days", 21) or 21))
+        _append_arg(cmd, "--pool-adv-window", int(metrics.get("rolling_pool_adv_window", 20) or 20))
     elif stocks_file:
         _append_arg(cmd, "--stocks-file", stocks_file)
 
@@ -615,7 +713,7 @@ def _build_retrain_command(
     _append_arg(cmd, "--weight-decay", cfg.get("weight_decay", 1e-4))
     _append_arg(cmd, "--epochs", epoch_budget)
     _append_arg(cmd, "--min-epochs", default_min_epochs_for_budget(epoch_budget))
-    _append_arg(cmd, "--early-stop-patience", max(int(cfg.get("early_stop_patience", 2)), 8))
+    _append_arg(cmd, "--early-stop-patience", max(int(cfg.get("early_stop_patience", 2)), epoch_budget, 8))
     _append_arg(cmd, "--lr-plateau-patience", max(int(cfg.get("lr_plateau_patience", 1)), 4))
     _append_arg(cmd, "--lr-plateau-factor", cfg.get("lr_plateau_factor", 0.5))
     _append_arg(cmd, "--min-improvement", cfg.get("min_improvement", 1e-4))
@@ -754,6 +852,412 @@ def _copy_if_exists(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def _extract_arg_value(cmd: list[str], flag: str, *, default: str = "") -> str:
+    for idx, token in enumerate(cmd):
+        if token == flag and idx + 1 < len(cmd):
+            return str(cmd[idx + 1])
+    return default
+
+
+def _write_json_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _parse_positive_ints(raw: Any) -> list[int]:
+    values: list[int] = []
+    if isinstance(raw, str):
+        items = [item.strip() for item in raw.split(",") if item.strip()]
+    elif isinstance(raw, (list, tuple, set)):
+        items = list(raw)
+    elif raw is None:
+        items = []
+    else:
+        items = [raw]
+    for item in items:
+        try:
+            numeric = int(item)
+        except Exception:
+            continue
+        if numeric > 0:
+            values.append(int(numeric))
+    return values
+
+
+def _infer_label_horizon_guard_trading_days(metrics: dict[str, Any], cfg: dict[str, Any]) -> int:
+    horizons = _parse_positive_ints(metrics.get("prediction_horizons") or cfg.get("prediction_horizons"))
+    target_names = [str(name) for name in (metrics.get("target_names") or [])]
+    target_loss_weights = cfg.get("target_loss_weights") if isinstance(cfg.get("target_loss_weights"), dict) else {}
+    if "risk_downside_20" in target_loss_weights or "risk_downside_20" in target_names:
+        horizons.append(20)
+    breakout_horizon = int(
+        metrics.get("breakout_event_horizon", cfg.get("breakout_event_horizon", 0)) or 0
+    )
+    if breakout_horizon > 0:
+        horizons.append(int(breakout_horizon))
+    return max(horizons or [20])
+
+
+def _infer_minimum_new_trainable_trading_days(*, trading_day_interval: int, label_horizon_guard_trading_days: int) -> int:
+    interval = max(int(trading_day_interval or 0), 1)
+    guard = max(int(label_horizon_guard_trading_days or 0), 1)
+    return max(3, min(interval, int(math.ceil(guard / 4.0))))
+
+
+def _build_run_dir(experiment_tag: str) -> Path:
+    return (Path("daily_research/output") / experiment_tag).resolve()
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {int(pid)}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return False
+    output = f"{result.stdout}\n{result.stderr}"
+    return str(int(pid)) in output
+
+
+def _terminate_process_tree(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        result = subprocess.run(
+            ["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+def _update_production_retrain_lock(lock_path: Path | None, **updates: Any) -> dict[str, Any]:
+    if lock_path is None:
+        return {}
+    payload = _load_metrics_payload(lock_path)
+    payload.update({key: value for key, value in updates.items() if value is not None})
+    payload["last_heartbeat_at"] = pd.Timestamp.now().isoformat()
+    _write_json_payload(lock_path, payload)
+    return payload
+
+
+def _summarize_existing_retrain_state(*, production_root: Path, run_dir: Path, lock_path: Path) -> dict[str, Any]:
+    lock_payload = _load_metrics_payload(lock_path)
+    convergence = _load_metrics_payload(run_dir / "production_retrain_convergence.json")
+    metrics = _load_metrics_payload(run_dir / "metrics.json")
+    resume_status = _load_metrics_payload(run_dir / "resume_status.json")
+    training_diagnostics = metrics.get("training_diagnostics") if isinstance(metrics.get("training_diagnostics"), dict) else {}
+    return {
+        "production_root": str(production_root.resolve()),
+        "run_dir": str(run_dir.resolve()),
+        "lock_present": bool(lock_path.exists()),
+        "lock_payload": lock_payload,
+        "resume_status": resume_status,
+        "training_diagnostics": training_diagnostics,
+        "convergence": convergence,
+    }
+
+
+def _acquire_production_retrain_lock(
+    *,
+    production_root: Path,
+    source_run_dir: Path,
+    experiment_tag: str,
+    run_dir: Path,
+) -> Path:
+    production_root.mkdir(parents=True, exist_ok=True)
+    lock_path = production_root / ".production_retrain.lock"
+    existing_payload = _load_metrics_payload(lock_path)
+    existing_pid = int(existing_payload.get("pid", 0) or existing_payload.get("runner_pid", 0) or 0) if existing_payload else 0
+    existing_child_pid = int(existing_payload.get("child_pid", 0) or 0) if existing_payload else 0
+    if existing_payload and (
+        (existing_pid > 0 and _is_pid_alive(existing_pid))
+        or (existing_child_pid > 0 and _is_pid_alive(existing_child_pid))
+    ):
+        raise RuntimeError(
+            "Production retrain is already running for this production_root. "
+            f"lock_path={lock_path} pid={existing_pid} child_pid={existing_child_pid} "
+            f"experiment_tag={existing_payload.get('experiment_tag', '')}"
+        )
+    payload = {
+        "pid": int(os.getpid()),
+        "runner_pid": int(os.getpid()),
+        "child_pid": 0,
+        "created_at": pd.Timestamp.now().isoformat(),
+        "last_heartbeat_at": pd.Timestamp.now().isoformat(),
+        "source_run_dir": str(source_run_dir.resolve()),
+        "production_root": str(production_root.resolve()),
+        "experiment_tag": str(experiment_tag),
+        "run_dir": str(run_dir.resolve()),
+        "status": "active",
+        "stage": "bootstrap",
+    }
+    _write_json_payload(lock_path, payload)
+    return lock_path
+
+
+def _release_production_retrain_lock(lock_path: Path | None) -> None:
+    if lock_path is None:
+        return
+    try:
+        if lock_path.exists():
+            lock_path.unlink()
+    except Exception:
+        pass
+
+
+def _cancel_existing_retrain(*, production_root: Path, run_dir: Path, lock_path: Path) -> dict[str, Any]:
+    payload = _load_metrics_payload(lock_path)
+    cancelled_pids: list[int] = []
+    for raw_pid in (payload.get("child_pid"), payload.get("runner_pid"), payload.get("pid")):
+        try:
+            pid = int(raw_pid or 0)
+        except Exception:
+            pid = 0
+        if pid > 0 and _is_pid_alive(pid) and _terminate_process_tree(pid):
+            cancelled_pids.append(pid)
+    result = {
+        "cancelled_at": pd.Timestamp.now().isoformat(),
+        "production_root": str(production_root.resolve()),
+        "run_dir": str(run_dir.resolve()),
+        "cancelled_pids": cancelled_pids,
+        "lock_payload": payload,
+    }
+    _write_json_payload(production_root / "production_retrain_cancellation.json", result)
+    if run_dir.exists():
+        _write_json_payload(run_dir / "production_retrain_cancellation.json", result)
+    _release_production_retrain_lock(lock_path)
+    return result
+
+
+def _run_training_with_heartbeat(
+    *,
+    cmd: list[str],
+    run_dir: Path,
+    lock_path: Path,
+) -> None:
+    process = subprocess.Popen(cmd, cwd=str(_DAILY_RESEARCH_ROOT.parent))
+    _update_production_retrain_lock(
+        lock_path,
+        child_pid=int(process.pid),
+        stage="training",
+        status="running",
+        run_dir=str(run_dir.resolve()),
+        command=cmd,
+    )
+    while True:
+        return_code = process.poll()
+        if return_code is not None:
+            _update_production_retrain_lock(
+                lock_path,
+                child_pid=int(process.pid),
+                stage="training_complete" if return_code == 0 else "training_failed",
+                status="completed" if return_code == 0 else "failed",
+                return_code=int(return_code),
+            )
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, cmd)
+            return
+        _update_production_retrain_lock(
+            lock_path,
+            child_pid=int(process.pid),
+            stage="training",
+            status="running",
+        )
+        time.sleep(30.0)
+
+
+def _assert_retrain_run_converged(
+    *,
+    run_dir: Path,
+    expected_epoch_budget: int,
+) -> dict[str, Any]:
+    def _write_convergence_payload(payload: dict[str, Any]) -> None:
+        (run_dir / "production_retrain_convergence.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    metrics_path = run_dir / "metrics.json"
+    train_history_path = run_dir / "train_history.csv"
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Production retrain metrics.json not found: {metrics_path}")
+    if not train_history_path.exists():
+        raise FileNotFoundError(f"Production retrain train_history.csv not found: {train_history_path}")
+    metrics = _load_metrics_payload(metrics_path)
+    diagnostics = metrics.get("training_diagnostics") if isinstance(metrics.get("training_diagnostics"), dict) else {}
+    if not diagnostics:
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "status": "missing_training_diagnostics",
+                "promotable": False,
+            }
+        )
+        raise RuntimeError(
+            "Production retrain metrics.json is missing training_diagnostics; cannot verify convergence safely."
+        )
+    train_history = pd.read_csv(train_history_path)
+    if train_history.empty:
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "status": "empty_train_history",
+                "promotable": False,
+            }
+        )
+        raise RuntimeError("Production retrain train_history.csv is empty; cannot verify convergence safely.")
+    finite_columns = [column for column in ["train_loss", "valid_loss", "learning_rate"] if column in train_history.columns]
+    for column in finite_columns:
+        values = pd.to_numeric(train_history[column], errors="coerce")
+        if not values.notna().all() or not values.map(math.isfinite).all():
+            _write_convergence_payload(
+                {
+                    "checked_at": pd.Timestamp.now().isoformat(),
+                    "run_dir": str(run_dir.resolve()),
+                    "expected_epoch_budget": int(expected_epoch_budget),
+                    "status": "non_finite_train_history",
+                    "failed_column": str(column),
+                    "promotable": False,
+                }
+            )
+            raise RuntimeError(
+                f"Production retrain has non-finite values in train_history column '{column}'; refuse to promote."
+            )
+    status = str(diagnostics.get("status", "") or "").strip().lower()
+    epochs_completed = int(diagnostics.get("epochs_completed", metrics.get("epochs", 0)) or 0)
+    minimum_epochs_required = int(default_min_epochs_for_budget(expected_epoch_budget))
+    selected_epoch = int(diagnostics.get("selected_epoch", 0) or 0)
+    selected_metric_value = diagnostics.get("selected_metric_value")
+    final_valid_loss = diagnostics.get("final_valid_loss")
+    if status != "stable":
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "minimum_epochs_required": int(minimum_epochs_required),
+                "epochs_completed": int(epochs_completed),
+                "selected_epoch": int(selected_epoch),
+                "status": status,
+                "selected_metric_name": str(diagnostics.get("selected_metric_name", "") or ""),
+                "selected_metric_value": diagnostics.get("selected_metric_value"),
+                "final_valid_loss": diagnostics.get("final_valid_loss"),
+                "recommendation": str(diagnostics.get("recommendation", "") or ""),
+                "promotable": False,
+            }
+        )
+        raise RuntimeError(
+            "Production retrain did not report a stable convergence status. "
+            f"status={status!r} run_dir={run_dir}"
+        )
+    if epochs_completed < minimum_epochs_required:
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "minimum_epochs_required": int(minimum_epochs_required),
+                "epochs_completed": int(epochs_completed),
+                "status": status,
+                "promotable": False,
+            }
+        )
+        raise RuntimeError(
+            "Production retrain completed fewer epochs than the required minimum budget. "
+            f"epochs_completed={epochs_completed} minimum_required={minimum_epochs_required}"
+        )
+    if selected_epoch <= 0:
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "epochs_completed": int(epochs_completed),
+                "selected_epoch": int(selected_epoch),
+                "status": status,
+                "promotable": False,
+            }
+        )
+        raise RuntimeError("Production retrain did not produce a valid selected_epoch; refuse to promote.")
+    if bool(diagnostics.get("still_improving", False)) or bool(diagnostics.get("selected_at_right_boundary", False)):
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "epochs_completed": int(epochs_completed),
+                "selected_epoch": int(selected_epoch),
+                "status": status,
+                "still_improving": bool(diagnostics.get("still_improving", False)),
+                "selected_at_right_boundary": bool(diagnostics.get("selected_at_right_boundary", False)),
+                "promotable": False,
+            }
+        )
+        raise RuntimeError(
+            "Production retrain is still budget-pressured at the selected checkpoint boundary; increase budget before promotion."
+        )
+    if bool(diagnostics.get("objective_aligned_budget_pressure", False)):
+        _write_convergence_payload(
+            {
+                "checked_at": pd.Timestamp.now().isoformat(),
+                "run_dir": str(run_dir.resolve()),
+                "expected_epoch_budget": int(expected_epoch_budget),
+                "epochs_completed": int(epochs_completed),
+                "selected_epoch": int(selected_epoch),
+                "status": status,
+                "objective_aligned_budget_pressure": True,
+                "recommendation": str(diagnostics.get("recommendation", "") or ""),
+                "promotable": False,
+            }
+        )
+        raise RuntimeError(
+            "Production retrain reports objective_aligned_budget_pressure=true; refuse to promote."
+        )
+    for value_name, value in {
+        "selected_metric_value": selected_metric_value,
+        "final_valid_loss": final_valid_loss,
+    }.items():
+        try:
+            numeric_value = float(value)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Production retrain diagnostics missing a finite {value_name}; refuse to promote."
+            ) from exc
+        if not math.isfinite(numeric_value):
+            raise RuntimeError(
+                f"Production retrain diagnostics has non-finite {value_name}={numeric_value}; refuse to promote."
+            )
+    summary = {
+        "checked_at": pd.Timestamp.now().isoformat(),
+        "run_dir": str(run_dir.resolve()),
+        "expected_epoch_budget": int(expected_epoch_budget),
+        "minimum_epochs_required": int(minimum_epochs_required),
+        "epochs_completed": int(epochs_completed),
+        "selected_epoch": int(selected_epoch),
+        "status": status,
+        "selected_metric_name": str(diagnostics.get("selected_metric_name", "") or ""),
+        "selected_metric_value": float(selected_metric_value),
+        "final_valid_loss": float(final_valid_loss),
+        "recommendation": str(diagnostics.get("recommendation", "") or ""),
+        "promotable": True,
+    }
+    _write_convergence_payload(summary)
+    return summary
+
+
 def _write_production_manifest(
     *,
     production_root: Path,
@@ -765,6 +1269,11 @@ def _write_production_manifest(
     internal_monitor_days: int,
     train_start_date: str,
     static_fallback_profile: str,
+    label_horizon_guard_trading_days: int,
+    minimum_new_trainable_trading_days: int,
+    daily_refresh_pool_name: str,
+    daily_refresh_rebalance_days: int,
+    daily_refresh_adv_window: int,
     strategy_manifest_path: Path | None = None,
     activate_strategy: bool = False,
 ) -> None:
@@ -784,21 +1293,39 @@ def _write_production_manifest(
             "leaderboard_csv": str(retrain_frequency_csv),
             "leaderboard_basis": "common comparison window",
             "comparison_window": "2025-03-18 -> 2026-03-27",
-            "preferred_cadence": "monthly_calendar",
-            "preferred_label": "Retrain Monthly",
-            "secondary_cadence": "quarterly_63d",
-            "secondary_label": "Retrain 63D",
+            "preferred_cadence": "trading_day_interval",
+            "preferred_label": "Retrain Every 10 Trading Days",
+            "secondary_cadence": "monthly_calendar",
+            "secondary_label": "Retrain Monthly",
             "auto_retrain_enabled": True,
-            "auto_retrain_mode": "monthly_calendar",
-            "auto_retrain_trigger": "next_calendar_month_after_launch_cutoff",
-            "auto_retrain_fallback_trading_days": 21,
-            "warn_after_trading_days": 21,
-            "block_after_trading_days": 63,
-            "notes": "2026-04-02 formal matrix: Monthly > 63D > Freeze 1Y > 21D. Execution side should auto retrain after the next calendar month boundary, keep a 21-trading-day fallback reminder, and block once it drifts past the 63-trading-day guardrail unless explicitly overridden.",
+            "auto_retrain_mode": "trading_day_interval",
+            "auto_retrain_trigger": "every_10_trading_days_after_launch_cutoff",
+            "trading_day_interval": 10,
+            "auto_retrain_fallback_trading_days": 10,
+            "warn_after_trading_days": 10,
+            "block_after_trading_days": 20,
+            "label_horizon_guard_trading_days": int(label_horizon_guard_trading_days),
+            "minimum_new_trainable_trading_days": int(minimum_new_trainable_trading_days),
+            "epoch_budget_policy": "family_recommended_with_source_floor",
+            "minimum_epoch_budget_floor": 32,
+            "universe_policy": "rolling_liquidity_pool_when_available",
+            "notes": (
+                "Default execution production now retrains every 10 trading days. "
+                "Epoch budget must never fall below the current source-run budget floor, "
+                "the universe should prefer a rolling liquidity pool so the stock pool refreshes automatically "
+                "with each production retrain, and cadence alone is not enough: the latest trainable cutoff "
+                "must advance by a minimum number of trading days beyond the prior train_end_date."
+            ),
         },
         "source_formal_run_dir": str(source_run_dir.resolve()),
         "active_production_run_dir": str(run_dir.resolve()),
         "production_root": str(production_root.resolve()),
+        "liquidity_pool": str(daily_refresh_pool_name),
+        "rolling_liquidity_pool": str(daily_refresh_pool_name),
+        "rolling_pool_rebalance_days": int(daily_refresh_rebalance_days),
+        "rolling_pool_adv_window": int(daily_refresh_adv_window),
+        "daily_pool_refresh_enabled": True,
+        "daily_pool_refresh_policy": "rolling_liquidity_pool_daily",
         "target_weight_semantics": "research_raw_target_weight",
         "target_weight_cap_mode": "follow_research_raw_no_global_cap",
         "raw_live_target_weight_panel_csv": str((production_root / "daily_live_target_weight_panel.csv").resolve()),
@@ -835,6 +1362,9 @@ def _write_production_manifest(
         f"- launch_cutoff_date: `{latest_completed_date}`",
         f"- internal_monitor_start_date: `{internal_monitor_start_date}`",
         f"- internal_monitor_days: `{internal_monitor_days}`",
+        f"- rolling_liquidity_pool: `{daily_refresh_pool_name}`",
+        f"- rolling_pool_rebalance_days: `{int(daily_refresh_rebalance_days)}`",
+        f"- rolling_pool_adv_window: `{int(daily_refresh_adv_window)}`",
         f"- target_weight_semantics: `research_raw_target_weight`",
         f"- target_weight_cap_mode: `follow_research_raw_no_global_cap`",
         f"- raw_live_target_weight_panel_csv: `{(production_root / 'daily_live_target_weight_panel.csv').as_posix()}`",
@@ -842,7 +1372,9 @@ def _write_production_manifest(
         f"- static_fallback_profile: `{static_fallback_profile}`",
         f"- static_fallback_daily_live_target_weight_panel_csv: `{(production_root / 'static_fallback_daily_live_target_weight_panel.csv').as_posix()}`",
         f"- active_execution_strategy_manifest: `{'' if strategy_manifest_path is None else strategy_manifest_path.as_posix()}`",
-        "- retrain_frequency_policy: `Retrain Monthly` preferred, auto retrain on next calendar month boundary, fallback remind at `21` trading days, block at `63` trading days",
+        "- retrain_frequency_policy: `Retrain Every 10 Trading Days` preferred, warn at `10` trading days, block at `20` trading days, and keep monthly cadence as a secondary guardrail",
+        f"- label_horizon_guard_trading_days: `{int(label_horizon_guard_trading_days)}`",
+        f"- minimum_new_trainable_trading_days: `{int(minimum_new_trainable_trading_days)}`",
         f"- retrain_frequency_leaderboard: `{retrain_frequency_csv.as_posix()}`",
         "- note: 本目录只用于日常 production 信号，不作为 formal holdout 证据。",
     ]
@@ -862,6 +1394,8 @@ def _sync_production_root(
     internal_monitor_start_date: str,
     internal_monitor_days: int,
     train_start_date: str,
+    label_horizon_guard_trading_days: int,
+    minimum_new_trainable_trading_days: int,
     static_fallback_profile: str = "",
     strategy_manifest_path: Path | None = None,
     activate_strategy: bool = False,
@@ -882,6 +1416,14 @@ def _sync_production_root(
         "execution_aligned_daily_live_target_weight_panel.csv",
     ]:
         _copy_if_exists(run_dir / name, production_root / name)
+    production_metrics = _enforce_daily_refresh_pool_metrics(
+        production_root=production_root,
+        source_run_dir=source_run_dir,
+        strategy_manifest_path=strategy_manifest_path,
+    )
+    daily_refresh_pool_name = str(production_metrics.get("rolling_liquidity_pool", "") or production_metrics.get("liquidity_pool", "") or "").strip()
+    daily_refresh_rebalance_days = int(production_metrics.get("rolling_pool_rebalance_days", 1) or 1)
+    daily_refresh_adv_window = int(production_metrics.get("rolling_pool_adv_window", 20) or 20)
     _materialize_static_fallback_panel(
         production_root=production_root,
         static_profile=resolved_static_fallback_profile,
@@ -897,6 +1439,11 @@ def _sync_production_root(
         internal_monitor_days=internal_monitor_days,
         train_start_date=train_start_date,
         static_fallback_profile=resolved_static_fallback_profile,
+        label_horizon_guard_trading_days=label_horizon_guard_trading_days,
+        minimum_new_trainable_trading_days=minimum_new_trainable_trading_days,
+        daily_refresh_pool_name=daily_refresh_pool_name,
+        daily_refresh_rebalance_days=daily_refresh_rebalance_days,
+        daily_refresh_adv_window=daily_refresh_adv_window,
         strategy_manifest_path=strategy_manifest_path,
         activate_strategy=activate_strategy,
     )
@@ -936,94 +1483,189 @@ def main() -> None:
     source_run_dir = Path(args.source_run_dir).resolve()
     production_root = Path(args.production_root).resolve()
     strategy_manifest_path = Path(args.strategy_manifest_path).resolve()
+    source_metrics, cfg = _load_source_config(source_run_dir)
+    family_key = _infer_family_key_for_source(source_run_dir, cfg)
+    train_start_date = str(cfg.get("start_date", "20210101"))
     latest_completed_date = pd.Timestamp(args.end_date or get_latest_completed_trading_date()).strftime("%Y%m%d")
+    experiment_tag = (
+        args.experiment_tag.strip()
+        or f"{family_key}_execalign_production_fullfit_{latest_completed_date}_r1"
+    )
+    run_dir = _build_run_dir(experiment_tag)
+    lock_file = production_root / ".production_retrain.lock"
+
+    if args.show_run_status:
+        print(
+            json.dumps(
+                _summarize_existing_retrain_state(
+                    production_root=production_root,
+                    run_dir=run_dir,
+                    lock_path=lock_file,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if args.cancel_existing_run:
+        if lock_file.exists():
+            result = _cancel_existing_retrain(
+                production_root=production_root,
+                run_dir=run_dir,
+                lock_path=lock_file,
+            )
+        else:
+            result = {
+                "cancelled_at": pd.Timestamp.now().isoformat(),
+                "production_root": str(production_root.resolve()),
+                "run_dir": str(run_dir.resolve()),
+                "cancelled_pids": [],
+                "message": "No active production retrain lock was present.",
+            }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     latest_trainable_date, internal_monitor_start_date, internal_monitor_days = _resolve_training_dates(
         source_run_dir=source_run_dir,
         latest_completed_date=latest_completed_date,
     )
-    _, cfg = _load_source_config(source_run_dir)
-    train_start_date = str(cfg.get("start_date", "20210101"))
-    experiment_tag = (
-        args.experiment_tag.strip()
-        or f"deep_alpha_short_alpha_execfirst_production_fullfit_{latest_completed_date}_r1"
+    label_horizon_guard_trading_days = _infer_label_horizon_guard_trading_days(source_metrics, cfg)
+    minimum_new_trainable_trading_days = _infer_minimum_new_trainable_trading_days(
+        trading_day_interval=10,
+        label_horizon_guard_trading_days=label_horizon_guard_trading_days,
     )
 
-    cmd = _build_retrain_command(
-        source_run_dir=source_run_dir,
-        family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
-        latest_completed_date=latest_completed_date,
-        latest_trainable_date=latest_trainable_date,
-        internal_monitor_start_date=internal_monitor_start_date,
-        internal_monitor_days=internal_monitor_days,
-        experiment_tag=experiment_tag,
-        research_objective_mode_override=str(args.research_objective_mode or ""),
-        checkpoint_selection_objective_override=str(args.checkpoint_selection_objective or ""),
-        checkpoint_selection_min_improvement_override=args.checkpoint_selection_min_improvement,
-        execution_alignment_objective_override=str(args.execution_alignment_objective or ""),
-        execution_alignment_mode_override=str(args.execution_alignment_mode or ""),
-        execution_alignment_profile_override=str(args.execution_alignment_profile or ""),
-        execution_alignment_candidate_profiles_override=str(args.execution_alignment_candidate_profiles or ""),
-        static_fallback_profile_override=str(args.static_fallback_profile or ""),
-    )
-    print("production_mode=full_fit_retrain")
-    print(f"source_formal_run={source_run_dir}")
-    print(f"production_run_tag={experiment_tag}")
-    print(f"latest_completed_date={latest_completed_date}")
-    print(f"latest_trainable_date={latest_trainable_date}")
-    print(f"internal_monitor_start_date={internal_monitor_start_date}")
-    print(f"internal_monitor_days={internal_monitor_days}")
-    print(
-        "default_static_fallback_profile="
-        f"{str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip()}"
-    )
-    if args.research_objective_mode:
-        print(f"override_research_objective_mode={args.research_objective_mode}")
-    if args.checkpoint_selection_objective:
-        print(f"override_checkpoint_selection_objective={args.checkpoint_selection_objective}")
-    if args.checkpoint_selection_min_improvement is not None:
-        print(f"override_checkpoint_selection_min_improvement={args.checkpoint_selection_min_improvement}")
-    if args.execution_alignment_objective:
-        print(f"override_execution_alignment_objective={args.execution_alignment_objective}")
-    if args.execution_alignment_mode:
-        print(f"override_execution_alignment_mode={args.execution_alignment_mode}")
-    if args.execution_alignment_profile:
-        print(f"override_execution_alignment_profile={args.execution_alignment_profile}")
-    if args.execution_alignment_candidate_profiles:
-        print(f"override_execution_alignment_candidate_profiles={args.execution_alignment_candidate_profiles}")
-    if args.static_fallback_profile:
-        print(f"override_static_fallback_profile={args.static_fallback_profile}")
-    subprocess.run(cmd, check=True)
-
-    run_dir = (Path("daily_research/output") / experiment_tag).resolve()
-    if not run_dir.exists():
-        raise FileNotFoundError(f"Production retrain run directory not found after training: {run_dir}")
-    _sync_production_root(
-        run_dir=run_dir,
-        production_root=production_root,
-        source_run_dir=source_run_dir,
-        latest_completed_date=latest_completed_date,
-        latest_trainable_date=latest_trainable_date,
-        internal_monitor_start_date=internal_monitor_start_date,
-        internal_monitor_days=internal_monitor_days,
-        train_start_date=train_start_date,
-        static_fallback_profile=str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip(),
-        strategy_manifest_path=strategy_manifest_path,
-        activate_strategy=bool(args.activate_strategy),
-    )
-    if args.activate_strategy:
-        active_manifest_path, active_payload = _activate_strategy(
-            source_run_dir=source_run_dir,
+    lock_path: Path | None = None
+    try:
+        lock_path = _acquire_production_retrain_lock(
             production_root=production_root,
-            strategy_manifest_path=strategy_manifest_path,
-            strategy_name=args.strategy_name,
-            strategy_panel_mode=args.strategy_panel_mode,
+            source_run_dir=source_run_dir,
+            experiment_tag=experiment_tag,
+            run_dir=run_dir,
         )
-        print(f"active_execution_strategy_manifest={active_manifest_path}")
-        print(f"active_execution_strategy_name={active_payload.get('strategy_name', '')}")
-        print(f"active_execution_panel_mode={active_payload.get('panel_mode', '')}")
-        print(f"active_execution_candidate_label={active_payload.get('candidate_label', '')}")
-    print(f"production_root={production_root}")
-    print(f"active_production_run={run_dir}")
+        _update_production_retrain_lock(
+            lock_path,
+            stage="command_build",
+            status="active",
+            latest_completed_date=latest_completed_date,
+            latest_trainable_date=latest_trainable_date,
+            label_horizon_guard_trading_days=int(label_horizon_guard_trading_days),
+            minimum_new_trainable_trading_days=int(minimum_new_trainable_trading_days),
+        )
+        cmd = _build_retrain_command(
+            source_run_dir=source_run_dir,
+            family_epoch_budget_manifest=str(args.family_epoch_budget_manifest),
+            latest_completed_date=latest_completed_date,
+            latest_trainable_date=latest_trainable_date,
+            internal_monitor_start_date=internal_monitor_start_date,
+            internal_monitor_days=internal_monitor_days,
+            experiment_tag=experiment_tag,
+            research_objective_mode_override=str(args.research_objective_mode or ""),
+            checkpoint_selection_objective_override=str(args.checkpoint_selection_objective or ""),
+            checkpoint_selection_min_improvement_override=args.checkpoint_selection_min_improvement,
+            execution_alignment_objective_override=str(args.execution_alignment_objective or ""),
+            execution_alignment_mode_override=str(args.execution_alignment_mode or ""),
+            execution_alignment_profile_override=str(args.execution_alignment_profile or ""),
+            execution_alignment_candidate_profiles_override=str(args.execution_alignment_candidate_profiles or ""),
+            static_fallback_profile_override=str(args.static_fallback_profile or ""),
+        )
+        resume_artifact_path = run_dir / "deep_alpha_model.pt"
+        existing_convergence = _load_metrics_payload(run_dir / "production_retrain_convergence.json")
+        if (
+            args.resume_existing_run
+            and isinstance(existing_convergence, dict)
+            and bool(existing_convergence.get("promotable", False))
+            and resume_artifact_path.exists()
+        ):
+            print("production_retrain_status=reuse_completed_run")
+        elif args.resume_existing_run and resume_artifact_path.exists():
+            cmd.extend(["--resume-run-dir", str(run_dir.resolve()), "--resume-mode", "strict"])
+            print(f"production_retrain_resume=explicit_strict_resume from {run_dir}")
+        expected_epoch_budget = int(_extract_arg_value(cmd, "--epochs", default="0") or 0)
+        print("production_mode=full_fit_retrain")
+        print(f"source_formal_run={source_run_dir}")
+        print(f"production_run_tag={experiment_tag}")
+        print(f"latest_completed_date={latest_completed_date}")
+        print(f"latest_trainable_date={latest_trainable_date}")
+        print(f"label_horizon_guard_trading_days={label_horizon_guard_trading_days}")
+        print(f"minimum_new_trainable_trading_days={minimum_new_trainable_trading_days}")
+        print(f"internal_monitor_start_date={internal_monitor_start_date}")
+        print(f"internal_monitor_days={internal_monitor_days}")
+        print(
+            "default_static_fallback_profile="
+            f"{str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip()}"
+        )
+        print(f"production_retrain_lock={lock_path}")
+        if args.research_objective_mode:
+            print(f"override_research_objective_mode={args.research_objective_mode}")
+        if args.checkpoint_selection_objective:
+            print(f"override_checkpoint_selection_objective={args.checkpoint_selection_objective}")
+        if args.checkpoint_selection_min_improvement is not None:
+            print(f"override_checkpoint_selection_min_improvement={args.checkpoint_selection_min_improvement}")
+        if args.execution_alignment_objective:
+            print(f"override_execution_alignment_objective={args.execution_alignment_objective}")
+        if args.execution_alignment_mode:
+            print(f"override_execution_alignment_mode={args.execution_alignment_mode}")
+        if args.execution_alignment_profile:
+            print(f"override_execution_alignment_profile={args.execution_alignment_profile}")
+        if args.execution_alignment_candidate_profiles:
+            print(f"override_execution_alignment_candidate_profiles={args.execution_alignment_candidate_profiles}")
+        if args.static_fallback_profile:
+            print(f"override_static_fallback_profile={args.static_fallback_profile}")
+        if not (bool(existing_convergence.get("promotable", False)) and resume_artifact_path.exists()):
+            _run_training_with_heartbeat(
+                cmd=cmd,
+                run_dir=run_dir,
+                lock_path=lock_path,
+            )
+
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Production retrain run directory not found after training: {run_dir}")
+        _update_production_retrain_lock(lock_path, stage="convergence_check", status="validating")
+        convergence_summary = _assert_retrain_run_converged(
+            run_dir=run_dir,
+            expected_epoch_budget=expected_epoch_budget,
+        )
+        print(
+            "production_retrain_convergence="
+            f"status={convergence_summary.get('status', '')} "
+            f"epochs_completed={convergence_summary.get('epochs_completed', '')} "
+            f"selected_epoch={convergence_summary.get('selected_epoch', '')}"
+        )
+        _update_production_retrain_lock(lock_path, stage="sync_production_root", status="promoting")
+        _sync_production_root(
+            run_dir=run_dir,
+            production_root=production_root,
+            source_run_dir=source_run_dir,
+            latest_completed_date=latest_completed_date,
+            latest_trainable_date=latest_trainable_date,
+            internal_monitor_start_date=internal_monitor_start_date,
+            internal_monitor_days=internal_monitor_days,
+            train_start_date=train_start_date,
+            label_horizon_guard_trading_days=label_horizon_guard_trading_days,
+            minimum_new_trainable_trading_days=minimum_new_trainable_trading_days,
+            static_fallback_profile=str(args.static_fallback_profile or _resolve_default_static_execution_profile()).strip(),
+            strategy_manifest_path=strategy_manifest_path,
+            activate_strategy=bool(args.activate_strategy),
+        )
+        if args.activate_strategy:
+            _update_production_retrain_lock(lock_path, stage="activate_strategy", status="promoting")
+            active_manifest_path, active_payload = _activate_strategy(
+                source_run_dir=source_run_dir,
+                production_root=production_root,
+                strategy_manifest_path=strategy_manifest_path,
+                strategy_name=args.strategy_name,
+                strategy_panel_mode=args.strategy_panel_mode,
+            )
+            print(f"active_execution_strategy_manifest={active_manifest_path}")
+            print(f"active_execution_strategy_name={active_payload.get('strategy_name', '')}")
+            print(f"active_execution_panel_mode={active_payload.get('panel_mode', '')}")
+            print(f"active_execution_candidate_label={active_payload.get('candidate_label', '')}")
+        _update_production_retrain_lock(lock_path, stage="complete", status="promoted")
+        print(f"production_root={production_root}")
+        print(f"active_production_run={run_dir}")
+    finally:
+        _release_production_retrain_lock(lock_path)
 
 
 if __name__ == "__main__":

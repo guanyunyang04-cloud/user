@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -102,10 +102,14 @@ def parse_args():
     parser.add_argument("--experiment-tag", default="")
     parser.add_argument("--model-artifact", default="daily_research/execution/models/latest_ml_model.joblib")
     parser.add_argument("--train-on-the-fly", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--external-score-csv", default="", help="Optional external score snapshot CSV, e.g. deep_alpha latest_scores.csv")
-    parser.add_argument("--external-score-column", default="latest_score", help="Score column name inside external score CSV.")
+    parser.add_argument("--external-score-csv", default="", help="Optional external upstream reference score CSV.")
+    parser.add_argument("--external-score-column", default="model_score", help="Score column name inside external score CSV.")
     parser.add_argument("--external-target-weight-csv", default="", help="Optional external target-weight CSV, e.g. deep_alpha daily_target_weight_panel.csv")
     parser.add_argument("--external-target-weight-column", default="target_weight", help="Target-weight column name inside external target-weight CSV.")
+    parser.add_argument("--external-watch-target-weight-csv", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-watch-target-weight-column", default="target_weight", help=argparse.SUPPRESS)
+    parser.add_argument("--external-watch-score-csv", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--external-watch-score-column", default="score", help=argparse.SUPPRESS)
     parser.add_argument("--external-target-weight-semantics", default="", help=argparse.SUPPRESS)
     parser.add_argument("--external-target-weight-cap-mode", default="", help=argparse.SUPPRESS)
     parser.add_argument("--external-target-weight-cap-note", default="", help=argparse.SUPPRESS)
@@ -375,7 +379,7 @@ def _assess_external_model_retrain_freshness(
     if not manifest:
         result["warnings"].append(
             f"Production manifest not found: {manifest_path}; cannot verify whether the underlying model is "
-            "past its monthly retrain cadence."
+            "past its configured retrain cadence."
         )
         return result
     if train_end_date is None:
@@ -392,7 +396,7 @@ def _assess_external_model_retrain_freshness(
     if resolved_warn <= 0 and resolved_max <= 0:
         result["status_text"] = "thresholds-missing"
         result["warnings"].append(
-            f"Production manifest does not provide retrain thresholds: {manifest_path}; cannot verify monthly "
+            f"Production manifest does not provide retrain thresholds: {manifest_path}; cannot verify configured "
             "retrain freshness against research conclusions."
         )
         return result
@@ -420,8 +424,8 @@ def _assess_external_model_retrain_freshness(
     if freshness.get("status") == "warning":
         result["warnings"].append(
             f"Production full-fit last launch cutoff={launch_cutoff_date.date()} lags current signal date "
-            f"{latest_signal_text} by {lag} trading days, reaching the monthly retrain warning threshold "
-            f"{resolved_warn}; run daily_research/execution/update_default_candidate_production.py soon."
+            f"{latest_signal_text} by {lag} trading days, reaching the retrain warning threshold "
+            f"{resolved_warn} ({preferred_label or 'configured cadence'}); run daily_research/execution/update_default_candidate_production.py soon."
         )
     elif freshness.get("status") == "blocked":
         result["warnings"].append(
@@ -518,7 +522,7 @@ def _build_scores_from_artifact(
     latest_regime_label = str(state_label_series.loc[latest_date]) if latest_date in state_label_series.index else ""
     latest_quadrant = str(regime_state.loc[latest_date, "quadrant"])
 
-    ml_score_row, _ = predict_ml_scores_for_date_bundle(
+    model_score_row, _ = predict_ml_scores_for_date_bundle(
         models=artifact.models,
         feature_frames=feature_frames,
         market_features=market_features,
@@ -527,14 +531,14 @@ def _build_scores_from_artifact(
         feature_names=artifact.feature_names,
         horizon_weights=resolve_horizon_weights(artifact_cfg, latest_regime_label),
     )
-    ml_score = pd.DataFrame(np.nan, index=[latest_date], columns=score_none.columns)
-    if not ml_score_row.empty:
-        ml_score.loc[latest_date, ml_score_row.index] = ml_score_row.values
+    model_score = pd.DataFrame(np.nan, index=[latest_date], columns=score_none.columns)
+    if not model_score_row.empty:
+        model_score.loc[latest_date, model_score_row.index] = model_score_row.values
 
     score_none_latest = score_none.loc[[latest_date]]
     score_v2_latest = score_v2.loc[[latest_date]]
     final_score_raw = blend_scores(
-        ml_score,
+        model_score,
         score_none_latest,
         score_v2_latest,
         artifact_cfg,
@@ -562,7 +566,7 @@ def _build_scores_from_artifact(
             }
         ]
     )
-    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+    return factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score, target_weights, training_log
 
 
 def _build_scores_on_the_fly(
@@ -582,7 +586,7 @@ def _build_scores_on_the_fly(
     state_label_series = resolve_regime_label_series(regime_state, cfg.regime_state_selector)
     benchmark_close = prepared_bundle["benchmark_close"]
     benchmark_open = prepared_bundle["benchmark_open"]
-    ml_score, training_log = rolling_ml_scores_multi(
+    model_score, training_log = rolling_ml_scores_multi(
         feature_frames=feature_frames,
         market_features=market_features,
         close=factor_bundle["raw_inputs"]["Close"],
@@ -594,13 +598,13 @@ def _build_scores_on_the_fly(
         config=ml_cfg,
         state_label_series=state_label_series,
     )
-    final_score_raw = blend_scores(ml_score, score_none, score_v2, ml_cfg, quadrant_series=state_label_series)
+    final_score_raw = blend_scores(model_score, score_none, score_v2, ml_cfg, quadrant_series=state_label_series)
     target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
     final_score = final_score_raw.copy()
     if cfg.enable_market_regime_filter:
         target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
 
-    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+    return factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score, target_weights, training_log
 
 
 def _resolve_column_name(columns: pd.Index, requested: str, *, label: str) -> str:
@@ -614,10 +618,14 @@ def _resolve_column_name(columns: pd.Index, requested: str, *, label: str) -> st
 def _resolve_external_value_column(columns: pd.Index, requested: str, *, label: str) -> str:
     candidates = [str(requested or "").strip()]
     lowered = str(requested or "").strip().lower()
-    if lowered == "latest_score":
-        candidates.append("score")
+    if lowered == "model_score":
+        candidates.extend(["score", "latest_score", "ml_score"])
+    elif lowered == "latest_score":
+        candidates.extend(["score", "model_score", "ml_score"])
     elif lowered == "score":
-        candidates.append("latest_score")
+        candidates.extend(["model_score", "latest_score", "ml_score"])
+    elif lowered == "ml_score":
+        candidates.extend(["model_score", "score", "latest_score"])
     elif lowered == "target_weight":
         candidates.append("weight")
 
@@ -671,6 +679,42 @@ def _load_external_candidate_rows(
     return rows, signal_date
 
 
+def _load_external_panel_row(
+    *,
+    panel_csv: Path,
+    value_column: str,
+    panel_label: str,
+    value_name: str,
+    latest_market_date: pd.Timestamp,
+    requested_date: pd.Timestamp,
+    market_index: pd.DatetimeIndex,
+    allowed_columns: pd.Index,
+) -> tuple[pd.Series, pd.Timestamp]:
+    panel = load_value_panel(
+        panel_csv,
+        panel_format="auto",
+        date_column="date",
+        stock_column="stock",
+        value_column=value_column,
+        panel_label=panel_label,
+        value_name=value_name,
+    )
+    panel = (
+        panel.reindex(index=market_index, columns=allowed_columns)
+        .sort_index()
+        .loc[lambda df: df.index <= latest_market_date]
+    )
+    if panel.empty:
+        raise ValueError(f"{panel_label} CSV has no aligned dates inside the current execution calendar: {panel_csv}")
+    requested_ts = pd.Timestamp(requested_date)
+    valid_index = panel.index[panel.index <= requested_ts]
+    if len(valid_index) == 0:
+        raise ValueError(f"{panel_label} CSV has no usable rows on or before signal date: {requested_ts.date()}")
+    signal_date = pd.Timestamp(valid_index.max())
+    row = pd.to_numeric(panel.loc[signal_date], errors="coerce").reindex(allowed_columns)
+    return row, signal_date
+
+
 def _build_scores_from_external_csv(
     cfg: ResearchConfig,
     prepared_bundle: Dict[str, object],
@@ -716,7 +760,7 @@ def _build_scores_from_external_csv(
 
     score_none = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
     score_v2 = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
-    ml_score = final_score_raw.copy()
+    model_score = final_score_raw.copy()
 
     target_weights = build_target_weights(final_score_raw, cfg, industry_map=industry_map, style_map=style_map)
     final_score = final_score_raw.copy()
@@ -724,13 +768,14 @@ def _build_scores_from_external_csv(
         target_weights, final_score = apply_market_regime_filter(target_weights, final_score.fillna(0.0), regime_state)
 
     label = str(candidate_label or external_score_csv.resolve().parent.name).strip()
+    resolved_score_column = _resolve_external_value_column(score_df.columns, external_score_column, label="external score")
     training_log = pd.DataFrame(
         [
             {
                 "source": "external_score_csv",
                 "candidate_label": label,
                 "score_csv_path": str(external_score_csv),
-                "score_column": str(score_col),
+                "score_column": str(resolved_score_column),
                 "loaded_rows": int(len(raw_scores)),
                 "usable_rows": int(len(usable)),
                 "dropped_rows": int(len(dropped)),
@@ -740,7 +785,7 @@ def _build_scores_from_external_csv(
             }
         ]
     )
-    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+    return factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score, target_weights, training_log
 
 
 def _build_scores_from_external_target_weight_csv(
@@ -758,7 +803,7 @@ def _build_scores_from_external_target_weight_csv(
     target_weight_power: float,
     target_weight_full_invest: bool,
     external_score_csv: Path | None = None,
-    external_score_column: str = "latest_score",
+    external_score_column: str = "model_score",
 ):
     factor_bundle = prepared_bundle["factor_bundle"]
     regime_state = prepared_bundle["regime_state"]
@@ -857,8 +902,8 @@ def _build_scores_from_external_target_weight_csv(
     final_score_raw.index.name = "date"
     score_none = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
     score_v2 = pd.DataFrame(0.0, index=[signal_date], columns=allowed_columns)
-    ml_score = pd.DataFrame([source_score_row], index=[signal_date])
-    ml_score.index.name = "date"
+    model_score = pd.DataFrame([source_score_row], index=[signal_date])
+    model_score.index.name = "date"
 
     final_score = final_score_raw.copy()
     if cfg.enable_market_regime_filter:
@@ -895,7 +940,7 @@ def _build_scores_from_external_target_weight_csv(
             }
         ]
     )
-    return factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score, target_weights, training_log
+    return factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score, target_weights, training_log
 
 
 def _resolve_plan_display_mode(model_info: Dict[str, Any]) -> str:
@@ -948,6 +993,10 @@ def _merge_score_reference_metadata(model_info: Dict[str, Any]) -> Dict[str, Any
 
 
 def _resolve_candidate_display_config(model_info: Dict[str, Any]) -> Dict[str, Any]:
+    return _resolve_candidate_display_config_v2(model_info)
+
+
+def _resolve_candidate_display_config_v2(model_info: Dict[str, Any]) -> Dict[str, Any]:
     mode = str(model_info.get("mode", "")).strip()
     status = str(model_info.get("score_context_status", "")).strip().lower()
     score_panel_role = str(model_info.get("score_panel_role", "")).strip().lower()
@@ -956,23 +1005,23 @@ def _resolve_candidate_display_config(model_info: Dict[str, Any]) -> Dict[str, A
             return {
                 "execution_score_label": "执行后排序值",
                 "show_source_score": True,
-                "source_score_label": "转权重前分数",
+                "source_score_label": "上游参考分",
                 "execution_proxy_source": "final_score",
-                "source_candidate_source": "ml_score",
+                "source_candidate_source": "model_score",
             }
         return {
-            "execution_score_label": "参考排序分数",
+            "execution_score_label": "参考排序分",
             "show_source_score": status == "external_score",
-            "source_score_label": "源候选参考分数",
+            "source_score_label": "上游参考分",
             "execution_proxy_source": "final_score",
-            "source_candidate_source": "ml_score",
+            "source_candidate_source": "model_score",
         }
     return {
         "execution_score_label": "候选分数",
         "show_source_score": False,
         "source_score_label": "",
         "execution_proxy_source": "final_score",
-        "source_candidate_source": "ml_score",
+        "source_candidate_source": "model_score",
     }
 
 
@@ -980,7 +1029,7 @@ def _decorate_candidate_display_fields(
     df: pd.DataFrame,
     *,
     execution_proxy_source: str = "final_score",
-    source_candidate_source: str = "ml_score",
+    source_candidate_source: str = "model_score",
 ) -> pd.DataFrame:
     if df.empty:
         out = df.copy()
@@ -1004,6 +1053,7 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
         return df
 
     mode = str(model_info.get("mode", "")).strip()
+    watchlist_mode = str(model_info.get("watchlist_mode", "")).strip()
     out = df.copy()
     if frame_kind == "action":
         base_columns = [
@@ -1027,12 +1077,20 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
                 out["source_candidate_score"] = pd.Series(dtype=float)
         if mode == "research_candidate_target_weight_csv":
             out = out[base_columns + ["execution_proxy_score", "source_candidate_score"]]
+            out = out.rename(columns={"source_candidate_score": "upstream_reference_score"})
         else:
             out = out[base_columns + ["execution_proxy_score"]]
             out = out.rename(columns={"execution_proxy_score": "candidate_score"})
         return out
 
     if frame_kind == "watch":
+        if watchlist_mode == "raw_model_selection":
+            base_columns = ["date", "stock", "target_weight", "model_score"]
+            if out.empty:
+                for column in base_columns:
+                    if column not in out.columns:
+                        out[column] = pd.Series(dtype=float if column in {"target_weight", "model_score"} else object)
+            return out[base_columns]
         base_columns = ["date", "stock", "target_weight"]
         if out.empty:
             for column in base_columns:
@@ -1044,6 +1102,12 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
                 out["source_candidate_score"] = pd.Series(dtype=float)
         if mode == "research_candidate_target_weight_csv":
             out = out[base_columns + ["execution_proxy_score", "source_candidate_score"]]
+            out = out.rename(
+                columns={
+                    "execution_proxy_score": "execution_proxy_score",
+                    "source_candidate_score": "upstream_reference_score",
+                }
+            )
         else:
             out = out[base_columns + ["execution_proxy_score"]]
             out = out.rename(columns={"execution_proxy_score": "candidate_score"})
@@ -1076,13 +1140,13 @@ def _build_trade_plan(
     final_score_row: pd.Series,
     score_none_row: pd.Series,
     score_v2_row: pd.Series,
-    ml_score_row: pd.Series,
+    model_score_row: pd.Series,
     positions_df: pd.DataFrame,
     cash: float,
     lot_size: int,
     display_mode: str = "native_model",
     execution_proxy_source: str = "final_score",
-    source_candidate_source: str = "ml_score",
+    source_candidate_source: str = "model_score",
 ) -> tuple[pd.DataFrame, Dict[str, float]]:
     latest_price = close_row.dropna()
     pos = positions_df.copy()
@@ -1128,7 +1192,7 @@ def _build_trade_plan(
                     "final_score": float(final_score_row.get(stock, 0.0)),
                     "score_none": float(score_none_row.get(stock, 0.0)),
                     "score_v2": float(score_v2_row.get(stock, 0.0)),
-                    "ml_score": float(ml_score_row.get(stock, 0.0)),
+                    "model_score": float(model_score_row.get(stock, 0.0)),
                     "cost_price": float(current_cost_map.get(stock, 0.0)),
                 }
             )
@@ -1151,7 +1215,7 @@ def _build_trade_plan(
                         "final_score": float(final_score_row.get(stock, 0.0)),
                         "score_none": float(score_none_row.get(stock, 0.0)),
                         "score_v2": float(score_v2_row.get(stock, 0.0)),
-                        "ml_score": float(ml_score_row.get(stock, 0.0)),
+                        "model_score": float(model_score_row.get(stock, 0.0)),
                         "cost_price": float(current_cost_map.get(stock, 0.0)),
                     }
                 )
@@ -1184,7 +1248,7 @@ def _build_trade_plan(
                 "final_score": float(final_score_row.get(stock, 0.0)),
                 "score_none": float(score_none_row.get(stock, 0.0)),
                 "score_v2": float(score_v2_row.get(stock, 0.0)),
-                "ml_score": float(ml_score_row.get(stock, 0.0)),
+                "model_score": float(model_score_row.get(stock, 0.0)),
                 "cost_price": float(current_cost_map.get(stock, 0.0)),
             }
         )
@@ -1196,7 +1260,7 @@ def _build_trade_plan(
         source_candidate_source=source_candidate_source,
     )
     if not action_df.empty:
-        action_priority = {"卖出": 0, "减仓": 1, "买入": 2, "加仓": 3}
+        action_priority = {"鍗栧嚭": 0, "鍑忎粨": 1, "涔板叆": 2, "鍔犱粨": 3}
         action_df["action_priority"] = action_df["action"].map(action_priority).fillna(99)
         if display_mode == "research_candidate":
             action_df = action_df.sort_values(
@@ -1266,11 +1330,11 @@ def _build_watchlist(
     target_weight_row: pd.Series,
     score_none_row: pd.Series,
     score_v2_row: pd.Series,
-    ml_score_row: pd.Series,
+    model_score_row: pd.Series,
     top_n: int = 15,
     display_mode: str = "native_model",
     execution_proxy_source: str = "final_score",
-    source_candidate_source: str = "ml_score",
+    source_candidate_source: str = "model_score",
 ) -> pd.DataFrame:
     df = pd.DataFrame(
         {
@@ -1280,7 +1344,7 @@ def _build_watchlist(
             "target_weight": target_weight_row.reindex(final_score_row.index).fillna(0.0).values,
             "score_none": score_none_row.reindex(final_score_row.index).values,
             "score_v2": score_v2_row.reindex(final_score_row.index).values,
-            "ml_score": ml_score_row.reindex(final_score_row.index).values,
+            "model_score": model_score_row.reindex(final_score_row.index).values,
         }
     )
     df = _decorate_candidate_display_fields(
@@ -1293,8 +1357,34 @@ def _build_watchlist(
             df.sort_values(["target_weight", "execution_proxy_score", "stock"], ascending=[False, False, True])
             .head(top_n)
             .reset_index(drop=True)
-        )
+    )
     return df.sort_values("final_score", ascending=False).head(top_n).reset_index(drop=True)
+
+
+def _build_raw_model_watchlist(
+    latest_date: pd.Timestamp,
+    *,
+    model_score_row: pd.Series,
+    target_weight_row: pd.Series,
+    top_n: int = 15,
+) -> pd.DataFrame:
+    aligned_index = pd.Index(model_score_row.index.astype(str))
+    df = pd.DataFrame(
+        {
+            "date": latest_date,
+            "stock": aligned_index,
+            "target_weight": target_weight_row.reindex(aligned_index).fillna(0.0).values,
+            "model_score": pd.to_numeric(model_score_row.reindex(aligned_index), errors="coerce").values,
+        }
+    )
+    df = df[(df["target_weight"] > 0.0) | pd.notna(df["model_score"])].copy()
+    if df.empty:
+        return df
+    return (
+        df.sort_values(["target_weight", "model_score", "stock"], ascending=[False, False, True])
+        .head(top_n)
+        .reset_index(drop=True)
+    )
 
 
 _TERMINAL_ACTION_LABELS = {
@@ -1373,11 +1463,12 @@ def _write_trade_plan_txt(
         return f"{number:.3f}"
 
     display_mode = _resolve_plan_display_mode(model_info)
-    candidate_display = _resolve_candidate_display_config(model_info)
+    candidate_display = _resolve_candidate_display_config_v2(model_info)
     execution_score_label = str(candidate_display.get("execution_score_label", "候选分数"))
     show_source_score = bool(candidate_display.get("show_source_score", False))
-    source_score_label = str(candidate_display.get("source_score_label", "源候选分数"))
+    source_score_label = str(candidate_display.get("source_score_label", "上游参考分"))
     candidate_mode = str(model_info.get("mode", "")).strip()
+    watchlist_mode = str(model_info.get("watchlist_mode", "")).strip()
     target_weight_semantics = str(model_info.get("target_weight_semantics", "")).strip()
     target_weight_cap_mode = str(model_info.get("target_weight_cap_mode", "")).strip()
     target_weight_cap_note = str(model_info.get("target_weight_cap_note", "")).strip()
@@ -1416,14 +1507,18 @@ def _write_trade_plan_txt(
         lines.append(f"候选标签: {model_info['candidate_label']}")
     if model_info.get("candidate_score_csv"):
         if candidate_mode == "research_candidate_target_weight_csv" and score_panel_role == "execution_preweight_score_panel":
-            score_file_label = "转权重前分数文件"
+            score_file_label = "上游参考分文件"
         else:
-            score_file_label = "源候选分数文件" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数文件"
+            score_file_label = "上游参考分文件" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数文件"
         lines.append(f"{score_file_label}: {model_info['candidate_score_csv']}")
     if model_info.get("candidate_target_weight_csv"):
         lines.append(f"候选权重文件: {model_info['candidate_target_weight_csv']}")
+    if model_info.get("watch_candidate_score_csv"):
+        lines.append(f"研究候选模型分文件: {model_info['watch_candidate_score_csv']}")
+    if model_info.get("watch_candidate_target_weight_csv"):
+        lines.append(f"研究候选原始权重文件: {model_info['watch_candidate_target_weight_csv']}")
     if model_info.get("candidate_usable_rows") is not None and model_info.get("candidate_total_rows") is not None:
-        coverage_label = "候选权重覆盖" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数覆盖"
+        coverage_label = "候选权重覆盖度" if candidate_mode == "research_candidate_target_weight_csv" else "候选分数覆盖度"
         lines.append(
             f"{coverage_label}: "
             f"{model_info.get('candidate_usable_rows', 0)}/{model_info.get('candidate_total_rows', 0)} "
@@ -1435,7 +1530,7 @@ def _write_trade_plan_txt(
         if show_source_score:
             lines.append(f"{source_score_label}: 仅作来源参考，不参与执行排序")
         if candidate_mode == "research_candidate_target_weight_csv" and score_panel_role == "execution_preweight_score_panel":
-            lines.append("执行语义说明: 最终执行以桥接后的目标权重与执行后排序值为准；转权重前分数只是上游参考，不保证与最终权重单调一致。")
+            lines.append("执行语义说明: 最终执行以桥接后的目标权重与执行后排序值为准；上游参考分只是来源参考，不保证与最终权重单调一致。")
         if candidate_mode == "research_candidate_target_weight_csv":
             if target_weight_semantics:
                 lines.append(f"权重语义: {target_weight_semantics}")
@@ -1511,7 +1606,7 @@ def _write_trade_plan_txt(
         if model_info.get("production_model_retrain_warn_trading_days"):
             retrain_line += f" | 提醒阈值 {model_info['production_model_retrain_warn_trading_days']}"
         if model_info.get("production_model_retrain_max_trading_days"):
-            retrain_line += f" | 拦截阈值 {model_info['production_model_retrain_max_trading_days']}"
+            retrain_line += f" | 阻断阈值 {model_info['production_model_retrain_max_trading_days']}"
         lines.append(retrain_line)
     history_window = model_info.get("history_window")
     if isinstance(history_window, dict) and history_window.get("effective_start_date"):
@@ -1593,7 +1688,7 @@ def _write_trade_plan_txt(
             else:
                 lines.append(
                     f"   当前权重 {row['current_weight']:.2%} -> 目标权重 {row['target_weight']:.2%} | "
-                    f"综合分 {row['final_score']:.4f} | ML {row['ml_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+                    f"综合分 {row['final_score']:.4f} | 模型分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
                 )
 
     lines.append("")
@@ -1610,20 +1705,29 @@ def _write_trade_plan_txt(
     lines.append("")
     if display_mode == "research_candidate":
         lines.append("三、研究候选观察名单")
-        for _, row in watch_df.iterrows():
-            line = (
-                f"- {row['stock']} | 目标权重 {row['target_weight']:.2%} | "
-                f"{execution_score_label} {row['execution_proxy_score']:.4f}"
-            )
-            if show_source_score and pd.notna(row.get("source_candidate_score", np.nan)):
-                line += f" | {source_score_label} {row['source_candidate_score']:.4f}"
-            lines.append(line)
+        if watchlist_mode == "raw_model_selection":
+            lines.append("- 观察名单使用未经过执行桥的模型原始候选权重与模型分。")
+            for _, row in watch_df.iterrows():
+                model_score = pd.to_numeric(pd.Series([row.get("model_score", np.nan)]), errors="coerce").iloc[0]
+                score_text = f"{float(model_score):.4f}" if pd.notna(model_score) else "nan"
+                lines.append(
+                    f"- {row['stock']} | 原始目标权重 {row['target_weight']:.2%} | 模型分 {score_text}"
+                )
+        else:
+            for _, row in watch_df.iterrows():
+                line = (
+                    f"- {row['stock']} | 目标权重 {row['target_weight']:.2%} | "
+                    f"{execution_score_label} {row['execution_proxy_score']:.4f}"
+                )
+                if show_source_score and pd.notna(row.get("source_candidate_score", np.nan)):
+                    line += f" | {source_score_label} {row['source_candidate_score']:.4f}"
+                lines.append(line)
     else:
         lines.append("三、候选观察名单")
         for _, row in watch_df.iterrows():
             lines.append(
                 f"- {row['stock']} | 综合分 {row['final_score']:.4f} | 目标权重 {row['target_weight']:.2%} | "
-                f"ML {row['ml_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+                f"模型分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
             )
 
     lines.append("")
@@ -1702,6 +1806,14 @@ def main():
     external_score_path = Path(args.external_score_csv).expanduser() if str(args.external_score_csv).strip() else None
     external_target_weight_path = (
         Path(args.external_target_weight_csv).expanduser() if str(args.external_target_weight_csv).strip() else None
+    )
+    external_watch_target_weight_path = (
+        Path(args.external_watch_target_weight_csv).expanduser()
+        if str(args.external_watch_target_weight_csv).strip()
+        else None
+    )
+    external_watch_score_path = (
+        Path(args.external_watch_score_csv).expanduser() if str(args.external_watch_score_csv).strip() else None
     )
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
@@ -1795,11 +1907,11 @@ def main():
 
     print("[8/9] Computing advanced scores...")
     if args.train_on_the_fly:
-        factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_on_the_fly(
+        factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_on_the_fly(
             cfg, ml_cfg, prepared_bundle, style_map, industry_map
         )
         model_info = {
-            "mode": "实时训练",
+            "mode": "瀹炴椂璁粌",
             "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
             "model_family": str(ml_cfg.model_family),
@@ -1813,7 +1925,7 @@ def main():
             "enhanced_profile": str(ml_cfg.enhanced_profile),
         }
     else:
-        factor_bundle, regime_state, score_none, score_v2, ml_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_from_artifact(
+        factor_bundle, regime_state, score_none, score_v2, model_score, final_score_raw, final_score_filtered, target_weights, training_log = _build_scores_from_artifact(
             cfg, artifact, prepared_bundle, style_map, industry_map
         )
         if not training_log.empty:
@@ -1897,7 +2009,7 @@ def main():
         training_log=training_log,
     )
     display_mode = _resolve_plan_display_mode(model_info)
-    candidate_display = _resolve_candidate_display_config(model_info)
+    candidate_display = _resolve_candidate_display_config_v2(model_info)
     display_score_frame = final_score_filtered if display_mode == "research_candidate" else final_score_raw
     action_df, summary = _build_trade_plan(
         latest_date=signal_date,
@@ -1906,13 +2018,13 @@ def main():
         final_score_row=display_score_frame.loc[signal_date],
         score_none_row=score_none.loc[signal_date],
         score_v2_row=score_v2.loc[signal_date],
-        ml_score_row=ml_score.loc[signal_date],
+        model_score_row=model_score.loc[signal_date],
         positions_df=positions_df,
         cash=effective_cash,
         lot_size=args.lot_size,
         display_mode=display_mode,
         execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
-        source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
+        source_candidate_source=str(candidate_display.get("source_candidate_source", "model_score")),
     )
     summary["positions_source"] = str(account_state.path)
     summary["positions_source_mode"] = str(account_state.source)
@@ -1929,6 +2041,50 @@ def main():
         summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
         summary["model_freshness"] = freshness_info
         summary["model_validation"] = validation_summary
+    raw_watch_df: pd.DataFrame | None = None
+    if (
+        display_mode == "research_candidate"
+        and external_watch_target_weight_path is not None
+        and external_watch_score_path is not None
+    ):
+        market_index = pd.DatetimeIndex(factor_bundle["raw_inputs"]["Close"].index)
+        allowed_columns = pd.Index(factor_bundle["raw_inputs"]["Close"].columns.astype(str))
+        latest_market_date = pd.Timestamp(market_index.max())
+        raw_watch_target_weight_row, raw_watch_target_signal_date = _load_external_panel_row(
+            panel_csv=external_watch_target_weight_path,
+            value_column=args.external_watch_target_weight_column,
+            panel_label="external raw-model watch target-weight",
+            value_name="target_weight",
+            latest_market_date=latest_market_date,
+            requested_date=pd.Timestamp(signal_date),
+            market_index=market_index,
+            allowed_columns=allowed_columns,
+        )
+        raw_watch_score_row, raw_watch_score_signal_date = _load_external_panel_row(
+            panel_csv=external_watch_score_path,
+            value_column=args.external_watch_score_column,
+            panel_label="external raw-model watch score",
+            value_name="score",
+            latest_market_date=latest_market_date,
+            requested_date=pd.Timestamp(signal_date),
+            market_index=market_index,
+            allowed_columns=allowed_columns,
+        )
+        raw_watch_df = _build_raw_model_watchlist(
+            latest_date=pd.Timestamp(signal_date),
+            model_score_row=raw_watch_score_row,
+            target_weight_row=raw_watch_target_weight_row,
+            top_n=15,
+        )
+        model_info.update(
+            {
+                "watchlist_mode": "raw_model_selection",
+                "watch_candidate_target_weight_csv": str(external_watch_target_weight_path),
+                "watch_candidate_score_csv": str(external_watch_score_path),
+                "watch_target_weight_signal_date": str(pd.Timestamp(raw_watch_target_signal_date).date()),
+                "watch_score_signal_date": str(pd.Timestamp(raw_watch_score_signal_date).date()),
+            }
+        )
     hold_df = _build_hold_table(
         latest_date=signal_date,
         close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
@@ -1936,17 +2092,21 @@ def main():
         final_score_row=display_score_frame.loc[signal_date],
         positions_df=positions_df,
     )
-    watch_df = _build_watchlist(
-        latest_date=signal_date,
-        final_score_row=display_score_frame.loc[signal_date].dropna(),
-        target_weight_row=target_weights.loc[signal_date],
-        score_none_row=score_none.loc[signal_date],
-        score_v2_row=score_v2.loc[signal_date],
-        ml_score_row=ml_score.loc[signal_date],
-        top_n=15,
-        display_mode=display_mode,
-        execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
-        source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
+    watch_df = (
+        raw_watch_df
+        if raw_watch_df is not None
+        else _build_watchlist(
+            latest_date=signal_date,
+            final_score_row=display_score_frame.loc[signal_date].dropna(),
+            target_weight_row=target_weights.loc[signal_date],
+            score_none_row=score_none.loc[signal_date],
+            score_v2_row=score_v2.loc[signal_date],
+            model_score_row=model_score.loc[signal_date],
+            top_n=15,
+            display_mode=display_mode,
+            execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+            source_candidate_source=str(candidate_display.get("source_candidate_source", "model_score")),
+        )
     )
     action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
     watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")
@@ -2065,6 +2225,14 @@ def main_with_progress():
     external_target_weight_path = (
         Path(args.external_target_weight_csv).expanduser() if str(args.external_target_weight_csv).strip() else None
     )
+    external_watch_target_weight_path = (
+        Path(args.external_watch_target_weight_csv).expanduser()
+        if str(args.external_watch_target_weight_csv).strip()
+        else None
+    )
+    external_watch_score_path = (
+        Path(args.external_watch_score_csv).expanduser() if str(args.external_watch_score_csv).strip() else None
+    )
     effective_profile = args.enhanced_profile
     effective_ml_cfg = ml_cfg
 
@@ -2077,6 +2245,14 @@ def main_with_progress():
                     raise FileNotFoundError(f"External score CSV not found: {external_score_path}")
                 if external_target_weight_path is not None and not external_target_weight_path.exists():
                     raise FileNotFoundError(f"External target-weight CSV not found: {external_target_weight_path}")
+                if external_watch_target_weight_path is not None and not external_watch_target_weight_path.exists():
+                    raise FileNotFoundError(
+                        f"External raw-model watch target-weight CSV not found: {external_watch_target_weight_path}"
+                    )
+                if external_watch_score_path is not None and not external_watch_score_path.exists():
+                    raise FileNotFoundError(
+                        f"External raw-model watch score CSV not found: {external_watch_score_path}"
+                    )
             elif not args.train_on_the_fly:
                 if not artifact_path.exists():
                     raise FileNotFoundError(
@@ -2176,7 +2352,7 @@ def main_with_progress():
                     regime_state,
                     score_none,
                     score_v2,
-                    ml_score,
+                    model_score,
                     final_score_raw,
                     final_score_filtered,
                     target_weights,
@@ -2253,7 +2429,7 @@ def main_with_progress():
                     regime_state,
                     score_none,
                     score_v2,
-                    ml_score,
+                    model_score,
                     final_score_raw,
                     final_score_filtered,
                     target_weights,
@@ -2296,14 +2472,14 @@ def main_with_progress():
                     regime_state,
                     score_none,
                     score_v2,
-                    ml_score,
+                    model_score,
                     final_score_raw,
                     final_score_filtered,
                     target_weights,
                     training_log,
                 ) = _build_scores_on_the_fly(cfg, ml_cfg, prepared_bundle, style_map, industry_map)
                 model_info = {
-                    "mode": "实时训练",
+                    "mode": "瀹炴椂璁粌",
                     "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
                     "model_family": str(ml_cfg.model_family),
@@ -2324,7 +2500,7 @@ def main_with_progress():
                     regime_state,
                     score_none,
                     score_v2,
-                    ml_score,
+                    model_score,
                     final_score_raw,
                     final_score_filtered,
                     target_weights,
@@ -2429,7 +2605,7 @@ def main_with_progress():
                         "latest_data_date": str(pd.Timestamp(source_signal_date).date()),
                         "latest_data_label": "候选源信号日",
                         "freshness_status": str(freshness_info.get("status_text", "")),
-                        "freshness_label": "候选信号新鲜度",
+                        "freshness_label": "鍊欓€変俊鍙锋柊椴滃害",
                         "latest_completed_trading_date": freshness_info.get("latest_completed_trading_date"),
                         "trading_day_lag": freshness_info.get("trading_day_lag"),
                         "warnings": warnings,
@@ -2516,7 +2692,7 @@ def main_with_progress():
                 model_info=model_info,
                 training_log=training_log,
             )
-            candidate_display = _resolve_candidate_display_config(model_info)
+            candidate_display = _resolve_candidate_display_config_v2(model_info)
             display_score_frame = final_score_filtered if display_mode == "research_candidate" else final_score_raw
             action_df, summary = _build_trade_plan(
                 latest_date=signal_date,
@@ -2525,13 +2701,13 @@ def main_with_progress():
                 final_score_row=display_score_frame.loc[signal_date],
                 score_none_row=score_none.loc[signal_date],
                 score_v2_row=score_v2.loc[signal_date],
-                ml_score_row=ml_score.loc[signal_date],
+                model_score_row=model_score.loc[signal_date],
                 positions_df=positions_df,
                 cash=effective_cash,
                 lot_size=args.lot_size,
                 display_mode=display_mode,
                 execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
-                source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
+                source_candidate_source=str(candidate_display.get("source_candidate_source", "model_score")),
             )
             summary["positions_source"] = str(account_state.path)
             summary["positions_source_mode"] = str(account_state.source)
@@ -2547,6 +2723,10 @@ def main_with_progress():
                 summary["candidate_target_weight_csv"] = str(external_target_weight_path)
                 if external_score_path is not None:
                     summary["candidate_score_csv"] = str(external_score_path)
+                if external_watch_target_weight_path is not None:
+                    summary["watch_candidate_target_weight_csv"] = str(external_watch_target_weight_path)
+                if external_watch_score_path is not None:
+                    summary["watch_candidate_score_csv"] = str(external_watch_score_path)
                 summary["candidate_label"] = str(model_info.get("candidate_label", ""))
                 summary["target_weight_semantics"] = str(model_info.get("target_weight_semantics", ""))
                 summary["target_weight_cap_mode"] = str(model_info.get("target_weight_cap_mode", ""))
@@ -2585,6 +2765,50 @@ def main_with_progress():
                 summary["model_latest_data_date"] = str(artifact_meta.get("latest_data_date", ""))
                 summary["model_freshness"] = freshness_info
                 summary["model_validation"] = validation_summary
+            raw_watch_df: pd.DataFrame | None = None
+            if (
+                display_mode == "research_candidate"
+                and external_watch_target_weight_path is not None
+                and external_watch_score_path is not None
+            ):
+                market_index = pd.DatetimeIndex(factor_bundle["raw_inputs"]["Close"].index)
+                allowed_columns = pd.Index(factor_bundle["raw_inputs"]["Close"].columns.astype(str))
+                latest_market_date = pd.Timestamp(market_index.max())
+                raw_watch_target_weight_row, raw_watch_target_signal_date = _load_external_panel_row(
+                    panel_csv=external_watch_target_weight_path,
+                    value_column=args.external_watch_target_weight_column,
+                    panel_label="external raw-model watch target-weight",
+                    value_name="target_weight",
+                    latest_market_date=latest_market_date,
+                    requested_date=pd.Timestamp(signal_date),
+                    market_index=market_index,
+                    allowed_columns=allowed_columns,
+                )
+                raw_watch_score_row, raw_watch_score_signal_date = _load_external_panel_row(
+                    panel_csv=external_watch_score_path,
+                    value_column=args.external_watch_score_column,
+                    panel_label="external raw-model watch score",
+                    value_name="score",
+                    latest_market_date=latest_market_date,
+                    requested_date=pd.Timestamp(signal_date),
+                    market_index=market_index,
+                    allowed_columns=allowed_columns,
+                )
+                raw_watch_df = _build_raw_model_watchlist(
+                    latest_date=pd.Timestamp(signal_date),
+                    model_score_row=raw_watch_score_row,
+                    target_weight_row=raw_watch_target_weight_row,
+                    top_n=15,
+                )
+                model_info.update(
+                    {
+                        "watchlist_mode": "raw_model_selection",
+                        "watch_candidate_target_weight_csv": str(external_watch_target_weight_path),
+                        "watch_candidate_score_csv": str(external_watch_score_path),
+                        "watch_target_weight_signal_date": str(pd.Timestamp(raw_watch_target_signal_date).date()),
+                        "watch_score_signal_date": str(pd.Timestamp(raw_watch_score_signal_date).date()),
+                    }
+                )
             hold_df = _build_hold_table(
                 latest_date=signal_date,
                 close_row=factor_bundle["raw_inputs"]["Close"].loc[signal_date],
@@ -2592,17 +2816,21 @@ def main_with_progress():
                 final_score_row=display_score_frame.loc[signal_date],
                 positions_df=positions_df,
             )
-            watch_df = _build_watchlist(
-                latest_date=signal_date,
-                final_score_row=display_score_frame.loc[signal_date].dropna(),
-                target_weight_row=target_weights.loc[signal_date],
-                score_none_row=score_none.loc[signal_date],
-                score_v2_row=score_v2.loc[signal_date],
-                ml_score_row=ml_score.loc[signal_date],
-                top_n=15,
-                display_mode=display_mode,
-                execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
-                source_candidate_source=str(candidate_display.get("source_candidate_source", "ml_score")),
+            watch_df = (
+                raw_watch_df
+                if raw_watch_df is not None
+                else _build_watchlist(
+                    latest_date=signal_date,
+                    final_score_row=display_score_frame.loc[signal_date].dropna(),
+                    target_weight_row=target_weights.loc[signal_date],
+                    score_none_row=score_none.loc[signal_date],
+                    score_v2_row=score_v2.loc[signal_date],
+                    model_score_row=model_score.loc[signal_date],
+                    top_n=15,
+                    display_mode=display_mode,
+                    execution_proxy_source=str(candidate_display.get("execution_proxy_source", "final_score")),
+                    source_candidate_source=str(candidate_display.get("source_candidate_source", "model_score")),
+                )
             )
             action_export_df = _export_plan_frame(action_df, model_info=model_info, frame_kind="action")
             watch_export_df = _export_plan_frame(watch_df, model_info=model_info, frame_kind="watch")

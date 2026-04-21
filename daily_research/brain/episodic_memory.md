@@ -16341,3 +16341,116 @@ position,000001.SZ,1200,12.38,
       - stock-level `deploy/release` 对齐
       - portfolio-level `defense/cash regime`
     - 下一轮必须使用新 tag，不复用 `cp_v3_constraint_arbitration_r8`
+## 2026-04-21 r9 intent-preserving translation 当前状态
+- 已完成实现：
+  - `daily_research/continuous_policy/portfolio_simulator.py` 新增 `cash_constraint_intent_guard_v5`，把 budget calibration 从“强 clip”推进到“优先保留高价值意图”的约束翻译模式。
+  - 新增 `_lift_to_soft_floor_by_priority(...)` 与 `_trim_delta_to_turnover_by_priority(...)`，让 held-side `add`、flat-side `open/add` 在不突破硬约束的前提下，优先保留 deploy intent。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 新增 `split_heads_intent_preserving_translation_r9`，固定小矩阵比较 `cash_constraint_guard_v4` 与 `cash_constraint_intent_guard_v5`。
+- 已完成验证：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过。
+  - smoke `cp_v3_intent_preserving_translation_r9__smoke01` 通过，关键现象：
+    - `annual_return=0.0731`
+    - `sharpe=1.0949`
+    - `cash_timing_quality_1d=-0.0127`
+    - `order_translation_conflict_rate=0.2314`
+    - `budget_clipped_day_share=0.0161`
+    - 主要冲突对变为 `add -> hold`。
+- 已完成正式 study：
+  - `daily_research/output/continuous_policy/studies/cp_v3_intent_preserving_translation_r9/study_summary.json`
+  - `completed_trial_count=4`
+  - `failed_trial_count=0`
+  - `confirmatory_completed_trial_count=1`
+  - `latest_state_restored=true`
+  - screening stability champion:
+    - `trial_01 = alpha_result_value_budget_split_v7 + cash_constraint_intent_guard_v5 + result_value_v8`
+    - `annual_return=0.9236`
+    - `sharpe=2.4458`
+    - `max_drawdown=-0.1139`
+    - `reduce_success_rate_5d=0.5000`
+    - `exit_timeliness_rate_5d=0.6000`
+    - `cash_timing_quality_1d=-0.0173`
+    - `order_translation_conflict_rate=0.1564`
+  - screening performance champion:
+    - `trial_04 = alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+    - `annual_return=1.5602`
+    - `sharpe=3.4538`
+    - `cash_timing_quality_1d=-0.1267`
+    - `order_translation_conflict_rate=0.2079`
+    - `training_evidence_status=insufficient`
+  - raw confirmatory:
+    - `confirm_01 = alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=0.7203`
+      - `sharpe=2.3841`
+      - `max_drawdown=-0.0945`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.4000`
+      - `cash_timing_quality_1d=-0.0367`
+      - `semantic_conflict_rate=0.0108`
+      - `order_translation_conflict_rate=0.2950`
+      - `promotion_status=shadow_only`
+    - `confirm_02` 在 study runner 侧失败，错误为 `[Errno 22] Invalid argument`，因此 formal study 原始汇总只保留了 `confirm_01`。
+- 已完成纠偏复算：
+  - 手动前台重跑 `cp_v3_intent_preserving_translation_r9__confirm_02_rerun`，用于区分“runner 失败”与“研究结论失败”。
+  - 重跑结果：
+    - `annual_return=0.7873`
+    - `sharpe=2.9992`
+    - `max_drawdown=-0.1084`
+    - `reduce_success_rate_5d=0.0000`
+    - `exit_timeliness_rate_5d=0.2500`
+    - `cash_timing_quality_1d=0.0194`
+    - `semantic_conflict_rate=0.0000`
+    - `order_translation_conflict_rate=0.4630`
+    - `budget_clipped_day_share=0.0145`
+    - `avg_budget_drop_count=38.8116`
+    - 主要冲突对为 `add -> hold`，共 `217` 行。
+- 动作后复盘：
+  - 事实：
+    - `cash_constraint_intent_guard_v5` 真实压低了 `budget_clipped_day_share`，说明 r8 的“clip 过重”主病灶已经被部分拆开。
+    - 但 clip 降下去之后，`order_translation_conflict_rate` 没有同步下降，反而把失败模式集中暴露成 `model_action=add -> execution/weight_change=hold`。
+    - `semantic_conflict_rate` 低或为零，说明这不是动作语义污染回潮，而是 deploy intent 不可执行。
+  - 推断：
+    - 当前主瓶颈已经从“budget layer 过度硬剪裁”升级为“deploy intent 没有被训练成可落地的权重变化”。
+    - r9 说明“减少 clip”与“保持执行对齐”不是同一件事；前者可以实现，后者还没有闭环。
+    - 下一轮如果只继续压 `budget_clipped_day_share`，会继续把问题从 clip 失败转移成 `add -> hold` 漂移，而不是解决问题本身。
+  - 决策：
+    - 不 promotion `cp_v3_intent_preserving_translation_r9`。
+    - 不把 `cash_constraint_intent_guard_v5` 直接升级为默认 budget calibration。
+    - r9 新增为结构证据：`clip reduction != deploy executability`。
+    - 后续实验必须显式审计并惩罚 `add -> hold` 这一类 deploy-executability mismatch。
+## 2026-04-21 Default Execution Optimization Closure
+
+- Completed the four pending default-execution optimizations end-to-end.
+- Production retrain governance is now hardened:
+  - auto retrain cadence = every 10 trading days
+  - warn/block = 10 / 20 trading days
+  - minimum epoch budget floor = 32
+  - universe policy = `rolling_liquidity_pool_when_available`
+  - new information gate added with:
+    - `label_horizon_guard_trading_days = 20`
+    - `minimum_new_trainable_trading_days = 5`
+- Production retrain operational control is now explicit:
+  - single-instance lock
+  - heartbeat updates
+  - `--show-run-status`
+  - `--cancel-existing-run`
+  - explicit strict resume path for existing run dirs
+- Promotion guard is now hard:
+  - production full-fit cannot overwrite the active production root unless convergence diagnostics are stable and promotable.
+- Candidate schema cleanup is now live on the default execution chain:
+  - next-open action output uses `upstream_reference_score`
+  - watchlist output uses `target_weight, model_score`
+  - latest trade plan no longer exposes `ml_score`
+- Follow-up correction completed:
+  - default execution stock-pool refresh is now daily, not only on retrain
+  - active production root metrics now enforce:
+    - `rolling_liquidity_pool = liquid500`
+    - `rolling_pool_rebalance_days = 1`
+    - `rolling_pool_adv_window = 20`
+    - `daily_pool_refresh_enabled = true`
+  - active execution manifest and production manifest were re-synced after this change
+  - live panels were rebuilt once under the new daily rolling-pool rule, and the next-open action list changed accordingly
+- Important operational lesson:
+  - after code-side schema/governance upgrades, the active production root must be re-synced; otherwise the production manifest can remain on stale policy fields even though the code is already correct.

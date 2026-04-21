@@ -5,39 +5,21 @@
 {% block title %}连续型组合策略代理{% endblock %}
 {% block header_actions %}
 <a class="action-link" href="/tasks?task=continuous-policy-protocol">运行协议</a>
-<a class="action-link" href="/tasks?task=continuous-policy-train">训练策略</a>
-<a class="action-link" href="/tasks?task=continuous-policy-evaluate">评估策略</a>
-<a class="action-link" href="/tasks?task=continuous-policy-export">导出动作</a>
 {% endblock %}
 
 {% block content %}
 <section class="hero-strip">
   <div class="hero-copy">
     <p class="hero-label">Shadow Stack</p>
-    <h3>把“像人一样连续判断”真正落成每日组合决策，而不是固定执行桥。</h3>
+    <h3>把“像人一样连续判断”落成每日组合决策，而不是固定执行桥。</h3>
     <p>这里集中展示连续策略的最新训练、评估、影子导出和组合运行时状态。当前仍保持 shadow 模式，不会静默替换 live 默认执行链路。</p>
   </div>
   <dl class="hero-stats">
-    <div>
-      <dt>最新模型</dt>
-      <dd id="cp-latest-model">{{ continuous_policy.latest_train.model_artifact_path or "暂无" }}</dd>
-    </div>
-    <div>
-      <dt>最新导出日期</dt>
-      <dd id="cp-latest-signal">{{ continuous_policy.latest_export.signal_date or "暂无" }}</dd>
-    </div>
-    <div>
-      <dt>最新协议</dt>
-      <dd id="cp-latest-protocol">{{ continuous_policy.latest_protocol.run_tag or "暂无" }}</dd>
-    </div>
-    <div>
-      <dt>跟踪持仓数</dt>
-      <dd id="cp-runtime-holdings">{{ continuous_policy.runtime_state.holdings|length if continuous_policy.runtime_state.holdings else 0 }}</dd>
-    </div>
-    <div>
-      <dt>账户对齐偏差</dt>
-      <dd id="cp-runtime-gap">{{ continuous_policy.latest_export.runtime_alignment_gap if continuous_policy.latest_export.runtime_alignment_gap is not none else "暂无" }}</dd>
-    </div>
+    <div><dt>最新模型</dt><dd id="cp-latest-model">{{ continuous_policy.latest_train.model_artifact_path or "暂无" }}</dd></div>
+    <div><dt>最新导出日</dt><dd id="cp-latest-signal">{{ continuous_policy.latest_export.signal_date or "暂无" }}</dd></div>
+    <div><dt>最新协议</dt><dd id="cp-latest-protocol">{{ continuous_policy.latest_protocol.run_tag or "暂无" }}</dd></div>
+    <div><dt>跟踪持仓数</dt><dd id="cp-runtime-holdings">{{ continuous_policy.runtime_state.holdings|length if continuous_policy.runtime_state.holdings else 0 }}</dd></div>
+    <div><dt>账户对齐偏差</dt><dd id="cp-runtime-gap">{{ continuous_policy.latest_export.runtime_alignment_gap if continuous_policy.latest_export.runtime_alignment_gap is not none else "暂无" }}</dd></div>
   </dl>
 </section>
 
@@ -66,7 +48,7 @@
   <article class="surface-panel">
     <div class="panel-heading">
       <p class="section-kicker">评估</p>
-      <h3>最新回放结果</h3>
+      <h3>最新回测结果</h3>
     </div>
     <dl class="detail-list detail-list--dense">
       <div><dt>年化收益</dt><dd id="cp-eval-annual">{{ continuous_policy.latest_evaluation.continuous_policy_metrics.annual_return if continuous_policy.latest_evaluation.continuous_policy_metrics else "暂无" }}</dd></div>
@@ -202,18 +184,9 @@
       <h3>当前治理约束</h3>
     </div>
     <ul class="compact-checks">
-      <li class="is-good">
-        <span>并行 shadow 模式</span>
-        <small>连续策略先训练、评估、影子导出，不静默替换 live 默认链路。</small>
-      </li>
-      <li class="is-good">
-        <span>仍保留市场硬约束</span>
-        <small>模型可以学习更自由的执行，但不能绕过现金、换手、卖出税和可交易性现实。</small>
-      </li>
-      <li class="is-good">
-        <span>前端与后台共用同一运行时</span>
-        <small>训练、评估、导出都统一走 execution app job 与 continuous-policy 输出目录。</small>
-      </li>
+      <li class="is-good"><span>并行 shadow 模式</span><small>连续策略只训练、评估、影子导出，不静默替换 live 默认链路。</small></li>
+      <li class="is-good"><span>仍保留市场硬约束</span><small>模型可以学习更自由的执行，但不能绕过现金、换手、税费和可交易性现实。</small></li>
+      <li class="is-good"><span>前端与后台共用同一运行时</span><small>训练、评估、导出都统一进入 execution app job 和 continuous-policy 输出目录。</small></li>
     </ul>
   </article>
 </section>

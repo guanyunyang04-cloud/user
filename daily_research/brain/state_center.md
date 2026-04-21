@@ -1350,3 +1350,77 @@
   - P1：保留 `result_value_v8 + cash_constraint_guard_v4` 作为结构资产，但不设为默认主线。
   - P2：下一轮显式优化 `budget-clipped intent drift` 与 `held-side sell-selection preservation`。
   - P3：继续固定 `stock-level deploy/release` 与 `portfolio-level defense/cash regime` 的层级边界，预算层只做容量、风险、换手约束。
+## 2026-04-21 r9 intent-preserving translation 最新状态
+- 已完成正式 study：
+  - `daily_research/output/continuous_policy/studies/cp_v3_intent_preserving_translation_r9/study_summary.json`
+  - `completed_trial_count=4`
+  - `confirmatory_completed_trial_count=1`
+  - raw formal champion 为 `confirm_01 = alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+  - raw formal champion 指标：
+    - `annual_return=0.7203`
+    - `sharpe=2.3841`
+    - `max_drawdown=-0.0945`
+    - `reduce_success_rate_5d=0.5000`
+    - `exit_timeliness_rate_5d=0.4000`
+    - `cash_timing_quality_1d=-0.0367`
+    - `order_translation_conflict_rate=0.2950`
+    - `promotion_status=shadow_only`
+- 已完成补充确认：
+  - 由于 raw study 的 `confirm_02` 因 `[Errno 22] Invalid argument` 在 runner 层失败，已手动前台重跑：
+    - `daily_research/output/continuous_policy/protocols/cp_v3_intent_preserving_translation_r9__confirm_02_rerun/protocol_summary.json`
+  - rerun 指标：
+    - `annual_return=0.7873`
+    - `sharpe=2.9992`
+    - `max_drawdown=-0.1084`
+    - `reduce_success_rate_5d=0.0000`
+    - `exit_timeliness_rate_5d=0.2500`
+    - `cash_timing_quality_1d=0.0194`
+    - `semantic_conflict_rate=0.0000`
+    - `order_translation_conflict_rate=0.4630`
+    - `budget_clipped_day_share=0.0145`
+    - top conflict pair: `add -> hold`
+- 当前最重要事实：
+  - `cash_constraint_intent_guard_v5` 确实把 `budget_clipped_day_share` 从 r8 v4 分支的近乎天天 clip，压低到了接近零的量级。
+  - 但 clip 下降没有换来执行对齐恢复，反而把主冲突集中显化为 `add -> hold`。
+  - 因此 r9 的结论不是“intent-preserving translation 已成功”，而是“仅靠减少 clip 仍不足以得到可执行 deploy intent”。
+- 当前本质判断更新为：
+  - 主病灶已从 `budget clipping too heavy` 升级为 `deploy intent not executable`。
+  - 这不是语义污染问题，而是 `model_action -> realized weight change` 没有闭环。
+  - 下一轮必须显式优化：
+    - `add -> hold` deploy-executability mismatch
+    - `order_translation_conflict_rate`
+    - `sell_selection_quality_5d`
+    - `deploy_gate_forward_alignment_5d`
+- 当前继承关系不变：
+  - r2 confirm_02：收益 / sharpe 主线锚点
+  - r4 confirm_01：cash timing 收敛证据
+  - r5 confirm_02：sell/exit 结构证据
+  - r7 / r8：层级与约束方向证据
+  - r9：新结构证据，证明 `clip reduction != deploy executability`
+## 2026-04-21 Default Execution State Update
+
+- Active default execution remains:
+  - `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+- Active production root:
+  - `daily_research/output/short_expert_policy_v5b_execalign_production_default`
+- The active production manifest has been refreshed to the latest governance schema.
+- Current enforced retrain policy:
+  - `auto_retrain_mode = trading_day_interval`
+  - `trading_day_interval = 10`
+  - `warn_after_trading_days = 10`
+  - `block_after_trading_days = 20`
+  - `label_horizon_guard_trading_days = 20`
+  - `minimum_new_trainable_trading_days = 5`
+  - `minimum_epoch_budget_floor = 32`
+  - `universe_policy = rolling_liquidity_pool_when_available`
+- Current enforced default-execution stock-pool policy:
+  - `rolling_liquidity_pool = liquid500`
+  - `rolling_pool_rebalance_days = 1`
+  - `rolling_pool_adv_window = 20`
+  - `daily_pool_refresh_enabled = true`
+  - implication: the active production root refreshes the execution/research live panels against a daily rolling liquid500 membership instead of only reusing the static pool from the last retrain
+- Current user-facing execution outputs are aligned:
+  - latest trade plan uses `上游参考分`
+  - action CSV uses `upstream_reference_score`
+  - watchlist CSV uses `model_score`
+  - default execution output no longer exposes `ml_score`

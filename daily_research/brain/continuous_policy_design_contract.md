@@ -298,3 +298,43 @@
     - held-side `sell_selection_quality_5d` 不为负
     - `order_translation_conflict_rate` 不再因约束层切换而显著恶化
   - 若收益恢复与结构对齐继续分裂在不同 confirmatory 上，则视为 r8 之后的 constraint-only hierarchy 仍未闭环。
+## 20. 2026-04-21 r9 intent-preserving translation 合同修正
+- 已被正式证明的事实：
+  - `cash_constraint_intent_guard_v5` 可以显著压低 `budget_clipped_day_share`，说明“budget layer 过度硬剪裁”并非不可修复。
+  - 但在 clip 降低后，`order_translation_conflict_rate` 没有同步下降，反而把主冲突集中暴露成 `model_action=add -> realized_weight_change=hold`。
+  - 因此“clip 更少”不等于“intent-preserving translation 已成立”。
+- 新的合同级结论：
+  - 当前主病灶已从 `budget clipping too heavy` 升级为 `deploy intent not executable`。
+  - `semantic_conflict_rate` 低并不能说明执行闭环成立；还必须检查 `model_action -> weight_change_action` 是否一致。
+  - 后续所有 budget translation / constraint arbitration 实验，必须把 `add -> hold` 视为核心失败模式，而不是把它当作一般性的噪声冲突。
+- 新的强约束：
+  - 任一新 calibration 只有在同时满足以下条件时，才可被视为有效进展：
+    - `budget_clipped_day_share` 明显下降
+    - `order_translation_conflict_rate` 不恶化
+    - `top_order_translation_conflict_pairs` 不以 `add -> hold` 为主导
+    - `deploy_gate_forward_alignment_5d` 不恶化
+    - `sell_selection_quality_5d` 不因 translation 修正而继续转负
+  - 若只看到 clip 降低，但 `add -> hold` 大幅上升，则判定为“失败模式转移”，不算真正进展。
+- 新的设计合同：
+  - stock-level 训练目标除了 `deploy_value / release_value` 外，必须新增或强化 deploy executability 审计：
+    - `model_action=add` 时，真实权重变化是否仍保留正向 deploy 含义
+    - `model_action=open/add` 时，是否被 translation 层静默吃成 `hold`
+  - budget layer 仍只允许承担：
+    - 容量约束
+    - 风险约束
+    - 换手约束
+    - intent-preserving translation
+    - clipped / dropped intent audit
+  - budget layer 不允许以“约束合理”为理由，持续把高价值 deploy intent 吃成无动作。
+- 明确禁止：
+  - 不得把 `cash_constraint_intent_guard_v5` 直接升级为默认 calibration。
+  - 不得把“clip 降低”误判成“translation 闭环已经完成”。
+  - 不得继续只用 `budget_clipped_day_share` 作为 translation 改进的主验收指标。
+- 下一轮验收补充：
+  - 除传统收益、回撤、cash timing、reduce/exit 指标外，必须同步验收：
+    - `order_translation_conflict_rate`
+    - `top_order_translation_conflict_pairs`
+    - `add -> hold` 冲突占比
+    - `deploy_gate_forward_alignment_5d`
+    - `sell_selection_quality_5d`
+  - 只有当 clip 降低与 deploy executability 改善同时出现，才允许判断 translation 方向真正闭环。

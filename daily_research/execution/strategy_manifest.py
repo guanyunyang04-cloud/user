@@ -243,6 +243,10 @@ def build_active_strategy_manifest(
         source_panel_root = production_root
     source_panel_origin = "formal_source" if source_panel_root == source_run_dir else "production_fallback"
     source_panel_metrics = source_metrics if source_panel_origin == "formal_source" else strategy_metrics
+    raw_target_weight_name, raw_score_name = resolve_panel_filenames("raw")
+    research_panel_root = production_root
+    if not all((production_root / name).exists() for name in (raw_target_weight_name, raw_score_name)):
+        research_panel_root = source_run_dir
     production_manifest_json = production_root / "production_retrain_manifest.json"
     has_production_manifest = production_manifest_json.exists()
     effective_live_metadata = _build_effective_live_metadata(
@@ -268,6 +272,8 @@ def build_active_strategy_manifest(
         "source_score_panel_csv": str((source_panel_root / score_name).resolve()),
         "trade_plan_target_weight_panel_csv": str((production_root / target_weight_name).resolve()),
         "trade_plan_score_panel_csv": str((production_root / score_name).resolve()),
+        "research_candidate_target_weight_panel_csv": str((research_panel_root / raw_target_weight_name).resolve()),
+        "research_candidate_score_panel_csv": str((research_panel_root / raw_score_name).resolve()),
         "trade_plan_candidate_label": candidate_label,
         "target_weight_semantics": "research_raw_target_weight",
         "target_weight_cap_mode": "follow_research_raw_no_global_cap",

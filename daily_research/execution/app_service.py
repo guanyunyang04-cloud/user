@@ -47,9 +47,9 @@ from daily_research.execution.app_runtime import (
     tail_file,
 )
 from daily_research.execution.app_tasks import (
-    TaskFieldSpec,
     build_task_command,
     get_task_spec,
+    list_core_frontend_task_specs,
     list_task_specs,
     serialize_task_spec,
 )
@@ -61,9 +61,9 @@ POSITIONS_PATH = EXECUTION_DIR / "current_positions.csv"
 POSITIONS_EXAMPLE_PATH = EXECUTION_DIR / "current_positions.example.csv"
 ENVIRONMENT_PATH = PROJECT_ROOT / "environment.yml"
 LATEST_TRADE_PLAN_PATH = EXECUTION_DIR / "output" / "latest_trade_plan.txt"
+ACCOUNT_FILE_HEADERS = ("record_type", "stock", "shares", "cost_price", "available_cash")
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
-ACCOUNT_FILE_HEADERS = ("record_type", "stock", "shares", "cost_price", "available_cash")
 
 
 def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
@@ -75,10 +75,6 @@ def sanitize_passthrough_args(values: list[str] | None) -> list[str]:
 
 def _read_json(path: Path) -> dict[str, Any]:
     return read_json_file(path)
-
-
-def _now_local_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _file_mtime_text(path: Path) -> str:
@@ -111,11 +107,7 @@ def _normalize_position_record(row: dict[str, Any], *, row_index: int) -> dict[s
         raise ValueError(f"第 {row_index} 行成本价不是有效数字：{cost_text}") from exc
     if cost_price < 0:
         raise ValueError(f"第 {row_index} 行成本价不能为负数：{cost_text}")
-    return {
-        "stock": stock,
-        "shares": int(shares_number),
-        "cost_price": float(cost_price),
-    }
+    return {"stock": stock, "shares": int(shares_number), "cost_price": float(cost_price)}
 
 
 def _format_decimal(value: float | int | None) -> str:
@@ -155,7 +147,6 @@ def load_account_snapshot(path: Path = POSITIONS_PATH) -> dict[str, Any]:
         reader = csv.DictReader(handle)
         raw_fieldnames = [str(name or "") for name in (reader.fieldnames or [])]
         normalized_fieldnames = {_clean_csv_cell(name).lower(): name for name in raw_fieldnames if _clean_csv_cell(name)}
-        required_position_fields = {"stock", "shares"}
         rows: list[dict[str, str]] = []
         for raw_row in reader:
             normalized_row: dict[str, str] = {}
@@ -166,13 +157,15 @@ def load_account_snapshot(path: Path = POSITIONS_PATH) -> dict[str, Any]:
     if not normalized_fieldnames:
         return snapshot
 
+    required_position_fields = {"stock", "shares"}
     positions: list[dict[str, Any]] = []
     available_cash: float | None = None
     has_record_type = "record_type" in normalized_fieldnames
-
     if has_record_type:
         snapshot["source"] = "account_snapshot"
-        snapshot["headers_ok"] = {"record_type", "available_cash"} <= set(normalized_fieldnames) or required_position_fields <= set(normalized_fieldnames)
+        snapshot["headers_ok"] = {"record_type", "available_cash"} <= set(normalized_fieldnames) or required_position_fields <= set(
+            normalized_fieldnames
+        )
         for row in rows:
             record_type = str(row.get("record_type", "") or "").strip().lower()
             if record_type == "account":
@@ -191,8 +184,8 @@ def load_account_snapshot(path: Path = POSITIONS_PATH) -> dict[str, Any]:
     else:
         snapshot["source"] = "positions_only"
         snapshot["headers_ok"] = required_position_fields <= set(normalized_fieldnames)
-        for raw_row in rows:
-            normalized = _normalize_position_record(raw_row, row_index=len(positions) + 1)
+        for row in rows:
+            normalized = _normalize_position_record(row, row_index=len(positions) + 1)
             if normalized:
                 positions.append(normalized)
 
@@ -246,11 +239,7 @@ def active_manifest_summary() -> dict[str, Any]:
         ),
         "source_target_weight_panel_csv": str(payload.get("source_target_weight_panel_csv", "") or ""),
         "trade_plan_target_weight_panel_csv": str(payload.get("trade_plan_target_weight_panel_csv", "") or ""),
-        "execution_policy_label": str(
-            payload.get("execution_policy_label", "")
-            or payload.get("execution_alignment_profile", "")
-            or ""
-        ),
+        "execution_policy_label": str(payload.get("execution_policy_label", "") or payload.get("execution_alignment_profile", "") or ""),
         "effective_live_target_weight_mode": str(payload.get("effective_live_target_weight_mode", "") or ""),
         "effective_live_execution_profile": str(payload.get("effective_live_execution_profile", "") or ""),
     }
@@ -319,7 +308,7 @@ def save_account_snapshot(
         if cash_value < 0:
             raise ValueError("可用现金不能为负数。")
 
-    normalized_positions: list[dict[str, Any]] = []
+    normalized_positions = []
     for row_index, position in enumerate(positions or [], start=1):
         normalized = _normalize_position_record(position if isinstance(position, dict) else {}, row_index=row_index)
         if normalized:
@@ -345,12 +334,7 @@ def save_account_snapshot(
         for position in normalized_positions
     )
     _write_csv_atomic(path, rows=rows)
-    append_event(
-        "account_snapshot_saved",
-        path=str(path.resolve()),
-        position_count=len(normalized_positions),
-        available_cash=cash_value,
-    )
+    append_event("account_snapshot_saved", path=str(path.resolve()), position_count=len(normalized_positions), available_cash=cash_value)
     return load_account_snapshot(path)
 
 
@@ -367,11 +351,7 @@ def reset_account_snapshot_from_example(
         positions=example_snapshot["positions"],
         path=target_path,
     )
-    append_event(
-        "account_snapshot_reset_from_example",
-        target_path=str(target_path.resolve()),
-        example_path=str(example_path.resolve()),
-    )
+    append_event("account_snapshot_reset_from_example", target_path=str(target_path.resolve()), example_path=str(example_path.resolve()))
     return restored
 
 
@@ -422,11 +402,7 @@ def build_doctor_payload() -> dict[str, Any]:
 
     add_check("environment_source", ENVIRONMENT_PATH.exists(), f"应存在：{ENVIRONMENT_PATH.resolve()}")
     add_check("yolos_python", Path(yolos_python).exists(), yolos_python)
-    add_check(
-        "active_manifest",
-        ACTIVE_MANIFEST_PATH.exists() and bool(_read_json(ACTIVE_MANIFEST_PATH)),
-        str(ACTIVE_MANIFEST_PATH.resolve()),
-    )
+    add_check("active_manifest", ACTIVE_MANIFEST_PATH.exists() and bool(_read_json(ACTIVE_MANIFEST_PATH)), str(ACTIVE_MANIFEST_PATH.resolve()))
     positions = positions_summary()
     add_check("current_positions", positions["exists"] and positions["headers_ok"], f"{positions['path']} 行数={positions['row_count']}")
     add_check("positions_example", POSITIONS_EXAMPLE_PATH.exists(), str(POSITIONS_EXAMPLE_PATH.resolve()))
@@ -440,15 +416,12 @@ def build_doctor_payload() -> dict[str, Any]:
     add_check("web_dependency_jinja2", importlib.util.find_spec("jinja2") is not None, "jinja2")
     add_check("latest_trade_plan_artifact", LATEST_TRADE_PLAN_PATH.exists(), str(LATEST_TRADE_PLAN_PATH.resolve()))
     overall_ok = all(bool(item["ok"]) for item in checks)
-    return {
-        "status": "ok" if overall_ok else "degraded",
-        "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "checks": checks,
-    }
+    return {"status": "ok" if overall_ok else "degraded", "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "checks": checks}
 
 
-def list_tasks_payload() -> list[dict[str, Any]]:
-    return [serialize_task_spec(spec) for spec in list_task_specs()]
+def list_tasks_payload(*, core_only: bool = False) -> list[dict[str, Any]]:
+    specs = list_core_frontend_task_specs() if core_only else list_task_specs()
+    return [serialize_task_spec(spec) for spec in specs]
 
 
 def list_jobs_payload(*, limit: int = 20) -> list[dict[str, Any]]:
@@ -480,8 +453,7 @@ def resolve_resume_metadata(job_id: str = "") -> dict[str, Any]:
         if not metadata:
             raise FileNotFoundError(f"未找到作业元数据：{requested_job_id}")
         return metadata
-    recent_jobs = list_recent_job_metadata(limit=20)
-    for metadata in recent_jobs:
+    for metadata in list_recent_job_metadata(limit=20):
         if str(metadata.get("status", "")) in {"failed", "blocked"}:
             return metadata
     raise FileNotFoundError("没有找到可恢复的失败或阻塞作业。")
@@ -583,12 +555,7 @@ def _run_existing_job(
         exit_code = 1
         status = "failed"
     finally:
-        metadata = mark_job_finished(
-            job_paths,
-            status=status,
-            exit_code=exit_code,
-            summary_note=summary_note,
-        )
+        metadata = mark_job_finished(job_paths, status=status, exit_code=exit_code, summary_note=summary_note)
         with _ACTIVE_JOB_THREADS_LOCK:
             _ACTIVE_JOB_THREADS.pop(job_paths.job_id, None)
     return {
@@ -617,11 +584,7 @@ def run_task_sync(
 ) -> dict[str, Any]:
     resolved_python = resolve_project_python_executable(python_executable or sys.executable)
     clean_passthrough = sanitize_passthrough_args(passthrough_args)
-    command = build_task_command(
-        task_name=task_name,
-        python_executable=resolved_python,
-        passthrough_args=clean_passthrough,
-    )
+    command = build_task_command(task_name=task_name, python_executable=resolved_python, passthrough_args=clean_passthrough)
     job_paths = create_job_record(
         task_name=task_name,
         command=command,
@@ -652,11 +615,7 @@ def launch_task_async(
 ) -> dict[str, Any]:
     resolved_python = resolve_project_python_executable(python_executable or sys.executable)
     clean_passthrough = sanitize_passthrough_args(passthrough_args)
-    command = build_task_command(
-        task_name=task_name,
-        python_executable=resolved_python,
-        passthrough_args=clean_passthrough,
-    )
+    command = build_task_command(task_name=task_name, python_executable=resolved_python, passthrough_args=clean_passthrough)
     job_paths = create_job_record(
         task_name=task_name,
         command=command,
@@ -665,7 +624,6 @@ def launch_task_async(
         passthrough_args=clean_passthrough,
         job_label=job_label,
     )
-
     thread = threading.Thread(
         target=_run_existing_job,
         kwargs={
@@ -777,12 +735,7 @@ def resume_task_async(
     with _ACTIVE_JOB_THREADS_LOCK:
         _ACTIVE_JOB_THREADS[job_paths.job_id] = thread
     thread.start()
-    append_event(
-        "job_resume_requested",
-        job_id=job_paths.job_id,
-        task_name=task_name,
-        resumed_from_job_id=str(metadata.get("job_id", "")),
-    )
+    append_event("job_resume_requested", job_id=job_paths.job_id, task_name=task_name, resumed_from_job_id=str(metadata.get("job_id", "")))
     return {
         "job_id": job_paths.job_id,
         "task_name": task_name,
@@ -799,7 +752,7 @@ def unlock_runtime(*, force: bool = False) -> dict[str, Any]:
     if not LOCK_PATH.exists():
         return {"status": "ok", "detail": "execution app 锁当前已清空"}
     if not force:
-        raise ExecutionAppLockError("锁仍然存在。只有在确认该作业已经消失后，才允许使用 force 重试。")
+        raise ExecutionAppLockError("锁仍然存在。只有确认该作业已经消失后，才允许使用 force 重试。")
     clear_lock_file()
     return {"status": "ok", "detail": "execution app 锁已清理"}
 
