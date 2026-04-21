@@ -170,3 +170,131 @@
 - 当前禁止项：不得把 `alpha_result_value_budget_split_v6` 或 `result_value_v5` 设为默认主线；不得因 sell-side 指标改善而覆盖收益/sharpe 退化；不得通过扩大 backbone 替代价值目标重构。
 - 下一轮合同：优先推进 r6b 三值门控，明确区分 `deploy_value`、`release_value`、`defense_value`；预算层只能做容量、风险和成本约束，不得静默吞掉高价值生命周期动作。
 - 治理合同：训练证据中的 `teacher_action_rows` 必须使用日频持仓容量自适应有效下限；原始 10000 行阈值只能作为参考，不得再把容量受限的日频执行教师误判为训练证据不足。
+## 17. 2026-04-19 r6b 三值门控合同修正
+- 已完成实证事实：
+  - `cp_v3_three_value_gate_r6b` 已完成 `4 screening + 2 confirmatory`，所有候选仍为 `shadow_only`。
+  - r6b 已把 `deploy_value / release_value / defense_value` 与对应 gate 全链路接入 teacher label、budget objective、model heads、推理仲裁、行为审计和 self-optimizing study。
+  - `smoke01` 揭示了一个真实目标污染：三值 gate 回退逻辑把合法 0 gate 误当成缺失值；该 bug 已修复。
+  - 修复后 `training_samples_preview.csv` 直接证明三值 gate label 归一成立：`gate_sum_mean=0.999998`。
+- 正式实证事实：
+  - performance champion `cp_v3_three_value_gate_r6b__confirm_01`
+    - `annual_return=0.2780`
+    - `sharpe=1.0538`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.1111`
+    - `cash_timing_quality_1d=-0.1833`
+    - `deploy_gate_forward_alignment_5d=-0.0842`
+    - `release_gate_forward_alignment_5d=0.0238`
+    - `defense_gate_timing_quality_1d=-0.0147`
+  - stability champion `cp_v3_three_value_gate_r6b__confirm_02`
+    - `annual_return=-0.1480`
+    - `sharpe=-0.5523`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.3750`
+    - `cash_timing_quality_1d=-0.0978`
+    - `release_gate_forward_alignment_5d=0.2826`
+    - `defense_gate_timing_quality_1d=-0.0875`
+- 合同级结论修正：
+  - r6b 证明“把 r6 的单一 scalar 拆成多值目标”是正确方向，但“把 deploy / release / defense 全部放进同一个个股级 gate simplex”仍然不对。
+  - `deploy / release` 更接近个股层、持仓层的边际资金去留判断。
+  - `defense / cash` 更接近组合层、市场层的全局风险与机会密度判断。
+  - 因此 `defense` 不应继续作为与个股 `deploy / release` 同层竞争的 stock-level gate；这会天然诱导模型学成高 deploy 暴露、弱 defense、弱 exit 的折中。
+- 新设计合同：
+  - 个股层只负责：
+    - `open / hold / add / reduce / exit`
+    - `deploy_value`
+    - `release_value`
+    - 持仓内 sell ranking / lifecycle arbitration
+  - 组合层只负责：
+    - `defense_value / cash regime`
+    - `gross / candidate / turnover / exposure floor`
+    - 市场机会密度与风险状态
+  - 预算层只允许：
+    - 做容量、风险、成本与换手约束
+    - 显式记录 clipped-intent
+    - 绝不静默吞掉高价值生命周期动作
+- 禁止项更新：
+  - 不得继续把 r6b 当成“再加 epoch、再加 loss、再加 backbone 就会自然跑通”的主线。
+  - 不得把 `cash_translation_sell_guard_v3` 的局部收益恢复误判为三值仲裁已经成立。
+  - 不得继续把 `defense` 设计成与每只股票 `deploy/release` 同粒度、同竞争层级的门控头。
+- 下一轮合同：
+  - 优先实现层级化仲裁，而不是继续同层三值门控：
+    - stock-level `deploy / release`
+    - portfolio-level `defense / cash`
+  - 正式 study 仍固定小矩阵，只比较层级仲裁与预算剪裁修复，不扩大 backbone。
+  - 只有当层级仲裁同时改善收益、cash timing、exit 与 gate alignment 后，才允许进入更强 backbone 或 offline RL 讨论。
+## 18. 2026-04-20 r7 后的层级仲裁修正合同
+- 已被正式证明的事实：
+  - 同层三值 gate 不对。
+  - 初步层级化 r7 比同层三值 gate 更对，因为它已经能把收益与 sharpe 拉回到接近主线强度。
+  - 但 r7 仍未完成真正闭环，因为最高收益 confirmatory 里的 `deploy / value arbitration` 对齐仍为负。
+- 新合同：
+  - `deploy / release` 只属于 stock-level 资本去留判断。
+  - `defense / cash regime` 只属于 portfolio-level 风险与机会密度判断。
+  - budget layer 只允许做：
+    - 容量约束
+    - 风险约束
+    - 换手约束
+    - clipped-intent 记录与惩罚
+  - budget layer 不允许再承担：
+    - 重写 stock-level 生命周期动作语义
+    - 用组合约束静默吞掉高价值 `hold / add / reduce / exit`
+- 下一轮验收要求：
+  - 不只看 `annual_return / sharpe`。
+  - 必须同时改善：
+    - `reduce_success_rate_5d`
+    - `exit_timeliness_rate_5d`
+    - `cash_timing_quality_1d`
+    - `value_arbitration_forward_alignment_5d`
+    - `deploy_gate_forward_alignment_5d`
+    - `order_translation_conflict_rate`
+  - 如果收益恢复和结构对齐继续分裂在不同 confirmatory 上，则视为 hierarchy 仍未闭环，不得 promotion。
+## 19. 2026-04-21 r8 constraint-only arbitration 合同修正
+- 已被正式证明的事实：
+  - `defense / cash regime` 继续留在 portfolio-level 是正确方向；它不应该重新回到 held-side `sell_arbitration / keep_arbitration / reduce / exit` 的同层竞争里。
+  - `result_value_v8` 已经把这一方向正式写进 `budget_objective`，并让 budget layer 进入 `constraint_only_mode`。
+  - 但 r8 正式最优 confirmatory 不是 `alpha_result_value_budget_split_v8`，而是 `alpha_result_value_budget_split_v7 + result_value_v8`。
+  - 这说明“新 objective 的方向正确”不等于“新 loss 配比已经正确”，objective 演进与 loss 演进必须分开验收。
+- r8 合同级失败定义：
+  - 若高收益分支同时出现：
+    - `value_arbitration_forward_alignment_5d < 0`
+    - `alpha_opportunity_forward_alignment_5d < 0`
+    - `deploy_gate_forward_alignment_5d < 0`
+  - 即使 `annual_return / sharpe` 回升，也不能视为 continuous policy 已经学成统一资本仲裁。
+  - 若结构分支虽把 `value/deploy/release` 对齐拉回正区间，但收益与 sell selection 明显偏弱，也不能视为闭环完成。
+- 新的强约束：
+  - budget layer 不只要“少改写动作”，还必须“在被 clip 后仍尽量保留高价值 stock-level 意图”。
+  - 后续所有 layered arbitration 实验都必须显式审计并优化：
+    - `budget_clipped_day_share`
+    - `avg_budget_drop_count`
+    - `order_translation_conflict_rate`
+    - `top_order_translation_conflict_pairs`
+    - held-side `sell_selection_quality_5d`
+  - 不能再接受“组合层约束是对的，但 stock-level deploy/release 被 clip 掉”的折中解。
+- 新的设计合同：
+  - stock-level 只负责：
+    - `deploy_value`
+    - `release_value`
+    - `open / hold / add / reduce / exit`
+    - held-side sell ranking / lifecycle arbitration
+  - portfolio-level 只负责：
+    - `defense_value / cash regime`
+    - `gross / candidate / turnover / exposure floor`
+    - 市场机会密度与风险状态
+  - budget layer 只负责：
+    - 容量约束
+    - 风险约束
+    - 换手约束
+    - intent-preserving translation
+    - clipped-intent audit 与惩罚
+- 明确禁止：
+  - 不得把 `alpha_result_value_budget_split_v8` 直接升为默认主线。
+  - 不得因为 `result_value_v8` 的结构方向更对，就忽略当前正式最优仍依赖旧 `v7` loss 的事实。
+  - 不得继续通过“加 epoch / 加 loss / 换更大 backbone”来掩盖 `budget clipping + deploy misalignment` 问题。
+- 下一轮验收补充：
+  - 除 `annual_return / sharpe / max_drawdown / reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d` 外，必须同时要求：
+    - `deploy_gate_forward_alignment_5d > 0`
+    - `value_arbitration_forward_alignment_5d > 0`
+    - held-side `sell_selection_quality_5d` 不为负
+    - `order_translation_conflict_rate` 不再因约束层切换而显著恶化
+  - 若收益恢复与结构对齐继续分裂在不同 confirmatory 上，则视为 r8 之后的 constraint-only hierarchy 仍未闭环。

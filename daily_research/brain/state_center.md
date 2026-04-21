@@ -1231,3 +1231,122 @@
   - P2：把预算层改成容量/风险约束器，而不是动作意图吞噬器；重点压低 clipped order translation drift。
   - P3：重新做 4 格正式 study，只比较三值门控与预算剪裁修复，不扩大 backbone。
   - P4：只有 r6b 同时恢复收益与价值对齐后，再考虑 deep_alpha prior 融合或 offline RL。
+## 2026-04-19 r6b three value gate 当前状态
+- 已完成实现：
+  - `label_builder.py`、`pipeline_utils.py`、`model_seq_v3.py`、`portfolio_simulator.py`、`analyze_behavior_gap.py`、`run_self_optimizing_study.py` 已完整接入 r6b 三值门控。
+  - 新能力包括：`deploy/release/defense` value targets、gate targets、三值门控 loss、三值行为审计、`split_heads_three_value_gate_r6b` 正式 study profile。
+- 已完成纠偏：
+  - `smoke01` 暴露出三值 gate 回退逻辑会把合法 0 gate 误当成缺失值，污染 `result_value_v6` 预算目标。
+  - 该 bug 已修复，`training_samples_preview.csv` 复核显示三值 gate 每行归一，`gate_sum_mean=0.999998`。
+  - 正式结论以 `smoke02 + cp_v3_three_value_gate_r6b` formal study 为准，不再使用 `smoke01` 作为判断依据。
+- 正式实证状态：
+  - `cp_v3_three_value_gate_r6b` 已完成 `4 screening + 2 confirmatory`，所有候选仍为 `shadow_only`。
+  - performance champion：`cp_v3_three_value_gate_r6b__confirm_01`
+    - 配置：`result_value_v6 + cash_translation_sell_guard_v3`
+    - `annual_return=0.2780`
+    - `sharpe=1.0538`
+    - `max_drawdown=-0.1217`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.1111`
+    - `cash_timing_quality_1d=-0.1833`
+    - `order_translation_conflict_rate=0.0506`
+    - `deploy_gate_forward_alignment_5d=-0.0842`
+    - `release_gate_forward_alignment_5d=0.0238`
+    - `defense_gate_timing_quality_1d=-0.0147`
+  - stability champion：`cp_v3_three_value_gate_r6b__confirm_02`
+    - 配置：`result_value_v6 + cash_translation_guard_v2`
+    - `annual_return=-0.1480`
+    - `sharpe=-0.5523`
+    - `max_drawdown=-0.0946`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.3750`
+    - `cash_timing_quality_1d=-0.0978`
+    - `order_translation_conflict_rate=0.1394`
+- 当前最准确判断：
+  - r6b 比 r6 更接近“收益可恢复”的方向，但并没有学成真正的三值价值竞争。
+  - 当前最强 r6b 分支的本质特征不是“deploy/release/defense 学稳”，而是“deploy 偏置更强、sell guard 更强、收益暂时回正，但 defense 与 exit 崩弱”。
+  - 因此 r6b 不能替代 r2/r4/r5 的分层证据：
+    - r2 confirm_02 仍是收益/sharpe 主线证据。
+    - r4 confirm_01 仍是 cash timing 收敛证据。
+    - r5 confirm_02 仍是 sell/exit 结构证据。
+    - r6b 只新增了一条更深的结构结论：三值拆分方向对，但 `defense` 不应继续和个股 `deploy/release` 放在同一 stock-level gate simplex 里竞争。
+- 当前本质原因：
+  - `deploy / release` 主要是个股层边际资金去留判断。
+  - `defense / cash` 更接近组合层、市场层的全局风险判断。
+  - 把三者压进同一 stock-level 三值门控，会让模型更容易学成“高 deploy 暴露 + 弱 defense + 弱 exit”的折中。
+  - 所以 r6b 的失败不是“强模型没学到”，而是“结构分工仍未对齐真实决策层级”。
+- 下一轮优先级更新：
+  - P0：不 promotion r6b，不改 live/default 主线，不让 `result_value_v6` 取代 r2/r4/r5 证据体系。
+  - P1：推进层级化仲裁，而不是继续放大 r6b loss。
+    - 个股层：`deploy_value / release_value`
+    - 组合层：`defense_value / cash regime`
+  - P2：预算层只保留容量、风险、换手约束，不再吞掉高价值生命周期动作。
+  - P3：继续固定小矩阵正式 study，不扩大 backbone；先验证层级仲裁是否同时修复收益、cash timing 与 exit。
+  - P4：只有层级仲裁闭环后，再考虑 deep_alpha prior 更强融合或 offline RL。
+## 2026-04-20 r7 hierarchical arbitration 最新状态
+- 已完成正式 study：
+  - `daily_research/output/continuous_policy/studies/cp_v3_hierarchical_arbitration_r7/study_summary.json`
+  - `completed_trial_count=4`
+  - `confirmatory_completed_trial_count=2`
+  - `latest_state_restored=true`
+- 当前正式 champion：
+  - `cp_v3_hierarchical_arbitration_r7__confirm_02`
+  - `annual_return=1.3666`
+  - `sharpe=3.8698`
+  - `max_drawdown=-0.0737`
+  - `cash_timing_quality_1d=0.0319`
+  - `promotion_status=shadow_only`
+- 当前最重要事实：
+  - r7 说明层级化仲裁比 r6/r6b 更接近正确方向，因为收益和 sharpe 已明显恢复。
+  - 但 r7 champion 的 `value_arbitration_forward_alignment_5d=-0.1382`、`alpha_opportunity_forward_alignment_5d=-0.1330`、`deploy_gate_forward_alignment_5d=-0.1347` 仍为负，说明高收益并不等于结构仲裁已学稳。
+  - `confirm_01` 反向证明了结构分支仍存在：`reduce_success_rate_5d=1.0000`，但 `exit_timeliness_rate_5d=0.0000`，收益也明显更弱。
+- 当前分层证据体系不变：
+  - r2 confirm_02：收益 / sharpe 主线锚点。
+  - r4 confirm_01：cash timing 收敛证据。
+  - r5 confirm_02：sell/exit 生命周期结构证据。
+  - r7 confirm_02：hierarchy 方向正确但信用分配仍未闭环的最新证据。
+- 当前本质判断更新为：
+  - 问题已不再是“要不要层级化”，而是“如何把层级化做彻底”。
+  - 现在最深层瓶颈是：收益恢复和结构对齐仍落在不同 confirmatory 上，说明 budget/action translation 还在吞噬部分个股生命周期意图。
+- 当前最高优先级更新为：
+  - P0：不 promotion r7，不覆盖 r2/r4/r5 证据分层。
+  - P1：下一轮继续推进更彻底的 layered arbitration，而不是继续放大 r7 loss。
+  - P2：把 `defense / cash regime` 完全固定在 portfolio-level；stock-level 只保留 `deploy / release`。
+  - P3：预算层只做容量、风险、换手约束，并显式审计 clipped-intent drift。
+## 2026-04-21 r8 constraint arbitration 当前状态
+- 已完成正式 study：
+  - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/study_summary.json`
+  - `completed_trial_count=4`
+  - `confirmatory_completed_trial_count=2`
+  - 当前 r8 全轮次已闭环，无未收口正式训练
+- 当前正式最强 confirmatory：
+  - `cp_v3_constraint_arbitration_r8__confirm_01`
+  - 配置：`alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+  - `annual_return=1.4187`
+  - `sharpe=3.0117`
+  - `max_drawdown=-0.1150`
+  - `reduce_success_rate_5d=1.0000`
+  - `exit_timeliness_rate_5d=0.3333`
+  - `cash_timing_quality_1d=-0.1573`
+  - `promotion_status=shadow_only`
+- 当前最重要事实：
+  - r8 没有证明 `alpha_result_value_budget_split_v8` 本身优于旧权重；正式最优分支重新回到了 `v7 loss + result_value_v8`。
+  - `confirm_01` 说明收益可以恢复，但 `value_arbitration_forward_alignment_5d=-0.2378`、`alpha_opportunity_forward_alignment_5d=-0.2632`、`deploy_gate_forward_alignment_5d=-0.2516` 仍为负，说明高收益并不等于 capital arbitration 已学稳。
+  - `confirm_02` 的 `value_arbitration_forward_alignment_5d=0.0612`、`deploy_gate_forward_alignment_5d=0.0487` 已回正，但收益只有 `annual_return=0.0517`、`sharpe=0.3232`，且 `sell_selection_quality_5d=-0.0266`。
+  - r8 两个 confirmatory 继续把“收益恢复”和“结构对齐”分裂到不同分支上，说明约束层仍未做到真正的 intent-preserving translation。
+  - `confirm_01` 的 `order_translation_conflict_rate=0.2224`，且 `budget_clipped_day_share=0.9855`，说明 budget layer 仍几乎每天深度介入 stock-level 意图。
+- 当前分层证据体系更新为：
+  - r2 confirm_02：收益 / sharpe 主线锚点。
+  - r4 confirm_01：cash timing 收敛证据。
+  - r5 confirm_02：sell/exit 生命周期结构证据。
+  - r7 confirm_02：hierarchy 方向正确但信用分配仍未闭环的证据。
+  - r8 confirm_01 / confirm_02：constraint-only portfolio defense 方向正确，但 budget clipping 与 deploy alignment 仍未闭环的最新证据。
+- 当前本质判断更新为：
+  - 问题已不再是“`defense` 该不该退回 portfolio-level”，而是“退回后 budget layer 如何不再吞 stock-level deploy/release 意图”。
+  - 当前最深层瓶颈是：约束层仍不够 intent-preserving，stock-level deploy branch 也还没有被训练成稳定的资本去向判断。
+  - 因此 r8 不是“再加 epoch / 加 loss / 换更大 backbone”就能自然转正的主线。
+- 当前最高优先级更新为：
+  - P0：不 promotion r8，不覆盖 r2/r4/r5/r7 的分层证据。
+  - P1：保留 `result_value_v8 + cash_constraint_guard_v4` 作为结构资产，但不设为默认主线。
+  - P2：下一轮显式优化 `budget-clipped intent drift` 与 `held-side sell-selection preservation`。
+  - P3：继续固定 `stock-level deploy/release` 与 `portfolio-level defense/cash regime` 的层级边界，预算层只做容量、风险、换手约束。

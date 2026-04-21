@@ -863,3 +863,170 @@
 - 训练证据门槛：
   - 已修复固定 `teacher_action_rows >= 10000` 的结构性误判；未来 protocol 会输出 `effective_min_teacher_action_rows`。
   - 该修正不代表任何历史 run 自动 promotion；所有 promotion 仍必须同时过收益、回撤、cash timing、active 对照与 shadow continuity。
+## 2026-04-19 r6b 操作状态
+- 已完成 dry-run：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_three_value_gate_r6b --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_three_value_gate_r6b__dry_run --dry-run`
+  - dry-run 展开结果：
+    - `result_value_v6 + cash_translation_guard_v2`
+    - `result_value_v6 + cash_translation_sell_guard_v3`
+    - `result_value_v5 + cash_translation_guard_v2`
+    - `result_value_v5 + cash_translation_sell_guard_v3`
+- 已完成 smoke：
+  - `smoke01` 标签：`cp_v3_three_value_gate_r6b__smoke01`
+  - 结论：仅作排错样本，不作正式依据；原因是三值 gate fallback 逻辑会把合法 0 gate 误回填为 fallback，污染 `result_value_v6` 预算目标。
+  - bug 修复后重跑：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_three_value_gate_r6b__smoke02 --max-universe-size 80 --epochs 2 --min-epochs 1 --resume-mode fresh --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v6b --budget-semantics action_budget_split_v1 --budget-calibration cash_translation_guard_v2 --budget-objective result_value_v6 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512`
+  - smoke02 关键事实：
+    - `annual_return=0.0731`
+    - `sharpe=1.0949`
+    - `cash_timing_quality_1d=0.0100`
+    - `deploy_gate_forward_alignment_5d=0.2086`
+    - 但 `reduce_success_rate_5d=0.0000`、`exit_timeliness_rate_5d=0.0000`
+- 已完成 formal study：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_three_value_gate_r6b --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_three_value_gate_r6b`
+  - 产物位置：
+    - `daily_research/output/continuous_policy/studies/cp_v3_three_value_gate_r6b/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_three_value_gate_r6b/trial_ranking.csv`
+    - `daily_research/output/continuous_policy/protocols/cp_v3_three_value_gate_r6b__confirm_01/protocol_summary.json`
+    - `daily_research/output/continuous_policy/protocols/cp_v3_three_value_gate_r6b__confirm_02/protocol_summary.json`
+  - formal 关键结论：
+    - 所有 trial / confirm 仍为 `shadow_only`
+    - screening/performance champion：`trial_02`，配置 `result_value_v6 + cash_translation_sell_guard_v3`
+    - confirmatory performance champion：`confirm_01`，关键指标：
+      - `annual_return=0.2780`
+      - `sharpe=1.0538`
+      - `max_drawdown=-0.1217`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.1111`
+      - `cash_timing_quality_1d=-0.1833`
+      - `order_translation_conflict_rate=0.0506`
+    - confirmatory stability champion：`confirm_02`，关键指标：
+      - `annual_return=-0.1480`
+      - `sharpe=-0.5523`
+      - `cash_timing_quality_1d=-0.0978`
+      - `release_gate_forward_alignment_5d=0.2826`
+      - `order_translation_conflict_rate=0.1394`
+- 当前运行结论：
+  - r6b 已完成实现、smoke、formal study、行为审计与结论写回，当前阶段不再有未跑完的 r6b 正式训练。
+  - 不得把 `cp_v3_three_value_gate_r6b__confirm_01` 切到 live/default。
+  - 不得继续以“再加 epoch / 再加三值门控权重 / 再换更大 backbone”作为默认下一步。
+  - `smoke01` 不得引用为任何正式证据；正式对外结论只认 `smoke02` 与 `cp_v3_three_value_gate_r6b`。
+- 下一次优先实现：
+  - 不再继续同层三值 gate。
+  - 下一次应优先做层级化仲裁：
+    - 个股层：`deploy_value_target / release_value_target`
+    - 组合层：`defense_value / cash regime`
+  - 预算层继续承担容量、风险、换手约束，但不得再作为动作意图吞噬器。
+  - 新 study 仍固定小矩阵，只比较层级仲裁和预算剪裁修复，不扩大 backbone。
+## 2026-04-20 r7 操作闭环
+- 已完成：
+  - 前台跑完 `cp_v3_hierarchical_arbitration_r7__confirm_02`
+  - 重建 `cp_v3_hierarchical_arbitration_r7/study_summary.json`
+  - 当前 r7 全轮次已闭环，无未收口的正式训练
+- 当前运行结论：
+  - r7 不 promotion，所有正式结论以 `cp_v3_hierarchical_arbitration_r7/study_summary.json` 为准。
+  - 当前 champion 是 `cp_v3_hierarchical_arbitration_r7__confirm_02`，但它代表“收益恢复证据”，不是“结构闭环完成证据”。
+  - 当前不允许把 r7 视为 live/default 新主线。
+- 当前禁止项更新：
+  - 不要复用 `cp_v3_hierarchical_arbitration_r7` tag 继续训练。
+  - 不要把 r7 champion 的高收益误判成 hierarchy 已完成。
+  - 不要继续通过“加 epoch / 加 loss / 换更大 backbone”尝试把 r7 顶成主线。
+- 下一轮执行口径：
+  - 下一次必须以新 tag 开始。
+  - 设计上必须继续推进更彻底的 layered arbitration：
+    - stock-level：`deploy_value_target / release_value_target`
+    - portfolio-level：`defense_value / cash regime`
+  - budget layer 继续承担容量、风险、换手约束，但必须显式记录 clipped-intent drift，不能再吞掉生命周期动作。
+  - 正式 study 仍固定小矩阵，不扩大 backbone。
+## 2026-04-21 r8 constraint arbitration 操作闭环
+- 动作前自检：
+  - 当前无需要保留的后台正式训练；检测到临时 Python 进程后已先确认结束，再继续执行，避免误伤已有任务。
+  - 继续遵守训练约束：不打断训练、正式任务统一前台执行、10h 窗口口径不变。
+- 已完成代码实现：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+    - 新增 `budget_objective=result_value_v8`
+    - 新增 `result_value_hierarchical_defense_pressure`
+    - 新增 `result_value_portfolio_release_pressure`
+    - 新增 `result_value_constraint_only_mode`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_split_v8`
+    - 新增 `pure_portfolio_defense_mode`
+    - 新增 `decision_portfolio_defense_signal`
+    - 新增 `budget_model_constraint_only_mode`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `budget_calibration=cash_constraint_guard_v4`
+    - 新增 `constraint_only_budget_mode`
+    - risk-off shrink 改为优先按 sell/release priority 收缩
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `split_heads_constraint_arbitration_r8` profile
+- 已完成验证：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/pipeline_utils.py`
+    - `daily_research/continuous_policy/model_seq_v3.py`
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过
+  - dry-run 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_constraint_arbitration_r8 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_constraint_arbitration_r8__dry_run --dry-run`
+  - dry-run 结果：
+    - 正确展开四格：
+      - `alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v8 + cash_translation_guard_v2 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+- 已完成 smoke：
+  - 前台命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_constraint_arbitration_r8__smoke01 --max-universe-size 80 --epochs 2 --min-epochs 1 --resume-mode fresh --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v8 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_guard_v4 --budget-objective result_value_v8 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512`
+  - smoke 只作链路闭环与方向预警，不作正式 promotion 依据
+  - smoke 预警：
+    - `hold_share=0.5000`
+    - `reduce_success_rate_5d=0.0000`
+    - `cash_timing_quality_1d=-0.1353`
+    - `order_translation_conflict_rate=0.5781`
+- 已完成 formal study：
+  - 前台命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_constraint_arbitration_r8 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_constraint_arbitration_r8`
+  - 产物位置：
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/trial_ranking.csv`
+    - `daily_research/output/continuous_policy/protocols/cp_v3_constraint_arbitration_r8__confirm_01/protocol_summary.json`
+    - `daily_research/output/continuous_policy/protocols/cp_v3_constraint_arbitration_r8__confirm_02/protocol_summary.json`
+  - 正式关键结论：
+    - 所有 trial / confirm 仍为 `shadow_only`
+    - screening 最强是 `trial_04 = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+    - performance champion 是 `confirm_01 = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=1.4187`
+      - `sharpe=3.0117`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.3333`
+      - `cash_timing_quality_1d=-0.1573`
+      - `value_arbitration_forward_alignment_5d=-0.2378`
+      - `deploy_gate_forward_alignment_5d=-0.2516`
+      - `order_translation_conflict_rate=0.2224`
+    - stability champion 是 `confirm_02 = alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+      - `annual_return=0.0517`
+      - `sharpe=0.3232`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.5556`
+      - `cash_timing_quality_1d=-0.0559`
+      - `value_arbitration_forward_alignment_5d=0.0612`
+      - `deploy_gate_forward_alignment_5d=0.0487`
+      - `order_translation_conflict_rate=0.1034`
+- 当前运行结论：
+  - r8 不 promotion，所有正式结论以 `cp_v3_constraint_arbitration_r8/study_summary.json` 为准。
+  - 当前不能把 `result_value_v8` 或 `alpha_result_value_budget_split_v8` 视为 live/default 主线。
+  - r8 证明“constraint-only portfolio defense”方向正确，但没有证明当前约束层已经具备 intent-preserving translation。
+  - 当前最强收益分支和最强结构分支依然分裂，说明下一轮不能靠“加 epoch / 加 loss / 换更大 backbone”硬顶。
+- 当前禁止项更新：
+  - 不要复用 `cp_v3_constraint_arbitration_r8` tag 继续训练。
+  - 不要把 `confirm_01` 的高收益误判成资本仲裁已学稳。
+  - 不要把 `confirm_02` 的局部 alignment 回正误判成结构已经可 promotion。
+  - 不要把 `alpha_result_value_budget_split_v8` 直接升为默认 loss。
+- 下一轮执行口径：
+  - 必须继续保持层级边界：
+    - stock-level：`deploy / release`
+    - portfolio-level：`defense / cash regime`
+  - budget layer 继续只做容量、风险、换手约束，但必须显式优化：
+    - `budget-clipped intent drift`
+    - held-side `sell-selection preservation`
+  - 正式 study 仍固定小矩阵，不扩大 backbone。

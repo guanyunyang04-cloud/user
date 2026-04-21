@@ -537,6 +537,124 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "three_value_gate_total": 0.24,
         },
     },
+    "alpha_result_value_budget_split_v7": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.34,
+            "entry_quality": 0.84,
+            "hold_quality": 1.08,
+            "add_quality": 0.84,
+            "reduce_quality": 1.06,
+            "exit_urgency": 1.08,
+            "reentry_readiness": 0.50,
+            "holding_days_ratio": 1.24,
+            "reduce_fraction": 1.30,
+            "exit_hazard": 1.36,
+            "sell_attribution_score": 1.10,
+            "sell_rank_score": 1.34,
+            "lifecycle_sell_gate": 1.32,
+            "large_upside_1d_target": 1.18,
+            "alpha_opportunity_value": 1.46,
+            "hold_continuation_value": 1.30,
+            "sell_release_value": 1.26,
+            "cash_defense_value": 1.20,
+            "deployment_opportunity_cost": 1.30,
+            "risk_adjusted_action_value": 1.18,
+            "value_arbitration_target": 0.84,
+            "deploy_value_target": 1.54,
+            "release_value_target": 1.34,
+            "defense_value_target": 0.86,
+            "deploy_gate_target": 1.50,
+            "release_gate_target": 1.32,
+            "defense_gate_target": 0.42,
+            "clipped_intent_risk": 1.02,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.38,
+            "candidate_budget": 0.96,
+            "turnover_budget": 1.22,
+            "max_position_weight_target": 0.82,
+            "hold_bias_target": 1.12,
+            "reduce_bias_target": 1.08,
+            "exit_patience_target": 1.12,
+            "reentry_guard_target": 0.94,
+            "budget_risk_signal_target": 1.10,
+            "budget_deploy_signal_target": 1.20,
+            "budget_cash_timing_signal_target": 1.34,
+            "budget_alpha_focus_signal_target": 1.04,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.40,
+            "action_soft": 0.60,
+            "action_total": 0.52,
+            "duration_total": 0.12,
+            "scalar_total": 1.60,
+            "daily_total": 0.90,
+            "arbitration_total": 0.14,
+            "sell_rank_pairwise_total": 0.12,
+            "clipped_intent_total": 0.08,
+            "value_arbitration_total": 0.08,
+            "hierarchical_three_value_total": 0.22,
+        },
+    },
+    "alpha_result_value_budget_split_v8": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.36,
+            "entry_quality": 0.82,
+            "hold_quality": 1.12,
+            "add_quality": 0.84,
+            "reduce_quality": 1.12,
+            "exit_urgency": 1.10,
+            "reentry_readiness": 0.48,
+            "holding_days_ratio": 1.24,
+            "reduce_fraction": 1.34,
+            "exit_hazard": 1.40,
+            "sell_attribution_score": 1.12,
+            "sell_rank_score": 1.40,
+            "lifecycle_sell_gate": 1.38,
+            "large_upside_1d_target": 1.16,
+            "alpha_opportunity_value": 1.44,
+            "hold_continuation_value": 1.34,
+            "sell_release_value": 1.34,
+            "cash_defense_value": 1.04,
+            "deployment_opportunity_cost": 1.28,
+            "risk_adjusted_action_value": 1.18,
+            "value_arbitration_target": 0.76,
+            "deploy_value_target": 1.58,
+            "release_value_target": 1.42,
+            "defense_value_target": 0.68,
+            "deploy_gate_target": 1.56,
+            "release_gate_target": 1.40,
+            "defense_gate_target": 0.32,
+            "clipped_intent_risk": 1.16,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.46,
+            "candidate_budget": 1.02,
+            "turnover_budget": 1.28,
+            "max_position_weight_target": 0.86,
+            "hold_bias_target": 0.98,
+            "reduce_bias_target": 1.12,
+            "exit_patience_target": 1.08,
+            "reentry_guard_target": 1.04,
+            "budget_risk_signal_target": 1.18,
+            "budget_deploy_signal_target": 1.24,
+            "budget_cash_timing_signal_target": 1.38,
+            "budget_alpha_focus_signal_target": 1.06,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.40,
+            "action_soft": 0.60,
+            "action_total": 0.54,
+            "duration_total": 0.12,
+            "scalar_total": 1.64,
+            "daily_total": 0.88,
+            "arbitration_total": 0.14,
+            "sell_rank_pairwise_total": 0.14,
+            "clipped_intent_total": 0.10,
+            "value_arbitration_total": 0.06,
+            "hierarchical_three_value_total": 0.24,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -736,6 +854,65 @@ def _three_value_gate_consistency_loss(
         margin_terms.append(torch.relu(margin - (defense_prob[defense_dominant] - deploy_prob[defense_dominant])).mean())
     if margin_terms:
         return bce_loss + torch.stack(margin_terms).mean() * 0.28
+    return bce_loss
+
+
+def _hierarchical_three_value_gate_consistency_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    device = outputs["action_logits"].device
+    required_targets = {
+        "deploy_value_target",
+        "release_value_target",
+        "defense_value_target",
+        "deploy_gate_target",
+        "release_gate_target",
+        "defense_gate_target",
+    }
+    if not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+    probs = torch.softmax(outputs["action_logits"], dim=-1)
+    action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
+    deploy_prob = probs[:, action_lookup["open"]] + probs[:, action_lookup["add"]]
+    keep_prob = probs[:, action_lookup["hold"]] + probs[:, action_lookup["add"]]
+    release_prob = probs[:, action_lookup["reduce"]] + probs[:, action_lookup["exit"]]
+    defense_prob = probs[:, action_lookup["skip"]]
+    deploy_value = torch.clamp(targets["deploy_value_target"].to(device), 0.0, 1.0)
+    release_value = torch.clamp(targets["release_value_target"].to(device), 0.0, 1.0)
+    defense_value = torch.clamp(targets["defense_value_target"].to(device), 0.0, 1.0)
+    deploy_gate = torch.clamp(targets["deploy_gate_target"].to(device), 0.0, 1.0)
+    release_gate = torch.clamp(targets["release_gate_target"].to(device), 0.0, 1.0)
+    defense_gate = torch.clamp(targets["defense_gate_target"].to(device), 0.0, 1.0)
+    hold_value = torch.clamp(targets.get("hold_continuation_value", torch.zeros_like(deploy_value)).to(device), 0.0, 1.0)
+    alpha_value = torch.clamp(targets.get("alpha_opportunity_value", torch.zeros_like(deploy_value)).to(device), 0.0, 1.0)
+    sell_release_value = torch.clamp(targets.get("sell_release_value", torch.zeros_like(deploy_value)).to(device), 0.0, 1.0)
+    held = torch.clamp(targets.get("holding_flag_target", torch.zeros_like(deploy_value)).to(device), 0.0, 1.0)
+    deploy_target = torch.clamp(0.58 * deploy_gate + 0.30 * deploy_value + 0.12 * alpha_value, 0.0, 1.0)
+    keep_target = torch.clamp(0.46 * deploy_gate + 0.34 * hold_value + 0.20 * deploy_value, 0.0, 1.0) * held
+    release_target = torch.clamp(0.58 * release_gate + 0.28 * release_value + 0.14 * sell_release_value, 0.0, 1.0) * held
+    defense_target = torch.clamp(0.58 * defense_value + 0.22 * defense_gate + 0.20 * torch.clamp(1.0 - deploy_value, 0.0, 1.0), 0.0, 1.0) * (1.0 - held)
+    eps = 1.0e-4
+    bce_loss = (
+        nn.functional.binary_cross_entropy(torch.clamp(deploy_prob, eps, 1.0 - eps), deploy_target) * 0.38
+        + nn.functional.binary_cross_entropy(torch.clamp(keep_prob, eps, 1.0 - eps), keep_target) * 0.22
+        + nn.functional.binary_cross_entropy(torch.clamp(release_prob, eps, 1.0 - eps), release_target) * 0.28
+        + nn.functional.binary_cross_entropy(torch.clamp(defense_prob, eps, 1.0 - eps), defense_target) * 0.12
+    )
+    deploy_dominant = deploy_gate > release_gate + 0.08
+    release_dominant = release_gate > deploy_gate + 0.08
+    margin = torch.tensor(0.08, device=device)
+    margin_terms: list[torch.Tensor] = []
+    if int(deploy_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(margin - (deploy_prob[deploy_dominant] - release_prob[deploy_dominant])).mean()
+        )
+    if int(release_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(margin - (release_prob[release_dominant] - keep_prob[release_dominant])).mean()
+        )
+    if margin_terms:
+        return bce_loss + torch.stack(margin_terms).mean() * 0.24
     return bce_loss
 
 
@@ -1631,6 +1808,7 @@ def fit_policy_models_v3(
             sell_rank_pairwise_loss = _sell_rank_pairwise_loss(outputs, sample_batch_targets)
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
+            hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
             clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -1647,6 +1825,7 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("sell_rank_pairwise_total", 0.0) * sell_rank_pairwise_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
+                + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
                 + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * clipped_intent_loss
             )
             sample_optimizer.zero_grad(set_to_none=True)
@@ -1683,6 +1862,7 @@ def fit_policy_models_v3(
             val_sell_rank_pairwise_loss = _sell_rank_pairwise_loss(val_outputs, val_targets)
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
+            val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
             val_clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(val_outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -1703,6 +1883,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("sell_rank_pairwise_total", 0.0) * val_sell_rank_pairwise_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
+                    + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
                     + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * val_clipped_intent_loss
                 ).detach().cpu()
             )
@@ -2702,7 +2883,177 @@ def predict_policy_v3(
     portfolio_value_arbitration = _finite_mean(value_arbitration_target, default=0.5)
     portfolio_alpha_opportunity = _finite_mean(alpha_opportunity_value, default=0.0)
     portfolio_cash_defense = _finite_mean(cash_defense_value, default=0.0)
-    if budget_objective_name == "result_value_v6":
+    if budget_objective_name == "result_value_v8":
+        portfolio_deploy_value = _finite_mean(deploy_value_target, default=0.0)
+        portfolio_release_value = _finite_mean(release_value_target, default=0.0)
+        portfolio_defense_value = _finite_mean(defense_value_target, default=0.0)
+        deploy_release_denominator = deploy_value_target + release_value_target + 1.0e-6
+        hierarchical_deploy_gate_target = np.clip(
+            0.62 * deploy_gate_target + 0.38 * np.clip(deploy_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        hierarchical_release_gate_target = np.clip(
+            0.62 * release_gate_target + 0.38 * np.clip(release_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        portfolio_deploy_gate = _finite_mean(hierarchical_deploy_gate_target, default=0.0)
+        portfolio_release_gate = _finite_mean(hierarchical_release_gate_target, default=0.0)
+        portfolio_defense_gate = float(
+            np.clip(
+                0.48 * float(global_targets.get("budget_cash_timing_signal_target", 0.0) or 0.0)
+                + 0.26 * float(global_targets.get("budget_risk_signal_target", 0.0) or 0.0)
+                + 0.12 * portfolio_cash_defense
+                + 0.08 * portfolio_defense_value
+                + 0.08 * max(portfolio_release_gate - portfolio_deploy_gate, 0.0)
+                - 0.08 * portfolio_deploy_gate,
+                0.0,
+                1.0,
+            )
+        )
+        three_value_deploy_pressure = float(
+            np.clip(
+                0.48 * portfolio_deploy_gate
+                + 0.30 * portfolio_deploy_value
+                + 0.14 * portfolio_alpha_opportunity
+                + 0.08 * _finite_mean(deployment_opportunity_cost, default=0.0),
+                0.0,
+                1.0,
+            )
+        )
+        three_value_release_pressure = float(
+            np.clip(
+                0.40 * portfolio_release_gate
+                + 0.34 * portfolio_release_value
+                + 0.16 * portfolio_cash_defense
+                + 0.10 * max(portfolio_defense_gate - portfolio_deploy_gate, 0.0),
+                0.0,
+                1.0,
+            )
+        )
+        global_targets["gross_exposure_target"] = float(
+            np.clip(
+                global_targets["gross_exposure_target"]
+                + three_value_deploy_pressure * 0.060
+                - portfolio_defense_gate * 0.072
+                - three_value_release_pressure * 0.028,
+                min_gross_exposure_target,
+                0.98,
+            )
+        )
+        global_targets["candidate_budget"] = float(
+            np.clip(
+                global_targets["candidate_budget"]
+                + three_value_deploy_pressure * 0.90
+                - portfolio_defense_gate * 0.62
+                - three_value_release_pressure * 0.18,
+                min_candidate_budget,
+                12.0,
+            )
+        )
+        global_targets["turnover_budget"] = float(
+            np.clip(
+                global_targets["turnover_budget"]
+                + three_value_release_pressure * 0.070
+                + portfolio_defense_gate * 0.022
+                + max(portfolio_deploy_gate - portfolio_release_gate, 0.0) * 0.018,
+                0.08,
+                1.00,
+            )
+        )
+        global_targets["budget_model_value_arbitration_signal"] = float(portfolio_value_arbitration)
+        global_targets["budget_model_alpha_opportunity_signal"] = float(portfolio_alpha_opportunity)
+        global_targets["budget_model_cash_defense_signal"] = float(portfolio_cash_defense)
+        global_targets["budget_model_deploy_value_signal"] = float(portfolio_deploy_value)
+        global_targets["budget_model_release_value_signal"] = float(portfolio_release_value)
+        global_targets["budget_model_defense_value_signal"] = float(portfolio_defense_value)
+        global_targets["budget_model_deploy_gate_signal"] = float(portfolio_deploy_gate)
+        global_targets["budget_model_release_gate_signal"] = float(portfolio_release_gate)
+        global_targets["budget_model_defense_gate_signal"] = float(portfolio_defense_gate)
+        global_targets["budget_model_hierarchical_mode"] = 1.0
+        global_targets["budget_model_constraint_only_mode"] = 1.0
+    elif budget_objective_name == "result_value_v7":
+        portfolio_deploy_value = _finite_mean(deploy_value_target, default=0.0)
+        portfolio_release_value = _finite_mean(release_value_target, default=0.0)
+        portfolio_defense_value = _finite_mean(defense_value_target, default=0.0)
+        deploy_release_denominator = deploy_value_target + release_value_target + 1.0e-6
+        hierarchical_deploy_gate_target = np.clip(
+            0.62 * deploy_gate_target + 0.38 * np.clip(deploy_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        hierarchical_release_gate_target = np.clip(
+            0.62 * release_gate_target + 0.38 * np.clip(release_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        portfolio_deploy_gate = _finite_mean(hierarchical_deploy_gate_target, default=0.0)
+        portfolio_release_gate = _finite_mean(hierarchical_release_gate_target, default=0.0)
+        portfolio_defense_gate = float(
+            np.clip(
+                0.42 * float(global_targets.get("budget_cash_timing_signal_target", 0.0) or 0.0)
+                + 0.24 * float(global_targets.get("budget_risk_signal_target", 0.0) or 0.0)
+                + 0.18 * portfolio_cash_defense
+                + 0.10 * portfolio_defense_value
+                + 0.06 * portfolio_release_gate
+                - 0.12 * portfolio_deploy_gate,
+                0.0,
+                1.0,
+            )
+        )
+        three_value_deploy_pressure = float(
+            np.clip(
+                0.46 * portfolio_deploy_gate
+                + 0.30 * portfolio_deploy_value
+                + 0.16 * portfolio_alpha_opportunity
+                + 0.08 * _finite_mean(deployment_opportunity_cost, default=0.0),
+                0.0,
+                1.0,
+            )
+        )
+        global_targets["gross_exposure_target"] = float(
+            np.clip(
+                global_targets["gross_exposure_target"]
+                + three_value_deploy_pressure * 0.065
+                - portfolio_defense_gate * 0.060
+                - max(portfolio_release_gate - portfolio_deploy_gate, 0.0) * 0.025,
+                min_gross_exposure_target,
+                0.98,
+            )
+        )
+        global_targets["candidate_budget"] = float(
+            np.clip(
+                global_targets["candidate_budget"]
+                + three_value_deploy_pressure * 0.95
+                - portfolio_defense_gate * 0.55
+                - max(portfolio_release_gate - portfolio_deploy_gate, 0.0) * 0.25,
+                min_candidate_budget,
+                12.0,
+            )
+        )
+        global_targets["turnover_budget"] = float(
+            np.clip(
+                global_targets["turnover_budget"]
+                + max(portfolio_release_gate - portfolio_deploy_gate, 0.0) * 0.055
+                + max(portfolio_deploy_gate - portfolio_release_gate, 0.0) * 0.030
+                + portfolio_defense_gate * 0.018,
+                0.08,
+                1.00,
+            )
+        )
+        global_targets["budget_model_value_arbitration_signal"] = float(portfolio_value_arbitration)
+        global_targets["budget_model_alpha_opportunity_signal"] = float(portfolio_alpha_opportunity)
+        global_targets["budget_model_cash_defense_signal"] = float(portfolio_cash_defense)
+        global_targets["budget_model_deploy_value_signal"] = float(portfolio_deploy_value)
+        global_targets["budget_model_release_value_signal"] = float(portfolio_release_value)
+        global_targets["budget_model_defense_value_signal"] = float(portfolio_defense_value)
+        global_targets["budget_model_deploy_gate_signal"] = float(portfolio_deploy_gate)
+        global_targets["budget_model_release_gate_signal"] = float(portfolio_release_gate)
+        global_targets["budget_model_defense_gate_signal"] = float(portfolio_defense_gate)
+        global_targets["budget_model_hierarchical_mode"] = 1.0
+        global_targets["budget_model_constraint_only_mode"] = 0.0
+    elif budget_objective_name == "result_value_v6":
         portfolio_deploy_value = _finite_mean(deploy_value_target, default=0.0)
         portfolio_release_value = _finite_mean(release_value_target, default=0.0)
         portfolio_defense_value = _finite_mean(defense_value_target, default=0.0)
@@ -2768,6 +3119,8 @@ def predict_policy_v3(
         global_targets["budget_model_deploy_gate_signal"] = float(portfolio_deploy_gate)
         global_targets["budget_model_release_gate_signal"] = float(portfolio_release_gate)
         global_targets["budget_model_defense_gate_signal"] = float(portfolio_defense_gate)
+        global_targets["budget_model_hierarchical_mode"] = 0.0
+        global_targets["budget_model_constraint_only_mode"] = 0.0
     elif budget_objective_name == "result_value_v5":
         portfolio_deployment_cost = _finite_mean(deployment_opportunity_cost, default=0.0)
         portfolio_sell_release = _finite_mean(sell_release_value, default=0.0)
@@ -2819,6 +3172,11 @@ def predict_policy_v3(
         global_targets["budget_model_value_arbitration_signal"] = float(portfolio_value_arbitration)
         global_targets["budget_model_alpha_opportunity_signal"] = float(portfolio_alpha_opportunity)
         global_targets["budget_model_cash_defense_signal"] = float(portfolio_cash_defense)
+        global_targets["budget_model_hierarchical_mode"] = 0.0
+        global_targets["budget_model_constraint_only_mode"] = 0.0
+    else:
+        global_targets["budget_model_hierarchical_mode"] = 0.0
+        global_targets["budget_model_constraint_only_mode"] = 0.0
     cash_pressure_scalar = float(np.clip(np.nanmean(portfolio_cash_pressure), 0.0, 1.0)) if len(portfolio_cash_pressure) else 0.0
     turnover_ramp_bonus = float(
         np.clip(
@@ -2879,6 +3237,36 @@ def predict_policy_v3(
     reduce_bias_target = float(global_targets["reduce_bias_target"])
     exit_patience_target = float(global_targets["exit_patience_target"])
     reentry_guard_target = float(global_targets["reentry_guard_target"])
+    hierarchical_stock_gate_mode = budget_objective_name in {"result_value_v7", "result_value_v8"}
+    pure_portfolio_defense_mode = budget_objective_name == "result_value_v8"
+    portfolio_defense_signal = float(
+        np.clip(
+            max(
+                float(global_targets.get("budget_model_defense_gate_signal", 0.0) or 0.0),
+                float(global_targets.get("budget_cash_timing_signal_target", 0.0) or 0.0),
+                float(global_targets.get("budget_risk_signal_target", 0.0) or 0.0) * 0.82 + portfolio_cash_defense * 0.18,
+            ),
+            0.0,
+            1.0,
+        )
+    )
+    if hierarchical_stock_gate_mode:
+        deploy_release_denominator = deploy_value_target + release_value_target + 1.0e-6
+        decision_deploy_gate = np.clip(
+            0.62 * deploy_gate_target + 0.38 * np.clip(deploy_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        decision_release_gate = np.clip(
+            0.62 * release_gate_target + 0.38 * np.clip(release_value_target / deploy_release_denominator, 0.0, 1.0),
+            0.0,
+            1.0,
+        )
+        decision_defense_signal = np.full(len(adjusted_labels), portfolio_defense_signal, dtype=float)
+    else:
+        decision_deploy_gate = deploy_gate_target
+        decision_release_gate = release_gate_target
+        decision_defense_signal = defense_gate_target
     for idx in range(len(adjusted_labels)):
         label = str(adjusted_labels[idx])
         held = float(current_weight[idx]) > 1e-8
@@ -2909,35 +3297,36 @@ def predict_policy_v3(
             and signal_decay_speed[idx] < 0.08
         )
         if held:
+            held_defense_weight = 0.0 if pure_portfolio_defense_mode else 1.0
             sell_arbitration = float(
                 np.clip(
-                    0.24 * release_gate_target[idx]
+                    0.24 * decision_release_gate[idx]
                     + 0.22 * release_value_target[idx]
                     + 0.18 * lifecycle_sell_gate[idx]
                     + 0.16 * sell_rank_score[idx]
                     + 0.12 * preliminary_sell_attribution[idx]
-                    + 0.08 * defense_gate_target[idx],
+                    + 0.08 * decision_defense_signal[idx] * held_defense_weight,
                     0.0,
                     1.0,
                 )
             )
             keep_arbitration = float(
                 np.clip(
-                    0.24 * deploy_gate_target[idx]
+                    0.24 * decision_deploy_gate[idx]
                     + 0.22 * deploy_value_target[idx]
                     + 0.18 * max(hold_quality[idx], 0.0)
                     + 0.16 * hold_continuation_value[idx]
                     + 0.12 * alpha_opportunity_value[idx]
                     + 0.06 * max(add_quality[idx], 0.0)
                     + 0.04 * max(hold_continuity_pressure[idx], 0.0)
-                    - 0.10 * defense_gate_target[idx],
+                    - 0.10 * decision_defense_signal[idx] * held_defense_weight,
                     0.0,
                     1.0,
                 )
             )
             value_defense_override = bool(
-                defense_gate_target[idx] > 0.44
-                and deploy_gate_target[idx] < 0.30
+                decision_defense_signal[idx] > 0.56
+                and decision_release_gate[idx] > decision_deploy_gate[idx] + 0.08
                 and release_value_target[idx] > deploy_value_target[idx] + 0.10
             )
             if (
@@ -2951,9 +3340,9 @@ def predict_policy_v3(
                 label = "hold"
             if (
                 label in {"reduce", "exit"}
-                and deploy_gate_target[idx] > max(release_gate_target[idx], defense_gate_target[idx]) + 0.08
+                and decision_deploy_gate[idx] > decision_release_gate[idx] + 0.08
                 and deploy_value_target[idx] > release_value_target[idx] + 0.10
-                and defense_gate_target[idx] < 0.40
+                and (pure_portfolio_defense_mode or decision_defense_signal[idx] < 0.40)
                 and exit_timing_pressure < 0.58
             ):
                 label = "hold"
@@ -2975,7 +3364,7 @@ def predict_policy_v3(
             if (
                 label == "add"
                 and clipped_intent_risk[idx] > 0.64
-                and deploy_gate_target[idx] < 0.38
+                and decision_deploy_gate[idx] < 0.38
                 and deployment_gap < 0.12
                 and add_quality[idx] < hold_quality[idx] + 0.10
             ):
@@ -3050,7 +3439,14 @@ def predict_policy_v3(
             ):
                 label = "exit" if (exit_timing_pressure > 0.62 and hold_days[idx] >= 6.0 and not profit_protected_trend) else ("reduce" if (reduce_fraction[idx] > 0.26 and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02) else "hold")
             if label in {"hold", "skip"} and (market_downside_pressure[idx] > 0.18 or portfolio_cash_pressure[idx] > 0.18 or signal_decay_speed[idx] > 0.10) and hold_days[idx] >= 3.0 and current_weight[idx] > 0.02 and drawdown_from_peak[idx] < -0.03:
-                if release_gate_target[idx] > deploy_gate_target[idx] + 0.06 or defense_gate_target[idx] > deploy_gate_target[idx] + 0.08 or sell_release_value[idx] > hold_continuation_value[idx] + 0.08:
+                if (
+                    decision_release_gate[idx] > decision_deploy_gate[idx] + 0.06
+                    or sell_release_value[idx] > hold_continuation_value[idx] + 0.08
+                    or (
+                        not pure_portfolio_defense_mode
+                        and decision_defense_signal[idx] > 0.54
+                    )
+                ):
                     label = "reduce"
             if label in {"hold", "skip"} and sell_pressure[idx] > 0.32 and hold_days[idx] >= 4.0 and current_weight[idx] > 0.025 and not profit_protected_trend:
                 label = "exit" if (exit_hazard[idx] > 0.58 or exit_timing_pressure > 0.68) else "reduce"
@@ -3082,13 +3478,13 @@ def predict_policy_v3(
             )
             if label == "open" and (entry_quality[idx] < open_gate or duration_name == "avoid"):
                 label = "skip"
-            if label == "open" and clipped_intent_risk[idx] > 0.72 and deploy_gate_target[idx] < 0.42 and entry_quality[idx] < open_gate + 0.05:
+            if label == "open" and clipped_intent_risk[idx] > 0.72 and decision_deploy_gate[idx] < 0.42 and entry_quality[idx] < open_gate + 0.05:
                 label = "skip"
             value_entry_ready = (
                 alpha_opportunity_value[idx] > 0.52
                 and deployment_opportunity_cost[idx] > 0.42
-                and deploy_gate_target[idx] > max(release_gate_target[idx], defense_gate_target[idx]) + 0.06
-                and defense_gate_target[idx] < 0.42
+                and decision_deploy_gate[idx] > decision_release_gate[idx] + 0.06
+                and decision_defense_signal[idx] < 0.42
             )
             if label in {"skip", "hold"} and duration_name != "avoid" and (
                 entry_quality[idx] > (0.075 + defensive_score * 0.01)
@@ -3108,9 +3504,9 @@ def predict_policy_v3(
         + alpha_opportunity_value * 0.18
         + deployment_opportunity_cost * 0.14
         + deploy_value_target * 0.12
-        + deploy_gate_target * 0.10
-        - defense_gate_target * 0.12
-        - release_gate_target * 0.06
+        + decision_deploy_gate * 0.10
+        - decision_defense_signal * (0.16 if pure_portfolio_defense_mode else 0.12)
+        - decision_release_gate * 0.06
     )
     open_candidate_scores = np.where(current_weight > 1e-8, -1e9, open_candidate_scores)
     open_candidate_scores = np.where(np.asarray(predicted_duration_labels) == "avoid", -1e9, open_candidate_scores)
@@ -3135,7 +3531,7 @@ def predict_policy_v3(
                 or (
                     open_risk_off_score > 0.46
                     and market_downside_pressure[idx] > 0.18
-                    and deploy_gate_target[idx] < 0.44
+                    and decision_deploy_gate[idx] < 0.44
                 )
             ):
                 continue
@@ -3148,6 +3544,9 @@ def predict_policy_v3(
     for idx, label in enumerate(adjusted_labels):
         duration_bonus = max(duration_days[idx] - 3.0, 0.0) / 20.0
         exit_timing_pressure = exit_timing_pressure_values[idx]
+        defense_drag_component = decision_defense_signal[idx] * (
+            0.08 if (not pure_portfolio_defense_mode or label in {"open", "add"}) else 0.0
+        )
         sell_drag = (
             sell_pressure[idx] * 0.45
             + exit_hazard[idx] * 0.10
@@ -3155,18 +3554,18 @@ def predict_policy_v3(
             + lifecycle_sell_gate[idx] * 0.14
             + sell_rank_score[idx] * 0.08
             + sell_release_value[idx] * 0.12
-            + release_gate_target[idx] * 0.10
-            + defense_gate_target[idx] * 0.08
-            - deploy_gate_target[idx] * 0.12
+            + decision_release_gate[idx] * 0.10
+            + defense_drag_component
+            - decision_deploy_gate[idx] * 0.12
             - deploy_value_target[idx] * 0.08
         )
         if label == "open":
-            value_boost = alpha_opportunity_value[idx] * 0.16 + deployment_opportunity_cost[idx] * 0.12 + deploy_value_target[idx] * 0.14 + deploy_gate_target[idx] * 0.12 + large_upside_1d_target[idx] * 0.06
+            value_boost = alpha_opportunity_value[idx] * 0.16 + deployment_opportunity_cost[idx] * 0.12 + deploy_value_target[idx] * 0.14 + decision_deploy_gate[idx] * 0.12 + large_upside_1d_target[idx] * 0.06
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.02 + entry_quality[idx] * 0.55 + duration_bonus * 0.05 + value_boost * 0.08) * (1.0 - sell_drag * 0.28 - clipped_intent_risk[idx] * 0.08), 0.0, 0.23)
             action_strength[idx] = np.clip(entry_quality[idx] + probability_map["open"][idx] * 0.55 + duration_bonus * 0.40 + value_boost - exit_reentry_pressure[idx] * 0.12 - sell_drag * 0.18 - open_risk_off_score * 0.04 - clipped_intent_risk[idx] * 0.05, 0.0, None)
             hold_boost[idx] = np.clip(reentry_readiness[idx] * 0.25 + duration_bonus * 0.20 + value_boost * 0.25 - sell_drag * 0.10, 0.0, None)
         elif label == "add":
-            value_boost = hold_continuation_value[idx] * 0.10 + alpha_opportunity_value[idx] * 0.12 + deployment_opportunity_cost[idx] * 0.08 + deploy_value_target[idx] * 0.12 + deploy_gate_target[idx] * 0.10
+            value_boost = hold_continuation_value[idx] * 0.10 + alpha_opportunity_value[idx] * 0.12 + deployment_opportunity_cost[idx] * 0.08 + deploy_value_target[idx] * 0.12 + decision_deploy_gate[idx] * 0.10
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.01 + add_quality[idx] * 0.35 + duration_bonus * 0.03 + value_boost * 0.06) * (1.0 - sell_drag * 0.50 - clipped_intent_risk[idx] * 0.10), 0.0, 0.18)
             action_strength[idx] = np.clip(add_quality[idx] + probability_map["add"][idx] * 0.45 + duration_bonus * 0.30 + value_boost - sell_drag * 0.32 - clipped_intent_risk[idx] * 0.07, 0.0, None)
             hold_boost[idx] = np.clip(hold_quality[idx] + duration_bonus * 0.25 + hold_continuation_value[idx] * 0.16 - sell_drag * 0.16, 0.0, None)
@@ -3176,7 +3575,7 @@ def predict_policy_v3(
                 0.0,
                 0.08 + decoder_profile["hold_delta_bonus"],
             )
-            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25 + hold_continuation_value[idx] * 0.18 + deploy_value_target[idx] * 0.10 + deploy_gate_target[idx] * 0.08 - sell_drag * 0.22, 0.0, None)
+            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25 + hold_continuation_value[idx] * 0.18 + deploy_value_target[idx] * 0.10 + decision_deploy_gate[idx] * 0.08 - sell_drag * 0.22, 0.0, None)
             hold_boost[idx] = np.clip(
                 hold_quality[idx]
                 + duration_bonus * 0.30
@@ -3199,8 +3598,8 @@ def predict_policy_v3(
                     + sell_rank_score[idx] * 0.10
                     + sell_release_value[idx] * 0.12
                     + release_value_target[idx] * 0.10
-                    + release_gate_target[idx] * 0.08
-                    + defense_gate_target[idx] * 0.06
+                    + decision_release_gate[idx] * 0.08
+                    + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
                     + market_downside_pressure[idx] * 0.16
                     + signal_decay_speed[idx] * 0.18
                     + cash_regime_pressure[idx] * 0.10
@@ -3221,8 +3620,8 @@ def predict_policy_v3(
                 + sell_rank_score[idx] * 0.12
                 + sell_release_value[idx] * 0.16
                 + release_value_target[idx] * 0.10
-                + release_gate_target[idx] * 0.08
-                + defense_gate_target[idx] * 0.06
+                + decision_release_gate[idx] * 0.08
+                + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
                 + reduce_bias_target * 0.25
                 - reduce_reversal_pressure[idx] * 0.12
                 - hold_continuation_value[idx] * 0.08,
@@ -3239,8 +3638,8 @@ def predict_policy_v3(
                 + sell_rank_score[idx] * 0.10
                 + sell_release_value[idx] * 0.16
                 + release_value_target[idx] * 0.10
-                + release_gate_target[idx] * 0.08
-                + defense_gate_target[idx] * 0.08
+                + decision_release_gate[idx] * 0.08
+                + decision_defense_signal[idx] * (0.08 if not pure_portfolio_defense_mode else 0.0)
                 + probability_map["exit"][idx] * 0.45
                 + market_downside_pressure[idx] * 0.12
                 + signal_decay_speed[idx] * 0.15
@@ -3321,6 +3720,12 @@ def predict_policy_v3(
             "deploy_gate_target": deploy_gate_target,
             "release_gate_target": release_gate_target,
             "defense_gate_target": defense_gate_target,
+            "decision_deploy_gate": decision_deploy_gate,
+            "decision_release_gate": decision_release_gate,
+            "decision_defense_signal": decision_defense_signal,
+            "decision_portfolio_defense_signal": np.full(len(state_frame), portfolio_defense_signal, dtype=float),
+            "budget_model_hierarchical_mode": np.full(len(state_frame), 1.0 if hierarchical_stock_gate_mode else 0.0, dtype=float),
+            "budget_model_constraint_only_mode": np.full(len(state_frame), 1.0 if pure_portfolio_defense_mode else 0.0, dtype=float),
             "clipped_intent_risk": clipped_intent_risk,
             "exit_timing_pressure": exit_timing_pressure_values,
             "planned_holding_bucket": predicted_duration_labels,

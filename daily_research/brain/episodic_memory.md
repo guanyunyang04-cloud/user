@@ -15981,3 +15981,363 @@ position,000001.SZ,1200,12.38,
   - 发现 `training_evidence` 的 `teacher_action_rows >= 10000` 固定阈值与日频执行模型的最大持仓容量冲突。
   - 已在 `run_continuous_policy_protocol.py` 中保留原始 10000 作为参考阈值，同时新增按 `train_day_count * 6` 与 1200 下限计算的有效阈值。
   - 用 r6 confirm_01 真实 `train_summary.json` 复算：`teacher_action_rows=3902`，`effective_min_teacher_action_rows=2454`，训练证据可判为 sufficient；但这不改变 r6 不 promotion 的结论，因为收益、回撤、cash timing 与 active 对照仍未过关。
+## 2026-04-19 r6b three value gate 实施、smoke 纠偏与正式 study 记忆
+- 触发：
+  - 承接 r6 结论：单一 `value_arbitration_target` 会把 `deploy / release / defense` 三种不同经济含义的价值压成一个 scalar，模型更容易学会 sell release，却学不稳高 alpha deployment 与 cash defense。
+  - 本轮目标不是继续放大 r6 loss，而是把价值仲裁拆成真正可竞争的三值门控，并用正式 study 验证它是否能把结构进步重新转回收益进步。
+- 动作前自检：
+  - 事实：
+    - 用户规则仍要求不打断任何训练，正式训练窗口统一 10h。
+    - 当前解释器仍必须使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/study 命令统一设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+    - 当前继承证据未变：r2 是收益/sharpe 主线，r4 是 cash timing 收敛证据，r5 是 sell/exit 结构证据，r6 是单标量价值仲裁失败证据。
+  - 推断：
+    - 如果 r6b 只是把 r6 的 sell release 再放大，而没有学成 deploy/release/defense 的真实竞争，那么它顶多恢复部分收益，不会成为可 promotion 主线。
+  - 假设：
+    - 如果三值目标表达本身正确，修掉目标污染后，至少应在 smoke 中看到 `deploy_gate_forward_alignment_5d` 不再系统性为负，且 `cash_timing_quality_1d` 不应继续恶化。
+- 关键实现：
+  - `label_builder.py`
+    - 新增 `deploy_value_target / release_value_target / defense_value_target`。
+    - 新增 `deploy_gate_target / release_gate_target / defense_gate_target`，并写入 `numeric_output_columns`。
+  - `pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v6`。
+    - 新增 deploy/release/defense 三值信号、门控诊断、对齐指标与预算目标映射。
+    - 新增 `deploy_gate_forward_alignment_5d / release_gate_forward_alignment_5d / defense_gate_timing_quality_1d` 等 continuity metrics。
+  - `model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_split_v6b`。
+    - 新增 `deploy/release/defense` value heads 与 gate heads。
+    - 新增 `three_value_gate_consistency_loss`，并把三值门控融入动作仲裁、预算目标与推理强度。
+  - `portfolio_simulator.py`
+    - 把三值 value/gate 信号接入预算翻译、风险收缩、部署提升、生命周期动作强度与 action diagnostics。
+  - `analyze_behavior_gap.py`
+    - 新增 `three_value_gate_not_aligned` 瓶颈。
+    - 行为审计显式输出 deploy/release/defense gate 的平均值与对齐质量。
+  - `run_self_optimizing_study.py`
+    - 新增 `split_heads_three_value_gate_r6b` search profile。
+    - 固定 4 格：`result_value_v6 / result_value_v5 x cash_translation_guard_v2 / cash_translation_sell_guard_v3`。
+- smoke 纠偏事实：
+  - 首次 `smoke01` 已完整跑通，但暴露出一个真实目标污染：
+    - 在 `pipeline_utils._result_value_budget_signals` 里，三值 gate 的回退逻辑会把合法的 0 gate 误当成缺失值，用 fallback 覆盖。
+    - 这会污染 `result_value_v6` 的预算目标与 gate 聚合，因此 `smoke01` 只能作为排错样本，不能作为正式依据。
+  - 已修复该 bug：只有列缺失时才 fallback，不再把 0 gate 当缺失。
+  - 修复后用 `training_samples_preview.csv` 直接复核：
+    - `deploy_gate_target + release_gate_target + defense_gate_target` 的 `gate_sum_mean=0.999998`
+    - `gate_sum_min=0.999996`
+    - `gate_sum_max=0.999999`
+    - 说明三值 gate label 本身是归一且干净的。
+  - 修复后 `cp_v3_three_value_gate_r6b__smoke02` 再跑完整闭环：
+    - `annual_return=0.0731`
+    - `sharpe=1.0949`
+    - `cash_timing_quality_1d=0.0100`
+    - `value_arbitration_forward_alignment_5d=0.2469`
+    - `alpha_opportunity_forward_alignment_5d=0.2134`
+    - `deploy_gate_forward_alignment_5d=0.2086`
+    - 但 `reduce_success_rate_5d=0.0000`、`exit_timeliness_rate_5d=0.0000`，仍只说明目标已干净，不说明机制已成熟。
+- 正式 study 事实：
+  - 正式命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_three_value_gate_r6b --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_three_value_gate_r6b`
+  - study 已完成 `4 screening + 2 confirmatory`，未中断任何训练，所有候选仍为 `shadow_only`。
+  - screening 排名事实：
+    - `trial_02 = result_value_v6 + cash_translation_sell_guard_v3`，`composite_score=2.6635`
+    - `trial_04 = result_value_v5 + cash_translation_sell_guard_v3`，`composite_score=1.5154`
+    - `trial_01 = result_value_v6 + cash_translation_guard_v2`，`composite_score=0.4477`
+    - `trial_03 = result_value_v5 + cash_translation_guard_v2`，`composite_score=-0.0973`
+    - 这说明在 r6b 结构下，`cash_translation_sell_guard_v3` 的影响显著大于 v5/v6 objective 的差异，且 v6 仍优于 v5。
+  - performance champion `cp_v3_three_value_gate_r6b__confirm_01`
+    - 配置：`result_value_v6 + cash_translation_sell_guard_v3`
+    - `annual_return=0.2780`
+    - `sharpe=1.0538`
+    - `max_drawdown=-0.1217`
+    - `open_win_rate_5d=0.7368`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.1111`
+    - `cash_timing_quality_1d=-0.1833`
+    - `hold_share=0.8071`
+    - `semantic_conflict_rate=0.0169`
+    - `order_translation_conflict_rate=0.0506`
+    - `deploy_gate_forward_alignment_5d=-0.0842`
+    - `release_gate_forward_alignment_5d=0.0238`
+    - `defense_gate_timing_quality_1d=-0.0147`
+  - stability champion `cp_v3_three_value_gate_r6b__confirm_02`
+    - 配置：`result_value_v6 + cash_translation_guard_v2`
+    - `annual_return=-0.1480`
+    - `sharpe=-0.5523`
+    - `max_drawdown=-0.0946`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.3750`
+    - `cash_timing_quality_1d=-0.0978`
+    - `order_translation_conflict_rate=0.1394`
+    - `deploy_gate_forward_alignment_5d=-0.0605`
+    - `release_gate_forward_alignment_5d=0.2826`
+    - `defense_gate_timing_quality_1d=-0.0875`
+- 动作后复盘：
+  - 事实：
+    - r6b 相比 r6，确实把纯负收益拉回了一个正收益候选：`r6 confirm_01 annual_return=-0.0913`，而 `r6b confirm_01 annual_return=0.2780`。
+    - 但 r6b 没有学成真正的三值竞争，最强 confirmatory 仍然同时出现：
+      - `cash_timing_quality_1d=-0.1833`
+      - `exit_timeliness_rate_5d=0.1111`
+      - `deploy_gate_forward_alignment_5d=-0.0842`
+      - `alpha_opportunity_forward_alignment_5d=-0.0838`
+    - r6b 最强 confirmatory 的 gate 平均值也呈现明显偏斜：
+      - `avg_deploy_gate_target=0.5468`
+      - `avg_release_gate_target=0.0146`
+      - `avg_defense_gate_target=0.0984`
+      - 说明模型主要把三值门控学成了高 deploy 倾向，release 与 defense 没有形成稳定竞争。
+  - 推断：
+    - r6b 证明“三值拆分”方向本身是对的，但把 `deploy / release / defense` 全部压在同一个个股级 gate simplex 里仍然不合理。
+    - `deploy / release` 主要是个股层的边际资金去留判断，而 `defense / cash` 更接近组合层、市场层的全局状态判断；把它们放在同一个 stock-level 竞争头里，模型容易学成“高 deploy 曝光 + 弱 defense”的折中。
+    - 因此 r6b 的本质失败不是“结构太复杂”，而是“分工还不够对”：`defense` 仍被错误地放在了和个股 deploy/release 同层竞争的位置上。
+  - 决策：
+    - 不 promotion `cp_v3_three_value_gate_r6b`。
+    - 不让 `alpha_result_value_budget_split_v6b`、`result_value_v6` 或 `cash_translation_sell_guard_v3` 替代当前 r2/r4/r5 的证据分层。
+    - 保留 r6b 作为关键结构证据：
+      - 它证明三值门控 label 与训练链路可以干净跑通。
+      - 它证明继续放大 r6 单标量仲裁不是最高 ROI。
+      - 它证明下一轮最高 ROI 不是更大 backbone，而是“层级化仲裁”。
+    - 下一轮优先方向应升级为：
+      - 个股层：`deploy_value / release_value`
+      - 组合层：`defense_value / cash regime`
+      - 预算层：只做容量、风险、换手约束，不再吞掉高价值生命周期动作
+    - 在这个层级化仲裁跑通前，不要把 r6b 当成可继续加 epoch、加 loss、加 backbone 就会自然变强的主线。
+## 2026-04-20 r7 hierarchical arbitration 正式收口
+- 触发：
+  - 继承 r6b 结论继续推进，不再停留在“同层三值 gate”，而是直接验证更符合北极星的层级化仲裁。
+  - 用户要求继续下一轮并一次性完整交付；执行约束仍是“不打断训练、前台跑完、10h 窗口统一”。
+- 动作前自检：
+  - 事实：
+    - r6b 已正式证明：`deploy/release/defense` 继续放在同一 stock-level simplex 中竞争，会自然塌成高 deploy、弱 defense、弱 exit。
+    - 当前主线证据分层仍未改变：r2 是收益主线，r4 是 cash timing 收敛证据，r5 是 sell/exit 结构证据，r6/r6b 是价值仲裁失败方式证据。
+    - 当前解释器和训练环境必须继续固定为 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/study 命令统一设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - 推断：
+    - 下一步最高 ROI 不是继续加大 r6b loss 或扩大 backbone，而是把 `defense/cash` 从 stock-level 仲裁中拿出来，改为组合层信号。
+    - 只要 hierarchy 没有同时写进训练目标、推理仲裁和执行翻译三层，模型仍会在 budget clipping 中回到旧的动作漂移。
+  - 假设：
+    - 若 stock-level 只竞争 `deploy/release`，portfolio-level 单独输出 `defense/cash regime`，则收益主线和结构主线有机会重新对齐。
+- 关键实现：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v7`。
+    - 新增 `result_value_hierarchical_defense_pressure`，把 defense 主要建模为组合层风险/现金压力，而不再让它和每只股票的 deploy/release 同层竞争。
+  - `daily_research/continuous_policy/model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_split_v7`。
+    - 新增 `hierarchical_three_value_gate_consistency_loss`，只在 stock-level 强化 `deploy vs release`，不再把 `defense` 当 held names 的直接同层对手。
+    - 推理层新增 `decision_deploy_gate / decision_release_gate / decision_defense_signal`，其中 `decision_defense_signal` 在 `result_value_v7` 下来自组合层。
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `hierarchical_budget_mode`。
+    - 层级模式下，stock-level 只用 deploy/release 重建 held/open 的动作强度；组合层 defense 信号只参与组合 risk-off / deploy score，不再作为单股 gate 竞争项。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `split_heads_hierarchical_arbitration_r7` profile。
+    - 固定四格：`v7 loss / v6b loss x cash_translation_guard_v2 / cash_translation_sell_guard_v3`，共同使用 `budget_objective=result_value_v7`。
+- 验证事实：
+  - `py_compile` 已通过：
+    - `pipeline_utils.py`
+    - `model_seq_v3.py`
+    - `portfolio_simulator.py`
+    - `run_self_optimizing_study.py`
+  - `git diff --check` 已通过。
+  - smoke：
+    - `cp_v3_hierarchical_arbitration_r7__smoke01` 已前台跑通，证明 r7 全链路可训练、可评估、可审计。
+  - 正式 study：
+    - 已重建完成 `cp_v3_hierarchical_arbitration_r7` 的 `4 screening + 2 confirmatory`。
+    - 产物：
+      - `daily_research/output/continuous_policy/studies/cp_v3_hierarchical_arbitration_r7/study_summary.json`
+      - `daily_research/output/continuous_policy/studies/cp_v3_hierarchical_arbitration_r7/trial_ranking.csv`
+    - screening 排名：
+      - `trial_01 = v7 + guard_v2`，`composite_score=8.1289`，但 `training_evidence_status=insufficient`
+      - `trial_02 = v7 + sell_guard_v3`，`composite_score=5.4568`
+      - `trial_04 = v6b + sell_guard_v3 + result_value_v7`，`composite_score=5.1920`
+      - `trial_03 = v6b + guard_v2 + result_value_v7`，`composite_score=4.1239`
+    - confirmatory：
+      - `confirm_01 = performance_champion = trial_01`
+      - `confirm_02 = stability_champion = trial_03`
+    - 正式 champion：
+      - `cp_v3_hierarchical_arbitration_r7__confirm_02`
+      - `annual_return=1.3666`
+      - `sharpe=3.8698`
+      - `max_drawdown=-0.0737`
+      - `cash_timing_quality_1d=0.0319`
+      - 但仍是 `shadow_only`
+      - failed checks：
+        - `open_win_rate_5d`
+        - `reduce_success_rate_5d`
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+    - `confirm_01` 事实：
+      - `annual_return=0.2191`
+      - `sharpe=0.8471`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.0000`
+      - `cash_timing_quality_1d=0.0251`
+      - `value_arbitration_forward_alignment_5d=0.1677`
+      - `deploy_gate_forward_alignment_5d=0.1828`
+      - `release_gate_forward_alignment_5d=-0.0859`
+    - `confirm_02` 事实：
+      - `annual_return=1.3666`
+      - `sharpe=3.8698`
+      - `reduce_success_rate_5d=0.3333`
+      - `exit_timeliness_rate_5d=0.3333`
+      - `cash_timing_quality_1d=0.0319`
+      - `value_arbitration_forward_alignment_5d=-0.1382`
+      - `alpha_opportunity_forward_alignment_5d=-0.1330`
+      - `deploy_gate_forward_alignment_5d=-0.1347`
+      - `release_gate_forward_alignment_5d=-0.0850`
+      - `defense_gate_timing_quality_1d=0.0758`
+- 动作后复盘：
+  - 事实：
+    - r7 证明“层级化方向”比 r6b 更接近正确，因为正式 confirmatory 已能把收益和 sharpe 拉回到接近 r2 主线的强度。
+    - 但 r7 champion 的价值仲裁对齐仍是负的，说明它更像“收益回来了”，而不是“deploy/release/defense 真的学对了”。
+    - `confirm_02` 的 `avg_deploy_gate_target=0.6156`、`avg_release_gate_target=0.0184`、`avg_defense_gate_target=0.0837`，说明当前最强分支仍带有明显 deploy 偏置。
+    - `confirm_01` 则相反，更像“结构比收益更好”，但 `exit_timeliness_rate_5d=0.0`，无法形成可用主线。
+  - 推断：
+    - r7 没有失败在“层级化是错的”，而是失败在“层级化还不够彻底”。
+    - 现在 `defense` 虽然从 stock-level simplex 里拿出来了，但 budget/action translation 还没有完全从个股生命周期意图上退后；收益分支和结构分支仍然在不同 confirm 上分裂。
+    - 真正的根因不是“缺更大模型”，而是“边际资本仲裁还没形成统一信用分配”。
+  - 决策：
+    - 不 promotion `cp_v3_hierarchical_arbitration_r7`。
+    - 不让 r7 覆盖 r2/r4/r5 的分层证据体系。
+    - 保留 r7 作为关键新证据：
+      - hierarchy 比同层三值 gate 更合理。
+      - 收益可以恢复。
+      - 但结构对齐与收益恢复尚未统一到同一 confirmatory。
+    - 下一轮不应继续加 epoch、加 loss 或换更大 backbone。
+    - 下一轮必须优先推进更彻底的 layered arbitration：stock-level `deploy/release`，portfolio-level `defense/cash regime`，budget layer 只做容量/风险/换手约束，并显式惩罚 clipped-intent drift。
+## 2026-04-21 r8 constraint arbitration 正式收口
+- 触发：
+  - 继承“当前最深层问题是缺少统一、层级正确、信用分配干净的边际资本仲裁中枢”的结论，继续往前推进而不是停留在分析。
+  - 用户要求这一轮直接一次性执行并完整交付，所以本轮按“实现 -> 验证 -> smoke -> formal study -> 写回”闭环执行。
+- 动作前自检：
+  - 事实：
+    - r7 已经证明 hierarchy 方向比 r6/r6b 更对，但收益恢复和结构对齐仍分裂在不同 confirmatory 分支上。
+    - 当前最可疑残留不是同层 `defense` 竞争，而是 budget/action translation 还在吞 stock-level 意图。
+    - 当前训练规则仍要遵守：不打断已有训练，正式训练/评估/study 统一使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，并显式设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - 推断：
+    - 下一步最高 ROI 不是更大 backbone，而是把 `defense/cash` 更彻底地退回组合约束层，同时减少 budget clipping 对 held-side 生命周期动作的吞噬。
+  - 假设：
+    - 如果 `defense` 只在 portfolio-level 生效、held-side 只竞争 `deploy/release`，则“结构更对”和“收益恢复”更有机会重新对齐。
+- 关键实现：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v8`
+    - 新增 `result_value_hierarchical_defense_pressure`、`result_value_portfolio_release_pressure`
+    - 新增 `result_value_constraint_only_mode`
+    - 在 v8 目标下，把 `defense` 主要约束到 `gross_exposure_target / candidate_budget / turnover_budget / max_position_weight_target`，不再直接注入 held-side `hold/reduce/exit` 语义
+  - `daily_research/continuous_policy/model_seq_v3.py`
+    - 新增 `loss_profile = alpha_result_value_budget_split_v8`
+    - 在 `budget_objective = result_value_v8` 下增加 portfolio-level `deploy/release/defense` 聚合信号与 gate diagnostics
+    - 推理阶段新增 `pure_portfolio_defense_mode`，held-side `sell_arbitration / keep_arbitration / reduce / exit` 不再直接吃 `defense`，但 entry/add 仍保留更强防守惩罚
+    - 新增 `decision_portfolio_defense_signal` 与 `budget_model_constraint_only_mode`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `budget_calibration = cash_constraint_guard_v4`
+    - 新增 `constraint_only_budget_mode`
+    - risk-off / shrink 阶段优先按 sell/release priority 缩减，不再做更粗暴的同权压缩
+    - held-side `reduce/hold` 不再被 `cash_defense_series` 直接推着走；entry/add 仍受组合层防守约束
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增正式 study profile：`split_heads_constraint_arbitration_r8`
+    - 固定四格：
+      - `alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v8 + cash_translation_guard_v2 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+- 验证事实：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/pipeline_utils.py`
+    - `daily_research/continuous_policy/model_seq_v3.py`
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过
+  - dry-run 通过：`split_heads_constraint_arbitration_r8` 四格矩阵被正确展开
+  - smoke 已前台跑通：
+    - tag：`cp_v3_constraint_arbitration_r8__smoke01`
+    - 作用：只作为链路闭环与方向预警，不作为 promotion 证据
+    - smoke 预警：
+      - `hold_share=0.5000`
+      - `reduce_success_rate_5d=0.0000`
+      - `cash_timing_quality_1d=-0.1353`
+      - `order_translation_conflict_rate=0.5781`
+    - 说明：约束层模式没有炸链路，但 budget translation 漂移在 smoke 小窗里仍然明显
+- 正式 study 事实：
+  - study 输出：
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/trial_ranking.csv`
+  - 已完整跑完 `4 screening + 2 confirmatory`，没有中断训练
+  - 所有 trial / confirm 仍为 `shadow_only`
+  - screening 排名：
+    - `trial_04 = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=1.6597`
+      - `sharpe=3.3216`
+      - `cash_timing_quality_1d=-0.1784`
+      - `reduce_success_rate_5d=0.0000`
+      - `order_translation_conflict_rate=0.2559`
+      - `training_evidence_status=insufficient`，原因是 `best_epoch=39` 仍贴边
+    - `trial_03 = alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+      - `annual_return=0.0517`
+      - `sharpe=0.3232`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.5556`
+      - `cash_timing_quality_1d=-0.0559`
+      - `order_translation_conflict_rate=0.1034`
+  - confirmatory：
+    - `confirm_01 = performance_champion = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=1.4187`
+      - `sharpe=3.0117`
+      - `max_drawdown=-0.1150`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.3333`
+      - `cash_timing_quality_1d=-0.1573`
+      - `semantic_conflict_rate=0.0036`
+      - `order_translation_conflict_rate=0.2224`
+      - `value_arbitration_forward_alignment_5d=-0.2378`
+      - `alpha_opportunity_forward_alignment_5d=-0.2632`
+      - `deploy_gate_forward_alignment_5d=-0.2516`
+      - `sell_rank_forward_alignment_5d=0.2731`
+      - `release_gate_forward_alignment_5d=0.2763`
+      - failed checks：
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+    - `confirm_02 = stability_champion = alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+      - `annual_return=0.0517`
+      - `sharpe=0.3232`
+      - `max_drawdown=-0.1674`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.5556`
+      - `cash_timing_quality_1d=-0.0559`
+      - `semantic_conflict_rate=0.0284`
+      - `order_translation_conflict_rate=0.1034`
+      - `value_arbitration_forward_alignment_5d=0.0612`
+      - `alpha_opportunity_forward_alignment_5d=0.0532`
+      - `deploy_gate_forward_alignment_5d=0.0487`
+      - `release_gate_forward_alignment_5d=0.0884`
+      - `defense_gate_timing_quality_1d=-0.0605`
+      - failed checks：
+        - `open_win_rate_5d`
+        - `reduce_success_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+        - `annual_return_vs_active`
+        - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - r8 最强 confirmatory 重新回到 `v7 loss + result_value_v8`，而不是 `v8 loss + result_value_v8`
+    - `confirm_01` 把收益和 sharpe 拉回强区间，但 deploy/value 对齐仍然显著为负，说明它更像“收益捷径回来了”，不是“边际资本仲裁学对了”
+    - `confirm_02` 恰好相反：deploy/value alignment 回正，但收益很弱、卖出对象选择仍差，`sell_selection_quality_5d=-0.0266`
+    - `confirm_01` 的 `budget_clipped_day_share=0.9855`，说明约束层仍然几乎天天深度介入，intent-preserving translation 还远没闭环
+  - 推断：
+    - “把 `defense/cash` 退回 portfolio constraint layer” 这个方向本身是对的，否则 r8 不会把最优组合重新收敛到 `result_value_v8 + cash_constraint_guard_v4`
+    - 但当前 `alpha_result_value_budget_split_v8` 的 loss 配比并没有把 `deploy/release/cash` 的竞争学稳，反而是旧的 `v7` 权重更能撑住收益
+    - 所以 r8 的失败已经不是 r6b 那种“层级设计明显错了”，而是“层级方向对了，但约束层仍不够 intent-preserving，loss 也没把 stock-level deploy branch 训练成真正可用的资本去向判断”
+  - 决策：
+    - 不 promotion `cp_v3_constraint_arbitration_r8`
+    - 不把 `alpha_result_value_budget_split_v8` 或 `result_value_v8` 直接设为默认主线
+    - r2 / r4 / r5 / r7 的分层证据体系保持不变：
+      - r2：收益主线锚点
+      - r4：cash timing 进展证据
+      - r5：sell/exit 生命周期结构证据
+      - r7：hierarchy 方向正确但未闭环的证据
+    - r8 作为新增结构证据保留：
+      - `constraint-only portfolio defense` 方向正确
+      - 但 `budget clipping + deploy alignment` 仍是当前主瓶颈
+    - 下一轮必须显式优化：
+      - budget-clipped intent drift
+      - held-side sell-selection preservation
+      - stock-level `deploy/release` 对齐
+      - portfolio-level `defense/cash regime`
+    - 下一轮必须使用新 tag，不复用 `cp_v3_constraint_arbitration_r8`
