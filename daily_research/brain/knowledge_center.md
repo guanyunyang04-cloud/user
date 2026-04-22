@@ -159,7 +159,9 @@
 - `governance_layer.md`
   - 只保留治理闭环与接管纪律
 - `episodic_memory.md`
-  - 只保留时间顺序过程与原始证据
+  - 只保留当前 episodic 结论、证据索引入口和新的动作后复盘
+  - 长历史原文下沉到 `daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`
+  - 完整证据定位使用 `daily_research/brain/references/episodic_memory_evidence_index_20260422.md`
 - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 进一步证明：
   - 对 capped 全A主线，最值得优先修的仍然是 held-path 的 `reduce / exit` 形成，而不是继续扩 `universe` 或直接切深网络
   - 只做一个很小的 held-path `exit rescue`，就能在同协议下同时把 `annual_return / sharpe / hold_share / reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d` 都往正确方向推一点

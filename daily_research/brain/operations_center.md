@@ -233,8 +233,12 @@
   - `operations_center.md`
 - 接管纪律与治理闭环：
   - `governance_layer.md`
-- 时间顺序过程和原始证据：
+- 时间顺序过程、证据索引与动作后复盘：
   - `episodic_memory.md`
+- 已归档历史原文：
+  - `daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`
+- 归档证据索引：
+  - `daily_research/brain/references/episodic_memory_evidence_index_20260422.md`
 
 ## 2026-04-15 更新
 - `seq_v3` 现在已经支持正式 `--sequence-layers`；后续 depth 对照统一走 protocol，不再走临时分叉
@@ -1220,3 +1224,15 @@
   - 先整合进对应 brain
   - 再保留 README / 教程里的简体中文索引或用户公开说明
   - 最后运行 `brain_integrity_check.py --json` 与 `doc_guard.py check`
+
+## 2026-04-22 episodic_memory 分层归档口径
+
+- `episodic_memory.md` 当前不再作为 1.6 万行长历史正文入口。
+- 新分层为：
+  - 当前结论：`daily_research/brain/episodic_memory.md`
+  - 证据索引：`daily_research/brain/references/episodic_memory_evidence_index_20260422.md`
+  - 历史原文：`daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`
+- 后续写回纪律：
+  - 新的动作后复盘先写入 `episodic_memory.md`
+  - 若本文件再次膨胀，再生成新的 index + raw archive，并保留旧归档
+  - 历史原文只作为证据，不自动覆盖 `state_center.md` 中的当前状态

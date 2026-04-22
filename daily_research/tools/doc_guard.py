@@ -225,6 +225,21 @@ REQUIRED_DOC_SNIPPETS = {
         "权威操作真源",
         "daily_research/brain/operations_center.md",
     ),
+    "daily_research/brain/episodic_memory.md": (
+        "## 当前结论",
+        "## 证据索引",
+        "## 历史原文",
+        "episodic_memory_history_raw_20260317_20260422.md",
+    ),
+    "daily_research/brain/references/episodic_memory_evidence_index_20260422.md": (
+        "# episodic_memory 证据索引",
+        "历史原文",
+        "## 标题索引",
+    ),
+    "daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md": (
+        "# 研究日志",
+        "## 2026-04-22 主分脑系统维护与兼容入口收口",
+    ),
     "daily_stock_analysis-main/README.md": (
         "AI 接管真源",
         "daily_stock_analysis-main/brain/",

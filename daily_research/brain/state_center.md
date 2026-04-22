@@ -1467,3 +1467,16 @@
 - 当前遗留：
   - `daily_research/output` 与 `daily_research/cache` 仍是大体量热产物区；没有明确保留策略前继续不裁剪。
   - `daily_stock_analysis-main/docs/` 下仍存在面向公开用户或历史迁移的长文档；本轮只收口稳定接管规则，不逐字搬迁历史/营销/展示内容。
+
+## 2026-04-22 episodic_memory 历史归档瘦身状态
+
+- 当前事实：
+  - `daily_research/brain/episodic_memory.md` 已从长历史正文瘦身为轻量入口。
+  - 归档前完整原文已原样保存到 `daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`。
+  - 标题与阶段证据索引已生成到 `daily_research/brain/references/episodic_memory_evidence_index_20260422.md`。
+- 当前读取口径：
+  - 日常接管仍不从 `episodic_memory.md` 起步。
+  - 需要过程证据时先读当前 `episodic_memory.md` 的“当前结论 / 证据索引 / 历史原文”入口。
+  - 只有需要完整复盘或核查旧指标时才打开历史原文。
+- 当前验证要求：
+  - 后续如再次归档 episodic，必须保留 raw archive、更新 evidence index，并运行 `doc_guard.py check`。

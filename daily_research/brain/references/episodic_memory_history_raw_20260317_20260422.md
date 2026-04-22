@@ -1,0 +1,16573 @@
+# 研究日志
+
+## 总览
+- 2026-03-14：初始化 `daily_research` baseline。
+- 2026-03-17：完成第一阶段研究框架扩展。
+- 当前项目已经形成三层分工：
+  - `baseline / advanced_ml`
+  - `execution`
+  - `deep_alpha`
+- 当前执行端冻结为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- `deep_alpha` 仍是正式研究主线之一，但当前最近待决策事项已经切到执行端升级 shortlist 的最终判决。
+
+## 阅读说明
+- 本文件只保留按时间顺序排列的实验记录、结果与结论。
+- 当前状态与使用入口见 `semantic_memory.md`。
+- 项目背景、当前瓶颈与未来方向见 `project_map.md`。
+- 当前默认决策、升级 shortlist、优先级与停止规则见 `working_memory.md`。
+- 当前运行基线与解释器口径见 `environment_model.md`。
+- 执行流程与日常操作细节见 `action_system.md`。
+
+## 阶段索引
+- `2026-03-17 ~ 2026-03-18`
+  - 基线收敛：`score + 5d`、市场状态过滤、`up_low_breakout_v2`
+- `2026-03-18 ~ 2026-03-20`
+  - `advanced_ml` 主线形成，并接入执行端
+- `2026-03-19 ~ 2026-03-22`
+  - `deep_alpha` 从烟测走向正式研究框架
+- `2026-03-22 ~ 2026-03-24`
+  - 项目治理：入口去重、Git 纳管、归档规则、文档分工、执行口径固化
+- `2026-03-25`
+  - 坏市场专项目标澄清与首批防守候选收口
+- `2026-03-26 ~ 2026-03-28`
+  - `advanced_ml (ma50 baseline, lgbm)` 状态专属候选、正式参数矩阵与长窗口 pair revalidation 收敛
+
+## 阶段实验记录模板
+- 日期：
+- 实验标签：
+- 数据来源：
+- 股票池范围：
+- 基准：
+- 样本区间：
+- 持仓数量：
+- 权重方式：
+- 调仓频率：
+- 分数阈值：
+- 核心指标：
+- IC / RankIC 重点：
+- 分层收益重点：
+- 结论：
+- 下一步动作：
+
+## 2026-03-17 第一轮全A结果与实现方式选择
+- 基线调优版：`all_a_stage1_tuned_concentrated_20240101`
+  - 配置：`equal + 1d`
+  - 结果：累计收益 `29.66%`，超额收益 `-5.32%`，超额 Sharpe `-0.154`
+- 分数加权：`all_a_stage1_score_20240101`
+  - 配置：`score + 1d`
+  - 结果：累计收益 `33.24%`，超额收益 `-2.70%`，超额 Sharpe `-0.073`
+- 低换手版本：`all_a_stage1_equal_5d_20240101`
+  - 配置：`equal + 5d`
+  - 结果：累计收益 `58.88%`，超额收益 `16.02%`，超额 Sharpe `0.457`
+- 当时最佳配置：`all_a_stage1_score_5d_20240101`
+  - 配置：`score + 5d`
+  - 结果：累计收益 `89.86%`，超额收益 `38.64%`，超额 Sharpe `0.959`
+- 结论：
+  - `score` 优于 `equal`
+  - `5d` 明显优于 `1d`
+  - 研究主线切换为 `5d + score`
+
+## 2026-03-17 因子删减与权重收敛
+- 输出目录：`daily_research/output/ablation_20260317`
+- 关键对比：
+  - `score_5d_structure_back`：超额收益 `32.97%`，超额 Sharpe `0.842`
+  - `score_5d_capped`：超额收益 `31.44%`，超额 Sharpe `0.827`
+  - `score_5d_core4`：明显变弱
+  - `score_5d_no_structure`：进一步变弱
+- 最终保留的核心因子：
+  - `volume_contraction`
+  - `price_volume_divergence`
+  - `atr_14_pct`
+  - `volatility_20`
+  - `volatility_contraction`
+  - `close_strength`
+- 结论：
+  - 趋势组整体不适合做全局主线
+  - 结构组不能完全删除
+
+## 2026-03-17 参数扫描：holding_count 与 max_weight
+- 输出目录：`daily_research/output/param_scan_20260317`
+- 最优高收益配置：
+  - `holding_count=5`
+  - `max_weight=0.25`
+  - 累计收益 `115.03%`
+  - 超额收益 `57.02%`
+  - 超额 Sharpe `1.222`
+  - 最大回撤 `-16.72%`
+- 次优但更稳健：
+  - `holding_count=12`
+  - `max_weight=0.25`
+  - 累计收益 `100.04%`
+  - 超额收益 `46.07%`
+  - 超额 Sharpe `1.193`
+  - 最大回撤 `-11.98%`
+- 结论：
+  - 高集中优于过度分散
+  - `max_weight=0.25` 优于 `0.15/0.20`
+
+## 2026-03-17 分窗口稳健性验证
+- 输出目录：`daily_research/output/window_robustness_20260317`
+- 配置：`holding_count=5`，`max_weight=0.25`，`score + 5d`
+- 年度结果：
+  - `2022`：超额收益 `-31.81%`
+  - `2023`：超额收益 `-17.63%`
+  - `2024`：超额收益 `65.02%`
+  - `2025`：超额收益 `-15.52%`
+  - `2026_ytd`：超额收益 `13.77%`
+- 结论：
+  - 策略存在明显市场环境依赖
+  - 后续主线转向市场状态过滤
+
+## 2026-03-17 市场状态过滤初版
+- 过滤逻辑：
+  - `benchmark_close > MA60`
+  - `20日年化波动率 <= regime_max_annual_vol`
+- `2022-2026YTD` 阈值测试：
+  - `0.24`：超额收益 `37.06%`，超额 Sharpe `0.413`
+  - `0.28`：超额收益 `34.77%`，超额 Sharpe `0.389`
+  - `0.32`：超额收益 `45.64%`，超额 Sharpe `0.506`
+- 最佳阈值：`0.32`
+- 结论：
+  - 市场状态过滤有效
+  - 但 `2025` 仍然失效
+
+## 2026-03-17 行业集中度约束
+- 核心结论：
+  - 行业约束可作为风险开关
+  - 但对当前主线收益提升帮助不大
+  - 不进入默认主线
+
+## 2026-03-18 风格偏置约束
+- 新增能力：
+  - `load_style_map_from_tq()`
+  - `--style-cap`
+  - `--max-style-weight`
+- `2022-2026YTD` 结果：
+  - 无风格约束：超额收益 `45.64%`，超额 Sharpe `0.506`
+  - `max_style_weight=0.60`：超额收益 `49.36%`，超额 Sharpe `0.545`
+  - `max_style_weight=0.50`：超额收益 `49.36%`，超额 Sharpe `0.545`
+- 结论：
+  - 风格约束有小幅增益
+  - 但不是根本解
+
+## 2026-03-18 市场状态四象限分析
+
+### 不加过滤的四象限归因
+- 输出目录：`daily_research/output/quadrant_unfiltered_style_20260318`
+- 关键发现：
+  - `trend_down_low_vol` 是主要失效环境
+  - 该象限样本最多，且策略几乎全程持仓
+  - `trend_up_high_vol` 是最强赚钱环境
+
+### 仅允许 `trend_up_low_vol` 的过滤结果
+- 输出目录：`daily_research/output/quadrant_filtered_style_20260318`
+- 整体结果：
+  - 累计收益 `+32.36%`
+  - 超额收益 `+40.88%`
+  - 超额 Sharpe `0.425`
+- 结论：
+  - 切掉了最差环境
+  - 但也错杀了 `trend_up_high_vol`
+
+## 2026-03-18 市场状态白名单升级
+- 白名单升级为：
+  - `trend_up_low_vol`
+  - `trend_up_high_vol`
+- 对比结果：
+  - 旧过滤：累计收益 `+32.36%`，超额收益 `+40.88%`
+  - 新过滤：累计收益 `+81.63%`，超额收益 `+93.14%`
+- 结论：
+  - 之前的问题不是过滤方向错
+  - 而是过滤过粗
+
+## 2026-03-18 2025 细分诊断：`trend_up_low_vol`
+- 输出目录：`daily_research/output/quadrant_factor_diag_up_low_20260318`
+- 发现：
+  - 综合分数在 `2025 / trend_up_low_vol` 中并未失效
+  - 但超额转换很弱
+  - 更强的单因子包括：
+    - `breakout_20`
+    - `drawdown_20`
+    - `range_position_20`
+    - `volatility_20`
+    - `up_day_ratio_10`
+- 结论：
+  - 问题不是没有 alpha
+  - 而是上涨低波环境下组合过于防守
+
+## 2026-03-18 状态内动态权重实验：`up_low_breakout_v1`
+- 输出目录：
+  - 基线：`daily_research/output/state_alpha_baseline_20220101`
+  - 动态权重：`daily_research/output/state_alpha_up_low_breakout_20220101`
+- 结果：
+  - 基线：累计收益 `+11.32%`，超额收益 `+18.39%`，超额 Sharpe `0.232`
+  - `up_low_breakout_v1`：累计收益 `+154.97%`，超额收益 `+171.16%`，超额 Sharpe `1.392`
+- 关键改善：
+  - `2025` 超额从 `-21.86%` 提升到 `+30.64%`
+  - `trend_up_low_vol` 超额从 `-44.63%` 提升到 `+20.45%`
+- 结论：
+  - 状态内动态权重有效
+
+## 2026-03-18 状态内动态权重实验二：`up_dual_v1`
+- 输出目录：`daily_research/output/state_alpha_up_dual_20220101`
+- 结果：
+  - `up_low_breakout_v1`：累计收益 `+154.97%`，超额收益 `+171.16%`
+  - `up_dual_v1`：累计收益 `+179.12%`，超额收益 `+197.58%`
+- 关键改善：
+  - `trend_up_high_vol` 超额从 `+9.59%` 提升到 `+23.50%`
+- 结论：
+  - `up_dual_v1` 优于 `up_low_breakout_v1`
+  - 当前是更强的候选主线
+
+## 2026-03-18 滚动样本外验证：状态 Profile 选择
+- 验证脚本：`daily_research/baseline/walkforward_profile_validation.py`
+- 输出目录：`daily_research/output/walkforward_profiles_2y_20260318`
+- 方法：
+  - 每年只用前 2 年训练窗口
+  - 按 `excess_sharpe` 选择 profile
+  - 在下一年测试
+- 候选 profile：
+  - `none`
+  - `up_low_breakout_v1`
+  - `up_dual_v1`
+- 整体结果：
+  - 累计收益 `+87.35%`
+  - 超额收益 `+53.87%`
+  - 超额 Sharpe `0.843`
+- 每年被选中的 profile：
+  - 2023：`up_low_breakout_v1`
+  - 2024：`none`
+  - 2025：`none`
+  - 2026：`none`
+- 结论：
+  - `up_dual_v1` 在全样本中很强
+  - 但用“过去两年总体 Sharpe”做事前选择时，不能稳定被选出来
+
+## 2026-03-18 冻结时点验证：2021-2023 设计，2024-2026 测试
+- 验证脚本：`daily_research/baseline/frozen_profile_validation.py`
+- 输出目录：`daily_research/output/frozen_profiles_20210101_20231231_to_20260318`
+- 方法：
+  - 训练期固定为 `2021-2023`
+  - 只在训练期比较候选 profile
+  - 测试期固定为 `2024-2026`
+  - 中途不滚动改规则
+- 候选 profile：
+  - `none`
+  - `up_low_breakout_v1`
+  - `up_dual_v1`
+- 结论：
+  - `up_dual_v1` 的全样本优势不够稳健
+  - `none` 是当前更稳的样本外基线
+  - `up_low_breakout_v1` 更偏收益进攻型备选
+
+## 2026-03-18 基于象限内 RankIC 的 profile 激活验证
+- 验证脚本：`daily_research/baseline/quadrant_ic_activation_validation.py`
+- 输出目录：
+  - `daily_research/output/quadrant_ic_activation_2y_20260318`（`10d RankIC`）
+  - `daily_research/output/quadrant_ic_activation_2y_h20_20260318`（`20d RankIC`）
+- 方法：
+  - 每年用前 2 年训练窗口
+  - 不再按总体 Sharpe 选 profile
+  - 改为按每个象限里的 `RankIC` 选择下一年启用哪套 profile
+- 结论：
+  - 无论 `10d` 还是 `20d`，结果仍然全部偏向 `none`
+  - 说明当前动态 profile 的事前横截面优势还不够稳定
+
+## 2026-03-18 冻结时点下的 `trend_up_low_vol` 因子重设：`up_low_breakout_v2`
+- 目标：
+  - 在不破坏 `none` 样本外稳健性的前提下，重做 `trend_up_low_vol` 的状态内权重
+- 思路：
+  - 保留更多 `none` 的低波/量价骨架
+  - 只适度加入突破与结构因子
+  - 避免 `v1` 那种过强的进攻化改动
+- 新 profile：`up_low_breakout_v2`
+- 输出目录：`daily_research/output/frozen_up_low_redesign_20260318`
+- 候选：
+  - `none`
+  - `up_low_breakout_v1`
+  - `up_low_breakout_v2`
+
+### 训练期（2021-2023）
+- `none`
+  - 超额收益 `21.84%`
+  - 超额 Sharpe `0.481`
+- `up_low_breakout_v2`
+  - 超额收益 `20.24%`
+  - 超额 Sharpe `0.448`
+- `up_low_breakout_v1`
+  - 超额收益 `16.99%`
+  - 超额 Sharpe `0.367`
+
+### 测试期（2024-2026）
+- `none`
+  - 累计收益 `114.35%`
+  - 超额收益 `56.38%`
+  - 超额 Sharpe `1.218`
+- `up_low_breakout_v1`
+  - 累计收益 `117.37%`
+  - 超额收益 `58.59%`
+  - 超额 Sharpe `1.063`
+- `up_low_breakout_v2`
+  - 累计收益 `124.89%`
+  - 超额收益 `64.07%`
+  - 超额 Sharpe `1.291`
+  - 超额最大回撤 `-16.56%`
+
+### 结论
+- `up_low_breakout_v2` 明显优于 `up_low_breakout_v1`
+- 与 `none` 相比，`v2` 在训练期仍略弱，但差距已经明显缩小
+- 更重要的是，`v2` 在测试期同时实现了：
+  - 更高的超额收益
+  - 更高的超额 Sharpe
+  - 更低的超额回撤
+- 这说明 `trend_up_low_vol` 的重设方向是有效的，而且比之前更接近“冻结时点可接受”的候选版本
+
+## 2026-03-18 `none` 与 `up_low_breakout_v2` 的双模型激活验证
+- 验证脚本：`daily_research/baseline/quadrant_ic_activation_validation.py`
+- 输出目录：
+  - `daily_research/output/quadrant_ic_activation_none_vs_v2_h10_20260318`
+  - `daily_research/output/quadrant_ic_activation_none_vs_v2_h20_20260318`
+- 方法：
+  - 只比较两套模型：
+    - `none`
+    - `up_low_breakout_v2`
+  - 仍然使用前 2 年训练窗口
+  - 仍然按象限内 `RankIC` 决定下一年启用哪套
+
+### 10d RankIC 结果
+- 整体结果：
+  - 累计收益 `+104.26%`
+  - 超额收益 `+66.64%`
+  - 超额 Sharpe `0.997`
+- 激活情况：
+  - 所有年份、所有象限仍然都选中 `none`
+- 结论：
+  - `10d RankIC` 下，`v2` 虽然比旧动态版本更接近 `none`，但仍不足以稳定胜出
+
+### 20d RankIC 结果
+- 整体结果：
+  - 累计收益 `+115.93%`
+  - 超额收益 `+76.06%`
+  - 超额 Sharpe `1.107`
+- 激活情况：
+  - `2023`：全部 `none`
+  - `2024`：全部 `none`
+  - `2025`：全部 `none`
+  - `2026`：
+    - `trend_up_low_vol` 选中 `up_low_breakout_v2`
+    - `trend_up_high_vol` 仍为 `none`
+- 结论：
+  - 这是目前第一次出现增强版在“事前激活”里胜过 `none`
+  - 说明 `up_low_breakout_v2` 比之前的动态版本更接近可被稳定激活的状态
+
+### 当前判断
+- `none` 仍是主基线。
+- `up_low_breakout_v2` 是当前唯一一个在冻结验证和激活验证中都出现正面信号的增强版本。
+- 下一步最值得做的是：
+  1. 固定高波部分继续使用 `none`
+  2. 只围绕 `trend_up_low_vol` 的 `v2` 做进一步激活优化
+
+## 2026-03-18 `up_dual_v2` 冻结验证
+- 目标：
+  - 用 `up_low_breakout_v2` 替换 `up_dual_v1` 的低波部分，测试双状态版本能否一起受益
+- 新 profile：`up_dual_v2`
+  - `trend_up_low_vol`：`up_low_breakout_v2`
+  - `trend_up_high_vol`：沿用高波动量增强
+- 输出目录：`daily_research/output/frozen_up_dual_v2_20260318`
+- 对比对象：
+  - `none`
+  - `up_low_breakout_v2`
+  - `up_dual_v2`
+
+### 训练期（2021-2023）
+- `none`
+  - 超额收益 `21.84%`
+  - 超额 Sharpe `0.481`
+- `up_low_breakout_v2`
+  - 超额收益 `20.24%`
+  - 超额 Sharpe `0.448`
+- `up_dual_v2`
+  - 超额收益 `20.24%`
+  - 超额 Sharpe `0.448`
+
+### 测试期（2024-2026）
+- `none`
+  - 累计收益 `114.35%`
+  - 超额收益 `56.08%`
+  - 超额 Sharpe `1.212`
+- `up_low_breakout_v2`
+  - 累计收益 `124.89%`
+  - 超额收益 `63.75%`
+  - 超额 Sharpe `1.285`
+  - 超额最大回撤 `-16.56%`
+- `up_dual_v2`
+  - 累计收益 `84.04%`
+  - 超额收益 `34.01%`
+  - 超额 Sharpe `0.655`
+  - 超额最大回撤 `-22.23%`
+
+### 结论
+- `up_dual_v2` 依然明显弱于 `up_low_breakout_v2`。
+- 这说明当前的高波上涨增强层仍然不稳健，是双状态版本的主要拖累。
+- 到目前为止，更合理的研究结论是：
+  - `none`：稳健基线
+  - `up_low_breakout_v2`：当前最有希望的增强版本
+  - `up_dual_v1 / up_dual_v2`：暂不进入主线，先降级为实验分支
+
+## 2026-03-18 `none` 与 `up_low_breakout_v2` 的季度激活验证
+- 目标：
+  - 不再继续扩新 profile，而是把研究重心转到更可执行的事前激活机制上。
+  - 固定 `trend_up_high_vol` 继续使用 `none`，只在 `trend_up_low_vol` 内部比较：
+    - `none`
+    - `up_low_breakout_v2`
+- 代码更新：
+  - `daily_research/baseline/quadrant_ic_activation_validation.py`
+  - 新增：
+    - `--activation-frequency`
+    - `--quadrant-candidates`
+- 关键命令：
+  - 半年度激活：
+    - `python daily_research/baseline/quadrant_ic_activation_validation.py --start-date 20210101 --benchmark 000300.SH --train-years 2 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --quadrant-candidates "trend_up_low_vol=none,up_low_breakout_v2;trend_up_high_vol=none" --ic-horizon 20 --activation-frequency halfyear --experiment-tag quadrant_ic_activation_none_v2_halfyear_h20_20260318`
+  - 季度激活：
+    - `python daily_research/baseline/quadrant_ic_activation_validation.py --start-date 20210101 --benchmark 000300.SH --train-years 2 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --quadrant-candidates "trend_up_low_vol=none,up_low_breakout_v2;trend_up_high_vol=none" --ic-horizon 20 --activation-frequency quarter --experiment-tag quadrant_ic_activation_none_v2_quarter_h20_20260318`
+  - 同跨度固定对照：
+    - `python daily_research/baseline/frozen_profile_validation.py --start-date 20210101 --train-end 20220331 --test-start 20220401 --benchmark 000300.SH --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --experiment-tag frozen_none_v2_from_20220401_20260318`
+- 输出目录：
+  - `daily_research/output/quadrant_ic_activation_none_v2_halfyear_h20_20260318`
+  - `daily_research/output/quadrant_ic_activation_none_v2_quarter_h20_20260318`
+  - `daily_research/output/frozen_none_v2_from_20220401_20260318`
+
+### 同类方案对比
+- 年度 `20d RankIC` 激活：
+  - 累计收益 `115.93%`
+  - 超额收益 `76.06%`
+  - 超额 Sharpe `1.107`
+  - 超额最大回撤 `-16.98%`
+- 半年度 `20d RankIC` 激活：
+  - 累计收益 `94.07%`
+  - 超额收益 `85.96%`
+  - 超额 Sharpe `1.020`
+  - 超额最大回撤 `-21.82%`
+- 季度 `20d RankIC` 激活：
+  - 累计收益 `119.59%`
+  - 超额收益 `116.29%`
+  - 超额 Sharpe `1.194`
+  - 超额最大回撤 `-19.86%`
+
+### 同跨度固定对照（2022-04-01 至今）
+- `none`
+  - 累计收益 `95.35%`
+  - 超额收益 `79.32%`
+  - 超额 Sharpe `0.876`
+  - 超额最大回撤 `-20.96%`
+- `up_low_breakout_v2`
+  - 累计收益 `103.23%`
+  - 超额收益 `86.55%`
+  - 超额 Sharpe `0.918`
+  - 超额最大回撤 `-27.28%`
+
+### 季度激活的实际选择
+- `trend_up_high_vol`
+  - 所有季度都固定为 `none`
+- `trend_up_low_vol`
+  - `2022Q3`：`up_low_breakout_v2`
+  - `2025Q4`：`up_low_breakout_v2`
+  - `2026Q1`：`up_low_breakout_v2`
+  - 其余季度：`none`
+
+### 结论
+- 目前最有前景的事前激活方案，不是继续扩新 profile，而是：
+  - `trend_up_high_vol` 固定使用 `none`
+  - `trend_up_low_vol` 在 `none` 与 `up_low_breakout_v2` 之间做 `20d RankIC` 的季度切换
+- 这套季度激活方案已经优于：
+  - 年度激活
+  - 半年度激活
+  - 同跨度固定 `none`
+  - 同跨度固定 `up_low_breakout_v2`
+- 这说明我们已经从“增强版本是否有效”推进到了“增强版本何时应该被打开”这个更有研究价值的阶段。
+- 下一步最值得做的是：
+  1. 检查季度激活是否能进一步简化成更可解释的规则
+  2. 对训练窗口长度做稳健性验证，例如 `1.5 / 2 / 3` 年
+
+## 2026-03-18 季度激活的训练窗口长度稳健性验证
+- 目标：
+  - 检查当前最优的季度激活方案，是否对训练窗口长度敏感。
+  - 继续固定：
+    - `trend_up_high_vol`：`none`
+    - `trend_up_low_vol`：在 `none / up_low_breakout_v2` 间做 `20d RankIC` 激活
+- 代码更新：
+  - `daily_research/baseline/quadrant_ic_activation_validation.py`
+  - 新增 `--train-months`，允许直接指定训练窗口月份数
+- 关键命令：
+  - `18` 个月：
+    - `python daily_research/baseline/quadrant_ic_activation_validation.py --start-date 20210101 --benchmark 000300.SH --train-years 2 --train-months 18 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --quadrant-candidates "trend_up_low_vol=none,up_low_breakout_v2;trend_up_high_vol=none" --ic-horizon 20 --activation-frequency quarter --experiment-tag quadrant_ic_activation_none_v2_quarter_h20_m18_20260318`
+  - `24` 个月：
+    - `python daily_research/baseline/quadrant_ic_activation_validation.py --start-date 20210101 --benchmark 000300.SH --train-years 2 --train-months 24 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --quadrant-candidates "trend_up_low_vol=none,up_low_breakout_v2;trend_up_high_vol=none" --ic-horizon 20 --activation-frequency quarter --experiment-tag quadrant_ic_activation_none_v2_quarter_h20_m24_20260318`
+  - `36` 个月：
+    - `python daily_research/baseline/quadrant_ic_activation_validation.py --start-date 20210101 --benchmark 000300.SH --train-years 2 --train-months 36 --rebalance-freq 5d --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --style-cap --max-style-weight 0.50 --profiles none,up_low_breakout_v2 --quadrant-candidates "trend_up_low_vol=none,up_low_breakout_v2;trend_up_high_vol=none" --ic-horizon 20 --activation-frequency quarter --experiment-tag quadrant_ic_activation_none_v2_quarter_h20_m36_20260318`
+- 输出目录：
+  - `daily_research/output/quadrant_ic_activation_none_v2_quarter_h20_m18_20260318`
+  - `daily_research/output/quadrant_ic_activation_none_v2_quarter_h20_m24_20260318`
+  - `daily_research/output/quadrant_ic_activation_none_v2_quarter_h20_m36_20260318`
+
+### 原始结果
+- `18` 个月：
+  - 累计收益 `103.52%`
+  - 超额收益 `110.28%`
+  - 超额 Sharpe `1.248`
+  - 超额最大回撤 `-19.86%`
+- `24` 个月：
+  - 累计收益 `122.45%`
+  - 超额收益 `103.71%`
+  - 超额 Sharpe `1.436`
+  - 超额最大回撤 `-14.89%`
+- `36` 个月：
+  - 累计收益 `101.69%`
+  - 超额收益 `59.53%`
+  - 超额 Sharpe `1.295`
+  - 超额最大回撤 `-15.86%`
+
+### 共同测试区间对比（2024-01-02 至今）
+- `18` 个月：
+  - 累计收益 `134.81%`
+  - 超额收益 `85.73%`
+  - 超额 Sharpe `1.768`
+  - 超额最大回撤 `-14.89%`
+- `24` 个月：
+  - 累计收益 `134.81%`
+  - 超额收益 `85.73%`
+  - 超额 Sharpe `1.768`
+  - 超额最大回撤 `-14.89%`
+- `36` 个月：
+  - 累计收益 `101.69%`
+  - 超额收益 `59.53%`
+  - 超额 Sharpe `1.291`
+  - 超额最大回撤 `-15.86%`
+
+### 与固定版本的同跨度对照（2024-2026）
+- 固定 `none`
+  - 累计收益 `114.35%`
+  - 超额收益 `56.38%`
+  - 超额 Sharpe `1.218`
+  - 超额最大回撤 `-18.09%`
+- 固定 `up_low_breakout_v2`
+  - 累计收益 `124.89%`
+  - 超额收益 `64.07%`
+  - 超额 Sharpe `1.291`
+  - 超额最大回撤 `-16.56%`
+- 季度激活（`24` 个月训练窗）
+  - 累计收益 `134.81%`
+  - 超额收益 `85.73%`
+  - 超额 Sharpe `1.768`
+  - 超额最大回撤 `-14.89%`
+
+### 结论
+- 对当前这套季度激活方案来说：
+  - `18` 个月与 `24` 个月在共同测试区间表现一致
+  - `36` 个月明显变钝，说明训练窗过长会稀释状态切换的敏感性
+- 当前更合理的默认选择是：
+  - `20d RankIC`
+  - 季度刷新
+  - `trend_up_high_vol` 固定 `none`
+  - `trend_up_low_vol` 在 `none / up_low_breakout_v2` 之间切换
+  - 训练窗口优先取 `24` 个月
+- 到这里为止，研究重点已经从“继续发明新 profile”转向“把季度激活机制做得更可解释、更可落地”。
+
+## 2026-03-18 季度激活规则解释化
+- 目标：
+  - 把当前最优的季度激活方案，从“RankIC 黑盒切换”进一步收敛成更直观、可解释的规则。
+- 新增脚本：
+  - `daily_research/baseline/analyze_activation_rule_candidates.py`
+  - `daily_research/baseline/rule_based_activation_validation.py`
+- 分析设定：
+  - 焦点象限：`trend_up_low_vol`
+  - 高波上涨象限继续固定 `none`
+  - 训练窗口：`24` 个月
+  - 刷新频率：季度
+  - 评估口径：`20d RankIC`
+- 输出目录：
+  - `daily_research/output/activation_rule_candidates_v2_q24_20260318`
+  - `daily_research/output/rule_activation_none_v2_q24_20260318`
+
+### 解释分析结果
+- 在 `24` 个月训练窗下，`up_low_breakout_v2` 被激活的季度只有：
+  - `2025Q4`
+  - `2026Q1`
+- 这两个季度共同特征很清楚：
+  - `breakout_20` 的训练期 `RankIC` 转正
+  - `drawdown_20` 的训练期 `RankIC` 转正
+  - `range_position_20` 的训练期 `RankIC` 虽仍为负，但已经回升到 `-0.06` 以上
+
+### 提炼出的可解释规则候选
+- 若在 `trend_up_low_vol` 的过去 `24` 个月训练窗中，同时满足：
+  - `breakout_20 RankIC >= 0`
+  - `drawdown_20 RankIC >= 0`
+  - `range_position_20 RankIC >= -0.06`
+- 则下一季度启用 `up_low_breakout_v2`
+- 否则继续使用 `none`
+
+### 规则版连续回测结果
+- 说明：
+  - 这一轮规则验证使用的是“连续回测”口径
+  - 因而与前面的“按窗口拼接”验证不是完全同一统计口径
+- 结果：
+  - 累计收益 `135.70%`
+  - 超额收益 `96.72%`
+  - 超额 Sharpe `1.340`
+  - 超额最大回撤 `-12.34%`
+- 激活季度与前面的季度 RankIC 版保持一致：
+  - `2025Q4`
+  - `2026Q1`
+
+### 结论
+- 现在我们已经有了一个“不是纯黑盒”的激活候选规则。
+- 它的价值不只是结果好，而是：
+  - 和 `RankIC` 版激活的关键季度一致
+  - 规则含义能被清楚解释
+  - 后续可以继续做成更稳健的研究对象
+- 下一步最值得做的是：
+  1. 用连续口径重做一次 `RankIC` 激活对照，统一比较基准
+  2. 在规则版上做阈值稳健性验证，例如 `range_position_20` 的阈值从 `-0.07 / -0.06 / -0.05` 比较
+
+## 2026-03-18 交付导向升级：先进版主程序
+- 背景：
+  - 为了尽快交付一套更强、更完整、可直接运行的程序，不再只沿着手工规则与 profile 验证推进。
+  - 在现有数据层、因子层、组合层、回测层基础上，直接叠加机器学习横截面排序。
+- 新增文件：
+  - `daily_research/baseline/ml_alpha.py`
+  - `daily_research/baseline/run_advanced_daily_research.py`
+- 设计思路：
+  - 延续当前有效框架：
+    - 市场状态过滤
+    - `none`
+    - `up_low_breakout_v2`
+  - 在此基础上新增：
+    - `sklearn` 梯度提升树滚动训练
+    - 预测未来 `20d` 超额收益
+    - 将机器学习分数与 `none / v2` 基线分数做集成
+- 默认程序特征：
+  - 全A
+  - 基准 `000300.SH`
+  - 高集中组合
+  - `5d` 调仓
+  - 风格约束
+  - 滚动重训
+  - 完整输出 `equity_curve / actions / metrics / factor_ic / latest_scores / training_log`
+- 烟测命令：
+  - `python daily_research/baseline/run_advanced_daily_research.py --data-source tq --stocks 600000.SH,600036.SH,601318.SH,000001.SZ,000333.SZ,002415.SZ --start-date 20240101 --benchmark 000300.SH --holding-count 3 --rebalance-freq 5d --ml-train-window-days 120 --ml-min-train-dates 40 --ml-retrain-every-days 10 --ml-max-samples-per-day 100 --ml-max-train-rows 10000 --experiment-tag advanced_ml_smoke_20260318`
+- 烟测输出目录：
+  - `daily_research/output/advanced_ml_smoke_20260318`
+
+### 烟测结果
+- 累计收益 `30.92%`
+- 年化收益 `13.64%`
+- Sharpe `1.434`
+- 最大回撤 `-6.72%`
+- 超额收益 `-4.83%`
+
+### 结论
+- 新主程序已经跑通，不是概念代码。
+- 这条线的意义不是替代所有研究，而是把已有研究成果快速压缩成一套更强的可执行程序。
+- 下一步应优先在这条先进版主程序上做真实全A实验，而不是继续停留在纯规则层面。
+
+## 2026-03-18 尾盘手工执行模式
+- 目标：
+  - 让程序不只输出研究结果，而是在每日尾盘前直接生成一份可执行的操作建议文本。
+- 新增文件：
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+  - `daily_research/execution/current_positions.example.csv`
+- 功能：
+  - 读取当前持仓与现金
+  - 运行先进版主线分数
+  - 自动生成：
+    - 卖出 / 减仓
+    - 买入 / 加仓
+    - 当前持仓概览
+    - 候选观察名单
+  - 每次覆盖刷新：
+    - `daily_research/execution/output/latest_trade_plan.txt`
+- 烟测输出目录：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+### 烟测结论
+- 脚本已能成功读取持仓、计算当日目标组合，并输出中文 TXT 建议。
+- 在禁止开仓的市场状态下：
+  - 会自动给出卖出建议
+  - 不会给出新的买入动作
+  - 但仍会保留观察名单，方便次日继续跟踪
+
+## 2026-03-18 训练与执行拆分
+- 调整目标：
+  - 将“模型训练”和“尾盘执行”从同一个脚本中拆开
+  - 避免尾盘运行时再做整套滚动训练
+- 新增文件：
+  - `daily_research/baseline/train_trade_model.py`
+  - `daily_research/execution/update_model.py`
+- 执行端改动：
+  - `daily_research/execution/run_trade_plan.py` 默认读取：
+    - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/baseline/generate_daily_trade_plan.py` 默认不再现场训练
+  - 若模型产物不存在，会明确提示先运行：
+    - `daily_research/execution/update_model.py`
+- 当前建议流程：
+  1. 先单独更新模型产物
+  2. 再在尾盘运行执行端生成建议文本
+- 这样做的收益：
+  - 尾盘执行速度更稳定
+  - 训练与使用职责更清楚
+  - 每天建议对应哪一次训练结果更容易追踪
+
+## 2026-03-18 高杠杆升级：多周期 ML 集成
+- 升级目标：
+  - 将原本单一 `20d` 目标的 ML，升级为多周期集成
+  - 让模型同时吸收 `5d / 10d / 20d` 三个周期的横截面信息
+- 核心改动：
+  - `daily_research/baseline/ml_alpha.py`
+    - 新增多周期训练、预测、模型产物保存/加载支持
+  - `daily_research/baseline/train_trade_model.py`
+    - 支持训练多周期点时模型产物
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+    - 默认读取离线多周期模型产物生成尾盘建议
+  - `daily_research/baseline/run_advanced_daily_research.py`
+    - 接入多周期 ML 集成研究主线
+- 默认新方向：
+  - `ml-target-horizons = 5,10,20`
+- 已验证：
+  - `update_model.py` 小样本训练通过
+  - `run_trade_plan.py` 小样本读取模型并生成建议通过
+  - `compileall` 与 `--help` 通过
+- 当前判断：
+  - 执行端已经能稳定使用多周期模型产物
+  - 研究主线也已接入多周期能力
+  - 但完整 `run_advanced_daily_research.py` 的多周期全流程实跑仍需后续继续压测与优化速度
+
+## 2026-03-18 多周期 ML 集成首轮 A/B 对比
+- 对比目的：
+  - 验证多周期集成是否真的优于原来的单周期 `20d`
+- 实验样本：
+  - `20` 只代表性股票
+  - 区间：`2024-01-01` 起
+  - 组合：`holding_count=5`
+  - 调仓：`5d`
+  - 训练窗：`252` 个交易日
+- 输出目录：
+  - `daily_research/output/advanced_ml_ab_single20_20260318`
+  - `daily_research/output/advanced_ml_ab_multi_5_10_20_20260318`
+  - 汇总表：`daily_research/output/advanced_ml_ab_compare_20260318.csv`
+
+### 结果
+- 单周期 `20d`
+  - 累计收益 `29.35%`
+  - Sharpe `0.944`
+  - 超额收益 `-5.97%`
+  - 超额 Sharpe `-0.178`
+- 多周期 `5/10/20`
+  - 累计收益 `27.79%`
+  - Sharpe `0.896`
+  - 超额收益 `-7.11%`
+  - 超额 Sharpe `-0.215`
+
+### 初步结论
+- 多周期集成不是自动更优。
+- 在这轮样本里：
+  - 多周期版本回撤略浅
+  - 命中率略高
+  - 但收益、Sharpe、超额都弱于单周期 `20d`
+- 当前更合理的判断：
+  - 多周期能力值得保留
+  - 但不能直接把 `5/10/20` 当成默认最优组合
+  - 下一步应优先研究：
+    1. 不同周期的权重分配
+    2. 按市场状态只启用部分周期
+
+## 2026-03-18 多周期权重扫描
+- 目标：
+  - 检验“`20d` 为主、`5d/10d` 为辅”是否比单周期和简单等权更有效
+- 对比组：
+  - `single20`
+  - `multi_equal`（等权 `5/10/20`）
+  - `multi_w235`（`5:0.2,10:0.3,20:0.5`）
+  - `multi_w127`（`5:0.1,10:0.2,20:0.7`）
+- 输出：
+  - `daily_research/output/advanced_ml_ab_weight_scan_20260318.csv`
+
+### 结果
+- `single20`
+  - 累计收益 `29.35%`
+  - Sharpe `0.944`
+  - 超额收益 `-5.97%`
+- `multi_equal`
+  - 累计收益 `27.79%`
+  - Sharpe `0.896`
+  - 超额收益 `-7.11%`
+- `multi_w235`
+  - 累计收益 `31.06%`
+  - Sharpe `0.982`
+  - 超额收益 `-4.73%`
+- `multi_w127`
+  - 累计收益 `18.77%`
+  - Sharpe `0.620`
+  - 超额收益 `-13.66%`
+
+### 结论
+- “`20d` 主导 + `5d/10d` 辅助”是有效方向，但不能过度压缩到只剩长周期。
+- 当前这轮样本里最优的是：
+  - `5:0.2,10:0.3,20:0.5`
+- 这组已经同时优于：
+  - 单周期 `20d`
+  - 多周期等权
+  - 过度偏向 `20d` 的 `0.1/0.2/0.7`
+- 因此当前 advanced ML 主线的多周期默认建议可先定为：
+  - `--ml-target-horizons 5,10,20`
+  - `--ml-horizon-weights 5:0.2,10:0.3,20:0.5`
+
+## 2026-03-18 状态内周期权重验证
+- 目标：
+  - 检验“不同市场状态使用不同 ML 周期权重”是否能进一步提升多周期 advanced ML 主线
+- 代码进展：
+  - `ml_alpha.py` 已支持按 `quadrant` 解析状态内周期权重
+  - `run_advanced_daily_research.py`
+  - `train_trade_model.py`
+  - `generate_daily_trade_plan.py`
+  - 均已支持参数：
+    - `--ml-state-horizon-profiles`
+- 典型参数格式：
+  - `trend_up_low_vol=5:0.15,10:0.25,20:0.60;trend_up_high_vol=5:0.30,10:0.35,20:0.35`
+- 输出目录：
+  - `daily_research/output/advanced_ml_ab_stateweights_a_20260318`
+  - `daily_research/output/advanced_ml_ab_stateweights_b_20260318`
+
+### 结果
+- `stateweights_a`
+  - `trend_up_low_vol=5:0.15,10:0.25,20:0.60`
+  - `trend_up_high_vol=5:0.35,10:0.35,20:0.30`
+  - 累计收益 `26.67%`
+  - Sharpe `0.859`
+  - 超额收益 `-7.92%`
+- `stateweights_b`
+  - `trend_up_low_vol=5:0.20,10:0.30,20:0.50`
+  - `trend_up_high_vol=5:0.30,10:0.35,20:0.35`
+  - 累计收益 `31.06%`
+  - Sharpe `0.982`
+  - 超额收益 `-4.73%`
+
+### 结论
+- 状态内周期权重能力已经打通，训练端和执行端都可使用。
+- 但当前两轮实验里：
+  - `stateweights_a` 明显弱于固定全局权重
+  - `stateweights_b` 仅与固定全局权重 `5:0.2,10:0.3,20:0.5` 基本持平
+- 因此截至目前，advanced ML 主线仍维持：
+  - 固定多周期权重 `5:0.2,10:0.3,20:0.5`
+- 状态内周期权重保留为研究能力，不进入当前默认执行配置。
+
+## 2026-03-19 Advanced ML 集成权重扫描
+- 目标：
+  - 检验 `ML / none / v2` 三路分数的集成比例，确认是否存在比当前 `0.7 / 0.2 / 0.1` 更强的组合方式
+- 样本设置：
+  - `20` 只代表性股票
+  - 区间：`2024-01-01` 起
+  - 组合：`holding_count=5`
+  - 调仓：`5d`
+  - 多周期：`5,10,20`
+  - 周期权重：`5:0.2,10:0.3,20:0.5`
+- 输出：
+  - `daily_research/output/advanced_ml_ensemble_scan_20260318.csv`
+  - `daily_research/output/advanced_ml_ens_base_20260318`
+  - `daily_research/output/advanced_ml_ens_ml85_20260318`
+  - `daily_research/output/advanced_ml_ens_bal60_20260318`
+  - `daily_research/output/advanced_ml_ens_rule50_20260318`
+  - `daily_research/output/advanced_ml_ens_v2tilt_20260318`
+
+### 对比组
+- `base`
+  - `ML=0.70, none=0.20, v2=0.10`
+- `ml85`
+  - `ML=0.85, none=0.10, v2=0.05`
+- `bal60`
+  - `ML=0.60, none=0.25, v2=0.15`
+- `rule50`
+  - `ML=0.50, none=0.30, v2=0.20`
+- `v2tilt`
+  - `ML=0.55, none=0.20, v2=0.25`
+
+### 结果
+- `base`
+  - 累计收益 `31.06%`
+  - Sharpe `0.982`
+  - 超额收益 `-4.73%`
+  - 超额 Sharpe `-0.140`
+- `ml85`
+  - 累计收益 `35.11%`
+  - Sharpe `1.103`
+  - 超额收益 `-1.78%`
+  - 超额 Sharpe `-0.052`
+- `bal60`
+  - 累计收益 `30.75%`
+  - Sharpe `0.985`
+  - 超额收益 `-4.96%`
+  - 超额 Sharpe `-0.146`
+- `rule50`
+  - 累计收益 `37.62%`
+  - Sharpe `1.189`
+  - 超额收益 `0.04%`
+  - 超额 Sharpe `0.001`
+- `v2tilt`
+  - 累计收益 `35.13%`
+  - Sharpe `1.101`
+  - 超额收益 `-1.77%`
+  - 超额 Sharpe `-0.052`
+
+### 结论
+- 这轮样本里，最优组合不是“继续提高 ML 占比”，而是：
+  - `ML=0.50, none=0.30, v2=0.20`
+- 这说明当前 advanced ML 更像“强增强器”，而不是“应该单独压倒规则分数”的主导源。
+- 与当前默认 `0.70 / 0.20 / 0.10` 相比：
+  - `rule50` 的累计收益更高
+  - Sharpe 更高
+  - 超额也从负值抬到了接近持平
+- 但这仍然是 `20` 只股票样本的研究结果，暂不直接改成执行端默认值。
+- 下一步优先级：
+  1. 用更大股票池或全A再验证一次 `rule50`
+  2. 如果结果保持，再考虑把执行端默认集成权重从 `0.70 / 0.20 / 0.10` 切到 `0.50 / 0.30 / 0.20`
+
+## 2026-03-19 Advanced ML 集成权重大样本验证
+- 目标：
+  - 用更大样本验证上一轮 `20` 股实验里表现最好的 `rule50`
+  - 判断是否应该把执行端默认集成权重从 `0.70 / 0.20 / 0.10` 切换到 `0.50 / 0.30 / 0.20`
+- 样本设置：
+  - 股票池：全A
+  - 起始日期：`2022-01-01`
+  - 股票数：`5498`
+  - 日期数：`1017`
+  - 组合：`holding_count=5`
+  - 调仓：`5d`
+  - 多周期：`5,10,20`
+  - 周期权重：`5:0.2,10:0.3,20:0.5`
+- 输出：
+  - `daily_research/output/advanced_ml_alla_base_20220101_20260319`
+  - `daily_research/output/advanced_ml_alla_rule50_20220101_20260319`
+  - 汇总表：`daily_research/output/advanced_ml_ensemble_alla_compare_20260319.csv`
+
+### 结果
+- `base`
+  - 权重：`ML=0.70, none=0.20, v2=0.10`
+  - 累计收益 `538.81%`
+  - 年化收益 `58.40%`
+  - Sharpe `1.945`
+  - 最大回撤 `-27.36%`
+  - 超额收益 `574.39%`
+  - 超额 Sharpe `2.054`
+- `rule50`
+  - 权重：`ML=0.50, none=0.30, v2=0.20`
+  - 累计收益 `352.27%`
+  - 年化收益 `45.40%`
+  - Sharpe `1.795`
+  - 最大回撤 `-20.92%`
+  - 超额收益 `381.50%`
+  - 超额 Sharpe `1.865`
+
+### 结论
+- `rule50` 在 `20` 股样本里更强，但在全A大样本验证里明显不如当前默认 `base`。
+- 这说明上一轮 `20` 股优化结论不够稳健，不能直接迁移到执行端默认配置。
+- 当前阶段更稳的选择仍然是：
+  - `ML=0.70, none=0.20, v2=0.10`
+- 因此执行端默认集成权重暂不修改。
+- 下一步研究方向应从“继续改三路集成比例”切到：
+  1. 检查全A下为何 `base` 更强
+  2. 研究是否需要分市场状态使用不同的集成权重，而不是全局统一切到 `rule50`
+
+## 2026-03-19 通达信关键信号接入：第一轮增量研究
+- 目标：
+  - 把通达信公式里最有价值的 6 个信号正式接入 `daily_research`
+  - 检验它们是否能提升当前 advanced ML 主线的收益与超额
+- 首批接入特征：
+  - `kama_gap`
+  - `kama_slope`
+  - `long_regime_flag`
+  - `mbuy_flag`
+  - `zjtp_flag`
+  - `hcw_flag`
+- 说明：
+  - 这些信号已经接入 `features.py`
+  - 新增增强 profile：
+    - `up_low_breakout_v3`
+
+### 第一版直接接入结果
+- 做法：
+  - 连续特征和布尔信号一起进入因子库
+  - 布尔信号先从 ML 输入剔除
+  - 初版连续 KAMA 特征也曾进入过 ML，结果显示会拖累全A表现，因此后续做了进一步优化
+- 中间结论：
+  - 这类信号更适合做“规则增强层”
+  - 不适合直接作为 ML 原始输入特征源去放大
+
+### 优化后的接入方式
+- 当前版本采取：
+  - `kama_gap / kama_slope / *_flag`
+  - 仅用于规则增强层（`up_low_breakout_v3`）
+  - 不直接进入 ML 原始输入
+- 原因：
+  - 这些信号本质是结构事件特征
+  - 稀疏度高，直接喂 ML 容易带来噪音和不稳定性
+
+### 20 股增量 A/B
+- 输出目录：
+  - `daily_research/output/advanced_ml_sig3_v2_20_20260319`
+  - `daily_research/output/advanced_ml_sig3_v3_20_20260319`
+
+- `up_low_breakout_v2`
+  - 累计收益 `31.06%`
+  - Sharpe `0.981`
+  - 超额收益 `-3.46%`
+  - 超额 Sharpe `-0.102`
+
+- `up_low_breakout_v3`
+  - 累计收益 `35.36%`
+  - Sharpe `1.116`
+  - 超额收益 `-0.19%`
+  - 超额 Sharpe `-0.005`
+
+### 20 股结论
+- 在代表性 `20` 股样本里：
+  - `v3` 明显优于 `v2`
+  - 说明这批信号对上涨低波增强层是有帮助的
+- 但它还没有在这个样本里把超额稳定推到明显正值
+
+### 全A验证
+- 输出目录：
+  - 对照基线：`daily_research/output/advanced_ml_alla_base_20220101_20260319`
+  - 信号增强：`daily_research/output/advanced_ml_sig3_alla_v3_20220101_20260319`
+
+- 对照基线 `base`
+  - 累计收益 `538.81%`
+  - 年化收益 `58.40%`
+  - Sharpe `1.945`
+  - 超额收益 `574.39%`
+  - 超额 Sharpe `2.054`
+
+- 信号增强 `up_low_breakout_v3`
+  - 累计收益 `357.60%`
+  - 年化收益 `45.82%`
+  - Sharpe `1.490`
+  - 超额收益 `390.43%`
+  - 超额 Sharpe `1.640`
+
+### 最终结论
+- 这批信号不是“没用”，而是：
+  - 在局部样本里能改善增强层表现
+  - 但在全A主线验证里，还不足以替代当前默认主线
+- 因此当前研究结论是：
+  - 保留 `up_low_breakout_v3` 作为实验分支
+- 暂不把它升级为 advanced ML 默认增强配置
+- 下一步更合理的方向：
+  1. 不再把这些信号继续硬塞进全A统一主线
+  2. 考虑把它们用作：
+     - `trend_up_low_vol` 状态下的候选过滤器
+     - 或执行端的解释/优先级增强
+
+## 2026-03-19 通达信关键信号接入：接入方式优化与复验
+- 目标：
+  - 修正第一轮接入方式中“把信号直接放进 ML”的问题
+  - 重新验证这些信号在更合理接入方式下是否有增益
+- 优化方式：
+  - `kama_gap / kama_slope / *_flag`
+  - 保留在规则增强层
+  - 不再直接作为 ML 原始输入特征
+- 理由：
+  - 这类信号本质是结构事件
+  - 稀疏度高，直接喂给 ML 容易放大噪音
+
+### 20 股复验
+- 输出目录：
+  - `daily_research/output/advanced_ml_sig3_v2_20_20260319`
+  - `daily_research/output/advanced_ml_sig3_v3_20_20260319`
+
+- `up_low_breakout_v2`
+  - 累计收益 `31.06%`
+  - Sharpe `0.981`
+  - 超额收益 `-3.46%`
+  - 超额 Sharpe `-0.102`
+
+- `up_low_breakout_v3`
+  - 累计收益 `35.36%`
+  - Sharpe `1.116`
+  - 超额收益 `-0.19%`
+  - 超额 Sharpe `-0.005`
+
+### 20 股结论
+- 优化接入方式后，`v3` 的表现明显改善。
+- 这说明这批信号更适合作为增强规则层，而不是 ML 原始特征。
+
+### 全A复验
+- 输出目录：
+  - `daily_research/output/advanced_ml_sig2_alla_v2_20220101_20260319`
+  - `daily_research/output/advanced_ml_sig3_alla_v3_20220101_20260319`
+  - 汇总表：`daily_research/output/advanced_ml_signal_compare_20260319.csv`
+
+- `up_low_breakout_v2`
+  - 累计收益 `363.72%`
+  - 年化收益 `46.30%`
+  - Sharpe `1.502`
+  - 超额收益 `394.19%`
+  - 超额 Sharpe `1.627`
+
+- `up_low_breakout_v3`
+  - 累计收益 `357.60%`
+  - 年化收益 `45.82%`
+  - Sharpe `1.490`
+  - 超额收益 `390.43%`
+  - 超额 Sharpe `1.640`
+
+### 最终结论
+- 在更合理的接入方式下，`v3` 在局部样本里优于 `v2`，说明信号本身有增益。
+- 但在全A验证里，`v3` 仍未超过当前 `v2` 分支。
+- 因此当前结论更新为：
+  - 信号接入方向是对的
+  - 接入方式必须克制
+  - `up_low_breakout_v3` 保留为实验分支
+  - 当前默认增强配置仍然维持 `up_low_breakout_v2`
+
+## 2026-03-19 通达信关键信号接入：优化后最终版本
+- 优化思路：
+  - 第一轮结果说明，这些新信号不适合直接作为 ML 原始输入
+  - 因此做了第二轮优化：
+    - `kama_gap / kama_slope / *_flag`
+    - 仅留在增强规则层
+    - 不再直接进入 ML 特征集合
+- 当前增强 profile：
+  - `up_low_breakout_v3`
+
+### 20 股优化后 A/B
+- 输出目录：
+  - `daily_research/output/advanced_ml_sig3_v2_20_20260319`
+  - `daily_research/output/advanced_ml_sig3_v3_20_20260319`
+
+- `up_low_breakout_v2`
+  - 累计收益 `31.06%`
+  - Sharpe `0.981`
+  - 超额收益 `-3.46%`
+  - 超额 Sharpe `-0.102`
+
+- `up_low_breakout_v3`
+  - 累计收益 `35.36%`
+  - Sharpe `1.116`
+  - 超额收益 `-0.19%`
+  - 超额 Sharpe `-0.005`
+
+### 20 股结论
+- 优化后 `v3` 明显优于 `v2`
+- 这说明这批信号在“规则增强层”里是有帮助的
+- 但它们不应该直接作为 ML 原始输入特征
+
+### 全A优化后验证
+- 输出目录：
+  - 对照基线：`daily_research/output/advanced_ml_alla_base_20220101_20260319`
+  - 优化后增强：`daily_research/output/advanced_ml_sig3_alla_v3_20220101_20260319`
+
+- 对照基线 `base`
+  - 累计收益 `538.81%`
+  - 年化收益 `58.40%`
+  - Sharpe `1.945`
+  - 超额收益 `574.39%`
+  - 超额 Sharpe `2.054`
+
+- 优化后增强 `up_low_breakout_v3`
+  - 累计收益 `357.60%`
+  - 年化收益 `45.82%`
+  - Sharpe `1.490`
+  - 超额收益 `390.43%`
+  - 超额 Sharpe `1.640`
+
+### 最终判断
+- 这批信号在局部样本和增强层里有价值
+- 但在全A统一主线验证里，仍然明显弱于当前 `base`
+- 因此当前阶段：
+  - 保留 `up_low_breakout_v3` 为实验分支
+  - 不升级为 advanced ML 默认增强配置
+- 这批信号更适合后续用于：
+  1. `trend_up_low_vol` 状态下的候选过滤器
+  2. 执行端建议文本中的解释增强
+
+
+## 2026-03-19 更强模型对照：HistGB vs ExtraTrees（全A）
+- 目的：
+  - 在不改变因子、市场状态过滤、组合构建与执行链的前提下，只替换横截面模型，验证是否存在比当前 `HistGradientBoostingRegressor` 更强的可用方案。
+- 说明：
+  - 当前环境未安装 `LightGBM` 与 `XGBoost`，因此先使用 `sklearn` 可用的 `ExtraTreesRegressor` 作为 challenger。
+- 输出目录：
+  - `daily_research/output/advanced_ml_model_family_alla_20220101_20260319`
+  - 汇总表：`daily_research/output/advanced_ml_model_family_alla_20220101_20260319/model_family_compare_summary.csv`
+
+### 实验设置
+- 股票池：全A，`5498` 只
+- 样本区间：`2022-01-01` 至 `2026-03-19`
+- 调仓频率：`5d`
+- 组合目标：`holding_count=5`
+- 市场状态：`trend_up_low_vol, trend_up_high_vol`
+- 增强层：`up_low_breakout_v2`
+- 多周期权重：`5:0.2,10:0.3,20:0.5`
+- 集成权重：`ML=0.70, none=0.20, v2=0.10`
+
+### 结果
+- `histgb`
+  - 累计收益 `541.64%`
+  - 年化收益 `58.57%`
+  - Sharpe `1.951`
+  - 最大回撤 `-27.36%`
+  - 超额收益 `588.47%`
+  - 超额 Sharpe `2.082`
+
+- `etr`
+  - 累计收益 `238.89%`
+  - 年化收益 `35.35%`
+  - Sharpe `1.565`
+  - 最大回撤 `-22.13%`
+  - 超额收益 `263.63%`
+  - 超额 Sharpe `1.645`
+
+### 结论
+- 当前全A主线下，`HistGradientBoostingRegressor` 明显优于 `ExtraTreesRegressor`。
+- `ExtraTrees` 的回撤更浅，但收益、超额和风险调整后收益都明显落后。
+- 因此当前 advanced ML 主线继续维持：
+  - `HistGB + 现有多周期权重 + 现有集成权重`
+- 这也说明：下一步如果要继续做“更强模型”研究，优先级应放在：
+  1. 安装并验证 `LightGBM`
+  2. 安装并验证 `XGBoost`
+  3. 若仍受限于环境，再考虑更强的 `sklearn` 集成或排序目标替代方案
+
+## 2026-03-19 更强模型对照升级：HistGB vs LightGBM（全A）
+- 目的：
+  - 在保持当前 advanced ML 主线结构不变的前提下，引入 `LightGBM` 做全A横截面对照，验证是否存在比 `HistGradientBoostingRegressor` 更强的可用模型。
+- 输出目录：
+  - `daily_research/output/advanced_ml_model_family_histgb_vs_lgbm_alla_20220101_20260319`
+  - 归因目录：`daily_research/output/advanced_ml_model_family_histgb_vs_lgbm_alla_20220101_20260319/histgb_vs_lgbm`
+
+### 实验设置
+- 股票池：全A，`5498` 只
+- 样本区间：`2022-01-01` 至 `2026-03-19`
+- 调仓频率：`5d`
+- 组合目标：`holding_count=5`
+- 市场状态：`trend_up_low_vol, trend_up_high_vol`
+- 增强层：`up_low_breakout_v2`
+- 多周期权重：`5:0.2,10:0.3,20:0.5`
+- 集成权重：`ML=0.70, none=0.20, v2=0.10`
+
+### 结果
+- `histgb`
+  - 累计收益 `541.64%`
+  - 年化收益 `58.57%`
+  - Sharpe `1.951`
+  - 最大回撤 `-27.36%`
+  - 超额收益 `588.47%`
+  - 超额 Sharpe `2.082`
+
+- `lgbm`
+  - 累计收益 `548.52%`
+  - 年化收益 `58.99%`
+  - Sharpe `1.931`
+  - 最大回撤 `-22.13%`
+  - 超额收益 `595.85%`
+  - 超额 Sharpe `2.075`
+
+### 归因要点
+- `lgbm` 超额胜出的季度数：`7 / 17`
+- 最强季度：`2025Q2`，相对 `histgb` 超额差 `+10.40%`
+- 最弱季度：`2024Q4`，相对 `histgb` 超额差 `-32.78%`
+- 象限对比：
+  - `trend_up_low_vol`：`lgbm` 更强，超额高出约 `46.49%`
+  - `trend_up_high_vol`：`histgb` 更强，超额高出约 `27.55%`
+  - 下行两个象限差异很小
+
+### 结论
+- `LightGBM` 没有全方位击败 `HistGB`，但已经是当前最接近主线质量的 challenger。
+- 如果优先看累计收益、超额收益和回撤，`lgbm` 有吸引力。
+- 如果优先看超额 Sharpe 稳健性，当前仍然是 `histgb` 略占优。
+- 因此现阶段判断：
+  - 默认主线先继续保持 `histgb`
+  - `lgbm` 升级为重点候选分支，下一步值得做状态内对照或双模型集成研究
+## 2026-03-19 Deep Alpha 研究分支：GRU vs Transformer 烟测对照
+- 目标：
+  - 在新的 `daily_research/deep_alpha/` 研究分支中，不再只做静态因子加权，而是直接学习“市场状态 + 股票时序表示 + 多任务横截面排序”。
+  - 第一轮先建立可运行骨架，再用两类时序编码器做最小对照：
+    - `GRU`
+    - `Transformer`
+- 新增代码：
+  - `daily_research/deep_alpha/config.py`
+  - `daily_research/deep_alpha/market_state_model.py`
+  - `daily_research/deep_alpha/sequence_dataset.py`
+  - `daily_research/deep_alpha/models.py`
+  - `daily_research/deep_alpha/trainer.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+
+### 研究设定
+- 股票池：8 只代表性股票烟测
+- 区间：`2022-01-01` 起
+- 序列窗口：`60`
+- 验证窗口：`120` 个交易日
+- 目标：
+  - `fwd_excess_5`
+  - `fwd_excess_10`
+  - `fwd_excess_20`
+  - `risk_downside_20`
+- 训练轮数：`2`
+
+### 输出目录
+- `daily_research/output/deep_alpha_gru_smoke_20260319`
+- `daily_research/output/deep_alpha_transformer_smoke_20260319`
+
+### GRU 结果
+- 累计收益 `-4.01%`
+- 年化收益 `-8.30%`
+- Sharpe `-0.737`
+- 超额收益 `-5.06%`
+- 超额 Sharpe `-0.590`
+- `fwd_excess_20 RankIC`：`0.0100`
+- `risk_downside_20 RankIC`：`0.6478`
+
+### Transformer 结果
+- 累计收益 `-1.41%`
+- 年化收益 `-2.96%`
+- Sharpe `-0.219`
+- 超额收益 `-2.49%`
+- 超额 Sharpe `-0.291`
+- `fwd_excess_20 RankIC`：`0.0546`
+- `risk_downside_20 RankIC`：`0.5957`
+
+### 当前结论
+- `deep_alpha` 分支已经完成从数据到训练、验证、持仓打分、回测输出的完整打通。
+- 在这轮烟测里，`Transformer` 明显优于 `GRU`：
+  - 收益更少亏损
+  - 超额更少亏损
+  - `10d / 20d` 超额 RankIC 更好
+- 但两者都还没有达到能挑战当前 `advanced_ml` 主线的程度。
+- 这说明新分支方向是对的，但还处于“表示学习骨架刚建立、还没进入强特征/强目标/强训练范式”的阶段。
+
+### 下一步
+- 不继续做小权重扫描。
+- `deep_alpha` 下一阶段优先研究：
+  1. 更贴近横截面排序目标的训练损失
+  2. 更强的序列特征表达
+  3. 更合理的预测到持仓分数映射
+
+## 2026-03-19 Deep Alpha 训练目标升级：按日期分组 + 排序损失
+- 目标：
+  - 不再只做“逐样本回归”，而是让 `deep_alpha` 更贴近真实横截面选股任务。
+  - 这次升级包含两部分：
+    1. 训练批次按交易日分组
+    2. 在回归损失之外，引入按日期计算的成对排序损失
+- 关键改动：
+  - `daily_research/deep_alpha/sequence_dataset.py`
+    - 新增 `DateGroupedBatchSampler`
+  - `daily_research/deep_alpha/trainer.py`
+    - 新增按日期的 pairwise rank loss
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - 新增 `--ranking-loss-weight`
+
+### 对照实验
+- 输出目录：
+  - `daily_research/output/deep_alpha_transformer_reg_20260319`
+  - `daily_research/output/deep_alpha_transformer_rank05_20260319`
+
+### 回归版（Transformer, ranking_loss_weight=0.0）
+- 累计收益 `-6.14%`
+- 超额收益 `-7.17%`
+- 超额 Sharpe `-0.855`
+- `fwd_excess_20 RankIC`：`0.0379`
+- `fwd_excess_10 RankIC`：`-0.0893`
+
+### 排序增强版（Transformer, ranking_loss_weight=0.5）
+- 累计收益 `-1.44%`
+- 超额收益 `-2.52%`
+- 超额 Sharpe `-0.302`
+- `fwd_excess_20 RankIC`：`0.2182`
+- `fwd_excess_10 RankIC`：`0.0836`
+
+### 结论
+- 这是 `deep_alpha` 目前最有价值的一次提升。
+- 排序损失没有立刻把烟测回测变成正收益，但它明显改善了核心研究指标：
+  - `10d / 20d` 超额 RankIC 显著提升
+  - 回测亏损明显收敛
+- 这说明：
+  - `deep_alpha` 当前的主要问题，已经不只是模型结构，而是目标函数和打分映射。
+  - “更贴近横截面排序”这条方向是对的。
+
+### 下一步
+- 优先继续沿这条线推进，而不是回去做小参数扫描：
+  1. 优化排序损失和多任务损失权重
+  2. 优化预测到组合分数的映射
+  3. 再做更大样本验证
+
+## 2026-03-19 Deep Alpha 关系层第一版：行业内排名 / 行业强度 / 风格强度
+- 目标：
+  - 在 `deep_alpha` 中补第一版轻量关系层，不上图网络，先验证“关系信息”是否有增量。
+- 接入方式：
+  - 行业映射：复用 `baseline/data_provider.py` 的 `load_industry_map_from_tq`
+  - 风格映射：复用 `baseline/data_provider.py` 的 `load_style_map_from_tq`
+  - 新增关系特征：
+    - `industry_ret_20`
+    - `industry_ma_20_gap`
+    - `industry_rank_ret_20`
+    - `industry_rank_ma_20_gap`
+    - `style_financial_strength_20`
+    - `style_financial_member`
+    - `style_high_dividend_strength_20`
+    - `style_high_dividend_member`
+
+### 对照实验
+- 输出目录：
+  - 无关系层：`daily_research/output/deep_alpha_transformer_rank05_rerun_20260319`
+  - 关系层第一版：`daily_research/output/deep_alpha_transformer_rank05_rel_20260319`
+
+### 无关系层（Transformer + rank loss）
+- 特征数 `20`
+- 累计收益 `1.25%`
+- 超额收益 `0.14%`
+- 超额 Sharpe `0.017`
+- `fwd_excess_10 RankIC`：`0.1707`
+- `fwd_excess_20 RankIC`：`0.1021`
+
+### 关系层第一版
+- 特征数 `28`
+- 累计收益 `-0.33%`
+- 超额收益 `-1.42%`
+- 超额 Sharpe `-0.164`
+- `fwd_excess_10 RankIC`：`0.1011`
+- `fwd_excess_20 RankIC`：`0.0236`
+
+### 当前结论
+- 第一版轻量关系层已经成功接入，工程上是通的。
+- 但在这轮 8 股烟测里，它明显拖累了表现。
+- 这不代表“关系层方向错误”，更可能说明：
+  1. 当前样本太小，关系特征噪音大于信息量
+  2. 风格强度与成员特征的设计还偏粗
+  3. 关系层更适合在更大横截面上验证，而不是在极小样本里判断生死
+
+### 决策
+- 关系层保留为可选开关：`--relation-layer`
+- 当前 `deep_alpha` 默认研究配置仍然不启用关系层
+- 下一步优先继续强化排序头，再用更大股票池重测关系层
+
+## 2026-03-19 Deep Alpha 多任务损失权重与分数映射优化
+- 目标：
+  - 不再把 `5d / 10d / 20d / downside` 一视同仁。
+  - 同时改进“预测值 -> 持仓分数”的映射，避免只做简单 zscore 加总。
+- 工程改动：
+  - `daily_research/deep_alpha/config.py`
+    - 新增：
+      - `target_loss_weights`
+      - `score_rank_blend`
+      - `score_downside_penalty`
+  - `daily_research/deep_alpha/trainer.py`
+    - 回归损失改为按目标加权
+    - 排序损失改为按目标加权
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - 新增参数：
+      - `--task-loss-weights`
+      - `--score-horizon-weights`
+      - `--score-rank-blend`
+      - `--score-downside-penalty`
+    - 分数映射从“纯 zscore”升级为：
+      - `zscore + 百分位 rank` 混合
+      - 再显式扣减 downside 风险项
+
+### 对照实验
+- 目录：
+  - `daily_research/output/deep_alpha_transformer_rank05_defaultscore_20260319`
+  - `daily_research/output/deep_alpha_transformer_rank05_weightedscore_20260319`
+  - `daily_research/output/deep_alpha_transformer_scoremap_v2_20260319`
+
+### 基线（排序损失 + 默认损失权重 + 默认分数映射）
+- 累计收益 `-1.62%`
+- 超额收益 `-2.69%`
+- 超额 Sharpe `-0.323`
+- `fwd_excess_10 RankIC`：`0.1514`
+- `fwd_excess_20 RankIC`：`0.0879`
+
+### 方案 A（弱化 5d，强化 20d，增加 downside 惩罚）
+- 参数：
+  - `task-loss-weights 5:0.10,10:0.30,20:0.60,downside:0.45`
+  - `score-horizon-weights 5:0.05,10:0.35,20:0.60`
+  - `score-rank-blend 0.50`
+  - `score-downside-penalty 0.35`
+- 结果：
+  - 累计收益 `-3.17%`
+  - 超额收益 `-4.23%`
+  - 超额 Sharpe `-0.493`
+
+### 方案 B（更温和的 score mapping 调整）
+- 参数：
+  - `task-loss-weights 5:0.20,10:0.30,20:0.50,downside:0.35`
+  - `score-horizon-weights 5:0.15,10:0.30,20:0.55`
+  - `score-rank-blend 0.50`
+  - `score-downside-penalty 0.15`
+- 结果：
+  - 累计收益 `-3.10%`
+  - 超额收益 `-4.16%`
+  - 超额 Sharpe `-0.495`
+
+### 当前结论
+- 这一步在工程上是必要的：现在 `deep_alpha` 的训练目标和打分映射终于都可配置了。
+- 但就这轮 8 股烟测而言：
+  - “手工指定更偏 10/20d、加强 downside 惩罚”的两版启发式权重，都没有优于当前默认配置。
+- 说明当前问题不是简单把某个 horizon 权重再调大一点就能解决。
+- 更可能的方向是：
+  1. 用数据驱动的方法学习“预测 -> 分数”的映射
+  2. 用更系统的多任务权重方案，而不是手工给定固定比例
+
+## 2026-03-19 Deep Alpha 二层 Score Head：学习“预测 -> 持仓分数”的映射
+- 目标：
+  - 不再手工规定 `5d / 10d / 20d / downside` 怎么加总成最终持仓分数。
+  - 改为先训练主模型，再用一个轻量二层模型学习：
+    - 哪组预测组合更值得进入组合
+- 新增文件：
+  - `daily_research/deep_alpha/score_head.py`
+- 新增能力：
+  - `--score-head-method manual|ridge`
+  - `--adaptive-task-weights`
+
+### 设计
+- 第一层：
+  - `Transformer + 排序损失`
+  - 输出：
+    - `pred_fwd_excess_5`
+    - `pred_fwd_excess_10`
+    - `pred_fwd_excess_20`
+    - `pred_risk_downside_20`
+- 第二层：
+  - 用训练期预测结果拟合一个 `Ridge` score head
+  - 特征：
+    - 每个预测值的横截面 zscore
+    - 每个预测值的横截面 rank
+  - 目标：
+    - 由训练期 RankIC 自适应得到任务权重
+    - 再构造横截面效用目标进行学习
+
+### 对照实验
+- 输出目录：
+  - 手工映射：`daily_research/output/deep_alpha_scorehead_manual_20260319`
+  - 学习式映射：`daily_research/output/deep_alpha_scorehead_ridge_20260319`
+
+### 手工映射
+- 累计收益 `-1.62%`
+- 超额收益 `-2.69%`
+- 超额 Sharpe `-0.323`
+- 最大回撤 `-14.02%`
+
+### 学习式 Score Head（Ridge + adaptive task weights）
+- 累计收益 `-1.05%`
+- 超额收益 `-2.13%`
+- 超额 Sharpe `-0.267`
+- 最大回撤 `-11.71%`
+
+### 学到的自适应任务权重
+- `fwd_excess_5`: `0.139`
+- `fwd_excess_10`: `0.151`
+- `fwd_excess_20`: `0.187`
+- `risk_downside_20`: `0.523`
+
+### 当前结论
+- 这是 `deep_alpha` 又一个正确方向：
+  - 学习式 score head 已经比手工映射更好
+  - 虽然提升还不大，但方向是成立的
+- 同时也暴露出一个很有价值的信息：
+  - 在当前样本里，模型更依赖 `downside` 维度来形成持仓分数
+  - 说明“风险维度”在当前深度分支里比我们原先设想的更重要
+
+### 下一步
+- 不再继续手工扫分数映射权重。
+- 优先研究：
+  1. 更强的 score head
+  2. 更系统的任务权重自适应
+  3. 更大样本验证
+
+## 2026-03-19 Deep Alpha Score Head 升级：LightGBM + 窗口式自适应任务权重
+- 目标：
+  - 把二层 `score head` 从线性 `Ridge` 升级到更强的非线性模型。
+  - 同时把 `adaptive task weights` 从“整段训练期一次性估计”推进到“最近窗口自适应”。
+
+### 工程改动
+- `daily_research/deep_alpha/score_head.py`
+  - 新增 `LightGBM` score head
+  - `derive_adaptive_task_weights` 支持最近窗口切片
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 新增：
+    - `--score-head-method lgbm`
+    - `--adaptive-task-window-days`
+
+### 对照实验
+- 输出目录：
+  - 手工映射：`daily_research/output/deep_alpha_scorehead_manual2_20260319`
+  - Ridge + adaptive：`daily_research/output/deep_alpha_scorehead_ridge2_20260319`
+  - LightGBM + adaptive：`daily_research/output/deep_alpha_scorehead_lgbm_20260319`
+
+### 手工映射
+- 累计收益 `-1.62%`
+- 超额收益 `-2.69%`
+- 超额 Sharpe `-0.323`
+
+### Ridge + 126 日窗口式 adaptive task weights
+- 累计收益 `-1.64%`
+- 超额收益 `-2.72%`
+- 超额 Sharpe `-0.347`
+
+### LightGBM + 126 日窗口式 adaptive task weights
+- 累计收益 `1.56%`
+- 超额收益 `0.45%`
+- 超额 Sharpe `0.057`
+
+### 当前学到的窗口式 adaptive task weights
+- `fwd_excess_5`: `0.271`
+- `fwd_excess_10`: `0.060`
+- `fwd_excess_20`: `0.101`
+- `risk_downside_20`: `0.568`
+
+### 结论
+- 这一步是当前 `deep_alpha` 里最明确的一次向前推进：
+  - `LightGBM score head` 已经明显优于手工映射和 `Ridge`
+  - 在这轮烟测里，已经从负超额拉回到微正超额
+- 同时，窗口式 adaptive task weights 也给了一个稳定信号：
+  - 当前阶段 `downside` 风险维度权重最高
+  - `5d` 比 `10d / 20d` 更重要
+  - 这和我们之前靠直觉设定的权重并不一致
+
+### 下一步
+- 当前 `deep_alpha` 最值得继续的方向已经收敛到：
+  1. 继续保留 `Transformer + rank loss`
+  2. 用 `LightGBM` 做二层 score head
+  3. 在更大股票池上验证这套结构
+
+## 2026-03-19 Deep Alpha 更大股票池验证：120 只高流动性股票
+- 目标：
+  - 不再停留在 8 股烟测，改用更有代表性的高流动性大样本验证 `deep_alpha` 新主线。
+- 股票池构建方法：
+  - 从全A中取最近阶段 `20` 日平均成交额最高的 `120` 只股票
+  - 文件：
+    - `daily_research/output/deep_alpha_liquid120_20260319.txt`
+
+### 实验结构
+- 主模型：
+  - `Transformer + rank loss`
+- 对照：
+  1. 手工映射：`manual`
+  2. 二层头：`LightGBM score head + 126日 adaptive task weights`
+
+### 输出目录
+- 手工映射：
+  - `daily_research/output/deep_alpha_liquid120_manual_20260319`
+- LightGBM score head：
+  - `daily_research/output/deep_alpha_liquid120_lgbm_20260319`
+
+### 手工映射结果
+- 训练样本 `56225`
+- 验证样本 `10469`
+- 累计收益 `50.30%`
+- 年化收益 `136.99%`
+- 超额收益 `48.66%`
+- 超额 Sharpe `4.011`
+- 最大回撤 `-18.84%`
+
+### LightGBM score head 结果
+- 训练样本 `56225`
+- 验证样本 `10469`
+- 累计收益 `8.68%`
+- 年化收益 `19.26%`
+- 超额收益 `7.49%`
+- 超额 Sharpe `0.813`
+- 最大回撤 `-12.59%`
+
+### 当前结论
+- 这是一个很重要的修正：
+  - `LightGBM score head` 在 8 股烟测里优于手工映射
+  - 但在 120 只高流动性股票样本里，明显弱于手工映射
+- 这说明：
+  1. 8 股烟测里的 `LightGBM` 改善具有明显样本局部性
+  2. 当前二层头还不够稳，不适合立刻升成默认主线
+  3. 更大样本验证是必要的，而且已经帮我们避免了错误升级
+
+### 补充观察
+- 这轮大样本里，第一层多任务预测的 return 维度 RankIC 本身是负的，只有 `risk_downside_20` 很强。
+- 手工映射之所以能跑得更好，更可能是：
+  - 当前 `deep_alpha` 的有效信息主要还集中在“风险规避”
+  - 手工映射保留了更直接的风险主导逻辑
+  - `LightGBM score head` 目前还没学出稳定的横截面选股增强
+
+### 决策
+- 当前阶段：
+  - `deep_alpha` 保留 `Transformer + rank loss`
+  - 二层 `score head` 继续作为实验层
+  - 默认不切换到 `LightGBM score head`
+- 下一步优先不再盲目换头，而是回到更本质的问题：
+  1. 第一层 return 预测为什么在更大样本里变弱
+  2. 如何让第一层学到更稳定的 return 排序信息
+
+
+## 2026-03-19 Deep Alpha 第一层多任务目标失效结构分析（120 高流动性股票池）
+- 目标：
+  - 明确第一层多任务目标在更大样本里到底是哪里失效：
+    1. 哪个 horizon 在拖后腿
+    2. 哪些市场状态里 return 预测变差
+    3. 是否已经变成“只会避险，不会进攻”
+- 新增分析脚本：
+  - `daily_research/deep_alpha/analyze_target_failure.py`
+- 分析对象：
+  - `daily_research/output/deep_alpha_liquid120_manual_20260319`
+- 输出目录：
+  - `daily_research/output/deep_alpha_liquid120_manual_20260319/target_failure_analysis`
+
+### 关键结果
+#### 1. 拖后腿的 horizon
+- 第一层 return 目标在大样本里整体都偏弱或为负：
+  - `fwd_excess_5 RankIC = -0.0316`
+  - `fwd_excess_10 RankIC = -0.0292`
+  - `fwd_excess_20 RankIC = -0.0618`
+- 明确最差的是：
+  - `fwd_excess_20`
+
+#### 2. 哪些市场状态里 return 预测变差
+- `trend_up_low_vol`
+  - `fwd_excess_20 RankIC = -0.0821`
+  - `fwd_excess_5 RankIC = -0.0391`
+  - `fwd_excess_10 RankIC = -0.0031`
+- `trend_down_low_vol`
+  - `fwd_excess_20 RankIC = -0.0451`
+  - `fwd_excess_10 RankIC = -0.0505`
+  - `fwd_excess_5 RankIC = -0.0254`
+
+结论：
+- 当前验证窗口里，第一层 return 学习在低波状态下整体失效；
+- 其中最明显的失效区是 `trend_up_low_vol`，也就是最该学会“进攻”的地方。
+
+#### 3. 是否变成“只会避险，不会进攻”
+- 是，而且证据很强。
+- 最终手工映射分数与未来 20 日超额收益的日度平均秩相关：
+  - `-0.0581`
+- 最终手工映射分数与未来 20 日 downside 风险的日度平均秩相关：
+  - `0.4548`
+- 最高分组 vs 最低分组：
+  - `20d` 真实超额收益差：`-0.0476`
+  - downside 风险差：`+0.1536`
+
+这说明：
+- 当前分数确实更擅长挑出“更安全的股票”
+- 但没有把“未来 20 日更强的超额收益”排到前面
+- 本质上已经更像风险模型，而不是攻击型 alpha 模型
+
+### 进一步理解
+- 当前 120 股票池里，手工映射仍然能跑出不错的组合结果，不是因为第一层 return 学得好了，
+  更可能是因为：
+  1. `risk_downside_20` 非常强
+  2. 手工映射保留了更直接的风险规避逻辑
+  3. 组合收益更多来自“少踩坑”，不是“更精准地抓住超额赢家”
+
+### 决策
+- 现在不优先继续微调二层 `score head`
+- 研究重点应转向：
+  1. **强化第一层 return 学习**
+  2. 必要时再**改变目标定义**
+
+当前优先判断：
+- 第一优先级：先强化第一层 return 学习
+- 因为现阶段最核心的问题，不是“怎么把几个预测值加起来”，而是“第一层对 return 的学习本身就不够对题”
+
+### 下一步方向
+建议下一步聚焦以下两条：
+1. 重新设计第一层 return 目标
+   - 从直接回归未来超额收益，转向更贴近横截面排序的目标
+   - 例如分层标签、top-vs-rest 分类、排序型 target
+2. 把 risk head 与 return head 的职责进一步拆开
+   - risk 负责过滤和惩罚
+   - return 负责决定谁值得进攻
+   - 避免当前这种“risk 太强，把进攻信号全部盖住”的结构
+
+## 2026-03-19 Deep Alpha 风险门控升级：固定 gate vs 状态自适应 gate（300 高流动性子样本）
+- 目标：
+  - 把 `risk gate` 从固定阈值升级成可学习/按状态自适应；
+  - 并在更大股票池上验证它是否真的值得进入 `deep_alpha` 默认主线。
+
+### 代码改动
+- `daily_research/deep_alpha/risk_gate.py`
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+
+新增能力：
+- `--score-risk-mode state_gate`
+- `--score-risk-state-thresholds`
+- 训练期自动学习各市场状态下的最优 risk gate 阈值
+- 运行后会额外输出：
+  - `risk_gate_objective_rows.csv`
+
+### 验证样本
+- 股票池：
+  - `daily_research/output/deep_alpha_liquid300_20260319.txt`
+- 规模：
+  - `300` 只高流动性 A 股
+- 区间起点：
+  - `2024-01-01`
+- 验证窗口：
+  - `126` 个交易日
+- 主模型：
+  - `Transformer + rank loss`
+- 第一层 return 目标：
+  - `regression`
+
+### 对比结果
+#### 1. 固定 subtract（当前旧式风险惩罚）
+- 输出：
+  - `daily_research/output/deep_alpha_liquid300_regression_subtract_20260319`
+- 结果：
+  - 累计收益 `90.74%`
+  - 超额收益 `85.63%`
+  - 超额 Sharpe `7.321`
+
+#### 2. 固定 gate 0.35
+- 输出：
+  - `daily_research/output/deep_alpha_liquid300_regression_gate35_20260319`
+- 结果：
+  - 累计收益 `38.05%`
+  - 超额收益 `34.35%`
+  - 超额 Sharpe `2.426`
+
+#### 3. 状态自适应 gate
+- 输出：
+  - `daily_research/output/deep_alpha_liquid300_regression_stategate_20260319`
+- 结果：
+  - 累计收益 `97.52%`
+  - 超额收益 `92.23%`
+  - 超额 Sharpe `8.012`
+
+### 学到的 gate 阈值
+- 全局最优阈值：
+  - `0.0`
+- 状态阈值：
+  - `trend_down_low_vol -> 0.0`
+  - `trend_up_high_vol -> 0.0`
+
+### 结论
+- 这轮结果说明两件事：
+  1. 固定 `gate=0.35` 过强，明显伤害收益
+  2. 状态自适应 gate 比固定 subtract 和固定 gate 都更好
+
+但更关键的是：
+- 自适应 gate 最终学到的不是“更强过滤”，而是“当前这组训练样本里不该强行过滤”
+- 也就是说，这套机制的价值在于：
+  - **让 risk 真的变成一个可学习的约束层**
+  - 而不是硬编码一个固定阈值去压制 return
+
+### 决策
+- `deep_alpha` 当前最优研究配置更新为：
+  - 第一层：`regression + rank loss`
+  - 分数层：`state_gate`
+- 但这还不足以直接升级成整个项目的默认执行主线，因为：
+  - 目前验证的是 `300` 只高流动性子样本
+  - 还不是全A更大范围验证
+
+### 当前判断
+- 可以把 `state_gate` 升级为 **deep_alpha 研究默认配置**
+- 但还不能直接升为 **daily execution 默认主线**
+- 下一步应继续：
+  1. 用更大股票池 / 更广泛全A子样本复验
+2. 如果结果继续稳定，再讨论是否进入执行端主线
+
+## 2026-03-19 Deep Alpha 扩展验证：500 高流动性股票池上的 state_gate 稳健性
+- 目标：
+  - 不再停留在 `300` 只股票子样本；
+  - 继续放大到 `500` 只高流动性股票池，验证 `state_gate` 是否还能保持优势。
+
+### 验证样本
+- 股票池文件：
+  - `daily_research/output/deep_alpha_liquid500_20260319.txt`
+- 样本规模：
+  - `500` 只高流动性 A 股
+- 区间起点：
+  - `2024-01-01`
+- 验证窗口：
+  - `126` 个交易日
+- 主模型：
+  - `Transformer + rank loss`
+- 第一层 return：
+  - `regression`
+
+### 对照实验
+#### 1. 固定 subtract
+- 输出：
+  - `daily_research/output/deep_alpha_liquid500_regression_subtract_20260319`
+- 结果：
+  - 累计收益 `39.47%`
+  - 超额收益 `35.73%`
+  - 超额 Sharpe `2.503`
+
+#### 2. 状态自适应 gate
+- 输出：
+  - `daily_research/output/deep_alpha_liquid500_regression_stategate_20260319`
+- 结果：
+  - 累计收益 `61.46%`
+  - 超额收益 `57.13%`
+  - 超额 Sharpe `4.058`
+
+### 学到的 gate 阈值
+- 全局阈值：
+  - `0.0`
+- 状态阈值：
+  - `trend_down_low_vol -> 0.0`
+  - `trend_up_high_vol -> 0.5`
+
+### 结论
+- 这轮 500 股票池验证说明：
+  - `state_gate` 不是只在 300 股票池里偶然有效
+  - 在更大的高流动性子样本里，它仍然明显优于固定 subtract
+- 更重要的是，这次它不再退化成“全局都不 gate”：
+  - 在 `trend_up_high_vol` 里，模型主动学到了 `0.5` 的更强风控阈值
+  - 在 `trend_down_low_vol` 里，仍保持 `0.0`
+
+这说明：
+- `state_gate` 已经开始表现出真正的“按状态自适应”
+- 而不是简单地退化成无过滤
+
+### 当前判断
+- 可以把：
+  - `regression + rank loss + state_gate`
+ 视为当前 `deep_alpha` 更稳定、更可信的研究主线
+- 但仍然不建议直接升为执行端默认，因为：
+  - 现在的证据仍集中在高流动性全A子样本
+  - 还缺一次更广的全A覆盖验证
+
+### 下一步
+优先顺序建议：
+1. 用更广的全A子样本继续复验 `state_gate`
+2. 如果仍保持优势，再考虑把它提升为 `deep_alpha` 默认主线
+3. 最后再讨论它是否接近执行端
+
+## 2026-03-19 Deep Alpha 第一层目标重做：return 分类化 + risk/return 解耦
+- 目标：
+  - 不再只沿用“直接回归未来超额收益”的第一层目标；
+  - 尝试把 return 目标改成更贴近横截面排序的形式；
+  - 同时把 risk 从“主导分数”改成更清晰的过滤/约束角色。
+
+### 代码改动
+- `daily_research/deep_alpha/config.py`
+- `daily_research/deep_alpha/trainer.py`
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+
+新增能力：
+- `--return-loss-mode`
+  - `regression`
+  - `top_rest_bce`
+  - `top_bottom_bce`
+- `--return-top-frac`
+- `--return-bottom-frac`
+- `--score-risk-mode`
+  - `subtract`
+  - `gate`
+- `--score-risk-gate-threshold`
+
+### 验证样本
+- 股票池：
+  - `daily_research/output/deep_alpha_liquid120_20260319.txt`
+- 区间起点：
+  - `2024-01-01`
+- 验证窗口：
+  - `126` 个交易日
+- 主模型：
+  - `Transformer + rank loss`
+- 二层：
+  - `manual score head`
+
+### A/B 结果
+#### 1. 第一层直接回归 return（baseline）
+- 输出：
+  - `daily_research/output/deep_alpha_liquid120_regression_retarget_20260319`
+- 结果：
+  - 累计收益 `85.47%`
+  - 超额收益 `80.49%`
+  - 超额 Sharpe `6.515`
+  - `fwd_excess_5 RankIC = 0.0610`
+  - `fwd_excess_10 RankIC = 0.0711`
+  - `fwd_excess_20 RankIC = 0.0555`
+
+#### 2. 第一层改成 top-bottom 分类
+- 输出：
+  - `daily_research/output/deep_alpha_liquid120_topbottom_retarget_20260319`
+- 结果：
+  - 累计收益 `28.40%`
+  - 超额收益 `24.95%`
+  - 超额 Sharpe `2.751`
+  - `fwd_excess_5 RankIC = -0.0176`
+  - `fwd_excess_10 RankIC = -0.0044`
+  - `fwd_excess_20 RankIC = 0.0000`
+
+#### 3. 第一层改成 top-vs-rest 分类
+- 输出：
+  - `daily_research/output/deep_alpha_liquid120_toprest_retarget_20260319`
+- 结果：
+  - 累计收益 `72.93%`
+  - 超额收益 `68.29%`
+  - 超额 Sharpe `5.891`
+  - `fwd_excess_5 RankIC = 0.0251`
+  - `fwd_excess_10 RankIC = 0.0090`
+  - `fwd_excess_20 RankIC = -0.0065`
+
+#### 4. 保留回归型 return，但把 risk 从“减分”改成“过滤”
+- 输出：
+  - `daily_research/output/deep_alpha_liquid120_regression_gate35_20260319`
+- 设定：
+  - `return_loss_mode = regression`
+  - `score_risk_mode = gate`
+  - `score_risk_gate_threshold = 0.35`
+- 结果：
+  - 累计收益 `76.51%`
+  - 超额收益 `71.77%`
+  - 超额 Sharpe `7.195`
+  - 超额最大回撤 `-5.99%`
+
+### 结论
+- 这轮结果非常明确：
+  1. 在当前 120 股票池验证窗口里，**直接把第一层 return 目标改成分类，并没有打赢回归**
+  2. `top_bottom_bce` 明显最差，说明它丢掉了太多中间样本信息
+  3. `top_rest_bce` 比 `top_bottom_bce` 好，但仍然弱于回归
+  4. **真正有效的是 risk / return 职责拆开**
+
+更具体地说：
+- 当前这版 `deep_alpha` 第一层最好的 return 学习方式，仍然是：
+  - `regression + rank loss`
+- 但分数层不该继续让 risk 与 return 混成一团：
+  - `risk` 更适合做过滤器
+  - `return` 更适合决定谁值得进入组合
+
+### 决策
+- 当前不把第一层默认切到分类目标
+- 当前最值得保留的新结论是：
+  - `return_loss_mode = regression`
+  - `score_risk_mode = gate`
+- 下一步研究重点应转向：
+  1. 在保留 `regression + rank loss` 的前提下，继续增强第一层 return 学习
+  2. 把 risk gating 做成更稳的可学习或可验证机制
+
+## 2026-03-19 deep_alpha 提速改造：缓存 + 单次构建语料 + 排序损失采样
+
+### 背景
+- `deep_alpha` 在更大股票池验证时，主要耗时已经不只是训练本身，而是：
+  1. 每次都重新从 TQ 拉取原始日线
+  2. `train_ds / valid_ds` 分别双重构建样本
+  3. `pairwise rank loss` 对同日样本做全量成对比较
+
+### 本次改动
+- 新增缓存模块：
+  - `daily_research/deep_alpha/cache_utils.py`
+- `run_deep_alpha_research.py` 现在支持：
+  - 原始 TQ 数据缓存
+  - 特征/目标缓存
+  - `--no-cache`
+  - `--refresh-cache`
+  - `--num-workers`
+  - `--pin-memory`
+  - `--use-amp`
+  - `--max-rank-pairs-per-group`
+- `sequence_dataset.py` 改成：
+  - 先一次性构建 `StockSequenceCorpus`
+  - 再切分 `train / valid` 视图
+  - 避免原先双重构建数据集
+- `trainer.py` 改成：
+  - 支持 `AMP` 混合精度
+  - 推理阶段也支持 `AMP`
+  - 排序损失支持 `max_rank_pairs_per_group` 采样，避免全量 `O(n^2)` pair 计算
+
+### 小规模验证
+- 运行：
+  - `daily_research/output/deep_alpha_speed_smoke_small3_20260319`
+- 条件：
+  - `5` 只股票
+  - `Transformer`
+  - `epochs=1`
+  - `num_workers=2`
+  - `AMP on`
+- 结果：
+  - 流程已完整跑通
+  - 原始数据缓存命中正常
+  - 特征缓存命中正常
+  - 单次构建语料 + 视图切分正常
+
+### 当前判断
+- 这轮改动属于高性价比的工程提速，不改变策略逻辑。
+- 目前 `deep_alpha` 研究端已经具备三层提速能力：
+  1. 原始数据缓存
+  2. 特征/目标缓存
+  3. 排序损失采样 + GPU 混合精度
+- 下一步如果还要继续提速，优先级应是：
+  1. 样本语料缓存
+  2. 更高效的 pair 采样策略
+  3. 分阶段增量更新而不是全量重算
+
+## 2026-03-19 Deep Alpha vs Advanced ML：500 高流动性股票池同池同区间正面对照
+
+### 目标
+- 用同一股票池、同一区间，直接回答：
+  - `deep_alpha` 目前只是“研究上有希望”
+  - 还是已经开始“接近替代执行主线”
+
+### 对照设置
+- 股票池：
+  - `daily_research/output/deep_alpha_liquid500_20260319.txt`
+- 区间起点：
+  - `2024-01-01`
+- 对照模型：
+  - `advanced_ml`
+    - `HistGB`
+    - 多周期 `5/10/20 = 0.2/0.3/0.5`
+    - 集成权重 `ml=0.70, none=0.20, v2=0.10`
+  - `deep_alpha`
+    - `Transformer + rank loss + regression + state_gate`
+- 为公平起见，最终对照窗口统一到：
+  - `2025-09-05` 至 `2026-03-19`
+  - 即 `deep_alpha` 当前 500 股票验证的 holdout 窗口
+
+### 输出
+- `advanced_ml`：
+  - `daily_research/output/advanced_ml_liquid500_compare_20260319`
+- `deep_alpha`：
+  - `daily_research/output/deep_alpha_liquid500_regression_stategate_20260319`
+- 对照汇总：
+  - `daily_research/output/deepalpha_vs_advancedml_liquid500_20260319.csv`
+
+### 对照结果（统一 holdout 口径）
+#### 1. Advanced ML
+- 累计收益：`66.67%`
+- 超额收益：`58.75%`
+- 超额 Sharpe：`4.338`
+- 超额最大回撤：`-10.28%`
+- 平均持仓数：`3.89`
+- 平均换手：`1.119`
+- 胜率：`45.24%`
+
+#### 2. Deep Alpha state_gate
+- 累计收益：`61.46%`
+- 超额收益：`57.13%`
+- 超额 Sharpe：`4.058`
+- 超额最大回撤：`-16.73%`
+- 平均持仓数：`4.18`
+- 平均换手：`0.853`
+- 胜率：`47.62%`
+
+### 结论
+- 这轮最重要的结论是：
+  - `deep_alpha` 已经不再是“明显落后”的实验分支
+  - 但在当前这轮 500 股票、同池同区间的正面对照下，仍未打赢当前 `advanced_ml` 执行主线
+- 更细一点看：
+  - `deep_alpha` 的优势：
+    - 换手更低
+    - 胜率略高
+  - `advanced_ml` 的优势：
+    - 收益更高
+    - 超额 Sharpe 更高
+    - 回撤更浅
+
+### 当前决策
+- **暂不把 `deep_alpha` 接入执行端主线**
+- **执行端继续保持 `advanced_ml` 为默认主线**
+- `deep_alpha` 当前定位更新为：
+  - 已经进入“接近执行主线”的候选阶段
+  - 但还需要继续做更本质的结构学习，而不是贸然接管执行
+
+### 下一步研究方向
+1. 如果继续推进 `deep_alpha`
+   - 优先做更强的第一层 `return` 学习
+   - 而不是继续折腾 profile 或小参数
+2. 如果要继续接近执行端
+   - 先扩大到更广的全A子样本，重复这类同池同区间对照
+3. 在此之前
+   - `advanced_ml` 继续作为稳定执行主线
+
+## 2026-03-19 Deep Alpha 原始 return 学习升级：更贴近 winner-picking 排序目标
+
+### 目标
+- 之前的 `deep_alpha` 更偏向“风险约束 + 回归拟合”，第一层 `return` 学习还不够直接服务于挑选下一阶段更强股票。
+- 这一步的目标是让 `return` 学习更贴近横截面 winner-picking，而不是继续把主信号交给后处理阶段补救。
+
+### 本次改动
+- `daily_research/deep_alpha/models.py`
+  - 进一步拆分 `return head` 与 `risk head`
+- `daily_research/deep_alpha/sequence_dataset.py`
+  - 调整标签与样本组织方式，让 `return` 目标更直接服务排序
+- `daily_research/deep_alpha/trainer.py`
+  - 新增 `listwise rank loss`
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 新增参数：
+    - `--return-target-transform`
+    - `--listwise-loss-weight`
+    - `--listwise-temperature`
+
+### 结果
+#### 300 高流动性股票池
+输出：
+- `daily_research/output/deep_alpha_liquid300_regression_stategate_20260319`
+- `daily_research/output/deep_alpha_liquid300_raw_listwise25_e4_20260319`
+- `daily_research/output/deep_alpha_liquid300_csrank_listwise25_e4_20260319`
+
+结果：
+- 原始 `state_gate`
+  - 超额收益：`92.23%`
+  - 超额 Sharpe：`8.01`
+- `raw + listwise`
+  - 超额收益：`134.52%`
+  - 超额 Sharpe：`10.10`
+- `cs_rank + listwise`
+  - 超额收益：`73.96%`
+  - 超额 Sharpe：`6.27`
+
+#### 500 高流动性股票池
+输出：
+- `daily_research/output/deep_alpha_liquid500_regression_stategate_20260319`
+- `daily_research/output/deep_alpha_liquid500_raw_listwise25_e4_20260319`
+
+结果：
+- 原始 `state_gate`
+  - 超额收益：`57.13%`
+  - 超额 Sharpe：`4.06`
+- `raw + listwise`
+  - 超额收益：`193.79%`
+  - 超额 Sharpe：`17.20`
+
+### 结论
+- 当前证据很清楚：要让第一层 `return target` 更直接服务 `rank learning`。
+- 目前最优方向是：
+  - 使用 `raw return target`
+  - 叠加 `pairwise + listwise` 排序损失
+  - 再结合 `state_gate`
+- 因此 `deep_alpha` 的第一层正式研究主线更新为：
+  - `raw return target`
+  - `pairwise rank loss`
+  - `listwise rank loss`
+  - `state_gate`
+
+### 汇总输出
+- `daily_research/output/deep_alpha_return_learning_compare_20260319.csv`
+- `daily_research/output/deep_alpha_return_learning_vs_advancedml_20260319.csv`
+
+## 2026-03-20 Deep Alpha 严格复验：500 高流动性股票池 + 更长 252 日 holdout
+
+### 目的
+- 不再只看短窗口结果，而是用更长 holdout 检查 `deep_alpha` 新主线是否仍然成立。
+- 在同一股票池、同一时间窗口下，和当前执行主线 `advanced_ml` 正面对照。
+
+### 设置
+- 股票池：`daily_research/output/deep_alpha_liquid500_20260319.txt`
+- 研究起点：`2024-01-01`
+- 对照窗口：`2025-03-06` 到 `2026-03-19`
+- `deep_alpha` 配置：
+  - `Transformer`
+  - `regression`
+  - `pairwise rank loss = 0.5`
+  - `listwise rank loss = 0.25`
+  - `state_gate`
+
+### 输出
+- `deep_alpha`
+  - `daily_research/output/deep_alpha_liquid500_raw_listwise25_e4_v252_20260320`
+- `advanced_ml` 同窗口切片
+  - `daily_research/output/advanced_ml_liquid500_compare_20260319/metrics_holdout_20250306_20260319.json`
+- 汇总
+  - `daily_research/output/deep_alpha_strict_revalidation_20260320.csv`
+
+### 结果
+#### Advanced ML
+- 超额收益：`54.80%`
+- 超额 Sharpe：`1.643`
+- 超额最大回撤：`-16.76%`
+
+#### Deep Alpha 新主线（252 日 holdout）
+- 超额收益：`83.09%`
+- 超额 Sharpe：`2.746`
+- 超额最大回撤：`-14.44%`
+
+### 结论
+- 这次已经不是短窗口偶然。`deep_alpha` 新主线在更长 holdout 下仍然赢过了 `advanced_ml`。
+- 更关键的是，它同时做到了：
+  - 更高的超额收益
+  - 更高的风险调整后收益
+  - 更浅的超额回撤
+
+### 决策
+- `deep_alpha` 已经进入“接近执行主线”的候选阶段。
+- 但还不直接接入执行端，下一步先做更广高流动性子样本复验。
+
+## 2026-03-20 Deep Alpha 更广子样本复验：800 高流动性股票池同池同区间对照
+
+### 目的
+- 在比 `liquid500` 更广的高流动性子样本上，继续检验 `deep_alpha` 新主线是否成立。
+- 若仍保持优势，再决定是否进入执行前最后对照阶段。
+
+### 这次补充改动
+- `daily_research/baseline/run_advanced_daily_research.py`
+  - 新增 `--stocks-file`，方便 `advanced_ml` 复用同一股票池做严格对照。
+
+### 设置
+- 股票池生成方式：从全A按最近 `ADV20` 选取前 `800` 只高流动性股票
+- 股票池文件：
+  - `daily_research/output/deep_alpha_liquid800_20260320.txt`
+- `deep_alpha` 配置保持不变：
+  - `raw return target`
+  - `pairwise rank loss = 0.5`
+  - `listwise rank loss = 0.25`
+  - `state_gate`
+- `advanced_ml` 使用同一股票池、同一研究起点、同一 holdout 区间
+
+### 输出
+- `deep_alpha`
+  - `daily_research/output/deep_alpha_liquid800_raw_listwise25_e4_v252_20260320`
+- `advanced_ml`
+  - `daily_research/output/advanced_ml_liquid800_compare_20260320`
+  - `daily_research/output/advanced_ml_liquid800_compare_20260320/metrics_holdout_20250307_20260319.json`
+- 执行前稳定性对照汇总
+  - `daily_research/output/deep_alpha_execution_readiness_compare_20260320.csv`
+
+### 结果
+#### Deep Alpha
+- 超额收益：`149.60%`
+- 超额 Sharpe：`3.508`
+- 超额最大回撤：`-28.55%`
+- 平均换手：`0.927`
+- 胜率：`51.59%`
+
+#### Advanced ML
+- 超额收益：`88.39%`
+- 超额 Sharpe：`1.669`
+- 超额最大回撤：`-21.41%`
+- 平均换手：`1.143`
+- 胜率：`41.27%`
+
+### 执行前稳定性观察
+- `deep_alpha` 在 `liquid500` 和 `liquid800` 两个更大高流动性样本上都保持了超额优势。
+- `deep_alpha` 的共同特点是：
+  - 超额收益更高
+  - 超额 Sharpe 更高
+  - 胜率更高
+  - 在 `liquid800` 上换手还更低
+- 需要继续关注的一点：
+  - `liquid800` 上 `deep_alpha` 的超额回撤更深，说明它已经开始更强地参与进攻排序，后面仍需继续监控回撤稳定性。
+
+### 当前决策
+- `advanced_ml` 仍然保留为当前执行端默认主线。
+- `deep_alpha` 已经不再只是研究备选，而是进入“执行前最后验证阶段”的候选主线。
+- 下一步研究继续围绕：
+  1. 更广高流动性或分层全A子样本复验
+  2. 执行前最后对照：稳定性、换手、回撤一致性
+  3. 若优势继续保持，再讨论接近执行端
+## 2026-03-20 Deep Alpha 分层全A子样本复验：确认是否只在高流动性样本里强
+### 目的
+- 不再只看高流动性股票池，转而用“分层全A子样本”验证 `deep_alpha`。
+- 这一步要回答的不是收益能不能继续做高，而是：
+  - `deep_alpha` 的优势是否只集中在高流动性样本里
+  - 它离真正可泛化的执行主线还有多远
+
+### 样本构造
+- 先从全A里按最近 `ADV20` 做 5 档流动性分层。
+- 每一档等量抽取 `160` 只股票，总共 `800` 只。
+- 股票池文件：
+  - `daily_research/output/deep_alpha_stratified_alla800_20260320.txt`
+- 分层摘要：
+  - `daily_research/output/deep_alpha_stratified_alla800_20260320_summary.csv`
+
+### 对照设置
+- `deep_alpha`
+  - `raw return target`
+  - `pairwise rank loss = 0.5`
+  - `listwise rank loss = 0.25`
+  - `state_gate`
+- `advanced_ml`
+  - 当前执行端默认主线
+- 时间窗口统一为长 holdout：
+  - `2025-03-07` 到 `2026-03-20`
+
+### 输出
+- `deep_alpha`
+  - `daily_research/output/deep_alpha_stratified_alla800_raw_listwise25_e4_v252_20260320`
+- `advanced_ml`
+  - `daily_research/output/advanced_ml_stratified_alla800_compare_20260320`
+  - `daily_research/output/advanced_ml_stratified_alla800_compare_20260320/metrics_holdout_20250307_20260320.json`
+- 汇总
+  - `daily_research/output/deep_alpha_stratified_alla800_compare_20260320.csv`
+
+### 结果
+#### Deep Alpha
+- 超额收益：`0.22%`
+- 超额 Sharpe：`0.007`
+- 超额最大回撤：`-28.84%`
+- 平均换手：`0.641`
+- 胜率：`44.84%`
+
+#### Advanced ML
+- 超额收益：`85.24%`
+- 超额 Sharpe：`1.138`
+- 超额最大回撤：`-16.15%`
+- 平均换手：`1.087`
+- 胜率：`39.68%`
+
+### 结论
+- 这次结果非常关键：`deep_alpha` 在分层全A子样本上没有保持住优势。
+- 它在高流动性子样本上赢过 `advanced_ml`，但一旦把中低流动性层也系统性纳入，表现几乎被抹平。
+- 这说明当前 `deep_alpha` 的有效性高度依赖流动性环境，暂时还不能视为“全A可泛化主线”。
+
+### 阶段判断
+- 现在不应推动 `deep_alpha` 接近执行端。
+- 当前最稳的结论是：
+  - `advanced_ml` 继续保留为执行端默认主线
+  - `deep_alpha` 回到“研究主线”定位
+- 下一步研究应转向：
+  1. 明确建模“流动性条件”本身
+  2. 研究 `deep_alpha` 为何只在高流动性样本里有效
+  3. 考虑把流动性分层作为显式状态或关系特征接入
+
+## 2026-03-20 流动性条件显式研究：deep_alpha 在分层全A子样本上的复验
+
+### 这次做了什么
+- 把流动性条件提升为 `deep_alpha` 的显式研究对象。
+- 新增了两类能力：
+  - `liquidity_layer`：把流动性分层状态和流动性相关关系特征接进序列特征。
+  - `state_liquidity_gate`：让 risk gate 按“市场状态 + 流动性桶”联合学习阈值。
+- 在分层全A `800` 股票池上做了同口径验证，避免只看高流动性股票池的结果。
+
+### 关键输出
+- 结果汇总：`daily_research/output/deep_alpha_liquidity_research_compare_20260320.csv`
+- 流动性桶诊断：`daily_research/output/deep_alpha_stratified_alla800_liquidity_bucket_diagnostics_20260320.csv`
+- 运行结果：
+  - `daily_research/output/deep_alpha_stratified_alla800_raw_listwise25_e4_v252_20260320`
+  - `daily_research/output/deep_alpha_stratified_alla800_liqgateonly_20260320`
+  - `daily_research/output/deep_alpha_stratified_alla800_liqfeatureonly_20260320`
+  - `daily_research/output/deep_alpha_stratified_alla800_liquidityaware_20260320`
+  - `daily_research/output/advanced_ml_stratified_alla800_compare_20260320`
+
+### 对照结果
+- `deep_alpha baseline state_gate`
+  - 超额收益：`0.22%`
+  - 超额 Sharpe：`0.007`
+- `deep_alpha + state_liquidity_gate`
+  - 超额收益：`0.22%`
+  - 超额 Sharpe：`0.007`
+- `deep_alpha + liquidity_layer`
+  - 超额收益：`-21.40%`
+  - 超额 Sharpe：`-0.641`
+- `deep_alpha + liquidity_layer + state_liquidity_gate`
+  - 超额收益：`-21.40%`
+  - 超额 Sharpe：`-0.641`
+- `advanced_ml`（同 holdout）
+  - 超额收益：`85.24%`
+  - 超额 Sharpe：`1.138`
+
+### 结论
+- `state_liquidity_gate` 单独启用时没有带来改进，学习出的分层阈值基本退化为 `0.0`，说明当前 gate 还没有学到有用的流动性过滤规则。
+- `liquidity_layer` 直接作为一层额外特征接进模型后，表现显著变差，说明“把流动性原始分层特征直接堆到特征栈里”不是当前最有效的接法。
+- 这次结果进一步确认：`deep_alpha` 的有效性仍然明显依赖高流动性环境，暂时还不是可泛化到更广分层全A样本的主线。
+- 当前执行端默认主线继续保持 `advanced_ml`，`deep_alpha` 继续作为研究主线推进。
+
+### 新的研究判断
+- 流动性条件必须继续作为显式研究对象，但下一步不应再沿着“直接加原始流动性特征 + 直接做 state_liquidity_gate”这条线硬推。
+- 更有前景的方向是：
+  1. 先做更细的流动性失效诊断，确认哪些流动性层、哪些状态组合在拖后腿。
+  2. 把流动性作为条件变量，而不是简单拼进主特征栈。
+  3. 优先研究“按流动性条件切换 return 学习”，而不是先继续强化 risk gate。
+
+## 2026-03-20 流动性失效细诊断 + 条件化 return 学习第一版
+
+### 这次做了什么
+- 给 `deep_alpha` 增加了按流动性桶切换的 `return head`：
+  - `--return-head-mode liquidity_switch`
+- 新增流动性失效诊断脚本：
+  - `daily_research/deep_alpha/analyze_liquidity_failure.py`
+- 在分层全A `800` 子样本上，对比了：
+  - `shared_state_gate`
+  - `liquidity_switch_state_gate`
+  - `advanced_ml`
+
+### 关键输出
+- 对照汇总：`daily_research/output/deep_alpha_liquidity_condition_compare_20260320.csv`
+- 基线 run：
+  - `daily_research/output/deep_alpha_stratified_alla800_shared_liqdiag_20260320`
+- 条件化 return head run：
+  - `daily_research/output/deep_alpha_stratified_alla800_liqswitch_20260320`
+- 诊断输出：
+  - `daily_research/output/deep_alpha_stratified_alla800_shared_liqdiag_20260320/liquidity_failure_analysis`
+  - `daily_research/output/deep_alpha_stratified_alla800_liqswitch_20260320/liquidity_failure_analysis`
+
+### 结果
+#### Shared return head
+- 超额收益：`0.22%`
+- 超额 Sharpe：`0.007`
+- 在流动性桶上的 `fwd_excess_20 RankIC`
+  - `bucket 3`：`-0.019`
+  - `bucket 4`：`0.094`
+
+#### Liquidity-switch return head
+- 超额收益：`-26.58%`
+- 超额 Sharpe：`-0.628`
+- 在流动性桶上的 `fwd_excess_20 RankIC`
+  - `bucket 3`：`-0.149`
+  - `bucket 4`：`-0.041`
+
+#### Advanced ML（同 holdout）
+- 超额收益：`85.24%`
+- 超额 Sharpe：`1.138`
+
+### 结论
+- 更细的流动性诊断说明：即使在已经做过 `min_adv20` 过滤的分层全A子样本里，`deep_alpha` 的第一层 return 学习也主要只在最高流动性桶里有效。
+- 把流动性当条件变量这个方向是对的，但当前这版“按每个流动性桶切换独立 return head”过于粗暴，明显伤害了泛化。
+- 所以这一步的价值不是把 `liquidity_switch` 升成新主线，而是进一步确认：
+  - 流动性问题的核心在第一层 return 学习
+  - 下一步应优先研究“更平滑、更约束的流动性条件化 return 学习”，而不是直接把桶切得很硬
+
+### 下一步收敛
+- 暂不采用 `liquidity_switch` 作为默认研究配置。
+- 更值得做的是：
+  1. 先把流动性条件压缩成更少的 regime，例如“最高流动性 vs 其余”。
+  2. 让流动性只影响 return loss / sample weighting，而不是直接切独立 head。
+  3. 继续保持 `advanced_ml` 为执行端默认主线，`deep_alpha` 聚焦研究。
+
+## 2026-03-20 执行与研究假设改造：盘后出策略，次日开盘执行
+
+### 背景
+- 之前执行端更偏“同日尾盘执行”，而缓存又按日期粒度工作。
+- 这会让盘中运行和收盘后运行在同一天共用缓存键，不够贴近真实交易流程。
+- 因此本轮把 `advanced_ml` 链路统一改成：
+  - `盘后生成信号`
+  - `次日开盘执行`
+
+### 本轮改动
+1. 新增“最新已完成交易日”识别：
+   - `daily_research/baseline/data_provider.py`
+   - `get_latest_completed_trading_date()`
+2. `advanced_ml` 训练/推理自动历史窗口不再默认取到“今天”，而是默认取到“最新已完成交易日”：
+   - `daily_research/baseline/advanced_ml_runtime.py`
+3. 训练目标从默认 `close->close` 扩展到 `next_open` 口径：
+   - `daily_research/baseline/ml_alpha.py`
+4. `run_advanced_daily_research.py` 改成显式用 `next_open` 口径训练和回测。
+5. `generate_daily_trade_plan.py` 改成输出：
+   - `信号日期`
+   - `执行日期`
+   - `盘后生成，次日开盘执行`
+6. `train_trade_model.py` 导出的模型元信息新增：
+   - `signal_date`
+   - `execution_date`
+   - `execution_mode=next_open`
+
+### 验证
+- 小样本训练验证通过：
+  - `daily_research/execution/models/_nextopen_smoke.joblib`
+  - `daily_research/execution/models/_nextopen_smoke.json`
+- 小样本执行建议验证通过：
+  - `daily_research/execution/output/nextopen_plan_smoke/daily_trade_plan.txt`
+- 训练端在当前时间点自动识别：
+  - `latest_data_date = 2026-03-19`
+  - `execution_date = 2026-03-20`
+  说明盘中不会把 `2026-03-20` 未收盘日线当成最终信号输入。
+
+### 当前判断
+- 这次改造是正确的。
+- 它让执行端更贴近真实交易节奏，也让研究与执行的假设更加一致。
+- 后续凡是要接近执行端的研究结果，都优先按这个 `盘后信号 -> 次日开盘执行` 口径验证。
+
+## 2026-03-20 Deep Alpha 回测口径统一到 next_open
+
+### 本轮改动
+1. `deep_alpha` 目标构造改成支持 `next_open`
+   - `daily_research/deep_alpha/sequence_dataset.py`
+2. `run_deep_alpha_research.py` 默认把研究截止日期落到“最新已完成交易日”
+3. `deep_alpha` holdout backtest 改成：
+   - 盘后信号
+   - 次日开盘执行
+   - open-to-open 持有收益
+
+### 烟测
+- 运行：
+  - `daily_research/output/deep_alpha_nextopen_smoke`
+- 结果：
+  - 超额收益：`0.42%`
+  - 超额 Sharpe：`0.209`
+
+### 当前判断
+- `deep_alpha` 研究链路已经与执行端口径一致。
+- 从现在开始，`deep_alpha` 与 `advanced_ml` 的对照，不再混用 close-to-close 与 next_open 两套假设。
+
+## 2026-03-20 Next-Open 全A正面对照：Deep Alpha vs Advanced ML
+
+### 目标
+- 用同一套 `next_open` 口径，重新比较 `deep_alpha` 与 `advanced_ml`。
+- 这一步不再看高流动性子样本，而是直接看全A范围内的同口径结果。
+- 需要回答的问题很直接：
+  1. `deep_alpha` 是否还能在更广泛的全A范围内保持优势。
+  2. 如果不能，它距离执行端还有多远。
+
+### 对照设置
+- 统一口径：`盘后信号 -> 次日开盘执行`
+- 股票池：全A
+- 研究起点：`2024-01-01`
+- `advanced_ml`
+  - 输出目录：`daily_research/output/advanced_ml_alla_nextopen_compare_20260320`
+  - holdout 切片：`daily_research/output/advanced_ml_alla_nextopen_compare_20260320/metrics_holdout_20250307_20260319.json`
+- `deep_alpha`
+  - 主线配置：
+    - `raw return target`
+    - `pairwise rank loss = 0.5`
+    - `listwise rank loss = 0.25`
+    - `state_gate`
+  - 输出目录：`daily_research/output/deep_alpha_alla_raw_listwise25_e4_v252_nextopen_20260320`
+- 汇总表：
+  - `daily_research/output/deep_alpha_vs_advanced_ml_alla_nextopen_20260320.csv`
+
+### 结果
+#### Advanced ML
+- 超额收益：`-12.51%`
+- 超额 Sharpe：`-0.577`
+- 超额最大回撤：`-24.77%`
+- 平均持仓数：`3.82`
+- 平均换手：`1.187`
+
+#### Deep Alpha
+- 超额收益：`-25.42%`
+- 超额 Sharpe：`-0.434`
+- 超额最大回撤：`-59.99%`
+- 平均持仓数：`4.46`
+- 平均换手：`1.168`
+
+### 结论
+- 这次全A `next_open` 正面对照的答案很明确：
+  - `deep_alpha` 没有在全A范围内保持住此前在高流动性样本里的优势。
+  - `advanced_ml` 虽然这一轮全A holdout 也没有跑赢基准，但整体仍然明显好于 `deep_alpha`。
+- 因此当前不能把 `deep_alpha` 视为“开始接近执行端”的候选主线。
+- 这次结果进一步确认：
+  - `deep_alpha` 当前的有效性仍然明显依赖高流动性环境。
+  - 它的泛化问题还没有解决。
+
+### 当前决策
+- `advanced_ml`
+  - 继续保留为执行端默认主线。
+- `deep_alpha`
+  - 继续作为研究主线。
+  - 当前不进入执行前最后验证阶段。
+
+### 下一步收敛
+- 不再优先讨论把 `deep_alpha` 接到执行端。
+- 研究重点继续回到：
+  1. 强化第一层 `return` 学习。
+  2. 把流动性当条件变量，而不是普通特征。
+  3. 优先解决“为什么只在高流动性环境里有效”的泛化问题。
+
+## 2026-03-20 流动性条件化 return 学习：top_liquidity vs other
+
+### 目标
+- 不再把流动性做成独立 `return head`，而是把它收缩成两类条件：
+  - `top_liquidity`
+  - `other`
+- 让流动性直接影响第一层 `return` 学习，而不是继续堆更复杂的结构：
+  1. `return loss` 权重
+  2. `ranking loss` 权重
+  3. `sample weighting`
+
+### 这次新增
+- 已在 `deep_alpha` 训练器里加入：
+  - `--liquidity-conditioning-mode top_vs_other`
+  - `--top-liquidity-return-loss-weight`
+  - `--top-liquidity-rank-loss-weight`
+  - `--top-liquidity-sample-weight`
+- 训练器现在会把最高流动性桶视为 `top_liquidity`，其余统一视为 `other`。
+- 这一版只影响第一层 `return` 学习，不再切独立 head。
+
+### 对照样本
+- 高流动性样本：
+  - `daily_research/output/deep_alpha_liquid500_20260319.txt`
+- 分层全A子样本：
+  - `daily_research/output/deep_alpha_stratified_alla800_20260320.txt`
+- 汇总表：
+  - `daily_research/output/deep_alpha_liquidity_conditioning_nextopen_compare_20260320.csv`
+
+### 结果
+#### liquid500
+- `shared baseline`
+  - 超额收益：`28.40%`
+  - 超额 Sharpe：`1.250`
+- `top_liquidity conditioning`（强）
+  - 超额收益：`128.91%`
+  - 超额 Sharpe：`4.639`
+- `top_liquidity conditioning`（轻）
+  - 超额收益：`310.10%`
+  - 超额 Sharpe：`6.913`
+
+#### stratified_all_a_800
+- `shared baseline`
+  - 超额收益：`-17.08%`
+  - 超额 Sharpe：`-0.418`
+- `top_liquidity conditioning`（强）
+  - 超额收益：`-30.16%`
+  - 超额 Sharpe：`-0.818`
+- `top_liquidity conditioning`（轻）
+  - 超额收益：`-12.39%`
+  - 超额 Sharpe：`-0.333`
+
+### 结论
+- 这一步说明方向是有价值的：
+  - 把流动性作为第一层 `return` 学习的条件变量，明显能放大 `liquid500` 上的 winner-picking 能力。
+- 但它还没有完成我们真正想要的目标：
+  - 在不牺牲高流动性优势的前提下，把分层全A泛化能力拉回来。
+- 当前最好的观察是：
+  - “轻条件化”比“强条件化”更稳。
+  - 它在分层全A上有改善，但仍然没有转正。
+
+### 当前判断
+- 这条线值得继续研究，但还不能视为已解决泛化问题。
+- 下一步不该再粗暴放大权重，而应该继续做：
+  1. 更平滑的流动性条件化 loss
+  2. 更细的高流动性/非高流动性状态诊断
+  3. 让条件化只增强进攻，不破坏广样本稳定性
+
+## 2026-03-20 更平滑的流动性条件化 loss + 结构拆解
+
+### 目标
+- 不再继续粗暴拉大 `top_liquidity` 的权重差，而是改成更平滑的条件化：
+  - `smooth_bucket`
+- 同时拆开回答两个更关键的问题：
+  1. 高流动性里到底强化了哪些结构
+  2. 非高流动性里到底是哪类结构在拖后腿
+
+### 本次改动
+- 训练器支持更平滑的流动性条件化：
+  - `--liquidity-conditioning-mode smooth_bucket`
+- 新增结构诊断脚本：
+  - `daily_research/deep_alpha/analyze_liquidity_structures.py`
+
+### 复验样本
+- 高流动性样本：
+  - `daily_research/output/deep_alpha_liquid500_20260319.txt`
+- 分层全A子样本：
+  - `daily_research/output/deep_alpha_stratified_alla800_20260320.txt`
+- 汇总表：
+  - `daily_research/output/deep_alpha_liquidity_conditioning_nextopen_compare_20260320.csv`
+
+### 结果
+#### liquid500
+- `shared baseline`
+  - 超额收益：`28.40%`
+  - 超额 Sharpe：`1.250`
+- `smooth_bucket`
+  - 超额收益：`2.55%`
+  - 超额 Sharpe：`0.056`
+- 对照结论：
+  - 更平滑不等于更强。
+  - 这版 `smooth_bucket` 明显弱于此前的轻度 `top_liquidity conditioning`，也弱于 `shared baseline`。
+
+#### stratified_all_a_800
+- `shared baseline`
+  - 超额收益：`-17.08%`
+  - 超额 Sharpe：`-0.418`
+- `smooth_bucket`
+  - 超额收益：`-12.39%`
+  - 超额 Sharpe：`-0.333`
+- 对照结论：
+  - `smooth_bucket` 没有转正，但和此前的“轻条件化”基本一致，说明：
+    - 平滑条件化能稍微减少广样本退化
+    - 但还不足以修复泛化
+
+### 结构拆解
+#### liquid500：高流动性里被强化的结构
+- 诊断目录：
+  - `daily_research/output/deep_alpha_liquid500_nextopen_smoothliq_20260320/liquidity_structure_analysis`
+- 增强最明显的结构：
+  1. `high_vol_expansion`
+     - `rankic_delta = +0.1607`
+     - `spread_delta = +0.1771`
+  2. `trend_breakout`
+     - `rankic_delta = +0.0295`
+     - `spread_delta = +0.0257`
+  3. `pullback_rebound`
+     - `rankic_delta = +0.0154`
+     - `spread_delta = +0.0063`
+- 解释：
+  - 条件化真正放大的，不是泛泛的“所有高流动性股票”，而是：
+    - 高流动性中的突破推进
+    - 高流动性中的高波动扩张
+    - 高流动性中的回踩反弹
+
+#### liquid500：非高流动性里拖后腿的结构
+- 退化最明显的结构：
+  1. `high_vol_expansion`
+     - `rankic_delta = -0.1613`
+     - `spread_delta = -0.0519`
+  2. `low_vol_trend`
+     - `rankic_delta = -0.0576`
+  3. `weak_structure`
+     - `rankic_delta = -0.0573`
+  4. `neutral_mixed`
+     - `spread_delta = -0.0285`
+- 解释：
+  - 这说明当前条件化会把“高流动性进攻结构”的偏好错误迁移到其他流动性层，导致：
+    - 中低流动性里的高波动扩张被误判
+    - 原本还能稳定工作的低波趋势、弱结构排序被破坏
+
+#### stratified_all_a_800：更广样本里的结构信号
+- 诊断目录：
+  - `daily_research/output/deep_alpha_stratified_alla800_nextopen_smoothliq_20260320/liquidity_structure_analysis`
+- 高流动性里仍然最有改善的是：
+  - `trend_breakout`
+    - `rankic_delta = +0.0400`
+- 但“other”组里退化最明显的是：
+  1. `neutral_mixed`
+     - `rankic_delta = -0.4210`
+  2. `pullback_rebound`
+     - `rankic_delta = -0.3157`
+  3. `trend_breakout`
+     - `rankic_delta = -0.0790`
+  4. `weak_structure`
+     - `spread_delta = -0.0472`
+
+### 当前结论
+- “流动性作为条件变量”这条主线仍然成立。
+- 但本次更平滑的 `smooth_bucket` 版本说明：
+  - 单纯把条件化做平滑，并不会自动带来更强泛化
+  - 真正被增强的是：
+    - 高流动性里的 `trend_breakout`
+    - 高流动性里的 `high_vol_expansion`
+  - 真正被破坏的是：
+    - 非高流动性里的 `neutral_mixed`
+    - `pullback_rebound`
+    - `low_vol_trend`
+    - `weak_structure`
+
+### 下一步收敛
+- 继续把流动性当条件变量，但不再先调大权重。
+- 下一步优先做：
+  1. 只对“高流动性进攻结构”做定向增强，而不是整体抬升高流动性权重
+  2. 对非高流动性里的 `neutral_mixed / pullback_rebound / low_vol_trend` 做保护性约束
+  3. 让条件化更多地影响 `listwise / ranking`，而不是简单放大所有 `return loss`
+
+## 2026-03-20 定向流动性结构增强：只强化进攻结构，保护 other 组基础排序
+
+### 目标
+- 不再继续粗暴放大高流动性整体权重。
+- 改成更定向的结构条件化：
+  - 只对 `top_liquidity` 下的
+    - `trend_breakout`
+    - `high_vol_expansion`
+    做排序增强
+  - 对 `other` 组里的
+    - `neutral_mixed`
+    - `pullback_rebound`
+    - `low_vol_trend`
+    做保护性排序加权
+- 条件化优先作用在：
+  - `pairwise rank loss`
+  - `listwise loss`
+- 尽量少碰全局 `return loss`
+
+### 本次改动
+- `daily_research/deep_alpha/sequence_dataset.py`
+  - 把结构标签接进训练语料：
+    - `trend_breakout`
+    - `pullback_rebound`
+    - `high_vol_expansion`
+    - `low_vol_trend`
+    - `weak_structure`
+    - `neutral_mixed`
+- `daily_research/deep_alpha/trainer.py`
+  - 新增定向结构条件化排序权重
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 新增参数：
+    - `--structure-conditioning-mode targeted_liquidity_rank`
+    - `--top-attack-structures`
+    - `--other-protect-structures`
+    - `--top-attack-rank-weight`
+    - `--other-protect-rank-weight`
+
+### 复验样本
+- 汇总表：
+  - `daily_research/output/deep_alpha_targeted_liquidity_structure_compare_20260320.csv`
+
+### 结果
+#### liquid500
+- `shared baseline`
+  - 超额收益：`28.40%`
+  - 超额 Sharpe：`1.250`
+- `top_liquidity conditioning`（轻）
+  - 超额收益：`310.10%`
+  - 超额 Sharpe：`6.913`
+- `smooth_bucket`
+  - 超额收益：`2.55%`
+  - 超额 Sharpe：`0.056`
+- `targeted_liquidity_rank`
+  - 超额收益：`193.62%`
+  - 超额 Sharpe：`5.309`
+  - 超额最大回撤：`-16.32%`
+
+#### stratified_all_a_800
+- `shared baseline`
+  - 超额收益：`-17.08%`
+  - 超额 Sharpe：`-0.418`
+- `top_liquidity conditioning`（轻）
+  - 超额收益：`-12.39%`
+  - 超额 Sharpe：`-0.333`
+- `smooth_bucket`
+  - 超额收益：`-12.39%`
+  - 超额 Sharpe：`-0.333`
+- `targeted_liquidity_rank`
+  - 超额收益：`-10.31%`
+  - 超额 Sharpe：`-0.251`
+  - 总收益：`4.64%`
+
+### 结构拆解
+#### liquid500：定向增强真正强化了什么
+- 诊断目录：
+  - `daily_research/output/deep_alpha_liquid500_nextopen_targetedrank_20260320/liquidity_structure_analysis`
+- `top_liquidity` 中提升最明显：
+  1. `high_vol_expansion`
+     - `rankic_delta = +0.2574`
+     - `spread_delta = +0.1802`
+  2. `pullback_rebound`
+     - 变化很小，基本持平
+  3. `trend_breakout`
+     - 本次没有被强化，反而略退化
+- 解释：
+  - 当前定向增强真正学出来的是：
+    - 高流动性里的高波动扩张进攻结构
+  - 但 `trend_breakout` 这条线还没被稳定激活出来
+
+#### liquid500：other 组里仍被拖后腿的结构
+- 退化最明显：
+  1. `neutral_mixed`
+     - `rankic_delta = -0.0929`
+  2. `low_vol_trend`
+     - `rankic_delta = -0.0751`
+  3. `high_vol_expansion`
+     - `rankic_delta = -0.0610`
+  4. `weak_structure`
+     - `spread_delta = -0.0162`
+- 解释：
+  - `other` 组的保护还不够。
+  - 尤其是：
+    - `neutral_mixed`
+    - `low_vol_trend`
+  这两类结构仍然会被进攻型排序偏好破坏。
+
+#### stratified_all_a_800：广样本里的变化
+- 诊断目录：
+  - `daily_research/output/deep_alpha_stratified_alla800_nextopen_targetedrank_20260320/liquidity_structure_analysis`
+- `top_liquidity` 中改善最明显：
+  1. `pullback_rebound`
+     - `rankic_delta = +0.0902`
+     - `spread_delta = +0.0412`
+  2. `neutral_mixed`
+     - `rankic_delta = +0.0431`
+  3. `high_vol_expansion`
+     - `rankic_delta = +0.0367`
+- `other` 组中：
+  - `neutral_mixed`
+  - `weak_structure`
+  - `trend_breakout`
+  实际上也出现了改善
+  - 但 `pullback_rebound` 仍明显退化
+
+### 当前结论
+- 这一步是有价值的，而且比 `smooth_bucket` 更接近我们想要的方向：
+  - 不靠整体粗暴抬权重
+  - 而是定向增强特定进攻结构
+- 它带来的变化是：
+  - `liquid500` 上继续显著增强
+  - `stratified_all_a_800` 上也比 `shared / smooth_bucket / 轻条件化` 更好
+- 但也要保持清醒：
+  - 分层全A子样本仍然是负超额
+  - 所以它还没有修复泛化问题，只是把问题从“整体失效”推进到了“更局部、可解释的失效”
+
+### 下一步收敛
+- 继续沿“定向结构增强”走，而不是回头做全局粗暴放大。
+- 下一步最值得做：
+  1. 继续想办法把 `trend_breakout` 在 `top_liquidity` 里真正强化出来
+  2. 对 `other` 组里的 `neutral_mixed / low_vol_trend / pullback_rebound` 加更强保护
+  3. 让保护优先作用在排序项，而不是全局 return loss
+
+## 2026-03-20 Advanced ML：next_open 口径下的高流动性基础池对照
+
+### 目标
+- 因为执行规则已经统一成：
+  - `盘后出策略`
+  - `次日开盘执行`
+- 所以前面基于旧交易假设得到的 `advanced_ml` 股票池结论，需要重新验证。
+- 这次直接用 `next_open` 口径，对：
+  - `liquid300`
+  - `liquid500`
+  - `liquid800`
+  做正面对照，判断执行端最适合的高流动性基础池。
+
+### 对照设置
+- 模型：
+  - `advanced_ml`
+  - `HistGB`
+  - 多周期 `5/10/20`
+  - 周期权重 `0.2 / 0.3 / 0.5`
+- 执行口径：
+  - `next_open`
+- 区间：
+  - `2024-01-01` 起
+- 输出汇总：
+  - `daily_research/output/advanced_ml_liquidity_pool_compare_20260320.csv`
+
+### 结果
+#### liquid300
+- 输出：
+  - `daily_research/output/advanced_ml_liquid300_nextopen_20260320`
+- 超额收益：`-0.76%`
+- 超额 Sharpe：`-0.016`
+- 超额最大回撤：`-37.04%`
+- 结论：
+  - 太窄了，edge 不稳，不适合作为执行端默认基础池。
+
+#### liquid500
+- 输出：
+  - `daily_research/output/advanced_ml_liquid500_nextopen_20260320`
+- 超额收益：`35.12%`
+- 超额 Sharpe：`0.577`
+- 超额最大回撤：`-26.54%`
+- 结论：
+  - 当前三组里，盈利能力最强。
+
+#### liquid800
+- 输出：
+  - `daily_research/output/advanced_ml_liquid800_nextopen_20260320`
+- 超额收益：`33.89%`
+- 超额 Sharpe：`0.563`
+- 超额最大回撤：`-25.49%`
+- 结论：
+  - 略逊于 `liquid500`，但更平衡一些。
+
+### 当前判断
+- 这次结论已经足够清楚：
+  - `advanced_ml` 在 `next_open` 口径下仍然有效
+  - 而且它在高流动性股票池里，明显好于此前更广的全A口径
+- 三组里最适合执行端高流动性基础池的是：
+  - **`liquid500`**
+- 如果更偏保守、想要稍微更平衡一点的风格，可以把：
+  - `liquid800`
+  作为备选
+- 但如果目标是“高盈利优先”，当前首选仍然是：
+  - `liquid500`
+
+### 含义
+- 这一步也反过来说明：
+  - 之前切到 `next_open` 之后，`advanced_ml` 在更广全A里表现变弱，不一定是模型完全失效
+  - 更大的原因是：股票池过宽，把可交易 edge 稀释掉了
+- 因此从执行角度看，后面不再追求“全A默认”，而改成：
+  - `high-liquidity specialist universe`
+
+### 下一步
+- 执行端主线建议切换成：
+  - `advanced_ml + liquid500`
+- 研究端继续：
+  - `deep_alpha` 在高流动性池里做更强进攻结构学习
+
+## 2026-03-20 执行端正式切换到 liquid500 基础池
+- 已给执行链路补齐 `--stocks-file` 支持：
+  - `daily_research/baseline/train_trade_model.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+- 新增流动性股票池更新脚本：
+  - `daily_research/execution/update_liquid_pool.py`
+- 新增共享工具：
+  - `daily_research/execution/liquidity_universe.py`
+- 新流程：
+  1. 盘后运行 `update_liquid_pool.py`
+  2. 默认刷新 `liquid300 / liquid500 / liquid800`
+  3. `update_model.py` 若未传 `--stocks` / `--stocks-file`，默认读 `liquid500_latest.txt`
+  4. `run_trade_plan.py` 若未传 `--stocks` / `--stocks-file`，默认读 `liquid500_latest.txt`
+- 已实际验证：
+  - `update_liquid_pool.py --start-date 20240101` 成功写入 `daily_research/execution/universe/`
+  - `run_trade_plan.py` 默认 liquid500 流程烟测通过：
+    - `daily_research/execution/output/liquid500_default_smoke`
+  - `update_model.py` 默认 liquid500 流程烟测通过：
+    - `daily_research/execution/models/_liquid500_default_smoke.json`
+- 当前判断：
+  - 执行端主线：`advanced_ml + liquid500`
+  - `deep_alpha` 继续作为高流动性专用研究主线推进
+
+## 2026-03-20 Deep Alpha 固定到每日更新 liquid500 / liquid800 研究池
+- 已在 `daily_research/deep_alpha/run_deep_alpha_research.py` 中新增 `--liquidity-pool`，支持直接读取：
+  - `liquid300`
+  - `liquid500`
+  - `liquid800`
+- 研究端现在可以直接复用执行端每日更新的固定股票池文件：
+  - `daily_research/execution/universe/liquid500_latest.txt`
+  - `daily_research/execution/universe/liquid800_latest.txt`
+- 本轮继续用 `next_open` 口径、`Transformer + regression + pairwise/listwise + state_gate`，对每日更新的固定高流动性研究池做结构强化复验。
+
+### 对照设置
+- 基线：`shared`
+- 结构强化：`targeted_liquidity_rank`
+  - `top_attack_structures = trend_breakout, high_vol_expansion`
+  - `other_protect_structures = neutral_mixed, pullback_rebound, low_vol_trend`
+  - `top_attack_rank_weight = 1.2`
+  - `other_protect_rank_weight = 1.08`
+- 汇总：`daily_research/output/deep_alpha_fixed_liquidity_pool_compare_20260320.csv`
+
+### liquid500（每日更新固定池）
+- 基线输出：`daily_research/output/deep_alpha_liquid500_latest_shared_20260320`
+- 强化输出：`daily_research/output/deep_alpha_liquid500_latest_targetedrank_20260320`
+- `shared`
+  - 超额收益：`70.13%`
+  - 超额 Sharpe：`2.967`
+  - 超额最大回撤：`-11.14%`
+- `targetedrank`
+  - 超额收益：`76.38%`
+  - 超额 Sharpe：`2.302`
+  - 超额最大回撤：`-22.41%`
+- 结论：
+  - 结构强化把收益推高了，但风险调整后收益和回撤明显变差。
+  - 对当前每日更新的 `liquid500` 池来说，`shared` 仍然是更稳的高流动性研究基线。
+- 结构诊断：`daily_research/output/deep_alpha_liquid500_latest_targetedrank_20260320/liquidity_structure_analysis/diagnosis.json`
+  - 被明显伤到的仍然是：`high_vol_expansion`、`trend_breakout`
+  - `other` 组里继续拖后腿的主要是：`neutral_mixed`、`low_vol_trend`、`weak_structure`
+
+### liquid800（每日更新固定池）
+- 基线输出：`daily_research/output/deep_alpha_liquid800_latest_shared_20260320`
+- 强化输出：`daily_research/output/deep_alpha_liquid800_latest_targetedrank_20260320`
+- `shared`
+  - 超额收益：`64.92%`
+  - 超额 Sharpe：`1.983`
+  - 超额最大回撤：`-19.18%`
+- `targetedrank`
+  - 超额收益：`49.24%`
+  - 超额 Sharpe：`1.199`
+  - 超额最大回撤：`-29.01%`
+- 结论：
+  - 对当前每日更新的 `liquid800` 池，`targetedrank` 明显不如 `shared`。
+- 结构诊断：`daily_research/output/deep_alpha_liquid800_latest_targetedrank_20260320/liquidity_structure_analysis/diagnosis.json`
+  - 从结构指标上看，`trend_breakout / high_vol_expansion` 在 `top_liquidity` 内其实被强化了
+  - 但组合层结果仍然变差，说明当前问题已经不只是“结构学没学到”，而是强化方式把风险/组合映射也一并扭坏了
+
+### 当前判断
+- `deep_alpha` 研究端现在正式固定为：
+  - `liquid500`：高流动性主研究池
+  - `liquid800`：更广的高流动性验证池
+- 这轮结果说明：
+  - 使用每日更新固定池是对的
+  - 但当前这版结构强化（`targeted_liquidity_rank`）不够稳，暂不升级为新基线
+- 后续继续沿“高流动性专用研究”推进，但默认参考基线改成：
+  - `liquid500 shared`
+  - `liquid800 shared`
+
+## 2026-03-20 历史滚动高流动性股票池研究框架落地
+- 目的：
+  - 让研究端和当前交易模式彻底对齐
+  - 不再用 `liquid500_latest.txt / liquid800_latest.txt` 静态回看历史
+  - 正式解决高流动性研究里的成分前视/生存者偏差问题
+
+### 本次新增
+- `daily_research/execution/liquidity_universe.py`
+  - 新增 `build_rolling_liquidity_membership(...)`
+  - 能按历史 `ADV20` 排名构建：
+    - `liquid300`
+    - `liquid500`
+    - `liquid800`
+  - 默认每 `21` 个交易日重建一次
+- `daily_research/deep_alpha/sequence_dataset.py`
+  - 新增 `universe_membership_frame` 过滤
+  - 训练样本只会在“当期滚动股票池成员”里生成
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 新增：
+    - `--rolling-liquidity-pool`
+    - `--pool-rebalance-days`
+    - `--pool-adv-window`
+  - 输出：
+    - `rolling_liquidity_schedule.csv`
+    - `rolling_liquidity_summary.csv`
+- `daily_research/baseline/run_advanced_daily_research.py`
+  - 新增同口径的历史滚动高流动性研究入口
+  - 可直接在 `advanced_ml` 上重做正式动态池验证
+
+### 这一步的意义
+- 执行端继续冻结：
+  - `advanced_ml + liquid500 + next_open`
+- 研究端主线继续保留：
+  - `deep_alpha`
+- 但从现在开始，凡是要讨论“是否接近执行端”的研究结论，都必须先通过：
+  1. 历史滚动高流动性股票池
+  2. `next_open`
+  3. 足够长的样本外窗口
+
+### 当前结论
+- 这一步不是模型优化，而是研究地基校准。
+- 从现在开始：
+  - `liquid500_latest / liquid800_latest` 仍可用于**快速研究迭代**
+  - **正式结论**优先看历史滚动高流动性框架
+
+## 2026-03-20 正式框架重验：rolling liquid500 + next_open 下的 advanced_ml vs deep_alpha
+- 目标：
+  - 不再用静态 `liquid500_latest.txt` 回看历史
+  - 改用历史滚动 `liquid500`
+  - 用与当前执行端一致的 `next_open` 口径，重新正面对照：
+    - `advanced_ml`
+    - `deep_alpha`
+
+### 实验设置
+- 股票池：历史滚动 `liquid500`
+- 重建频率：每 `21` 个交易日
+- 研究起点：`2022-01-01`
+- 对照窗口：`2025-03-07` 到 `2026-03-19`
+- 输出：
+  - `daily_research/output/advanced_ml_rolling_liq500_formal_20260320`
+  - `daily_research/output/deep_alpha_rolling_liq500_formal_20260320`
+  - `daily_research/output/deep_alpha_vs_advanced_ml_rolling_liq500_20260320.csv`
+
+### advanced_ml（正式框架）
+- 全样本输出：`daily_research/output/advanced_ml_rolling_liq500_formal_20260320`
+- 动态历史池规模：
+  - `rolling_pool_union_size = 2704`
+  - `rolling_pool_rebalance_count = 49`
+- 同口径 holdout 切片：
+  - `window_start = 2025-03-07`
+  - `window_end = 2026-03-19`
+  - 超额收益：`12.44%`
+  - 超额 Sharpe：`0.323`
+  - 超额最大回撤：`-41.39%`
+
+### deep_alpha（正式框架）
+- 输出：`daily_research/output/deep_alpha_rolling_liq500_formal_20260320`
+- 配置：
+  - `Transformer`
+  - `regression + pairwise/listwise`
+  - `state_gate`
+- 样本：
+  - `train_samples = 208705`
+  - `valid_samples = 107804`
+- holdout：
+  - `valid_start = 2025-03-07`
+  - 超额收益：`30.12%`
+  - 超额 Sharpe：`1.048`
+  - 超额最大回撤：`-17.86%`
+
+### 结论
+- 在“历史滚动高流动性股票池 + next_open”这套正式框架下：
+  - `deep_alpha` 重新建立了对 `advanced_ml` 的优势
+  - 而且不是只赢收益，风险调整后收益和回撤也更优
+- 这一步很关键，因为它说明：
+  - 之前的静态池偏差确实会干扰判断
+  - 但把框架校准正确后，`deep_alpha` 在高流动性专用模式下仍然有真实 edge
+
+### 当前决策
+- 执行端**暂不立即切换**
+  - 继续保持：`advanced_ml + liquid500 + next_open`
+- 但 `deep_alpha` 的状态升级为：
+  - **重新进入执行前最后验证阶段候选**
+- 接下来不再优先做宽泛模型微调，而是：
+  1. 在同一正式框架下继续做更多 holdout / walk-forward 复验
+  2. 如果优势继续保持，再进入 shadow mode 或执行候选阶段
+
+## 2026-03-20 rolling liquid500 + next_open 多窗口 walk-forward 复验
+### 目的
+- 不再只看单一 holdout 的漂亮结果。
+- 在同一正式框架下继续验证 `deep_alpha`：
+  - 历史滚动 `liquid500`
+  - `next_open`
+  - 与当前执行主线 `advanced_ml` 做同池同口径对照
+- 只有多窗口结果也稳定，才允许讨论 `shadow mode`。
+
+### 对照窗口与输出
+- 汇总：`daily_research/output/deep_alpha_rolling_liq500_walkforward_compare_20260320.csv`
+- `deep_alpha`
+  - `daily_research/output/deep_alpha_rolling_liq500_wf_20240822_20250305`
+  - `daily_research/output/deep_alpha_rolling_liq500_wf_20250306_20250904`
+  - `daily_research/output/deep_alpha_rolling_liq500_wf_20250905_20260319`
+- `advanced_ml` 基准切片
+  - `daily_research/output/advanced_ml_rolling_liq500_formal_20260320`
+
+### 结果
+#### 窗口 1：`2024-08-22 -> 2025-03-05`
+- `advanced_ml`
+  - 超额收益：`57.54%`
+  - 超额 Sharpe：`2.489`
+  - 超额最大回撤：`-24.42%`
+- `deep_alpha`
+  - 超额收益：`16.23%`
+  - 超额 Sharpe：`1.912`
+  - 超额最大回撤：`-7.91%`
+
+#### 窗口 2：`2025-03-06 -> 2025-09-04`
+- `advanced_ml`
+  - 超额收益：`49.30%`
+  - 超额 Sharpe：`3.026`
+  - 超额最大回撤：`-21.16%`
+- `deep_alpha`
+  - 超额收益：`-9.65%`
+  - 超额 Sharpe：`-0.692`
+  - 超额最大回撤：`-14.62%`
+
+#### 窗口 3：`2025-09-05 -> 2026-03-19`
+- `advanced_ml`
+  - 超额收益：`-28.78%`
+  - 超额 Sharpe：`-1.382`
+  - 超额最大回撤：`-41.39%`
+- `deep_alpha`
+  - 超额收益：`25.88%`
+  - 超额 Sharpe：`2.889`
+  - 超额最大回撤：`-8.66%`
+
+### 结论
+- `deep_alpha` 在正式框架下不是偶然强一次，它在最近窗口里确实表现出明显优势。
+- 但它还没有形成“多数窗口稳定压过 `advanced_ml`”的形态。
+- 尤其 `2025-03-06 -> 2025-09-04` 这一段，`deep_alpha` 明显失守，说明当前泛化还不够稳。
+
+### 当前决策
+- **暂不进入 `shadow mode`**
+- 执行端继续冻结为：`advanced_ml + liquid500 + next_open`
+- `deep_alpha` 继续保留为最有前景的研究主线，但下一阶段目标从“接近执行端”退回到“先把正式框架下的稳定性做出来”
+
+### 下一步
+1. 优先分析 `2025-03-06 -> 2025-09-04` 弱窗口里 `deep_alpha` 的失效结构。
+2. 所有后续 `deep_alpha` 增强，必须继续在：
+   - 历史滚动 `liquid500`
+   - `next_open`
+   - 多窗口 walk-forward
+   这套正式框架下验证。
+3. 只有多窗口稳定优于 `advanced_ml` 后，才重新讨论 `shadow mode`。
+
+## 2026-03-21 trend_up_low_vol 定向排序增强复验
+### 目标
+- 只围绕 `trend_up_low_vol` 做第一层 return 学习增强。
+- 优先修：
+  - `neutral_mixed`
+  - `pullback_rebound`
+  - `trend_breakout`
+- `low_vol_trend` 只做轻保护，不做激进强化。
+- 所有新方案继续固定在：
+  - 历史滚动 `liquid500`
+  - `next_open`
+  - 多窗口 walk-forward
+
+### 本次实现
+- 新增 `state_targeted_rank` 条件化模式：
+  - 仅在目标状态下，对指定结构放大 pairwise/listwise 排序权重
+  - 对 `low_vol_trend` 只做轻保护
+- 关键代码：
+  - `daily_research/deep_alpha/sequence_dataset.py`
+  - `daily_research/deep_alpha/trainer.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+- 对照汇总：
+  - `daily_research/output/deep_alpha_state_targeted_rank_compare_20260321.csv`
+
+### 结果
+#### 窗口 1：`2024-08-22 -> 2025-03-05`
+- `deep_alpha shared`
+  - 超额收益：`16.23%`
+  - 超额 Sharpe：`1.912`
+- `deep_alpha state_targeted_rank`
+  - 超额收益：`-4.94%`
+  - 超额 Sharpe：`-0.410`
+
+#### 窗口 2：`2025-03-06 -> 2025-09-04`
+- `deep_alpha shared`
+  - 超额收益：`-9.65%`
+  - 超额 Sharpe：`-0.692`
+- `deep_alpha state_targeted_rank`
+  - 超额收益：`-30.40%`
+  - 超额 Sharpe：`-2.881`
+
+#### 窗口 3：`2025-09-05 -> 2026-03-19`
+- `deep_alpha shared`
+  - 超额收益：`25.88%`
+  - 超额 Sharpe：`2.889`
+- `deep_alpha state_targeted_rank`
+  - 超额收益：`7.31%`
+  - 超额 Sharpe：`0.845`
+
+### 结论
+- 这条“直接在 loss 里做状态+结构定向放大”的路线，当前并不成立。
+- 它不只没修复弱窗口，反而在三个窗口里都比 `shared` 更差。
+- 这说明：
+  - 当前问题不是“这些结构没有信息量”
+  - 而是**直接对 ranking loss 做显式放大，会把组合映射带偏**
+
+### 当前判断
+- `deep_alpha` 继续保留为研究主线。
+- 但后续不再优先尝试这种直接的 state-targeted loss 放大。
+- 接下来更合理的方向应该是：
+  1. 继续保留正式框架不变
+  2. 不再直接扭 ranking loss 权重
+  3. 转向更轻的结构表达/表示学习增强，而不是显式硬加权
+
+## 2026-03-21 deep_alpha 弱窗口失效结构诊断
+### 目的
+- 解释 `2025-03-06 -> 2025-09-04` 这段 walk-forward 弱窗口里，为什么 `deep_alpha` 明显输给了 `advanced_ml`。
+- 固化后续研究纪律：
+  - 所有增强继续在
+    - 历史滚动 `liquid500`
+    - `next_open`
+    - 多窗口 walk-forward
+    下验证。
+
+### 输出
+- 诊断目录：`daily_research/output/deep_alpha_rolling_liq500_walkforward_failure_20260321`
+- 关键文件：
+  - `state_compare_summary.csv`
+  - `structure_compare_summary.csv`
+  - `state_structure_compare_summary.csv`
+  - `liquidity_bucket_compare_summary.csv`
+  - `diagnosis.json`
+
+### 关键发现
+#### 1. 弱窗口不是“全局都坏”，而是特定状态明显失守
+- 弱窗口：`2025-03-06 -> 2025-09-04`
+- 强窗口：`2025-09-05 -> 2026-03-19`
+- 最关键差异在 `trend_up_low_vol`：
+  - 弱窗口里，`deep_alpha` 的 `score_true20_rankic` 只有 `0.0165`
+  - 强窗口里，同一状态升到 `0.1667`
+  - 弱窗口里，这个状态的 top-bottom spread 还是负的：`-0.0273`
+  - 强窗口里转正到：`0.0275`
+- 这说明当前 `deep_alpha` 的主要问题不是“不会识别高流动性机会”，而是：
+  - **在最重要的上涨低波状态里，排序稳定性不足**
+
+#### 2. 弱窗口里真正拖后腿的结构
+- 在 `trend_up_low_vol` 下，最明显的拖累结构是：
+  - `neutral_mixed`
+  - `pullback_rebound`
+  - `trend_breakout`
+- 这些结构在弱窗口里都出现了：
+  - rankIC 低
+  - spread 为负
+- 而到了强窗口，同样几类结构都明显改善并转正。
+
+#### 3. `low_vol_trend` 依然是持续性薄弱点
+- 不管弱窗口还是强窗口，`low_vol_trend` 都偏弱。
+- 弱窗口里更差：
+  - 结构级 `score_true20_rankic = -0.0257`
+- 强窗口里虽然回升，但也只到：
+  - `0.0060`
+- 这说明这类结构目前还不值得优先强化，反而更适合作为保护或降权对象。
+
+#### 4. 流动性本身不是主矛盾，状态与结构的耦合才是
+- 弱窗口和强窗口的主样本都集中在最高流动性桶：
+  - 弱窗口 `bucket4` 样本 `43749`
+  - 强窗口 `bucket4` 样本 `45455`
+- 也就是说，当前失败并不是“流动性不够高”，而是：
+  - **同样高流动性下，不同市场状态里的结构排序学得不够稳**
+
+### 当前判断
+- `deep_alpha` 仍然是最有前景的研究主线。
+- 但当前最该修的不是：
+  - 更换执行主线
+  - 直接进入 `shadow mode`
+- 而是：
+  - 继续强化 `trend_up_low_vol` 下的 winner-picking
+  - 优先修复 `neutral_mixed / pullback_rebound / trend_breakout`
+  - 对 `low_vol_trend` 保持谨慎，先保护不放大
+
+### 研究纪律
+1. 执行端继续冻结为：`advanced_ml + liquid500 + next_open`
+2. 后续所有 `deep_alpha` 增强都必须继续在：
+   - 历史滚动 `liquid500`
+   - `next_open`
+   - 多窗口 walk-forward
+   下验证
+3. 只有多窗口稳定赢过 `advanced_ml`，才重新讨论 `shadow mode`
+
+## 2026-03-21 执行端 / 研究端口径复核
+### 结论
+- 当前执行端和研究端不是“完全同频”，但这是**有意为之**，而且当前判断是合理的。
+- 二者当前已经对齐的部分：
+  - 都围绕高流动性股票池；
+  - 都采用 `next_open` 交易口径；
+  - 执行端冻结为 `advanced_ml + liquid500 + next_open`。
+- 二者当前故意保留差异的部分：
+  - 执行端流动池：`每日盘后更新 liquid500_latest.txt`；
+  - 正式研究端流动池：`历史滚动 liquid500/liquid800`，默认每 `21` 个交易日重建一次。
+
+### 这样设计的原因
+- 执行端的目标是“明天开盘实际买什么”，所以应优先使用最新已完成交易日的流动性排名结果。
+- 正式研究端的目标是“做可信验证”，所以必须避免拿今天的静态股票池回看历史，并降低过于频繁换池带来的噪声。
+
+### 当前治理规则
+1. `liquid500_latest.txt / liquid800_latest.txt`：用于执行端与快速研究诊断。
+2. 历史滚动 `liquid500 / liquid800`：用于正式研究结论与策略晋级评估。
+3. 没有在正式框架下通过验证的研究结果，不进入执行端，也不直接讨论 shadow mode。
+
+## 2026-03-21 轻量结构表达增强：上下文嵌入复验
+### 目标
+- 保持正式框架不变：历史滚动 `liquid500`、`next_open`、多窗口 walk-forward。
+- 不再直接扭 ranking loss 权重。
+- 改为让模型更好表示结构信息：把 `state_id / liquidity_bucket / structure_id` 作为轻量上下文嵌入输入第一层 return 学习。
+
+### 实现
+- `MultiTaskRanker` 新增可选上下文嵌入：
+  - `--state-context`
+  - `--liquidity-context`
+  - `--structure-context`
+  - `--context-dim`
+- 这些上下文不改变 loss 权重，只在编码器输出后做轻量表示融合。
+- 本轮验证使用：`state + liquidity + structure` 三类上下文同时开启。
+
+### 对照结果
+- 汇总文件：`daily_research/output/deep_alpha_structure_context_compare_20260321.csv`
+
+#### 窗口 1：`2024-08-22 -> 2025-03-05`
+- `shared`
+  - 超额收益：`16.23%`
+  - 超额 Sharpe：`1.912`
+- `context_repr`
+  - 超额收益：`-10.99%`
+  - 超额 Sharpe：`-0.977`
+
+#### 窗口 2：`2025-03-06 -> 2025-09-04`
+- `shared`
+  - 超额收益：`-9.65%`
+  - 超额 Sharpe：`-0.692`
+- `context_repr`
+  - 超额收益：`-2.67%`
+  - 超额 Sharpe：`-0.338`
+
+#### 窗口 3：`2025-09-05 -> 2026-03-19`
+- `shared`
+  - 超额收益：`25.88%`
+  - 超额 Sharpe：`2.889`
+- `context_repr`
+  - 超额收益：`-11.66%`
+  - 超额 Sharpe：`-1.297`
+
+### 结论
+- 这条“轻量结构表达增强”思路本身是对的，但当前这版上下文嵌入实现不成立。
+- 它在弱窗口里有一定修复迹象，但明显破坏了两个本来表现较强的窗口。
+- 也就是说：
+  - 直接做 loss 级硬加权不对；
+  - 当前这版把 `state/liquidity/structure` 一起作为上下文嵌入也不对。
+- 下一步更合理的方向应当更克制：
+  1. 不再一次性塞入三类上下文；
+  2. 优先尝试更轻的结构表达，例如只做结构原型或结构平滑通道；
+  3. 继续固定在正式框架下验证，没过多窗口就不讨论 `shadow mode`。
+
+## 2026-03-22 辅助结构识别任务：正式框架复验
+### 目标
+- 在不改正式框架的前提下，尝试一条更轻的结构表达增强路线：
+  - 不直接扭 `ranking loss` 权重；
+  - 不再把 `state / liquidity / structure` 一起塞进上下文嵌入；
+  - 改为增加一个**辅助结构识别任务**，让第一层表示更懂结构，再观察 return 排序是否改善。
+
+### 实现
+- `MultiTaskRanker` 新增轻量 `structure` 分类头。
+- 新参数：
+  - `--aux-structure-task`
+  - `--aux-structure-loss-weight`
+  - `--aux-structure-label-smoothing`
+- 主任务仍然保持：
+  - `raw return`
+  - `pairwise + listwise`
+  - `state_gate`
+- 正式验证继续固定在：
+  - 历史滚动 `liquid500`
+  - `next_open`
+  - 多窗口 walk-forward
+
+### 输出
+- 汇总文件：`daily_research/output/deep_alpha_aux_structure_walkforward_compare_20260322.csv`
+- 三个窗口输出：
+  - `daily_research/output/deep_alpha_rolling_liq500_auxstruct_wf_20240822_20250305`
+  - `daily_research/output/deep_alpha_rolling_liq500_auxstruct_wf_20250306_20250904`
+  - `daily_research/output/deep_alpha_rolling_liq500_auxstruct_wf_20250905_20260319`
+
+### 结果
+#### 窗口 1：`2024-08-22 -> 2025-03-05`
+- `shared`
+  - 超额收益：`16.23%`
+  - 超额 Sharpe：`1.912`
+- `aux_structure_task`
+  - 超额收益：`4.21%`
+  - 超额 Sharpe：`0.177`
+  - 结构识别准确率：`74.50%`
+
+#### 窗口 2：`2025-03-06 -> 2025-09-04`
+- `shared`
+  - 超额收益：`-9.65%`
+  - 超额 Sharpe：`-0.692`
+- `aux_structure_task`
+  - 超额收益：`9.62%`
+  - 超额 Sharpe：`0.558`
+  - 结构识别准确率：`77.07%`
+
+#### 窗口 3：`2025-09-05 -> 2026-03-19`
+- `shared`
+  - 超额收益：`25.88%`
+  - 超额 Sharpe：`2.889`
+- `aux_structure_task`
+  - 超额收益：`-11.66%`
+  - 超额 Sharpe：`-1.485`
+  - 结构识别准确率：`83.16%`
+
+### 结论
+- 这条路线的信号很清楚：
+  - 结构标签本身是**可学的**，因为辅助识别准确率并不低；
+  - 但“学会识别结构”并不自动等于“更会做 return 排序”。
+- 它确实修复了最弱窗口 `2025-03-06 -> 2025-09-04`；
+- 但同时明显破坏了另外两个窗口，尤其是原本最强的 `2025-09-05 -> 2026-03-19`。
+- 因此当前判断是：
+  - **辅助结构识别任务不适合直接升级成 deep_alpha 主线配置**；
+  - 但它证明了“结构表达增强”方向仍然成立，只是这版辅助任务与 return 排序的耦合方式不对。
+
+### 后续约束
+1. 执行端继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `deep_alpha` 继续保留为研究主线
+3. 结构增强后续优先尝试：
+   - 更单一的结构原型
+   - 或结构平滑通道
+4. 所有新方案继续固定在：历史滚动 `liquid500`、`next_open`、多窗口 walk-forward
+
+## 2026-03-22 结构原型增强：正式框架复验
+### 目标
+- 继续保持正式框架不变：历史滚动 `liquid500`、`next_open`、多窗口 walk-forward。
+- 不直接扭 `ranking loss` 权重，也不再加更多上下文信号。
+- 改为让 embedding 围绕结构原型自然整理几何空间，观察能否更平稳地修复 return 排序。
+
+### 实现
+- `MultiTaskRanker` 新增可选 `structure_prototypes` 原型矩阵。
+- 训练期增加轻量 prototype loss：
+  - 用 embedding 与对应结构原型的相似度做约束；
+  - 不直接改写主 return / ranking loss。
+- 新参数：
+  - `--structure-prototype-task`
+  - `--structure-prototype-loss-weight`
+  - `--structure-prototype-temperature`
+
+### 输出
+- 汇总文件：`daily_research/output/deep_alpha_structure_prototype_walkforward_compare_20260322.csv`
+- 三个窗口输出：
+  - `daily_research/output/deep_alpha_rolling_liq500_proto_wf_20240822_20250305`
+  - `daily_research/output/deep_alpha_rolling_liq500_proto_wf_20250306_20250904`
+  - `daily_research/output/deep_alpha_rolling_liq500_proto_wf_20250905_20260319`
+
+### 结果
+#### 窗口 1：`2024-08-22 -> 2025-03-05`
+- `shared`
+  - 超额收益：`16.23%`
+  - 超额 Sharpe：`1.912`
+- `structure_prototype`
+  - 超额收益：`-9.01%`
+  - 超额 Sharpe：`-0.338`
+  - 原型识别准确率：`73.18%`
+
+#### 窗口 2：`2025-03-06 -> 2025-09-04`
+- `shared`
+  - 超额收益：`-9.65%`
+  - 超额 Sharpe：`-0.692`
+- `structure_prototype`
+  - 超额收益：`-4.23%`
+  - 超额 Sharpe：`-0.286`
+  - 原型识别准确率：`79.29%`
+
+#### 窗口 3：`2025-09-05 -> 2026-03-19`
+- `shared`
+  - 超额收益：`25.88%`
+  - 超额 Sharpe：`2.889`
+- `structure_prototype`
+  - 超额收益：`-7.98%`
+  - 超额 Sharpe：`-1.084`
+  - 原型识别准确率：`83.76%`
+
+### 结论
+- 结构原型同样证明了“结构可表示”这件事是成立的：原型识别准确率也不低。
+- 但它和辅助结构识别任务有类似问题：
+  - 确实对最弱窗口有小幅修复；
+  - 但仍然破坏了两个本来更强的窗口。
+- 因此当前判断是：
+  - **结构原型增强也还不适合升级为 deep_alpha 主线配置**；
+  - 它比直接硬加权更合理，但还没找到与 return ranking 稳定对齐的过渡方式。
+
+### 后续约束
+1. 执行端继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `deep_alpha` 继续保留为研究主线
+3. 后续结构表达增强更应该走：
+   - 更轻的结构平滑通道
+   - 或更细的单结构局部表达
+4. 不再继续堆叠“能识别结构但不能稳定提升排序”的辅助任务线
+
+## 2026-03-22 Deep Alpha 表示学习主线升级
+### 决策
+- 下一阶段的大方向收敛为：
+  - `patch-based masked self-supervised pretraining + return ranking fine-tune`
+- 辅助任务、原型约束、本地 loss 重加权不再作为主研究路线。
+- 正式评价框架保持不变：
+  - rolling `liquid500`
+  - `next_open`
+  - multi-window walk-forward
+
+### 已交付的新框架
+- 新编码器族：
+  - `patch_transformer`
+- 新预训练模型：
+  - `MaskedPatchPretrainer`
+- 新入口脚本：
+  - `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
+- fine-tune 入口新增支持：
+  - `--encoder-family patch_transformer`
+  - `--patch-len`
+  - `--pretrained-encoder-path`
+
+### 本阶段研究规则
+1. 先在没有 return label 的条件下预训练编码器。
+2. 再用同一编码器做 return ranking fine-tune。
+3. 正式 A/B 只比较两组：
+   - `shared baseline`
+   - `masked-pretrained encoder + ranking fine-tune`
+4. 如果它只修复弱窗口、却破坏强窗口，就停止推进。
+5. 如果它没有在多窗口 walk-forward 中比 `shared` 更稳，也停止推进。
+
+### 烟测验证
+- 预训练烟测：
+  - `daily_research/output/deep_alpha_pretrain_smoke_20260322`
+- fine-tune 烟测：
+  - `daily_research/output/deep_alpha_pretrained_finetune_smoke_20260322`
+- 结论：
+  - 两阶段流程已经可以端到端跑通；
+  - 预训练编码器可以被 fine-tune 正常加载；
+  - 下一步转入正式 A/B。
+
+## 2026-03-22 正式 A/B：`shared` 基线 vs 掩码预训练编码器
+### 正式框架
+- rolling `liquid500`
+- `next_open`
+- multi-window walk-forward
+- 只比较：
+  - 当前 `shared baseline`
+  - `masked-pretrained encoder + ranking fine-tune`
+
+### 预训练运行
+- `daily_research/output/deep_alpha_pretrain_liq500_formal_20240822_20250305`
+- `daily_research/output/deep_alpha_pretrain_liq500_formal_20250306_20250904`
+- `daily_research/output/deep_alpha_pretrain_liq500_formal_20250905_20260319`
+
+### 微调运行
+- `daily_research/output/deep_alpha_pretrained_liq500_formal_20240822_20250305`
+- `daily_research/output/deep_alpha_pretrained_liq500_formal_20250306_20250904`
+- `daily_research/output/deep_alpha_pretrained_liq500_formal_20250905_20260319`
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrained_walkforward_compare_20260322.csv`
+
+### 结果摘要
+1. 窗口 `2024-08-22 -> 2025-03-05`
+- `shared`: excess return `16.23%`, excess Sharpe `1.912`, excess MDD `-7.91%`
+- `pretrained`: excess return `20.74%`, excess Sharpe `0.620`, excess MDD `-23.14%`
+- 解读：
+  - 收益略有提升，但稳定性明显变差。
+
+2. 窗口 `2025-03-06 -> 2025-09-04`
+- `shared`: excess return `-9.65%`, excess Sharpe `-0.692`, excess MDD `-14.62%`
+- `pretrained`: excess return `-19.04%`, excess Sharpe `-0.993`, excess MDD `-27.34%`
+- 解读：
+  - 最弱窗口没有被修复，反而更差。
+
+3. 窗口 `2025-09-05 -> 2026-03-19`
+- `shared`: excess return `25.88%`, excess Sharpe `2.889`, excess MDD `-8.66%`
+- `pretrained`: excess return `1.75%`, excess Sharpe `0.174`, excess MDD `-14.34%`
+- 解读：
+  - 原本最强的窗口被明显破坏。
+
+### 结论
+- 第一版大方向押注的 masked pretraining，并没有在正式框架下战胜当前 `shared` 基线。
+- 它触发了停止规则：
+  - 没有提升 walk-forward 稳定性；
+  - 让弱窗口更差；
+  - 明显破坏了最强窗口。
+- 当前决策：
+  - 执行端继续冻结为 `advanced_ml + liquid500 + next_open`
+  - `deep_alpha` 继续保留为研究主线
+  - 这版 masked-pretraining 配方先停止，不继续做局部打磨
+
+## 2026-03-22 预训练轮数敏感性检查
+### 问题
+- 需要确认第一版 masked-pretraining 的失败，是否主要来自预训练预算过低。
+- 本轮只改预训练 epoch 预算，其余配置保持不变。
+
+### 正式设置
+- rolling `liquid500`
+- `next_open`
+- fine-tune 配方保持不变
+- 代表性窗口：
+  - 弱窗口：`2025-03-06 -> 2025-09-04`
+  - 强窗口：`2025-09-05 -> 2026-03-19`
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrain_epoch_sensitivity_20260322.csv`
+
+### 结果
+#### 弱窗口 `2025-03-06 -> 2025-09-04`
+- `shared baseline`: excess return `-9.65%`, excess Sharpe `-0.692`
+- `pretrained 4e`: excess return `-19.04%`, excess Sharpe `-0.993`
+- `pretrained 8e`: excess return `-3.39%`, excess Sharpe `-0.166`
+- `pretrained 12e`: excess return `18.15%`, excess Sharpe `0.784`
+
+#### 强窗口 `2025-09-05 -> 2026-03-19`
+- `shared baseline`: excess return `25.88%`, excess Sharpe `2.889`
+- `pretrained 4e`: excess return `1.75%`, excess Sharpe `0.174`
+- `pretrained 8e`: excess return `-4.55%`, excess Sharpe `-0.540`
+- `pretrained 12e`: excess return `21.24%`, excess Sharpe `1.876`
+
+### 解读
+- 预训练预算影响非常大。
+- `4 epoch` 的失败不足以直接判死整条路线。
+- `8 epoch` 依然不够。
+- `12 epoch` 已经明显改变结论：
+  - 修复了弱窗口；
+  - 不再像早期版本那样彻底破坏强窗口；
+  - 但仍未在强窗口上稳定战胜 `shared` 基线。
+
+### 决策
+- 这条 masked-pretraining 路线先不判死。
+- 但也不能提前晋级。
+- 下一步需要用 `12 epoch` 预训练，在完整多窗口上再做一次正式结论。
+
+## 2026-03-22 训练预算护栏与本机运行策略
+### 为什么需要这一步
+- 第一版 `masked pretraining v1` 的结论被低预算预训练明显扭曲。
+- 当时 `4 epoch` 结束时，预训练验证损失还在下降，而 fine-tune 已经接近平稳。
+- 这说明问题不只在配方本身，也在于我们缺少识别 `undertraining` 的护栏。
+
+### 代码改动
+- 为 `deep_alpha` fine-tune 与 masked pretraining 同时加入训练诊断：
+  - `best_epoch`
+  - `best_valid_loss`
+  - `final_valid_loss`
+  - `stopped_early`
+  - `still_improving`
+  - `status`
+  - `recommendation`
+- 两个阶段都加入：
+  - `ReduceLROnPlateau`
+  - best-checkpoint restore
+  - early stopping
+- 为当前本机增加安全运行策略：
+  - `patch_transformer` batch size 上限 `192`
+  - Windows `num_workers` 上限 `2`
+  - `prefetch_factor=1`
+  - CUDA 可用时保留 `AMP`
+
+### 当前决策
+- 以后正式研究不能在不看训练诊断的情况下直接判死一条路线。
+- 如果 `status = undertrained`，就不能给最终判决。
+- 当前机器的推荐运行画像是：
+  - 低 worker 数
+  - 复用缓存
+  - 中等 batch size
+  - 开启 AMP
+
+### 下一步
+- 用 `12 epoch` 预训练重新跑完整正式结论。
+- 正式框架保持不变：
+  - rolling `liquid500`
+  - `next_open`
+  - multi-window walk-forward
+
+## 2026-03-22 正式框架提速：`train_eval` 窗口裁剪
+### 问题
+- 正式 `deep_alpha` 流程变慢，不只是模型质量问题。
+- 训练后的评估链条在当前本机上已经过重。
+- 主要瓶颈是：
+  - full-train `train_eval_loader`
+  - then fitting `score_head`
+  - then fitting `state_gate`
+
+### 修正
+- 正式框架保持不变：
+  - rolling `liquid500`
+  - `next_open`
+  - multi-window walk-forward
+- 但把 `train_eval_loader` 裁剪为最近一段 train-side 窗口，而不是整段训练区间。
+- 新默认值：
+  - `train_eval_window_days = 126`
+- 这样既让校准更贴近近期市场，又显著降低正式运行成本。
+
+### 代码改动
+- `daily_research/deep_alpha/config.py`
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+
+### 新规则
+- 不再默认使用 full-train 的 score-head / state-gate 拟合。
+- 如需恢复旧行为，可显式加：
+  - `--train-eval-window-days 0`
+
+## 2026-03-22 更轻正式框架下的 12 轮预训练完整结论
+### 为什么重跑
+- 第一版 `12 epoch` 正式结论仍混杂了更重的后处理评估链条。
+- 因此这次在更轻的正式默认值下重新跑完整 walk-forward：
+  - rolling `liquid500`
+  - `next_open`
+  - `train_eval_window_days = 126`
+  - explicit `num_workers = 0`
+
+### 输出
+- 汇总：
+  - `daily_research/output/deep_alpha_pretrained_e12_lite126_walkforward_compare_20260322.csv`
+- fine-tune 窗口：
+  - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20240822_20250305`
+  - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20250306_20250904`
+  - `daily_research/output/deep_alpha_pretrained_liq500_formal_e12_lite126_wf_20250905_20260319`
+
+### 结果
+#### 窗口 `2024-08-22 -> 2025-03-05`
+- `shared baseline`: excess return `16.23%`, excess Sharpe `1.912`, excess MDD `-7.91%`
+- `pretrained e12 + lite126`: excess return `26.31%`, excess Sharpe `1.997`, excess MDD `-10.85%`
+
+#### 窗口 `2025-03-06 -> 2025-09-04`
+- `shared baseline`: excess return `-9.65%`, excess Sharpe `-0.692`
+- `pretrained e12 + lite126`: excess return `-5.87%`, excess Sharpe `-0.478`, excess MDD `-16.60%`
+
+#### 窗口 `2025-09-05 -> 2026-03-19`
+- `shared baseline`: excess return `25.88%`, excess Sharpe `2.889`, excess MDD `-8.66%`
+- `pretrained e12 + lite126`: excess return `14.41%`, excess Sharpe `1.566`, excess MDD `-6.16%`
+
+### 训练诊断
+- 预训练窗口 `2024-08-22 -> 2025-03-05`
+  - `status = undertrained`
+  - `best_epoch = 12/12`
+- 预训练窗口 `2025-03-06 -> 2025-09-04`
+  - `status = stable`
+  - `best_epoch = 10/12`
+- 预训练窗口 `2025-09-05 -> 2026-03-19`
+  - `status = undertrained`
+  - `best_epoch = 12/12`
+
+### 解读
+- 更轻的正式框架显著提升了本机研究吞吐，让完整结论可以稳定跑完。
+- 在这套更干净的设置下，`12 epoch` masked pretraining 明显强于最早的 `4 epoch` 版本。
+- 当前它已经：
+  - 改善了第一个窗口的收益与 Sharpe；
+  - 修复了部分弱窗口；
+  - 但仍然没有保护住最强窗口的收益与 Sharpe。
+- 更关键的是：
+  - 窗口 `1` 与 `3` 的预训练结束时仍是 `undertrained`。
+
+### 决策
+- 按新的训练护栏，这条路线现在仍不能拿最终配方判决。
+- 当前既不晋级执行，也不直接判死。
+- 下一步：
+  - 保持同一正式框架；
+  - 把预训练预算上限从 `12 -> 16`；
+  - 优先处理仍未平台化的窗口 `1` 与 `3`。
+
+## 2026-03-22 自适应预训练预算支持
+### 为什么新增
+- 当前已经有足够证据表明：预训练预算会实质性改变研究结论。
+- 因此不应该每次都凭经验猜一个固定上限。
+- 更合理的方式是：
+  - 当诊断仍显示 `undertrained` 时，允许在同一轮运行里自动续训；
+  - 同时保留明确的硬上限。
+
+### 改动
+- `daily_research/deep_alpha/trainer.py`
+- `daily_research/deep_alpha/pretrain_deep_alpha_encoder.py`
+
+新增预训练控制参数：
+- `--auto-extend-undertrained`
+- `--epoch-extend-step`
+- `--max-total-epochs`
+
+行为：
+- 预训练先从指定的 `--epochs` 启动；
+- 如果跑到上限后诊断仍为 `undertrained`，预算会按 `epoch_extend_step` 自动上调；
+- 到达 `max_total_epochs` 后停止；
+- 整个过程保持同一轮 optimizer / scheduler 状态，不再为每次预算测试重新起跑。
+
+### 当前政策
+- 自适应续训不是“自动放行”。
+- 最终研究结论仍然要求：
+  - 关键窗口不再是 `undertrained`
+  - 正式框架下通过多窗口 walk-forward
+- 对当前本机，安全运行策略仍保持克制：
+  - 如果显式指定 `num_workers = 0`，就尊重它；
+  - batch size 仍然受安全上限约束。
+
+## 2026-03-22 项目治理与维护整理
+### 项目总评
+- `daily_research` 已经形成清晰分层：
+  - `baseline` 负责可解释基线与 advanced ML 主线；
+  - `execution` 负责盘后更新与次日开盘执行；
+  - `deep_alpha` 负责表示学习研究，不直接进入执行端。
+- 当前真正冻结可执行主线仍然是：
+  - `advanced_ml + liquid500 + next_open`
+- `t0_project` 应继续视为独立实验区，不与 `daily_research` 的正式执行链路混用。
+
+### 本轮修正的历史问题
+- 修复了执行入口长期积累的重复启动逻辑：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - 已统一抽到 `daily_research/execution/entrypoint_utils.py`
+- 修复了 `deep_alpha` 对主研究脚本内部私有函数的耦合：
+  - 公共数据装载、股票池解析、切分日期、滚动池缓存等流程已抽到 `daily_research/deep_alpha/pipeline_utils.py`
+  - `pretrain_deep_alpha_encoder.py` 不再依赖 `run_deep_alpha_research.py` 的内部下划线函数
+- 新增工作区维护工具：
+  - `daily_research/tools/workspace_maintenance.py`
+  - 用于体检目录体积、识别生成物并安全清理可再生产物
+- 新增顶层维护说明：
+  - 工作区根目录 `README.md`
+  - 工作区根目录 `.gitignore`
+
+### 当前维护结论
+- 代码层面：
+  - 本轮整理后，核心 Python 脚本已通过编译检查；
+  - 入口重复、跨文件私有依赖、工作区边界不清这三类历史问题已经被压缩。
+- 产物层面：
+  - 当前主要空间占用仍来自 `daily_research/cache/` 与 `daily_research/output/`；
+  - 这些目录属于研究产物，不应作为日常默认清理目标。
+- 维护纪律：
+1. 默认只清理 `__pycache__`、`*.pyc`、日志、TensorBoard 事件文件等可再生产物。
+2. 研究结论继续统一沉淀到本日志；工作区级规则维护在根目录 `README.md`。
+3. `deep_alpha` 后续若未通过正式框架，不讨论执行接入。
+
+## 2026-03-22 Git 纳管与归档规则建立
+### 本轮治理目标
+- 把当前工作区正式纳入 Git 管理。
+- 把 `daily_research/cache/` 与 `daily_research/output/` 从“持续堆积区”改成“热区 + 冷归档”结构。
+
+### 新规则
+- Git 跟踪范围：
+  - 源码
+  - 文档
+  - `daily_research/archive_policy.json`
+  - `daily_research/archive/manifests/` 下的小型归档清单
+- Git 明确不跟踪：
+  - `daily_research/output/`
+  - `daily_research/cache/`
+  - `daily_research/archive/cache/`
+  - `daily_research/archive/output/`
+  - 以及其他生成物目录
+
+### 归档策略
+- `output/`：
+  - 最近 `21` 天或最近 `12` 个实验目录保留在热区；
+  - 更旧的实验目录进入 `daily_research/archive/output/`。
+- `output/` 根目录下的汇总表、日志、说明文件：
+  - 最近 `30` 天或最近 `30` 个文件保留在热区；
+  - 更旧文件进入 `daily_research/archive/output/root_files/`。
+- `cache/`：
+  - 对大体积哈希缓存按桶管理：
+    - `deep_alpha/raw`
+    - `deep_alpha/features`
+    - `deep_alpha/corpus`
+    - `advanced_ml/raw`
+    - `advanced_ml/prepared`
+  - 这些桶按“最近保留数量 + 最近保留天数”双阈值决定是否进入冷归档。
+- 默认不归档的小型常驻缓存：
+  - `industry_map_tq.csv`
+  - `style_map_tq.csv`
+  - `rolling_pools`
+  - `states`
+  - `liquidity_buckets`
+
+### 工具化落地
+- 新增归档策略文件：
+  - `daily_research/archive_policy.json`
+- 新增归档说明目录：
+  - `daily_research/archive/README.md`
+- `workspace_maintenance.py` 新增 `archive` 子命令：
+  - dry-run：先列出候选；
+  - `--apply`：再执行移动；
+  - 执行后自动生成 manifest。
+
+### 维护纪律
+1. 任何归档先 dry-run，再 `--apply`。
+2. 归档后优先提交 manifest 与规则文件，不提交 payload 本体。
+3. 若某个缓存桶将来出现误判，再调规则，不直接恢复为“长期全部热存”。
+
+## 2026-03-22 执行端收益能力体检与研究重启
+### 体检依据
+- 正式执行主线目录：
+  - `daily_research/output/advanced_ml_rolling_liq500_formal_20260320`
+- 股票池对照：
+  - `daily_research/output/advanced_ml_liquidity_pool_compare_20260320.csv`
+- 体检工具：
+  - `daily_research/tools/execution_health_check.py`
+
+### 总体结果
+- 在正式框架 `rolling liquid500 + next_open` 下，截至 `2026-03-19`：
+  - 总超额收益：`224.21%`
+  - 总超额 Sharpe：`1.037`
+  - 总超额最大回撤：`-41.39%`
+- 这说明长期样本下，当前执行主线仍然是有效的。
+
+### 近期结果
+- 最近完整 holdout `2025-03-07 -> 2026-03-19`：
+  - 超额收益：`12.44%`
+  - 超额 Sharpe：`0.323`
+  - 超额最大回撤：`-41.39%`
+- 最新子窗口 `2025-09-05 -> 2026-03-19`：
+  - 超额收益：`-28.78%`
+  - 超额 Sharpe：`-1.382`
+  - 超额最大回撤：`-41.39%`
+
+### 股票池判断
+- `liquid300 / liquid500 / liquid800` 对照结果显示：
+  - `liquid500` 的超额 Sharpe 仍是三档高流动性池里最高；
+  - `liquid800` 接近，但没有稳定优于 `liquid500`。
+- 因此这轮不先改执行股票池，继续固定为 `liquid500`。
+
+### 结论
+- 当前执行主线不是“整体失效”，而是“长期仍有效，但近期收益能力已经不理想”。
+- 真正触发重启研究的核心证据是：
+  - 最新正式子窗口已经出现负超额收益；
+  - 最新正式子窗口超额 Sharpe 为负；
+  - 整体超额回撤仍然偏深。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. 不直接切换到 `deep_alpha`，因为它还没有通过完整晋级标准
+3. 从现在开始，正式重启执行方向研究
+
+### 重启范围
+1. 固定正式框架不变：
+   - 历史滚动 `liquid500`
+   - `next_open`
+   - 多窗口 walk-forward
+2. 第一轮优先研究：
+   - `advanced_ml` 集成权重
+   - 状态启停
+   - 回撤控制
+   - 换手约束
+3. 研究目标不是先扩新路线，而是先修复当前执行主线在 `2025-09-05 -> 2026-03-19` 的弱窗口表现
+
+## 2026-03-22 执行端弱窗口第一轮正式修复扫描
+### 本轮目的
+- 不改执行默认值，也不先改股票池。
+- 只在正式框架下检查：当前弱窗口能否通过执行线自身的小修复得到明显改善。
+- 第一轮优先看两类杠杆：
+  - `trend_up_low_vol` 下的分段集成权重；
+  - 换手约束。
+
+### 为跑正式扫描补的历史兼容修复
+- 在 `quant` 环境下，项目里一批旧脚本会因为 `Python 3.9` 的类型注解兼容问题直接报错。
+- 本轮顺手补齐了这些文件的 `from __future__ import annotations`：
+  - `daily_research/baseline/alpha.py`
+  - `daily_research/baseline/backtest.py`
+  - `daily_research/baseline/data_provider.py`
+  - `daily_research/baseline/portfolio.py`
+  - `daily_research/baseline/position_manager.py`
+  - `daily_research/baseline/run_daily_research.py`
+- 这一步不改变策略逻辑，只是清理旧环境兼容债，确保正式研究脚本在现有研究环境里可直接运行。
+
+### 新增工具
+- `daily_research/baseline/scan_execution_repair_candidates.py`
+- 作用：
+  - 固定正式口径 `rolling liquid500 + next_open`
+  - 共享同一份原始数据、因子准备和滚动 ML 分数
+  - 批量比较执行线修复候选
+  - 自动输出全样本、最近完整窗口和最新弱窗口摘要
+
+### 正式扫描输出
+- 目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1`
+- 汇总：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1/repair_scan_summary.csv`
+- 基线对候选归因：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round1/attr_baseline_vs_up_low_ml55_none25_v220`
+
+### 候选结果
+#### 基线
+- `baseline`
+  - 全样本超额收益：`223.44%`
+  - 全样本超额 Sharpe：`1.035`
+  - 最新弱窗口超额收益：`-28.95%`
+  - 最新弱窗口超额 Sharpe：`-1.381`
+  - 最新弱窗口平均换手：`0.940`
+
+#### 候选 1：只调低 `trend_up_low_vol` 的 ML 主导权重
+- `up_low_ml55_none25_v220`
+  - 状态权重：`trend_up_low_vol -> ml=0.55 / none=0.25 / v2=0.20`
+  - 全样本超额收益：`200.21%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-31.22%`
+  - 最近完整窗口超额收益：`33.11%`
+  - 最近完整窗口超额 Sharpe：`0.898`
+  - 最新弱窗口超额收益：`-10.76%`
+  - 最新弱窗口超额 Sharpe：`-0.582`
+  - 最新弱窗口平均换手：`1.071`
+
+#### 候选 2：更激进地下调 `trend_up_low_vol` 的 ML 权重
+- `up_low_ml50_none20_v230`
+  - 状态权重：`trend_up_low_vol -> ml=0.50 / none=0.20 / v2=0.30`
+  - 全样本超额收益：`151.50%`
+  - 全样本超额 Sharpe：`0.875`
+  - 最新弱窗口超额收益：`-7.84%`
+  - 最新弱窗口超额 Sharpe：`-0.466`
+- 结论：
+  - 弱窗口修得更狠；
+  - 但全样本收益和 Sharpe 损失更大，不是当前最稳候选。
+
+#### 候选 3：单独收紧换手约束
+- `turnover1_hold3`
+  - 约束：`turnover_limit=1.0`，`min_hold_days=3`
+  - 全样本超额收益：`141.97%`
+  - 全样本超额 Sharpe：`0.833`
+  - 最新弱窗口超额收益：`-29.10%`
+  - 最新弱窗口超额 Sharpe：`-1.550`
+- 结论：
+  - 单独收紧换手约束没有修复弱窗口；
+  - 反而同时伤害了全样本和近期窗口。
+
+#### 候选 4：状态权重修复 + 更严换手约束
+- `up_low_ml55_none25_v220_turnover1_hold3`
+- `up_low_ml50_none20_v230_turnover1_hold3`
+- 结论：
+  - 两者都明显差于只做状态权重修复；
+  - 当前不应把更严换手约束作为第一优先修复方向。
+
+### 弱窗口结构判断
+- 最新弱窗口的拖累主要集中在：
+  - `trend_up_low_vol`
+  - 次要是 `trend_down_low_vol`
+- 基线在弱窗口里：
+  - `trend_up_low_vol` 超额收益约 `-29.68%`
+  - `trend_down_low_vol` 超额收益约 `-8.14%`
+- `up_low_ml55_none25_v220` 修复后：
+  - `trend_up_low_vol` 超额收益改善到约 `-11.58%`
+  - `trend_down_low_vol` 超额收益改善到约 `-1.05%`
+- 这说明当前最有效的修复不是“少交易”，而是“减少 `trend_up_low_vol` 状态下 ML 分数的主导性”。
+
+### 归因补充
+- 基线与 `up_low_ml55_none25_v220` 的全样本归因显示：
+  - `repair` 相对基线最强季度是 `2025Q4`
+  - 超额差值约 `+8.82%`
+- 但它在更早的强窗口有一定让利，因此当前仍只能算“最稳修复候选”，不能直接升级成新默认值。
+
+### 本轮结论
+1. 第一轮正式修复扫描已经确认：执行线当前最值得继续做的是 `trend_up_low_vol` 分段权重修复，而不是先收紧换手。
+2. 当前最稳候选是：
+   - `trend_up_low_vol -> ml=0.55 / none=0.25 / v2=0.20`
+3. 这个候选已经显著改善了最新弱窗口，同时保住了全样本超额 Sharpe，并明显收敛了全样本超额回撤。
+4. 但它仍没有把弱窗口修回正收益，所以执行端默认值继续冻结，不直接切换。
+
+### 下一步
+1. 继续围绕 `trend_up_low_vol` 分段权重做更细的正式扫描。
+2. 把第二轮重点放在：
+   - `0.55 ~ 0.60` 一带的分段权重微调
+   - 状态启停阈值
+3. 暂不把更严换手约束作为第一优先修复方向。
+
+## 2026-03-22 执行端弱窗口第二轮正式扫描
+### 本轮目标
+- 延续第一轮正式修复研究，但把范围进一步收敛。
+- 不再继续优先扫描更严的换手约束。
+- 第二轮只做两件事：
+  - 继续微调 `trend_up_low_vol` 下的分段集成权重；
+  - 正式检查“状态启停阈值”是否比单纯权重微调更有效。
+
+### 工具补充
+- `daily_research/baseline/scan_execution_repair_candidates.py`
+  - 新增 `--candidate-set`
+  - 当前支持：
+    - `round1`
+    - `round2_weights`
+    - `pair_best`
+- 这样第二轮可以把“权重扫描”和“状态阈值扫描”拆开跑，避免变量混在一起。
+
+### 扫描输出
+- 权重微调：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round2_weights`
+- 状态启停阈值：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round2_ma50`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round2_ma55`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round2_ma40`
+- `ma60` 基线对 `ma50` 基线归因：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round2_ma50/attr_ma60_baseline_vs_ma50_baseline`
+
+### 结果一：`ma60` 框架下的权重微调
+#### 结果总览
+- `baseline`
+  - 全样本超额 Sharpe：`1.035`
+  - 最新弱窗口超额收益：`-28.95%`
+  - 最新弱窗口超额 Sharpe：`-1.381`
+- `up_low_ml60_none25_v215`
+  - 全样本超额 Sharpe：`0.974`
+  - 最新弱窗口超额收益：`-15.53%`
+  - 最新弱窗口超额 Sharpe：`-0.858`
+- `up_low_ml58_none24_v218`
+  - 全样本超额 Sharpe：`0.819`
+  - 最新弱窗口超额收益：`-18.33%`
+  - 最新弱窗口超额 Sharpe：`-0.996`
+- `up_low_ml57_none25_v218`
+  - 全样本超额 Sharpe：`0.913`
+  - 最新弱窗口超额收益：`-17.35%`
+  - 最新弱窗口超额 Sharpe：`-0.921`
+- `up_low_ml56_none24_v220`
+  - 全样本超额 Sharpe：`0.928`
+  - 最新弱窗口超额收益：`-15.61%`
+  - 最新弱窗口超额 Sharpe：`-0.858`
+- `up_low_ml55_none25_v220`
+  - 全样本超额 Sharpe：`1.035`
+  - 最新弱窗口超额收益：`-10.76%`
+  - 最新弱窗口超额 Sharpe：`-0.582`
+
+#### 结论
+- 在 `0.55 ~ 0.60` 区间里，第一轮的最优点 `0.55 / 0.25 / 0.20` 没有被推翻。
+- 其余更靠近 `0.60` 的方案虽然也能改善弱窗口，但都不如 `0.55 / 0.25 / 0.20` 稳。
+- 因此：
+  - `ma60` 框架下的权重修复已经基本收敛；
+  - 继续围绕这条线盲扫，边际收益已经不高。
+
+### 结果二：状态启停阈值扫描
+#### `regime_ma_window=50`
+- `baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 全样本超额最大回撤：`-29.11%`
+  - 最近完整窗口超额收益：`77.33%`
+  - 最近完整窗口超额 Sharpe：`1.896`
+  - 最新弱窗口超额收益：`-10.87%`
+  - 最新弱窗口超额 Sharpe：`-0.559`
+- `up_low_ml55_none25_v220`
+  - 弱窗口略进一步改善到 `-9.31% / -0.509`
+  - 但全样本明显不如 `ma50 baseline`
+
+#### `regime_ma_window=55`
+- `baseline`
+  - 全样本超额 Sharpe：`0.549`
+  - 最新弱窗口超额收益：`-23.21%`
+  - 最新弱窗口超额 Sharpe：`-1.076`
+- `up_low_ml55_none25_v220`
+  - 全样本超额收益：`207.15%`
+  - 全样本超额 Sharpe：`1.057`
+  - 最新弱窗口超额收益：`-9.33%`
+  - 最新弱窗口超额 Sharpe：`-0.471`
+
+#### `regime_ma_window=40`
+- `baseline`
+  - 全样本超额 Sharpe：`1.121`
+  - 最新弱窗口超额收益：`-20.17%`
+  - 最新弱窗口超额 Sharpe：`-1.048`
+- `up_low_ml55_none25_v220`
+  - 全样本超额 Sharpe：`0.802`
+  - 最新弱窗口超额收益：`-21.63%`
+  - 最新弱窗口超额 Sharpe：`-1.194`
+
+#### 结论
+- `ma40` 明显偏紧，不是当前方向。
+- `ma55` 只有在叠加 `0.55 / 0.25 / 0.20` 时才恢复到可用，但整体仍不如 `ma50 baseline`。
+- 当前最强的新信号不是“继续压 `trend_up_low_vol` 权重”，而是“把状态启停从 `ma60` 收到 `ma50`”。
+
+### 三窗口交叉核对
+- `ma60 baseline`
+  - 窗口 1：`57.54% / 2.489`
+  - 窗口 2：`49.30% / 3.006`
+  - 窗口 3：`-28.95% / -1.381`
+- `ma60 + up_low_ml55_none25_v220`
+  - 窗口 1：`47.13% / 2.161`
+  - 窗口 2：`45.66% / 2.920`
+  - 窗口 3：`-10.76% / -0.582`
+- `ma55 + up_low_ml55_none25_v220`
+  - 窗口 1：`9.75% / 0.413`
+  - 窗口 2：`84.93% / 5.702`
+  - 窗口 3：`-9.33% / -0.471`
+- `ma50 baseline`
+  - 窗口 1：`85.94% / 4.180`
+  - 窗口 2：`93.95% / 6.304`
+  - 窗口 3：`-10.87% / -0.559`
+
+### 归因补充
+- `ma50 baseline` 相对当前 `ma60 baseline`：
+  - 17 个季度里有 13 个季度超额更强
+  - 最强季度是 `2026Q1`
+  - 超额差约 `+19.23%`
+- 市场状态归因：
+  - `trend_up_low_vol` 超额差约 `+145.98%`
+  - `trend_down_low_vol` 超额差约 `+36.48%`
+- 这说明：
+  - `ma50` 不是只修了一个小弱窗口；
+  - 它在正式框架下对主要有效状态的映射更强。
+
+### 本轮结论
+1. `ma60` 框架下的权重微调已经收敛，`0.55 / 0.25 / 0.20` 仍是这条线最优点。
+2. 第二轮更关键的新发现是：`regime_ma_window=50` 的 `baseline` 已经在三个正式窗口里同时优于当前执行主线。
+3. 因此执行端修复研究的第一优先级应当更新为：
+   - 先复验并确认 `ma50` 状态启停候选；
+   - 再决定是否还需要在 `ma50` 框架里叠加 `trend_up_low_vol` 权重微调。
+4. 更严换手约束继续不列为第一优先修复方向。
+
+### 当前决策
+1. 执行端默认值暂不切换，继续冻结为：`advanced_ml + liquid500 + next_open`
+2. 但新的“最强正式修复候选”已经从第一轮的 `ma60 + up_low_ml55_none25_v220`，更新为第二轮的 `ma50 baseline`
+3. `ma60 + up_low_ml55_none25_v220` 仍保留为次一级备选
+
+## 2026-03-22 执行端弱窗口第三轮正式复验：`ma50 baseline`
+### 本轮目标
+- 不再继续盲扫新的大分支，而是专门确认第二轮跑出来的 `ma50 baseline` 是否真的站得住。
+- 本轮只回答三件事：
+  - `ma50 baseline` 是否继续优于当前 `ma60 baseline`
+  - `ma50 baseline` 是否继续优于次一级备选 `ma60 + up_low_ml55_none25_v220`
+  - 在 `ma50` 框架里，是否还值得立刻进入第四轮权重微调
+
+### 本轮产物
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma60_pair`
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_pair`
+- `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation`
+- 关键归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma60_baseline_vs_ma50_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma60_up_low_vs_ma50_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round3_ma50_revalidation/attr_ma50_baseline_vs_ma50_up_low`
+
+### 结果一：`ma50 baseline` 对当前执行主线
+- `ma60 baseline`
+  - 全样本超额收益：`223.44%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-41.53%`
+  - 最近完整窗口：`12.17% / 0.315`
+  - 最新弱窗口：`-28.95% / -1.381`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 全样本超额最大回撤：`-29.11%`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- 季度稳定性：
+  - `ma50 baseline` 在 `17` 个季度里有 `13` 个季度超额更强
+  - 最强季度是 `2026Q1`
+  - 单一最强季度对正向季度总优势的占比约 `20.96%`
+- 这说明：
+  - `ma50 baseline` 不是只靠某一个季度抬起来；
+  - 它对当前执行主线的优势是跨季度、跨窗口的。
+
+### 结果二：`ma50 baseline` 对次一级备选
+- `ma60 + up_low_ml55_none25_v220`
+  - 全样本超额收益：`200.21%`
+  - 全样本超额 Sharpe：`1.035`
+  - 全样本超额最大回撤：`-31.22%`
+  - 最近完整窗口：`33.11% / 0.898`
+  - 最新弱窗口：`-10.76% / -0.582`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 全样本超额最大回撤：`-29.11%`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- 季度稳定性：
+  - `ma50 baseline` 同样是在 `17` 个季度里赢下 `13` 个季度
+  - 最强季度是 `2025Q2`
+  - 单一最强季度对正向季度总优势的占比约 `19.84%`
+- 这说明：
+  - 即使把第一轮最稳的 `ma60` 权重修补拿来对照，`ma50 baseline` 仍然是更强的正式候选；
+  - 它的优势同样不是单季度异常造成。
+
+### 结果三：`ma50` 框架内部是否还要立刻做权重微调
+- `ma50 baseline`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- `ma50 + up_low_ml55_none25_v220`
+  - 全样本超额 Sharpe：`1.392`
+  - 最近完整窗口：`64.14% / 1.679`
+  - 最新弱窗口：`-9.31% / -0.509`
+- 归因上：
+  - `ma50 + up_low_ml55_none25_v220` 只在 `17` 个季度里的 `4` 个季度更强
+  - 最明显的拖累来自 `trend_up_low_vol`，超额差约 `-100.56%`
+- 这说明：
+  - 在 `ma50` 框架里继续叠加第一轮那套权重修补，代价明显大于收益；
+  - 第四轮权重微调不该再作为立刻要做的下一步。
+
+### 本轮结论
+1. 第三轮专项复验已经通过，`ma50 baseline` 继续稳居当前“最强正式修复候选”。
+2. `ma50 baseline` 同时优于当前执行主线和次一级备选，而且优势不是单季度异常造成。
+3. 在 `ma50` 框架里，继续叠加 `up_low_ml55_none25_v220` 会明显伤害整体表现，因此第四轮权重微调降级为条件触发项。
+4. 下一步研究重心应当从“继续调 `trend_up_low_vol` 权重”，切到“复验 `ma50` 的状态边界稳定性与轻量风险控制”。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 下一步直接进入 `ma50` 的状态边界与轻量风险控制复验；第四轮权重微调改为条件触发
+
+## 2026-03-22 执行端第五轮正式复验：`ma50` 边界稳定性与轻量风险控制
+### 本轮目标
+- 不再继续在 `ma50` 框架里盲调权重，而是先判断：
+  - `ma50` 周围的状态边界是否存在更强点
+  - 轻量风控是否能在不破坏整体的前提下提供净增益
+- 这轮只做两类变量：
+  - 状态边界：`ma48 / ma49 / ma50 / ma51 / ma52`
+  - 轻量风控：`baseline / stop8 / take20 / stop8_take20`
+
+### 本轮产物
+- 边界扫描目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma48_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma49_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma50_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma51_boundary_risk`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma52_boundary_risk`
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare`
+- 关键归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma50_baseline_vs_ma48_baseline`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma50_baseline_vs_ma48_take20`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/attr_ma48_baseline_vs_ma48_take20`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_boundary_risk_compare/ma48_take20_revalidation`
+
+### 结果一：边界扫描的主结论
+- `ma48 baseline`
+  - 全样本超额收益：`729.66%`
+  - 全样本超额 Sharpe：`2.202`
+  - 最近完整窗口：`112.46% / 2.790`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma48 + take20`
+  - 全样本超额收益：`746.20%`
+  - 全样本超额 Sharpe：`2.239`
+  - 最近完整窗口：`116.70% / 2.930`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- `ma49 / ma51 / ma52` 的基线都明显更差，尤其最新弱窗口重新大幅转负。
+- 这说明：
+  - `ma48` 的确跑出了比 `ma50` 更强的边界点；
+  - 但这个改善不是一个平滑的“附近都更好”，而是一个比较尖锐的局部甜点。
+
+### 结果二：轻量风控的主结论
+- 在 `ma50` 框架里：
+  - `take20` 只能把最新弱窗口从 `-10.87% / -0.559` 轻微改善到 `-9.66% / -0.504`
+  - 但全样本超额 Sharpe 会从 `1.841` 轻微回落到 `1.836`
+  - `stop8` 与 `stop8_take20` 都更差
+- 在 `ma48` 框架里：
+  - `take20` 把全样本超额 Sharpe 从 `2.202` 小幅抬到 `2.239`
+  - 但它对 `ma48 baseline` 的增益很小，更多像附加微调，而不是主驱动
+- 这说明：
+  - 真正有信息量的是“边界从 `ma50` 收到 `ma48`”，不是“轻量风控本身”
+  - `take20` 目前只能算边界候选上的次级增强，而不是单独结论
+
+### 结果三：稳定性与集中度
+- `ma48 + take20` 相对 `ma50 baseline`
+  - 只在 `17` 个季度里的 `5` 个季度更强
+  - 有 `8` 个季度反而更弱
+  - 最强季度是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `54.92%`
+- `ma48 + take20` 相对 `ma48 baseline`
+  - 只在 `17` 个季度里的 `2` 个季度更强
+  - 总增益很小
+  - 最强季度同样是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `72.05%`
+- 这说明：
+  - `ma48` 这条线虽然数值很强，但当前优势明显更集中；
+  - `take20` 的附加收益本身也不够稳定。
+
+### 归因补充
+- `ma48 baseline` / `ma48 + take20` 相对 `ma50 baseline` 的主要新增优势：
+  - `trend_up_high_vol` 超额差约 `+34.25%`
+  - `trend_down_low_vol` 超额差约 `+4.73%`
+- 相对 `ma50 baseline`，它们在 `trend_up_low_vol` 反而没有继续扩大优势。
+- 这说明：
+  - 第五轮跑出来的新信号，核心不是再次强化原先的 `trend_up_low_vol`
+  - 而是边界变化后，对 `trend_up_high_vol` 的映射明显变强
+
+### 本轮结论
+1. 第五轮已经确认：`ma50` 附近确实存在一个更强的边界点，当前最亮眼的是 `ma48`。
+2. 但 `ma48` 的优势并不平滑，`ma49 / ma51 / ma52` 都明显回落，说明它目前更像局部甜点，而不是已经确认的稳定新主线。
+3. `ma48 + take20` 是当前数值最强点，但其相对 `ma48 baseline` 的增益本身高度集中，不足以单独晋级。
+4. `ma50` 框架内的轻量风控没有提供足够大的净增益，因此当前不改变“`ma50 baseline` 是头号正式修复候选”的主判断。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 新增一条高收益待复验分支：`ma48 baseline`，`ma48 + take20` 作为其附加轻量风控版本保留
+5. 下一步不直接切执行默认值，而是先对 `ma48` 做专门稳定性复验与季度集中度诊断
+
+## 2026-03-22 执行端第六轮正式复验：`ma48` 稳定性复验与季度集中度诊断
+### 本轮目标
+- 不再只看 `ma48` 在第五轮里的聚合指标，而是专门回答三件事：
+  - `ma48` 是否只是一个孤立甜点；
+  - `ma48` 相对 `ma50` 和左邻 `ma47` 的优势是否足够平滑稳定；
+  - `ma48 + take20` 对 `ma48 baseline` 的附加收益是否能够独立成立。
+
+### 本轮产物
+- 新补跑左邻边界目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round5_ma47_boundary_risk`
+- 第六轮稳定性汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round6_ma48_stability`
+- 关键归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round6_ma48_stability/attr_ma47_baseline_vs_ma48_baseline`
+- 工具：
+  - `daily_research/tools/ma48_stability_report.py`
+
+### 结果一：邻域稳定性
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- `ma47 baseline`
+  - 全样本超额收益：`626.68%`
+  - 全样本超额 Sharpe：`1.955`
+  - 最近完整窗口：`96.93% / 2.380`
+  - 最新弱窗口：`+1.79% / 0.106`
+- `ma48 baseline`
+  - 全样本超额收益：`729.66%`
+  - 全样本超额 Sharpe：`2.202`
+  - 最近完整窗口：`112.46% / 2.790`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma49 baseline`
+  - 全样本超额收益：`499.38%`
+  - 全样本超额 Sharpe：`1.774`
+  - 最近完整窗口：`71.39% / 1.834`
+  - 最新弱窗口：`-30.27% / -1.544`
+- 这说明：
+  - `ma48` 的强势不再像纯随机孤点，因为左邻 `ma47` 也处在较强水平；
+  - 但右邻 `ma49` 明显回落，说明当前更像“左侧 `ma47/48` 强带”，而不是一整段平滑抬升的新稳态。
+
+### 结果二：季度集中度
+- `ma48 baseline` 相对 `ma50 baseline`
+  - 只在 `17` 个季度里的 `5` 个季度更强
+  - 有 `8` 个季度反而更弱
+  - 最强季度是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `53.86%`
+  - Top3 正向季度占比约 `94.20%`
+- `ma48 baseline` 相对 `ma47 baseline`
+  - 在 `17` 个季度里的 `6` 个季度更强
+  - 有 `4` 个季度更弱
+  - 最强季度同样是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `71.02%`
+  - Top3 正向季度占比约 `91.32%`
+- `ma48 + take20` 相对 `ma48 baseline`
+  - 只在 `17` 个季度里的 `2` 个季度更强
+  - 总增益约 `3.33%`
+  - 最强季度仍是 `2025Q3`
+  - 单一最强季度占正向季度总优势约 `72.05%`
+- 这说明：
+  - `ma48` 相对 `ma50` 的优势仍然高度集中，不能直接视为新的稳定主线；
+  - `ma48` 相对 `ma47` 的新增优势同样高度集中，真正需要继续诊断的是 `47 -> 48` 这一步为什么只在少数季度显著拉开；
+  - `take20` 在 `ma48` 上只能算很小的附加微调，不足以单独构成升级理由。
+
+### 结果三：归因补充
+- `ma48 baseline` 相对 `ma47 baseline`
+  - 最强季度是 `2025Q3`
+  - 超额差约 `+62.43%`
+- 市场状态差异：
+  - `trend_up_low_vol`：`+65.68%`
+  - `trend_down_low_vol`：`-13.17%`
+  - `trend_up_high_vol`：`-8.40%`
+- 这说明：
+  - `47 -> 48` 的新增收益主要来自 `trend_up_low_vol` 的进一步放大；
+  - 但它不是一个全状态普适增强，因此更需要继续拆解集中来源，而不是直接晋级执行端。
+
+### 本轮结论
+1. `ma48 baseline` 的高收益并非纯随机孤点，因为左邻 `ma47 baseline` 也处在明显更强的区间。
+2. 但 `ma48 baseline` 相对 `ma50 baseline`、相对 `ma47 baseline` 的新增优势都高度集中在少数季度，尤其 `2025Q3`。
+3. `ma48 + take20` 相对 `ma48 baseline` 的增益很小且更集中，不足以作为独立晋级理由。
+4. 因此当前仍不改变“`ma50 baseline` 是头号正式修复候选”的主判断，但高收益待复验分支应从单点 `ma48` 扩展为左侧 `ma47/48` 边界带。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 高收益待复验分支从单点 `ma48 baseline` 扩展为 `ma47/48` 左侧边界带；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为其附加轻量风控版本保留
+5. 下一步不直接切执行默认值，而是先做 `ma47/48` 左侧边界带的稳定性复验，并拆解 `2025Q3` 的集中来源
+
+## 2026-03-22 执行端第七轮正式复验：`ma47/48` 左侧边界带与 `2025Q3` 集中来源诊断
+### 本轮目标
+- 不再继续只看 `ma48` 单点，而是专门回答两件事：
+  - 左侧 `ma47/48` 边界带是否真的是一段值得继续保留的高收益分支；
+  - `2025Q3` 的集中增益到底来自状态切换，还是来自同一状态内的持仓槽位替换。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round7_ma4748_band`
+- 工具：
+  - `daily_research/tools/ma4748_band_report.py`
+- 关键明细：
+  - `focus_quarter_ma48_vs_ma47_monthly.csv`
+  - `focus_quarter_ma48_vs_ma50_monthly.csv`
+  - `focus_quarter_ma48_vs_ma47_top_days.csv`
+  - `focus_quarter_ma48_vs_ma50_top_days.csv`
+  - `focus_quarter_ma48_vs_ma47_overlap.csv`
+  - `focus_quarter_ma48_vs_ma50_overlap.csv`
+
+### 结果一：左侧边界带仍然成立
+- `ma47 baseline`
+  - 全样本超额收益：`626.68%`
+  - 全样本超额 Sharpe：`1.955`
+  - 最近完整窗口：`96.93% / 2.380`
+  - 最新弱窗口：`+1.79% / 0.106`
+- `ma48 baseline`
+  - 全样本超额收益：`729.66%`
+  - 全样本超额 Sharpe：`2.202`
+  - 最近完整窗口：`112.46% / 2.790`
+  - 最新弱窗口：`+3.24% / 0.157`
+- `ma50 baseline`
+  - 全样本超额收益：`580.31%`
+  - 全样本超额 Sharpe：`1.841`
+  - 最近完整窗口：`77.33% / 1.896`
+  - 最新弱窗口：`-10.87% / -0.559`
+- 这说明：
+  - 左侧 `ma47/48` 带不是纯随机噪音，因为 `ma47` 与 `ma48` 都明显强于当前稳定候选 `ma50`
+  - 但 `ma48` 仍然只是这条高收益分支里的数值最强点，不等于已经取得执行端晋级资格。
+
+### 结果二：`2025Q3` 的集中来源不是状态切换
+- `ma48` 相对 `ma47` 的 `2025Q3` compound 超额边际约 `+62.43%`
+- `ma48` 相对 `ma50` 的 `2025Q3` compound 超额边际约 `+55.31%`
+- 但 `2025Q3` 的 `66` 个交易日全部都处于：
+  - `trend_up_low_vol`
+  - `regime_on=True`
+- 这说明：
+  - `2025Q3` 的集中增益不是靠边界切换后“多开了某些状态”
+  - 而是同一 `trend_up_low_vol` 状态内部的选股与换仓差异。
+
+### 结果三：`2025Q3` 优势是逐月放大、但仍受少数关键日驱动
+- `ma48` 相对 `ma47` 的月度 compound 超额边际：
+  - `2025-07`：`+9.98%`
+  - `2025-08`：`+13.60%`
+  - `2025-09`：`+16.83%`
+- `ma48` 相对 `ma50` 的月度 compound 超额边际：
+  - `2025-07`：`+7.65%`
+  - `2025-08`：`+8.16%`
+  - `2025-09`：`+18.84%`
+- 但日度集中度仍不低：
+  - `ma48` 相对 `ma47` 的 Top5 正向日占 `2025Q3` 正向日总优势约 `41.12%`
+  - `ma48` 相对 `ma50` 的 Top5 正向日占比约 `51.25%`
+- 关键日期集中在：
+  - `2025-08-22`
+  - `2025-08-27`
+  - `2025-09-01`
+  - `2025-09-03`
+  - `2025-09-18`
+- 这说明：
+  - `2025Q3` 的确不是只靠单一天抬起来；
+  - 但优势仍然高度依赖少数关键交易日，而不是完全平滑均匀分布。
+
+### 结果四：优势主要来自少数持仓槽位替换
+- `ma48` 相对 `ma47` 的 `2025Q3` 平均持仓重叠：
+  - Jaccard 约 `0.697`
+  - 约 `72.73%` 的日期至少重合 `4` 个名字
+- `ma48` 相对 `ma50` 的 `2025Q3` 平均持仓重叠：
+  - Jaccard 约 `0.694`
+  - 约 `75.76%` 的日期至少重合 `4` 个名字
+- 最大正向贡献日上的典型替换包括：
+  - `2025-08-22`：`601328.SH` 替换 `601288.SH`
+  - `2025-08-27`：`688660.SH` 替换 `603256.SH`
+  - `2025-09-01`：`300486.SZ / 601728.SH / 601288.SH` 替换 `601939.SH / 002142.SZ / 600900.SH`
+  - `2025-09-03`：`688108.SH` 替换 `600585.SH`
+  - `2025-09-18`：`300204.SZ` 替换 `301357.SZ`
+- 这说明：
+  - `ma48` 的新增优势主要来自少数持仓槽位的替换；
+  - 真正值得继续追的是这些槽位替换是否能跨季度复现，而不是继续盲扫边界。
+
+### 本轮结论
+1. 左侧 `ma47/48` 边界带应继续保留为高收益待复验分支，因为它整体确实强于 `ma50 baseline`。
+2. `2025Q3` 的集中来源已经明确：不是状态切换，而是 `trend_up_low_vol` 内部的选股与换仓差异。
+3. `ma48` 的优势不是纯单日噪音，但仍明显依赖少数关键交易日和少数持仓槽位替换。
+4. 因此当前仍不改变“`ma50 baseline` 是头号正式修复候选”的主判断；左侧高收益分支的下一步应转入关键槽位复现诊断，而不是继续大范围扫边界。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. 高收益待复验分支继续保留为 `ma47/48` 左侧边界带；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为其附加轻量风控版本保留
+5. 下一步不直接切执行默认值，而是先围绕 `trend_up_low_vol` 做关键槽位复现诊断，检查 `2025Q3` 的增益是否能跨季度重复出现
+
+## 2026-03-22 执行端第八轮正式复验：`trend_up_low_vol` 关键槽位复现诊断
+### 本轮目标
+- 不再只停留在“`2025Q3` 很强”这个现象判断，而是专门验证：
+  - `2025Q3` 的关键槽位替换是否能在其他 `trend_up_low_vol` 季度复现；
+  - 如果不能复现，`ma47/48` 左侧带到底应该继续作为晋级候选，还是改成纯研究分支。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round8_slot_replay`
+- 工具：
+  - `daily_research/tools/trend_up_low_vol_slot_replay_report.py`
+- 关键明细：
+  - `ma48_vs_ma47_slot_replay.csv`
+  - `ma48_vs_ma50_slot_replay.csv`
+  - `ma48_vs_ma47_focus_signature_stocks.csv`
+  - `ma48_vs_ma50_focus_signature_stocks.csv`
+
+### 结果一：`2025Q3` 的 top5 槽位签名已经明确
+- `ma48` 相对 `ma47` 的 `2025Q3` top5 槽位签名：
+  - `301389.SZ`
+  - `301488.SZ`
+  - `603716.SH`
+  - `300436.SZ`
+  - `300486.SZ`
+- `ma48` 相对 `ma50` 的 `2025Q3` top5 槽位签名：
+  - `301357.SZ`
+  - `300436.SZ`
+  - `301488.SZ`
+  - `300476.SZ`
+  - `601728.SH`
+
+### 结果二：按当前 top5 槽位签名口径，跨季度复现是零
+- 相对 `ma47`
+  - 其他季度里完整复现次数：`0`
+  - 放宽到“任意 top5 重叠”的季度数：`0`
+  - 正边际季度里出现任意重叠的季度数：`0`
+- 相对 `ma50`
+  - 其他季度里完整复现次数：`0`
+  - 放宽到“任意 top5 重叠”的季度数：`0`
+  - 正边际季度里出现任意重叠的季度数：`0`
+- 这说明：
+  - `2025Q3` 的关键槽位签名在当前口径下并不是一个已经跨季度稳定复放的固定模式；
+  - `ma47/48` 左侧带的高收益，更像某个季度里对 `trend_up_low_vol` 的局部命中。
+
+### 结果三：stock 级别的重复出现也很弱
+- 相对 `ma47`
+  - `301389.SZ / 301488.SZ / 603716.SH / 300436.SZ / 300486.SZ` 这 5 个 Q3 槽位名字，在其他季度里没有一次达到 `0.1%` 以上的平均正权重差复现
+- 相对 `ma50`
+  - `301357.SZ`：其他季度复现 `0` 次
+  - `300436.SZ`：其他季度复现 `0` 次
+  - `301488.SZ`：其他季度复现 `1` 次，且落在正边际季度 `2025Q4`
+  - `300476.SZ`：其他季度复现 `1` 次，但对应季度 `2025Q2` 不是正边际季度
+  - `601728.SH`：其他季度复现 `1` 次，但对应季度 `2024Q2` 不是正边际季度
+- 这说明：
+  - 即使把诊断下沉到单只股票层面，`2025Q3` 的关键槽位也没有表现出稳定的跨季度复现能力；
+  - 目前没有证据支持把这组槽位直接固化成新的执行端配置。
+
+### 本轮结论
+1. `2025Q3` 的优势来源已经进一步确认：它不是一个可直接跨季度复放的 top5 槽位签名。
+2. `ma47/48` 左侧带当前仍可保留为高收益研究分支，但更像“季度特定槽位命中”，而不是已经成熟的正式修复候选。
+3. 因此当前不改变“`ma50 baseline` 是头号正式修复候选”的主判断，也不建议继续直接扫左侧边界。
+4. 如果后续还要继续推进这条分支，下一步必须把 `2025Q3` 的槽位替换抽象成更稳定的 `trend_up_low_vol` 信号逻辑，并要求它在非 `2025Q3` 季度也能复放；否则就停止该分支晋级。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. `ma47/48` 左侧边界带继续保留为高收益研究分支，但当前按“季度特定槽位命中”看待；其中 `ma48 baseline` 仍是当前数值最强点，`ma48 + take20` 作为附加轻量风控版本保留
+5. 下一步不直接切执行默认值，也不继续盲扫边界，而是先把 `2025Q3` 的槽位替换抽象成更稳定的 `trend_up_low_vol` 信号逻辑；若无法抽象并跨季度复放，就停止该分支晋级
+
+## 2026-03-22 执行端第九轮正式复验：`trend_up_low_vol` 信号逻辑抽象诊断
+### 本轮目标
+- 不再停留在“`2025Q3` 有几只关键槽位股票”的复现口径，而是直接回答：
+  - 能否把 `2025Q3` 的槽位替换抽象成一个可重复使用的 `trend_up_low_vol` 信号逻辑；
+  - 这个信号逻辑能否同时满足“解释 `ma48` 的槽位差异”与“在其他季度继续对未来超额有效”；
+  - 如果做不到，是否应按既定停止规则，终止 `ma47/48` 左侧带的执行端晋级。
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round9_signal_logic`
+- 工具：
+  - `daily_research/tools/trend_up_low_vol_signal_logic_report.py`
+- 关键明细：
+  - `ma48_vs_ma47_topday_factor_diff.csv`
+  - `ma48_vs_ma50_topday_factor_diff.csv`
+  - `selected_slot_logic_factors.csv`
+  - `selected_slot_logic_shared_factors.csv`
+  - `quarter_rank_ic.csv`
+  - `quarter_slot_edge.csv`
+  - `rank_ic_summary.csv`
+  - `slot_edge_summary.csv`
+
+### 结果一：宽口径抽象 `slot_logic` 不稳定
+- 按 `2025Q3` 顶部换仓日自动提炼出的宽口径 `slot_logic` 因子为：
+  - `volatility_contraction`
+  - `ma_gap_20_60`
+  - `volatility_20`
+  - `price_volume_divergence`
+  - `mom_20`
+  - `long_regime_flag`
+- 这条宽口径候选的结果是：
+  - 季度 RankIC 均值约 `-0.009`
+  - 相对 `v2` 只在 `3` 个非 `2025Q3` 季度更强
+  - 这些非焦点季度的正向改善约 `95.71%` 集中在单一季度
+- 这说明：
+  - 直接把 `Q3` 的替换痕迹做成一个更宽的组合信号，会把一批只在单侧对照中出现的因素也带进来；
+  - 这种抽象方式无法形成可晋级的稳定排序逻辑。
+
+### 结果二：更克制的 `slot_logic_shared` 也不够支撑晋级
+- 只保留 `ma48_vs_ma47` 与 `ma48_vs_ma50` 都共同支持的因子后，最终剩下的 shared 逻辑只有：
+  - `volatility_contraction`
+- 这条单因子逻辑的结果是：
+  - 季度 RankIC 均值约 `0.044`
+  - 相对 `v2` 虽在 `5` 个非 `2025Q3` 季度更强，但正向改善约 `82.42%` 集中在 `2024Q3`
+  - 在焦点季度 `2025Q3` 本身，反而落后 `v2` 约 `-0.060`
+- 这说明：
+  - `Q3` 的槽位替换里确实能抽出一点更窄的“低波收缩”信息；
+  - 但它不是 `2025Q3` 那轮优势的稳定核心，更像其他季度里偶发有效的局部排序信号。
+
+### 结果三：信号排序与槽位复放没有同时成立
+- `slot_logic_shared` 对 `ma48_vs_ma47` 的季度槽位复放：
+  - 在非焦点季度里只出现 `2` 个正向槽位边际
+  - 且在 `ma48` 其他正边际季度里没有一次稳定对齐
+- `slot_logic_shared` 对 `ma48_vs_ma50` 的季度槽位复放：
+  - 在非焦点季度里只出现 `3` 个正向槽位边际
+  - 其中只有 `1` 个落在 `ma48` 的其他正边际季度
+- `slot_logic` 虽然在部分季度里能给出更高的槽位边际，但它自己的未来超额排序已经不稳定。
+- 这说明：
+  - 当前抽出来的逻辑要么能解释一点槽位差异、却不能稳定解释未来超额；
+  - 要么能在别的季度偶尔有排序价值、却不是 `2025Q3` 那轮优势的稳定抽象。
+
+### 本轮结论
+1. `2025Q3` 的槽位替换目前仍无法抽象成一个可跨季度复放的稳定 `trend_up_low_vol` 信号逻辑。
+2. `ma47/48` 左侧边界带的高收益事实仍然保留，但它不再满足继续晋级执行端的条件。
+3. 因此这条分支应按既定停止规则处理：停止执行端晋级，降级为纯研究旁支，而不是继续扫边界或继续堆局部解释。
+4. 研究主线应回到 `ma50 baseline` 内部升级，优先从状态专属 horizon 权重开始，而不是继续追逐 `ma47/48` 的季度特定高点。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. `ma47/48` 左侧边界带停止晋级执行端，降级为纯研究旁支；已有结论和产物保留，但不再作为当前执行修复候选
+5. 下一步研究重心回到 `ma50 baseline` 内部升级，优先做状态专属 horizon 权重，其后再看状态专属 ensemble 权重与 `ma50` 框架内波动阈值微调
+
+## 2026-03-22 执行端第十至十二轮正式复验：`ma50 baseline` 内部升级
+### 本轮目标
+- 在确认 `ma47/48` 左侧边界带停止晋级后，把研究主线收回到 `ma50 baseline` 内部；
+- 依次回答三件事：
+  - 状态专属 horizon 权重，是否能以最小改动修复最新弱窗口；
+  - 状态专属 ensemble 权重，是否存在“弱窗口改善且不破坏全样本”的干净升级；
+  - `ma50` 框架内的简单波动阈值微调，是否还存在有效敏感度。
+
+### 本轮脚本修正
+- 在第十轮正式扫描前，先修正了共享扫描器的一个实现问题：
+  - 之前 `scan_execution_repair_candidates.py` 会在候选循环外先合成一遍多周期 `ml_score`，导致状态专属 horizon 候选即使写进配置，也不会真的影响候选结果；
+  - 因此补充了 `ml_alpha.py` 的 `combine_per_horizon_ml_scores` 与 `rolling_ml_scores_multi_detail`，并让扫描器在候选循环内按各自 `state_horizon_weights` 重新合成 `candidate_ml_score`；
+  - 同时把扫描器扩成支持“候选级全量重算”，以便安全复验 `regime_max_annual_vol` 这种会改状态标签与 ML 特征的参数。
+
+### 本轮产物
+- 第十轮 `ma50` 状态专属 horizon 权重：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round10_ma50_state_horizon`
+- 第十一轮 `ma50` 状态专属 ensemble 权重：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round11_ma50_state_ensemble`
+- 第十二轮 `ma50` 波动阈值微调：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260322_formal_round12_ma50_regime_vol`
+- 关键脚本：
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+  - `daily_research/baseline/ml_alpha.py`
+
+### 结果一：状态专属 horizon 权重不是当前修复主线
+- 只改 `trend_up_high_vol` 的 horizon 配比时：
+  - `latest_weak` 窗口始终停在基线同一水平，约 `-10.87% / -0.559`
+  - 但全样本超额 Sharpe 会从 `1.841` 回落到约 `1.653 ~ 1.712`
+- 一旦同时改到 `trend_up_low_vol` 的 horizon 配比：
+  - 最新弱窗口会明显恶化，最差一档约退到 `-18.96% / -0.927`
+  - 全样本超额 Sharpe 也进一步退到约 `1.412 ~ 1.608`
+- 这说明：
+  - `ma50 baseline` 下，状态专属 horizon 权重对当前弱窗口没有提供有效修复；
+  - 尤其 `trend_up_low_vol` 的 horizon 结构，当前不宜作为下一步第一优先级。
+
+### 结果二：状态专属 ensemble 权重仍有一点信息量，但还没有干净升级
+- 纯 `trend_up_high_vol` 的 ensemble 调整：
+  - 对最新弱窗口几乎完全无影响；
+  - 但会轻微拖累全样本超额 Sharpe。
+- 首个真正动到弱窗口的候选是：
+  - `trend_up_low_vol=ml0.60/none0.25/v20.15`
+  - `trend_up_high_vol=ml0.80/none0.15/v20.05`
+- 这条候选的表现是：
+  - 最新弱窗口从基线约 `-10.87% / -0.559` 小幅改善到约 `-10.04% / -0.550`
+  - 最近完整窗口提升到约 `90.53% / 2.299`
+  - 但全样本超额 Sharpe 从 `1.841` 回落到约 `1.753`
+  - 全样本超额最大回撤也从约 `-29.11%` 扩到约 `-32.43%`
+- 这说明：
+  - 当前三条升级线里，只有状态专属 ensemble 还保留一点继续研究的价值；
+  - 但第一轮结果还不足以把它直接晋级成 `ma50 baseline` 的正式替代。
+
+### 结果三：`ma50` 简单波动阈值微调没有有效敏感度
+- `regime_max_annual_vol=0.30 / 0.31 / 0.32 / 0.33 / 0.34` 五个点的正式收益指标完全一致：
+  - 全样本超额 Sharpe 都约 `1.841`
+  - 最新弱窗口都约 `-10.87% / -0.559`
+- 进一步比对 `regime_state.csv` 与 `actions.csv` 后确认：
+  - 阈值变化只改动了少数 `trend_down_low_vol / trend_down_high_vol` 的标签；
+  - `regime_on` 一天都没有变化；
+  - 持仓权重与交易动作也完全一致。
+- 这说明：
+  - 在当前 `ma50 + liquid500 + next_open` 框架里，简单波动阈值微调并没有触发到真正影响执行结果的边界；
+  - 这条线当前不应继续放在第一优先级。
+
+### 本轮结论
+1. `ma50 baseline` 内部升级的首轮正式复验已经完成，原定三条线里，`horizon` 与简单波动阈值都没有跑出可继续优先推进的信号。
+2. 状态专属 ensemble 权重仍保留一定信息量，但当前最佳候选仍是“弱窗口略改善、全样本明显退步”的不干净升级。
+3. 因此执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`，`ma50 baseline` 继续保留为头号正式修复候选。
+4. 下一步不再按原顺序继续推 `horizon -> ensemble -> vol threshold`，而是收束为：只对 `ma50` 做第二轮状态专属 ensemble 精扫，并先隔离 `trend_up_low_vol` 的权重结构。
+
+### 当前决策
+1. 执行端默认值继续冻结为：`advanced_ml + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前头号正式修复候选
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级备选
+4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不再参与当前执行修复排序
+5. 下一步研究重心继续留在 `ma50 baseline` 内部，但顺序更新为：第二轮状态专属 ensemble 精扫优先，且先隔离 `trend_up_low_vol`；状态专属 horizon 权重与简单波动阈值微调暂不再列为第一优先级
+
+## 2026-03-23 执行端默认值切换：`ma50 baseline`
+### 本轮目标
+- 既然 `ma50 baseline` 已经完成专项复验，并在稳定性上明确优于当前执行主线，就不再停留在“候选”状态；
+- 正式把执行端默认口径从原 `ma60` 切到 `ma50 baseline`，并确保：
+  - 训练入口默认值完成切换；
+  - 出计划入口默认值完成切换；
+  - 当前默认模型产物同步重训到 `ma50`；
+  - 文档口径从“候选”更新为“当前默认执行”。
+
+### 本轮动作
+1. 执行端入口参数切换：
+   - `daily_research/execution/entrypoint_utils.py`
+   - `daily_research/execution/update_model.py`
+   - `daily_research/execution/run_trade_plan.py`
+   - 新增统一默认注入：`--regime-ma-window 50`
+2. 修正了执行端脚本直接按路径运行时的入口缺口：
+   - `update_model.py` / `run_trade_plan.py` 在最顶部先补 `sys.path`
+   - 因此 `python daily_research/execution/update_model.py ...` 与 `python daily_research/execution/run_trade_plan.py ...` 现在都可以直接运行
+3. 补强模型元数据：
+   - `daily_research/baseline/train_trade_model.py`
+   - 默认模型 `json` 现在会写出：
+     - `regime_ma_window`
+     - `regime_vol_window`
+     - `regime_max_annual_vol`
+     - `regime_allowed_quadrants`
+
+### 本轮执行结果
+1. 已按新的执行默认值重训默认模型产物：
+   - `daily_research/execution/models/latest_ml_model.joblib`
+   - `daily_research/execution/models/latest_ml_model.json`
+2. 当前默认模型元数据已明确写明：
+   - `trained_at = 2026-03-23 00:32:27`
+   - `regime_ma_window = 50`
+   - `regime_vol_window = 20`
+   - `regime_max_annual_vol = 0.32`
+   - `regime_allowed_quadrants = [trend_up_low_vol, trend_up_high_vol]`
+3. 以脚本路径方式完成了执行端冒烟验证：
+   - `python daily_research/execution/update_model.py ...`
+   - `python daily_research/execution/run_trade_plan.py ... --output-dir daily_research/output/ma50_execution_switch_smoke --experiment-tag ma50_switch_smoke_20260323`
+4. 冒烟验证已通过：
+   - 训练入口正常写出 `latest_ml_model.joblib/json`
+   - 出计划入口正常完成推理并输出到：
+     - `daily_research/output/ma50_execution_switch_smoke/ma50_switch_smoke_20260323`
+
+### 本轮结论
+1. `ma50 baseline` 已从“头号正式修复候选”正式晋级为当前执行默认口径。
+2. 当前执行端默认值已不再是原 `ma60` 口径，而是：`advanced_ml (ma50 baseline) + liquid500 + next_open`。
+3. 后续研究主线不再讨论“要不要切到 ma50”，而是直接围绕当前默认执行 `ma50 baseline` 做增量优化。
+4. 原 `ma60 + up_low_ml55_none25_v220` 保留为次一级回滚参考，但不再作为当前默认执行主线。
+
+### 当前决策
+1. 执行端默认值已切换为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 已正式晋级为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 保留为次一级回滚备选
+4. `ma47/48` 左侧边界带继续保留为纯研究旁支，不参与当前执行默认值排序
+5. 下一步研究重心继续留在当前执行默认 `ma50 baseline` 内部，优先做第二轮状态专属 ensemble 精扫，并先隔离 `trend_up_low_vol`
+
+## 2026-03-23 执行端模型治理补强：验证指标落盘 + 过期拦截
+### 本轮目标
+- 解决两个执行端治理空缺：
+  - 默认模型产物只有 `train_summary`，没有历史验证摘要，导致“模型是否仍有效”不能直接从产物上看；
+  - 出计划时只检查模型文件是否存在，不检查模型是否过期。
+
+### 本轮动作
+1. 在 `daily_research/baseline/train_trade_model.py` 中补了默认模型滚动验证摘要：
+   - 沿当前默认口径跑历史滚动 ML 验证；
+   - 采用滚动 RankIC 摘要作为默认验证指标；
+   - 默认 `21` 个交易日一个历史重训块；
+   - 结果写入 `latest_ml_model.json -> validation_summary`
+2. 在 `daily_research/baseline/generate_daily_trade_plan.py` 中补了模型新鲜度判断：
+   - 默认相对当前信号日滞后 `1` 个交易日开始提醒；
+   - 默认滞后 `3` 个交易日开始拦截；
+   - 可用 `--allow-stale-model` 强制放行
+3. 同步把模型验证摘要与模型新鲜度写进：
+   - `latest_trade_plan.txt`
+   - `plan_summary.json`
+
+### 本轮执行结果
+1. 已重新生成默认模型产物：
+   - `daily_research/execution/models/latest_ml_model.joblib`
+   - `daily_research/execution/models/latest_ml_model.json`
+2. 当前默认模型元数据已包含 `validation_summary`：
+   - `combined.full` 平均 RankIC 约 `0.107`
+   - `combined.recent_126d` 平均 RankIC 约 `0.146`
+   - `combined.recent_63d` 平均 RankIC 约 `0.212`
+3. 已完成正常执行冒烟：
+   - `daily_research/output/model_validation_smoke/model_validation_smoke_20260323`
+   - `latest_trade_plan.txt` 已能显示模型最新数据日、模型新鲜度、模型验证摘要
+4. 已完成过期拦截冒烟：
+   - 构造临时过期模型元数据 `latest_data_date=2026-03-20`
+   - 在 `--stale-model-max-trading-days 1` 下，执行端已按预期抛出 `RuntimeError` 并中止出计划
+
+### 本轮结论
+1. 默认模型产物现在不再只是“能加载”，而是可以直接看到训练摘要和滚动验证摘要。
+2. 执行端现在不再只是“有模型就继续”，而是具备了最基本的模型过期提醒与拦截能力。
+3. 当前执行主线仍保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`，后续优化可以直接建立在这套更可观测的执行底座上。
+
+## 2026-03-23 执行端易用性修正：`current_positions.csv` 升级为可选账号快照
+### 本轮目标
+- 修正执行端文档与实际使用上的两个摩擦点：
+  - 原 README 把“更新持仓”和“准备次日开盘可用现金”拆成了两步，逻辑重复；
+  - 日常执行时还要求命令行手填 `--cash`，不利于直接模拟真实账号状态。
+
+### 本轮动作
+1. 在 `daily_research/baseline/generate_daily_trade_plan.py` 中补了账号快照读取：
+   - `current_positions.csv` 继续兼容原来的老格式：`stock,shares,cost_price`
+   - 同时支持新的账号快照格式：同一文件内写 `account` 行现金与 `position` 行持仓
+2. `--cash` 现在改成可选覆盖参数：
+   - 不传时，优先读取 `current_positions.csv` 中 `account -> available_cash`
+   - 传了 `--cash` 时，命令行显式覆盖文件里的现金
+3. 在计划摘要与 `latest_trade_plan.txt` 中补了现金来源说明：
+   - 会写明本次现金来自命令行覆盖、账号快照，还是“未提供按 0 处理”
+4. 更新样例与说明：
+   - `daily_research/execution/current_positions.example.csv`
+   - `daily_research/execution/README.md`
+
+### 新的推荐账号快照格式
+```csv
+record_type,stock,shares,cost_price,available_cash
+account,,,,200000
+position,600000.SH,1000,10.52,
+position,600036.SH,800,42.10,
+position,000001.SZ,1200,12.38,
+```
+
+### 本轮结论
+1. 执行端现在不必再把“持仓更新”和“现金输入”拆成两步。
+2. 日常更推荐只维护一份 `current_positions.csv`，直接把账号现金和持仓一起写进去。
+3. `--cash` 仍然保留，但定位变成“临时覆盖”，而不是每天必须手填的常规入口。
+
+## 2026-03-23 执行端第十三轮正式复验：`ma50` 状态专属 ensemble 第二轮精扫（先隔离 `trend_up_low_vol`）
+### 本轮目标
+- 既然当前执行默认值已经切到 `ma50 baseline`，这轮不再同时调两个上涨状态，而是先把变量收干净：
+  - 固定 `trend_up_high_vol` 回到 baseline；
+  - 只围绕 `trend_up_low_vol` 的 `ML / none / v2` 配比，做第二轮细扫；
+  - 重点确认：第一轮里“弱窗口略有改善”的信号，在隔离 `trend_up_high_vol` 后是否还能成立，以及能否跑出更干净的正式候选。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only`
+- 汇总表：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/repair_scan_summary.csv`
+- 归因目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/attr_baseline_vs_up_low_ml62_none23_v215`
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only/attr_baseline_vs_up_low_ml61_none24_v215`
+- 关键脚本：
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+
+### 结果一：只隔离 `trend_up_low_vol` 后，弱窗口修复信号仍然存在
+- 本轮 baseline（当前执行默认 `ma50 baseline`）：
+  - 全样本超额 Sharpe 约 `1.869`
+  - 最近完整窗口约 `77.68% / 1.904`
+  - 最新弱窗口约 `-10.70% / -0.550`
+- 弱窗口修复最强点出现在：
+  - `up_low_ml62_none23_v215`
+  - 全样本超额 Sharpe 约 `1.775`
+  - 最近完整窗口约 `91.04% / 2.279`
+  - 最新弱窗口约 `-7.67% / -0.413`
+- 相对更平衡的候选是：
+  - `up_low_ml61_none24_v215`
+  - 全样本超额 Sharpe 约 `1.792`
+  - 最近完整窗口约 `91.54% / 2.337`
+  - 最新弱窗口约 `-8.05% / -0.451`
+- 这说明：
+  - 第一轮里“`trend_up_low_vol` 权重仍有修复信息量”的判断没有被推翻；
+  - 而且在把 `trend_up_high_vol` 固定回 baseline 后，这条信号反而更清楚。
+
+### 结果二：但当前仍没有跑出“弱窗口改善 + 全样本不伤”的干净升级
+- 虽然 `up_low_ml62_none23_v215 / up_low_ml61_none24_v215` 都显著改善了最近完整窗口和最新弱窗口：
+  - 但两者的全样本超额 Sharpe 仍分别从 baseline 的约 `1.869` 回落到约 `1.775 / 1.792`
+  - 全样本超额最大回撤也分别扩到约 `-31.28% / -32.62%`，都差于 baseline 的约 `-29.11%`
+- 更激进地把 `ML` 压到 `0.59` 以下后，结果开始明显恶化：
+  - `up_low_ml59_none25_v216` 的最新弱窗口已经退到约 `-14.67% / -0.792`
+  - `up_low_ml58_none25_v217` 更差，约 `-19.46% / -1.018`
+- 这说明：
+  - `trend_up_low_vol` 的第二轮细扫已经把有效区间压缩到了 `0.60 ~ 0.62` 附近；
+  - 再继续往下压 `ML` 主导权，并不会持续改善，反而会把这条线推回失效区。
+
+### 结果三：当前最强候选的增益仍然带有季度集中迹象
+- `up_low_ml62_none23_v215` 相对 baseline：
+  - 只在 `17` 个季度里的 `7` 个季度更强
+  - 最强季度是 `2026Q1`，超额差约 `+9.04%`
+  - 最弱季度是 `2024Q4`，超额差约 `-16.58%`
+- `up_low_ml61_none24_v215` 相对 baseline：
+  - 也只在 `17` 个季度里的 `7` 个季度更强
+  - 最强季度同样是 `2026Q1`，超额差约 `+11.19%`
+  - 最弱季度同样落在 `2024Q4`，超额差约 `-16.47%`
+- 状态归因也表明：
+  - 这轮差异几乎全部来自 `trend_up_low_vol`
+  - `trend_up_high_vol` 与两个下跌象限基本没变
+- 这说明：
+  - “先隔离 `trend_up_low_vol`”这一步是对的；
+  - 但当前最佳候选仍然可能带有较强的季度集中性，不能直接按正式升级处理。
+
+### 本轮结论
+1. `ma50 baseline` 内部第二轮状态专属 ensemble 精扫已经完成，且确认：真正还有继续研究价值的，确实是 `trend_up_low_vol` 这条线。
+2. 目前保留下来的两个候选是：
+   - `up_low_ml62_none23_v215`：偏弱窗口修复最强；
+   - `up_low_ml61_none24_v215`：偏近期窗口相对更平衡。
+3. 但它们都还不是“弱窗口改善且全样本不伤”的干净升级，因此当前执行默认值不切换，继续保持 `advanced_ml (ma50 baseline) + liquid500 + next_open`。
+4. 下一步不再继续盲扫更大的 `trend_up_low_vol` 权重网格，而是先对这两档候选做季度集中度与 `2026Q1` 归因诊断；如果确认增益仍主要集中在单一季度，就停止这条 ensemble 权重线晋级。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
+4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 作为本轮保留的两档研究候选，但暂不晋级执行端
+5. 下一步先做这两档候选的季度集中度与 `2026Q1` 归因诊断；若确认仍属季度集中驱动，则停止这条 ensemble 权重线继续晋级
+
+## 2026-03-23 执行端第十四轮正式诊断：`ma50` ensemble 候选季度集中度与 `2026Q1` 归因
+### 本轮目标
+- 对 round13 保留下来的两档候选做最后一步正式诊断：
+  - `up_low_ml62_none23_v215`
+  - `up_low_ml61_none24_v215`
+- 直接回答两个问题：
+  - 它们相对 `ma50 baseline` 的改进是否仍主要集中在少数季度；
+  - 若焦点季度为 `2026Q1`，增益究竟来自稳定的季度级增强，还是少数日期与少数槽位放大。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_execution_repair_scan_20260323_formal_round14_ma50_ensemble_q1_diagnosis`
+- 关键文件：
+  - `summary_rows.csv`
+  - `repair_vs_baseline_quarterly_compare.csv`
+  - `balance_vs_baseline_quarterly_compare.csv`
+  - `repair_focus_quarter_monthly.csv`
+  - `balance_focus_quarter_monthly.csv`
+  - `repair_focus_quarter_top_days.csv`
+  - `balance_focus_quarter_top_days.csv`
+  - `report.json`
+  - `report.md`
+- 关键工具：
+  - `daily_research/tools/ma50_ensemble_q1_report.py`
+
+### 结果一：两条候选都确认存在较强季度集中度
+- `up_low_ml62_none23_v215` 相对 baseline：
+  - 只在 `17` 个季度里的 `7` 个季度更强
+  - 最佳季度 `2026Q1` 占正向季度总优势约 `45.27%`
+  - Top3 季度占比约 `81.16%`
+  - 季度正向优势 HHI 约 `0.285`
+- `up_low_ml61_none24_v215` 相对 baseline：
+  - 也只在 `17` 个季度里的 `7` 个季度更强
+  - 最佳季度 `2026Q1` 占正向季度总优势约 `52.20%`
+  - Top3 季度占比约 `86.74%`
+  - 季度正向优势 HHI 约 `0.341`
+- 这说明：
+  - 两条候选都不是“多季度平滑抬升”的修复；
+  - 其中 `up_low_ml61_none24_v215` 比 `up_low_ml62_none23_v215` 还要更集中。
+
+### 结果二：`2026Q1` 的增量主要堆在 `2026-01`
+- `up_low_ml62_none23_v215`：
+  - `2026-01` compound 超额边际约 `+8.93%`
+  - `2026-02` 反而回吐约 `-4.75%`
+  - `2026-03` 仅修复约 `+3.41%`
+- `up_low_ml61_none24_v215`：
+  - `2026-01` compound 超额边际约 `+12.99%`
+  - `2026-02` 回吐约 `-6.79%`
+  - `2026-03` 仅修复约 `+3.41%`
+- 这说明：
+  - 即使把最佳季度拆到月度，增量也不是均匀分布；
+  - 真正的放大主要集中在 `2026-01`，而不是整个 `2026Q1` 都持续占优。
+
+### 结果三：焦点季度内的增益仍主要来自少数日期与少数槽位替换
+- `up_low_ml62_none23_v215` 在 `2026Q1`：
+  - Top5 正向日占正向日总优势约 `79.11%`
+  - Top10 正向日占比约 `97.26%`
+  - 平均持仓重叠 Jaccard 约 `0.714`
+  - 约 `54%` 的日期仍至少与 baseline 重合 `4` 个名字
+- `up_low_ml61_none24_v215` 在 `2026Q1`：
+  - Top5 正向日占比约 `79.12%`
+  - Top10 正向日占比约 `96.02%`
+  - 平均持仓重叠 Jaccard 约 `0.697`
+  - 约 `52%` 的日期仍至少与 baseline 重合 `4` 个名字
+- 焦点季度里的正向差异主要发生在 `trend_up_low_vol`，但并不是整季整套组合重写：
+  - 更多还是少数日期放大；
+  - 再叠加少数槽位替换完成。
+
+### 本轮结论
+1. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的正式季度集中度与 `2026Q1` 归因诊断已经完成。
+2. 结论可以正式落地为：这条 `trend_up_low_vol` ensemble 权重线仍然属于季度集中驱动，不满足继续晋级执行端的条件。
+3. 因此这条线到此停止晋级执行端；已有扫描结果、归因结果和焦点季度诊断全部保留，但仅作为研究附录，不再继续扩展权重网格。
+4. 当前执行默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`。
+5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究，而不是继续扫这条 ensemble 权重线。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. `ma50 baseline` 继续作为当前执行默认口径
+3. `ma60 + up_low_ml55_none25_v220` 继续保留为次一级回滚备选
+4. `up_low_ml62_none23_v215` 与 `up_low_ml61_none24_v215` 的诊断已完成，并确认仍属季度集中驱动；两者保留为研究附录，但停止继续晋级执行端
+5. 下一步若继续做执行端 ML 增量优化，优先切到 `ma50` 口径下的模型族对照或状态专属模型研究
+
+## 2026-03-24 执行端第十五轮正式复验：`ma50` 口径模型族对照（`histgb / lgbm / etr`）
+> 注：这段高收益结论属于 `2026-03-24` 的旧执行口径，不等于当前 live 执行端的收益预期。
+> 当时脚本默认起点仍是 `2022-01-01`，且使用的是旧 `market_features(7)` 与全局 `ML / none / v2 = 0.70 / 0.20 / 0.10` 集成；
+> `2026-03-28` 底层状态和 `market_features` 已扩到 `24` 个，当前 live 默认也已切到 `trend_up_low_vol` 状态专属 `v250`，因此这里的高收益只能作为“旧模型族对照结论”，不能直接外推到今天的执行端。
+
+### 本轮目标
+- 既然 `trend_up_low_vol` 的 ensemble 权重线已经确认停止晋级，就把执行端 ML 增量优化的主线切到当前真实执行口径下的模型族对照：
+  - 固定 `ma50 + rolling liquid500 + next_open`
+  - 不再沿用旧的 `ma60` 模型族结论
+  - 直接回答：当前默认 `histgb` 是否仍然是最合适的执行模型族
+- 本轮也把之前超时中断的 `etr` 单独补跑完成，避免三家模型里只留两家半结论。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution`
+- 关键文件：
+  - `model_family_compare_summary.csv`
+  - `model_family_compare_report.json`
+  - `model_family_compare_report.md`
+  - `histgb_vs_lgbm/overall_comparison.csv`
+  - `histgb_vs_lgbm/quarterly_comparison.csv`
+  - `histgb_vs_lgbm/quadrant_comparison.csv`
+- 关键脚本：
+  - `daily_research/baseline/compare_ml_model_families.py`
+  - `daily_research/baseline/analyze_advanced_ml_comparison.py`
+
+### 结果一：`lgbm` 在当前执行口径下显著强于当前默认 `histgb`
+> 2026-03-28 追加澄清：
+> 这里的 `887.75%` 是旧口径下的“全样本超额总收益”，不是年化收益，也不是“一年翻数倍”。
+> 同段里的 `127.99% / 2.816` 也应读作“最近完整窗口超额总收益 / 超额 Sharpe”，不是“窗口年化 / Sharpe”。
+> 另外，这轮模型族对照脚本当时默认仍是 `start_date=20220101`、全局 blend `0.70 / 0.20 / 0.10`，且发生在 `market_features(7)` 旧系统里；
+> 2026-03-28 切到 `market_features(24)` 后，当前 live 口径必须以 `advanced_ml_attack_defense_controller_20260328_formal_r3_weightgrid_focus`
+> 与 `market_feature_profile_compare_20260328_formal_r1` 为准，不能把这里的旧高收益直接外推成今天执行端的收益预期。
+- `lgbm`：
+  - 全样本超额收益约 `887.75%`
+  - 全样本超额 Sharpe 约 `2.300`
+  - 最近完整窗口 `2025-03-07 -> 2026-03-19` 约 `127.99% / 2.816`
+  - 最新弱窗口 `2025-09-05 -> 2026-03-19` 约 `9.79% / 0.475`
+- 当前默认 `histgb`：
+  - 全样本超额收益约 `388.95%`
+  - 全样本超额 Sharpe 约 `1.487`
+  - 最近完整窗口约 `61.33% / 1.402`
+  - 最新弱窗口约 `-8.46% / -0.423`
+- 这说明：
+  - 在当前已经切换到 `ma50 baseline` 的执行口径下，`histgb` 不再是最强模型族；
+  - `lgbm` 不只是弱窗口更好，而是全样本、最近完整窗口、最新弱窗口三层都明显更强。
+
+### 结果二：`etr` 补跑完成，但仍不是头号 challenger
+- `etr` 正式补跑结果为：
+  - 全样本超额收益约 `274.63%`
+  - 全样本超额 Sharpe 约 `1.443`
+  - 最近完整窗口约 `41.74% / 1.491`
+  - 最新弱窗口约 `6.46% / 0.433`
+- 这说明：
+  - `etr` 的确比当前默认 `histgb` 更能修复最新弱窗口；
+  - 但它在全样本与最近完整窗口上都明显落后于 `lgbm`，且全样本超额 Sharpe 也低于 `histgb`；
+  - 因此 `etr` 只保留为正式研究附录，不再作为头号模型族升级候选。
+
+### 结果三：`lgbm` 的领先不是单季度孤点
+- `lgbm` 相对 `histgb` 的季度对照结果：
+  - 在 `17` 个季度里有 `9` 个季度更强
+  - `8` 个季度持平
+  - `0` 个季度更弱
+- 季度集中度摘要：
+  - 最强季度为 `2025Q3`
+  - 该季度占正向季度总优势约 `29.67%`
+  - Top3 季度占比约 `74.12%`
+  - 正向季度 HHI 约 `0.214`
+- 状态归因结果：
+  - 主要新增优势来自 `trend_up_low_vol`
+  - `trend_up_high_vol` 也有正向增益
+  - 并不存在“一个上涨状态修好、另一个上涨状态反而更差”的问题
+- 这说明：
+  - 这次 `lgbm` 的领先不是“少数季度抬起来、其他季度更差”；
+  - 更像是从 `2024Q1` 起，在当前 `ma50` 执行框架里持续把 `histgb` 拉开。
+
+### 本轮结论
+1. `ma50` 口径下的正式模型族对照已经完成，当前最强模型族已从默认 `histgb` 明确切换为 `lgbm`。
+2. `etr` 正式补跑完成后，结论更新为：它能修复弱窗口，但整体不如 `lgbm`，因此只保留为研究附录。
+3. `lgbm` 相对 `histgb` 的领先已经具备跨窗口、跨季度的一致性，不再只是旧 `ma60` 口径下那个“值得继续观察”的 challenger。
+4. 但当前执行默认模型暂不直接切换，先进入 `ma50 + lgbm` 的切换前复核与执行端烟测，再决定是否正式替换默认模型。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族继续保持为：`histgb`
+3. `lgbm` 已正式晋级为当前 `ma50` 执行口径下的头号模型族升级候选
+4. `etr` 正式补跑完成，但只保留为研究附录，不再作为主 challenger
+5. 下一步若继续做执行端 ML 增量优化，优先顺序更新为：
+   - 先对 `ma50 + lgbm` 做切换前复核与执行端烟测
+   - 再决定是否还有必要进入状态专属模型研究
+
+## 2026-03-24 执行端第十六轮正式复核：`ma50 + lgbm` 切换前复核与第一轮执行端烟测
+### 本轮目标
+- 既然 `lgbm` 已在当前 `ma50` 执行口径下跑成头号模型族升级候选，这轮不直接切默认值，而是先做切换前复核：
+  - 生成独立的 `lgbm` 候选模型产物，不覆盖默认 `latest_ml_model.*`
+  - 确认候选产物也能完整走通执行端 `update_model.py -> run_trade_plan.py`
+  - 检查执行端是否能正常读取候选 meta 里的 `validation_summary` 与模型新鲜度
+  - 再判断：当前是否已经足够进入默认模型切换
+
+### 本轮产物
+- 候选模型目录：
+  - `daily_research/output/ma50_lgbm_switch_review/models`
+- 候选模型产物：
+  - `ma50_lgbm_candidate.joblib`
+  - `ma50_lgbm_candidate.json`
+- 烟测目录：
+  - `daily_research/output/ma50_lgbm_switch_smoke/ma50_lgbm_switch_smoke_20260324`
+  - `daily_research/output/ma50_lgbm_switch_smoke/latest_trade_plan.txt`
+- 复核摘要：
+  - `daily_research/output/ma50_lgbm_switch_review/switch_review_summary.json`
+  - `daily_research/output/ma50_lgbm_switch_review/switch_review_summary.md`
+
+### 结果一：独立 `lgbm` 候选产物已成功生成，且验证摘要继续强于默认 `histgb`
+- 候选产物训练完成时间：
+  - `trained_at = 2026-03-24 11:27:56`
+- 候选产物口径：
+  - `ma50 + liquid500 + next_open`
+  - `ml_model_family = lgbm`
+- 候选 `lgbm` 的滚动验证摘要：
+  - `full IC 0.121`
+  - `recent126d IC 0.152`
+  - `recent63d IC 0.219`
+- 当前默认 `histgb` 的对应摘要：
+  - `full IC 0.107`
+  - `recent126d IC 0.146`
+  - `recent63d IC 0.212`
+- 这说明：
+  - `lgbm` 不只是在回测收益上更强，离线滚动验证摘要也继续优于当前默认 `histgb`
+  - 当前 `lgbm` 候选产物已经具备进入执行端复核的基础质量
+
+### 结果二：第一轮执行端烟测已跑通，但当前只覆盖到 `regime_off` 卖出路径
+- 烟测命令已用独立候选产物跑通：
+  - `update_model.py` 显式输出到独立 `artifact-path / artifact-meta-path`
+  - `run_trade_plan.py` 显式读取该候选 `model-artifact`
+- 烟测摘要确认：
+  - 模型新鲜度 `fresh`
+  - `trading_day_lag = 0`
+  - 执行端已正常读取候选 meta 中的 `validation_summary`
+- 当前烟测信号日为：
+  - `2026-03-23`
+  - 市场状态 `trend_down_low_vol`
+  - `regime_off`
+- 因此本次烟测只走到了“禁止开新仓时的卖出路径”，计划结果为：
+  - 卖出 `002843.SZ` `800` 股
+
+### 结果三：候选 `lgbm` 与当前默认计划在本次烟测日没有引入额外执行漂移
+- 当前默认计划与候选 `lgbm` 计划在 `2026-03-23` 的动作完全一致：
+  - 都只给出一笔卖出 `002843.SZ` `800` 股
+- 差异主要体现在分数层：
+  - 默认 `histgb` 对该标的的 `final_score` 约 `2.447`
+  - 候选 `lgbm` 对该标的的 `final_score` 约 `2.767`
+- 这说明：
+  - 在当前这个 `regime_off` 信号日上，切到 `lgbm` 不会导致额外的执行动作漂移
+  - 但这仍不足以证明买入路径也完全稳定，因为今天没有覆盖到 `regime_on` 下的新开仓场景
+
+### 本轮结论
+1. `ma50 + lgbm` 的切换前复核已经完成第一步：独立候选产物与执行端烟测都已跑通。
+2. 当前候选 `lgbm` 不仅正式回测强于默认 `histgb`，滚动验证摘要也继续优于默认模型。
+3. 但本次烟测落在 `trend_down_low_vol`，只覆盖了 `regime_off` 卖出路径，还不能直接作为最终切换依据。
+4. 因此当前执行默认模型暂不切换；下一步应先补一个 `regime_on` 日期的点时烟测，把买入路径也完整验证掉。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族继续保持为：`histgb`
+3. `lgbm` 继续作为当前头号模型族升级候选
+4. 下一步不直接进入状态专属模型研究，而是先补一个 `regime_on` 日期的点时烟测
+5. 只有在该点时烟测也通过后，才决定是否正式把默认模型从 `histgb` 切换到 `lgbm`
+
+## 2026-03-24 执行端第十七轮正式复核：`regime_on` 点时烟测补完与买入路径修复
+### 本轮目标
+- 承接第十六轮尚未完成的切换前复核，直接回答两个问题：
+  - `ma50 + lgbm` 在 `regime_on` 场景下是否也能稳定走通真实买入路径；
+  - 若点时烟测仍异常，问题究竟来自模型本身，还是执行端计划生成逻辑。
+
+### 本轮产物
+- 点时账户快照：
+  - `daily_research/output/ma50_lgbm_switch_review/regime_on_account_snapshot.csv`
+- 点时模型产物：
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_histgb_pointtime_20260311.joblib`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_histgb_pointtime_20260311.json`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_pointtime_20260311.joblib`
+  - `daily_research/output/ma50_lgbm_switch_review/models/ma50_lgbm_pointtime_20260311.json`
+- 修复后点时烟测目录：
+  - `daily_research/output/ma50_lgbm_switch_review/histgb_regime_on_smoke_fixed/20260311`
+  - `daily_research/output/ma50_lgbm_switch_review/lgbm_regime_on_smoke_fixed/20260311`
+
+### 结果一：前一次 `regime_on` 失败暴露的是执行端买入 bug，不是模型失效
+- 原始异常现象是：
+  - `plan_summary.json` 显示 `target_position_count = 5`
+  - `watchlist.csv` 里已有多只接近 `25%` 的目标仓位
+  - 但 `actions_today.csv` 为空，计划文本写成“今日无明确调仓动作”
+- 复核后定位到真实原因：
+  - `daily_research/baseline/generate_daily_trade_plan.py` 的买入腿循环里，误把 `target_weight_row` 当成了 `target_value`
+  - 结果就是买入判断实际在拿 `0.25` 这类权重去和一手股票金额比较，正常候选会被直接跳过
+- 这说明：
+  - 前一次 `regime_on` 烟测未通过，不能归因到 `histgb` 或 `lgbm`
+  - 它首先是一个执行端计划生成 bug
+
+### 结果二：修复后，`histgb / lgbm` 都能在同一 `regime_on` 日期正常生成买单
+- 本轮点时信号日固定为：`2026-03-11`
+- 当日市场状态为：
+  - `trend_up_low_vol`
+  - `regime_on = True`
+- 修复后 `histgb` 点时计划：
+  - 买入 `002470.SZ` `16600` 股
+  - 买入 `688800.SH` `500` 股
+  - 买入 `300617.SZ` `700` 股
+  - 买入 `002843.SZ` `1800` 股
+  - 计划后剩余现金约 `9098`
+- 修复后 `lgbm` 点时计划：
+  - 买入 `002470.SZ` `16600` 股
+  - 买入 `000510.SZ` `2600` 股
+  - 买入 `688800.SH` `500` 股
+  - 买入 `300739.SZ` `1700` 股
+  - 计划后剩余现金约 `5584`
+- 两边点时产物都保持：
+  - `model_freshness = fresh`
+  - `trading_day_lag = 0`
+
+### 结果三：切换前执行链路现在已经补全
+- 第十六轮已经覆盖了 `2026-03-23` 的 `regime_off` 卖出路径：
+  - 默认 `histgb` 与候选 `lgbm` 给出同一笔卖出 `002843.SZ` `800` 股
+- 第十七轮又补完了 `2026-03-11` 的 `regime_on` 买入路径：
+  - `histgb / lgbm` 都能正常生成多笔买单
+  - 且 `lgbm` 的买入组合与 `histgb` 有清晰但可解释的差异，不是执行链路漂移失控
+- 这说明：
+  - 当前 `ma50 + lgbm` 不只是离线回测与验证摘要更强
+  - 在执行端里也已经同时通过了卖出场景和买入场景的烟测复核
+
+### 本轮结论
+1. `regime_on` 点时烟测已经补完，且在修复执行端买入 bug 后正式通过。
+2. 前一次“有目标仓位却无买单”的异常，已经确认是执行端买入腿 sizing 逻辑问题，不构成对 `lgbm` 的负面证据。
+3. 因此当前默认模型从研究侧和执行侧都已满足正式切换到 `lgbm` 的条件。
+4. 下一步不再优先进入状态专属模型研究，而是应先完成默认模型从 `histgb` 到 `lgbm` 的正式替换。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline) + liquid500 + next_open`
+2. 当前默认模型族仍暂时是：`histgb`
+3. 但 `lgbm` 的切换前复核已经完整通过，现已具备正式替换默认模型的条件
+4. 下一步优先做默认模型切换：`histgb -> lgbm`
+5. 默认模型切换完成后，再决定是否还有必要进入状态专属模型研究
+
+## 2026-03-24 执行端第十八轮正式变更：默认模型 `histgb -> lgbm`
+### 本轮目标
+- 承接第十七轮已经完成的切换前复核，不再停留在“具备切换条件”，而是把默认执行模型真正从 `histgb` 切换到 `lgbm`：
+  - 修改执行端默认入口；
+  - 重训默认 `latest_ml_model.*`；
+  - 重新跑默认 `run_trade_plan.py`，确认切换后真实默认链路正常。
+
+### 本轮产物
+- 默认模型产物：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+- 默认执行输出：
+  - `daily_research/execution/output/20260324`
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+### 结果一：执行端默认入口已切到 `lgbm`
+- `daily_research/execution/update_model.py` 现已默认注入：
+  - `--ml-model-family lgbm`
+- 这意味着：
+  - 后续按执行端标准流程运行 `update_model.py` 时，不再需要手动显式补 `--ml-model-family lgbm`
+  - 当前默认执行模型族已从“文档建议切换”升级为“入口默认已切换”
+
+### 结果二：默认 `latest_ml_model.*` 已重训为 `lgbm`
+- 默认模型元数据当前为：
+  - `trained_at = 2026-03-24 16:33:31`
+  - `latest_data_date = 2026-03-24`
+  - `regime_ma_window = 50`
+  - `model_family = lgbm`
+- 当前默认滚动验证摘要为：
+  - `full IC 0.120`
+  - `recent126d IC 0.153`
+  - `recent63d IC 0.227`
+- 这说明：
+  - 当前默认执行产物已经不再是旧的 `histgb`
+  - 默认元数据中的验证摘要和新鲜度也都同步更新到了新模型上
+
+### 结果三：切换后的默认执行链路烟测正常
+- 用当前真实执行快照重新运行默认 `run_trade_plan.py` 后：
+  - 信号日：`2026-03-24`
+  - 市场状态：`trend_down_low_vol`
+  - 默认计划动作：卖出 `002843.SZ` `800` 股
+- 当前计划文件已写回：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+- 这说明：
+  - 默认 `lgbm` 切换后，执行端入口、默认模型产物、默认计划输出三者口径已经重新对齐
+  - 本次切换没有引入新的执行异常
+
+### 本轮结论
+1. 默认模型 `histgb -> lgbm` 已于 `2026-03-24` 正式完成，不再只是候选结论。
+2. 当前执行默认口径正式更新为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+3. 切换后的默认模型产物、模型新鲜度、验证摘要与默认计划输出均已完成同步刷新。
+4. 下一步不直接进入状态专属模型研究，而是先判断：在默认 `lgbm` 已经切换完成后，是否还存在值得继续投入的额外 ML 增量空间。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml + liquid500 + next_open`
+2. 其中默认状态边界为：`ma50 baseline`
+3. 其中默认模型族现已正式切换为：`lgbm`
+4. `ma60 + up_low_ml55_none25_v220` 继续只保留为旧执行口径回滚备选
+5. 下一步再决定是否还有必要进入状态专属模型研究
+
+## 2026-03-24 执行端第十九轮正式决策：暂不进入状态专属模型研究
+### 本轮目标
+- 承接第十八轮默认模型切换后的待决事项，不再继续自动展开新一轮高成本研究，而是先回答：
+  - 在默认 `lgbm` 已经切换完成后，当前是否仍有必要立刻进入状态专属模型研究；
+  - 还是应该先冻结当前默认口径，观察切换后的真实执行与滚动验证表现。
+
+### 本轮依据
+- 当前默认执行口径已经切到：
+  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- 当前正式模型族对照结果显示：
+  - `lgbm` 全样本超额 Sharpe 约 `2.300`
+  - `histgb` 全样本超额 Sharpe 约 `1.487`
+  - `lgbm` 相对 `histgb` 在 `17` 个季度里有 `9` 个季度更强、`8` 个季度持平、`0` 个季度更弱
+- 当前正式按状态对照结果显示：
+  - `trend_up_low_vol` 中，`lgbm` 相对 `histgb` 的超额边际约 `+164.71%`
+  - `trend_up_high_vol` 中，`lgbm` 相对 `histgb` 的超额边际约 `+15.78%`
+- 历史 `ma50` 内部升级结论显示：
+  - 状态专属 horizon 权重线没有形成稳定增量
+  - 状态专属 ensemble 权重线最终确认仍属季度集中驱动，已停止晋级执行端
+
+### 本轮判断
+1. 当前没有足够证据支持“默认 `lgbm` 刚切完就立刻进入状态专属模型研究”。
+2. 原因不是状态专属模型永远没价值，而是当前最重要的两个真实开仓状态 `trend_up_low_vol / trend_up_high_vol`，已经在正式模型族对照里被 `lgbm` 同步改善。
+3. 与此同时，现有状态专属 horizon / ensemble 研究并没有拿出比当前默认 `lgbm` 更干净、更稳的升级证据。
+4. 因此这一步的正式决策应落为：暂不进入状态专属模型研究，先冻结当前默认执行口径，观察切换后的真实执行与滚动验证表现。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml + liquid500 + next_open`
+2. 其中默认状态边界保持为：`ma50 baseline`
+3. 其中默认模型族保持为：`lgbm`
+4. 当前不进入状态专属模型研究
+5. 只有在后续重新出现明确的状态内失衡证据时，才重启状态专属模型研究
+## 2026-03-24 执行端第二十轮正式诊断：`v2` 规则层首轮减法诊断
+### 本轮目标
+- 承接“`none / v2` 规则层值得做的 3 个小升级点”，先做第一步：
+  - 不急着加新因子；
+  - 先回答 `v2` 里哪些因子/分组是真贡献，哪些可能已经变成过重负担。
+- 诊断口径固定为当前执行默认框架的规则层隔离评估：
+  - `ma50`
+  - `rolling liquid500`
+  - `next_open`
+  - `holding_count=5`
+  - `max_style_weight=0.50`
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/v2_rule_ablation_20260324_formal_round1_fixed`
+- 关键工具：
+  - `daily_research/tools/v2_rule_ablation_report.py`
+- 关键汇总：
+  - `summary_rows.csv`
+  - `quarter_rankic_summary.csv`
+  - `report.json`
+  - `report.md`
+
+### 过程补记：顺手修复一个 `next_open` 基准对齐 bug
+- 在正式开跑这轮 ablation 时，暴露出 `daily_research/baseline/backtest.py` 的一个底层问题：
+  - `next_open` 回测只按索引对齐 `benchmark_open`；
+  - 没有在进入公共交易日集合前排除 `benchmark_open` 的空值日期；
+  - 导致早期样本可能出现 `common_index` 包含日期、但 `benchmark_open` 在该日期已被 `dropna` 掉，随后触发 `KeyError`。
+- 已修复为：
+  - 先对 `benchmark_open` 做 `dropna()`；
+  - 再进入 `common_index` 对齐。
+- 这次修复是底层稳健性修复，不改变已有正常样本上的策略逻辑，只避免早期缺口把正式诊断跑断。
+
+### 候选设计
+- 基线：
+  - `none`
+  - `v2`
+- 组级 ablation：
+  - `ablate_group_volume`
+  - `ablate_group_volatility`
+  - `ablate_group_structure`
+- 因子级 ablation：
+  - `ablate_factor_volume_contraction`
+  - `ablate_factor_price_volume_divergence`
+  - `ablate_factor_volatility_20`
+  - `ablate_factor_volatility_contraction`
+  - `ablate_factor_close_strength`
+  - `ablate_factor_range_position_20`
+  - `ablate_factor_drawdown_20`
+
+### 结果一：`v2` 不是“过于简陋”，但内部确实已经出现过重项
+- `v2` 基线本轮规则层隔离结果为：
+  - 全样本超额 Sharpe 约 `-0.139`
+  - 最近完整窗口超额收益约 `-4.09%`，超额 Sharpe 约 `-0.175`
+  - 最新弱窗口超额收益约 `+0.08%`
+  - `trend_up_low_vol` `20d RankIC` 均值约 `0.180`
+- 这再次说明：
+  - 当前 `none / v2` 更像规则层锚点，而不是独立主引擎；
+  - 但 `v2` 作为锚点内部，已经不是“所有信号都该继续保留”的状态。
+
+### 结果二：`range_position_20 / drawdown_20 / price_volume_divergence` 更像当前应保留的骨架
+- 去掉 `range_position_20` 后：
+  - 全样本超额 Sharpe 从约 `-0.139` 恶化到约 `-0.345`
+  - 最新弱窗口从约 `+0.08%` 降到约 `-3.35%`
+- 去掉 `drawdown_20` 后：
+  - 全样本超额 Sharpe 恶化到约 `-0.287`
+  - 最新弱窗口降到约 `-3.52%`
+- 去掉 `price_volume_divergence` 后：
+  - 全样本超额 Sharpe 恶化到约 `-0.211`
+  - 最新弱窗口降到约 `-7.44%`
+- 这说明：
+  - `v2` 的“结构位置 + 回撤约束 + 量价背离”仍然更像当前骨架；
+  - 下一轮不应优先动这三项。
+
+### 结果三：`volume_contraction / volatility_contraction` 出现“过重嫌疑”
+- 去掉 `volume_contraction` 后：
+  - 全样本超额 Sharpe 反而升到约 `0.142`
+  - 最近完整窗口升到约 `39.44% / 1.106`
+  - 最新弱窗口升到约 `31.01%`
+  - 但 `trend_up_low_vol` `20d RankIC` 均值从约 `0.180` 小幅回落到约 `0.169`
+- 去掉 `volatility_contraction` 后：
+  - 全样本超额 Sharpe 升到约 `0.145`
+  - 最近完整窗口升到约 `5.76% / 0.271`
+  - 最新弱窗口升到约 `3.16%`
+  - `trend_up_low_vol` `20d RankIC` 均值升到约 `0.194`
+- 这说明：
+  - 这两项至少在当前 `v2` 里的权重有“偏重”嫌疑；
+  - 其中 `volatility_contraction` 更像值得优先保留为低权重候选；
+  - `volume_contraction` 则更像应优先做减权/移除复核的对象。
+
+### 结果四：整组删除过于粗糙，不适合作为下一步
+- 去掉整个 `structure` 组后：
+  - 全样本超额 Sharpe 反而升到约 `0.111`
+  - 但最新弱窗口直接掉到约 `-11.25%`
+- 去掉整个 `volume` 组后：
+  - 最新弱窗口升到约 `20.24%`
+  - 但全样本超额 Sharpe 降到约 `-0.239`
+- 去掉整个 `volatility` 组后：
+  - 最新弱窗口升到约 `10.30%`
+  - 但 `RankIC` 均值显著降到约 `0.109`
+- 这说明：
+  - 组级改动太粗，容易出现“修一边、坏一边”；
+  - 下一轮应坚持小步减法，不做整组删除。
+
+### 本轮结论
+1. `none / v2` 这条规则层并不算“过于简陋”，但 `v2` 内部确实已经出现需要清理的过重项。
+2. 当前更应保留的骨架是：
+   - `range_position_20`
+   - `drawdown_20`
+   - `price_volume_divergence`
+3. 当前最值得进入 `v2.1` 微调首批候选的是：
+   - `volume_contraction`
+   - `volatility_contraction`
+4. 下一轮不做整组删除，也不重开新的 profile 家族；优先做 `v2.1` 小范围减法微调。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. `none / v2` 继续保留为规则层锚点，不上升为新的主线替换议题
+3. `v2.1` 的首批微调方向固定为：
+   - 优先下调或移除 `volume_contraction`
+   - 优先下调或移除 `volatility_contraction`
+   - 固定保留 `range_position_20 / drawdown_20 / price_volume_divergence`
+4. 下一步继续围绕 `v2.1` 做小范围减法微调，不扩 `v3 / v4` 分支
+
+## 2026-03-24 执行端第二十一轮口径复核：`rebalance_freq=5d` 是否仍为真 `5d`
+### 本轮目标
+- 直接回答当前 `advanced_ml` 主线里的 `rebalance_freq=5d` 究竟代表什么：
+  - 它是否仍像早期 `score + 5d` 一样，是真正作用到目标权重上的调仓约束；
+  - 还是已经只剩历史参数名，当前实际行为更接近日频目标更新。
+- 如果确认口径已经漂移，就把研究端、执行端和文档里的理解重新对齐。
+
+### 本轮产物
+- 执行端最小复现实验：
+  - `daily_research/output/rebalance_freq_audit_exec/exec_1d_audit`
+  - `daily_research/output/rebalance_freq_audit_exec/exec_5d_audit_samepool`
+- 研究端最小复现实验：
+  - `daily_research/output/rebalance_freq_audit_research_1d`
+  - `daily_research/output/rebalance_freq_audit_research_5d`
+
+### 结果一：早期 stage1 基线仍是真 `5d`
+- 静态代码复核显示：
+  - `daily_research/baseline/run_daily_research.py` 仍保留 `_apply_rebalance_frequency()`
+  - 且会在 `build_target_weights()` 之后，把 `target_weights` 与 `score_for_backtest` 一并做频率约束
+- 这说明：
+  - 早期 `score + 5d` 的研究结论本身没有问题；
+  - 但它严格对应的是 stage1 基线路径，不能自动外推到后来的 `advanced_ml` 主线。
+
+### 结果二：当前 `advanced_ml` 研究端不会真正应用 `rebalance_freq`
+- 静态代码复核显示：
+  - `daily_research/baseline/run_advanced_daily_research.py` 会读取并记录 `rebalance_freq`
+  - 但在 `build_target_weights(final_score, ...)` 之后，直接进入后续回测，没有像 stage1 那样再做 `_apply_rebalance_frequency()`
+- 最小复现实验显示：
+  - `rebalance_freq=1d` 与 `rebalance_freq=5d` 的研究端正式输出里，`metrics / equity_curve / actions / latest_scores / regime_state / training_log / factor_ic_summary / factor_quantile_returns` 全部逐文件一致
+  - `metrics.json` 的唯一差异只剩：
+    - `rebalance_freq: 1d`
+    - `rebalance_freq: 5d`
+- 这说明：
+  - 当前 `run_advanced_daily_research.py` 的 `rebalance_freq` 已经只剩元数据意义；
+  - 它不会改变研究端的真实目标权重路径。
+
+### 结果三：当前执行端也不会因为 `1d / 5d` 改变计划输出
+- 静态代码复核显示：
+  - `daily_research/baseline/generate_daily_trade_plan.py` 会读取 `rebalance_freq`
+  - 但在构建完 `target_weights` 后，会直接取 `target_weights.loc[signal_date]`
+  - 中间不存在与 stage1 等价的频率约束步骤
+- 最小复现实验显示：
+  - 同一模型、同一股票池、同一账户快照下，`rebalance_freq=1d` 与 `rebalance_freq=5d` 的 `actions_today.csv` 完全一致
+  - `watchlist.csv` 也完全一致
+  - `plan_summary.json` 只有缓存命中元数据不同，不涉及任何计划动作差异
+- 这说明：
+  - 当前执行端对 `rebalance_freq` 的处理，也已经不再是“真 `5d`”；
+  - 当前计划生成行为实质上等价于日频目标更新。
+
+### 本轮结论
+1. `advanced_ml` 主线里的 `rebalance_freq=5d` 已经不是早期 stage1 那种“真 `5d` 调仓约束”。
+2. 当前研究端与执行端都已确认：`rebalance_freq=1d / 5d` 只改元数据，不改真实目标权重与计划输出。
+3. 因此当前执行默认口径 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 应解释为“日频目标更新”，而不能再直接沿用旧 `score + 5d` 的理解。
+4. 这次先不静默改执行语义；下一步若要继续处理这条线，应先做清晰选择：
+   - 恢复 `advanced_ml` 主线里的真 `5d` 调仓约束；
+   - 或正式把这条主线标准化为日频目标更新，并清理历史文档表述。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 但当前主线的实际调仓语义更新为：按“日频目标更新”理解，而不是“真 `5d`”
+3. 早期 `score + 5d` 的研究结论继续保留，但仅限对应 stage1 基线路径，不再直接引用为当前 `advanced_ml` 主线口径
+4. 下一步先不改代码行为；等后续再明确是恢复真 `5d`，还是正式标准化为日频目标更新
+
+## 2026-03-24 执行端第二十二轮正式决策：统一当前主线口径
+### 本轮目标
+- 不再停留在“口径提醒”层面，而是基于当前代码、默认模型产物与已有正式研究记录，把三个容易混淆的问题一次性定下来：
+  - 当前默认 `lgbm` 的训练窗口是否需要立即继续拉长；
+  - 当前 `advanced_ml` 主线到底按“真 `5d`”还是“日频目标更新”理解；
+  - 市场状态过滤与 `none / v2` profile 之后该放在什么层级，不再混成同一条主引擎叙述。
+
+### 结果一：训练窗口保持当前近两年滚动，不机械拉长
+- 当前默认模型产物 `daily_research/execution/models/latest_ml_model.json` 对应的真实训练口径显示：
+  - 请求起点仍可写为 `2021-01-01`
+  - 但有效原始历史窗口约为 `2023-03-06 -> 2026-03-24`
+  - 真正用于三组 horizon 训练的样本大致为 `2024-02-22 -> 2026-03-23`
+- 这说明：
+  - 当前默认 `lgbm` 并不是“吃满 2021 以来全部历史”的长期训练；
+  - 它本质上仍是一条近两年滚动、偏近期适应性的主线。
+- 因此正式决策为：
+  - 当前不机械继续拉长训练窗口；
+  - 默认训练口径继续维持 `ml_train_window_days=504`。
+
+### 结果二：验证窗口应继续扩，而不是拿训练窗口替代稳定性判断
+- 稳定性问题要靠更长的正式复验窗口回答，而不是靠把训练窗口越喂越长来回答。
+- 因此正式决策为：
+  - 后续正式复验优先把研究验证起点从 `2021` 往 `2019` 扩；
+  - 若数据质量、基准对齐与运行成本允许，再继续评估是否扩到 `2018`。
+
+### 结果三：当前 `advanced_ml` 主线正式标准化为“日频目标更新”
+- 承接第二十一轮的静态复核与 `1d / 5d` 最小复现实验，当前已经没有必要继续保留“以后再决定”的模糊态。
+- 因此正式决策为：
+  - 当前 `advanced_ml` 主线不再按“真 `5d` 调仓约束”理解；
+  - 直接标准化为“日频目标更新”；
+  - 主入口相关默认值同步统一到 `rebalance_freq=1d`。
+- 本轮同步更新的入口包括：
+  - `daily_research/baseline/run_advanced_daily_research.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+  - `daily_research/baseline/compare_ml_model_families.py`
+  - `daily_research/baseline/scan_execution_repair_candidates.py`
+
+### 结果四：状态过滤与 `none / v2` 的定位正式收束
+- 市场状态过滤这条线继续成立，但只作为门控层，不再被叙述成“主收益引擎”。
+- `none / v2` 这条线继续成立，但更适合作为规则层先验，而不是继续扩成 profile zoo。
+- 当前真正的主收益引擎继续明确为默认 `lgbm`。
+
+### 本轮结论
+1. 你之前的研究主方向没有走偏，但此前确实存在训练窗口、验证窗口、`score + 5d` 与当前主线语义混用的问题。
+2. 这些问题现在已正式收束为统一口径：
+   - 训练窗口不机械拉长；
+   - 验证窗口继续向更长历史扩展；
+   - 当前 `advanced_ml` 主线正式按日频目标更新理解。
+3. 市场状态过滤与 `none / v2` 继续有效，但层级明确更新为：
+   - 状态过滤 = 门控层
+   - `none / v2` = 规则层先验
+   - `lgbm` = 当前主引擎
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 默认训练窗口继续保持近两年滚动，不机械拉长
+3. 后续正式研究验证窗口优先从 `2021` 向 `2019` 扩，必要时再评估 `2018`
+4. `advanced_ml` 主线正式标准化为“日频目标更新”，不再沿用旧 `score + 5d` 口径
+5. 市场状态过滤继续作为门控层，`none / v2` 继续作为规则层先验；当前不把 profile 家族扩成新的执行端主线研究
+
+## 2026-03-24 执行端第二十三轮正式微调：`v2.1` 小范围减法微调
+### 本轮目标
+- 承接首轮 `v2` 减法诊断，不再做“整组删除”或重开 `v3 / v4`：
+  - 只围绕首轮暴露出的两个过重项做小范围减法微调：
+    - `volume_contraction`
+    - `volatility_contraction`
+- 这轮要直接回答三个问题：
+  - 对 `v2` 来说，是“单独下调 `volume_contraction`”更有效，还是“单独下调 `volatility_contraction`”更有效；
+  - 两者一起减时，是否能比单独减更稳；
+  - 有没有已经值得进入下一轮正式归因诊断的 `v2.1` 候选。
+
+### 本轮产物
+- 正式输出目录：
+  - `daily_research/output/v21_rule_tuning_20260324_formal_round2`
+- 工具：
+  - `daily_research/tools/v2_rule_ablation_report.py`
+  - 本轮新增入口：`--candidate-set v21`
+- 候选集合：
+  - `v2`
+  - `v21_volume_contraction_035`
+  - `v21_volume_contraction_025`
+  - `v21_volume_contraction_015`
+  - `v21_volatility_contraction_020`
+  - `v21_volatility_contraction_015`
+  - `v21_volatility_contraction_010`
+  - `v21_dual_mild_035_020`
+  - `v21_dual_balanced_025_015`
+
+### 结果一：单独下调 `volume_contraction` 明显强于单独下调 `volatility_contraction`
+- `v21_volume_contraction_015`：
+  - 全样本超额 Sharpe 约 `0.095`
+  - 最近完整窗口超额收益约 `+21.66%`
+  - 最新弱窗口超额收益约 `+22.89%`
+  - `trend_up_low_vol` `20d RankIC` 均值约 `0.176`
+- 相对基线 `v2`：
+  - 全样本超额 Sharpe 提升约 `+0.234`
+  - 最近完整窗口超额收益提升约 `+25.75%`
+  - 最新弱窗口超额收益提升约 `+22.81%`
+  - `RankIC` 只小幅回落约 `-0.004`
+- `v21_volume_contraction_025` 也有改善，但明显弱于 `0.15` 档：
+  - 全样本超额 Sharpe 仍约 `-0.063`
+  - 最近完整窗口超额收益约 `+4.01%`
+  - 最新弱窗口超额收益约 `+3.83%`
+- 这说明：
+  - 当前 `v2` 的主要过重项更像是 `volume_contraction`
+  - 而且“适度减一点”还不够，真正有信息量的是更大幅度地下调。
+
+### 结果二：单独下调 `volatility_contraction` 有信息量，但不构成头号方向
+- `v21_volatility_contraction_020 / 015 / 010` 的结果都没有跑出像 `volume_contraction_015` 那样的改善：
+  - 最好的 `0.10` 档，全样本超额 Sharpe 仍约 `-0.099`
+  - 最新弱窗口反而回落到约 `-4.63%`
+  - 虽然 `RankIC` 均值有所回升到约 `0.189`
+  - 但收益口径没有同步改善
+- 这说明：
+  - `volatility_contraction` 确实不是毫无问题；
+  - 但它更像二级修饰项，而不是这轮最该优先动的主矛盾。
+
+### 结果三：双因子一起减没有跑赢“单独下调 `volume_contraction`”
+- `v21_dual_mild_035_020`：
+  - 全样本超额 Sharpe 约 `-0.180`
+  - 最新弱窗口约 `-1.98%`
+- `v21_dual_balanced_025_015`：
+  - 全样本超额 Sharpe 约 `-0.269`
+  - 最新弱窗口约 `-4.08%`
+- 两条双因子候选都不如 `v21_volume_contraction_015`，也不如 `v21_volume_contraction_025`
+- 这说明：
+  - 首轮看到的两个“过重项”并不意味着这轮应该同步动两把刀；
+  - 现在更像是先把 `volume_contraction` 这个主矛盾拆干净，再考虑要不要动第二项。
+
+### 本轮结论
+1. `v2.1` 这轮小范围减法微调已经跑出一个非常清晰的头号候选：`v21_volume_contraction_015`。
+2. 当前最重要的信息不是“`v2` 里两项都偏重”，而是：
+   - `volume_contraction` 的过重问题远比 `volatility_contraction` 更关键；
+   - 且应优先用“单独大幅下调”而不是“双因子一起减”来修。
+3. 这轮还不足以直接把 `v21_volume_contraction_015` 升为新的执行端规则层默认值，因为它的改善幅度很大，下一步必须先做季度集中度与归因诊断。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. `none / v2` 继续保留为规则层先验，不扩 `v3 / v4`
+3. 当前 `v2.1` 的头号候选更新为：`v21_volume_contraction_015`
+4. `volatility_contraction` 继续保留为次级观察位，但不是下一轮第一优先微调对象
+5. 下一步不继续盲扫网格；先对 `v21_volume_contraction_015` 做季度集中度与归因诊断，再决定是否正式晋级为 `v2.1`
+
+## 2026-03-24 执行端第二十四轮正式诊断：`v21_volume_contraction_015` 季度集中度与归因
+### 本轮目标
+- 不再继续扩 `v2.1` 减权网格，而是先对第二十三轮跑出来的头号候选 `v21_volume_contraction_015` 做最后一步正式诊断：
+  - 它相对当前 `v2` 的增量是否已经足够平滑；
+  - 还是仍然主要由少数季度、少数月份、少数交易日或少数槽位放大。
+- 如果仍偏集中，就按既定规则先不晋级，避免规则层又走回“局部修好就急着替换”的老路。
+
+### 本轮产物
+- 正式输出目录：
+  - `daily_research/output/v21_rule_concentration_20260324_formal_round3`
+- 工具：
+  - `daily_research/tools/v21_rule_concentration_report.py`
+- 关键文件：
+  - `summary_rows.csv`
+  - `quarterly_metrics.csv`
+  - `candidate_vs_baseline_quarterly_compare.csv`
+  - `focus_quarter_daily.csv`
+  - `focus_quarter_monthly.csv`
+  - `focus_quarter_top_days.csv`
+  - `focus_quarter_weight_delta.csv`
+  - `focus_quarter_overlap.csv`
+  - `quarterly_rankic_compare.csv`
+  - `report.json`
+  - `report.md`
+
+### 结果一：季度集中度明显好于前面失败分支，但仍不够平滑
+- `v21_volume_contraction_015` 相对 `v2`：
+  - `19` 个季度里 `9` 个季度更强、`8` 个季度更弱
+  - 最佳季度 `2026Q1` 占正向季度总优势约 `34.95%`
+  - Top2 季度占比约 `54.16%`
+  - Top3 季度占比约 `72.87%`
+  - 正向季度 HHI 约 `0.210`
+- 这说明：
+  - 它确实不像前面很多失败候选那样，单季度就占掉一半以上正向优势；
+  - 但离“多季度平滑抬升”的正式晋级标准也还有距离。
+
+### 结果二：焦点季度自动落在 `2026Q1`，且增量主要堆在 `2026-01`
+- 自动识别出的焦点季度是 `2026Q1`：
+  - compound 超额边际约 `+15.47%`
+  - 全季都以 `trend_up_low_vol` 为主，`regime_active_ratio` 约 `0.68`
+- 但月度拆解显示：
+  - `2026-01` compound 超额边际约 `+13.98%`
+  - `2026-02` 仅约 `+0.61%`
+  - `2026-03` 仅约 `+0.20%`
+- 这说明：
+  - 当前这轮增量虽不再是单日孤点，但仍然强烈集中在 `2026Q1` 的前半段，尤其是 `2026-01`。
+
+### 结果三：焦点季度内仍存在少数日期与少数槽位放大
+- `2026Q1` 内部：
+  - Top5 正向日占正向日总优势约 `61.20%`
+  - Top10 正向日占比约 `87.85%`
+  - 平均持仓重叠 Jaccard 约 `0.599`
+  - `51` 个交易日里，仍有 `23` 天至少与 `v2` 重合 `4` 个名字，占比约 `45.10%`
+- 这说明：
+  - `v21_volume_contraction_015` 不是整套组合完全改写；
+  - 增益更像少数槽位替换叠加少数关键日放大。
+
+### 结果四：收益改善没有伴随季度 RankIC 的同步升级
+- `trend_up_low_vol` 的季度 RankIC 对照结果：
+  - 仅 `4/17` 个季度强于 `v2`
+  - `13/17` 个季度反而更弱
+  - 焦点季度 `2026Q1` 本身也落后约 `-0.004`
+- 这说明：
+  - 这轮收益上的改善，还不能被解释成“规则排序质量已经稳定升级”；
+  - 更像是交易路径、权重分布或局部样本结构上的收益放大。
+
+### 本轮结论
+1. `v21_volume_contraction_015` 的收益改善是真实的，但当前还不够干净，不满足立即正式晋级为默认 `v2.1` 的条件。
+2. 它相对 `v2` 的季度集中度已经比前几条失败分支温和很多，说明这条线不是纯粹无效，值得保留。
+3. 但 `2026Q1` 尤其 `2026-01` 的集中仍然偏强，且季度 RankIC 并没有同步改善，因此现在更像“收益候选”，还不是“排序质量已经稳态升级”的候选。
+4. 所以当前最稳妥的动作不是立刻晋级，而是继续保留为头号规则层研究候选，先拆解 `2026Q1 / 2026-01` 的关键槽位与交易日来源。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. `none / v2` 继续保留为规则层先验，不扩 `v3 / v4`
+3. `v21_volume_contraction_015` 继续保留为头号规则层研究候选
+4. 但当前暂不正式晋级为默认 `v2.1`
+5. 下一步不再扫参数，先拆解 `2026Q1` 尤其 `2026-01` 的关键槽位与交易日来源，确认这轮改善能否抽象成更稳的规则逻辑
+## 2026-03-24 执行端第二十五轮正式诊断：`v21` 规则逻辑抽象
+### 本轮目标
+- 暂时搁置其它研究方向，不再继续扫参数；
+- 直接拆解 `v21_volume_contraction_015` 相对 `v2` 在 `2026Q1` 尤其 `2026-01` 的关键交易日与关键槽位来源；
+- 回答一个核心问题：
+  - 这轮改善能否被抽象成一条可跨季度复放的、更稳的规则逻辑。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/v21_rule_logic_20260324_formal_round4`
+- 关键工具：
+  - `daily_research/tools/v21_rule_logic_report.py`
+- 关键文件：
+  - `focus_quarter_daily.csv`
+  - `focus_month_daily.csv`
+  - `focus_quarter_top_days.csv`
+  - `focus_month_top_days.csv`
+  - `focus_quarter_factor_diff.csv`
+  - `focus_month_factor_diff.csv`
+  - `selected_logic_factors.csv`
+  - `quarter_rank_ic.csv`
+  - `rank_ic_summary.csv`
+  - `quarter_slot_edge.csv`
+  - `slot_edge_summary.csv`
+  - `focus_month_stock_signature.csv`
+  - `report.json`
+  - `report.md`
+
+### 结果一：`2026-01` 的关键槽位来源已经能被描述出来
+- 焦点季度自动落在 `2026Q1`，焦点月份自动落在 `2026-01`。
+- 关键新增槽位主要集中在：
+  - `002716.SZ`
+  - `000603.SZ`
+  - `688521.SH`
+  - `000547.SZ`
+  - `603920.SH`
+  - `002413.SZ`
+  - `002851.SZ`
+  - `600219.SH`
+- 对应关键减仓槽位主要集中在：
+  - `000933.SZ`
+  - `600456.SH`
+  - `600096.SH`
+  - `603063.SH`
+  - `600711.SH`
+  - `002611.SZ`
+  - `601995.SH`
+  - `002409.SZ`
+  - `600919.SH`
+  - `002353.SZ`
+- 这说明：
+  - `v21` 的改善并不是“整个组合完全重写”；
+  - 更像少数槽位在 `2026-01` 里连续被切换到一批更强势、更低波的名字。
+
+### 结果二：可以抽出一组清晰的 signed 因子签名，但它更像槽位偏好而不是稳定排序逻辑
+- 从 `2026Q1 / 2026-01` 的关键交易日与关键槽位里抽出的 signed 因子，前 12 个为：
+  - `+kama_slope`
+  - `+mom_20`
+  - `+mom_60`
+  - `+trend_slope_20`
+  - `+ma_gap_10`
+  - `+ma_gap_20_60`
+  - `+mom_5`
+  - `+price_volume_divergence`
+  - `-volatility_20`
+  - `+trend_streak`
+  - `+up_day_ratio_10`
+  - `-atr_14_pct`
+- 这说明：
+  - `v21` 在焦点月份更偏好“更强趋势 + 更强价量背离 + 更低波动/ATR”的名字；
+  - 这套签名是能被清楚描述出来的，不是完全不可解释的随机命中。
+
+### 结果三：这套逻辑能解释槽位偏好，但不能稳定解释未来超额
+- `logic_signed` 相对 `v2` 的季度 RankIC：
+  - 均值约 `-0.067`
+  - 只在 `1` 个季度更强
+  - 非焦点季度也只在 `1` 个季度更强
+  - 焦点季度 `2026Q1` 本身反而落后 `v2` 约 `-0.157`
+- `logic_signed` 相对候选 `v21`：
+  - 也只在 `1` 个季度更强
+  - 焦点季度落后约 `-0.153`
+- 这说明：
+  - 抽出来的 signed 逻辑并没有把 `v21` 的改善沉淀成稳定的未来超额排序；
+  - 它更像是“解释了候选为什么会买这些股票”，而不是“证明这些股票类型在别的季度也会持续更优”。
+
+### 结果四：槽位复放层面也不够干净
+- `logic_signed` 的季度槽位边际：
+  - `focus_quarter_slot_edge` 约 `0.528`
+  - `positive_slot_edge_quarters = 15`
+  - `positive_slot_edge_other_quarters = 14`
+  - 但真正与候选正收益季度对齐的只有 `8`
+- 这说明：
+  - 这套 logic 在很多季度都能解释“候选更喜欢什么类型的名字”；
+  - 但这种偏好并不稳定对应更好的未来超额，仍然存在明显的“解释对了偏好，却没有解释对收益”问题。
+
+### 本轮结论
+1. `v21_volume_contraction_015` 的 `2026Q1 / 2026-01` 改善已经能被拆成一组比较清晰的槽位偏好签名。
+2. 这组签名主要是“更强趋势 + 更强价量背离 + 更低波动/ATR”。
+3. 但这套 signed 逻辑目前还不能跨季度稳定复放为更稳的规则排序逻辑。
+4. 因此，当前不能把这轮改善视为默认 `v2.1` 的正式逻辑升级。
+5. `v21_volume_contraction_015` 继续保留为规则层研究候选，但这条线到这里再次停止晋级，不再继续扫参数，也不继续硬抽新的 profile 默认值。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. `none / v2` 继续作为规则层先验，不扩 `v3 / v4`
+3. `v21_volume_contraction_015` 保留为研究附录与观察候选，但不正式晋级为默认 `v2.1`
+4. 若后续继续规则层研究，优先回到解释 `volume_contraction` 的风险/组合作用，而不是继续追逐 `2026-01` 的局部槽位签名
+## 2026-03-24 执行端第二十六轮正式复验：当前默认主线长窗口验证
+### 本轮目标
+- 按新的研究判断，不再先做“观察期”，而是直接用回测验证当前默认执行主线：
+  - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+- 把正式验证起点从 `2021` 往前扩到 `2019`，回答一个核心问题：
+  - 当前默认主线是否只是“近期窗口好看”，还是在更长历史里仍然成立。
+
+### 本轮过程
+1. 先直接运行 `2019` 起的正式复验。
+2. 首次运行时，暴露出一个长窗口真实 bug：
+   - `daily_research/baseline/ml_alpha.py` 在 `train_regime_only` 口径下，默认假设 `regime_state` 与 `label_df` 的日期完全对齐；
+   - 当请求窗口拉长后，`2019-01-02` 这类更早日期会直接触发 `KeyError`。
+3. 该问题已修复为：
+   - 先按 `label_df.index` 对 `regime_state["regime_on"]` 做安全重索引；
+   - 再执行 regime-only 训练过滤；
+   - 短窗口语义不变，长窗口不再因早期状态缺口崩溃。
+
+### 本轮产物
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal`
+- 补充汇总：
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal/long_window_review/window_review_summary.json`
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal/long_window_review/run_summary_rows.csv`
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal/long_window_review/window_slice_summary.csv`
+- 关键修复文件：
+  - `daily_research/baseline/ml_alpha.py`
+
+### 结果一：`2019` 起长窗口下，当前默认主线仍然成立
+- `2019` 起正式复验结果：
+  - 全样本超额收益约 `529.30%`
+  - 全样本超额 Sharpe 约 `1.578`
+  - 全样本超额最大回撤约 `-27.50%`
+  - 平均换手约 `0.497`
+  - `regime_active_ratio` 约 `0.449`
+- 这说明：
+  - 新增更早历史后，主线明显变难；
+  - 但没有失效，仍保持正超额、正 Sharpe、可接受回撤。
+
+### 结果二：相对 `2021` 口径，长窗口确实变弱，但不是塌掉
+- 当前 `2021` 口径的参考结果为：
+  - 全样本超额收益约 `887.75%`
+  - 全样本超额 Sharpe 约 `2.300`
+  - 全样本超额最大回撤约 `-23.43%`
+- 与之相比，`2019` 起版本：
+  - 超额 Sharpe 从约 `2.300` 回落到约 `1.578`
+  - 超额最大回撤从约 `-23.43%` 扩到约 `-27.50%`
+- 这说明：
+  - 更早窗口确实更难做；
+  - 但当前默认主线并没有因为把验证口径拉长就被推翻。
+
+### 结果三：这轮还确认了一个更关键的口径边界
+- “请求起点 = 2019” 并不等于 “真实交易样本从 2019 开始”。
+- 在当前 `ml_train_window_days=504` 与滚动 liquid500 研究池口径下，本轮 `2019` 复验的：
+  - `first_nonzero_pool_date = 2019-01-31`
+  - `first_equity_date = 2021-08-02`
+  - `first_holding_date = 2021-10-20`
+- 作为对照，原 `2021` 口径的：
+  - `first_equity_date = 2022-01-04`
+  - `first_holding_date = 2022-06-01`
+- 这说明：
+  - 把请求起点从 `2021` 推到 `2019`，确实把真实交易样本往前拉了约 `7` 个多月；
+  - 但 `2019 ~ 2021` 里仍有很大一段在承担训练/预热作用，而不是完整交易样本。
+
+### 本轮结论
+1. 当前默认执行主线在更长历史里仍然成立，不支持“这条主线只是近期窗口有效”的判断。
+2. 相对 `2021` 口径，长窗口确实明显变弱，但仍保持正超额、正 Sharpe，因此默认主线不需要因为这轮复验而回滚。
+3. 这轮更重要的新增认识是：当前研究框架下，“请求起点”与“真实交易起点”不是一回事；长训练窗和滚动股票池预热会显著吞掉更早历史。
+4. 因此，如果后续真要把真实交易样本再往前压，不应继续机械把 start-date 从 `2019` 改到 `2018`，而应先解决更早可用数据边界和长训练窗预热问题。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 不再把“先观察一段时间”作为进入下一研究阶段的前置动作
+3. 下一步正式转向 `deep_alpha` 的最终判决
+4. 若后续还要继续做更早历史的执行端正式复验，优先级高于“继续往 `2018` 改 start-date`”的，是先补更早可用数据或重新设计长训练窗预热口径
+## 2026-03-24 执行端第二十七轮正式诊断：连续状态分数首轮验证
+### 本轮目标
+- 保留现有四象限门控不动；
+- 不直接改默认执行逻辑；
+- 先验证一层“宽度 + 分歧 + 流动性”的连续状态分数，是否能解释 `regime_on` 内部的弱窗口与错误开仓。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/continuous_market_context_20260324_formal_round1`
+- 关键工具：
+  - `daily_research/baseline/market_context.py`
+  - `daily_research/tools/continuous_market_context_report.py`
+- 关键文件：
+  - `context_features.csv`
+  - `decision_context_diagnostic.csv`
+  - `regime_on_context_diagnostic.csv`
+  - `regime_on_quantile_summary.csv`
+  - `regime_on_quadrant_summary.csv`
+  - `context_correlation_summary.csv`
+  - `latest_weak_window_summary.csv`
+  - `top_wrong_open_days.csv`
+  - `report.json`
+  - `report.md`
+
+### 结果一：连续状态分数对后续 20 日市场环境已有解释力
+- 在当前默认主线 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open` 上，`regime_on` 样本按 `context_score` 做五分位后：
+  - Q1 的 `benchmark_fwd_20d` 均值约 `0.55%`
+  - Q5 的 `benchmark_fwd_20d` 均值约 `2.47%`
+- 同时，`wrong_open_rate_20d` 也明显分层：
+  - Q1 约 `50.00%`
+  - Q5 约 `29.41%`
+- `context_score` 与 `benchmark_fwd_20d` 的相关性也已转正：
+  - Pearson 约 `0.226`
+  - Spearman 约 `0.278`
+- 这说明：
+  - 这层分数已经能在“门开了”的前提下，区分哪些日期后面的市场环境更舒服、哪些日期更容易变成错误开仓。
+
+### 结果二：它还没有直接解释成更强的 1 日超额
+- `context_score` 与当前主线的 `portfolio_return / excess_return` 相关性都接近于零：
+  - `portfolio_return` Pearson 约 `0.014`
+  - `excess_return` Pearson 约 `0.017`
+- 五分位比较里，Q5 并没有稳定跑赢 Q1 的 `avg_excess_return_1d`：
+  - Q1 约 `0.85%`
+  - Q5 约 `0.63%`
+- 这说明：
+  - 这层连续状态分数当前更像“风险与执行调节器”；
+  - 还不是能直接拿来替代当前选股 alpha 的东西。
+
+### 结果三：最新弱窗口里低状态分数显著堆积
+- 最新弱窗口 `2025-09-05 -> 2026-03-19` 的 `regime_on` 日期：
+  - 平均 `context_score` 约 `0.474`
+  - 底部五分位占比约 `34.83%`
+  - 顶部五分位占比为 `0%`
+- 其余 `regime_on` 日期：
+  - 平均 `context_score` 约 `0.717`
+  - 底部五分位占比约 `3.75%`
+  - 顶部五分位占比约 `42.50%`
+- 这说明：
+  - 当前默认主线的弱窗口，不只是收益结果变差；
+  - 连续状态层也已经明确显示出“门虽开着，但开得不够舒服”的结构特征。
+
+### 结果四：当前 `regime_on` 样本几乎全部落在 `trend_up_low_vol`
+- 本轮正式样本里，`regime_on` 主体都落在 `trend_up_low_vol`；
+- 所以这轮连续状态诊断本质上是在回答：
+  - 同样都是低波上涨，哪些日期值得更积极，哪些日期应该收一点。
+
+### 本轮结论
+1. 连续状态分数已经表现出明确的“风险门内再分层”价值。
+2. 它能解释一部分后续 20 日市场环境与错误开仓风险。
+3. 但它还不能直接解释成更强的 1 日超额，因此当前不该把它当成新的 alpha 主引擎。
+4. 正确的升级方向应是：保留现有四象限门控不动，只在 `regime_on` 内部拿这层分数去做轻度执行去风险。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限继续作为第一层安全门
+3. 连续状态分数先定位为“风险门内再分层”，不直接替换门控，也不直接接入 ML 主引擎
+4. 下一步正式进入第二轮：连续状态分数驱动的软调节回测
+5. 首批只试：
+   - `holding_count`
+   - `max_weight`
+   - `turnover_limit`
+   - `max_style_weight`
+6. 若出现“弱窗口改善但强窗口或全样本被破坏”，则停止这条线晋级执行层
+
+## 2026-03-24 执行端第二十八轮正式回测：连续状态分数驱动的软调节
+### 本轮目标
+- 保留现有四象限门控不动；
+- 只在低 `context_score` 的 `regime_on` 日期做轻度去风险；
+- 首批单独测试 4 个执行旋钮：
+  - `holding_count`
+  - `max_weight`
+  - `turnover_limit`
+  - `max_style_weight`
+- 严格执行既定停止规则：
+  - 只要出现“弱窗口改善但强窗口或全样本被破坏”，就停止这条线晋级执行层。
+
+### 本轮产物
+- 汇总目录：
+  - `daily_research/output/continuous_market_context_soft_20260324_formal_round2_defaultwindow`
+- 关键工具：
+  - `daily_research/tools/continuous_market_context_soft_scan.py`
+- 关键文件：
+  - `soft_scan_summary.csv`
+  - `report.json`
+  - `report.md`
+  - 各候选子目录下的：
+    - `equity_curve.csv`
+    - `actions.csv`
+    - `target_weights.csv`
+    - `metrics.json`
+    - `metrics_recent_full.json`
+    - `metrics_latest_weak.json`
+
+### 结果一：四个首批候选都没有通过正式停止规则
+- `baseline`：
+  - 全样本超额 Sharpe 约 `1.601`
+  - 最近完整窗口超额 Sharpe 约 `1.416`
+  - 最新弱窗口超额收益约 `-26.18%`
+  - 最新弱窗口超额 Sharpe 约 `-1.088`
+- `low_ctx_hold3`：
+  - 全样本超额 Sharpe 回落到约 `1.564`
+  - 最近完整窗口超额 Sharpe 回落到约 `1.218`
+  - 最新弱窗口恶化到约 `-31.87% / -1.437`
+  - 结论：整体退化，不保留
+- `low_ctx_maxw20`：
+  - 全样本超额 Sharpe 回落到约 `1.466`
+  - 最近完整窗口超额 Sharpe 回落到约 `1.096`
+  - 最新弱窗口恶化到约 `-30.92% / -1.296`
+  - 结论：整体退化，不保留
+- `low_ctx_turnover1`：
+  - 最近完整窗口超额 Sharpe 提升到约 `1.576`
+  - 但全样本超额 Sharpe 回落到约 `1.570`
+  - 最新弱窗口超额收益小幅改善到约 `-25.50%`，但 Sharpe 反而微幅回落到约 `-1.101`
+  - 结论：不满足“弱窗口与全样本同步改善”，不晋级
+- `low_ctx_style40`：
+  - 最新弱窗口从约 `-26.18% / -1.088` 小幅改善到约 `-25.97% / -1.081`
+  - 但全样本超额 Sharpe 从约 `1.601` 回落到约 `1.593`
+  - 最近完整窗口超额 Sharpe 从约 `1.416` 回落到约 `1.395`
+  - 结论：触发既定停止规则，`candidate_verdict = stop_due_to_tradeoff`
+
+### 结果二：低状态分数触发本身不是空信号
+- 本轮所有候选共用同一批低状态分数触发日：
+  - `override_signal_days = 95`
+  - `override_signal_ratio = 9.31%`
+  - 最新弱窗口里的 `override_ratio` 约 `32.54%`
+- 这说明：
+  - 连续状态分数确实识别到了不少“门开着但环境不够舒服”的日期；
+  - 当前问题不在“触发条件太稀或太假”，而在第一批单旋钮软调节还不够干净。
+
+### 本轮结论
+1. 连续状态分数作为诊断层与风险附录的价值继续成立。
+2. 但在当前默认窗口下，首批四个单旋钮软调节都没有通过“弱窗口改善且强窗口/全样本不被破坏”的正式晋级门槛。
+3. 因此这条连续状态软调节线到这里停止，不进入执行层默认逻辑。
+4. 当前默认执行口径继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限继续作为第一层安全门
+3. 连续状态分数继续保留为诊断层与风险附录，不晋级为执行层软调节逻辑
+4. 这条连续状态软调节线到此停止，不继续扩单旋钮参数网格
+5. 下一步研究重心回到 `deep_alpha` 的最终正式判决
+
+## 2026-03-24 项目治理回收：README / 计划去日志化
+### 本轮目标
+- 把 `daily_research/README.md` 收回到“当前状态与入口”；
+- 把 `daily_research/daily_research_plan.md` 收回到“当前默认决策与优先级”；
+- 让 `research_log.md` 继续作为唯一时间顺序记录；
+- 给文档维护补上结构守卫，而不只是靠人工记忆。
+
+### 本轮动作
+- 重写 `daily_research/README.md`：
+  - 只保留当前默认执行口径、目录职责、日常入口与维护命令；
+- 重写 `daily_research/daily_research_plan.md`：
+  - 只保留当前默认主线、当前优先级、已降级分支与停止规则；
+- 更新根目录 `README.md`：
+  - 把当前执行主线写精确为 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`；
+  - 补上 `2026-03-23 ~ 2026-03-24` 的主线收束阶段；
+- 增强 `daily_research/tools/doc_guard.py`：
+  - 默认纳入根目录 `README.md`；
+  - 增加 README / 计划文件的行数上限检查；
+  - 增加按日期追加日志式标题的结构检查。
+
+### 本轮结论
+1. 文档治理已经从“靠人工记住边界”升级为“文档分工 + 守卫脚本”。
+2. `README.md` 与 `daily_research_plan.md` 不再承担历史追加职责，完整时间线统一留在 `research_log.md`。
+3. 当前更准确的项目状态已经固化为：
+   - 执行端默认口径：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+   - 调仓语义：日频目标更新
+   - 当前主研究事项：`deep_alpha` 最终正式判决
+
+### 当前决策
+1. 以后新增实验结论继续写入 `research_log.md`，不再顺手堆进 README 或计划文件。
+2. 日常维护时先跑 `python daily_research/tools/doc_guard.py check`，再提交文档更新。
+3. 继续保留 `workspace_maintenance.py` 作为热区体检与清理入口，不回到人工记忆式维护。
+
+## 2026-03-24 下一阶段正式起步：执行 README 收敛 + `deep_alpha` 口径统一
+### 本轮目标
+- 把 `daily_research/execution/README.md` 收敛成面向日常操作的执行手册；
+- 正式启动 `deep_alpha` 最终判决阶段的第一项治理动作；
+- 先统一 `deep_alpha` 的调仓语义默认值，避免后续研究结论继续混入旧 `5d` 元数据。
+
+### 本轮动作
+- 重写 `daily_research/execution/README.md`：
+  - 把内容收敛为“当前默认口径 + 每日标准流程 + 输出解释 + 风险边界”；
+  - 减少历史叙述和分散说明，让执行入口更直接。
+- 更新 `daily_research/deep_alpha/config.py`：
+  - 默认 `rebalance_freq` 从 `5d` 改为 `1d`。
+- 更新 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - 命令行默认 `--rebalance-freq` 从 `5d` 改为 `1d`；
+  - `metrics.json` 显式写出 `rebalance_freq`。
+- 更新 `daily_research/README.md`：
+  - `deep_alpha` 主线示例命令显式补上 `--rebalance-freq 1d`。
+
+### 本轮结论
+1. 执行端说明文档已经从“信息堆叠”收敛为“可直接照着跑的操作手册”。
+2. `deep_alpha` 的默认调仓语义已经与当前主线统一到“日频目标更新”。
+3. 这标志着 `deep_alpha` 最终正式判决已经从“规划阶段”进入“口径统一后的正式执行阶段”。
+
+### 当前决策
+1. 后续 `deep_alpha` 正式对照实验默认按 `rebalance_freq=1d` 记录与解释。
+2. 下一步直接进入 `deep_alpha` 当前主线的最小充分对照矩阵，不再先做额外支线扩展。
+
+## 2026-03-24 `deep_alpha` 最小充分对照矩阵：runner 固化与正式起步
+### 本轮目标
+- 不再手工拼接 `deep_alpha` 正式对照命令；
+- 把“最小充分对照矩阵”固化成正式 runner；
+- 先从 `backbone` 阶段进入当前主线正式判决。
+
+### 本轮动作
+- 新增 `daily_research/deep_alpha/run_minimal_matrix.py`：
+  - 自动按最新已完成交易日切最近三段正式 walk-forward 窗口；
+  - 当前分三阶段组织最小矩阵：
+    - `backbone`
+    - `score_head`
+    - `ranking`
+  - `backbone` 阶段当前只比较：
+    - `gru + manual + plain`
+    - `patch_transformer + manual + plain`
+    - `patch_transformer + masked pretrain + manual + plain`
+  - 同一套 runner 会把：
+    - `matrix_plan.json`
+    - `windows.csv`
+    - 各阶段命令清单
+    - 各阶段运行汇总 / 选中 recipe
+    统一写到同一个输出根目录下。
+- 用 `quant` 环境做了 dry-run：
+  - 根目录：`daily_research/output/deep_alpha_minimal_matrix_20260324_formal_round1`
+  - 生成了：
+    - `matrix_plan.json`
+    - `windows.csv`
+    - `stage_backbone_commands.txt`
+- 同时补了主 README 入口：
+  - `python daily_research/deep_alpha/run_minimal_matrix.py --phase backbone --root-tag deep_alpha_minimal_matrix_round1`
+
+### 当前 dry-run 切出的正式窗口
+1. `2023-02-09 -> 2024-02-22`
+2. `2024-02-23 -> 2025-03-10`
+3. `2025-03-11 -> 2026-03-24`
+
+### 本轮结论
+1. `deep_alpha` 当前主线的最小充分对照矩阵已经从“文字规划”变成“可执行正式入口”。
+2. 当前正式起步点已经明确为 `backbone` 阶段，而不是继续横向扩更多研究支线。
+3. 后续 `score_head` 与 `ranking` 阶段将建立在 `backbone` winner 之上，而不是直接暴力全因子扩表。
+
+### 当前决策
+1. 正式矩阵入口固定为：
+   - `daily_research/deep_alpha/run_minimal_matrix.py`
+2. 当前第一阶段固定为：
+   - `--phase backbone`
+3. `score_head` 与 `ranking` 只在上阶段 winner 产生后继续推进。
+
+## 2026-03-24 运行环境基线固化：解释器与调用口径留档
+### 本轮目标
+- 把当前工作区真实可用的运行环境固定成项目文档；
+- 避免后续研究再次混用 `base` 与 `quant` 解释器；
+- 给 `deep_alpha` 主线与最小充分对照矩阵保留统一调用前缀。
+
+### 本轮动作
+- 新增 `daily_research/runtime_environment.md`：
+  - 记录工作区根目录、Shell、时区与环境快照日期；
+  - 记录默认 `python` 与推荐 `quant` Python 的路径和版本；
+  - 记录 `quant` 环境中的关键依赖版本：
+    - `pandas==2.3.3`
+    - `numpy==2.0.2`
+    - `torch==2.8.0+cpu`
+  - 记录可用 conda 环境清单与推荐调用方式。
+- 更新 `daily_research/README.md`：
+  - 在文档分工里加入 `runtime_environment.md`；
+  - 在推荐阅读顺序里补上环境基线入口。
+
+### 本轮结论
+1. 当前运行口径已经从“靠会话记忆”固化为项目文档。
+2. `daily_research` 的正式研究与 `deep_alpha` 相关脚本默认应使用 `quant` 环境，而不是 `base` Python。
+3. 后续如果解释器或关键依赖升级，应先更新环境基线文档，再推进新的正式实验批次。
+
+### 当前决策
+1. 正式研究脚本默认调用：
+   - `C:\Users\ASUS\miniconda3\envs\quant\python.exe`
+2. `base` 环境只视为轻量维护入口，不再假定具备完整研究依赖。
+
+## 2026-03-25 执行端完整四象限复核：坏市场盈利能力与坏状态专用 profile 排查
+### 本轮目标
+- 直接回答当前执行默认主线在完整四象限里的盈利能力；
+- 明确坏市场里当前策略是“绝对赚钱”还是“少亏 / 空仓”；
+- 判断当前是否已经存在类似 `v2`、但只在坏市场状态起作用的成熟分支。
+
+### 本轮动作
+- 复核当前最贴近执行默认口径的正式产物：
+  - `daily_research/output/advanced_ml_model_family_compare_20260323_formal_ma50_execution/lgbm`
+  - `daily_research/output/advanced_ml_ma50_lgbm_longwindow_2019_formal`
+- 新增输出目录：
+  - `daily_research/output/execution_quadrant_review_20260325_formal_round1`
+  - 其中生成：
+    - `current_execution_lgbm_quadrant_summary.csv`
+    - `longwindow_lgbm_quadrant_summary.csv`
+    - `bad_market_summary.csv`
+    - `histgb_vs_lgbm/`
+- 用现有归因脚本补跑：
+  - `histgb vs lgbm` 的完整四象限对照与季度对照。
+- 复核 `daily_research/baseline/state_profiles.py` 与近几轮正式诊断记录，确认当前已注册与已保留候选主要覆盖哪些状态。
+
+### 结果一：当前默认执行端在坏市场里更像“去风险”，不是稳定绝对盈利
+- 当前默认等价正式口径 `current_execution_lgbm`：
+  - `trend_down_high_vol`
+    - 组合收益约 `0.00%`
+    - 超额收益约 `+3.79%`
+    - 平均持仓数约 `0.00`
+  - `trend_down_low_vol`
+    - 组合收益约 `-19.17%`
+    - 基准收益约 `-54.14%`
+    - 超额收益约 `+66.79%`
+    - 平均持仓数约 `0.23`
+- 长窗口附录 `longwindow_lgbm` 也保持同一结构：
+  - `trend_down_high_vol` 约 `0.00% / -0.98%`（组合 / 超额）
+  - `trend_down_low_vol` 约 `-38.11% / +45.01%`
+- 这说明：
+  - 当前主线在坏市场里的核心能力是空仓、降仓、少亏；
+  - 不是已经具备“坏市场里稳定做出绝对正收益”的独立 alpha。
+
+### 结果二：`lgbm` 对坏市场的改进存在，但主要仍是防守改进
+- 相对旧 `histgb`：
+  - `trend_down_high_vol` 的超额边际约 `+0.00%`
+  - `trend_down_low_vol` 的超额边际约 `+5.94%`
+  - `trend_up_high_vol` 的超额边际约 `+15.78%`
+  - `trend_up_low_vol` 的超额边际约 `+164.71%`
+- 这说明 `lgbm` 对坏市场不是完全没改善；
+- 但当前默认主线的决定性增益仍主要来自两个上涨象限，尤其 `trend_up_low_vol`。
+
+### 结果三：当前没有成熟的“坏市场专用 `v2` 类 profile”
+- `daily_research/baseline/state_profiles.py` 当前正式注册的 profile 只有：
+  - `up_low_breakout_v1 / v2 / v3`
+  - `up_dual_v1 / v2`
+- 它们只覆盖：
+  - `trend_up_low_vol`
+  - `trend_up_high_vol`
+- 当前没有一个已注册、已验证、只在 `trend_down_low_vol / trend_down_high_vol` 生效的正式 profile。
+- 历史上确实出现过“弱窗口和 `trend_down_low_vol` 一起改善”的候选，例如：
+  - `up_low_ml55_none25_v220` 曾把 `trend_down_low_vol` 的弱窗口超额从约 `-8.14%` 改善到约 `-1.05%`
+- 但那类改善的来源是：
+  - 降低 `trend_up_low_vol` 下 `ML` 主导权；
+  - 不是构建了一个真正独立的坏市场状态 alpha。
+- 后续第二轮保留下来的候选 `up_low_ml62_none23_v215 / up_low_ml61_none24_v215` 也已确认：
+  - 差异几乎全部来自 `trend_up_low_vol`
+  - 两个下跌象限基本没变
+  - 因此没有资格被解释成“坏市场专用分支”。
+
+### 本轮结论
+1. 当前执行默认主线在坏市场里具备明显防守价值，但还不能说“坏市场本身能稳定盈利”。
+2. 当前没有成熟的、已正式验证的“坏市场专用 `v2` 类 profile”。
+3. 如果下一步继续研究坏市场增量，正确方向应是：
+   - 单独定义 `trend_down_low_vol / trend_down_high_vol` 的防守或反向候选；
+   - 而不是继续假定上涨态 profile 的外推会自动修复坏市场。
+
+### 当前决策
+1. 执行端默认值继续保持为：`advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 四象限门控继续作为第一层安全门，不因为这轮检查而撤掉。
+3. 若继续推进“坏市场专项研究”，应明确把目标定义为：
+   - 坏市场绝对收益
+   - 或坏市场进一步降损
+   二者需要分开立题与验收。
+
+## 2026-03-25 坏市场专项目标固定：从“坏市场超额”切到“坏市场绝对收益”
+### 本轮目标
+- 把“坏市场绝对收益”从口头选择固定成正式研究目标；
+- 让后续候选扫描直接按这个目标排序，而不是继续默认按全样本超额 Sharpe；
+- 避免后续再次把“坏市场少亏”表述成“坏市场盈利”。
+
+### 本轮动作
+- 更新 `daily_research/daily_research_plan.md`：
+  - 明确坏市场专项若重启，主目标固定为“坏市场绝对收益”；
+  - 明确坏市场专项的停止规则不能只看坏市场超额。
+- 更新 `daily_research/baseline/scan_execution_repair_candidates.py`：
+  - 新增 `--selection-objective`
+    - `default_excess`
+    - `bad_market_absolute`
+  - 新增 `--bad-market-quadrants`
+  - 新增 `--primary-bad-market-quadrant`
+  - 候选汇总新增：
+    - `full_bad_market_total_return`
+    - `full_primary_bad_market_total_return`
+    - 各窗口 `bad_market_total_return`
+    - 各窗口 `primary_bad_market_total_return`
+  - 正式扫描产物新增坏市场专项指标文件：
+    - `metrics_bad_market_full.json`
+    - `metrics_primary_bad_market_full.json`
+    - `metrics_<window>_bad_market.json`
+    - `metrics_<window>_primary_bad_market.json`
+  - 当目标切到 `bad_market_absolute` 时，最终 summary 改按坏市场绝对收益优先排序。
+- 立即对现有正式候选库存做了一次坏市场目标重排：
+  - 输出目录：`daily_research/output/bad_market_objective_existing_candidates_20260325`
+  - 复核范围：
+    - `advanced_ml_execution_repair_scan_20260323_formal_round13_ma50_state_ensemble_round2_low_only`
+    - `advanced_ml_execution_repair_scan_20260322_formal_round12_ma50_regime_vol`
+
+### 本轮结论
+1. 后续“坏市场专项研究”终于有了清晰目标函数，不再和“坏市场超额修复”混为一谈。
+2. 这一步还没有证明我们已经找到坏市场绝对盈利方案，但已经把研究入口改成会朝这个方向收敛。
+3. 现有正式候选库存按坏市场绝对收益重排后，当前第一名仍是 `baseline`，且 `positive_bad_market_candidate_count = 0`。
+4. 这说明：
+   - 当前库存里还没有一个候选已经达到“坏市场绝对盈利”；
+   - 下一步必须显式设计坏市场候选，而不是继续指望现有上涨态微调自然外溢成坏市场盈利方案。
+
+### 当前决策
+1. 坏市场专项默认目标固定为：`bad_market_absolute`
+2. 若后续继续执行端候选扫描，优先显式传：
+   - `--selection-objective bad_market_absolute`
+3. 若候选只改善坏市场超额、不改善坏市场绝对收益，则只记为防守修复，不记为坏市场盈利方案。
+
+## 2026-03-25 坏市场专项首批专用候选：formal round1 完整收口
+### 本轮目标
+- 不再继续拿上涨态微调外推坏市场；
+- 直接设计面向 `trend_down_low_vol / trend_down_high_vol` 的第一批专用候选；
+- 按“坏市场绝对收益”完成首批正式扫描，并判断是否存在值得继续细化的坏市场防守分支。
+
+### 本轮动作
+- 更新 `daily_research/baseline/state_profiles.py`：
+  - 新增 `upv2_downlow_rebound_v1`
+  - 新增 `upv2_downdual_reversal_v1`
+- 更新 `daily_research/baseline/scan_execution_repair_candidates.py`：
+  - 新增 `bad_market_round1` 候选集；
+  - 支持 `--candidate-labels`，允许长时扫描按标签分批续跑；
+  - 修正坏市场切片指标口径：
+    - 由“直接截取累计 equity”改为“按入选日期自身收益序列重建 equity”；
+    - 避免坏市场切片收益把中间非坏市场日期也错误算入。
+- 首批候选正式分批产出：
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_core3`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_badonly_hold2`
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_formal_round1_hold2_remaining`
+- 汇总目录：
+  - `daily_research/output/advanced_ml_bad_market_round1_20260325_consolidated`
+  - 其中生成：
+    - `combined_bad_market_round1_summary.csv`
+    - `summary.txt`
+
+### 首批正式候选
+1. `baseline`
+2. `downlow_rebound_open`
+3. `downlow_rebound_open_hold2`
+4. `downlow_ruleheavy_open`
+5. `downdual_reversal_open`
+6. `downdual_reversal_open_hold2`
+7. `downdual_reversal_badonly`
+8. `downdual_reversal_badonly_hold2`
+
+### 汇总结果
+- 全历史坏市场绝对收益仍然最好的是 `baseline`：
+  - `full_bad_market_total_return = -28.46%`
+- 最近弱窗口坏市场绝对收益最强的前三名是：
+  1. `downdual_reversal_open_hold2`
+     - `latest_weak_bad_market_total_return = -4.72%`
+  2. `downdual_reversal_badonly_hold2`
+     - `latest_weak_bad_market_total_return = -5.53%`
+  3. `downlow_ruleheavy_open`
+     - `latest_weak_bad_market_total_return = -6.16%`
+- 当前首批候选里仍然没有一个达到坏市场绝对盈利：
+  - `positive_full_bad_market_candidate_count = 0`
+- `hold2` 在这轮里普遍优于对应 open 母体：
+  - `downlow_rebound_open_hold2` 明显优于 `downlow_rebound_open`
+  - `downdual_reversal_open_hold2` 明显优于 `downdual_reversal_open`
+  - `downdual_reversal_badonly_hold2` 明显优于 `downdual_reversal_badonly`
+- 但它们当前改善的主要是：
+  - 最近坏市场窗口的少亏与超额修复；
+  - 还不是跨长历史稳定成立的坏市场绝对盈利。
+
+### 本轮结论
+1. 坏市场专项首批专用候选已经从“口头方向”变成了正式可复核的一轮产物。
+2. 这轮没有找到可晋级执行端的坏市场绝对盈利方案，`baseline` 仍是全历史坏市场绝对收益的最优参考。
+3. 但近期弱市里已经筛出两个值得继续细化的防守修复方向：
+   - `downdual_reversal_open_hold2`
+   - `downdual_reversal_badonly_hold2`
+4. 这两个方向当前只能记为“近期坏市场防守修复候选”，不能记为“坏市场盈利方案”。
+
+### 当前决策
+1. 首批坏市场专用候选不晋级执行端默认值。
+2. 若继续推进坏市场专项，下一轮只围绕以下两条线做小步细化：
+   - `downdual_reversal_open_hold2`
+   - `downdual_reversal_badonly_hold2`
+3. 下一轮只允许细化：
+   - 持有约束
+   - 止盈止损
+   - 坏市场专用 `state_horizon_weights / state_ensemble_weights`
+4. 在出现“全历史坏市场绝对收益仍显著差于 baseline”时，不再继续横向扩更多 recipe。
+## 2026-03-26 `advanced_ml (ma50 baseline, lgbm)` 组合策略消融 / `trend_up_low_vol` state-only / overlap 诊断
+### 本轮目标
+- 不再只凭经验判断 `ma50 baseline + lgbm + none + v2` 是否合理；
+- 正式补齐三类可复现诊断：
+  - `ablation`: `ml only / none only / v2 only / ml+none / ml+v2 / ml+none+v2`
+  - `state-only`: 只在 `trend_up_low_vol` 扫 `ml:none:v2`
+  - `overlap`: 比较 `ml_score` 与 `score_none / score_v2` 的截面相关、Top5 重合率、弱窗口信号增益
+
+### 本轮动作
+- 新增统一诊断脚本：
+  - `daily_research/baseline/diagnose_advanced_ml_ensemble.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_ensemble_diag_20260326_formal_rerun`
+- 这轮实际数据日期：
+  - `latest_data_date = 2026-03-25`
+- 这轮因 `--auto-trim-history` 实际使用的训练/评估历史窗口：
+  - `2023-03-07 -> 2026-03-25`
+- 本轮弱窗口统一按绝对日期命名为：
+  - `weak_window_20250905_20260319 = 2025-09-05 -> 2026-03-19`
+- 顺手补了共享 `ML per_horizon scores` 缓存，避免以后改权重表时重复训练 30 分钟：
+  - `daily_research/cache/advanced_ml/ml_scores/6600fbb205abd471d5ef.pkl`
+
+### 结果一：全局默认三层融合并不是当前最优主组合
+- `ml_only`
+  - `full_excess_sharpe = 0.379`
+  - `full_excess_total_return = +37.02%`
+- 当前默认 `ml+none+v2`（全局 `0.70 / 0.20 / 0.10`）
+  - `full_excess_sharpe = 0.265`
+  - `full_excess_total_return = +23.87%`
+- 这说明：
+  - 全样本上，当前默认三层融合相对 `ml_only` 已出现明显拖累；
+  - 拖累不是来自 `ma50` 边界，而是来自全局 ensemble 结构本身。
+
+### 结果二：弱窗口里真正拖累默认策略的不是 `ma50`，而是“ML 权重过高”
+- 在弱窗口 `2025-09-05 -> 2026-03-19` 内：
+  - `v2_only`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.170`
+    - `weak_window_20250905_20260319_excess_total_return = +2.27%`
+  - `none_only`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.363`
+    - `weak_window_20250905_20260319_excess_total_return = -4.42%`
+  - `ml_only`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.581`
+    - `weak_window_20250905_20260319_excess_total_return = -12.35%`
+  - 默认 `ml+none+v2`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.627`
+    - `weak_window_20250905_20260319_excess_total_return = -12.72%`
+- 这说明：
+  - 弱窗口里，`v2` 规则层比 `ML` 更抗压；
+  - 默认组合不仅没有对冲 `ML` 的弱窗口拖累，反而因为仍以 `ML` 为主导而继续被拉低。
+
+### 结果三：最值得推进的修复方向不是“抛弃 ML”，而是只在 `trend_up_low_vol` 重配 ensemble
+- `trend_up_low_vol_ml20_none30_v250`
+  - 仅在 `trend_up_low_vol` 使用 `ml:0.20, none:0.30, v2:0.50`
+  - 其余状态仍保留全局默认 `0.70 / 0.20 / 0.10`
+  - 结果：
+    - `full_excess_sharpe = 0.419`
+    - `full_excess_total_return = +29.67%`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.684`
+    - `weak_window_20250905_20260319_excess_total_return = +7.11%`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.558`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +4.55%`
+- 相对默认 `base_global`：
+  - `full_excess_sharpe`: `0.265 -> 0.419`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.627 -> 0.684`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.667 -> 0.558`
+- 次优但更偏全样本强势的候选是：
+  - `trend_up_low_vol_ml50_none10_v240`
+  - 结果：
+    - `full_excess_sharpe = 0.420`
+    - `full_excess_total_return = +38.78%`
+    - `weak_window_20250905_20260319_excess_sharpe = 0.208`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.366`
+- 这说明：
+  - 当前最合理的修复方式不是全局改成 `v2_only`；
+  - 而是保留 `ML` 作为全样本主干，同时只在 `trend_up_low_vol` 显著抬升 `v2`、下调 `ML`。
+
+### 结果四：`ML` 和规则层并不重合，真正高度重合的是 `none` 与 `v2`
+- 全样本 overlap 诊断：
+  - `ml_vs_none`
+    - `mean_pearson = 0.058`
+    - `mean_spearman = 0.057`
+    - `Top5 overlap = 1.02%`
+  - `ml_vs_v2`
+    - `mean_pearson = 0.073`
+    - `mean_spearman = 0.094`
+    - `Top5 overlap = 1.96%`
+  - `none_vs_v2`
+    - `mean_pearson = 0.960`
+    - `mean_spearman = 0.953`
+    - `Top5 overlap = 75.88%`
+- 在 `trend_up_low_vol` 内：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.30%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 2.60%`
+  - `none_vs_v2`
+    - `Top5 overlap = 47.52%`
+- 这说明：
+  - `ML` 与规则层是明显不同的信号源；
+  - `none` 与 `v2` 才是高度重叠的一对，`v2` 本质上更像 `none` 在 `trend_up_low_vol` 的局部修正版。
+
+### 结果五：弱窗口里 `ML` 的“独立性”没有转化成优势，反而转化成拖累
+- 在弱窗口 `2025-09-05 -> 2026-03-19`：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.27%`
+    - `ML Top5 - none Top5 = -15.70%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 3.02%`
+    - `ML Top5 - v2 Top5 = -10.73%`
+- 在 `trend_up_low_vol` 且仍限定弱窗口时：
+  - `ml_vs_none`
+    - `Top5 overlap = 1.57%`
+    - `ML Top5 - none Top5 = -17.57%`
+  - `ml_vs_v2`
+    - `Top5 overlap = 4.04%`
+    - `ML Top5 - v2 Top5 = -11.96%`
+- 这说明：
+  - `ML` 的确提供了与规则层不同的排序；
+  - 但在这段弱窗口里，这份“独立性”方向错了，带来的是负贡献而不是额外 alpha。
+
+### 本轮结论
+1. `ma50 baseline` 本身没有构成组合矛盾，真正的问题在于全局默认 ensemble 把 `ML` 放得太重。
+2. 当前默认 `ml+none+v2 = 0.70 / 0.20 / 0.10` 已不应继续被视为“无需再碰”的稳态默认。
+3. 目前最值得推进的正式修复方向是：
+   - 仅在 `trend_up_low_vol` 下调 `ML`、上调 `v2`
+   - 第一优先候选：`ml:0.20, none:0.30, v2:0.50`
+   - 第二优先候选：`ml:0.50, none:0.10, v2:0.40`
+4. 不建议把结论误读成“应全局移除 `ML`”：
+   - 因为 `ml_only` 仍是全样本最强单体；
+   - 真正合理的方向是“保留 ML 主线，但在 `trend_up_low_vol` 做状态专属降权”。
+
+### 当前决策
+1. 执行端默认暂不直接切换，但当前默认组合已进入“需要正式复验后再决定是否升级”的状态。
+2. 下一轮若继续做正式研究，优先做更细的局部扫描，而不是再做全局盲扫：
+   - 以 `trend_up_low_vol_ml20_none30_v250` 为中心
+   - 用 `0.05` 步长在附近细扫
+   - 重点扫描区间：
+     - `ml 0.15 ~ 0.55`
+     - `none 0.10 ~ 0.35`
+     - `v2 0.30 ~ 0.60`
+3. 后续文档与口头结论中，不再把 `latest_weak` 当作相对时间词使用，应写成：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-26 `advanced_ml (ma50 baseline, lgbm)` `trend_up_low_vol` `0.05` 步长局部细扫补充复验
+### 本轮动作
+- 基于上一轮正式诊断结论，围绕 `trend_up_low_vol_ml20_none30_v250` 继续做状态专属 ensemble 局部细扫；
+- 只保留 `state-only`，跳过已完成的 `ablation / overlap`，聚焦 `trend_up_low_vol` 的 `ml:none:v2` 局部权重结构；
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_ensemble_focus_scan_20260326_local005`
+- 本轮实际数据日期：
+  - `latest_data_date = 2026-03-26`
+- 本轮 `--auto-trim-history` 后实际使用的训练/评估历史窗口：
+  - `2023-03-08 -> 2026-03-26`
+- 本轮局部扫描约束：
+  - `ml 0.15 ~ 0.55`
+  - `none 0.10 ~ 0.35`
+  - `v2 0.30 ~ 0.60`
+  - `step = 0.05`
+- 本轮弱窗口命名与指标列统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：上一轮中心候选有效，但局部最优点进一步收敛到 `ml 0.25 / none 0.20~0.25 / v2 0.50~0.55`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_sharpe = 0.829`
+  - `full_excess_total_return = +67.85%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.779`
+  - `weak_window_20250905_20260319_excess_total_return = +9.26%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.706`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +6.65%`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe = 0.788`
+  - `full_excess_total_return = +64.29%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.914`
+  - `weak_window_20250905_20260319_excess_total_return = +11.06%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.881`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +8.41%`
+- `trend_up_low_vol_ml20_none30_v250`
+  - `full_excess_sharpe = 0.689`
+  - `full_excess_total_return = +52.25%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.784`
+  - `weak_window_20250905_20260319_excess_total_return = +8.63%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.695`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = +6.04%`
+- 这说明：
+  - 上一轮选出来的 `trend_up_low_vol_ml20_none30_v250` 不是误报，它在更细扫描里仍处在前排；
+  - 但局部前沿已经明显向 `ml 0.25`、`v2 0.50~0.55`、`none 0.20~0.25` 这一小块区域收敛。
+
+### 结果二：与当前 `base_global` 相比，局部降 `ML`、抬 `v2` 仍然显著改善弱窗口
+- `base_global`
+  - `full_excess_sharpe = 0.732`
+  - `full_excess_total_return = +73.66%`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.247`
+  - `weak_window_20250905_20260319_excess_total_return = -4.77%`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.291`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_total_return = -4.30%`
+- 相对 `base_global`，`trend_up_low_vol_ml25_none25_v250`：
+  - `full_excess_sharpe`: `0.732 -> 0.829`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.247 -> 0.779`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.291 -> 0.706`
+- 相对 `base_global`，`trend_up_low_vol_ml25_none20_v255`：
+  - `full_excess_sharpe`: `0.732 -> 0.788`
+  - `weak_window_20250905_20260319_excess_sharpe`: `-0.247 -> 0.914`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe`: `-0.291 -> 0.881`
+- 这说明：
+  - 默认组合在当前新数据口径下，全样本本身并不弱；
+  - 但在 `weak_window_20250905_20260319` 这段里，它依然明显落后于 `trend_up_low_vol` 的状态专属降 `ML` 方案。
+
+### 结果三：局部扫描已经把“平衡型候选”和“防守型候选”分开了
+- 更平衡、可作为头号正式复验候选的是：
+  - `trend_up_low_vol_ml25_none25_v250`
+- 更偏弱窗口防守、但全样本仍不伤的候选是：
+  - `trend_up_low_vol_ml25_none20_v255`
+- 弱窗口 Sharpe 最高但全样本明显偏弱的极端防守候选是：
+  - `trend_up_low_vol_ml15_none30_v255`
+  - `full_excess_sharpe = 0.552`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.923`
+- 这说明：
+  - 当前已经不需要再做大范围盲扫；
+  - 更合理的下一步，是把候选缩到 `ml25_none25_v250` 与 `ml25_none20_v255`，再和 `base_global` 做正式复验对照。
+
+### 本轮结论
+1. 细扫后，`trend_up_low_vol_ml20_none30_v250` 仍然成立，但已不再是局部最优点。
+2. 当前最稳的平衡型候选更新为：`trend_up_low_vol_ml25_none25_v250`。
+3. 当前最强的弱窗口防守型候选更新为：`trend_up_low_vol_ml25_none20_v255`。
+4. 这轮结果继续支持同一方向：问题不在 `ma50 baseline`，而在默认全局 ensemble 在 `trend_up_low_vol` 里给了 `ML` 过高主导权。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，先保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，优先做三组严格对照：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-27 `advanced_ml (ma50 baseline, lgbm)` 重训频率 / boosting 轮数正式敏感性实验
+### 本轮目标
+- 不再凭经验判断“`retrain_every_days` 和 `lgbm boosting rounds` 会不会影响结果”；
+- 直接在当前执行主线口径下做正式实验，回答两件事：
+  - 树模型重训频率是否影响结果；
+  - `lgbm_n_estimators` 是否影响结果。
+
+### 先修正一处本轮实验中暴露出来的时序错误
+- 在第一次矩阵实验 `advanced_ml_retrain_tree_impact_20260326_formal_r1` 里，出现了不合理的超高 Sharpe；
+- 回查后确认，问题不在参数本身，而在 `rolling ML` 训练窗口的标签边界：
+  - 训练样本末端没有对 `target_horizon` 做足够的 label-safe 截断；
+  - 会把对预测块而言“未来才知道”的标签提前喂进滚动训练。
+- 已修正为：
+  - `train_point_in_time_model` 与 `rolling_ml_scores` 都按 `target_horizon` 与 `execution_mode=next_open` 做 label-safe 截断；
+  - 共享 `ml score cache` 也同步抬了版本，避免误命中旧缓存。
+- 因此：
+  - `advanced_ml_retrain_tree_impact_20260326_formal_r1` 作废；
+  - 本轮正式结论只以 `advanced_ml_retrain_tree_impact_20260326_formal_r2` 为准。
+
+### 本轮动作
+- 新增正式实验脚本：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 这轮固定只比较三组候选，不再做全局盲扫：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260326_formal_r2`
+- 本轮实际数据日期：
+  - `latest_data_date = 2026-03-26`
+- 本轮 `--auto-trim-history` 后实际训练/评估历史窗口：
+  - `2023-03-08 -> 2026-03-26`
+- 固定比较网格：
+  - `retrain_every_days = 5, 10, 21, 42`
+  - `lgbm_n_estimators = 130, 260, 520`
+- 本轮弱窗口命名统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：结论已经实验确认，两类参数都会影响结果
+- `base_global`
+  - `full_excess_sharpe` 全范围：`-0.351 -> 0.248`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-1.922 -> -0.486`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe` 全范围：`-0.176 -> 0.282`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-0.581 -> 0.346`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_sharpe` 全范围：`0.006 -> 0.311`
+  - `weak_window_20250905_20260319_excess_sharpe` 全范围：`-0.308 -> 0.425`
+- 这说明：
+  - `retrain_every_days` 不是无关参数；
+  - `lgbm_n_estimators` 也不是无关参数；
+  - 两者都会实质改变结论，不能再把当前 `21 / 260` 当成默认不动的“天然合理值”。
+
+### 结果二：`base_global` 会被参数调整拉动，但仍然修不好弱窗口
+- 默认 `base_global @ 21 / 260`
+  - `full_excess_sharpe = -0.008`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.939`
+- `base_global` 全样本最强点在 `5 / 260`
+  - `full_excess_sharpe = 0.248`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.486`
+- `base_global` 的弱窗口最佳点也仍然是 `5 / 260`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.486`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.612`
+- 这说明：
+  - 更频繁重训确实能改善 `base_global`；
+  - 但 `base_global` 即使调到本轮最佳参数，弱窗口仍然是负 Sharpe，不能靠“只调训练次数”完成修复。
+
+### 结果三：状态专属候选会被参数显著放大，而且已经出现弱窗口转正
+- 默认 `trend_up_low_vol_ml25_none25_v250 @ 21 / 260`
+  - `full_excess_sharpe = 0.158`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.131`
+- 它的全样本最强点在 `5 / 130`
+  - `full_excess_sharpe = 0.311`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.005`
+- 它的弱窗口最强点在 `5 / 520`
+  - `full_excess_sharpe = 0.222`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.425`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.253`
+- 默认 `trend_up_low_vol_ml25_none20_v255 @ 21 / 260`
+  - `full_excess_sharpe = -0.035`
+  - `weak_window_20250905_20260319_excess_sharpe = -0.581`
+- 它的全样本最强点在 `5 / 260`
+  - `full_excess_sharpe = 0.282`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.312`
+- 它的弱窗口最强点在 `21 / 520`
+  - `full_excess_sharpe = 0.173`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.346`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.150`
+- 这说明：
+  - 两个状态专属候选都不是“参数不敏感”的假稳态；
+  - 但它们都能在更合适的参数组合下，把弱窗口从负值推到正值；
+  - 其中 `ml25_none25_v250` 当前是更稳的主候选。
+
+### 结果四：重训频率通常对全样本更敏感，boosting 轮数对弱窗口常常同样重要甚至更重要
+- 用组均值看参数影响范围：
+  - `trend_up_low_vol_ml25_none25_v250`
+    - `full_excess_sharpe`：
+      - `retrain` 组均值范围 `0.154`
+      - `n_estimators` 组均值范围 `0.057`
+    - `weak_window_20250905_20260319_excess_sharpe`：
+      - `retrain` 组均值范围 `0.234`
+      - `n_estimators` 组均值范围 `0.224`
+  - `trend_up_low_vol_ml25_none20_v255`
+    - `full_excess_sharpe`：
+      - `retrain` 组均值范围 `0.198`
+      - `n_estimators` 组均值范围 `0.106`
+    - `weak_window_20250905_20260319_excess_sharpe`：
+      - `retrain` 组均值范围 `0.318`
+      - `n_estimators` 组均值范围 `0.362`
+- 这说明：
+  - 对全样本表现，`retrain_every_days` 往往影响更大；
+  - 对弱窗口表现，`lgbm_n_estimators` 的影响并不比重训频率小，有时还更大；
+  - 所以以后不能只扫一个维度，至少要把这两个维度联动看。
+
+### 本轮结论
+1. “树模型重训频率 + boosting 轮数是否有影响”这个问题，现在已经有正式实验答案：有，而且是实质影响，不是边角扰动。
+2. 当前默认 `21 / 260` 并不是这三组候选里的稳定优值。
+3. `base_global` 可以通过参数优化改善，但仍然不能解决 `weak_window_20250905_20260319` 的核心弱点。
+4. 当前更值得继续推进的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 5 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 5 / 260`
+   - 这两者都比默认 `21 / 260` 更值得正式复验。
+5. 本轮也顺手确认了一件更底层的事：
+   - 以后凡是基于 rolling ML 的正式研究，必须沿用这次修正后的 label-safe 边界；
+   - 不能再引用修正前那版滚动结果。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，先保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，优先仍是这三组严格对照，但不再默认锁死 `21 / 260`：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 下一轮正式复验时，至少应把以下参数组合纳入首轮：
+   - `5 / 260`
+   - `5 / 520`
+   - `21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 训练窗口 / 重训频率 / boosting 轮数正式矩阵
+### 本轮目标
+- 把 `ml_train_window_days` 正式纳入当前执行主线的受控变量。
+- 不再只看 `retrain_every_days` 与 `lgbm_n_estimators`，而是一起回答：
+  - `ml_train_window_days` 是否实质影响结果；
+  - 三个当前候选在 `train_window / retrain / n_estimators` 联动下的最优点分别在哪里。
+
+### 先修正本轮第一版矩阵的历史窗口边界
+- 2026-03-27 先跑出的 `advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r1` 不作为正式结论引用。
+- 原因不是候选本身失效，而是脚本刚接入 `--train-window-grid` 后，`--auto-trim-history` 仍按默认 `ml_train_window_days=504` 裁历史；
+- 但本轮网格已经扩到 `train_window_days=756`，导致 `756` 这组历史不够长，训练日志几乎为空，结果更接近规则层回退，不适合作为正式对照。
+- 已修正为：
+  - `auto-trim-history` 按 `train-window-grid` 的最大窗口裁历史；
+  - 本轮正式口径只认 `advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`。
+
+### 本轮动作
+- 脚本：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 新增能力：
+  - `--train-window-grid`
+  - 摘要 / 默认行 / 最优行 / run_config 全部带上 `ml_train_window_days`
+  - `auto-trim-history` 现在按 `train-window-grid` 最大值取历史窗口
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+- 实际最新数据日期：
+  - `latest_data_date = 2026-03-27`
+- 本轮 `--auto-trim-history` 后的实际训练/评估历史窗口：
+  - `20220322 -> 20260327`
+- 固定候选仍只看三组严格对照：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 本轮正式参数网格：
+  - `ml_train_window_days = 378, 504, 756`
+  - `retrain_every_days = 5, 21`
+  - `lgbm_n_estimators = 260, 520`
+- 后续命名继续统一：
+  - `weak_window_20250905_20260319`
+
+### 结果一：`ml_train_window_days` 确实会影响结果，而且不是越长越好
+- `base_global`
+  - 默认 `504 / 21 / 260`: `full_excess_sharpe = 0.410`
+  - 默认 `504 / 21 / 260`: `weak_window_20250905_20260319_excess_sharpe = -0.961`
+  - 最强全样本点在 `504 / 5 / 260`: `0.837 / -0.788`
+  - 最强弱窗口点在 `378 / 21 / 520`: `0.776 / -0.383`
+- `trend_up_low_vol_ml25_none20_v255`
+  - 默认 `504 / 21 / 260`: `0.515 / 0.368`
+  - 最强全样本点在 `504 / 5 / 260`: `0.793 / 0.204`
+  - 最强弱窗口点在 `504 / 21 / 520`: `0.699 / 1.094`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 默认 `504 / 21 / 260`: `0.549 / 0.692`
+  - 最强全样本点在 `504 / 5 / 260`: `0.745 / -0.070`
+  - 最强弱窗口点在 `504 / 21 / 520`: `0.663 / 1.154`
+- 这说明：
+  - `ml_train_window_days` 不是无关变量；
+  - 但当前执行主线下，并没有出现“窗口拉到 `756` 就自然更稳”的结论；
+  - 在这轮正式矩阵里，真正占优的主轴仍然落在 `504`。
+
+### 结果二：`504` 是当前两组状态专属候选的主窗口，`756` 不是
+- 按弱窗口最优点看：
+  - `trend_up_low_vol_ml25_none20_v255`
+    - `378` 最优：`0.427 / 0.314`
+    - `504` 最优：`0.699 / 1.094`
+    - `756` 最优：`0.329 / 0.827`
+  - `trend_up_low_vol_ml25_none25_v250`
+    - `378` 最优：`0.485 / 0.152`
+    - `504` 最优：`0.663 / 1.154`
+    - `756` 最优：`0.355 / 0.801`
+- 这说明：
+  - `756` 不是没用，它确实能把弱窗口维持在正值；
+  - 但在这轮正式口径里，`504` 明显更强，尤其配合 `21 / 520` 时，已经同时兼顾了全样本与弱窗口。
+
+### 结果三：当前最值得推进的正式候选进一步收敛
+- `base_global`
+  - 即使纳入 `train_window_days`，弱窗口最优也仍为负值；
+  - 说明它可以被参数改善，但依旧不是能够修复当前弱窗口问题的主候选。
+- `trend_up_low_vol_ml25_none20_v255`
+  - 当前最强弱窗口点更新为：
+    - `504 / 21 / 520`
+    - `full_excess_sharpe = 0.699`
+    - `weak_window_20250905_20260319_excess_sharpe = 1.094`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.076`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 当前最强弱窗口点更新为：
+    - `504 / 21 / 520`
+    - `full_excess_sharpe = 0.663`
+    - `weak_window_20250905_20260319_excess_sharpe = 1.154`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.139`
+- 这说明：
+  - 这两组状态专属候选仍然是当前最值得推进的正式复验对象；
+  - 而且在引入 `ml_train_window_days` 之后，它们并没有被推翻，反而更清楚地收敛到 `504 / 21 / 520`。
+
+### 本轮结论
+1. `ml_train_window_days` 会实质影响结果，这个问题现在已经有正式实验答案。
+2. 在本轮正式矩阵里，`504` 明显强于 `378` 与 `756`，当前没有证据支持把训练窗口继续机械拉长到 `756`。
+3. `base_global` 仍不具备作为弱窗口修复主方案的资格。
+4. 当前最值得推进正式复验的两组候选，进一步收敛为：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+5. `504 / 5 / 260` 依然有价值，但更像“全样本进攻型对照点”，不如 `504 / 21 / 520` 兼顾弱窗口稳定性。
+
+### 当前决策
+1. 执行端默认值仍不直接切换，继续保留 `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`。
+2. 若继续正式复验，三组严格对照仍保持不变：
+   - `base_global`
+   - `trend_up_low_vol_ml25_none25_v250`
+   - `trend_up_low_vol_ml25_none20_v255`
+3. 下一轮正式 pair revalidation 时，参数优先级更新为：
+   - `504 / 21 / 520`
+   - `504 / 5 / 260`
+   - `378 / 21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 长窗口 pair revalidation
+### 本轮目标
+- 对上一轮已经收敛出的三组参数优先级做长窗口正式复验，不再做新的参数盲扫。
+- 本轮只验证三组显式参数：
+  - `504 / 21 / 520`
+  - `504 / 5 / 260`
+  - `378 / 21 / 520`
+
+### 先说明本轮第一版 `r1`
+- 2026-03-28 先跑出的 `advanced_ml_pair_revalidation_20260328_formal_r1` 不作为长窗口正式结论引用。
+- 原因是当时仍带了 `--auto-trim-history`，实际历史窗口被自动裁回：
+  - `20230309 -> 20260327`
+- 它可以作为“这三组参数在当前短样本上的快速对照”，但不是这轮要的长窗口 pair revalidation。
+- 本轮正式口径只认：
+  - `advanced_ml_pair_revalidation_20260328_formal_r2`
+
+### 本轮动作
+- 脚本继续使用：
+  - `daily_research/baseline/scan_advanced_ml_retrain_tree_impact.py`
+- 为了精确复验三组指定参数，脚本新增：
+  - `--explicit-configs`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_pair_revalidation_20260328_formal_r2`
+- 最新数据日期：
+  - `latest_data_date = 2026-03-27`
+- 本轮正式历史窗口：
+  - `20190101 -> 20260327`
+- 固定候选仍只看三组严格对照：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 命名继续统一：
+  - `weak_window_20250905_20260319`
+
+### 结果一：长窗口复验后，只有 `504 / 21 / 520` 真正站住
+- `base_global`
+  - `378 / 21 / 520`: `full_excess_sharpe = -0.111`, `weak_window_20250905_20260319_excess_sharpe = -0.581`
+  - `504 / 5 / 260`: `0.375 / -0.544`
+  - `504 / 21 / 520`: `0.016 / -0.656`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `378 / 21 / 520`: `0.012 / -0.876`
+  - `504 / 5 / 260`: `0.550 / -0.575`
+  - `504 / 21 / 520`: `0.860 / 0.819`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `378 / 21 / 520`: `0.100 / -0.798`
+  - `504 / 5 / 260`: `0.492 / -0.287`
+  - `504 / 21 / 520`: `0.786 / 0.992`
+- 这说明：
+  - 在长窗口 pair revalidation 里，`504 / 21 / 520` 是唯一能让两组状态专属候选同时保持“全样本强 + 弱窗口为正”的参数；
+  - `504 / 5 / 260` 和 `378 / 21 / 520` 在长窗口下都没有守住弱窗口。
+
+### 结果二：两组状态专属候选都通过了长窗口复验，但侧重点不同
+- `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+  - `full_excess_sharpe = 0.786`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.968`
+- 这说明：
+  - `ml25_none20_v255` 更偏全样本进攻；
+  - `ml25_none25_v250` 更偏弱窗口和 `trend_up_low_vol` 防守；
+  - 两者都已经明显优于 `base_global`。
+
+### 本轮结论
+1. 长窗口 pair revalidation 已经把参数层面收敛到一个很清楚的结论：
+   - `504 / 21 / 520`
+2. `504 / 5 / 260` 没有通过长窗口复验，不再适合作为优先晋级参数。
+3. `378 / 21 / 520` 也没有通过长窗口复验，不再适合作为优先晋级参数。
+4. 当前真正通过长窗口正式复验、值得进入执行端升级 shortlist 的，只剩两组：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+5. 若按弱窗口稳健性排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+6. 若按全样本收益排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+
+### 当前决策
+1. 执行端默认值暂不自动切换，但“是否升级”的判断门槛已经满足。
+2. 后续若继续推进，不再需要回头做这三组参数的重复复验。
+3. 下一步应直接聚焦两组最终候选的 head-to-head：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` shortlist head-to-head
+### 本轮目标
+- 把已经通过长窗口正式复验的两组最终候选，收口成一次可复用、可回滚、可解释的正式 head-to-head。
+- 不再扩新候选，不再重跑已经淘汰的参数组，只比较：
+  - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+  - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+
+### 本轮动作
+- 新增汇总脚本：
+  - `daily_research/baseline/render_advanced_ml_shortlist_head_to_head.py`
+- 直接读取两份正式输出：
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+  - `daily_research/output/advanced_ml_pair_revalidation_20260328_formal_r2`
+- 固定精确配置：
+  - `504 / 21 / 520`
+- 正式 head-to-head 输出目录：
+  - `daily_research/output/advanced_ml_shortlist_head_to_head_20260328_formal_r1`
+- 本轮继续统一使用：
+  - `weak_window_20250905_20260319`
+
+### 结果一：两组最终候选的优势分工被正式固定
+- `trend_up_low_vol_ml25_none20_v255`
+  - 在两份 formal 输出里，`full_excess_sharpe` 都更强：
+    - `0.699 > 0.663`
+    - `0.860 > 0.786`
+- `trend_up_low_vol_ml25_none25_v250`
+  - 在两份 formal 输出里，`weak_window_20250905_20260319_excess_sharpe` 都更强：
+    - `1.154 > 1.094`
+    - `0.992 > 0.819`
+  - 在两份 formal 输出里，`trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe` 也都更强：
+    - `1.139 > 1.076`
+    - `0.968 > 0.751`
+- 这说明：
+  - `ml25_none20_v255` 的优势继续稳定落在全样本进攻；
+  - `ml25_none25_v250` 的优势继续稳定落在弱窗口与 `trend_up_low_vol` 防守。
+
+### 结果二：辅助指标没有把结论收口成单一赢家
+- `recent_full_excess_sharpe`
+  - 在短历史 formal 矩阵里是 `v250` 更强；
+  - 在长窗口 pair revalidation 里是 `v255` 更强。
+- `full_excess_max_drawdown` 与 `recent_full_excess_max_drawdown`
+  - 也没有形成跨两份 formal 输出都偏向同一候选的单边优势。
+- `full_avg_turnover`
+  - `v255` 略优，但差距很小。
+- 这说明：
+  - 当前并不存在一个在“全样本收益、弱窗口稳健、回撤、换手”上同时形成单边优势的候选；
+  - 这轮 head-to-head 产出的不是“升级赢家”，而是“分工清楚但仍 split 的 verdict”。
+
+### 本轮结论
+1. 当前 formal head-to-head 已经完成，但没有形成单一升级赢家。
+2. 若按全样本进攻排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none20_v255 @ 504 / 21 / 520`
+3. 若按弱窗口与 `trend_up_low_vol` 防守排序，当前更强的是：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+4. 按当前项目停止规则执行，结论应当是：
+   - 维持现默认值，不做口头升级。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 后续若继续推进升级，不再重开更大候选分支。
+3. 下一步若仍要推动升级，先做以下二选一：
+   - 明确写出“全样本进攻 vs 弱窗口防守”谁是当前升级优先级；
+   - 或补一项同口径的 formal comparator，再让两组最终候选分出单一赢家。
+4. 后续文档与口头结论继续统一使用：
+   - `weak_window_20250905_20260319`
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器首轮正式扫描
+### 本轮目标
+- 不再逼 `v250` 与 `v255` 选出静态唯一赢家。
+- 直接验证一个最小可执行的动态控制器：在 `trend_up_low_vol` 内部，根据市场趋势强度与波动水平，在两组最终候选之间切换。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/scan_advanced_ml_attack_defense_controller.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1`
+- 正式口径继续固定为：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+- 静态对照仍只看：
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+- 动态控制器首轮只做最小扫描：
+  - 在 `trend_up_low_vol` 内，若 `trend_gap >= 阈值` 且 `annual_vol <= 阈值`，则切到 `v255`
+  - 否则保持 `v250`
+- 首轮阈值网格：
+  - `trend_gap = 0.010, 0.024, 0.044, 0.065`
+  - `annual_vol = 0.140, 0.170, 0.200, 0.320`
+
+### 结果一：当前没有动态控制器能同时压过两组静态 shortlist
+- 静态 `v250`
+  - `full_excess_sharpe = 0.786`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.968`
+- 静态 `v255`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- 本轮 16 个动态候选里：
+  - `dominating_dynamic_candidate_count = 0`
+- 这说明：
+  - 首轮简单控制器还不能把“进攻”和“防守”同时收口成一个可直接升级的默认方案。
+
+### 结果二：简单控制器确实有信号，但还不够形成默认值升级
+- 进攻最强的动态候选：
+  - `gap>=0.010, vol<=0.320`
+  - `full_excess_sharpe = 0.817`
+  - `weak_window_excess_sharpe = 0.745`
+  - `focus_weak_excess_sharpe = 0.657`
+- 防守最强、也是 balance score 最强的动态候选：
+  - `gap>=0.024, vol<=0.140`
+  - `full_excess_sharpe = 0.758`
+  - `weak_window_excess_sharpe = 1.095`
+  - `focus_weak_excess_sharpe = 1.108`
+- 当前最像“折中型”的候选之一：
+  - `gap>=0.024, vol<=0.200`
+  - `full_excess_sharpe = 0.806`
+  - `weak_window_excess_sharpe = 0.987`
+  - `focus_weak_excess_sharpe = 0.966`
+- 这说明：
+  - 简单控制器已经能明显改变攻守平衡；
+  - 但它还做不到既保住 `v255` 的全样本上沿，又同时稳定压过 `v250` 的弱窗口上沿。
+
+### 本轮结论
+1. “做动态攻守控制器”这条方向本身是对的，不需要回退到静态二选一。
+2. 但首轮最小规则版控制器还不够作为默认执行升级方案。
+3. 当前最重要的真实信息不是“动态无效”，而是：
+   - 简单 `trend_gap + annual_vol` 双阈值规则不足以完成这次升级。
+4. 后续若继续推进，重点应转向：
+   - 补强 `trend_up_low_vol` 内部的状态识别与切换信号；
+   - 而不是继续在同一层重复更密的纯阈值扫网格。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 动态控制器方向继续保留为优先研究线。
+3. 下一步不再回头做静态 shortlist 的重复争论。
+4. 下一步若继续推进，优先做：
+   - 更强的 `trend_up_low_vol` 内部攻守识别信号
+   - 再用同一正式口径重跑动态控制器正式比较
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守分型诊断
+### 本轮目标
+- 不再停留在“动态方案有没有赢家”这一层。
+- 直接拆清 `trend_up_low_vol` 内，究竟哪些信号更像正式攻守切换入口，哪些只是解释变量。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/diagnose_advanced_ml_attack_defense.py`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_diagnosis_20260328_formal_r1`
+- 诊断对象继续固定为：
+  - 静态 `trend_up_low_vol_ml25_none20_v255`
+  - 静态 `trend_up_low_vol_ml25_none25_v250`
+- 诊断口径继续固定为：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+
+### 结果一：日级攻守差分真实存在，但强度还不够直接形成单变量 gate
+- `focus_state_days = 482`
+- `offense_minus_defense_mean_excess_return` 接近零轴，但 `offense_win_rate = 0.523`
+- 这说明：
+  - `v255` 与 `v250` 的日级优势差异不是不存在；
+  - 但它不是那种用单一简单特征就能一下子完全分开的强信号。
+
+### 结果二：`focus_streak` 更像解释变量，不像下一轮 formal controller 的主入口
+- `focus_streak>=18 / 27 / 10` 这类单规则虽然在全样本上有轻微正向 mean diff；
+- 但它们在弱窗口里的 `weak_mean_diff` 并不稳定，普遍没有形成比 `ret10` 更清晰的正式升级方向。
+- 这说明：
+  - `focus_streak` 可以保留为解释 `trend_up_low_vol` 内部节奏的诊断特征；
+  - 但当前不值得直接升格为第二轮正式 gating 入口。
+
+### 结果三：更值得 formal 化的是 `benchmark_ret_10d`
+- 诊断里更像“下一轮正式入口”的组合集中在：
+  - `trend_gap >= 0.024192`
+  - `annual_vol <= 0.176128`
+  - 再叠加 `benchmark_ret_10d`
+- 这说明：
+  - 与其继续在首轮 `trend_gap + annual_vol` 上加密网格；
+  - 不如直接把 `benchmark_ret_10d` 作为第二代动态控制器的新增门槛进入正式复验。
+
+### 本轮结论
+1. 当前攻守控制器方向继续成立，不回退到静态二选一。
+2. 下一轮最值得 formal 化的新轴不是 `focus_streak`，而是 `benchmark_ret_10d`。
+3. 因此下一步直接进入：
+   - 带 `ret10` 门槛的第二轮正式动态控制器扫描。
+
+### 当前决策
+1. 保留 `focus_streak` 为诊断变量。
+2. 把 `benchmark_ret_10d` 升为第二轮正式控制器扫描的新增门槛。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器第二轮正式扫描（加 `ret10`）
+### 本轮目标
+- 验证在首轮 `trend_gap + annual_vol` 基础上，再加入 `benchmark_ret_10d`，能否把动态控制器正式推到可升级默认值的水平。
+
+### 本轮动作
+- 继续使用脚本：
+  - `daily_research/baseline/scan_advanced_ml_attack_defense_controller.py`
+- 脚本新增：
+  - `--offense-benchmark-ret10-grid`
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r2_ret10`
+- 第二轮正式网格收敛为：
+  - `trend_gap = 0.015576, 0.024192`
+  - `annual_vol = 0.108317, 0.176128`
+  - `benchmark_ret_10d = -0.007665, 0.003449, 0.014717`
+- 静态对照继续保持：
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+
+### 结果一：`ret10` 确实让动态方案更接近正式可用
+- `dominating_dynamic_candidate_count = 0`
+- 但第二轮最强折中候选已经变成：
+  - `gap>=0.024192, vol<=0.176128, ret10>=0.014717`
+  - `full_excess_sharpe = 0.807`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.101`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.114`
+- 这说明：
+  - `ret10` 不是噪音门槛；
+  - 它确实把动态方案的弱窗口与 focus-weak 防守能力又往上推了一层。
+
+### 结果二：当前更偏进攻的第二轮候选也已经比首轮更完整
+- 本轮 full 端最强动态候选是：
+  - `gap>=0.024192, vol<=0.176128, ret10>=0.003449`
+  - `full_excess_sharpe = 0.818`
+  - `weak_window_excess_sharpe = 1.088`
+  - `focus_weak_excess_sharpe = 1.097`
+- 这说明：
+  - 第二轮 `ret10` 控制器已经不再只是“纯防守补丁”；
+  - 它开始形成“full 端不算差，弱窗口端明显更强”的正式动态候选形态。
+
+### 结果三：但它还没有真正跨过升级门槛
+- 静态 `v255` 仍然保持：
+  - `full_excess_sharpe = 0.860`
+- 静态 `v250` 仍然保持：
+  - `weak_window_excess_sharpe = 0.992`
+  - `focus_weak_excess_sharpe = 0.968`
+- 当前第二轮最强动态候选虽然已经在弱窗口侧明显超过 `v250`；
+- 但在 full 端仍没超过静态 `v255`。
+- 这说明：
+  - 当前问题已经从“动态方向有没有信号”收敛成：
+  - 如何在保住 `ret10` 带来的弱窗口增益前提下，再把 full 端补回去。
+
+### 本轮结论
+1. 第二轮正式扫描进一步确认：
+   - `benchmark_ret_10d` 是值得保留的第二代动态控制轴。
+2. 当前最强动态折中候选是：
+   - `gap>=0.024192, vol<=0.176128, ret10>=0.014717`
+3. 当前更偏 full 端的动态候选是：
+   - `gap>=0.024192, vol<=0.176128, ret10>=0.003449`
+4. 但当前仍没有一个动态控制器能同时压过静态 `v255` 的 full 上沿与静态 `v250` 的弱窗口防守。
+5. 因此执行端默认值继续保持不切换。
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `advanced_ml (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 动态控制器研究线继续保留，而且优先级高于回头争论静态二选一。
+3. 下一步不再把 `focus_streak` 升格为正式 gating 入口。
+4. 下一步若继续推进，优先做：
+   - 围绕 `gap>=0.024192, vol<=0.176128, ret10>=0.014717 / 0.003449` 继续补 full 端收益；
+   - 在保住这层 `ret10` 弱窗口增益的前提下，再做同口径 formal comparator。
+
+> 注：以上结论基于旧 `market_features` 口径，已被下方“当前代码口径重跑 + 执行默认值升级”条目覆盖；后续默认以该新条目为准。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 当前代码口径重跑 + 执行默认值升级
+### 本轮目标
+- 解释为什么旧 formal `r1 / r2` 与当前脚本结果发生冲突；
+- 在当前代码、当前特征空间和当前 rolling ML score 口径下，重新决定 live execution default。
+
+### 本轮动作
+- 正式输出目录：
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_weightgrid_focus`
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r3_baseprobe`
+- 对比了旧 formal 产物与当前 prepared / ml_score cache：
+  - 旧 prepared cache：`daily_research/cache/advanced_ml/prepared/2ec8e125112e2645a3aa.pkl`
+  - 当前 prepared cache：`daily_research/cache/advanced_ml/prepared/e237c99bfbfa9a984e00.pkl`
+  - 旧 ml_scores cache：`daily_research/cache/advanced_ml/ml_scores/5b68d4a05901bf6f1229.pkl`
+  - 当前 ml_scores cache：`daily_research/cache/advanced_ml/ml_scores/bb3aae2219e0720b81ca.pkl`
+- 同时把执行端 wrapper 的共享默认参数切到：
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+- 并重训 live artifact：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+
+### 结果一：旧 split verdict 失效的原因，不在四象限，也不在规则层，而在 market-feature 扩容后的 ML 分数漂移
+- 旧 prepared / 当前 prepared 之间：
+  - `regime_state` 行数一致；
+  - `trend_up_low_vol` 天数一致；
+  - `score_none / score_v2 / filter_mask` 一致；
+  - `feature_frames` 一致；
+  - 但 `market_features` 已从 `7` 个扩到 `24` 个。
+- 当前新增的 market features 里，包括：
+  - `benchmark_vol_gap`
+  - `benchmark_vol_ratio`
+  - `trend_bucket / vol_bucket` 对应的一组布尔 market signals
+- 这直接导致 rolling ML scores 已经实质变化：
+  - `h20` 平均绝对差约 `0.272`
+  - `h20` 最大绝对差约 `4.490`
+- 所以旧 formal `r1 / r2` 里“`v255` 更适合当默认主候选”的结论，已经不再代表当前代码。
+
+### 结果二：在当前代码口径下，静态赢家已经收敛为 `v250`
+- 当前静态 `trend_up_low_vol_ml25_none25_v250`：
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- 当前静态 `trend_up_low_vol_ml25_none20_v255`：
+  - `full_excess_sharpe = 0.675`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.281`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.094`
+- 当前 base-equivalent 默认 artifact：
+  - `full_excess_sharpe = 0.294`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.151`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.186`
+- 这说明：
+  - 在当前代码下，旧 live default 已明显落后；
+  - `v250` 已经不是“防守候选之一”，而是新的 live default。
+
+### 结果三：动态控制器方向仍成立，但当前还不足以越过新的 live 默认值
+- 当前最强 full 端动态候选：
+  - `0.791 / 0.992 / 0.980`
+- 当前最强 balance 动态候选：
+  - `0.775 / 1.013 / 1.008`
+- 它们都说明：
+  - 动态方案已经开始接近“攻守切换”；
+  - 但还没有形成一个足以绕过 live `v250` 默认值、直接升级执行端的单一赢家。
+
+### 本轮结论
+1. 旧 formal `r1 / r2` 结论已不再代表当前代码，应整体降级为历史口径。
+2. 当前代码下的静态默认值应升级为：
+   - `trend_up_low_vol_ml25_none25_v250 @ 504 / 21 / 520`
+3. `trend_up_low_vol_ml25_none20_v255` 继续保留为进攻对照，而不是 live default。
+4. 动态控制器研究线继续保留，但它的比较基准已经改成 live `v250`，不再是旧 split verdict。
+
+### 当前决策
+1. 执行端 wrapper 已切换共享默认参数为：
+   - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+2. live artifact 已重训完成：
+   - `trained_at = 2026-03-28 15:19:20`
+3. 后续所有正式动态比较，默认都要先回答：
+   - 能否在同一 formal 口径下跑赢 live `v250`
+4. 后续若继续推进动态控制器，不再把“是否沿用旧 `v255` 口径”作为讨论前提。
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` `market_features` 正式对照（`legacy_v7` vs `expanded_v24`）
+### 本轮目标
+- 直接回答：`2026-03-28` 这次底层状态与 `market_features` 扩容后，当前执行端到底是整体更强，还是只是“看起来更现代、但收益反而掉了”。
+- 把“怀念旧 `v255` 高收益”和“当前 live `v250` 是否合理”拆成两件事，用同一 execution stack 正式比较。
+
+### 本轮动作
+- 新增脚本：
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+- 正式输出目录：
+  - `daily_research/output/market_feature_profile_compare_20260328_formal_r1`
+- 固定比较对象：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none25_v250`
+  - `trend_up_low_vol_ml25_none20_v255`
+  - `trend_up_low_vol_controller_gap0p024192_vol0p176128_ret100p014717`
+- 固定口径继续保持：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+
+### 结果一：`expanded_v24` 不是整体升级，而是“修 base + 保住 `v250` 防守”
+- `base_global`
+  - `expanded_v24 - legacy_v7 = full_excess_sharpe +0.278`
+  - `weak_window_20250905_20260319_excess_sharpe +0.808`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.686`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `full_excess_annual_return +0.08%`
+  - `full_excess_sharpe -0.027`
+  - `recent_full_excess_sharpe +0.097`
+  - `weak_window_20250905_20260319_excess_sharpe +0.081`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.115`
+- 这说明：
+  - `24-feature` 新系统并不是把所有候选都一起抬高；
+  - 它明显修复了旧 `legacy_v7` 下几乎失效的 `base_global`；
+  - 对当前 live `v250`，它属于“全样本收益几乎持平、full Sharpe 略低，但最近窗口和弱窗口更强”。
+
+### 结果二：`expanded_v24` 明显吃掉了旧 `v255` 与动态控制器的进攻上沿
+- 用同一 execution stack 直接比较时，`expanded_v24 - legacy_v7` 的结果是：
+  - `v250`：`full_excess_sharpe = -0.027`，但 `weak_window_20250905_20260319_excess_sharpe = +0.081`
+  - `v255`：`full_excess_sharpe = -0.184`，`weak_window_20250905_20260319_excess_sharpe = -0.538`
+- 这说明：
+  - 新系统不是把所有候选都抬高；
+  - 它主要保住并强化了当前 live `v250` 的防守；
+  - 但旧 `legacy_v7` 下 `v255` 的进攻上沿，确实比当前 `expanded_v24` 更高。
+- `trend_up_low_vol_ml25_none20_v255`
+  - `full_excess_sharpe -0.184`
+  - `full_excess_annual_return -3.45%`
+  - `weak_window_20250905_20260319_excess_sharpe -0.538`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe -0.656`
+- `trend_up_low_vol_controller_gap0p024192_vol0p176128_ret100p014717`
+  - `full_excess_sharpe -0.058`
+  - `full_excess_annual_return -0.67%`
+  - `weak_window_20250905_20260319_excess_sharpe -0.110`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe -0.134`
+- 这说明：
+  - 你记忆里“以前明显更能打”的感觉，主要不是错觉；
+  - 它集中体现在旧 `legacy_v7` 口径下的 `v255` 进攻腿；
+  - 当前 `expanded_v24` 不是把整条 frontier 全面右移，而是把收益结构重排了。
+
+### 本轮结论
+1. 当前 live `expanded_v24 + v250` 仍然成立，不应该因为怀念旧 `v255` 高收益就直接整体系回滚。
+2. 但 `24-feature` 不能再被表述成“整体架构全面增强”；更准确的表述是：
+   - `base` 更强；
+   - `v250` 防守更稳；
+   - `v255` 与当前动态控制器的进攻边更弱。
+3. 当前真正的研发目标不再是争论“是否回滚到底层旧系统”，而是：
+   - 如何在保住 `v250` 防守改进的前提下，补回 `v255 / dynamic` 的进攻能力。
+
+### 当前决策
+1. live 默认继续保持：
+   - 当前代码口径
+   - `expanded_v24`
+   - `trend_up_low_vol_ml25_none25_v250`
+2. 下一步优先研究：
+   - `attack leg` 的 `market_features` 裁剪或 hybrid profile；
+   - 再用同一 formal 口径比较其是否能追回旧 `v255` 的进攻上沿，而不破坏当前 `v250` 的弱窗口防守。
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` `market_features` focused pruning 正式扫描（以 `expanded_v24` 为锚）
+### 本轮目标
+- 在已经确认 `expanded_v24 + v250` 是当前 live 默认之后，不再泛泛争论“要不要整体系回滚”。
+- 直接回答更具体的问题：
+  - `24-feature` 里有没有一组更小的 profile，能在不破坏当前 live `v250` 防守的前提下，把旧 `v255` 的进攻边拉回来？
+- 本轮 focused pruning 只看当前最有信息量的六组 profile：
+  - `legacy_v7`
+  - `continuous_quadrant_v9`
+  - `expanded_state_only_v14`
+  - `expanded_no_market_state_v15`
+  - `expanded_no_buckets_v18`
+  - `expanded_v24`
+
+### 本轮动作
+- 新增/扩展：
+  - `daily_research/baseline/ml_alpha.py`
+    - 把 `market_feature_profile` 从“新旧两档”扩成可复用的 profile registry
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+    - 新增多 profile anchored comparator 输出
+- 正式输出目录：
+  - `daily_research/output/market_feature_profile_pruning_20260328_formal_r1`
+- 固定口径继续保持：
+  - `liquid500`
+  - `next_open`
+  - `20190101 -> 20260327`
+  - `504 / 21 / 520`
+  - 本轮先 `--skip-dynamic`，先把静态 offense / live-defense frontier 跑清楚
+
+### 结果一：简单 pruning 没有产生新的单一升级赢家
+- 当前锚点仍是：
+  - `expanded_v24`
+- `trend_up_low_vol_ml25_none20_v255`
+  - `legacy_v7`: `full_excess_sharpe = 0.860`, `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `continuous_quadrant_v9`: `0.594 / 0.765`
+  - `expanded_state_only_v14`: `0.544 / 0.389`
+  - `expanded_no_market_state_v15`: `0.481 / 0.199`
+  - `expanded_no_buckets_v18`: `0.447 / -0.380`
+  - `expanded_v24`: `0.675 / 0.281`
+- `trend_up_low_vol_ml25_none25_v250`
+  - `legacy_v7`: `full_excess_sharpe = 0.786`, `weak_window_20250905_20260319_excess_sharpe = 0.992`
+  - `continuous_quadrant_v9`: `0.579 / 0.787`
+  - `expanded_state_only_v14`: `0.568 / 0.393`
+  - `expanded_no_market_state_v15`: `0.512 / 0.392`
+  - `expanded_no_buckets_v18`: `0.505 / -0.068`
+  - `expanded_v24`: `0.759 / 1.073`
+- 这说明：
+  - 没有任何一个中间态 profile 能同时拿到“比 `expanded_v24` 更强的 live `v250` 防守”和“比 `expanded_v24` 更强的 `v255` 进攻”；
+  - `expanded_no_buckets_v18` 明显是错误方向；
+  - `expanded_state_only_v14` 和 `expanded_no_market_state_v15` 也没有形成有效折中。
+
+### 结果二：`continuous_quadrant_v9` 是最接近可讨论的 pruning，但仍不够
+- 相对当前锚点 `expanded_v24`：
+  - 对 `v255`：
+    - `full_excess_sharpe = -0.082`
+    - `weak_window_20250905_20260319_excess_sharpe = +0.484`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = +0.604`
+  - 对 live `v250`：
+    - `full_excess_sharpe = -0.180`
+    - `weak_window_20250905_20260319_excess_sharpe = -0.286`
+    - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = -0.371`
+- 这说明：
+  - 它确实证明“当前 24 维特征里有一部分在压制 `v255` 的弱窗口表现”；
+  - 但它并没有把 `v255` 的 full 端追回来，反而还会明显伤到 live `v250`；
+  - 所以它只能作为结构线索，不能直接晋级。
+
+### 结果三：真正清晰的 frontier 变成了“双 profile 分工”
+- offense 最强 profile 仍是：
+  - `legacy_v7`
+- live-defense 最强 profile 仍是：
+  - `expanded_v24`
+- 而且这两边都不是简单 pruning 能统一起来的。
+- 这说明：
+  - 当前更值得做的，不再是继续扫“单一全局 profile”；
+  - 而是把问题改写成：
+    - 是否能让 offense leg 用 `legacy_v7`
+    - 同时让 defense/live leg 继续用 `expanded_v24`
+    - 再放进同一套 formal 攻守控制器里比较
+
+### 本轮结论
+1. `expanded_v24 + v250` 继续成立，不回滚。
+2. 简单 `market_features` pruning 不是当前最优研发方向。
+3. `legacy_v7` 仍然承载最强的 offense edge，但不能直接整体回滚，因为它会削弱当前 live-defense 口径。
+4. 下一步正式研发重点应收口为：
+   - 双 profile 攻守控制器
+   - 而不是继续做单一全局 profile 的裁剪比赛
+
+### 当前决策
+1. 执行端默认值不变：
+   - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+2. 后续若继续推进收益上沿，优先做：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 同口径 formal comparator
+
+## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 旧 `legacy_v7` 进攻栈 vs 当前 `expanded_v24` live 栈正式 A/B
+### 本轮目标
+- 在同一正式长窗口下，把“旧最强 offense 栈”和“当前 live 默认栈”直接做硬 A/B。
+- 不再只看“同候选跨 profile delta”，而是直接回答：
+  - 当前系统到底是升级了，还是变弱了？
+
+### 本轮产物
+- 正式输出目录：
+  - `daily_research/output/market_feature_stack_ab_20260328_formal_r1`
+- 关键文件：
+  - `profile_results.csv`
+  - `pairwise_comparison.csv`
+  - `summary.md`
+  - `stack_ab/summary.md`
+  - `stack_ab/verdict.json`
+  - `stack_ab/stack_metrics.csv`
+- 关键脚本：
+  - `daily_research/baseline/compare_market_feature_profiles.py`
+  - `daily_research/baseline/render_market_feature_stack_ab.py`
+
+### 固定口径
+- `20190101 -> 20260327`
+- `liquid500`
+- `next_open`
+- `lgbm`
+- `504 / 21 / 520`
+- 本轮只保留静态：
+  - `base_global`
+  - `trend_up_low_vol_ml25_none20_v255`
+  - `trend_up_low_vol_ml25_none25_v250`
+- 本轮显式：
+  - `--skip-dynamic`
+
+### 结果一：旧 offense 栈 full 端更强，当前 live 栈 recent / weak 更强
+- 旧 offense 栈：
+  - `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+  - `full_annual_return = 15.54%`
+  - `full_excess_annual_return = 18.22%`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- 当前 live 栈：
+  - `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+  - `full_annual_return = 13.92%`
+  - `full_excess_annual_return = 16.57%`
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- 当前 live 相对旧 offense 的直接 delta：
+  - `full_annual_return -1.62%`
+  - `full_excess_annual_return -1.65%`
+  - `full_excess_sharpe -0.100`
+  - `recent_full_excess_sharpe +0.030`
+  - `weak_window_20250905_20260319_excess_annual_return +7.28%`
+  - `weak_window_20250905_20260319_excess_sharpe +0.254`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe +0.332`
+- 这说明：
+  - 如果标尺是旧 `legacy_v7 + v255` 的 full 端进攻，当前 live 的确更弱；
+  - 但如果标尺是当前执行端最需要的 recent / weak / focus-weak 稳健性，当前 live 又是明显更强。
+
+### 结果二：差异主要来自 `expanded_v24` 对 `v255` 的伤害更大，而对 `v250` 基本是“保住 + 加固”
+- profile-only change：
+  - `v255` 上：`expanded_v24 - legacy_v7 = full_excess_sharpe -0.184`，`weak_window_20250905_20260319_excess_sharpe -0.538`
+  - `v250` 上：`expanded_v24 - legacy_v7 = full_excess_sharpe -0.027`，`weak_window_20250905_20260319_excess_sharpe +0.081`
+- 同 profile 内部切换：
+  - `legacy_v7` 下 `v250 - v255 = full_excess_sharpe -0.073`，`weak_window_20250905_20260319_excess_sharpe +0.173`
+  - `expanded_v24` 下 `v250 - v255 = full_excess_sharpe +0.084`，`weak_window_20250905_20260319_excess_sharpe +0.792`
+- 这说明：
+  - 新 profile 对 `v255` 的 full 和 weak 都伤得很重；
+  - 但对 `v250` 则接近“full 基本持平、weak 明显增强”；
+  - 当前系统内部的静态偏好，也已经从旧 `legacy_v7` 的 offense 倾向，切到了 `expanded_v24` 的 live-defense 倾向。
+
+### 本轮结论
+1. 这次升级不能再被表述成“整体都更强”。
+2. 但它也不能被表述成“白改了、全面变弱”。
+3. 更准确的结论是：
+   - 当前系统牺牲了旧 `legacy_v7 + v255` 的 full 端进攻上沿；
+   - 换来了 current live `expanded_v24 + v250` 在 `recent / weak / focus-weak` 三层更强的稳健性。
+4. 所以后续研发主线继续收口为：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 同一 formal 口径下的双 profile 攻守控制器
+
+### 当前决策
+1. 执行端默认值继续保持：
+   - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+2. 不整体系回滚到旧 `legacy_v7`。
+3. 后续若要追回收益上沿，不再继续泛泛争论“新系统是不是不如旧系统”，而是直接围绕：
+   - `legacy_v7` offense leg
+   - `expanded_v24` defense/live leg
+   - 双 profile formal comparator
+
+## 2026-03-28 历史快照复刻：`2026-03-24` 旧 `lgbm / histgb / etr` 模型族高收益审计
+### 本轮目标
+- 不再只靠研究日志判断 `887.75%` 是否可信。
+- 直接把 `2026-03-24` 的旧模型族对照，在对应历史代码快照上重跑成可审计证据。
+
+### 本轮动作
+- 先用当前代码做了两轮探针：
+  - `legacy_v7 + current compare_ml_model_families + auto-trim`
+  - `legacy_v7 + current compare_ml_model_families + no-auto-trim-history`
+- 结果都无法复刻旧日志量级，说明问题不只在 `market_features`，还有脚本实现与状态层的历史漂移。
+- 随后改用 `git worktree` 拉起历史快照：
+  - commit: `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - commit time: `2026-03-24 18:58:23 +0800`
+  - subject: `执行端12`
+- 在隔离快照里直接运行当时的原脚本：
+  - `daily_research/baseline/compare_ml_model_families.py`
+- 为了尽量贴近旧日志，再追加一轮：
+  - `--end-date 20260319`
+- 审计产物已拷回当前工作区：
+  - `daily_research/output/advanced_ml_model_family_compare_20260319_legacy_snapshot_reaudit_r2`
+  - `audit_metadata.json`
+
+### 结果一：旧高收益量级被历史快照成功复刻
+- `lgbm`
+  - `full_excess_total_return = 910.30%`
+  - `full_excess_annual_return = 77.57%`
+  - `full_excess_sharpe = 2.398`
+  - `recent_full_excess_total_return = 118.01%`
+  - `recent_full_excess_sharpe = 2.789`
+  - `latest_weak_excess_total_return = 4.96%`
+  - `latest_weak_excess_sharpe = 0.230`
+- `histgb`
+  - `full_excess_total_return = 337.24%`
+  - `full_excess_sharpe = 1.395`
+- `etr`
+  - `full_excess_total_return = 322.53%`
+  - `full_excess_sharpe = 1.691`
+
+### 结果二：它与旧日志已经足够接近，可以确认旧记录不是伪高收益
+- 旧日志记录：
+  - `lgbm full_excess_total_return ≈ 887.75%`
+  - `lgbm full_excess_sharpe ≈ 2.300`
+  - `recent_full ≈ 127.99% / 2.816`
+  - `latest_weak ≈ 9.79% / 0.475`
+- 当前历史快照复刻：
+  - `910.30% / 2.398`
+  - `118.01% / 2.789`
+  - `4.96% / 0.230`
+- 这说明：
+  - 旧日志里的高收益不是凭空写出来的假数字；
+  - 在旧系统快照里，`lgbm` 确实能跑出“全样本超额总收益接近 9x、Sharpe > 2”的量级；
+  - 当前和旧日志之间的细小差异，更像是数据更新时间、TQ 数据回补或环境细节漂移，而不是结论层面的翻案。
+
+### 本轮结论
+1. `2026-03-24` 那段旧高收益，在旧系统里是真实结果。
+2. 但它属于历史快照系统，不属于今天的 current live 系统。
+3. 所以后续表述应固定为：
+   - 旧 `lgbm` 高收益是真实历史结果；
+   - 但不能直接拿它替代今天的 current live benchmark。
+
+### 当前决策
+1. 旧 `887.75%` 不再按“存疑旧日志”处理。
+2. 未来若再遇到类似“历史高收益到底真不真”的争议，优先走：
+   - 当前代码探针
+   - 历史快照复刻
+   - 再做 current live 同口径 A/B
+
+## 2026-03-28 用户显式要求执行端切到最高收益后端
+### 本轮目标
+- 用户已明确要求“我要的就是最高收益”。
+- 不再继续把当前代码口径下的 `expanded_v24 + v250` 当作执行默认值。
+- 直接把执行端切到已经审计复刻过的旧高收益快照后端。
+
+### 本轮动作
+- 新增当前执行 wrapper 的快照后端转发器：
+  - `daily_research/execution/high_profit_backend.py`
+- 修改当前执行入口：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/run_trade_plan.py`
+- 当前 wrapper 不再直接调用当前工作区 `baseline/train_trade_model.py` 与 `baseline/generate_daily_trade_plan.py`；
+  而是转发到历史快照：
+  - commit: `e7d0f8d151c6667220f8ca5d0a6f98ab3b4b075d`
+  - commit time: `2026-03-24 18:58:23 +0800`
+  - local worktree: `H:/new_tdx64/PYPlugins/user_snapshot_codex_e7d0f8d`
+- 同时保持落盘位置不变：
+  - `daily_research/execution/models/latest_ml_model.joblib`
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `daily_research/execution/output/latest_trade_plan.txt`
+
+### 结果
+- `update_model.py` 已在旧高收益快照后端重训成功：
+  - `trained_at = 2026-03-28 22:59:12`
+  - `latest_data_date = 2026-03-27`
+  - `execution_date = 2026-03-30`
+  - `model_family = lgbm`
+  - `regime_ma_window = 50`
+  - `feature_count = 34 / 34 / 34`（`h5 / h10 / h20`）
+  - `state_ensemble_weights = {}`
+- `run_trade_plan.py` 已在同一旧快照后端生成完成：
+  - 输出目录：`daily_research/execution/output/20260327`
+  - 最新建议文件：`daily_research/execution/output/latest_trade_plan.txt`
+  - 本次结果：`今日无明确调仓动作`
+- 运行过程中虽然仍打印了 TQ `Load DLL ERROR Version:309 / Get PyGILState_* Error` 提示，但旧快照脚本最终完成了模型产物写出与计划生成。
+
+### 本轮结论
+1. 当前执行端已经不再是“当前代码口径下的 live-defense 默认值”。
+2. 当前执行端已切到“已审计复刻的旧高收益快照后端”。
+3. `expanded_v24 + v250`、`legacy_v7 + v255` 与双 profile 控制器，继续保留为当前代码研究侧的比较锚点。
+
+### 当前决策
+1. 执行端默认后端切换为：
+   - `historical_snapshot_e7d0f8d (ma50 baseline, lgbm) + liquid500 + next_open`
+2. 当前 wrapper 继续保留“写回当前 execution 目录”的方式，不直接把整个工作区代码回滚到旧提交。
+
+## 2026-03-28 执行端最高收益回测复核
+### 本轮目标
+- 直接回测当前执行端实际在跑的旧快照后端，确认它在最新数据 `2026-03-27` 下，是否仍然是当前可确认的最高收益方案。
+
+### 本轮动作
+- 运行旧快照 worktree：
+  - `H:/new_tdx64/PYPlugins/user_snapshot_codex_e7d0f8d/daily_research/baseline/compare_ml_model_families.py`
+- 使用命令：
+  - `--model-families lgbm`
+  - `--end-date 20260327`
+  - `--windows recent_full:20250307:20260327,latest_weak:20250905:20260327`
+  - `--experiment-tag advanced_ml_model_family_compare_20260328_execution_backend_livecheck`
+- 对照读取当前代码侧今天已经形成的正式结果：
+  - `daily_research/output/market_feature_stack_ab_20260328_formal_r1`
+  - `daily_research/output/advanced_ml_attack_defense_controller_20260328_formal_r1`
+  - `daily_research/output/advanced_ml_model_family_compare_20260328_legacy_v7_lgbm_noautotrim_probe`
+
+### 结果
+- 当前执行端实际后端：
+  - `execution_backend_snapshot_lgbm`
+  - `full_excess_total_return = 958.89%`
+  - `full_excess_sharpe = 2.447`
+  - `recent_full_excess_total_return = 128.49%`
+  - `latest_weak_excess_total_return = 10.01%`
+- 当前代码里今天能确认到的几条高收益对照：
+  - `legacy_v7_lgbm_noautotrim_probe`
+    - `full_excess_total_return = 151.70%`
+    - `full_excess_sharpe = 0.882`
+  - `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+    - `full_excess_total_return = 110.99%`
+    - `full_excess_sharpe = 0.860`
+  - `best_dynamic_r1`
+    - `full_excess_total_return = 103.60%`
+    - `full_excess_sharpe = 0.817`
+  - `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+    - `full_excess_total_return = 98.14%`
+    - `full_excess_sharpe = 0.759`
+
+### 本轮结论
+1. 以 `2026-03-27` 为最新数据日重新回测后，当前执行端实际运行的旧快照后端，仍然是当前可确认的最高收益方案。
+2. 它不只是高于当前 live 默认 `expanded_v24 + v250`，也明显高于当前代码侧最强静态进攻腿、动态控制器，以及 `legacy_v7` 的 no-auto-trim probe。
+3. 因此截至 `2026-03-28`，把执行端保持在 `historical_snapshot_e7d0f8d (ma50 baseline, lgbm)`，与用户“我要的就是最高收益”的目标一致。
+
+## 2026-03-29 旧快照高收益因果链钉死：`label_gap_off` 受控 ablation
+### 本轮目标
+- 不再停留在“旧快照收益很高”或“当前代码收益明显更低”的表面现象。
+- 用单开关 ablation 直接验证：
+  - 旧快照 `958.89% / 2.447`
+  - 到底是来自更强 alpha，还是来自 `next_open` 训练边界上的口径问题。
+
+### 本轮动作
+- 先做代码考古，确认：
+  - 当前与快照 `features.py` 完全一致；
+  - 当前与快照 `build_ml_target()` 也一致；
+  - 关键差异落在 `daily_research/baseline/ml_alpha.py` 的训练边界：
+    - 快照版直接 `train_end_idx = as_of_idx - 1` / `block_start - 1`
+    - 当前版新增 `_label_lookahead_bars()`，对 `next_open` 强制回退 `horizon + 1`
+- 新建隔离 worktree：
+  - `H:/new_tdx64/PYPlugins/user_ablation_labelgap_off`
+  - branch: `ablation_labelgap_off_20260328`
+- 只做一个改动：
+  - 在隔离 worktree 里把 `ml_alpha.py::_label_lookahead_bars()` 临时改成 `return 0`
+- 然后重跑与当前 probe 同口径的命令：
+  - `compare_ml_model_families.py`
+  - `--model-families lgbm`
+  - `--market-feature-profile legacy_v7`
+  - `--no-auto-trim-history`
+  - `--experiment-tag advanced_ml_model_family_compare_20260328_legacy_v7_labelgap_off_ablation`
+
+### 结果
+- 当前代码正常 probe：
+  - `advanced_ml_model_family_compare_20260328_legacy_v7_lgbm_noautotrim_probe`
+  - `full_excess_total_return = 151.70%`
+  - `full_excess_sharpe = 0.882`
+- 隔离 worktree `label_gap_off` ablation：
+  - `advanced_ml_model_family_compare_20260328_legacy_v7_labelgap_off_ablation`
+  - `full_excess_total_return = 958.89%`
+  - `full_excess_sharpe = 2.447`
+- 该 ablation 与旧快照 livecheck 的 full 指标完全对齐：
+  - `958.89% / 2.447`
+- 训练日志也同步回到旧快照边界：
+  - 第一段由当前代码的 `predict_start = 2024-02-06`
+  - 回跳为旧快照式的 `predict_start = 2024-01-30`
+
+### 本轮结论
+1. 旧快照 `958.89%` 的主因已经被单开关实验证实：
+   - 不是 `features.py` 更强；
+   - 不是 `build_ml_target()` 公式不同；
+   - 而是 `next_open` 训练边界缺少 label-safe gap，存在严重 `label leakage / look-ahead bias`。
+2. 这意味着“旧快照高收益”虽然可复刻，但它不是当前执行端可以直接继承的可信 alpha。
+3. 当前 wrapper 运行时虽仍指向旧快照后端，但研究判断必须从“最高收益主线”切换为“已识别出真实性问题的历史 artifact”。
+4. 这轮也把一个可复用方法沉淀出来：
+   - 先做 apples-to-apples 口径对齐
+   - 再用隔离 worktree 做 single-switch ablation
+- 如果单开关能精确复现旧收益，就先把旧收益视为 artifact 候选，再决定后续执行切回或桥接验证
+
+## 2026-03-29 执行端从旧快照高收益后端切回当前仓安全桥接版
+
+### 背景
+- `2026-03-29` 的代码考古与受控 ablation 已钉死：
+  - 旧快照 `958.89% / 2.447` 的主因是 `next_open` 训练边界缺少 `label-safe gap`
+  - 它属于 `label leakage / look-ahead bias` 产物，不再允许继续作为执行默认后端
+- 用户随后明确要求直接处理最现实的问题：
+  - 把当前执行端从已证伪的快照高收益后端切回来，或者至少先做一个安全桥接版本
+
+### 实际改动
+- 修改执行 wrapper：
+  - `daily_research/execution/update_model.py`
+  - `daily_research/execution/run_trade_plan.py`
+- 不再转发到历史快照 worktree，而是切回当前仓：
+  - `daily_research/baseline/train_trade_model.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+- 恢复执行默认注入：
+  - `regime_ma_window=50`
+  - `enhanced_profile=up_low_breakout_v2`
+  - `trend_up_low_vol=ml:0.25,none:0.25,v2:0.50`
+  - `stocks-file=universe/liquid500_latest.txt`
+
+### 验证
+- 先实际运行：
+  - `python daily_research/execution/update_model.py ...`
+- 新模型产物已写出：
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `trained_at = 2026-03-29 00:36:54`
+  - `latest_data_date = 2026-03-27`
+  - `model_family = lgbm`
+  - `enhanced_profile = up_low_breakout_v2`
+  - `state_ensemble_weights.trend_up_low_vol = ml:0.25 / none:0.25 / v2:0.50`
+- 随后运行：
+  - `python daily_research/execution/run_trade_plan.py ...`
+- 新计划已写出：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+  - 生成时间 `2026-03-29 00:37:40`
+  - 信号日 `2026-03-27`
+  - 执行日 `2026-03-30`
+  - 本次结果：`今日无明确调仓动作`
+
+### 本轮遇到的困难与修正
+- 一开始为了省时间，把 `update_model.py` 和 `run_trade_plan.py` 并行跑了。
+- 结果计划先消费了旧 artifact，出现了“计划生成成功，但绑定的仍是旧模型”的依赖错位。
+- 修正方式：
+  - 立刻停止把这类 producer-consumer 步骤当成可并行任务；
+  - 在训练完成后顺序重跑一次 `run_trade_plan.py`；
+  - 重新确认 `latest_trade_plan.txt` 里的模型训练时间已经更新到 `2026-03-29 00:36:53`
+
+### 结论
+1. 当前执行端默认后端已不再指向旧快照高收益 artifact，而是切回当前仓无泄漏的安全桥接口径。
+2. 研究侧仍保留：
+   - `expanded_v24 + v250` 作为当前代码 live-defense 锚点
+   - `legacy_v7 + v255` 作为 offense 锚点
+   但它们不再与执行 wrapper 的默认后端混写。
+3. 后续若要把执行端从“安全桥接版”继续升级到更贴近当前研究 live 默认值，必须先补做同口径桥接验证，而不是再次直接切到一个高收益表象更强的后端。
+## 2026-03-29 Same-Protocol Bridge Validation: execution `v250@260` vs live-anchor `v250@520`
+### Objective
+- Decide whether the current execution default should stay on the 260-tree safe bridge or be upgraded to the current-code live anchor.
+
+### Bridge evidence
+- Reused the formal output directory:
+  - `daily_research/output/advanced_ml_retrain_tree_impact_20260327_trainwindow_formal_r2`
+- Locked the protocol to the same stack:
+  - `expanded_v24 + trend_up_low_vol_ml25_none25_v250`
+  - `liquid500`
+  - `next_open`
+  - `504 / 21`
+  - weak window `20250905 -> 20260319`
+- Only changed one knob:
+  - `lgbm_n_estimators = 260`
+  - `lgbm_n_estimators = 520`
+
+### Key bridge result
+- `v250 @ 504 / 21 / 260`
+  - `full_excess_total_return = 61.81%`
+  - `full_excess_sharpe = 0.549`
+  - `recent_full_excess_total_return = 23.09%`
+  - `recent_full_excess_sharpe = 1.039`
+  - `weak_window_20250905_20260319_excess_total_return = 6.86%`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.692`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.547`
+  - `full_avg_turnover = 0.732`
+- `v250 @ 504 / 21 / 520`
+  - `full_excess_total_return = 65.96%`
+  - `full_excess_sharpe = 0.663`
+  - `recent_full_excess_total_return = 19.93%`
+  - `recent_full_excess_sharpe = 0.885`
+  - `weak_window_20250905_20260319_excess_total_return = 11.38%`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.154`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.139`
+  - `full_avg_turnover = 0.725`
+
+### Engineering obstacle and fix
+- During implementation, found that the execution path could not actually express the winning knob:
+  - `daily_research/execution/entrypoint_utils.py` had no `--lgbm-n-estimators` injection
+  - `daily_research/baseline/train_trade_model.py` and `daily_research/baseline/generate_daily_trade_plan.py` also lacked this CLI argument
+- Fixed by:
+  - adding `--lgbm-n-estimators`
+  - wiring it into `MLAplhaConfig`
+  - making the execution wrapper inject `520`
+  - exposing `LGBM Trees: 520` in `latest_trade_plan.txt`
+- Found one more audit mismatch after the first retrain:
+  - artifact internal `ml_config` already showed `520`
+  - outer `latest_ml_model.json` initially did not write `lgbm_n_estimators`
+- Patched the meta writer and reran `update_model.py` so the external JSON and the internal artifact now agree.
+
+### Live verification
+- Retrained with:
+  - `python daily_research/execution/update_model.py --data-source tq --start-date 20210101 --benchmark 000300.SH --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --ml-target-horizons 5,10,20 --ml-horizon-weights 5:0.2,10:0.3,20:0.5 --ml-train-window-days 504`
+- Final live model artifact:
+  - `daily_research/execution/models/latest_ml_model.json`
+  - `trained_at = 2026-03-29 09:59:12`
+  - `model_family = lgbm`
+  - `lgbm_n_estimators = 520`
+  - `enhanced_profile = up_low_breakout_v2`
+  - `state_ensemble_weights.trend_up_low_vol = ml:0.25 / none:0.25 / v2:0.50`
+- Rebuilt the plan after training finished:
+  - `python daily_research/execution/run_trade_plan.py --data-source tq --start-date 20210101 --benchmark 000300.SH --holding-count 5 --rebalance-freq 1d --regime-ma-window 50 --regime-max-annual-vol 0.32 --regime-quadrants trend_up_low_vol,trend_up_high_vol --max-style-weight 0.50`
+- Final plan artifact:
+  - `daily_research/execution/output/latest_trade_plan.txt`
+  - `generated_at = 2026-03-29 09:59:28`
+  - text now includes `LGBM Trees: 520`
+  - result remains `今日无明确调仓动作`
+
+### Conclusion
+1. The bridge validation is strong enough to support upgrading the execution default from `v250 @ 504 / 21 / 260` to `v250 @ 504 / 21 / 520`.
+2. This is a current-code upgrade, not a return to the invalid old snapshot backend.
+3. Future execution-path upgrades must keep the same validation discipline:
+   - same protocol first
+   - then CLI / wrapper expressibility
+   - then artifact + meta + downstream-plan triple verification
+## 2026-03-29 Gemini standard mode rollback to background resume, plus brain repair
+### Objective
+- User judged that the previous "frontend persistent collaboration mode" did not actually save time, because Codex later still called Gemini through a separate background CLI process.
+- User asked for two things:
+  - switch Gemini back to background mode as the standard way
+  - repair and improve the brain so it no longer insists on the outdated frontend-first workflow
+
+### What changed
+- Patched `daily_research/tools/gemini_frontend.ps1`:
+  - added `default_mode = background_resume`
+  - `ask` and `closeout` now work without requiring a running frontend window
+  - `status` now reports the default mode explicitly
+  - frontend `open / close / status` remains available, but only as optional human interactive mode
+- Repaired current-state brain docs so they match the real execution chain and Gemini workflow:
+  - `brain/environment_model.md`
+  - `brain/procedural_memory.md`
+  - `daily_research/brain/environment_model.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `brain/brain_manifest.json`
+  - `daily_research/brain/brain_manifest.json`
+
+### Verification
+- `daily_research/tools/gemini_frontend.cmd status` returned:
+  - `default_mode = background_resume`
+  - `running = false`
+- `daily_research/tools/gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_BACKEND_OK"` returned:
+  - `GEMINI_BACKEND_OK`
+- `python daily_research/tools/doc_guard.py check` passed after all brain edits
+
+### New pitfall discovered
+- Running Gemini closeout through background `--resume latest` can still drag stale historical context into the reply.
+- During this turn, Gemini closeout incorrectly mentioned:
+  - `v24 feature degradation`
+  - `V24-Slim`
+  - `execution via snapshot bridge`
+  even though the current workspace had already moved to the current-code `lgbm520` live anchor.
+
+### Conclusion
+1. The standard Codex-to-Gemini path is now background `ask / closeout / sessions`; frontend is optional only.
+2. Closing a visible frontend window is no longer treated as "ending Gemini collaboration", because background `--resume` remains usable by design.
+3. If background `latest` brings back stale context, Gemini output must be treated as a second opinion rather than a source of truth; workspace files, artifacts, and backtest outputs stay authoritative.
+## 2026-03-29 Cross-profile 攻守控制器正式扫描：`legacy_v7` offense vs `expanded_v24` defense
+### Objective
+- Keep execution default on the current-code `lgbm520` live anchor.
+- Formally test whether a cross-profile attack/defense controller can raise annual return above the current clean static offense frontier while retaining the weak-window/focus-weak defense edge.
+- If not, stop lingering in the current `v250 / v255 / controller` parameter space and pivot R&D to a new opportunity set.
+
+### New tool
+- Added:
+  - `daily_research/baseline/scan_cross_profile_attack_defense_controller.py`
+- Purpose:
+  - use one market-feature profile for offense scoring
+  - use another market-feature profile for defense/live scoring
+  - keep the same current-code protocol:
+    - `liquid500`
+    - `next_open`
+    - `504 / 21 / 520`
+    - `holding_count = 5`
+    - `rebalance_freq = 1d`
+
+### Formal run
+- Experiment tag:
+  - `advanced_ml_cross_profile_attack_defense_20260329_formal_r1`
+- Output directory:
+  - `daily_research/output/advanced_ml_cross_profile_attack_defense_20260329_formal_r1`
+- Focus state:
+  - `trend_up_low_vol`
+- Static controls:
+  - defense: `expanded_v24 | trend_up_low_vol_ml25_none25_v250`
+  - offense: `legacy_v7 | trend_up_low_vol_ml25_none20_v255`
+
+### Key result
+- Static defense:
+  - `full_annual_return = 13.92%`
+  - `full_excess_sharpe = 0.759`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.073`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.083`
+- Static offense:
+  - `full_annual_return = 15.54%`
+  - `full_excess_sharpe = 0.860`
+  - `weak_window_20250905_20260319_excess_sharpe = 0.819`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 0.751`
+- Best cross-profile dynamic by `full_excess_sharpe` and balance:
+  - `trend_up_low_vol_cross_legacy_v7_off_expanded_v24_def_controller_gap0p024192_vol0p176128_ret100p014717_offml25_none22_v253_defml25_none23p5_v251p5`
+  - `full_annual_return = 15.49%`
+  - `full_excess_annual_return = 18.17%`
+  - `full_excess_sharpe = 0.836`
+  - `weak_window_20250905_20260319_excess_sharpe = 1.359`
+  - `trend_up_low_vol_weak_window_20250905_20260319_excess_sharpe = 1.458`
+  - `offense_within_focus = 24.90%`
+
+### Direct answer
+- The controller is real:
+  - it materially strengthens weak-window and focus-weak defense
+  - it improves the balance between offense and defense compared with either static leg alone
+- But it still fails the user's upgrade gate:
+  - `15.49%` annual return is still below the clean static offense frontier `15.54%`
+  - no dynamic candidate dominates both static controls on full and weak-window metrics at the same time
+
+### Conclusion
+1. Execution default stays unchanged on the current-code `lgbm520 v250` live anchor.
+2. Cross-profile controller work is now a finished frontier-mapping step, not the main active frontier.
+3. By the user's explicit rule, R&D should now pivot away from the current `v250 / v255 / controller` parameter space and move to a new opportunity set / new alpha family.
+## 2026-03-29 `deep_alpha` 新 alpha 家族正式起跑：最小充分矩阵 `backbone` 阶段完成
+### Objective
+- Stop continuing the `v250 / v255 / controller` frontier.
+- Move the new-alpha search onto the already-defined formal entry:
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+- Complete the first real formal stage:
+  - `backbone`
+
+### Formal run
+- Command:
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase backbone --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Output root:
+  - `daily_research/output/deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Windows:
+  1. `20230214 -> 20240227`
+  2. `20240228 -> 20250313`
+  3. `20250314 -> 20260327`
+
+### Practical obstacle and fix
+- This stage was long enough that the shell wait timed out before the full stage finished.
+- The correct recovery method was:
+  - rerun the same `root-tag`
+  - let the runner `skip-existing`
+  - fill the remaining missing pretrain / finetune windows
+  - wait for `stage_backbone_selected.json` instead of treating partial window metrics as a finished stage
+
+### Leaderboard
+- `enc-patch__pre-nopre__score-manual__rank-plain`
+  - `mean_excess_sharpe = 0.744`
+  - `min_excess_sharpe = -0.529`
+  - `mean_excess_total_return = 60.76%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 0`
+- `enc-gru__pre-nopre__score-manual__rank-plain`
+  - `mean_excess_sharpe = 0.626`
+  - `min_excess_sharpe = 0.014`
+  - `mean_excess_total_return = 45.78%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 0`
+- `enc-patch__pre-maskedpre__score-manual__rank-plain`
+  - `mean_excess_sharpe = -0.224`
+  - `min_excess_sharpe = -1.173`
+  - `mean_excess_total_return = -13.03%`
+  - `finetune_undertrained_count = 0`
+  - `pretrain_undertrained_count = 1`
+
+### Conclusion
+1. The first formal winner in the new-alpha family is:
+   - `patch_transformer + no pretrain + manual + plain`
+2. `masked pretrain` does not currently deserve to stay on the default backbone route:
+   - it is not the winner
+   - it carries one undertrained pretrain window
+   - its three-window average is materially worse
+3. The next sensible step is now narrow and concrete:
+   - continue to `score_head`
+   - do not open more backbone branches first
+
+## 2026-03-29 Gemini hallucination escalation rule was productized
+
+### Trigger
+- The existing Gemini background flow was too sticky to `latest` session memory.
+- When stale context leaked back in, Codex needed an explicit, repeatable escalation path instead of ad hoc prompt tightening.
+
+### Tooling changes
+- Patched `daily_research/tools/gemini_frontend.ps1` to support:
+  - `-FreshSession`
+  - `-Model`
+  - `-Escalate`
+- `-Escalate` was defined as:
+  - force fresh session
+  - if no explicit model is provided, default to `gemini-3.1-pro-preview`
+- Frontend window mode can now be reopened as an isolation path with:
+  - `daily_research\tools\gemini_frontend.cmd open -ForceNew -Escalate`
+
+### Validation
+- Verified the new status surface:
+  - `default_mode = background_resume`
+  - `escalation_mode = fresh_session_plus_model`
+  - `default_escalation_model = gemini-3.1-pro-preview`
+- Verified fresh-session background call:
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_FRESH_OK" -FreshSession`
+  - returned `GEMINI_FRESH_OK`
+- Verified pro escalation path:
+  - `daily_research\tools\gemini_frontend.cmd ask -Prompt "Reply with exactly: GEMINI_ESCALATE_OK" -Escalate`
+  - returned `GEMINI_ESCALATE_OK`
+- Tried `closeout` twice after the upgrade:
+  - first with `-Escalate`
+  - then with a shorter summary and `-FreshSession`
+  - both timed out without a trustworthy return, so the fallback rule was recorded: retry once with a shorter summary, then report failure honestly
+
+### Operational rule learned
+- Default collaborative path remains background `--resume`.
+- First obvious stale-memory / hallucination event:
+  - upgrade to `-FreshSession`
+- Repeated drift, critical review, or high-risk closeout:
+  - upgrade to `-Escalate`
+- If context must be visually isolated from the old thread:
+  - open a new frontend window with `open -ForceNew -Escalate`
+- Gemini remains a second-opinion tool; final truth still comes from the current workspace artifacts and commands.
+
+## 2026-03-29 `deep_alpha` 最小矩阵继续推进：`score_head` 与 `ranking` 都已正式收口
+
+### Objective
+- Continue the same formal root:
+  - `deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Finish the next two minimal-matrix stages:
+  - `score_head`
+  - `ranking`
+
+### Formal runs
+- Commands:
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase score_head --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+  - `C:\Users\ASUS\miniconda3\envs\quant\python.exe daily_research\deep_alpha\run_minimal_matrix.py --phase ranking --root-tag deep_alpha_minimal_matrix_20260329_backbone_r1`
+- Both stages initially hit shell timeout before the outer wrapper returned.
+- The correct handling remained the same as backbone:
+  - do not open a new tag
+  - inspect whether child processes are still running
+  - if the stage stops before writing `stage_<name>_selected.json`, rerun the same `root-tag`
+  - let `skip-existing` fill only the missing windows and write the final summary
+
+### Score-head result
+- `stage_score_head_selected.json` landed successfully.
+- Leaderboard:
+  - `enc-patch__pre-nopre__score-manual__rank-plain`: `mean_excess_sharpe = 0.744`, `mean_excess_total_return = 60.76%`
+  - `enc-patch__pre-nopre__score-lgbm__rank-plain`: `0.441`, `14.72%`
+  - `enc-patch__pre-nopre__score-ridge__rank-plain`: `-0.063`, `1.50%`
+- Conclusion:
+  - changing the score head did not improve the frontier
+  - manual stayed the winner
+
+### Ranking result
+- `stage_ranking_selected.json` landed successfully.
+- Leaderboard:
+  - `enc-patch__pre-nopre__score-manual__rank-plain`: `mean_excess_sharpe = 0.744`, `mean_excess_total_return = 60.76%`
+  - `enc-patch__pre-nopre__score-manual__rank-ranked`: `0.638`, `28.26%`
+- Conclusion:
+  - adding ranking/listwise loss did not improve the frontier
+  - plain stayed the winner
+
+### Time bottleneck learned
+- The main time bottleneck in this round was not `run_minimal_matrix.py` orchestration.
+- The heavy part was each walk-forward window inside `run_deep_alpha_research.py`, especially:
+  - `[4/8] Building sequence features and targets`
+  - `[6/8] Training deep alpha model`
+- `score_head` was noticeably heavier than `ranking`, and the slowest new branch was `score-lgbm`.
+
+### Reusable rule
+- Future `deep_alpha` research must treat per-window cache reuse as a first-class design constraint.
+- If a new branch does not change windows, pool, lookback, targets, or encoder/pretrain itself, prefer reusing:
+  - feature cache
+  - sequence corpus cache
+  - already-landed encoder / pretrain artifacts
+- Do not reopen full slow chains by default for small `score_head / ranking` tweaks that already look frontier-weak.
+
+## 2026-03-29 Gemini CLI session hygiene was repaired into a usable default workflow
+
+### Objective
+- Fix the real collaboration pain points in `daily_research/tools/gemini_frontend.ps1` so Gemini CLI can be used efficiently, repeatedly, and with less session drift.
+- Target issues:
+  - `closeout` frequently timed out
+  - background `latest` could drift into stale or utility-heavy sessions
+  - there was no stable way to inspect or pin a good analysis thread
+
+### What changed
+- Patched `daily_research/tools/gemini_frontend.ps1` to add or stabilize:
+  - `doctor`
+  - `pin`
+  - `unpin`
+  - remembered `analysis_session`
+  - smarter resume routing for `ask`
+- `ask` now prefers:
+  - pinned session
+  - remembered analysis session
+  - latest non-utility analysis session
+  - literal `latest` only as the last fallback
+- `pin -Session latest` now means “pin the latest analysis session”, not blindly pin the latest utility/closeout thread.
+- Added explicit escape hatch:
+  - `-Session raw_latest`
+- Reworked `closeout`:
+  - default fresh session
+  - default model `gemini-3.1-pro-preview`
+  - short ASCII-only response contract:
+    - `Done: ...`
+    - `Next: ...`
+    - `Risk: ...`
+- Added UTF-8 output handling inside the background process wrapper to reduce Chinese garbling.
+
+### Validation
+- `daily_research\tools\gemini_frontend.cmd ask -Prompt "请只回复：ASK_PATH_OK" -FreshSession`
+  - returned `ASK_PATH_OK`
+- `daily_research\tools\gemini_frontend.cmd ask -FreshSession -Prompt "In one short English sentence, summarize why session hygiene matters for a CLI assistant."`
+  - returned a valid answer
+  - then wrote `analysis_session = 47` into `daily_research/cache/gemini_frontend/preferences.json`
+- `daily_research\tools\gemini_frontend.cmd ask -Prompt "Name the topic we just discussed in one word."`
+  - returned `Hygiene.`
+  - showing the default non-fresh path continued the remembered analysis session instead of a polluted `latest`
+- `daily_research\tools\gemini_frontend.cmd closeout -WorkSummary "..." -NextStep "..."`
+  - returned valid structured output:
+    - `Done: ...`
+    - `Next: ...`
+    - `Risk: ...`
+- A later end-of-turn validation with a longer summary still hit:
+  - `Gemini closeout retry timed out.`
+  - so the truthful state is "much more usable than before, but not yet perfectly deterministic"
+- `doctor` now reports the recommended analysis session separately from utility/closeout-heavy recent threads.
+- `pin -Session latest` pinned session `47`, not the newer closeout thread.
+- `unpin` cleared the pin while preserving `analysis_session`.
+
+### Bugs found and fixed during repair
+- `Start-Process` argument passing was unreliable for complex prompts; switched the background runner to a `Start-Job` wrapper with array-style argument expansion.
+- A PowerShell collection-enumeration bug in `Update-Preferences` caused:
+  - `Collection was modified; enumeration operation may not execute.`
+  - fixed by iterating over a snapshot of keys.
+- Old long closeout prompts plus fresh-session overhead were the main reason the previous `closeout` path kept timing out.
+
+### Operational rule learned
+- Treat analysis-thread continuity and closeout hygiene as two separate lanes.
+- Use `doctor` when session quality is unclear.
+- Let `ask` reuse the remembered analysis lane by default.
+- Use `pin` only when a specific thread must stay fixed across several rounds.
+- Keep Gemini as second opinion only; current workspace artifacts remain authoritative.
+
+## 2026-03-29 Gemini 协作模块被整体暂停
+
+### Trigger
+- After the session-hygiene and closeout experiments, the user decided the entire Gemini collaboration module should be paused.
+- The new requirement was:
+  - stop the whole module for now
+  - keep only the minimal memory that this attempt happened
+
+### Action taken
+- Replaced `daily_research/tools/gemini_frontend.ps1` with a suspended placeholder.
+- The placeholder now:
+  - keeps `status`
+  - keeps `close` for local cache cleanup
+  - blocks `open / sessions / ask / closeout / doctor / pin / unpin`
+- Cleared the active Gemini frontend cache expectation from current brain docs.
+- Removed Gemini from default workflow and from final-answer closeout requirements.
+
+### Active conclusion
+- Gemini is not part of the default collaboration path right now.
+- The only active memory that should remain is:
+  - we tried to productize Gemini-assisted collaboration
+  - the automation layer was more fragile than desired
+  - the module is now temporarily suspended
+
+## 2026-03-29 Deep Alpha 新机会集 formal：rolling liquid800 + ranked / concentration 复验
+
+### 背景
+- `deep_alpha_minimal_matrix_20260329_backbone_r1` 已经完成 `backbone / score_head / ranking`，当前 rolling `liquid500` winner 固定为：
+  - `enc-patch__pre-nopre__score-manual__rank-plain`
+- 同日又补完了 `relation` 阶段：
+  - `enc-patch__pre-nopre__score-manual__rank-plain__norel`
+  - `mean_excess_sharpe = 0.744`
+  - 明显高于 `__rel` 的 `0.413`
+- 因此 `relation_layer` 在当前 `liquid500` 机会集下正式降级。
+
+### 这轮目标
+- 不再继续在 rolling `liquid500` 里磨已经输掉的小旋钮；
+- 直接把同一 winner 推到真正的新机会集上，检查能否把 clean annual frontier 抬出新台阶；
+- 然后只在这个更强机会集里，有限度地重开最有依据的小旋钮与收益翻译候选。
+
+### 产物
+- 机会集 formal 对照：
+  - `daily_research/output/deep_alpha_opportunity_liquid800_20260329_formal_r1`
+- 关键文件：
+  - `liquid800_vs_liquid500_window_compare.csv`
+  - `liquid800_vs_liquid500_summary.csv`
+  - `summary.md`
+  - `candidate_window_compare.csv`
+  - `candidate_summary.csv`
+  - `candidate_summary.md`
+
+### 结果一：rolling liquid800 明确强于当前 liquid500 frontier
+- `liquid500_plain`
+  - `mean_annual_return = 27.38%`
+  - `mean_excess_annual_return = 16.16%`
+  - `mean_excess_sharpe = 0.744`
+  - `min_excess_sharpe = -0.529`
+- `liquid800_plain`
+  - `mean_annual_return = 38.38%`
+  - `mean_excess_annual_return = 27.32%`
+  - `mean_excess_sharpe = 0.870`
+  - `min_excess_sharpe = 0.634`
+- 这说明：
+  - rolling `liquid800` 已经不是“略有希望”的旁支，而是当前 `deep_alpha` 更强的新机会集；
+  - 它不仅抬高了均值年化和均值超额 Sharpe，还把最差窗口从负 Sharpe 拉回到正 Sharpe。
+
+### 结果二：`ranked` 在新机会集里重新变成可研究分支
+- 在 rolling `liquid500` 最小矩阵里，`ranked` 曾输给 `plain`；
+- 但放到 rolling `liquid800` 后，`liquid800_ranked` 变成了新的激进前沿：
+  - `mean_annual_return = 38.29%`
+  - `mean_excess_annual_return = 25.94%`
+  - `mean_excess_sharpe = 1.003`
+  - `min_excess_sharpe = -0.367`
+  - `mean_excess_max_drawdown = -0.251`
+- 形态很清楚：
+  - 均值 Sharpe 与回撤优于 `liquid800_plain`
+  - 但重新引入了负窗口
+- 因而当前判断是：
+  - `liquid800_plain` = 稳定前沿
+  - `liquid800_ranked` = 激进前沿
+
+### 结果三：更激进的集中持仓翻译方式没有成立
+- 在 `liquid800_ranked` 上又做了：
+  - `holding_count = 3`
+  - `max_weight = 0.40`
+- 结果 `liquid800_ranked_hold3_w40`：
+  - `mean_annual_return = 32.58%`
+  - `mean_excess_annual_return = 20.49%`
+  - `mean_excess_sharpe = 0.685`
+  - `min_excess_sharpe = -0.777`
+- 这说明：
+  - 它虽然继续放大了中间窗口；
+  - 但整体前沿、最差窗口和鲁棒性都明显退化；
+  - “直接把当前候选压缩成 3 持仓 + 0.40 上限”不是当前通往 `100%+` 年化的正确下一跳。
+
+### 这轮学到的方法
+1. 机会集变化后，可以有限度地重开此前输掉的小旋钮，但必须先证明新机会集本身更强。
+2. 对当前项目而言，rolling `liquid800` 已经满足这个前提，所以 `ranked` 的重开是合理的。
+3. 收益翻译方式要在更强机会集上测，但不能因为单窗更猛就继续推；一旦 `3` 窗里破坏了 `2` 窗，就直接降级。
+
+### 当前结论
+1. `deep_alpha` 当前真正值得继续投入的前沿，已经从 `liquid500_plain` 切换到 rolling `liquid800`。
+2. 当前需要维护两条 `deep_alpha` 候选：
+   - 稳定前沿：`liquid800_plain`
+   - 激进前沿：`liquid800_ranked`
+3. `relation_layer` 与 `ranked_hold3_w40` 都已正式失败，不再作为这一轮第一优先级。
+4. 这轮虽然把 clean annual frontier 从 `27%` 级抬到了 `38%` 级，但离用户目标的 `100%+` 年化仍有明显距离；后续还需要新的表示能力或更聪明的状态/窗口控制，而不是继续极端集中持仓。
+
+## 2026-03-30 Deep Alpha strict walk-forward 纠偏：liquid800 前沿重算
+
+### 背景
+- 在继续围绕 rolling `liquid800` 做 `plain / ranked` 控制器与新表示分支之前，先回查了 `run_deep_alpha_research.py` 的窗口边界。
+- 结果发现旧 runner 的 `valid_days` 只约束了 `valid_start`，却没有真正构造 `valid_end`；验证数据集、样本切片和 `ResearchConfig.end_date` 都默认滑到了 `close.index.max()`。
+- 这意味着 `2026-03-29` 的 `liquid800` “三窗口 formal” 其实是三个嵌套长 holdout，而不是严格等长 walk-forward。
+
+### 修复
+- 修正了 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - 显式按交易日推导 `valid_end`
+  - 同时截断 `sample_dates`
+  - 截断 `valid_dates`
+  - 截断 `valid_ds`
+  - 截断 `ResearchConfig.end_date`
+  - 并把 `valid_end` 写入 `metrics.json` 与 corpus cache key
+- 修复后重新用 strict 口径重跑 `rolling liquid800` 主候选。
+
+### 产物
+- strict root：
+  - `daily_research/output/deep_alpha_opportunity_liquid800_20260330_strictwf_r1`
+- 汇总文件：
+  - `strict_candidate_window_compare.csv`
+  - `strict_candidate_summary.csv`
+  - `strict_candidate_summary.md`
+- 控制器诊断：
+  - `plain_ranked_controller_analysis/controller_metrics.csv`
+  - `plain_ranked_controller_analysis/state_advantage_summary.csv`
+  - `plain_ranked_controller_analysis/walkforward_state_preferences.csv`
+  - `plain_ranked_controller_analysis/summary.md`
+
+### 结果一：修正后真正的 strict frontier 是 `liquid800_plain`
+- `plain`
+  - `mean_annual_return = 51.02%`
+  - `mean_excess_annual_return = 46.73%`
+  - `mean_excess_sharpe = 1.621`
+  - `min_excess_sharpe = 1.124`
+- `ranked`
+  - `mean_annual_return = 35.50%`
+  - `mean_excess_annual_return = 29.31%`
+  - `mean_excess_sharpe = 1.173`
+  - `min_excess_sharpe = 0.184`
+- 这次修正直接推翻了前一日“`plain` 稳定前沿 + `ranked` 激进前沿”的说法：
+  - `ranked` 依然是正收益分支；
+  - 但它不再和 `plain` 并列为主前沿；
+  - 修正后是 `plain` 明显更强，而且三窗都保持正的 excess Sharpe。
+
+### 结果二：状态 / 窗口控制器没有真正超越 `plain`
+- `plain` stitched diagnostic：
+  - `annual_return = 47.56%`
+  - `excess_annual_return = 45.44%`
+  - `excess_sharpe = 1.508`
+- `walkforward_state_controller`
+  - `annual_return = 44.49%`
+  - `excess_annual_return = 42.41%`
+  - `excess_sharpe = 1.402`
+- `oracle_state_controller`
+  - `annual_return = 49.78%`
+  - `excess_annual_return = 47.63%`
+  - `excess_sharpe = 1.586`
+- `window_oracle`
+  - `annual_return = 48.65%`
+  - `excess_annual_return = 46.52%`
+  - `excess_sharpe = 1.606`
+- 结论很清楚：
+  - 真实可用的 walk-forward state/window controller 没有跑赢 `plain`
+  - 只有 ex-post oracle stitched-return 略高于 `plain`
+  - 所以 `plain/ranked` 控制线目前更适合作为诊断工具，而不是下一条正式主线
+
+### 结果三：新的表示能力分支这轮也没有抬高 strict frontier
+- `relation`
+  - `mean_annual_return = 11.37%`
+  - `mean_excess_annual_return = 4.73%`
+  - `mean_excess_sharpe = 0.061`
+  - `min_excess_sharpe = -1.520`
+- `masked_pretrain`
+  - `mean_annual_return = 17.67%`
+  - `mean_excess_annual_return = 12.85%`
+  - `mean_excess_sharpe = 0.477`
+  - `min_excess_sharpe = -0.346`
+- 这说明：
+  - `relation_layer` 在 strict `liquid800` 下是明确失败
+  - `masked_pretrain` 虽然最新窗口 probe 看起来有年化弹性，但 full strict formal 仍然不成立
+
+### 当前结论
+1. `2026-03-29` 的 `liquid800` ranked/controller 叙事已被 strict-window bug 明确污染，不能继续当主事实源。
+2. 修正后的 `deep_alpha` 当前 clean frontier 是 strict rolling `liquid800_plain`，大致位于 `51%` 年化量级。
+3. `ranked`、`controller`、`relation_layer`、`masked_pretrain` 与 `hold3_w40` 都没有把 strict frontier 再抬高。
+4. 下一步不应继续在 `plain/ranked/controller` 一圈里细磨，而应把研发资源转去真正新的表示能力或新的收益翻译方式。
+
+## 2026-03-30 Deep Alpha adaptive task weights 复活：先修 dead flag，再做 strict formal
+
+### 背景
+- 在 strict `liquid800_plain` 成为当前主前沿后，尝试重开一个旧烟测里曾有信号、但尚未在 strict `liquid800` 下正式验证的小旋钮：
+  - `manual score + adaptive_task_weights`
+- 首先只在最新窗口 `2025-03-14 -> 2026-03-27` 做 single-switch probe。
+
+### 第一轮异常
+- 第一次 probe 的 `metrics.json` 明确写出了：
+  - `adaptive_task_weights = true`
+  - 非空的 `score_head_task_weights`
+- 但 `latest_scores.csv`、`actions.csv` 与 `holdout_backtest` 却和基线逐项完全一致。
+- 这说明问题不是“adaptive 无效”，而是更像执行链里的 dead flag。
+
+### 代码定位与修复
+- 定位到 `daily_research/deep_alpha/run_deep_alpha_research.py`：
+  - `fit_score_head(..., method='manual', adaptive_task_weights=true)` 确实算出了 `task_weights`
+  - 但后续 manual scoring 仍直接调用 `_build_score_frame(...)`
+  - 使用的仍是固定 `cfg.score_horizon_weights`
+  - 根本没有消费 `score_head_artifact.task_weights`
+- 修复方式：
+  - 新增 `_resolve_manual_score_config(...)`
+  - 对 manual 路径把 `score_head_artifact.task_weights` 映射成真正生效的 `applied_score_horizon_weights`
+  - 同时把 `applied_score_horizon_weights / applied_score_downside_penalty` 写进 `metrics.json` 方便审计
+
+### 修复后最新窗口 probe
+- 输出：
+  - `daily_research/output/deep_alpha_liquid800_plain_adaptivetask_probe_20260330_latest`
+- 修复后最新窗口从基线：
+  - `annual_return = 38.98%`
+  - `excess_annual_return = 26.00%`
+  - `excess_sharpe = 1.308`
+- 抬到：
+  - `annual_return = 48.41%`
+  - `excess_annual_return = 34.55%`
+  - `excess_sharpe = 1.825`
+- 这说明 adaptive task weights 在 strict `liquid800` 最新窗口里确实有实质收益翻译价值；之前那次“完全没变化”是死开关，不是策略无效。
+
+### strict formal 三窗补跑
+- 第一窗 `2023-02-14 -> 2024-02-27`
+  - `adaptive = -10.43% / 8.13% / 0.219`
+  - `base = 18.66% / 43.26% / 1.124`
+- 第二窗 `2024-02-28 -> 2025-03-13`
+  - `adaptive = 96.45% / 71.86% / 2.481`
+  - `base = 95.41% / 70.94% / 2.430`
+- 第三窗 `2025-03-14 -> 2026-03-27`
+  - `adaptive = 48.41% / 34.55% / 1.825`
+  - `base = 38.98% / 26.00% / 1.308`
+
+### 三窗汇总
+- `adaptive`
+  - `mean_annual_return = 44.81%`
+  - `mean_excess_annual_return = 38.18%`
+  - `mean_excess_sharpe = 1.508`
+  - `min_excess_sharpe = 0.219`
+- `base`
+  - `mean_annual_return = 51.02%`
+  - `mean_excess_annual_return = 46.73%`
+  - `mean_excess_sharpe = 1.621`
+  - `min_excess_sharpe = 1.124`
+
+### 当前结论
+1. `manual + adaptive_task_weights` 之前确实存在 dead flag；现在代码路径已经修通。
+2. 修通后，这个分支在最新窗口有明显收益提升，说明“近期自适应任务权重”不是假信号。
+3. 但 pure adaptive 版 formal 三窗总体仍输给当前 strict `liquid800_plain` 基线，且第一窗退化非常明显。
+4. 因此这条线目前应视为“局部有效、但还不够稳”的新收益翻译候选；下一步如果继续追，方向应是更平滑的 adaptive 版本，而不是直接把 pure adaptive 升成新主前沿。
+## 2026-04-02 默认执行切换为 production full-fit
+
+### 背景
+- 用户确认新的正式制度：
+  - 研究阶段保留最近一年 `formal holdout`
+  - 日常执行不继续使用一年前冻结模型
+  - winner 确认后，要在上线前用最新可标注数据重训一次 production model
+
+### 发现的问题
+- 默认候选虽然已经切到 `regoff_k2_10d_ensemble_native_anchor`，但日常计划仍直接读取：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+- 该 formal run 的训练截止日是：
+  - `2025-03-17`
+- 对 `2026-04-02` 的日常执行来说，这已经偏旧。
+
+### 本轮修复
+- 新增 `daily_research/execution/update_default_candidate_production.py`
+- 该脚本现在会：
+  - 读取当前 formal winner 配置
+  - 自动计算“最新完成交易日”与“最新可标注训练日”
+  - 用全部可标注数据做 production full-fit 重训
+  - 把稳定执行产物同步到：
+    - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+- 同时把默认候选 profile 拆成两层：
+  - backtest / research 继续指向 formal run
+  - trade_plan / 日常默认执行改指向 production root
+
+### 关键边界
+- 第一次 production 重训尝试失败，原因不是模型不能训，而是：
+  - 直接把 `2026-04-01` 当成训练截止日会导致验证集为空
+- 进一步核对后确认：
+  - 最新完成交易日：`2026-04-01`
+  - 最新可标注训练日：`2026-03-03`
+- 对 `next_open + 5/10/20d horizon` 口径，正确解释应为：
+  - “截至上线前的全部可标注数据”
+  - 而不是“截至上线前的全部原始日期”
+
+### 正式结果
+- production full-fit 成功产出：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_fullfit_20260401_r1`
+- 稳定 production 根目录：
+  - `deep_alpha_liquid500_dynamic_graph_bridge_production_default`
+- 默认交易计划已切到 production root：
+  - `candidate_label = dynamic_graph_regoff_k2_10d_ensemble_native_anchor_production_fullfit`
+  - `candidate_score_csv = ...production_default/daily_live_score_panel.csv`
+  - `candidate_target_weight_csv = ...production_default/daily_live_target_weight_panel.csv`
+
+### 收口结论
+1. formal holdout 判决与日常 production 执行现在已经正式分离。
+2. 默认执行不再继续直接使用 `2025-03-17` 截止的 formal 冻结模型。
+3. 以后默认候选升级，必须同时给出：
+   - formal winner 证据
+   - production full-fit 重训版
+   - 上线后的新样本表现
+
+## 2026-04-02 Short Alpha 首轮实验矩阵
+
+### 背景
+- 用户明确提出三个可实验验证的问题：
+  - 当前模型结构是否还不够强
+  - 短线起爆前信息能不能通过更短目标学到
+  - 输入是否需要增加短线候选特征
+- 因此本轮不再空谈，而是直接在当前 `dynamic_graph_v1` 赢家骨架上做一轮 recent-formal 矩阵。
+
+### 协议
+- 时间窗：
+  - `train_end = 2025-03-17`
+  - `valid_start = 2025-03-18`
+  - `valid_end = 2026-04-01`
+- 范围与假设：
+  - `liquid500`
+  - 主板范围
+  - `next_open`
+  - `patch_transformer + dynamic_graph_v1`
+- 输出目录：
+  - `daily_research/output/deep_alpha_short_alpha_matrix_20260402_r1`
+
+### 设计
+- `baseline_current`
+  - 当前基线
+- `state_context_v1`
+  - 只开 `state_context`
+- `state_liquidity_listwise_v1`
+  - 开 `state_context + liquidity_context`
+  - 加轻量 `ranking/listwise loss`
+- `short_target_v1`
+  - 改成 `1/2/3/5d` 超额目标
+  - 叠加 `5d breakout` 与 `clean breakout` 事件标签
+- `short_input_v1`
+  - 新增突破、压缩、能量类日线特征
+- `short_combo_v1`
+  - 同时启用短线目标与短线输入
+
+### 结果
+- `state_liquidity_listwise_v1`
+  - `excess_annual_return = 82.38%`
+  - `excess_sharpe = 3.876`
+  - `excess_max_drawdown = -8.86%`
+  - `avg_turnover = 1.486`
+- `baseline_current`
+  - `excess_annual_return = 66.49%`
+  - `excess_sharpe = 2.582`
+- `state_context_v1`
+  - `excess_annual_return = 33.81%`
+  - `excess_sharpe = 1.257`
+- `short_input_v1`
+  - `excess_annual_return = 18.62%`
+  - `excess_sharpe = 0.882`
+- `short_target_v1`
+  - `excess_annual_return = 11.25%`
+  - `excess_sharpe = 0.593`
+- `short_combo_v1`
+  - `excess_annual_return = 6.82%`
+  - `excess_sharpe = 0.354`
+
+### 代码改动
+- `daily_research/deep_alpha/config.py`
+  - 增加 `short_alpha_features` 与 breakout event 相关配置
+- `daily_research/deep_alpha/sequence_dataset.py`
+  - 新增突破、压缩、能量类特征
+  - 新增 breakout 事件标签
+- `daily_research/deep_alpha/trainer.py`
+  - 允许 `event_*` 目标走 BCE loss
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 打通新目标、新特征与 CLI
+- `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 固化 profile 注册表
+- `daily_research/deep_alpha/run_short_alpha_experiment_matrix.py`
+  - 固化矩阵入口
+
+### 当前结论
+1. 当前第一优先问题不是“模型还不够大”，而是“上下文与收益排序耦合还不够强”。
+2. 单开 `state_context` 不够，甚至会退化。
+3. `state + liquidity + light ranking/listwise` 在 recent-formal 窗口里明显有效，值得升格成下一条正式验证分支。
+4. 第一版短线目标改写与额外日线短线输入都没有带来增益，暂时不能当默认主线。
+5. 想继续追“单票起爆前”方向，后续更合理的切入点是：
+   - 更直接的执行目标
+   - 或更强的盘中/竞价信息
+   - 而不是继续在这一版日线短线标签上细磨
+
+## 2026-04-02 Short Alpha 三窗 formal head-to-head
+
+### 背景
+- `state_liquidity_listwise_v1` 在 recent-formal 窗口里明显赢了 `baseline_current`。
+- 但这个结果还不能直接当正式结论，必须回答它是不是 recent-window lucky run。
+
+### 协议
+- 输出目录：
+  - `daily_research/output/short_alpha_formal_head2head_20260402_r1`
+- 比较对象：
+  - `baseline_current`
+  - `state_liquidity_listwise_v1`
+- 时间窗：
+  - `20230216 -> 20240229`
+  - `20240301 -> 20250317`
+  - `20250318 -> 20260331`
+- 口径保持和 recent-formal 一致：
+  - `liquid500`
+  - `patch_transformer + dynamic_graph_v1`
+  - `top_bottom_bce`
+  - `manual score`
+  - 第三窗直接复用 recent-formal 已跑结果
+
+### 结果
+- 均值汇总：
+  - `state_liquidity_listwise_v1 = 26.16% / 1.199`
+  - `baseline_current = 14.61% / 0.448`
+- 胜负统计：
+  - 按超额年化：`2/3`
+  - 按超额 Sharpe：`2/3`
+- 分窗：
+  - `20230216_20240229`
+    - candidate `-7.97% / -0.433`
+    - baseline `-3.06% / -0.181`
+    - candidate 明显更差
+  - `20240301_20250317`
+    - candidate `4.07% / 0.154`
+    - baseline `-19.60% / -1.056`
+    - candidate 明显更好
+  - `20250318_20260331`
+    - candidate `82.38% / 3.876`
+    - baseline `66.49% / 2.582`
+    - candidate 明显更好
+
+### 当前结论
+1. `state_liquidity_listwise_v1` 不是 recent-window lucky run，已经通过第一轮三窗 formal。
+2. 但它也不是无条件新前沿，因为第一窗退化得很明显。
+3. 因此这条线现在最合理的定位是：
+   - 正式研究候选成立
+   - 有资格进入 execution objective 对齐
+   - 但还不能直接替换当前默认执行候选
+4. 对“模型结构是否还值得继续加强”的当前回答也更具体了：
+   - 纯粹单开 `state_context` 不够
+   - `state + liquidity + light ranking/listwise` 有真实价值
+   - 第一版短线目标改写与额外日线短线输入暂时不成立
+
+## 2026-04-02 `deep_alpha` formal 重训频率矩阵
+
+### 背景
+- 用户明确追问：
+  - `deep_alpha` 是否考虑过模型重训频率对收益的影响；
+  - “训练一次直接用一年”与“隔一段时间重训一次”哪个更优。
+- 当时项目只有研究侧的一年级别 formal holdout 口径，以及生产侧“上线前做一次 production full-fit”的工程规则；
+  - 但还没有把 `deep_alpha` 本身跑成正式的 retrain-frequency comparator。
+- 因此这轮不再口头推断，直接补一份正式矩阵。
+
+### 新增脚本
+- 新增：
+  - `daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py`
+- 作用：
+  - 锚定当前 formal winner；
+  - 复用第一块 source formal slice；
+  - 后续块按指定 cadence 在块前重训；
+  - stitch `equity_curve / actions`；
+  - 同时输出 raw summary 与 common-window summary。
+
+### 协议
+- source formal winner：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1`
+- source 边界：
+  - `train_end = 2025-03-17`
+  - `valid_start = 2025-03-18`
+  - `valid_end = 2026-03-31`
+- 统一口径：
+  - `dynamic_graph_v1`
+  - `liquid500`
+  - `next_open`
+  - 只改重训 cadence，不改 winner config 其他参数
+- 比较频率：
+  - `annual_freeze`
+  - `quarterly_63d`
+  - `monthly_calendar`
+  - `every_21d`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_retrain_frequency_formal_20260402_r1`
+
+### 关键边界修正
+- 跑完后先发现一个协议细节：
+  - `Freeze 1Y` 的 raw stitched 数据自然落到了 `2026-03-30`
+  - 分块重训频率的 raw stitched 数据实际只落到 `2026-03-27`
+- 若直接混用 raw 末日做 leaderboard，会让 `Freeze 1Y` 多吃最后一个执行日，不够公平。
+- 因此补修 runner：
+  - 保留 `frequency_summary.csv` 作为 raw stitched 汇总
+  - 新增 `frequency_summary_common_window.csv` 作为共同比较窗口汇总
+  - 最终 leaderboard 固定基于共同窗口
+- 这轮共同比较窗口为：
+  - `2025-03-18 -> 2026-03-27`
+
+### 结果
+- 共同比较窗口口径：
+  - `Retrain Monthly`
+    - `excess_annual_return = 36.71%`
+    - `excess_sharpe = 1.484`
+    - `excess_max_drawdown = -16.75%`
+    - `avg_turnover = 1.451`
+  - `Retrain 63D`
+    - `excess_annual_return = 21.47%`
+    - `excess_sharpe = 0.991`
+    - `excess_max_drawdown = -13.35%`
+    - `avg_turnover = 1.357`
+  - `Freeze 1Y`
+    - `excess_annual_return = 6.35%`
+    - `excess_sharpe = 0.262`
+    - `excess_max_drawdown = -19.35%`
+    - `avg_turnover = 1.492`
+  - `Retrain 21D`
+    - `excess_annual_return = 3.68%`
+    - `excess_sharpe = 0.208`
+    - `excess_max_drawdown = -13.47%`
+    - `avg_turnover = 1.405`
+- 排名：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+
+### 运行与校验
+- 正式运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_retrain_frequency_formal_matrix.py --frequencies annual_freeze,quarterly_63d,monthly_calendar,every_21d --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe"`
+- 过程里先单独完成了：
+  - `annual_freeze`
+  - `quarterly_63d`
+- 再统一补跑剩余频率并复用已有 block。
+- 脚本校验：
+  - `python -m py_compile daily_research/deep_alpha/run_retrain_frequency_formal_matrix.py`
+- 文档与协议辅助产物：
+  - `block_plan.csv`
+  - `block_detail.csv`
+  - `frequency_summary.csv`
+  - `frequency_summary_common_window.csv`
+  - `summary.md`
+  - `source_runs.json`
+
+### 当前结论
+1. `deep_alpha` 已经有正式实验答案：在当前 formal 口径下，冻结一年明显不是最优。
+2. 更频繁重训确实可能带来显著收益提升，但不是越频繁越好；当前最好的是月度，不是 `21D`。
+3. 这条结论用于研究侧与上线前重训节奏判断，不改变“每日默认流程不静默重训”的 production 边界。
+4. 后续若要继续推进：
+   - 优先围绕 `monthly` 与 `63D` 两档做更长窗或多机会集复验；
+   - 不再把 `Freeze 1Y` 当作 `deep_alpha` 的默认研究解释。
+
+## 2026-04-02 `deep_alpha` 重训频率结论同步到执行端
+
+### 背景
+- formal 矩阵已经给出明确结论：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+- 但执行端此前只检查：
+  - `daily_live_*` 面板是不是最新
+- 这会漏掉一个关键问题：
+  - 面板可以每天刷新，但底层 production 模型可能已经超过应重训的节奏。
+
+### 代码改动
+- 更新：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+  - `daily_research/execution/update_default_candidate_production.py`
+- 同步当前 production manifest：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+
+### 同步内容
+- 默认执行候选现在会把 production manifest 一并注入 `run_trade_plan.py`。
+- `generate_daily_trade_plan.py` 在外部 target-weight 候选模式下，除了检查候选源信号日新鲜度，还会额外检查：
+  - 底层 production 模型最近一次 `launch_cutoff_date`
+  - formal 矩阵同步过来的重训阈值
+- 当前执行侧阈值固定为：
+  - 提醒：`21` 个交易日
+  - 拦截：`63` 个交易日
+- `update_default_candidate_production.py` 以后新写出的 production manifest 也会自动带上这套策略。
+- `train_end_date` 仍保留展示，但只作为监督样本截止信息，不再误当作“上次重训时间”。
+
+### 验证
+- 重新运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py`
+- 新输出目录：
+  - `daily_research/execution/output/20260402`
+- 最新建议文件：
+  - `daily_research/execution/output/latest_trade_plan.txt`
+- 结果显示：
+  - 候选源信号日仍然是最新；
+  - 底层模型 `train_end_date = 2026-03-03` 会单独展示；
+  - 真正用于重训时效判断的是 `launch_cutoff_date = 2026-04-01`
+  - 相对 `2026-04-02` 只滞后 `1` 个交易日
+  - 因而当前状态仍是“最新”，没有误触发月度重训提醒。
+
+### 当前结论
+1. 重训频率实验结果现在已经真正进入执行侧，而不是只停留在研究文档里。
+2. 默认执行仍不静默重训，但现在会区分：
+   - 面板新鲜度
+   - 底层模型最近一次重训上线时效
+3. 下一次 production full-fit 更新，应该优先通过：
+   - `daily_research/execution/update_default_candidate_production.py`
+   来更新这条时效计时器。
+
+## 2026-04-02 默认执行按 `Retrain Monthly` 自动重训
+
+### 背景
+- 用户要求把执行端从“只提醒月度重训”进一步推进到“默认按 `Retrain Monthly` 自动重训”。
+- 既有 formal 结论已经明确：
+  - `Retrain Monthly > Retrain 63D > Freeze 1Y > Retrain 21D`
+- 因此这次不再停留在提醒/拦截层，而是把默认执行入口真正接到月度 production 重训上。
+
+### 代码改动
+- 更新：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/update_default_candidate_production.py`
+- 同步当前 live production 策略文件：
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_manifest.json`
+  - `daily_research/output/deep_alpha_liquid500_dynamic_graph_bridge_production_default/production_retrain_summary.md`
+
+### 实现口径
+- 默认 trade-plan 候选现在会先读取 `production_retrain_manifest.json`。
+- 自动重训只在以下条件满足时触发：
+  - `auto_retrain_enabled = true`
+  - `auto_retrain_mode = monthly_calendar`
+  - 最近一次 `launch_cutoff_date` 相对最新完成交易日已经跨入新的自然月
+- 若尚未跨月：
+  - 不会重训
+  - 仍只刷新 `daily_live_*` 面板
+- 为了不丢掉旧护栏：
+  - manifest 仍保留 `warn_after_trading_days = 21`
+  - 仍保留 `block_after_trading_days = 63`
+  - `generate_daily_trade_plan.py` 继续显示这两层时效状态
+
+### manifest 新增字段
+- `auto_retrain_enabled = true`
+- `auto_retrain_mode = monthly_calendar`
+- `auto_retrain_trigger = next_calendar_month_after_launch_cutoff`
+- `auto_retrain_fallback_trading_days = 21`
+
+### 验证
+- 语法校验：
+  - `python -m py_compile daily_research/execution/research_candidate_profiles.py`
+  - `python -m py_compile daily_research/execution/update_default_candidate_production.py`
+- 实跑：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\execution\run_trade_plan.py`
+- 文档校验：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\tools\doc_guard.py check`
+
+### 当前结果
+1. 默认执行入口已经具备“按 `Retrain Monthly` 自动重训”的能力，不再只是停留在提醒。
+2. 今天的 live manifest `launch_cutoff_date = 2026-04-01`，最新完成交易日也是 `2026-04-02` 所在自然月，因此本次验证运行不会误触发自动重训。
+3. 下一次跨到新的自然月后，默认 `run_trade_plan.py` 会先触发 `production full-fit` 自动重训，再继续生成交易计划。
+
+## 2026-04-02 `deep_alpha` 架构复杂度 / 深度 / 结构正式实验
+
+### 背景
+- 用户要求不要只凭经验判断，而是用较丰富的正式实验去验证：
+  - 模型复杂度 / 网络复杂度
+  - 模型深度 / 网络深度
+  - 模型结构 / 网络结构
+- 这条问题此前在 `deep_alpha` 里没有独立成套 formal 答案。
+- 因此这次专门补两层证据：
+  - recent-formal 同窗矩阵
+  - 多窗口 formal head-to-head
+
+### 一、recent-formal 架构矩阵
+
+#### 代码与协议
+- 新增：
+  - `daily_research/deep_alpha/architecture_profiles.py`
+  - `daily_research/deep_alpha/run_architecture_experiment_matrix.py`
+- 固定协议：
+  - 窗口：`2025-03-18 -> 2026-03-31`
+  - 股票池：`liquid500`
+  - benchmark：`000300.SH`
+  - 固定使用：`top_bottom_bce + manual score head + no execution alignment + next_open`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_matrix_20260402_r1`
+
+#### 实验分组
+- complexity：
+  - `capacity_small_h64`
+  - `capacity_large_h160`
+- depth：
+  - `depth_shallow_l1`
+  - `depth_deep_l4`
+- encoder：
+  - `encoder_transformer_v1`
+  - `encoder_mamba_v1`
+- graph：
+  - `graph_off_plain`
+  - `graph_relation_only`
+  - `graph_topk4`
+- context：
+  - `state_context_only`
+  - `state_liquidity_context`
+- structure：
+  - `structure_context_only`
+  - `structure_aux_task_v1`
+  - `structure_prototype_task_v1`
+
+#### recent-formal 结果
+- 整体 winner 仍是：
+  - `baseline_current = 66.49% / 2.582 / -13.52%`
+- complexity：
+  - `capacity_large_h160 = 48.93% / 2.106`
+  - `capacity_small_h64 = 20.18% / 1.154`
+  - 说明单纯放大或缩小容量都没有超过基线
+- depth：
+  - `depth_deep_l4 = 36.71% / 1.432`
+  - `depth_shallow_l1 = 33.37% / 1.899`
+  - 说明继续加深网络也没有形成收益优势
+- encoder：
+  - `encoder_mamba_v1 = 21.13% / 1.044`
+  - `encoder_transformer_v1 = 18.78% / 0.992`
+  - 说明当前协议下切 backbone 并没有带来正向升级
+- graph：
+  - `graph_off_plain = 55.19% / 1.434`
+  - `graph_topk4 = 36.20% / 1.374`
+  - `graph_relation_only = 22.55% / 0.902`
+  - 说明 dynamic graph 有价值，但 relation-only 并不成立
+- context：
+  - `state_context_only = 33.81% / 1.257`
+  - `state_liquidity_context = 1.21% / 0.053`
+  - 说明仅靠把上下文开关打开并不能自动带来增益
+- structure：
+  - `structure_context_only = 54.58% / 3.000 / -6.03%`
+  - `structure_aux_task_v1 = -14.61% / -0.925`
+  - `structure_prototype_task_v1 = -19.69% / -1.109`
+  - 说明 `structure_context_only` 是唯一接近基线且 Sharpe 更高的结构改动，而附加结构辅助任务在当前协议下明显破坏主线
+
+### 二、三窗 formal architecture head-to-head
+
+#### 代码与协议
+- 新增：
+  - `daily_research/deep_alpha/run_architecture_formal_head2head.py`
+- 固定窗口：
+  - `20230216_20240229`
+  - `20240301_20250317`
+  - `20250318_20260331`
+- 比较集合：
+  - `baseline_current`
+  - `capacity_large_h160`
+  - `depth_shallow_l1`
+  - `depth_deep_l4`
+  - `graph_off_plain`
+  - `structure_context_only`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_formal_head2head_20260402_r1`
+
+#### 多窗结果
+- 基线三窗均值：
+  - `baseline_current = 14.61% / 0.448`
+- `structure_context_only`：
+  - 均值 `27.66% / 1.448`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `3/3` 窗取胜
+  - 相对基线均值超额年化多 `13.05%`
+- `graph_off_plain`：
+  - 均值 `22.93% / 0.666`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `2/3` 窗取胜
+- `depth_shallow_l1`：
+  - 均值 `20.00% / 1.051`
+  - 超额年化 `2/3` 窗取胜
+  - Sharpe `2/3` 窗取胜
+- `capacity_large_h160`：
+  - 均值 `14.71% / 0.657`
+  - 基本只是与基线打平，不构成明确升级
+- `depth_deep_l4`：
+  - 均值 `12.84% / 0.494`
+  - 仍不构成可信升级
+
+### 运行与验证
+- 运行：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_experiment_matrix.py`
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_formal_head2head.py`
+- recent-formal runner 自动复用了已存在的：
+  - `baseline_current`
+  - `state_context_only`
+  - recent 窗结果，避免重复重训
+- 三窗 head-to-head 也复用了 recent 窗对应 run
+- 运行中出现过 `RankIC` 的 `ConstantInputWarning`，但不影响 metrics 产物落盘，命令整体正常退出
+
+### 当前结论
+1. `deep_alpha` 现在已经有了关于模型复杂度 / 深度 / 结构影响的正式实验答案，不再只凭口头经验。
+2. 在当前 recent-formal 协议下，`baseline_current` 仍是最近窗口收益 winner，因此不能把“复杂一点”误当成默认更优。
+3. 单纯加大容量、继续加深网络、或直接切到 vanilla `transformer` / `mamba`，都没有形成可信升级路径。
+4. `structure_context_only` 是当前最值得继续推进的结构方向：recent 窗口收益接近基线但 Sharpe 更高，多窗口均值和稳健性也明显更强。
+5. 这条结论目前只进入研究判断与下一步研究优先级，还没有直接静默同步到默认执行；下一步应先做 execution objective 与显式成本下的 head-to-head。
+
+## 2026-04-03 `deep_alpha` 架构 execution-objective + realistic cost formal head-to-head
+
+### 背景
+- 上一轮 raw 架构实验已经说明：
+  - `structure_context_only` 是当前最强多窗结构挑战者
+  - 但它还没有经过 execution objective 与显式成本 gate
+- 因此这次把“raw 研究优势”真正接到执行侧协议上，验证它能不能穿过：
+  - `train_eval_auto`
+  - `robust_composite`
+  - realistic cost
+
+### 代码改动
+- 新增：
+  - `daily_research/deep_alpha/run_architecture_execution_objective_head2head.py`
+- 修正：
+  - `daily_research/deep_alpha/execution_alignment.py`
+- 这次修正点不是改默认执行，而是修 formal 多窗研究边界：
+  - 当 `regoff/regon` 的锚点日期晚于旧窗口交易日历时，execution_alignment 会在该窗口内自动回落到首个可用交易日
+  - 这样老窗口也能复用同一 execution profile 定义，不影响当前默认执行入口
+
+### 协议
+- 比较对象：
+  - `baseline_current`
+  - `structure_context_only`
+- formal 窗口：
+  - `20230216_20240229`
+  - `20240301_20250317`
+  - `20250318_20260331`
+- 模型侧固定：
+  - `liquid500`
+  - `top_bottom_bce`
+  - `manual score head`
+  - `next_open`
+- execution-objective 固定：
+  - `train_eval_auto`
+  - `objective = robust_composite`
+  - candidate profiles:
+    - `raw_1d`
+    - `topk2_1d_regoff`
+    - `regoff_k2_10d_ensemble_native_anchor`
+    - `regon_k1_10d_ensemble_native_anchor`
+- realistic cost 固定：
+  - transaction `3 bps`
+  - slippage `7 bps`
+  - sell-tax `10 bps`
+- 正式输出目录：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r1`
+
+### 结果一：`structure_context_only` 的 raw 优势没有穿过 execution-objective gate
+- raw 三窗均值：
+  - `baseline_current = 14.61% / 0.448`
+  - `structure_context_only = 27.66% / 1.448`
+- 但 execution-objective aligned holdout 三窗均值变成：
+  - `baseline_current = 21.43% / 1.330`
+  - `structure_context_only = 2.81% / 0.235`
+- realistic external replay 三窗均值进一步确认：
+  - `baseline_current = 15.15% / 0.872`
+  - `structure_context_only = 2.09% / 0.205`
+- `structure_context_only` 只在 `20240301_20250317` 这一窗短暂胜出，其余窗口都落后
+
+### 结果二：这次落后不是因为 execution bridge 选错
+- 两个模型在三窗里最终都选到了同一个 execution profile：
+  - `regoff_k2_10d_ensemble_native_anchor`
+- 因此这轮输赢已经不再能解释成：
+  - `structure_context_only` 只是 auto alignment 选错桥接 profile
+- 更准确的解释是：
+  - `structure_context_only` 的 raw 信号优势经同一 bridge 映射到执行侧后，没有稳定保留
+
+### 结果三：recent 窗口里，`structure_context_only` 也没过升级门槛
+- recent realistic replay：
+  - `structure_execalign_realistic = 27.36% / 12.86% / 0.921 / -10.89%`
+  - `baseline_execalign_realistic = 73.35% / 53.61% / 3.134 / -7.03%`
+  - `regoff_k2_realistic = 44.12% / 25.75% / 1.722 / -8.55%`
+- 因此在真正要决定“能不能升级到执行侧”的 recent 口径里：
+  - `structure_context_only` 同时输给 `baseline_current execalign`
+  - 也输给当前默认 `regoff_k2_realistic`
+
+### 结果四：recent 弱窗复核也没有帮 `structure_context_only` 翻案
+- `structure_execalign_realistic` 对当前默认 `regoff_k2_realistic` 的 named-window H2H：
+  - `full_available + year + bridge + weak_window` 五个窗口全部落后
+  - `weak_window_20250905` 的差距更大：
+    - excess annual delta `-41.53%`
+    - excess Sharpe delta `-2.382`
+- `structure_execalign_realistic` 对 `baseline_execalign_realistic` 的 named-window H2H：
+  - 也是五个窗口全部落后
+  - `weak_window_20250905` 进一步拉开到：
+    - excess annual delta `-84.69%`
+    - excess Sharpe delta `-4.119`
+
+### 结果五：真正冒出来的新信号其实是 `baseline_current + regoff_k2 execalign`
+- recent named-window H2H 里：
+  - `baseline_execalign_realistic` 对当前默认 `regoff_k2_realistic` 五个窗口全部取胜
+  - full_available:
+    - excess annual delta `+16.91%`
+    - excess Sharpe delta `+0.645`
+  - `weak_window_20250905`:
+    - excess annual delta `+44.97%`
+    - excess Sharpe delta `+1.793`
+- 这说明 architecture 线真正值得继续推进的不是 `structure_context_only` 升格，而是：
+  - `baseline_current` 接上 execution objective 后，recent execution candidate 质量明显抬升
+
+### 当前结论
+1. `structure_context_only` 作为 raw 架构挑战者成立，但作为 execution-upgrade 候选目前失败，不应继续按“差一步就能上线”的心智去推进。
+2. 这次失败不是桥接 profile 选错，而是它的 raw 结构优势没有稳定穿过同一条 `regoff_k2` 执行映射。
+3. 当前 architecture 线最值得继续推进的新候选已经从 `structure_context_only` 切换为 `baseline_current + regoff_k2 execalign`。
+4. 但这条新候选仍然只完成了 recent realistic 与 named-window H2H；在 production full-fit 与独立 live / paper 证据补齐前，不能静默替换默认执行。
+
+## 2026-04-03 execution-first 项目级统一修正
+
+### 背景
+- 用户明确要求把“执行后净收益最大”直接变成模型学习目标，不接受研究端和执行端继续分裂。
+- 这次不再做最小修补，而是按项目级统一目标整理主链：
+  - 训练目标统一
+  - production promotion 统一
+  - 默认执行真源统一
+
+### 代码改动
+- 新增 `daily_research/deep_alpha/research_objective.py`
+  - 固定 `execution_first` 默认协议
+  - 提供 primary backtest / checkpoint metric 解析
+- 改造 `daily_research/deep_alpha/trainer.py`
+  - best checkpoint 不再被迫只看 `valid_loss`
+  - 支持通过 callback 按 primary research backtest 选择 checkpoint
+- 改造 `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - 默认 `research_objective_mode = execution_first`
+  - 默认 `execution_alignment_mode = train_eval_auto`
+  - 默认 `execution_alignment_objective = robust_composite`
+  - 默认 realistic cost = `3 / 7 / 10 bps`
+  - metrics 里新增 `primary_research_backtest*` 语义
+- 改造多个 matrix runner
+  - 统一从 `primary_research_backtest` 读取 winner 指标，不再硬编码只读 raw `holdout_backtest`
+- 新增 `daily_research/execution/strategy_manifest.py`
+  - 提供 `active_execution_strategy.json` 的读写与构建
+- 改造 `daily_research/execution/research_candidate_profiles.py`
+  - 默认执行 profile 改为 manifest-driven
+  - 当 active manifest 存在时，`default` 自动解析成 `active_execution_strategy`
+- 改造 `daily_research/execution/update_default_candidate_production.py`
+  - production full-fit 重训命令会透传 execution-first 研究目标
+  - 会透传 execution alignment 配置与 realistic cost
+  - promotion 完成后可直接写入 `active_execution_strategy.json`
+
+### 当前状态
+- 已用现有 source/prod 产物写出：
+  - `daily_research/output/active_execution_strategy.json`
+- 已确认默认执行入口现在读取：
+  - `active_execution_strategy`
+- 但这仍是过渡态：
+  - 当前 formal source `deep_alpha_liquid500_dynamic_graph_bridge_20260401_formal_r1` 仍是旧 raw 口径 run
+  - 所以 active manifest 现在只是把当前 legacy raw default 显式化，不代表 execution-first 新 winner 已经正式产生
+
+### 验证
+- `py_compile` 通过：
+  - `research_objective.py`
+  - `trainer.py`
+  - `run_deep_alpha_research.py`
+  - 各 formal matrix runner
+  - `strategy_manifest.py`
+  - `research_candidate_profiles.py`
+  - `update_default_candidate_production.py`
+- `run_trade_plan.py --list-candidate-profiles` 通过：
+  - `default=active_execution_strategy`
+- `update_default_candidate_production.py --help` 通过
+- 默认执行烟测通过：
+  - `run_trade_plan.py`
+  - 输出正常
+  - `candidate_profile=active_execution_strategy`
+
+### 当前结论
+1. 研究端与执行端的统一主链已经在代码层接通。
+2. 现在研究 winner 可以被定义为“真实执行后净收益最大”，而不是“raw holdout 看起来最强”。
+3. 默认执行也已经不再依赖硬编码 profile，而是依赖 `active_execution_strategy.json`。
+4. 真正还没完成的只剩最后一步：用新协议重跑 formal winner，再做一次正式 promotion，让 active strategy 从“legacy raw default 显式化”升级为“execution-first winner 正式上位”。
+
+## 2026-04-03 项目体检与冗余清理
+
+### 发现的问题一：active strategy 的回测起始窗被 production 监控窗污染
+- 在上一轮把 `active_execution_strategy.json` 接上后，发现 manifest 里的：
+  - `backtest_start_date`
+- 被 production full-fit 的 `valid_start` 覆盖成了内部监控窗起点 `2026-02-27`，而不是 formal source 真正的研究起点 `2025-03-18`。
+- 这会导致：
+  - `run_research_candidate_backtest.py --candidate-profile default`
+  - 默认只回测到过短窗口，不符合 active strategy 作为研究候选真源的设计。
+
+### 修正
+- 已修改 `daily_research/execution/strategy_manifest.py`：
+  - formal source 面板模式下，`backtest_start_date` 现在固定取 source metrics，而不是 production metrics
+- 已重写：
+  - `daily_research/output/active_execution_strategy.json`
+- 当前验证值：
+  - `backtest_start_date = 20250318`
+  - `trade_plan_start_date = 20210101`
+
+### 发现的问题二：wrapper 在 `--help` 下仍会触发重活
+- 之前如果运行：
+  - `run_trade_plan.py --candidate-profile default --help`
+  - `run_research_candidate_trade_plan.py --candidate-profile default --help`
+  - `run_research_candidate_backtest.py --candidate-profile default --help`
+- wrapper 会先做 profile 应用和 live panel 检查，导致 help 查询也可能触发缓存读取、live panel 刷新，甚至 auto retrain 逻辑。
+
+### 修正
+- 已修改：
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - `daily_research/execution/run_research_candidate_trade_plan.py`
+  - `daily_research/execution/run_research_candidate_backtest.py`
+- 现在 `apply_profile_defaults(..., ensure_live_panels=...)` 可显式关闭副作用；
+  - help 模式下不再触发 live panel 刷新或 auto retrain。
+
+### 清理
+- `project_map.md` 已收口到当前真实优先级：
+  - 默认执行真源是 `active_execution_strategy.json`
+  - 当前最高优先的 execution-first 升级候选是 `baseline_current + regoff_k2 execalign`
+- `working_memory.md`、`semantic_memory.md`、`action_system.md`、`project_map.md` 的快照日期已统一更新到 `2026-04-03`
+
+### 验证
+- `py_compile` 通过
+- `run_research_candidate_backtest.py --candidate-profile default --help` 通过，且不再触发重活
+- `run_research_candidate_trade_plan.py --candidate-profile default --help` 通过，且不再触发重活
+- `run_trade_plan.py --candidate-profile default --help` 通过，且不再触发重活
+- `doc_guard.py check` 通过
+
+### 当前剩余问题
+1. 代码和默认执行真源已经统一，但当前 active strategy 仍是过渡态，尚未完成“execution-first formal winner 正式上位”。
+2. 这不是实现 bug，而是实验产物还没重跑：
+   - 需要按统一后的 `execution_first + train_eval_auto + robust_composite + 3/7/10bps` 协议重跑 formal winner
+   - 再执行一次 production promotion
+
+## 2026-04-03 execution-first formal winner 正式上位
+
+### formal 重跑
+- 已修正 `daily_research/deep_alpha/run_architecture_execution_objective_head2head.py`：
+  - 显式写入 `research_objective_mode = execution_first`
+  - 显式写入 `checkpoint_selection_objective = primary_annual_return`
+  - summary 同步记录协议字段
+- 新正式输出：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2`
+- 新 formal summary：
+  - `baseline_current` 三窗 mean replay excess annual / Sharpe = `16.05% / 0.930`
+  - `structure_context_only` 三窗 mean replay excess annual / Sharpe = `3.72% / 0.272`
+  - recent replay 上，`baseline_execalign_realistic = 53.61% / 3.134`
+  - 继续显著强于旧默认 `regoff_k2_realistic = 25.75% / 1.722`
+- 因此 execution-first formal winner 正式确认为：
+  - `baseline_current + regoff_k2_10d_ensemble_native_anchor`
+
+### promotion 链修正
+- 第一次 promotion 后发现一个统一性缺口：
+  - `update_default_candidate_production.py` 仍保留 `train_eval_auto`
+  - 会让 production full-fit 在仅 `3` 天内部监控窗上重新挑选 `execution_alignment_profile`
+  - 导致 formal winner 与 production execution strategy 再次分裂
+- 已修正：
+  - 当 source run 来自 `execution_first`
+  - 且 formal winner 已选出 `execution_alignment_profile`
+  - production full-fit 自动冻结为 `execution_alignment_mode = profile`
+  - 不再允许在短监控窗上静默改写 execution profile
+
+### 默认执行切换
+- 已用修正后的 promotion 链重新运行：
+  - source formal run = `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - production run = `daily_research/output/deep_alpha_baseline_current_execfirst_production_fullfit_20260403_r2`
+- 当前 production manifest：
+  - `source_formal_run_dir = deep_alpha_architecture_execalign_formal_20260403_r2/runs/baseline_current_20250318_20260331`
+  - `active_production_run_dir = deep_alpha_baseline_current_execfirst_production_fullfit_20260403_r2`
+  - `launch_cutoff_date = 20260402`
+  - `train_end_date = 20260304`
+- 当前 active strategy 已正式写成：
+  - `strategy_name = baseline_current_execfirst_winner`
+  - `panel_mode = execution_aligned`
+  - `execution_alignment_mode = profile`
+  - `execution_alignment_profile = regoff_k2_10d_ensemble_native_anchor`
+
+### 验证
+- `py_compile` 通过：
+  - `run_architecture_execution_objective_head2head.py`
+  - `update_default_candidate_production.py`
+- `run_trade_plan.py --list-candidate-profiles` 通过：
+  - `default=active_execution_strategy`
+  - `strategy=baseline_current_execfirst_winner`
+  - `panel_mode=execution_aligned`
+- 默认 production `metrics.json` 已确认：
+  - `research_objective_mode = execution_first`
+  - `execution_alignment_mode = profile`
+  - `execution_alignment_profile = regoff_k2_10d_ensemble_native_anchor`
+
+### 当前结论
+1. execution-first formal winner 已正式重跑并完成上位。
+2. 默认执行不再是 legacy raw default 的显式化，而是正式的 execution-first winner。
+3. production full-fit promotion 现在会冻结 formal winner 的 selected execution profile，避免研究端和执行端再次分裂。
+## 2026-04-03 Monthly Research Protocol Unification
+- 用户要求把 `deep_alpha` 的研究单位从交易日协议提升为自然月协议，并且要求训练、推理、回测、评估一体化，不接受只改表层参数名。
+- 本轮完成的代码改动：
+  - `deep_alpha/config.py` 新增 `research_time_unit / valid_months / train_eval_window_months / adaptive_task_window_months`
+  - `deep_alpha/pipeline_utils.py` 新增月度切窗解析与显式短窗优先级
+  - `deep_alpha/score_head.py` 让 adaptive task weighting 支持按月取近期窗口
+  - `deep_alpha/trainer.py` 补出 RankIC timeseries，供月度汇总复用
+  - `baseline/backtest.py` 新增 `summarize_backtest_by_month()`
+  - `run_deep_alpha_research.py` 接入月度协议，并新增月度 RankIC / score / target_weight / backtest 产物导出
+  - `pretrain_deep_alpha_encoder.py` 接入月度协议与月度 pretrain-valid split
+  - `execution/update_default_candidate_production.py` 与 `run_retrain_frequency_formal_matrix.py` 继承新时间协议，但保留显式短窗优先
+  - `execution/strategy_manifest.py` 新增月度协议元数据透传
+- 关键边界修正：
+  - 显式给出 `train_end_date + valid_start_date + valid_days` 时，验证窗继续按交易日执行
+  - 这条优先级是为了保护 production internal monitor 与 blockwise retrain，不让月度默认值把短监控窗错误放大
+- `yolos` 下的真实验证：
+  - `py_compile` 通过
+  - `run_deep_alpha_research.py --help` 通过
+  - `pretrain_deep_alpha_encoder.py --help` 通过
+  - `update_default_candidate_production.py --help` 通过
+  - 月度研究 smoke run 通过：`deep_alpha_monthly_protocol_smoke_20260403_r1`
+  - 月度预训练 smoke run 通过：`deep_alpha_pretrain_monthly_protocol_smoke_20260403_r1`
+- 月度研究 smoke run 已确认落出：
+  - `validation_rankic_monthly_summary.csv`
+  - `monthly_score_panel.csv`
+  - `monthly_target_weight_panel.csv`
+  - `monthly_backtest_summary.csv`
+- smoke run 的关键元数据已确认：
+  - `research_time_unit = calendar_months`
+  - `valid_months = 2`
+  - `train_eval_window_months = 1`
+  - `adaptive_task_window_months = 1`
+  - `valid_start = 2025-02-05`
+  - `valid_end = 2025-03-31`
+  - `train_eval_start = 2025-01-02`
+## 2026-04-04 monthly execution-first rich experiment 重跑
+
+### 一、architecture execution-objective formal H2H 重跑完成
+- 输出目录：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260403_monthly_r1`
+- 结论：
+  - `baseline_current` 仍然是统一后的 execution-first formal winner
+  - mean aligned excess annual / Sharpe = `15.87% / 0.985`
+  - mean replay excess annual / Sharpe = `4.72% / 0.258`
+  - `structure_context_only` = `11.92% / 0.657`（aligned），`1.17% / 0.128`（replay）
+  - 因此 `structure_context_only` 仍未通过 execution upgrade gate
+
+### 二、short-alpha formal H2H 重跑完成
+- 输出目录：
+  - `daily_research/output/short_alpha_formal_head2head_20260403_monthly_r1`
+- 结论：
+  - `state_liquidity_listwise_v1` mean excess annual = `23.25%`
+  - `baseline_current` mean excess annual = `22.71%`
+  - candidate 在 `2/3` 窗口按 excess annual 与 Sharpe 取胜
+  - 但 candidate mean excess Sharpe = `1.444` 仍低于 baseline 的 `1.488`
+  - 当前判定是推进到 execution-objective 对齐，而不是直接升格默认执行
+
+### 三、dynamic-graph formal ablation 重跑完成
+- 输出目录：
+  - `daily_research/output/dynamic_graph_ablation_formal_20260403_monthly_r1`
+- 结论：
+  - `dynamic_graph_no_priors` = `20.98% / 1.083`
+  - `dynamic_graph_v1` = `14.67% / 0.786`
+  - `plain_baseline` = `9.37% / 0.478`
+  - 这说明在当前 monthly execution-first 主板 formal 口径下，industry/style priors 不是稳定增益，反而可能在拖累表现
+
+### 四、复跑过程中的基础设施修正
+- `daily_research/deep_alpha/run_dynamic_graph_formal_ablation_matrix.py`
+  - 显式补上 `--end-date 20260401`，避免子进程为推断最新交易日再次触发 TQ 初始化
+- `daily_research/baseline/data_provider.py`
+  - TQ 初始化改为独立 session 文件，并在失败时 close/retry
+- `daily_research/deep_alpha/run_deep_alpha_research.py`
+- `daily_research/deep_alpha/pipeline_utils.py`
+  - 新增 `--force-raw-cache-path`
+  - 当 TQ 抖动但同协议 raw 数据已缓存时，可直接复用 raw cache 补完正式实验
+
+## 2026-04-04 monthly execution-first finetune epoch 预算充分性 formal
+
+### 一、实验目的
+- 在整体切到 monthly execution-first 协议后，先验证当前主赢家 `baseline_current` 的 finetune 训练次数是否足够。
+- 这轮只验证 finetune epoch budget，不混入 masked pretraining 变量。
+
+### 二、协议
+- 入口：
+  - `daily_research/deep_alpha/run_epoch_budget_formal_matrix.py`
+- 输出目录：
+  - `daily_research/output/deep_alpha_epoch_budget_formal_20260404_r1`
+- 协议固定：
+  - profile = `baseline_current`
+  - windows = `20230216_20240229 / 20240301_20250317 / 20250318_20260331`
+  - research objective = `execution_first`
+  - checkpoint objective = `primary_annual_return`
+  - execution alignment = `train_eval_auto / robust_composite`
+  - realistic cost = `3 / 7 / 10 bps`
+  - epoch budgets = `4 / 8 / 12 / 16`
+
+### 三、结果
+- 三窗均值：
+  - `16` epoch = `8.50% / 0.494`（mean replay excess annual / Sharpe）
+  - `8` epoch = `4.72% / 0.258`
+  - `4` epoch = `4.95% / 0.266`
+  - `12` epoch = `4.72% / 0.258`
+- 因此当前 `8` epoch 不足；`16` epoch 是本轮 tested budgets 里的最优 replay 预算。
+
+### 四、关键细节
+- 提升不是来自 execution bridge 变化：
+  - 四档在对应窗口里选到的 execution profile 没有本质变化，主差异来自 checkpoint 本身。
+- 提升高度集中在窗口 `20240301_20250317`：
+  - `8` epoch 的 selected checkpoint = `epoch 7`
+  - `16` epoch 的 selected checkpoint = `epoch 13`
+  - 该窗 replay excess annual / Sharpe 从 `-7.10% / -0.441` 改善到 `4.25% / 0.268`
+- 月度拆解也支持“不是单月 lucky spike”：
+  - 该窗口正收益月份从 `4` 个月提升到 `6` 个月
+  - `2024-06`、`2024-07`、`2025-01` 改善最明显
+  - 平均换手还略降：`0.182 -> 0.170`
+
+### 五、暴露的问题
+- 当前 `training_diagnostics` 的 `undertrained` 判断主要盯 `valid_loss`，这轮四档都是 `0/3` undertrained。
+- 但 execution-first 目标下，真正更赚钱的 checkpoint 可能在更后面的 epoch 才出现，即使 `valid_loss` 早已不再改善。
+- 因此：
+  - `valid_loss stable` 不等于 execution-first 目标已经训够
+  - 仅靠现有 undertrained flag 会漏掉“晚出现但更赚钱”的 checkpoint
+
+### 六、当前判决
+- 对 `baseline_current` 的 monthly execution-first formal 复跑，当前主参考预算应上调到 `16` epoch。
+- `12` epoch 没有解决问题，说明这条线不是简单的“从 8 稍微多训一点就够”。
+## 2026-04-04 训练续训与家族 budget frontier 接线
+- 为解决 “epoch budget 可能没训够、但从头重跑浪费算力” 的问题，已把 `strict resume + warm_start continue + family-based frontier stop rule` 接入 `deep_alpha` 主链。
+- 代码侧新增：
+  - `run_deep_alpha_research.py` 支持 `--resume-run-dir / --resume-model-path / --resume-mode`
+  - `trainer.py` 保存并恢复 `last_model_state_dict + optimizer/scheduler/scaler + sampler epoch + history`
+  - `run_family_epoch_frontier_calibration.py` 负责先在 calibration windows 上冻结家族 budget
+  - `family_epoch_budget.py` 负责输出与读取 `deep_alpha_family_epoch_budget_latest.json`
+- formal runner 侧已接线：
+  - `run_architecture_execution_objective_head2head.py`
+  - `run_short_alpha_formal_head2head.py`
+  - `run_dynamic_graph_formal_ablation_matrix.py`
+- 真实 smoke 已验证：
+  - `base_e2` 产物已包含 resumable state
+  - `strict_to_e4` 能在同一训练链上从 `epoch 3/4` 继续
+  - `warmstart_to_e4` 会重新从 `epoch 1/4` 起步，但继承已有模型权重
+- 同日晚些时候继续把 family frontier 真正跑完：
+  - 初版统一 calibration windows 里，`baseline` 能跑但暴露出两个 runner bug：external replay 输出路径错位、summary objective 取错列名；两者都已修复
+  - 统一窗口随后又暴露 `dynamic_graph` 样本起点更晚：根因不是模型坏，而是该家族固定 `start-date=20220101 + lookback_window=120 + liquid800 rolling pool`，导致最早有效 sample date 天然晚于 baseline 线
+  - 之后把 `run_family_epoch_frontier_calibration.py` 升成 family-specific calibration windows，`dynamic_graph` 改用更晚的 pre-formal 月度窗口，实验得以完整跑通
+  - 最终产物目录为 `daily_research/output/deep_alpha_family_epoch_frontier_20260404_r2`
+  - 最终冻结预算为：
+    - `baseline -> 12`
+    - `structure -> 12`
+    - `short_alpha -> 32`
+    - `dynamic_graph -> 16`
+  - 其中：
+    - `baseline` 到 `32` 右边界仍有 budget pressure，说明当前 frontier 还没完全封顶
+    - `short_alpha` 到 `32` 右边界仍是最优，说明该家族最吃训练预算
+    - `structure` 的 `12/16` 打平且右边界无 pressure
+    - `dynamic_graph` 的 `16/24` 打平且右边界无 pressure
+  - 完成后再次用四家族全量重扫同一 `root-tag`，把 `daily_research/output/deep_alpha_family_epoch_budget_latest.json` 固化为完整 manifest
+
+## 2026-04-05
+
+### 预算归一化 rich experiment 全量收口
+- 先完成了 second-stage family frontier：
+  - `daily_research/output/deep_alpha_family_epoch_frontier_baseline_stage2_20260404_r1`
+  - `daily_research/output/deep_alpha_family_epoch_frontier_short_alpha_stage2_20260404_r1`
+- latest manifest 因而更新为：
+  - `baseline -> 4`
+  - `structure -> 12`
+  - `short_alpha -> 24`
+  - `dynamic_graph -> 16`
+- 然后按这套冻结预算重跑了三套 monthly execution-first formal：
+  - `daily_research/output/deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+  - `daily_research/output/dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
+
+### architecture 线：structure 彻底失去升级资格
+- `baseline_current` mean replay excess annual / Sharpe = `4.95% / 0.266`
+- `structure_context_only` = `1.66% / 0.156`
+- 说明 `structure_context_only` 在预算归一化后仍没有穿过 execution-upgrade gate
+
+### short_alpha 线：state_liquidity_listwise_v1 从候选升级为首选
+- `state_liquidity_listwise_v1` mean excess annual / Sharpe = `31.86% / 1.797`
+- `baseline_current` = `15.72% / 0.934`
+- 三窗 formal 为 `3/3` 同时取胜
+- 之后补做了 recent realistic replay gate：
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/recent_replays/state_liquidity_listwise_v1_20250318_20260331`
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/recent_h2h_short_alpha_vs_current_default/summary.md`
+- 结果：
+  - `short_alpha_execalign_realistic` full-period annual / excess annual / excess Sharpe = `71.19% / 51.70% / 2.964`
+  - 当前默认 `regoff_k2_realistic` = `44.12% / 25.75% / 1.722`
+  - named-window 胜负为 `4/5`
+- 因此 short-alpha 线已不再只是“值得继续研究”的候选，而是新的 liquid500 execution-upgrade 首选
+
+### dynamic_graph 线：no_priors 优势被进一步放大
+- `dynamic_graph_no_priors` mean excess annual / Sharpe = `34.94% / 1.393`
+- `dynamic_graph_v1` = `19.97% / 1.044`
+- `plain_baseline` = `0.33% / -0.059`
+- 这说明在 rolling liquid800 monthly execution-first formal 下，industry/style priors 不是稳健增益，而是净拖累
+
+### 过程性修正
+- `run_short_alpha_formal_head2head.py` 已改为让 `baseline_current` 读取 `baseline` 家族预算，而不是误继承 `short_alpha` 预算
+- `run_dynamic_graph_formal_ablation_matrix.py` 已改为让 `plain_baseline` 读取 `baseline` 家族预算，而不是误继承 `dynamic_graph` 预算
+- `run_family_epoch_frontier_calibration.py` 已支持：
+  - `late_preformal` calibration preset
+  - subset rerun 后 merge 回 latest manifest
+- `run_dynamic_graph_formal_ablation_matrix.py` 还新增了 `--force-raw-cache-path`
+- dynamic-graph 补跑时曾在 `dynamic_graph_topk4_20250318_20260331` 遇到 TQ 初始化失败；最终通过复用 `daily_research/cache/deep_alpha/raw/6e5203c8cdec3a61.pkl` 成功续跑并收口
+
+### short_alpha production promotion 与 active default 切换完成
+- 先把 `state_liquidity_listwise_v1` 按 production full-fit 路线重训到：
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - active production run = `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260403_r1`
+- 随后补做 production 口径 recent realistic replay：
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_replays/short_alpha_production_20260403`
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_replays/baseline_current_production_20260403`
+- multi-window H2H 结果写入：
+  - `daily_research/output/short_alpha_production_promotion_eval_20260405_r1/recent_h2h_short_alpha_production_vs_baseline_current_production/summary.md`
+- production 口径结论：
+  - `short_alpha_production_realistic` full-period annual / excess annual / excess Sharpe = `0.68% / -10.21% / -0.618`
+  - `baseline_current_production_realistic` = `-10.36% / -20.06% / -1.288`
+  - excess annual wins = `4/4`
+  - excess Sharpe wins = `4/4`
+- 因此将 active execution strategy 正式切换为：
+  - `daily_research/output/active_execution_strategy.json`
+  - `strategy_name = state_liquidity_listwise_v1_execfirst_winner`
+  - `production_root = daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+- 切换后已用 `yolos` 实跑默认 `run_trade_plan.py`：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+  - `target_position_count = 19`
+  - `production_model_retrain_status = fresh`
+- 仍需保留的风险：
+  - 当前 short-alpha production full-fit 的 `training_diagnostics` 显示 `selected_epoch = 21 / 24`
+  - `objective_aligned_budget_pressure = true`
+- 因此默认执行虽然已切换成功，但下一步维护重点不是换回旧 baseline，而是继续做 short-alpha production recipe 的 epoch extension
+
+### 月度分析提升为研究主视角
+- 为了把“按月暴露问题、按月找优化方向”放到最重要位置，补上了统一月度诊断链路：
+  - `daily_research/baseline/backtest.py` 新增月度诊断函数
+  - `daily_research/deep_alpha/run_deep_alpha_research.py` 现在会写：
+    - `primary_research_monthly_summary.csv`
+    - `primary_research_monthly_diagnostics.json`
+    - `monthly_backtest_diagnostics.json`
+    - `execution_aligned_monthly_backtest_diagnostics.json`
+  - `daily_research/baseline/backtest_external_score_panel.py` 现在会写：
+    - `monthly_backtest_summary.csv`
+    - `monthly_backtest_diagnostics.json`
+- 三套 formal summary 也改成月度优先：
+  - `deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1/summary.md`
+  - `short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1/summary.md`
+  - `dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1/summary.md`
+  - 现在都先写 `Monthly Priority Summary`，再写 `Mean Summary`
+- 统一关注字段固定为：
+  - `positive_month_ratio`
+  - `median_monthly_return`
+  - `worst_monthly_return`
+  - `top3_positive_month_share`
+  - `longest_negative_streak`
+- 另外补跑了轻量 smoke：
+  - `daily_research/output/deep_alpha_monthly_focus_smoke_20260405_r1`
+  - 已验证新文件真实落盘，且 `primary_research_monthly_diagnostics` 会直接出现在终端 summary 里
+
+### 预算归一化后月度总判已重做
+- 为避免继续沿用 `2026-04-03 monthly_r1` 的旧排序，新增统一复盘入口：
+  - `daily_research/deep_alpha/run_monthly_landscape_review.py`
+- 当前最新汇总输出：
+  - `daily_research/output/deep_alpha_monthly_landscape_review_20260405_r1/report.md`
+  - `track_profile_summary.csv`
+  - `pairwise_compare_summary.csv`
+  - `monthly_panel_long.csv`
+- 这次总判使用的证据集合：
+  - `deep_alpha_architecture_execalign_formal_20260404_monthly_budgetnorm_r1`
+  - `short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+  - `dynamic_graph_ablation_formal_20260404_monthly_budgetnorm_r1`
+  - `short_alpha_production_promotion_eval_20260405_r1`
+- 更新后的核心结论：
+  - `structure_context_only` 的旧月度判断大体仍成立，但只保留为结构诊断，不再作为执行升级方向
+  - `short_alpha` 的旧“更稳但不够爆”判断被预算归一化 formal 推翻；当前应视为 liquid500 主执行升级线
+  - `dynamic_graph_no_priors` 仍是 mainboard / liquid800 主研究线，但更精确的表述应是：priors 没能带来更高的净收益兑现
+- production 月度拆解也一并纳入，但当前真正有信息量的 production 月份主要集中在 `2026-03` 上线之后；prelaunch 月份基本相同，因此 production 月度样本仍需继续累计
+
+### 月度 checkpoint objective 正式接入主链
+- 为了把“月度兑现质量”进一步前推到训练判决，正式扩充了 checkpoint objective：
+  - `daily_research/deep_alpha/research_objective.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+- 新增可直接选用的月度目标至少包括：
+  - `primary_monthly_positive_ratio`
+  - `primary_monthly_median_return`
+  - `primary_monthly_robust_score`
+- 单次 run 现在会新增落盘：
+  - `primary_research_monthly_objectives.json`
+- `run_architecture_execution_objective_head2head.py`
+- `run_epoch_budget_formal_matrix.py`
+- `run_family_epoch_frontier_calibration.py`
+  也都同步接受新的 checkpoint objective 枚举
+- 这样后续 fresh run / fresh frontier / fresh production retrain 已经可以直接研究：
+  - 按 `primary_annual_return` 选 checkpoint
+  - 与按 `primary_monthly_robust_score` 选 checkpoint
+  哪条更能兑现成执行净收益
+
+### short-alpha production recipe 的 strict-resume epoch extension 完成
+- 为了不浪费已经训练出的 checkpoint，同时验证当前 production recipe 是否还存在预算压力，新增入口：
+  - `daily_research/deep_alpha/run_short_alpha_production_epoch_extension.py`
+- 这条入口默认读取：
+  - `daily_research/output/deep_alpha_short_alpha_execalign_production_default/production_retrain_manifest.json`
+  - 然后沿当前 production recipe 做 `24 -> 32 -> 40` strict resume continuation
+- 本次真实输出目录为：
+  - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1`
+- recent replay 月度优先 ranking 结果为：
+  - `e24`: excess annual / Sharpe = `-10.21% / -0.618`，`budget_pressure = true`
+  - `e32`: excess annual / Sharpe = `-8.76% / -0.499`，`budget_pressure = false`
+  - `e40`: 与 `e32` replay 基本打平，但作为当前 latest best recipe 被正式同步到 production root
+- 最新 production root 指向：
+  - `daily_research/output/short_alpha_production_epoch_extension_20260405_r1/runs/short_alpha_production_e40`
+- production root 内部 `metrics.json` 当前显示：
+  - `resume_mode = strict`
+  - `selected_epoch = 25 / 40`
+  - `objective_aligned_budget_pressure = false`
+  - `status = stable`
+- `production_retrain_manifest.json` 也同步更新为：
+  - `active_production_run_dir = short_alpha_production_e40`
+- 之后已再次用 `yolos` 实跑默认 `run_trade_plan.py`：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+  - `target_position_count = 13`
+  - `production_model_retrain_status = fresh`
+
+### 这次 production extension 的方法学边界
+- 这次 `24 -> 32 -> 40` extension 虽然已经完成，但它走的是 strict resume continuation
+- 为了保证同一训练链历史可比，整个 production chain 继续保持：
+  - `checkpoint_selection_objective = primary_annual_return`
+- 因而“月度 checkpoint objective 是否优于年化 objective”这件事，并没有在这次 strict resume extension 里混做
+- 这条问题已留给下一轮 fresh run / warm-start restart 去正式比较
+
+### liquid500 short-alpha fresh checkpoint objective compare 完成
+- 为了把“年化 objective vs 月度 objective”真正从口头判断变成 formal 证据，新增入口：
+  - `daily_research/deep_alpha/run_short_alpha_checkpoint_objective_comparison.py`
+- 同时把 `run_short_alpha_formal_head2head.py` 升成可显式接收：
+  - `--research-objective-mode`
+  - `--checkpoint-selection-objective`
+  - `--checkpoint-selection-min-improvement`
+  - `--execution-alignment-objective`
+- 这样 short-alpha formal 可以正式对照：
+  - `primary_annual_return`
+  - `primary_monthly_robust_score`
+- 为了避免重复烧一整轮 annual 算力，这次 annual 侧复用的是当前稳定 budget-normalized baseline：
+  - `daily_research/output/short_alpha_formal_head2head_20260404_monthly_budgetnorm_r1`
+- monthly 侧新鲜重跑到：
+  - `daily_research/output/short_alpha_formal_head2head_20260405_monthly_checkpoint_r1`
+- 对照总表落在：
+  - `daily_research/output/short_alpha_checkpoint_objective_comparison_20260405_r1`
+
+### 这次 objective compare 的核心结果
+- `primary_monthly_robust_score` 并不是无效。
+- 它让 `state_liquidity_listwise_v1` 的绝对指标变得更高：
+  - mean excess annual：`31.86% -> 33.78%`
+  - mean excess Sharpe：`1.797 -> 1.985`
+  - positive-month ratio：`66.67% -> 69.44%`
+  - median monthly excess：`1.52% -> 2.78%`
+- 但它也把 `baseline_current` 抬得更多：
+  - baseline mean excess annual：`15.72% -> 22.66%`
+  - baseline mean excess Sharpe：`0.934 -> 1.655`
+  - baseline positive-month ratio：`58.33% -> 63.89%`
+  - baseline median monthly excess：`0.77% -> 1.69%`
+- 结果就是 candidate 相对 baseline 的净优势反而被压缩：
+  - excess annual delta：`16.15% -> 11.12%`
+  - excess Sharpe delta：`0.863 -> 0.330`
+  - Sharpe wins：`3/3 -> 1/3`
+- 因此当前 liquid500 short-alpha 主线的正式判决是：
+  - `checkpoint_selection_objective` 仍保持 `primary_annual_return`
+  - `primary_monthly_robust_score` 继续保留为 fresh-run challenger objective，而不是主线默认 objective
+
+### production fresh retrain 侧的处理
+- 这轮没有把 monthly objective 继续推进到 production fresh retrain 实跑。
+- 原因不是入口不通，而是 formal objective compare 已经给出足够明确的否定信号：
+  - monthly objective 提高了绝对水平
+  - 但削弱了 liquid500 主线 candidate 相对 baseline 的 discrimination
+- 与此同时，也把 `daily_research/execution/update_default_candidate_production.py` 的 CLI 补成了可显式 override：
+  - `--research-objective-mode`
+  - `--checkpoint-selection-objective`
+  - `--checkpoint-selection-min-improvement`
+  - `--execution-alignment-objective`
+- 这样后续若某个家族/候选真的在 formal 层证明 monthly objective 更优，就可以直接推到 production fresh retrain，而不需要再改代码
+
+## 2026-04-05 - liquid500 short_alpha execution policy profit-max audit
+- 为解决“执行端不该被固定成少数旧 profile”这个问题，扩展了 `daily_research/deep_alpha/execution_alignment.py`：
+  - 新增 `profit_max_v1` execution policy set
+  - 默认 `train_eval_auto` 现在扫描更宽的 execution policy 空间，而不是只扫旧四档 profile
+  - execution alignment artifact / metrics / active strategy manifest 现在会显式保存 `execution_policy_label` 与 `execution_alignment_selected_profile_spec`
+- 新增 `daily_research/deep_alpha/run_execution_policy_audit.py`，可以直接对任意 deep_alpha run 的 raw/formal/live panels 做 execution policy replay scan。
+- 对 `state_liquidity_listwise_v1` 当前三窗 formal runs 做了 `excess_annual_return` 目标下的 execution policy 审计：
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20230216_20240229_20260405_r1`
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20240301_20250317_20260405_r1`
+  - `daily_research/output/short_alpha_formal_execution_policy_audit_20260405_r1`
+- 聚合总表在 `daily_research/output/short_alpha_execution_policy_formal_review_20260405_r1`。
+- 三窗 formal 的 mean excess annual / Sharpe 聚合结果：
+  - `regoff_k1_5d_ensemble_native_anchor = 53.29% / 2.170`
+  - 旧 active policy `regoff_k2_10d_ensemble_native_anchor = 28.93% / 1.655`
+- 因此把 active strategy 从“execution_aligned panel + regoff_k2_10d”切成了“raw panel + regoff_k1_5d execution policy spec”：
+  - `strategy_name = state_liquidity_listwise_v1_execfirst_profitmax_execution_winner`
+  - `panel_mode = raw`
+  - `execution_policy_label = regoff_k1_5d_ensemble_native_anchor`
+- 默认 `run_trade_plan.py` 已用新 active strategy 实跑通过：
+  - `signal_date = 2026-04-03`
+  - `execution_date = 2026-04-06`
+- `candidate_label = state_liquidity_listwise_v1_20250318_20260331__regoff_k1_5d_ensemble_native_anchor__active`
+- `target_position_count = 4`
+
+## 2026-04-05 - liquid500 short-alpha weak-month / conditional policy / profit-max refresh / dynamic_graph challenger 收口
+- 为把“当前 liquid500 主线到底还差什么”从口头判断变成正式证据，新增了三条入口：
+  - `daily_research/deep_alpha/run_short_alpha_weak_month_review.py`
+  - `daily_research/deep_alpha/run_short_alpha_conditional_execution_policy_review.py`
+  - `daily_research/deep_alpha/run_short_alpha_profitmax_production_refresh.py`
+- 同时补了一条 liquid500 同宇宙 challenger formal：
+  - `daily_research/deep_alpha/run_dynamic_graph_liquid500_challenger_head2head.py`
+- 先修了 production refresh 基础设施：
+  - `daily_research/execution/update_default_candidate_production.py` 新增显式 override：
+    - `--execution-alignment-mode`
+    - `--execution-alignment-profile`
+    - `--execution-alignment-candidate-profiles`
+  - 这样 production fresh retrain 现在可以被显式锁到某条 execution policy，而不是只能继承 source run 的旧 policy
+- weak-month review 正式输出在：
+  - `daily_research/output/short_alpha_weak_month_review_20260405_r1`
+- 这轮 weak-month review 的核心结果：
+  - `state_liquidity_listwise_v1` 在 `36` 个月里有 `16` 个弱月
+  - 弱月主要集中在 `trend_down_low_vol` 与 `trend_up_low_vol`
+  - 弱月里 candidate 相对 baseline 的平均 excess 月收益差为 `-4.43%`
+  - 同期最优 policy 相对当前 `regoff_k1_5d_ensemble_native_anchor` 仍有平均 `8.04%` lift
+  - 典型坏月包括：
+    - `2025-07`
+    - `2024-01`
+    - `2025-10`
+- 条件化 execution policy review 正式输出在：
+  - `daily_research/output/short_alpha_conditional_execution_policy_review_20260405_r1`
+- 这轮 conditional review 采用的是 leave-window-out 的 month-start-regime mapping；结果对静态 `regoff_k1_5d_ensemble_native_anchor` 为 `0/3` 全败：
+  - conditional mean excess annual / Sharpe = `37.28% / 1.366`
+  - static mean excess annual / Sharpe = `53.29% / 2.170`
+  - 结论：当前不把简单 regime-conditioned execution policy 推到 active default
+- profit-max production fresh refresh 正式输出在：
+  - `daily_research/output/short_alpha_profitmax_production_refresh_20260405_r1`
+- 这轮 refresh 的 protocol 是：
+  - source formal run 仍用 `state_liquidity_listwise_v1_20250318_20260331`
+  - review retrain 显式锁到 `execution_alignment_mode = profile`
+  - profile = `regoff_k1_5d_ensemble_native_anchor`
+  - review retrain 先落到独立 review root，再在同一 policy 下与当前 production root 做 recent live replay H2H
+- refresh 结果很明确：
+  - current production 在同一 `regoff_k1_5d_ensemble_native_anchor` 下的 recent replay = `7.77% / 0.517`
+  - review production = `-15.03% / -0.910`
+  - full-period delta = `-21.85% / -1.368`
+  - named-window annual wins/losses = `0/2`
+  - named-window Sharpe wins/losses = `0/2`
+  - 结论：fresh review 不晋升，当前 production root 与 active strategy 保持不变
+- dynamic_graph liquid500 同宇宙 challenger 正式输出在：
+  - `daily_research/output/dynamic_graph_liquid500_challenger_20260405_r1`
+- 这轮同宇宙 formal 的核心结果：
+  - `state_liquidity_listwise_v1 = 34.85% / 2.196`
+  - `dynamic_graph_no_priors = 33.21% / 1.956`
+  - `baseline_current = 16.48% / 1.147`
+  - `dynamic_graph_no_priors` 前两窗领先，但最近窗 `20250318_20260331` 明显落后：
+    - excess annual delta = `-33.93%`
+    - excess Sharpe delta = `-1.714`
+  - 结论：`dynamic_graph_no_priors` 仍保留为 liquid800 / mainboard 主研究线，但当前不是 liquid500 默认执行升级答案
+- 这轮总判决：
+  - liquid500 当前最该做的不是“简单切条件化 policy”或“立即 fresh retrain 替换 current production”
+  - 而是围绕 `trend_down_low_vol` / `trend_up_low_vol` 的 weak months 做 targeted repair
+  - `dynamic_graph_no_priors` 也已不再是 liquid500 侧的高优先级 challenger；它继续留在 liquid800 / mainboard 独立推进
+
+## 2026-04-06 全局 deployable leaderboard 接线
+- 目标：
+  - 不再把 `liquid500` 默认执行写死在 wrapper 里
+  - 建立跨 `liquid500 / liquid800` 的统一 deployable leaderboard
+  - 让默认执行直接跟随当前全局第一名
+- 代码改动：
+  - `daily_research/execution/strategy_manifest.py`
+  - `daily_research/execution/research_candidate_profiles.py`
+  - `daily_research/execution/entrypoint_utils.py`
+  - `daily_research/execution/run_trade_plan.py`
+  - `daily_research/deep_alpha/run_formal_execution_policy_review.py`
+  - `daily_research/execution/run_global_deployable_strategy_leaderboard.py`
+- 新协议：
+  - active manifest 新增 `liquidity_pool_name / liquidity_pool_size`
+  - 默认执行 preflight 先读 active winner 的 pool，再自动刷新对应 `liquid500` 或 `liquid800`
+  - “全项目最高”只允许在 `global_deployable_non_capacity_adjusted_v1` 口径下表述
+- dynamic_graph 同口径补验：
+  - 输出目录：`daily_research/output/dynamic_graph_no_priors_execution_policy_formal_review_20260406_r1`
+  - 最优 execution policy：`regoff_k3_5d_ensemble_native_anchor`
+  - mean excess annual / Sharpe：`33.27% / 1.290`
+- 全局 deployable leaderboard：
+  - 输出目录：`daily_research/output/global_deployable_strategy_leaderboard_20260406_r1`
+  - rank 1：`state_liquidity_listwise_v1 + regoff_k1_5d_ensemble_native_anchor = 53.29% / 2.170`
+  - rank 2：`dynamic_graph_no_priors + regoff_k3_5d_ensemble_native_anchor = 33.27% / 1.290`
+- active default 同步：
+  - `active_execution_strategy.json` 已改写为 `state_liquidity_listwise_v1_execfirst_profitmax_global_winner`
+  - 当前 active manifest 已保存：
+    - `liquidity_pool_name = liquid500`
+    - `execution_policy_label = regoff_k1_5d_ensemble_native_anchor`
+    - `global_deployable_summary_rows`
+- 验证：
+  - `py_compile`
+  - `run_trade_plan.py`
+  - `doc_guard.py check`
+  - 额外验证 `liquid800` pool preflight 可正确解析并返回 `liquid800_latest.txt`
+
+## 2026-04-06 `deep_alpha` 架构复杂度 / 深度 / 结构实验按当前协议重做
+
+### 背景
+- 用户指出 `2026-04-02` 那套架构复杂度 / 深度 / 结构实验仍受到旧训练预算与旧协议限制。
+- 需要按当前正式协议重做，而不是继续引用旧的 `8 epoch` 时代结论。
+- 这次的目标不是只看 headline 年化，而是基于：
+  - current family epoch budget
+  - `execution_first`
+  - `profit_max_v1`
+  - 月度优先判读
+  重新判定当前架构线到底还有哪些有效信号、哪些已被推翻。
+
+### 新入口
+- 新增统一 runner：
+  - `daily_research/deep_alpha/run_architecture_protocol_refresh.py`
+- 这条入口会顺序完成：
+  - recent complexity / depth / encoder / graph / context / structure 全矩阵
+  - recent category winner 选择
+  - multi-window formal H2H
+  - 月度诊断、RankIC 与 training budget pressure 汇总
+
+### 当前协议
+- universe：
+  - `liquid500`
+- benchmark：
+  - `000300.SH`
+- research objective：
+  - `execution_first`
+- checkpoint objective：
+  - `primary_annual_return`
+- execution alignment：
+  - `train_eval_auto / robust_composite / profit_max_v1`
+- realistic cost：
+  - `3 / 7 / 10 bps`
+- family epoch budget manifest：
+  - `baseline -> 4`
+  - `structure -> 12`
+- 输出目录：
+  - `daily_research/output/deep_alpha_architecture_protocol_refresh_20260406_r1`
+
+### recent 全矩阵 category winners
+- complexity：
+  - `capacity_small_h64`
+  - `14.01% / 1.015`
+- depth：
+  - `depth_deep_l4`
+  - `25.17% / 1.449`
+- encoder：
+  - `encoder_transformer_v1`
+  - `87.47% / 2.915`
+- graph：
+  - `graph_off_plain`
+  - `36.41% / 2.155`
+- context：
+  - `state_context_only`
+  - `20.52% / 1.185`
+- structure：
+  - `structure_context_only`
+  - `48.59% / 2.543`
+
+### formal 月度优先总判
+- `baseline_current`：
+  - formal mean excess annual / Sharpe = `22.46% / 1.695`
+  - mean positive-month ratio = `72.22%`
+  - worst month = `-6.39%`
+  - 月度优先总判 rank 1
+- `structure_context_only`：
+  - formal mean excess annual / Sharpe = `31.57% / 1.717`
+  - 但 mean positive-month ratio 只有 `58.33%`
+  - worst month = `-8.99%`
+  - 说明它的 raw 架构优势部分成立，但坏月和稳定性仍落后 baseline
+- `encoder_transformer_v1`：
+  - formal mean excess annual / Sharpe = `27.07% / 0.874`
+  - `20240301_20250317` 仍有 budget pressure
+  - recent 爆发很强，但 formal 稳定性不足
+- `graph_off_plain`：
+  - formal mean excess annual / Sharpe = `17.47% / 1.027`
+  - 两条旧窗仍有 budget pressure
+  - 说明 plain graph 方向并未失效，但当前负结论还不能封死
+- `depth_deep_l4`：
+  - formal mean excess annual / Sharpe = `15.40% / 0.920`
+  - 改善了月度中位数，但没有打赢 baseline
+- `state_context_only`：
+  - formal mean excess annual / Sharpe = `4.04% / 0.247`
+  - 当前不是主升级方向
+- `capacity_small_h64`：
+  - formal mean excess annual / Sharpe = `9.28% / 0.629`
+  - 说明当前主线问题不是“模型容量不够”
+
+### 当前判断
+- 当前架构线最重要的新结论不是“谁 recent 爆得最高”，而是：
+  - `baseline_current` 在 current-protocol formal 下仍是月度优先 rank 1
+  - 因此主瓶颈仍不是继续盲目加深 / 加大 / 换 backbone
+- `structure_context_only` 应继续保留为 raw 架构 challenger，但不再按“差一步就能上线”的心智推进。
+- `encoder_transformer_v1` 与 `graph_off_plain` 是当前最值得继续跟进的两条架构候选：
+  - 前者问题是稳定性与 regime 泛化
+  - 后者问题是旧窗 budget pressure 尚未解除
+- `state_context_only` 与容量线当前都没有提供足够强的新证据。
+
+### 后续方向
+1. liquid500 主线仍优先做 weak-month repair、score-to-weight 映射和执行兑现质量。
+2. architecture 线如需继续推进，优先顺序改为：
+   - `graph_off_plain` 预算补齐与旧窗复核
+   - `encoder_transformer_v1` 弱窗与稳定性复核
+   - 再决定是否值得进入 liquid500 challenger gate
+3. 不再把“更大、更深”本身视为默认升级方向。
+
+### 验证
+- `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_architecture_protocol_refresh.py`
+- `py_compile daily_research/deep_alpha/run_architecture_protocol_refresh.py`
+- 输出产物：
+  - `report.md`
+  - `recent_matrix_summary.csv`
+  - `recent_category_winners.csv`
+  - `formal_window_detail.csv`
+  - `formal_profile_summary.csv`
+
+## 2026-04-06 - short-alpha score-to-weight repair + graph_off_plain budget review + encoder_transformer stability review
+
+### 背景
+- 用户要求不要只停留在“后续方向”，而是把计划真正落地。
+- 上一轮留下的三条明确待办是：
+  - liquid500 short-alpha 主线继续做 weak-month repair、score-to-weight 映射和执行兑现质量
+  - `graph_off_plain` 做预算补齐与旧窗复核
+  - `encoder_transformer_v1` 做弱窗与稳定性复核
+- 这次目标不是再写规划，而是把这三条链全部跑完，并据此重排真正的后续优先级。
+
+### 新增入口
+- `daily_research/deep_alpha/run_short_alpha_score_weight_repair_review.py`
+- `daily_research/deep_alpha/run_graph_off_plain_budget_review.py`
+- `daily_research/deep_alpha/run_encoder_transformer_stability_review.py`
+- 同时扩展了 `daily_research/deep_alpha/execution_alignment.py`：
+  - 新增 `weak_month_repair_v1`
+  - 补进更强集中度 / 更强幂次 / 更长持有期的静态 bridge / score-to-weight profile
+
+### short-alpha score-to-weight / weak-month repair review
+- 输出目录：
+  - `daily_research/output/short_alpha_score_weight_repair_review_20260406_r1`
+- 核心结果：
+  - `weak_month_repair_v1` 的最优 profile 仍是 `regoff_k1_5d_ensemble_native_anchor`
+  - best mean excess annual / Sharpe = `53.29% / 2.170`
+  - 与当前 active policy 完全持平，没有新的静态 bridge/profile 翻案
+- weak-month 侧补充结论：
+  - weak months = `16 / 36`
+  - weak-month ratio = `44.44%`
+  - avg best-policy lift vs current = `7.55%`
+  - avg candidate gap vs best policy = `7.80%`
+  - top weak-month repair profiles 包括：
+    - `regoff_k1_20d_ensemble_native_anchor`
+    - `topk1_1d_regoff`
+    - `regon_k1_10d_ensemble_native_anchor`
+- 直接判决：
+  - 扩大静态 score-to-weight / bridge 搜索空间已经不再是当前 liquid500 主线的最高 ROI 动作
+  - 后续要转向 targeted weak-month repair，而不是继续扩大静态 profile 集合
+
+### graph_off_plain 预算补齐与旧窗复核
+- 输出目录：
+  - `daily_research/output/graph_off_plain_budget_review_20260406_r1`
+- 这条链的做法是：
+  - 直接复用 architecture refresh 里的旧窗 `graph_off_plain` run
+  - 对旧窗继续扩预算
+  - 再和 baseline 以及 recent window 一起拼成 refreshed three-window summary
+- 关键结果：
+  - `20230216_20240229` 的高预算 annual / Sharpe 有提升，但 monthly-first 仍落在 `e4`
+  - `20240301_20250317` 的高预算 annual / Sharpe 也有提升，但 monthly-first 仍落在 `e4`
+  - refreshed three-window mean excess annual / Sharpe = `17.47% / 1.027`
+  - baseline_current = `22.46% / 1.695`
+  - annual wins vs baseline = `1/3`
+  - Sharpe wins vs baseline = `0/3`
+- 直接判决：
+  - `graph_off_plain` 预算补齐后仍不通过 liquid500 challenger gate
+  - 这条线当前只保留为 monitored architecture branch，不再占主优先级
+
+### encoder_transformer_v1 弱窗与稳定性复核
+- 输出目录：
+  - `daily_research/output/encoder_transformer_stability_review_20260406_r1`
+- 复核中先尝试 strict resume continuation：
+  - 失败原因是 resume artifact 的 `feature_names` 与当前 dataset 不一致
+  - 系统拒绝把这类 continuation 视为同一训练链
+- 随后尝试 warm-start continue：
+  - 同样因为 `feature_names` 一致性校验而失败
+- 因此这条 review 最终改成 fresh rerun：
+  - 对预算压力最大的窗口 `20240301_20250317` 重新跑 `4 / 8 / 12 / 16 / 24`
+  - 再与其余两窗现有 run 拼成 refreshed three-window stability summary
+- 核心结果：
+  - weak window best budget = `e24`
+  - weak-window best excess annual / Sharpe = `25.19% / 1.546`
+  - 但 `budget_pressure = true`
+  - refreshed three-window mean excess annual / Sharpe = `34.68% / 1.343`
+  - baseline_current = `22.46% / 1.695`
+  - annual wins vs baseline = `2/3`
+  - Sharpe wins vs baseline = `2/3`
+  - 但 encoder 的：
+    - mean positive-month ratio = `61.11%`
+    - worst month = `-15.30%`
+    - mean top3 positive-month share = `79.27%`
+- 直接判决：
+  - `encoder_transformer_v1` 的上行潜力是真的
+  - 但它当前仍属于 high-upside but unstable
+  - 现在还不通过 liquid500 challenger gate
+
+### 这轮之后的总判决
+- liquid500 主线的最优下一步不是继续扩大静态 bridge/profile 搜索。
+- liquid500 主线的最优下一步是：
+  - targeted weak-month repair
+  - score-to-weight 映射
+  - 执行兑现质量
+- architecture 线如果继续推进，优先顺序应改成：
+  - 先做 `encoder_transformer_v1` 的稳定性修复
+  - `graph_off_plain` 仅做监控性复核
+  - 不再把“更大、更深”本身当作默认升级方向
+
+### 同步
+- 已同步更新：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+### 验证
+- `py_compile` 通过：
+  - `daily_research/deep_alpha/execution_alignment.py`
+  - `daily_research/deep_alpha/run_short_alpha_score_weight_repair_review.py`
+  - `daily_research/deep_alpha/run_graph_off_plain_budget_review.py`
+  - `daily_research/deep_alpha/run_encoder_transformer_stability_review.py`
+- 真实 `yolos` 实跑通过：
+  - `run_short_alpha_score_weight_repair_review.py`
+  - `run_graph_off_plain_budget_review.py`
+  - `run_encoder_transformer_stability_review.py`
+
+## 2026-04-06 - workspace maintenance + hotset trim
+
+### 背景
+- 用户要求先总览 `daily_research` 当前项目状态，再做整理维护，并清理不重要缓存。
+- 本轮目标不是改研究判决，而是：
+  - 先按分脑规则确认什么是活跃真源、什么是可安全处理的热区
+  - 再只对“已有策略声明、且不影响当前执行真源”的缓存做维护
+
+### 项目总览结论
+- `daily_research` 当前仍是正式生产主线：
+  - active strategy 真源仍是 `daily_research/output/active_execution_strategy.json`
+  - 当前默认执行与当前研究判决没有变化
+- 当前体积压力主要来自：
+  - `daily_research/cache`
+  - 不是 `execution/models` 或 `execution/output`
+- `daily_research/output` 虽然体积很大，但按当前 `archive_policy.json` 规则：
+  - 没有超出热集的候选
+  - 主要因为最近输出都在 `keep_recent_days` / `keep_recent_count` 保护范围内
+  - 不应为了降体积而盲动最近实验产物
+
+### 维护前快照
+- `workspace_maintenance.py report` 显示：
+  - `daily_research = 518.78 GB`
+  - `daily_research/cache = 448.32 GB`
+  - `daily_research/output = 64.39 GB`
+  - 归档候选合计 `430.34 GB`
+- 归档候选主要来自：
+  - `deep_alpha/corpus = 378.00 GB`
+  - `deep_alpha/features = 19.16 GB`
+  - `advanced_ml/raw = 2.80 GB`
+  - `advanced_ml/prepared = 28.33 GB`
+  - `advanced_ml/ml_scores = 2.05 GB`
+- 同时检测到：
+  - `__pycache__ dirs = 5`
+  - `*.pyc files = 55`
+
+### 本轮维护动作
+- 执行官方缓存归档：
+  - `workspace_maintenance.py archive --apply --batch-name 20260406_hotset_trim_r1`
+- 归档结果：
+  - moved items = `269`
+  - moved size = `430.34 GB`
+  - manifest：
+    - `daily_research/archive/manifests/archive_20260406_hotset_trim_r1.json`
+- 执行字节码缓存清理：
+  - `workspace_maintenance.py clean --targets pycache --apply`
+- 清理结果：
+  - matched items = `60`
+  - removed size = `2.66 MB`
+
+### 维护后快照
+- 复跑 `workspace_maintenance.py report` 后：
+  - `daily_research/cache = 17.98 GB`
+  - `daily_research/output = 64.39 GB`
+  - `daily_research/archive = 436.40 GB`
+  - `archive candidates = 0`
+  - `__pycache__ dirs = 0`
+  - `*.pyc files = 0`
+
+### 剩余告警与判读
+- `daily_research/output` 仍高于通用阈值，但当前没有符合策略的归档候选：
+  - 说明问题不是“忘了清理旧输出”
+  - 而是最近几天活跃实验本身较重
+- `deep_alpha/corpus` 与 `deep_alpha/features` 仍高于各自 hot budget：
+  - 不是旧缓存没清掉
+  - 而是当前最新 hot set 体积本身已经超过 policy 里的硬预算
+- 当前不应静默把 `keep_recent_count` 继续下调来追求表面达标：
+  - 这些剩余文件全部是最新热集
+  - 需要在后续专门确认“是否接受更激进的 hot-set 收缩”后，才适合改 `archive_policy.json`
+
+### 同步
+- 本轮只更新：
+  - `daily_research/brain/episodic_memory.md`
+- 不更新：
+  - `working_memory.md`
+  - `semantic_memory.md`
+  - `project_map.md`
+- 原因：
+  - 当前研究判决、active default、项目边界都没有变化
+  - 变化只属于一次带日期的维护动作
+
+### 验证
+- 官方维护脚本实跑通过：
+  - `daily_research/tools/workspace_maintenance.py report`
+  - `daily_research/tools/workspace_maintenance.py archive --apply`
+  - `daily_research/tools/workspace_maintenance.py clean --targets pycache --apply`
+
+## 2026-04-06 - targeted weak-month repair implementation + leave-window-out review
+
+### 背景
+- 用户要求不要只停留在“下一步建议”，而是认真规划后续工作并直接做完。
+- 当前 short-alpha 主线已知事实是：
+  - 扩大的静态 score-to-weight / bridge 搜索没有翻案
+  - simple regime-conditioned execution policy 已正式失败
+  - 因此最合理的下一步是把 weak-month repair 从“泛条件化”收窄到“窄触发局部覆写”
+
+### 这轮规划
+- 先补一个新的 targeted repair runner：
+  - `daily_research/deep_alpha/run_short_alpha_targeted_weak_month_repair_review.py`
+- 做法分四步：
+  - 先复用 `run_short_alpha_weak_month_review.py` 生成 weak-month 真表
+  - 再在 training windows 的 weak months 上学习 trigger -> policy 候选
+  - 但 plan 选择不只看 weak months，而是在全部 training months 上打分
+  - 最后对 test window 拼接 hybrid target-weight panel 并做真实 replay
+
+### 第一轮：粗 trigger `month_start_regime`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `50.46% / 2.108`
+  - static = `53.29% / 2.170`
+  - delta = `-2.83% / -0.062`
+- 逐窗：
+  - `20230216_20240130`：
+    - `not_ready -> topk1_1d_regoff`
+    - 相对静态改善 `+8.70% / +0.392`
+  - `20240301_20250227`：
+    - `static_only`
+  - `20250318_20260226`：
+    - `trend_down_low_vol -> regon_k1_10d_ensemble_native_anchor`
+    - 相对静态退化 `-17.20% / -0.577`
+- 结论：
+  - 粗 `regime` trigger 仍然太宽
+  - 这条线不能作为 default upgrade 答案
+
+### 第二轮：更细 trigger 复核
+- 我把 runner 扩展成可切换 trigger 粒度：
+  - `regime`
+  - `market_state`
+  - `trend_vol`
+  - `regime_market_state`
+
+### 第二轮 A：`trend_vol`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_trend_vol_review_20260406_r1`
+- 结果：
+  - 所有窗都退回 `static_only`
+  - mean excess annual / Sharpe 与静态完全一致：`53.29% / 2.170`
+- 结论：
+  - `trend_bucket + vol_bucket` 本身不够形成有效修复触发键
+
+### 第二轮 B：`regime_market_state`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `56.19% / 2.301`
+  - static = `53.29% / 2.170`
+  - delta = `+2.90% / +0.131`
+- 逐窗：
+  - `20230216_20240130`：
+    - `not_ready|unknown -> topk1_1d_regoff`
+    - 相对静态改善 `+8.70% / +0.392`
+  - `20240301_20250227`：
+    - `static_only`
+  - `20250318_20260226`：
+    - `static_only`
+- 直接判决：
+  - 细化到 `regime_market_state` 后，targeted weak-month repair 首次转正
+  - 当前唯一有证据的窄触发映射是：
+    - `not_ready|unknown -> topk1_1d_regoff`
+- 但它目前只在最早窗触发；中窗与最新窗仍保持静态
+- 因此它现在只算 monitored repair candidate，不算 active default 升级
+
+### 第三轮：support / trigger 敏感性复核
+- 我继续补了两条敏感性检查，目的是确认上一条转正结论不是靠放松门槛硬推出来的。
+
+#### 3A. `regime_market_state` + `min_support = 1`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_market_state_support1_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `49.84% / 2.040`
+  - static = `53.29% / 2.170`
+  - delta = `-3.45% / -0.130`
+- 最新窗的影响最明显：
+  - 被强行推广成 `not_ready|unknown -> topk1_1d_regoff`
+  - recent window 直接退化 `-19.07% / -0.782`
+- 结论：
+  - 不能为了让最新窗也触发而把 support 放宽到 `1`
+  - 这会把 monitored repair candidate 推成 overfit
+
+#### 3B. `market_state` 单独触发
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_market_state_support1_review_20260406_r1`
+- 结果：
+  - 所有窗都退回 `static_only`
+  - mean excess annual / Sharpe 与静态完全一致：`53.29% / 2.170`
+- 结论：
+  - `market_state` 单独使用不够形成有效 month-start repair trigger
+
+### 第四轮：month-start 权重签名触发复核
+- 为了继续往 `score -> weight -> execution` 推进，我没有再扩 execution policy 集合，而是给 targeted repair runner 增加了：
+  - `regime_signal_shape`
+  - `regime_weight_count`
+- 这两个 trigger 都来自当前静态线月初 target-weight 面板：
+  - `signal_shape` 用 `zero / tight / mid / broad`
+  - `weight_count` 用月初非零持仓数 `count0 / count2 / count3 / count4 / count5`
+
+#### 4A. `regime_signal_shape`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_signal_shape_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `45.71% / 1.895`
+  - static = `53.29% / 2.170`
+  - delta = `-7.59% / -0.275`
+  - `0/3` 窗口全败
+- 结论：
+  - 粗 month-start 权重形状过于宽，不能形成可推广修复
+
+#### 4B. `regime_weight_count`
+- 输出目录：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_weight_count_review_20260406_r1`
+- 结果：
+  - targeted mean excess annual / Sharpe = `51.83% / 2.106`
+  - static = `53.29% / 2.170`
+  - delta = `-1.46% / -0.064`
+  - 也是 `0/3` 窗口全败，但明显比 `signal_shape` 更接近静态线
+- 学到的主要映射：
+  - `trend_down_low_vol|count3 -> regon_k1_10d_ensemble_native_anchor`
+  - `trend_down_low_vol|count5 -> regon_k1_10d_ensemble_native_anchor`
+- 结论：
+  - month-start 持仓宽度本身确实有信息量
+  - 但它单独仍不足以成为可靠 trigger，不能继续靠细分更多静态 month-start 类别推进
+
+### 这轮之后的总判决
+- broad conditional policy 仍然不成立。
+- targeted weak-month repair 这条线没有被否定，但必须继续下钻到：
+  - month-start trigger
+  - month-trigger
+  - score-to-weight / 执行兑现链
+- 从这个节点开始，不再横向撒网试更多 execution policy；除非 active strategy 或 formal protocol 变化，否则不重开 broad execution-policy sweep。
+- 当前最值得保留的结论是：
+  - `regime_market_state` 比粗 `regime` 更适合作为 weak-month repair 触发键
+  - `not_ready|unknown -> topk1_1d_regoff` 是第一条转正的窄映射
+  - 但必须保留 `min_support >= 2` 的保守门槛
+  - 不能为了覆盖最新窗而放松成 `support = 1`
+  - month-start `weight_count / signal_shape` 只能提供弱信息，不足以单独完成修复
+  - 下一步应转向多日 `score / weight` 触发，而不是继续细分静态 month-start 类别
+
+### 同步
+- 已同步更新：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+### 验证
+- `py_compile` 通过：
+  - `daily_research/deep_alpha/run_short_alpha_targeted_weak_month_repair_review.py`
+- 真实 `yolos` 实跑通过：
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime`
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode trend_vol`
+  - `run_short_alpha_targeted_weak_month_repair_review.py --trigger-mode regime_market_state`
+
+## 2026-04-06 - user north-star target aligned
+- 用户明确给出新的北极星目标：
+  - 月度正收益 `> 30%`
+- 我把它接入当前判断，但没有把它直接改写成 formal gate：
+  - 当前 liquid500 最强线月度中位数超额仍只有 `1.49%`
+  - 月度正收益占比 `66.67%`
+  - 最差月份 `-8.24%`
+  - 说明目标与当前可部署前沿之间仍有数量级差距
+- 当前执行口径因此调整为：
+  - 把“月收益 30%+”作为长期 north star
+  - 短期仍先追月度中位数抬升、弱月修复、坏月收浅与执行兑现改善
+  - 避免为了追北极星而把当前研究直接推向过拟合
+
+## 2026-04-06 - short-line expert training package + recent probe
+- 我把“把模型练成短线高手”这件事收敛成了一个可落地工作包，没有去直接堆更深网络，而是先改：
+  - short-alpha profile 体系
+  - short_alpha feature pack
+  - score head / checkpoint objective 穿透
+  - latest-window expert review runner
+- 代码层新增与改动：
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - 新增 `short_expert_v1`
+    - 新增 `short_expert_monthly_v1`
+    - 新增 profile -> CLI 参数桥接函数
+  - `daily_research/deep_alpha/sequence_dataset.py`
+    - 在 `short_alpha_features` 下新增多日短线特征：
+      - `volatility_ratio_3_10`
+      - `range_expansion_1_5`
+      - `body_strength_1_5`
+      - `volume_burst_1_3`
+      - `amount_burst_1_3`
+      - `signal_persistence_5`
+      - `momentum_2`
+      - `rel_momentum_2`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - feature cache version 从 `5` bump 到 `6`
+  - 新增：
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+- 我先尝试按 native short_alpha budget 直接跑完整 recent review，但在当前机器上超时，没有留下可用收口产物。
+- 为了把这轮工作在本回合内做完，我补了一个受控预算探针：
+  - 生成 `daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json`
+  - 把 `short_alpha` budget 暂时压到 `4`
+  - 在 latest formal monthly window 上跑 `short_expert_monthly_v1`
+- 输出目录：
+  - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r1_e4`
+- 结果：
+  - `short_expert_monthly_v1 = 91.76% / 4.852`
+  - 月度正收益占比 `83.33%`
+  - 月度中位数超额 `4.61%`
+  - 最差月 `-3.73%`
+  - monthly robust score `0.1012`
+- 对当前 monthly-first 主线 `state_liquidity_listwise_v1` 的同窗对照：
+  - 当前主线 = `65.90% / 3.856`
+  - 月度正收益占比 `75.00%`
+  - 月度中位数超额 `5.26%`
+  - 最差月 `-4.48%`
+  - monthly robust score `0.0897`
+- 直接判决：
+  - `short_expert_monthly_v1` 已经形成了有证据的 short-line model-side candidate
+  - 它赢在更高胜率、更浅坏月、更高 annual / Sharpe 与更高 monthly robust score
+  - 但它并没有在“月度中位数超额”这一项上全面压过当前主线
+  - 所以当前结论应该写成“latest-window strong candidate”，而不是“默认已可升级”
+- 这次还有一个重要副产物：
+  - execution alignment 最终选中的不是更快的 `1d/3d` 壳
+  - 而是 `regoff_k1_20d_ensemble_native_anchor`
+  - 说明这条 uplift 更像是训练目标与输出头改进后带来的月度兑现改善，而不只是靠更快 execution policy
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+- 验证：
+  - `py_compile` 通过：
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/sequence_dataset.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_short_alpha_experiment_matrix.py`
+    - `daily_research/deep_alpha/run_short_alpha_formal_head2head.py`
+    - `daily_research/deep_alpha/run_family_epoch_frontier_calibration.py`
+    - `daily_research/deep_alpha/run_dynamic_graph_liquid500_challenger_head2head.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - latest review 实跑通过：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json`
+
+## 2026-04-06 - `short_expert` 输出头分支落地并与主候选分离
+- 我继续把“输出头升级”这件事补齐成代码，而不是停留在方案层：
+  - `daily_research/deep_alpha/score_head.py`
+    - 新增 `short_expert` score head
+    - 把输出拆成 `selection_score / confidence_score / sizing_score / learned_score`
+    - 其中 `learned_score = selection_signal * sizing_score`，这样主回测链不需要改组合构建接口
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `--score-head-method` 新增 `short_expert`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - 为了避免把未验证分支误覆盖主候选，把 profile 拆成两组：
+      - `short_expert_monthly_v1` 回到已验证的 `ridge`
+      - `short_expert_scorehead_v1 / short_expert_scorehead_monthly_v1` 专门承载输出头实验
+- 我按同一 latest formal monthly window 补跑了规范命名的受控预算探针：
+  - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4`
+- probe 结果：
+  - `short_expert_scorehead_monthly_v1 = 81.41% / 4.871`
+  - 月度正收益占比 `75.00%`
+  - 月度中位数超额 `3.69%`
+  - 最差月 `-3.10%`
+  - monthly robust score `0.0857`
+- 与当前主候选 `short_expert_monthly_v1`（`ridge` 版）直接对比：
+  - `ridge` 主候选 = `91.76% / 4.852`
+  - 月度正收益占比 `83.33%`
+  - 月度中位数超额 `4.61%`
+  - 最差月 `-3.73%`
+  - monthly robust score `0.1012`
+- 判决：
+  - 当前这版 `short_expert` 输出头只在坏月更浅、最大回撤更浅、Sharpe 略高上占优
+  - 但它没有打赢 monthly-first 主目标，尤其 `positive_month_ratio / median_monthly_excess / monthly_robust_score` 都回撤
+  - 所以它现在只能作为 output-head experimental branch 保留，不能替代 `short_expert_monthly_v1`
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+- 验证：
+  - `py_compile` 通过：
+    - `daily_research/deep_alpha/score_head.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - canonical review 实跑通过：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r1_e4 --family-epoch-budget-manifest daily_research/output/deep_alpha_family_epoch_budget_short_alpha_e4_20260406.json --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1`
+
+## 2026-04-06 - `short_expert` full-budget 复跑，确认 latest 结论不是“没训够”
+- 用户明确要求：
+  - 不要吝啬训练资源
+  - 实验时不要轻易中断
+  - 需要核实 recent `short_expert` 结论是否被低预算扭曲
+- 我先回查了当前正式训练预算真源：
+  - `daily_research/output/deep_alpha_family_epoch_budget_latest.json`
+  - 其中 `short_alpha` family 的冻结预算本来就是 `24`
+  - 所以前一轮 `e4` 只应该被视为“回合内快速探针”，不该继续当成最终预算证据
+- 我补跑了 native family full-budget 的 ridge 主候选复核：
+  - 命令：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_monthly_v1`
+  - 输出目录：
+    - `daily_research/output/short_alpha_short_horizon_expert_review_20260406_r2_fullbudget`
+  - full-budget 结果与 `e4` probe 完全一致：
+    - `short_expert_monthly_v1 = 91.76% / 4.852`
+    - 月度正收益占比 `83.33%`
+    - 月度中位数超额 `4.61%`
+    - 最差月 `-3.73%`
+    - monthly robust score `0.1012`
+  - 训练诊断：
+    - `epochs_requested/completed = 24/24`
+    - `selected_epoch = 1`
+    - `selected_in_tail = false`
+    - `selected_at_right_boundary = false`
+    - `still_improving = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- 我也补跑了 output-head 分支的 native family full-budget 复核：
+  - 命令：
+    - `run_short_alpha_short_horizon_expert_review.py --root-tag short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget --profiles baseline_current,state_liquidity_listwise_v1,short_expert_scorehead_monthly_v1`
+  - 输出目录：
+    - `daily_research/output/short_alpha_short_horizon_expert_scorehead_review_20260406_r2_fullbudget`
+  - full-budget 结果同样与 `e4` probe 一致：
+    - `short_expert_scorehead_monthly_v1 = 81.41% / 4.871`
+    - 月度正收益占比 `75.00%`
+    - 月度中位数超额 `3.69%`
+    - 最差月 `-3.10%`
+    - monthly robust score `0.0857`
+  - 训练诊断同样稳定：
+    - `epochs_requested/completed = 24/24`
+    - `selected_epoch = 1`
+    - `selected_in_tail = false`
+    - `selected_at_right_boundary = false`
+    - `still_improving = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- 这轮新增判断：
+  - 对 latest-window 的 `short_expert_monthly_v1` 与 `short_expert_scorehead_monthly_v1`，当前没有证据表明“训练次数不够”是主要问题
+  - `short_expert_monthly_v1` 的优势和 `short_expert_scorehead_monthly_v1` 的落后，都在 native family budget 下复现了
+  - 后续默认口径应改为：
+    - 先跑 native family budget
+    - 不轻易中断长实验
+    - 只有看到 `selected_in_tail / selected_at_right_boundary / still_improving / objective_aligned_budget_pressure` 之一为真，才正式讨论“没训够”
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - 后续工作重排为“最有效优先、训练不吝啬”
+- 用户新增明确要求：
+  - 后续改动不要追求最小
+  - 应优先追求最有效
+  - 训练资源不要吝啬
+- 基于当前证据，我把后续工作顺序重排为三阶段：
+  - 第一阶段：先用 native family budget 把 `short_expert_monthly_v1` 推进到 multi-window formal
+    - 原因：它已经是 latest-window strong candidate，且 uplift 不是低预算假象
+    - 要优先回答的不是“还能不能再加一点小特征”，而是“它能不能正式成为 multi-window winner”
+  - 第二阶段：只保留一条 execution-side 高 ROI 修复线
+    - 不再横向扩 execution policy / profile
+    - 继续把 weak-month repair 下钻到 `first-week / multi-day score-weight trigger`
+    - 重点针对 `trend_down_low_vol`、`trend_up_low_vol` 与 `2025-07 / 2024-01 / 2025-10`
+  - 第三阶段：只有在前两步给出新结论后，才决定是否继续扩大 model-side 配方
+    - 若 `short_expert_monthly_v1` formal 转正，再进 recent realistic gate
+    - 若仍不过，再做更大但更有效的 `short_expert_v2`，补齐剩余 first-week 特征与状态化 downside / false-positive 惩罚
+- 这次同步的核心口径：
+  - 在当前节点上，最该避免的是“为了保持 diff 小而继续做零散小修”
+  - 应优先做能够改变 formal / gate 结论的大动作
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+
+## 2026-04-07 - first-week / multi-day weak-month repair 首次转正
+- 执行：
+  - 扩展 `run_short_alpha_targeted_weak_month_repair_review.py`
+  - 新增 trigger mode：
+    - `regime_firstweek_weight_drift`
+    - `regime_firstweek_score_followthrough`
+    - `regime_firstweek_combo`
+  - 从 `aligned_daily_score_panel.csv` 与 `aligned_daily_target_weight_panel.csv` 提取首周多日诊断：
+    - `first_week_weight_drift`
+    - `first_week_score_followthrough`
+    - `first_week_combo`
+- 正式复核：
+  - `daily_research/output/short_alpha_targeted_weak_month_repair_regime_firstweek_combo_review_20260407_r1`
+- 结果：
+  - targeted mean excess annual = `61.67%`
+  - targeted mean excess Sharpe = `2.575`
+  - static mean excess annual = `53.29%`
+  - static mean excess Sharpe = `2.170`
+  - `delta_excess_annual = +8.38%`
+  - `wins = 2/3`
+- 学到的有效映射：
+  - `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor`
+- 判断：
+  - 这是 first-week / multi-day `score -> weight -> execution` 修复线首次出现正式正证据
+  - 说明 weak-month repair 的下一步应继续沿 limited regime-scoped repair branch 收敛
+  - 不再回到 broad execution-policy sweep
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - short_expert_monthly_v1 multi-window formal 补齐到稳定视图
+- 初始动作：
+  - 先跑 `short_alpha_short_expert_formal_head2head_20260407_r1`
+  - 之后核对发现 formal runner 若不显式传参，会回落到 `primary_annual_return`
+  - 因此这条 `r1` 不能作为 `short_expert_monthly_v1` 的 monthly-first formal 证据
+- 正式 monthly-first 复核链：
+  - `r2_monthlycheckpoint`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r2_monthlycheckpoint`
+    - 显式使用 `--checkpoint-selection-objective primary_monthly_robust_score`
+    - 结果：两段历史窗仍 `undertrained`
+      - `20230216_20240229`
+      - `20240301_20250317`
+  - `r3_shortalpha32`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r3_shortalpha32`
+    - 新增 `deep_alpha_family_epoch_budget_short_alpha32_20260407.json`
+    - 结果：`20240301_20250317` 稳定；`20230216_20240229` 仍 `undertrained`
+    - 这一版 headline 最亮眼：
+      - `46.44% / 2.825`
+      - 月度正收益占比 `75.00%`
+      - 月度中位数超额 `3.142%`
+  - `r4_shortalpha48`
+    - `daily_research/output/short_alpha_short_expert_formal_head2head_20260407_r4_shortalpha48`
+    - 新增 `deep_alpha_family_epoch_budget_short_alpha48_20260407.json`
+    - 结果：最老窗终于稳定，但该窗显著回撤
+      - `selected_epoch = 20`
+      - `selected_in_tail = false`
+      - `objective_aligned_budget_pressure = false`
+      - `status = stable`
+- fully-stabilized formal 汇总（以 `r4_shortalpha48` 为准）：
+  - `short_expert_monthly_v1 = 41.45% / 2.411`
+  - `state_liquidity_listwise_v1 = 33.78% / 1.985`
+  - 月度正收益占比：`72.22% > 69.44%`
+  - 最差月：`-4.06% > -6.68%`
+  - 但月度中位数超额仍略低：`2.742% < 2.779%`
+- 判断：
+  - `short_expert_monthly_v1` 已经不是 latest-window 偶然 uplift，而是有 formal 支撑的 strong challenger
+  - 但在 fully-stabilized 视图下，它仍没有形成 clean promotion answer
+  - 原因不是“没训够”，而是 oldest stable window 暴露了真实边界
+  - 后续若继续推进 model-side，不应重复补同类 formal，而应直接进入更有效的 `short_expert_v2`
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+
+## 2026-04-07 - short_expert_monthly_v2 latest-window 补齐到预算稳定
+- 背景：
+  - 在 `short_expert_monthly_v1` 已经成为 formal strong challenger 后，我继续按“最有效优先”方向，把剩余的 first-week / breadth / failure-risk 特征与 state-targeted downside / false-positive 惩罚打包成 `short_expert_monthly_v2`
+  - 代码侧同时更新了：
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+    - `daily_research/deep_alpha/sequence_dataset.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+- 新增点：
+  - `short_expert_monthly_v2`
+    - 更高 `ranking/listwise`
+    - 更高 `downside` 权重
+    - `state_targeted_rank`
+    - 首周 follow-through / breadth / breakout-failure 特征
+  - feature cache version 从 `6` bump 到 `7`
+- latest-window 复核链：
+  - `r1_fullbudget`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r1_fullbudget`
+    - `47.58% / 3.121`
+    - `selected_epoch = 22/24`
+    - `selected_in_tail = true`
+    - `objective_aligned_budget_pressure = true`
+  - `r2_shortalpha32`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r2_shortalpha32`
+    - `52.41% / 2.983`
+    - `selected_epoch = 30/32`
+    - 仍 `selected_in_tail = true`
+  - `r3_shortalpha48`
+    - `daily_research/output/short_alpha_short_horizon_expert_v2_review_20260407_r3_shortalpha48`
+    - `57.55% / 3.015`
+    - `selected_epoch = 36/48`
+    - `selected_in_tail = false`
+    - `objective_aligned_budget_pressure = false`
+    - `status = stable`
+- fully-stabilized latest-window 判断：
+  - `short_expert_monthly_v2` 虽把月度正收益占比抬到 `83.33%`
+  - 但月度中位数超额只有 `3.19%`
+  - excess annual / Sharpe 只有 `57.55% / 3.015`
+  - 整体仍显著落后 `short_expert_monthly_v1 = 91.76% / 4.852`
+- 结论：
+  - `short_expert_monthly_v2` 不是“还没训够”的假阴性，`48` 后已经 budget-stable
+  - 这条大包 recipe 只能记为 monitored negative branch
+  - 负证据针对的是“这整包改动的组合方式”，不是 short-line 方向整体失效
+  - 后续 model-side 如继续，应拆成 feature-only / penalty-only ablation，而不是继续往同一个 bundle 里堆更多改动
+- 同步：
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/project_map.md`
+## 2026-04-08 - execution refinement + feature/penalty ablation completed
+- 执行侧：
+  - `weight_drift` 与 `score_followthrough` 单组件都失败
+  - 真正更强的 repair candidate 收敛为单条 `trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - formal `65.75% / 2.826`，annual / Sharpe `3/3` 全胜
+  - recent realistic gate `16.68% / 1.097` vs static `7.77% / 0.517`
+  - `trend_down_low_vol|fade|tighten -> regon_k1_10d_ensemble_native_anchor` 保留为 supporting mapping
+- 模型侧：
+  - `short_expert_feature_only_monthly_v1` fully stable but weak: `41.57% / 3.352`
+  - `short_expert_penalty_only_monthly_v1` fully stable and near current line: `63.93% / 4.696`
+  - current line `state_liquidity_listwise_v1` = `65.90% / 3.856`
+  - `short_expert_monthly_v2` = `57.55% / 3.015`
+- 判断：
+  - 新 feature pack 单独不够，真正有效的增量来自 state-targeted downside / rank penalty
+  - 后续 model-side 如继续，应从 `short_expert_penalty_only_monthly_v1` 往下做，而不是回到 `short_expert_monthly_v2`
+## 2026-04-08 - execution single-mapping candidate pipeline + penalty-only narrow ablation launch
+- 今天先把 execution-side 的 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 从 summary 级证据推进成了真正的 candidate pipeline：
+  - 补跑 source live audit：`short_alpha_active_source_execution_policy_audit_20260408_r1`
+  - 补跑 production live audit：`short_alpha_production_execution_policy_audit_20260408_r1`
+  - 用 forced mapping 复核 recent gate：`short_alpha_targeted_weak_month_repair_regime_firstweek_combo_expand_stable_topk3_review_20260408_r1`
+  - 物化 candidate root：`short_alpha_execution_single_mapping_candidate_pipeline_20260408_r1`
+- 这次把口径彻底理顺了：
+  - candidate comparison 应使用 execution-aligned direct panel，而不是把 raw panel 再次按 profile bridge
+  - full-bridge direct H2H 下，candidate `85.31% / 3.201`，静态 `64.53% / 2.434`
+  - `full_available` delta = `+20.65% / +0.762`
+  - weak window delta = `+84.42% / +2.495`
+- 更关键的新发现是触发非常窄：
+  - full-bridge 只有 `2025-06`、`2025-10` 两个月命中 `trend_up_low_vol|expand|stable`
+  - latest recent (`2026-03`, `2026-04`) `nonstatic_count = 0`
+  - 所以这条线现在是“已经物化的 monitored repair candidate”，但不是“今天 live 会切掉当前静态线”的答案
+- model-side 同步启动了下一轮真正高 ROI 的窄 ablation：
+  - root = `short_alpha_penalty_only_narrow_ablation_review_20260408_r1_shortalpha48`
+  - profiles = `short_expert_penalty_only_light_monthly_v1`, `short_expert_penalty_only_heavy_monthly_v1`, `short_expert_penalty_only_upstate_monthly_v1`, `short_expert_penalty_only_downstate_monthly_v1`
+  - baseline current / current line / original penalty-only 复用既有稳定结果
+  - 当前训练仍在运行中，按“不轻易中断长实验”口径保持继续
+## 2026-04-08 - 用户明确收紧训练与执行 handoff 纪律
+- 用户今天又把默认纪律明确收紧了一层：
+  - 以后跑长实验时默认耐心等待，不因为中途慢、耗时长就主动打断
+  - 凡是准备“转移过去”的候选，不管是 execution-side、production candidate 还是 monthly refresh，都必须先训练成最新模型
+  - 这一步默认使用该 family 当前最高预算，不再满足于旧模型、低预算 probe 或只补 native budget
+- 我对这条要求的理解已经固定：
+  - 用户要避免 execution 测被 stale / undertrained model 污染
+  - 用户要避免月更链因为赶时间而拿低预算结果直接进 production 判断
+  - 用户要的是“先把模型真实能力补到当前上限，再看 execution / 月更是否成立”，这样结论才干净
+- 因此从这个节点开始，execution audit、recent gate、trade-plan replay、default candidate promotion、monthly refresh 都必须建立在“最新模型 + 当前最高预算”之上；否则只记为不够资格的中间证据
+## 2026-04-08 - 用户新增“同模型扩预算一律续训”纪律
+- 用户又把 budget extension 规则收紧了一层：
+  - 同一模型、同一 recipe、同一窗口下如果只是扩 epoch budget，不再 fresh rerun
+  - 默认必须使用 strict resume continuation
+  - 只有 resume chain 被一致性校验拒绝时，才允许退回 fresh rerun，并显式记成 fallback
+- 这条规则直接命中了当前 `short_expert_penalty_only_heavy_monthly_v1` 的 `48 -> 64`：
+  - 我刚才启动的是 fresh rerun，不符合新纪律
+  - 从这一刻开始，类似 `48 -> 64` 的扩预算都必须优先走 strict resume
+## 2026-04-08 - 用户新增 GPU-only 训练纪律
+- 用户明确要求后续训练一律使用 GPU。
+- 我已把这条规则固化为两层：
+  - 记忆层：分脑默认把“GPU-only training”当成正式训练纪律
+  - 代码层：`run_deep_alpha_research.py` 不再允许在 CUDA 不可用时静默回落到 CPU
+- 这意味着后续如果机器上没有可用 GPU，系统会直接报阻塞，而不是偷偷在 CPU 上继续跑出一份低效训练结果
+## 2026-04-08 - penalty-only narrow ablation completed with strict-resume heavy extension
+- 我把上轮未收口的 model-side 工作完整收口了，核心动作有两步：
+  - `run_short_alpha_short_horizon_expert_review.py` 新增 `--resume-run-dir-map`，让 same-model epoch extension 可以在 review runner 里直接走 strict resume
+  - `short_expert_penalty_only_heavy_monthly_v1` 按新纪律从 `48 -> 64` 完成 strict resume，而不是 fresh rerun
+- 实际 strict-resume 命令：
+  - `& "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" daily_research\deep_alpha\run_short_alpha_short_horizon_expert_review.py --python-executable "C:\Users\ASUS\miniconda3\envs\yolos\python.exe" --profiles baseline_current,state_liquidity_listwise_v1,short_expert_penalty_only_monthly_v1,short_expert_penalty_only_heavy_monthly_v1 --short-alpha-epoch-budget-override 64 --resume-run-dir-map "short_expert_penalty_only_heavy_monthly_v1=H:\new_tdx64\PYPlugins\user\daily_research\output\short_alpha_penalty_only_narrow_ablation_review_20260408_r2_shortalpha48_complete\runs\short_expert_penalty_only_heavy_monthly_v1" --root-tag short_alpha_penalty_only_heavy_review_20260408_r2_shortalpha64_resume`
+- strict-resume 结果：
+  - `resume_mode = strict`
+  - `resume_source_epochs_completed = 48`
+  - `device = cuda`
+  - `selected_epoch = 43`
+  - `selected_in_tail = false`
+  - `objective_aligned_budget_pressure = false`
+  - 稳定后落到 `39.46% / 3.054`, monthly robust `0.0458`
+- 最终 unified summary root：
+  - `daily_research/output/short_alpha_penalty_only_narrow_ablation_final_20260408_r1`
+- 最终判断：
+  - no narrow split produced a clean promotion answer over `state_liquidity_listwise_v1`
+  - best reusable restart point remains `short_expert_penalty_only_monthly_v1`: `63.93% / 4.696`, monthly robust `0.0835`
+  - strongest split challenger is `short_expert_penalty_only_light_monthly_v1`: positive `83.33%`, median `2.92%`, monthly robust `0.0822`
+  - `short_expert_penalty_only_heavy_monthly_v1` 在 strict-resume `48 -> 64` 后确认是 stable negative branch，不再继续沿这条更重惩罚线堆预算
+## 2026-04-08 - project brain consolidation and current-state cleanup
+- 今天对 `daily_research` 分脑做了一次结构化整理，目标不是追加新实验，而是把“项目从立项以来的主线演进、当前判断、操作纪律、执行入口”压缩成更短、更准、更一致的口径。
+- 这次重写了四个核心脑文档：
+  - `project_map.md`
+  - `working_memory.md`
+  - `procedural_memory.md`
+  - `action_system.md`
+- 调整原则：
+  - 删掉重复叙述
+  - 删掉已失效的“进行中”状态
+  - 把历史过程留在 `episodic_memory.md`
+  - 把当前项目口径收敛成“当前主线、当前瓶颈、明确停止项、下一步”
+- 本次整理后的正式项目判断：
+  - active default 仍是 `state_liquidity_listwise_v1 + regoff_k1_5d_ensemble_native_anchor`
+  - execution-side 当前只保留 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 作为 monitored repair candidate
+  - model-side 当前只保留 `short_expert_penalty_only_monthly_v1` 作为 best restart point
+  - 不再重开 broad execution-policy sweep，不再把 `short_expert_monthly_v2 / heavy penalty` 视为当前主修复线
+- 结果：
+  - `project_map.md` 收缩到项目地图与阶段演进
+  - `working_memory.md` 收缩到当前判断
+  - `procedural_memory.md` 收缩到方法和纪律
+  - `action_system.md` 收缩到高频命令和当前操作清单
+  - `brain_manifest.json` 版本同步更新到 `2026-04-08`
+- `python daily_research/tools/doc_guard.py check` 已通过，且这次整理清掉了此前 `working_memory / procedural_memory / action_system` 的结构超长告警
+## 2026-04-08 - execution single-mapping candidate promoted to active default
+- 先把 execution-side 单映射 candidate 从 `summary / monitored` 状态推进成真正可执行的 active default：
+  - 新增脚本：
+    - `daily_research/execution/run_short_alpha_execution_single_mapping_candidate_pipeline.py`
+    - `daily_research/execution/activate_execution_single_mapping_candidate.py`
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 现在会：
+    - 物化 formal candidate/static panel
+    - 输出 `formal_trigger_tradeoff_summary.json`
+    - 输出 `live_trigger_monitor.json`
+    - 输出 `daily_live_target_weight_panel.csv`
+  - current pipeline root：
+    - `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260408_r2`
+- 新 pipeline 的正式结论：
+  - mapping：`trend_up_low_vol|expand|stable -> topk3_1d_regoff`
+  - formal full-period candidate vs static：`51.42% / 2.253` vs `39.85% / 1.738`
+  - full-period delta：`+11.54% / +0.514`
+  - trigger coverage：`3/36 = 8.33%`
+  - triggered mean monthly delta：`+8.50%`
+  - latest live month `2026-04` 未触发，`candidate_active_now=false`
+  - 在未触发时，`daily_live_target_weight_panel.csv` 直接复用当前静态 production live panel，因此 active 切换不会改变当前未触发月份的实际执行结果
+- active manifest 已切换：
+  - `daily_research/output/active_execution_strategy.json`
+  - strategy：`state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
+  - execution policy label：`trend_up_low_vol|expand|stable->topk3_1d_regoff`
+  - production root：`daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260408_r2`
+  - 已加入 `trade_plan_refresh_command`，默认 trade plan 会先刷新 single-mapping pipeline，再读取 active target-weight panel
+- 现场验证：
+  - `run_trade_plan.py --cash 100000` 已通过，终端明确显示 `candidate_profile=active_execution_strategy`
+  - `python daily_research/tools/doc_guard.py check` 已通过
+- 这次用户临时把优先级切回 execution-side，所以中途停掉了正在跑的 `short_alpha_penalty_only_refine_review_20260408_r1_shortalpha64`，没有继续占 GPU；模型侧后续恢复时再从新的优先级接。
+
+## 2026-04-08 - execution pipeline light refresh + 32-start production refresh completed
+- 按用户新纪律把 execution-side 剩余收尾一次做完：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 新增 `--live-only`
+  - heavy mode 继续负责 formal replay / H2H / trigger tradeoff
+  - live-only mode 只刷新 `live_trigger_monitor.json`、`daily_live_target_weight_panel.csv`、`daily_live_score_panel.csv`
+  - pipeline root 现在额外输出 `daily_live_score_reference.json`，明确 score 只是 static reference view
+- `activate_execution_single_mapping_candidate.py` 同步升级：
+  - active manifest 的 `trade_plan_refresh_command` 改走 `live-only`
+  - `source_score_panel_csv / trade_plan_score_panel_csv` 都改指向 candidate pipeline root 内部的 companion score panel
+- `research_candidate_profiles.py` 也补了 freshness 检查：
+  - custom refresh 之后同时检查 target weight panel 与 score panel
+  - 避免只刷新 target weight 而 score 仍停在旧文件
+- 训练预算纪律正式下沉到代码入口：
+  - `family_epoch_budget.py` 现在默认把所有 family 的起训预算 floor 到 `32`
+  - 如果 manifest 推荐更高预算，则直接服从更高预算
+  - 同模型扩预算仍保持 strict resume continuation
+- production side 也已按这条纪律补齐：
+  - 执行 `update_default_candidate_production.py --no-activate-strategy`
+  - refreshed run root = `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260408_r1`
+  - production root = `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - launch cutoff 更新到 `20260408`
+  - train end 更新到 `20260309`
+  - 本轮 fresh full-fit 以 `32` epoch 起训，且不覆盖当前 execution candidate active manifest
+- 本轮 production refresh 的训练判断：
+  - train history best epoch = `15/32`
+  - last epoch = `32`
+  - 最佳点不在右边界，所以当前没有“32 还没训够、必须立刻继续续训”的直接证据
+- production refresh 完成后，重新执行了：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py --live-only`
+  - `activate_execution_single_mapping_candidate.py`
+  - `run_trade_plan.py --cash 100000`
+- 刷新后的 latest trade plan 发生了有效变化，最新建议买入变为：
+  - `603979.SH`
+  - `001369.SZ`
+  - `000723.SZ`
+  - `600352.SH`
+- 当前正式口径因此进一步稳定为：
+  - active execution 继续保持 `state_liquidity_listwise_v1_execfirst_single_mapping_candidate_active`
+  - 日常 trade plan 走轻刷新，不再为候选管线每日重跑 formal replay
+  - 底层 production root 已更新到最新 full-fit，且满足 `GPU only + 32 起训 + 不覆盖 active candidate`
+## 2026-04-08 - consistency cleanup and regression guard completed
+- 对项目现行主链做了一次“前后口径 / 过期入口 / dated root / 旧默认值”专项清理，重点不是开新实验，而是把训练、执行、文档和脚本入口重新对齐。
+- 训练侧修正：
+  - `run_deep_alpha_research.py` 默认起训改为 `32`，默认 `min_epochs` 跟随预算抬升
+  - `pretrain_deep_alpha_encoder.py` 同步改为 `32` 起训，且强制 `GPU only`
+  - `run_minimal_matrix.py`、`run_epoch_budget_formal_matrix.py`、`run_graph_off_plain_budget_review.py`、`run_encoder_transformer_stability_review.py`、`run_short_alpha_production_epoch_extension.py` 的默认预算口径全部抬到 `32+`
+- 执行侧修正：
+  - `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 与 `activate_execution_single_mapping_candidate.py` 不再硬编码 dated review root / audit root / pipeline root
+  - default candidate 刷新命令改为依赖动态解析，不再把旧批次产物写死进 active manifest
+  - external target-weight 语义正式写回脑文档：`research_raw_target_weight` + `follow_research_raw_no_global_cap`
+- 旧入口与旧提示修正：
+  - `generate_daily_trade_plan.py` 不再建议回退 `run_trade_plan_legacy_ml.py`
+  - `run_trade_plan_legacy_ml.py`、`update_model_legacy_ml.py` 改为显式 deprecated wrapper
+  - `execution_alignment.py` 内旧 `regoff_k2_10d_ensemble_native_anchor` 的“current default”描述已改成 legacy comparator
+- 为防同类问题复发，新增 `daily_research/tools/project_consistency_check.py`
+  - 检查训练/预训练默认预算
+  - 检查 GPU-only 约束
+  - 检查 active manifest 的 raw target-weight 语义
+  - 检查 single-mapping pipeline / activation 脚本不再硬编码 dated operational roots
+  - 检查关键 brain 文档已同步当前统一口径
+## 2026-04-08 - latest-user-requirement priority formalized
+- 用户补充项目级纪律：
+  - 不准再出现前后矛盾和过期冗余
+  - 最新提出的要求必须拥有最高优先级
+  - 新要求必须前后一致地同步到默认入口与 brain 文档
+- 已将这条纪律写入：
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/project_map.md`
+- `daily_research/tools/project_consistency_check.py` 也已增加对应检查，避免后续再次只改一半。
+## 2026-04-09 - raw fallback 统一且 production e64 同步完成
+- production full-fit fresh `32` run 被判 undertrained，随后按 strict resume 扩到稳定 `64`。
+- 当前稳定 production run：`daily_research/output/short_alpha_production_epoch_extension_20260409_r1/runs/short_alpha_production_e64`
+- production root 现已同时物化 `daily_live_target_weight_panel.csv`、`portfolio_capped_daily_live_target_weight_panel.csv` 与 `static_fallback_daily_live_target_weight_panel.csv`。
+- active pipeline 已刷新到 `daily_research/output/short_alpha_execution_single_mapping_candidate_pipeline_20260409_r1`。
+- 当前 active candidate backtest 已默认跟随 manifest/profile 成本设置 `3 / 7 / 10` bps。
+- 最新带成本 recent recheck 根：`daily_research/output/recheck_active_execution_candidate_20260409_r3_unified_costed`
+- 当时结论是：全链语义更干净，但 recent 已兑现收益弱于旧 capped fallback。
+## 2026-04-09 09:48 Consistency Closure
+- 本轮把“代码主链已统一，但 manifest / trade plan / 底层默认值仍残留旧口径”的尾巴收完。
+- `run_short_alpha_execution_single_mapping_candidate_pipeline.py` 现在会把 `effective_execution_profile / effective_execution_bridge_meta / weight_generation_note` 写进 `daily_live_score_reference.json`。
+- `activate_execution_single_mapping_candidate.py` 现在会把 current live execution state 同步写进 `active_execution_strategy.json`，包括 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_weight_generation_note`。
+- `generate_daily_trade_plan.py` 现在会加载 score reference metadata，并在 plan 里解释 bridge 造成的“raw score 与最终权重非单调”现象。
+- `DeepAlphaConfig` 已同步到 `32 / 16`；`run_deep_alpha_research.py` 和 `run_retrain_frequency_formal_matrix.py` 的 stale execution-alignment default 已切到 `regoff_k1_5d_ensemble_native_anchor`。
+- `project_consistency_check.py` 已扩展为检查 dataclass 默认值、stale execution profile fallback、active manifest 的 effective live 字段，以及 trade plan 对 effective execution explanation 的支持。
+
+## 2026-04-09 - 月度优先执行裁决与 same-window targeted review 修复
+- 新增 recent audit 根：`daily_research/output/short_alpha_production_execution_policy_audit_20260409_r2`
+- `k1 / k2 / k3 / topk3` 的 recent monthly-first 排序现已明确把 `regoff_k2_5d_ensemble_native_anchor` 放在第一。
+- 新增 `daily_research/tools/monthly_first_execution_scoreboard.py`
+- 落盘 scoreboard 根：`daily_research/output/short_alpha_monthly_first_execution_scoreboard_20260409_r1`
+- 已修复 `run_short_alpha_targeted_weak_month_repair_review.py`，使 static comparison 与 targeted replay 使用完全相同的 clipped window，去掉了旧的一天错位。
+- same-window clipping 之后，强制映射 `trend_up_low_vol|expand|stable -> topk3_1d_regoff` 在前两个 formal 窗口中性、在最新主窗口落败，在 recent gate 里也再次中性，因为最近月份仍然选到 `k2`。
+- 当前 execution-side mainline 保持为 `raw + regoff_k2_5d_ensemble_native_anchor`；`topk3_1d_regoff` 已降级为 monitored observation branch。
+## 2026-04-09 - 30% 强月 signal-to-weight verdict
+- 新增工具：`daily_research/tools/monthly_attack_signal_weight_verdict.py`
+- 这轮研究不再只问“月度稳不稳”，而是显式问“能不能更接近 30% 强月目标”。
+- verdict 根：`daily_research/output/short_alpha_monthly_attack_signal_weight_verdict_20260409_r1`
+- 关键方法修正：
+  - 自定义 challenger 必须改成“先过可交易过滤，再做 bridge”，否则 recent/live 结果会和官方 audit 打架。
+  - tool 已按这个顺序修正，并把 `equal_top5 -> k1/k2/k3` 的 formal 攻击桥一起纳入对照。
+- formal attack scoreboard 结果：
+  - winner：`formal_current_equal_top5_k1_bridge`
+  - annual `124.82%`
+  - excess annual `88.44%`
+  - best monthly return `25.88%`
+  - strong_month_30_count `0`
+- recent/live gate 结果：
+  - winner：`recent_current_live_k2_static`
+  - 当前 custom attack challenger 都没有打赢 live `k2`
+- 结论收口：
+  - 目前还没有任何方案实现稳定 `30%+` 月收益
+  - `formal_current_equal_top5_k1_bridge` 应记为 research attack branch
+  - `regoff_k2_5d_ensemble_native_anchor` 继续保留为 live mainline
+
+## 2026-04-09 - 研究模型与执行模型协议钉死并完成分脑整理
+- 用户明确补充硬规则：
+  - 研究模型训练时，模型能用到的最新数据只能到 formal 评估开始前一天
+  - 最近 `12` 个月数据必须完整预留做评估
+  - 只有执行时才允许训练最新的 `production full-fit` 模型
+- 这轮同步把该规则正式写入：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/brain_architecture.md`
+- 同步整理点：
+  - 把 `formal / recent / live` 三个术语的职责和证据边界写清楚
+  - 把“研究环”和“执行环”的闭环拆开，避免其它 agent 再把 formal 与 production 混报
+  - 在 `project_consistency_check.py` 里增加对应守卫，避免后续文档回退
+- 这次没有修改策略结论和生产默认值，只做治理层与分脑层统一。
+
+## 2026-04-09 - strongest-model gate 重新裁决完成
+- 新增 strongest-model verdict 工具：`daily_research/tools/refresh_strongest_model_verdict.py`
+- verdict 根：`daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`
+- 当前 winner gate 固定为：
+  - `liquid500`
+  - `execution_first`
+  - `formal 3 windows`
+  - `primary_monthly_robust_score`
+  - `window_count = 3`
+- 机器结果：
+  - winner：`short_expert_monthly_v1`
+  - mean excess annual `41.45%`
+  - mean excess Sharpe `2.411`
+  - mean positive-month ratio `72.22%`
+  - worst month excess `-4.06%`
+- runner-up：
+  - `state_liquidity_listwise_v1`
+  - mean excess annual `33.78%`
+  - mean excess Sharpe `1.985`
+- reference only：
+  - `state_liquidity_listwise_v1__annual_checkpoint_reference = 33.13% / 2.348`
+  - `dynamic_graph_no_priors__cross_family_reference = 33.21% / 1.956`
+- 结论收口：
+  - 当前 strongest research model 已改记为 `short_expert_monthly_v1`
+  - `state_liquidity_listwise_v1` 保留为 strongest stable base model
+  - 当前 live 默认链路暂不变，仍由 `state_liquidity_listwise_v1 + regoff_k2_5d_ensemble_native_anchor` 承担
+  - 下一步应进入 `short_expert_monthly_v1 -> production full-fit -> recent/live gate -> execution audit` 的晋升闭环，而不是直接静默 promotion
+
+## 2026-04-09 - strongest-model 协议改写为“formal 每窗最新 + recent 必报 + 研究 winner 可直达执行默认”
+- 用户新增三条高优先级规矩：
+  - formal 验证时，每个窗口都要使用该窗口起点前最新可标注数据训练的当时最新模型
+  - recent 验证不能缺席
+  - 研究出来的最强模型可以直接作为执行默认
+- 这轮同步修改了：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/brain/brain_architecture.md`
+  - `daily_research/tools/project_consistency_check.py`
+  - `daily_research/tools/refresh_strongest_model_verdict.py`
+- 新口径要点：
+  - strongest-model 不再允许只讲 formal、不讲 recent
+  - strongest-model 不再额外卡一层独立 promotion 哲学流程
+  - `production full-fit` 现在被解释为“把 strongest winner 物化成当前默认执行”，而不是“只有 execution 才能用最新模型”的唯一例外
+
+## 2026-04-09 - recent 定义纠偏为最近一年 12 个月
+- 用户再次明确：`recent` 不是一个月短监控切片，而是最近一年 `12` 个月窗口。
+- 这轮同步修正了：
+  - `daily_research/brain/semantic_memory.md`
+  - `daily_research/brain/working_memory.md`
+  - `daily_research/brain/project_map.md`
+  - `daily_research/brain/procedural_memory.md`
+  - `daily_research/brain/action_system.md`
+  - `daily_research/tools/project_consistency_check.py`
+- 当前口径改为：
+  - recent 默认按截至当前评估时点回看最近 `12` 个月
+  - 以当前 latest completed date `2026-04-08` 计，recent 应理解为 `2025-04-09 -> 2026-04-08`
+  - 先前用 `2026-03-05 -> 2026-04-08` 的短窗说法属于旧口径，不能再冒充 current recent 定义
+
+## 2026-04-09 - strongest-model recent 一年补齐并完成 short_expert 默认接管
+- 这轮先修了 `short_expert_monthly_v1` 的 live/recent 导出兼容性：
+  - `daily_research/deep_alpha/export_live_panels_from_run.py`
+  - 关键修正是把 `short_alpha_features` 与 breakout-event 目标配置纳入 cache / target 解析，并按 artifact 里的 `feature_names / target_names` 重排导出面板
+  - 修正后，`short_expert_monthly_v1` 已能顺利导出 live panel，不再报 `Unexpected feature dim 39, expected 59`
+- strongest-model 工具升级成 `formal + recent` 一体裁决：
+  - `daily_research/tools/refresh_strongest_model_verdict.py`
+  - strongest-model verdict 根仍是 `daily_research/output/short_alpha_strongest_model_verdict_20260409_r1`
+  - recent 窗口现在实际按当前 latest completed date `2026-04-09` 回看 `2025-04-10 -> 2026-04-09`
+- 机器结果：
+  - formal strongest research model：`short_expert_monthly_v1`
+  - recent 一年 companion winner：`state_liquidity_listwise_v1`
+  - `state_liquidity_listwise_v1` recent excess annual `40.71%`、recent excess Sharpe `2.194`
+  - `short_expert_monthly_v1` recent excess annual `20.11%`、recent excess Sharpe `1.154`
+- 按用户最新协议，研究 strongest winner 允许直接作为执行默认，因此本轮没有停在“结论层”，而是继续完成 latest-data 默认物化：
+  - 修了 `daily_research/execution/update_default_candidate_production.py`
+  - 修了 `daily_research/execution/strategy_manifest.py`
+  - `production full-fit` 已落到 `daily_research/output/deep_alpha_short_alpha_execfirst_production_fullfit_20260409_r1`
+  - `production root` 仍为 `daily_research/output/deep_alpha_short_alpha_execalign_production_default`
+  - 当前 `launch_cutoff_date = 2026-04-09`
+  - 当前 production 选出的 execution profile 仍是 `regoff_k2_5d_ensemble_native_anchor`
+- active default 已切换为：
+  - strategy：`deep_alpha_short_alpha_execalign_production_default`
+  - candidate label：`short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - `daily_research/output/active_execution_strategy.json` 已同步到新的 production root
+  - `daily_research/execution/output/latest_trade_plan.txt` 已重刷到新的 default source
+- 这轮也顺手补齐了 production promotion 后的 manifest 可观测性：
+  - active manifest 现在由 production promotion 直接写出 `score_panel_role`
+  - 并写出 `effective_live_target_weight_mode / effective_live_execution_profile / effective_live_execution_bridge_meta / effective_live_weight_generation_note`
+  - 避免 strongest winner 接管后，trade plan 与 consistency guard 继续读到空白 live 解释字段
+
+## 2026-04-09 - `short_expert_policy_v1` 首版落地并完成 smoke
+- 为了把“模型输出分数 -> 规则选股/配仓”的旧链路进一步内生化，这轮没有再扩新的 execution policy，而是直接把可学习 policy head 接进了 research 主链。
+- 代码层改动：
+  - `daily_research/deep_alpha/score_head.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+- 新增方法：
+  - `score_head_method = policy_v1`
+  - profile：`short_expert_policy_v1`
+- `policy_v1` 当前学习四件事：
+  - `selection_model`：选股排序
+  - `gate_model`：候选池进入强度
+  - `weight_model`：相对权重
+  - `hold_model + cash_model`：持有强度与总仓位
+- 当前输出已经不止 `learned_score`，还包括：
+  - `selection_score / gate_score / weight_score / hold_score / cash_score / gross_exposure_target`
+- 在 `short_expert_monthly_v1` 的 validation panel 上做了真实 smoke：
+  - 窗口：`2025-03-18 -> 2026-02-27`
+  - 交易日数：`230`
+  - 股票数：`465`
+  - 平均 gross exposure：约 `0.676`
+  - 平均正持仓数：`10`
+- smoke 中顺手修掉了一个 `gross_exposure_target` 缺省兜底的长度不匹配 bug；修正后 `policy_v1` 已能稳定导出 learned target-weight panel。
+- 当前收口：
+  - `short_expert_policy_v1` 已经是正式 research branch
+  - 但它还没有 formal 3 windows 与 recent 12 个月证据
+  - 因此当前不能替代默认执行 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+
+## 2026-04-09 - `short_expert_policy_v1` latest formal single-window review 完成
+- 新 root：`daily_research/output/short_alpha_policy_v1_review_20260409_r1`
+- 为了让 `policy_v1` 可以单 profile 独立 review，这轮顺手修了：
+  - `daily_research/deep_alpha/run_short_alpha_short_horizon_expert_review.py`
+  - 原问题是 summary writer 默认假设一定存在 `state_liquidity_listwise_v1`，导致单 profile review 在收尾时 `IndexError`
+- 实验口径：
+  - formal latest single window：`2025-03-18 -> 2026-02-27`
+  - family budget：`32`
+  - score head：`policy_v1`
+- `short_expert_policy_v1` 结果：
+  - excess annual `65.84%`
+  - excess Sharpe `3.901`
+  - positive month ratio `75.00%`
+  - median monthly excess `3.53%`
+  - worst month excess `-3.28%`
+- 与同窗 `short_expert_monthly_v1` 对比：
+  - `short_expert_monthly_v1 = 91.76% / 4.852`
+  - `policy_v1` 目前仍然更弱
+- 当前收口：
+  - `policy_v1` 证明了“让模型学习 score -> weight / gross exposure”是可落地的
+  - 但第一版 learned policy head 还没有打赢当前 strongest research model
+  - 因此当前它继续保留为 research branch，下一步应优先补 formal 3 windows 与 recent 12 个月，而不是抢默认位
+
+## 2026-04-10 - deep challenger 对照完成并补齐 strongest winner 的 recent 一年回放
+- 这轮围绕“更深 backbone 能不能直接增强当前主线”做了三条 same-protocol challenger：
+  - `short_expert_monthly_v1_deep`
+  - `short_expert_policy_v1_deep`
+  - `short_expert_mamba_policy_v1`
+- 为了让 deep challenger 可以正式接入研究链，这轮扩了：
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 新增深层 profile 参数：`hidden_dim / encoder_family / transformer_heads / transformer_layers`
+  - 新增 profile：
+    - `short_expert_monthly_v1_deep`
+    - `short_expert_policy_v1_deep`
+    - `short_expert_mamba_policy_v1`
+- latest-window formal review root：
+  - `daily_research/output/short_alpha_deep_capacity_review_20260409_r1`
+- completed challenger 结果：
+  - `short_expert_monthly_v1_deep`：excess annual `57.29%`、excess Sharpe `2.841`、positive month `66.67%`、median monthly excess `4.48%`、worst month `-6.38%`
+  - `short_expert_policy_v1_deep`：excess annual `61.97%`、excess Sharpe `3.244`、positive month `75.00%`、median monthly excess `5.23%`、worst month `-4.25%`
+  - 当前 mainline `short_expert_monthly_v1` 仍是 same-window winner：excess annual `91.76%`、excess Sharpe `4.852`、positive month `83.33%`、median monthly excess `4.61%`
+- `short_expert_mamba_policy_v1` 也尝试启动过，但在当前 `RTX 2060 6GB` 上同协议 wall-clock 吞吐过慢，未能在这轮完成可比 formal 产物。
+- 这轮同步补齐了 strongest winner 的 recent 一年回放：
+  - root：`daily_research/output/short_alpha_deep_capacity_recent_eval_20260410_r1`
+  - winner：`short_expert_monthly_v1`
+  - recent window：`2025-04-10 -> 2026-04-09`
+  - recent excess annual `20.11%`
+  - recent excess Sharpe `1.154`
+  - positive month ratio `53.85%`
+  - median monthly excess `0.02%`
+  - worst month `-6.89%`
+- 当前收口：
+  - “单纯加深 backbone”这条路已经做过一轮同协议验证，但没有打赢当前主线
+  - `policy_v1` 方向仍值得继续，因为 deep 版月度中位数更高，但它还没有跨过 mainline
+  - strongest winner 在 recent 一年里“有正超额，但月度分布偏弱”
+  - 下一步默认方向应回到 `short_expert + k2` 的 `signal-to-weight / month-trigger / concentration` 修补，而不是继续盲目堆深
+
+## 2026-04-10 - recent 一年根因拆解完成
+- 新增工具：`daily_research/tools/recent_root_cause_breakdown.py`
+- 根因拆解 root：`daily_research/output/short_alpha_recent_root_cause_breakdown_20260410_r1`
+- 这轮不再停留在“感觉像市场状态或股票池”的口头判断，而是把 recent 一年差距明确拆成四块：
+  - `market_state`
+  - `stock_pool`
+  - `score_to_weight`
+  - `cash_control`
+- 拆解对象：
+  - winner：`short_expert_monthly_v1`
+  - companion：`state_liquidity_listwise_v1`
+  - recent window：`2025-04-10 -> 2026-04-09`
+- 机器结论：
+  - 当前月度分布不稳的第一主因，更像是“顺风状态兑现不足 + cash sizing 不够状态化 + score-to-weight 转换偏弱”
+  - 不是“模型完全不会看状态”
+  - 也不是“股票池就是第一主因”
+- 关键数字：
+  - winner 在 `trend_up_low_vol` 的日均超额约 `0.1683%`
+  - companion 在同状态的日均超额约 `0.2745%`
+  - winner 的 active-date score/weight Spearman 约 `0.206`
+  - companion 的 active-date score/weight Spearman 约 `0.235`
+  - winner 的 down/up gross exposure 比例约 `1.032`
+  - companion 的 down/up gross exposure 比例约 `0.992`
+- 股票池结论：
+  - 两条 recent 线当前使用的是同一个固定 `liquid500` 池
+  - winner 负月份里 all-A top20 5d 强势股入池占比约 `33.17%`
+  - 非负月份约 `34.05%`
+  - 说明池子更像收益天花板约束，不是解释 winner 与 companion 差距的第一主因
+- 当前收口：
+  - 默认修补顺序应改成 `signal-to-weight -> month-trigger / cash sizing -> concentration`
+  - 只有在上述方向收效有限后，才应把“固定池 vs 动态 rolling pool”提升为独立主议题
+
+## 2026-04-10 - current default signal/cash repair verdict 完成并修复空动作 trade plan 导出
+- 新增工具：`daily_research/tools/current_default_signal_cash_repair_verdict.py`
+- repair verdict root：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1`
+- 这轮把 current default 的 same-protocol recent 一年修补只收敛到一小包 challenger：
+  - `winner_current_target_static`
+  - `winner_current_target_power125_cash_preserved`
+  - `winner_current_target_market_state_guard_v1`
+  - `winner_current_target_power125_market_state_guard_v1`
+  - `winner_current_target_attack_defense_v1`
+  - `winner_score_weight_k2_static`
+  - `winner_score_weight_k2_market_state_guard_v1`
+  - `companion_current_target_static`
+- 机器结论：
+  - overall recent winner 仍是 `state_liquidity_listwise_v1` companion baseline
+  - current-default 自己内部的 repair winner 已变成 `winner_current_target_market_state_guard_v1`
+  - 这说明当前默认链第一修补方向应是 `cash-sizing guard / market_state_guard`，不是更激进的 `score_weight_k2`
+- 关键数字：
+  - `companion_current_target_static` 的 `monthly_robust_score = 0.0726`
+  - 当前 default `winner_current_target_static` 的 `monthly_robust_score = 0.0456`
+  - repair winner `winner_current_target_market_state_guard_v1` 的 `monthly_robust_score = 0.0519`
+  - `winner_score_weight_k2_static` 虽然 excess annual 到了 `49.69%`，但 `monthly_robust_score` 只有 `0.0136`
+- 这轮同时补了 current live preview：
+  - preview trade plan：`daily_research/output/short_alpha_current_default_signal_cash_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`
+  - `2026-04-09` 信号对应的 state 仍是 `trend_down_low_vol`
+  - 预览结果没有建议动作
+- 为了让 preview plan 可稳定导出，这轮还修了真实脚本 bug：
+  - 文件：`daily_research/baseline/generate_daily_trade_plan.py`
+  - 问题：`action/watch` frame 为空时，列重排会直接报错
+  - 修复：为空时先补齐所需列，再导出空表
+- 当前收口：
+  - 根因拆解之后，第一包小修已经证明“先修 cash sizing”比“先修 signal-to-weight”更接近正确方向
+  - 高年化但低 `monthly_robust_score` 的 `score_weight_k2` 路线保留为 attack bridge 观察分支，不直接晋升为 monthly-first repair winner
+
+## 2026-04-10 - current default follow-up repair verdict 完成，gross-control 主因进一步坐实
+- 新增工具：`daily_research/tools/current_default_followup_repair_verdict.py`
+- follow-up verdict root：`daily_research/output/short_alpha_current_default_followup_repair_20260410_r1`
+- 这轮把 current default 的第二包 same-protocol recent 一年修补扩成三类：
+  - `market_state_guard_v2`
+  - 控制层迁移（winner/companion 互换 row gross 与 state gross）
+  - 窄版 `signal-to-weight`（低波动 score blend / mild power）
+- 关键 challenger：
+  - `winner_current_target_market_state_guard_v2_companion_transfer`
+  - `winner_current_target_market_state_guard_v2_balance`
+  - `winner_current_target_month_state_guard_v2_companion_transfer`
+  - `winner_current_target_month_state_attack_defense_v2`
+  - `winner_current_target_market_state_guard_v2_balance_scoreblend15`
+  - `companion_current_target_winner_row_gross_transfer`
+  - `companion_current_target_winner_state_gross_transfer`
+- 机器结论：
+  - overall winner 仍是 `companion_current_target_static`
+  - winner-side repair winner 已从上一轮的 `winner_current_target_market_state_guard_v1` 进一步推进到 `winner_current_target_market_state_guard_v2_balance`
+  - 这说明 current default 的当前最强修补答案已经不是笼统的 “cash-sizing guard”，而是更具体的 `gross-control / market_state_guard_v2_balance`
+- 关键数字：
+  - current default `winner_current_target_static`：`monthly_robust_score = 0.0456`
+  - 第一轮 winner-side best repair `winner_current_target_market_state_guard_v1_reference`：`0.0519`
+  - 第二轮 winner-side best repair `winner_current_target_market_state_guard_v2_balance`：`0.0599`
+  - companion baseline `companion_current_target_static`：`0.0726`
+- 控制层迁移读数：
+  - winner 借用 companion 的逐日 gross 后，`monthly_robust_score` 提高约 `+0.0116`
+  - winner 借用 companion 的状态 gross 后，`monthly_robust_score` 提高约 `+0.0124`
+  - companion 借用 winner 的逐日 gross 后，`monthly_robust_score` 下降约 `-0.0056`
+  - companion 借用 winner 的状态 gross 后，`monthly_robust_score` 下降约 `-0.0025`
+- 这轮还给出了更具体的 gross map：
+  - winner 当前 state gross：`up 0.922 / flat 0.905 / down 0.973`
+  - companion state gross：`up 0.953 / flat 0.959 / down 0.960`
+  - balance map：`up 0.953 / flat 0.959 / down 0.893`
+- signal-to-weight 读数：
+  - `scoreblend15` 确实把 `score/weight Spearman` 从 `0.206` 抬到约 `0.218`
+  - 但 `monthly_robust_score` 仍低于 `market_state_guard_v2_balance`
+  - 因此窄版 `signal-to-weight` 当前只能做 secondary branch，不能抢 gross-control 的第一优先级
+- current live preview：
+  - plan：`daily_research/output/short_alpha_current_default_followup_repair_20260410_r1/live_preview/trade_plan/latest_trade_plan.txt`
+  - `2026-04-09` 信号对应 `trend_down_low_vol`
+  - 预览结果仍无明确调仓动作
+- 当前收口：
+  - gross-control 已从“嫌疑”升级成“有同向迁移证据支持的主因之一”
+  - 下一步默认应继续围绕 `market_state_guard_v2_balance` 微调，而不是把精力重新打回更激进的 `score_weight_k2`
+## 2026-04-10 - current default gross-control sweep 完成，hand-crafted 控制层基本压到头
+- 新增工具：`daily_research/tools/current_default_gross_control_sweep_verdict.py`
+- verdict 根：`daily_research/output/short_alpha_current_default_gross_control_sweep_20260410_r1`
+- 这轮在 `market_state_guard_v2_balance` 基础上继续做窄版 gross-control sweep，并把轻量 `month-trigger` / 窄版 `score-to-weight` overlay 一起纳入 same-protocol recent 一年回放。
+- 结果：
+  - overall winner 仍是 `state_liquidity_listwise_v1` companion baseline，`monthly_robust_score = 0.0726`
+  - winner-side gross-only best 是 `winner_gross_map_u097_f098_d088`
+  - 它把 current default 的 `monthly_robust_score` 从 `0.0456` 拉到 `0.0616`
+  - 但它仍低于 companion，robust gap 约 `-0.011`
+- 重要判断：
+  - 轻量 `month-trigger` overlay 与窄版 `score overlay` 都没有继续推翻 gross-only winner
+  - 说明 hand-crafted 控制层还有效，但已经接近当前上限
+  - 后续最高性价比动作不再是继续广扫手工控制层，而是把 best gross-control 当老师信号交给 learned control 学
+
+## 2026-04-10 - `short_expert_policy_v2` formal / recent 首轮评估完成
+- 新 profile：`short_expert_policy_v2`
+- 代码接线：
+  - `daily_research/deep_alpha/score_head.py`
+  - `daily_research/deep_alpha/run_deep_alpha_research.py`
+  - `daily_research/deep_alpha/run_minimal_matrix.py`
+  - `daily_research/deep_alpha/short_alpha_profiles.py`
+- 设计要点：
+  - 在 `policy_v1` 基础上收紧 gross exposure 区间到 `0.88 -> 0.98`
+  - 用更贴近当前 best gross-control 的 cash target teacher
+  - 强化 learned control 的日期级 cash/gross feature frame
+  - 让 target-weight 构造同时吸收 `weight/gate/hold`
+- formal latest-window review 根：`daily_research/output/short_alpha_policy_v2_review_20260410_r1`
+- formal 结果：
+  - `positive month ratio = 83.33%`
+  - `median monthly excess = 3.59%`
+  - `worst month = -1.12%`
+  - `top3 positive share = 50.88%`
+  - `excess annual = 55.83%`
+  - `excess Sharpe = 3.817`
+- formal 解读：
+  - `policy_v2` 明显优于 `policy_v1` 的月度稳定性
+  - 但它没有打赢 `short_expert_monthly_v1`
+  - 它还自动漂到 `regoff_k2_20d_ensemble_native_anchor`，平均持仓数升到约 `30.3`
+  - 当前 formal 收益折损大概率和 learned control 过度分散 / profile 漂移有关
+- recent 一年评估工具：`daily_research/tools/policy_v2_recent_eval.py`
+- recent 根：`daily_research/output/short_alpha_policy_v2_recent_eval_20260410_r1`
+- recent 结果：
+  - `state_liquidity_listwise_v1`: robust `0.0154`
+  - `short_expert_policy_v2`: robust `0.0149`
+  - `short_expert_monthly_v1`: robust `-0.0117`
+  - `short_expert_policy_v1`: robust `-0.0470`
+  - `policy_v2` recent excess annual `22.21%`，高于 current default `20.11%`
+- 最终判断：
+  - `policy_v2 > policy_v1`
+  - `policy_v2` recent 一年明显优于 current default
+  - `policy_v2` recent robust 已几乎追平 companion
+  - 但 formal 仍未打赢 `short_expert_monthly_v1`
+  - 因此 `policy_v2` 已成为 learned-control 主研究分支，但当前还不能升为新的默认执行
+
+## 2026-04-10 - `policy_v2` constrained review / `policy_v3` formal+recent 补齐，learned-control 主线继续停在 `policy_v2`
+- 这轮按“先 formal 拆因，再 recent 验证，再决定是否晋升默认”的顺序，把 `policy_v2` 和 `policy_v3` 的后续链路补完了。
+- 环境纪律：
+  - 这轮正式训练、formal 回放、recent 回放与 summary 生成全部锁定在 `yolos` 环境
+  - 其它环境只允许做非正式探查，不再混进正式结论
+- `policy_v2` constrained formal review：
+  - 根：`daily_research/output/short_alpha_policy_v2_constrained_execution_review_20260410_r1`
+  - best constrained variant 仍是 `policy_v2_current_k2_20d`
+  - formal `monthly_robust_score = 0.0919`
+  - 相对 current mainline formal `0.1012` 仍落后约 `-0.0093`
+  - 这直接推翻了“formal gap 主要只是桥太慢”的简单解释
+- `policy_v2` formal loss breakdown：
+  - 根：`daily_research/output/short_alpha_policy_v2_formal_loss_breakdown_20260410_r1`
+  - `raw_1d` 依然是坏答案，不能直接拿来替代执行桥
+  - 手工 candidate cap 和更紧 gross band 也没有单独救回 formal gap
+  - 因此下一代 learned-control 不能只靠继续手工稀疏化，重点应回到 learned score-to-weight 本体
+- `policy_v3` 代码接线：
+  - 新增 `policy_v3` score head，继续学习 `selection / gate / weight / hold / gross / candidate_count`
+  - 接线文件：
+    - `daily_research/deep_alpha/score_head.py`
+    - `daily_research/deep_alpha/run_deep_alpha_research.py`
+    - `daily_research/deep_alpha/run_minimal_matrix.py`
+    - `daily_research/deep_alpha/short_alpha_profiles.py`
+  - 新工具：
+    - `daily_research/tools/policy_v3_formal_review.py`
+    - `daily_research/tools/policy_v3_recent_eval.py`
+- `policy_v3` formal latest-window review：
+  - 根：`daily_research/output/short_alpha_policy_v3_review_20260410_r1`
+  - 初始 summary 把 run_dir 误判成 `runs/short_expert_policy_v3`，后来已修复为兼容 direct-root run layout
+  - 正式 formal 结果：
+    - profile 仍是 `regoff_k2_20d_ensemble_native_anchor`
+    - `excess annual = 58.17%`
+    - `excess Sharpe = 4.645`
+    - `monthly_robust_score = 0.0786`
+  - 对照：
+    - 低于 `short_expert_monthly_v1 = 0.1012`
+    - 低于 `state_liquidity_listwise_v1 = 0.0897`
+    - 也低于 `policy_v2 = 0.0830`
+- `policy_v3` recent 一年评估：
+  - 根：`daily_research/output/short_alpha_policy_v3_recent_eval_20260410_r1`
+  - 窗口：`2025-04-11 -> 2026-04-10`
+  - 结果：
+    - `state_liquidity_listwise_v1`: robust `0.0588`
+    - `short_expert_policy_v2`: robust `-0.0061`
+    - `short_expert_policy_v3`: robust `-0.0143`
+    - `short_expert_monthly_v1`: robust `-0.0370`
+  - 解释：
+    - `policy_v3` 虽然比 current default 好
+    - 但它没有打赢 `policy_v2`
+    - 更没有打赢 companion
+- 最终结论：
+  - `policy_v3` 证明了“把更多控制动作继续学进去”是可以落地的
+  - 但它没有修复 `policy_v2` 的 formal gap，也没有成为 latest recent 一年 winner
+  - 因此 learned-control 主研究分支继续保持为 `short_expert_policy_v2`
+  - 当前默认执行不变，继续维持 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+
+## 2026-04-11 - independent recent 协议纠偏与全项目收口
+
+- strongest-model 的 recent 层正式从 replay recent 改成了 `independent_recent_model_as_of_recent_start`。
+- 当前 strongest-model 的 corrected recent 窗口固定为 `2025-04-11 -> 2026-04-10`，对应训练截止 `2025-04-10`。
+- corrected strongest 结果收口为：
+  - `formal winner = short_expert_monthly_v1`
+  - `recent winner = baseline_current`
+  - `promotable winner = short_expert_monthly_v1`
+- corrected recent 关键读数：
+  - `baseline_current`: robust `0.0982`, recent excess annual `84.38%`, profile `regoff_k1_20d_ensemble_native_anchor`
+  - `short_expert_monthly_v1`: robust `0.0778`, recent excess annual `55.11%`, profile `regoff_k2_5d_ensemble_native_anchor`
+  - `state_liquidity_listwise_v1`: robust `-0.0019`, recent excess annual `15.53%`
+- corrected learned-control recent 结果收口为：
+  - `policy_v2`: robust `0.0871`, recent excess annual `93.01%`
+  - `policy_v1`: robust `0.0744`
+  - `policy_v3`: robust `0.0390`, recent excess annual `45.84%`
+- 因此 learned-control 主研究分支继续保持为 `short_expert_policy_v2`，`policy_v3` 不进入默认执行晋升链。
+- 本轮同步修复了 strongest / policy recent verdict 工具的 `summary.md` 输出文案，避免继续生成乱码决策段。
+- 本机训练纪律也正式钉死为：
+  - `yolos`
+  - 前台执行
+  - `num_workers = 0`
+  - `pin_memory = false`
+  - 未经用户明确允许，不重新启用 CPU 并行供数
+
+## 2026-04-11 - 第二轮 replay-based 入口瘦身归档
+
+- 新增 `daily_research/archive/output/replay_based_reference_index.md`
+- 新增 `daily_research/archive/output/replay_based_reference_index.json`
+- 这次归档是“入口级归档”，不是 payload 物理搬迁；原始根仍保留在 `daily_research/output/`。
+- 当前 brain 主文档里的旧 replay-based recent、current-default repair、gross-control sweep、execution audit 与 targeted repair 入口，已统一收口到上述索引。
+- 从这个节点开始：
+  - `project_map.md` 只保留当前正式真源与单点 archive 入口
+  - `working_memory.md` 只保留当前结论，不再散落直引旧 replay-based 根
+  - `action_system.md` 先给 archive index，再按需下钻旧 replay-based 原始根
+
+## 2026-04-11 - 热区冗余与缓存实删清理
+
+- 先执行了 `workspace_maintenance.py report` 与 `archive` dry-run，确认当时热区压力主要来自：
+  - `daily_research/cache = 96.86 GB`
+  - `daily_research/output = 71.85 GB`
+  - 其中 `deep_alpha/corpus` 与 `deep_alpha/features` 是最大 cache 热点
+- 随后按“只删可重建 cache 与明显临时产物”的原则做了真实删除，不走后台，不动当前默认执行真源。
+- 本轮新增清理 manifest：
+  - `daily_research/archive/manifests/cleanup_20260411_disk_trim_r1.json`
+- 本轮实删汇总：
+  - 热区旧 cache 候选：`77` 项，约 `58.91 GB`
+  - 冷区 archived cache payload：`2` 个大目录，约 `436.40 GB`
+  - `daily_research/output/tmp_*` 临时 probe 目录：`8` 个，约 `81.11 MB`
+  - paused monitor 残留：`2` 个文件
+  - `__pycache__ / *.pyc`：`6` 项目录级缓存
+- 合计真实删除约 `495.39 GB`
+- 清理后复查：
+  - `daily_research/cache` 下降到 `37.95 GB`
+  - `daily_research/archive` 下降到近乎空壳，只保留 README、manifest 与索引
+  - `__pycache__` 与 `*.pyc` 已清零
+- 本轮没有继续删除 `daily_research/output` 里的大实验根，因为其中多项仍被脚本默认值、工具入口或历史真源直接引用；只清掉了确认无引用的 `tmp_*` 临时 probe 输出。
+
+## 2026-04-11 - handoff 纪律固化与前台续训闭环
+
+- 新增 `daily_research/brain/handoff_rules.md`，并把它写入 `brain_manifest.json` 的 `read_order / write_routes / modules / handoff_contract.entry_sequence`，让后续 agent 接管时先读这份纪律。
+- 用户把正式实验纪律显式收口为四条：
+  - 所有正式实验都必须具备续训能力
+  - 最低要求是同一 `experiment-tag / run_dir` 的 `strict resume`
+  - 长实验只允许前台执行
+  - 终端默认超时预算按 `10` 小时处理
+- 用户同日再次明确：后续改法不应追求最小，而应优先追求最有效；只要风险可控、语义收口、代码与 brain 能同步更新，就不为了保守故意做成低效小修。
+- `deep_alpha` 训练入口已补上 epoch 级 resume artifact 持久化、同 run_dir 自动 strict resume，以及 family formal review 的 partial-run 显式续训。
+- `short_alpha_policy_v2_family_pipeline_20260411_r1` 已按前台纪律跑完 formal family review、constrained execution review、recent family eval、`project_consistency_check.py` 与 `doc_guard.py check`，说明这套 front-only + resume 纪律已经从规则变成了可运行闭环。
+
+## 2026-04-11 - policy_v2 family 结果收口与下一步重排
+
+- `short_alpha_policy_v2_family_formal_review_20260411_r1` 已完成：
+  - overall formal winner 仍是 `short_expert_monthly_v1 = 0.1012`
+  - family formal best 仍是老 `short_expert_policy_v2 = 0.0830`
+  - 新分支 formal 排名为 `policy_v2 > policy_v2b = 0.0803 > policy_v2c = 0.0777 > policy_v2a = 0.0505`
+- `short_alpha_policy_v2_family_recent_eval_20260411_r1` 已完成：
+  - corrected recent winner 已前移到 `short_expert_policy_v2c = 0.1046`
+  - `short_expert_policy_v2b = 0.1020` 也是显著 recent 前沿
+  - 二者都超过 `baseline_current = 0.0982` 与 current default `0.0778`
+- 同轮 `short_alpha_policy_v2_family_pipeline_20260411_r1_status.json` 也明确暴露了一个关键缺口：
+  - family pipeline 名义上跑了 constrained step
+  - 但实际只对老 `policy_v2` 跑了 `policy_v2_constrained_execution_review.py`
+  - `v2b / v2c` 仍没有同规格 constrained formal 证据
+- 从这个节点开始，learned-control 的主矛盾正式改写为：
+  - recent frontier 已经从 `policy_v2` 前移到 `policy_v2c / v2b`
+  - formal main branch 仍停留在老 `policy_v2`
+  - 下一步最高优先级不再是继续证明 `policy_v2 > policy_v1`
+  - 而是补齐 `v2b / v2c` constrained formal review，并拆清 recent 强、formal 弱到底来自 profile 漂移、集中度，还是 gross / hold control 本体
+
+## 2026-04-12 - `policy_v2 family` constrained / `policy_v4 family` 第一轮闭环完成
+
+- `short_alpha_policy_v2_family_constrained_execution_review_20260411_r2` 已按前台纪律补齐：
+  - family constrained best 已前移到 `short_expert_policy_v2b__k1_20d = 0.1104`
+  - 这个读数已经高于 current mainline formal `short_expert_monthly_v1 = 0.1012`
+  - `short_expert_policy_v2c` 的 constrained best 是 `k1_5d = 0.0953`
+  - 但 selected slow bridge `k1_20d` 只有 `0.0846`
+- `short_alpha_policy_family_formal_loss_breakdown_20260411_r1` 已把 learned-control 当前 formal 叙事收口成：
+  - `short_expert_policy_v2b` 是当前最强 constrained / deployable learned-control candidate
+  - `short_expert_policy_v2c` 的 formal gap 更像 bridge / control 敏感，而不是 recent 偶然值
+  - 下一代设计假设收口为：`v4a = execution-stability`、`v4b = concentration regularization`、`v4c = gross teacher` 仅作可选
+- `short_alpha_policy_v4_family_pipeline_20260411_r1` 也已按前台 + strict-resume 纪律跑完 formal / constrained / recent / consistency / doc_guard：
+  - `short_expert_policy_v4b` 的 fresh formal family best 到了 `0.1008`
+  - `short_expert_policy_v4b` 的 corrected recent 到了 `0.1387`，成为新的 learned-control recent frontier
+  - 但它的 constrained best 只有 `0.0687`
+  - `short_expert_policy_v4a` 的 constrained best 更低到 `0.0458`
+- 因此 current learned-control 需要明确分三层讲：
+  - constrained formal front-runner = `short_expert_policy_v2b`
+  - corrected recent winner = `short_expert_policy_v4b`
+  - live 默认执行继续冻结在 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+- 这也把下一轮主问题改写成：
+  - 不再是“`v2b / v2c` 有没有 constrained formal”
+  - 而是“如何保住 `policy_v4b` 的 recent 强度，同时把 constrained formal 拉回 `policy_v2b` 水平以上”
+
+## 2026-04-12 - 主脑 / 分脑接管结构升级为六层项目大脑
+
+- 本轮把 `daily_research/brain/` 从“已有记忆分层的分脑”继续升级成更像人脑工作流的项目认知中枢：
+  - 新增 `identity_layer.md`
+  - 新增 `rule_memory.md`
+  - 新增 `lesson_memory.md`
+  - 新增 `temporal_state.md`
+  - 新增 `handoff_packet.md`
+  - 新增 `governance_layer.md`
+- 同轮也把根主脑升级成配套结构：
+  - 新增 `brain/identity_layer.md`
+  - 新增 `brain/handoff_packet.md`
+  - 新增 `brain/governance_layer.md`
+- manifest 与 bootstrap 已同步切换到新的接管顺序：
+  - 主脑：`identity -> handoff packet -> master / architecture / working / procedural / governance`
+  - `daily_research`：`identity -> handoff packet -> semantic -> rule -> lesson -> temporal -> working -> action -> episodic`
+- 这次升级的核心目标不是多几份文档，而是把项目设计成：
+  - `agent 可替换，大脑不可替换`
+  - `Agent 无状态，项目大脑有状态`
+- 本轮还同步补上了治理闭环：
+  - `brain_bootstrap.py` 现在会暴露 `identity / handoff / rule / lesson / temporal / governance` 路径
+  - `doc_guard.py` 已覆盖这些新脑区
+  - `project_consistency_check.py` 已把新脑区纳入一致性检查
+- 结果是：后续 agent 接管时，不再默认从长 `episodic_memory.md` 起步，而是先接标准状态包，再按需下钻证据。
+
+## 2026-04-12 - recent 协议修正、`policy_v5 family` 收口与脑内口径重写
+
+- `recent_model_protocol.py` 已完成一次关键协议修正：
+  - `requested_recent_end_date` 与 `effective validation end` 现在被显式分离
+  - 当前 strongest-model / family recent 使用的正式根改为 `short_alpha_recent_model_protocol_20260412_r1`
+  - 在该根下，requested recent cutoff 仍是 `20260410`
+  - 但 effective validation window 实际是 `2025-04-11 -> 2026-03-31`
+- `short_alpha_strongest_model_verdict_20260412_r1` 已按新 recent 协议重刷：
+  - strongest-model formal winner = `short_expert_monthly_v1`
+  - strongest-model recent winner = `short_expert_monthly_v1`
+  - strongest-model promotable winner = `short_expert_monthly_v1`
+  - 这意味着 strongest-model 三层重新对齐，不再延续旧的 `baseline_current` recent winner 叙事
+- `short_alpha_policy_v5_family_pipeline_20260412_r1` 已按前台 + strict-resume + `10h` 预算纪律完整跑完：
+  - `policy_v5b` corrected recent `monthly_robust_score = 0.1200`
+  - `policy_v5b__k1_20d` constrained formal `monthly_robust_score = 0.1177`
+  - `policy_v5a__k1_20d = 0.1018`
+  - `policy_v5c__k1_20d = 0.1010`
+  - active `v5 family` fresh formal best 仍是 `policy_v5b = 0.0839`
+- 当前 learned-control 叙事因此被整体改写：
+  - 当前最强 deployable learned-control candidate 前移到 `short_expert_policy_v5b__k1_20d`
+  - 当前 learned-control recent winner 也前移到 `short_expert_policy_v5b`
+  - 历史 cross-family fresh formal best 仍是 `short_expert_policy_v4b = 0.1008`
+  - 但当前 active family 与当前主研究锚点都已经切到 `policy_v5`
+- 主问题也随之重排：
+  - 不再是“current default 如何在 corrected recent 里追 `baseline_current`”
+  - 也不再是“如何把 `policy_v4b` 的 recent 强度转成 deployable constrained formal”
+  - 当前真正的问题已经变成：如何保住 `policy_v5b` 的 recent / constrained 优势，同时把它的 fresh-formal gap 缩到接近乃至打穿 current overall formal mainline `short_expert_monthly_v1 = 0.1012`
+- 同轮已把高频脑区全部按新真相重写：
+  - `identity_layer.md`
+  - `handoff_packet.md`
+  - `temporal_state.md`
+  - `rule_memory.md`
+  - `semantic_memory.md`
+  - `project_map.md`
+  - `lesson_memory.md`
+  - `procedural_memory.md`
+  - `working_memory.md`
+  - `action_system.md`
+- 这次写回的重点不是增量修补，而是直接清掉旧的 `baseline_current / policy_v2b / policy_v4b` 当前口径，保证后续 agent 接管时先看到的是 `2026-04-12` 新协议和 `policy_v5` 新主线。
+
+## 2026-04-12 - 接管校验完成，主线与下一步保持不变
+
+- 本轮接管先按主脑 + `daily_research` 高优先脑区读取：
+  - 主脑确认当前工作区正式生产主线仍是 `daily_research`
+  - `t0_project` 与 `daily_stock_analysis-main` 继续保持分脑边界，不改写当前生产主线
+- 现场状态已核对：
+  - `git status --short` 为空，当前工作区没有未提交改动干扰接管判断
+  - `active_execution_strategy.json` 仍指向 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - `short_alpha_strongest_model_verdict_20260412_r1/summary.json` 与 `policy_v5 family` 各 summary 的关键数值和 brain 当前口径一致
+- 接管链路已通过项目自检：
+  - `brain_bootstrap.py --child daily_research --json` 返回 `child_attach_status = attached_to_main_brain`
+  - 主脑与分脑 boot order 与当前 handoff 入口一致，没有发现入口漂移或规则冲突
+- 当前没有发现 `2026-04-12 r1` 之后的新 `policy_v5` 后继实验根：
+  - `handoff_packet.md` 中“新一轮窄迭代还未开始”的状态仍成立
+  - 输出目录里也未见晚于 `policy_v5 family` 收口结果的后继 `policy_v5` 窄迭代根
+- 因此这次接管后的结论不改写项目目标，只确认当前下一步仍应是：
+  - 以 `policy_v5b` 为锚点设计并启动窄版后继分支
+  - 目标是保住 recent / constrained 优势，并缩小 fresh-formal gap
+
+## 2026-04-13 - `policy_v5b` 桥接敏感性审计完成，`policy_v5d / policy_v5e` successor 首轮被否决
+
+- 本轮先围绕 `policy_v5b` 补齐了只读诊断，而不是直接继续盲开新训练：
+  - 新增脚本 `daily_research/tools/policy_v5b_bridge_sensitivity_audit.py`
+  - 输出根为 `daily_research/output/short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1`
+- 审计结果把当前 deployable / recent 分裂的原因看清为“快桥脆弱性”而不是“还差一点外部修补”：
+  - constrained deployable anchor 仍是 `policy_v5b__k1_20d = 0.1177`
+  - `k1_5d = 0.0834`
+  - `k1_3d = 0.0248`
+  - `raw_1d = -0.1177`
+  - `k1_3d` 下 aligned names 只有 `2.817`
+  - `top1 = 38.99%`
+  - `top2 = 72.46%`
+  - `HHI = 0.376`
+  - `cap6_k1_5d` 与 `cap4_g092_098_k1_5d` 对 `k1_5d` 是 no-op
+- 随后围绕这个结论做了首轮 successor 实现，而不是重开 broad sweep：
+  - 在 `daily_research/deep_alpha/short_alpha_profiles.py` 中新增 `short_expert_policy_v5d`、`short_expert_policy_v5e`
+  - 在 `daily_research/deep_alpha/score_head.py` 中新增 `policy_v5d`、`policy_v5e`
+  - 在 `daily_research/deep_alpha/run_deep_alpha_research.py` 中补齐 method allowlist
+  - 将 `daily_research/tools/policy_v5_family_formal_review.py` 与 `daily_research/tools/policy_v5_family_recent_eval.py` 泛化到 successor family
+  - 新增 `daily_research/tools/run_policy_v5_successor_pipeline.py`
+- 全流程严格按前台 + strict-resume + `10h` 预算执行，并完整跑完：
+  - `short_alpha_policy_v5_successor_formal_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_constrained_execution_review_20260412_r1`
+  - `short_alpha_policy_v5_successor_recent_eval_20260412_r1`
+  - `short_alpha_policy_v5_successor_formal_loss_breakdown_20260412_r1`
+- 三层结果明确否决了 `policy_v5d / policy_v5e`：
+  - `policy_v5b = formal 0.0839 / constrained 0.1177 / recent 0.1200`
+  - `policy_v5d = formal 0.0676 / constrained 0.0925 / recent 0.1071`
+  - `policy_v5e = formal 0.0812 / constrained 0.0867 / recent 0.0934`
+- 这轮结果说明：
+  - `policy_v5b` 仍是当前 learned-control deployable + recent 双锚点
+  - `policy_v5d / policy_v5e` 都不能进入 promotion 讨论
+  - “温和 stability / concentration smoothing + external cap wrapper” 不再是下一轮默认方向
+- 同轮已把高优先脑区同步改写到新状态：
+  - `working_memory.md`
+  - `handoff_packet.md`
+  - `temporal_state.md`
+  - `semantic_memory.md`
+  - `action_system.md`
+  - `lesson_memory.md`
+- 收尾校验要求保持不变：
+  - `project_consistency_check.py`
+  - `doc_guard.py check`
+
+## 2026-04-13 - 接管复核完成，操作入口纠偏，主线判断保持不变
+
+- 本轮先按当前治理入口读取：
+  - `identity_layer.md -> state_center.md -> knowledge_center.md -> operations_center.md -> governance_layer.md`
+- 执行前四检结果：
+  - 事实：当前主问题仍是 `policy_v5b` 的 successor 方向选择，而不是 strongest-model 重开
+  - 事实：formal / recent / promotion / live 分层规则没有变化
+  - 事实：输出目录中没有晚于 `2026-04-12` successor 收口批次的新 `policy_v5` 正式实验根
+  - 推断：当前不应跳过纠偏直接重跑实验，先修正接管入口更能降低后续误操作风险
+- 本轮现场校验：
+  - 事实：`git status --short` 为空，当前工作区没有新增未提交改动
+  - 事实：`python daily_research/tools/project_consistency_check.py` 返回 `status = ok`
+  - 事实：`python daily_research/tools/doc_guard.py check` 未发现 `daily_research/brain` 结构问题
+  - 事实：`daily_research/output/active_execution_strategy.json` 仍指向 `short_expert_monthly_v1__regoff_k2_5d_ensemble_native_anchor__active`
+  - 事实：`daily_research/tools/run_short_alpha_recent_model_protocol.py` 不存在
+  - 事实：当前可执行的 strongest-model / recent 相关入口分别是 `refresh_strongest_model_verdict.py` 与 `recent_protocol_completion_monitor.py`
+- 本轮动作：
+  - 将 `daily_research/brain/operations_center.md` 中错误的 recent / verdict 命令入口纠偏为真实脚本
+  - 将接管复核结果写回 `daily_research/brain/state_center.md`
+- 本轮复盘：
+  - 这次没有发现主线结论漂移，发现的是“操作入口文档漂移”
+  - 先修入口比先开实验更重要，因为错误命令会直接破坏后续接管效率
+  - 下一步仍保持不变：围绕 `policy_v5b` 设计 `1-2` 个与“温和平滑”显式不同的新 successor，并同时跑 `formal + constrained formal + recent`
+
+## 2026-04-13 - `daily_research` 依赖环境补成真源，并接入守卫
+
+- 触发原因：
+  - 这轮排查发现 `daily_research/brain` 已经写了环境基线，但 `daily_research/` 下没有 `requirements.txt`、`pyproject.toml`、`environment.yml` 之类可复现依赖真源
+  - `python daily_research/execution/run_trade_plan.py --help` 在当前 shell 下因为缺 `pandas` 直接失败，说明“环境规则存在”不等于“环境真源存在”
+- 本轮动作：
+  - 新增 `daily_research/environment.yml` 作为当前 authoritative runtime dependency source
+  - 环境名统一定为 `yolos`
+  - 依赖真源显式列出：
+    - `python=3.11`
+    - `numpy`
+    - `pandas`
+    - `scipy`
+    - `scikit-learn`
+    - `joblib`
+    - `lightgbm`
+    - `pytorch`
+    - `pytorch-cuda=12.4`
+  - 在 `daily_research/tools/project_consistency_check.py` 中新增环境真源守卫，防止 `environment.yml` 缺失或关键依赖漂移
+  - 在 `daily_research/execution/entrypoint_utils.py` 与相关 execution entrypoints 中补了缺依赖时的显式报错路径，并让 `--help` 优先于重依赖导入
+  - 在 `daily_research/brain/operations_center.md`、`knowledge_center.md`、`state_center.md` 写回了新环境口径
+- 额外结论：
+  - `t0_project/tqcenter.py` 仍是工作区内本地依赖，不由 conda 安装
+  - 今后判断环境是否满足，应该以 `daily_research/environment.yml` 为真源，而不是以“这台机器上某个 shell 恰好能跑”为真
+
+## 2026-04-13 - `yolos` 升级为 `daily_research` 全项目统一运行解释器
+
+- 触发原因：
+  - 用户明确要求：以后此项目任何程序均在 `yolos` 环境下运行
+  - 现场排查发现两类残留漂移：
+    - `daily_research/deep_alpha/experiment_guardrails.py` 仍保留旧 `quant` fallback
+    - 多个 orchestration / review / execution 脚本仍把 `sys.executable` 当作默认解释器或内部 subprocess 解释器
+- 本轮事实：
+  - `daily_research/environment.yml` 已经把 `yolos` 物化成依赖环境真源
+  - 仅靠 brain 写“环境基线”仍不足以约束代码默认行为
+  - `resolve_project_python_executable(sys.executable)` 若 helper 不做纠偏，也会继续跟随当前 shell Python
+- 本轮动作：
+  - 把 project python anchor 收口到 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`
+  - 删除旧 `quant` fallback
+  - 将 `daily_research` 下相关脚本的默认 `--python-executable` 与内部 Python 转调统一切到 `resolve_project_python_executable(sys.executable)`
+  - 在 `project_consistency_check.py` 中新增 project runtime contract 守卫，防止后续重新出现 raw `sys.executable` 默认值 / 转调
+  - 将 `state_center.md`、`knowledge_center.md`、`operations_center.md` 的环境口径升级为“任何程序都必须在 `yolos` 环境下运行”
+- 本轮复盘：
+  - 这次不是简单补一句规则，而是把规则下沉成了 helper 默认、脚本入口默认和 consistency 守卫
+  - 以后如果有人再把默认解释器改回当前 shell Python 或旧 `quant`，守卫应直接报错，而不是等到运行时才暴露
+
+## 2026-04-13 - execution 侧从脚本集合升级为统一应用骨架
+
+- 触发原因：
+  - 执行侧虽然已有较多业务脚本，但缺少统一任务入口、运行状态、日志、锁、恢复和健康检查
+  - 这会让日常执行、排障、交接和扩展都过度依赖“知道该跑哪一个脚本”
+- 本轮动作：
+  - 新增 `daily_research/execution/app.py` 作为 execution application 核心 CLI
+  - 新增 `daily_research/execution/run_execution_app.py` 与 `python -m daily_research.execution` 双入口
+  - 新增 `daily_research/execution/app_tasks.py`，把 execution 常用任务收口成 task registry
+  - 新增 `daily_research/execution/app_runtime.py`，统一管理：
+    - `runtime_state.json`
+    - `events.jsonl`
+    - `jobs/<job_id>/metadata.json`
+    - `stdout.log / stderr.log`
+    - execution app lock
+  - execution app 当前已提供：
+    - `tasks`
+    - `status`
+    - `doctor`
+    - `run`
+    - `resume`
+    - `tail`
+    - `unlock`
+- 本轮验证：
+  - `python daily_research/execution/run_execution_app.py --help` 通过
+  - `python daily_research/execution/run_execution_app.py tasks` 通过
+  - `python daily_research/execution/run_execution_app.py status --json` 通过
+  - `python daily_research/execution/run_execution_app.py doctor --json` 通过
+  - `python daily_research/execution/run_execution_app.py run --task trade-plan -- --help` 成功产出作业日志
+  - `tail` 与 `resume --job-id <job_id>` 已做真实回放验证
+- 本轮复盘：
+  - 这次不是重写执行业务，而是在现有脚本之上补齐统一应用层
+  - 后续新增 execution 能力时，优先扩 task registry 和统一运行时，而不是继续散落新的单点脚本入口
+
+## 2026-04-13 - execution 本地 Web 控制台落地
+
+- 触发原因：
+  - 用户明确选择本地 Web 控制台作为 execution 前端
+  - 现有 execution app 已经具备任务、状态、日志、恢复能力，适合作为 Web 层后端内核
+- 本轮动作：
+  - 新增 `daily_research/execution/web_server.py`
+  - 新增 `daily_research/execution/web_service.py`
+  - 新增 `daily_research/execution/web_models.py`
+  - 新增 `daily_research/execution/run_execution_web.py`
+  - 新增 `daily_research/execution/web/templates/*`
+  - 新增 `daily_research/execution/web/static/execution_console.css`
+  - 新增 `daily_research/execution/web/static/execution_console.js`
+  - 将 execution CLI 重构为 service-backed 薄壳，并新增 `web` 子命令
+  - 将 task registry 扩展为“脚本路径 + 表单元数据”，供 Web 页自动渲染 launcher
+  - 将 `FastAPI / uvicorn / jinja2` 写入 `daily_research/environment.yml`
+- 当前页面：
+  - Dashboard
+  - Tasks
+  - Jobs
+  - Job Detail
+  - Doctor
+  - Trade Plan
+  - Runtime
+- 当前 API：
+  - `GET /api/status`
+  - `GET /api/doctor`
+  - `GET /api/tasks`
+  - `GET /api/jobs`
+  - `GET /api/jobs/{job_id}`
+  - `POST /api/run`
+  - `POST /api/resume`
+  - `POST /api/unlock`
+- 设计原则：
+  - 不重写 execution 内核
+  - Web 只作为本地控制面
+  - 继续沿用 `execution_app` 的状态、锁、日志、恢复目录
+  - 默认仅绑定 `127.0.0.1`
+
+## 2026-04-13 - execution Web 控制台完成联调收尾，并修复模板签名与 job_id 碰撞
+
+- 触发原因：
+  - 用户要求按顺序把本地 Web 控制台从规划直接做到“可运行、可监控、可恢复、可扩展”的落地态
+  - 首轮实现后需要做真实 `yolos` 环境联调，而不是停留在静态代码完成
+- 本轮动作：
+  - 用 `conda env update -f daily_research/environment.yml --prune` 把 `FastAPI / uvicorn / jinja2` 真正装进 `yolos`
+  - 把 `run_execution_web.py` 与 `run_execution_app.py web` 的缺依赖报错改成显式指向 `daily_research/environment.yml` 的项目化提示
+  - 给 Dashboard 补上 doctor 轮询刷新
+  - 给 Runtime 页面补上 stale lock `force unlock` Web 操作
+  - 修复 `web_server.py` 的 `TemplateResponse` 调用签名，使其兼容当前 `FastAPI / Starlette` 版本
+  - 修复 `app_runtime.py` 的 job_id 生成逻辑，从秒级时间戳升级到微秒级唯一 ID，并在落盘前继续做目录存在性检查
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -c "import fastapi, uvicorn, jinja2; print('ok')"` 通过
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/execution/run_execution_app.py doctor --json` 返回 `status=ok`
+  - 真实本地联调通过：
+    - `GET /healthz` 返回 `ok`
+    - `GET /` 返回 `200`
+    - `GET /api/status` / `GET /api/doctor` 正常
+    - `POST /api/unlock` 正常
+    - `POST /api/run` 以 `trade-plan --help` 后台触发成功
+    - `POST /api/resume` 对该作业回放成功
+    - 修复后 `run_job_id != resume_job_id`
+- 本轮复盘：
+  - 真正有价值的问题不是静态代码里能看到的，而是联调里暴露的版本签名差异与同秒作业覆盖风险
+  - Web 控制台现在已经不是“前端草图”，而是和 execution runtime 真实打通的本地应用
+
+## 2026-04-13 - execution Web 控制台切换为简体中文，并补齐使用教程
+
+- 触发原因：
+  - 用户明确要求控制台语言统一为简体中文，并补一份实际可用的使用教程
+- 本轮动作：
+  - 将 Web 控制台的导航、标题、按钮、动态提示、状态文案和页面说明统一改为简体中文
+  - 将 task registry 中供 Web 使用的任务描述、字段标签、帮助文本和 launcher notes 切到简体中文
+  - 新增 `daily_research/execution/web/templates/guide.html`，提供内置教程页 `/guide`
+  - 新增 `daily_research/execution/使用教程.md`，提供仓库内可直接阅读的 Markdown 教程
+  - 将教程入口写回 `operations_center.md`，并把“简体中文 + 教程”同步到 `state_center.md`、`knowledge_center.md`
+  - 更新 `project_consistency_check.py`，把教程页与教程文档纳入守卫
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+- 本轮复盘：
+  - 语言切换如果只改静态模板、不改前端动态提示和任务注册表，用户体验仍会前后割裂
+  - 教程最好同时有“Web 内可点击版本”和“仓库内可接管版本”，这样执行与接管两条链路都能直接复用
+
+## 2026-04-13 - 修复 execution Web 页面错位，并补齐前端模拟账户管理
+
+- 触发原因：
+  - 用户反馈 Dashboard / Guide / Runtime 页面存在桌面端错位、重叠和窄列塌陷
+  - 用户要求前端可以直接管理模拟持仓账户，而不是只读展示
+- 本轮动作：
+  - 给 `guide.html`、`runtime.html`、`account.html` 接入页面专属 `surface-grid` 布局约束
+  - 在 `execution_console.css` 为 hero / panel / detail 区域补 `min-width: 0`、路径换行和断词规则，修复长路径与时间戳互相挤压
+  - 在 `app_service.py` 新增 `load_account_snapshot()`、`save_account_snapshot()`、`reset_account_snapshot_from_example()`，统一把 `current_positions.csv` 作为模拟账户真源
+  - 在 `web_server.py` 新增 `/account` 页面和 `GET /api/account`、`POST /api/account`、`POST /api/account/reset-example`
+  - 新增 `daily_research/execution/web/templates/account.html`，支持编辑现金、持仓、删除行、新增行和示例重置
+  - 在 `execution_console.js` 新增账户页前端逻辑，并让 Dashboard 同步显示可用现金与最近修改时间
+  - 在 `project_consistency_check.py` 中将 `account.html` 纳入 execution app 守卫
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - 真实本地浏览器截图已确认：
+    - `dashboard.png` 不再出现 YOLOS Python 路径与更新时间重叠
+    - `guide.png` 不再出现窄列堆叠
+    - `runtime.png` 不再出现纵向挤压
+    - `account.png` 页面可正常展示账户编辑器
+  - 真实前端操作联调通过：
+    - 在 `/account` 页面通过浏览器将可用现金改为 `54321.98`
+    - 通过“新增持仓”添加 `300750.SZ / 500 / 245.5`
+    - 点击“保存账户”后，`GET /api/account` 回读结果为 `saved_cash=54321.98`、`saved_position_count=4`
+    - 随后调用示例重置恢复到 `reset_cash=200000.0`、`reset_position_count=3`
+- 本轮复盘：
+  - 页面型控制台不能只靠通用栅格；Guide / Runtime / Account 这类信息密度差异大的页面必须给明确列契约
+  - 模拟账户如果只做读接口，仍然是“后台工具”；只有把保存、重置和前端表格编辑打通，才算真正可管理
+
+## 2026-04-13 - 将 `Start-Job` 明确为 agent 联调默认，而不是用户启动默认
+
+- 触发原因：
+  - 用户进一步澄清，“后台 job 方式设为默认”指的是 `agent` 在本地查看、截图、验收和短期服务联调时的默认口径
+  - 不是要求把用户侧公开教程的默认启动方式切成 `Start-Job`
+- 本轮动作：
+  - 将 `state_center.md` 中 execution Web 控制台默认口径改成 `agent` 专用表述
+  - 在 `knowledge_center.md` 中补入 `agent` 联调默认使用同一 PowerShell 会话 `Start-Job` 的规则与边界
+  - 在 `operations_center.md` 中补入 `agent` 本地验收后台模板与“用户侧默认不变”的说明
+- 本轮复盘：
+  - `Start-Job` 适合作为 `agent` 的短期联调默认，是因为它更适合当前终端环境下的可控验证闭环
+  - 但它绑定当前 PowerShell 会话，所以不能被偷换成用户侧长期运行的公开默认
+
+## 2026-04-13 - continuous_policy 并行连续策略栈落地并接入 execution app / Web
+
+- 触发原因：
+  - 用户明确要求把执行侧往“更自由、更连续、更像人类高手”的方向升级
+  - 需求不是继续微调固定执行桥，而是把“每日组合状态 -> 每日动作决策”的连续代理真正落地
+- 本轮事实：
+  - 现有 live 默认链路仍是 `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+  - 当前 trade plan 仍然主要是 `current holdings vs target weight` 的差分翻译，不是逐票连续生命史驱动
+  - 项目已存在足够可复用的数据层、执行 app、Web 控制台和模拟账户真源，可以承接连续策略新栈
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/`
+  - 落地：
+    - `runtime.py`
+    - `state_builder.py`
+    - `label_builder.py`
+    - `portfolio_simulator.py`
+    - `model.py`
+    - `pipeline_utils.py`
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+  - 将 `continuous-policy-train / continuous-policy-evaluate / continuous-policy-export` 接入 `execution/app_tasks.py`
+  - 在 `app_service.py` 中新增 continuous-policy 最新产物摘要读取
+  - 在 Web 控制台新增 `/continuous-policy` 页面与 `/api/continuous-policy`
+  - 将连续策略入口、shadow 边界和产物目录写回 `state_center.md`、`knowledge_center.md`、`operations_center.md`
+- 本轮真实验证：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m compileall -q daily_research/continuous_policy` 通过
+  - `train_policy.py --help`、`evaluate_policy.py --help`、`export_action_panel.py --help` 通过
+  - 真实 smoke train 通过：
+    - `--pool-name liquid300 --start-date 20260102 --end-date 20260331 --max-universe-size 30`
+    - 产出 `continuous_policy_artifact.pkl`
+  - 真实 smoke evaluate 通过：
+    - 产出连续策略 / teacher 上限 / active manifest 参考摘要
+  - 真实 smoke export 通过：
+    - 产出 `daily_live_action_panel.csv`
+    - 产出 `daily_execution_reasoning.json`
+    - 产出 `portfolio_state.json`
+- 本轮复盘：
+  - 正确方向不是继续叠加 hand-crafted bridge，而是新建连续策略栈并保持 live 默认冻结
+  - 连续策略如果没有统一输出目录、runtime state、execution app task registry 和 Web 摘要页，很快就会退化成新的孤立脚本集合
+  - smoke 结果证明新栈已经可运行，但当前仍只是 shadow 并行主线；promotion 仍需要更大股票池、更长窗口和更稳的 account/runtime continuity 证据
+
+## 2026-04-13 - 将 continuous_policy 与模拟账户补入正式教程口径
+
+- 触发原因：
+  - continuous_policy 栈、`/continuous-policy` 页面和模拟账户管理已经落地
+  - 但正式教程文档与 Web `/guide` 页面还没有完整覆盖这两块能力
+- 本轮动作：
+  - 更新 `daily_research/execution/使用教程.md`
+  - 在“页面说明”中补入 `连续策略` 和 `模拟账户`
+  - 在“常见操作”中补入 `continuous-policy-train / evaluate / export`
+  - 在排障建议中补入“连续策略页面没有数据”的处理路径
+  - 更新 Web `guide.html`，把连续策略与模拟账户纳入页面职责和推荐操作顺序
+- 本轮复盘：
+  - 新能力如果只存在于代码与页面，不进入正式教程，很容易在接管时被漏用或误用
+  - continuous_policy 的正确操作顺序必须始终强调 `train -> evaluate -> export`，否则容易把影子导出误当成独立入口
+
+## 2026-04-13 - continuous_policy 正式 protocol、连续性指标与参考对照落地
+
+- 触发原因：
+  - 用户要求不要停在 smoke，而是按顺序把 continuous_policy 推进到正式协议、连续性指标和真实 shadow continuity
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - 将 continuous_policy 正式高层入口接入 `execution/app_tasks.py`，任务名为 `continuous-policy-protocol`
+  - 扩展 `pipeline_utils.py`：
+    - 新增 action outcome 计算
+    - 新增连续性指标
+    - 评估结果新增 `continuity_metrics`
+    - 参考 panel 评估新增 `avg_gross_exposure / avg_holding_count / avg_cash_weight`
+  - 扩展 `evaluate_policy.py`：
+    - 新增 `--reference-panel`
+    - 新增 `daily_action_outcomes.csv`
+  - 扩展 Web `/continuous-policy`：
+    - 新增 protocol 摘要
+    - 新增行为连续性摘要
+  - 同步更新：
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+    - `execution/使用教程.md`
+    - `web/templates/guide.html`
+    - `project_consistency_check.py`
+- 本轮真实 protocol：
+  - 运行命令：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/continuous_policy/run_continuous_policy_protocol.py --pool-name liquid500 --train-start-date 20240102 --train-end-date 20251231 --eval-start-date 20260102 --eval-end-date 20260413 --shadow-start-date 20260401 --shadow-end-date 20260413 --force-bootstrap-from-account --tag formal_liquid500_20260413_r1`
+  - 训练结果：
+    - `sample_rows=203745`
+    - `feature_count=66`
+    - `daily_feature_count=23`
+  - 评估结果：
+    - continuous_policy：年化 `0.4763` / Sharpe `1.7685` / 最大回撤 `-0.0946`
+    - active manifest：年化 `0.5002` / Sharpe `3.7327` / 最大回撤 `-0.0263`
+    - `policy_v5b`：年化 `11.3075` / Sharpe `6.7309` / 最大回撤 `-0.0897`
+  - 连续性指标：
+    - `open_win_rate_5d=0.3966`
+    - `reduce_success_rate_5d=0.4615`
+    - `exit_timeliness_rate_5d=0.4074`
+    - `cash_timing_quality_1d=0.0250`
+  - shadow continuity：
+    - 窗口 `2026-04-01 -> 2026-04-13`
+    - 年化 `0.0301`
+    - Sharpe `0.2849`
+    - `cash_timing_quality_1d=-0.5624`
+  - 最新导出：
+    - `signal_date=2026-04-13`
+    - `action_counts={"减仓": 1}`
+    - `runtime_alignment_gap=0.1813`
+- 本轮复盘：
+  - protocol 已经把 continuous_policy 从“能跑脚本”升级成“有正式入口、有参考对照、有 shadow continuity 的并行主线”
+  - 但首轮正式协议同时证明：当前最大问题已经从“缺骨架”切换成“行为质量不够强”
+  - 下一轮不该继续优先补页面，而应优先修 teacher 标签、动作头与现金时机判断
+
+## 2026-04-13 - continuous_policy r2 lifecycle preset comparison 完成
+- 触发原因：
+  - 用户要求按顺序继续把 continuous_policy 从“能跑 protocol”推进到“正式多预设对照 + 行为质量判决”
+  - 当前目标不是再补界面，而是直接验证 `balanced_v2 / swing_v2 / defensive_v2` 三种 lifecycle preset
+- 本轮动作：
+  - 在 `train_policy.py / evaluate_policy.py / run_continuous_policy_protocol.py / export_action_panel.py` 正式接入 `--label-preset`
+  - 在 `execution/app_tasks.py` 把 `continuous-policy-protocol / train / evaluate` 接入 lifecycle preset 表单字段
+  - 在 `pipeline_utils.py` 扩展连续性指标：
+    - `hold_share`
+    - `hold_retention_quality_5d`
+    - `reduce_preservation_quality_5d`
+    - `reentry_quality_10d`
+    - `immediate_reversal_rate_3d`
+    - `avg_position_cap_target`
+    - `avg_hold_bias_target`
+  - 在 `model.py` 增加空仓开仓回补与 quality-ranking fallback，修复“评估期全程空仓”的塌缩
+  - 在 `label_builder.py` 收紧生命周期标签输出，消除 `entry_quality` 等监督目标里的 `NaN`
+  - 在 `state_builder.py` 修复 `vol_20d=0` 时的除零告警
+  - 在 `/continuous-policy` 页面补充 preset、promotion gate 和新增连续性指标展示
+- 本轮真实验证：
+  - smoke：
+    - `smoke_lifecycle_balanced_20260413_r2`
+    - 已从首轮 smoke 的“评估全空仓”修到会开仓 / 加仓 / 减仓 / 导出
+  - formal：
+    - `formal_liquid500_20260413_r2_balanced_v2`
+      - 年化 `0.3820` / Sharpe `1.6199` / 最大回撤 `-0.0916`
+      - `open/reduce/exit = 0.3603 / 0.4831 / 0.4597`
+    - `formal_liquid500_20260413_r2_swing_v2`
+      - 年化 `0.4157` / Sharpe `1.8885` / 最大回撤 `-0.0941`
+      - `open/reduce/exit = 0.4457 / 0.5315 / 0.5714`
+    - `formal_liquid500_20260413_r2_defensive_v2`
+      - 年化 `-0.1281` / Sharpe `-0.8824` / 最大回撤 `-0.1063`
+      - `open/reduce/exit = 0.5038 / 0.5711 / 0.5254`
+    - 对照：
+      - active manifest：年化 `0.5002` / Sharpe `3.7327` / 最大回撤 `-0.0263`
+      - `policy_v5b`：年化 `11.3075` / Sharpe `6.7309` / 最大回撤 `-0.0897`
+- 本轮结论：
+  - `swing_v2` 当前是 r2 三预设里收益/Sharpe 最强的 shadow 参考
+  - `defensive_v2` 虽然 `open/reduce/exit` 行为指标更强，但收益已经转负
+  - 三个 r2 preset 全部仍是 `shadow_only`
+  - 共同瓶颈已经收缩到：
+    - `hold_share` 近乎为 `0`
+    - `cash_timing_quality_1d` 仍弱
+    - `avg_turnover` 仍显著高于 active manifest
+- 本轮复盘：
+  - 先做 lifecycle preset formal comparison 是对的，它把问题从“抽象想法”收缩成了明确的三类 tradeoff
+  - 当前 continuous_policy 已经会开 / 加 / 减 / 退，但还不会像高手那样稳定持有和主动留现金
+  - 下轮最该修的是 `hold_share / cash_timing / turnover`，而不是继续扩 protocol 或页面
+## 2026-04-14 - 补回正式训练至少 `32` epoch 起步纪律
+- 触发原因：
+  - 用户指出主脑里把“正式训练至少 `32` epoch 起步；不够再 `strict resume` 续训”这条纪律写淡了
+  - 代码守卫仍保留 `MIN_DEFAULT_EPOCHS = 32`，但 brain 表述不够显眼，容易在接管时被忽略
+- 本轮动作：
+  - 在 `identity_layer.md` 明确补回硬约束：正式训练至少从 `32` epoch 起步；不够就沿同一 `experiment-tag / run_dir` 做 `strict resume`
+  - 在 `operations_center.md` 的协议方法中补回默认预算纪律，并显式写明不优先 fresh rerun
+  - 在 `state_center.md` 补回当前纠偏与边界说明，明确不足 `32` epoch 不构成完整训练判决
+  - 同步收紧 `project_consistency_check.py` 的 memory sync，防止以后再次只剩代码里记得、brain 里忘了
+- 本轮复盘：
+  - 这次问题不是代码规则丢了，而是主脑显式性不够，属于“可执行纪律未被足够前置”
+  - 以后凡是 formal 训练预算类纪律，必须同时存在于代码守卫、identity、operations 和 state，不能只留在 `knowledge_center.md`
+
+## 2026-04-14 - continuous_policy 训练合同拆分并落地 `formal_torch_v2`
+- 触发原因：
+  - 用户追问“新主线是否满足正式训练要求”，暴露出 continuous_policy 现有 `v1` 树模型并不具备 `epoch / strict resume / GPU-only` 训练合同
+  - 继续沿用单一“至少 `32` epoch”口径，会把 `prototype_gbdt_v1` 和真正可 promotion 的训练栈混写
+- 本轮动作：
+  - 新增 `continuous_policy/training_contracts.py`，把连续策略训练合同拆成：
+    - `prototype_gbdt_v1 = non-epoch shadow prototype`
+    - `formal_torch_v2 = epoch_resume_formal_candidate`
+  - 新增 `continuous_policy/model_v2.py`，落地 PyTorch 多头模型训练器：
+    - `GPU only`
+    - `>=32` epoch 起步
+    - `strict resume`
+    - `checkpoint_last.pt / checkpoint_best.pt / training_diagnostics.json`
+    - `continuous_policy_v2_artifact.pt`
+  - 重写 `train_policy.py`，正式接入：
+    - `--trainer-backend`
+    - `--epochs`
+    - `--min-epochs`
+    - `--resume-mode`
+  - 更新 `evaluate_policy.py / export_action_panel.py / run_continuous_policy_protocol.py`，统一把：
+    - `trainer_backend`
+    - `training_contract`
+    - `training_diagnostics`
+    写入 summary / protocol / export reasoning
+  - 修正 `export_action_panel.py` 的 runtime 时态回退问题：
+    - 当目标 `signal_date` 早于 runtime 的 `last_signal_date` 时，不再误用旧 runtime，而是回退到账户快照重建
+  - execution app / Web 控制台已同步：
+    - `continuous-policy-protocol / train` 任务表单新增 `trainer_backend / epochs / resume_mode`
+    - `/continuous-policy` 页面新增训练后端、合同类型、完成 epoch、promotion 资格展示
+  - 主脑与守卫已同步：
+    - `identity_layer.md / knowledge_center.md / operations_center.md / state_center.md`
+    - `project_consistency_check.py`
+- 本轮真实验证：
+  - `python -X utf8 -m compileall -q daily_research` 通过
+  - `python -X utf8 daily_research/tools/project_consistency_check.py` 通过
+  - `python -X utf8 daily_research/tools/doc_guard.py check` 通过
+  - `conda run -n yolos python daily_research/continuous_policy/train_policy.py --help` 通过
+  - `conda run -n yolos python daily_research/continuous_policy/run_continuous_policy_protocol.py --help` 通过
+  - `formal_torch_v2` smoke protocol：
+    - `smoke_cp_v2_protocol_20260414__*` 首次跑通 train/evaluate，但在 export 暴露 runtime 时态回退 bug
+    - 修 bug 后 `smoke_cp_v2_protocol_20260414_r2` 完整跑通 `train -> evaluate -> shadow -> export -> gate`
+    - 训练侧：
+      - `device = cuda`
+      - `completed_epochs = 32`
+      - `best_epoch = 32`
+      - `resume_mode = strict`
+    - 协议结论：
+      - `promotion_gate = shadow_only`
+      - 当前失败项：
+        - `reduce_success_rate_5d`
+        - `cash_timing_quality_1d`
+        - `hold_share`
+- 本轮复盘：
+  - 这轮已经把 continuous_policy 从“训练合同不清晰的原型栈”推进到“有 formal 候选后端的可审计研究栈”
+  - 当前主瓶颈已从“合同是否合规”切换成“行为质量是否足够好”
+  - 下一轮应直接围绕 `reduce_success_rate / cash_timing / hold_share` 修状态、标签和解码器，而不是再补训练合同本身
+
+## 2026-04-14 - 实验口径改为“最高效、最合理”
+- 触发原因：
+  - 用户指出：“先做窄实验，不做无边界广扫”容易误伤一种情况：某些设定在弱模型上表现差，但在更强模型上可能更合适
+  - 用户要求把默认实验口径改成“做最高效、最合理的实验”
+- 本轮动作：
+  - 在 `identity_layer.md` 明确写入：
+    - 默认追求最高效、最合理，不追求最小改动
+    - 某设定在较弱模型上失效，不等于在更强模型上永久淘汰
+  - 在 `knowledge_center.md` 把原先“默认只做窄实验，不做无边界广扫”改成：
+    - 默认做最高效、最合理的实验
+    - 允许为验证“某设定是否只在更强模型上成立”而扩实验
+    - 但必须先写清假设、成本边界、停止条件
+  - 在 `operations_center.md` 和 `state_center.md` 同步新的实验纪律
+  - 在 `project_consistency_check.py` 的记忆同步守卫中更新这条口径，避免以后退回旧表述
+- 本轮复盘：
+  - 这次纠偏的核心不是鼓励无边界广扫，而是把“实验边界”从规模导向改成信息增益导向
+  - 以后判断某条线该不该重开，不再只问“是不是窄实验”，而是问“它是否是当前最高效、最合理的信息获取方式”
+
+## 2026-04-14 - continuous_policy 结论账本 / 行为审计 / 强时序分支首轮 smoke
+- 触发原因：
+  - 用户要求在“默认做最高效、最合理实验”的前提下，回顾旧结论是否合理，并把后续高优先级工作按顺序直接做完
+  - 已完成 `conclusion ledger`、`behavior audit`、`v2` 状态/标签/decoder 升级与三组高信息 protocol 后，结果表明 `v2` 仍受明显行为瓶颈约束，需要进入 stronger sequence branch
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/conclusion_ledger.py`
+    - 生成 `stable_conclusions / stage_local_conclusions / strong_model_recheck_conclusions / next_actions`
+    - 写回 `daily_research/output/continuous_policy/latest_conclusion_ledger.json`
+  - 新增 `daily_research/continuous_policy/analyze_behavior_gap.py`
+    - 生成 teacher-vs-model 行为差距、micro signals 与 bottleneck
+    - 写回 `daily_research/output/continuous_policy/latest_behavior_audit_summary.json`
+  - 升级 `continuous_policy v2`：
+    - `state_builder.py` 新增 `days_since_last_buy/sell`、`reentry_cooldown`、`position_age_phase`、组合 cash/turnover 状态与 lagged sequence features
+    - `label_builder.py` 新增 `holdcash_v3`，并强化 `hold / reduce / cash` teacher 逻辑
+    - `portfolio_simulator.py` 新增 buy/sell/action memory 与组合 cash/turnover 统计
+    - `model_v2.py` 新增 `budget_v3 / holdcash_v3` decoder profile，并修掉 global target NaN 污染
+  - 已真实跑完三组高信息 `v2` protocol：
+    - `cp_v2_holdcash_r2`
+    - `cp_v2_decoder_r1`
+    - `cp_v2_holdcash_decoder_r1`
+    - 共同结论：`hold_share` 仍塌缩到 `0.0`，因此满足“v2 仍受限 -> 转入 stronger model branch”的条件
+  - 新增 `formal_torch_seq_v3`：
+    - 文件：`model_seq_v3.py`
+    - 训练合同：`GPU only + >=32 epoch + strict resume`
+    - 载入/分发：`model.py`
+    - 训练入口：`train_policy.py`
+    - 执行侧摘要：`app_service.py`
+  - 已真实跑通第一轮 stronger temporal smoke：
+    - tag：`cp_v3_seq_holdcash_r1`
+    - backend：`formal_torch_seq_v3`
+    - decoder：`holdcash_v3`
+    - train/evaluate/shadow/export 全链路通过
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 训练侧：
+    - `device = cuda`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sequence_base_count = 9`
+    - `sequence_step_count = 5`
+  - `cp_v3_seq_holdcash_r1` 评估侧：
+    - 年化 `0.6196`
+    - Sharpe `5.9867`
+    - 最大回撤 `-0.0152`
+    - `avg_turnover = 0.0721`
+    - `hold_share = 0.30`
+    - `reduce_success_rate_5d = 0.4286`
+    - `cash_timing_quality_1d = -0.4564`
+    - `promotion_gate = shadow_only`
+  - `behavior_audit_20260414_r2` 当前 top bottlenecks：
+    - `reduce_too_early_or_wrong_side`
+    - `cash_timing_not_learned`
+    - `early_exit_bias`
+  - `conclusion_ledger_20260414_r2` 已把旧结论重分成：
+    - 稳定结论
+    - 阶段性结论
+    - 强模型复核结论
+- 本轮推断：
+  - `hold_share` 已不再是 continuous_policy 当前第一瓶颈，说明 stronger temporal branch 对“持有连续性”确实有增益
+  - 当前最值得继续打的不是再证明“要不要更强模型”，而是基于 `seq_v3` 继续修 `reduce / cash / reversal`
+  - 旧结论现在不该再用“永久淘汰”口吻表述；凡是弱模型、旧状态表达、旧动作空间下的失败，都应当进入“强模型复核池”
+- 本轮写回：
+  - `identity_layer.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `state_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research/continuous_policy daily_research/execution` 通过
+  - `cp_v3_seq_holdcash_r1` protocol 真实跑通
+  - `behavior_audit_20260414_r2` 真实生成
+  - `conclusion_ledger_20260414_r2` 真实生成
+- 本轮复盘：
+  - 这轮已经把“先做结论清洗 -> 再做行为审计 -> 再做 stronger temporal 验证”的闭环真正落地
+  - continuous_policy 现在不再只是“有更强模型设想”，而是已经有可审计的 `seq_v3` 真实证据
+  - 下一轮不该回到泛化规划，而应直接围绕 `reduce / cash / early exit` 继续做高信息增益改动
+
+## 2026-04-14 - continuous_policy 目标定义收口为“日频连续决策代理”
+- 触发原因：
+  - 用户明确给出目标定义：希望构建的是一个以日为单位进行连续决策的交易执行模型，而不是依赖固定调仓频率、固定持有周期或人工执行桥接规则的系统
+- 本轮动作：
+  - 将这条目标定义正式写入：
+    - `identity_layer.md`
+    - `knowledge_center.md`
+    - `state_center.md`
+    - `project_consistency_check.py`
+- 本轮写回要点：
+  - continuous_policy 的终局目标不是“继续优化固定执行桥”
+  - 而是：
+    - 日频连续决策
+    - 逐票异质持有逻辑
+    - 从市场全局状态、个股演化路径与持仓上下文直接学习动态执行
+    - 在尽量少的人为约束下综合权衡收益、风险与成本
+  - `top-k / 3d / 5d / 20d / ensemble / regime filter` 这类桥接规则从此只保留为基线、参考或 fallback，不再作为终局目标本身
+- 本轮复盘：
+  - 这次不是新增实验，而是收紧了“我们到底在建什么”的目标边界
+  - 以后评价 continuous_policy 的进展，不能只看是否超过某个固定桥基线，还必须看它是否越来越接近日频连续、逐票异质、全局动态优化的目标形态
+
+## 2026-04-14 - 主脑与分析真源精炼整理
+- 触发原因：
+  - 用户要求总览立项以来的路线和成果，并对整个项目做详细审阅、整理、维护和修复，使其满足“逻辑严谨一致，条理清晰，精炼简洁”
+- 本轮动作：
+  - 在 `state_center.md / knowledge_center.md / operations_center.md` 清理了已过时的旧阶段叙事：
+    - 移除了把 `hold_share` 继续写成当前第一瓶颈的表述
+    - 修正了把 continuous_policy GPU 正式训练约束误写成只作用于 `formal_torch_v2` 的表述
+  - 新增非权威派生摘要：
+    - `daily_research/output/project_review/latest_project_route_review.md`
+  - 修正分析真源生成逻辑：
+    - `analyze_behavior_gap.py` 的 `recommended_focus` 改为按当前指标动态生成，不再默认“先提升 hold_share”
+    - `conclusion_ledger.py` 的局部瓶颈结论改为按当前 gate 与影子 reversal 动态生成，并把 `formal_torch_seq_v3` 纳入正式合同叙事
+  - 在 `project_consistency_check.py` 新增 stale phrase 守卫，防止旧结论回流进当前主脑
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 当前仍是 stronger temporal 最新 smoke 证据
+  - 当前主脑口径已经统一为：
+    - `hold_share` 已改善，不再是第一瓶颈
+    - 当前更集中要修的是 `reduce / cash / early exit / shadow reversal`
+- 本轮验证：
+  - 重新生成 `latest_behavior_audit_summary.json`
+  - 重新生成 `latest_conclusion_ledger.json`
+  - `project_consistency_check.py` 通过
+  - `doc_guard.py check` 通过
+  - `compileall` 通过
+- 本轮复盘：
+  - 这轮不是新增一条研究线，而是把已有路线、成果、边界和当前问题真正收口成一致真源
+  - 以后接管时，不再需要在“旧瓶颈”“新瓶颈”“训练合同范围”之间做人工去歧义
+
+## 2026-04-14 - seq_v3 `v4` repair matrix 跑完并回切 latest 指针
+- 触发原因：
+  - 用户要求按顺序把“先改 `reduce / cash / reversal`，再跑高价值 protocol，对比后写回主脑”的后续工作直接做完
+  - 我已先完成 `holdcash_v4` 标签、`reduceexit_v4 / cash_v4 / reduceexit_cash_v4` decoder 与行为审计增强，接下来需要把剩余两组真实 protocol 跑完并收口阶段结论
+- 本轮动作：
+  - 完整跑通三组 seq_v3 `v4` repair protocol：
+    - `cp_v3_seq_reduceexit_r1`
+    - `cp_v3_seq_cash_r1`
+    - `cp_v3_seq_reduceexit_cash_r1`
+  - `run_continuous_policy_protocol.py` 已自动串联：
+    - `train`
+    - `evaluate`
+    - `shadow`
+    - `export`
+    - `behavior audit`
+    - `conclusion ledger`
+  - 新增的行为归因指标已进入 protocol / audit：
+    - `wrong_side_reduce_share`
+    - `profit_take_too_early_share`
+    - `reentry_after_exit_3d_rate`
+    - `exit_then_rebound_cost`
+    - `risk_off_cash_hit_rate`
+  - 为避免控制台默认漂到“最近一次但更差”的版本，我把：
+    - `latest_train_summary.json`
+    - `latest_evaluation_summary.json`
+    - `latest_export_summary.json`
+    - `latest_protocol_summary.json`
+    - `latest_behavior_audit_summary.json`
+    - `latest_conclusion_ledger.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+- 本轮关键事实：
+  - `cp_v3_seq_reduceexit_r1`
+    - 年化 `-0.1497`
+    - Sharpe `-1.6263`
+    - `hold_share = 0.0833`
+    - `reduce_success_rate_5d = 0.6296`
+    - `cash_timing_quality_1d = -0.0398`
+    - `shadow_cash_timing_quality_1d = 0.5177`
+  - `cp_v3_seq_cash_r1`
+    - 年化 `0.0062`
+    - Sharpe `0.1111`
+    - `hold_share = 0.0417`
+    - `reduce_success_rate_5d = 0.6538`
+    - `cash_timing_quality_1d = -0.0665`
+    - `shadow_cash_timing_quality_1d = 0.5177`
+  - `cp_v3_seq_reduceexit_cash_r1`
+    - 年化 `0.0062`
+    - Sharpe `0.1111`
+    - `hold_share = 0.0417`
+    - `reduce_success_rate_5d = 0.6538`
+    - `cash_timing_quality_1d = -0.0658`
+    - 与 `cp_v3_seq_cash_r1` 基本等价，没有带来额外增益
+  - `cp_v3_seq_holdcash_r1`
+    - 仍是当前 strongest temporal 综合最强锚点
+    - 年化 `0.6196`
+    - Sharpe `5.9867`
+    - `hold_share = 0.30`
+    - 但仍卡在 `reduce_success_rate_5d / cash_timing_quality_1d / shadow_reversal`
+- 本轮推断：
+  - `v4` repair matrix 证明了一个更清晰的阶段边界：
+    - 单点修 `reduce / cash` 可以显著修好局部指标
+    - 但如果没有显式保护持有连续性，`hold_share` 和总收益会一起塌掉
+  - 当前最值得继续打的不是再广扫 profile，而是：
+    - 修 `reduce_too_early_or_wrong_side`
+    - 修 `cash_timing_not_learned`
+    - 修 `early_exit_bias / shadow reversal`
+    - 同时显式保住 `hold_share >= 0.20`
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+- 本轮验证：
+  - `cp_v3_seq_cash_r1` protocol 真实跑通
+  - `cp_v3_seq_reduceexit_cash_r1` protocol 真实跑通
+  - `latest_*` 指针已真实回切到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-14 - `formal_torch_hier_v4` 分层时序分支落地并完成首轮 smoke
+- 背景事实：
+  - 用户明确要求不要再停留在蓝图层，而是把“更强、最合理的神经网络架构”直接接进项目
+  - 当时 continuous_policy 只有 `prototype_gbdt_v1 / formal_torch_v2 / formal_torch_seq_v3`
+- 本轮动作：
+  - 新增 `daily_research/continuous_policy/model_hier_v4.py`
+  - 实现 `formal_torch_hier_v4`：
+    - 按交易日分组训练
+    - 个股静态特征编码 + 个股时序路径编码
+    - market / portfolio / universe token
+    - cross-section interaction encoder
+    - 全局预算头 + 生命周期动作头
+  - 同步接入：
+    - `training_contracts.py`
+    - `model.py`
+    - `train_policy.py`
+    - `runtime.py`
+    - `app_tasks.py`
+    - `analyze_behavior_gap.py`
+- 真实验证：
+  - 已前台在 `yolos` 中跑通：
+    - `cp_hier_v4_holdcash_r1`
+    - `cp_hier_v4_holdcash_r2`
+    - `cp_hier_v4_holdcash_r3`
+  - `r1` 暴露 `analyze_behavior_gap.py` 对空 `action_outcomes_csv` 不稳；本轮已修复
+  - `r3` 已完整通过：
+    - `train -> evaluate -> shadow continuity -> export -> behavior audit -> conclusion ledger`
+    - `device = cuda`
+    - `completed_epochs = 32`
+    - `best_epoch = 32`
+- 关键事实：
+  - `formal_torch_hier_v4` 已满足：
+    - `GPU only`
+    - `>=32 epoch`
+    - `strict resume`
+    - `checkpoint_last.pt / checkpoint_best.pt / training_diagnostics.json`
+    - `continuous_policy_hier_v4_artifact.pt`
+  - 但 `cp_hier_v4_holdcash_r3` 的 formal 评估侧仍出现：
+    - `action_rows = 0`
+    - `avg_gross_exposure = 0`
+    - `hold_share = 0`
+  - 说明当前 `hier_v4` 已经是正式存在的新研究分支，但行为层仍有全现金塌缩
+- 本轮推断：
+  - `formal_torch_hier_v4` 已经从设想变成项目内第四类 continuous_policy 训练后端
+  - 但它当前不能替代 `cp_v3_seq_holdcash_r1`
+  - 当前 strongest temporal 锚点仍然是 `formal_torch_seq_v3`
+  - `hier_v4` 下一步优先修：
+    - 正式评估侧全现金塌缩
+    - `open / hold` 不出手
+    - decoder 与组合预算头过度保守耦合
+- 本轮写回：
+  - `identity_layer.md`
+  - `knowledge_center.md`
+  - `state_center.md`
+  - `operations_center.md`
+  - `execution/使用教程.md`
+  - `execution/web/templates/guide.html`
+- 本轮复盘：
+  - 这轮最大的收获不是立即得到新 strongest model，而是把更强分层神经网络路线变成了可训练、可评估、可导出、可写回的正式项目分支
+  - 同时也明确收口了一条阶段性结论：
+    - `seq_v3` 仍是当前 strongest temporal 锚点
+    - `hier_v4` 已落地，但现在仍只是 `shadow_only` 起点
+- 本轮复盘：
+  - 这轮最大的收获不是又多了两个 tag，而是把“局部修补”和“当前最强锚点”真正区分开了
+  - 后续如果再跑 repair 变体，默认不能让控制台自动漂到最近一次实验，必须在比较完成后主动收口到当前最强版本
+
+## 2026-04-14 - `formal_torch_hier_v4` stock index 错位修复并完成 `cp_hier_v4_holdcash_r4`
+- 背景事实：
+  - 用户要求继续把更强架构真正落到可用状态，而不是停在“新分支已接通”
+  - `cp_hier_v4_holdcash_r3` 当时的 formal 评估侧表现为全零：`action_rows = 0 / avg_gross_exposure = 0 / hold_share = 0`
+- 本轮排查：
+  - 先直接抽样 `predict_policy_v4` 在 empty-portfolio formal 首日的输出
+  - 结果发现模型其实已经能给出非零 `open` 与非零 `target_weight`
+  - 再对比 `portfolio.step()` 的输入输出，确认真正根因不是模型完全失效，而是 `build_cross_section_state()` 末尾把真实股票代码索引重置成了 `0..N-1`
+  - 这样 `predict_policy` 产出的 policy frame 与 `prices.index` 对票失败，formal rollout 被统一回填成 `skip`
+- 本轮动作：
+  - 修复 `daily_research/continuous_policy/state_builder.py`
+    - 保留真实股票代码为 cross-section state 的索引
+    - 同时保留 `stock` 列
+  - 先用既有 artifact 快速验证：
+    - `cp_hier_v4_holdcash_r3__evaluate_after_index_fix`
+  - 再完整重跑：
+    - `cp_hier_v4_holdcash_r4__train`
+    - `cp_hier_v4_holdcash_r4__evaluate`
+    - `cp_hier_v4_holdcash_r4` shadow continuity
+    - `cp_hier_v4_holdcash_r4__export`
+    - `cp_hier_v4_holdcash_r4__audit`
+    - `cp_hier_v4_holdcash_r4__ledger`
+  - 同步写回：
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+    - `project_consistency_check.py`
+- 关键事实：
+  - `formal_torch_hier_v4` 的根因已确认不是“不会开仓”，而是 stock index 错位
+  - 修复后 `cp_hier_v4_holdcash_r4` 的 formal 评估已恢复为非零交易回放：
+    - 年化 `-0.1657`
+    - Sharpe `-1.6595`
+    - `avg_turnover = 0.0761`
+    - `avg_gross_exposure = 0.3223`
+    - `open / add / reduce / exit = 10 / 43 / 61 / 2`
+  - 但当前仍明显不够 promotable：
+    - `hold_share = 0.0`
+    - `cash_timing_quality_1d = 0.0216`
+    - `immediate_reversal_rate_3d = 0.5172`
+    - `promotion_gate = shadow_only`
+- 本轮推断：
+  - `formal_torch_hier_v4` 已从“结构已接通但 formal 全零”推进到“能真实交易回放，但行为质量仍差”
+  - `r3` 的全现金塌缩已不再是当前现状，后续接管不能再沿用那个旧判断
+  - 当前 `hier_v4` 的主瓶颈已经切换为：
+    - `hold_share` 仍为 `0`
+    - `early_exit_bias`
+    - `shadow_reversal`
+  - 当前 strongest temporal 锚点仍然是 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-14 - `holdcash_v5` repair 跑完，`latest_*` 保持回指 strongest temporal 锚点
+- 触发原因：
+  - 用户要求按顺序把“behavior audit -> state/label/decoder 修补 -> 高信息增益 protocol -> 写回主脑”这一轮连续策略工作直接做完
+  - 我已先完成 `holdcash_v5` 的状态、标签、decoder 与组合预算修补，接下来需要真实验证它到底是在修行为，还是只是把 strongest temporal 锚点打坏
+- 本轮动作：
+  - 真实跑完 `cp_v3_seq_holdcash_r2`
+    - `formal_torch_seq_v3 + holdcash_v5`
+    - `32` epoch / `strict resume`
+  - 真实修完 `formal_torch_hier_v4` 的两个实现 bug 后，沿同一 `run_dir` 连续 strict resume，最终跑完 `cp_hier_v4_holdcash_r5`
+    - `32 -> 40 -> 44` epoch
+  - 刷新 `cp_v3_seq_holdcash_r1` 的 behavior audit / conclusion ledger
+  - 把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json / latest_behavior_audit_summary.json / latest_conclusion_ledger.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r2`
+    - 年化 `0.4996`
+    - Sharpe `2.7879`
+    - `hold_share = 0.0777`
+    - `reduce_success_rate_5d = 0.3810`
+    - `cash_timing_quality_1d = -0.0352`
+    - `immediate_reversal_rate_3d = 0.3684`
+  - 与 `cp_v3_seq_holdcash_r1` 相比：
+    - `cash_timing_quality_1d` 从 `-0.4564` 改善到 `-0.0352`
+    - `immediate_reversal_rate_3d` 从 `0.5357` 下降到 `0.3684`
+    - 但 `hold_share` 从 `0.30` 回落到 `0.0777`
+  - `cp_hier_v4_holdcash_r5`
+    - `completed_epochs = 44`
+    - `best_epoch = 11`
+    - 年化 `-0.0702`
+    - Sharpe `-0.7293`
+    - `hold_share = 0.0`
+    - `reduce_success_rate_5d = 0.4230`
+    - `cash_timing_quality_1d = -0.0207`
+    - `immediate_reversal_rate_3d = 0.0883`
+- 本轮推断：
+  - `holdcash_v5` 方向本身没有错，因为它确实同时改善了 cash / reversal
+  - 但当前 `seq_v3` 实现里，只要这些修法没有显式保护持有连续性，`hold_share` 就会重新塌掉
+  - `hier_v4` 当前已经从“结构 bug”阶段推进到“低反手但仍不会持有”的研究阶段
+  - strongest temporal 当前仍应锚定 `cp_v3_seq_holdcash_r1`
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research`
+  - `python -X utf8 daily_research/tools/project_consistency_check.py`
+  - `python -X utf8 daily_research/tools/doc_guard.py check`
+
+## 2026-04-14 - continuous_policy 训练充分性复核并补跑长窗正式证据
+- 触发原因：
+  - 用户追问“这些实验的训练次数和训练数据是否足够；如果不够就加”
+  - 我先复核了当前 strongest temporal / repair / hierarchical 几条主线的真实训练诊断
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sample_rows = 44268`
+    - 当前窗口只有 `106` 个交易日
+  - `cp_v3_seq_holdcash_r2`
+    - `completed_epochs = 32`
+    - `best_epoch = 31`
+    - `sample_rows = 15672`
+    - `teacher_action_rows = 5081`
+    - 当前窗口同样只有 `106` 个交易日
+  - `cp_hier_v4_holdcash_r5`
+    - `completed_epochs = 44`
+    - `best_epoch = 11`
+    - `train_day_count = 93`
+    - `teacher_action_rows = 5081`
+  - 结论：
+    - `r1 / r2 / r5` 这批短窗 repair run 的训练证据都偏紧
+    - 其中 `seq_v3` 还存在 best_epoch 贴边，说明不该把 `32` epoch 当成已经完全训够
+- 本轮动作：
+  - 在 `run_continuous_policy_protocol.py` 里新增 `training_evidence`
+    - `train_day_count >= 180`
+    - `teacher_action_rows >= 10000`
+    - `best_epoch_not_at_edge`
+  - 把 `training_evidence_sufficient` 接进 promotion gate
+  - 把 `seq_v3` 训练诊断补齐 `train_day_count / validation_day_count / train_sample_rows / validation_sample_rows`
+  - 真实补跑长窗正式 protocol：
+    - `cp_v3_seq_holdcash_v5_formal_r1`
+    - `formal_torch_seq_v3 + holdcash_v5`
+    - `train_start = 20240102`
+    - `train_end = 20251231`
+    - `epochs = 48`
+- 长窗正式结果：
+  - 训练证据已过线：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 22604`
+    - `best_epoch = 45 / 48`
+    - `training_evidence.status = sufficient`
+  - 但行为仍失败：
+    - 年化 `0.4688`
+    - Sharpe `3.8311`
+    - `hold_share = 0.0`
+    - `reduce_success_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.0908`
+    - `immediate_reversal_rate_3d = 0.1757`
+- 本轮推断：
+  - 这次长窗 formal 已证明：当前 `holdcash_v5` 的主问题不再能解释成“只是 epoch 不够/样本不够”
+  - 下一步应优先修标签、状态与 decoder，而不是机械继续加 epoch
+  - `cp_v3_seq_holdcash_r1` 仍是当前 strongest temporal 锚点，所以 `latest_*` 再次回切到它
+- 本轮写回：
+  - `state_center.md`
+  - `knowledge_center.md`
+  - `operations_center.md`
+  - `project_consistency_check.py`
+- 本轮验证：
+  - `python -X utf8 -m compileall -q daily_research`
+  - `python -X utf8 daily_research/tools/project_consistency_check.py`
+  - `python -X utf8 daily_research/tools/doc_guard.py check`
+
+## 2026-04-14 - 持续接管复核：最小入口、守卫与运行口径再次确认
+- 触发原因：
+  - 新一轮接管明确要求先理解再行动、区分事实/推断/假设，并在关键动作后复盘写回
+  - 因此本轮不直接重做研究或改代码，而是先按当前治理规则做一次最小接管复核
+- 执行前四检：
+  - 目标一致性：
+    - 当前主线仍是 `daily_research`
+    - 当前主问题仍是 continuous_policy 行为质量收敛，而不是 strongest-model 主线重开
+  - 规则冲突检查：
+    - 当前没有发现 formal / recent / live / promotion 混写
+    - continuous_policy 仍处于 `shadow_only`
+  - 经验教训检查：
+    - 不再从 `episodic_memory.md` 全量起步
+    - 不把短窗 `32` epoch repair run 直接当终局结论
+  - 依赖完整性检查：
+    - `yolos` 环境存在
+    - brain 文档最小入口完整
+- 本轮动作：
+  - 读取 `identity_layer.md / state_center.md / knowledge_center.md / operations_center.md / governance_layer.md`
+  - 复核工作区状态：`git status --short` 为空
+  - 复核环境：`conda env list` 确认 `yolos` 存在
+  - 用 `conda run -n yolos python -X utf8 daily_research/tools/project_consistency_check.py` 复跑守卫
+  - 用显式 `yolos` Python 复跑 `daily_research/tools/doc_guard.py check`
+- 本轮关键事实：
+  - `project_consistency_check.py` 返回：
+    - `status = ok`
+    - `failure_count = 0`
+  - 显式 `yolos` Python 运行 `doc_guard.py check` 返回：
+    - `documentation_layout_issues = 0`
+    - 各 brain 文档未见 replacement char、tail 可疑问句或 heading 失真
+    - 当前仅见主脑 `brain_manifest.json` 的 `line_count_exceeds_warning (212 > 200)` 结构告警，但无语义问题
+  - 当前接管结论与主状态一致：
+    - stronger temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - 下一轮优先修 `reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d`
+    - 修法必须显式保住 `hold_share >= 0.20`
+- 本轮推断：
+  - 目前 brain 真源、守卫结果与主线叙事仍一致，未发现目标偏移或计划失效
+  - 之前 `conda run -n yolos ... doc_guard.py check` 的尾部异常输出更像 Windows 调用噪声，而不是 `doc_guard.py` 本身失败，因为显式 `yolos` Python 复跑结果干净且退出码正常
+- 暂不采纳的假设：
+  - 不因为本轮接管复核就改写 strongest temporal、promotion gate 或 live 默认执行
+  - 不因为 `conda run` 噪声就假设文档体系存在新的结构损坏
+- 本轮写回：
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次接管没有产生新的模型结论，价值在于把“当前方向没偏、守卫真实能过、命令口径怎么更稳”重新固定为项目资产
+  - 后续继续推进 continuous_policy 时，可以直接在当前真源上前进，不需要再重复做一轮全量考古
+
+## 2026-04-14 - continuous_policy 显式接入 `learned_all_a`，把固定股票池从隐式前置改成可学习候选域
+- 触发原因：
+  - 用户明确提出：股票池也不应再是定好的，而应让模型自己学会在整个上证+深证 A 股里选股
+  - 我先复核了当前实现，确认“fixed liquid500”更多是正式协议默认值，而不是 continuous_policy 架构硬上限
+- 本轮关键事实：
+  - `daily_research/baseline/data_provider.py` 的 `load_universe_from_tq("all_a")` 本来就能加载全 A 候选域
+  - `continuous_policy/state_builder.py` 此前如果 `pool_name` 为空，会隐式回退到全 A universe，但这不是正式、可追踪的接口
+  - 同时 `_build_membership_frame()` 之前只认 rolling liquidity pool；如果显式传 `all_a`，反而会落到 unsupported pool name
+- 本轮动作：
+  - 在 `continuous_policy/state_builder.py` 新增：
+    - `normalize_policy_pool_name()`
+    - `is_learned_all_a_pool_name()`
+    - `LEARNED_ALL_A_POOL_NAMES`
+  - 把 `all_a / learned_all_a / full_a / whole_a` 统一归一为 `learned_all_a`
+  - 让 `resolve_policy_universe()` 在 `learned_all_a` 下显式加载全 A，而不是再靠空字符串隐式回退
+  - 让 `_build_membership_frame()` 在 `learned_all_a` 下直接返回全市场 `membership = close.notna()`
+  - 同步更新：
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+    - `run_continuous_policy_protocol.py`
+    的 CLI help，使 `all_a / learned_all_a` 成为正式入口
+  - 更新 `execution/app_tasks.py` 与 brain 文档，明确：
+    - `liquid500` 继续是当前 frozen shadow 参考
+    - `learned_all_a` 是新的研究方向，不等于 live 默认已切换
+- 本轮推断：
+  - 这次改动解决的是“目标和接口口径不一致”问题，而不是已经证明全 A learned selection 优于 `liquid500`
+  - 下一轮真正要验证的是：
+    - 同协议下 `liquid500` vs `learned_all_a` 是否带来净信息增益
+    - 这种增益是否值得额外的训练样本、显存和 runtime 成本
+- 本轮暂不采纳的假设：
+  - 不把这次接口接通误写成“已经可以静默 promotion 到 live”
+  - 不把 `liquid500` 直接删掉；它仍应保留为 same-protocol 对照和预算友好参考
+  - 不直接宣称 `hier_v4` 已适合无上限全 A 正式训练；这需要单独预算和实跑证据
+- 本轮写回：
+  - `daily_research/continuous_policy/state_builder.py`
+  - `daily_research/continuous_policy/train_policy.py`
+  - `daily_research/continuous_policy/evaluate_policy.py`
+  - `daily_research/continuous_policy/export_action_panel.py`
+  - `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - `daily_research/execution/app_tasks.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮预期验证：
+  - `resolve_policy_universe(pool_name="all_a")` 与 `resolve_policy_universe(pool_name="learned_all_a")` 应显式得到全 A universe
+  - `learned_all_a` 下的 membership 应为全市场可观测股票的全量 `True`
+  - `project_consistency_check.py` 与 `doc_guard.py check` 应继续通过
+
+## 2026-04-14 - 以“高瞻远瞩的策略规划者”视角收敛 continuous_policy 下一步：先验证候选域，再修行为，再谈全A正式扩窗
+- 触发原因：
+  - 用户要求从更高层的策略规划视角推进：先发散设想多条路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 本轮关键事实：
+  - `learned_all_a` 已经成为 continuous_policy 的正式候选域入口，但目前还没有 same-protocol 的正式对照证据证明它优于 `liquid500`
+  - 当前 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 当前已收敛的核心行为问题仍是：
+    - `reduce_success_rate_5d`
+    - `cash_timing_quality_1d`
+    - `immediate_reversal_rate_3d`
+    - 且修这些问题时必须显式保住 `hold_share >= 0.20`
+  - `liquid500` 当前仍是 frozen shadow 参考与预算友好对照，不应在尚无新证据前被直接删除
+- 本轮发散评估过的路径：
+  - 路径 A：直接上 `learned_all_a` 全A长窗 formal
+    - 优点：最接近用户最终目标
+    - 风险：会把“候选域放开”的效果与“样本量、显存、训练稳定性”混在一起，难以解释成败原因
+  - 路径 B：先做 `learned_all_a` 的 same-protocol capped smoke，再和 `liquid500` 对照
+    - 优点：变量最少，能先确认候选域放开是否带来净信息增益
+    - 风险：不是最终形态，但能最大化下一步决策质量
+  - 路径 C：暂时不碰全A，继续只在 `liquid500` 上修 `reduce / cash / reversal`
+    - 优点：最稳、最省算力
+    - 风险：会偏离“模型自己学会在全A选股”的新目标
+  - 路径 D：直接让 `hier_v4` 承担全A主线
+    - 优点：它在 reversal 上已有领先迹象
+    - 风险：当前 `hold_share` 仍为 `0`，如果现在切主线，会把“架构切换”与“候选域切换”叠在一起，解释性最差
+- 本轮推断：
+  - 路径 B 是当前最高 ROI 的收敛方案，因为它同时满足：
+    - 不偏离“全A学习选股”的新方向
+    - 不丢失 `liquid500` 对照组
+    - 不把架构切换、标签修补、候选域扩张三件事混成一次高噪声实验
+  - 在候选域效应还没分离出来之前，不应直接宣布“下一步就是全A长窗 formal”或“hier_v4 改当主线”
+- 收敛后的优先级行动方案：
+  - `P0`：先跑 same-protocol 候选域对照 smoke
+    - 目标：用最小变量变化确认 `learned_all_a` 是否真的带来净信息增益
+    - 口径：优先复用 `formal_torch_seq_v3 + holdcash_v5` 与现有 `cp_v3_seq_holdcash_r2` 同窗口，只把 `pool_name` 切到 `learned_all_a`，并保留 `max_universe_size`
+    - 重点观察：
+      - `hold_share`
+      - `reduce_success_rate_5d`
+      - `cash_timing_quality_1d`
+      - `immediate_reversal_rate_3d`
+      - `training_evidence`
+      - 训练时长、显存与运行稳定性
+    - 停止条件：
+      - 明显 OOM / runtime 不稳定
+      - `training_evidence` 不达标
+      - `hold_share` 相比 `cp_v3_seq_holdcash_r1` 再次显著塌缩
+  - `P1`：基于对照结果做行为归因，而不是立刻扩大搜索
+    - 如果 `learned_all_a` 在 capped smoke 下没有明显恶化 `hold_share`，就进入行为归因
+    - 归因目标是区分：
+      - 问题主要来自候选域放开本身
+      - 还是主要来自 teacher 标签、decoder 或组合分配逻辑
+    - 只有归因清楚后，下一轮 repair 才继续围绕 `reduce / cash / reversal` 做精修
+  - `P2`：只有在 `P0` 证明候选域放开有正信号后，才做 universe 扩张
+    - 先从更大的 `max_universe_size` 扩到近全A
+    - 再决定是否值得进入真正的全A长窗 formal
+    - 如果 `P0` 失败，则先回到 `liquid500` 对照组继续修行为，而不是盲目加预算
+  - `P3`：`hier_v4` 保持 research branch 身份，暂不接主线
+    - 只有当 `seq_v3` 在 `learned_all_a` 下证明“候选域方向成立，但 reversal 仍卡住”时，才值得让 `hier_v4` 作为定向 challenger 进入
+- 本轮暂不采纳的假设：
+  - 不把“支持 `learned_all_a`”误写成“已经证实全A优于 `liquid500`”
+  - 不把“用户希望全A学习选股”误解成“现在就该放弃一切对照、直接全A正式扩窗”
+  - 不把 `hier_v4` 当前 reversal 优势误读成“它已经具备全A主线接管条件”
+- 本轮写回：
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次规划动作的核心价值，不是新增模型证据，而是把“全A方向”的推进顺序明确成：
+    - 先确认候选域净信息增益
+    - 再修行为
+    - 最后才扩大预算与主线切换
+  - 这样能避免重复历史上“多变量同时变化，最后无法解释为什么成败”的低效路径
+
+## 2026-04-14 - 按顺序完成 learned_all_a 的 capped 对照、归因与长窗正式验证；结论是暂不扩 universe
+- 触发原因：
+  - 用户要求按既定优先级把 `learned_all_a` 这条线顺序推进完，而不是只停留在规划
+- 本轮关键事实：
+  - `cp_v3_seq_learned_all_a_smoke_r1` 已真实跑完：
+    - 口径：`formal_torch_seq_v3 + holdcash_v5 + learned_all_a + max_universe_size=1200`
+    - 评估侧：
+      - `annual_return = 2.1015`
+      - `hold_share = 0.0`
+      - `reduce_success_rate_5d = 0.4154`
+      - `cash_timing_quality_1d = -0.2190`
+      - `immediate_reversal_rate_3d = 0.3212`
+    - shadow 侧：
+      - `annual_return = -0.5546`
+      - `sharpe = -2.3499`
+      - `hold_share = 0.0`
+      - `cash_timing_quality_1d = -0.5199`
+    - `training_evidence = insufficient`
+      - `train_day_count = 93`
+      - `teacher_action_rows = 9516`
+  - 在停止条件被触发后，我没有直接扩 universe，而是先做了同域归因：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_r1`
+    - 只把 `holdcash_v5` 换成 `holdcash_v3`，其余窗口、模型、候选域保持不变
+    - 评估侧：
+      - `annual_return = 1.5912`
+      - `hold_share = 0.2532`
+      - `cash_timing_quality_1d = 0.0598`
+      - `avg_turnover = 0.0611`
+    - 但 shadow 侧仍为负：
+      - `annual_return = -0.4554`
+      - `hold_share = 0.2182`
+      - `cash_timing_quality_1d = -0.3669`
+      - `immediate_reversal_rate_3d = 0.5581`
+    - 同时 `training_evidence` 仍不足：
+      - `train_day_count = 93`
+      - `teacher_action_rows = 9533`
+      - `best_epoch = 31 / 32`
+  - 为把“短窗正信号是否只是幻觉”真正验清，我继续跑了长窗正式验证：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1`
+    - 口径：`20240102 -> 20251231`、`48` epoch、`min_epochs = 32`
+    - 这次 `training_evidence` 已充足：
+      - `train_day_count = 409`
+      - `teacher_action_rows = 37130`
+      - `best_epoch = 43 / 48`
+    - 评估侧：
+      - `annual_return = 0.9403`
+      - `hold_share = 0.0`
+      - `reduce_success_rate_5d = 0.4195`
+      - `cash_timing_quality_1d = -0.1311`
+      - `immediate_reversal_rate_3d = 0.4607`
+    - shadow 侧：
+      - `annual_return = 0.2585`
+      - `sharpe = 1.3484`
+      - `hold_share = 0.0`
+      - `cash_timing_quality_1d = -0.2839`
+      - `immediate_reversal_rate_3d = 0.2857`
+- 本轮推断：
+  - `learned_all_a` 方向本身没有被第一轮 smoke 直接判死，因为同域换成 `holdcash_v3` 后，短窗下 `hold_share` 和 `cash_timing_quality_1d` 能明显修复
+  - 但这个正信号在长窗正式口径下没有站住；一旦训练证据充足，`hold_share` 又塌回 `0.0`
+  - 因此当前 capped 全A的主要问题不是“接口没接上”或“只是预算不够”，而是：
+    - teacher 标签
+    - decoder 行为偏置
+    - 状态表征
+    这三者在 `learned_all_a` 上仍未稳定
+- 本轮纠偏：
+  - 原规划里的 `P2 = universe 扩张` 已被本轮真实证据否决
+  - 当前更正确的下一步不再是把 `max_universe_size` 往上推，而是先留在 capped `1200` 范围内修行为质量
+- 本轮治理动作：
+  - 跑完三组 `learned_all_a` 对照后，我已把：
+    - `latest_train_summary.json`
+    - `latest_evaluation_summary.json`
+    - `latest_export_summary.json`
+    - `latest_protocol_summary.json`
+    - `latest_behavior_audit_summary.json`
+    - `latest_conclusion_ledger.json`
+    - `runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 这样执行控制台不会漂到“最新但治理上更弱”的 learned_all_a run
+- 本轮暂不采纳的假设：
+  - 不把 `cp_v3_seq_learned_all_a_holdcash_v3_r1` 的短窗正信号误写成“全A方向已经稳定成立”
+  - 不因为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 的 shadow 年化转正，就忽略它在 `hold_share / cash_timing_quality_1d` 上仍然失败
+  - 不让 `hier_v4` 因为 reversal 指标有潜力而直接接管 capped 全A主线
+- 本轮写回：
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次顺序推进最大的价值，是把 `learned_all_a` 从“方向设想”推进成了“有三层证据约束的真实研究线”
+  - 当前正式结论已经足够清楚：
+    - `learned_all_a` 继续保留
+    - 但只保留为 capped `1200` 的 `shadow_only` research line
+    - 下一轮先修标签 / decoder / 状态表征
+    - 在这些问题没稳住前，不再继续扩 universe
+
+## 2026-04-14 - 基于已完成的 learned_all_a 三层证据，重新收敛下一步：先修行为形成机制，再谈 capped 全A升级
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散设想路径，再收敛为清晰、详细且高效的下一步行动方案
+- 本轮关键事实：
+  - `cp_v3_seq_holdcash_r1` 仍是当前 stronger temporal 锚点，`latest_*` 已回切到它
+  - `cp_v3_seq_learned_all_a_smoke_r1` 证明 `holdcash_v5` 在 capped 全A上会把 `hold_share` 打成 `0`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_r1` 证明 capped 全A方向本身并未被判死，但这个正信号只成立在短窗且 `training_evidence` 不足
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 证明：当 `training_evidence` 充足后，`hold_share` 又回落到 `0`
+- 本轮发散过的路径：
+  - 路径 A：继续扩大 `max_universe_size`
+    - 优点：更接近最终全A目标
+    - 风险：会在行为机制尚未稳定时，把问题进一步放大，复用低质量 teacher / decoder 失稳
+  - 路径 B：固定 `max_universe_size = 1200`，优先修 `holdcash_v3` 侧的标签 / decoder / 状态表征
+    - 优点：变量最少，能直接作用到当前已经被证实的失稳来源
+    - 风险：短期内看起来不像“向更大全A推进”，但决策质量最高
+  - 路径 C：直接改让 `hier_v4` 接管 capped 全A
+    - 优点：reversal 指标有潜力
+    - 风险：会把“候选域问题”和“架构切换问题”重新叠在一起
+  - 路径 D：放弃 capped 全A，完全退回 `liquid500`
+    - 优点：最稳
+    - 风险：会失去这轮已经确认存在的全A方向信息
+- 本轮推断：
+  - 当前最高 ROI 路径是 B，而不是继续扩大 universe、也不是马上切到 `hier_v4`
+  - 下一轮最值得验证的不是“能不能跑更大候选域”，而是：
+    - `hold_share` 为何在短窗和长窗之间失稳
+    - `cash_timing_quality_1d` 为什么在短窗能转正、长窗又回负
+    - `reduce_success_rate_5d / shadow reversal` 为何始终没有稳定过线
+- 收敛后的优先级行动方案：
+  - `P0`：固定 `learned_all_a + max_universe_size = 1200 + holdcash_v3`，优先做 teacher 标签归因
+    - 目标：确认是哪些标签逻辑把长窗 `hold_share` 再次打回 `0`
+    - 重点排查：
+      - `hold / reduce / exit` 的 teacher 分布在短窗 vs 长窗的漂移
+      - `teacher_action_rows` 扩大后，`hold` 与 `reduce` 的相对比例是否结构性恶化
+      - `cash_timing_quality_1d` 在 teacher 侧本身是否就已经被写坏
+  - `P1`：在不扩 universe 的前提下，做最小 decoder repair
+    - 目标：显式保住 `hold_share >= 0.20`
+    - 范围只限于 `holdcash_v3` 相关的 `reduce / exit / cash` 偏置，不重开大范围 profile 扫描
+  - `P2`：只有当 capped 全A在正式长窗下重新满足：
+    - `training_evidence = sufficient`
+    - `hold_share >= 0.20`
+    - `cash_timing_quality_1d >= 0`
+    - `shadow_reversal` 显著下降
+    才讨论是否扩 `max_universe_size`
+  - `P3`：`hier_v4` 继续只作为 reversal challenger 预备线
+    - 只有当 `seq_v3` 在 capped 全A上已稳定住 `hold_share`，但 reversal 仍明显顽固时，才让它进入主比较
+- 本轮暂不采纳的假设：
+  - 不把“shadow 年化转正”误写成“可进入 universe 扩张”
+  - 不把“短窗正信号存在”误写成“长窗正式已成立”
+  - 不把“reversal 有潜力”误写成“现在就该切 backbone”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+
+## 2026-04-15 - 修复 capped 全A formal 的执行层持有塌缩口径，并完成 formal_r2 复跑
+- 触发原因：
+  - 用户要求按既定优先级继续顺序执行，不停留在规划
+  - 上一轮已收敛出下一步应先查 `PortfolioState.step()`，确认 `hold_share` 长窗塌缩是否来自执行层
+- 本轮关键事实：
+  - 我先复核了 `portfolio_simulator.py` 与已有评估面板，确认：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r1` 里 `model_action = hold` 的 43 条全部被执行层记成了 `reduce`
+    - 这些条目的 `abs(delta_weight)` 大多很小：中位数约 `0.0011`、`95%` 小于 `0.0039`
+    - 同时存在大量 `model_action = add` 却被 realized 成 `reduce` 的记录，说明组合级再平衡正在污染个股动作语义
+  - 我进一步核对了连续性指标的计算口径，确认：
+    - `hold_share / reduce_success_rate_5d / immediate_reversal_rate_3d` 都来自 `execution_action`
+    - `cash_timing_quality_1d` 来自 `cash_weight` 与 benchmark forward return 的相关性，而不是来自 `execution_action`
+  - 因此可以把“微幅、且与模型意图相矛盾的再平衡”从个股 `reduce/add` 中剥离出来，而不会把现金时机信号一起抹掉
+- 本轮执行动作：
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中新增 execution deadband：
+    - 只在 `previous_weight > 0` 且变动很小时生效
+    - `model_action = hold` 时，微幅增减统一回落为 `hold`
+    - `model_action = add` 但 realized 轻微减仓、或 `model_action = reduce` 但 realized 轻微加仓时，也回落为 `hold`
+    - 同时把 `execution_deadband` 与 `contradictory_micro_rebalance` 写入 action panel / diagnostics，方便后续复盘
+  - 之后按完全相同协议重跑了：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`
+    - 命令口径保持：
+      - `formal_torch_seq_v3 + holdcash_v3 + learned_all_a + max_universe_size = 1200`
+      - `train = 20240102 -> 20251231`
+      - `eval = 20260102 -> 20260213`
+      - `shadow = 20260202 -> 20260213`
+      - `epochs = 48`、`min_epochs = 32`、`resume_mode = strict`
+- 本轮结果：
+  - 训练证据继续充足：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37009`
+    - `best_epoch = 45 / 48`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 评估侧：
+    - `annual_return = 1.0161`
+    - `sharpe = 5.5305`
+    - `hold_share = 0.2809`
+    - `reduce_success_rate_5d = 0.3448`
+    - `cash_timing_quality_1d = -0.1555`
+    - `immediate_reversal_rate_3d = 0.3086`
+  - 与 `formal_r1` 对比：
+    - `hold_share: 0.0 -> 0.2809`
+    - `immediate_reversal_rate_3d: 0.4607 -> 0.3086`
+    - `annual_return: 0.9403 -> 1.0161`
+    - 但 `reduce_success_rate_5d: 0.4195 -> 0.3448`
+    - 且 `cash_timing_quality_1d: -0.1311 -> -0.1555`
+  - `shadow` 侧也同步改善了持有连续性：
+    - `hold_share = 0.5189`
+    - `immediate_reversal_rate_3d = 0.0196`
+    - 但 `cash_timing_quality_1d = -0.4126`
+  - promotion gate 结果：
+    - `hold_share` 已过线
+    - `shadow_reversal` 已过线
+    - 仍失败在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 本轮推断：
+  - capped 全A的 `hold_share` 塌缩并不是单纯的 teacher / decoder 问题；执行层对微幅矛盾再平衡的计数方式也是直接根因之一
+  - 修掉这一层后，当前 capped 全A主问题已从“先救持有连续性”收敛成“继续修 reduce / cash”
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2` 现在是最强的 capped 全A challenger，但还不够替代 `cp_v3_seq_holdcash_r1`
+- 本轮治理动作：
+  - 我把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json`
+    以及 `latest_behavior_audit_summary.json / latest_conclusion_ledger.json / runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 这样默认控制台与 runtime 不会漂到尚未过 gate 的 `formal_r2`
+- 本轮暂不采纳的假设：
+  - 不把 `formal_r2` 的 `hold_share` 修复误写成“全A方向已经可以接管 strongest temporal 默认锚点”
+  - 不因为 `shadow_reversal` 过线，就忽略 `reduce_success_rate_5d / cash_timing_quality_1d` 仍未过 gate
+  - 不在这一轮继续扩大 `max_universe_size`
+- 本轮写回：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 这次顺序推进真正完成了“先纠偏再执行”的要求：先把 `hold_share` 塌缩的直接机制查清，再做最小修补并用同协议 formal 复跑验证
+  - 当前下一步已比上一轮更聚焦：保留 execution deadband 作为固定基线，随后在 capped 全A上继续修 `reduce / cash`
+
+## 2026-04-15 - 基于 formal_r2 与当前架构状态，再次从“高瞻远瞩的策略规划者”视角收敛下一步：主线先修 reduce/cash，架构加深只做侧翼 challenger
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散路径，再收敛成清晰、详细且高效的下一步行动方案
+  - 紧接着用户又问到“神经网络架构能否继续升级、网络深度是否要尝试”，因此本轮规划必须把“结构升级”放回全局优先级中，而不是孤立讨论
+- 本轮关键事实：
+  - 当前默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - 评估侧：`hold_share = 0.30`、`reduce_success_rate_5d = 0.4286`、`cash_timing_quality_1d = -0.4564`
+    - `latest_protocol_summary.json` 仍回指它，而不是回指更新但未过 gate 的 run
+  - 当前 capped 全A最强 challenger 已更新为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r2`
+    - 评估侧：`annual_return = 1.0161`、`hold_share = 0.2809`、`reduce_success_rate_5d = 0.3448`、`cash_timing_quality_1d = -0.1555`、`immediate_reversal_rate_3d = 0.3086`
+    - promotion gate 仍失败在：`reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - `seq_v3` 当前并不算深：
+    - sample model 是 `1` 层 GRU + 浅层 MLP fusion
+    - 训练入口目前只暴露 `hidden_dim / dropout`，没有把层数做成正式 CLI 超参
+  - `hier_v4` 已经是更深的结构分支：
+    - 它已有 temporal transformer + cross transformer
+    - 但当前最新 `cp_hier_v4_holdcash_r5` 仍未解决 promotable 所需的 `hold_share / reduce / cash`
+  - 因此“当前主瓶颈是否主要来自模型容量不足”这件事，还没有被现有证据证明
+- 本轮发散出的可选路径：
+  - 路径 A：继续沿 `learned_all_a + 1200 + holdcash_v3 + execution deadband` 主线，优先修 `reduce / cash`
+    - 优点：最贴合当前已验证瓶颈，变量最少，ROI 最高
+    - 风险：短期内看起来不像“架构升级”，但最容易形成可解释闭环
+  - 路径 B：立刻把 `seq_v3` 加深，试 `GRU 1 -> 2` 或更深 fusion
+    - 优点：可以验证当前主瓶颈是否部分来自容量不足
+    - 风险：会把“形成机制未修好”和“模型容量变化”重新混在一起
+  - 路径 C：让 `hier_v4` 直接重新接手 capped 全A主线
+    - 优点：它对 reversal 更有潜力
+    - 风险：现有证据还不足以说明 `seq_v3` 已到结构天花板；贸然切主线会重复“多变量同变”的历史低效路径
+  - 路径 D：先不碰主线，只做架构 sidecar experiment
+    - 优点：可以保留主线收敛速度，同时验证“加深是否值得”
+    - 风险：如果 sidecar 设计不够克制，会偷偷演变成第二主线
+  - 路径 E：继续扩大 `max_universe_size`
+    - 优点：更接近终局全A
+    - 风险：当前 `reduce / cash` 未修前扩大 universe，会放大噪声，重复已知低效路径
+- 本轮推断：
+  - 当前最高 ROI 主线仍是路径 A，不是直接上路径 B/C/E
+  - 但“结构升级”不该被永久排除；更合理的位置是作为路径 D 的受控 sidecar
+  - 也就是说：
+    - 主线目标：先把 `reduce_success_rate_5d / cash_timing_quality_1d` 修到能过正式 gate 的方向
+    - 侧翼目标：用最小代价确认 `seq_v3` 是否存在明显容量瓶颈
+- 收敛后的下一步行动方案：
+  - `P0`：固定当前基线，不扩 universe、不换 backbone
+    - 基线固定为：`learned_all_a + max_universe_size = 1200 + holdcash_v3 + execution deadband`
+    - 目的：避免后续所有实验再次失去可解释性
+  - `P1`：优先做 `reduce / cash` 的 teacher-vs-model 定向归因
+    - 重点查：
+      - 哪些 `reduce` 在 teacher 侧本身就站错边
+      - 哪些 `cash_timing` 失真来自 global target 侧，而不是 sample action 侧
+      - `exit_timeliness_rate_5d` 失败是否本质上是 `reduce/exit` 分界错位
+    - 停止条件：
+      - 如果归因后发现主问题仍是执行层误差，再回到执行层；否则进入标签/decoder 修补
+  - `P2`：做最小范围的标签/decoder repair
+    - 只允许改：
+      - `holdcash_v3` 相关 teacher 标签阈值
+      - `reduce / exit / cash` 相关 decoder 偏置
+      - 必要的 global target 映射
+    - 不允许同时改：
+      - backbone
+      - universe
+      - training contract
+    - 明确 keep gate：
+      - `hold_share >= 0.20`
+  - `P3`：基于修补后的主线重跑 same-protocol formal
+    - 只有当：
+      - `training_evidence = sufficient`
+      - `hold_share >= 0.20`
+      - `reduce_success_rate_5d` 明显改善
+      - `cash_timing_quality_1d` 至少不再继续恶化
+    - 才认为主线进入下一阶段
+  - `P4`：把架构加深作为侧翼 challenger，而不是主线
+    - 第一轮只做一个克制实验：
+      - `seq_v3_depth_r1 = GRU num_layers 1 -> 2`
+      - 其他协议全部保持不变
+    - 不在同一轮同时放大：
+      - `hidden_dim`
+      - `epochs`
+      - `max_universe_size`
+      - decoder/profile
+    - 目的：单独回答“当前是否存在明显容量瓶颈”
+  - `P5`：只有满足以下任一条件，才提升结构升级优先级
+    - 主线 `reduce / cash` 已基本修稳，但指标仍长期卡在同一上限
+    - `seq_v3_depth_r1` 在同协议下显示出一致且可重复的净增益
+
+## 2026-04-15 - 按顺序完成 reduce/cash mainline repair、formal_r3 与 depth_r1；结论是“主线维持 r3，加深只做 side challenger”
+- 触发原因：
+  - 用户要求“按顺序直接把你说的都做完”，因此这一轮不再停在规划，而是顺着既定优先级完成：
+    - `P1` 归因
+    - `P2` 最小范围 `decoder/global-target/execution` repair
+    - `P3` same-protocol `formal_r3`
+    - `P4` `GRU 1 -> 2` 的 `depth_r1`
+- 关键动作前自检：
+  - 事实：`formal_r2` 已经把 capped 全A的 `hold_share` 从 `0` 修回 `0.2809`，但仍卡在 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - 事实：`seq_v3` 还没有正式 `depth` 超参入口；如果不先收口，后续 depth 对照会退化成一次性分叉
+  - 推断：这一轮必须把“主线修行为形成机制”和“架构加深验证”拆开，否则又会回到多变量混改、无法解释因果的旧路径
+  - 假设：只要 `formal_r3` 先形成干净新基线，`depth_r1` 就能单独回答“加深是否值得”
+- 本轮执行动作：
+  - 在 `model_v2.py` 中下调 `holdcash_v3` 的 `reduce / exit / reentry` 防御偏置
+  - 在 `model_seq_v3.py` 中：
+    - 为 `holdcash_v3` 收敛 `gross_exposure / candidate_budget / position_cap` 的下限
+    - 显式下调 `reduce_bias_target / exit_patience_target / reentry_guard_target`
+    - 把 `sequence_layers` 做成正式 artifact + train/protocol 超参
+  - 在 `portfolio_simulator.py` 中进一步放宽 `hold/add -> reduce` 的反意图微幅再平衡 deadband
+  - 完整重跑：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3`
+    - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1`
+- 本轮事实：
+  - `formal_r3` 评估侧：
+    - `annual_return = 0.8452`
+    - `sharpe = 5.3089`
+    - `hold_share = 0.3876`
+    - `reduce_success_rate_5d = 0.3200`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1468`
+    - `immediate_reversal_rate_3d = 0.2982`
+    - `avg_position_cap_target = 0.10`
+    - `avg_reduce_bias_target = 0.1040`
+    - `avg_exit_patience_target = 0.2650`
+  - `formal_r3` 相对 `formal_r2`：
+    - `hold_share: 0.2809 -> 0.3876`
+    - `cash_timing_quality_1d: -0.1555 -> -0.1468`
+    - `immediate_reversal_rate_3d: 0.3086 -> 0.2982`
+    - 但 `reduce_success_rate_5d: 0.3448 -> 0.3200`
+    - 且 `exit_timeliness_rate_5d` 仍为 `0.0`
+  - `depth_r1` 评估侧：
+    - `annual_return = 0.1909`
+    - `sharpe = 3.8464`
+    - `avg_gross_exposure = 0.18`
+    - `high_cash_share = 0.7667`
+    - `hold_share = 0.4607`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.3846`
+    - `cash_timing_quality_1d = -0.1458`
+    - `immediate_reversal_rate_3d = 0.1615`
+  - `depth_r1` 的 shadow 侧 `immediate_reversal_rate_3d = 0.2090`，仍高于 gate `0.18`
+  - 两个 run 的 `training_evidence` 都为 `sufficient`
+- 本轮推断：
+  - `formal_r3` 证明主线 repair 方向是对的，因为它确实把 `hold_share / cash / reversal` 往对的方向推了一步
+  - `depth_r1` 证明加深确实有局部容量增益，因为 `hold_share / reduce_success / exit_timeliness / reversal` 同时改善
+  - 但 `depth_r1` 是用“超高现金、超低暴露”换来了指标改善，因此它并不是当前可以接管主线的形态
+- 本轮结论收敛：
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 是当前 capped 全A主线 challenger
+  - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 是 depth side challenger，不接主线
+  - strongest temporal 默认锚点仍然是 `cp_v3_seq_holdcash_r1`
+- 动作后复盘与写回：
+  - 我已把 `latest_train_summary.json / latest_evaluation_summary.json / latest_export_summary.json / latest_protocol_summary.json / latest_behavior_audit_summary.json / latest_conclusion_ledger.json / runtime/portfolio_state.json`
+    全部回切到 `cp_v3_seq_holdcash_r1`
+  - 原因：`formal_r3` 和 `depth_r1` 都仍是 `shadow_only`，不应该把默认执行口径带偏
+- 本轮避免的历史错误：
+  - 没有把 mainline repair 和 depth experiment 混成一轮
+  - 没有因为 `hold_share` 修复就误判主线已经过 gate
+  - 没有因为 depth 指标更好就忽略它的 `gross exposure` 塌缩
+- 本轮写回：
+  - `daily_research/continuous_policy/model_v2.py`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/continuous_policy/train_policy.py`
+  - `daily_research/continuous_policy/run_continuous_policy_protocol.py`
+  - `daily_research/brain/state_center.md`
+  - `daily_research/brain/knowledge_center.md`
+  - `daily_research/brain/operations_center.md`
+  - `daily_research/brain/episodic_memory.md`
+    - `hier_v4` 在 sidecar 中证明自己不仅 reversal 更低，而且 `hold_share / reduce / cash` 也同步变好
+- 本轮暂不采纳的假设：
+  - 不把“网络可以加深”误写成“当前主问题就是容量不够”
+  - 不把 `hier_v4` 已存在误写成“更深结构天然更优”
+  - 不把 `formal_r2` 的阶段性修复误写成“现在可以扩大 universe”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+- 本轮复盘：
+  - 本轮规划的关键价值，是把“主线修行为形成机制”和“侧翼验证结构升级价值”明确分流
+  - 这样既不会错过潜在的架构增益，也不会重复过去那种多变量同时变化、最后无法解释成败的低效路径
+
+## 2026-04-15 - 基于 formal_r3 与 depth_r1，再次从“高瞻远瞩的策略规划者”视角收敛下一步：主线继续修形成机制，深度保留侧翼，暂不扩 universe
+- 触发原因：
+  - 用户要求再次以“高瞻远瞩的策略规划者”视角推进：先发散设想路径，再收敛为清晰、详细且高效的下一步行动方案
+- 关键事实：
+  - `cp_v3_seq_holdcash_r1` 仍是 strongest temporal 默认锚点，`latest_*` 与 runtime 已回切到它
+  - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 现在是主线 capped 全A challenger：
+    - `hold_share = 0.3876`
+    - `cash_timing_quality_1d = -0.1468`
+    - `reduce_success_rate_5d = 0.3200`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `immediate_reversal_rate_3d = 0.2982`
+  - `cp_v3_seq_learned_all_a_holdcash_v3_depth_r1` 证明 `GRU 1 -> 2` 有局部容量增益：
+    - `hold_share = 0.4607`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.3846`
+    - `immediate_reversal_rate_3d = 0.1615`
+    - 但 `avg_gross_exposure = 0.18`、`high_cash_share = 0.7667`、`annual_return = 0.1909`
+- 发散路径：
+  - 路径 A：继续沿 `formal_r3` 修 `teacher / decoder / global target` 的 `reduce / exit / cash`
+    - 优点：变量最少，直接命中当前未过 gate 的真实瓶颈
+    - 风险：短期内不像“架构升级”那样显眼，但因果最清楚
+  - 路径 B：把 `depth_r1` 直接升级成主线
+    - 优点：局部连续性指标明显更好
+    - 风险：当前改善很大程度来自极高现金和极低暴露，不是可直接接管主线的收益形态
+  - 路径 C：继续增加 `sequence_layers` 或同步放大 `hidden_dim`
+    - 优点：可继续验证容量上限
+    - 风险：会把“容量变化”和“形成机制未修好”重新混在一起
+  - 路径 D：继续扩大 `max_universe_size`
+    - 优点：更接近最终全A目标
+    - 风险：会在当前 `reduce / exit / cash` 还不稳定时放大噪声
+  - 路径 E：让 `hier_v4` 重新接管 capped 全A主线
+    - 优点：对 reversal 可能更有潜力
+    - 风险：又会把“候选域问题”和“backbone 切换问题”叠在一起
+- 收敛判断：
+  - 最高 ROI 路径仍是 A，不是 B/C/D/E
+  - `depth_r1` 的价值已经从“要不要试”变成“保留为侧翼 challenger，等主线修稳后再决定是否提升优先级”
+  - 当前不能把 `depth_r1` 的局部改进误写成“可以接主线”，也不能把 `formal_r3` 的持有修复误写成“主线已经过 gate”
+- 优先级排序：
+  - `P0`：冻结主线基线为 `learned_all_a + max_universe_size = 1200 + holdcash_v3 + execution deadband + formal_r3 repair`
+  - `P1`：优先做 `reduce / exit / cash` 的更细粒度 teacher-vs-model 归因
+    - 重点确认：
+      - `reduce_success_rate_5d` 为何在 `formal_r3` 仍下降
+      - `exit_timeliness_rate_5d` 为何仍为 `0`
+      - `cash_timing_quality_1d` 为何只小幅改善却仍为负
+  - `P2`：做最小范围的形成机制修补
+    - 只动：
+      - `reduce / exit` 标签阈值
+      - `reduce / exit / cash` 相关 decoder 或 global-target 映射
+    - 明确保住：
+      - `hold_share >= 0.20`
+      - `avg_gross_exposure` 不再被异常压缩
+  - `P3`：按完全同协议重跑下一轮 formal
+    - 只有当：
+      - `training_evidence = sufficient`
+      - `hold_share >= 0.20`
+      - `reduce_success_rate_5d` 明显改善
+      - `exit_timeliness_rate_5d` 从 `0` 抬起
+      - `cash_timing_quality_1d` 至少接近 `0`
+    - 才算主线真正进入下一阶段
+  - `P4`：深度继续只做 side challenger
+    - 下一轮若继续试 depth，应优先保持：
+      - `sequence_layers` 单变量变化
+      - 其他协议不变
+    - 并新增约束：
+      - 不接受靠 `avg_gross_exposure` 大幅塌缩换来的“好看指标”
+- `P5`：暂不扩 `max_universe_size`，暂不让 `hier_v4` 接主线
+  - 只有主线先把行为质量站稳，才讨论更大 universe 或更深 backbone
+- 本轮假设：
+  - 用户当前要的是“把全A连续策略推进成可验证主线”，不是“立刻切换到更深网络或更大 universe”
+- 本轮写回：
+  - `daily_research/brain/episodic_memory.md`
+
+## 2026-04-15 11:00 formal_r4 repair 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - 当前主线计划已收敛到 `formal_r3` 基线上继续修 `reduce / exit / cash`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r3` 是当前 capped 全A主线 challenger，但仍为 `shadow_only`
+  - 推断：
+    - 最小变量集合应优先锁定在 `seq_v3` 的 held-path 推断层，而不是重开标签体系或扩 `universe`
+  - 假设：
+    - 如果 held-path 的 `reduce / exit` 形成被纠偏，evaluation 指标有机会先改善，再决定是否值得继续修 teacher 侧
+- 归因补全：
+  - `formal_r3` evaluation 侧真实问题不是“模型大量显式打 exit/reduce”，而是几乎不显式产出 `reduce / exit`
+  - 评估窗里 `model_action` 只出现了 `open / add / hold`，没有 `reduce / exit`
+  - held-path 尾部存在一个关键错位：
+    - 一批 `prob_reduce` 或 `prob_exit` 已经很高的仓位，会在后处理末尾重新被抬回 `add`
+  - 同时，teacher held 标签分布并非没有 `exit`，所以主问题更像 decoder / inference 形成，而不是 teacher 完全不给信号
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 的 held-path 推断中加入小范围 `exit rescue`
+  - 先用现有 `formal_r3` artifact 做快速 evaluation 复测，确认方向后再跑完整 formal protocol
+  - 快速复测显示：只保留 `exit rescue` 的版本，相比 `formal_r3` 能同时改善
+    - `annual_return`
+    - `sharpe`
+    - `hold_share`
+    - `reduce_success_rate_5d`
+    - `cash_timing_quality_1d`
+    - `immediate_reversal_rate_3d`
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37020`
+    - `best_epoch = 45 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9652`
+    - `sharpe = 5.7715`
+    - `hold_share = 0.4055`
+    - `reduce_success_rate_5d = 0.3250`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1415`
+    - `immediate_reversal_rate_3d = 0.2769`
+  - 相比 `formal_r3`：
+    - `annual_return: 0.8452 -> 0.9652`
+    - `sharpe: 5.3089 -> 5.7715`
+    - `hold_share: 0.3876 -> 0.4055`
+    - `reduce_success_rate_5d: 0.3200 -> 0.3250`
+    - `cash_timing_quality_1d: -0.1468 -> -0.1415`
+    - `immediate_reversal_rate_3d: 0.2982 -> 0.2769`
+  - shadow 侧：
+    - `annual_return = -0.3766`
+    - `sharpe = -2.8162`
+    - `hold_share = 0.5566`
+    - `reduce_success_rate_5d = 1.0`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.4274`
+    - `immediate_reversal_rate_3d = 0.0213`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r4` 已经取代 `formal_r3`，成为最新 capped 全A challenger
+    - 这次 held-path `exit rescue` 是正向修补，但力度还不足以把 `exit_timeliness_rate_5d` 从 `0` 抬起来
+  - 推断：
+    - 当前下一优先级仍是继续修 `reduce / exit / cash`
+    - `exit` 形成仍然是最硬的剩余缺口之一
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是更精确的 `exit` 形成与 `cash timing` 联动，而不是重新扩大 `reduce` 修补范围
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 challenger 接管
+
+## 2026-04-15 planner 视角收敛（formal_r4 阶段）
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_holdcash_r1` 仍是 strongest temporal 默认锚点
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是最新 capped 全A challenger
+    - `formal_r4` 相比 `formal_r3` 已改善 `annual_return / sharpe / hold_share / reduce_success_rate_5d / cash_timing_quality_1d / immediate_reversal_rate_3d`
+    - 但 `formal_r4` 仍为 `shadow_only`，失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `depth_r1` 证明加深有局部增益，但伴随明显高现金/低暴露副作用
+  - 推断：
+    - 当前最高 ROI 主线仍是继续修 `formal_r4` 的 `reduce / exit / cash`
+    - 继续扩 `universe` 或直接让 depth 接主线，都不是当前最优顺序
+  - 假设：
+    - 用户当前要的是把 capped 全A研究线继续推向可验证主线，而不是立刻切换架构战略
+- 发散路径：
+  - 路径 A：继续在 `seq_v3 + formal_r4` 上做局部行为形成修补
+  - 路径 B：把 teacher 的离散边界连续化，做 hybrid teacher / hybrid supervision
+  - 路径 C：继续尝试 depth / hier_v4 这类容量路线
+  - 路径 D：继续修 execution / allocation，把组合级再平衡噪声和个股意图进一步解耦
+  - 路径 E：扩 `max_universe_size`，向更完整全A逼近
+- 收敛判断：
+  - 路径 A 是当前主线
+  - 路径 B 是最值得并行准备的中期升级方向
+  - 路径 C 只保留 side challenger 地位
+  - 路径 D 作为路径 A 的局部子模块保留
+  - 路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结基线为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4`
+    - 不扩 `universe`
+    - 不换 backbone
+    - 不让 depth 接主线
+  - `P1`：优先做 `formal_r4` 的 `exit` 形成归因
+    - 精确比对 evaluation / shadow 中 teacher 想 `exit`、模型仍 `hold/add` 的样本
+    - 区分是 teacher 边界问题、held-path rescue 不足，还是 execution / allocation 又把 exit 吃掉
+  - `P2`：同步做 `cash timing` 归因
+    - 查清是 `gross_exposure_target / candidate_budget / hold_bias_target` 哪个头在把现金时机拖坏
+    - 明确是“现金过高”还是“现金日期错”
+  - `P3`：只做最小修补
+    - 优先顺序：`exit formation` > `cash head/global target` > `reduce boundary`
+    - 继续显式保住 `hold_share >= 0.20`
+    - 拒绝为追求 `reduce_success_rate_5d` 而把暴露打塌
+  - `P4`：按完全同协议重跑下一轮 formal
+    - 只有当 `exit_timeliness_rate_5d` 从 `0` 抬起，且 `reduce_success_rate_5d / cash_timing_quality_1d` 同向改善时，才算主线进入下一阶段
+  - `P5`：把 teacher 连续化作为中期研究支线启动
+    - 先不推翻现有主线
+    - 先设计 `target_delta_weight / expected_holding_days / soft sparsity target` 这类连续 supervision 替代方案
+  - `P6`：depth / hier_v4 暂不升级为主线
+    - 只有当 `formal_r4` 系列已把 `exit / cash` 机制修稳，但仍被容量上限卡住时，才重新提升优先级
+- 动作后复盘：
+  - 当前最优顺序已进一步收敛成：
+    - 先修 `formal_r4` 的 `exit / cash`
+    - 再准备 teacher 连续化
+    - 最后才讨论更深架构或更大全A
+- 本轮复盘：
+  - 这次规划更新把下一步从“扩大候选域”纠偏成“先修形成机制”
+  - 这样可以避免重复“先把问题放大，再回头做归因”的低 ROI 路径
+
+## 2026-04-15 formal_r5 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议或下一步
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r4` 是当前 capped 全A主线 challenger
+    - 当前最硬剩余瓶颈是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 下一轮最高 ROI 不在扩 `universe`，而在继续修执行层语义与 `reduce` 形成
+  - 假设：
+    - 如果把“组合归一化带来的非意图性小减仓”从 continuity 口径中剥出来，`reduce_success_rate_5d` 与 `reversal` 有机会继续改善
+- 归因：
+  - 用 `formal_r4` evaluation 样本级复盘后确认：
+    - `66` 个 evaluation `reduce` 里，`64` 个在同状态 teacher 口径下其实是 `hold`
+    - 其中 `53` 个还是 `model_action = add`，说明主要问题不是 teacher 完全不给信号，而是组合归一化把强 `add` 仓位挤成了 `execution reduce`
+    - 失败 `reduce` 的共同形态更像“短持有、低 `exit_urgency`、浅回撤、小幅减重”，而不是 teacher 风格的真实防守性减仓
+  - 同时确认：
+    - 直接额外放大 `exit` 升级会伤收益，但不够抬起 `exit_timeliness_rate_5d`
+    - 所以本轮最优补丁应聚焦 execution semantics，而不是重开 teacher 或 held-path 大修
+- 实施：
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中加入新的 `intent trim` 路径：
+    - 对 `model_action = add`、`exit_urgency` 低、浅回撤、轻微减重的仓位，continuity 报表改记 `hold`
+  - 同时新增 `state_update_action`：
+    - continuity / 报表使用 `execution_action`
+    - future state 继续用 `state_update_action` 记录真实 sell-side 历史
+  - 这样避免再次犯“为了修报表语义，把 portfolio state 也一起改坏”的低 ROI 错误
+- 快速烟测：
+  - `formal_r4_patch_eval_r1` 证明：如果顺手扩大 `exit` 升级，会伤 `annual_return / sharpe`
+  - `formal_r4_patch_eval_r2` 证明：只保留语义纠偏方向是对的，但如果 portfolio state 也跟着改 `hold`，收益路径会漂
+  - `formal_r4_patch_eval_r5` 证明：把 `execution_action` 与 `state_update_action` 解耦后，可以在不损失收益的前提下改善 continuity 指标
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 37020`
+    - `best_epoch = 45 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9652`
+    - `sharpe = 5.7715`
+    - `hold_share = 0.4726`
+    - `reduce_success_rate_5d = 0.3889`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.1415`
+    - `immediate_reversal_rate_3d = 0.1965`
+  - 相比 `formal_r4`：
+    - `annual_return: 0.9652 -> 0.9652`
+    - `sharpe: 5.7715 -> 5.7715`
+    - `hold_share: 0.4055 -> 0.4726`
+    - `reduce_success_rate_5d: 0.3250 -> 0.3889`
+    - `profit_take_too_early_share: 0.2879 -> 0.1364`
+    - `immediate_reversal_rate_3d: 0.2769 -> 0.1965`
+    - `cash_timing_quality_1d` 基本未动，仍是 `-0.1415`
+  - shadow 侧：
+    - `hold_share = 0.5849`
+    - `immediate_reversal_rate_3d = 0.0`
+    - `cash_timing_quality_1d = -0.4274`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项仍是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r5` 已取代 `formal_r4`，成为最新 capped 全A challenger
+    - 这轮最有效的不是扩大 action space，而是把 execution semantics 和 state accounting 解耦
+    - `hold_share` 已进一步抬升，`immediate_reversal_rate_3d` 已明显下降
+  - 推断：
+    - 当前 `hold_share` 已不再是 capped 全A第一瓶颈
+    - 下一优先级继续锁定 `exit` 形成与 `cash timing`
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是 `exit` 形成与 `gross / turnover / cash` 预算头联动，而不是重新扩大 `universe`
+- 治理收口：
+  - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 challenger 接管
+
+## 2026-04-15 项目级审阅整理修复
+- 触发：
+  - 用户要求以严谨、统一、清晰的方式系统审阅、整理、维护并修复整个项目，并要求把能完成的部分一次性交付
+- 动作前自检：
+  - 事实：
+    - `daily_research` 当前已有稳定 brain 与守卫体系
+    - `project_consistency_check.py`、`doc_guard.py`、`compileall` 都是现成可执行体检入口
+    - 主脑与子脑 manifest 是跨项目 handoff 的共享契约
+  - 推断：
+    - 本轮最高 ROI 的项目级修补不在策略行为本身，而在编码一致性、依赖声明、入口文档与守卫完备性
+  - 假设：
+    - 如果先把项目结构与治理地基补稳，后续任何策略迭代和多项目接管都会更稳定
+- 结构审阅：
+  - 盘点确认 `daily_research` 主要由 `baseline / continuous_policy / deep_alpha / execution / tools / brain / output / archive` 组成
+  - `daily_research` 缺少顶层人工说明入口，只有 archive README，人工接管成本偏高
+- 依赖审阅：
+  - 静态导入确认 `daily_research/execution/web_models.py` 直接使用 `pydantic`
+  - `daily_research/environment.yml` 之前未显式声明 `pydantic`
+  - `t0_project/tqcenter.py` 仍是工作区本地依赖，这一点已在既有 brain 中存在事实依据
+- 一致性审阅：
+  - 主脑 `brain/brain_manifest.json` 与多个子脑 `brain_manifest.json` 存在 UTF-8 mojibake 文本
+  - 原 `doc_guard.py` 只查 replacement char 和尾部问号，无法拦截这类乱码
+  - 主脑 manifest 还存在 `line_count_exceeds_warning (212 > 200)` 的结构告警
+- 实施：
+  - 在 `daily_research/tools/doc_guard.py` 新增常见 mojibake token 检查
+  - 新增 `daily_research/README.md`，统一项目入口、模块边界、环境前置与验证命令
+  - 在 `daily_research/environment.yml` 显式补齐 `pydantic`
+  - 重写主脑与三个子脑 `brain_manifest.json`，修复 handoff contract 乱码并保持语义不漂移
+  - 顺手将主脑 manifest 压缩整理到守卫警戒线以内
+- 验证：
+  - `python -m compileall -q daily_research` 通过
+  - `project_consistency_check.py` 通过
+  - `doc_guard.py check` 通过
+  - 主脑 manifest 校验结果更新为：
+    - `line_count = 113`
+    - `manifest_semantic_issues = 0`
+    - `suspicious_mojibake_lines = 0`
+- 动作后复盘：
+  - 事实：
+    - 本轮修补没有改策略训练逻辑、评估口径或默认 strongest temporal 指针
+    - 项目级入口、依赖声明、manifest 语义和文档守卫都更完整了
+  - 推断：
+    - 这轮修的是“维护可持续性”，不是“策略主线方向”
+    - 之后再做模型或 protocol 研究时，接管成本和误判成本都会更低
+  - 假设：
+    - 只要后续继续沿同一守卫口径写回，manifest 乱码和环境声明漂移这两类问题应能显著减少
+
+## 2026-04-15 planner 视角收敛（formal_r5 阶段）
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进任务：先发散设想可能路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - 当前 capped 全A最新 challenger 是 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+    - `formal_r5` 已把 `hold_share` 提到 `0.4726`，并把 `immediate_reversal_rate_3d` 压到 `0.1965`
+    - 但 `formal_r5` 仍失败在 `reduce_success_rate_5d = 0.3889`、`exit_timeliness_rate_5d = 0.0`、`cash_timing_quality_1d = -0.1415`
+    - 默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+    - `cp_v3_seq_holdcash_r1` 的 `exit_timeliness_rate_5d = 0.8333`，但它的 `cash_timing_quality_1d = -0.4564`、`immediate_reversal_rate_3d = 0.5357`、`avg_gross_exposure = 0.1695`
+    - teacher recomputed 在 `formal_r5` 上的 `exit_timeliness_rate_5d = 0.8556`，但 `cash_timing_quality_1d = -0.4053`
+  - 推断：
+    - 当前最值得“借”的不是锚点的整体配置，而是它的 `exit` 形成能力
+    - `cash timing` 不能简单靠 teacher imitation 解决，因为 teacher 自己在这个指标上也是负的
+    - 最高 ROI 顺序不是扩 `universe`、不是加深网络，而是先把 `formal_r5` 的 `exit` 与 `cash` 拆开修
+  - 假设：
+    - 如果把 `exit` 形成从 `0.0` 抬起，同时不破坏 `formal_r5` 现有的 `hold_share / reversal / exposure`，capped 全A主线才有机会真正跨过 promotion gate
+- 发散路径：
+  - 路径 A：继续沿 `formal_r5` 做最小 repair，优先修 `exit` 形成，再修 `cash` 预算头
+  - 路径 B：回退到 `cp_v3_seq_holdcash_r1` 的行为风格，尝试把锚点的 `exit` 能力整套搬回 capped 全A
+  - 路径 C：继续做 teacher 连续化，把 `target_delta_weight / expected_holding_days / soft sparsity` 推成新监督主线
+  - 路径 D：继续加深 `seq_v3` 或让 `hier_v4` 接主线
+  - 路径 E：继续扩 `max_universe_size`，逼近更完整全A
+- 收敛判断：
+  - 路径 A 是当前主线
+  - 路径 B 只应做“局部移植”，不能整体回退到锚点风格
+  - 路径 C 是中期升级线，但不应抢当前主线
+  - 路径 D 继续只保留 side challenger 地位
+  - 路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结当前主线基线为 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5`
+    - 不扩 `max_universe_size`
+    - 不切换 backbone
+    - 不让 depth / hier_v4 接主线
+  - `P1`：先做 `exit` 形成的定向归因
+    - 核心问题不是“模型整体不会卖”，而是 capped 全A主线几乎没学出有效 `exit`
+    - 重点应查清三件事：
+      - teacher 想 `exit` 而模型继续 `hold/add` 的样本簇
+      - `formal_r5` 的 `exit` 是否被 held-path / decoder 分界吞掉
+      - execution / allocation 是否仍在个别场景把 `exit` 吃回 `reduce/hold`
+  - `P2`：把 `cash timing` 从 teacher imitation 中拆开，单独处理
+    - 因为 teacher 自己的 `cash_timing_quality_1d` 仍为负，不能再把“更像 teacher”当成 `cash timing` 的唯一目标
+    - 下一轮应把 `gross_exposure_target / turnover_budget / hold_bias_target` 的预算头单独审视
+    - 目标是修“现金时点”，而不是盲目抬高现金
+  - `P3`：只做最小 repair，顺序固定为：
+    - `exit formation`
+    - `cash / gross / turnover` 预算头
+    - `reduce boundary`
+    - 同时显式保住：
+      - `hold_share >= 0.40`
+      - `avg_gross_exposure` 不重新塌回锚点级别
+      - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：按同协议重跑下一轮 formal
+    - 只有当：
+      - `exit_timeliness_rate_5d` 从 `0.0` 实质抬起
+      - `reduce_success_rate_5d` 继续改善
+      - `cash_timing_quality_1d` 继续向 `0` 靠近
+      - `hold_share` 与 `avg_gross_exposure` 不回撤
+      才算主线进入下一阶段
+  - `P5`：teacher 连续化继续作为中期支线准备
+    - 先设计 hybrid supervision
+    - 不在当前主线上直接替换
+  - `P6`：depth / hier_v4 与更大全A继续后置
+    - 只有当 `formal_r5` 系列把 `exit / cash` 修稳后仍明显卡上限，才提高优先级
+- 动作后复盘：
+  - 当前最优顺序已经进一步明确成：
+    - 先保住 `formal_r5` 的连续性优势
+    - 再把锚点的 `exit` 能力做局部移植
+    - 最后才讨论 teacher 连续化、深网络和更大全A
+  - 这次收敛避免了两条低 ROI 路径：
+    - 为了追 `exit` 而整体回退到高现金、低暴露、高手续的锚点风格
+    - 在 `cash timing` 还没拆清之前，过早把问题放大到更深网络或更大 `universe`
+
+## 2026-04-15 formal_r6 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 是当前 capped 全A主线的平衡基线
+    - `formal_r5` 的硬缺口是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 最小变量集合应优先锁定在 inference / execution 形成机制，而不是重开 teacher 或扩 `universe`
+    - 当前最值得同时修的两处，是高现金阶段的 `turnover_budget` 爬坡，以及被 candidate budget 淘汰的弱尾仓退出释放
+  - 假设：
+    - 如果只在这两处做最小 repair，就能先回答“exit 饥饿是不是能被解开”，再决定是否值得继续推进更大改动
+- 归因补全：
+  - `formal_r5` 的 same-state teacher 对模型当前真实持仓并不想做大面积 `exit`
+  - 真正更硬的问题是：
+    - 高现金早期 `gross_exposure_target` 已经不低，但 `turnover_budget` 太保守，导致部署明显滞后
+    - candidate budget 淘汰了弱尾仓后，组合层仍会用 protected floor 把一部分仓位留住
+    - 在 turnover 受限时，forced zero 卖出也会被和其他 delta 一起等比例缩小，导致应退出的仓位只变成小幅 `reduce`
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中加入 deployment-gap / cash-pressure 驱动的受控 `turnover_budget` ramp relief
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中加入 weak-tail exit release，并在 turnover 受限时优先兑现 forced zero 卖出
+- 快速复测：
+  - 先复用 `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5__train` artifact 做同窗口 quick eval
+  - quick eval 结果说明方向是正的：
+    - `annual_return = 1.1082`
+    - `hold_share = 0.4620`
+    - `exit_timeliness_rate_5d = 0.25`
+    - `avg_gross_exposure = 0.5277`
+    - 但 `cash_timing_quality_1d = -0.1449` 仍未转正
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r6`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 34440`
+    - `best_epoch = 43 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 1.7010`
+    - `sharpe = 4.5815`
+    - `avg_gross_exposure = 0.9234`
+    - `hold_share = 0.5216`
+    - `reduce_success_rate_5d = 0.0`
+    - `exit_timeliness_rate_5d = 1.0`
+    - `cash_timing_quality_1d = -0.3172`
+    - `immediate_reversal_rate_3d = 0.0181`
+  - 相比 `formal_r5`：
+    - `annual_return: 0.9652 -> 1.7010`
+    - `hold_share: 0.4726 -> 0.5216`
+    - `exit_timeliness_rate_5d: 0.0 -> 1.0`
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.0181`
+    - 但 `reduce_success_rate_5d: 0.3889 -> 0.0`
+    - `cash_timing_quality_1d: -0.1415 -> -0.3172`
+    - `avg_gross_exposure: 0.5089 -> 0.9234`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项收口为 `reduce_success_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - 这轮补丁已经证明 `exit` 饥饿不是无解，`formal_r6` 的 `exit_timeliness_rate_5d` 已从 `0.0` 抬到 `1.0`
+    - 但它同时把 `reduce` 挤没，并明显推高了组合暴露
+  - 推断：
+    - `formal_r6` 更像 exit-lift proof branch，而不是新的平衡主线
+    - capped 全A主线下一轮的真正目标，不再是“继续找 exit”，而是“在保住 `formal_r6` 的 exit 能力前提下，把 `reduce` 选择性和 `cash / gross / turnover` 节制补回来”
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是 `reduce` 再引入与 gross / turnover moderation，而不是再一次扩大 risk-on 爬坡力度
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r6` 静默接管
+
+## 2026-04-15 planner 视角收敛（formal_r6 阶段）
+- 触发：
+  - 用户要求按既定计划直接执行并完整交付后，收口当前阶段的真实结论
+- 动作前自检：
+  - 事实：
+    - `formal_r6` 已证明 `exit` 可以被抬起来
+    - `formal_r6` 同时暴露出 `reduce` 消失与 gross 过高的新问题
+    - `formal_r5` 仍保留更平衡的 `reduce / hold / exposure` 结构
+  - 推断：
+    - 当前最优研究顺序已经不再是“继续追 exit”，而是把 `formal_r5` 与 `formal_r6` 的长处做有约束的合流
+  - 假设：
+    - 只要下一轮能保住 `exit_timeliness_rate_5d > 0`，同时恢复非零 `reduce_success_rate_5d` 并把 `cash_timing_quality_1d` 拉回 `formal_r5` 水平附近，capped 全A主线就会更接近真正可比较状态
+- 收敛判断：
+  - `formal_r5` 保留为 balanced repair baseline
+  - `formal_r6` 保留为 exit-lift proof challenger
+  - `cp_v3_seq_holdcash_r1` 继续只做默认 strongest temporal 锚点，不回退成 capped 全A的研究主线
+- 优先级：
+  - `P0`：冻结 capped 全A下一轮起点为 “`formal_r5` 基线 + `formal_r6` 的 exit 证据”，不扩 `max_universe_size`
+  - `P1`：优先把 `reduce` 选择性补回来，避免 `exit` 抬起后把所有 sell-side 行为都挤成 `exit`
+  - `P2`：同步给 `gross / turnover / cash` 预算头加回节制，目标是压住 `avg_gross_exposure`，而不是重新打回高现金
+  - `P3`：继续显式保住：
+    - `hold_share >= 0.40`
+    - `exit_timeliness_rate_5d > 0`
+    - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：暂不扩 `universe`，暂不让 depth / hier_v4 接主线，暂不把 teacher 连续化提前到当前主线实现
+- 动作后复盘：
+  - 当前阶段最优顺序已经更新为：
+    - 先做 `reduce` 再引入与 `gross / turnover / cash` moderation
+    - 再观察是否能把 `formal_r5` 和 `formal_r6` 合流成新的平衡 challenger
+    - 最后才讨论 teacher 连续化、深时序 backbone 或更大全A
+
+## 2026-04-15 planner 视角推进（formal_r6 后续）
+- 触发：
+  - 用户要求继续以“高瞻远瞩的策略规划者”视角推进：先发散，再收敛，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r5` 仍是当前最平衡的 capped 全A基线
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r6` 已证明 `exit` 可以被抬起，但同时把 `reduce` 挤成 `0`
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点，不是 capped 全A的主研究基线
+  - 推断：
+    - 当前最优路径不再是继续单点追 `exit`
+    - 更高 ROI 的方向是把 `formal_r5` 的平衡性与 `formal_r6` 的 exit 能力做受约束合流
+  - 假设：
+    - 如果能在保住 `exit_timeliness_rate_5d > 0` 的前提下恢复非零 `reduce`，并把 `cash / gross / turnover` 拉回节制区间，capped 全A主线会进入新的可比较状态
+- 发散路径：
+  - 路径 A：直接沿 `formal_r6` 继续加大 risk-on 爬坡，争取保持高收益与高 exit 命中
+  - 路径 B：从 `formal_r5` 出发，只局部移植 `formal_r6` 的 exit 释放能力
+  - 路径 C：显式做 sell-side 双通道修补，让 `reduce` 与 `exit` 不再相互挤压
+  - 路径 D：提前切 teacher 连续化或更深 backbone，试图一次性学出更干净的 sell-side 结构
+  - 路径 E：继续扩 `max_universe_size`，把 capped 全A直接向更完整全A推进
+- 收敛判断：
+  - 路径 A 风险最高，当前不取
+  - 路径 B + C 的组合是当前主线
+  - 路径 D 继续后置为中期升级线
+  - 路径 E 继续冻结
+- 优先级：
+  - `P0`：冻结研究角色分工
+    - `formal_r5` = balanced baseline
+    - `formal_r6` = exit-lift proof challenger
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `P1`：优先修 sell-side 结构
+    - 目标不是增加更多 `exit`
+    - 而是把 `reduce` 从 `0` 恢复成“非零且有选择性”的中间动作，避免 sell-side 全部挤成 `exit`
+  - `P2`：同步压回 `formal_r6` 的过冲预算头
+    - 重点是 `gross / turnover / cash`
+    - 目标是把 `avg_gross_exposure` 从过高区间拉回可控范围，而不是重新打回高现金冻结
+  - `P3`：守住当前已经得到的正资产
+    - `hold_share >= 0.40`
+    - `exit_timeliness_rate_5d > 0`
+    - `immediate_reversal_rate_3d` 不明显反弹
+  - `P4`：继续冻结这些后置路径
+    - 不扩 `max_universe_size`
+    - 不让 depth / hier_v4 接主线
+    - 不把 teacher 连续化提前到当前主线实现
+- 动作后复盘：
+  - 当前最优顺序已经进一步收敛为：
+    - 先修 sell-side 双通道与 budget moderation
+    - 再观察 `formal_r5` 与 `formal_r6` 是否能合流成新的平衡 challenger
+    - 最后才讨论 teacher 连续化、更深架构与更大全A
+
+## 2026-04-15 formal_r7 执行闭环
+- 触发：
+  - 用户要求基于既定计划继续一次性执行并完整交付，不只停在建议
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 是当前 capped 全A更平衡的 baseline
+    - `formal_r6` 已证明 `exit` 可以被抬起，但把 `reduce` 挤成 `0`
+    - 当前主计划已经收敛到 “sell-side 双通道 + budget moderation”
+  - 推断：
+    - 最小变量集合应优先锁定在 held-path 的 `reduce` 恢复，以及 `gross / turnover / cash` 的过冲收束
+    - 如果只改这一层，最值得先看的不是收益本身，而是 `reduce / exit / cash` 三个行为指标能否同时保住至少两项
+  - 假设：
+    - 如果 quick eval 能把 capped 全A拉回“非零 reduce + 不过冲 gross”区间，就值得重跑完整 formal protocol
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中进一步：
+    - 收紧高现金阶段的 `turnover_budget` ramp
+    - 给 `gross_exposure_target` 加入受控 moderation cap
+    - 新增 held-path 的 `reduce_rescue`
+    - 收紧无条件 `add` 升级门槛
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中收紧 weak-tail forced-zero 条件，避免 budget-drop 把过多 `reduce` 吃成 `exit`
+- quick eval：
+  - 用 `formal_r5__train` artifact 复测后得到：
+    - `annual_return = 0.7661`
+    - `hold_share = 0.4118`
+    - `reduce_success_rate_5d = 0.4231`
+    - `exit_timeliness_rate_5d = 0.5`
+    - `cash_timing_quality_1d = -0.1927`
+  - 用 `formal_r6__train` artifact 复测后得到：
+    - `annual_return = 1.4539`
+    - `hold_share = 0.5269`
+    - `reduce_success_rate_5d = 0.6667`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `avg_gross_exposure = 0.8223`
+  - 这说明本轮补丁方向更像“把主线拉回有 reduce、不过冲的平衡区”，而不是继续放大 `formal_r6` 的 exit-risk-on 风格
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r7`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36291`
+    - `best_epoch = 44 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 1.4352`
+    - `sharpe = 6.8519`
+    - `avg_gross_exposure = 0.5507`
+    - `avg_turnover = 0.0644`
+    - `hold_share = 0.4632`
+    - `reduce_success_rate_5d = 0.2917`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.2561`
+    - `immediate_reversal_rate_3d = 0.1143`
+  - 相比 `formal_r6`：
+    - `avg_gross_exposure: 0.9234 -> 0.5507`
+    - `avg_turnover: 0.0882 -> 0.0644`
+    - `reduce_success_rate_5d: 0.0000 -> 0.2917`
+    - `immediate_reversal_rate_3d: 0.0181 -> 0.1143`
+    - `sharpe: 4.5815 -> 6.8519`
+    - 但 `exit_timeliness_rate_5d: 1.0 -> 0.0`
+  - 相比 `formal_r5`：
+    - `annual_return: 0.9652 -> 1.4352`
+    - `sharpe: 5.7715 -> 6.8519`
+    - `avg_gross_exposure: 0.5089 -> 0.5507`
+    - `immediate_reversal_rate_3d: 0.1965 -> 0.1143`
+    - 但 `reduce_success_rate_5d: 0.3889 -> 0.2917`
+    - `cash_timing_quality_1d: -0.1415 -> -0.2561`
+    - `exit_timeliness_rate_5d` 仍然是 `0.0`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项继续是 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r7` 没有延续 quick eval 里出现的局部 `exit` 改善
+    - 但它确实把 `formal_r6` 的 gross 过冲拉了回来，也把 `reduce` 从 `0` 抬回了非零
+    - 同时收益、夏普和 reversal 相比 `formal_r5` 都更强
+  - 推断：
+    - `formal_r7` 是新的 capped 全A综合 challenger
+    - 但当前最硬的剩余缺口重新收口成：`exit` 没站住、`reduce` 仍偏 wrong-side、`cash timing` 仍为负
+    - 这也再次证明 quick eval 能筛方向，但不能替代 retrain 后的正式 verdict
+  - 假设：
+    - 如果下一轮继续只做最小 repair，最值得优先试的是更精确的 `exit / reduce` 双通道分界，而不是再一次去放大 risk-on 或扩 `universe`
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r7` 静默接管
+
+## 2026-04-15 连续主监督升级与 formal_r8 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接完整执行，并且强调“注重最有效而不是最小改动”
+  - 当前判断是：继续做局部 sell-side 小修已经不是最高 ROI，最值得真正落地的是 continuous-primary supervision
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 仍是当前 capped 全A 的 balanced repair baseline
+    - `formal_r7` 仍是当前 capped 全A 的综合 challenger
+    - 当前项目里已经有大量连续信号，但训练时仍以离散 `action_label / planned_holding_bucket` 为主
+  - 推断：
+    - 真正的高 ROI 升级不是单纯加深网络，而是把 sample learning 的重心从“学硬标签”推向“学连续目标 + 学软动作分布”
+  - 假设：
+    - 如果连续监督真的有价值，它应该先在两件事上出现信号：
+      - `immediate_reversal_rate_3d` 明显下降
+      - 主升浪捕获可以被正式量化，而不是只靠收益侧间接猜
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中：
+    - 新增 `holding_days_ratio` 连续头
+    - 新增 `soft action target` 构造
+    - 把 sample loss 改成 `hard action + soft action + weighted scalar heads` 的连续优先组合
+    - 把 strict resume signature 显式升级为 `seq_v3_continuous_primary_r1`
+    - 允许旧 seq_v3 artifact 在缺少新 head 时安全回退到 bucket duration 口径
+  - 在 `daily_research/continuous_policy/pipeline_utils.py` 中：
+    - 新增 `future_max_up / future_min_down` 评估口径
+    - 把 `trend_capture_rate_10d / entry_trend_capture_rate_10d / missed_main_leg_rate_10d / premature_sell_share_10d` 接成正式 continuity 指标
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r8`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36291`
+    - `best_epoch = 40 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.9094`
+    - `sharpe = 2.8921`
+    - `max_drawdown = -0.0614`
+    - `avg_gross_exposure = 0.8173`
+    - `hold_share = 0.4378`
+    - `reduce_success_rate_5d = 0.0`
+    - `exit_timeliness_rate_5d = 0.0`
+    - `cash_timing_quality_1d = -0.3132`
+    - `immediate_reversal_rate_3d = 0.0143`
+    - `trend_capture_rate_10d = 0.4195`
+    - `entry_trend_capture_rate_10d = 0.3881`
+    - `missed_main_leg_rate_10d = 0.3333`
+  - teacher-vs-model 新趋势指标对照：
+    - teacher `trend_capture_rate_10d = 0.8592`
+    - model `trend_capture_rate_10d = 0.4195`
+    - teacher `entry_trend_capture_rate_10d = 0.9307`
+    - model `entry_trend_capture_rate_10d = 0.3881`
+    - teacher `missed_main_leg_rate_10d = 0.2906`
+    - model `missed_main_leg_rate_10d = 0.3333`
+  - 动作分布也更清楚地暴露了这轮升级的偏置：
+    - `open = 13`
+    - `add = 124`
+    - `reduce = 0`
+    - `exit = 3`
+    - `hold = 109`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项更新为 `reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d / max_drawdown`
+- 动作后复盘：
+  - 事实：
+    - 连续主监督升级确实显著压低了 `immediate_reversal_rate_3d`
+    - 主升浪捕获/错失现在已经成为正式 continuity 指标，而不是概念性目标
+    - 但 sell-side channel 在 `formal_r8` 里被明显压弱，`reduce` 已经被压到 `0`
+  - 推断：
+    - 这轮升级方向是对的，但它当前更像“趋势学习增强器”，还不是“完整买卖策略”
+    - 下一阶段如果继续沿这条路走，最值得优先补的是显式 sell-side supervision，而不是继续单边强化持有和加仓
+  - 假设：
+    - 如果后续把 `reduce / exit` 的连续监督也补成和 long-side 同等级别，这条路线有机会真正变成更强的学习范式，而不只是单边 persistence amplifier
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r8` 静默接管
+
+## 2026-04-15 planner 视角再收敛：从局部 repair 转向“双通道连续学习”
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散设想可能路径，再收敛为清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `formal_r5` 仍是当前 capped 全A最平衡的 repair baseline
+    - `formal_r7` 仍是当前 capped 全A的综合 performance challenger
+    - `formal_r8` 已证明 continuous-primary supervision 能显著压低 `immediate_reversal_rate_3d`，并把“主升浪捕获/错失”变成正式指标
+    - 但 `formal_r8` 同时把 `reduce / exit` 压得过弱，评估侧已经出现 `reduce = 0 / exit = 3`
+  - 推断：
+    - 下一步最高 ROI 已不再是继续强化 long-side persistence，也不是回到纯局部 sell-side 小修
+    - 更合理的主线是把当前升级推进到“long-side continuous supervision + sell-side continuous supervision”对称结构
+  - 假设：
+    - 如果 sell-side 也被连续化为正式主监督，模型有机会保住 `formal_r8` 的 reversal / trend 学习增益，同时恢复 `reduce / exit`
+- 发散路径：
+  - 路径 A：继续沿 `formal_r8` 加强 long-side continuous supervision
+    - 优点：最贴近当前已出现的正信号
+    - 风险：会进一步把动作分布推向 `open / add / hold`
+  - 路径 B：退回 `formal_r5 / formal_r7`，继续做离散 sell-side repair
+    - 优点：最稳、最接近现有主线
+    - 风险：又回到局部 patch，学习范式升级被中断
+  - 路径 C：把 continuous upgrade 推到 sell-side，对 `reduce / exit` 也建立连续主监督
+    - 优点：最符合这轮暴露出来的真实结构缺口
+    - 风险：实现面比纯局部 repair 更大，需要控制变量
+  - 路径 D：继续加深 backbone 或切 `hier_v4`
+    - 优点：可能突破容量上限
+    - 风险：会把“监督问题”和“容量问题”重新混在一起
+  - 路径 E：继续扩 `max_universe_size`
+    - 优点：更接近完整全A目标
+    - 风险：会把当前未修稳的行为问题放大
+- 收敛判断：
+  - 主线应选 `路径 C`
+  - `路径 B` 保留为局部 fallback 参考，而不是下一阶段主路径
+  - `路径 A` 只作为 `路径 C` 的一部分保留，不再单独前进
+  - `路径 D / E` 继续后置冻结
+- 优先级：
+  - `P0`：冻结当前参考角色
+    - `formal_r5` = balanced baseline
+    - `formal_r7` = 综合 performance challenger
+    - `formal_r8` = continuous-learning reference
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `P1`：优先把 sell-side 连续监督正式化
+    - 不再只让 `reduce / exit` 主要靠离散 label 学
+    - 下一轮最值得接入的是：
+      - `reduce_fraction`
+      - `exit_hazard` 或等价的连续退出强度
+      - 让 sell-side 与现有 `target_delta_hint / holding_days_ratio` 处于同等主监督地位
+  - `P2`：同步约束 daily/global budget 头
+    - 当前 `formal_r8` 的 `avg_gross_exposure = 0.8173` 与 `cash_timing_quality_1d = -0.3132`
+    - 说明 continuous upgrade 不能只改 sample head，必须一起约束 `gross / turnover / hold_bias`
+  - `P3`：下一轮 formal 的最低目标固定为
+    - 保住 `immediate_reversal_rate_3d` 不明显反弹
+    - 保住主升浪相关指标可见且不退化成空壳
+    - 让 `reduce_success_rate_5d > 0`
+    - 让 `exit_timeliness_rate_5d > 0`
+    - 把 `max_drawdown` 拉回 gate 内
+  - `P4`：如果 `P1-P3` 成立，再讨论把连续监督进一步扩到：
+    - `target_weight`
+    - `soft sparsity`
+    - 更完整的持仓生命周期建模
+  - `P5`：depth / `hier_v4` / 更大全A继续冻结
+    - 只有当双通道连续监督已站稳，但仍明显卡容量上限时，才重新提升优先级
+- 动作后复盘：
+  - 当前最优顺序已经从“继续 patch sell-side”收敛为：
+    - 先把 continuous-primary 升级补成双通道
+    - 再让预算头跟上
+    - 最后才重新讨论更深 backbone 或更大全A
+  - 这次收敛的核心价值，是避免把 `formal_r8` 的真实增益误判成“方向错了”，也避免把它的真实副作用误判成“只要继续加深就会好”
+
+## 2026-04-15 双通道连续监督升级与 formal_r9 执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，且明确强调“注重最有效而不是最小改动”
+- 动作前自检：
+  - 事实：
+    - 当前主线计划已收敛到：从 `formal_r8` 的 continuous-primary supervision 继续推进到“long-side + sell-side 双通道连续学习”
+    - `formal_r8` 已证明连续主监督方向有效，但评估侧真实动作分布已经塌成 `reduce = 0 / exit = 3`
+    - `formal_r5` 仍是 balanced repair baseline，`formal_r7` 仍是综合 performance challenger，`cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 当前最高 ROI 不是继续加深 backbone，也不是继续扩 `universe`
+    - 最有效的下一步是把 `reduce / exit` 也正式连续化，并让 budget / execution 同步消费 sell-side continuous signals
+  - 假设：
+    - 如果 `reduce_fraction / exit_hazard` 真能贯穿 teacher、sample、decoder 与 execution，模型有机会保住 `formal_r8` 的趋势/连续学习增益，同时恢复真实 sell-side
+- 实施：
+  - 在 `daily_research/continuous_policy/label_builder.py` 中：
+    - 新增 `reduce_fraction_target / exit_hazard_target`
+    - 同步让 teacher global target 显式吸收 sell pressure
+  - 在 `daily_research/continuous_policy/pipeline_utils.py` 中：
+    - 把新 sell-side target 列纳入 sample label 边界，确保不会混进 feature matrix
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中：
+    - 新增 `reduce_fraction / exit_hazard` 连续头
+    - 把二者纳入 sample scalar loss 与 `soft action target`
+    - 在推断侧把 sell-side signal 接进 held-path label repair 与 daily/global budget coupling
+    - strict resume signature 升级为 `seq_v3_continuous_dual_channel_r1`
+  - 在 `daily_research/continuous_policy/portfolio_simulator.py` 中：
+    - 让 `reduce_fraction / exit_hazard / sell_pressure` 真正参与 `reduce / hold / add / open` 的目标权重形成
+    - 让 weak-tail forced-zero 与 budget moderation 同步吸收 sell-side continuous signal
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r9`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36635`
+    - `best_epoch = 39 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.4185`
+    - `sharpe = 3.4923`
+    - `max_drawdown = -0.0240`
+    - `avg_gross_exposure = 0.3969`
+    - `hold_share = 0.5087`
+    - `reduce_success_rate_5d = 0.7368`
+    - `exit_timeliness_rate_5d = 0.4000`
+    - `cash_timing_quality_1d = -0.2470`
+    - `immediate_reversal_rate_3d = 0.1268`
+    - `trend_capture_rate_10d = 0.3520`
+    - `missed_main_leg_rate_10d = 0.3448`
+  - 相比 `formal_r8`：
+    - `reduce_success_rate_5d: 0.0000 -> 0.7368`
+    - `exit_timeliness_rate_5d: 0.0000 -> 0.4000`
+    - `hold_share: 0.4378 -> 0.5087`
+    - `max_drawdown: -0.0614 -> -0.0240`
+    - `cash_timing_quality_1d: -0.3132 -> -0.2470`
+    - 但 `annual_return: 0.9094 -> 0.4185`
+    - `trend_capture_rate_10d: 0.4195 -> 0.3520`
+    - `immediate_reversal_rate_3d: 0.0143 -> 0.1268`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项已收敛到只剩 `exit_timeliness_rate_5d / cash_timing_quality_1d`
+  - shadow 侧：
+    - `annual_return = -0.1052`
+    - `sharpe = -2.0674`
+    - `avg_gross_exposure = 0.2719`
+    - `hold_share = 0.8000`
+    - `reduce_success_rate_5d = 1.0000`
+    - `exit_timeliness_rate_5d = 0.0000`
+    - `cash_timing_quality_1d = -0.1053`
+    - `immediate_reversal_rate_3d = 0.0000`
+- 动作后复盘：
+  - 事实：
+    - 双通道连续监督已经把 `formal_r8` 的 sell-side starvation 真正拉回来了
+    - `reduce / exit` 不再是 `0`
+    - `max_drawdown` 也重新回到 gate 内
+  - 推断：
+    - continuous-learning 这条线已经被证明是有效主线，而不再只是概念性 upgrade
+    - 当前 capped 全A主线的第一瓶颈已从“sell-side 学不会”收敛成“`exit` 时点还不够准 + `cash timing` 仍为负”
+    - `formal_r9` 现在更适合作为下一轮主研究底座；`formal_r5` 与 `formal_r8` 分别保留为 cash / long-side reference
+  - 假设：
+    - 如果下一轮继续只做高 ROI repair，最值得优先补的是 `exit` 时点校准与 budget head calibration，而不是继续扩池或加深 backbone
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r9` 静默接管
+
+## 2026-04-15 planner 视角再收敛：以 formal_r9 为新底座
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角推进：先发散设想可能路径，再收敛为清晰、详细且高前景的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `formal_r9` 已把 `formal_r8` 的 sell-side starvation 真正拉回：`reduce_success_rate_5d = 0.7368`、`exit_timeliness_rate_5d = 0.4000`
+    - `formal_r9` 仍未过 gate，失败项已经只剩 `exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - `formal_r9` 也带来了新的代价：`annual_return` 与 `trend_capture_rate_10d` 相比 `formal_r8` 回落，`immediate_reversal_rate_3d` 也从极低位反弹到 `0.1268`
+    - `formal_r5` 仍是更稳的 cash / repair 参考线，`formal_r8` 仍是更强的 long-side continuous 参考线
+  - 推断：
+    - 当前最高 ROI 已不是继续证明“双通道能不能学会卖”，因为这一点已经被 `formal_r9` 验证
+    - 更高前景的方向是：以 `formal_r9` 为主线，把“sell-side 恢复”进一步升级成“exit 时点更准 + 现金时点更准”
+    - 现在如果直接扩 `universe`、继续加深 backbone，或者马上再扩一大批连续头，会把当前最关键的局部瓶颈重新稀释掉
+  - 假设：
+    - 如果下一轮能在不明显伤害 `hold_share / reduce_success_rate_5d / max_drawdown` 的前提下，把 `exit_timeliness_rate_5d` 抬进 gate，并继续把 `cash_timing_quality_1d` 往 `0` 拉近，那么 capped 全A 主线就会进入真正可 promotion 的阶段
+- 发散路径：
+  - 路径 A：沿 `formal_r9` 继续做最小高 ROI repair
+    - 优点：变量最少，最有机会把剩余 gate 项逐一打穿
+    - 风险：如果校准不当，容易重新压坏 `reduce` 或把 `hold_share` 打回去
+  - 路径 B：退回 `formal_r8` 风格，重新偏向趋势捕获与低 reversal
+    - 优点：更贴近“不漏主升浪”的长期目标
+    - 风险：会重新掉回 sell-side starvation，等于重复刚修好的问题
+  - 路径 C：继续扩连续化范围，直接上 `target_weight / soft sparsity / 生命周期建模`
+    - 优点：长期潜力高
+    - 风险：改动面太大，会和当前 `exit / cash` 局部瓶颈混在一起
+  - 路径 D：切更深 backbone 或 `hier_v4`
+    - 优点：可能提高容量上限
+    - 风险：当前还无法证明瓶颈主要来自容量，而不是 calibration
+  - 路径 E：继续扩 `max_universe_size`
+    - 优点：更接近完整全A目标
+    - 风险：会放大尚未修稳的 `exit / cash` 问题
+- 收敛判断：
+  - 主线应选 `路径 A`
+  - `路径 B` 只保留为趋势学习参考，不再回退成主线
+  - `路径 C` 作为中期升级线保留，但现在不抢主优先级
+  - `路径 D / E` 继续后置冻结
+- 优先级：
+  - `P0`：冻结参考角色
+    - `formal_r9` = dual-channel continuous 主研究基线
+    - `formal_r5` = balanced cash / repair reference
+    - `formal_r8` = long-side continuous reference
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+  - `P1`：优先做 `exit` 时点校准
+    - 重点不再是“多造一些 exit”，而是把已有 sell-side 能力从“会卖”推进到“卖得准”
+    - 核心要区分：
+      - 是 `exit_hazard` 阈值不对
+      - 还是 `exit_patience_target` 太保守
+      - 还是 execution / allocation 在特定场景又把 `exit` 吃回 `reduce / hold`
+  - `P2`：同步做 budget head calibration
+    - 把 `gross_exposure_target / turnover_budget / hold_bias_target / reduce_bias_target / exit_patience_target` 作为一个联动组来修
+    - 目标是修“现金时点”，不是简单增加现金或简单压低暴露
+  - `P3`：固定下一轮 formal 的目标口径
+    - 至少要同时满足：
+      - `exit_timeliness_rate_5d` 继续抬升并尽量接近 gate
+      - `cash_timing_quality_1d` 继续向 `0` 改善
+      - `hold_share >= 0.45`
+      - `reduce_success_rate_5d` 保持在高位，不接受重新塌回去
+      - `max_drawdown` 不明显恶化
+  - `P4`：只有当 `P1-P3` 站稳，才继续扩连续化范围
+    - 这时再推进 `target_weight / soft sparsity / 更完整持仓生命周期建模`
+  - `P5`：depth / `hier_v4` / 更大全A继续冻结
+    - 只有当前双通道主线已把 `exit / cash` 修稳，但仍明显被容量或候选域上限卡住时，才重新提升优先级
+- 动作后复盘：
+  - 当前最优顺序已经进一步从“证明 dual-channel 是否有效”收敛为：
+    - 先把 `formal_r9` 的 `exit` 校准好
+    - 再把 `cash / budget head` 校准好
+    - 最后才谈更大升级
+  - 这次收敛的核心价值，是避免两类重复错误：
+    - 一类是刚把 sell-side 拉回来，就急着切回更激进的趋势路线
+    - 另一类是还没把当前瓶颈修透，就过早引入更深 backbone 或更大全A变量
+
+## 2026-04-15 formal_r10 exit/cash 校准执行闭环
+- 触发：
+  - 用户要求基于既定计划直接一次性执行并完整交付，不停在建议层
+- 动作前自检：
+  - 事实：
+    - `formal_r9` 已把 sell-side 真正拉回，但仍未过 gate，剩余失败项是 `exit_timeliness_rate_5d / cash_timing_quality_1d`
+    - 最新 planner 收敛已固定：下一步优先做 `exit` 时点校准与 `cash / budget head` 校准
+    - `cp_v3_seq_holdcash_r1` 仍是默认 strongest temporal 锚点
+  - 推断：
+    - 当前最有效路径不是扩 `universe` 或继续加深 backbone，而是沿 `formal_r9` 的 dual-channel 基线继续做校准
+    - 为避免再走“长训练后才发现方向错误”的低 ROI 路径，应先做 quick eval，再决定是否值得重跑 formal
+  - 假设：
+    - 如果 `cash_defense_score / exit_timing_pressure` 的 patch 在 quick eval 里能让 `cash_timing_quality_1d` 与 `exit_timeliness_rate_5d` 同向改善，那么完整 retrain 值得执行
+- 实施：
+  - 代码层：
+    - 在 `label_builder.py` 的 teacher global target 中新增 `cash_defense_pressure`
+    - 在 `model_seq_v3.py` 的 `predict_policy_v3` 中新增 `cash_defense_score`、`exit_timing_pressure`、更保守的 open promotion 与 held-path sell-side 校准
+    - 在 `portfolio_simulator.py` 中把 `exit_timing_pressure` 真正接入 execution，影响 `weak_tail_zero_candidate / reduce keep_ratio / hold floor / add suppression / contradictory trim`
+  - 静态验证：
+    - `python -m compileall -q daily_research`
+    - `project_consistency_check.py`
+    - 均通过
+- quick eval：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r10_quick_eval`
+  - 结果：
+    - `annual_return = 0.4187`
+    - `sharpe = 3.5832`
+    - `hold_share = 0.7276`
+    - `reduce_success_rate_5d = 0.5714`
+    - `exit_timeliness_rate_5d = 0.3333`
+    - `cash_timing_quality_1d = -0.0911`
+    - `immediate_reversal_rate_3d = 0.1184`
+  - quick eval 复盘：
+    - 事实：
+      - `cash_timing_quality_1d` 相比 `formal_r9` 的 `-0.2470` 已明显改善
+      - `hold_share` 也明显抬高
+      - 但 `exit_timeliness_rate_5d` 没有同步抬高
+    - 推断：
+      - 这轮 patch 没有跑偏，而是先把预算头与持仓防御拉向正确方向
+      - 是否会在 retrain 后过度 risk-off，仍需 formal verdict 才能确认
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r10`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36633`
+    - `best_epoch = 39 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = -0.1310`
+    - `sharpe = -1.8718`
+    - `max_drawdown = -0.0247`
+    - `avg_gross_exposure = 0.3702`
+    - `open_win_rate_5d = 0.4375`
+    - `hold_share = 0.7687`
+    - `reduce_success_rate_5d = 0.6000`
+    - `exit_timeliness_rate_5d = 0.5000`
+    - `cash_timing_quality_1d = 0.0090`
+    - `immediate_reversal_rate_3d = 0.1231`
+    - `trend_capture_rate_10d = 0.1225`
+    - `missed_main_leg_rate_10d = 0.1250`
+  - 相比 `formal_r9`：
+    - `exit_timeliness_rate_5d: 0.4000 -> 0.5000`
+    - `cash_timing_quality_1d: -0.2470 -> 0.0090`
+    - `hold_share: 0.5087 -> 0.7687`
+    - 但 `annual_return: 0.4185 -> -0.1310`
+    - `sharpe: 3.4923 -> -1.8718`
+    - `open_win_rate_5d: 0.6471 -> 0.4375`
+    - `trend_capture_rate_10d: 0.3520 -> 0.1225`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项扩展为：
+      - `open_win_rate_5d`
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - `formal_r10` 已经证明：`exit / cash` 校准可以接近把剩余两项 gate 缺口打穿
+    - 但这轮是通过明显更 defensive 的部署实现的，导致收益、开仓质量与趋势捕获同时恶化
+    - `formal_r10` 没有取代 `formal_r9` 成为新的主研究底座
+  - 推断：
+    - 当前 capped 全A主线的第一矛盾已经从“sell-side 学不会”转成“sell-side 与 budget calibration 如何不压坏 long-side”
+    - 下一个高 ROI 方向不再是继续提高 `cash_defense_score`，而是把 `formal_r9` 的 long-side/trend 与 `formal_r10` 的 `exit/cash` 改善做受约束合流
+  - 假设：
+    - 如果后续继续只做最有效修补，最值得优先守住的不是 `hold_share`，而是 `open_win_rate_5d / trend_capture_rate_10d / annual_return_vs_active`
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r10` 静默接管
+
+## 2026-04-15 formal_r11 受约束合流执行闭环
+- 触发：
+  - 用户要求基于既定计划继续一次性执行并完整交付，不停在建议层
+- 动作前自检：
+  - 事实：
+    - `formal_r10` 已证明 `exit / cash` 校准方向有效，但它通过过强的全局 defensive 压制牺牲了 `open_win_rate_5d / annual_return / trend_capture_rate_10d`
+    - 最新收敛已固定：下一步不是继续推高 `cash_defense_score`，而是把 `formal_r10` 的 `exit/cash` 改善，转成“只对该卖的持仓更准地卖”
+    - `formal_r9` 仍是当前 dual-channel 主研究基线
+  - 推断：
+    - 当前最有效路径，是做一次“受约束合流”：
+      - 保留 `formal_r9` 的 long-side / trend 能力
+      - 只迁移 `formal_r10` 中真正对 held-exit 与现金时点有帮助的局部校准
+    - 若把 held-exit 校准和 open suppression 继续绑成同一个全局 defensive 分数，会再次重复 `formal_r10` 的误伤
+  - 假设：
+    - 如果把 `cash_defense_score` 拆成 `open_risk_off_score + held_exit_support_score`，并同步减弱 teacher global target 侧的预算压制，long-side 有机会恢复，而 `cash timing` 仍能保留部分改善
+- 实施：
+  - 代码层：
+    - 在 `label_builder.py` 中减弱 `cash_defense_pressure` 对 `gross / candidate_budget / max_position_weight / hold_bias` 的压制
+    - 在 `model_seq_v3.py` 中把原先单一的 `cash_defense_score` 拆成：
+      - `open_risk_off_score`
+      - `held_exit_support_score`
+    - 保留 held-path 的 `exit_timing_pressure` 修补，但不再让同一层全局 defensive 信号直接重压 `open promotion / gross / candidate_budget`
+    - strict resume 签名同步升级到 `sequence_model_revision = seq_v3_continuous_dual_channel_r2`
+  - 静态验证：
+    - `python -m compileall -q daily_research`
+    - `project_consistency_check.py`
+    - 均通过
+- quick eval：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11_quick_eval`
+  - 结果：
+    - `annual_return = 0.4198`
+    - `open_win_rate_5d = 0.7647`
+    - `hold_share = 0.7276`
+    - `reduce_success_rate_5d = 0.5714`
+    - `exit_timeliness_rate_5d = 0.3333`
+    - `cash_timing_quality_1d = -0.0908`
+    - `trend_capture_rate_10d = 0.3571`
+  - quick eval 复盘：
+    - 事实：
+      - 相比 `formal_r9`，`cash_timing_quality_1d` 明显改善
+      - `open_win_rate_5d / annual_return / trend_capture_rate_10d` 没有像 `formal_r10` 那样被压坏
+      - `exit_timeliness_rate_5d` 仍然没有真正站起来
+    - 推断：
+      - 这说明“分层合流”的方向是对的
+      - 也说明 retrain 后最需要观察的，将不再是 long-side 是否塌掉，而是 sell-side timing 会不会继续回落
+- 正式执行：
+  - 运行：
+    - `cp_v3_seq_learned_all_a_holdcash_v3_formal_r11`
+  - 训练事实：
+    - `train_day_count = 409`
+    - `teacher_action_rows = 36634`
+    - `best_epoch = 40 / 48`
+    - `training_evidence = sufficient`
+- 结果：
+  - evaluation 侧：
+    - `annual_return = 0.4881`
+    - `sharpe = 4.2806`
+    - `max_drawdown = -0.0205`
+    - `avg_gross_exposure = 0.3646`
+    - `open_win_rate_5d = 0.9091`
+    - `hold_share = 0.6959`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.2000`
+    - `cash_timing_quality_1d = -0.1556`
+    - `immediate_reversal_rate_3d = 0.1778`
+    - `trend_capture_rate_10d = 0.4462`
+    - `missed_main_leg_rate_10d = 0.4167`
+  - 相比 `formal_r9`：
+    - `annual_return: 0.4185 -> 0.4881`
+    - `sharpe: 3.4923 -> 4.2806`
+    - `open_win_rate_5d: 0.6471 -> 0.9091`
+    - `hold_share: 0.5087 -> 0.6959`
+    - `cash_timing_quality_1d: -0.2470 -> -0.1556`
+    - `trend_capture_rate_10d: 0.3520 -> 0.4462`
+    - 但 `reduce_success_rate_5d: 0.7368 -> 0.5000`
+    - `exit_timeliness_rate_5d: 0.4000 -> 0.2000`
+    - `immediate_reversal_rate_3d: 0.1268 -> 0.1778`
+  - promotion gate：
+    - 仍为 `shadow_only`
+    - 失败项收口为：
+      - `reduce_success_rate_5d`
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+- 动作后复盘：
+  - 事实：
+    - `formal_r11` 已成功把 `formal_r10` 误伤的 long-side 指标大幅拉回
+    - `open_win_rate_5d / annual_return / sharpe / trend_capture_rate_10d` 全部重新站到比 `formal_r9` 更强的位置
+    - 但 sell-side timing 又明显回落，特别是 `exit_timeliness_rate_5d`
+  - 推断：
+    - “受约束合流”方向是成立的，`formal_r11` 比 `formal_r10` 更接近真正可 promotion 的形态
+    - 当前主矛盾已进一步收敛成：
+      - 以 `formal_r11` 为底座
+      - 定向补回 `formal_r9` 的 `reduce / exit` timing
+      - 而不是再整体推高 defensive budget
+  - 假设：
+    - 如果下一轮继续只做最有效修补，最值得优先借用的已经不是 `formal_r10` 的全局防御，而是 `formal_r9` 的 sell-side 分界与 timing 能力
+- 治理收口：
+  - protocol 完成后，已把 `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 全部回切到 `cp_v3_seq_holdcash_r1`
+  - 避免默认运行态被仍未过 gate 的 `formal_r11` 静默接管
+## 2026-04-16 self-opt study 自动研究层执行闭环
+- 触发：
+  - 用户明确要求从局部 repair mode 继续推进到更偏“自己学、自己调”的方向，并要求基于既定计划直接执行，不只停在建议层
+- 动作前自检：
+  - 事实：
+    - `continuous_policy` 现有 formal protocol 已经暴露了可正式搜索的超参面：`decoder_profile / learning_rate / hidden_dim / sequence_layers / daily_hidden_dim / dropout / daily_dropout / batch_size`
+    - 当前主线仍没有 promotable 的 capped 全A challenger
+    - 当前默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 推断：
+    - 现阶段最有效的不是继续手工 patch 单一 protocol，而是先把“自动研究层”接到现有 protocol 上，让系统至少能自动筛 trial、自动评分、自动回滚 latest
+  - 假设：
+    - 在当前信息下，最可行的第一步不是立刻重构 teacher / loss 全栈，而是先做 bounded study orchestration
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/runtime.py` 中新增：
+      - `STUDIES_ROOT`
+      - `LATEST_STUDY_SUMMARY_PATH`
+      - `update_latest_summary("study", ...)`
+    - 新增 `daily_research/continuous_policy/run_self_optimizing_study.py`
+      - 负责 trial 采样
+      - 调用 `run_continuous_policy_protocol`
+      - 基于 protocol summary 计算 composite score
+      - 输出 `study_plan / trial_ranking / study_summary`
+      - 在 study 结束后自动 restore `latest_*` 与 `runtime/portfolio_state.json`
+  - smoke：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --dry-run --study-tag self_opt_smoke_r1`
+    - dry-run 通过，确认了 3 个 trial 的 sampling 口径
+  - 执行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --study-tag cp_v3_seq_self_opt_focused_r1`
+- 运行事实：
+  - study tag：
+    - `cp_v3_seq_self_opt_focused_r1`
+  - 研究范围：
+    - `pool_name = learned_all_a`
+    - `trainer_backend = formal_torch_seq_v3`
+    - `label_preset = holdcash_v3`
+    - trial 数 = `3`
+  - 三个 trial：
+    - `trial_01`
+      - `decoder_profile = holdcash_v3`
+      - `learning_rate = 0.0015`
+      - `hidden_dim = 224`
+      - `sequence_layers = 1`
+      - `batch_size = 512`
+      - `epochs = 40`
+    - `trial_02`
+      - `decoder_profile = reduceexit_v4`
+      - `learning_rate = 0.0010`
+      - `hidden_dim = 224`
+      - `sequence_layers = 1`
+      - `batch_size = 384`
+      - `epochs = 40`
+    - `trial_03`
+      - `decoder_profile = budget_v3`
+      - `learning_rate = 0.0012`
+      - `hidden_dim = 224`
+      - `sequence_layers = 2`
+      - `daily_hidden_dim = 128`
+      - `dropout = 0.12`
+      - `daily_dropout = 0.08`
+      - `batch_size = 512`
+      - `epochs = 40`
+- 结果：
+  - `trial_02` 成为本轮 composite-score 冠军：
+    - `composite_score = 2.986128`
+    - `annual_return = 0.1896`
+    - `sharpe = 0.9015`
+    - `open_win_rate_5d = 0.6667`
+    - `reduce_success_rate_5d = 0.5106`
+    - `exit_timeliness_rate_5d = 0.4667`
+    - `cash_timing_quality_1d = -0.2305`
+    - `immediate_reversal_rate_3d = 0.5649`
+    - `shadow_reversal_rate_3d = 0.5333`
+    - promotion gate 仍为 `shadow_only`
+  - `trial_01` 作为 baseline：
+    - `composite_score = 2.692268`
+    - `annual_return = 0.1584`
+    - `sharpe = 0.7290`
+    - `reduce_success_rate_5d = 0.5600`
+    - `exit_timeliness_rate_5d = 0.4412`
+    - `cash_timing_quality_1d = -0.0849`
+    - `avg_gross_exposure = 0.8780`
+  - `trial_03` 作为 capacity challenger：
+    - `composite_score = 1.660975`
+    - `annual_return = -0.1007`
+    - `sharpe = -0.6605`
+    - `reduce_success_rate_5d = 0.6444`
+    - `exit_timeliness_rate_5d = 0.5278`
+    - `cash_timing_quality_1d = -0.2463`
+    - `hold_share = 0.7193`
+    - `avg_gross_exposure = 0.4956`
+  - 三个 trial 全部共同失败于：
+    - `training_evidence_sufficient`
+    - 没有任何一个 trial 达到 promotable 状态
+- 动作后复盘：
+  - 事实：
+    - 自动研究层已经真正接通，不再只是口头计划
+    - `run_self_optimizing_study.py` 已能独立完成 bounded screen、生成 study report、并自动回滚 latest
+    - 本轮最强 score champion 与 promotion candidate 并不相同；`trial_02` 虽然 score 第一，但 reversal 风险过高，不能直接视为主线升级
+    - `trial_03` 证明 `sequence_layers = 2` 在当前线下能明显抬高 `reduce / exit`，但 40 epoch screen 下收益仍明显失真
+  - 推断：
+    - 当前自动研究层已经足够承担“筛方向”的职责
+    - 但 40 epoch budget 还不足以承担“给 promotable verdict”的职责
+    - 当前 objective 对 reversal / shadow_reversal 的惩罚仍然偏软，下一轮若继续走 self-opt，应把“search champion”与“stability champion”继续拆开
+  - 假设：
+    - 如果后续继续推进，最高 ROI 的下一层不是重新回到手工 patch，而是：
+      - 保留这套 study orchestration
+      - 提高 champion / safe baseline 的训练预算
+      - 再决定是否继续把 loss / objective 也纳入自动搜索
+- 补充纠偏：
+  - 本轮 study 执行完成后，又顺手把 runner 的默认口径进一步收紧：
+    - 日期默认值规范到 `YYYYMMDD`
+    - 后续默认 `shadow_start_date` 留空，由 protocol 内部自动回推短窗
+    - historical leaderboard 进一步收窄到同一 `label_preset`
+- 治理收口：
+  - study 完成后确认：
+    - `latest_protocol_summary.json` 已恢复为 `cp_v3_seq_holdcash_r1`
+    - 默认运行态没有被任何 study trial 静默接管
+## 2026-04-16 planner 视角收敛：self-opt 之后
+- 触发：
+  - 用户要求以“高瞻远瞩的策略规划者”视角继续推进：先发散路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_focused_r1` 已把自动研究层正式接通，但当前只完成了 `3` 个 40-epoch screening trial
+    - 本轮 search champion 是 `trial_02 = reduceexit_v4 / lr=0.0010 / batch=384 / seq=1`
+    - `trial_02` 虽然 score 第一，但 `immediate_reversal_rate_3d = 0.5649`、`shadow_reversal_rate_3d = 0.5333` 过高，仍是 `shadow_only`
+    - `trial_03 = budget_v3 / seq=2` 证明更深一层 `seq_v3` 能把 `reduce / exit` 拉高，但在 40 epoch screening 下 `annual_return < 0`
+    - `latest_protocol_summary.json` 已恢复到 `cp_v3_seq_holdcash_r1`
+    - 当前 live 执行仍来自 `deep_alpha_short_alpha_execalign_production_default` 的 external target-weight 路径，不受本轮 continuous_policy study 直接接管
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 单个 protocol，也不是立刻扩大 `universe`
+    - 更合理的是把“自动研究层”从 v1 screening 升级成“筛选 + 复核”两阶段研究流水线
+  - 假设：
+    - 如果让 self-opt 先负责筛方向，再让更高预算的 confirmatory formal 负责裁决，就能减少当前反复在局部 patch 与单次 formal 之间来回摆动的低效率
+- 发散路径：
+  - 路径 A：回到 `formal_r11` 主线，继续手工修 `reduce / exit / cash`
+  - 路径 B：把 self-opt 保留为筛选层，并把冠军 trial 提升到更高预算做 confirmatory rerun
+  - 路径 C：继续扩 self-opt 的搜索空间，把 `loss / objective / search score` 也纳入自动搜索
+  - 路径 D：把 `sequence_layers = 2` 直接升成主线假设
+  - 路径 E：把 continuous_policy 继续后置，转而优先处理 live 执行路径
+- 收敛判断：
+  - 路径 B 是当前主线
+  - 路径 C 是最值得并行准备的中期升级
+  - 路径 A 只保留为局部 fallback
+  - 路径 D 只保留为 confirmatory challenger，不直接接主线
+  - 路径 E 当前不取，因为 live 执行仍稳定走独立 production 路径，本轮研究不应打扰它
+- 优先级：
+  - `P0`：冻结角色分工
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+    - `formal_r11` = 手工 constrained-merge reference
+    - `cp_v3_seq_self_opt_focused_r1__trial_02` = search champion
+    - `cp_v3_seq_self_opt_focused_r1__trial_03` = depth confirmatory challenger
+  - `P1`：把 self-opt 从“单阶段 screening”升级到“两阶段研究”
+    - 第一阶段：小预算 screening
+    - 第二阶段：对 top-1 / top-2 做更高 epoch 的 confirmatory formal rerun
+    - 明确区分 `search champion` 与 `promotion candidate`
+  - `P2`：下一轮优先复核 `trial_03`
+    - 因为它在当前 40 epoch 下已经把 `reduce_success_rate_5d / exit_timeliness_rate_5d` 推到最接近 gate 的位置
+    - 当前最值得验证的是：增加训练预算后，`annual_return` 是否能从负值修回，而不是继续猜测
+  - `P3`：同步重打分逻辑
+    - 当前 objective 对 `reversal / shadow_reversal` 惩罚偏软
+    - 下一轮 self-opt 必须把 stability champion 与 performance champion 拆开，避免 `trial_02` 这类高 reversal run 继续当总冠军
+  - `P4`：暂不扩大搜索到 `loss/objective` 全空间
+    - 先把“search -> confirmatory rerun”闭环跑顺
+    - 只有当这条两阶段流水线稳定后，再把更深的 objective auto-tuning 纳入正式搜索面
+- 动作后复盘：
+  - 当前最优顺序已进一步收敛成：
+    - 先把 self-opt 升级成两阶段研究流水线
+    - 再优先复核 `trial_03`
+    - 再修 composite objective，使 search champion 不再被高 reversal run 误占
+
+## 2026-04-16 self-opt confirmatory_r1 执行闭环
+- 触发：
+  - 用户要求基于既定计划继续直接执行，不停在建议层；本轮目标是把刚接通的 self-opt 从“只筛选”推进到正式“两阶段研究流水线”
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_focused_r1` 已完成 3 个 screening trial
+    - `trial_02` 是旧口径下的 screen performance champion，但 `immediate_reversal_rate_3d = 0.5649`、`shadow_reversal_rate_3d = 0.5333`
+    - `trial_03` 是当前最接近 gate 的 depth challenger，但 40 epoch screening 下 `annual_return < 0`
+    - 默认 strongest temporal 锚点仍是 `cp_v3_seq_holdcash_r1`
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 某一个 `formal_r*`
+    - 而是把 self-opt 从单阶段 screening 升级成“screening + confirmatory rerun”的正式研究流水线
+  - 假设：
+    - 如果 confirmatory rerun 能把 `trial_03` 的 `training_evidence` 补足，就能更准确判断这条更深 `seq_v3` 分支是否值得继续投入
+- 实施：
+  - 代码层：
+    - 升级 `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `performance_score / stability_score / composite_score`
+    - 显式加入 `reversal / shadow_reversal / reversal_excess / training_evidence` 惩罚与加减分
+    - 新增 seed-study 读取、confirmatory 候选选择、confirmatory protocol 参数构建
+    - 新增 `screen_performance_champion / screen_stability_champion / screen_depth_challenger / confirmatory_trials / confirmatory_completed_trial_count`
+    - 新增 `study_tag` 字段别名，补齐 study handoff 语义
+  - dry-run：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --seed-study-tag cp_v3_seq_self_opt_focused_r1 --skip-screening --study-tag self_opt_confirm_smoke_r1 --dry-run`
+    - 结果：通过；确认会基于 seed study 直接选择 confirmatory candidates
+  - 正式执行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --seed-study-tag cp_v3_seq_self_opt_focused_r1 --skip-screening --study-tag cp_v3_seq_self_opt_confirmatory_r1`
+- 运行事实：
+  - study tag：
+    - `cp_v3_seq_self_opt_confirmatory_r1`
+  - seed study：
+    - `cp_v3_seq_self_opt_focused_r1`
+  - 角色选择：
+    - `performance_champion = cp_v3_seq_self_opt_focused_r1__trial_02`
+    - `depth_challenger = cp_v3_seq_self_opt_focused_r1__trial_03`
+    - `screen_stability_champion` 也收敛到 `trial_03`
+  - confirmatory epoch 预算：
+    - `epochs = 64`
+    - `min_epochs = 48`
+  - confirmatory 使用的 shadow 窗口已自动收口为短窗：
+    - `20260401 -> 20260415`
+- 结果：
+  - `confirm_01 = cp_v3_seq_self_opt_confirmatory_r1__confirm_01`
+    - 来源：`trial_02`
+    - 角色：`performance_champion`
+    - `training_evidence = sufficient`
+    - `completed_epochs = 64`
+    - `best_epoch = 57`
+    - `annual_return = -0.0144`
+    - `sharpe = -0.0281`
+    - `open_win_rate_5d = 0.5098`
+    - `reduce_success_rate_5d = 0.5000`
+    - `exit_timeliness_rate_5d = 0.5135`
+    - `cash_timing_quality_1d = -0.2124`
+    - `immediate_reversal_rate_3d = 0.3136`
+    - `shadow_reversal_rate_3d = 0.3288`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `reduce_success_rate_5d`
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `shadow_reversal`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+  - `confirm_02 = cp_v3_seq_self_opt_confirmatory_r1__confirm_02`
+    - 来源：`trial_03`
+    - 角色：`depth_challenger`
+    - `training_evidence = sufficient`
+    - `completed_epochs = 49`
+    - `best_epoch = 39`
+    - `annual_return = -0.1007`
+    - `sharpe = -0.6605`
+    - `max_drawdown = -0.1029`
+    - `avg_gross_exposure = 0.4956`
+    - `open_win_rate_5d = 0.5000`
+    - `hold_share = 0.7193`
+    - `reduce_success_rate_5d = 0.6444`
+    - `exit_timeliness_rate_5d = 0.5278`
+    - `cash_timing_quality_1d = -0.2463`
+    - `immediate_reversal_rate_3d = 0.1750`
+    - `shadow_reversal_rate_3d = 0.0000`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+  - confirmatory champion：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02`
+    - `performance_score = 2.267823`
+    - `stability_score = 0.526811`
+    - `composite_score = 2.794634`
+- 动作后复盘：
+  - 事实：
+    - 两阶段自动研究流水线已经真实跑通，不再只是规划
+    - `trial_02` 虽然仍是 screen performance champion，但 confirmatory 后依然暴露高 reversal / shadow_reversal，不适合作为当前最稳的后续投入对象
+    - `trial_03` 在 confirmatory 后把 `training_evidence` 从不足修到充足，且继续保持较强的 `reduce / exit`
+  - 推断：
+    - 当前 self-opt 主线最值得继续投入的是 `trial_03 -> confirm_02`
+    - 当前瓶颈已经不是“更深一层 `seq_v3` 能不能学会 sell-side”，而是“在保住 sell-side 的前提下，如何修回 `annual_return / sharpe / drawdown / cash timing`”
+    - v2 评分已经成功把“高 reversal 的短期高分 run”从总冠军位置上挤下来
+  - 假设：
+    - 如果后续继续推进，最高 ROI 的动作将不再是回到单次 screening 或回到手工 patch，而是围绕 `confirm_02` 这条 depth confirmatory 线继续修收益和预算头
+- 治理收口：
+  - study 完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json` 已全部自动恢复到 `cp_v3_seq_holdcash_r1`
+  - 默认运行态没有被任何 confirmatory trial 静默接管
+
+## 2026-04-16 planner 视角收敛：confirmatory 之后
+- 触发：
+  - 用户要求继续以“高瞻远瞩的策略规划者”视角推进：先发散可能路径，再收敛成清晰、详细且高效的下一步行动方案，并按优先级排序
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` 已经成为当前 self-opt confirmatory champion
+    - `confirm_02` 的 `training_evidence = sufficient`，且 `reduce_success_rate_5d = 0.6444`、`exit_timeliness_rate_5d = 0.5278`、`shadow_reversal_rate_3d = 0.0000`
+    - `confirm_02` 仍失败在 `cash_timing_quality_1d / max_drawdown / annual_return_vs_active / sharpe_vs_active`
+    - `formal_r11` 仍是当前手工 constrained-merge 的 long-side / trend reference
+    - 当前 live 执行与 `latest_trade_plan.txt` 仍走 external target-weight production 路径，不受本研究线直接接管
+  - 推断：
+    - 当前最高 ROI 已不再是继续手工 patch `formal_r11`
+    - 也不是立刻把 `loss / objective / universe` 全部扩大到更大自动搜索面
+    - 最合理的是把主线切到“围绕 `confirm_02` 做 return-recovery 型 focused self-opt”
+  - 假设：
+    - 如果能在不破坏 `confirm_02` 已经拿到的 sell-side 稳定性前提下，把收益、回撤和现金时点修回来，这条更深一层 `seq_v3` 线才真正可能进入 promotable 比较区
+- 发散路径：
+  - 路径 A：回到 `formal_r11`，继续手工修 `reduce / exit / cash`
+  - 路径 B：以 `confirm_02` 为底座，做 focused self-opt return-recovery family
+  - 路径 C：直接把 `loss / objective / promotion score` 全面纳入下一轮大搜索
+  - 路径 D：继续扩大 `max_universe_size` 或让更深 backbone 抢主线
+  - 路径 E：提前把这条研究线接到 live 执行
+- 收敛判断：
+  - 路径 B 是当前主线
+  - 路径 C 是下一层中期升级，不应抢在 B 前面
+  - 路径 A 只保留为 reference / fallback
+  - 路径 D 和路径 E 当前继续冻结
+- 优先级：
+  - `P0`：冻结角色分工
+    - `cp_v3_seq_holdcash_r1` = 默认 strongest temporal 锚点
+    - `formal_r11` = 手工 constrained-merge reference
+    - `confirm_01` = 高收益但高 reversal 的反例 reference
+    - `confirm_02` = 当前最值得继续投入的 depth confirmatory 基线
+  - `P1`：下一轮主线改为 `confirm_02` 的 return-recovery focused self-opt
+    - 固定 `sequence_layers = 2`
+    - 固定当前更稳的 short-shadow confirmatory 口径
+    - 不再重新回到“先证明 sell-side 会不会”的问题
+    - 主目标改成修 `annual_return / sharpe / max_drawdown / cash_timing_quality_1d`
+  - `P2`：focused 搜索只允许围绕收益恢复相关变量做小范围收敛
+    - 优先搜索训练与部署平衡变量，而不是再扩大结构变量
+    - 显式拒绝把 `reduce / exit` 再度打塌来换收益表观修复
+  - `P3`：评分逻辑继续服务于“稳定可晋级”，不是“短期高分”
+    - `performance champion / stability champion / promotion candidate` 继续分离
+    - 后续排行榜应更看重 active return、drawdown 与 cash timing，而不再只看局部动作指标
+  - `P4`：暂不扩大到全量 objective auto-tuning
+    - 先把 `confirm_02` 这条线跑到真正能比较 promotion 的程度
+    - 只有当 focused family 已证明“收益恢复空间有限”时，才提升 objective-level 搜索优先级
+  - `P5`：暂不让研究线碰 live 默认执行
+    - live 继续走独立 production 路径
+    - 研究线继续只在 shadow / confirmatory 层积累证据
+- 动作后复盘：
+  - 当前最优顺序已经收敛成：
+    - 先围绕 `confirm_02` 做 return-recovery focused self-opt
+    - 再决定是否值得把 objective / loss 自动调优抬成下一层主线
+    - 在此之前，不回到高频手工 patch，也不提前扩大 `universe` 或接管 live
+
+
+## 2026-04-16 self-opt return_recovery_r1 执行闭环
+- 触发：
+  - 用户要求基于当前最优计划直接一次性执行并完整交付，不只停在建议层
+  - 当前最优计划已收敛到：
+    - 把 teacher 从主老师降为辅助先验
+    - 把这件事接成正式、可搜索的训练合同
+    - 围绕 `confirm_02` 做 focused self-opt return-recovery
+- 动作前自检：
+  - 事实：
+    - `cp_v3_seq_self_opt_confirmatory_r1__confirm_02` 已证明 `seq_v3 + sequence_layers = 2` 这条线不再卡在 `training_evidence`
+    - 当前更像是卡在 `annual_return / sharpe / cash_timing_quality_1d / max_drawdown`
+    - 现有 `seq_v3` 虽然已有连续头，但 loss 合同仍是固定写死的，self-opt 也还搜不到这一层
+  - 推断：
+    - 当前最高 ROI 不是继续手工 patch 某个 `formal_r*`
+    - 而是把“teacher 降级为辅助先验”正式接进训练合同，然后用 focused self-opt 验证它在 `seq2` 深层分支上能否恢复收益
+  - 假设：
+    - 如果 teacher 退居辅助先验后真的有价值，最先出现正信号的地方不会是 confirmatory 直接 promotion，而会是 short-budget screening 上的收益/现金时点修复
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/model_seq_v3.py` 新增正式 `loss_profile`
+    - 新增 profile：
+      - `dual_channel_default_v1`
+      - `teacher_aux_continuous_v1`
+      - `teacher_aux_return_recovery_v1`
+    - strict resume lineage 升级为：
+      - `sequence_model_revision = seq_v3_continuous_dual_channel_r3`
+      - `loss_profile`、sample/daily/multi-objective 权重全部进入 signature
+    - 在 `daily_research/continuous_policy/train_policy.py` 和 `run_continuous_policy_protocol.py` 接通 `--loss-profile`
+    - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 接通：
+      - `loss_profile` 进入 trial config 与 protocol args
+      - 新 search profile：`seq2_return_recovery_v1`
+      - 固定 `budget_v3 + sequence_layers = 2`
+      - 只搜索 `loss_profile`
+  - 预检：
+    - `python -m compileall -q daily_research`
+    - `run_self_optimizing_study.py --search-profile seq2_return_recovery_v1 --trial-count 3 --dry-run`
+    - Windows 下因 OpenMP duplicate init，正式口径切换为：
+      - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe ...`
+  - 正式执行：
+    - `study_tag = cp_v3_seq_self_opt_return_recovery_r1`
+    - `search_profile = seq2_return_recovery_v1`
+    - screening `epochs = 40 / min_epochs = 32`
+    - confirmatory `epochs = 64 / min_epochs = 48`
+- 结果：
+  - screening：
+    - `trial_01 = dual_channel_default_v1`
+      - `annual_return = -0.1007`
+      - `sharpe = -0.6605`
+      - `reduce_success_rate_5d = 0.6444`
+      - `exit_timeliness_rate_5d = 0.5278`
+      - `cash_timing_quality_1d = -0.2463`
+    - `trial_02 = teacher_aux_continuous_v1`
+      - `annual_return = -0.0547`
+      - `sharpe = -0.3559`
+      - `reduce_success_rate_5d = 0.5000`
+      - `exit_timeliness_rate_5d = 0.5750`
+      - `cash_timing_quality_1d = -0.3278`
+    - `trial_03 = teacher_aux_return_recovery_v1`
+      - `annual_return = 0.1327`
+      - `sharpe = 0.9732`
+      - `reduce_success_rate_5d = 0.6364`
+      - `exit_timeliness_rate_5d = 0.5370`
+      - `cash_timing_quality_1d = -0.1243`
+      - `immediate_reversal_rate_3d = 0.1706`
+      - `shadow_reversal_rate_3d = 0.0000`
+      - 成为本轮 screen performance / stability 双冠军
+  - confirmatory：
+    - `confirm_01 = cp_v3_seq_self_opt_return_recovery_r1__confirm_01`
+    - 来源：
+      - `trial_03 = teacher_aux_return_recovery_v1`
+    - `training_evidence = sufficient`
+      - `completed_epochs = 52`
+      - `best_epoch = 42`
+      - `train_day_count = 409`
+      - `teacher_action_rows = 36634`
+    - 但正式长预算下结果退化：
+      - `annual_return = -0.1814`
+      - `sharpe = -1.6036`
+      - `max_drawdown = -0.0996`
+      - `reduce_success_rate_5d = 0.4737`
+      - `exit_timeliness_rate_5d = 0.6099`
+      - `cash_timing_quality_1d = -0.4792`
+    - promotion 仍为 `shadow_only`
+    - failed checks：
+      - `reduce_success_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active`
+      - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - “teacher 降级为辅助先验”已不再只是概念，而是正式训练合同和 self-opt 搜索维度
+    - `teacher_aux_return_recovery_v1` 在 `seq2` 短预算 screening 上确实给出了当前最强的收益恢复正信号
+    - 但同一 profile 在 confirmatory 长预算下没有稳定住收益、回撤与现金时点
+  - 推断：
+    - 当前不是“这条方向无效”，而是“这条方向还没学稳”
+    - 当前最值得保留的是：
+      - `loss_profile` 作为正式搜索维度
+      - `teacher_aux_return_recovery_v1` 作为 screening-promising profile
+    - 当前最需要警惕的是：
+      - 不要把 screening 正信号误当成 confirmatory verdict
+  - 假设：
+    - 如果后续继续推进，最高 ROI 会是围绕 `teacher_aux_return_recovery_v1` 做更窄的 return-recovery family，而不是回到高频手工 patch
+- 治理收口：
+  - study 完成后已确认：
+    - `latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
+    - 已全部恢复到 `cp_v3_seq_holdcash_r1`
+
+## 2026-04-16 self-opt return_recovery_r2 执行闭环
+- 触发：
+  - 用户要求基于最优计划继续一次性执行并完整交付，不停在建议层
+  - 当前最优计划已收敛到：
+    - 不再回到手工 `formal_r*` patch 主线
+    - 围绕 `seq2 + teacher-aux return-recovery` 做 confirmatory-oriented focused self-opt
+    - 让评分目标更贴近长预算下的真实生存能力
+- 动作前自检：
+  - 事实：
+    - `teacher_aux_return_recovery_v1` 在 `return_recovery_r1` 的 screening 上最强，但 confirmatory 长预算明显退化
+    - 现有 study runner 已能搜索 `loss_profile`，但当前 objective 仍不足以把“screening 亮眼”和“confirmatory 能活下来”充分分开
+    - `confirmatory-max-candidates` 虽已可配，但 narrow family 下若角色重叠，容易只 rerun 一个 trial
+  - 推断：
+    - 当前最高 ROI 不是扩大搜索面，而是把 focused family 的评分目标和 confirmatory 选拔做得更贴近长期稳定性
+    - 如果这步成立，下一轮最可能浮出的，不会是更激进的 profile，而是更平衡的 return-recovery 变体
+  - 假设：
+    - 同一 `seq2 + budget_v3` 家族内，存在一个比 `teacher_aux_return_recovery_v1` 更适合 confirmatory 长预算的 balanced 分支
+- 实施：
+  - 代码层：
+    - 在 `daily_research/continuous_policy/model_seq_v3.py` 新增：
+      - `teacher_aux_return_recovery_balanced_v2`
+      - `teacher_aux_return_recovery_stable_v2`
+    - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 新增：
+      - `search_profile = seq2_return_recovery_v2`
+      - `objective_profile = return_recovery_v2`
+      - `SEARCH_PROFILE_DEFAULT_OBJECTIVES`
+      - confirmatory 候选补位 `composite_runner_up`
+    - `return_recovery_v2` objective 显式加强对以下项的惩罚：
+      - 负 `annual_return`
+      - 负 `sharpe`
+      - 过深 `max_drawdown`
+      - 过差 `cash_timing_quality_1d`
+      - 过低 `trend_capture_rate_10d`
+  - 预检：
+    - `git status --short` 确认本轮只在 `model_seq_v3.py` 与 `run_self_optimizing_study.py` 上继续演进
+    - `run_self_optimizing_study.py --search-profile seq2_return_recovery_v2 --trial-count 4 --confirmatory-max-candidates 2 --dry-run`
+    - dry-run 已确认本轮 4 个筛选 trial 全部落在预期 family 内
+  - 正式执行：
+    - `study_tag = cp_v3_seq_self_opt_return_recovery_r2`
+    - `search_profile = seq2_return_recovery_v2`
+    - `objective_profile = return_recovery_v2`
+    - `trial_count = 4`
+    - `confirmatory_max_candidates = 2`
+- 结果：
+  - screening：
+    - `trial_01 = teacher_aux_return_recovery_v1`
+      - `annual_return = 0.1327`
+      - `sharpe = 0.9732`
+      - `max_drawdown = -0.0680`
+      - `reduce_success_rate_5d = 0.6364`
+      - `exit_timeliness_rate_5d = 0.5370`
+      - `cash_timing_quality_1d = -0.1243`
+      - `trend_capture_rate_10d = 0.3529`
+      - `training_evidence = insufficient`
+      - 成为本轮 screen performance / stability 双冠军
+    - 其余 family 也已完成 screening：
+      - `teacher_aux_return_recovery_stable_v2`
+      - `dual_channel_default_v1`
+      - `teacher_aux_return_recovery_balanced_v2`
+  - confirmatory：
+    - `confirm_01 = cp_v3_seq_self_opt_return_recovery_r2__confirm_01`
+      - 来源：`trial_01 = teacher_aux_return_recovery_v1`
+      - `training_evidence = sufficient`
+      - 但长预算下退化为：
+        - `annual_return = -0.1814`
+        - `sharpe = -1.6036`
+        - `max_drawdown = -0.0996`
+        - `reduce_success_rate_5d = 0.4737`
+        - `exit_timeliness_rate_5d = 0.6099`
+        - `cash_timing_quality_1d = -0.4792`
+      - 说明它仍是 screening-strong、confirmatory-fragile profile
+    - `confirm_02 = cp_v3_seq_self_opt_return_recovery_r2__confirm_02`
+      - 来源：`trial_04 = teacher_aux_return_recovery_balanced_v2`
+      - 角色：`composite_runner_up`
+      - `training_evidence = sufficient`
+      - 长预算结果为：
+        - `annual_return = 0.0906`
+        - `sharpe = 0.6595`
+        - `max_drawdown = -0.0804`
+        - `reduce_success_rate_5d = 0.5342`
+        - `exit_timeliness_rate_5d = 0.5000`
+        - `cash_timing_quality_1d = -0.1270`
+        - `trend_capture_rate_10d = 0.3906`
+        - `shadow_reversal_rate_3d = 0.0000`
+      - 成为本轮新的 confirmatory champion
+      - promotion 仍为 `shadow_only`
+      - failed checks：
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+        - `annual_return_vs_active`
+        - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - `return_recovery_v2` 没有把 study 推向更激进的短期冠军，反而把更能在 confirmatory 长预算下活下来的 `balanced_v2` 提到了冠军位
+    - `teacher_aux_return_recovery_balanced_v2` 是当前第一条在 confirmatory 下同时保住：
+      - 正 `annual_return`
+      - 正 `sharpe`
+      - `shadow_reversal_rate_3d = 0.0000`
+      的 return-recovery family 分支
+  - 推断：
+    - 当前最值得继续推进的已不再是 `teacher_aux_return_recovery_v1`
+    - 而是 `teacher_aux_return_recovery_balanced_v2` 这条更接近 confirmatory-stable 的分支
+    - 下一阶段主矛盾已经进一步压缩到：
+      - `exit_timeliness_rate_5d`
+      - `cash_timing_quality_1d`
+      - `max_drawdown`
+      - `annual_return_vs_active / sharpe_vs_active`
+  - 假设：
+    - 若后续继续沿最优路径推进，最高 ROI 会是围绕 `balanced_v2` 做更窄的 confirmatory repair，而不是重新扩大 objective 或回到手工 patch
+- 治理收口：
+  - study 完成后，`latest_train / latest_evaluation / latest_export / latest_protocol / latest_behavior_audit / latest_conclusion_ledger / runtime/portfolio_state.json`
+  - 已再次自动恢复到 `cp_v3_seq_holdcash_r1`
+  - 默认运行态未被任何新 trial 静默接管
+
+## 2026-04-16 trade plan 中 `policy_v5b` 分数/权重语义纠偏
+- 触发：
+  - 用户发现 `latest_trade_plan.txt` 里：
+    - 被买入的 `600021.SH / 601728.SH / 002027.SZ` 都显示负的“转权重前分数”
+    - 被卖出的 `600982.SH` 反而显示更高分
+  - 用户质疑“最佳权重”和“分数”是否互相矛盾
+- 动作前自检：
+  - 事实：
+    - `execution_aligned_daily_live_target_weight_panel.csv` 的 `2026-04-16` 非零权重确实是：
+      - `600021.SH / 601728.SH / 002027.SZ`
+    - `execution_aligned_daily_live_score_panel.csv` 同日对应分数里，这三只票确实是负数
+    - 代码里 `research_candidate_target_weight_csv + execution_preweight_score_panel` 的显示配置，原先把：
+      - `execution_proxy_source = ml_score`
+      - `execution_score_label = 转权重前分数`
+      直接拿去当 trade plan 主显示
+    - 但真实排序逻辑仍是：
+      - 先按 `target_weight`
+      - 再按 `final_score`
+  - 推断：
+    - 这是 trade plan 显示语义错误，不是模型真的“用负分票做正权重”
+    - 当前 live 路径里，上游 score 与桥接后的最终 target weight 不是同一个量
+  - 假设：
+    - 若把主显示切回真正参与执行排序的字段，并把 preweight score 降为参考项，用户看到的矛盾会消失
+- 实施：
+  - 修改 `daily_research/baseline/generate_daily_trade_plan.py`
+  - 对 `execution_preweight_score_panel` 改成：
+    - 主显示：`执行后排序值`
+    - 参考显示：`转权重前分数`
+  - 并新增一句显式说明：
+    - 最终执行以桥接后的目标权重与执行后排序值为准；转权重前分数只是上游参考，不保证与最终权重单调一致
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+- 结果：
+  - `latest_trade_plan.txt` 已改成：
+    - `执行排序口径: 先按目标权重，再按执行后排序值`
+    - 被买入的三只票现在显示：
+      - `目标权重 33.33% | 执行后排序值 0.3333 | 转权重前分数 ...`
+    - 被卖出的 `600982.SH` 现在显示：
+      - `目标权重 0.00% | 执行后排序值 0.0000 | 转权重前分数 0.4600`
+- 动作后复盘：
+  - 事实：
+    - 当前问题是展示误导，不是权重本身算错
+    - `execution_preweight_score_panel` 不能再直接当“最终买卖分数”解释
+  - 推断：
+    - 今后凡是 execution-aligned 多 sleeve / bridge 路径，都应优先看：
+      - `target_weight`
+      - `执行后排序值`
+    - 再把 `转权重前分数` 当上游线索
+
+## 2026-04-16 用户显式切换 live 默认执行到 `policy_v5b` recent strongest branch
+- 触发：
+  - 用户明确要求：不用 deployable 慢桥，直接切到 `policy_v5b` 的 recent 最强分支
+- 动作前自检：
+  - 事实：
+    - 当前 active manifest 与 `latest_trade_plan` 口径存在分叉：
+      - manifest 仍写 `state_liquidity_listwise_v1 + regoff_k1_5d`
+      - trade plan 实际展示成 `execution_aligned_live + regoff_k2_5d`
+    - `short_alpha_policy_v5_successor_recent_eval_20260412_r1/summary.json` 已明确：
+      - `recent_winner_profile_name = short_expert_policy_v5b`
+      - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+      - `recent_monthly_robust_score = 0.1200`
+    - 目标 run `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b` 已自带：
+      - `execution_aligned_daily_live_score_panel.csv`
+      - `execution_aligned_daily_live_target_weight_panel.csv`
+  - 推断：
+    - 最稳妥的切法不是手改 JSON，而是复用 `strategy_manifest.py` 的 builder 生成新的 `active_execution_strategy.json`
+  - 假设：
+    - 用户这次要的是显式 live 默认切换，不要求先补一轮新的 production full-fit
+- 实施：
+  - 用 `build_active_strategy_manifest(...)` 生成新的 active manifest：
+    - `strategy_name = short_expert_policy_v5b_recent_winner_active`
+    - `panel_mode = execution_aligned`
+    - `production_root = short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+  - 随后运行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+  - 让系统自动把该 run 的 execution-aligned live panel 刷新到 `2026-04-16`
+- 结果：
+  - `daily_research/output/active_execution_strategy.json` 已切成：
+    - `short_expert_policy_v5b_recent_winner_active`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+    - `effective_live_target_weight_mode = execution_aligned_live`
+  - `daily_research/execution/output/latest_trade_plan.txt` 已同步切成：
+    - `候选标签 = short_alpha_recent_model_protocol_20260412_r1__short_expert_policy_v5b__regoff_k1_3d_ensemble_native_anchor__active`
+    - `候选源信号日 = 2026-04-16`
+    - `候选信号新鲜度 = fresh`
+  - trade plan 当前建议动作变成：
+    - 卖出 `600982.SH`
+    - 买入 `600021.SH / 601728.SH / 002027.SZ`
+- 动作后复盘：
+  - 事实：
+    - 切换已真正落到 live 默认执行真源，而不是只停在建议层
+    - `project_consistency_check.py` 在切换后继续通过
+  - 推断：
+    - 当前 live 默认执行已经不再是 strongest-model overall mainline，而是用户显式指定的 `policy_v5b` recent fast bridge
+    - strongest-model 研究判决层与 live 默认执行层现在被有意分离
+  - 假设：
+    - 若后续用户改变偏好或实盘观察不满意，最自然的回滚点仍是：
+      - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
+## 2026-04-17 live 默认执行从 `policy_v5b` fast bridge 回切到 deployable anchor
+- 触发：
+  - 用户在复盘 `latest_trade_plan.txt` 后指出：
+    - `policy_v5b + regoff_k1_3d_ensemble_native_anchor` 下出现了明显不合理的 `3` 只平均 `33.33%` 聚合
+    - 要求把“之前得到的最强最合适模型”替换为执行默认
+- 动作前自检：
+  - 事实：
+    - 当前 active live 默认仍是 `short_expert_policy_v5b_recent_winner_active`
+    - `execution_alignment_profile = regoff_k1_3d_ensemble_native_anchor`
+    - prior constrained execution review 已明确给出：
+      - `family_best_variant = policy_v5b__k1_20d`
+      - `monthly_robust_score = 0.11767040627525917`
+    - `short_alpha_policy_v5b_bridge_sensitivity_audit_20260412_r1` 已明确写出：
+      - `Fast 3d bridge is the main tail-risk source under constrained replay`
+  - 推断：
+    - 当前 live 默认并不符合“最强最合适”的既有研究结论
+    - 应该从 recent strongest fast bridge 回切到 prior audit 已确认的 deployable anchor
+  - 假设：
+    - 用户此刻要的是“按既有研究证据选择最适合 live 默认的版本”，而不是继续保留先前显式指定的高攻击性 fast bridge
+- 实施：
+  - 用 `policy_v5b` formal/constrained run 直接作为 active live 真源，不做新的 production retrain
+  - 运行：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; ... refresh_live_panels_for_run(short_expert_policy_v5b formal run)`
+  - 用 `build_active_strategy_manifest(...)` 生成新的：
+    - `daily_research/output/active_execution_strategy.json`
+  - 关键字段切为：
+    - `strategy_name = short_expert_policy_v5b_deployable_anchor_active`
+    - `candidate_label = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+    - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+    - `selection_basis = constrained_deployable_anchor`
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/execution/run_trade_plan.py --candidate-profile active_execution_strategy`
+  - 额外纠偏：
+    - 把 manifest 里的 `production_manifest_json` 留空
+    - 把 `effective_live_*_note` 改成 deployable-anchor 语义，避免误写成 production full-fit
+- 结果：
+  - `active_execution_strategy.json` 当前已切为：
+    - `short_expert_policy_v5b_deployable_anchor_active`
+    - `execution_alignment_profile = regoff_k1_20d_ensemble_native_anchor`
+  - `latest_trade_plan.txt` 当前已同步切为：
+    - `候选标签 = short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+    - `信号日期 = 2026-04-16`
+    - `候选信号新鲜度 = fresh`
+  - 建议动作已不再是 fast bridge 的 `3` 只平均 `33.33%`：
+    - `600982.SH` 从清仓改为减仓保留 `5%`
+    - 新增：
+      - `600531.SH = 15%`
+      - `000555.SZ = 10%`
+      - 多只 `5%` 的慢桥分散持仓
+- 动作后复盘：
+  - 事实：
+    - 这次回切后，live 默认再次与 prior constrained execution review 的正式结论一致
+    - 当前 trade plan 的权重结构也重新回到更符合 `k1_20d` 慢桥语义的分散组合
+  - 推断：
+    - 先前 `policy_v5b` recent strongest branch 适合做高攻击性 live 试验，但不适合作为“之前得到的最强最合适模型”的长期默认
+  - 假设：
+    - 若后续用户再次显式要求回到 recent strongest fast bridge，应当把它视作偏好覆盖，而不是研究结论变更
+
+## 2026-04-17 execution 前端 leaderboard 安全修复
+- 触发：
+  - 用户指出执行侧前端的 `global-strategy-leaderboard` 看起来像只刷新榜单，但曾意外把默认执行切走，要求彻底修复并顺手优化相关前端设置
+- 动作前自检：
+  - 事实：
+    - 前端任务卡片文案只写“刷新可部署执行策略排行榜”，没有显式提示会改默认执行
+    - `run_global_deployable_strategy_leaderboard.py` 的 CLI 默认是 `activate_winner=True`
+    - 任务表单字段却错误绑定成 `--activate-best`，而脚本真正识别的是 `--activate-winner/--no-activate-winner`
+  - 推断：
+    - 之前即使用户不勾选任何危险开关，任务也会沿用脚本默认值，导致意外改写 `active_execution_strategy`
+  - 假设：
+    - 最有效修复不是只改文案，而是同时修脚本默认值、前端参数绑定和任务安全提示
+- 实施：
+  - 将 `run_global_deployable_strategy_leaderboard.py` 改成默认只读：`activate_winner=False`
+  - 在任务注册层为布尔字段加入 `false_arg_flag`，让未勾选状态也能显式传 `--no-activate-winner`
+  - 修正 `global-strategy-leaderboard` 的前端字段绑定为真实参数 `--activate-winner/--no-activate-winner`
+  - 任务页新增安全标记与说明：
+    - `默认只读`
+    - `会改默认`
+    - 选中任务时显示安全摘要
+- 验证：
+  - `build_passthrough_args_from_form(task_name='global-strategy-leaderboard', form_payload={'activate_winner': False})` 返回 `['--no-activate-winner']`
+  - `build_passthrough_args_from_form(..., {'activate_winner': True})` 返回 `['--activate-winner']`
+  - 直接运行 `run_global_deployable_strategy_leaderboard.py` 后，`active_execution_strategy.json` 的 SHA256 前后完全一致，确认默认只读生效
+- 动作后复盘：
+  - 事实：
+    - 这次修复后，用户再点 `global-strategy-leaderboard` 不会因为隐藏默认值而静默切走默认执行
+    - 前端也不再把“查看榜单”和“改默认执行”混成一个无提示动作
+  - 推断：
+    - 执行侧前端当前最危险的一处误导性交互已经被机制级消除，而不是只靠使用习惯规避
+  - 假设：
+    - 若后续继续新增会改 `active_execution_strategy` 的任务，应复用同样的安全分层和显式危险提示
+
+## 2026-04-17 self-opt return_recovery_r3 预置
+- 触发：
+  - 接管后复核发现：项目当前最新主线已经推进到 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02`
+  - 当前真正剩余失败项已收口到：
+    - `exit_timeliness_rate_5d = 0.5000`，仅略低于 gate `0.52`
+    - `cash_timing_quality_1d = -0.1270`
+    - `max_drawdown = -0.0804`
+    - `annual_return_vs_active / sharpe_vs_active`
+  - 同时又不能回到大范围搜索或高强度手工 patch
+- 动作前自检：
+  - 事实：
+    - `teacher_aux_return_recovery_balanced_v2` 是当前 confirmatory-stable challenger
+    - `teacher_aux_return_recovery_stable_v2` 在 screening 上更偏稳定，但没有被证明更适合 confirmatory 接管
+    - 当前 search profile `seq2_return_recovery_v2` 还没有一个明确位于 `balanced_v2 -> stable_v2` 之间的插值候选
+  - 推断：
+    - 最高 ROI 的下一步不是扩大搜索维度，而是只新增一个更窄的 loss-profile 插值候选
+    - 这样既能保持严格对照，也能把下一轮结论聚焦到“是否存在更好的 balanced/stable 折中”
+  - 假设：
+    - 通过略微提高 action hard 比重、略收紧 `gross_exposure / turnover` 预算，并保留 `budget_v3 + seq2` 骨架，有机会先把 `exit_timeliness_rate_5d / max_drawdown` 往 gate 推近，而不必立即牺牲全部收益质量
+- 实施：
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中新增：
+    - `teacher_aux_return_recovery_balanced_v3`
+  - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 中新增：
+    - `seq2_return_recovery_v3`
+  - 固定：
+    - 不扩 `universe`
+    - 不改 `decoder_profile = budget_v3`
+    - 不改 `sequence_layers = 2`
+    - 只继续搜索 `loss_profile`
+  - 同时把：
+    - dry-run 命令
+    - 正式 study 命令
+    - 治理边界
+    写回 brain 文档，避免后续接管把“实验预置”误读成“实验已完成”
+- 验证：
+  - 计划在补丁后先跑：
+    - `compileall`
+    - `project_consistency_check.py`
+    - `doc_guard.py check`
+    - `run_self_optimizing_study --search-profile seq2_return_recovery_v3 --dry-run`
+- 动作后复盘：
+  - 事实：
+    - 这次只完成了下一轮 focused self-opt 的代码预置与命令预置
+    - 当前 strongest temporal 锚点与 confirmatory champion 都没有被改写
+  - 推断：
+    - 后续如果 `balanced_v3` 仍不能同时改善 `exit / cash / drawdown`，就应优先承认这条 loss-profile 插值线收益有限，而不是继续无边界细磨
+  - 假设：
+    - 若 dry-run 与守卫都通过，这条预置就足够支撑下一轮最小充分实验，不需要再先做额外脚手架改造
+
+## 2026-04-17 continuous_policy 绑定设计合同与语义审计闭环
+- 触发：
+  - 用户明确收敛北极星：要构建的是“以日为单位进行连续决策的交易执行模型”，不依赖固定调仓频率、固定持有周期或人工执行桥接规则，而要让模型像成熟交易者一样，直接从市场全局状态、个股演化路径和持仓上下文中学习动态执行。
+  - 用户随后要求不要只停留在建议层，而是按最优计划把当前能完成的部分一次性完整交付。
+- 动作前自检：
+  - 事实：
+    - `daily_research/brain/identity_layer.md` 已把 continuous_policy 的目标写成“日频连续决策执行模型”，当前北极星本身没有偏移。
+    - `daily_research/continuous_policy/label_builder.py` 仍在大量生成 `teacher_signal / teacher_urgency / teacher_global_targets`，说明 teacher 仍不只是 warm-start prior。
+    - `daily_research/continuous_policy/model_seq_v3.py` 仍含有较强的组合预算与行为偏置脚手架，如 `gross_exposure_target / turnover_budget / hold_bias_target / exit_patience_target`。
+    - 旧版 `behavior_audit` 更偏 teacher-vs-model gap，对“model_action 是否在 execution layer 被重写”缺少直接量化。
+    - `cp_v3_seq_self_opt_return_recovery_r2__confirm_02` 的最新 confirmatory 结果仍为 `shadow_only`，并且剩余失败项已收口到 `cash_timing_quality_1d / exit_timeliness_rate_5d / max_drawdown / annual_return_vs_active / sharpe_vs_active`。
+  - 推断：
+    - 现在的关键问题不是继续堆更深模型或更大搜索，而是先把“动作语义、预算语义、执行翻译”三层彻底分清，否则收益提升会持续被结构性冲突吞掉。
+    - 如果不把这条判断沉淀成绑定合同与可复验审计，后续接管很容易又回到“继续磨 loss profile”而忽略真正的信用分配错位。
+  - 假设：
+    - 只要能把语义冲突量化出来，并把它正式纳入 protocol/ledger/brain 三层链路，后续研究就能从“模糊直觉”切到“有实证约束的结构改造”。
+- 实施：
+  - 新建 `daily_research/brain/continuous_policy_design_contract.md`，把以下内容正式固化成绑定设计合同：
+    - teacher 只是 warm-start / auxiliary prior，不是最终老师
+    - `cash timing` 不能主要依赖 teacher imitation
+    - 个股生命周期语义与组合预算语义必须分层
+    - execution layer 只能翻译，不应改写策略语义
+    - 评估必须使用 execution-aligned 可比口径
+  - 升级 `daily_research/continuous_policy/analyze_behavior_gap.py`：
+    - 新增 `semantic_conflicts` 审计块
+    - 量化 `semantic_conflict_rate / micro_rebalance_conflict_rate / budget_clipped_conflict_rate / high_cash_up_market_share / high_cash_down_market_share`
+    - 输出 top action-pair / conflict-pair 与针对性 `recommended_focus`
+  - 升级 `daily_research/continuous_policy/run_continuous_policy_protocol.py`：
+    - 在生成 conclusion ledger 之前，先把 `latest_behavior_audit` 写入 protocol summary
+  - 升级 `daily_research/continuous_policy/conclusion_ledger.py`：
+    - 如果 protocol 内嵌的旧版 behavior audit 缺少 `semantic_conflicts`，就优先回落到“同一 evaluation 且更新、且带语义冲突字段”的 latest behavior audit
+    - 让 stage-local 结论和 `next_actions` 能显式吸收 `semantic_conflict_rate`
+  - 写回：
+    - `daily_research/brain/state_center.md`
+    - `daily_research/brain/knowledge_center.md`
+    - `daily_research/brain/operations_center.md`
+- 验证：
+  - 运行：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary daily_research/output/continuous_policy/evaluations/cp_v3_seq_self_opt_return_recovery_r2__confirm_02__evaluate/evaluation_summary.json --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_audit`
+  - 实际得到的关键事实：
+    - `semantic_conflict_rate = 0.1636`
+    - `micro_rebalance_conflict_rate = 0.6158`
+    - `budget_clipped_day_share = 0.1515`
+    - `budget_clipped_conflict_rate = 0.0781`
+    - `unclipped_conflict_rate = 0.1882`
+    - `avg_budget_drop_count = 1192.0`
+    - `high_cash_up_market_share = 0.1364`
+    - `high_cash_down_market_share = 0.1212`
+    - top conflict pairs 包括：
+      - `add -> hold = 40`
+      - `reduce -> exit = 37`
+      - `hold -> reduce = 33`，且 `avg_forward_excess_5d ≈ 0.0308`
+      - `add -> reduce = 16`，且 `avg_forward_excess_5d ≈ 0.0273`
+  - 审计直接给出的诊断：
+    - `execution layer still rewrites model semantics non-trivially`
+    - `micro rebalancing still contaminates stock lifecycle semantics`
+  - 随后重跑：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.conclusion_ledger --protocol-summary daily_research/output/continuous_policy/protocols/cp_v3_seq_self_opt_return_recovery_r2__confirm_02/protocol_summary.json --tag cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_ledger_r2`
+  - 补丁后 ledger 已能稳定消费较新的同源 behavior audit，而不是被 protocol 里旧版 audit 静默覆盖。
+  - 守卫验证：
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m compileall -q daily_research`
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/tools/project_consistency_check.py`
+    - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/tools/doc_guard.py check`
+    均通过。
+- 动作后复盘：
+  - 事实：
+    - 这次不只是提出了“要拆语义层”的建议，而是已经把设计合同、审计工具、protocol 链路、ledger 回落逻辑和 brain 文档全部补齐。
+    - `confirm_02` 现在已有明确实证，证明问题不只是 `cash timing` 或 `exit` 指标低，而是 `execution_action` 仍在系统性改写 `model_action`。
+  - 推断：
+    - 当前 continuous_policy 的第一结构性矛盾，已经可以从“直觉判断”升级为“经审计证实的语义漂移问题”。
+    - 在这个问题被压下去之前，继续期待通过更强 loss-profile 微调获得大幅收益跃升，不符合现有证据。
+  - 假设：
+    - 如果后续把 execution layer 真正退回翻译器角色，并把 budget head 与 stock action head 分层，收益与结构之间的假矛盾有望显著缓解；但这一步还需要后续正式实验继续验证。
+
+## 2026-04-18 continuous_policy semantic_guard 执行层净化
+- 触发：
+  - 用户要求基于最优计划直接完整执行，不停留在建议层。
+  - 上一轮已确认当前第一结构性矛盾是 `model_action -> execution_action` 被执行层改写，且 `confirm_02` 旧审计的 `semantic_conflict_rate = 0.1636`。
+- 动作前自检：
+  - 事实：
+    - `PortfolioState.step()` 是真实改写路径：模型先输出 `action_label`，然后组合预算、候选预算和 turnover 预算通过目标权重变化推导出 `execution_action`。
+    - 旧 action panel 没有稳定区分“策略语义”和“真实权重变化”，导致 `hold -> reduce` 这类微幅再平衡被记成生命周期减仓。
+    - 只把 `execution_action` 改成等于 `model_action` 会制造假好看，因为真实订单层仍可能在反向变化。
+  - 推断：
+    - 必须做“双账本”：`execution_action` 记录模型生命周期语义，`weight_change_action` 记录真实权重变化。
+    - 必须把部分语义保护前移到权重翻译层，直接阻止低风险、微幅、反向的无意义变化，而不是只在事后改标签。
+  - 假设：
+    - 如果当前主要污染来自微幅再平衡，那么语义保护应能显著降低 `semantic_conflict_rate` 与 `order_translation_conflict_rate`，同时不应破坏收益。
+- 实施：
+  - 修改 `daily_research/continuous_policy/portfolio_simulator.py`：
+    - 新增 `execution_semantics`
+    - 新默认 `semantic_preserving_v1`
+    - 保留旧口径 `legacy_weight_derived`
+    - 新增 `weight_change_action`
+    - 新增 `semantic_delta_guarded`
+    - 新增 `semantic_translation_reason`
+    - 对 `hold -> small reduce`、`add -> small reduce`、`reduce -> small add` 等低风险微幅反向变化做权重层保护
+  - 修改 `daily_research/continuous_policy/pipeline_utils.py`：
+    - `build_training_matrices` 与 `run_policy_rollout` 接入 `execution_semantics`
+    - rollout metrics 新增 `weight_change_action_counts`
+  - 修改 CLI 链路：
+    - `train_policy.py`
+    - `evaluate_policy.py`
+    - `export_action_panel.py`
+    - `run_continuous_policy_protocol.py`
+    - `run_self_optimizing_study.py`
+    均接入 `--execution-semantics`
+  - 修改 `analyze_behavior_gap.py`：
+    - 保留 `semantic_conflict_rate`
+    - 新增 `order_translation_conflict_rate`
+    - 新增 `budget_clipped_order_translation_conflict_rate`
+    - 新增 `top_order_translation_conflict_pairs`
+  - 修改 `conclusion_ledger.py`：
+    - 将“执行层语义改写”和“权重翻译偏离策略意图”拆成两个阶段性结论
+  - 写回：
+    - `continuous_policy_design_contract.md`
+    - `state_center.md`
+    - `knowledge_center.md`
+    - `operations_center.md`
+- 验证：
+  - 先运行 `compileall`，发现并修复一个旧隐患：
+    - `budget_dropped = ~desired_strength.index.isin(keep)` 会产生 numpy array
+    - 已改为显式 `pd.Series(..., index=desired_strength.index)`
+  - 第一次只做语义双账本、未做权重层保护时，同窗结果为：
+    - `annual_return = -0.0420`
+    - `sharpe = -0.2113`
+    - `semantic_conflict_rate = 0.0000`
+    - `order_translation_conflict_rate = 0.7896`
+    - 结论：只净化标签不够，订单层仍严重偏离模型意图
+  - 加入权重层 `semantic_delta_guard` 后，对 `confirm_02` 同窗重评估得到：
+    - `run_tag = cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_eval`
+    - `annual_return = 0.1672`
+    - `sharpe = 1.0340`
+    - `max_drawdown = -0.0918`
+    - `avg_turnover = 0.0873`
+    - `reduce_success_rate_5d = 0.5833`
+    - `exit_timeliness_rate_5d = 0.4444`
+    - `cash_timing_quality_1d = -0.1934`
+    - `immediate_reversal_rate_3d = 0.1647`
+  - 新审计 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_audit` 得到：
+    - `semantic_conflict_rate = 0.0000`
+    - `order_translation_conflict_rate = 0.2328`
+    - `small_delta_order_translation_conflict_rate = 0.1642`
+    - `budget_clipped_order_translation_conflict_rate = 0.2336`
+    - top 剩余偏离为：
+      - `add -> hold = 87`
+      - `hold -> add = 17`
+      - `reduce -> exit = 16`
+      - `hold -> reduce = 11`
+      - `add -> reduce = 8`
+- 动作后复盘：
+  - 事实：
+    - `semantic_guard` 已把旧的执行语义改写问题压到 `0`
+    - 权重层保护把未保护状态下的 `order_translation_conflict_rate = 0.7896` 压到 `0.2328`
+    - 相比旧 `confirm_02`，同窗 `annual_return / sharpe / reduce_success / avg_turnover / immediate_reversal` 均改善
+    - 但 `exit_timeliness / cash_timing / max_drawdown` 仍未达 promotion 要求
+  - 推断：
+    - 这轮证明“执行层语义净化”是必要且有效的结构地基
+    - 它同时证明下一瓶颈已经转移到预算/现金/退出校准，不应继续把所有问题归咎于语义改写
+  - 假设：
+    - 下一轮如果对 budget/cash 层做结果驱动校准，有机会在保住 `semantic_conflict_rate = 0` 的前提下，继续修复 `cash_timing_quality_1d / exit_timeliness_rate_5d / max_drawdown`
+    - 但在这些指标过线前，`semantic_guard` 只能作为结构性进展，不能作为 promotion 结论
+
+## 2026-04-18 continuous_policy budget split ablation
+- 触发：
+  - 用户要求基于“先净化 execution，再拆 action/budget，再做四格对照”的方案直接完整执行。
+- 动作前自检：
+  - 事实：
+    - `semantic_guard` 已经把 `semantic_conflict_rate` 压到 `0`，但 `order_translation_conflict_rate / cash_timing_quality_1d / exit_timeliness_rate_5d` 仍未解决。
+    - 旧执行器的 candidate budget 会裁剪全体目标强度，可能把已有持仓生命周期动作和新开仓预算混在一起。
+  - 推断：
+    - 下一步最有效的不是继续调 loss，而是把预算层做成显式可审计口径，并跑同窗 ablation。
+  - 假设：
+    - 如果预算层吞动作语义是主要矛盾，`action_budget_split_v1` 应该在不牺牲收益的前提下降低订单漂移；如果旧模型未按新语义训练，则可能先出现结构干净但收益变差。
+- 实施：
+  - 在 `portfolio_simulator.py` 新增：
+    - `budget_semantics = legacy_total_candidate / action_budget_split_v1`
+    - `budget_calibration = none / cash_exit_guard_v1`
+    - `budget_risk_off_score / budget_deploy_score / budget_entry_candidate_count / budget_entry_keep_count / budget_held_protected_count / budget_split_bound_guard_count`
+  - 在 `pipeline_utils.py`、`train_policy.py`、`evaluate_policy.py`、`export_action_panel.py`、`run_continuous_policy_protocol.py`、`run_self_optimizing_study.py` 串起 `--budget-semantics` 与 `--budget-calibration`。
+  - 在 `run_self_optimizing_study.py` 新增 `budget_layer_ablation_v1`，允许训练级搜索 `legacy_total_candidate / action_budget_split_v1 / cash_exit_guard_v1`。
+  - 在 `analyze_behavior_gap.py` 增加预算口径计数和预算层诊断字段。
+- 同窗验证：
+  - `semantic_guard + legacy_total_candidate`：
+    - `annual_return=0.1672`, `sharpe=1.0340`, `max_drawdown=-0.0918`
+    - `reduce_success_rate_5d=0.5833`, `exit_timeliness_rate_5d=0.4444`, `cash_timing_quality_1d=-0.1934`
+    - `semantic_conflict_rate=0.0000`, `order_translation_conflict_rate=0.2328`
+  - `semantic_guard + action_budget_split_v1`：
+    - `annual_return=0.0384`, `sharpe=0.3074`, `max_drawdown=-0.0923`
+    - `reduce_success_rate_5d=0.5313`, `exit_timeliness_rate_5d=0.3333`, `cash_timing_quality_1d=-0.1844`
+    - `immediate_reversal_rate_3d` 从 `0.1647` 降到 `0.1009`
+  - `semantic_guard + action_budget_split_v1 + cash_exit_guard_v1`：
+    - `annual_return=-0.0023`, `sharpe=0.0642`, `max_drawdown=-0.0977`
+    - `reduce_success_rate_5d=0.5200`, `exit_timeliness_rate_5d=0.4706`, `cash_timing_quality_1d=-0.2025`
+    - `risk_off_cash_hit_rate` 升到 `0.5294`
+- 动作后复盘：
+  - 事实：
+    - 预算分层是已落地能力，但旧模型同窗 rollout 直接切换会压低收益。
+    - `cash_exit_guard_v1` 改善局部风险命中和 exit/reversal，但没有解决现金择时相关性。
+  - 推断：
+    - 结构和收益的矛盾来自训练信用分配不匹配：旧模型是在旧预算语义下学到的，推理期强行换预算语义会暴露 action head 的错误，而不是自动提升收益。
+  - 决策：
+    - 当前默认预算口径保留 `legacy_total_candidate`。
+    - `action_budget_split_v1` 进入训练级 ablation，而不是直接 promotion。
+    - 下一轮若要真正验证 P2，必须训练 `budget_layer_ablation_v1`，不能只继续手工调现金 guard。
+
+## 2026-04-18 continuous_policy budget_layer_ablation_r2 前台训练级交付
+- 触发：
+  - 用户要求继续下一步并完整交付，随后明确要求关闭后台训练进程并换到前台执行。
+- 动作前自检：
+  - 事实：后台 `cp_v3_budget_layer_ablation_r1` 已开始但未完成，关闭后会污染同 tag 的 `trial_01`。
+  - 推断：若继续沿用 r1，会把人为中断误写成研究失败；必须用新 tag 干净重跑。
+  - 假设：前台 10h 窗口足够完成 4 个 screening + 2 个 confirmatory。
+- 执行：
+  - 按用户要求关闭了匹配 `cp_v3_budget_layer_ablation_r1` 命令行的训练进程，未触碰其它 Python 进程。
+  - r1 前台补跑完成但 `trial_01=failed`，因此仅保留为中断痕迹。
+  - 恢复 latest evaluation/audit 到 `cp_v3_seq_self_opt_return_recovery_r2__confirm_02__semantic_guard_legacy_budget_eval/audit`。
+  - 以前台执行 `cp_v3_budget_layer_ablation_r2`，完成全部正式对照。
+- 结果事实：
+  - `r2` screening performance champion：`trial_02 = action_budget_split_v1 + cash_exit_guard_v1`，`annual_return=1.2597`，`sharpe=2.8915`，但 `training_evidence_status=insufficient`。
+  - `r2` confirmatory champion：`confirm_01`，同配置 64 epoch 后 `annual_return=0.3124`，`sharpe=1.7115`，`max_drawdown=-0.0599`，但 `exit_timeliness_rate_5d=0.3333`，`cash_timing_quality_1d=-0.1670`，仍 `shadow_only`。
+  - `r2` confirmatory baseline：`confirm_02 = legacy_total_candidate + none`，`training_evidence_status=sufficient`，但 `annual_return=-0.0402`，`sharpe=-0.2210`。
+- 动作后复盘：
+  - 事实：P2 已从同窗切换推进到训练级 ablation，证明 split+cash 有潜力但尚不稳定。
+  - 推断：当前瓶颈已不是“能否拆预算语义”，而是“预算/value/head 的结果信用分配是否学稳”。
+  - 决策：不 promotion r2；稳定默认继续保留 `semantic_preserving_v1 + legacy_total_candidate + none`；下一阶段应优先接入 alpha prior 或结果驱动 budget/value objective。
+
+## 2026-04-18 continuous_policy alpha prior + result/value budget r1 落地
+- 触发：
+  - 用户要求基于上一轮方案继续一次性交付，并强调当前目标是日频连续决策交易执行模型，不要回到固定桥接规则或纯建议。
+- 动作前自检：
+  - 事实：
+    - `cp_v3_budget_layer_ablation_r2` 已证明 `action_budget_split_v1 + cash_exit_guard_v1` 有收益潜力但 confirmatory 仍 `shadow_only`。
+    - 当前稳定默认仍是 `semantic_preserving_v1 + legacy_total_candidate + none`。
+    - active manifest 已暴露 policy_v5b 的 score panel 与 target_weight panel，可作为 alpha prior。
+    - seq_v3 daily controller 当前只有 5 个预算输出头，直接扩 head 会破坏旧 artifact 兼容性。
+  - 推断：
+    - 最高 ROI 是先把 `deep_alpha/policy_v5b` 的强 alpha 作为可观测机会先验接入，再用结果驱动目标修正预算信用分配。
+    - 第一版不应新增 controller head，而应通过状态特征、既有五个预算目标和 loss profile 完成兼容落地。
+  - 假设：
+    - 如果收益差距主要来自“从零学习机会识别 + 预算信用分配错位”，则 active alpha prior + result_value budget 应在正式训练中改善收益与现金/退出质量。
+- 实施：
+  - `state_builder.py`
+    - 新增 `alpha_prior_source`、`alpha_prior_score_panel`、`alpha_prior_target_weight_panel`。
+    - 新增 `alpha_prior_score_raw / score_z / rank_pct / target_weight / selected / deltas / coverage` 状态帧与日频汇总。
+    - `active_execution_strategy` 自动读取 active manifest 的 score/target_weight panel。
+  - `label_builder.py`
+    - 将 alpha prior 作为机会支持项进入 `momentum / action_signal / entry_quality / hold_quality / add_quality / reduce_quality`。
+  - `pipeline_utils.py`
+    - 新增 `budget_objective = teacher_imitation / result_value_v1`。
+    - `result_value_v1` 用未来 edge/opportunity/downside、alpha alignment、risk/sell pressure 调整既有 `gross_exposure_target / candidate_budget / turnover_budget / max_position_weight_target / hold_bias_target`。
+  - `model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_v1` loss profile。
+    - strict resume signature 升级为 `seq_v3_alpha_result_value_budget_r1`。
+  - CLI 链路：
+    - `train_policy.py / evaluate_policy.py / export_action_panel.py / run_continuous_policy_protocol.py / run_self_optimizing_study.py` 均已接入 alpha prior 参数。
+    - `train/evaluate/protocol/run_self` 接入 `--budget-objective`。
+  - 新增反事实入口：
+    - `daily_research/continuous_policy/run_execution_counterfactuals.py`
+    - 固定模型比较 `legacy_total_candidate / action_budget_split_v1 / cash_exit_guard_v1` 执行层影响，输出 ranking 与各 variant 面板。
+  - 新增 study profile：
+    - `alpha_result_value_budget_r1`
+    - 四格对照：无 alpha + teacher、active alpha + teacher、无 alpha + result_value、active alpha + result_value。
+- 验证：
+  - `C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m compileall -q daily_research/continuous_policy` 通过。
+  - 默认 shell `python` 缺 `pandas`，被确认为环境偏差；按项目规则切回显式 `yolos`。
+  - 首次 dry-run 遇到 Windows/OpenMP `libiomp5md.dll already initialized`，按既有经验仅对验证命令临时设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - dry-run 通过命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1__dry_run --dry-run`
+  - dry-run 展开事实：
+    - `trial_count=4`
+    - baseline 为 `alpha_prior_source=none + budget_objective=teacher_imitation`
+    - 其余三格分别覆盖 `active_execution_strategy + result_value_v1`、`active_execution_strategy + teacher_imitation`、`none + result_value_v1`
+  - 真实数据 smoke 通过：
+    - `max_universe_size=40`
+    - `20251103-20260213`
+    - `alpha_prior_source=active_execution_strategy`
+    - `budget_objective=result_value_v1`
+    - `alpha_status=loaded`
+    - `alpha_coverage_mean=1.0`
+    - `alpha_selected_count_mean=0.465753`
+    - `sample_rows=2120`
+    - `daily_rows=53`
+    - `feature_has_alpha=True`
+    - 既有 5 个 daily target columns 齐全。
+- 动作后复盘：
+  - 事实：
+    - 这次已经完成可运行入口、训练目标、alpha 特征、study profile、反事实工具与文档写回。
+    - 尚未启动正式 10h 训练；当前证据只证明链路可运行，不证明收益已提升。
+  - 推断：
+    - 当前路线已经从“修语义/拆预算”推进到“机会先验 + 结果价值预算目标”的信用分配阶段。
+    - 若正式 study 仍无法改善收益，则下一步才应考虑更显式的 value head/offline RL，而不是继续人工 cash guard。
+  - 决策：
+    - 下一次正式执行应使用新 tag `cp_v3_alpha_result_value_budget_r1`，不要覆盖 r2。
+    - 继续遵守用户规则：训练窗口统一 10h；不要中断无关训练。
+
+## 2026-04-18 cp_v3_alpha_result_value_budget_r1 正式 study 与反事实复盘
+- 触发：
+  - 在完成实现、dry-run、smoke 与守卫后，按用户“训练窗口统一 10h、前台执行、不只给建议”的规则继续启动正式 study。
+- 动作前自检：
+  - 事实：
+    - `Get-Process python,pythonw` 未发现正在运行的 Python 训练进程。
+    - `yolos` 是项目唯一有效解释器；裸 `python` 缺 `pandas`。
+  - 推断：
+    - 可以启动前台 study，不会中断已有训练。
+  - 假设：
+    - 10h 窗口足够完成 4 screening + 2 confirmatory。
+- 执行：
+  - 正式命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile alpha_result_value_budget_r1 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_alpha_result_value_budget_r1`
+  - 结果文件：
+    - `daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_alpha_result_value_budget_r1/trial_ranking.csv`
+  - 运行事实：
+    - 用时约 64 分钟。
+    - `latest_state_restored=true`。
+    - `confirmatory_completed_trial_count=2`。
+- 正式结果事实：
+  - screening 冠军：
+    - `trial_02 = active_execution_strategy + result_value_v1`
+    - `annual_return=2.8597648652`
+    - `sharpe=5.0897803152`
+    - `max_drawdown=-0.0518498473`
+    - `reduce_success_rate_5d=0.59375`
+    - `exit_timeliness_rate_5d=0.5555555556`
+    - `cash_timing_quality_1d=-0.2318420741`
+    - `training_evidence_status=insufficient`
+    - `promotion_status=shadow_only`
+  - screening baseline：
+    - `trial_01 = none + teacher_imitation`
+    - `annual_return=0.9151075764`
+    - `sharpe=2.3006946907`
+    - `cash_timing_quality_1d=-0.2428994547`
+    - `promotion_status=shadow_only`
+  - confirmatory active+result：
+    - `confirm_01 = active_execution_strategy + result_value_v1`
+    - `annual_return=-0.0491195330`
+    - `sharpe=-0.0237242857`
+    - `max_drawdown=-0.1352626456`
+    - `reduce_success_rate_5d=0.6129032258`
+    - `exit_timeliness_rate_5d=0.5`
+    - `cash_timing_quality_1d=-0.3185323813`
+    - `promotion_status=shadow_only`
+  - confirmatory no-alpha teacher：
+    - `confirm_02 = none + teacher_imitation`
+    - `annual_return=0.1339029638`
+    - `sharpe=0.5899171432`
+    - `max_drawdown=-0.1464942375`
+    - `reduce_success_rate_5d=0.7391304348`
+    - `exit_timeliness_rate_5d=0.4545454545`
+    - `cash_timing_quality_1d=-0.2400597945`
+    - `promotion_status=shadow_only`
+- 反事实执行：
+  - 命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_execution_counterfactuals --model-path daily_research/output/continuous_policy/models/cp_v3_alpha_result_value_budget_r1__confirm_01__train/continuous_policy_v3_seq_artifact.pt --pool-name learned_all_a --max-universe-size 1200 --start-date 20260102 --end-date 20260417 --benchmark 000300.SH --data-source tq --tag cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals`
+  - 输出：
+    - `daily_research/output/continuous_policy/analysis/counterfactuals/cp_v3_alpha_result_value_budget_r1__confirm_01__exec_counterfactuals/counterfactual_ranking.csv`
+  - 关键事实：
+    - legacy/default：`annual_return=0.0984`，`sharpe=0.4781`，但 `avg_semantic_conflict_rate=0.6429`，`avg_order_translation_conflict_rate=0.8560`。
+    - split + cash：`annual_return=-0.0491`，`sharpe=-0.0237`，`avg_semantic_conflict_rate=0.0037`，`avg_order_translation_conflict_rate=0.4564`。
+    - split + none：`annual_return=-0.3240`，`sharpe=-1.0363`。
+- 动作后复盘：
+  - 事实：
+    - `active alpha + result_value` 明显提升了 screening 表现，但 confirmatory 失败，不能 promotion。
+    - legacy 预算可制造较好收益表象，但语义污染极重，不符合北极星合同。
+    - split/cash 能保持语义干净，却不能保证收益稳定。
+  - 推断：
+    - 结构与收益的矛盾没有消失，只是从“执行层改写动作”推进到了“训练信用分配/confirmatory 泛化/cash timing”。
+    - alpha prior 方向有信号价值，但当前 r1 目标仍过于不稳，尤其现金时机仍负。
+  - 决策：
+    - 不 promotion `cp_v3_alpha_result_value_budget_r1`。
+    - 不回退到语义污染的 legacy 收益表象作为胜利结论。
+    - 下一轮应聚焦 `cash_timing_quality_1d` 的结果目标、训练证据充分性和 active alpha 的稳定融合，而不是单纯继续放大模型或延长同一 r1。
+
+## 2026-04-18 split heads cash timing v2 实施记忆
+- 背景：
+  - 用户要求不要再停留在规划层，而是直接把“alpha 只做机会先验、lifecycle 与 budget 真分头、现金时机单独作为核心问题”的方案落成可运行实现。
+- 关键动作：
+  - 在 `label_builder.py` 中把 teacher/global daily target 从 5 项扩展到 8 项控制目标，并为预算学习加入 4 项辅助信号目标。
+  - 在 `pipeline_utils.py` 中新增 `budget_objective=result_value_v2`，把 `cash_timing_score / reentry_guard_score / opportunity_concentration / risk_deploy_gap` 等结果驱动信号映射到训练目标。
+  - 在 `model_seq_v3.py` 中落地 `daily_head_layout=split_v2`，把 daily controller 拆为 exposure / deployment / lifecycle / signal 四类子头，并让评估 artifact 显式记录 `daily_head_layout`。
+  - 在 `portfolio_simulator.py` 与 `evaluate_policy.py` 中把预算模型输出写入 turnover diagnostics 与 evaluation summary，支持模块级 timing 审计。
+  - 在 `train_policy.py`、`run_continuous_policy_protocol.py`、`run_self_optimizing_study.py` 中打通 `--daily-head-layout` 参数，并新增 study profile `split_heads_cash_timing_r1`。
+  - 在 `pipeline_utils.py` 中增加 `_safe_corrcoef`，修复近常数序列下相关性计算 warning。
+- 动作后验证：
+  - dry-run：`split_heads_cash_timing_r1` 四格试验计划生成成功，证明 study plumbing 已打通。
+  - smoke train：`cp_split_heads_cash_timing_smoke_train_r2` 成功生成 artifact，且诊断中明确显示 `daily_head_layout=split_v2`、`supports_extended_budget_heads=true`。
+  - smoke eval：`cp_split_heads_cash_timing_smoke_eval_r2` 得到 `annual_return=0.0092`、`sharpe=0.1892`、`cash_timing_quality_1d=-0.0033`、`avg_semantic_conflict_rate=0.0`、`avg_order_translation_conflict_rate=0.1518`。
+  - smoke audit：`cp_split_heads_cash_timing_smoke_audit_r2` 明确指出 `cash_timing_not_learned` 为高优先级失败项，`shadow_reversal_still_high` 与 `order_translation_drift` 为中优先级失败项。
+  - warning 复验：`cp_split_heads_cash_timing_smoke_eval_r3` 无 numpy 相关性 warning，但 `cash_timing_quality_1d=-0.1587`，说明问题没有被技术噪声掩盖。
+- 复盘：
+  - 事实：
+    - 这轮已经把“多结构分工”从概念推进到模型级实现，且动作语义保持干净。
+    - `result_value_v2` 与 split heads 已可训练、可评估、可做 self-optimizing study。
+    - cash timing、reversal 与 translation drift 仍是当前主瓶颈。
+  - 推断：
+    - 真正卡点不再是“结构是否分开”，而是“分开后 budget/value 学习是否真的拿到长期信用分配”。
+    - 继续回退到 monolithic 或继续叠加人工 guard，都只会掩盖而不是解决问题。
+  - 决策：
+    - 保留 `split_heads_cash_timing_r1` 为下一条正式 10h 前台 study 主线。
+    - 不把 smoke 结果误写为 promotion 证据。
+    - 下一轮若继续实现，应优先打 `cash timing` 与 `translation drift`，而不是再做大规模结构扩张。
+
+## 2026-04-18 split heads cash timing v2 正式 study 记忆
+- 动作：
+  - 直接以前台方式完成正式 study：`cp_v3_split_heads_cash_timing_r1`
+  - study 配置为 4 screening + 2 confirmatory，核心变量只比较 `budget_objective = teacher_imitation / result_value_v2` 与 `alpha_prior_source = none / active_execution_strategy`，统一 `daily_head_layout=split_v2`
+  - 追加 champion 行为审计：`cp_v3_split_heads_cash_timing_r1__confirm_01__behavior_audit`
+- 关键结果：
+  - 最优 screening 与 confirmatory 都是 `active_execution_strategy + result_value_v2 + split_v2`
+  - 冠军 `cp_v3_split_heads_cash_timing_r1__confirm_01`：
+    - `annual_return=0.9918`
+    - `sharpe=3.4369`
+    - `max_drawdown=-0.0536`
+    - `reduce_success_rate_5d=0.6038`
+    - `exit_timeliness_rate_5d=0.5833`
+    - `cash_timing_quality_1d=-0.1861`
+    - `semantic_conflict_rate=0.0108`
+    - `order_translation_conflict_rate=0.2366`
+    - `training_evidence_status=insufficient`
+  - `confirm_02 = active alpha + teacher_imitation + split_v2` 作为 runner-up：
+    - `annual_return=0.5271`
+    - `sharpe=1.8304`
+    - `cash_timing_quality_1d=-0.2853`
+    - `order_translation_conflict_rate=0.4220`
+- 审计结论：
+  - `cash_timing_not_learned` 仍是高优先级失败项，且 `budget_model_cash_timing_quality_1d=-0.1775`
+  - `order_translation_drift` 为中优先级失败项，核心冲突仍集中在 `hold -> add` 与 `add -> hold`
+  - 相比旧 r1，当前结果说明“结构分头 + active alpha + result budget”已经能恢复更可用的收益/回撤组合，但并没有学会真正稳定的现金时机
+- 复盘：
+  - 事实：
+    - 这轮已经把“结构合理但收益不稳”的问题推进到更窄的核心：`cash timing` 和 `translation drift`
+    - confirmatory 没有崩成负收益，说明 split 主线比上一轮更接近正确方向
+    - 但 promotion 仍不成立，不能把“正收益”误当成“北极星完成”
+  - 推断：
+    - 当前已经不需要再争论是否要分头；这个问题已被实证回答
+    - 真正剩下的难点是 budget/value 的长期信用分配，而不是结构骨架
+  - 决策：
+    - 把 `active alpha + result_value_v2 + split_v2` 记为当前最优主线
+    - 不 promotion
+    - 下一轮优先修 `cash timing` 和 `translation drift`，不要回退到 monolithic 或 legacy 表象收益
+
+## 2026-04-18 translation guard v2 实施记忆
+- 背景：
+  - 上一轮已经确认 `split_v2` 是正确结构方向，但主瓶颈缩到 `cash timing` 与 `order translation drift`
+  - 因此这轮不再扩结构，而是同时推进两件事：强化 `cash timing` 目标本身，以及把执行层进一步收回到纯翻译器
+- 关键动作：
+  - 在 `pipeline_utils.py` 中新增 `budget_objective=result_value_v3`，加强 `cash_timing_score` 对风险、risk-deploy gap 与 downside regime 的响应
+  - 在 `model_seq_v3.py` 中新增 `alpha_result_value_budget_split_v3`，提升 daily 预算头尤其是 `budget_cash_timing_signal_target` 的损失权重
+  - 在 `portfolio_simulator.py` 中新增 `budget_calibration=cash_translation_guard_v2`
+  - 新翻译器核心语义：
+    - `hold` 默认锁仓，不再静默变成加减仓
+    - `open/add` 必须留下可见的正向权重变化
+    - `reduce/exit` 必须留下可见的负向权重变化
+  - 在 `run_self_optimizing_study.py` 中新增 `split_heads_cash_timing_r2`，只围绕 `result_value_v2 / result_value_v3` 与 `cash_exit_guard_v1 / cash_translation_guard_v2` 做四格对照
+- smoke 结果：
+  - `cp_split_heads_cash_timing_smoke_eval_r4`
+  - `cash_timing_quality_1d=0.1278`
+  - 但 `annual_return=-0.0476`、`avg_gross_exposure=0.1574`、`order_translation_conflict_rate=0.5357`
+  - 复盘：新目标有把现金时机推正的潜力，但当前组合会过度收缩，不能直接上正式主线
+- 正式 study 结果：
+  - screening 最优：`trial_02 = result_value_v3 + cash_translation_guard_v2`
+    - `annual_return=1.2183`
+    - `sharpe=3.1359`
+    - `order_translation_conflict_rate=0.0534`
+    - `cash_timing_quality_1d=-0.1319`
+  - confirmatory：
+    - `confirm_01 = result_value_v3 + cash_translation_guard_v2` 崩到 `annual_return=0.1101`、`sharpe=0.5080`、`max_drawdown=-0.1766`
+    - 最终冠军 `confirm_02 = result_value_v2 + cash_translation_guard_v2`
+      - `annual_return=1.3904`
+      - `sharpe=3.7228`
+      - `max_drawdown=-0.0709`
+      - `cash_timing_quality_1d=-0.1555`
+      - `order_translation_conflict_rate=0.0801`
+      - `training_evidence_status=insufficient`
+- champion 行为审计：
+  - `cp_v3_split_heads_cash_timing_r2__confirm_02__behavior_audit`
+  - 高优先级失败项：
+    - `reduce_too_early_or_wrong_side`
+    - `cash_timing_not_learned`
+    - `budget_action_entanglement`
+  - 中优先级失败项：
+    - `order_translation_drift`
+  - 关键事实：
+    - `budget_model_cash_timing_signal` 仍接近 0
+    - `budget_clipped_order_translation_conflict_rate` 高于 `unclipped`
+    - `hold -> add` 这一类冲突显著下降，但 `add -> hold`、`open -> reduce/add` 仍然存在
+- 复盘：
+  - 事实：
+    - 真正被正式证明有效的是 `cash_translation_guard_v2`，因为它把 `order_translation_conflict_rate` 从 r1 的 `0.2366` 压到 r2 champion 的 `0.0801`
+    - `result_value_v3` 有 screening 价值，但 confirmatory 没有站住
+    - `cash timing` 仍然没有真正学会，负值幅度有所收窄但没有过线
+  - 推断：
+    - 下一轮不需要再争论要不要强化翻译层，这个方向已被证明有用
+    - 新的主矛盾已经进一步缩成：`cash timing` 的长期信用分配，以及 `reduce` 何时做、对谁做
+  - 决策：
+    - 更新当前最优主线为 `active alpha + split_v2 + result_value_v2 + cash_translation_guard_v2`
+    - 不 promotion `cp_v3_split_heads_cash_timing_r2`
+    - 不让 `result_value_v3` 取代 `result_value_v2`
+    - 下一轮优先打 `cash timing` 与 `reduce wrong-side`，而不是再扩结构
+## 2026-04-19 split heads cash timing r3 实施与复盘
+- 触发：
+  - 用户要求继续下一轮，并强调直接一次性执行、完整交付，不停留在建议。
+  - 继承上一轮结论：主矛盾已经从“是否分头/是否语义净化”推进到 `cash timing` 与 `reduce wrong-side / sell selection` 的信用分配。
+- 动作前自检：
+  - 事实：
+    - 用户规则要求训练窗口统一 10h，且不要中断任何训练。
+    - 当前项目解释器仍应使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，裸 `python` 缺 `pandas`，不能作为验证依据。
+    - r2 当前最优可继承主线是 `active alpha + split_v2 + result_value_v2 + cash_translation_guard_v2`，但 `cash_timing_quality_1d` 与 wrong-side reduce 仍未解决。
+  - 推断：
+    - 继续单纯加 loss 权重或扩大模型不会解决“该卖谁”和“何时留现金”的目标错配。
+    - 最高 ROI 是把真实 future benchmark outcome 接入 budget objective，并显式审计 sell-side selection。
+  - 假设：
+    - 如果训练目标能看到真实 benchmark downside 与持仓卖出归因，cash/sell 学习入口会被打开；但正式 promotion 仍必须由 confirmatory 决定。
+- 关键实现：
+  - 在 `label_builder.py` 中新增真实 `forward_benchmark_return_1d/3d/5d/10d/20d`，并加入 label-only 训练链路。
+  - 在 `label_builder.py / pipeline_utils.py / model_seq_v3.py / portfolio_simulator.py / analyze_behavior_gap.py` 中贯通 `sell_attribution_score`。
+  - 新增 `budget_objective=result_value_v4`、`loss_profile=alpha_result_value_budget_split_v4`、`budget_calibration=cash_translation_sell_guard_v3`、`split_heads_cash_timing_r3` study profile。
+  - 新增行为指标 `sell_selection_quality_5d / sell_selection_hit_rate_5d`，用于审计组合收缩时是否真的减掉了后续更差的持仓。
+- smoke 结果：
+  - `cp_split_heads_cash_timing_smoke_eval_r5`
+  - `cash_timing_quality_1d=0.2170`
+  - `sell_selection_quality_5d=0.0137`
+  - `sell_selection_hit_rate_5d=0.6923`
+  - `avg_gross_exposure=0.1442`
+  - 复盘：新目标确实让 cash/sell 信号变得可学习，但 smoke 明显过度防守，不能据此 promotion。
+- 正式 study 结果：
+  - 正式命令：`run_self_optimizing_study --search-profile split_heads_cash_timing_r3 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r3`
+  - 用时约 72 分钟，`completed_trial_count=4`、`confirmatory_completed_trial_count=2`、`latest_state_restored=true`。
+  - 冠军：`cp_v3_split_heads_cash_timing_r3__confirm_01`
+  - 冠军配置：`active_execution_strategy + split_v2 + result_value_v2 + cash_translation_sell_guard_v3 + alpha_result_value_budget_split_v4`
+  - 冠军指标：`annual_return=0.5762`、`sharpe=2.2604`、`max_drawdown=-0.1116`、`cash_timing_quality_1d=-0.0945`、`semantic_conflict_rate=0.0000`、`order_translation_conflict_rate=0.0597`
+  - `confirm_02 = result_value_v4 + cash_translation_sell_guard_v3` 指标：`annual_return=0.1565`、`sharpe=0.8738`、`cash_timing_quality_1d=-0.0762`
+  - 所有 r3 trial/confirm 均为 `shadow_only`。
+- 行为审计结果：
+  - `confirm_01` 高优先级失败项：`sell_selection_not_learned`、`cash_timing_not_learned`
+  - `confirm_01` 中 `sell_selection_quality_5d=0.0001`，teacher recomputed 为 `0.2531`
+  - `confirm_01` 中 `wrong_side_reduce_share=0.5128`
+  - `confirm_01` 中 `budget_model_cash_timing_quality_1d=-0.0990`
+  - `confirm_02` 额外暴露 `budget_action_entanglement`，`budget_clipped_order_translation_conflict_rate=0.1557` 高于 `unclipped_order_translation_conflict_rate=0.0453`
+- 动作后复盘：
+  - 事实：
+    - `semantic_conflict_rate` 已经基本压到 0，旧的执行层语义污染不再是 r3 的主要失败来源。
+    - `sell_attribution_score` 与真实 forward benchmark 目标链路已经可运行、可训练、可审计。
+    - r3 正式 confirmatory 没有超过 r2 最优主线，也没有 promotion。
+  - 推断：
+    - 本质问题不是模型容量不足，而是卖出对象选择和现金时机的结果信用分配仍不稳定。
+    - r3 的 v4 shaping 更像“打开信号入口”，但没有把信号稳定转化成收益；在 smoke 中甚至会过度收缩暴露。
+    - 当前最好的策略是保留 sell attribution 审计与候选 guard，但回到更稳的 `result_value_v2 + cash_translation_guard_v2` 主线做 v4b 级目标重构。
+  - 决策：
+    - 不 promotion `cp_v3_split_heads_cash_timing_r3`
+    - 不让 `result_value_v4` 替代 `result_value_v2`
+    - 当前最优可继承主线仍是 `active alpha + split_v2 + result_value_v2 + cash_translation_guard_v2`
+    - 下一轮优先做 `sell_selection / cash timing / deployment opportunity cost` 的统一目标，而不是继续堆更强 backbone 或扩大同一 r3 搜索。
+## 2026-04-19 split heads cash timing r4 实施与复盘
+- 触发：
+  - 用户要求继续下一轮，直接一次性执行并完整交付，不停留在建议层。
+  - 继承 r3 结论：sell attribution 已打开入口，但高防守 shaping 导致部署不足；下一轮必须同时处理 sell selection、cash timing 与 deployment opportunity cost。
+- 动作前自检：
+  - 事实：
+    - 用户规则要求不打断任何训练，训练窗口统一 10h。
+    - 本机应继续使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，并在训练/评估命令中设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+    - r2 confirm_02 仍是当前收益/sharpe 最强继承证据，r3 提供 sell attribution 审计入口但未 promotion。
+  - 推断：
+    - 只继续加大 v4 防守权重会扩大低暴露问题。
+    - 需要让模型显式看见“现金机会成本”和“部署下限”，同时保留 sell attribution 的个股卖出归因。
+  - 假设：
+    - 如果机会成本/部署下限能与 sell attribution 同时进入目标，cash timing 应该收窄负值；但 sell-side 是否能稳定转化为收益，必须由 confirmatory 决定。
+- 关键实现：
+  - 在 `pipeline_utils.py` 新增 `result_value_v4b`，把 `forward_benchmark_upside / opportunity_cost_pressure / deployment_floor_pressure` 写入预算目标。
+  - 在 `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v4b` 与独立 `sell_attribution_head`，并在动作软标签中让高卖出归因压低 hold/add、抬高 reduce/exit。
+  - 在推理中新增 v4b deployment floor，防止模型在机会充足时长期低 gross/candidate budget。
+  - 在 `run_self_optimizing_study.py` 新增 `split_heads_cash_timing_r4` profile，固定 `active alpha + split_v2 + v4b loss`，只比较 guard/objective 的关键四格。
+- smoke 结果：
+  - `cp_split_heads_cash_timing_smoke_train_r5` 成功，`supports_sell_attribution_head=true`。
+  - 初始 smoke 暴露仍低，追加推理 deployment floor 后，`cp_split_heads_cash_timing_smoke_eval_r7` 把 `avg_gross_exposure` 拉到 `0.1960`，`sell_selection_quality_5d=0.0165`，但 `cash_timing_quality_1d=-0.1155`。
+  - smoke 审计显示 sell selection 有早期改善信号，但 cash timing 与 budget/action entanglement 仍未解决。
+- 正式 study 结果：
+  - 正式命令：`run_self_optimizing_study --search-profile split_heads_cash_timing_r4 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_split_heads_cash_timing_r4`
+  - 用时约 73 分钟，4 screening + 2 confirmatory 全部完成，`latest_state_restored=true`。
+  - 所有 r4 trial/confirm 均为 `shadow_only`。
+  - performance champion `cp_v3_split_heads_cash_timing_r4__confirm_01`：
+    - `annual_return=1.1745`
+    - `sharpe=3.0222`
+    - `max_drawdown=-0.0911`
+    - `avg_gross_exposure=0.8057`
+    - `reduce_success_rate_5d=0.4474`
+    - `exit_timeliness_rate_5d=0.3333`
+    - `cash_timing_quality_1d=-0.0414`
+    - `semantic_conflict_rate=0.0147`
+    - `order_translation_conflict_rate=0.0772`
+  - stability/sell-side champion `cp_v3_split_heads_cash_timing_r4__confirm_02`：
+    - `annual_return=0.2190`
+    - `sharpe=1.2970`
+    - `max_drawdown=-0.0690`
+    - `reduce_success_rate_5d=0.5429`
+    - `exit_timeliness_rate_5d=0.6190`
+    - `sell_selection_quality_5d=0.0228`
+    - `cash_timing_quality_1d=-0.0673`
+    - `order_translation_conflict_rate=0.1749`
+- 行为审计结果：
+  - `confirm_01` 仍触发 `sell_selection_not_learned / cash_timing_not_learned / budget_action_entanglement`，`sell_selection_quality_5d=0.0036`、`wrong_side_reduce_share=0.5526`。
+  - `confirm_02` 未触发 `sell_selection_not_learned`，`sell_selection_hit_rate_5d=0.6757`，但 `order_translation_conflict_rate=0.1749` 且收益低。
+- 动作后复盘：
+  - 事实：
+    - v4b 使 performance champion 的 cash timing 明显收窄到 `-0.0414`，比 r2 的 `-0.1555` 与 r3 的 `-0.0945` 更接近过线。
+    - v4b 没有稳定提升收益到 r2 之上，也没有通过 promotion gate。
+    - sell guard 分支改善了 reduce/exit/sell hit，但预算剪裁和动作漂移明显变大，收益被压低。
+  - 推断：
+    - 当前已经不是“强模型有没有信号”的问题，而是“信号之间如何仲裁”的问题。
+    - sell attribution 作为单独预测头还不够；当 add/hold/reduce/exit 同时竞争时，模型缺少生命周期仲裁结构，导致高收益分支仍会牺牲正确卖出排序。
+    - 预算层如果只在执行后剪裁，会继续制造训练意图和真实权重变化之间的漂移。
+  - 决策：
+    - 不 promotion `cp_v3_split_heads_cash_timing_r4`
+    - 不让 `result_value_v4b` 替代 `result_value_v2`
+    - r4 作为 cash timing 进展证据和 sell-side 诊断桥保留
+    - 下一轮最高 ROI 是 lifecycle action arbitration、持仓内 sell ranking/pairwise loss、clipped-intent loss，而不是继续扩大 backbone 或继续微调 v4b 权重。
+
+## 2026-04-19 lifecycle arbitration r5 实施与复盘
+- 触发：
+  - 用户要求继续下一轮，直接一次性执行并完整交付；继承 r4 结论，不再把问题退回“继续调 v4b 权重”。
+  - r4 已把瓶颈缩窄为生命周期动作仲裁：sell signal 存在，但在 `add / hold / reduce / exit` 竞争和预算剪裁介入时，卖出排序会被其他目标覆盖。
+- 动作前自检：
+  - 事实：
+    - 用户规则要求不打断任何训练，正式训练窗口统一 10h。
+    - 当前解释器仍必须使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/审计命令设定 `KMP_DUPLICATE_LIB_OK=TRUE`。
+    - r2 confirm_02 仍是当前收益/sharpe 最强继承证据；r4 confirm_01 是当前 cash timing 收敛证据；r4 confirm_02 是 sell/exit 质量诊断证据。
+  - 推断：
+    - 继续扩大 backbone 或微调同一 v4b loss 不会解决“该卖哪只”的动作仲裁问题。
+    - 最高 ROI 是把 sell attribution 升级为 held-only rank/pairwise 约束，并让模型看见预算剪裁造成的真实动作漂移成本。
+  - 假设：
+    - 如果 `sell_rank_score / lifecycle_sell_gate / clipped_intent_risk` 能贯穿 teacher label、训练 loss、推理输出、执行层和行为审计，则模型应更容易稳定学习 reduce/exit 对象选择。
+- 关键实现：
+  - `label_builder.py` 新增 `sell_rank_score / lifecycle_sell_gate / clipped_intent_risk / holding_flag_target`，其中 `sell_rank_score` 是持仓内卖出归因排序，`lifecycle_sell_gate` 是生命周期卖出门控目标。
+  - `pipeline_utils.py` 新增执行反馈写回，把 `budget_dropped / semantic_delta_guarded / budget_split_bound_guarded / forced_zero / weight_change_action drift` 转成 `clipped_intent_risk`；同时新增 `sell_rank_forward_alignment_5d / lifecycle_sell_gate_forward_alignment_5d / clipped_intent_risk_conflict_gap` 等审计指标。
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v5`、`sell_rank_head`、`lifecycle_sell_gate_head`、`clipped_intent_head`、生命周期动作仲裁 loss、held-only pairwise sell rank loss、clipped-intent loss，并保持旧 artifact 兼容。
+  - `portfolio_simulator.py` 让 `sell_rank_score / lifecycle_sell_gate / clipped_intent_risk` 进入预算收缩、hold/add 保护、open/add 剪裁惩罚、sell reduction priority 与 action diagnostics。
+  - `analyze_behavior_gap.py` 增加新语义/排序指标输出，并在排序未对齐时报告 `lifecycle_sell_arbitration_not_aligned`。
+  - `run_self_optimizing_study.py` 新增 `split_heads_lifecycle_arbitration_r5` profile，固定 `active_execution_strategy + split_v2 + alpha_result_value_budget_split_v5`，只比较 `result_value_v2/result_value_v4b` 与 `cash_translation_guard_v2/cash_translation_sell_guard_v3`。
+- smoke 复盘：
+  - 第一次 smoke eval 暴露 `clipped_intent_risk_feedback` 被误当成特征列，评估期缺列失败。
+  - 已修复为反馈列只覆盖 `clipped_intent_risk`，不再泄露到 feature set；重新训练后 `feature_count` 从 180 回到 179。
+  - `cp_lifecycle_arbitration_smoke_eval_r2` 成功闭环：`sell_rank_forward_alignment_5d=0.1089`，`lifecycle_sell_gate_forward_alignment_5d=0.1419`，`cash_timing_quality_1d=0.0419`，`semantic_conflict_rate=0.0000`，`order_translation_conflict_rate=0.0625`。
+- 正式 study 结果：
+  - 正式命令：`run_self_optimizing_study --search-profile split_heads_lifecycle_arbitration_r5 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_lifecycle_arbitration_r5`
+  - 实际用时约 81 分钟，4 个 screening + 2 个 confirmatory 全部完成，未中断既有训练，`latest_state_restored=true`。
+  - 所有 r5 trial/confirm 仍为 `shadow_only`。
+  - confirm_01：`annual_return=0.3201`，`sharpe=1.0793`，`max_drawdown=-0.1094`，`reduce_success_rate_5d=0.5217`，`exit_timeliness_rate_5d=0.3636`，`cash_timing_quality_1d=-0.1184`，`sell_selection_quality_5d=-0.0029`，`semantic_conflict_rate=0.0203`，`order_translation_conflict_rate=0.0627`。
+  - final champion confirm_02：`annual_return=0.1529`，`sharpe=0.6942`，`max_drawdown=-0.0941`，`reduce_success_rate_5d=0.5957`，`exit_timeliness_rate_5d=0.7333`，`cash_timing_quality_1d=-0.1379`，`sell_selection_quality_5d=0.0207`，`sell_rank_forward_alignment_5d=0.1188`，`lifecycle_sell_gate_forward_alignment_5d=0.1335`，`semantic_conflict_rate=0.0163`，`order_translation_conflict_rate=0.0380`。
+- 动作后复盘：
+  - 事实：
+    - r5 成功把 `order_translation_conflict_rate` 压到 `0.0380`，明显优于 r4 sell guard 分支的 `0.1749`，语义/翻译层更干净。
+    - r5 的 sell rank 与 lifecycle gate 对齐指标为正，说明“该卖哪只”的排序信号开始可学习。
+    - r5 收益、sharpe、max_drawdown 和 cash timing 不如 r2/r4 最优证据，不能 promotion。
+  - 推断：
+    - r5 修的是动作仲裁地基，不是收益恢复；它牺牲了部分 alpha deployment 与 cash timing。
+    - 当前真正矛盾已经变成“三方信用分配”：alpha/deployment 想持有或加仓，lifecycle sell rank 想减仓/退出，budget/cash 想降暴露；三者尚未被统一到结果驱动价值目标里。
+  - 决策：
+    - 不 promotion `cp_v3_lifecycle_arbitration_r5`。
+    - 不让 `alpha_result_value_budget_split_v5` 替代 r2/r4 当前主线。
+    - 保留 r5 作为生命周期动作仲裁与 sell-rank 学习证据。
+    - 下一轮优先做 `cash/deployment/value arbitration`：把 alpha opportunity、sell rank、cash risk 三者统一进同一个结果价值头或门控混合器，而不是继续单独加 sell loss。
+
+## 2026-04-19 value arbitration r6 实施、正式 study 与复盘
+- 触发：
+  - 用户要求基于上一轮三方仲裁方案继续推进，直接一次性执行并完整交付，不停留在建议层。
+  - 继承 r5 结论：sell-rank / lifecycle gate 已经可学习，但收益、cash timing 和 alpha deployment 被牺牲；下一步必须把 alpha opportunity、sell release、cash defense 统一到结果价值仲裁中。
+- 动作前自检：
+  - 事实：
+    - 用户规则要求不打断任何训练，正式训练窗口统一 10h。
+    - 当前解释器仍应使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/审计命令需设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+    - r2 confirm_02 仍是收益/sharpe 最强继承证据；r4 confirm_01 是 cash timing 收敛证据；r5 confirm_02 是 sell/exit 与动作仲裁结构证据。
+  - 推断：
+    - 如果只继续加 sell loss，会进一步增强退出能力但继续牺牲部署与收益。
+    - 需要让模型同时看到“继续持有/加仓的机会价值”“卖出释放资金的价值”“持现金防御的价值”，否则它学到的仍是局部正确而全局收益不稳。
+  - 假设：
+    - 统一 value arbitration head 可以帮助模型从“各头互相抢方向”推进到“资金在个股机会、卖出释放、现金防御之间做结果驱动仲裁”。
+- 关键实现：
+  - `label_builder.py` 新增 `large_upside_1d_target / alpha_opportunity_value / hold_continuation_value / sell_release_value / cash_defense_value / deployment_opportunity_cost / risk_adjusted_action_value / value_arbitration_target`。
+  - `pipeline_utils.py` 新增 `budget_objective=result_value_v5`，并把 r6 value signals 贯穿预算目标、rollout diagnostics 与 continuity metrics。
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v6`、8 个 value/arbitration heads、value arbitration consistency loss，并保持旧 artifact 兼容；初次 smoke 暴露全 NaN value head 会污染预算，随后增加 finite guard 修复。
+  - `portfolio_simulator.py` 让 value/arbitration signals 进入组合预算、现金翻译、open/add/hold/reduce/exit 强度、sell priority 与 action diagnostics。
+  - `analyze_behavior_gap.py` 新增 r6 价值仲裁审计与 `unified_value_arbitration_not_aligned` 瓶颈；同时修复 `recommended_focus` 先使用后定义的旧 bug。
+  - `run_self_optimizing_study.py` 新增 `split_heads_value_arbitration_r6` profile，四格对照 `result_value_v5/result_value_v4b x cash_translation_guard_v2/cash_translation_sell_guard_v3`。
+- 验证事实：
+  - `py_compile` 通过。
+  - dry-run 通过，正确展开 4 个 screening trials 与 2 个 confirmatory candidates。
+  - smoke 第一次在 eval 阶段因 NaN value signals 失败；finite guard 修复后，`cp_v3_value_arbitration_r6__smoke02` 完成完整闭环。
+  - 正式 study `cp_v3_value_arbitration_r6` 已完成 4 screening + 2 confirmatory，用时约 1h46m，未中断既有训练，`latest_state_restored=true`。
+- 正式结果事实：
+  - screening champion `trial_01 = result_value_v5 + cash_translation_guard_v2`：`annual_return=0.4621`，`sharpe=1.8533`，`max_drawdown=-0.1065`，`cash_timing_quality_1d=-0.0026`，`semantic_conflict_rate=0.0037`，`order_translation_conflict_rate=0.1335`。
+  - confirmatory champion `confirm_01 = result_value_v5 + cash_translation_guard_v2` 仍为 `shadow_only`：`annual_return=-0.0913`，`sharpe=-0.4327`，`max_drawdown=-0.0829`，`avg_gross_exposure=0.7993`，`reduce_success_rate_5d=1.0000`，`exit_timeliness_rate_5d=0.7500`，`cash_timing_quality_1d=-0.0033`，`semantic_conflict_rate=0.0019`，`order_translation_conflict_rate=0.0964`。
+  - r6 confirm_01 的价值对齐出现结构性分裂：`sell_release_forward_alignment_5d=0.2593` 为强正，但 `value_arbitration_forward_alignment_5d=-0.0625`、`alpha_opportunity_forward_alignment_5d=-0.0739`、`cash_defense_timing_quality_1d=-0.0304`。
+  - confirm_02 更弱：`annual_return=-0.3856`，`sharpe=-1.5561`，`max_drawdown=-0.2058`，`cash_timing_quality_1d=-0.0739`，`value_arbitration_forward_alignment_5d=-0.1076`。
+- 动作后复盘：
+  - 事实：
+    - r6 把 `semantic_conflict_rate` 压到近乎干净，说明“模型动作语义”这一层已经不是主瓶颈。
+    - r6 明显强化了 reduce/exit/sell release：confirm_01 的 `reduce_success_rate_5d=1.0000`、`exit_timeliness_rate_5d=0.7500`、`sell_release_forward_alignment_5d=0.2593`。
+    - r6 没有恢复收益，也没有学稳 alpha deployment 与 cash defense；长训练 confirm 反而把 screening 的正收益翻成负收益。
+  - 推断：
+    - 单一 `value_arbitration_target` 把机会、释放、现金三种不同性质的价值压成一个标量后，模型更容易学习“卖出释放”这种后验更清晰的信号，而忽视“继续部署高 alpha”这种更稀疏、更难的信号。
+    - 预算剪裁仍在制造动作/权重翻译漂移；`order_translation_conflict_rate=0.0964` 虽低于早期版本，但仍会把高价值 add/hold 变成不可见的小权重变化。
+    - r6 的失败不是“强模型方向错了”，而是价值仲裁目标还没有分解出 deploy value 与 defensive value 的不同职责。
+  - 假设：
+    - 下一轮如果把 `deploy_value`、`release_value`、`defense_value` 从单标量拆成可仲裁的多头门控，并让预算层只做容量约束而不吞掉生命周期意图，收益恢复概率高于继续加大 r6 loss。
+  - 决策：
+    - 不 promotion `cp_v3_value_arbitration_r6`。
+    - 不让 `alpha_result_value_budget_split_v6` 或 `result_value_v5` 替代 r2/r4 当前主线。
+    - 保留 r6 作为“统一价值仲裁初版已可运行，但单标量仲裁会偏向 sell release、牺牲 alpha deployment”的实证证据。
+    - 下一轮优先做 r6b：把价值仲裁从单一目标升级为 `deploy / release / defense` 三值门控，修复预算剪裁吞动作的问题，再重新正式 study。
+- 额外治理修正：
+  - 发现 `training_evidence` 的 `teacher_action_rows >= 10000` 固定阈值与日频执行模型的最大持仓容量冲突。
+  - 已在 `run_continuous_policy_protocol.py` 中保留原始 10000 作为参考阈值，同时新增按 `train_day_count * 6` 与 1200 下限计算的有效阈值。
+  - 用 r6 confirm_01 真实 `train_summary.json` 复算：`teacher_action_rows=3902`，`effective_min_teacher_action_rows=2454`，训练证据可判为 sufficient；但这不改变 r6 不 promotion 的结论，因为收益、回撤、cash timing 与 active 对照仍未过关。
+## 2026-04-19 r6b three value gate 实施、smoke 纠偏与正式 study 记忆
+- 触发：
+  - 承接 r6 结论：单一 `value_arbitration_target` 会把 `deploy / release / defense` 三种不同经济含义的价值压成一个 scalar，模型更容易学会 sell release，却学不稳高 alpha deployment 与 cash defense。
+  - 本轮目标不是继续放大 r6 loss，而是把价值仲裁拆成真正可竞争的三值门控，并用正式 study 验证它是否能把结构进步重新转回收益进步。
+- 动作前自检：
+  - 事实：
+    - 用户规则仍要求不打断任何训练，正式训练窗口统一 10h。
+    - 当前解释器仍必须使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/study 命令统一设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+    - 当前继承证据未变：r2 是收益/sharpe 主线，r4 是 cash timing 收敛证据，r5 是 sell/exit 结构证据，r6 是单标量价值仲裁失败证据。
+  - 推断：
+    - 如果 r6b 只是把 r6 的 sell release 再放大，而没有学成 deploy/release/defense 的真实竞争，那么它顶多恢复部分收益，不会成为可 promotion 主线。
+  - 假设：
+    - 如果三值目标表达本身正确，修掉目标污染后，至少应在 smoke 中看到 `deploy_gate_forward_alignment_5d` 不再系统性为负，且 `cash_timing_quality_1d` 不应继续恶化。
+- 关键实现：
+  - `label_builder.py`
+    - 新增 `deploy_value_target / release_value_target / defense_value_target`。
+    - 新增 `deploy_gate_target / release_gate_target / defense_gate_target`，并写入 `numeric_output_columns`。
+  - `pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v6`。
+    - 新增 deploy/release/defense 三值信号、门控诊断、对齐指标与预算目标映射。
+    - 新增 `deploy_gate_forward_alignment_5d / release_gate_forward_alignment_5d / defense_gate_timing_quality_1d` 等 continuity metrics。
+  - `model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_split_v6b`。
+    - 新增 `deploy/release/defense` value heads 与 gate heads。
+    - 新增 `three_value_gate_consistency_loss`，并把三值门控融入动作仲裁、预算目标与推理强度。
+  - `portfolio_simulator.py`
+    - 把三值 value/gate 信号接入预算翻译、风险收缩、部署提升、生命周期动作强度与 action diagnostics。
+  - `analyze_behavior_gap.py`
+    - 新增 `three_value_gate_not_aligned` 瓶颈。
+    - 行为审计显式输出 deploy/release/defense gate 的平均值与对齐质量。
+  - `run_self_optimizing_study.py`
+    - 新增 `split_heads_three_value_gate_r6b` search profile。
+    - 固定 4 格：`result_value_v6 / result_value_v5 x cash_translation_guard_v2 / cash_translation_sell_guard_v3`。
+- smoke 纠偏事实：
+  - 首次 `smoke01` 已完整跑通，但暴露出一个真实目标污染：
+    - 在 `pipeline_utils._result_value_budget_signals` 里，三值 gate 的回退逻辑会把合法的 0 gate 误当成缺失值，用 fallback 覆盖。
+    - 这会污染 `result_value_v6` 的预算目标与 gate 聚合，因此 `smoke01` 只能作为排错样本，不能作为正式依据。
+  - 已修复该 bug：只有列缺失时才 fallback，不再把 0 gate 当缺失。
+  - 修复后用 `training_samples_preview.csv` 直接复核：
+    - `deploy_gate_target + release_gate_target + defense_gate_target` 的 `gate_sum_mean=0.999998`
+    - `gate_sum_min=0.999996`
+    - `gate_sum_max=0.999999`
+    - 说明三值 gate label 本身是归一且干净的。
+  - 修复后 `cp_v3_three_value_gate_r6b__smoke02` 再跑完整闭环：
+    - `annual_return=0.0731`
+    - `sharpe=1.0949`
+    - `cash_timing_quality_1d=0.0100`
+    - `value_arbitration_forward_alignment_5d=0.2469`
+    - `alpha_opportunity_forward_alignment_5d=0.2134`
+    - `deploy_gate_forward_alignment_5d=0.2086`
+    - 但 `reduce_success_rate_5d=0.0000`、`exit_timeliness_rate_5d=0.0000`，仍只说明目标已干净，不说明机制已成熟。
+- 正式 study 事实：
+  - 正式命令：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_three_value_gate_r6b --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_three_value_gate_r6b`
+  - study 已完成 `4 screening + 2 confirmatory`，未中断任何训练，所有候选仍为 `shadow_only`。
+  - screening 排名事实：
+    - `trial_02 = result_value_v6 + cash_translation_sell_guard_v3`，`composite_score=2.6635`
+    - `trial_04 = result_value_v5 + cash_translation_sell_guard_v3`，`composite_score=1.5154`
+    - `trial_01 = result_value_v6 + cash_translation_guard_v2`，`composite_score=0.4477`
+    - `trial_03 = result_value_v5 + cash_translation_guard_v2`，`composite_score=-0.0973`
+    - 这说明在 r6b 结构下，`cash_translation_sell_guard_v3` 的影响显著大于 v5/v6 objective 的差异，且 v6 仍优于 v5。
+  - performance champion `cp_v3_three_value_gate_r6b__confirm_01`
+    - 配置：`result_value_v6 + cash_translation_sell_guard_v3`
+    - `annual_return=0.2780`
+    - `sharpe=1.0538`
+    - `max_drawdown=-0.1217`
+    - `open_win_rate_5d=0.7368`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.1111`
+    - `cash_timing_quality_1d=-0.1833`
+    - `hold_share=0.8071`
+    - `semantic_conflict_rate=0.0169`
+    - `order_translation_conflict_rate=0.0506`
+    - `deploy_gate_forward_alignment_5d=-0.0842`
+    - `release_gate_forward_alignment_5d=0.0238`
+    - `defense_gate_timing_quality_1d=-0.0147`
+  - stability champion `cp_v3_three_value_gate_r6b__confirm_02`
+    - 配置：`result_value_v6 + cash_translation_guard_v2`
+    - `annual_return=-0.1480`
+    - `sharpe=-0.5523`
+    - `max_drawdown=-0.0946`
+    - `reduce_success_rate_5d=1.0000`
+    - `exit_timeliness_rate_5d=0.3750`
+    - `cash_timing_quality_1d=-0.0978`
+    - `order_translation_conflict_rate=0.1394`
+    - `deploy_gate_forward_alignment_5d=-0.0605`
+    - `release_gate_forward_alignment_5d=0.2826`
+    - `defense_gate_timing_quality_1d=-0.0875`
+- 动作后复盘：
+  - 事实：
+    - r6b 相比 r6，确实把纯负收益拉回了一个正收益候选：`r6 confirm_01 annual_return=-0.0913`，而 `r6b confirm_01 annual_return=0.2780`。
+    - 但 r6b 没有学成真正的三值竞争，最强 confirmatory 仍然同时出现：
+      - `cash_timing_quality_1d=-0.1833`
+      - `exit_timeliness_rate_5d=0.1111`
+      - `deploy_gate_forward_alignment_5d=-0.0842`
+      - `alpha_opportunity_forward_alignment_5d=-0.0838`
+    - r6b 最强 confirmatory 的 gate 平均值也呈现明显偏斜：
+      - `avg_deploy_gate_target=0.5468`
+      - `avg_release_gate_target=0.0146`
+      - `avg_defense_gate_target=0.0984`
+      - 说明模型主要把三值门控学成了高 deploy 倾向，release 与 defense 没有形成稳定竞争。
+  - 推断：
+    - r6b 证明“三值拆分”方向本身是对的，但把 `deploy / release / defense` 全部压在同一个个股级 gate simplex 里仍然不合理。
+    - `deploy / release` 主要是个股层的边际资金去留判断，而 `defense / cash` 更接近组合层、市场层的全局状态判断；把它们放在同一个 stock-level 竞争头里，模型容易学成“高 deploy 曝光 + 弱 defense”的折中。
+    - 因此 r6b 的本质失败不是“结构太复杂”，而是“分工还不够对”：`defense` 仍被错误地放在了和个股 deploy/release 同层竞争的位置上。
+  - 决策：
+    - 不 promotion `cp_v3_three_value_gate_r6b`。
+    - 不让 `alpha_result_value_budget_split_v6b`、`result_value_v6` 或 `cash_translation_sell_guard_v3` 替代当前 r2/r4/r5 的证据分层。
+    - 保留 r6b 作为关键结构证据：
+      - 它证明三值门控 label 与训练链路可以干净跑通。
+      - 它证明继续放大 r6 单标量仲裁不是最高 ROI。
+      - 它证明下一轮最高 ROI 不是更大 backbone，而是“层级化仲裁”。
+    - 下一轮优先方向应升级为：
+      - 个股层：`deploy_value / release_value`
+      - 组合层：`defense_value / cash regime`
+      - 预算层：只做容量、风险、换手约束，不再吞掉高价值生命周期动作
+    - 在这个层级化仲裁跑通前，不要把 r6b 当成可继续加 epoch、加 loss、加 backbone 就会自然变强的主线。
+## 2026-04-20 r7 hierarchical arbitration 正式收口
+- 触发：
+  - 继承 r6b 结论继续推进，不再停留在“同层三值 gate”，而是直接验证更符合北极星的层级化仲裁。
+  - 用户要求继续下一轮并一次性完整交付；执行约束仍是“不打断训练、前台跑完、10h 窗口统一”。
+- 动作前自检：
+  - 事实：
+    - r6b 已正式证明：`deploy/release/defense` 继续放在同一 stock-level simplex 中竞争，会自然塌成高 deploy、弱 defense、弱 exit。
+    - 当前主线证据分层仍未改变：r2 是收益主线，r4 是 cash timing 收敛证据，r5 是 sell/exit 结构证据，r6/r6b 是价值仲裁失败方式证据。
+    - 当前解释器和训练环境必须继续固定为 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，训练/评估/study 命令统一设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - 推断：
+    - 下一步最高 ROI 不是继续加大 r6b loss 或扩大 backbone，而是把 `defense/cash` 从 stock-level 仲裁中拿出来，改为组合层信号。
+    - 只要 hierarchy 没有同时写进训练目标、推理仲裁和执行翻译三层，模型仍会在 budget clipping 中回到旧的动作漂移。
+  - 假设：
+    - 若 stock-level 只竞争 `deploy/release`，portfolio-level 单独输出 `defense/cash regime`，则收益主线和结构主线有机会重新对齐。
+- 关键实现：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v7`。
+    - 新增 `result_value_hierarchical_defense_pressure`，把 defense 主要建模为组合层风险/现金压力，而不再让它和每只股票的 deploy/release 同层竞争。
+  - `daily_research/continuous_policy/model_seq_v3.py`
+    - 新增 `alpha_result_value_budget_split_v7`。
+    - 新增 `hierarchical_three_value_gate_consistency_loss`，只在 stock-level 强化 `deploy vs release`，不再把 `defense` 当 held names 的直接同层对手。
+    - 推理层新增 `decision_deploy_gate / decision_release_gate / decision_defense_signal`，其中 `decision_defense_signal` 在 `result_value_v7` 下来自组合层。
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `hierarchical_budget_mode`。
+    - 层级模式下，stock-level 只用 deploy/release 重建 held/open 的动作强度；组合层 defense 信号只参与组合 risk-off / deploy score，不再作为单股 gate 竞争项。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增 `split_heads_hierarchical_arbitration_r7` profile。
+    - 固定四格：`v7 loss / v6b loss x cash_translation_guard_v2 / cash_translation_sell_guard_v3`，共同使用 `budget_objective=result_value_v7`。
+- 验证事实：
+  - `py_compile` 已通过：
+    - `pipeline_utils.py`
+    - `model_seq_v3.py`
+    - `portfolio_simulator.py`
+    - `run_self_optimizing_study.py`
+  - `git diff --check` 已通过。
+  - smoke：
+    - `cp_v3_hierarchical_arbitration_r7__smoke01` 已前台跑通，证明 r7 全链路可训练、可评估、可审计。
+  - 正式 study：
+    - 已重建完成 `cp_v3_hierarchical_arbitration_r7` 的 `4 screening + 2 confirmatory`。
+    - 产物：
+      - `daily_research/output/continuous_policy/studies/cp_v3_hierarchical_arbitration_r7/study_summary.json`
+      - `daily_research/output/continuous_policy/studies/cp_v3_hierarchical_arbitration_r7/trial_ranking.csv`
+    - screening 排名：
+      - `trial_01 = v7 + guard_v2`，`composite_score=8.1289`，但 `training_evidence_status=insufficient`
+      - `trial_02 = v7 + sell_guard_v3`，`composite_score=5.4568`
+      - `trial_04 = v6b + sell_guard_v3 + result_value_v7`，`composite_score=5.1920`
+      - `trial_03 = v6b + guard_v2 + result_value_v7`，`composite_score=4.1239`
+    - confirmatory：
+      - `confirm_01 = performance_champion = trial_01`
+      - `confirm_02 = stability_champion = trial_03`
+    - 正式 champion：
+      - `cp_v3_hierarchical_arbitration_r7__confirm_02`
+      - `annual_return=1.3666`
+      - `sharpe=3.8698`
+      - `max_drawdown=-0.0737`
+      - `cash_timing_quality_1d=0.0319`
+      - 但仍是 `shadow_only`
+      - failed checks：
+        - `open_win_rate_5d`
+        - `reduce_success_rate_5d`
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+    - `confirm_01` 事实：
+      - `annual_return=0.2191`
+      - `sharpe=0.8471`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.0000`
+      - `cash_timing_quality_1d=0.0251`
+      - `value_arbitration_forward_alignment_5d=0.1677`
+      - `deploy_gate_forward_alignment_5d=0.1828`
+      - `release_gate_forward_alignment_5d=-0.0859`
+    - `confirm_02` 事实：
+      - `annual_return=1.3666`
+      - `sharpe=3.8698`
+      - `reduce_success_rate_5d=0.3333`
+      - `exit_timeliness_rate_5d=0.3333`
+      - `cash_timing_quality_1d=0.0319`
+      - `value_arbitration_forward_alignment_5d=-0.1382`
+      - `alpha_opportunity_forward_alignment_5d=-0.1330`
+      - `deploy_gate_forward_alignment_5d=-0.1347`
+      - `release_gate_forward_alignment_5d=-0.0850`
+      - `defense_gate_timing_quality_1d=0.0758`
+- 动作后复盘：
+  - 事实：
+    - r7 证明“层级化方向”比 r6b 更接近正确，因为正式 confirmatory 已能把收益和 sharpe 拉回到接近 r2 主线的强度。
+    - 但 r7 champion 的价值仲裁对齐仍是负的，说明它更像“收益回来了”，而不是“deploy/release/defense 真的学对了”。
+    - `confirm_02` 的 `avg_deploy_gate_target=0.6156`、`avg_release_gate_target=0.0184`、`avg_defense_gate_target=0.0837`，说明当前最强分支仍带有明显 deploy 偏置。
+    - `confirm_01` 则相反，更像“结构比收益更好”，但 `exit_timeliness_rate_5d=0.0`，无法形成可用主线。
+  - 推断：
+    - r7 没有失败在“层级化是错的”，而是失败在“层级化还不够彻底”。
+    - 现在 `defense` 虽然从 stock-level simplex 里拿出来了，但 budget/action translation 还没有完全从个股生命周期意图上退后；收益分支和结构分支仍然在不同 confirm 上分裂。
+    - 真正的根因不是“缺更大模型”，而是“边际资本仲裁还没形成统一信用分配”。
+  - 决策：
+    - 不 promotion `cp_v3_hierarchical_arbitration_r7`。
+    - 不让 r7 覆盖 r2/r4/r5 的分层证据体系。
+    - 保留 r7 作为关键新证据：
+      - hierarchy 比同层三值 gate 更合理。
+      - 收益可以恢复。
+      - 但结构对齐与收益恢复尚未统一到同一 confirmatory。
+    - 下一轮不应继续加 epoch、加 loss 或换更大 backbone。
+    - 下一轮必须优先推进更彻底的 layered arbitration：stock-level `deploy/release`，portfolio-level `defense/cash regime`，budget layer 只做容量/风险/换手约束，并显式惩罚 clipped-intent drift。
+## 2026-04-21 r8 constraint arbitration 正式收口
+- 触发：
+  - 继承“当前最深层问题是缺少统一、层级正确、信用分配干净的边际资本仲裁中枢”的结论，继续往前推进而不是停留在分析。
+  - 用户要求这一轮直接一次性执行并完整交付，所以本轮按“实现 -> 验证 -> smoke -> formal study -> 写回”闭环执行。
+- 动作前自检：
+  - 事实：
+    - r7 已经证明 hierarchy 方向比 r6/r6b 更对，但收益恢复和结构对齐仍分裂在不同 confirmatory 分支上。
+    - 当前最可疑残留不是同层 `defense` 竞争，而是 budget/action translation 还在吞 stock-level 意图。
+    - 当前训练规则仍要遵守：不打断已有训练，正式训练/评估/study 统一使用 `C:\Users\ASUS\miniconda3\envs\yolos\python.exe`，并显式设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - 推断：
+    - 下一步最高 ROI 不是更大 backbone，而是把 `defense/cash` 更彻底地退回组合约束层，同时减少 budget clipping 对 held-side 生命周期动作的吞噬。
+  - 假设：
+    - 如果 `defense` 只在 portfolio-level 生效、held-side 只竞争 `deploy/release`，则“结构更对”和“收益恢复”更有机会重新对齐。
+- 关键实现：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+    - 新增 `budget_objective = result_value_v8`
+    - 新增 `result_value_hierarchical_defense_pressure`、`result_value_portfolio_release_pressure`
+    - 新增 `result_value_constraint_only_mode`
+    - 在 v8 目标下，把 `defense` 主要约束到 `gross_exposure_target / candidate_budget / turnover_budget / max_position_weight_target`，不再直接注入 held-side `hold/reduce/exit` 语义
+  - `daily_research/continuous_policy/model_seq_v3.py`
+    - 新增 `loss_profile = alpha_result_value_budget_split_v8`
+    - 在 `budget_objective = result_value_v8` 下增加 portfolio-level `deploy/release/defense` 聚合信号与 gate diagnostics
+    - 推理阶段新增 `pure_portfolio_defense_mode`，held-side `sell_arbitration / keep_arbitration / reduce / exit` 不再直接吃 `defense`，但 entry/add 仍保留更强防守惩罚
+    - 新增 `decision_portfolio_defense_signal` 与 `budget_model_constraint_only_mode`
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+    - 新增 `budget_calibration = cash_constraint_guard_v4`
+    - 新增 `constraint_only_budget_mode`
+    - risk-off / shrink 阶段优先按 sell/release priority 缩减，不再做更粗暴的同权压缩
+    - held-side `reduce/hold` 不再被 `cash_defense_series` 直接推着走；entry/add 仍受组合层防守约束
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+    - 新增正式 study profile：`split_heads_constraint_arbitration_r8`
+    - 固定四格：
+      - `alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v8 + cash_translation_guard_v2 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+- 验证事实：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/pipeline_utils.py`
+    - `daily_research/continuous_policy/model_seq_v3.py`
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过
+  - dry-run 通过：`split_heads_constraint_arbitration_r8` 四格矩阵被正确展开
+  - smoke 已前台跑通：
+    - tag：`cp_v3_constraint_arbitration_r8__smoke01`
+    - 作用：只作为链路闭环与方向预警，不作为 promotion 证据
+    - smoke 预警：
+      - `hold_share=0.5000`
+      - `reduce_success_rate_5d=0.0000`
+      - `cash_timing_quality_1d=-0.1353`
+      - `order_translation_conflict_rate=0.5781`
+    - 说明：约束层模式没有炸链路，但 budget translation 漂移在 smoke 小窗里仍然明显
+- 正式 study 事实：
+  - study 输出：
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/study_summary.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_constraint_arbitration_r8/trial_ranking.csv`
+  - 已完整跑完 `4 screening + 2 confirmatory`，没有中断训练
+  - 所有 trial / confirm 仍为 `shadow_only`
+  - screening 排名：
+    - `trial_04 = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=1.6597`
+      - `sharpe=3.3216`
+      - `cash_timing_quality_1d=-0.1784`
+      - `reduce_success_rate_5d=0.0000`
+      - `order_translation_conflict_rate=0.2559`
+      - `training_evidence_status=insufficient`，原因是 `best_epoch=39` 仍贴边
+    - `trial_03 = alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+      - `annual_return=0.0517`
+      - `sharpe=0.3232`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.5556`
+      - `cash_timing_quality_1d=-0.0559`
+      - `order_translation_conflict_rate=0.1034`
+  - confirmatory：
+    - `confirm_01 = performance_champion = alpha_result_value_budget_split_v7 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=1.4187`
+      - `sharpe=3.0117`
+      - `max_drawdown=-0.1150`
+      - `reduce_success_rate_5d=1.0000`
+      - `exit_timeliness_rate_5d=0.3333`
+      - `cash_timing_quality_1d=-0.1573`
+      - `semantic_conflict_rate=0.0036`
+      - `order_translation_conflict_rate=0.2224`
+      - `value_arbitration_forward_alignment_5d=-0.2378`
+      - `alpha_opportunity_forward_alignment_5d=-0.2632`
+      - `deploy_gate_forward_alignment_5d=-0.2516`
+      - `sell_rank_forward_alignment_5d=0.2731`
+      - `release_gate_forward_alignment_5d=0.2763`
+      - failed checks：
+        - `exit_timeliness_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+    - `confirm_02 = stability_champion = alpha_result_value_budget_split_v7 + cash_translation_guard_v2 + result_value_v8`
+      - `annual_return=0.0517`
+      - `sharpe=0.3232`
+      - `max_drawdown=-0.1674`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.5556`
+      - `cash_timing_quality_1d=-0.0559`
+      - `semantic_conflict_rate=0.0284`
+      - `order_translation_conflict_rate=0.1034`
+      - `value_arbitration_forward_alignment_5d=0.0612`
+      - `alpha_opportunity_forward_alignment_5d=0.0532`
+      - `deploy_gate_forward_alignment_5d=0.0487`
+      - `release_gate_forward_alignment_5d=0.0884`
+      - `defense_gate_timing_quality_1d=-0.0605`
+      - failed checks：
+        - `open_win_rate_5d`
+        - `reduce_success_rate_5d`
+        - `cash_timing_quality_1d`
+        - `max_drawdown`
+        - `annual_return_vs_active`
+        - `sharpe_vs_active`
+- 动作后复盘：
+  - 事实：
+    - r8 最强 confirmatory 重新回到 `v7 loss + result_value_v8`，而不是 `v8 loss + result_value_v8`
+    - `confirm_01` 把收益和 sharpe 拉回强区间，但 deploy/value 对齐仍然显著为负，说明它更像“收益捷径回来了”，不是“边际资本仲裁学对了”
+    - `confirm_02` 恰好相反：deploy/value alignment 回正，但收益很弱、卖出对象选择仍差，`sell_selection_quality_5d=-0.0266`
+    - `confirm_01` 的 `budget_clipped_day_share=0.9855`，说明约束层仍然几乎天天深度介入，intent-preserving translation 还远没闭环
+  - 推断：
+    - “把 `defense/cash` 退回 portfolio constraint layer” 这个方向本身是对的，否则 r8 不会把最优组合重新收敛到 `result_value_v8 + cash_constraint_guard_v4`
+    - 但当前 `alpha_result_value_budget_split_v8` 的 loss 配比并没有把 `deploy/release/cash` 的竞争学稳，反而是旧的 `v7` 权重更能撑住收益
+    - 所以 r8 的失败已经不是 r6b 那种“层级设计明显错了”，而是“层级方向对了，但约束层仍不够 intent-preserving，loss 也没把 stock-level deploy branch 训练成真正可用的资本去向判断”
+  - 决策：
+    - 不 promotion `cp_v3_constraint_arbitration_r8`
+    - 不把 `alpha_result_value_budget_split_v8` 或 `result_value_v8` 直接设为默认主线
+    - r2 / r4 / r5 / r7 的分层证据体系保持不变：
+      - r2：收益主线锚点
+      - r4：cash timing 进展证据
+      - r5：sell/exit 生命周期结构证据
+      - r7：hierarchy 方向正确但未闭环的证据
+    - r8 作为新增结构证据保留：
+      - `constraint-only portfolio defense` 方向正确
+      - 但 `budget clipping + deploy alignment` 仍是当前主瓶颈
+    - 下一轮必须显式优化：
+      - budget-clipped intent drift
+      - held-side sell-selection preservation
+      - stock-level `deploy/release` 对齐
+      - portfolio-level `defense/cash regime`
+    - 下一轮必须使用新 tag，不复用 `cp_v3_constraint_arbitration_r8`
+## 2026-04-21 r9 intent-preserving translation 当前状态
+- 已完成实现：
+  - `daily_research/continuous_policy/portfolio_simulator.py` 新增 `cash_constraint_intent_guard_v5`，把 budget calibration 从“强 clip”推进到“优先保留高价值意图”的约束翻译模式。
+  - 新增 `_lift_to_soft_floor_by_priority(...)` 与 `_trim_delta_to_turnover_by_priority(...)`，让 held-side `add`、flat-side `open/add` 在不突破硬约束的前提下，优先保留 deploy intent。
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 新增 `split_heads_intent_preserving_translation_r9`，固定小矩阵比较 `cash_constraint_guard_v4` 与 `cash_constraint_intent_guard_v5`。
+- 已完成验证：
+  - `py_compile` 通过：
+    - `daily_research/continuous_policy/portfolio_simulator.py`
+    - `daily_research/continuous_policy/run_self_optimizing_study.py`
+  - `git diff --check` 通过。
+  - smoke `cp_v3_intent_preserving_translation_r9__smoke01` 通过，关键现象：
+    - `annual_return=0.0731`
+    - `sharpe=1.0949`
+    - `cash_timing_quality_1d=-0.0127`
+    - `order_translation_conflict_rate=0.2314`
+    - `budget_clipped_day_share=0.0161`
+    - 主要冲突对变为 `add -> hold`。
+- 已完成正式 study：
+  - `daily_research/output/continuous_policy/studies/cp_v3_intent_preserving_translation_r9/study_summary.json`
+  - `completed_trial_count=4`
+  - `failed_trial_count=0`
+  - `confirmatory_completed_trial_count=1`
+  - `latest_state_restored=true`
+  - screening stability champion:
+    - `trial_01 = alpha_result_value_budget_split_v7 + cash_constraint_intent_guard_v5 + result_value_v8`
+    - `annual_return=0.9236`
+    - `sharpe=2.4458`
+    - `max_drawdown=-0.1139`
+    - `reduce_success_rate_5d=0.5000`
+    - `exit_timeliness_rate_5d=0.6000`
+    - `cash_timing_quality_1d=-0.0173`
+    - `order_translation_conflict_rate=0.1564`
+  - screening performance champion:
+    - `trial_04 = alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+    - `annual_return=1.5602`
+    - `sharpe=3.4538`
+    - `cash_timing_quality_1d=-0.1267`
+    - `order_translation_conflict_rate=0.2079`
+    - `training_evidence_status=insufficient`
+  - raw confirmatory:
+    - `confirm_01 = alpha_result_value_budget_split_v8 + cash_constraint_guard_v4 + result_value_v8`
+      - `annual_return=0.7203`
+      - `sharpe=2.3841`
+      - `max_drawdown=-0.0945`
+      - `reduce_success_rate_5d=0.5000`
+      - `exit_timeliness_rate_5d=0.4000`
+      - `cash_timing_quality_1d=-0.0367`
+      - `semantic_conflict_rate=0.0108`
+      - `order_translation_conflict_rate=0.2950`
+      - `promotion_status=shadow_only`
+    - `confirm_02` 在 study runner 侧失败，错误为 `[Errno 22] Invalid argument`，因此 formal study 原始汇总只保留了 `confirm_01`。
+- 已完成纠偏复算：
+  - 手动前台重跑 `cp_v3_intent_preserving_translation_r9__confirm_02_rerun`，用于区分“runner 失败”与“研究结论失败”。
+  - 重跑结果：
+    - `annual_return=0.7873`
+    - `sharpe=2.9992`
+    - `max_drawdown=-0.1084`
+    - `reduce_success_rate_5d=0.0000`
+    - `exit_timeliness_rate_5d=0.2500`
+    - `cash_timing_quality_1d=0.0194`
+    - `semantic_conflict_rate=0.0000`
+    - `order_translation_conflict_rate=0.4630`
+    - `budget_clipped_day_share=0.0145`
+    - `avg_budget_drop_count=38.8116`
+    - 主要冲突对为 `add -> hold`，共 `217` 行。
+- 动作后复盘：
+  - 事实：
+    - `cash_constraint_intent_guard_v5` 真实压低了 `budget_clipped_day_share`，说明 r8 的“clip 过重”主病灶已经被部分拆开。
+    - 但 clip 降下去之后，`order_translation_conflict_rate` 没有同步下降，反而把失败模式集中暴露成 `model_action=add -> execution/weight_change=hold`。
+    - `semantic_conflict_rate` 低或为零，说明这不是动作语义污染回潮，而是 deploy intent 不可执行。
+  - 推断：
+    - 当前主瓶颈已经从“budget layer 过度硬剪裁”升级为“deploy intent 没有被训练成可落地的权重变化”。
+    - r9 说明“减少 clip”与“保持执行对齐”不是同一件事；前者可以实现，后者还没有闭环。
+    - 下一轮如果只继续压 `budget_clipped_day_share`，会继续把问题从 clip 失败转移成 `add -> hold` 漂移，而不是解决问题本身。
+  - 决策：
+    - 不 promotion `cp_v3_intent_preserving_translation_r9`。
+    - 不把 `cash_constraint_intent_guard_v5` 直接升级为默认 budget calibration。
+    - r9 新增为结构证据：`clip reduction != deploy executability`。
+    - 后续实验必须显式审计并惩罚 `add -> hold` 这一类 deploy-executability mismatch。
+## 2026-04-21 默认执行优化闭环
+
+- 已端到端完成四项待处理的默认执行优化。
+- production retrain 治理已加固：
+  - 自动重训节奏为每 `10` 个交易日一次
+  - 提醒 / 阻断阈值为 `10 / 20` 个交易日
+  - 最小 epoch 预算底线为 `32`
+  - 股票池策略为 `rolling_liquidity_pool_when_available`
+  - 新增信息量闸门：
+    - `label_horizon_guard_trading_days = 20`
+    - `minimum_new_trainable_trading_days = 5`
+- production retrain 的操作控制已显式化：
+  - 单实例锁
+  - heartbeat 更新
+  - `--show-run-status`
+  - `--cancel-existing-run`
+  - 对已有 run dir 使用显式 strict resume 路径
+- promotion 守卫已变为硬约束：
+  - 除非收敛诊断稳定且具备 promotable 条件，否则 production full-fit 不能覆盖 active production root。
+- 默认执行链上的候选 schema 清理已生效：
+  - 次日开盘动作输出使用 `upstream_reference_score`
+  - watchlist 输出使用 `target_weight, model_score`
+  - 最新交易计划不再暴露 `ml_score`
+- 后续纠偏已完成：
+  - 默认执行股票池刷新改为每日刷新，而不是只在重训时刷新
+  - active production root metrics 当前强制执行：
+    - `rolling_liquidity_pool = liquid500`
+    - `rolling_pool_rebalance_days = 1`
+    - `rolling_pool_adv_window = 20`
+    - `daily_pool_refresh_enabled = true`
+  - 该变更后已重新同步 active execution manifest 与 production manifest
+  - 已按新的每日滚动池规则重建一次 live panels，次日开盘动作列表随之变化
+- 重要操作教训：
+  - 代码侧 schema / governance 升级后，必须重新同步 active production root；否则即使代码已经正确，production manifest 仍可能停留在旧 policy 字段。
+
+## 2026-04-22 默认执行分数语义修复
+
+- 事实：
+  - 默认 active chain 仍为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+  - 修复前，`daily_live_score_panel.csv` 暴露的是 policy `learned_score`，而 raw target weight 来自多头 policy 链。
+  - 这会造成“raw target-weight 为正，但展示的模型分数为负”的混淆案例。
+- 实现：
+  - 为 policy-family score heads 新增 selected composite decision-score 导出。
+  - 展示给 research-candidate 的分数现在跟随 target-weight 归一化前同一条被选中的 stock-level 决策链：candidate gate、learned / weight / gate / hold heads、hold scale 与 policy weight power。
+  - 未被选中的股票写为 `0.0`；research watchlist 现在只保留模型实际选中的候选。
+  - 交易计划文案与 CSV schema 现在使用 `模型综合决策分` / `model_decision_score`。
+- 验证：
+  - 未重训，只在前台刷新当前默认 production live panels。
+  - 最新信号日期：`2026-04-21`。
+  - raw positive target-weight 数量：`9`。
+  - 正向 decision-score 范围：`0.485579 -> 0.943472`。
+  - zero-weight 但 decision score 为正的数量：`0`。
+  - 已重新生成 `daily_research/execution/output/latest_trade_plan.txt`。
+  - `project_consistency_check` 通过，`failure_count=0`。
+- 教训：
+  - 对 `policy_v5b` 及相关 policy heads 而言，`learned_score` 是 sub-head / debug 信号，不是用户侧最终模型偏好。后续执行展示必须使用 selected composite decision score，除非目的明确是调试单个 sub-head。
+
+## 2026-04-22 项目系统维护扫描
+
+- 事实：
+  - 本轮主动项目扫描覆盖了结构、命名、分数 schema 一致性、文档健康、生成字节码残留和 artifact 占用。
+  - 未停止或打断任何训练任务。
+  - `daily_research/output` 与 `daily_research/cache` 仍是很大的热产物区域；没有明确保留策略前不做裁剪。
+- 实现：
+  - 更新 `daily_research/execution/run_research_candidate_trade_plan.py`，让 research-candidate trade plan 默认使用 `model_decision_score`，与默认执行链保持一致。
+  - 将 `daily_research/baseline/generate_daily_trade_plan.py` 行尾规范化为 LF。
+  - 删除 `daily_research` 下生成的 Python 字节码残留。
+- 验证：
+  - `daily_research.tools.project_consistency_check`：`status=ok`，`failure_count=0`。
+  - `daily_research/tools/doc_guard.py check`：`documentation_layout_issues=0`。
+  - active Python AST parse：检查 `193` 个文件，失败数 `0`。
+  - `git diff --check` 通过。
+  - 清理后字节码扫描：`pycache_dirs=0`，`pyc_files=0`。
+- 剩余风险：
+  - `daily_research` 仍然占用较大存储：总量约 `146.46 GB`，其中 `output` 约 `80.12 GB`，`cache` 约 `66.32 GB`。
+  - `pip check` 报告共享环境中存在非核心包依赖冲突，例如 `labelimg`、`onnxsim`、`pyqt5`、`zeep`、`inference`、`roboflow`；为避免扰动 `yolos` 训练 / 研究环境，本轮保持不改。
+- 教训：
+  - 本轮最高价值的维护修复不是大规模重写，而是关闭执行入口之间的 score-contract mismatch。后续 cleanup 应优先处理语义合同，再处理格式和存储卫生。
+
+## 2026-04-22 主脑 / 分脑完整性维护
+
+- 事实：
+  - 维护范围是工作区主脑与已附着分脑系统。
+  - 未停止或启动任何训练任务。
+  - 初始 PowerShell 读取时显示疑似中文乱码，但 Python UTF-8 读取确认真实 brain 文件是有效简体中文。
+- 实现：
+  - 新增 `daily_research/tools/brain_integrity_check.py`。
+  - 新守卫检查主脑 / 子脑附着、必需 manifest key、相对路径有效性、派生子脑读取顺序、写回路由、body map、区域特化、模块覆盖和可疑编码标记。
+  - 已将新守卫接入 `daily_research/tools/doc_guard.py check`。
+  - 已更新主脑与 `daily_research` governance / operations 文档，将该守卫暴露为标准结构验证命令。
+- 验证：
+  - `brain_integrity_check.py --json`：`status=ok`，`error_count=0`，`warning_count=0`。
+  - `brain_bootstrap.py --json`：主脑启动顺序可解析。
+  - `brain_bootstrap.py --child daily_research --json`：可解析。
+  - `brain_bootstrap.py --child t0_project --json`：可解析。
+  - `brain_bootstrap.py --child daily_stock_analysis-main --json`：可解析。
+- 教训：
+  - 主脑 / 分脑维护不能只依赖文字复核。manifest 合同需要可执行守卫，这样后续 agent 才能区分真实结构漂移和显示 / 编码伪象。
+
+## 2026-04-22 文档内容收口与简体中文统一
+
+- 动作前自检：
+  - 用户要求“所有文档内容均需整合入大脑中，另外都要用简体中文”。
+  - 本轮只处理文档治理与接管入口，不启动训练、不切换 live 默认执行、不改写 promotion 结论。
+  - 先确认 `daily_research/README.md` 为英文快速入口，`daily_stock_analysis-main/README.md` 为较长的简体中文公开产品指南，后者不适合被粗暴删除。
+- 已完成实现：
+  - 主脑写入全局文档治理规则：
+    - README、教程、审计、迁移说明等文档内容必须先整合进对应 brain。
+    - body 顶层文档只保留简体中文索引、公开指南或兼容入口。
+    - 面向接管和治理的文档默认使用简体中文。
+  - `daily_research/README.md` 已重写为简体中文快速索引，并明确 `daily_research/brain/` 为权威接管真源。
+  - `daily_research/brain/knowledge_center.md` 与 `operations_center.md` 已写入 README 降级和文档收口口径。
+  - `daily_stock_analysis-main/README.md` 已增加简体中文提示：AI 接管真源为 `daily_stock_analysis-main/brain/`。
+  - `daily_stock_analysis-main/brain/knowledge_center.md` 已整合公开 README 的稳定产品定位、核心能力、模型/数据/通知生态、fail-open 基本面降级和公开指南边界。
+  - `daily_stock_analysis-main/brain/operations_center.md` 已整合 README 的用户入口、配置域、验证入口、产品能力和免责声明口径。
+  - `daily_research/tools/doc_guard.py` 已增加 README 必须指向 brain 真源的片段守卫。
+- 决策：
+  - 保留 `daily_stock_analysis-main/README.md` 作为公开用户指南，因为它包含安装、部署、配置和展示信息；但 AI 接管不再以它为真源。
+  - 不把公开 README 的营销徽章、赞助展示、Star 历史等逐字搬入 brain；只沉淀对接管、维护、配置和产品边界有长期价值的稳定内容。
+- 后续要求：
+  - 新增或修改 README / docs 时，必须同步判断是否需要写入对应 brain。
+  - 文档结构变更后运行 `brain_integrity_check.py --json`、`doc_guard.py check` 和 `git diff --check`。
+
+## 2026-04-22 主分脑系统维护与兼容入口收口
+
+- 动作前自检：
+  - 用户要求系统审阅、整理、维护、简练并修复主分脑，同时逐项检查逻辑、结构、命名、依赖、实现与一致性问题。
+  - 本轮定位为治理与文档结构维护，不启动训练、不停止训练、不切换 live 默认执行、不改写 promotion 结论。
+  - 先复跑 `brain_integrity_check.py --json`、`doc_guard.py check`、`project_consistency_check.py`、`git status` 与 `git diff --stat`，再做修复。
+- 发现的事实：
+  - 主分脑结构守卫与文档守卫均已通过，说明 manifest、读写路径和基本文档布局没有硬性结构错误。
+  - `daily_stock_analysis-main` 的 AI 兼容入口仍有较强“AGENTS 即真源”口径，容易与工作区主分脑真源发生语义漂移。
+  - `daily_research/execution/使用教程.md` 作为操作教程尚未显式标注 `operations_center.md` 为权威操作真源。
+- 已完成实现：
+  - 将 `daily_stock_analysis-main/AGENTS.md` 改为仓库原生 AI 生态兼容入口，明确 brain 才是接管、结构边界和稳定规则真源。
+  - 将 `.github/copilot-instructions.md` 与 `.github/instructions/governance.instructions.md` 改为简体中文兼容入口，并保留 `scripts/check_ai_assets.py` 需要的 `Canonical source:` 字面合同。
+  - 为 `daily_stock_analysis-main/SKILL.md` 与 `strategies/README.md` 增加 AI 接管真源提示。
+  - 为 `daily_research/execution/使用教程.md` 增加权威操作真源提示。
+  - 将 AI 兼容入口规则、禁止未确认 git 发布、禁止硬编码密钥/账号/端口/模型/环境路径、用户可见变更需更新文档并评估 brain 写回等稳定规则写入 `daily_stock_analysis-main/brain/knowledge_center.md` 与 `operations_center.md`。
+  - 更新 `daily_research/tools/doc_guard.py`，把 README、教程、AGENTS、Copilot、governance instructions、SKILL 与 strategies README 的 brain 回指要求纳入可执行守卫。
+- 验证：
+  - `daily_research/tools/brain_integrity_check.py --json`：通过。
+  - `daily_research/tools/doc_guard.py check`：通过。
+  - `daily_research/tools/project_consistency_check.py`：通过，`failure_count=0`。
+  - `daily_stock_analysis-main/scripts/check_ai_assets.py`：通过。
+  - `git diff --check`：通过。
+  - 收尾进程复查未发现残留 `python / uvicorn / pythonw` 训练或服务进程。
+- 动作后复盘：
+  - 事实：本轮真正需要修复的不是主分脑 manifest，而是兼容入口的权威口径漂移。
+  - 推断：若只依赖人工说明，不把回指要求纳入 `doc_guard.py`，后续 AGENTS / Copilot / SKILL 类文件会再次变成平行真源。
+  - 决策：保留这些文件作为外部工具兼容入口，但稳定规则必须先写入对应 brain，再由兼容入口摘要引用。

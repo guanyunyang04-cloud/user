@@ -25,6 +25,7 @@
 - 默认先读 `identity -> state -> knowledge -> operations`
 - 遇到流程或纪律问题再读 `governance`
 - 需要历史证据时才下钻 `episodic`
+- `episodic_memory.md` 是轻量入口；完整历史原文与标题索引放在 `brain/references/`
 
 ## 4. 区域特化
 - `state_center`
