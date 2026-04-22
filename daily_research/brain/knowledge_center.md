@@ -14,6 +14,23 @@
   - 让模型直接从市场全局状态、个股演化路径与持仓上下文中学习动态执行
 - continuous_policy 的训练、评估、导出产物统一落到 `daily_research/output/continuous_policy`
 - `daily_research/continuous_policy/run_continuous_policy_protocol.py` 现在是 continuous_policy 的正式高层协议入口
+- continuous_policy 的 r10 部署可执行性链路已经落地为正式可搜索研究分支：
+  - `deploy_executability_target` 是派生标签 / 输出 / 审计信号，不新增神经网络权重头，避免破坏旧 artifact 加载
+  - `result_value_v9` 把部署可执行性压力接入组合预算目标
+  - `cash_constraint_deploy_guard_v6` 把强 `open/add` 意图从“只减少 clip”推进到“尽量形成真实正向权重变化”
+  - `split_heads_deploy_executability_r10` 是下一轮 bounded self-opt 的默认搜索入口
+- r10 的稳定教训是：`budget clip` 下降不等于 `deploy intent executable`；必须同时看 `deploy_intent_realized_rate`、`open_add_positive_weight_change_rate`、`add_to_hold_conflict_share` 与 `deploy_intent_dropped_share`
+- `cp_v3_deploy_executability_r10__study_r1` 进一步证明：
+  - 在当前 deploy-executability 目标下，`cash_constraint_deploy_guard_v6` 明显优于 `cash_constraint_intent_guard_v5`
+  - `cash_constraint_intent_guard_v5` 会把大量 `open/add` 意图重新压回 `hold`，不再是该目标下的优先主线
+  - `result_value_v9 + cash_constraint_deploy_guard_v6 + alpha_result_value_budget_split_v9` 是当前最稳定的 r10 组合
+  - `result_value_v8 + cash_constraint_deploy_guard_v6 + alpha_result_value_budget_split_v9` 保留了更强 raw performance，但仍未越过 cash timing / drawdown gate
+- r10 confirmatory 冠军当前仍是 `shadow_only`，说明“部署可执行性闭环成立”与“可 promotion”仍是两层不同结论；后续不得把前者误写成后者
+- 当前 r10 的主瓶颈已收口为：
+  - `cash_timing_quality_1d` 仍为负
+  - `deploy_intent_candidate_budget_drop_share` 仍很高
+  - `order_translation_conflict_rate` 仍在 `0.30` 左右
+  - `budget_action_entanglement` 仍明显存在
 - continuous_policy 当前已拆成两类训练合同：
   - `prototype_gbdt_v1 = non-epoch shadow prototype`
   - `formal_torch_v2 = epoch formal candidate`

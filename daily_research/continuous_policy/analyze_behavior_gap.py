@@ -155,6 +155,25 @@ def _build_semantic_conflicts(
             "avg_sell_release_value": 0.0,
             "avg_cash_defense_value": 0.0,
             "avg_value_arbitration_target": 0.0,
+            "avg_deploy_value_target": 0.0,
+            "avg_release_value_target": 0.0,
+            "avg_defense_value_target": 0.0,
+            "avg_deploy_gate_target": 0.0,
+            "avg_release_gate_target": 0.0,
+            "avg_defense_gate_target": 0.0,
+            "avg_deploy_executability_target": 0.0,
+            "deploy_intent_action_count": 0,
+            "deploy_intent_realized_count": 0,
+            "deploy_intent_realized_rate": 0.0,
+            "open_add_positive_weight_change_rate": 0.0,
+            "add_to_hold_conflict_count": 0,
+            "add_to_hold_conflict_share": 0.0,
+            "deploy_intent_hold_conflict_share": 0.0,
+            "deploy_intent_dropped_count": 0,
+            "deploy_intent_dropped_share": 0.0,
+            "avg_deploy_intent_candidate_count": 0.0,
+            "avg_deploy_intent_candidate_realized_rate": 0.0,
+            "avg_deploy_intent_candidate_budget_drop_share": 0.0,
             "avg_clipped_intent_risk": 0.0,
             "clipped_intent_risk_conflict_gap": 0.0,
             "high_cash_up_market_share": 0.0,
@@ -181,6 +200,13 @@ def _build_semantic_conflicts(
             "sell_release_value",
             "cash_defense_value",
             "value_arbitration_target",
+            "deploy_value_target",
+            "release_value_target",
+            "defense_value_target",
+            "deploy_gate_target",
+            "release_gate_target",
+            "defense_gate_target",
+            "deploy_executability_target",
             "clipped_intent_risk",
         ],
     ).copy()
@@ -238,6 +264,11 @@ def _build_semantic_conflicts(
             "budget_held_protected_count",
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
+            "deploy_intent_candidate_count",
+            "deploy_intent_candidate_realized_count",
+            "deploy_intent_candidate_realized_rate",
+            "deploy_intent_candidate_budget_drop_count",
+            "deploy_intent_candidate_budget_drop_share",
         ],
     )
     if turnover_working.empty:
@@ -264,6 +295,11 @@ def _build_semantic_conflicts(
             "budget_held_protected_count",
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
+            "deploy_intent_candidate_count",
+            "deploy_intent_candidate_realized_count",
+            "deploy_intent_candidate_realized_rate",
+            "deploy_intent_candidate_budget_drop_count",
+            "deploy_intent_candidate_budget_drop_share",
         ):
             if optional_column not in turnover_working.columns:
                 turnover_working[optional_column] = 0.0
@@ -289,6 +325,11 @@ def _build_semantic_conflicts(
                     "budget_held_protected_count",
                     "budget_split_bound_guard_count",
                     "budget_sell_priority_guard_count",
+                    "deploy_intent_candidate_count",
+                    "deploy_intent_candidate_realized_count",
+                    "deploy_intent_candidate_realized_rate",
+                    "deploy_intent_candidate_budget_drop_count",
+                    "deploy_intent_candidate_budget_drop_share",
                 ]
             ],
             how="left",
@@ -367,6 +408,52 @@ def _build_semantic_conflicts(
     avg_defense_gate_target = _safe_mean(
         working.get("defense_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
+    avg_deploy_executability_target = _safe_mean(
+        working.get("deploy_executability_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    model_action_lookup = working["model_action"].astype(str).str.lower()
+    weight_change_lookup = working["weight_change_action"].astype(str).str.lower()
+    deploy_intent_mask = model_action_lookup.isin({"open", "add"})
+    add_intent_mask = model_action_lookup == "add"
+    deploy_realized_mask = weight_change_lookup.isin({"open", "add"})
+    positive_weight_change_mask = working["delta_weight"].fillna(0.0) > 1.0e-8
+    add_to_hold_mask = add_intent_mask & (weight_change_lookup == "hold")
+    deploy_hold_mask = deploy_intent_mask & (weight_change_lookup == "hold")
+    deploy_dropped_mask = deploy_intent_mask & (
+        working.get("budget_dropped", pd.Series(False, index=working.index)).map(_safe_bool)
+        | working.get("forced_zero", pd.Series(False, index=working.index)).map(_safe_bool)
+        | (working["target_weight"].fillna(0.0) <= 1.0e-8)
+    )
+    deploy_intent_count = int(deploy_intent_mask.sum())
+    add_intent_count = int(add_intent_mask.sum())
+    deploy_intent_realized_count = int((deploy_intent_mask & deploy_realized_mask).sum())
+    open_add_positive_weight_change_count = int((deploy_intent_mask & positive_weight_change_mask).sum())
+    add_to_hold_conflict_count = int(add_to_hold_mask.sum())
+    deploy_intent_dropped_count = int(deploy_dropped_mask.sum())
+    deploy_intent_realized_rate = (
+        float(deploy_intent_realized_count / deploy_intent_count) if deploy_intent_count else 0.0
+    )
+    open_add_positive_weight_change_rate = (
+        float(open_add_positive_weight_change_count / deploy_intent_count) if deploy_intent_count else 0.0
+    )
+    add_to_hold_conflict_share = (
+        float(add_to_hold_conflict_count / add_intent_count) if add_intent_count else 0.0
+    )
+    deploy_intent_hold_conflict_share = (
+        float(deploy_hold_mask.sum() / deploy_intent_count) if deploy_intent_count else 0.0
+    )
+    deploy_intent_dropped_share = (
+        float(deploy_intent_dropped_count / deploy_intent_count) if deploy_intent_count else 0.0
+    )
+    avg_deploy_intent_candidate_count = _safe_mean(
+        day_merge.get("deploy_intent_candidate_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
+    )
+    avg_deploy_intent_candidate_realized_rate = _safe_mean(
+        day_merge.get("deploy_intent_candidate_realized_rate", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
+    )
+    avg_deploy_intent_candidate_budget_drop_share = _safe_mean(
+        day_merge.get("deploy_intent_candidate_budget_drop_share", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
+    )
     clipped_intent_series = working.get("clipped_intent_risk", pd.Series(0.0, index=working.index)).fillna(0.0)
     avg_clipped_intent_risk = _safe_mean(clipped_intent_series)
     if bool(working["is_order_translation_conflict"].any()) and bool((~working["is_order_translation_conflict"]).any()):
@@ -384,6 +471,15 @@ def _build_semantic_conflicts(
         diagnoses.append("微幅再平衡仍会造成订单层反向变化，需继续隔离 hold/add/reduce 的生命周期语义。")
     if budget_clipped_order_translation_conflict_rate > unclipped_order_translation_conflict_rate + 0.03:
         diagnoses.append("预算/换手约束会显著放大订单层动作偏离，预算头与动作头仍未真正解耦。")
+    if deploy_intent_count >= 5 and deploy_intent_realized_rate < 0.55:
+        diagnoses.append("模型给出的 open/add 部署意图未被足量转化为真实加仓，部署可执行性仍是主瓶颈。")
+    if add_intent_count >= 3 and add_to_hold_conflict_share >= 0.20:
+        diagnoses.append("add -> hold 冲突占比偏高，持仓加仓意图在预算/换手翻译层被过度钝化。")
+    if (
+        (deploy_intent_count >= 5 and deploy_intent_dropped_share >= 0.20)
+        or avg_deploy_intent_candidate_budget_drop_share >= 0.20
+    ):
+        diagnoses.append("open/add 意图被预算丢弃或归零的比例偏高，需要优先检查候选预算与部署地板。")
     if high_cash_up_market_share > high_cash_down_market_share + 0.05:
         diagnoses.append("高现金日更多出现在次日上涨前，当前现金部署仍带有顺周期保守偏差。")
 
@@ -453,6 +549,19 @@ def _build_semantic_conflicts(
         "avg_deploy_gate_target": avg_deploy_gate_target,
         "avg_release_gate_target": avg_release_gate_target,
         "avg_defense_gate_target": avg_defense_gate_target,
+        "avg_deploy_executability_target": avg_deploy_executability_target,
+        "deploy_intent_action_count": int(deploy_intent_count),
+        "deploy_intent_realized_count": int(deploy_intent_realized_count),
+        "deploy_intent_realized_rate": deploy_intent_realized_rate,
+        "open_add_positive_weight_change_rate": open_add_positive_weight_change_rate,
+        "add_to_hold_conflict_count": int(add_to_hold_conflict_count),
+        "add_to_hold_conflict_share": add_to_hold_conflict_share,
+        "deploy_intent_hold_conflict_share": deploy_intent_hold_conflict_share,
+        "deploy_intent_dropped_count": int(deploy_intent_dropped_count),
+        "deploy_intent_dropped_share": deploy_intent_dropped_share,
+        "avg_deploy_intent_candidate_count": avg_deploy_intent_candidate_count,
+        "avg_deploy_intent_candidate_realized_rate": avg_deploy_intent_candidate_realized_rate,
+        "avg_deploy_intent_candidate_budget_drop_share": avg_deploy_intent_candidate_budget_drop_share,
         "avg_clipped_intent_risk": avg_clipped_intent_risk,
         "clipped_intent_risk_conflict_gap": clipped_intent_risk_conflict_gap,
         "high_cash_up_market_share": high_cash_up_market_share,
@@ -777,6 +886,32 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "top_order_translation_conflict_pairs": list(
                         semantic_conflicts.get("top_order_translation_conflict_pairs", []) or []
+                    ),
+                },
+            }
+        )
+    if (
+        float(semantic_conflicts.get("deploy_intent_realized_rate", 0.0) or 0.0) < 0.55
+        and float(semantic_conflicts.get("deploy_intent_action_count", 0.0) or 0.0) >= 5
+    ) or float(semantic_conflicts.get("add_to_hold_conflict_share", 0.0) or 0.0) >= 0.20:
+        bottlenecks.append(
+            {
+                "name": "deploy_intent_not_executable",
+                "severity": "high",
+                "diagnosis": "open/add 部署意图未被稳定翻译为真实加仓，尤其需要跟踪 add -> hold 是否仍是主冲突。",
+                "evidence": {
+                    "deploy_intent_action_count": float(semantic_conflicts.get("deploy_intent_action_count", 0.0) or 0.0),
+                    "deploy_intent_realized_rate": float(semantic_conflicts.get("deploy_intent_realized_rate", 0.0) or 0.0),
+                    "open_add_positive_weight_change_rate": float(
+                        semantic_conflicts.get("open_add_positive_weight_change_rate", 0.0) or 0.0
+                    ),
+                    "add_to_hold_conflict_share": float(semantic_conflicts.get("add_to_hold_conflict_share", 0.0) or 0.0),
+                    "deploy_intent_dropped_share": float(semantic_conflicts.get("deploy_intent_dropped_share", 0.0) or 0.0),
+                    "avg_deploy_intent_candidate_budget_drop_share": float(
+                        semantic_conflicts.get("avg_deploy_intent_candidate_budget_drop_share", 0.0) or 0.0
+                    ),
+                    "avg_deploy_executability_target": float(
+                        semantic_conflicts.get("avg_deploy_executability_target", 0.0) or 0.0
                     ),
                 },
             }

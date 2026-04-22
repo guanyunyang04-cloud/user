@@ -333,6 +333,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_deploy_executability_r10": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v8", "alpha_result_value_budget_split_v9"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_intent_guard_v5", "cash_constraint_deploy_guard_v6"],
+        "budget_objective": ["result_value_v8", "result_value_v9"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -587,6 +604,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_deploy_executability_r10": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v9",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_deploy_guard_v6",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -606,6 +640,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_three_value_gate_r6b": "return_recovery_v2",
     "split_heads_hierarchical_arbitration_r7": "return_recovery_v2",
     "split_heads_constraint_arbitration_r8": "return_recovery_v2",
+    "split_heads_deploy_executability_r10": "deploy_executability_v1",
 }
 
 
@@ -666,6 +701,41 @@ def _score_protocol_summary(
         )
         or 0.0
     )
+    deploy_intent_realized_rate = float(
+        semantic_conflicts.get(
+            "deploy_intent_realized_rate",
+            continuity.get("deploy_intent_realized_rate", 0.0),
+        )
+        or 0.0
+    )
+    open_add_positive_weight_change_rate = float(
+        semantic_conflicts.get(
+            "open_add_positive_weight_change_rate",
+            continuity.get("open_add_positive_weight_change_rate", 0.0),
+        )
+        or 0.0
+    )
+    add_to_hold_conflict_share = float(
+        semantic_conflicts.get(
+            "add_to_hold_conflict_share",
+            continuity.get("add_to_hold_conflict_share", 0.0),
+        )
+        or 0.0
+    )
+    deploy_intent_hold_conflict_share = float(
+        semantic_conflicts.get(
+            "deploy_intent_hold_conflict_share",
+            continuity.get("deploy_intent_hold_conflict_share", 0.0),
+        )
+        or 0.0
+    )
+    deploy_intent_dropped_share = float(semantic_conflicts.get("deploy_intent_dropped_share", 0.0) or 0.0)
+    deploy_intent_candidate_budget_drop_share = float(
+        semantic_conflicts.get("avg_deploy_intent_candidate_budget_drop_share", deploy_intent_dropped_share) or 0.0
+    )
+    deploy_executability_alignment = float(continuity.get("deploy_executability_forward_alignment_5d", 0.0) or 0.0)
+    deploy_gate_alignment = float(continuity.get("deploy_gate_forward_alignment_5d", 0.0) or 0.0)
+    sell_selection_quality = float(continuity.get("sell_selection_quality_5d", 0.0) or 0.0)
 
     threshold_gap_penalty = (
         max(0.0, PROMOTION_THRESHOLDS["open_win_rate_5d"] - open_win) * 1.00
@@ -696,7 +766,57 @@ def _score_protocol_summary(
     total_checks = max(len(gate_checks), 1)
     gate_pass_ratio = passed_checks / float(total_checks)
 
-    if str(objective_profile or "promotion_balanced_v2") == "return_recovery_v2":
+    objective_profile_name = str(objective_profile or "promotion_balanced_v2")
+    if objective_profile_name == "deploy_executability_v1":
+        performance_breakdown = {
+            "annual_return": annual_return * 2.55,
+            "sharpe": sharpe * 0.30,
+            "open_win_rate_5d": open_win * 1.05,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate * 1.45,
+            "open_add_positive_weight_change_rate": open_add_positive_weight_change_rate * 1.15,
+            "deploy_gate_forward_alignment_5d": _bounded(deploy_gate_alignment, -0.25, 0.20) * 0.70,
+            "deploy_executability_forward_alignment_5d": _bounded(deploy_executability_alignment, -0.25, 0.20) * 0.78,
+            "sell_selection_quality_5d": _bounded(sell_selection_quality, -0.04, 0.05) * 0.38,
+            "reduce_success_rate_5d": reduce_success * 0.88,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.90,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.72,
+            "trend_capture_rate_10d": trend_capture * 0.88,
+            "active_alignment_bonus": active_alignment_bonus,
+            "gate_pass_ratio": gate_pass_ratio * 0.36,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.40,
+            "exposure_penalty": -_exposure_penalty(avg_gross_exposure),
+            "negative_return_penalty": -negative_return_penalty * 3.20,
+            "negative_sharpe_penalty": -negative_sharpe_penalty * 0.58,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.40,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.80,
+            "add_to_hold_conflict_penalty": -add_to_hold_conflict_share * 1.35,
+            "deploy_hold_conflict_penalty": -deploy_intent_hold_conflict_share * 1.05,
+            "deploy_dropped_penalty": -deploy_intent_dropped_share * 1.15,
+            "deploy_candidate_budget_drop_penalty": -deploy_intent_candidate_budget_drop_share * 1.05,
+        }
+        stability_breakdown = {
+            "gate_pass_ratio": gate_pass_ratio * 0.62,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate * 1.05,
+            "open_add_positive_weight_change_rate": open_add_positive_weight_change_rate * 0.88,
+            "deploy_executability_forward_alignment_5d": _bounded(deploy_executability_alignment, -0.25, 0.20) * 0.54,
+            "reduce_success_rate_5d": reduce_success * 0.46,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.48,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.44,
+            "hold_share": hold_share * 0.18,
+            "reversal_penalty": -reversal * 1.15,
+            "shadow_reversal_penalty": -shadow_reversal * 1.10,
+            "reversal_excess_penalty": -reversal_excess_penalty,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.10,
+            "threshold_gap_penalty": -threshold_gap_penalty * 1.05,
+            "training_evidence_bonus": 0.32 if training_evidence_ok else -0.40,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.95,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 1.05,
+            "add_to_hold_conflict_penalty": -add_to_hold_conflict_share * 1.60,
+            "deploy_hold_conflict_penalty": -deploy_intent_hold_conflict_share * 1.20,
+            "deploy_dropped_penalty": -deploy_intent_dropped_share * 1.25,
+            "deploy_candidate_budget_drop_penalty": -deploy_intent_candidate_budget_drop_share * 1.25,
+        }
+    elif objective_profile_name == "return_recovery_v2":
         performance_breakdown = {
             "annual_return": annual_return * 3.10,
             "sharpe": sharpe * 0.42,
@@ -785,7 +905,7 @@ def _score_protocol_summary(
         "gate_pass_ratio": gate_pass_ratio,
         "passed_check_count": passed_checks,
         "total_check_count": total_checks,
-        "objective_profile": str(objective_profile or "promotion_balanced_v2"),
+        "objective_profile": objective_profile_name,
         "primary_metrics": {
             "annual_return": annual_return,
             "sharpe": sharpe,
@@ -801,6 +921,15 @@ def _score_protocol_summary(
             "shadow_reversal_rate_3d": shadow_reversal,
             "semantic_conflict_rate": semantic_conflict_rate,
             "order_translation_conflict_rate": order_translation_conflict_rate,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate,
+            "open_add_positive_weight_change_rate": open_add_positive_weight_change_rate,
+            "add_to_hold_conflict_share": add_to_hold_conflict_share,
+            "deploy_intent_hold_conflict_share": deploy_intent_hold_conflict_share,
+            "deploy_intent_dropped_share": deploy_intent_dropped_share,
+            "deploy_intent_candidate_budget_drop_share": deploy_intent_candidate_budget_drop_share,
+            "deploy_executability_forward_alignment_5d": deploy_executability_alignment,
+            "deploy_gate_forward_alignment_5d": deploy_gate_alignment,
+            "sell_selection_quality_5d": sell_selection_quality,
             "training_evidence_status": str(training_evidence.get("status", "") or ""),
         },
     }

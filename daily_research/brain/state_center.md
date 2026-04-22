@@ -2,6 +2,62 @@
 
 快照日期：`2026-04-22`
 
+## 2026-04-22 r10 bounded self-opt 结果
+- 事实：r10 bounded self-opt `cp_v3_deploy_executability_r10__study_r1` 已在前台完整跑完，耗时约 `3.45h`，包含 `8` 个 screening trial 与 `2` 个 confirmatory trial，`completed_trial_count = 8`，`failed_trial_count = 0`，`confirmatory_completed_trial_count = 2`。
+- 事实：当前 deploy-executability objective 下的 confirmatory 冠军是 `cp_v3_deploy_executability_r10__study_r1__confirm_02`，配置为：
+  - `loss_profile = alpha_result_value_budget_split_v9`
+  - `budget_calibration = cash_constraint_deploy_guard_v6`
+  - `budget_objective = result_value_v9`
+  - `training_evidence.status = sufficient`
+  - `promotion_gate.status = shadow_only`
+- 事实：冠军 trial 的关键指标为：
+  - `composite_score = 8.588851`
+  - `annual_return = 0.2917500761`
+  - `sharpe = 1.1731900982`
+  - `reduce_success_rate_5d = 0.8571428571`
+  - `exit_timeliness_rate_5d = 0.6666666667`
+  - `cash_timing_quality_1d = -0.0155974839`
+  - `hold_share = 0.5969868173`
+  - `semantic_conflict_rate = 0.0018832392`
+  - `order_translation_conflict_rate = 0.3069679849`
+  - `deploy_intent_realized_rate = 0.905`
+  - `add_to_hold_conflict_share = 0.0218579235`
+  - `deploy_intent_candidate_budget_drop_share = 0.7199674656`
+- 事实：r10 screening 的结构性结果已经比较清楚：
+  - `cash_constraint_deploy_guard_v6` 平均 `deploy_intent_realized_rate = 0.8195`，显著高于 `cash_constraint_intent_guard_v5` 的 `0.3235`
+  - `cash_constraint_deploy_guard_v6` 平均 `add_to_hold_conflict_share = 0.0503`，显著低于 `cash_constraint_intent_guard_v5` 的 `0.7594`
+  - 在 `v6` 分支内，`result_value_v9` 赢得 composite / stability；`result_value_v8` 拿到更高 raw return / sharpe，但 cash timing 与 drawdown 仍不过关
+- 事实：r10 冠军相对 r9 confirmatory champion 的变化是：
+  - 改善：`reduce_success_rate_5d 0.5 -> 0.8571`，`exit_timeliness_rate_5d 0.4 -> 0.6667`，`cash_timing_quality_1d -0.0367 -> -0.0156`，`semantic_conflict_rate 0.0108 -> 0.0019`
+  - 未改善：`annual_return 0.7203 -> 0.2918`，`sharpe 2.3841 -> 1.1732`，`order_translation_conflict_rate 0.2950 -> 0.3070`
+- 推断：r10 证明了“部署意图可执行性”方向是对的，且 `v6` 已经明显优于 `v5`；但当前最优组合仍未同时守住收益、现金时机和权重翻译层一致性，因此还不能进入 promotion。
+- 当前优先级：若继续推进 continuous_policy，下一轮不应回退到 `cash_constraint_intent_guard_v5`，而应在 `cash_constraint_deploy_guard_v6` 主线下继续处理：
+  - `cash_timing_quality_1d`
+  - `deploy_intent_candidate_budget_drop_share`
+  - `order_translation_conflict_rate`
+  - `budget_action_entanglement`
+
+## 2026-04-22 r10 部署可执行性闭环状态
+- 事实：`continuous_policy` 已新增 r10 部署可执行性链路，但仍只属于 research / shadow 分支，未切换 live 默认执行，未改写 promotion 结论。
+- 事实：新增可执行入口包括：
+  - `budget_objective = result_value_v9`
+  - `loss_profile = alpha_result_value_budget_split_v9`
+  - `budget_calibration = cash_constraint_deploy_guard_v6`
+  - `search_profile = split_heads_deploy_executability_r10`
+  - `objective_profile = deploy_executability_v1`
+- 事实：r10 smoke `cp_v3_deploy_executability_r10__smoke01` 已跑通 `train -> evaluate -> shadow continuity -> export -> behavior audit -> conclusion ledger`。
+- 事实：该 smoke 只跑 `1` epoch，`training_evidence.status = insufficient`，`promotion_gate.status = shadow_only`，不能作为 promotable verdict。
+- 事实：r10 smoke 的行为审计已能显式输出部署可执行性指标：
+  - `deploy_intent_action_count = 4`
+  - `deploy_intent_realized_rate = 1.0`
+  - `open_add_positive_weight_change_rate = 1.0`
+  - `add_to_hold_conflict_share = 0.0`
+  - `deploy_intent_dropped_share = 0.0`
+  - `avg_deploy_intent_candidate_budget_drop_share = 0.0714285714`
+  - `avg_deploy_executability_target = 0.3399522728`
+- 推断：r10 已解决“系统是否能度量并约束部署意图可执行性”的工程闭环；尚未证明完整训练后可同时守住收益、sell-side、cash timing 与 promotion gate。
+- 当前优先级：下一轮若继续 continuous_policy，应先用 r10 profile 做 bounded self-opt / full formal，而不是再把 `clip reduction` 当成 deploy executability 的替代指标。
+
 ## 1. 当前接管摘要
 - `daily_research` 是当前工作区的正式生产研究与执行主线
 - 当前接管不再从 `episodic_memory.md` 起步

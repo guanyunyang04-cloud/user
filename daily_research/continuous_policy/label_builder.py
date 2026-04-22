@@ -1016,6 +1016,26 @@ def build_action_labels_for_date(
     deploy_gate_target = np.clip(deploy_value_target / gate_denominator, 0.0, 1.0)
     release_gate_target = np.clip(release_value_target / gate_denominator, 0.0, 1.0)
     defense_gate_target = np.clip(defense_value_target / gate_denominator, 0.0, 1.0)
+    deploy_action_mask = action_series.isin({"open", "add"}).to_numpy(dtype=float)
+    deploy_executability_target = np.clip(
+        0.30 * deploy_action_value
+        + 0.22 * deploy_value_target
+        + 0.18 * deploy_gate_target
+        + 0.12 * deployment_opportunity_cost
+        + 0.10 * alpha_opportunity_value
+        + 0.06 * large_upside_1d_target
+        + 0.04 * held_float
+        - 0.16 * release_gate_target
+        - 0.12 * defense_gate_target
+        - 0.08 * cash_defense_value,
+        0.0,
+        1.0,
+    )
+    deploy_executability_target = np.clip(
+        deploy_executability_target * (0.72 + 0.28 * deploy_action_mask),
+        0.0,
+        1.0,
+    )
     working["large_upside_1d_target"] = large_upside_1d_target
     working["alpha_opportunity_value"] = alpha_opportunity_value
     working["hold_continuation_value"] = hold_continuation_value
@@ -1030,6 +1050,7 @@ def build_action_labels_for_date(
     working["deploy_gate_target"] = deploy_gate_target
     working["release_gate_target"] = release_gate_target
     working["defense_gate_target"] = defense_gate_target
+    working["deploy_executability_target"] = deploy_executability_target
     working["clipped_intent_risk"] = 0.0
     working["holding_flag_target"] = held_float
     working["forward_benchmark_return_1d"] = benchmark_fwd1.to_numpy(dtype=float)
@@ -1071,6 +1092,7 @@ def build_action_labels_for_date(
         "deploy_gate_target",
         "release_gate_target",
         "defense_gate_target",
+        "deploy_executability_target",
         "clipped_intent_risk",
         "holding_flag_target",
         "forward_benchmark_return_1d",

@@ -1236,3 +1236,40 @@
   - 新的动作后复盘先写入 `episodic_memory.md`
   - 若本文件再次膨胀，再生成新的 index + raw archive，并保留旧归档
   - 历史原文只作为证据，不自动覆盖 `state_center.md` 中的当前状态
+
+## 2026-04-22 r10 deploy-executability 操作入口
+
+- r10 的研究目标是验证 `open/add` 部署意图能否真实转化为正向权重变化，而不是只压低 budget clip。
+- r10 入口参数：
+  - `--loss-profile alpha_result_value_budget_split_v9`
+  - `--budget-objective result_value_v9`
+  - `--budget-calibration cash_constraint_deploy_guard_v6`
+  - `--search-profile split_heads_deploy_executability_r10`
+  - 默认 objective profile：`deploy_executability_v1`
+- r10 最小 smoke 命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_deploy_executability_r10__smoke01 --max-universe-size 60 --epochs 1 --min-epochs 1 --resume-mode fresh --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v9 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_deploy_guard_v6 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 128 --sequence-layers 2 --daily-hidden-dim 96 --dropout 0.12 --daily-dropout 0.08 --batch-size 256`
+- r10 bounded study dry-run 命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_deploy_executability_r10 --trial-count 2 --confirmatory-max-candidates 1 --study-tag cp_v3_deploy_executability_r10__dry_run --dry-run`
+- r10 本轮完整 bounded study 命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_deploy_executability_r10 --trial-count 8 --confirmatory-max-candidates 2 --study-tag cp_v3_deploy_executability_r10__study_r1`
+- r10 本轮 study 结果入口：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_deploy_executability_r10__study_r1/study_summary.json`
+  - ranking csv：`daily_research/output/continuous_policy/studies/cp_v3_deploy_executability_r10__study_r1/trial_ranking.csv`
+  - stability champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_deploy_executability_r10__study_r1__confirm_02/protocol_summary.json`
+  - performance champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_deploy_executability_r10__study_r1__confirm_01/protocol_summary.json`
+- 当前应优先看的结论：
+  - `confirm_02` 是当前 deploy-executability objective 下的冠军：`v9 / v6 / v9`
+  - `confirm_01` 保留更高 raw performance：`v9 / v6 / v8`
+  - 两个 confirmatory 均完成独立训练 run，且最佳 checkpoint 与对应 screening 一致，说明前两名配置在当前数据窗内是稳定复现，不是偶然漂移
+- 当前不要误判的点：
+  - `cash_constraint_intent_guard_v5` 在 r10 study 中显著退化为高 `add_to_hold_conflict_share` / 低 `deploy_intent_realized_rate`
+  - `shadow_only` 仍然成立，当前不能用 r10 study 结果覆盖 live 默认执行或 promotion 结论
+- r10 验收重点：
+  - `deploy_intent_realized_rate`
+  - `open_add_positive_weight_change_rate`
+  - `add_to_hold_conflict_share`
+  - `deploy_intent_dropped_share`
+  - `avg_deploy_intent_candidate_budget_drop_share`
+  - `deploy_executability_forward_alignment_5d`
+  - 同时继续守住 `annual_return / sharpe / open_win_rate_5d / reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
+- 注意：`1` epoch smoke 只证明链路可执行，不构成 formal verdict；正式判断仍必须满足 `training_evidence.status = sufficient` 与 promotion gate。

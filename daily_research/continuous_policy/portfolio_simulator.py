@@ -26,6 +26,7 @@ BUDGET_CALIBRATION_CASH_TRANSLATION = "cash_translation_guard_v2"
 BUDGET_CALIBRATION_CASH_TRANSLATION_SELL = "cash_translation_sell_guard_v3"
 BUDGET_CALIBRATION_CASH_CONSTRAINT = "cash_constraint_guard_v4"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT = "cash_constraint_intent_guard_v5"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY = "cash_constraint_deploy_guard_v6"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -34,6 +35,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
     BUDGET_CALIBRATION_CASH_CONSTRAINT,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
 )
 
 
@@ -101,6 +103,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_intent_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
         "cash_constraint_intent_guard_v5": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
         "intent_preserving_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+        "cash_constraint_deploy": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+        "cash_constraint_deploy_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+        "cash_constraint_deploy_guard_v6": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+        "deploy_executability_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
     }
     if text not in aliases:
         raise ValueError(
@@ -649,17 +655,24 @@ class PortfolioState:
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
         }
-        intent_preserving_constraint_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT
+        intent_preserving_constraint_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+        }
+        deploy_executability_constraint_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -702,6 +715,7 @@ class PortfolioState:
         deploy_gate_series = _policy_numeric("deploy_gate_target")
         release_gate_series = _policy_numeric("release_gate_target")
         defense_gate_series = _policy_numeric("defense_gate_target")
+        deploy_executability_series = _policy_numeric("deploy_executability_target")
         if hierarchical_budget_mode:
             decision_gate_denominator_series = (deploy_value_series + release_value_series + 1.0e-6).clip(lower=1.0e-6)
             decision_deploy_gate_series = (
@@ -733,6 +747,8 @@ class PortfolioState:
         flat_deployment_opportunity_cost = _masked_mean(deployment_opportunity_series, flat_mask)
         flat_deploy_value = _masked_mean(deploy_value_series, flat_mask)
         flat_deploy_gate = _masked_mean(decision_deploy_gate_series, flat_mask)
+        flat_deploy_executability = _masked_mean(deploy_executability_series, flat_mask)
+        held_deploy_executability = _masked_mean(deploy_executability_series, held_mask)
         avg_value_arbitration_target = float(value_arbitration_series.clip(0.0, 1.0).mean()) if len(value_arbitration_series) else 0.5
         avg_alpha_opportunity_value = float(alpha_opportunity_series.clip(0.0, 1.0).mean()) if len(alpha_opportunity_series) else 0.0
         avg_cash_defense_value = float(cash_defense_series.clip(0.0, 1.0).mean()) if len(cash_defense_series) else 0.0
@@ -742,6 +758,7 @@ class PortfolioState:
         avg_deploy_gate_target = float(decision_deploy_gate_series.clip(0.0, 1.0).mean()) if len(decision_deploy_gate_series) else 0.0
         avg_release_gate_target = float(decision_release_gate_series.clip(0.0, 1.0).mean()) if len(decision_release_gate_series) else 0.0
         avg_stock_defense_gate_target = float(defense_gate_series.clip(0.0, 1.0).mean()) if len(defense_gate_series) else 0.0
+        avg_deploy_executability_target = float(deploy_executability_series.clip(0.0, 1.0).mean()) if len(deploy_executability_series) else 0.0
         held_defense_gate = 0.0 if hierarchical_budget_mode else held_stock_defense_gate
         avg_defense_gate_target = 0.0 if hierarchical_budget_mode else avg_stock_defense_gate_target
         held_clipped_intent_risk = _masked_mean(clipped_intent_risk_series, held_mask)
@@ -781,6 +798,7 @@ class PortfolioState:
                     + 0.18 * flat_alpha_opportunity_value
                     + 0.14 * flat_deployment_opportunity_cost
                     + 0.12 * flat_deploy_value
+                    + 0.10 * flat_deploy_executability
                     + 0.14 * budget_model_deploy_gate_signal
                     + 0.10 * budget_model_deploy_value_signal
                     + 0.08 * budget_model_alpha_opportunity_signal
@@ -828,6 +846,7 @@ class PortfolioState:
                     + flat_deployment_opportunity_cost * 0.14
                     + flat_deploy_value * 0.14
                     + flat_deploy_gate * 0.12
+                    + flat_deploy_executability * 0.10
                     + max(avg_value_arbitration_target - 0.50, 0.0) * 0.18
                     - budget_risk_off_score * 0.45
                     - avg_cash_defense_value * 0.14
@@ -866,7 +885,7 @@ class PortfolioState:
             position_cap_target = float(
                 np.clip(position_cap_target - budget_risk_off_score * 0.025 + budget_deploy_score * 0.006, 0.05, 0.35)
             )
-        elif budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT:
+        elif budget_calibration in {BUDGET_CALIBRATION_CASH_CONSTRAINT, BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY}:
             portfolio_constraint_pressure = float(
                 np.clip(
                     0.42 * budget_model_defense_gate_signal
@@ -894,18 +913,19 @@ class PortfolioState:
                     + 0.24 * budget_model_deploy_value_signal
                     + 0.18 * flat_alpha_opportunity_value
                     + 0.12 * flat_deployment_opportunity_cost
+                    + (0.14 * flat_deploy_executability if deploy_executability_constraint_mode else 0.0)
                     + 0.10 * budget_model_alpha_opportunity_signal,
                     0.0,
                     1.0,
                 )
             )
             risk_cut = (
-                portfolio_constraint_pressure * (0.10 + current_gross_exposure * 0.16)
+                portfolio_constraint_pressure * (0.09 + current_gross_exposure * (0.14 if deploy_executability_constraint_mode else 0.16))
                 + portfolio_release_pressure * 0.04
-                - portfolio_deploy_pressure * 0.03
+                - portfolio_deploy_pressure * (0.05 if deploy_executability_constraint_mode else 0.03)
             )
             deploy_boost = (
-                portfolio_deploy_pressure * 0.055
+                portfolio_deploy_pressure * (0.070 if deploy_executability_constraint_mode else 0.055)
                 + budget_model_alpha_focus_signal * 0.018
                 if portfolio_constraint_pressure < 0.40 and budget_model_cash_timing_signal < 0.46
                 else 0.0
@@ -913,8 +933,8 @@ class PortfolioState:
             gross_exposure_target = float(
                 np.clip(
                     gross_exposure_target - risk_cut + deploy_boost,
-                    0.18,
-                    min(0.92, max(gross_exposure_target_raw + 0.05, 0.32)),
+                    0.20 if deploy_executability_constraint_mode else 0.18,
+                    min(0.94 if deploy_executability_constraint_mode else 0.92, max(gross_exposure_target_raw + 0.05, 0.32)),
                 )
             )
             candidate_budget = int(
@@ -923,7 +943,7 @@ class PortfolioState:
                         candidate_budget
                         - portfolio_constraint_pressure * 2.2
                         - portfolio_release_pressure * 0.8
-                        + portfolio_deploy_pressure * 1.8
+                        + portfolio_deploy_pressure * (2.2 if deploy_executability_constraint_mode else 1.8)
                         + budget_model_alpha_focus_signal * 0.5
                     ),
                     1,
@@ -935,7 +955,7 @@ class PortfolioState:
                     turnover_budget
                     + portfolio_release_pressure * 0.12
                     + portfolio_constraint_pressure * 0.08
-                    - portfolio_deploy_pressure * 0.02,
+                    - portfolio_deploy_pressure * (0.01 if deploy_executability_constraint_mode else 0.02),
                     0.08,
                     1.00,
                 )
@@ -944,9 +964,9 @@ class PortfolioState:
                 np.clip(
                     position_cap_target
                     - portfolio_constraint_pressure * 0.028
-                    + portfolio_deploy_pressure * 0.010,
+                    + portfolio_deploy_pressure * (0.014 if deploy_executability_constraint_mode else 0.010),
                     0.05,
-                    0.32,
+                    0.34 if deploy_executability_constraint_mode else 0.32,
                 )
             )
         elif budget_calibration in {BUDGET_CALIBRATION_CASH_TRANSLATION, BUDGET_CALIBRATION_CASH_TRANSLATION_SELL}:
@@ -1501,6 +1521,7 @@ class PortfolioState:
             + deployment_opportunity_series.clip(0.0, 1.0) * 0.22
             + deploy_value_series.clip(0.0, 1.0) * 0.18
             + decision_deploy_gate_series.clip(0.0, 1.0) * 0.16
+            + deploy_executability_series.clip(0.0, 1.0) * 0.14
             + hold_continuation_series.clip(0.0, 1.0) * 0.08
             + action_names.isin({"open", "add"}).astype(float) * 0.16
             + action_names.eq("hold").astype(float) * 0.08
@@ -1572,6 +1593,20 @@ class PortfolioState:
                 model_action_name = str(policy.at[stock, "action_label"] or "skip").strip().lower()
                 if model_action_name not in {"skip", "open", "hold", "add", "reduce", "exit"}:
                     continue
+                deploy_executability_value = float(deploy_executability_series.get(stock, 0.0))
+                decision_deploy_value = float(decision_deploy_gate_series.get(stock, 0.0))
+                decision_release_value = float(decision_release_gate_series.get(stock, 0.0))
+                strong_deploy_executable = bool(
+                    deploy_executability_constraint_mode
+                    and model_action_name in {"open", "add"}
+                    and (
+                        deploy_executability_value >= 0.52
+                        or (
+                            decision_deploy_value >= decision_release_value + 0.06
+                            and float(deploy_value_series.get(stock, 0.0)) >= float(release_value_series.get(stock, 0.0))
+                        )
+                    )
+                )
                 if previous_weight > 1e-8:
                     deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
                     if model_action_name == "hold":
@@ -1589,7 +1624,11 @@ class PortfolioState:
                             position_cap_target,
                             previous_weight + max(deadband * 1.35, previous_weight * (0.035 + budget_model_deploy_signal * 0.040), 0.0035),
                         )
-                        hard_add_floor = previous_weight if intent_preserving_constraint_mode else min_add_weight
+                        hard_add_floor = (
+                            min_add_weight
+                            if strong_deploy_executable
+                            else previous_weight if intent_preserving_constraint_mode else min_add_weight
+                        )
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_add_floor)
                         translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), min_add_weight)
                         if target_value < hard_add_floor - 1e-12:
@@ -1615,7 +1654,11 @@ class PortfolioState:
                             position_cap_target,
                             max(execution_deadband_abs * 2.5, 0.012 + budget_model_deploy_signal * 0.010 + budget_model_alpha_focus_signal * 0.006),
                         )
-                        hard_open_floor = 0.0 if intent_preserving_constraint_mode else min_open_weight
+                        hard_open_floor = (
+                            min_open_weight
+                            if strong_deploy_executable
+                            else 0.0 if intent_preserving_constraint_mode else min_open_weight
+                        )
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_open_floor)
                         translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), min_open_weight)
                         if target_value < hard_open_floor - 1e-12:
@@ -1747,6 +1790,22 @@ class PortfolioState:
         if float(new_weights.sum()) > 0.999:
             new_weights = new_weights / float(new_weights.sum())
         self.cash_weight = max(0.0, 1.0 - float(new_weights.sum()))
+        deploy_intent_candidate_mask = action_names.isin({"open", "add"})
+        deploy_intent_candidate_count = int(deploy_intent_candidate_mask.sum())
+        deploy_intent_candidate_realized_count = int(
+            ((new_weights - current) > 1.0e-8).loc[deploy_intent_candidate_mask].sum()
+        )
+        deploy_intent_candidate_budget_drop_count = int(
+            (
+                deploy_intent_candidate_mask
+                & (
+                    budget_dropped.reindex(prices.index).fillna(False)
+                    | forced_zero.reindex(prices.index).fillna(False)
+                    | (desired_strength.reindex(prices.index).fillna(0.0) <= 1.0e-12)
+                    | (new_weights.reindex(prices.index).fillna(0.0) <= 1.0e-8)
+                )
+            ).sum()
+        )
 
         actions: list[dict[str, Any]] = []
         for stock in prices.index:
@@ -1889,6 +1948,7 @@ class PortfolioState:
                     "deploy_gate_target": float(policy.at[stock, "deploy_gate_target"] or 0.0) if "deploy_gate_target" in policy.columns else 0.0,
                     "release_gate_target": float(policy.at[stock, "release_gate_target"] or 0.0) if "release_gate_target" in policy.columns else 0.0,
                     "defense_gate_target": float(policy.at[stock, "defense_gate_target"] or 0.0) if "defense_gate_target" in policy.columns else 0.0,
+                    "deploy_executability_target": float(policy.at[stock, "deploy_executability_target"] or 0.0) if "deploy_executability_target" in policy.columns else 0.0,
                     "clipped_intent_risk": float(policy.at[stock, "clipped_intent_risk"] or 0.0) if "clipped_intent_risk" in policy.columns else 0.0,
                     "exit_timing_pressure": float(policy.at[stock, "exit_timing_pressure"] or 0.0) if "exit_timing_pressure" in policy.columns else 0.0,
                     "execution_deadband": float(deadband if previous_weight > 1e-8 else 0.0),
@@ -1966,6 +2026,45 @@ class PortfolioState:
             if str(item.get("model_action", "") or "").strip().lower()
             != str(item.get("weight_change_action", "") or "").strip().lower()
         )
+        deploy_intent_items = [
+            item
+            for item in actions
+            if str(item.get("model_action", "") or "").strip().lower() in {"open", "add"}
+        ]
+        add_intent_items = [
+            item
+            for item in actions
+            if str(item.get("model_action", "") or "").strip().lower() == "add"
+        ]
+        deploy_realized_count = sum(
+            1
+            for item in deploy_intent_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() in {"open", "add"}
+        )
+        deploy_positive_delta_count = sum(
+            1
+            for item in deploy_intent_items
+            if float(item.get("delta_weight", 0.0) or 0.0) > 1.0e-8
+        )
+        add_to_hold_conflict_count = sum(
+            1
+            for item in add_intent_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() == "hold"
+        )
+        deploy_hold_conflict_count = sum(
+            1
+            for item in deploy_intent_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() == "hold"
+        )
+        deploy_intent_dropped_count = sum(
+            1
+            for item in deploy_intent_items
+            if bool(item.get("budget_dropped", False))
+            or bool(item.get("forced_zero", False))
+            or float(item.get("target_weight", 0.0) or 0.0) <= 1.0e-8
+        )
+        deploy_intent_count = len(deploy_intent_items)
+        add_intent_count = len(add_intent_items)
         self.recent_turnovers.append(realized_turnover)
         if len(self.recent_turnovers) > 60:
             self.recent_turnovers = self.recent_turnovers[-60:]
@@ -2044,6 +2143,9 @@ class PortfolioState:
             "avg_deploy_gate_target": avg_deploy_gate_target,
             "avg_release_gate_target": avg_release_gate_target,
             "avg_defense_gate_target": avg_defense_gate_target,
+            "flat_deploy_executability_target": flat_deploy_executability,
+            "held_deploy_executability_target": held_deploy_executability,
+            "avg_deploy_executability_target": avg_deploy_executability_target,
             "held_clipped_intent_risk": held_clipped_intent_risk,
             "avg_clipped_intent_risk": avg_clipped_intent_risk,
             "held_exit_timing_pressure": held_exit_timing_pressure,
@@ -2066,6 +2168,20 @@ class PortfolioState:
             "semantic_conflict_rate": float(semantic_conflict_count / action_count),
             "order_translation_conflict_count": int(order_translation_conflict_count),
             "order_translation_conflict_rate": float(order_translation_conflict_count / action_count),
+            "deploy_intent_action_count": int(deploy_intent_count),
+            "deploy_intent_realized_count": int(deploy_realized_count),
+            "deploy_intent_realized_rate": float(deploy_realized_count / deploy_intent_count) if deploy_intent_count else 0.0,
+            "open_add_positive_weight_change_rate": float(deploy_positive_delta_count / deploy_intent_count) if deploy_intent_count else 0.0,
+            "deploy_intent_dropped_count": int(deploy_intent_dropped_count),
+            "deploy_intent_dropped_share": float(deploy_intent_dropped_count / deploy_intent_count) if deploy_intent_count else 0.0,
+            "deploy_intent_candidate_count": int(deploy_intent_candidate_count),
+            "deploy_intent_candidate_realized_count": int(deploy_intent_candidate_realized_count),
+            "deploy_intent_candidate_realized_rate": float(deploy_intent_candidate_realized_count / deploy_intent_candidate_count) if deploy_intent_candidate_count else 0.0,
+            "deploy_intent_candidate_budget_drop_count": int(deploy_intent_candidate_budget_drop_count),
+            "deploy_intent_candidate_budget_drop_share": float(deploy_intent_candidate_budget_drop_count / deploy_intent_candidate_count) if deploy_intent_candidate_count else 0.0,
+            "add_to_hold_conflict_count": int(add_to_hold_conflict_count),
+            "add_to_hold_conflict_share": float(add_to_hold_conflict_count / add_intent_count) if add_intent_count else 0.0,
+            "deploy_intent_hold_conflict_share": float(deploy_hold_conflict_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "semantic_delta_guard_count": int(semantic_delta_guarded.sum()),
             "turnover_intent_guard_count": int(turnover_intent_guarded.sum()),
             "budget_split_bound_guard_count": int(budget_split_bound_guarded.sum()),
