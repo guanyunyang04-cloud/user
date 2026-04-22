@@ -16420,37 +16420,154 @@ position,000001.SZ,1200,12.38,
     - 不把 `cash_constraint_intent_guard_v5` 直接升级为默认 budget calibration。
     - r9 新增为结构证据：`clip reduction != deploy executability`。
     - 后续实验必须显式审计并惩罚 `add -> hold` 这一类 deploy-executability mismatch。
-## 2026-04-21 Default Execution Optimization Closure
+## 2026-04-21 默认执行优化闭环
 
-- Completed the four pending default-execution optimizations end-to-end.
-- Production retrain governance is now hardened:
-  - auto retrain cadence = every 10 trading days
-  - warn/block = 10 / 20 trading days
-  - minimum epoch budget floor = 32
-  - universe policy = `rolling_liquidity_pool_when_available`
-  - new information gate added with:
+- 已端到端完成四项待处理的默认执行优化。
+- production retrain 治理已加固：
+  - 自动重训节奏为每 `10` 个交易日一次
+  - 提醒 / 阻断阈值为 `10 / 20` 个交易日
+  - 最小 epoch 预算底线为 `32`
+  - 股票池策略为 `rolling_liquidity_pool_when_available`
+  - 新增信息量闸门：
     - `label_horizon_guard_trading_days = 20`
     - `minimum_new_trainable_trading_days = 5`
-- Production retrain operational control is now explicit:
-  - single-instance lock
-  - heartbeat updates
+- production retrain 的操作控制已显式化：
+  - 单实例锁
+  - heartbeat 更新
   - `--show-run-status`
   - `--cancel-existing-run`
-  - explicit strict resume path for existing run dirs
-- Promotion guard is now hard:
-  - production full-fit cannot overwrite the active production root unless convergence diagnostics are stable and promotable.
-- Candidate schema cleanup is now live on the default execution chain:
-  - next-open action output uses `upstream_reference_score`
-  - watchlist output uses `target_weight, model_score`
-  - latest trade plan no longer exposes `ml_score`
-- Follow-up correction completed:
-  - default execution stock-pool refresh is now daily, not only on retrain
-  - active production root metrics now enforce:
+  - 对已有 run dir 使用显式 strict resume 路径
+- promotion 守卫已变为硬约束：
+  - 除非收敛诊断稳定且具备 promotable 条件，否则 production full-fit 不能覆盖 active production root。
+- 默认执行链上的候选 schema 清理已生效：
+  - 次日开盘动作输出使用 `upstream_reference_score`
+  - watchlist 输出使用 `target_weight, model_score`
+  - 最新交易计划不再暴露 `ml_score`
+- 后续纠偏已完成：
+  - 默认执行股票池刷新改为每日刷新，而不是只在重训时刷新
+  - active production root metrics 当前强制执行：
     - `rolling_liquidity_pool = liquid500`
     - `rolling_pool_rebalance_days = 1`
     - `rolling_pool_adv_window = 20`
     - `daily_pool_refresh_enabled = true`
-  - active execution manifest and production manifest were re-synced after this change
-  - live panels were rebuilt once under the new daily rolling-pool rule, and the next-open action list changed accordingly
-- Important operational lesson:
-  - after code-side schema/governance upgrades, the active production root must be re-synced; otherwise the production manifest can remain on stale policy fields even though the code is already correct.
+  - 该变更后已重新同步 active execution manifest 与 production manifest
+  - 已按新的每日滚动池规则重建一次 live panels，次日开盘动作列表随之变化
+- 重要操作教训：
+  - 代码侧 schema / governance 升级后，必须重新同步 active production root；否则即使代码已经正确，production manifest 仍可能停留在旧 policy 字段。
+
+## 2026-04-22 默认执行分数语义修复
+
+- 事实：
+  - 默认 active chain 仍为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+  - 修复前，`daily_live_score_panel.csv` 暴露的是 policy `learned_score`，而 raw target weight 来自多头 policy 链。
+  - 这会造成“raw target-weight 为正，但展示的模型分数为负”的混淆案例。
+- 实现：
+  - 为 policy-family score heads 新增 selected composite decision-score 导出。
+  - 展示给 research-candidate 的分数现在跟随 target-weight 归一化前同一条被选中的 stock-level 决策链：candidate gate、learned / weight / gate / hold heads、hold scale 与 policy weight power。
+  - 未被选中的股票写为 `0.0`；research watchlist 现在只保留模型实际选中的候选。
+  - 交易计划文案与 CSV schema 现在使用 `模型综合决策分` / `model_decision_score`。
+- 验证：
+  - 未重训，只在前台刷新当前默认 production live panels。
+  - 最新信号日期：`2026-04-21`。
+  - raw positive target-weight 数量：`9`。
+  - 正向 decision-score 范围：`0.485579 -> 0.943472`。
+  - zero-weight 但 decision score 为正的数量：`0`。
+  - 已重新生成 `daily_research/execution/output/latest_trade_plan.txt`。
+  - `project_consistency_check` 通过，`failure_count=0`。
+- 教训：
+  - 对 `policy_v5b` 及相关 policy heads 而言，`learned_score` 是 sub-head / debug 信号，不是用户侧最终模型偏好。后续执行展示必须使用 selected composite decision score，除非目的明确是调试单个 sub-head。
+
+## 2026-04-22 项目系统维护扫描
+
+- 事实：
+  - 本轮主动项目扫描覆盖了结构、命名、分数 schema 一致性、文档健康、生成字节码残留和 artifact 占用。
+  - 未停止或打断任何训练任务。
+  - `daily_research/output` 与 `daily_research/cache` 仍是很大的热产物区域；没有明确保留策略前不做裁剪。
+- 实现：
+  - 更新 `daily_research/execution/run_research_candidate_trade_plan.py`，让 research-candidate trade plan 默认使用 `model_decision_score`，与默认执行链保持一致。
+  - 将 `daily_research/baseline/generate_daily_trade_plan.py` 行尾规范化为 LF。
+  - 删除 `daily_research` 下生成的 Python 字节码残留。
+- 验证：
+  - `daily_research.tools.project_consistency_check`：`status=ok`，`failure_count=0`。
+  - `daily_research/tools/doc_guard.py check`：`documentation_layout_issues=0`。
+  - active Python AST parse：检查 `193` 个文件，失败数 `0`。
+  - `git diff --check` 通过。
+  - 清理后字节码扫描：`pycache_dirs=0`，`pyc_files=0`。
+- 剩余风险：
+  - `daily_research` 仍然占用较大存储：总量约 `146.46 GB`，其中 `output` 约 `80.12 GB`，`cache` 约 `66.32 GB`。
+  - `pip check` 报告共享环境中存在非核心包依赖冲突，例如 `labelimg`、`onnxsim`、`pyqt5`、`zeep`、`inference`、`roboflow`；为避免扰动 `yolos` 训练 / 研究环境，本轮保持不改。
+- 教训：
+  - 本轮最高价值的维护修复不是大规模重写，而是关闭执行入口之间的 score-contract mismatch。后续 cleanup 应优先处理语义合同，再处理格式和存储卫生。
+
+## 2026-04-22 主脑 / 分脑完整性维护
+
+- 事实：
+  - 维护范围是工作区主脑与已附着分脑系统。
+  - 未停止或启动任何训练任务。
+  - 初始 PowerShell 读取时显示疑似中文乱码，但 Python UTF-8 读取确认真实 brain 文件是有效简体中文。
+- 实现：
+  - 新增 `daily_research/tools/brain_integrity_check.py`。
+  - 新守卫检查主脑 / 子脑附着、必需 manifest key、相对路径有效性、派生子脑读取顺序、写回路由、body map、区域特化、模块覆盖和可疑编码标记。
+  - 已将新守卫接入 `daily_research/tools/doc_guard.py check`。
+  - 已更新主脑与 `daily_research` governance / operations 文档，将该守卫暴露为标准结构验证命令。
+- 验证：
+  - `brain_integrity_check.py --json`：`status=ok`，`error_count=0`，`warning_count=0`。
+  - `brain_bootstrap.py --json`：主脑启动顺序可解析。
+  - `brain_bootstrap.py --child daily_research --json`：可解析。
+  - `brain_bootstrap.py --child t0_project --json`：可解析。
+  - `brain_bootstrap.py --child daily_stock_analysis-main --json`：可解析。
+- 教训：
+  - 主脑 / 分脑维护不能只依赖文字复核。manifest 合同需要可执行守卫，这样后续 agent 才能区分真实结构漂移和显示 / 编码伪象。
+
+## 2026-04-22 文档内容收口与简体中文统一
+
+- 动作前自检：
+  - 用户要求“所有文档内容均需整合入大脑中，另外都要用简体中文”。
+  - 本轮只处理文档治理与接管入口，不启动训练、不切换 live 默认执行、不改写 promotion 结论。
+  - 先确认 `daily_research/README.md` 为英文快速入口，`daily_stock_analysis-main/README.md` 为较长的简体中文公开产品指南，后者不适合被粗暴删除。
+- 已完成实现：
+  - 主脑写入全局文档治理规则：
+    - README、教程、审计、迁移说明等文档内容必须先整合进对应 brain。
+    - body 顶层文档只保留简体中文索引、公开指南或兼容入口。
+    - 面向接管和治理的文档默认使用简体中文。
+  - `daily_research/README.md` 已重写为简体中文快速索引，并明确 `daily_research/brain/` 为权威接管真源。
+  - `daily_research/brain/knowledge_center.md` 与 `operations_center.md` 已写入 README 降级和文档收口口径。
+  - `daily_stock_analysis-main/README.md` 已增加简体中文提示：AI 接管真源为 `daily_stock_analysis-main/brain/`。
+  - `daily_stock_analysis-main/brain/knowledge_center.md` 已整合公开 README 的稳定产品定位、核心能力、模型/数据/通知生态、fail-open 基本面降级和公开指南边界。
+  - `daily_stock_analysis-main/brain/operations_center.md` 已整合 README 的用户入口、配置域、验证入口、产品能力和免责声明口径。
+  - `daily_research/tools/doc_guard.py` 已增加 README 必须指向 brain 真源的片段守卫。
+- 决策：
+  - 保留 `daily_stock_analysis-main/README.md` 作为公开用户指南，因为它包含安装、部署、配置和展示信息；但 AI 接管不再以它为真源。
+  - 不把公开 README 的营销徽章、赞助展示、Star 历史等逐字搬入 brain；只沉淀对接管、维护、配置和产品边界有长期价值的稳定内容。
+- 后续要求：
+  - 新增或修改 README / docs 时，必须同步判断是否需要写入对应 brain。
+  - 文档结构变更后运行 `brain_integrity_check.py --json`、`doc_guard.py check` 和 `git diff --check`。
+
+## 2026-04-22 主分脑系统维护与兼容入口收口
+
+- 动作前自检：
+  - 用户要求系统审阅、整理、维护、简练并修复主分脑，同时逐项检查逻辑、结构、命名、依赖、实现与一致性问题。
+  - 本轮定位为治理与文档结构维护，不启动训练、不停止训练、不切换 live 默认执行、不改写 promotion 结论。
+  - 先复跑 `brain_integrity_check.py --json`、`doc_guard.py check`、`project_consistency_check.py`、`git status` 与 `git diff --stat`，再做修复。
+- 发现的事实：
+  - 主分脑结构守卫与文档守卫均已通过，说明 manifest、读写路径和基本文档布局没有硬性结构错误。
+  - `daily_stock_analysis-main` 的 AI 兼容入口仍有较强“AGENTS 即真源”口径，容易与工作区主分脑真源发生语义漂移。
+  - `daily_research/execution/使用教程.md` 作为操作教程尚未显式标注 `operations_center.md` 为权威操作真源。
+- 已完成实现：
+  - 将 `daily_stock_analysis-main/AGENTS.md` 改为仓库原生 AI 生态兼容入口，明确 brain 才是接管、结构边界和稳定规则真源。
+  - 将 `.github/copilot-instructions.md` 与 `.github/instructions/governance.instructions.md` 改为简体中文兼容入口，并保留 `scripts/check_ai_assets.py` 需要的 `Canonical source:` 字面合同。
+  - 为 `daily_stock_analysis-main/SKILL.md` 与 `strategies/README.md` 增加 AI 接管真源提示。
+  - 为 `daily_research/execution/使用教程.md` 增加权威操作真源提示。
+  - 将 AI 兼容入口规则、禁止未确认 git 发布、禁止硬编码密钥/账号/端口/模型/环境路径、用户可见变更需更新文档并评估 brain 写回等稳定规则写入 `daily_stock_analysis-main/brain/knowledge_center.md` 与 `operations_center.md`。
+  - 更新 `daily_research/tools/doc_guard.py`，把 README、教程、AGENTS、Copilot、governance instructions、SKILL 与 strategies README 的 brain 回指要求纳入可执行守卫。
+- 验证：
+  - `daily_research/tools/brain_integrity_check.py --json`：通过。
+  - `daily_research/tools/doc_guard.py check`：通过。
+  - `daily_research/tools/project_consistency_check.py`：通过，`failure_count=0`。
+  - `daily_stock_analysis-main/scripts/check_ai_assets.py`：通过。
+  - `git diff --check`：通过。
+  - 收尾进程复查未发现残留 `python / uvicorn / pythonw` 训练或服务进程。
+- 动作后复盘：
+  - 事实：本轮真正需要修复的不是主分脑 manifest，而是兼容入口的权威口径漂移。
+  - 推断：若只依赖人工说明，不把回指要求纳入 `doc_guard.py`，后续 AGENTS / Copilot / SKILL 类文件会再次变成平行真源。
+  - 决策：保留这些文件作为外部工具兼容入口，但稳定规则必须先写入对应 brain，再由兼容入口摘要引用。

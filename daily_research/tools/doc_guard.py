@@ -3,9 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+
+from daily_research.tools.brain_integrity_check import run_checks as run_brain_integrity_checks
 
 
 DEFAULT_DOCS = [
@@ -210,15 +217,41 @@ ALLOWED_EXTERNAL_DOCS = {
 }
 
 REQUIRED_DOC_SNIPPETS = {
+    "daily_research/README.md": (
+        "权威接管真源",
+        "daily_research/brain/",
+    ),
+    "daily_research/execution/使用教程.md": (
+        "权威操作真源",
+        "daily_research/brain/operations_center.md",
+    ),
+    "daily_stock_analysis-main/README.md": (
+        "AI 接管真源",
+        "daily_stock_analysis-main/brain/",
+    ),
     "daily_stock_analysis-main/AGENTS.md": (
+        "兼容入口",
         "brain/state_center.md",
         "brain/operations_center.md",
     ),
+    "daily_stock_analysis-main/CLAUDE.md": (
+        "AGENTS.md",
+    ),
+    "daily_stock_analysis-main/SKILL.md": (
+        "AI 接管真源",
+        "daily_stock_analysis-main/brain/",
+    ),
+    "daily_stock_analysis-main/strategies/README.md": (
+        "AI 接管真源",
+        "daily_stock_analysis-main/brain/",
+    ),
     "daily_stock_analysis-main/.github/copilot-instructions.md": (
+        "工作区接管真源",
         "brain/state_center.md",
         "brain/operations_center.md",
     ),
     "daily_stock_analysis-main/.github/instructions/governance.instructions.md": (
+        "工作区级接管真源",
         "brain/state_center.md",
         "brain/operations_center.md",
     ),
@@ -757,6 +790,16 @@ def cmd_check(args: argparse.Namespace) -> int:
         has_issue = True
         for issue in layout_issues[: args.show_lines]:
             print(f"    ! {issue}")
+
+    brain_findings = run_brain_integrity_checks()
+    brain_errors = [finding for finding in brain_findings if finding.severity == "error"]
+    brain_warnings = [finding for finding in brain_findings if finding.severity == "warning"]
+    print(f"[brain-integrity] errors={len(brain_errors)} warnings={len(brain_warnings)}")
+    if brain_errors:
+        has_issue = True
+    for finding in brain_findings[: args.show_lines]:
+        path = f" path={finding.path}" if finding.path else ""
+        print(f"    ! [{finding.severity}] {finding.code}{path}: {finding.detail}")
 
     return 1 if has_issue else 0
 

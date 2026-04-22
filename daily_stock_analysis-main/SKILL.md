@@ -5,6 +5,8 @@ description: "分析股票和市场。当用户想要分析单个或多个股票
 
 # 股票分析器
 
+AI 接管真源：`daily_stock_analysis-main/brain/`。本文件只保留产品技能调用说明；结构边界、稳定规则和维护流程必须先写入 brain。
+
 本技能基于 `analyzer_service.py` 的逻辑，提供分析股票和整体市场的功能。
 
 ## 输出结构 (`AnalysisResult`)

@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-04-16`
+快照日期：`2026-04-22`
 
 ## 1. 当前接管摘要
 - `daily_research` 是当前工作区的正式生产研究与执行主线
@@ -1424,3 +1424,46 @@
   - action CSV uses `upstream_reference_score`
   - watchlist CSV uses `model_score`
   - default execution output no longer exposes `ml_score`
+
+## 2026-04-22 接管复核与状态补齐
+
+- 当前接管事实：
+  - 主脑与 `daily_research` 分脑已按主分脑合同完成接管复核。
+  - `daily_research/brain/operations_center.md` 与 `episodic_memory.md` 已记录 2026-04-22 的默认执行分数语义修复、系统维护扫描、主分脑完整性维护。
+  - 本节用于把这些已完成事项补入当前状态中枢，避免状态摘要停留在 2026-04-21。
+- 最新守卫状态：
+  - `daily_research/tools/brain_integrity_check.py --json`：`status=ok`，`error_count=0`，`warning_count=0`
+  - `daily_research/tools/project_consistency_check.py`：`status=ok`，`failure_count=0`
+  - `daily_research/tools/doc_guard.py check`：`documentation_layout_issues=0`，`brain-integrity errors=0 warnings=0`
+  - `git diff --check`：通过
+  - 复查未发现残留 `python / uvicorn / pythonw` 训练或 Web 服务进程
+- 当前默认执行状态补充：
+  - `policy_v5b` live 展示分数语义已修为 selected composite decision score，不再把 raw `learned_score` 当用户侧最终偏好。
+  - research-candidate 与 default execution 的 score-name 合同已对齐到 `model_decision_score` / `模型综合决策分` 语义。
+  - 当前 default production live panels 与最新 trade plan 已在前台刷新到 latest signal date `2026-04-21`。
+- 当前结构状态补充：
+  - `daily_research/tools/brain_integrity_check.py` 已成为主分脑结构守卫，并已接入 `doc_guard.py check`。
+  - 后续主脑或分脑结构变更，必须继续单独跑 `brain_integrity_check.py --json`，再跑 `doc_guard.py check`。
+- 文档收口状态补充：
+  - `daily_research/README.md` 已改为简体中文快速索引，内容不再作为平行真源。
+  - README 中的模块地图、环境、常用入口、验证和治理提示已对应收口到 `daily_research/brain/`。
+  - `doc_guard.py check` 已增加 README 必须指向 brain 真源的片段守卫。
+- 当前决策：
+  - 不启动训练，不切换 live 默认执行，不基于任何 2026-04-22 维护动作改写 promotion 结论。
+  - 下一步若继续研究主线，仍应回到 continuous_policy 当前主矛盾：`deploy intent not executable`、`add -> hold` 漂移、`sell_selection_quality_5d`、`cash_timing_quality_1d` 与 `deploy_gate_forward_alignment_5d`。
+
+## 2026-04-22 主分脑文档兼容入口维护补充
+
+- 当前事实：
+  - 本轮维护没有启动训练、没有停止训练、没有切换 live 默认执行，也没有修改 promotion 结论。
+  - 主脑、`daily_research` 分脑和 `daily_stock_analysis-main` 分脑的接管真源仍然收口在各自 `brain/`。
+  - `daily_stock_analysis-main` 的 AGENTS / Copilot / governance instructions / SKILL / strategies README 已统一为兼容入口，稳定规则已回写其分脑。
+- 已完成实现：
+  - `daily_research/tools/doc_guard.py check` 已增加 AI 兼容入口片段守卫，防止 README、教程和兼容入口重新漂移为平行真源。
+  - `daily_research/execution/使用教程.md` 已标注权威操作真源。
+  - `daily_stock_analysis-main/brain/knowledge_center.md`、`operations_center.md`、`state_center.md` 与 `episodic_memory.md` 已记录本轮兼容入口收口。
+- 当前验证：
+  - `brain_integrity_check.py --json`、`doc_guard.py check`、`project_consistency_check.py`、`daily_stock_analysis-main/scripts/check_ai_assets.py` 与 `git diff --check` 均已通过。
+- 当前遗留：
+  - `daily_research/output` 与 `daily_research/cache` 仍是大体量热产物区；没有明确保留策略前继续不裁剪。
+  - `daily_stock_analysis-main/docs/` 下仍存在面向公开用户或历史迁移的长文档；本轮只收口稳定接管规则，不逐字搬迁历史/营销/展示内容。

@@ -56,7 +56,8 @@ def main():
 
     inject_default_arg("--positions-file", str(positions_file))
     inject_default_arg("--output-dir", str(output_dir))
-    inject_default_arg("--external-score-column", "latest_score")
+    inject_default_arg("--external-score-column", "model_decision_score")
+    inject_default_arg("--external-watch-score-column", "model_decision_score")
     inject_default_arg("--external-target-weight-column", "target_weight")
     ensure_default_pool_argument()
     ensure_execution_strategy_defaults()

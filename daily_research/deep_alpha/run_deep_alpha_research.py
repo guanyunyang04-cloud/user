@@ -95,8 +95,10 @@ from daily_research.deep_alpha.research_objective import (
 )
 from daily_research.deep_alpha.score_head import (
     apply_score_head,
+    build_policy_decision_score_frame,
     build_policy_target_weight_frame,
     fit_score_head,
+    is_policy_score_head_method,
 )
 from daily_research.deep_alpha.sequence_dataset import (
     DateGroupedBatchSampler,
@@ -1029,11 +1031,20 @@ def _build_live_inference_outputs(
         )
     else:
         live_score_outputs = apply_score_head(score_head_artifact, live_pred_df, target_names)
-        live_score_frame = (
-            live_score_outputs
-            .pivot(index="date", columns="stock", values="learned_score")
-            .reindex(index=live_index, columns=close.columns)
-        )
+        if is_policy_score_head_method(score_head_method):
+            live_score_frame = build_policy_decision_score_frame(
+                live_score_outputs,
+                all_dates=live_index,
+                all_stocks=list(close.columns),
+                holding_count=cfg.holding_count,
+                artifact=score_head_artifact,
+            )
+        else:
+            live_score_frame = (
+                live_score_outputs
+                .pivot(index="date", columns="stock", values="learned_score")
+                .reindex(index=live_index, columns=close.columns)
+            )
     if rolling_membership_frame is not None:
         membership = rolling_membership_frame.reindex(index=live_score_frame.index, columns=live_score_frame.columns).fillna(False)
         live_score_frame = live_score_frame.where(membership)
@@ -1059,7 +1070,7 @@ def _build_live_inference_outputs(
         max_price=cfg.max_price,
     )
     portfolio_live_target_weights = build_target_weights(live_score_frame, live_cfg)
-    if score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v5d", "policy_v5e", "policy_v3"}:
+    if is_policy_score_head_method(score_head_method):
         live_target_weights = build_policy_target_weight_frame(
             live_score_outputs,
             all_dates=live_index,
@@ -1240,17 +1251,33 @@ def _evaluate_research_outputs(
         )
     else:
         train_score_outputs = apply_score_head(score_head_artifact, train_pred_df, train_ds.target_names)
-        train_score_frame = (
-            train_score_outputs
-            .pivot(index="date", columns="stock", values="learned_score")
-            .reindex(index=train_eval_dates, columns=close.columns)
-        )
         score_outputs = apply_score_head(score_head_artifact, pred_df, train_ds.target_names)
-        score_frame = (
-            score_outputs
-            .pivot(index="date", columns="stock", values="learned_score")
-            .reindex(index=valid_dates, columns=close.columns)
-        )
+        if is_policy_score_head_method(args.score_head_method):
+            train_score_frame = build_policy_decision_score_frame(
+                train_score_outputs,
+                all_dates=pd.Index(train_eval_dates),
+                all_stocks=list(close.columns),
+                holding_count=cfg.holding_count,
+                artifact=score_head_artifact,
+            )
+            score_frame = build_policy_decision_score_frame(
+                score_outputs,
+                all_dates=pd.Index(valid_dates),
+                all_stocks=list(close.columns),
+                holding_count=cfg.holding_count,
+                artifact=score_head_artifact,
+            )
+        else:
+            train_score_frame = (
+                train_score_outputs
+                .pivot(index="date", columns="stock", values="learned_score")
+                .reindex(index=train_eval_dates, columns=close.columns)
+            )
+            score_frame = (
+                score_outputs
+                .pivot(index="date", columns="stock", values="learned_score")
+                .reindex(index=valid_dates, columns=close.columns)
+            )
     if rolling_membership_frame is not None:
         train_score_frame = train_score_frame.where(
             rolling_membership_frame.reindex(index=train_score_frame.index, columns=train_score_frame.columns).fillna(False)
@@ -1312,7 +1339,7 @@ def _evaluate_research_outputs(
         min_price=cfg.min_price,
         max_price=cfg.max_price,
     )
-    if args.score_head_method in {"policy_v1", "policy_v2", "policy_v2a", "policy_v2b", "policy_v2c", "policy_v4a", "policy_v4b", "policy_v5a", "policy_v5b", "policy_v5c", "policy_v5d", "policy_v5e", "policy_v3"}:
+    if is_policy_score_head_method(args.score_head_method):
         train_eval_target_weights = build_policy_target_weight_frame(
             train_score_outputs,
             all_dates=pd.Index(train_eval_dates),

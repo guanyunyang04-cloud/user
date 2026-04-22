@@ -123,24 +123,26 @@ def _build_effective_live_metadata(
         if has_production_manifest:
             weight_generation_note = (
                 "Current live weights come from the promoted production full-fit "
-                "execution-aligned live target-weight panel; the displayed pre-weight "
-                "score is the signal-day execution-preweight score only, so it does not "
-                "need to be monotonic with final weight."
+                "execution-aligned live target-weight panel; the displayed score "
+                "is the signal-day model composite decision score before final "
+                "execution sizing/bridging, so it does not need to be monotonic "
+                "with final weight."
             )
             score_note = (
-                "Displayed score is the execution pre-weight score from the promoted "
-                "production full-fit live panel."
+                "Displayed score is the model composite decision score before final "
+                "execution sizing/bridging from the promoted production full-fit live panel."
             )
         else:
             weight_generation_note = (
                 "Current live weights come from the selected active "
-                "execution-aligned live target-weight panel; the displayed pre-weight "
-                "score is the signal-day execution-preweight score only, so it does not "
-                "need to be monotonic with final weight."
+                "execution-aligned live target-weight panel; the displayed score "
+                "is the signal-day model composite decision score before final "
+                "execution sizing/bridging, so it does not need to be monotonic "
+                "with final weight."
             )
             score_note = (
-                "Displayed score is the execution pre-weight score from the selected "
-                "active live panel."
+                "Displayed score is the model composite decision score before final "
+                "execution sizing/bridging from the selected active live panel."
             )
         live_mode = "execution_aligned_live"
     else:

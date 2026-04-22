@@ -1,47 +1,57 @@
 # daily_research
 
-`daily_research` is the workspace's production research and execution cortex. It contains the long-horizon research stacks, live execution console, maintenance tools, and the project's structured brain state.
+`daily_research` 是当前工作区的正式生产研究与执行主线，负责长期研究、连续策略、默认执行、Web 控制台、维护工具和项目大脑状态。
 
-## Layout
+权威接管真源：`daily_research/brain/`。本 README 只作为简体中文快速索引，不替代大脑中的当前状态、规则、证据和治理判断。
 
-- `baseline/`: legacy and still-supported research and trade-plan pipelines
-- `continuous_policy/`: current continuous-control policy training, evaluation, export, and protocol orchestration
-- `deep_alpha/`: longer-horizon architecture and execution-policy research
-- `execution/`: execution app, task runners, web console, and production update entrypoints
-- `tools/`: guards, reports, maintenance utilities, and consistency checks
-- `brain/`: current state, durable knowledge, governance, and episodic writeback
-- `output/`, `cache/`, `archive/`: generated artifacts, hot caches, and cold storage
+## 模块地图
 
-## Environment
+- `baseline/`：历史研究链路与仍受支持的交易计划管线
+- `continuous_policy/`：当前连续决策策略的训练、评估、导出与协议编排
+- `deep_alpha/`：更长周期的模型架构、alpha 与执行策略研究
+- `execution/`：执行应用、任务运行器、Web 控制台与 production 更新入口
+- `tools/`：守卫、报告、维护工具与一致性检查
+- `brain/`：当前状态、长期知识、治理规则与过程记忆
+- `output/`、`cache/`、`archive/`：生成产物、热缓存与冷归档
 
-The standard environment is `yolos`, defined by [environment.yml](/H:/new_tdx64/PYPlugins/user/daily_research/environment.yml:1).
+## 环境
 
-Local prerequisite:
-- `t0_project/tqcenter.py` is a workspace-local data dependency. It is not installed from Conda and must exist locally when using the `tq` data source.
+标准环境是 `yolos`，依赖真源为 [environment.yml](/H:/new_tdx64/PYPlugins/user/daily_research/environment.yml:1)。
 
-## Common Entry Points
+本地前置依赖：
+- `t0_project/tqcenter.py` 是工作区内的数据依赖，不由 Conda 安装；使用 `tq` 数据源时必须存在。
 
-- Continuous policy formal protocol:
+## 常用入口
+
+- 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
-- Execution app:
+- 执行应用：
   `python daily_research/execution/run_execution_app.py run --task <task-name> -- ...`
-- Execution web:
+- 执行 Web 控制台：
   `python daily_research/execution/run_execution_web.py`
-- Workspace maintenance report:
+- 工作区维护报告：
   `python daily_research/tools/workspace_maintenance.py report`
 
-## Verification
+真实运行时优先使用显式 `yolos` Python，例如：
 
-Run these before and after substantial changes:
+```powershell
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py
+```
+
+## 验证
+
+较大改动前后建议运行：
 
 ```powershell
 python -m compileall -q daily_research
+C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\brain_integrity_check.py --json
 C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\project_consistency_check.py
 C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research\tools\doc_guard.py check
 ```
 
-## Governance
+## 治理
 
-- The canonical operating state lives under `daily_research/brain/`.
-- `brain/brain_manifest.json` defines the shared main-brain contract used by all sub-brains.
-- Generated experiment artifacts should stay under `daily_research/output/` and can be reviewed or trimmed with `workspace_maintenance.py`.
+- 先读主脑，再读 `daily_research/brain/`。
+- `brain/brain_manifest.json` 定义所有分脑共享的主脑合同。
+- 新的文档内容必须先整合进对应 brain；README 只保留简体中文索引和公开入口。
+- 生成实验产物应留在 `daily_research/output/`，需要复核或裁剪时使用 `workspace_maintenance.py`。

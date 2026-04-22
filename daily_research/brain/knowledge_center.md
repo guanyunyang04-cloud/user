@@ -182,9 +182,10 @@
 - brain / sub-brain manifest 的 UTF-8 乱码即使没有出现 `replacement char`，仍会破坏 handoff 语义；这类问题不能只靠肉眼发现，必须让 `doc_guard.py` 显式扫描常见 mojibake token
 - `daily_research/execution/web_models.py` 直接依赖 `pydantic`，因此 `daily_research/environment.yml` 应显式声明它，而不是只隐式依赖 `fastapi` 的传递安装
 - `t0_project/tqcenter.py` 仍是工作区内本地依赖，不由 conda 安装；这类本地前置依赖更适合写进 `README.md` 和 brain，而不是假装它属于标准环境解
-- `daily_research/README.md` 适合作为项目级人工接管入口：
-  - 负责解释模块边界、环境前置、常用入口与验证命令
-  - 不替代 brain 的当前状态与治理判断
+- `daily_research/README.md` 只保留简体中文快速索引：
+  - 模块边界、环境前置、常用入口与验证命令必须先整合进 `daily_research/brain/`
+  - README 不得保存 brain 未收录的当前状态、治理判断、实验结论或接管规则
+  - 后续新增文档内容默认先写入 brain，再决定是否需要 README 兼容摘要
 
 - `turnover_budget` 在“高现金 + 大部署缺口”阶段做受控放松，确实可以明显缓解 capped 全A 的冷启动现金滞留，并同时抬起 `exit_timeliness_rate_5d`
 - 但如果只放松部署与退出，而不同时保住 `reduce` 的独立形成边界，模型会把 `reduce` 挤成 `0`，并把 `avg_gross_exposure` 推到过高水平；`formal_r6` 已经验证了这类过冲风险

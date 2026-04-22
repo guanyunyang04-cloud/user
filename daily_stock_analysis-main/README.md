@@ -22,7 +22,9 @@
 
 </div>
 
-## 💖 赞助商 (Sponsors)
+> AI 接管真源：本仓库的项目状态、接管边界、稳定规则与模块地图已整合到 `daily_stock_analysis-main/brain/`。本 README 保留为面向用户的简体中文公开指南；维护和接管时请先读 brain。
+
+## 💖 赞助商
 <div align="center">
   <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank">
     <img src="./sources/serpapi_banner_zh.png" alt="轻松抓取搜索引擎上的实时金融新闻数据 - SerpApi" height="160">
@@ -415,7 +417,7 @@ LITELLM_MODEL=openai/deepseek-chat
 
 > 也可以使用 `python main.py --serve` (等效命令)
 
-## 🗺️ Roadmap
+## 🗺️ 路线图
 
 查看已支持的功能和未来规划：[更新日志](docs/CHANGELOG.md)
 
@@ -429,7 +431,7 @@ LITELLM_MODEL=openai/deepseek-chat
 如果本项目对你有帮助，欢迎支持项目的持续维护与迭代，感谢支持 🙏  
 赞赏可备注联系方式，祝股市长虹
 
-| 支付宝 (Alipay) | 微信支付 (WeChat) | 小红书 |
+| 支付宝 | 微信支付 | 小红书 |
 | :---: | :---: | :---: |
 | <img src="./sources/alipay.jpg" width="200" alt="Alipay"> | <img src="./sources/wechatpay.jpg" width="200" alt="WeChat Pay"> | <img src="./sources/xiaohongshu.png" width="200" alt="小红书"> |
 
@@ -458,8 +460,8 @@ npm run lint
 npm run build
 ```
 
-## 📄 License
-[MIT License](LICENSE) © 2026 ZhuLinsen
+## 📄 许可证
+[MIT 许可证](LICENSE) © 2026 ZhuLinsen
 
 如果你在项目中使用或基于本项目进行二次开发，
 非常欢迎在 README 或文档中注明来源并附上本仓库链接。
@@ -469,14 +471,14 @@ npm run build
 - GitHub Issues：[提交 Issue](https://github.com/ZhuLinsen/daily_stock_analysis/issues)
 - 合作邮箱：zhuls345@gmail.com
 
-## ⭐ Star History
-**如果觉得有用，请给个 ⭐ Star 支持一下！**
+## ⭐ 星标历史
+**如果觉得有用，请给个 ⭐ 支持一下！**
 
 <a href="https://star-history.com/#ZhuLinsen/daily_stock_analysis&Date">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ZhuLinsen/daily_stock_analysis&type=Date&theme=dark" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ZhuLinsen/daily_stock_analysis&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ZhuLinsen/daily_stock_analysis&type=Date" />
+   <img alt="星标历史图表" src="https://api.star-history.com/svg?repos=ZhuLinsen/daily_stock_analysis&type=Date" />
  </picture>
 </a>
 

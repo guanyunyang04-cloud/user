@@ -486,12 +486,16 @@ def _write_execution_aligned_score_reference(*, production_root: Path) -> None:
         "latest_selected_profile": execution_profile,
         "live_target_weight_mode": "execution_aligned_live",
         "effective_execution_bridge_meta": effective_bridge_meta,
-        "note": "Displayed score is the execution pre-weight score from the promoted production full-fit live panel.",
+        "note": (
+            "Displayed score is the model composite decision score before final "
+            "execution sizing/bridging."
+        ),
         "weight_generation_note": (
             "Current live weights come from the promoted production full-fit "
-            "execution-aligned live target-weight panel; the displayed pre-weight "
-            "score is the signal-day execution-preweight score only, so it does not "
-            "need to be monotonic with final weight."
+            "execution-aligned live target-weight panel; the displayed score is "
+            "the signal-day model composite decision score before final "
+            "execution sizing/bridging, so it does not need to be monotonic with "
+            "final weight."
         ),
     }
     (production_root / "daily_live_score_reference.json").write_text(

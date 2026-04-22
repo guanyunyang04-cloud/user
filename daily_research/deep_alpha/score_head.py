@@ -212,6 +212,7 @@ POLICY_V3_MAX_GROSS_EXPOSURE = 0.98
 POLICY_V3_WEIGHT_POWER = 1.28
 POLICY_V3_HOLD_BOOST = 0.16
 POLICY_V3_CANDIDATE_MULTIPLIER = 1.6
+POLICY_SCORE_HEAD_METHODS = frozenset({"policy_v1", "policy_v3", *POLICY_V2_METHODS})
 
 
 @dataclass
@@ -826,6 +827,10 @@ def _get_policy_v2_config(method: str) -> Dict[str, float]:
     return dict(POLICY_V2_FAMILY_CONFIGS[normalized])
 
 
+def is_policy_score_head_method(method: str) -> bool:
+    return str(method).strip().lower() in POLICY_SCORE_HEAD_METHODS
+
+
 def fit_score_head(
     train_pred_df: pd.DataFrame,
     target_names: List[str],
@@ -1389,6 +1394,120 @@ def apply_score_head(
     score = artifact.model.predict(aligned)
     out["learned_score"] = score
     return out
+
+
+def build_policy_decision_score_frame(
+    policy_output_df: pd.DataFrame,
+    *,
+    all_dates: pd.Index,
+    all_stocks: list[str],
+    holding_count: int,
+    artifact: ScoreHeadArtifact,
+) -> pd.DataFrame:
+    """Build the human-facing policy composite score.
+
+    For policy heads, target weights are not driven by learned_score alone.  They
+    combine selection/weight/gate/hold heads, then pass through a learned
+    candidate-count gate before cash and execution bridging.  This panel exposes
+    the same selected pre-normalization decision strength, with non-selected
+    names set to zero, so the displayed "score" follows the model's final
+    stock-level preference.
+    """
+
+    result = pd.DataFrame(np.nan, index=pd.Index(pd.to_datetime(all_dates)), columns=list(all_stocks), dtype=float)
+    if policy_output_df.empty:
+        return result
+    required = {"date", "stock", "learned_score", "gate_score", "weight_score", "hold_score"}
+    missing = required.difference(policy_output_df.columns)
+    if missing:
+        raise KeyError(f"{artifact.method} output is missing required columns: {sorted(missing)}")
+
+    method = str(artifact.method).strip().lower()
+    if method == "policy_v1":
+        default_min_gross = POLICY_V1_MIN_GROSS_EXPOSURE
+        default_max_gross = POLICY_V1_MAX_GROSS_EXPOSURE
+        default_weight_power = POLICY_V1_WEIGHT_POWER
+        default_hold_boost = POLICY_V1_HOLD_BOOST
+        default_candidate_multiplier = POLICY_V1_CANDIDATE_MULTIPLIER
+    elif method in POLICY_V2_METHODS:
+        config = _get_policy_v2_config(method)
+        default_min_gross = float(config["min_gross_exposure"])
+        default_max_gross = float(config["max_gross_exposure"])
+        default_weight_power = float(config["weight_power"])
+        default_hold_boost = float(config["hold_boost"])
+        default_candidate_multiplier = float(config["candidate_multiplier"])
+    else:
+        default_min_gross = POLICY_V3_MIN_GROSS_EXPOSURE
+        default_max_gross = POLICY_V3_MAX_GROSS_EXPOSURE
+        default_weight_power = POLICY_V3_WEIGHT_POWER
+        default_hold_boost = POLICY_V3_HOLD_BOOST
+        default_candidate_multiplier = POLICY_V3_CANDIDATE_MULTIPLIER
+
+    min_gross = float(artifact.extra.get("policy_min_gross_exposure", default_min_gross))
+    max_gross = float(artifact.extra.get("policy_max_gross_exposure", default_max_gross))
+    weight_power = float(artifact.extra.get("policy_weight_power", default_weight_power))
+    hold_boost = float(artifact.extra.get("policy_hold_boost", default_hold_boost))
+    candidate_multiplier = float(artifact.extra.get("policy_candidate_multiplier", default_candidate_multiplier))
+
+    indexed = policy_output_df.copy()
+    indexed["date"] = pd.to_datetime(indexed["date"])
+    indexed["stock"] = indexed["stock"].astype(str).str.upper().str.strip()
+    indexed = indexed.set_index(["date", "stock"]).sort_index()
+    base_holding_count = max(int(holding_count), 1)
+    max_candidates = max(base_holding_count, int(round(base_holding_count * candidate_multiplier)))
+
+    for dt, group in indexed.groupby(level=0):
+        frame = group.reset_index(level=0, drop=True).copy()
+        result.loc[pd.Timestamp(dt), frame.index.intersection(result.columns)] = 0.0
+        frame = frame.sort_values(["gate_score", "learned_score"], ascending=False)
+        if "gross_exposure_target" in frame.columns and not frame["gross_exposure_target"].empty:
+            gross = float(frame["gross_exposure_target"].iloc[0])
+        else:
+            gross = float(max_gross)
+        gross = float(np.clip(gross, min_gross, max_gross))
+        if "candidate_count_target" in frame.columns and not frame["candidate_count_target"].empty:
+            candidate_min = int(artifact.extra.get("policy_candidate_min_count", base_holding_count))
+            candidate_max = int(artifact.extra.get("policy_candidate_max_count", max_candidates))
+            candidate_count = int(round(float(frame["candidate_count_target"].iloc[0])))
+            candidate_count = max(candidate_min, min(candidate_count, candidate_max, len(frame)))
+        else:
+            candidate_count = int(round(base_holding_count + (max_candidates - base_holding_count) * gross))
+            candidate_count = max(base_holding_count, min(candidate_count, len(frame)))
+        if method in POLICY_V2_METHODS or method == "policy_v3":
+            frame = frame.sort_values(["gate_score", "hold_score", "learned_score"], ascending=False)
+        selected = frame.head(candidate_count).copy()
+        learned = pd.to_numeric(selected["learned_score"], errors="coerce").fillna(0.0)
+        learned_rank = learned.rank(method="first", pct=True).astype(float).fillna(0.0).clip(lower=0.0)
+        weight_score = pd.to_numeric(selected["weight_score"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        gate_score = pd.to_numeric(selected["gate_score"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        hold_score = pd.to_numeric(selected["hold_score"], errors="coerce").fillna(0.5).clip(lower=0.0)
+
+        if method in POLICY_V2_METHODS:
+            raw = (
+                learned_rank * float(artifact.extra.get("policy_build_score_mix", 0.0))
+                + weight_score * float(artifact.extra.get("policy_build_weight_mix", 0.65))
+                + gate_score * float(artifact.extra.get("policy_build_gate_mix", 0.25))
+                + hold_score * float(artifact.extra.get("policy_build_hold_mix", 0.10))
+            )
+        elif method == "policy_v3":
+            raw = (
+                learned_rank * float(artifact.extra.get("policy_build_score_mix", 0.40))
+                + weight_score * float(artifact.extra.get("policy_build_weight_mix", 0.35))
+                + gate_score * float(artifact.extra.get("policy_build_gate_mix", 0.15))
+                + hold_score * float(artifact.extra.get("policy_build_hold_mix", 0.10))
+            )
+        else:
+            raw = weight_score
+
+        if float(raw.sum()) <= 0.0:
+            raw = learned_rank
+        hold_scale = 1.0 + hold_boost * (hold_score - 0.5) * 2.0
+        decision_score = raw.mul(hold_scale.clip(lower=0.25), fill_value=0.0)
+        decision_score = decision_score.pow(max(weight_power, 1e-6)).clip(lower=0.0)
+        result.loc[pd.Timestamp(dt), decision_score.index.intersection(result.columns)] = (
+            decision_score.reindex(decision_score.index.intersection(result.columns)).astype(float).values
+        )
+    return result
 
 
 def build_policy_target_weight_frame(

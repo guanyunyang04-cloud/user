@@ -28,9 +28,10 @@
 
 ## 2. AI 协作资产治理
 
-- `AGENTS.md` 是仓库原生 AI 生态的兼容真源；工作区级接管真源仍收口在 `brain/`。
+- `AGENTS.md` 是仓库原生 AI 生态的兼容入口；工作区级接管、结构边界和稳定规则的真源仍收口在 `brain/`。
+- 本文件中的稳定规则必须摘要写入 `brain/knowledge_center.md` 或 `brain/operations_center.md`，不得单独扩展成平行真源。
 - `CLAUDE.md` 优先保持为指向 `AGENTS.md` 的软链接；若当前平台无建链权限，则退化为仅包含 `AGENTS.md` 的最小兼容入口。
-- `.github/copilot-instructions.md` 与 `.github/instructions/*.instructions.md` 是 GitHub Copilot / Coding Agent 的镜像或分层补充；若与本文件冲突，以 `AGENTS.md` 为准。
+- `.github/copilot-instructions.md` 与 `.github/instructions/*.instructions.md` 是 GitHub Copilot / Coding Agent 的镜像或分层补充；若与本文件冲突，先按 `brain/` 纠偏，再同步本文件。
 - 仓库协作 skill 存放在 `.claude/skills/`，分析产物存放在 `.claude/reviews/`；前者可以入库，后者默认视为本地产物。
 - 根目录 `SKILL.md` 与 `docs/openclaw-skill-integration.md` 属于产品或外部集成说明，不是仓库协作规则真源。
 - 若未来新增 `.agents/skills/` 或其他 agent 专用目录，必须先明确单一真源，再通过脚本或镜像同步；禁止手工长期维护多份同义内容。

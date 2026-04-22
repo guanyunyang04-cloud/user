@@ -25,11 +25,13 @@
 
 ## 3. 守卫
 - `python daily_research/tools/brain_bootstrap.py --child <brain_id> --json`
+- `python daily_research/tools/brain_integrity_check.py --json`
 - `python daily_research/tools/doc_guard.py check`
 - 结构升级后必须保证：
   - manifest 可解析
   - 读取顺序可执行
   - 写回路由可追踪
+  - 主脑 child 引用与分脑 manifest 一致
   - brain 中不存在平行真源
 
 ## 4. 写回纪律

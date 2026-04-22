@@ -12,6 +12,14 @@
 - 再改目标分脑 manifest 与区域特化
 - 最后改具体中枢正文和兼容别名
 
+## 2.1 文档收口顺序
+- 先判断文档内容属于哪个脑：
+  - 工作区共性规则写入 `brain/`
+  - 项目事实、入口、流程写入对应 `<child>/brain/`
+  - 过长但仍需保留的参考材料写入 `<child>/brain/references/`
+- 再把 body 顶层 README / 兼容文档改成简体中文索引，明确指向 brain 真源
+- 最后运行 `brain_integrity_check.py --json` 与 `doc_guard.py check`
+
 ## 3. 写回路由
 - 工作区级当前状态写回 `brain/state_center.md`
 - 工作区级固定规则与教训写回 `brain/knowledge_center.md`
@@ -20,9 +28,10 @@
 - 工作区级方法、环境与守卫入口写回 `brain/operations_center.md`
 
 ## 4. 守卫入口
+- `python daily_research/tools/brain_integrity_check.py --json`
 - `python daily_research/tools/doc_guard.py check`
 - `python daily_research/tools/project_consistency_check.py`
-- 必要时再跑目标分脑自己的额外检查器
+- `doc_guard.py check` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `brain_integrity_check.py --json` 便于快速定位
 
 ## 5. 环境基线
 - brain 文档统一使用 UTF-8

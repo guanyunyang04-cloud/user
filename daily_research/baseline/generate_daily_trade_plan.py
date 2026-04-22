@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -618,14 +618,14 @@ def _resolve_column_name(columns: pd.Index, requested: str, *, label: str) -> st
 def _resolve_external_value_column(columns: pd.Index, requested: str, *, label: str) -> str:
     candidates = [str(requested or "").strip()]
     lowered = str(requested or "").strip().lower()
-    if lowered == "model_score":
-        candidates.extend(["score", "latest_score", "ml_score"])
+    if lowered in {"model_score", "model_decision_score"}:
+        candidates.extend(["score", "latest_score", "model_decision_score", "model_score", "ml_score"])
     elif lowered == "latest_score":
-        candidates.extend(["score", "model_score", "ml_score"])
+        candidates.extend(["score", "model_decision_score", "model_score", "ml_score"])
     elif lowered == "score":
-        candidates.extend(["model_score", "latest_score", "ml_score"])
+        candidates.extend(["model_decision_score", "model_score", "latest_score", "ml_score"])
     elif lowered == "ml_score":
-        candidates.extend(["model_score", "score", "latest_score"])
+        candidates.extend(["model_decision_score", "model_score", "score", "latest_score"])
     elif lowered == "target_weight":
         candidates.append("weight")
 
@@ -690,12 +690,21 @@ def _load_external_panel_row(
     market_index: pd.DatetimeIndex,
     allowed_columns: pd.Index,
 ) -> tuple[pd.Series, pd.Timestamp]:
+    header = pd.read_csv(panel_csv, nrows=0)
+    resolved_value_column = value_column
+    columns_lower = {str(col).strip().lower(): str(col) for col in header.columns}
+    if "date" in columns_lower and "stock" in columns_lower:
+        resolved_value_column = _resolve_external_value_column(
+            header.columns,
+            value_column,
+            label=panel_label,
+        )
     panel = load_value_panel(
         panel_csv,
         panel_format="auto",
         date_column="date",
         stock_column="stock",
-        value_column=value_column,
+        value_column=resolved_value_column,
         panel_label=panel_label,
         value_name=value_name,
     )
@@ -1085,11 +1094,13 @@ def _export_plan_frame(df: pd.DataFrame, *, model_info: Dict[str, Any], frame_ki
 
     if frame_kind == "watch":
         if watchlist_mode == "raw_model_selection":
-            base_columns = ["date", "stock", "target_weight", "model_score"]
+            if "model_decision_score" not in out.columns and "model_score" in out.columns:
+                out["model_decision_score"] = pd.to_numeric(out["model_score"], errors="coerce")
+            base_columns = ["date", "stock", "target_weight", "model_decision_score"]
             if out.empty:
                 for column in base_columns:
                     if column not in out.columns:
-                        out[column] = pd.Series(dtype=float if column in {"target_weight", "model_score"} else object)
+                        out[column] = pd.Series(dtype=float if column in {"target_weight", "model_decision_score"} else object)
             return out[base_columns]
         base_columns = ["date", "stock", "target_weight"]
         if out.empty:
@@ -1260,7 +1271,7 @@ def _build_trade_plan(
         source_candidate_source=source_candidate_source,
     )
     if not action_df.empty:
-        action_priority = {"鍗栧嚭": 0, "鍑忎粨": 1, "涔板叆": 2, "鍔犱粨": 3}
+        action_priority = {"卖出": 0, "减仓": 1, "买入": 2, "加仓": 3}
         action_df["action_priority"] = action_df["action"].map(action_priority).fillna(99)
         if display_mode == "research_candidate":
             action_df = action_df.sort_values(
@@ -1374,14 +1385,15 @@ def _build_raw_model_watchlist(
             "date": latest_date,
             "stock": aligned_index,
             "target_weight": target_weight_row.reindex(aligned_index).fillna(0.0).values,
-            "model_score": pd.to_numeric(model_score_row.reindex(aligned_index), errors="coerce").values,
+            "model_decision_score": pd.to_numeric(model_score_row.reindex(aligned_index), errors="coerce").values,
         }
     )
-    df = df[(df["target_weight"] > 0.0) | pd.notna(df["model_score"])].copy()
+    df["model_score"] = df["model_decision_score"]
+    df = df[(df["target_weight"] > 0.0) | (df["model_decision_score"].fillna(0.0) > 0.0)].copy()
     if df.empty:
         return df
     return (
-        df.sort_values(["target_weight", "model_score", "stock"], ascending=[False, False, True])
+        df.sort_values(["target_weight", "model_decision_score", "stock"], ascending=[False, False, True])
         .head(top_n)
         .reset_index(drop=True)
     )
@@ -1514,7 +1526,7 @@ def _write_trade_plan_txt(
     if model_info.get("candidate_target_weight_csv"):
         lines.append(f"候选权重文件: {model_info['candidate_target_weight_csv']}")
     if model_info.get("watch_candidate_score_csv"):
-        lines.append(f"研究候选模型分文件: {model_info['watch_candidate_score_csv']}")
+        lines.append(f"研究候选综合决策分文件: {model_info['watch_candidate_score_csv']}")
     if model_info.get("watch_candidate_target_weight_csv"):
         lines.append(f"研究候选原始权重文件: {model_info['watch_candidate_target_weight_csv']}")
     if model_info.get("candidate_usable_rows") is not None and model_info.get("candidate_total_rows") is not None:
@@ -1688,7 +1700,7 @@ def _write_trade_plan_txt(
             else:
                 lines.append(
                     f"   当前权重 {row['current_weight']:.2%} -> 目标权重 {row['target_weight']:.2%} | "
-                    f"综合分 {row['final_score']:.4f} | 模型分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+                    f"综合分 {row['final_score']:.4f} | 模型综合决策分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
                 )
 
     lines.append("")
@@ -1706,12 +1718,15 @@ def _write_trade_plan_txt(
     if display_mode == "research_candidate":
         lines.append("三、研究候选观察名单")
         if watchlist_mode == "raw_model_selection":
-            lines.append("- 观察名单使用未经过执行桥的模型原始候选权重与模型分。")
+            lines.append("- 观察名单使用未经过执行桥的模型原始候选权重与模型综合决策分。")
             for _, row in watch_df.iterrows():
-                model_score = pd.to_numeric(pd.Series([row.get("model_score", np.nan)]), errors="coerce").iloc[0]
-                score_text = f"{float(model_score):.4f}" if pd.notna(model_score) else "nan"
+                model_decision_score = pd.to_numeric(
+                    pd.Series([row.get("model_decision_score", row.get("model_score", np.nan))]),
+                    errors="coerce",
+                ).iloc[0]
+                score_text = f"{float(model_decision_score):.4f}" if pd.notna(model_decision_score) else "nan"
                 lines.append(
-                    f"- {row['stock']} | 原始目标权重 {row['target_weight']:.2%} | 模型分 {score_text}"
+                    f"- {row['stock']} | 原始目标权重 {row['target_weight']:.2%} | 模型综合决策分 {score_text}"
                 )
         else:
             for _, row in watch_df.iterrows():
@@ -1727,7 +1742,7 @@ def _write_trade_plan_txt(
         for _, row in watch_df.iterrows():
             lines.append(
                 f"- {row['stock']} | 综合分 {row['final_score']:.4f} | 目标权重 {row['target_weight']:.2%} | "
-                f"模型分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
+                f"模型综合决策分 {row['model_score']:.4f} | none {row['score_none']:.4f} | v2 {row['score_v2']:.4f}"
             )
 
     lines.append("")
@@ -1911,7 +1926,7 @@ def main():
             cfg, ml_cfg, prepared_bundle, style_map, industry_map
         )
         model_info = {
-            "mode": "瀹炴椂璁粌",
+            "mode": "实时训练",
             "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
             "model_family": str(ml_cfg.model_family),
@@ -2479,7 +2494,7 @@ def main_with_progress():
                     training_log,
                 ) = _build_scores_on_the_fly(cfg, ml_cfg, prepared_bundle, style_map, industry_map)
                 model_info = {
-                    "mode": "瀹炴椂璁粌",
+                    "mode": "实时训练",
                     "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "horizons": ",".join(str(h) for h in ml_cfg.target_horizons),
                     "model_family": str(ml_cfg.model_family),
@@ -2605,7 +2620,7 @@ def main_with_progress():
                         "latest_data_date": str(pd.Timestamp(source_signal_date).date()),
                         "latest_data_label": "候选源信号日",
                         "freshness_status": str(freshness_info.get("status_text", "")),
-                        "freshness_label": "鍊欓€変俊鍙锋柊椴滃害",
+                        "freshness_label": "候选信号新鲜度",
                         "latest_completed_trading_date": freshness_info.get("latest_completed_trading_date"),
                         "trading_day_lag": freshness_info.get("trading_day_lag"),
                         "warnings": warnings,
