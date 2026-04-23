@@ -99,6 +99,7 @@ BUDGET_OBJECTIVE_RESULT_VALUE_V6 = "result_value_v6"
 BUDGET_OBJECTIVE_RESULT_VALUE_V7 = "result_value_v7"
 BUDGET_OBJECTIVE_RESULT_VALUE_V8 = "result_value_v8"
 BUDGET_OBJECTIVE_RESULT_VALUE_V9 = "result_value_v9"
+BUDGET_OBJECTIVE_RESULT_VALUE_V10 = "result_value_v10"
 BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
     DEFAULT_BUDGET_OBJECTIVE,
     BUDGET_OBJECTIVE_RESULT_VALUE_V1,
@@ -111,6 +112,7 @@ BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
     BUDGET_OBJECTIVE_RESULT_VALUE_V7,
     BUDGET_OBJECTIVE_RESULT_VALUE_V8,
     BUDGET_OBJECTIVE_RESULT_VALUE_V9,
+    BUDGET_OBJECTIVE_RESULT_VALUE_V10,
 )
 DEFAULT_OUTCOME_HORIZONS = (1, 3, 5, 10, 20)
 
@@ -1479,6 +1481,7 @@ def _apply_budget_objective_targets(
     diagnostics["budget_objective_is_result_value_v7"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V7 else 0.0
     diagnostics["budget_objective_is_result_value_v8"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V8 else 0.0
     diagnostics["budget_objective_is_result_value_v9"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V9 else 0.0
+    diagnostics["budget_objective_is_result_value_v10"] = 1.0 if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V10 else 0.0
 
     adjusted = dict(global_targets)
     adjusted["budget_risk_signal_target"] = float(np.clip(signals["risk_score"], 0.0, 1.0))
@@ -1613,6 +1616,290 @@ def _apply_budget_objective_targets(
     arbitration_deploy_pressure = float(signals["arbitration_deploy_pressure"])
     arbitration_sell_pressure = float(signals["arbitration_sell_pressure"])
     arbitration_cash_pressure = float(signals["arbitration_cash_pressure"])
+    if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V10:
+        release_dominance = max(release_gate_target - deploy_gate_target, 0.0)
+        deploy_dominance = max(deploy_gate_target - release_gate_target, 0.0)
+        deploy_release_spread = deploy_value_target - release_value_target
+        executable_deploy = float(
+            np.clip(
+                0.40 * deploy_executability_pressure
+                + 0.22 * deploy_executability_target
+                + 0.18 * deploy_gate_target
+                + 0.14 * deploy_value_target
+                + 0.10 * alpha_opportunity_value
+                - 0.14 * release_gate_target
+                - 0.10 * defense_gate_target,
+                0.0,
+                1.0,
+            )
+        )
+        protected_hold_pressure = float(
+            np.clip(
+                0.34 * hold_continuation_value
+                + 0.18 * alpha_opportunity_value
+                + 0.14 * deploy_value_target
+                + 0.12 * deploy_gate_target
+                + 0.12 * deploy_executability_target
+                + 0.10 * executable_deploy
+                - 0.20 * release_value_target
+                - 0.20 * release_gate_target
+                - 0.14 * sell_release_value
+                - 0.08 * cash_defense_value,
+                0.0,
+                1.0,
+            )
+        )
+        funding_release_pressure = float(
+            np.clip(
+                0.32 * release_value_target
+                + 0.24 * release_gate_target
+                + 0.14 * held_sell_pressure
+                + 0.10 * sell_selection_pressure
+                + 0.08 * forward_benchmark_downside
+                + 0.06 * cash_defense_value
+                - 0.22 * hold_continuation_value
+                - 0.16 * deploy_executability_target
+                - 0.12 * alpha_opportunity_value
+                - 0.10 * deploy_gate_target,
+                0.0,
+                1.0,
+            )
+        )
+        hierarchical_defense_pressure = float(
+            np.clip(
+                0.34 * cash_timing
+                + 0.20 * cash_defense_value
+                + 0.14 * risk
+                + 0.10 * forward_benchmark_downside
+                + 0.08 * max(risk_deploy_gap, 0.0)
+                + 0.08 * defense_value_target
+                + 0.06 * funding_release_pressure
+                - 0.16 * executable_deploy
+                - 0.10 * deploy_value_target,
+                0.0,
+                1.0,
+            )
+        )
+        disciplined_funding_need = float(
+            np.clip(
+                0.40 * executable_deploy
+                + 0.20 * deployment_floor
+                + 0.14 * deploy_dominance
+                + 0.10 * deploy_value_target
+                + 0.08 * alpha_alignment
+                - 0.22 * protected_hold_pressure
+                - 0.10 * hierarchical_defense_pressure,
+                0.0,
+                1.0,
+            )
+        )
+        portfolio_release_pressure = float(
+            np.clip(
+                0.38 * funding_release_pressure
+                + 0.22 * max(release_dominance - protected_hold_pressure * 0.50, 0.0)
+                + 0.14 * held_sell_pressure
+                + 0.10 * sell_selection_pressure
+                + 0.08 * forward_benchmark_downside
+                - 0.18 * protected_hold_pressure
+                - 0.06 * executable_deploy,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_risk = float(
+            np.clip(
+                0.30 * risk
+                + 0.28 * hierarchical_defense_pressure
+                + 0.14 * portfolio_release_pressure
+                + 0.10 * forward_benchmark_downside
+                + 0.08 * max(risk_deploy_gap, 0.0)
+                - 0.12 * disciplined_funding_need
+                - 0.08 * deploy_value_target,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_deploy = float(
+            np.clip(
+                0.30 * deploy
+                + 0.26 * deploy_value_target
+                + 0.20 * deploy_gate_target
+                + 0.18 * executable_deploy
+                + 0.10 * alpha_opportunity_value
+                + 0.08 * disciplined_funding_need
+                + 0.06 * deployment_opportunity_cost
+                + 0.04 * large_upside_1d_target
+                - 0.10 * hierarchical_defense_pressure
+                - 0.10 * portfolio_release_pressure,
+                0.0,
+                1.0,
+            )
+        )
+        sharpened_cash = float(
+            np.clip(
+                0.44 * cash_timing
+                + 0.28 * hierarchical_defense_pressure
+                + 0.10 * cash_defense_value
+                + 0.08 * forward_benchmark_downside
+                + 0.06 * max(risk_deploy_gap, 0.0)
+                - 0.14 * disciplined_funding_need
+                - 0.08 * deploy_value_target,
+                0.0,
+                1.0,
+            )
+        )
+        min_gross = float(
+            np.clip(
+                0.22
+                + 0.28 * deployment_floor
+                + 0.18 * disciplined_funding_need
+                + 0.14 * executable_deploy
+                + 0.10 * deploy_dominance
+                - 0.18 * hierarchical_defense_pressure
+                - 0.08 * portfolio_release_pressure,
+                0.18,
+                0.78,
+            )
+        )
+        min_candidate = int(
+            np.clip(
+                round(
+                    2.0
+                    + disciplined_funding_need * 4.4
+                    + executable_deploy * 2.2
+                    + deploy_gate_target * 1.8
+                    + large_upside_1d_target * 1.2
+                    - hierarchical_defense_pressure * 1.4
+                ),
+                2,
+                10,
+            )
+        )
+        diagnostics["result_value_hierarchical_defense_pressure"] = hierarchical_defense_pressure
+        diagnostics["result_value_portfolio_release_pressure"] = portfolio_release_pressure
+        diagnostics["result_value_executable_deploy_pressure"] = executable_deploy
+        diagnostics["result_value_protected_hold_pressure"] = protected_hold_pressure
+        diagnostics["result_value_funding_release_pressure"] = funding_release_pressure
+        diagnostics["result_value_disciplined_funding_need"] = disciplined_funding_need
+        diagnostics["result_value_sell_source_contract_mode"] = 1.0
+        adjusted["budget_risk_signal_target"] = sharpened_risk
+        adjusted["budget_deploy_signal_target"] = sharpened_deploy
+        adjusted["budget_cash_timing_signal_target"] = sharpened_cash
+        adjusted["budget_alpha_focus_signal_target"] = float(
+            np.clip(
+                0.30 * alpha_alignment
+                + 0.24 * deploy_value_target
+                + 0.20 * deploy_gate_target
+                + 0.14 * executable_deploy
+                + 0.08 * disciplined_funding_need
+                + 0.04 * large_upside_1d_target,
+                0.0,
+                1.0,
+            )
+        )
+        adjusted["gross_exposure_target"] = float(
+            np.clip(
+                base_gross
+                + 0.14 * (sharpened_deploy - 0.30)
+                + 0.10 * disciplined_funding_need
+                + 0.06 * deploy_dominance
+                + 0.04 * max(deploy_release_spread, 0.0)
+                - 0.18 * hierarchical_defense_pressure
+                - 0.08 * portfolio_release_pressure,
+                min_gross,
+                0.96,
+            )
+        )
+        adjusted["candidate_budget"] = float(
+            int(
+                np.clip(
+                    round(
+                        0.32 * float(adjusted.get("candidate_budget", 2.0) or 2.0)
+                        + 0.24 * candidate_hint
+                        + 2.8 * disciplined_funding_need
+                        + 1.8 * executable_deploy
+                        + 0.8 * alpha_opportunity_value
+                        - 0.8 * hierarchical_defense_pressure
+                        - 0.4 * portfolio_release_pressure
+                    ),
+                    min_candidate,
+                    14,
+                )
+            )
+        )
+        adjusted["turnover_budget"] = float(
+            np.clip(
+                float(adjusted.get("turnover_budget", 0.10) or 0.10)
+                + 0.08 * max(portfolio_release_pressure - protected_hold_pressure, 0.0)
+                + 0.05 * max(hierarchical_defense_pressure - executable_deploy, 0.0)
+                + 0.05 * max(disciplined_funding_need - protected_hold_pressure, 0.0),
+                0.08,
+                0.82,
+            )
+        )
+        adjusted["max_position_weight_target"] = float(
+            np.clip(
+                float(adjusted.get("max_position_weight_target", 0.10) or 0.10)
+                + 0.018 * deploy_gate_target
+                + 0.016 * executable_deploy
+                + 0.010 * disciplined_funding_need
+                - 0.008 * hierarchical_defense_pressure
+                - 0.006 * portfolio_release_pressure,
+                0.07,
+                0.28,
+            )
+        )
+        adjusted["hold_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("hold_bias_target", 0.18) or 0.18)
+                + 0.18 * protected_hold_pressure
+                + 0.12 * executable_deploy
+                + 0.10 * hold_continuation_value
+                + 0.06 * deploy_dominance
+                - 0.10 * funding_release_pressure
+                - 0.08 * release_dominance,
+                0.10,
+                0.96,
+            )
+        )
+        adjusted["reduce_bias_target"] = float(
+            np.clip(
+                float(adjusted.get("reduce_bias_target", 0.10) or 0.10)
+                + 0.16 * release_gate_target
+                + 0.14 * funding_release_pressure
+                + 0.08 * portfolio_release_pressure
+                - 0.14 * protected_hold_pressure
+                - 0.08 * executable_deploy
+                - 0.04 * hold_continuation_value,
+                0.0,
+                0.62,
+            )
+        )
+        adjusted["exit_patience_target"] = float(
+            np.clip(
+                float(adjusted.get("exit_patience_target", 0.20) or 0.20)
+                + 0.16 * protected_hold_pressure
+                + 0.10 * executable_deploy
+                + 0.08 * hold_continuation_value
+                - 0.12 * funding_release_pressure
+                - 0.08 * release_gate_target,
+                0.05,
+                0.95,
+            )
+        )
+        adjusted["reentry_guard_target"] = float(
+            np.clip(
+                float(adjusted.get("reentry_guard_target", 0.0) or 0.0)
+                + 0.14 * hierarchical_defense_pressure
+                + 0.08 * funding_release_pressure
+                + 0.04 * reentry_guard
+                - 0.10 * disciplined_funding_need,
+                0.0,
+                0.52,
+            )
+        )
+        diagnostics["result_value_constraint_only_mode"] = 1.0
+        return adjusted, diagnostics
     if objective == BUDGET_OBJECTIVE_RESULT_VALUE_V9:
         release_dominance = max(release_gate_target - deploy_gate_target, 0.0)
         deploy_dominance = max(deploy_gate_target - release_gate_target, 0.0)
@@ -3514,6 +3801,16 @@ def translate_target_weights_to_share_actions(
     target_weights: pd.Series,
     price_row: pd.Series,
 ) -> pd.DataFrame:
+    columns = [
+        "stock",
+        "price",
+        "current_weight",
+        "target_weight",
+        "current_shares",
+        "target_shares",
+        "delta_shares",
+        "share_action",
+    ]
     positions = account_snapshot.get("positions", []) if isinstance(account_snapshot, dict) else []
     cash_value = float(account_snapshot.get("available_cash", 0.0) or 0.0)
     current_shares = {
@@ -3561,7 +3858,7 @@ def translate_target_weights_to_share_actions(
                 "share_action": action,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def build_reason_summary(action_row: pd.Series) -> str:

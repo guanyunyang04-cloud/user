@@ -568,3 +568,61 @@
 - 遗留知识假设：
   - 若下一轮要从代码侧走向训练级闭环，应让模型学习 release / deploy funding 的价值仲裁，而不是长期依赖 simulator 里的弱证据规则。
   - cash timing 仍需要从被动仓位结果转向主动择时信号；单靠 sell-source 解耦不会自动解决 `cash_timing_quality_1d`。
+
+## 2026-04-23 r11 卖出来源契约训练级知识沉淀
+
+- 新知识 1：sell-source contract 若只改 simulator，不会自动进入正式研究主线。
+  - 这轮已证明，要把同一合同真正接进训练级闭环，至少要同时修改三层：
+    - `budget objective`
+    - `loss profile`
+    - `self-optimizing study objective`
+  - 只改其中一层，会导致研究系统继续沿旧目标选优，形成“代码已变、训练目标未变、study 评分还在奖旧行为”的假闭环。
+- 新知识 2：`result_value_v10` 的主要作用不是单纯提收益，而是把“谁可以被释放来资助新部署”从隐性预算副作用改成可学习的预算目标。
+  - 短窗教师回放中，`v10` 相对 `v9` 明确降低了：
+    - `candidate_budget`
+    - `turnover_budget`
+    - `reduce_bias_target`
+    - `portfolio_release_pressure`
+  - 同时抬高了：
+    - `executable_deploy_pressure`
+    - `exit_patience_target`
+    - `disciplined_funding_need`
+- 新知识 3：短窗比较不能只看 `annual_return`。
+  - 在 `2025-10-08 -> 2025-12-31` 的 bounded teacher rollout 中，`v10` 的年化收益差被短窗复利明显放大。
+  - 更可靠的读法应先看：
+    - `total_return`
+    - 目标均值变化
+    - 换手与候选预算变化
+  - 这一点可避免把“轻度保守化”误判成“目标方向彻底错误”。
+- 新知识 4：新的 study objective 必须显式惩罚卖出来源污染，而不只是奖励 headline return。
+  - `sell_source_contract_v1` 已固定纳入：
+    - `budget_origin_sell_share`
+    - `high_cash_budget_origin_sell_share`
+    - `deploy_funding_rebalance_sell_share`
+    - `deploy_funding_rebalance_forward_excess_5d`
+    - `sell_source_floor_guard_share`
+  - 这保证了后续 bounded study 不会再把“收益高但来源脏”的分支自动排到最前。
+- 当前稳定结论：
+  - sell-source 解耦的下一阶段，不是继续堆 simulator 规则，而是让训练目标显式学习：
+    - `protected_hold`
+    - `funding_release`
+    - `deploy_executability`
+  - 当前最值得继续验证的主线，不是回退到 `v9` 旧目标，而是拿 `r11` 做 bounded formal 对照，判断 `v10` 的谨慎收缩是否能在正式训练后换来更干净的 sell-source 行为。
+
+## 2026-04-23 r11 正式 bounded study 收口知识
+
+- 新知识 1：`objective` 演进与 `loss` 演进必须分开验收。
+  - 这轮正式 study 的最佳可复现分支不是 `result_value_v10 + alpha_result_value_budget_split_v10`，而是 `result_value_v9 + alpha_result_value_budget_split_v10`。
+  - 说明当前真正站得住的增量在 `loss-side funding-release discipline`，而不是 `v10 objective` 的现有权重配比。
+- 新知识 2：screening 可行不等于 confirmatory 成立。
+  - `trial_01` 在 screening 阶段还能保住正收益，但其 fresh confirmatory `confirm_02` 直接坍塌到负收益、负 Sharpe。
+  - 对 sell-source 这类合同问题，confirmatory 稳定性比单次 screening headline 更重要。
+- 新知识 3：`budget_origin_sell_share = 0` 之后，主瓶颈会前移到 funding-sell 依赖。
+  - r11 所有正式分支的 `budget_origin_sell_share` 都已归零。
+  - 但 `deploy_funding_rebalance_sell_share` 仍集中在 `0.855 -> 0.970`，说明“隐藏 budget 卖出”问题已被压住，新的核心问题变成“显式 funding sell 是否仍然过多、过早、过脏”。
+- 新知识 4：runner-up 需要在证据缺口处主动补 confirm，而不能机械信任默认选优器。
+  - 这轮 `trial_03` 是 screening runner-up，且部分 contract-like 指标更平衡，因此值得手动补做同口径 confirm。
+  - 补跑结果证明：它改善了部分 alignment，但在收益、funding-sell 污染和综合得分上仍不如 `confirm_01`，从而真正补齐了证据链，而不是只保留猜测。
+- 新知识 5：导出链路也要遵守“空结果是合法状态”的合同。
+  - 当某一天 `share_actions` 为空时，导出系统不应因缺列而崩溃。
+  - 对连续策略研究来说，“没有可执行 share action”是合法输出，schema 必须稳定保留 `stock/action/shares/current_weight/target_weight/delta_weight` 等字段。

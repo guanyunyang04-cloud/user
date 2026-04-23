@@ -2,6 +2,35 @@
 
 快照日期：`2026-04-23`
 
+## 2026-04-23 r11 卖出来源契约训练侧接通状态
+- 事实：`continuous_policy` 已把 sell-source contract 接到训练与搜索主链：
+  - `pipeline_utils.py` 新增 `budget_objective = result_value_v10`
+  - `model_seq_v3.py` 新增 `loss_profile = alpha_result_value_budget_split_v10`
+  - `model_seq_v3.py` 新增 `funding_release_discipline_loss`
+  - `run_self_optimizing_study.py` 新增 `search_profile = split_heads_sell_source_contract_r11`
+  - `run_self_optimizing_study.py` 新增 `objective_profile = sell_source_contract_v1`
+- 事实：`r11 dry-run` 已前台跑通，产物为：
+  - `daily_research/output/continuous_policy/studies/verify_sell_source_contract_r11_dryrun_20260423/study_plan.json`
+  - baseline 已固定为 `holdcash_v3 + budget_v3 + alpha_result_value_budget_split_v10 + action_budget_split_v1 + cash_constraint_sell_source_guard_v7 + result_value_v10 + active_execution_strategy + split_v2`
+- 事实：已完成短窗教师回放核验，产物为：
+  - `daily_research/output/continuous_policy/analysis/budget_objective_checks/sell_source_contract_v10_short_window_20251008_20251231.json`
+  - 同窗 `v10 - v9` 关键变化：
+    - `candidate_budget = -0.75`
+    - `turnover_budget = -0.0269`
+    - `reduce_bias_target = -0.0219`
+    - `exit_patience_target = +0.0071`
+    - `result_value_executable_deploy_pressure = +0.0525`
+    - `result_value_hierarchical_defense_pressure = -0.0293`
+    - `result_value_portfolio_release_pressure = -0.0530`
+    - `teacher total_return = 4.1852 -> 4.1273`
+  - 同窗年化收益差看起来很大，但主要是短窗年化放大效应；更应看 `total_return` 与目标均值变化。
+- 事实：已完成真实协议摘要评分 smoke，产物为：
+  - `daily_research/output/continuous_policy/analysis/budget_objective_checks/sell_source_contract_v1_score_smoke_20260423.json`
+  - `sell_source_contract_v1` 已能对现有 `protocol_summary.json` 正常给出 `performance / stability / composite score`
+- 推断：当前思路不是错在“sell-source 不该进入训练”，而是此前只改了 simulator，没有把相同合同同步接到 `budget objective + loss profile + study objective` 三个层面。
+- 推断：`v10` 当前短窗表现是“更克制、更少预算化卖出冲动”，不是“目标断了”；但是否值得替代 `v9` 进入正式主线，还需要 bounded study。
+- 决策：本轮先收口训练侧合同、验证链和主分脑写回，不在证据仍属短窗时直接吃掉新的正式 10h 窗口。
+
 ## 2026-04-23 r10 卖出来源解耦 v7c 当前状态
 - 事实：`continuous_policy` 已新增 `budget_calibration = cash_constraint_sell_source_guard_v7`，当前代码侧评估落点为 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_eval` / `sell_source_v7c_audit`。
 - 事实：v6 对照复跑确认了原始病灶：
@@ -1635,3 +1664,54 @@
     - `promotion_gate.status = shadow_only`
   - 当前不得依据 `source_eval` / `source_audit` 切换 live 默认执行，也不得改写 promotion 结论。
   - 后续凡是涉及 simulator 卖出路径的修正，都应把 source attribution audit 作为标准随行产物，而不再只看 aggregate metrics。
+
+## 2026-04-23 r11 sell-source contract 正式 bounded study 完成
+
+- 当前事实：
+  - 已前台完成正式 bounded self-opt：
+    - study tag：`cp_v3_sell_source_contract_r11__study_r1`
+    - `completed_trial_count = 4`
+    - `failed_trial_count = 0`
+    - `confirmatory_completed_trial_count = 2`
+    - `objective_profile = sell_source_contract_v1`
+  - 当前 formal 最优且可复现分支为 `confirm_01`：
+    - `loss_profile = alpha_result_value_budget_split_v10`
+    - `budget_objective = result_value_v9`
+    - `annual_return = 0.8743`
+    - `sharpe = 2.3028`
+    - `max_drawdown = -0.1416`
+    - `deploy_intent_realized_rate = 0.8861`
+    - `sell_selection_quality_5d = 0.0223`
+    - `budget_origin_sell_share = 0.0`
+    - `deploy_funding_rebalance_sell_share = 0.8974`
+    - `deploy_funding_rebalance_forward_excess_5d = 0.0031`
+    - `promotion_status = shadow_only`
+  - `confirm_02` 对应 `result_value_v10 + alpha_result_value_budget_split_v10`，fresh confirmatory 明显失稳：
+    - `annual_return = -0.3206`
+    - `sharpe = -1.7629`
+    - `sell_selection_quality_5d = -0.0816`
+    - `deploy_funding_rebalance_sell_share = 0.9185`
+    - `promotion_status = shadow_only`
+  - 已补做同口径 runner-up confirm：
+    - tag：`cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla`
+    - 对应 `result_value_v9 + alpha_result_value_budget_split_v9`
+    - `annual_return = 0.2267`
+    - `sharpe = 0.9590`
+    - `cash_timing_quality_1d = 0.0001`
+    - `release_gate_forward_alignment_5d = 0.1496`
+    - `deploy_funding_rebalance_sell_share = 0.9449`
+    - `deploy_funding_rebalance_forward_excess_5d = 0.0439`
+    - 未超过 `confirm_01`
+  - 本轮还发现一个真实导出层 bug：当 `translate_target_weights_to_share_actions(...)` 返回空结果时，export merge 会因缺少 `stock` 列崩溃；现已在 `pipeline_utils.py` 与 `export_action_panel.py` 修复。
+- 当前结论：
+  - `result_value_v10` 当前不能升为正式主线预算目标。
+  - `v10` 目前真正有效的增量在 `alpha_result_value_budget_split_v10` 与 `funding_release_discipline_loss`，而不是 `result_value_v10` 本身。
+  - sell-source 训练侧主矛盾已经从 `budget_origin_sell_share` 转移到：
+    - `deploy_funding_rebalance_sell_share` 长期过高
+    - `deploy_funding_rebalance_forward_excess_5d` 未稳定非正
+    - `reduce_success_rate_5d / exit_timeliness_rate_5d` 仍不过关
+  - 这说明方向不是整体错误，但当前 `objective` 版本还没有把“谁该释放来资助新部署”学稳。
+- 当前边界：
+  - 本轮未中断训练。
+  - 本轮未切换 live 默认执行。
+  - 本轮未改写 promotion gate，当前所有 r11 分支仍是 `shadow_only`。

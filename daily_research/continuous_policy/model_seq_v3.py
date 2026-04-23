@@ -714,6 +714,67 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "hierarchical_three_value_total": 0.25,
         },
     },
+    "alpha_result_value_budget_split_v10": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.34,
+            "entry_quality": 0.82,
+            "hold_quality": 1.14,
+            "add_quality": 0.88,
+            "reduce_quality": 1.06,
+            "exit_urgency": 1.04,
+            "reentry_readiness": 0.44,
+            "holding_days_ratio": 1.24,
+            "reduce_fraction": 1.26,
+            "exit_hazard": 1.30,
+            "sell_attribution_score": 1.02,
+            "sell_rank_score": 1.42,
+            "lifecycle_sell_gate": 1.28,
+            "large_upside_1d_target": 1.18,
+            "alpha_opportunity_value": 1.52,
+            "hold_continuation_value": 1.56,
+            "sell_release_value": 1.30,
+            "cash_defense_value": 1.04,
+            "deployment_opportunity_cost": 1.40,
+            "risk_adjusted_action_value": 1.24,
+            "value_arbitration_target": 0.82,
+            "deploy_value_target": 1.78,
+            "release_value_target": 1.46,
+            "defense_value_target": 0.70,
+            "deploy_gate_target": 1.82,
+            "release_gate_target": 1.48,
+            "defense_gate_target": 0.38,
+            "deploy_executability_target": 1.54,
+            "clipped_intent_risk": 1.16,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.54,
+            "candidate_budget": 1.12,
+            "turnover_budget": 1.24,
+            "max_position_weight_target": 0.90,
+            "hold_bias_target": 1.12,
+            "reduce_bias_target": 1.00,
+            "exit_patience_target": 1.12,
+            "reentry_guard_target": 0.96,
+            "budget_risk_signal_target": 1.10,
+            "budget_deploy_signal_target": 1.42,
+            "budget_cash_timing_signal_target": 1.38,
+            "budget_alpha_focus_signal_target": 1.14,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.40,
+            "action_soft": 0.60,
+            "action_total": 0.56,
+            "duration_total": 0.12,
+            "scalar_total": 1.72,
+            "daily_total": 0.90,
+            "arbitration_total": 0.14,
+            "sell_rank_pairwise_total": 0.16,
+            "clipped_intent_total": 0.10,
+            "value_arbitration_total": 0.10,
+            "hierarchical_three_value_total": 0.30,
+            "funding_release_total": 0.18,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -972,6 +1033,89 @@ def _hierarchical_three_value_gate_consistency_loss(
         )
     if margin_terms:
         return bce_loss + torch.stack(margin_terms).mean() * 0.24
+    return bce_loss
+
+
+def _funding_release_discipline_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    device = outputs["action_logits"].device
+    required_targets = {
+        "hold_continuation_value",
+        "alpha_opportunity_value",
+        "sell_release_value",
+        "cash_defense_value",
+        "deploy_value_target",
+        "release_value_target",
+        "deploy_gate_target",
+        "release_gate_target",
+        "holding_flag_target",
+    }
+    if not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+    probs = torch.softmax(outputs["action_logits"], dim=-1)
+    action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
+    keep_prob = probs[:, action_lookup["hold"]] + probs[:, action_lookup["add"]]
+    release_prob = probs[:, action_lookup["reduce"]] + probs[:, action_lookup["exit"]]
+    hold_value = torch.clamp(targets["hold_continuation_value"].to(device), 0.0, 1.0)
+    alpha_value = torch.clamp(targets["alpha_opportunity_value"].to(device), 0.0, 1.0)
+    sell_release_value = torch.clamp(targets["sell_release_value"].to(device), 0.0, 1.0)
+    cash_defense_value = torch.clamp(targets["cash_defense_value"].to(device), 0.0, 1.0)
+    deploy_value = torch.clamp(targets["deploy_value_target"].to(device), 0.0, 1.0)
+    release_value = torch.clamp(targets["release_value_target"].to(device), 0.0, 1.0)
+    deploy_gate = torch.clamp(targets["deploy_gate_target"].to(device), 0.0, 1.0)
+    release_gate = torch.clamp(targets["release_gate_target"].to(device), 0.0, 1.0)
+    deploy_executability = torch.clamp(
+        targets.get("deploy_executability_target", torch.zeros_like(hold_value)).to(device),
+        0.0,
+        1.0,
+    )
+    held = torch.clamp(targets["holding_flag_target"].to(device), 0.0, 1.0)
+    protected_keep_target = torch.clamp(
+        0.34 * hold_value
+        + 0.18 * alpha_value
+        + 0.14 * deploy_value
+        + 0.12 * deploy_gate
+        + 0.12 * deploy_executability
+        - 0.22 * release_value
+        - 0.20 * release_gate
+        - 0.14 * sell_release_value
+        - 0.08 * cash_defense_value,
+        0.0,
+        1.0,
+    ) * held
+    funding_release_target = torch.clamp(
+        0.34 * release_value
+        + 0.24 * release_gate
+        + 0.16 * sell_release_value
+        + 0.08 * cash_defense_value
+        - 0.24 * hold_value
+        - 0.14 * alpha_value
+        - 0.12 * deploy_gate
+        - 0.10 * deploy_executability,
+        0.0,
+        1.0,
+    ) * held
+    eps = 1.0e-4
+    bce_loss = (
+        nn.functional.binary_cross_entropy(torch.clamp(keep_prob, eps, 1.0 - eps), protected_keep_target) * 0.52
+        + nn.functional.binary_cross_entropy(torch.clamp(release_prob, eps, 1.0 - eps), funding_release_target) * 0.48
+    )
+    protected_dominant = protected_keep_target > funding_release_target + 0.12
+    release_dominant = funding_release_target > protected_keep_target + 0.12
+    margin = torch.tensor(0.10, device=device)
+    margin_terms: list[torch.Tensor] = []
+    if int(protected_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(margin - (keep_prob[protected_dominant] - release_prob[protected_dominant])).mean()
+        )
+    if int(release_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(margin - (release_prob[release_dominant] - keep_prob[release_dominant])).mean()
+        )
+    if margin_terms:
+        return bce_loss + torch.stack(margin_terms).mean() * 0.26
     return bce_loss
 
 
@@ -1868,6 +2012,7 @@ def fit_policy_models_v3(
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
+            funding_release_loss = _funding_release_discipline_loss(outputs, sample_batch_targets)
             clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -1885,6 +2030,7 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
+                + multi_objective_loss_weights.get("funding_release_total", 0.0) * funding_release_loss
                 + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * clipped_intent_loss
             )
             sample_optimizer.zero_grad(set_to_none=True)
@@ -1922,6 +2068,7 @@ def fit_policy_models_v3(
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
+            val_funding_release_loss = _funding_release_discipline_loss(val_outputs, val_targets)
             val_clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(val_outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -1943,6 +2090,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
+                    + multi_objective_loss_weights.get("funding_release_total", 0.0) * val_funding_release_loss
                     + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * val_clipped_intent_loss
                 ).detach().cpu()
             )
@@ -2031,6 +2179,23 @@ def fit_policy_models_v3(
                 "deploy_gate_target",
                 "release_gate_target",
                 "defense_gate_target",
+            )
+        ),
+        "supports_deploy_executability_head": "deploy_executability_target" in sample_scalar_loss_weights,
+        "supports_funding_release_discipline": (
+            multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
+            and all(
+                name in sample_scalar_loss_weights
+                for name in (
+                    "hold_continuation_value",
+                    "alpha_opportunity_value",
+                    "sell_release_value",
+                    "cash_defense_value",
+                    "deploy_value_target",
+                    "release_value_target",
+                    "deploy_gate_target",
+                    "release_gate_target",
+                )
             )
         ),
         "sample_scalar_loss_weights": dict(sample_scalar_loss_weights),

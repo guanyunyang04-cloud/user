@@ -1369,6 +1369,37 @@
   - 不要并行运行多个 `analyze_behavior_gap` 写同一个 `latest_behavior_audit_summary.json`；此前并行审计曾触发 latest 文件 rename 权限竞争。行为审计应顺序运行。
   - 本轮未启动训练、未停止训练、未切换 live 默认执行、未改写 promotion gate。
 
+## 2026-04-23 r11 sell-source contract 训练侧核验命令
+
+- 新增代码入口：
+  - `daily_research/continuous_policy/check_budget_objective_contract.py`
+  - `daily_research/continuous_policy/pipeline_utils.py`
+  - `daily_research/continuous_policy/model_seq_v3.py`
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`
+- 已执行 dry-run：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_sell_source_contract_r11 --trial-count 2 --study-tag verify_sell_source_contract_r11_dryrun_20260423 --dry-run`
+  - 产物：`daily_research/output/continuous_policy/studies/verify_sell_source_contract_r11_dryrun_20260423/study_plan.json`
+- 已执行短窗 contract check：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.check_budget_objective_contract --output-json "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\analysis\budget_objective_checks\sell_source_contract_v10_short_window_20251008_20251231.json" --protocol-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\protocols\cp_v3_deploy_executability_r10__budget_fix_protocol_r1\protocol_summary.json" --objective-profile sell_source_contract_v1 --protocol-score-output "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\analysis\budget_objective_checks\sell_source_contract_v1_score_smoke_20260423.json"`
+  - 当前默认核验口径：
+    - `pool_name = learned_all_a`
+    - `prepare window = 20250701 -> 20251231`
+    - `compare window = 20251008 -> 20251231`
+    - `label_preset = holdcash_v3`
+    - `execution_semantics = semantic_preserving_v1`
+    - `budget_semantics = action_budget_split_v1`
+    - `budget_calibration = cash_constraint_sell_source_guard_v7`
+    - `objectives = result_value_v9, result_value_v10`
+  - 产物：
+    - `daily_research/output/continuous_policy/analysis/budget_objective_checks/sell_source_contract_v10_short_window_20251008_20251231.json`
+    - `daily_research/output/continuous_policy/analysis/budget_objective_checks/sell_source_contract_v1_score_smoke_20260423.json`
+- 当前读取口径：
+  - 这轮 `contract check` 只负责验证训练侧目标、损失和 study objective 是否真正接通，以及 `v10` 相对 `v9` 的目标行为变化。
+  - 短窗 `teacher rollout` 不是正式训练 verdict，不得直接覆盖 protocol / bounded study 结论。
+- 下一轮正式前台命令候选（未执行）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_sell_source_contract_r11 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_sell_source_contract_r11__study_r1`
+  - 仅当需要正式验证 `v10` 是否优于 `v9` 时再执行；当前文档状态不应把 dry-run 或 short-window check 误记为正式 study。
+
 ## 2026-04-23 默认执行池外持仓显式动作修复
 
 - 代码入口：
@@ -1391,3 +1422,25 @@
 - 读取口径：
   - “系统识别得到股票” 与 “股票在当前默认执行股票池内可自动估值” 是两件事。
   - 池外持仓现在属于显式决策对象，不再只是持仓备注。
+
+## 2026-04-23 r11 sell-source contract 正式 study 与补充复核命令
+
+- 正式 bounded study（已执行）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_sell_source_contract_r11 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_sell_source_contract_r11__study_r1`
+- 主要产物：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11__study_r1/study_summary.json`
+  - ranking csv：`daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11__study_r1/trial_ranking.csv`
+  - 当前 formal 最优 confirmatory：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11__study_r1__confirm_01/protocol_summary.json`
+  - `v10 objective` fresh confirmatory：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11__study_r1__confirm_02/protocol_summary.json`
+- runner-up 同口径补充 confirm（已执行）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v9 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_sell_source_guard_v7 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512 --epochs 64 --min-epochs 48 --resume-mode fresh`
+  - 产物：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla/protocol_summary.json`
+- 非可比误跑说明：
+  - 本轮曾误用默认 `pool_name=liquid500` 启动过一次 runner-up rerun；该 run 不得作为 r11 正式结论证据，只保留为发现 export bug 的触发上下文。
+- 导出层修复入口：
+  - `daily_research/continuous_policy/pipeline_utils.py`
+  - `daily_research/continuous_policy/export_action_panel.py`
+- 当前读取口径：
+  - `confirm_01` 才是当前最优且可复现分支，不是 `v10/v10`。
+  - `confirm_03_runnerup_alla` 只用于补齐候选缺口，不是新的冠军。
+  - 空 `share_actions` 日现在应被视为合法导出状态；后续若再出现同类场景，不应再因为缺少 `stock` 列而崩溃。

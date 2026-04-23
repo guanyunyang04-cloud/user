@@ -2,6 +2,16 @@
 
 快照日期：`2026-04-23`
 
+## 2026-04-23 daily_research r11 卖出来源契约训练侧接通状态
+- 当前事实：
+  - `daily_research` 已把 sell-source 问题从代码侧 calibration 继续推进到训练侧契约，新增了 `result_value_v10`、`alpha_result_value_budget_split_v10`、`split_heads_sell_source_contract_r11` 与 `sell_source_contract_v1`。
+  - 已完成 `r11 dry-run`、短窗 `v9 vs v10` 教师回放比较，以及 `sell_source_contract_v1` 对真实 `protocol_summary.json` 的评分 smoke。
+  - 新证据表明：训练侧契约已经接通，但当前短窗效果偏谨慎收缩，不宜把“契约已接通”直接等同于“正式收益已验证”。
+  - 本轮仍未启动新的正式训练、未停止训练、未切换 live 默认执行、未改写 promotion 结论。
+- 主脑层决策：
+  - 主脑只记录推进阶段变化：`daily_research` 当前已经从“拆清卖出来源”进入“把卖出来源合同接入训练目标、损失和 study 打分”阶段。
+  - 是否投入新的 10h bounded study，由分脑基于现有短窗证据继续执行；主脑不展开具体实验细节。
+
 ## 1. 当前接管摘要
 - 工作区正式生产主线仍是 `daily_research`
 - 已接入主脑的分脑固定为：
@@ -97,3 +107,14 @@
 - 主脑层决策：
   - 主脑只记录状态摘要，不复制具体指标；详细证据、命令、合同与遗留问题继续以 `daily_research/brain/` 为真源。
   - 后续若继续推进，应优先在分脑中验证训练级 value/release/cash timing 闭环，而不是让主脑承载实验细节。
+
+## 2026-04-23 daily_research r11 bounded study 收口状态
+- 当前事实：
+  - `daily_research` 已完成正式 bounded self-opt：`cp_v3_sell_source_contract_r11__study_r1`，共 `4` 个 screening trial 与 `2` 个 confirmatory trial，`objective_profile = sell_source_contract_v1`。
+  - 当前可复现最佳分支不是 `result_value_v10`，而是 `loss_profile = alpha_result_value_budget_split_v10` 搭配 `budget_objective = result_value_v9`。
+  - `result_value_v10 + alpha_result_value_budget_split_v10` 在 screening 可行，但 fresh confirmatory `confirm_02` 明显失稳，不能据此把 `v10 objective` 扶正。
+  - 已手动补做同口径 runner-up confirm：`cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla`；其结果未超过 `confirm_01`。
+  - 本轮还在导出链路中发现并修复了空 `share_actions` 时的 export 崩溃问题。
+- 主脑层决策：
+  - 主脑只保留全局结论：当前训练侧最有价值的新增信号在 `v10 loss / funding-release discipline`，不在当前 `v10 objective`。
+  - sell-source 主矛盾已从 `budget_origin_sell_share` 收敛到 `deploy_funding_rebalance` 过度依赖与 `reduce/exit` 学习不足；详细指标、命令与产物继续只写 `daily_research/brain/`。

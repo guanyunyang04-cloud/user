@@ -240,6 +240,46 @@
   - `sell_source_floor_guard_share = 0.7661` 仍偏高，说明大量持仓仍需要 simulator 底线保护。
   - `deploy_intent_candidate_budget_drop_share`、`budget_action_entanglement`、`order_translation_drift` 与 `cash_timing_quality_1d` 仍是下一阶段主瓶颈。
 
+## 2026-04-23 r11 卖出来源契约训练侧接通
+
+- 动作前自检：
+  - 事实：v7c 已把 sell-source 从代码侧拆清，但当前正式训练主线仍主要沿 `result_value_v9 / alpha_result_value_budget_split_v9 / deploy_executability_v1` 选优。
+  - 事实：若只继续在 simulator 层加规则，study 仍会按旧目标打分，后续极易重复“代码已修、训练没学、study 还在奖旧行为”的无效路径。
+  - 推断：当前最高 ROI 不是马上再开长训练，而是先把卖出来源合同同步接到 `budget objective + loss profile + study objective`。
+  - 假设：若训练侧合同真正接通，短窗 teacher rollout 至少会显示出更克制的 candidate / turnover / release 偏置变化，即使 headline return 不一定立刻最好。
+- 已完成实现：
+  - 在 `pipeline_utils.py` 中新增 `result_value_v10`，引入：
+    - `protected_hold_pressure`
+    - `funding_release_pressure`
+    - `disciplined_funding_need`
+    - `portfolio_release_pressure`
+  - 在 `model_seq_v3.py` 中新增 `alpha_result_value_budget_split_v10` 与 `funding_release_discipline_loss`。
+  - 在 `run_self_optimizing_study.py` 中新增：
+    - `split_heads_sell_source_contract_r11`
+    - `sell_source_contract_v1`
+  - 新增可复用核验脚本：`daily_research/continuous_policy/check_budget_objective_contract.py`
+- 已完成验证：
+  - `r11 dry-run` 已跑通，`study_plan.json` 已生成。
+  - 短窗 contract check 已生成：
+    - `daily_research/output/continuous_policy/analysis/budget_objective_checks/sell_source_contract_v10_short_window_20251008_20251231.json`
+  - 同窗 `v10 - v9` 关键变化：
+    - `candidate_budget = -0.75`
+    - `turnover_budget = -0.0269`
+    - `reduce_bias_target = -0.0219`
+    - `exit_patience_target = +0.0071`
+    - `result_value_executable_deploy_pressure = +0.0525`
+    - `result_value_portfolio_release_pressure = -0.0530`
+    - `teacher total_return = 4.1852 -> 4.1273`
+  - `sell_source_contract_v1` 已能对真实 `protocol_summary.json` 正常评分：
+    - `composite_score = 4.566913`
+    - `budget_origin_sell_penalty = 0`
+    - `deploy_funding_sell_share_penalty = 0`
+- 动作后复盘：
+  - 事实：训练侧链路已经接通，当前不再只有 simulator 知道 sell-source contract。
+  - 事实：`v10` 的直接效果是更克制地压低候选预算、换手和 reduce 偏置，而不是完全推翻 deploy。
+  - 推断：先前看到的巨大 `annual_return` 差值主要受短窗年化放大影响；真实应优先看 `total_return` 与目标变化，不应误判为“思路整体错误”。
+  - 决策：本轮不直接把 dry-run 或 short-window check 写成正式训练 verdict；下一轮若继续正式推进，应直接用 `r11` 做 bounded study，而不是回退到只靠 `v9` 的旧主线。
+
 ## 2026-04-23 默认执行池外持仓显式动作修复
 
 - 动作前自检：
@@ -296,3 +336,54 @@
 - 动作后复盘：
   - 事实：本轮没有启动、停止或中断任何训练。
   - 结论：默认执行当前重新对齐为 `21` 日股票池节奏 + `21` 日自动重训节奏，与 formal 主结论保持一致。
+
+## 2026-04-23 r11 正式 bounded study 收口与 export 守护
+
+- 动作前自检：
+  - 事实：`r11` 的训练侧合同链路已经通过 dry-run 与 short-window contract check 打通，但这还不是正式 study 证据。
+  - 事实：用户明确要求继续下一轮并一次性交付全部可完成内容，因此本轮不能停在建议层，而应直接完成正式 bounded study、必要复核、写回和验证。
+  - 推断：最有效路径不是继续猜哪条 profile 可能更强，而是先把 `cp_v3_sell_source_contract_r11__study_r1` 跑完，再针对 confirmatory 候选空缺补做 runner-up 复核。
+- 已完成实现：
+  - 前台执行正式 bounded study：
+    - `run_self_optimizing_study --search-profile split_heads_sell_source_contract_r11 --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_sell_source_contract_r11__study_r1`
+  - 在默认 confirmatory 之外，手动补做了同口径 runner-up confirm：
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla`
+  - 本轮还修复了一个真实导出 bug：
+    - `translate_target_weights_to_share_actions(...)` 为空时，原返回表缺少固定列，导致 export merge 因缺少 `stock` 列崩溃
+    - 现已在 `pipeline_utils.py` 与 `export_action_panel.py` 中为零行结果保留稳定 schema
+  - 过程中曾误跑过一次默认 `liquid500` 的 runner-up rerun；该 run 不作为正式证据，只作为触发 export bug 的上下文。
+- 关键事实：
+  - 正式 study 完成：
+    - `completed_trial_count = 4`
+    - `failed_trial_count = 0`
+    - `confirmatory_completed_trial_count = 2`
+    - `objective_profile = sell_source_contract_v1`
+  - `confirm_01`（当前正式最佳）：
+    - `loss_profile = alpha_result_value_budget_split_v10`
+    - `budget_objective = result_value_v9`
+    - `annual_return = 0.8743`
+    - `sharpe = 2.3028`
+    - `sell_selection_quality_5d = 0.0223`
+    - `budget_origin_sell_share = 0.0`
+    - `deploy_funding_rebalance_sell_share = 0.8974`
+    - `promotion_status = shadow_only`
+  - `confirm_02`（`v10/v10` fresh confirmatory）：
+    - `annual_return = -0.3206`
+    - `sharpe = -1.7629`
+    - `sell_selection_quality_5d = -0.0816`
+    - `deploy_funding_rebalance_sell_share = 0.9185`
+    - `promotion_status = shadow_only`
+  - `confirm_03_runnerup_alla`（补充 runner-up confirm）：
+    - `annual_return = 0.2267`
+    - `sharpe = 0.9590`
+    - `cash_timing_quality_1d = 0.0001`
+    - `release_gate_forward_alignment_5d = 0.1496`
+    - `deploy_funding_rebalance_sell_share = 0.9449`
+    - `deploy_funding_rebalance_forward_excess_5d = 0.0439`
+    - 未超过 `confirm_01`
+- 动作后复盘：
+  - 事实：`v10 objective` 本轮没有通过正式 confirmatory 验收；当前可复用胜出结论是“保留 `result_value_v9`，吸收 `alpha_result_value_budget_split_v10`”。
+  - 事实：所有正式分支的 `budget_origin_sell_share` 都已归零，但 funding-sell 占比仍普遍偏高，说明主瓶颈已经从隐藏 budget 卖出转移到显式 funding rebalance 的过度依赖。
+  - 推断：当前思路不是底层原理错了，而是前一阶段只把 sell-source 修到了 simulator，尚未完全把 held-side release/funding 仲裁学稳。
+  - 决策：当前 r11 家族继续推进时，应优先沿 `result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7` 做后续对照，不回退到只修 simulator，也不直接扶正 `result_value_v10`。
+  - 边界：本轮未切换 live 默认执行，未改写 promotion gate，未中断任何正式训练。

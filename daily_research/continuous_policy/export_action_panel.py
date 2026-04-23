@@ -217,6 +217,19 @@ def main(argv: list[str] | None = None) -> int:
         target_weights=final_step_result.weights,
         price_row=prepared.close.loc[signal_dt],
     )
+    if share_actions.empty:
+        share_actions = pd.DataFrame(
+            columns=[
+                "stock",
+                "price",
+                "current_weight",
+                "target_weight",
+                "current_shares",
+                "target_shares",
+                "delta_shares",
+                "share_action",
+            ]
+        )
     action_panel = pd.DataFrame(final_step_result.actions)
     if action_panel.empty:
         action_panel = pd.DataFrame(columns=["stock"])

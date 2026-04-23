@@ -350,6 +350,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_sell_source_contract_r11": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v9", "alpha_result_value_budget_split_v10"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_sell_source_guard_v7"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -621,6 +638,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_sell_source_contract_r11": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v10",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_sell_source_guard_v7",
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -641,6 +675,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_hierarchical_arbitration_r7": "return_recovery_v2",
     "split_heads_constraint_arbitration_r8": "return_recovery_v2",
     "split_heads_deploy_executability_r10": "deploy_executability_v1",
+    "split_heads_sell_source_contract_r11": "sell_source_contract_v1",
 }
 
 
@@ -735,7 +770,18 @@ def _score_protocol_summary(
     )
     deploy_executability_alignment = float(continuity.get("deploy_executability_forward_alignment_5d", 0.0) or 0.0)
     deploy_gate_alignment = float(continuity.get("deploy_gate_forward_alignment_5d", 0.0) or 0.0)
+    release_gate_alignment = float(continuity.get("release_gate_forward_alignment_5d", 0.0) or 0.0)
+    value_arbitration_alignment = float(continuity.get("value_arbitration_forward_alignment_5d", 0.0) or 0.0)
     sell_selection_quality = float(continuity.get("sell_selection_quality_5d", 0.0) or 0.0)
+    budget_origin_sell_share = float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0)
+    high_cash_budget_origin_sell_share = float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0)
+    deploy_funding_rebalance_sell_share = float(
+        semantic_conflicts.get("deploy_funding_rebalance_sell_share", 0.0) or 0.0
+    )
+    deploy_funding_rebalance_forward_excess_5d = float(
+        semantic_conflicts.get("deploy_funding_rebalance_forward_excess_5d", 0.0) or 0.0
+    )
+    sell_source_floor_guard_share = float(semantic_conflicts.get("sell_source_floor_guard_share", 0.0) or 0.0)
 
     threshold_gap_penalty = (
         max(0.0, PROMOTION_THRESHOLDS["open_win_rate_5d"] - open_win) * 1.00
@@ -815,6 +861,53 @@ def _score_protocol_summary(
             "deploy_hold_conflict_penalty": -deploy_intent_hold_conflict_share * 1.20,
             "deploy_dropped_penalty": -deploy_intent_dropped_share * 1.25,
             "deploy_candidate_budget_drop_penalty": -deploy_intent_candidate_budget_drop_share * 1.25,
+        }
+    elif objective_profile_name == "sell_source_contract_v1":
+        performance_breakdown = {
+            "annual_return": annual_return * 2.25,
+            "sharpe": sharpe * 0.28,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate * 1.10,
+            "sell_selection_quality_5d": _bounded(sell_selection_quality, -0.06, 0.08) * 0.80,
+            "reduce_success_rate_5d": reduce_success * 0.95,
+            "exit_timeliness_rate_5d": exit_timeliness * 1.00,
+            "release_gate_forward_alignment_5d": _bounded(release_gate_alignment, -0.10, 0.10) * 0.74,
+            "value_arbitration_forward_alignment_5d": _bounded(value_arbitration_alignment, -0.10, 0.12) * 0.64,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.68,
+            "active_alignment_bonus": active_alignment_bonus,
+            "gate_pass_ratio": gate_pass_ratio * 0.30,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 3.35,
+            "negative_return_penalty": -negative_return_penalty * 3.20,
+            "negative_sharpe_penalty": -negative_sharpe_penalty * 0.55,
+            "budget_origin_sell_penalty": -budget_origin_sell_share * 2.80,
+            "high_cash_budget_origin_sell_penalty": -high_cash_budget_origin_sell_share * 1.80,
+            "deploy_funding_sell_share_penalty": -max(0.0, deploy_funding_rebalance_sell_share - 0.55) * 1.60,
+            "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 8.00,
+            "sell_source_floor_guard_penalty": -max(0.0, sell_source_floor_guard_share - 0.60) * 1.20,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.70,
+            "add_to_hold_conflict_penalty": -add_to_hold_conflict_share * 1.10,
+        }
+        stability_breakdown = {
+            "gate_pass_ratio": gate_pass_ratio * 0.68,
+            "reduce_success_rate_5d": reduce_success * 0.48,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.52,
+            "release_gate_forward_alignment_5d": _bounded(release_gate_alignment, -0.10, 0.10) * 0.56,
+            "value_arbitration_forward_alignment_5d": _bounded(value_arbitration_alignment, -0.10, 0.12) * 0.46,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.44,
+            "hold_share": hold_share * 0.14,
+            "training_evidence_bonus": 0.34 if training_evidence_ok else -0.40,
+            "reversal_penalty": -reversal * 1.10,
+            "shadow_reversal_penalty": -shadow_reversal * 1.08,
+            "reversal_excess_penalty": -reversal_excess_penalty,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.10,
+            "threshold_gap_penalty": -threshold_gap_penalty * 1.05,
+            "budget_origin_sell_penalty": -budget_origin_sell_share * 3.10,
+            "high_cash_budget_origin_sell_penalty": -high_cash_budget_origin_sell_share * 1.95,
+            "deploy_funding_sell_share_penalty": -max(0.0, deploy_funding_rebalance_sell_share - 0.55) * 1.85,
+            "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 8.80,
+            "sell_source_floor_guard_penalty": -max(0.0, sell_source_floor_guard_share - 0.58) * 1.35,
+            "semantic_conflict_penalty": -semantic_conflict_rate * 1.70,
+            "order_translation_conflict_penalty": -order_translation_conflict_rate * 0.88,
+            "add_to_hold_conflict_penalty": -add_to_hold_conflict_share * 1.20,
         }
     elif objective_profile_name == "return_recovery_v2":
         performance_breakdown = {
@@ -929,7 +1022,14 @@ def _score_protocol_summary(
             "deploy_intent_candidate_budget_drop_share": deploy_intent_candidate_budget_drop_share,
             "deploy_executability_forward_alignment_5d": deploy_executability_alignment,
             "deploy_gate_forward_alignment_5d": deploy_gate_alignment,
+            "release_gate_forward_alignment_5d": release_gate_alignment,
+            "value_arbitration_forward_alignment_5d": value_arbitration_alignment,
             "sell_selection_quality_5d": sell_selection_quality,
+            "budget_origin_sell_share": budget_origin_sell_share,
+            "high_cash_budget_origin_sell_share": high_cash_budget_origin_sell_share,
+            "deploy_funding_rebalance_sell_share": deploy_funding_rebalance_sell_share,
+            "deploy_funding_rebalance_forward_excess_5d": deploy_funding_rebalance_forward_excess_5d,
+            "sell_source_floor_guard_share": sell_source_floor_guard_share,
             "training_evidence_status": str(training_evidence.get("status", "") or ""),
         },
     }

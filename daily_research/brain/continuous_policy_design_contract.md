@@ -426,3 +426,74 @@
   - `deploy_funding_rebalance_forward_excess_5d` 应保持非正。
   - `sell_source_floor_guard_share` 不宜长期过高，否则说明模型释放信号仍没有学会。
   - cash timing 需要单独闭环，sell-source 解耦不能替代主动择时学习。
+
+## 23. 2026-04-23 r11 sell-source contract 训练侧合同
+
+- 已落地的训练侧事实：
+  - `pipeline_utils.py` 已新增 `budget_objective = result_value_v10`。
+  - `model_seq_v3.py` 已新增 `loss_profile = alpha_result_value_budget_split_v10`。
+  - `model_seq_v3.py` 已新增 `funding_release_discipline_loss`，把 `protected_hold` 与 `funding_release` 的概率约束直接写进训练损失。
+  - `run_self_optimizing_study.py` 已新增：
+    - `search_profile = split_heads_sell_source_contract_r11`
+    - `objective_profile = sell_source_contract_v1`
+- 新合同级结论：
+  - sell-source contract 不再只属于 simulator；它现在必须同时进入：
+    - 预算目标如何生成
+    - 模型如何学习 keep / release
+    - study 如何打分选优
+  - 若只改 `budget_calibration` 而不改训练目标与 study objective，系统会继续把旧目标当成“最优”，导致 contract 漂浮在训练主线之外。
+- `result_value_v10` 的合同含义：
+  - 不再把 deploy 需求直接翻译成泛化的持仓释放压力。
+  - 必须先显式计算：
+    - `protected_hold_pressure`
+    - `funding_release_pressure`
+    - `disciplined_funding_need`
+    - `portfolio_release_pressure`
+  - 只有当 deploy 机会、可执行性和资金需求同时成立时，才允许预算层朝更高 candidate / turnover 倾斜。
+- `alpha_result_value_budget_split_v10` 的合同含义：
+  - 模型除了学 `deploy_value / release_value / gate` 外，还必须学会：
+    - 什么时候该继续保留高质量旧仓
+    - 什么时候该为了更强新机会释放资金
+  - `funding_release_discipline_loss` 的目标不是鼓励多卖，而是避免“应该保留的仓位被弱证据 funding sell 吃掉”。
+- `sell_source_contract_v1` 的合同含义：
+  - 后续 bounded study 不能只奖励收益、Sharpe 和 deploy realization。
+  - 还必须显式惩罚：
+    - `budget_origin_sell_share`
+    - `high_cash_budget_origin_sell_share`
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - 正向的 `deploy_funding_rebalance_forward_excess_5d`
+    - 过高的 `sell_source_floor_guard_share`
+- 当前验证边界：
+  - dry-run 与 short-window teacher rollout 已证明训练侧合同链条打通。
+  - 但它们还不能回答 `v10` 是否正式优于 `v9`。
+  - 因此当前允许的结论只有：
+    - `r11` 已具备正式 bounded study 条件
+    - `v10` 已显式影响预算目标与选优标准
+    - 是否升为正式主线，仍需新 study 决定
+
+## 24. 2026-04-23 r11 正式 bounded study 后的合同修正
+
+- 已被正式证据确认的事实：
+  - `cp_v3_sell_source_contract_r11__study_r1` 已完整跑完，且当前最佳可复现分支为：
+    - `budget_objective = result_value_v9`
+    - `loss_profile = alpha_result_value_budget_split_v10`
+    - `budget_calibration = cash_constraint_sell_source_guard_v7`
+  - `result_value_v10 + alpha_result_value_budget_split_v10` 虽然在 screening 可行，但 fresh confirmatory 失稳，当前不能升格为默认预算目标。
+- 新合同级结论：
+  - `budget objective` 演进与 `loss profile` 演进必须分离验收。
+    - 若 `loss` 提供了有效归因纪律，而 `objective` 仍不稳，则允许暂时保留旧 objective、吸收新 loss。
+    - 不得因为同属 `v10` 家族就把两者绑定升格。
+  - `sell_source_contract_v1` 的正式职责，不只是打掉 `budget_origin_sell_share`，还要继续把下列 funding-sell 风险留在主评价面：
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - 正向的 `deploy_funding_rebalance_forward_excess_5d`
+    - 过高的 `sell_source_floor_guard_share`
+  - 当前合同下，`budget_origin_sell_share = 0` 只代表第一层责任解耦已完成，不代表 held-side release/funding 仲裁已经学成。
+- 新的默认研究约束：
+  - 在 `r11` 家族继续推进时，优先保留：
+    - `result_value_v9`
+    - `alpha_result_value_budget_split_v10`
+    - `cash_constraint_sell_source_guard_v7`
+  - 只有当新的 bounded study 能证明 `result_value_v10` 在 confirmatory 中稳定优于上述组合时，才允许改写默认 objective。
+- 导出与可观测性合同补充：
+  - 连续策略导出链路必须接受“当天无 share-level action”是合法状态。
+  - 任一导出入口若消费 `share_actions`，都不得假定结果非空；空表也必须保留稳定 schema，避免研究 run 因展示层 merge 失败而中断。
