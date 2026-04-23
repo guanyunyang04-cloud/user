@@ -1093,14 +1093,17 @@
   - lock + heartbeat + show-status + cancel-existing-run
   - explicit strict resume for existing run dirs
   - bootstrap defaults now resolve from the current active execution manifest instead of the stale legacy production root
-- Default execution stock-pool refresh correction:
-  - patched production-root `metrics.json` during sync so live-panel refresh no longer reuses only the static pool from the last retrain
+- Default execution stock-pool / retrain cadence rollback:
+  - patched production-root `metrics.json` during sync so the active policy follows the original 21-trading-day formal cadence instead of the later 1-day refresh / 10-day retrain override
   - enforced:
     - `rolling_liquidity_pool = liquid500`
-    - `rolling_pool_rebalance_days = 1`
+    - `rolling_pool_rebalance_days = 21`
     - `rolling_pool_adv_window = 20`
-    - `daily_pool_refresh_policy = rolling_liquidity_pool_daily`
-  - re-synced production root and rebuilt live panels once under the new rule
+    - `daily_pool_refresh_policy = rolling_liquidity_pool_every_21_trading_days`
+    - `trading_day_interval = 21`
+    - `warn_after_trading_days = 21`
+    - `block_after_trading_days = 42`
+  - current active manifest and production summary were rewritten to the restored 21-day rule
 - Output/schema cleanup now enforced on the default execution chain:
   - no `ml_score` in latest trade plan / actions CSV / watchlist CSV
   - `转权重前分数` replaced by `上游参考分`
@@ -1273,3 +1276,118 @@
   - `deploy_executability_forward_alignment_5d`
   - 同时继续守住 `annual_return / sharpe / open_win_rate_5d / reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d`
 - 注意：`1` epoch smoke 只证明链路可执行，不构成 formal verdict；正式判断仍必须满足 `training_evidence.status = sufficient` 与 promotion gate。
+
+## 2026-04-22 r10 预算/动作解耦补丁验证命令
+
+- 代码修正入口：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+- 本轮补丁目标：
+  - 强化 `hold/add` 微幅负向 `delta` 的语义守卫，减少 deadband 内的 `hold -> reduce` / `add -> reduce` 翻译漂移。
+  - 在 `action_budget_split_v1` 下加入弱持仓槽位竞争，避免所有旧仓无差别占满 slot。
+- 验证命令：
+  - 评估：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\models\cp_v3_deploy_executability_r10__study_r1__confirm_02__train\continuous_policy_v3_seq_artifact.pt" --pool-name learned_all_a --start-date 20260102 --end-date 20260421 --benchmark 000300.SH --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_deploy_guard_v6 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --tag cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval`
+  - 行为审计：
+    - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval\evaluation_summary.json" --tag cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit`
+- 产物入口：
+  - 评估 summary：`daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval/evaluation_summary.json`
+  - 行为审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit.json`
+- 当前验证结论：
+  - patched 评估相对原始 `confirm_02__evaluate` 已显著改善：
+    - `annual_return: 0.2918 -> 0.9022`
+    - `sharpe: 1.1732 -> 3.5963`
+    - `max_drawdown: -0.0826 -> -0.0683`
+    - `avg_order_translation_conflict_rate: 0.3149 -> 0.2787`
+    - `deploy_intent_realized_rate: 0.9050 -> 0.9312`
+    - `cash_timing_quality_1d: -0.0156 -> -0.0010`
+  - 但 sell-side 仍未闭环：
+    - `reduce_success_rate_5d: 0.8571 -> 0.2500`
+    - `exit_timeliness_rate_5d: 0.6667 -> 0.1429`
+    - `sell_selection_quality_5d: 0.0826 -> -0.1009`
+- 操作纪律：
+  - 本轮只是 code-side patched evaluation，不等于 training-level confirmatory。
+  - 不得直接用本轮 patched eval 覆盖 `cp_v3_deploy_executability_r10__study_r1` 的正式 study verdict。
+  - 若要继续推进，下一步应在 patched simulator 上重跑新的 protocol / bounded study，并使用新 tag。
+
+## 2026-04-22 r10 卖出来源归因复跑命令
+
+- 代码入口：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/continuous_policy/analyze_behavior_gap.py`
+- 本轮补充目标：
+  - 为 action outcome 显式输出卖出来源与卖出抑制来源：
+    - `sell_execution_origin`
+    - `sell_suppression_origin`
+  - 为连续性诊断补充卖出责任汇总：
+    - `budget_origin_sell_share`
+    - `sell_intent_realized_rate`
+    - `sell_intent_suppressed_share`
+    - `high_cash_budget_origin_sell_share`
+- 评估命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\models\cp_v3_deploy_executability_r10__budget_fix_protocol_r1__train\continuous_policy_v3_seq_artifact.pt" --pool-name learned_all_a --start-date 20260102 --end-date 20260421 --benchmark 000300.SH --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_deploy_guard_v6 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --tag cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval`
+- 行为审计命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval\evaluation_summary.json" --tag cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_audit`
+- 产物入口：
+  - 评估 summary：`daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval/evaluation_summary.json`
+  - 行为审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_audit.json`
+  - 正式训练级 protocol：`daily_research/output/continuous_policy/protocols/cp_v3_deploy_executability_r10__budget_fix_protocol_r1/protocol_summary.json`
+- 当前读取口径：
+  - `source_eval` / `source_audit` 的职责是卖出来源归因，不是新的正式收益 verdict。
+  - 正式训练级结论仍以 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1/protocol_summary.json` 为准：
+    - `training_evidence.status = sufficient`
+    - `promotion_gate.status = shadow_only`
+  - 当 `source_eval` 与正式 protocol 的收益面出现冲突时，先保留正式 protocol verdict，再把 `source_audit` 当成结构诊断输入。
+- 当前应优先看的来源归因结论：
+  - `budget_origin_sell_share = 0.9000`
+  - `sell_intent_realized_rate = 1.0000`
+  - `sell_intent_suppressed_share = 0.0000`
+  - `high_cash_budget_origin_sell_share = 0.6667`
+  - 结论：当前主要问题不是“卖出意图被压掉”，而是“预算层仍在主动制造大多数真实卖出”。
+
+## 2026-04-23 r10 sell-source v7c 复跑命令
+
+- 代码入口：
+  - `daily_research/continuous_policy/portfolio_simulator.py`
+  - `daily_research/continuous_policy/analyze_behavior_gap.py`
+- 当前最终代码侧 calibration：
+  - `budget_calibration = cash_constraint_sell_source_guard_v7`
+  - 别名：`cash_constraint_sell_source`、`cash_constraint_sell_source_guard`、`sell_source_decoupled_constraint`
+- v7c 评估命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.evaluate_policy --model-path "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\models\cp_v3_deploy_executability_r10__budget_fix_protocol_r1__train\continuous_policy_v3_seq_artifact.pt" --pool-name learned_all_a --start-date 20260102 --end-date 20260421 --benchmark 000300.SH --execution-semantics semantic_preserving_v1 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_sell_source_guard_v7 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --label-preset holdcash_v3 --tag cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_eval`
+- v7c 行为审计命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.analyze_behavior_gap --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_eval\evaluation_summary.json" --tag cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_audit`
+- 产物入口：
+  - v6 对照评估：`daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__v6_recheck_eval/evaluation_summary.json`
+  - v6 对照审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__v6_recheck_audit.json`
+  - v7c 评估 summary：`daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_eval/evaluation_summary.json`
+  - v7c 行为审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_audit.json`
+- 当前读取口径：
+  - v7c 是当前最稳妥的代码侧 sell-source 解耦结果，但不是训练级 promotion 证据。
+  - v7b 的 `annual_return / sharpe` 更高，只能作为性能上限与后续训练目标参考；因其 deploy funding sell 过多，不作为当前语义最终落点。
+  - 不要把 `budget_origin_sell_share = 0` 单独当作成功，必须同时检查 deploy 是否被冻结、deploy funding 卖出是否过量、卖出后的 forward excess 是否为负。
+- 操作纪律：
+  - 不要并行运行多个 `analyze_behavior_gap` 写同一个 `latest_behavior_audit_summary.json`；此前并行审计曾触发 latest 文件 rename 权限竞争。行为审计应顺序运行。
+  - 本轮未启动训练、未停止训练、未切换 live 默认执行、未改写 promotion gate。
+
+## 2026-04-23 默认执行池外持仓显式动作修复
+
+- 代码入口：
+  - `daily_research/baseline/generate_daily_trade_plan.py`
+- 修复目标：
+  - 默认执行不再把“池外持仓 / 缺少最新价格的持仓”静默过滤成“当前无持仓”或“无明确调仓动作”
+  - 对池外持仓直接给出明确卖出/保留建议
+- 当前实现：
+  - 若现有持仓不在当前执行价格宇宙中：
+    - `target_weight = 0` 时，生成显式 `卖出`
+    - `target_weight > 0` 时，生成显式 `保留`
+  - `latest_trade_plan.txt` 会额外显示：
+    - 输入持仓数 / 可估价持仓数 / 缺少价格持仓数
+    - `positions_source_mtime`
+    - 一手 / 现金约束导致的 blocked buy 提示
+  - `actions_today.csv` 允许 advisory 行使用 `price = NaN`、`est_value = NaN`，表示次日需人工核价执行
+- 当前样例：
+  - `001202.SZ` 当前被识别为池外持仓，因此默认执行已给出：
+    - `卖出 001202.SZ | 原因: 池外持仓，默认执行建议退出`
+- 读取口径：
+  - “系统识别得到股票” 与 “股票在当前默认执行股票池内可自动估值” 是两件事。
+  - 池外持仓现在属于显式决策对象，不再只是持仓备注。

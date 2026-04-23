@@ -27,6 +27,7 @@ BUDGET_CALIBRATION_CASH_TRANSLATION_SELL = "cash_translation_sell_guard_v3"
 BUDGET_CALIBRATION_CASH_CONSTRAINT = "cash_constraint_guard_v4"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT = "cash_constraint_intent_guard_v5"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY = "cash_constraint_deploy_guard_v6"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE = "cash_constraint_sell_source_guard_v7"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -36,6 +37,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
 )
 
 
@@ -107,6 +109,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_deploy_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
         "cash_constraint_deploy_guard_v6": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
         "deploy_executability_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+        "cash_constraint_sell_source": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        "cash_constraint_sell_source_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        "cash_constraint_sell_source_guard_v7": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        "sell_source_decoupled_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
     }
     if text not in aliases:
         raise ValueError(
@@ -656,23 +662,31 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         }
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         }
-        deploy_executability_constraint_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY
+        deploy_executability_constraint_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        }
+        sell_source_decoupled_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -885,7 +899,11 @@ class PortfolioState:
             position_cap_target = float(
                 np.clip(position_cap_target - budget_risk_off_score * 0.025 + budget_deploy_score * 0.006, 0.05, 0.35)
             )
-        elif budget_calibration in {BUDGET_CALIBRATION_CASH_CONSTRAINT, BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY}:
+        elif budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        }:
             portfolio_constraint_pressure = float(
                 np.clip(
                     0.42 * budget_model_defense_gate_signal
@@ -1468,10 +1486,94 @@ class PortfolioState:
                 continue
             desired_strength.at[stock] = current_weight * (1.0 + hold_bias_target * 0.02)
 
+        model_release_signal = (
+            (current > 1e-8)
+            & (~action_names.isin({"reduce", "exit"}))
+            & (
+                (lifecycle_sell_gate_series >= 0.62)
+                | (
+                    (sell_attribution_series >= 0.62)
+                    & (sell_rank_series >= 0.54)
+                    & (sell_pressure_series >= 0.18)
+                )
+                | (
+                    (decision_release_gate_series >= decision_deploy_gate_series + 0.08)
+                    & (release_value_series >= deploy_value_series + 0.04)
+                    & (sell_release_series >= 0.42)
+                )
+                | (
+                    (exit_timing_pressure_values >= 0.40)
+                    & (
+                        (sell_pressure_series >= 0.22)
+                        | (sell_release_series >= 0.48)
+                        | (sell_rank_series >= 0.64)
+                    )
+                )
+            )
+        )
+        sell_authorized_mask = (
+            (current > 1e-8)
+            & (
+                action_names.isin({"reduce", "exit"})
+                | model_release_signal
+                | weak_tail_zero_candidate
+                | forced_zero
+            )
+        )
+        deploy_funding_weak_evidence_count = (
+            (hold_continuation_series <= 0.46).astype(float)
+            + (alpha_opportunity_series <= 0.30).astype(float)
+            + (decision_deploy_gate_series <= decision_release_gate_series + 0.02).astype(float)
+            + (current <= float(position_cap_target) * 0.70).astype(float)
+        )
+        deploy_funding_rebalance_signal = (
+            (current > 1e-8)
+            & (~sell_authorized_mask)
+            & bool(sell_source_decoupled_mode)
+            & action_names.isin({"hold", "skip"})
+            & (
+                (budget_deploy_score >= 0.12)
+                | (budget_model_deploy_signal >= 0.78)
+                | (
+                    (flat_entry_action_share >= 0.10)
+                    & (budget_deploy_score >= 0.09)
+                )
+            )
+            & (deploy_funding_weak_evidence_count >= 2.0)
+        )
+        deploy_funding_retention_floor = pd.Series(1.0, index=prices.index, dtype=float)
+        if sell_source_decoupled_mode:
+            deploy_pressure = float(np.clip(budget_deploy_score, 0.0, 1.0))
+            entry_pressure = float(np.clip(flat_entry_action_share, 0.0, 1.0))
+            deploy_funding_retention_floor = (
+                pd.Series(0.94 - deploy_pressure * 0.12 - entry_pressure * 0.06, index=prices.index, dtype=float)
+                - (1.0 - hold_continuation_series.clip(0.0, 1.0)) * 0.05
+                - (1.0 - alpha_opportunity_series.clip(0.0, 1.0)) * 0.03
+                - (decision_release_gate_series - decision_deploy_gate_series).clip(lower=0.0, upper=1.0) * 0.04
+            ).clip(lower=0.84, upper=0.94)
+        sell_authorization_score = (
+            action_names.isin({"reduce", "exit"}).astype(float) * 1.00
+            + model_release_signal.astype(float) * 0.82
+            + deploy_funding_rebalance_signal.astype(float) * 0.46
+            + weak_tail_zero_candidate.astype(float) * 0.74
+            + lifecycle_sell_gate_series.clip(0.0, 1.0) * 0.24
+            + sell_attribution_series.clip(0.0, 1.0) * 0.18
+            + sell_rank_series.clip(0.0, 1.0) * 0.12
+            + decision_release_gate_series.clip(0.0, 1.0) * 0.16
+            + sell_release_series.clip(0.0, 1.0) * 0.12
+            + exit_timing_pressure_values.clip(0.0, 1.0) * 0.12
+            - decision_deploy_gate_series.clip(0.0, 1.0) * 0.08
+            - hold_continuation_series.clip(0.0, 1.0) * 0.08
+            - alpha_opportunity_series.clip(0.0, 1.0) * 0.06
+        ).clip(lower=0.0, upper=1.0)
+
         budget_dropped = pd.Series(False, index=prices.index, dtype=bool)
+        budget_released_from_hold = pd.Series(False, index=prices.index, dtype=bool)
         budget_entry_candidate_count = 0
         budget_entry_keep_count = 0
         budget_held_protected_count = 0
+        budget_reclaimable_held_count = 0
+        budget_released_held_count = 0
         if budget_semantics == BUDGET_SEMANTICS_LEGACY and candidate_budget < len(desired_strength):
             keep = desired_strength.nlargest(candidate_budget).index
             budget_dropped = pd.Series(~desired_strength.index.isin(keep), index=desired_strength.index, dtype=bool)
@@ -1486,21 +1588,79 @@ class PortfolioState:
             budget_entry_candidate_count = int(entry_candidate_mask.sum())
             budget_held_protected_count = int(held_lifecycle_mask.sum())
             candidate_limit = int(np.clip(candidate_budget, 1, int(self.max_positions)))
-            open_slots = max(
+            small_held_weight_threshold = min(
+                float(position_cap_target) * 0.60,
+                max(float(gross_exposure_target) / max(candidate_limit, 1) * 1.10, 0.04),
+            )
+            reclaimable_held_mask = held_survivor_mask & (
+                weak_tail_zero_candidate
+                | (
+                    action_names.isin({"hold", "add", "skip"})
+                    & (current <= small_held_weight_threshold + 1.0e-12)
+                    & (protected_floor <= current * 0.88 + 1.0e-12)
+                    & (hold_continuation_series < 0.22)
+                    & (alpha_opportunity_series < 0.18)
+                    & (deploy_executability_series < 0.18)
+                    & (decision_deploy_gate_series <= np.maximum(decision_release_gate_series + 0.02, 0.18))
+                    & (sell_pressure_series < 0.18)
+                    & (exit_timing_pressure_series < 0.22)
+                )
+            )
+            if sell_source_decoupled_mode:
+                reclaimable_held_mask = reclaimable_held_mask & (
+                    sell_authorized_mask | deploy_funding_rebalance_signal
+                )
+            budget_reclaimable_held_count = int(reclaimable_held_mask.sum())
+            fixed_held_keep_mask = held_survivor_mask & (~reclaimable_held_mask)
+            remaining_slots = max(
                 0,
                 min(
-                    int(self.max_positions) - int(held_survivor_mask.sum()),
-                    candidate_limit - int(held_survivor_mask.sum()),
+                    int(self.max_positions) - int(fixed_held_keep_mask.sum()),
+                    candidate_limit - int(fixed_held_keep_mask.sum()),
                 ),
             )
             entry_keep_mask = pd.Series(False, index=prices.index, dtype=bool)
-            if open_slots > 0 and bool(entry_candidate_mask.any()):
-                entry_keep = desired_strength.where(entry_candidate_mask, 0.0).nlargest(open_slots).index
-                entry_keep_mask = pd.Series(desired_strength.index.isin(entry_keep), index=desired_strength.index, dtype=bool)
+            reclaimable_held_keep_mask = pd.Series(False, index=prices.index, dtype=bool)
+            competitive_mask = reclaimable_held_mask | entry_candidate_mask
+            if remaining_slots > 0 and bool(competitive_mask.any()):
+                competitive_priority = desired_strength.copy()
+                competitive_priority = competitive_priority + protected_floor.clip(0.0, position_cap_target) * 0.30
+                competitive_priority = competitive_priority + hold_continuation_series.clip(0.0, 1.0) * 0.025
+                competitive_priority = competitive_priority + action_names.isin({"hold", "add"}).astype(float) * 0.015
+                competitive_priority = competitive_priority + entry_candidate_mask.astype(float) * (
+                    (
+                        alpha_opportunity_series.clip(0.0, 1.0) * 0.30
+                        + deployment_opportunity_series.clip(0.0, 1.0) * 0.22
+                        + deploy_value_series.clip(0.0, 1.0) * 0.18
+                        + decision_deploy_gate_series.clip(0.0, 1.0) * 0.16
+                        + deploy_executability_series.clip(0.0, 1.0) * 0.14
+                    ) * 0.050
+                    + deploy_executability_series.clip(0.0, 1.0) * 0.030
+                    + entry_quality_series.clip(0.0, 1.0) * 0.020
+                )
+                competitive_priority = competitive_priority - reclaimable_held_mask.astype(float) * (
+                    (
+                        sell_attribution_series.clip(0.0, 1.0) * 0.38
+                        + lifecycle_sell_gate_series.clip(0.0, 1.0) * 0.24
+                        + sell_rank_series.clip(0.0, 1.0) * 0.18
+                        + sell_release_series.clip(0.0, 1.0) * 0.18
+                        + cash_defense_series.clip(0.0, 1.0) * (0.04 if constraint_only_budget_mode else 0.08)
+                        + sell_pressure_series.clip(0.0, 1.0) * 0.16
+                        + exit_timing_pressure_series.clip(0.0, 1.0) * 0.12
+                    ) * 0.040
+                    + decision_release_gate_series.clip(0.0, 1.0) * 0.020
+                )
+                competitive_keep = competitive_priority.where(competitive_mask, -np.inf).nlargest(remaining_slots).index
+                competitive_keep_mask = pd.Series(competitive_priority.index.isin(competitive_keep), index=competitive_priority.index, dtype=bool)
+                entry_keep_mask = competitive_keep_mask & entry_candidate_mask
+                reclaimable_held_keep_mask = competitive_keep_mask & reclaimable_held_mask
             budget_entry_keep_count = int(entry_keep_mask.sum())
-            keep_mask = held_lifecycle_mask | entry_keep_mask
+            keep_mask = fixed_held_keep_mask | reclaimable_held_keep_mask | entry_keep_mask
             budget_dropped = entry_candidate_mask & (~entry_keep_mask)
+            budget_released_from_hold = reclaimable_held_mask & (~reclaimable_held_keep_mask)
+            budget_released_held_count = int(budget_released_from_hold.sum())
             desired_strength = desired_strength.where(keep_mask, 0.0)
+            protected_floor = protected_floor.where(~budget_released_from_hold, 0.0)
         desired_strength = desired_strength.where(~forced_zero, 0.0)
         sell_reduction_priority = (
             sell_attribution_series.clip(0.0, 1.0) * 0.38
@@ -1529,6 +1689,23 @@ class PortfolioState:
             - cash_defense_series.clip(0.0, 1.0) * (0.06 if constraint_only_budget_mode else 0.10)
         ).clip(lower=0.0)
 
+        sell_source_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        if sell_source_decoupled_mode:
+            original_protected_floor = protected_floor.copy()
+            sell_source_retention_floor = pd.Series(1.0, index=prices.index, dtype=float).where(
+                ~deploy_funding_rebalance_signal,
+                deploy_funding_retention_floor,
+            )
+            sell_source_floor = (current * sell_source_retention_floor).where(
+                (current > 1e-8) & (~sell_authorized_mask) & (~forced_zero),
+                0.0,
+            ).clip(lower=0.0, upper=position_cap_target)
+            sell_source_floor_guarded = sell_source_floor > original_protected_floor + 1e-12
+            protected_floor = pd.concat(
+                [protected_floor.rename("protected"), sell_source_floor.rename("sell_source")],
+                axis=1,
+            ).max(axis=1)
+
         target_weights = self._allocate_with_cap(
             desired_strength,
             gross_exposure_target,
@@ -1536,7 +1713,10 @@ class PortfolioState:
         )
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
         if float(protected_floor.sum()) > float(gross_exposure_target) > 0.0:
-            protected_floor = protected_floor / float(protected_floor.sum()) * float(gross_exposure_target)
+            if sell_source_decoupled_mode:
+                gross_exposure_target = min(float(protected_floor.sum()), 0.999)
+            else:
+                protected_floor = protected_floor / float(protected_floor.sum()) * float(gross_exposure_target)
         sell_priority_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if bool((protected_floor > 1e-8).any()):
             target_weights = target_weights.where(target_weights >= protected_floor, protected_floor)
@@ -1609,7 +1789,32 @@ class PortfolioState:
                 )
                 if previous_weight > 1e-8:
                     deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
-                    if model_action_name == "hold":
+                    if (
+                        sell_source_decoupled_mode
+                        and not bool(sell_authorized_mask.get(stock, False))
+                        and model_action_name in {"hold", "skip", "open"}
+                    ):
+                        if bool(deploy_funding_rebalance_signal.get(stock, False)):
+                            funding_floor = max(
+                                0.0,
+                                previous_weight * float(deploy_funding_retention_floor.get(stock, 0.90)),
+                            )
+                        else:
+                            funding_floor = previous_weight
+                        translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), funding_floor)
+                        translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), funding_floor)
+                        translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), previous_weight)
+                        if target_value > previous_weight + 1e-12:
+                            target_weights.at[stock] = previous_weight
+                            translation_cap_guarded.at[stock] = True
+                        elif target_value < funding_floor - 1e-12:
+                            target_weights.at[stock] = funding_floor
+                            translation_floor_guarded.at[stock] = True
+                            if bool(deploy_funding_rebalance_signal.get(stock, False)):
+                                sell_source_floor_guarded.at[stock] = True
+                    elif model_action_name == "hold" and not (
+                        sell_source_decoupled_mode and bool(sell_authorized_mask.get(stock, False))
+                    ):
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), previous_weight)
                         translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), previous_weight)
                         translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), previous_weight)
@@ -1619,7 +1824,9 @@ class PortfolioState:
                         elif target_value < previous_weight - 1e-12:
                             target_weights.at[stock] = previous_weight
                             translation_floor_guarded.at[stock] = True
-                    elif model_action_name == "add":
+                    elif model_action_name == "add" and not (
+                        sell_source_decoupled_mode and bool(model_release_signal.get(stock, False))
+                    ):
                         min_add_weight = min(
                             position_cap_target,
                             previous_weight + max(deadband * 1.35, previous_weight * (0.035 + budget_model_deploy_signal * 0.040), 0.0035),
@@ -1745,6 +1952,12 @@ class PortfolioState:
                     continue
                 deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
                 exit_timing_pressure = float(exit_timing_pressure_values.get(stock, 0.0))
+                protected_floor_value = float(protected_floor.get(stock, 0.0))
+                hold_continuation_value = float(hold_continuation_series.get(stock, 0.0))
+                alpha_opportunity_value = float(alpha_opportunity_series.get(stock, 0.0))
+                deploy_executability_value = float(deploy_executability_series.get(stock, 0.0))
+                deploy_gate_value = float(decision_deploy_gate_series.get(stock, 0.0))
+                release_gate_value = float(decision_release_gate_series.get(stock, 0.0))
                 sell_pressure = (
                     float(policy.at[stock, "sell_pressure"] or 0.0)
                     if "sell_pressure" in policy.columns
@@ -1752,23 +1965,45 @@ class PortfolioState:
                 )
                 lifecycle_gate_value = float(lifecycle_sell_gate_series.get(stock, 0.0))
                 sell_rank_value = float(sell_rank_series.get(stock, 0.0))
+                protect_unauthorized_sell = (
+                    sell_source_decoupled_mode
+                    and delta_value < 0.0
+                    and not bool(sell_authorized_mask.get(stock, False))
+                    and not bool(deploy_funding_rebalance_signal.get(stock, False))
+                    and abs(delta_value) <= max(deadband * 4.00, previous_weight * 0.25)
+                )
+                micro_negative_trim = delta_value < 0.0 and abs(delta_value) <= max(deadband * 1.10, previous_weight * 0.045)
                 protect_hold_trim = (
                     model_action_name == "hold"
-                    and delta_value < 0.0
+                    and micro_negative_trim
+                    and not (
+                        sell_source_decoupled_mode
+                        and bool(deploy_funding_rebalance_signal.get(stock, False))
+                    )
+                    and exit_timing_pressure < 0.42
+                    and sell_pressure < 0.34
+                    and lifecycle_gate_value < 0.58
+                    and sell_rank_value < 0.80
+                    and (
+                        protected_floor_value >= previous_weight * 0.90
+                        or hold_continuation_value >= 0.22
+                        or alpha_opportunity_value >= 0.18
+                        or deploy_gate_value >= release_gate_value - 0.02
+                    )
+                )
+                protect_add_trim = (
+                    model_action_name == "add"
+                    and micro_negative_trim
                     and exit_timing_pressure < 0.30
                     and sell_pressure < 0.28
                     and lifecycle_gate_value < 0.48
                     and sell_rank_value < 0.72
-                    and abs(delta_value) <= max(deadband * 2.75, previous_weight * 0.10)
-                )
-                protect_add_trim = (
-                    model_action_name == "add"
-                    and delta_value < 0.0
-                    and exit_timing_pressure < 0.28
-                    and sell_pressure < 0.26
-                    and lifecycle_gate_value < 0.44
-                    and sell_rank_value < 0.68
-                    and abs(delta_value) <= max(deadband * 3.00, previous_weight * 0.14)
+                    and (
+                        protected_floor_value >= previous_weight * 0.94
+                        or deploy_executability_value >= 0.46
+                        or deploy_gate_value >= release_gate_value + 0.02
+                        or alpha_opportunity_value >= 0.26
+                    )
                 )
                 protect_hold_add = (
                     model_action_name == "hold"
@@ -1783,12 +2018,22 @@ class PortfolioState:
                     and delta_value > 0.0
                     and abs(delta_value) <= max(deadband * 2.00, previous_weight * 0.08)
                 )
-                if protect_hold_trim or protect_add_trim or protect_hold_add or protect_reduce_add:
+                if protect_unauthorized_sell or protect_hold_trim or protect_add_trim or protect_hold_add or protect_reduce_add:
                     delta.at[stock] = 0.0
                     semantic_delta_guarded.at[stock] = True
+                    if protect_unauthorized_sell:
+                        sell_source_floor_guarded.at[stock] = True
         new_weights = (current + delta).clip(lower=0.0)
         if float(new_weights.sum()) > 0.999:
-            new_weights = new_weights / float(new_weights.sum())
+            if sell_source_decoupled_mode:
+                excess_weight = float(new_weights.sum()) - 0.999
+                positive_delta = (new_weights - current).clip(lower=0.0)
+                positive_delta_sum = float(positive_delta.sum())
+                if positive_delta_sum > 1e-8:
+                    reduction = positive_delta / positive_delta_sum * min(excess_weight, positive_delta_sum)
+                    new_weights = (new_weights - reduction).clip(lower=0.0)
+            if float(new_weights.sum()) > 0.999:
+                new_weights = new_weights / float(new_weights.sum())
         self.cash_weight = max(0.0, 1.0 - float(new_weights.sum()))
         deploy_intent_candidate_mask = action_names.isin({"open", "add"})
         deploy_intent_candidate_count = int(deploy_intent_candidate_mask.sum())
@@ -1894,6 +2139,59 @@ class PortfolioState:
                     weight_action=weight_change_action,
                 )
 
+            budget_dropped_flag = bool(budget_dropped.get(stock, False))
+            budget_released_from_hold_flag = bool(budget_released_from_hold.get(stock, False))
+            forced_zero_flag = bool(forced_zero.get(stock, False))
+            semantic_delta_guarded_flag = bool(semantic_delta_guarded.get(stock, False))
+            budget_split_bound_guarded_flag = bool(budget_split_bound_guarded.get(stock, False))
+            translation_floor_guarded_flag = bool(translation_floor_guarded.get(stock, False))
+            translation_cap_guarded_flag = bool(translation_cap_guarded.get(stock, False))
+            translation_soft_lift_guarded_flag = bool(translation_soft_lift_guarded.get(stock, False))
+            sell_priority_guarded_flag = bool(sell_priority_guarded.get(stock, False))
+            turnover_intent_guarded_flag = bool(turnover_intent_guarded.get(stock, False))
+            sell_source_floor_guarded_flag = bool(sell_source_floor_guarded.get(stock, False))
+            model_release_signal_flag = bool(model_release_signal.get(stock, False))
+            deploy_funding_rebalance_signal_flag = bool(deploy_funding_rebalance_signal.get(stock, False))
+            sell_authorized_by_model_flag = bool(sell_authorized_mask.get(stock, False))
+            sell_authorization_score_value = float(sell_authorization_score.get(stock, 0.0))
+            realized_sell = weight_change_action in {"reduce", "exit"}
+            sell_intent = model_action_name in {"reduce", "exit"}
+            sell_intent_suppressed = sell_intent and not realized_sell
+            sell_execution_origin = "none"
+            if realized_sell:
+                if sell_intent:
+                    sell_execution_origin = "model_sell_intent"
+                elif model_release_signal_flag:
+                    sell_execution_origin = "model_release_signal"
+                elif deploy_funding_rebalance_signal_flag:
+                    sell_execution_origin = "deploy_funding_rebalance"
+                elif forced_zero_flag:
+                    sell_execution_origin = "forced_zero"
+                elif budget_released_from_hold_flag:
+                    sell_execution_origin = "budget_slot_reclaim"
+                elif sell_priority_guarded_flag:
+                    sell_execution_origin = "budget_sell_priority"
+                elif turnover_intent_guarded_flag:
+                    sell_execution_origin = "turnover_budget_trim"
+                elif translation_cap_guarded_flag:
+                    sell_execution_origin = "translation_cap_guard"
+                else:
+                    sell_execution_origin = "weight_translation"
+            sell_suppression_origin = "none"
+            if sell_intent_suppressed:
+                if semantic_delta_guarded_flag:
+                    sell_suppression_origin = "semantic_delta_guard"
+                elif translation_floor_guarded_flag:
+                    sell_suppression_origin = "translation_floor_guard"
+                elif translation_soft_lift_guarded_flag:
+                    sell_suppression_origin = "translation_soft_lift_guard"
+                elif turnover_intent_guarded_flag:
+                    sell_suppression_origin = "turnover_budget_trim"
+                elif budget_split_bound_guarded_flag:
+                    sell_suppression_origin = "budget_split_bound_guard"
+                else:
+                    sell_suppression_origin = "weight_translation"
+
             actions.append(
                 {
                     "date": signal_dt.strftime("%Y-%m-%d"),
@@ -1907,12 +2205,23 @@ class PortfolioState:
                     "budget_calibration": budget_calibration,
                     "semantic_translation_reason": semantic_translation_reason,
                     "semantic_preserved": bool(model_action_name == str(execution_action).strip().lower()),
-                    "budget_dropped": bool(budget_dropped.get(stock, False)),
-                    "forced_zero": bool(forced_zero.get(stock, False)),
-                    "semantic_delta_guarded": bool(semantic_delta_guarded.get(stock, False)),
-                    "budget_split_bound_guarded": bool(budget_split_bound_guarded.get(stock, False)),
-                    "translation_soft_lift_guarded": bool(translation_soft_lift_guarded.get(stock, False)),
-                    "turnover_intent_guarded": bool(turnover_intent_guarded.get(stock, False)),
+                    "budget_dropped": budget_dropped_flag,
+                    "budget_released_from_hold": budget_released_from_hold_flag,
+                    "forced_zero": forced_zero_flag,
+                    "semantic_delta_guarded": semantic_delta_guarded_flag,
+                    "budget_split_bound_guarded": budget_split_bound_guarded_flag,
+                    "translation_floor_guarded": translation_floor_guarded_flag,
+                    "translation_cap_guarded": translation_cap_guarded_flag,
+                    "translation_soft_lift_guarded": translation_soft_lift_guarded_flag,
+                    "sell_priority_guarded": sell_priority_guarded_flag,
+                    "turnover_intent_guarded": turnover_intent_guarded_flag,
+                    "sell_source_floor_guarded": sell_source_floor_guarded_flag,
+                    "model_release_signal": model_release_signal_flag,
+                    "deploy_funding_rebalance_signal": deploy_funding_rebalance_signal_flag,
+                    "sell_authorized_by_model": sell_authorized_by_model_flag,
+                    "sell_authorization_score": sell_authorization_score_value,
+                    "sell_execution_origin": sell_execution_origin,
+                    "sell_suppression_origin": sell_suppression_origin,
                     "desired_strength": float(desired_strength.get(stock, 0.0)),
                     "protected_floor": float(protected_floor.get(stock, 0.0)),
                     "current_weight": previous_weight,
@@ -2046,6 +2355,67 @@ class PortfolioState:
             for item in deploy_intent_items
             if float(item.get("delta_weight", 0.0) or 0.0) > 1.0e-8
         )
+        sell_intent_items = [
+            item
+            for item in actions
+            if str(item.get("model_action", "") or "").strip().lower() in {"reduce", "exit"}
+        ]
+        realized_sell_items = [
+            item
+            for item in actions
+            if str(item.get("weight_change_action", "") or "").strip().lower() in {"reduce", "exit"}
+        ]
+        sell_intent_realized_count = sum(
+            1
+            for item in sell_intent_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() in {"reduce", "exit"}
+        )
+        sell_intent_hold_conflict_count = sum(
+            1
+            for item in sell_intent_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() == "hold"
+        )
+        sell_intent_suppressed_count = sum(
+            1
+            for item in sell_intent_items
+            if str(item.get("sell_suppression_origin", "") or "").strip().lower() != "none"
+        )
+        budget_origin_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower()
+            not in {"model_sell_intent", "model_release_signal", "deploy_funding_rebalance"}
+        )
+        model_release_signal_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "model_release_signal"
+        )
+        deploy_funding_rebalance_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "deploy_funding_rebalance"
+        )
+        budget_slot_reclaim_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "budget_slot_reclaim"
+        )
+        sell_priority_guard_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "budget_sell_priority"
+        )
+        turnover_trim_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "turnover_budget_trim"
+        )
+        forced_zero_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "forced_zero"
+        )
         add_to_hold_conflict_count = sum(
             1
             for item in add_intent_items
@@ -2153,10 +2523,16 @@ class PortfolioState:
             "budget_entry_candidate_count": int(budget_entry_candidate_count),
             "budget_entry_keep_count": int(budget_entry_keep_count),
             "budget_held_protected_count": int(budget_held_protected_count),
+            "budget_reclaimable_held_count": int(budget_reclaimable_held_count),
+            "budget_released_held_count": int(budget_released_held_count),
+            "model_release_signal_count": int(model_release_signal.sum()),
+            "deploy_funding_rebalance_signal_count": int(deploy_funding_rebalance_signal.sum()),
+            "sell_authorized_held_count": int(sell_authorized_mask.sum()),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),
             "budget_translation_soft_lift_guard_count": int(translation_soft_lift_guarded.sum()),
             "budget_sell_priority_guard_count": int(sell_priority_guarded.sum()),
+            "sell_source_floor_guard_count": int(sell_source_floor_guarded.sum()),
             "execution_deadband_abs": execution_deadband_abs,
             "execution_deadband_rel": execution_deadband_rel,
             "recent_reversal_rate_20d": float(self.portfolio_features().get("recent_reversal_rate_20d", 0.0)),
@@ -2172,6 +2548,28 @@ class PortfolioState:
             "deploy_intent_realized_count": int(deploy_realized_count),
             "deploy_intent_realized_rate": float(deploy_realized_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "open_add_positive_weight_change_rate": float(deploy_positive_delta_count / deploy_intent_count) if deploy_intent_count else 0.0,
+            "sell_intent_action_count": int(len(sell_intent_items)),
+            "sell_intent_realized_count": int(sell_intent_realized_count),
+            "sell_intent_realized_rate": float(sell_intent_realized_count / len(sell_intent_items)) if sell_intent_items else 0.0,
+            "sell_intent_hold_conflict_count": int(sell_intent_hold_conflict_count),
+            "sell_intent_hold_conflict_share": float(sell_intent_hold_conflict_count / len(sell_intent_items)) if sell_intent_items else 0.0,
+            "sell_intent_suppressed_count": int(sell_intent_suppressed_count),
+            "sell_intent_suppressed_share": float(sell_intent_suppressed_count / len(sell_intent_items)) if sell_intent_items else 0.0,
+            "realized_sell_action_count": int(len(realized_sell_items)),
+            "budget_origin_sell_count": int(budget_origin_sell_count),
+            "budget_origin_sell_share": float(budget_origin_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "model_release_signal_sell_count": int(model_release_signal_sell_count),
+            "model_release_signal_sell_share": float(model_release_signal_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "deploy_funding_rebalance_sell_count": int(deploy_funding_rebalance_sell_count),
+            "deploy_funding_rebalance_sell_share": float(deploy_funding_rebalance_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "budget_slot_reclaim_sell_count": int(budget_slot_reclaim_sell_count),
+            "budget_slot_reclaim_sell_share": float(budget_slot_reclaim_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "sell_priority_guard_sell_count": int(sell_priority_guard_sell_count),
+            "sell_priority_guard_sell_share": float(sell_priority_guard_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "turnover_trim_sell_count": int(turnover_trim_sell_count),
+            "turnover_trim_sell_share": float(turnover_trim_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "forced_zero_sell_count": int(forced_zero_sell_count),
+            "forced_zero_sell_share": float(forced_zero_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
             "deploy_intent_dropped_count": int(deploy_intent_dropped_count),
             "deploy_intent_dropped_share": float(deploy_intent_dropped_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "deploy_intent_candidate_count": int(deploy_intent_candidate_count),

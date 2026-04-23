@@ -338,3 +338,91 @@
     - `deploy_gate_forward_alignment_5d`
     - `sell_selection_quality_5d`
   - 只有当 clip 降低与 deploy executability 改善同时出现，才允许判断 translation 方向真正闭环。
+
+## 21. 2026-04-22 r10 卖出来源归因合同修正
+- 已被新证据明确的事实：
+  - 已在 `portfolio_simulator.py` 与 `analyze_behavior_gap.py` 中接入显式卖出来源归因：
+    - `sell_execution_origin`
+    - `sell_suppression_origin`
+    - `budget_origin_sell_share`
+    - `sell_intent_realized_rate`
+    - `high_cash_budget_origin_sell_share`
+  - 在 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval` / `source_audit` 中，当前 sell-side 结构被首次拆清：
+    - `budget_origin_sell_share = 0.9000`
+    - `sell_intent_action_count = 9`
+    - `sell_intent_realized_rate = 1.0000`
+    - `sell_intent_suppressed_share = 0.0000`
+    - `high_cash_budget_origin_sell_share = 0.6667`
+    - `sell_execution_origin_counts` 以 `budget_sell_priority / forced_zero / weight_translation` 为主，而非 `model_sell_intent`
+  - 这说明当前问题不只是“模型卖出意图被压回 hold”，还包括“预算/翻译层主动制造了大多数真实卖出”。
+- 新的合同级结论：
+  - 当 `sell_intent_realized_rate` 很高、但 `budget_origin_sell_share` 仍接近主导时，不能判定为“release gate / sell selection 已学成”，只能判定为“模型自身卖出意图没有被压住，但真实卖出仍主要由预算层制造”。
+  - 当 `high_cash_budget_origin_sell_share` 明显偏高时，不能把高现金日误读为主动 cash timing；这更可能是预算挤压后的被动收缩。
+  - 因此当前 r10 的主矛盾已进一步收敛为：
+    - `sell_execution_source_entangled`
+    - `cash_timing_still_passive`
+    - `sell_selection_not_learned`
+    - `unified_value_arbitration_not_aligned`
+- 新的强约束：
+  - 后续任何 simulator / budget translation 修正，只要触及卖出路径，必须同步输出 sell-source attribution 审计，至少检查：
+    - `budget_origin_sell_share`
+    - `sell_intent_realized_rate`
+    - `sell_intent_suppressed_share`
+    - `high_cash_budget_origin_sell_share`
+    - `sell_execution_origin_counts`
+  - budget layer 可以做容量、风险、换手和 slot 竞争，但不应长期充当隐藏的主要卖出决策器。
+  - 若未来 patched eval 只改善收益或 deploy realization，却仍由 budget-origin sell 主导，则只能判定为“工程层暂时拉正”，不能判定为“sell-side 已闭环”。
+- 操作纪律：
+  - `source_eval` / `source_audit` 属于来源归因复跑，其职责是拆清责任来源，不得覆盖正式 `protocol_summary` 的 training-evidence 或 promotion verdict。
+  - formal verdict 仍以训练级 protocol / bounded study 的正式 tag 为准。
+- 下一轮验收补充：
+  - 除传统收益、回撤、cash timing、reduce/exit 指标外，必须同时要求：
+    - `budget_origin_sell_share` 下降
+    - `high_cash_budget_origin_sell_share` 下降
+    - `sell_selection_quality_5d` 不为负
+    - `release_gate_forward_alignment_5d` 不为负
+    - `order_translation_conflict_rate` 不因卖出归因修正而重新恶化
+
+## 22. 2026-04-23 r10 sell-source decoupling v7c 合同修正
+
+- 已落地的代码侧事实：
+  - 新增 `budget_calibration = cash_constraint_sell_source_guard_v7`。
+  - 该 calibration 明确把真实卖出来源拆为：
+    - `model_sell_intent`
+    - `model_release_signal`
+    - `deploy_funding_rebalance`
+    - 以及只作审计保留的 budget / translation fallback。
+  - 行为审计新增并返回：
+    - `model_release_signal_count`
+    - `deploy_funding_rebalance_signal_count`
+    - `sell_authorized_held_count`
+    - `sell_source_floor_guard_count`
+    - `model_release_signal_sell_count/share`
+    - `deploy_funding_rebalance_sell_count/share`
+    - `deploy_funding_rebalance_forward_excess_5d`
+- 新合同级结论：
+  - budget layer 不能再静默制造主要真实卖出；真实卖出必须尽量归因到模型显式卖出、模型释放信号或显式 deploy funding rebalance。
+  - `budget_origin_sell_share = 0` 是必要条件，不是充分条件。第一版 hard guard 已证明，若 deploy 被冻住，来源干净仍然不合格。
+  - 高收益也不是充分条件。v7b 已证明，若 deploy funding sell 占比过高且卖出后 forward excess 仍为正，则该分支更像过度资金腾挪，而不是成熟的 value arbitration。
+- v7c 当前合同：
+  - deploy funding rebalance 只允许在以下条件同时成立时触发：
+    - 已持仓且不是模型显式授权卖出。
+    - 原模型动作为 `hold/skip`，不得把 `open/add` 直接作为 funding sell 来源。
+    - deploy 需求足够强。
+    - 弱持仓证据数达到门槛。
+    - 受动态 retention floor 约束，不能无底线削仓。
+  - 对未授权且不满足 deploy funding 的持仓，translation 层应守住上一期权重底线，避免预算层把轻微权重扰动翻译成生命周期卖出。
+- 当前证据判决：
+  - v6 对照确认原实现存在 `sell_execution_source_entangled`。
+  - 第一版 v7 确认 hard floor 会过度保护旧仓。
+  - v7b 确认显式 funding rebalance 有收益潜力，但语义上过激。
+  - v7c 是当前最稳妥的代码侧 calibration：来源干净、deploy 未冻结、sell quality 为正、deploy funding 卖出后 forward excess 为负。
+- 明确禁止：
+  - 不得把 v7c 直接写成 promotion / live 默认执行。
+  - 不得用 v7b 的 headline return 覆盖语义风险。
+  - 不得只凭 `budget_origin_sell_share = 0` 宣称 sell-side 闭环。
+- 下一轮验收补充：
+  - `deploy_funding_rebalance_sell_share` 应继续下降，或由训练级 value / release head 提供更强可解释性。
+  - `deploy_funding_rebalance_forward_excess_5d` 应保持非正。
+  - `sell_source_floor_guard_share` 不宜长期过高，否则说明模型释放信号仍没有学会。
+  - cash timing 需要单独闭环，sell-source 解耦不能替代主动择时学习。

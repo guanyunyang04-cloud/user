@@ -133,12 +133,18 @@ def _build_semantic_conflicts(
         return {
             "action_rows": 0,
             "semantic_conflict_rate": 0.0,
+            "order_translation_conflict_rate": 0.0,
+            "weight_change_conflict_rate": 0.0,
             "micro_rebalance_conflict_rate": 0.0,
             "deadband_conflict_rate": 0.0,
+            "deadband_order_translation_conflict_rate": 0.0,
             "small_delta_conflict_rate": 0.0,
+            "small_delta_order_translation_conflict_rate": 0.0,
             "budget_clipped_day_share": 0.0,
             "budget_clipped_conflict_rate": 0.0,
             "unclipped_conflict_rate": 0.0,
+            "budget_clipped_order_translation_conflict_rate": 0.0,
+            "unclipped_order_translation_conflict_rate": 0.0,
             "budget_semantics_counts": {},
             "budget_calibration_counts": {},
             "avg_budget_risk_off_score": 0.0,
@@ -146,6 +152,12 @@ def _build_semantic_conflicts(
             "avg_budget_entry_candidate_count": 0.0,
             "avg_budget_entry_keep_count": 0.0,
             "avg_budget_held_protected_count": 0.0,
+            "avg_budget_reclaimable_held_count": 0.0,
+            "avg_budget_released_held_count": 0.0,
+            "avg_model_release_signal_count": 0.0,
+            "avg_deploy_funding_rebalance_signal_count": 0.0,
+            "avg_sell_authorized_held_count": 0.0,
+            "avg_sell_source_floor_guard_count": 0.0,
             "avg_budget_split_bound_guard_count": 0.0,
             "avg_budget_sell_priority_guard_count": 0.0,
             "avg_sell_rank_score": 0.0,
@@ -174,12 +186,46 @@ def _build_semantic_conflicts(
             "avg_deploy_intent_candidate_count": 0.0,
             "avg_deploy_intent_candidate_realized_rate": 0.0,
             "avg_deploy_intent_candidate_budget_drop_share": 0.0,
+            "sell_intent_action_count": 0,
+            "sell_intent_realized_count": 0,
+            "sell_intent_realized_rate": 0.0,
+            "sell_intent_hold_conflict_count": 0,
+            "sell_intent_hold_conflict_share": 0.0,
+            "sell_intent_suppressed_count": 0,
+            "sell_intent_suppressed_share": 0.0,
+            "realized_sell_action_count": 0,
+            "budget_origin_sell_count": 0,
+            "budget_origin_sell_share": 0.0,
+            "model_release_signal_sell_count": 0,
+            "model_release_signal_sell_share": 0.0,
+            "deploy_funding_rebalance_sell_count": 0,
+            "deploy_funding_rebalance_sell_share": 0.0,
+            "budget_slot_reclaim_sell_count": 0,
+            "budget_slot_reclaim_sell_share": 0.0,
+            "sell_priority_guard_sell_count": 0,
+            "sell_priority_guard_sell_share": 0.0,
+            "turnover_trim_sell_count": 0,
+            "turnover_trim_sell_share": 0.0,
+            "forced_zero_sell_count": 0,
+            "forced_zero_sell_share": 0.0,
+            "model_origin_sell_forward_excess_5d": 0.0,
+            "model_authorized_sell_forward_excess_5d": 0.0,
+            "deploy_funding_rebalance_forward_excess_5d": 0.0,
+            "budget_origin_sell_forward_excess_5d": 0.0,
             "avg_clipped_intent_risk": 0.0,
             "clipped_intent_risk_conflict_gap": 0.0,
             "high_cash_up_market_share": 0.0,
             "high_cash_down_market_share": 0.0,
+            "high_cash_sell_action_count": 0,
+            "high_cash_budget_origin_sell_share": 0.0,
+            "sell_execution_origin_counts": {},
+            "sell_suppression_origin_counts": {},
+            "sell_source_floor_guard_count": 0,
+            "sell_source_floor_guard_share": 0.0,
             "top_action_pairs": [],
             "top_conflict_pairs": [],
+            "top_weight_change_pairs": [],
+            "top_order_translation_conflict_pairs": [],
             "diagnoses": [],
         }
 
@@ -208,6 +254,7 @@ def _build_semantic_conflicts(
             "defense_gate_target",
             "deploy_executability_target",
             "clipped_intent_risk",
+            "sell_authorization_score",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -221,6 +268,34 @@ def _build_semantic_conflicts(
         "contradictory_micro_rebalance",
         pd.Series(False, index=working.index),
     ).map(_safe_bool)
+    for bool_column in (
+        "budget_dropped",
+        "budget_released_from_hold",
+        "forced_zero",
+        "semantic_delta_guarded",
+        "budget_split_bound_guarded",
+        "translation_floor_guarded",
+        "translation_cap_guarded",
+        "translation_soft_lift_guarded",
+        "sell_priority_guarded",
+        "turnover_intent_guarded",
+        "sell_source_floor_guarded",
+        "model_release_signal",
+        "deploy_funding_rebalance_signal",
+        "sell_authorized_by_model",
+    ):
+        working[bool_column] = working.get(
+            bool_column,
+            pd.Series(False, index=working.index),
+        ).map(_safe_bool)
+    working["sell_execution_origin"] = working.get(
+        "sell_execution_origin",
+        pd.Series("none", index=working.index),
+    ).astype(str)
+    working["sell_suppression_origin"] = working.get(
+        "sell_suppression_origin",
+        pd.Series("none", index=working.index),
+    ).astype(str)
     working["deadband_active"] = working.get(
         "execution_deadband",
         pd.Series(0.0, index=working.index),
@@ -262,13 +337,41 @@ def _build_semantic_conflicts(
             "budget_entry_candidate_count",
             "budget_entry_keep_count",
             "budget_held_protected_count",
+            "budget_reclaimable_held_count",
+            "budget_released_held_count",
+            "model_release_signal_count",
+            "deploy_funding_rebalance_signal_count",
+            "sell_authorized_held_count",
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
+            "sell_source_floor_guard_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
             "deploy_intent_candidate_budget_drop_count",
             "deploy_intent_candidate_budget_drop_share",
+            "sell_intent_action_count",
+            "sell_intent_realized_count",
+            "sell_intent_realized_rate",
+            "sell_intent_hold_conflict_count",
+            "sell_intent_hold_conflict_share",
+            "sell_intent_suppressed_count",
+            "sell_intent_suppressed_share",
+            "realized_sell_action_count",
+            "budget_origin_sell_count",
+            "budget_origin_sell_share",
+            "model_release_signal_sell_count",
+            "model_release_signal_sell_share",
+            "deploy_funding_rebalance_sell_count",
+            "deploy_funding_rebalance_sell_share",
+            "budget_slot_reclaim_sell_count",
+            "budget_slot_reclaim_sell_share",
+            "sell_priority_guard_sell_count",
+            "sell_priority_guard_sell_share",
+            "turnover_trim_sell_count",
+            "turnover_trim_sell_share",
+            "forced_zero_sell_count",
+            "forced_zero_sell_share",
         ],
     )
     if turnover_working.empty:
@@ -293,13 +396,41 @@ def _build_semantic_conflicts(
             "budget_entry_candidate_count",
             "budget_entry_keep_count",
             "budget_held_protected_count",
+            "budget_reclaimable_held_count",
+            "budget_released_held_count",
+            "model_release_signal_count",
+            "deploy_funding_rebalance_signal_count",
+            "sell_authorized_held_count",
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
+            "sell_source_floor_guard_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
             "deploy_intent_candidate_budget_drop_count",
             "deploy_intent_candidate_budget_drop_share",
+            "sell_intent_action_count",
+            "sell_intent_realized_count",
+            "sell_intent_realized_rate",
+            "sell_intent_hold_conflict_count",
+            "sell_intent_hold_conflict_share",
+            "sell_intent_suppressed_count",
+            "sell_intent_suppressed_share",
+            "realized_sell_action_count",
+            "budget_origin_sell_count",
+            "budget_origin_sell_share",
+            "model_release_signal_sell_count",
+            "model_release_signal_sell_share",
+            "deploy_funding_rebalance_sell_count",
+            "deploy_funding_rebalance_sell_share",
+            "budget_slot_reclaim_sell_count",
+            "budget_slot_reclaim_sell_share",
+            "sell_priority_guard_sell_count",
+            "sell_priority_guard_sell_share",
+            "turnover_trim_sell_count",
+            "turnover_trim_sell_share",
+            "forced_zero_sell_count",
+            "forced_zero_sell_share",
         ):
             if optional_column not in turnover_working.columns:
                 turnover_working[optional_column] = 0.0
@@ -323,13 +454,41 @@ def _build_semantic_conflicts(
                     "budget_entry_candidate_count",
                     "budget_entry_keep_count",
                     "budget_held_protected_count",
+                    "budget_reclaimable_held_count",
+                    "budget_released_held_count",
+                    "model_release_signal_count",
+                    "deploy_funding_rebalance_signal_count",
+                    "sell_authorized_held_count",
                     "budget_split_bound_guard_count",
                     "budget_sell_priority_guard_count",
+                    "sell_source_floor_guard_count",
                     "deploy_intent_candidate_count",
                     "deploy_intent_candidate_realized_count",
                     "deploy_intent_candidate_realized_rate",
                     "deploy_intent_candidate_budget_drop_count",
                     "deploy_intent_candidate_budget_drop_share",
+                    "sell_intent_action_count",
+                    "sell_intent_realized_count",
+                    "sell_intent_realized_rate",
+                    "sell_intent_hold_conflict_count",
+                    "sell_intent_hold_conflict_share",
+                    "sell_intent_suppressed_count",
+                    "sell_intent_suppressed_share",
+                    "realized_sell_action_count",
+                    "budget_origin_sell_count",
+                    "budget_origin_sell_share",
+                    "model_release_signal_sell_count",
+                    "model_release_signal_sell_share",
+                    "deploy_funding_rebalance_sell_count",
+                    "deploy_funding_rebalance_sell_share",
+                    "budget_slot_reclaim_sell_count",
+                    "budget_slot_reclaim_sell_share",
+                    "sell_priority_guard_sell_count",
+                    "sell_priority_guard_sell_share",
+                    "turnover_trim_sell_count",
+                    "turnover_trim_sell_share",
+                    "forced_zero_sell_count",
+                    "forced_zero_sell_share",
                 ]
             ],
             how="left",
@@ -350,6 +509,12 @@ def _build_semantic_conflicts(
     high_cash_down_market_share = _safe_mean(
         ((day_merge["benchmark_forward_return_1d"].fillna(0.0) < 0) & high_cash_mask).astype(float)
     )
+    day_merge["high_cash_day"] = high_cash_mask.astype(bool)
+    high_cash_lookup = {
+        str(key): bool(value)
+        for key, value in day_merge.set_index("date")["high_cash_day"].to_dict().items()
+    }
+    working["high_cash_day"] = working["date"].astype(str).map(high_cash_lookup).fillna(False)
 
     diagnoses: list[str] = []
     semantic_conflict_rate = _safe_mean(working["is_conflict"].astype(float))
@@ -415,13 +580,30 @@ def _build_semantic_conflicts(
     weight_change_lookup = working["weight_change_action"].astype(str).str.lower()
     deploy_intent_mask = model_action_lookup.isin({"open", "add"})
     add_intent_mask = model_action_lookup == "add"
+    sell_intent_mask = model_action_lookup.isin({"reduce", "exit"})
+    realized_sell_mask = weight_change_lookup.isin({"reduce", "exit"})
     deploy_realized_mask = weight_change_lookup.isin({"open", "add"})
     positive_weight_change_mask = working["delta_weight"].fillna(0.0) > 1.0e-8
     add_to_hold_mask = add_intent_mask & (weight_change_lookup == "hold")
     deploy_hold_mask = deploy_intent_mask & (weight_change_lookup == "hold")
+    sell_intent_hold_mask = sell_intent_mask & (weight_change_lookup == "hold")
+    sell_intent_realized_mask = sell_intent_mask & realized_sell_mask
+    sell_intent_suppressed_mask = sell_intent_mask & (~realized_sell_mask)
+    model_authorized_sell_origin_mask = working["sell_execution_origin"].isin(
+        {"model_sell_intent", "model_release_signal", "deploy_funding_rebalance"}
+    )
+    budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
+    model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
+    deploy_funding_rebalance_sell_mask = (
+        realized_sell_mask & working["sell_execution_origin"].eq("deploy_funding_rebalance")
+    )
+    budget_slot_reclaim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_slot_reclaim")
+    sell_priority_guard_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_sell_priority")
+    turnover_trim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("turnover_budget_trim")
+    forced_zero_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("forced_zero")
     deploy_dropped_mask = deploy_intent_mask & (
-        working.get("budget_dropped", pd.Series(False, index=working.index)).map(_safe_bool)
-        | working.get("forced_zero", pd.Series(False, index=working.index)).map(_safe_bool)
+        working["budget_dropped"]
+        | working["forced_zero"]
         | (working["target_weight"].fillna(0.0) <= 1.0e-8)
     )
     deploy_intent_count = int(deploy_intent_mask.sum())
@@ -454,6 +636,64 @@ def _build_semantic_conflicts(
     avg_deploy_intent_candidate_budget_drop_share = _safe_mean(
         day_merge.get("deploy_intent_candidate_budget_drop_share", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
     )
+    sell_intent_count = int(sell_intent_mask.sum())
+    realized_sell_count = int(realized_sell_mask.sum())
+    sell_intent_realized_count = int(sell_intent_realized_mask.sum())
+    sell_intent_hold_conflict_count = int(sell_intent_hold_mask.sum())
+    sell_intent_suppressed_count = int(sell_intent_suppressed_mask.sum())
+    budget_origin_sell_count = int(budget_origin_sell_mask.sum())
+    model_release_signal_sell_count = int(model_release_signal_sell_mask.sum())
+    deploy_funding_rebalance_sell_count = int(deploy_funding_rebalance_sell_mask.sum())
+    budget_slot_reclaim_sell_count = int(budget_slot_reclaim_sell_mask.sum())
+    sell_priority_guard_sell_count = int(sell_priority_guard_sell_mask.sum())
+    turnover_trim_sell_count = int(turnover_trim_sell_mask.sum())
+    forced_zero_sell_count = int(forced_zero_sell_mask.sum())
+    sell_intent_realized_rate = float(sell_intent_realized_count / sell_intent_count) if sell_intent_count else 0.0
+    sell_intent_hold_conflict_share = float(sell_intent_hold_conflict_count / sell_intent_count) if sell_intent_count else 0.0
+    sell_intent_suppressed_share = float(sell_intent_suppressed_count / sell_intent_count) if sell_intent_count else 0.0
+    budget_origin_sell_share = float(budget_origin_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    model_release_signal_sell_share = (
+        float(model_release_signal_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    )
+    deploy_funding_rebalance_sell_share = (
+        float(deploy_funding_rebalance_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    )
+    budget_slot_reclaim_sell_share = (
+        float(budget_slot_reclaim_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    )
+    sell_priority_guard_sell_share = (
+        float(sell_priority_guard_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    )
+    turnover_trim_sell_share = float(turnover_trim_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    forced_zero_sell_share = float(forced_zero_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    model_origin_sell_forward_excess_5d = _safe_mean(
+        working.loc[sell_intent_realized_mask, "forward_excess_5d"]
+        if sell_intent_realized_mask.any()
+        else pd.Series(dtype=float)
+    )
+    model_authorized_sell_mask = realized_sell_mask & model_authorized_sell_origin_mask
+    model_authorized_sell_forward_excess_5d = _safe_mean(
+        working.loc[model_authorized_sell_mask, "forward_excess_5d"]
+        if model_authorized_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_rebalance_forward_excess_5d = _safe_mean(
+        working.loc[deploy_funding_rebalance_sell_mask, "forward_excess_5d"]
+        if deploy_funding_rebalance_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    budget_origin_sell_forward_excess_5d = _safe_mean(
+        working.loc[budget_origin_sell_mask, "forward_excess_5d"]
+        if budget_origin_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
+    high_cash_sell_action_count = int(high_cash_sell_mask.sum())
+    high_cash_budget_origin_sell_share = (
+        float((budget_origin_sell_mask & working["high_cash_day"].astype(bool)).sum() / high_cash_sell_action_count)
+        if high_cash_sell_action_count
+        else 0.0
+    )
     clipped_intent_series = working.get("clipped_intent_risk", pd.Series(0.0, index=working.index)).fillna(0.0)
     avg_clipped_intent_risk = _safe_mean(clipped_intent_series)
     if bool(working["is_order_translation_conflict"].any()) and bool((~working["is_order_translation_conflict"]).any()):
@@ -480,6 +720,12 @@ def _build_semantic_conflicts(
         or avg_deploy_intent_candidate_budget_drop_share >= 0.20
     ):
         diagnoses.append("open/add 意图被预算丢弃或归零的比例偏高，需要优先检查候选预算与部署地板。")
+    if realized_sell_count >= 5 and budget_origin_sell_share >= 0.30:
+        diagnoses.append("真实卖出中相当一部分并非来自模型 reduce/exit 主意图，而是由预算/翻译层被动创造，卖出责任边界仍不干净。")
+    if sell_intent_count >= 5 and sell_intent_suppressed_share >= 0.20:
+        diagnoses.append("模型自身给出的 reduce/exit 意图仍有较高比例被翻译层压回 hold，卖出学习与组合约束还没有真正分责。")
+    if high_cash_sell_action_count >= 3 and high_cash_budget_origin_sell_share >= 0.50:
+        diagnoses.append("高现金日的卖出更像预算挤压而不是主动卖出决策，当前 cash timing 仍偏被动。")
     if high_cash_up_market_share > high_cash_down_market_share + 0.05:
         diagnoses.append("高现金日更多出现在次日上涨前，当前现金部署仍带有顺周期保守偏差。")
 
@@ -510,6 +756,14 @@ def _build_semantic_conflicts(
         if not turnover_frame.empty
         else {}
     )
+    sell_execution_origin_counts = {
+        str(key): int(value)
+        for key, value in working.loc[realized_sell_mask, "sell_execution_origin"].astype(str).value_counts().sort_index().items()
+    }
+    sell_suppression_origin_counts = {
+        str(key): int(value)
+        for key, value in working.loc[sell_intent_suppressed_mask, "sell_suppression_origin"].astype(str).value_counts().sort_index().items()
+    }
     return {
         "action_rows": int(len(working)),
         "semantic_conflict_rate": semantic_conflict_rate,
@@ -534,6 +788,12 @@ def _build_semantic_conflicts(
         "avg_budget_entry_candidate_count": _safe_mean(day_merge.get("budget_entry_candidate_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_entry_keep_count": _safe_mean(day_merge.get("budget_entry_keep_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_held_protected_count": _safe_mean(day_merge.get("budget_held_protected_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_budget_reclaimable_held_count": _safe_mean(day_merge.get("budget_reclaimable_held_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_budget_released_held_count": _safe_mean(day_merge.get("budget_released_held_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_model_release_signal_count": _safe_mean(day_merge.get("model_release_signal_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_deploy_funding_rebalance_signal_count": _safe_mean(day_merge.get("deploy_funding_rebalance_signal_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_sell_authorized_held_count": _safe_mean(day_merge.get("sell_authorized_held_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
+        "avg_sell_source_floor_guard_count": _safe_mean(day_merge.get("sell_source_floor_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_split_bound_guard_count": _safe_mean(day_merge.get("budget_split_bound_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_budget_sell_priority_guard_count": _safe_mean(day_merge.get("budget_sell_priority_guard_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)),
         "avg_sell_rank_score": avg_sell_rank_score,
@@ -562,10 +822,42 @@ def _build_semantic_conflicts(
         "avg_deploy_intent_candidate_count": avg_deploy_intent_candidate_count,
         "avg_deploy_intent_candidate_realized_rate": avg_deploy_intent_candidate_realized_rate,
         "avg_deploy_intent_candidate_budget_drop_share": avg_deploy_intent_candidate_budget_drop_share,
+        "sell_intent_action_count": int(sell_intent_count),
+        "sell_intent_realized_count": int(sell_intent_realized_count),
+        "sell_intent_realized_rate": sell_intent_realized_rate,
+        "sell_intent_hold_conflict_count": int(sell_intent_hold_conflict_count),
+        "sell_intent_hold_conflict_share": sell_intent_hold_conflict_share,
+        "sell_intent_suppressed_count": int(sell_intent_suppressed_count),
+        "sell_intent_suppressed_share": sell_intent_suppressed_share,
+        "realized_sell_action_count": int(realized_sell_count),
+        "budget_origin_sell_count": int(budget_origin_sell_count),
+        "budget_origin_sell_share": budget_origin_sell_share,
+        "model_release_signal_sell_count": int(model_release_signal_sell_count),
+        "model_release_signal_sell_share": model_release_signal_sell_share,
+        "deploy_funding_rebalance_sell_count": int(deploy_funding_rebalance_sell_count),
+        "deploy_funding_rebalance_sell_share": deploy_funding_rebalance_sell_share,
+        "budget_slot_reclaim_sell_count": int(budget_slot_reclaim_sell_count),
+        "budget_slot_reclaim_sell_share": budget_slot_reclaim_sell_share,
+        "sell_priority_guard_sell_count": int(sell_priority_guard_sell_count),
+        "sell_priority_guard_sell_share": sell_priority_guard_sell_share,
+        "turnover_trim_sell_count": int(turnover_trim_sell_count),
+        "turnover_trim_sell_share": turnover_trim_sell_share,
+        "forced_zero_sell_count": int(forced_zero_sell_count),
+        "forced_zero_sell_share": forced_zero_sell_share,
+        "model_origin_sell_forward_excess_5d": model_origin_sell_forward_excess_5d,
+        "model_authorized_sell_forward_excess_5d": model_authorized_sell_forward_excess_5d,
+        "deploy_funding_rebalance_forward_excess_5d": deploy_funding_rebalance_forward_excess_5d,
+        "budget_origin_sell_forward_excess_5d": budget_origin_sell_forward_excess_5d,
         "avg_clipped_intent_risk": avg_clipped_intent_risk,
         "clipped_intent_risk_conflict_gap": clipped_intent_risk_conflict_gap,
         "high_cash_up_market_share": high_cash_up_market_share,
         "high_cash_down_market_share": high_cash_down_market_share,
+        "high_cash_sell_action_count": int(high_cash_sell_action_count),
+        "high_cash_budget_origin_sell_share": high_cash_budget_origin_sell_share,
+        "sell_execution_origin_counts": sell_execution_origin_counts,
+        "sell_suppression_origin_counts": sell_suppression_origin_counts,
+        "sell_source_floor_guard_count": int(working["sell_source_floor_guarded"].sum()),
+        "sell_source_floor_guard_share": float(working["sell_source_floor_guarded"].mean()) if len(working) else 0.0,
         "top_action_pairs": pair_rows,
         "top_conflict_pairs": conflict_pair_rows,
         "top_weight_change_pairs": order_pair_rows,
@@ -935,6 +1227,54 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }
         )
+    if (
+        float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0) >= 0.30
+        or float(semantic_conflicts.get("sell_intent_suppressed_share", 0.0) or 0.0) >= 0.20
+    ):
+        bottlenecks.append(
+            {
+                "name": "sell_execution_source_entangled",
+                "severity": "high",
+                "diagnosis": "真实卖出中仍有相当比例来自预算/翻译层被动创造，或模型自身的 reduce/exit 意图被压回 hold，卖出责任边界还没有真正稳定下来。",
+                "evidence": {
+                    "sell_intent_action_count": float(semantic_conflicts.get("sell_intent_action_count", 0.0) or 0.0),
+                    "sell_intent_realized_rate": float(semantic_conflicts.get("sell_intent_realized_rate", 0.0) or 0.0),
+                    "sell_intent_hold_conflict_share": float(
+                        semantic_conflicts.get("sell_intent_hold_conflict_share", 0.0) or 0.0
+                    ),
+                    "sell_intent_suppressed_share": float(
+                        semantic_conflicts.get("sell_intent_suppressed_share", 0.0) or 0.0
+                    ),
+                    "budget_origin_sell_share": float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0),
+                    "sell_execution_origin_counts": dict(semantic_conflicts.get("sell_execution_origin_counts", {}) or {}),
+                    "sell_suppression_origin_counts": dict(
+                        semantic_conflicts.get("sell_suppression_origin_counts", {}) or {}
+                    ),
+                },
+            }
+        )
+    if (
+        _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02
+        and float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0) >= 0.50
+        and float(semantic_conflicts.get("high_cash_sell_action_count", 0.0) or 0.0) >= 3.0
+    ):
+        bottlenecks.append(
+            {
+                "name": "cash_timing_still_passive",
+                "severity": "high",
+                "diagnosis": "高现金日的卖出更多来自预算层被动挤压，而不是模型主动给出的 release/exit，说明 cash timing 仍更像结果后的被动收缩。",
+                "evidence": {
+                    "cash_timing_quality_1d": _safe_float(model_continuity, "cash_timing_quality_1d"),
+                    "high_cash_sell_action_count": float(
+                        semantic_conflicts.get("high_cash_sell_action_count", 0.0) or 0.0
+                    ),
+                    "high_cash_budget_origin_sell_share": float(
+                        semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0
+                    ),
+                    "budget_origin_sell_share": float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0),
+                },
+            }
+        )
 
     if model_hold_share < 0.12:
         recommended_focus.append("先把 hold_share 拉过最低连续持有阈值，再去追求更复杂的收益最优行为。")
@@ -958,6 +1298,15 @@ def main(argv: list[str] | None = None) -> int:
         semantic_conflicts.get("unclipped_order_translation_conflict_rate", 0.0) or 0.0
     ) + 0.03:
         recommended_focus.append("把预算头与个股动作头分层，让 cash / gross / turnover 只做组合部署，不再吞掉 reduce / exit 语义。")
+    if float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0) >= 0.30:
+        recommended_focus.append("把真实卖出拆成模型主动卖与预算被动卖两条链，优先减少预算层主动创造 reduce / exit。")
+    if float(semantic_conflicts.get("sell_intent_suppressed_share", 0.0) or 0.0) >= 0.20:
+        recommended_focus.append("优先检查 reduce / exit 意图被谁压回 hold：semantic guard、translation floor 还是 turnover trim，不要再把所有卖出失败都归咎给模型本身。")
+    if (
+        _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02
+        and float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0) >= 0.50
+    ):
+        recommended_focus.append("cash timing 需要从“预算挤压后留下更多现金”升级为“模型主动决定何时释放风险暴露”，避免高现金主要靠被动卖出形成。")
     if float(semantic_conflicts.get("high_cash_up_market_share", 0.0) or 0.0) > float(
         semantic_conflicts.get("high_cash_down_market_share", 0.0) or 0.0
     ) + 0.05:

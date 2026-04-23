@@ -1163,7 +1163,18 @@ def _build_trade_plan(
     pos = positions_df.copy()
     if pos.empty:
         pos = pd.DataFrame(columns=["stock", "shares", "cost_price"])
-    pos = pos[pos["stock"].isin(latest_price.index)].copy()
+    input_position_count = int(len(pos))
+    priced_mask = pos["stock"].isin(latest_price.index)
+    unpriced_pos = pos[~priced_mask].copy()
+    pos = pos[priced_mask].copy()
+    unpriced_position_records = [
+        {
+            "stock": str(row.stock),
+            "shares": int(row.shares),
+            "cost_price": float(row.cost_price),
+        }
+        for row in unpriced_pos.itertuples(index=False)
+    ]
 
     current_value_map = {
         row.stock: float(row.shares) * float(latest_price.get(row.stock, 0.0))
@@ -1177,8 +1188,35 @@ def _build_trade_plan(
     current_cost_map = {row.stock: float(row.cost_price) for row in pos.itertuples(index=False)}
 
     rows = []
+    blocked_buy_rows = []
     available_cash = float(cash)
     planned_shares_map = current_shares_map.copy()
+
+    for row in unpriced_pos.itertuples(index=False):
+        stock = str(row.stock)
+        target_weight = float(target_weight_row.get(stock, 0.0))
+        target_value = float(target_value_map.get(stock, 0.0))
+        rows.append(
+            {
+                "stock": stock,
+                "action": "保留" if target_weight > 0 else "卖出",
+                "shares": int(row.shares),
+                "price": np.nan,
+                "est_value": np.nan,
+                "reason": "缺少价格，人工核对后保留" if target_weight > 0 else "池外持仓，默认执行建议退出",
+                "current_weight": np.nan,
+                "target_weight": target_weight,
+                "final_score": float(final_score_row.get(stock, 0.0)),
+                "score_none": float(score_none_row.get(stock, 0.0)),
+                "score_v2": float(score_v2_row.get(stock, 0.0)),
+                "model_score": float(model_score_row.get(stock, 0.0)),
+                "cost_price": float(row.cost_price),
+                "advisory_only": True,
+                "target_value": target_value,
+            }
+        )
+        if target_weight <= 0:
+            planned_shares_map[stock] = 0
 
     for stock, shares in sorted(current_shares_map.items()):
         price = float(latest_price.get(stock, 0.0))
@@ -1237,11 +1275,50 @@ def _build_trade_plan(
         current_shares = int(current_shares_map.get(stock, 0))
         current_value = float(current_shares * price)
         delta_value = float(target_value - current_value)
-        if delta_value <= price * lot_size:
+        target_weight = float(target_weight_row.get(stock, 0.0))
+        if delta_value <= 0:
+            continue
+        if price <= 0:
+            blocked_buy_rows.append(
+                {
+                    "stock": str(stock),
+                    "target_weight": target_weight,
+                    "target_value": float(target_value),
+                    "price": float(price),
+                    "minimum_lot_value": None,
+                    "available_cash": float(available_cash),
+                    "reason": "missing_price",
+                }
+            )
+            continue
+        minimum_lot_value = float(price * lot_size)
+        if delta_value <= minimum_lot_value:
+            blocked_buy_rows.append(
+                {
+                    "stock": str(stock),
+                    "target_weight": target_weight,
+                    "target_value": float(target_value),
+                    "price": float(price),
+                    "minimum_lot_value": minimum_lot_value,
+                    "available_cash": float(available_cash),
+                    "reason": "target_value_below_one_lot",
+                }
+            )
             continue
         planned_buy_value = min(delta_value, available_cash)
         buy_shares = _round_buy_shares(planned_buy_value, price, lot_size)
         if buy_shares <= 0:
+            blocked_buy_rows.append(
+                {
+                    "stock": str(stock),
+                    "target_weight": target_weight,
+                    "target_value": float(target_value),
+                    "price": float(price),
+                    "minimum_lot_value": minimum_lot_value,
+                    "available_cash": float(available_cash),
+                    "reason": "available_cash_below_one_lot",
+                }
+            )
             continue
         est_value = float(buy_shares * price)
         available_cash -= est_value
@@ -1255,7 +1332,7 @@ def _build_trade_plan(
                 "est_value": est_value,
                 "reason": "进入目标组合" if current_shares == 0 else "目标仓位上升",
                 "current_weight": current_value / total_equity if total_equity > 0 else 0.0,
-                "target_weight": float(target_weight_row.get(stock, 0.0)),
+                "target_weight": target_weight,
                 "final_score": float(final_score_row.get(stock, 0.0)),
                 "score_none": float(score_none_row.get(stock, 0.0)),
                 "score_v2": float(score_v2_row.get(stock, 0.0)),
@@ -1271,7 +1348,7 @@ def _build_trade_plan(
         source_candidate_source=source_candidate_source,
     )
     if not action_df.empty:
-        action_priority = {"卖出": 0, "减仓": 1, "买入": 2, "加仓": 3}
+        action_priority = {"卖出": 0, "减仓": 1, "买入": 2, "加仓": 3, "保留": 4}
         action_df["action_priority"] = action_df["action"].map(action_priority).fillna(99)
         if display_mode == "research_candidate":
             action_df = action_df.sort_values(
@@ -1294,10 +1371,27 @@ def _build_trade_plan(
         "cash_input": float(cash),
         "total_equity": float(total_equity),
         "estimated_cash_after_plan": float(available_cash),
-        "current_position_count": int(len(current_shares_map)),
+        "current_position_count": input_position_count,
+        "priced_position_count": int(len(current_shares_map)),
+        "unpriced_position_count": int(len(unpriced_position_records)),
+        "unpriced_positions": unpriced_position_records,
+        "unpriced_action_suggestions": [
+            {
+                "stock": str(row["stock"]),
+                "action": str(row["action"]),
+                "reason": str(row["reason"]),
+                "shares": int(row["shares"]),
+                "target_weight": float(row["target_weight"]),
+            }
+            for row in rows
+            if bool(row.get("advisory_only", False))
+        ],
         "target_position_count": actionable_target_position_count,
         "raw_target_position_count": raw_target_position_count,
         "actionable_target_position_count": actionable_target_position_count,
+        "blocked_buy_candidate_count": int(len(blocked_buy_rows)),
+        "blocked_buy_candidates": blocked_buy_rows[:15],
+        "lot_size": int(lot_size),
         "price_basis": "signal_close",
     }
     return action_df, summary
@@ -1312,24 +1406,30 @@ def _build_hold_table(
 ) -> pd.DataFrame:
     latest_price = close_row.dropna()
     pos = positions_df.copy()
-    pos = pos[pos["stock"].isin(latest_price.index)].copy()
     rows = []
     for row in pos.itertuples(index=False):
         stock = row.stock
         shares = int(row.shares)
-        price = float(latest_price.get(stock, 0.0))
+        raw_price = latest_price.get(stock, np.nan)
+        price = float(raw_price) if pd.notna(raw_price) else np.nan
         target_weight = float(target_weight_row.get(stock, 0.0))
+        if pd.isna(price):
+            market_value = np.nan
+            status = "缺少价格，人工核对后保留" if target_weight > 0 else "池外持仓，默认执行建议退出"
+        else:
+            market_value = shares * price
+            status = "目标持有" if target_weight > 0 else "待卖出"
         rows.append(
             {
                 "date": latest_date,
                 "stock": stock,
                 "shares": shares,
                 "close": price,
-                "market_value": shares * price,
+                "market_value": market_value,
                 "cost_price": float(row.cost_price),
                 "target_weight": target_weight,
                 "final_score": float(final_score_row.get(stock, 0.0)),
-                "status": "目标持有" if target_weight > 0 else "待卖出",
+                "status": status,
             }
         )
     return pd.DataFrame(rows)
@@ -1404,6 +1504,7 @@ _TERMINAL_ACTION_LABELS = {
     "减仓": "Trim",
     "买入": "Buy",
     "加仓": "Add",
+    "保留": "Keep",
 }
 
 _TERMINAL_REASON_LABELS = {
@@ -1411,6 +1512,8 @@ _TERMINAL_REASON_LABELS = {
     "目标仓位下降": "Target weight decreased",
     "进入目标组合": "Entered target portfolio",
     "目标仓位上升": "Target weight increased",
+    "池外持仓，默认执行建议退出": "Out-of-pool holding, default execution suggests exit",
+    "缺少价格，人工核对后保留": "Missing price, keep after manual verification",
 }
 
 
@@ -1465,6 +1568,12 @@ def _write_trade_plan_txt(
     watch_df: pd.DataFrame,
     model_info: Dict[str, str],
 ):
+    blocked_reason_labels = {
+        "missing_price": "缺少最新价格",
+        "target_value_below_one_lot": "目标金额不足一手",
+        "available_cash_below_one_lot": "可用现金不足一手",
+    }
+
     def _fmt_metric(value: object) -> str:
         try:
             number = float(value)
@@ -1671,8 +1780,42 @@ def _write_trade_plan_txt(
     lines.append(f"总资产估算: {summary['total_equity']:.2f}")
     if summary.get("cash_source_text"):
         lines.append(f"现金来源: {summary['cash_source_text']}")
+    if summary.get("positions_source_mtime"):
+        lines.append(f"持仓文件时间: {summary['positions_source_mtime']}")
     lines.append(f"输入现金: {summary['cash_input']:.2f}")
     lines.append(f"计划后剩余现金估算: {summary['estimated_cash_after_plan']:.2f}")
+    if summary.get("current_position_count") is not None:
+        priced_position_count = int(summary.get("priced_position_count", summary.get("current_position_count", 0)) or 0)
+        current_position_count = int(summary.get("current_position_count", 0) or 0)
+        unpriced_position_count = int(summary.get("unpriced_position_count", 0) or 0)
+        if current_position_count > 0:
+            lines.append(
+                f"持仓识别: 输入持仓 {current_position_count} | 可估价 {priced_position_count} | 缺少价格 {unpriced_position_count}"
+            )
+        if unpriced_position_count > 0:
+            lines.append("持仓识别提醒:")
+            for row in list(summary.get("unpriced_positions") or [])[:8]:
+                cost_price = pd.to_numeric(pd.Series([row.get('cost_price', np.nan)]), errors='coerce').iloc[0]
+                cost_text = f"{float(cost_price):.2f}" if pd.notna(cost_price) else "缺失"
+                lines.append(
+                    f"- {row.get('stock', '')} | 持股 {int(row.get('shares', 0) or 0)} 股 | 成本价 {cost_text} | "
+                    "不在当前执行价格宇宙或缺少最新收盘价，未纳入自动估值与自动调仓。"
+                )
+            lines.append("- 上述持仓不会被解释成“无持仓”或“建议继续持有”，需要人工先核对。")
+            lines.append("- 当前总资产估算不含上述缺少价格持仓的市值。")
+    blocked_buy_count = int(summary.get("blocked_buy_candidate_count", 0) or 0)
+    if blocked_buy_count > 0:
+        lines.append(
+            f"买入约束提醒: 有 {blocked_buy_count} 个正目标因一手/现金约束未转成可执行买入（lot_size={int(summary.get('lot_size', 0) or 0)}）。"
+        )
+        for row in list(summary.get("blocked_buy_candidates") or [])[:5]:
+            min_lot_value = row.get("minimum_lot_value")
+            min_lot_text = f"{float(min_lot_value):.2f}" if min_lot_value is not None else "缺失"
+            lines.append(
+                f"- {row.get('stock', '')} | 目标权重 {float(row.get('target_weight', 0.0)):.2%} | "
+                f"目标金额 {float(row.get('target_value', 0.0)):.2f} | 一手门槛 {min_lot_text} | "
+                f"可用现金 {float(row.get('available_cash', 0.0)):.2f} | 原因 {blocked_reason_labels.get(str(row.get('reason', '')), str(row.get('reason', '')))}"
+            )
     if display_mode == "research_candidate":
         lines.append("价格口径: 以下数量按信号日收盘价估算，仅用于把目标权重换算成股数；次日开盘请按实际开盘价与目标权重执行。")
     else:
@@ -1681,17 +1824,28 @@ def _write_trade_plan_txt(
 
     if action_df.empty:
         lines.append("一、次日开盘建议动作")
-        lines.append("- 当前无明确调仓动作，建议次日开盘保持现有仓位。")
+        if int(summary.get("unpriced_position_count", 0) or 0) > 0:
+            lines.append("- 当前未生成明确自动调仓动作；存在缺少价格/不在执行价格宇宙的持仓，系统无法安全估值并自动给出调仓股数。")
+        elif int(summary.get("raw_target_position_count", 0) or 0) > 0 and int(summary.get("blocked_buy_candidate_count", 0) or 0) > 0:
+            lines.append("- 当前未生成明确调仓动作；模型存在正目标，但按当前总资产、收盘价和一手约束，暂时无法形成可执行买入股数。")
+        else:
+            lines.append("- 当前无明确调仓动作，建议次日开盘保持现有仓位。")
     else:
         lines.append("一、次日开盘建议动作")
         for idx, row in action_df.iterrows():
+            price_text = f"{float(row['price']):.2f}" if pd.notna(row.get("price", np.nan)) else "待核对"
+            est_value_text = f"{float(row['est_value']):.2f}" if pd.notna(row.get("est_value", np.nan)) else "待核对"
+            current_weight_text = (
+                f"{float(row['current_weight']):.2%}" if pd.notna(row.get("current_weight", np.nan)) else "待核对"
+            )
             lines.append(
-                f"{idx + 1}. {row['action']} {row['stock']} | 估算数量 {int(row['shares'])} 股 | 估算价格基准 {row['price']:.2f} | "
-                f"估算金额 {row['est_value']:.2f} | 原因: {row['reason']}"
+                f"{idx + 1}. {row['action']} {row['stock']} | 估算数量 {int(row['shares'])} 股 | 估算价格基准 {price_text} | "
+                f"估算金额 {est_value_text} | 原因: {row['reason']}"
             )
             if display_mode == "research_candidate":
                 detail = (
-                    f"   当前权重 {row['current_weight']:.2%} -> 目标权重 {row['target_weight']:.2%} | "
+                    f"   当前权重 {current_weight_text} "
+                    f"-> 目标权重 {row['target_weight']:.2%} | "
                     f"{execution_score_label} {row['execution_proxy_score']:.4f}"
                 )
                 if show_source_score and pd.notna(row.get("source_candidate_score", np.nan)):
@@ -1709,8 +1863,10 @@ def _write_trade_plan_txt(
         lines.append("- 当前无持仓。")
     else:
         for _, row in hold_df.iterrows():
+            close_text = f"{float(row['close']):.2f}" if pd.notna(row.get("close", np.nan)) else "缺失"
+            market_value_text = f"{float(row['market_value']):.2f}" if pd.notna(row.get("market_value", np.nan)) else "缺失"
             lines.append(
-                f"- {row['stock']} | 持股 {int(row['shares'])} 股 | 收盘 {row['close']:.2f} | 市值 {row['market_value']:.2f} | "
+                f"- {row['stock']} | 持股 {int(row['shares'])} 股 | 收盘 {close_text} | 市值 {market_value_text} | "
                 f"目标权重 {row['target_weight']:.2%} | 状态 {row['status']}"
             )
 
@@ -2045,6 +2201,11 @@ def main():
     summary["positions_source_mode"] = str(account_state.source)
     summary["cash_source"] = str(cash_source)
     summary["cash_source_text"] = str(cash_source_text)
+    summary["positions_source_mtime"] = (
+        datetime.fromtimestamp(Path(account_state.path).stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        if account_state.path and Path(account_state.path).exists()
+        else ""
+    )
     summary["history_window"] = history_window_to_dict(history_window)
     summary["cache"] = {
         "raw": raw_cache_meta,
@@ -2728,6 +2889,11 @@ def main_with_progress():
             summary["positions_source_mode"] = str(account_state.source)
             summary["cash_source"] = str(cash_source)
             summary["cash_source_text"] = str(cash_source_text)
+            summary["positions_source_mtime"] = (
+                datetime.fromtimestamp(Path(account_state.path).stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                if account_state.path and Path(account_state.path).exists()
+                else ""
+            )
             summary["history_window"] = history_window_to_dict(history_window)
             summary["cache"] = {
                 "raw": raw_cache_meta,

@@ -1,6 +1,6 @@
 # 主脑状态中枢
 
-快照日期：`2026-04-22`
+快照日期：`2026-04-23`
 
 ## 1. 当前接管摘要
 - 工作区正式生产主线仍是 `daily_research`
@@ -69,3 +69,31 @@
   - `daily_research/tools/brain_integrity_check.py --json` 通过。
   - `daily_research/tools/doc_guard.py check` 通过。
   - `daily_stock_analysis-main/scripts/check_ai_assets.py` 通过。
+
+## 2026-04-22 daily_research r10 代码侧修正状态
+- 当前事实：
+  - `daily_research` 已在其分脑中记录一轮新的 r10 code-side simulator 修正，目标是缓解预算/动作翻译漂移，而不是直接改写研究结论。
+  - 该修正基于现有冠军模型 `cp_v3_deploy_executability_r10__study_r1__confirm_02` 做了 patched evaluation / audit，结果显著改善了 deploy realization、收益、Sharpe 与 cash timing。
+  - 但 sell-side 相关瓶颈仍在，`daily_research` 分脑已明确保持 `shadow_only`，没有把这次 patched eval 误写成 promotion。
+- 主脑层决策：
+  - 主脑继续只记录“这轮代码侧修正已发生且已写回分脑”，不在主脑重复存放具体策略指标细节。
+  - 若后续还有类似 code-side 修正，仍然必须先写回目标分脑，再在主脑留一句状态摘要，避免主脑变成平行实验日志。
+
+## 2026-04-22 daily_research r10 卖出来源归因状态
+- 当前事实：
+  - `daily_research` 已补做一轮 r10 source attribution 复跑，用来拆清“真实卖出来自模型还是预算层”。
+  - 新证据表明，当前 sell-side 的更深层问题是 `budget_origin_sell_share` 很高，而不是简单的 sell intent suppression。
+  - `daily_research` 分脑已记录这轮复跑只用于来源归因，不改写正式 protocol verdict。
+- 主脑层决策：
+  - 主脑继续只保留一句全局判断：`daily_research` 当前已把 sell-side 问题从“是否被压掉”推进到“是谁在实际制造卖出”的责任分解阶段。
+  - sell-source attribution 的详细指标、命令与策略含义，继续只写在 `daily_research/brain/`，不在主脑重复展开。
+
+## 2026-04-23 daily_research r10 卖出来源解耦状态
+- 当前事实：
+  - `daily_research` 已完成一轮 r10 sell-source 解耦代码侧评估，当前分脑结论落在 `cash_constraint_sell_source_guard_v7` / v7c。
+  - 这轮工作把真实卖出从隐藏 budget-origin 副作用拆成模型显式卖出、模型释放信号与显式 deploy funding rebalance。
+  - 分脑已记录 v6、v7、v7b、v7c 的证据链；v7c 不是最高收益分支，但当前语义最稳健。
+  - 本轮未启动训练、未停止训练、未切换 live 默认执行、未改写 promotion gate。
+- 主脑层决策：
+  - 主脑只记录状态摘要，不复制具体指标；详细证据、命令、合同与遗留问题继续以 `daily_research/brain/` 为真源。
+  - 后续若继续推进，应优先在分脑中验证训练级 value/release/cash timing 闭环，而不是让主脑承载实验细节。

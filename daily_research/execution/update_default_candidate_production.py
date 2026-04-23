@@ -72,6 +72,16 @@ def _resolve_default_bootstrap_inputs() -> tuple[Path, Path, str]:
 
 
 FORMAL_SOURCE_RUN, PRODUCTION_ROOT, DEFAULT_STATIC_FALLBACK_PROFILE = _resolve_default_bootstrap_inputs()
+DEFAULT_PRODUCTION_TRADING_DAY_INTERVAL = 21
+DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS = DEFAULT_PRODUCTION_TRADING_DAY_INTERVAL
+DEFAULT_PRODUCTION_POOL_ADV_WINDOW = 20
+DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL = DEFAULT_PRODUCTION_TRADING_DAY_INTERVAL
+DEFAULT_PRODUCTION_RETRAIN_WARN_AFTER_TRADING_DAYS = DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL
+DEFAULT_PRODUCTION_RETRAIN_BLOCK_AFTER_TRADING_DAYS = DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL * 2
+DEFAULT_PRODUCTION_POOL_REFRESH_POLICY = (
+    f"rolling_liquidity_pool_every_{DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS}_trading_days"
+)
+DEFAULT_PRODUCTION_DAILY_POOL_REFRESH_ENABLED = DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS == 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -288,7 +298,7 @@ def _write_metrics_payload(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _enforce_daily_refresh_pool_metrics(
+def _enforce_active_pool_metrics(
     *,
     production_root: Path,
     source_run_dir: Path,
@@ -310,24 +320,30 @@ def _enforce_daily_refresh_pool_metrics(
     if str(metrics.get("rolling_liquidity_pool", "") or "").strip() != resolved_pool_name:
         metrics["rolling_liquidity_pool"] = resolved_pool_name
         changed = True
-    if int(metrics.get("rolling_pool_rebalance_days", 0) or 0) != 1:
-        metrics["rolling_pool_rebalance_days"] = 1
+    if int(metrics.get("rolling_pool_rebalance_days", 0) or 0) != DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS:
+        metrics["rolling_pool_rebalance_days"] = DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS
         changed = True
-    adv_window = int(metrics.get("rolling_pool_adv_window", 20) or 20)
+    adv_window = int(
+        metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW)
+        or DEFAULT_PRODUCTION_POOL_ADV_WINDOW
+    )
     if adv_window <= 0:
-        metrics["rolling_pool_adv_window"] = 20
+        metrics["rolling_pool_adv_window"] = DEFAULT_PRODUCTION_POOL_ADV_WINDOW
         changed = True
-    elif int(metrics.get("rolling_pool_adv_window", 20) or 20) != adv_window:
+    elif (
+        int(metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW) or DEFAULT_PRODUCTION_POOL_ADV_WINDOW)
+        != adv_window
+    ):
         metrics["rolling_pool_adv_window"] = adv_window
         changed = True
     if str(metrics.get("universe_scope", "") or "").strip() != "all_a":
         metrics["universe_scope"] = "all_a"
         changed = True
-    if not bool(metrics.get("daily_pool_refresh_enabled", False)):
-        metrics["daily_pool_refresh_enabled"] = True
+    if bool(metrics.get("daily_pool_refresh_enabled", False)) != DEFAULT_PRODUCTION_DAILY_POOL_REFRESH_ENABLED:
+        metrics["daily_pool_refresh_enabled"] = DEFAULT_PRODUCTION_DAILY_POOL_REFRESH_ENABLED
         changed = True
-    if str(metrics.get("daily_pool_refresh_policy", "") or "").strip() != "rolling_liquidity_pool_daily":
-        metrics["daily_pool_refresh_policy"] = "rolling_liquidity_pool_daily"
+    if str(metrics.get("daily_pool_refresh_policy", "") or "").strip() != DEFAULT_PRODUCTION_POOL_REFRESH_POLICY:
+        metrics["daily_pool_refresh_policy"] = DEFAULT_PRODUCTION_POOL_REFRESH_POLICY
         changed = True
     if changed:
         _write_metrics_payload(metrics_path, metrics)
@@ -543,8 +559,14 @@ def _resolve_training_dates(
         stocks_file=str(metrics.get("stocks_file", "") or ""),
         liquidity_pool=str(metrics.get("liquidity_pool", "") or ""),
         rolling_liquidity_pool=str(metrics.get("rolling_liquidity_pool", "") or ""),
-        pool_rebalance_days=int(metrics.get("rolling_pool_rebalance_days", 21) or 21),
-        pool_adv_window=int(metrics.get("rolling_pool_adv_window", 20) or 20),
+        pool_rebalance_days=int(
+            metrics.get("rolling_pool_rebalance_days", DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS)
+            or DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS
+        ),
+        pool_adv_window=int(
+            metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW)
+            or DEFAULT_PRODUCTION_POOL_ADV_WINDOW
+        ),
         relation_layer=bool(metrics.get("relation_layer", False)),
         use_cache=True,
         refresh_cache=False,
@@ -657,12 +679,28 @@ def _build_retrain_command(
     stocks_file = str(metrics.get("stocks_file", "") or "").strip()
     if rolling_pool:
         _append_arg(cmd, "--rolling-liquidity-pool", rolling_pool)
-        _append_arg(cmd, "--pool-rebalance-days", int(metrics.get("rolling_pool_rebalance_days", 21) or 21))
-        _append_arg(cmd, "--pool-adv-window", int(metrics.get("rolling_pool_adv_window", 20) or 20))
+        _append_arg(
+            cmd,
+            "--pool-rebalance-days",
+            int(metrics.get("rolling_pool_rebalance_days", DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS) or DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS),
+        )
+        _append_arg(
+            cmd,
+            "--pool-adv-window",
+            int(metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW) or DEFAULT_PRODUCTION_POOL_ADV_WINDOW),
+        )
     elif liquidity_pool:
         _append_arg(cmd, "--rolling-liquidity-pool", liquidity_pool)
-        _append_arg(cmd, "--pool-rebalance-days", int(metrics.get("rolling_pool_rebalance_days", 21) or 21))
-        _append_arg(cmd, "--pool-adv-window", int(metrics.get("rolling_pool_adv_window", 20) or 20))
+        _append_arg(
+            cmd,
+            "--pool-rebalance-days",
+            int(metrics.get("rolling_pool_rebalance_days", DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS) or DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS),
+        )
+        _append_arg(
+            cmd,
+            "--pool-adv-window",
+            int(metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW) or DEFAULT_PRODUCTION_POOL_ADV_WINDOW),
+        )
     elif stocks_file:
         _append_arg(cmd, "--stocks-file", stocks_file)
 
@@ -1275,9 +1313,9 @@ def _write_production_manifest(
     static_fallback_profile: str,
     label_horizon_guard_trading_days: int,
     minimum_new_trainable_trading_days: int,
-    daily_refresh_pool_name: str,
-    daily_refresh_rebalance_days: int,
-    daily_refresh_adv_window: int,
+    active_pool_name: str,
+    active_pool_rebalance_days: int,
+    active_pool_adv_window: int,
     strategy_manifest_path: Path | None = None,
     activate_strategy: bool = False,
 ) -> None:
@@ -1298,38 +1336,40 @@ def _write_production_manifest(
             "leaderboard_basis": "common comparison window",
             "comparison_window": "2025-03-18 -> 2026-03-27",
             "preferred_cadence": "trading_day_interval",
-            "preferred_label": "Retrain Every 10 Trading Days",
+            "preferred_label": f"Retrain Every {DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL} Trading Days",
             "secondary_cadence": "monthly_calendar",
             "secondary_label": "Retrain Monthly",
             "auto_retrain_enabled": True,
             "auto_retrain_mode": "trading_day_interval",
-            "auto_retrain_trigger": "every_10_trading_days_after_launch_cutoff",
-            "trading_day_interval": 10,
-            "auto_retrain_fallback_trading_days": 10,
-            "warn_after_trading_days": 10,
-            "block_after_trading_days": 20,
+            "auto_retrain_trigger": (
+                f"every_{DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL}_trading_days_after_launch_cutoff"
+            ),
+            "trading_day_interval": DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL,
+            "auto_retrain_fallback_trading_days": DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL,
+            "warn_after_trading_days": DEFAULT_PRODUCTION_RETRAIN_WARN_AFTER_TRADING_DAYS,
+            "block_after_trading_days": DEFAULT_PRODUCTION_RETRAIN_BLOCK_AFTER_TRADING_DAYS,
             "label_horizon_guard_trading_days": int(label_horizon_guard_trading_days),
             "minimum_new_trainable_trading_days": int(minimum_new_trainable_trading_days),
             "epoch_budget_policy": "family_recommended_with_source_floor",
             "minimum_epoch_budget_floor": 32,
             "universe_policy": "rolling_liquidity_pool_when_available",
             "notes": (
-                "Default execution production now retrains every 10 trading days. "
+                f"Default execution production now retrains every {DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL} trading days. "
                 "Epoch budget must never fall below the current source-run budget floor, "
-                "the universe should prefer a rolling liquidity pool so the stock pool refreshes automatically "
-                "with each production retrain, and cadence alone is not enough: the latest trainable cutoff "
+                f"the universe should stay on the active rolling liquidity pool with a {DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS}-trading-day rebuild cadence, "
+                "and cadence alone is not enough: the latest trainable cutoff "
                 "must advance by a minimum number of trading days beyond the prior train_end_date."
             ),
         },
         "source_formal_run_dir": str(source_run_dir.resolve()),
         "active_production_run_dir": str(run_dir.resolve()),
         "production_root": str(production_root.resolve()),
-        "liquidity_pool": str(daily_refresh_pool_name),
-        "rolling_liquidity_pool": str(daily_refresh_pool_name),
-        "rolling_pool_rebalance_days": int(daily_refresh_rebalance_days),
-        "rolling_pool_adv_window": int(daily_refresh_adv_window),
-        "daily_pool_refresh_enabled": True,
-        "daily_pool_refresh_policy": "rolling_liquidity_pool_daily",
+        "liquidity_pool": str(active_pool_name),
+        "rolling_liquidity_pool": str(active_pool_name),
+        "rolling_pool_rebalance_days": int(active_pool_rebalance_days),
+        "rolling_pool_adv_window": int(active_pool_adv_window),
+        "daily_pool_refresh_enabled": DEFAULT_PRODUCTION_DAILY_POOL_REFRESH_ENABLED,
+        "daily_pool_refresh_policy": DEFAULT_PRODUCTION_POOL_REFRESH_POLICY,
         "target_weight_semantics": "research_raw_target_weight",
         "target_weight_cap_mode": "follow_research_raw_no_global_cap",
         "raw_live_target_weight_panel_csv": str((production_root / "daily_live_target_weight_panel.csv").resolve()),
@@ -1366,9 +1406,9 @@ def _write_production_manifest(
         f"- launch_cutoff_date: `{latest_completed_date}`",
         f"- internal_monitor_start_date: `{internal_monitor_start_date}`",
         f"- internal_monitor_days: `{internal_monitor_days}`",
-        f"- rolling_liquidity_pool: `{daily_refresh_pool_name}`",
-        f"- rolling_pool_rebalance_days: `{int(daily_refresh_rebalance_days)}`",
-        f"- rolling_pool_adv_window: `{int(daily_refresh_adv_window)}`",
+        f"- rolling_liquidity_pool: `{active_pool_name}`",
+        f"- rolling_pool_rebalance_days: `{int(active_pool_rebalance_days)}`",
+        f"- rolling_pool_adv_window: `{int(active_pool_adv_window)}`",
         f"- target_weight_semantics: `research_raw_target_weight`",
         f"- target_weight_cap_mode: `follow_research_raw_no_global_cap`",
         f"- raw_live_target_weight_panel_csv: `{(production_root / 'daily_live_target_weight_panel.csv').as_posix()}`",
@@ -1376,7 +1416,12 @@ def _write_production_manifest(
         f"- static_fallback_profile: `{static_fallback_profile}`",
         f"- static_fallback_daily_live_target_weight_panel_csv: `{(production_root / 'static_fallback_daily_live_target_weight_panel.csv').as_posix()}`",
         f"- active_execution_strategy_manifest: `{'' if strategy_manifest_path is None else strategy_manifest_path.as_posix()}`",
-        "- retrain_frequency_policy: `Retrain Every 10 Trading Days` preferred, warn at `10` trading days, block at `20` trading days, and keep monthly cadence as a secondary guardrail",
+        (
+            f"- retrain_frequency_policy: `Retrain Every {DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL} Trading Days` preferred, "
+            f"warn at `{DEFAULT_PRODUCTION_RETRAIN_WARN_AFTER_TRADING_DAYS}` trading days, "
+            f"block at `{DEFAULT_PRODUCTION_RETRAIN_BLOCK_AFTER_TRADING_DAYS}` trading days, "
+            "and keep monthly cadence as a secondary guardrail"
+        ),
         f"- label_horizon_guard_trading_days: `{int(label_horizon_guard_trading_days)}`",
         f"- minimum_new_trainable_trading_days: `{int(minimum_new_trainable_trading_days)}`",
         f"- retrain_frequency_leaderboard: `{retrain_frequency_csv.as_posix()}`",
@@ -1420,14 +1465,22 @@ def _sync_production_root(
         "execution_aligned_daily_live_target_weight_panel.csv",
     ]:
         _copy_if_exists(run_dir / name, production_root / name)
-    production_metrics = _enforce_daily_refresh_pool_metrics(
+    production_metrics = _enforce_active_pool_metrics(
         production_root=production_root,
         source_run_dir=source_run_dir,
         strategy_manifest_path=strategy_manifest_path,
     )
-    daily_refresh_pool_name = str(production_metrics.get("rolling_liquidity_pool", "") or production_metrics.get("liquidity_pool", "") or "").strip()
-    daily_refresh_rebalance_days = int(production_metrics.get("rolling_pool_rebalance_days", 1) or 1)
-    daily_refresh_adv_window = int(production_metrics.get("rolling_pool_adv_window", 20) or 20)
+    active_pool_name = str(
+        production_metrics.get("rolling_liquidity_pool", "") or production_metrics.get("liquidity_pool", "") or ""
+    ).strip()
+    active_pool_rebalance_days = int(
+        production_metrics.get("rolling_pool_rebalance_days", DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS)
+        or DEFAULT_PRODUCTION_POOL_REBALANCE_DAYS
+    )
+    active_pool_adv_window = int(
+        production_metrics.get("rolling_pool_adv_window", DEFAULT_PRODUCTION_POOL_ADV_WINDOW)
+        or DEFAULT_PRODUCTION_POOL_ADV_WINDOW
+    )
     _materialize_static_fallback_panel(
         production_root=production_root,
         static_profile=resolved_static_fallback_profile,
@@ -1445,9 +1498,9 @@ def _sync_production_root(
         static_fallback_profile=resolved_static_fallback_profile,
         label_horizon_guard_trading_days=label_horizon_guard_trading_days,
         minimum_new_trainable_trading_days=minimum_new_trainable_trading_days,
-        daily_refresh_pool_name=daily_refresh_pool_name,
-        daily_refresh_rebalance_days=daily_refresh_rebalance_days,
-        daily_refresh_adv_window=daily_refresh_adv_window,
+        active_pool_name=active_pool_name,
+        active_pool_rebalance_days=active_pool_rebalance_days,
+        active_pool_adv_window=active_pool_adv_window,
         strategy_manifest_path=strategy_manifest_path,
         activate_strategy=activate_strategy,
     )
@@ -1535,7 +1588,7 @@ def main() -> None:
     )
     label_horizon_guard_trading_days = _infer_label_horizon_guard_trading_days(source_metrics, cfg)
     minimum_new_trainable_trading_days = _infer_minimum_new_trainable_trading_days(
-        trading_day_interval=10,
+        trading_day_interval=DEFAULT_PRODUCTION_RETRAIN_TRADING_DAY_INTERVAL,
         label_horizon_guard_trading_days=label_horizon_guard_trading_days,
     )
 

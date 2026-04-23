@@ -1,6 +1,33 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-04-22`
+快照日期：`2026-04-23`
+
+## 2026-04-23 r10 卖出来源解耦 v7c 当前状态
+- 事实：`continuous_policy` 已新增 `budget_calibration = cash_constraint_sell_source_guard_v7`，当前代码侧评估落点为 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__sell_source_v7c_eval` / `sell_source_v7c_audit`。
+- 事实：v6 对照复跑确认了原始病灶：
+  - `budget_origin_sell_share = 0.9000`
+  - `high_cash_budget_origin_sell_share = 0.6667`
+  - `sell_origins` 主要来自 `budget_sell_priority / budget_slot_reclaim / weight_translation`，而非模型卖出意图。
+- 事实：第一版 sell-source hard guard 虽把 `budget_origin_sell_share` 与 `high_cash_budget_origin_sell_share` 降到 `0.0`，但 `deploy_intent_realized_rate = 0.2605`、`add_to_hold_conflict_share = 0.7727`，属于过度保护旧仓、冻结部署意图。
+- 事实：v7b 证明了“显式 deploy funding rebalance”存在收益上限，`annual_return = 0.7562`、`sharpe = 2.4132`，但 `deploy_funding_rebalance_sell_share = 0.8945`、`avg_order_translation_conflict_rate = 0.4568`，且 deploy funding 卖出后的 `forward_excess_5d = 0.0058`，说明该分支过度借组合再平衡之名卖出仍可能上涨的旧仓。
+- 事实：当前最终代码采用更克制的 v7c 条件，只允许弱证据 `hold/skip` 持仓参与显式 deploy funding rebalance，并使用动态保留底线。v7c 关键结果：
+  - `annual_return = 0.2716`
+  - `sharpe = 1.0760`
+  - `max_drawdown = -0.1162`
+  - `avg_turnover = 0.0477`
+  - `avg_sell_turnover = 0.0167`
+  - `avg_order_translation_conflict_rate = 0.2376`
+  - `deploy_intent_realized_rate = 0.7321`
+  - `add_to_hold_conflict_share = 0.2606`
+  - `sell_selection_quality_5d = 0.0538`
+  - `cash_timing_quality_1d = -0.0158`
+  - `budget_origin_sell_share = 0.0`
+  - `high_cash_budget_origin_sell_share = 0.0`
+  - `deploy_funding_rebalance_sell_share = 0.7250`
+  - `deploy_funding_rebalance_forward_excess_5d = -0.0179`
+- 推断：当前底层思路不是“完全错误”，而是原实现把三类责任混在一起：模型显式卖出、模型释放信号、组合部署资金来源。v7c 的主要价值是把隐藏预算卖出改成可审计、可限制、可归因的显式来源。
+- 决策：v7c 是当前最稳妥的代码侧修正结果，但仍只属于 shadow / research 证据；未启动训练、未切换 live 默认执行、未改写 promotion 结论。
+- 下一优先级：继续处理 `unified_value_arbitration_not_aligned`、`cash_timing_not_learned`、`order_translation_drift`、`deploy_intent_candidate_budget_drop_share` 与 `budget_action_entanglement`；不应回退到 `cash_constraint_intent_guard_v5`。
 
 ## 2026-04-22 r10 bounded self-opt 结果
 - 事实：r10 bounded self-opt `cp_v3_deploy_executability_r10__study_r1` 已在前台完整跑完，耗时约 `3.45h`，包含 `8` 个 screening trial 与 `2` 个 confirmatory trial，`completed_trial_count = 8`，`failed_trial_count = 0`，`confirmatory_completed_trial_count = 2`。
@@ -1462,19 +1489,19 @@
 - The active production manifest has been refreshed to the latest governance schema.
 - Current enforced retrain policy:
   - `auto_retrain_mode = trading_day_interval`
-  - `trading_day_interval = 10`
-  - `warn_after_trading_days = 10`
-  - `block_after_trading_days = 20`
+  - `trading_day_interval = 21`
+  - `warn_after_trading_days = 21`
+  - `block_after_trading_days = 42`
   - `label_horizon_guard_trading_days = 20`
   - `minimum_new_trainable_trading_days = 5`
   - `minimum_epoch_budget_floor = 32`
   - `universe_policy = rolling_liquidity_pool_when_available`
 - Current enforced default-execution stock-pool policy:
   - `rolling_liquidity_pool = liquid500`
-  - `rolling_pool_rebalance_days = 1`
+  - `rolling_pool_rebalance_days = 21`
   - `rolling_pool_adv_window = 20`
-  - `daily_pool_refresh_enabled = true`
-  - implication: the active production root refreshes the execution/research live panels against a daily rolling liquid500 membership instead of only reusing the static pool from the last retrain
+  - `daily_pool_refresh_enabled = false`
+  - implication: the active production root reuses a 21-trading-day rolling liquid500 membership aligned with the formal source cadence instead of a daily-rebuilt stock pool
 - Current user-facing execution outputs are aligned:
   - latest trade plan uses `上游参考分`
   - action CSV uses `upstream_reference_score`
@@ -1536,3 +1563,75 @@
   - 只有需要完整复盘或核查旧指标时才打开历史原文。
 - 当前验证要求：
   - 后续如再次归档 episodic，必须保留 raw archive、更新 evidence index，并运行 `doc_guard.py check`。
+
+## 2026-04-22 r10 预算/动作解耦补丁验证
+
+- 事实：
+  - 已在 `daily_research/continuous_policy/portfolio_simulator.py` 落地两类修正：
+    - 强化 `hold/add` 的微幅负向 `delta` 语义守卫，抑制大量小于 deadband 的 `hold -> reduce` / `add -> reduce` 漂移。
+    - 在 `action_budget_split_v1` 下新增弱持仓槽位竞争，允许少量明显弱势的小权重持仓与 flat deploy 候选共同竞争有限名额，而不再默认“旧仓永远先占满全部槽位”。
+  - 已使用现有 r10 稳定冠军模型 `cp_v3_deploy_executability_r10__study_r1__confirm_02` 直接重跑 patched 评估与行为审计：
+    - 评估：`daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval/evaluation_summary.json`
+    - 审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit.json`
+- 关键对照（旧 `confirm_02__evaluate` -> 新 `budget_fix_eval`）：
+  - `annual_return: 0.2918 -> 0.9022`
+  - `sharpe: 1.1732 -> 3.5963`
+  - `max_drawdown: -0.0826 -> -0.0683`
+  - `avg_order_translation_conflict_rate: 0.3149 -> 0.2787`
+  - `deploy_intent_realized_rate: 0.9050 -> 0.9312`
+  - `add_to_hold_conflict_share: 0.0219 -> 0.0000`
+  - `deploy_intent_hold_conflict_share: 0.0200 -> 0.0000`
+  - `cash_timing_quality_1d: -0.0156 -> -0.0010`
+- 同时暴露出的剩余瓶颈：
+  - `reduce_success_rate_5d: 0.8571 -> 0.2500`
+  - `exit_timeliness_rate_5d: 0.6667 -> 0.1429`
+  - `sell_selection_quality_5d: 0.0826 -> -0.1009`
+  - patched audit 仍把 `reduce_too_early_or_wrong_side`、`sell_selection_not_learned`、`unified_value_arbitration_not_aligned`、`three_value_gate_not_aligned` 与 `budget_action_entanglement` 列为高优先级瓶颈。
+- 推断：
+  - 这次修正已经证明：r10 当前收益与执行性的一部分损失，确实来自预算/动作翻译层的工程性漂移，而不是全部都要靠重新训练才能解决。
+  - 但这还不等于 sell-side / value arbitration 已经学稳；补丁压住了 deploy 落地漂移，同时把卖出侧真实短板暴露得更清楚。
+- 决策：
+  - 维持 `shadow_only`，不据此切换 live 默认执行，不改写 promotion 结论。
+  - r10 下一步若继续正式推进，必须在 patched simulator 上重跑训练级 protocol / study，再判断新的 training-evidence 与 promotion gate。
+
+## 2026-04-22 r10 卖出来源归因复跑状态
+
+- 当前动作：
+  - 已在 `daily_research/continuous_policy/portfolio_simulator.py` 中为每个 action 补充：
+    - `sell_execution_origin`
+    - `sell_suppression_origin`
+    - `translation_floor_guarded`
+    - `translation_cap_guarded`
+    - `sell_priority_guarded`
+  - 已在 `daily_research/continuous_policy/analyze_behavior_gap.py` 中补充 sell-source attribution 汇总与新瓶颈诊断。
+  - 已生成新的来源归因复跑产物：
+    - `daily_research/output/continuous_policy/evaluations/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval/evaluation_summary.json`
+    - `daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_audit.json`
+- 当前关键事实：
+  - `source_eval` 的收益结论弱于正式训练级 protocol：
+    - `annual_return = -0.1140`
+    - `sharpe = -0.3284`
+    - `max_drawdown = -0.2088`
+    - `cash_timing_quality_1d = -0.0446`
+  - 因而这轮 `source_eval` 不能覆盖 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1` 的正式训练级 verdict。
+  - `source_audit` 明确暴露当前 sell-side 的真实责任结构：
+    - `budget_origin_sell_share = 0.9000`
+    - `sell_intent_action_count = 9`
+    - `sell_intent_realized_rate = 1.0000`
+    - `sell_intent_suppressed_share = 0.0000`
+    - `high_cash_budget_origin_sell_share = 0.6667`
+    - 真实卖出来源以 `budget_sell_priority / forced_zero / weight_translation` 为主，而非 `model_sell_intent`
+- 当前判断：
+  - 这轮新证据说明，当前主要问题已经不是“模型卖出意图被压掉”，而是“预算/翻译层仍在主动制造大多数真实卖出”。
+  - 高现金日当前更像 budget-origin 被动收缩，而不是主动 cash timing。
+  - 因此下一阶段的主瓶颈已从 deploy-side 工程漂移，进一步收敛到：
+    - `sell_execution_source_entangled`
+    - `cash_timing_still_passive`
+    - `sell_selection_not_learned`
+    - `unified_value_arbitration_not_aligned`
+- 当前正式边界：
+  - 训练级正式 verdict 仍以 `daily_research/output/continuous_policy/protocols/cp_v3_deploy_executability_r10__budget_fix_protocol_r1/protocol_summary.json` 为准：
+    - `training_evidence.status = sufficient`
+    - `promotion_gate.status = shadow_only`
+  - 当前不得依据 `source_eval` / `source_audit` 切换 live 默认执行，也不得改写 promotion 结论。
+  - 后续凡是涉及 simulator 卖出路径的修正，都应把 source attribution audit 作为标准随行产物，而不再只看 aggregate metrics。

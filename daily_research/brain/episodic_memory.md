@@ -125,3 +125,174 @@
   - 事实：r10 方向已经从“工程上可执行”推进到“结构性优胜组合已跑清”，主胜线明确落在 `v6`，不是 `v5`。
   - 推断：当前真正的主瓶颈已经不是 `add -> hold` 本身，而是 `cash_timing_quality_1d`、`deploy_intent_candidate_budget_drop_share` 与 `budget_action_entanglement`。
   - 决策：后续若继续推进 r10，应固定 `cash_constraint_deploy_guard_v6`，在其上继续拆预算头与动作头，而不是回退到 `cash_constraint_intent_guard_v5`。
+
+## 2026-04-22 r10 预算/动作解耦补丁验证
+
+- 动作前自检：
+  - 事实：r10 正式 study 已经收口，但核心瓶颈仍是 `hold/add` 被微幅负向 `delta` 扭成 `reduce`，以及“旧仓一律先占坑”导致的 candidate budget 饱和。
+  - 事实：当前最有效动作不是再猜下一组 profile，而是先验证代码层预算/动作解耦补丁能否直接改善现有冠军模型的执行表现。
+  - 假设：如果 patched simulator 能在不改模型权重的前提下明显改善收益与 deploy realization，则说明当前存在可直接修复的工程性漂移。
+- 已完成实现：
+  - 在 `portfolio_simulator.py` 中补强了 `hold/add` 的微幅负向 `delta` 守卫。
+  - 在 `action_budget_split_v1` 下新增弱持仓 slot 竞争，并补充 `budget_reclaimable_held_count` / `budget_released_held_count` / `budget_released_from_hold` 诊断字段。
+  - 用现有冠军模型 `cp_v3_deploy_executability_r10__study_r1__confirm_02` 重跑 patched 评估与行为审计。
+- 结果：
+  - patched eval：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval`
+  - patched audit：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit`
+  - 关键指标改善：
+    - `annual_return: 0.2918 -> 0.9022`
+    - `sharpe: 1.1732 -> 3.5963`
+    - `max_drawdown: -0.0826 -> -0.0683`
+    - `avg_order_translation_conflict_rate: 0.3149 -> 0.2787`
+    - `deploy_intent_realized_rate: 0.9050 -> 0.9312`
+    - `add_to_hold_conflict_share: 0.0219 -> 0.0000`
+    - `cash_timing_quality_1d: -0.0156 -> -0.0010`
+  - 同时暴露出的恶化项：
+    - `reduce_success_rate_5d: 0.8571 -> 0.2500`
+    - `exit_timeliness_rate_5d: 0.6667 -> 0.1429`
+    - `sell_selection_quality_5d: 0.0826 -> -0.1009`
+- 动作后复盘：
+  - 事实：这次补丁已经证明，r10 当前有一部分损失来自预算/动作翻译层本身，而不是只能靠重新训练解决。
+  - 推断：deploy side 的工程漂移被压住以后，sell-side / release-side 的真实学习短板会更清楚地暴露出来。
+  - 决策：维持 `shadow_only`；后续若继续 formal 推进，必须在 patched simulator 上重跑新的训练级 protocol / study，而不是把 patched eval 直接当成 promotion 证据。
+
+## 2026-04-22 r10 卖出来源归因复跑
+
+- 动作前自检：
+  - 事实：上一轮 patched eval 已证明 deploy-side 工程漂移存在，但还不能回答“当前真实卖出主要是谁造成的”。
+  - 事实：若不把模型主动卖出与 budget-origin 被动卖出拆开，后续继续修 sell-side 会反复把预算层问题误判成 release gate 问题。
+  - 假设：最有效动作不是再开一轮大搜索，而是先对当前 patched protocol 做来源归因复跑，把 sell-side 责任链拆清。
+- 已完成实现：
+  - 在 `portfolio_simulator.py` 中为 action outcome 新增：
+    - `sell_execution_origin`
+    - `sell_suppression_origin`
+    - `translation_floor_guarded`
+    - `translation_cap_guarded`
+    - `sell_priority_guarded`
+  - 在 `analyze_behavior_gap.py` 中新增 sell-source attribution 统计、诊断与瓶颈：
+    - `sell_execution_source_entangled`
+    - `cash_timing_still_passive`
+  - 已生成：
+    - `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_eval`
+    - `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_audit`
+- 动作后复盘：
+  - 事实：
+    - `source_eval` 收益弱于正式 protocol：`annual_return = -0.1140`、`sharpe = -0.3284`、`max_drawdown = -0.2088`
+    - `source_audit` 显示：
+      - `budget_origin_sell_share = 0.9000`
+      - `sell_intent_realized_rate = 1.0000`
+      - `sell_intent_suppressed_share = 0.0000`
+      - `high_cash_budget_origin_sell_share = 0.6667`
+  - 推断：
+    - 当前更深层的问题不是“模型卖出意图被压掉”，而是“预算/翻译层仍主动制造了大多数真实卖出”。
+    - 高现金日当前仍偏被动形成，cash timing 还没有真正学成主动择时。
+  - 决策：
+    - 正式 verdict 仍保持 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1` 的 `shadow_only`。
+    - 后续凡是触及 simulator 卖出路径的修正，都应默认补跑 source attribution audit。
+
+## 2026-04-23 r10 卖出来源解耦 v7c 复盘
+
+- 动作前自检：
+  - 事实：v6 source audit 已显示 `budget_origin_sell_share = 0.9000`、`high_cash_budget_origin_sell_share = 0.6667`，说明真实卖出主要由预算/翻译层制造。
+  - 事实：用户要求前台推进、训练不要中断；本轮因此只做代码侧评估、审计与文档写回，未启动训练、未停止训练、未做 live/promotion 切换。
+  - 推断：当前底层思路不是整体错误，而是实现层把“模型显式卖出 / 模型释放信号 / 组合部署资金来源”混成了一个预算副作用。
+  - 假设：若把卖出来源显式解耦，并只允许弱证据旧仓为强 deploy 候选提供有限资金，就能同时避免 budget-origin 隐性卖出和 hard floor 冻结部署。
+- 已完成实现：
+  - 在 `portfolio_simulator.py` 中新增 `cash_constraint_sell_source_guard_v7` 及别名。
+  - 增加模型释放信号、卖出授权、deploy funding rebalance、卖出来源底线守卫与对应诊断字段。
+  - 在 `analyze_behavior_gap.py` 中补齐 deploy funding rebalance 的计数、占比、forward excess 与瓶颈判断。
+  - 前台顺序完成 v6 对照、v7 hard guard、v7b 宽松 funding、v7c 克制 funding 的评估与行为审计。
+- 关键证据：
+  - v6 对照：
+    - `annual_return = -0.1140`
+    - `sharpe = -0.3284`
+    - `budget_origin_sell_share = 0.9000`
+    - `high_cash_budget_origin_sell_share = 0.6667`
+  - 第一版 v7：
+    - `budget_origin_sell_share = 0.0`
+    - `deploy_intent_realized_rate = 0.2605`
+    - `add_to_hold_conflict_share = 0.7727`
+    - 结论：过度保护旧仓，部署被冻结。
+  - v7b：
+    - `annual_return = 0.7562`
+    - `sharpe = 2.4132`
+    - `deploy_funding_rebalance_sell_share = 0.8945`
+    - `deploy_funding_rebalance_forward_excess_5d = 0.0058`
+    - 结论：证明收益上限，但 funding sell 过多且卖出后仍平均跑赢，不宜作为语义最终落点。
+  - v7c：
+    - `annual_return = 0.2716`
+    - `sharpe = 1.0760`
+    - `max_drawdown = -0.1162`
+    - `avg_order_translation_conflict_rate = 0.2376`
+    - `deploy_intent_realized_rate = 0.7321`
+    - `sell_selection_quality_5d = 0.0538`
+    - `budget_origin_sell_share = 0.0`
+    - `high_cash_budget_origin_sell_share = 0.0`
+    - `deploy_funding_rebalance_sell_share = 0.7250`
+    - `deploy_funding_rebalance_forward_excess_5d = -0.0179`
+- 动作后复盘：
+  - 事实：v7c 已把卖出责任从隐藏预算副作用改成显式、可审计、可限制的来源链。
+  - 推断：当前不是“不该有组合资金腾挪”，而是资金腾挪必须显式标注为 `deploy_funding_rebalance`，并接受 forward excess 与占比约束。
+  - 决策：当前代码采用 v7c，而不是 headline return 更高的 v7b；原因是 v7c 更符合来源合同和稳健推进纪律。
+  - 边界：本轮仍是 shadow / research 证据，不构成 promotion；正式训练级结论仍需新的 protocol / bounded study 支撑。
+- 遗留问题：
+  - `deploy_funding_rebalance_sell_share = 0.7250` 仍偏高，说明模型 release/value head 还没有充分承担资金来源判断。
+  - `sell_source_floor_guard_share = 0.7661` 仍偏高，说明大量持仓仍需要 simulator 底线保护。
+  - `deploy_intent_candidate_budget_drop_share`、`budget_action_entanglement`、`order_translation_drift` 与 `cash_timing_quality_1d` 仍是下一阶段主瓶颈。
+
+## 2026-04-23 默认执行池外持仓显式动作修复
+
+- 动作前自检：
+  - 事实：`daily_research/execution/current_positions.csv` 当前包含 `001202.SZ`、`1400` 股、成本价 `17.03`。
+  - 事实：`001202.SZ` 存在于全市场识别缓存中，但不在 `2026-04-23` 当前默认执行价格宇宙与目标权重/分数面板中。
+  - 事实：旧逻辑按 `latest_price.index` 过滤持仓，导致池外持仓从动作生成和持仓概览中被静默丢失，并被文本误报成“当前无持仓/无明确调仓动作”。
+  - 推断：这不是股票代码无法识别，而是“已识别但不在当前默认执行自动估值宇宙”。
+- 已完成实现：
+  - 修改 `daily_research/baseline/generate_daily_trade_plan.py`：
+    - 池外持仓不再被静默过滤。
+    - `target_weight = 0` 时生成显式 `卖出`。
+    - `target_weight > 0` 时生成显式 `保留`。
+    - 为 summary 新增：
+      - `priced_position_count`
+      - `unpriced_position_count`
+      - `unpriced_action_suggestions`
+      - `blocked_buy_candidate_count`
+      - `positions_source_mtime`
+    - 文本输出新增：
+      - 持仓识别统计
+      - 池外持仓提醒
+      - 一手/现金约束导致的 blocked buy 解释
+- 关键证据：
+  - 前台重生成默认执行计划后，`latest_trade_plan.txt` 已显示：
+    - `1. 卖出 001202.SZ | 估算价格基准 待核对 | 原因: 池外持仓，默认执行建议退出`
+  - `actions_today.csv` 已包含：
+    - `001202.SZ, 卖出, 1400, price=NaN, est_value=NaN`
+  - `holdings_snapshot.csv` 已显示：
+    - `状态 = 池外持仓，默认执行建议退出`
+- 动作后复盘：
+  - 事实：默认执行现在可以对池外持仓给出明确卖出/保留建议，而不是只给模糊备注。
+  - 事实：当前 `cash = 1071.57`、`lot_size = 100`，同时存在 `15` 个正目标由于一手约束未形成可执行买入，因此“无新增买入动作”也是独立事实，不应与池外持仓问题混淆。
+  - 决策：默认执行后续要继续把“识别得到但无法自动估值”的持仓视为显式决策对象，而不是显示层例外。
+
+## 2026-04-23 默认执行 21 日节奏回滚
+
+- 动作前自检：
+  - 事实：`short_expert_policy_v5b` 的 formal 主结论来自 `liquid500 + rolling_pool_rebalance_days = 21 + execution_first + regoff_k1_20d_ensemble_native_anchor`。
+  - 事实：production 层后来被改成了 `rolling_pool_rebalance_days = 1` 与 `trading_day_interval = 10`，已经偏离 formal 主结论的制度节奏。
+  - 推断：如果不回滚，后续收益变化会继续混入“股票池刷新制度变化”和“模型本体变化”，归因会失真。
+- 已完成实现：
+  - 修改 `daily_research/execution/update_default_candidate_production.py`
+    - 默认滚动股票池重建周期改回 `21` 个交易日
+    - 默认自动重训周期改回 `21` 个交易日
+    - `warn_after_trading_days = 21`
+    - `block_after_trading_days = 42`
+    - `daily_pool_refresh_enabled = false`
+    - `daily_pool_refresh_policy = rolling_liquidity_pool_every_21_trading_days`
+  - 同步改写当前生效产物：
+    - `daily_research/output/active_execution_strategy.json`
+    - `daily_research/output/short_expert_policy_v5b_execalign_production_default/metrics.json`
+    - `daily_research/output/short_expert_policy_v5b_execalign_production_default/production_retrain_manifest.json`
+    - `daily_research/output/short_expert_policy_v5b_execalign_production_default/production_retrain_summary.md`
+- 动作后复盘：
+  - 事实：本轮没有启动、停止或中断任何训练。
+  - 结论：默认执行当前重新对齐为 `21` 日股票池节奏 + `21` 日自动重训节奏，与 formal 主结论保持一致。

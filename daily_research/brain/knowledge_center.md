@@ -497,3 +497,74 @@
 - 下一知识假设：
   - continuous_policy 不应从零学习所有机会选择；更合理的是接入 `deep_alpha / policy_v5b` 的 alpha prior，让连续执行模型学习生命周期和预算节奏。
   - 预算头最终应从 teacher/rule imitation 迁移到结果驱动：收益、回撤、成本、趋势捕获、现金时机和订单翻译漂移共同进入目标。
+
+## 2026-04-22 r10 预算/动作解耦补丁经验
+
+- 新证据表明，r10 当前最难缠的一类 `order_translation_drift` 不是“大方向错了”，而是“很小的负向权重扰动被翻译成了生命周期卖出语义”：
+  - patched audit 里最大的冲突对仍是 `hold -> reduce`，但这类样本的 `avg_abs_delta_weight = 0.0039`，而 `avg_execution_deadband = 0.0106`，说明大量冲突本质上只是低于执行死区的微缩减。
+  - `add -> reduce` 也有同类现象：`avg_abs_delta_weight = 0.00339`，但 `avg_execution_deadband = 0.02183`。
+- 因而一个重要经验是：
+  - 对 `hold/add`，当真实权重变化仍落在 deadband 内，且 sell-side 压力并不成立时，应优先把它视为预算翻译噪声，而不是直接把生命周期语义改写成 `reduce`。
+- 新证据也表明，candidate budget drop 并不全是“候选质量差”：
+  - 很多高 drop 日其实是“持仓已满 + 旧仓全部被默认保护”的结构性饱和。
+  - 本轮补丁只释放了极少量弱持仓名额：`budget_released_held_count` 日均仅约 `0.0714`，但依然足以明显改善 deploy realization 与总体绩效。
+  - 这说明当前更有效的方向不是大规模换仓，而是小心地把“明显弱势的小权重旧仓”从“永远先占坑”改成“可与更强新候选竞争”。
+- 重要边界：
+  - 本轮 patched 评估虽然显著提升了 `annual_return / sharpe / cash_timing_quality_1d / deploy_intent_realized_rate`，但 `reduce_success_rate_5d` 与 `sell_selection_quality_5d` 明显恶化。
+  - 这说明预算/动作工程层修正可以先把 deploy side 拉正，但 sell-side 质量仍取决于 value arbitration / release gate / reduce selection 本身是否学会。
+- 当前更可靠的知识结论是：
+  - `cash_constraint_deploy_guard_v6` 依然是 r10 主线。
+  - 预算头与动作头需要继续分层，但不能误以为“只要把 deploy 落地修好，卖出侧就会自动一起变好”。
+
+## 2026-04-22 r10 卖出来源归因经验
+
+- 新经验 1：`sell_intent_realized_rate` 高，不等于 sell-side 已学成。
+  - 在 `cp_v3_deploy_executability_r10__budget_fix_protocol_r1__source_audit` 中，`sell_intent_realized_rate = 1.0000`，但 `budget_origin_sell_share = 0.9000`。
+  - 这意味着“模型自己的少量卖出意图没有被压掉”，和“真实卖出主要由模型学出”是两件不同的事。
+- 新经验 2：高现金日可以是被动形成的。
+  - `high_cash_budget_origin_sell_share = 0.6667` 表明，高现金并不天然代表成熟 cash timing。
+  - 若高现金主要来自 budget-origin sell，应优先解读为“预算层挤出了现金”，而不是“模型提前看到了风险”。
+- 新经验 3：sell-source attribution 必须成为 simulator 修正后的标准审计。
+  - 过去只看 `reduce_success_rate_5d`、`cash_timing_quality_1d`、`order_translation_conflict_rate`，仍不足以分辨：
+    - 是模型主动卖对了
+    - 还是预算层被动卖出了
+  - 因此后续 simulator / translation 修正后，必须至少同步检查：
+    - `budget_origin_sell_share`
+    - `sell_intent_realized_rate`
+    - `sell_intent_suppressed_share`
+    - `high_cash_budget_origin_sell_share`
+- 新经验 4：当前主病灶已从“deploy intent 落不下来”继续收敛为“卖出责任没有分干净”。
+  - deploy-side 问题仍重要，但本轮 source audit 已说明，当前更深层的问题是：
+    - budget layer 仍在当隐藏卖出控制器
+    - cash timing 仍偏被动
+    - value arbitration 与 release gate 尚未真正学会“为什么卖”
+
+## 2026-04-23 r10 卖出来源解耦知识沉淀
+
+- 事实：`cash_constraint_sell_source_guard_v7` 已把 sell execution source 从隐性预算行为拆成显式来源：
+  - `model_sell_intent`
+  - `model_release_signal`
+  - `deploy_funding_rebalance`
+  - 以及保留作审计的 budget / translation fallback。
+- 事实：v6 对照中的 `budget_origin_sell_share = 0.9000`、`high_cash_budget_origin_sell_share = 0.6667` 证明，原链路的高现金和多数卖出不是可靠的主动择时证据。
+- 事实：第一版 hard guard 证明 `budget_origin_sell_share = 0` 只是必要条件，不是充分条件；如果同时把 `deploy_intent_realized_rate` 压到 `0.2605`，说明系统只是从“预算层乱卖”变成“旧仓被过度保护”。
+- 事实：v7b 证明显式 deploy funding 能恢复高收益，但若 `deploy_funding_rebalance_sell_share` 接近 `0.9` 且卖出后 `forward_excess_5d` 仍为正，就不能把它视为语义闭环，只能视为性能上限证据。
+- 事实：v7c 当前更符合语义合同：
+  - `budget_origin_sell_share = 0.0`
+  - `high_cash_budget_origin_sell_share = 0.0`
+  - `deploy_intent_realized_rate = 0.7321`
+  - `avg_order_translation_conflict_rate = 0.2376`
+  - `sell_selection_quality_5d = 0.0538`
+  - `deploy_funding_rebalance_forward_excess_5d = -0.0179`
+- 推断：当前最关键的设计原则是“卖出责任分层”，而不是单纯提高或压低卖出频率：
+  - 模型显式 `reduce/exit` 是生命周期卖出。
+  - 模型释放信号是持仓不再值得强保护。
+  - 组合 deploy funding 是为更强新候选腾挪预算，但必须显式、限量、可归因。
+  - budget layer 不应静默制造无法解释的主要卖出。
+- 经验规则：
+  - `budget_origin_sell_share = 0` 之后，必须继续看 `deploy_funding_rebalance_sell_share`、`deploy_funding_rebalance_forward_excess_5d` 与 `sell_source_floor_guard_share`。
+  - 高收益分支若依赖过多 deploy funding sell，不能直接 promotion；应先判断这些资金来源卖出是否真的 forward-negative。
+  - 当前 v7c 的成功点是“来源干净且不过度冻结部署”，不是“sell-side 已经完全学会”。
+- 遗留知识假设：
+  - 若下一轮要从代码侧走向训练级闭环，应让模型学习 release / deploy funding 的价值仲裁，而不是长期依赖 simulator 里的弱证据规则。
+  - cash timing 仍需要从被动仓位结果转向主动择时信号；单靠 sell-source 解耦不会自动解决 `cash_timing_quality_1d`。
