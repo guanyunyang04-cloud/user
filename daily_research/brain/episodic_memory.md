@@ -387,3 +387,84 @@
   - 推断：当前思路不是底层原理错了，而是前一阶段只把 sell-source 修到了 simulator，尚未完全把 held-side release/funding 仲裁学稳。
   - 决策：当前 r11 家族继续推进时，应优先沿 `result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7` 做后续对照，不回退到只修 simulator，也不直接扶正 `result_value_v10`。
   - 边界：本轮未切换 live 默认执行，未改写 promotion gate，未中断任何正式训练。
+## 2026-04-23 r11 held-side release/funding 合同收紧与重审
+
+- 动作前自检：
+  - 事实：
+    - `r11` 正式 bounded study 已经完成，当前最优 formal 分支仍是 `confirm_01 = result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7`。
+    - 旧的 `sell_source_contract_v1` 已经能压住 `budget_origin_sell_share`，但还不能直接说明 held-side release/funding 已学成。
+    - `analyze_behavior_gap.py` 已经具备 sell-source 诊断框架，最有效的下一步不是再堆 simulator 规则，而是把 held-side 失败模式显式量化并接进 study 评分。
+  - 推断：
+    - 当前主问题更可能是“release/funding 证据没学出来”，而不是“还在大面积砍到最强保护旧仓”。
+  - 假设：
+    - 若把 `protected_hold / funding_release / release_signal` 三类指标同时接进 audit 和 study objective，就能把原先停留在口头分析里的 held-side 问题转成正式可比较证据。
+
+- 已完成实现：
+  - 在 `daily_research/continuous_policy/analyze_behavior_gap.py` 中补齐 held-side 指标：
+    - `avg_protected_hold_support`
+    - `avg_funding_release_support`
+    - `model_release_signal_forward_excess_5d`
+    - `model_release_against_protected_hold_share`
+    - `model_release_release_consistent_share`
+    - `deploy_funding_against_protected_hold_share`
+    - `deploy_funding_release_consistent_share`
+  - 增加新瓶颈：
+    - `held_funding_release_arbitration_not_learned`
+    - `release_signal_not_selective`
+  - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 中新增：
+    - `objective_profile = sell_source_contract_v2`
+    - `search_profile = split_heads_sell_source_contract_r11b`
+  - `sell_source_contract_v2` 继续惩罚：
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - 为正的 `deploy_funding_rebalance_forward_excess_5d`
+    - 偏低的 `deploy_funding_release_consistent_share`
+    - release 样本达到阈值后仍不干净的 `model_release_signal_forward_excess_5d / against_protected_hold`
+
+- 关键执行与证据：
+  - 用新审计字段串行重跑：
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_01__reaudit_v2`
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_02__reaudit_v2`
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla__reaudit_v2`
+  - 关键事实：
+    - `confirm_01`
+      - `deploy_funding_rebalance_sell_share = 0.8974`
+      - `deploy_funding_rebalance_forward_excess_5d = 0.0031`
+      - `deploy_funding_against_protected_hold_share = 0.0143`
+      - `deploy_funding_release_consistent_share = 0.0`
+      - `model_release_signal_sell_count = 2`
+      - `model_release_signal_keep_support = 0.3272`
+      - `model_release_signal_release_support = 0.0`
+    - `confirm_02`
+      - `deploy_funding_rebalance_sell_share = 0.9185`
+      - `deploy_funding_rebalance_forward_excess_5d = -0.0371`
+      - `deploy_funding_against_protected_hold_share = 0.0242`
+      - `deploy_funding_release_consistent_share = 0.0`
+    - `confirm_03_runnerup_alla`
+      - `deploy_funding_rebalance_sell_share = 0.9449`
+      - `deploy_funding_rebalance_forward_excess_5d = 0.0439`
+      - `deploy_funding_against_protected_hold_share = 0.0167`
+      - `deploy_funding_release_consistent_share = 0.0`
+  - 新对比产物：
+    - `daily_research/output/continuous_policy/analysis/protocol_contract_comparisons/r11_sell_source_contract_v2_compare_20260423.json`
+  - `sell_source_contract_v2` 下排序：
+    - `confirm_01 = 0.752571`
+    - `confirm_03_runnerup_alla = -2.039523`
+    - `confirm_02 = -7.803599`
+  - `r11b` dry-run 已完成：
+    - `daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11b__dryrun_20260423/study_plan.json`
+
+- 动作后复盘：
+  - 事实：
+    - 新指标证明当前 held-side 问题不主要表现为“经常卖到最强保护旧仓”，因为 `deploy_funding_against_protected_hold_share` 实际很低。
+    - 真正更深的问题是：`deploy_funding_release_consistent_share` 约等于 `0`，而 `model_release_signal_release_support` 也基本为 `0`。
+  - 推断：
+    - 这不是“funding sell 只是卖错了一点点仓位”，而是“release/funding 价值仲裁几乎还没学出来”；系统现在更多是在用显式 funding 卖出顶替过去的隐式 budget 卖出。
+    - 当前 `sell_source_contract_v2` 的价值在于把这个 held-side 学习缺口从口头结论变成正式 study 评分约束。
+  - 自纠偏：
+    - 中途曾并行触发过两次 `analyze_behavior_gap`，考虑到它会写 latest 摘要，这种做法有潜在竞态风险。
+    - 已立即按同一 tag 顺序覆盖重跑三份审计，消除了 latest 指针歧义；单独审计 JSON 以串行结果为准。
+
+- 当前结论：
+  - 当前思路不是整体错了。
+  - 真正错的是早期把 held-side release/funding 混成 budget 副作用；这部分现在已经被显式拆开，并继续接进正式研究合同。
+  - 但 held-side 学习闭环还没有完成，`r11b` 之后真正该验证的是：能否在不牺牲正式 confirm 稳定性的前提下，让 `deploy_funding_release_consistent_share` 从接近 `0` 提升到可解释区间。

@@ -626,3 +626,36 @@
 - 新知识 5：导出链路也要遵守“空结果是合法状态”的合同。
   - 当某一天 `share_actions` 为空时，导出系统不应因缺列而崩溃。
   - 对连续策略研究来说，“没有可执行 share action”是合法输出，schema 必须稳定保留 `stock/action/shares/current_weight/target_weight/delta_weight` 等字段。
+## 2026-04-23 held-side funding/release 诊断知识
+
+- 新知识 1：`deploy_funding_against_protected_hold_share` 低，并不等于 held-side 已学成。
+  - 本轮 `r11` confirm 重审显示，`confirm_01 / confirm_02 / confirm_03_runnerup_alla` 的 `deploy_funding_against_protected_hold_share` 都很低，约在 `0.0143 ~ 0.0242`。
+  - 但三者的 `deploy_funding_release_consistent_share` 仍都约等于 `0.0`，且 `deploy_funding_release_support = 0.0`。
+  - 这意味着当前 funding sell 很少直接砍到“最强保护旧仓”，但也几乎从未建立起“哪些旧仓真的该被 release”这一套可学习标准；问题的本质是 release 证据缺位，而不是单纯砍错极强仓位。
+
+- 新知识 2：release head 当前更像稀疏、弱选择性的异常信号，而不是成熟的 held-side 释放头。
+  - `confirm_01` 重审里 `model_release_signal_sell_count = 2`，`model_release_signal_keep_support = 0.3272`，`model_release_signal_release_support = 0.0`。
+  - `confirm_02` 重审里 `model_release_signal_sell_count = 1`，`model_release_signal_keep_support = 0.4135`，`model_release_signal_release_support = 0.0`。
+  - 因此 release head 当前不能被解释为“已会挑出该放掉的旧仓”，更准确的说法是：它还没有学成稳定的 held-side 选择器。
+
+- 新知识 3：`sell_source_contract_v2` 的职责不是推翻 `v1`，而是把 held-side 失败模式显式写进 study 打分。
+  - `v2` 在 `v1` 基础上继续惩罚：
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - 为正的 `deploy_funding_rebalance_forward_excess_5d`
+    - 偏低的 `deploy_funding_release_consistent_share`
+    - release 信号样本一旦达到一定数量后仍表现为正向 forward excess 或 against-hold
+  - 其中对 release 信号的惩罚带有 `count >= 5` 门槛，避免把极少量稀疏样本误当成稳定统计事实。
+
+- 新知识 4：当前 `r11` 正式最优分支仍是“旧 objective + 新 loss”，这不是折中退步，而是训练闭环真实状态。
+  - 正式 confirm 证明当前最稳的组合仍是：
+    - `budget_objective = result_value_v9`
+    - `loss_profile = alpha_result_value_budget_split_v10`
+    - `budget_calibration = cash_constraint_sell_source_guard_v7`
+  - 因而对 `v10` 家族的正确表述应是：
+    - 当前有效增量主要在 `loss-side funding-release discipline`
+    - 当前 `objective-side result_value_v10` 仍未通过正式 confirmatory 验证
+
+- 新知识 5：`analyze_behavior_gap.py` 的顺序执行要求是硬纪律。
+  - 该脚本会写回 `latest_behavior_audit_summary.json`。
+  - 并行运行虽然不一定破坏单个独立审计文件，但可能导致 latest 指针 rename 竞争或结果覆盖。
+  - 正确做法是顺序运行；若曾并行触发过，应立即按同一 tag 串行覆盖一遍，清掉 latest 竞态歧义。

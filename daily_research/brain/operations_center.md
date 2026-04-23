@@ -1444,3 +1444,16 @@
   - `confirm_01` 才是当前最优且可复现分支，不是 `v10/v10`。
   - `confirm_03_runnerup_alla` 只用于补齐候选缺口，不是新的冠军。
   - 空 `share_actions` 日现在应被视为合法导出状态；后续若再出现同类场景，不应再因为缺少 `stock` 列而崩溃。
+## 2026-04-23 r11 held-side release/funding 重审与 dry-run 命令
+
+- r11 confirm 分支顺序重审命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONIOENCODING='utf-8'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/continuous_policy/analyze_behavior_gap.py --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_sell_source_contract_r11__study_r1__confirm_01__evaluate\evaluation_summary.json" --tag cp_v3_sell_source_contract_r11__study_r1__confirm_01__reaudit_v2; C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/continuous_policy/analyze_behavior_gap.py --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_sell_source_contract_r11__study_r1__confirm_02__evaluate\evaluation_summary.json" --tag cp_v3_sell_source_contract_r11__study_r1__confirm_02__reaudit_v2; C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/continuous_policy/analyze_behavior_gap.py --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla__evaluate\evaluation_summary.json" --tag cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla__reaudit_v2`
+- r11 held-side 合同比较产物：
+  - `daily_research/output/continuous_policy/analysis/protocol_contract_comparisons/r11_sell_source_contract_v2_compare_20260423.json`
+- r11b dry-run 命令：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONIOENCODING='utf-8'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_sell_source_contract_r11b --trial-count 4 --disable-confirmatory --dry-run --study-tag cp_v3_sell_source_contract_r11b__dryrun_20260423`
+- r11b dry-run 产物：
+  - `daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11b__dryrun_20260423/study_plan.json`
+- 当前操作纪律：
+  - `analyze_behavior_gap.py` 不要并行跑多个实例写同一个 latest 行为摘要。
+  - Windows 控制台默认 `gbk` 输出下，`analyze_behavior_gap.py` 建议总是带 `PYTHONIOENCODING='utf-8'`，避免打印阶段的 `UnicodeEncodeError` 干扰前台执行判断。

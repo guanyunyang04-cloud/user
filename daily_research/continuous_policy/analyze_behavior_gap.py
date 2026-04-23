@@ -210,8 +210,19 @@ def _build_semantic_conflicts(
             "forced_zero_sell_share": 0.0,
             "model_origin_sell_forward_excess_5d": 0.0,
             "model_authorized_sell_forward_excess_5d": 0.0,
+            "model_release_signal_forward_excess_5d": 0.0,
             "deploy_funding_rebalance_forward_excess_5d": 0.0,
             "budget_origin_sell_forward_excess_5d": 0.0,
+            "avg_protected_hold_support": 0.0,
+            "avg_funding_release_support": 0.0,
+            "model_release_signal_keep_support": 0.0,
+            "model_release_signal_release_support": 0.0,
+            "deploy_funding_keep_support": 0.0,
+            "deploy_funding_release_support": 0.0,
+            "model_release_against_protected_hold_share": 0.0,
+            "model_release_release_consistent_share": 0.0,
+            "deploy_funding_against_protected_hold_share": 0.0,
+            "deploy_funding_release_consistent_share": 0.0,
             "avg_clipped_intent_risk": 0.0,
             "clipped_intent_risk_conflict_gap": 0.0,
             "high_cash_up_market_share": 0.0,
@@ -576,6 +587,42 @@ def _build_semantic_conflicts(
     avg_deploy_executability_target = _safe_mean(
         working.get("deploy_executability_target", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
+    hold_value_series = working.get("hold_continuation_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    alpha_value_series = working.get("alpha_opportunity_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    sell_release_value_series = working.get("sell_release_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    cash_defense_value_series = working.get("cash_defense_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_value_series = working.get("deploy_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    release_value_series = working.get("release_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_gate_series = working.get("deploy_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    release_gate_series = working.get("release_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_executability_series = working.get(
+        "deploy_executability_target",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    protected_hold_support = (
+        0.34 * hold_value_series
+        + 0.18 * alpha_value_series
+        + 0.14 * deploy_value_series
+        + 0.12 * deploy_gate_series
+        + 0.12 * deploy_executability_series
+        - 0.22 * release_value_series
+        - 0.20 * release_gate_series
+        - 0.14 * sell_release_value_series
+        - 0.08 * cash_defense_value_series
+    ).clip(lower=0.0, upper=1.0)
+    funding_release_support = (
+        0.34 * release_value_series
+        + 0.24 * release_gate_series
+        + 0.16 * sell_release_value_series
+        + 0.08 * cash_defense_value_series
+        - 0.24 * hold_value_series
+        - 0.14 * alpha_value_series
+        - 0.12 * deploy_gate_series
+        - 0.10 * deploy_executability_series
+    ).clip(lower=0.0, upper=1.0)
+    support_margin = 0.12
+    avg_protected_hold_support = _safe_mean(protected_hold_support)
+    avg_funding_release_support = _safe_mean(funding_release_support)
     model_action_lookup = working["model_action"].astype(str).str.lower()
     weight_change_lookup = working["weight_change_action"].astype(str).str.lower()
     deploy_intent_mask = model_action_lookup.isin({"open", "add"})
@@ -677,6 +724,11 @@ def _build_semantic_conflicts(
         if model_authorized_sell_mask.any()
         else pd.Series(dtype=float)
     )
+    model_release_signal_forward_excess_5d = _safe_mean(
+        working.loc[model_release_signal_sell_mask, "forward_excess_5d"]
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
     deploy_funding_rebalance_forward_excess_5d = _safe_mean(
         working.loc[deploy_funding_rebalance_sell_mask, "forward_excess_5d"]
         if deploy_funding_rebalance_sell_mask.any()
@@ -703,6 +755,58 @@ def _build_semantic_conflicts(
         )
     else:
         clipped_intent_risk_conflict_gap = 0.0
+    model_release_signal_keep_support = _safe_mean(
+        protected_hold_support.loc[model_release_signal_sell_mask]
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    model_release_signal_release_support = _safe_mean(
+        funding_release_support.loc[model_release_signal_sell_mask]
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_keep_support = _safe_mean(
+        protected_hold_support.loc[deploy_funding_rebalance_sell_mask]
+        if deploy_funding_rebalance_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_release_support = _safe_mean(
+        funding_release_support.loc[deploy_funding_rebalance_sell_mask]
+        if deploy_funding_rebalance_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    model_release_against_protected_hold_share = _safe_mean(
+        (
+            protected_hold_support.loc[model_release_signal_sell_mask]
+            > funding_release_support.loc[model_release_signal_sell_mask] + support_margin
+        ).astype(float)
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    model_release_release_consistent_share = _safe_mean(
+        (
+            funding_release_support.loc[model_release_signal_sell_mask]
+            > protected_hold_support.loc[model_release_signal_sell_mask] + support_margin
+        ).astype(float)
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_against_protected_hold_share = _safe_mean(
+        (
+            protected_hold_support.loc[deploy_funding_rebalance_sell_mask]
+            > funding_release_support.loc[deploy_funding_rebalance_sell_mask] + support_margin
+        ).astype(float)
+        if deploy_funding_rebalance_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_release_consistent_share = _safe_mean(
+        (
+            funding_release_support.loc[deploy_funding_rebalance_sell_mask]
+            > protected_hold_support.loc[deploy_funding_rebalance_sell_mask] + support_margin
+        ).astype(float)
+        if deploy_funding_rebalance_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
     if semantic_conflict_rate >= 0.05:
         diagnoses.append("执行层仍在非小概率地重写模型动作语义，策略学习闭环还不干净。")
     if order_translation_conflict_rate >= 0.05:
@@ -728,6 +832,26 @@ def _build_semantic_conflicts(
         diagnoses.append("高现金日的卖出更像预算挤压而不是主动卖出决策，当前 cash timing 仍偏被动。")
     if high_cash_up_market_share > high_cash_down_market_share + 0.05:
         diagnoses.append("高现金日更多出现在次日上涨前，当前现金部署仍带有顺周期保守偏差。")
+
+    if (
+        deploy_funding_rebalance_sell_count >= 5
+        and deploy_funding_rebalance_sell_share >= 0.45
+        and (
+            deploy_funding_rebalance_forward_excess_5d > 0.0
+            or deploy_funding_against_protected_hold_share >= 0.35
+            or deploy_funding_release_consistent_share <= 0.35
+        )
+    ):
+        diagnoses.append("涓轰簡缁欐柊閮ㄧ讲鑵炬尓璧勯噾锛岀郴缁熶粛鍦ㄨ繃澶氬湴鍗栧嚭鍘熸湰鏇村€煎緱淇濈暀鐨勬棫浠擄紝held-side funding/release 浠茶杩樻病鏈夊绋炽€?")
+    if (
+        model_release_signal_sell_count >= 5
+        and (
+            model_release_signal_forward_excess_5d > 0.0
+            or model_release_against_protected_hold_share >= 0.35
+            or model_release_release_consistent_share <= 0.35
+        )
+    ):
+        diagnoses.append("妯″瀷缁欏嚭鐨?release 淇″彿浠嶄笉澶熼€夋嫨鎬э紝琚噴鏀剧殑鎸佷粨閲屼粛鏈夌浉褰撴瘮渚嬪睘浜庡簲褰撶户缁繚鐣欑殑寮烘寔浠撱€?")
 
     pair_rows = _action_pair_rows(working, actual_column="execution_action", actual_key="execution_action", limit=12)
     conflict_pair_rows = [row for row in pair_rows if row["model_action"] != row["execution_action"]][:8]
@@ -846,8 +970,19 @@ def _build_semantic_conflicts(
         "forced_zero_sell_share": forced_zero_sell_share,
         "model_origin_sell_forward_excess_5d": model_origin_sell_forward_excess_5d,
         "model_authorized_sell_forward_excess_5d": model_authorized_sell_forward_excess_5d,
+        "model_release_signal_forward_excess_5d": model_release_signal_forward_excess_5d,
         "deploy_funding_rebalance_forward_excess_5d": deploy_funding_rebalance_forward_excess_5d,
         "budget_origin_sell_forward_excess_5d": budget_origin_sell_forward_excess_5d,
+        "avg_protected_hold_support": avg_protected_hold_support,
+        "avg_funding_release_support": avg_funding_release_support,
+        "model_release_signal_keep_support": model_release_signal_keep_support,
+        "model_release_signal_release_support": model_release_signal_release_support,
+        "deploy_funding_keep_support": deploy_funding_keep_support,
+        "deploy_funding_release_support": deploy_funding_release_support,
+        "model_release_against_protected_hold_share": model_release_against_protected_hold_share,
+        "model_release_release_consistent_share": model_release_release_consistent_share,
+        "deploy_funding_against_protected_hold_share": deploy_funding_against_protected_hold_share,
+        "deploy_funding_release_consistent_share": deploy_funding_release_consistent_share,
         "avg_clipped_intent_risk": avg_clipped_intent_risk,
         "clipped_intent_risk_conflict_gap": clipped_intent_risk_conflict_gap,
         "high_cash_up_market_share": high_cash_up_market_share,
@@ -1254,6 +1389,80 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
     if (
+        float(semantic_conflicts.get("deploy_funding_rebalance_sell_share", 0.0) or 0.0) >= 0.45
+        and (
+            float(semantic_conflicts.get("deploy_funding_rebalance_forward_excess_5d", 0.0) or 0.0) > 0.0
+            or float(semantic_conflicts.get("deploy_funding_against_protected_hold_share", 0.0) or 0.0) >= 0.35
+            or float(semantic_conflicts.get("deploy_funding_release_consistent_share", 0.0) or 0.0) <= 0.35
+        )
+    ):
+        bottlenecks.append(
+            {
+                "name": "held_funding_release_arbitration_not_learned",
+                "severity": "high",
+                "diagnosis": "显式 funding rebalance 已替代了隐藏 budget-origin sell，但系统仍会卖出本该保护的旧仓来资助新部署，说明 held-side release/funding 仲裁还没有真正学会。",
+                "evidence": {
+                    "deploy_funding_rebalance_sell_share": float(
+                        semantic_conflicts.get("deploy_funding_rebalance_sell_share", 0.0) or 0.0
+                    ),
+                    "deploy_funding_rebalance_forward_excess_5d": float(
+                        semantic_conflicts.get("deploy_funding_rebalance_forward_excess_5d", 0.0) or 0.0
+                    ),
+                    "deploy_funding_keep_support": float(
+                        semantic_conflicts.get("deploy_funding_keep_support", 0.0) or 0.0
+                    ),
+                    "deploy_funding_release_support": float(
+                        semantic_conflicts.get("deploy_funding_release_support", 0.0) or 0.0
+                    ),
+                    "deploy_funding_against_protected_hold_share": float(
+                        semantic_conflicts.get("deploy_funding_against_protected_hold_share", 0.0) or 0.0
+                    ),
+                    "deploy_funding_release_consistent_share": float(
+                        semantic_conflicts.get("deploy_funding_release_consistent_share", 0.0) or 0.0
+                    ),
+                    "release_gate_forward_alignment_5d": _safe_float(model_continuity, "release_gate_forward_alignment_5d"),
+                    "value_arbitration_forward_alignment_5d": _safe_float(
+                        model_continuity, "value_arbitration_forward_alignment_5d"
+                    ),
+                },
+            }
+        )
+    if (
+        float(semantic_conflicts.get("model_release_signal_sell_count", 0.0) or 0.0) >= 5.0
+        and (
+            float(semantic_conflicts.get("model_release_signal_forward_excess_5d", 0.0) or 0.0) > 0.0
+            or float(semantic_conflicts.get("model_release_against_protected_hold_share", 0.0) or 0.0) >= 0.35
+            or float(semantic_conflicts.get("model_release_release_consistent_share", 0.0) or 0.0) <= 0.35
+        )
+    ):
+        bottlenecks.append(
+            {
+                "name": "release_signal_not_selective",
+                "severity": "medium",
+                "diagnosis": "模型给出的 release 信号仍不够选择性，被释放的持仓里仍混有较多应继续保护的旧仓，release head 还没有稳定学会“该放掉谁”。",
+                "evidence": {
+                    "model_release_signal_sell_count": float(
+                        semantic_conflicts.get("model_release_signal_sell_count", 0.0) or 0.0
+                    ),
+                    "model_release_signal_forward_excess_5d": float(
+                        semantic_conflicts.get("model_release_signal_forward_excess_5d", 0.0) or 0.0
+                    ),
+                    "model_release_signal_keep_support": float(
+                        semantic_conflicts.get("model_release_signal_keep_support", 0.0) or 0.0
+                    ),
+                    "model_release_signal_release_support": float(
+                        semantic_conflicts.get("model_release_signal_release_support", 0.0) or 0.0
+                    ),
+                    "model_release_against_protected_hold_share": float(
+                        semantic_conflicts.get("model_release_against_protected_hold_share", 0.0) or 0.0
+                    ),
+                    "model_release_release_consistent_share": float(
+                        semantic_conflicts.get("model_release_release_consistent_share", 0.0) or 0.0
+                    ),
+                },
+            }
+        )
+    if (
         _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02
         and float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0) >= 0.50
         and float(semantic_conflicts.get("high_cash_sell_action_count", 0.0) or 0.0) >= 3.0
@@ -1302,6 +1511,13 @@ def main(argv: list[str] | None = None) -> int:
         recommended_focus.append("把真实卖出拆成模型主动卖与预算被动卖两条链，优先减少预算层主动创造 reduce / exit。")
     if float(semantic_conflicts.get("sell_intent_suppressed_share", 0.0) or 0.0) >= 0.20:
         recommended_focus.append("优先检查 reduce / exit 意图被谁压回 hold：semantic guard、translation floor 还是 turnover trim，不要再把所有卖出失败都归咎给模型本身。")
+    if float(semantic_conflicts.get("deploy_funding_against_protected_hold_share", 0.0) or 0.0) >= 0.35:
+        recommended_focus.append("把 held-side funding 卖出单独拆出来复盘，优先减少“为了给新机会腾资金而卖掉本该继续保护的旧仓”这类伪 release。")
+    if (
+        float(semantic_conflicts.get("model_release_signal_sell_count", 0.0) or 0.0) >= 5.0
+        and float(semantic_conflicts.get("model_release_against_protected_hold_share", 0.0) or 0.0) >= 0.35
+    ):
+        recommended_focus.append("把 release head 从泛化的卖出开关收紧成真正的旧仓释放头，要求 release 信号优先落在低 continuation / 高 release support 的持仓上。")
     if (
         _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02
         and float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0) >= 0.50

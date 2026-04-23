@@ -118,3 +118,12 @@
 - 主脑层决策：
   - 主脑只保留全局结论：当前训练侧最有价值的新增信号在 `v10 loss / funding-release discipline`，不在当前 `v10 objective`。
   - sell-source 主矛盾已从 `budget_origin_sell_share` 收敛到 `deploy_funding_rebalance` 过度依赖与 `reduce/exit` 学习不足；详细指标、命令与产物继续只写 `daily_research/brain/`。
+## 2026-04-23 daily_research r11 held-side release/funding 合同收紧状态
+- 当前事实：
+  - `daily_research` 已把 held-side 诊断继续接到正式研究链路：`analyze_behavior_gap.py` 新增 `protected_hold / funding_release` 支持度、`deploy_funding_release_consistent_share`、`model_release_signal_forward_excess_5d` 等字段；`run_self_optimizing_study.py` 新增 `sell_source_contract_v2` 与 `split_heads_sell_source_contract_r11b`。
+  - 已对 `r11` 的 `confirm_01 / confirm_02 / confirm_03_runnerup_alla` 串行重跑新审计，并生成对比产物：`daily_research/output/continuous_policy/analysis/protocol_contract_comparisons/r11_sell_source_contract_v2_compare_20260423.json`。
+  - 新证据表明，当前 held-side 主问题不是“大量卖到强保护旧仓”，而是 `deploy_funding_release_consistent_share` 在现有 confirm 分支中仍接近 `0`，说明 release/funding 判据还没有真正学成。
+  - 在 `sell_source_contract_v2` 下，当前排序仍由 `confirm_01` 领先，`confirm_03_runnerup_alla` 与 `confirm_02` 被进一步拉开；`r11b` dry-run 已可直接进入后续正式 study。
+- 主脑层决策：
+  - 主脑继续维持“分层方向正确、held-side 学习闭环尚未完成”的全局判断，不回退到“整体原理错误”叙事。
+  - 后续如继续投入正式算力，应优先围绕 `result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7` 的 held-side release/funding 学习加强版推进，而不是让主脑承载实验细节。

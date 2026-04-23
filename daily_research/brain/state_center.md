@@ -1715,3 +1715,38 @@
   - 本轮未中断训练。
   - 本轮未切换 live 默认执行。
   - 本轮未改写 promotion gate，当前所有 r11 分支仍是 `shadow_only`。
+## 2026-04-23 r11 held-side release/funding 深化状态
+- 当前事实：
+  - `daily_research/continuous_policy/analyze_behavior_gap.py` 已新增 held-side 深诊断字段：
+    - `avg_protected_hold_support`
+    - `avg_funding_release_support`
+    - `deploy_funding_against_protected_hold_share`
+    - `deploy_funding_release_consistent_share`
+    - `model_release_signal_forward_excess_5d`
+    - `model_release_against_protected_hold_share`
+    - `model_release_release_consistent_share`
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 已新增：
+    - `objective_profile = sell_source_contract_v2`
+    - `search_profile = split_heads_sell_source_contract_r11b`
+  - 已串行重跑：
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_01__reaudit_v2`
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_02__reaudit_v2`
+    - `cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla__reaudit_v2`
+  - 已生成对比产物：
+    - `daily_research/output/continuous_policy/analysis/protocol_contract_comparisons/r11_sell_source_contract_v2_compare_20260423.json`
+    - `daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11b__dryrun_20260423/study_plan.json`
+- 关键结论：
+  - `sell_source_contract_v2` 下当前排序仍为：
+    - `confirm_01` = `0.752571`
+    - `confirm_03_runnerup_alla` = `-2.039523`
+    - `confirm_02` = `-7.803599`
+  - `confirm_01` 仍是当前最优且可复现分支，但新证据把 held-side 问题刻画得更清楚：
+    - `deploy_funding_rebalance_sell_share = 0.8974`
+    - `deploy_funding_rebalance_forward_excess_5d = 0.0031`
+    - `deploy_funding_against_protected_hold_share = 0.0143`
+    - `deploy_funding_release_consistent_share = 0.0`
+  - 这说明当前主病灶不是“经常卖到最强保护旧仓”，而是“funding sell 基本没有和 release support 对齐”，release/funding 价值仲裁仍接近空学。
+  - `model_release_signal_sell_count` 在当前 confirm 分支里仍很低，且已触发样本的 `keep_support` 明显高于 `release_support`，说明 release head 还没有学成稳定的旧仓释放器。
+- 当前边界：
+  - 本轮未启动训练、未停止训练、未切换 live 默认执行、未改写 promotion gate。
+  - `r11b` 当前只完成 dry-run；正式 bounded study 是否开跑，需以后续算力窗口决定。

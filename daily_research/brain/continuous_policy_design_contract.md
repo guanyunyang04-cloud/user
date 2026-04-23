@@ -497,3 +497,43 @@
 - 导出与可观测性合同补充：
   - 连续策略导出链路必须接受“当天无 share-level action”是合法状态。
   - 任一导出入口若消费 `share_actions`，都不得假定结果非空；空表也必须保留稳定 schema，避免研究 run 因展示层 merge 失败而中断。
+## 2026-04-23 held-side release/funding 合同补强
+
+- `analyze_behavior_gap.py` 必须把 held-side 释放学习拆成三类证据，而不是只看 aggregate sell share：
+  - `protected_hold` 证据：
+    - `avg_protected_hold_support`
+    - `model_release_against_protected_hold_share`
+    - `deploy_funding_against_protected_hold_share`
+  - `funding_release` 证据：
+    - `avg_funding_release_support`
+    - `model_release_release_consistent_share`
+    - `deploy_funding_release_consistent_share`
+  - `forward outcome` 证据：
+    - `model_release_signal_forward_excess_5d`
+    - `deploy_funding_rebalance_forward_excess_5d`
+
+- held-side 合同的解释顺序必须固定：
+  1. 先看 `budget_origin_sell_share` 是否已归零。
+  2. 再看 `deploy_funding_rebalance_sell_share` 是否过高。
+  3. 再看 funding sell 是否真的对齐 `release support`，而不是只看它有没有砍到强保护旧仓。
+  4. 最后再看 `model_release_signal` 是否已形成稳定、可复现的释放头。
+
+- 解释规则：
+  - `deploy_funding_against_protected_hold_share` 很低，但 `deploy_funding_release_consistent_share = 0` 时，正确结论不是“held-side 已学成”，而是“系统没有频繁砍最强保护旧仓，但 release/funding 证据仍几乎为空”。
+  - `model_release_signal_sell_count` 很低时，不得把少量 release 样本的好坏过度外推为稳定能力；study 评分只应在样本达到一定数量后再加强惩罚。
+
+- `sell_source_contract_v2` 的设计职责：
+  - 延续 `sell_source_contract_v1` 对 `budget_origin_sell_share` 和 `deploy_funding_rebalance_forward_excess_5d` 的硬约束。
+  - 新增对 held-side 学习失败的显式惩罚：
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - 偏低的 `deploy_funding_release_consistent_share`
+    - release 样本达到阈值后仍为正的 `model_release_signal_forward_excess_5d`
+    - release 样本达到阈值后仍偏高的 `model_release_against_protected_hold_share`
+  - 目标不是追求“完全不 funding sell”，而是让 funding sell 逐步从“部署副作用”变成“被 release/value 证据解释的显式资金来源”。
+
+- `split_heads_sell_source_contract_r11b` 的默认起点合同：
+  - `budget_objective = result_value_v9`
+  - `loss_profile = alpha_result_value_budget_split_v10`
+  - `budget_calibration = cash_constraint_sell_source_guard_v7`
+  - `objective_profile = sell_source_contract_v2`
+  - 该起点的含义是：先保留已经正式证明有效的 objective/loss 组合，再用更严格的 held-side 合同继续压缩 funding-sell 污染，而不是直接扶正未过 confirm 的 `result_value_v10`。
