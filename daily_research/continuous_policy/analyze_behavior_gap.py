@@ -367,6 +367,10 @@ def _build_held_side_detail_payload(
             "direct_action_utility_add",
             "direct_action_utility_reduce",
             "direct_action_utility_exit",
+            "direct_action_keep_utility",
+            "direct_action_release_utility",
+            "direct_action_deploy_utility",
+            "direct_action_release_advantage",
             "deploy_value_target",
             "release_value_target",
             "deploy_gate_target",
@@ -598,6 +602,10 @@ def _build_semantic_conflicts(
             "direct_action_value_gap_mean": 0.0,
             "direct_action_value_low_margin_share": 0.0,
             "direct_action_order_translation_conflict_rate": 0.0,
+            "direct_action_intent_preserved_share": 0.0,
+            "direct_action_funding_authorized_sell_share": 0.0,
+            "direct_action_funding_protected_sell_share": 0.0,
+            "direct_action_release_advantage_mean": 0.0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
@@ -748,6 +756,8 @@ def _build_semantic_conflicts(
         "model_release_signal",
         "deploy_funding_rebalance_signal",
         "sell_authorized_by_model",
+        "direct_action_funding_release_authorized",
+        "direct_action_funding_protected",
     ):
         working[bool_column] = working.get(
             bool_column,
@@ -1198,10 +1208,40 @@ def _build_semantic_conflicts(
         if bool(direct_mode_mask.any())
         else 0.0
     )
+    direct_funding_authorized = working.get(
+        "direct_action_funding_release_authorized",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_funding_protected = working.get(
+        "direct_action_funding_protected",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_release_advantage = working.get(
+        "direct_action_release_advantage",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
     deploy_funding_rebalance_sell_mask = (
         realized_sell_mask & working["sell_execution_origin"].eq("deploy_funding_rebalance")
+    )
+    direct_action_intent_preserved_share = (
+        _safe_mean((direct_action_label_lookup.loc[direct_mode_mask] == weight_change_lookup.loc[direct_mode_mask]).astype(float))
+        if bool(direct_mode_mask.any())
+        else 0.0
+    )
+    direct_action_funding_authorized_sell_share = (
+        _safe_mean(direct_funding_authorized.loc[deploy_funding_rebalance_sell_mask].astype(float))
+        if bool(deploy_funding_rebalance_sell_mask.any())
+        else 0.0
+    )
+    direct_action_funding_protected_sell_share = (
+        _safe_mean(direct_funding_protected.loc[deploy_funding_rebalance_sell_mask].astype(float))
+        if bool(deploy_funding_rebalance_sell_mask.any())
+        else 0.0
+    )
+    direct_action_release_advantage_mean = (
+        _safe_mean(direct_release_advantage.loc[direct_mode_mask]) if bool(direct_mode_mask.any()) else 0.0
     )
     budget_slot_reclaim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_slot_reclaim")
     sell_priority_guard_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_sell_priority")
@@ -1380,6 +1420,12 @@ def _build_semantic_conflicts(
         diagnoses.append("执行层仍在非小概率地重写模型动作语义，策略学习闭环还不干净。")
     if order_translation_conflict_rate >= 0.05:
         diagnoses.append("真实权重变化仍与模型动作意图存在偏离，预算/持仓约束还需要继续和动作头分层校准。")
+    if direct_action_value_mode_share >= 0.50 and direct_action_order_translation_conflict_rate >= 0.08:
+        diagnoses.append("直接动作值已进入决策主路径，但订单/预算翻译仍在改写 direct action intent，需要优先做 direct-action-preserving calibration。")
+    if direct_action_value_mode_share >= 0.50 and direct_action_value_low_margin_share >= 0.60:
+        diagnoses.append("直接动作值边际偏低，低置信动作应更多保留为 hold/cash，而不是被预算层强行转成交易。")
+    if deploy_funding_rebalance_sell_count >= 5 and direct_action_funding_authorized_sell_share < 0.50:
+        diagnoses.append("deploy funding sell 中直接动作释放授权不足，说明 funding 责任仍被组合层吸走。")
     if micro_rebalance_conflict_rate >= 0.02 or small_delta_order_translation_conflict_rate >= 0.02:
         diagnoses.append("微幅再平衡仍会造成订单层反向变化，需继续隔离 hold/add/reduce 的生命周期语义。")
     if budget_clipped_order_translation_conflict_rate > unclipped_order_translation_conflict_rate + 0.03:
@@ -1534,6 +1580,10 @@ def _build_semantic_conflicts(
         "direct_action_value_gap_mean": direct_action_value_gap_mean,
         "direct_action_value_low_margin_share": direct_action_value_low_margin_share,
         "direct_action_order_translation_conflict_rate": direct_action_order_translation_conflict_rate,
+        "direct_action_intent_preserved_share": direct_action_intent_preserved_share,
+        "direct_action_funding_authorized_sell_share": direct_action_funding_authorized_sell_share,
+        "direct_action_funding_protected_sell_share": direct_action_funding_protected_sell_share,
+        "direct_action_release_advantage_mean": direct_action_release_advantage_mean,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,
@@ -1930,6 +1980,40 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
     if (
+        float(semantic_conflicts.get("direct_action_value_mode_share", 0.0) or 0.0) >= 0.50
+        and (
+            float(semantic_conflicts.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) >= 0.08
+            or float(semantic_conflicts.get("direct_action_value_low_margin_share", 0.0) or 0.0) >= 0.60
+        )
+    ):
+        bottlenecks.append(
+            {
+                "name": "direct_action_intent_not_preserved",
+                "severity": "high",
+                "diagnosis": "direct action 已经成为模型决策入口，但低边际动作和订单翻译仍让 open/add/hold/reduce/exit 的最终权重变化不稳定。",
+                "evidence": {
+                    "direct_action_value_mode_share": float(
+                        semantic_conflicts.get("direct_action_value_mode_share", 0.0) or 0.0
+                    ),
+                    "direct_action_value_gap_mean": float(
+                        semantic_conflicts.get("direct_action_value_gap_mean", 0.0) or 0.0
+                    ),
+                    "direct_action_value_low_margin_share": float(
+                        semantic_conflicts.get("direct_action_value_low_margin_share", 0.0) or 0.0
+                    ),
+                    "direct_action_order_translation_conflict_rate": float(
+                        semantic_conflicts.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0
+                    ),
+                    "direct_action_intent_preserved_share": float(
+                        semantic_conflicts.get("direct_action_intent_preserved_share", 0.0) or 0.0
+                    ),
+                    "direct_action_funding_authorized_sell_share": float(
+                        semantic_conflicts.get("direct_action_funding_authorized_sell_share", 0.0) or 0.0
+                    ),
+                },
+            }
+        )
+    if (
         float(semantic_conflicts.get("action_value_consistency_score", 1.0) or 1.0) < 0.78
         or float(semantic_conflicts.get("sell_against_keep_value_share", 0.0) or 0.0) >= 0.18
         or float(semantic_conflicts.get("keep_against_release_value_share", 0.0) or 0.0) >= 0.18
@@ -2185,6 +2269,10 @@ def main(argv: list[str] | None = None) -> int:
         recommended_focus.append("先把 execution layer 退回“翻译器”角色，停止改写模型动作语义。")
     if float(semantic_conflicts.get("order_translation_conflict_rate", 0.0) or 0.0) >= 0.08:
         recommended_focus.append("继续校准权重翻译层，保留模型生命周期语义，同时减少真实订单方向与模型意图的偏离。")
+    if float(semantic_conflicts.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) >= 0.08:
+        recommended_focus.append("下一轮优先使用 direct-action-preserving translation，让预算层只做现金/风控约束，不再吞掉 direct action intent。")
+    if float(semantic_conflicts.get("direct_action_value_low_margin_share", 0.0) or 0.0) >= 0.60:
+        recommended_focus.append("对低边际 direct action 增加 hold/cash abstain 纪律，避免弱优势动作被强行交易。")
     if (
         float(semantic_conflicts.get("action_rows", 0.0) or 0.0) > 0.0
         and float(semantic_conflicts.get("release_translation_deploy_health_score", 0.0) or 0.0) < 0.50

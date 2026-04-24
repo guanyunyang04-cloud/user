@@ -535,6 +535,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     study_text = _read_text("daily_research/continuous_policy/run_self_optimizing_study.py")
     analysis_text = _read_text("daily_research/continuous_policy/analyze_behavior_gap.py")
     pipeline_text = _read_text("daily_research/continuous_policy/pipeline_utils.py")
+    simulator_text = _read_text("daily_research/continuous_policy/portfolio_simulator.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
         ("--epochs", "train_policy epoch budget"),
@@ -601,6 +602,9 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("alpha_result_value_budget_split_v14", "r14 direct action-value loss profile"),
         ("split_heads_direct_action_value_r14", "r14 direct action-value study profile"),
         ("direct_daily_policy_v1", "r14 direct daily policy objective"),
+        ("alpha_result_value_budget_split_v15", "r15 direct action-preserving loss profile"),
+        ("split_heads_direct_action_translation_r15", "r15 direct action-preserving study profile"),
+        ("direct_action_translation_v1", "r15 direct action-preserving objective"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -633,6 +637,15 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r14_contract_missing",
         "continuous_policy r14 direct action-value arbitration contract is missing audit/scoring markers.",
+    )
+    _require(
+        "cash_constraint_direct_action_guard_v8" in simulator_text
+        and "direct_action_intent_preserved_share" in analysis_text
+        and "direct_action_funding_authorized_sell_share" in pipeline_text
+        and "direct_action_translation_v1" in study_text,
+        failures,
+        "continuous_policy_r15_contract_missing",
+        "continuous_policy r15 direct-action-preserving translation/funding contract is missing markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

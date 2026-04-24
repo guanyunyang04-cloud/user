@@ -574,6 +574,10 @@ def compute_continuity_metrics(
             "direct_action_utility_add",
             "direct_action_utility_reduce",
             "direct_action_utility_exit",
+            "direct_action_keep_utility",
+            "direct_action_release_utility",
+            "direct_action_deploy_utility",
+            "direct_action_release_advantage",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -936,6 +940,43 @@ def compute_continuity_metrics(
             if bool(direct_mode_mask.any())
             else 0.0
         )
+        direct_funding_authorized = action_outcomes.get(
+            "direct_action_funding_release_authorized",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        direct_funding_protected = action_outcomes.get(
+            "direct_action_funding_protected",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        sell_origin_lookup = action_outcomes.get(
+            "sell_execution_origin",
+            pd.Series("", index=action_outcomes.index),
+        ).astype(str).str.lower()
+        direct_release_advantage = pd.to_numeric(
+            action_outcomes.get("direct_action_release_advantage", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_funding_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
+            "deploy_funding_rebalance"
+        )
+        metrics["direct_action_intent_preserved_share"] = (
+            float((direct_action_label_lookup.loc[direct_mode_mask] == weight_change_lookup.loc[direct_mode_mask]).mean())
+            if bool(direct_mode_mask.any())
+            else 0.0
+        )
+        metrics["direct_action_funding_authorized_sell_share"] = (
+            float(direct_funding_authorized.loc[direct_funding_sell_mask].mean())
+            if bool(direct_funding_sell_mask.any())
+            else 0.0
+        )
+        metrics["direct_action_funding_protected_sell_share"] = (
+            float(direct_funding_protected.loc[direct_funding_sell_mask].mean())
+            if bool(direct_funding_sell_mask.any())
+            else 0.0
+        )
+        metrics["direct_action_release_advantage_mean"] = (
+            float(direct_release_advantage.loc[direct_mode_mask].mean()) if bool(direct_mode_mask.any()) else 0.0
+        )
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
@@ -1212,6 +1253,10 @@ def compute_continuity_metrics(
             "direct_action_value_gap_mean",
             "direct_action_value_low_margin_share",
             "direct_action_order_translation_conflict_rate",
+            "direct_action_intent_preserved_share",
+            "direct_action_funding_authorized_sell_share",
+            "direct_action_funding_protected_sell_share",
+            "direct_action_release_advantage_mean",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",

@@ -1017,8 +1017,60 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v14"] = {
         "action_value_total": 0.74,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v15"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v14"]["sample_scalar_loss_weights"],
+        "target_delta_hint": 1.12,
+        "entry_quality": 0.68,
+        "hold_quality": 1.20,
+        "add_quality": 0.88,
+        "reduce_quality": 1.18,
+        "exit_urgency": 1.16,
+        "multi_horizon_forward_value": 1.76,
+        "multi_horizon_forward_risk": 1.54,
+        "multi_horizon_path_value": 1.88,
+        "open_action_value": 1.84,
+        "add_action_value": 1.84,
+        "hold_action_value": 2.02,
+        "reduce_action_value": 1.96,
+        "exit_action_value": 1.92,
+        "relative_opportunity_value": 1.42,
+        "action_value_consistency_target": 1.88,
+        "deploy_value_target": 1.88,
+        "release_value_target": 1.94,
+        "deploy_executability_target": 1.74,
+        "clipped_intent_risk": 1.36,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v14"]["daily_target_loss_weights"],
+        "candidate_budget": 1.00,
+        "turnover_budget": 1.16,
+        "budget_risk_signal_target": 1.14,
+        "budget_deploy_signal_target": 1.34,
+        "budget_cash_timing_signal_target": 1.42,
+        "budget_alpha_focus_signal_target": 1.18,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v14"]["multi_objective_loss_weights"],
+        "action_hard": 0.24,
+        "action_soft": 0.78,
+        "action_total": 0.46,
+        "duration_total": 0.08,
+        "scalar_total": 2.16,
+        "daily_total": 0.88,
+        "arbitration_total": 0.10,
+        "sell_rank_pairwise_total": 0.16,
+        "clipped_intent_total": 0.10,
+        "value_arbitration_total": 0.10,
+        "hierarchical_three_value_total": 0.28,
+        "funding_release_total": 0.38,
+        "action_value_total": 0.88,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
-DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset({"alpha_result_value_budget_split_v14"})
+DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
+    {"alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"}
+)
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
 DAILY_HEAD_LAYOUT_MONOLITHIC_V1 = "monolithic_v1"

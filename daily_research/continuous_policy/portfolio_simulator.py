@@ -28,6 +28,7 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT = "cash_constraint_guard_v4"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT = "cash_constraint_intent_guard_v5"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY = "cash_constraint_deploy_guard_v6"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE = "cash_constraint_sell_source_guard_v7"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION = "cash_constraint_direct_action_guard_v8"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -38,6 +39,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
 )
 
 
@@ -113,6 +115,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_sell_source_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         "cash_constraint_sell_source_guard_v7": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
         "sell_source_decoupled_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+        "cash_constraint_direct_action": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+        "cash_constraint_direct_action_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+        "cash_constraint_direct_action_guard_v8": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+        "direct_action_preserving_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
     }
     if text not in aliases:
         raise ValueError(
@@ -673,23 +679,31 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         }
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         }
         deploy_executability_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         }
-        sell_source_decoupled_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE
+        direct_action_preserving_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION
+        sell_source_decoupled_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+        }
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
@@ -697,6 +711,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -757,6 +772,77 @@ class PortfolioState:
         exit_timing_pressure_series = _policy_numeric("exit_timing_pressure")
         exit_hazard_series = _policy_numeric("exit_hazard")
         entry_quality_series = _policy_numeric("entry_quality")
+        direct_action_applied_series = _policy_numeric("direct_action_value_applied")
+        direct_action_gap_series = _policy_numeric("direct_action_value_gap")
+        direct_action_mode_series = (
+            policy.get("policy_decision_mode", pd.Series("", index=policy.index))
+            .astype(str)
+            .str.lower()
+            .eq("direct_action_value_v1")
+            | (direct_action_applied_series > 0.5)
+        )
+        direct_action_keep_utility_series = pd.concat(
+            [
+                _policy_numeric("direct_action_utility_hold"),
+                _policy_numeric("direct_action_utility_add"),
+            ],
+            axis=1,
+        ).max(axis=1)
+        direct_action_release_utility_series = pd.concat(
+            [
+                _policy_numeric("direct_action_utility_reduce"),
+                _policy_numeric("direct_action_utility_exit"),
+            ],
+            axis=1,
+        ).max(axis=1)
+        direct_action_deploy_utility_series = pd.concat(
+            [
+                _policy_numeric("direct_action_utility_open"),
+                _policy_numeric("direct_action_utility_add"),
+            ],
+            axis=1,
+        ).max(axis=1)
+        direct_action_release_advantage_series = (
+            direct_action_release_utility_series - direct_action_keep_utility_series
+        )
+        direct_action_keep_advantage_series = (
+            direct_action_keep_utility_series - direct_action_release_utility_series
+        )
+        direct_action_funding_release_authorized = (
+            direct_action_preserving_mode
+            & direct_action_mode_series
+            & held_mask
+            & (
+                (
+                    (direct_action_release_advantage_series >= 0.035)
+                    & (direct_action_gap_series >= 0.030)
+                )
+                | (
+                    (direct_action_release_advantage_series >= 0.010)
+                    & (
+                        (sell_release_series >= 0.44)
+                        | (decision_release_gate_series >= decision_deploy_gate_series + 0.05)
+                        | (exit_timing_pressure_series >= 0.38)
+                    )
+                )
+            )
+        )
+        direct_action_funding_protected = (
+            direct_action_preserving_mode
+            & direct_action_mode_series
+            & held_mask
+            & (
+                (direct_action_keep_advantage_series >= 0.030)
+                | (
+                    (direct_action_keep_utility_series >= 0.34)
+                    & (direct_action_release_advantage_series < 0.015)
+                )
+                | (
+                    (direct_action_gap_series < 0.030)
+                    & (direct_action_release_advantage_series < 0.040)
+                )
+            )
+        )
         held_sell_pressure = _masked_mean(sell_pressure_series, held_mask)
         held_sell_attribution = _masked_mean(sell_attribution_series, held_mask)
         held_sell_rank = _masked_mean(sell_rank_series, held_mask)
@@ -1579,6 +1665,7 @@ class PortfolioState:
                         | (sell_rank_series >= 0.64)
                     )
                 )
+                | direct_action_funding_release_authorized
             )
         )
         sell_authorized_mask = (
@@ -1611,6 +1698,31 @@ class PortfolioState:
             )
             & (deploy_funding_weak_evidence_count >= 2.0)
         )
+        if direct_action_preserving_mode:
+            direct_funding_evidence = (
+                direct_action_funding_release_authorized
+                | (
+                    direct_action_mode_series
+                    & held_mask
+                    & (direct_action_release_advantage_series >= 0.020)
+                    & (direct_action_gap_series >= 0.035)
+                )
+                | (
+                    direct_action_mode_series
+                    & held_mask
+                    & (direct_action_release_advantage_series >= 0.0)
+                    & (deploy_funding_weak_evidence_count >= 3.0)
+                    & (
+                        (sell_release_series >= 0.40)
+                        | (decision_release_gate_series >= decision_deploy_gate_series + 0.03)
+                    )
+                )
+            )
+            deploy_funding_rebalance_signal = (
+                deploy_funding_rebalance_signal
+                & direct_funding_evidence
+                & (~direct_action_funding_protected)
+            )
         deploy_funding_retention_floor = pd.Series(1.0, index=prices.index, dtype=float)
         if sell_source_decoupled_mode:
             deploy_pressure = float(np.clip(budget_deploy_score, 0.0, 1.0))
@@ -1621,6 +1733,14 @@ class PortfolioState:
                 - (1.0 - alpha_opportunity_series.clip(0.0, 1.0)) * 0.03
                 - (decision_release_gate_series - decision_deploy_gate_series).clip(lower=0.0, upper=1.0) * 0.04
             ).clip(lower=0.84, upper=0.94)
+            if direct_action_preserving_mode:
+                direct_release_boost = direct_action_release_advantage_series.clip(lower=0.0, upper=0.12)
+                direct_keep_protection = direct_action_keep_advantage_series.clip(lower=0.0, upper=0.12)
+                deploy_funding_retention_floor = (
+                    deploy_funding_retention_floor
+                    + direct_keep_protection * 0.45
+                    - direct_release_boost * 0.30
+                ).clip(lower=0.88, upper=0.98)
         sell_authorization_score = (
             action_names.isin({"reduce", "exit"}).astype(float) * 1.00
             + model_release_signal.astype(float) * 0.82
@@ -2279,6 +2399,12 @@ class PortfolioState:
                     "direct_action_utility_add": float(policy.at[stock, "direct_action_utility_add"] or 0.0) if "direct_action_utility_add" in policy.columns else 0.0,
                     "direct_action_utility_reduce": float(policy.at[stock, "direct_action_utility_reduce"] or 0.0) if "direct_action_utility_reduce" in policy.columns else 0.0,
                     "direct_action_utility_exit": float(policy.at[stock, "direct_action_utility_exit"] or 0.0) if "direct_action_utility_exit" in policy.columns else 0.0,
+                    "direct_action_keep_utility": float(direct_action_keep_utility_series.get(stock, 0.0)),
+                    "direct_action_release_utility": float(direct_action_release_utility_series.get(stock, 0.0)),
+                    "direct_action_deploy_utility": float(direct_action_deploy_utility_series.get(stock, 0.0)),
+                    "direct_action_release_advantage": float(direct_action_release_advantage_series.get(stock, 0.0)),
+                    "direct_action_funding_release_authorized": bool(direct_action_funding_release_authorized.get(stock, False)),
+                    "direct_action_funding_protected": bool(direct_action_funding_protected.get(stock, False)),
                     "execution_action": execution_action,
                     "weight_change_action": weight_change_action,
                     "execution_semantics": execution_semantics,
@@ -2618,6 +2744,9 @@ class PortfolioState:
             "budget_released_held_count": int(budget_released_held_count),
             "model_release_signal_count": int(model_release_signal.sum()),
             "deploy_funding_rebalance_signal_count": int(deploy_funding_rebalance_signal.sum()),
+            "direct_action_preserving_mode": float(bool(direct_action_preserving_mode)),
+            "direct_action_funding_release_authorized_count": int(direct_action_funding_release_authorized.sum()),
+            "direct_action_funding_protected_count": int(direct_action_funding_protected.sum()),
             "sell_authorized_held_count": int(sell_authorized_mask.sum()),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),

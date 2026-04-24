@@ -36,13 +36,15 @@
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --help`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/analyze_behavior_gap.py --help`
 
-## 当前 r11/r11b/r12/r13/r14 操作口径
+## 当前 r11/r11b/r12/r13/r14/r15 操作口径
 - `split_heads_release_translation_deploy_r12` 是当前最新 study profile，用于联合检查 release learning、order translation drift 与 deploy executability。
 - `split_heads_action_value_unification_r13` 是已完成 bounded study 的 research profile，用于检查 open/add/hold/reduce/exit 是否共享同一套多周期未来价值锚。
 - `split_heads_direct_action_value_r14` 是当前最新 research profile，用于检查模型是否能通过 `direct_action_value_v1` 直接仲裁日级动作，减少人工规则桥接。
+- `split_heads_direct_action_translation_r15` 是当前最新 research profile，用于检查 `cash_constraint_direct_action_guard_v8` 是否能在订单/预算层保留 direct action intent，并把 release/funding 责任链显式化。
 - `release_translation_deploy_v1` 是 r12 默认 objective；`release_translation_deploy_health_score` 是审计侧主健康分，必须结合组件分解解释。
 - `action_value_unification_v1` 是 r13 默认 objective；`action_value_consistency_score`、`action_value_conflict_share`、`sell_against_keep_value_share`、`keep_against_release_value_share` 是 r13 主审计指标。
 - `direct_daily_policy_v1` 是 r14 默认 objective；重点看 `direct_action_value_mode_share`、`direct_action_value_gap_mean`、`direct_action_value_low_margin_share`、`direct_action_order_translation_conflict_rate` 与月度收益质量。
+- `direct_action_translation_v1` 是 r15 默认 objective；重点看 `direct_action_intent_preserved_share`、`direct_action_funding_authorized_sell_share`、`direct_action_funding_protected_sell_share`、`direct_action_release_advantage_mean`、`deploy_intent_realized_rate` 与月度收益质量。
 - 月度收益评价已接入通用曲线指标与 study ranking；重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`，并读取 `monthly_returns.csv` 或 `shadow_monthly_returns.csv` 明细。
 - 已完成的 r11b 仍全部是 `shadow_only`；r12 也只允许作为 shadow 研究入口，不改变 live 默认执行。
 - 已验证 dry-run：`verify_release_translation_deploy_r12_dryrun_20260424` 只生成 study plan，baseline 为 `alpha_result_value_budget_split_v12 + result_value_v9 + cash_constraint_sell_source_guard_v7`。
@@ -50,6 +52,10 @@
 - 当前 r12 champion：`confirm_02 = alpha_result_value_budget_split_v12 + result_value_v9`；`promotion_status = shadow_only`，`release_translation_deploy_failure_mode = order_translation_drift`。
 - 当前 r13 状态：`cp_v3_action_value_unification_r13__study_r1` 已完成正式 bounded shadow study；4 个 screening、2 个 confirmatory 完成，最终 champion 为 `confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`，但 `promotion_status = shadow_only`，不得视为 live 证据。
 - 当前 r14 状态：`cp_v3_direct_action_value_r14__study_r1` 已完成 screening 与 repaired confirm；`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9` 为当前 r14 champion，但仍是 `shadow_only`，不得视为 live / promotion 证据。
+- 当前 r15 状态：代码、指标、守卫与研究计划已落地；`verify_direct_action_translation_r15_dryrun_20260424` 只生成 4 条 study plan，baseline 为 `alpha_result_value_budget_split_v15 + result_value_v9 + cash_constraint_direct_action_guard_v8`，未训练、未生成正式 verdict。
+- r15 smoke/audit 入口：
+  - evaluation summary：`daily_research/output/continuous_policy/evaluations/verify_direct_action_translation_r15_v8_eval_smoke_20260424/evaluation_summary.json`
+  - behavior audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_translation_r15_v8_audit_smoke_20260424.json`
 - r14 产物入口：
   - study summary：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_value_r14__study_r1/study_summary.json`
   - repaired confirm summary：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_value_r14__study_r1/manual_confirm_repair_summary.json`

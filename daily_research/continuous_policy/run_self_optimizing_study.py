@@ -435,6 +435,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_direct_action_translation_r15": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_direct_action_guard_v8"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -791,6 +808,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_direct_action_translation_r15": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_direct_action_guard_v8",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -816,6 +850,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_release_translation_deploy_r12": "release_translation_deploy_v1",
     "split_heads_action_value_unification_r13": "action_value_unification_v1",
     "split_heads_direct_action_value_r14": "direct_daily_policy_v1",
+    "split_heads_direct_action_translation_r15": "direct_action_translation_v1",
 }
 
 
@@ -1011,6 +1046,34 @@ def _score_protocol_summary(
         semantic_conflicts.get(
             "direct_action_order_translation_conflict_rate",
             continuity.get("direct_action_order_translation_conflict_rate", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_intent_preserved_share = float(
+        semantic_conflicts.get(
+            "direct_action_intent_preserved_share",
+            continuity.get("direct_action_intent_preserved_share", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_funding_authorized_sell_share = float(
+        semantic_conflicts.get(
+            "direct_action_funding_authorized_sell_share",
+            continuity.get("direct_action_funding_authorized_sell_share", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_funding_protected_sell_share = float(
+        semantic_conflicts.get(
+            "direct_action_funding_protected_sell_share",
+            continuity.get("direct_action_funding_protected_sell_share", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_release_advantage_mean = float(
+        semantic_conflicts.get(
+            "direct_action_release_advantage_mean",
+            continuity.get("direct_action_release_advantage_mean", 0.0),
         )
         or 0.0
     )
@@ -1521,6 +1584,112 @@ def _score_protocol_summary(
                 else 0.0
             ),
         }
+    elif objective_profile_name == "direct_action_translation_v1":
+        action_alignment_score = (
+            _bounded(multi_horizon_path_alignment, -0.10, 0.16) * 0.24
+            + _bounded(open_action_value_alignment, -0.10, 0.16) * 0.16
+            + _bounded(add_action_value_alignment, -0.10, 0.16) * 0.14
+            + _bounded(hold_action_value_alignment, -0.10, 0.16) * 0.18
+            + _bounded(reduce_action_value_avoidance, -0.10, 0.16) * 0.14
+            + _bounded(exit_action_value_avoidance, -0.10, 0.16) * 0.14
+        )
+        direct_translation_penalty = max(
+            order_translation_conflict_rate,
+            direct_action_order_translation_conflict_rate,
+        )
+        funding_authorization_gap = (
+            max(0.0, 0.62 - direct_action_funding_authorized_sell_share)
+            if deploy_funding_rebalance_sell_count >= 5.0
+            else 0.0
+        )
+        direct_funding_protected_penalty = (
+            direct_action_funding_protected_sell_share
+            if deploy_funding_rebalance_sell_count >= 5.0
+            else 0.0
+        )
+        direct_mode_activation_penalty = max(0.0, 0.94 - direct_action_value_mode_share) * 1.20
+        direct_conflict_penalty = (
+            action_value_conflict_share * 1.12
+            + open_low_action_value_share * 0.82
+            + sell_against_keep_value_share * 0.82
+            + keep_against_release_value_share * 0.78
+            + direct_action_value_low_margin_share * 0.42
+        )
+        performance_breakdown = {
+            "annual_return": annual_return * 1.52,
+            "sharpe": sharpe * 0.22,
+            "monthly_return_mean_annualized_focus": monthly_return_mean * 12.0 * 0.44,
+            "monthly_win_rate_focus": monthly_win_rate * 0.28,
+            "monthly_consistency_focus": monthly_consistency_score * 0.28,
+            "direct_action_value_mode_share": direct_action_value_mode_share * 0.58,
+            "direct_action_intent_preserved_share": direct_action_intent_preserved_share * 0.84,
+            "direct_action_value_gap_mean": _bounded(direct_action_value_gap_mean, 0.00, 0.24) * 0.48,
+            "direct_action_release_advantage_mean": _bounded(direct_action_release_advantage_mean, -0.08, 0.12) * 0.22,
+            "action_value_consistency_score": action_value_consistency_score * 1.08,
+            "action_value_alignment_score": action_alignment_score * 0.92,
+            "release_translation_deploy_health_score": release_translation_deploy_health_score * 0.96,
+            "release_translation_deploy_translation_score": release_translation_deploy_translation_score * 0.82,
+            "release_translation_deploy_funding_score": release_translation_deploy_funding_score * 0.94,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate * 0.44,
+            "reduce_success_rate_5d": reduce_success * 0.72,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.74,
+            "sell_selection_quality_5d": _bounded(sell_selection_quality, -0.06, 0.08) * 0.52,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.34,
+            "active_alignment_bonus": active_alignment_bonus,
+            "gate_pass_ratio": gate_pass_ratio * 0.20,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 4.05,
+            "monthly_worst_return_focus_penalty": -monthly_worst_loss * 1.34,
+            "negative_return_penalty": -negative_return_penalty * 3.10,
+            "negative_sharpe_penalty": -negative_sharpe_penalty * 0.52,
+            "direct_mode_activation_penalty": -direct_mode_activation_penalty,
+            "direct_action_conflict_penalty": -direct_conflict_penalty,
+            "direct_translation_penalty": -direct_translation_penalty * 1.92,
+            "deploy_candidate_budget_drop_penalty": -deploy_intent_candidate_budget_drop_share * 0.90,
+            "deploy_funding_sell_share_penalty": -max(0.0, deploy_funding_rebalance_sell_share - 0.30) * 2.45,
+            "deploy_funding_authorization_gap_penalty": -funding_authorization_gap * 2.85,
+            "direct_funding_protected_sell_penalty": -direct_funding_protected_penalty * 2.60,
+            "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 10.80,
+            "deploy_funding_release_consistency_penalty": -(
+                max(0.0, 0.56 - deploy_funding_release_consistent_share) * 2.35
+                if deploy_funding_rebalance_sell_count >= 5.0
+                else 0.0
+            ),
+        }
+        stability_breakdown = {
+            "gate_pass_ratio": gate_pass_ratio * 0.54,
+            "monthly_consistency_score": monthly_consistency_score * 0.48,
+            "monthly_worst_return_penalty": -monthly_worst_loss * 1.86,
+            "monthly_intramonth_drawdown_penalty": -abs(min(monthly_intramonth_max_drawdown, 0.0)) * 1.02,
+            "direct_action_value_mode_share": direct_action_value_mode_share * 0.62,
+            "direct_action_intent_preserved_share": direct_action_intent_preserved_share * 1.02,
+            "direct_action_value_gap_mean": _bounded(direct_action_value_gap_mean, 0.00, 0.24) * 0.42,
+            "action_value_consistency_score": action_value_consistency_score * 1.18,
+            "release_translation_deploy_health_score": release_translation_deploy_health_score * 1.02,
+            "release_translation_deploy_translation_score": release_translation_deploy_translation_score * 0.96,
+            "release_translation_deploy_funding_score": release_translation_deploy_funding_score * 1.04,
+            "deploy_intent_realized_rate": deploy_intent_realized_rate * 0.34,
+            "reduce_success_rate_5d": reduce_success * 0.46,
+            "exit_timeliness_rate_5d": exit_timeliness * 0.48,
+            "cash_timing_quality_1d": _bounded(cash_timing, -0.35, 0.12) * 0.34,
+            "training_evidence_bonus": 0.34 if training_evidence_ok else -0.42,
+            "reversal_penalty": -reversal * 1.04,
+            "shadow_reversal_penalty": -shadow_reversal * 1.02,
+            "reversal_excess_penalty": -reversal_excess_penalty,
+            "drawdown_penalty": -abs(min(max_drawdown, 0.0)) * 5.62,
+            "threshold_gap_penalty": -threshold_gap_penalty * 0.94,
+            "direct_mode_activation_penalty": -direct_mode_activation_penalty,
+            "direct_action_conflict_penalty": -direct_conflict_penalty * 1.20,
+            "direct_translation_penalty": -direct_translation_penalty * 2.18,
+            "deploy_funding_sell_share_penalty": -max(0.0, deploy_funding_rebalance_sell_share - 0.30) * 2.70,
+            "deploy_funding_authorization_gap_penalty": -funding_authorization_gap * 3.05,
+            "direct_funding_protected_sell_penalty": -direct_funding_protected_penalty * 2.95,
+            "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 11.60,
+            "deploy_funding_against_hold_penalty": -(
+                max(0.0, deploy_funding_against_protected_hold_share - 0.20) * 2.95
+                if deploy_funding_rebalance_sell_count >= 5.0
+                else 0.0
+            ),
+        }
     elif objective_profile_name == "direct_daily_policy_v1":
         action_alignment_score = (
             _bounded(multi_horizon_path_alignment, -0.10, 0.16) * 0.28
@@ -1761,6 +1930,10 @@ def _score_protocol_summary(
             "direct_action_value_gap_mean": direct_action_value_gap_mean,
             "direct_action_value_low_margin_share": direct_action_value_low_margin_share,
             "direct_action_order_translation_conflict_rate": direct_action_order_translation_conflict_rate,
+            "direct_action_intent_preserved_share": direct_action_intent_preserved_share,
+            "direct_action_funding_authorized_sell_share": direct_action_funding_authorized_sell_share,
+            "direct_action_funding_protected_sell_share": direct_action_funding_protected_sell_share,
+            "direct_action_release_advantage_mean": direct_action_release_advantage_mean,
             "sell_selection_quality_5d": sell_selection_quality,
             "budget_origin_sell_share": budget_origin_sell_share,
             "high_cash_budget_origin_sell_share": high_cash_budget_origin_sell_share,

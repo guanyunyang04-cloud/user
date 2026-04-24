@@ -768,3 +768,27 @@
   - 事实：direct action 已经进入推理主路径，但低边际占比仍高，且订单/预算翻译冲突与 held-side funding rebalance 过度依赖没有闭合。
   - 推断：当前主瓶颈已从“是否应该直接学习日级动作”转为“如何让订单、预算、release/funding 层保留 direct action intent 并承担真实退出责任”。
   - 决策：r14 保持 `shadow_only`；下一步应推进 r15 direct-action-preserving translation / release-funding repair，而不是把 r14 高收益 confirm 直接升级为 production 证据。
+
+## 2026-04-24 r15 direct-action-preserving translation / release-funding repair 落地
+
+- 行动前自检：
+  - 事实：r14 repaired confirm 证明直接动作值仲裁有收益价值，但 `direct_action_order_translation_conflict_rate = 0.2867`、`direct_action_value_low_margin_share = 0.7372`，且 held-side sell 主要来自 `deploy_funding_rebalance`。
+  - 推断：当前最高价值不是继续单点加 release loss，而是让订单/预算层尽量保留 direct action intent，并把 funding sell 绑定到可审计 release 授权。
+  - 假设：先用 r14 champion artifact 做短窗 v8 smoke，可以验证新执行层和审计字段是否真实贯通；正式优劣仍需后续 bounded study。
+  - 边界：本轮不切换 live，不改 active artifact，不改 promotion gate，不把 smoke 写成正式 verdict。
+- 已完成执行：
+  - `portfolio_simulator.py` 新增 `cash_constraint_direct_action_guard_v8`，引入 direct action release authorization / protected hold 证据，并把 funding sell 的模型释放责任显式化。
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v15`，加强 direct action margin、release/funding 责任、deploy/cash timing 与多周期价值训练权重。
+  - `pipeline_utils.py` 与 `analyze_behavior_gap.py` 新增 `direct_action_intent_preserved_share`、`direct_action_funding_authorized_sell_share`、`direct_action_funding_protected_sell_share`、`direct_action_release_advantage_mean` 等审计字段。
+  - `run_self_optimizing_study.py` 新增 `split_heads_direct_action_translation_r15` 与 `direct_action_translation_v1`，把月度收益、直接动作保真、funding 授权和低边际惩罚纳入 study scoring。
+  - `doc_guard.py`、`project_consistency_check.py`、主脑状态中枢与分脑状态/操作/设计合同已写回 r15 research 入口。
+- 验证与证据：
+  - dry-run：`verify_direct_action_translation_r15_dryrun_20260424` 生成 4 条计划，baseline 为 `alpha_result_value_budget_split_v15 + result_value_v9 + cash_constraint_direct_action_guard_v8`。
+  - smoke evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_translation_r15_v8_eval_smoke_20260424/evaluation_summary.json`。
+  - smoke audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_translation_r15_v8_audit_smoke_20260424.json`。
+  - 短窗事实：`direct_action_intent_preserved_share = 0.9191`、`direct_action_order_translation_conflict_rate = 0.0515`、`direct_action_value_low_margin_share = 0.8676`、`deploy_intent_realized_rate = 0.7083`，短窗未产生 deploy funding sell。
+- 动作后复盘：
+  - 事实：r15 代码链路、指标链路、dry-run 与短窗 smoke 均已贯通；它修的是“动作意图如何穿透执行翻译层”，不是新的 live 策略。
+  - 事实：低边际 direct action 仍偏高，add -> hold / hold -> add 的小额翻译漂移仍在；审计继续把 `direct_action_intent_not_preserved` 与 `deploy_intent_not_executable` 判为高优先级。
+  - 推断：r15 已把根因从“预算层暗改动作”推进到“模型动作边际不够锋利、deploy 预算落地仍受约束”的更窄问题。
+  - 决策：r15 保持 research / smoke 状态；下一步若继续，应启动正式 bounded shadow study，并以 `direct_action_translation_v1` 对比 v14/v15 与 result_value_v9/v10。
