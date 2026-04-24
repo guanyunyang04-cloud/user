@@ -265,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     model_rollout["turnover_frame"].to_csv(run_root / "daily_turnover.csv", index=False, encoding="utf-8-sig")
     model_rollout["position_history"].to_csv(run_root / "daily_position_history.csv", index=False, encoding="utf-8-sig")
     model_rollout["returns"].rename("daily_return").to_csv(run_root / "daily_returns.csv", encoding="utf-8-sig")
+    model_rollout["monthly_returns"].to_csv(run_root / "monthly_returns.csv", index=False, encoding="utf-8-sig")
 
     summary_payload = {
         "run_tag": run_tag,
@@ -302,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         "turnover_csv": str((run_root / "daily_turnover.csv").resolve()),
         "position_history_csv": str((run_root / "daily_position_history.csv").resolve()),
         "returns_csv": str((run_root / "daily_returns.csv").resolve()),
+        "monthly_returns_csv": str((run_root / "monthly_returns.csv").resolve()),
     }
     write_json(run_root / "evaluation_summary.json", summary_payload)
     update_latest_summary("evaluation", summary_payload)

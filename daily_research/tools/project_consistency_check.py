@@ -534,6 +534,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     contracts_text = _read_text("daily_research/continuous_policy/training_contracts.py")
     study_text = _read_text("daily_research/continuous_policy/run_self_optimizing_study.py")
     analysis_text = _read_text("daily_research/continuous_policy/analyze_behavior_gap.py")
+    pipeline_text = _read_text("daily_research/continuous_policy/pipeline_utils.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
         ("--epochs", "train_policy epoch budget"),
@@ -597,6 +598,9 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("alpha_result_value_budget_split_v13", "r13 action-value loss profile"),
         ("split_heads_action_value_unification_r13", "r13 action-value study profile"),
         ("action_value_unification_v1", "r13 action-value objective"),
+        ("alpha_result_value_budget_split_v14", "r14 direct action-value loss profile"),
+        ("split_heads_direct_action_value_r14", "r14 direct action-value study profile"),
+        ("direct_daily_policy_v1", "r14 direct daily policy objective"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -621,6 +625,31 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         "continuous_policy_r13_contract_missing",
         "continuous_policy r13 audit/scoring contract is missing action_value_consistency_score marker.",
     )
+    _require(
+        "DIRECT_ACTION_VALUE_POLICY_MODE" in model_seq_v3_text
+        and "direct_action_value_mode_share" in analysis_text
+        and "direct_action_value_mode_share" in pipeline_text
+        and "direct_action_value_mode_share" in study_text,
+        failures,
+        "continuous_policy_r14_contract_missing",
+        "continuous_policy r14 direct action-value arbitration contract is missing audit/scoring markers.",
+    )
+    _require(
+        "build_monthly_return_frame" in pipeline_text,
+        failures,
+        "continuous_policy_monthly_contract_missing",
+        "continuous_policy monthly evaluation contract is missing monthly return frame builder.",
+    )
+    for snippet, label in (
+        ("monthly_consistency_score", "monthly consistency metric"),
+        ("monthly_worst_return", "monthly worst-return metric"),
+    ):
+        _require(
+            snippet in pipeline_text and snippet in study_text,
+            failures,
+            "continuous_policy_monthly_contract_missing",
+            f"continuous_policy monthly evaluation contract is missing marker: {label}",
+        )
     for snippet, label in (
         ("release_translation_deploy_health_score", "r12 audit health score"),
         ("release_translation_deploy_failure_mode", "r12 audit failure mode"),

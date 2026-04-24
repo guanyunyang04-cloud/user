@@ -358,6 +358,15 @@ def _build_held_side_detail_payload(
             "exit_action_value",
             "relative_opportunity_value",
             "action_value_consistency_target",
+            "direct_action_value_applied",
+            "direct_action_value_selected",
+            "direct_action_value_gap",
+            "direct_action_utility_skip",
+            "direct_action_utility_open",
+            "direct_action_utility_hold",
+            "direct_action_utility_add",
+            "direct_action_utility_reduce",
+            "direct_action_utility_exit",
             "deploy_value_target",
             "release_value_target",
             "deploy_gate_target",
@@ -583,6 +592,12 @@ def _build_semantic_conflicts(
             "avg_release_gate_target": 0.0,
             "avg_defense_gate_target": 0.0,
             "avg_deploy_executability_target": 0.0,
+            "direct_action_value_mode_share": 0.0,
+            "direct_action_value_label_match_share": 0.0,
+            "direct_action_value_selected_mean": 0.0,
+            "direct_action_value_gap_mean": 0.0,
+            "direct_action_value_low_margin_share": 0.0,
+            "direct_action_order_translation_conflict_rate": 0.0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
@@ -1140,6 +1155,49 @@ def _build_semantic_conflicts(
             1.0,
         )
     )
+    policy_decision_mode_lookup = working.get(
+        "policy_decision_mode",
+        pd.Series("", index=working.index),
+    ).astype(str).str.lower()
+    direct_action_label_lookup = working.get(
+        "direct_action_value_label",
+        pd.Series("", index=working.index),
+    ).astype(str).str.lower()
+    direct_action_applied = working.get(
+        "direct_action_value_applied",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    direct_selected_value = working.get(
+        "direct_action_value_selected",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    direct_value_gap = working.get(
+        "direct_action_value_gap",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    direct_mode_mask = policy_decision_mode_lookup.eq("direct_action_value_v1") | (direct_action_applied > 0.5)
+    direct_action_value_mode_share = _safe_mean(direct_mode_mask.astype(float))
+    direct_action_value_label_match_share = (
+        _safe_mean((model_action_lookup.loc[direct_mode_mask] == direct_action_label_lookup.loc[direct_mode_mask]).astype(float))
+        if bool(direct_mode_mask.any())
+        else 0.0
+    )
+    direct_action_value_selected_mean = (
+        _safe_mean(direct_selected_value.loc[direct_mode_mask]) if bool(direct_mode_mask.any()) else 0.0
+    )
+    direct_action_value_gap_mean = (
+        _safe_mean(direct_value_gap.loc[direct_mode_mask]) if bool(direct_mode_mask.any()) else 0.0
+    )
+    direct_action_value_low_margin_share = (
+        _safe_mean((direct_value_gap.loc[direct_mode_mask] < 0.05).astype(float))
+        if bool(direct_mode_mask.any())
+        else 0.0
+    )
+    direct_action_order_translation_conflict_rate = (
+        _safe_mean((model_action_lookup.loc[direct_mode_mask] != weight_change_lookup.loc[direct_mode_mask]).astype(float))
+        if bool(direct_mode_mask.any())
+        else 0.0
+    )
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
     deploy_funding_rebalance_sell_mask = (
@@ -1470,6 +1528,12 @@ def _build_semantic_conflicts(
         "keep_against_release_value_share": keep_against_release_value_share,
         "open_low_action_value_share": open_low_action_value_share,
         "action_value_consistency_score": action_value_consistency_score,
+        "direct_action_value_mode_share": direct_action_value_mode_share,
+        "direct_action_value_label_match_share": direct_action_value_label_match_share,
+        "direct_action_value_selected_mean": direct_action_value_selected_mean,
+        "direct_action_value_gap_mean": direct_action_value_gap_mean,
+        "direct_action_value_low_margin_share": direct_action_value_low_margin_share,
+        "direct_action_order_translation_conflict_rate": direct_action_order_translation_conflict_rate,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,

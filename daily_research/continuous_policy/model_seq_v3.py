@@ -970,6 +970,55 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
         },
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v14"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v13"]["sample_scalar_loss_weights"],
+        "target_delta_hint": 1.18,
+        "entry_quality": 0.72,
+        "hold_quality": 1.10,
+        "add_quality": 0.84,
+        "reduce_quality": 1.06,
+        "exit_urgency": 1.04,
+        "multi_horizon_forward_value": 1.72,
+        "multi_horizon_forward_risk": 1.46,
+        "multi_horizon_path_value": 1.82,
+        "open_action_value": 1.90,
+        "add_action_value": 1.78,
+        "hold_action_value": 1.84,
+        "reduce_action_value": 1.76,
+        "exit_action_value": 1.70,
+        "relative_opportunity_value": 1.34,
+        "action_value_consistency_target": 1.66,
+        "deploy_executability_target": 1.72,
+        "clipped_intent_risk": 1.24,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v13"]["daily_target_loss_weights"],
+        "candidate_budget": 1.06,
+        "turnover_budget": 1.10,
+        "budget_deploy_signal_target": 1.40,
+        "budget_cash_timing_signal_target": 1.36,
+        "budget_alpha_focus_signal_target": 1.24,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v13"]["multi_objective_loss_weights"],
+        "action_hard": 0.28,
+        "action_soft": 0.72,
+        "action_total": 0.42,
+        "duration_total": 0.08,
+        "scalar_total": 2.04,
+        "daily_total": 0.86,
+        "arbitration_total": 0.10,
+        "sell_rank_pairwise_total": 0.14,
+        "clipped_intent_total": 0.08,
+        "value_arbitration_total": 0.10,
+        "hierarchical_three_value_total": 0.26,
+        "funding_release_total": 0.28,
+        "action_value_total": 0.74,
+    },
+}
+DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
+DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset({"alpha_result_value_budget_split_v14"})
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
 DAILY_HEAD_LAYOUT_MONOLITHIC_V1 = "monolithic_v1"
@@ -3042,6 +3091,12 @@ def predict_policy_v3(
     min_candidate_budget = 4.0 if is_holdcash_v3_decoder else 2.0
     min_position_cap_target = 0.10 if is_holdcash_v3_decoder else 0.08
     budget_objective_name = str(artifact.train_summary.get("budget_objective", "") or "").strip().lower()
+    loss_profile_name = str(artifact.train_summary.get("loss_profile", "") or "").strip().lower()
+    direct_action_value_mode = (
+        loss_profile_name in DIRECT_ACTION_VALUE_LOSS_PROFILES
+        or str(artifact.train_summary.get("policy_decision_mode", "") or "").strip().lower()
+        == DIRECT_ACTION_VALUE_POLICY_MODE
+    )
     if budget_objective_name == "result_value_v4b":
         opportunity_floor = float(
             np.clip(
@@ -4208,6 +4263,152 @@ def predict_policy_v3(
         low=0.0,
         high=1.0,
     )
+    direct_action_utility = {
+        label: np.zeros(len(adjusted_labels), dtype=float)
+        for label in ACTION_CLASSES
+    }
+    direct_action_value_label = predicted_labels.astype(object).copy()
+    direct_action_value_selected = np.zeros(len(adjusted_labels), dtype=float)
+    direct_action_value_gap = np.zeros(len(adjusted_labels), dtype=float)
+    direct_action_value_applied = np.zeros(len(adjusted_labels), dtype=float)
+    if direct_action_value_mode:
+        duration_bonus = np.clip(duration_days - 3.0, 0.0, None) / 20.0
+        preliminary_exit_timing_pressure = np.clip(
+            exit_hazard * 0.46
+            + sell_pressure * 0.18
+            + np.clip(-drawdown_from_peak - 0.04, 0.0, None) * 1.05
+            + np.clip(-unrealized_pnl - 0.02, 0.0, None) * 0.38
+            + signal_decay_speed * 0.34
+            + market_downside_pressure * 0.18
+            + np.clip(-price_from_local_peak - 0.03, 0.0, None) * 0.26
+            + np.clip(drawdown_rank_in_portfolio - 0.62, 0.0, None) * 0.20
+            - np.clip(score_rank_pct - 0.72, 0.0, None) * 0.12,
+            0.0,
+            1.35,
+        )
+        direct_action_utility["skip"] = np.clip(
+            probability_map["skip"] * 0.24
+            + decision_defense_signal * 0.34
+            + cash_defense_value * 0.20
+            + reentry_guard_target * 0.10
+            - open_action_value * 0.26
+            - entry_quality.clip(min=0.0) * 0.12
+            - decision_deploy_gate * 0.10,
+            -1.0,
+            1.8,
+        )
+        direct_action_utility["open"] = np.clip(
+            open_action_value * 0.40
+            + probability_map["open"] * 0.20
+            + entry_quality.clip(min=0.0) * 0.18
+            + alpha_opportunity_value * 0.12
+            + deployment_opportunity_cost * 0.10
+            + deploy_value_target * 0.12
+            + decision_deploy_gate * 0.12
+            + deploy_executability_target * 0.10
+            + multi_horizon_path_value * 0.10
+            + duration_bonus * 0.08
+            - decision_defense_signal * 0.18
+            - multi_horizon_forward_risk * 0.12
+            - clipped_intent_risk * 0.10
+            - reentry_cooldown * 0.08
+            - open_risk_off_score * 0.08,
+            -1.0,
+            1.8,
+        )
+        direct_action_utility["hold"] = np.clip(
+            hold_action_value * 0.38
+            + probability_map["hold"] * 0.18
+            + hold_continuation_value * 0.18
+            + hold_quality.clip(min=0.0) * 0.16
+            + alpha_opportunity_value * 0.08
+            + deploy_value_target * 0.06
+            + decision_deploy_gate * 0.08
+            + duration_bonus * 0.08
+            - release_value_target * 0.10
+            - decision_release_gate * 0.10
+            - preliminary_exit_timing_pressure * 0.12
+            - sell_pressure * 0.10,
+            -1.0,
+            1.8,
+        )
+        direct_action_utility["add"] = np.clip(
+            add_action_value * 0.34
+            + probability_map["add"] * 0.18
+            + add_quality.clip(min=0.0) * 0.18
+            + hold_continuation_value * 0.10
+            + alpha_opportunity_value * 0.10
+            + deployment_opportunity_cost * 0.08
+            + deploy_value_target * 0.12
+            + decision_deploy_gate * 0.10
+            + deploy_executability_target * 0.08
+            + multi_horizon_path_value * 0.06
+            - release_value_target * 0.12
+            - decision_release_gate * 0.10
+            - preliminary_exit_timing_pressure * 0.14
+            - clipped_intent_risk * 0.10,
+            -1.0,
+            1.8,
+        )
+        direct_action_utility["reduce"] = np.clip(
+            reduce_action_value * 0.34
+            + probability_map["reduce"] * 0.18
+            + reduce_quality.clip(min=0.0) * 0.14
+            + reduce_fraction * 0.14
+            + sell_release_value * 0.12
+            + release_value_target * 0.12
+            + decision_release_gate * 0.12
+            + sell_pressure * 0.10
+            + preliminary_exit_timing_pressure * 0.10
+            + signal_decay_speed * 0.08
+            - hold_action_value * 0.12
+            - hold_continuation_value * 0.10
+            - decision_deploy_gate * 0.08,
+            -1.0,
+            1.8,
+        )
+        direct_action_utility["exit"] = np.clip(
+            exit_action_value * 0.36
+            + probability_map["exit"] * 0.18
+            + exit_urgency.clip(min=0.0) * 0.14
+            + exit_hazard * 0.16
+            + sell_release_value * 0.12
+            + release_value_target * 0.12
+            + decision_release_gate * 0.10
+            + preliminary_exit_timing_pressure * 0.18
+            + market_downside_pressure * 0.08
+            - hold_action_value * 0.14
+            - hold_continuation_value * 0.12
+            - decision_deploy_gate * 0.08,
+            -1.0,
+            1.8,
+        )
+        utility_matrix = np.stack([direct_action_utility[label] for label in ACTION_CLASSES], axis=1)
+        held_state_mask = current_weight > 1.0e-8
+        flat_state_mask = ~held_state_mask
+        action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
+        utility_matrix[held_state_mask, action_lookup["skip"]] = -1.0e9
+        utility_matrix[held_state_mask, action_lookup["open"]] = -1.0e9
+        for invalid_action in ("hold", "add", "reduce", "exit"):
+            utility_matrix[flat_state_mask, action_lookup[invalid_action]] = -1.0e9
+        avoid_mask = np.asarray(predicted_duration_labels, dtype=object) == "avoid"
+        utility_matrix[flat_state_mask & avoid_mask, action_lookup["open"]] = -1.0e9
+        direct_indices = utility_matrix.argmax(axis=1)
+        direct_action_value_label = np.asarray(ACTION_CLASSES, dtype=object)[direct_indices]
+        sorted_direct = np.sort(utility_matrix, axis=1)
+        direct_action_value_selected = np.clip(sorted_direct[:, -1], -1.0, 1.8)
+        direct_action_value_gap = np.clip(sorted_direct[:, -1] - sorted_direct[:, -2], 0.0, 2.0)
+        direct_action_value_applied = np.ones(len(adjusted_labels), dtype=float)
+        adjusted_labels = direct_action_value_label.astype(object).copy()
+        for label in ACTION_CLASSES:
+            direct_action_utility[label] = np.where(
+                np.isfinite(utility_matrix[:, action_lookup[label]]),
+                utility_matrix[:, action_lookup[label]],
+                -1.0,
+            )
+        global_targets["policy_decision_mode"] = DIRECT_ACTION_VALUE_POLICY_MODE
+    else:
+        global_targets["policy_decision_mode"] = "logit_rule_bridge_v1"
     for idx in range(len(adjusted_labels)):
         label = str(adjusted_labels[idx])
         held = float(current_weight[idx]) > 1e-8
@@ -4237,6 +4438,48 @@ def predict_policy_v3(
             and drawdown_from_peak[idx] > -0.05
             and signal_decay_speed[idx] < 0.08
         )
+        if direct_action_value_mode:
+            action_keep_value = max(float(add_action_value[idx]), float(hold_action_value[idx]))
+            action_release_value = max(float(reduce_action_value[idx]), float(exit_action_value[idx]))
+            if held:
+                if label in {"skip", "open"}:
+                    label = "add" if add_action_value[idx] > hold_action_value[idx] + 0.10 else "hold"
+                if (
+                    label == "add"
+                    and action_release_value > action_keep_value + 0.18
+                    and exit_timing_pressure > 0.46
+                ):
+                    label = "exit" if exit_action_value[idx] >= reduce_action_value[idx] + 0.08 else "reduce"
+                elif (
+                    label in {"reduce", "exit"}
+                    and action_keep_value > action_release_value + 0.16
+                    and exit_timing_pressure < 0.54
+                    and decision_release_gate[idx] <= decision_deploy_gate[idx] + 0.06
+                    and market_downside_pressure[idx] < 0.24
+                ):
+                    label = "add" if add_action_value[idx] > hold_action_value[idx] + 0.12 else "hold"
+                if (
+                    label == "exit"
+                    and hold_days[idx] < 2.0
+                    and exit_timing_pressure < 0.60
+                    and exit_action_value[idx] < reduce_action_value[idx] + 0.10
+                ):
+                    label = "reduce"
+            else:
+                if label not in {"open", "skip"}:
+                    label = "open" if open_action_value[idx] >= 0.42 and decision_deploy_gate[idx] > decision_defense_signal[idx] else "skip"
+                if (
+                    label == "open"
+                    and (
+                        duration_name == "avoid"
+                        or open_action_value[idx] < 0.28
+                        or decision_defense_signal[idx] > 0.62
+                        or clipped_intent_risk[idx] > 0.76
+                    )
+                ):
+                    label = "skip"
+            adjusted_labels[idx] = label
+            continue
         if held:
             held_defense_weight = 0.0 if pure_portfolio_defense_mode else 1.0
             sell_arbitration = float(
@@ -4734,6 +4977,21 @@ def predict_policy_v3(
             "planned_holding_days": duration_days,
             "planned_holding_days_bucket": bucket_duration_days,
             "planned_holding_days_regressed": regressed_duration_days,
+            "policy_decision_mode": np.full(
+                len(state_frame),
+                DIRECT_ACTION_VALUE_POLICY_MODE if direct_action_value_mode else "logit_rule_bridge_v1",
+                dtype=object,
+            ),
+            "direct_action_value_label": direct_action_value_label,
+            "direct_action_value_applied": direct_action_value_applied,
+            "direct_action_value_selected": direct_action_value_selected,
+            "direct_action_value_gap": direct_action_value_gap,
+            "direct_action_utility_skip": direct_action_utility["skip"],
+            "direct_action_utility_open": direct_action_utility["open"],
+            "direct_action_utility_hold": direct_action_utility["hold"],
+            "direct_action_utility_add": direct_action_utility["add"],
+            "direct_action_utility_reduce": direct_action_utility["reduce"],
+            "direct_action_utility_exit": direct_action_utility["exit"],
             "decoder_profile": decoder_profile_name,
         }
     ).set_index("stock")

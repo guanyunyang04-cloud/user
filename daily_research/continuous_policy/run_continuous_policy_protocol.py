@@ -521,12 +521,14 @@ def main(argv: list[str] | None = None) -> int:
     shadow_turnover_path = protocol_root / "shadow_daily_turnover.csv"
     shadow_position_history_path = protocol_root / "shadow_daily_position_history.csv"
     shadow_returns_path = protocol_root / "shadow_daily_returns.csv"
+    shadow_monthly_returns_path = protocol_root / "shadow_monthly_returns.csv"
     shadow_summary_path = protocol_root / "shadow_window_summary.json"
     shadow_rollout["action_panel"].to_csv(shadow_action_panel_path, index=False, encoding="utf-8-sig")
     shadow_rollout["action_outcomes"].to_csv(shadow_action_outcomes_path, index=False, encoding="utf-8-sig")
     shadow_rollout["turnover_frame"].to_csv(shadow_turnover_path, index=False, encoding="utf-8-sig")
     shadow_rollout["position_history"].to_csv(shadow_position_history_path, index=False, encoding="utf-8-sig")
     shadow_rollout["returns"].rename("daily_return").to_csv(shadow_returns_path, encoding="utf-8-sig")
+    shadow_rollout["monthly_returns"].to_csv(shadow_monthly_returns_path, index=False, encoding="utf-8-sig")
     shadow_summary = {
         "start_date": shadow_start_date,
         "end_date": shadow_end_date,
@@ -546,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         "turnover_csv": str(shadow_turnover_path.resolve()),
         "position_history_csv": str(shadow_position_history_path.resolve()),
         "returns_csv": str(shadow_returns_path.resolve()),
+        "monthly_returns_csv": str(shadow_monthly_returns_path.resolve()),
     }
     write_json(shadow_summary_path, shadow_summary)
 

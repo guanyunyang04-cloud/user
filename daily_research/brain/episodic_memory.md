@@ -705,3 +705,66 @@
   - 事实：r13 仍未达到 promotion，主要被 drawdown、卖出时机、cash timing、相对 active Sharpe 和 order translation drift 拦住。
   - 推断：用户提出的“统一学习未来多日涨跌/价值”是正确方向，但仅靠统一 action value 不足以解决 open 低价值入场和订单/预算翻译层改写动作的问题。
   - 决策：r13 保持 `shadow_only`；下一轮若继续，优先处理 `open_low_action_value_share`、`order_translation_drift` 与 release/deploy 翻译层错配，不要把高 `action_value_consistency_score` 误写成 live 证据。
+
+## 2026-04-24 月度收益评价接入
+
+- 行动前自检：
+  - 事实：用户指出“评价收益以月为单位更好，更能体现模型的优势和问题”。
+  - 推断：日级收益、年化收益和 5 日动作质量各自有用，但不足以暴露收益是否按月持续、是否集中在少数短窗口、是否存在最差月/连续亏损月风险。
+  - 决策：把月度评价放进通用曲线指标和 study ranking，而不是单独做一次性报告。
+- 已完成执行：
+  - `pipeline_utils.py` 新增 `build_monthly_return_frame`，从 daily returns 聚合 `monthly_returns.csv` 明细。
+  - `compute_curve_metrics` 新增 `monthly_return_mean`、`monthly_return_median`、`monthly_return_std`、`monthly_sharpe`、`monthly_win_rate`、`monthly_best_return`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_intramonth_max_drawdown`、`monthly_consistency_score`。
+  - `evaluate_policy.py` 与 `run_continuous_policy_protocol.py` 分别导出 `monthly_returns.csv` 与 `shadow_monthly_returns.csv`。
+  - `run_self_optimizing_study.py` 已把月度指标纳入 primary metrics、trial ranking 和所有 objective 的轻量 scoring bonus/penalty。
+- 动作后复盘：
+  - 月度指标不替代动作语义审计；它回答“收益质量是否稳定”，动作审计回答“为什么会这样”。
+  - 后续比较 r12/r13 或新分支时，应同时看年化/Sharpe/drawdown、月度持续性和 action/release/translation 指标。
+
+## 2026-04-24 r14 直接日级动作价值仲裁入口落地
+
+- 行动前自检：
+  - 事实：r13 已把动作价值放到统一多周期坐标中，但推理端仍存在较长规则桥接，`order_translation_drift` 仍是关键 failure mode。
+  - 事实：用户明确要求构建“以日为单位进行连续决策”的交易执行模型，不依赖固定调仓频率、固定持有周期或人工执行桥接规则。
+  - 推断：下一步最高价值不是继续增加单个动作 loss，而是让统一动作价值成为日级动作仲裁的直接共同货币，同时保留最小合法性与风险边界。
+  - 边界：本轮只落地 research / shadow 能力，不切换 live，不改 active artifact，不改 promotion gate，不把 r14 写成已验证结论。
+- 已完成执行：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v14` 与 `direct_action_value_v1`，在 v14 或带有对应 train summary 的 artifact 上启用直接动作价值仲裁。
+  - `predict_policy_v3` 新增 `skip/open/hold/add/reduce/exit` 六类直接动作 utility；持仓态只允许 `hold/add/reduce/exit`，空仓态只允许 `skip/open`，并只保留最小合法性纠偏。
+  - `portfolio_simulator.py`、`pipeline_utils.py` 与 `analyze_behavior_gap.py` 贯通 `direct_action_value_*` 字段，新增 direct mode 覆盖、标签匹配、边际、低边际与订单翻译冲突指标。
+  - `run_self_optimizing_study.py` 新增 `split_heads_direct_action_value_r14` 与 `direct_daily_policy_v1`，把月度收益质量、直接动作边际、动作价值一致性和订单翻译漂移放入同一个 scoring 目标。
+  - `doc_guard.py` 与 `project_consistency_check.py` 已补入 r14 合同守卫，主脑与分脑状态中心同步记录 r14 仅为研究入口。
+- 验证：
+  - `py_compile` 通过：`model_seq_v3.py`、`portfolio_simulator.py`、`pipeline_utils.py`、`analyze_behavior_gap.py`、`run_self_optimizing_study.py`、`project_consistency_check.py`、`doc_guard.py`。
+  - r14 dry-run `verify_direct_action_value_r14_dryrun_20260424` 已生成 `split_heads_direct_action_value_r14` 研究计划，默认 objective 为 `direct_daily_policy_v1`，baseline 为 `alpha_result_value_budget_split_v14 + result_value_v10`。
+  - 伪 artifact 推理烟测已进入 `direct_action_value_v1`，并产出 `direct_action_value_label`、`direct_action_value_applied`、`direct_action_value_gap` 与各动作 utility 列。
+  - `doc_guard.py check`、`brain_integrity_check.py --json`、`project_consistency_check.py` 与 `git diff --check` 均通过。
+- 动作后复盘：
+  - 事实：r14 完成的是直接日级仲裁链路，不是正式 study verdict；后续仍需 bounded shadow study 才能判断是否优于 r13。
+  - 推断：若 r14 改善 `direct_action_value_mode_share` 和月度一致性但仍有高 `direct_action_order_translation_conflict_rate`，根因将继续指向订单/预算层改写，而不是动作价值学习本身。
+  - 决策：后续评估 r14 必须同时看 `monthly_consistency_score`、`monthly_worst_return`、`direct_action_value_gap_mean`、`open_low_action_value_share` 与 `order_translation_drift`，不能只看年化收益。
+
+## 2026-04-24 r14 direct-action bounded study 与 repaired confirm
+
+- 行动前自检：
+  - 事实：r14 入口、dry-run、伪 artifact 推理烟测和静态守卫已通过，但尚缺正式 bounded shadow 证据。
+  - 事实：用户目标是以日为单位进行连续动态决策，减少固定调仓、固定持有周期和人工桥接规则依赖。
+  - 边界：本轮允许启动 r14 shadow study，但不得切换 live、不得改 active artifact、不得改 promotion gate。
+  - 假设：最有效验证是一次跑清 r14 的 4 个 screening，并用 confirm / repaired confirm 对照 r13，而不是继续只做架构讨论。
+- 已完成执行：
+  - 执行 `cp_v3_direct_action_value_r14__study_r1`：4 个 screening 完成、0 个 screening 失败。
+  - 自动 confirm 训练产物生成后在 protocol 写出阶段触发 `[Errno 22] Invalid argument`，未形成完整 `protocol_summary.json`；随后用原 study 口径和 `--max-universe-size 1200` strict resume 修复 `confirm_01`。
+  - `confirm_02` 的 64 epoch checkpoint 已完成，因此用 65 epoch strict resume 补齐对照；该结果只作为严格续跑 sanity check，不等同于原 64 epoch 自动 confirm 行。
+  - 曾误启动一条缺少 `--max-universe-size 1200` 的 manual confirm；因 universe / sample 口径不一致，未纳入正式证据。
+  - 生成 repaired confirm 对比：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_value_r14__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
+  - 顺序导出 `confirm_01` held-side detail，未并行运行会写 latest 行为摘要的审计。
+- 关键结果：
+  - screening champion：`trial_02 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.3631`、`sharpe = 1.1531`、`max_drawdown = -0.1201`、`monthly_return_mean = 0.0234`、`monthly_win_rate = 0.75`、`direct_action_value_mode_share = 1.0`、`direct_action_order_translation_conflict_rate = 0.2842`，`promotion_status = shadow_only`。
+  - repaired champion：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 1.0904`、`sharpe = 2.8082`、`max_drawdown = -0.1326`、`monthly_return_mean = 0.0587`、`monthly_win_rate = 0.75`、`monthly_worst_return = -0.0797`、`monthly_consistency_score = 0.7722`、`direct_action_value_mode_share = 1.0`、`direct_action_value_gap_mean = 0.0351`。
+  - r14 的主要失败项仍是 `reduce_success_rate_5d = 0.0`、`exit_timeliness_rate_5d = 0.25`、`cash_timing_quality_1d`、`max_drawdown` 与 `failure_mode = order_translation_drift`；`promotion_status` 仍为 `shadow_only`。
+  - held-side detail：135 条 held-side sell 中 134 条来自 `deploy_funding_rebalance`，1 条来自 `model_release_signal`；104 条 ambiguous、18 条 protected-hold conflict、13 条 release-consistent，集中在 `002371.SZ / 000333.SZ / 002028.SZ`。
+- 动作后复盘：
+  - 事实：r14 直接动作值仲裁显著改善了 repaired confirm 的收益、Sharpe 与月度收益质量，也证明用户提出的“按未来收益风险直接学习日级动作”方向有实证价值。
+  - 事实：direct action 已经进入推理主路径，但低边际占比仍高，且订单/预算翻译冲突与 held-side funding rebalance 过度依赖没有闭合。
+  - 推断：当前主瓶颈已从“是否应该直接学习日级动作”转为“如何让订单、预算、release/funding 层保留 direct action intent 并承担真实退出责任”。
+  - 决策：r14 保持 `shadow_only`；下一步应推进 r15 direct-action-preserving translation / release-funding repair，而不是把 r14 高收益 confirm 直接升级为 production 证据。

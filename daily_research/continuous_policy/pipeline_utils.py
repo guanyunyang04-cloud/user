@@ -125,6 +125,15 @@ BUDGET_OBJECTIVE_CHOICES: tuple[str, ...] = (
     BUDGET_OBJECTIVE_RESULT_VALUE_V10,
 )
 DEFAULT_OUTCOME_HORIZONS = (1, 3, 5, 10, 20)
+MONTHLY_RETURN_COLUMNS = (
+    "month",
+    "start_date",
+    "end_date",
+    "trading_day_count",
+    "monthly_return",
+    "monthly_equity",
+    "intramonth_max_drawdown",
+)
 
 
 def resolve_budget_objective(budget_objective: str | None) -> str:
@@ -181,6 +190,133 @@ def estimate_trading_cost(
     return float(buy_cost + sell_cost)
 
 
+def _max_consecutive_negative(values: pd.Series) -> int:
+    longest = 0
+    current = 0
+    for value in pd.Series(values, dtype=float).fillna(0.0):
+        if float(value) < 0.0:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return int(longest)
+
+
+def _empty_monthly_return_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(MONTHLY_RETURN_COLUMNS))
+
+
+def build_monthly_return_frame(daily_returns: pd.Series) -> pd.DataFrame:
+    clean = pd.Series(daily_returns, dtype=float).replace([np.inf, -np.inf], np.nan).dropna()
+    if clean.empty:
+        return _empty_monthly_return_frame()
+
+    parsed_index = pd.to_datetime(clean.index, errors="coerce")
+    rows: list[dict[str, Any]] = []
+    if pd.Series(parsed_index).notna().all():
+        working = pd.DataFrame({"date": parsed_index, "daily_return": clean.to_numpy(dtype=float)})
+        working = working.sort_values("date").reset_index(drop=True)
+        working["month"] = working["date"].dt.to_period("M").astype(str)
+        grouped = working.groupby("month", sort=True)
+    else:
+        working = pd.DataFrame(
+            {
+                "date": pd.RangeIndex(start=0, stop=len(clean), step=1),
+                "daily_return": clean.to_numpy(dtype=float),
+            }
+        )
+        working["month"] = [f"block_{int(idx // 21) + 1:03d}" for idx in range(len(working))]
+        grouped = working.groupby("month", sort=True)
+
+    cumulative_equity = 1.0
+    for month, group in grouped:
+        returns = pd.Series(group["daily_return"], dtype=float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        monthly_return = float((1.0 + returns).prod() - 1.0)
+        cumulative_equity *= 1.0 + monthly_return
+        local_equity = pd.concat(
+            [pd.Series([1.0], dtype=float), (1.0 + returns).cumprod().reset_index(drop=True)],
+            ignore_index=True,
+        )
+        intramonth_drawdown = float((local_equity / local_equity.cummax() - 1.0).min()) if not local_equity.empty else 0.0
+        first_date = group["date"].iloc[0]
+        last_date = group["date"].iloc[-1]
+        rows.append(
+            {
+                "month": str(month),
+                "start_date": first_date.strftime("%Y-%m-%d") if hasattr(first_date, "strftime") else str(first_date),
+                "end_date": last_date.strftime("%Y-%m-%d") if hasattr(last_date, "strftime") else str(last_date),
+                "trading_day_count": int(len(group)),
+                "monthly_return": monthly_return,
+                "monthly_equity": float(cumulative_equity),
+                "intramonth_max_drawdown": intramonth_drawdown,
+            }
+        )
+    return pd.DataFrame(rows, columns=list(MONTHLY_RETURN_COLUMNS))
+
+
+def _monthly_curve_metrics(daily_returns: pd.Series) -> dict[str, float]:
+    monthly_frame = build_monthly_return_frame(daily_returns)
+    if monthly_frame.empty:
+        return {
+            "monthly_count": 0.0,
+            "monthly_return_mean": 0.0,
+            "monthly_return_median": 0.0,
+            "monthly_return_std": 0.0,
+            "monthly_sharpe": 0.0,
+            "monthly_win_rate": 0.0,
+            "monthly_positive_count": 0.0,
+            "monthly_negative_count": 0.0,
+            "monthly_best_return": 0.0,
+            "monthly_worst_return": 0.0,
+            "monthly_gain_loss_ratio": 0.0,
+            "monthly_max_consecutive_loss_months": 0.0,
+            "monthly_intramonth_max_drawdown": 0.0,
+            "monthly_consistency_score": 0.0,
+        }
+    monthly_returns = pd.to_numeric(monthly_frame["monthly_return"], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if monthly_returns.empty:
+        return _monthly_curve_metrics(pd.Series(dtype=float))
+    positive = monthly_returns[monthly_returns > 0.0]
+    negative = monthly_returns[monthly_returns < 0.0]
+    monthly_std = float(monthly_returns.std(ddof=0))
+    monthly_win_rate = float((monthly_returns > 0.0).mean())
+    worst_month = float(monthly_returns.min())
+    best_month = float(monthly_returns.max())
+    gain_loss_ratio = (
+        float(positive.mean() / abs(float(negative.mean())))
+        if len(positive) and len(negative) and abs(float(negative.mean())) > 1.0e-12
+        else (float("inf") if len(positive) and not len(negative) else 0.0)
+    )
+    gain_loss_ratio = float(min(gain_loss_ratio, 9.99)) if np.isfinite(gain_loss_ratio) else 9.99
+    intramonth_drawdown = pd.to_numeric(monthly_frame["intramonth_max_drawdown"], errors="coerce").fillna(0.0)
+    monthly_consistency_score = float(
+        np.clip(
+            monthly_win_rate * 0.48
+            + np.clip((float(monthly_returns.mean()) + 0.04) / 0.10, 0.0, 1.0) * 0.24
+            + (1.0 - np.clip(abs(min(worst_month, 0.0)) / 0.18, 0.0, 1.0)) * 0.18
+            + (1.0 - np.clip(float(_max_consecutive_negative(monthly_returns)) / 4.0, 0.0, 1.0)) * 0.10,
+            0.0,
+            1.0,
+        )
+    )
+    return {
+        "monthly_count": float(len(monthly_returns)),
+        "monthly_return_mean": float(monthly_returns.mean()),
+        "monthly_return_median": float(monthly_returns.median()),
+        "monthly_return_std": monthly_std,
+        "monthly_sharpe": float(monthly_returns.mean() / monthly_std * np.sqrt(12.0)) if monthly_std > 0.0 else 0.0,
+        "monthly_win_rate": monthly_win_rate,
+        "monthly_positive_count": float((monthly_returns > 0.0).sum()),
+        "monthly_negative_count": float((monthly_returns < 0.0).sum()),
+        "monthly_best_return": best_month,
+        "monthly_worst_return": worst_month,
+        "monthly_gain_loss_ratio": gain_loss_ratio,
+        "monthly_max_consecutive_loss_months": float(_max_consecutive_negative(monthly_returns)),
+        "monthly_intramonth_max_drawdown": float(intramonth_drawdown.min()) if len(intramonth_drawdown) else 0.0,
+        "monthly_consistency_score": monthly_consistency_score,
+    }
+
+
 def compute_curve_metrics(daily_returns: pd.Series) -> dict[str, float]:
     clean = pd.Series(daily_returns, dtype=float).replace([np.inf, -np.inf], np.nan).dropna()
     if clean.empty:
@@ -192,6 +328,7 @@ def compute_curve_metrics(daily_returns: pd.Series) -> dict[str, float]:
             "max_drawdown": 0.0,
             "daily_return_mean": 0.0,
             "daily_return_std": 0.0,
+            **_monthly_curve_metrics(clean),
         }
     equity = (1.0 + clean).cumprod()
     total_return = float(equity.iloc[-1] - 1.0)
@@ -207,6 +344,7 @@ def compute_curve_metrics(daily_returns: pd.Series) -> dict[str, float]:
         "max_drawdown": max_drawdown,
         "daily_return_mean": float(clean.mean()),
         "daily_return_std": float(clean.std(ddof=0)),
+        **_monthly_curve_metrics(clean),
     }
 
 
@@ -427,6 +565,15 @@ def compute_continuity_metrics(
             "exit_action_value",
             "relative_opportunity_value",
             "action_value_consistency_target",
+            "direct_action_value_applied",
+            "direct_action_value_selected",
+            "direct_action_value_gap",
+            "direct_action_utility_skip",
+            "direct_action_utility_open",
+            "direct_action_utility_hold",
+            "direct_action_utility_add",
+            "direct_action_utility_reduce",
+            "direct_action_utility_exit",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -746,6 +893,49 @@ def compute_continuity_metrics(
                 1.0,
             )
         )
+        policy_decision_mode_lookup = action_outcomes.get(
+            "policy_decision_mode",
+            pd.Series("", index=action_outcomes.index),
+        ).astype(str).str.lower()
+        direct_action_label_lookup = action_outcomes.get(
+            "direct_action_value_label",
+            pd.Series("", index=action_outcomes.index),
+        ).astype(str).str.lower()
+        direct_action_applied = pd.to_numeric(
+            action_outcomes.get("direct_action_value_applied", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_selected_value = pd.to_numeric(
+            action_outcomes.get("direct_action_value_selected", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_value_gap = pd.to_numeric(
+            action_outcomes.get("direct_action_value_gap", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_mode_mask = policy_decision_mode_lookup.eq("direct_action_value_v1") | (direct_action_applied > 0.5)
+        metrics["direct_action_value_mode_share"] = (
+            float(direct_mode_mask.mean()) if len(direct_mode_mask) else 0.0
+        )
+        metrics["direct_action_value_label_match_share"] = (
+            float((model_action_lookup.loc[direct_mode_mask] == direct_action_label_lookup.loc[direct_mode_mask]).mean())
+            if bool(direct_mode_mask.any())
+            else 0.0
+        )
+        metrics["direct_action_value_selected_mean"] = (
+            float(direct_selected_value.loc[direct_mode_mask].mean()) if bool(direct_mode_mask.any()) else 0.0
+        )
+        metrics["direct_action_value_gap_mean"] = (
+            float(direct_value_gap.loc[direct_mode_mask].mean()) if bool(direct_mode_mask.any()) else 0.0
+        )
+        metrics["direct_action_value_low_margin_share"] = (
+            float((direct_value_gap.loc[direct_mode_mask] < 0.05).mean()) if bool(direct_mode_mask.any()) else 0.0
+        )
+        metrics["direct_action_order_translation_conflict_rate"] = (
+            float((model_action_lookup.loc[direct_mode_mask] != weight_change_lookup.loc[direct_mode_mask]).mean())
+            if bool(direct_mode_mask.any())
+            else 0.0
+        )
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
@@ -1009,6 +1199,19 @@ def compute_continuity_metrics(
             "avg_release_gate_target",
             "avg_defense_gate_target",
             "avg_deploy_executability_target",
+            "action_value_conflict_share",
+            "action_value_selected_gap",
+            "held_keep_release_value_gap",
+            "sell_against_keep_value_share",
+            "keep_against_release_value_share",
+            "open_low_action_value_share",
+            "action_value_consistency_score",
+            "direct_action_value_mode_share",
+            "direct_action_value_label_match_share",
+            "direct_action_value_selected_mean",
+            "direct_action_value_gap_mean",
+            "direct_action_value_low_margin_share",
+            "direct_action_order_translation_conflict_rate",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",
@@ -3850,6 +4053,7 @@ def run_policy_rollout(
     turnover_frame = pd.DataFrame(turnover_rows)
     returns_index = [dt.strftime("%Y-%m-%d") for dt in dates[1:]]
     returns_series = pd.Series(daily_returns, index=returns_index, dtype=float)
+    monthly_returns = build_monthly_return_frame(returns_series)
     metrics = compute_curve_metrics(returns_series)
     if not turnover_frame.empty:
         metrics["avg_turnover"] = float(turnover_frame["realized_turnover"].mean())
@@ -3918,6 +4122,7 @@ def run_policy_rollout(
         "budget_calibration": str(budget_calibration),
         "budget_objective": str(resolved_budget_objective),
         "returns": returns_series,
+        "monthly_returns": monthly_returns,
         "metrics": metrics,
         "continuity_metrics": continuity_metrics,
         "action_panel": action_panel,

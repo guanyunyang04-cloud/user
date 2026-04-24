@@ -127,6 +127,10 @@ def _metric_row(label: str, variant: dict[str, str], rollout: dict[str, Any]) ->
         "annual_volatility",
         "sharpe",
         "max_drawdown",
+        "monthly_return_mean",
+        "monthly_win_rate",
+        "monthly_worst_return",
+        "monthly_consistency_score",
         "avg_turnover",
         "avg_gross_exposure",
         "avg_holding_count",
@@ -237,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         rollout["action_outcomes"].to_csv(variant_dir / "daily_action_outcomes.csv", index=False, encoding="utf-8-sig")
         rollout["turnover_frame"].to_csv(variant_dir / "daily_turnover.csv", index=False, encoding="utf-8-sig")
         rollout["returns"].rename("daily_return").to_csv(variant_dir / "daily_returns.csv", encoding="utf-8-sig")
+        rollout["monthly_returns"].to_csv(variant_dir / "monthly_returns.csv", index=False, encoding="utf-8-sig")
         rows.append(_metric_row(str(variant["label"]), variant, rollout))
         variant_payloads.append(
             {
