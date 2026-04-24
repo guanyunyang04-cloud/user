@@ -1,0 +1,71 @@
+# operations_center evidence index
+
+- Archived date: `2026-04-24`
+- Raw history: `daily_research/brain/references/operations_center_history_raw_20260424.md`
+- Original line count: `1483`
+- Original SHA256: `fd8349ca8d7152191a57ff023d8ed502ea42f0085553658f4d920c783654ef08`
+- Rule: current entry documents keep only executable current state; use this index to locate historical evidence in the raw archive.
+
+## Heading Index
+
+| No. | Line | Heading |
+| --- | ---: | --- |
+| 1 | 1 | `# Daily Research 操作中枢` |
+| 2 | 3 | `## 1. 项目地图` |
+| 3 | 20 | `## 2. 默认操作纪律` |
+| 4 | 30 | `## 3. 协议方法` |
+| 5 | 44 | `## 4. 高频命令` |
+| 6 | 156 | `## 5. 环境基线` |
+| 7 | 171 | `## 6. execution app 运行时` |
+| 8 | 188 | `## 7. Web 控制台` |
+| 9 | 227 | `## 8. 写回路由` |
+| 10 | 243 | `## 2026-04-15 更新` |
+| 11 | 251 | `## 2026-04-15 formal_r4 更新` |
+| 12 | 266 | `## 2026-04-15 formal_r5 更新` |
+| 13 | 282 | `## 2026-04-15 项目维护更新` |
+| 14 | 296 | `## 2026-04-15 formal_r6 操作补充` |
+| 15 | 316 | `## 2026-04-15 formal_r7 操作补充` |
+| 16 | 331 | `## 2026-04-15 formal_r8 操作补充` |
+| 17 | 360 | `## 2026-04-15 formal_r10 操作补充` |
+| 18 | 384 | `## 2026-04-15 formal_r11 操作补充` |
+| 19 | 408 | `## 2026-04-15 formal_r9 操作补充` |
+| 20 | 432 | `## 2026-04-16 self-opt study 操作补充` |
+| 21 | 457 | `## 2026-04-16 self-opt confirmatory 操作补充` |
+| 22 | 486 | `## 2026-04-16 self-opt return_recovery 操作补充` |
+| 23 | 512 | `## 2026-04-16 self-opt return_recovery_r2 操作补充` |
+| 24 | 537 | `## 2026-04-16 trade plan 显示语义纠偏` |
+| 25 | 550 | `## 2026-04-16 live 默认执行切换到 `policy_v5b` recent strongest branch` |
+| 26 | 606 | `## 2026-04-17 self-opt return_recovery_r3 预置` |
+| 27 | 630 | `## 2026-04-17 continuous_policy 语义审计与设计合同固化` |
+| 28 | 651 | `## 2026-04-18 continuous_policy semantic_guard 执行口径` |
+| 29 | 673 | `## 2026-04-18 continuous_policy budget split 实验口径` |
+| 30 | 689 | `## 2026-04-18 budget_layer_ablation_r2 正式执行记录` |
+| 31 | 708 | `## 2026-04-18 alpha_result_value_budget_r1 操作口径` |
+| 32 | 728 | `## 2026-04-18 split heads cash timing v2 操作口径` |
+| 33 | 744 | `## 2026-04-18 split heads cash timing v2 正式运行记录` |
+| 34 | 760 | `## 2026-04-18 translation guard v2 操作口径` |
+| 35 | 773 | `## 2026-04-19 split_heads_cash_timing_r3 操作口径` |
+| 36 | 793 | `## 2026-04-19 split_heads_cash_timing_r4 操作口径` |
+| 37 | 815 | `## 2026-04-19 split_heads_lifecycle_arbitration_r5 操作记录` |
+| 38 | 841 | `## 2026-04-19 r6 操作状态` |
+| 39 | 870 | `## 2026-04-19 r6b 操作状态` |
+| 40 | 925 | `## 2026-04-20 r7 操作闭环` |
+| 41 | 945 | `## 2026-04-21 r8 constraint arbitration 操作闭环` |
+| 42 | 1037 | `## 2026-04-21 r9 intent-preserving translation 执行记录` |
+| 43 | 1083 | `## 2026-04-21 Default Execution Operations Update` |
+| 44 | 1114 | `## 2026-04-21 Frontend Task Surface Simplification` |
+| 45 | 1135 | `## 2026-04-21 Frontend Simplified Chinese Encoding Repair` |
+| 46 | 1148 | `## 2026-04-22 Policy Score Display Semantics Repair` |
+| 47 | 1183 | `## 2026-04-22 Project Systematic Maintenance Sweep` |
+| 48 | 1204 | `## 2026-04-22 Main/Sub Brain Integrity Maintenance` |
+| 49 | 1219 | `## 2026-04-22 文档收口与中文化口径` |
+| 50 | 1231 | `## 2026-04-22 episodic_memory 分层归档口径` |
+| 51 | 1243 | `## 2026-04-22 r10 deploy-executability 操作入口` |
+| 52 | 1280 | `## 2026-04-22 r10 预算/动作解耦补丁验证命令` |
+| 53 | 1312 | `## 2026-04-22 r10 卖出来源归因复跑命令` |
+| 54 | 1347 | `## 2026-04-23 r10 sell-source v7c 复跑命令` |
+| 55 | 1372 | `## 2026-04-23 r11 sell-source contract 训练侧核验命令` |
+| 56 | 1403 | `## 2026-04-23 默认执行池外持仓显式动作修复` |
+| 57 | 1426 | `## 2026-04-23 r11 sell-source contract 正式 study 与补充复核命令` |
+| 58 | 1447 | `## 2026-04-23 r11 held-side release/funding 重审与 dry-run 命令` |
+| 59 | 1461 | `## 2026-04-23 r11b v11 正式 study 与 held-side detail 命令` |

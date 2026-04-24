@@ -746,8 +746,21 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "cp_hier_v4_holdcash_r5",
         ),
     }
+    archive_memory_sources = {
+        "daily_research/brain/state_center.md": (
+            "daily_research/brain/references/state_center_history_raw_20260424.md",
+        ),
+        "daily_research/brain/operations_center.md": (
+            "daily_research/brain/references/operations_center_history_raw_20260424.md",
+        ),
+    }
     for relative_path, snippets in required_strings.items():
         text = _read_text(relative_path)
+        # Historical compression keeps current entry files short while preserving
+        # older consistency markers in raw archives. Treat the entry plus its
+        # archive as the memory surface for legacy marker checks.
+        for archive_path in archive_memory_sources.get(relative_path, ()):
+            text += "\n" + _read_text(archive_path)
         for snippet in snippets:
             _require(
                 snippet in text,

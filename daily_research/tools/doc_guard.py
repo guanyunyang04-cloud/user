@@ -27,6 +27,7 @@ DEFAULT_DOCS = [
     "daily_research/brain/identity_layer.md",
     "daily_research/brain/state_center.md",
     "daily_research/brain/knowledge_center.md",
+    "daily_research/brain/continuous_policy_design_contract.md",
     "daily_research/brain/brain_architecture.md",
     "daily_research/brain/operations_center.md",
     "daily_research/brain/governance_layer.md",
@@ -103,6 +104,18 @@ DOC_RULES = {
             (r"当前\s*live\s*默认执行", "mutable live default belongs in state_center and active_execution_strategy, not identity_layer"),
             (r"regoff_k2_5d_ensemble_native_anchor", "stale live default marker must not be kept in identity_layer"),
         ),
+    ),
+    "daily_research/brain/state_center.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+    ),
+    "daily_research/brain/operations_center.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
+    ),
+    "daily_research/brain/continuous_policy_design_contract.md": DocRule(
+        warn_lines=180,
+        max_lines=260,
     ),
     "daily_research/brain/brain_architecture.md": DocRule(
         warn_lines=160,
@@ -241,10 +254,43 @@ REQUIRED_DOC_SNIPPETS = {
         "## 历史原文",
         "episodic_memory_history_raw_20260317_20260422.md",
     ),
+    "daily_research/brain/state_center.md": (
+        "## 当前结论",
+        "## 历史归档入口",
+        "state_center_history_raw_20260424.md",
+        "state_center_evidence_index_20260424.md",
+    ),
+    "daily_research/brain/operations_center.md": (
+        "## 默认操作纪律",
+        "## 历史归档入口",
+        "operations_center_history_raw_20260424.md",
+        "operations_center_evidence_index_20260424.md",
+    ),
+    "daily_research/brain/continuous_policy_design_contract.md": (
+        "## 北极星",
+        "## 历史归档入口",
+        "continuous_policy_design_contract_history_raw_20260424.md",
+        "continuous_policy_design_contract_evidence_index_20260424.md",
+    ),
     "daily_research/brain/references/episodic_memory_evidence_index_20260422.md": (
         "# episodic_memory 证据索引",
         "历史原文",
         "## 标题索引",
+    ),
+    "daily_research/brain/references/state_center_evidence_index_20260424.md": (
+        "# state_center evidence index",
+        "state_center_history_raw_20260424.md",
+        "## Heading Index",
+    ),
+    "daily_research/brain/references/operations_center_evidence_index_20260424.md": (
+        "# operations_center evidence index",
+        "operations_center_history_raw_20260424.md",
+        "## Heading Index",
+    ),
+    "daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md": (
+        "# continuous_policy_design_contract evidence index",
+        "continuous_policy_design_contract_history_raw_20260424.md",
+        "## Heading Index",
     ),
     "daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md": (
         "# 研究日志",

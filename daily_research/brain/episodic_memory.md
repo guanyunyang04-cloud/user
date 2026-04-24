@@ -12,6 +12,7 @@
 - 当前默认执行链仍是 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`，默认 production root 仍是 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前 active 执行口径的物化真源为 `daily_research/output/active_execution_strategy.json`；`identity_layer.md` 不再承载可变 live 默认、最新分数或实验指标。
 - 当前文档守卫已显式检查 active 执行口径与 `state_center.md` / `knowledge_center.md` 的一致性，并禁止 mutable live 默认回流到 `identity_layer.md`。
+- 当前 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 已完成历史归档压缩；长原文与标题索引统一下沉到 `daily_research/brain/references/`。
 - 当前默认执行分数语义已修为 selected composite decision score，对外字段使用 `model_decision_score` / `模型综合决策分`；`learned_score` 只作为 sub-head / debug 信号。
 - 当前 continuous_policy 研究主矛盾仍是 `deploy intent not executable`：r9 已说明 `clip reduction != deploy executability`，后续不得把减少 budget clip 误当作执行意图闭环。
 - 当前 r7 / r8 / r9 的证据关系：
@@ -570,3 +571,21 @@
   - 事实：`doc_guard.py check` 与 `brain_integrity_check.py --json` 已在修正后通过；最终验证需继续包含 `project_consistency_check.py`、`py_compile` 与 `git diff --check`。
   - 推断：原问题不是执行策略本身切换，而是 mutable live 事实被放进了身份层，导致状态中枢、知识中枢和 artifact 之间存在误读风险。
   - 决策：后续若身份层再次出现具体 live 默认、实验指标或最新 winner，应先视作文档职责漂移修复，再继续任何重动作。
+
+## 2026-04-24 state / operations / design contract 历史归档压缩
+
+- 动作前自检：
+  - 事实：用户要求继续做历史归档压缩；上轮遗留风险是 `state_center.md` 与 `operations_center.md` 仍承载大量历史日期段。
+  - 事实：`continuous_policy_design_contract.md` 也已膨胀为 r1-r11b 的合同演化长文，适合同步归档。
+  - 约束：本轮只压缩 brain 文档，不启动训练、不运行行为审计、不切换 live、不改写 promotion。
+  - 假设：先原样归档 raw history，再生成标题索引，最后重写当前入口，可以降低丢证据与误删关键命令的风险。
+- 已完成实现：
+  - 原样归档 `state_center.md` 到 `daily_research/brain/references/state_center_history_raw_20260424.md`，并生成 `state_center_evidence_index_20260424.md`。
+  - 原样归档 `operations_center.md` 到 `daily_research/brain/references/operations_center_history_raw_20260424.md`，并生成 `operations_center_evidence_index_20260424.md`。
+  - 原样归档 `continuous_policy_design_contract.md` 到 `daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`，并生成 `continuous_policy_design_contract_evidence_index_20260424.md`。
+  - 三个入口文件已改写为当前结论、当前纪律、当前合同与历史归档入口。
+  - `doc_guard.py` 已新增这三个入口文件的行数上限与归档引用守卫。
+- 动作后复盘：
+  - 事实：归档前原文均已保全，并记录原始行数与 SHA256；入口文档不再承载长历史日志。
+  - 推断：后续接管成本会下降，且需要旧证据时仍可通过索引精确回到原文标题。
+  - 决策：后续若这三个入口再次膨胀，应优先追加到 `episodic_memory.md` 或 `brain/references/`，不要把历史过程重新堆回当前入口。

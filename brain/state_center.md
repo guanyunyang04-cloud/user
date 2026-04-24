@@ -7,9 +7,11 @@
   - 已复核主脑与 `daily_research` 分脑接管链路，现有 `brain_integrity_check.py --json`、`doc_guard.py check` 与 `project_consistency_check.py` 均通过。
   - 已发现并纠偏 `daily_research/brain/identity_layer.md` 中残留的可变 live 默认旧口径；身份层改为只保留目标、边界和事实入口。
   - `daily_research` 当前 live 默认执行以 `daily_research/output/active_execution_strategy.json` 为物化真源，当前 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+  - 已完成 `daily_research` 的 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 历史归档压缩；长原文与标题索引已下沉到 `daily_research/brain/references/`。
 - 当前决策：
   - 主脑只记录维护摘要；`daily_research` 的具体 live、research、continuous_policy 状态继续由分脑承载。
   - 后续若身份层再次出现可变 live 默认或具体实验指标，应视为文档职责漂移，先纠偏再继续重动作。
+  - 后续若状态、操作或合同入口再次膨胀，应先追加 references / episodic 索引，而不是把历史过程重新堆回当前入口。
 
 ## 2026-04-23 daily_research r11 卖出来源契约训练侧接通状态
 - 当前事实：
