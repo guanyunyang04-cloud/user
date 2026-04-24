@@ -56,6 +56,7 @@ class DocRule:
     warn_lines: int | None = None
     max_lines: int | None = None
     forbidden_heading_patterns: tuple[tuple[str, str], ...] = ()
+    forbidden_text_patterns: tuple[tuple[str, str], ...] = ()
     enforce_non_decreasing_dated_headings: bool = False
 
 
@@ -97,6 +98,10 @@ DOC_RULES = {
         max_lines=260,
         forbidden_heading_patterns=(
             (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "daily_research identity layer should stay a current identity document instead of becoming a dated log"),
+        ),
+        forbidden_text_patterns=(
+            (r"当前\s*live\s*默认执行", "mutable live default belongs in state_center and active_execution_strategy, not identity_layer"),
+            (r"regoff_k2_5d_ensemble_native_anchor", "stale live default marker must not be kept in identity_layer"),
         ),
     ),
     "daily_research/brain/brain_architecture.md": DocRule(
@@ -220,6 +225,11 @@ REQUIRED_DOC_SNIPPETS = {
     "daily_research/README.md": (
         "权威接管真源",
         "daily_research/brain/",
+    ),
+    "daily_research/brain/identity_layer.md": (
+        "## 5. 当前事实入口",
+        "daily_research/brain/state_center.md",
+        "daily_research/output/active_execution_strategy.json",
     ),
     "daily_research/execution/使用教程.md": (
         "权威操作真源",
@@ -729,6 +739,51 @@ def _check_document_layout() -> list[str]:
     return issues
 
 
+def _check_active_execution_brain_alignment() -> list[str]:
+    issues: list[str] = []
+    active_path = WORKSPACE_ROOT / "daily_research/output/active_execution_strategy.json"
+    if not active_path.exists():
+        return issues
+    try:
+        active = json.loads(active_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        return [f"active_execution_strategy_invalid_json:{exc}"]
+    if not isinstance(active, dict):
+        return ["active_execution_strategy_must_be_object"]
+
+    active_label = str(active.get("trade_plan_candidate_label") or active.get("candidate_label") or "").strip()
+    active_profile = str(
+        active.get("effective_live_execution_profile")
+        or active.get("execution_alignment_profile")
+        or active.get("execution_policy_label")
+        or ""
+    ).strip()
+    if not active_label:
+        issues.append("active_execution_strategy_label_missing")
+        return issues
+
+    for relative_path in (
+        "daily_research/brain/state_center.md",
+        "daily_research/brain/knowledge_center.md",
+    ):
+        path = WORKSPACE_ROOT / relative_path
+        if not path.exists():
+            issues.append(f"active_execution_brain_target_missing:{relative_path}")
+            continue
+        text = _read_text(path)
+        if active_label not in text:
+            issues.append(f"active_execution_label_missing_from_brain:{relative_path}:{active_label}")
+        if active_profile and active_profile not in text:
+            issues.append(f"active_execution_profile_missing_from_brain:{relative_path}:{active_profile}")
+
+    identity_path = WORKSPACE_ROOT / "daily_research/brain/identity_layer.md"
+    if identity_path.exists():
+        identity_text = _read_text(identity_path)
+        if active_label in identity_text or "当前 live 默认执行" in identity_text:
+            issues.append("mutable_active_execution_state_leaked_into_identity_layer")
+    return issues
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     has_issue = False
     for raw in args.files:
@@ -776,6 +831,14 @@ def cmd_check(args: argparse.Namespace) -> int:
                     for line in matches[: args.show_lines]:
                         print(f"    ! {line}")
 
+            for pattern, reason in rule.forbidden_text_patterns:
+                matches = _matching_lines(lines, pattern)
+                print(f"  forbidden_text_matches={len(matches)} for rule: {reason}")
+                if matches:
+                    has_issue = True
+                    for line in matches[: args.show_lines]:
+                        print(f"    ! {line}")
+
             if rule.enforce_non_decreasing_dated_headings:
                 headings = _dated_headings(lines)
                 out_of_order_pairs: list[tuple[tuple[int, str, str], tuple[int, str, str]]] = []
@@ -804,6 +867,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     if layout_issues:
         has_issue = True
         for issue in layout_issues[: args.show_lines]:
+            print(f"    ! {issue}")
+
+    active_alignment_issues = _check_active_execution_brain_alignment()
+    print(f"[active-execution] brain_alignment_issues={len(active_alignment_issues)}")
+    if active_alignment_issues:
+        has_issue = True
+        for issue in active_alignment_issues[: args.show_lines]:
             print(f"    ! {issue}")
 
     brain_findings = run_brain_integrity_checks()

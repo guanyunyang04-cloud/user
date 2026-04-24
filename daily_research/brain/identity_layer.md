@@ -1,6 +1,6 @@
 # Daily Research 身份层
 
-快照日期：`2026-04-14`
+快照日期：`2026-04-24`
 
 ## 1. 我是谁
 - `daily_research` 是当前工作区的正式生产研究与执行主线。
@@ -42,25 +42,20 @@
 - `requested_recent_end_date` 与 `effective recent validation end` 必须分开记录。
 - live 默认执行不得被单次 recent 结果静默改写。
 
-## 5. 当前成功定义
-- strongest-model 当前三层答案已经重新对齐：
-  - `formal winner = short_expert_monthly_v1`
-  - `recent winner = short_expert_monthly_v1`
-  - `promotable winner = short_expert_monthly_v1`
-- 当前 live 默认执行仍是：
-  - `short_expert_monthly_v1 + regoff_k2_5d_ensemble_native_anchor`
-- learned-control 当前最强 deployable candidate 已前移到：
-  - `short_expert_policy_v5b__k1_20d = 0.1177`
-- learned-control 当前 recent winner 也已前移到：
-  - `short_expert_policy_v5b = 0.1200`
-- cross-family learned-control 的历史 fresh formal best 仍是：
-  - `short_expert_policy_v4b = 0.1008`
-- 但当前 active v5 family 的 fresh formal best 是：
-  - `short_expert_policy_v5b = 0.0839`
+## 5. 当前事实入口
+- 身份层只保留目标、边界和硬约束，不再承载可变的 live 默认、winner 数值或阶段指标。
+- 当前状态、当前优先级、当前 live 默认解释：
+  - `daily_research/brain/state_center.md`
+- 稳定事实、硬规则与长期教训：
+  - `daily_research/brain/knowledge_center.md`
+- 当前 active 执行物化真源：
+  - `daily_research/output/active_execution_strategy.json`
+- 如果身份层与上述真源冲突，以状态中枢和 active artifact 为准，并立即回写纠偏。
 
 ## 6. 当前禁区
 - 不得把 learned-control recent 胜利直接写成 promotion 结论。
 - 不得把 selected formal profile、constrained best、fresh formal best 和 live default 混写成一个“当前最强”。
 - 不得在没有写回 brain 的情况下，让关键状态只存在于终端会话里。
+- 不得把可变 live 默认、最新分数或实验指标长期写在 `identity_layer.md`。
 - 不得继续把宽扫 hand-crafted repair 当默认主研究路线。
 - 不得再把 `baseline_current` 写成 strongest-model 当前 recent winner。

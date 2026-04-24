@@ -370,7 +370,7 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
     "split_heads_sell_source_contract_r11b": {
         "label_preset": ["holdcash_v3"],
         "decoder_profile": ["budget_v3"],
-        "loss_profile": ["alpha_result_value_budget_split_v9", "alpha_result_value_budget_split_v10"],
+        "loss_profile": ["alpha_result_value_budget_split_v10", "alpha_result_value_budget_split_v11"],
         "budget_semantics": ["action_budget_split_v1"],
         "budget_calibration": ["cash_constraint_sell_source_guard_v7"],
         "budget_objective": ["result_value_v9", "result_value_v10"],
@@ -675,7 +675,7 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
     "split_heads_sell_source_contract_r11b": {
         "label_preset": "holdcash_v3",
         "decoder_profile": "budget_v3",
-        "loss_profile": "alpha_result_value_budget_split_v10",
+        "loss_profile": "alpha_result_value_budget_split_v11",
         "budget_semantics": "action_budget_split_v1",
         "budget_calibration": "cash_constraint_sell_source_guard_v7",
         "budget_objective": "result_value_v9",

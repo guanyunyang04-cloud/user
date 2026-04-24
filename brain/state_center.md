@@ -1,6 +1,15 @@
 # 主脑状态中枢
 
-快照日期：`2026-04-23`
+快照日期：`2026-04-24`
+
+## 2026-04-24 主分脑维护状态
+- 当前事实：
+  - 已复核主脑与 `daily_research` 分脑接管链路，现有 `brain_integrity_check.py --json`、`doc_guard.py check` 与 `project_consistency_check.py` 均通过。
+  - 已发现并纠偏 `daily_research/brain/identity_layer.md` 中残留的可变 live 默认旧口径；身份层改为只保留目标、边界和事实入口。
+  - `daily_research` 当前 live 默认执行以 `daily_research/output/active_execution_strategy.json` 为物化真源，当前 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+- 当前决策：
+  - 主脑只记录维护摘要；`daily_research` 的具体 live、research、continuous_policy 状态继续由分脑承载。
+  - 后续若身份层再次出现可变 live 默认或具体实验指标，应视为文档职责漂移，先纠偏再继续重动作。
 
 ## 2026-04-23 daily_research r11 卖出来源契约训练侧接通状态
 - 当前事实：
@@ -127,3 +136,14 @@
 - 主脑层决策：
   - 主脑继续维持“分层方向正确、held-side 学习闭环尚未完成”的全局判断，不回退到“整体原理错误”叙事。
   - 后续如继续投入正式算力，应优先围绕 `result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7` 的 held-side release/funding 学习加强版推进，而不是让主脑承载实验细节。
+
+## 2026-04-23 daily_research r11b v11 正式 study 状态
+- 当前事实：
+  - `daily_research` 已完成正式 bounded self-opt：`cp_v3_sell_source_contract_r11b__study_r1`，`objective_profile = sell_source_contract_v2`，共 `4` 个 screening trial 与 `2` 个自动 confirmatory trial，并补做了 `confirm_03_semantic_v11v9`。
+  - 训练侧已新增 `alpha_result_value_budget_split_v11`，并让 `funding_release_discipline_loss` 支持 `v10 / v11` 变体；held-side 审计现已可导出逐事件明细。
+  - `v11 + result_value_v10` 不再像旧 `v10/v10` 那样彻底失稳，但自动 confirm 仍为 `shadow_only`，且 `deploy_funding_rebalance_sell_share = 0.9699`、`deploy_funding_release_consistent_share = 0.0`，说明更强 loss 并没有自动换来 release 学成。
+  - `v11 + result_value_v9` 证明 funding 语义可以继续被清理，`deploy_funding_rebalance_sell_share = 0.6957`、`deploy_funding_rebalance_forward_excess_5d = -0.0121`，但 `deploy_intent_realized_rate = 0.2627`，说明 held-side 改善尚未和 deploy executability 同步成立。
+  - held-side 逐事件明细显示：自动 confirm 共有 `129` 次 funding trim，集中在 `002371.SZ / 001309.SZ / 002049.SZ`；语义线只有 `16` 次 funding trim，集中在 `002049.SZ / 002157.SZ`，但两条线的 `deploy_funding_release_consistent_share` 都仍为 `0.0`。
+- 主脑层决策：
+  - 主脑维持“整体分层方向正确、真正瓶颈已收敛到 held-side release 学习与 deploy/order translation 耦合”的判断。
+  - 当前不允许把 `result_value_v10` 升为默认 objective，也不允许把 `v11` 单独视为 promotion 证据；实验细节、命令与逐仓证据继续只写 `daily_research/brain/`。

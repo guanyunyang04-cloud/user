@@ -89,7 +89,9 @@
   - `recent = short_expert_monthly_v1`
   - `promotable = short_expert_monthly_v1`
 - 当前 live 默认执行稳定语义：
-  - `short_expert_policy_v5b + regoff_k1_3d_ensemble_native_anchor`
+  - active label：`short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+  - active manifest：`daily_research/output/active_execution_strategy.json`
+  - production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`
 
 ## 2. 硬规则
 - 必须 `brain-first`
@@ -659,3 +661,31 @@
   - 该脚本会写回 `latest_behavior_audit_summary.json`。
   - 并行运行虽然不一定破坏单个独立审计文件，但可能导致 latest 指针 rename 竞争或结果覆盖。
   - 正确做法是顺序运行；若曾并行触发过，应立即按同一 tag 串行覆盖一遍，清掉 latest 竞态歧义。
+
+## 2026-04-23 r11b v11 loss 与逐仓 held-side 审计知识
+
+- 新知识 1：`alpha_result_value_budget_split_v11` 的真实增量不是“自动更强”，而是“能把 funding 语义往更严格方向推”，但副作用会直接打到 deploy executability。
+  - `v11 + result_value_v10` 的自动 confirm 不再像旧 `v10/v10` 那样完全失稳，说明更强 release-side loss 确实在起作用。
+  - 但它仍有 `deploy_funding_rebalance_sell_share = 0.9699`、`deploy_funding_release_consistent_share = 0.0`、`cash_timing_quality_1d = -0.0739`。
+  - `v11 + result_value_v9` 把 funding share 压到 `0.6957`，并把 funding sell 的 `forward_excess_5d` 压到 `-0.0121`，但 `deploy_intent_realized_rate` 同时掉到 `0.2627`。
+  - 这说明 `v11` 现在更像一把“更严厉的 funding 纪律杠杆”，而不是可直接 promotion 的完成态。
+
+- 新知识 2：当 held-side detail 的 `event_count` 大幅下降、但 `deploy_funding_release_consistent_share` 仍为 `0.0` 时，正确结论是“funding trim 变少了”，不是“release 学成了”。
+  - 自动 confirm 有 `129` 次 funding trim，语义线只有 `16` 次。
+  - 但两条线的 `deploy_funding_release_consistent_share` 都仍然是 `0.0`。
+  - 因而 `v11 + v9` 当前证明的是“可以更少、更克制地做 funding trim”，不是“已经学会该释放哪些旧仓”。
+
+- 新知识 3：逐仓明细能够直接揭示 funding 污染是“广泛扩散”还是“集中在少数旧仓反复被修剪”。
+  - 自动 confirm 的 trim 明显集中在 `002371.SZ / 001309.SZ / 002049.SZ`，其中 `001309.SZ` 的 `avg_forward_excess_5d = 0.0665`，属于需要重点警惕的正向污染源。
+  - 语义线的 trim 集中在 `002049.SZ / 002157.SZ`，同时仍保留 `002195.SZ`、`000070.SZ` 这样的 protected-hold conflict 个案。
+  - 因此未来不能只看 aggregate share，还要看“是哪几个旧仓在反复承担 funding 来源”。
+
+- 新知识 4：`sell_source_contract_v2` 的 composite 排序会偏向“收益和执行率更完整”的分支，因此语义更干净但可执行性塌陷的线需要人工补 confirm。
+  - `trial_01 = v11 + v9` 在 screening 中 `composite = -1.132652`，不会自动进入 confirm。
+  - 但它恰好是本轮最能证明“funding 污染可以继续下降”的语义线，所以必须手动补做 `confirm_03_semantic_v11v9`。
+  - 这不是对自动选优器的不信任，而是承认当前 composite 还无法完全覆盖“值得保留的失败样本”。
+
+- 新知识 5：当前最难的不是再降一点 funding share，而是把 held-side release 学习和 deploy/order translation 一起闭环。
+  - 只看 funding cleanliness，`v11 + v9` 已经比自动 confirm 更好。
+  - 但它的 `order_translation_conflict_rate = 0.3869`、`deploy_intent_realized_rate = 0.2627`，说明 release-side 约束一旦变强，执行链就会立刻暴露出新的耦合断点。
+  - 所以下一阶段真正要攻的不是“继续盲目加大 release loss”，而是把 held-side learning、translation drift 和 deploy executability 作为一个联合问题处理。

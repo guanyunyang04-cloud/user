@@ -537,3 +537,45 @@
   - `budget_calibration = cash_constraint_sell_source_guard_v7`
   - `objective_profile = sell_source_contract_v2`
   - 该起点的含义是：先保留已经正式证明有效的 objective/loss 组合，再用更严格的 held-side 合同继续压缩 funding-sell 污染，而不是直接扶正未过 confirm 的 `result_value_v10`。
+
+## 2026-04-23 r11b v11 loss 合同修正
+
+- `alpha_result_value_budget_split_v11` 的设计职责：
+  - 不是直接替代 `v10` 成为默认 loss。
+  - 而是更强地约束：
+    - `sell_release_value`
+    - `release_value_target`
+    - `release_gate_target`
+    - `deploy_executability_target`
+    - `funding_release_total`
+  - 并在 `funding_release_discipline_loss` 中把 `disciplined_funding_need`、dominant gap 和 margin 惩罚显式加重。
+
+- `v11` 的正式解释规则：
+  - 若 `v11 + result_value_v10` 仍出现：
+    - 过高的 `deploy_funding_rebalance_sell_share`
+    - `deploy_funding_release_consistent_share = 0`
+    - 为负的 `cash_timing_quality_1d`
+    - `shadow_only`
+    则不得把它解释成“更强 loss 已经完成 held-side 学习闭环”。
+  - 若 `v11 + result_value_v9` 虽然显著压低 funding share、并把 `deploy_funding_rebalance_forward_excess_5d` 压到非正，但同时把 `deploy_intent_realized_rate` 压低到不可接受区间，则不得把它当作可推广主线，只能视为语义改善证据。
+
+- `r11b` 之后的合同更新：
+  - `deploy_funding_release_consistent_share` 仍为 `0.0` 时，不论 funding share 降到多低，都不能宣称 release head 已学成。
+  - held-side 新 contract 不只要求“少卖、卖得干净”，还要求：
+    - deploy intent 不显著塌陷
+    - order translation conflict 不显著恶化
+    - hold continuity 不被系统性破坏
+  - 因而 future confirm 的最低验收语言必须同时覆盖：
+    - `deploy_funding_rebalance_sell_share`
+    - `deploy_funding_rebalance_forward_excess_5d`
+    - `deploy_funding_release_consistent_share`
+    - `deploy_intent_realized_rate`
+    - `order_translation_conflict_rate`
+
+- 逐仓 held-side detail export 的合同地位：
+  - 当研究目标涉及 held-side release/funding 时，`--export-held-side-details` 产物应被视为标准审计附件，而不是可有可无的调试文件。
+  - 原因是 aggregate share 无法告诉我们 funding trim 是：
+    - 广泛分散
+    - 集中在少数旧仓反复修剪
+    - 还是以少量 protected-hold conflict 为主
+  - 当前 `001309.SZ`、`002371.SZ`、`002049.SZ` 这类重复 trim 名单，已经证明逐仓明细对合同判读具有实质价值。

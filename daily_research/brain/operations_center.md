@@ -1457,3 +1457,27 @@
 - 当前操作纪律：
   - `analyze_behavior_gap.py` 不要并行跑多个实例写同一个 latest 行为摘要。
   - Windows 控制台默认 `gbk` 输出下，`analyze_behavior_gap.py` 建议总是带 `PYTHONIOENCODING='utf-8'`，避免打印阶段的 `UnicodeEncodeError` 干扰前台执行判断。
+
+## 2026-04-23 r11b v11 正式 study 与 held-side detail 命令
+
+- 正式 bounded study（已执行）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_sell_source_contract_r11b --trial-count 4 --confirmatory-max-candidates 2 --study-tag cp_v3_sell_source_contract_r11b__study_r1`
+- 正式 study 主要产物：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_sell_source_contract_r11b__study_r1/study_summary.json`
+  - 当前自动 performance champion confirm：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11b__study_r1__confirm_01/protocol_summary.json`
+  - 当前自动 stability champion confirm：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11b__study_r1__confirm_02/protocol_summary.json`
+- 手动补做语义 confirm（等价 standalone 复现实例）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 -m daily_research.continuous_policy.run_continuous_policy_protocol --tag cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9 --pool-name learned_all_a --max-universe-size 1200 --label-preset holdcash_v3 --trainer-backend formal_torch_seq_v3 --decoder-profile budget_v3 --loss-profile alpha_result_value_budget_split_v11 --budget-semantics action_budget_split_v1 --budget-calibration cash_constraint_sell_source_guard_v7 --budget-objective result_value_v9 --alpha-prior-source active_execution_strategy --daily-head-layout split_v2 --learning-rate 0.0012 --hidden-dim 224 --sequence-layers 2 --daily-hidden-dim 128 --dropout 0.12 --daily-dropout 0.08 --batch-size 512 --epochs 64 --min-epochs 48 --resume-mode fresh`
+  - 语义 confirm 产物：`daily_research/output/continuous_policy/protocols/cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9/protocol_summary.json`
+- held-side detail 审计命令（顺序执行）：
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/continuous_policy/analyze_behavior_gap.py --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_sell_source_contract_r11b__study_r1__confirm_01__evaluate\evaluation_summary.json" --tag cp_v3_sell_source_contract_r11b__study_r1__confirm_01__details_v1 --export-held-side-details --held-side-detail-limit 200`
+  - `$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:\Users\ASUS\miniconda3\envs\yolos\python.exe -X utf8 daily_research/continuous_policy/analyze_behavior_gap.py --evaluation-summary "H:\new_tdx64\PYPlugins\user\daily_research\output\continuous_policy\evaluations\cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9__evaluate\evaluation_summary.json" --tag cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9__details_v1 --export-held-side-details --held-side-detail-limit 200`
+- held-side detail 产物：
+  - `daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_sell_source_contract_r11b__study_r1__confirm_01__details_v1.json`
+  - `daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_sell_source_contract_r11b__study_r1__confirm_01__details_v1__held_side_details.json`
+  - `daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9__details_v1.json`
+  - `daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9__details_v1__held_side_details.json`
+- 当前读取纪律：
+  - `r11b` 的正式结论不能只看自动 confirm；`confirm_03_semantic_v11v9` 是本轮保留下来的关键语义对照线。
+  - `--export-held-side-details` 生成的逐仓明细应作为 held-side 根因分析真源，不再只靠 aggregate share 口头推断。
+  - `analyze_behavior_gap.py` 仍然必须顺序执行，尤其在 detail audit 会同时写 latest 摘要时，不得并行偷跑。

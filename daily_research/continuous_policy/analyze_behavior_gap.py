@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze teacher-vs-model behavior gaps for continuous_policy.")
     parser.add_argument("--evaluation-summary", default=str(LATEST_EVALUATION_SUMMARY_PATH))
     parser.add_argument("--tag", default="")
+    parser.add_argument("--export-held-side-details", action="store_true")
+    parser.add_argument("--held-side-detail-limit", type=int, default=40)
     return parser
 
 
@@ -75,6 +77,64 @@ def _coerce_numeric(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     for column in columns:
         if column in working.columns:
             working[column] = pd.to_numeric(working[column], errors="coerce")
+    return working
+
+
+def _compute_held_side_support_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    working = frame.copy()
+    hold_value_series = working.get("hold_continuation_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    alpha_value_series = working.get("alpha_opportunity_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    sell_release_value_series = working.get("sell_release_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    cash_defense_value_series = working.get("cash_defense_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_value_series = working.get("deploy_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    release_value_series = working.get("release_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_gate_series = working.get("deploy_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    release_gate_series = working.get("release_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
+    deploy_executability_series = working.get(
+        "deploy_executability_target",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    disciplined_funding_need = (
+        0.48 * deploy_executability_series
+        + 0.24 * deploy_gate_series
+        + 0.16 * deploy_value_series
+        + 0.06 * alpha_value_series
+        - 0.16 * hold_value_series
+        - 0.08 * release_value_series
+    ).clip(lower=0.0, upper=1.0)
+    protected_hold_support = (
+        0.34 * hold_value_series
+        + 0.18 * alpha_value_series
+        + 0.12 * deploy_value_series
+        + 0.08 * deploy_gate_series
+        + 0.06 * deploy_executability_series
+        - 0.20 * release_value_series
+        - 0.18 * release_gate_series
+        - 0.14 * sell_release_value_series
+        - 0.08 * cash_defense_value_series
+    ).clip(lower=0.0, upper=1.0)
+    funding_release_support = (
+        0.28 * release_value_series
+        + 0.22 * release_gate_series
+        + 0.18 * sell_release_value_series
+        + 0.10 * cash_defense_value_series
+        + 0.36 * disciplined_funding_need
+        - 0.18 * hold_value_series
+        - 0.08 * alpha_value_series
+    ).clip(lower=0.0, upper=1.0)
+    support_margin = 0.10
+    working["disciplined_funding_need"] = disciplined_funding_need
+    working["protected_hold_support"] = protected_hold_support
+    working["funding_release_support"] = funding_release_support
+    working["held_side_support_gap"] = funding_release_support - protected_hold_support
+    working["held_side_release_consistent"] = (
+        funding_release_support > protected_hold_support + support_margin
+    ).astype(float)
+    working["held_side_against_protected_hold"] = (
+        protected_hold_support > funding_release_support + support_margin
+    ).astype(float)
     return working
 
 
@@ -122,6 +182,202 @@ def _action_pair_rows(
             }
         )
     return rows
+
+
+def _build_held_side_detail_payload(
+    *,
+    action_outcomes: pd.DataFrame,
+    run_tag: str,
+    detail_limit: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if action_outcomes.empty:
+        return pd.DataFrame(), {
+            "event_count": 0,
+            "csv_path": "",
+            "summary_json": "",
+            "origin_counts": {},
+            "top_symbols_by_event_count": [],
+            "top_symbols_by_positive_forward_excess": [],
+            "top_conflict_rows": [],
+            "top_release_consistent_rows": [],
+        }
+    working = _coerce_numeric(
+        action_outcomes,
+        [
+            "current_weight",
+            "target_weight",
+            "delta_weight",
+            "hold_days_before",
+            "forward_excess_5d",
+            "sell_rank_score",
+            "lifecycle_sell_gate",
+            "alpha_opportunity_value",
+            "hold_continuation_value",
+            "sell_release_value",
+            "cash_defense_value",
+            "deploy_value_target",
+            "release_value_target",
+            "deploy_gate_target",
+            "release_gate_target",
+            "deploy_executability_target",
+        ],
+    )
+    working = _compute_held_side_support_columns(working)
+    realized_sell_mask = working.get("weight_change_action", pd.Series("", index=working.index)).astype(str).str.lower().isin(
+        {"reduce", "exit"}
+    )
+    held_side_origin_mask = working.get("sell_execution_origin", pd.Series("", index=working.index)).isin(
+        {"deploy_funding_rebalance", "model_release_signal"}
+    )
+    detail_frame = working.loc[realized_sell_mask & held_side_origin_mask].copy()
+    if detail_frame.empty:
+        return pd.DataFrame(), {
+            "event_count": 0,
+            "csv_path": "",
+            "summary_json": "",
+            "origin_counts": {},
+            "top_symbols_by_event_count": [],
+            "top_symbols_by_positive_forward_excess": [],
+            "top_conflict_rows": [],
+            "top_release_consistent_rows": [],
+        }
+    detail_frame["support_alignment"] = np.where(
+        detail_frame["held_side_release_consistent"] > 0.5,
+        "release_consistent",
+        np.where(
+            detail_frame["held_side_against_protected_hold"] > 0.5,
+            "protected_hold_conflict",
+            "ambiguous",
+        ),
+    )
+    detail_frame["abs_delta_weight"] = detail_frame["delta_weight"].fillna(0.0).abs()
+    detail_frame = detail_frame.sort_values(
+        ["date", "sell_execution_origin", "held_side_support_gap", "forward_excess_5d"],
+        ascending=[True, True, True, False],
+    )
+    detail_columns = [
+        "date",
+        "stock",
+        "model_action",
+        "weight_change_action",
+        "sell_execution_origin",
+        "support_alignment",
+        "current_weight",
+        "target_weight",
+        "delta_weight",
+        "abs_delta_weight",
+        "hold_days_before",
+        "forward_excess_5d",
+        "disciplined_funding_need",
+        "protected_hold_support",
+        "funding_release_support",
+        "held_side_support_gap",
+        "held_side_against_protected_hold",
+        "held_side_release_consistent",
+        "sell_rank_score",
+        "lifecycle_sell_gate",
+        "alpha_opportunity_value",
+        "hold_continuation_value",
+        "sell_release_value",
+        "cash_defense_value",
+        "deploy_value_target",
+        "release_value_target",
+        "deploy_gate_target",
+        "release_gate_target",
+        "deploy_executability_target",
+    ]
+    detail_frame = detail_frame[[column for column in detail_columns if column in detail_frame.columns]].copy()
+    top_symbols = (
+        detail_frame.groupby("stock", dropna=False)
+        .agg(
+            event_count=("stock", "count"),
+            avg_forward_excess_5d=("forward_excess_5d", "mean"),
+            avg_support_gap=("held_side_support_gap", "mean"),
+            avg_disciplined_funding_need=("disciplined_funding_need", "mean"),
+        )
+        .reset_index()
+        .sort_values(["event_count", "avg_forward_excess_5d"], ascending=[False, False])
+    )
+    positive_forward_symbols = (
+        detail_frame.groupby("stock", dropna=False)
+        .agg(
+            event_count=("stock", "count"),
+            total_positive_forward_excess_5d=("forward_excess_5d", lambda values: float(values.clip(lower=0.0).sum())),
+            avg_forward_excess_5d=("forward_excess_5d", "mean"),
+            avg_support_gap=("held_side_support_gap", "mean"),
+        )
+        .reset_index()
+        .sort_values(["total_positive_forward_excess_5d", "event_count"], ascending=[False, False])
+    )
+
+    def _detail_rows(frame: pd.DataFrame, *, ascending: bool) -> list[dict[str, Any]]:
+        if frame.empty:
+            return []
+        trimmed = frame.head(max(int(detail_limit), 1)).copy()
+        rows: list[dict[str, Any]] = []
+        for item in trimmed.to_dict(orient="records"):
+            rows.append(
+                {
+                    "date": str(item.get("date", "") or ""),
+                    "stock": str(item.get("stock", "") or ""),
+                    "sell_execution_origin": str(item.get("sell_execution_origin", "") or ""),
+                    "support_alignment": str(item.get("support_alignment", "") or ""),
+                    "current_weight": float(item.get("current_weight", 0.0) or 0.0),
+                    "target_weight": float(item.get("target_weight", 0.0) or 0.0),
+                    "delta_weight": float(item.get("delta_weight", 0.0) or 0.0),
+                    "hold_days_before": float(item.get("hold_days_before", 0.0) or 0.0),
+                    "forward_excess_5d": float(item.get("forward_excess_5d", 0.0) or 0.0),
+                    "disciplined_funding_need": float(item.get("disciplined_funding_need", 0.0) or 0.0),
+                    "protected_hold_support": float(item.get("protected_hold_support", 0.0) or 0.0),
+                    "funding_release_support": float(item.get("funding_release_support", 0.0) or 0.0),
+                    "held_side_support_gap": float(item.get("held_side_support_gap", 0.0) or 0.0),
+                }
+            )
+        return rows
+
+    conflict_rows = detail_frame.sort_values(
+        ["held_side_support_gap", "forward_excess_5d"],
+        ascending=[True, False],
+    )
+    release_rows = detail_frame.sort_values(
+        ["held_side_support_gap", "forward_excess_5d"],
+        ascending=[False, False],
+    )
+    summary_payload = {
+        "run_tag": run_tag,
+        "event_count": int(len(detail_frame)),
+        "origin_counts": {
+            str(key): int(value)
+            for key, value in detail_frame["sell_execution_origin"].astype(str).value_counts().sort_index().items()
+        },
+        "alignment_counts": {
+            str(key): int(value)
+            for key, value in detail_frame["support_alignment"].astype(str).value_counts().sort_index().items()
+        },
+        "top_symbols_by_event_count": [
+            {
+                "stock": str(item.get("stock", "") or ""),
+                "event_count": int(item.get("event_count", 0) or 0),
+                "avg_forward_excess_5d": float(item.get("avg_forward_excess_5d", 0.0) or 0.0),
+                "avg_support_gap": float(item.get("avg_support_gap", 0.0) or 0.0),
+                "avg_disciplined_funding_need": float(item.get("avg_disciplined_funding_need", 0.0) or 0.0),
+            }
+            for item in top_symbols.head(max(int(detail_limit), 1)).to_dict(orient="records")
+        ],
+        "top_symbols_by_positive_forward_excess": [
+            {
+                "stock": str(item.get("stock", "") or ""),
+                "event_count": int(item.get("event_count", 0) or 0),
+                "total_positive_forward_excess_5d": float(item.get("total_positive_forward_excess_5d", 0.0) or 0.0),
+                "avg_forward_excess_5d": float(item.get("avg_forward_excess_5d", 0.0) or 0.0),
+                "avg_support_gap": float(item.get("avg_support_gap", 0.0) or 0.0),
+            }
+            for item in positive_forward_symbols.head(max(int(detail_limit), 1)).to_dict(orient="records")
+        ],
+        "top_conflict_rows": _detail_rows(conflict_rows, ascending=True),
+        "top_release_consistent_rows": _detail_rows(release_rows, ascending=False),
+    }
+    return detail_frame, summary_payload
 
 
 def _build_semantic_conflicts(
@@ -213,10 +469,13 @@ def _build_semantic_conflicts(
             "model_release_signal_forward_excess_5d": 0.0,
             "deploy_funding_rebalance_forward_excess_5d": 0.0,
             "budget_origin_sell_forward_excess_5d": 0.0,
+            "avg_disciplined_funding_need": 0.0,
             "avg_protected_hold_support": 0.0,
             "avg_funding_release_support": 0.0,
+            "model_release_signal_disciplined_funding_need": 0.0,
             "model_release_signal_keep_support": 0.0,
             "model_release_signal_release_support": 0.0,
+            "deploy_funding_disciplined_funding_need": 0.0,
             "deploy_funding_keep_support": 0.0,
             "deploy_funding_release_support": 0.0,
             "model_release_against_protected_hold_share": 0.0,
@@ -314,6 +573,7 @@ def _build_semantic_conflicts(
     working["small_delta_conflict"] = working["is_semantic_conflict"] & (
         working["abs_delta_weight"] <= working.get("execution_deadband", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
+    working = _compute_held_side_support_columns(working)
     working["small_delta_order_translation_conflict"] = working["is_order_translation_conflict"] & (
         working["abs_delta_weight"] <= working.get("execution_deadband", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
@@ -587,40 +847,11 @@ def _build_semantic_conflicts(
     avg_deploy_executability_target = _safe_mean(
         working.get("deploy_executability_target", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
-    hold_value_series = working.get("hold_continuation_value", pd.Series(0.0, index=working.index)).fillna(0.0)
-    alpha_value_series = working.get("alpha_opportunity_value", pd.Series(0.0, index=working.index)).fillna(0.0)
-    sell_release_value_series = working.get("sell_release_value", pd.Series(0.0, index=working.index)).fillna(0.0)
-    cash_defense_value_series = working.get("cash_defense_value", pd.Series(0.0, index=working.index)).fillna(0.0)
-    deploy_value_series = working.get("deploy_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
-    release_value_series = working.get("release_value_target", pd.Series(0.0, index=working.index)).fillna(0.0)
-    deploy_gate_series = working.get("deploy_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
-    release_gate_series = working.get("release_gate_target", pd.Series(0.0, index=working.index)).fillna(0.0)
-    deploy_executability_series = working.get(
-        "deploy_executability_target",
-        pd.Series(0.0, index=working.index),
-    ).fillna(0.0)
-    protected_hold_support = (
-        0.34 * hold_value_series
-        + 0.18 * alpha_value_series
-        + 0.14 * deploy_value_series
-        + 0.12 * deploy_gate_series
-        + 0.12 * deploy_executability_series
-        - 0.22 * release_value_series
-        - 0.20 * release_gate_series
-        - 0.14 * sell_release_value_series
-        - 0.08 * cash_defense_value_series
-    ).clip(lower=0.0, upper=1.0)
-    funding_release_support = (
-        0.34 * release_value_series
-        + 0.24 * release_gate_series
-        + 0.16 * sell_release_value_series
-        + 0.08 * cash_defense_value_series
-        - 0.24 * hold_value_series
-        - 0.14 * alpha_value_series
-        - 0.12 * deploy_gate_series
-        - 0.10 * deploy_executability_series
-    ).clip(lower=0.0, upper=1.0)
-    support_margin = 0.12
+    disciplined_funding_need = working.get("disciplined_funding_need", pd.Series(0.0, index=working.index)).fillna(0.0)
+    protected_hold_support = working.get("protected_hold_support", pd.Series(0.0, index=working.index)).fillna(0.0)
+    funding_release_support = working.get("funding_release_support", pd.Series(0.0, index=working.index)).fillna(0.0)
+    support_margin = 0.10
+    avg_disciplined_funding_need = _safe_mean(disciplined_funding_need)
     avg_protected_hold_support = _safe_mean(protected_hold_support)
     avg_funding_release_support = _safe_mean(funding_release_support)
     model_action_lookup = working["model_action"].astype(str).str.lower()
@@ -760,9 +991,19 @@ def _build_semantic_conflicts(
         if model_release_signal_sell_mask.any()
         else pd.Series(dtype=float)
     )
+    model_release_signal_disciplined_funding_need = _safe_mean(
+        disciplined_funding_need.loc[model_release_signal_sell_mask]
+        if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
     model_release_signal_release_support = _safe_mean(
         funding_release_support.loc[model_release_signal_sell_mask]
         if model_release_signal_sell_mask.any()
+        else pd.Series(dtype=float)
+    )
+    deploy_funding_disciplined_funding_need = _safe_mean(
+        disciplined_funding_need.loc[deploy_funding_rebalance_sell_mask]
+        if deploy_funding_rebalance_sell_mask.any()
         else pd.Series(dtype=float)
     )
     deploy_funding_keep_support = _safe_mean(
@@ -973,10 +1214,13 @@ def _build_semantic_conflicts(
         "model_release_signal_forward_excess_5d": model_release_signal_forward_excess_5d,
         "deploy_funding_rebalance_forward_excess_5d": deploy_funding_rebalance_forward_excess_5d,
         "budget_origin_sell_forward_excess_5d": budget_origin_sell_forward_excess_5d,
+        "avg_disciplined_funding_need": avg_disciplined_funding_need,
         "avg_protected_hold_support": avg_protected_hold_support,
         "avg_funding_release_support": avg_funding_release_support,
+        "model_release_signal_disciplined_funding_need": model_release_signal_disciplined_funding_need,
         "model_release_signal_keep_support": model_release_signal_keep_support,
         "model_release_signal_release_support": model_release_signal_release_support,
+        "deploy_funding_disciplined_funding_need": deploy_funding_disciplined_funding_need,
         "deploy_funding_keep_support": deploy_funding_keep_support,
         "deploy_funding_release_support": deploy_funding_release_support,
         "model_release_against_protected_hold_share": model_release_against_protected_hold_share,
@@ -1408,6 +1652,9 @@ def main(argv: list[str] | None = None) -> int:
                     "deploy_funding_rebalance_forward_excess_5d": float(
                         semantic_conflicts.get("deploy_funding_rebalance_forward_excess_5d", 0.0) or 0.0
                     ),
+                    "deploy_funding_disciplined_funding_need": float(
+                        semantic_conflicts.get("deploy_funding_disciplined_funding_need", 0.0) or 0.0
+                    ),
                     "deploy_funding_keep_support": float(
                         semantic_conflicts.get("deploy_funding_keep_support", 0.0) or 0.0
                     ),
@@ -1446,6 +1693,9 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "model_release_signal_forward_excess_5d": float(
                         semantic_conflicts.get("model_release_signal_forward_excess_5d", 0.0) or 0.0
+                    ),
+                    "model_release_signal_disciplined_funding_need": float(
+                        semantic_conflicts.get("model_release_signal_disciplined_funding_need", 0.0) or 0.0
                     ),
                     "model_release_signal_keep_support": float(
                         semantic_conflicts.get("model_release_signal_keep_support", 0.0) or 0.0
@@ -1559,6 +1809,21 @@ def main(argv: list[str] | None = None) -> int:
         "bottlenecks": bottlenecks,
         "recommended_focus": recommended_focus,
     }
+    if args.export_held_side_details:
+        detail_frame, detail_payload = _build_held_side_detail_payload(
+            action_outcomes=action_outcomes,
+            run_tag=str(payload["run_tag"]),
+            detail_limit=int(args.held_side_detail_limit),
+        )
+        if not detail_frame.empty:
+            ANALYSIS_ROOT.mkdir(parents=True, exist_ok=True)
+            detail_csv_path = ANALYSIS_ROOT / f"{payload['run_tag']}__held_side_details.csv"
+            detail_summary_path = ANALYSIS_ROOT / f"{payload['run_tag']}__held_side_details.json"
+            detail_frame.to_csv(detail_csv_path, index=False, encoding="utf-8-sig")
+            detail_payload["csv_path"] = str(detail_csv_path.resolve())
+            detail_payload["summary_json"] = str(detail_summary_path.resolve())
+            write_json(detail_summary_path, detail_payload)
+        payload["held_side_details"] = detail_payload
     ANALYSIS_ROOT.mkdir(parents=True, exist_ok=True)
     output_path = ANALYSIS_ROOT / f"{payload['run_tag']}.json"
     write_json(output_path, payload)

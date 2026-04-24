@@ -10,6 +10,8 @@
 - 当前接管默认仍然先读 `identity_layer.md -> state_center.md -> knowledge_center.md -> operations_center.md`；只有需要完整过程证据时才进入本文件和历史原文。
 - 当前生产 / 执行结论仍以 `state_center.md` 为准；本文件只记录过程证据、归档索引和动作后复盘。
 - 当前默认执行链仍是 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`，默认 production root 仍是 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
+- 当前 active 执行口径的物化真源为 `daily_research/output/active_execution_strategy.json`；`identity_layer.md` 不再承载可变 live 默认、最新分数或实验指标。
+- 当前文档守卫已显式检查 active 执行口径与 `state_center.md` / `knowledge_center.md` 的一致性，并禁止 mutable live 默认回流到 `identity_layer.md`。
 - 当前默认执行分数语义已修为 selected composite decision score，对外字段使用 `model_decision_score` / `模型综合决策分`；`learned_score` 只作为 sub-head / debug 信号。
 - 当前 continuous_policy 研究主矛盾仍是 `deploy intent not executable`：r9 已说明 `clip reduction != deploy executability`，后续不得把减少 budget clip 误当作执行意图闭环。
 - 当前 r7 / r8 / r9 的证据关系：
@@ -468,3 +470,103 @@
   - 当前思路不是整体错了。
   - 真正错的是早期把 held-side release/funding 混成 budget 副作用；这部分现在已经被显式拆开，并继续接进正式研究合同。
   - 但 held-side 学习闭环还没有完成，`r11b` 之后真正该验证的是：能否在不牺牲正式 confirm 稳定性的前提下，让 `deploy_funding_release_consistent_share` 从接近 `0` 提升到可解释区间。
+
+## 2026-04-23 r11b v11 正式 study 与 held-side 逐仓复盘
+
+- 动作前自检：
+  - `r11b dry-run` 已打通，本轮真正不确定点不再是“能不能开跑”，而是 `v11` 到底会带来真实 held-side 改善，还是只会把执行链拉塌。
+  - 为避免重复“只看 aggregate share 就下结论”的旧错误，这轮先把 held-side detail export 接进审计，再跑正式 bounded study，并保留手动语义 confirm 作为对照。
+  - 约束保持不变：前台跑，不中断既有训练，不回退到 simulator-only 解释。
+
+- 实施：
+  - 在 `daily_research/continuous_policy/analyze_behavior_gap.py` 中新增：
+    - `--export-held-side-details`
+    - `--held-side-detail-limit`
+    - `disciplined_funding_need`
+    - `held_side_support_gap`
+    - `held_side_release_consistent`
+    - `held_side_against_protected_hold`
+  - 在 `daily_research/continuous_policy/model_seq_v3.py` 中新增：
+    - `alpha_result_value_budget_split_v11`
+    - `funding_release_discipline_loss(variant='v11')`
+  - 在 `daily_research/continuous_policy/run_self_optimizing_study.py` 中把 `split_heads_sell_source_contract_r11b` 扩成 `v10 / v11` 与 `v9 / v10` 联合搜索。
+  - 正式执行：
+    - `cp_v3_sell_source_contract_r11b__study_r1`
+    - 自动 confirm：`confirm_01`、`confirm_02`
+    - 手动补 confirm：`cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9`
+  - 顺序导出逐仓明细：
+    - `confirm_01__details_v1`
+    - `confirm_03_semantic_v11v9__details_v1`
+
+- 动作后复盘：
+  - 事实：
+    - `confirm_01 = v11 + v10`：
+      - `annual_return = 0.5505`
+      - `sharpe = 1.5937`
+      - `deploy_funding_rebalance_sell_share = 0.9699`
+      - `deploy_funding_rebalance_forward_excess_5d = 0.0097`
+      - `deploy_funding_release_consistent_share = 0.0`
+      - `deploy_intent_realized_rate = 0.8708`
+      - `promotion = shadow_only`
+    - `confirm_02 = v10 + v10` 仍为负收益，说明 `result_value_v10` 旧问题没有被自动消除。
+    - `confirm_03_semantic_v11v9`：
+      - `annual_return = 0.4653`
+      - `sharpe = 1.4377`
+      - `deploy_funding_rebalance_sell_share = 0.6957`
+      - `deploy_funding_rebalance_forward_excess_5d = -0.0121`
+      - `deploy_funding_release_consistent_share = 0.0`
+      - `deploy_intent_realized_rate = 0.2627`
+      - `order_translation_conflict_rate = 0.3869`
+      - `promotion = shadow_only`
+    - held-side 明细显示：
+      - 自动 confirm 有 `129` 次 funding trim，且全部来自 `deploy_funding_rebalance`
+      - trim 主要集中在 `002371.SZ`、`001309.SZ`、`002049.SZ`
+      - 语义线只有 `16` 次 funding trim，集中在 `002049.SZ`、`002157.SZ`
+      - 两条线都仍存在 protected-hold conflict，且 `deploy_funding_release_consistent_share` 仍为 `0.0`
+  - 推断：
+    - `v11` 不是无效，它确实能把 funding-sell 往更少、更干净的方向推。
+    - 但当前真正没打通的是“held-side release 学习”和“deploy/order translation 执行闭环”的兼容性；这两者现在仍然互相拉扯。
+    - `result_value_v10` 即使叠加更强的 `v11 loss`，也还没有形成可 promotion 的预算目标。
+  - 自纠偏：
+    - `trial_01 = v11 + v9` 在 screening composite 中很差，若机械依赖自动 confirm，会错过一条重要的语义样本。
+    - 本轮补做 `confirm_03_semantic_v11v9`，避免把“可以更干净但还不可执行”的半成品误记成不存在。
+    - 这次没有再并行跑 `analyze_behavior_gap.py`；逐仓 detail audit 全部按顺序执行，避免 latest 摘要竞态。
+
+- 当前结论：
+  - 当前思路仍然不是整体错了。
+  - `alpha_result_value_budget_split_v11` 已证明 held-side funding 语义还能继续往正确方向推进。
+  - 但 promotion 级别的真正瓶颈已进一步收敛到：release learning、order translation drift 与 deploy executability 的三方耦合还没被同时解决。
+
+## 2026-04-24 接管复核与守卫验证
+
+- 动作前自检：
+  - 事实：用户要求新 agent 在继承已有目标、规则、记忆、经验和计划的前提下继续推进，并要求区分事实、推断、假设。
+  - 事实：当前项目已有主脑/分脑接管合同，默认应先读主脑，再读 `daily_research` 分脑，不得先盲扫 body。
+  - 约束：本轮只是接管与复核，不启动训练、不改 live、不改 promotion、不并行运行会写 latest 摘要的 `analyze_behavior_gap.py`。
+- 已完成动作：
+  - 运行 `brain_bootstrap.py --child daily_research --json`，确认 `daily_research` 分脑状态为 `attached_to_main_brain`。
+  - 用 UTF-8 方式重读主脑与 `daily_research` 的 `identity / state / knowledge / operations / governance` 关键入口，避免把 PowerShell 乱码误判为文件损坏。
+  - 阅读当前未提交差异，确认代码改动集中在 held-side 逐仓审计、`alpha_result_value_budget_split_v11` 与 `split_heads_sell_source_contract_r11b` 搜索口径。
+  - 运行守卫与轻量验证：`brain_integrity_check.py --json`、`doc_guard.py check`、三份修改脚本 `py_compile`、`git diff --check`，均通过。
+- 动作后复盘：
+  - 事实：当时复核的工作树为 `main...origin/main [ahead 33]`，未提交改动记录为 `9` 个既有文件；该轮复核未引入新的可见 Git 变更范围之外的产物。
+  - 推断：brain 写回与代码差异目前一致；当前最新正式结论仍是 r11b/v11 证明方向可继续推进，但所有 confirm 分支仍为 `shadow_only`。
+  - 决策：下一步若继续研究，应把 `release learning / order translation drift / deploy executability` 作为联合问题处理；不得把 `deploy_funding_release_consistent_share = 0.0` 的分支解释为 release head 已学成。
+
+## 2026-04-24 主分脑维护与 active 执行口径纠偏
+
+- 动作前自检：
+  - 事实：用户要求系统审阅、整理、维护、简练并修复主分脑；本轮目标是文档职责、事实口径和守卫一致性，不是重开实验。
+  - 事实：`daily_research/output/active_execution_strategy.json` 中的 active label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`，production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
+  - 事实：`identity_layer.md` 仍残留旧的可变 live 默认口径，属于身份层职责漂移。
+  - 假设：把可变执行事实统一路由到 `state_center.md`、`knowledge_center.md` 与 active artifact，可以降低后续接管误读概率。
+- 已完成实现：
+  - `identity_layer.md` 改为只保留目标、边界、禁区和事实入口，不再记录 mutable live 默认、最新分数或实验指标。
+  - `state_center.md` 与 `knowledge_center.md` 的 active 执行口径统一为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+  - `doc_guard.py` 新增 identity-layer 禁止模式，并新增 active artifact 与 brain 状态/知识中心的对齐检查。
+  - 主脑 `brain/state_center.md` 只记录维护摘要，具体 production 与 continuous_policy 状态继续由 `daily_research` 分脑承载。
+- 动作后复盘：
+  - 事实：本轮未启动训练，未运行会写 `latest_behavior_audit_summary.json` 的新行为审计，未切换 live 默认执行，未改写 promotion gate。
+  - 事实：`doc_guard.py check` 与 `brain_integrity_check.py --json` 已在修正后通过；最终验证需继续包含 `project_consistency_check.py`、`py_compile` 与 `git diff --check`。
+  - 推断：原问题不是执行策略本身切换，而是 mutable live 事实被放进了身份层，导致状态中枢、知识中枢和 artifact 之间存在误读风险。
+  - 决策：后续若身份层再次出现具体 live 默认、实验指标或最新 winner，应先视作文档职责漂移修复，再继续任何重动作。

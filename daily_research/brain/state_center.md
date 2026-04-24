@@ -1,6 +1,21 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-04-23`
+快照日期：`2026-04-24`
+
+## 2026-04-24 接管复核与守卫状态
+- 事实：本轮新接管已按主脑 `brain_bootstrap.py --child daily_research --json` 读取主脑与 `daily_research` 分脑顺序，并纠正了 PowerShell 中文输出乱码的误读风险。
+- 事实：当前工作树仍在 `main...origin/main [ahead 33]`，存在未提交改动，集中在主/分脑写回、文档守卫与既有 `continuous_policy` 变更。
+- 事实：本轮只做接管、差异阅读与轻量守卫验证；未启动训练，未运行会写 `latest_behavior_audit_summary.json` 的新审计，未切换 live 默认执行，未改写 promotion gate。
+- 事实：已纠偏 `identity_layer.md` 中残留的旧 mutable live 默认口径；active 执行事实统一以 `daily_research/output/active_execution_strategy.json` 为物化真源，当前 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+- 事实：`doc_guard.py` 已新增 active artifact 与 `state_center.md` / `knowledge_center.md` 的一致性检查，并禁止 mutable live 默认回流到 `identity_layer.md`。
+- 事实：验证已通过：
+  - `brain_integrity_check.py --json`
+  - `doc_guard.py check`
+  - `project_consistency_check.py`
+  - `py_compile`：`analyze_behavior_gap.py`、`model_seq_v3.py`、`run_self_optimizing_study.py`
+  - `git diff --check`
+- 推断：当前未提交代码与 brain 写回保持一致，r11b/v11 的正式边界仍是 `shadow_only`，下一步不应把 `v11` 或 `result_value_v10` 直接视为 promotion 证据。
+- 决策：后续若继续推进 continuous_policy，应沿“held-side release learning + order translation drift + deploy executability 三方耦合”处理，而不是回退到 simulator-only 或盲目加大 release loss。
 
 ## 2026-04-23 r11 卖出来源契约训练侧接通状态
 - 事实：`continuous_policy` 已把 sell-source contract 接到训练与搜索主链：
@@ -187,7 +202,9 @@
 - strongest-model 当前 recent winner root：
   - `daily_research/output/short_alpha_recent_model_protocol_20260412_r1__short_expert_monthly_v1`
 - 当前 live 默认执行：
-  - `short_expert_policy_v5b + regoff_k1_3d_ensemble_native_anchor`
+  - `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+  - active artifact：`daily_research/output/active_execution_strategy.json`
+  - production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`
 - 当前 execution app 统一入口：
   - `python daily_research/execution/run_execution_app.py status`
 - 当前 execution Web 控制台入口：
@@ -1750,3 +1767,97 @@
 - 当前边界：
   - 本轮未启动训练、未停止训练、未切换 live 默认执行、未改写 promotion gate。
   - `r11b` 当前只完成 dry-run；正式 bounded study 是否开跑，需以后续算力窗口决定。
+
+## 2026-04-23 r11b v11 正式 study 与逐仓审计完成
+- 当前事实：
+  - `daily_research/continuous_policy/analyze_behavior_gap.py` 已继续补强：
+    - `--export-held-side-details`
+    - `--held-side-detail-limit`
+    - `disciplined_funding_need`
+    - `protected_hold_support`
+    - `funding_release_support`
+    - `held_side_support_gap`
+    - `held_side_release_consistent`
+    - `held_side_against_protected_hold`
+  - `daily_research/continuous_policy/model_seq_v3.py` 已新增：
+    - `loss_profile = alpha_result_value_budget_split_v11`
+    - `funding_release_discipline_loss(variant='v11')`
+  - `daily_research/continuous_policy/run_self_optimizing_study.py` 已让 `split_heads_sell_source_contract_r11b` 同时搜索：
+    - `alpha_result_value_budget_split_v10 / v11`
+    - `result_value_v9 / v10`
+  - 正式 study 已完成：
+    - study tag：`cp_v3_sell_source_contract_r11b__study_r1`
+    - `objective_profile = sell_source_contract_v2`
+    - `trial_count = 4`
+    - `completed_trial_count = 4`
+    - `confirmatory_completed_trial_count = 2`
+  - screening 排序：
+    - `trial_03 = v10 + v9`：`performance = 3.154830`，`stability = -2.402259`，`composite = 0.752571`
+    - `trial_02 = v11 + v10`：`performance = 3.356699`，`stability = -2.911040`，`composite = 0.445659`
+    - `trial_04 = v10 + v10`：`performance = 2.096260`，`stability = -2.012034`，`composite = 0.084226`
+    - `trial_01 = v11 + v9`：`performance = 1.533016`，`stability = -2.665668`，`composite = -1.132652`
+  - 自动 confirmatory：
+    - `confirm_01 = alpha_result_value_budget_split_v11 + result_value_v10`
+      - `annual_return = 0.5505`
+      - `sharpe = 1.5937`
+      - `hold_share = 0.6784`
+      - `cash_timing_quality_1d = -0.0739`
+      - `reduce_success_rate_5d = 0.0`
+      - `deploy_intent_realized_rate = 0.8708`
+      - `deploy_funding_rebalance_sell_share = 0.9699`
+      - `deploy_funding_rebalance_forward_excess_5d = 0.0097`
+      - `deploy_funding_disciplined_funding_need = 0.0341`
+      - `deploy_funding_against_protected_hold_share = 0.0233`
+      - `deploy_funding_release_consistent_share = 0.0`
+      - `model_release_signal_sell_count = 0`
+      - `sell_source_floor_guard_share = 0.6926`
+      - `promotion = shadow_only`
+    - `confirm_02 = alpha_result_value_budget_split_v10 + result_value_v10`
+      - `annual_return = -0.3206`
+      - `sharpe = -1.7629`
+      - `deploy_funding_rebalance_sell_share = 0.9185`
+      - `deploy_funding_rebalance_forward_excess_5d = -0.0371`
+      - `deploy_funding_release_consistent_share = 0.0`
+      - `promotion = shadow_only`
+  - 手动补做语义 confirm：
+    - tag：`cp_v3_sell_source_contract_r11b__study_r1__confirm_03_semantic_v11v9`
+    - `loss_profile = alpha_result_value_budget_split_v11`
+    - `budget_objective = result_value_v9`
+    - `annual_return = 0.4653`
+    - `sharpe = 1.4377`
+    - `max_drawdown = -0.1395`
+    - `hold_share = 0.5219`
+    - `cash_timing_quality_1d = 0.0251`
+    - `reduce_success_rate_5d = 0.0`
+    - `release_gate_forward_alignment_5d = 0.0542`
+    - `order_translation_conflict_rate = 0.3869`
+    - `deploy_intent_realized_rate = 0.2627`
+    - `deploy_funding_rebalance_sell_share = 0.6957`
+    - `deploy_funding_rebalance_forward_excess_5d = -0.0121`
+    - `deploy_funding_disciplined_funding_need = 0.0775`
+    - `deploy_funding_against_protected_hold_share = 0.1250`
+    - `deploy_funding_release_consistent_share = 0.0`
+    - `model_release_signal_sell_count = 0`
+    - `sell_source_floor_guard_share = 0.7628`
+    - `promotion = shadow_only`
+  - held-side 逐事件明细：
+    - `confirm_01__details_v1__held_side_details.json`
+      - `event_count = 129`
+      - `origin_counts = {'deploy_funding_rebalance': 129}`
+      - `alignment_counts = {'ambiguous': 126, 'protected_hold_conflict': 3}`
+      - 高频 funding trim：`002371.SZ (55)`、`001309.SZ (40)`、`002049.SZ (15)`
+      - 正向 forward excess 污染集中：`001309.SZ` 的 `avg_forward_excess_5d = 0.0665`
+    - `confirm_03_semantic_v11v9__details_v1__held_side_details.json`
+      - `event_count = 16`
+      - `origin_counts = {'deploy_funding_rebalance': 16}`
+      - `alignment_counts = {'ambiguous': 14, 'protected_hold_conflict': 2}`
+      - 高频 funding trim：`002049.SZ (8)`、`002157.SZ (5)`
+      - 仍存在显式 protected-hold conflict：`002195.SZ@2026-02-04`、`000070.SZ@2026-04-23`
+- 当前推断：
+  - `alpha_result_value_budget_split_v11` 已证明可以把 funding-sell 从“又多又脏”推向“更少、更干净”，但还不能在同一条线里同时保住 deploy executability。
+  - 当前主瓶颈已经进一步收敛到：held-side release 学习、order translation drift 与 deploy intent realization 之间仍然强耦合。
+  - `result_value_v10` 在更强 loss 下虽然不再完全崩溃，但仍没有通过“低 funding 污染 + 非零 release consistency + 正常执行率”三重门。
+- 当前边界：
+  - 本轮未中断训练。
+  - 本轮未切换 live 默认执行。
+  - 本轮未改写 promotion gate；`r11b` 当前所有 confirm 分支仍为 `shadow_only`。
