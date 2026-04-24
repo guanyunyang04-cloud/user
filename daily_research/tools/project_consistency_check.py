@@ -532,6 +532,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     protocol_text = _read_text("daily_research/continuous_policy/run_continuous_policy_protocol.py")
     model_v2_text = _read_text("daily_research/continuous_policy/model_v2.py")
     contracts_text = _read_text("daily_research/continuous_policy/training_contracts.py")
+    study_text = _read_text("daily_research/continuous_policy/run_self_optimizing_study.py")
+    analysis_text = _read_text("daily_research/continuous_policy/analyze_behavior_gap.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
         ("--epochs", "train_policy epoch budget"),
@@ -588,6 +590,53 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
             "continuous_policy_contract_missing",
             f"continuous_policy torch seq v3 backend is missing required contract marker: {label}",
         )
+    for snippet, label in (
+        ("alpha_result_value_budget_split_v12", "r12 loss profile"),
+        ("split_heads_release_translation_deploy_r12", "r12 study profile"),
+        ("release_translation_deploy_v1", "r12 joint objective"),
+        ("alpha_result_value_budget_split_v13", "r13 action-value loss profile"),
+        ("split_heads_action_value_unification_r13", "r13 action-value study profile"),
+        ("action_value_unification_v1", "r13 action-value objective"),
+    ):
+        _require(
+            snippet in model_seq_v3_text or snippet in study_text,
+            failures,
+            "continuous_policy_r12_contract_missing",
+            f"continuous_policy r12/r13 release/action-value contract is missing marker: {label}",
+        )
+    for snippet, label in (
+        ("open_action_value", "r13 open action value"),
+        ("hold_action_value", "r13 hold action value"),
+        ("reduce_action_value", "r13 reduce action value"),
+    ):
+        _require(
+            snippet in model_seq_v3_text and snippet in analysis_text and snippet in study_text,
+            failures,
+            "continuous_policy_r13_contract_missing",
+            f"continuous_policy r13 action-value contract is missing marker: {label}",
+        )
+    _require(
+        "action_value_consistency_score" in analysis_text and "action_value_consistency_score" in study_text,
+        failures,
+        "continuous_policy_r13_contract_missing",
+        "continuous_policy r13 audit/scoring contract is missing action_value_consistency_score marker.",
+    )
+    for snippet, label in (
+        ("release_translation_deploy_health_score", "r12 audit health score"),
+        ("release_translation_deploy_failure_mode", "r12 audit failure mode"),
+    ):
+        _require(
+            snippet in analysis_text and snippet in study_text,
+            failures,
+            "continuous_policy_r12_contract_missing",
+            f"continuous_policy r12 audit/scoring contract is missing marker: {label}",
+        )
+    _require(
+        "release_translation_deploy_components" in analysis_text,
+        failures,
+        "continuous_policy_r12_contract_missing",
+        "continuous_policy r12 audit contract is missing component-map marker.",
+    )
     model_hier_v4_text = _read_text("daily_research/continuous_policy/model_hier_v4.py")
     for snippet, label in (
         ("continuous_policy_torch_hier_v4", "hier artifact type"),

@@ -145,6 +145,139 @@ def _safe_mean(series: pd.Series) -> float:
     return value if np.isfinite(value) else 0.0
 
 
+def _bounded_unit(value: float, low: float, high: float) -> float:
+    if high <= low:
+        return 0.0
+    clipped = min(max(float(value), low), high)
+    return (clipped - low) / float(high - low)
+
+
+def _weighted_unit_score(components: list[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _, weight in components if weight > 0.0)
+    if total_weight <= 0.0:
+        return 0.0
+    return float(sum(value * weight for value, weight in components if weight > 0.0) / total_weight)
+
+
+def _release_translation_deploy_health(
+    *,
+    deploy_intent_action_count: float,
+    deploy_intent_realized_rate: float,
+    order_translation_conflict_rate: float,
+    add_to_hold_conflict_share: float,
+    sell_intent_suppressed_share: float,
+    budget_origin_sell_share: float,
+    deploy_funding_rebalance_sell_count: float,
+    deploy_funding_rebalance_sell_share: float,
+    deploy_funding_rebalance_forward_excess_5d: float,
+    deploy_funding_against_protected_hold_share: float,
+    deploy_funding_release_consistent_share: float,
+    model_release_signal_sell_count: float,
+    model_release_signal_forward_excess_5d: float,
+    model_release_against_protected_hold_share: float,
+    model_release_release_consistent_share: float,
+) -> dict[str, Any]:
+    deploy_observed = float(deploy_intent_action_count) >= 3.0
+    funding_observed = float(deploy_funding_rebalance_sell_count) >= 5.0
+    release_observed = float(model_release_signal_sell_count) >= 5.0
+
+    deploy_score = _bounded_unit(deploy_intent_realized_rate, 0.35, 0.85) if deploy_observed else 0.0
+    release_score = (
+        _bounded_unit(deploy_funding_release_consistent_share, 0.05, 0.65)
+        if funding_observed
+        else 0.0
+    )
+    translation_score = 1.0 - _bounded_unit(order_translation_conflict_rate, 0.06, 0.35)
+    intent_integrity_score = 1.0 - _bounded_unit(
+        max(add_to_hold_conflict_share, sell_intent_suppressed_share),
+        0.05,
+        0.35,
+    )
+    funding_forward_score = 1.0 - _bounded_unit(max(0.0, deploy_funding_rebalance_forward_excess_5d), 0.0, 0.04)
+    protected_hold_score = 1.0 - _bounded_unit(deploy_funding_against_protected_hold_share, 0.10, 0.45)
+    funding_sell_share_score = 1.0 - _bounded_unit(
+        max(0.0, deploy_funding_rebalance_sell_share - 0.35),
+        0.0,
+        0.45,
+    )
+    budget_origin_score = 1.0 - _bounded_unit(budget_origin_sell_share, 0.0, 0.35)
+    funding_score = (
+        _weighted_unit_score(
+            [
+                (funding_forward_score, 0.30),
+                (protected_hold_score, 0.30),
+                (funding_sell_share_score, 0.20),
+                (budget_origin_score, 0.20),
+            ]
+        )
+        if funding_observed
+        else 0.0
+    )
+    model_release_score = (
+        _weighted_unit_score(
+            [
+                (1.0 - _bounded_unit(max(0.0, model_release_signal_forward_excess_5d), 0.0, 0.04), 0.35),
+                (1.0 - _bounded_unit(model_release_against_protected_hold_share, 0.10, 0.45), 0.30),
+                (_bounded_unit(model_release_release_consistent_share, 0.05, 0.65), 0.35),
+            ]
+        )
+        if release_observed
+        else release_score
+    )
+    health_score = _weighted_unit_score(
+        [
+            (deploy_score, 0.26),
+            (release_score, 0.28),
+            (translation_score, 0.20),
+            (funding_score, 0.20),
+            (model_release_score, 0.06),
+        ]
+    )
+
+    if not deploy_observed:
+        failure_mode = "deploy_intent_not_observed"
+    elif deploy_score < 0.40:
+        failure_mode = "deploy_not_realized"
+    elif translation_score < 0.45 or intent_integrity_score < 0.45:
+        failure_mode = "order_translation_drift"
+    elif not funding_observed:
+        failure_mode = "funding_release_not_observed"
+    elif release_score < 0.30:
+        failure_mode = "release_not_learned_despite_deploy"
+    elif funding_score < 0.45:
+        failure_mode = "funding_source_pollution"
+    elif release_observed and model_release_score < 0.45:
+        failure_mode = "release_signal_not_selective"
+    elif health_score >= 0.70:
+        failure_mode = "healthy"
+    else:
+        failure_mode = "mixed_or_improving"
+
+    components = {
+        "deploy_score": deploy_score,
+        "release_score": release_score,
+        "translation_score": translation_score,
+        "intent_integrity_score": intent_integrity_score,
+        "funding_score": funding_score,
+        "model_release_score": model_release_score,
+        "funding_forward_score": funding_forward_score if funding_observed else 0.0,
+        "protected_hold_score": protected_hold_score if funding_observed else 0.0,
+        "funding_sell_share_score": funding_sell_share_score if funding_observed else 0.0,
+        "budget_origin_score": budget_origin_score,
+    }
+    return {
+        "release_translation_deploy_health_score": health_score,
+        "release_translation_deploy_failure_mode": failure_mode,
+        "release_translation_deploy_components": components,
+        "release_translation_deploy_deploy_score": deploy_score,
+        "release_translation_deploy_release_score": release_score,
+        "release_translation_deploy_translation_score": translation_score,
+        "release_translation_deploy_intent_integrity_score": intent_integrity_score,
+        "release_translation_deploy_funding_score": funding_score,
+        "release_translation_deploy_model_release_score": model_release_score,
+    }
+
+
 def _action_pair_rows(
     action_outcomes: pd.DataFrame,
     *,
@@ -215,6 +348,16 @@ def _build_held_side_detail_payload(
             "hold_continuation_value",
             "sell_release_value",
             "cash_defense_value",
+            "multi_horizon_forward_value",
+            "multi_horizon_forward_risk",
+            "multi_horizon_path_value",
+            "open_action_value",
+            "add_action_value",
+            "hold_action_value",
+            "reduce_action_value",
+            "exit_action_value",
+            "relative_opportunity_value",
+            "action_value_consistency_target",
             "deploy_value_target",
             "release_value_target",
             "deploy_gate_target",
@@ -280,6 +423,16 @@ def _build_held_side_detail_payload(
         "hold_continuation_value",
         "sell_release_value",
         "cash_defense_value",
+        "multi_horizon_forward_value",
+        "multi_horizon_forward_risk",
+        "multi_horizon_path_value",
+        "open_action_value",
+        "add_action_value",
+        "hold_action_value",
+        "reduce_action_value",
+        "exit_action_value",
+        "relative_opportunity_value",
+        "action_value_consistency_target",
         "deploy_value_target",
         "release_value_target",
         "deploy_gate_target",
@@ -492,6 +645,23 @@ def _build_semantic_conflicts(
             "sell_suppression_origin_counts": {},
             "sell_source_floor_guard_count": 0,
             "sell_source_floor_guard_share": 0.0,
+            **_release_translation_deploy_health(
+                deploy_intent_action_count=0.0,
+                deploy_intent_realized_rate=0.0,
+                order_translation_conflict_rate=0.0,
+                add_to_hold_conflict_share=0.0,
+                sell_intent_suppressed_share=0.0,
+                budget_origin_sell_share=0.0,
+                deploy_funding_rebalance_sell_count=0.0,
+                deploy_funding_rebalance_sell_share=0.0,
+                deploy_funding_rebalance_forward_excess_5d=0.0,
+                deploy_funding_against_protected_hold_share=0.0,
+                deploy_funding_release_consistent_share=0.0,
+                model_release_signal_sell_count=0.0,
+                model_release_signal_forward_excess_5d=0.0,
+                model_release_against_protected_hold_share=0.0,
+                model_release_release_consistent_share=0.0,
+            ),
             "top_action_pairs": [],
             "top_conflict_pairs": [],
             "top_weight_change_pairs": [],
@@ -516,6 +686,16 @@ def _build_semantic_conflicts(
             "sell_release_value",
             "cash_defense_value",
             "value_arbitration_target",
+            "multi_horizon_forward_value",
+            "multi_horizon_forward_risk",
+            "multi_horizon_path_value",
+            "open_action_value",
+            "add_action_value",
+            "hold_action_value",
+            "reduce_action_value",
+            "exit_action_value",
+            "relative_opportunity_value",
+            "action_value_consistency_target",
             "deploy_value_target",
             "release_value_target",
             "defense_value_target",
@@ -823,6 +1003,33 @@ def _build_semantic_conflicts(
     avg_cash_defense_value = _safe_mean(
         working.get("cash_defense_value", pd.Series(0.0, index=working.index)).fillna(0.0)
     )
+    avg_multi_horizon_forward_value = _safe_mean(
+        working.get("multi_horizon_forward_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_multi_horizon_forward_risk = _safe_mean(
+        working.get("multi_horizon_forward_risk", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_multi_horizon_path_value = _safe_mean(
+        working.get("multi_horizon_path_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_open_action_value = _safe_mean(
+        working.get("open_action_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_add_action_value = _safe_mean(
+        working.get("add_action_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_hold_action_value = _safe_mean(
+        working.get("hold_action_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_reduce_action_value = _safe_mean(
+        working.get("reduce_action_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_exit_action_value = _safe_mean(
+        working.get("exit_action_value", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    avg_action_value_consistency_target = _safe_mean(
+        working.get("action_value_consistency_target", pd.Series(0.5, index=working.index)).fillna(0.5)
+    )
     avg_value_arbitration_target = _safe_mean(
         working.get("value_arbitration_target", pd.Series(0.5, index=working.index)).fillna(0.5)
     )
@@ -869,6 +1076,69 @@ def _build_semantic_conflicts(
     sell_intent_suppressed_mask = sell_intent_mask & (~realized_sell_mask)
     model_authorized_sell_origin_mask = working["sell_execution_origin"].isin(
         {"model_sell_intent", "model_release_signal", "deploy_funding_rebalance"}
+    )
+    action_value_table = pd.DataFrame(
+        {
+            "open": working.get("open_action_value", pd.Series(0.0, index=working.index)).fillna(0.0),
+            "add": working.get("add_action_value", pd.Series(0.0, index=working.index)).fillna(0.0),
+            "hold": working.get("hold_action_value", pd.Series(0.0, index=working.index)).fillna(0.0),
+            "reduce": working.get("reduce_action_value", pd.Series(0.0, index=working.index)).fillna(0.0),
+            "exit": working.get("exit_action_value", pd.Series(0.0, index=working.index)).fillna(0.0),
+        },
+        index=working.index,
+    )
+    best_action_value = action_value_table.max(axis=1)
+    chosen_action_value = pd.Series(0.0, index=working.index, dtype=float)
+    for action_name in ("open", "add", "hold", "reduce", "exit"):
+        chosen_action_value = chosen_action_value.where(model_action_lookup != action_name, action_value_table[action_name])
+    action_value_conflict_mask = (
+        model_action_lookup.isin({"open", "add", "hold", "reduce", "exit"})
+        & (best_action_value > chosen_action_value + 0.08)
+    )
+    keep_action_value = pd.concat(
+        [
+            action_value_table["add"],
+            action_value_table["hold"],
+        ],
+        axis=1,
+    ).max(axis=1)
+    release_action_value = pd.concat(
+        [
+            action_value_table["reduce"],
+            action_value_table["exit"],
+        ],
+        axis=1,
+    ).max(axis=1)
+    held_value_mask = working["hold_days_before"].fillna(0.0) > 0.0
+    sell_against_keep_value_mask = (
+        held_value_mask
+        & sell_intent_mask
+        & (keep_action_value > release_action_value + 0.08)
+    )
+    keep_against_release_value_mask = (
+        held_value_mask
+        & model_action_lookup.isin({"add", "hold"})
+        & (release_action_value > keep_action_value + 0.08)
+    )
+    open_low_action_value_mask = (model_action_lookup == "open") & (action_value_table["open"] < 0.30)
+    action_value_conflict_share = _safe_mean(action_value_conflict_mask.astype(float))
+    sell_against_keep_value_share = float(
+        sell_against_keep_value_mask.sum() / max(float(sell_intent_mask.sum()), 1.0)
+    )
+    keep_against_release_value_share = float(
+        keep_against_release_value_mask.sum() / max(float(model_action_lookup.isin({"add", "hold"}).sum()), 1.0)
+    )
+    open_low_action_value_share = float(open_low_action_value_mask.sum() / max(float((model_action_lookup == "open").sum()), 1.0))
+    action_value_consistency_score = float(
+        np.clip(
+            1.0
+            - action_value_conflict_share * 0.46
+            - sell_against_keep_value_share * 0.28
+            - keep_against_release_value_share * 0.18
+            - open_low_action_value_share * 0.08,
+            0.0,
+            1.0,
+        )
     )
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
@@ -1083,7 +1353,7 @@ def _build_semantic_conflicts(
             or deploy_funding_release_consistent_share <= 0.35
         )
     ):
-        diagnoses.append("涓轰簡缁欐柊閮ㄧ讲鑵炬尓璧勯噾锛岀郴缁熶粛鍦ㄨ繃澶氬湴鍗栧嚭鍘熸湰鏇村€煎緱淇濈暀鐨勬棫浠擄紝held-side funding/release 浠茶杩樻病鏈夊绋炽€?")
+        diagnoses.append("为了给新部署腾挪资金，系统仍在过多卖出原本更值得保留的旧仓，held-side funding/release 仲裁还没有学稳。")
     if (
         model_release_signal_sell_count >= 5
         and (
@@ -1092,7 +1362,7 @@ def _build_semantic_conflicts(
             or model_release_release_consistent_share <= 0.35
         )
     ):
-        diagnoses.append("妯″瀷缁欏嚭鐨?release 淇″彿浠嶄笉澶熼€夋嫨鎬э紝琚噴鏀剧殑鎸佷粨閲屼粛鏈夌浉褰撴瘮渚嬪睘浜庡簲褰撶户缁繚鐣欑殑寮烘寔浠撱€?")
+        diagnoses.append("模型给出的 release 信号仍不够选择性，被释放的持仓里仍有相当比例属于应当继续保留的强持仓。")
 
     pair_rows = _action_pair_rows(working, actual_column="execution_action", actual_key="execution_action", limit=12)
     conflict_pair_rows = [row for row in pair_rows if row["model_action"] != row["execution_action"]][:8]
@@ -1129,6 +1399,23 @@ def _build_semantic_conflicts(
         str(key): int(value)
         for key, value in working.loc[sell_intent_suppressed_mask, "sell_suppression_origin"].astype(str).value_counts().sort_index().items()
     }
+    release_translation_deploy_health = _release_translation_deploy_health(
+        deploy_intent_action_count=float(deploy_intent_count),
+        deploy_intent_realized_rate=deploy_intent_realized_rate,
+        order_translation_conflict_rate=order_translation_conflict_rate,
+        add_to_hold_conflict_share=add_to_hold_conflict_share,
+        sell_intent_suppressed_share=sell_intent_suppressed_share,
+        budget_origin_sell_share=budget_origin_sell_share,
+        deploy_funding_rebalance_sell_count=float(deploy_funding_rebalance_sell_count),
+        deploy_funding_rebalance_sell_share=deploy_funding_rebalance_sell_share,
+        deploy_funding_rebalance_forward_excess_5d=deploy_funding_rebalance_forward_excess_5d,
+        deploy_funding_against_protected_hold_share=deploy_funding_against_protected_hold_share,
+        deploy_funding_release_consistent_share=deploy_funding_release_consistent_share,
+        model_release_signal_sell_count=float(model_release_signal_sell_count),
+        model_release_signal_forward_excess_5d=model_release_signal_forward_excess_5d,
+        model_release_against_protected_hold_share=model_release_against_protected_hold_share,
+        model_release_release_consistent_share=model_release_release_consistent_share,
+    )
     return {
         "action_rows": int(len(working)),
         "semantic_conflict_rate": semantic_conflict_rate,
@@ -1167,6 +1454,22 @@ def _build_semantic_conflicts(
         "avg_hold_continuation_value": avg_hold_continuation_value,
         "avg_sell_release_value": avg_sell_release_value,
         "avg_cash_defense_value": avg_cash_defense_value,
+        "avg_multi_horizon_forward_value": avg_multi_horizon_forward_value,
+        "avg_multi_horizon_forward_risk": avg_multi_horizon_forward_risk,
+        "avg_multi_horizon_path_value": avg_multi_horizon_path_value,
+        "avg_open_action_value": avg_open_action_value,
+        "avg_add_action_value": avg_add_action_value,
+        "avg_hold_action_value": avg_hold_action_value,
+        "avg_reduce_action_value": avg_reduce_action_value,
+        "avg_exit_action_value": avg_exit_action_value,
+        "avg_action_value_consistency_target": avg_action_value_consistency_target,
+        "action_value_conflict_share": action_value_conflict_share,
+        "action_value_selected_gap": _safe_mean((best_action_value - chosen_action_value).where(action_value_conflict_mask, 0.0)),
+        "held_keep_release_value_gap": _safe_mean((keep_action_value - release_action_value).where(held_value_mask, 0.0)),
+        "sell_against_keep_value_share": sell_against_keep_value_share,
+        "keep_against_release_value_share": keep_against_release_value_share,
+        "open_low_action_value_share": open_low_action_value_share,
+        "action_value_consistency_score": action_value_consistency_score,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,
@@ -1237,6 +1540,7 @@ def _build_semantic_conflicts(
         "sell_suppression_origin_counts": sell_suppression_origin_counts,
         "sell_source_floor_guard_count": int(working["sell_source_floor_guarded"].sum()),
         "sell_source_floor_guard_share": float(working["sell_source_floor_guarded"].mean()) if len(working) else 0.0,
+        **release_translation_deploy_health,
         "top_action_pairs": pair_rows,
         "top_conflict_pairs": conflict_pair_rows,
         "top_weight_change_pairs": order_pair_rows,
@@ -1562,6 +1866,35 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
     if (
+        float(semantic_conflicts.get("action_value_consistency_score", 1.0) or 1.0) < 0.78
+        or float(semantic_conflicts.get("sell_against_keep_value_share", 0.0) or 0.0) >= 0.18
+        or float(semantic_conflicts.get("keep_against_release_value_share", 0.0) or 0.0) >= 0.18
+    ):
+        bottlenecks.append(
+            {
+                "name": "action_value_contract_not_unified",
+                "severity": "high",
+                "diagnosis": "buy/add/hold/reduce/exit are not yet ordered by one shared multi-horizon action-value contract.",
+                "evidence": {
+                    "action_value_consistency_score": float(
+                        semantic_conflicts.get("action_value_consistency_score", 0.0) or 0.0
+                    ),
+                    "action_value_conflict_share": float(
+                        semantic_conflicts.get("action_value_conflict_share", 0.0) or 0.0
+                    ),
+                    "sell_against_keep_value_share": float(
+                        semantic_conflicts.get("sell_against_keep_value_share", 0.0) or 0.0
+                    ),
+                    "keep_against_release_value_share": float(
+                        semantic_conflicts.get("keep_against_release_value_share", 0.0) or 0.0
+                    ),
+                    "open_low_action_value_share": float(
+                        semantic_conflicts.get("open_low_action_value_share", 0.0) or 0.0
+                    ),
+                },
+            }
+        )
+    if (
         float(semantic_conflicts.get("deploy_intent_realized_rate", 0.0) or 0.0) < 0.55
         and float(semantic_conflicts.get("deploy_intent_action_count", 0.0) or 0.0) >= 5
     ) or float(semantic_conflicts.get("add_to_hold_conflict_share", 0.0) or 0.0) >= 0.20:
@@ -1712,6 +2045,41 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }
         )
+    if float(semantic_conflicts.get("action_value_consistency_score", 1.0) or 1.0) < 0.78:
+        recommended_focus.append(
+            "Next continuous_policy round should optimize one shared multi-horizon action-value contract for open/add/hold/reduce/exit before tuning release loss again."
+        )
+    if (
+        float(semantic_conflicts.get("action_rows", 0.0) or 0.0) > 0.0
+        and float(semantic_conflicts.get("release_translation_deploy_health_score", 0.0) or 0.0) < 0.50
+    ):
+        bottlenecks.append(
+            {
+                "name": "release_translation_deploy_triad_not_closed",
+                "severity": "high",
+                "diagnosis": "部署实现、旧仓释放与订单翻译尚未形成同向闭环；单独优化 deploy、release 或 sell-source 都可能把压力转移到另一个环节。",
+                "evidence": {
+                    "release_translation_deploy_health_score": float(
+                        semantic_conflicts.get("release_translation_deploy_health_score", 0.0) or 0.0
+                    ),
+                    "release_translation_deploy_failure_mode": str(
+                        semantic_conflicts.get("release_translation_deploy_failure_mode", "") or ""
+                    ),
+                    "release_translation_deploy_components": dict(
+                        semantic_conflicts.get("release_translation_deploy_components", {}) or {}
+                    ),
+                    "deploy_intent_realized_rate": float(
+                        semantic_conflicts.get("deploy_intent_realized_rate", 0.0) or 0.0
+                    ),
+                    "deploy_funding_release_consistent_share": float(
+                        semantic_conflicts.get("deploy_funding_release_consistent_share", 0.0) or 0.0
+                    ),
+                    "order_translation_conflict_rate": float(
+                        semantic_conflicts.get("order_translation_conflict_rate", 0.0) or 0.0
+                    ),
+                },
+            }
+        )
     if (
         _safe_float(model_continuity, "cash_timing_quality_1d") < 0.02
         and float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0) >= 0.50
@@ -1753,6 +2121,11 @@ def main(argv: list[str] | None = None) -> int:
         recommended_focus.append("先把 execution layer 退回“翻译器”角色，停止改写模型动作语义。")
     if float(semantic_conflicts.get("order_translation_conflict_rate", 0.0) or 0.0) >= 0.08:
         recommended_focus.append("继续校准权重翻译层，保留模型生命周期语义，同时减少真实订单方向与模型意图的偏离。")
+    if (
+        float(semantic_conflicts.get("action_rows", 0.0) or 0.0) > 0.0
+        and float(semantic_conflicts.get("release_translation_deploy_health_score", 0.0) or 0.0) < 0.50
+    ):
+        recommended_focus.append("下一轮 continuous_policy 应使用 release/translation/deploy 联合目标审计，避免只把 release loss、deploy realized 或 sell-source cleanliness 单点做高。")
     if float(semantic_conflicts.get("budget_clipped_order_translation_conflict_rate", 0.0) or 0.0) > float(
         semantic_conflicts.get("unclipped_order_translation_conflict_rate", 0.0) or 0.0
     ) + 0.03:

@@ -836,6 +836,139 @@ LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
             "funding_release_total": 0.26,
         },
     },
+    "alpha_result_value_budget_split_v12": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.36,
+            "entry_quality": 0.82,
+            "hold_quality": 1.20,
+            "add_quality": 0.92,
+            "reduce_quality": 1.16,
+            "exit_urgency": 1.12,
+            "reentry_readiness": 0.42,
+            "holding_days_ratio": 1.30,
+            "reduce_fraction": 1.38,
+            "exit_hazard": 1.42,
+            "sell_attribution_score": 1.10,
+            "sell_rank_score": 1.52,
+            "lifecycle_sell_gate": 1.36,
+            "large_upside_1d_target": 1.16,
+            "alpha_opportunity_value": 1.58,
+            "hold_continuation_value": 1.68,
+            "sell_release_value": 1.58,
+            "cash_defense_value": 1.04,
+            "deployment_opportunity_cost": 1.46,
+            "risk_adjusted_action_value": 1.28,
+            "value_arbitration_target": 0.88,
+            "deploy_value_target": 1.90,
+            "release_value_target": 1.82,
+            "defense_value_target": 0.68,
+            "deploy_gate_target": 1.94,
+            "release_gate_target": 1.88,
+            "defense_gate_target": 0.34,
+            "deploy_executability_target": 1.74,
+            "clipped_intent_risk": 1.20,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.56,
+            "candidate_budget": 1.16,
+            "turnover_budget": 1.22,
+            "max_position_weight_target": 0.92,
+            "hold_bias_target": 1.12,
+            "reduce_bias_target": 1.16,
+            "exit_patience_target": 1.10,
+            "reentry_guard_target": 0.94,
+            "budget_risk_signal_target": 1.08,
+            "budget_deploy_signal_target": 1.50,
+            "budget_cash_timing_signal_target": 1.34,
+            "budget_alpha_focus_signal_target": 1.18,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.40,
+            "action_soft": 0.60,
+            "action_total": 0.56,
+            "duration_total": 0.12,
+            "scalar_total": 1.82,
+            "daily_total": 0.92,
+            "arbitration_total": 0.14,
+            "sell_rank_pairwise_total": 0.18,
+            "clipped_intent_total": 0.10,
+            "value_arbitration_total": 0.12,
+            "hierarchical_three_value_total": 0.32,
+            "funding_release_total": 0.34,
+        },
+    },
+    "alpha_result_value_budget_split_v13": {
+        "sample_scalar_loss_weights": {
+            "target_delta_hint": 1.30,
+            "entry_quality": 0.78,
+            "hold_quality": 1.14,
+            "add_quality": 0.88,
+            "reduce_quality": 1.10,
+            "exit_urgency": 1.08,
+            "reentry_readiness": 0.40,
+            "holding_days_ratio": 1.24,
+            "reduce_fraction": 1.30,
+            "exit_hazard": 1.34,
+            "sell_attribution_score": 1.04,
+            "sell_rank_score": 1.46,
+            "lifecycle_sell_gate": 1.30,
+            "large_upside_1d_target": 1.08,
+            "alpha_opportunity_value": 1.46,
+            "hold_continuation_value": 1.56,
+            "sell_release_value": 1.46,
+            "cash_defense_value": 1.00,
+            "deployment_opportunity_cost": 1.38,
+            "risk_adjusted_action_value": 1.20,
+            "multi_horizon_forward_value": 1.58,
+            "multi_horizon_forward_risk": 1.34,
+            "multi_horizon_path_value": 1.64,
+            "open_action_value": 1.66,
+            "add_action_value": 1.58,
+            "hold_action_value": 1.72,
+            "reduce_action_value": 1.58,
+            "exit_action_value": 1.50,
+            "relative_opportunity_value": 1.20,
+            "action_value_consistency_target": 1.44,
+            "value_arbitration_target": 0.86,
+            "deploy_value_target": 1.78,
+            "release_value_target": 1.70,
+            "defense_value_target": 0.64,
+            "deploy_gate_target": 1.80,
+            "release_gate_target": 1.76,
+            "defense_gate_target": 0.32,
+            "deploy_executability_target": 1.62,
+            "clipped_intent_risk": 1.14,
+        },
+        "daily_target_loss_weights": {
+            "gross_exposure_target": 1.52,
+            "candidate_budget": 1.12,
+            "turnover_budget": 1.18,
+            "max_position_weight_target": 0.90,
+            "hold_bias_target": 1.18,
+            "reduce_bias_target": 1.10,
+            "exit_patience_target": 1.14,
+            "reentry_guard_target": 0.94,
+            "budget_risk_signal_target": 1.06,
+            "budget_deploy_signal_target": 1.46,
+            "budget_cash_timing_signal_target": 1.30,
+            "budget_alpha_focus_signal_target": 1.20,
+        },
+        "multi_objective_loss_weights": {
+            "action_hard": 0.36,
+            "action_soft": 0.64,
+            "action_total": 0.50,
+            "duration_total": 0.10,
+            "scalar_total": 1.90,
+            "daily_total": 0.90,
+            "arbitration_total": 0.12,
+            "sell_rank_pairwise_total": 0.16,
+            "clipped_intent_total": 0.08,
+            "value_arbitration_total": 0.10,
+            "hierarchical_three_value_total": 0.28,
+            "funding_release_total": 0.30,
+            "action_value_total": 0.46,
+        },
+    },
 }
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -1243,6 +1376,82 @@ def _funding_release_discipline_loss(
     return bce_loss
 
 
+def _action_value_consistency_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    device = outputs["action_logits"].device
+    required_targets = {
+        "open_action_value",
+        "add_action_value",
+        "hold_action_value",
+        "reduce_action_value",
+        "exit_action_value",
+        "action_value_consistency_target",
+        "holding_flag_target",
+    }
+    if not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+    probs = torch.softmax(outputs["action_logits"], dim=-1)
+    action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
+    action_names = ("open", "add", "hold", "reduce", "exit")
+    predicted_probs = torch.stack([probs[:, action_lookup[name]] for name in action_names], dim=1)
+    target_values = torch.stack(
+        [
+            torch.clamp(targets[f"{name}_action_value"].to(device), 0.0, 1.0)
+            for name in action_names
+        ],
+        dim=1,
+    )
+    held = torch.clamp(targets["holding_flag_target"].to(device), 0.0, 1.0)
+    open_mask = (1.0 - held).unsqueeze(1)
+    held_mask = held.unsqueeze(1)
+    relevance = torch.cat(
+        [
+            open_mask,
+            held_mask,
+            held_mask,
+            held_mask,
+            held_mask,
+        ],
+        dim=1,
+    )
+    eps = 1.0e-4
+    bce = nn.functional.binary_cross_entropy(
+        torch.clamp(predicted_probs, eps, 1.0 - eps),
+        target_values,
+        weight=1.0 + relevance * 1.25,
+        reduction="none",
+    )
+    bce_loss = bce.mean()
+
+    keep_value = torch.maximum(target_values[:, 1], target_values[:, 2])
+    release_value = torch.maximum(target_values[:, 3], target_values[:, 4])
+    keep_prob = probs[:, action_lookup["add"]] + probs[:, action_lookup["hold"]]
+    release_prob = probs[:, action_lookup["reduce"]] + probs[:, action_lookup["exit"]]
+    open_prob = probs[:, action_lookup["open"]]
+    skip_prob = probs[:, action_lookup["skip"]]
+    consistency_target = torch.clamp(targets["action_value_consistency_target"].to(device), 0.0, 1.0)
+
+    keep_dominant = (held > 0.5) & (keep_value > release_value + 0.08)
+    release_dominant = (held > 0.5) & (release_value > keep_value + 0.08)
+    open_dominant = (held <= 0.5) & (target_values[:, 0] > 0.52)
+    skip_dominant = (held <= 0.5) & (target_values[:, 0] < 0.28) & (consistency_target < 0.46)
+    margin = torch.tensor(0.10, device=device)
+    margin_terms: list[torch.Tensor] = []
+    if int(keep_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(torch.relu(margin - (keep_prob[keep_dominant] - release_prob[keep_dominant])).mean())
+    if int(release_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(torch.relu(margin - (release_prob[release_dominant] - keep_prob[release_dominant])).mean())
+    if int(open_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(torch.relu(margin - (open_prob[open_dominant] - skip_prob[open_dominant])).mean())
+    if int(skip_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(torch.relu(margin - (skip_prob[skip_dominant] - open_prob[skip_dominant])).mean())
+    if margin_terms:
+        return bce_loss + torch.stack(margin_terms).mean() * 0.34
+    return bce_loss
+
+
 def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
     row_count = int(len(sample_frame))
     soft_targets = np.full((row_count, len(ACTION_CLASSES)), 1.0e-4, dtype=np.float32)
@@ -1435,6 +1644,16 @@ class TemporalSamplePolicyNet(nn.Module):
         self.deployment_opportunity_head = nn.Linear(int(hidden_dim), 1)
         self.risk_adjusted_action_value_head = nn.Linear(int(hidden_dim), 1)
         self.value_arbitration_head = nn.Linear(int(hidden_dim), 1)
+        self.multi_horizon_forward_value_head = nn.Linear(int(hidden_dim), 1)
+        self.multi_horizon_forward_risk_head = nn.Linear(int(hidden_dim), 1)
+        self.multi_horizon_path_value_head = nn.Linear(int(hidden_dim), 1)
+        self.open_action_value_head = nn.Linear(int(hidden_dim), 1)
+        self.add_action_value_head = nn.Linear(int(hidden_dim), 1)
+        self.hold_action_value_head = nn.Linear(int(hidden_dim), 1)
+        self.reduce_action_value_head = nn.Linear(int(hidden_dim), 1)
+        self.exit_action_value_head = nn.Linear(int(hidden_dim), 1)
+        self.relative_opportunity_value_head = nn.Linear(int(hidden_dim), 1)
+        self.action_value_consistency_head = nn.Linear(int(hidden_dim), 1)
         self.deploy_value_head = nn.Linear(int(hidden_dim), 1)
         self.release_value_head = nn.Linear(int(hidden_dim), 1)
         self.defense_value_head = nn.Linear(int(hidden_dim), 1)
@@ -1472,6 +1691,16 @@ class TemporalSamplePolicyNet(nn.Module):
             "deployment_opportunity_cost": torch.sigmoid(self.deployment_opportunity_head(fused).squeeze(-1)),
             "risk_adjusted_action_value": torch.sigmoid(self.risk_adjusted_action_value_head(fused).squeeze(-1)),
             "value_arbitration_target": torch.sigmoid(self.value_arbitration_head(fused).squeeze(-1)),
+            "multi_horizon_forward_value": torch.sigmoid(self.multi_horizon_forward_value_head(fused).squeeze(-1)),
+            "multi_horizon_forward_risk": torch.sigmoid(self.multi_horizon_forward_risk_head(fused).squeeze(-1)),
+            "multi_horizon_path_value": torch.sigmoid(self.multi_horizon_path_value_head(fused).squeeze(-1)),
+            "open_action_value": torch.sigmoid(self.open_action_value_head(fused).squeeze(-1)),
+            "add_action_value": torch.sigmoid(self.add_action_value_head(fused).squeeze(-1)),
+            "hold_action_value": torch.sigmoid(self.hold_action_value_head(fused).squeeze(-1)),
+            "reduce_action_value": torch.sigmoid(self.reduce_action_value_head(fused).squeeze(-1)),
+            "exit_action_value": torch.sigmoid(self.exit_action_value_head(fused).squeeze(-1)),
+            "relative_opportunity_value": torch.sigmoid(self.relative_opportunity_value_head(fused).squeeze(-1)),
+            "action_value_consistency_target": torch.sigmoid(self.action_value_consistency_head(fused).squeeze(-1)),
             "deploy_value_target": torch.sigmoid(self.deploy_value_head(fused).squeeze(-1)),
             "release_value_target": torch.sigmoid(self.release_value_head(fused).squeeze(-1)),
             "defense_value_target": torch.sigmoid(self.defense_value_head(fused).squeeze(-1)),
@@ -1704,6 +1933,26 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "risk_adjusted_action_value_head.bias",
         "value_arbitration_head.weight",
         "value_arbitration_head.bias",
+        "multi_horizon_forward_value_head.weight",
+        "multi_horizon_forward_value_head.bias",
+        "multi_horizon_forward_risk_head.weight",
+        "multi_horizon_forward_risk_head.bias",
+        "multi_horizon_path_value_head.weight",
+        "multi_horizon_path_value_head.bias",
+        "open_action_value_head.weight",
+        "open_action_value_head.bias",
+        "add_action_value_head.weight",
+        "add_action_value_head.bias",
+        "hold_action_value_head.weight",
+        "hold_action_value_head.bias",
+        "reduce_action_value_head.weight",
+        "reduce_action_value_head.bias",
+        "exit_action_value_head.weight",
+        "exit_action_value_head.bias",
+        "relative_opportunity_value_head.weight",
+        "relative_opportunity_value_head.bias",
+        "action_value_consistency_head.weight",
+        "action_value_consistency_head.bias",
         "deploy_value_head.weight",
         "deploy_value_head.bias",
         "release_value_head.weight",
@@ -1757,6 +2006,20 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         for name in missing_key_names
     )
     training_diagnostics["supports_value_arbitration_heads"] = not value_arbitration_missing
+    action_value_missing = any(
+        name.startswith("multi_horizon_forward_value_head.")
+        or name.startswith("multi_horizon_forward_risk_head.")
+        or name.startswith("multi_horizon_path_value_head.")
+        or name.startswith("open_action_value_head.")
+        or name.startswith("add_action_value_head.")
+        or name.startswith("hold_action_value_head.")
+        or name.startswith("reduce_action_value_head.")
+        or name.startswith("exit_action_value_head.")
+        or name.startswith("relative_opportunity_value_head.")
+        or name.startswith("action_value_consistency_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_action_value_heads"] = not action_value_missing
     three_value_gate_missing = any(
         name.startswith("deploy_value_head.")
         or name.startswith("release_value_head.")
@@ -1835,7 +2098,16 @@ def fit_policy_models_v3(
     sample_scalar_loss_weights = dict(loss_config["sample_scalar_loss_weights"])
     daily_target_loss_weights = dict(loss_config["daily_target_loss_weights"])
     multi_objective_loss_weights = dict(loss_config["multi_objective_loss_weights"])
-    funding_release_loss_variant = "v11" if resolved_loss_profile == "alpha_result_value_budget_split_v11" else "v10"
+    funding_release_loss_variant = (
+        "v11"
+        if resolved_loss_profile
+        in {
+            "alpha_result_value_budget_split_v11",
+            "alpha_result_value_budget_split_v12",
+            "alpha_result_value_budget_split_v13",
+        }
+        else "v10"
+    )
 
     sequence_base_names, sequence_columns = resolve_sequence_columns(feature_names)
     static_feature_names = [name for name in feature_names if name not in set(sequence_columns)]
@@ -1930,6 +2202,56 @@ def fit_policy_models_v3(
         ),
         "risk_adjusted_action_value": np.clip(
             sample_frame.get("risk_adjusted_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "multi_horizon_forward_value": np.clip(
+            sample_frame.get("multi_horizon_forward_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "multi_horizon_forward_risk": np.clip(
+            sample_frame.get("multi_horizon_forward_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "multi_horizon_path_value": np.clip(
+            sample_frame.get("multi_horizon_path_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "open_action_value": np.clip(
+            sample_frame.get("open_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "add_action_value": np.clip(
+            sample_frame.get("add_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "hold_action_value": np.clip(
+            sample_frame.get("hold_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "reduce_action_value": np.clip(
+            sample_frame.get("reduce_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "exit_action_value": np.clip(
+            sample_frame.get("exit_action_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "relative_opportunity_value": np.clip(
+            sample_frame.get("relative_opportunity_value", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "action_value_consistency_target": np.clip(
+            sample_frame.get("action_value_consistency_target", pd.Series(np.full(len(sample_frame), 0.5), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -2142,6 +2464,7 @@ def fit_policy_models_v3(
                 sample_batch_targets,
                 variant=funding_release_loss_variant,
             )
+            action_value_consistency_loss = _action_value_consistency_loss(outputs, sample_batch_targets)
             clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -2160,6 +2483,7 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
                 + multi_objective_loss_weights.get("funding_release_total", 0.0) * funding_release_loss
+                + multi_objective_loss_weights.get("action_value_total", 0.0) * action_value_consistency_loss
                 + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * clipped_intent_loss
             )
             sample_optimizer.zero_grad(set_to_none=True)
@@ -2202,6 +2526,7 @@ def fit_policy_models_v3(
                 val_targets,
                 variant=funding_release_loss_variant,
             )
+            val_action_value_consistency_loss = _action_value_consistency_loss(val_outputs, val_targets)
             val_clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(val_outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
@@ -2224,6 +2549,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
                     + multi_objective_loss_weights.get("funding_release_total", 0.0) * val_funding_release_loss
+                    + multi_objective_loss_weights.get("action_value_total", 0.0) * val_action_value_consistency_loss
                     + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * val_clipped_intent_loss
                 ).detach().cpu()
             )
@@ -2301,6 +2627,20 @@ def fit_policy_models_v3(
                 "cash_defense_value",
                 "deployment_opportunity_cost",
                 "value_arbitration_target",
+            )
+        ),
+        "supports_action_value_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "multi_horizon_forward_value",
+                "multi_horizon_forward_risk",
+                "multi_horizon_path_value",
+                "open_action_value",
+                "add_action_value",
+                "hold_action_value",
+                "reduce_action_value",
+                "exit_action_value",
+                "action_value_consistency_target",
             )
         ),
         "supports_three_value_gate_heads": all(
@@ -2483,6 +2823,57 @@ def predict_policy_v3(
         predicted_value_arbitration = (
             np.clip(outputs["value_arbitration_target"].cpu().numpy(), 0.0, 1.0)
             if supports_value_arbitration_heads
+            else None
+        )
+        supports_action_value_heads = bool(artifact.training_diagnostics.get("supports_action_value_heads", False))
+        predicted_multi_horizon_forward_value = (
+            np.clip(outputs["multi_horizon_forward_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_multi_horizon_forward_risk = (
+            np.clip(outputs["multi_horizon_forward_risk"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_multi_horizon_path_value = (
+            np.clip(outputs["multi_horizon_path_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_open_action_value = (
+            np.clip(outputs["open_action_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_add_action_value = (
+            np.clip(outputs["add_action_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_hold_action_value = (
+            np.clip(outputs["hold_action_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_reduce_action_value = (
+            np.clip(outputs["reduce_action_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_exit_action_value = (
+            np.clip(outputs["exit_action_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_relative_opportunity_value = (
+            np.clip(outputs["relative_opportunity_value"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
+            else None
+        )
+        predicted_action_value_consistency = (
+            np.clip(outputs["action_value_consistency_target"].cpu().numpy(), 0.0, 1.0)
+            if supports_action_value_heads
             else None
         )
         supports_three_value_gate_heads = bool(artifact.training_diagnostics.get("supports_three_value_gate_heads", False))
@@ -3224,6 +3615,169 @@ def predict_policy_v3(
         if predicted_risk_adjusted_action_value is not None
         else fallback_risk_adjusted_action
     )
+    fallback_multi_horizon_forward_value = np.clip(
+        0.30 * alpha_opportunity_value
+        + 0.22 * large_upside_1d_target
+        + 0.18 * deploy_value_target
+        + 0.14 * np.clip(entry_quality, 0.0, None)
+        + 0.10 * np.clip(add_quality, 0.0, None)
+        + 0.06 * np.clip(score_rank_pct, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    fallback_multi_horizon_forward_risk = np.clip(
+        0.28 * sell_release_value
+        + 0.20 * cash_defense_value
+        + 0.16 * lifecycle_sell_gate
+        + 0.14 * np.clip(exit_urgency, 0.0, None)
+        + 0.12 * clipped_intent_risk
+        + 0.10 * np.clip(market_downside_pressure, 0.0, 1.0)
+        - 0.18 * alpha_opportunity_value
+        - 0.10 * hold_continuation_value,
+        0.0,
+        1.0,
+    )
+    multi_horizon_forward_value = (
+        np.clip(0.70 * predicted_multi_horizon_forward_value + 0.30 * fallback_multi_horizon_forward_value, 0.0, 1.0)
+        if predicted_multi_horizon_forward_value is not None
+        else fallback_multi_horizon_forward_value
+    )
+    multi_horizon_forward_risk = (
+        np.clip(0.70 * predicted_multi_horizon_forward_risk + 0.30 * fallback_multi_horizon_forward_risk, 0.0, 1.0)
+        if predicted_multi_horizon_forward_risk is not None
+        else fallback_multi_horizon_forward_risk
+    )
+    fallback_multi_horizon_path_value = np.clip(
+        0.52 * multi_horizon_forward_value
+        + 0.22 * alpha_opportunity_value
+        + 0.14 * deploy_value_target
+        + 0.12 * large_upside_1d_target
+        - 0.36 * multi_horizon_forward_risk,
+        0.0,
+        1.0,
+    )
+    multi_horizon_path_value = (
+        np.clip(0.70 * predicted_multi_horizon_path_value + 0.30 * fallback_multi_horizon_path_value, 0.0, 1.0)
+        if predicted_multi_horizon_path_value is not None
+        else fallback_multi_horizon_path_value
+    )
+    held_array = (current_weight > 1.0e-8).astype(float)
+    fallback_open_action_value = np.clip(
+        0.30 * deployment_opportunity_cost
+        + 0.26 * multi_horizon_path_value
+        + 0.18 * alpha_opportunity_value
+        + 0.12 * deploy_gate_target
+        + 0.08 * large_upside_1d_target
+        + 0.06 * np.clip(entry_quality, 0.0, None)
+        - 0.20 * cash_defense_value
+        - 0.10 * release_value_target,
+        0.0,
+        1.0,
+    ) * (1.0 - held_array)
+    fallback_add_action_value = np.clip(
+        0.26 * hold_continuation_value
+        + 0.24 * multi_horizon_path_value
+        + 0.18 * alpha_opportunity_value
+        + 0.12 * deploy_value_target
+        + 0.10 * deploy_gate_target
+        + 0.10 * np.clip(add_quality, 0.0, None)
+        - 0.22 * sell_release_value
+        - 0.12 * multi_horizon_forward_risk,
+        0.0,
+        1.0,
+    ) * held_array
+    fallback_hold_action_value = np.clip(
+        0.30 * hold_continuation_value
+        + 0.24 * multi_horizon_path_value
+        + 0.18 * np.clip(hold_quality, 0.0, None)
+        + 0.12 * alpha_opportunity_value
+        + 0.08 * deploy_gate_target
+        + 0.08 * np.clip(hold_continuity_pressure, 0.0, 1.0)
+        - 0.22 * sell_release_value
+        - 0.12 * multi_horizon_forward_risk,
+        0.0,
+        1.0,
+    ) * held_array
+    fallback_relative_opportunity_value = np.clip(
+        0.42 * deployment_opportunity_cost
+        + 0.24 * alpha_opportunity_value
+        + 0.20 * multi_horizon_path_value
+        + 0.08 * large_upside_1d_target
+        + 0.06 * deploy_gate_target
+        - 0.24 * hold_continuation_value,
+        0.0,
+        1.0,
+    )
+    relative_opportunity_value = (
+        np.clip(0.70 * predicted_relative_opportunity_value + 0.30 * fallback_relative_opportunity_value, 0.0, 1.0)
+        if predicted_relative_opportunity_value is not None
+        else fallback_relative_opportunity_value
+    )
+    fallback_reduce_action_value = np.clip(
+        0.28 * sell_release_value
+        + 0.22 * multi_horizon_forward_risk
+        + 0.16 * relative_opportunity_value
+        + 0.12 * release_value_target
+        + 0.10 * sell_rank_score
+        + 0.08 * lifecycle_sell_gate
+        + 0.04 * reduce_fraction
+        - 0.22 * fallback_hold_action_value
+        - 0.10 * fallback_add_action_value,
+        0.0,
+        1.0,
+    ) * held_array
+    fallback_exit_action_value = np.clip(
+        0.30 * sell_release_value
+        + 0.24 * multi_horizon_forward_risk
+        + 0.16 * cash_defense_value
+        + 0.12 * lifecycle_sell_gate
+        + 0.10 * exit_hazard
+        + 0.08 * relative_opportunity_value
+        - 0.24 * fallback_hold_action_value
+        - 0.10 * alpha_opportunity_value,
+        0.0,
+        1.0,
+    ) * held_array
+    open_action_value = (
+        np.clip(0.70 * predicted_open_action_value + 0.30 * fallback_open_action_value, 0.0, 1.0)
+        if predicted_open_action_value is not None
+        else fallback_open_action_value
+    )
+    add_action_value = (
+        np.clip(0.70 * predicted_add_action_value + 0.30 * fallback_add_action_value, 0.0, 1.0) * held_array
+        if predicted_add_action_value is not None
+        else fallback_add_action_value
+    )
+    hold_action_value = (
+        np.clip(0.70 * predicted_hold_action_value + 0.30 * fallback_hold_action_value, 0.0, 1.0) * held_array
+        if predicted_hold_action_value is not None
+        else fallback_hold_action_value
+    )
+    reduce_action_value = (
+        np.clip(0.70 * predicted_reduce_action_value + 0.30 * fallback_reduce_action_value, 0.0, 1.0) * held_array
+        if predicted_reduce_action_value is not None
+        else fallback_reduce_action_value
+    )
+    exit_action_value = (
+        np.clip(0.70 * predicted_exit_action_value + 0.30 * fallback_exit_action_value, 0.0, 1.0) * held_array
+        if predicted_exit_action_value is not None
+        else fallback_exit_action_value
+    )
+    fallback_action_value_consistency = np.clip(
+        0.50
+        + 0.55
+        * (
+            np.maximum(open_action_value, np.maximum(add_action_value, hold_action_value))
+            - np.maximum(reduce_action_value, np.maximum(exit_action_value, cash_defense_value))
+        ),
+        0.0,
+        1.0,
+    )
+    action_value_consistency_target = (
+        np.clip(0.70 * predicted_action_value_consistency + 0.30 * fallback_action_value_consistency, 0.0, 1.0)
+        if predicted_action_value_consistency is not None
+        else fallback_action_value_consistency
+    )
     large_upside_1d_target = _finite_array(large_upside_1d_target, default=0.0, low=0.0, high=1.0)
     alpha_opportunity_value = _finite_array(alpha_opportunity_value, default=0.0, low=0.0, high=1.0)
     hold_continuation_value = _finite_array(hold_continuation_value, default=0.0, low=0.0, high=1.0)
@@ -3238,6 +3792,16 @@ def predict_policy_v3(
     release_gate_target = _finite_array(release_gate_target, default=0.0, low=0.0, high=1.0)
     defense_gate_target = _finite_array(defense_gate_target, default=0.0, low=0.0, high=1.0)
     risk_adjusted_action_value = _finite_array(risk_adjusted_action_value, default=0.0, low=0.0, high=1.0)
+    multi_horizon_forward_value = _finite_array(multi_horizon_forward_value, default=0.0, low=0.0, high=1.0)
+    multi_horizon_forward_risk = _finite_array(multi_horizon_forward_risk, default=0.0, low=0.0, high=1.0)
+    multi_horizon_path_value = _finite_array(multi_horizon_path_value, default=0.0, low=0.0, high=1.0)
+    open_action_value = _finite_array(open_action_value, default=0.0, low=0.0, high=1.0)
+    add_action_value = _finite_array(add_action_value, default=0.0, low=0.0, high=1.0)
+    hold_action_value = _finite_array(hold_action_value, default=0.0, low=0.0, high=1.0)
+    reduce_action_value = _finite_array(reduce_action_value, default=0.0, low=0.0, high=1.0)
+    exit_action_value = _finite_array(exit_action_value, default=0.0, low=0.0, high=1.0)
+    relative_opportunity_value = _finite_array(relative_opportunity_value, default=0.0, low=0.0, high=1.0)
+    action_value_consistency_target = _finite_array(action_value_consistency_target, default=0.5, low=0.0, high=1.0)
     portfolio_value_arbitration = _finite_mean(value_arbitration_target, default=0.5)
     portfolio_alpha_opportunity = _finite_mean(alpha_opportunity_value, default=0.0)
     portfolio_cash_defense = _finite_mean(cash_defense_value, default=0.0)
@@ -3701,6 +4265,26 @@ def predict_policy_v3(
                     1.0,
                 )
             )
+            action_keep_value = max(float(add_action_value[idx]), float(hold_action_value[idx]))
+            action_release_value = max(float(reduce_action_value[idx]), float(exit_action_value[idx]))
+            if (
+                label in {"reduce", "exit"}
+                and action_keep_value > action_release_value + 0.12
+                and exit_timing_pressure < 0.62
+                and market_downside_pressure[idx] < 0.24
+            ):
+                label = "add" if add_action_value[idx] > hold_action_value[idx] + 0.10 and add_quality[idx] > 0.10 else "hold"
+            if (
+                label in {"hold", "add", "skip"}
+                and action_release_value > action_keep_value + 0.14
+                and hold_days[idx] >= 3.0
+                and (
+                    sell_rank_score[idx] > 0.54
+                    or lifecycle_sell_gate[idx] > 0.50
+                    or exit_timing_pressure > 0.48
+                )
+            ):
+                label = "exit" if exit_action_value[idx] >= reduce_action_value[idx] + 0.08 and hold_days[idx] >= 6.0 else "reduce"
             value_defense_override = bool(
                 decision_defense_signal[idx] > 0.56
                 and decision_release_gate[idx] > decision_deploy_gate[idx] + 0.08
@@ -3855,6 +4439,8 @@ def predict_policy_v3(
             )
             if label == "open" and (entry_quality[idx] < open_gate or duration_name == "avoid"):
                 label = "skip"
+            if label == "open" and open_action_value[idx] < 0.30 and action_value_consistency_target[idx] < 0.48:
+                label = "skip"
             if label == "open" and clipped_intent_risk[idx] > 0.72 and decision_deploy_gate[idx] < 0.42 and entry_quality[idx] < open_gate + 0.05:
                 label = "skip"
             value_entry_ready = (
@@ -3863,10 +4449,16 @@ def predict_policy_v3(
                 and decision_deploy_gate[idx] > decision_release_gate[idx] + 0.06
                 and decision_defense_signal[idx] < 0.42
             )
+            action_value_entry_ready = (
+                open_action_value[idx] > 0.56
+                and action_value_consistency_target[idx] > 0.54
+                and decision_defense_signal[idx] < 0.48
+            )
             if label in {"skip", "hold"} and duration_name != "avoid" and (
                 entry_quality[idx] > (0.075 + defensive_score * 0.01)
                 or (entry_quality[idx] > 0.055 and probability_map["open"][idx] > 0.035)
                 or value_entry_ready
+                or action_value_entry_ready
             ):
                 if probability_map["open"][idx] > 0.035 or duration_name in {"swing", "extended"}:
                     if (reentry_cooldown[idx] <= 0.25 and days_since_last_exit[idx] > 3.0) or entry_quality[idx] > open_gate + 0.035:
@@ -3880,6 +4472,8 @@ def predict_policy_v3(
         + np.clip(duration_days - 3.0, 0.0, None) / 30.0
         + alpha_opportunity_value * 0.18
         + deployment_opportunity_cost * 0.14
+        + open_action_value * 0.16
+        + multi_horizon_path_value * 0.10
         + deploy_value_target * 0.12
         + decision_deploy_gate * 0.10
         - decision_defense_signal * (0.16 if pure_portfolio_defense_mode else 0.12)
@@ -3943,6 +4537,8 @@ def predict_policy_v3(
                 + deploy_value_target[idx] * 0.14
                 + decision_deploy_gate[idx] * 0.12
                 + deploy_executability_target[idx] * 0.10
+                + open_action_value[idx] * 0.12
+                + multi_horizon_path_value[idx] * 0.08
                 + large_upside_1d_target[idx] * 0.06
             )
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.02 + entry_quality[idx] * 0.55 + duration_bonus * 0.05 + value_boost * 0.08) * (1.0 - sell_drag * 0.28 - clipped_intent_risk[idx] * 0.08), 0.0, 0.23)
@@ -3953,6 +4549,8 @@ def predict_policy_v3(
                 hold_continuation_value[idx] * 0.10
                 + alpha_opportunity_value[idx] * 0.12
                 + deployment_opportunity_cost[idx] * 0.08
+                + add_action_value[idx] * 0.12
+                + multi_horizon_path_value[idx] * 0.06
                 + deploy_value_target[idx] * 0.12
                 + decision_deploy_gate[idx] * 0.10
                 + deploy_executability_target[idx] * 0.08
@@ -3966,7 +4564,7 @@ def predict_policy_v3(
                 0.0,
                 0.08 + decoder_profile["hold_delta_bonus"],
             )
-            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25 + hold_continuation_value[idx] * 0.18 + deploy_value_target[idx] * 0.10 + decision_deploy_gate[idx] * 0.08 - sell_drag * 0.22, 0.0, None)
+            action_strength[idx] = np.clip(hold_quality[idx] + probability_map["hold"][idx] * 0.35 + duration_bonus * 0.25 + hold_continuation_value[idx] * 0.18 + hold_action_value[idx] * 0.14 + deploy_value_target[idx] * 0.10 + decision_deploy_gate[idx] * 0.08 - sell_drag * 0.22, 0.0, None)
             hold_boost[idx] = np.clip(
                 hold_quality[idx]
                 + duration_bonus * 0.30
@@ -3988,6 +4586,7 @@ def predict_policy_v3(
                     + lifecycle_sell_gate[idx] * 0.10
                     + sell_rank_score[idx] * 0.10
                     + sell_release_value[idx] * 0.12
+                    + reduce_action_value[idx] * 0.12
                     + release_value_target[idx] * 0.10
                     + decision_release_gate[idx] * 0.08
                     + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
@@ -4010,6 +4609,7 @@ def predict_policy_v3(
                 + lifecycle_sell_gate[idx] * 0.14
                 + sell_rank_score[idx] * 0.12
                 + sell_release_value[idx] * 0.16
+                + exit_action_value[idx] * 0.14
                 + release_value_target[idx] * 0.10
                 + decision_release_gate[idx] * 0.08
                 + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
@@ -4104,6 +4704,16 @@ def predict_policy_v3(
             "cash_defense_value": cash_defense_value,
             "deployment_opportunity_cost": deployment_opportunity_cost,
             "risk_adjusted_action_value": risk_adjusted_action_value,
+            "multi_horizon_forward_value": multi_horizon_forward_value,
+            "multi_horizon_forward_risk": multi_horizon_forward_risk,
+            "multi_horizon_path_value": multi_horizon_path_value,
+            "open_action_value": open_action_value,
+            "add_action_value": add_action_value,
+            "hold_action_value": hold_action_value,
+            "reduce_action_value": reduce_action_value,
+            "exit_action_value": exit_action_value,
+            "relative_opportunity_value": relative_opportunity_value,
+            "action_value_consistency_target": action_value_consistency_target,
             "value_arbitration_target": value_arbitration_target,
             "deploy_value_target": deploy_value_target,
             "release_value_target": release_value_target,

@@ -8,10 +8,14 @@
   - 已发现并纠偏 `daily_research/brain/identity_layer.md` 中残留的可变 live 默认旧口径；身份层改为只保留目标、边界和事实入口。
   - `daily_research` 当前 live 默认执行以 `daily_research/output/active_execution_strategy.json` 为物化真源，当前 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
   - 已完成 `daily_research` 的 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 历史归档压缩；长原文与标题索引已下沉到 `daily_research/brain/references/`。
+  - `daily_research` 已新增 r12 shadow 研究入口：`split_heads_release_translation_deploy_r12`、`release_translation_deploy_v1`、`alpha_result_value_budget_split_v12` 与 `release_translation_deploy_health_score`，用于把 release learning、order translation drift 与 deploy executability 联合审计。
+  - `daily_research` 已完成 r12 bounded shadow study：`cp_v3_release_translation_deploy_r12__study_r1`；最终仍为 `shadow_only`，主 failure mode 为 `order_translation_drift`。
 - 当前决策：
   - 主脑只记录维护摘要；`daily_research` 的具体 live、research、continuous_policy 状态继续由分脑承载。
   - 后续若身份层再次出现可变 live 默认或具体实验指标，应视为文档职责漂移，先纠偏再继续重动作。
   - 后续若状态、操作或合同入口再次膨胀，应先追加 references / episodic 索引，而不是把历史过程重新堆回当前入口。
+  - r12 只改变 research / shadow 搜索与审计口径，不改变 `daily_research` active execution artifact、live 默认执行或 promotion 结论。
+  - 主脑层只记录“r12 已验证但未闭合”，具体指标、逐仓明细与后续 r13 设计继续由 `daily_research` 分脑承载。
 
 ## 2026-04-23 daily_research r11 卖出来源契约训练侧接通状态
 - 当前事实：
@@ -149,3 +153,8 @@
 - 主脑层决策：
   - 主脑维持“整体分层方向正确、真正瓶颈已收敛到 held-side release 学习与 deploy/order translation 耦合”的判断。
   - 当前不允许把 `result_value_v10` 升为默认 objective，也不允许把 `v11` 单独视为 promotion 证据；实验细节、命令与逐仓证据继续只写 `daily_research/brain/`。
+
+## 2026-04-24 daily_research r13 动作价值统一入口状态
+- 当前事实：`daily_research` 已落地 `split_heads_action_value_unification_r13`、`alpha_result_value_budget_split_v13` 与 `action_value_unification_v1`，用于把选股、建仓、加仓、持有、减仓、清仓统一到 `1/3/5/10/20d` 多周期未来价值合同。
+- 当前事实：`cp_v3_action_value_unification_r13__study_r1` 已完成正式 bounded study，最终 champion 为 `confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`；r13 降低了显性动作价值冲突，但仍是 `shadow_only`，不改变 live 默认执行，不改写 promotion gate。
+- 主脑层决策：主脑只记录“动作价值统一方向已完成分脑正式 shadow 验证但仍不可上线”；具体指标、命令与后续根因继续由 `daily_research/brain/` 承载。

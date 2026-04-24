@@ -610,6 +610,16 @@ class PortfolioState:
                 "cash_defense_value": 0.0,
                 "deployment_opportunity_cost": 0.0,
                 "risk_adjusted_action_value": 0.0,
+                "multi_horizon_forward_value": 0.0,
+                "multi_horizon_forward_risk": 0.0,
+                "multi_horizon_path_value": 0.0,
+                "open_action_value": 0.0,
+                "add_action_value": 0.0,
+                "hold_action_value": 0.0,
+                "reduce_action_value": 0.0,
+                "exit_action_value": 0.0,
+                "relative_opportunity_value": 0.0,
+                "action_value_consistency_target": 0.5,
                 "value_arbitration_target": 0.5,
                 "deploy_value_target": 0.0,
                 "release_value_target": 0.0,
@@ -1177,6 +1187,51 @@ class PortfolioState:
                 if "risk_adjusted_action_value" in policy.columns
                 else 0.0
             )
+            multi_horizon_forward_value = (
+                float(policy.at[stock, "multi_horizon_forward_value"] or 0.0)
+                if "multi_horizon_forward_value" in policy.columns
+                else 0.0
+            )
+            multi_horizon_forward_risk = (
+                float(policy.at[stock, "multi_horizon_forward_risk"] or 0.0)
+                if "multi_horizon_forward_risk" in policy.columns
+                else 0.0
+            )
+            multi_horizon_path_value = (
+                float(policy.at[stock, "multi_horizon_path_value"] or 0.0)
+                if "multi_horizon_path_value" in policy.columns
+                else 0.0
+            )
+            open_action_value = (
+                float(policy.at[stock, "open_action_value"] or 0.0)
+                if "open_action_value" in policy.columns
+                else 0.0
+            )
+            add_action_value = (
+                float(policy.at[stock, "add_action_value"] or 0.0)
+                if "add_action_value" in policy.columns
+                else 0.0
+            )
+            hold_action_value = (
+                float(policy.at[stock, "hold_action_value"] or 0.0)
+                if "hold_action_value" in policy.columns
+                else 0.0
+            )
+            reduce_action_value = (
+                float(policy.at[stock, "reduce_action_value"] or 0.0)
+                if "reduce_action_value" in policy.columns
+                else 0.0
+            )
+            exit_action_value = (
+                float(policy.at[stock, "exit_action_value"] or 0.0)
+                if "exit_action_value" in policy.columns
+                else 0.0
+            )
+            action_value_consistency_target = (
+                float(policy.at[stock, "action_value_consistency_target"] or 0.5)
+                if "action_value_consistency_target" in policy.columns
+                else 0.5
+            )
             value_arbitration_target = (
                 float(policy.at[stock, "value_arbitration_target"] or 0.5)
                 if "value_arbitration_target" in policy.columns
@@ -1237,8 +1292,10 @@ class PortfolioState:
                     + 0.18 * lifecycle_sell_gate
                     + 0.14 * sell_rank_score
                     + 0.12 * sell_attribution_score
+                    + 0.08 * max(reduce_action_value, exit_action_value)
                     + 0.08 * decision_defense_signal * held_defense_weight
                     - 0.10 * hold_continuation_value
+                    - 0.08 * max(add_action_value, hold_action_value)
                     - 0.08 * decision_deploy_gate,
                     0.0,
                     1.0,
@@ -1274,6 +1331,7 @@ class PortfolioState:
                             or exit_timing_pressure >= 0.52
                             or sell_rank_score >= 0.70
                             or sell_release_value >= 0.64
+                            or max(reduce_action_value, exit_action_value) >= max(add_action_value, hold_action_value) + 0.16
                         )
                         and sell_pressure >= 0.20
                         and value_arbitration_target <= 0.58
@@ -1311,9 +1369,11 @@ class PortfolioState:
                             + lifecycle_sell_gate * 0.12
                             + sell_rank_score * 0.08
                             + sell_release_value * 0.10
+                            + reduce_action_value * 0.10
                             + cash_defense_value * (0.06 if not constraint_only_budget_mode else 0.0)
                             - hold_bias_target * 0.10
                             - hold_continuation_value * 0.06
+                            - hold_action_value * 0.06
                             - alpha_opportunity_value * 0.04
                         ),
                         0.02 if (exit_hazard > 0.55 or exit_timing_pressure > 0.68) else 0.08,
@@ -1343,7 +1403,9 @@ class PortfolioState:
                     + hold_bias_target * 0.06
                     + exit_patience_target * 0.04
                     + hold_continuation_value * 0.08
+                    + hold_action_value * 0.08
                     + alpha_opportunity_value * 0.04
+                    + multi_horizon_path_value * 0.04
                     + decision_deploy_gate * 0.04
                     + max(planned_holding_days - 3.0, 0.0) / 120.0
                     - sell_pressure * 0.18
@@ -1363,6 +1425,7 @@ class PortfolioState:
                         hold_boost
                         + hold_quality
                         + hold_continuation_value * 0.28
+                        + hold_action_value * 0.20
                         + alpha_opportunity_value * 0.12
                         + deploy_value_target * 0.08
                         + decision_deploy_gate * 0.06
@@ -1382,6 +1445,7 @@ class PortfolioState:
                             + hold_bias_target * 0.10
                             + exit_patience_target * 0.05
                             + hold_continuation_value * 0.08
+                            + hold_action_value * 0.06
                             + alpha_opportunity_value * 0.04
                             + max(planned_holding_days - 3.0, 0.0) / 180.0,
                             0.54
@@ -1403,6 +1467,8 @@ class PortfolioState:
                     + add_quality * 0.15
                     + alpha_opportunity_value * 0.14
                     + deployment_opportunity_cost * 0.10
+                    + add_action_value * 0.18
+                    + multi_horizon_path_value * 0.08
                     + deploy_value_target * 0.10
                     + decision_deploy_gate * 0.08
                     + large_upside_1d_target * 0.06
@@ -1423,6 +1489,7 @@ class PortfolioState:
                         or exit_hazard > 0.20
                         or exit_timing_pressure > 0.24
                         or lifecycle_sell_gate > 0.52
+                        or max(reduce_action_value, exit_action_value) > max(add_action_value, hold_action_value) + 0.12
                         or clipped_intent_risk > 0.68
                         or ((not constraint_only_budget_mode) and decision_defense_signal > 0.46 and decision_deploy_gate < 0.34)
                     )
@@ -1447,6 +1514,7 @@ class PortfolioState:
                         and ((not constraint_only_budget_mode) or decision_defense_signal < 0.42)
                         and decision_deploy_gate > decision_release_gate + 0.02
                         and add_quality > max(0.10, hold_quality - 0.02)
+                        and add_action_value >= hold_action_value - 0.04
                         and reduce_quality < hold_quality + 0.04
                     ):
                         floor_ratio = max(
@@ -1469,6 +1537,8 @@ class PortfolioState:
                         + hold_bias_target * 0.15
                         + alpha_opportunity_value * 0.10
                         + deployment_opportunity_cost * 0.08
+                        + open_action_value * 0.16
+                        + multi_horizon_path_value * 0.08
                         + deploy_value_target * 0.10
                         + decision_deploy_gate * 0.08
                         + risk_adjusted_action_value * 0.06
@@ -1480,8 +1550,8 @@ class PortfolioState:
                         - decision_release_gate * 0.05
                         - open_clip_penalty,
                     ),
-                    max(delta_hint, 0.02 + entry_quality * 0.20 + alpha_opportunity_value * 0.05 + deployment_opportunity_cost * 0.04 + deploy_value_target * 0.05 + decision_deploy_gate * 0.04 + planned_holding_days / 320.0)
-                    * max(0.55, 1.0 - sell_pressure * 0.35 - clipped_intent_risk * 0.18 - decision_defense_signal * (0.14 if constraint_only_budget_mode else 0.10)),
+                    max(delta_hint, 0.02 + entry_quality * 0.20 + alpha_opportunity_value * 0.05 + deployment_opportunity_cost * 0.04 + open_action_value * 0.06 + deploy_value_target * 0.05 + decision_deploy_gate * 0.04 + planned_holding_days / 320.0)
+                    * max(0.55, 1.0 - sell_pressure * 0.35 - multi_horizon_forward_risk * 0.08 - clipped_intent_risk * 0.18 - decision_defense_signal * (0.14 if constraint_only_budget_mode else 0.10)),
                 )
                 continue
             desired_strength.at[stock] = current_weight * (1.0 + hold_bias_target * 0.02)
@@ -2250,6 +2320,16 @@ class PortfolioState:
                     "cash_defense_value": float(policy.at[stock, "cash_defense_value"] or 0.0) if "cash_defense_value" in policy.columns else 0.0,
                     "deployment_opportunity_cost": float(policy.at[stock, "deployment_opportunity_cost"] or 0.0) if "deployment_opportunity_cost" in policy.columns else 0.0,
                     "risk_adjusted_action_value": float(policy.at[stock, "risk_adjusted_action_value"] or 0.0) if "risk_adjusted_action_value" in policy.columns else 0.0,
+                    "multi_horizon_forward_value": float(policy.at[stock, "multi_horizon_forward_value"] or 0.0) if "multi_horizon_forward_value" in policy.columns else 0.0,
+                    "multi_horizon_forward_risk": float(policy.at[stock, "multi_horizon_forward_risk"] or 0.0) if "multi_horizon_forward_risk" in policy.columns else 0.0,
+                    "multi_horizon_path_value": float(policy.at[stock, "multi_horizon_path_value"] or 0.0) if "multi_horizon_path_value" in policy.columns else 0.0,
+                    "open_action_value": float(policy.at[stock, "open_action_value"] or 0.0) if "open_action_value" in policy.columns else 0.0,
+                    "add_action_value": float(policy.at[stock, "add_action_value"] or 0.0) if "add_action_value" in policy.columns else 0.0,
+                    "hold_action_value": float(policy.at[stock, "hold_action_value"] or 0.0) if "hold_action_value" in policy.columns else 0.0,
+                    "reduce_action_value": float(policy.at[stock, "reduce_action_value"] or 0.0) if "reduce_action_value" in policy.columns else 0.0,
+                    "exit_action_value": float(policy.at[stock, "exit_action_value"] or 0.0) if "exit_action_value" in policy.columns else 0.0,
+                    "relative_opportunity_value": float(policy.at[stock, "relative_opportunity_value"] or 0.0) if "relative_opportunity_value" in policy.columns else 0.0,
+                    "action_value_consistency_target": float(policy.at[stock, "action_value_consistency_target"] or 0.5) if "action_value_consistency_target" in policy.columns else 0.5,
                     "value_arbitration_target": float(policy.at[stock, "value_arbitration_target"] or 0.5) if "value_arbitration_target" in policy.columns else 0.5,
                     "deploy_value_target": float(policy.at[stock, "deploy_value_target"] or 0.0) if "deploy_value_target" in policy.columns else 0.0,
                     "release_value_target": float(policy.at[stock, "release_value_target"] or 0.0) if "release_value_target" in policy.columns else 0.0,

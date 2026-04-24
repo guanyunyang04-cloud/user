@@ -13,6 +13,7 @@
 - 当前 active 执行口径的物化真源为 `daily_research/output/active_execution_strategy.json`；`identity_layer.md` 不再承载可变 live 默认、最新分数或实验指标。
 - 当前文档守卫已显式检查 active 执行口径与 `state_center.md` / `knowledge_center.md` 的一致性，并禁止 mutable live 默认回流到 `identity_layer.md`。
 - 当前 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 已完成历史归档压缩；长原文与标题索引统一下沉到 `daily_research/brain/references/`。
+- 当前已新增 r12 shadow 研究闭环：`alpha_result_value_budget_split_v12`、`split_heads_release_translation_deploy_r12`、`release_translation_deploy_v1` 与 `release_translation_deploy_health_score`，用于联合审计 release learning、order translation drift 与 deploy executability。
 - 当前默认执行分数语义已修为 selected composite decision score，对外字段使用 `model_decision_score` / `模型综合决策分`；`learned_score` 只作为 sub-head / debug 信号。
 - 当前 continuous_policy 研究主矛盾仍是 `deploy intent not executable`：r9 已说明 `clip reduction != deploy executability`，后续不得把减少 budget clip 误当作执行意图闭环。
 - 当前 r7 / r8 / r9 的证据关系：
@@ -589,3 +590,118 @@
   - 事实：归档前原文均已保全，并记录原始行数与 SHA256；入口文档不再承载长历史日志。
   - 推断：后续接管成本会下降，且需要旧证据时仍可通过索引精确回到原文标题。
   - 决策：后续若这三个入口再次膨胀，应优先追加到 `episodic_memory.md` 或 `brain/references/`，不要把历史过程重新堆回当前入口。
+
+## 2026-04-24 r12 release / translation / deploy 联合闭环落地
+
+- 动作前自检：
+  - 事实：r10 已证明 deploy intent executability 可测；r11/r11b 已证明 sell-source 与 held-side funding 可进入训练侧和审计侧。
+  - 事实：r11b 仍未打通 `deploy_funding_release_consistent_share`，且 deploy/order translation 仍互相拉扯。
+  - 推断：当前根因不是主线方向错误，而是 release learning、order translation drift 与 deploy executability 三者没有被同一个目标函数同时约束。
+  - 约束：本轮只落地代码、审计、守卫和文档，不启动训练、不切换 live、不改 promotion gate、不运行会改写 latest 行为摘要的新审计。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v12`，复用 v11 funding-release discipline 变体并提高 release / deploy / protected-hold 相关权重。
+  - `run_self_optimizing_study.py` 新增 `split_heads_release_translation_deploy_r12` 与默认 objective `release_translation_deploy_v1`。
+  - `analyze_behavior_gap.py` 新增 `release_translation_deploy_health_score`、组件分解、failure mode 与低分 bottleneck，同时修复两处历史编码残留诊断句。
+  - `project_consistency_check.py` 与 `doc_guard.py` 已补入 r12 合同守卫，防止 profile / objective / audit / brain 文档再次漂移。
+- 验证：
+  - `py_compile` 通过：`model_seq_v3.py`、`run_self_optimizing_study.py`、`analyze_behavior_gap.py`、`project_consistency_check.py`、`doc_guard.py`。
+  - `doc_guard.py check` 通过。
+  - `brain_integrity_check.py --json` 通过。
+  - `project_consistency_check.py` 通过。
+  - `git diff --check` 通过。
+  - `run_self_optimizing_study --help` 已暴露 `split_heads_release_translation_deploy_r12`。
+  - r12 dry-run `verify_release_translation_deploy_r12_dryrun_20260424` 已生成 study plan，默认 `objective_profile = release_translation_deploy_v1`，baseline 使用 `alpha_result_value_budget_split_v12 + result_value_v9 + cash_constraint_sell_source_guard_v7`。
+- 动作后复盘：
+  - 事实：本轮没有训练产物、没有新的正式 verdict、没有 active execution artifact 变更。
+  - 推断：r12 把“该不该为新部署释放旧仓、释放谁、订单翻译是否保留意图”变成了同一张审计表和同一个 self-opt scoring 目标。
+  - 决策：后续若继续投入正式算力，应先跑 r12 shadow study；任何结果必须同时看 `release_translation_deploy_health_score` 与组件分解，不能只看 annual return、deploy realized 或 budget-origin sell。
+
+## 2026-04-24 r12 bounded shadow study 完整执行
+
+- 动作前自检：
+  - 事实：r12 dry-run、scoring smoke、守卫均已通过，profile 可执行。
+  - 事实：用户要求直接执行完整方案；本轮允许启动 r12 研究训练，但仍不得切 live、不得改 active artifact、不得改 promotion gate。
+  - 假设：最有效验证不是继续加代码，而是跑满 r12 的 4 个 screening 组合与 2 个 confirmatory 复核。
+- 已完成执行：
+  - 前台执行 `cp_v3_release_translation_deploy_r12__study_r1`。
+  - 搜索空间：`alpha_result_value_budget_split_v11/v12` × `result_value_v9/v10`，固定 `cash_constraint_sell_source_guard_v7`。
+  - 完成 `4` 个 screening、`2` 个 confirmatory，失败数为 `0`；latest state 在 study 结束后按 runner 机制恢复，随后为了逐仓根因补做 detail audit，并把 latest 行为摘要刷新到 `confirm_02__details_v1`。
+  - 顺序导出 held-side detail：`confirm_02__details_v1`、`confirm_01__details_v1`、`trial_04__details_v1`；未并行运行审计。
+- 关键结果：
+  - 最终 champion：`cp_v3_release_translation_deploy_r12__study_r1__confirm_02`
+    - `loss_profile = alpha_result_value_budget_split_v12`
+    - `budget_objective = result_value_v9`
+    - `annual_return = 1.7484`
+    - `sharpe = 3.0857`
+    - `max_drawdown = -0.1756`
+    - `composite_score = 2.4736`
+    - `promotion_status = shadow_only`
+    - `release_translation_deploy_health_score = 0.3235`
+    - `release_translation_deploy_failure_mode = order_translation_drift`
+    - `deploy_intent_realized_rate = 0.6703`
+    - `deploy_funding_release_consistent_share = 0.0`
+    - `order_translation_conflict_rate = 0.3862`
+    - `reduce_success_rate_5d = 0.0`
+    - `exit_timeliness_rate_5d = 0.25`
+  - screening champion：`trial_04 = alpha_result_value_budget_split_v11 + result_value_v10`
+    - `composite_score = 3.0082`
+    - `annual_return = 0.9111`
+    - `deploy_intent_realized_rate = 0.9130`
+    - `release_translation_deploy_health_score = 0.4352`
+    - `deploy_funding_release_consistent_share = 0.0`
+    - `failure_mode = order_translation_drift`
+  - confirm_01：`alpha_result_value_budget_split_v11 + result_value_v10`
+    - `annual_return = 0.5505`
+    - `release_translation_deploy_health_score = 0.4093`
+    - `deploy_intent_realized_rate = 0.8708`
+    - `deploy_funding_release_consistent_share = 0.0`
+    - `failure_mode = order_translation_drift`
+- held-side detail 复盘：
+  - `confirm_02`：`119` 条 funding sell，全部来自 `deploy_funding_rebalance`；`105` 条 ambiguous，`14` 条 protected-hold conflict；主要集中在 `002371.SZ`、`002256.SZ`、`002157.SZ`。
+  - `confirm_01`：`129` 条 funding sell，全部来自 `deploy_funding_rebalance`；`126` 条 ambiguous，`3` 条 protected-hold conflict；主要集中在 `002371.SZ`、`001309.SZ`、`002049.SZ`。
+  - `trial_04`：`101` 条 held-side sell，其中 `98` 条来自 `deploy_funding_rebalance`、`3` 条来自 `model_release_signal`；但 release consistency 仍为 `0.0`。
+- 动作后复盘：
+  - 事实：r12 能提高收益与 Sharpe，但没有闭合三方语义；所有 confirm 仍为 `shadow_only`。
+  - 事实：`v12 + result_value_v9` 在 confirm 中比 `v11 + result_value_v10` 更强，但它通过更激进收益换来更高 drawdown 和更重 order translation drift。
+  - 推断：当前不是单纯 release loss 不够，而是预算/订单翻译层仍在把 deploy 与 funding 的压力互相转嫁；`weight_change_action` 仍不能稳定保留 `execution_action` 语义。
+  - 决策：下一轮最高价值不是 v13 继续加 release 权重，而是面向 translation / simulator / budget-action 解耦，降低 add -> hold、deploy candidate budget drop 与 held-side funding trim 的相互污染。
+
+## 2026-04-24 r13 动作价值统一入口落地
+
+- 行动前自检：
+  - 事实：r12 最终 failure mode 是 `order_translation_drift`，并且用户明确指出选股、建仓、加仓、减仓、清仓之间可能各学各的。
+  - 推断：继续单独加重 release loss 不能直接解决动作互斥；需要把所有动作放在同一个多周期未来价值坐标上。
+  - 边界：本轮只落地 research / shadow 能力，不切换 live，不改 promotion gate，不把 r13 当成已验证 verdict。
+- 已完成执行：
+  - `label_builder.py` 新增 `multi_horizon_forward_value / risk / path_value`，基于 `1/3/5/10/20d` 未来路径生成统一价值锚。
+  - `label_builder.py` 新增 `open_action_value / add_action_value / hold_action_value / reduce_action_value / exit_action_value / action_value_consistency_target`。
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v13`、动作价值 heads、`_action_value_consistency_loss` 与老 artifact 兼容加载标记。
+  - `pipeline_utils.py`、`portfolio_simulator.py`、`analyze_behavior_gap.py` 贯通动作价值字段，并新增 `action_value_consistency_score`、`action_value_conflict_share`、`sell_against_keep_value_share`、`keep_against_release_value_share` 等审计指标。
+  - `run_self_optimizing_study.py` 新增 `split_heads_action_value_unification_r13` 与 `action_value_unification_v1`。
+  - `doc_guard.py` 与 `project_consistency_check.py` 已加入 r13 合同守卫。
+- 动作后复盘：
+  - 本轮完成的是 r13 可运行入口，不是正式研究结论。
+  - 后续正式 study 必须同时看收益、Sharpe、drawdown、`release_translation_deploy_health_score` 与 `action_value_consistency_score`。
+  - 如果 r13 仍失败，优先判断是动作价值标签本身不清、订单翻译层仍改写动作，还是预算层继续把个股动作头吞掉。
+
+## 2026-04-24 r13 action-value bounded study 完整执行
+
+- 行动前自检：
+  - 事实：r13 入口、dry-run、标签/矩阵烟测与静态守卫已通过；用户要求直接完成可执行部分。
+  - 事实：第一次正式 study 暴露出 `pipeline_utils.py` 中 `open_low_value_mask` 缺少括号，导致 pandas 把 `"open" & Series` 解析为 `rand_` 布尔错误。
+  - 决策：先修复指标路径并用真实 rollout 复现通过，再用同一 study tag 做 strict resume，避免留下失败 study 作为最新事实。
+- 已完成执行：
+  - 修复 `open_low_value_mask = (model_action_lookup == "open") & (...)`。
+  - 用 r13 trial_01 artifact 跑真实 rollout metrics smoke，确认 `action_value_consistency_score` 等连续性指标可产出。
+  - 执行 `cp_v3_action_value_unification_r13__study_r1`：4 个 screening 均完成，2 个 confirmatory 均完成；screening 从 40 epoch strict resume 到 56 epoch，confirmatory 使用 64 epoch 预算。
+- 关键结果：
+  - 最终 champion：`cp_v3_action_value_unification_r13__study_r1__confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`。
+  - `composite_score = 6.1955`，`annual_return = 0.4522`，`sharpe = 1.6735`，`max_drawdown = -0.0827`，`promotion_status = shadow_only`。
+  - 动作统一指标：`action_value_consistency_score = 0.92`，`action_value_conflict_share = 0.0`，`sell_against_keep_value_share = 0.0`，但 `open_low_action_value_share = 1.0`。
+  - 执行语义指标：`deploy_intent_realized_rate = 0.8684`，`order_translation_conflict_rate = 0.2378`，`release_translation_deploy_health_score = 0.4701`，`failure_mode = order_translation_drift`。
+  - confirm_02：`alpha_result_value_budget_split_v13 + result_value_v9` 收益更高但 drawdown 更差，`annual_return = 0.7877`，`max_drawdown = -0.2213`，`failure_mode = release_not_learned_despite_deploy`。
+- 动作后复盘：
+  - 事实：r13 方向不是无效；它显著压低了显性 action-value 冲突。
+  - 事实：r13 仍未达到 promotion，主要被 drawdown、卖出时机、cash timing、相对 active Sharpe 和 order translation drift 拦住。
+  - 推断：用户提出的“统一学习未来多日涨跌/价值”是正确方向，但仅靠统一 action value 不足以解决 open 低价值入场和订单/预算翻译层改写动作的问题。
+  - 决策：r13 保持 `shadow_only`；下一轮若继续，优先处理 `open_low_action_value_share`、`order_translation_drift` 与 release/deploy 翻译层错配，不要把高 `action_value_consistency_score` 误写成 live 证据。

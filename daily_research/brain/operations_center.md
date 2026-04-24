@@ -36,8 +36,25 @@
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --help`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/analyze_behavior_gap.py --help`
 
-## 当前 r11/r11b 操作口径
-- `split_heads_sell_source_contract_r11b` 是当前最新 study profile，但已完成的 r11b 仍全部是 `shadow_only`。
+## 当前 r11/r11b/r12/r13 操作口径
+- `split_heads_release_translation_deploy_r12` 是当前最新 study profile，用于联合检查 release learning、order translation drift 与 deploy executability。
+- `split_heads_action_value_unification_r13` 是当前最新已落地 research profile，用于检查 open/add/hold/reduce/exit 是否共享同一套多周期未来价值锚。
+- `release_translation_deploy_v1` 是 r12 默认 objective；`release_translation_deploy_health_score` 是审计侧主健康分，必须结合组件分解解释。
+- `action_value_unification_v1` 是 r13 默认 objective；`action_value_consistency_score`、`action_value_conflict_share`、`sell_against_keep_value_share`、`keep_against_release_value_share` 是 r13 主审计指标。
+- 已完成的 r11b 仍全部是 `shadow_only`；r12 也只允许作为 shadow 研究入口，不改变 live 默认执行。
+- 已验证 dry-run：`verify_release_translation_deploy_r12_dryrun_20260424` 只生成 study plan，baseline 为 `alpha_result_value_budget_split_v12 + result_value_v9 + cash_constraint_sell_source_guard_v7`。
+- 已完成正式 bounded shadow study：`cp_v3_release_translation_deploy_r12__study_r1`，4 个 screening、2 个 confirmatory、0 失败。
+- 当前 r12 champion：`confirm_02 = alpha_result_value_budget_split_v12 + result_value_v9`；`promotion_status = shadow_only`，`release_translation_deploy_failure_mode = order_translation_drift`。
+- 当前 r13 状态：`cp_v3_action_value_unification_r13__study_r1` 已完成正式 bounded shadow study；4 个 screening、2 个 confirmatory 完成，最终 champion 为 `confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`，但 `promotion_status = shadow_only`，不得视为 live 证据。
+- r13 产物入口：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_action_value_unification_r13__study_r1/study_summary.json`
+  - trial ranking：`daily_research/output/continuous_policy/studies/cp_v3_action_value_unification_r13__study_r1/trial_ranking.csv`
+  - champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_action_value_unification_r13__study_r1__confirm_01/protocol_summary.json`
+- r12 排名与明细入口：
+  - study summary：`daily_research/output/continuous_policy/studies/cp_v3_release_translation_deploy_r12__study_r1/study_summary.json`
+  - trial ranking：`daily_research/output/continuous_policy/studies/cp_v3_release_translation_deploy_r12__study_r1/trial_ranking.csv`
+  - champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_release_translation_deploy_r12__study_r1__confirm_02/protocol_summary.json`
+  - champion held-side detail：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_release_translation_deploy_r12__study_r1__confirm_02__details_v1__held_side_details.csv`
 - `--export-held-side-details` 是 held-side 根因分析入口；导出逐仓明细时必须顺序审计。
 - 旧的完整 r10/r11/r11b 命令、产物路径和复盘说明已归档；需要复现时先读历史操作索引。
 

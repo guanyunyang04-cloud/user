@@ -23,25 +23,33 @@
 - r10 合同：deploy intent 必须能真实形成正向权重变化，不能用 `clip reduction` 代替 deploy executability。
 - r11 合同：sell-source 必须从隐式 budget-origin sell 改为显式、可审计、可限制的来源链。
 - r11b 合同：held-side release/funding 必须同时满足低 funding 污染、非零 release consistency 与可接受 deploy realization。
+- r12 合同：release learning、order translation drift 与 deploy executability 必须联合评分；单点改善不得掩盖三者之间的压力转移。
 - 当前已证实：`alpha_result_value_budget_split_v11` 能让 funding-sell 更少、更干净。
+- 当前已证实：`alpha_result_value_budget_split_v12 + result_value_v9` 可以在 r12 confirm_02 中拿到更高收益，但不能自动闭合三方语义。
+- 当前已证实：`alpha_result_value_budget_split_v13 + result_value_v10` 可以在 r13 confirm_01 中把显性动作价值冲突压到 `action_value_conflict_share = 0.0`、`action_value_consistency_score = 0.92`，但仍未通过 promotion gate。
 - 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，`deploy_funding_release_consistent_share` 仍未打通。
-- 当前主瓶颈：`held-side release learning + order translation drift + deploy executability` 三方耦合。
+- 当前主瓶颈：`order_translation_drift` 正在主导 release / deploy / funding 的压力转移，held-side release learning 仍没有被真实转化为 release consistency。
+- 当前已新增：`alpha_result_value_budget_split_v12`、`split_heads_release_translation_deploy_r12`、`release_translation_deploy_v1` 与审计字段 `release_translation_deploy_health_score`。
+- 当前已新增：`alpha_result_value_budget_split_v13`、`split_heads_action_value_unification_r13`、`action_value_unification_v1` 与审计字段 `action_value_consistency_score`，把 `open/add/hold/reduce/exit` 放进同一个 `1/3/5/10/20d` 多周期未来价值合同中。
 
 ## 当前禁止事项
-- 不得把 r11/r11b 任一分支写成 promotion 或 live 切换依据；所有 confirm 仍是 `shadow_only`。
+- 不得把 r11/r11b/r12/r13 任一分支写成 promotion 或 live 切换依据；所有 confirm 仍是 `shadow_only`。
 - 不得只看 `budget_origin_sell_share = 0` 就宣布 sell-source 成功。
 - 不得只看自动 confirm 排序；`confirm_03_semantic_v11v9` 是当前必须保留的语义对照线。
 - 不得并行运行多个会写 latest 行为摘要的审计。
 - 不得在 release consistency 仍为 0 时声称 release head 已学成。
+- 不得把 r13 的高 `action_value_consistency_score` 解释为可上线；只要 `open_low_action_value_share`、`order_translation_drift` 或 promotion gate 仍失败，就只能作为 shadow 研究证据。
 
 ## 成功判定
 - 结果层：`annual_return / sharpe / max_drawdown / trend_capture_rate_10d`。
 - 结构层：`reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d / shadow_reversal_rate_3d`。
 - 语义层：`semantic_conflict_rate / order_translation_conflict_rate / deploy_intent_realized_rate / deploy_funding_release_consistent_share`。
+- 联合层：`release_translation_deploy_health_score` 必须拆开看 `deploy / release / translation / funding / model_release` 组件。
+- 动作价值层：`action_value_consistency_score` 必须拆开看 `action_value_conflict_share`、`sell_against_keep_value_share`、`keep_against_release_value_share`、`open_low_action_value_share`，不能只看收益或 Sharpe。
 - 责任链：sell-source、funding source、held-side release support 与 protected-hold conflict 必须可审计。
 
 ## 下一步方向
-- 优先设计能同时约束 release learning、order translation drift 与 deploy executability 的联合验证。
+- r13 应优先面向 translation / simulator / budget-action 解耦：让 `weight_change_action` 更忠实地表达 `execution_action`，并减少 add -> hold 与 held-side funding trim 的混合污染。
 - 继续保留 `cash_constraint_sell_source_guard_v7` 与 held-side detail audit 作为 source attribution 基线。
 - 后续若调整 loss / objective / simulator，必须随行补跑 source attribution 与 held-side detail，而不是只看 aggregate metrics。
 

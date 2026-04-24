@@ -8,9 +8,9 @@
 - 当前 live 默认执行 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
-- 当前 continuous_policy 研究主线已从 r10 deploy executability 推进到 r11/r11b sell-source、held-side release/funding 与 order translation 的耦合问题。
-- r11/r11b 全部分支仍是 `shadow_only`；不得把 `result_value_v10`、`alpha_result_value_budget_split_v11` 或任何 confirm 分支直接解释成 promotion / live 切换证据。
-- 本轮只是历史归档压缩；未启动训练，未运行新的行为审计，未切换 live，未改写 promotion gate。
+- 当前 continuous_policy 研究主线已推进到 r12 release / translation / deploy 联合验证。
+- r11/r11b/r12 全部分支仍是 `shadow_only`；不得把 `result_value_v10`、`alpha_result_value_budget_split_v11/v12` 或任何 confirm 分支直接解释成 promotion / live 切换证据。
+- 本轮已完成历史归档压缩、r12 代码落地、r12 bounded shadow study 与 held-side detail audit；未切换 live，未改写 promotion gate。
 
 ## 当前接管入口
 - 默认读取顺序仍为：`identity_layer.md -> state_center.md -> knowledge_center.md -> operations_center.md -> governance_layer.md`。
@@ -25,11 +25,18 @@
 - r11 证明 sell-source contract 可以进入训练侧，但 `result_value_v10` 本身尚未成为稳定预算目标。
 - r11b 证明 `alpha_result_value_budget_split_v11` 能把 funding-sell 推向更少、更干净，但 `deploy_funding_release_consistent_share` 仍为 `0.0`，且 deploy/order translation 仍会互相拉扯。
 - 当前真正瓶颈收敛为：`held-side release learning + order translation drift + deploy executability` 三方耦合。
+- 已新增 `split_heads_release_translation_deploy_r12`、`release_translation_deploy_v1`、`alpha_result_value_budget_split_v12` 与 `release_translation_deploy_health_score`，用于把上述三方耦合变成可搜索、可审计的 shadow 研究目标。
+- `split_heads_action_value_unification_r13` 已完成 `cp_v3_action_value_unification_r13__study_r1` 正式 bounded shadow study：4 个 screening、2 个 confirmatory 均完成；最终 champion 为 `confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`，但仍是 `shadow_only`，不改变 live / promotion。
+- r13 关键事实：`confirm_01` 的 `action_value_consistency_score = 0.92`、`action_value_conflict_share = 0.0`、`sell_against_keep_value_share = 0.0`，说明动作价值统一显著压低了显性动作冲突；但 `annual_return = 0.4522`、`sharpe = 1.6735`、`max_drawdown = -0.0827`、`open_low_action_value_share = 1.0`、`failure_mode = order_translation_drift`，说明尚未达到 promotion 级结果。
+- `verify_release_translation_deploy_r12_dryrun_20260424` 已证明 r12 study plan 可生成；该 dry-run 未训练、未生成正式 verdict。
+- `cp_v3_release_translation_deploy_r12__study_r1` 已完成：4 个 screening、2 个 confirmatory、0 失败；最终 champion 为 `confirm_02 = alpha_result_value_budget_split_v12 + result_value_v9`，但仍为 `shadow_only`。
+- r12 关键结论：收益与 Sharpe 可以被推高，但 `release_translation_deploy_health_score = 0.3235`、`failure_mode = order_translation_drift`、`deploy_funding_release_consistent_share = 0.0`，说明 release/translation/deploy 三方闭环仍未完成。
+- held-side detail 显示 `confirm_02` 有 119 条 funding sell，全部来自 `deploy_funding_rebalance`；其中 `002371.SZ / 002256.SZ / 002157.SZ` 最集中，`protected_hold_conflict = 14`。
 
 ## 当前优先级
 - 冻结 live 默认执行，不做静默切换。
-- 继续把 r11/r11b 视为 research / shadow 证据，而不是 production 证据。
-- 后续若继续推进 continuous_policy，应先处理 release/funding 学习与订单翻译漂移的兼容性。
+- 继续把 r11/r11b/r12/r13 视为 research / shadow 证据，而不是 production 证据。
+- 后续若继续推进 continuous_policy，应优先处理 `order_translation_drift` 与 budget/action entanglement；单纯继续调高 release loss 已不是最高优先级。
 - 不回退到 simulator-only 解释，不把单一 aggregate share 当作结论；需要逐仓明细时读取 held-side detail audit。
 - `analyze_behavior_gap.py` 不得并行运行多个会写 `latest_behavior_audit_summary.json` 的实例。
 
@@ -37,7 +44,8 @@
 - formal、recent、promotion、live 不得混写。
 - 不足正式证据的 smoke / dry-run / short-window check 不能升级为正式 verdict。
 - continuous_policy 只有在正式协议、参考对照、连续 shadow continuity、行为语义和 promotion gate 均稳定后，才允许进入 promotion 讨论。
-- 当前任何 r11/r11b 结果都不改变 active execution artifact。
+- 当前任何 r11/r11b/r12/r13 结果都不改变 active execution artifact。
+- r12 虽有 `annual_return = 1.7484`、`sharpe = 3.0857` 的 confirm_02，但 `max_drawdown = -0.1756`、`reduce_success_rate_5d = 0.0`、`exit_timeliness_rate_5d = 0.25`、`order_translation_conflict_rate = 0.3862`，不得进入 promotion 讨论。
 
 ## 当前风险
 - 若身份层再次写入具体 live 默认、最新分数或 winner，属于文档职责漂移。
@@ -46,7 +54,8 @@
 - 若并行运行行为审计，仍可能重现 latest 摘要文件竞争。
 
 ## 推荐下一步
-- 若继续研究：围绕 release learning、order translation drift、deploy executability 设计联合验证，而不是单独扩大 release loss。
+- 若继续研究：围绕 translation / simulator / budget-action 解耦设计 r13；以 r12 的 `order_translation_drift` 作为主 failure mode，不要再把 release consistency 失败单独归因给 release loss 不够。
+- r13 已证明动作价值统一能降低显性冲突，但未证明可 promotion；下一轮若继续，应优先处理 `open_low_action_value_share = 1.0`、`order_translation_drift` 与 release/deploy 翻译层错配，而不是继续单独加大 action-value loss。
 - 若继续维护：优先保持入口文档轻量，把过程证据写入 `episodic_memory.md` 或 `brain/references/`。
 - 若需要旧状态细节：按下方索引读取历史原文，不把归档历史自动提升为当前状态。
 

@@ -55,6 +55,16 @@ SAMPLE_LABEL_COLUMNS = {
     "cash_defense_value",
     "deployment_opportunity_cost",
     "risk_adjusted_action_value",
+    "multi_horizon_forward_value",
+    "multi_horizon_forward_risk",
+    "multi_horizon_path_value",
+    "open_action_value",
+    "add_action_value",
+    "hold_action_value",
+    "reduce_action_value",
+    "exit_action_value",
+    "relative_opportunity_value",
+    "action_value_consistency_target",
     "value_arbitration_target",
     "deploy_value_target",
     "release_value_target",
@@ -407,6 +417,16 @@ def compute_continuity_metrics(
             "cash_defense_value",
             "deployment_opportunity_cost",
             "risk_adjusted_action_value",
+            "multi_horizon_forward_value",
+            "multi_horizon_forward_risk",
+            "multi_horizon_path_value",
+            "open_action_value",
+            "add_action_value",
+            "hold_action_value",
+            "reduce_action_value",
+            "exit_action_value",
+            "relative_opportunity_value",
+            "action_value_consistency_target",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -537,6 +557,16 @@ def compute_continuity_metrics(
         deployment_signal_all = pd.to_numeric(action_outcomes["deployment_opportunity_cost"], errors="coerce")
         large_upside_signal_all = pd.to_numeric(action_outcomes["large_upside_1d_target"], errors="coerce")
         risk_action_signal_all = pd.to_numeric(action_outcomes["risk_adjusted_action_value"], errors="coerce")
+        multi_horizon_forward_value_all = pd.to_numeric(action_outcomes["multi_horizon_forward_value"], errors="coerce")
+        multi_horizon_forward_risk_all = pd.to_numeric(action_outcomes["multi_horizon_forward_risk"], errors="coerce")
+        multi_horizon_path_value_all = pd.to_numeric(action_outcomes["multi_horizon_path_value"], errors="coerce")
+        open_action_value_all = pd.to_numeric(action_outcomes["open_action_value"], errors="coerce")
+        add_action_value_all = pd.to_numeric(action_outcomes["add_action_value"], errors="coerce")
+        hold_action_value_all = pd.to_numeric(action_outcomes["hold_action_value"], errors="coerce")
+        reduce_action_value_all = pd.to_numeric(action_outcomes["reduce_action_value"], errors="coerce")
+        exit_action_value_all = pd.to_numeric(action_outcomes["exit_action_value"], errors="coerce")
+        relative_opportunity_value_all = pd.to_numeric(action_outcomes["relative_opportunity_value"], errors="coerce")
+        action_value_consistency_all = pd.to_numeric(action_outcomes["action_value_consistency_target"], errors="coerce")
         deploy_value_signal_all = pd.to_numeric(action_outcomes["deploy_value_target"], errors="coerce")
         deploy_gate_signal_all = pd.to_numeric(action_outcomes["deploy_gate_target"], errors="coerce")
         deploy_executability_signal_all = pd.to_numeric(action_outcomes["deploy_executability_target"], errors="coerce")
@@ -546,6 +576,12 @@ def compute_continuity_metrics(
             ("deployment_opportunity_cost", deployment_signal_all, "deployment_opportunity_forward_alignment_5d"),
             ("large_upside_1d_target", large_upside_signal_all, "large_upside_forward_alignment_5d"),
             ("risk_adjusted_action_value", risk_action_signal_all, "risk_adjusted_action_forward_alignment_5d"),
+            ("multi_horizon_forward_value", multi_horizon_forward_value_all, "multi_horizon_forward_value_alignment_5d"),
+            ("multi_horizon_path_value", multi_horizon_path_value_all, "multi_horizon_path_value_alignment_5d"),
+            ("open_action_value", open_action_value_all, "open_action_value_forward_alignment_5d"),
+            ("add_action_value", add_action_value_all, "add_action_value_forward_alignment_5d"),
+            ("hold_action_value", hold_action_value_all, "hold_action_value_forward_alignment_5d"),
+            ("relative_opportunity_value", relative_opportunity_value_all, "relative_opportunity_forward_alignment_5d"),
             ("deploy_value_target", deploy_value_signal_all, "deploy_value_forward_alignment_5d"),
             ("deploy_gate_target", deploy_gate_signal_all, "deploy_gate_forward_alignment_5d"),
             ("deploy_executability_target", deploy_executability_signal_all, "deploy_executability_forward_alignment_5d"),
@@ -553,6 +589,17 @@ def compute_continuity_metrics(
             valid_signal = signal_values.notna() & arbitration_forward_5d.notna()
             metrics[metric_name] = (
                 float(_safe_corrcoef(signal_values.loc[valid_signal], arbitration_forward_5d.loc[valid_signal]))
+                if int(valid_signal.sum()) >= 2
+                else 0.0
+            )
+        for signal_name, signal_values, metric_name in (
+            ("reduce_action_value", reduce_action_value_all, "reduce_action_value_forward_avoidance_5d"),
+            ("exit_action_value", exit_action_value_all, "exit_action_value_forward_avoidance_5d"),
+            ("multi_horizon_forward_risk", multi_horizon_forward_risk_all, "multi_horizon_forward_risk_avoidance_5d"),
+        ):
+            valid_signal = signal_values.notna() & arbitration_forward_5d.notna()
+            metrics[metric_name] = (
+                float(-_safe_corrcoef(signal_values.loc[valid_signal], arbitration_forward_5d.loc[valid_signal]))
                 if int(valid_signal.sum()) >= 2
                 else 0.0
             )
@@ -584,6 +631,16 @@ def compute_continuity_metrics(
         metrics["avg_cash_defense_value"] = float(cash_defense_signal_all.fillna(0.0).mean())
         metrics["avg_deployment_opportunity_cost"] = float(deployment_signal_all.fillna(0.0).mean())
         metrics["avg_value_arbitration_target"] = float(value_signal_all.fillna(0.0).mean())
+        metrics["avg_multi_horizon_forward_value"] = float(multi_horizon_forward_value_all.fillna(0.0).mean())
+        metrics["avg_multi_horizon_forward_risk"] = float(multi_horizon_forward_risk_all.fillna(0.0).mean())
+        metrics["avg_multi_horizon_path_value"] = float(multi_horizon_path_value_all.fillna(0.0).mean())
+        metrics["avg_open_action_value"] = float(open_action_value_all.fillna(0.0).mean())
+        metrics["avg_add_action_value"] = float(add_action_value_all.fillna(0.0).mean())
+        metrics["avg_hold_action_value"] = float(hold_action_value_all.fillna(0.0).mean())
+        metrics["avg_reduce_action_value"] = float(reduce_action_value_all.fillna(0.0).mean())
+        metrics["avg_exit_action_value"] = float(exit_action_value_all.fillna(0.0).mean())
+        metrics["avg_relative_opportunity_value"] = float(relative_opportunity_value_all.fillna(0.0).mean())
+        metrics["avg_action_value_consistency_target"] = float(action_value_consistency_all.fillna(0.5).mean())
         metrics["avg_deploy_value_target"] = float(deploy_value_signal_all.fillna(0.0).mean())
         metrics["avg_release_value_target"] = float(pd.to_numeric(action_outcomes["release_value_target"], errors="coerce").fillna(0.0).mean())
         metrics["avg_defense_value_target"] = float(defense_value_signal_all.fillna(0.0).mean())
@@ -611,6 +668,84 @@ def compute_continuity_metrics(
         deploy_hold_mask = deploy_intent_mask & (weight_change_lookup == "hold")
         deploy_intent_count = int(deploy_intent_mask.sum())
         add_intent_count = int(add_intent_mask.sum())
+        action_value_table = pd.DataFrame(
+            {
+                "open": open_action_value_all.fillna(0.0),
+                "add": add_action_value_all.fillna(0.0),
+                "hold": hold_action_value_all.fillna(0.0),
+                "reduce": reduce_action_value_all.fillna(0.0),
+                "exit": exit_action_value_all.fillna(0.0),
+            },
+            index=action_outcomes.index,
+        )
+        best_action_value = action_value_table.max(axis=1)
+        best_action_name = action_value_table.idxmax(axis=1)
+        chosen_action_value = pd.Series(0.0, index=action_outcomes.index, dtype=float)
+        for action_name in ("open", "add", "hold", "reduce", "exit"):
+            chosen_action_value = chosen_action_value.where(
+                model_action_lookup != action_name,
+                action_value_table[action_name],
+            )
+        action_value_conflict_mask = (
+            model_action_lookup.isin({"open", "add", "hold", "reduce", "exit"})
+            & (best_action_value > chosen_action_value + 0.08)
+        )
+        held_value_rows = action_outcomes["hold_days_before"].fillna(0.0) > 0.0
+        keep_action_value = pd.concat([add_action_value_all.fillna(0.0), hold_action_value_all.fillna(0.0)], axis=1).max(axis=1)
+        release_action_value = pd.concat([reduce_action_value_all.fillna(0.0), exit_action_value_all.fillna(0.0)], axis=1).max(axis=1)
+        sell_against_keep_value_mask = (
+            held_value_rows
+            & model_action_lookup.isin({"reduce", "exit"})
+            & (keep_action_value > release_action_value + 0.08)
+        )
+        keep_against_release_value_mask = (
+            held_value_rows
+            & model_action_lookup.isin({"add", "hold"})
+            & (release_action_value > keep_action_value + 0.08)
+        )
+        open_low_value_mask = (
+            (model_action_lookup == "open")
+            & (open_action_value_all.fillna(0.0) < 0.30)
+        )
+        metrics["action_value_conflict_share"] = (
+            float(action_value_conflict_mask.mean()) if len(action_value_conflict_mask) else 0.0
+        )
+        metrics["action_value_selected_gap"] = (
+            float((best_action_value - chosen_action_value).where(action_value_conflict_mask, 0.0).mean())
+            if len(best_action_value)
+            else 0.0
+        )
+        metrics["held_keep_release_value_gap"] = (
+            float((keep_action_value - release_action_value).where(held_value_rows, 0.0).sum() / max(float(held_value_rows.sum()), 1.0))
+            if len(keep_action_value)
+            else 0.0
+        )
+        metrics["sell_against_keep_value_share"] = (
+            float(sell_against_keep_value_mask.sum() / max(float(model_action_lookup.isin({"reduce", "exit"}).sum()), 1.0))
+            if len(sell_against_keep_value_mask)
+            else 0.0
+        )
+        metrics["keep_against_release_value_share"] = (
+            float(keep_against_release_value_mask.sum() / max(float(model_action_lookup.isin({"add", "hold"}).sum()), 1.0))
+            if len(keep_against_release_value_mask)
+            else 0.0
+        )
+        metrics["open_low_action_value_share"] = (
+            float(open_low_value_mask.sum() / max(float((model_action_lookup == "open").sum()), 1.0))
+            if len(open_low_value_mask)
+            else 0.0
+        )
+        metrics["action_value_consistency_score"] = float(
+            np.clip(
+                1.0
+                - metrics["action_value_conflict_share"] * 0.46
+                - metrics["sell_against_keep_value_share"] * 0.28
+                - metrics["keep_against_release_value_share"] * 0.18
+                - metrics["open_low_action_value_share"] * 0.08,
+                0.0,
+                1.0,
+            )
+        )
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
@@ -1055,6 +1190,16 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
             "cash_defense_value": 0.0,
             "deployment_opportunity_cost": 0.0,
             "risk_adjusted_action_value": 0.0,
+            "multi_horizon_forward_value": 0.0,
+            "multi_horizon_forward_risk": 0.0,
+            "multi_horizon_path_value": 0.0,
+            "open_action_value": 0.0,
+            "add_action_value": 0.0,
+            "hold_action_value": 0.0,
+            "reduce_action_value": 0.0,
+            "exit_action_value": 0.0,
+            "relative_opportunity_value": 0.0,
+            "action_value_consistency_target": 0.5,
             "value_arbitration_target": 0.0,
             "deploy_value_target": 0.0,
             "release_value_target": 0.0,
@@ -1086,6 +1231,16 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
     cash_defense_value = _safe_label_column(label_frame, "cash_defense_value")
     deployment_cost_value = _safe_label_column(label_frame, "deployment_opportunity_cost")
     risk_adjusted_action_value = _safe_label_column(label_frame, "risk_adjusted_action_value")
+    multi_horizon_forward_value = _safe_label_column(label_frame, "multi_horizon_forward_value")
+    multi_horizon_forward_risk = _safe_label_column(label_frame, "multi_horizon_forward_risk")
+    multi_horizon_path_value = _safe_label_column(label_frame, "multi_horizon_path_value")
+    open_action_value = _safe_label_column(label_frame, "open_action_value")
+    add_action_value = _safe_label_column(label_frame, "add_action_value")
+    hold_action_value = _safe_label_column(label_frame, "hold_action_value")
+    reduce_action_value = _safe_label_column(label_frame, "reduce_action_value")
+    exit_action_value = _safe_label_column(label_frame, "exit_action_value")
+    relative_opportunity_value = _safe_label_column(label_frame, "relative_opportunity_value")
+    action_value_consistency_target = _safe_label_column(label_frame, "action_value_consistency_target", default=0.5)
     value_arbitration_target = _safe_label_column(label_frame, "value_arbitration_target", default=0.5)
     fallback_deploy_value = pd.Series(
         np.maximum(
@@ -1320,12 +1475,29 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
     deploy_executability_top = (
         float(deploy_executability.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
     )
+    open_action_value_top = float(open_action_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    multi_horizon_forward_value_top = (
+        float(multi_horizon_forward_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    )
+    multi_horizon_path_value_top = (
+        float(multi_horizon_path_value.reindex(top_index).clip(0.0, 1.0).mean()) if len(top_index) else 0.0
+    )
+    multi_horizon_forward_risk_mean = (
+        float(multi_horizon_forward_risk.clip(0.0, 1.0).mean()) if len(multi_horizon_forward_risk) else 0.0
+    )
     value_arbitration_mean = float(value_arbitration_target.clip(0.0, 1.0).mean()) if len(value_arbitration_target) else 0.0
     risk_adjusted_action_mean = float(risk_adjusted_action_value.clip(0.0, 1.0).mean()) if len(risk_adjusted_action_value) else 0.0
     cash_defense_mean = float(cash_defense_value.clip(0.0, 1.0).mean()) if len(cash_defense_value) else 0.0
     defense_value_mean = float(defense_value.clip(0.0, 1.0).mean()) if len(defense_value) else 0.0
     defense_gate_mean = float(defense_gate.clip(0.0, 1.0).mean()) if len(defense_gate) else 0.0
     hold_value_mean = float(hold_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    add_action_value_mean = float(add_action_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    hold_action_value_mean = float(hold_action_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    reduce_action_value_mean = float(reduce_action_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    exit_action_value_mean = float(exit_action_value.clip(0.0, 1.0).where(held_mask, 0.0).sum() / max(float(held_mask.sum()), 1.0))
+    action_value_consistency_mean = (
+        float(action_value_consistency_target.clip(0.0, 1.0).mean()) if len(action_value_consistency_target) else 0.5
+    )
     if held_weight_total > 1.0e-8:
         sell_release_mean = float((sell_release_value.clip(0.0, 1.0).where(held_mask, 0.0) * held_weight).sum())
         release_value_mean = float((release_value.clip(0.0, 1.0).where(held_mask, 0.0) * held_weight).sum())
@@ -1446,6 +1618,18 @@ def _result_value_budget_signals(label_frame: pd.DataFrame) -> dict[str, float]:
         "cash_defense_value": cash_defense_mean,
         "deployment_opportunity_cost": deployment_cost_top,
         "risk_adjusted_action_value": risk_adjusted_action_mean,
+        "multi_horizon_forward_value": multi_horizon_forward_value_top,
+        "multi_horizon_forward_risk": multi_horizon_forward_risk_mean,
+        "multi_horizon_path_value": multi_horizon_path_value_top,
+        "open_action_value": open_action_value_top,
+        "add_action_value": add_action_value_mean,
+        "hold_action_value": hold_action_value_mean,
+        "reduce_action_value": reduce_action_value_mean,
+        "exit_action_value": exit_action_value_mean,
+        "relative_opportunity_value": (
+            float(relative_opportunity_value.clip(0.0, 1.0).mean()) if len(relative_opportunity_value) else 0.0
+        ),
+        "action_value_consistency_target": action_value_consistency_mean,
         "value_arbitration_target": value_arbitration_mean,
         "deploy_value_target": deploy_value_top,
         "release_value_target": release_value_mean,
@@ -1613,6 +1797,14 @@ def _apply_budget_objective_targets(
     deploy_executability_target = float(signals["deploy_executability_target"])
     deploy_executability_pressure = float(signals["deploy_executability_pressure"])
     large_upside_1d_target = float(signals["large_upside_1d_target"])
+    multi_horizon_path_value = float(signals["multi_horizon_path_value"])
+    multi_horizon_forward_risk = float(signals["multi_horizon_forward_risk"])
+    open_action_value = float(signals["open_action_value"])
+    add_action_value = float(signals["add_action_value"])
+    hold_action_value = float(signals["hold_action_value"])
+    reduce_action_value = float(signals["reduce_action_value"])
+    exit_action_value = float(signals["exit_action_value"])
+    action_value_consistency_target = float(signals["action_value_consistency_target"])
     arbitration_deploy_pressure = float(signals["arbitration_deploy_pressure"])
     arbitration_sell_pressure = float(signals["arbitration_sell_pressure"])
     arbitration_cash_pressure = float(signals["arbitration_cash_pressure"])
@@ -1627,6 +1819,8 @@ def _apply_budget_objective_targets(
                 + 0.18 * deploy_gate_target
                 + 0.14 * deploy_value_target
                 + 0.10 * alpha_opportunity_value
+                + 0.08 * max(open_action_value, add_action_value)
+                + 0.06 * multi_horizon_path_value
                 - 0.14 * release_gate_target
                 - 0.10 * defense_gate_target,
                 0.0,
@@ -1636,12 +1830,14 @@ def _apply_budget_objective_targets(
         protected_hold_pressure = float(
             np.clip(
                 0.34 * hold_continuation_value
+                + 0.18 * hold_action_value
                 + 0.18 * alpha_opportunity_value
                 + 0.14 * deploy_value_target
                 + 0.12 * deploy_gate_target
                 + 0.12 * deploy_executability_target
                 + 0.10 * executable_deploy
                 - 0.20 * release_value_target
+                - 0.14 * max(reduce_action_value, exit_action_value)
                 - 0.20 * release_gate_target
                 - 0.14 * sell_release_value
                 - 0.08 * cash_defense_value,
@@ -1653,11 +1849,14 @@ def _apply_budget_objective_targets(
             np.clip(
                 0.32 * release_value_target
                 + 0.24 * release_gate_target
+                + 0.18 * max(reduce_action_value, exit_action_value)
                 + 0.14 * held_sell_pressure
                 + 0.10 * sell_selection_pressure
                 + 0.08 * forward_benchmark_downside
+                + 0.06 * multi_horizon_forward_risk
                 + 0.06 * cash_defense_value
                 - 0.22 * hold_continuation_value
+                - 0.14 * max(add_action_value, hold_action_value)
                 - 0.16 * deploy_executability_target
                 - 0.12 * alpha_opportunity_value
                 - 0.10 * deploy_gate_target,
@@ -1781,6 +1980,7 @@ def _apply_budget_objective_targets(
         diagnostics["result_value_protected_hold_pressure"] = protected_hold_pressure
         diagnostics["result_value_funding_release_pressure"] = funding_release_pressure
         diagnostics["result_value_disciplined_funding_need"] = disciplined_funding_need
+        diagnostics["result_value_action_value_consistency_target"] = action_value_consistency_target
         diagnostics["result_value_sell_source_contract_mode"] = 1.0
         adjusted["budget_risk_signal_target"] = sharpened_risk
         adjusted["budget_deploy_signal_target"] = sharpened_deploy

@@ -383,6 +383,34 @@ def build_action_labels_for_date(
     edge = 0.15 * short_edge + 0.35 * mid_edge + 0.50 * long_edge
     opportunity = 0.25 * max_up5 + 0.35 * max_up10 + 0.40 * max_up20
     downside = 0.25 * min_down5.clip(upper=0).abs() + 0.35 * min_down10.clip(upper=0).abs() + 0.40 * min_down20.clip(upper=0).abs()
+    multi_horizon_forward_value = np.clip(
+        0.16 * np.clip(fwd1.to_numpy(dtype=float) / 0.025, 0.0, 1.0)
+        + 0.20 * np.clip(fwd3.to_numpy(dtype=float) / 0.040, 0.0, 1.0)
+        + 0.24 * np.clip(fwd5.to_numpy(dtype=float) / 0.055, 0.0, 1.0)
+        + 0.22 * np.clip(fwd10.to_numpy(dtype=float) / 0.090, 0.0, 1.0)
+        + 0.18 * np.clip(fwd20.to_numpy(dtype=float) / 0.140, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    multi_horizon_forward_risk = np.clip(
+        0.18 * np.clip(-fwd1.to_numpy(dtype=float) / 0.025, 0.0, 1.0)
+        + 0.18 * np.clip(-fwd3.to_numpy(dtype=float) / 0.040, 0.0, 1.0)
+        + 0.20 * np.clip(-fwd5.to_numpy(dtype=float) / 0.055, 0.0, 1.0)
+        + 0.20 * np.clip(-fwd10.to_numpy(dtype=float) / 0.090, 0.0, 1.0)
+        + 0.16 * np.clip(-fwd20.to_numpy(dtype=float) / 0.140, 0.0, 1.0)
+        + 0.08 * np.clip(downside.to_numpy(dtype=float) / 0.10, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    multi_horizon_path_value = np.clip(
+        0.48 * multi_horizon_forward_value
+        + 0.22 * np.clip(opportunity.to_numpy(dtype=float) / 0.14, 0.0, 1.0)
+        + 0.18 * np.clip(edge.to_numpy(dtype=float) / 0.070, 0.0, 1.0)
+        + 0.12 * np.clip(alpha_support, 0.0, 1.0)
+        - 0.34 * multi_horizon_forward_risk,
+        0.0,
+        1.0,
+    )
     momentum = (
         0.28 * working["score_delta_5d"].fillna(0.0).to_numpy(dtype=float)
         + 0.12 * working["score_delta_accel"].fillna(0.0).to_numpy(dtype=float)
@@ -998,6 +1026,103 @@ def build_action_labels_for_date(
         0.0,
         1.0,
     )
+    open_action_value = np.where(
+        held_mask,
+        0.0,
+        np.clip(
+            0.30 * deploy_action_value
+            + 0.26 * multi_horizon_path_value
+            + 0.18 * alpha_opportunity_value
+            + 0.14 * deployment_opportunity_cost
+            + 0.08 * large_upside_1d_target
+            + 0.04 * np.clip(working["entry_quality"].to_numpy(dtype=float), 0.0, 1.0)
+            - 0.18 * cash_defense_value
+            - 0.10 * multi_horizon_forward_risk,
+            0.0,
+            1.0,
+        ),
+    )
+    add_action_value = np.where(
+        held_mask,
+        np.clip(
+            0.26 * keep_action_value
+            + 0.24 * multi_horizon_path_value
+            + 0.18 * hold_continuation_value
+            + 0.14 * alpha_opportunity_value
+            + 0.10 * np.clip(working["add_quality"].to_numpy(dtype=float), 0.0, 1.0)
+            + 0.08 * deploy_action_value
+            - 0.22 * sell_release_value
+            - 0.12 * multi_horizon_forward_risk,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    hold_action_value = np.where(
+        held_mask,
+        np.clip(
+            0.30 * hold_continuation_value
+            + 0.26 * multi_horizon_path_value
+            + 0.18 * np.clip(working["hold_quality"].to_numpy(dtype=float), 0.0, 1.0)
+            + 0.12 * alpha_opportunity_value
+            + 0.08 * deploy_action_value
+            + 0.06 * np.clip(hold_continuity_pressure, 0.0, 1.0)
+            - 0.22 * sell_release_value
+            - 0.14 * multi_horizon_forward_risk,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    relative_opportunity_value = np.clip(
+        0.46 * deployment_opportunity_cost
+        + 0.28 * alpha_opportunity_value
+        + 0.18 * multi_horizon_path_value
+        + 0.08 * large_upside_1d_target
+        - 0.24 * hold_continuation_value,
+        0.0,
+        1.0,
+    )
+    reduce_action_value = np.where(
+        held_mask,
+        np.clip(
+            0.28 * sell_release_value
+            + 0.22 * multi_horizon_forward_risk
+            + 0.16 * relative_opportunity_value
+            + 0.12 * cash_defense_value
+            + 0.10 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.08 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+            + 0.04 * np.asarray(reduce_fraction_targets, dtype=float)
+            - 0.22 * hold_action_value
+            - 0.10 * add_action_value,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    exit_action_value = np.where(
+        held_mask,
+        np.clip(
+            0.30 * sell_release_value
+            + 0.24 * multi_horizon_forward_risk
+            + 0.18 * cash_defense_value
+            + 0.12 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+            + 0.08 * np.asarray(exit_hazard_targets, dtype=float)
+            + 0.08 * relative_opportunity_value
+            - 0.26 * hold_action_value
+            - 0.10 * np.clip(alpha_opportunity_value, 0.0, 1.0),
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    keep_action_value = np.maximum(add_action_value, hold_action_value)
+    release_action_value = np.maximum(reduce_action_value, exit_action_value)
+    action_value_consistency_target = np.clip(
+        0.50 + 0.55 * (np.maximum(open_action_value, keep_action_value) - np.maximum(release_action_value, cash_action_value)),
+        0.0,
+        1.0,
+    )
     action_values = np.select(
         [
             action_series.isin({"open", "add"}).to_numpy(dtype=bool),
@@ -1043,6 +1168,16 @@ def build_action_labels_for_date(
     working["cash_defense_value"] = cash_defense_value
     working["deployment_opportunity_cost"] = deployment_opportunity_cost
     working["risk_adjusted_action_value"] = np.clip(action_values, 0.0, 1.0)
+    working["multi_horizon_forward_value"] = multi_horizon_forward_value
+    working["multi_horizon_forward_risk"] = multi_horizon_forward_risk
+    working["multi_horizon_path_value"] = multi_horizon_path_value
+    working["open_action_value"] = open_action_value
+    working["add_action_value"] = add_action_value
+    working["hold_action_value"] = hold_action_value
+    working["reduce_action_value"] = reduce_action_value
+    working["exit_action_value"] = exit_action_value
+    working["relative_opportunity_value"] = relative_opportunity_value
+    working["action_value_consistency_target"] = action_value_consistency_target
     working["value_arbitration_target"] = np.clip(0.50 + 0.55 * (capital_value - defensive_value), 0.0, 1.0)
     working["deploy_value_target"] = deploy_value_target
     working["release_value_target"] = release_value_target
@@ -1085,6 +1220,16 @@ def build_action_labels_for_date(
         "cash_defense_value",
         "deployment_opportunity_cost",
         "risk_adjusted_action_value",
+        "multi_horizon_forward_value",
+        "multi_horizon_forward_risk",
+        "multi_horizon_path_value",
+        "open_action_value",
+        "add_action_value",
+        "hold_action_value",
+        "reduce_action_value",
+        "exit_action_value",
+        "relative_opportunity_value",
+        "action_value_consistency_target",
         "value_arbitration_target",
         "deploy_value_target",
         "release_value_target",
