@@ -86,3 +86,8 @@
 - 原始行数：`581`。
 - 原始 SHA256：`b3f83530ec585e284a60e568bd66be4f7c8402d455efec20944af41e58f0afe8`。
 - 读取纪律：当前设计合同以本文件上方章节为准；r1-r11b 的完整合同演化只作为历史证据。
+## 2026-04-25 r19 portfolio daily ranking contract
+- r19 changes the learning/evaluation question from isolated `open/add/hold/reduce/exit` labels to daily portfolio allocation: which names receive capital, which names release capital, and whether cash should be reserved.
+- Required success evidence includes positive `portfolio_daily_receiver_minus_source_forward_excess_5d`, non-trivial `portfolio_daily_source_realized_sell_rate`, controlled `portfolio_daily_cash_reserve_rate`, acceptable turnover, and better monthly consistency without larger drawdown.
+- A source stock may still be a good stock; it is only a valid source when its opportunity cost is lower than the selected receiver under the same portfolio state.
+- r19 is a research bridge toward listwise/pairwise portfolio decision learning, not a live execution profile.

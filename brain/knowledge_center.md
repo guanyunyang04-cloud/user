@@ -30,3 +30,5 @@
 - `daily_research` 负责正式生产研究与执行主线
 - `t0_project` 负责盘中实验与 RL 原型，不直接替代正式主线
 - `daily_stock_analysis-main` 是独立产品分脑，不改写 `daily_research` 默认执行
+## 2026-04-25 daily_research r19 routing note
+- Root-brain fact: `split_heads_portfolio_daily_ranking_r19` is a daily_research-only, research/shadow portfolio receiver-source-cash path; no live artifact, production default, or promotion gate changed.

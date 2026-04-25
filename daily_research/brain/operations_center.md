@@ -98,3 +98,13 @@
 - 原始行数：`1483`。
 - 原始 SHA256：`6ade627c15612feab90eaf9c1389a6be7f24b5573c2c2e62583a816f41c8a2a3`。
 - 读取纪律：当前操作以本文件上方章节为准；旧命令仅作为复现和审计证据。
+## 2026-04-25 r19 portfolio daily ranking operation path
+- Use `split_heads_portfolio_daily_ranking_r19` when the task is to study portfolio-level daily execution rather than another action-loss variant.
+- The simulator budget calibration for this path is `cash_constraint_portfolio_daily_ranking_guard_v12`; it ranks capital receivers, capital sources, and cash reserve pressure in one daily portfolio context.
+- The study objective is `portfolio_daily_ranking_v1`; promotion discussion is forbidden until formal bounded evidence passes monthly quality, turnover, drawdown, receiver-source spread, source sell realization, and cash timing checks.
+- Audit priority: read `portfolio_daily_receiver_minus_source_forward_excess_5d`, `portfolio_daily_source_realized_sell_rate`, `portfolio_daily_cash_reserve_rate`, and monthly returns before interpreting headline annual return.
+## 长时训练任务运行纪律
+- 长时训练任务默认在后台运行；前台不承担训练主进程，只负责保持监控直到后台进程完成。
+- 前台不需要反复轮询进度；除非进程异常、用户要求状态、或需要读取最终产物，否则不要做无意义轮询。
+- 监控完成后再一次性读取日志、summary、checkpoint、evaluation 或 audit 产物，并按 `state_center.md` / `episodic_memory.md` 写回复盘。
+- 这条规则适用于 formal training、bounded study、confirmatory rerun、长窗口 evaluation 和长耗时 audit。

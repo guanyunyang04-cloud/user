@@ -890,3 +890,11 @@
   - 事实：r18 绝对收益低于 r17 repaired confirm，说明它不是最终提升来源，只是把错误的 source credit assignment 明确化、可审计化。
   - 推断：真正的大提升仍需组合级日决策模型，直接学习资金获得者、资金释放者、释放幅度与现金保留，而不是继续学习单只股票该 add 还是 hold。
   - 决策：下一轮主线应转向 portfolio-level pair/listwise ranking、直接优化多日/月度组合收益、卖出与 cash timing 联合 credit assignment；不再把动作 loss 堆叠作为主方向。
+## 2026-04-25 r19 implementation episode
+- Implemented a portfolio-level daily ranking path that carries receiver/source/cash signals from simulator execution into metrics, behavior audit, study scoring, and guard checks.
+- Reframed the next research target around capital receivers, capital sources, release amount, and cash reserve rather than independent action heads.
+- Kept r19 as research/shadow-only evidence; no live default, promotion status, or active artifact was changed.
+## 2026-04-25 r19 verification episode
+- Verified compile, dry-run profile expansion, v12 smoke evaluation, behavior audit, direct `portfolio_daily_ranking_v1` scoring, doc guard, brain integrity, project consistency, and `git diff --check`.
+- Smoke evidence: annual return 0.843131, Sharpe 2.072912, max drawdown -0.122117, monthly consistency 0.723549, receiver-source forward excess 0.002383, source realized sell rate 0.551948.
+- Residual risk: source forward excess remains positive at 0.010149, so the next root problem is still sell/source credit assignment rather than more action-loss stacking.

@@ -79,3 +79,12 @@
 - 原始行数：`1863`。
 - 原始 SHA256：`1c135d58f6e1951cf60c8bd2234522ccc5357755953f6962d9070ec67b7a1e16`。
 - 读取纪律：当前状态以本文件上方章节为准；归档文件只作为历史证据与追溯入口。
+## 2026-04-25 r19 portfolio daily ranking status
+- Fact: new research entry is `split_heads_portfolio_daily_ranking_r19` + `cash_constraint_portfolio_daily_ranking_guard_v12` + `portfolio_daily_ranking_v1`.
+- Fact: r19 converts r18 pair-source guard into portfolio daily receiver/source/cash ranking: capital receivers, capital sources, and cash reserve are audited in simulator, pipeline metrics, behavior gap analysis, and study scoring.
+- Fact: r19 remains research/shadow evidence only; no live or promotion implication.
+- Decision: next formal evidence must compare receiver vs source forward excess, source realized sell rate, cash reserve behavior, monthly quality, turnover, and drawdown.
+## 2026-04-25 r19 verification status
+- Fact: `verify_portfolio_daily_ranking_r19_v12_confirm01_smoke_20260425` completed with `annual_return = 0.843131`, `sharpe = 2.072912`, `max_drawdown = -0.122117`, `monthly_return_mean = 0.051062`, `monthly_consistency_score = 0.723549`, and `avg_turnover = 0.048518`.
+- Fact: r19 smoke produced `portfolio_daily_receiver_target_count = 392`, `portfolio_daily_source_target_count = 308`, `portfolio_daily_source_realized_sell_rate = 0.551948`, and `portfolio_daily_receiver_minus_source_forward_excess_5d = 0.002383`.
+- Risk: `portfolio_daily_source_forward_excess_5d = 0.010149` remains positive, so sell/opportunity-cost attribution is improved enough to audit but not solved enough for promotion.

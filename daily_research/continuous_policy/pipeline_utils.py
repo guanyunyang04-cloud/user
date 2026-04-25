@@ -582,6 +582,10 @@ def compute_continuity_metrics(
             "direct_action_pair_opportunity_spread",
             "direct_action_pair_source_opportunity_cost",
             "direct_action_pair_source_release_score",
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_source_gap",
+            "portfolio_daily_source_score",
+            "portfolio_daily_cash_score",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -1007,8 +1011,43 @@ def compute_continuity_metrics(
             ),
             errors="coerce",
         ).fillna(0.0)
+        portfolio_receiver_target = action_outcomes.get(
+            "portfolio_daily_receiver_target",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_source_candidate = action_outcomes.get(
+            "portfolio_daily_source_candidate",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_source_target = action_outcomes.get(
+            "portfolio_daily_source_target",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_cash_reserve_signal = action_outcomes.get(
+            "portfolio_daily_cash_reserve_signal",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_receiver_score = pd.to_numeric(
+            action_outcomes.get("portfolio_daily_receiver_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_gap = pd.to_numeric(
+            action_outcomes.get("portfolio_daily_source_gap", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_score = pd.to_numeric(
+            action_outcomes.get("portfolio_daily_source_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_cash_score = pd.to_numeric(
+            action_outcomes.get("portfolio_daily_cash_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
         direct_funding_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
             "deploy_funding_rebalance"
+        )
+        portfolio_daily_source_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
+            "portfolio_daily_ranking_source"
         )
         metrics["direct_action_intent_preserved_share"] = (
             float((direct_action_label_lookup.loc[direct_mode_mask] == weight_change_lookup.loc[direct_mode_mask]).mean())
@@ -1090,6 +1129,50 @@ def compute_continuity_metrics(
             metrics["direct_action_core_target_forward_excess_5d"]
             - metrics["direct_action_pair_source_forward_excess_5d"]
             if bool(direct_core_deploy_target.any()) and bool(direct_pair_reallocation_source.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_target_count"] = float(portfolio_receiver_target.sum())
+        metrics["portfolio_daily_source_candidate_count"] = float(portfolio_source_candidate.sum())
+        metrics["portfolio_daily_source_target_count"] = float(portfolio_source_target.sum())
+        metrics["portfolio_daily_source_sell_count"] = float(portfolio_daily_source_sell_mask.sum())
+        metrics["portfolio_daily_source_realized_sell_rate"] = (
+            float((portfolio_source_target & weight_change_lookup.isin({"reduce", "exit"})).sum() / portfolio_source_target.sum())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_cash_score_mean"] = float(portfolio_cash_score.mean()) if len(portfolio_cash_score) else 0.0
+        metrics["portfolio_daily_cash_reserve_rate"] = (
+            float(portfolio_cash_reserve_signal.mean()) if len(portfolio_cash_reserve_signal) else 0.0
+        )
+        metrics["portfolio_daily_receiver_score_mean"] = (
+            float(portfolio_receiver_score.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_score_mean"] = (
+            float(portfolio_source_score.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_gap_mean"] = (
+            float(portfolio_source_gap.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_forward_excess_5d"] = (
+            float(arbitration_forward_5d.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_forward_excess_5d"] = (
+            float(arbitration_forward_5d.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_minus_source_forward_excess_5d"] = (
+            metrics["portfolio_daily_receiver_forward_excess_5d"]
+            - metrics["portfolio_daily_source_forward_excess_5d"]
+            if bool(portfolio_receiver_target.any()) and bool(portfolio_source_target.any())
             else 0.0
         )
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
@@ -1390,6 +1473,19 @@ def compute_continuity_metrics(
             "direct_action_pair_source_forward_excess_5d",
             "direct_action_core_target_forward_excess_5d",
             "direct_action_core_minus_pair_forward_excess_5d",
+            "portfolio_daily_receiver_target_count",
+            "portfolio_daily_source_candidate_count",
+            "portfolio_daily_source_target_count",
+            "portfolio_daily_source_sell_count",
+            "portfolio_daily_source_realized_sell_rate",
+            "portfolio_daily_cash_score_mean",
+            "portfolio_daily_cash_reserve_rate",
+            "portfolio_daily_receiver_score_mean",
+            "portfolio_daily_source_score_mean",
+            "portfolio_daily_source_gap_mean",
+            "portfolio_daily_receiver_forward_excess_5d",
+            "portfolio_daily_source_forward_excess_5d",
+            "portfolio_daily_receiver_minus_source_forward_excess_5d",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",

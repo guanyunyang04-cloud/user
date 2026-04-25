@@ -626,6 +626,20 @@ def _build_semantic_conflicts(
             "direct_action_pair_source_forward_excess_5d": 0.0,
             "direct_action_core_target_forward_excess_5d": 0.0,
             "direct_action_core_minus_pair_forward_excess_5d": 0.0,
+            "portfolio_daily_receiver_target_count": 0,
+            "portfolio_daily_source_candidate_count": 0,
+            "portfolio_daily_source_target_count": 0,
+            "portfolio_daily_source_sell_count": 0,
+            "portfolio_daily_source_sell_share": 0.0,
+            "portfolio_daily_source_realized_sell_rate": 0.0,
+            "portfolio_daily_cash_score_mean": 0.0,
+            "portfolio_daily_cash_reserve_rate": 0.0,
+            "portfolio_daily_receiver_score_mean": 0.0,
+            "portfolio_daily_source_score_mean": 0.0,
+            "portfolio_daily_source_gap_mean": 0.0,
+            "portfolio_daily_receiver_forward_excess_5d": 0.0,
+            "portfolio_daily_source_forward_excess_5d": 0.0,
+            "portfolio_daily_receiver_minus_source_forward_excess_5d": 0.0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
@@ -759,6 +773,10 @@ def _build_semantic_conflicts(
             "direct_action_pair_opportunity_spread",
             "direct_action_pair_source_opportunity_cost",
             "direct_action_pair_source_release_score",
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_source_gap",
+            "portfolio_daily_source_score",
+            "portfolio_daily_cash_score",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -798,6 +816,10 @@ def _build_semantic_conflicts(
         "direct_action_pair_reallocation_source",
         "direct_action_pair_cost_guard_pass",
         "direct_action_pair_cost_guard_blocked",
+        "portfolio_daily_receiver_target",
+        "portfolio_daily_source_candidate",
+        "portfolio_daily_source_target",
+        "portfolio_daily_cash_reserve_signal",
     ):
         working[bool_column] = working.get(
             bool_column,
@@ -1146,7 +1168,13 @@ def _build_semantic_conflicts(
     sell_intent_realized_mask = sell_intent_mask & realized_sell_mask
     sell_intent_suppressed_mask = sell_intent_mask & (~realized_sell_mask)
     model_authorized_sell_origin_mask = working["sell_execution_origin"].isin(
-        {"model_sell_intent", "model_release_signal", "deploy_funding_rebalance", "direct_action_pair_reallocation"}
+        {
+            "model_sell_intent",
+            "model_release_signal",
+            "deploy_funding_rebalance",
+            "direct_action_pair_reallocation",
+            "portfolio_daily_ranking_source",
+        }
     )
     action_value_table = pd.DataFrame(
         {
@@ -1310,6 +1338,38 @@ def _build_semantic_conflicts(
         "direct_action_pair_source_opportunity_cost",
         pd.Series(0.0, index=working.index),
     ).fillna(0.0)
+    portfolio_receiver_target = working.get(
+        "portfolio_daily_receiver_target",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_source_candidate = working.get(
+        "portfolio_daily_source_candidate",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_source_target = working.get(
+        "portfolio_daily_source_target",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_cash_reserve_signal = working.get(
+        "portfolio_daily_cash_reserve_signal",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_receiver_score = working.get(
+        "portfolio_daily_receiver_score",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    portfolio_source_gap = working.get(
+        "portfolio_daily_source_gap",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    portfolio_source_score = working.get(
+        "portfolio_daily_source_score",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    portfolio_cash_score = working.get(
+        "portfolio_daily_cash_score",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
     deploy_funding_rebalance_sell_mask = (
@@ -1317,6 +1377,9 @@ def _build_semantic_conflicts(
     )
     direct_action_pair_reallocation_sell_mask = (
         realized_sell_mask & working["sell_execution_origin"].eq("direct_action_pair_reallocation")
+    )
+    portfolio_daily_source_sell_mask = (
+        realized_sell_mask & working["sell_execution_origin"].eq("portfolio_daily_ranking_source")
     )
     direct_action_intent_preserved_share = (
         _safe_mean((direct_action_label_lookup.loc[direct_mode_mask] == weight_change_lookup.loc[direct_mode_mask]).astype(float))
@@ -1428,6 +1491,7 @@ def _build_semantic_conflicts(
     model_release_signal_sell_count = int(model_release_signal_sell_mask.sum())
     deploy_funding_rebalance_sell_count = int(deploy_funding_rebalance_sell_mask.sum())
     direct_action_pair_reallocation_sell_count = int(direct_action_pair_reallocation_sell_mask.sum())
+    portfolio_daily_source_sell_count = int(portfolio_daily_source_sell_mask.sum())
     budget_slot_reclaim_sell_count = int(budget_slot_reclaim_sell_mask.sum())
     sell_priority_guard_sell_count = int(sell_priority_guard_sell_mask.sum())
     turnover_trim_sell_count = int(turnover_trim_sell_mask.sum())
@@ -1444,6 +1508,9 @@ def _build_semantic_conflicts(
     )
     direct_action_pair_reallocation_sell_share = (
         float(direct_action_pair_reallocation_sell_count / realized_sell_count) if realized_sell_count else 0.0
+    )
+    portfolio_daily_source_sell_share = (
+        float(portfolio_daily_source_sell_count / realized_sell_count) if realized_sell_count else 0.0
     )
     budget_slot_reclaim_sell_share = (
         float(budget_slot_reclaim_sell_count / realized_sell_count) if realized_sell_count else 0.0
@@ -1492,6 +1559,46 @@ def _build_semantic_conflicts(
     direct_action_core_minus_pair_forward_excess_5d = (
         direct_action_core_target_forward_excess_5d - direct_action_pair_source_forward_excess_5d
         if direct_core_deploy_target.any() and direct_pair_reallocation_source.any()
+        else 0.0
+    )
+    portfolio_daily_receiver_target_count = int(portfolio_receiver_target.sum())
+    portfolio_daily_source_candidate_count = int(portfolio_source_candidate.sum())
+    portfolio_daily_source_target_count = int(portfolio_source_target.sum())
+    portfolio_daily_source_realized_sell_rate = (
+        _safe_mean(weight_change_lookup.loc[portfolio_source_target].isin({"reduce", "exit"}).astype(float))
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_cash_score_mean = _safe_mean(portfolio_cash_score)
+    portfolio_daily_cash_reserve_rate = _safe_mean(portfolio_cash_reserve_signal.astype(float))
+    portfolio_daily_receiver_score_mean = (
+        _safe_mean(portfolio_receiver_score.loc[portfolio_receiver_target])
+        if portfolio_receiver_target.any()
+        else 0.0
+    )
+    portfolio_daily_source_score_mean = (
+        _safe_mean(portfolio_source_score.loc[portfolio_source_target])
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_source_gap_mean = (
+        _safe_mean(portfolio_source_gap.loc[portfolio_source_target])
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_receiver_forward_excess_5d = (
+        _safe_mean(working.loc[portfolio_receiver_target, "forward_excess_5d"])
+        if portfolio_receiver_target.any()
+        else 0.0
+    )
+    portfolio_daily_source_forward_excess_5d = (
+        _safe_mean(working.loc[portfolio_source_target, "forward_excess_5d"])
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_receiver_minus_source_forward_excess_5d = (
+        portfolio_daily_receiver_forward_excess_5d - portfolio_daily_source_forward_excess_5d
+        if portfolio_receiver_target.any() and portfolio_source_target.any()
         else 0.0
     )
     high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
@@ -1637,6 +1744,17 @@ def _build_semantic_conflicts(
     ):
         diagnoses.append("direct-action pair reallocation 正在释放高持有价值来源，资金来源成本偏高会吞掉核心部署收益。")
 
+    if (
+        portfolio_daily_receiver_target_count >= 5
+        and portfolio_daily_source_target_count >= 5
+        and portfolio_daily_receiver_minus_source_forward_excess_5d <= 0.0
+    ):
+        diagnoses.append("portfolio daily ranking has not separated capital receivers from funding sources; the listwise allocation target still needs tighter relative credit assignment.")
+    if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_forward_excess_5d > 0.006:
+        diagnoses.append("portfolio daily ranking is releasing sources that still have positive forward excess return, suggesting sell/opportunity-cost attribution remains too weak.")
+    if portfolio_daily_receiver_target_count >= 5 and portfolio_daily_source_target_count == 0:
+        diagnoses.append("portfolio daily ranking selects capital receivers but finds no explicit funding source, so cash/source coordination remains incomplete.")
+
     pair_rows = _action_pair_rows(working, actual_column="execution_action", actual_key="execution_action", limit=12)
     conflict_pair_rows = [row for row in pair_rows if row["model_action"] != row["execution_action"]][:8]
     order_pair_rows = _action_pair_rows(
@@ -1771,6 +1889,20 @@ def _build_semantic_conflicts(
         "direct_action_pair_source_forward_excess_5d": direct_action_pair_source_forward_excess_5d,
         "direct_action_core_target_forward_excess_5d": direct_action_core_target_forward_excess_5d,
         "direct_action_core_minus_pair_forward_excess_5d": direct_action_core_minus_pair_forward_excess_5d,
+        "portfolio_daily_receiver_target_count": int(portfolio_daily_receiver_target_count),
+        "portfolio_daily_source_candidate_count": int(portfolio_daily_source_candidate_count),
+        "portfolio_daily_source_target_count": int(portfolio_daily_source_target_count),
+        "portfolio_daily_source_sell_count": int(portfolio_daily_source_sell_count),
+        "portfolio_daily_source_sell_share": portfolio_daily_source_sell_share,
+        "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate,
+        "portfolio_daily_cash_score_mean": portfolio_daily_cash_score_mean,
+        "portfolio_daily_cash_reserve_rate": portfolio_daily_cash_reserve_rate,
+        "portfolio_daily_receiver_score_mean": portfolio_daily_receiver_score_mean,
+        "portfolio_daily_source_score_mean": portfolio_daily_source_score_mean,
+        "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
+        "portfolio_daily_receiver_forward_excess_5d": portfolio_daily_receiver_forward_excess_5d,
+        "portfolio_daily_source_forward_excess_5d": portfolio_daily_source_forward_excess_5d,
+        "portfolio_daily_receiver_minus_source_forward_excess_5d": portfolio_daily_receiver_minus_source_forward_excess_5d,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,

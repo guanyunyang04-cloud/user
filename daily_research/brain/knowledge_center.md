@@ -697,3 +697,7 @@
   - 只看 funding cleanliness，`v11 + v9` 已经比自动 confirm 更好。
   - 但它的 `order_translation_conflict_rate = 0.3869`、`deploy_intent_realized_rate = 0.2627`，说明 release-side 约束一旦变强，执行链就会立刻暴露出新的耦合断点。
   - 所以下一阶段真正要攻的不是“继续盲目加大 release loss”，而是把 held-side learning、translation drift 和 deploy executability 作为一个联合问题处理。
+## 2026-04-25 r19 knowledge note
+- The five fixed bottlenecks are now represented as a portfolio daily ranking problem: individual action quality, portfolio capital allocation, sell/source credit assignment, daily-data blind spots, and small independent regime count must be evaluated together.
+- The most useful next evidence is not another action-classification loss; it is receiver-vs-source separation, source sell realization, cash reserve behavior, and month-level outcome quality.
+- Daily OHLCV can support trend, relative strength, drawdown, volume-price structure, and regime features, but it cannot fully learn intraday impact, true slippage, news shock path, or order-book liquidity.
