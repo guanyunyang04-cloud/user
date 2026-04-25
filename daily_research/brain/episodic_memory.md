@@ -792,3 +792,28 @@
   - 事实：低边际 direct action 仍偏高，add -> hold / hold -> add 的小额翻译漂移仍在；审计继续把 `direct_action_intent_not_preserved` 与 `deploy_intent_not_executable` 判为高优先级。
   - 推断：r15 已把根因从“预算层暗改动作”推进到“模型动作边际不够锋利、deploy 预算落地仍受约束”的更窄问题。
   - 决策：r15 保持 research / smoke 状态；下一步若继续，应启动正式 bounded shadow study，并以 `direct_action_translation_v1` 对比 v14/v15 与 result_value_v9/v10。
+
+## 2026-04-25 r15 formal 失败复盘与 r16 direct-action reallocation repair
+
+- 行动前自检：
+  - 事实：r15 正式 bounded study 已完成，champion 为 `confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9 + cash_constraint_direct_action_guard_v8`，但 `promotion_status = shadow_only`。
+  - 事实：r15 formal 的主要失败不是收益完全失效，而是 `deploy_intent_realized_rate = 0.1642`、`add_to_hold_conflict_share = 0.8524`、`release_translation_deploy_health_score = 0`，failure mode 为 `deploy_not_realized`。
+  - 事实：budget clipped 日的翻译冲突远高于 unclipped 日，说明 direct add/open 的失败主要卡在预算/订单翻译，而不是动作值路径完全缺失。
+  - 推断：下一轮最高价值不是继续泛化加 loss，而是给高置信 direct add/open 建立显式可成交预算再分配，并让释放资金的持仓必须有可审计来源。
+  - 假设：在不切换 live、不改 promotion gate 的边界内，可以先用 r15 champion artifact 评估 v9 reallocation guard，验证执行层结构修复是否有效。
+- 已完成执行：
+  - `portfolio_simulator.py` 新增 `cash_constraint_direct_action_reallocation_guard_v9`，为 direct add/open 授权、deploy advantage、reallocation source 与 retention floor 建立显式链路。
+  - `pipeline_utils.py`、`analyze_behavior_gap.py` 新增 `direct_action_deploy_authorized_realized_rate`、`direct_action_add_authorized_realized_rate`、`direct_action_reallocation_source_count` 等 r16 审计字段。
+  - `run_self_optimizing_study.py` 新增 `split_heads_direct_action_reallocation_r16` 与 `direct_action_reallocation_v1`，把授权成交率、再分配 source、月度收益质量和 direct action 语义一起纳入 scoring。
+  - `project_consistency_check.py` 与 `doc_guard.py` 已加入 r16 合同守卫；状态、操作、设计合同同步写回 r16 事实边界。
+- 验证与证据：
+  - `py_compile` 通过本轮修改的 continuous_policy 与工具文件。
+  - r16 dry-run `verify_direct_action_reallocation_r16_dryrun_20260425` 通过，4 条 trial 均使用 v9 reallocation guard。
+  - r16 smoke2 `verify_direct_action_reallocation_r16_v9_eval_smoke2_20260425`：`annual_return = 0.5807`、`sharpe = 1.6261`、`max_drawdown = -0.1180`、`monthly_consistency_score = 0.7247`、`direct_action_reallocation_source_count = 105`。
+  - r16 smoke2 同时暴露：`direct_action_deploy_authorized_realized_rate = 0.1557`、`direct_action_add_authorized_realized_rate = 0.1439`、`add_to_hold_conflict_share = 0.8483`，说明核心 deploy/add 落地仍未完成。
+  - r16 smoke3 曾尝试强制压低 source cap 并收窄授权阈值，结果显著恶化收益、回撤和成交率；该路径已回退，不作为当前实现。
+- 动作后复盘：
+  - 事实：r16 修复了“reallocation source 选不出来 / sell-source floor 锁死当前仓位”的结构问题，并在同一模型窗口显著改善 return/risk。
+  - 事实：r16 没有解决 direct add/open 高授权低成交的本质问题，订单/预算层仍会把大量 add 翻译成 hold。
+  - 推断：下一轮若继续，应优先研究 budget-clipped 日的可成交分配机制和 source/target 同步约束，而不是只继续提升动作分类置信度。
+  - 决策：r16 保持 `shadow_only` / research baseline；不切换 live，不改 active artifact，不改 promotion gate。

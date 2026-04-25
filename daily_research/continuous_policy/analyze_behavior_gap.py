@@ -371,6 +371,7 @@ def _build_held_side_detail_payload(
             "direct_action_release_utility",
             "direct_action_deploy_utility",
             "direct_action_release_advantage",
+            "direct_action_deploy_advantage",
             "deploy_value_target",
             "release_value_target",
             "deploy_gate_target",
@@ -606,6 +607,12 @@ def _build_semantic_conflicts(
             "direct_action_funding_authorized_sell_share": 0.0,
             "direct_action_funding_protected_sell_share": 0.0,
             "direct_action_release_advantage_mean": 0.0,
+            "direct_action_deploy_advantage_mean": 0.0,
+            "direct_action_add_authorized_count": 0,
+            "direct_action_add_authorized_realized_rate": 0.0,
+            "direct_action_deploy_authorized_count": 0,
+            "direct_action_deploy_authorized_realized_rate": 0.0,
+            "direct_action_reallocation_source_count": 0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
@@ -728,6 +735,11 @@ def _build_semantic_conflicts(
             "deploy_executability_target",
             "clipped_intent_risk",
             "sell_authorization_score",
+            "direct_action_value_applied",
+            "direct_action_value_selected",
+            "direct_action_value_gap",
+            "direct_action_release_advantage",
+            "direct_action_deploy_advantage",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -758,6 +770,10 @@ def _build_semantic_conflicts(
         "sell_authorized_by_model",
         "direct_action_funding_release_authorized",
         "direct_action_funding_protected",
+        "direct_action_add_authorized",
+        "direct_action_open_authorized",
+        "direct_action_deploy_authorized",
+        "direct_action_reallocation_source",
     ):
         working[bool_column] = working.get(
             bool_column,
@@ -1220,6 +1236,22 @@ def _build_semantic_conflicts(
         "direct_action_release_advantage",
         pd.Series(0.0, index=working.index),
     ).fillna(0.0)
+    direct_deploy_advantage = working.get(
+        "direct_action_deploy_advantage",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    direct_add_authorized = working.get(
+        "direct_action_add_authorized",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_deploy_authorized = working.get(
+        "direct_action_deploy_authorized",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_reallocation_source = working.get(
+        "direct_action_reallocation_source",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
     deploy_funding_rebalance_sell_mask = (
@@ -1243,6 +1275,22 @@ def _build_semantic_conflicts(
     direct_action_release_advantage_mean = (
         _safe_mean(direct_release_advantage.loc[direct_mode_mask]) if bool(direct_mode_mask.any()) else 0.0
     )
+    direct_action_deploy_advantage_mean = (
+        _safe_mean(direct_deploy_advantage.loc[direct_mode_mask]) if bool(direct_mode_mask.any()) else 0.0
+    )
+    direct_action_add_authorized_count = int(direct_add_authorized.sum())
+    direct_action_add_authorized_realized_rate = (
+        _safe_mean(weight_change_lookup.loc[direct_add_authorized].eq("add").astype(float))
+        if bool(direct_add_authorized.any())
+        else 0.0
+    )
+    direct_action_deploy_authorized_count = int(direct_deploy_authorized.sum())
+    direct_action_deploy_authorized_realized_rate = (
+        _safe_mean(weight_change_lookup.loc[direct_deploy_authorized].isin({"open", "add"}).astype(float))
+        if bool(direct_deploy_authorized.any())
+        else 0.0
+    )
+    direct_action_reallocation_source_count = int(direct_reallocation_source.sum())
     budget_slot_reclaim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_slot_reclaim")
     sell_priority_guard_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_sell_priority")
     turnover_trim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("turnover_budget_trim")
@@ -1434,6 +1482,8 @@ def _build_semantic_conflicts(
         diagnoses.append("模型给出的 open/add 部署意图未被足量转化为真实加仓，部署可执行性仍是主瓶颈。")
     if add_intent_count >= 3 and add_to_hold_conflict_share >= 0.20:
         diagnoses.append("add -> hold 冲突占比偏高，持仓加仓意图在预算/换手翻译层被过度钝化。")
+    if direct_action_deploy_authorized_count >= 5 and direct_action_deploy_authorized_realized_rate < 0.55:
+        diagnoses.append("direct action 授权部署仍未被稳定兑现，说明缺口集中在预算再分配和订单翻译闭环。")
     if (
         (deploy_intent_count >= 5 and deploy_intent_dropped_share >= 0.20)
         or avg_deploy_intent_candidate_budget_drop_share >= 0.20
@@ -1584,6 +1634,12 @@ def _build_semantic_conflicts(
         "direct_action_funding_authorized_sell_share": direct_action_funding_authorized_sell_share,
         "direct_action_funding_protected_sell_share": direct_action_funding_protected_sell_share,
         "direct_action_release_advantage_mean": direct_action_release_advantage_mean,
+        "direct_action_deploy_advantage_mean": direct_action_deploy_advantage_mean,
+        "direct_action_add_authorized_count": int(direct_action_add_authorized_count),
+        "direct_action_add_authorized_realized_rate": direct_action_add_authorized_realized_rate,
+        "direct_action_deploy_authorized_count": int(direct_action_deploy_authorized_count),
+        "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate,
+        "direct_action_reallocation_source_count": int(direct_action_reallocation_source_count),
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,
@@ -1984,6 +2040,10 @@ def main(argv: list[str] | None = None) -> int:
         and (
             float(semantic_conflicts.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) >= 0.08
             or float(semantic_conflicts.get("direct_action_value_low_margin_share", 0.0) or 0.0) >= 0.60
+            or (
+                float(semantic_conflicts.get("direct_action_deploy_authorized_count", 0.0) or 0.0) >= 5.0
+                and float(semantic_conflicts.get("direct_action_deploy_authorized_realized_rate", 0.0) or 0.0) < 0.55
+            )
         )
     ):
         bottlenecks.append(
@@ -2009,6 +2069,24 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "direct_action_funding_authorized_sell_share": float(
                         semantic_conflicts.get("direct_action_funding_authorized_sell_share", 0.0) or 0.0
+                    ),
+                    "direct_action_deploy_advantage_mean": float(
+                        semantic_conflicts.get("direct_action_deploy_advantage_mean", 0.0) or 0.0
+                    ),
+                    "direct_action_add_authorized_count": float(
+                        semantic_conflicts.get("direct_action_add_authorized_count", 0.0) or 0.0
+                    ),
+                    "direct_action_add_authorized_realized_rate": float(
+                        semantic_conflicts.get("direct_action_add_authorized_realized_rate", 0.0) or 0.0
+                    ),
+                    "direct_action_deploy_authorized_count": float(
+                        semantic_conflicts.get("direct_action_deploy_authorized_count", 0.0) or 0.0
+                    ),
+                    "direct_action_deploy_authorized_realized_rate": float(
+                        semantic_conflicts.get("direct_action_deploy_authorized_realized_rate", 0.0) or 0.0
+                    ),
+                    "direct_action_reallocation_source_count": float(
+                        semantic_conflicts.get("direct_action_reallocation_source_count", 0.0) or 0.0
                     ),
                 },
             }
@@ -2064,6 +2142,15 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "avg_deploy_executability_target": float(
                         semantic_conflicts.get("avg_deploy_executability_target", 0.0) or 0.0
+                    ),
+                    "direct_action_deploy_authorized_count": float(
+                        semantic_conflicts.get("direct_action_deploy_authorized_count", 0.0) or 0.0
+                    ),
+                    "direct_action_deploy_authorized_realized_rate": float(
+                        semantic_conflicts.get("direct_action_deploy_authorized_realized_rate", 0.0) or 0.0
+                    ),
+                    "direct_action_reallocation_source_count": float(
+                        semantic_conflicts.get("direct_action_reallocation_source_count", 0.0) or 0.0
                     ),
                 },
             }
@@ -2271,6 +2358,11 @@ def main(argv: list[str] | None = None) -> int:
         recommended_focus.append("继续校准权重翻译层，保留模型生命周期语义，同时减少真实订单方向与模型意图的偏离。")
     if float(semantic_conflicts.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) >= 0.08:
         recommended_focus.append("下一轮优先使用 direct-action-preserving translation，让预算层只做现金/风控约束，不再吞掉 direct action intent。")
+    if (
+        float(semantic_conflicts.get("direct_action_deploy_authorized_count", 0.0) or 0.0) >= 5.0
+        and float(semantic_conflicts.get("direct_action_deploy_authorized_realized_rate", 0.0) or 0.0) < 0.55
+    ):
+        recommended_focus.append("对高置信 direct add/open 建立显式可成交预算再分配，优先从未受保护的弱持仓释放小额资金。")
     if float(semantic_conflicts.get("direct_action_value_low_margin_share", 0.0) or 0.0) >= 0.60:
         recommended_focus.append("对低边际 direct action 增加 hold/cash abstain 纪律，避免弱优势动作被强行交易。")
     if (

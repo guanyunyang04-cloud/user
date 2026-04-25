@@ -29,6 +29,7 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT = "cash_constraint_intent_guard_v5"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY = "cash_constraint_deploy_guard_v6"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE = "cash_constraint_sell_source_guard_v7"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION = "cash_constraint_direct_action_guard_v8"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION = "cash_constraint_direct_action_reallocation_guard_v9"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -40,6 +41,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
 )
 
 
@@ -119,6 +121,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_direct_action_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         "cash_constraint_direct_action_guard_v8": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
         "direct_action_preserving_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+        "cash_constraint_direct_action_reallocation": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+        "cash_constraint_direct_action_reallocation_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+        "cash_constraint_direct_action_reallocation_guard_v9": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+        "direct_action_reallocation_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
     }
     if text not in aliases:
         raise ValueError(
@@ -680,22 +686,32 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
         deploy_executability_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
-        direct_action_preserving_mode = budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION
+        direct_action_preserving_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+        }
+        direct_action_reallocation_mode = (
+            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION
+        )
         sell_source_decoupled_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
@@ -704,6 +720,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
@@ -712,6 +729,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -808,6 +826,51 @@ class PortfolioState:
         direct_action_keep_advantage_series = (
             direct_action_keep_utility_series - direct_action_release_utility_series
         )
+        direct_action_add_advantage_series = (
+            _policy_numeric("direct_action_utility_add") - _policy_numeric("direct_action_utility_hold")
+        )
+        direct_action_open_advantage_series = (
+            _policy_numeric("direct_action_utility_open") - _policy_numeric("direct_action_utility_skip")
+        )
+        direct_action_deploy_advantage_series = pd.concat(
+            [
+                direct_action_add_advantage_series.rename("add"),
+                direct_action_open_advantage_series.rename("open"),
+            ],
+            axis=1,
+        ).max(axis=1)
+        direct_action_add_authorized = (
+            direct_action_reallocation_mode
+            & direct_action_mode_series
+            & held_mask
+            & action_names.eq("add")
+            & (
+                (direct_action_add_advantage_series >= 0.045)
+                | (
+                    (direct_action_gap_series >= 0.060)
+                    & (deploy_executability_series >= 0.42)
+                )
+                | (
+                    (deploy_executability_series >= 0.62)
+                    & (decision_deploy_gate_series >= decision_release_gate_series + 0.025)
+                )
+            )
+            & (direct_action_release_advantage_series < 0.060)
+        )
+        direct_action_open_authorized = (
+            direct_action_reallocation_mode
+            & direct_action_mode_series
+            & flat_mask
+            & action_names.eq("open")
+            & (
+                (direct_action_open_advantage_series >= 0.035)
+                | (
+                    (direct_action_gap_series >= 0.055)
+                    & (deploy_executability_series >= 0.42)
+                )
+            )
+        )
+        direct_action_deploy_authorized = direct_action_add_authorized | direct_action_open_authorized
         direct_action_funding_release_authorized = (
             direct_action_preserving_mode
             & direct_action_mode_series
@@ -842,6 +905,30 @@ class PortfolioState:
                     & (direct_action_release_advantage_series < 0.040)
                 )
             )
+        )
+        direct_action_reallocation_source_candidate = (
+            direct_action_reallocation_mode
+            & bool(direct_action_deploy_authorized.any())
+            & direct_action_mode_series
+            & held_mask
+            & action_names.isin({"hold", "skip"})
+            & (direct_action_keep_advantage_series < 0.180)
+            & (hold_continuation_series < 0.820)
+            & (alpha_opportunity_series < 0.760)
+            & (sell_pressure_series < 0.340)
+            & (exit_timing_pressure_series < 0.420)
+        )
+        direct_action_reallocation_protection_override = (
+            direct_action_reallocation_source_candidate
+            & direct_action_funding_protected
+            & (direct_action_keep_advantage_series < 0.140)
+            & (hold_continuation_series < 0.780)
+            & (alpha_opportunity_series < 0.720)
+            & (deploy_executability_series < 0.760)
+            & (direct_action_release_advantage_series <= 0.010)
+        )
+        direct_action_reallocation_source = direct_action_reallocation_source_candidate & (
+            (~direct_action_funding_protected) | direct_action_reallocation_protection_override
         )
         held_sell_pressure = _masked_mean(sell_pressure_series, held_mask)
         held_sell_attribution = _masked_mean(sell_attribution_series, held_mask)
@@ -1878,6 +1965,15 @@ class PortfolioState:
             - sell_reduction_priority.clip(0.0, 1.0) * 0.10
             - cash_defense_series.clip(0.0, 1.0) * (0.06 if constraint_only_budget_mode else 0.10)
         ).clip(lower=0.0)
+        direct_action_reallocation_retention_floor = pd.Series(1.0, index=prices.index, dtype=float)
+        if direct_action_reallocation_mode:
+            direct_action_reallocation_retention_floor = (
+                pd.Series(0.885, index=prices.index, dtype=float)
+                + hold_continuation_series.clip(0.0, 1.0) * 0.045
+                + direct_action_keep_advantage_series.clip(lower=0.0, upper=0.14) * 0.120
+                + alpha_opportunity_series.clip(0.0, 1.0) * 0.025
+                - deploy_intent_priority.clip(0.0, 1.0) * 0.030
+            ).clip(lower=0.865, upper=0.945)
 
         sell_source_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if sell_source_decoupled_mode:
@@ -1886,6 +1982,11 @@ class PortfolioState:
                 ~deploy_funding_rebalance_signal,
                 deploy_funding_retention_floor,
             )
+            if direct_action_reallocation_mode:
+                sell_source_retention_floor = sell_source_retention_floor.where(
+                    ~direct_action_reallocation_source,
+                    direct_action_reallocation_retention_floor,
+                )
             sell_source_floor = (current * sell_source_retention_floor).where(
                 (current > 1e-8) & (~sell_authorized_mask) & (~forced_zero),
                 0.0,
@@ -1977,8 +2078,13 @@ class PortfolioState:
                         )
                     )
                 )
+                direct_add_authorized = bool(direct_action_add_authorized.get(stock, False))
+                direct_open_authorized = bool(direct_action_open_authorized.get(stock, False))
                 if previous_weight > 1e-8:
                     deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
+                    direct_reallocation_source_allowed = bool(
+                        direct_action_reallocation_source.get(stock, False)
+                    )
                     if (
                         sell_source_decoupled_mode
                         and not bool(sell_authorized_mask.get(stock, False))
@@ -1989,6 +2095,9 @@ class PortfolioState:
                                 0.0,
                                 previous_weight * float(deploy_funding_retention_floor.get(stock, 0.90)),
                             )
+                        elif direct_reallocation_source_allowed and model_action_name in {"hold", "skip"}:
+                            source_retention = float(direct_action_reallocation_retention_floor.get(stock, 0.90))
+                            funding_floor = max(0.0, previous_weight * source_retention)
                         else:
                             funding_floor = previous_weight
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), funding_floor)
@@ -2017,17 +2126,30 @@ class PortfolioState:
                     elif model_action_name == "add" and not (
                         sell_source_decoupled_mode and bool(model_release_signal.get(stock, False))
                     ):
+                        if direct_action_reallocation_mode and direct_add_authorized:
+                            min_add_delta = max(
+                                deadband * 1.10,
+                                previous_weight * (0.020 + budget_model_deploy_signal * 0.015),
+                                0.0025,
+                            )
+                        else:
+                            min_add_delta = max(
+                                deadband * 1.35,
+                                previous_weight * (0.035 + budget_model_deploy_signal * 0.040),
+                                0.0035,
+                            )
                         min_add_weight = min(
                             position_cap_target,
-                            previous_weight + max(deadband * 1.35, previous_weight * (0.035 + budget_model_deploy_signal * 0.040), 0.0035),
+                            previous_weight + min_add_delta,
                         )
                         hard_add_floor = (
                             min_add_weight
-                            if strong_deploy_executable
+                            if strong_deploy_executable or direct_add_authorized
                             else previous_weight if intent_preserving_constraint_mode else min_add_weight
                         )
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_add_floor)
                         translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), min_add_weight)
+                        translation_cap.at[stock] = max(float(translation_cap.get(stock, position_cap_target)), hard_add_floor)
                         if target_value < hard_add_floor - 1e-12:
                             target_weights.at[stock] = hard_add_floor
                             translation_floor_guarded.at[stock] = True
@@ -2047,13 +2169,24 @@ class PortfolioState:
                             translation_cap_guarded.at[stock] = True
                 else:
                     if model_action_name in {"open", "add"} and target_value > 1e-12:
-                        min_open_weight = min(
-                            position_cap_target,
-                            max(execution_deadband_abs * 2.5, 0.012 + budget_model_deploy_signal * 0.010 + budget_model_alpha_focus_signal * 0.006),
-                        )
+                        if direct_action_reallocation_mode and direct_open_authorized:
+                            min_open_weight = min(
+                                position_cap_target,
+                                max(
+                                    execution_deadband_abs * 2.2,
+                                    0.010
+                                    + budget_model_deploy_signal * 0.008
+                                    + budget_model_alpha_focus_signal * 0.006,
+                                ),
+                            )
+                        else:
+                            min_open_weight = min(
+                                position_cap_target,
+                                max(execution_deadband_abs * 2.5, 0.012 + budget_model_deploy_signal * 0.010 + budget_model_alpha_focus_signal * 0.006),
+                            )
                         hard_open_floor = (
                             min_open_weight
-                            if strong_deploy_executable
+                            if strong_deploy_executable or direct_open_authorized
                             else 0.0 if intent_preserving_constraint_mode else min_open_weight
                         )
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), hard_open_floor)
@@ -2141,6 +2274,9 @@ class PortfolioState:
                 if abs(delta_value) <= 1e-12:
                     continue
                 deadband = max(execution_deadband_abs, previous_weight * execution_deadband_rel)
+                direct_reallocation_source_allowed = bool(
+                    direct_action_reallocation_source.get(stock, False)
+                )
                 exit_timing_pressure = float(exit_timing_pressure_values.get(stock, 0.0))
                 protected_floor_value = float(protected_floor.get(stock, 0.0))
                 hold_continuation_value = float(hold_continuation_series.get(stock, 0.0))
@@ -2160,12 +2296,14 @@ class PortfolioState:
                     and delta_value < 0.0
                     and not bool(sell_authorized_mask.get(stock, False))
                     and not bool(deploy_funding_rebalance_signal.get(stock, False))
+                    and not direct_reallocation_source_allowed
                     and abs(delta_value) <= max(deadband * 4.00, previous_weight * 0.25)
                 )
                 micro_negative_trim = delta_value < 0.0 and abs(delta_value) <= max(deadband * 1.10, previous_weight * 0.045)
                 protect_hold_trim = (
                     model_action_name == "hold"
                     and micro_negative_trim
+                    and not direct_reallocation_source_allowed
                     and not (
                         sell_source_decoupled_mode
                         and bool(deploy_funding_rebalance_signal.get(stock, False))
@@ -2403,8 +2541,13 @@ class PortfolioState:
                     "direct_action_release_utility": float(direct_action_release_utility_series.get(stock, 0.0)),
                     "direct_action_deploy_utility": float(direct_action_deploy_utility_series.get(stock, 0.0)),
                     "direct_action_release_advantage": float(direct_action_release_advantage_series.get(stock, 0.0)),
+                    "direct_action_deploy_advantage": float(direct_action_deploy_advantage_series.get(stock, 0.0)),
+                    "direct_action_add_authorized": bool(direct_action_add_authorized.get(stock, False)),
+                    "direct_action_open_authorized": bool(direct_action_open_authorized.get(stock, False)),
+                    "direct_action_deploy_authorized": bool(direct_action_deploy_authorized.get(stock, False)),
                     "direct_action_funding_release_authorized": bool(direct_action_funding_release_authorized.get(stock, False)),
                     "direct_action_funding_protected": bool(direct_action_funding_protected.get(stock, False)),
+                    "direct_action_reallocation_source": bool(direct_action_reallocation_source.get(stock, False)),
                     "execution_action": execution_action,
                     "weight_change_action": weight_change_action,
                     "execution_semantics": execution_semantics,
@@ -2747,6 +2890,9 @@ class PortfolioState:
             "direct_action_preserving_mode": float(bool(direct_action_preserving_mode)),
             "direct_action_funding_release_authorized_count": int(direct_action_funding_release_authorized.sum()),
             "direct_action_funding_protected_count": int(direct_action_funding_protected.sum()),
+            "direct_action_add_authorized_count": int(direct_action_add_authorized.sum()),
+            "direct_action_open_authorized_count": int(direct_action_open_authorized.sum()),
+            "direct_action_reallocation_source_count": int(direct_action_reallocation_source.sum()),
             "sell_authorized_held_count": int(sell_authorized_mask.sum()),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),

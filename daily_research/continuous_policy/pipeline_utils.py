@@ -956,6 +956,22 @@ def compute_continuity_metrics(
             action_outcomes.get("direct_action_release_advantage", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0)
+        direct_deploy_advantage = pd.to_numeric(
+            action_outcomes.get("direct_action_deploy_advantage", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_add_authorized = action_outcomes.get(
+            "direct_action_add_authorized",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        direct_deploy_authorized = action_outcomes.get(
+            "direct_action_deploy_authorized",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        direct_reallocation_source = action_outcomes.get(
+            "direct_action_reallocation_source",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
         direct_funding_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
             "deploy_funding_rebalance"
         )
@@ -977,6 +993,25 @@ def compute_continuity_metrics(
         metrics["direct_action_release_advantage_mean"] = (
             float(direct_release_advantage.loc[direct_mode_mask].mean()) if bool(direct_mode_mask.any()) else 0.0
         )
+        metrics["direct_action_deploy_advantage_mean"] = (
+            float(direct_deploy_advantage.loc[direct_mode_mask].mean()) if bool(direct_mode_mask.any()) else 0.0
+        )
+        metrics["direct_action_add_authorized_count"] = float(direct_add_authorized.sum())
+        metrics["direct_action_add_authorized_realized_rate"] = (
+            float((direct_add_authorized & weight_change_lookup.eq("add")).sum() / direct_add_authorized.sum())
+            if bool(direct_add_authorized.any())
+            else 0.0
+        )
+        metrics["direct_action_deploy_authorized_count"] = float(direct_deploy_authorized.sum())
+        metrics["direct_action_deploy_authorized_realized_rate"] = (
+            float(
+                (direct_deploy_authorized & weight_change_lookup.isin({"open", "add"})).sum()
+                / direct_deploy_authorized.sum()
+            )
+            if bool(direct_deploy_authorized.any())
+            else 0.0
+        )
+        metrics["direct_action_reallocation_source_count"] = float(direct_reallocation_source.sum())
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
@@ -1257,6 +1292,12 @@ def compute_continuity_metrics(
             "direct_action_funding_authorized_sell_share",
             "direct_action_funding_protected_sell_share",
             "direct_action_release_advantage_mean",
+            "direct_action_deploy_advantage_mean",
+            "direct_action_add_authorized_count",
+            "direct_action_add_authorized_realized_rate",
+            "direct_action_deploy_authorized_count",
+            "direct_action_deploy_authorized_realized_rate",
+            "direct_action_reallocation_source_count",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",

@@ -605,6 +605,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("alpha_result_value_budget_split_v15", "r15 direct action-preserving loss profile"),
         ("split_heads_direct_action_translation_r15", "r15 direct action-preserving study profile"),
         ("direct_action_translation_v1", "r15 direct action-preserving objective"),
+        ("split_heads_direct_action_reallocation_r16", "r16 direct action reallocation study profile"),
+        ("direct_action_reallocation_v1", "r16 direct action reallocation objective"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -646,6 +648,15 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r15_contract_missing",
         "continuous_policy r15 direct-action-preserving translation/funding contract is missing markers.",
+    )
+    _require(
+        "cash_constraint_direct_action_reallocation_guard_v9" in simulator_text
+        and "direct_action_deploy_authorized_realized_rate" in analysis_text
+        and "direct_action_deploy_authorized_realized_rate" in pipeline_text
+        and "direct_action_reallocation_v1" in study_text,
+        failures,
+        "continuous_policy_r16_contract_missing",
+        "continuous_policy r16 direct-action reallocation contract is missing audit/scoring markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,
