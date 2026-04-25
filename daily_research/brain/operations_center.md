@@ -37,15 +37,16 @@
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --help`
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/analyze_behavior_gap.py --help`
 
-## 当前 r12-r17 操作口径
+## 当前 r12-r18 操作口径
 - `split_heads_release_translation_deploy_r12` 使用 `release_translation_deploy_v1`，用于联合检查 release learning、order translation drift 与 deploy executability。
 - `split_heads_action_value_unification_r13` 使用 `action_value_unification_v1`，用于检查 open/add/hold/reduce/exit 是否共享同一套多周期未来价值锚。
 - `split_heads_direct_action_value_r14` 使用 `direct_daily_policy_v1`，用于检查模型是否能通过直接动作值仲裁日级动作。
 - `split_heads_direct_action_translation_r15` 使用 `direct_action_translation_v1` 与 `cash_constraint_direct_action_guard_v8`，用于检查订单/预算层是否保留 direct action intent。
 - `split_heads_direct_action_reallocation_r16` 使用 `direct_action_reallocation_v1` 与 `cash_constraint_direct_action_reallocation_guard_v9`，用于检查高置信 add/open 是否能获得显式预算再分配。
 - `split_heads_direct_action_pair_reallocation_r17` 使用 `direct_action_pair_reallocation_v1` 与 `cash_constraint_direct_action_pair_reallocation_guard_v10`，用于检查 core deploy target 是否能在满仓/预算受限日通过成对换仓真实成交。
+- `split_heads_direct_action_pair_cost_guard_r18` 使用 `direct_action_pair_cost_guard_v1` 与 `cash_constraint_direct_action_pair_cost_guard_v11`，用于检查 pair-source 是否相对 core target 足够弱、机会成本可接受且不会单纯扩大牺牲源数量。
 - 月度收益评价已接入通用曲线指标与 study ranking；重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`，并读取 `monthly_returns.csv` 或 `shadow_monthly_returns.csv` 明细。
-- r12/r13/r14/r15/r16/r17 全部仍为 research / shadow 证据，不改变 live 默认执行。
+- r12/r13/r14/r15/r16/r17/r18 全部仍为 research / shadow 证据，不改变 live 默认执行。
 
 ## r16-r17 当前证据入口
 - r16 dry-run：`daily_research/output/continuous_policy/studies/verify_direct_action_reallocation_r16_dryrun_20260425/study_summary.json`。
@@ -59,16 +60,23 @@
 - r17 repaired confirm 对照：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
 - r17 pair-source 专项审计：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/pair_source_audit_summary.json` 与 `pair_source_audit_comparison.csv`。
 - r17 repaired confirm held-side 审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_direct_action_pair_reallocation_r17__study_r1__confirm_01_repair_audit.json`、`...confirm_02_repair_audit.json`。
+- r18 dry-run：`daily_research/output/continuous_policy/studies/verify_direct_action_pair_cost_guard_r18_dryrun_20260425/study_summary.json`。
+- r18 smoke2 evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425/evaluation_summary.json`。
+- r18 smoke2 audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_audit_20260425.json`。
 - r15 formal study summary：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_translation_r15__study_r1/study_summary.json`。
 - r15 champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_direct_action_translation_r15__study_r1__confirm_01/protocol_summary.json`。
 
-## r17 推荐命令
+## r17-r18 推荐命令
 - dry-run：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_direct_action_pair_reallocation_r17 --objective-profile direct_action_pair_reallocation_v1 --trial-count 4 --study-tag verify_direct_action_pair_reallocation_r17_dryrun_20260425 --dry-run`
+- r18 dry-run：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_direct_action_pair_cost_guard_r18 --objective-profile direct_action_pair_cost_guard_v1 --trial-count 4 --study-tag verify_direct_action_pair_cost_guard_r18_dryrun_20260425 --dry-run`
 - 评估 r15 champion artifact 的 v10 pair reallocation smoke 时，必须显式指定 `cash_constraint_direct_action_pair_reallocation_guard_v10`，并保留独立 tag，避免覆盖正式 r15 evidence。
+- 评估 r17 repaired confirm artifact 的 v11 pair cost guard smoke 时，必须显式指定 `cash_constraint_direct_action_pair_cost_guard_v11`，并同时读取 `direct_action_core_minus_pair_forward_excess_5d`、pair-source cost、blocked count、turnover 与月度收益质量。
 - 审计 r17 evaluation summary 时使用 `--export-held-side-details`，并顺序运行，避免 latest 摘要竞争。
 - 若需要回看 r16 对照，可使用 `split_heads_direct_action_reallocation_r16`、`direct_action_reallocation_v1` 与 `cash_constraint_direct_action_reallocation_guard_v9`，但 r16 当前只作为结构对照基线。
 - r17 bounded study 的自动 confirm summary 失败属于 study runner 子进程 `[Errno 22] Invalid argument`；使用 direct protocol rerun / strict resume 产物时，以 `manual_confirm_repair_summary.json` 为 repaired confirm 对照真源。
+- 下一轮不得继续把主要算力投入到单独动作 loss 堆叠；优先设计组合级日决策 objective / pair-listwise ranking / 月度收益直接优化入口。
 
 ## execution app 运行时
 - 统一运行时目录：`daily_research/output/execution_app`。

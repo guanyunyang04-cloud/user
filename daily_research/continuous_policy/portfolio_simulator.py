@@ -31,6 +31,7 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE = "cash_constraint_sell_source_gu
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION = "cash_constraint_direct_action_guard_v8"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION = "cash_constraint_direct_action_reallocation_guard_v9"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION = "cash_constraint_direct_action_pair_reallocation_guard_v10"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD = "cash_constraint_direct_action_pair_cost_guard_v11"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -44,6 +45,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
 )
 
 
@@ -131,6 +133,11 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_direct_action_pair_reallocation_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         "cash_constraint_direct_action_pair_reallocation_guard_v10": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         "direct_action_pair_reallocation_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+        "cash_constraint_direct_action_pair_cost_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
+        "cash_constraint_direct_action_pair_cost_guard_v11": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
+        "cash_constraint_direct_action_pair_reallocation_cost_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
+        "cash_constraint_direct_action_pair_reallocation_cost_guard_v11": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
+        "direct_action_pair_cost_guard_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
     }
     if text not in aliases:
         raise ValueError(
@@ -694,6 +701,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -702,6 +710,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         deploy_executability_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
@@ -709,24 +718,32 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         direct_action_preserving_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
-        direct_action_pair_reallocation_mode = (
-            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION
+        direct_action_pair_cost_guard_mode = (
+            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD
         )
+        direct_action_pair_reallocation_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
+        }
         direct_action_reallocation_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         sell_source_decoupled_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
@@ -737,6 +754,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
@@ -747,6 +765,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -1004,13 +1023,78 @@ class PortfolioState:
             & (exit_timing_pressure_series < 0.480)
             & (direct_action_add_rank > 1.0)
         )
-        direct_action_pair_reallocation_source = (
+        direct_action_pair_source_baseline_eligible = (
             direct_action_pair_reallocation_source_candidate
             & (direct_action_add_rank > 1.0)
             & (hold_continuation_series < 0.900)
             & (alpha_opportunity_series < 0.920)
             & (deploy_executability_series < 0.930)
         )
+        direct_action_pair_core_reference_score = 0.0
+        core_rank_scores = direct_action_deploy_rank_score.loc[direct_action_core_deploy_target].replace(
+            [np.inf, -np.inf],
+            np.nan,
+        ).dropna()
+        if bool(len(core_rank_scores)):
+            direct_action_pair_core_reference_score = float(core_rank_scores.min())
+        direct_action_pair_opportunity_spread = (
+            pd.Series(direct_action_pair_core_reference_score, index=prices.index, dtype=float)
+            - direct_action_deploy_rank_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        )
+        direct_action_pair_source_opportunity_cost = (
+            hold_continuation_series.clip(0.0, 1.0) * 0.34
+            + alpha_opportunity_series.clip(0.0, 1.0) * 0.30
+            + deploy_executability_series.clip(0.0, 1.0) * 0.20
+            + (direct_action_keep_advantage_series.clip(lower=0.0, upper=0.18) / 0.18) * 0.16
+        ).clip(0.0, 1.0)
+        pair_min_spread = float(
+            np.clip(
+                0.075
+                + budget_model_alpha_focus_signal * 0.010
+                + max(budget_model_deploy_signal - 0.55, 0.0) * 0.014,
+                0.075,
+                0.115,
+            )
+        )
+        direct_action_pair_source_release_score = (
+            direct_action_pair_opportunity_spread.clip(lower=-0.10, upper=0.20) * 1.35
+            + (1.0 - direct_action_pair_source_opportunity_cost).clip(0.0, 1.0) * 0.62
+            + direct_action_release_advantage_series.clip(lower=0.0, upper=0.12) * 0.28
+            - current.clip(0.0, 0.25) * 0.18
+            - large_upside_series.clip(0.0, 1.0) * 0.16
+        )
+        if direct_action_pair_cost_guard_mode:
+            direct_action_pair_cost_guard_pass = (
+                direct_action_pair_source_baseline_eligible
+                & (direct_action_pair_opportunity_spread >= pair_min_spread)
+                & (direct_action_pair_source_opportunity_cost <= 0.745)
+                & (large_upside_series < 0.680)
+                & (hold_continuation_series < 0.875)
+                & (alpha_opportunity_series < 0.875)
+                & (deploy_executability_series < 0.900)
+            )
+            guarded_pair_count = int(direct_action_pair_cost_guard_pass.sum())
+            core_target_count = int(direct_action_core_deploy_target.sum())
+            pair_source_limit = 0
+            if guarded_pair_count > 0 and core_target_count > 0:
+                pair_source_limit = min(guarded_pair_count, max(1, min(4, int(np.ceil(core_target_count * 1.25)))))
+            if pair_source_limit > 0:
+                pair_source_rank = direct_action_pair_source_release_score.where(
+                    direct_action_pair_cost_guard_pass
+                ).rank(method="first", ascending=False)
+                direct_action_pair_reallocation_source = direct_action_pair_cost_guard_pass & (
+                    pair_source_rank <= float(pair_source_limit)
+                )
+            else:
+                direct_action_pair_reallocation_source = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_pair_cost_guard_blocked = (
+                direct_action_pair_reallocation_source_candidate
+                & (~direct_action_pair_reallocation_source)
+            )
+        else:
+            direct_action_pair_cost_guard_pass = direct_action_pair_source_baseline_eligible
+            direct_action_pair_reallocation_source = direct_action_pair_source_baseline_eligible
+            direct_action_pair_cost_guard_blocked = pd.Series(False, index=prices.index, dtype=bool)
         direct_action_reallocation_source = (
             direct_action_hold_reallocation_source | direct_action_pair_reallocation_source
         )
@@ -1252,6 +1336,92 @@ class PortfolioState:
                     + portfolio_deploy_pressure * (0.014 if deploy_executability_constraint_mode else 0.010),
                     0.05,
                     0.34 if deploy_executability_constraint_mode else 0.32,
+                )
+            )
+        elif direct_action_pair_cost_guard_mode:
+            pair_core_pressure = float(
+                np.clip(
+                    int(direct_action_core_deploy_target.sum()) / max(float(self.max_positions), 1.0) * 0.62
+                    + budget_deploy_score * 0.30
+                    + budget_model_alpha_focus_signal * 0.08,
+                    0.0,
+                    1.0,
+                )
+            )
+            pair_guard_pass_count = int(direct_action_pair_cost_guard_pass.sum())
+            pair_source_spread_mean = (
+                float(direct_action_pair_opportunity_spread.loc[direct_action_pair_cost_guard_pass].mean())
+                if pair_guard_pass_count > 0
+                else 0.0
+            )
+            pair_source_pressure = float(
+                np.clip(
+                    pair_guard_pass_count / max(float(self.max_positions), 1.0) * 0.42
+                    + _masked_mean(direct_action_pair_source_release_score, direct_action_pair_cost_guard_pass) * 0.30
+                    + max(pair_source_spread_mean, 0.0) * 4.0,
+                    0.0,
+                    1.0,
+                )
+            )
+            pair_constraint_pressure = float(
+                np.clip(
+                    0.34 * budget_model_cash_timing_signal
+                    + 0.24 * budget_model_defense_gate_signal
+                    + 0.14 * budget_model_risk_signal
+                    + 0.12 * avg_cash_defense_value
+                    + 0.10 * max(-portfolio_drawdown_20d - 0.025, 0.0) / 0.09
+                    + 0.06 * max(turnover_pressure - 0.60, 0.0) / 0.70,
+                    0.0,
+                    1.0,
+                )
+            )
+            pair_cash_cut = max(0.0, pair_constraint_pressure - pair_core_pressure * 0.46 - pair_source_pressure * 0.18)
+            risk_cut = (
+                pair_constraint_pressure * (0.060 + current_gross_exposure * 0.105)
+                + pair_cash_cut * (0.040 + current_gross_exposure * 0.080)
+            )
+            deploy_boost = (
+                pair_core_pressure * 0.072 + pair_source_pressure * 0.018
+                if pair_constraint_pressure < 0.44 and budget_model_cash_timing_signal < 0.48
+                else 0.0
+            )
+            gross_exposure_target = float(
+                np.clip(
+                    gross_exposure_target - risk_cut + deploy_boost,
+                    0.20,
+                    min(0.94, max(gross_exposure_target_raw + 0.045, 0.32)),
+                )
+            )
+            candidate_budget = int(
+                np.clip(
+                    round(
+                        candidate_budget
+                        - pair_constraint_pressure * 1.8
+                        - pair_cash_cut * 1.2
+                        + pair_core_pressure * 2.1
+                        + pair_source_pressure * 0.6
+                    ),
+                    1,
+                    int(self.max_positions),
+                )
+            )
+            turnover_budget = float(
+                np.clip(
+                    turnover_budget
+                    + pair_source_pressure * 0.10
+                    + pair_constraint_pressure * 0.05
+                    - pair_core_pressure * 0.015,
+                    0.08,
+                    1.00,
+                )
+            )
+            position_cap_target = float(
+                np.clip(
+                    position_cap_target
+                    - pair_constraint_pressure * 0.018
+                    + pair_core_pressure * 0.010,
+                    0.05,
+                    0.34,
                 )
             )
         elif budget_calibration in {BUDGET_CALIBRATION_CASH_TRANSLATION, BUDGET_CALIBRATION_CASH_TRANSLATION_SELL}:
@@ -2661,6 +2831,11 @@ class PortfolioState:
                     "direct_action_funding_protected": bool(direct_action_funding_protected.get(stock, False)),
                     "direct_action_reallocation_source": bool(direct_action_reallocation_source.get(stock, False)),
                     "direct_action_pair_reallocation_source": direct_pair_reallocation_source_flag,
+                    "direct_action_pair_opportunity_spread": float(direct_action_pair_opportunity_spread.get(stock, 0.0)),
+                    "direct_action_pair_source_opportunity_cost": float(direct_action_pair_source_opportunity_cost.get(stock, 0.0)),
+                    "direct_action_pair_cost_guard_pass": bool(direct_action_pair_cost_guard_pass.get(stock, False)),
+                    "direct_action_pair_cost_guard_blocked": bool(direct_action_pair_cost_guard_blocked.get(stock, False)),
+                    "direct_action_pair_source_release_score": float(direct_action_pair_source_release_score.get(stock, 0.0)),
                     "execution_action": execution_action,
                     "weight_change_action": weight_change_action,
                     "execution_semantics": execution_semantics,
@@ -3011,6 +3186,7 @@ class PortfolioState:
             "model_release_signal_count": int(model_release_signal.sum()),
             "deploy_funding_rebalance_signal_count": int(deploy_funding_rebalance_signal.sum()),
             "direct_action_preserving_mode": float(bool(direct_action_preserving_mode)),
+            "direct_action_pair_cost_guard_mode": float(bool(direct_action_pair_cost_guard_mode)),
             "direct_action_funding_release_authorized_count": int(direct_action_funding_release_authorized.sum()),
             "direct_action_funding_protected_count": int(direct_action_funding_protected.sum()),
             "direct_action_add_signal_count": int(direct_action_add_signal.sum()),
@@ -3020,6 +3196,16 @@ class PortfolioState:
             "direct_action_open_authorized_count": int(direct_action_open_authorized.sum()),
             "direct_action_reallocation_source_count": int(direct_action_reallocation_source.sum()),
             "direct_action_pair_reallocation_source_count": int(direct_action_pair_reallocation_source.sum()),
+            "direct_action_pair_cost_guard_pass_count": int(direct_action_pair_cost_guard_pass.sum()),
+            "direct_action_pair_cost_guard_blocked_count": int(direct_action_pair_cost_guard_blocked.sum()),
+            "direct_action_pair_source_spread_mean": _masked_mean(
+                direct_action_pair_opportunity_spread,
+                direct_action_pair_reallocation_source,
+            ),
+            "direct_action_pair_source_cost_mean": _masked_mean(
+                direct_action_pair_source_opportunity_cost,
+                direct_action_pair_reallocation_source,
+            ),
             "sell_authorized_held_count": int(sell_authorized_mask.sum()),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),

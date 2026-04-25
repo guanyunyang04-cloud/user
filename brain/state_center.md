@@ -1,19 +1,19 @@
 # 主脑状态中枢
 
-快照日期：`2026-04-24`
+快照日期：`2026-04-25`
+
+## 2026-04-25 daily_research r18 根因与组合级方向状态
+- 当前事实：`daily_research` 已落地 `split_heads_direct_action_pair_cost_guard_r18`、`cash_constraint_direct_action_pair_cost_guard_v11` 与 `direct_action_pair_cost_guard_v1`；r18 smoke2 已让 `direct_action_core_minus_pair_forward_excess_5d` 转正并降低换手，但仍是 research / `shadow_only`。
+- 已固定五个卡点：个股动作不等于组合决策、局部动作目标会互相打架、卖出/现金/source credit assignment 最难、日频数据有盲区、有效 regime 样本小。
+- 主脑层决策：具体 r18 指标、命令、审计与合同继续由 `daily_research/brain/` 承载；根因排序为目标函数与组合级决策不一致优先，其次是卖出责任分配，最后才是数据细度与 regime 样本。
+- 后续方向：不再继续堆动作 loss，转向组合级日决策模型，学习谁获得资金、谁释放资金、释放多少以及是否保留现金。
 
 ## 2026-04-24 主分脑维护状态
-- 当前事实：
-  - 已复核主脑与 `daily_research` 分脑接管链路，现有 `brain_integrity_check.py --json`、`doc_guard.py check` 与 `project_consistency_check.py` 均通过。
-  - 已发现并纠偏 `daily_research/brain/identity_layer.md` 中残留的可变 live 默认旧口径；身份层改为只保留目标、边界和事实入口。
-  - `daily_research` 当前 live 默认执行以 `daily_research/output/active_execution_strategy.json` 为物化真源，当前 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
-  - 已完成 `daily_research` 的 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 历史归档压缩；长原文与标题索引已下沉到 `daily_research/brain/references/`。
-  - `daily_research` 已推进到 r17 direct-action pair reallocation；r17 bounded study 已完成 screening，并用 direct protocol rerun / strict resume 补齐 repaired confirm 对照；全部仍为 research / `shadow_only`，不改变 live。
-- 当前决策：
-  - 主脑只记录维护摘要；`daily_research` 的具体 live、research、continuous_policy 状态继续由分脑承载。
-  - 后续若身份层再次出现可变 live 默认或具体实验指标，应视为文档职责漂移，先纠偏再继续重动作。
-  - 后续若状态、操作或合同入口再次膨胀，应先追加 references / episodic 索引，而不是把历史过程重新堆回当前入口。
-  - r12-r17 只改变 research / shadow 搜索与审计口径；不改变 active artifact、live 默认执行或 promotion 结论，具体指标继续由分脑承载。
+- 当前事实：主脑与 `daily_research` 分脑接管链路已复核，身份层可变 live 默认旧口径已纠偏；active 执行物化真源仍是 `daily_research/output/active_execution_strategy.json`。
+- 已完成 `daily_research` 的 `state_center.md`、`operations_center.md` 与 `continuous_policy_design_contract.md` 历史归档压缩；长原文与标题索引已下沉到 `daily_research/brain/references/`。
+- 当前决策：主脑只记录维护摘要；`daily_research` 的具体 live、research、continuous_policy 状态继续由分脑承载。
+- 若身份层再次出现可变 live 默认或具体实验指标，应视为文档职责漂移；若入口再次膨胀，应先追加 references / episodic 索引。
+- r12-r18 只改变 research / shadow 搜索与审计口径；不改变 active artifact、live 默认执行或 promotion 结论，具体指标继续由分脑承载。
 
 ## 2026-04-23 daily_research r11 卖出来源契约训练侧接通状态
 - 当前事实：

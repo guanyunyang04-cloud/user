@@ -14,6 +14,10 @@
 
 ## 当前绑定原则
 - 个股动作语义与组合预算语义必须分层：个股层表达生命周期动作，组合层表达 gross / cash / turnover / deployment。
+- 个股未来上涨不等于今天该加仓；组合级目标必须判断“谁获得资金、谁释放资金、释放多少、是否保留现金”，不能只做个股动作分类。
+- 卖出、现金与资金来源是同一条 credit assignment 链：释放旧仓不是因为它一定差，而是因为在当前组合状态下继续持有的机会成本可能高于把资金给 core target。
+- 日频数据只能学习趋势、强弱、回撤和量价结构；对盘中冲击、真实滑点、新闻驱动、盘口流动性和开盘跳空过程必须保留盲区假设。
+- 2024-2026 这类训练/验证切分的有效独立 regime 数量有限；月度样本更少，任何高收益分支都必须防止学到单段市场风格。
 - 执行层只翻译策略语义为权重和订单，不得静默改写策略本体。
 - 评价必须使用 execution-aligned 可比口径，禁止混用不同回测语义的 headline 指标。
 - `execution_action` 表示模型生命周期语义；`weight_change_action` 表示订单/预算翻译后的真实权重变化。
@@ -31,6 +35,8 @@
 - r16 边界：可以降低被授权 reallocation source 的 sell-source retention floor，但不得把这种修复解释成 promotion；只要 authorized deploy/add 仍被翻译成 hold，模型仍是 research/shadow。
 - r17 合同：`cash_constraint_direct_action_pair_reallocation_guard_v10` 必须把 direct deploy signal 与 core executable target 分开；在预算饱和日，只允许少数高排序 add/open 成为 core target，并允许弱排序 add 持仓作为显式 pair reallocation source。
 - r17 边界：pair reallocation source 是独立可审计的资金来源，不得混入 budget-origin sell；`direct_action_core_deploy_target_realized_rate`、`direct_action_pair_reallocation_source_count`、pair-source 机会成本、换手和月度收益质量必须联合判断。
+- r18 合同：`cash_constraint_direct_action_pair_cost_guard_v11` 必须把 pair-source 从“可释放资金”升级为“相对 core target 机会成本可接受”；`direct_action_core_minus_pair_forward_excess_5d`、`direct_action_pair_source_opportunity_cost`、blocked count、换手和月度收益质量必须联合判断。
+- r18 边界：`split_heads_direct_action_pair_cost_guard_r18` 是从规则桥走向组合级日决策的过渡层，不得被解释为最终模型；下一阶段目标应转为 pair/listwise portfolio ranking 与多日/月度组合收益直接优化。
 
 ## 当前已知事实
 - 当前已证实：`alpha_result_value_budget_split_v11` 能让 funding-sell 更少、更干净。
@@ -42,7 +48,8 @@
 - 当前已证实：r17 smoke3 在同一 r15 champion artifact 上把 `direct_action_core_deploy_target_realized_rate` 提升到 `0.9921`，把 `add_to_hold_conflict_share` 压到 `0.0`，并改善收益与月度一致性。
 - 当前已证实：r17 bounded study 的 screening champion `trial_03` 与 repaired confirm champion `confirm_01` 均保持高 core target 成交率，说明 v10 成对换仓机制不是单次 smoke 偶然。
 - 当前已证实：r17 pair-source 机会成本并非单调稳定；`trial_03 / confirm_01 / confirm_02` 的 core-minus-pair 5 日超额均值为正，但 `trial_01 / trial_02` 不成立或接近 0。
-- 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，r17 尚不能升为 production 或 promotion 证据；cash timing、卖出责任链和 pair-source 选择质量仍需 r18 修复。
+- 当前已证实：r18 v11 可以把 `direct_action_core_minus_pair_forward_excess_5d` 修为正值并显著降低换手，但绝对收益低于 r17 repaired confirm，说明机会成本守门有效但组合级目标仍未端到端闭合。
+- 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，r18 尚不能升为 production 或 promotion 证据；cash timing、卖出责任链和 portfolio-level objective 仍需后续修复。
 
 ## 当前禁止事项
 - 不得把 r11/r11b/r12/r13/r14/r15/r16/r17 任一分支写成 promotion 或 live 切换依据。
@@ -52,6 +59,7 @@
 - 不得在 release consistency 或 authorized deploy realization 仍低时声称 release / deploy 已学成。
 - 不得把 r16 smoke2 的收益改善解释为可上线；只要 add->hold 冲突和 authorized deploy 未实现仍高，就只能作为修复性 shadow 证据。
 - 不得把 r17 smoke3 或 r17 screening champion 的高收益和高成交率解释为可上线；repaired confirm 仍是 `shadow_only`，且 pair-source 机会成本、换手、cash timing 与长窗稳定性仍未闭合。
+- 不得继续把主要矛盾简化成堆动作 loss；open/add/hold/reduce/exit 分开学会强化局部目标冲突，必须向组合级日决策目标收敛。
 
 ## 成功判定
 - 结果层：`annual_return / sharpe / max_drawdown / trend_capture_rate_10d`。
@@ -64,12 +72,13 @@
 - 直接翻译层：`direct_action_intent_preserved_share / direct_action_funding_authorized_sell_share / direct_action_funding_protected_sell_share / direct_action_release_advantage_mean` 必须和 `deploy_intent_realized_rate`、held-side detail 及月度收益质量一起看。
 - 直接再分配层：`direct_action_deploy_authorized_realized_rate / direct_action_add_authorized_realized_rate / direct_action_reallocation_source_count / add_to_hold_conflict_share` 必须一起看，防止“有授权、有资金源、但真实订单仍不加仓”。
 - 成对再分配层：`direct_action_deploy_signal_count / direct_action_core_deploy_target_count / direct_action_core_deploy_target_realized_rate / direct_action_pair_reallocation_source_count / direct_action_pair_reallocation_sell_share` 必须和 pair-source 逐仓 forward excess、换手和月度收益质量一起看。
+- 成对机会成本层：`direct_action_pair_cost_guard_pass_rate / direct_action_pair_source_spread_mean / direct_action_pair_source_cost_mean / direct_action_core_minus_pair_forward_excess_5d` 必须和真实收益、换手、cash timing 与月度收益质量一起看。
 - 责任链：sell-source、funding source、held-side release support、protected-hold conflict 与 reallocation source 必须可审计。
 
 ## 下一步方向
-- r17 已从 smoke 推进到 bounded shadow study；下一步应转向 r18 的 pair-source 成本控制、主动 cash timing 和卖出责任链修复。
+- r18 已把 pair-source 成本守门落地；下一步应转向组合级日决策模型，而不是继续在固定动作集合里做局部桥接。
 - 后续若调整 loss / objective / simulator，必须随行补跑 source attribution、held-side detail 和 budget-clipped 分层审计。
-- 若 r18 继续使用 pair reallocation，必须把 core-minus-pair forward spread、pair-source 强势保护、换手成本和主动 release/cash 信号纳入合同；不得继续单纯扩大 pair-source 数量。
+- 后续模型应直接学习“当前组合状态下的仓位调整集合”，通过 pair/listwise ranking、多日收益风险成本与月度收益质量联合优化，显式解决资金获得、资金释放和现金保留。
 
 ## 历史归档入口
 - 原 `continuous_policy_design_contract.md` 已原样归档：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

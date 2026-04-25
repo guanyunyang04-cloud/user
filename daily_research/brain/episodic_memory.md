@@ -865,3 +865,28 @@
   - 事实：正式 confirm 收益低于 smoke，且 promotion gate 仍被 `cash_timing_quality_1d`、`max_drawdown`、reduce/exit 质量等项拦住。
   - 推断：主矛盾已经从“add/open 能不能成交”转为“pair-source 是否长期值得牺牲、cash/release 是否主动、卖出责任链是否干净”。
   - 决策：r17 作为当前最佳 shadow 修复基线收口；下一轮不应继续无约束扩大 pair-source，而应推进 r18 pair-source cost guard、主动 cash timing 和卖出责任链修复。
+
+## 2026-04-25 r18 pair-source opportunity cost guard 与根因写回
+
+- 行动前自检：
+  - 事实：用户明确要求记住五个卡点，并基于“目标函数与组合级决策不一致”这一第一根因继续解决问题。
+  - 事实：r17 已修复 core deploy target 成交，但暴露 pair-source 可能也是好票，只是相对 core target 没那么强；这说明卖出源选择必须做相对机会成本归因。
+  - 推断：继续堆 open/add/hold/reduce/exit 动作 loss 会强化局部目标冲突，最高价值动作应是把 pair-source、cash、release 与月度收益质量纳入组合级目标。
+  - 边界：本轮仍不切 live、不改 active artifact、不改 promotion gate；r18 只能作为 research / shadow 修复证据。
+- 已完成实现：
+  - `portfolio_simulator.py` 新增 `cash_constraint_direct_action_pair_cost_guard_v11`，把 pair-source 从“可释放资金”升级为“相对 core target 有足够 spread 且机会成本可接受”。
+  - `pipeline_utils.py` 与 `analyze_behavior_gap.py` 新增 `direct_action_pair_opportunity_spread`、`direct_action_pair_source_opportunity_cost`、`direct_action_pair_source_release_score`、`direct_action_core_minus_pair_forward_excess_5d` 等审计字段。
+  - `run_self_optimizing_study.py` 新增 `split_heads_direct_action_pair_cost_guard_r18` 与 `direct_action_pair_cost_guard_v1`，把 pair-source spread、source cost、core-minus-pair forward excess、换手和月度收益质量纳入 scoring。
+  - `doc_guard.py` 与 `project_consistency_check.py` 新增 r18 标记守卫，防止 profile / objective / simulator / audit / brain 文档再次漂移。
+  - 主脑、分脑状态中枢、知识中枢、操作中枢与设计合同已写回五个卡点、根因排序和 r18 当前边界。
+- 验证与证据：
+  - `py_compile` 已通过本轮修改的 continuous_policy 与工具文件。
+  - r18 dry-run `verify_direct_action_pair_cost_guard_r18_dryrun_20260425` 已生成 4 条 trial 计划。
+  - r18 smoke2 `verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425`：`annual_return = 0.4891`、`sharpe = 1.9492`、`max_drawdown = -0.1060`、`monthly_return_mean = 0.0322`、`monthly_consistency_score = 0.6693`、`avg_turnover = 0.0286`。
+  - r18 smoke2 pair-source 事实：`direct_action_pair_reallocation_source_count = 31`、`direct_action_pair_cost_guard_blocked_count = 327`、`direct_action_pair_source_spread_mean = 0.1490`、`direct_action_pair_source_cost_mean = 0.6716`、`direct_action_core_minus_pair_forward_excess_5d = 0.0060`。
+  - r18 smoke2 audit 仍把 `direct_action_intent_not_preserved`、`deploy_intent_not_executable`、`budget_action_entanglement` 与 `sell_execution_source_entangled` 判为高优先级瓶颈。
+- 行动后复盘：
+  - 事实：r18 修复了“pair-source 是否相对 core target 值得牺牲”的量化与守门问题，且减少了无约束换手。
+  - 事实：r18 绝对收益低于 r17 repaired confirm，说明它不是最终提升来源，只是把错误的 source credit assignment 明确化、可审计化。
+  - 推断：真正的大提升仍需组合级日决策模型，直接学习资金获得者、资金释放者、释放幅度与现金保留，而不是继续学习单只股票该 add 还是 hold。
+  - 决策：下一轮主线应转向 portfolio-level pair/listwise ranking、直接优化多日/月度组合收益、卖出与 cash timing 联合 credit assignment；不再把动作 loss 堆叠作为主方向。

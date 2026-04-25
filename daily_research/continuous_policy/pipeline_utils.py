@@ -578,6 +578,10 @@ def compute_continuity_metrics(
             "direct_action_release_utility",
             "direct_action_deploy_utility",
             "direct_action_release_advantage",
+            "direct_action_deploy_advantage",
+            "direct_action_pair_opportunity_spread",
+            "direct_action_pair_source_opportunity_cost",
+            "direct_action_pair_source_release_score",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -984,6 +988,25 @@ def compute_continuity_metrics(
             "direct_action_pair_reallocation_source",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        direct_pair_cost_guard_pass = action_outcomes.get(
+            "direct_action_pair_cost_guard_pass",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        direct_pair_cost_guard_blocked = action_outcomes.get(
+            "direct_action_pair_cost_guard_blocked",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        direct_pair_opportunity_spread = pd.to_numeric(
+            action_outcomes.get("direct_action_pair_opportunity_spread", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        direct_pair_source_cost = pd.to_numeric(
+            action_outcomes.get(
+                "direct_action_pair_source_opportunity_cost",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         direct_funding_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
             "deploy_funding_rebalance"
         )
@@ -1035,6 +1058,40 @@ def compute_continuity_metrics(
         )
         metrics["direct_action_reallocation_source_count"] = float(direct_reallocation_source.sum())
         metrics["direct_action_pair_reallocation_source_count"] = float(direct_pair_reallocation_source.sum())
+        direct_pair_guard_observed_count = float(direct_pair_cost_guard_pass.sum() + direct_pair_cost_guard_blocked.sum())
+        metrics["direct_action_pair_cost_guard_pass_count"] = float(direct_pair_cost_guard_pass.sum())
+        metrics["direct_action_pair_cost_guard_blocked_count"] = float(direct_pair_cost_guard_blocked.sum())
+        metrics["direct_action_pair_cost_guard_pass_rate"] = (
+            float(direct_pair_cost_guard_pass.sum() / direct_pair_guard_observed_count)
+            if direct_pair_guard_observed_count > 0.0
+            else 0.0
+        )
+        metrics["direct_action_pair_source_spread_mean"] = (
+            float(direct_pair_opportunity_spread.loc[direct_pair_reallocation_source].mean())
+            if bool(direct_pair_reallocation_source.any())
+            else 0.0
+        )
+        metrics["direct_action_pair_source_cost_mean"] = (
+            float(direct_pair_source_cost.loc[direct_pair_reallocation_source].mean())
+            if bool(direct_pair_reallocation_source.any())
+            else 0.0
+        )
+        metrics["direct_action_pair_source_forward_excess_5d"] = (
+            float(arbitration_forward_5d.loc[direct_pair_reallocation_source].mean())
+            if bool(direct_pair_reallocation_source.any())
+            else 0.0
+        )
+        metrics["direct_action_core_target_forward_excess_5d"] = (
+            float(arbitration_forward_5d.loc[direct_core_deploy_target].mean())
+            if bool(direct_core_deploy_target.any())
+            else 0.0
+        )
+        metrics["direct_action_core_minus_pair_forward_excess_5d"] = (
+            metrics["direct_action_core_target_forward_excess_5d"]
+            - metrics["direct_action_pair_source_forward_excess_5d"]
+            if bool(direct_core_deploy_target.any()) and bool(direct_pair_reallocation_source.any())
+            else 0.0
+        )
         metrics["deploy_intent_action_count"] = float(deploy_intent_count)
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
@@ -1325,6 +1382,14 @@ def compute_continuity_metrics(
             "direct_action_deploy_authorized_realized_rate",
             "direct_action_reallocation_source_count",
             "direct_action_pair_reallocation_source_count",
+            "direct_action_pair_cost_guard_pass_count",
+            "direct_action_pair_cost_guard_blocked_count",
+            "direct_action_pair_cost_guard_pass_rate",
+            "direct_action_pair_source_spread_mean",
+            "direct_action_pair_source_cost_mean",
+            "direct_action_pair_source_forward_excess_5d",
+            "direct_action_core_target_forward_excess_5d",
+            "direct_action_core_minus_pair_forward_excess_5d",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",

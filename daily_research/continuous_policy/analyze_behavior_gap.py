@@ -618,6 +618,14 @@ def _build_semantic_conflicts(
             "direct_action_deploy_authorized_realized_rate": 0.0,
             "direct_action_reallocation_source_count": 0,
             "direct_action_pair_reallocation_source_count": 0,
+            "direct_action_pair_cost_guard_pass_count": 0,
+            "direct_action_pair_cost_guard_blocked_count": 0,
+            "direct_action_pair_cost_guard_pass_rate": 0.0,
+            "direct_action_pair_source_spread_mean": 0.0,
+            "direct_action_pair_source_cost_mean": 0.0,
+            "direct_action_pair_source_forward_excess_5d": 0.0,
+            "direct_action_core_target_forward_excess_5d": 0.0,
+            "direct_action_core_minus_pair_forward_excess_5d": 0.0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
@@ -748,6 +756,9 @@ def _build_semantic_conflicts(
             "direct_action_release_advantage",
             "direct_action_deploy_advantage",
             "direct_action_deploy_rank_score",
+            "direct_action_pair_opportunity_spread",
+            "direct_action_pair_source_opportunity_cost",
+            "direct_action_pair_source_release_score",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -785,6 +796,8 @@ def _build_semantic_conflicts(
         "direct_action_core_deploy_target",
         "direct_action_reallocation_source",
         "direct_action_pair_reallocation_source",
+        "direct_action_pair_cost_guard_pass",
+        "direct_action_pair_cost_guard_blocked",
     ):
         working[bool_column] = working.get(
             bool_column,
@@ -1281,6 +1294,22 @@ def _build_semantic_conflicts(
         "direct_action_pair_reallocation_source",
         pd.Series(False, index=working.index),
     ).astype(bool)
+    direct_pair_cost_guard_pass = working.get(
+        "direct_action_pair_cost_guard_pass",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_pair_cost_guard_blocked = working.get(
+        "direct_action_pair_cost_guard_blocked",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    direct_pair_opportunity_spread = working.get(
+        "direct_action_pair_opportunity_spread",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    direct_pair_source_cost = working.get(
+        "direct_action_pair_source_opportunity_cost",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     budget_origin_sell_mask = realized_sell_mask & (~model_authorized_sell_origin_mask)
     model_release_signal_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("model_release_signal")
     deploy_funding_rebalance_sell_mask = (
@@ -1331,6 +1360,26 @@ def _build_semantic_conflicts(
     )
     direct_action_reallocation_source_count = int(direct_reallocation_source.sum())
     direct_action_pair_reallocation_source_count = int(direct_pair_reallocation_source.sum())
+    direct_action_pair_cost_guard_pass_count = int(direct_pair_cost_guard_pass.sum())
+    direct_action_pair_cost_guard_blocked_count = int(direct_pair_cost_guard_blocked.sum())
+    direct_action_pair_cost_guard_observed_count = (
+        direct_action_pair_cost_guard_pass_count + direct_action_pair_cost_guard_blocked_count
+    )
+    direct_action_pair_cost_guard_pass_rate = (
+        float(direct_action_pair_cost_guard_pass_count / direct_action_pair_cost_guard_observed_count)
+        if direct_action_pair_cost_guard_observed_count
+        else 0.0
+    )
+    direct_action_pair_source_spread_mean = _safe_mean(
+        direct_pair_opportunity_spread.loc[direct_pair_reallocation_source]
+        if direct_pair_reallocation_source.any()
+        else pd.Series(dtype=float)
+    )
+    direct_action_pair_source_cost_mean = _safe_mean(
+        direct_pair_source_cost.loc[direct_pair_reallocation_source]
+        if direct_pair_reallocation_source.any()
+        else pd.Series(dtype=float)
+    )
     budget_slot_reclaim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_slot_reclaim")
     sell_priority_guard_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("budget_sell_priority")
     turnover_trim_sell_mask = realized_sell_mask & working["sell_execution_origin"].eq("turnover_budget_trim")
@@ -1429,6 +1478,21 @@ def _build_semantic_conflicts(
         working.loc[budget_origin_sell_mask, "forward_excess_5d"]
         if budget_origin_sell_mask.any()
         else pd.Series(dtype=float)
+    )
+    direct_action_pair_source_forward_excess_5d = _safe_mean(
+        working.loc[direct_pair_reallocation_source, "forward_excess_5d"]
+        if direct_pair_reallocation_source.any()
+        else pd.Series(dtype=float)
+    )
+    direct_action_core_target_forward_excess_5d = _safe_mean(
+        working.loc[direct_core_deploy_target, "forward_excess_5d"]
+        if direct_core_deploy_target.any()
+        else pd.Series(dtype=float)
+    )
+    direct_action_core_minus_pair_forward_excess_5d = (
+        direct_action_core_target_forward_excess_5d - direct_action_pair_source_forward_excess_5d
+        if direct_core_deploy_target.any() and direct_pair_reallocation_source.any()
+        else 0.0
     )
     high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
     high_cash_sell_action_count = int(high_cash_sell_mask.sum())
@@ -1562,6 +1626,17 @@ def _build_semantic_conflicts(
     ):
         diagnoses.append("模型给出的 release 信号仍不够选择性，被释放的持仓里仍有相当比例属于应当继续保留的强持仓。")
 
+    if (
+        direct_action_pair_reallocation_source_count >= 5
+        and direct_action_core_minus_pair_forward_excess_5d <= 0.0
+    ):
+        diagnoses.append("direct-action pair reallocation 的资金来源没有稳定弱于核心部署目标，说明组合内相对机会成本守门仍需收紧。")
+    if (
+        direct_action_pair_reallocation_source_count >= 5
+        and direct_action_pair_source_cost_mean >= 0.78
+    ):
+        diagnoses.append("direct-action pair reallocation 正在释放高持有价值来源，资金来源成本偏高会吞掉核心部署收益。")
+
     pair_rows = _action_pair_rows(working, actual_column="execution_action", actual_key="execution_action", limit=12)
     conflict_pair_rows = [row for row in pair_rows if row["model_action"] != row["execution_action"]][:8]
     order_pair_rows = _action_pair_rows(
@@ -1688,6 +1763,14 @@ def _build_semantic_conflicts(
         "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate,
         "direct_action_reallocation_source_count": int(direct_action_reallocation_source_count),
         "direct_action_pair_reallocation_source_count": int(direct_action_pair_reallocation_source_count),
+        "direct_action_pair_cost_guard_pass_count": int(direct_action_pair_cost_guard_pass_count),
+        "direct_action_pair_cost_guard_blocked_count": int(direct_action_pair_cost_guard_blocked_count),
+        "direct_action_pair_cost_guard_pass_rate": direct_action_pair_cost_guard_pass_rate,
+        "direct_action_pair_source_spread_mean": direct_action_pair_source_spread_mean,
+        "direct_action_pair_source_cost_mean": direct_action_pair_source_cost_mean,
+        "direct_action_pair_source_forward_excess_5d": direct_action_pair_source_forward_excess_5d,
+        "direct_action_core_target_forward_excess_5d": direct_action_core_target_forward_excess_5d,
+        "direct_action_core_minus_pair_forward_excess_5d": direct_action_core_minus_pair_forward_excess_5d,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,
@@ -2149,6 +2232,18 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "direct_action_pair_reallocation_source_count": float(
                         semantic_conflicts.get("direct_action_pair_reallocation_source_count", 0.0) or 0.0
+                    ),
+                    "direct_action_pair_cost_guard_pass_rate": float(
+                        semantic_conflicts.get("direct_action_pair_cost_guard_pass_rate", 0.0) or 0.0
+                    ),
+                    "direct_action_pair_source_spread_mean": float(
+                        semantic_conflicts.get("direct_action_pair_source_spread_mean", 0.0) or 0.0
+                    ),
+                    "direct_action_pair_source_cost_mean": float(
+                        semantic_conflicts.get("direct_action_pair_source_cost_mean", 0.0) or 0.0
+                    ),
+                    "direct_action_core_minus_pair_forward_excess_5d": float(
+                        semantic_conflicts.get("direct_action_core_minus_pair_forward_excess_5d", 0.0) or 0.0
                     ),
                 },
             }
