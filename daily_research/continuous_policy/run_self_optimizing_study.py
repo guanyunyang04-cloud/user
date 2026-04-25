@@ -469,6 +469,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_direct_action_pair_reallocation_r17": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_direct_action_pair_reallocation_guard_v10"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12],
+        "daily_dropout": [0.08],
+        "batch_size": [512],
+    },
 }
 
 
@@ -859,6 +876,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_direct_action_pair_reallocation_r17": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_direct_action_pair_reallocation_guard_v10",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.2e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.12,
+        "daily_dropout": 0.08,
+        "batch_size": 512,
+    },
 }
 
 
@@ -886,6 +920,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_direct_action_value_r14": "direct_daily_policy_v1",
     "split_heads_direct_action_translation_r15": "direct_action_translation_v1",
     "split_heads_direct_action_reallocation_r16": "direct_action_reallocation_v1",
+    "split_heads_direct_action_pair_reallocation_r17": "direct_action_pair_reallocation_v1",
 }
 
 
@@ -1147,10 +1182,31 @@ def _score_protocol_summary(
         )
         or 0.0
     )
+    direct_action_core_deploy_target_count = float(
+        semantic_conflicts.get(
+            "direct_action_core_deploy_target_count",
+            continuity.get("direct_action_core_deploy_target_count", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_core_deploy_target_realized_rate = float(
+        semantic_conflicts.get(
+            "direct_action_core_deploy_target_realized_rate",
+            continuity.get("direct_action_core_deploy_target_realized_rate", 0.0),
+        )
+        or 0.0
+    )
     direct_action_reallocation_source_count = float(
         semantic_conflicts.get(
             "direct_action_reallocation_source_count",
             continuity.get("direct_action_reallocation_source_count", 0.0),
+        )
+        or 0.0
+    )
+    direct_action_pair_reallocation_source_count = float(
+        semantic_conflicts.get(
+            "direct_action_pair_reallocation_source_count",
+            continuity.get("direct_action_pair_reallocation_source_count", 0.0),
         )
         or 0.0
     )
@@ -1661,8 +1717,13 @@ def _score_protocol_summary(
                 else 0.0
             ),
         }
-    elif objective_profile_name in {"direct_action_translation_v1", "direct_action_reallocation_v1"}:
+    elif objective_profile_name in {
+        "direct_action_translation_v1",
+        "direct_action_reallocation_v1",
+        "direct_action_pair_reallocation_v1",
+    }:
         direct_reallocation_objective = objective_profile_name == "direct_action_reallocation_v1"
+        direct_pair_reallocation_objective = objective_profile_name == "direct_action_pair_reallocation_v1"
         action_alignment_score = (
             _bounded(multi_horizon_path_alignment, -0.10, 0.16) * 0.24
             + _bounded(open_action_value_alignment, -0.10, 0.16) * 0.16
@@ -1709,7 +1770,8 @@ def _score_protocol_summary(
             if direct_action_deploy_authorized_count >= 5.0
             else 0.0
         )
-        direct_reallocation_weight = 1.0 if direct_reallocation_objective else 0.0
+        direct_reallocation_weight = 1.0 if (direct_reallocation_objective or direct_pair_reallocation_objective) else 0.0
+        direct_pair_reallocation_weight = 1.0 if direct_pair_reallocation_objective else 0.0
         performance_breakdown = {
             "annual_return": annual_return * 1.52,
             "sharpe": sharpe * 0.22,
@@ -1726,9 +1788,15 @@ def _score_protocol_summary(
             "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate
             * 0.74
             * direct_reallocation_weight,
+            "direct_action_core_deploy_target_realized_rate": direct_action_core_deploy_target_realized_rate
+            * 0.86
+            * direct_pair_reallocation_weight,
             "direct_action_add_authorized_realized_rate": direct_action_add_authorized_realized_rate
             * 0.40
             * direct_reallocation_weight,
+            "direct_action_pair_reallocation_source_count": min(direct_action_pair_reallocation_source_count, 12.0)
+            * 0.025
+            * direct_pair_reallocation_weight,
             "action_value_consistency_score": action_value_consistency_score * 1.08,
             "action_value_alignment_score": action_alignment_score * 0.92,
             "release_translation_deploy_health_score": release_translation_deploy_health_score * 0.96,
@@ -1758,6 +1826,12 @@ def _score_protocol_summary(
             "direct_authorized_add_gap_penalty": -direct_authorized_add_gap * 1.25 * direct_reallocation_weight,
             "direct_reallocation_source_sparse_penalty": -direct_reallocation_source_sparse_penalty
             * direct_reallocation_weight,
+            "direct_core_deploy_target_gap_penalty": -(
+                max(0.0, 0.74 - direct_action_core_deploy_target_realized_rate) * 1.85
+                if direct_action_core_deploy_target_count >= 3.0
+                else 0.0
+            )
+            * direct_pair_reallocation_weight,
             "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 10.80,
             "deploy_funding_release_consistency_penalty": -(
                 max(0.0, 0.56 - deploy_funding_release_consistent_share) * 2.35
@@ -1776,6 +1850,9 @@ def _score_protocol_summary(
             "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate
             * 0.92
             * direct_reallocation_weight,
+            "direct_action_core_deploy_target_realized_rate": direct_action_core_deploy_target_realized_rate
+            * 1.04
+            * direct_pair_reallocation_weight,
             "direct_action_add_authorized_realized_rate": direct_action_add_authorized_realized_rate
             * 0.46
             * direct_reallocation_weight,
@@ -2058,11 +2135,14 @@ def _score_protocol_summary(
             "direct_action_funding_protected_sell_share": direct_action_funding_protected_sell_share,
             "direct_action_release_advantage_mean": direct_action_release_advantage_mean,
             "direct_action_deploy_advantage_mean": direct_action_deploy_advantage_mean,
+            "direct_action_core_deploy_target_count": direct_action_core_deploy_target_count,
+            "direct_action_core_deploy_target_realized_rate": direct_action_core_deploy_target_realized_rate,
             "direct_action_add_authorized_count": direct_action_add_authorized_count,
             "direct_action_add_authorized_realized_rate": direct_action_add_authorized_realized_rate,
             "direct_action_deploy_authorized_count": direct_action_deploy_authorized_count,
             "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate,
             "direct_action_reallocation_source_count": direct_action_reallocation_source_count,
+            "direct_action_pair_reallocation_source_count": direct_action_pair_reallocation_source_count,
             "sell_selection_quality_5d": sell_selection_quality,
             "budget_origin_sell_share": budget_origin_sell_share,
             "high_cash_budget_origin_sell_share": high_cash_budget_origin_sell_share,

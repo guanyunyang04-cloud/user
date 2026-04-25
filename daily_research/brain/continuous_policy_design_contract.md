@@ -29,6 +29,8 @@
 - r15 合同：`alpha_result_value_budget_split_v15`、`cash_constraint_direct_action_guard_v8` 与 `direct_action_intent_preserved_share` 必须让 direct action intent 尽量穿透订单/预算翻译层；funding sell 必须有 direct release authorization 或其他可审计证据。
 - r16 合同：`cash_constraint_direct_action_reallocation_guard_v9` 只允许在高置信 direct add/open 存在时释放低 continuation、低 keep advantage 的持仓预算；核心成功指标新增 `direct_action_deploy_authorized_realized_rate` 与 `direct_action_add_authorized_realized_rate`。
 - r16 边界：可以降低被授权 reallocation source 的 sell-source retention floor，但不得把这种修复解释成 promotion；只要 authorized deploy/add 仍被翻译成 hold，模型仍是 research/shadow。
+- r17 合同：`cash_constraint_direct_action_pair_reallocation_guard_v10` 必须把 direct deploy signal 与 core executable target 分开；在预算饱和日，只允许少数高排序 add/open 成为 core target，并允许弱排序 add 持仓作为显式 pair reallocation source。
+- r17 边界：pair reallocation source 是独立可审计的资金来源，不得混入 budget-origin sell；`direct_action_core_deploy_target_realized_rate`、`direct_action_pair_reallocation_source_count`、pair-source 机会成本、换手和月度收益质量必须联合判断。
 
 ## 当前已知事实
 - 当前已证实：`alpha_result_value_budget_split_v11` 能让 funding-sell 更少、更干净。
@@ -37,15 +39,19 @@
 - 当前已证实：r14 直接动作价值仲裁能显著改善收益质量，但低边际动作与 held-side funding rebalance 仍未闭合。
 - 当前已证实：r15 formal 全窗暴露 `deploy_not_realized`，budget clipping 日的订单翻译冲突显著高于 unclipped 日。
 - 当前已证实：r16 smoke2 改善 return/risk 并恢复非零 reallocation source，但 `direct_action_deploy_authorized_realized_rate = 0.1557` 仍明显不足。
-- 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，r16 尚不能升为 production 或 promotion 证据。
+- 当前已证实：r17 smoke3 在同一 r15 champion artifact 上把 `direct_action_core_deploy_target_realized_rate` 提升到 `0.9921`，把 `add_to_hold_conflict_share` 压到 `0.0`，并改善收益与月度一致性。
+- 当前已证实：r17 bounded study 的 screening champion `trial_03` 与 repaired confirm champion `confirm_01` 均保持高 core target 成交率，说明 v10 成对换仓机制不是单次 smoke 偶然。
+- 当前已证实：r17 pair-source 机会成本并非单调稳定；`trial_03 / confirm_01 / confirm_02` 的 core-minus-pair 5 日超额均值为正，但 `trial_01 / trial_02` 不成立或接近 0。
+- 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，r17 尚不能升为 production 或 promotion 证据；cash timing、卖出责任链和 pair-source 选择质量仍需 r18 修复。
 
 ## 当前禁止事项
-- 不得把 r11/r11b/r12/r13/r14/r15/r16 任一分支写成 promotion 或 live 切换依据。
+- 不得把 r11/r11b/r12/r13/r14/r15/r16/r17 任一分支写成 promotion 或 live 切换依据。
 - 不得只看 `budget_origin_sell_share = 0` 就宣布 sell-source 成功。
 - 不得只看自动 confirm 排序；必须保留语义对照和 held-side detail 证据。
 - 不得并行运行多个会写 latest 行为摘要的审计。
 - 不得在 release consistency 或 authorized deploy realization 仍低时声称 release / deploy 已学成。
 - 不得把 r16 smoke2 的收益改善解释为可上线；只要 add->hold 冲突和 authorized deploy 未实现仍高，就只能作为修复性 shadow 证据。
+- 不得把 r17 smoke3 或 r17 screening champion 的高收益和高成交率解释为可上线；repaired confirm 仍是 `shadow_only`，且 pair-source 机会成本、换手、cash timing 与长窗稳定性仍未闭合。
 
 ## 成功判定
 - 结果层：`annual_return / sharpe / max_drawdown / trend_capture_rate_10d`。
@@ -57,12 +63,13 @@
 - 直接决策层：`direct_action_value_mode_share / direct_action_value_gap_mean / direct_action_value_low_margin_share / direct_action_order_translation_conflict_rate` 必须和月度收益质量一起看。
 - 直接翻译层：`direct_action_intent_preserved_share / direct_action_funding_authorized_sell_share / direct_action_funding_protected_sell_share / direct_action_release_advantage_mean` 必须和 `deploy_intent_realized_rate`、held-side detail 及月度收益质量一起看。
 - 直接再分配层：`direct_action_deploy_authorized_realized_rate / direct_action_add_authorized_realized_rate / direct_action_reallocation_source_count / add_to_hold_conflict_share` 必须一起看，防止“有授权、有资金源、但真实订单仍不加仓”。
+- 成对再分配层：`direct_action_deploy_signal_count / direct_action_core_deploy_target_count / direct_action_core_deploy_target_realized_rate / direct_action_pair_reallocation_source_count / direct_action_pair_reallocation_sell_share` 必须和 pair-source 逐仓 forward excess、换手和月度收益质量一起看。
 - 责任链：sell-source、funding source、held-side release support、protected-hold conflict 与 reallocation source 必须可审计。
 
 ## 下一步方向
-- r16 应优先从 smoke 推进到 bounded shadow study，验证直接动作授权、预算再分配和月度收益质量能否稳定共存。
+- r17 已从 smoke 推进到 bounded shadow study；下一步应转向 r18 的 pair-source 成本控制、主动 cash timing 和卖出责任链修复。
 - 后续若调整 loss / objective / simulator，必须随行补跑 source attribution、held-side detail 和 budget-clipped 分层审计。
-- 若 r16 bounded study 仍出现高 add->hold 冲突，下一轮应优先改预算层的可成交分配机制，而不是继续叠加动作分类 loss。
+- 若 r18 继续使用 pair reallocation，必须把 core-minus-pair forward spread、pair-source 强势保护、换手成本和主动 release/cash 信号纳入合同；不得继续单纯扩大 pair-source 数量。
 
 ## 历史归档入口
 - 原 `continuous_policy_design_contract.md` 已原样归档：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

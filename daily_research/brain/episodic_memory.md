@@ -817,3 +817,51 @@
   - 事实：r16 没有解决 direct add/open 高授权低成交的本质问题，订单/预算层仍会把大量 add 翻译成 hold。
   - 推断：下一轮若继续，应优先研究 budget-clipped 日的可成交分配机制和 source/target 同步约束，而不是只继续提升动作分类置信度。
   - 决策：r16 保持 `shadow_only` / research baseline；不切换 live，不改 active artifact，不改 promotion gate。
+
+## 2026-04-25 r17 direct-action pair reallocation / core target execution repair
+
+- 行动前自检：
+  - 事实：r16 已恢复非零 reallocation source，但在高 add/open 压力日仍有大量授权 deploy/add 被翻译成 hold，`direct_action_deploy_authorized_realized_rate = 0.1557`、`add_to_hold_conflict_share = 0.8483`。
+  - 事实：逐日分析显示，高 add 日常常是所有持仓都想 add，r16 只从 hold/skip 或弱 release source 找资金，因此满仓状态下没有足够可释放预算。
+  - 推断：本质问题不是再加一个 add loss，而是缺少“在同一日把目标和资金来源配对排序”的组合预算机制。
+  - 假设：在不切换 live、不改 promotion gate 的边界内，可以先用 r15 champion artifact 验证 v10 pair reallocation guard 是否能修复可成交性。
+- 已完成执行：
+  - `portfolio_simulator.py` 新增 `cash_constraint_direct_action_pair_reallocation_guard_v10`：把 direct deploy signal 收敛为 core deploy target，并允许弱排序 add 持仓作为 `direct_action_pair_reallocation_source`。
+  - `pipeline_utils.py` 与 `analyze_behavior_gap.py` 新增 `direct_action_deploy_signal_count`、`direct_action_core_deploy_target_count`、`direct_action_core_deploy_target_realized_rate`、`direct_action_pair_reallocation_source_count`、`direct_action_pair_reallocation_sell_share` 等审计字段。
+  - `run_self_optimizing_study.py` 新增 `split_heads_direct_action_pair_reallocation_r17` 与 `direct_action_pair_reallocation_v1`，把 core target 成交率、pair-source 数量、月度收益质量和 direct action 保真纳入 scoring。
+  - `project_consistency_check.py` 与 `doc_guard.py` 已加入 r17 合同守卫；状态、操作、设计合同同步写回 r17 research 边界。
+- 验证与证据：
+  - `py_compile` 通过本轮修改的 continuous_policy 与工具文件。
+  - r17 dry-run `verify_direct_action_pair_reallocation_r17_dryrun_20260425` 通过，4 条 trial 均使用 v10 pair reallocation guard。
+  - r17 smoke3 `verify_direct_action_pair_reallocation_r17_v10_eval_smoke3_20260425`：`annual_return = 1.0177`、`sharpe = 2.3094`、`max_drawdown = -0.1180`、`monthly_return_mean = 0.0516`、`monthly_consistency_score = 0.7684`、`avg_turnover = 0.0752`。
+  - r17 smoke3 执行语义：`direct_action_core_deploy_target_realized_rate = 0.9921`、`direct_action_add_authorized_realized_rate = 0.9917`、`direct_action_pair_reallocation_source_count = 65`、`deploy_intent_realized_rate = 0.7143`、`add_to_hold_conflict_share = 0.0`、`direct_action_order_translation_conflict_rate = 0.1764`。
+  - r17 audit smoke3：`sell_execution_origin_counts = {budget_sell_priority: 9, direct_action_pair_reallocation: 65, model_release_signal: 1, model_sell_intent: 6, weight_translation: 19}`，修正后 `budget_origin_sell_share = 0.28`，pair-source 不再混入 budget-origin sell。
+- 动作后复盘：
+  - 事实：r17 直接修复了 r16 的核心成交瓶颈，direct add/open 不再大面积被预算层压成 hold。
+  - 事实：pair-source 引入了新的权衡：`direct_action_pair_reallocation_sell_share = 0.65`，主要冲突从 `add -> hold` 转为可审计的 `add -> reduce`，换手也上升。
+  - 推断：这说明模型开始具备“今日从较弱 add 切到更强 core target”的组合级日决策雏形，但 pair-source 的长期机会成本尚不能用单次 smoke 证明。
+  - 决策：r17 是当前最佳 research 修复证据，但仍保持 `shadow_only`；下一步应做 bounded shadow study，并重点审计 pair-source 相对收益、换手成本和月度稳定性。
+
+## 2026-04-25 r17 bounded study / repaired confirm / pair-source audit 收口
+
+- 行动前自检：
+  - 事实：用户要求按“高瞻远瞩的策略规划者”方案直接执行，核心任务是把 r17 从 smoke 推进到 bounded study，并审计 pair-source 机会成本。
+  - 事实：r17 smoke 已证明可成交性，但 smoke 不能替代 formal / bounded evidence；promotion 和 live 仍冻结。
+  - 推断：本轮最高价值不是继续写 r18 代码，而是先验证 v10 成对换仓机制是否稳定，并把新的代价量化清楚。
+  - 假设：`cp_v3_direct_action_pair_reallocation_r17__study_r1` 的 4 trial screening + repaired confirm 足以作为当前信息下的正式 shadow 对照。
+- 已完成执行：
+  - 启动并阻塞等待 `split_heads_direct_action_pair_reallocation_r17 + direct_action_pair_reallocation_v1` bounded study；4 个 screening 全部完成，0 个 screening failed。
+  - 自动 confirm 阶段触发 `[Errno 22] Invalid argument`，但训练进程已推进到 confirm 目录；随后用 direct protocol rerun 修复 `confirm_01`，用 65 epoch strict resume 修复已完成 64 epoch 但缺 summary 的 `confirm_02`。
+  - 生成 repaired confirm 对照：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
+  - 生成 pair-source 专项审计：`pair_source_audit_summary.json` 与 `pair_source_audit_comparison.csv`，并顺序导出 `confirm_01 / confirm_02` held-side detail，避免 latest 审计竞争。
+- 关键结果：
+  - screening champion：`trial_03 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.9682`、`sharpe = 2.2180`、`max_drawdown = -0.1183`、`monthly_return_mean = 0.0519`、`monthly_consistency_score = 0.7703`、`direct_action_core_deploy_target_realized_rate = 0.9844`、`add_to_hold_conflict_share = 0.0090`、`avg_turnover = 0.0686`，`promotion_status = shadow_only`。
+  - repaired confirm champion：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.6225`、`sharpe = 2.0071`、`max_drawdown = -0.1128`、`monthly_return_mean = 0.0369`、`monthly_consistency_score = 0.7374`、`direct_action_core_deploy_target_realized_rate = 0.9933`、`add_to_hold_conflict_share = 0.0`、`avg_turnover = 0.0890`，`promotion_status = shadow_only`。
+  - repaired confirm_02：`result_value_v10` 方向明显弱，`annual_return = 0.0805`、`sharpe = 0.4082`、`max_drawdown = -0.1698`，继续不能升为默认预算目标。
+  - pair-source 审计：`trial_03` core-minus-pair 5 日超额均值 `+0.00936`，`confirm_01` 为 `+0.00710`，`confirm_02` 为 `+0.02734`；但 `trial_01` 为 `-0.00908`、`trial_02` 约 `-0.00046`，说明 pair-source 排序有价值但不稳定。
+  - held-side 审计：`confirm_01` 的 `direct_action_pair_reallocation_sell_count = 87`、`direct_action_pair_reallocation_sell_share = 0.6744`、`budget_origin_sell_share = 0.2713`；`confirm_02` 的 `budget_origin_sell_share = 0.5495`，卖出责任链仍未闭合。
+- 动作后复盘：
+  - 事实：r17 bounded study 证明 v10 机制能稳定修复 core target 成交，不再是单次 smoke 偶然。
+  - 事实：正式 confirm 收益低于 smoke，且 promotion gate 仍被 `cash_timing_quality_1d`、`max_drawdown`、reduce/exit 质量等项拦住。
+  - 推断：主矛盾已经从“add/open 能不能成交”转为“pair-source 是否长期值得牺牲、cash/release 是否主动、卖出责任链是否干净”。
+  - 决策：r17 作为当前最佳 shadow 修复基线收口；下一轮不应继续无约束扩大 pair-source，而应推进 r18 pair-source cost guard、主动 cash timing 和卖出责任链修复。

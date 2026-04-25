@@ -607,6 +607,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("direct_action_translation_v1", "r15 direct action-preserving objective"),
         ("split_heads_direct_action_reallocation_r16", "r16 direct action reallocation study profile"),
         ("direct_action_reallocation_v1", "r16 direct action reallocation objective"),
+        ("split_heads_direct_action_pair_reallocation_r17", "r17 direct action pair reallocation study profile"),
+        ("direct_action_pair_reallocation_v1", "r17 direct action pair reallocation objective"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -657,6 +659,15 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r16_contract_missing",
         "continuous_policy r16 direct-action reallocation contract is missing audit/scoring markers.",
+    )
+    _require(
+        "cash_constraint_direct_action_pair_reallocation_guard_v10" in simulator_text
+        and "direct_action_core_deploy_target_realized_rate" in analysis_text
+        and "direct_action_core_deploy_target_realized_rate" in pipeline_text
+        and "direct_action_pair_reallocation_v1" in study_text,
+        failures,
+        "continuous_policy_r17_contract_missing",
+        "continuous_policy r17 pair reallocation contract is missing audit/scoring markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

@@ -30,6 +30,7 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY = "cash_constraint_deploy_guard_v6"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE = "cash_constraint_sell_source_guard_v7"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION = "cash_constraint_direct_action_guard_v8"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION = "cash_constraint_direct_action_reallocation_guard_v9"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION = "cash_constraint_direct_action_pair_reallocation_guard_v10"
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -42,6 +43,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
 )
 
 
@@ -125,6 +127,10 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_direct_action_reallocation_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         "cash_constraint_direct_action_reallocation_guard_v9": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
         "direct_action_reallocation_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+        "cash_constraint_direct_action_pair_reallocation": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+        "cash_constraint_direct_action_pair_reallocation_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+        "cash_constraint_direct_action_pair_reallocation_guard_v10": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+        "direct_action_pair_reallocation_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
     }
     if text not in aliases:
         raise ValueError(
@@ -687,6 +693,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -694,24 +701,32 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
         deploy_executability_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
         direct_action_preserving_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
-        direct_action_reallocation_mode = (
-            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION
+        direct_action_pair_reallocation_mode = (
+            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION
         )
+        direct_action_reallocation_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
+        }
         sell_source_decoupled_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
@@ -721,6 +736,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
@@ -730,6 +746,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
         }
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -839,7 +856,7 @@ class PortfolioState:
             ],
             axis=1,
         ).max(axis=1)
-        direct_action_add_authorized = (
+        direct_action_add_signal = (
             direct_action_reallocation_mode
             & direct_action_mode_series
             & held_mask
@@ -857,7 +874,7 @@ class PortfolioState:
             )
             & (direct_action_release_advantage_series < 0.060)
         )
-        direct_action_open_authorized = (
+        direct_action_open_signal = (
             direct_action_reallocation_mode
             & direct_action_mode_series
             & flat_mask
@@ -870,6 +887,49 @@ class PortfolioState:
                 )
             )
         )
+        direct_action_deploy_signal = direct_action_add_signal | direct_action_open_signal
+        direct_action_deploy_rank_score = (
+            direct_action_deploy_advantage_series.clip(lower=-0.25, upper=0.50) * 1.35
+            + direct_action_gap_series.clip(lower=0.0, upper=0.35) * 0.64
+            + deploy_executability_series.clip(0.0, 1.0) * 0.24
+            + decision_deploy_gate_series.clip(0.0, 1.0) * 0.16
+            + alpha_opportunity_series.clip(0.0, 1.0) * 0.08
+            - current.clip(0.0, 0.25) * 0.16
+            - cash_defense_series.clip(0.0, 1.0) * 0.08
+        )
+        direct_action_core_deploy_target = direct_action_deploy_signal.copy()
+        paired_reallocation_pressure = False
+        direct_action_add_rank = pd.Series(np.inf, index=prices.index, dtype=float)
+        direct_action_open_rank = pd.Series(np.inf, index=prices.index, dtype=float)
+        if direct_action_pair_reallocation_mode and bool(direct_action_deploy_signal.any()):
+            current_gross = float(current.sum())
+            deploy_signal_count = int(direct_action_deploy_signal.sum())
+            paired_reallocation_pressure = current_gross >= 0.92 and deploy_signal_count >= 3
+            if paired_reallocation_pressure:
+                direct_action_core_deploy_target = pd.Series(False, index=prices.index, dtype=bool)
+                add_signal_count = int(direct_action_add_signal.sum())
+                open_signal_count = int(direct_action_open_signal.sum())
+                if add_signal_count > 0:
+                    add_scores = direct_action_deploy_rank_score.where(direct_action_add_signal)
+                    direct_action_add_rank = add_scores.rank(method="first", ascending=False)
+                    add_limit = min(add_signal_count, max(1, min(3, int(np.ceil(add_signal_count * 0.35)))))
+                    direct_action_core_deploy_target = direct_action_core_deploy_target | (
+                        direct_action_add_signal & (direct_action_add_rank <= float(add_limit))
+                    )
+                if open_signal_count > 0:
+                    open_scores = direct_action_deploy_rank_score.where(direct_action_open_signal)
+                    direct_action_open_rank = open_scores.rank(method="first", ascending=False)
+                    open_limit = min(open_signal_count, max(1, min(3, int(np.ceil(open_signal_count * 0.04)))))
+                    direct_action_core_deploy_target = direct_action_core_deploy_target | (
+                        direct_action_open_signal & (direct_action_open_rank <= float(open_limit))
+                    )
+        direct_action_executable_target = (
+            direct_action_core_deploy_target
+            if direct_action_pair_reallocation_mode
+            else pd.Series(True, index=prices.index, dtype=bool)
+        )
+        direct_action_add_authorized = direct_action_add_signal & direct_action_executable_target
+        direct_action_open_authorized = direct_action_open_signal & direct_action_executable_target
         direct_action_deploy_authorized = direct_action_add_authorized | direct_action_open_authorized
         direct_action_funding_release_authorized = (
             direct_action_preserving_mode
@@ -927,8 +987,32 @@ class PortfolioState:
             & (deploy_executability_series < 0.760)
             & (direct_action_release_advantage_series <= 0.010)
         )
-        direct_action_reallocation_source = direct_action_reallocation_source_candidate & (
+        direct_action_hold_reallocation_source = direct_action_reallocation_source_candidate & (
             (~direct_action_funding_protected) | direct_action_reallocation_protection_override
+        )
+        direct_action_pair_reallocation_source_candidate = (
+            direct_action_pair_reallocation_mode
+            & bool(direct_action_deploy_authorized.any())
+            & bool(paired_reallocation_pressure)
+            & direct_action_mode_series
+            & held_mask
+            & direct_action_add_signal
+            & (~direct_action_add_authorized)
+            & (current >= 0.015)
+            & (direct_action_release_advantage_series < 0.040)
+            & (sell_pressure_series < 0.380)
+            & (exit_timing_pressure_series < 0.480)
+            & (direct_action_add_rank > 1.0)
+        )
+        direct_action_pair_reallocation_source = (
+            direct_action_pair_reallocation_source_candidate
+            & (direct_action_add_rank > 1.0)
+            & (hold_continuation_series < 0.900)
+            & (alpha_opportunity_series < 0.920)
+            & (deploy_executability_series < 0.930)
+        )
+        direct_action_reallocation_source = (
+            direct_action_hold_reallocation_source | direct_action_pair_reallocation_source
         )
         held_sell_pressure = _masked_mean(sell_pressure_series, held_mask)
         held_sell_attribution = _masked_mean(sell_attribution_series, held_mask)
@@ -1974,6 +2058,18 @@ class PortfolioState:
                 + alpha_opportunity_series.clip(0.0, 1.0) * 0.025
                 - deploy_intent_priority.clip(0.0, 1.0) * 0.030
             ).clip(lower=0.865, upper=0.945)
+            if direct_action_pair_reallocation_mode:
+                pair_retention_floor = (
+                    pd.Series(0.800, index=prices.index, dtype=float)
+                    + hold_continuation_series.clip(0.0, 1.0) * 0.045
+                    + direct_action_keep_advantage_series.clip(lower=0.0, upper=0.18) * 0.090
+                    + alpha_opportunity_series.clip(0.0, 1.0) * 0.020
+                    - deploy_intent_priority.clip(0.0, 1.0) * 0.045
+                ).clip(lower=0.780, upper=0.915)
+                direct_action_reallocation_retention_floor = direct_action_reallocation_retention_floor.where(
+                    ~direct_action_pair_reallocation_source,
+                    pair_retention_floor,
+                )
 
         sell_source_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if sell_source_decoupled_mode:
@@ -2085,26 +2181,33 @@ class PortfolioState:
                     direct_reallocation_source_allowed = bool(
                         direct_action_reallocation_source.get(stock, False)
                     )
+                    direct_pair_source_allowed = bool(
+                        direct_action_pair_reallocation_source.get(stock, False)
+                    )
                     if (
                         sell_source_decoupled_mode
                         and not bool(sell_authorized_mask.get(stock, False))
-                        and model_action_name in {"hold", "skip", "open"}
+                        and (
+                            model_action_name in {"hold", "skip", "open"}
+                            or (direct_reallocation_source_allowed and model_action_name == "add")
+                        )
                     ):
                         if bool(deploy_funding_rebalance_signal.get(stock, False)):
                             funding_floor = max(
                                 0.0,
                                 previous_weight * float(deploy_funding_retention_floor.get(stock, 0.90)),
                             )
-                        elif direct_reallocation_source_allowed and model_action_name in {"hold", "skip"}:
+                        elif direct_reallocation_source_allowed and model_action_name in {"hold", "skip", "add"}:
                             source_retention = float(direct_action_reallocation_retention_floor.get(stock, 0.90))
                             funding_floor = max(0.0, previous_weight * source_retention)
                         else:
                             funding_floor = previous_weight
+                        source_ceiling = funding_floor if direct_pair_source_allowed else previous_weight
                         translation_floor.at[stock] = max(float(translation_floor.get(stock, 0.0)), funding_floor)
                         translation_soft_floor.at[stock] = max(float(translation_soft_floor.get(stock, 0.0)), funding_floor)
-                        translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), previous_weight)
-                        if target_value > previous_weight + 1e-12:
-                            target_weights.at[stock] = previous_weight
+                        translation_cap.at[stock] = min(float(translation_cap.get(stock, position_cap_target)), source_ceiling)
+                        if target_value > source_ceiling + 1e-12:
+                            target_weights.at[stock] = source_ceiling
                             translation_cap_guarded.at[stock] = True
                         elif target_value < funding_floor - 1e-12:
                             target_weights.at[stock] = funding_floor
@@ -2322,6 +2425,7 @@ class PortfolioState:
                 protect_add_trim = (
                     model_action_name == "add"
                     and micro_negative_trim
+                    and not direct_reallocation_source_allowed
                     and exit_timing_pressure < 0.30
                     and sell_pressure < 0.28
                     and lifecycle_gate_value < 0.48
@@ -2480,6 +2584,7 @@ class PortfolioState:
             sell_source_floor_guarded_flag = bool(sell_source_floor_guarded.get(stock, False))
             model_release_signal_flag = bool(model_release_signal.get(stock, False))
             deploy_funding_rebalance_signal_flag = bool(deploy_funding_rebalance_signal.get(stock, False))
+            direct_pair_reallocation_source_flag = bool(direct_action_pair_reallocation_source.get(stock, False))
             sell_authorized_by_model_flag = bool(sell_authorized_mask.get(stock, False))
             sell_authorization_score_value = float(sell_authorization_score.get(stock, 0.0))
             realized_sell = weight_change_action in {"reduce", "exit"}
@@ -2493,6 +2598,8 @@ class PortfolioState:
                     sell_execution_origin = "model_release_signal"
                 elif deploy_funding_rebalance_signal_flag:
                     sell_execution_origin = "deploy_funding_rebalance"
+                elif direct_pair_reallocation_source_flag:
+                    sell_execution_origin = "direct_action_pair_reallocation"
                 elif forced_zero_flag:
                     sell_execution_origin = "forced_zero"
                 elif budget_released_from_hold_flag:
@@ -2542,12 +2649,18 @@ class PortfolioState:
                     "direct_action_deploy_utility": float(direct_action_deploy_utility_series.get(stock, 0.0)),
                     "direct_action_release_advantage": float(direct_action_release_advantage_series.get(stock, 0.0)),
                     "direct_action_deploy_advantage": float(direct_action_deploy_advantage_series.get(stock, 0.0)),
+                    "direct_action_deploy_rank_score": float(direct_action_deploy_rank_score.get(stock, 0.0)),
+                    "direct_action_add_signal": bool(direct_action_add_signal.get(stock, False)),
+                    "direct_action_open_signal": bool(direct_action_open_signal.get(stock, False)),
+                    "direct_action_deploy_signal": bool(direct_action_deploy_signal.get(stock, False)),
+                    "direct_action_core_deploy_target": bool(direct_action_core_deploy_target.get(stock, False)),
                     "direct_action_add_authorized": bool(direct_action_add_authorized.get(stock, False)),
                     "direct_action_open_authorized": bool(direct_action_open_authorized.get(stock, False)),
                     "direct_action_deploy_authorized": bool(direct_action_deploy_authorized.get(stock, False)),
                     "direct_action_funding_release_authorized": bool(direct_action_funding_release_authorized.get(stock, False)),
                     "direct_action_funding_protected": bool(direct_action_funding_protected.get(stock, False)),
                     "direct_action_reallocation_source": bool(direct_action_reallocation_source.get(stock, False)),
+                    "direct_action_pair_reallocation_source": direct_pair_reallocation_source_flag,
                     "execution_action": execution_action,
                     "weight_change_action": weight_change_action,
                     "execution_semantics": execution_semantics,
@@ -2744,7 +2857,12 @@ class PortfolioState:
             1
             for item in realized_sell_items
             if str(item.get("sell_execution_origin", "") or "").strip().lower()
-            not in {"model_sell_intent", "model_release_signal", "deploy_funding_rebalance"}
+            not in {
+                "model_sell_intent",
+                "model_release_signal",
+                "deploy_funding_rebalance",
+                "direct_action_pair_reallocation",
+            }
         )
         model_release_signal_sell_count = sum(
             1
@@ -2755,6 +2873,11 @@ class PortfolioState:
             1
             for item in realized_sell_items
             if str(item.get("sell_execution_origin", "") or "").strip().lower() == "deploy_funding_rebalance"
+        )
+        direct_action_pair_reallocation_sell_count = sum(
+            1
+            for item in realized_sell_items
+            if str(item.get("sell_execution_origin", "") or "").strip().lower() == "direct_action_pair_reallocation"
         )
         budget_slot_reclaim_sell_count = sum(
             1
@@ -2890,9 +3013,13 @@ class PortfolioState:
             "direct_action_preserving_mode": float(bool(direct_action_preserving_mode)),
             "direct_action_funding_release_authorized_count": int(direct_action_funding_release_authorized.sum()),
             "direct_action_funding_protected_count": int(direct_action_funding_protected.sum()),
+            "direct_action_add_signal_count": int(direct_action_add_signal.sum()),
+            "direct_action_open_signal_count": int(direct_action_open_signal.sum()),
+            "direct_action_core_deploy_target_count": int(direct_action_core_deploy_target.sum()),
             "direct_action_add_authorized_count": int(direct_action_add_authorized.sum()),
             "direct_action_open_authorized_count": int(direct_action_open_authorized.sum()),
             "direct_action_reallocation_source_count": int(direct_action_reallocation_source.sum()),
+            "direct_action_pair_reallocation_source_count": int(direct_action_pair_reallocation_source.sum()),
             "sell_authorized_held_count": int(sell_authorized_mask.sum()),
             "budget_translation_floor_guard_count": int(translation_floor_guarded.sum()),
             "budget_translation_cap_guard_count": int(translation_cap_guarded.sum()),
@@ -2928,6 +3055,8 @@ class PortfolioState:
             "model_release_signal_sell_share": float(model_release_signal_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
             "deploy_funding_rebalance_sell_count": int(deploy_funding_rebalance_sell_count),
             "deploy_funding_rebalance_sell_share": float(deploy_funding_rebalance_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
+            "direct_action_pair_reallocation_sell_count": int(direct_action_pair_reallocation_sell_count),
+            "direct_action_pair_reallocation_sell_share": float(direct_action_pair_reallocation_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
             "budget_slot_reclaim_sell_count": int(budget_slot_reclaim_sell_count),
             "budget_slot_reclaim_sell_share": float(budget_slot_reclaim_sell_count / len(realized_sell_items)) if realized_sell_items else 0.0,
             "sell_priority_guard_sell_count": int(sell_priority_guard_sell_count),
