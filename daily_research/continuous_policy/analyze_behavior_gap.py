@@ -626,7 +626,13 @@ def _build_semantic_conflicts(
             "direct_action_pair_source_forward_excess_5d": 0.0,
             "direct_action_core_target_forward_excess_5d": 0.0,
             "direct_action_core_minus_pair_forward_excess_5d": 0.0,
+            "portfolio_daily_receiver_exec_guard_count": 0,
+            "portfolio_daily_receiver_add_headroom_mean": 0.0,
+            "portfolio_daily_receiver_min_add_delta_mean": 0.0,
             "portfolio_daily_receiver_target_count": 0,
+            "portfolio_daily_receiver_realized_deploy_rate": 0.0,
+            "portfolio_daily_receiver_unrealized_deploy_count": 0,
+            "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
             "portfolio_daily_source_candidate_count": 0,
             "portfolio_daily_source_target_count": 0,
             "portfolio_daily_source_sell_count": 0,
@@ -781,6 +787,8 @@ def _build_semantic_conflicts(
             "direct_action_pair_source_opportunity_cost",
             "direct_action_pair_source_release_score",
             "portfolio_daily_receiver_score",
+            "portfolio_daily_receiver_add_headroom",
+            "portfolio_daily_receiver_min_add_delta",
             "portfolio_daily_source_gap",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
@@ -828,6 +836,7 @@ def _build_semantic_conflicts(
         "direct_action_pair_cost_guard_pass",
         "direct_action_pair_cost_guard_blocked",
         "portfolio_daily_receiver_target",
+        "portfolio_daily_receiver_exec_guarded",
         "portfolio_daily_source_candidate",
         "portfolio_daily_source_target",
         "portfolio_daily_cash_reserve_signal",
@@ -1353,6 +1362,18 @@ def _build_semantic_conflicts(
         "portfolio_daily_receiver_target",
         pd.Series(False, index=working.index),
     ).astype(bool)
+    portfolio_receiver_exec_guarded = working.get(
+        "portfolio_daily_receiver_exec_guarded",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_receiver_add_headroom = working.get(
+        "portfolio_daily_receiver_add_headroom",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    portfolio_receiver_min_add_delta = working.get(
+        "portfolio_daily_receiver_min_add_delta",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     portfolio_source_candidate = working.get(
         "portfolio_daily_source_candidate",
         pd.Series(False, index=working.index),
@@ -1585,6 +1606,7 @@ def _build_semantic_conflicts(
         else 0.0
     )
     portfolio_daily_receiver_target_count = int(portfolio_receiver_target.sum())
+    portfolio_daily_receiver_exec_guard_count = int(portfolio_receiver_exec_guarded.sum())
     portfolio_daily_source_candidate_count = int(portfolio_source_candidate.sum())
     portfolio_daily_source_target_count = int(portfolio_source_target.sum())
     portfolio_daily_source_realized_sell_rate = (
@@ -1612,6 +1634,19 @@ def _build_semantic_conflicts(
     )
     portfolio_daily_receiver_realized_deploy_count = int(
         (portfolio_receiver_target & weight_change_lookup.isin({"open", "add"})).sum()
+    )
+    portfolio_daily_receiver_unrealized_deploy_count = int(
+        (portfolio_receiver_target & (~weight_change_lookup.isin({"open", "add"}))).sum()
+    )
+    portfolio_daily_receiver_realized_deploy_rate = (
+        float(portfolio_daily_receiver_realized_deploy_count / portfolio_daily_receiver_target_count)
+        if portfolio_daily_receiver_target_count
+        else 0.0
+    )
+    portfolio_daily_receiver_unrealized_deploy_share = (
+        float(portfolio_daily_receiver_unrealized_deploy_count / portfolio_daily_receiver_target_count)
+        if portfolio_daily_receiver_target_count
+        else 0.0
     )
     portfolio_daily_effective_capital_transfer_count = min(
         int((portfolio_source_target & weight_change_lookup.isin({"reduce", "exit"})).sum()),
@@ -1949,7 +1984,21 @@ def _build_semantic_conflicts(
         "direct_action_pair_source_forward_excess_5d": direct_action_pair_source_forward_excess_5d,
         "direct_action_core_target_forward_excess_5d": direct_action_core_target_forward_excess_5d,
         "direct_action_core_minus_pair_forward_excess_5d": direct_action_core_minus_pair_forward_excess_5d,
+        "portfolio_daily_receiver_exec_guard_count": int(portfolio_daily_receiver_exec_guard_count),
+        "portfolio_daily_receiver_add_headroom_mean": (
+            _safe_mean(portfolio_receiver_add_headroom.loc[portfolio_receiver_exec_guarded])
+            if portfolio_receiver_exec_guarded.any()
+            else 0.0
+        ),
+        "portfolio_daily_receiver_min_add_delta_mean": (
+            _safe_mean(portfolio_receiver_min_add_delta.loc[portfolio_receiver_exec_guarded])
+            if portfolio_receiver_exec_guarded.any()
+            else 0.0
+        ),
         "portfolio_daily_receiver_target_count": int(portfolio_daily_receiver_target_count),
+        "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate,
+        "portfolio_daily_receiver_unrealized_deploy_count": int(portfolio_daily_receiver_unrealized_deploy_count),
+        "portfolio_daily_receiver_unrealized_deploy_share": portfolio_daily_receiver_unrealized_deploy_share,
         "portfolio_daily_source_candidate_count": int(portfolio_daily_source_candidate_count),
         "portfolio_daily_source_target_count": int(portfolio_daily_source_target_count),
         "portfolio_daily_source_sell_count": int(portfolio_daily_source_sell_count),

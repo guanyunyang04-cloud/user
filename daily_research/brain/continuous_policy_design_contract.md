@@ -106,3 +106,10 @@
 - `split_heads_portfolio_daily_ranking_source_exec_r21` 使用 `portfolio_daily_ranking_v2_gated`，但新增 source execution 证据：`portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight`、`portfolio_daily_receiver_realized_deploy_count` 与 `portfolio_daily_effective_capital_transfer_count`。
 - `source_not_sold_ceiling` 是 `source_realized_sell_floor` 的配套约束：当 `portfolio_daily_source_target_count >= 5` 时，source target 未真实卖出的占比不得高于 `0.65`。
 - r21 成功判定必须同时看 source 真实释放、receiver 真实成交和 effective capital transfer；只改善 source realized sell 但牺牲收益、回撤、月度一致性或现金行为，仍不能 promotion。
+
+## 2026-04-26 r22 receiver-exec 合同
+- `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 必须继承 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 与 `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 的行为；不得为了降低 add-to-hold 冲突而丢失现金分支或 source 真实释放。
+- receiver target 的合同从“排序靠前”升级为“排序靠前且可执行加仓”：已持仓 add 只有在 `portfolio_daily_receiver_add_headroom >= portfolio_daily_receiver_min_add_delta` 时，才能进入 `portfolio_daily_receiver_target` 与 `direct_action_core_deploy_target`。
+- 无 headroom 的 receiver/add 必须在目标集前置过滤，而不是等到订单翻译后再把 add 退化为 hold/reduce；被过滤的行必须记录 `portfolio_daily_receiver_exec_guarded` 与 `portfolio_daily_receiver_exec_guard_reason`。
+- r22 成功判定必须同时看 `portfolio_daily_receiver_realized_deploy_rate`、`portfolio_daily_receiver_unrealized_deploy_share`、`order_translation_conflict_rate`、`add_to_hold_conflict_share`、source realized sell、effective capital transfer 和现金保留。
+- r22 smoke 过 `portfolio_daily_ranking_v2_gated` 只证明机制方向有效；若 `training_evidence_status = insufficient` 或缺少 stable confirmatory，不得进入 promotion 或 live 讨论。

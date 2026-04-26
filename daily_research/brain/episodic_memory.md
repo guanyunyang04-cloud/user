@@ -966,3 +966,56 @@
   - retry2 指标：`annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`、`monthly_consistency_score = 0.564085`、`source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`、`effective_capital_transfer_count = 17`、`cash_reserve_rate = 0.097872`。
   - retry2 gate report 仍无合格 v2 champion，失败 gate 为 `order_translation_conflict_ceiling` 与 `add_to_hold_conflict_ceiling`。
 - 状态：本轮为代码侧执行耦合修复，不改变 live，不改变 active execution artifact；第一瓶颈已从 source execution 推进到 order translation / add-to-hold 冲突。
+
+## 2026-04-26 r22 receiver-exec guard 实施复盘
+- 触发原因：r21 retry2 已让 `source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`，但仍失败于 `order_translation_conflict_rate = 0.289362` 与 `add_to_hold_conflict_share = 0.454545`。
+- 根因分析：
+  - r21 中 source 已经释放资金，残余冲突集中在 receiver/add 侧。
+  - `portfolio_daily_receiver_target` 把已持仓且没有足够加仓空间的标的选成 core receiver，导致执行层无法再加仓，只能把 add 翻译成 hold/reduce。
+  - 这不是“项目思路错了”，而是组合日频目标还少了一条执行前合同：receiver 不仅要值得买，还必须能买。
+- 本轮动作：
+  - 新增 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
+  - 新增 `split_heads_portfolio_daily_ranking_receiver_exec_r22`。
+  - 在模拟器中新增 `portfolio_daily_receiver_add_headroom`、`portfolio_daily_receiver_min_add_delta`、`portfolio_daily_receiver_exec_guarded` 与 `portfolio_daily_receiver_exec_guard_reason`。
+  - 在 behavior audit、continuity metrics、study scoring 和 gate report 中接入 receiver guard 指标。
+  - 修复 `run_self_optimizing_study.py` 的 study 顶层元数据，避免 search profile trial 明明使用 v15，但 study summary 顶层仍显示 `budget_calibration = none`。
+- 执行证据：
+  - dry-run `verify_r22_receiver_exec_profile_metadata_20260426` 确认 `budget_semantics = action_budget_split_v1`、`budget_calibration = cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
+  - smoke retry2 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2` 前台自然结束。
+  - 训练诊断为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、`completed_epochs = 6`、`best_epoch = 6`、strict resume。
+  - gate report 产物：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`。
+- 关键结果：
+  - r22 retry2 生成合格 v2 champion：`cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2__trial_01`。
+  - `annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`。
+  - `portfolio_daily_receiver_target_count = 16`、`portfolio_daily_receiver_exec_guard_count = 37`、`portfolio_daily_receiver_realized_deploy_rate = 1.0`、`portfolio_daily_receiver_unrealized_deploy_share = 0.0`。
+  - `portfolio_daily_source_target_count = 55`、`portfolio_daily_source_realized_sell_rate = 1.0`、`portfolio_daily_source_target_not_sold_share = 0.0`、`portfolio_daily_effective_capital_transfer_count = 16`、`portfolio_daily_cash_reserve_rate = 0.097872`。
+  - `order_translation_conflict_rate = 0.136170`、`add_to_hold_conflict_share = 0.0`。
+  - receiver guard 原因分布：`no_position_cap_headroom = 36`、`insufficient_min_add_headroom = 1`。
+- 行动后复盘：
+  - 事实：v15 在不破坏 source/cash 的前提下，把 r21 的 receiver unrealized deploy 直接压到 `0`。
+- 事实：本轮仍是 `6` epoch smoke，`training_evidence_status = insufficient`，没有 confirmatory 稳定性证据。
+- 推断：当前最高价值下一步是 bounded confirmatory 或更长 budget 的 r22 稳定性验证，而不是继续堆单点 guard。
+- 决策：r22 仍为 `research / shadow_only`，不改变 live、不改变 active execution artifact、不进入 promotion。
+
+## 2026-04-26 r22 formal 48 epoch 执行复盘
+- 行动前自检：
+  - 用户要求一次性完成优先级行动方案；上一轮收敛的 P0 是补齐 r22/v15 的正式训练证据与 confirmatory 稳定性。
+  - 当前规则为所有任务前台运行、不转后台、不打断，窗口时限 10h；`daily_research` 必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+  - 启动前语义进程检查没有发现遗留 `daily_research` Python 训练进程。
+- 执行：
+  - 前台运行 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426`，先用 `trial-count = 2`、screening `24/16` epoch、confirmatory `32/24` epoch 完成一轮 formal。
+  - 首轮 formal 自然结束并生成 gate report；`confirm_01` 自身过 v2 gates，但训练证据仍因 `best_epoch_not_at_edge` 不足。
+  - 按训练证据建议沿同一 run_dir strict resume 到 screening `48/40` epoch 与 confirmatory `48/40` epoch。
+- 结果：
+  - strict resume 后 `trial_01`、`trial_02`、`confirm_01` 均 `training_evidence_status = sufficient`，GPU/yolos 证据均为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`。
+  - gate report 合格 v2 champion 为 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426__trial_01`，`annual_return = 2.002426`、`sharpe = 3.868514`、`max_drawdown = -0.111321`、`monthly_return_mean = 0.084873`。
+  - 执行指标为 `order_translation_conflict_rate = 0.110211`、`add_to_hold_conflict_share = 0.0`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_realized_sell_rate = 0.9875`、`effective_capital_transfer_count = 39`。
+  - `confirm_01` 自身过 v2 gates 且训练证据充分，但相对 screening 衰减，失败稳定性项为 `annual_return_decay_limit`、`sharpe_decay_limit`、`monthly_return_decay_limit`。
+- 动作后复盘：
+  - r22/v15 已从 smoke 机制证明升级为正式训练证据充分的 research 主线。
+  - 但 stable confirmatory 仍未成立；这不是终止 bug，也不是脚本循环问题，而是模型在确认阶段收益复现能力不足。
+  - 本轮命令均自然退出；最终语义进程检查没有发现遗留 `daily_research` Python 进程。
+  - 代码编译、brain integrity、doc guard、project consistency 与 `git diff --check` 均通过。
+- 决策：
+  - r22/v15 继续 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
+  - 下一轮优先级应转向降低 screening/confirmatory 衰减：收紧高收益 trial 的稳健约束、加入 confirm-stability-aware search 或在 r22/v15 基础上做小范围稳定性搜索，而不是继续扩大 receiver guard。

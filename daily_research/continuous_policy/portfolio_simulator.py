@@ -39,10 +39,14 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE = (
 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC = (
     "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14"
 )
+BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC = (
+    "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"
+)
 BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
 )
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
@@ -61,6 +65,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
 )
 
 
@@ -168,6 +173,11 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
         "portfolio_daily_ranking_source_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
         "portfolio_daily_ranking_source_exec_guard_v14": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        "cash_constraint_portfolio_daily_ranking_receiver_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        "cash_constraint_portfolio_daily_ranking_receiver_exec_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        "portfolio_daily_ranking_receiver_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        "portfolio_daily_ranking_receiver_exec_guard_v15": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
     }
     if text not in aliases:
         raise ValueError(
@@ -809,8 +819,12 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
         } or portfolio_daily_calibration_mode
-        portfolio_daily_source_exec_guard_mode = (
-            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC
+        portfolio_daily_source_exec_guard_mode = budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        }
+        portfolio_daily_receiver_exec_guard_mode = (
+            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC
         )
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
@@ -1344,6 +1358,7 @@ class PortfolioState:
         if budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
         }:
             weak_receiver_quality = max(0.0, 0.18 - max(portfolio_daily_receiver_target_score, 0.0)) / 0.30
             weak_market_breadth = max(0.0, 0.52 - recent_positive_share) / 0.52
@@ -1373,6 +1388,7 @@ class PortfolioState:
             in {
                 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
                 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
             }
             else 0.58
         )
@@ -1382,6 +1398,7 @@ class PortfolioState:
             in {
                 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
                 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
             }
             else 0.48
         )
@@ -1866,6 +1883,43 @@ class PortfolioState:
                     0.32,
                 )
             )
+        portfolio_daily_receiver_add_headroom = (
+            pd.Series(float(position_cap_target), index=prices.index, dtype=float) - current
+        )
+        portfolio_daily_receiver_min_add_delta = pd.Series(0.0, index=prices.index, dtype=float)
+        portfolio_daily_receiver_exec_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        portfolio_daily_receiver_exec_guard_reason = pd.Series("none", index=prices.index, dtype=object)
+        if portfolio_daily_receiver_exec_guard_mode and bool(portfolio_daily_receiver_target.any()):
+            portfolio_daily_receiver_min_add_delta = pd.concat(
+                [
+                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 2.0, index=prices.index, dtype=float),
+                    current.clip(lower=0.0) * 0.025,
+                    pd.Series(float(position_cap_target) * 0.018, index=prices.index, dtype=float),
+                    pd.Series(0.0025, index=prices.index, dtype=float),
+                ],
+                axis=1,
+            ).max(axis=1)
+            receiver_add_no_headroom = (
+                portfolio_daily_receiver_target
+                & held_mask
+                & action_names.eq("add")
+                & (portfolio_daily_receiver_add_headroom < portfolio_daily_receiver_min_add_delta)
+            )
+            if bool(receiver_add_no_headroom.any()):
+                portfolio_daily_receiver_exec_guarded = receiver_add_no_headroom
+                portfolio_daily_receiver_exec_guard_reason = portfolio_daily_receiver_exec_guard_reason.where(
+                    ~receiver_add_no_headroom,
+                    np.where(
+                        portfolio_daily_receiver_add_headroom <= 1.0e-8,
+                        "no_position_cap_headroom",
+                        "insufficient_min_add_headroom",
+                    ),
+                )
+                portfolio_daily_receiver_target = portfolio_daily_receiver_target & (~receiver_add_no_headroom)
+                direct_action_core_deploy_target = direct_action_core_deploy_target & (~receiver_add_no_headroom)
+                direct_action_add_authorized = direct_action_add_authorized & (~receiver_add_no_headroom)
+                direct_action_deploy_authorized = direct_action_add_authorized | direct_action_open_authorized
+                portfolio_daily_receiver_target_count = int(portfolio_daily_receiver_target.sum())
         execution_deadband_abs = float(
             np.clip(
                 max(
@@ -3208,6 +3262,13 @@ class PortfolioState:
             sell_source_floor_guarded_flag = bool(sell_source_floor_guarded.get(stock, False))
             model_release_signal_flag = bool(model_release_signal.get(stock, False))
             deploy_funding_rebalance_signal_flag = bool(deploy_funding_rebalance_signal.get(stock, False))
+            portfolio_daily_receiver_flag = bool(portfolio_daily_receiver_target.get(stock, False))
+            portfolio_daily_receiver_exec_guarded_flag = bool(
+                portfolio_daily_receiver_exec_guarded.get(stock, False)
+            )
+            portfolio_daily_receiver_exec_guard_reason_value = str(
+                portfolio_daily_receiver_exec_guard_reason.get(stock, "none") or "none"
+            )
             portfolio_daily_source_flag = bool(portfolio_daily_source_target.get(stock, False))
             portfolio_daily_source_exec_guard_flag = bool(
                 portfolio_daily_source_exec_guard_mode and portfolio_daily_source_flag
@@ -3289,7 +3350,10 @@ class PortfolioState:
             if (
                 portfolio_daily_ranking_mode
                 and model_action_name in {"open", "add"}
-                and not bool(direct_action_core_deploy_target.get(stock, False))
+                and (
+                    portfolio_daily_receiver_exec_guarded_flag
+                    or not bool(direct_action_core_deploy_target.get(stock, False))
+                )
             ):
                 portfolio_daily_effective_model_action = str(weight_change_action).strip().lower()
 
@@ -3334,7 +3398,15 @@ class PortfolioState:
                     "direct_action_pair_cost_guard_blocked": bool(direct_action_pair_cost_guard_blocked.get(stock, False)),
                     "direct_action_pair_source_release_score": float(direct_action_pair_source_release_score.get(stock, 0.0)),
                     "portfolio_daily_receiver_score": float(portfolio_daily_receiver_score.get(stock, 0.0)),
-                    "portfolio_daily_receiver_target": bool(portfolio_daily_receiver_target.get(stock, False)),
+                    "portfolio_daily_receiver_target": portfolio_daily_receiver_flag,
+                    "portfolio_daily_receiver_exec_guarded": portfolio_daily_receiver_exec_guarded_flag,
+                    "portfolio_daily_receiver_exec_guard_reason": portfolio_daily_receiver_exec_guard_reason_value,
+                    "portfolio_daily_receiver_add_headroom": float(
+                        portfolio_daily_receiver_add_headroom.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_receiver_min_add_delta": float(
+                        portfolio_daily_receiver_min_add_delta.get(stock, 0.0)
+                    ),
                     "portfolio_daily_source_gap": float(portfolio_daily_source_gap.get(stock, 0.0)),
                     "portfolio_daily_source_score": float(portfolio_daily_source_score.get(stock, 0.0)),
                     "portfolio_daily_source_candidate": bool(portfolio_daily_source_candidate.get(stock, False)),
@@ -3647,6 +3719,14 @@ class PortfolioState:
             for item in portfolio_daily_receiver_target_items
             if str(item.get("weight_change_action", "") or "").strip().lower() in {"open", "add"}
         ]
+        portfolio_daily_receiver_unrealized_items = [
+            item
+            for item in portfolio_daily_receiver_target_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() not in {"open", "add"}
+        ]
+        portfolio_daily_receiver_exec_guard_count = sum(
+            1 for item in actions if bool(item.get("portfolio_daily_receiver_exec_guarded", False))
+        )
         portfolio_daily_source_exec_guard_count = sum(
             1 for item in portfolio_daily_source_target_items if bool(item.get("portfolio_daily_source_exec_guard", False))
         )
@@ -3780,6 +3860,16 @@ class PortfolioState:
                 direct_action_pair_reallocation_source,
             ),
             "portfolio_daily_source_exec_guard_mode": float(bool(portfolio_daily_source_exec_guard_mode)),
+            "portfolio_daily_receiver_exec_guard_mode": float(bool(portfolio_daily_receiver_exec_guard_mode)),
+            "portfolio_daily_receiver_exec_guard_count": int(portfolio_daily_receiver_exec_guard_count),
+            "portfolio_daily_receiver_add_headroom_mean": _masked_mean(
+                portfolio_daily_receiver_add_headroom,
+                portfolio_daily_receiver_exec_guarded,
+            ),
+            "portfolio_daily_receiver_min_add_delta_mean": _masked_mean(
+                portfolio_daily_receiver_min_add_delta,
+                portfolio_daily_receiver_exec_guarded,
+            ),
             "portfolio_daily_receiver_target_count": int(portfolio_daily_receiver_target.sum()),
             "portfolio_daily_source_candidate_count": int(portfolio_daily_source_candidate.sum()),
             "portfolio_daily_source_target_count": int(portfolio_daily_source_target.sum()),
@@ -3795,6 +3885,17 @@ class PortfolioState:
                 portfolio_daily_source_realized_reduction_weight
             ),
             "portfolio_daily_receiver_realized_deploy_count": int(len(portfolio_daily_receiver_realized_items)),
+            "portfolio_daily_receiver_unrealized_deploy_count": int(len(portfolio_daily_receiver_unrealized_items)),
+            "portfolio_daily_receiver_realized_deploy_rate": float(
+                len(portfolio_daily_receiver_realized_items) / len(portfolio_daily_receiver_target_items)
+            )
+            if portfolio_daily_receiver_target_items
+            else 0.0,
+            "portfolio_daily_receiver_unrealized_deploy_share": float(
+                len(portfolio_daily_receiver_unrealized_items) / len(portfolio_daily_receiver_target_items)
+            )
+            if portfolio_daily_receiver_target_items
+            else 0.0,
             "portfolio_daily_effective_capital_transfer_count": int(portfolio_daily_effective_capital_transfer_count),
             "portfolio_daily_receiver_score_mean": _masked_mean(
                 portfolio_daily_receiver_score,

@@ -154,3 +154,24 @@
   - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`
   - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_rescore.csv`
 - smoke/正式训练仍必须前台阻塞运行，窗口时限 `10` 小时；任何 r21 结果都先写成 `research / shadow_only`，不得跳过 v2 gate report、GPU diagnostics 和 semantic process check。
+
+## 2026-04-26 r22 receiver-exec 操作路径
+- r22 receiver execution profile：`split_heads_portfolio_daily_ranking_receiver_exec_r22`。
+- r22 预算校准标记：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
+- r22 默认目标：`portfolio_daily_ranking_v2_gated`。
+- r22 dry-run 元数据检查命令：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_receiver_exec_r22 --trial-count 1 --study-tag verify_r22_receiver_exec_profile_metadata_20260426 --dry-run`
+- 已执行 smoke retry2：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_receiver_exec_r22 --trial-count 1 --disable-confirmatory --epochs 6 --min-epochs 3 --early-stop-patience 3 --study-tag cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2`
+- r22 retry2 gate report：
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_rescore.csv`
+- r22 读取重点：
+  - `portfolio_daily_receiver_exec_guarded`
+  - `portfolio_daily_receiver_exec_guard_count`
+  - `portfolio_daily_receiver_exec_guard_reason`
+  - `portfolio_daily_receiver_add_headroom`
+  - `portfolio_daily_receiver_min_add_delta`
+  - `portfolio_daily_receiver_realized_deploy_rate`
+  - `portfolio_daily_receiver_unrealized_deploy_share`
+- 若后续继续推进，优先跑 bounded confirmatory；不得把 r22 smoke 的 `qualified_v2_champion` 误写成 promotion，因为 `training_evidence_status = insufficient` 且缺少 fresh confirm。

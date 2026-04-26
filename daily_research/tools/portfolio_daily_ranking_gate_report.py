@@ -155,6 +155,8 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
         receiver_realized_mask = receiver_mask & outcomes.get("weight_change_action", pd.Series("", index=outcomes.index)).isin(
             ["open", "add"]
         )
+        receiver_unrealized_mask = receiver_mask & (~receiver_realized_mask)
+        receiver_exec_guard_mask = _series_bool(outcomes, "portfolio_daily_receiver_exec_guarded")
         source_reason_series = outcomes.get(
             "portfolio_daily_source_target_not_sold_reason",
             pd.Series("historical_missing_reason", index=outcomes.index),
@@ -173,6 +175,26 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
             else 0.0,
             "source_exec_guard_count": int(_series_bool(outcomes, "portfolio_daily_source_exec_guard").sum()),
             "source_exec_cap_guard_count": int(_series_bool(outcomes, "portfolio_daily_source_exec_cap_guarded").sum()),
+            "receiver_exec_guard_count": int(receiver_exec_guard_mask.sum()),
+            "receiver_realized_deploy_rate": _safe_float(receiver_realized_mask.sum() / receiver_mask.sum())
+            if bool(receiver_mask.any())
+            else 0.0,
+            "receiver_unrealized_deploy_count": int(receiver_unrealized_mask.sum()),
+            "receiver_unrealized_deploy_share": _safe_float(receiver_unrealized_mask.sum() / receiver_mask.sum())
+            if bool(receiver_mask.any())
+            else 0.0,
+            "receiver_exec_guard_reason_counts": {
+                str(key): int(value)
+                for key, value in outcomes.get(
+                    "portfolio_daily_receiver_exec_guard_reason",
+                    pd.Series("historical_missing_reason", index=outcomes.index),
+                )
+                .loc[receiver_exec_guard_mask]
+                .astype(str)
+                .value_counts()
+                .sort_index()
+                .items()
+            },
             "source_realized_reduction_weight": _safe_float(
                 _numeric(outcomes, "portfolio_daily_source_realized_reduction_weight").loc[source_mask].sum()
             ),
@@ -236,7 +258,11 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
         calibration = str(evaluation_summary.get("budget_calibration", "") or "")
         cash_threshold = (
             0.24
-            if "cash_aware_guard_v13" in calibration or "source_exec_guard_v14" in calibration
+            if (
+                "cash_aware_guard_v13" in calibration
+                or "source_exec_guard_v14" in calibration
+                or "receiver_exec_guard_v15" in calibration
+            )
             else 0.58
         )
         cash_score = _numeric(turnover, "portfolio_daily_cash_score")
@@ -317,6 +343,9 @@ def _trial_record(item: dict[str, Any]) -> dict[str, Any]:
         metrics["portfolio_daily_source_target_not_sold_count"] = action_diag.get("source_target_not_sold_count")
         metrics["portfolio_daily_effective_capital_transfer_count"] = action_diag.get("effective_capital_transfer_count")
         metrics["portfolio_daily_receiver_realized_deploy_count"] = action_diag.get("receiver_realized_deploy_count")
+        metrics["portfolio_daily_receiver_exec_guard_count"] = action_diag.get("receiver_exec_guard_count")
+        metrics["portfolio_daily_receiver_realized_deploy_rate"] = action_diag.get("receiver_realized_deploy_rate")
+        metrics["portfolio_daily_receiver_unrealized_deploy_share"] = action_diag.get("receiver_unrealized_deploy_share")
         metrics["portfolio_daily_source_exec_cap_guard_count"] = action_diag.get("source_exec_cap_guard_count")
         metrics["portfolio_daily_source_realized_reduction_weight"] = action_diag.get("source_realized_reduction_weight")
         v2["primary_metrics"] = metrics
@@ -557,6 +586,7 @@ def _markdown(report: dict[str, Any]) -> str:
                 f"- annual_return={_fmt(metrics.get('annual_return'))}, sharpe={_fmt(metrics.get('sharpe'))}, max_drawdown={_fmt(metrics.get('max_drawdown'))}",
                 f"- receiver-source 5d={_fmt(metrics.get('portfolio_daily_receiver_minus_source_forward_excess_5d'))}, source realized sell rate={_fmt(metrics.get('portfolio_daily_source_realized_sell_rate'))}",
                 f"- source not sold share={_fmt(metrics.get('portfolio_daily_source_target_not_sold_share'))}, effective capital transfer count={_fmt(metrics.get('portfolio_daily_effective_capital_transfer_count'), digits=0)}",
+                f"- receiver exec guard count={_fmt(metrics.get('portfolio_daily_receiver_exec_guard_count'), digits=0)}, receiver realized deploy rate={_fmt(metrics.get('portfolio_daily_receiver_realized_deploy_rate'))}",
                 f"- order_translation_conflict={_fmt(metrics.get('order_translation_conflict_rate'))}, add_to_hold_conflict={_fmt(metrics.get('add_to_hold_conflict_share'))}",
                 f"- CSV 复算 receiver-source 5d={_fmt(action_diag.get('receiver_minus_source_forward_excess_5d'))}, source realized sell count={action_diag.get('source_realized_sell_count', 0)}",
                 f"- source 未卖原因：{action_diag.get('source_not_sold_reason_counts', {})}",

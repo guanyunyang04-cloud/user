@@ -618,6 +618,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("portfolio_daily_ranking_v1", "r19 portfolio daily ranking objective"),
         ("portfolio_daily_ranking_v2_gated", "r20 gated portfolio daily ranking objective"),
         ("split_heads_portfolio_daily_ranking_stability_r20", "r20 portfolio daily ranking stability study profile"),
+        ("split_heads_portfolio_daily_ranking_receiver_exec_r22", "r22 portfolio daily receiver execution study profile"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -718,6 +719,17 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r21_contract_missing",
         "continuous_policy r21 source-exec portfolio daily ranking contract is missing execution-coupling markers.",
+    )
+    _require(
+        "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15" in simulator_text
+        and "portfolio_daily_receiver_exec_guarded" in simulator_text
+        and "portfolio_daily_receiver_exec_guard_count" in analysis_text
+        and "portfolio_daily_receiver_realized_deploy_rate" in pipeline_text
+        and "split_heads_portfolio_daily_ranking_receiver_exec_r22" in study_text
+        and "receiver_exec_guard_count" in gate_report_text,
+        failures,
+        "continuous_policy_r22_contract_missing",
+        "continuous_policy r22 receiver-exec portfolio daily ranking contract is missing headroom/execution markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

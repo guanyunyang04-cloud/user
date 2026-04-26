@@ -760,3 +760,37 @@
   - 第一次 r21 smoke 证明只修 source execution 会意外让 cash branch 再次死亡；原因是现金竞争条件只匹配 `cash_aware_guard_v13`，没有覆盖 `source_exec_guard_v14`。
   - 修复后 retry2 同时恢复 `cash_reserve_rate = 0.097872`，并保持 `source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`。
   - 新残余瓶颈变为 `order_translation_conflict_rate = 0.289362` 和 `add_to_hold_conflict_share = 0.454545`，说明下一轮应压执行冲突，而不是继续主攻 source realized sell。
+
+## 2026-04-26 r22 receiver-exec guard 知识记录
+- 新知识 1：receiver ranking 必须先通过“可买性合同”，否则再强的 add 意图也会在执行层退化。
+  - r21 中 source 已真实释放资金，但 receiver 仍大量 add->hold；根因是 receiver/add 被选中时已经没有足够 `position_cap` headroom。
+  - 这属于组合执行合同错误，不是信号强弱问题：模型可以判断“值得加仓”，但最终组合状态决定“是否还能加仓”。
+- 新知识 2：`portfolio_daily_receiver_target` 不应包含无法加仓的已持仓 add。
+  - v15 在 receiver target 写入 core deploy 前计算 `portfolio_daily_receiver_add_headroom` 与 `portfolio_daily_receiver_min_add_delta`。
+  - 对 `held + add + headroom < min_delta` 的行设置 `portfolio_daily_receiver_exec_guarded = true`，并记录 `portfolio_daily_receiver_exec_guard_reason`。
+- 新知识 3：执行冲突可以通过“目标集前置过滤”比事后惩罚更有效地降低。
+  - r22 retry2 将 `add_to_hold_conflict_share` 从 r21 的 `0.454545` 压到 `0.0`，将 `order_translation_conflict_rate` 从 `0.289362` 压到 `0.136170`。
+  - 这说明直接让无 headroom receiver 退出 core deploy，比继续调 action loss 或扩大 source 数量更贴近瓶颈本质。
+- 新知识 4：receiver guard 不能牺牲 source/cash 合同。
+  - r22 继承 v14 source-exec 与 v13 cash-aware 分支后，仍保持 `source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`、`cash_reserve_rate = 0.097872`。
+  - 因此 v15 的正确继承链是 `v13 cash-aware + v14 source-exec + v15 receiver-exec`，缺任何一段都会把旧瓶颈带回来。
+- 新知识 5：smoke 过 v2 gate 不是 promotion 证据。
+- r22 retry2 是 `6` epoch smoke，`training_evidence_status = insufficient`，且未跑 fresh confirmatory。
+- 它只能证明 receiver 可执行性机制有效；要进入下一层结论，必须用更长训练预算和 confirm-vs-screening 稳定性验证。
+
+## 2026-04-26 r22 formal 48 epoch 知识记录
+- 新知识 1：r22/v15 的核心方向被正式证据强化，而不是只停留在 smoke。
+  - `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426` 经 48 epoch strict resume 后，`trial_01`、`trial_02`、`confirm_01` 的 `training_evidence_status` 均为 `sufficient`。
+  - 这说明前一轮 `best_epoch` 贴边确实是训练预算不足；同一 run_dir strict resume 到 48 epoch 后，best epoch 离开边缘，证据链从 smoke 提升为正式训练证据。
+- 新知识 2：receiver-exec guard 的底层机制没有破坏 source/cash 合同。
+  - gate-qualified `trial_01` 中 `receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_realized_sell_rate = 0.9875`、`source_not_sold_share = 0.0125`。
+  - 说明 v15 的“先检查加仓 headroom，再允许 receiver 进入 core deploy”可以和 v14 source-exec、v13 cash-aware 同时成立。
+- 新知识 3：收益大幅提升不等于稳定确认成立。
+  - `trial_01` 达到 `annual_return = 2.002426`、`sharpe = 3.868514`，但 `confirm_01` 回落到 `annual_return = 0.761591`、`sharpe = 2.365477`。
+  - `confirm_01` 自身过 v2 gates，却因相对 screening 的 annual return、Sharpe、monthly return 衰减而没有进入 stable confirmatory。
+- 新知识 4：当前瓶颈已经从“动作是否能落地”升级为“高收益结构是否可跨确认阶段复现”。
+  - r21 的瓶颈是 receiver/add 无 headroom；r22 formal 后这个瓶颈已被基本压住。
+  - 现在最重要的约束应是 confirm-vs-screening 稳定性、收益衰减、月度收益稳定和稳健目标，而不是继续盲目增加单点 guard。
+- 经验规则：`qualified_v2_champion` 与 `stable_confirmatory` 必须分开读。
+  - gate report 中的合格 v2 champion 表示“当前回测与执行门禁通过”。
+  - `portfolio_daily_v2_stable_confirmatory_trials` 为空时，不得把该结果解释为可 promotion 或 live 的稳定冠军。

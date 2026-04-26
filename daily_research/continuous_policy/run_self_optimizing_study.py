@@ -560,6 +560,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.10, 0.12],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_ranking_receiver_exec_r22": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [8.0e-4, 1.0e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.16, 0.18],
+        "daily_dropout": [0.10, 0.12],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1035,6 +1052,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.12,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_ranking_receiver_exec_r22": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 8.0e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.18,
+        "daily_dropout": 0.12,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1067,6 +1101,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_ranking_r19": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_ranking_stability_r20": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_ranking_source_exec_r21": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_ranking_receiver_exec_r22": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1416,6 +1451,27 @@ def _score_protocol_summary(
         semantic_conflicts.get(
             "portfolio_daily_receiver_target_count",
             continuity.get("portfolio_daily_receiver_target_count", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_receiver_exec_guard_count = float(
+        semantic_conflicts.get(
+            "portfolio_daily_receiver_exec_guard_count",
+            continuity.get("portfolio_daily_receiver_exec_guard_count", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_receiver_realized_deploy_rate = float(
+        semantic_conflicts.get(
+            "portfolio_daily_receiver_realized_deploy_rate",
+            continuity.get("portfolio_daily_receiver_realized_deploy_rate", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_receiver_unrealized_deploy_share = float(
+        semantic_conflicts.get(
+            "portfolio_daily_receiver_unrealized_deploy_share",
+            continuity.get("portfolio_daily_receiver_unrealized_deploy_share", 0.0),
         )
         or 0.0
     )
@@ -2223,6 +2279,12 @@ def _score_protocol_summary(
             "portfolio_daily_source_count": min(portfolio_daily_source_target_count, 14.0)
             * 0.018
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_exec_guard_count": min(portfolio_daily_receiver_exec_guard_count, 20.0)
+            * 0.010
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate
+            * 0.18
+            * portfolio_daily_ranking_weight,
             "action_value_consistency_score": action_value_consistency_score * 1.08,
             "action_value_alignment_score": action_alignment_score * 0.92,
             "release_translation_deploy_health_score": release_translation_deploy_health_score * 0.96,
@@ -2343,6 +2405,12 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight
             if portfolio_daily_observed
             else 0.0,
+            "portfolio_daily_receiver_exec_guard_count": min(portfolio_daily_receiver_exec_guard_count, 20.0)
+            * 0.012
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate
+            * 0.22
+            * portfolio_daily_ranking_weight,
             "action_value_consistency_score": action_value_consistency_score * 1.18,
             "release_translation_deploy_health_score": release_translation_deploy_health_score * 1.02,
             "release_translation_deploy_translation_score": release_translation_deploy_translation_score * 0.96,
@@ -2726,6 +2794,9 @@ def _score_protocol_summary(
             "direct_action_core_target_forward_excess_5d": direct_action_core_target_forward_excess_5d,
             "direct_action_core_minus_pair_forward_excess_5d": direct_action_core_minus_pair_forward_excess_5d,
             "portfolio_daily_receiver_target_count": portfolio_daily_receiver_target_count,
+            "portfolio_daily_receiver_exec_guard_count": portfolio_daily_receiver_exec_guard_count,
+            "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate,
+            "portfolio_daily_receiver_unrealized_deploy_share": portfolio_daily_receiver_unrealized_deploy_share,
             "portfolio_daily_source_target_count": portfolio_daily_source_target_count,
             "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate,
             "portfolio_daily_source_target_not_sold_share": portfolio_daily_source_target_not_sold_share,
@@ -3299,6 +3370,11 @@ def main(argv: list[str] | None = None) -> int:
         "epochs": int(args.epochs),
         "min_epochs": int(args.min_epochs),
     }
+    active_budget_semantics = str(base_trial.get("budget_semantics", args.budget_semantics))
+    active_budget_calibration = str(base_trial.get("budget_calibration", args.budget_calibration))
+    active_budget_objective = str(base_trial.get("budget_objective", args.budget_objective))
+    active_daily_head_layout = str(base_trial.get("daily_head_layout", args.daily_head_layout))
+    active_alpha_prior_source = str(base_trial.get("alpha_prior_source", args.alpha_prior_source))
     selected_trials = _select_trials(
         base=base_trial,
         profile_name=args.search_profile,
@@ -3326,11 +3402,11 @@ def main(argv: list[str] | None = None) -> int:
         "confirmatory_epochs": int(args.confirmatory_epochs),
         "confirmatory_min_epochs": int(args.confirmatory_min_epochs),
         "execution_semantics": str(args.execution_semantics),
-        "budget_semantics": str(args.budget_semantics),
-        "budget_calibration": str(args.budget_calibration),
-        "budget_objective": str(args.budget_objective),
-        "daily_head_layout": str(args.daily_head_layout),
-        "alpha_prior_source": str(args.alpha_prior_source),
+        "budget_semantics": active_budget_semantics,
+        "budget_calibration": active_budget_calibration,
+        "budget_objective": active_budget_objective,
+        "daily_head_layout": active_daily_head_layout,
+        "alpha_prior_source": active_alpha_prior_source,
         "alpha_prior_score_panel": str(args.alpha_prior_score_panel),
         "alpha_prior_target_weight_panel": str(args.alpha_prior_target_weight_panel),
         "trial_count": len(selected_trials),
@@ -3567,8 +3643,8 @@ def main(argv: list[str] | None = None) -> int:
         "benchmark": args.benchmark,
         "trainer_backend": args.trainer_backend,
         "execution_semantics": str(args.execution_semantics),
-        "budget_semantics": str(args.budget_semantics),
-        "budget_calibration": str(args.budget_calibration),
+        "budget_semantics": active_budget_semantics,
+        "budget_calibration": active_budget_calibration,
         "study_plan_json": str((study_root / "study_plan.json").resolve()),
         "trial_ranking_csv": str((study_root / "trial_ranking.csv").resolve()),
         "trial_count": len(selected_trials),

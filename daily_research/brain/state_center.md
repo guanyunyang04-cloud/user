@@ -8,7 +8,7 @@
 - 当前 live 默认执行 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
-- continuous_policy 已推进到 r18 direct-action pair-source cost guard repair；当前 research 入口为 `split_heads_direct_action_pair_cost_guard_r18`、`cash_constraint_direct_action_pair_cost_guard_v11`、`direct_action_pair_cost_guard_v1`。
+- continuous_policy 已推进到 r22 portfolio daily receiver-exec guard；当前 research 入口为 `split_heads_portfolio_daily_ranking_receiver_exec_r22`、`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`portfolio_daily_ranking_v2_gated`。
 - r15 正式 bounded study 已完成，champion 为 `confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9 + cash_constraint_direct_action_guard_v8`，但 `promotion_status = shadow_only`，不得切换 live。
 - r15 事实：收益尚可但执行语义失败，`annual_return = 0.3816`、`sharpe = 1.0867`、`max_drawdown = -0.1493`、`monthly_consistency_score = 0.6703`、`deploy_intent_realized_rate = 0.1642`、`add_to_hold_conflict_share = 0.8524`、`failure_mode = deploy_not_realized`。
 - r16 当前最佳 smoke2 事实：复用 r15 champion artifact 后，`annual_return = 0.5807`、`sharpe = 1.6261`、`max_drawdown = -0.1180`、`monthly_return_mean = 0.0337`、`monthly_consistency_score = 0.7247`，但 `direct_action_deploy_authorized_realized_rate = 0.1557`、`add_to_hold_conflict_share = 0.8483` 仍未解决。
@@ -123,3 +123,24 @@
 - 事实：retry2 关键指标为 `annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`、`monthly_consistency_score = 0.564085`、`portfolio_daily_receiver_target_count = 53`、`portfolio_daily_source_target_count = 55`、`portfolio_daily_source_realized_sell_rate = 1.0`、`portfolio_daily_source_target_not_sold_share = 0.0`、`portfolio_daily_effective_capital_transfer_count = 17`、`portfolio_daily_cash_reserve_rate = 0.097872`。
 - 事实：retry2 仍无合格 v2 champion，失败 gate 为 `order_translation_conflict_ceiling` 与 `add_to_hold_conflict_ceiling`；对应 `order_translation_conflict_rate = 0.289362`、`add_to_hold_conflict_share = 0.454545`。
 - 决策：r21 已把第一瓶颈从 source execution 推进到 order translation / add-to-hold 冲突；当前仍是 `research / shadow_only`，不得 promotion 或 live。
+
+## 2026-04-26 r22 receiver-exec guard 当前状态
+- 事实：r21 失败的本质不是 source 释放资金不足，而是 receiver 选择没有先满足最终执行层的可买性约束；r21 中 `portfolio_daily_receiver_target_count = 53`，但 `receiver unrealized = 36`，`order_translation_conflict_rate = 0.289362`，`add_to_hold_conflict_share = 0.454545`。
+- 事实：语义审计显示，r21 的 receiver/add 未成交集中在已持仓且接近或超过单票 cap 的标的；模型把“值得加仓”当成“可执行加仓”，而模拟器最终只能把这些 add 翻译成 hold/reduce。
+- 事实：新增预算校准 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 与 search profile `split_heads_portfolio_daily_ranking_receiver_exec_r22`，在 receiver target 进入 core deploy 前检查 `portfolio_daily_receiver_add_headroom` 与 `portfolio_daily_receiver_min_add_delta`，无足够加仓空间时先剔除 receiver/add 目标。
+- 事实：`cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2` 已前台自然完成，GPU 诊断为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、strict resume。
+- 事实：retry2 顶层元数据已修复为 `budget_semantics = action_budget_split_v1`、`budget_calibration = cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`，避免 trial 正确但 study 顶层仍显示 `none` 的审计误导。
+- 事实：retry2 通过离线 `portfolio_daily_ranking_v2_gated` 全部 gates，合格 v2 champion 为 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_smoke_20260426_retry2__trial_01`。
+- 事实：关键指标为 `annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`、`portfolio_daily_receiver_target_count = 16`、`portfolio_daily_receiver_exec_guard_count = 37`、`portfolio_daily_receiver_realized_deploy_rate = 1.0`、`portfolio_daily_receiver_unrealized_deploy_share = 0.0`。
+- 事实：source 与现金仍保持有效，`portfolio_daily_source_target_count = 55`、`portfolio_daily_source_realized_sell_rate = 1.0`、`portfolio_daily_source_target_not_sold_share = 0.0`、`portfolio_daily_effective_capital_transfer_count = 16`、`portfolio_daily_cash_reserve_rate = 0.097872`。
+- 事实：执行冲突已明显压低，`order_translation_conflict_rate = 0.136170`、`add_to_hold_conflict_share = 0.0`；receiver guard 原因分布为 `no_position_cap_headroom = 36`、`insufficient_min_add_headroom = 1`。
+- 决策：r22 证明 receiver 可执行性约束是正确突破口，已把 r21 的 add-to-hold 瓶颈转成可观测、可审计、可门控的 headroom 问题；但本轮仍是 `6` epoch smoke，`training_evidence_status = insufficient`，没有 confirmatory 稳定性证据，仍为 `research / shadow_only`，不得 promotion 或 live。
+
+## 2026-04-26 r22 formal 48 epoch 当前状态
+- 事实：`cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426` 已按 `yolos` 前台、strict resume、10h 窗口纪律自然完成；先跑 24/32 epoch formal，再沿同一 run_dir strict resume 到 48/48 epoch。
+- 事实：3 条训练记录均为 `formal_torch_seq_v3`、`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、strict resume；`trial_01`、`trial_02` 与 `confirm_01` 的 `training_evidence_status` 均已变为 `sufficient`。
+- 事实：离线 gate report 的合格 v2 champion 为 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426__trial_01`，关键指标为 `annual_return = 2.002426`、`sharpe = 3.868514`、`max_drawdown = -0.111321`、`monthly_return_mean = 0.084873`、`monthly_win_rate = 0.75`、`monthly_consistency_score = 0.841198`。
+- 事实：执行链路保持干净：`order_translation_conflict_rate = 0.110211`、`add_to_hold_conflict_share = 0.0`、`portfolio_daily_receiver_realized_deploy_rate = 1.0`、`portfolio_daily_receiver_unrealized_deploy_share = 0.0`、`portfolio_daily_source_realized_sell_rate = 0.9875`、`portfolio_daily_source_target_not_sold_share = 0.0125`、`portfolio_daily_effective_capital_transfer_count = 39`。
+- 事实：`confirm_01` 自身也过 v2 gates 且训练证据充分，指标为 `annual_return = 0.761591`、`sharpe = 2.365477`、`max_drawdown = -0.136675`、`monthly_return_mean = 0.045673`、`receiver_realized_deploy_rate = 1.0`、`source_realized_sell_rate = 0.992188`。
+- 边界：`portfolio_daily_v2_stable_confirmatory_trials` 仍为空；`confirm_01` 相对 `trial_01` 触发 `annual_return_decay_limit`、`sharpe_decay_limit` 与 `monthly_return_decay_limit`，因此当前只能说 r22/v15 训练证据充分且 v2 gate 成立，不能说 stable confirmatory 已成立。
+- 决策：r22/v15 是当前最强研究主线，但仍保持 `research / shadow_only`；不得切 live、不得改 active artifact、不得进入 promotion。下一层瓶颈已从执行可行性转为“screening 高收益能否被 confirmatory 稳定复现”与“收益衰减下的稳健目标约束”。

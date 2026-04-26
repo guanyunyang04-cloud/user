@@ -42,3 +42,7 @@
 ## 2026-04-26 daily_research r21 路由说明
 - 主脑事实：`cash_constraint_portfolio_daily_ranking_source_exec_guard_v14`、`split_heads_portfolio_daily_ranking_source_exec_r21`、`source_not_sold_ceiling` 与 `portfolio_daily_effective_capital_transfer_count` 都是 `daily_research` 分脑事实；主脑只保留它们用于修复 source target 真实释放资金，且仍为 `research / shadow_only`。
 - 全局教训：source execution 修复必须同时继承 cash-aware 分支；否则会从“不会释放 source”转成“会释放 source 但现金分支再死”。r21 retry2 已把下一瓶颈推到 order translation 与 add-to-hold 冲突。
+
+## 2026-04-26 daily_research r22 路由说明
+- 主脑事实：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`split_heads_portfolio_daily_ranking_receiver_exec_r22`、`portfolio_daily_receiver_exec_guarded`、`portfolio_daily_receiver_add_headroom` 与 `portfolio_daily_receiver_realized_deploy_rate` 都是 `daily_research` 分脑事实；主脑只保留它们用于修复 receiver target 的真实可买性，且仍为 `research / shadow_only`。
+- 全局教训：组合级 receiver 不能只按信号排序，还必须在进入 core deploy 前满足执行 headroom；否则 source 已释放资金也会被 add-to-hold 冲突吞掉。r22 smoke 证明该 guard 有效，但 smoke 过 gate 不等于 promotion。

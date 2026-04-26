@@ -1015,6 +1015,10 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_target",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        portfolio_receiver_exec_guarded = action_outcomes.get(
+            "portfolio_daily_receiver_exec_guarded",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
         portfolio_source_candidate = action_outcomes.get(
             "portfolio_daily_source_candidate",
             pd.Series(False, index=action_outcomes.index),
@@ -1029,6 +1033,20 @@ def compute_continuity_metrics(
         ).astype(bool)
         portfolio_receiver_score = pd.to_numeric(
             action_outcomes.get("portfolio_daily_receiver_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_receiver_add_headroom = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_add_headroom",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_receiver_min_add_delta = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_min_add_delta",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
             errors="coerce",
         ).fillna(0.0)
         portfolio_source_gap = pd.to_numeric(
@@ -1131,7 +1149,34 @@ def compute_continuity_metrics(
             if bool(direct_core_deploy_target.any()) and bool(direct_pair_reallocation_source.any())
             else 0.0
         )
+        portfolio_receiver_realized_count = float(
+            (portfolio_receiver_target & weight_change_lookup.isin({"open", "add"})).sum()
+        )
+        metrics["portfolio_daily_receiver_exec_guard_count"] = float(portfolio_receiver_exec_guarded.sum())
+        metrics["portfolio_daily_receiver_add_headroom_mean"] = (
+            float(portfolio_receiver_add_headroom.loc[portfolio_receiver_exec_guarded].mean())
+            if bool(portfolio_receiver_exec_guarded.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_min_add_delta_mean"] = (
+            float(portfolio_receiver_min_add_delta.loc[portfolio_receiver_exec_guarded].mean())
+            if bool(portfolio_receiver_exec_guarded.any())
+            else 0.0
+        )
         metrics["portfolio_daily_receiver_target_count"] = float(portfolio_receiver_target.sum())
+        metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
+            float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_unrealized_deploy_count"] = float(
+            (portfolio_receiver_target & (~weight_change_lookup.isin({"open", "add"}))).sum()
+        )
+        metrics["portfolio_daily_receiver_unrealized_deploy_share"] = (
+            float(metrics["portfolio_daily_receiver_unrealized_deploy_count"] / portfolio_receiver_target.sum())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
         metrics["portfolio_daily_source_candidate_count"] = float(portfolio_source_candidate.sum())
         metrics["portfolio_daily_source_target_count"] = float(portfolio_source_target.sum())
         metrics["portfolio_daily_source_sell_count"] = float(portfolio_daily_source_sell_mask.sum())
@@ -1473,7 +1518,13 @@ def compute_continuity_metrics(
             "direct_action_pair_source_forward_excess_5d",
             "direct_action_core_target_forward_excess_5d",
             "direct_action_core_minus_pair_forward_excess_5d",
+            "portfolio_daily_receiver_exec_guard_count",
+            "portfolio_daily_receiver_add_headroom_mean",
+            "portfolio_daily_receiver_min_add_delta_mean",
             "portfolio_daily_receiver_target_count",
+            "portfolio_daily_receiver_realized_deploy_rate",
+            "portfolio_daily_receiver_unrealized_deploy_count",
+            "portfolio_daily_receiver_unrealized_deploy_share",
             "portfolio_daily_source_candidate_count",
             "portfolio_daily_source_target_count",
             "portfolio_daily_source_sell_count",
