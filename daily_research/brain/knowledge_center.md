@@ -794,3 +794,20 @@
 - 经验规则：`qualified_v2_champion` 与 `stable_confirmatory` 必须分开读。
   - gate report 中的合格 v2 champion 表示“当前回测与执行门禁通过”。
   - `portfolio_daily_v2_stable_confirmatory_trials` 为空时，不得把该结果解释为可 promotion 或 live 的稳定冠军。
+
+## 2026-04-27 r23 receiver-exec stability 知识记录
+- 新知识 1：降低学习率并提高 dropout 后，r22 的收益衰减可以显著收敛。
+  - r22 formal 的 `confirm_01` 自身过 v2 gates，但相对 screening 的 annual return、Sharpe 和 monthly return 衰减过大。
+  - r23 `confirm_01` 相对 source `trial_03` 的 annual return 仅衰减 `0.022524`，Sharpe 反而提升 `0.065448`，monthly return 仅衰减 `0.002555`。
+- 新知识 2：稳定性搜索会牺牲单点峰值，但能换来更可信的跨阶段复现。
+  - r22 screening champion 年化达到 `2.002426`，但没有 stable confirmatory。
+  - r23 v2 champion 年化降到 `0.351246`，但通过 stable confirmatory；这说明当前瓶颈不是“还能不能跑出高收益”，而是“高收益结构能否低衰减复现”。
+- 新知识 3：v2 排名会压制单纯经济冠军，保留结构质量。
+  - r23 `confirm_02` 年化 `1.337017`、Sharpe `2.936905`，但 `receiver_minus_source_5d = -0.012136` 且 `add_to_hold_conflict_share = 0.086093`。
+  - v2 将 `confirm_01` 排在前面，是因为它同时保持正 receiver-source spread、低执行冲突、source 真实释放和稳定确认。
+- 新知识 4：strict resume 是训练证据充分化的必要动作。
+  - r23 首轮 40/48 epoch 多数 best epoch 贴边，不能当作正式结论。
+  - 同一 tag strict resume 到 64 epoch 后，全部 best epoch 落在 `56-59`，且 `resumed_from_checkpoint` 非空，证据链才变硬。
+- 新知识 5：当前路线已经从“执行合同修复”进入“收益稳定性与目标选择”阶段。
+  - v13/v14/v15 解决的是现金、source 与 receiver 的执行合同。
+  - r23 证明下一层更像稳健优化问题：在不破坏执行合同的前提下，提高 stable confirmatory 的收益上限。

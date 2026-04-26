@@ -1019,3 +1019,28 @@
 - 决策：
   - r22/v15 继续 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
   - 下一轮优先级应转向降低 screening/confirmatory 衰减：收紧高收益 trial 的稳健约束、加入 confirm-stability-aware search 或在 r22/v15 基础上做小范围稳定性搜索，而不是继续扩大 receiver guard。
+
+## 2026-04-27 r23 receiver-exec stability 执行复盘
+- 行动前自检：
+  - r22/v15 已证明执行合同正确，但 stable confirmatory 为空；本轮 P0 是把收益衰减问题转成稳定性优先搜索。
+  - 启动前语义进程检查未发现遗留 `daily_research` 训练进程；所有命令继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台运行，窗口按 10h 处理。
+- 本轮动作：
+  - 新增 `split_heads_portfolio_daily_ranking_receiver_exec_stability_r23`。
+  - r23 继承 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`alpha_result_value_budget_split_v15` 与 `portfolio_daily_ranking_v2_gated`。
+  - r23 收窄到低学习率、高 dropout、单一 `result_value_v9`，减少高收益 screening 的不稳定自由度。
+- 执行：
+  - dry-run `verify_r23_receiver_exec_stability_profile_20260426` 通过，确认 study plan 元数据正确。
+  - 首轮前台训练 `cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426` 自然结束，包含 `3` 个 screening 与 `2` 个 confirmatory；但 diagnostics 显示多个 best epoch 贴边。
+  - 沿同一 tag strict resume 到 `64/56` epoch，任务自然结束。
+- 结果：
+  - 最终 5 条训练诊断均为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、`completed_epochs = 64`、strict resume，且 `resumed_from_checkpoint` 非空。
+  - gate report 的 `qualified_v2_champion` 为 `cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426__confirm_01`，且 `confirm_stable = True`。
+  - `confirm_01` 指标：`annual_return = 0.351246`、`sharpe = 1.191887`、`max_drawdown = -0.136122`、`monthly_return_mean = 0.023111`、`receiver_minus_source_5d = 0.025178`、`source_realized_sell_rate = 0.979798`、`order_translation_conflict_rate = 0.134128`、`add_to_hold_conflict_share = 0.0`。
+  - `confirm_02` 也是 stable confirmatory，且是经济冠军：`annual_return = 1.337017`、`sharpe = 2.936905`、`max_drawdown = -0.154638`、`monthly_return_mean = 0.065722`。
+- 行动后复盘：
+  - r23 证明稳定性优先搜索有效解决了 r22 的核心残差：stable confirmatory 不再为空。
+  - r23 同时暴露新的取舍：稳定 v2 champion 的收益低于 r22 高峰；经济冠军收益更高，但结构质量不是第一。
+  - 当前最优策略不是上线，而是在 r23 稳定性配置基础上恢复收益上限，或引入 confirm-stability-aware 的二阶段筛选。
+- 决策：
+  - r23 仍为 `research / shadow_only`，不切 live、不改 active artifact、不进入 promotion。
+  - 后续若继续推进，必须保留 v15 执行合同和 stable confirmatory gate，不得回到只追求 screening 年化。

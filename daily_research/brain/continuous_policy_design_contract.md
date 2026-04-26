@@ -113,3 +113,10 @@
 - 无 headroom 的 receiver/add 必须在目标集前置过滤，而不是等到订单翻译后再把 add 退化为 hold/reduce；被过滤的行必须记录 `portfolio_daily_receiver_exec_guarded` 与 `portfolio_daily_receiver_exec_guard_reason`。
 - r22 成功判定必须同时看 `portfolio_daily_receiver_realized_deploy_rate`、`portfolio_daily_receiver_unrealized_deploy_share`、`order_translation_conflict_rate`、`add_to_hold_conflict_share`、source realized sell、effective capital transfer 和现金保留。
 - r22 smoke 过 `portfolio_daily_ranking_v2_gated` 只证明机制方向有效；若 `training_evidence_status = insufficient` 或缺少 stable confirmatory，不得进入 promotion 或 live 讨论。
+
+## 2026-04-27 r23 稳定性合同
+- `split_heads_portfolio_daily_ranking_receiver_exec_stability_r23` 不改变 v15 执行合同；它只改变搜索空间，把目标从单点峰值收益转为降低 screening 到 confirmatory 的衰减。
+- r23 的有效证据必须同时满足：`device = cuda`、`runtime_env = yolos`、strict resume、best epoch 不贴最终 epoch、v2 gates 通过，以及 `confirm_stable = True`。
+- stable confirmatory 必须优先比较 confirm 与其 source screening 的衰减，而不是只看 confirm 自身收益；`annual_return_delta_vs_source`、`sharpe_delta_vs_source`、`monthly_return_mean_delta_vs_source` 和 `max_drawdown_delta_vs_source` 是硬解释字段。
+- 若经济冠军和 v2 champion 不一致，优先按 v2 champion 解释结构质量；高收益但 `receiver_minus_source_5d` 为负或执行冲突更高的路线只能作为收益候选，不得自动升为结构冠军。
+- r23 通过 stable confirmatory 只说明研究路线进入更强证据层，不等于 live 或 promotion；上线边界仍必须由独立 promotion gate、长窗 out-of-sample 和真实执行风控共同决定。

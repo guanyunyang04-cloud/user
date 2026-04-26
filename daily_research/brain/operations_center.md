@@ -175,3 +175,28 @@
   - `portfolio_daily_receiver_realized_deploy_rate`
   - `portfolio_daily_receiver_unrealized_deploy_share`
 - 若后续继续推进，优先跑 bounded confirmatory；不得把 r22 smoke 的 `qualified_v2_champion` 误写成 promotion，因为 `training_evidence_status = insufficient` 且缺少 fresh confirm。
+
+## 2026-04-27 r23 receiver-exec stability 操作路径
+- r23 稳定性搜索 profile：`split_heads_portfolio_daily_ranking_receiver_exec_stability_r23`。
+- r23 预算校准标记仍为：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
+- r23 默认目标仍为：`portfolio_daily_ranking_v2_gated`。
+- r23 dry-run 元数据检查命令：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_receiver_exec_stability_r23 --trial-count 1 --study-tag verify_r23_receiver_exec_stability_profile_20260426 --dry-run`
+- 已执行 r23 首轮前台验证：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_receiver_exec_stability_r23 --trial-count 3 --epochs 40 --min-epochs 32 --early-stop-patience 10 --confirmatory-max-candidates 2 --confirmatory-epochs 48 --confirmatory-min-epochs 40 --study-tag cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426`
+- 已执行同一 tag strict resume：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_receiver_exec_stability_r23 --trial-count 3 --epochs 64 --min-epochs 56 --early-stop-patience 12 --confirmatory-max-candidates 2 --confirmatory-epochs 64 --confirmatory-min-epochs 56 --study-tag cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426`
+- r23 gate report：
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r23_receiver_exec_stability_20260426/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_rescore.csv`
+- 读取 r23 时必须先看：
+  - `confirm_stable`
+  - `confirm_stability_failed`
+  - `annual_return_delta_vs_source`
+  - `sharpe_delta_vs_source`
+  - `monthly_return_mean_delta_vs_source`
+  - `receiver_minus_source_5d`
+  - `source_realized_sell_rate`
+  - `source_target_not_sold_share`
+  - `effective_capital_transfer_count`
+- r23 已出现 stable confirmatory，但仍不得自动 promotion；下一轮若继续推进，应以 r23 稳定性配置为锚，尝试恢复 r22 的收益上限，同时保持 `confirm_stable = True`。

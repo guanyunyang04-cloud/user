@@ -577,6 +577,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.10, 0.12],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_ranking_receiver_exec_stability_r23": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v9"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [5.0e-4, 6.5e-4, 8.0e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.18, 0.20, 0.22],
+        "daily_dropout": [0.12, 0.14],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1069,6 +1086,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.12,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_ranking_receiver_exec_stability_r23": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 6.5e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.20,
+        "daily_dropout": 0.14,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1102,6 +1136,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_ranking_stability_r20": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_ranking_source_exec_r21": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_ranking_receiver_exec_r22": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_ranking_receiver_exec_stability_r23": "portfolio_daily_ranking_v2_gated",
 }
 
 

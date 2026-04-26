@@ -153,7 +153,8 @@
 - 主脑层决策：主脑只记录全局摘要；r22 仍为 `research / shadow_only`，不改变 active execution artifact，不进入 promotion 或 live，详细指标、命令和 gate 报告继续以 `daily_research/brain/` 为真源。
 
 ## 2026-04-26 daily_research r22 formal 48 epoch 摘要
-- 当前事实：`daily_research` 已完成 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426`，并沿同一 run_dir strict resume 到 48 epoch；训练证据从 insufficient 提升为 sufficient，GPU/yolos 证据完整。
-- 当前事实：合格 v2 champion 为 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426__trial_01`，`annual_return = 2.002426`、`sharpe = 3.868514`、`max_drawdown = -0.111321`，receiver/source 执行链路基本闭合。
-- 当前边界：`confirm_01` 自身过 v2 gates，但相对 screening 触发收益、Sharpe 与月度收益衰减稳定性失败；stable confirmatory 仍为空。
-- 主脑层决策：r22/v15 是当前最强研究主线，但仍是 `research / shadow_only`；不切 live、不改 active artifact、不进入 promotion，具体复盘继续由 `daily_research/brain/` 承载。
+- 当前事实：`daily_research` 已完成 `cp_v3_portfolio_daily_ranking_r22_receiver_exec_formal_20260426` 并 strict resume 到 48 epoch；合格 v2 champion 为 `trial_01`，`annual_return = 2.002426`、`sharpe = 3.868514`、`max_drawdown = -0.111321`。
+- 主脑层决策：r22/v15 执行链路基本闭合，但 stable confirmatory 仍为空；继续 `research / shadow_only`，不切 live、不改 active artifact。
+## 2026-04-27 daily_research r23 receiver-exec stability 摘要
+- 当前事实：`daily_research` 已完成 `split_heads_portfolio_daily_ranking_receiver_exec_stability_r23`，同一 tag strict resume 到 64 epoch，训练证据均为 `cuda + yolos + formal_torch_seq_v3 + strict resume`。
+- 主脑层决策：r23 已补上 stable confirmatory 缺口，v2 champion `confirm_01` 为 `annual_return = 0.351246`、`sharpe = 1.191887`；仍为 `research / shadow_only`，细节继续以 `daily_research/brain/` 为真源。
