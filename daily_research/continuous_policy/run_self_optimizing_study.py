@@ -526,6 +526,40 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.08],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_ranking_stability_r20": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [8.0e-4, 1.0e-3, 1.2e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.12, 0.16],
+        "daily_dropout": [0.08, 0.10],
+        "batch_size": [512],
+    },
+    "split_heads_portfolio_daily_ranking_source_exec_r21": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_source_exec_guard_v14"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [8.0e-4, 1.0e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.16, 0.18],
+        "daily_dropout": [0.10, 0.12],
+        "batch_size": [512],
+    },
 }
 
 
@@ -967,6 +1001,40 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.08,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_ranking_stability_r20": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.0e-3,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.16,
+        "daily_dropout": 0.10,
+        "batch_size": 512,
+    },
+    "split_heads_portfolio_daily_ranking_source_exec_r21": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v15",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 8.0e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.18,
+        "daily_dropout": 0.12,
+        "batch_size": 512,
+    },
 }
 
 
@@ -997,6 +1065,8 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_direct_action_pair_reallocation_r17": "direct_action_pair_reallocation_v1",
     "split_heads_direct_action_pair_cost_guard_r18": "direct_action_pair_cost_guard_v1",
     "split_heads_portfolio_daily_ranking_r19": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_ranking_stability_r20": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_ranking_source_exec_r21": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1360,6 +1430,27 @@ def _score_protocol_summary(
         semantic_conflicts.get(
             "portfolio_daily_source_realized_sell_rate",
             continuity.get("portfolio_daily_source_realized_sell_rate", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_source_target_not_sold_share = float(
+        semantic_conflicts.get(
+            "portfolio_daily_source_target_not_sold_share",
+            continuity.get("portfolio_daily_source_target_not_sold_share", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_source_exec_cap_guard_count = float(
+        semantic_conflicts.get(
+            "portfolio_daily_source_exec_cap_guard_count",
+            continuity.get("portfolio_daily_source_exec_cap_guard_count", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_effective_capital_transfer_count = float(
+        semantic_conflicts.get(
+            "portfolio_daily_effective_capital_transfer_count",
+            continuity.get("portfolio_daily_effective_capital_transfer_count", 0.0),
         )
         or 0.0
     )
@@ -2029,6 +2120,21 @@ def _score_protocol_summary(
             if portfolio_daily_source_target_count >= 5.0
             else 0.0
         )
+        portfolio_daily_source_not_sold_excess = (
+            max(0.0, portfolio_daily_source_target_not_sold_share - 0.50)
+            if portfolio_daily_source_target_count >= 5.0
+            else 0.0
+        )
+        portfolio_daily_effective_transfer_sparse_penalty = (
+            max(
+                0.0,
+                min(portfolio_daily_receiver_target_count, portfolio_daily_source_target_count) * 0.30
+                - portfolio_daily_effective_capital_transfer_count,
+            )
+            * 0.09
+            if portfolio_daily_receiver_target_count >= 5.0 and portfolio_daily_source_target_count >= 5.0
+            else 0.0
+        )
         portfolio_daily_source_sparse_penalty = (
             max(0.0, min(portfolio_daily_receiver_target_count * 0.65, 6.0) - portfolio_daily_source_target_count)
             * 0.12
@@ -2105,6 +2211,15 @@ def _score_protocol_summary(
             "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate
             * 0.34
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_effective_capital_transfer_count": min(
+                portfolio_daily_effective_capital_transfer_count,
+                10.0,
+            )
+            * 0.020
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_exec_cap_guard_count": min(portfolio_daily_source_exec_cap_guard_count, 10.0)
+            * 0.010
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_source_count": min(portfolio_daily_source_target_count, 14.0)
             * 0.018
             * portfolio_daily_ranking_weight,
@@ -2153,6 +2268,11 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_realization_gap_penalty": -portfolio_daily_source_realization_gap
             * 2.20
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_not_sold_penalty": -portfolio_daily_source_not_sold_excess
+            * 1.20
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_effective_transfer_sparse_penalty": -portfolio_daily_effective_transfer_sparse_penalty
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * portfolio_daily_ranking_weight,
@@ -2212,6 +2332,12 @@ def _score_protocol_summary(
             "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate
             * 0.44
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_effective_capital_transfer_count": min(
+                portfolio_daily_effective_capital_transfer_count,
+                10.0,
+            )
+            * 0.024
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_cash_reserve_rate": (1.0 - _bounded(portfolio_daily_cash_reserve_rate, 0.00, 0.42))
             * 0.18
             * portfolio_daily_ranking_weight
@@ -2261,6 +2387,12 @@ def _score_protocol_summary(
             "portfolio_daily_source_realization_gap_penalty": -portfolio_daily_source_realization_gap
             * 2.55
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_not_sold_penalty": -portfolio_daily_source_not_sold_excess
+            * 1.45
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_effective_transfer_sparse_penalty": -portfolio_daily_effective_transfer_sparse_penalty
+            * 1.12
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * 1.18
             * portfolio_daily_ranking_weight,
@@ -2278,6 +2410,16 @@ def _score_protocol_summary(
             v2_negative_monthly_mean = max(0.0, -monthly_return_mean)
             v2_drawdown_excess = max(0.0, abs(min(max_drawdown, 0.0)) - 0.18)
             v2_monthly_consistency_gap = max(0.0, 0.45 - monthly_consistency_score)
+            v2_source_realization_gap = (
+                max(0.0, 0.35 - portfolio_daily_source_realized_sell_rate)
+                if portfolio_daily_source_target_count >= 5.0
+                else 0.0
+            )
+            v2_source_not_sold_gap = (
+                max(0.0, portfolio_daily_source_target_not_sold_share - 0.65)
+                if portfolio_daily_source_target_count >= 5.0
+                else 0.0
+            )
             v2_order_translation_gap = max(0.0, direct_translation_penalty - 0.24)
             v2_add_to_hold_gap = max(0.0, add_to_hold_conflict_share - 0.35)
             v2_cash_dead_branch = 1.0 if v2_observed and portfolio_daily_cash_reserve_rate <= 0.0 else 0.0
@@ -2285,7 +2427,10 @@ def _score_protocol_summary(
                 annual_return > 0.0
                 and sharpe > 0.0
                 and monthly_return_mean > 0.0
+                and max_drawdown >= -0.18
                 and monthly_consistency_score >= 0.45
+                and (portfolio_daily_source_target_count < 5.0 or portfolio_daily_source_realized_sell_rate >= 0.35)
+                and (portfolio_daily_source_target_count < 5.0 or portfolio_daily_source_target_not_sold_share <= 0.65)
                 and direct_translation_penalty <= 0.24
                 and add_to_hold_conflict_share <= 0.35
                 and (not v2_observed or portfolio_daily_cash_reserve_rate > 0.0)
@@ -2297,6 +2442,8 @@ def _score_protocol_summary(
                         "portfolio_daily_v2_negative_sharpe_gate": -v2_negative_sharpe * 8.0,
                         "portfolio_daily_v2_negative_monthly_mean_gate": -v2_negative_monthly_mean * 60.0,
                         "portfolio_daily_v2_drawdown_excess_gate": -v2_drawdown_excess * 18.0,
+                        "portfolio_daily_v2_source_realization_gate": -v2_source_realization_gap * 8.0,
+                        "portfolio_daily_v2_source_not_sold_gate": -v2_source_not_sold_gap * 6.0,
                         "portfolio_daily_v2_clean_spread_rebate_removed": -max(
                             0.0,
                             _bounded(portfolio_daily_receiver_minus_source_forward_excess_5d, -0.015, 0.050)
@@ -2307,6 +2454,8 @@ def _score_protocol_summary(
                 stability_breakdown.update(
                     {
                         "portfolio_daily_v2_monthly_consistency_gate": -v2_monthly_consistency_gap * 3.2,
+                        "portfolio_daily_v2_source_realization_gate": -v2_source_realization_gap * 3.2,
+                        "portfolio_daily_v2_source_not_sold_gate": -v2_source_not_sold_gap * 2.4,
                         "portfolio_daily_v2_order_translation_gate": -v2_order_translation_gap * 8.0,
                         "portfolio_daily_v2_add_to_hold_gate": -v2_add_to_hold_gap * 4.2,
                         "portfolio_daily_v2_cash_dead_branch_gate": -v2_cash_dead_branch * 1.6,
@@ -2579,6 +2728,9 @@ def _score_protocol_summary(
             "portfolio_daily_receiver_target_count": portfolio_daily_receiver_target_count,
             "portfolio_daily_source_target_count": portfolio_daily_source_target_count,
             "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate,
+            "portfolio_daily_source_target_not_sold_share": portfolio_daily_source_target_not_sold_share,
+            "portfolio_daily_source_exec_cap_guard_count": portfolio_daily_source_exec_cap_guard_count,
+            "portfolio_daily_effective_capital_transfer_count": portfolio_daily_effective_capital_transfer_count,
             "portfolio_daily_cash_score_mean": portfolio_daily_cash_score_mean,
             "portfolio_daily_cash_reserve_rate": portfolio_daily_cash_reserve_rate,
             "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
@@ -2891,12 +3043,15 @@ def _portfolio_daily_v2_gate_pass(metrics: dict[str, Any]) -> bool:
         float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0) >= 3.0
         or float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0) >= 3.0
     )
+    source_observed = float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0) >= 5.0
     return (
         float(metrics.get("annual_return", 0.0) or 0.0) > 0.0
         and float(metrics.get("sharpe", 0.0) or 0.0) > 0.0
         and float(metrics.get("monthly_return_mean", 0.0) or 0.0) > 0.0
         and float(metrics.get("max_drawdown", 0.0) or 0.0) >= -0.18
         and float(metrics.get("monthly_consistency_score", 0.0) or 0.0) >= 0.45
+        and ((not source_observed) or float(metrics.get("portfolio_daily_source_realized_sell_rate", 0.0) or 0.0) >= 0.35)
+        and ((not source_observed) or float(metrics.get("portfolio_daily_source_target_not_sold_share", 0.0) or 0.0) <= 0.65)
         and float(metrics.get("order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("add_to_hold_conflict_share", 0.0) or 0.0) <= 0.35
@@ -2905,6 +3060,68 @@ def _portfolio_daily_v2_gate_pass(metrics: dict[str, Any]) -> bool:
             or float(metrics.get("portfolio_daily_cash_reserve_rate", 0.0) or 0.0) > 0.0
         )
     )
+
+
+def _metric(metrics: dict[str, Any], name: str, default: float = 0.0) -> float:
+    try:
+        return float(metrics.get(name, default) or default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _portfolio_daily_v2_confirm_stability(
+    confirm_metrics: dict[str, Any],
+    source_metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source_metrics = dict(source_metrics or {})
+    confirm_gate_pass = _portfolio_daily_v2_gate_pass(confirm_metrics)
+    source_gate_pass = _portfolio_daily_v2_gate_pass(source_metrics) if source_metrics else False
+    annual_return = _metric(confirm_metrics, "annual_return")
+    sharpe = _metric(confirm_metrics, "sharpe")
+    monthly_return_mean = _metric(confirm_metrics, "monthly_return_mean")
+    max_drawdown = _metric(confirm_metrics, "max_drawdown")
+    annual_delta = annual_return - _metric(source_metrics, "annual_return")
+    sharpe_delta = sharpe - _metric(source_metrics, "sharpe")
+    monthly_delta = monthly_return_mean - _metric(source_metrics, "monthly_return_mean")
+    drawdown_delta = max_drawdown - _metric(source_metrics, "max_drawdown")
+    order_delta = _metric(confirm_metrics, "order_translation_conflict_rate") - _metric(
+        source_metrics,
+        "order_translation_conflict_rate",
+    )
+    add_to_hold_delta = _metric(confirm_metrics, "add_to_hold_conflict_share") - _metric(
+        source_metrics,
+        "add_to_hold_conflict_share",
+    )
+    stable_checks = {
+        "confirm_gate_pass": confirm_gate_pass,
+        "confirm_annual_return_floor": annual_return >= 0.12,
+        "confirm_sharpe_floor": sharpe >= 0.50,
+        "confirm_monthly_return_floor": monthly_return_mean >= 0.006,
+        "confirm_drawdown_floor": max_drawdown >= -0.18,
+        "annual_return_decay_limit": (not source_metrics) or annual_delta >= -0.35,
+        "sharpe_decay_limit": (not source_metrics) or sharpe_delta >= -1.20,
+        "monthly_return_decay_limit": (not source_metrics) or monthly_delta >= -0.025,
+        "drawdown_decay_limit": (not source_metrics) or drawdown_delta >= -0.07,
+        "order_translation_decay_limit": (not source_metrics) or order_delta <= 0.18,
+        "add_to_hold_decay_limit": (not source_metrics) or add_to_hold_delta <= 0.22,
+    }
+    failed = [name for name, passed in stable_checks.items() if not passed]
+    return {
+        "stable_confirmatory": not failed,
+        "failed_stability_checks": failed,
+        "source_gate_pass": source_gate_pass,
+        "confirm_gate_pass": confirm_gate_pass,
+        "annual_return_delta": annual_delta if source_metrics else 0.0,
+        "sharpe_delta": sharpe_delta if source_metrics else 0.0,
+        "monthly_return_mean_delta": monthly_delta if source_metrics else 0.0,
+        "max_drawdown_delta": drawdown_delta if source_metrics else 0.0,
+        "order_translation_conflict_delta": order_delta if source_metrics else 0.0,
+        "add_to_hold_conflict_delta": add_to_hold_delta if source_metrics else 0.0,
+        "confirm_annual_return": annual_return,
+        "confirm_sharpe": sharpe,
+        "confirm_monthly_return_mean": monthly_return_mean,
+        "confirm_max_drawdown": max_drawdown,
+    }
 
 
 @dataclass
@@ -3287,16 +3504,46 @@ def main(argv: list[str] | None = None) -> int:
         if screen_depth_trials
         else {}
     )
+    screening_by_tag = {item.trial_tag: item for item in completed_screening}
+    confirmatory_stability_checks: list[dict[str, Any]] = []
+    stable_confirmatory_tags: set[str] = set()
+    for item in completed_confirmatory:
+        source_item = screening_by_tag.get(str(item.source_trial_tag or ""))
+        stability = _portfolio_daily_v2_confirm_stability(
+            item.primary_metrics,
+            source_item.primary_metrics if source_item is not None else {},
+        )
+        stability.update(
+            {
+                "trial_tag": item.trial_tag,
+                "source_trial_tag": str(item.source_trial_tag or ""),
+                "role": item.role,
+                "source_found": source_item is not None,
+            }
+        )
+        confirmatory_stability_checks.append(stability)
+        if bool(stability.get("stable_confirmatory")):
+            stable_confirmatory_tags.add(item.trial_tag)
     qualified_confirmatory = list(completed_confirmatory)
     rejected_confirmatory = []
     if objective_profile == "portfolio_daily_ranking_v2_gated":
         qualified_confirmatory = [
-            item for item in completed_confirmatory if _portfolio_daily_v2_gate_pass(item.primary_metrics)
+            item for item in completed_confirmatory if item.trial_tag in stable_confirmatory_tags
         ]
         rejected_confirmatory = [
-            item.to_summary()
+            {
+                **item.to_summary(),
+                "portfolio_daily_v2_confirm_stability": next(
+                    (
+                        stability
+                        for stability in confirmatory_stability_checks
+                        if stability.get("trial_tag") == item.trial_tag
+                    ),
+                    {},
+                ),
+            }
             for item in completed_confirmatory
-            if not _portfolio_daily_v2_gate_pass(item.primary_metrics)
+            if item.trial_tag not in stable_confirmatory_tags
         ]
     champion = (
         qualified_confirmatory[0].to_summary()
@@ -3335,9 +3582,17 @@ def main(argv: list[str] | None = None) -> int:
         "screen_depth_challenger": screen_depth_challenger,
         "champion": champion,
         "champion_selection_policy": (
-            "portfolio_daily_v2_confirmatory_gate_then_screening_fallback"
+            "portfolio_daily_v2_stable_confirmatory_then_screening_fallback"
             if objective_profile == "portfolio_daily_ranking_v2_gated"
             else "confirmatory_preferred"
+        ),
+        "portfolio_daily_v2_confirm_stability_checks": (
+            confirmatory_stability_checks if objective_profile == "portfolio_daily_ranking_v2_gated" else []
+        ),
+        "portfolio_daily_v2_stable_confirmatory_trials": (
+            [item.to_summary() for item in completed_confirmatory if item.trial_tag in stable_confirmatory_tags]
+            if objective_profile == "portfolio_daily_ranking_v2_gated"
+            else []
         ),
         "rejected_confirmatory_trials": rejected_confirmatory,
         "historical_leaderboard": historical,

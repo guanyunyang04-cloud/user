@@ -726,3 +726,37 @@
 - 新知识 5：当前最有效路径已经不是继续增加 action loss，而是让目标函数、现金竞争、有效组合意图和 champion 选择共同服从真实组合表现。
   - v2/v13 retry2 证明该路径能同时压低执行冲突并恢复非零现金保留。
   - fresh confirm 失败说明稳定性还没闭合；下一步应扩大同口径 bounded evidence，而不是把 smoke 过 gate 解释成 promotion。
+
+## 2026-04-26 r20 stability sweep 教训
+- 新知识 1：cash branch 已经不再是当前第一瓶颈。
+  - v13 stability sweep 中没有路线触发 `cash_branch_alive`，现金 reserve 天数合计达到 `139`。
+  - 因此后续不应继续只围绕 cash threshold 调参，重点应转向 source 执行和 confirm 稳定性。
+- 新知识 2：source ranking 不能只看 receiver-source forward spread，还必须看 source 是否真实释放资金。
+  - `confirm_02` 有很强 `receiver_minus_source_5d = 0.149814`，但 `source_realized_sell_rate = 0.088889`。
+  - 这说明“source 选得好”如果没有转成 reduce/exit，就只是账面排序，不是组合资金再分配。
+  - 因此 `source_realized_sell_floor` 已成为 v2 gate 的硬条件。
+- 新知识 3：经济冠军也可能不是合格冠军。
+  - `confirm_01` 年化和 Sharpe 更高，但 `max_drawdown = -0.182756`，越过 v2 的 `-0.18` 回撤底线。
+  - 对 r20 来说，收益更高但越过回撤边界的路线只能作为候选研究证据，不能成为合格 champion。
+- 新知识 4：confirm stability 必须比较 source screening，而不是只看 confirm 自身。
+  - 这轮 `confirm_02` 从 screening 负收益变成正收益，但同时暴露 source realization 不足。
+  - 这说明 confirm-vs-screening delta 是必要诊断，但不能替代最终 v2 gates。
+- 新知识 5：当前最有效的下一层约束不是继续扩大长训练，而是把 source realized sell、回撤边界和 add-to-hold 约束更深地接入训练/候选选择。
+  - 若不先解决 source 真实释放，更多 receiver/source spread 奖励会继续产生“会选 source、不会释放 source”的假突破。
+
+## 2026-04-26 r21 source-exec guard 知识记录
+- 新知识 1：source target 进入 sell 授权还不等于会真实减仓。
+  - v13 已把 `portfolio_daily_source_target` 合入 reallocation source，但后续 add/hold translation floor、protected floor、竞争保留和换手裁剪仍可能把它锁回持有。
+  - 因此必须把 source execution coupling 放进模拟器目标权重生成和 translation guard，而不是只在评分阶段惩罚。
+- 新知识 2：有效组合再分配要看 capital transfer，而不是单边 source 或 receiver 指标。
+  - `portfolio_daily_effective_capital_transfer_count = min(source realized sell, receiver realized deploy)` 用来逼近“当天真的发生了资金转移”的下界。
+  - receiver-source spread 只有在 source 释放和 receiver 成交同时存在时，才接近真实资本调度证据。
+- 新知识 3：source 未卖原因必须可审计。
+  - 新字段 `portfolio_daily_source_target_not_sold_reason` 区分 `target_weight_not_below_current`、`translation_floor_guard`、`turnover_budget_trim`、`protected_floor_locked` 等原因。
+  - 后续若 `source_not_sold_ceiling` 持续失败，应先看原因分布，再决定是继续降保留底线、调换手优先级，还是收紧 source 候选。
+- 新知识 4：r21 不是 promotion 路线，而是把 r20 的第一瓶颈从事后 gate 推进到执行生成层。
+  - 只有 source realized sell、source not sold、effective transfer、回撤和 fresh confirm 同时稳定，才能说明组合级资金责任链真正闭合。
+- 新知识 5：v14 必须继承 v13 的 cash-aware 竞争分支。
+  - 第一次 r21 smoke 证明只修 source execution 会意外让 cash branch 再次死亡；原因是现金竞争条件只匹配 `cash_aware_guard_v13`，没有覆盖 `source_exec_guard_v14`。
+  - 修复后 retry2 同时恢复 `cash_reserve_rate = 0.097872`，并保持 `source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`。
+  - 新残余瓶颈变为 `order_translation_conflict_rate = 0.289362` 和 `add_to_hold_conflict_share = 0.454545`，说明下一轮应压执行冲突，而不是继续主攻 source realized sell。

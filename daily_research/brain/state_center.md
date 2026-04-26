@@ -103,5 +103,23 @@
 - 事实：r19 离线重排显示，v1 champion `confirm_02` 因 `annual_return = -0.221432`、`sharpe = -0.565395` 被 v2 降为负分；v2 champion 变为 `confirm_01`，但它仍有 `order_translation_conflict_rate = 0.305556`、`add_to_hold_conflict_share = 0.410628`、`cash_reserve_rate = 0.0`，不能进入 promotion。
 - 事实：r20 retry2 smoke 通过全部 v2 gate，关键指标为 `annual_return = 0.316303`、`sharpe = 1.152146`、`max_drawdown = -0.129243`、`monthly_return_mean = 0.020376`、`monthly_consistency_score = 0.727527`、`portfolio_daily_receiver_minus_source_forward_excess_5d = 0.004380`、`portfolio_daily_source_realized_sell_rate = 0.8`、`portfolio_daily_cash_reserve_rate = 0.009479`、`order_translation_conflict_rate = 0.033175`、`add_to_hold_conflict_share = 0.072464`。
 - 事实：bounded confirmatory 暴露 fresh 8 epoch confirm 失稳，`annual_return = -0.253312`、`sharpe = -0.587612`、`max_drawdown = -0.220648`、`monthly_return_mean = -0.015989`、`add_to_hold_conflict_share = 0.578947`；该 confirm 只能作为失败证据，不能被 champion selector 自动扶正。
-- 已修正：v2 champion selection 改为“confirmatory 先过 v2 gate 才可优先；否则回退到最佳 completed screening”，并记录 `champion_selection_policy` 与 `rejected_confirmatory_trials`。
+- 已修正：v2 champion selection 改为“stable confirmatory 先过 v2 gate 和 confirm-vs-screening 稳定性检查才可优先；否则回退”，并记录 `champion_selection_policy`、`portfolio_daily_v2_confirm_stability_checks` 与 `rejected_confirmatory_trials`。
 - 决策：r20/v2/v13 是当前最有效突破口，已修复 v1 奖励错位、现金死分支和候选动作误判；但 fresh confirm 稳定性未过，仍保持 `research / shadow_only`，不进入 live 或 promotion 讨论。
+
+## 2026-04-26 r20 stability sweep 状态
+- 事实：新增 `split_heads_portfolio_daily_ranking_stability_r20`，用于 v2/v13 稳定性搜索；baseline 使用较低学习率 `0.001`、较高 `dropout = 0.16`、`daily_dropout = 0.10`，候选覆盖 v14/v15、v9/v10、低学习率和高 dropout 组合。
+- 事实：`cp_v3_portfolio_daily_ranking_r20_stability_sweep_20260426` 已完成 `6` 个 screening trial 和 `2` 个 confirmatory trial，`failed_trial_count = 0`，latest state 已恢复到 `cp_v3_direct_action_pair_reallocation_r17__study_r1__confirm_02`。
+- 事实：8 个训练目录均为 `trainer_backend = formal_torch_seq_v3`、`device = cuda`、`cuda_available = true`、strict resume；本轮命令由 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台启动并自然结束。历史 diagnostics 尚未写入解释器路径，代码已修复未来训练会写入 `python_executable`、`conda_prefix` 与 `runtime_env`。
+- 事实：现金分支已经转活，本轮 gate report 中没有路线触发 `cash_branch_alive`；`cash_score >= 阈值` 天数合计 `139`，`cash reserve` 天数合计 `139`。
+- 事实：加入 `source_realized_sell_floor` 后，本轮没有合格 v2 champion。按分数 top-ranked 的 `confirm_01` 为 `annual_return = 0.570476`、`sharpe = 1.448580`、`max_drawdown = -0.182756`，但触发 `max_drawdown_floor`；v1 top `confirm_02` 为 `annual_return = 0.465136`、`sharpe = 1.419674`、`max_drawdown = -0.171690`，但 `source_realized_sell_rate = 0.088889`，触发 `source_realized_sell_floor`。
+- 决策：r20 的瓶颈已从“现金死分支”推进到“source 被选中但没有真实释放资金”和“fresh confirm 回撤边界”；当前仍为 `research / shadow_only`，不得 promotion 或 live。
+
+## 2026-04-26 r21 source-exec guard 当前状态
+- 事实：新增预算校准 `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 与 search profile `split_heads_portfolio_daily_ranking_source_exec_r21`，目标是把 source target 从“被选中”推进到“真实 reduce/exit 释放资金”。
+- 事实：v14 在模拟器执行链路中降低 source target 的保留底线、提高 source 的 sell reduction priority、压低其 deploy priority，并在 translation guard 中绕过原先 add/hold 保护导致 source 被锁回持有的路径。
+- 事实：审计新增 `portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight`、`portfolio_daily_receiver_realized_deploy_count` 与 `portfolio_daily_effective_capital_transfer_count`；gate report 新增 `source_not_sold_ceiling`。
+- 事实：第一次 r21 smoke 暴露 v14 未继承 v13 cash-aware 分支，已修复为 v14 同样使用 cash-aware competition score、`0.24` cash threshold 和 `0.72` receiver pressure ceiling。
+- 事实：`cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2` 已前台自然完成，GPU 诊断为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、strict resume。
+- 事实：retry2 关键指标为 `annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`、`monthly_consistency_score = 0.564085`、`portfolio_daily_receiver_target_count = 53`、`portfolio_daily_source_target_count = 55`、`portfolio_daily_source_realized_sell_rate = 1.0`、`portfolio_daily_source_target_not_sold_share = 0.0`、`portfolio_daily_effective_capital_transfer_count = 17`、`portfolio_daily_cash_reserve_rate = 0.097872`。
+- 事实：retry2 仍无合格 v2 champion，失败 gate 为 `order_translation_conflict_ceiling` 与 `add_to_hold_conflict_ceiling`；对应 `order_translation_conflict_rate = 0.289362`、`add_to_hold_conflict_share = 0.454545`。
+- 决策：r21 已把第一瓶颈从 source execution 推进到 order translation / add-to-hold 冲突；当前仍是 `research / shadow_only`，不得 promotion 或 live。

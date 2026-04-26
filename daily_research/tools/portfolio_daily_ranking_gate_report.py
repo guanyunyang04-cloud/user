@@ -94,6 +94,7 @@ def _gate_checks(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         _safe_float(metrics.get("portfolio_daily_receiver_target_count")) >= 3.0
         or _safe_float(metrics.get("portfolio_daily_source_target_count")) >= 3.0
     )
+    source_observed = _safe_float(metrics.get("portfolio_daily_source_target_count")) >= 5.0
     checks = [
         ("annual_return_positive", "年化收益必须为正", _safe_float(metrics.get("annual_return")) > 0.0),
         ("sharpe_positive", "Sharpe 必须为正", _safe_float(metrics.get("sharpe")) > 0.0),
@@ -103,6 +104,16 @@ def _gate_checks(metrics: dict[str, Any]) -> list[dict[str, Any]]:
             "monthly_consistency_floor",
             "月度一致性不应低于 0.45",
             _safe_float(metrics.get("monthly_consistency_score")) >= 0.45,
+        ),
+        (
+            "source_realized_sell_floor",
+            "资金来源被观测到时 source realized sell rate 不应低于 0.35",
+            (not source_observed) or _safe_float(metrics.get("portfolio_daily_source_realized_sell_rate")) >= 0.35,
+        ),
+        (
+            "source_not_sold_ceiling",
+            "资金来源被观测到时 source target 未真实卖出的占比不应高于 0.65",
+            (not source_observed) or _safe_float(metrics.get("portfolio_daily_source_target_not_sold_share")) <= 0.65,
         ),
         (
             "order_translation_conflict_ceiling",
@@ -140,6 +151,14 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
         source_realized_mask = source_mask & outcomes.get("weight_change_action", pd.Series("", index=outcomes.index)).isin(
             ["reduce", "exit"]
         )
+        source_not_sold_mask = source_mask & (~source_realized_mask)
+        receiver_realized_mask = receiver_mask & outcomes.get("weight_change_action", pd.Series("", index=outcomes.index)).isin(
+            ["open", "add"]
+        )
+        source_reason_series = outcomes.get(
+            "portfolio_daily_source_target_not_sold_reason",
+            pd.Series("historical_missing_reason", index=outcomes.index),
+        )
         result["action_outcomes"] = {
             "row_count": int(len(outcomes)),
             "receiver_target_count": int(receiver_mask.sum()),
@@ -148,6 +167,27 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
             "source_realized_sell_rate": _safe_float(source_realized_mask.sum() / source_mask.sum())
             if bool(source_mask.any())
             else 0.0,
+            "source_target_not_sold_count": int(source_not_sold_mask.sum()),
+            "source_target_not_sold_share": _safe_float(source_not_sold_mask.sum() / source_mask.sum())
+            if bool(source_mask.any())
+            else 0.0,
+            "source_exec_guard_count": int(_series_bool(outcomes, "portfolio_daily_source_exec_guard").sum()),
+            "source_exec_cap_guard_count": int(_series_bool(outcomes, "portfolio_daily_source_exec_cap_guarded").sum()),
+            "source_realized_reduction_weight": _safe_float(
+                _numeric(outcomes, "portfolio_daily_source_realized_reduction_weight").loc[source_mask].sum()
+            ),
+            "receiver_realized_deploy_count": int(receiver_realized_mask.sum()),
+            "effective_capital_transfer_count": int(
+                min(int(source_realized_mask.sum()), int(receiver_realized_mask.sum()))
+            ),
+            "source_not_sold_reason_counts": {
+                str(key): int(value)
+                for key, value in source_reason_series.loc[source_not_sold_mask]
+                .astype(str)
+                .value_counts()
+                .sort_index()
+                .items()
+            },
             "receiver_forward_excess_5d": _masked_mean(outcomes, "forward_excess_5d", receiver_mask),
             "source_forward_excess_5d": _masked_mean(outcomes, "forward_excess_5d", source_mask),
             "receiver_minus_source_forward_excess_5d": _masked_mean(outcomes, "forward_excess_5d", receiver_mask)
@@ -194,7 +234,11 @@ def _csv_diagnostics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
     if turnover_path is not None:
         turnover = pd.read_csv(turnover_path)
         calibration = str(evaluation_summary.get("budget_calibration", "") or "")
-        cash_threshold = 0.24 if "cash_aware_guard_v13" in calibration else 0.58
+        cash_threshold = (
+            0.24
+            if "cash_aware_guard_v13" in calibration or "source_exec_guard_v14" in calibration
+            else 0.58
+        )
         cash_score = _numeric(turnover, "portfolio_daily_cash_score")
         reserve = _series_bool(turnover, "portfolio_daily_cash_reserve_signal")
         score_above_threshold = cash_score >= cash_threshold
@@ -265,13 +309,23 @@ def _trial_record(item: dict[str, Any]) -> dict[str, Any]:
     v1 = _score_protocol_summary(protocol, objective_profile="portfolio_daily_ranking_v1")
     v2 = _score_protocol_summary(protocol, objective_profile="portfolio_daily_ranking_v2_gated")
     metrics = dict(v2.get("primary_metrics", {}) or {})
-    gate_checks = _gate_checks(metrics)
     evaluation_path = _safe_path(dict(protocol.get("evaluation", {}) or {}).get("evaluation_summary_json"))
     csv_diagnostics = _csv_diagnostics(_read_json(evaluation_path)) if evaluation_path else {}
+    action_diag = dict(csv_diagnostics.get("action_outcomes", {}) or {})
+    if action_diag:
+        metrics["portfolio_daily_source_target_not_sold_share"] = action_diag.get("source_target_not_sold_share")
+        metrics["portfolio_daily_source_target_not_sold_count"] = action_diag.get("source_target_not_sold_count")
+        metrics["portfolio_daily_effective_capital_transfer_count"] = action_diag.get("effective_capital_transfer_count")
+        metrics["portfolio_daily_receiver_realized_deploy_count"] = action_diag.get("receiver_realized_deploy_count")
+        metrics["portfolio_daily_source_exec_cap_guard_count"] = action_diag.get("source_exec_cap_guard_count")
+        metrics["portfolio_daily_source_realized_reduction_weight"] = action_diag.get("source_realized_reduction_weight")
+        v2["primary_metrics"] = metrics
+    gate_checks = _gate_checks(metrics)
     return {
         "trial_tag": str(item.get("trial_tag", "")),
         "phase": str(item.get("phase", "")),
         "role": str(item.get("role", "")),
+        "source_trial_tag": str(item.get("source_trial_tag", "")),
         "protocol_summary_json": str(protocol_path.resolve()),
         "v1": v1,
         "v2": v2,
@@ -286,20 +340,85 @@ def _trial_record(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _confirm_stability(record: dict[str, Any], source: dict[str, Any] | None = None) -> dict[str, Any]:
+    metrics = dict(record["v2"].get("primary_metrics", {}) or {})
+    source_metrics = dict(source["v2"].get("primary_metrics", {}) or {}) if source else {}
+    gate_pass = not record.get("gate_failed")
+    source_gate_pass = (not source.get("gate_failed")) if source else False
+    annual = _safe_float(metrics.get("annual_return"))
+    sharpe = _safe_float(metrics.get("sharpe"))
+    monthly = _safe_float(metrics.get("monthly_return_mean"))
+    drawdown = _safe_float(metrics.get("max_drawdown"))
+    annual_delta = annual - _safe_float(source_metrics.get("annual_return"))
+    sharpe_delta = sharpe - _safe_float(source_metrics.get("sharpe"))
+    monthly_delta = monthly - _safe_float(source_metrics.get("monthly_return_mean"))
+    drawdown_delta = drawdown - _safe_float(source_metrics.get("max_drawdown"))
+    order_delta = _safe_float(metrics.get("order_translation_conflict_rate")) - _safe_float(
+        source_metrics.get("order_translation_conflict_rate")
+    )
+    add_delta = _safe_float(metrics.get("add_to_hold_conflict_share")) - _safe_float(
+        source_metrics.get("add_to_hold_conflict_share")
+    )
+    checks = {
+        "confirm_gate_pass": gate_pass,
+        "confirm_annual_return_floor": annual >= 0.12,
+        "confirm_sharpe_floor": sharpe >= 0.50,
+        "confirm_monthly_return_floor": monthly >= 0.006,
+        "confirm_drawdown_floor": drawdown >= -0.18,
+        "annual_return_decay_limit": (not source) or annual_delta >= -0.35,
+        "sharpe_decay_limit": (not source) or sharpe_delta >= -1.20,
+        "monthly_return_decay_limit": (not source) or monthly_delta >= -0.025,
+        "drawdown_decay_limit": (not source) or drawdown_delta >= -0.07,
+        "order_translation_decay_limit": (not source) or order_delta <= 0.18,
+        "add_to_hold_decay_limit": (not source) or add_delta <= 0.22,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    return {
+        "trial_tag": record["trial_tag"],
+        "source_trial_tag": record.get("source_trial_tag", ""),
+        "source_found": source is not None,
+        "stable_confirmatory": not failed,
+        "failed_stability_checks": failed,
+        "source_gate_pass": source_gate_pass,
+        "confirm_gate_pass": gate_pass,
+        "annual_return_delta": annual_delta if source else 0.0,
+        "sharpe_delta": sharpe_delta if source else 0.0,
+        "monthly_return_mean_delta": monthly_delta if source else 0.0,
+        "max_drawdown_delta": drawdown_delta if source else 0.0,
+        "order_translation_conflict_delta": order_delta if source else 0.0,
+        "add_to_hold_conflict_delta": add_delta if source else 0.0,
+    }
+
+
 def _write_csv(records: list[dict[str, Any]], path: Path) -> None:
+    by_tag = {record["trial_tag"]: record for record in records}
     rows = []
     for record in records:
         metrics = dict(record["v2"].get("primary_metrics", {}) or {})
+        stability = (
+            _confirm_stability(record, by_tag.get(str(record.get("source_trial_tag", ""))))
+            if record.get("phase") == "confirmatory"
+            else {}
+        )
         rows.append(
             {
                 "trial_tag": record["trial_tag"],
                 "phase": record["phase"],
                 "role": record["role"],
+                "source_trial_tag": record.get("source_trial_tag", ""),
                 "v1_composite_score": record["v1"]["composite_score"],
                 "v2_composite_score": record["v2"]["composite_score"],
                 "v2_performance_score": record["v2"]["performance_score"],
                 "v2_stability_score": record["v2"]["stability_score"],
                 "v2_gate_failed": ",".join(record["gate_failed"]),
+                "confirm_stable": stability.get("stable_confirmatory", ""),
+                "confirm_stability_failed": ",".join(stability.get("failed_stability_checks", [])),
+                "annual_return_delta_vs_source": stability.get("annual_return_delta", ""),
+                "sharpe_delta_vs_source": stability.get("sharpe_delta", ""),
+                "monthly_return_mean_delta_vs_source": stability.get("monthly_return_mean_delta", ""),
+                "max_drawdown_delta_vs_source": stability.get("max_drawdown_delta", ""),
+                "order_translation_conflict_delta_vs_source": stability.get("order_translation_conflict_delta", ""),
+                "add_to_hold_conflict_delta_vs_source": stability.get("add_to_hold_conflict_delta", ""),
                 "annual_return": metrics.get("annual_return"),
                 "sharpe": metrics.get("sharpe"),
                 "max_drawdown": metrics.get("max_drawdown"),
@@ -307,6 +426,9 @@ def _write_csv(records: list[dict[str, Any]], path: Path) -> None:
                 "monthly_consistency_score": metrics.get("monthly_consistency_score"),
                 "receiver_minus_source_5d": metrics.get("portfolio_daily_receiver_minus_source_forward_excess_5d"),
                 "source_realized_sell_rate": metrics.get("portfolio_daily_source_realized_sell_rate"),
+                "source_target_not_sold_share": metrics.get("portfolio_daily_source_target_not_sold_share"),
+                "source_exec_cap_guard_count": metrics.get("portfolio_daily_source_exec_cap_guard_count"),
+                "effective_capital_transfer_count": metrics.get("portfolio_daily_effective_capital_transfer_count"),
                 "cash_reserve_rate": metrics.get("portfolio_daily_cash_reserve_rate"),
                 "cash_score_mean": metrics.get("portfolio_daily_cash_score_mean"),
                 "order_translation_conflict_rate": metrics.get("order_translation_conflict_rate"),
@@ -328,9 +450,43 @@ def _fmt(value: Any, digits: int = 6) -> str:
 def _markdown(report: dict[str, Any]) -> str:
     ranking = report["v2_ranking"]
     v1_champion = report["v1_champion"]
-    v2_champion = report["v2_champion"]
+    v2_top_ranked = report["v2_champion"]
+    qualified_v2_champion = report.get("qualified_v2_champion")
     economic_champion = report["economic_champion"]
     cash = report["cash_branch_summary"]
+    stability_pairs = report.get("confirm_stability_checks", [])
+    cash_failed_count = sum(1 for record in ranking if "cash_branch_alive" in record.get("gate_failed", []))
+    source_failed_count = sum(
+        1
+        for record in ranking
+        if "source_realized_sell_floor" in record.get("gate_failed", [])
+        or "source_not_sold_ceiling" in record.get("gate_failed", [])
+    )
+    order_failed_count = sum(1 for record in ranking if "order_translation_conflict_ceiling" in record.get("gate_failed", []))
+    add_failed_count = sum(1 for record in ranking if "add_to_hold_conflict_ceiling" in record.get("gate_failed", []))
+    stable_confirm_count = sum(1 for item in stability_pairs if item.get("stable_confirmatory"))
+    core_conclusions = [
+        "- v2 目标已把“亏损但 ranking 干净”的路线压低，receiver-source spread 不再能单独抵消负收益。",
+    ]
+    if cash_failed_count == len(ranking):
+        core_conclusions.append("- 当前全部路线仍触发 cash_branch_alive 失败，现金保留分支尚未成为有效竞争项。")
+    elif cash_failed_count:
+        core_conclusions.append(f"- 当前仍有 {cash_failed_count} 条路线触发 cash_branch_alive 失败，现金保留需要按候选逐条审计。")
+    else:
+        core_conclusions.append("- 当前没有路线触发 cash_branch_alive 失败，现金保留分支已经从死分支变为可观测行为。")
+    if order_failed_count or add_failed_count:
+        core_conclusions.append(
+            f"- 执行冲突仍需关注：order translation 失败路线 {order_failed_count} 条，add-to-hold 失败路线 {add_failed_count} 条。"
+        )
+    else:
+        core_conclusions.append("- 当前 v2 gate 下没有路线触发 order translation 或 add-to-hold 上限失败。")
+    if source_failed_count:
+        core_conclusions.append(f"- source 执行耦合仍是核心瓶颈：{source_failed_count} 条路线未达到真实释放资金要求。")
+    if stability_pairs:
+        if stable_confirm_count:
+            core_conclusions.append(f"- fresh confirm 稳定性已有 {stable_confirm_count} 条通过，但仍需结合收益、回撤和月度质量人工复核。")
+        else:
+            core_conclusions.append("- fresh confirm 稳定性尚未通过：screening 过 gate 的路线仍可能在 confirmatory 中塌陷。")
 
     lines = [
         "# portfolio_daily_ranking_v2_gated 离线诊断报告",
@@ -338,19 +494,23 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- 生成时间：{report['generated_at']}",
         f"- 输入 study：`{report['study_summary_json']}`",
         f"- v1 champion：`{v1_champion['trial_tag']}`，v1 composite={_fmt(v1_champion['v1']['composite_score'])}",
-        f"- v2 champion：`{v2_champion['trial_tag']}`，v2 composite={_fmt(v2_champion['v2']['composite_score'])}",
+        f"- v2 top-ranked：`{v2_top_ranked['trial_tag']}`，v2 composite={_fmt(v2_top_ranked['v2']['composite_score'])}",
+        "- 合格 v2 champion："
+        + (
+            f"`{qualified_v2_champion['trial_tag']}`"
+            if qualified_v2_champion
+            else "无，当前没有完全通过 v2 gates 的路线"
+        ),
         f"- 经济冠军：`{economic_champion['trial_tag']}`，annual_return={_fmt(economic_champion['v2']['primary_metrics'].get('annual_return'))}",
         "",
         "## 核心结论",
         "",
-        "- v2 目标已把“亏损但 ranking 干净”的路线压低，receiver-source spread 不再能单独抵消负收益。",
-        "- r19 的全部路线都触发 cash_branch_alive 失败，说明 cash reserve 在当前组合日排名实现中是死亡分支。",
-        "- 主要结构冲突仍集中在 order_translation_conflict 与 add_to_hold_conflict，说明模型意图到真实权重变化之间仍有翻译损耗。",
+        *core_conclusions,
         "",
         "## v2 重排",
         "",
-        "| rank | trial | phase | v2 | v1 | annual | sharpe | mdd | spread5d | cash | failed gates |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| rank | trial | phase | v2 | v1 | annual | sharpe | mdd | spread5d | src_not_sold | transfer | cash | failed gates |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for idx, record in enumerate(ranking, start=1):
         metrics = record["v2"]["primary_metrics"]
@@ -367,6 +527,8 @@ def _markdown(report: dict[str, Any]) -> str:
                     _fmt(metrics.get("sharpe")),
                     _fmt(metrics.get("max_drawdown")),
                     _fmt(metrics.get("portfolio_daily_receiver_minus_source_forward_excess_5d")),
+                    _fmt(metrics.get("portfolio_daily_source_target_not_sold_share")),
+                    _fmt(metrics.get("portfolio_daily_effective_capital_transfer_count"), digits=0),
                     _fmt(metrics.get("portfolio_daily_cash_reserve_rate")),
                     ",".join(record["gate_failed"]) or "无",
                 ]
@@ -381,7 +543,10 @@ def _markdown(report: dict[str, Any]) -> str:
             "",
         ]
     )
-    for label, record in [("v1 champion", v1_champion), ("v2 champion", v2_champion), ("economic champion", economic_champion)]:
+    champion_rows = [("v1 champion", v1_champion), ("v2 top-ranked", v2_top_ranked), ("economic champion", economic_champion)]
+    if qualified_v2_champion:
+        champion_rows.insert(2, ("qualified v2 champion", qualified_v2_champion))
+    for label, record in champion_rows:
         metrics = record["v2"]["primary_metrics"]
         csv_diag = record.get("csv_diagnostics", {})
         action_diag = csv_diag.get("action_outcomes", {})
@@ -391,12 +556,44 @@ def _markdown(report: dict[str, Any]) -> str:
                 "",
                 f"- annual_return={_fmt(metrics.get('annual_return'))}, sharpe={_fmt(metrics.get('sharpe'))}, max_drawdown={_fmt(metrics.get('max_drawdown'))}",
                 f"- receiver-source 5d={_fmt(metrics.get('portfolio_daily_receiver_minus_source_forward_excess_5d'))}, source realized sell rate={_fmt(metrics.get('portfolio_daily_source_realized_sell_rate'))}",
+                f"- source not sold share={_fmt(metrics.get('portfolio_daily_source_target_not_sold_share'))}, effective capital transfer count={_fmt(metrics.get('portfolio_daily_effective_capital_transfer_count'), digits=0)}",
                 f"- order_translation_conflict={_fmt(metrics.get('order_translation_conflict_rate'))}, add_to_hold_conflict={_fmt(metrics.get('add_to_hold_conflict_share'))}",
                 f"- CSV 复算 receiver-source 5d={_fmt(action_diag.get('receiver_minus_source_forward_excess_5d'))}, source realized sell count={action_diag.get('source_realized_sell_count', 0)}",
+                f"- source 未卖原因：{action_diag.get('source_not_sold_reason_counts', {})}",
                 f"- 失败门槛：{', '.join(record['gate_failed']) or '无'}",
                 "",
             ]
+    )
+
+    if stability_pairs:
+        lines.extend(
+            [
+                "## confirm 稳定性",
+                "",
+                "| trial | source | stable | annual_delta | sharpe_delta | monthly_delta | mdd_delta | order_delta | add_delta | failed checks |",
+                "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+            ]
         )
+        for item in stability_pairs:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{item.get('trial_tag', '')}`",
+                        f"`{item.get('source_trial_tag', '')}`",
+                        "是" if item.get("stable_confirmatory") else "否",
+                        _fmt(item.get("annual_return_delta")),
+                        _fmt(item.get("sharpe_delta")),
+                        _fmt(item.get("monthly_return_mean_delta")),
+                        _fmt(item.get("max_drawdown_delta")),
+                        _fmt(item.get("order_translation_conflict_delta")),
+                        _fmt(item.get("add_to_hold_conflict_delta")),
+                        ",".join(item.get("failed_stability_checks", [])) or "无",
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
 
     lines.extend(
         [
@@ -411,12 +608,24 @@ def _markdown(report: dict[str, Any]) -> str:
             "",
             "## 下一步执行判定",
             "",
-            "- 现在不建议直接扩大长训练；应先用 v2 作为 r20 smoke 的目标函数。",
-            "- r20 smoke 必须验证三件事：负收益路线不能夺冠，cash reserve 不能继续全 0，订单翻译冲突必须下降或被强惩罚。",
-            "- 如果 smoke 仍全量触发 cash_branch_alive 失败，应优先修 cash gate/receiver pressure 竞争机制，再进入 confirmatory。",
-            "",
+            "- 未通过 stable confirm 前，不得进入 promotion 或 live 讨论。",
         ]
     )
+    if source_failed_count:
+        lines.extend(
+            [
+                "- 下一轮优先使用 v14 source-exec guard 验证 source target 是否真实 reduce/exit，而不是只扩大 v13 训练。",
+                "- 如果 source not sold 或 effective transfer 仍失败，应继续收紧 source 保留底线、换手优先级和 receiver/source matching。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- 当前 source execution gate 未失败时，下一轮应保持 v14，并优先压低 order translation 与 add-to-hold 冲突。",
+                "- 不应因 source realized sell 改善就进入 promotion；必须补 fresh confirm 和执行冲突修复证据。",
+            ]
+        )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -430,6 +639,7 @@ def build_report(study_summary_path: Path, output_dir: Path) -> dict[str, Any]:
     v1_champion_tag = str(dict(study.get("champion", {}) or {}).get("trial_tag", ""))
     v1_champion = next((record for record in records if record["trial_tag"] == v1_champion_tag), records[0])
     v2_champion = ranking[0]
+    qualified_v2_champion = next((record for record in ranking if not record.get("gate_failed")), None)
     economic_champion = max(
         records,
         key=lambda record: float(record["v2"]["primary_metrics"].get("annual_return", 0.0) or 0.0),
@@ -456,6 +666,12 @@ def build_report(study_summary_path: Path, output_dir: Path) -> dict[str, Any]:
             sum(int(row.get("likely_receiver_pressure_blocked_days", 0) or 0) for row in cash_rows)
         ),
     }
+    by_tag = {record["trial_tag"]: record for record in records}
+    confirm_stability_checks = [
+        _confirm_stability(record, by_tag.get(str(record.get("source_trial_tag", ""))))
+        for record in records
+        if record.get("phase") == "confirmatory"
+    ]
 
     report = {
         "generated_at": now_iso(),
@@ -463,9 +679,11 @@ def build_report(study_summary_path: Path, output_dir: Path) -> dict[str, Any]:
         "output_dir": str(output_dir.resolve()),
         "v1_champion": v1_champion,
         "v2_champion": v2_champion,
+        "qualified_v2_champion": qualified_v2_champion,
         "economic_champion": economic_champion,
         "v2_ranking": ranking,
         "cash_branch_summary": cash_summary,
+        "confirm_stability_checks": confirm_stability_checks,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(records, output_dir / "portfolio_daily_ranking_v2_rescore.csv")
@@ -501,7 +719,12 @@ def main(argv: list[str] | None = None) -> int:
             "generated_at": report["generated_at"],
             "output_dir": report["output_dir"],
             "v1_champion": report["v1_champion"]["trial_tag"],
-            "v2_champion": report["v2_champion"]["trial_tag"],
+            "v2_top_ranked": report["v2_champion"]["trial_tag"],
+            "qualified_v2_champion": (
+                report["qualified_v2_champion"]["trial_tag"]
+                if report.get("qualified_v2_champion")
+                else ""
+            ),
             "economic_champion": report["economic_champion"]["trial_tag"],
             "report_md": str((output_dir / "portfolio_daily_ranking_v2_gate_report.md").resolve()),
             "rescore_csv": str((output_dir / "portfolio_daily_ranking_v2_rescore.csv").resolve()),

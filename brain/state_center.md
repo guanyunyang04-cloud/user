@@ -139,5 +139,10 @@
 - 主脑层决策：r14 证明直接动作值仲裁有价值，但 release/funding 与订单翻译未闭合；不切 live、不改 active artifact、不改 promotion gate，细节继续由 `daily_research/brain/` 承载。
 
 ## 2026-04-26 daily_research r20 v2/v13 状态摘要
-- 当前事实：`daily_research` 已把 r19 组合日频排序推进到 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`；修复点包括 v1 spread 奖励错位、现金死分支、组合候选动作误判和失败 confirm 自动成为 champion 的风险。
-- 主脑层决策：主脑只记录全局摘要；r20 仍为 `research / shadow_only`，不能进入 live 或 promotion，详细指标、命令、gate 报告和失败 confirm 证据继续以 `daily_research/brain/` 为真源。
+- 当前事实：`daily_research` 已把 r19 组合日频排序推进到 `portfolio_daily_ranking_v2_gated`、`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 与 `split_heads_portfolio_daily_ranking_stability_r20`；现金分支已转活，但 source realized sell 与 fresh confirm 回撤边界仍未闭合。
+- 主脑层决策：主脑只记录全局摘要；r20 当前没有合格 v2 champion，仍为 `research / shadow_only`，不能进入 live 或 promotion，详细指标、命令、gate 报告和失败 confirm 证据继续以 `daily_research/brain/` 为真源。
+
+## 2026-04-26 daily_research r21 source-exec 状态摘要
+- 当前事实：`daily_research` 已新增 `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 与 `split_heads_portfolio_daily_ranking_source_exec_r21`，把 source target 的真实 reduce/exit 从事后 gate 推进到模拟器执行链路，并新增 source not sold 与 effective capital transfer 审计。
+- 当前事实：r21 retry2 smoke 已让 source execution 和 cash branch 同时转活，但仍因 order translation 与 add-to-hold 冲突没有合格 v2 champion。
+- 主脑层决策：主脑只记录全局摘要；r21 仍为 `research / shadow_only`，不改变 active execution artifact，细节继续以 `daily_research/brain/` 为真源。

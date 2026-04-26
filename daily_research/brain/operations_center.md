@@ -128,6 +128,29 @@
 - r20 bounded confirmatory 推荐命令：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_r19 --objective-profile portfolio_daily_ranking_v2_gated --trial-count 1 --confirmatory-max-candidates 1 --epochs 6 --min-epochs 3 --early-stop-patience 3 --confirmatory-epochs 8 --confirmatory-min-epochs 4 --study-tag cp_v3_portfolio_daily_ranking_r20_v2_gated_confirm_20260426`
 - 读取 r20 结果时，优先看 v2 gate report 中的 `v2_champion`、失败 gate 和 `portfolio_daily_effective_model_action` 后的冲突指标；不要只看旧 `study_summary.json` 的 `champion` 字段，尤其是代码修复前已经生成的历史 summary。
-- `portfolio_daily_ranking_v2_gated` 的 champion selection 已修复；后续新 summary 应读取 `champion_selection_policy = portfolio_daily_v2_confirmatory_gate_then_screening_fallback` 与 `rejected_confirmatory_trials`。
+- `portfolio_daily_ranking_v2_gated` 的 champion selection 已修复；后续新 summary 应读取 `champion_selection_policy = portfolio_daily_v2_stable_confirmatory_then_screening_fallback`、`portfolio_daily_v2_confirm_stability_checks` 与 `rejected_confirmatory_trials`。
 - 任何 r20 训练证据写成正式结论前，仍必须逐个读取 `training_diagnostics.json`，确认 `device = cuda`、`cuda_available = true`、`trainer_backend = formal_torch_seq_v3`、显式 `yolos` 解释器路径和 strict resume。
 - 进程检查继续按语义核验：PID、CommandLine、run_tag、日志/summary 时间戳必须一致；不得把当前检查脚本或短暂 Python 解析进程误判为 r19/r20 训练仍在运行。
+
+## 2026-04-26 r20 stability sweep 操作路径
+- r20 稳定性搜索 profile：`split_heads_portfolio_daily_ranking_stability_r20`。
+- 已执行 bounded sweep：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_stability_r20 --trial-count 6 --confirmatory-max-candidates 2 --epochs 8 --min-epochs 4 --early-stop-patience 4 --confirmatory-epochs 12 --confirmatory-min-epochs 6 --study-tag cp_v3_portfolio_daily_ranking_r20_stability_sweep_20260426`
+- 本轮报告：
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r20_stability_sweep_20260426/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r20_stability_sweep_20260426/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_rescore.csv`
+- 读取该报告时必须区分 `v2_top_ranked` 与 `qualified_v2_champion`；若 `qualified_v2_champion` 为空，说明没有完全通过 v2 gates 的路线。
+- 后续训练诊断应包含 `python_executable`、`conda_prefix` 与 `runtime_env`；若历史 diagnostics 缺少解释器字段，只能结合前台命令记录说明其由 `yolos` 启动，不能把缺字段写成 diagnostics 内证据。
+
+## 2026-04-26 r21 source-exec 操作路径
+- r21 source execution profile：`split_heads_portfolio_daily_ranking_source_exec_r21`。
+- r21 预算校准标记：`cash_constraint_portfolio_daily_ranking_source_exec_guard_v14`。
+- r21 默认目标仍为 `portfolio_daily_ranking_v2_gated`，但必须额外读取 `source_not_sold_ceiling`、`portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight` 与 `portfolio_daily_effective_capital_transfer_count`。
+- dry-run 验证命令：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_source_exec_r21 --trial-count 1 --study-tag verify_r21_source_exec_profile_dryrun_20260426 --dry-run`
+- 已执行 smoke：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_source_exec_r21 --trial-count 1 --disable-confirmatory --epochs 6 --min-epochs 3 --early-stop-patience 3 --study-tag cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2`
+- r21 retry2 gate report：
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_gate_report.md`
+  - `daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r21_source_exec_smoke_20260426_retry2/portfolio_daily_ranking_v2_gate_report/portfolio_daily_ranking_v2_rescore.csv`
+- smoke/正式训练仍必须前台阻塞运行，窗口时限 `10` 小时；任何 r21 结果都先写成 `research / shadow_only`，不得跳过 v2 gate report、GPU diagnostics 和 semantic process check。

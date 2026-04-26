@@ -536,6 +536,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     analysis_text = _read_text("daily_research/continuous_policy/analyze_behavior_gap.py")
     pipeline_text = _read_text("daily_research/continuous_policy/pipeline_utils.py")
     simulator_text = _read_text("daily_research/continuous_policy/portfolio_simulator.py")
+    gate_report_text = _read_text("daily_research/tools/portfolio_daily_ranking_gate_report.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
         ("--epochs", "train_policy epoch budget"),
@@ -584,6 +585,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("checkpoint_best.pt", "seq checkpoint best"),
         ("strict resume", "seq strict resume wording"),
         ("torch.cuda.is_available", "seq cuda contract check"),
+        ("python_executable", "seq diagnostics python executable"),
+        ("runtime_env", "seq diagnostics runtime env"),
         ("sequence_step_count", "seq diagnostics"),
     ):
         _require(
@@ -614,6 +617,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("split_heads_portfolio_daily_ranking_r19", "r19 portfolio daily ranking study profile"),
         ("portfolio_daily_ranking_v1", "r19 portfolio daily ranking objective"),
         ("portfolio_daily_ranking_v2_gated", "r20 gated portfolio daily ranking objective"),
+        ("split_heads_portfolio_daily_ranking_stability_r20", "r20 portfolio daily ranking stability study profile"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -697,10 +701,23 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         and "portfolio_daily_effective_model_action" in simulator_text
         and "portfolio_daily_effective_model_action" in analysis_text
         and "portfolio_daily_ranking_v2_gated" in study_text
+        and "split_heads_portfolio_daily_ranking_stability_r20" in study_text
+        and "stable_confirmatory" in study_text
+        and "source_realized_sell_floor" in gate_report_text
         and "champion_selection_policy" in study_text,
         failures,
         "continuous_policy_r20_contract_missing",
         "continuous_policy r20 gated portfolio daily ranking contract is missing v2/v13/effective-intent markers.",
+    )
+    _require(
+        "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14" in simulator_text
+        and "portfolio_daily_source_target_not_sold_share" in analysis_text
+        and "portfolio_daily_effective_capital_transfer_count" in pipeline_text
+        and "split_heads_portfolio_daily_ranking_source_exec_r21" in study_text
+        and "source_not_sold_ceiling" in gate_report_text,
+        failures,
+        "continuous_policy_r21_contract_missing",
+        "continuous_policy r21 source-exec portfolio daily ranking contract is missing execution-coupling markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

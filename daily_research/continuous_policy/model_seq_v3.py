@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -2692,6 +2694,9 @@ def fit_policy_models_v3(
         "trainer_backend": TRAINER_BACKEND_FORMAL_SEQ_V3,
         "device": str(device),
         "cuda_available": bool(torch.cuda.is_available()),
+        "python_executable": str(sys.executable),
+        "conda_prefix": str(os.environ.get("CONDA_PREFIX", "")),
+        "runtime_env": "yolos" if "yolos" in str(sys.executable).lower() else "",
         "epochs_requested": int(epochs),
         "min_epochs": int(min_epochs),
         "completed_epochs": int(history[-1]["epoch"]) if history else 0,

@@ -929,3 +929,40 @@
   - 事实：fresh confirm 明确失败，说明短窗过 gate 不等于稳定模型，champion selector 必须拒绝失败 confirm。
   - 推断：当前瓶颈已经从“能否形成组合日频排序”推进到“v2/v13 能否跨 confirmatory 长窗稳定保持收益、回撤、现金和执行一致性”。
   - 决策：r20 保持 `research / shadow_only`；下一轮应在 v2/v13 下扩大 bounded evidence，并把失败 confirm 当作稳定性约束，而不是当作可 promotion 的候选。
+
+## 2026-04-26 r20 stability sweep 与 source realization gate 复盘
+- 行动前自检：
+  - 事实：上轮 v2/v13 已通过 smoke，但 fresh confirm 失败；下一条最高价值证据是多候选 stability sweep，而不是继续追加单候选 smoke。
+  - 事实：当前 diagnostics 能证明 CUDA，但历史 `training_diagnostics.json` 缺少解释器路径字段，证据链对 `yolos` 的表达不够硬。
+  - 推断：本轮应同时做稳定性 profile、confirm-vs-screening 稳定性检查、source 真实释放门槛和诊断字段修复。
+- 已完成实现：
+  - 新增 `split_heads_portfolio_daily_ranking_stability_r20`，以低学习率和更高 dropout 作为稳定性 baseline，并扩展候选组合。
+  - v2 champion selection 改为 `portfolio_daily_v2_stable_confirmatory_then_screening_fallback`，新增 `portfolio_daily_v2_confirm_stability_checks`。
+  - `portfolio_daily_ranking_v2_gated` 新增 `source_realized_sell_floor`，当 source target 足够多时要求 `portfolio_daily_source_realized_sell_rate >= 0.35`。
+  - `model_seq_v3.py` 未来会把 `python_executable`、`conda_prefix` 与 `runtime_env` 写入 `training_diagnostics.json`。
+  - gate report 改为区分 `v2_top_ranked` 与 `qualified_v2_champion`，避免把未过 gate 的分数第一误读成合格冠军。
+- 执行证据：
+  - `cp_v3_portfolio_daily_ranking_r20_stability_sweep_20260426` 前台自然完成，包含 `6` 个 screening 与 `2` 个 confirmatory，`failed_trial_count = 0`。
+  - 全部 8 个训练诊断均为 `device = cuda`、`cuda_available = true`、`trainer_backend = formal_torch_seq_v3`、strict resume；命令由 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 启动。
+  - 现金分支已转活：报告中无 `cash_branch_alive` 失败，`cash reserve` 天数合计 `139`。
+  - 加入 source realization gate 后，`qualified_v2_champion` 为空。
+  - `confirm_01` 是经济冠军，`annual_return = 0.570476`、`sharpe = 1.448580`，但 `max_drawdown = -0.182756`，触发 `max_drawdown_floor`。
+  - `confirm_02` 是旧 v1 top-ranked，`annual_return = 0.465136`、`sharpe = 1.419674`、`max_drawdown = -0.171690`，但 `source_realized_sell_rate = 0.088889`，触发 `source_realized_sell_floor`。
+- 行动后复盘：
+  - 事实：v13 已经解决现金死分支，但 v2/v13 仍会产生“source 排得漂亮、资金却没真正释放”的假突破。
+  - 事实：回撤边界非常敏感，`confirm_01` 只差约 `0.002756` 就过 `-0.18`，但仍必须按硬门槛拒绝。
+  - 推断：下一轮真正要攻的是 source target 到 reduce/exit 的执行耦合，以及回撤边界下的收益保留，而不是继续提高 receiver-source spread。
+  - 决策：本轮无合格 champion；r20 继续 `research / shadow_only`，不进入 promotion 或 live。
+
+## 2026-04-26 r21 source-exec guard 实施复盘
+- 触发原因：r20 stability sweep 显示现金分支已转活，但 `confirm_02` 的 `source_realized_sell_rate = 0.088889` 暴露 source 被选中后没有真实释放资金。
+- 本轮动作：新增 `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 与 `split_heads_portfolio_daily_ranking_source_exec_r21`，把 source target 的真实减仓从事后评分推进到模拟器执行链路。
+- 关键实现：v14 对 source target 降低 retention floor、提高 sell reduction priority、压低 deploy priority，并在 translation guard 中绕开原始 add/hold 保护导致 source 被锁回持有的路径。
+- 新审计：新增 `portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_target_not_sold_reason`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight`、`portfolio_daily_receiver_realized_deploy_count` 与 `portfolio_daily_effective_capital_transfer_count`。
+- 新 gate：`source_not_sold_ceiling` 与 `source_realized_sell_floor` 配套；后续报告必须区分“source 被选中”“source 被减仓”和“receiver/source 真实形成资金转移”。
+- 执行证据：
+  - 第一次 r21 smoke 前台自然完成，证明 source 执行链路有效（source target 全部真实卖出），但暴露 v14 未继承 v13 cash-aware 分支，导致 `cash_branch_alive` 失败。
+  - 已修复 v14 cash-aware 条件；retry2 前台自然完成，`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、strict resume。
+  - retry2 指标：`annual_return = 0.126142`、`sharpe = 0.677610`、`max_drawdown = -0.112456`、`monthly_return_mean = 0.008781`、`monthly_consistency_score = 0.564085`、`source_realized_sell_rate = 1.0`、`source_not_sold_share = 0.0`、`effective_capital_transfer_count = 17`、`cash_reserve_rate = 0.097872`。
+  - retry2 gate report 仍无合格 v2 champion，失败 gate 为 `order_translation_conflict_ceiling` 与 `add_to_hold_conflict_ceiling`。
+- 状态：本轮为代码侧执行耦合修复，不改变 live，不改变 active execution artifact；第一瓶颈已从 source execution 推进到 order translation / add-to-hold 冲突。

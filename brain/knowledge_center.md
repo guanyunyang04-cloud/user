@@ -37,4 +37,8 @@
 - 主脑事实：`split_heads_portfolio_daily_ranking_r19` 只属于 `daily_research`，是 `research / shadow` 的组合级 receiver/source/cash 路径；没有改变 live artifact、生产默认或 promotion gate。
 
 ## 2026-04-26 daily_research r20 路由说明
-- 主脑事实：`portfolio_daily_ranking_v2_gated`、`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`、`portfolio_daily_effective_model_action` 和 v2 champion gate 都是 `daily_research` 分脑事实；主脑只保留它们仍为 `research / shadow_only` 的全局边界。
+- 主脑事实：`portfolio_daily_ranking_v2_gated`、`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`、`split_heads_portfolio_daily_ranking_stability_r20`、`portfolio_daily_effective_model_action`、`source_realized_sell_floor` 和 stable confirm gate 都是 `daily_research` 分脑事实；主脑只保留它们仍为 `research / shadow_only` 的全局边界。
+
+## 2026-04-26 daily_research r21 路由说明
+- 主脑事实：`cash_constraint_portfolio_daily_ranking_source_exec_guard_v14`、`split_heads_portfolio_daily_ranking_source_exec_r21`、`source_not_sold_ceiling` 与 `portfolio_daily_effective_capital_transfer_count` 都是 `daily_research` 分脑事实；主脑只保留它们用于修复 source target 真实释放资金，且仍为 `research / shadow_only`。
+- 全局教训：source execution 修复必须同时继承 cash-aware 分支；否则会从“不会释放 source”转成“会释放 source 但现金分支再死”。r21 retry2 已把下一瓶颈推到 order translation 与 add-to-hold 冲突。

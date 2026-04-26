@@ -632,6 +632,13 @@ def _build_semantic_conflicts(
             "portfolio_daily_source_sell_count": 0,
             "portfolio_daily_source_sell_share": 0.0,
             "portfolio_daily_source_realized_sell_rate": 0.0,
+            "portfolio_daily_source_exec_guard_count": 0,
+            "portfolio_daily_source_exec_cap_guard_count": 0,
+            "portfolio_daily_source_target_not_sold_count": 0,
+            "portfolio_daily_source_target_not_sold_share": 0.0,
+            "portfolio_daily_source_realized_reduction_weight": 0.0,
+            "portfolio_daily_receiver_realized_deploy_count": 0,
+            "portfolio_daily_effective_capital_transfer_count": 0,
             "portfolio_daily_cash_score_mean": 0.0,
             "portfolio_daily_cash_reserve_rate": 0.0,
             "portfolio_daily_receiver_score_mean": 0.0,
@@ -1354,6 +1361,18 @@ def _build_semantic_conflicts(
         "portfolio_daily_source_target",
         pd.Series(False, index=working.index),
     ).astype(bool)
+    portfolio_source_exec_guard = working.get(
+        "portfolio_daily_source_exec_guard",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_source_exec_cap_guarded = working.get(
+        "portfolio_daily_source_exec_cap_guarded",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_source_realized_reduction_weight = working.get(
+        "portfolio_daily_source_realized_reduction_weight",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     portfolio_cash_reserve_signal = working.get(
         "portfolio_daily_cash_reserve_signal",
         pd.Series(False, index=working.index),
@@ -1573,6 +1592,31 @@ def _build_semantic_conflicts(
         if portfolio_source_target.any()
         else 0.0
     )
+    portfolio_daily_source_target_not_sold_mask = portfolio_source_target & (
+        ~weight_change_lookup.isin({"reduce", "exit"})
+    )
+    portfolio_daily_source_target_not_sold_count = int(portfolio_daily_source_target_not_sold_mask.sum())
+    portfolio_daily_source_target_not_sold_share = (
+        float(portfolio_daily_source_target_not_sold_count / portfolio_daily_source_target_count)
+        if portfolio_daily_source_target_count
+        else 0.0
+    )
+    portfolio_daily_source_exec_guard_count = int((portfolio_source_target & portfolio_source_exec_guard).sum())
+    portfolio_daily_source_exec_cap_guard_count = int(
+        (portfolio_source_target & portfolio_source_exec_cap_guarded).sum()
+    )
+    portfolio_daily_source_realized_reduction_weight = (
+        float(portfolio_source_realized_reduction_weight.loc[portfolio_source_target].sum())
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_receiver_realized_deploy_count = int(
+        (portfolio_receiver_target & weight_change_lookup.isin({"open", "add"})).sum()
+    )
+    portfolio_daily_effective_capital_transfer_count = min(
+        int((portfolio_source_target & weight_change_lookup.isin({"reduce", "exit"})).sum()),
+        portfolio_daily_receiver_realized_deploy_count,
+    )
     portfolio_daily_cash_score_mean = _safe_mean(portfolio_cash_score)
     portfolio_daily_cash_reserve_rate = _safe_mean(portfolio_cash_reserve_signal.astype(float))
     portfolio_daily_receiver_score_mean = (
@@ -1758,6 +1802,18 @@ def _build_semantic_conflicts(
         diagnoses.append("portfolio daily ranking is releasing sources that still have positive forward excess return, suggesting sell/opportunity-cost attribution remains too weak.")
     if portfolio_daily_receiver_target_count >= 5 and portfolio_daily_source_target_count == 0:
         diagnoses.append("portfolio daily ranking selects capital receivers but finds no explicit funding source, so cash/source coordination remains incomplete.")
+    if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_target_not_sold_share > 0.65:
+        diagnoses.append("portfolio daily ranking selects funding sources, but too many source targets are not translated into real reduce/exit actions; source execution coupling remains the primary bottleneck.")
+    if (
+        portfolio_daily_receiver_target_count >= 5
+        and portfolio_daily_source_target_count >= 5
+        and portfolio_daily_effective_capital_transfer_count < min(
+            portfolio_daily_receiver_target_count,
+            portfolio_daily_source_target_count,
+        )
+        * 0.30
+    ):
+        diagnoses.append("portfolio daily receiver/source matching is sparse after execution, so the learned ranking is not yet becoming an effective capital transfer graph.")
 
     pair_rows = _action_pair_rows(working, actual_column="execution_action", actual_key="execution_action", limit=12)
     conflict_pair_rows = [row for row in pair_rows if row["model_action"] != row["execution_action"]][:8]
@@ -1899,6 +1955,13 @@ def _build_semantic_conflicts(
         "portfolio_daily_source_sell_count": int(portfolio_daily_source_sell_count),
         "portfolio_daily_source_sell_share": portfolio_daily_source_sell_share,
         "portfolio_daily_source_realized_sell_rate": portfolio_daily_source_realized_sell_rate,
+        "portfolio_daily_source_exec_guard_count": int(portfolio_daily_source_exec_guard_count),
+        "portfolio_daily_source_exec_cap_guard_count": int(portfolio_daily_source_exec_cap_guard_count),
+        "portfolio_daily_source_target_not_sold_count": int(portfolio_daily_source_target_not_sold_count),
+        "portfolio_daily_source_target_not_sold_share": portfolio_daily_source_target_not_sold_share,
+        "portfolio_daily_source_realized_reduction_weight": portfolio_daily_source_realized_reduction_weight,
+        "portfolio_daily_receiver_realized_deploy_count": int(portfolio_daily_receiver_realized_deploy_count),
+        "portfolio_daily_effective_capital_transfer_count": int(portfolio_daily_effective_capital_transfer_count),
         "portfolio_daily_cash_score_mean": portfolio_daily_cash_score_mean,
         "portfolio_daily_cash_reserve_rate": portfolio_daily_cash_reserve_rate,
         "portfolio_daily_receiver_score_mean": portfolio_daily_receiver_score_mean,

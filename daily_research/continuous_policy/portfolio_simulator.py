@@ -36,9 +36,13 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING = "cash_constraint_po
 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE = (
     "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13"
 )
+BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC = (
+    "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14"
+)
 BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
 )
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
@@ -56,6 +60,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
 )
 
 
@@ -158,6 +163,11 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
         "portfolio_daily_ranking_cash_aware": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
         "portfolio_daily_ranking_cash_aware_guard_v13": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+        "cash_constraint_portfolio_daily_ranking_source_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        "cash_constraint_portfolio_daily_ranking_source_exec_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        "cash_constraint_portfolio_daily_ranking_source_exec_guard_v14": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        "portfolio_daily_ranking_source_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        "portfolio_daily_ranking_source_exec_guard_v14": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
     }
     if text not in aliases:
         raise ValueError(
@@ -799,6 +809,9 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
         } or portfolio_daily_calibration_mode
+        portfolio_daily_source_exec_guard_mode = (
+            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC
+        )
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
 
@@ -1328,7 +1341,10 @@ class PortfolioState:
                 1.0,
             )
         )
-        if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE:
+        if budget_calibration in {
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+        }:
             weak_receiver_quality = max(0.0, 0.18 - max(portfolio_daily_receiver_target_score, 0.0)) / 0.30
             weak_market_breadth = max(0.0, 0.52 - recent_positive_share) / 0.52
             high_exposure_pressure = max(0.0, current_gross - 0.70) / 0.30
@@ -1353,12 +1369,20 @@ class PortfolioState:
         portfolio_daily_cash_score_series = pd.Series(portfolio_daily_cash_score, index=prices.index, dtype=float)
         portfolio_daily_cash_threshold = (
             0.24
-            if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE
+            if budget_calibration
+            in {
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+            }
             else 0.58
         )
         portfolio_daily_cash_receiver_pressure_ceiling = (
             0.72
-            if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE
+            if budget_calibration
+            in {
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+                BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
+            }
             else 0.48
         )
         portfolio_daily_cash_reserve_signal = bool(
@@ -1428,6 +1452,36 @@ class PortfolioState:
             )
             portfolio_daily_source_target = portfolio_daily_source_candidate & (
                 portfolio_daily_source_rank <= float(source_limit)
+            )
+        portfolio_daily_source_execution_pressure = pd.Series(0.0, index=prices.index, dtype=float)
+        portfolio_daily_source_retention_floor = pd.Series(1.0, index=prices.index, dtype=float)
+        if portfolio_daily_source_exec_guard_mode and bool(portfolio_daily_source_target.any()):
+            portfolio_daily_source_execution_pressure = (
+                pd.Series(0.52, index=prices.index, dtype=float)
+                + portfolio_daily_source_gap.clip(lower=0.0, upper=0.24) * 1.55
+                + portfolio_daily_source_score.clip(lower=0.0, upper=1.0) * 0.18
+                + portfolio_daily_cash_score_series.clip(0.0, 1.0) * 0.08
+                + pd.Series(portfolio_daily_receiver_pressure, index=prices.index, dtype=float).clip(0.0, 1.0) * 0.06
+                - hold_continuation_series.clip(0.0, 1.0) * 0.08
+                - alpha_opportunity_series.clip(0.0, 1.0) * 0.06
+                - deploy_executability_series.clip(0.0, 1.0) * 0.04
+            ).clip(lower=0.0, upper=1.0)
+            portfolio_daily_source_execution_pressure = portfolio_daily_source_execution_pressure.where(
+                portfolio_daily_source_target,
+                0.0,
+            )
+            portfolio_daily_source_retention_floor = (
+                pd.Series(0.84, index=prices.index, dtype=float)
+                - portfolio_daily_source_execution_pressure.clip(0.0, 1.0) * 0.18
+                - portfolio_daily_source_gap.clip(lower=0.0, upper=0.24) * 0.28
+                - portfolio_daily_source_score.clip(lower=0.0, upper=1.0) * 0.035
+                + hold_continuation_series.clip(0.0, 1.0) * 0.045
+                + direct_action_keep_advantage_series.clip(lower=0.0, upper=0.18) * 0.080
+                + alpha_opportunity_series.clip(0.0, 1.0) * 0.020
+            ).clip(lower=0.62, upper=0.86)
+            portfolio_daily_source_retention_floor = portfolio_daily_source_retention_floor.where(
+                portfolio_daily_source_target,
+                1.0,
             )
         if portfolio_daily_ranking_mode:
             direct_action_pair_reallocation_source = (
@@ -1561,6 +1615,16 @@ class PortfolioState:
                     1.0,
                 )
             )
+            if portfolio_daily_source_exec_guard_mode:
+                portfolio_source_pressure = float(
+                    np.clip(
+                        portfolio_source_pressure
+                        + max(_masked_mean(portfolio_daily_source_execution_pressure, portfolio_daily_source_target), 0.0)
+                        * 0.12,
+                        0.0,
+                        1.0,
+                    )
+                )
             portfolio_constraint_pressure = float(
                 np.clip(
                     0.34 * budget_model_cash_timing_signal
@@ -2478,6 +2542,12 @@ class PortfolioState:
                     ) * 0.040
                     + decision_release_gate_series.clip(0.0, 1.0) * 0.020
                 )
+                if portfolio_daily_source_exec_guard_mode:
+                    competitive_priority = competitive_priority - portfolio_daily_source_target.astype(float) * (
+                        portfolio_daily_source_execution_pressure.clip(0.0, 1.0) * 0.18
+                        + portfolio_daily_source_gap.clip(lower=0.0, upper=0.24) * 0.70
+                        + portfolio_daily_source_score.clip(lower=0.0, upper=1.0) * 0.035
+                    )
                 competitive_keep = competitive_priority.where(competitive_mask, -np.inf).nlargest(remaining_slots).index
                 competitive_keep_mask = pd.Series(competitive_priority.index.isin(competitive_keep), index=competitive_priority.index, dtype=bool)
                 entry_keep_mask = competitive_keep_mask & entry_candidate_mask
@@ -2490,6 +2560,22 @@ class PortfolioState:
             desired_strength = desired_strength.where(keep_mask, 0.0)
             protected_floor = protected_floor.where(~budget_released_from_hold, 0.0)
         desired_strength = desired_strength.where(~forced_zero, 0.0)
+        if portfolio_daily_source_exec_guard_mode and bool(portfolio_daily_source_target.any()):
+            source_exec_cap = (current * portfolio_daily_source_retention_floor).clip(lower=0.0, upper=position_cap_target)
+            desired_strength = desired_strength.where(
+                ~portfolio_daily_source_target,
+                pd.concat(
+                    [desired_strength.rename("desired"), source_exec_cap.rename("source_exec_cap")],
+                    axis=1,
+                ).min(axis=1),
+            )
+            protected_floor = protected_floor.where(
+                ~portfolio_daily_source_target,
+                pd.concat(
+                    [protected_floor.rename("protected"), source_exec_cap.rename("source_exec_cap")],
+                    axis=1,
+                ).min(axis=1),
+            )
         sell_reduction_priority = (
             sell_attribution_series.clip(0.0, 1.0) * 0.38
             + lifecycle_sell_gate_series.clip(0.0, 1.0) * 0.24
@@ -2503,6 +2589,16 @@ class PortfolioState:
             - alpha_opportunity_series.clip(0.0, 1.0) * 0.08
             - value_arbitration_series.clip(0.0, 1.0) * 0.04
             - action_names.isin({"hold", "add"}).astype(float) * 0.06
+            + (
+                portfolio_daily_source_target.astype(float)
+                * (
+                    portfolio_daily_source_execution_pressure.clip(0.0, 1.0) * 0.44
+                    + portfolio_daily_source_gap.clip(lower=0.0, upper=0.24) * 1.70
+                    + portfolio_daily_source_score.clip(lower=0.0, upper=1.0) * 0.12
+                )
+                if portfolio_daily_source_exec_guard_mode
+                else 0.0
+            )
         ).clip(lower=0.0)
         deploy_intent_priority = (
             alpha_opportunity_series.clip(0.0, 1.0) * 0.30
@@ -2515,6 +2611,15 @@ class PortfolioState:
             + action_names.eq("hold").astype(float) * 0.08
             - sell_reduction_priority.clip(0.0, 1.0) * 0.10
             - cash_defense_series.clip(0.0, 1.0) * (0.06 if constraint_only_budget_mode else 0.10)
+            - (
+                portfolio_daily_source_target.astype(float)
+                * (
+                    portfolio_daily_source_execution_pressure.clip(0.0, 1.0) * 0.32
+                    + portfolio_daily_source_gap.clip(lower=0.0, upper=0.24) * 0.95
+                )
+                if portfolio_daily_source_exec_guard_mode
+                else 0.0
+            )
         ).clip(lower=0.0)
         direct_action_reallocation_retention_floor = pd.Series(1.0, index=prices.index, dtype=float)
         if direct_action_reallocation_mode:
@@ -2537,6 +2642,11 @@ class PortfolioState:
                     ~direct_action_pair_reallocation_source,
                     pair_retention_floor,
                 )
+                if portfolio_daily_source_exec_guard_mode:
+                    direct_action_reallocation_retention_floor = direct_action_reallocation_retention_floor.where(
+                        ~portfolio_daily_source_target,
+                        portfolio_daily_source_retention_floor,
+                    )
 
         sell_source_floor_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if sell_source_decoupled_mode:
@@ -2566,6 +2676,19 @@ class PortfolioState:
             position_cap=position_cap_target,
         )
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
+        portfolio_daily_source_exec_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
+        if portfolio_daily_source_exec_guard_mode and bool(portfolio_daily_source_target.any()):
+            source_exec_cap = (current * portfolio_daily_source_retention_floor).clip(lower=0.0, upper=position_cap_target)
+            source_cap_mask = portfolio_daily_source_target & (target_weights > source_exec_cap + 1.0e-12)
+            target_weights = target_weights.where(~portfolio_daily_source_target, source_exec_cap)
+            protected_floor = protected_floor.where(
+                ~portfolio_daily_source_target,
+                pd.concat(
+                    [protected_floor.rename("protected"), source_exec_cap.rename("source_exec_cap")],
+                    axis=1,
+                ).min(axis=1),
+            )
+            portfolio_daily_source_exec_cap_guarded = portfolio_daily_source_exec_cap_guarded | source_cap_mask
         if float(protected_floor.sum()) > float(gross_exposure_target) > 0.0:
             if sell_source_decoupled_mode:
                 gross_exposure_target = min(float(protected_floor.sum()), 0.999)
@@ -2651,7 +2774,41 @@ class PortfolioState:
                     direct_pair_source_allowed = bool(
                         direct_action_pair_reallocation_source.get(stock, False)
                     )
+                    portfolio_source_exec_allowed = bool(
+                        portfolio_daily_source_exec_guard_mode
+                        and portfolio_daily_source_target.get(stock, False)
+                    )
                     if (
+                        portfolio_source_exec_allowed
+                    ):
+                        source_pressure = float(portfolio_daily_source_execution_pressure.get(stock, 0.0))
+                        source_retention = float(portfolio_daily_source_retention_floor.get(stock, 0.82))
+                        min_source_reduce_delta = max(
+                            deadband * 1.15,
+                            previous_weight * (0.030 + source_pressure * 0.050),
+                            0.0020,
+                        )
+                        source_exec_cap = max(
+                            0.0,
+                            min(previous_weight * source_retention, previous_weight - min_source_reduce_delta),
+                        )
+                        translation_floor.at[stock] = min(
+                            float(translation_floor.get(stock, 0.0)),
+                            source_exec_cap,
+                        )
+                        translation_soft_floor.at[stock] = min(
+                            float(translation_soft_floor.get(stock, 0.0)),
+                            source_exec_cap,
+                        )
+                        translation_cap.at[stock] = min(
+                            float(translation_cap.get(stock, position_cap_target)),
+                            source_exec_cap,
+                        )
+                        if target_value > source_exec_cap + 1.0e-12:
+                            target_weights.at[stock] = source_exec_cap
+                            translation_cap_guarded.at[stock] = True
+                            portfolio_daily_source_exec_cap_guarded.at[stock] = True
+                    elif (
                         sell_source_decoupled_mode
                         and not bool(sell_authorized_mask.get(stock, False))
                         and (
@@ -3052,6 +3209,12 @@ class PortfolioState:
             model_release_signal_flag = bool(model_release_signal.get(stock, False))
             deploy_funding_rebalance_signal_flag = bool(deploy_funding_rebalance_signal.get(stock, False))
             portfolio_daily_source_flag = bool(portfolio_daily_source_target.get(stock, False))
+            portfolio_daily_source_exec_guard_flag = bool(
+                portfolio_daily_source_exec_guard_mode and portfolio_daily_source_flag
+            )
+            portfolio_daily_source_exec_cap_guarded_flag = bool(
+                portfolio_daily_source_exec_cap_guarded.get(stock, False)
+            )
             direct_pair_reallocation_source_flag = bool(direct_action_pair_reallocation_source.get(stock, False))
             sell_authorized_by_model_flag = bool(sell_authorized_mask.get(stock, False))
             sell_authorization_score_value = float(sell_authorization_score.get(stock, 0.0))
@@ -3082,6 +3245,31 @@ class PortfolioState:
                     sell_execution_origin = "translation_cap_guard"
                 else:
                     sell_execution_origin = "weight_translation"
+            portfolio_daily_source_target_not_sold_reason = "none"
+            if portfolio_daily_source_flag and not realized_sell:
+                if new_weight > previous_weight + 1.0e-8:
+                    portfolio_daily_source_target_not_sold_reason = "weight_increased"
+                elif float(target_weights.get(stock, new_weight)) >= previous_weight - 1.0e-8:
+                    portfolio_daily_source_target_not_sold_reason = "target_weight_not_below_current"
+                elif turnover_intent_guarded_flag:
+                    portfolio_daily_source_target_not_sold_reason = "turnover_budget_trim"
+                elif translation_floor_guarded_flag:
+                    portfolio_daily_source_target_not_sold_reason = "translation_floor_guard"
+                elif translation_soft_lift_guarded_flag:
+                    portfolio_daily_source_target_not_sold_reason = "translation_soft_lift_guard"
+                elif budget_split_bound_guarded_flag:
+                    portfolio_daily_source_target_not_sold_reason = "budget_split_bound_guard"
+                elif sell_source_floor_guarded_flag:
+                    portfolio_daily_source_target_not_sold_reason = "sell_source_floor_guard"
+                elif protected_floor.get(stock, 0.0) >= previous_weight - 1.0e-8:
+                    portfolio_daily_source_target_not_sold_reason = "protected_floor_locked"
+                elif abs(new_weight - previous_weight) <= 1.0e-8:
+                    portfolio_daily_source_target_not_sold_reason = "zero_delta_after_translation"
+                else:
+                    portfolio_daily_source_target_not_sold_reason = "weight_translation"
+            portfolio_daily_source_realized_reduction_weight = (
+                max(previous_weight - new_weight, 0.0) if portfolio_daily_source_flag else 0.0
+            )
             sell_suppression_origin = "none"
             if sell_intent_suppressed:
                 if semantic_delta_guarded_flag:
@@ -3151,6 +3339,18 @@ class PortfolioState:
                     "portfolio_daily_source_score": float(portfolio_daily_source_score.get(stock, 0.0)),
                     "portfolio_daily_source_candidate": bool(portfolio_daily_source_candidate.get(stock, False)),
                     "portfolio_daily_source_target": portfolio_daily_source_flag,
+                    "portfolio_daily_source_exec_guard": portfolio_daily_source_exec_guard_flag,
+                    "portfolio_daily_source_execution_pressure": float(
+                        portfolio_daily_source_execution_pressure.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_source_retention_floor": float(
+                        portfolio_daily_source_retention_floor.get(stock, 1.0)
+                    ),
+                    "portfolio_daily_source_exec_cap_guarded": portfolio_daily_source_exec_cap_guarded_flag,
+                    "portfolio_daily_source_target_not_sold_reason": portfolio_daily_source_target_not_sold_reason,
+                    "portfolio_daily_source_realized_reduction_weight": float(
+                        portfolio_daily_source_realized_reduction_weight
+                    ),
                     "portfolio_daily_cash_score": float(portfolio_daily_cash_score),
                     "portfolio_daily_cash_reserve_signal": bool(portfolio_daily_cash_reserve_signal),
                     "execution_action": execution_action,
@@ -3422,6 +3622,49 @@ class PortfolioState:
         )
         deploy_intent_count = len(deploy_intent_items)
         add_intent_count = len(add_intent_items)
+        portfolio_daily_source_target_items = [
+            item
+            for item in actions
+            if bool(item.get("portfolio_daily_source_target", False))
+        ]
+        portfolio_daily_source_realized_items = [
+            item
+            for item in portfolio_daily_source_target_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() in {"reduce", "exit"}
+        ]
+        portfolio_daily_source_not_sold_items = [
+            item
+            for item in portfolio_daily_source_target_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() not in {"reduce", "exit"}
+        ]
+        portfolio_daily_receiver_target_items = [
+            item
+            for item in actions
+            if bool(item.get("portfolio_daily_receiver_target", False))
+        ]
+        portfolio_daily_receiver_realized_items = [
+            item
+            for item in portfolio_daily_receiver_target_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() in {"open", "add"}
+        ]
+        portfolio_daily_source_exec_guard_count = sum(
+            1 for item in portfolio_daily_source_target_items if bool(item.get("portfolio_daily_source_exec_guard", False))
+        )
+        portfolio_daily_source_exec_cap_guard_count = sum(
+            1
+            for item in portfolio_daily_source_target_items
+            if bool(item.get("portfolio_daily_source_exec_cap_guarded", False))
+        )
+        portfolio_daily_source_realized_reduction_weight = sum(
+            float(item.get("portfolio_daily_source_realized_reduction_weight", 0.0) or 0.0)
+            for item in portfolio_daily_source_target_items
+        )
+        portfolio_daily_source_target_not_sold_count = len(portfolio_daily_source_not_sold_items)
+        portfolio_daily_source_target_count_from_actions = len(portfolio_daily_source_target_items)
+        portfolio_daily_effective_capital_transfer_count = min(
+            len(portfolio_daily_source_realized_items),
+            len(portfolio_daily_receiver_realized_items),
+        )
         self.recent_turnovers.append(realized_turnover)
         if len(self.recent_turnovers) > 60:
             self.recent_turnovers = self.recent_turnovers[-60:]
@@ -3536,9 +3779,23 @@ class PortfolioState:
                 direct_action_pair_source_opportunity_cost,
                 direct_action_pair_reallocation_source,
             ),
+            "portfolio_daily_source_exec_guard_mode": float(bool(portfolio_daily_source_exec_guard_mode)),
             "portfolio_daily_receiver_target_count": int(portfolio_daily_receiver_target.sum()),
             "portfolio_daily_source_candidate_count": int(portfolio_daily_source_candidate.sum()),
             "portfolio_daily_source_target_count": int(portfolio_daily_source_target.sum()),
+            "portfolio_daily_source_exec_guard_count": int(portfolio_daily_source_exec_guard_count),
+            "portfolio_daily_source_exec_cap_guard_count": int(portfolio_daily_source_exec_cap_guard_count),
+            "portfolio_daily_source_target_not_sold_count": int(portfolio_daily_source_target_not_sold_count),
+            "portfolio_daily_source_target_not_sold_share": float(
+                portfolio_daily_source_target_not_sold_count / portfolio_daily_source_target_count_from_actions
+            )
+            if portfolio_daily_source_target_count_from_actions
+            else 0.0,
+            "portfolio_daily_source_realized_reduction_weight": float(
+                portfolio_daily_source_realized_reduction_weight
+            ),
+            "portfolio_daily_receiver_realized_deploy_count": int(len(portfolio_daily_receiver_realized_items)),
+            "portfolio_daily_effective_capital_transfer_count": int(portfolio_daily_effective_capital_transfer_count),
             "portfolio_daily_receiver_score_mean": _masked_mean(
                 portfolio_daily_receiver_score,
                 portfolio_daily_receiver_target,

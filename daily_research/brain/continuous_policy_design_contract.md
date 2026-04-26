@@ -96,5 +96,13 @@
 - `portfolio_daily_ranking_v2_gated` 必须 gate-first：`annual_return`、`sharpe`、`monthly_return_mean` 必须为正，`max_drawdown` 不得低于 `-0.18`，`monthly_consistency_score` 不得低于 `0.45`，执行冲突、add-to-hold 和现金行为必须达标后，receiver-source spread 才能获得主要奖励。
 - `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 必须让现金保留成为真实竞争分支；若 portfolio daily ranking 已观测但 `portfolio_daily_cash_reserve_rate = 0.0`，不得把该分支写成组合级完成态。
 - 组合排序模式下的冲突指标必须优先使用 `portfolio_daily_effective_model_action`；未被选为 core receiver 的原始 `add/open` 只是候选意图，不得直接当成最终 add/open 失败。
-- v2 champion selection 必须拒绝失败 confirmatory：只有通过 v2 gate 的 confirmatory 才能优先成为 champion；否则必须回退到最佳 completed screening，并把失败 confirm 写入 `rejected_confirmatory_trials`。
-- r20 成功判定不是单次 smoke 过 gate，而是在 bounded/fresh confirm 下同时保持正收益、受控回撤、正向月度收益、非零且合理现金保留、正向 receiver-source spread、低 order translation conflict 和低 add-to-hold conflict。
+- v2 champion selection 必须拒绝失败 confirmatory：只有通过 v2 gate 且通过 confirm-vs-screening 稳定性检查的 confirmatory 才能优先成为 champion；否则必须回退，并把失败 confirm 写入 `rejected_confirmatory_trials`。
+- `stable_confirmatory` 必须同时满足 v2 gates 与 confirm-vs-screening 稳定性检查；source target 必须真实释放资金，`source_realized_sell_floor` 要求当 `portfolio_daily_source_target_count >= 5` 时，`portfolio_daily_source_realized_sell_rate` 不得低于 `0.35`；否则 receiver-source spread 不能被视为完成态。
+- r20 成功判定不是单次 smoke 过 gate，而是在 bounded/fresh confirm 下同时保持正收益、受控回撤、正向月度收益、非零且合理现金保留、正向 receiver-source spread、足够 source realized sell、低 order translation conflict 和低 add-to-hold conflict。
+
+## 2026-04-26 r21 source-exec 合同
+- `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 必须把 source target 的真实 reduce/exit 放进执行生成层：降低 source target 保留底线、提高 source sell priority、压低 source deploy priority，并避免原始 add/hold translation floor 把 source 锁回持有。
+- v14 必须继承 v13 的 cash-aware competition：使用弱 receiver、弱市场宽度、高暴露、高换手、稀疏 receiver、真实回撤和 defense gate 共同激活现金保留；不得因修 source execution 让 cash branch 再次死亡。
+- `split_heads_portfolio_daily_ranking_source_exec_r21` 使用 `portfolio_daily_ranking_v2_gated`，但新增 source execution 证据：`portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight`、`portfolio_daily_receiver_realized_deploy_count` 与 `portfolio_daily_effective_capital_transfer_count`。
+- `source_not_sold_ceiling` 是 `source_realized_sell_floor` 的配套约束：当 `portfolio_daily_source_target_count >= 5` 时，source target 未真实卖出的占比不得高于 `0.65`。
+- r21 成功判定必须同时看 source 真实释放、receiver 真实成交和 effective capital transfer；只改善 source realized sell 但牺牲收益、回撤、月度一致性或现金行为，仍不能 promotion。
