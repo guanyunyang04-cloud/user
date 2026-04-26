@@ -33,6 +33,13 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION = "cash_constraint
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION = "cash_constraint_direct_action_pair_reallocation_guard_v10"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD = "cash_constraint_direct_action_pair_cost_guard_v11"
 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING = "cash_constraint_portfolio_daily_ranking_guard_v12"
+BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE = (
+    "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13"
+)
+BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET = (
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+)
 DEFAULT_BUDGET_CALIBRATION = BUDGET_CALIBRATION_NONE
 BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_NONE,
@@ -48,6 +55,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
 )
 
 
@@ -145,6 +153,11 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_portfolio_daily_ranking_guard_v12": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
         "portfolio_daily_ranking_constraint": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
         "portfolio_daily_ranking_guard_v12": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
+        "cash_constraint_portfolio_daily_ranking_cash_aware": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+        "cash_constraint_portfolio_daily_ranking_cash_aware_guard": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+        "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+        "portfolio_daily_ranking_cash_aware": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
+        "portfolio_daily_ranking_cash_aware_guard_v13": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
     }
     if text not in aliases:
         raise ValueError(
@@ -700,6 +713,7 @@ class PortfolioState:
         budget_model_hierarchical_mode = float((global_targets or {}).get("budget_model_hierarchical_mode", 0.0) or 0.0)
         budget_model_constraint_only_mode = float((global_targets or {}).get("budget_model_constraint_only_mode", 0.0) or 0.0)
         hierarchical_budget_mode = budget_model_hierarchical_mode > 0.5
+        portfolio_daily_calibration_mode = budget_calibration in BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -710,7 +724,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         intent_preserving_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
@@ -720,7 +734,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         deploy_executability_constraint_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DEPLOY,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
@@ -729,32 +743,30 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         direct_action_preserving_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
-        portfolio_daily_ranking_mode = (
-            budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING
-        )
+        } or portfolio_daily_calibration_mode
+        portfolio_daily_ranking_mode = portfolio_daily_calibration_mode
         direct_action_pair_cost_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         direct_action_pair_reallocation_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         direct_action_reallocation_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         sell_source_decoupled_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_SELL_SOURCE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION,
@@ -762,7 +774,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         translation_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION,
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
@@ -774,7 +786,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
         use_sell_priority_guard = budget_calibration in {
             BUDGET_CALIBRATION_CASH_TRANSLATION_SELL,
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
@@ -786,7 +798,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_REALLOCATION,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
-        }
+        } or portfolio_daily_calibration_mode
 
         action_names = policy["action_label"].astype(str).str.strip().str.lower()
 
@@ -959,8 +971,8 @@ class PortfolioState:
         paired_reallocation_pressure = False
         direct_action_add_rank = pd.Series(np.inf, index=prices.index, dtype=float)
         direct_action_open_rank = pd.Series(np.inf, index=prices.index, dtype=float)
+        current_gross = float(current.sum())
         if direct_action_pair_reallocation_mode and bool(direct_action_deploy_signal.any()):
-            current_gross = float(current.sum())
             deploy_signal_count = int(direct_action_deploy_signal.sum())
             add_signal_count = int(direct_action_add_signal.sum())
             open_signal_count = int(direct_action_open_signal.sum())
@@ -1316,11 +1328,43 @@ class PortfolioState:
                 1.0,
             )
         )
+        if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE:
+            weak_receiver_quality = max(0.0, 0.18 - max(portfolio_daily_receiver_target_score, 0.0)) / 0.30
+            weak_market_breadth = max(0.0, 0.52 - recent_positive_share) / 0.52
+            high_exposure_pressure = max(0.0, current_gross - 0.70) / 0.30
+            high_turnover_pressure = max(0.0, turnover_pressure - 0.45) / 0.55
+            receiver_sparse_pressure = max(0.0, 2.0 - float(portfolio_daily_receiver_target_count)) / 2.0
+            realized_drawdown_pressure = max(0.0, -portfolio_drawdown_20d - 0.005) / 0.08
+            cash_competition_score = float(
+                np.clip(
+                    0.16 * weak_receiver_quality
+                    + 0.14 * weak_market_breadth
+                    + 0.12 * high_exposure_pressure
+                    + 0.10 * high_turnover_pressure
+                    + 0.10 * receiver_sparse_pressure
+                    + 0.08 * realized_drawdown_pressure
+                    + 0.08 * budget_model_defense_gate_signal
+                    - 0.08 * portfolio_daily_receiver_pressure,
+                    0.0,
+                    1.0,
+                )
+            )
+            portfolio_daily_cash_score = max(portfolio_daily_cash_score, cash_competition_score)
         portfolio_daily_cash_score_series = pd.Series(portfolio_daily_cash_score, index=prices.index, dtype=float)
+        portfolio_daily_cash_threshold = (
+            0.24
+            if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE
+            else 0.58
+        )
+        portfolio_daily_cash_receiver_pressure_ceiling = (
+            0.72
+            if budget_calibration == BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE
+            else 0.48
+        )
         portfolio_daily_cash_reserve_signal = bool(
             portfolio_daily_ranking_mode
-            and portfolio_daily_cash_score >= 0.58
-            and portfolio_daily_receiver_pressure < 0.48
+            and portfolio_daily_cash_score >= portfolio_daily_cash_threshold
+            and portfolio_daily_receiver_pressure < portfolio_daily_cash_receiver_pressure_ceiling
         )
         portfolio_daily_receiver_reference_score = 0.0
         portfolio_daily_receiver_scores = portfolio_daily_receiver_score.loc[portfolio_daily_receiver_target].replace(
@@ -3053,12 +3097,21 @@ class PortfolioState:
                 else:
                     sell_suppression_origin = "weight_translation"
 
+            portfolio_daily_effective_model_action = model_action_name
+            if (
+                portfolio_daily_ranking_mode
+                and model_action_name in {"open", "add"}
+                and not bool(direct_action_core_deploy_target.get(stock, False))
+            ):
+                portfolio_daily_effective_model_action = str(weight_change_action).strip().lower()
+
             actions.append(
                 {
                     "date": signal_dt.strftime("%Y-%m-%d"),
                     "stock": stock,
                     "source_label": source_label,
                     "model_action": model_action,
+                    "portfolio_daily_effective_model_action": portfolio_daily_effective_model_action,
                     "policy_decision_mode": str(policy.at[stock, "policy_decision_mode"] or "") if "policy_decision_mode" in policy.columns else "",
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,
@@ -3106,7 +3159,9 @@ class PortfolioState:
                     "budget_semantics": budget_semantics,
                     "budget_calibration": budget_calibration,
                     "semantic_translation_reason": semantic_translation_reason,
-                    "semantic_preserved": bool(model_action_name == str(execution_action).strip().lower()),
+                    "semantic_preserved": bool(
+                        portfolio_daily_effective_model_action == str(execution_action).strip().lower()
+                    ),
                     "budget_dropped": budget_dropped_flag,
                     "budget_released_from_hold": budget_released_from_hold_flag,
                     "forced_zero": forced_zero_flag,
@@ -3235,27 +3290,31 @@ class PortfolioState:
         buy_turnover = float(weight_delta.clip(lower=0.0).sum())
         sell_turnover = float((-weight_delta.clip(upper=0.0)).sum())
         action_count = max(len(actions), 1)
+
+        def _intent_action(item: dict[str, Any]) -> str:
+            return str(
+                item.get("portfolio_daily_effective_model_action", item.get("model_action", "")) or ""
+            ).strip().lower()
+
         semantic_conflict_count = sum(
             1
             for item in actions
-            if str(item.get("model_action", "") or "").strip().lower()
-            != str(item.get("execution_action", "") or "").strip().lower()
+            if _intent_action(item) != str(item.get("execution_action", "") or "").strip().lower()
         )
         order_translation_conflict_count = sum(
             1
             for item in actions
-            if str(item.get("model_action", "") or "").strip().lower()
-            != str(item.get("weight_change_action", "") or "").strip().lower()
+            if _intent_action(item) != str(item.get("weight_change_action", "") or "").strip().lower()
         )
         deploy_intent_items = [
             item
             for item in actions
-            if str(item.get("model_action", "") or "").strip().lower() in {"open", "add"}
+            if _intent_action(item) in {"open", "add"}
         ]
         add_intent_items = [
             item
             for item in actions
-            if str(item.get("model_action", "") or "").strip().lower() == "add"
+            if _intent_action(item) == "add"
         ]
         deploy_realized_count = sum(
             1
@@ -3270,7 +3329,7 @@ class PortfolioState:
         sell_intent_items = [
             item
             for item in actions
-            if str(item.get("model_action", "") or "").strip().lower() in {"reduce", "exit"}
+            if _intent_action(item) in {"reduce", "exit"}
         ]
         realized_sell_items = [
             item

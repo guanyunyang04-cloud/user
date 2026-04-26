@@ -3,11 +3,17 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# The Windows yolos environment can load Intel OpenMP through both pandas/numpy
+# and torch. Set this before third-party imports so the foreground orchestrator
+# can run instead of failing before any training starts.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import pandas as pd
 
@@ -508,7 +514,7 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "decoder_profile": ["budget_v3"],
         "loss_profile": ["alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"],
         "budget_semantics": ["action_budget_split_v1"],
-        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_guard_v12"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13"],
         "budget_objective": ["result_value_v9", "result_value_v10"],
         "alpha_prior_source": ["active_execution_strategy"],
         "daily_head_layout": ["split_v2"],
@@ -949,7 +955,7 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "decoder_profile": "budget_v3",
         "loss_profile": "alpha_result_value_budget_split_v15",
         "budget_semantics": "action_budget_split_v1",
-        "budget_calibration": "cash_constraint_portfolio_daily_ranking_guard_v12",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13",
         "budget_objective": "result_value_v9",
         "alpha_prior_source": "active_execution_strategy",
         "daily_head_layout": "split_v2",
@@ -990,7 +996,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_direct_action_reallocation_r16": "direct_action_reallocation_v1",
     "split_heads_direct_action_pair_reallocation_r17": "direct_action_pair_reallocation_v1",
     "split_heads_direct_action_pair_cost_guard_r18": "direct_action_pair_cost_guard_v1",
-    "split_heads_portfolio_daily_ranking_r19": "portfolio_daily_ranking_v1",
+    "split_heads_portfolio_daily_ranking_r19": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1912,17 +1918,23 @@ def _score_protocol_summary(
         "direct_action_pair_reallocation_v1",
         "direct_action_pair_cost_guard_v1",
         "portfolio_daily_ranking_v1",
+        "portfolio_daily_ranking_v2_gated",
     }:
         direct_reallocation_objective = objective_profile_name == "direct_action_reallocation_v1"
-        portfolio_daily_ranking_objective = objective_profile_name == "portfolio_daily_ranking_v1"
+        portfolio_daily_ranking_objective = objective_profile_name in {
+            "portfolio_daily_ranking_v1",
+            "portfolio_daily_ranking_v2_gated",
+        }
         direct_pair_cost_guard_objective = objective_profile_name in {
             "direct_action_pair_cost_guard_v1",
             "portfolio_daily_ranking_v1",
+            "portfolio_daily_ranking_v2_gated",
         }
         direct_pair_reallocation_objective = objective_profile_name in {
             "direct_action_pair_reallocation_v1",
             "direct_action_pair_cost_guard_v1",
             "portfolio_daily_ranking_v1",
+            "portfolio_daily_ranking_v2_gated",
         }
         action_alignment_score = (
             _bounded(multi_horizon_path_alignment, -0.10, 0.16) * 0.24
@@ -2259,6 +2271,50 @@ def _score_protocol_summary(
                 else 0.0
             ),
         }
+        if objective_profile_name == "portfolio_daily_ranking_v2_gated":
+            v2_observed = portfolio_daily_observed
+            v2_negative_annual_return = max(0.0, -annual_return)
+            v2_negative_sharpe = max(0.0, -sharpe)
+            v2_negative_monthly_mean = max(0.0, -monthly_return_mean)
+            v2_drawdown_excess = max(0.0, abs(min(max_drawdown, 0.0)) - 0.18)
+            v2_monthly_consistency_gap = max(0.0, 0.45 - monthly_consistency_score)
+            v2_order_translation_gap = max(0.0, direct_translation_penalty - 0.24)
+            v2_add_to_hold_gap = max(0.0, add_to_hold_conflict_share - 0.35)
+            v2_cash_dead_branch = 1.0 if v2_observed and portfolio_daily_cash_reserve_rate <= 0.0 else 0.0
+            v2_clean_spread_allowed = (
+                annual_return > 0.0
+                and sharpe > 0.0
+                and monthly_return_mean > 0.0
+                and monthly_consistency_score >= 0.45
+                and direct_translation_penalty <= 0.24
+                and add_to_hold_conflict_share <= 0.35
+                and (not v2_observed or portfolio_daily_cash_reserve_rate > 0.0)
+            )
+            if not v2_clean_spread_allowed:
+                performance_breakdown.update(
+                    {
+                        "portfolio_daily_v2_negative_annual_return_gate": -v2_negative_annual_return * 24.0,
+                        "portfolio_daily_v2_negative_sharpe_gate": -v2_negative_sharpe * 8.0,
+                        "portfolio_daily_v2_negative_monthly_mean_gate": -v2_negative_monthly_mean * 60.0,
+                        "portfolio_daily_v2_drawdown_excess_gate": -v2_drawdown_excess * 18.0,
+                        "portfolio_daily_v2_clean_spread_rebate_removed": -max(
+                            0.0,
+                            _bounded(portfolio_daily_receiver_minus_source_forward_excess_5d, -0.015, 0.050)
+                            * 1.10,
+                        ),
+                    }
+                )
+                stability_breakdown.update(
+                    {
+                        "portfolio_daily_v2_monthly_consistency_gate": -v2_monthly_consistency_gap * 3.2,
+                        "portfolio_daily_v2_order_translation_gate": -v2_order_translation_gap * 8.0,
+                        "portfolio_daily_v2_add_to_hold_gate": -v2_add_to_hold_gap * 4.2,
+                        "portfolio_daily_v2_cash_dead_branch_gate": -v2_cash_dead_branch * 1.6,
+                    }
+                )
+            else:
+                performance_breakdown["portfolio_daily_v2_economic_gate_bonus"] = 0.42
+                stability_breakdown["portfolio_daily_v2_execution_gate_bonus"] = 0.28
     elif objective_profile_name == "direct_daily_policy_v1":
         action_alignment_score = (
             _bounded(multi_horizon_path_alignment, -0.10, 0.16) * 0.28
@@ -2830,6 +2886,27 @@ def _build_confirmatory_protocol_args(
     return _build_protocol_args(args, confirmatory_config, protocol_tag)
 
 
+def _portfolio_daily_v2_gate_pass(metrics: dict[str, Any]) -> bool:
+    observed = (
+        float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0) >= 3.0
+        or float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0) >= 3.0
+    )
+    return (
+        float(metrics.get("annual_return", 0.0) or 0.0) > 0.0
+        and float(metrics.get("sharpe", 0.0) or 0.0) > 0.0
+        and float(metrics.get("monthly_return_mean", 0.0) or 0.0) > 0.0
+        and float(metrics.get("max_drawdown", 0.0) or 0.0) >= -0.18
+        and float(metrics.get("monthly_consistency_score", 0.0) or 0.0) >= 0.45
+        and float(metrics.get("order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
+        and float(metrics.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
+        and float(metrics.get("add_to_hold_conflict_share", 0.0) or 0.0) <= 0.35
+        and (
+            (not observed)
+            or float(metrics.get("portfolio_daily_cash_reserve_rate", 0.0) or 0.0) > 0.0
+        )
+    )
+
+
 @dataclass
 class TrialResult:
     trial_id: int
@@ -3210,9 +3287,20 @@ def main(argv: list[str] | None = None) -> int:
         if screen_depth_trials
         else {}
     )
+    qualified_confirmatory = list(completed_confirmatory)
+    rejected_confirmatory = []
+    if objective_profile == "portfolio_daily_ranking_v2_gated":
+        qualified_confirmatory = [
+            item for item in completed_confirmatory if _portfolio_daily_v2_gate_pass(item.primary_metrics)
+        ]
+        rejected_confirmatory = [
+            item.to_summary()
+            for item in completed_confirmatory
+            if not _portfolio_daily_v2_gate_pass(item.primary_metrics)
+        ]
     champion = (
-        completed_confirmatory[0].to_summary()
-        if completed_confirmatory
+        qualified_confirmatory[0].to_summary()
+        if qualified_confirmatory
         else (completed_screening[0].to_summary() if completed_screening else {})
     )
     historical = _historical_leaderboard(
@@ -3246,6 +3334,12 @@ def main(argv: list[str] | None = None) -> int:
         "screen_stability_champion": screen_stability_champion,
         "screen_depth_challenger": screen_depth_challenger,
         "champion": champion,
+        "champion_selection_policy": (
+            "portfolio_daily_v2_confirmatory_gate_then_screening_fallback"
+            if objective_profile == "portfolio_daily_ranking_v2_gated"
+            else "confirmatory_preferred"
+        ),
+        "rejected_confirmatory_trials": rejected_confirmatory,
         "historical_leaderboard": historical,
         "latest_state_restored": True,
         "seed_study_tag": str(args.seed_study_tag or ""),

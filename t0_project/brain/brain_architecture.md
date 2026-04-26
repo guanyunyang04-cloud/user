@@ -1,4 +1,4 @@
-# T0 Project Brain Architecture
+# T0 项目脑架构
 
 ## 1. 区域定位
 `t0_project/brain/` 是实验型分脑。

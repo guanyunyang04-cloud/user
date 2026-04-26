@@ -1,4 +1,4 @@
-# Archive Rules
+# 归档规则
 
 `daily_research/output/` 与 `daily_research/cache/` 都属于高频研究产物区，但两者角色不同：
 

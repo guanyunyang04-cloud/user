@@ -89,9 +89,9 @@
   - `recent = short_expert_monthly_v1`
   - `promotable = short_expert_monthly_v1`
 - 当前 live 默认执行稳定语义：
-  - active label：`short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
-  - active manifest：`daily_research/output/active_execution_strategy.json`
-  - production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`
+- 当前 active label：`short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`
+- 当前 active manifest：`daily_research/output/active_execution_strategy.json`
+- 生产根目录 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`
 
 ## 2. 硬规则
 - 必须 `brain-first`
@@ -108,6 +108,9 @@
 - 依赖环境必须先写入真源文件，再谈“环境基线已满足”
 - `daily_research` 任何程序都必须在 `yolos` 环境下运行
 - 脚本默认解释器与内部 subprocess 统一收口到 `yolos`，不得回退到 `quant` 或当前 shell Python
+- 脑内文档当前层标题、正文、状态、规则和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
+- 所有训练、评估、审计、bounded study、confirmatory rerun 与 execution app 任务默认前台运行，不得默认后台化，不得中途人为中断；前台窗口时限统一按 `10` 小时处理
+- GPU 训练完成后必须核验 `training_diagnostics.json` 中 `device = cuda` 与 `cuda_available = true`，并确认训练解释器来自 `yolos` 后再写入正式证据
 - 新执行能力优先注册到 execution app task registry，而不是继续追加孤立脚本入口
 - 连续策略研究也必须先接 execution app task registry，再谈 Web、shadow export 或 promotion
 - continuous_policy 的正式运行默认优先走 `run_continuous_policy_protocol.py`，而不是人工拼接 `train -> evaluate -> export`
@@ -131,8 +134,8 @@
 - 后续最大提升不应来自继续堆动作 loss，而应来自组合级 pair/listwise ranking、直接优化多日/月度组合收益，以及更强的卖出与现金时机学习
 - execution 侧默认通过统一应用入口运行、监控、恢复；直接裸跑底层脚本只应用于调试或局部排障
 - execution Web 控制台基于 FastAPI + Jinja2，本地只监听 `127.0.0.1`
-- `agent` 在本地联调 Web 控制台或短期临时服务时，默认使用同一 PowerShell 会话内的 `Start-Job` 后台方式，而不是 `Start-Process`
-- 正式训练前台窗口限时统一为 `10` 小时
+- `agent` 在本地联调 Web 控制台、短期临时服务或训练任务时，也必须遵守前台运行与不中断纪律；不再默认使用 `Start-Job` 或 `Start-Process` 后台化任务
+- 正式训练、bounded study、confirmatory rerun、评估、审计和 execution app 任务的前台窗口限时统一为 `10` 小时
 - continuous_policy 当前下一阶段已从“先解决 hold_share”收敛到更具体的三件事：
   - 修 `reduce` 过早且站错边
   - 修 `cash timing` 负收益
@@ -352,7 +355,7 @@
   - 如果训练目标仍主要是 teacher / gate / surrogate metric，而不是直接长期 active return，那么自由度增加后更容易学到“更平衡”而不是“更赚钱”
   - `cp_v3_seq_holdcash_r1` 这类旧主线虽然更窄，但它自带强 inductive bias：固定 `liquid500`、更短的近端训练窗、极强的 entry/exit precision 偏置；这些约束本身就是收益正则
   - 因此旧主线最值得借的不是“把世界重新缩回去”，而是：
-  - recent-regime specialization
+- 近期 regime 专门化
   - 高精度 entry gating
   - 强 sell-side timing bias
   - 把候选域自由度和预算头自由度分阶段放开，而不是一次性全放开
@@ -697,7 +700,29 @@
   - 只看 funding cleanliness，`v11 + v9` 已经比自动 confirm 更好。
   - 但它的 `order_translation_conflict_rate = 0.3869`、`deploy_intent_realized_rate = 0.2627`，说明 release-side 约束一旦变强，执行链就会立刻暴露出新的耦合断点。
   - 所以下一阶段真正要攻的不是“继续盲目加大 release loss”，而是把 held-side learning、translation drift 和 deploy executability 作为一个联合问题处理。
-## 2026-04-25 r19 knowledge note
-- The five fixed bottlenecks are now represented as a portfolio daily ranking problem: individual action quality, portfolio capital allocation, sell/source credit assignment, daily-data blind spots, and small independent regime count must be evaluated together.
-- The most useful next evidence is not another action-classification loss; it is receiver-vs-source separation, source sell realization, cash reserve behavior, and month-level outcome quality.
-- Daily OHLCV can support trend, relative strength, drawdown, volume-price structure, and regime features, but it cannot fully learn intraday impact, true slippage, news shock path, or order-book liquidity.
+## 2026-04-25 r19 知识记录
+- 五个已固定卡点现在应被统一表达为组合日频排序问题：个股动作质量、组合资金分配、sell/source credit assignment、日频数据盲区和独立 regime 样本偏少，必须一起评估。
+- 下一条最有价值的证据不是新的动作分类 loss，而是 receiver-vs-source 分离、source sell realization、现金保留行为和月度结果质量。
+- 日频 OHLCV 可以支撑趋势、相对强弱、回撤、量价结构和 regime 特征，但不能完整学习 intraday impact、真实滑点、新闻冲击路径或订单簿流动性。
+## 2026-04-26 r19 bounded study 教训
+- `cp_v3_portfolio_daily_ranking_r19__study_r1` 证明组合级 receiver/source/cash ranking 可以在正式 `seq_v3` 流程下训练和评分，但当前 scoring 与真实收益、回撤仍不够对齐。
+- 关键冲突已经明确：`confirm_02` 的 receiver-source spread 最干净但收益为负；`confirm_01` 的收益和月度质量最好，但 receiver-source spread 为负。
+- 因此下一步应修复 `portfolio_daily_ranking_v1` scoring，或演进后继 objective，使 receiver-source separation 只有在收益、回撤、cash timing 和 order translation 质量不退化时才获得奖励。
+- r19 bounded evidence 仍是 `research / shadow_only`；它不是 live candidate，也不改变当前 active `policy_v5b` 执行锚点。
+
+## 2026-04-26 r20 v2/v13 知识记录
+- 新知识 1：receiver-source spread 不能无条件奖励。
+  - r19 `confirm_02` 证明 spread 最干净的分支也可能真实收益为负。
+  - 因此 `portfolio_daily_ranking_v2_gated` 必须先看收益、Sharpe、月度收益、回撤、执行冲突和现金行为，再决定是否给 spread 奖励。
+- 新知识 2：r19 的现金分支不是阈值太严，而是现金竞争信号几乎没有被激活。
+  - r19 全部路线 `cash_reserve_rate = 0.0`，现金分数均值接近零。
+  - v13 通过弱 receiver、弱市场宽度、高暴露压力、高换手压力、稀疏 receiver、真实回撤压力和防守门槛共同形成 cash competition score，才让现金保留从死分支变为可观测行为。
+- 新知识 3：组合排序模式下，原始 `add/open` 不一定是最终组合意图。
+  - 未被选为 `direct_action_core_deploy_target` 的原始 `add/open` 更像候选 receiver，不应直接计入 add-to-hold 或 order-translation 冲突。
+  - 审计和指标应优先使用 `portfolio_daily_effective_model_action`，再回退到原始 `model_action`。
+- 新知识 4：confirmatory 不是天然更可信，失败 confirm 必须能被 selector 拒绝。
+  - r20 bounded confirmatory 显示 fresh confirm 可以从 screening 过 gate 退化到负收益、超回撤和高 add-to-hold 冲突。
+  - 因此 v2 champion selector 必须使用 gate-first 逻辑，不能因为结果来自 confirmatory 就自动优先。
+- 新知识 5：当前最有效路径已经不是继续增加 action loss，而是让目标函数、现金竞争、有效组合意图和 champion 选择共同服从真实组合表现。
+  - v2/v13 retry2 证明该路径能同时压低执行冲突并恢复非零现金保留。
+  - fresh confirm 失败说明稳定性还没闭合；下一步应扩大同口径 bounded evidence，而不是把 smoke 过 gate 解释成 promotion。

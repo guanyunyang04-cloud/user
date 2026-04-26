@@ -86,8 +86,15 @@
 - 原始行数：`581`。
 - 原始 SHA256：`b3f83530ec585e284a60e568bd66be4f7c8402d455efec20944af41e58f0afe8`。
 - 读取纪律：当前设计合同以本文件上方章节为准；r1-r11b 的完整合同演化只作为历史证据。
-## 2026-04-25 r19 portfolio daily ranking contract
-- r19 changes the learning/evaluation question from isolated `open/add/hold/reduce/exit` labels to daily portfolio allocation: which names receive capital, which names release capital, and whether cash should be reserved.
-- Required success evidence includes positive `portfolio_daily_receiver_minus_source_forward_excess_5d`, non-trivial `portfolio_daily_source_realized_sell_rate`, controlled `portfolio_daily_cash_reserve_rate`, acceptable turnover, and better monthly consistency without larger drawdown.
-- A source stock may still be a good stock; it is only a valid source when its opportunity cost is lower than the selected receiver under the same portfolio state.
-- r19 is a research bridge toward listwise/pairwise portfolio decision learning, not a live execution profile.
+## 2026-04-25 r19 组合日频排序合同
+- r19 把学习/评估问题从孤立的 `open/add/hold/reduce/exit` 标签改为日频组合分配：哪些标的接收资金，哪些标的释放资金，以及是否应保留现金。
+- 必要成功证据包括正向 `portfolio_daily_receiver_minus_source_forward_excess_5d`、非平凡 `portfolio_daily_source_realized_sell_rate`、受控 `portfolio_daily_cash_reserve_rate`、可接受换手，以及不扩大回撤前提下更好的月度一致性。
+- source stock 仍可能是好股票；只有在同一组合状态下它的机会成本低于被选 receiver 时，它才是有效资金来源。
+- r19 是通向 listwise/pairwise 组合决策学习的 research 桥，不是 live execution profile。
+
+## 2026-04-26 r20 v2/v13 合同
+- `portfolio_daily_ranking_v2_gated` 必须 gate-first：`annual_return`、`sharpe`、`monthly_return_mean` 必须为正，`max_drawdown` 不得低于 `-0.18`，`monthly_consistency_score` 不得低于 `0.45`，执行冲突、add-to-hold 和现金行为必须达标后，receiver-source spread 才能获得主要奖励。
+- `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 必须让现金保留成为真实竞争分支；若 portfolio daily ranking 已观测但 `portfolio_daily_cash_reserve_rate = 0.0`，不得把该分支写成组合级完成态。
+- 组合排序模式下的冲突指标必须优先使用 `portfolio_daily_effective_model_action`；未被选为 core receiver 的原始 `add/open` 只是候选意图，不得直接当成最终 add/open 失败。
+- v2 champion selection 必须拒绝失败 confirmatory：只有通过 v2 gate 的 confirmatory 才能优先成为 champion；否则必须回退到最佳 completed screening，并把失败 confirm 写入 `rejected_confirmatory_trials`。
+- r20 成功判定不是单次 smoke 过 gate，而是在 bounded/fresh confirm 下同时保持正收益、受控回撤、正向月度收益、非零且合理现金保留、正向 receiver-source spread、低 order translation conflict 和低 add-to-hold conflict。

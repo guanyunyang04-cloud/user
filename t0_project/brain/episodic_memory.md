@@ -1,4 +1,4 @@
-# T0 Project Episodic Memory
+# T0 项目情节记忆
 
 ## 1. 作用
 本文件用于保存 `t0_project` 后续按时间顺序推进的实验记录、证据与结论。

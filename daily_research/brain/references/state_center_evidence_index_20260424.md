@@ -1,12 +1,12 @@
-# state_center evidence index
+# state_center 证据索引
 
-- Archived date: `2026-04-24`
-- Raw history: `daily_research/brain/references/state_center_history_raw_20260424.md`
-- Original line count: `1863`
-- Original SHA256: `1c135d58f6e1951cf60c8bd2234522ccc5357755953f6962d9070ec67b7a1e16`
-- Rule: current entry documents keep only executable current state; use this index to locate historical evidence in the raw archive.
+- 归档日期：`2026-04-24`
+- 历史原文：`daily_research/brain/references/state_center_history_raw_20260424.md`
+- 原始行数：`1863`
+- 原始 SHA256：`1c135d58f6e1951cf60c8bd2234522ccc5357755953f6962d9070ec67b7a1e16`
+- 规则：当前入口文档只保留可执行的当前状态；需要历史证据时，通过本索引定位到原始归档。
 
-## Heading Index
+## 标题索引
 
 | No. | Line | Heading |
 | --- | ---: | --- |
@@ -61,7 +61,7 @@
 | 49 | 1415 | `## 2026-04-20 r7 hierarchical arbitration 最新状态` |
 | 50 | 1445 | `## 2026-04-21 r8 constraint arbitration 当前状态` |
 | 51 | 1482 | `## 2026-04-21 r9 intent-preserving translation 最新状态` |
-| 52 | 1529 | `## 2026-04-21 Default Execution State Update` |
+| 52 | 1529 | `## 2026-04-21 默认执行状态更新` |
 | 53 | 1557 | `## 2026-04-22 接管复核与状态补齐` |
 | 54 | 1584 | `## 2026-04-22 主分脑文档兼容入口维护补充` |
 | 55 | 1600 | `## 2026-04-22 episodic_memory 历史归档瘦身状态` |

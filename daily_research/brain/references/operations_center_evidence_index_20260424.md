@@ -1,12 +1,12 @@
-# operations_center evidence index
+# operations_center 证据索引
 
-- Archived date: `2026-04-24`
-- Raw history: `daily_research/brain/references/operations_center_history_raw_20260424.md`
-- Original line count: `1483`
-- Original SHA256: `fd8349ca8d7152191a57ff023d8ed502ea42f0085553658f4d920c783654ef08`
-- Rule: current entry documents keep only executable current state; use this index to locate historical evidence in the raw archive.
+- 归档日期：`2026-04-24`
+- 历史原文：`daily_research/brain/references/operations_center_history_raw_20260424.md`
+- 原始行数：`1483`
+- 原始 SHA256：`fd8349ca8d7152191a57ff023d8ed502ea42f0085553658f4d920c783654ef08`
+- 规则：当前入口文档只保留可执行的当前状态；需要历史证据时，通过本索引定位到原始归档。
 
-## Heading Index
+## 标题索引
 
 | No. | Line | Heading |
 | --- | ---: | --- |
@@ -52,12 +52,12 @@
 | 40 | 925 | `## 2026-04-20 r7 操作闭环` |
 | 41 | 945 | `## 2026-04-21 r8 constraint arbitration 操作闭环` |
 | 42 | 1037 | `## 2026-04-21 r9 intent-preserving translation 执行记录` |
-| 43 | 1083 | `## 2026-04-21 Default Execution Operations Update` |
-| 44 | 1114 | `## 2026-04-21 Frontend Task Surface Simplification` |
-| 45 | 1135 | `## 2026-04-21 Frontend Simplified Chinese Encoding Repair` |
-| 46 | 1148 | `## 2026-04-22 Policy Score Display Semantics Repair` |
-| 47 | 1183 | `## 2026-04-22 Project Systematic Maintenance Sweep` |
-| 48 | 1204 | `## 2026-04-22 Main/Sub Brain Integrity Maintenance` |
+| 43 | 1083 | `## 2026-04-21 默认执行操作状态更新` |
+| 44 | 1114 | `## 2026-04-21 前端任务界面简化` |
+| 45 | 1135 | `## 2026-04-21 前端简体中文编码修复` |
+| 46 | 1148 | `## 2026-04-22 策略分数显示语义修复` |
+| 47 | 1183 | `## 2026-04-22 项目系统性维护清扫` |
+| 48 | 1204 | `## 2026-04-22 主分脑完整性维护` |
 | 49 | 1219 | `## 2026-04-22 文档收口与中文化口径` |
 | 50 | 1231 | `## 2026-04-22 episodic_memory 分层归档口径` |
 | 51 | 1243 | `## 2026-04-22 r10 deploy-executability 操作入口` |

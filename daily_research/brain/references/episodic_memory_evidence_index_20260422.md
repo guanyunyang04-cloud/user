@@ -149,7 +149,7 @@
 | 6925 | 2026-03-27 | ## 2026-03-27 `advanced_ml (ma50 baseline, lgbm)` 重训频率 / boosting 轮数正式敏感性实验 |
 | 7064 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 训练窗口 / 重训频率 / boosting 轮数正式矩阵 |
 | 7178 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 长窗口 pair revalidation |
-| 7265 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` shortlist head-to-head |
+| 7265 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 候选短名单正面对比 |
 | 7332 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器首轮正式扫描 |
 | 7409 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守分型诊断 |
 | 7461 | 2026-03-28 | ## 2026-03-28 `advanced_ml (ma50 baseline, lgbm)` 攻守控制器第二轮正式扫描（加 `ret10`） |
@@ -162,13 +162,13 @@
 | 7989 | 2026-03-28 | ## 2026-03-28 执行端最高收益回测复核 |
 | 8032 | 2026-03-29 | ## 2026-03-29 旧快照高收益因果链钉死：`label_gap_off` 受控 ablation |
 | 8085 | 2026-03-29 | ## 2026-03-29 执行端从旧快照高收益后端切回当前仓安全桥接版 |
-| 8141 | 2026-03-29 | ## 2026-03-29 Same-Protocol Bridge Validation: execution `v250@260` vs live-anchor `v250@520` |
-| 8217 | 2026-03-29 | ## 2026-03-29 Gemini standard mode rollback to background resume, plus brain repair |
+| 8141 | 2026-03-29 | ## 2026-03-29 同协议桥接验证：execution `v250@260` 对比 live-anchor `v250@520` |
+| 8217 | 2026-03-29 | ## 2026-03-29 Gemini 标准模式回退到后台 resume，并修复 brain |
 | 8261 | 2026-03-29 | ## 2026-03-29 Cross-profile 攻守控制器正式扫描：`legacy_v7` offense vs `expanded_v24` defense |
 | 8323 | 2026-03-29 | ## 2026-03-29 `deep_alpha` 新 alpha 家族正式起跑：最小充分矩阵 `backbone` 阶段完成 |
-| 8380 | 2026-03-29 | ## 2026-03-29 Gemini hallucination escalation rule was productized |
+| 8380 | 2026-03-29 | ## 2026-03-29 Gemini 幻觉升级规则产品化 |
 | 8423 | 2026-03-29 | ## 2026-03-29 `deep_alpha` 最小矩阵继续推进：`score_head` 与 `ranking` 都已正式收口 |
-| 8477 | 2026-03-29 | ## 2026-03-29 Gemini CLI session hygiene was repaired into a usable default workflow |
+| 8477 | 2026-03-29 | ## 2026-03-29 Gemini CLI 会话卫生修复成可用默认流程 |
 | 8545 | 2026-03-29 | ## 2026-03-29 Gemini 协作模块被整体暂停 |
 | 8569 | 2026-03-29 | ## 2026-03-29 Deep Alpha 新机会集 formal：rolling liquid800 + ranked / concentration 复验 |
 | 8653 | 2026-03-30 | ## 2026-03-30 Deep Alpha strict walk-forward 纠偏：liquid800 前沿重算 |
@@ -184,39 +184,39 @@
 | 9453 | 2026-04-03 | ## 2026-04-03 execution-first 项目级统一修正 |
 | 9519 | 2026-04-03 | ## 2026-04-03 项目体检与冗余清理 |
 | 9573 | 2026-04-03 | ## 2026-04-03 execution-first formal winner 正式上位 |
-| 9633 | 2026-04-03 | ## 2026-04-03 Monthly Research Protocol Unification |
+| 9633 | 2026-04-03 | ## 2026-04-03 月度研究协议统一 |
 | 9668 | 2026-04-04 | ## 2026-04-04 monthly execution-first rich experiment 重跑 |
 | 9709 | 2026-04-04 | ## 2026-04-04 monthly execution-first finetune epoch 预算充分性 formal |
 | 9759 | 2026-04-04 | ## 2026-04-04 训练续训与家族 budget frontier 接线 |
 | 9791 | 2026-04-05 | ## 2026-04-05 |
-| 10016 | 2026-04-05 | ## 2026-04-05 - liquid500 short_alpha execution policy profit-max audit |
+| 10016 | 2026-04-05 | ## 2026-04-05 - liquid500 short_alpha execution policy 利润最大化审计 |
 | 10040 | 2026-04-05 | ## 2026-04-05 - liquid500 short-alpha weak-month / conditional policy / profit-max refresh / dynamic_graph challenger 收口 |
 | 10099 | 2026-04-06 | ## 2026-04-06 全局 deployable leaderboard 接线 |
 | 10135 | 2026-04-06 | ## 2026-04-06 `deep_alpha` 架构复杂度 / 深度 / 结构实验按当前协议重做 |
-| 10252 | 2026-04-06 | ## 2026-04-06 - short-alpha score-to-weight repair + graph_off_plain budget review + encoder_transformer stability review |
-| 10366 | 2026-04-06 | ## 2026-04-06 - workspace maintenance + hotset trim |
-| 10453 | 2026-04-06 | ## 2026-04-06 - targeted weak-month repair implementation + leave-window-out review |
-| 10618 | 2026-04-06 | ## 2026-04-06 - user north-star target aligned |
-| 10631 | 2026-04-06 | ## 2026-04-06 - short-line expert training package + recent probe |
+| 10252 | 2026-04-06 | ## 2026-04-06 - short-alpha score-to-weight 修复 + graph_off_plain 预算复核 + encoder_transformer 稳定性复核 |
+| 10366 | 2026-04-06 | ## 2026-04-06 - 工作区维护 + hotset 精简 |
+| 10453 | 2026-04-06 | ## 2026-04-06 - 定向弱月修复实现 + leave-window-out 复核 |
+| 10618 | 2026-04-06 | ## 2026-04-06 - 用户北极星目标对齐 |
+| 10631 | 2026-04-06 | ## 2026-04-06 - 短线专家训练包 + recent 探针 |
 | 10701 | 2026-04-06 | ## 2026-04-06 - `short_expert` 输出头分支落地并与主候选分离 |
 | 10744 | 2026-04-06 | ## 2026-04-06 - `short_expert` full-budget 复跑，确认 latest 结论不是“没训够” |
 | 10803 | 2026-04-07 | ## 2026-04-07 - 后续工作重排为“最有效优先、训练不吝啬” |
 | 10826 | 2026-04-07 | ## 2026-04-07 - first-week / multi-day weak-month repair 首次转正 |
 | 10858 | 2026-04-07 | ## 2026-04-07 - short_expert_monthly_v1 multi-window formal 补齐到稳定视图 |
 | 10902 | 2026-04-07 | ## 2026-04-07 - short_expert_monthly_v2 latest-window 补齐到预算稳定 |
-| 10951 | 2026-04-08 | ## 2026-04-08 - execution refinement + feature/penalty ablation completed |
-| 10966 | 2026-04-08 | ## 2026-04-08 - execution single-mapping candidate pipeline + penalty-only narrow ablation launch |
+| 10951 | 2026-04-08 | ## 2026-04-08 - execution 精修 + feature/penalty 消融完成 |
+| 10966 | 2026-04-08 | ## 2026-04-08 - execution single-mapping 候选流程 + penalty-only 窄消融启动 |
 | 10986 | 2026-04-08 | ## 2026-04-08 - 用户明确收紧训练与执行 handoff 纪律 |
 | 10996 | 2026-04-08 | ## 2026-04-08 - 用户新增“同模型扩预算一律续训”纪律 |
 | 11004 | 2026-04-08 | ## 2026-04-08 - 用户新增 GPU-only 训练纪律 |
-| 11010 | 2026-04-08 | ## 2026-04-08 - penalty-only narrow ablation completed with strict-resume heavy extension |
-| 11031 | 2026-04-08 | ## 2026-04-08 - project brain consolidation and current-state cleanup |
-| 11055 | 2026-04-08 | ## 2026-04-08 - execution single-mapping candidate promoted to active default |
-| 11086 | 2026-04-08 | ## 2026-04-08 - execution pipeline light refresh + 32-start production refresh completed |
-| 11126 | 2026-04-08 | ## 2026-04-08 - consistency cleanup and regression guard completed |
-| 11146 | 2026-04-08 | ## 2026-04-08 - latest-user-requirement priority formalized |
+| 11010 | 2026-04-08 | ## 2026-04-08 - penalty-only 窄消融完成并做 strict-resume 重预算扩展 |
+| 11031 | 2026-04-08 | ## 2026-04-08 - 项目脑整合与当前状态清理 |
+| 11055 | 2026-04-08 | ## 2026-04-08 - execution single-mapping 候选晋升为 active default |
+| 11086 | 2026-04-08 | ## 2026-04-08 - execution pipeline 轻刷新 + 32-start production 刷新完成 |
+| 11126 | 2026-04-08 | ## 2026-04-08 - 一致性清理与回归守卫完成 |
+| 11146 | 2026-04-08 | ## 2026-04-08 - 最新用户要求优先级正式化 |
 | 11157 | 2026-04-09 | ## 2026-04-09 - raw fallback 统一且 production e64 同步完成 |
-| 11165 | 2026-04-09 | ## 2026-04-09 09:48 Consistency Closure |
+| 11165 | 2026-04-09 | ## 2026-04-09 09:48 一致性闭环 |
 | 11173 | 2026-04-09 | ## 2026-04-09 - 月度优先执行裁决与 same-window targeted review 修复 |
 | 11181 | 2026-04-09 | ## 2026-04-09 - 30% 强月 signal-to-weight verdict |
 | 11202 | 2026-04-09 | ## 2026-04-09 - 研究模型与执行模型协议钉死并完成分脑整理 |
@@ -304,7 +304,7 @@
 | 15221 | 2026-04-17 | ## 2026-04-17 self-opt return_recovery_r3 预置 |
 | 15270 | 2026-04-17 | ## 2026-04-17 continuous_policy 绑定设计合同与语义审计闭环 |
 | 15344 | 2026-04-18 | ## 2026-04-18 continuous_policy semantic_guard 执行层净化 |
-| 15433 | 2026-04-18 | ## 2026-04-18 continuous_policy budget split ablation |
+| 15433 | 2026-04-18 | ## 2026-04-18 continuous_policy budget split 消融 |
 | 15476 | 2026-04-18 | ## 2026-04-18 continuous_policy budget_layer_ablation_r2 前台训练级交付 |
 | 15497 | 2026-04-18 | ## 2026-04-18 continuous_policy alpha prior + result/value budget r1 落地 |
 | 15566 | 2026-04-18 | ## 2026-04-18 cp_v3_alpha_result_value_budget_r1 正式 study 与反事实复盘 |

@@ -780,10 +780,14 @@ def _build_semantic_conflicts(
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
+    working["effective_model_action"] = working.get(
+        "portfolio_daily_effective_model_action",
+        working["model_action"],
+    ).astype(str)
     working["execution_action"] = working.get("execution_action", pd.Series("", index=working.index)).astype(str)
     working["weight_change_action"] = working.get("weight_change_action", working["execution_action"]).astype(str)
-    working["is_semantic_conflict"] = working["model_action"] != working["execution_action"]
-    working["is_order_translation_conflict"] = working["model_action"] != working["weight_change_action"]
+    working["is_semantic_conflict"] = working["effective_model_action"] != working["execution_action"]
+    working["is_order_translation_conflict"] = working["effective_model_action"] != working["weight_change_action"]
     working["is_conflict"] = working["is_semantic_conflict"]
     working["abs_delta_weight"] = working["delta_weight"].abs()
     working["contradictory_micro_rebalance"] = working.get(
@@ -1154,7 +1158,7 @@ def _build_semantic_conflicts(
     avg_disciplined_funding_need = _safe_mean(disciplined_funding_need)
     avg_protected_hold_support = _safe_mean(protected_hold_support)
     avg_funding_release_support = _safe_mean(funding_release_support)
-    model_action_lookup = working["model_action"].astype(str).str.lower()
+    model_action_lookup = working["effective_model_action"].astype(str).str.lower()
     weight_change_lookup = working["weight_change_action"].astype(str).str.lower()
     deploy_intent_mask = model_action_lookup.isin({"open", "add"})
     add_intent_mask = model_action_lookup == "add"

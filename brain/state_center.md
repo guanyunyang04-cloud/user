@@ -2,6 +2,12 @@
 
 快照日期：`2026-04-25`
 
+## 2026-04-26 daily_research r19 bounded study 与运行纪律状态
+- 当前事实：`daily_research` 已完成 `cp_v3_portfolio_daily_ranking_r19__study_r1`，共 `4` 个 screening trial、`2` 个 confirmatory trial，训练诊断均为 `formal_torch_seq_v3 / device=cuda / cuda_available=true`，任务按 `yolos` 口径执行。
+- 主脑层结论：r19 仍是 `research / shadow_only` 证据；没有切换 live、没有改写 active artifact、没有改变 promotion gate。
+- 关键判断：r19 证明组合级 receiver/source/cash ranking 指标已经可训练、可评估、可审计，但当前 `portfolio_daily_ranking_v1` 的 scoring 与真实收益/回撤仍不完全一致，具体实验细节继续由 `daily_research/brain/` 承载。
+- 运行纪律已更新：项目任务默认前台运行、不中断，窗口时限统一为 `10` 小时；`daily_research` 任务必须使用 `yolos`，GPU 训练完成后必须核验 `device=cuda` 与 `cuda_available=true`。
+
 ## 2026-04-25 daily_research r18 根因与组合级方向状态
 - 当前事实：`daily_research` 已落地 `split_heads_direct_action_pair_cost_guard_r18`、`cash_constraint_direct_action_pair_cost_guard_v11` 与 `direct_action_pair_cost_guard_v1`；r18 smoke2 已让 `direct_action_core_minus_pair_forward_excess_5d` 转正并降低换手，但仍是 research / `shadow_only`。
 - 已固定五个卡点：个股动作不等于组合决策、局部动作目标会互相打架、卖出/现金/source credit assignment 最难、日频数据有盲区、有效 regime 样本小。
@@ -120,36 +126,9 @@
   - 主脑只记录状态摘要，不复制具体指标；详细证据、命令、合同与遗留问题继续以 `daily_research/brain/` 为真源。
   - 后续若继续推进，应优先在分脑中验证训练级 value/release/cash timing 闭环，而不是让主脑承载实验细节。
 
-## 2026-04-23 daily_research r11 bounded study 收口状态
-- 当前事实：
-  - `daily_research` 已完成正式 bounded self-opt：`cp_v3_sell_source_contract_r11__study_r1`，共 `4` 个 screening trial 与 `2` 个 confirmatory trial，`objective_profile = sell_source_contract_v1`。
-  - 当前可复现最佳分支不是 `result_value_v10`，而是 `loss_profile = alpha_result_value_budget_split_v10` 搭配 `budget_objective = result_value_v9`。
-  - `result_value_v10 + alpha_result_value_budget_split_v10` 在 screening 可行，但 fresh confirmatory `confirm_02` 明显失稳，不能据此把 `v10 objective` 扶正。
-  - 已手动补做同口径 runner-up confirm：`cp_v3_sell_source_contract_r11__study_r1__confirm_03_runnerup_alla`；其结果未超过 `confirm_01`。
-  - 本轮还在导出链路中发现并修复了空 `share_actions` 时的 export 崩溃问题。
-- 主脑层决策：
-  - 主脑只保留全局结论：当前训练侧最有价值的新增信号在 `v10 loss / funding-release discipline`，不在当前 `v10 objective`。
-  - sell-source 主矛盾已从 `budget_origin_sell_share` 收敛到 `deploy_funding_rebalance` 过度依赖与 `reduce/exit` 学习不足；详细指标、命令与产物继续只写 `daily_research/brain/`。
-## 2026-04-23 daily_research r11 held-side release/funding 合同收紧状态
-- 当前事实：
-  - `daily_research` 已把 held-side 诊断继续接到正式研究链路：`analyze_behavior_gap.py` 新增 `protected_hold / funding_release` 支持度、`deploy_funding_release_consistent_share`、`model_release_signal_forward_excess_5d` 等字段；`run_self_optimizing_study.py` 新增 `sell_source_contract_v2` 与 `split_heads_sell_source_contract_r11b`。
-  - 已对 `r11` 的 `confirm_01 / confirm_02 / confirm_03_runnerup_alla` 串行重跑新审计，并生成对比产物：`daily_research/output/continuous_policy/analysis/protocol_contract_comparisons/r11_sell_source_contract_v2_compare_20260423.json`。
-  - 新证据表明，当前 held-side 主问题不是“大量卖到强保护旧仓”，而是 `deploy_funding_release_consistent_share` 在现有 confirm 分支中仍接近 `0`，说明 release/funding 判据还没有真正学成。
-  - 在 `sell_source_contract_v2` 下，当前排序仍由 `confirm_01` 领先，`confirm_03_runnerup_alla` 与 `confirm_02` 被进一步拉开；`r11b` dry-run 已可直接进入后续正式 study。
-- 主脑层决策：
-  - 主脑继续维持“分层方向正确、held-side 学习闭环尚未完成”的全局判断，不回退到“整体原理错误”叙事。
-  - 后续如继续投入正式算力，应优先围绕 `result_value_v9 + alpha_result_value_budget_split_v10 + cash_constraint_sell_source_guard_v7` 的 held-side release/funding 学习加强版推进，而不是让主脑承载实验细节。
-
-## 2026-04-23 daily_research r11b v11 正式 study 状态
-- 当前事实：
-  - `daily_research` 已完成正式 bounded self-opt：`cp_v3_sell_source_contract_r11b__study_r1`，`objective_profile = sell_source_contract_v2`，共 `4` 个 screening trial 与 `2` 个自动 confirmatory trial，并补做了 `confirm_03_semantic_v11v9`。
-  - 训练侧已新增 `alpha_result_value_budget_split_v11`，并让 `funding_release_discipline_loss` 支持 `v10 / v11` 变体；held-side 审计现已可导出逐事件明细。
-  - `v11 + result_value_v10` 不再像旧 `v10/v10` 那样彻底失稳，但自动 confirm 仍为 `shadow_only`，且 `deploy_funding_rebalance_sell_share = 0.9699`、`deploy_funding_release_consistent_share = 0.0`，说明更强 loss 并没有自动换来 release 学成。
-  - `v11 + result_value_v9` 证明 funding 语义可以继续被清理，`deploy_funding_rebalance_sell_share = 0.6957`、`deploy_funding_rebalance_forward_excess_5d = -0.0121`，但 `deploy_intent_realized_rate = 0.2627`，说明 held-side 改善尚未和 deploy executability 同步成立。
-  - held-side 逐事件明细显示：自动 confirm 共有 `129` 次 funding trim，集中在 `002371.SZ / 001309.SZ / 002049.SZ`；语义线只有 `16` 次 funding trim，集中在 `002049.SZ / 002157.SZ`，但两条线的 `deploy_funding_release_consistent_share` 都仍为 `0.0`。
-- 主脑层决策：
-  - 主脑维持“整体分层方向正确、真正瓶颈已收敛到 held-side release 学习与 deploy/order translation 耦合”的判断。
-  - 当前不允许把 `result_value_v10` 升为默认 objective，也不允许把 `v11` 单独视为 promotion 证据；实验细节、命令与逐仓证据继续只写 `daily_research/brain/`。
+## 2026-04-23 daily_research r11-r11b 卖出来源与 held-side 状态摘要
+- 当前事实：r11/r11b 已把 sell-source、funding release、held-side detail 和补充 confirm 接入正式研究链路；最佳稳定方向仍围绕 `result_value_v9` 与更强 funding discipline，而不是把 `result_value_v10` 或单独 `v11` 扶正。
+- 主脑层决策：主脑只保留“主矛盾已收敛到 held-side release 学习与 deploy/order translation 耦合”的全局判断；具体命令、指标、逐仓证据、失败分支和导出修复继续只由 `daily_research/brain/` 承载。
 
 ## 2026-04-24 daily_research r13 动作价值统一入口状态
 - 当前事实：`daily_research` 已落地 `split_heads_action_value_unification_r13`、`alpha_result_value_budget_split_v13` 与 `action_value_unification_v1`，并完成 `cp_v3_action_value_unification_r13__study_r1`；champion 为 `confirm_01 = alpha_result_value_budget_split_v13 + result_value_v10`，但仍是 `shadow_only`。
@@ -158,3 +137,7 @@
 ## 2026-04-24 daily_research r14 直接日级动作仲裁入口状态
 - 当前事实：`daily_research` 已完成 `cp_v3_direct_action_value_r14__study_r1` screening 与 repaired confirm；`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9` 收益、Sharpe 与月度收益质量显著改善，但仍为 `shadow_only`，failure mode 仍是 `order_translation_drift`。
 - 主脑层决策：r14 证明直接动作值仲裁有价值，但 release/funding 与订单翻译未闭合；不切 live、不改 active artifact、不改 promotion gate，细节继续由 `daily_research/brain/` 承载。
+
+## 2026-04-26 daily_research r20 v2/v13 状态摘要
+- 当前事实：`daily_research` 已把 r19 组合日频排序推进到 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`；修复点包括 v1 spread 奖励错位、现金死分支、组合候选动作误判和失败 confirm 自动成为 champion 的风险。
+- 主脑层决策：主脑只记录全局摘要；r20 仍为 `research / shadow_only`，不能进入 live 或 promotion，详细指标、命令、gate 报告和失败 confirm 证据继续以 `daily_research/brain/` 为真源。

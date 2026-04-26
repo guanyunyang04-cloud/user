@@ -613,6 +613,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("direct_action_pair_cost_guard_v1", "r18 direct action pair cost guard objective"),
         ("split_heads_portfolio_daily_ranking_r19", "r19 portfolio daily ranking study profile"),
         ("portfolio_daily_ranking_v1", "r19 portfolio daily ranking objective"),
+        ("portfolio_daily_ranking_v2_gated", "r20 gated portfolio daily ranking objective"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -690,6 +691,16 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r19_contract_missing",
         "continuous_policy r19 portfolio daily ranking contract is missing audit/scoring markers.",
+    )
+    _require(
+        "cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13" in simulator_text
+        and "portfolio_daily_effective_model_action" in simulator_text
+        and "portfolio_daily_effective_model_action" in analysis_text
+        and "portfolio_daily_ranking_v2_gated" in study_text
+        and "champion_selection_policy" in study_text,
+        failures,
+        "continuous_policy_r20_contract_missing",
+        "continuous_policy r20 gated portfolio daily ranking contract is missing v2/v13/effective-intent markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

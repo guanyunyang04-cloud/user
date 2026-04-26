@@ -1,12 +1,12 @@
-# continuous_policy_design_contract evidence index
+# continuous_policy_design_contract 证据索引
 
-- Archived date: `2026-04-24`
-- Raw history: `daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`
-- Original line count: `581`
-- Original SHA256: `305f273ad470d9e6f7fcadfcf8580390902633a2534dbb12d5c4775e987dd030`
-- Rule: current entry documents keep only executable current state; use this index to locate historical evidence in the raw archive.
+- 归档日期：`2026-04-24`
+- 历史原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`
+- 原始行数：`581`
+- 原始 SHA256：`305f273ad470d9e6f7fcadfcf8580390902633a2534dbb12d5c4775e987dd030`
+- 规则：当前入口文档只保留可执行的当前状态；需要历史证据时，通过本索引定位到原始归档。
 
-## Heading Index
+## 标题索引
 
 | No. | Line | Heading |
 | --- | ---: | --- |

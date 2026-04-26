@@ -108,7 +108,7 @@
     - `composite_score = 8.588851`
     - `training_evidence.status = sufficient`
     - `promotion_gate.status = shadow_only`
-  - performance champion：`cp_v3_deploy_executability_r10__study_r1__confirm_01`
+- 表现冠军：`cp_v3_deploy_executability_r10__study_r1__confirm_01`
     - `budget_objective = result_value_v8`
     - raw `annual_return / sharpe` 更高，但 `cash_timing_quality_1d` 与 `max_drawdown` 仍不过 gate
   - screening 的结构性分层很清楚：
@@ -141,8 +141,8 @@
   - 在 `action_budget_split_v1` 下新增弱持仓 slot 竞争，并补充 `budget_reclaimable_held_count` / `budget_released_held_count` / `budget_released_from_hold` 诊断字段。
   - 用现有冠军模型 `cp_v3_deploy_executability_r10__study_r1__confirm_02` 重跑 patched 评估与行为审计。
 - 结果：
-  - patched eval：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval`
-  - patched audit：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit`
+- 修补后评估：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_eval`
+- 修补后审计：`cp_v3_deploy_executability_r10__study_r1__confirm_02__budget_fix_audit`
   - 关键指标改善：
     - `annual_return: 0.2918 -> 0.9022`
     - `sharpe: 1.1732 -> 3.5963`
@@ -643,14 +643,14 @@
     - `order_translation_conflict_rate = 0.3862`
     - `reduce_success_rate_5d = 0.0`
     - `exit_timeliness_rate_5d = 0.25`
-  - screening champion：`trial_04 = alpha_result_value_budget_split_v11 + result_value_v10`
+- 筛选冠军：`trial_04 = alpha_result_value_budget_split_v11 + result_value_v10`
     - `composite_score = 3.0082`
     - `annual_return = 0.9111`
     - `deploy_intent_realized_rate = 0.9130`
     - `release_translation_deploy_health_score = 0.4352`
     - `deploy_funding_release_consistent_share = 0.0`
     - `failure_mode = order_translation_drift`
-  - confirm_01：`alpha_result_value_budget_split_v11 + result_value_v10`
+- 确认项 confirm_01：`alpha_result_value_budget_split_v11 + result_value_v10`
     - `annual_return = 0.5505`
     - `release_translation_deploy_health_score = 0.4093`
     - `deploy_intent_realized_rate = 0.8708`
@@ -759,8 +759,8 @@
   - 生成 repaired confirm 对比：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_value_r14__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
   - 顺序导出 `confirm_01` held-side detail，未并行运行会写 latest 行为摘要的审计。
 - 关键结果：
-  - screening champion：`trial_02 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.3631`、`sharpe = 1.1531`、`max_drawdown = -0.1201`、`monthly_return_mean = 0.0234`、`monthly_win_rate = 0.75`、`direct_action_value_mode_share = 1.0`、`direct_action_order_translation_conflict_rate = 0.2842`，`promotion_status = shadow_only`。
-  - repaired champion：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 1.0904`、`sharpe = 2.8082`、`max_drawdown = -0.1326`、`monthly_return_mean = 0.0587`、`monthly_win_rate = 0.75`、`monthly_worst_return = -0.0797`、`monthly_consistency_score = 0.7722`、`direct_action_value_mode_share = 1.0`、`direct_action_value_gap_mean = 0.0351`。
+- 筛选冠军：`trial_02 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.3631`、`sharpe = 1.1531`、`max_drawdown = -0.1201`、`monthly_return_mean = 0.0234`、`monthly_win_rate = 0.75`、`direct_action_value_mode_share = 1.0`、`direct_action_order_translation_conflict_rate = 0.2842`，`promotion_status = shadow_only`。
+- 修复后冠军：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 1.0904`、`sharpe = 2.8082`、`max_drawdown = -0.1326`、`monthly_return_mean = 0.0587`、`monthly_win_rate = 0.75`、`monthly_worst_return = -0.0797`、`monthly_consistency_score = 0.7722`、`direct_action_value_mode_share = 1.0`、`direct_action_value_gap_mean = 0.0351`。
   - r14 的主要失败项仍是 `reduce_success_rate_5d = 0.0`、`exit_timeliness_rate_5d = 0.25`、`cash_timing_quality_1d`、`max_drawdown` 与 `failure_mode = order_translation_drift`；`promotion_status` 仍为 `shadow_only`。
   - held-side detail：135 条 held-side sell 中 134 条来自 `deploy_funding_rebalance`，1 条来自 `model_release_signal`；104 条 ambiguous、18 条 protected-hold conflict、13 条 release-consistent，集中在 `002371.SZ / 000333.SZ / 002028.SZ`。
 - 动作后复盘：
@@ -784,8 +784,8 @@
   - `doc_guard.py`、`project_consistency_check.py`、主脑状态中枢与分脑状态/操作/设计合同已写回 r15 research 入口。
 - 验证与证据：
   - dry-run：`verify_direct_action_translation_r15_dryrun_20260424` 生成 4 条计划，baseline 为 `alpha_result_value_budget_split_v15 + result_value_v9 + cash_constraint_direct_action_guard_v8`。
-  - smoke evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_translation_r15_v8_eval_smoke_20260424/evaluation_summary.json`。
-  - smoke audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_translation_r15_v8_audit_smoke_20260424.json`。
+- smoke 评估：`daily_research/output/continuous_policy/evaluations/verify_direct_action_translation_r15_v8_eval_smoke_20260424/evaluation_summary.json`。
+- smoke 审计：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_translation_r15_v8_audit_smoke_20260424.json`。
   - 短窗事实：`direct_action_intent_preserved_share = 0.9191`、`direct_action_order_translation_conflict_rate = 0.0515`、`direct_action_value_low_margin_share = 0.8676`、`deploy_intent_realized_rate = 0.7083`，短窗未产生 deploy funding sell。
 - 动作后复盘：
   - 事实：r15 代码链路、指标链路、dry-run 与短窗 smoke 均已贯通；它修的是“动作意图如何穿透执行翻译层”，不是新的 live 策略。
@@ -809,7 +809,7 @@
 - 验证与证据：
   - `py_compile` 通过本轮修改的 continuous_policy 与工具文件。
   - r16 dry-run `verify_direct_action_reallocation_r16_dryrun_20260425` 通过，4 条 trial 均使用 v9 reallocation guard。
-  - r16 smoke2 `verify_direct_action_reallocation_r16_v9_eval_smoke2_20260425`：`annual_return = 0.5807`、`sharpe = 1.6261`、`max_drawdown = -0.1180`、`monthly_consistency_score = 0.7247`、`direct_action_reallocation_source_count = 105`。
+- r16 第二次 smoke `verify_direct_action_reallocation_r16_v9_eval_smoke2_20260425`：`annual_return = 0.5807`、`sharpe = 1.6261`、`max_drawdown = -0.1180`、`monthly_consistency_score = 0.7247`、`direct_action_reallocation_source_count = 105`。
   - r16 smoke2 同时暴露：`direct_action_deploy_authorized_realized_rate = 0.1557`、`direct_action_add_authorized_realized_rate = 0.1439`、`add_to_hold_conflict_share = 0.8483`，说明核心 deploy/add 落地仍未完成。
   - r16 smoke3 曾尝试强制压低 source cap 并收窄授权阈值，结果显著恶化收益、回撤和成交率；该路径已回退，不作为当前实现。
 - 动作后复盘：
@@ -818,7 +818,7 @@
   - 推断：下一轮若继续，应优先研究 budget-clipped 日的可成交分配机制和 source/target 同步约束，而不是只继续提升动作分类置信度。
   - 决策：r16 保持 `shadow_only` / research baseline；不切换 live，不改 active artifact，不改 promotion gate。
 
-## 2026-04-25 r17 direct-action pair reallocation / core target execution repair
+## 2026-04-25 r17 direct-action pair reallocation / core target 执行修复
 
 - 行动前自检：
   - 事实：r16 已恢复非零 reallocation source，但在高 add/open 压力日仍有大量授权 deploy/add 被翻译成 hold，`direct_action_deploy_authorized_realized_rate = 0.1557`、`add_to_hold_conflict_share = 0.8483`。
@@ -833,7 +833,7 @@
 - 验证与证据：
   - `py_compile` 通过本轮修改的 continuous_policy 与工具文件。
   - r17 dry-run `verify_direct_action_pair_reallocation_r17_dryrun_20260425` 通过，4 条 trial 均使用 v10 pair reallocation guard。
-  - r17 smoke3 `verify_direct_action_pair_reallocation_r17_v10_eval_smoke3_20260425`：`annual_return = 1.0177`、`sharpe = 2.3094`、`max_drawdown = -0.1180`、`monthly_return_mean = 0.0516`、`monthly_consistency_score = 0.7684`、`avg_turnover = 0.0752`。
+- r17 第三次 smoke `verify_direct_action_pair_reallocation_r17_v10_eval_smoke3_20260425`：`annual_return = 1.0177`、`sharpe = 2.3094`、`max_drawdown = -0.1180`、`monthly_return_mean = 0.0516`、`monthly_consistency_score = 0.7684`、`avg_turnover = 0.0752`。
   - r17 smoke3 执行语义：`direct_action_core_deploy_target_realized_rate = 0.9921`、`direct_action_add_authorized_realized_rate = 0.9917`、`direct_action_pair_reallocation_source_count = 65`、`deploy_intent_realized_rate = 0.7143`、`add_to_hold_conflict_share = 0.0`、`direct_action_order_translation_conflict_rate = 0.1764`。
   - r17 audit smoke3：`sell_execution_origin_counts = {budget_sell_priority: 9, direct_action_pair_reallocation: 65, model_release_signal: 1, model_sell_intent: 6, weight_translation: 19}`，修正后 `budget_origin_sell_share = 0.28`，pair-source 不再混入 budget-origin sell。
 - 动作后复盘：
@@ -855,8 +855,8 @@
   - 生成 repaired confirm 对照：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
   - 生成 pair-source 专项审计：`pair_source_audit_summary.json` 与 `pair_source_audit_comparison.csv`，并顺序导出 `confirm_01 / confirm_02` held-side detail，避免 latest 审计竞争。
 - 关键结果：
-  - screening champion：`trial_03 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.9682`、`sharpe = 2.2180`、`max_drawdown = -0.1183`、`monthly_return_mean = 0.0519`、`monthly_consistency_score = 0.7703`、`direct_action_core_deploy_target_realized_rate = 0.9844`、`add_to_hold_conflict_share = 0.0090`、`avg_turnover = 0.0686`，`promotion_status = shadow_only`。
-  - repaired confirm champion：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.6225`、`sharpe = 2.0071`、`max_drawdown = -0.1128`、`monthly_return_mean = 0.0369`、`monthly_consistency_score = 0.7374`、`direct_action_core_deploy_target_realized_rate = 0.9933`、`add_to_hold_conflict_share = 0.0`、`avg_turnover = 0.0890`，`promotion_status = shadow_only`。
+- 筛选冠军：`trial_03 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.9682`、`sharpe = 2.2180`、`max_drawdown = -0.1183`、`monthly_return_mean = 0.0519`、`monthly_consistency_score = 0.7703`、`direct_action_core_deploy_target_realized_rate = 0.9844`、`add_to_hold_conflict_share = 0.0090`、`avg_turnover = 0.0686`，`promotion_status = shadow_only`。
+- 修复后 confirm 冠军：`confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9`，`annual_return = 0.6225`、`sharpe = 2.0071`、`max_drawdown = -0.1128`、`monthly_return_mean = 0.0369`、`monthly_consistency_score = 0.7374`、`direct_action_core_deploy_target_realized_rate = 0.9933`、`add_to_hold_conflict_share = 0.0`、`avg_turnover = 0.0890`，`promotion_status = shadow_only`。
   - repaired confirm_02：`result_value_v10` 方向明显弱，`annual_return = 0.0805`、`sharpe = 0.4082`、`max_drawdown = -0.1698`，继续不能升为默认预算目标。
   - pair-source 审计：`trial_03` core-minus-pair 5 日超额均值 `+0.00936`，`confirm_01` 为 `+0.00710`，`confirm_02` 为 `+0.02734`；但 `trial_01` 为 `-0.00908`、`trial_02` 约 `-0.00046`，说明 pair-source 排序有价值但不稳定。
   - held-side 审计：`confirm_01` 的 `direct_action_pair_reallocation_sell_count = 87`、`direct_action_pair_reallocation_sell_share = 0.6744`、`budget_origin_sell_share = 0.2713`；`confirm_02` 的 `budget_origin_sell_share = 0.5495`，卖出责任链仍未闭合。
@@ -882,7 +882,7 @@
 - 验证与证据：
   - `py_compile` 已通过本轮修改的 continuous_policy 与工具文件。
   - r18 dry-run `verify_direct_action_pair_cost_guard_r18_dryrun_20260425` 已生成 4 条 trial 计划。
-  - r18 smoke2 `verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425`：`annual_return = 0.4891`、`sharpe = 1.9492`、`max_drawdown = -0.1060`、`monthly_return_mean = 0.0322`、`monthly_consistency_score = 0.6693`、`avg_turnover = 0.0286`。
+- r18 第二次 smoke `verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425`：`annual_return = 0.4891`、`sharpe = 1.9492`、`max_drawdown = -0.1060`、`monthly_return_mean = 0.0322`、`monthly_consistency_score = 0.6693`、`avg_turnover = 0.0286`。
   - r18 smoke2 pair-source 事实：`direct_action_pair_reallocation_source_count = 31`、`direct_action_pair_cost_guard_blocked_count = 327`、`direct_action_pair_source_spread_mean = 0.1490`、`direct_action_pair_source_cost_mean = 0.6716`、`direct_action_core_minus_pair_forward_excess_5d = 0.0060`。
   - r18 smoke2 audit 仍把 `direct_action_intent_not_preserved`、`deploy_intent_not_executable`、`budget_action_entanglement` 与 `sell_execution_source_entangled` 判为高优先级瓶颈。
 - 行动后复盘：
@@ -890,11 +890,42 @@
   - 事实：r18 绝对收益低于 r17 repaired confirm，说明它不是最终提升来源，只是把错误的 source credit assignment 明确化、可审计化。
   - 推断：真正的大提升仍需组合级日决策模型，直接学习资金获得者、资金释放者、释放幅度与现金保留，而不是继续学习单只股票该 add 还是 hold。
   - 决策：下一轮主线应转向 portfolio-level pair/listwise ranking、直接优化多日/月度组合收益、卖出与 cash timing 联合 credit assignment；不再把动作 loss 堆叠作为主方向。
-## 2026-04-25 r19 implementation episode
-- Implemented a portfolio-level daily ranking path that carries receiver/source/cash signals from simulator execution into metrics, behavior audit, study scoring, and guard checks.
-- Reframed the next research target around capital receivers, capital sources, release amount, and cash reserve rather than independent action heads.
-- Kept r19 as research/shadow-only evidence; no live default, promotion status, or active artifact was changed.
-## 2026-04-25 r19 verification episode
-- Verified compile, dry-run profile expansion, v12 smoke evaluation, behavior audit, direct `portfolio_daily_ranking_v1` scoring, doc guard, brain integrity, project consistency, and `git diff --check`.
-- Smoke evidence: annual return 0.843131, Sharpe 2.072912, max drawdown -0.122117, monthly consistency 0.723549, receiver-source forward excess 0.002383, source realized sell rate 0.551948.
-- Residual risk: source forward excess remains positive at 0.010149, so the next root problem is still sell/source credit assignment rather than more action-loss stacking.
+## 2026-04-25 r19 实现过程
+- 已实现组合级日频排序路径，把 simulator execution 中的 receiver/source/cash 信号贯穿到 metrics、behavior audit、study scoring 和 guard checks。
+- 下一阶段研究目标已重构为资金接收方、资金来源、释放金额和现金保留，而不是继续围绕独立 action heads。
+- r19 保持为 research/shadow-only 证据；没有改变 live default、promotion status 或 active artifact。
+## 2026-04-25 r19 核验过程
+- 已核验 compile、dry-run profile expansion、v12 smoke evaluation、behavior audit、直接 `portfolio_daily_ranking_v1` scoring、doc guard、brain integrity、project consistency 和 `git diff --check`。
+- smoke 证据：annual return 0.843131、Sharpe 2.072912、max drawdown -0.122117、monthly consistency 0.723549、receiver-source forward excess 0.002383、source realized sell rate 0.551948。
+- 残余风险：source forward excess 仍为正，数值为 0.010149，所以下一个根问题仍是 sell/source credit assignment，而不是继续堆叠 action-loss。
+## 2026-04-26 r19 bounded study 与运行规则纠偏
+- 自检前动作：完整脑接管后，r19 只有 dry-run 和 smoke 证据；下一条正式 shadow 证据缺口是 bounded `split_heads_portfolio_daily_ranking_r19 + portfolio_daily_ranking_v1` study。
+- 执行：用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`、`KMP_DUPLICATE_LIB_OK=TRUE` 启动 `cp_v3_portfolio_daily_ranking_r19__study_r1`，包含 `4` 个 screening trial 和 `2` 个 confirmatory trial；进程自然完成并写出 `study_summary.json`。
+- 核验：六个训练目录均报告 `trainer_backend = formal_torch_seq_v3`、`device = cuda`、`cuda_available = true`、strict resume，且训练诊断完整。
+- 结果：screening 完成 `4/4`，confirmatory 完成 `2/2`，failed trial count 为 `0`，latest state 已恢复到 `cp_v3_direct_action_pair_reallocation_r17__study_r1__confirm_02`。
+- 证据：`confirm_01` 是表现线（`annual_return = 0.967208`、`sharpe = 2.394526`、`monthly_consistency_score = 0.772378`），但 `portfolio_daily_receiver_minus_source_forward_excess_5d = -0.008111`。
+- 证据：`confirm_02` 是综合稳定线，receiver-source spread 更好（`0.031289`）且 source sell realization 为 `0.692308`，但真实收益为负（`annual_return = -0.221432`、`sharpe = -0.565395`）。
+- 决策：r19 仍是 `research / shadow_only`；有用教训是组合级 ranking 是正确问题框架，但 `portfolio_daily_ranking_v1` 当前需要 scoring alignment repair，之后才能讨论 promotion。
+- 运行规则纠偏：脑规则已更新为所有项目任务前台运行、不中断、使用 `10h` 窗口，且 `daily_research` 任务必须在 `yolos` 下运行；GPU 训练证据写回前必须从 diagnostics 核验。
+
+## 2026-04-26 r20 v2 gated 与 v13 cash-aware 执行复盘
+- 行动前自检：
+  - 事实：r19 已自然完成且 GPU 诊断完整，但 v1 objective 把 `confirm_02` 的 receiver-source spread 奖励到高位，同时忽略其负收益和超回撤。
+  - 事实：r19 全部路线 `cash_reserve_rate = 0.0`，说明现金分支在组合日频排序里没有真正参与竞争。
+  - 推断：最高价值动作不是继续跑更多 v1 trial，而是重写 scoring gate、修复现金竞争、校正组合有效意图，并防止失败 confirm 被自动选为 champion。
+- 已完成实现：
+  - `run_self_optimizing_study.py` 新增并默认启用 `portfolio_daily_ranking_v2_gated`，对收益、Sharpe、月度收益、回撤、月度一致性、执行冲突、add-to-hold 和现金保留进行 gate-first scoring。
+  - `portfolio_simulator.py` 新增 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`，把现金保留从近零死分支变成由弱 receiver、弱市场宽度、暴露、换手、稀疏 receiver 和回撤共同驱动的竞争项。
+  - `portfolio_simulator.py` 与 `analyze_behavior_gap.py` 新增 `portfolio_daily_effective_model_action`，避免把未被组合排序选中的原始 `add/open` 候选误算成最终执行冲突。
+  - 新增 `daily_research/tools/portfolio_daily_ranking_gate_report.py`，用于离线 v1/v2 重排、反冠军诊断和 gate 报告。
+  - 修正 v2 champion selector：confirmatory 必须过 v2 gate 才可优先，否则回退到最佳 completed screening，并记录被拒 confirm。
+- 执行证据：
+  - 第一次 smoke 因 `current_gross` 局部变量作用域失败，已修复后重跑；该失败保留为真实工程证据。
+  - retry1 smoke 让现金分支变活，`cash_reserve_rate = 0.009479`，但因原始 `add/open` 候选被误计为执行意图，`order_translation_conflict_rate = 0.398104`、`add_to_hold_conflict_share = 0.5`。
+  - retry2 smoke 通过全部 v2 gate：`annual_return = 0.316303`、`sharpe = 1.152146`、`max_drawdown = -0.129243`、`monthly_return_mean = 0.020376`、`monthly_consistency_score = 0.727527`、`receiver_minus_source_5d = 0.004380`、`source_realized_sell_rate = 0.8`、`order_translation_conflict_rate = 0.033175`、`add_to_hold_conflict_share = 0.072464`。
+  - bounded confirmatory 暴露 fresh confirm 失败：`annual_return = -0.253312`、`sharpe = -0.587612`、`max_drawdown = -0.220648`、`monthly_return_mean = -0.015989`、`add_to_hold_conflict_share = 0.578947`。
+- 行动后复盘：
+  - 事实：v2/v13 可以同时修复 v1 奖励错位、现金死分支和候选动作误判，retry2 已给出一条完整过 gate 的短窗证据。
+  - 事实：fresh confirm 明确失败，说明短窗过 gate 不等于稳定模型，champion selector 必须拒绝失败 confirm。
+  - 推断：当前瓶颈已经从“能否形成组合日频排序”推进到“v2/v13 能否跨 confirmatory 长窗稳定保持收益、回撤、现金和执行一致性”。
+  - 决策：r20 保持 `research / shadow_only`；下一轮应在 v2/v13 下扩大 bounded evidence，并把失败 confirm 当作稳定性约束，而不是当作可 promotion 的候选。

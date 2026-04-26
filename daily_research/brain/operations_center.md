@@ -1,14 +1,17 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-04-25`
+快照日期：`2026-04-26`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录已归档到 `daily_research/brain/references/`。
 - `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - Windows 下默认设置：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`；涉及 MKL/OpenMP 冲突时设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+- 脑内文档当前层标题、正文、状态、规则和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文。
 - 不启动训练、不切换 live、不改写 promotion，除非用户明确要求或状态中枢已有新正式决策。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；需要多条审计时必须顺序执行，不得并行抢写。
-- 长训练、评估或审计按阻塞等待完成处理；不做无意义轮询。
+- 所有训练、评估、审计、bounded study、confirmatory rerun、execution app 任务与交易计划任务默认前台运行，任务主进程不得后台化规避窗口，也不得中途人为中断。
+- 所有项目任务前台窗口时限统一按 `10` 小时处理；若工具单次调用存在更短硬上限，应在同一前台任务语义下接续等待，不改变任务本体。
+- continuous_policy / deep_alpha 等 GPU 训练完成后，必须核验 `training_diagnostics.json` 中 `device = cuda` 与 `cuda_available = true`，并确认解释器来自 `yolos` 后再写入正式证据。
 
 ## 项目地图
 - 当前状态与研究优先级：`daily_research/brain/state_center.md`。
@@ -49,22 +52,22 @@
 - r12/r13/r14/r15/r16/r17/r18 全部仍为 research / shadow 证据，不改变 live 默认执行。
 
 ## r16-r17 当前证据入口
-- r16 dry-run：`daily_research/output/continuous_policy/studies/verify_direct_action_reallocation_r16_dryrun_20260425/study_summary.json`。
+- r16 dry-run 证据：`daily_research/output/continuous_policy/studies/verify_direct_action_reallocation_r16_dryrun_20260425/study_summary.json`。
 - r16 最佳 smoke evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_reallocation_r16_v9_eval_smoke2_20260425/evaluation_summary.json`。
 - r16 最佳 smoke audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_reallocation_r16_v9_audit_smoke2_20260425.json`。
-- r16 held-side detail：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_reallocation_r16_v9_audit_smoke2_20260425__held_side_details.csv`。
-- r17 dry-run：`daily_research/output/continuous_policy/studies/verify_direct_action_pair_reallocation_r17_dryrun_20260425/study_summary.json`。
+- r16 held-side 明细：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_reallocation_r16_v9_audit_smoke2_20260425__held_side_details.csv`。
+- r17 dry-run 证据：`daily_research/output/continuous_policy/studies/verify_direct_action_pair_reallocation_r17_dryrun_20260425/study_summary.json`。
 - r17 最佳 smoke evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_pair_reallocation_r17_v10_eval_smoke3_20260425/evaluation_summary.json`。
 - r17 最佳 smoke audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_pair_reallocation_r17_v10_audit_smoke3_20260425.json`。
 - r17 bounded study 原始 summary：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/study_summary.json`。
 - r17 repaired confirm 对照：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/manual_confirm_repair_summary.json` 与 `manual_confirm_repair_comparison.csv`。
 - r17 pair-source 专项审计：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_pair_reallocation_r17__study_r1/pair_source_audit_summary.json` 与 `pair_source_audit_comparison.csv`。
 - r17 repaired confirm held-side 审计：`daily_research/output/continuous_policy/analysis/behavior_audits/cp_v3_direct_action_pair_reallocation_r17__study_r1__confirm_01_repair_audit.json`、`...confirm_02_repair_audit.json`。
-- r18 dry-run：`daily_research/output/continuous_policy/studies/verify_direct_action_pair_cost_guard_r18_dryrun_20260425/study_summary.json`。
-- r18 smoke2 evaluation：`daily_research/output/continuous_policy/evaluations/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425/evaluation_summary.json`。
-- r18 smoke2 audit：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_audit_20260425.json`。
-- r15 formal study summary：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_translation_r15__study_r1/study_summary.json`。
-- r15 champion protocol：`daily_research/output/continuous_policy/protocols/cp_v3_direct_action_translation_r15__study_r1__confirm_01/protocol_summary.json`。
+- r18 dry-run 证据：`daily_research/output/continuous_policy/studies/verify_direct_action_pair_cost_guard_r18_dryrun_20260425/study_summary.json`。
+- r18 smoke2 评估：`daily_research/output/continuous_policy/evaluations/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_20260425/evaluation_summary.json`。
+- r18 smoke2 审计：`daily_research/output/continuous_policy/analysis/behavior_audits/verify_direct_action_pair_cost_guard_r18_v11_confirm01_smoke2_audit_20260425.json`。
+- r15 正式 study 摘要：`daily_research/output/continuous_policy/studies/cp_v3_direct_action_translation_r15__study_r1/study_summary.json`。
+- r15 冠军 protocol：`daily_research/output/continuous_policy/protocols/cp_v3_direct_action_translation_r15__study_r1__confirm_01/protocol_summary.json`。
 
 ## r17-r18 推荐命令
 - dry-run：
@@ -98,13 +101,33 @@
 - 原始行数：`1483`。
 - 原始 SHA256：`6ade627c15612feab90eaf9c1389a6be7f24b5573c2c2e62583a816f41c8a2a3`。
 - 读取纪律：当前操作以本文件上方章节为准；旧命令仅作为复现和审计证据。
-## 2026-04-25 r19 portfolio daily ranking operation path
-- Use `split_heads_portfolio_daily_ranking_r19` when the task is to study portfolio-level daily execution rather than another action-loss variant.
-- The simulator budget calibration for this path is `cash_constraint_portfolio_daily_ranking_guard_v12`; it ranks capital receivers, capital sources, and cash reserve pressure in one daily portfolio context.
-- The study objective is `portfolio_daily_ranking_v1`; promotion discussion is forbidden until formal bounded evidence passes monthly quality, turnover, drawdown, receiver-source spread, source sell realization, and cash timing checks.
-- Audit priority: read `portfolio_daily_receiver_minus_source_forward_excess_5d`, `portfolio_daily_source_realized_sell_rate`, `portfolio_daily_cash_reserve_rate`, and monthly returns before interpreting headline annual return.
-## 长时训练任务运行纪律
-- 长时训练任务默认在后台运行；前台不承担训练主进程，只负责保持监控直到后台进程完成。
-- 前台不需要反复轮询进度；除非进程异常、用户要求状态、或需要读取最终产物，否则不要做无意义轮询。
-- 监控完成后再一次性读取日志、summary、checkpoint、evaluation 或 audit 产物，并按 `state_center.md` / `episodic_memory.md` 写回复盘。
-- 这条规则适用于 formal training、bounded study、confirmatory rerun、长窗口 evaluation 和长耗时 audit。
+## 2026-04-25 r19 组合日频排序操作路径
+- 当任务目标是研究组合级日频执行，而不是继续增加动作 loss 变体时，使用 `split_heads_portfolio_daily_ranking_r19`。
+- 这一路径的模拟器预算校准为 `cash_constraint_portfolio_daily_ranking_guard_v12`；它在同一个日频组合状态里排序资金接收方、资金释放方和现金保留压力。
+- study 目标为 `portfolio_daily_ranking_v1`；在正式 bounded evidence 通过月度质量、换手、回撤、receiver-source spread、source sell realization 和 cash timing 检查前，禁止进入 promotion 讨论。
+- 审计优先读取 `portfolio_daily_receiver_minus_source_forward_excess_5d`、`portfolio_daily_source_realized_sell_rate`、`portfolio_daily_cash_reserve_rate` 和月度收益，再解释 headline annual return。
+## 2026-04-26 r19 bounded study 证据路径
+- bounded study 摘要：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r19__study_r1/study_summary.json`。
+- trial ranking 表：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r19__study_r1/trial_ranking.csv`。
+- 表现线 confirm protocol：`daily_research/output/continuous_policy/protocols/cp_v3_portfolio_daily_ranking_r19__study_r1__confirm_01/protocol_summary.json`。
+- 综合稳定线 confirm protocol：`daily_research/output/continuous_policy/protocols/cp_v3_portfolio_daily_ranking_r19__study_r1__confirm_02/protocol_summary.json`。
+- 训练环境检查：读取每个 `daily_research/output/continuous_policy/models/cp_v3_portfolio_daily_ranking_r19__study_r1*__train/training_diagnostics.json`，要求 `device = cuda`、`cuda_available = true`、`trainer_backend = formal_torch_seq_v3`。
+## 长时任务运行纪律
+- 长时任务默认前台运行；训练、评估、审计、bounded study、confirmatory rerun、长窗口 evaluation 和长耗时 audit 都不得默认转后台。
+- 前台任务不得中途人为中断；若外层工具因自身硬上限断开，只允许接续等待或读取已自然完成的产物，不得停止训练主进程。
+- 前台窗口时限统一为 `10` 小时；启动命令必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 判断任务是否仍在运行时，必须核对 PID、CommandLine、run_tag 和产物时间戳；不要在 Python summary/diagnostics 解析命令并行运行时用裸 `Get-Process python` 下结论。
+- 完成后一次性读取日志、summary、checkpoint、evaluation 或 audit 产物，并按 `state_center.md` / `episodic_memory.md` 写回复盘。
+
+## 2026-04-26 r20 v2/v13 操作路径
+- 当前 r20 默认预算校准标记：`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`。
+- r19 离线反冠军诊断：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/portfolio_daily_ranking_gate_report.py --study-summary daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_ranking_r19__study_r1/study_summary.json`
+- r20 v2/v13 smoke 推荐命令：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_r19 --objective-profile portfolio_daily_ranking_v2_gated --trial-count 1 --disable-confirmatory --epochs 6 --min-epochs 3 --early-stop-patience 3 --study-tag cp_v3_portfolio_daily_ranking_r20_v2_gated_smoke_20260426_retry2`
+- r20 bounded confirmatory 推荐命令：
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_ranking_r19 --objective-profile portfolio_daily_ranking_v2_gated --trial-count 1 --confirmatory-max-candidates 1 --epochs 6 --min-epochs 3 --early-stop-patience 3 --confirmatory-epochs 8 --confirmatory-min-epochs 4 --study-tag cp_v3_portfolio_daily_ranking_r20_v2_gated_confirm_20260426`
+- 读取 r20 结果时，优先看 v2 gate report 中的 `v2_champion`、失败 gate 和 `portfolio_daily_effective_model_action` 后的冲突指标；不要只看旧 `study_summary.json` 的 `champion` 字段，尤其是代码修复前已经生成的历史 summary。
+- `portfolio_daily_ranking_v2_gated` 的 champion selection 已修复；后续新 summary 应读取 `champion_selection_policy = portfolio_daily_v2_confirmatory_gate_then_screening_fallback` 与 `rejected_confirmatory_trials`。
+- 任何 r20 训练证据写成正式结论前，仍必须逐个读取 `training_diagnostics.json`，确认 `device = cuda`、`cuda_available = true`、`trainer_backend = formal_torch_seq_v3`、显式 `yolos` 解释器路径和 strict resume。
+- 进程检查继续按语义核验：PID、CommandLine、run_tag、日志/summary 时间戳必须一致；不得把当前检查脚本或短暂 Python 解析进程误判为 r19/r20 训练仍在运行。

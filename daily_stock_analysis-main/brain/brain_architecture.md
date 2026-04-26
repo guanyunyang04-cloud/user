@@ -1,4 +1,4 @@
-# Daily Stock Analysis Brain Architecture
+# 每日股票分析脑架构
 
 ## 1. 区域定位
 `daily_stock_analysis-main/brain/` 是独立产品型分脑。

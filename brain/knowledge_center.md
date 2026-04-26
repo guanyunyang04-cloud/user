@@ -22,7 +22,10 @@
 - 如果 README 里保留了 brain 未收录的接管规则、命令入口或稳定结论，后续接管会重新绕过大脑
 - 如果接管入口、命令入口或写回路由已经漂移，先纠偏再重开实验，通常比直接推进更能降低误操作风险
 - 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
+- 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
 - 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
+- 项目任务运行纪律已改为前台优先：训练、评估、审计、bounded study、confirmatory rerun 与执行任务不得默认后台化，不得中途人为中断，单次窗口时限统一按 `10` 小时处理
+- 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda` 与 `cuda_available = true`
 
 ## 3. 当前长期边界
 - 主脑不是分脑事实库
@@ -30,5 +33,8 @@
 - `daily_research` 负责正式生产研究与执行主线
 - `t0_project` 负责盘中实验与 RL 原型，不直接替代正式主线
 - `daily_stock_analysis-main` 是独立产品分脑，不改写 `daily_research` 默认执行
-## 2026-04-25 daily_research r19 routing note
-- Root-brain fact: `split_heads_portfolio_daily_ranking_r19` is a daily_research-only, research/shadow portfolio receiver-source-cash path; no live artifact, production default, or promotion gate changed.
+## 2026-04-25 daily_research r19 路由说明
+- 主脑事实：`split_heads_portfolio_daily_ranking_r19` 只属于 `daily_research`，是 `research / shadow` 的组合级 receiver/source/cash 路径；没有改变 live artifact、生产默认或 promotion gate。
+
+## 2026-04-26 daily_research r20 路由说明
+- 主脑事实：`portfolio_daily_ranking_v2_gated`、`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`、`portfolio_daily_effective_model_action` 和 v2 champion gate 都是 `daily_research` 分脑事实；主脑只保留它们仍为 `research / shadow_only` 的全局边界。

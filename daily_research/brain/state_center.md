@@ -79,12 +79,29 @@
 - 原始行数：`1863`。
 - 原始 SHA256：`1c135d58f6e1951cf60c8bd2234522ccc5357755953f6962d9070ec67b7a1e16`。
 - 读取纪律：当前状态以本文件上方章节为准；归档文件只作为历史证据与追溯入口。
-## 2026-04-25 r19 portfolio daily ranking status
-- Fact: new research entry is `split_heads_portfolio_daily_ranking_r19` + `cash_constraint_portfolio_daily_ranking_guard_v12` + `portfolio_daily_ranking_v1`.
-- Fact: r19 converts r18 pair-source guard into portfolio daily receiver/source/cash ranking: capital receivers, capital sources, and cash reserve are audited in simulator, pipeline metrics, behavior gap analysis, and study scoring.
-- Fact: r19 remains research/shadow evidence only; no live or promotion implication.
-- Decision: next formal evidence must compare receiver vs source forward excess, source realized sell rate, cash reserve behavior, monthly quality, turnover, and drawdown.
-## 2026-04-25 r19 verification status
-- Fact: `verify_portfolio_daily_ranking_r19_v12_confirm01_smoke_20260425` completed with `annual_return = 0.843131`, `sharpe = 2.072912`, `max_drawdown = -0.122117`, `monthly_return_mean = 0.051062`, `monthly_consistency_score = 0.723549`, and `avg_turnover = 0.048518`.
-- Fact: r19 smoke produced `portfolio_daily_receiver_target_count = 392`, `portfolio_daily_source_target_count = 308`, `portfolio_daily_source_realized_sell_rate = 0.551948`, and `portfolio_daily_receiver_minus_source_forward_excess_5d = 0.002383`.
-- Risk: `portfolio_daily_source_forward_excess_5d = 0.010149` remains positive, so sell/opportunity-cost attribution is improved enough to audit but not solved enough for promotion.
+## 2026-04-25 r19 组合日频排序状态
+- 事实：新增 research entry 为 `split_heads_portfolio_daily_ranking_r19` + `cash_constraint_portfolio_daily_ranking_guard_v12` + `portfolio_daily_ranking_v1`。
+- 事实：r19 把 r18 pair-source guard 转成组合日频 receiver/source/cash ranking；资金接收方、资金来源和现金保留会同时进入模拟器、pipeline metrics、behavior gap analysis 和 study scoring 审计。
+- 事实：r19 仍只属于 research/shadow 证据；没有 live 或 promotion 含义。
+- 决策：下一条正式证据必须比较 receiver vs source forward excess、source realized sell rate、现金保留行为、月度质量、换手和回撤。
+## 2026-04-25 r19 核验状态
+- 事实：`verify_portfolio_daily_ranking_r19_v12_confirm01_smoke_20260425` 已完成，结果为 `annual_return = 0.843131`、`sharpe = 2.072912`、`max_drawdown = -0.122117`、`monthly_return_mean = 0.051062`、`monthly_consistency_score = 0.723549`、`avg_turnover = 0.048518`。
+- 事实：r19 smoke 产生 `portfolio_daily_receiver_target_count = 392`、`portfolio_daily_source_target_count = 308`、`portfolio_daily_source_realized_sell_rate = 0.551948`、`portfolio_daily_receiver_minus_source_forward_excess_5d = 0.002383`。
+- 风险：`portfolio_daily_source_forward_excess_5d = 0.010149` 仍为正，因此 sell/opportunity-cost attribution 已经足够进入审计，但还没有解决到可 promotion 的程度。
+## 2026-04-26 r19 bounded study 状态
+- 事实：`cp_v3_portfolio_daily_ranking_r19__study_r1` 完成 `4` 个 screening trial 和 `2` 个 confirmatory trial，`failed_trial_count = 0`；latest state 已恢复到 `cp_v3_direct_action_pair_reallocation_r17__study_r1__confirm_02`。
+- 事实：所有 r19 训练诊断均使用 `formal_torch_seq_v3`、`device = cuda`、`cuda_available = true`、strict resume 和显式 `yolos` 解释器路径。
+- 事实：表现线 confirm 为 `confirm_01 = alpha_result_value_budget_split_v15 + result_value_v9`，指标为 `annual_return = 0.967208`、`sharpe = 2.394526`、`max_drawdown = -0.154689`、`monthly_return_mean = 0.053307`、`monthly_consistency_score = 0.772378`、`avg_turnover = 0.035627`。
+- 事实：`confirm_01` 仍有 `portfolio_daily_receiver_minus_source_forward_excess_5d = -0.008111`、`cash_timing_quality_1d = -0.053872`、`add_to_hold_conflict_share = 0.410628`、`order_translation_conflict_rate = 0.305556`。
+- 事实：综合稳定线 confirm 为 `confirm_02 = alpha_result_value_budget_split_v14 + result_value_v9`，receiver-source separation 更强（`portfolio_daily_receiver_minus_source_forward_excess_5d = 0.031289`、`portfolio_daily_source_realized_sell_rate = 0.692308`），但收益为负（`annual_return = -0.221432`、`sharpe = -0.565395`、`max_drawdown = -0.187207`）。
+- 决策：r19 bounded evidence 证明组合级框架有价值，但 `portfolio_daily_ranking_v1` 目前相对真实收益/回撤过度奖励 receiver-source spread；r19 仍是 `research / shadow_only`，不能进入 promotion 讨论。
+- 已更新操作规则：所有 `daily_research` 任务必须在 `yolos` 下前台运行，不得中断，使用 `10h` 前台窗口；GPU 训练证据写成正式证据前必须从 `training_diagnostics.json` 核验。
+
+## 2026-04-26 r20 v2/v13 当前状态
+- 事实：`split_heads_portfolio_daily_ranking_r19` 的默认目标已从 `portfolio_daily_ranking_v1` 升级为 `portfolio_daily_ranking_v2_gated`；默认预算校准已从 v12 升级为 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`。
+- 事实：新增反冠军诊断工具 `daily_research/tools/portfolio_daily_ranking_gate_report.py`，可离线重算 v1/v2 分数、列出 gate 失败项，并生成 `portfolio_daily_ranking_v2_gate_report.md/json` 与 `portfolio_daily_ranking_v2_rescore.csv`。
+- 事实：r19 离线重排显示，v1 champion `confirm_02` 因 `annual_return = -0.221432`、`sharpe = -0.565395` 被 v2 降为负分；v2 champion 变为 `confirm_01`，但它仍有 `order_translation_conflict_rate = 0.305556`、`add_to_hold_conflict_share = 0.410628`、`cash_reserve_rate = 0.0`，不能进入 promotion。
+- 事实：r20 retry2 smoke 通过全部 v2 gate，关键指标为 `annual_return = 0.316303`、`sharpe = 1.152146`、`max_drawdown = -0.129243`、`monthly_return_mean = 0.020376`、`monthly_consistency_score = 0.727527`、`portfolio_daily_receiver_minus_source_forward_excess_5d = 0.004380`、`portfolio_daily_source_realized_sell_rate = 0.8`、`portfolio_daily_cash_reserve_rate = 0.009479`、`order_translation_conflict_rate = 0.033175`、`add_to_hold_conflict_share = 0.072464`。
+- 事实：bounded confirmatory 暴露 fresh 8 epoch confirm 失稳，`annual_return = -0.253312`、`sharpe = -0.587612`、`max_drawdown = -0.220648`、`monthly_return_mean = -0.015989`、`add_to_hold_conflict_share = 0.578947`；该 confirm 只能作为失败证据，不能被 champion selector 自动扶正。
+- 已修正：v2 champion selection 改为“confirmatory 先过 v2 gate 才可优先；否则回退到最佳 completed screening”，并记录 `champion_selection_policy` 与 `rejected_confirmatory_trials`。
+- 决策：r20/v2/v13 是当前最有效突破口，已修复 v1 奖励错位、现金死分支和候选动作误判；但 fresh confirm 稳定性未过，仍保持 `research / shadow_only`，不进入 live 或 promotion 讨论。
