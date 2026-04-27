@@ -623,6 +623,11 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
             "split_heads_portfolio_daily_ranking_receiver_exec_stability_r23",
             "r23 portfolio daily receiver execution stability study profile",
         ),
+        ("alpha_result_value_budget_split_v16", "r24 portfolio daily listwise allocation loss profile"),
+        (
+            "split_heads_portfolio_daily_listwise_allocation_r24",
+            "r24 portfolio daily listwise allocation study profile",
+        ),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -735,6 +740,24 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r22_contract_missing",
         "continuous_policy r22 receiver-exec portfolio daily ranking contract is missing headroom/execution markers.",
+    )
+    _require(
+        "deploy_executability_head" in model_seq_v3_text
+        and "supports_deploy_executability_head" in model_seq_v3_text
+        and "supports_portfolio_listwise_heads" in model_seq_v3_text
+        and "portfolio_daily_receiver_add_capacity" in model_seq_v3_text
+        and "portfolio_daily_receiver_add_capacity" in pipeline_text
+        and "portfolio_daily_receiver_add_capacity" in simulator_text
+        and "portfolio_daily_receiver_executability" in model_seq_v3_text
+        and "portfolio_daily_receiver_score" in model_seq_v3_text
+        and "portfolio_daily_source_score" in model_seq_v3_text
+        and "portfolio_daily_cash_score" in model_seq_v3_text
+        and "portfolio_receiver_pairwise_total" in model_seq_v3_text
+        and "portfolio_cash_margin_total" in model_seq_v3_text
+        and "split_heads_portfolio_daily_listwise_allocation_r24" in study_text,
+        failures,
+        "continuous_policy_r24_contract_missing",
+        "continuous_policy r24 portfolio daily listwise allocation contract is missing learned headroom/listwise markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

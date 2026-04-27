@@ -1044,3 +1044,12 @@
 - 决策：
   - r23 仍为 `research / shadow_only`，不切 live、不改 active artifact、不进入 promotion。
   - 后续若继续推进，必须保留 v15 执行合同和 stable confirmatory gate，不得回到只追求 screening 年化。
+
+## 2026-04-27 r24 listwise allocation 执行复盘
+- 行动前判断：r23 已解决 stable confirmatory 为空的问题，但仍是 guard/simulator 主导；用户要求先做 P1 和 P4，因此本轮目标是让 receiver 可买性与组合日分配进入训练目标，而不是继续堆后置过滤。
+- 已完成实现：`label_builder.py` 生成 receiver headroom/min_add_delta/capacity/executability/receiver_score/source_score/cash_score 与候选 mask；`pipeline_utils.py` 把执行反馈写回这些标签并新增 continuity metrics；`model_seq_v3.py` 新增 `alpha_result_value_budget_split_v16`、`deploy_executability_head`、portfolio listwise heads、pairwise/cash-margin loss 和推理侧融合；`portfolio_simulator.py` 读取模型 listwise 输出参与 receiver/source/cash 排序；`run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_listwise_allocation_r24`。
+- 验证：`py_compile` 通过；r24 dry-run 通过；r24 smoke 在前台自然结束，trial 8 epoch 与 confirm 10 epoch 均为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、`trainer_backend = formal_torch_seq_v3`、`resume_mode = strict`。
+- 新头证据：trial 与 confirm diagnostics 均显示 `supports_deploy_executability_head = true`、`supports_portfolio_listwise_heads = true`。
+- 结果边界：smoke 仍为 `shadow_only`，`training_evidence_status = insufficient`；confirm_01 年化 `0.027326`、Sharpe `0.239028`、最大回撤 `-0.152518`、月均 `0.003561`，稳定性失败项为 `confirm_annual_return_floor`、`confirm_sharpe_floor`、`confirm_monthly_return_floor`。
+- 结构观察：confirm_01 的 `receiver_unrealized_deploy_share = 0.0`、`cash_reserve_rate = 0.110526`，但 `source_target_count = 0`、`effective_capital_transfer_count = 0`，说明 r24 链路已能学 receiver/cash 侧，但资金释放/source 侧仍未形成有效日分配闭环。
+- 决策：r24 是 P1/P4 机制落地，不是 promotion 证据；下一轮若继续，应做 bounded confirmatory 的 v16 参数稳定性搜索，而不是把本次 smoke 当成正式策略结论。

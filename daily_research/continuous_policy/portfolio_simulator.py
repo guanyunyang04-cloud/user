@@ -834,6 +834,11 @@ class PortfolioState:
                 return pd.Series(float(default), index=policy.index, dtype=float)
             return pd.to_numeric(policy[name], errors="coerce").fillna(float(default)).astype(float)
 
+        def _optional_policy_numeric(name: str) -> pd.Series | None:
+            if name not in policy.columns:
+                return None
+            return pd.to_numeric(policy[name], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
         def _masked_mean(values: pd.Series, mask: pd.Series) -> float:
             selected = values.loc[mask.reindex(values.index).fillna(False)]
             if selected.empty:
@@ -868,6 +873,15 @@ class PortfolioState:
         release_gate_series = _policy_numeric("release_gate_target")
         defense_gate_series = _policy_numeric("defense_gate_target")
         deploy_executability_series = _policy_numeric("deploy_executability_target")
+        model_receiver_score_series = _optional_policy_numeric("portfolio_daily_receiver_score")
+        model_receiver_executability_series = _optional_policy_numeric("portfolio_daily_receiver_executability")
+        model_receiver_capacity_series = _optional_policy_numeric("portfolio_daily_receiver_add_capacity")
+        model_source_score_series = _optional_policy_numeric("portfolio_daily_source_score")
+        model_cash_score_series = _optional_policy_numeric("portfolio_daily_cash_score")
+        if model_receiver_executability_series is not None:
+            deploy_executability_series = (
+                0.72 * deploy_executability_series + 0.28 * model_receiver_executability_series.clip(0.0, 1.0)
+            ).clip(0.0, 1.0)
         if hierarchical_budget_mode:
             decision_gate_denominator_series = (deploy_value_series + release_value_series + 1.0e-6).clip(lower=1.0e-6)
             decision_deploy_gate_series = (
@@ -986,6 +1000,17 @@ class PortfolioState:
             - release_value_series.clip(0.0, 1.0) * 0.08
             - current.clip(0.0, 0.25) * 0.10
         )
+        if model_receiver_score_series is not None:
+            receiver_capacity_bonus = (
+                model_receiver_capacity_series.clip(0.0, 1.0) * 0.08
+                if model_receiver_capacity_series is not None
+                else 0.0
+            )
+            portfolio_daily_receiver_score = (
+                0.60 * model_receiver_score_series.clip(0.0, 1.0)
+                + 0.40 * portfolio_daily_receiver_score
+                + receiver_capacity_bonus
+            ).clip(lower=-0.25, upper=1.35)
         portfolio_daily_receiver_candidate = (
             portfolio_daily_ranking_mode
             & direct_action_deploy_signal
@@ -1355,6 +1380,12 @@ class PortfolioState:
                 1.0,
             )
         )
+        if model_cash_score_series is not None and len(model_cash_score_series):
+            model_cash_score_value = float(
+                model_cash_score_series.replace([np.inf, -np.inf], np.nan).dropna().clip(0.0, 1.0).mean()
+            )
+            if np.isfinite(model_cash_score_value):
+                portfolio_daily_cash_score = float(np.clip(0.60 * model_cash_score_value + 0.40 * portfolio_daily_cash_score, 0.0, 1.0))
         if budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
@@ -1432,6 +1463,11 @@ class PortfolioState:
             - deploy_executability_series.clip(0.0, 1.0) * 0.10
             - large_upside_series.clip(0.0, 1.0) * 0.12
         )
+        if model_source_score_series is not None:
+            portfolio_daily_source_score = (
+                0.62 * model_source_score_series.clip(0.0, 1.0)
+                + 0.38 * portfolio_daily_source_score
+            ).clip(lower=-0.20, upper=1.25)
         portfolio_daily_source_candidate = (
             portfolio_daily_ranking_mode
             & held_mask
@@ -3407,6 +3443,19 @@ class PortfolioState:
                     "portfolio_daily_receiver_min_add_delta": float(
                         portfolio_daily_receiver_min_add_delta.get(stock, 0.0)
                     ),
+                    "portfolio_daily_receiver_add_capacity": float(
+                        np.clip(
+                            (
+                                portfolio_daily_receiver_add_headroom.get(stock, 0.0)
+                                / max(float(portfolio_daily_receiver_min_add_delta.get(stock, 0.0)), 1.0e-6)
+                            )
+                            if bool(held_mask.get(stock, False))
+                            else 1.0,
+                            0.0,
+                            1.0,
+                        )
+                    ),
+                    "portfolio_daily_receiver_executability": float(deploy_executability_series.get(stock, 0.0)),
                     "portfolio_daily_source_gap": float(portfolio_daily_source_gap.get(stock, 0.0)),
                     "portfolio_daily_source_score": float(portfolio_daily_source_score.get(stock, 0.0)),
                     "portfolio_daily_source_candidate": bool(portfolio_daily_source_candidate.get(stock, False)),

@@ -1069,9 +1069,37 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v15"] = {
         "action_value_total": 0.88,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v16"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v15"]["sample_scalar_loss_weights"],
+        "deploy_executability_target": 1.58,
+        "portfolio_daily_receiver_add_headroom": 1.12,
+        "portfolio_daily_receiver_add_capacity": 1.28,
+        "portfolio_daily_receiver_executability": 1.62,
+        "portfolio_daily_receiver_score": 1.78,
+        "portfolio_daily_source_score": 1.68,
+        "portfolio_daily_cash_score": 1.22,
+        "clipped_intent_risk": 1.42,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v15"]["daily_target_loss_weights"],
+        "candidate_budget": 1.04,
+        "turnover_budget": 1.18,
+        "budget_deploy_signal_target": 1.38,
+        "budget_cash_timing_signal_target": 1.44,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v15"]["multi_objective_loss_weights"],
+        "scalar_total": 2.22,
+        "daily_total": 0.90,
+        "portfolio_receiver_pairwise_total": 0.20,
+        "portfolio_source_pairwise_total": 0.18,
+        "portfolio_cash_margin_total": 0.08,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
-    {"alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15"}
+    {"alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15", "alpha_result_value_budget_split_v16"}
 )
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -1179,6 +1207,83 @@ def _sell_rank_pairwise_loss(
     if pair_count <= 0:
         return torch.tensor(0.0, device=device)
     return total_loss / float(pair_count)
+
+
+def _date_rank_pairwise_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    *,
+    score_name: str,
+    target_name: str,
+    candidate_mask_name: str | None = None,
+    min_target_gap: float = 0.05,
+) -> torch.Tensor:
+    device = outputs["action_logits"].device
+    if score_name not in outputs or target_name not in targets or "date_code" not in targets:
+        return torch.tensor(0.0, device=device)
+    score = outputs[score_name].to(device)
+    target = torch.clamp(targets[target_name].to(device), 0.0, 1.0)
+    date_code = targets["date_code"].to(device).long()
+    candidate_mask = torch.isfinite(target)
+    if candidate_mask_name and candidate_mask_name in targets:
+        candidate_mask = candidate_mask & (targets[candidate_mask_name].to(device) > 0.5)
+    elif "holding_flag_target" in targets and "source" in score_name:
+        candidate_mask = candidate_mask & (targets["holding_flag_target"].to(device) > 0.5)
+    total_loss = torch.tensor(0.0, device=device)
+    pair_count = 0
+    for date_value in torch.unique(date_code[candidate_mask]):
+        mask = candidate_mask & (date_code == date_value)
+        if int(mask.sum().detach().cpu()) < 2:
+            continue
+        local_score = score[mask]
+        local_target = target[mask]
+        target_diff = local_target[:, None] - local_target[None, :]
+        useful = torch.abs(target_diff) > float(min_target_gap)
+        if not bool(useful.any().detach().cpu()):
+            continue
+        pred_diff = local_score[:, None] - local_score[None, :]
+        direction = torch.sign(target_diff[useful])
+        weight = torch.clamp(torch.abs(target_diff[useful]), 0.05, 1.0)
+        total_loss = total_loss + (nn.functional.softplus(-direction * pred_diff[useful] * 7.0) * weight).mean()
+        pair_count += 1
+    if pair_count <= 0:
+        return torch.tensor(0.0, device=device)
+    return total_loss / float(pair_count)
+
+
+def _portfolio_cash_margin_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    device = outputs["action_logits"].device
+    required = {
+        "portfolio_daily_cash_score",
+        "portfolio_daily_receiver_score",
+        "portfolio_daily_source_score",
+    }
+    if not required.issubset(outputs) or not required.issubset(targets):
+        return torch.tensor(0.0, device=device)
+    cash_score = torch.clamp(outputs["portfolio_daily_cash_score"].to(device), 0.0, 1.0)
+    receiver_score = torch.clamp(outputs["portfolio_daily_receiver_score"].to(device), 0.0, 1.0)
+    source_score = torch.clamp(outputs["portfolio_daily_source_score"].to(device), 0.0, 1.0)
+    target_cash = torch.clamp(targets["portfolio_daily_cash_score"].to(device), 0.0, 1.0)
+    target_receiver = torch.clamp(targets["portfolio_daily_receiver_score"].to(device), 0.0, 1.0)
+    target_source = torch.clamp(targets["portfolio_daily_source_score"].to(device), 0.0, 1.0)
+    cash_dominant = target_cash > torch.maximum(target_receiver, target_source) + 0.08
+    deploy_dominant = target_receiver > target_cash + 0.08
+    if not bool((cash_dominant | deploy_dominant).any().detach().cpu()):
+        return torch.tensor(0.0, device=device)
+    margin = torch.tensor(0.08, device=device)
+    terms: list[torch.Tensor] = []
+    if int(cash_dominant.sum().detach().cpu().item()) > 0:
+        terms.append(
+            torch.relu(
+                margin - (cash_score[cash_dominant] - torch.maximum(receiver_score[cash_dominant], source_score[cash_dominant]))
+            ).mean()
+        )
+    if int(deploy_dominant.sum().detach().cpu().item()) > 0:
+        terms.append(torch.relu(margin - (receiver_score[deploy_dominant] - cash_score[deploy_dominant])).mean())
+    return torch.stack(terms).mean() if terms else torch.tensor(0.0, device=device)
 
 
 def _value_arbitration_consistency_loss(
@@ -1763,6 +1868,13 @@ class TemporalSamplePolicyNet(nn.Module):
         self.deploy_gate_head = nn.Linear(int(hidden_dim), 1)
         self.release_gate_head = nn.Linear(int(hidden_dim), 1)
         self.defense_gate_head = nn.Linear(int(hidden_dim), 1)
+        self.deploy_executability_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_headroom_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_capacity_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_executability_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_cash_score_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -1810,6 +1922,13 @@ class TemporalSamplePolicyNet(nn.Module):
             "deploy_gate_target": torch.sigmoid(self.deploy_gate_head(fused).squeeze(-1)),
             "release_gate_target": torch.sigmoid(self.release_gate_head(fused).squeeze(-1)),
             "defense_gate_target": torch.sigmoid(self.defense_gate_head(fused).squeeze(-1)),
+            "deploy_executability_target": torch.sigmoid(self.deploy_executability_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_add_headroom": torch.sigmoid(self.portfolio_receiver_headroom_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_add_capacity": torch.sigmoid(self.portfolio_receiver_capacity_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_executability": torch.sigmoid(self.portfolio_receiver_executability_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_score": torch.sigmoid(self.portfolio_receiver_score_head(fused).squeeze(-1)),
+            "portfolio_daily_source_score": torch.sigmoid(self.portfolio_source_score_head(fused).squeeze(-1)),
+            "portfolio_daily_cash_score": torch.sigmoid(self.portfolio_cash_score_head(fused).squeeze(-1)),
         }
 
 
@@ -2068,6 +2187,20 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "release_gate_head.bias",
         "defense_gate_head.weight",
         "defense_gate_head.bias",
+        "deploy_executability_head.weight",
+        "deploy_executability_head.bias",
+        "portfolio_receiver_headroom_head.weight",
+        "portfolio_receiver_headroom_head.bias",
+        "portfolio_receiver_capacity_head.weight",
+        "portfolio_receiver_capacity_head.bias",
+        "portfolio_receiver_executability_head.weight",
+        "portfolio_receiver_executability_head.bias",
+        "portfolio_receiver_score_head.weight",
+        "portfolio_receiver_score_head.bias",
+        "portfolio_source_score_head.weight",
+        "portfolio_source_score_head.bias",
+        "portfolio_cash_score_head.weight",
+        "portfolio_cash_score_head.bias",
     }
     if sample_unexpected or (sample_missing - allowed_sample_missing):
         raise RuntimeError(
@@ -2133,6 +2266,21 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         for name in missing_key_names
     )
     training_diagnostics["supports_three_value_gate_heads"] = not three_value_gate_missing
+    deploy_executability_missing = any(
+        name.startswith("deploy_executability_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_deploy_executability_head"] = not deploy_executability_missing
+    portfolio_listwise_missing = any(
+        name.startswith("portfolio_receiver_headroom_head.")
+        or name.startswith("portfolio_receiver_capacity_head.")
+        or name.startswith("portfolio_receiver_executability_head.")
+        or name.startswith("portfolio_receiver_score_head.")
+        or name.startswith("portfolio_source_score_head.")
+        or name.startswith("portfolio_cash_score_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_portfolio_listwise_heads"] = not portfolio_listwise_missing
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -2393,6 +2541,56 @@ def fit_policy_models_v3(
             0.0,
             1.0,
         ),
+        "deploy_executability_target": np.clip(
+            sample_frame.get("deploy_executability_target", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_add_headroom": np.clip(
+            sample_frame.get("portfolio_daily_receiver_add_headroom", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_min_add_delta": np.clip(
+            sample_frame.get("portfolio_daily_receiver_min_add_delta", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_add_capacity": np.clip(
+            sample_frame.get("portfolio_daily_receiver_add_capacity", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_executability": np.clip(
+            sample_frame.get("portfolio_daily_receiver_executability", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_score": np.clip(
+            sample_frame.get("portfolio_daily_receiver_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_score": np.clip(
+            sample_frame.get("portfolio_daily_source_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_cash_score": np.clip(
+            sample_frame.get("portfolio_daily_cash_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_candidate_mask": np.clip(
+            sample_frame.get("portfolio_daily_receiver_candidate_mask", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_candidate_mask": np.clip(
+            sample_frame.get("portfolio_daily_source_candidate_mask", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
         "clipped_intent_risk": np.clip(
             sample_frame.get("clipped_intent_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
@@ -2559,6 +2757,21 @@ def fit_policy_models_v3(
             )
             arbitration_loss = _lifecycle_arbitration_loss(outputs, sample_batch_targets)
             sell_rank_pairwise_loss = _sell_rank_pairwise_loss(outputs, sample_batch_targets)
+            portfolio_receiver_pairwise_loss = _date_rank_pairwise_loss(
+                outputs,
+                sample_batch_targets,
+                score_name="portfolio_daily_receiver_score",
+                target_name="portfolio_daily_receiver_score",
+                candidate_mask_name="portfolio_daily_receiver_candidate_mask",
+            )
+            portfolio_source_pairwise_loss = _date_rank_pairwise_loss(
+                outputs,
+                sample_batch_targets,
+                score_name="portfolio_daily_source_score",
+                target_name="portfolio_daily_source_score",
+                candidate_mask_name="portfolio_daily_source_candidate_mask",
+            )
+            portfolio_cash_margin_loss = _portfolio_cash_margin_loss(outputs, sample_batch_targets)
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -2582,6 +2795,9 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights["scalar_total"] * scalar_loss
                 + multi_objective_loss_weights.get("arbitration_total", 0.0) * arbitration_loss
                 + multi_objective_loss_weights.get("sell_rank_pairwise_total", 0.0) * sell_rank_pairwise_loss
+                + multi_objective_loss_weights.get("portfolio_receiver_pairwise_total", 0.0) * portfolio_receiver_pairwise_loss
+                + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * portfolio_source_pairwise_loss
+                + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * portfolio_cash_margin_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -2621,6 +2837,21 @@ def fit_policy_models_v3(
             val_scalar_loss = _weighted_scalar_heads_loss(val_outputs, val_targets, sample_scalar_loss_weights)
             val_arbitration_loss = _lifecycle_arbitration_loss(val_outputs, val_targets)
             val_sell_rank_pairwise_loss = _sell_rank_pairwise_loss(val_outputs, val_targets)
+            val_portfolio_receiver_pairwise_loss = _date_rank_pairwise_loss(
+                val_outputs,
+                val_targets,
+                score_name="portfolio_daily_receiver_score",
+                target_name="portfolio_daily_receiver_score",
+                candidate_mask_name="portfolio_daily_receiver_candidate_mask",
+            )
+            val_portfolio_source_pairwise_loss = _date_rank_pairwise_loss(
+                val_outputs,
+                val_targets,
+                score_name="portfolio_daily_source_score",
+                target_name="portfolio_daily_source_score",
+                candidate_mask_name="portfolio_daily_source_candidate_mask",
+            )
+            val_portfolio_cash_margin_loss = _portfolio_cash_margin_loss(val_outputs, val_targets)
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -2648,6 +2879,9 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights["daily_total"] * val_daily_loss
                     + multi_objective_loss_weights.get("arbitration_total", 0.0) * val_arbitration_loss
                     + multi_objective_loss_weights.get("sell_rank_pairwise_total", 0.0) * val_sell_rank_pairwise_loss
+                    + multi_objective_loss_weights.get("portfolio_receiver_pairwise_total", 0.0) * val_portfolio_receiver_pairwise_loss
+                    + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * val_portfolio_source_pairwise_loss
+                    + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * val_portfolio_cash_margin_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -2761,6 +2995,17 @@ def fit_policy_models_v3(
             )
         ),
         "supports_deploy_executability_head": "deploy_executability_target" in sample_scalar_loss_weights,
+        "supports_portfolio_listwise_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "portfolio_daily_receiver_add_headroom",
+                "portfolio_daily_receiver_add_capacity",
+                "portfolio_daily_receiver_executability",
+                "portfolio_daily_receiver_score",
+                "portfolio_daily_source_score",
+                "portfolio_daily_cash_score",
+            )
+        ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
             and all(
@@ -3011,6 +3256,43 @@ def predict_policy_v3(
         predicted_defense_gate = (
             np.clip(outputs["defense_gate_target"].cpu().numpy(), 0.0, 1.0)
             if supports_three_value_gate_heads
+            else None
+        )
+        supports_deploy_executability_head = bool(artifact.training_diagnostics.get("supports_deploy_executability_head", False))
+        predicted_deploy_executability = (
+            np.clip(outputs["deploy_executability_target"].cpu().numpy(), 0.0, 1.0)
+            if supports_deploy_executability_head
+            else None
+        )
+        supports_portfolio_listwise_heads = bool(artifact.training_diagnostics.get("supports_portfolio_listwise_heads", False))
+        predicted_portfolio_receiver_headroom = (
+            np.clip(outputs["portfolio_daily_receiver_add_headroom"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
+            else None
+        )
+        predicted_portfolio_receiver_capacity = (
+            np.clip(outputs["portfolio_daily_receiver_add_capacity"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
+            else None
+        )
+        predicted_portfolio_receiver_executability = (
+            np.clip(outputs["portfolio_daily_receiver_executability"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
+            else None
+        )
+        predicted_portfolio_receiver_score = (
+            np.clip(outputs["portfolio_daily_receiver_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
+            else None
+        )
+        predicted_portfolio_source_score = (
+            np.clip(outputs["portfolio_daily_source_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
+            else None
+        )
+        predicted_portfolio_cash_score = (
+            np.clip(outputs["portfolio_daily_cash_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_listwise_heads
             else None
         )
         if reduce_fraction is None:
@@ -4320,6 +4602,142 @@ def predict_policy_v3(
         low=0.0,
         high=1.0,
     )
+    if predicted_deploy_executability is not None:
+        deploy_executability_target = _finite_array(
+            0.68 * predicted_deploy_executability + 0.32 * deploy_executability_target,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+    position_cap_for_headroom = float(np.clip(float(global_targets.get("max_position_weight_target", 0.12) or 0.12), 0.05, 0.34))
+    portfolio_daily_receiver_add_headroom = _finite_array(
+        np.clip(position_cap_for_headroom - current_weight, 0.0, 1.0),
+        default=0.0,
+        low=0.0,
+        high=1.0,
+    )
+    portfolio_daily_receiver_min_add_delta = np.maximum.reduce(
+        [
+            np.full(len(current_weight), 0.0025, dtype=float),
+            np.clip(current_weight, 0.0, None) * 0.025,
+            np.full(len(current_weight), position_cap_for_headroom * 0.018, dtype=float),
+        ]
+    )
+    fallback_receiver_capacity = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            portfolio_daily_receiver_add_headroom / np.clip(portfolio_daily_receiver_min_add_delta, 1.0e-6, None),
+            0.0,
+            1.0,
+        ),
+        1.0,
+    )
+    portfolio_daily_receiver_add_capacity = (
+        _finite_array(
+            0.70 * predicted_portfolio_receiver_capacity + 0.30 * fallback_receiver_capacity,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_receiver_capacity is not None
+        else fallback_receiver_capacity
+    )
+    if predicted_portfolio_receiver_headroom is not None:
+        portfolio_daily_receiver_add_headroom = _finite_array(
+            0.45 * predicted_portfolio_receiver_headroom + 0.55 * portfolio_daily_receiver_add_headroom,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+    fallback_receiver_executability = np.clip(
+        deploy_executability_target * (0.50 + 0.50 * portfolio_daily_receiver_add_capacity)
+        - np.where(current_weight > 1.0e-8, (1.0 - portfolio_daily_receiver_add_capacity) * 0.22, 0.0),
+        0.0,
+        1.0,
+    )
+    portfolio_daily_receiver_executability = (
+        _finite_array(
+            0.68 * predicted_portfolio_receiver_executability + 0.32 * fallback_receiver_executability,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_receiver_executability is not None
+        else fallback_receiver_executability
+    )
+    receiver_action_value = np.where(current_weight > 1.0e-8, add_action_value, open_action_value)
+    fallback_portfolio_receiver_score = np.clip(
+        0.30 * portfolio_daily_receiver_executability
+        + 0.20 * deploy_value_target
+        + 0.14 * decision_deploy_gate
+        + 0.14 * receiver_action_value
+        + 0.10 * alpha_opportunity_value
+        + 0.08 * relative_opportunity_value
+        + 0.06 * multi_horizon_path_value
+        - 0.14 * decision_defense_signal
+        - 0.12 * release_value_target
+        - np.where(current_weight > 1.0e-8, (1.0 - portfolio_daily_receiver_add_capacity) * 0.18, 0.0),
+        0.0,
+        1.0,
+    )
+    portfolio_daily_receiver_score = (
+        _finite_array(
+            0.70 * predicted_portfolio_receiver_score + 0.30 * fallback_portfolio_receiver_score,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_receiver_score is not None
+        else fallback_portfolio_receiver_score
+    )
+    fallback_portfolio_source_score = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            0.28 * release_value_target
+            + 0.20 * sell_release_value
+            + 0.14 * relative_opportunity_value
+            + 0.12 * cash_defense_value
+            + 0.10 * sell_rank_score
+            + 0.10 * decision_release_gate
+            + 0.06 * multi_horizon_forward_risk
+            - 0.18 * hold_continuation_value
+            - 0.12 * portfolio_daily_receiver_executability,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_score = (
+        _finite_array(
+            0.70 * predicted_portfolio_source_score + 0.30 * fallback_portfolio_source_score,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_score is not None
+        else fallback_portfolio_source_score
+    )
+    fallback_portfolio_cash_score = np.clip(
+        0.30 * defense_value_target
+        + 0.22 * defense_gate_target
+        + 0.16 * cash_defense_value
+        + 0.12 * decision_defense_signal
+        + 0.08 * multi_horizon_forward_risk
+        + 0.06 * np.clip(risk_off_score, 0.0, 1.0)
+        - 0.18 * portfolio_daily_receiver_score,
+        0.0,
+        1.0,
+    )
+    portfolio_daily_cash_score = (
+        _finite_array(
+            0.68 * predicted_portfolio_cash_score + 0.32 * fallback_portfolio_cash_score,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_cash_score is not None
+        else fallback_portfolio_cash_score
+    )
     direct_action_utility = {
         label: np.zeros(len(adjusted_labels), dtype=float)
         for label in ACTION_CLASSES
@@ -4347,10 +4765,12 @@ def predict_policy_v3(
             probability_map["skip"] * 0.24
             + decision_defense_signal * 0.34
             + cash_defense_value * 0.20
+            + portfolio_daily_cash_score * 0.12
             + reentry_guard_target * 0.10
             - open_action_value * 0.26
             - entry_quality.clip(min=0.0) * 0.12
-            - decision_deploy_gate * 0.10,
+            - decision_deploy_gate * 0.10
+            - portfolio_daily_receiver_score * 0.08,
             -1.0,
             1.8,
         )
@@ -4363,10 +4783,13 @@ def predict_policy_v3(
             + deploy_value_target * 0.12
             + decision_deploy_gate * 0.12
             + deploy_executability_target * 0.10
+            + portfolio_daily_receiver_executability * 0.10
+            + portfolio_daily_receiver_score * 0.14
             + multi_horizon_path_value * 0.10
             + duration_bonus * 0.08
             - decision_defense_signal * 0.18
             - multi_horizon_forward_risk * 0.12
+            - portfolio_daily_cash_score * 0.08
             - clipped_intent_risk * 0.10
             - reentry_cooldown * 0.08
             - open_risk_off_score * 0.08,
@@ -4399,9 +4822,14 @@ def predict_policy_v3(
             + deploy_value_target * 0.12
             + decision_deploy_gate * 0.10
             + deploy_executability_target * 0.08
+            + portfolio_daily_receiver_executability * 0.10
+            + portfolio_daily_receiver_score * 0.12
+            + portfolio_daily_receiver_add_capacity * 0.14
             + multi_horizon_path_value * 0.06
             - release_value_target * 0.12
             - decision_release_gate * 0.10
+            - (1.0 - portfolio_daily_receiver_add_capacity) * 0.22
+            - portfolio_daily_cash_score * 0.06
             - preliminary_exit_timing_pressure * 0.14
             - clipped_intent_risk * 0.10,
             -1.0,
@@ -4415,6 +4843,8 @@ def predict_policy_v3(
             + sell_release_value * 0.12
             + release_value_target * 0.12
             + decision_release_gate * 0.12
+            + portfolio_daily_source_score * 0.12
+            + portfolio_daily_cash_score * 0.04
             + sell_pressure * 0.10
             + preliminary_exit_timing_pressure * 0.10
             + signal_decay_speed * 0.08
@@ -4432,6 +4862,8 @@ def predict_policy_v3(
             + sell_release_value * 0.12
             + release_value_target * 0.12
             + decision_release_gate * 0.10
+            + portfolio_daily_source_score * 0.14
+            + portfolio_daily_cash_score * 0.06
             + preliminary_exit_timing_pressure * 0.18
             + market_downside_pressure * 0.08
             - hold_action_value * 0.14
@@ -4776,7 +5208,10 @@ def predict_policy_v3(
         + multi_horizon_path_value * 0.10
         + deploy_value_target * 0.12
         + decision_deploy_gate * 0.10
+        + portfolio_daily_receiver_score * 0.16
+        + portfolio_daily_receiver_executability * 0.08
         - decision_defense_signal * (0.16 if pure_portfolio_defense_mode else 0.12)
+        - portfolio_daily_cash_score * 0.06
         - decision_release_gate * 0.06
     )
     open_candidate_scores = np.where(current_weight > 1e-8, -1e9, open_candidate_scores)
@@ -4837,6 +5272,8 @@ def predict_policy_v3(
                 + deploy_value_target[idx] * 0.14
                 + decision_deploy_gate[idx] * 0.12
                 + deploy_executability_target[idx] * 0.10
+                + portfolio_daily_receiver_score[idx] * 0.12
+                + portfolio_daily_receiver_executability[idx] * 0.08
                 + open_action_value[idx] * 0.12
                 + multi_horizon_path_value[idx] * 0.08
                 + large_upside_1d_target[idx] * 0.06
@@ -4854,6 +5291,10 @@ def predict_policy_v3(
                 + deploy_value_target[idx] * 0.12
                 + decision_deploy_gate[idx] * 0.10
                 + deploy_executability_target[idx] * 0.08
+                + portfolio_daily_receiver_score[idx] * 0.10
+                + portfolio_daily_receiver_executability[idx] * 0.08
+                + portfolio_daily_receiver_add_capacity[idx] * 0.08
+                - (1.0 - portfolio_daily_receiver_add_capacity[idx]) * 0.16
             )
             blended_delta[idx] = np.clip(max(blended_delta[idx], 0.01 + add_quality[idx] * 0.35 + duration_bonus * 0.03 + value_boost * 0.06) * (1.0 - sell_drag * 0.50 - clipped_intent_risk[idx] * 0.10), 0.0, 0.18)
             action_strength[idx] = np.clip(add_quality[idx] + probability_map["add"][idx] * 0.45 + duration_bonus * 0.30 + value_boost - sell_drag * 0.32 - clipped_intent_risk[idx] * 0.07, 0.0, None)
@@ -5022,6 +5463,13 @@ def predict_policy_v3(
             "release_gate_target": release_gate_target,
             "defense_gate_target": defense_gate_target,
             "deploy_executability_target": deploy_executability_target,
+            "portfolio_daily_receiver_add_headroom": portfolio_daily_receiver_add_headroom,
+            "portfolio_daily_receiver_min_add_delta": portfolio_daily_receiver_min_add_delta,
+            "portfolio_daily_receiver_add_capacity": portfolio_daily_receiver_add_capacity,
+            "portfolio_daily_receiver_executability": portfolio_daily_receiver_executability,
+            "portfolio_daily_receiver_score": portfolio_daily_receiver_score,
+            "portfolio_daily_source_score": portfolio_daily_source_score,
+            "portfolio_daily_cash_score": portfolio_daily_cash_score,
             "decision_deploy_gate": decision_deploy_gate,
             "decision_release_gate": decision_release_gate,
             "decision_defense_signal": decision_defense_signal,

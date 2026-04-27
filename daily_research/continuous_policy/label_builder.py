@@ -1161,6 +1161,103 @@ def build_action_labels_for_date(
         0.0,
         1.0,
     )
+    current_weight_array = working["current_weight"].fillna(0.0).to_numpy(dtype=float)
+    alpha_target_array = np.asarray(alpha_target_weight, dtype=float)
+    alpha_support_array = np.asarray(alpha_support, dtype=float)
+    market_downside_array = np.asarray(market_downside_pressure, dtype=float)
+    cash_regime_array = np.asarray(cash_regime_pressure, dtype=float)
+    portfolio_cash_pressure_array = np.asarray(portfolio_cash_pressure, dtype=float)
+    position_cap_proxy = np.clip(
+        np.maximum(alpha_target_array * 1.22, 0.10)
+        + 0.030
+        + 0.018 * np.clip(alpha_support_array, 0.0, 1.0)
+        + 0.012 * np.clip(multi_horizon_path_value, 0.0, 1.0)
+        - 0.020 * np.clip(cash_defense_value, 0.0, 1.0)
+        - 0.012 * np.clip(market_downside_array, 0.0, 1.0),
+        0.08,
+        0.26,
+    )
+    portfolio_daily_receiver_add_headroom = np.clip(position_cap_proxy - current_weight_array, 0.0, 1.0)
+    portfolio_daily_receiver_min_add_delta = np.maximum.reduce(
+        [
+            np.full(len(working), 0.0025, dtype=float),
+            np.clip(current_weight_array, 0.0, None) * 0.025,
+            position_cap_proxy * 0.018,
+        ]
+    )
+    portfolio_daily_receiver_add_capacity = np.where(
+        held_mask,
+        np.clip(
+            portfolio_daily_receiver_add_headroom / np.clip(portfolio_daily_receiver_min_add_delta, 1.0e-6, None),
+            0.0,
+            1.0,
+        ),
+        1.0,
+    )
+    receiver_action_value = np.where(held_mask, add_action_value, open_action_value)
+    portfolio_daily_receiver_executability = np.clip(
+        deploy_executability_target * (0.50 + 0.50 * portfolio_daily_receiver_add_capacity)
+        + np.where(held_mask, np.clip(add_action_value - hold_action_value, -0.35, 0.35) * 0.12, 0.0)
+        - np.where(held_mask, (1.0 - portfolio_daily_receiver_add_capacity) * 0.24, 0.0),
+        0.0,
+        1.0,
+    )
+    portfolio_daily_receiver_score = np.clip(
+        0.30 * portfolio_daily_receiver_executability
+        + 0.20 * deploy_value_target
+        + 0.16 * deploy_gate_target
+        + 0.14 * receiver_action_value
+        + 0.10 * alpha_opportunity_value
+        + 0.08 * relative_opportunity_value
+        + 0.06 * multi_horizon_path_value
+        - 0.14 * defense_value_target
+        - 0.12 * release_value_target
+        - np.where(held_mask, (1.0 - portfolio_daily_receiver_add_capacity) * 0.18, 0.0),
+        0.0,
+        1.0,
+    )
+    portfolio_daily_source_score = np.where(
+        held_mask,
+        np.clip(
+            0.28 * release_value_target
+            + 0.22 * sell_release_value
+            + 0.16 * relative_opportunity_value
+            + 0.12 * cash_defense_value
+            + 0.10 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.10 * release_gate_target
+            + 0.06 * multi_horizon_forward_risk
+            - 0.18 * hold_continuation_value
+            - 0.12 * portfolio_daily_receiver_executability,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_cash_score = np.clip(
+        0.30 * defense_value_target
+        + 0.24 * defense_gate_target
+        + 0.16 * cash_defense_value
+        + 0.10 * np.clip(market_downside_array, 0.0, 1.0)
+        + 0.08 * np.clip(cash_regime_array, 0.0, 1.0)
+        + 0.06 * np.clip(portfolio_cash_pressure_array, 0.0, 1.0)
+        + 0.06 * np.clip(multi_horizon_forward_risk, 0.0, 1.0)
+        - 0.18 * portfolio_daily_receiver_score,
+        0.0,
+        1.0,
+    )
+    portfolio_daily_receiver_candidate_mask = (
+        (deploy_action_mask > 0.5)
+        | (portfolio_daily_receiver_score >= 0.42)
+        | ((~held_mask) & (portfolio_daily_receiver_executability >= 0.34))
+    ).astype(float)
+    portfolio_daily_source_candidate_mask = (
+        held_mask
+        & (
+            (portfolio_daily_source_score >= 0.34)
+            | action_series.isin({"reduce", "exit"}).to_numpy(dtype=bool)
+            | (release_gate_target >= deploy_gate_target + 0.06)
+        )
+    ).astype(float)
     working["large_upside_1d_target"] = large_upside_1d_target
     working["alpha_opportunity_value"] = alpha_opportunity_value
     working["hold_continuation_value"] = hold_continuation_value
@@ -1186,6 +1283,15 @@ def build_action_labels_for_date(
     working["release_gate_target"] = release_gate_target
     working["defense_gate_target"] = defense_gate_target
     working["deploy_executability_target"] = deploy_executability_target
+    working["portfolio_daily_receiver_add_headroom"] = portfolio_daily_receiver_add_headroom
+    working["portfolio_daily_receiver_min_add_delta"] = portfolio_daily_receiver_min_add_delta
+    working["portfolio_daily_receiver_add_capacity"] = portfolio_daily_receiver_add_capacity
+    working["portfolio_daily_receiver_executability"] = portfolio_daily_receiver_executability
+    working["portfolio_daily_receiver_score"] = portfolio_daily_receiver_score
+    working["portfolio_daily_source_score"] = portfolio_daily_source_score
+    working["portfolio_daily_cash_score"] = portfolio_daily_cash_score
+    working["portfolio_daily_receiver_candidate_mask"] = portfolio_daily_receiver_candidate_mask
+    working["portfolio_daily_source_candidate_mask"] = portfolio_daily_source_candidate_mask
     working["clipped_intent_risk"] = 0.0
     working["holding_flag_target"] = held_float
     working["forward_benchmark_return_1d"] = benchmark_fwd1.to_numpy(dtype=float)
@@ -1238,6 +1344,15 @@ def build_action_labels_for_date(
         "release_gate_target",
         "defense_gate_target",
         "deploy_executability_target",
+        "portfolio_daily_receiver_add_headroom",
+        "portfolio_daily_receiver_min_add_delta",
+        "portfolio_daily_receiver_add_capacity",
+        "portfolio_daily_receiver_executability",
+        "portfolio_daily_receiver_score",
+        "portfolio_daily_source_score",
+        "portfolio_daily_cash_score",
+        "portfolio_daily_receiver_candidate_mask",
+        "portfolio_daily_source_candidate_mask",
         "clipped_intent_risk",
         "holding_flag_target",
         "forward_benchmark_return_1d",
@@ -1464,6 +1579,43 @@ def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
     policy["reduce_fraction"] = working.get("reduce_fraction_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["exit_hazard"] = working.get("exit_hazard_target", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["sell_attribution_score"] = working.get("sell_attribution_score", pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
+    for column in (
+        "sell_rank_score",
+        "lifecycle_sell_gate",
+        "large_upside_1d_target",
+        "alpha_opportunity_value",
+        "hold_continuation_value",
+        "sell_release_value",
+        "cash_defense_value",
+        "deployment_opportunity_cost",
+        "risk_adjusted_action_value",
+        "multi_horizon_forward_value",
+        "multi_horizon_forward_risk",
+        "multi_horizon_path_value",
+        "open_action_value",
+        "add_action_value",
+        "hold_action_value",
+        "reduce_action_value",
+        "exit_action_value",
+        "relative_opportunity_value",
+        "action_value_consistency_target",
+        "value_arbitration_target",
+        "deploy_value_target",
+        "release_value_target",
+        "defense_value_target",
+        "deploy_gate_target",
+        "release_gate_target",
+        "defense_gate_target",
+        "deploy_executability_target",
+        "portfolio_daily_receiver_add_headroom",
+        "portfolio_daily_receiver_min_add_delta",
+        "portfolio_daily_receiver_add_capacity",
+        "portfolio_daily_receiver_executability",
+        "portfolio_daily_receiver_score",
+        "portfolio_daily_source_score",
+        "portfolio_daily_cash_score",
+    ):
+        policy[column] = working.get(column, pd.Series(0.0, index=working.index)).astype(float).clip(0.0, 1.0)
     policy["planned_holding_days"] = working["planned_holding_days"].astype(float)
     policy["planned_holding_bucket"] = working["planned_holding_bucket"].astype(str)
     policy["hold_boost"] = np.where(

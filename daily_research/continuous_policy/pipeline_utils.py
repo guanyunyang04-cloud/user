@@ -73,6 +73,15 @@ SAMPLE_LABEL_COLUMNS = {
     "release_gate_target",
     "defense_gate_target",
     "deploy_executability_target",
+    "portfolio_daily_receiver_add_headroom",
+    "portfolio_daily_receiver_min_add_delta",
+    "portfolio_daily_receiver_add_capacity",
+    "portfolio_daily_receiver_executability",
+    "portfolio_daily_receiver_score",
+    "portfolio_daily_source_score",
+    "portfolio_daily_cash_score",
+    "portfolio_daily_receiver_candidate_mask",
+    "portfolio_daily_source_candidate_mask",
     "clipped_intent_risk",
     "holding_flag_target",
     "forward_benchmark_return_1d",
@@ -483,6 +492,8 @@ def _annotate_label_frame_with_execution_feedback(
         "semantic_delta_guarded",
         "budget_split_bound_guarded",
         "forced_zero",
+        "portfolio_daily_receiver_exec_guarded",
+        "sell_source_floor_guarded",
     ):
         drift_sources[column] = feedback.get(column, pd.Series(False, index=feedback.index)).astype(bool)
     clipped_risk = (
@@ -491,14 +502,29 @@ def _annotate_label_frame_with_execution_feedback(
         + drift_sources["semantic_delta_guarded"].astype(float) * 0.35
         + drift_sources["budget_split_bound_guarded"].astype(float) * 0.35
         + drift_sources["forced_zero"].astype(float) * 0.20
+        + drift_sources["portfolio_daily_receiver_exec_guarded"].astype(float) * 0.48
+        + drift_sources["sell_source_floor_guarded"].astype(float) * 0.28
     ).clip(0.0, 1.0)
     feedback = feedback.assign(
         stock_key=feedback["stock"].astype(str).str.upper(),
         clipped_intent_risk_feedback=clipped_risk.to_numpy(dtype=float),
     )
+    feedback_columns = [
+        "stock_key",
+        "clipped_intent_risk_feedback",
+        "portfolio_daily_receiver_exec_guarded",
+        "portfolio_daily_receiver_add_headroom",
+        "portfolio_daily_receiver_min_add_delta",
+        "portfolio_daily_receiver_score",
+        "portfolio_daily_source_score",
+        "portfolio_daily_cash_score",
+    ]
+    for column in feedback_columns:
+        if column not in feedback.columns:
+            feedback[column] = False if column.endswith("_guarded") else 0.0
     working["_feedback_stock_key"] = working["stock"].astype(str).str.upper()
     merged = working.merge(
-        feedback.loc[:, ["stock_key", "clipped_intent_risk_feedback"]],
+        feedback.loc[:, feedback_columns],
         how="left",
         left_on="_feedback_stock_key",
         right_on="stock_key",
@@ -513,6 +539,61 @@ def _annotate_label_frame_with_execution_feedback(
     )
     merged["clipped_intent_risk"] = (
         pd.to_numeric(feedback_risk, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    )
+    receiver_guarded = (
+        merged.get("portfolio_daily_receiver_exec_guarded", pd.Series(False, index=merged.index))
+        .astype("boolean")
+        .fillna(False)
+        .astype(bool)
+    )
+    feedback_headroom = pd.to_numeric(
+        merged.get("portfolio_daily_receiver_add_headroom_feedback", pd.Series(np.nan, index=merged.index)),
+        errors="coerce",
+    ).replace([np.inf, -np.inf], np.nan)
+    feedback_min_delta = pd.to_numeric(
+        merged.get("portfolio_daily_receiver_min_add_delta_feedback", pd.Series(np.nan, index=merged.index)),
+        errors="coerce",
+    ).replace([np.inf, -np.inf], np.nan)
+    if "portfolio_daily_receiver_add_headroom" in merged.columns:
+        merged["portfolio_daily_receiver_add_headroom"] = feedback_headroom.combine_first(
+            pd.to_numeric(working.get("portfolio_daily_receiver_add_headroom", pd.Series(0.0, index=working.index)), errors="coerce")
+        ).fillna(0.0).clip(lower=0.0)
+    if "portfolio_daily_receiver_min_add_delta" in merged.columns:
+        merged["portfolio_daily_receiver_min_add_delta"] = feedback_min_delta.combine_first(
+            pd.to_numeric(working.get("portfolio_daily_receiver_min_add_delta", pd.Series(0.0025, index=working.index)), errors="coerce")
+        ).fillna(0.0025).clip(lower=1.0e-6)
+    if {"portfolio_daily_receiver_add_headroom", "portfolio_daily_receiver_min_add_delta"}.issubset(merged.columns):
+        merged["portfolio_daily_receiver_add_capacity"] = (
+            merged["portfolio_daily_receiver_add_headroom"] / merged["portfolio_daily_receiver_min_add_delta"].clip(lower=1.0e-6)
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    guard_penalty = receiver_guarded.astype(float)
+    for column, scale in (
+        ("portfolio_daily_receiver_executability", 0.55),
+        ("portfolio_daily_receiver_score", 0.42),
+    ):
+        if column in merged.columns:
+            merged[column] = (
+                pd.to_numeric(merged[column], errors="coerce").fillna(0.0) * (1.0 - guard_penalty * scale)
+            ).clip(0.0, 1.0)
+    if "portfolio_daily_source_score" in merged.columns:
+        source_feedback = pd.to_numeric(
+            merged.get("portfolio_daily_source_score_feedback", pd.Series(np.nan, index=merged.index)),
+            errors="coerce",
+        ).replace([np.inf, -np.inf], np.nan)
+        merged["portfolio_daily_source_score"] = source_feedback.combine_first(
+            pd.to_numeric(working.get("portfolio_daily_source_score", pd.Series(0.0, index=working.index)), errors="coerce")
+        ).fillna(0.0).clip(0.0, 1.0)
+    if "portfolio_daily_cash_score" in merged.columns:
+        cash_feedback = pd.to_numeric(
+            merged.get("portfolio_daily_cash_score_feedback", pd.Series(np.nan, index=merged.index)),
+            errors="coerce",
+        ).replace([np.inf, -np.inf], np.nan)
+        merged["portfolio_daily_cash_score"] = cash_feedback.combine_first(
+            pd.to_numeric(working.get("portfolio_daily_cash_score", pd.Series(0.0, index=working.index)), errors="coerce")
+        ).fillna(0.0).clip(0.0, 1.0)
+    merged = merged.drop(
+        columns=[column for column in merged.columns if str(column).endswith("_feedback")],
+        errors="ignore",
     )
     return merged
 
@@ -583,6 +664,10 @@ def compute_continuity_metrics(
             "direct_action_pair_source_opportunity_cost",
             "direct_action_pair_source_release_score",
             "portfolio_daily_receiver_score",
+            "portfolio_daily_receiver_add_headroom",
+            "portfolio_daily_receiver_min_add_delta",
+            "portfolio_daily_receiver_add_capacity",
+            "portfolio_daily_receiver_executability",
             "portfolio_daily_source_gap",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
@@ -1049,6 +1134,20 @@ def compute_continuity_metrics(
             ),
             errors="coerce",
         ).fillna(0.0)
+        portfolio_receiver_add_capacity = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_add_capacity",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_receiver_executability = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_executability",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_source_gap = pd.to_numeric(
             action_outcomes.get("portfolio_daily_source_gap", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
@@ -1191,6 +1290,16 @@ def compute_continuity_metrics(
         )
         metrics["portfolio_daily_receiver_score_mean"] = (
             float(portfolio_receiver_score.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_add_capacity_mean"] = (
+            float(portfolio_receiver_add_capacity.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_executability_mean"] = (
+            float(portfolio_receiver_executability.loc[portfolio_receiver_target].mean())
             if bool(portfolio_receiver_target.any())
             else 0.0
         )

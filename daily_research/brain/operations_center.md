@@ -200,3 +200,13 @@
   - `source_target_not_sold_share`
   - `effective_capital_transfer_count`
 - r23 已出现 stable confirmatory，但仍不得自动 promotion；下一轮若继续推进，应以 r23 稳定性配置为锚，尝试恢复 r22 的收益上限，同时保持 `confirm_stable = True`。
+
+## 2026-04-27 r24 listwise allocation 操作路径
+- r24 profile：`split_heads_portfolio_daily_listwise_allocation_r24`。
+- r24 loss：`alpha_result_value_budget_split_v16`；关键新诊断为 `supports_deploy_executability_head` 与 `supports_portfolio_listwise_heads`。
+- r24 关键可买性字段：`portfolio_daily_receiver_add_capacity`、`portfolio_daily_receiver_executability`、`portfolio_daily_receiver_score`、`portfolio_daily_source_score`、`portfolio_daily_cash_score`。
+- r24 继承校准：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`；默认目标仍为 `portfolio_daily_ranking_v2_gated`。
+- dry-run 已执行：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_listwise_allocation_r24 --trial-count 1 --study-tag verify_r24_listwise_allocation_profile_20260427 --dry-run`。
+- smoke 已执行：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_listwise_allocation_r24 --trial-count 1 --epochs 8 --min-epochs 4 --early-stop-patience 4 --confirmatory-max-candidates 1 --confirmatory-epochs 10 --confirmatory-min-epochs 5 --study-tag cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427`。
+- smoke 产物：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427/study_summary.json` 与 `trial_ranking.csv`；训练诊断在 `daily_research/output/continuous_policy/models/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427__trial_01__train/training_diagnostics.json` 和 `...__confirm_01__train/training_diagnostics.json`。
+- 后续正式验证必须前台运行、10h 窗口、显式 yolos 解释器；未满足 sufficient evidence 与稳定 confirm 前不得 promotion/live。

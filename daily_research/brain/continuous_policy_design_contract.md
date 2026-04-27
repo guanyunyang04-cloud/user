@@ -120,3 +120,10 @@
 - stable confirmatory 必须优先比较 confirm 与其 source screening 的衰减，而不是只看 confirm 自身收益；`annual_return_delta_vs_source`、`sharpe_delta_vs_source`、`monthly_return_mean_delta_vs_source` 和 `max_drawdown_delta_vs_source` 是硬解释字段。
 - 若经济冠军和 v2 champion 不一致，优先按 v2 champion 解释结构质量；高收益但 `receiver_minus_source_5d` 为负或执行冲突更高的路线只能作为收益候选，不得自动升为结构冠军。
 - r23 通过 stable confirmatory 只说明研究路线进入更强证据层，不等于 live 或 promotion；上线边界仍必须由独立 promotion gate、长窗 out-of-sample 和真实执行风控共同决定。
+
+## 2026-04-27 r24 listwise allocation 合同
+- r24 把 P1 receiver 可买性从事后 guard 推进到标签、训练信号、模型头和模拟器评分：`portfolio_daily_receiver_add_headroom`、`portfolio_daily_receiver_min_add_delta`、`portfolio_daily_receiver_add_capacity`、`portfolio_daily_receiver_executability` 与 `portfolio_daily_receiver_score` 必须共同约束 receiver。
+- r24 把 P4 的组合日决策显式化为 receiver/source/cash listwise 学习：`portfolio_daily_receiver_score`、`portfolio_daily_source_score`、`portfolio_daily_cash_score` 进入 `alpha_result_value_budget_split_v16`，并通过 `portfolio_receiver_pairwise_total`、`portfolio_source_pairwise_total`、`portfolio_cash_margin_total` 监督日内排序。
+- `deploy_executability_target` 必须有真实 `deploy_executability_head`，且 `supports_deploy_executability_head = true` 与 `supports_portfolio_listwise_heads = true` 才能把 r24 artifact 解释为新架构输出。
+- `split_heads_portfolio_daily_listwise_allocation_r24` 继承 r23 稳定性思路与 v15 receiver exec guard；guard 仍是最后防线，成功标准是核心 receiver 天然具备 headroom/capacity，而不是靠大量后置过滤维持干净语义。
+- r24 smoke 只证明链路闭合，不证明策略可用；在 bounded/fresh confirm 达到 `training_evidence_status = sufficient`、v2 gates 全过、confirm stable、收益/月度/回撤/source/receiver/cash 联合过线前，仍是 `research / shadow_only`。

@@ -154,3 +154,9 @@
 - 事实：`confirm_01` 相对 source screening `trial_03` 的稳定性增量为 `annual_return_delta = -0.022524`、`sharpe_delta = 0.065448`、`monthly_return_mean_delta = -0.002555`、`max_drawdown_delta = 0.035460`，没有稳定性失败项。
 - 事实：经济冠军 `confirm_02` 也为 stable confirmatory，指标为 `annual_return = 1.337017`、`sharpe = 2.936905`、`max_drawdown = -0.154638`、`monthly_return_mean = 0.065722`，但因 `receiver_minus_source_5d = -0.012136`、`add_to_hold_conflict_share = 0.086093` 等结构质量不如 `confirm_01`，v2 排名低于 `confirm_01`。
 - 决策：r23 已把 r22 的“stable confirmatory 为空”推进为“存在 stable confirmatory”，证明稳定性优先搜索方向有效；但 r23 的 v2 champion 收益低于 r22 高收益 screening champion，当前仍为 `research / shadow_only`，不得切 live、不得改 active artifact、不得把 stable confirmatory 直接等同 promotion。
+
+## 2026-04-27 r24 当前状态
+- 已落地 P1/P4：`alpha_result_value_budget_split_v16` 与 `split_heads_portfolio_daily_listwise_allocation_r24` 已接入，模型支持 `supports_deploy_executability_head` 和 `supports_portfolio_listwise_heads`。
+- receiver 可买性现在由 `portfolio_daily_receiver_add_headroom`、`portfolio_daily_receiver_min_add_delta`、`portfolio_daily_receiver_add_capacity`、`portfolio_daily_receiver_executability`、`portfolio_daily_receiver_score` 进入标签、训练、推理和模拟器。
+- listwise 组合日决策现在显式学习 receiver/source/cash score，但 r24 smoke 只证明链路闭合；confirm 收益、Sharpe、月均收益不足，仍为 `research / shadow_only`。
+- 最新 r24 smoke tag：`cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427`；产物入口：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427/study_summary.json`。
