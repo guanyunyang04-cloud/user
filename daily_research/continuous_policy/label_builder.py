@@ -1216,18 +1216,132 @@ def build_action_labels_for_date(
         0.0,
         1.0,
     )
-    portfolio_daily_source_score = np.where(
+    portfolio_daily_receiver_candidate_mask = (
+        (deploy_action_mask > 0.5)
+        | (portfolio_daily_receiver_score >= 0.42)
+        | ((~held_mask) & (portfolio_daily_receiver_executability >= 0.34))
+    ).astype(float)
+    source_forward_edge = (
+        0.58 * forward_edge_5d
+        + 0.26 * forward_edge_10d
+        + 0.16 * fwd20.to_numpy(dtype=float)
+    )
+    receiver_candidate_reference_mask = (
+        (portfolio_daily_receiver_candidate_mask > 0.5)
+        & (portfolio_daily_receiver_add_capacity >= 0.20)
+        & (portfolio_daily_receiver_score >= 0.18)
+    )
+    receiver_forward_reference = 0.0
+    if bool(np.any(receiver_candidate_reference_mask)):
+        receiver_ref = pd.DataFrame(
+            {
+                "score": portfolio_daily_receiver_score,
+                "forward_edge": source_forward_edge,
+            },
+            index=working.index,
+        ).loc[receiver_candidate_reference_mask]
+        receiver_ref = receiver_ref.replace([np.inf, -np.inf], np.nan).dropna()
+        if not receiver_ref.empty:
+            top_k = max(1, min(5, int(np.ceil(len(receiver_ref) * 0.20))))
+            receiver_forward_reference = float(receiver_ref.nlargest(top_k, "score")["forward_edge"].median())
+            if not np.isfinite(receiver_forward_reference):
+                receiver_forward_reference = 0.0
+    portfolio_daily_source_receiver_forward_spread = np.where(
+        held_mask,
+        np.clip(receiver_forward_reference - source_forward_edge, -0.30, 0.30),
+        0.0,
+    )
+    portfolio_daily_source_release_quality = np.where(
+        held_mask,
+        np.clip(
+            0.36 * np.clip(portfolio_daily_source_receiver_forward_spread / 0.075, 0.0, 1.0)
+            + 0.24 * np.clip(-source_forward_edge / 0.060, 0.0, 1.0)
+            + 0.18 * multi_horizon_forward_risk
+            + 0.10 * cash_defense_value
+            + 0.08 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.06 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
+            - 0.22 * hold_continuation_value
+            - 0.18 * alpha_opportunity_value
+            - 0.14 * large_upside_1d_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_min_release_delta = np.maximum.reduce(
+        [
+            np.full(len(working), 0.0025, dtype=float),
+            np.clip(current_weight_array, 0.0, None) * 0.018,
+            position_cap_proxy * 0.012,
+        ]
+    )
+    portfolio_daily_source_release_capacity = np.where(
+        held_mask,
+        np.clip(
+            current_weight_array / np.clip(portfolio_daily_source_min_release_delta, 1.0e-6, None),
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_opportunity_cost = np.where(
+        held_mask,
+        np.clip(
+            0.34 * hold_continuation_value
+            + 0.26 * alpha_opportunity_value
+            + 0.20 * multi_horizon_path_value
+            + 0.14 * deploy_value_target
+            + 0.10 * portfolio_daily_receiver_executability
+            + 0.10 * large_upside_1d_target
+            + 0.12 * np.clip(-portfolio_daily_source_receiver_forward_spread / 0.075, 0.0, 1.0)
+            + 0.10 * np.clip(source_forward_edge / 0.075, 0.0, 1.0)
+            - 0.10 * release_value_target
+            - 0.06 * cash_defense_value
+            - 0.05 * multi_horizon_forward_risk
+            - 0.20 * portfolio_daily_source_release_quality,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_executability = np.where(
         held_mask,
         np.clip(
             0.28 * release_value_target
-            + 0.22 * sell_release_value
-            + 0.16 * relative_opportunity_value
+            + 0.20 * sell_release_value
+            + 0.14 * release_gate_target
             + 0.12 * cash_defense_value
-            + 0.10 * working["sell_rank_score"].to_numpy(dtype=float)
-            + 0.10 * release_gate_target
-            + 0.06 * multi_horizon_forward_risk
+            + 0.10 * multi_horizon_forward_risk
+            + 0.08 * working["sell_rank_score"].to_numpy(dtype=float)
+            + 0.06 * portfolio_daily_source_release_capacity
+            + 0.14 * (1.0 - portfolio_daily_source_opportunity_cost)
+            + 0.20 * portfolio_daily_source_release_quality
             - 0.18 * hold_continuation_value
-            - 0.12 * portfolio_daily_receiver_executability,
+            - 0.14 * alpha_opportunity_value
+            - 0.10 * portfolio_daily_receiver_executability
+            - 0.06 * large_upside_1d_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_score = np.where(
+        held_mask,
+        np.clip(
+            0.28 * portfolio_daily_source_executability
+            + 0.10 * portfolio_daily_source_release_capacity
+            + 0.22 * (1.0 - portfolio_daily_source_opportunity_cost)
+            + 0.24 * portfolio_daily_source_release_quality
+            + 0.13 * release_value_target
+            + 0.11 * sell_release_value
+            + 0.09 * release_gate_target
+            + 0.07 * cash_defense_value
+            + 0.06 * multi_horizon_forward_risk
+            + 0.05 * relative_opportunity_value
+            - 0.15 * hold_continuation_value
+            - 0.12 * alpha_opportunity_value
+            - 0.10 * portfolio_daily_receiver_executability
+            - 0.08 * large_upside_1d_target,
             0.0,
             1.0,
         ),
@@ -1245,17 +1359,56 @@ def build_action_labels_for_date(
         0.0,
         1.0,
     )
-    portfolio_daily_receiver_candidate_mask = (
-        (deploy_action_mask > 0.5)
-        | (portfolio_daily_receiver_score >= 0.42)
-        | ((~held_mask) & (portfolio_daily_receiver_executability >= 0.34))
-    ).astype(float)
+    portfolio_daily_source_semantic_release_mask = (
+        action_series.isin({"reduce", "exit"}).to_numpy(dtype=bool)
+        | (release_value_target >= 0.30)
+        | (sell_release_value >= 0.32)
+        | (
+            (release_gate_target >= deploy_gate_target + 0.16)
+            & (portfolio_daily_source_score >= 0.34)
+            & (portfolio_daily_source_opportunity_cost <= 0.46)
+        )
+        | (
+            (portfolio_daily_source_release_quality >= 0.34)
+            & (portfolio_daily_source_score >= 0.22)
+            & (portfolio_daily_source_opportunity_cost <= 0.54)
+        )
+        | (
+            (portfolio_daily_source_score >= 0.36)
+            & (portfolio_daily_source_opportunity_cost <= 0.18)
+            & (portfolio_daily_source_executability >= 0.15)
+            & (portfolio_daily_source_release_capacity >= 0.80)
+        )
+    )
     portfolio_daily_source_candidate_mask = (
         held_mask
+        & portfolio_daily_source_semantic_release_mask
         & (
-            (portfolio_daily_source_score >= 0.34)
-            | action_series.isin({"reduce", "exit"}).to_numpy(dtype=bool)
-            | (release_gate_target >= deploy_gate_target + 0.06)
+            ((portfolio_daily_source_score >= 0.32) & (portfolio_daily_source_opportunity_cost <= 0.58))
+            | (
+                (portfolio_daily_source_release_quality >= 0.34)
+                & (portfolio_daily_source_score >= 0.22)
+                & (portfolio_daily_source_executability >= 0.12)
+                & (portfolio_daily_source_opportunity_cost <= 0.54)
+            )
+            | (
+                (portfolio_daily_source_score >= 0.36)
+                & (portfolio_daily_source_opportunity_cost <= 0.18)
+                & (portfolio_daily_source_executability >= 0.15)
+            )
+            | (
+                (portfolio_daily_source_executability >= 0.30)
+                & (portfolio_daily_source_release_capacity >= 0.50)
+                & (portfolio_daily_source_opportunity_cost <= 0.52)
+            )
+            | (
+                action_series.isin({"reduce", "exit"}).to_numpy(dtype=bool)
+                & (portfolio_daily_source_opportunity_cost <= 0.66)
+            )
+            | (
+                (release_gate_target >= deploy_gate_target + 0.10)
+                & (portfolio_daily_source_opportunity_cost <= 0.56)
+            )
         )
     ).astype(float)
     working["large_upside_1d_target"] = large_upside_1d_target
@@ -1288,6 +1441,12 @@ def build_action_labels_for_date(
     working["portfolio_daily_receiver_add_capacity"] = portfolio_daily_receiver_add_capacity
     working["portfolio_daily_receiver_executability"] = portfolio_daily_receiver_executability
     working["portfolio_daily_receiver_score"] = portfolio_daily_receiver_score
+    working["portfolio_daily_source_min_release_delta"] = portfolio_daily_source_min_release_delta
+    working["portfolio_daily_source_release_capacity"] = portfolio_daily_source_release_capacity
+    working["portfolio_daily_source_receiver_forward_spread"] = portfolio_daily_source_receiver_forward_spread
+    working["portfolio_daily_source_release_quality"] = portfolio_daily_source_release_quality
+    working["portfolio_daily_source_opportunity_cost"] = portfolio_daily_source_opportunity_cost
+    working["portfolio_daily_source_executability"] = portfolio_daily_source_executability
     working["portfolio_daily_source_score"] = portfolio_daily_source_score
     working["portfolio_daily_cash_score"] = portfolio_daily_cash_score
     working["portfolio_daily_receiver_candidate_mask"] = portfolio_daily_receiver_candidate_mask
@@ -1349,6 +1508,11 @@ def build_action_labels_for_date(
         "portfolio_daily_receiver_add_capacity",
         "portfolio_daily_receiver_executability",
         "portfolio_daily_receiver_score",
+        "portfolio_daily_source_release_capacity",
+        "portfolio_daily_source_receiver_forward_spread",
+        "portfolio_daily_source_release_quality",
+        "portfolio_daily_source_opportunity_cost",
+        "portfolio_daily_source_executability",
         "portfolio_daily_source_score",
         "portfolio_daily_cash_score",
         "portfolio_daily_receiver_candidate_mask",
@@ -1612,6 +1776,10 @@ def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
         "portfolio_daily_receiver_add_capacity",
         "portfolio_daily_receiver_executability",
         "portfolio_daily_receiver_score",
+        "portfolio_daily_source_release_capacity",
+        "portfolio_daily_source_release_quality",
+        "portfolio_daily_source_opportunity_cost",
+        "portfolio_daily_source_executability",
         "portfolio_daily_source_score",
         "portfolio_daily_cash_score",
     ):

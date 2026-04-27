@@ -210,3 +210,31 @@
 - smoke 已执行：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_listwise_allocation_r24 --trial-count 1 --epochs 8 --min-epochs 4 --early-stop-patience 4 --confirmatory-max-candidates 1 --confirmatory-epochs 10 --confirmatory-min-epochs 5 --study-tag cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427`。
 - smoke 产物：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427/study_summary.json` 与 `trial_ranking.csv`；训练诊断在 `daily_research/output/continuous_policy/models/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427__trial_01__train/training_diagnostics.json` 和 `...__confirm_01__train/training_diagnostics.json`。
 - 后续正式验证必须前台运行、10h 窗口、显式 yolos 解释器；未满足 sufficient evidence 与稳定 confirm 前不得 promotion/live。
+## 2026-04-27 r25 source-release listwise 操作路径
+- r25 dry-run 命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_source_release_listwise_r25 --trial-count 1 --study-tag verify_r25_source_release_listwise_profile_20260427 --dry-run`
+- r25 smoke 命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_source_release_listwise_r25 --trial-count 1 --epochs 8 --min-epochs 4 --early-stop-patience 4 --confirmatory-max-candidates 1 --confirmatory-epochs 10 --confirmatory-min-epochs 5 --study-tag cp_v3_portfolio_daily_source_release_listwise_r25_smoke_20260427`
+- r24/r25 source 审计命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/portfolio_daily_listwise_audit.py --protocol-dir <protocol_dir> --output-dir <audit_output_dir>`
+- 运行纪律不变：所有 `daily_research` 任务显式使用 yolos python、前台运行、窗口按 10h、结束后做 diagnostics、gate report、语义进程检查与脑内写回。
+
+## 2026-04-27 r25 source-release listwise 精确操作标记
+- r25 profile：`split_heads_portfolio_daily_source_release_listwise_r25`。
+- r25 loss：`alpha_result_value_budget_split_v17`。
+- 必须确认训练诊断包含 `supports_portfolio_listwise_heads = true` 与 `supports_portfolio_source_release_heads = true`。
+- 必读字段：`portfolio_daily_receiver_add_capacity`、`portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`。
+- 必须用 `portfolio_daily_listwise_audit.py` 拆解 source disappearance、candidate、target、realized sell 与 sell_source_floor_guard。
+## 2026-04-27 r25 confirmfix + release-quality 操作记录
+- dry-run 命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_source_release_listwise_r25 --study-tag verify_r25_confirmfix_release_quality_profile2_20260427 --trial-count 1 --dry-run`
+- bounded confirm 命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/continuous_policy/run_self_optimizing_study.py --search-profile split_heads_portfolio_daily_source_release_listwise_r25 --study-tag cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427 --trial-count 1 --confirmatory-max-candidates 1 --epochs 8 --min-epochs 4 --confirmatory-epochs 10 --confirmatory-min-epochs 5 --trainer-backend formal_torch_seq_v3 --resume-mode fresh`
+- 本轮已验证：confirm 阶段不再因 TQ 初始化失败中断；任务前台运行并自然结束，未发现脚本尾部循环或训练进程遗留。
+- study summary：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427/study_summary.json`
+- trial diagnostics：`daily_research/output/continuous_policy/models/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427__trial_01__train/training_diagnostics.json`
+- confirm diagnostics：`daily_research/output/continuous_policy/models/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427__confirm_01__train/training_diagnostics.json`
+- r25 审计工具：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/portfolio_daily_listwise_audit.py --protocol-dir <protocol_dir> --output-dir <audit_output_dir>`
+- 审计解释纪律：若 `source_target_count = 0` 且 receiver-source spread 不为负，只能解释为“正确回避了不值得卖的 source”，不能解释为“已经学会卖得对”；必须继续寻找非零 source target、正 spread、正收益与 sufficient training 同时成立的证据。
+- 后续所有 `daily_research` 命令继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`，前台运行，窗口按 10h，结束后必须做 diagnostics、gate/audit、脑内写回、语义进程检查。
+## 2026-04-27 r25 quality6 审计产物
+- trial audit summary：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427/listwise_audit_trial_01/portfolio_daily_listwise_audit_summary.json`
+- trial audit daily：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427/listwise_audit_trial_01/portfolio_daily_listwise_audit_by_date.csv`
+- confirm audit summary：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427/listwise_audit_confirm_01/portfolio_daily_listwise_audit_summary.json`
+- confirm audit daily：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427/listwise_audit_confirm_01/portfolio_daily_listwise_audit_by_date.csv`
+- 审计结论：trial 与 confirm 的 source-like rows 均主要被 `protection_blocked: source-like rows were mostly protected by funding/keep guards` 解释；`source_target_count = 0` 是防错行为，不是主动 source allocation 已完成。

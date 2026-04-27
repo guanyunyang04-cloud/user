@@ -78,6 +78,12 @@ SAMPLE_LABEL_COLUMNS = {
     "portfolio_daily_receiver_add_capacity",
     "portfolio_daily_receiver_executability",
     "portfolio_daily_receiver_score",
+    "portfolio_daily_source_min_release_delta",
+    "portfolio_daily_source_release_capacity",
+    "portfolio_daily_source_receiver_forward_spread",
+    "portfolio_daily_source_release_quality",
+    "portfolio_daily_source_opportunity_cost",
+    "portfolio_daily_source_executability",
     "portfolio_daily_source_score",
     "portfolio_daily_cash_score",
     "portfolio_daily_receiver_candidate_mask",
@@ -516,8 +522,12 @@ def _annotate_label_frame_with_execution_feedback(
         "portfolio_daily_receiver_add_headroom",
         "portfolio_daily_receiver_min_add_delta",
         "portfolio_daily_receiver_score",
+        "portfolio_daily_source_release_capacity",
+        "portfolio_daily_source_release_quality",
+        "portfolio_daily_source_executability",
         "portfolio_daily_source_score",
         "portfolio_daily_cash_score",
+        "sell_source_floor_guarded",
     ]
     for column in feedback_columns:
         if column not in feedback.columns:
@@ -583,6 +593,32 @@ def _annotate_label_frame_with_execution_feedback(
         merged["portfolio_daily_source_score"] = source_feedback.combine_first(
             pd.to_numeric(working.get("portfolio_daily_source_score", pd.Series(0.0, index=working.index)), errors="coerce")
         ).fillna(0.0).clip(0.0, 1.0)
+    source_floor_guarded = (
+        merged.get("sell_source_floor_guarded", pd.Series(False, index=merged.index))
+        .astype("boolean")
+        .fillna(False)
+        .astype(bool)
+    )
+    source_guard_penalty = source_floor_guarded.astype(float)
+    for column, scale in (
+        ("portfolio_daily_source_release_capacity", 0.22),
+        ("portfolio_daily_source_release_quality", 0.30),
+        ("portfolio_daily_source_executability", 0.44),
+        ("portfolio_daily_source_score", 0.36),
+    ):
+        if column in merged.columns:
+            feedback_values = pd.to_numeric(
+                merged.get(f"{column}_feedback", pd.Series(np.nan, index=merged.index)),
+                errors="coerce",
+            ).replace([np.inf, -np.inf], np.nan)
+            base_values = pd.to_numeric(
+                working.get(column, pd.Series(0.0, index=working.index)),
+                errors="coerce",
+            )
+            merged[column] = (
+                feedback_values.combine_first(base_values).fillna(0.0).clip(0.0, 1.0)
+                * (1.0 - source_guard_penalty * scale)
+            ).clip(0.0, 1.0)
     if "portfolio_daily_cash_score" in merged.columns:
         cash_feedback = pd.to_numeric(
             merged.get("portfolio_daily_cash_score_feedback", pd.Series(np.nan, index=merged.index)),
@@ -592,7 +628,11 @@ def _annotate_label_frame_with_execution_feedback(
             pd.to_numeric(working.get("portfolio_daily_cash_score", pd.Series(0.0, index=working.index)), errors="coerce")
         ).fillna(0.0).clip(0.0, 1.0)
     merged = merged.drop(
-        columns=[column for column in merged.columns if str(column).endswith("_feedback")],
+        columns=[
+            column
+            for column in merged.columns
+            if str(column).endswith("_feedback") or str(column) == "sell_source_floor_guarded"
+        ],
         errors="ignore",
     )
     return merged
@@ -669,6 +709,9 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_add_capacity",
             "portfolio_daily_receiver_executability",
             "portfolio_daily_source_gap",
+            "portfolio_daily_source_release_capacity",
+            "portfolio_daily_source_release_quality",
+            "portfolio_daily_source_executability",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
             "value_arbitration_target",
@@ -1156,6 +1199,27 @@ def compute_continuity_metrics(
             action_outcomes.get("portfolio_daily_source_score", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0)
+        portfolio_source_release_capacity = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_release_capacity",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_release_quality = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_release_quality",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_executability = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_executability",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_cash_score = pd.to_numeric(
             action_outcomes.get("portfolio_daily_cash_score", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
@@ -1305,6 +1369,21 @@ def compute_continuity_metrics(
         )
         metrics["portfolio_daily_source_score_mean"] = (
             float(portfolio_source_score.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_release_capacity_mean"] = (
+            float(portfolio_source_release_capacity.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_release_quality_mean"] = (
+            float(portfolio_source_release_quality.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_executability_mean"] = (
+            float(portfolio_source_executability.loc[portfolio_source_target].mean())
             if bool(portfolio_source_target.any())
             else 0.0
         )
@@ -1649,6 +1728,9 @@ def compute_continuity_metrics(
             "portfolio_daily_cash_reserve_rate",
             "portfolio_daily_receiver_score_mean",
             "portfolio_daily_source_score_mean",
+            "portfolio_daily_source_release_capacity_mean",
+            "portfolio_daily_source_release_quality_mean",
+            "portfolio_daily_source_executability_mean",
             "portfolio_daily_source_gap_mean",
             "portfolio_daily_receiver_forward_excess_5d",
             "portfolio_daily_source_forward_excess_5d",

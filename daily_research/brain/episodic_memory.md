@@ -1053,3 +1053,20 @@
 - 结果边界：smoke 仍为 `shadow_only`，`training_evidence_status = insufficient`；confirm_01 年化 `0.027326`、Sharpe `0.239028`、最大回撤 `-0.152518`、月均 `0.003561`，稳定性失败项为 `confirm_annual_return_floor`、`confirm_sharpe_floor`、`confirm_monthly_return_floor`。
 - 结构观察：confirm_01 的 `receiver_unrealized_deploy_share = 0.0`、`cash_reserve_rate = 0.110526`，但 `source_target_count = 0`、`effective_capital_transfer_count = 0`，说明 r24 链路已能学 receiver/cash 侧，但资金释放/source 侧仍未形成有效日分配闭环。
 - 决策：r24 是 P1/P4 机制落地，不是 promotion 证据；下一轮若继续，应做 bounded confirmatory 的 v16 参数稳定性搜索，而不是把本次 smoke 当成正式策略结论。
+## 2026-04-27 r25 source-release listwise 实施记录
+- 行动前判断：r24 已完成 P1/P4 的第一阶段，但 confirm 中 source target 消失，说明长期正确方向不是继续堆 receiver guard，而是补齐 source 释放资金的可学习信号。
+- 已执行实现：新增 source release capacity/executability 标签、模型头、v17 loss、r25 profile、模拟器排序字段、continuity metrics、source 消失审计工具，并把 guard/doc/project consistency 同步到 r25。
+- 待验证事实：需要用 yolos 前台完成 r25 dry-run、r25 smoke、r24 confirm source audit、GPU/yolos diagnostics、doc guard、project consistency 与语义进程检查。
+- 当前边界：r25 只是 research/shadow 修复路线；任何 smoke 结果都不能替代 bounded/fresh confirm 与 promotion gate。
+## 2026-04-27 r25 confirmfix + release-quality 复盘
+- 起因：用户要求先修 confirm 阶段 TQ 初始化失败，让 r25 能完成 bounded confirm；再针对负的 receiver-source forward spread 调整 source opportunity cost / release label，使“能卖”进一步变成“卖得对”。
+- 执行：数据层修复 TQ session 唯一化、重试、失败日志与 universe/date fallback；策略层新增 source release-quality 标签、模型头、loss 权重、推理融合、模拟器排序和 audit 工具。
+- 验证：`cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427` 前台自然完成 trial + confirm，确认 TQ confirm 初始化失败不再阻断 bounded confirm。
+- 关键发现：release-quality 生效后，confirm 中 source 被抑制为 0，负 spread 不再出现；审计显示评估窗口内的 held/context rows 多为正 forward excess，release-quality 很低，因此不卖是合理防错。
+- 本质瓶颈：当前不是“脚本会不会结束”的工程问题，而是 source release 正样本稀疏、短训练预算泛化不足、best epoch 仍贴边导致 insufficient training evidence；模型学会了不要乱卖，但还没有证明能稳定主动卖出正确 source。
+- 决策：本轮不进入 promotion/live，不改 active artifact；下一轮若继续推进，应在 r25 release-quality 机制上增加 confirm 训练预算或做小规模稳定性搜索，目标是非零 source target + 正 receiver-source spread + 正收益/月度质量 + sufficient training 同时成立。
+## 2026-04-27 r25 quality6 审计补记
+- 已补跑 `portfolio_daily_listwise_audit.py`，trial 与 confirm 均生成 summary/daily 审计文件。
+- trial 审计显示 `top_source_release_quality = 0.035386`、`source_target_count = 0`、`source_realized_sell_rate = 0`，诊断为 funding/keep protection 阻断。
+- confirm 审计显示 `top_source_release_quality = 0.035386`、`source_target_count = 0`、`source_realized_sell_rate = 0`，同样诊断为 funding/keep protection 阻断。
+- 解释：当前机制已经避免把仍有持有价值的 source 硬卖掉；下一阶段要证明的是在真实低质量 source 出现时能够非零卖出，并保持正 spread 与正收益，而不是简单降低 protection。

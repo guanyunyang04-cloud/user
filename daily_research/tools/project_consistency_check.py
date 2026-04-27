@@ -628,6 +628,11 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
             "split_heads_portfolio_daily_listwise_allocation_r24",
             "r24 portfolio daily listwise allocation study profile",
         ),
+        ("alpha_result_value_budget_split_v17", "r25 source-release listwise allocation loss profile"),
+        (
+            "split_heads_portfolio_daily_source_release_listwise_r25",
+            "r25 source-release listwise allocation study profile",
+        ),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -758,6 +763,22 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         failures,
         "continuous_policy_r24_contract_missing",
         "continuous_policy r24 portfolio daily listwise allocation contract is missing learned headroom/listwise markers.",
+    )
+    audit_text = _read_text("daily_research/tools/portfolio_daily_listwise_audit.py")
+    _require(
+        "portfolio_daily_source_release_capacity" in model_seq_v3_text
+        and "portfolio_daily_source_executability" in model_seq_v3_text
+        and "supports_portfolio_source_release_heads" in model_seq_v3_text
+        and "portfolio_daily_source_release_capacity" in pipeline_text
+        and "portfolio_daily_source_executability" in pipeline_text
+        and "portfolio_daily_source_release_capacity" in simulator_text
+        and "portfolio_daily_source_executability" in simulator_text
+        and "alpha_result_value_budget_split_v17" in model_seq_v3_text
+        and "split_heads_portfolio_daily_source_release_listwise_r25" in study_text
+        and "source_disappearance" in audit_text,
+        failures,
+        "continuous_policy_r25_contract_missing",
+        "continuous_policy r25 source-release listwise contract is missing learned release-capacity/executability markers.",
     )
     _require(
         "build_monthly_return_frame" in pipeline_text,

@@ -127,3 +127,23 @@
 - `deploy_executability_target` 必须有真实 `deploy_executability_head`，且 `supports_deploy_executability_head = true` 与 `supports_portfolio_listwise_heads = true` 才能把 r24 artifact 解释为新架构输出。
 - `split_heads_portfolio_daily_listwise_allocation_r24` 继承 r23 稳定性思路与 v15 receiver exec guard；guard 仍是最后防线，成功标准是核心 receiver 天然具备 headroom/capacity，而不是靠大量后置过滤维持干净语义。
 - r24 smoke 只证明链路闭合，不证明策略可用；在 bounded/fresh confirm 达到 `training_evidence_status = sufficient`、v2 gates 全过、confirm stable、收益/月度/回撤/source/receiver/cash 联合过线前，仍是 `research / shadow_only`。
+## 2026-04-27 r25 source-release listwise 合同
+- r25 合同：source 不再只是 `portfolio_daily_source_score` 一个标量，而是由 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_opportunity_cost` 与 `portfolio_daily_source_score` 共同决定。
+- `supports_portfolio_source_release_heads = true` 是解释 r25 artifact 具备 source 释放学习能力的必要诊断；只具备 `supports_portfolio_listwise_heads` 只能说明 r24 receiver/source/cash 基础头存在。
+- 成功判定不能只看 `receiver_unrealized_deploy_share = 0` 或 `add_to_hold = 0`；必须同时看 source candidate、source target、source realized sell、effective capital transfer、cash reserve、monthly return、drawdown 与 confirm stability。
+- 如果 source candidate 存在但 target 或 sell 消失，优先用 `portfolio_daily_listwise_audit.py` 拆解 score gate、execution gate、funding protection 与 sell_source_floor_guard，而不是直接降阈值。
+
+## 2026-04-27 r25 source-release listwise 精确合同标记
+- `split_heads_portfolio_daily_source_release_listwise_r25` 是 r24 listwise 的 source-release 延伸，仍必须保持 `research / shadow_only`。
+- `alpha_result_value_budget_split_v17` 负责把 source release capacity、source executability、source score 纳入训练。
+- `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_opportunity_cost` 与 `portfolio_daily_source_score` 必须联合解释。
+- `supports_portfolio_source_release_heads = true` 是判断 r25 artifact 具备 source 释放学习头的必要诊断。
+- 成功判定仍必须同时看 `stable_confirmatory`、`source_realized_sell_floor`、`source_not_sold_ceiling`、`portfolio_daily_effective_capital_transfer_count` 与 `monthly_return_mean`。
+## 2026-04-27 r25 confirmfix + source release-quality 合同
+- TQ 不是策略信号的一部分，只是外部数据连接层；confirm 阶段不得因 TQ session 文件冲突、初始化残留或短暂连接失败导致整轮训练失败。数据层必须优先尝试真实 TQ，失败后记录失败原因，并在 research/shadow 验证中允许使用可审计 universe 缓存兜底。
+- source release 的合同从“能卖”升级为“卖得对”：source 只有在相对 receiver 机会成本为正、继续持有价值不足、forward risk/现金防御/卖出排序共同支持时，才应成为 release source。
+- `portfolio_daily_source_opportunity_cost` 不能再简单奖励“可以被卖出”；它必须惩罚卖掉仍有正 forward edge 或优于 receiver 参考收益的持仓，并奖励 release-quality 高、source forward edge 弱、receiver 替代收益更强的持仓。
+- `portfolio_daily_source_release_quality` 是 r25 的核心 source 学习信号，必须与 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_score` 联合解释；只看 source score 或只看 guard count 都是不完整解释。
+- 成功判定不得把 `source_target_count = 0` 当作 source 问题解决。非零 source target、非零 realized sell、正 `portfolio_daily_receiver_minus_source_forward_excess_5d`、正收益/月度质量、可控回撤、receiver deploy 全实现和 cash reserve 同时过线，才可称为“卖得对”的有效证据。
+- quality6 的合同解释：负 receiver-source spread 被消除是因为 release-quality 阻止了低质量卖出；这是正确的防错机制，但不是 active source allocation 的完成态。
+- r25 当前状态仍为 `research / shadow_only`；任何 promotion/live/active artifact 更新都必须等待 sufficient training、v2 gates、confirm stability、source/receiver/cash 联合经济质量同时成立。

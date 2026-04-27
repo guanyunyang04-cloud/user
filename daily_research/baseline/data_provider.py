@@ -35,6 +35,7 @@ STYLE_SECTOR_CODES = {
 
 MARKET_DATA_FIELDS = ("Open", "High", "Low", "Close", "Volume", "Amount")
 TQ_FETCH_BATCH_SIZE = 64
+_TQ_SESSION_COUNTER = 0
 
 
 def _run_tq_quietly(func, *args, **kwargs):
@@ -43,30 +44,43 @@ def _run_tq_quietly(func, *args, **kwargs):
         return func(*args, **kwargs)
 
 
-def _tq_session_path() -> str:
+def _tq_session_path(attempt: int = 0) -> str:
+    global _TQ_SESSION_COUNTER
+    _TQ_SESSION_COUNTER += 1
     session_dir = Path(__file__).resolve().parents[1] / "cache" / "tq_sessions"
     session_dir.mkdir(parents=True, exist_ok=True)
-    session_path = session_dir / f"data_provider_{os.getpid()}.session"
+    session_path = session_dir / (
+        f"data_provider_{os.getpid()}_{int(time.time() * 1000)}_{_TQ_SESSION_COUNTER}_{attempt}.session"
+    )
     if not session_path.exists():
         session_path.write_text("daily_research tq session\n", encoding="utf-8")
     return str(session_path)
 
 
+def _record_tq_init_failure(exc: Exception, *, attempt: int) -> None:
+    log_path = Path(__file__).resolve().parents[1] / "cache" / "tq_sessions" / "tq_init_failures.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    line = f"{pd.Timestamp.now().isoformat()} attempt={attempt} error={type(exc).__name__}: {exc}\n"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
 def _initialize_tq_client(tq) -> None:
     last_error: Exception | None = None
-    session_path = _tq_session_path()
-    for attempt in range(3):
+    for attempt in range(6):
         try:
+            session_path = _tq_session_path(attempt)
             _run_tq_quietly(tq.initialize, session_path)
             return
         except Exception as exc:
             last_error = exc
+            _record_tq_init_failure(exc, attempt=attempt + 1)
             try:
                 _run_tq_quietly(tq.close)
             except Exception:
                 pass
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
+            if attempt < 5:
+                time.sleep(min(8.0, 0.75 * (attempt + 1)))
     if last_error is not None:
         raise last_error
 
@@ -90,6 +104,63 @@ def _try_import_tq():
             except Exception:
                 return None
         return None
+
+
+def get_universe_cache_file(universe_scope: str = "all_a") -> Path:
+    safe_scope = str(universe_scope or "all_a").strip().lower().replace("/", "_").replace("\\", "_")
+    cache_file = Path(__file__).resolve().parents[1] / "cache" / f"universe_{safe_scope}_tq.csv"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    return cache_file
+
+
+def load_cached_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
+    cache_file = get_universe_cache_file(universe_scope)
+    if not cache_file.exists():
+        cached_manifest = _load_cached_universe_from_raw_manifest(universe_scope)
+        if cached_manifest:
+            _save_universe_cache(cached_manifest, universe_scope)
+        return cached_manifest
+    try:
+        cached = pd.read_csv(cache_file, dtype={"stock": str})
+    except Exception:
+        return _load_cached_universe_from_raw_manifest(universe_scope)
+    if cached.empty or "stock" not in cached.columns:
+        return _load_cached_universe_from_raw_manifest(universe_scope)
+    return _unique_preserve_order([str(item).strip().upper() for item in cached["stock"].dropna().tolist()])
+
+
+def _load_cached_universe_from_raw_manifest(universe_scope: str = "all_a") -> List[str]:
+    if str(universe_scope or "all_a").strip().lower() != "all_a":
+        return []
+    manifest_dir = Path(__file__).resolve().parents[1] / "cache" / "advanced_ml"
+    if not manifest_dir.exists():
+        return []
+    candidates = sorted(
+        manifest_dir.glob("all_a_cached_from_raw_*.txt"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for manifest in candidates:
+        try:
+            values = [
+                line.strip().upper()
+                for line in manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except Exception:
+            continue
+        cached = _unique_preserve_order([value for value in values if _is_a_share_stock(value)])
+        if cached:
+            return cached
+    return []
+
+
+def _save_universe_cache(universe: List[str], universe_scope: str = "all_a") -> None:
+    stocks = _unique_preserve_order(universe)
+    if not stocks:
+        return
+    cache_file = get_universe_cache_file(universe_scope)
+    pd.DataFrame({"stock": stocks}).to_csv(cache_file, index=False, encoding="utf-8-sig")
 
 
 def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -225,10 +296,13 @@ def filter_a_share_universe(
 def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
     tq = _try_import_tq()
     if tq is None:
+        cached_universe = load_cached_universe_from_tq(universe_scope)
+        if cached_universe:
+            return cached_universe
         raise RuntimeError("tqcenter not available. Please ensure t0_project/tqcenter.py exists.")
 
-    _initialize_tq_client(tq)
     try:
+        _initialize_tq_client(tq)
         stock_list = tq.get_stock_list()
         if not stock_list:
             raise RuntimeError("TDX returned empty stock list.")
@@ -260,7 +334,13 @@ def load_universe_from_tq(universe_scope: str = "all_a") -> List[str]:
         )
         if not filtered:
             raise RuntimeError(f"No valid stocks found for universe_scope={universe_scope}.")
+        _save_universe_cache(filtered, universe_scope)
         return filtered
+    except Exception:
+        cached_universe = load_cached_universe_from_tq(universe_scope)
+        if cached_universe:
+            return cached_universe
+        raise
     finally:
         try:
             _close_tq_client(tq)
@@ -535,8 +615,8 @@ def get_next_trading_date(anchor_date: str | pd.Timestamp, market: str = "SH") -
     if tq is None:
         return (anchor_ts + pd.offsets.BDay(1)).strftime("%Y-%m-%d")
 
-    _initialize_tq_client(tq)
     try:
+        _initialize_tq_client(tq)
         end_ts = anchor_ts + timedelta(days=40)
         dates = tq.get_trading_dates(
             market=str(market).upper(),
@@ -548,6 +628,8 @@ def get_next_trading_date(anchor_date: str | pd.Timestamp, market: str = "SH") -
         for dt in normalized:
             if dt > anchor_ts:
                 return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return (anchor_ts + pd.offsets.BDay(1)).strftime("%Y-%m-%d")
     finally:
         try:
             _close_tq_client(tq)
@@ -571,8 +653,8 @@ def get_latest_completed_trading_date(
         offset = 0 if include_today else 1
         return (anchor_ts - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
 
-    _initialize_tq_client(tq)
     try:
+        _initialize_tq_client(tq)
         start_ts = anchor_ts - timedelta(days=40)
         dates = tq.get_trading_dates(
             market=str(market).upper(),
@@ -587,6 +669,8 @@ def get_latest_completed_trading_date(
             eligible = [dt for dt in normalized if dt < anchor_ts]
         if eligible:
             return eligible[-1].strftime("%Y-%m-%d")
+    except Exception:
+        pass
     finally:
         try:
             _close_tq_client(tq)

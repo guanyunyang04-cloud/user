@@ -160,3 +160,22 @@
 - receiver 可买性现在由 `portfolio_daily_receiver_add_headroom`、`portfolio_daily_receiver_min_add_delta`、`portfolio_daily_receiver_add_capacity`、`portfolio_daily_receiver_executability`、`portfolio_daily_receiver_score` 进入标签、训练、推理和模拟器。
 - listwise 组合日决策现在显式学习 receiver/source/cash score，但 r24 smoke 只证明链路闭合；confirm 收益、Sharpe、月均收益不足，仍为 `research / shadow_only`。
 - 最新 r24 smoke tag：`cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427`；产物入口：`daily_research/output/continuous_policy/studies/cp_v3_portfolio_daily_listwise_allocation_r24_smoke_20260427/study_summary.json`。
+## 2026-04-27 r25 source-release listwise 状态
+- r24 smoke 的关键瓶颈不是 receiver/cash，而是 `confirm_01` 中 `source_target_count = 0`、`effective_capital_transfer_count = 0`，说明 source 释放资金侧没有形成可学习的执行闭环。
+- 本轮新增 `split_heads_portfolio_daily_source_release_listwise_r25` 与 `alpha_result_value_budget_split_v17`，把 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_score` 放入标签、模型头、模拟器排序、continuity metrics 与审计工具。
+- 新增 `daily_research/tools/portfolio_daily_listwise_audit.py`，用于解释 source 消失、candidate/target/realized sell、sell_source_floor_guarded 与 receiver/cash 上下文。
+- r25 仍为 `research / shadow_only`；未完成 sufficient training evidence、v2 gates、confirm stability、source/receiver/cash 联合质量前，不得 promotion、不得 live、不得修改 active artifact。
+
+## 2026-04-27 r25 source-release listwise 精确状态标记
+- `split_heads_portfolio_daily_source_release_listwise_r25` 当前仍是 `research / shadow_only`。
+- `alpha_result_value_budget_split_v17` 已用于 source-release listwise smoke，但尚未形成可 promotion 的稳定证据。
+- 必须把 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability` 与 `portfolio_daily_source_score` 一起读取，不能只看单一 source 分数。
+- 只有 `supports_portfolio_source_release_heads = true` 且 `supports_portfolio_listwise_heads = true` 的 artifact，才能被解释为 r25 架构输出。
+## 2026-04-27 r25 confirmfix + release-quality 最新状态
+- 已修复 confirm 阶段 TQ 初始化脆弱点：TQ session 文件改为按进程、时间、计数和 retry attempt 唯一化，初始化失败会关闭残留客户端、重试并记录 `daily_research/cache/tq_sessions/tq_init_failures.log`；TQ 不可用时允许从 `daily_research/cache/universe_all_a_tq.csv` 或 raw manifest 缓存恢复 universe，日期接口失败时回退到交易日近似。
+- 已完成 r25 bounded confirm 前台验证：`cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427` 自然结束，`completed_trial_count = 1`、`confirmatory_completed_trial_count = 1`、`failed_trial_count = 0`。
+- GPU/yolos 证据成立：trial 与 confirm 的 `training_diagnostics.json` 均显示 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`，并且 `supports_portfolio_listwise_heads = true`、`supports_portfolio_source_release_heads = true`。
+- 已把“能卖”升级为“卖得对”的第一层标签机制：新增并接入 `portfolio_daily_source_release_quality`、`portfolio_daily_source_receiver_forward_spread`、`portfolio_daily_source_opportunity_cost`、`portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`，其中 release quality 使用未来 receiver 参考收益、source 自身 forward edge、持有延续价值、alpha opportunity、cash defense 与 sell rank/gate 联合构造。
+- quality6 结果边界：trial/confirm 的负 receiver-source forward spread 已被消除，但方式是 source abstention；`source_target_count = 0`、`source_realized_sell_rate = 0`，因此只能说明 release-quality 机制没有强卖好票，不能说明已经学会主动卖出正确 source。
+- quality6 经济质量不足：trial `annual_return = -0.012185`、`sharpe = -0.126366`、`monthly_return_mean = -0.000724`；confirm `annual_return = -0.011901`、`sharpe = -0.081842`、`monthly_return_mean = -0.000690`。两者均仍为 `training_evidence_status = insufficient`，失败原因为 `best_epoch_not_at_edge`。
+- 当前结论：r25 已完成 TQ/confirm 链路修复与 source release label 结构升级，但仍是 `research / shadow_only`；不得 promotion、不得 live、不得改 active artifact。

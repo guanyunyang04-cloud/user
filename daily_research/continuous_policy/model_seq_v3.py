@@ -1097,9 +1097,39 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v16"] = {
         "portfolio_cash_margin_total": 0.08,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v17"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v16"]["sample_scalar_loss_weights"],
+        "portfolio_daily_source_release_capacity": 1.24,
+        "portfolio_daily_source_release_quality": 1.72,
+        "portfolio_daily_source_opportunity_cost": 1.66,
+        "portfolio_daily_source_executability": 1.72,
+        "portfolio_daily_source_score": 1.92,
+        "portfolio_daily_receiver_score": 1.74,
+        "portfolio_daily_cash_score": 1.28,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v16"]["daily_target_loss_weights"],
+        "turnover_budget": 1.20,
+        "budget_deploy_signal_target": 1.40,
+        "budget_cash_timing_signal_target": 1.46,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v16"]["multi_objective_loss_weights"],
+        "scalar_total": 2.32,
+        "portfolio_receiver_pairwise_total": 0.18,
+        "portfolio_source_pairwise_total": 0.26,
+        "portfolio_cash_margin_total": 0.10,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
-    {"alpha_result_value_budget_split_v14", "alpha_result_value_budget_split_v15", "alpha_result_value_budget_split_v16"}
+    {
+        "alpha_result_value_budget_split_v14",
+        "alpha_result_value_budget_split_v15",
+        "alpha_result_value_budget_split_v16",
+        "alpha_result_value_budget_split_v17",
+    }
 )
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
 LOSS_PROFILE_NAMES: tuple[str, ...] = tuple(sorted(LOSS_PROFILE_CONFIGS))
@@ -1873,6 +1903,10 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_receiver_capacity_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_receiver_executability_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_receiver_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_capacity_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_release_quality_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_opportunity_cost_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_executability_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_score_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_cash_score_head = nn.Linear(int(hidden_dim), 1)
 
@@ -1927,6 +1961,10 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_receiver_add_capacity": torch.sigmoid(self.portfolio_receiver_capacity_head(fused).squeeze(-1)),
             "portfolio_daily_receiver_executability": torch.sigmoid(self.portfolio_receiver_executability_head(fused).squeeze(-1)),
             "portfolio_daily_receiver_score": torch.sigmoid(self.portfolio_receiver_score_head(fused).squeeze(-1)),
+            "portfolio_daily_source_release_capacity": torch.sigmoid(self.portfolio_source_capacity_head(fused).squeeze(-1)),
+            "portfolio_daily_source_release_quality": torch.sigmoid(self.portfolio_source_release_quality_head(fused).squeeze(-1)),
+            "portfolio_daily_source_opportunity_cost": torch.sigmoid(self.portfolio_source_opportunity_cost_head(fused).squeeze(-1)),
+            "portfolio_daily_source_executability": torch.sigmoid(self.portfolio_source_executability_head(fused).squeeze(-1)),
             "portfolio_daily_source_score": torch.sigmoid(self.portfolio_source_score_head(fused).squeeze(-1)),
             "portfolio_daily_cash_score": torch.sigmoid(self.portfolio_cash_score_head(fused).squeeze(-1)),
         }
@@ -2197,6 +2235,14 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "portfolio_receiver_executability_head.bias",
         "portfolio_receiver_score_head.weight",
         "portfolio_receiver_score_head.bias",
+        "portfolio_source_capacity_head.weight",
+        "portfolio_source_capacity_head.bias",
+        "portfolio_source_release_quality_head.weight",
+        "portfolio_source_release_quality_head.bias",
+        "portfolio_source_opportunity_cost_head.weight",
+        "portfolio_source_opportunity_cost_head.bias",
+        "portfolio_source_executability_head.weight",
+        "portfolio_source_executability_head.bias",
         "portfolio_source_score_head.weight",
         "portfolio_source_score_head.bias",
         "portfolio_cash_score_head.weight",
@@ -2281,6 +2327,14 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         for name in missing_key_names
     )
     training_diagnostics["supports_portfolio_listwise_heads"] = not portfolio_listwise_missing
+    portfolio_source_release_missing = any(
+        name.startswith("portfolio_source_capacity_head.")
+        or name.startswith("portfolio_source_release_quality_head.")
+        or name.startswith("portfolio_source_opportunity_cost_head.")
+        or name.startswith("portfolio_source_executability_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_portfolio_source_release_heads"] = not portfolio_source_release_missing
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -2568,6 +2622,26 @@ def fit_policy_models_v3(
         ),
         "portfolio_daily_receiver_score": np.clip(
             sample_frame.get("portfolio_daily_receiver_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_release_capacity": np.clip(
+            sample_frame.get("portfolio_daily_source_release_capacity", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_release_quality": np.clip(
+            sample_frame.get("portfolio_daily_source_release_quality", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_opportunity_cost": np.clip(
+            sample_frame.get("portfolio_daily_source_opportunity_cost", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_executability": np.clip(
+            sample_frame.get("portfolio_daily_source_executability", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -3006,6 +3080,15 @@ def fit_policy_models_v3(
                 "portfolio_daily_cash_score",
             )
         ),
+        "supports_portfolio_source_release_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "portfolio_daily_source_release_capacity",
+                "portfolio_daily_source_release_quality",
+                "portfolio_daily_source_opportunity_cost",
+                "portfolio_daily_source_executability",
+            )
+        ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
             and all(
@@ -3283,6 +3366,29 @@ def predict_policy_v3(
         predicted_portfolio_receiver_score = (
             np.clip(outputs["portfolio_daily_receiver_score"].cpu().numpy(), 0.0, 1.0)
             if supports_portfolio_listwise_heads
+            else None
+        )
+        supports_portfolio_source_release_heads = bool(
+            artifact.training_diagnostics.get("supports_portfolio_source_release_heads", False)
+        )
+        predicted_portfolio_source_release_capacity = (
+            np.clip(outputs["portfolio_daily_source_release_capacity"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_source_release_heads
+            else None
+        )
+        predicted_portfolio_source_release_quality = (
+            np.clip(outputs["portfolio_daily_source_release_quality"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_source_release_heads
+            else None
+        )
+        predicted_portfolio_source_opportunity_cost = (
+            np.clip(outputs["portfolio_daily_source_opportunity_cost"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_source_release_heads
+            else None
+        )
+        predicted_portfolio_source_executability = (
+            np.clip(outputs["portfolio_daily_source_executability"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_source_release_heads
             else None
         )
         predicted_portfolio_source_score = (
@@ -4690,18 +4796,135 @@ def predict_policy_v3(
         if predicted_portfolio_receiver_score is not None
         else fallback_portfolio_receiver_score
     )
-    fallback_portfolio_source_score = np.where(
+    portfolio_daily_source_min_release_delta = np.maximum.reduce(
+        [
+            np.full(len(current_weight), 0.0025, dtype=float),
+            np.clip(current_weight, 0.0, None) * 0.018,
+            np.full(len(current_weight), position_cap_for_headroom * 0.012, dtype=float),
+        ]
+    )
+    fallback_source_release_capacity = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            current_weight / np.clip(portfolio_daily_source_min_release_delta, 1.0e-6, None),
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_release_capacity = (
+        _finite_array(
+            0.70 * predicted_portfolio_source_release_capacity + 0.30 * fallback_source_release_capacity,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_release_capacity is not None
+        else fallback_source_release_capacity
+    )
+    fallback_source_release_quality = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            0.30 * sell_release_value
+            + 0.18 * release_value_target
+            + 0.16 * multi_horizon_forward_risk
+            + 0.12 * cash_defense_value
+            + 0.10 * decision_release_gate
+            + 0.08 * sell_rank_score
+            + 0.08 * (1.0 - hold_continuation_value)
+            - 0.16 * alpha_opportunity_value
+            - 0.12 * large_upside_1d_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_release_quality = (
+        _finite_array(
+            0.68 * predicted_portfolio_source_release_quality + 0.32 * fallback_source_release_quality,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_release_quality is not None
+        else fallback_source_release_quality
+    )
+    fallback_source_opportunity_cost = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            0.34 * hold_continuation_value
+            + 0.26 * alpha_opportunity_value
+            + 0.20 * multi_horizon_path_value
+            + 0.14 * deploy_value_target
+            + 0.10 * portfolio_daily_receiver_executability
+            + 0.10 * large_upside_1d_target
+            - 0.10 * release_value_target
+            - 0.06 * cash_defense_value
+            - 0.05 * multi_horizon_forward_risk
+            - 0.12 * portfolio_daily_source_release_quality,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_opportunity_cost = (
+        _finite_array(
+            0.64 * predicted_portfolio_source_opportunity_cost + 0.36 * fallback_source_opportunity_cost,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_opportunity_cost is not None
+        else fallback_source_opportunity_cost
+    )
+    fallback_source_executability = np.where(
         current_weight > 1.0e-8,
         np.clip(
             0.28 * release_value_target
             + 0.20 * sell_release_value
-            + 0.14 * relative_opportunity_value
+            + 0.14 * decision_release_gate
             + 0.12 * cash_defense_value
-            + 0.10 * sell_rank_score
-            + 0.10 * decision_release_gate
-            + 0.06 * multi_horizon_forward_risk
+            + 0.10 * multi_horizon_forward_risk
+            + 0.08 * sell_rank_score
+            + 0.06 * portfolio_daily_source_release_capacity
+            + 0.14 * (1.0 - portfolio_daily_source_opportunity_cost)
+            + 0.18 * portfolio_daily_source_release_quality
             - 0.18 * hold_continuation_value
-            - 0.12 * portfolio_daily_receiver_executability,
+            - 0.14 * alpha_opportunity_value
+            - 0.10 * portfolio_daily_receiver_executability
+            - 0.06 * large_upside_1d_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_executability = (
+        _finite_array(
+            0.70 * predicted_portfolio_source_executability + 0.30 * fallback_source_executability,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_executability is not None
+        else fallback_source_executability
+    )
+    fallback_portfolio_source_score = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            0.28 * portfolio_daily_source_executability
+            + 0.10 * portfolio_daily_source_release_capacity
+            + 0.22 * (1.0 - portfolio_daily_source_opportunity_cost)
+            + 0.22 * portfolio_daily_source_release_quality
+            + 0.13 * release_value_target
+            + 0.11 * sell_release_value
+            + 0.09 * decision_release_gate
+            + 0.07 * cash_defense_value
+            + 0.06 * multi_horizon_forward_risk
+            + 0.05 * relative_opportunity_value
+            - 0.15 * hold_continuation_value
+            - 0.12 * alpha_opportunity_value
+            - 0.10 * portfolio_daily_receiver_executability
+            - 0.08 * large_upside_1d_target,
             0.0,
             1.0,
         ),
@@ -4709,7 +4932,9 @@ def predict_policy_v3(
     )
     portfolio_daily_source_score = (
         _finite_array(
-            0.70 * predicted_portfolio_source_score + 0.30 * fallback_portfolio_source_score,
+            0.62 * predicted_portfolio_source_score
+            + 0.38 * fallback_portfolio_source_score
+            - 0.08 * portfolio_daily_source_opportunity_cost,
             default=0.0,
             low=0.0,
             high=1.0,
@@ -4844,6 +5069,8 @@ def predict_policy_v3(
             + release_value_target * 0.12
             + decision_release_gate * 0.12
             + portfolio_daily_source_score * 0.12
+            + portfolio_daily_source_executability * 0.10
+            + portfolio_daily_source_release_capacity * 0.06
             + portfolio_daily_cash_score * 0.04
             + sell_pressure * 0.10
             + preliminary_exit_timing_pressure * 0.10
@@ -4863,6 +5090,8 @@ def predict_policy_v3(
             + release_value_target * 0.12
             + decision_release_gate * 0.10
             + portfolio_daily_source_score * 0.14
+            + portfolio_daily_source_executability * 0.10
+            + portfolio_daily_source_release_capacity * 0.06
             + portfolio_daily_cash_score * 0.06
             + preliminary_exit_timing_pressure * 0.18
             + market_downside_pressure * 0.08
@@ -5330,6 +5559,8 @@ def predict_policy_v3(
                     + reduce_action_value[idx] * 0.12
                     + release_value_target[idx] * 0.10
                     + decision_release_gate[idx] * 0.08
+                    + portfolio_daily_source_executability[idx] * 0.08
+                    + portfolio_daily_source_release_capacity[idx] * 0.05
                     + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
                     + market_downside_pressure[idx] * 0.16
                     + signal_decay_speed[idx] * 0.18
@@ -5353,6 +5584,8 @@ def predict_policy_v3(
                 + exit_action_value[idx] * 0.14
                 + release_value_target[idx] * 0.10
                 + decision_release_gate[idx] * 0.08
+                + portfolio_daily_source_executability[idx] * 0.08
+                + portfolio_daily_source_release_capacity[idx] * 0.05
                 + decision_defense_signal[idx] * (0.06 if not pure_portfolio_defense_mode else 0.0)
                 + reduce_bias_target * 0.25
                 - reduce_reversal_pressure[idx] * 0.12
@@ -5468,6 +5701,11 @@ def predict_policy_v3(
             "portfolio_daily_receiver_add_capacity": portfolio_daily_receiver_add_capacity,
             "portfolio_daily_receiver_executability": portfolio_daily_receiver_executability,
             "portfolio_daily_receiver_score": portfolio_daily_receiver_score,
+            "portfolio_daily_source_min_release_delta": portfolio_daily_source_min_release_delta,
+            "portfolio_daily_source_release_capacity": portfolio_daily_source_release_capacity,
+            "portfolio_daily_source_release_quality": portfolio_daily_source_release_quality,
+            "portfolio_daily_source_opportunity_cost": portfolio_daily_source_opportunity_cost,
+            "portfolio_daily_source_executability": portfolio_daily_source_executability,
             "portfolio_daily_source_score": portfolio_daily_source_score,
             "portfolio_daily_cash_score": portfolio_daily_cash_score,
             "decision_deploy_gate": decision_deploy_gate,
