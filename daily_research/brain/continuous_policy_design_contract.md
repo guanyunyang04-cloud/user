@@ -147,3 +147,9 @@
 - 成功判定不得把 `source_target_count = 0` 当作 source 问题解决。非零 source target、非零 realized sell、正 `portfolio_daily_receiver_minus_source_forward_excess_5d`、正收益/月度质量、可控回撤、receiver deploy 全实现和 cash reserve 同时过线，才可称为“卖得对”的有效证据。
 - quality6 的合同解释：负 receiver-source spread 被消除是因为 release-quality 阻止了低质量卖出；这是正确的防错机制，但不是 active source allocation 的完成态。
 - r25 当前状态仍为 `research / shadow_only`；任何 promotion/live/active artifact 更新都必须等待 sufficient training、v2 gates、confirm stability、source/receiver/cash 联合经济质量同时成立。
+## 2026-04-27 r25 双守门合同补充
+- source release head 不能单独决定卖出，必须经过 observable release quality 与 low keep-value 双确认；模型预测只能放大已有可观测卖出理由，不能凭空制造卖出理由。
+- 当 observable source release quality 很低时，必须提高 `portfolio_daily_source_opportunity_cost` 并压低 `portfolio_daily_source_score`；这种情况下 `source_target_count = 0` 是正确防错，不是失败。
+- receiver target 不能只满足 score/rank/headroom；在高仓位、现金不足、可卖 source 不足时，必须按 funding context 对每日 receiver slot 做硬上限，避免 `receiver_target_count` 高但 `receiver_realized_deploy_rate` 低。
+- r25 成功判定升级：`receiver_unrealized_deploy_share = 0`、`source_target_count > 0`、`source_realized_sell_rate >= 0.35`、`receiver_minus_source_forward_excess_5d > 0`、`monthly_return_mean > 0` 与 `training_evidence_status = sufficient` 必须联合成立；其中任一缺失都只能视为 research/shadow 证据。
+- 当前 r25 v2 smoke 只证明双守门可以恢复语义干净，不证明收益质量、长预算稳定性或 promotion readiness。

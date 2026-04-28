@@ -1070,3 +1070,8 @@
 - trial 审计显示 `top_source_release_quality = 0.035386`、`source_target_count = 0`、`source_realized_sell_rate = 0`，诊断为 funding/keep protection 阻断。
 - confirm 审计显示 `top_source_release_quality = 0.035386`、`source_target_count = 0`、`source_realized_sell_rate = 0`，同样诊断为 funding/keep protection 阻断。
 - 解释：当前机制已经避免把仍有持有价值的 source 硬卖掉；下一阶段要证明的是在真实低质量 source 出现时能够非零卖出，并保持正 spread 与正收益，而不是简单降低 protection。
+## 2026-04-27 r25 P0/P1 执行复盘
+- 本轮先按计划完成 P0 strict-resume，确认 TQ/confirm 链路已修好，但长预算暴露出新的真实瓶颈：source 会恢复 active，却卖掉正 forward source；receiver 也会生成大量不能兑现的 target。
+- 第一轮修正只压住 source 误卖，未充分压住 receiver unrealized；第二轮加入 receiver funding-context slot cap 和更强 source observable/keep-value pass 后，短预算 confirm 恢复干净语义。
+- 最新 v2 smoke confirm：`annual_return = -0.028102`、`sharpe = -0.275511`、`max_drawdown = -0.049638`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`receiver_forward_excess_5d = 0.031391`。
+- 本轮最重要的本质结论：r25 的问题不再是“脚本能不能跑完”，也不再只是“source 能不能卖”，而是“模型内生分配目标在长预算下会过度自信”。继续推进前，必须先让双守门在长预算下稳定，再谈 P1 参数搜索。

@@ -179,3 +179,10 @@
 - quality6 结果边界：trial/confirm 的负 receiver-source forward spread 已被消除，但方式是 source abstention；`source_target_count = 0`、`source_realized_sell_rate = 0`，因此只能说明 release-quality 机制没有强卖好票，不能说明已经学会主动卖出正确 source。
 - quality6 经济质量不足：trial `annual_return = -0.012185`、`sharpe = -0.126366`、`monthly_return_mean = -0.000724`；confirm `annual_return = -0.011901`、`sharpe = -0.081842`、`monthly_return_mean = -0.000690`。两者均仍为 `training_evidence_status = insufficient`，失败原因为 `best_epoch_not_at_edge`。
 - 当前结论：r25 已完成 TQ/confirm 链路修复与 source release label 结构升级，但仍是 `research / shadow_only`；不得 promotion、不得 live、不得改 active artifact。
+## 2026-04-27 r25 P0/P1 执行后状态
+- 已执行 P0：沿 `cp_v3_portfolio_daily_source_release_listwise_r25_confirmfix_release_quality6_20260427` 做 strict-resume 到 screening `24/18`、confirm `26/20`，任务前台自然结束，TQ/confirm 链路正常。
+- P0 结论：长预算后 source 会重新出现，但卖错；confirm `source_target_count = 2`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = 0.184754`、`receiver_minus_source_forward_excess_5d = -0.190008`，同时 `receiver_unrealized_deploy_share = 0.525253`。本质是模型头过度覆盖可观测 release 信号，且 receiver target 没有被真实资金上下文充分约束。
+- 已执行机制修正：source release-quality 现在必须被 observable release pass 与低 keep-value pass 确认；低可观测 release 会提高 source opportunity cost、压低 source score；receiver target 在进入目标集前加入 add-capacity 过滤，并按现金/source funding context 做每日 slot cap。
+- 修正验证 1：`cp_v3_portfolio_daily_source_release_listwise_r25_release_receiver_guarded_smoke_20260427` 短预算 confirm 语义干净，但 strict-resume 到 `24/26` 后仍出现 receiver unrealized 回归，说明第一版 receiver 限流不够硬。
+- 修正验证 2：`cp_v3_portfolio_daily_source_release_listwise_r25_release_receiver_guarded_v2_smoke_20260427` 短预算 confirm 自然结束，`receiver_target_count = 3`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`cash_reserve_rate = 0.111111`、`receiver_forward_excess_5d = 0.031391`。
+- 当前边界：v2 短验证证明 receiver/source 双守门能恢复语义干净，但收益仍弱且 `training_evidence_status = insufficient`；r25 仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。

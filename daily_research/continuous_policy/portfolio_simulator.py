@@ -994,6 +994,30 @@ class PortfolioState:
             - current.clip(0.0, 0.25) * 0.16
             - cash_defense_series.clip(0.0, 1.0) * 0.08
         )
+        portfolio_daily_receiver_pre_add_headroom = (
+            pd.Series(float(position_cap_target), index=prices.index, dtype=float) - current
+        )
+        portfolio_daily_receiver_pre_min_add_delta = pd.concat(
+            [
+                pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 2.0, index=prices.index, dtype=float),
+                current.clip(lower=0.0) * 0.025,
+                pd.Series(float(position_cap_target) * 0.018, index=prices.index, dtype=float),
+            ],
+            axis=1,
+        ).max(axis=1)
+        portfolio_daily_receiver_pre_add_capacity = (
+            portfolio_daily_receiver_pre_add_headroom
+            / portfolio_daily_receiver_pre_min_add_delta.clip(lower=1.0e-6)
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+        portfolio_daily_receiver_pre_add_capacity = portfolio_daily_receiver_pre_add_capacity.where(
+            held_mask,
+            1.0,
+        )
+        if model_receiver_capacity_series is not None:
+            portfolio_daily_receiver_pre_add_capacity = (
+                0.58 * model_receiver_capacity_series.clip(0.0, 1.0)
+                + 0.42 * portfolio_daily_receiver_pre_add_capacity
+            ).clip(0.0, 1.0)
         portfolio_daily_receiver_score = (
             direct_action_deploy_rank_score.replace([np.inf, -np.inf], np.nan).fillna(0.0) * 0.52
             + deploy_value_series.clip(0.0, 1.0) * 0.18
@@ -1004,21 +1028,31 @@ class PortfolioState:
             - cash_defense_series.clip(0.0, 1.0) * 0.16
             - release_value_series.clip(0.0, 1.0) * 0.08
             - current.clip(0.0, 0.25) * 0.10
+            - (1.0 - portfolio_daily_receiver_pre_add_capacity).clip(0.0, 1.0).where(held_mask, 0.0) * 0.22
         )
         if model_receiver_score_series is not None:
             receiver_capacity_bonus = (
-                model_receiver_capacity_series.clip(0.0, 1.0) * 0.08
-                if model_receiver_capacity_series is not None
-                else 0.0
+                portfolio_daily_receiver_pre_add_capacity.clip(0.0, 1.0) * 0.08
             )
             portfolio_daily_receiver_score = (
                 0.60 * model_receiver_score_series.clip(0.0, 1.0)
                 + 0.40 * portfolio_daily_receiver_score
                 + receiver_capacity_bonus
+                - (1.0 - portfolio_daily_receiver_pre_add_capacity).clip(0.0, 1.0).where(held_mask, 0.0) * 0.18
             ).clip(lower=-0.25, upper=1.35)
+        portfolio_daily_receiver_pre_exec_pass = (
+            (~held_mask)
+            | (portfolio_daily_receiver_pre_add_capacity >= 0.70)
+            | (
+                (portfolio_daily_receiver_pre_add_capacity >= 0.46)
+                & (deploy_executability_series.clip(0.0, 1.0) >= 0.52)
+                & (direct_action_add_advantage_series >= 0.060)
+            )
+        )
         portfolio_daily_receiver_candidate = (
             portfolio_daily_ranking_mode
             & direct_action_deploy_signal
+            & portfolio_daily_receiver_pre_exec_pass
             & (portfolio_daily_receiver_score >= -0.020)
             & (cash_defense_series < 0.760)
             & (exit_timing_pressure_series < 0.560)
@@ -1049,9 +1083,37 @@ class PortfolioState:
                     or budget_model_alpha_focus_signal >= 0.55
                 )
                 receiver_fraction = 0.44 if not receiver_pressure else 0.34
+                receiver_funding_context_count = int(
+                    (
+                        held_mask
+                        & (
+                            (
+                                (release_value_series.clip(0.0, 1.0) >= 0.34)
+                                & (sell_release_series.clip(0.0, 1.0) >= 0.28)
+                            )
+                            | (
+                                (decision_release_gate_series >= decision_deploy_gate_series + 0.14)
+                                & (multi_horizon_forward_risk_series.clip(0.0, 1.0) >= 0.36)
+                            )
+                            | action_names.isin({"reduce", "exit"})
+                        )
+                    ).sum()
+                )
+                cash_slot_context = int(max(0.0, float(self.cash_weight)) / max(float(position_cap_target), 1.0e-6))
+                receiver_funding_context_slots = receiver_funding_context_count + cash_slot_context
+                receiver_slot_cap = int(self.max_positions)
+                if portfolio_daily_ranking_mode and current_gross >= 0.84 and receiver_funding_context_slots < 2:
+                    receiver_fraction = min(receiver_fraction, 0.12)
+                    receiver_slot_cap = min(receiver_slot_cap, 1)
+                elif portfolio_daily_ranking_mode and current_gross >= 0.80 and receiver_funding_context_slots < 3:
+                    receiver_fraction = min(receiver_fraction, 0.18)
+                    receiver_slot_cap = min(receiver_slot_cap, 2)
+                elif portfolio_daily_ranking_mode and current_gross >= 0.72 and receiver_funding_context_slots < 4:
+                    receiver_fraction = min(receiver_fraction, 0.22)
+                    receiver_slot_cap = min(receiver_slot_cap, 3)
                 receiver_limit = min(
                     portfolio_daily_receiver_count,
-                    max(1, min(int(self.max_positions), int(np.ceil(float(self.max_positions) * receiver_fraction)))),
+                    max(1, min(receiver_slot_cap, int(np.ceil(float(self.max_positions) * receiver_fraction)))),
                 )
                 receiver_rank = portfolio_daily_receiver_score.where(portfolio_daily_receiver_candidate).rank(
                     method="first",
@@ -1471,7 +1533,7 @@ class PortfolioState:
                 0.58 * model_source_release_capacity_series.clip(0.0, 1.0)
                 + 0.42 * portfolio_daily_source_release_capacity
             ).clip(0.0, 1.0)
-        portfolio_daily_source_release_quality = (
+        portfolio_daily_source_release_quality_observable = (
             release_value_series.clip(0.0, 1.0) * 0.24
             + sell_release_series.clip(0.0, 1.0) * 0.20
             + multi_horizon_forward_risk_series.clip(0.0, 1.0) * 0.18
@@ -1482,11 +1544,24 @@ class PortfolioState:
             - alpha_opportunity_series.clip(0.0, 1.0) * 0.14
             - large_upside_series.clip(0.0, 1.0) * 0.12
         ).clip(0.0, 1.0).where(held_mask, 0.0)
+        portfolio_daily_source_release_quality = portfolio_daily_source_release_quality_observable.copy()
         if model_source_release_quality_series is not None:
-            portfolio_daily_source_release_quality = (
+            blended_source_release_quality = (
                 0.66 * model_source_release_quality_series.clip(0.0, 1.0)
-                + 0.34 * portfolio_daily_source_release_quality
+                + 0.34 * portfolio_daily_source_release_quality_observable
             ).clip(0.0, 1.0).where(held_mask, 0.0)
+            observable_release_cap = (
+                portfolio_daily_source_release_quality_observable
+                + release_value_series.clip(0.0, 1.0) * 0.08
+                + sell_release_series.clip(0.0, 1.0) * 0.06
+                + decision_release_gate_series.clip(0.0, 1.0) * 0.05
+                + portfolio_daily_cash_score_series.clip(0.0, 1.0) * 0.04
+                + 0.12
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
+            portfolio_daily_source_release_quality = pd.concat(
+                [blended_source_release_quality, observable_release_cap],
+                axis=1,
+            ).min(axis=1).clip(0.0, 1.0).where(held_mask, 0.0)
         portfolio_daily_source_opportunity_cost = (
             direct_action_pair_source_opportunity_cost.clip(0.0, 1.0) * 0.34
             + hold_continuation_series.clip(0.0, 1.0) * 0.26
@@ -1504,6 +1579,16 @@ class PortfolioState:
                 0.64 * model_source_opportunity_cost_series.clip(0.0, 1.0)
                 + 0.36 * portfolio_daily_source_opportunity_cost
             ).clip(0.0, 1.0).where(held_mask, 0.0)
+        low_observable_source_release = (
+            (0.22 - portfolio_daily_source_release_quality_observable).clip(lower=0.0, upper=0.22) / 0.22
+        ).where(held_mask, 0.0)
+        portfolio_daily_source_opportunity_cost = (
+            portfolio_daily_source_opportunity_cost
+            + low_observable_source_release * 0.18
+            + hold_continuation_series.clip(0.0, 1.0) * 0.05
+            + alpha_opportunity_series.clip(0.0, 1.0) * 0.06
+            + large_upside_series.clip(0.0, 1.0) * 0.04
+        ).clip(0.0, 1.0).where(held_mask, 0.0)
         portfolio_daily_source_executability = (
             direct_action_pair_source_release_score.replace([np.inf, -np.inf], np.nan).fillna(0.0) * 0.24
             + release_value_series.clip(0.0, 1.0) * 0.16
@@ -1545,8 +1630,47 @@ class PortfolioState:
             portfolio_daily_source_score = (
                 0.54 * model_source_score_series.clip(0.0, 1.0)
                 + 0.46 * portfolio_daily_source_score
+                - 0.22 * low_observable_source_release
                 - 0.10 * portfolio_daily_source_opportunity_cost.clip(0.0, 1.0)
             ).clip(lower=-0.20, upper=1.25)
+        portfolio_daily_source_low_keep_value_pass = (
+            (
+                (hold_continuation_series.clip(0.0, 1.0) <= 0.52)
+                & (alpha_opportunity_series.clip(0.0, 1.0) <= 0.58)
+            )
+            | (
+                (portfolio_daily_cash_score_series.clip(0.0, 1.0) >= 0.52)
+                & (multi_horizon_forward_risk_series.clip(0.0, 1.0) >= 0.42)
+            )
+            | action_names.isin({"exit"})
+        )
+        portfolio_daily_source_observable_release_pass = (
+            (
+                (portfolio_daily_source_release_quality_observable >= 0.24)
+                & portfolio_daily_source_low_keep_value_pass
+            )
+            | (
+                (release_value_series.clip(0.0, 1.0) >= 0.34)
+                & (sell_release_series.clip(0.0, 1.0) >= 0.28)
+                & (decision_release_gate_series >= decision_deploy_gate_series + 0.14)
+                & portfolio_daily_source_low_keep_value_pass
+            )
+            | (
+                action_names.isin({"reduce", "exit"})
+                & (portfolio_daily_source_release_quality_observable >= 0.20)
+                & (portfolio_daily_source_opportunity_cost <= 0.48)
+                & portfolio_daily_source_low_keep_value_pass
+            )
+            | (
+                (portfolio_daily_cash_score_series.clip(0.0, 1.0) >= 0.42)
+                & (multi_horizon_forward_risk_series.clip(0.0, 1.0) >= 0.44)
+                & (portfolio_daily_source_opportunity_cost <= 0.46)
+                & (
+                    (hold_continuation_series.clip(0.0, 1.0) <= 0.62)
+                    | (portfolio_daily_cash_score_series.clip(0.0, 1.0) >= 0.60)
+                )
+            )
+        )
         portfolio_daily_source_semantic_release_pass = (
             action_names.isin({"reduce", "exit"})
             | (release_value_series.clip(0.0, 1.0) >= 0.30)
@@ -1570,19 +1694,22 @@ class PortfolioState:
             )
         )
         portfolio_daily_source_quality_gap_pass = (
-            (portfolio_daily_source_gap >= 0.10)
+            ((portfolio_daily_source_gap >= 0.10) & portfolio_daily_source_observable_release_pass)
             | (
                 (portfolio_daily_source_release_quality >= 0.30)
+                & portfolio_daily_source_observable_release_pass
                 & (portfolio_daily_source_score >= 0.18)
                 & (portfolio_daily_source_opportunity_cost <= 0.52)
             )
             | (
                 (portfolio_daily_source_score >= 0.36)
+                & portfolio_daily_source_observable_release_pass
                 & (portfolio_daily_source_opportunity_cost <= 0.18)
                 & (portfolio_daily_source_executability >= 0.15)
             )
             | (
                 action_names.isin({"reduce", "exit"})
+                & portfolio_daily_source_observable_release_pass
                 & (portfolio_daily_source_score >= 0.28)
                 & (portfolio_daily_source_opportunity_cost <= 0.66)
             )
@@ -1615,6 +1742,7 @@ class PortfolioState:
             & (~direct_action_core_deploy_target)
             & (current >= 0.012)
             & portfolio_daily_source_semantic_release_pass
+            & portfolio_daily_source_observable_release_pass
             & portfolio_daily_source_quality_gap_pass
             & portfolio_daily_source_repeat_release_pass
             & (

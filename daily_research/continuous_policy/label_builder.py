@@ -1262,7 +1262,9 @@ def build_action_labels_for_date(
             + 0.06 * working["lifecycle_sell_gate"].to_numpy(dtype=float)
             - 0.22 * hold_continuation_value
             - 0.18 * alpha_opportunity_value
-            - 0.14 * large_upside_1d_target,
+            - 0.14 * large_upside_1d_target
+            - 0.26 * np.clip(-portfolio_daily_source_receiver_forward_spread / 0.075, 0.0, 1.0)
+            - 0.22 * np.clip(source_forward_edge / 0.075, 0.0, 1.0),
             0.0,
             1.0,
         ),
@@ -1293,8 +1295,8 @@ def build_action_labels_for_date(
             + 0.14 * deploy_value_target
             + 0.10 * portfolio_daily_receiver_executability
             + 0.10 * large_upside_1d_target
-            + 0.12 * np.clip(-portfolio_daily_source_receiver_forward_spread / 0.075, 0.0, 1.0)
-            + 0.10 * np.clip(source_forward_edge / 0.075, 0.0, 1.0)
+            + 0.22 * np.clip(-portfolio_daily_source_receiver_forward_spread / 0.075, 0.0, 1.0)
+            + 0.18 * np.clip(source_forward_edge / 0.075, 0.0, 1.0)
             - 0.10 * release_value_target
             - 0.06 * cash_defense_value
             - 0.05 * multi_horizon_forward_risk
@@ -1347,6 +1349,15 @@ def build_action_labels_for_date(
         ),
         0.0,
     )
+    portfolio_daily_source_forward_release_pass = (
+        (portfolio_daily_source_receiver_forward_spread >= 0.012)
+        | (source_forward_edge <= -0.015)
+        | (
+            (cash_defense_value >= 0.56)
+            & (multi_horizon_forward_risk >= 0.42)
+            & (portfolio_daily_source_receiver_forward_spread >= -0.010)
+        )
+    )
     portfolio_daily_cash_score = np.clip(
         0.30 * defense_value_target
         + 0.24 * defense_gate_target
@@ -1372,17 +1383,20 @@ def build_action_labels_for_date(
             (portfolio_daily_source_release_quality >= 0.34)
             & (portfolio_daily_source_score >= 0.22)
             & (portfolio_daily_source_opportunity_cost <= 0.54)
+            & portfolio_daily_source_forward_release_pass
         )
         | (
             (portfolio_daily_source_score >= 0.36)
             & (portfolio_daily_source_opportunity_cost <= 0.18)
             & (portfolio_daily_source_executability >= 0.15)
             & (portfolio_daily_source_release_capacity >= 0.80)
+            & portfolio_daily_source_forward_release_pass
         )
     )
     portfolio_daily_source_candidate_mask = (
         held_mask
         & portfolio_daily_source_semantic_release_mask
+        & portfolio_daily_source_forward_release_pass
         & (
             ((portfolio_daily_source_score >= 0.32) & (portfolio_daily_source_opportunity_cost <= 0.58))
             | (
