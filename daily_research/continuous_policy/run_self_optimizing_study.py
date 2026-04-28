@@ -2296,6 +2296,27 @@ def _score_protocol_summary(
             if portfolio_daily_receiver_target_count >= 5.0 and portfolio_daily_source_target_count >= 5.0
             else 0.0
         )
+        portfolio_daily_receiver_activity_gap = (
+            max(0.0, 3.0 - portfolio_daily_receiver_target_count)
+            if portfolio_daily_ranking_objective
+            else 0.0
+        )
+        portfolio_daily_source_activity_gap = (
+            max(0.0, 1.0 - portfolio_daily_source_target_count)
+            if portfolio_daily_ranking_objective and portfolio_daily_receiver_target_count >= 3.0
+            else 0.0
+        )
+        portfolio_daily_dead_allocation_branch = (
+            1.0
+            if (
+                portfolio_daily_ranking_objective
+                and portfolio_daily_receiver_target_count < 3.0
+                and portfolio_daily_source_target_count < 1.0
+                and portfolio_daily_cash_reserve_rate >= 0.75
+                and annual_return < 0.05
+            )
+            else 0.0
+        )
         portfolio_daily_source_sparse_penalty = (
             max(0.0, min(portfolio_daily_receiver_target_count * 0.65, 6.0) - portfolio_daily_source_target_count)
             * 0.12
@@ -2441,6 +2462,15 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_effective_transfer_sparse_penalty": -portfolio_daily_effective_transfer_sparse_penalty
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_activity_gap_penalty": -portfolio_daily_receiver_activity_gap
+            * 0.58
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_activity_gap_penalty": -portfolio_daily_source_activity_gap
+            * 0.42
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_dead_allocation_branch_penalty": -portfolio_daily_dead_allocation_branch
+            * 2.40
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * portfolio_daily_ranking_weight,
             "portfolio_daily_cash_drag_penalty": -portfolio_daily_cash_drag_penalty
@@ -2566,6 +2596,15 @@ def _score_protocol_summary(
             "portfolio_daily_effective_transfer_sparse_penalty": -portfolio_daily_effective_transfer_sparse_penalty
             * 1.12
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_activity_gap_penalty": -portfolio_daily_receiver_activity_gap
+            * 0.74
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_activity_gap_penalty": -portfolio_daily_source_activity_gap
+            * 0.52
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_dead_allocation_branch_penalty": -portfolio_daily_dead_allocation_branch
+            * 2.85
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * 1.18
             * portfolio_daily_ranking_weight,
@@ -2596,12 +2635,22 @@ def _score_protocol_summary(
             v2_order_translation_gap = max(0.0, direct_translation_penalty - 0.24)
             v2_add_to_hold_gap = max(0.0, add_to_hold_conflict_share - 0.35)
             v2_cash_dead_branch = 1.0 if v2_observed and portfolio_daily_cash_reserve_rate <= 0.0 else 0.0
+            v2_receiver_activity_gap = max(0.0, 3.0 - portfolio_daily_receiver_target_count)
+            v2_source_activity_gap = (
+                max(0.0, 1.0 - portfolio_daily_source_target_count)
+                if portfolio_daily_receiver_target_count >= 3.0
+                else 0.0
+            )
+            v2_dead_allocation_branch = portfolio_daily_dead_allocation_branch
             v2_clean_spread_allowed = (
                 annual_return > 0.0
                 and sharpe > 0.0
                 and monthly_return_mean > 0.0
                 and max_drawdown >= -0.18
                 and monthly_consistency_score >= 0.45
+                and portfolio_daily_receiver_target_count >= 3.0
+                and portfolio_daily_receiver_unrealized_deploy_share <= 0.02
+                and portfolio_daily_source_realized_sell_rate >= 0.35
                 and (portfolio_daily_source_target_count < 5.0 or portfolio_daily_source_realized_sell_rate >= 0.35)
                 and (portfolio_daily_source_target_count < 5.0 or portfolio_daily_source_target_not_sold_share <= 0.65)
                 and direct_translation_penalty <= 0.24
@@ -2617,6 +2666,9 @@ def _score_protocol_summary(
                         "portfolio_daily_v2_drawdown_excess_gate": -v2_drawdown_excess * 18.0,
                         "portfolio_daily_v2_source_realization_gate": -v2_source_realization_gap * 8.0,
                         "portfolio_daily_v2_source_not_sold_gate": -v2_source_not_sold_gap * 6.0,
+                        "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 1.35,
+                        "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 1.10,
+                        "portfolio_daily_v2_dead_allocation_branch_gate": -v2_dead_allocation_branch * 3.20,
                         "portfolio_daily_v2_clean_spread_rebate_removed": -max(
                             0.0,
                             _bounded(portfolio_daily_receiver_minus_source_forward_excess_5d, -0.015, 0.050)
@@ -2632,6 +2684,9 @@ def _score_protocol_summary(
                         "portfolio_daily_v2_order_translation_gate": -v2_order_translation_gap * 8.0,
                         "portfolio_daily_v2_add_to_hold_gate": -v2_add_to_hold_gap * 4.2,
                         "portfolio_daily_v2_cash_dead_branch_gate": -v2_cash_dead_branch * 1.6,
+                        "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 0.85,
+                        "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 0.70,
+                        "portfolio_daily_v2_dead_allocation_branch_gate": -v2_dead_allocation_branch * 2.20,
                     }
                 )
             else:
@@ -3215,26 +3270,27 @@ def _build_confirmatory_protocol_args(
 
 
 def _portfolio_daily_v2_gate_pass(metrics: dict[str, Any]) -> bool:
-    observed = (
-        float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0) >= 3.0
-        or float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0) >= 3.0
-    )
+    receiver_count = float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0)
+    source_count = float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0)
+    observed = receiver_count >= 3.0 or source_count >= 3.0
+    receiver_observed = receiver_count >= 3.0
     source_observed = float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0) >= 5.0
     return (
-        float(metrics.get("annual_return", 0.0) or 0.0) > 0.0
+        observed
+        and receiver_observed
+        and float(metrics.get("annual_return", 0.0) or 0.0) > 0.0
         and float(metrics.get("sharpe", 0.0) or 0.0) > 0.0
         and float(metrics.get("monthly_return_mean", 0.0) or 0.0) > 0.0
         and float(metrics.get("max_drawdown", 0.0) or 0.0) >= -0.18
         and float(metrics.get("monthly_consistency_score", 0.0) or 0.0) >= 0.45
+        and float(metrics.get("portfolio_daily_receiver_unrealized_deploy_share", 1.0) or 0.0) <= 0.02
+        and float(metrics.get("portfolio_daily_source_realized_sell_rate", 0.0) or 0.0) >= 0.35
         and ((not source_observed) or float(metrics.get("portfolio_daily_source_realized_sell_rate", 0.0) or 0.0) >= 0.35)
         and ((not source_observed) or float(metrics.get("portfolio_daily_source_target_not_sold_share", 0.0) or 0.0) <= 0.65)
         and float(metrics.get("order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("add_to_hold_conflict_share", 0.0) or 0.0) <= 0.35
-        and (
-            (not observed)
-            or float(metrics.get("portfolio_daily_cash_reserve_rate", 0.0) or 0.0) > 0.0
-        )
+        and float(metrics.get("portfolio_daily_cash_reserve_rate", 0.0) or 0.0) > 0.0
     )
 
 

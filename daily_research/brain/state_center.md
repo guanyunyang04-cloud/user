@@ -186,3 +186,11 @@
 - 修正验证 1：`cp_v3_portfolio_daily_source_release_listwise_r25_release_receiver_guarded_smoke_20260427` 短预算 confirm 语义干净，但 strict-resume 到 `24/26` 后仍出现 receiver unrealized 回归，说明第一版 receiver 限流不够硬。
 - 修正验证 2：`cp_v3_portfolio_daily_source_release_listwise_r25_release_receiver_guarded_v2_smoke_20260427` 短预算 confirm 自然结束，`receiver_target_count = 3`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`cash_reserve_rate = 0.111111`、`receiver_forward_excess_5d = 0.031391`。
 - 当前边界：v2 短验证证明 receiver/source 双守门能恢复语义干净，但收益仍弱且 `training_evidence_status = insufficient`；r25 仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-04-28 r25 v3 长预算状态
+- 已完成 v2 长预算复核：`cp_v3_portfolio_daily_source_release_listwise_r25_release_receiver_guarded_v2_long_20260428` 前台自然结束，GPU/yolos 成立；confirm 暴露 `receiver_unrealized_deploy_share = 0.8`，说明 v2 smoke 的 receiver 干净性不能外推到长预算。
+- 已完成 v3 机制修正：receiver capacity 受可观测 headroom 上限约束，高仓位且无 funding context 时 receiver slot 可降为 0，并在最终 turnover/gross/cash 翻译后把无真实正向 delta 的 receiver 从 target 中剔除并记入 exec guard reason。
+- v3 smoke 自然结束，confirm `receiver_target_count = 3`、`receiver_exec_guard_count = 2`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`，证明 finalization 链路可用。
+- v3 长预算自然结束，confirm `receiver_target_count = 0`、`source_target_count = 0`、`cash_reserve_rate = 0.989510`、`annual_return = -0.386116`、`sharpe = -1.172900`、`monthly_return_mean = -0.030778`。本质结论：不可执行 receiver 已被清掉，但 r25 当前退化为组合日分配死分支。
+- 已补 v2 objective/gate：真实 receiver 活性、source realized sell、cash 正值、经济质量与 dead allocation branch 惩罚成为硬解释边界；不得把 `receiver_unrealized_deploy_share = 0` 或 `target_count = 0` 解释为成功。
+- 当前边界不变：r25 仍为 `research / shadow_only`；不得 promotion、不得 live、不得改 active artifact。下一阶段应回到 r23 稳定主线或推进真正 listwise allocation teacher，而不是继续放宽 r25 source/receiver guard。

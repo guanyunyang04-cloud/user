@@ -1013,11 +1013,22 @@ class PortfolioState:
             held_mask,
             1.0,
         )
+        portfolio_daily_receiver_observable_pre_add_capacity = portfolio_daily_receiver_pre_add_capacity.copy()
         if model_receiver_capacity_series is not None:
             portfolio_daily_receiver_pre_add_capacity = (
                 0.58 * model_receiver_capacity_series.clip(0.0, 1.0)
                 + 0.42 * portfolio_daily_receiver_pre_add_capacity
             ).clip(0.0, 1.0)
+            portfolio_daily_receiver_pre_add_capacity = pd.concat(
+                [
+                    portfolio_daily_receiver_pre_add_capacity.rename("model_blend"),
+                    (
+                        portfolio_daily_receiver_observable_pre_add_capacity
+                        + pd.Series(0.16, index=prices.index, dtype=float).where(held_mask, 0.0)
+                    ).clip(0.0, 1.0).rename("observable_cap"),
+                ],
+                axis=1,
+            ).min(axis=1).clip(0.0, 1.0)
         portfolio_daily_receiver_score = (
             direct_action_deploy_rank_score.replace([np.inf, -np.inf], np.nan).fillna(0.0) * 0.52
             + deploy_value_series.clip(0.0, 1.0) * 0.18
@@ -1102,7 +1113,10 @@ class PortfolioState:
                 cash_slot_context = int(max(0.0, float(self.cash_weight)) / max(float(position_cap_target), 1.0e-6))
                 receiver_funding_context_slots = receiver_funding_context_count + cash_slot_context
                 receiver_slot_cap = int(self.max_positions)
-                if portfolio_daily_ranking_mode and current_gross >= 0.84 and receiver_funding_context_slots < 2:
+                if portfolio_daily_ranking_mode and current_gross >= 0.84 and receiver_funding_context_slots < 1:
+                    receiver_fraction = 0.0
+                    receiver_slot_cap = 0
+                elif portfolio_daily_ranking_mode and current_gross >= 0.84 and receiver_funding_context_slots < 2:
                     receiver_fraction = min(receiver_fraction, 0.12)
                     receiver_slot_cap = min(receiver_slot_cap, 1)
                 elif portfolio_daily_ranking_mode and current_gross >= 0.80 and receiver_funding_context_slots < 3:
@@ -1111,17 +1125,21 @@ class PortfolioState:
                 elif portfolio_daily_ranking_mode and current_gross >= 0.72 and receiver_funding_context_slots < 4:
                     receiver_fraction = min(receiver_fraction, 0.22)
                     receiver_slot_cap = min(receiver_slot_cap, 3)
-                receiver_limit = min(
-                    portfolio_daily_receiver_count,
-                    max(1, min(receiver_slot_cap, int(np.ceil(float(self.max_positions) * receiver_fraction)))),
-                )
-                receiver_rank = portfolio_daily_receiver_score.where(portfolio_daily_receiver_candidate).rank(
-                    method="first",
-                    ascending=False,
-                )
-                portfolio_daily_receiver_target = portfolio_daily_receiver_candidate & (
-                    receiver_rank <= float(receiver_limit)
-                )
+                if receiver_slot_cap <= 0 or receiver_fraction <= 0.0:
+                    receiver_limit = 0
+                else:
+                    receiver_limit = min(
+                        portfolio_daily_receiver_count,
+                        max(1, min(receiver_slot_cap, int(np.ceil(float(self.max_positions) * receiver_fraction)))),
+                    )
+                if receiver_limit > 0:
+                    receiver_rank = portfolio_daily_receiver_score.where(portfolio_daily_receiver_candidate).rank(
+                        method="first",
+                        ascending=False,
+                    )
+                    portfolio_daily_receiver_target = portfolio_daily_receiver_candidate & (
+                        receiver_rank <= float(receiver_limit)
+                    )
                 direct_action_core_deploy_target = portfolio_daily_receiver_target.copy()
             else:
                 paired_reallocation_pressure = current_gross >= 0.92 and deploy_signal_count >= 3
@@ -3483,6 +3501,65 @@ class PortfolioState:
             if float(new_weights.sum()) > 0.999:
                 new_weights = new_weights / float(new_weights.sum())
         self.cash_weight = max(0.0, 1.0 - float(new_weights.sum()))
+        if portfolio_daily_receiver_exec_guard_mode and bool(portfolio_daily_receiver_target.any()):
+            receiver_final_delta = (new_weights - current).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            receiver_final_min_delta = pd.concat(
+                [
+                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 1.4, index=prices.index, dtype=float),
+                    current.clip(lower=0.0) * 0.012,
+                    portfolio_daily_receiver_min_add_delta.replace(0.0, np.nan).fillna(
+                        DEFAULT_EXECUTION_DEADBAND_ABS * 1.4
+                    )
+                    * 0.50,
+                ],
+                axis=1,
+            ).max(axis=1).clip(lower=1.0e-8)
+            receiver_final_no_deploy = (
+                portfolio_daily_receiver_target
+                & (receiver_final_delta <= receiver_final_min_delta)
+            )
+            if bool(receiver_final_no_deploy.any()):
+                receiver_final_reason = pd.Series("final_no_positive_delta", index=prices.index, dtype=object)
+                receiver_final_reason = receiver_final_reason.where(
+                    ~turnover_intent_guarded,
+                    "turnover_budget_trim",
+                )
+                receiver_final_reason = receiver_final_reason.where(
+                    ~budget_dropped,
+                    "budget_slot_drop",
+                )
+                receiver_final_reason = receiver_final_reason.where(
+                    ~(translation_cap_guarded | translation_floor_guarded | translation_soft_lift_guarded),
+                    "weight_translation_guard",
+                )
+                receiver_final_reason = receiver_final_reason.where(
+                    ~semantic_delta_guarded,
+                    "semantic_delta_guard",
+                )
+                receiver_final_reason = receiver_final_reason.where(
+                    ~sell_priority_guarded,
+                    "gross_exposure_shrink",
+                )
+                receiver_final_reason = receiver_final_reason.where(
+                    ~(
+                        receiver_final_reason.eq("final_no_positive_delta")
+                        & (receiver_final_delta <= 1.0e-8)
+                    ),
+                    "zero_delta_after_allocation",
+                )
+                portfolio_daily_receiver_exec_guarded = (
+                    portfolio_daily_receiver_exec_guarded | receiver_final_no_deploy
+                )
+                portfolio_daily_receiver_exec_guard_reason = portfolio_daily_receiver_exec_guard_reason.where(
+                    ~receiver_final_no_deploy,
+                    receiver_final_reason,
+                )
+                portfolio_daily_receiver_target = portfolio_daily_receiver_target & (~receiver_final_no_deploy)
+                direct_action_core_deploy_target = direct_action_core_deploy_target & (~receiver_final_no_deploy)
+                direct_action_add_authorized = direct_action_add_authorized & (~receiver_final_no_deploy)
+                direct_action_open_authorized = direct_action_open_authorized & (~receiver_final_no_deploy)
+                direct_action_deploy_authorized = direct_action_add_authorized | direct_action_open_authorized
+                portfolio_daily_receiver_target_count = int(portfolio_daily_receiver_target.sum())
         deploy_intent_candidate_mask = action_names.isin({"open", "add"})
         deploy_intent_candidate_count = int(deploy_intent_candidate_mask.sum())
         deploy_intent_candidate_realized_count = int(

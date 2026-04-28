@@ -153,3 +153,9 @@
 - receiver target 不能只满足 score/rank/headroom；在高仓位、现金不足、可卖 source 不足时，必须按 funding context 对每日 receiver slot 做硬上限，避免 `receiver_target_count` 高但 `receiver_realized_deploy_rate` 低。
 - r25 成功判定升级：`receiver_unrealized_deploy_share = 0`、`source_target_count > 0`、`source_realized_sell_rate >= 0.35`、`receiver_minus_source_forward_excess_5d > 0`、`monthly_return_mean > 0` 与 `training_evidence_status = sufficient` 必须联合成立；其中任一缺失都只能视为 research/shadow 证据。
 - 当前 r25 v2 smoke 只证明双守门可以恢复语义干净，不证明收益质量、长预算稳定性或 promotion readiness。
+
+## 2026-04-28 r25 v3 final-exec 与 dead-branch 合同
+- receiver target 的最终定义升级为“排序靠前且最终资金翻译后形成真实正向 delta”；如果 turnover、gross、cash、translation 或 semantic guard 使其没有真实 open/add，则必须从 `portfolio_daily_receiver_target` 中剔除，并记录 `portfolio_daily_receiver_exec_guarded` 与 reason。
+- 模型预测的 receiver add capacity 只能在可观测 headroom 附近微调，不能把无 headroom 的持仓凭空抬成可加仓；高仓位且无 funding context 时 receiver slot 可以为 0。
+- v2 gate 不得再允许未观测到真实组合日分配的结果通过；`portfolio_daily_receiver_target_count >= 3`、`portfolio_daily_receiver_unrealized_deploy_share <= 0.02`、`portfolio_daily_source_realized_sell_rate >= 0.35`、`portfolio_daily_cash_reserve_rate > 0` 与正收益/月度质量必须联合成立。
+- `receiver_target_count = 0`、`source_target_count = 0` 或高 `cash_reserve_rate` 下的负收益，应解释为 dead allocation branch，不得解释为“守门成功”。守门的职责是防错，不是替代 listwise 资金分配学习。

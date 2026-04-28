@@ -1075,3 +1075,10 @@
 - 第一轮修正只压住 source 误卖，未充分压住 receiver unrealized；第二轮加入 receiver funding-context slot cap 和更强 source observable/keep-value pass 后，短预算 confirm 恢复干净语义。
 - 最新 v2 smoke confirm：`annual_return = -0.028102`、`sharpe = -0.275511`、`max_drawdown = -0.049638`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`receiver_forward_excess_5d = 0.031391`。
 - 本轮最重要的本质结论：r25 的问题不再是“脚本能不能跑完”，也不再只是“source 能不能卖”，而是“模型内生分配目标在长预算下会过度自信”。继续推进前，必须先让双守门在长预算下稳定，再谈 P1 参数搜索。
+
+## 2026-04-28 r25 v3 长预算执行复盘
+- 本轮先按铁律用 `yolos` 前台完成 v2 长预算复核，结果 confirm `receiver_unrealized_deploy_share = 0.8`，证明上一轮 v2 smoke 的干净性只是短预算现象。
+- 随后实现 v3：约束模型 receiver capacity 不能覆盖可观测 headroom，高仓位且无 funding context 时 receiver slot 可为 0，并加入 final-exec receiver guard，把最终没有真实正向 delta 的 receiver 从 target 中移除。
+- v3 smoke confirm 恢复干净：`receiver_target_count = 3`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`，但收益仍弱。
+- v3 长预算 confirm 更重要：`receiver_target_count = 0`、`source_target_count = 0`、`cash_reserve_rate = 0.989510`、`annual_return = -0.386116`、`sharpe = -1.172900`。这不是可推广成功，而是 r25 在严格守门后退化为 dead allocation branch。
+- 已把 dead-branch 惩罚写进 objective/gate。下一轮最有效路径不是继续放宽 r25 guard，而是回到 r23 稳定主线恢复收益上限，或升级 teacher/listwise allocation，让模型直接学 source/receiver/cash 的组合资金分配闭环。
