@@ -883,6 +883,12 @@ class PortfolioState:
         model_source_opportunity_cost_series = _optional_policy_numeric("portfolio_daily_source_opportunity_cost")
         model_source_executability_series = _optional_policy_numeric("portfolio_daily_source_executability")
         model_cash_score_series = _optional_policy_numeric("portfolio_daily_cash_score")
+        model_receiver_funding_coverage_series = _optional_policy_numeric("portfolio_daily_receiver_funding_coverage")
+        model_funding_closure_score_series = _optional_policy_numeric("portfolio_daily_funding_closure_score")
+        model_allocation_transfer_score_series = _optional_policy_numeric("portfolio_daily_allocation_transfer_score")
+        model_allocation_dead_branch_risk_series = _optional_policy_numeric(
+            "portfolio_daily_allocation_dead_branch_risk"
+        )
         if model_receiver_executability_series is not None:
             deploy_executability_series = (
                 0.72 * deploy_executability_series + 0.28 * model_receiver_executability_series.clip(0.0, 1.0)
@@ -1051,6 +1057,26 @@ class PortfolioState:
                 + receiver_capacity_bonus
                 - (1.0 - portfolio_daily_receiver_pre_add_capacity).clip(0.0, 1.0).where(held_mask, 0.0) * 0.18
             ).clip(lower=-0.25, upper=1.35)
+        portfolio_daily_receiver_funding_coverage = pd.Series(0.0, index=prices.index, dtype=float)
+        if model_receiver_funding_coverage_series is not None:
+            portfolio_daily_receiver_funding_coverage = model_receiver_funding_coverage_series.clip(0.0, 1.0)
+        portfolio_daily_funding_closure_score = pd.Series(0.0, index=prices.index, dtype=float)
+        if model_funding_closure_score_series is not None:
+            portfolio_daily_funding_closure_score = model_funding_closure_score_series.clip(0.0, 1.0)
+        portfolio_daily_allocation_transfer_score = pd.Series(0.0, index=prices.index, dtype=float)
+        if model_allocation_transfer_score_series is not None:
+            portfolio_daily_allocation_transfer_score = model_allocation_transfer_score_series.clip(0.0, 1.0)
+        portfolio_daily_allocation_dead_branch_risk = pd.Series(0.0, index=prices.index, dtype=float)
+        if model_allocation_dead_branch_risk_series is not None:
+            portfolio_daily_allocation_dead_branch_risk = model_allocation_dead_branch_risk_series.clip(0.0, 1.0)
+        if model_receiver_funding_coverage_series is not None or model_funding_closure_score_series is not None:
+            portfolio_daily_receiver_score = (
+                portfolio_daily_receiver_score
+                + portfolio_daily_receiver_funding_coverage.clip(0.0, 1.0) * 0.16
+                + portfolio_daily_funding_closure_score.clip(0.0, 1.0) * 0.08
+                + portfolio_daily_allocation_transfer_score.clip(0.0, 1.0) * 0.06
+                - portfolio_daily_allocation_dead_branch_risk.clip(0.0, 1.0) * 0.12
+            ).clip(lower=-0.25, upper=1.35)
         portfolio_daily_receiver_pre_exec_pass = (
             (~held_mask)
             | (portfolio_daily_receiver_pre_add_capacity >= 0.70)
@@ -1060,10 +1086,25 @@ class PortfolioState:
                 & (direct_action_add_advantage_series >= 0.060)
             )
         )
+        current_gross = float(current.sum())
+        portfolio_daily_receiver_funding_pass = pd.Series(True, index=prices.index, dtype=bool)
+        if model_receiver_funding_coverage_series is not None or model_allocation_transfer_score_series is not None:
+            funding_signal = (
+                portfolio_daily_receiver_funding_coverage.clip(0.0, 1.0) * 0.64
+                + portfolio_daily_allocation_transfer_score.clip(0.0, 1.0) * 0.24
+                + portfolio_daily_funding_closure_score.clip(0.0, 1.0) * 0.12
+            )
+            portfolio_daily_receiver_funding_pass = (
+                (current_gross < 0.72)
+                | (cash_defense_series.clip(0.0, 1.0) < 0.54)
+                | (funding_signal >= 0.12)
+                | ((portfolio_daily_receiver_pre_add_capacity >= 0.82) & (portfolio_daily_receiver_score >= 0.22))
+            )
         portfolio_daily_receiver_candidate = (
             portfolio_daily_ranking_mode
             & direct_action_deploy_signal
             & portfolio_daily_receiver_pre_exec_pass
+            & portfolio_daily_receiver_funding_pass
             & (portfolio_daily_receiver_score >= -0.020)
             & (cash_defense_series < 0.760)
             & (exit_timing_pressure_series < 0.560)
@@ -1472,6 +1513,22 @@ class PortfolioState:
             )
             if np.isfinite(model_cash_score_value):
                 portfolio_daily_cash_score = float(np.clip(0.60 * model_cash_score_value + 0.40 * portfolio_daily_cash_score, 0.0, 1.0))
+        if model_allocation_dead_branch_risk_series is not None or model_allocation_transfer_score_series is not None:
+            allocation_dead_risk_value = float(
+                portfolio_daily_allocation_dead_branch_risk.replace([np.inf, -np.inf], np.nan).dropna().clip(0.0, 1.0).mean()
+            ) if len(portfolio_daily_allocation_dead_branch_risk) else 0.0
+            allocation_transfer_value = float(
+                portfolio_daily_allocation_transfer_score.replace([np.inf, -np.inf], np.nan).dropna().clip(0.0, 1.0).mean()
+            ) if len(portfolio_daily_allocation_transfer_score) else 0.0
+            portfolio_daily_cash_score = float(
+                np.clip(
+                    portfolio_daily_cash_score
+                    + allocation_dead_risk_value * 0.10
+                    - allocation_transfer_value * 0.08,
+                    0.0,
+                    1.0,
+                )
+            )
         if budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
@@ -1651,6 +1708,89 @@ class PortfolioState:
                 - 0.22 * low_observable_source_release
                 - 0.10 * portfolio_daily_source_opportunity_cost.clip(0.0, 1.0)
             ).clip(lower=-0.20, upper=1.25)
+        if model_allocation_transfer_score_series is not None or model_funding_closure_score_series is not None:
+            portfolio_daily_source_opportunity_cost = (
+                portfolio_daily_source_opportunity_cost
+                + portfolio_daily_allocation_dead_branch_risk.clip(0.0, 1.0) * 0.06
+                - portfolio_daily_funding_closure_score.clip(0.0, 1.0) * 0.04
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
+            portfolio_daily_source_score = (
+                portfolio_daily_source_score
+                + portfolio_daily_allocation_transfer_score.clip(0.0, 1.0) * 0.10
+                + portfolio_daily_funding_closure_score.clip(0.0, 1.0) * 0.06
+                - portfolio_daily_allocation_dead_branch_risk.clip(0.0, 1.0) * 0.08
+                - portfolio_daily_source_opportunity_cost.clip(0.0, 1.0) * 0.04
+            ).clip(lower=-0.20, upper=1.25).where(held_mask, 0.0)
+        allocation_source_funding_pressure = pd.Series(0.0, index=prices.index, dtype=float)
+        if model_allocation_transfer_score_series is not None or model_funding_closure_score_series is not None:
+            allocation_source_funding_pressure = (
+                portfolio_daily_allocation_transfer_score.clip(0.0, 1.0) * 0.28
+                + portfolio_daily_funding_closure_score.clip(0.0, 1.0) * 0.24
+                + portfolio_daily_receiver_funding_coverage.clip(0.0, 1.0) * 0.14
+                + pd.Series(portfolio_daily_receiver_pressure, index=prices.index, dtype=float).clip(0.0, 1.0) * 0.20
+                + portfolio_daily_cash_score_series.clip(0.0, 1.0) * 0.08
+                + portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 0.68
+                - portfolio_daily_allocation_dead_branch_risk.clip(0.0, 1.0) * 0.08
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
+            allocation_release_override = (
+                (allocation_source_funding_pressure >= 0.08)
+                & (portfolio_daily_source_gap >= -0.04)
+                & (portfolio_daily_source_release_capacity >= 0.45)
+            )
+            portfolio_daily_source_opportunity_cost = (
+                portfolio_daily_source_opportunity_cost
+                - allocation_source_funding_pressure * 0.22
+                - portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 0.30
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
+            portfolio_daily_source_release_quality = pd.concat(
+                [
+                    portfolio_daily_source_release_quality,
+                    (
+                        allocation_source_funding_pressure * 0.48
+                        + portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 0.54
+                        + portfolio_daily_cash_score_series.clip(0.0, 1.0) * 0.06
+                    ).clip(0.0, 1.0).where(allocation_release_override, 0.0),
+                ],
+                axis=1,
+            ).max(axis=1).clip(0.0, 1.0).where(held_mask, 0.0)
+            portfolio_daily_source_executability = (
+                portfolio_daily_source_executability
+                + allocation_source_funding_pressure * 0.18
+                + portfolio_daily_source_release_quality.clip(0.0, 1.0) * 0.08
+                - portfolio_daily_source_opportunity_cost.clip(0.0, 1.0) * 0.04
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
+        portfolio_daily_source_score = (
+            portfolio_daily_source_score
+            + allocation_source_funding_pressure * 0.36
+            + portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 0.76
+            + portfolio_daily_source_release_quality.clip(0.0, 1.0) * 0.12
+            - portfolio_daily_source_opportunity_cost.clip(0.0, 1.0) * 0.02
+        ).clip(lower=-0.20, upper=1.25).where(held_mask, 0.0)
+        protected_source_release_override = (
+            portfolio_daily_ranking_mode
+            & held_mask
+            & direct_action_funding_protected
+            & (~direct_action_core_deploy_target)
+            & (~portfolio_daily_receiver_target)
+            & bool(portfolio_daily_receiver_target.any())
+            & (current >= 0.012)
+            & (direct_action_pair_opportunity_spread >= max(pair_min_spread, 0.200))
+            & (direct_action_pair_source_release_score >= 0.160)
+            & (direct_action_pair_source_opportunity_cost >= 0.800)
+            & (portfolio_daily_source_gap >= 0.140)
+            & (portfolio_daily_source_release_quality >= 0.21)
+            & (portfolio_daily_source_release_capacity >= 0.80)
+            & (portfolio_daily_source_opportunity_cost >= 0.78)
+            & (portfolio_daily_source_opportunity_cost <= 0.94)
+            & (portfolio_daily_allocation_dead_branch_risk <= 0.30)
+        )
+        protected_source_release_boost = (
+            direct_action_pair_opportunity_spread.clip(lower=0.0, upper=0.24) * 0.72
+            + direct_action_pair_source_release_score.clip(lower=0.0, upper=0.32) * 0.38
+            + portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 0.24
+            + allocation_source_funding_pressure.clip(0.0, 1.0) * 0.16
+            - portfolio_daily_source_opportunity_cost.clip(lower=0.72, upper=1.0) * 0.08
+        ).clip(0.0, 0.42).where(protected_source_release_override, 0.0)
         portfolio_daily_source_low_keep_value_pass = (
             (
                 (hold_continuation_series.clip(0.0, 1.0) <= 0.52)
@@ -1710,6 +1850,14 @@ class PortfolioState:
                 & (portfolio_daily_source_executability >= 0.15)
                 & (portfolio_daily_source_release_capacity >= 0.80)
             )
+            | (
+                (allocation_source_funding_pressure >= 0.10)
+                & (portfolio_daily_source_gap >= 0.04)
+                & (portfolio_daily_source_release_quality >= 0.08)
+                & (portfolio_daily_source_score >= -0.06)
+                & (portfolio_daily_source_opportunity_cost <= 0.86)
+                & (portfolio_daily_source_release_capacity >= 0.45)
+            )
         )
         portfolio_daily_source_quality_gap_pass = (
             ((portfolio_daily_source_gap >= 0.10) & portfolio_daily_source_observable_release_pass)
@@ -1730,6 +1878,14 @@ class PortfolioState:
                 & portfolio_daily_source_observable_release_pass
                 & (portfolio_daily_source_score >= 0.28)
                 & (portfolio_daily_source_opportunity_cost <= 0.66)
+            )
+            | (
+                (allocation_source_funding_pressure >= 0.10)
+                & (portfolio_daily_source_gap >= 0.04)
+                & (portfolio_daily_source_release_quality >= 0.08)
+                & (portfolio_daily_source_score >= -0.06)
+                & (portfolio_daily_source_opportunity_cost <= 0.86)
+                & (portfolio_daily_source_release_capacity >= 0.45)
             )
         )
         portfolio_daily_source_recent_sell_days = pd.Series(
@@ -1787,14 +1943,34 @@ class PortfolioState:
                     & (portfolio_daily_source_opportunity_cost <= 0.560)
                     & (portfolio_daily_source_gap >= 0.0)
                 )
+                | (
+                    (allocation_source_funding_pressure >= 0.10)
+                    & (portfolio_daily_source_gap >= 0.04)
+                    & (portfolio_daily_source_release_quality >= 0.08)
+                    & (portfolio_daily_source_score >= -0.06)
+                    & (portfolio_daily_source_opportunity_cost <= 0.86)
+                    & (portfolio_daily_source_release_capacity >= 0.45)
+                )
             )
             & (
                 (~direct_action_funding_protected)
                 | ((portfolio_daily_source_score >= 0.255) & (portfolio_daily_source_opportunity_cost <= 0.560))
                 | ((portfolio_daily_source_executability >= 0.38) & (portfolio_daily_source_opportunity_cost <= 0.520))
                 | (action_names.isin({"reduce", "exit"}) & (portfolio_daily_source_opportunity_cost <= 0.620))
+                | (
+                    (allocation_source_funding_pressure >= 0.16)
+                    & (portfolio_daily_source_gap >= 0.04)
+                    & (portfolio_daily_source_opportunity_cost <= 0.82)
+                )
             )
-            & (portfolio_daily_source_opportunity_cost <= 0.720)
+            & (
+                (portfolio_daily_source_opportunity_cost <= 0.720)
+                | (
+                    (allocation_source_funding_pressure >= 0.10)
+                    & (portfolio_daily_source_gap >= 0.04)
+                    & (portfolio_daily_source_opportunity_cost <= 0.86)
+                )
+            )
         )
         portfolio_daily_source_target = pd.Series(False, index=prices.index, dtype=bool)
         portfolio_daily_source_candidate_count = int(portfolio_daily_source_candidate.sum())
@@ -3835,6 +4011,18 @@ class PortfolioState:
                         )
                     ),
                     "portfolio_daily_receiver_executability": float(deploy_executability_series.get(stock, 0.0)),
+                    "portfolio_daily_receiver_funding_coverage": float(
+                        portfolio_daily_receiver_funding_coverage.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_funding_closure_score": float(
+                        portfolio_daily_funding_closure_score.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_allocation_transfer_score": float(
+                        portfolio_daily_allocation_transfer_score.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_allocation_dead_branch_risk": float(
+                        portfolio_daily_allocation_dead_branch_risk.get(stock, 0.0)
+                    ),
                     "portfolio_daily_source_gap": float(portfolio_daily_source_gap.get(stock, 0.0)),
                     "portfolio_daily_source_min_release_delta": float(
                         portfolio_daily_source_min_release_delta.get(stock, 0.0)
@@ -3857,6 +4045,12 @@ class PortfolioState:
                     ),
                     "portfolio_daily_source_quality_gap_pass": bool(
                         portfolio_daily_source_quality_gap_pass.get(stock, False)
+                    ),
+                    "portfolio_daily_source_protected_release_override": bool(
+                        protected_source_release_override.get(stock, False)
+                    ),
+                    "portfolio_daily_source_protected_release_boost": float(
+                        protected_source_release_boost.get(stock, 0.0)
                     ),
                     "portfolio_daily_source_repeat_release_pass": bool(
                         portfolio_daily_source_repeat_release_pass.get(stock, False)
@@ -4328,6 +4522,9 @@ class PortfolioState:
             "portfolio_daily_receiver_target_count": int(portfolio_daily_receiver_target.sum()),
             "portfolio_daily_source_candidate_count": int(portfolio_daily_source_candidate.sum()),
             "portfolio_daily_source_target_count": int(portfolio_daily_source_target.sum()),
+            "portfolio_daily_source_protected_release_override_count": int(
+                protected_source_release_override.sum()
+            ),
             "portfolio_daily_source_exec_guard_count": int(portfolio_daily_source_exec_guard_count),
             "portfolio_daily_source_exec_cap_guard_count": int(portfolio_daily_source_exec_cap_guard_count),
             "portfolio_daily_source_target_not_sold_count": int(portfolio_daily_source_target_not_sold_count),
@@ -4376,6 +4573,23 @@ class PortfolioState:
                 portfolio_daily_source_gap,
                 portfolio_daily_source_target,
             ),
+            "portfolio_daily_receiver_funding_coverage_mean": _masked_mean(
+                portfolio_daily_receiver_funding_coverage,
+                portfolio_daily_receiver_target,
+            ),
+            "portfolio_daily_funding_closure_score_mean": _masked_mean(
+                portfolio_daily_funding_closure_score,
+                portfolio_daily_receiver_target | portfolio_daily_source_target,
+            ),
+            "portfolio_daily_allocation_transfer_score_mean": _masked_mean(
+                portfolio_daily_allocation_transfer_score,
+                portfolio_daily_receiver_target | portfolio_daily_source_target,
+            ),
+            "portfolio_daily_allocation_dead_branch_risk_mean": float(
+                portfolio_daily_allocation_dead_branch_risk.mean()
+            )
+            if len(portfolio_daily_allocation_dead_branch_risk)
+            else 0.0,
             "portfolio_daily_cash_score": float(portfolio_daily_cash_score),
             "portfolio_daily_cash_reserve_signal": float(bool(portfolio_daily_cash_reserve_signal)),
             "sell_authorized_held_count": int(sell_authorized_mask.sum()),

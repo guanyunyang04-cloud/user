@@ -1122,6 +1122,31 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v17"] = {
         "portfolio_cash_margin_total": 0.10,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v18"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v17"]["sample_scalar_loss_weights"],
+        "portfolio_daily_receiver_funding_coverage": 1.86,
+        "portfolio_daily_funding_closure_score": 1.72,
+        "portfolio_daily_allocation_transfer_score": 1.82,
+        "portfolio_daily_allocation_dead_branch_risk": 1.54,
+        "portfolio_daily_receiver_score": 1.82,
+        "portfolio_daily_source_score": 2.02,
+        "portfolio_daily_cash_score": 1.34,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v17"]["daily_target_loss_weights"],
+        "turnover_budget": 1.24,
+        "budget_deploy_signal_target": 1.44,
+        "budget_cash_timing_signal_target": 1.48,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v17"]["multi_objective_loss_weights"],
+        "scalar_total": 2.48,
+        "portfolio_receiver_pairwise_total": 0.24,
+        "portfolio_source_pairwise_total": 0.30,
+        "portfolio_cash_margin_total": 0.12,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -1129,6 +1154,7 @@ DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
         "alpha_result_value_budget_split_v15",
         "alpha_result_value_budget_split_v16",
         "alpha_result_value_budget_split_v17",
+        "alpha_result_value_budget_split_v18",
     }
 )
 DEFAULT_LOSS_PROFILE = "dual_channel_default_v1"
@@ -1909,6 +1935,10 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_source_executability_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_score_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_cash_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_funding_coverage_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_funding_closure_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_allocation_transfer_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_allocation_dead_branch_risk_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -1967,6 +1997,10 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_source_executability": torch.sigmoid(self.portfolio_source_executability_head(fused).squeeze(-1)),
             "portfolio_daily_source_score": torch.sigmoid(self.portfolio_source_score_head(fused).squeeze(-1)),
             "portfolio_daily_cash_score": torch.sigmoid(self.portfolio_cash_score_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_funding_coverage": torch.sigmoid(self.portfolio_receiver_funding_coverage_head(fused).squeeze(-1)),
+            "portfolio_daily_funding_closure_score": torch.sigmoid(self.portfolio_funding_closure_score_head(fused).squeeze(-1)),
+            "portfolio_daily_allocation_transfer_score": torch.sigmoid(self.portfolio_allocation_transfer_score_head(fused).squeeze(-1)),
+            "portfolio_daily_allocation_dead_branch_risk": torch.sigmoid(self.portfolio_allocation_dead_branch_risk_head(fused).squeeze(-1)),
         }
 
 
@@ -2247,6 +2281,14 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "portfolio_source_score_head.bias",
         "portfolio_cash_score_head.weight",
         "portfolio_cash_score_head.bias",
+        "portfolio_receiver_funding_coverage_head.weight",
+        "portfolio_receiver_funding_coverage_head.bias",
+        "portfolio_funding_closure_score_head.weight",
+        "portfolio_funding_closure_score_head.bias",
+        "portfolio_allocation_transfer_score_head.weight",
+        "portfolio_allocation_transfer_score_head.bias",
+        "portfolio_allocation_dead_branch_risk_head.weight",
+        "portfolio_allocation_dead_branch_risk_head.bias",
     }
     if sample_unexpected or (sample_missing - allowed_sample_missing):
         raise RuntimeError(
@@ -2335,6 +2377,16 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         for name in missing_key_names
     )
     training_diagnostics["supports_portfolio_source_release_heads"] = not portfolio_source_release_missing
+    portfolio_allocation_teacher_missing = any(
+        name.startswith("portfolio_receiver_funding_coverage_head.")
+        or name.startswith("portfolio_funding_closure_score_head.")
+        or name.startswith("portfolio_allocation_transfer_score_head.")
+        or name.startswith("portfolio_allocation_dead_branch_risk_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_portfolio_allocation_teacher_heads"] = (
+        not portfolio_allocation_teacher_missing
+    )
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -2652,6 +2704,26 @@ def fit_policy_models_v3(
         ),
         "portfolio_daily_cash_score": np.clip(
             sample_frame.get("portfolio_daily_cash_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_funding_coverage": np.clip(
+            sample_frame.get("portfolio_daily_receiver_funding_coverage", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_funding_closure_score": np.clip(
+            sample_frame.get("portfolio_daily_funding_closure_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_allocation_transfer_score": np.clip(
+            sample_frame.get("portfolio_daily_allocation_transfer_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_allocation_dead_branch_risk": np.clip(
+            sample_frame.get("portfolio_daily_allocation_dead_branch_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -3089,6 +3161,15 @@ def fit_policy_models_v3(
                 "portfolio_daily_source_executability",
             )
         ),
+        "supports_portfolio_allocation_teacher_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "portfolio_daily_receiver_funding_coverage",
+                "portfolio_daily_funding_closure_score",
+                "portfolio_daily_allocation_transfer_score",
+                "portfolio_daily_allocation_dead_branch_risk",
+            )
+        ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
             and all(
@@ -3399,6 +3480,29 @@ def predict_policy_v3(
         predicted_portfolio_cash_score = (
             np.clip(outputs["portfolio_daily_cash_score"].cpu().numpy(), 0.0, 1.0)
             if supports_portfolio_listwise_heads
+            else None
+        )
+        supports_portfolio_allocation_teacher_heads = bool(
+            artifact.training_diagnostics.get("supports_portfolio_allocation_teacher_heads", False)
+        )
+        predicted_portfolio_receiver_funding_coverage = (
+            np.clip(outputs["portfolio_daily_receiver_funding_coverage"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_allocation_teacher_heads
+            else None
+        )
+        predicted_portfolio_funding_closure_score = (
+            np.clip(outputs["portfolio_daily_funding_closure_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_allocation_teacher_heads
+            else None
+        )
+        predicted_portfolio_allocation_transfer_score = (
+            np.clip(outputs["portfolio_daily_allocation_transfer_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_allocation_teacher_heads
+            else None
+        )
+        predicted_portfolio_allocation_dead_branch_risk = (
+            np.clip(outputs["portfolio_daily_allocation_dead_branch_risk"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_allocation_teacher_heads
             else None
         )
         if reduce_fraction is None:
@@ -4963,6 +5067,116 @@ def predict_policy_v3(
         if predicted_portfolio_cash_score is not None
         else fallback_portfolio_cash_score
     )
+    source_funding_strength = np.clip(
+        portfolio_daily_source_score
+        * portfolio_daily_source_release_capacity
+        * (1.0 - portfolio_daily_source_opportunity_cost)
+        * (0.55 + 0.45 * portfolio_daily_source_release_quality),
+        0.0,
+        1.0,
+    )
+    receiver_demand_strength = np.clip(
+        portfolio_daily_receiver_score
+        * np.where(current_weight > 1.0e-8, portfolio_daily_receiver_add_capacity, 1.0),
+        0.0,
+        1.0,
+    )
+    source_funding_reference = 0.0
+    finite_source_funding = source_funding_strength[np.isfinite(source_funding_strength)]
+    if finite_source_funding.size:
+        top_k = max(1, min(5, int(np.ceil(finite_source_funding.size * 0.25))))
+        source_funding_reference = float(np.median(np.sort(finite_source_funding)[-top_k:]))
+    receiver_demand_reference = 0.0
+    finite_receiver_demand = receiver_demand_strength[np.isfinite(receiver_demand_strength)]
+    if finite_receiver_demand.size:
+        top_k = max(1, min(5, int(np.ceil(finite_receiver_demand.size * 0.25))))
+        receiver_demand_reference = float(np.median(np.sort(finite_receiver_demand)[-top_k:]))
+    cash_funding_reference = float(np.clip(np.nanmean(portfolio_daily_cash_score), 0.0, 1.0)) if len(portfolio_daily_cash_score) else 0.0
+    funding_reference = float(
+        np.clip(
+            0.62 * source_funding_reference
+            + 0.22 * receiver_demand_reference
+            + 0.16 * cash_funding_reference,
+            0.0,
+            1.0,
+        )
+    )
+    fallback_receiver_funding_coverage = np.clip(
+        np.where(current_weight > 1.0e-8, portfolio_daily_receiver_add_capacity, 1.0)
+        * (0.64 * funding_reference + 0.24 * source_funding_reference + 0.12 * cash_funding_reference),
+        0.0,
+        1.0,
+    )
+    fallback_allocation_transfer_score = np.clip(
+        np.maximum(
+            receiver_demand_strength * (0.44 + 0.56 * fallback_receiver_funding_coverage),
+            source_funding_strength * (0.48 + 0.52 * receiver_demand_reference),
+        )
+        + np.minimum(receiver_demand_strength, source_funding_strength) * 0.14
+        - portfolio_daily_cash_score * 0.06,
+        0.0,
+        1.0,
+    )
+    fallback_funding_closure_score = np.clip(
+        0.36 * fallback_allocation_transfer_score
+        + 0.28 * fallback_receiver_funding_coverage
+        + 0.22 * source_funding_strength
+        + 0.14 * funding_reference,
+        0.0,
+        1.0,
+    )
+    fallback_allocation_dead_branch_risk = np.clip(
+        0.30 * np.clip(1.0 - receiver_demand_reference / 0.32, 0.0, 1.0)
+        + 0.30 * np.clip(1.0 - source_funding_reference / 0.28, 0.0, 1.0)
+        + 0.18 * np.clip((cash_funding_reference - 0.34) / 0.46, 0.0, 1.0)
+        + 0.22 * (1.0 - fallback_allocation_transfer_score),
+        0.0,
+        1.0,
+    )
+    portfolio_daily_receiver_funding_coverage = (
+        _finite_array(
+            0.70 * predicted_portfolio_receiver_funding_coverage
+            + 0.30 * fallback_receiver_funding_coverage,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_receiver_funding_coverage is not None
+        else fallback_receiver_funding_coverage
+    )
+    portfolio_daily_funding_closure_score = (
+        _finite_array(
+            0.70 * predicted_portfolio_funding_closure_score
+            + 0.30 * fallback_funding_closure_score,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_funding_closure_score is not None
+        else fallback_funding_closure_score
+    )
+    portfolio_daily_allocation_transfer_score = (
+        _finite_array(
+            0.70 * predicted_portfolio_allocation_transfer_score
+            + 0.30 * fallback_allocation_transfer_score,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_allocation_transfer_score is not None
+        else fallback_allocation_transfer_score
+    )
+    portfolio_daily_allocation_dead_branch_risk = (
+        _finite_array(
+            0.70 * predicted_portfolio_allocation_dead_branch_risk
+            + 0.30 * fallback_allocation_dead_branch_risk,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_allocation_dead_branch_risk is not None
+        else fallback_allocation_dead_branch_risk
+    )
     direct_action_utility = {
         label: np.zeros(len(adjusted_labels), dtype=float)
         for label in ACTION_CLASSES
@@ -5708,6 +5922,10 @@ def predict_policy_v3(
             "portfolio_daily_source_executability": portfolio_daily_source_executability,
             "portfolio_daily_source_score": portfolio_daily_source_score,
             "portfolio_daily_cash_score": portfolio_daily_cash_score,
+            "portfolio_daily_receiver_funding_coverage": portfolio_daily_receiver_funding_coverage,
+            "portfolio_daily_funding_closure_score": portfolio_daily_funding_closure_score,
+            "portfolio_daily_allocation_transfer_score": portfolio_daily_allocation_transfer_score,
+            "portfolio_daily_allocation_dead_branch_risk": portfolio_daily_allocation_dead_branch_risk,
             "decision_deploy_gate": decision_deploy_gate,
             "decision_release_gate": decision_release_gate,
             "decision_defense_signal": decision_defense_signal,

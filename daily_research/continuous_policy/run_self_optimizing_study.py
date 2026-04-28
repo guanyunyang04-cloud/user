@@ -628,6 +628,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.12, 0.14],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_allocation_teacher_r26": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v18"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v9"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [5.0e-4, 6.5e-4, 8.0e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.18, 0.20, 0.22],
+        "daily_dropout": [0.12, 0.14],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1171,6 +1188,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.14,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_allocation_teacher_r26": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v18",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v9",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 6.5e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.20,
+        "daily_dropout": 0.14,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1207,6 +1241,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_ranking_receiver_exec_stability_r23": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_listwise_allocation_r24": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_source_release_listwise_r25": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_allocation_teacher_r26": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1633,6 +1668,46 @@ def _score_protocol_summary(
         semantic_conflicts.get(
             "portfolio_daily_source_gap_mean",
             continuity.get("portfolio_daily_source_gap_mean", 0.0),
+        )
+        or 0.0
+    )
+    portfolio_daily_receiver_funding_coverage_mean = float(
+        semantic_conflicts.get(
+            "portfolio_daily_receiver_funding_coverage_mean",
+            continuity.get(
+                "portfolio_daily_receiver_funding_coverage_mean",
+                metrics.get("avg_portfolio_daily_receiver_funding_coverage", 0.0),
+            ),
+        )
+        or 0.0
+    )
+    portfolio_daily_funding_closure_score_mean = float(
+        semantic_conflicts.get(
+            "portfolio_daily_funding_closure_score_mean",
+            continuity.get(
+                "portfolio_daily_funding_closure_score_mean",
+                metrics.get("avg_portfolio_daily_funding_closure_score", 0.0),
+            ),
+        )
+        or 0.0
+    )
+    portfolio_daily_allocation_transfer_score_mean = float(
+        semantic_conflicts.get(
+            "portfolio_daily_allocation_transfer_score_mean",
+            continuity.get(
+                "portfolio_daily_allocation_transfer_score_mean",
+                metrics.get("avg_portfolio_daily_allocation_transfer_score", 0.0),
+            ),
+        )
+        or 0.0
+    )
+    portfolio_daily_allocation_dead_branch_risk_mean = float(
+        semantic_conflicts.get(
+            "portfolio_daily_allocation_dead_branch_risk_mean",
+            continuity.get(
+                "portfolio_daily_allocation_dead_branch_risk_mean",
+                metrics.get("avg_portfolio_daily_allocation_dead_branch_risk", 0.0),
+            ),
         )
         or 0.0
     )
@@ -2328,6 +2403,26 @@ def _score_protocol_summary(
             if annual_return < 0.12 and portfolio_daily_ranking_objective
             else 0.0
         )
+        portfolio_daily_funding_coverage_gap = (
+            max(0.0, 0.18 - portfolio_daily_receiver_funding_coverage_mean)
+            if portfolio_daily_receiver_target_count >= 3.0
+            else 0.0
+        )
+        portfolio_daily_closure_gap = (
+            max(0.0, 0.20 - portfolio_daily_funding_closure_score_mean)
+            if portfolio_daily_observed
+            else 0.0
+        )
+        portfolio_daily_transfer_gap = (
+            max(0.0, 0.18 - portfolio_daily_allocation_transfer_score_mean)
+            if portfolio_daily_observed
+            else 0.0
+        )
+        portfolio_daily_dead_branch_risk_penalty = (
+            max(0.0, portfolio_daily_allocation_dead_branch_risk_mean - 0.46)
+            if portfolio_daily_ranking_objective
+            else 0.0
+        )
         performance_breakdown = {
             "annual_return": annual_return * 1.52,
             "sharpe": sharpe * 0.22,
@@ -2411,6 +2506,32 @@ def _score_protocol_summary(
             "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate
             * 0.18
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_funding_coverage_mean": _bounded(
+                portfolio_daily_receiver_funding_coverage_mean,
+                0.06,
+                0.38,
+            )
+            * 0.24
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_funding_closure_score_mean": _bounded(
+                portfolio_daily_funding_closure_score_mean,
+                0.08,
+                0.42,
+            )
+            * 0.22
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_allocation_transfer_score_mean": _bounded(
+                portfolio_daily_allocation_transfer_score_mean,
+                0.08,
+                0.42,
+            )
+            * 0.26
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_allocation_dead_branch_risk_quality": (
+                1.0 - _bounded(portfolio_daily_allocation_dead_branch_risk_mean, 0.34, 0.78)
+            )
+            * 0.18
+            * portfolio_daily_ranking_weight,
             "action_value_consistency_score": action_value_consistency_score * 1.08,
             "action_value_alignment_score": action_alignment_score * 0.92,
             "release_translation_deploy_health_score": release_translation_deploy_health_score * 0.96,
@@ -2474,6 +2595,18 @@ def _score_protocol_summary(
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * portfolio_daily_ranking_weight,
             "portfolio_daily_cash_drag_penalty": -portfolio_daily_cash_drag_penalty
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_funding_coverage_gap_penalty": -portfolio_daily_funding_coverage_gap
+            * 1.10
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_closure_gap_penalty": -portfolio_daily_closure_gap
+            * 1.05
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_transfer_gap_penalty": -portfolio_daily_transfer_gap
+            * 1.15
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_allocation_dead_branch_risk_penalty": -portfolio_daily_dead_branch_risk_penalty
+            * 1.30
             * portfolio_daily_ranking_weight,
             "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 10.80,
             "deploy_funding_release_consistency_penalty": -(
@@ -2546,6 +2679,27 @@ def _score_protocol_summary(
             "portfolio_daily_receiver_realized_deploy_rate": portfolio_daily_receiver_realized_deploy_rate
             * 0.22
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_funding_coverage_mean": _bounded(
+                portfolio_daily_receiver_funding_coverage_mean,
+                0.06,
+                0.38,
+            )
+            * 0.28
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_funding_closure_score_mean": _bounded(
+                portfolio_daily_funding_closure_score_mean,
+                0.08,
+                0.42,
+            )
+            * 0.26
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_allocation_transfer_score_mean": _bounded(
+                portfolio_daily_allocation_transfer_score_mean,
+                0.08,
+                0.42,
+            )
+            * 0.28
+            * portfolio_daily_ranking_weight,
             "action_value_consistency_score": action_value_consistency_score * 1.18,
             "release_translation_deploy_health_score": release_translation_deploy_health_score * 1.02,
             "release_translation_deploy_translation_score": release_translation_deploy_translation_score * 0.96,
@@ -2607,6 +2761,18 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_sparse_penalty": -portfolio_daily_source_sparse_penalty
             * 1.18
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_funding_coverage_gap_penalty": -portfolio_daily_funding_coverage_gap
+            * 1.24
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_closure_gap_penalty": -portfolio_daily_closure_gap
+            * 1.18
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_transfer_gap_penalty": -portfolio_daily_transfer_gap
+            * 1.26
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_allocation_dead_branch_risk_penalty": -portfolio_daily_dead_branch_risk_penalty
+            * 1.42
             * portfolio_daily_ranking_weight,
             "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 11.60,
             "deploy_funding_against_hold_penalty": -(
@@ -2965,6 +3131,10 @@ def _score_protocol_summary(
             "portfolio_daily_cash_score_mean": portfolio_daily_cash_score_mean,
             "portfolio_daily_cash_reserve_rate": portfolio_daily_cash_reserve_rate,
             "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
+            "portfolio_daily_receiver_funding_coverage_mean": portfolio_daily_receiver_funding_coverage_mean,
+            "portfolio_daily_funding_closure_score_mean": portfolio_daily_funding_closure_score_mean,
+            "portfolio_daily_allocation_transfer_score_mean": portfolio_daily_allocation_transfer_score_mean,
+            "portfolio_daily_allocation_dead_branch_risk_mean": portfolio_daily_allocation_dead_branch_risk_mean,
             "portfolio_daily_receiver_forward_excess_5d": portfolio_daily_receiver_forward_excess_5d,
             "portfolio_daily_source_forward_excess_5d": portfolio_daily_source_forward_excess_5d,
             "portfolio_daily_receiver_minus_source_forward_excess_5d": (

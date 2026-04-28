@@ -1082,3 +1082,11 @@
 - v3 smoke confirm 恢复干净：`receiver_target_count = 3`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`，但收益仍弱。
 - v3 长预算 confirm 更重要：`receiver_target_count = 0`、`source_target_count = 0`、`cash_reserve_rate = 0.989510`、`annual_return = -0.386116`、`sharpe = -1.172900`。这不是可推广成功，而是 r25 在严格守门后退化为 dead allocation branch。
 - 已把 dead-branch 惩罚写进 objective/gate。下一轮最有效路径不是继续放宽 r25 guard，而是回到 r23 稳定主线恢复收益上限，或升级 teacher/listwise allocation，让模型直接学 source/receiver/cash 的组合资金分配闭环。
+
+## 2026-04-28 r26 allocation-teacher 执行复盘
+- 行动前判断：r25 v3 已证明“清掉错误 receiver”不等于“学会组合分配”，因此本轮优先把 funding coverage、closure、transfer 与 dead-branch risk 做成模型可学习目标，而不是继续放宽 guard。
+- 已执行实现：`label_builder.py` 新增四个 allocation teacher 标签并把 receiver demand 反推到 source release teacher；`model_seq_v3.py` 新增 v18 loss 与四个输出头；`pipeline_utils.py` 接入反馈、continuity metrics 与输出指标；`portfolio_simulator.py` 用新头参与 receiver/source/cash 评分；`run_self_optimizing_study.py` 新增 r26 profile 与 scoring penalty。
+- 验证过程：dry-run 通过；第一次 smoke 暴露 `current_gross` 初始化顺序问题并已修复；smoke2/smoke3 证明 receiver unrealized 被压到 0 但 source 仍塌缩；smoke4 完整完成 screening + confirm，GPU/yolos 诊断成立。
+- smoke4 关键结果：confirm `annual_return = 0.135025`、`sharpe = 0.570791`、`max_drawdown = -0.153265`、`monthly_return_mean = 0.010839`、`receiver_target_count = 2`、`receiver_realized_deploy_rate = 1.0`、`source_target_count = 0`、`cash_reserve_rate = 0.107143`、`training_evidence_status = insufficient`。
+- 反证实验：尝试让 protected source override 穿透下单路径后，source target 能恢复且 sell rate 可达 1.0，但 receiver-source spread 变负、回撤变差，说明“能卖”不等于“卖得对”。最终只保留 protected release 审计字段，不让它影响下单。
+- 本质结论：当前瓶颈是 listwise day allocation teacher 尚未学会稳定选择 funding source；硬打穿 `direct_action_funding_protected` 会把问题从“source 消失”变成“卖错 source”。r26 仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。

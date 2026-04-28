@@ -159,3 +159,11 @@
 - 模型预测的 receiver add capacity 只能在可观测 headroom 附近微调，不能把无 headroom 的持仓凭空抬成可加仓；高仓位且无 funding context 时 receiver slot 可以为 0。
 - v2 gate 不得再允许未观测到真实组合日分配的结果通过；`portfolio_daily_receiver_target_count >= 3`、`portfolio_daily_receiver_unrealized_deploy_share <= 0.02`、`portfolio_daily_source_realized_sell_rate >= 0.35`、`portfolio_daily_cash_reserve_rate > 0` 与正收益/月度质量必须联合成立。
 - `receiver_target_count = 0`、`source_target_count = 0` 或高 `cash_reserve_rate` 下的负收益，应解释为 dead allocation branch，不得解释为“守门成功”。守门的职责是防错，不是替代 listwise 资金分配学习。
+
+## 2026-04-28 r26 allocation-teacher 合同
+- r26 的核心合同是让 receiver/source/cash 的资金闭环进入可学习信号，而不是继续让 simulator guard 事后翻译。新增四个硬读字段：`portfolio_daily_receiver_funding_coverage`、`portfolio_daily_funding_closure_score`、`portfolio_daily_allocation_transfer_score`、`portfolio_daily_allocation_dead_branch_risk`。
+- `alpha_result_value_budget_split_v18` 必须同时具备 `supports_portfolio_allocation_teacher_heads = true`、`supports_portfolio_source_release_heads = true` 与 `supports_portfolio_listwise_heads = true`，否则不得解释为 r26 artifact。
+- receiver 成功不能只看 `receiver_unrealized_deploy_share = 0`；必须同时看 funding coverage、closure、transfer、dead branch risk、source realized sell、cash reserve、收益、月度一致性和回撤。
+- protected-source 只能作为审计候选：`portfolio_daily_source_protected_release_override_count` 表示“有可能需要突破 funding protection 的旧仓”，但在 source forward 质量没有被模型稳定学会前，不得直接进入 `portfolio_daily_source_candidate` 或 `portfolio_daily_source_target`。
+- 若强行放宽 protected-source 后出现 `source_realized_sell_rate = 1.0` 但 `portfolio_daily_receiver_minus_source_forward_excess_5d <= 0`、回撤扩大或月度质量变差，应立即判定为“能卖但没卖对”，不得把非零 source sell 视为进步。
+- r26 成功判定必须联合成立：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正 receiver-source spread、正收益/月度质量与可控回撤。

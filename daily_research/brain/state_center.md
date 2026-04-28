@@ -194,3 +194,11 @@
 - v3 长预算自然结束，confirm `receiver_target_count = 0`、`source_target_count = 0`、`cash_reserve_rate = 0.989510`、`annual_return = -0.386116`、`sharpe = -1.172900`、`monthly_return_mean = -0.030778`。本质结论：不可执行 receiver 已被清掉，但 r25 当前退化为组合日分配死分支。
 - 已补 v2 objective/gate：真实 receiver 活性、source realized sell、cash 正值、经济质量与 dead allocation branch 惩罚成为硬解释边界；不得把 `receiver_unrealized_deploy_share = 0` 或 `target_count = 0` 解释为成功。
 - 当前边界不变：r25 仍为 `research / shadow_only`；不得 promotion、不得 live、不得改 active artifact。下一阶段应回到 r23 稳定主线或推进真正 listwise allocation teacher，而不是继续放宽 r25 source/receiver guard。
+
+## 2026-04-28 r26 allocation-teacher 当前状态
+- 已完成 r26 机制落地：新增 `alpha_result_value_budget_split_v18` 与 `split_heads_portfolio_daily_allocation_teacher_r26`，把 `portfolio_daily_receiver_funding_coverage`、`portfolio_daily_funding_closure_score`、`portfolio_daily_allocation_transfer_score`、`portfolio_daily_allocation_dead_branch_risk` 纳入标签、模型头、推理输出、模拟器评分、continuity metrics 与 study scoring。
+- r26 smoke4 已按铁律使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台自然完成 screening + confirm，`completed_trial_count = 1`、`confirmatory_completed_trial_count = 1`、`failed_trial_count = 0`；训练诊断显示 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`supports_portfolio_allocation_teacher_heads = true`。
+- smoke4 confirm 指标：`annual_return = 0.135025`、`sharpe = 0.570791`、`max_drawdown = -0.153265`、`monthly_return_mean = 0.010839`、`receiver_target_count = 2`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`cash_reserve_rate = 0.107143`、`training_evidence_status = insufficient`、`promotion_status = shadow_only`。
+- 已验证一个重要反例：把 `direct_action_funding_protected` 直接打穿后，确实能让 `source_target_count > 0` 与 `source_realized_sell_rate = 1.0`，但 receiver-source spread 变为负、回撤和月度质量变差；因此该通道最终保留为审计字段，不参与下单路径。
+- eval4 行为恢复到 smoke4，同时新增审计读数：`portfolio_daily_source_protected_release_override_count = 46`、`portfolio_daily_source_target_count = 0`。解释为“存在潜在保护释放候选，但当前模型/label 尚不能证明卖得对”，不得为追求非零 source 而硬卖。
+- 当前结论：r26 完成了 allocation teacher 与 protected-source 审计闭环，但仍是 `research / shadow_only`。真正瓶颈不是脚本、TQ 或 GPU，而是 source/receiver/cash 的日级 listwise 资金分配目标仍未学会稳定选择“该卖的 source”。

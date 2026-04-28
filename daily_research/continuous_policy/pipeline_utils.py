@@ -86,6 +86,10 @@ SAMPLE_LABEL_COLUMNS = {
     "portfolio_daily_source_executability",
     "portfolio_daily_source_score",
     "portfolio_daily_cash_score",
+    "portfolio_daily_receiver_funding_coverage",
+    "portfolio_daily_funding_closure_score",
+    "portfolio_daily_allocation_transfer_score",
+    "portfolio_daily_allocation_dead_branch_risk",
     "portfolio_daily_receiver_candidate_mask",
     "portfolio_daily_source_candidate_mask",
     "clipped_intent_risk",
@@ -527,6 +531,10 @@ def _annotate_label_frame_with_execution_feedback(
         "portfolio_daily_source_executability",
         "portfolio_daily_source_score",
         "portfolio_daily_cash_score",
+        "portfolio_daily_receiver_funding_coverage",
+        "portfolio_daily_funding_closure_score",
+        "portfolio_daily_allocation_transfer_score",
+        "portfolio_daily_allocation_dead_branch_risk",
         "sell_source_floor_guarded",
     ]
     for column in feedback_columns:
@@ -580,6 +588,9 @@ def _annotate_label_frame_with_execution_feedback(
     for column, scale in (
         ("portfolio_daily_receiver_executability", 0.55),
         ("portfolio_daily_receiver_score", 0.42),
+        ("portfolio_daily_receiver_funding_coverage", 0.44),
+        ("portfolio_daily_funding_closure_score", 0.36),
+        ("portfolio_daily_allocation_transfer_score", 0.34),
     ):
         if column in merged.columns:
             merged[column] = (
@@ -605,6 +616,8 @@ def _annotate_label_frame_with_execution_feedback(
         ("portfolio_daily_source_release_quality", 0.30),
         ("portfolio_daily_source_executability", 0.44),
         ("portfolio_daily_source_score", 0.36),
+        ("portfolio_daily_funding_closure_score", 0.26),
+        ("portfolio_daily_allocation_transfer_score", 0.24),
     ):
         if column in merged.columns:
             feedback_values = pd.to_numeric(
@@ -619,6 +632,16 @@ def _annotate_label_frame_with_execution_feedback(
                 feedback_values.combine_first(base_values).fillna(0.0).clip(0.0, 1.0)
                 * (1.0 - source_guard_penalty * scale)
             ).clip(0.0, 1.0)
+    combined_guard_penalty = (receiver_guarded.astype(float) * 0.20 + source_guard_penalty * 0.16).clip(0.0, 0.80)
+    for column in (
+        "portfolio_daily_funding_closure_score",
+        "portfolio_daily_allocation_transfer_score",
+    ):
+        if column in merged.columns:
+            merged[column] = (
+                pd.to_numeric(merged[column], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+                * (1.0 - combined_guard_penalty)
+            ).clip(0.0, 1.0)
     if "portfolio_daily_cash_score" in merged.columns:
         cash_feedback = pd.to_numeric(
             merged.get("portfolio_daily_cash_score_feedback", pd.Series(np.nan, index=merged.index)),
@@ -627,6 +650,20 @@ def _annotate_label_frame_with_execution_feedback(
         merged["portfolio_daily_cash_score"] = cash_feedback.combine_first(
             pd.to_numeric(working.get("portfolio_daily_cash_score", pd.Series(0.0, index=working.index)), errors="coerce")
         ).fillna(0.0).clip(0.0, 1.0)
+    if "portfolio_daily_allocation_dead_branch_risk" in merged.columns:
+        dead_branch_feedback = pd.to_numeric(
+            merged.get("portfolio_daily_allocation_dead_branch_risk_feedback", pd.Series(np.nan, index=merged.index)),
+            errors="coerce",
+        ).replace([np.inf, -np.inf], np.nan)
+        base_dead_branch = pd.to_numeric(
+            working.get("portfolio_daily_allocation_dead_branch_risk", pd.Series(0.0, index=working.index)),
+            errors="coerce",
+        )
+        merged["portfolio_daily_allocation_dead_branch_risk"] = (
+            dead_branch_feedback.combine_first(base_dead_branch).fillna(0.0).clip(0.0, 1.0)
+            + receiver_guarded.astype(float) * 0.20
+            + source_floor_guarded.astype(float) * 0.10
+        ).clip(0.0, 1.0)
     merged = merged.drop(
         columns=[
             column
@@ -714,6 +751,10 @@ def compute_continuity_metrics(
             "portfolio_daily_source_executability",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
+            "portfolio_daily_receiver_funding_coverage",
+            "portfolio_daily_funding_closure_score",
+            "portfolio_daily_allocation_transfer_score",
+            "portfolio_daily_allocation_dead_branch_risk",
             "value_arbitration_target",
             "deploy_value_target",
             "release_value_target",
@@ -1155,6 +1196,10 @@ def compute_continuity_metrics(
             "portfolio_daily_source_target",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        portfolio_source_protected_release_override = action_outcomes.get(
+            "portfolio_daily_source_protected_release_override",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
         portfolio_cash_reserve_signal = action_outcomes.get(
             "portfolio_daily_cash_reserve_signal",
             pd.Series(False, index=action_outcomes.index),
@@ -1222,6 +1267,34 @@ def compute_continuity_metrics(
         ).fillna(0.0)
         portfolio_cash_score = pd.to_numeric(
             action_outcomes.get("portfolio_daily_cash_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_receiver_funding_coverage = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_funding_coverage",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_funding_closure_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_funding_closure_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_allocation_transfer_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_allocation_transfer_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_allocation_dead_branch_risk = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_allocation_dead_branch_risk",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
             errors="coerce",
         ).fillna(0.0)
         direct_funding_sell_mask = weight_change_lookup.isin({"reduce", "exit"}) & sell_origin_lookup.eq(
@@ -1342,6 +1415,14 @@ def compute_continuity_metrics(
         )
         metrics["portfolio_daily_source_candidate_count"] = float(portfolio_source_candidate.sum())
         metrics["portfolio_daily_source_target_count"] = float(portfolio_source_target.sum())
+        metrics["portfolio_daily_source_protected_release_override_count"] = float(
+            portfolio_source_protected_release_override.sum()
+        )
+        metrics["portfolio_daily_source_protected_release_override_share"] = (
+            float(portfolio_source_protected_release_override.mean())
+            if len(portfolio_source_protected_release_override)
+            else 0.0
+        )
         metrics["portfolio_daily_source_sell_count"] = float(portfolio_daily_source_sell_mask.sum())
         metrics["portfolio_daily_source_realized_sell_rate"] = (
             float((portfolio_source_target & weight_change_lookup.isin({"reduce", "exit"})).sum() / portfolio_source_target.sum())
@@ -1390,6 +1471,26 @@ def compute_continuity_metrics(
         metrics["portfolio_daily_source_gap_mean"] = (
             float(portfolio_source_gap.loc[portfolio_source_target].mean())
             if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_funding_coverage_mean"] = (
+            float(portfolio_receiver_funding_coverage.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_funding_closure_score_mean"] = (
+            float(portfolio_funding_closure_score.loc[portfolio_receiver_target | portfolio_source_target].mean())
+            if bool((portfolio_receiver_target | portfolio_source_target).any())
+            else 0.0
+        )
+        metrics["portfolio_daily_allocation_transfer_score_mean"] = (
+            float(portfolio_allocation_transfer_score.loc[portfolio_receiver_target | portfolio_source_target].mean())
+            if bool((portfolio_receiver_target | portfolio_source_target).any())
+            else 0.0
+        )
+        metrics["portfolio_daily_allocation_dead_branch_risk_mean"] = (
+            float(portfolio_allocation_dead_branch_risk.mean())
+            if len(portfolio_allocation_dead_branch_risk)
             else 0.0
         )
         metrics["portfolio_daily_receiver_forward_excess_5d"] = (
@@ -1715,6 +1816,8 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_unrealized_deploy_share",
             "portfolio_daily_source_candidate_count",
             "portfolio_daily_source_target_count",
+            "portfolio_daily_source_protected_release_override_count",
+            "portfolio_daily_source_protected_release_override_share",
             "portfolio_daily_source_sell_count",
             "portfolio_daily_source_realized_sell_rate",
             "portfolio_daily_source_exec_guard_count",
@@ -1732,6 +1835,10 @@ def compute_continuity_metrics(
             "portfolio_daily_source_release_quality_mean",
             "portfolio_daily_source_executability_mean",
             "portfolio_daily_source_gap_mean",
+            "portfolio_daily_receiver_funding_coverage_mean",
+            "portfolio_daily_funding_closure_score_mean",
+            "portfolio_daily_allocation_transfer_score_mean",
+            "portfolio_daily_allocation_dead_branch_risk_mean",
             "portfolio_daily_receiver_forward_excess_5d",
             "portfolio_daily_source_forward_excess_5d",
             "portfolio_daily_receiver_minus_source_forward_excess_5d",
@@ -4601,6 +4708,10 @@ def run_policy_rollout(
         metrics["avg_budget_model_deploy_gate_signal"] = float(turnover_frame["budget_model_deploy_gate_signal"].mean()) if "budget_model_deploy_gate_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_release_gate_signal"] = float(turnover_frame["budget_model_release_gate_signal"].mean()) if "budget_model_release_gate_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_defense_gate_signal"] = float(turnover_frame["budget_model_defense_gate_signal"].mean()) if "budget_model_defense_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_receiver_funding_coverage"] = float(turnover_frame["portfolio_daily_receiver_funding_coverage_mean"].mean()) if "portfolio_daily_receiver_funding_coverage_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_funding_closure_score"] = float(turnover_frame["portfolio_daily_funding_closure_score_mean"].mean()) if "portfolio_daily_funding_closure_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_allocation_transfer_score"] = float(turnover_frame["portfolio_daily_allocation_transfer_score_mean"].mean()) if "portfolio_daily_allocation_transfer_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_allocation_dead_branch_risk"] = float(turnover_frame["portfolio_daily_allocation_dead_branch_risk_mean"].mean()) if "portfolio_daily_allocation_dead_branch_risk_mean" in turnover_frame.columns else 0.0
     else:
         metrics["avg_turnover"] = 0.0
         metrics["avg_buy_turnover"] = 0.0
@@ -4624,6 +4735,10 @@ def run_policy_rollout(
         metrics["avg_budget_model_deploy_gate_signal"] = 0.0
         metrics["avg_budget_model_release_gate_signal"] = 0.0
         metrics["avg_budget_model_defense_gate_signal"] = 0.0
+        metrics["avg_portfolio_daily_receiver_funding_coverage"] = 0.0
+        metrics["avg_portfolio_daily_funding_closure_score"] = 0.0
+        metrics["avg_portfolio_daily_allocation_transfer_score"] = 0.0
+        metrics["avg_portfolio_daily_allocation_dead_branch_risk"] = 0.0
     metrics["action_counts"] = {
         str(key): int(value)
         for key, value in action_panel["execution_action"].astype(str).value_counts().sort_index().items()
