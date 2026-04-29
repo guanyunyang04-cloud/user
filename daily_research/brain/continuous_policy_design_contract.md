@@ -183,3 +183,15 @@
 - 收益内生合同：`monthly_return_mean`、`portfolio_daily_exposure_utilization`、`receiver_realized_deploy`、`deploy_intent_unrealized_share` 与 source 正 forward 分布必须进入 objective/feedback。不得把“语义干净但收益弱”解释为完成态。
 - r31 bounded 验证只能证明机制闭包，不证明 promotion readiness。正式成功必须同时满足：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正收益/月度质量、可控回撤、source 分布尾部不过线。
 - 中期正路不变：模型应直接输出当日 source/receiver/cash allocation ranking，让资金从谁出来、去谁那里、留多少现金成为端到端可学习对象；simulator guard 只做最后防线，不能继续承担主要策略翻译职责。
+
+## 2026-04-29 r33 source forward proxy / distribution clean-pass 合同
+- `portfolio_daily_source_forward_proxy_keep_risk` 是 source 保留风险合同的一部分，不是普通辅助指标。它必须同时进入 label、训练头、推理融合、source candidate gate、feedback、continuity metrics、study scoring 与 behavior audit；旧 artifact 缺少该 head 时只能使用 fallback proxy，不得把未训练随机头作为有效信号。
+- source candidate 的最低合同升级为三段式：先通过 forward proxy keep-risk 防错，再通过 `portfolio_daily_source_release_conviction_pass` 证明释放质量，最后通过 `portfolio_daily_source_distribution_clean_pass` 控制正 forward 卖出分布。任一层未通过，不得进入 `portfolio_daily_source_candidate`。
+- `portfolio_daily_source_release_conviction` 必须联合解释 source score、release quality、economic release、executability、release capacity、opportunity cost、forward-strength brake、bad forward spread、economic block 与 forward proxy keep-risk。高 conviction 不等于可部署；它仍必须服从 distribution clean-pass。
+- source 分布合同不允许只看均值正确。当 `source_target_count` 非零时，必须同步审计 `portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count`、`portfolio_daily_source_max_forward_excess_5d` 与 `portfolio_daily_source_p75_forward_excess_5d`；强势正 forward 误卖不得被低均值或少数负样本掩盖。
+- repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。不得用 repeat relief 绕过 forward proxy、release conviction 或 distribution clean-pass。
+- r33 的成功判定不是 `source_positive_forward_sell_share = 0` 一项。正式成功必须同时满足：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_target_count >= 3`、`source_target_count >= 3`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正 receiver-source forward spread、正 monthly return、可控 max drawdown、无强势正 forward source 误卖。
+- 若 clean-pass 导致 `source_target_count` 过低或 `receiver_minus_source_forward_excess_5d` 仍为负，应解释为 clean source breadth 与 receiver breadth 不足，而不是放宽 source gate 的理由。下一步应扩大可学习的 clean source 样本和 receiver flat-open 候选广度。
+- 收益内生合同继续强化：`monthly_return_mean`、`monthly_consistency_score`、`portfolio_daily_exposure_utilization`、`receiver_realized_deploy`、`source_realized_sell_rate`、positive spread distribution 与 drawdown 必须进入 objective/feedback/gate 的联合判断。不得把“语义干净但收益弱”解释为完成态。
+- r33 仍服从 r31 的 receiver 授权闭包：所有 direct add/open authorized 必须是 executable receiver candidate 子集；无 headroom held add 必须提前降级并计入审计，不得因为 source clean-pass 修复而放松 receiver 语义。
+- 长期合同不变：真正突破应让模型直接学习当日 source/receiver/cash allocation ranking。source distribution clean-pass 是必要防线，不是最终策略本体；继续堆 guard 只能减少坏翻译，不能替代资金分配学习。

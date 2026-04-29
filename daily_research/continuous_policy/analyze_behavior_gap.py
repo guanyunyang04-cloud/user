@@ -656,6 +656,8 @@ def _build_semantic_conflicts(
             "portfolio_daily_receiver_score_mean": 0.0,
             "portfolio_daily_source_score_mean": 0.0,
             "portfolio_daily_source_gap_mean": 0.0,
+            "portfolio_daily_source_forward_proxy_keep_risk_mean": 0.0,
+            "portfolio_daily_source_release_conviction_mean": 0.0,
             "portfolio_daily_receiver_forward_excess_5d": 0.0,
             "portfolio_daily_source_forward_excess_5d": 0.0,
             "portfolio_daily_source_positive_forward_sell_share": 0.0,
@@ -1464,6 +1466,14 @@ def _build_semantic_conflicts(
         "portfolio_daily_source_score",
         pd.Series(0.0, index=working.index),
     ).fillna(0.0)
+    portfolio_source_forward_proxy_keep_risk = working.get(
+        "portfolio_daily_source_forward_proxy_keep_risk",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
+    portfolio_source_release_conviction = working.get(
+        "portfolio_daily_source_release_conviction",
+        pd.Series(0.0, index=working.index),
+    ).fillna(0.0)
     portfolio_cash_score = working.get(
         "portfolio_daily_cash_score",
         pd.Series(0.0, index=working.index),
@@ -1745,6 +1755,16 @@ def _build_semantic_conflicts(
         if portfolio_source_target.any()
         else 0.0
     )
+    portfolio_daily_source_forward_proxy_keep_risk_mean = (
+        _safe_mean(portfolio_source_forward_proxy_keep_risk.loc[portfolio_source_target])
+        if portfolio_source_target.any()
+        else 0.0
+    )
+    portfolio_daily_source_release_conviction_mean = (
+        _safe_mean(portfolio_source_release_conviction.loc[portfolio_source_target])
+        if portfolio_source_target.any()
+        else 0.0
+    )
     portfolio_daily_receiver_forward_excess_5d = (
         _safe_mean(working.loc[portfolio_receiver_target, "forward_excess_5d"])
         if portfolio_receiver_target.any()
@@ -1941,21 +1961,25 @@ def _build_semantic_conflicts(
         diagnoses.append("direct-action pair reallocation 正在释放高持有价值来源，资金来源成本偏高会吞掉核心部署收益。")
 
     if (
-        portfolio_daily_receiver_target_count >= 5
-        and portfolio_daily_source_target_count >= 5
+        portfolio_daily_receiver_target_count >= 3
+        and portfolio_daily_source_target_count >= 3
         and portfolio_daily_receiver_minus_source_forward_excess_5d <= 0.0
     ):
         diagnoses.append("portfolio daily ranking has not separated capital receivers from funding sources; the listwise allocation target still needs tighter relative credit assignment.")
-    if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_forward_excess_5d > 0.006:
+    if portfolio_daily_source_target_count >= 3 and portfolio_daily_source_forward_excess_5d > 0.006:
         diagnoses.append("portfolio daily ranking is releasing sources that still have positive forward excess return, suggesting sell/opportunity-cost attribution remains too weak.")
     if (
-        portfolio_daily_source_target_count >= 5
+        portfolio_daily_source_target_count >= 3
         and (
             portfolio_daily_source_positive_forward_sell_share > 0.45
             or portfolio_daily_source_strong_positive_forward_sell_count >= 1
         )
     ):
         diagnoses.append("source 选择的均值改善不足以说明卖得对：正 forward source 占比或强势误卖仍偏高，需把分布尾部纳入 source opportunity cost。")
+    if portfolio_daily_source_target_count >= 3 and portfolio_daily_source_forward_proxy_keep_risk_mean > 0.280:
+        diagnoses.append("source 目标的 forward proxy keep risk 偏高，说明卖出候选仍混入了继续持有价值较强的标的，需要继续抬高 source opportunity cost 或收紧 release label。")
+    if portfolio_daily_source_target_count >= 3 and portfolio_daily_source_release_conviction_mean < 0.300:
+        diagnoses.append("source release conviction 均值偏低，说明 source 目标虽被执行为卖出，但释放资金的综合证据仍不足，需要继续把 opportunity cost、forward proxy keep risk 和 release label 对齐。")
     if portfolio_daily_receiver_target_count >= 5 and portfolio_daily_source_target_count == 0:
         diagnoses.append("portfolio daily ranking selects capital receivers but finds no explicit funding source, so cash/source coordination remains incomplete.")
     if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_target_not_sold_share > 0.65:
@@ -2149,6 +2173,12 @@ def _build_semantic_conflicts(
         "portfolio_daily_receiver_score_mean": portfolio_daily_receiver_score_mean,
         "portfolio_daily_source_score_mean": portfolio_daily_source_score_mean,
         "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
+        "portfolio_daily_source_forward_proxy_keep_risk_mean": (
+            portfolio_daily_source_forward_proxy_keep_risk_mean
+        ),
+        "portfolio_daily_source_release_conviction_mean": (
+            portfolio_daily_source_release_conviction_mean
+        ),
         "portfolio_daily_receiver_forward_excess_5d": portfolio_daily_receiver_forward_excess_5d,
         "portfolio_daily_source_forward_excess_5d": portfolio_daily_source_forward_excess_5d,
         "portfolio_daily_source_positive_forward_sell_share": portfolio_daily_source_positive_forward_sell_share,

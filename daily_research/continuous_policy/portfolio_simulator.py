@@ -865,6 +865,7 @@ class PortfolioState:
         cash_defense_series = _policy_numeric("cash_defense_value")
         deployment_opportunity_series = _policy_numeric("deployment_opportunity_cost")
         risk_adjusted_action_value_series = _policy_numeric("risk_adjusted_action_value")
+        multi_horizon_forward_value_series = _policy_numeric("multi_horizon_forward_value")
         multi_horizon_forward_risk_series = _policy_numeric("multi_horizon_forward_risk")
         multi_horizon_path_value_series = _policy_numeric("multi_horizon_path_value")
         value_arbitration_series = _policy_numeric("value_arbitration_target", default=0.5)
@@ -1135,14 +1136,14 @@ class PortfolioState:
             portfolio_daily_ranking_mode
             & receiver_open_breadth_pressure
             & flat_mask
-            & (portfolio_daily_receiver_score >= 0.015)
-            & (cash_defense_series < 0.700)
-            & (exit_timing_pressure_series < 0.500)
+            & (portfolio_daily_receiver_score >= 0.055)
+            & (cash_defense_series < 0.660)
+            & (exit_timing_pressure_series < 0.460)
             & (
-                (deploy_executability_series >= 0.18)
-                | (decision_deploy_gate_series >= decision_release_gate_series + 0.030)
-                | (alpha_opportunity_series >= 0.22)
-                | (deployment_opportunity_series >= 0.20)
+                (deploy_executability_series >= 0.24)
+                | (decision_deploy_gate_series >= decision_release_gate_series + 0.050)
+                | (alpha_opportunity_series >= 0.28)
+                | (deployment_opportunity_series >= 0.26)
             )
         )
         if bool(portfolio_daily_receiver_open_breadth_candidate.any()):
@@ -1166,9 +1167,17 @@ class PortfolioState:
             & direct_action_deploy_signal
             & portfolio_daily_receiver_pre_exec_pass
             & portfolio_daily_receiver_funding_pass
-            & (portfolio_daily_receiver_score >= -0.020)
-            & (cash_defense_series < 0.760)
-            & (exit_timing_pressure_series < 0.560)
+            & (
+                (portfolio_daily_receiver_score >= 0.035)
+                | (
+                    (portfolio_daily_receiver_score >= 0.000)
+                    & (deploy_executability_series.clip(0.0, 1.0) >= 0.45)
+                    & (deploy_value_series.clip(0.0, 1.0) >= 0.56)
+                    & (alpha_opportunity_series.clip(0.0, 1.0) >= 0.24)
+                )
+            )
+            & (cash_defense_series < 0.720)
+            & (exit_timing_pressure_series < 0.520)
         )
         portfolio_daily_receiver_target = pd.Series(False, index=prices.index, dtype=bool)
         direct_action_core_deploy_target = direct_action_deploy_signal.copy()
@@ -2026,6 +2035,62 @@ class PortfolioState:
             - portfolio_daily_source_economic_block_risk.clip(0.0, 1.0) * 0.12
             - portfolio_daily_source_bad_forward_spread_risk.clip(0.0, 1.0) * 0.08
         ).clip(0.0, 1.0).where(held_mask, 0.0)
+        portfolio_daily_receiver_context_active = bool(portfolio_daily_receiver_target.any())
+        portfolio_daily_source_direct_release_gap_pass = (
+            (
+                pd.Series(portfolio_daily_receiver_context_active, index=prices.index, dtype=bool)
+                & (portfolio_daily_source_gap >= 0.020)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.46)
+                & (portfolio_daily_source_economic_block_risk <= 0.60)
+            )
+            | (
+                pd.Series(not portfolio_daily_receiver_context_active, index=prices.index, dtype=bool)
+                & bool(portfolio_daily_cash_reserve_signal)
+                & (portfolio_daily_source_gap >= -0.100)
+                & (portfolio_daily_source_economic_release_score >= 0.20)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.42)
+                & (portfolio_daily_source_economic_block_risk <= 0.52)
+            )
+        )
+        portfolio_daily_source_forward_proxy_keep_risk = (
+            multi_horizon_forward_value_series.clip(0.0, 1.0) * 0.34
+            + multi_horizon_path_value_series.clip(0.0, 1.0) * 0.30
+            + alpha_opportunity_series.clip(0.0, 1.0) * 0.18
+            + deploy_value_series.clip(0.0, 1.0) * 0.12
+            + release_value_series.clip(0.0, 1.0) * 0.06
+        ).clip(0.0, 1.0).where(held_mask, 0.0)
+        portfolio_daily_source_forward_proxy_pass = (
+            (
+                pd.Series(portfolio_daily_receiver_context_active, index=prices.index, dtype=bool)
+                & (
+                    (portfolio_daily_source_forward_proxy_keep_risk <= 0.245)
+                    | (
+                        (portfolio_daily_source_forward_proxy_keep_risk <= 0.280)
+                        & (portfolio_daily_source_gap >= 0.450)
+                        & (portfolio_daily_source_opportunity_cost <= 0.040)
+                        & (portfolio_daily_source_economic_release_score >= 0.480)
+                        & (portfolio_daily_source_release_capacity >= 0.920)
+                    )
+                )
+            )
+            | (
+                pd.Series(not portfolio_daily_receiver_context_active, index=prices.index, dtype=bool)
+                & (
+                    (portfolio_daily_source_forward_proxy_keep_risk <= 0.320)
+                    | (
+                        bool(portfolio_daily_cash_reserve_signal)
+                        & (portfolio_daily_source_forward_proxy_keep_risk <= 0.360)
+                        & (portfolio_daily_source_gap >= 0.160)
+                        & (portfolio_daily_source_economic_release_score >= 0.360)
+                    )
+                )
+            )
+            | (
+                action_names.isin({"exit"})
+                & (portfolio_daily_source_forward_proxy_keep_risk <= 0.300)
+                & (decision_release_gate_series >= decision_deploy_gate_series + 0.220)
+            )
+        )
         portfolio_daily_source_direct_release_relief_pass = (
             held_mask
             & (~action_names.isin({"open", "add"}))
@@ -2034,7 +2099,7 @@ class PortfolioState:
             & (portfolio_daily_source_forward_strength_brake_risk <= 0.38)
             & (portfolio_daily_source_release_capacity >= 0.70)
             & (portfolio_daily_source_direct_release_relief_score >= 0.42)
-            & (portfolio_daily_source_gap >= -0.38)
+            & portfolio_daily_source_direct_release_gap_pass
         )
         portfolio_daily_source_release_quality = pd.concat(
             [
@@ -2085,6 +2150,74 @@ class PortfolioState:
             )
             * 0.44
         ).clip(lower=-0.20, upper=1.25).where(held_mask, 0.0)
+        portfolio_daily_source_release_conviction = (
+            portfolio_daily_source_score.clip(lower=-0.20, upper=1.25)
+            + portfolio_daily_source_release_quality.clip(0.0, 1.0) * 0.24
+            + portfolio_daily_source_economic_release_score.clip(0.0, 1.0) * 0.20
+            + portfolio_daily_source_executability.clip(0.0, 1.0) * 0.12
+            + portfolio_daily_source_release_capacity.clip(0.0, 1.0) * 0.08
+            - portfolio_daily_source_opportunity_cost.clip(0.0, 1.0) * 0.35
+            - portfolio_daily_source_forward_strength_brake_risk.clip(0.0, 1.0) * 0.24
+            - portfolio_daily_source_bad_forward_spread_risk.clip(0.0, 1.0) * 0.22
+            - portfolio_daily_source_economic_block_risk.clip(0.0, 1.0) * 0.18
+            - portfolio_daily_source_forward_proxy_keep_risk.clip(0.0, 1.0) * 0.18
+        ).clip(lower=-1.0, upper=1.0).where(held_mask, 0.0)
+        portfolio_daily_source_release_conviction_pass = (
+            (portfolio_daily_source_release_conviction >= 0.340)
+            | (
+                portfolio_daily_source_direct_release_relief_pass
+                & (portfolio_daily_source_release_conviction >= 0.260)
+            )
+            | (
+                direct_action_funding_release_authorized
+                & (portfolio_daily_source_gap >= 0.080)
+                & (portfolio_daily_source_release_conviction >= 0.300)
+            )
+            | (
+                action_names.isin({"exit"})
+                & (portfolio_daily_source_opportunity_cost <= 0.360)
+                & (portfolio_daily_source_release_conviction >= 0.280)
+            )
+        )
+        portfolio_daily_source_distribution_clean_pass = (
+            (
+                (portfolio_daily_source_gap >= 0.060)
+                & (portfolio_daily_source_forward_strength_brake_risk <= 0.300)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.180)
+                & (portfolio_daily_source_economic_block_risk <= 0.320)
+                & (portfolio_daily_source_release_conviction >= 0.360)
+            )
+            | (
+                (portfolio_daily_source_gap >= 0.025)
+                & (portfolio_daily_source_bad_forward_spread_risk >= 0.100)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.180)
+                & (portfolio_daily_source_forward_strength_brake_risk >= 0.180)
+                & (portfolio_daily_source_forward_strength_brake_risk <= 0.300)
+                & (portfolio_daily_source_economic_block_risk <= 0.320)
+                & (portfolio_daily_source_release_conviction >= 0.360)
+            )
+            | (
+                (portfolio_daily_source_gap >= 0.320)
+                & (portfolio_daily_source_forward_spread_score >= 0.200)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.160)
+                & (portfolio_daily_source_release_conviction >= 0.500)
+            )
+            | (
+                portfolio_daily_source_direct_release_relief_pass
+                & (portfolio_daily_source_gap >= 0.055)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.140)
+                & (portfolio_daily_source_forward_strength_brake_risk <= 0.200)
+                & (portfolio_daily_source_economic_block_risk <= 0.240)
+                & (portfolio_daily_source_release_conviction >= 0.400)
+            )
+            | (
+                action_names.isin({"exit"})
+                & (decision_release_gate_series >= decision_deploy_gate_series + 0.220)
+                & (portfolio_daily_source_gap >= 0.100)
+                & (portfolio_daily_source_bad_forward_spread_risk <= 0.160)
+                & (portfolio_daily_source_release_conviction >= 0.340)
+            )
+        )
         portfolio_daily_source_low_keep_value_pass = (
             (
                 (hold_continuation_series.clip(0.0, 1.0) <= 0.52)
@@ -2215,6 +2348,14 @@ class PortfolioState:
                 & (portfolio_daily_source_score >= 0.36)
                 & (portfolio_daily_source_opportunity_cost <= 0.42)
             )
+            | (
+                portfolio_daily_source_distribution_clean_pass
+                & (portfolio_daily_source_recent_sell_days > 2.0)
+                & (portfolio_daily_source_score >= 0.320)
+                & (portfolio_daily_source_opportunity_cost <= 0.340)
+                & (portfolio_daily_source_release_capacity >= 0.50)
+                & (portfolio_daily_source_economic_block_risk <= 0.320)
+            )
         )
         portfolio_daily_source_candidate = (
             portfolio_daily_ranking_mode
@@ -2226,6 +2367,9 @@ class PortfolioState:
             & portfolio_daily_source_quality_gap_pass
             & portfolio_daily_source_repeat_release_pass
             & portfolio_daily_source_forward_strength_brake_pass
+            & portfolio_daily_source_forward_proxy_pass
+            & portfolio_daily_source_release_conviction_pass
+            & portfolio_daily_source_distribution_clean_pass
             & (
                 (portfolio_daily_source_economic_release_score >= 0.10)
                 | portfolio_daily_source_direct_release_relief_pass
@@ -4410,11 +4554,26 @@ class PortfolioState:
                     "portfolio_daily_source_forward_strength_brake_pass": bool(
                         portfolio_daily_source_forward_strength_brake_pass.get(stock, False)
                     ),
+                    "portfolio_daily_source_forward_proxy_keep_risk": float(
+                        portfolio_daily_source_forward_proxy_keep_risk.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_source_forward_proxy_pass": bool(
+                        portfolio_daily_source_forward_proxy_pass.get(stock, False)
+                    ),
                     "portfolio_daily_source_direct_release_relief_score": float(
                         portfolio_daily_source_direct_release_relief_score.get(stock, 0.0)
                     ),
                     "portfolio_daily_source_direct_release_relief_pass": bool(
                         portfolio_daily_source_direct_release_relief_pass.get(stock, False)
+                    ),
+                    "portfolio_daily_source_release_conviction": float(
+                        portfolio_daily_source_release_conviction.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_source_release_conviction_pass": bool(
+                        portfolio_daily_source_release_conviction_pass.get(stock, False)
+                    ),
+                    "portfolio_daily_source_distribution_clean_pass": bool(
+                        portfolio_daily_source_distribution_clean_pass.get(stock, False)
                     ),
                     "portfolio_daily_source_release_quality": float(
                         portfolio_daily_source_release_quality.get(stock, 0.0)
@@ -5001,9 +5160,53 @@ class PortfolioState:
                 portfolio_daily_source_forward_strength_brake_risk,
                 portfolio_daily_source_target,
             ),
+            "portfolio_daily_source_forward_proxy_keep_risk_mean": _masked_mean(
+                portfolio_daily_source_forward_proxy_keep_risk,
+                portfolio_daily_source_target,
+            ),
+            "portfolio_daily_source_forward_proxy_blocked_count": int(
+                (
+                    held_mask
+                    & portfolio_daily_source_semantic_release_pass
+                    & portfolio_daily_source_observable_release_pass
+                    & portfolio_daily_source_quality_gap_pass
+                    & portfolio_daily_source_repeat_release_pass
+                    & portfolio_daily_source_forward_strength_brake_pass
+                    & (~portfolio_daily_source_forward_proxy_pass)
+                ).sum()
+            ),
             "portfolio_daily_source_direct_release_relief_score_mean": _masked_mean(
                 portfolio_daily_source_direct_release_relief_score,
                 portfolio_daily_source_target,
+            ),
+            "portfolio_daily_source_release_conviction_mean": _masked_mean(
+                portfolio_daily_source_release_conviction,
+                portfolio_daily_source_target,
+            ),
+            "portfolio_daily_source_release_conviction_blocked_count": int(
+                (
+                    held_mask
+                    & portfolio_daily_source_semantic_release_pass
+                    & portfolio_daily_source_observable_release_pass
+                    & portfolio_daily_source_quality_gap_pass
+                    & portfolio_daily_source_repeat_release_pass
+                    & portfolio_daily_source_forward_strength_brake_pass
+                    & portfolio_daily_source_forward_proxy_pass
+                    & (~portfolio_daily_source_release_conviction_pass)
+                ).sum()
+            ),
+            "portfolio_daily_source_distribution_clean_blocked_count": int(
+                (
+                    held_mask
+                    & portfolio_daily_source_semantic_release_pass
+                    & portfolio_daily_source_observable_release_pass
+                    & portfolio_daily_source_quality_gap_pass
+                    & portfolio_daily_source_repeat_release_pass
+                    & portfolio_daily_source_forward_strength_brake_pass
+                    & portfolio_daily_source_forward_proxy_pass
+                    & portfolio_daily_source_release_conviction_pass
+                    & (~portfolio_daily_source_distribution_clean_pass)
+                ).sum()
             ),
             "portfolio_daily_source_release_quality_mean": _masked_mean(
                 portfolio_daily_source_release_quality,

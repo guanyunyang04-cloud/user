@@ -1271,6 +1271,19 @@ def build_action_labels_for_date(
         np.clip(source_forward_edge / 0.075, 0.0, 1.0),
         0.0,
     )
+    portfolio_daily_source_forward_proxy_keep_risk = np.where(
+        held_mask,
+        np.clip(
+            0.34 * multi_horizon_forward_value
+            + 0.30 * multi_horizon_path_value
+            + 0.18 * alpha_opportunity_value
+            + 0.12 * deploy_value_target
+            + 0.06 * release_value_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
     source_forward_strength_brake_risk_base = np.where(
         held_mask,
         np.clip(
@@ -1307,7 +1320,8 @@ def build_action_labels_for_date(
             - 0.14 * large_upside_1d_target
             - 0.26 * portfolio_daily_source_bad_forward_spread_risk
             - 0.22 * source_forward_strength_risk
-            - 0.18 * source_forward_strength_brake_risk_base,
+            - 0.18 * source_forward_strength_brake_risk_base
+            - 0.16 * portfolio_daily_source_forward_proxy_keep_risk,
             0.0,
             1.0,
         ),
@@ -1341,6 +1355,7 @@ def build_action_labels_for_date(
             + 0.22 * portfolio_daily_source_bad_forward_spread_risk
             + 0.18 * source_forward_strength_risk
             + 0.18 * source_forward_strength_brake_risk_base
+            + 0.26 * portfolio_daily_source_forward_proxy_keep_risk
             - 0.10 * release_value_target
             - 0.06 * cash_defense_value
             - 0.05 * multi_horizon_forward_risk
@@ -1388,7 +1403,8 @@ def build_action_labels_for_date(
             - 0.12 * alpha_opportunity_value
             - 0.10 * portfolio_daily_receiver_executability
             - 0.08 * large_upside_1d_target
-            - 0.12 * source_forward_strength_brake_risk_base,
+            - 0.12 * source_forward_strength_brake_risk_base
+            - 0.14 * portfolio_daily_source_forward_proxy_keep_risk,
             0.0,
             1.0,
         ),
@@ -1560,6 +1576,7 @@ def build_action_labels_for_date(
         np.clip(
             portfolio_daily_source_economic_block_risk
             + portfolio_daily_source_forward_strength_brake_risk * 0.18
+            + portfolio_daily_source_forward_proxy_keep_risk * 0.12
             - portfolio_daily_source_economic_release_score * 0.04,
             0.0,
             1.0,
@@ -1582,6 +1599,7 @@ def build_action_labels_for_date(
             portfolio_daily_source_opportunity_cost
             + portfolio_daily_source_economic_block_risk * 0.16
             + portfolio_daily_source_forward_strength_brake_risk * 0.20
+            + portfolio_daily_source_forward_proxy_keep_risk * 0.16
             - portfolio_daily_source_economic_release_score * 0.08,
             0.0,
             1.0,
@@ -1594,7 +1612,8 @@ def build_action_labels_for_date(
             portfolio_daily_source_release_quality
             + portfolio_daily_source_economic_release_score * 0.10
             - portfolio_daily_source_economic_block_risk * 0.08
-            - portfolio_daily_source_forward_strength_brake_risk * 0.10,
+            - portfolio_daily_source_forward_strength_brake_risk * 0.10
+            - portfolio_daily_source_forward_proxy_keep_risk * 0.10,
             0.0,
             1.0,
         ),
@@ -1606,11 +1625,82 @@ def build_action_labels_for_date(
             portfolio_daily_source_score
             + portfolio_daily_source_economic_release_score * 0.20
             - portfolio_daily_source_economic_block_risk * 0.24
-            - portfolio_daily_source_forward_strength_brake_risk * 0.24,
+            - portfolio_daily_source_forward_strength_brake_risk * 0.24
+            - portfolio_daily_source_forward_proxy_keep_risk * 0.14,
             0.0,
             1.0,
         ),
         0.0,
+    )
+    portfolio_daily_source_release_conviction = np.where(
+        held_mask,
+        np.clip(
+            portfolio_daily_source_score
+            + portfolio_daily_source_release_quality * 0.24
+            + portfolio_daily_source_economic_release_score * 0.20
+            + portfolio_daily_source_executability * 0.12
+            + portfolio_daily_source_release_capacity * 0.08
+            - portfolio_daily_source_opportunity_cost * 0.35
+            - portfolio_daily_source_forward_strength_brake_risk * 0.24
+            - portfolio_daily_source_bad_forward_spread_risk * 0.22
+            - portfolio_daily_source_economic_block_risk * 0.18
+            - portfolio_daily_source_forward_proxy_keep_risk * 0.18,
+            -1.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_release_conviction_pass = (
+        (portfolio_daily_source_release_conviction >= 0.340)
+        | (
+            allocation_source_release_override
+            & (portfolio_daily_source_release_conviction >= 0.260)
+            & (source_forward_weakness_score >= 0.18)
+        )
+        | (
+            action_series.isin({"exit"}).to_numpy(dtype=bool)
+            & (portfolio_daily_source_opportunity_cost <= 0.360)
+            & (portfolio_daily_source_release_conviction >= 0.280)
+        )
+    )
+    portfolio_daily_source_distribution_clean_pass = (
+        (
+            (portfolio_daily_source_receiver_forward_spread >= 0.060)
+            & (portfolio_daily_source_forward_strength_brake_risk <= 0.300)
+            & (portfolio_daily_source_bad_forward_spread_risk <= 0.180)
+            & (portfolio_daily_source_economic_block_risk <= 0.320)
+            & (portfolio_daily_source_release_conviction >= 0.360)
+        )
+        | (
+            (portfolio_daily_source_receiver_forward_spread >= 0.025)
+            & (portfolio_daily_source_bad_forward_spread_risk >= 0.100)
+            & (portfolio_daily_source_bad_forward_spread_risk <= 0.180)
+            & (portfolio_daily_source_forward_strength_brake_risk >= 0.180)
+            & (portfolio_daily_source_forward_strength_brake_risk <= 0.300)
+            & (portfolio_daily_source_economic_block_risk <= 0.320)
+            & (portfolio_daily_source_release_conviction >= 0.360)
+        )
+        | (
+            (portfolio_daily_source_receiver_forward_spread >= 0.320)
+            & (portfolio_daily_source_forward_spread_score >= 0.200)
+            & (portfolio_daily_source_bad_forward_spread_risk <= 0.160)
+            & (portfolio_daily_source_release_conviction >= 0.500)
+        )
+        | (
+            allocation_source_release_override
+            & (portfolio_daily_source_receiver_forward_spread >= 0.055)
+            & (portfolio_daily_source_bad_forward_spread_risk <= 0.140)
+            & (portfolio_daily_source_forward_strength_brake_risk <= 0.200)
+            & (portfolio_daily_source_economic_block_risk <= 0.240)
+            & (portfolio_daily_source_release_conviction >= 0.400)
+        )
+        | (
+            action_series.isin({"exit"}).to_numpy(dtype=bool)
+            & (release_gate_target >= deploy_gate_target + 0.220)
+            & (portfolio_daily_source_receiver_forward_spread >= 0.100)
+            & (portfolio_daily_source_bad_forward_spread_risk <= 0.160)
+            & (portfolio_daily_source_release_conviction >= 0.340)
+        )
     )
     portfolio_daily_source_forward_strength_brake_pass = (
         (portfolio_daily_source_forward_strength_brake_risk <= 0.48)
@@ -1670,6 +1760,21 @@ def build_action_labels_for_date(
         & portfolio_daily_source_semantic_release_mask
         & (portfolio_daily_source_forward_release_pass | allocation_source_release_override)
         & portfolio_daily_source_forward_strength_brake_pass
+        & portfolio_daily_source_release_conviction_pass
+        & portfolio_daily_source_distribution_clean_pass
+        & (
+            (portfolio_daily_source_forward_proxy_keep_risk <= 0.340)
+            | (
+                allocation_source_release_override
+                & (source_forward_weakness_score >= 0.22)
+                & (portfolio_daily_source_forward_proxy_keep_risk <= 0.400)
+            )
+            | (
+                (cash_defense_value >= 0.60)
+                & (multi_horizon_forward_risk >= 0.52)
+                & (portfolio_daily_source_forward_proxy_keep_risk <= 0.420)
+            )
+        )
         & (
             (portfolio_daily_source_economic_release_score >= 0.12)
             | (
@@ -1884,6 +1989,9 @@ def build_action_labels_for_date(
     working["portfolio_daily_source_economic_release_score"] = portfolio_daily_source_economic_release_score
     working["portfolio_daily_source_economic_block_risk"] = portfolio_daily_source_economic_block_risk
     working["portfolio_daily_source_forward_strength_brake_risk"] = portfolio_daily_source_forward_strength_brake_risk
+    working["portfolio_daily_source_forward_proxy_keep_risk"] = portfolio_daily_source_forward_proxy_keep_risk
+    working["portfolio_daily_source_release_conviction"] = portfolio_daily_source_release_conviction
+    working["portfolio_daily_source_distribution_clean_pass"] = portfolio_daily_source_distribution_clean_pass.astype(float)
     working["portfolio_daily_source_release_quality"] = portfolio_daily_source_release_quality
     working["portfolio_daily_source_opportunity_cost"] = portfolio_daily_source_opportunity_cost
     working["portfolio_daily_source_executability"] = portfolio_daily_source_executability
@@ -1959,6 +2067,9 @@ def build_action_labels_for_date(
         "portfolio_daily_source_economic_release_score",
         "portfolio_daily_source_economic_block_risk",
         "portfolio_daily_source_forward_strength_brake_risk",
+        "portfolio_daily_source_forward_proxy_keep_risk",
+        "portfolio_daily_source_release_conviction",
+        "portfolio_daily_source_distribution_clean_pass",
         "portfolio_daily_source_release_quality",
         "portfolio_daily_source_opportunity_cost",
         "portfolio_daily_source_executability",
@@ -2235,6 +2346,7 @@ def build_teacher_policy_frame(label_frame: pd.DataFrame) -> pd.DataFrame:
         "portfolio_daily_source_economic_release_score",
         "portfolio_daily_source_economic_block_risk",
         "portfolio_daily_source_forward_strength_brake_risk",
+        "portfolio_daily_source_forward_proxy_keep_risk",
         "portfolio_daily_source_release_quality",
         "portfolio_daily_source_opportunity_cost",
         "portfolio_daily_source_executability",

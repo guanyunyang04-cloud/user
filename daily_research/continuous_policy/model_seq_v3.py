@@ -1177,6 +1177,7 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v20"] = {
     "sample_scalar_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v19"]["sample_scalar_loss_weights"],
         "portfolio_daily_source_forward_strength_brake_risk": 2.34,
+        "portfolio_daily_source_forward_proxy_keep_risk": 1.72,
         "portfolio_daily_source_bad_forward_spread_risk": 2.02,
         "portfolio_daily_source_economic_block_risk": 2.06,
         "portfolio_daily_source_economic_release_score": 2.04,
@@ -1806,6 +1807,73 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
         0.0,
         1.0,
     )
+    portfolio_source_candidate = np.clip(
+        sample_frame.get(
+            "portfolio_daily_source_candidate_mask",
+            pd.Series(np.zeros(row_count), index=sample_frame.index),
+        ).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_score = np.clip(
+        sample_frame.get("portfolio_daily_source_score", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_release_quality = np.clip(
+        sample_frame.get("portfolio_daily_source_release_quality", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_executability = np.clip(
+        sample_frame.get("portfolio_daily_source_executability", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_release_capacity = np.clip(
+        sample_frame.get("portfolio_daily_source_release_capacity", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_economic_release = np.clip(
+        sample_frame.get("portfolio_daily_source_economic_release_score", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_opportunity_cost = np.clip(
+        sample_frame.get("portfolio_daily_source_opportunity_cost", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_economic_block = np.clip(
+        sample_frame.get("portfolio_daily_source_economic_block_risk", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_forward_brake = np.clip(
+        sample_frame.get("portfolio_daily_source_forward_strength_brake_risk", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_proxy_keep_risk = np.clip(
+        sample_frame.get("portfolio_daily_source_forward_proxy_keep_risk", pd.Series(np.zeros(row_count), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    portfolio_source_release_intent = np.clip(
+        0.30 * portfolio_source_candidate
+        + 0.22 * portfolio_source_score
+        + 0.16 * portfolio_source_release_quality
+        + 0.12 * portfolio_source_executability
+        + 0.10 * portfolio_source_release_capacity
+        + 0.12 * portfolio_source_economic_release
+        - 0.18 * portfolio_source_opportunity_cost
+        - 0.16 * portfolio_source_economic_block
+        - 0.14 * portfolio_source_forward_brake
+        - 0.10 * portfolio_source_proxy_keep_risk,
+        0.0,
+        1.0,
+    )
     sell_pressure = np.clip(0.58 * reduce_fraction + 0.42 * exit_hazard, 0.0, 1.0)
     action_lookup = {name: idx for idx, name in enumerate(ACTION_CLASSES)}
 
@@ -1848,6 +1916,16 @@ def _build_action_soft_targets(sample_frame: pd.DataFrame) -> np.ndarray:
             scores[action_lookup["add"]] *= float(np.clip(1.0 - sell_attribution[idx] * 0.26, 0.50, 1.00))
             scores[action_lookup["reduce"]] += sell_pressure[idx] * 0.24 + sell_attribution[idx] * 0.34
             scores[action_lookup["exit"]] += sell_pressure[idx] * 0.20 + sell_attribution[idx] * 0.22
+            source_intent = float(portfolio_source_release_intent[idx])
+            if source_intent > 0.0:
+                scores[action_lookup["hold"]] *= float(np.clip(1.0 - source_intent * 0.58, 0.34, 1.0))
+                scores[action_lookup["add"]] *= float(np.clip(1.0 - source_intent * 0.72, 0.24, 1.0))
+                scores[action_lookup["reduce"]] += source_intent * 1.28
+                scores[action_lookup["exit"]] += max(0.0, source_intent - 0.54) * 0.36
+            if portfolio_source_candidate[idx] > 0.5:
+                scores[action_lookup["hold"]] *= 0.68
+                scores[action_lookup["add"]] *= 0.54
+                scores[action_lookup["reduce"]] += 0.38
             if duration_ratio[idx] > 0.45 and hold_quality[idx] >= reduce_quality[idx] - 0.02:
                 scores[action_lookup["hold"]] += 0.12
             if hold_days[idx] >= 6.0 and exit_urgency[idx] > 0.20:
@@ -1987,6 +2065,7 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_source_economic_release_score_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_economic_block_risk_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_forward_strength_brake_risk_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_forward_proxy_keep_risk_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_release_quality_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_opportunity_cost_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_source_executability_head = nn.Linear(int(hidden_dim), 1)
@@ -2054,6 +2133,7 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_source_economic_release_score": torch.sigmoid(self.portfolio_source_economic_release_score_head(fused).squeeze(-1)),
             "portfolio_daily_source_economic_block_risk": torch.sigmoid(self.portfolio_source_economic_block_risk_head(fused).squeeze(-1)),
             "portfolio_daily_source_forward_strength_brake_risk": torch.sigmoid(self.portfolio_source_forward_strength_brake_risk_head(fused).squeeze(-1)),
+            "portfolio_daily_source_forward_proxy_keep_risk": torch.sigmoid(self.portfolio_source_forward_proxy_keep_risk_head(fused).squeeze(-1)),
             "portfolio_daily_source_release_quality": torch.sigmoid(self.portfolio_source_release_quality_head(fused).squeeze(-1)),
             "portfolio_daily_source_opportunity_cost": torch.sigmoid(self.portfolio_source_opportunity_cost_head(fused).squeeze(-1)),
             "portfolio_daily_source_executability": torch.sigmoid(self.portfolio_source_executability_head(fused).squeeze(-1)),
@@ -2333,6 +2413,8 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         "portfolio_receiver_score_head.bias",
         "portfolio_source_capacity_head.weight",
         "portfolio_source_capacity_head.bias",
+        "portfolio_source_forward_proxy_keep_risk_head.weight",
+        "portfolio_source_forward_proxy_keep_risk_head.bias",
         "portfolio_source_release_quality_head.weight",
         "portfolio_source_release_quality_head.bias",
         "portfolio_source_opportunity_cost_head.weight",
@@ -2449,6 +2531,10 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     )
     training_diagnostics["supports_portfolio_economic_release_heads"] = (
         not portfolio_economic_release_missing
+    )
+    training_diagnostics["supports_portfolio_source_forward_proxy_head"] = not any(
+        name.startswith("portfolio_source_forward_proxy_keep_risk_head.")
+        for name in missing_key_names
     )
     portfolio_allocation_teacher_missing = any(
         name.startswith("portfolio_receiver_funding_coverage_head.")
@@ -2777,6 +2863,11 @@ def fit_policy_models_v3(
         ),
         "portfolio_daily_source_forward_strength_brake_risk": np.clip(
             sample_frame.get("portfolio_daily_source_forward_strength_brake_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_forward_proxy_keep_risk": np.clip(
+            sample_frame.get("portfolio_daily_source_forward_proxy_keep_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -3269,6 +3360,9 @@ def fit_policy_models_v3(
                 "portfolio_daily_source_forward_strength_brake_risk",
             )
         ),
+        "supports_portfolio_source_forward_proxy_head": (
+            "portfolio_daily_source_forward_proxy_keep_risk" in sample_scalar_loss_weights
+        ),
         "supports_portfolio_allocation_teacher_heads": all(
             name in sample_scalar_loss_weights
             for name in (
@@ -3591,6 +3685,14 @@ def predict_policy_v3(
         predicted_portfolio_source_forward_strength_brake_risk = (
             np.clip(outputs["portfolio_daily_source_forward_strength_brake_risk"].cpu().numpy(), 0.0, 1.0)
             if supports_portfolio_economic_release_heads
+            else None
+        )
+        supports_portfolio_source_forward_proxy_head = bool(
+            artifact.training_diagnostics.get("supports_portfolio_source_forward_proxy_head", False)
+        )
+        predicted_portfolio_source_forward_proxy_keep_risk = (
+            np.clip(outputs["portfolio_daily_source_forward_proxy_keep_risk"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_source_forward_proxy_head
             else None
         )
         predicted_portfolio_source_release_quality = (
@@ -5089,6 +5191,37 @@ def predict_policy_v3(
         if predicted_portfolio_source_release_quality is not None
         else fallback_source_release_quality
     )
+    fallback_source_forward_proxy_keep_risk = np.where(
+        current_weight > 1.0e-8,
+        np.clip(
+            0.34 * multi_horizon_forward_value
+            + 0.30 * multi_horizon_path_value
+            + 0.18 * alpha_opportunity_value
+            + 0.12 * deploy_value_target
+            + 0.06 * release_value_target,
+            0.0,
+            1.0,
+        ),
+        0.0,
+    )
+    portfolio_daily_source_forward_proxy_keep_risk = (
+        _finite_array(
+            0.62 * predicted_portfolio_source_forward_proxy_keep_risk
+            + 0.38 * fallback_source_forward_proxy_keep_risk,
+            default=0.0,
+            low=0.0,
+            high=1.0,
+        )
+        if predicted_portfolio_source_forward_proxy_keep_risk is not None
+        else fallback_source_forward_proxy_keep_risk
+    )
+    portfolio_daily_source_release_quality = _finite_array(
+        portfolio_daily_source_release_quality
+        - portfolio_daily_source_forward_proxy_keep_risk * 0.08,
+        default=0.0,
+        low=0.0,
+        high=1.0,
+    )
     fallback_source_opportunity_cost = np.where(
         current_weight > 1.0e-8,
         np.clip(
@@ -5098,6 +5231,7 @@ def predict_policy_v3(
             + 0.14 * deploy_value_target
             + 0.10 * portfolio_daily_receiver_executability
             + 0.10 * large_upside_1d_target
+            + 0.26 * portfolio_daily_source_forward_proxy_keep_risk
             - 0.10 * release_value_target
             - 0.06 * cash_defense_value
             - 0.05 * multi_horizon_forward_risk
@@ -5164,7 +5298,8 @@ def predict_policy_v3(
             - 0.15 * hold_continuation_value
             - 0.12 * alpha_opportunity_value
             - 0.10 * portfolio_daily_receiver_executability
-            - 0.08 * large_upside_1d_target,
+            - 0.08 * large_upside_1d_target
+            - 0.12 * portfolio_daily_source_forward_proxy_keep_risk,
             0.0,
             1.0,
         ),
@@ -6228,6 +6363,7 @@ def predict_policy_v3(
             "portfolio_daily_source_economic_release_score": portfolio_daily_source_economic_release_score,
             "portfolio_daily_source_economic_block_risk": portfolio_daily_source_economic_block_risk,
             "portfolio_daily_source_forward_strength_brake_risk": portfolio_daily_source_forward_strength_brake_risk,
+            "portfolio_daily_source_forward_proxy_keep_risk": portfolio_daily_source_forward_proxy_keep_risk,
             "portfolio_daily_source_release_quality": portfolio_daily_source_release_quality,
             "portfolio_daily_source_opportunity_cost": portfolio_daily_source_opportunity_cost,
             "portfolio_daily_source_executability": portfolio_daily_source_executability,
