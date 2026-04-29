@@ -81,6 +81,11 @@ SAMPLE_LABEL_COLUMNS = {
     "portfolio_daily_source_min_release_delta",
     "portfolio_daily_source_release_capacity",
     "portfolio_daily_source_receiver_forward_spread",
+    "portfolio_daily_source_forward_spread_score",
+    "portfolio_daily_source_bad_forward_spread_risk",
+    "portfolio_daily_source_economic_release_score",
+    "portfolio_daily_source_economic_block_risk",
+    "portfolio_daily_source_forward_strength_brake_risk",
     "portfolio_daily_source_release_quality",
     "portfolio_daily_source_opportunity_cost",
     "portfolio_daily_source_executability",
@@ -527,6 +532,11 @@ def _annotate_label_frame_with_execution_feedback(
         "portfolio_daily_receiver_min_add_delta",
         "portfolio_daily_receiver_score",
         "portfolio_daily_source_release_capacity",
+        "portfolio_daily_source_forward_spread_score",
+        "portfolio_daily_source_bad_forward_spread_risk",
+        "portfolio_daily_source_economic_release_score",
+        "portfolio_daily_source_economic_block_risk",
+        "portfolio_daily_source_forward_strength_brake_risk",
         "portfolio_daily_source_release_quality",
         "portfolio_daily_source_executability",
         "portfolio_daily_source_score",
@@ -613,6 +623,11 @@ def _annotate_label_frame_with_execution_feedback(
     source_guard_penalty = source_floor_guarded.astype(float)
     for column, scale in (
         ("portfolio_daily_source_release_capacity", 0.22),
+        ("portfolio_daily_source_forward_spread_score", 0.24),
+        ("portfolio_daily_source_bad_forward_spread_risk", -0.12),
+        ("portfolio_daily_source_economic_release_score", 0.34),
+        ("portfolio_daily_source_economic_block_risk", -0.16),
+        ("portfolio_daily_source_forward_strength_brake_risk", -0.18),
         ("portfolio_daily_source_release_quality", 0.30),
         ("portfolio_daily_source_executability", 0.44),
         ("portfolio_daily_source_score", 0.36),
@@ -628,10 +643,16 @@ def _annotate_label_frame_with_execution_feedback(
                 working.get(column, pd.Series(0.0, index=working.index)),
                 errors="coerce",
             )
-            merged[column] = (
-                feedback_values.combine_first(base_values).fillna(0.0).clip(0.0, 1.0)
-                * (1.0 - source_guard_penalty * scale)
-            ).clip(0.0, 1.0)
+            if scale >= 0.0:
+                merged[column] = (
+                    feedback_values.combine_first(base_values).fillna(0.0).clip(0.0, 1.0)
+                    * (1.0 - source_guard_penalty * scale)
+                ).clip(0.0, 1.0)
+            else:
+                merged[column] = (
+                    feedback_values.combine_first(base_values).fillna(0.0).clip(0.0, 1.0)
+                    + source_guard_penalty * abs(scale)
+                ).clip(0.0, 1.0)
     combined_guard_penalty = (receiver_guarded.astype(float) * 0.20 + source_guard_penalty * 0.16).clip(0.0, 0.80)
     for column in (
         "portfolio_daily_funding_closure_score",
@@ -747,6 +768,10 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_executability",
             "portfolio_daily_source_gap",
             "portfolio_daily_source_release_capacity",
+            "portfolio_daily_source_forward_spread_score",
+            "portfolio_daily_source_bad_forward_spread_risk",
+            "portfolio_daily_source_economic_release_score",
+            "portfolio_daily_source_economic_block_risk",
             "portfolio_daily_source_release_quality",
             "portfolio_daily_source_executability",
             "portfolio_daily_source_score",
@@ -1251,6 +1276,48 @@ def compute_continuity_metrics(
             ),
             errors="coerce",
         ).fillna(0.0)
+        portfolio_source_forward_spread_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_forward_spread_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_bad_forward_spread_risk = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_bad_forward_spread_risk",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_economic_release_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_economic_release_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_economic_block_risk = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_economic_block_risk",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_forward_strength_brake_risk = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_forward_strength_brake_risk",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_direct_release_relief_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_direct_release_relief_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_source_release_quality = pd.to_numeric(
             action_outcomes.get(
                 "portfolio_daily_source_release_quality",
@@ -1455,6 +1522,36 @@ def compute_continuity_metrics(
         )
         metrics["portfolio_daily_source_release_capacity_mean"] = (
             float(portfolio_source_release_capacity.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_forward_spread_score_mean"] = (
+            float(portfolio_source_forward_spread_score.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_bad_forward_spread_risk_mean"] = (
+            float(portfolio_source_bad_forward_spread_risk.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_economic_release_score_mean"] = (
+            float(portfolio_source_economic_release_score.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_economic_block_risk_mean"] = (
+            float(portfolio_source_economic_block_risk.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_forward_strength_brake_risk_mean"] = (
+            float(portfolio_source_forward_strength_brake_risk.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_direct_release_relief_score_mean"] = (
+            float(portfolio_source_direct_release_relief_score.loc[portfolio_source_target].mean())
             if bool(portfolio_source_target.any())
             else 0.0
         )
@@ -1832,6 +1929,12 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_score_mean",
             "portfolio_daily_source_score_mean",
             "portfolio_daily_source_release_capacity_mean",
+            "portfolio_daily_source_forward_spread_score_mean",
+            "portfolio_daily_source_bad_forward_spread_risk_mean",
+            "portfolio_daily_source_economic_release_score_mean",
+            "portfolio_daily_source_economic_block_risk_mean",
+            "portfolio_daily_source_forward_strength_brake_risk_mean",
+            "portfolio_daily_source_direct_release_relief_score_mean",
             "portfolio_daily_source_release_quality_mean",
             "portfolio_daily_source_executability_mean",
             "portfolio_daily_source_gap_mean",
@@ -4708,6 +4811,12 @@ def run_policy_rollout(
         metrics["avg_budget_model_deploy_gate_signal"] = float(turnover_frame["budget_model_deploy_gate_signal"].mean()) if "budget_model_deploy_gate_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_release_gate_signal"] = float(turnover_frame["budget_model_release_gate_signal"].mean()) if "budget_model_release_gate_signal" in turnover_frame.columns else 0.0
         metrics["avg_budget_model_defense_gate_signal"] = float(turnover_frame["budget_model_defense_gate_signal"].mean()) if "budget_model_defense_gate_signal" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_forward_spread_score"] = float(turnover_frame["portfolio_daily_source_forward_spread_score_mean"].mean()) if "portfolio_daily_source_forward_spread_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_bad_forward_spread_risk"] = float(turnover_frame["portfolio_daily_source_bad_forward_spread_risk_mean"].mean()) if "portfolio_daily_source_bad_forward_spread_risk_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_economic_release_score"] = float(turnover_frame["portfolio_daily_source_economic_release_score_mean"].mean()) if "portfolio_daily_source_economic_release_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_economic_block_risk"] = float(turnover_frame["portfolio_daily_source_economic_block_risk_mean"].mean()) if "portfolio_daily_source_economic_block_risk_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_forward_strength_brake_risk"] = float(turnover_frame["portfolio_daily_source_forward_strength_brake_risk_mean"].mean()) if "portfolio_daily_source_forward_strength_brake_risk_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_direct_release_relief_score"] = float(turnover_frame["portfolio_daily_source_direct_release_relief_score_mean"].mean()) if "portfolio_daily_source_direct_release_relief_score_mean" in turnover_frame.columns else 0.0
         metrics["avg_portfolio_daily_receiver_funding_coverage"] = float(turnover_frame["portfolio_daily_receiver_funding_coverage_mean"].mean()) if "portfolio_daily_receiver_funding_coverage_mean" in turnover_frame.columns else 0.0
         metrics["avg_portfolio_daily_funding_closure_score"] = float(turnover_frame["portfolio_daily_funding_closure_score_mean"].mean()) if "portfolio_daily_funding_closure_score_mean" in turnover_frame.columns else 0.0
         metrics["avg_portfolio_daily_allocation_transfer_score"] = float(turnover_frame["portfolio_daily_allocation_transfer_score_mean"].mean()) if "portfolio_daily_allocation_transfer_score_mean" in turnover_frame.columns else 0.0
@@ -4735,6 +4844,12 @@ def run_policy_rollout(
         metrics["avg_budget_model_deploy_gate_signal"] = 0.0
         metrics["avg_budget_model_release_gate_signal"] = 0.0
         metrics["avg_budget_model_defense_gate_signal"] = 0.0
+        metrics["avg_portfolio_daily_source_forward_spread_score"] = 0.0
+        metrics["avg_portfolio_daily_source_bad_forward_spread_risk"] = 0.0
+        metrics["avg_portfolio_daily_source_economic_release_score"] = 0.0
+        metrics["avg_portfolio_daily_source_economic_block_risk"] = 0.0
+        metrics["avg_portfolio_daily_source_forward_strength_brake_risk"] = 0.0
+        metrics["avg_portfolio_daily_source_direct_release_relief_score"] = 0.0
         metrics["avg_portfolio_daily_receiver_funding_coverage"] = 0.0
         metrics["avg_portfolio_daily_funding_closure_score"] = 0.0
         metrics["avg_portfolio_daily_allocation_transfer_score"] = 0.0

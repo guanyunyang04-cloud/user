@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-04-25`
+快照日期：`2026-04-29`
 
 ## 当前结论
 - `daily_research` 仍是当前工作区的正式生产研究与执行主线。
@@ -8,7 +8,7 @@
 - 当前 live 默认执行 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
-- continuous_policy 已推进到 r22 portfolio daily receiver-exec guard；当前 research 入口为 `split_heads_portfolio_daily_ranking_receiver_exec_r22`、`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`portfolio_daily_ranking_v2_gated`。
+- continuous_policy 已推进到 r30 source economic brake / cash-relief research 分支；当前最新研究入口为 `split_heads_portfolio_daily_source_brake_cash_relief_r30`、`alpha_result_value_budget_split_v20`、`portfolio_daily_ranking_v2_gated`，但仍为 `research / shadow_only`，不得 promotion / live / active artifact 切换。
 - r15 正式 bounded study 已完成，champion 为 `confirm_01 = alpha_result_value_budget_split_v14 + result_value_v9 + cash_constraint_direct_action_guard_v8`，但 `promotion_status = shadow_only`，不得切换 live。
 - r15 事实：收益尚可但执行语义失败，`annual_return = 0.3816`、`sharpe = 1.0867`、`max_drawdown = -0.1493`、`monthly_consistency_score = 0.6703`、`deploy_intent_realized_rate = 0.1642`、`add_to_hold_conflict_share = 0.8524`、`failure_mode = deploy_not_realized`。
 - r16 当前最佳 smoke2 事实：复用 r15 champion artifact 后，`annual_return = 0.5807`、`sharpe = 1.6261`、`max_drawdown = -0.1180`、`monthly_return_mean = 0.0337`、`monthly_consistency_score = 0.7247`，但 `direct_action_deploy_authorized_realized_rate = 0.1557`、`add_to_hold_conflict_share = 0.8483` 仍未解决。
@@ -202,3 +202,7 @@
 - 已验证一个重要反例：把 `direct_action_funding_protected` 直接打穿后，确实能让 `source_target_count > 0` 与 `source_realized_sell_rate = 1.0`，但 receiver-source spread 变为负、回撤和月度质量变差；因此该通道最终保留为审计字段，不参与下单路径。
 - eval4 行为恢复到 smoke4，同时新增审计读数：`portfolio_daily_source_protected_release_override_count = 46`、`portfolio_daily_source_target_count = 0`。解释为“存在潜在保护释放候选，但当前模型/label 尚不能证明卖得对”，不得为追求非零 source 而硬卖。
 - 当前结论：r26 完成了 allocation teacher 与 protected-source 审计闭环，但仍是 `research / shadow_only`。真正瓶颈不是脚本、TQ 或 GPU，而是 source/receiver/cash 的日级 listwise 资金分配目标仍未学会稳定选择“该卖的 source”。
+## 2026-04-29 最新状态：r30 source cash-relief
+- r30 已把 source 侧从“卖错”推进到“低机会成本、低 brake 的 direct-release source 可独立释放为现金”：confirm `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`。
+- 但 r30 仍是 `research / shadow_only`：`receiver_target_count = 2` 未达 v2 gate 下限，收益侧 `annual_return / sharpe / monthly_return_mean` 未过 confirm floor。
+- 当前不得 promotion、不得 live、不得改 active artifact。下一步优先恢复 receiver 活性与收益质量，同时保留 r30 的 source economic brake / direct cash-relief 约束，不能回到硬卖 source。

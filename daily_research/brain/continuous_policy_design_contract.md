@@ -167,3 +167,9 @@
 - protected-source 只能作为审计候选：`portfolio_daily_source_protected_release_override_count` 表示“有可能需要突破 funding protection 的旧仓”，但在 source forward 质量没有被模型稳定学会前，不得直接进入 `portfolio_daily_source_candidate` 或 `portfolio_daily_source_target`。
 - 若强行放宽 protected-source 后出现 `source_realized_sell_rate = 1.0` 但 `portfolio_daily_receiver_minus_source_forward_excess_5d <= 0`、回撤扩大或月度质量变差，应立即判定为“能卖但没卖对”，不得把非零 source sell 视为进步。
 - r26 成功判定必须联合成立：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正 receiver-source spread、正收益/月度质量与可控回撤。
+## 2026-04-29 r30 source economic brake / cash-relief 合同
+- source release 合同从 r27 开始明确区分“语义可卖”和“经济上该卖”。`portfolio_daily_source_forward_spread_score`、`portfolio_daily_source_bad_forward_spread_risk`、`portfolio_daily_source_economic_release_score`、`portfolio_daily_source_economic_block_risk` 必须联合解释，不能只因 source target 非零或 sell rate 高就判定成功。
+- `portfolio_daily_source_forward_strength_brake_risk` 是 r28 之后的硬边界：当持仓仍有前瞻强度、alpha opportunity、large upside、multi-horizon path value 或高 keep value 时，source 不得仅凭 funding 需求被硬卖。brake 过强导致 source 归零时，也不能把归零解释为成功。
+- r29/r30 的 direct-release relief 只适用于窄条件：`direct_action_pair_source_release_score` 高、`direct_action_pair_source_opportunity_cost` 很低、forward-strength brake 低、且不是 open/add 意图。该通道可以在 r30 中独立释放为现金，但不能替代收益 gate。
+- r30 的有效结构证据是：confirm `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`。这说明 source 选择质量改善，但不等于 promotion readiness。
+- r30 的失败边界同样必须保留：`receiver_target_count = 2` 未达 v2 gate 下限，且收益、Sharpe、月均收益仍未过 confirm floor。后续不能为了通过 source_count 继续放宽 source；应优先恢复 receiver 活性、收益质量与月度一致性。
