@@ -1001,9 +1001,13 @@ def compute_continuity_metrics(
         metrics["avg_release_gate_target"] = float(pd.to_numeric(action_outcomes["release_gate_target"], errors="coerce").fillna(0.0).mean())
         metrics["avg_defense_gate_target"] = float(defense_gate_signal_all.fillna(0.0).mean())
         metrics["avg_deploy_executability_target"] = float(deploy_executability_signal_all.fillna(0.0).mean())
-        model_action_lookup = action_outcomes.get(
+        raw_model_action_lookup = action_outcomes.get(
             "model_action",
             pd.Series("", index=action_outcomes.index),
+        ).astype(str).str.lower()
+        model_action_lookup = action_outcomes.get(
+            "portfolio_daily_effective_model_action",
+            raw_model_action_lookup,
         ).astype(str).str.lower()
         weight_change_lookup = action_outcomes.get(
             "weight_change_action",
@@ -1174,6 +1178,10 @@ def compute_continuity_metrics(
             "direct_action_add_authorized",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        direct_open_authorized = action_outcomes.get(
+            "direct_action_open_authorized",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
         direct_deploy_authorized = action_outcomes.get(
             "direct_action_deploy_authorized",
             pd.Series(False, index=action_outcomes.index),
@@ -1209,8 +1217,20 @@ def compute_continuity_metrics(
             "portfolio_daily_receiver_target",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        portfolio_receiver_candidate = action_outcomes.get(
+            "portfolio_daily_receiver_candidate",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
         portfolio_receiver_exec_guarded = action_outcomes.get(
             "portfolio_daily_receiver_exec_guarded",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_receiver_semantic_no_headroom = action_outcomes.get(
+            "portfolio_daily_receiver_semantic_no_headroom",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        portfolio_receiver_open_breadth_candidate = action_outcomes.get(
+            "portfolio_daily_receiver_open_breadth_candidate",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
         portfolio_source_candidate = action_outcomes.get(
@@ -1407,6 +1427,15 @@ def compute_continuity_metrics(
             if bool(direct_add_authorized.any())
             else 0.0
         )
+        authorized_add_no_weight_change = direct_add_authorized & (
+            (~weight_change_lookup.eq("add")) | (delta_weight_lookup <= 1.0e-8)
+        )
+        metrics["authorized_add_no_weight_change_count"] = float(authorized_add_no_weight_change.sum())
+        metrics["authorized_add_no_weight_change_share"] = (
+            float(authorized_add_no_weight_change.sum() / direct_add_authorized.sum())
+            if bool(direct_add_authorized.any())
+            else 0.0
+        )
         metrics["direct_action_deploy_authorized_count"] = float(direct_deploy_authorized.sum())
         metrics["direct_action_deploy_authorized_realized_rate"] = (
             float(
@@ -1415,6 +1444,13 @@ def compute_continuity_metrics(
             )
             if bool(direct_deploy_authorized.any())
             else 0.0
+        )
+        direct_receiver_authorization_subset_violation = (
+            (direct_add_authorized | direct_open_authorized)
+            & ((~portfolio_receiver_target) | (~portfolio_receiver_candidate))
+        )
+        metrics["direct_action_authorization_subset_violation_count"] = float(
+            direct_receiver_authorization_subset_violation.sum()
         )
         metrics["direct_action_reallocation_source_count"] = float(direct_reallocation_source.sum())
         metrics["direct_action_pair_reallocation_source_count"] = float(direct_pair_reallocation_source.sum())
@@ -1455,7 +1491,14 @@ def compute_continuity_metrics(
         portfolio_receiver_realized_count = float(
             (portfolio_receiver_target & weight_change_lookup.isin({"open", "add"})).sum()
         )
+        metrics["portfolio_daily_receiver_candidate_count"] = float(portfolio_receiver_candidate.sum())
         metrics["portfolio_daily_receiver_exec_guard_count"] = float(portfolio_receiver_exec_guarded.sum())
+        metrics["portfolio_daily_receiver_semantic_no_headroom_count"] = float(
+            portfolio_receiver_semantic_no_headroom.sum()
+        )
+        metrics["portfolio_daily_receiver_open_breadth_candidate_count"] = float(
+            portfolio_receiver_open_breadth_candidate.sum()
+        )
         metrics["portfolio_daily_receiver_add_headroom_mean"] = (
             float(portfolio_receiver_add_headroom.loc[portfolio_receiver_exec_guarded].mean())
             if bool(portfolio_receiver_exec_guarded.any())
@@ -1600,6 +1643,27 @@ def compute_continuity_metrics(
             if bool(portfolio_source_target.any())
             else 0.0
         )
+        portfolio_source_forward_values = arbitration_forward_5d.loc[portfolio_source_target].dropna()
+        metrics["portfolio_daily_source_positive_forward_sell_share"] = (
+            float((portfolio_source_forward_values > 0.0).mean())
+            if len(portfolio_source_forward_values)
+            else 0.0
+        )
+        metrics["portfolio_daily_source_strong_positive_forward_sell_count"] = (
+            float((portfolio_source_forward_values > 0.055).sum())
+            if len(portfolio_source_forward_values)
+            else 0.0
+        )
+        metrics["portfolio_daily_source_max_forward_excess_5d"] = (
+            float(portfolio_source_forward_values.max())
+            if len(portfolio_source_forward_values)
+            else 0.0
+        )
+        metrics["portfolio_daily_source_p75_forward_excess_5d"] = (
+            float(portfolio_source_forward_values.quantile(0.75))
+            if len(portfolio_source_forward_values)
+            else 0.0
+        )
         metrics["portfolio_daily_receiver_minus_source_forward_excess_5d"] = (
             metrics["portfolio_daily_receiver_forward_excess_5d"]
             - metrics["portfolio_daily_source_forward_excess_5d"]
@@ -1610,6 +1674,12 @@ def compute_continuity_metrics(
         metrics["deploy_intent_realized_count"] = float((deploy_intent_mask & deploy_realized_mask).sum())
         metrics["deploy_intent_realized_rate"] = (
             float((deploy_intent_mask & deploy_realized_mask).sum() / deploy_intent_count) if deploy_intent_count else 0.0
+        )
+        metrics["deploy_intent_unrealized_count"] = float(
+            max(0, int(deploy_intent_count) - int((deploy_intent_mask & deploy_positive_delta_mask).sum()))
+        )
+        metrics["deploy_intent_unrealized_share"] = (
+            float(metrics["deploy_intent_unrealized_count"] / deploy_intent_count) if deploy_intent_count else 0.0
         )
         metrics["open_add_positive_weight_change_rate"] = (
             float((deploy_intent_mask & deploy_positive_delta_mask).sum() / deploy_intent_count) if deploy_intent_count else 0.0
@@ -1892,8 +1962,11 @@ def compute_continuity_metrics(
             "direct_action_core_deploy_target_realized_rate",
             "direct_action_add_authorized_count",
             "direct_action_add_authorized_realized_rate",
+            "authorized_add_no_weight_change_count",
+            "authorized_add_no_weight_change_share",
             "direct_action_deploy_authorized_count",
             "direct_action_deploy_authorized_realized_rate",
+            "direct_action_authorization_subset_violation_count",
             "direct_action_reallocation_source_count",
             "direct_action_pair_reallocation_source_count",
             "direct_action_pair_cost_guard_pass_count",
@@ -1904,7 +1977,10 @@ def compute_continuity_metrics(
             "direct_action_pair_source_forward_excess_5d",
             "direct_action_core_target_forward_excess_5d",
             "direct_action_core_minus_pair_forward_excess_5d",
+            "portfolio_daily_receiver_candidate_count",
             "portfolio_daily_receiver_exec_guard_count",
+            "portfolio_daily_receiver_semantic_no_headroom_count",
+            "portfolio_daily_receiver_open_breadth_candidate_count",
             "portfolio_daily_receiver_add_headroom_mean",
             "portfolio_daily_receiver_min_add_delta_mean",
             "portfolio_daily_receiver_target_count",
@@ -1944,10 +2020,16 @@ def compute_continuity_metrics(
             "portfolio_daily_allocation_dead_branch_risk_mean",
             "portfolio_daily_receiver_forward_excess_5d",
             "portfolio_daily_source_forward_excess_5d",
+            "portfolio_daily_source_positive_forward_sell_share",
+            "portfolio_daily_source_strong_positive_forward_sell_count",
+            "portfolio_daily_source_max_forward_excess_5d",
+            "portfolio_daily_source_p75_forward_excess_5d",
             "portfolio_daily_receiver_minus_source_forward_excess_5d",
             "deploy_intent_action_count",
             "deploy_intent_realized_count",
             "deploy_intent_realized_rate",
+            "deploy_intent_unrealized_count",
+            "deploy_intent_unrealized_share",
             "open_add_positive_weight_change_rate",
             "add_to_hold_conflict_count",
             "add_to_hold_conflict_share",
@@ -2012,6 +2094,21 @@ def compute_continuity_metrics(
         metrics["high_cash_down_market_hit_rate"] = 0.0
         metrics["risk_off_cash_hit_rate"] = 0.0
     if not turnover_frame.empty:
+        if "gross_exposure" in turnover_frame.columns:
+            avg_gross_exposure = float(turnover_frame["gross_exposure"].mean())
+        elif "cash_weight" in turnover_frame.columns:
+            avg_gross_exposure = float((1.0 - pd.to_numeric(turnover_frame["cash_weight"], errors="coerce")).mean())
+        else:
+            avg_gross_exposure = 0.0
+        avg_gross_exposure_target = (
+            float(turnover_frame["gross_exposure_target"].mean()) if "gross_exposure_target" in turnover_frame.columns else 0.0
+        )
+        metrics["avg_gross_exposure_target"] = avg_gross_exposure_target
+        metrics["portfolio_daily_exposure_utilization"] = (
+            float(avg_gross_exposure / max(avg_gross_exposure_target, 1.0e-8))
+            if avg_gross_exposure_target > 0.0
+            else 0.0
+        )
         metrics["avg_position_cap_target"] = float(turnover_frame["max_position_weight_target"].mean())
         metrics["avg_hold_bias_target"] = float(turnover_frame["hold_bias_target"].mean())
         metrics["avg_reduce_bias_target"] = float(turnover_frame["reduce_bias_target"].mean()) if "reduce_bias_target" in turnover_frame.columns else 0.0
@@ -2022,6 +2119,10 @@ def compute_continuity_metrics(
         metrics["avg_budget_entry_candidate_count"] = float(turnover_frame["budget_entry_candidate_count"].mean()) if "budget_entry_candidate_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_entry_keep_count"] = float(turnover_frame["budget_entry_keep_count"].mean()) if "budget_entry_keep_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_held_protected_count"] = float(turnover_frame["budget_held_protected_count"].mean()) if "budget_held_protected_count" in turnover_frame.columns else 0.0
+        metrics["avg_authorized_add_no_weight_change_share"] = float(turnover_frame["authorized_add_no_weight_change_share"].mean()) if "authorized_add_no_weight_change_share" in turnover_frame.columns else 0.0
+        metrics["avg_deploy_intent_unrealized_share"] = float(turnover_frame["deploy_intent_unrealized_share"].mean()) if "deploy_intent_unrealized_share" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_receiver_semantic_no_headroom_count"] = float(turnover_frame["portfolio_daily_receiver_semantic_no_headroom_count"].mean()) if "portfolio_daily_receiver_semantic_no_headroom_count" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_receiver_open_breadth_candidate_count"] = float(turnover_frame["portfolio_daily_receiver_open_breadth_candidate_count"].mean()) if "portfolio_daily_receiver_open_breadth_candidate_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_split_bound_guard_count"] = float(turnover_frame["budget_split_bound_guard_count"].mean()) if "budget_split_bound_guard_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_translation_floor_guard_count"] = float(turnover_frame["budget_translation_floor_guard_count"].mean()) if "budget_translation_floor_guard_count" in turnover_frame.columns else 0.0
         metrics["avg_budget_translation_cap_guard_count"] = float(turnover_frame["budget_translation_cap_guard_count"].mean()) if "budget_translation_cap_guard_count" in turnover_frame.columns else 0.0
@@ -2046,6 +2147,8 @@ def compute_continuity_metrics(
         metrics["avg_turnover_release_gate_target"] = float(turnover_frame["avg_release_gate_target"].mean()) if "avg_release_gate_target" in turnover_frame.columns else 0.0
         metrics["avg_turnover_defense_gate_target"] = float(turnover_frame["avg_defense_gate_target"].mean()) if "avg_defense_gate_target" in turnover_frame.columns else 0.0
     else:
+        metrics["avg_gross_exposure_target"] = 0.0
+        metrics["portfolio_daily_exposure_utilization"] = 0.0
         metrics["avg_position_cap_target"] = 0.0
         metrics["avg_hold_bias_target"] = 0.0
         metrics["avg_reduce_bias_target"] = 0.0
@@ -2056,6 +2159,10 @@ def compute_continuity_metrics(
         metrics["avg_budget_entry_candidate_count"] = 0.0
         metrics["avg_budget_entry_keep_count"] = 0.0
         metrics["avg_budget_held_protected_count"] = 0.0
+        metrics["avg_authorized_add_no_weight_change_share"] = 0.0
+        metrics["avg_deploy_intent_unrealized_share"] = 0.0
+        metrics["avg_portfolio_daily_receiver_semantic_no_headroom_count"] = 0.0
+        metrics["avg_portfolio_daily_receiver_open_breadth_candidate_count"] = 0.0
         metrics["avg_budget_split_bound_guard_count"] = 0.0
         metrics["avg_budget_translation_floor_guard_count"] = 0.0
         metrics["avg_budget_translation_cap_guard_count"] = 0.0

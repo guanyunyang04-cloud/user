@@ -614,8 +614,11 @@ def _build_semantic_conflicts(
             "direct_action_core_deploy_target_realized_rate": 0.0,
             "direct_action_add_authorized_count": 0,
             "direct_action_add_authorized_realized_rate": 0.0,
+            "authorized_add_no_weight_change_count": 0,
+            "authorized_add_no_weight_change_share": 0.0,
             "direct_action_deploy_authorized_count": 0,
             "direct_action_deploy_authorized_realized_rate": 0.0,
+            "direct_action_authorization_subset_violation_count": 0,
             "direct_action_reallocation_source_count": 0,
             "direct_action_pair_reallocation_source_count": 0,
             "direct_action_pair_cost_guard_pass_count": 0,
@@ -626,7 +629,10 @@ def _build_semantic_conflicts(
             "direct_action_pair_source_forward_excess_5d": 0.0,
             "direct_action_core_target_forward_excess_5d": 0.0,
             "direct_action_core_minus_pair_forward_excess_5d": 0.0,
+            "portfolio_daily_receiver_candidate_count": 0,
             "portfolio_daily_receiver_exec_guard_count": 0,
+            "portfolio_daily_receiver_semantic_no_headroom_count": 0,
+            "portfolio_daily_receiver_open_breadth_candidate_count": 0,
             "portfolio_daily_receiver_add_headroom_mean": 0.0,
             "portfolio_daily_receiver_min_add_delta_mean": 0.0,
             "portfolio_daily_receiver_target_count": 0,
@@ -652,10 +658,18 @@ def _build_semantic_conflicts(
             "portfolio_daily_source_gap_mean": 0.0,
             "portfolio_daily_receiver_forward_excess_5d": 0.0,
             "portfolio_daily_source_forward_excess_5d": 0.0,
+            "portfolio_daily_source_positive_forward_sell_share": 0.0,
+            "portfolio_daily_source_strong_positive_forward_sell_count": 0,
+            "portfolio_daily_source_max_forward_excess_5d": 0.0,
+            "portfolio_daily_source_p75_forward_excess_5d": 0.0,
             "portfolio_daily_receiver_minus_source_forward_excess_5d": 0.0,
+            "avg_gross_exposure_target": 0.0,
+            "portfolio_daily_exposure_utilization": 0.0,
             "deploy_intent_action_count": 0,
             "deploy_intent_realized_count": 0,
             "deploy_intent_realized_rate": 0.0,
+            "deploy_intent_unrealized_count": 0,
+            "deploy_intent_unrealized_share": 0.0,
             "open_add_positive_weight_change_rate": 0.0,
             "add_to_hold_conflict_count": 0,
             "add_to_hold_conflict_share": 0.0,
@@ -835,8 +849,11 @@ def _build_semantic_conflicts(
         "direct_action_pair_reallocation_source",
         "direct_action_pair_cost_guard_pass",
         "direct_action_pair_cost_guard_blocked",
+        "portfolio_daily_receiver_candidate",
         "portfolio_daily_receiver_target",
         "portfolio_daily_receiver_exec_guarded",
+        "portfolio_daily_receiver_semantic_no_headroom",
+        "portfolio_daily_receiver_open_breadth_candidate",
         "portfolio_daily_source_candidate",
         "portfolio_daily_source_target",
         "portfolio_daily_cash_reserve_signal",
@@ -884,6 +901,7 @@ def _build_semantic_conflicts(
             "realized_turnover",
             "budget_drop_count",
             "cash_weight",
+            "gross_exposure",
             "gross_exposure_target",
             "gross_exposure_target_raw",
             "candidate_budget",
@@ -903,6 +921,12 @@ def _build_semantic_conflicts(
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
             "sell_source_floor_guard_count",
+            "authorized_add_no_weight_change_count",
+            "authorized_add_no_weight_change_share",
+            "deploy_intent_unrealized_count",
+            "deploy_intent_unrealized_share",
+            "portfolio_daily_receiver_semantic_no_headroom_count",
+            "portfolio_daily_receiver_open_breadth_candidate_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
@@ -946,6 +970,7 @@ def _build_semantic_conflicts(
             turnover_working["raw_turnover"].fillna(0.0) > turnover_working["realized_turnover"].fillna(0.0) + 1e-8
         )
         for optional_column in (
+            "gross_exposure",
             "gross_exposure_target_raw",
             "candidate_budget",
             "candidate_budget_raw",
@@ -964,6 +989,12 @@ def _build_semantic_conflicts(
             "budget_split_bound_guard_count",
             "budget_sell_priority_guard_count",
             "sell_source_floor_guard_count",
+            "authorized_add_no_weight_change_count",
+            "authorized_add_no_weight_change_share",
+            "deploy_intent_unrealized_count",
+            "deploy_intent_unrealized_share",
+            "portfolio_daily_receiver_semantic_no_headroom_count",
+            "portfolio_daily_receiver_open_breadth_candidate_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
@@ -1003,6 +1034,7 @@ def _build_semantic_conflicts(
                     "budget_clipped",
                     "budget_drop_count",
                     "cash_weight",
+                    "gross_exposure",
                     "raw_turnover",
                     "realized_turnover",
                     "gross_exposure_target",
@@ -1024,6 +1056,12 @@ def _build_semantic_conflicts(
                     "budget_split_bound_guard_count",
                     "budget_sell_priority_guard_count",
                     "sell_source_floor_guard_count",
+                    "authorized_add_no_weight_change_count",
+                    "authorized_add_no_weight_change_share",
+                    "deploy_intent_unrealized_count",
+                    "deploy_intent_unrealized_share",
+                    "portfolio_daily_receiver_semantic_no_headroom_count",
+                    "portfolio_daily_receiver_open_breadth_candidate_count",
                     "deploy_intent_candidate_count",
                     "deploy_intent_candidate_realized_count",
                     "deploy_intent_candidate_realized_rate",
@@ -1330,6 +1368,10 @@ def _build_semantic_conflicts(
         "direct_action_add_authorized",
         pd.Series(False, index=working.index),
     ).astype(bool)
+    direct_open_authorized = working.get(
+        "direct_action_open_authorized",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
     direct_deploy_authorized = working.get(
         "direct_action_deploy_authorized",
         pd.Series(False, index=working.index),
@@ -1362,8 +1404,20 @@ def _build_semantic_conflicts(
         "portfolio_daily_receiver_target",
         pd.Series(False, index=working.index),
     ).astype(bool)
+    portfolio_receiver_candidate = working.get(
+        "portfolio_daily_receiver_candidate",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
     portfolio_receiver_exec_guarded = working.get(
         "portfolio_daily_receiver_exec_guarded",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_receiver_semantic_no_headroom = working.get(
+        "portfolio_daily_receiver_semantic_no_headroom",
+        pd.Series(False, index=working.index),
+    ).astype(bool)
+    portfolio_receiver_open_breadth_candidate = working.get(
+        "portfolio_daily_receiver_open_breadth_candidate",
         pd.Series(False, index=working.index),
     ).astype(bool)
     portfolio_receiver_add_headroom = working.get(
@@ -1459,11 +1513,26 @@ def _build_semantic_conflicts(
         if bool(direct_add_authorized.any())
         else 0.0
     )
+    authorized_add_no_weight_change_mask = direct_add_authorized & (
+        (~weight_change_lookup.eq("add")) | (working["delta_weight"].fillna(0.0) <= 1.0e-8)
+    )
+    authorized_add_no_weight_change_count = int(authorized_add_no_weight_change_mask.sum())
+    authorized_add_no_weight_change_share = (
+        float(authorized_add_no_weight_change_count / direct_action_add_authorized_count)
+        if direct_action_add_authorized_count
+        else 0.0
+    )
     direct_action_deploy_authorized_count = int(direct_deploy_authorized.sum())
     direct_action_deploy_authorized_realized_rate = (
         _safe_mean(weight_change_lookup.loc[direct_deploy_authorized].isin({"open", "add"}).astype(float))
         if bool(direct_deploy_authorized.any())
         else 0.0
+    )
+    direct_action_authorization_subset_violation_count = int(
+        (
+            (direct_add_authorized | direct_open_authorized)
+            & ((~portfolio_receiver_target) | (~portfolio_receiver_candidate))
+        ).sum()
     )
     direct_action_reallocation_source_count = int(direct_reallocation_source.sum())
     direct_action_pair_reallocation_source_count = int(direct_pair_reallocation_source.sum())
@@ -1516,6 +1585,10 @@ def _build_semantic_conflicts(
     )
     deploy_intent_dropped_share = (
         float(deploy_intent_dropped_count / deploy_intent_count) if deploy_intent_count else 0.0
+    )
+    deploy_intent_unrealized_count = max(0, deploy_intent_count - open_add_positive_weight_change_count)
+    deploy_intent_unrealized_share = (
+        float(deploy_intent_unrealized_count / deploy_intent_count) if deploy_intent_count else 0.0
     )
     avg_deploy_intent_candidate_count = _safe_mean(
         day_merge.get("deploy_intent_candidate_count", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
@@ -1605,8 +1678,11 @@ def _build_semantic_conflicts(
         if direct_core_deploy_target.any() and direct_pair_reallocation_source.any()
         else 0.0
     )
+    portfolio_daily_receiver_candidate_count = int(portfolio_receiver_candidate.sum())
     portfolio_daily_receiver_target_count = int(portfolio_receiver_target.sum())
     portfolio_daily_receiver_exec_guard_count = int(portfolio_receiver_exec_guarded.sum())
+    portfolio_daily_receiver_semantic_no_headroom_count = int(portfolio_receiver_semantic_no_headroom.sum())
+    portfolio_daily_receiver_open_breadth_candidate_count = int(portfolio_receiver_open_breadth_candidate.sum())
     portfolio_daily_source_candidate_count = int(portfolio_source_candidate.sum())
     portfolio_daily_source_target_count = int(portfolio_source_target.sum())
     portfolio_daily_source_realized_sell_rate = (
@@ -1679,9 +1755,40 @@ def _build_semantic_conflicts(
         if portfolio_source_target.any()
         else 0.0
     )
+    portfolio_source_forward_values = working.loc[portfolio_source_target, "forward_excess_5d"].dropna()
+    portfolio_daily_source_positive_forward_sell_share = (
+        float((portfolio_source_forward_values > 0.0).mean())
+        if len(portfolio_source_forward_values)
+        else 0.0
+    )
+    portfolio_daily_source_strong_positive_forward_sell_count = (
+        int((portfolio_source_forward_values > 0.055).sum())
+        if len(portfolio_source_forward_values)
+        else 0
+    )
+    portfolio_daily_source_max_forward_excess_5d = (
+        float(portfolio_source_forward_values.max()) if len(portfolio_source_forward_values) else 0.0
+    )
+    portfolio_daily_source_p75_forward_excess_5d = (
+        float(portfolio_source_forward_values.quantile(0.75)) if len(portfolio_source_forward_values) else 0.0
+    )
     portfolio_daily_receiver_minus_source_forward_excess_5d = (
         portfolio_daily_receiver_forward_excess_5d - portfolio_daily_source_forward_excess_5d
         if portfolio_receiver_target.any() and portfolio_source_target.any()
+        else 0.0
+    )
+    if "gross_exposure" in day_merge.columns:
+        avg_gross_exposure = _safe_mean(day_merge["gross_exposure"].fillna(0.0))
+    elif "cash_weight" in day_merge.columns:
+        avg_gross_exposure = _safe_mean((1.0 - day_merge["cash_weight"]).fillna(0.0))
+    else:
+        avg_gross_exposure = 0.0
+    avg_gross_exposure_target = _safe_mean(
+        day_merge.get("gross_exposure_target", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
+    )
+    portfolio_daily_exposure_utilization = (
+        float(avg_gross_exposure / max(avg_gross_exposure_target, 1.0e-8))
+        if avg_gross_exposure_target > 0.0
         else 0.0
     )
     high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
@@ -1778,6 +1885,12 @@ def _build_semantic_conflicts(
         diagnoses.append("预算/换手约束会显著放大订单层动作偏离，预算头与动作头仍未真正解耦。")
     if deploy_intent_count >= 5 and deploy_intent_realized_rate < 0.55:
         diagnoses.append("模型给出的 open/add 部署意图未被足量转化为真实加仓，部署可执行性仍是主瓶颈。")
+    if authorized_add_no_weight_change_share >= 0.05 or direct_action_authorization_subset_violation_count > 0:
+        diagnoses.append("receiver 授权仍存在语义旁路：部分 add/open 授权没有落到可执行 receiver 子集或没有形成真实权重变化。")
+    if portfolio_daily_receiver_semantic_no_headroom_count >= 3:
+        diagnoses.append("无 headroom 的 held add 已被语义层降级，需要继续把 receiver 容量作为模型评分信号，而不是交给后置订单翻译层处理。")
+    if deploy_intent_count >= 5 and deploy_intent_unrealized_share >= 0.25:
+        diagnoses.append("部署意图仍有较高比例未兑现，需要继续提高 cash/receiver/source 的组合日资金闭环能力。")
     if add_intent_count >= 3 and add_to_hold_conflict_share >= 0.20:
         diagnoses.append("add -> hold 冲突占比偏高，持仓加仓意图在预算/换手翻译层被过度钝化。")
     if direct_action_deploy_authorized_count >= 5 and direct_action_deploy_authorized_realized_rate < 0.55:
@@ -1835,6 +1948,14 @@ def _build_semantic_conflicts(
         diagnoses.append("portfolio daily ranking has not separated capital receivers from funding sources; the listwise allocation target still needs tighter relative credit assignment.")
     if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_forward_excess_5d > 0.006:
         diagnoses.append("portfolio daily ranking is releasing sources that still have positive forward excess return, suggesting sell/opportunity-cost attribution remains too weak.")
+    if (
+        portfolio_daily_source_target_count >= 5
+        and (
+            portfolio_daily_source_positive_forward_sell_share > 0.45
+            or portfolio_daily_source_strong_positive_forward_sell_count >= 1
+        )
+    ):
+        diagnoses.append("source 选择的均值改善不足以说明卖得对：正 forward source 占比或强势误卖仍偏高，需把分布尾部纳入 source opportunity cost。")
     if portfolio_daily_receiver_target_count >= 5 and portfolio_daily_source_target_count == 0:
         diagnoses.append("portfolio daily ranking selects capital receivers but finds no explicit funding source, so cash/source coordination remains incomplete.")
     if portfolio_daily_source_target_count >= 5 and portfolio_daily_source_target_not_sold_share > 0.65:
@@ -1972,8 +2093,13 @@ def _build_semantic_conflicts(
         "direct_action_core_deploy_target_realized_rate": direct_action_core_deploy_target_realized_rate,
         "direct_action_add_authorized_count": int(direct_action_add_authorized_count),
         "direct_action_add_authorized_realized_rate": direct_action_add_authorized_realized_rate,
+        "authorized_add_no_weight_change_count": int(authorized_add_no_weight_change_count),
+        "authorized_add_no_weight_change_share": authorized_add_no_weight_change_share,
         "direct_action_deploy_authorized_count": int(direct_action_deploy_authorized_count),
         "direct_action_deploy_authorized_realized_rate": direct_action_deploy_authorized_realized_rate,
+        "direct_action_authorization_subset_violation_count": int(
+            direct_action_authorization_subset_violation_count
+        ),
         "direct_action_reallocation_source_count": int(direct_action_reallocation_source_count),
         "direct_action_pair_reallocation_source_count": int(direct_action_pair_reallocation_source_count),
         "direct_action_pair_cost_guard_pass_count": int(direct_action_pair_cost_guard_pass_count),
@@ -1984,7 +2110,14 @@ def _build_semantic_conflicts(
         "direct_action_pair_source_forward_excess_5d": direct_action_pair_source_forward_excess_5d,
         "direct_action_core_target_forward_excess_5d": direct_action_core_target_forward_excess_5d,
         "direct_action_core_minus_pair_forward_excess_5d": direct_action_core_minus_pair_forward_excess_5d,
+        "portfolio_daily_receiver_candidate_count": int(portfolio_daily_receiver_candidate_count),
         "portfolio_daily_receiver_exec_guard_count": int(portfolio_daily_receiver_exec_guard_count),
+        "portfolio_daily_receiver_semantic_no_headroom_count": int(
+            portfolio_daily_receiver_semantic_no_headroom_count
+        ),
+        "portfolio_daily_receiver_open_breadth_candidate_count": int(
+            portfolio_daily_receiver_open_breadth_candidate_count
+        ),
         "portfolio_daily_receiver_add_headroom_mean": (
             _safe_mean(portfolio_receiver_add_headroom.loc[portfolio_receiver_exec_guarded])
             if portfolio_receiver_exec_guarded.any()
@@ -2018,7 +2151,15 @@ def _build_semantic_conflicts(
         "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
         "portfolio_daily_receiver_forward_excess_5d": portfolio_daily_receiver_forward_excess_5d,
         "portfolio_daily_source_forward_excess_5d": portfolio_daily_source_forward_excess_5d,
+        "portfolio_daily_source_positive_forward_sell_share": portfolio_daily_source_positive_forward_sell_share,
+        "portfolio_daily_source_strong_positive_forward_sell_count": int(
+            portfolio_daily_source_strong_positive_forward_sell_count
+        ),
+        "portfolio_daily_source_max_forward_excess_5d": portfolio_daily_source_max_forward_excess_5d,
+        "portfolio_daily_source_p75_forward_excess_5d": portfolio_daily_source_p75_forward_excess_5d,
         "portfolio_daily_receiver_minus_source_forward_excess_5d": portfolio_daily_receiver_minus_source_forward_excess_5d,
+        "avg_gross_exposure_target": avg_gross_exposure_target,
+        "portfolio_daily_exposure_utilization": portfolio_daily_exposure_utilization,
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,
@@ -2030,6 +2171,8 @@ def _build_semantic_conflicts(
         "deploy_intent_action_count": int(deploy_intent_count),
         "deploy_intent_realized_count": int(deploy_intent_realized_count),
         "deploy_intent_realized_rate": deploy_intent_realized_rate,
+        "deploy_intent_unrealized_count": int(deploy_intent_unrealized_count),
+        "deploy_intent_unrealized_share": deploy_intent_unrealized_share,
         "open_add_positive_weight_change_rate": open_add_positive_weight_change_rate,
         "add_to_hold_conflict_count": int(add_to_hold_conflict_count),
         "add_to_hold_conflict_share": add_to_hold_conflict_share,

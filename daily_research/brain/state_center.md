@@ -206,3 +206,15 @@
 - r30 已把 source 侧从“卖错”推进到“低机会成本、低 brake 的 direct-release source 可独立释放为现金”：confirm `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`。
 - 但 r30 仍是 `research / shadow_only`：`receiver_target_count = 2` 未达 v2 gate 下限，收益侧 `annual_return / sharpe / monthly_return_mean` 未过 confirm floor。
 - 当前不得 promotion、不得 live、不得改 active artifact。下一步优先恢复 receiver 活性与收益质量，同时保留 r30 的 source economic brake / direct cash-relief 约束，不能回到硬卖 source。
+
+## 2026-04-29 r31 receiver 语义闭包当前状态
+- r31 已落地 research entry：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，沿用 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`alpha_result_value_budget_split_v20` 与 `portfolio_daily_ranking_v2_gated`，默认预算目标为 `result_value_v10`。
+- 最高优先级修复已完成：`direct_action_add_authorized` 与 `direct_action_open_authorized` 被强制收敛为可执行 receiver target 的子集；无 headroom 的 held add 在语义层提前降级，不再等到订单翻译后绕过 gate。
+- 新增审计字段已经进入 simulator、continuity metrics、behavior audit 与 study scoring：`portfolio_daily_receiver_candidate_count`、`portfolio_daily_receiver_semantic_no_headroom_count`、`portfolio_daily_receiver_open_breadth_candidate_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`、`direct_action_authorization_subset_violation_count`。
+- receiver 广度修复已接入：在高现金、低持仓数、gross exposure target 较高时，flat open candidate 的 listwise 排名会重新进入 receiver path，避免资金只反复加两个已到目标权重的 held 名字。
+- source 分布门槛已补入：保留 r30 的 brake/relief，不继续粗暴放宽 source；新增 `portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count`、`portfolio_daily_source_max_forward_excess_5d` 与 `p75_forward_excess_5d`，用于惩罚“均值正确但尾部强势误卖”。
+- 收益门槛内生化已推进到 objective/gate：`monthly_return`、`portfolio_daily_exposure_utilization`、receiver realized deploy、receiver-source spread 与 source 正 forward 分布均进入评分或 v2 gate，不再只依赖后验 gate report。
+- bounded 验证 `cp_v3_portfolio_daily_receiver_semantic_closure_r31_bounded_fix2_20260429` 已按 `yolos` 前台自然完成，`completed_trial_count = 1`、`confirmatory_completed_trial_count = 1`、`failed_trial_count = 0`；GPU 诊断为 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`。
+- bounded confirm 的语义闭包干净：`direct_action_authorization_subset_violation_count = 0`、`authorized_add_no_weight_change_share = 0.0`、`deploy_intent_unrealized_share = 0.0`、`receiver_unrealized_deploy_share = 0.0`，并出现 `portfolio_daily_receiver_open_breadth_candidate_count = 1`。
+- bounded confirm 的失败边界也必须保留：`training_evidence_status = insufficient`，`stable_confirmatory_count = 0`，失败项包含 `confirm_gate_pass`、`confirm_annual_return_floor` 与 `confirm_source_count_floor`；`annual_return = 0.100831` 低于 confirm floor，`source_target_count = 0`，source 分布门槛尚未被真实 source 样本检验。
+- 当前结论：r31 已修复 receiver 语义旁路并部分恢复 flat receiver 广度，但仍是 `research / shadow_only`；不得 promotion、不得 live、不得改 active artifact。下一步应先用足够 confirm 预算验证 `training_evidence_status = sufficient`，再专门修 source active selection，而不是放宽 r30/r31 的 source 或 receiver gate。

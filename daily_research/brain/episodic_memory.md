@@ -1097,3 +1097,14 @@
 - r30 允许合格 direct-release relief source 在没有当天 receiver 的情况下独立释放为现金。confirm 达到 `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_target_not_sold_share = 0.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`、`cash_reserve_rate = 0.020833`，说明 source 侧“卖得对”的结构已有进展。
 - r30 仍未通过 promotion 级别验证：`receiver_target_count = 2` 低于 v2 gate 下限，且 confirm 失败项仍包含 `confirm_annual_return_floor`、`confirm_sharpe_floor`、`confirm_monthly_return_floor`。本轮只证明 source 释放机制更干净，不证明组合收益质量可上线。
 - 全部任务均使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台自然运行；训练 diagnostics 显示 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`。本轮没有改 live、promotion 或 active execution artifact，所有结果保持 `research / shadow_only`。
+
+## 2026-04-29 r31 receiver semantic closure 执行复盘
+- 行动前判断：r30 已把 source 从“硬卖好票”推进到低机会成本 cash-relief，但 receiver 侧暴露新的最高优先级问题：`direct_action_add_authorized/open_authorized` 仍可能通过语义旁路停留在不可执行 held add 上，尤其是无 headroom 的已持仓标的。
+- 已执行实现：在 `portfolio_simulator.py` 中把无 headroom held add 提前降级，强制 receiver 授权闭包为 executable receiver target 子集，并让 `portfolio_daily_effective_model_action` 反映最终 receiver 语义；新增 flat open breadth candidate，使高现金、低持仓、目标暴露较高的场景重新寻找新 receiver。
+- 已执行审计与评分：`pipeline_utils.py`、`analyze_behavior_gap.py` 与 `run_self_optimizing_study.py` 已接入 receiver semantic no-headroom、authorized add no weight change、deploy unrealized、authorization subset violation、source positive forward sell share、strong false sell、exposure utilization 等指标，并写入 objective、v2 gate 与 confirm stability。
+- 工程修复：第一次 bounded 运行暴露 `budget_deploy_score` 初始化顺序问题，已改为使用已存在的 daily head/flat 信号；第二次运行暴露旧 turnover 文件缺少 `gross_exposure`，已按 `1 - cash_weight` 提供兼容回退；`analyze_behavior_gap.py` 同步补齐旧 CSV 兼容。
+- 验证：`py_compile` 与 r31 dry-run 通过；GPU/yolos 诊断通过，`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`。bounded fix2 前台自然结束，`completed_trial_count = 1`、`confirmatory_completed_trial_count = 1`、`failed_trial_count = 0`。
+- 关键结果：bounded confirm 中 `direct_action_authorization_subset_violation_count = 0`、`authorized_add_no_weight_change_share = 0.0`、`deploy_intent_unrealized_share = 0.0`、`receiver_unrealized_deploy_share = 0.0`，说明 receiver 语义旁路已被当前短预算验证压住；`portfolio_daily_receiver_open_breadth_candidate_count = 1`，说明 flat receiver 广度链路已重新接上。
+- 失败边界：bounded confirm 仍为 `training_evidence_status = insufficient`，`stable_confirmatory_count = 0`，失败项包含 `confirm_gate_pass`、`confirm_annual_return_floor`、`confirm_source_count_floor`；`annual_return = 0.100831` 低于 confirm floor，`source_target_count = 0`，source 分布惩罚尚未被真实 source target 检验。
+- 行动后复盘：r31 证明“语义闭包”可以被前置到 receiver target 层，而不是继续依赖 simulator guard 补漏洞；但当前最深瓶颈已经转为 source active selection 与收益质量。下一轮不应放宽 r30/r31 守门，而应在足够 confirm 预算下验证 r31 training evidence，并让 source/receiver/cash listwise allocation 学会真正的资金分配。
+- 决策：r31 仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。

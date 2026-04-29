@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-04-25`
+快照日期：`2026-04-29`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -173,3 +173,13 @@
 - r29/r30 的 direct-release relief 只适用于窄条件：`direct_action_pair_source_release_score` 高、`direct_action_pair_source_opportunity_cost` 很低、forward-strength brake 低、且不是 open/add 意图。该通道可以在 r30 中独立释放为现金，但不能替代收益 gate。
 - r30 的有效结构证据是：confirm `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`。这说明 source 选择质量改善，但不等于 promotion readiness。
 - r30 的失败边界同样必须保留：`receiver_target_count = 2` 未达 v2 gate 下限，且收益、Sharpe、月均收益仍未过 confirm floor。后续不能为了通过 source_count 继续放宽 source；应优先恢复 receiver 活性、收益质量与月度一致性。
+
+## 2026-04-29 r31 receiver 语义闭包合同
+- r31 的首要合同是 receiver 授权闭包：所有 `direct_action_add_authorized` 与 `direct_action_open_authorized` 必须是可执行 `portfolio_daily_receiver_target` 的子集；若出现 `direct_action_authorization_subset_violation_count > 0`，该 protocol 不得通过 v2 gate。
+- 无 headroom 的 held add 必须在语义层提前降级为 hold/no-op，并记录为 `portfolio_daily_receiver_semantic_no_headroom`、`authorized_add_no_weight_change_share` 或 `deploy_intent_unrealized_share`；不得让它绕过 receiver gate 后再由订单翻译层静默吞掉。
+- receiver 广度合同：在高现金、低持仓数、gross exposure target 较高时，flat open candidate 的 listwise 排名必须能重新进入 receiver path。成功不是反复加满仓 held 名字，而是在现金需要部署时找到新的可执行 receiver。
+- r31 继续保留 r30 的 source economic brake 与 direct cash-relief，不得为了恢复 source count 粗暴放宽 source。source 成功必须同时满足低机会成本、低 forward-strength brake、正 receiver-source spread 与真实 realized sell。
+- source 分布合同升级：不能只看 `portfolio_daily_source_forward_excess_5d` 均值；当 `source_target_count >= 5` 时，`portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count` 与 `portfolio_daily_source_max_forward_excess_5d` 必须受控，防止单笔强势误卖掩盖在均值里。
+- 收益内生合同：`monthly_return_mean`、`portfolio_daily_exposure_utilization`、`receiver_realized_deploy`、`deploy_intent_unrealized_share` 与 source 正 forward 分布必须进入 objective/feedback。不得把“语义干净但收益弱”解释为完成态。
+- r31 bounded 验证只能证明机制闭包，不证明 promotion readiness。正式成功必须同时满足：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正收益/月度质量、可控回撤、source 分布尾部不过线。
+- 中期正路不变：模型应直接输出当日 source/receiver/cash allocation ranking，让资金从谁出来、去谁那里、留多少现金成为端到端可学习对象；simulator guard 只做最后防线，不能继续承担主要策略翻译职责。

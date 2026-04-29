@@ -1094,7 +1094,60 @@ class PortfolioState:
                 & (direct_action_add_advantage_series >= 0.060)
             )
         )
+        flat_alpha_opportunity_value = _masked_mean(alpha_opportunity_series, flat_mask)
+        flat_deployment_opportunity_cost = _masked_mean(deployment_opportunity_series, flat_mask)
+        flat_deploy_executability = _masked_mean(deploy_executability_series, flat_mask)
         current_gross = float(current.sum())
+        portfolio_daily_receiver_semantic_no_headroom = pd.Series(False, index=prices.index, dtype=bool)
+        if portfolio_daily_receiver_exec_guard_mode:
+            portfolio_daily_receiver_semantic_no_headroom = (
+                direct_action_add_signal
+                & held_mask
+                & (
+                    (portfolio_daily_receiver_pre_add_headroom < portfolio_daily_receiver_pre_min_add_delta)
+                    | (portfolio_daily_receiver_pre_add_capacity < 0.46)
+                )
+            )
+            if bool(portfolio_daily_receiver_semantic_no_headroom.any()):
+                direct_action_add_signal = direct_action_add_signal & (~portfolio_daily_receiver_semantic_no_headroom)
+        receiver_open_breadth_pressure = bool(
+            portfolio_daily_ranking_mode
+            and float(self.cash_weight) >= 0.28
+            and held_count_before < int(self.max_positions)
+            and float(gross_exposure_target) >= max(0.42, current_gross + 0.10)
+            and (
+                budget_model_deploy_signal >= 0.42
+                or budget_model_alpha_focus_signal >= 0.40
+                or flat_entry_action_share >= 0.08
+                or float(
+                    np.clip(
+                        0.42 * flat_alpha_opportunity_value
+                        + 0.34 * flat_deployment_opportunity_cost
+                        + 0.24 * flat_deploy_executability,
+                        0.0,
+                        1.0,
+                    )
+                )
+                >= 0.20
+            )
+        )
+        portfolio_daily_receiver_open_breadth_candidate = (
+            portfolio_daily_ranking_mode
+            & receiver_open_breadth_pressure
+            & flat_mask
+            & (portfolio_daily_receiver_score >= 0.015)
+            & (cash_defense_series < 0.700)
+            & (exit_timing_pressure_series < 0.500)
+            & (
+                (deploy_executability_series >= 0.18)
+                | (decision_deploy_gate_series >= decision_release_gate_series + 0.030)
+                | (alpha_opportunity_series >= 0.22)
+                | (deployment_opportunity_series >= 0.20)
+            )
+        )
+        if bool(portfolio_daily_receiver_open_breadth_candidate.any()):
+            direct_action_open_signal = direct_action_open_signal | portfolio_daily_receiver_open_breadth_candidate
+        direct_action_deploy_signal = direct_action_add_signal | direct_action_open_signal
         portfolio_daily_receiver_funding_pass = pd.Series(True, index=prices.index, dtype=bool)
         if model_receiver_funding_coverage_series is not None or model_allocation_transfer_score_series is not None:
             funding_signal = (
@@ -1204,6 +1257,8 @@ class PortfolioState:
                         direct_action_core_deploy_target = direct_action_core_deploy_target | (
                             direct_action_open_signal & (direct_action_open_rank <= float(open_limit))
                         )
+        if portfolio_daily_receiver_exec_guard_mode:
+            direct_action_core_deploy_target = portfolio_daily_receiver_target & portfolio_daily_receiver_candidate
         direct_action_executable_target = (
             direct_action_core_deploy_target
             if direct_action_pair_reallocation_mode
@@ -2759,6 +2814,8 @@ class PortfolioState:
         exit_timing_pressure_values = pd.Series(0.0, index=prices.index, dtype=float)
         for stock in prices.index:
             action = str(policy.at[stock, "action_label"] or "skip").strip().lower()
+            if bool(portfolio_daily_receiver_target.get(stock, False)):
+                action = "add" if float(current.get(stock, 0.0)) > 1e-8 else "open"
             strength = float(policy.at[stock, "action_strength"] or 0.0)
             delta_hint = float(policy.at[stock, "target_delta_hint"] or 0.0)
             hold_boost = float(policy.at[stock, "hold_boost"] or 0.0)
@@ -3607,6 +3664,8 @@ class PortfolioState:
                         translation_cap_guarded.at[stock] = True
                     continue
                 model_action_name = str(policy.at[stock, "action_label"] or "skip").strip().lower()
+                if bool(portfolio_daily_receiver_target.get(stock, False)):
+                    model_action_name = "add" if previous_weight > 1e-8 else "open"
                 if model_action_name not in {"skip", "open", "hold", "add", "reduce", "exit"}:
                     continue
                 deploy_executability_value = float(deploy_executability_series.get(stock, 0.0))
@@ -3856,6 +3915,8 @@ class PortfolioState:
                 if previous_weight <= 1e-8 or bool(forced_zero.get(stock, False)):
                     continue
                 model_action_name = str(policy.at[stock, "action_label"] or "skip").strip().lower()
+                if bool(portfolio_daily_receiver_target.get(stock, False)):
+                    model_action_name = "add" if previous_weight > 1e-8 else "open"
                 delta_value = float(delta.get(stock, 0.0))
                 if abs(delta_value) <= 1e-12:
                     continue
@@ -4032,6 +4093,25 @@ class PortfolioState:
             new_weight = float(new_weights.get(stock, 0.0))
             model_action = str(policy.at[stock, "action_label"] or "skip")
             model_action_name = model_action.strip().lower()
+            portfolio_daily_receiver_action_flag = bool(portfolio_daily_receiver_target.get(stock, False))
+            portfolio_daily_receiver_semantic_no_headroom_flag = bool(
+                portfolio_daily_receiver_semantic_no_headroom.get(stock, False)
+            )
+            portfolio_daily_receiver_exec_guarded_action_flag = bool(
+                portfolio_daily_receiver_exec_guarded.get(stock, False)
+            )
+            if portfolio_daily_receiver_action_flag:
+                model_action_name = "add" if previous_weight > 1e-8 else "open"
+            elif (
+                portfolio_daily_ranking_mode
+                and model_action_name in {"open", "add"}
+                and (
+                    portfolio_daily_receiver_semantic_no_headroom_flag
+                    or portfolio_daily_receiver_exec_guarded_action_flag
+                    or not bool(direct_action_core_deploy_target.get(stock, False))
+                )
+            ):
+                model_action_name = "hold" if previous_weight > 1e-8 else "skip"
             existing = self.holdings.get(stock)
             previous_hold_days = int(existing.hold_days) if existing is not None else 0
             previous_entry_price = float(existing.entry_price) if existing is not None else 0.0
@@ -4211,7 +4291,9 @@ class PortfolioState:
                     sell_suppression_origin = "weight_translation"
 
             portfolio_daily_effective_model_action = model_action_name
-            if (
+            if portfolio_daily_receiver_flag:
+                portfolio_daily_effective_model_action = "add" if previous_weight > 1e-8 else "open"
+            elif (
                 portfolio_daily_ranking_mode
                 and model_action_name in {"open", "add"}
                 and (
@@ -4261,6 +4343,13 @@ class PortfolioState:
                     "direct_action_pair_cost_guard_pass": bool(direct_action_pair_cost_guard_pass.get(stock, False)),
                     "direct_action_pair_cost_guard_blocked": bool(direct_action_pair_cost_guard_blocked.get(stock, False)),
                     "direct_action_pair_source_release_score": float(direct_action_pair_source_release_score.get(stock, 0.0)),
+                    "portfolio_daily_receiver_candidate": bool(portfolio_daily_receiver_candidate.get(stock, False)),
+                    "portfolio_daily_receiver_semantic_no_headroom": bool(
+                        portfolio_daily_receiver_semantic_no_headroom.get(stock, False)
+                    ),
+                    "portfolio_daily_receiver_open_breadth_candidate": bool(
+                        portfolio_daily_receiver_open_breadth_candidate.get(stock, False)
+                    ),
                     "portfolio_daily_receiver_score": float(portfolio_daily_receiver_score.get(stock, 0.0)),
                     "portfolio_daily_receiver_target": portfolio_daily_receiver_flag,
                     "portfolio_daily_receiver_exec_guarded": portfolio_daily_receiver_exec_guarded_flag,
@@ -4544,6 +4633,30 @@ class PortfolioState:
             for item in deploy_intent_items
             if float(item.get("delta_weight", 0.0) or 0.0) > 1.0e-8
         )
+        deploy_intent_unrealized_count = max(0, len(deploy_intent_items) - deploy_positive_delta_count)
+        authorized_add_items = [
+            item
+            for item in actions
+            if bool(item.get("direct_action_add_authorized", False))
+        ]
+        authorized_add_no_weight_change_count = sum(
+            1
+            for item in authorized_add_items
+            if str(item.get("weight_change_action", "") or "").strip().lower() != "add"
+            or float(item.get("delta_weight", 0.0) or 0.0) <= 1.0e-8
+        )
+        receiver_authorization_subset_violation_count = sum(
+            1
+            for item in actions
+            if (
+                bool(item.get("direct_action_add_authorized", False))
+                or bool(item.get("direct_action_open_authorized", False))
+            )
+            and (
+                not bool(item.get("portfolio_daily_receiver_target", False))
+                or not bool(item.get("portfolio_daily_receiver_candidate", False))
+            )
+        )
         sell_intent_items = [
             item
             for item in actions
@@ -4793,6 +4906,9 @@ class PortfolioState:
             "direct_action_core_deploy_target_count": int(direct_action_core_deploy_target.sum()),
             "direct_action_add_authorized_count": int(direct_action_add_authorized.sum()),
             "direct_action_open_authorized_count": int(direct_action_open_authorized.sum()),
+            "direct_action_authorization_subset_violation_count": int(
+                receiver_authorization_subset_violation_count
+            ),
             "direct_action_reallocation_source_count": int(direct_action_reallocation_source.sum()),
             "direct_action_pair_reallocation_source_count": int(direct_action_pair_reallocation_source.sum()),
             "direct_action_pair_cost_guard_pass_count": int(direct_action_pair_cost_guard_pass.sum()),
@@ -4807,7 +4923,14 @@ class PortfolioState:
             ),
             "portfolio_daily_source_exec_guard_mode": float(bool(portfolio_daily_source_exec_guard_mode)),
             "portfolio_daily_receiver_exec_guard_mode": float(bool(portfolio_daily_receiver_exec_guard_mode)),
+            "portfolio_daily_receiver_candidate_count": int(portfolio_daily_receiver_candidate.sum()),
             "portfolio_daily_receiver_exec_guard_count": int(portfolio_daily_receiver_exec_guard_count),
+            "portfolio_daily_receiver_semantic_no_headroom_count": int(
+                portfolio_daily_receiver_semantic_no_headroom.sum()
+            ),
+            "portfolio_daily_receiver_open_breadth_candidate_count": int(
+                portfolio_daily_receiver_open_breadth_candidate.sum()
+            ),
             "portfolio_daily_receiver_add_headroom_mean": _masked_mean(
                 portfolio_daily_receiver_add_headroom,
                 portfolio_daily_receiver_exec_guarded,
@@ -4933,6 +5056,8 @@ class PortfolioState:
             "deploy_intent_action_count": int(deploy_intent_count),
             "deploy_intent_realized_count": int(deploy_realized_count),
             "deploy_intent_realized_rate": float(deploy_realized_count / deploy_intent_count) if deploy_intent_count else 0.0,
+            "deploy_intent_unrealized_count": int(deploy_intent_unrealized_count),
+            "deploy_intent_unrealized_share": float(deploy_intent_unrealized_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "open_add_positive_weight_change_rate": float(deploy_positive_delta_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "sell_intent_action_count": int(len(sell_intent_items)),
             "sell_intent_realized_count": int(sell_intent_realized_count),
@@ -4967,6 +5092,12 @@ class PortfolioState:
             "deploy_intent_candidate_budget_drop_share": float(deploy_intent_candidate_budget_drop_count / deploy_intent_candidate_count) if deploy_intent_candidate_count else 0.0,
             "add_to_hold_conflict_count": int(add_to_hold_conflict_count),
             "add_to_hold_conflict_share": float(add_to_hold_conflict_count / add_intent_count) if add_intent_count else 0.0,
+            "authorized_add_no_weight_change_count": int(authorized_add_no_weight_change_count),
+            "authorized_add_no_weight_change_share": float(
+                authorized_add_no_weight_change_count / len(authorized_add_items)
+            )
+            if authorized_add_items
+            else 0.0,
             "deploy_intent_hold_conflict_share": float(deploy_hold_conflict_count / deploy_intent_count) if deploy_intent_count else 0.0,
             "semantic_delta_guard_count": int(semantic_delta_guarded.sum()),
             "turnover_intent_guard_count": int(turnover_intent_guarded.sum()),
