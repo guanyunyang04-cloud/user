@@ -4,194 +4,70 @@
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
-- 模型直接从市场全局状态、个股演化路径与持仓上下文中学习 `open / hold / add / reduce / exit / cash`。
-- 目标是在尽量少的人为执行桥约束下，综合权衡未来收益、风险、成本与部署可执行性。
+- 模型直接从市场全局状态、个股演化路径与持仓上下文中学习 `source / receiver / cash allocation ranking`。
+- 目标是在尽量少的人为执行桥约束下，综合权衡未来收益、风险、成本、现金防守与部署可执行性。
 
 ## 非目标
-- 不把优化固定调仓频率、固定持有周期或人工执行桥作为主目标。
+- 不把固定调仓频率、固定持有周期或人工执行桥作为最终目标。
 - 不把更像 teacher 当作最终目标；teacher 只是 warm start / auxiliary prior / heuristic scaffold。
-- 不用 screening 高收益、短窗 smoke 或单一局部指标替代正式 verdict。
+- 不用 screening 高收益、短窗 smoke、replay 单项改善或单一局部指标替代正式 verdict。
 
 ## 当前绑定原则
-- 个股动作语义与组合预算语义必须分层：个股层表达生命周期动作，组合层表达 gross / cash / turnover / deployment。
-- 个股未来上涨不等于今天该加仓；组合级目标必须判断“谁获得资金、谁释放资金、释放多少、是否保留现金”，不能只做个股动作分类。
-- 卖出、现金与资金来源是同一条 credit assignment 链：释放旧仓不是因为它一定差，而是因为在当前组合状态下继续持有的机会成本可能高于把资金给 core target。
-- 日频数据只能学习趋势、强弱、回撤和量价结构；对盘中冲击、真实滑点、新闻驱动、盘口流动性和开盘跳空过程必须保留盲区假设。
-- 2024-2026 这类训练/验证切分的有效独立 regime 数量有限；月度样本更少，任何高收益分支都必须防止学到单段市场风格。
+- 个股动作语义与组合预算语义必须分层：个股层表达生命周期动作，组合层表达资金接收、资金释放、现金保留、gross / turnover / cost。
+- 个股未来上涨不等于今天该加仓；持仓仍有正 forward 也不一定永远不能卖，关键是相对 receiver、现金与风险的机会成本。
+- 卖出、现金与资金来源是同一条 credit assignment 链；source 必须解释为“当前组合状态下更适合释放资金”，不是简单看跌。
 - 执行层只翻译策略语义为权重和订单，不得静默改写策略本体。
-- 评价必须使用 execution-aligned 可比口径，禁止混用不同回测语义的 headline 指标。
-- `execution_action` 表示模型生命周期语义；`weight_change_action` 表示订单/预算翻译后的真实权重变化。
-- `semantic_conflict_rate` 应接近 0；`order_translation_conflict_rate` 允许存在但必须被预算层解释并逐步压低。
+- 日频数据不能完整学习盘中冲击、真实滑点、新闻驱动、盘口流动性和开盘跳空过程；所有 promotion 判断必须保留这个盲区。
+- 2024-2026 的有效独立 regime 和月度样本有限；高收益分支必须经 confirm-vs-screening 稳定性与月度质量复核。
 
 ## 当前阶段合同
-- r10 合同：deploy intent 必须能真实形成正向权重变化，不能用 clip reduction 代替 deploy executability。
-- r11 合同：sell-source 必须从隐式 budget-origin sell 改为显式、可审计、可限制的来源链。
-- r11b 合同：held-side release/funding 必须同时满足低 funding 污染、非零 release consistency 与可接受 deploy realization。
-- r12 合同：`alpha_result_value_budget_split_v12`、`split_heads_release_translation_deploy_r12` 与 `release_translation_deploy_health_score` 必须联合评分 release learning、order translation drift 与 deploy executability。
-- r13 合同：`alpha_result_value_budget_split_v13` 与 `action_value_consistency_score` 把 `open/add/hold/reduce/exit` 放进同一个多周期未来价值合同中；高一致性不等于可上线。
-- r14 合同：`alpha_result_value_budget_split_v14`、`direct_action_value_mode_share` 和直接动作值可以承担日级动作仲裁，但订单/预算层不得继续把 direct action 隐式改写成其他动作。
-- r15 合同：`alpha_result_value_budget_split_v15`、`cash_constraint_direct_action_guard_v8` 与 `direct_action_intent_preserved_share` 必须让 direct action intent 尽量穿透订单/预算翻译层；funding sell 必须有 direct release authorization 或其他可审计证据。
-- r16 合同：`cash_constraint_direct_action_reallocation_guard_v9` 只允许在高置信 direct add/open 存在时释放低 continuation、低 keep advantage 的持仓预算；核心成功指标新增 `direct_action_deploy_authorized_realized_rate` 与 `direct_action_add_authorized_realized_rate`。
-- r16 边界：可以降低被授权 reallocation source 的 sell-source retention floor，但不得把这种修复解释成 promotion；只要 authorized deploy/add 仍被翻译成 hold，模型仍是 research/shadow。
-- r17 合同：`cash_constraint_direct_action_pair_reallocation_guard_v10` 必须把 direct deploy signal 与 core executable target 分开；在预算饱和日，只允许少数高排序 add/open 成为 core target，并允许弱排序 add 持仓作为显式 pair reallocation source。
-- r17 边界：pair reallocation source 是独立可审计的资金来源，不得混入 budget-origin sell；`direct_action_core_deploy_target_realized_rate`、`direct_action_pair_reallocation_source_count`、pair-source 机会成本、换手和月度收益质量必须联合判断。
-- r18 合同：`cash_constraint_direct_action_pair_cost_guard_v11` 必须把 pair-source 从“可释放资金”升级为“相对 core target 机会成本可接受”；`direct_action_core_minus_pair_forward_excess_5d`、`direct_action_pair_source_opportunity_cost`、blocked count、换手和月度收益质量必须联合判断。
-- r18 边界：`split_heads_direct_action_pair_cost_guard_r18` 是从规则桥走向组合级日决策的过渡层，不得被解释为最终模型；下一阶段目标应转为 pair/listwise portfolio ranking 与多日/月度组合收益直接优化。
-
-## 当前已知事实
-- 当前已证实：`alpha_result_value_budget_split_v11` 能让 funding-sell 更少、更干净。
-- 当前已证实：`alpha_result_value_budget_split_v12 + result_value_v9` 可以在 r12 confirm_02 中拿到更高收益，但不能自动闭合三方语义。
-- 当前已证实：`alpha_result_value_budget_split_v13 + result_value_v10` 可以把显性动作价值冲突压到 `action_value_conflict_share = 0.0`，但仍未通过 promotion gate。
-- 当前已证实：r14 直接动作价值仲裁能显著改善收益质量，但低边际动作与 held-side funding rebalance 仍未闭合。
-- 当前已证实：r15 formal 全窗暴露 `deploy_not_realized`，budget clipping 日的订单翻译冲突显著高于 unclipped 日。
-- 当前已证实：r16 smoke2 改善 return/risk 并恢复非零 reallocation source，但 `direct_action_deploy_authorized_realized_rate = 0.1557` 仍明显不足。
-- 当前已证实：r17 smoke3 在同一 r15 champion artifact 上把 `direct_action_core_deploy_target_realized_rate` 提升到 `0.9921`，把 `add_to_hold_conflict_share` 压到 `0.0`，并改善收益与月度一致性。
-- 当前已证实：r17 bounded study 的 screening champion `trial_03` 与 repaired confirm champion `confirm_01` 均保持高 core target 成交率，说明 v10 成对换仓机制不是单次 smoke 偶然。
-- 当前已证实：r17 pair-source 机会成本并非单调稳定；`trial_03 / confirm_01 / confirm_02` 的 core-minus-pair 5 日超额均值为正，但 `trial_01 / trial_02` 不成立或接近 0。
-- 当前已证实：r18 v11 可以把 `direct_action_core_minus_pair_forward_excess_5d` 修为正值并显著降低换手，但绝对收益低于 r17 repaired confirm，说明机会成本守门有效但组合级目标仍未端到端闭合。
-- 当前未证实：`result_value_v10` 尚不能升为稳定预算目标，r18 尚不能升为 production 或 promotion 证据；cash timing、卖出责任链和 portfolio-level objective 仍需后续修复。
-
-## 当前禁止事项
-- 不得把 r11/r11b/r12/r13/r14/r15/r16/r17 任一分支写成 promotion 或 live 切换依据。
-- 不得只看 `budget_origin_sell_share = 0` 就宣布 sell-source 成功。
-- 不得只看自动 confirm 排序；必须保留语义对照和 held-side detail 证据。
-- 不得并行运行多个会写 latest 行为摘要的审计。
-- 不得在 release consistency 或 authorized deploy realization 仍低时声称 release / deploy 已学成。
-- 不得把 r16 smoke2 的收益改善解释为可上线；只要 add->hold 冲突和 authorized deploy 未实现仍高，就只能作为修复性 shadow 证据。
-- 不得把 r17 smoke3 或 r17 screening champion 的高收益和高成交率解释为可上线；repaired confirm 仍是 `shadow_only`，且 pair-source 机会成本、换手、cash timing 与长窗稳定性仍未闭合。
-- 不得继续把主要矛盾简化成堆动作 loss；open/add/hold/reduce/exit 分开学会强化局部目标冲突，必须向组合级日决策目标收敛。
+- r31 receiver 授权闭包：所有 `direct_action_add_authorized` 与 `direct_action_open_authorized` 必须是 executable `portfolio_daily_receiver_target` 的子集；`direct_action_authorization_subset_violation_count > 0` 时不得通过 v2 gate。
+- r31 no-headroom 降级：无 headroom 的 held add 必须在语义层提前降级为 hold/no-op，并计入 `portfolio_daily_receiver_semantic_no_headroom`、`authorized_add_no_weight_change_share` 或 `deploy_intent_unrealized_share`。
+- r31 receiver 广度：高现金、低持仓数、gross exposure target 较高时，flat open candidate 的 listwise 排名必须能重新进入 receiver path，不能只反复加已到目标权重的 held 名字。
+- r33 source forward proxy：`portfolio_daily_source_forward_proxy_keep_risk` 必须进入 label、训练头、推理融合、source candidate gate、feedback、continuity metrics、study scoring 与 behavior audit；旧 artifact 缺少该 head 时只能使用 fallback proxy。
+- r33 release conviction：`portfolio_daily_source_release_conviction` 必须联合 source score、release quality、economic release、executability、release capacity、opportunity cost、forward-strength brake、bad forward spread、economic block 与 proxy keep-risk。
+- r33 distribution clean-pass：source candidate 必须同时通过 forward proxy、`portfolio_daily_source_release_conviction_pass` 与 `portfolio_daily_source_distribution_clean_pass`；强势正 forward 误卖不得被均值掩盖。
+- repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
+- 当前 gate / scoring 合同继续使用 `portfolio_daily_ranking_v2_gated`，不能用局部 clean-pass 指标替代 v2 gates 与 confirm stability。
 
 ## 成功判定
-- 结果层：`annual_return / sharpe / max_drawdown / trend_capture_rate_10d`。
-- 月度收益层：`monthly_return_mean / monthly_win_rate / monthly_worst_return / monthly_max_consecutive_loss_months / monthly_consistency_score` 必须辅助判断收益质量，避免只看年化或短窗口动作指标。
-- 结构层：`reduce_success_rate_5d / exit_timeliness_rate_5d / cash_timing_quality_1d / shadow_reversal_rate_3d`。
-- 语义层：`semantic_conflict_rate / order_translation_conflict_rate / deploy_intent_realized_rate / deploy_funding_release_consistent_share`。
-- 联合层：`release_translation_deploy_health_score` 必须拆开看 `deploy / release / translation / funding / model_release` 组件。
-- 动作价值层：`action_value_consistency_score` 必须拆开看 `action_value_conflict_share`、`sell_against_keep_value_share`、`keep_against_release_value_share`、`open_low_action_value_share`。
-- 直接决策层：`direct_action_value_mode_share / direct_action_value_gap_mean / direct_action_value_low_margin_share / direct_action_order_translation_conflict_rate` 必须和月度收益质量一起看。
-- 直接翻译层：`direct_action_intent_preserved_share / direct_action_funding_authorized_sell_share / direct_action_funding_protected_sell_share / direct_action_release_advantage_mean` 必须和 `deploy_intent_realized_rate`、held-side detail 及月度收益质量一起看。
-- 直接再分配层：`direct_action_deploy_authorized_realized_rate / direct_action_add_authorized_realized_rate / direct_action_reallocation_source_count / add_to_hold_conflict_share` 必须一起看，防止“有授权、有资金源、但真实订单仍不加仓”。
-- 成对再分配层：`direct_action_deploy_signal_count / direct_action_core_deploy_target_count / direct_action_core_deploy_target_realized_rate / direct_action_pair_reallocation_source_count / direct_action_pair_reallocation_sell_share` 必须和 pair-source 逐仓 forward excess、换手和月度收益质量一起看。
-- 成对机会成本层：`direct_action_pair_cost_guard_pass_rate / direct_action_pair_source_spread_mean / direct_action_pair_source_cost_mean / direct_action_core_minus_pair_forward_excess_5d` 必须和真实收益、换手、cash timing 与月度收益质量一起看。
-- 责任链：sell-source、funding source、held-side release support、protected-hold conflict 与 reallocation source 必须可审计。
+- 训练证据：`training_evidence_status = sufficient`，且 diagnostics 显示 `device = cuda`、`cuda_available = true`、`python_executable` 指向 yolos。
+- v2 gates：收益、Sharpe、max drawdown、monthly return、monthly consistency、receiver/source/cash 质量、执行冲突与 source 分布全部过线。
+- 稳定性：confirm-vs-screening 不能靠单点偶然，`stable_confirmatory` 必须成立。
+- receiver：`receiver_target_count >= 3`、`receiver_unrealized_deploy_share = 0`、direct add/open authorization subset 无违规。
+- source：`source_target_count >= 3`、`source_realized_sell_rate >= 0.35`、positive forward sell share / strong false sell / max forward 受控。
+- cash：`cash_reserve_rate > 0`，但不能退化为高现金 dead branch。
+- 经济质量：`monthly_return_mean`、`monthly_consistency_score`、`portfolio_daily_exposure_utilization`、receiver realized deploy、receiver-source spread、drawdown 必须联合判断。
+
+## 当前已知事实
+- r31 已证明 receiver 语义旁路可以前置到 receiver target 层；bounded confirm 中 authorization subset、authorized add no weight、deploy unrealized 与 receiver unrealized 均可压到 0。
+- r31 仍未证明 promotion readiness：training evidence、source activity、confirm gate 与收益质量仍不足。
+- r33 trainable proxy 可以防错，但会让 source dormant；source-soft 可以恢复 source，却会强势误卖。
+- r33 release conviction 可以恢复收益和 source 数量，但单独不足以控制尾部正 forward source。
+- r33 clean-pass + repeat relief 可以清掉强势误卖，但 clean-pass bounded 仍出现 source/receiver 广度不足和 receiver-source spread 不稳。
+- 当前瓶颈已经从“能不能卖”推进到“能否在 clean source 约束下恢复足够多正确卖出，并同步找到正 forward receiver”。
+
+## 当前禁止事项
+- 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
+- 不得为了恢复 source count 粗暴放宽 source forward proxy、release conviction 或 distribution clean-pass。
+- 不得把 `receiver_unrealized_deploy_share = 0`、`source_positive_forward_sell_share = 0` 或 `add_to_hold_conflict_share = 0` 单独解释为成功。
+- 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- r18 已把 pair-source 成本守门落地；下一步应转向组合级日决策模型，而不是继续在固定动作集合里做局部桥接。
-- 后续若调整 loss / objective / simulator，必须随行补跑 source attribution、held-side detail 和 budget-clipped 分层审计。
-- 后续模型应直接学习“当前组合状态下的仓位调整集合”，通过 pair/listwise ranking、多日收益风险成本与月度收益质量联合优化，显式解决资金获得、资金释放和现金保留。
+- 短期：扩大 clean source breadth，恢复 flat-open receiver breadth，并保持 receiver 授权闭包不退化。
+- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution 和 drawdown 更深地写进 objective / feedback。
+- 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
+
+## 阶段索引
+- r1-r11b：alpha prior、split heads、translation guard、sell attribution、value arbitration、sell-source contract，详见 `daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
+- r12-r18：release/translation/deploy、action-value、direct action、pair reallocation 与 pair-source cost，详见 `daily_research/brain/episodic_memory.md`。
+- r19-r23：portfolio daily ranking、v2 gated、cash-aware、source/receiver execution 与 stable confirmatory。
+- r24-r26：listwise allocation、source-release listwise、allocation teacher。
+- r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
+- r31/r33：当前合同核心，分别约束 receiver 语义闭包与 source distribution clean-pass。
 
 ## 历史归档入口
-- 原 `continuous_policy_design_contract.md` 已原样归档：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
-- 标题索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
-- 原始行数：`581`。
-- 原始 SHA256：`b3f83530ec585e284a60e568bd66be4f7c8402d455efec20944af41e58f0afe8`。
-- 读取纪律：当前设计合同以本文件上方章节为准；r1-r11b 的完整合同演化只作为历史证据。
-## 2026-04-25 r19 组合日频排序合同
-- r19 把学习/评估问题从孤立的 `open/add/hold/reduce/exit` 标签改为日频组合分配：哪些标的接收资金，哪些标的释放资金，以及是否应保留现金。
-- 必要成功证据包括正向 `portfolio_daily_receiver_minus_source_forward_excess_5d`、非平凡 `portfolio_daily_source_realized_sell_rate`、受控 `portfolio_daily_cash_reserve_rate`、可接受换手，以及不扩大回撤前提下更好的月度一致性。
-- source stock 仍可能是好股票；只有在同一组合状态下它的机会成本低于被选 receiver 时，它才是有效资金来源。
-- r19 是通向 listwise/pairwise 组合决策学习的 research 桥，不是 live execution profile。
-
-## 2026-04-26 r20 v2/v13 合同
-- `portfolio_daily_ranking_v2_gated` 必须 gate-first：`annual_return`、`sharpe`、`monthly_return_mean` 必须为正，`max_drawdown` 不得低于 `-0.18`，`monthly_consistency_score` 不得低于 `0.45`，执行冲突、add-to-hold 和现金行为必须达标后，receiver-source spread 才能获得主要奖励。
-- `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 必须让现金保留成为真实竞争分支；若 portfolio daily ranking 已观测但 `portfolio_daily_cash_reserve_rate = 0.0`，不得把该分支写成组合级完成态。
-- 组合排序模式下的冲突指标必须优先使用 `portfolio_daily_effective_model_action`；未被选为 core receiver 的原始 `add/open` 只是候选意图，不得直接当成最终 add/open 失败。
-- v2 champion selection 必须拒绝失败 confirmatory：只有通过 v2 gate 且通过 confirm-vs-screening 稳定性检查的 confirmatory 才能优先成为 champion；否则必须回退，并把失败 confirm 写入 `rejected_confirmatory_trials`。
-- `stable_confirmatory` 必须同时满足 v2 gates 与 confirm-vs-screening 稳定性检查；source target 必须真实释放资金，`source_realized_sell_floor` 要求当 `portfolio_daily_source_target_count >= 5` 时，`portfolio_daily_source_realized_sell_rate` 不得低于 `0.35`；否则 receiver-source spread 不能被视为完成态。
-- r20 成功判定不是单次 smoke 过 gate，而是在 bounded/fresh confirm 下同时保持正收益、受控回撤、正向月度收益、非零且合理现金保留、正向 receiver-source spread、足够 source realized sell、低 order translation conflict 和低 add-to-hold conflict。
-
-## 2026-04-26 r21 source-exec 合同
-- `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 必须把 source target 的真实 reduce/exit 放进执行生成层：降低 source target 保留底线、提高 source sell priority、压低 source deploy priority，并避免原始 add/hold translation floor 把 source 锁回持有。
-- v14 必须继承 v13 的 cash-aware competition：使用弱 receiver、弱市场宽度、高暴露、高换手、稀疏 receiver、真实回撤和 defense gate 共同激活现金保留；不得因修 source execution 让 cash branch 再次死亡。
-- `split_heads_portfolio_daily_ranking_source_exec_r21` 使用 `portfolio_daily_ranking_v2_gated`，但新增 source execution 证据：`portfolio_daily_source_target_not_sold_share`、`portfolio_daily_source_exec_cap_guard_count`、`portfolio_daily_source_realized_reduction_weight`、`portfolio_daily_receiver_realized_deploy_count` 与 `portfolio_daily_effective_capital_transfer_count`。
-- `source_not_sold_ceiling` 是 `source_realized_sell_floor` 的配套约束：当 `portfolio_daily_source_target_count >= 5` 时，source target 未真实卖出的占比不得高于 `0.65`。
-- r21 成功判定必须同时看 source 真实释放、receiver 真实成交和 effective capital transfer；只改善 source realized sell 但牺牲收益、回撤、月度一致性或现金行为，仍不能 promotion。
-
-## 2026-04-26 r22 receiver-exec 合同
-- `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 必须继承 `cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13` 与 `cash_constraint_portfolio_daily_ranking_source_exec_guard_v14` 的行为；不得为了降低 add-to-hold 冲突而丢失现金分支或 source 真实释放。
-- receiver target 的合同从“排序靠前”升级为“排序靠前且可执行加仓”：已持仓 add 只有在 `portfolio_daily_receiver_add_headroom >= portfolio_daily_receiver_min_add_delta` 时，才能进入 `portfolio_daily_receiver_target` 与 `direct_action_core_deploy_target`。
-- 无 headroom 的 receiver/add 必须在目标集前置过滤，而不是等到订单翻译后再把 add 退化为 hold/reduce；被过滤的行必须记录 `portfolio_daily_receiver_exec_guarded` 与 `portfolio_daily_receiver_exec_guard_reason`。
-- r22 成功判定必须同时看 `portfolio_daily_receiver_realized_deploy_rate`、`portfolio_daily_receiver_unrealized_deploy_share`、`order_translation_conflict_rate`、`add_to_hold_conflict_share`、source realized sell、effective capital transfer 和现金保留。
-- r22 smoke 过 `portfolio_daily_ranking_v2_gated` 只证明机制方向有效；若 `training_evidence_status = insufficient` 或缺少 stable confirmatory，不得进入 promotion 或 live 讨论。
-
-## 2026-04-27 r23 稳定性合同
-- `split_heads_portfolio_daily_ranking_receiver_exec_stability_r23` 不改变 v15 执行合同；它只改变搜索空间，把目标从单点峰值收益转为降低 screening 到 confirmatory 的衰减。
-- r23 的有效证据必须同时满足：`device = cuda`、`runtime_env = yolos`、strict resume、best epoch 不贴最终 epoch、v2 gates 通过，以及 `confirm_stable = True`。
-- stable confirmatory 必须优先比较 confirm 与其 source screening 的衰减，而不是只看 confirm 自身收益；`annual_return_delta_vs_source`、`sharpe_delta_vs_source`、`monthly_return_mean_delta_vs_source` 和 `max_drawdown_delta_vs_source` 是硬解释字段。
-- 若经济冠军和 v2 champion 不一致，优先按 v2 champion 解释结构质量；高收益但 `receiver_minus_source_5d` 为负或执行冲突更高的路线只能作为收益候选，不得自动升为结构冠军。
-- r23 通过 stable confirmatory 只说明研究路线进入更强证据层，不等于 live 或 promotion；上线边界仍必须由独立 promotion gate、长窗 out-of-sample 和真实执行风控共同决定。
-
-## 2026-04-27 r24 listwise allocation 合同
-- r24 把 P1 receiver 可买性从事后 guard 推进到标签、训练信号、模型头和模拟器评分：`portfolio_daily_receiver_add_headroom`、`portfolio_daily_receiver_min_add_delta`、`portfolio_daily_receiver_add_capacity`、`portfolio_daily_receiver_executability` 与 `portfolio_daily_receiver_score` 必须共同约束 receiver。
-- r24 把 P4 的组合日决策显式化为 receiver/source/cash listwise 学习：`portfolio_daily_receiver_score`、`portfolio_daily_source_score`、`portfolio_daily_cash_score` 进入 `alpha_result_value_budget_split_v16`，并通过 `portfolio_receiver_pairwise_total`、`portfolio_source_pairwise_total`、`portfolio_cash_margin_total` 监督日内排序。
-- `deploy_executability_target` 必须有真实 `deploy_executability_head`，且 `supports_deploy_executability_head = true` 与 `supports_portfolio_listwise_heads = true` 才能把 r24 artifact 解释为新架构输出。
-- `split_heads_portfolio_daily_listwise_allocation_r24` 继承 r23 稳定性思路与 v15 receiver exec guard；guard 仍是最后防线，成功标准是核心 receiver 天然具备 headroom/capacity，而不是靠大量后置过滤维持干净语义。
-- r24 smoke 只证明链路闭合，不证明策略可用；在 bounded/fresh confirm 达到 `training_evidence_status = sufficient`、v2 gates 全过、confirm stable、收益/月度/回撤/source/receiver/cash 联合过线前，仍是 `research / shadow_only`。
-## 2026-04-27 r25 source-release listwise 合同
-- r25 合同：source 不再只是 `portfolio_daily_source_score` 一个标量，而是由 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_opportunity_cost` 与 `portfolio_daily_source_score` 共同决定。
-- `supports_portfolio_source_release_heads = true` 是解释 r25 artifact 具备 source 释放学习能力的必要诊断；只具备 `supports_portfolio_listwise_heads` 只能说明 r24 receiver/source/cash 基础头存在。
-- 成功判定不能只看 `receiver_unrealized_deploy_share = 0` 或 `add_to_hold = 0`；必须同时看 source candidate、source target、source realized sell、effective capital transfer、cash reserve、monthly return、drawdown 与 confirm stability。
-- 如果 source candidate 存在但 target 或 sell 消失，优先用 `portfolio_daily_listwise_audit.py` 拆解 score gate、execution gate、funding protection 与 sell_source_floor_guard，而不是直接降阈值。
-
-## 2026-04-27 r25 source-release listwise 精确合同标记
-- `split_heads_portfolio_daily_source_release_listwise_r25` 是 r24 listwise 的 source-release 延伸，仍必须保持 `research / shadow_only`。
-- `alpha_result_value_budget_split_v17` 负责把 source release capacity、source executability、source score 纳入训练。
-- `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_opportunity_cost` 与 `portfolio_daily_source_score` 必须联合解释。
-- `supports_portfolio_source_release_heads = true` 是判断 r25 artifact 具备 source 释放学习头的必要诊断。
-- 成功判定仍必须同时看 `stable_confirmatory`、`source_realized_sell_floor`、`source_not_sold_ceiling`、`portfolio_daily_effective_capital_transfer_count` 与 `monthly_return_mean`。
-## 2026-04-27 r25 confirmfix + source release-quality 合同
-- TQ 不是策略信号的一部分，只是外部数据连接层；confirm 阶段不得因 TQ session 文件冲突、初始化残留或短暂连接失败导致整轮训练失败。数据层必须优先尝试真实 TQ，失败后记录失败原因，并在 research/shadow 验证中允许使用可审计 universe 缓存兜底。
-- source release 的合同从“能卖”升级为“卖得对”：source 只有在相对 receiver 机会成本为正、继续持有价值不足、forward risk/现金防御/卖出排序共同支持时，才应成为 release source。
-- `portfolio_daily_source_opportunity_cost` 不能再简单奖励“可以被卖出”；它必须惩罚卖掉仍有正 forward edge 或优于 receiver 参考收益的持仓，并奖励 release-quality 高、source forward edge 弱、receiver 替代收益更强的持仓。
-- `portfolio_daily_source_release_quality` 是 r25 的核心 source 学习信号，必须与 `portfolio_daily_source_release_capacity`、`portfolio_daily_source_executability`、`portfolio_daily_source_score` 联合解释；只看 source score 或只看 guard count 都是不完整解释。
-- 成功判定不得把 `source_target_count = 0` 当作 source 问题解决。非零 source target、非零 realized sell、正 `portfolio_daily_receiver_minus_source_forward_excess_5d`、正收益/月度质量、可控回撤、receiver deploy 全实现和 cash reserve 同时过线，才可称为“卖得对”的有效证据。
-- quality6 的合同解释：负 receiver-source spread 被消除是因为 release-quality 阻止了低质量卖出；这是正确的防错机制，但不是 active source allocation 的完成态。
-- r25 当前状态仍为 `research / shadow_only`；任何 promotion/live/active artifact 更新都必须等待 sufficient training、v2 gates、confirm stability、source/receiver/cash 联合经济质量同时成立。
-## 2026-04-27 r25 双守门合同补充
-- source release head 不能单独决定卖出，必须经过 observable release quality 与 low keep-value 双确认；模型预测只能放大已有可观测卖出理由，不能凭空制造卖出理由。
-- 当 observable source release quality 很低时，必须提高 `portfolio_daily_source_opportunity_cost` 并压低 `portfolio_daily_source_score`；这种情况下 `source_target_count = 0` 是正确防错，不是失败。
-- receiver target 不能只满足 score/rank/headroom；在高仓位、现金不足、可卖 source 不足时，必须按 funding context 对每日 receiver slot 做硬上限，避免 `receiver_target_count` 高但 `receiver_realized_deploy_rate` 低。
-- r25 成功判定升级：`receiver_unrealized_deploy_share = 0`、`source_target_count > 0`、`source_realized_sell_rate >= 0.35`、`receiver_minus_source_forward_excess_5d > 0`、`monthly_return_mean > 0` 与 `training_evidence_status = sufficient` 必须联合成立；其中任一缺失都只能视为 research/shadow 证据。
-- 当前 r25 v2 smoke 只证明双守门可以恢复语义干净，不证明收益质量、长预算稳定性或 promotion readiness。
-
-## 2026-04-28 r25 v3 final-exec 与 dead-branch 合同
-- receiver target 的最终定义升级为“排序靠前且最终资金翻译后形成真实正向 delta”；如果 turnover、gross、cash、translation 或 semantic guard 使其没有真实 open/add，则必须从 `portfolio_daily_receiver_target` 中剔除，并记录 `portfolio_daily_receiver_exec_guarded` 与 reason。
-- 模型预测的 receiver add capacity 只能在可观测 headroom 附近微调，不能把无 headroom 的持仓凭空抬成可加仓；高仓位且无 funding context 时 receiver slot 可以为 0。
-- v2 gate 不得再允许未观测到真实组合日分配的结果通过；`portfolio_daily_receiver_target_count >= 3`、`portfolio_daily_receiver_unrealized_deploy_share <= 0.02`、`portfolio_daily_source_realized_sell_rate >= 0.35`、`portfolio_daily_cash_reserve_rate > 0` 与正收益/月度质量必须联合成立。
-- `receiver_target_count = 0`、`source_target_count = 0` 或高 `cash_reserve_rate` 下的负收益，应解释为 dead allocation branch，不得解释为“守门成功”。守门的职责是防错，不是替代 listwise 资金分配学习。
-
-## 2026-04-28 r26 allocation-teacher 合同
-- r26 的核心合同是让 receiver/source/cash 的资金闭环进入可学习信号，而不是继续让 simulator guard 事后翻译。新增四个硬读字段：`portfolio_daily_receiver_funding_coverage`、`portfolio_daily_funding_closure_score`、`portfolio_daily_allocation_transfer_score`、`portfolio_daily_allocation_dead_branch_risk`。
-- `alpha_result_value_budget_split_v18` 必须同时具备 `supports_portfolio_allocation_teacher_heads = true`、`supports_portfolio_source_release_heads = true` 与 `supports_portfolio_listwise_heads = true`，否则不得解释为 r26 artifact。
-- receiver 成功不能只看 `receiver_unrealized_deploy_share = 0`；必须同时看 funding coverage、closure、transfer、dead branch risk、source realized sell、cash reserve、收益、月度一致性和回撤。
-- protected-source 只能作为审计候选：`portfolio_daily_source_protected_release_override_count` 表示“有可能需要突破 funding protection 的旧仓”，但在 source forward 质量没有被模型稳定学会前，不得直接进入 `portfolio_daily_source_candidate` 或 `portfolio_daily_source_target`。
-- 若强行放宽 protected-source 后出现 `source_realized_sell_rate = 1.0` 但 `portfolio_daily_receiver_minus_source_forward_excess_5d <= 0`、回撤扩大或月度质量变差，应立即判定为“能卖但没卖对”，不得把非零 source sell 视为进步。
-- r26 成功判定必须联合成立：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正 receiver-source spread、正收益/月度质量与可控回撤。
-## 2026-04-29 r30 source economic brake / cash-relief 合同
-- source release 合同从 r27 开始明确区分“语义可卖”和“经济上该卖”。`portfolio_daily_source_forward_spread_score`、`portfolio_daily_source_bad_forward_spread_risk`、`portfolio_daily_source_economic_release_score`、`portfolio_daily_source_economic_block_risk` 必须联合解释，不能只因 source target 非零或 sell rate 高就判定成功。
-- `portfolio_daily_source_forward_strength_brake_risk` 是 r28 之后的硬边界：当持仓仍有前瞻强度、alpha opportunity、large upside、multi-horizon path value 或高 keep value 时，source 不得仅凭 funding 需求被硬卖。brake 过强导致 source 归零时，也不能把归零解释为成功。
-- r29/r30 的 direct-release relief 只适用于窄条件：`direct_action_pair_source_release_score` 高、`direct_action_pair_source_opportunity_cost` 很低、forward-strength brake 低、且不是 open/add 意图。该通道可以在 r30 中独立释放为现金，但不能替代收益 gate。
-- r30 的有效结构证据是：confirm `source_target_count = 5`、`source_realized_sell_rate = 1.0`、`source_forward_excess_5d = -0.009351`、`receiver_minus_source_forward_excess_5d = +0.021760`。这说明 source 选择质量改善，但不等于 promotion readiness。
-- r30 的失败边界同样必须保留：`receiver_target_count = 2` 未达 v2 gate 下限，且收益、Sharpe、月均收益仍未过 confirm floor。后续不能为了通过 source_count 继续放宽 source；应优先恢复 receiver 活性、收益质量与月度一致性。
-
-## 2026-04-29 r31 receiver 语义闭包合同
-- r31 的首要合同是 receiver 授权闭包：所有 `direct_action_add_authorized` 与 `direct_action_open_authorized` 必须是可执行 `portfolio_daily_receiver_target` 的子集；若出现 `direct_action_authorization_subset_violation_count > 0`，该 protocol 不得通过 v2 gate。
-- 无 headroom 的 held add 必须在语义层提前降级为 hold/no-op，并记录为 `portfolio_daily_receiver_semantic_no_headroom`、`authorized_add_no_weight_change_share` 或 `deploy_intent_unrealized_share`；不得让它绕过 receiver gate 后再由订单翻译层静默吞掉。
-- receiver 广度合同：在高现金、低持仓数、gross exposure target 较高时，flat open candidate 的 listwise 排名必须能重新进入 receiver path。成功不是反复加满仓 held 名字，而是在现金需要部署时找到新的可执行 receiver。
-- r31 继续保留 r30 的 source economic brake 与 direct cash-relief，不得为了恢复 source count 粗暴放宽 source。source 成功必须同时满足低机会成本、低 forward-strength brake、正 receiver-source spread 与真实 realized sell。
-- source 分布合同升级：不能只看 `portfolio_daily_source_forward_excess_5d` 均值；当 `source_target_count >= 5` 时，`portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count` 与 `portfolio_daily_source_max_forward_excess_5d` 必须受控，防止单笔强势误卖掩盖在均值里。
-- 收益内生合同：`monthly_return_mean`、`portfolio_daily_exposure_utilization`、`receiver_realized_deploy`、`deploy_intent_unrealized_share` 与 source 正 forward 分布必须进入 objective/feedback。不得把“语义干净但收益弱”解释为完成态。
-- r31 bounded 验证只能证明机制闭包，不证明 promotion readiness。正式成功必须同时满足：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正收益/月度质量、可控回撤、source 分布尾部不过线。
-- 中期正路不变：模型应直接输出当日 source/receiver/cash allocation ranking，让资金从谁出来、去谁那里、留多少现金成为端到端可学习对象；simulator guard 只做最后防线，不能继续承担主要策略翻译职责。
-
-## 2026-04-29 r33 source forward proxy / distribution clean-pass 合同
-- `portfolio_daily_source_forward_proxy_keep_risk` 是 source 保留风险合同的一部分，不是普通辅助指标。它必须同时进入 label、训练头、推理融合、source candidate gate、feedback、continuity metrics、study scoring 与 behavior audit；旧 artifact 缺少该 head 时只能使用 fallback proxy，不得把未训练随机头作为有效信号。
-- source candidate 的最低合同升级为三段式：先通过 forward proxy keep-risk 防错，再通过 `portfolio_daily_source_release_conviction_pass` 证明释放质量，最后通过 `portfolio_daily_source_distribution_clean_pass` 控制正 forward 卖出分布。任一层未通过，不得进入 `portfolio_daily_source_candidate`。
-- `portfolio_daily_source_release_conviction` 必须联合解释 source score、release quality、economic release、executability、release capacity、opportunity cost、forward-strength brake、bad forward spread、economic block 与 forward proxy keep-risk。高 conviction 不等于可部署；它仍必须服从 distribution clean-pass。
-- source 分布合同不允许只看均值正确。当 `source_target_count` 非零时，必须同步审计 `portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count`、`portfolio_daily_source_max_forward_excess_5d` 与 `portfolio_daily_source_p75_forward_excess_5d`；强势正 forward 误卖不得被低均值或少数负样本掩盖。
-- repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。不得用 repeat relief 绕过 forward proxy、release conviction 或 distribution clean-pass。
-- r33 的成功判定不是 `source_positive_forward_sell_share = 0` 一项。正式成功必须同时满足：`training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_target_count >= 3`、`source_target_count >= 3`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、正 receiver-source forward spread、正 monthly return、可控 max drawdown、无强势正 forward source 误卖。
-- 若 clean-pass 导致 `source_target_count` 过低或 `receiver_minus_source_forward_excess_5d` 仍为负，应解释为 clean source breadth 与 receiver breadth 不足，而不是放宽 source gate 的理由。下一步应扩大可学习的 clean source 样本和 receiver flat-open 候选广度。
-- 收益内生合同继续强化：`monthly_return_mean`、`monthly_consistency_score`、`portfolio_daily_exposure_utilization`、`receiver_realized_deploy`、`source_realized_sell_rate`、positive spread distribution 与 drawdown 必须进入 objective/feedback/gate 的联合判断。不得把“语义干净但收益弱”解释为完成态。
-- r33 仍服从 r31 的 receiver 授权闭包：所有 direct add/open authorized 必须是 executable receiver candidate 子集；无 headroom held add 必须提前降级并计入审计，不得因为 source clean-pass 修复而放松 receiver 语义。
-- 长期合同不变：真正突破应让模型直接学习当日 source/receiver/cash allocation ranking。source distribution clean-pass 是必要防线，不是最终策略本体；继续堆 guard 只能减少坏翻译，不能替代资金分配学习。
+- 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
+- 早期标题索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
+- 过程复盘入口：`daily_research/brain/episodic_memory.md`。
+- 读取纪律：当前合同以本文件上方章节为准；历史合同只作为证据与演化追溯。

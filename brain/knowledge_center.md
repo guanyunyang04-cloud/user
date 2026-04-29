@@ -24,6 +24,7 @@
 - 如果控制台显示疑似中文乱码，先用 UTF-8 读取工具确认真实文件内容，不能把终端编码错觉当作文件损坏来修
 - 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
 - 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
+- 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 项目任务运行纪律已改为前台优先：训练、评估、审计、bounded study、confirmatory rerun 与执行任务不得默认后台化，不得中途人为中断，单次窗口时限统一按 `10` 小时处理
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda` 与 `cuda_available = true`
 

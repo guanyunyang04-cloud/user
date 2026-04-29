@@ -536,6 +536,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     analysis_text = _read_text("daily_research/continuous_policy/analyze_behavior_gap.py")
     pipeline_text = _read_text("daily_research/continuous_policy/pipeline_utils.py")
     simulator_text = _read_text("daily_research/continuous_policy/portfolio_simulator.py")
+    label_text = _read_text("daily_research/continuous_policy/label_builder.py")
     gate_report_text = _read_text("daily_research/tools/portfolio_daily_ranking_gate_report.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
@@ -633,6 +634,8 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
             "split_heads_portfolio_daily_source_release_listwise_r25",
             "r25 source-release listwise allocation study profile",
         ),
+        ("split_heads_portfolio_daily_receiver_semantic_closure_r31", "r31 receiver semantic closure study profile"),
+        ("split_heads_portfolio_daily_source_forward_proxy_r33", "r33 source forward proxy study profile"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -781,6 +784,36 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         "continuous_policy r25 source-release listwise contract is missing learned release-capacity/executability markers.",
     )
     _require(
+        "direct_action_authorization_subset_violation_count" in simulator_text
+        and "direct_action_authorization_subset_violation_count" in pipeline_text
+        and "direct_action_authorization_subset_violation_count" in analysis_text
+        and "authorized_add_no_weight_change_share" in simulator_text
+        and "deploy_intent_unrealized_share" in simulator_text
+        and "portfolio_daily_receiver_semantic_no_headroom" in simulator_text
+        and "portfolio_daily_receiver_open_breadth_candidate_count" in simulator_text
+        and "split_heads_portfolio_daily_receiver_semantic_closure_r31" in study_text,
+        failures,
+        "continuous_policy_r31_contract_missing",
+        "continuous_policy r31 receiver semantic closure contract is missing authorization/breadth markers.",
+    )
+    _require(
+        "portfolio_daily_source_forward_proxy_keep_risk" in label_text
+        and "portfolio_daily_source_forward_proxy_keep_risk" in model_seq_v3_text
+        and "portfolio_daily_source_forward_proxy_keep_risk" in simulator_text
+        and "portfolio_daily_source_forward_proxy_keep_risk" in pipeline_text
+        and "portfolio_daily_source_forward_proxy_keep_risk" in analysis_text
+        and "portfolio_daily_source_release_conviction" in label_text
+        and "portfolio_daily_source_release_conviction" in simulator_text
+        and "portfolio_daily_source_distribution_clean_pass" in label_text
+        and "portfolio_daily_source_distribution_clean_pass" in simulator_text
+        and "portfolio_daily_source_positive_forward_sell_share" in study_text
+        and "portfolio_daily_source_strong_positive_forward_sell_count" in study_text
+        and "split_heads_portfolio_daily_source_forward_proxy_r33" in study_text,
+        failures,
+        "continuous_policy_r33_contract_missing",
+        "continuous_policy r33 source forward proxy / release conviction / clean-pass contract is missing markers.",
+    )
+    _require(
         "build_monthly_return_frame" in pipeline_text,
         failures,
         "continuous_policy_monthly_contract_missing",
@@ -861,32 +894,18 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
         ),
         "daily_research/brain/state_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
-            "当前接管摘要",
-            "当前状态",
+            "当前结论",
+            "当前接管入口",
             "当前主问题",
             "当前优先级",
             "当前边界",
-            "当前时态",
-            "任何程序都必须在 `yolos` 环境下运行",
-            "run_execution_app.py",
-            "Web 控制台",
-            "Start-Job",
+            "近期研究索引",
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe",
             "continuous_policy",
-            "run_continuous_policy_protocol.py",
-            "不足 `32` epoch 不构成完整判决",
-            "默认最高效、最合理实验",
-            "formal_torch_seq_v3",
-            "formal_torch_hier_v4",
-            "cp_v3_seq_holdcash_r1",
-            "cp_v3_seq_holdcash_r2",
-            "cp_v3_seq_holdcash_v5_formal_r1",
-            "cp_hier_v4_holdcash_r5",
-            "holdcash_v5",
-            "training_evidence",
-            "latest_behavior_audit_summary.json",
-            "latest_conclusion_ledger.json",
-            "固定调仓频率",
-            "日频连续决策",
+            "split_heads_portfolio_daily_receiver_semantic_closure_r31",
+            "split_heads_portfolio_daily_source_forward_proxy_r33",
+            "portfolio_daily_source_distribution_clean_pass",
+            "source/receiver/cash listwise allocation teacher",
         ),
         "daily_research/brain/knowledge_center.md": (
             EXPECTED_TARGET_WEIGHT_SEMANTICS,
@@ -939,35 +958,17 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             EXPECTED_TARGET_WEIGHT_CAP_MODE,
             "项目地图",
             "高频命令",
-            "环境基线",
             "写回路由",
-            "任何程序都必须在 `yolos` 环境下运行",
+            "C:/Users/ASUS/miniconda3/envs/yolos/python.exe",
             "run_execution_app.py",
             "execution app 运行时",
-            "run_execution_web.py",
-            "使用教程",
-            "Start-Job",
-            "默认先给足 `32` epoch 起步预算",
-            "最高效、最合理",
-            "prototype_gbdt_v1",
-            "formal_torch_v2",
-            "formal_torch_seq_v3",
-            "formal_torch_hier_v4",
-            "holdcash_v3",
-            "holdcash_v5",
-            "training_evidence",
-            "train_day_count",
-            "teacher_action_rows",
-            "continuous-policy-protocol",
-            "continuous-policy-train",
-            "/continuous-policy",
+            "当前 continuous_policy 操作口径",
             "run_continuous_policy_protocol.py",
             "analyze_behavior_gap.py",
-            "conclusion_ledger.py",
-            "cp_v3_seq_holdcash_r1",
-            "cp_v3_seq_holdcash_r2",
-            "cp_v3_seq_holdcash_v5_formal_r1",
-            "cp_hier_v4_holdcash_r5",
+            "split_heads_portfolio_daily_receiver_semantic_closure_r31",
+            "split_heads_portfolio_daily_source_forward_proxy_r33",
+            "portfolio_daily_source_forward_proxy_keep_risk",
+            "portfolio_daily_source_distribution_clean_pass",
         ),
     }
     archive_memory_sources = {
