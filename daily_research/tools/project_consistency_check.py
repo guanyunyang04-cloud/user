@@ -537,6 +537,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     pipeline_text = _read_text("daily_research/continuous_policy/pipeline_utils.py")
     simulator_text = _read_text("daily_research/continuous_policy/portfolio_simulator.py")
     label_text = _read_text("daily_research/continuous_policy/label_builder.py")
+    allocation_teacher_text = _read_text("daily_research/continuous_policy/allocation_teacher.py")
     gate_report_text = _read_text("daily_research/tools/portfolio_daily_ranking_gate_report.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
@@ -636,6 +637,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ),
         ("split_heads_portfolio_daily_receiver_semantic_closure_r31", "r31 receiver semantic closure study profile"),
         ("split_heads_portfolio_daily_source_forward_proxy_r33", "r33 source forward proxy study profile"),
+        ("split_heads_portfolio_daily_allocation_breadth_r34", "r34 allocation breadth study profile"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -814,6 +816,27 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         "continuous_policy r33 source forward proxy / release conviction / clean-pass contract is missing markers.",
     )
     _require(
+        "build_allocation_teacher_summary" in allocation_teacher_text
+        and "source_receiver_cash_allocation_teacher_ready" in allocation_teacher_text
+        and "build_allocation_teacher_summary" in pipeline_text
+        and "allocation_teacher_summary_mean" in pipeline_text
+        and "portfolio_daily_receiver_candidate_breadth" in study_text
+        and "portfolio_daily_clean_source_candidate_breadth" in study_text
+        and "portfolio_daily_joint_economic_quality_gate" in study_text
+        and "split_heads_portfolio_daily_allocation_breadth_r34" in study_text,
+        failures,
+        "continuous_policy_r34_contract_missing",
+        "continuous_policy r34 allocation breadth / economic quality / allocation teacher scaffold is missing markers.",
+    )
+    _require(
+        "_trial_is_portfolio_daily_v2_qualified" in study_text
+        and "source_training_evidence_sufficient" in study_text
+        and "confirm_training_evidence_sufficient" in study_text,
+        failures,
+        "continuous_policy_r34_confirm_candidate_contract_missing",
+        "continuous_policy r34 confirm candidate selection must prefer sufficient training evidence and v2 gate qualification.",
+    )
+    _require(
         "build_monthly_return_frame" in pipeline_text,
         failures,
         "continuous_policy_monthly_contract_missing",
@@ -904,7 +927,9 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "continuous_policy",
             "split_heads_portfolio_daily_receiver_semantic_closure_r31",
             "split_heads_portfolio_daily_source_forward_proxy_r33",
+            "split_heads_portfolio_daily_allocation_breadth_r34",
             "portfolio_daily_source_distribution_clean_pass",
+            "portfolio_daily_joint_economic_quality_gate",
             "source/receiver/cash listwise allocation teacher",
         ),
         "daily_research/brain/knowledge_center.md": (
@@ -967,8 +992,10 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "analyze_behavior_gap.py",
             "split_heads_portfolio_daily_receiver_semantic_closure_r31",
             "split_heads_portfolio_daily_source_forward_proxy_r33",
+            "split_heads_portfolio_daily_allocation_breadth_r34",
             "portfolio_daily_source_forward_proxy_keep_risk",
             "portfolio_daily_source_distribution_clean_pass",
+            "allocation_teacher_summary_mean",
         ),
     }
     archive_memory_sources = {

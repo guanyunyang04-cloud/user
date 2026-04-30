@@ -6,6 +6,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from daily_research.continuous_policy.allocation_teacher import (
+    build_allocation_teacher_summary,
+    summarize_allocation_teacher_rows,
+)
 from daily_research.continuous_policy.label_builder import (
     FuturePathMetrics,
     build_action_labels_for_date,
@@ -4778,6 +4782,7 @@ def build_training_matrices(
     action_rows: list[dict[str, Any]] = []
     teacher_returns: list[float] = []
     budget_diagnostic_rows: list[dict[str, float]] = []
+    allocation_teacher_rows: list[dict[str, float]] = []
 
     for idx, signal_dt in enumerate(dates):
         state_frame = build_cross_section_state(prepared, date=signal_dt, portfolio_state=portfolio)
@@ -4787,6 +4792,7 @@ def build_training_matrices(
             future_metrics=future_metrics,
             label_config=resolved_label_config,
         )
+        allocation_teacher_rows.append(build_allocation_teacher_summary(label_frame))
         daily_features = build_daily_state_features(state_frame)
         global_targets = build_teacher_global_targets(label_frame, label_config=resolved_label_config)
         global_targets, budget_diagnostics = _apply_budget_objective_targets(
@@ -4850,6 +4856,7 @@ def build_training_matrices(
             str(column): float(pd.DataFrame(budget_diagnostic_rows)[column].mean())
             for column in (pd.DataFrame(budget_diagnostic_rows).columns if budget_diagnostic_rows else [])
         },
+        "allocation_teacher_summary_mean": summarize_allocation_teacher_rows(allocation_teacher_rows),
         "teacher_action_distribution": {
             str(key): int(value)
             for key, value in full_sample_frame["action_label"].astype(str).value_counts().sort_index().items()

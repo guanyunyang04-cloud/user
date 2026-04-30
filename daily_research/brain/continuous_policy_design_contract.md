@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-04-29`
+快照日期：`2026-04-30`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -27,6 +27,9 @@
 - r33 source forward proxy：`portfolio_daily_source_forward_proxy_keep_risk` 必须进入 label、训练头、推理融合、source candidate gate、feedback、continuity metrics、study scoring 与 behavior audit；旧 artifact 缺少该 head 时只能使用 fallback proxy。
 - r33 release conviction：`portfolio_daily_source_release_conviction` 必须联合 source score、release quality、economic release、executability、release capacity、opportunity cost、forward-strength brake、bad forward spread、economic block 与 proxy keep-risk。
 - r33 distribution clean-pass：source candidate 必须同时通过 forward proxy、`portfolio_daily_source_release_conviction_pass` 与 `portfolio_daily_source_distribution_clean_pass`；强势正 forward 误卖不得被均值掩盖。
+- r34 allocation breadth scaffold：`split_heads_portfolio_daily_allocation_breadth_r34` 只作为 bounded confirm 搜索入口，必须保留 r31/r33 守门，并通过 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth` 与 `portfolio_daily_joint_economic_quality_gate` 把广度和经济质量写入 scoring。
+- r34 confirm candidate 合同：v2 gated profile 的 confirm 候选必须优先满足 `training_evidence_status = sufficient` 与 v2 gate qualified；不得让 insufficient screening 高分 trial 绕过 confirm 候选选择。
+- listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
 - 当前 gate / scoring 合同继续使用 `portfolio_daily_ranking_v2_gated`，不能用局部 clean-pass 指标替代 v2 gates 与 confirm stability。
 
@@ -45,6 +48,7 @@
 - r33 trainable proxy 可以防错，但会让 source dormant；source-soft 可以恢复 source，却会强势误卖。
 - r33 release conviction 可以恢复收益和 source 数量，但单独不足以控制尾部正 forward source。
 - r33 clean-pass + repeat relief 可以清掉强势误卖，但 clean-pass bounded 仍出现 source/receiver 广度不足和 receiver-source spread 不稳。
+- r34 已补上 receiver/source breadth scoring、joint economic quality penalty 与 allocation teacher summary，并完成 bounded/evidence-confirm；最新 fresh confirm 训练证据充分且 receiver/cash/source 执行率达标，但因 `receiver-source spread` 转负、`source_positive_forward_sell_share` 与 `source_strong_positive_forward_sell_count` 失控，仍不是 verdict。
 - 当前瓶颈已经从“能不能卖”推进到“能否在 clean source 约束下恢复足够多正确卖出，并同步找到正 forward receiver”。
 
 ## 当前禁止事项
@@ -54,7 +58,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：扩大 clean source breadth，恢复 flat-open receiver breadth，并保持 receiver 授权闭包不退化。
+- 短期：不要继续扩大 r34 搜索面；先强化 source opportunity cost / release label / distribution feedback，让 positive/strong positive source sell 与负 receiver-source spread 在训练目标中成为硬失败信号。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution 和 drawdown 更深地写进 objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
 
@@ -65,6 +69,7 @@
 - r24-r26：listwise allocation、source-release listwise、allocation teacher。
 - r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
 - r31/r33：当前合同核心，分别约束 receiver 语义闭包与 source distribution clean-pass。
+- r34：当前执行入口，聚焦 allocation breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

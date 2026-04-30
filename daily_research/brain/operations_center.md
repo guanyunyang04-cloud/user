@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-04-29`
+快照日期：`2026-04-30`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/` 或 `episodic_memory.md`。
@@ -44,6 +44,8 @@
 - 当前正式默认仍是 research / shadow，不能切换 live 或 promotion。
 - r31 receiver semantic closure 入口：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，重点读取 `direct_action_authorization_subset_violation_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`、`portfolio_daily_receiver_unrealized_deploy_share`。
 - r33 source forward proxy / clean-pass 入口：`split_heads_portfolio_daily_source_forward_proxy_r33`，重点读取 `portfolio_daily_source_forward_proxy_keep_risk`、`portfolio_daily_source_release_conviction`、`portfolio_daily_source_distribution_clean_pass`、`portfolio_daily_source_positive_forward_sell_share`、`portfolio_daily_source_strong_positive_forward_sell_count`。
+- r34 allocation breadth 入口：`split_heads_portfolio_daily_allocation_breadth_r34`，重点读取 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate` 与 `allocation_teacher_summary_mean`。
+- r34 最新证据入口：`cp_v3_portfolio_daily_allocation_breadth_r34_bounded_20260430` 与 `cp_v3_portfolio_daily_allocation_breadth_r34_evidence_confirm_20260430`；读取 `portfolio_daily_v2_confirm_stability_checks`，重点看 `receiver_minus_source_forward_excess_5d`、`source_positive_forward_sell_share`、`source_strong_positive_forward_sell_count` 与 `training_evidence_status`。
 - 当前核心 loss / objective：`alpha_result_value_budget_split_v20` 与 `portfolio_daily_ranking_v2_gated`。
 - 当前核心 simulator calibration：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`，并继承 v13 cash-aware 与 v14 source-exec 语义。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。

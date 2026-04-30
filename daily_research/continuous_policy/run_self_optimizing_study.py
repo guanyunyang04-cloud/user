@@ -764,6 +764,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14, 0.16],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_allocation_breadth_r34": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v20"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v9", "result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [8.0e-4, 1.0e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.16, 0.18],
+        "daily_dropout": [0.12, 0.14],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1443,6 +1460,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.16,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_allocation_breadth_r34": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v20",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 8.0e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.18,
+        "daily_dropout": 0.14,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1487,6 +1521,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_receiver_semantic_closure_r31": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_source_distribution_quality_r32": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_source_forward_proxy_r33": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_allocation_breadth_r34": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1909,6 +1944,13 @@ def _score_protocol_summary(
         )
         or 0.0
     )
+    portfolio_daily_source_candidate_count = float(
+        semantic_conflicts.get(
+            "portfolio_daily_source_candidate_count",
+            continuity.get("portfolio_daily_source_candidate_count", 0.0),
+        )
+        or 0.0
+    )
     portfolio_daily_source_realized_sell_rate = float(
         semantic_conflicts.get(
             "portfolio_daily_source_realized_sell_rate",
@@ -2024,6 +2066,16 @@ def _score_protocol_summary(
             continuity.get(
                 "portfolio_daily_source_release_conviction_mean",
                 metrics.get("avg_portfolio_daily_source_release_conviction", 0.0),
+            ),
+        )
+        or 0.0
+    )
+    portfolio_daily_source_distribution_clean_pass_mean = float(
+        semantic_conflicts.get(
+            "portfolio_daily_source_distribution_clean_pass_mean",
+            continuity.get(
+                "portfolio_daily_source_distribution_clean_pass_mean",
+                metrics.get("avg_portfolio_daily_source_distribution_clean_pass", 0.0),
             ),
         )
         or 0.0
@@ -2907,9 +2959,39 @@ def _score_protocol_summary(
             if portfolio_daily_ranking_objective and portfolio_daily_receiver_target_count >= 3.0
             else 0.0
         )
+        portfolio_daily_receiver_candidate_breadth = (
+            _bounded(portfolio_daily_receiver_candidate_count, 3.0, 9.0)
+            if portfolio_daily_ranking_objective
+            else 0.0
+        )
+        source_clean_quality = (
+            min(max(portfolio_daily_source_distribution_clean_pass_mean, 0.0), 1.0) * 0.42
+            + (1.0 - _bounded(portfolio_daily_source_forward_proxy_keep_risk_mean, 0.16, 0.46)) * 0.24
+            + _bounded(portfolio_daily_source_release_conviction_mean, 0.24, 0.48) * 0.24
+            + (1.0 - _bounded(portfolio_daily_source_positive_forward_sell_share, 0.20, 0.55)) * 0.10
+        )
+        portfolio_daily_clean_source_candidate_breadth = (
+            _bounded(portfolio_daily_source_candidate_count, 3.0, 9.0)
+            * float(min(max(source_clean_quality, 0.0), 1.0))
+            if portfolio_daily_ranking_objective
+            else 0.0
+        )
         portfolio_daily_exposure_utilization_gap = (
             max(0.0, 0.52 - portfolio_daily_exposure_utilization)
             if portfolio_daily_ranking_objective and avg_gross_exposure_target >= 0.42
+            else 0.0
+        )
+        portfolio_daily_joint_economic_quality_gap = (
+            max(0.0, 0.006 - monthly_return_mean) * 12.0
+            + max(0.0, 0.002 - portfolio_daily_receiver_minus_source_forward_excess_5d) * 10.0
+            + (
+                max(0.0, 0.82 - portfolio_daily_receiver_realized_deploy_rate) * 0.42
+                if portfolio_daily_receiver_target_count >= 3.0
+                else 0.0
+            )
+            + portfolio_daily_exposure_utilization_gap * 0.70
+            + max(0.0, abs(min(max_drawdown, 0.0)) - 0.14) * 1.80
+            if portfolio_daily_ranking_objective
             else 0.0
         )
         performance_breakdown = {
@@ -3036,6 +3118,12 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_count": min(portfolio_daily_source_target_count, 14.0)
             * 0.018
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_candidate_breadth": portfolio_daily_receiver_candidate_breadth
+            * 0.11
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_clean_source_candidate_breadth": portfolio_daily_clean_source_candidate_breadth
+            * 0.13
             * portfolio_daily_ranking_weight,
             "portfolio_daily_receiver_exec_guard_count": min(portfolio_daily_receiver_exec_guard_count, 20.0)
             * 0.010
@@ -3183,6 +3271,9 @@ def _score_protocol_summary(
             "portfolio_daily_exposure_utilization_gap_penalty": -portfolio_daily_exposure_utilization_gap
             * 1.20
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_joint_economic_quality_gate": -portfolio_daily_joint_economic_quality_gap
+            * 1.12
+            * portfolio_daily_ranking_weight,
             "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 10.80,
             "deploy_funding_release_consistency_penalty": -(
                 max(0.0, 0.56 - deploy_funding_release_consistent_share) * 2.35
@@ -3256,6 +3347,12 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_open_breadth_candidate_count": portfolio_daily_open_breadth_bonus
             * 1.10
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_candidate_breadth": portfolio_daily_receiver_candidate_breadth
+            * 0.13
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_clean_source_candidate_breadth": portfolio_daily_clean_source_candidate_breadth
+            * 0.15
             * portfolio_daily_ranking_weight,
             "portfolio_daily_exposure_utilization": _bounded(
                 portfolio_daily_exposure_utilization,
@@ -3373,6 +3470,9 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_exposure_utilization_gap_penalty": -portfolio_daily_exposure_utilization_gap
             * 1.35
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_joint_economic_quality_gate": -portfolio_daily_joint_economic_quality_gap
+            * 0.86
             * portfolio_daily_ranking_weight,
             "deploy_funding_forward_penalty": -max(0.0, deploy_funding_rebalance_forward_excess_5d) * 11.60,
             "deploy_funding_against_hold_penalty": -(
@@ -4184,6 +4284,14 @@ def _portfolio_daily_v2_confirm_stability(
     source_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_metrics = dict(source_metrics or {})
+    source_training_evidence_sufficient = (
+        str(source_metrics.get("training_evidence_status", "") or "").strip().lower() == "sufficient"
+        if source_metrics
+        else True
+    )
+    confirm_training_evidence_sufficient = (
+        str(confirm_metrics.get("training_evidence_status", "") or "").strip().lower() == "sufficient"
+    )
     confirm_gate_pass = _portfolio_daily_v2_gate_pass(confirm_metrics)
     source_gate_pass = _portfolio_daily_v2_gate_pass(source_metrics) if source_metrics else False
     annual_return = _metric(confirm_metrics, "annual_return")
@@ -4225,6 +4333,8 @@ def _portfolio_daily_v2_confirm_stability(
         "add_to_hold_conflict_share",
     )
     stable_checks = {
+        "source_training_evidence_sufficient": source_training_evidence_sufficient,
+        "confirm_training_evidence_sufficient": confirm_training_evidence_sufficient,
         "confirm_gate_pass": confirm_gate_pass,
         "confirm_annual_return_floor": annual_return >= 0.12,
         "confirm_sharpe_floor": sharpe >= 0.50,
@@ -4253,6 +4363,8 @@ def _portfolio_daily_v2_confirm_stability(
     return {
         "stable_confirmatory": not failed,
         "failed_stability_checks": failed,
+        "source_training_evidence_status": str(source_metrics.get("training_evidence_status", "") or ""),
+        "confirm_training_evidence_status": str(confirm_metrics.get("training_evidence_status", "") or ""),
         "source_gate_pass": source_gate_pass,
         "confirm_gate_pass": confirm_gate_pass,
         "annual_return_delta": annual_delta if source_metrics else 0.0,
@@ -4325,6 +4437,14 @@ class TrialResult:
         }
 
 
+def _trial_has_sufficient_training_evidence(item: TrialResult) -> bool:
+    return str(item.primary_metrics.get("training_evidence_status", "") or "").strip().lower() == "sufficient"
+
+
+def _trial_is_portfolio_daily_v2_qualified(item: TrialResult) -> bool:
+    return _trial_has_sufficient_training_evidence(item) and _portfolio_daily_v2_gate_pass(item.primary_metrics)
+
+
 def _pick_confirmatory_candidates(
     completed_trials: list[TrialResult],
     *,
@@ -4333,6 +4453,12 @@ def _pick_confirmatory_candidates(
 ) -> list[tuple[str, TrialResult]]:
     if not completed_trials or max_candidates <= 0:
         return []
+    v2_qualified_trials = [item for item in completed_trials if _trial_is_portfolio_daily_v2_qualified(item)]
+    evidence_sufficient_trials = [item for item in completed_trials if _trial_has_sufficient_training_evidence(item)]
+    if v2_qualified_trials:
+        completed_trials = v2_qualified_trials
+    elif evidence_sufficient_trials:
+        completed_trials = evidence_sufficient_trials
     candidates: list[tuple[str, TrialResult]] = []
     performance_champion = max(completed_trials, key=lambda item: float(item.performance_score))
     candidates.append(("performance_champion", performance_champion))
@@ -4705,10 +4831,22 @@ def main(argv: list[str] | None = None) -> int:
             for item in completed_confirmatory
             if item.trial_tag not in stable_confirmatory_tags
         ]
+    screening_fallback_pool = completed_screening
+    if objective_profile == "portfolio_daily_ranking_v2_gated":
+        v2_qualified_screening = [
+            item for item in completed_screening if _trial_is_portfolio_daily_v2_qualified(item)
+        ]
+        evidence_sufficient_screening = [
+            item for item in completed_screening if _trial_has_sufficient_training_evidence(item)
+        ]
+        if v2_qualified_screening:
+            screening_fallback_pool = v2_qualified_screening
+        elif evidence_sufficient_screening:
+            screening_fallback_pool = evidence_sufficient_screening
     champion = (
         qualified_confirmatory[0].to_summary()
         if qualified_confirmatory
-        else (completed_screening[0].to_summary() if completed_screening else {})
+        else (screening_fallback_pool[0].to_summary() if screening_fallback_pool else {})
     )
     historical = _historical_leaderboard(
         pool_name=args.pool_name,

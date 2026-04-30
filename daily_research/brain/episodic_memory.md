@@ -1122,3 +1122,13 @@
 - GPU/yolos 证据：本轮训练/评估均用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台自然结束；关键 bounded run 的 diagnostics 显示 `device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`。
 - 行动后复盘：r33 的价值是把 source 尾部误卖从后验 gate 推进到语义层，但它还没有解决组合日资金分配本体。后续不应把 clean-pass 重新放宽，而应扩大 clean source breadth、恢复 receiver breadth，并把 monthly return、exposure utilization、receiver realized deploy 与 positive spread distribution 更深地写进 objective/feedback。
 - 决策：r33 当前仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-04-30 r34 allocation breadth bounded / evidence-confirm 复盘
+- 行动前判断：r34 已把 receiver/source breadth、joint economic quality 与 allocation teacher summary 接入 scoring / summary，但必须用 bounded screening + fresh confirm 验证是否稳定，而不能把 scaffold 当 verdict。
+- 执行：用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`、`KMP_DUPLICATE_LIB_OK=TRUE` 前台运行 `cp_v3_portfolio_daily_allocation_breadth_r34_bounded_20260430`，完成 4 个 screening、2 个 confirmatory。用户中断发生在 orchestrator 写最终 study summary 前；检查无残留 Python 进程后，补齐 `confirm_02` strict resume，并重建 `study_summary.json` / `trial_ranking.csv`。
+- 工程修复：发现旧 confirm candidate 选择会让 `training_evidence_status = insufficient` 的高分 screening trial 进入 confirm；已修为 v2 gated profile 候选优先 `training_evidence_status = sufficient` + v2 gate qualified，并把 confirm stability 显式检查 source/confirm training evidence。
+- 追加验证：基于只含 screening 的 seed `cp_v3_portfolio_daily_allocation_breadth_r34_screening_seed_20260430`，运行 `cp_v3_portfolio_daily_allocation_breadth_r34_evidence_confirm_20260430`，只 fresh confirm evidence-sufficient 的 `trial_03`。
+- GPU/yolos 证据：evidence confirm 的 diagnostics 为 `trainer_backend = formal_torch_seq_v3`、`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、`completed_epochs = 61`、`best_epoch = 51`、`resume_mode = fresh`。
+- 结果：evidence confirm 达到 `training_evidence_status = sufficient`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate = 0.668333`、`annual_return = 0.808193`、`monthly_return_mean = 0.047187`，但 `stable_confirmatory = false`。
+- 失败本质：核心失败不是 receiver 可执行性，也不是脚本/GPU 链路，而是 source 分布与资金去向相对价值：`receiver_minus_source_forward_excess_5d = -0.126380`、`source_forward_excess_5d = +0.085735`、`source_positive_forward_sell_share = 0.70`、`source_strong_positive_forward_sell_count = 4`、`source_max_forward_excess_5d = 0.548741`。
+- 决策：r34 仍是 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。下一轮不应扩大搜索面，而应把 source opportunity cost / release label / distribution feedback 加强到能硬性压住正 forward source 误卖与负 receiver-source spread。
