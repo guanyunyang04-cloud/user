@@ -2,7 +2,13 @@ import unittest
 
 import pandas as pd
 
+from daily_research.continuous_policy.allocation_optimizer import (
+    AllocationOptimizerConstraints,
+    build_unified_allocation_problem,
+    solve_semidifferentiable_allocation,
+)
 from daily_research.continuous_policy.allocation_teacher import build_allocation_teacher_summary
+from daily_research.continuous_policy.model_seq_v3 import LOSS_PROFILE_CONFIGS
 from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILE_BASE_TRIALS,
     SEARCH_PROFILE_DEFAULT_OBJECTIVES,
@@ -222,6 +228,182 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(summary["allocation_transfer_intensity_target"], 0.40)
         self.assertGreaterEqual(summary["allocation_cash_reserve_target"], 0.0)
         self.assertLessEqual(summary["allocation_cash_reserve_target"], 1.0)
+
+    def test_unified_allocation_problem_penalizes_positive_forward_and_opportunity_cost_source(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {
+                    "stock": "strong_source",
+                    "current_weight": 0.14,
+                    "portfolio_daily_source_score": 0.88,
+                    "portfolio_daily_source_candidate_mask": 1.0,
+                    "portfolio_daily_source_executability": 1.0,
+                    "portfolio_daily_source_forward_excess_5d": 0.12,
+                    "portfolio_daily_source_receiver_forward_spread": -0.08,
+                    "portfolio_daily_source_opportunity_cost": 0.86,
+                },
+                {
+                    "stock": "clean_source",
+                    "current_weight": 0.12,
+                    "portfolio_daily_source_score": 0.58,
+                    "portfolio_daily_source_candidate_mask": 1.0,
+                    "portfolio_daily_source_executability": 1.0,
+                    "portfolio_daily_source_forward_excess_5d": -0.04,
+                    "portfolio_daily_source_receiver_forward_spread": 0.05,
+                    "portfolio_daily_source_opportunity_cost": 0.06,
+                },
+            ]
+        )
+
+        problem = build_unified_allocation_problem(frame)
+        by_stock = problem.set_index("stock")
+
+        self.assertGreater(
+            by_stock.loc["strong_source", "portfolio_daily_source_positive_forward_penalty"],
+            by_stock.loc["clean_source", "portfolio_daily_source_positive_forward_penalty"],
+        )
+        self.assertGreater(
+            by_stock.loc["strong_source", "portfolio_daily_source_opportunity_cost_penalty"],
+            by_stock.loc["clean_source", "portfolio_daily_source_opportunity_cost_penalty"],
+        )
+        self.assertGreater(
+            by_stock.loc["clean_source", "portfolio_daily_receiver_source_spread_reward"],
+            by_stock.loc["strong_source", "portfolio_daily_receiver_source_spread_reward"],
+        )
+        self.assertGreater(
+            by_stock.loc["clean_source", "portfolio_daily_unified_source_score"],
+            by_stock.loc["strong_source", "portfolio_daily_unified_source_score"],
+        )
+
+    def test_semidifferentiable_allocation_solver_respects_cash_turnover_and_position_cap(self) -> None:
+        problem = build_unified_allocation_problem(
+            pd.DataFrame(
+                [
+                    {
+                        "stock": "bad_source",
+                        "current_weight": 0.18,
+                        "portfolio_daily_source_score": 0.90,
+                        "portfolio_daily_source_candidate_mask": 1.0,
+                        "portfolio_daily_source_executability": 1.0,
+                        "portfolio_daily_source_forward_excess_5d": 0.13,
+                        "portfolio_daily_source_receiver_forward_spread": -0.09,
+                        "portfolio_daily_source_opportunity_cost": 0.82,
+                    },
+                    {
+                        "stock": "clean_source",
+                        "current_weight": 0.14,
+                        "portfolio_daily_source_score": 0.62,
+                        "portfolio_daily_source_candidate_mask": 1.0,
+                        "portfolio_daily_source_executability": 1.0,
+                        "portfolio_daily_source_forward_excess_5d": -0.05,
+                        "portfolio_daily_source_receiver_forward_spread": 0.08,
+                        "portfolio_daily_source_opportunity_cost": 0.04,
+                    },
+                    {
+                        "stock": "new_receiver",
+                        "current_weight": 0.00,
+                        "portfolio_daily_receiver_score": 0.86,
+                        "portfolio_daily_receiver_candidate_mask": 1.0,
+                        "portfolio_daily_receiver_executability": 1.0,
+                        "portfolio_daily_receiver_add_headroom": 0.18,
+                    },
+                    {
+                        "stock": "held_receiver",
+                        "current_weight": 0.06,
+                        "portfolio_daily_receiver_score": 0.70,
+                        "portfolio_daily_receiver_candidate_mask": 1.0,
+                        "portfolio_daily_receiver_executability": 1.0,
+                        "portfolio_daily_receiver_add_headroom": 0.10,
+                    },
+                ]
+            )
+        )
+        constraints = AllocationOptimizerConstraints(
+            cash_reserve_target=0.48,
+            turnover_limit=0.18,
+            max_position_weight=0.20,
+            transaction_cost_bps=3.0,
+            slippage_bps=7.0,
+            sell_tax_bps=10.0,
+        )
+
+        solution = solve_semidifferentiable_allocation(problem, constraints=constraints)
+        target = solution.target_weight
+
+        self.assertLessEqual(float(target.max()), constraints.max_position_weight + 1.0e-9)
+        self.assertGreaterEqual(solution.cash_after, constraints.cash_reserve_target - 1.0e-9)
+        self.assertLessEqual(solution.expected_turnover, constraints.turnover_limit + 1.0e-9)
+        self.assertLessEqual(solution.buy_turnover, solution.sell_turnover + solution.available_cash_to_deploy + 1.0e-9)
+        self.assertLess(target.loc["clean_source"], float(problem.set_index("stock").loc["clean_source", "current_weight"]))
+        self.assertGreaterEqual(target.loc["bad_source"], target.loc["clean_source"])
+        self.assertTrue(solution.diagnostics["constraint_violations"] == 0.0)
+
+    def test_r35_unified_allocation_profile_and_loss_targets_are_registered(self) -> None:
+        tag = "split_heads_portfolio_daily_unified_allocation_r35"
+        self.assertIn(tag, SEARCH_PROFILES)
+        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v21")
+
+        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"]["sample_scalar_loss_weights"]
+        for column in (
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_unified_source_score",
+            "portfolio_daily_unified_cash_score",
+            "portfolio_daily_source_positive_forward_penalty",
+            "portfolio_daily_source_opportunity_cost_penalty",
+            "portfolio_daily_receiver_source_spread_reward",
+            "portfolio_daily_unified_allocation_objective",
+        ):
+            self.assertIn(column, weights)
+
+    def test_v2_scoring_rewards_unified_allocation_surface_quality(self) -> None:
+        weak = _score_protocol_summary(
+            _protocol_summary(
+                semantic={
+                    "portfolio_daily_receiver_minus_source_forward_excess_5d": -0.06,
+                    "portfolio_daily_source_positive_forward_sell_share": 0.72,
+                }
+            )
+            | {
+                "train": {
+                    "teacher_summary": {
+                        "unified_allocation_summary_mean": {
+                            "portfolio_daily_unified_allocation_objective": 0.18,
+                            "portfolio_daily_source_positive_forward_penalty": 0.68,
+                            "portfolio_daily_source_opportunity_cost_penalty": 0.62,
+                            "portfolio_daily_receiver_source_spread_reward": 0.10,
+                        }
+                    }
+                }
+            },
+            objective_profile="portfolio_daily_ranking_v2_gated",
+        )
+        strong = _score_protocol_summary(
+            _protocol_summary(
+                semantic={
+                    "portfolio_daily_receiver_minus_source_forward_excess_5d": 0.04,
+                    "portfolio_daily_source_positive_forward_sell_share": 0.10,
+                }
+            )
+            | {
+                "train": {
+                    "teacher_summary": {
+                        "unified_allocation_summary_mean": {
+                            "portfolio_daily_unified_allocation_objective": 0.74,
+                            "portfolio_daily_source_positive_forward_penalty": 0.08,
+                            "portfolio_daily_source_opportunity_cost_penalty": 0.12,
+                            "portfolio_daily_receiver_source_spread_reward": 0.62,
+                        }
+                    }
+                }
+            },
+            objective_profile="portfolio_daily_ranking_v2_gated",
+        )
+
+        self.assertIn("portfolio_daily_unified_allocation_objective", strong["score_breakdown"]["performance"])
+        self.assertIn("portfolio_daily_source_positive_forward_penalty", strong["score_breakdown"]["performance"])
+        self.assertGreater(strong["composite_score"], weak["composite_score"])
 
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(

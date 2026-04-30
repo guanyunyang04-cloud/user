@@ -538,6 +538,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
     simulator_text = _read_text("daily_research/continuous_policy/portfolio_simulator.py")
     label_text = _read_text("daily_research/continuous_policy/label_builder.py")
     allocation_teacher_text = _read_text("daily_research/continuous_policy/allocation_teacher.py")
+    allocation_optimizer_text = _read_text("daily_research/continuous_policy/allocation_optimizer.py")
     gate_report_text = _read_text("daily_research/tools/portfolio_daily_ranking_gate_report.py")
     for snippet, label in (
         ("--trainer-backend", "train_policy backend selector"),
@@ -638,6 +639,7 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         ("split_heads_portfolio_daily_receiver_semantic_closure_r31", "r31 receiver semantic closure study profile"),
         ("split_heads_portfolio_daily_source_forward_proxy_r33", "r33 source forward proxy study profile"),
         ("split_heads_portfolio_daily_allocation_breadth_r34", "r34 allocation breadth study profile"),
+        ("split_heads_portfolio_daily_unified_allocation_r35", "r35 unified allocation study profile"),
     ):
         _require(
             snippet in model_seq_v3_text or snippet in study_text,
@@ -829,6 +831,24 @@ def _check_continuous_policy_training_contract(failures: list[CheckResult]) -> N
         "continuous_policy r34 allocation breadth / economic quality / allocation teacher scaffold is missing markers.",
     )
     _require(
+        "AllocationOptimizerConstraints" in allocation_optimizer_text
+        and "build_unified_allocation_problem" in allocation_optimizer_text
+        and "attach_unified_allocation_targets" in allocation_optimizer_text
+        and "solve_semidifferentiable_allocation" in allocation_optimizer_text
+        and "portfolio_daily_source_positive_forward_penalty" in allocation_optimizer_text
+        and "portfolio_daily_source_opportunity_cost_penalty" in allocation_optimizer_text
+        and "portfolio_daily_receiver_source_spread_reward" in allocation_optimizer_text
+        and "attach_unified_allocation_targets" in pipeline_text
+        and "unified_allocation_summary_mean" in pipeline_text
+        and "alpha_result_value_budget_split_v21" in model_seq_v3_text
+        and "supports_portfolio_unified_allocation_heads" in model_seq_v3_text
+        and "split_heads_portfolio_daily_unified_allocation_r35" in study_text
+        and "portfolio_daily_unified_allocation_objective" in study_text,
+        failures,
+        "continuous_policy_r35_contract_missing",
+        "continuous_policy r35 unified source/receiver/cash allocation contract is missing optimizer, training, scoring or study markers.",
+    )
+    _require(
         "_trial_is_portfolio_daily_v2_qualified" in study_text
         and "source_training_evidence_sufficient" in study_text
         and "confirm_training_evidence_sufficient" in study_text,
@@ -928,8 +948,13 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "split_heads_portfolio_daily_receiver_semantic_closure_r31",
             "split_heads_portfolio_daily_source_forward_proxy_r33",
             "split_heads_portfolio_daily_allocation_breadth_r34",
+            "split_heads_portfolio_daily_unified_allocation_r35",
             "portfolio_daily_source_distribution_clean_pass",
             "portfolio_daily_joint_economic_quality_gate",
+            "portfolio_daily_unified_allocation_objective",
+            "portfolio_daily_source_positive_forward_penalty",
+            "portfolio_daily_source_opportunity_cost_penalty",
+            "portfolio_daily_receiver_source_spread_reward",
             "source/receiver/cash listwise allocation teacher",
         ),
         "daily_research/brain/knowledge_center.md": (
@@ -993,9 +1018,11 @@ def _check_memory_sync(failures: list[CheckResult]) -> None:
             "split_heads_portfolio_daily_receiver_semantic_closure_r31",
             "split_heads_portfolio_daily_source_forward_proxy_r33",
             "split_heads_portfolio_daily_allocation_breadth_r34",
+            "split_heads_portfolio_daily_unified_allocation_r35",
             "portfolio_daily_source_forward_proxy_keep_risk",
             "portfolio_daily_source_distribution_clean_pass",
             "allocation_teacher_summary_mean",
+            "unified_allocation_summary_mean",
         ),
     }
     archive_memory_sources = {

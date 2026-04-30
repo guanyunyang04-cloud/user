@@ -1198,6 +1198,34 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v20"] = {
         "portfolio_cash_margin_total": 0.12,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v20"]["sample_scalar_loss_weights"],
+        "portfolio_daily_receiver_score": 2.46,
+        "portfolio_daily_source_score": 2.62,
+        "portfolio_daily_cash_score": 1.46,
+        "portfolio_daily_unified_receiver_score": 1.88,
+        "portfolio_daily_unified_source_score": 2.18,
+        "portfolio_daily_unified_cash_score": 1.42,
+        "portfolio_daily_source_positive_forward_penalty": 1.86,
+        "portfolio_daily_source_opportunity_cost_penalty": 1.74,
+        "portfolio_daily_receiver_source_spread_reward": 1.72,
+        "portfolio_daily_unified_allocation_objective": 1.64,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v20"]["daily_target_loss_weights"],
+        "turnover_budget": 1.34,
+        "budget_deploy_signal_target": 1.52,
+        "budget_cash_timing_signal_target": 1.56,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v20"]["multi_objective_loss_weights"],
+        "scalar_total": 3.02,
+        "portfolio_source_pairwise_total": 0.50,
+        "portfolio_receiver_pairwise_total": 0.28,
+        "portfolio_cash_margin_total": 0.16,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -2075,6 +2103,13 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_funding_closure_score_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_allocation_transfer_score_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_allocation_dead_branch_risk_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_unified_receiver_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_unified_source_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_unified_cash_score_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_positive_forward_penalty_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_source_opportunity_cost_penalty_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_receiver_source_spread_reward_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_unified_allocation_objective_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -2143,6 +2178,13 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_funding_closure_score": torch.sigmoid(self.portfolio_funding_closure_score_head(fused).squeeze(-1)),
             "portfolio_daily_allocation_transfer_score": torch.sigmoid(self.portfolio_allocation_transfer_score_head(fused).squeeze(-1)),
             "portfolio_daily_allocation_dead_branch_risk": torch.sigmoid(self.portfolio_allocation_dead_branch_risk_head(fused).squeeze(-1)),
+            "portfolio_daily_unified_receiver_score": torch.sigmoid(self.portfolio_unified_receiver_score_head(fused).squeeze(-1)),
+            "portfolio_daily_unified_source_score": torch.sigmoid(self.portfolio_unified_source_score_head(fused).squeeze(-1)),
+            "portfolio_daily_unified_cash_score": torch.sigmoid(self.portfolio_unified_cash_score_head(fused).squeeze(-1)),
+            "portfolio_daily_source_positive_forward_penalty": torch.sigmoid(self.portfolio_source_positive_forward_penalty_head(fused).squeeze(-1)),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.sigmoid(self.portfolio_source_opportunity_cost_penalty_head(fused).squeeze(-1)),
+            "portfolio_daily_receiver_source_spread_reward": torch.sigmoid(self.portfolio_receiver_source_spread_reward_head(fused).squeeze(-1)),
+            "portfolio_daily_unified_allocation_objective": torch.sigmoid(self.portfolio_unified_allocation_objective_head(fused).squeeze(-1)),
         }
 
 
@@ -2546,6 +2588,19 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     training_diagnostics["supports_portfolio_allocation_teacher_heads"] = (
         not portfolio_allocation_teacher_missing
     )
+    portfolio_unified_allocation_missing = any(
+        name.startswith("portfolio_unified_receiver_score_head.")
+        or name.startswith("portfolio_unified_source_score_head.")
+        or name.startswith("portfolio_unified_cash_score_head.")
+        or name.startswith("portfolio_source_positive_forward_penalty_head.")
+        or name.startswith("portfolio_source_opportunity_cost_penalty_head.")
+        or name.startswith("portfolio_receiver_source_spread_reward_head.")
+        or name.startswith("portfolio_unified_allocation_objective_head.")
+        for name in missing_key_names
+    )
+    training_diagnostics["supports_portfolio_unified_allocation_heads"] = (
+        not portfolio_unified_allocation_missing
+    )
     return TorchContinuousPolicySeqArtifact(
         sample_model=sample_model,
         daily_model=daily_model,
@@ -2913,6 +2968,41 @@ def fit_policy_models_v3(
         ),
         "portfolio_daily_allocation_dead_branch_risk": np.clip(
             sample_frame.get("portfolio_daily_allocation_dead_branch_risk", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_unified_receiver_score": np.clip(
+            sample_frame.get("portfolio_daily_unified_receiver_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_unified_source_score": np.clip(
+            sample_frame.get("portfolio_daily_unified_source_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_unified_cash_score": np.clip(
+            sample_frame.get("portfolio_daily_unified_cash_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_positive_forward_penalty": np.clip(
+            sample_frame.get("portfolio_daily_source_positive_forward_penalty", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_opportunity_cost_penalty": np.clip(
+            sample_frame.get("portfolio_daily_source_opportunity_cost_penalty", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_receiver_source_spread_reward": np.clip(
+            sample_frame.get("portfolio_daily_receiver_source_spread_reward", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_unified_allocation_objective": np.clip(
+            sample_frame.get("portfolio_daily_unified_allocation_objective", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -3370,6 +3460,18 @@ def fit_policy_models_v3(
                 "portfolio_daily_funding_closure_score",
                 "portfolio_daily_allocation_transfer_score",
                 "portfolio_daily_allocation_dead_branch_risk",
+            )
+        ),
+        "supports_portfolio_unified_allocation_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "portfolio_daily_unified_receiver_score",
+                "portfolio_daily_unified_source_score",
+                "portfolio_daily_unified_cash_score",
+                "portfolio_daily_source_positive_forward_penalty",
+                "portfolio_daily_source_opportunity_cost_penalty",
+                "portfolio_daily_receiver_source_spread_reward",
+                "portfolio_daily_unified_allocation_objective",
             )
         ),
         "supports_funding_release_discipline": (

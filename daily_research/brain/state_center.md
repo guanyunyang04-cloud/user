@@ -9,7 +9,7 @@
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
-- continuous_policy 最新有效研究状态为 r34 bounded/evidence-confirm 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass 已保留，r34 已把 receiver/source breadth、joint economic quality 与 allocation teacher 摘要接入 scoring / summary；最新 fresh confirm 训练证据充分，但 source 分布与 receiver-source spread 未通过 v2/stability。
+- continuous_policy 最新有效研究状态为 r35 unified allocation 工程合同之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth 仍保留；r35 已把 source/receiver/cash 改为同一个 listwise allocation problem 的训练 surface，并把 receiver-source spread、positive source forward penalty 与 source opportunity cost 写入训练目标、summary 与 scoring，但尚未跑正式 bounded confirm。
 - 未完成正式判定前，不得 promotion、不得 live、不得改 active artifact。
 
 ## 当前接管入口
@@ -27,15 +27,15 @@
 - r34 bounded screening 暴露 candidate selection 合同漏洞：旧逻辑会让 `training_evidence_status = insufficient` 的高分 trial 进入 confirm；已修为 confirm 候选优先 evidence sufficient + v2 gate qualified。
 - r34 evidence-qualified fresh confirm 指向真实瓶颈：`training_evidence_status = sufficient`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate > 0` 可以同时成立，但 `receiver-source spread` 可大幅转负，且 positive/strong positive source sell 分布失控。
 - 当前 r31 profile 标记：`split_heads_portfolio_daily_receiver_semantic_closure_r31`；核心审计字段为 `direct_action_authorization_subset_violation_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`。
-- 当前 r33 profile 标记：`split_heads_portfolio_daily_source_forward_proxy_r33`；当前 r34 profile 标记：`split_heads_portfolio_daily_allocation_breadth_r34`。
+- 当前 r33 profile 标记：`split_heads_portfolio_daily_source_forward_proxy_r33`；当前 r34 profile 标记：`split_heads_portfolio_daily_allocation_breadth_r34`；当前 r35 profile 标记：`split_heads_portfolio_daily_unified_allocation_r35`。
 - 当前核心 objective / calibration 标记为 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`；新增 scoring 标记为 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate`。
 
 ## 当前优先级
 - P0：保持 live / active artifact 冻结，只在 research / shadow 范围推进。
 - P1：维护主分脑入口精炼，避免 `state_center.md` 和 `operations_center.md` 继续变成长日志。
 - P2：继续把 receiver 可执行性、source 分布质量、monthly return、exposure utilization、realized deploy 与 drawdown 写入 objective / feedback / gate。
-- P3：下一轮研究不应继续放大 r34 搜索面；应先把 positive/strong positive source sell distribution、receiver-source spread 与 source opportunity cost/release label 更深地写入 objective/label/feedback。
-- P4：中期正路仍是 source/receiver/cash listwise allocation teacher；当前 `build_allocation_teacher_summary` 只作为 teacher surface 摘要入口，未替代 live 策略。
+- P3：下一轮研究应优先跑 r35 bounded screening + fresh confirm，检验 `portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward` 是否能稳定压住 r34 的正 forward source 误卖。
+- P4：中期正路仍是 source/receiver/cash listwise allocation teacher 向正式 allocation layer 迁移；`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 cash、turnover、position cap 与 transaction cost；simulator guard 只保留最后安全层。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。
@@ -58,6 +58,7 @@
 - r31：receiver semantic closure，修复 direct add/open 授权绕过 executable receiver gate。
 - r33：source forward proxy、release conviction 与 distribution clean-pass，修复强势 source 误卖但尚未恢复足够 clean breadth。
 - r34：allocation breadth bounded/evidence-confirm 已完成；工程链路可执行，训练证据可充分，但 fresh confirm 未通过 v2/stability，失败核心是 source 分布与 receiver-source spread，而不是 receiver 可执行性或 GPU/yolos 训练链路。
+- r35：unified allocation scaffold 已完成工程接入；入口为 `split_heads_portfolio_daily_unified_allocation_r35`、loss 为 `alpha_result_value_budget_split_v21`，新增 `allocation_optimizer.py`、`unified_allocation_summary_mean` 与半可微 solver；当前只完成单测/编译/dry-run 级验证，不是 formal verdict。
 - 过程细节与完整实验复盘以 `daily_research/brain/episodic_memory.md` 为准。
 
 ## 历史归档入口

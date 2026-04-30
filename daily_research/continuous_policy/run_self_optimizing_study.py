@@ -781,6 +781,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.12, 0.14],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_unified_allocation_r35": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v21"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [8.0e-4, 1.0e-3],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.16, 0.18],
+        "daily_dropout": [0.12, 0.14],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1477,6 +1494,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.14,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_unified_allocation_r35": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v21",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 8.0e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.18,
+        "daily_dropout": 0.14,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1522,6 +1556,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_source_distribution_quality_r32": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_source_forward_proxy_r33": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_allocation_breadth_r34": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_unified_allocation_r35": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -1558,11 +1593,31 @@ def _score_protocol_summary(
     training_evidence = dict(protocol_summary.get("training_evidence", {}) or {})
     behavior_audit = dict(protocol_summary.get("latest_behavior_audit", {}) or {})
     semantic_conflicts = dict(behavior_audit.get("semantic_conflicts", {}) or {})
+    train_section = dict(protocol_summary.get("train", {}) or {})
+    teacher_summary = dict(
+        train_section.get("teacher_summary", {})
+        or protocol_summary.get("teacher_summary", {})
+        or {}
+    )
+    unified_allocation_summary = dict(
+        teacher_summary.get("unified_allocation_summary_mean", {})
+        or protocol_summary.get("unified_allocation_summary_mean", {})
+        or {}
+    )
     shadow = dict(protocol_summary.get("shadow", {}) or {})
     shadow_continuity = dict(shadow.get("continuity_metrics", {}) or {})
 
     def _semantic_metric(key: str, default: float = 0.0) -> float:
         value = semantic_conflicts.get(key, None)
+        if value is None or value == "":
+            return float(default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _unified_allocation_metric(key: str, default: float = 0.0) -> float:
+        value = unified_allocation_summary.get(key, None)
         if value is None or value == "":
             return float(default)
         try:
@@ -2139,6 +2194,33 @@ def _score_protocol_summary(
             ),
         )
         or 0.0
+    )
+    portfolio_daily_unified_allocation_objective = _unified_allocation_metric(
+        "portfolio_daily_unified_allocation_objective"
+    )
+    portfolio_daily_unified_solution_objective = _unified_allocation_metric(
+        "portfolio_daily_unified_solution_objective"
+    )
+    portfolio_daily_unified_receiver_score = _unified_allocation_metric(
+        "portfolio_daily_unified_receiver_score"
+    )
+    portfolio_daily_unified_source_score = _unified_allocation_metric(
+        "portfolio_daily_unified_source_score"
+    )
+    portfolio_daily_unified_cash_score = _unified_allocation_metric(
+        "portfolio_daily_unified_cash_score"
+    )
+    portfolio_daily_source_positive_forward_penalty = _unified_allocation_metric(
+        "portfolio_daily_source_positive_forward_penalty"
+    )
+    portfolio_daily_source_opportunity_cost_penalty = _unified_allocation_metric(
+        "portfolio_daily_source_opportunity_cost_penalty"
+    )
+    portfolio_daily_receiver_source_spread_reward = _unified_allocation_metric(
+        "portfolio_daily_receiver_source_spread_reward"
+    )
+    portfolio_daily_unified_constraint_violations = _unified_allocation_metric(
+        "portfolio_daily_unified_constraint_violations"
     )
     portfolio_daily_receiver_forward_excess_5d = float(
         semantic_conflicts.get(
@@ -3161,6 +3243,41 @@ def _score_protocol_summary(
             )
             * 0.26
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_unified_allocation_objective": _bounded(
+                portfolio_daily_unified_allocation_objective,
+                0.10,
+                0.62,
+            )
+            * 0.34
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_unified_solution_objective": _bounded(
+                portfolio_daily_unified_solution_objective,
+                0.02,
+                0.16,
+            )
+            * 0.18
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_unified_receiver_score": _bounded(
+                portfolio_daily_unified_receiver_score,
+                0.08,
+                0.52,
+            )
+            * 0.12
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_unified_source_score": _bounded(
+                portfolio_daily_unified_source_score,
+                0.04,
+                0.42,
+            )
+            * 0.16
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_source_spread_reward": _bounded(
+                portfolio_daily_receiver_source_spread_reward,
+                0.08,
+                0.58,
+            )
+            * 0.20
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_allocation_dead_branch_risk_quality": (
                 1.0 - _bounded(portfolio_daily_allocation_dead_branch_risk_mean, 0.34, 0.78)
             )
@@ -3265,6 +3382,15 @@ def _score_protocol_summary(
             "portfolio_daily_unrealized_deploy_penalty": -portfolio_daily_unrealized_deploy_penalty
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_positive_distribution_penalty": -portfolio_daily_source_positive_distribution_penalty
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_positive_forward_penalty": -portfolio_daily_source_positive_forward_penalty
+            * 0.92
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_opportunity_cost_penalty": -portfolio_daily_source_opportunity_cost_penalty
+            * 0.74
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_unified_constraint_violation_penalty": -portfolio_daily_unified_constraint_violations
+            * 1.10
             * portfolio_daily_ranking_weight,
             "portfolio_daily_source_strong_false_sell_penalty": -portfolio_daily_source_strong_false_sell_penalty
             * portfolio_daily_ranking_weight,

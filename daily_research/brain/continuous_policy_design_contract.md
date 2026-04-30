@@ -29,6 +29,10 @@
 - r33 distribution clean-pass：source candidate 必须同时通过 forward proxy、`portfolio_daily_source_release_conviction_pass` 与 `portfolio_daily_source_distribution_clean_pass`；强势正 forward 误卖不得被均值掩盖。
 - r34 allocation breadth scaffold：`split_heads_portfolio_daily_allocation_breadth_r34` 只作为 bounded confirm 搜索入口，必须保留 r31/r33 守门，并通过 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth` 与 `portfolio_daily_joint_economic_quality_gate` 把广度和经济质量写入 scoring。
 - r34 confirm candidate 合同：v2 gated profile 的 confirm 候选必须优先满足 `training_evidence_status = sufficient` 与 v2 gate qualified；不得让 insufficient screening 高分 trial 绕过 confirm 候选选择。
+- r35 unified allocation 合同：`split_heads_portfolio_daily_unified_allocation_r35` 必须把 source、receiver 与 cash 当作同一个 listwise allocation problem；`portfolio_daily_unified_receiver_score`、`portfolio_daily_unified_source_score`、`portfolio_daily_unified_cash_score`、`portfolio_daily_unified_allocation_objective` 是训练 surface，不得作为普通 feature 泄漏。
+- r35 经济 credit assignment 合同：`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward` 必须写入训练目标、summary 与 scoring；不能只在 v2 gate 后验拦截正 forward source 误卖或负 receiver-source spread。
+- r35 optimizer 合同：`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 `cash_reserve_target`、`turnover_limit`、`max_position_weight`、transaction cost、slippage 与 sell tax；simulator guard 只做最后安全层，不再承担主策略逻辑。
+- foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
 - 当前 gate / scoring 合同继续使用 `portfolio_daily_ranking_v2_gated`，不能用局部 clean-pass 指标替代 v2 gates 与 confirm stability。
@@ -58,7 +62,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：不要继续扩大 r34 搜索面；先强化 source opportunity cost / release label / distribution feedback，让 positive/strong positive source sell 与负 receiver-source spread 在训练目标中成为硬失败信号。
+- 短期：不要继续扩大 r34 搜索面；先用 r35 bounded screening + fresh confirm 验证 unified allocation 训练目标是否能压住 positive/strong positive source sell 与负 receiver-source spread。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution 和 drawdown 更深地写进 objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
 
@@ -69,7 +73,8 @@
 - r24-r26：listwise allocation、source-release listwise、allocation teacher。
 - r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
 - r31/r33：当前合同核心，分别约束 receiver 语义闭包与 source distribution clean-pass。
-- r34：当前执行入口，聚焦 allocation breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
+- r34：allocation breadth 入口，聚焦 receiver/source breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
+- r35：当前执行入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

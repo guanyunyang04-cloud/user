@@ -638,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
             "alpha_prior_source": train_summary.get("alpha_prior_source", args.alpha_prior_source),
             "training_contract": train_summary.get("training_contract", {}),
             "training_diagnostics": train_summary.get("training_diagnostics", {}),
+            "teacher_summary": train_summary.get("teacher_summary", {}),
             "sample_rows": train_summary.get("sample_rows"),
             "feature_count": train_summary.get("feature_count"),
             "daily_feature_count": train_summary.get("daily_feature_count"),
