@@ -898,6 +898,68 @@ class PortfolioState:
         model_allocation_dead_branch_risk_series = _optional_policy_numeric(
             "portfolio_daily_allocation_dead_branch_risk"
         )
+        model_unified_receiver_score_series = _optional_policy_numeric("portfolio_daily_unified_receiver_score")
+        model_unified_source_score_series = _optional_policy_numeric("portfolio_daily_unified_source_score")
+        model_unified_cash_score_series = _optional_policy_numeric("portfolio_daily_unified_cash_score")
+        model_source_positive_forward_penalty_series = _optional_policy_numeric(
+            "portfolio_daily_source_positive_forward_penalty"
+        )
+        model_source_opportunity_cost_penalty_series = _optional_policy_numeric(
+            "portfolio_daily_source_opportunity_cost_penalty"
+        )
+        model_receiver_source_spread_reward_series = _optional_policy_numeric(
+            "portfolio_daily_receiver_source_spread_reward"
+        )
+        model_unified_allocation_objective_series = _optional_policy_numeric(
+            "portfolio_daily_unified_allocation_objective"
+        )
+        unified_allocation_policy_mode = any(
+            series is not None
+            for series in (
+                model_unified_receiver_score_series,
+                model_unified_source_score_series,
+                model_unified_cash_score_series,
+                model_source_positive_forward_penalty_series,
+                model_source_opportunity_cost_penalty_series,
+                model_receiver_source_spread_reward_series,
+                model_unified_allocation_objective_series,
+            )
+        )
+        portfolio_daily_unified_receiver_score = (
+            model_unified_receiver_score_series.clip(0.0, 1.0)
+            if model_unified_receiver_score_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_source_score = (
+            model_unified_source_score_series.clip(0.0, 1.0).where(held_mask, 0.0)
+            if model_unified_source_score_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_cash_score = (
+            model_unified_cash_score_series.clip(0.0, 1.0)
+            if model_unified_cash_score_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_source_positive_forward_penalty = (
+            model_source_positive_forward_penalty_series.clip(0.0, 1.0).where(held_mask, 0.0)
+            if model_source_positive_forward_penalty_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_source_opportunity_cost_penalty = (
+            model_source_opportunity_cost_penalty_series.clip(0.0, 1.0).where(held_mask, 0.0)
+            if model_source_opportunity_cost_penalty_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_receiver_source_spread_reward = (
+            model_receiver_source_spread_reward_series.clip(0.0, 1.0).where(held_mask, 0.0)
+            if model_receiver_source_spread_reward_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
+        portfolio_daily_unified_allocation_objective = (
+            model_unified_allocation_objective_series.clip(0.0, 1.0)
+            if model_unified_allocation_objective_series is not None
+            else pd.Series(0.0, index=prices.index, dtype=float)
+        )
         if model_receiver_executability_series is not None:
             deploy_executability_series = (
                 0.72 * deploy_executability_series + 0.28 * model_receiver_executability_series.clip(0.0, 1.0)
@@ -1066,6 +1128,13 @@ class PortfolioState:
                 + receiver_capacity_bonus
                 - (1.0 - portfolio_daily_receiver_pre_add_capacity).clip(0.0, 1.0).where(held_mask, 0.0) * 0.18
             ).clip(lower=-0.25, upper=1.35)
+        if model_unified_receiver_score_series is not None:
+            portfolio_daily_receiver_score = (
+                0.48 * portfolio_daily_receiver_score
+                + 0.52 * portfolio_daily_unified_receiver_score
+                + portfolio_daily_receiver_pre_add_capacity.clip(0.0, 1.0) * 0.05
+                - cash_defense_series.clip(0.0, 1.0) * 0.04
+            ).clip(lower=-0.25, upper=1.35)
         portfolio_daily_receiver_funding_coverage = pd.Series(0.0, index=prices.index, dtype=float)
         if model_receiver_funding_coverage_series is not None:
             portfolio_daily_receiver_funding_coverage = model_receiver_funding_coverage_series.clip(0.0, 1.0)
@@ -1162,6 +1231,43 @@ class PortfolioState:
                 | (funding_signal >= 0.12)
                 | ((portfolio_daily_receiver_pre_add_capacity >= 0.82) & (portfolio_daily_receiver_score >= 0.22))
             )
+        portfolio_daily_unified_receiver_candidate = pd.Series(False, index=prices.index, dtype=bool)
+        if unified_allocation_policy_mode and model_unified_receiver_score_series is not None:
+            unified_receiver_deploy_context = (
+                (float(self.cash_weight) >= 0.18)
+                or (float(gross_exposure_target) >= current_gross + 0.04)
+                or (budget_model_deploy_signal >= 0.36)
+                or (budget_model_alpha_focus_signal >= 0.34)
+            )
+            portfolio_daily_unified_receiver_candidate = (
+                portfolio_daily_ranking_mode
+                & portfolio_daily_receiver_pre_exec_pass
+                & portfolio_daily_receiver_funding_pass
+                & (
+                    (portfolio_daily_unified_receiver_score >= 0.180)
+                    | (portfolio_daily_receiver_score >= 0.240)
+                )
+                & (cash_defense_series < 0.760)
+                & (exit_timing_pressure_series < 0.580)
+                & (
+                    (
+                        flat_mask
+                        & bool(unified_receiver_deploy_context)
+                        & (
+                            (deploy_executability_series.clip(0.0, 1.0) >= 0.10)
+                            | (portfolio_daily_unified_receiver_score >= 0.260)
+                        )
+                    )
+                    | (
+                        held_mask
+                        & (portfolio_daily_receiver_pre_add_capacity >= 0.46)
+                        & (portfolio_daily_unified_receiver_score >= 0.240)
+                    )
+                )
+            )
+            direct_action_open_signal = direct_action_open_signal | (portfolio_daily_unified_receiver_candidate & flat_mask)
+            direct_action_add_signal = direct_action_add_signal | (portfolio_daily_unified_receiver_candidate & held_mask)
+            direct_action_deploy_signal = direct_action_add_signal | direct_action_open_signal
         portfolio_daily_receiver_candidate = (
             portfolio_daily_ranking_mode
             & direct_action_deploy_signal
@@ -1178,7 +1284,7 @@ class PortfolioState:
             )
             & (cash_defense_series < 0.720)
             & (exit_timing_pressure_series < 0.520)
-        )
+        ) | portfolio_daily_unified_receiver_candidate
         portfolio_daily_receiver_target = pd.Series(False, index=prices.index, dtype=bool)
         direct_action_core_deploy_target = direct_action_deploy_signal.copy()
         paired_reallocation_pressure = False
@@ -1585,6 +1691,14 @@ class PortfolioState:
             )
             if np.isfinite(model_cash_score_value):
                 portfolio_daily_cash_score = float(np.clip(0.60 * model_cash_score_value + 0.40 * portfolio_daily_cash_score, 0.0, 1.0))
+        if model_unified_cash_score_series is not None and len(model_unified_cash_score_series):
+            unified_cash_score_value = float(
+                model_unified_cash_score_series.replace([np.inf, -np.inf], np.nan).dropna().clip(0.0, 1.0).mean()
+            )
+            if np.isfinite(unified_cash_score_value):
+                portfolio_daily_cash_score = float(
+                    np.clip(0.52 * unified_cash_score_value + 0.48 * portfolio_daily_cash_score, 0.0, 1.0)
+                )
         if model_allocation_dead_branch_risk_series is not None or model_allocation_transfer_score_series is not None:
             allocation_dead_risk_value = float(
                 portfolio_daily_allocation_dead_branch_risk.replace([np.inf, -np.inf], np.nan).dropna().clip(0.0, 1.0).mean()
@@ -1726,6 +1840,13 @@ class PortfolioState:
                 0.64 * model_source_opportunity_cost_series.clip(0.0, 1.0)
                 + 0.36 * portfolio_daily_source_opportunity_cost
             ).clip(0.0, 1.0).where(held_mask, 0.0)
+        if unified_allocation_policy_mode:
+            portfolio_daily_source_opportunity_cost = (
+                portfolio_daily_source_opportunity_cost
+                + portfolio_daily_unified_source_positive_forward_penalty * 0.20
+                + portfolio_daily_unified_source_opportunity_cost_penalty * 0.16
+                - portfolio_daily_unified_receiver_source_spread_reward * 0.10
+            ).clip(0.0, 1.0).where(held_mask, 0.0)
         low_observable_source_release = (
             (0.22 - portfolio_daily_source_release_quality_observable).clip(lower=0.0, upper=0.22) / 0.22
         ).where(held_mask, 0.0)
@@ -1780,6 +1901,18 @@ class PortfolioState:
                 - 0.22 * low_observable_source_release
                 - 0.10 * portfolio_daily_source_opportunity_cost.clip(0.0, 1.0)
             ).clip(lower=-0.20, upper=1.25)
+        if model_unified_source_score_series is not None:
+            unified_source_support = (
+                portfolio_daily_unified_source_score
+                - portfolio_daily_unified_source_positive_forward_penalty * 0.46
+                - portfolio_daily_unified_source_opportunity_cost_penalty * 0.30
+                + portfolio_daily_unified_receiver_source_spread_reward * 0.28
+            ).clip(lower=-0.20, upper=1.25).where(held_mask, 0.0)
+            portfolio_daily_source_score = (
+                0.48 * portfolio_daily_source_score
+                + 0.52 * unified_source_support
+                + portfolio_daily_source_release_capacity.clip(0.0, 1.0) * 0.04
+            ).clip(lower=-0.20, upper=1.25).where(held_mask, 0.0)
         fallback_source_forward_spread_score = (
             portfolio_daily_source_gap.clip(lower=0.0, upper=0.28) * 1.35
             + portfolio_daily_source_release_quality.clip(0.0, 1.0) * 0.20
@@ -2218,6 +2351,29 @@ class PortfolioState:
                 & (portfolio_daily_source_release_conviction >= 0.340)
             )
         )
+        portfolio_daily_unified_source_candidate = pd.Series(False, index=prices.index, dtype=bool)
+        if unified_allocation_policy_mode and model_unified_source_score_series is not None:
+            portfolio_daily_unified_source_candidate = (
+                portfolio_daily_ranking_mode
+                & held_mask
+                & (~direct_action_core_deploy_target)
+                & (current >= 0.012)
+                & (
+                    bool(portfolio_daily_receiver_target.any())
+                    | portfolio_daily_cash_reserve_signal
+                    | (budget_model_deploy_signal >= 0.46)
+                    | (portfolio_daily_unified_receiver_source_spread_reward >= 0.10)
+                )
+                & (portfolio_daily_unified_source_score >= 0.160)
+                & (portfolio_daily_source_score >= -0.040)
+                & (portfolio_daily_source_release_capacity >= 0.45)
+                & (portfolio_daily_source_opportunity_cost <= 0.740)
+                & (portfolio_daily_source_economic_block_risk <= 0.780)
+                & (portfolio_daily_source_forward_strength_brake_risk <= 0.520)
+                & (portfolio_daily_source_forward_proxy_keep_risk <= 0.560)
+                & (portfolio_daily_unified_source_positive_forward_penalty <= 0.360)
+                & (portfolio_daily_unified_source_opportunity_cost_penalty <= 0.520)
+            )
         portfolio_daily_source_low_keep_value_pass = (
             (
                 (hold_continuation_series.clip(0.0, 1.0) <= 0.52)
@@ -2443,7 +2599,7 @@ class PortfolioState:
                     & (portfolio_daily_source_opportunity_cost <= 0.86)
                 )
             )
-        )
+        ) | portfolio_daily_unified_source_candidate
         portfolio_daily_source_target = pd.Series(False, index=prices.index, dtype=bool)
         portfolio_daily_source_candidate_count = int(portfolio_daily_source_candidate.sum())
         if portfolio_daily_source_candidate_count > 0:
@@ -4494,6 +4650,12 @@ class PortfolioState:
                     "portfolio_daily_receiver_open_breadth_candidate": bool(
                         portfolio_daily_receiver_open_breadth_candidate.get(stock, False)
                     ),
+                    "portfolio_daily_unified_receiver_score": float(
+                        portfolio_daily_unified_receiver_score.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_unified_receiver_candidate": bool(
+                        portfolio_daily_unified_receiver_candidate.get(stock, False)
+                    ),
                     "portfolio_daily_receiver_score": float(portfolio_daily_receiver_score.get(stock, 0.0)),
                     "portfolio_daily_receiver_target": portfolio_daily_receiver_flag,
                     "portfolio_daily_receiver_exec_guarded": portfolio_daily_receiver_exec_guarded_flag,
@@ -4584,6 +4746,21 @@ class PortfolioState:
                     "portfolio_daily_source_executability": float(
                         portfolio_daily_source_executability.get(stock, 0.0)
                     ),
+                    "portfolio_daily_unified_source_score": float(
+                        portfolio_daily_unified_source_score.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_source_positive_forward_penalty": float(
+                        portfolio_daily_unified_source_positive_forward_penalty.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_source_opportunity_cost_penalty": float(
+                        portfolio_daily_unified_source_opportunity_cost_penalty.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_receiver_source_spread_reward": float(
+                        portfolio_daily_unified_receiver_source_spread_reward.get(stock, 0.0)
+                    ),
+                    "portfolio_daily_unified_allocation_objective": float(
+                        portfolio_daily_unified_allocation_objective.get(stock, 0.0)
+                    ),
                     "portfolio_daily_source_score": float(portfolio_daily_source_score.get(stock, 0.0)),
                     "portfolio_daily_source_semantic_release_pass": bool(
                         portfolio_daily_source_semantic_release_pass.get(stock, False)
@@ -4603,6 +4780,9 @@ class PortfolioState:
                     "portfolio_daily_source_recent_sell_days": float(
                         portfolio_daily_source_recent_sell_days.get(stock, 999.0)
                     ),
+                    "portfolio_daily_unified_source_candidate": bool(
+                        portfolio_daily_unified_source_candidate.get(stock, False)
+                    ),
                     "portfolio_daily_source_candidate": bool(portfolio_daily_source_candidate.get(stock, False)),
                     "portfolio_daily_source_target": portfolio_daily_source_flag,
                     "portfolio_daily_source_exec_guard": portfolio_daily_source_exec_guard_flag,
@@ -4616,6 +4796,9 @@ class PortfolioState:
                     "portfolio_daily_source_target_not_sold_reason": portfolio_daily_source_target_not_sold_reason,
                     "portfolio_daily_source_realized_reduction_weight": float(
                         portfolio_daily_source_realized_reduction_weight
+                    ),
+                    "portfolio_daily_unified_cash_score": float(
+                        portfolio_daily_unified_cash_score.get(stock, 0.0)
                     ),
                     "portfolio_daily_cash_score": float(portfolio_daily_cash_score),
                     "portfolio_daily_cash_reserve_signal": bool(portfolio_daily_cash_reserve_signal),
@@ -5080,8 +5263,42 @@ class PortfolioState:
                 direct_action_pair_source_opportunity_cost,
                 direct_action_pair_reallocation_source,
             ),
+            "portfolio_daily_unified_allocation_policy_mode": float(bool(unified_allocation_policy_mode)),
             "portfolio_daily_source_exec_guard_mode": float(bool(portfolio_daily_source_exec_guard_mode)),
             "portfolio_daily_receiver_exec_guard_mode": float(bool(portfolio_daily_receiver_exec_guard_mode)),
+            "portfolio_daily_unified_receiver_candidate_count": int(portfolio_daily_unified_receiver_candidate.sum()),
+            "portfolio_daily_unified_source_candidate_count": int(portfolio_daily_unified_source_candidate.sum()),
+            "portfolio_daily_unified_receiver_score_mean": float(
+                portfolio_daily_unified_receiver_score.replace([np.inf, -np.inf], np.nan).dropna().mean()
+            )
+            if len(portfolio_daily_unified_receiver_score.dropna())
+            else 0.0,
+            "portfolio_daily_unified_source_score_mean": _masked_mean(
+                portfolio_daily_unified_source_score,
+                held_mask,
+            ),
+            "portfolio_daily_unified_cash_score_mean": float(
+                portfolio_daily_unified_cash_score.replace([np.inf, -np.inf], np.nan).dropna().mean()
+            )
+            if len(portfolio_daily_unified_cash_score.dropna())
+            else 0.0,
+            "portfolio_daily_source_positive_forward_penalty_mean": _masked_mean(
+                portfolio_daily_unified_source_positive_forward_penalty,
+                portfolio_daily_source_target,
+            ),
+            "portfolio_daily_source_opportunity_cost_penalty_mean": _masked_mean(
+                portfolio_daily_unified_source_opportunity_cost_penalty,
+                portfolio_daily_source_target,
+            ),
+            "portfolio_daily_receiver_source_spread_reward_mean": _masked_mean(
+                portfolio_daily_unified_receiver_source_spread_reward,
+                portfolio_daily_source_target,
+            ),
+            "portfolio_daily_unified_allocation_objective_mean": float(
+                portfolio_daily_unified_allocation_objective.replace([np.inf, -np.inf], np.nan).dropna().mean()
+            )
+            if len(portfolio_daily_unified_allocation_objective.dropna())
+            else 0.0,
             "portfolio_daily_receiver_candidate_count": int(portfolio_daily_receiver_candidate.sum()),
             "portfolio_daily_receiver_exec_guard_count": int(portfolio_daily_receiver_exec_guard_count),
             "portfolio_daily_receiver_semantic_no_headroom_count": int(

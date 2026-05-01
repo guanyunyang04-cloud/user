@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-04-30`
+快照日期：`2026-05-01`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/` 或 `episodic_memory.md`。
@@ -47,8 +47,8 @@
 - r34 allocation breadth 入口：`split_heads_portfolio_daily_allocation_breadth_r34`，重点读取 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate` 与 `allocation_teacher_summary_mean`。
 - r35 unified allocation 入口：`split_heads_portfolio_daily_unified_allocation_r35`，重点读取 `unified_allocation_summary_mean`、`portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty`、`portfolio_daily_receiver_source_spread_reward`、`portfolio_daily_unified_constraint_violations` 与 `supports_portfolio_unified_allocation_heads`。
 - r34 最新证据入口：`cp_v3_portfolio_daily_allocation_breadth_r34_bounded_20260430` 与 `cp_v3_portfolio_daily_allocation_breadth_r34_evidence_confirm_20260430`；读取 `portfolio_daily_v2_confirm_stability_checks`，重点看 `receiver_minus_source_forward_excess_5d`、`source_positive_forward_sell_share`、`source_strong_positive_forward_sell_count` 与 `training_evidence_status`。
-- r35 尚未形成正式训练证据；下一次正式研究必须用 yolos/GPU 前台运行 bounded screening + fresh confirm，并检查 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`。
-- 当前核心 loss / objective：`alpha_result_value_budget_split_v20` 与 `portfolio_daily_ranking_v2_gated`。
+- r35 已形成修复后正式 bounded confirm 证据；读取 `cp_v3_portfolio_daily_unified_allocation_r35_postfix4_bounded_confirm_20260430`，重点看 `confirm_02`、`portfolio_daily_v2_stable_confirmatory_trials`、`failed_checks`、source positive distribution、cash timing 与 drawdown。
+- 当前核心 loss / objective：`alpha_result_value_budget_split_v21` 与 `portfolio_daily_ranking_v2_gated`。
 - 当前核心 simulator calibration：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`，并继承 v13 cash-aware 与 v14 source-exec 语义。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；多条审计必须顺序执行，不得并行抢写。

@@ -1,5 +1,7 @@
 import unittest
+from types import SimpleNamespace
 
+import torch
 import pandas as pd
 
 from daily_research.continuous_policy.allocation_optimizer import (
@@ -8,7 +10,17 @@ from daily_research.continuous_policy.allocation_optimizer import (
     solve_semidifferentiable_allocation,
 )
 from daily_research.continuous_policy.allocation_teacher import build_allocation_teacher_summary
-from daily_research.continuous_policy.model_seq_v3 import LOSS_PROFILE_CONFIGS
+from daily_research.continuous_policy.model_seq_v3 import (
+    LOSS_PROFILE_CONFIGS,
+    predict_policy_v3,
+)
+from daily_research.continuous_policy.model_v2 import ACTION_CLASSES, DURATION_CLASSES
+from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+    BUDGET_SEMANTICS_SPLIT,
+    HoldingState,
+    PortfolioState,
+)
 from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILE_BASE_TRIALS,
     SEARCH_PROFILE_DEFAULT_OBJECTIVES,
@@ -116,6 +128,101 @@ def _trial(
         passed_check_count=1,
         total_check_count=1,
     )
+
+
+def _base_policy(index: list[str]) -> pd.DataFrame:
+    frame = pd.DataFrame(index=index)
+    base_values = {
+        "action_label": "skip",
+        "action_strength": 0.10,
+        "target_delta_hint": 0.0,
+        "hold_boost": 0.0,
+        "portfolio_daily_unified_receiver_score": 0.0,
+        "portfolio_daily_unified_source_score": 0.0,
+        "portfolio_daily_unified_cash_score": 0.05,
+        "portfolio_daily_source_positive_forward_penalty": 0.0,
+        "portfolio_daily_source_opportunity_cost_penalty": 0.0,
+        "portfolio_daily_receiver_source_spread_reward": 0.0,
+        "portfolio_daily_unified_allocation_objective": 0.0,
+        "portfolio_daily_receiver_score": 0.0,
+        "portfolio_daily_receiver_executability": 0.0,
+        "portfolio_daily_source_score": 0.0,
+        "portfolio_daily_source_release_capacity": 1.0,
+        "portfolio_daily_source_release_quality": 0.0,
+        "portfolio_daily_source_opportunity_cost": 0.20,
+        "portfolio_daily_source_executability": 0.0,
+        "portfolio_daily_source_forward_proxy_keep_risk": 0.0,
+        "portfolio_daily_source_forward_strength_brake_risk": 0.0,
+        "portfolio_daily_source_bad_forward_spread_risk": 0.0,
+        "portfolio_daily_source_economic_release_score": 0.0,
+        "portfolio_daily_source_economic_block_risk": 0.0,
+        "deploy_value_target": 0.0,
+        "release_value_target": 0.0,
+        "deploy_gate_target": 0.0,
+        "release_gate_target": 0.0,
+        "alpha_opportunity_value": 0.0,
+        "deployment_opportunity_cost": 0.0,
+        "cash_defense_value": 0.05,
+        "exit_timing_pressure": 0.0,
+        "multi_horizon_forward_value": 0.0,
+        "multi_horizon_path_value": 0.0,
+        "multi_horizon_forward_risk": 0.0,
+        "hold_continuation_value": 0.20,
+        "large_upside_1d_target": 0.0,
+    }
+    for column, value in base_values.items():
+        frame[column] = value
+    return frame
+
+
+class _FakePolicyModel:
+    def __call__(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
+        row_count = int(static_x.shape[0])
+        ones = torch.ones(row_count, dtype=torch.float32)
+        zeros = torch.zeros(row_count, dtype=torch.float32)
+        action_logits = torch.zeros((row_count, len(ACTION_CLASSES)), dtype=torch.float32)
+        action_logits[:, ACTION_CLASSES.index("skip")] = 4.0
+        duration_logits = torch.zeros((row_count, len(DURATION_CLASSES)), dtype=torch.float32)
+        return {
+            "action_logits": action_logits,
+            "duration_logits": duration_logits,
+            "target_delta_hint": zeros,
+            "entry_quality": zeros,
+            "hold_quality": zeros,
+            "add_quality": zeros,
+            "reduce_quality": zeros,
+            "exit_urgency": zeros,
+            "reentry_readiness": zeros,
+            "holding_days_ratio": zeros,
+            "portfolio_daily_receiver_add_headroom": ones * 0.80,
+            "portfolio_daily_receiver_add_capacity": ones * 0.80,
+            "portfolio_daily_receiver_executability": ones * 0.80,
+            "portfolio_daily_receiver_score": ones * 0.20,
+            "portfolio_daily_source_score": ones * 0.10,
+            "portfolio_daily_cash_score": ones * 0.30,
+            "portfolio_daily_unified_receiver_score": torch.linspace(0.62, 0.82, row_count),
+            "portfolio_daily_unified_source_score": torch.linspace(0.22, 0.42, row_count),
+            "portfolio_daily_unified_cash_score": torch.linspace(0.12, 0.32, row_count),
+            "portfolio_daily_source_positive_forward_penalty": torch.linspace(0.02, 0.12, row_count),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.linspace(0.04, 0.14, row_count),
+            "portfolio_daily_receiver_source_spread_reward": torch.linspace(0.30, 0.50, row_count),
+            "portfolio_daily_unified_allocation_objective": torch.linspace(0.55, 0.75, row_count),
+        }
+
+
+class _FakeDailyModel:
+    def __call__(self, daily_x: torch.Tensor) -> dict[str, torch.Tensor]:
+        return {
+            "gross_exposure_target": torch.tensor([0.80], dtype=torch.float32),
+            "candidate_budget": torch.tensor([4.0], dtype=torch.float32),
+            "turnover_budget": torch.tensor([0.40], dtype=torch.float32),
+            "max_position_weight_target": torch.tensor([0.20], dtype=torch.float32),
+            "hold_bias_target": torch.tensor([0.20], dtype=torch.float32),
+            "budget_risk_signal_target": torch.tensor([0.10], dtype=torch.float32),
+            "budget_deploy_signal_target": torch.tensor([0.80], dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.tensor([0.20], dtype=torch.float32),
+            "budget_alpha_focus_signal_target": torch.tensor([0.70], dtype=torch.float32),
+        }
 
 
 class PortfolioDailyStrategyContractsTest(unittest.TestCase):
@@ -357,6 +464,54 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         ):
             self.assertIn(column, weights)
 
+    def test_predict_policy_exports_unified_allocation_heads_to_policy_frame(self) -> None:
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["new_a", "new_b"],
+                "current_weight": [0.0, 0.0],
+                "static_feature": [0.0, 0.0],
+                "seq_feature": [0.0, 0.0],
+            }
+        )
+        artifact = SimpleNamespace(
+            sample_model=_FakePolicyModel(),
+            daily_model=_FakeDailyModel(),
+            static_feature_names=["static_feature"],
+            sequence_base_names=["seq_feature"],
+            sequence_steps=[0],
+            sequence_columns=["seq_feature"],
+            daily_feature_names=["daily_feature"],
+            static_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            static_means=pd.Series([0.0]).to_numpy(dtype=float),
+            static_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            sequence_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_means=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            daily_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_means=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            train_summary={},
+            training_diagnostics={
+                "supports_sell_heads": False,
+                "supports_portfolio_listwise_heads": True,
+                "supports_portfolio_unified_allocation_heads": True,
+            },
+        )
+
+        policy, _ = predict_policy_v3(artifact, state_frame=state_frame, daily_features={"daily_feature": 0.0})
+
+        for column in (
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_unified_source_score",
+            "portfolio_daily_unified_cash_score",
+            "portfolio_daily_source_positive_forward_penalty",
+            "portfolio_daily_source_opportunity_cost_penalty",
+            "portfolio_daily_receiver_source_spread_reward",
+            "portfolio_daily_unified_allocation_objective",
+        ):
+            self.assertIn(column, policy.columns)
+            self.assertGreater(float(policy[column].max()), 0.0)
+
     def test_v2_scoring_rewards_unified_allocation_surface_quality(self) -> None:
         weak = _score_protocol_summary(
             _protocol_summary(
@@ -404,6 +559,87 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIn("portfolio_daily_unified_allocation_objective", strong["score_breakdown"]["performance"])
         self.assertIn("portfolio_daily_source_positive_forward_penalty", strong["score_breakdown"]["performance"])
         self.assertGreater(strong["composite_score"], weak["composite_score"])
+
+    def test_unified_receiver_head_can_open_without_direct_action_label(self) -> None:
+        prices = pd.Series({"new_a": 10.0, "new_b": 20.0, "weak": 30.0})
+        policy = _base_policy(list(prices.index))
+        policy.loc["new_a", [
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_receiver_executability",
+            "deploy_value_target",
+            "deploy_gate_target",
+            "alpha_opportunity_value",
+            "deployment_opportunity_cost",
+            "portfolio_daily_unified_allocation_objective",
+        ]] = [0.92, 0.92, 0.90, 0.90, 0.90, 0.80, 0.80, 0.72]
+        policy.loc["new_b", [
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_receiver_executability",
+            "deploy_value_target",
+            "deploy_gate_target",
+            "alpha_opportunity_value",
+            "deployment_opportunity_cost",
+        ]] = [0.84, 0.84, 0.82, 0.82, 0.82, 0.70, 0.70]
+        state = PortfolioState(cash_weight=1.0, max_positions=4, max_position_weight=0.20, turnover_limit=0.60)
+
+        result = state.step(
+            date="2026-01-02",
+            prices=prices,
+            policy_frame=policy,
+            budget_semantics=BUDGET_SEMANTICS_SPLIT,
+            budget_calibration=BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        )
+
+        self.assertGreater(result.diagnostics["portfolio_daily_unified_receiver_candidate_count"], 0)
+        self.assertGreater(result.diagnostics["portfolio_daily_unified_allocation_objective_mean"], 0.0)
+        self.assertIn("portfolio_daily_unified_allocation_objective", result.actions[0])
+        self.assertGreater(result.diagnostics["portfolio_daily_receiver_target_count"], 0)
+        self.assertGreater(result.diagnostics["direct_action_open_signal_count"], 0)
+        self.assertGreater(float(result.weights.sum()), 0.0)
+
+    def test_unified_source_head_can_release_clean_held_without_reduce_label(self) -> None:
+        prices = pd.Series({"source": 10.0, "receiver": 20.0, "weak": 30.0})
+        policy = _base_policy(list(prices.index))
+        policy.loc["receiver", [
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_receiver_executability",
+            "deploy_value_target",
+            "deploy_gate_target",
+            "alpha_opportunity_value",
+            "deployment_opportunity_cost",
+        ]] = [0.90, 0.90, 0.88, 0.88, 0.88, 0.78, 0.78]
+        policy.loc["source", [
+            "portfolio_daily_unified_source_score",
+            "portfolio_daily_source_score",
+            "portfolio_daily_source_release_quality",
+            "portfolio_daily_source_executability",
+            "portfolio_daily_source_economic_release_score",
+            "portfolio_daily_source_opportunity_cost",
+            "portfolio_daily_receiver_source_spread_reward",
+        ]] = [0.76, 0.70, 0.42, 0.55, 0.36, 0.08, 0.30]
+        state = PortfolioState(
+            cash_weight=0.80,
+            max_positions=4,
+            max_position_weight=0.20,
+            turnover_limit=0.60,
+            holdings={"source": HoldingState(weight=0.20, entry_price=10.0, peak_price=10.0, hold_days=10)},
+        )
+
+        result = state.step(
+            date="2026-01-02",
+            prices=prices,
+            policy_frame=policy,
+            budget_semantics=BUDGET_SEMANTICS_SPLIT,
+            budget_calibration=BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        )
+
+        self.assertGreater(result.diagnostics["portfolio_daily_unified_receiver_candidate_count"], 0)
+        self.assertGreater(result.diagnostics["portfolio_daily_unified_source_candidate_count"], 0)
+        self.assertGreater(result.diagnostics["portfolio_daily_source_target_count"], 0)
+        self.assertLess(float(result.weights["source"]), 0.20)
 
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(

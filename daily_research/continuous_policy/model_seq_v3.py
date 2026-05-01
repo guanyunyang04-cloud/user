@@ -3822,6 +3822,44 @@ def predict_policy_v3(
             if supports_portfolio_listwise_heads
             else None
         )
+        supports_portfolio_unified_allocation_heads = bool(
+            artifact.training_diagnostics.get("supports_portfolio_unified_allocation_heads", False)
+        )
+        predicted_portfolio_unified_receiver_score = (
+            np.clip(outputs["portfolio_daily_unified_receiver_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_unified_receiver_score" in outputs
+            else None
+        )
+        predicted_portfolio_unified_source_score = (
+            np.clip(outputs["portfolio_daily_unified_source_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_unified_source_score" in outputs
+            else None
+        )
+        predicted_portfolio_unified_cash_score = (
+            np.clip(outputs["portfolio_daily_unified_cash_score"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_unified_cash_score" in outputs
+            else None
+        )
+        predicted_portfolio_source_positive_forward_penalty = (
+            np.clip(outputs["portfolio_daily_source_positive_forward_penalty"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_source_positive_forward_penalty" in outputs
+            else None
+        )
+        predicted_portfolio_source_opportunity_cost_penalty = (
+            np.clip(outputs["portfolio_daily_source_opportunity_cost_penalty"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_source_opportunity_cost_penalty" in outputs
+            else None
+        )
+        predicted_portfolio_receiver_source_spread_reward = (
+            np.clip(outputs["portfolio_daily_receiver_source_spread_reward"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_receiver_source_spread_reward" in outputs
+            else None
+        )
+        predicted_portfolio_unified_allocation_objective = (
+            np.clip(outputs["portfolio_daily_unified_allocation_objective"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_unified_allocation_heads and "portfolio_daily_unified_allocation_objective" in outputs
+            else None
+        )
         supports_portfolio_allocation_teacher_heads = bool(
             artifact.training_diagnostics.get("supports_portfolio_allocation_teacher_heads", False)
         )
@@ -5610,6 +5648,42 @@ def predict_policy_v3(
         if predicted_portfolio_cash_score is not None
         else fallback_portfolio_cash_score
     )
+    zero_unified_allocation_head = np.zeros(len(state_frame), dtype=float)
+    portfolio_daily_unified_receiver_score = (
+        _finite_array(predicted_portfolio_unified_receiver_score, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_unified_receiver_score is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_unified_source_score = (
+        _finite_array(predicted_portfolio_unified_source_score, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_unified_source_score is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_unified_cash_score = (
+        _finite_array(predicted_portfolio_unified_cash_score, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_unified_cash_score is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_source_positive_forward_penalty = (
+        _finite_array(predicted_portfolio_source_positive_forward_penalty, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_source_positive_forward_penalty is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_source_opportunity_cost_penalty = (
+        _finite_array(predicted_portfolio_source_opportunity_cost_penalty, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_source_opportunity_cost_penalty is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_receiver_source_spread_reward = (
+        _finite_array(predicted_portfolio_receiver_source_spread_reward, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_receiver_source_spread_reward is not None
+        else zero_unified_allocation_head.copy()
+    )
+    portfolio_daily_unified_allocation_objective = (
+        _finite_array(predicted_portfolio_unified_allocation_objective, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_unified_allocation_objective is not None
+        else zero_unified_allocation_head.copy()
+    )
     source_funding_strength = np.clip(
         portfolio_daily_source_score
         * portfolio_daily_source_release_capacity
@@ -6471,6 +6545,13 @@ def predict_policy_v3(
             "portfolio_daily_source_executability": portfolio_daily_source_executability,
             "portfolio_daily_source_score": portfolio_daily_source_score,
             "portfolio_daily_cash_score": portfolio_daily_cash_score,
+            "portfolio_daily_unified_receiver_score": portfolio_daily_unified_receiver_score,
+            "portfolio_daily_unified_source_score": portfolio_daily_unified_source_score,
+            "portfolio_daily_unified_cash_score": portfolio_daily_unified_cash_score,
+            "portfolio_daily_source_positive_forward_penalty": portfolio_daily_source_positive_forward_penalty,
+            "portfolio_daily_source_opportunity_cost_penalty": portfolio_daily_source_opportunity_cost_penalty,
+            "portfolio_daily_receiver_source_spread_reward": portfolio_daily_receiver_source_spread_reward,
+            "portfolio_daily_unified_allocation_objective": portfolio_daily_unified_allocation_objective,
             "portfolio_daily_receiver_funding_coverage": portfolio_daily_receiver_funding_coverage,
             "portfolio_daily_funding_closure_score": portfolio_daily_funding_closure_score,
             "portfolio_daily_allocation_transfer_score": portfolio_daily_allocation_transfer_score,

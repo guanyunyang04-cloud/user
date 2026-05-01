@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-04-30`
+快照日期：`2026-05-01`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -53,7 +53,8 @@
 - r33 release conviction 可以恢复收益和 source 数量，但单独不足以控制尾部正 forward source。
 - r33 clean-pass + repeat relief 可以清掉强势误卖，但 clean-pass bounded 仍出现 source/receiver 广度不足和 receiver-source spread 不稳。
 - r34 已补上 receiver/source breadth scoring、joint economic quality penalty 与 allocation teacher summary，并完成 bounded/evidence-confirm；最新 fresh confirm 训练证据充分且 receiver/cash/source 执行率达标，但因 `receiver-source spread` 转负、`source_positive_forward_sell_share` 与 `source_strong_positive_forward_sell_count` 失控，仍不是 verdict。
-- 当前瓶颈已经从“能不能卖”推进到“能否在 clean source 约束下恢复足够多正确卖出，并同步找到正 forward receiver”。
+- r35 已完成 unified allocation 修复后 bounded confirm：`postfix4_bounded_confirm_20260430` 完成 4 个 screening、2 个 confirm，`stable_confirmatory_count = 1`，champion `confirm_02` 达到 `training_evidence_status = sufficient`、`annual_return = 1.409793`、`sharpe = 2.846432`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate = 0.806071`、`receiver_minus_source_forward_excess_5d = 0.206611`，但仍 `promotion_status = shadow_only`。
+- 当前瓶颈已经从“能不能卖”推进到“能否在 unified allocation 下同时控制 cash timing、drawdown、reduce/exit 质量和 source positive distribution”。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -62,8 +63,8 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：不要继续扩大 r34 搜索面；先用 r35 bounded screening + fresh confirm 验证 unified allocation 训练目标是否能压住 positive/strong positive source sell 与负 receiver-source spread。
-- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution 和 drawdown 更深地写进 objective / feedback。
+- 短期：不要继续扩大 r35 机制验证；先把 `cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution 写成更强 allocation objective / feedback。
+- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
 
 ## 阶段索引

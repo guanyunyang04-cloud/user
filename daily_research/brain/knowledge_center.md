@@ -132,6 +132,7 @@
   - 股票很多不等于 regime 很多，2024-2026 的有效独立市场环境和月度样本都很少
 - continuous_policy 当前根因排序：第一是目标函数与组合级决策不完全一致；第二是卖出、现金、资金来源的 credit assignment 很难；第三才是数据粒度和样本 regime 不足
 - 后续最大提升不应来自继续堆动作 loss，而应来自组合级 pair/listwise ranking、直接优化多日/月度组合收益，以及更强的卖出与现金时机学习
+- r35 已验证 source/receiver/cash unified allocation 机制能把 receiver/source target 重新接通，并能在 confirm 中形成正 receiver-source spread；但它仍不能替代 promotion gate，当前失败核心转为 cash timing、drawdown、reduce/exit 质量和 source positive distribution。
 - execution 侧默认通过统一应用入口运行、监控、恢复；直接裸跑底层脚本只应用于调试或局部排障
 - execution Web 控制台基于 FastAPI + Jinja2，本地只监听 `127.0.0.1`
 - `agent` 在本地联调 Web 控制台、短期临时服务或训练任务时，也必须遵守前台运行与不中断纪律；不再默认使用 `Start-Job` 或 `Start-Process` 后台化任务

@@ -801,6 +801,13 @@ def compute_continuity_metrics(
             "portfolio_daily_source_executability",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
+            "portfolio_daily_unified_receiver_score",
+            "portfolio_daily_unified_source_score",
+            "portfolio_daily_unified_cash_score",
+            "portfolio_daily_source_positive_forward_penalty",
+            "portfolio_daily_source_opportunity_cost_penalty",
+            "portfolio_daily_receiver_source_spread_reward",
+            "portfolio_daily_unified_allocation_objective",
             "portfolio_daily_receiver_funding_coverage",
             "portfolio_daily_funding_closure_score",
             "portfolio_daily_allocation_transfer_score",
@@ -1402,6 +1409,55 @@ def compute_continuity_metrics(
             action_outcomes.get("portfolio_daily_cash_score", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0)
+        portfolio_unified_receiver_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_unified_receiver_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_unified_source_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_unified_source_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_unified_cash_score = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_unified_cash_score",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_positive_forward_penalty = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_positive_forward_penalty",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_source_opportunity_cost_penalty = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_source_opportunity_cost_penalty",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_receiver_source_spread_reward = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_receiver_source_spread_reward",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        portfolio_unified_allocation_objective = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_daily_unified_allocation_objective",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_receiver_funding_coverage = pd.to_numeric(
             action_outcomes.get(
                 "portfolio_daily_receiver_funding_coverage",
@@ -1588,6 +1644,37 @@ def compute_continuity_metrics(
         metrics["portfolio_daily_cash_score_mean"] = float(portfolio_cash_score.mean()) if len(portfolio_cash_score) else 0.0
         metrics["portfolio_daily_cash_reserve_rate"] = (
             float(portfolio_cash_reserve_signal.mean()) if len(portfolio_cash_reserve_signal) else 0.0
+        )
+        metrics["portfolio_daily_unified_allocation_objective_mean"] = (
+            float(portfolio_unified_allocation_objective.mean()) if len(portfolio_unified_allocation_objective) else 0.0
+        )
+        metrics["portfolio_daily_unified_receiver_score_mean"] = (
+            float(portfolio_unified_receiver_score.loc[portfolio_receiver_target].mean())
+            if bool(portfolio_receiver_target.any())
+            else (float(portfolio_unified_receiver_score.mean()) if len(portfolio_unified_receiver_score) else 0.0)
+        )
+        metrics["portfolio_daily_unified_source_score_mean"] = (
+            float(portfolio_unified_source_score.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else (float(portfolio_unified_source_score.mean()) if len(portfolio_unified_source_score) else 0.0)
+        )
+        metrics["portfolio_daily_unified_cash_score_mean"] = (
+            float(portfolio_unified_cash_score.mean()) if len(portfolio_unified_cash_score) else 0.0
+        )
+        metrics["portfolio_daily_source_positive_forward_penalty_mean"] = (
+            float(portfolio_source_positive_forward_penalty.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_source_opportunity_cost_penalty_mean"] = (
+            float(portfolio_source_opportunity_cost_penalty.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["portfolio_daily_receiver_source_spread_reward_mean"] = (
+            float(portfolio_receiver_source_spread_reward.loc[portfolio_source_target].mean())
+            if bool(portfolio_source_target.any())
+            else 0.0
         )
         metrics["portfolio_daily_receiver_score_mean"] = (
             float(portfolio_receiver_score.loc[portfolio_receiver_target].mean())
@@ -5003,6 +5090,13 @@ def run_policy_rollout(
         metrics["avg_portfolio_daily_funding_closure_score"] = float(turnover_frame["portfolio_daily_funding_closure_score_mean"].mean()) if "portfolio_daily_funding_closure_score_mean" in turnover_frame.columns else 0.0
         metrics["avg_portfolio_daily_allocation_transfer_score"] = float(turnover_frame["portfolio_daily_allocation_transfer_score_mean"].mean()) if "portfolio_daily_allocation_transfer_score_mean" in turnover_frame.columns else 0.0
         metrics["avg_portfolio_daily_allocation_dead_branch_risk"] = float(turnover_frame["portfolio_daily_allocation_dead_branch_risk_mean"].mean()) if "portfolio_daily_allocation_dead_branch_risk_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_unified_allocation_objective"] = float(turnover_frame["portfolio_daily_unified_allocation_objective_mean"].mean()) if "portfolio_daily_unified_allocation_objective_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_unified_receiver_score"] = float(turnover_frame["portfolio_daily_unified_receiver_score_mean"].mean()) if "portfolio_daily_unified_receiver_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_unified_source_score"] = float(turnover_frame["portfolio_daily_unified_source_score_mean"].mean()) if "portfolio_daily_unified_source_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_unified_cash_score"] = float(turnover_frame["portfolio_daily_unified_cash_score_mean"].mean()) if "portfolio_daily_unified_cash_score_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_positive_forward_penalty"] = float(turnover_frame["portfolio_daily_source_positive_forward_penalty_mean"].mean()) if "portfolio_daily_source_positive_forward_penalty_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_source_opportunity_cost_penalty"] = float(turnover_frame["portfolio_daily_source_opportunity_cost_penalty_mean"].mean()) if "portfolio_daily_source_opportunity_cost_penalty_mean" in turnover_frame.columns else 0.0
+        metrics["avg_portfolio_daily_receiver_source_spread_reward"] = float(turnover_frame["portfolio_daily_receiver_source_spread_reward_mean"].mean()) if "portfolio_daily_receiver_source_spread_reward_mean" in turnover_frame.columns else 0.0
     else:
         metrics["avg_turnover"] = 0.0
         metrics["avg_buy_turnover"] = 0.0
@@ -5039,6 +5133,13 @@ def run_policy_rollout(
         metrics["avg_portfolio_daily_funding_closure_score"] = 0.0
         metrics["avg_portfolio_daily_allocation_transfer_score"] = 0.0
         metrics["avg_portfolio_daily_allocation_dead_branch_risk"] = 0.0
+        metrics["avg_portfolio_daily_unified_allocation_objective"] = 0.0
+        metrics["avg_portfolio_daily_unified_receiver_score"] = 0.0
+        metrics["avg_portfolio_daily_unified_source_score"] = 0.0
+        metrics["avg_portfolio_daily_unified_cash_score"] = 0.0
+        metrics["avg_portfolio_daily_source_positive_forward_penalty"] = 0.0
+        metrics["avg_portfolio_daily_source_opportunity_cost_penalty"] = 0.0
+        metrics["avg_portfolio_daily_receiver_source_spread_reward"] = 0.0
     metrics["action_counts"] = {
         str(key): int(value)
         for key, value in action_panel["execution_action"].astype(str).value_counts().sort_index().items()
