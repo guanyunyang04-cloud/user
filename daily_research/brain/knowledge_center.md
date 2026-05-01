@@ -825,3 +825,17 @@
 - 新知识 4：r36 不具备 confirm 前置资格。
   - r36c 为 `training_evidence_status = sufficient`，但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`。
   - 在 source distribution 与 cash/drawdown 同时过线前，不应启动 bounded confirm 或 promotion 讨论。
+
+## 2026-05-01 r37 decision-focused allocation 知识沉淀
+- 新知识 1：source hard-negative 必须同时接训练目标和推理 allocation path。
+  - 只把 `portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 写进训练 label 不够；如果推理阶段 unified allocation 没有消费模型预测的 penalty heads，source selection 会退回低惩罚路径。
+  - r37 已用回归测试锁定该问题：无未来标签时，predicted positive-forward / opportunity-cost penalty 必须影响 `portfolio_daily_source_hard_negative_penalty` 与 unified source candidate。
+- 新知识 2：decision-focused regret 比后验 gate 更贴近当前瓶颈，但一次接入不会自动解决分布错误。
+  - r37b 已达到 `training_evidence_status = sufficient`，并确认 `supports_portfolio_decision_focused_allocation_loss = true`。
+  - 但 `source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`，说明模型仍会低估被卖 source 的正向前景。
+- 新知识 3：当前问题不再是 receiver 可执行性或 source 执行率。
+  - r37b 的 `receiver_unrealized_deploy_share = 0.0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate = 0.718153`，说明订单翻译和资金释放链路可执行。
+  - 真正失败在“卖得对”和“资金时机”：`open_win_rate_5d`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown` 同时未过 gate。
+- 新知识 4：下一轮不应继续粗暴加 guard。
+  - r31/r33/r36/r37 已证明 guard 可以压住语义旁路，但过多 guard 会把主策略逻辑推回执行层。
+  - 更有效方向是强化 hard-negative label 采样、pairwise/listwise source regret、source positive tail distribution loss 与 allocation optimizer 约束，让模型在训练内学会“不该从强 source 出钱”。

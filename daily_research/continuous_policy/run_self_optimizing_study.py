@@ -815,6 +815,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14, 0.16],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_decision_focused_allocation_r37": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v23"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [6.5e-4, 8.0e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.18, 0.20],
+        "daily_dropout": [0.14, 0.16],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1545,6 +1562,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.16,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_decision_focused_allocation_r37": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v23",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 6.5e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.20,
+        "daily_dropout": 0.16,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1592,6 +1626,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_allocation_breadth_r34": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_unified_allocation_r35": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_risk_aware_unified_allocation_r36": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_decision_focused_allocation_r37": "portfolio_daily_ranking_v2_gated",
 }
 
 
@@ -2250,6 +2285,9 @@ def _score_protocol_summary(
     )
     portfolio_daily_source_opportunity_cost_penalty = _unified_allocation_metric(
         "portfolio_daily_source_opportunity_cost_penalty"
+    )
+    portfolio_daily_source_hard_negative_penalty = _unified_allocation_metric(
+        "portfolio_daily_source_hard_negative_penalty"
     )
     portfolio_daily_receiver_source_spread_reward = _unified_allocation_metric(
         "portfolio_daily_receiver_source_spread_reward"
@@ -3424,6 +3462,9 @@ def _score_protocol_summary(
             "portfolio_daily_source_opportunity_cost_penalty": -portfolio_daily_source_opportunity_cost_penalty
             * 0.74
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_hard_negative_penalty": -portfolio_daily_source_hard_negative_penalty
+            * 0.88
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_unified_constraint_violation_penalty": -portfolio_daily_unified_constraint_violations
             * 1.10
             * portfolio_daily_ranking_weight,
@@ -4084,6 +4125,7 @@ def _score_protocol_summary(
             "portfolio_daily_source_strong_positive_forward_sell_count": portfolio_daily_source_strong_positive_forward_sell_count,
             "portfolio_daily_source_max_forward_excess_5d": portfolio_daily_source_max_forward_excess_5d,
             "portfolio_daily_source_p75_forward_excess_5d": portfolio_daily_source_p75_forward_excess_5d,
+            "portfolio_daily_source_hard_negative_penalty": portfolio_daily_source_hard_negative_penalty,
             "portfolio_daily_receiver_minus_source_forward_excess_5d": (
                 portfolio_daily_receiver_minus_source_forward_excess_5d
             ),

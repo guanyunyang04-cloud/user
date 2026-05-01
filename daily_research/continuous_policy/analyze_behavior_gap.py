@@ -80,6 +80,41 @@ def _coerce_numeric(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return working
 
 
+def _compute_exposure_utilization_from_turnover(turnover_frame: pd.DataFrame) -> tuple[float, float]:
+    """Return gross-exposure target and realized utilization for audit panels."""
+    if turnover_frame.empty:
+        return 0.0, 0.0
+    working = turnover_frame.copy()
+    index = working.index
+    cash_weight = (
+        pd.to_numeric(working["cash_weight"], errors="coerce")
+        if "cash_weight" in working.columns
+        else pd.Series(np.nan, index=index, dtype=float)
+    )
+    if "gross_exposure" in working.columns:
+        gross_exposure = pd.to_numeric(working["gross_exposure"], errors="coerce")
+        usable_gross = gross_exposure.dropna()
+        if usable_gross.empty or float(usable_gross.abs().sum()) <= 1.0e-12:
+            gross_exposure = 1.0 - cash_weight
+    elif "cash_weight" in working.columns:
+        gross_exposure = 1.0 - cash_weight
+    else:
+        gross_exposure = pd.Series(0.0, index=index, dtype=float)
+    avg_gross_exposure = _safe_mean(gross_exposure.replace([np.inf, -np.inf], np.nan).fillna(0.0))
+    target_series = (
+        pd.to_numeric(working["gross_exposure_target"], errors="coerce")
+        if "gross_exposure_target" in working.columns
+        else pd.Series(0.0, index=index, dtype=float)
+    )
+    avg_gross_exposure_target = _safe_mean(target_series.replace([np.inf, -np.inf], np.nan).fillna(0.0))
+    utilization = (
+        float(avg_gross_exposure / max(avg_gross_exposure_target, 1.0e-8))
+        if avg_gross_exposure_target > 0.0
+        else 0.0
+    )
+    return float(avg_gross_exposure_target), float(utilization)
+
+
 def _compute_held_side_support_columns(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame
@@ -1797,19 +1832,8 @@ def _build_semantic_conflicts(
         if portfolio_receiver_target.any() and portfolio_source_target.any()
         else 0.0
     )
-    if "gross_exposure" in day_merge.columns:
-        avg_gross_exposure = _safe_mean(day_merge["gross_exposure"].fillna(0.0))
-    elif "cash_weight" in day_merge.columns:
-        avg_gross_exposure = _safe_mean((1.0 - day_merge["cash_weight"]).fillna(0.0))
-    else:
-        avg_gross_exposure = 0.0
-    avg_gross_exposure_target = _safe_mean(
-        day_merge.get("gross_exposure_target", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
-    )
-    portfolio_daily_exposure_utilization = (
-        float(avg_gross_exposure / max(avg_gross_exposure_target, 1.0e-8))
-        if avg_gross_exposure_target > 0.0
-        else 0.0
+    avg_gross_exposure_target, portfolio_daily_exposure_utilization = _compute_exposure_utilization_from_turnover(
+        day_merge
     )
     high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
     high_cash_sell_action_count = int(high_cash_sell_mask.sum())

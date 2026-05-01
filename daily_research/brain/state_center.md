@@ -9,7 +9,7 @@
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
-- continuous_policy 最新有效研究状态为 r36 risk-aware unified allocation screening 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation 仍保留；r36 已把 cash timing、drawdown、source distribution 与 unified allocation consistency loss 写入训练目标和执行约束，但未过 promotion。
+- continuous_policy 最新有效研究状态为 r37 decision-focused allocation screening 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation、r36 risk-aware unified allocation 仍保留；r37 已把 source hard-negative、strong false sell 与 decision-focused allocation regret 写入 unified allocation 训练目标，并修复推理侧未消费预测 source penalty 的路径，但未过 promotion。
 - 未完成正式判定前，不得 promotion、不得 live、不得改 active artifact。
 
 ## 当前接管入口
@@ -27,14 +27,14 @@
 - r34 bounded screening 暴露 candidate selection 合同漏洞：旧逻辑会让 `training_evidence_status = insufficient` 的高分 trial 进入 confirm；已修为 confirm 候选优先 evidence sufficient + v2 gate qualified。
 - r35 修复后 bounded confirm 指向新的真实瓶颈：`training_evidence_status = sufficient`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate > 0` 与正 `receiver-source spread` 可以同时成立，但仍会失败在 `cash_timing_quality_1d`、`max_drawdown`、部分 reduce/exit gate 与 source positive distribution。
 - 当前 r31 profile 标记：`split_heads_portfolio_daily_receiver_semantic_closure_r31`；核心审计字段为 `direct_action_authorization_subset_violation_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`。
-- 当前 r33 profile 标记：`split_heads_portfolio_daily_source_forward_proxy_r33`；当前 r34 profile 标记：`split_heads_portfolio_daily_allocation_breadth_r34`；当前 r35 profile 标记：`split_heads_portfolio_daily_unified_allocation_r35`。
-- 当前核心 objective / calibration 标记为 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`；新增 scoring 标记为 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate`。
+- 当前 r33 profile 标记：`split_heads_portfolio_daily_source_forward_proxy_r33`；当前 r34 profile 标记：`split_heads_portfolio_daily_allocation_breadth_r34`；当前 r35 profile 标记：`split_heads_portfolio_daily_unified_allocation_r35`；当前 r36 profile 标记：`split_heads_portfolio_daily_risk_aware_unified_allocation_r36`；当前 r37 profile 标记：`split_heads_portfolio_daily_decision_focused_allocation_r37`。
+- 当前核心 objective / calibration 标记为 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`；当前核心 loss 标记为 `alpha_result_value_budget_split_v23`；新增 scoring 标记为 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate`、`portfolio_daily_source_hard_negative_penalty`。
 
 ## 当前优先级
 - P0：保持 live / active artifact 冻结，只在 research / shadow 范围推进。
 - P1：维护主分脑入口精炼，避免 `state_center.md` 和 `operations_center.md` 继续变成长日志。
 - P2：继续把 receiver 可执行性、source 分布质量、monthly return、exposure utilization、realized deploy 与 drawdown 写入 objective / feedback / gate。
-- P3：下一轮研究不再优先重跑 r35 机制验证，而应继续修 r36 暴露出的模型低估 source 正向前景/机会成本问题；`cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution 仍必须作为 allocation objective 的一等反馈；必须持续审计 `portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward`。
+- P3：下一轮研究不再优先重跑 r35/r36 机制验证，而应继续修 r37 暴露出的 source hard-negative 学习强度不足问题；`cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution 仍必须作为 allocation objective 的一等反馈；必须持续审计 `portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty`、`portfolio_daily_source_hard_negative_penalty`、`portfolio_daily_source_strong_false_sell_penalty` 与 `portfolio_daily_receiver_source_spread_reward`。
 - P4：中期正路仍是 source/receiver/cash listwise allocation teacher 向正式 allocation layer 迁移；`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 cash、turnover、position cap 与 transaction cost；simulator guard 只保留最后安全层。
 
 ## 当前边界
@@ -60,6 +60,7 @@
 - r34：allocation breadth bounded/evidence-confirm 已完成；工程链路可执行，训练证据可充分，但 fresh confirm 未通过 v2/stability，失败核心是 source 分布与 receiver-source spread，而不是 receiver 可执行性或 GPU/yolos 训练链路。
 - r35：unified allocation 已完成修复后 bounded confirm；入口为 `split_heads_portfolio_daily_unified_allocation_r35`、loss 为 `alpha_result_value_budget_split_v21`。`postfix4_bounded_confirm_20260430` 完成 4 个 screening 与 2 个 confirm，`stable_confirmatory_count = 1`，champion 为 `confirm_02`，但 `promotion_status = shadow_only`。
 - r36：risk-aware unified allocation 已完成代码接入与 3 轮 screening。入口为 `split_heads_portfolio_daily_risk_aware_unified_allocation_r36`、loss 为 `alpha_result_value_budget_split_v22`。r36c 已封住 unified source 绕过 `source_distribution_clean_pass` 的执行层旁路，并在 `64/48` screening 中达到 `training_evidence_status = sufficient`；但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且真实 source 未来分布仍未过线。
+- r37：decision-focused allocation 已完成代码接入与两轮 `64/48` screening。入口为 `split_heads_portfolio_daily_decision_focused_allocation_r37`、loss 为 `alpha_result_value_budget_split_v23`。r37b 已确认推理侧 unified allocation 会消费预测 source penalty heads，训练 diagnostics 为 yolos + CUDA 且 `training_evidence_status = sufficient`；但 `promotion_gate.status = shadow_only`，失败项仍为 `open_win_rate_5d`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且 `source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`，说明 source hard-negative 信号已接通但学习强度仍不足。
 - 过程细节与完整实验复盘以 `daily_research/brain/episodic_memory.md` 为准。
 
 ## 历史归档入口

@@ -16,6 +16,8 @@ UNIFIED_ALLOCATION_COLUMNS: tuple[str, ...] = (
     "portfolio_daily_unified_cash_score",
     "portfolio_daily_source_positive_forward_penalty",
     "portfolio_daily_source_opportunity_cost_penalty",
+    "portfolio_daily_source_strong_false_sell_penalty",
+    "portfolio_daily_source_hard_negative_penalty",
     "portfolio_daily_receiver_source_spread_reward",
     "portfolio_daily_unified_allocation_objective",
     "portfolio_daily_unified_receiver_candidate",
@@ -146,10 +148,29 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         ),
         default=0.0,
     )
-    positive_forward_penalty = _clip_series(source_forward / 0.08, 0.0, 1.0)
+    predicted_positive_forward_penalty = _clip_series(
+        _series(working, "portfolio_daily_source_positive_forward_penalty"),
+        0.0,
+        1.0,
+    )
+    positive_forward_penalty = _clip_series(
+        np.maximum(source_forward / 0.08, predicted_positive_forward_penalty),
+        0.0,
+        1.0,
+    )
     forward_proxy_keep_risk = _clip_series(_series(working, "portfolio_daily_source_forward_proxy_keep_risk"), 0.0, 1.0)
     forward_strength_brake = _clip_series(_series(working, "portfolio_daily_source_forward_strength_brake_risk"), 0.0, 1.0)
-    opportunity_cost_penalty = _clip_series(_series(working, "portfolio_daily_source_opportunity_cost"), 0.0, 1.0)
+    source_opportunity_cost = _clip_series(_series(working, "portfolio_daily_source_opportunity_cost"), 0.0, 1.0)
+    predicted_opportunity_cost_penalty = _clip_series(
+        _series(working, "portfolio_daily_source_opportunity_cost_penalty"),
+        0.0,
+        1.0,
+    )
+    opportunity_cost_penalty = _clip_series(
+        np.maximum(source_opportunity_cost, predicted_opportunity_cost_penalty),
+        0.0,
+        1.0,
+    )
     bad_spread_risk = _clip_series(_series(working, "portfolio_daily_source_bad_forward_spread_risk"), 0.0, 1.0)
     economic_block_risk = _clip_series(_series(working, "portfolio_daily_source_economic_block_risk"), 0.0, 1.0)
     economic_release = _clip_series(_series(working, "portfolio_daily_source_economic_release_score"), 0.0, 1.0)
@@ -187,10 +208,51 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         1.0,
     )
     strong_positive_forward_penalty = _clip_series((source_forward - 0.025) / 0.075, 0.0, 1.0)
+    predicted_strong_false_sell_penalty = _clip_series(
+        _series(working, "portfolio_daily_source_strong_false_sell_penalty"),
+        0.0,
+        1.0,
+    )
+    strong_false_raw = pd.Series(
+        np.maximum.reduce(
+            [
+                _clip_series((source_forward - 0.055) / 0.075, 0.0, 1.0).to_numpy(dtype=float),
+                predicted_strong_false_sell_penalty.to_numpy(dtype=float),
+                _clip_series((positive_forward_penalty - 0.55) / 0.35, 0.0, 1.0).to_numpy(dtype=float),
+            ]
+        ),
+        index=working.index,
+        dtype=float,
+    )
+    strong_false_sell_penalty = _clip_series(
+        strong_false_raw,
+        0.0,
+        1.0,
+    )
+    tail_false_sell_penalty = _clip_series((source_forward - 0.100) / 0.080, 0.0, 1.0)
+    predicted_hard_negative_penalty = _clip_series(
+        _series(working, "portfolio_daily_source_hard_negative_penalty"),
+        0.0,
+        1.0,
+    )
+    hard_negative_penalty = _clip_series(
+        np.maximum(
+            predicted_hard_negative_penalty,
+            0.50 * strong_false_sell_penalty
+            + 0.24 * tail_false_sell_penalty
+            + 0.12 * opportunity_cost_penalty
+            + 0.08 * forward_strength_brake
+            + 0.06 * forward_proxy_keep_risk
+            + 0.10 * positive_forward_penalty,
+        ),
+        0.0,
+        1.0,
+    )
     positive_forward_penalty = _clip_series(
         np.maximum(
             positive_forward_penalty,
             0.54 * strong_positive_forward_penalty
+            + 0.24 * hard_negative_penalty
             + 0.20 * forward_strength_brake
             + 0.16 * forward_proxy_keep_risk
             + 0.10 * bad_spread_risk,
@@ -199,7 +261,9 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         1.0,
     )
     source_distribution_spread_reward = _clip_series(
-        receiver_source_spread_reward * (1.0 - 0.62 * strong_positive_forward_penalty),
+        receiver_source_spread_reward
+        * (1.0 - 0.62 * strong_positive_forward_penalty)
+        * (1.0 - 0.72 * hard_negative_penalty),
         0.0,
         1.0,
     )
@@ -212,6 +276,7 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + 0.10 * np.clip(-source_forward / 0.08, 0.0, 1.0)
         - 0.28 * positive_forward_penalty
         - 0.24 * strong_positive_forward_penalty
+        - 0.38 * hard_negative_penalty
         - 0.22 * opportunity_cost_penalty
         - 0.16 * bad_spread_risk
         - 0.14 * forward_strength_brake
@@ -240,6 +305,7 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + source_distribution_spread_reward * 0.30
         - positive_forward_penalty * 0.58
         - strong_positive_forward_penalty * 0.36
+        - hard_negative_penalty * 0.82
         - opportunity_cost_penalty * 0.44
         - bad_spread_risk * 0.18
         - economic_block_risk * 0.16
@@ -248,7 +314,13 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
-    unified_source = unified_source.where(source_mask & (source_exec > 0.05) & (current_weight > 1.0e-8), 0.0)
+    unified_source = unified_source.where(
+        source_mask
+        & (source_exec > 0.05)
+        & (current_weight > 1.0e-8)
+        & (hard_negative_penalty < 0.72),
+        0.0,
+    )
 
     deploy_competition = _clip_series(
         0.34 * unified_receiver
@@ -291,6 +363,7 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + defensive_cash_alignment * 0.06
         - positive_forward_penalty * 0.22
         - strong_positive_forward_penalty * 0.16
+        - hard_negative_penalty * 0.24
         - opportunity_cost_penalty * 0.18
         - dead_branch_risk * 0.08,
         0.0,
@@ -302,13 +375,19 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     working["portfolio_daily_unified_cash_score"] = unified_cash
     working["portfolio_daily_source_positive_forward_penalty"] = positive_forward_penalty
     working["portfolio_daily_source_opportunity_cost_penalty"] = opportunity_cost_penalty
+    working["portfolio_daily_source_strong_false_sell_penalty"] = strong_false_sell_penalty
+    working["portfolio_daily_source_hard_negative_penalty"] = hard_negative_penalty
     working["portfolio_daily_receiver_source_spread_reward"] = receiver_source_spread_reward
     working["portfolio_daily_unified_allocation_objective"] = objective
     working["portfolio_daily_unified_receiver_candidate"] = (
         (unified_receiver > 0.0) & receiver_mask & (receiver_exec > 0.05)
     ).astype(float)
     working["portfolio_daily_unified_source_candidate"] = (
-        (unified_source > 0.0) & source_mask & (source_exec > 0.05) & (current_weight > 1.0e-8)
+        (unified_source > 0.0)
+        & source_mask
+        & (source_exec > 0.05)
+        & (current_weight > 1.0e-8)
+        & (hard_negative_penalty < 0.72)
     ).astype(float)
     return working
 
@@ -485,6 +564,8 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
             "portfolio_daily_unified_cash_score": 0.0,
             "portfolio_daily_source_positive_forward_penalty": 0.0,
             "portfolio_daily_source_opportunity_cost_penalty": 0.0,
+            "portfolio_daily_source_strong_false_sell_penalty": 0.0,
+            "portfolio_daily_source_hard_negative_penalty": 0.0,
             "portfolio_daily_receiver_source_spread_reward": 0.0,
             "portfolio_daily_unified_receiver_candidate_count": 0.0,
             "portfolio_daily_unified_source_candidate_count": 0.0,
@@ -499,6 +580,8 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
         "portfolio_daily_unified_cash_score": float(problem["portfolio_daily_unified_cash_score"].mean()),
         "portfolio_daily_source_positive_forward_penalty": float(problem["portfolio_daily_source_positive_forward_penalty"].mean()),
         "portfolio_daily_source_opportunity_cost_penalty": float(problem["portfolio_daily_source_opportunity_cost_penalty"].mean()),
+        "portfolio_daily_source_strong_false_sell_penalty": float(problem["portfolio_daily_source_strong_false_sell_penalty"].mean()),
+        "portfolio_daily_source_hard_negative_penalty": float(problem["portfolio_daily_source_hard_negative_penalty"].mean()),
         "portfolio_daily_receiver_source_spread_reward": float(problem["portfolio_daily_receiver_source_spread_reward"].mean()),
         "portfolio_daily_unified_receiver_candidate_count": float(problem["portfolio_daily_unified_receiver_candidate"].sum()),
         "portfolio_daily_unified_source_candidate_count": float(problem["portfolio_daily_unified_source_candidate"].sum()),

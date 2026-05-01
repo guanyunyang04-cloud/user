@@ -1257,6 +1257,38 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"] = {
         "portfolio_unified_allocation_total": 0.46,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v23"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"]["sample_scalar_loss_weights"],
+        "portfolio_daily_receiver_score": 2.56,
+        "portfolio_daily_source_score": 2.86,
+        "portfolio_daily_cash_score": 1.64,
+        "portfolio_daily_unified_receiver_score": 2.08,
+        "portfolio_daily_unified_source_score": 2.54,
+        "portfolio_daily_unified_cash_score": 1.90,
+        "portfolio_daily_source_positive_forward_penalty": 2.42,
+        "portfolio_daily_source_opportunity_cost_penalty": 2.18,
+        "portfolio_daily_receiver_source_spread_reward": 2.06,
+        "portfolio_daily_unified_allocation_objective": 2.08,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"]["daily_target_loss_weights"],
+        "budget_risk_signal_target": 1.50,
+        "budget_deploy_signal_target": 1.64,
+        "budget_cash_timing_signal_target": 1.96,
+        "budget_alpha_focus_signal_target": 1.48,
+        "turnover_budget": 1.44,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"]["multi_objective_loss_weights"],
+        "scalar_total": 3.18,
+        "portfolio_source_pairwise_total": 0.62,
+        "portfolio_receiver_pairwise_total": 0.34,
+        "portfolio_cash_margin_total": 0.24,
+        "portfolio_unified_allocation_total": 0.50,
+        "portfolio_decision_regret_total": 0.28,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -1621,6 +1653,155 @@ def _unified_allocation_consistency_loss(
         )
     margin_loss = torch.stack(margin_terms).mean() if margin_terms else torch.tensor(0.0, device=device)
     return regression_loss + bad_source_loss * 0.26 + dead_cash_loss * 0.22 + margin_loss * 0.24
+
+
+def _decision_focused_allocation_regret_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    required_outputs = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_unified_allocation_objective",
+    }
+    required_targets = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_unified_allocation_objective",
+        "portfolio_daily_source_positive_forward_penalty",
+        "portfolio_daily_source_opportunity_cost_penalty",
+        "portfolio_daily_receiver_source_spread_reward",
+        "portfolio_daily_receiver_candidate_mask",
+        "portfolio_daily_source_candidate_mask",
+    }
+    device = next(iter(outputs.values())).device
+    if not required_outputs.issubset(outputs) or not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+
+    receiver_score = torch.clamp(outputs["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    source_score = torch.clamp(outputs["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    cash_score = torch.clamp(outputs["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    objective_score = torch.clamp(outputs["portfolio_daily_unified_allocation_objective"].to(device), 0.0, 1.0)
+
+    target_receiver = torch.clamp(targets["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    target_source = torch.clamp(targets["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    target_cash = torch.clamp(targets["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    target_objective = torch.clamp(targets["portfolio_daily_unified_allocation_objective"].to(device), 0.0, 1.0)
+    zero = torch.zeros_like(target_receiver)
+    receiver_mask = torch.clamp(targets["portfolio_daily_receiver_candidate_mask"].to(device), 0.0, 1.0)
+    source_mask = torch.clamp(targets["portfolio_daily_source_candidate_mask"].to(device), 0.0, 1.0)
+    receiver_forward = torch.clamp(
+        targets.get("portfolio_daily_receiver_forward_excess_5d", targets.get("forward_excess_5d", zero)).to(device),
+        -0.35,
+        0.35,
+    )
+    source_forward = torch.clamp(
+        targets.get("portfolio_daily_source_forward_excess_5d", targets.get("forward_excess_5d", zero)).to(device),
+        -0.35,
+        0.35,
+    )
+    positive_forward_penalty = torch.clamp(
+        torch.maximum(
+            targets["portfolio_daily_source_positive_forward_penalty"].to(device),
+            torch.clamp(source_forward / 0.08, 0.0, 1.0),
+        ),
+        0.0,
+        1.0,
+    )
+    opportunity_cost_penalty = torch.clamp(
+        targets["portfolio_daily_source_opportunity_cost_penalty"].to(device),
+        0.0,
+        1.0,
+    )
+    hard_negative_penalty = torch.clamp(
+        torch.maximum(
+            targets.get("portfolio_daily_source_hard_negative_penalty", zero).to(device),
+            targets.get("portfolio_daily_source_strong_false_sell_penalty", zero).to(device),
+        ),
+        0.0,
+        1.0,
+    )
+    spread_reward = torch.clamp(targets["portfolio_daily_receiver_source_spread_reward"].to(device), 0.0, 1.0)
+    transfer_score = torch.clamp(targets.get("portfolio_daily_allocation_transfer_score", zero).to(device), 0.0, 1.0)
+    market_downside = torch.clamp(targets.get("market_downside_pressure", zero).to(device), 0.0, 1.0)
+    cash_regime = torch.clamp(targets.get("cash_regime_pressure", zero).to(device), 0.0, 1.0)
+    portfolio_drawdown = torch.clamp(targets.get("portfolio_drawdown_20d", zero).to(device), -1.0, 0.25)
+    drawdown_pressure = torch.clamp((-portfolio_drawdown - 0.02) / 0.10, 0.0, 1.0)
+    risk_off_target = torch.clamp(
+        0.40 * market_downside + 0.34 * cash_regime + 0.26 * drawdown_pressure,
+        0.0,
+        1.0,
+    )
+
+    receiver_oracle = torch.clamp(
+        0.48 * target_receiver
+        + 0.26 * torch.clamp(receiver_forward / 0.08, 0.0, 1.0)
+        + 0.16 * spread_reward
+        + 0.10 * transfer_score
+        - 0.18 * risk_off_target,
+        0.0,
+        1.0,
+    ) * receiver_mask
+    source_release_oracle = torch.clamp(
+        0.44 * target_source
+        + 0.24 * torch.clamp(-source_forward / 0.08, 0.0, 1.0)
+        + 0.16 * spread_reward
+        + 0.10 * transfer_score
+        - 0.40 * hard_negative_penalty
+        - 0.26 * positive_forward_penalty
+        - 0.22 * opportunity_cost_penalty,
+        0.0,
+        1.0,
+    ) * source_mask
+    false_source_pressure = torch.clamp(
+        torch.maximum(hard_negative_penalty, 0.70 * positive_forward_penalty + 0.30 * opportunity_cost_penalty)
+        + 0.22 * torch.clamp(source_forward / 0.08, 0.0, 1.0),
+        0.0,
+        1.0,
+    ) * source_mask
+    cash_oracle = torch.clamp(
+        0.48 * target_cash
+        + 0.34 * risk_off_target
+        + 0.10 * false_source_pressure
+        - 0.28 * receiver_oracle
+        - 0.18 * source_release_oracle,
+        0.0,
+        1.0,
+    )
+    objective_oracle = torch.clamp(
+        target_objective
+        + 0.12 * receiver_oracle
+        + 0.10 * source_release_oracle
+        - 0.20 * false_source_pressure,
+        0.0,
+        1.0,
+    )
+
+    receiver_regret = (torch.relu(receiver_oracle - receiver_score) * torch.clamp(receiver_mask + 0.10, 0.0, 1.0)).mean()
+    source_release_regret = (
+        torch.relu(source_release_oracle - source_score)
+        * torch.clamp(source_mask + 0.10, 0.0, 1.0)
+        * (1.0 - hard_negative_penalty)
+    ).mean()
+    false_source_loss = (false_source_pressure * (source_score + 0.36 * objective_score)).mean()
+    dead_cash_pressure = torch.clamp(
+        receiver_oracle + 0.55 * source_release_oracle - risk_off_target + 0.06,
+        0.0,
+        1.0,
+    )
+    dead_cash_loss = (dead_cash_pressure * cash_score).mean()
+    cash_regret = nn.functional.smooth_l1_loss(cash_score, cash_oracle)
+    objective_regret = nn.functional.smooth_l1_loss(objective_score, objective_oracle)
+    return (
+        receiver_regret * 0.24
+        + source_release_regret * 0.18
+        + false_source_loss * 0.30
+        + dead_cash_loss * 0.16
+        + cash_regret * 0.06
+        + objective_regret * 0.06
+    )
 
 
 def _value_arbitration_consistency_loss(
@@ -3201,6 +3382,26 @@ def fit_policy_models_v3(
             -0.35,
             0.35,
         ),
+        "current_weight": np.clip(
+            sample_frame.get("current_weight", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "forward_excess_5d": np.clip(
+            sample_frame.get("forward_excess_5d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            -0.35,
+            0.35,
+        ),
+        "portfolio_daily_receiver_forward_excess_5d": np.clip(
+            sample_frame.get("portfolio_daily_receiver_forward_excess_5d", sample_frame.get("forward_excess_5d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index))).astype(float).to_numpy(dtype=np.float32),
+            -0.35,
+            0.35,
+        ),
+        "portfolio_daily_source_forward_excess_5d": np.clip(
+            sample_frame.get("portfolio_daily_source_forward_excess_5d", sample_frame.get("forward_excess_5d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index))).astype(float).to_numpy(dtype=np.float32),
+            -0.35,
+            0.35,
+        ),
         "portfolio_daily_unified_receiver_score": np.clip(
             sample_frame.get("portfolio_daily_unified_receiver_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
@@ -3223,6 +3424,16 @@ def fit_policy_models_v3(
         ),
         "portfolio_daily_source_opportunity_cost_penalty": np.clip(
             sample_frame.get("portfolio_daily_source_opportunity_cost_penalty", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_strong_false_sell_penalty": np.clip(
+            sample_frame.get("portfolio_daily_source_strong_false_sell_penalty", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_daily_source_hard_negative_penalty": np.clip(
+            sample_frame.get("portfolio_daily_source_hard_negative_penalty", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
             1.0,
         ),
@@ -3428,6 +3639,7 @@ def fit_policy_models_v3(
             )
             portfolio_cash_margin_loss = _portfolio_cash_margin_loss(outputs, sample_batch_targets)
             portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(outputs, sample_batch_targets)
+            portfolio_decision_regret_loss = _decision_focused_allocation_regret_loss(outputs, sample_batch_targets)
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -3455,6 +3667,7 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * portfolio_source_pairwise_loss
                 + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * portfolio_cash_margin_loss
                 + multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) * portfolio_unified_allocation_loss
+                + multi_objective_loss_weights.get("portfolio_decision_regret_total", 0.0) * portfolio_decision_regret_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -3510,6 +3723,7 @@ def fit_policy_models_v3(
             )
             val_portfolio_cash_margin_loss = _portfolio_cash_margin_loss(val_outputs, val_targets)
             val_portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(val_outputs, val_targets)
+            val_portfolio_decision_regret_loss = _decision_focused_allocation_regret_loss(val_outputs, val_targets)
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -3541,6 +3755,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * val_portfolio_source_pairwise_loss
                     + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * val_portfolio_cash_margin_loss
                     + multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) * val_portfolio_unified_allocation_loss
+                    + multi_objective_loss_weights.get("portfolio_decision_regret_total", 0.0) * val_portfolio_decision_regret_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -3710,6 +3925,9 @@ def fit_policy_models_v3(
         ),
         "supports_portfolio_unified_allocation_consistency_loss": (
             multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) > 0.0
+        ),
+        "supports_portfolio_decision_focused_allocation_loss": (
+            multi_objective_loss_weights.get("portfolio_decision_regret_total", 0.0) > 0.0
         ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
