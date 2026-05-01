@@ -798,6 +798,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.12, 0.14],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_risk_aware_unified_allocation_r36": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v22"],
+        "budget_semantics": ["action_budget_split_v1"],
+        "budget_calibration": ["cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [6.5e-4, 8.0e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.18, 0.20],
+        "daily_dropout": [0.14, 0.16],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1511,6 +1528,23 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.14,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_risk_aware_unified_allocation_r36": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v22",
+        "budget_semantics": "action_budget_split_v1",
+        "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 6.5e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.20,
+        "daily_dropout": 0.16,
+        "batch_size": 512,
+    },
 }
 
 
@@ -1557,6 +1591,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_source_forward_proxy_r33": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_allocation_breadth_r34": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_unified_allocation_r35": "portfolio_daily_ranking_v2_gated",
+    "split_heads_portfolio_daily_risk_aware_unified_allocation_r36": "portfolio_daily_ranking_v2_gated",
 }
 
 

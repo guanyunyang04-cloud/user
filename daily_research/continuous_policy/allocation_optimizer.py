@@ -155,6 +155,70 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     economic_release = _clip_series(_series(working, "portfolio_daily_source_economic_release_score"), 0.0, 1.0)
     transfer_score = _clip_series(_series(working, "portfolio_daily_allocation_transfer_score"), 0.0, 1.0)
     dead_branch_risk = _clip_series(_series(working, "portfolio_daily_allocation_dead_branch_risk"), 0.0, 1.0)
+    market_downside = _clip_series(_series(working, "market_downside_pressure"), 0.0, 1.0)
+    cash_regime = _clip_series(_series(working, "cash_regime_pressure"), 0.0, 1.0)
+    portfolio_cash_pressure = _clip_series(_series(working, "portfolio_cash_pressure"), 0.0, 1.0)
+    multi_horizon_forward_risk = _clip_series(_series(working, "multi_horizon_forward_risk"), 0.0, 1.0)
+    cash_defense_value = _clip_series(_series(working, "cash_defense_value"), 0.0, 1.0)
+    portfolio_drawdown = _series(working, "portfolio_drawdown_20d")
+    drawdown_pressure = _clip_series((-portfolio_drawdown - 0.02) / 0.10, 0.0, 1.0)
+    forward_benchmark_1d = _series(working, "forward_benchmark_return_1d")
+    forward_benchmark_3d = _series(working, "forward_benchmark_return_3d")
+    benchmark_downside_timing = _clip_series(
+        0.62 * np.clip(-forward_benchmark_1d / 0.025, 0.0, 1.0)
+        + 0.38 * np.clip(-forward_benchmark_3d / 0.045, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    benchmark_upside_timing = _clip_series(
+        0.62 * np.clip(forward_benchmark_1d / 0.025, 0.0, 1.0)
+        + 0.38 * np.clip(forward_benchmark_3d / 0.045, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    risk_off_pressure = _clip_series(
+        0.26 * market_downside
+        + 0.22 * cash_regime
+        + 0.20 * drawdown_pressure
+        + 0.16 * multi_horizon_forward_risk
+        + 0.10 * cash_defense_value
+        + 0.06 * portfolio_cash_pressure,
+        0.0,
+        1.0,
+    )
+    strong_positive_forward_penalty = _clip_series((source_forward - 0.025) / 0.075, 0.0, 1.0)
+    positive_forward_penalty = _clip_series(
+        np.maximum(
+            positive_forward_penalty,
+            0.54 * strong_positive_forward_penalty
+            + 0.20 * forward_strength_brake
+            + 0.16 * forward_proxy_keep_risk
+            + 0.10 * bad_spread_risk,
+        ),
+        0.0,
+        1.0,
+    )
+    source_distribution_spread_reward = _clip_series(
+        receiver_source_spread_reward * (1.0 - 0.62 * strong_positive_forward_penalty),
+        0.0,
+        1.0,
+    )
+    source_distribution_quality = _clip_series(
+        0.30 * source_distribution_spread_reward
+        + 0.22 * source_release_quality
+        + 0.18 * economic_release
+        + 0.12 * source_exec
+        + 0.08 * source_capacity
+        + 0.10 * np.clip(-source_forward / 0.08, 0.0, 1.0)
+        - 0.28 * positive_forward_penalty
+        - 0.24 * strong_positive_forward_penalty
+        - 0.22 * opportunity_cost_penalty
+        - 0.16 * bad_spread_risk
+        - 0.14 * forward_strength_brake
+        - 0.10 * economic_block_risk,
+        0.0,
+        1.0,
+    )
 
     unified_receiver = _clip_series(
         receiver_raw * (0.36 + 0.42 * receiver_exec + 0.22 * receiver_headroom)
@@ -172,36 +236,62 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + source_capacity * 0.10
         + source_release_quality * 0.10
         + economic_release * 0.12
-        + receiver_source_spread_reward * 0.32
-        - positive_forward_penalty * 0.45
-        - opportunity_cost_penalty * 0.38
+        + source_distribution_quality * 0.20
+        + source_distribution_spread_reward * 0.30
+        - positive_forward_penalty * 0.58
+        - strong_positive_forward_penalty * 0.36
+        - opportunity_cost_penalty * 0.44
         - bad_spread_risk * 0.18
         - economic_block_risk * 0.16
-        - forward_strength_brake * 0.20
+        - forward_strength_brake * 0.24
         - forward_proxy_keep_risk * 0.16,
         0.0,
         1.0,
     )
     unified_source = unified_source.where(source_mask & (source_exec > 0.05) & (current_weight > 1.0e-8), 0.0)
 
-    unified_cash = _clip_series(
-        cash_raw * 0.62
-        + dead_branch_risk * 0.20
-        + positive_forward_penalty * 0.10
-        + opportunity_cost_penalty * 0.08
-        - transfer_score * 0.08
-        - unified_receiver * 0.06,
+    deploy_competition = _clip_series(
+        0.34 * unified_receiver
+        + 0.20 * source_distribution_spread_reward
+        + 0.18 * transfer_score
+        + 0.14 * receiver_raw
+        + 0.14 * source_distribution_quality,
         0.0,
         1.0,
     )
+    cash_timing_target = _clip_series(
+        0.44 * risk_off_pressure
+        + 0.50 * benchmark_downside_timing
+        + 0.10 * positive_forward_penalty
+        + 0.06 * opportunity_cost_penalty
+        - 0.28 * benchmark_upside_timing
+        - 0.18 * deploy_competition,
+        0.0,
+        1.0,
+    )
+    unified_cash = _clip_series(
+        cash_raw * 0.30
+        + cash_timing_target * 0.50
+        + dead_branch_risk * 0.10
+        + positive_forward_penalty * 0.04
+        + opportunity_cost_penalty * 0.03
+        - deploy_competition * 0.20
+        - transfer_score * 0.05,
+        0.0,
+        1.0,
+    )
+    defensive_cash_alignment = _clip_series(risk_off_pressure * unified_cash, 0.0, 1.0)
+    deploy_cash_alignment = _clip_series((1.0 - risk_off_pressure) * (1.0 - unified_cash) * deploy_competition, 0.0, 1.0)
     objective = _clip_series(
         unified_receiver * 0.34
         + unified_source * 0.34
-        + receiver_source_spread_reward * 0.16
+        + source_distribution_spread_reward * 0.16
         + transfer_score * 0.10
-        + (1.0 - unified_cash) * 0.06
-        - positive_forward_penalty * 0.16
-        - opportunity_cost_penalty * 0.14
+        + deploy_cash_alignment * 0.10
+        + defensive_cash_alignment * 0.06
+        - positive_forward_penalty * 0.22
+        - strong_positive_forward_penalty * 0.16
+        - opportunity_cost_penalty * 0.18
         - dead_branch_risk * 0.08,
         0.0,
         1.0,

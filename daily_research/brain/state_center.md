@@ -9,7 +9,7 @@
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
-- continuous_policy 最新有效研究状态为 r35 unified allocation bounded confirm 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth 仍保留；r35 已把 source/receiver/cash 改为同一个 listwise allocation problem，并完成修复后 bounded confirm，但未过 promotion。
+- continuous_policy 最新有效研究状态为 r36 risk-aware unified allocation screening 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation 仍保留；r36 已把 cash timing、drawdown、source distribution 与 unified allocation consistency loss 写入训练目标和执行约束，但未过 promotion。
 - 未完成正式判定前，不得 promotion、不得 live、不得改 active artifact。
 
 ## 当前接管入口
@@ -34,7 +34,7 @@
 - P0：保持 live / active artifact 冻结，只在 research / shadow 范围推进。
 - P1：维护主分脑入口精炼，避免 `state_center.md` 和 `operations_center.md` 继续变成长日志。
 - P2：继续把 receiver 可执行性、source 分布质量、monthly return、exposure utilization、realized deploy 与 drawdown 写入 objective / feedback / gate。
-- P3：下一轮研究不再优先重跑 r35 机制验证，而应修 `cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution；仍必须持续审计 `portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward`，并把 cash / reduce / drawdown 作为 allocation objective 的一等反馈。
+- P3：下一轮研究不再优先重跑 r35 机制验证，而应继续修 r36 暴露出的模型低估 source 正向前景/机会成本问题；`cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution 仍必须作为 allocation objective 的一等反馈；必须持续审计 `portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward`。
 - P4：中期正路仍是 source/receiver/cash listwise allocation teacher 向正式 allocation layer 迁移；`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 cash、turnover、position cap 与 transaction cost；simulator guard 只保留最后安全层。
 
 ## 当前边界
@@ -59,6 +59,7 @@
 - r33：source forward proxy、release conviction 与 distribution clean-pass，修复强势 source 误卖但尚未恢复足够 clean breadth。
 - r34：allocation breadth bounded/evidence-confirm 已完成；工程链路可执行，训练证据可充分，但 fresh confirm 未通过 v2/stability，失败核心是 source 分布与 receiver-source spread，而不是 receiver 可执行性或 GPU/yolos 训练链路。
 - r35：unified allocation 已完成修复后 bounded confirm；入口为 `split_heads_portfolio_daily_unified_allocation_r35`、loss 为 `alpha_result_value_budget_split_v21`。`postfix4_bounded_confirm_20260430` 完成 4 个 screening 与 2 个 confirm，`stable_confirmatory_count = 1`，champion 为 `confirm_02`，但 `promotion_status = shadow_only`。
+- r36：risk-aware unified allocation 已完成代码接入与 3 轮 screening。入口为 `split_heads_portfolio_daily_risk_aware_unified_allocation_r36`、loss 为 `alpha_result_value_budget_split_v22`。r36c 已封住 unified source 绕过 `source_distribution_clean_pass` 的执行层旁路，并在 `64/48` screening 中达到 `training_evidence_status = sufficient`；但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且真实 source 未来分布仍未过线。
 - 过程细节与完整实验复盘以 `daily_research/brain/episodic_memory.md` 为准。
 
 ## 历史归档入口

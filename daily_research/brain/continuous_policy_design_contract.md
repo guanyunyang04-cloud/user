@@ -32,6 +32,8 @@
 - r35 unified allocation 合同：`split_heads_portfolio_daily_unified_allocation_r35` 必须把 source、receiver 与 cash 当作同一个 listwise allocation problem；`portfolio_daily_unified_receiver_score`、`portfolio_daily_unified_source_score`、`portfolio_daily_unified_cash_score`、`portfolio_daily_unified_allocation_objective` 是训练 surface，不得作为普通 feature 泄漏。
 - r35 经济 credit assignment 合同：`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward` 必须写入训练目标、summary 与 scoring；不能只在 v2 gate 后验拦截正 forward source 误卖或负 receiver-source spread。
 - r35 optimizer 合同：`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 `cash_reserve_target`、`turnover_limit`、`max_position_weight`、transaction cost、slippage 与 sell tax；simulator guard 只做最后安全层，不再承担主策略逻辑。
+- r36 risk-aware unified allocation 合同：cash timing、drawdown、market downside、forward benchmark return、source positive forward penalty、source opportunity cost penalty 与 receiver-source spread reward 必须进入 unified allocation target 与 consistency loss；不能只靠 v2 gate 后验拦截。
+- r36 source distribution 执行合同：所有 unified source candidate 必须满足 `portfolio_daily_source_distribution_clean_pass`，或满足更严格的低 penalty / 低 opportunity cost / 低 brake-risk / 高 spread relief 条件；普通 source candidate 与 unified source candidate 的 OR 合并不得绕过 source distribution gate。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -55,6 +57,7 @@
 - r34 已补上 receiver/source breadth scoring、joint economic quality penalty 与 allocation teacher summary，并完成 bounded/evidence-confirm；最新 fresh confirm 训练证据充分且 receiver/cash/source 执行率达标，但因 `receiver-source spread` 转负、`source_positive_forward_sell_share` 与 `source_strong_positive_forward_sell_count` 失控，仍不是 verdict。
 - r35 已完成 unified allocation 修复后 bounded confirm：`postfix4_bounded_confirm_20260430` 完成 4 个 screening、2 个 confirm，`stable_confirmatory_count = 1`，champion `confirm_02` 达到 `training_evidence_status = sufficient`、`annual_return = 1.409793`、`sharpe = 2.846432`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate = 0.806071`、`receiver_minus_source_forward_excess_5d = 0.206611`，但仍 `promotion_status = shadow_only`。
 - 当前瓶颈已经从“能不能卖”推进到“能否在 unified allocation 下同时控制 cash timing、drawdown、reduce/exit 质量和 source positive distribution”。
+- r36c screening 证明：执行层 source distribution 旁路已被封住，source target 行全部为 `portfolio_daily_source_distribution_clean_pass = true`；但真实未来分布仍失败，`source_positive_forward_sell_share = 0.666667`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.029367`。剩余根因不是 simulator OR 旁路，而是模型对 source 正向前景与机会成本的低估。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -63,7 +66,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：不要继续扩大 r35 机制验证；先把 `cash_timing_quality_1d`、`max_drawdown`、`reduce_success_rate_5d` 与 source positive distribution 写成更强 allocation objective / feedback。
+- 短期：不要继续扩大 r35 机制验证；先把 r36 暴露出的 source 正向前景低估、opportunity cost 低估、cash timing 与 drawdown 失败写成更强 allocation objective / feedback。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
 
@@ -75,7 +78,8 @@
 - r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
 - r31/r33：当前合同核心，分别约束 receiver 语义闭包与 source distribution clean-pass。
 - r34：allocation breadth 入口，聚焦 receiver/source breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
-- r35：当前执行入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
+- r35：unified allocation 入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
+- r36：当前执行入口，聚焦 risk-aware cash/source distribution objective、unified allocation consistency loss 与 source distribution 执行旁路封闭。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

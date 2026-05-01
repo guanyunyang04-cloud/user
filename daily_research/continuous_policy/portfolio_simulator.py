@@ -2353,6 +2353,20 @@ class PortfolioState:
         )
         portfolio_daily_unified_source_candidate = pd.Series(False, index=prices.index, dtype=bool)
         if unified_allocation_policy_mode and model_unified_source_score_series is not None:
+            portfolio_daily_unified_source_distribution_pass = (
+                portfolio_daily_source_distribution_clean_pass
+                | (
+                    (portfolio_daily_source_gap >= 0.180)
+                    & (portfolio_daily_unified_receiver_source_spread_reward >= 0.740)
+                    & (portfolio_daily_unified_source_positive_forward_penalty <= 0.120)
+                    & (portfolio_daily_unified_source_opportunity_cost_penalty <= 0.180)
+                    & (portfolio_daily_source_bad_forward_spread_risk <= 0.120)
+                    & (portfolio_daily_source_forward_strength_brake_risk <= 0.180)
+                    & (portfolio_daily_source_forward_proxy_keep_risk <= 0.220)
+                    & (portfolio_daily_source_economic_block_risk <= 0.240)
+                    & (portfolio_daily_source_release_conviction >= 0.520)
+                )
+            )
             portfolio_daily_unified_source_candidate = (
                 portfolio_daily_ranking_mode
                 & held_mask
@@ -2373,6 +2387,7 @@ class PortfolioState:
                 & (portfolio_daily_source_forward_proxy_keep_risk <= 0.560)
                 & (portfolio_daily_unified_source_positive_forward_penalty <= 0.360)
                 & (portfolio_daily_unified_source_opportunity_cost_penalty <= 0.520)
+                & portfolio_daily_unified_source_distribution_pass
             )
         portfolio_daily_source_low_keep_value_pass = (
             (

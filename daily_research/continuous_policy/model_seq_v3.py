@@ -1226,6 +1226,37 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"] = {
         "portfolio_cash_margin_total": 0.16,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"]["sample_scalar_loss_weights"],
+        "portfolio_daily_receiver_score": 2.52,
+        "portfolio_daily_source_score": 2.78,
+        "portfolio_daily_cash_score": 1.58,
+        "portfolio_daily_unified_receiver_score": 1.96,
+        "portfolio_daily_unified_source_score": 2.36,
+        "portfolio_daily_unified_cash_score": 1.84,
+        "portfolio_daily_source_positive_forward_penalty": 2.24,
+        "portfolio_daily_source_opportunity_cost_penalty": 2.02,
+        "portfolio_daily_receiver_source_spread_reward": 1.96,
+        "portfolio_daily_unified_allocation_objective": 1.92,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"]["daily_target_loss_weights"],
+        "budget_risk_signal_target": 1.46,
+        "budget_deploy_signal_target": 1.58,
+        "budget_cash_timing_signal_target": 1.92,
+        "budget_alpha_focus_signal_target": 1.42,
+        "turnover_budget": 1.40,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"]["multi_objective_loss_weights"],
+        "scalar_total": 3.12,
+        "portfolio_source_pairwise_total": 0.58,
+        "portfolio_receiver_pairwise_total": 0.32,
+        "portfolio_cash_margin_total": 0.22,
+        "portfolio_unified_allocation_total": 0.46,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -1421,6 +1452,175 @@ def _portfolio_cash_margin_loss(
     if int(deploy_dominant.sum().detach().cpu().item()) > 0:
         terms.append(torch.relu(margin - (receiver_score[deploy_dominant] - cash_score[deploy_dominant])).mean())
     return torch.stack(terms).mean() if terms else torch.tensor(0.0, device=device)
+
+
+def _unified_allocation_consistency_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    required_outputs = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_unified_allocation_objective",
+    }
+    required_targets = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_source_positive_forward_penalty",
+        "portfolio_daily_source_opportunity_cost_penalty",
+        "portfolio_daily_receiver_source_spread_reward",
+        "portfolio_daily_unified_allocation_objective",
+    }
+    if not required_outputs.issubset(outputs) or not required_targets.issubset(targets):
+        device = next(iter(outputs.values())).device
+        return torch.tensor(0.0, device=device)
+    device = outputs["portfolio_daily_unified_receiver_score"].device
+    receiver_score = torch.clamp(outputs["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    source_score = torch.clamp(outputs["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    cash_score = torch.clamp(outputs["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    objective_score = torch.clamp(outputs["portfolio_daily_unified_allocation_objective"].to(device), 0.0, 1.0)
+
+    target_receiver = torch.clamp(targets["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    target_source = torch.clamp(targets["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    target_cash = torch.clamp(targets["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    target_objective = torch.clamp(targets["portfolio_daily_unified_allocation_objective"].to(device), 0.0, 1.0)
+    positive_forward_penalty = torch.clamp(
+        targets["portfolio_daily_source_positive_forward_penalty"].to(device),
+        0.0,
+        1.0,
+    )
+    opportunity_cost_penalty = torch.clamp(
+        targets["portfolio_daily_source_opportunity_cost_penalty"].to(device),
+        0.0,
+        1.0,
+    )
+    spread_reward = torch.clamp(targets["portfolio_daily_receiver_source_spread_reward"].to(device), 0.0, 1.0)
+    zero = torch.zeros_like(target_receiver)
+    market_downside = torch.clamp(targets.get("market_downside_pressure", zero).to(device), 0.0, 1.0)
+    cash_regime = torch.clamp(targets.get("cash_regime_pressure", zero).to(device), 0.0, 1.0)
+    portfolio_cash_pressure = torch.clamp(targets.get("portfolio_cash_pressure", zero).to(device), 0.0, 1.0)
+    multi_horizon_forward_risk = torch.clamp(targets.get("multi_horizon_forward_risk", zero).to(device), 0.0, 1.0)
+    portfolio_drawdown = torch.clamp(targets.get("portfolio_drawdown_20d", zero).to(device), -1.0, 0.25)
+    forward_benchmark_1d = torch.clamp(targets.get("forward_benchmark_return_1d", zero).to(device), -0.25, 0.25)
+    forward_benchmark_3d = torch.clamp(targets.get("forward_benchmark_return_3d", zero).to(device), -0.35, 0.35)
+    transfer_score = torch.clamp(targets.get("portfolio_daily_allocation_transfer_score", zero).to(device), 0.0, 1.0)
+    receiver_mask = torch.clamp(targets.get("portfolio_daily_receiver_candidate_mask", zero).to(device), 0.0, 1.0)
+    source_mask = torch.clamp(targets.get("portfolio_daily_source_candidate_mask", zero).to(device), 0.0, 1.0)
+
+    drawdown_pressure = torch.clamp((-portfolio_drawdown - 0.02) / 0.10, 0.0, 1.0)
+    benchmark_downside_timing = torch.clamp(
+        0.62 * torch.clamp(-forward_benchmark_1d / 0.025, 0.0, 1.0)
+        + 0.38 * torch.clamp(-forward_benchmark_3d / 0.045, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    benchmark_upside_timing = torch.clamp(
+        0.62 * torch.clamp(forward_benchmark_1d / 0.025, 0.0, 1.0)
+        + 0.38 * torch.clamp(forward_benchmark_3d / 0.045, 0.0, 1.0),
+        0.0,
+        1.0,
+    )
+    risk_off_target = torch.clamp(
+        0.28 * market_downside
+        + 0.22 * cash_regime
+        + 0.20 * drawdown_pressure
+        + 0.18 * multi_horizon_forward_risk
+        + 0.12 * portfolio_cash_pressure,
+        0.0,
+        1.0,
+    )
+    deploy_pressure_target = torch.clamp(
+        0.36 * target_receiver
+        + 0.24 * spread_reward
+        + 0.22 * transfer_score
+        + 0.18 * target_source,
+        0.0,
+        1.0,
+    )
+    cash_behavior_target = torch.clamp(
+        0.46 * target_cash
+        + 0.26 * risk_off_target
+        + 0.34 * benchmark_downside_timing
+        + 0.08 * positive_forward_penalty
+        + 0.08 * opportunity_cost_penalty
+        - 0.24 * benchmark_upside_timing
+        - 0.22 * deploy_pressure_target,
+        0.0,
+        1.0,
+    )
+    source_behavior_target = torch.clamp(
+        target_source
+        + 0.18 * spread_reward
+        + 0.10 * target_objective
+        - 0.34 * positive_forward_penalty
+        - 0.26 * opportunity_cost_penalty,
+        0.0,
+        1.0,
+    )
+    objective_behavior_target = torch.clamp(
+        target_objective
+        + 0.10 * deploy_pressure_target * (1.0 - cash_behavior_target)
+        + 0.06 * risk_off_target * cash_behavior_target
+        - 0.18 * positive_forward_penalty
+        - 0.14 * opportunity_cost_penalty,
+        0.0,
+        1.0,
+    )
+
+    regression_loss = (
+        nn.functional.smooth_l1_loss(receiver_score, target_receiver) * 0.18
+        + nn.functional.smooth_l1_loss(source_score, source_behavior_target) * 0.26
+        + nn.functional.smooth_l1_loss(cash_score, cash_behavior_target) * 0.28
+        + nn.functional.smooth_l1_loss(objective_score, objective_behavior_target) * 0.18
+    )
+    bad_source_pressure = torch.clamp(
+        torch.maximum(positive_forward_penalty, opportunity_cost_penalty) - spread_reward + 0.06,
+        0.0,
+        1.0,
+    )
+    bad_source_loss = (bad_source_pressure * source_score * torch.clamp(source_mask + 0.25, 0.0, 1.0)).mean()
+    dead_cash_pressure = torch.clamp(deploy_pressure_target - risk_off_target + 0.08, 0.0, 1.0)
+    dead_cash_loss = (dead_cash_pressure * cash_score * torch.clamp(receiver_mask + 0.25, 0.0, 1.0)).mean()
+
+    margin = torch.tensor(0.10, device=device)
+    margin_terms: list[torch.Tensor] = []
+    defensive_cash = cash_behavior_target > torch.maximum(target_receiver, source_behavior_target) + 0.08
+    receiver_dominant = target_receiver > torch.maximum(cash_behavior_target, source_behavior_target) + 0.08
+    source_dominant = source_behavior_target > torch.maximum(cash_behavior_target, target_receiver) + 0.08
+    if int(defensive_cash.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(
+                margin
+                - (
+                    cash_score[defensive_cash]
+                    - torch.maximum(receiver_score[defensive_cash], source_score[defensive_cash])
+                )
+            ).mean()
+        )
+    if int(receiver_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(
+                margin
+                - (
+                    receiver_score[receiver_dominant]
+                    - torch.maximum(cash_score[receiver_dominant], source_score[receiver_dominant])
+                )
+            ).mean()
+        )
+    if int(source_dominant.sum().detach().cpu().item()) > 0:
+        margin_terms.append(
+            torch.relu(
+                margin
+                - (
+                    source_score[source_dominant]
+                    - torch.maximum(cash_score[source_dominant], receiver_score[source_dominant])
+                )
+            ).mean()
+        )
+    margin_loss = torch.stack(margin_terms).mean() if margin_terms else torch.tensor(0.0, device=device)
+    return regression_loss + bad_source_loss * 0.26 + dead_cash_loss * 0.22 + margin_loss * 0.24
 
 
 def _value_arbitration_consistency_loss(
@@ -2971,6 +3171,36 @@ def fit_policy_models_v3(
             0.0,
             1.0,
         ),
+        "market_downside_pressure": np.clip(
+            sample_frame.get("market_downside_pressure", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "cash_regime_pressure": np.clip(
+            sample_frame.get("cash_regime_pressure", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_cash_pressure": np.clip(
+            sample_frame.get("portfolio_cash_pressure", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            0.0,
+            1.0,
+        ),
+        "portfolio_drawdown_20d": np.clip(
+            sample_frame.get("portfolio_drawdown_20d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            -1.0,
+            0.25,
+        ),
+        "forward_benchmark_return_1d": np.clip(
+            sample_frame.get("forward_benchmark_return_1d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            -0.25,
+            0.25,
+        ),
+        "forward_benchmark_return_3d": np.clip(
+            sample_frame.get("forward_benchmark_return_3d", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
+            -0.35,
+            0.35,
+        ),
         "portfolio_daily_unified_receiver_score": np.clip(
             sample_frame.get("portfolio_daily_unified_receiver_score", pd.Series(np.zeros(len(sample_frame)), index=sample_frame.index)).astype(float).to_numpy(dtype=np.float32),
             0.0,
@@ -3197,6 +3427,7 @@ def fit_policy_models_v3(
                 candidate_mask_name="portfolio_daily_source_candidate_mask",
             )
             portfolio_cash_margin_loss = _portfolio_cash_margin_loss(outputs, sample_batch_targets)
+            portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(outputs, sample_batch_targets)
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -3223,6 +3454,7 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("portfolio_receiver_pairwise_total", 0.0) * portfolio_receiver_pairwise_loss
                 + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * portfolio_source_pairwise_loss
                 + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * portfolio_cash_margin_loss
+                + multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) * portfolio_unified_allocation_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -3277,6 +3509,7 @@ def fit_policy_models_v3(
                 candidate_mask_name="portfolio_daily_source_candidate_mask",
             )
             val_portfolio_cash_margin_loss = _portfolio_cash_margin_loss(val_outputs, val_targets)
+            val_portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(val_outputs, val_targets)
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -3307,6 +3540,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("portfolio_receiver_pairwise_total", 0.0) * val_portfolio_receiver_pairwise_loss
                     + multi_objective_loss_weights.get("portfolio_source_pairwise_total", 0.0) * val_portfolio_source_pairwise_loss
                     + multi_objective_loss_weights.get("portfolio_cash_margin_total", 0.0) * val_portfolio_cash_margin_loss
+                    + multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) * val_portfolio_unified_allocation_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -3473,6 +3707,9 @@ def fit_policy_models_v3(
                 "portfolio_daily_receiver_source_spread_reward",
                 "portfolio_daily_unified_allocation_objective",
             )
+        ),
+        "supports_portfolio_unified_allocation_consistency_loss": (
+            multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) > 0.0
         ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0

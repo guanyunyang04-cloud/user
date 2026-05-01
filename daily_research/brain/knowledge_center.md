@@ -812,3 +812,16 @@
 - 新知识 5：当前路线已经从“执行合同修复”进入“收益稳定性与目标选择”阶段。
   - v13/v14/v15 解决的是现金、source 与 receiver 的执行合同。
   - r23 证明下一层更像稳健优化问题：在不破坏执行合同的前提下，提高 stable confirmatory 的收益上限。
+
+## 2026-05-01 r36 risk-aware unified allocation 知识沉淀
+- 新知识 1：unified source candidate 的执行层旁路是真实风险。
+  - r36b 显示高收益和低回撤可以与 source distribution 明显失败同时出现：`annual_return = 1.877440`、`max_drawdown = -0.053202`，但 `receiver_minus_source_forward_excess_5d = -0.053013`、`source_positive_forward_sell_share = 0.533333`、`source_strong_positive_forward_sell_count = 7`。
+  - 代码根因是普通 source candidate 已要求 `portfolio_daily_source_distribution_clean_pass`，但 `portfolio_daily_unified_source_candidate` 通过 OR 合并回最终 source candidate，允许 unified source 绕过 distribution gate。
+- 新知识 2：封住执行旁路后，问题会从 simulator guard 转移到模型信用分配。
+  - r36c 已要求 unified source candidate 满足 `portfolio_daily_source_distribution_clean_pass` 或更严格 relief 条件，action panel 中 source target 行的 `source_distribution_clean_pass_share = 1.0`。
+  - 但 r36c 仍有 `source_positive_forward_sell_share = 0.666667`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.029367`，说明模型仍低估了被卖 source 的真实正向前景和机会成本。
+- 新知识 3：cash timing 改善不能以 source distribution 退化为代价。
+  - 加入 forward benchmark cash timing target 后，r36b 的收益和回撤显著改善，但 source 分布退化；这证明 cash/drawdown objective 与 source distribution objective 必须联合优化，不能单独强化。
+- 新知识 4：r36 不具备 confirm 前置资格。
+  - r36c 为 `training_evidence_status = sufficient`，但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`。
+  - 在 source distribution 与 cash/drawdown 同时过线前，不应启动 bounded confirm 或 promotion 讨论。
