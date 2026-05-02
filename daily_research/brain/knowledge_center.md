@@ -133,6 +133,7 @@
 - continuous_policy 当前根因排序：第一是目标函数与组合级决策不完全一致；第二是卖出、现金、资金来源的 credit assignment 很难；第三才是数据粒度和样本 regime 不足
 - 后续最大提升不应来自继续堆动作 loss，而应来自组合级 pair/listwise ranking、直接优化多日/月度组合收益，以及更强的卖出与现金时机学习
 - r35 已验证 source/receiver/cash unified allocation 机制能把 receiver/source target 重新接通，并能在 confirm 中形成正 receiver-source spread；但它仍不能替代 promotion gate，当前失败核心转为 cash timing、drawdown、reduce/exit 质量和 source positive distribution。
+- r39 已验证 allocation objective consolidation 机制能把收益、回撤、现金部署、交易质量、月度质量和 final allocation objective 写入同一训练入口，并能把 final objective 回写到 receiver/source/cash 执行评分；但它仍不能替代 promotion gate，当前失败核心转为 clean source breadth 不足、cash timing 为负、cash reserve 过高和 drawdown 不稳。
 - execution 侧默认通过统一应用入口运行、监控、恢复；直接裸跑底层脚本只应用于调试或局部排障
 - execution Web 控制台基于 FastAPI + Jinja2，本地只监听 `127.0.0.1`
 - `agent` 在本地联调 Web 控制台、短期临时服务或训练任务时，也必须遵守前台运行与不中断纪律；不再默认使用 `Start-Job` 或 `Start-Process` 后台化任务
@@ -839,3 +840,17 @@
 - 新知识 4：下一轮不应继续粗暴加 guard。
   - r31/r33/r36/r37 已证明 guard 可以压住语义旁路，但过多 guard 会把主策略逻辑推回执行层。
   - 更有效方向是强化 hard-negative label 采样、pairwise/listwise source regret、source positive tail distribution loss 与 allocation optimizer 约束，让模型在训练内学会“不该从强 source 出钱”。
+
+## 2026-05-01 r38 source hard-negative regret 知识沉淀
+- 新知识 1：tail hard-negative / listwise release / transfer regret 可以把 source 正向误卖显著压下去。
+  - r38 confirm 达到 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`source_forward_excess_5d = -0.026266`、`receiver_minus_source_forward_excess_5d = 0.037347`。
+  - 这说明 r37 的“source hard-negative 学习强度不足”可以通过尾部样本权重、release preference 和 transfer-level regret 明显改善。
+- 新知识 2：只压 source false-sell 会暴露新的保守化风险。
+  - r38 同时只有 `source_target_count = 1`，且 `cash_reserve_rate = 0.981728`、`annual_return = 0.009111`、`sharpe = 0.164855`。
+  - 这不是执行失败，而是 allocation objective 在防错后缺少足够的收益恢复、receiver/source breadth 和 cash deployment 反馈。
+- 新知识 3：r38 失败不是 GPU、yolos、脚本中止或 JSON 损坏问题。
+  - screening 与 confirm 都用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` 前台自然完成，diagnostics 为 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`completed_epochs = 64`。
+  - `protocol_summary.json` 需要在 PowerShell 中显式 `-Encoding UTF8` 读取；默认编码乱码不能解释为脑内文档或 JSON 损坏。
+- 新知识 4：下一轮应从“防错强度”转向“防错约束下的有效交易”。
+  - 保留 r38 hard-negative 和 source distribution 约束，但把 open/reduce/exit 质量、cash timing、monthly return、drawdown、receiver/source breadth 和 exposure utilization 写进同一个 transfer-level allocation objective。
+  - 不应为了恢复收益直接放宽 source clean-pass 或 positive-forward 惩罚，否则会回退到 r36/r37 的强势误卖。

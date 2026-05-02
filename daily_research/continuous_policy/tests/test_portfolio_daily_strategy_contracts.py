@@ -13,7 +13,11 @@ from daily_research.continuous_policy.analyze_behavior_gap import _compute_expos
 from daily_research.continuous_policy.allocation_teacher import build_allocation_teacher_summary
 from daily_research.continuous_policy.model_seq_v3 import (
     LOSS_PROFILE_CONFIGS,
+    _allocation_objective_consolidation_loss,
     _decision_focused_allocation_regret_loss,
+    _source_hard_negative_tail_loss,
+    _source_listwise_release_regret_loss,
+    _transfer_level_allocation_regret_loss,
     _unified_allocation_consistency_loss,
     predict_policy_v3,
 )
@@ -210,6 +214,12 @@ class _FakePolicyModel:
             "portfolio_daily_source_opportunity_cost_penalty": torch.linspace(0.04, 0.14, row_count),
             "portfolio_daily_receiver_source_spread_reward": torch.linspace(0.30, 0.50, row_count),
             "portfolio_daily_unified_allocation_objective": torch.linspace(0.55, 0.75, row_count),
+            "portfolio_daily_allocation_trade_quality_target": torch.linspace(0.58, 0.78, row_count),
+            "portfolio_daily_allocation_cash_deployment_target": torch.linspace(0.62, 0.82, row_count),
+            "portfolio_daily_allocation_risk_adjusted_return_target": torch.linspace(0.56, 0.76, row_count),
+            "portfolio_daily_allocation_drawdown_control_target": torch.linspace(0.08, 0.18, row_count),
+            "portfolio_daily_allocation_monthly_quality_target": torch.linspace(0.54, 0.74, row_count),
+            "portfolio_daily_allocation_final_objective": torch.linspace(0.60, 0.80, row_count),
         }
 
 
@@ -435,6 +445,57 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         )
         self.assertEqual(problem.loc["false_source", "portfolio_daily_unified_source_candidate"], 0.0)
 
+    def test_unified_allocation_problem_exposes_source_release_and_transfer_regret_targets(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {
+                    "stock": "false_source",
+                    "current_weight": 0.15,
+                    "portfolio_daily_source_score": 0.94,
+                    "portfolio_daily_source_candidate_mask": 1.0,
+                    "portfolio_daily_source_executability": 1.0,
+                    "portfolio_daily_source_release_capacity": 1.0,
+                    "portfolio_daily_source_release_quality": 0.86,
+                    "portfolio_daily_source_economic_release_score": 0.74,
+                    "portfolio_daily_source_forward_excess_5d": 0.15,
+                    "portfolio_daily_source_receiver_forward_spread": -0.08,
+                    "portfolio_daily_source_opportunity_cost": 0.82,
+                    "portfolio_daily_source_forward_strength_brake_risk": 0.70,
+                    "portfolio_daily_source_forward_proxy_keep_risk": 0.72,
+                },
+                {
+                    "stock": "clean_source",
+                    "current_weight": 0.14,
+                    "portfolio_daily_source_score": 0.58,
+                    "portfolio_daily_source_candidate_mask": 1.0,
+                    "portfolio_daily_source_executability": 1.0,
+                    "portfolio_daily_source_release_capacity": 1.0,
+                    "portfolio_daily_source_release_quality": 0.62,
+                    "portfolio_daily_source_economic_release_score": 0.46,
+                    "portfolio_daily_source_forward_excess_5d": -0.05,
+                    "portfolio_daily_source_receiver_forward_spread": 0.07,
+                    "portfolio_daily_source_opportunity_cost": 0.04,
+                },
+            ]
+        )
+
+        problem = build_unified_allocation_problem(frame).set_index("stock")
+
+        for column in (
+            "portfolio_daily_source_tail_false_sell_penalty",
+            "portfolio_daily_source_release_preference",
+            "portfolio_daily_transfer_regret_target",
+        ):
+            self.assertIn(column, problem.columns)
+        self.assertGreater(
+            problem.loc["clean_source", "portfolio_daily_source_release_preference"],
+            problem.loc["false_source", "portfolio_daily_source_release_preference"] + 0.35,
+        )
+        self.assertGreater(
+            problem.loc["clean_source", "portfolio_daily_transfer_regret_target"],
+            problem.loc["false_source", "portfolio_daily_transfer_regret_target"] + 0.30,
+        )
+
     def test_unified_allocation_problem_uses_predicted_source_penalties_without_future_labels(self) -> None:
         frame = pd.DataFrame(
             [
@@ -638,6 +699,89 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
 
         self.assertGreater(float(bad_loss.detach().cpu()), float(good_loss.detach().cpu()) * 2.0)
 
+    def test_source_hard_negative_tail_loss_reweights_false_source_pressure(self) -> None:
+        targets = {
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.94, 0.02, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_strong_false_sell_penalty": torch.tensor([0.90, 0.00, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.96, 0.02, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.90, 0.04, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([0.13, -0.07, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_tail_false_sell_penalty": torch.tensor([0.84, 0.00, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.02, 0.84, 0.00], dtype=torch.float32),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_source_score": torch.tensor([0.02, 0.78, 0.06], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.92, 0.04, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.04, 0.80, 0.00], dtype=torch.float32),
+        }
+        bad_outputs = {
+            "portfolio_daily_unified_source_score": torch.tensor([0.86, 0.12, 0.06], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.18, 0.20, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.82, 0.10, 0.00], dtype=torch.float32),
+        }
+
+        good_loss = _source_hard_negative_tail_loss(good_outputs, targets)
+        bad_loss = _source_hard_negative_tail_loss(bad_outputs, targets)
+
+        self.assertLess(float(good_loss.detach().cpu()), float(bad_loss.detach().cpu()) * 0.45)
+
+    def test_source_listwise_release_regret_prefers_clean_source_within_day(self) -> None:
+        targets = {
+            "date_code": torch.tensor([1.0, 1.0, 1.0, 2.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.02, 0.86, 0.72, 0.55], dtype=torch.float32),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.82, 0.70, 0.50], dtype=torch.float32),
+        }
+        bad_outputs = {
+            "portfolio_daily_unified_source_score": torch.tensor([0.90, 0.12, 0.18, 0.50], dtype=torch.float32),
+        }
+
+        good_loss = _source_listwise_release_regret_loss(good_outputs, targets)
+        bad_loss = _source_listwise_release_regret_loss(bad_outputs, targets)
+
+        self.assertLess(float(good_loss.detach().cpu()), float(bad_loss.detach().cpu()) * 0.35)
+
+    def test_transfer_level_allocation_regret_penalizes_negative_spread_and_dead_cash(self) -> None:
+        targets = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.86, 0.08, 0.18], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.00, 0.72], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.12, 0.18, 0.14], dtype=torch.float32),
+            "portfolio_daily_unified_allocation_objective": torch.tensor([0.82, 0.02, 0.70], dtype=torch.float32),
+            "portfolio_daily_transfer_regret_target": torch.tensor([0.84, 0.00, 0.76], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.00, 0.02, 0.84], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.00, 0.94, 0.02], dtype=torch.float32),
+            "portfolio_daily_source_tail_false_sell_penalty": torch.tensor([0.00, 0.86, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.00, 0.96, 0.02], dtype=torch.float32),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.00, 0.90, 0.04], dtype=torch.float32),
+            "portfolio_daily_receiver_source_spread_reward": torch.tensor([0.74, 0.02, 0.68], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 1.0, 1.0], dtype=torch.float32),
+            "market_downside_pressure": torch.tensor([0.02, 0.02, 0.04], dtype=torch.float32),
+            "cash_regime_pressure": torch.tensor([0.02, 0.02, 0.04], dtype=torch.float32),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.82, 0.04, 0.18], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.02, 0.76], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.10, 0.14, 0.12], dtype=torch.float32),
+            "portfolio_daily_unified_allocation_objective": torch.tensor([0.82, 0.04, 0.72], dtype=torch.float32),
+            "portfolio_daily_transfer_regret_target": torch.tensor([0.82, 0.02, 0.72], dtype=torch.float32),
+        }
+        bad_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.12, 0.18, 0.20], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.08, 0.84, 0.16], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.78, 0.72, 0.70], dtype=torch.float32),
+            "portfolio_daily_unified_allocation_objective": torch.tensor([0.14, 0.82, 0.18], dtype=torch.float32),
+            "portfolio_daily_transfer_regret_target": torch.tensor([0.12, 0.82, 0.20], dtype=torch.float32),
+        }
+
+        good_loss = _transfer_level_allocation_regret_loss(good_outputs, targets)
+        bad_loss = _transfer_level_allocation_regret_loss(bad_outputs, targets)
+
+        self.assertLess(float(good_loss.detach().cpu()), float(bad_loss.detach().cpu()) * 0.45)
+
     def test_semidifferentiable_allocation_solver_respects_cash_turnover_and_position_cap(self) -> None:
         problem = build_unified_allocation_problem(
             pd.DataFrame(
@@ -745,6 +889,30 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             weights["multi_objective_loss_weights"]["portfolio_unified_allocation_total"] * 0.40,
         )
 
+    def test_r38_source_hard_negative_regret_profile_is_registered(self) -> None:
+        tag = "split_heads_portfolio_daily_source_hard_negative_regret_r38"
+        self.assertIn(tag, SEARCH_PROFILES)
+        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v24")
+
+        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v24"]
+        for column in (
+            "portfolio_daily_source_hard_negative_penalty",
+            "portfolio_daily_source_tail_false_sell_penalty",
+            "portfolio_daily_source_release_preference",
+            "portfolio_daily_transfer_regret_target",
+        ):
+            self.assertIn(column, weights["sample_scalar_loss_weights"])
+        multi = weights["multi_objective_loss_weights"]
+        self.assertGreater(multi["portfolio_source_hard_negative_tail_total"], 0.0)
+        self.assertGreater(multi["portfolio_source_listwise_release_total"], 0.0)
+        self.assertGreater(multi["portfolio_transfer_regret_total"], 0.0)
+        self.assertGreater(
+            multi["portfolio_source_hard_negative_tail_total"],
+            multi["portfolio_unified_allocation_total"] * 0.40,
+        )
+
     def test_exposure_utilization_uses_cash_weight_when_gross_exposure_is_empty(self) -> None:
         turnover_frame = pd.DataFrame(
             {
@@ -790,6 +958,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 "supports_sell_heads": False,
                 "supports_portfolio_listwise_heads": True,
                 "supports_portfolio_unified_allocation_heads": True,
+                "supports_portfolio_allocation_objective_consolidation_heads": True,
             },
         )
 
@@ -803,9 +972,19 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             "portfolio_daily_source_opportunity_cost_penalty",
             "portfolio_daily_receiver_source_spread_reward",
             "portfolio_daily_unified_allocation_objective",
+            "portfolio_daily_allocation_trade_quality_target",
+            "portfolio_daily_allocation_cash_deployment_target",
+            "portfolio_daily_allocation_risk_adjusted_return_target",
+            "portfolio_daily_allocation_drawdown_control_target",
+            "portfolio_daily_allocation_monthly_quality_target",
+            "portfolio_daily_allocation_final_objective",
         ):
             self.assertIn(column, policy.columns)
-            self.assertGreater(float(policy[column].max()), 0.0)
+            if column == "portfolio_daily_unified_cash_score":
+                self.assertGreaterEqual(float(policy[column].max()), 0.0)
+            else:
+                self.assertGreater(float(policy[column].max()), 0.0)
+        self.assertLess(float(policy["portfolio_daily_cash_score"].max()), 0.30)
 
     def test_v2_scoring_rewards_unified_allocation_surface_quality(self) -> None:
         weak = _score_protocol_summary(
@@ -982,6 +1161,136 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(result.diagnostics["portfolio_daily_unified_source_candidate_count"], 0)
         self.assertEqual(result.diagnostics["portfolio_daily_source_target_count"], 0)
         self.assertEqual(float(result.weights["source"]), 0.20)
+
+    def test_r39_allocation_objective_consolidation_adds_economic_targets(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "date": ["2026-01-02", "2026-01-02"],
+                "stock": ["receiver", "source"],
+                "action_label": ["open", "reduce"],
+                "current_weight": [0.0, 0.20],
+                "portfolio_daily_receiver_score": [0.88, 0.10],
+                "portfolio_daily_source_score": [0.05, 0.74],
+                "portfolio_daily_cash_score": [0.72, 0.72],
+                "portfolio_daily_receiver_candidate_mask": [1.0, 0.0],
+                "portfolio_daily_source_candidate_mask": [0.0, 1.0],
+                "portfolio_daily_receiver_executability": [0.92, 0.40],
+                "portfolio_daily_receiver_add_headroom": [0.18, 0.04],
+                "portfolio_daily_source_executability": [0.25, 0.86],
+                "portfolio_daily_source_release_capacity": [0.0, 0.20],
+                "portfolio_daily_source_release_quality": [0.0, 0.76],
+                "portfolio_daily_source_economic_release_score": [0.0, 0.72],
+                "portfolio_daily_source_opportunity_cost": [0.02, 0.04],
+                "portfolio_daily_source_forward_excess_5d": [0.0, -0.030],
+                "portfolio_daily_source_receiver_forward_spread": [0.060, 0.060],
+                "portfolio_daily_receiver_forward_excess_5d": [0.040, 0.040],
+                "portfolio_daily_allocation_transfer_score": [0.78, 0.78],
+                "portfolio_daily_allocation_dead_branch_risk": [0.05, 0.05],
+                "market_downside_pressure": [0.05, 0.05],
+                "cash_regime_pressure": [0.04, 0.04],
+                "portfolio_cash_pressure": [0.82, 0.82],
+                "multi_horizon_forward_risk": [0.05, 0.05],
+                "cash_defense_value": [0.05, 0.05],
+                "portfolio_drawdown_20d": [-0.010, -0.010],
+                "forward_benchmark_return_1d": [0.012, 0.012],
+                "forward_benchmark_return_3d": [0.026, 0.026],
+            }
+        )
+
+        result = build_unified_allocation_problem(frame)
+
+        required = {
+            "portfolio_daily_allocation_trade_quality_target",
+            "portfolio_daily_allocation_cash_deployment_target",
+            "portfolio_daily_allocation_risk_adjusted_return_target",
+            "portfolio_daily_allocation_drawdown_control_target",
+            "portfolio_daily_allocation_monthly_quality_target",
+            "portfolio_daily_allocation_final_objective",
+        }
+        self.assertTrue(required.issubset(result.columns))
+        self.assertGreater(float(result["portfolio_daily_allocation_cash_deployment_target"].mean()), 0.35)
+        self.assertLess(float(result["portfolio_daily_unified_cash_score"].mean()), 0.70)
+        self.assertGreater(float(result["portfolio_daily_allocation_final_objective"].mean()), 0.40)
+
+    def test_r39_loss_profile_makes_allocation_objective_primary_not_action_head(self) -> None:
+        profile_name = "alpha_result_value_budget_split_v25"
+
+        self.assertIn(profile_name, LOSS_PROFILE_CONFIGS)
+        config = LOSS_PROFILE_CONFIGS[profile_name]
+        sample_weights = config["sample_scalar_loss_weights"]
+        multi_weights = config["multi_objective_loss_weights"]
+
+        for name in (
+            "portfolio_daily_allocation_trade_quality_target",
+            "portfolio_daily_allocation_cash_deployment_target",
+            "portfolio_daily_allocation_risk_adjusted_return_target",
+            "portfolio_daily_allocation_drawdown_control_target",
+            "portfolio_daily_allocation_monthly_quality_target",
+            "portfolio_daily_allocation_final_objective",
+        ):
+            self.assertIn(name, sample_weights)
+            self.assertGreater(sample_weights[name], 1.0)
+        self.assertLessEqual(multi_weights["action_total"], 0.08)
+        self.assertGreater(multi_weights["portfolio_allocation_objective_consolidation_total"], 0.70)
+        self.assertGreater(
+            multi_weights["portfolio_allocation_objective_consolidation_total"],
+            multi_weights["action_total"] * 8.0,
+        )
+
+    def test_r39_allocation_consolidation_loss_penalizes_dead_cash_and_bad_source(self) -> None:
+        targets = {
+            "portfolio_daily_allocation_trade_quality_target": torch.tensor([0.78, 0.20]),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([0.82, 0.12]),
+            "portfolio_daily_allocation_risk_adjusted_return_target": torch.tensor([0.76, 0.18]),
+            "portfolio_daily_allocation_drawdown_control_target": torch.tensor([0.08, 0.72]),
+            "portfolio_daily_allocation_monthly_quality_target": torch.tensor([0.74, 0.20]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.80, 0.16]),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.82, 0.12]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.74, 0.10]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.16, 0.70]),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.04, 0.84]),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.05, 0.76]),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.02, 0.80]),
+            "portfolio_daily_receiver_source_spread_reward": torch.tensor([0.80, 0.04]),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0]),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0]),
+        }
+        good_outputs = {
+            "portfolio_daily_allocation_trade_quality_target": torch.tensor([0.74, 0.16]),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([0.78, 0.16]),
+            "portfolio_daily_allocation_risk_adjusted_return_target": torch.tensor([0.72, 0.16]),
+            "portfolio_daily_allocation_drawdown_control_target": torch.tensor([0.10, 0.68]),
+            "portfolio_daily_allocation_monthly_quality_target": torch.tensor([0.70, 0.18]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.76, 0.14]),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.78, 0.10]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.70, 0.06]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.12, 0.72]),
+        }
+        bad_outputs = {
+            **good_outputs,
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.18, 0.10]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.20, 0.72]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.88, 0.30]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.20, 0.62]),
+        }
+
+        good_loss = _allocation_objective_consolidation_loss(good_outputs, targets)
+        bad_loss = _allocation_objective_consolidation_loss(bad_outputs, targets)
+
+        self.assertGreater(float(bad_loss), float(good_loss) + 0.15)
+
+    def test_r39_search_profile_is_architecture_consolidation(self) -> None:
+        profile = "split_heads_portfolio_daily_allocation_objective_consolidation_r39"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v25")
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "portfolio_daily_ranking_v2_gated")
+        self.assertEqual(
+            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        )
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
 
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(

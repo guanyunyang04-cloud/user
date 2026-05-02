@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-01`
+快照日期：`2026-05-02`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -36,6 +36,10 @@
 - r36 source distribution 执行合同：所有 unified source candidate 必须满足 `portfolio_daily_source_distribution_clean_pass`，或满足更严格的低 penalty / 低 opportunity cost / 低 brake-risk / 高 spread relief 条件；普通 source candidate 与 unified source candidate 的 OR 合并不得绕过 source distribution gate。
 - r37 source hard-negative 合同：`portfolio_daily_source_strong_false_sell_penalty` 与 `portfolio_daily_source_hard_negative_penalty` 必须作为 source candidate、unified source score、allocation objective、summary、study scoring 与 decision-focused loss 的一等信号；推理阶段没有未来标签时必须消费模型预测的 positive-forward / opportunity-cost penalty heads，不能退回全零惩罚路径。
 - r37 decision-focused allocation 合同：`portfolio_decision_regret_total` 必须同时惩罚错误释放强正 forward source、receiver/source ranking regret、dead cash 与 cash/objective regret；它是 source/receiver/cash 同一 allocation problem 的训练反馈，不得被解释为单票 action head 的附属损失。
+- r38 source hard-negative regret 合同：`portfolio_daily_source_tail_false_sell_penalty`、`portfolio_daily_source_release_preference` 与 `portfolio_daily_transfer_regret_target` 必须进入训练 heads、sample targets、listwise / pairwise loss、unified allocation summary、study scoring 与 protocol metrics；source 防错不能只靠后验 v2 gate。
+- r38 balance 合同：压住强势误卖后，必须同步约束 `source_target_count`、receiver/source breadth、cash deployment、open/reduce/exit 质量、monthly return 与 drawdown；不得把接近全现金的语义安全状态解释为成功。
+- r39 allocation objective consolidation 合同：`portfolio_daily_allocation_trade_quality_target`、`portfolio_daily_allocation_cash_deployment_target`、`portfolio_daily_allocation_risk_adjusted_return_target`、`portfolio_daily_allocation_drawdown_control_target`、`portfolio_daily_allocation_monthly_quality_target` 与 `portfolio_daily_allocation_final_objective` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective 与 profile；`alpha_result_value_budget_split_v25` 中 action loss 只能作为辅助，不能继续主导 allocation objective。
+- r39 execution blend 合同：当 r39 objective heads 可用时，`portfolio_daily_allocation_final_objective` 必须回写 `portfolio_daily_unified_receiver_score/source_score/cash_score` 和核心 receiver/source/cash score；否则会重回“训练目标已接入、执行仍走旧 score”的半旧路径。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -61,6 +65,8 @@
 - 当前瓶颈已经从“能不能卖”推进到“能否在 unified allocation 下同时控制 cash timing、drawdown、reduce/exit 质量和 source positive distribution”。
 - r36c screening 证明：执行层 source distribution 旁路已被封住，source target 行全部为 `portfolio_daily_source_distribution_clean_pass = true`；但真实未来分布仍失败，`source_positive_forward_sell_share = 0.666667`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.029367`。剩余根因不是 simulator OR 旁路，而是模型对 source 正向前景与机会成本的低估。
 - r37b screening 证明：source hard-negative 与 decision-focused allocation loss 的工程路径已接通，推理侧也会消费预测 penalty heads；但模型学出的 penalty 仍太弱，`source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`。当前问题不是字段未接或 guard 漏洞，而是 source hard-negative 信号的学习强度和信用分配仍不足。
+- r38 bounded confirm 证明：source hard-negative tail、release preference 与 transfer regret 能把 positive source false sell 压住，confirm 中 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`receiver_minus_source_forward_excess_5d = 0.037347`；但 `annual_return = 0.009111`、`sharpe = 0.164855`、`source_target_count = 1`、`cash_reserve_rate = 0.981728`，说明当前失败已转为收益弱、交易广度不足和现金过度保守。
+- r39 bounded confirm 证明：统一 allocation objective 和 execution blend 能恢复收益、正 spread 与 receiver 广度，execblend confirm 达到 `annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`receiver_minus_source_forward_excess_5d = 0.066883`、`source_positive_forward_sell_share = 0.0`；但仍未稳定，`source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`，v2 gate 只过 `9/12`。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -69,7 +75,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：不要继续扩大 r35/r36 机制验证；先把 r37 暴露出的 source hard-negative 学习强度不足、source positive distribution、cash timing 与 drawdown 失败写成更强 allocation objective / feedback。
+- 短期：不要继续单边加重 source false-sell 或 cash penalty；先在 r39 objective consolidation 基础上提高 clean source breadth、降低过高 cash reserve，并把 cash timing / drawdown 的日级触发直接并入 allocation layer。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
 
@@ -84,6 +90,8 @@
 - r35：unified allocation 入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
 - r36：risk-aware unified allocation 入口，聚焦 risk-aware cash/source distribution objective、unified allocation consistency loss 与 source distribution 执行旁路封闭。
 - r37：当前执行入口，聚焦 source hard-negative、strong false sell、预测 penalty 推理消费与 decision-focused allocation regret。
+- r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
+- r39：当前执行入口，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

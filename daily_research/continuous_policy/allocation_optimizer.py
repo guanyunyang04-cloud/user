@@ -18,8 +18,17 @@ UNIFIED_ALLOCATION_COLUMNS: tuple[str, ...] = (
     "portfolio_daily_source_opportunity_cost_penalty",
     "portfolio_daily_source_strong_false_sell_penalty",
     "portfolio_daily_source_hard_negative_penalty",
+    "portfolio_daily_source_tail_false_sell_penalty",
+    "portfolio_daily_source_release_preference",
     "portfolio_daily_receiver_source_spread_reward",
+    "portfolio_daily_transfer_regret_target",
     "portfolio_daily_unified_allocation_objective",
+    "portfolio_daily_allocation_trade_quality_target",
+    "portfolio_daily_allocation_cash_deployment_target",
+    "portfolio_daily_allocation_risk_adjusted_return_target",
+    "portfolio_daily_allocation_drawdown_control_target",
+    "portfolio_daily_allocation_monthly_quality_target",
+    "portfolio_daily_allocation_final_objective",
     "portfolio_daily_unified_receiver_candidate",
     "portfolio_daily_unified_source_candidate",
 )
@@ -176,6 +185,15 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     economic_release = _clip_series(_series(working, "portfolio_daily_source_economic_release_score"), 0.0, 1.0)
     transfer_score = _clip_series(_series(working, "portfolio_daily_allocation_transfer_score"), 0.0, 1.0)
     dead_branch_risk = _clip_series(_series(working, "portfolio_daily_allocation_dead_branch_risk"), 0.0, 1.0)
+    receiver_forward = _coalesce_series(
+        working,
+        (
+            "portfolio_daily_receiver_forward_excess_5d",
+            "receiver_forward_excess_5d",
+            "forward_excess_5d",
+        ),
+        default=0.0,
+    )
     market_downside = _clip_series(_series(working, "market_downside_pressure"), 0.0, 1.0)
     cash_regime = _clip_series(_series(working, "cash_regime_pressure"), 0.0, 1.0)
     portfolio_cash_pressure = _clip_series(_series(working, "portfolio_cash_pressure"), 0.0, 1.0)
@@ -238,12 +256,13 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     hard_negative_penalty = _clip_series(
         np.maximum(
             predicted_hard_negative_penalty,
-            0.50 * strong_false_sell_penalty
-            + 0.24 * tail_false_sell_penalty
-            + 0.12 * opportunity_cost_penalty
-            + 0.08 * forward_strength_brake
-            + 0.06 * forward_proxy_keep_risk
-            + 0.10 * positive_forward_penalty,
+            0.56 * strong_false_sell_penalty
+            + 0.30 * tail_false_sell_penalty
+            + 0.16 * opportunity_cost_penalty
+            + 0.12 * forward_strength_brake
+            + 0.10 * forward_proxy_keep_risk
+            + 0.14 * positive_forward_penalty
+            + 0.08 * bad_spread_risk,
         ),
         0.0,
         1.0,
@@ -284,6 +303,25 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
+    source_release_preference = _clip_series(
+        0.26 * source_distribution_quality
+        + 0.18 * source_release_quality
+        + 0.16 * economic_release
+        + 0.14 * source_exec
+        + 0.10 * source_capacity
+        + 0.18 * source_distribution_spread_reward
+        + 0.12 * np.clip(-source_forward / 0.08, 0.0, 1.0)
+        + 0.08 * transfer_score
+        - 0.48 * hard_negative_penalty
+        - 0.34 * positive_forward_penalty
+        - 0.26 * opportunity_cost_penalty
+        - 0.22 * strong_false_sell_penalty
+        - 0.18 * tail_false_sell_penalty
+        - 0.16 * forward_proxy_keep_risk
+        - 0.14 * bad_spread_risk,
+        0.0,
+        1.0,
+    )
 
     unified_receiver = _clip_series(
         receiver_raw * (0.36 + 0.42 * receiver_exec + 0.22 * receiver_headroom)
@@ -301,7 +339,8 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + source_capacity * 0.10
         + source_release_quality * 0.10
         + economic_release * 0.12
-        + source_distribution_quality * 0.20
+        + source_distribution_quality * 0.14
+        + source_release_preference * 0.18
         + source_distribution_spread_reward * 0.30
         - positive_forward_penalty * 0.58
         - strong_positive_forward_penalty * 0.36
@@ -331,6 +370,22 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
+    receiver_realized_deploy_proxy = _clip_series(
+        receiver_mask.astype(float) * receiver_exec * receiver_headroom,
+        0.0,
+        1.0,
+    )
+    source_realized_release_proxy = _clip_series(
+        source_mask.astype(float)
+        * source_exec
+        * source_capacity
+        * source_release_preference
+        * (1.0 - hard_negative_penalty),
+        0.0,
+        1.0,
+    )
+    receiver_forward_value = _clip_series(receiver_forward / 0.08, 0.0, 1.0)
+    source_forward_release_value = _clip_series(-source_forward / 0.08, 0.0, 1.0)
     cash_timing_target = _clip_series(
         0.44 * risk_off_pressure
         + 0.50 * benchmark_downside_timing
@@ -341,6 +396,19 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
+    allocation_cash_deployment_target = _clip_series(
+        0.28 * deploy_competition
+        + 0.22 * portfolio_cash_pressure * (1.0 - risk_off_pressure)
+        + 0.16 * receiver_realized_deploy_proxy
+        + 0.14 * benchmark_upside_timing
+        + 0.12 * receiver_forward_value
+        + 0.10 * source_release_preference
+        + 0.08 * source_realized_release_proxy
+        - 0.34 * risk_off_pressure
+        - 0.16 * dead_branch_risk,
+        0.0,
+        1.0,
+    )
     unified_cash = _clip_series(
         cash_raw * 0.30
         + cash_timing_target * 0.50
@@ -348,17 +416,92 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         + positive_forward_penalty * 0.04
         + opportunity_cost_penalty * 0.03
         - deploy_competition * 0.20
+        - allocation_cash_deployment_target * 0.18
         - transfer_score * 0.05,
         0.0,
         1.0,
     )
     defensive_cash_alignment = _clip_series(risk_off_pressure * unified_cash, 0.0, 1.0)
     deploy_cash_alignment = _clip_series((1.0 - risk_off_pressure) * (1.0 - unified_cash) * deploy_competition, 0.0, 1.0)
+    transfer_regret_target = _clip_series(
+        0.30 * unified_receiver
+        + 0.24 * source_release_preference
+        + 0.16 * source_distribution_spread_reward
+        + 0.14 * transfer_score
+        + 0.10 * deploy_cash_alignment
+        + 0.06 * defensive_cash_alignment
+        - 0.34 * hard_negative_penalty
+        - 0.24 * positive_forward_penalty
+        - 0.20 * opportunity_cost_penalty
+        - 0.14 * tail_false_sell_penalty
+        - 0.10 * dead_branch_risk,
+        0.0,
+        1.0,
+    )
+    allocation_risk_adjusted_return_target = _clip_series(
+        0.24 * receiver_forward_value
+        + 0.20 * receiver_source_spread_reward
+        + 0.16 * source_forward_release_value
+        + 0.14 * benchmark_upside_timing
+        + 0.12 * unified_receiver
+        + 0.08 * unified_source
+        + 0.06 * transfer_score
+        - 0.22 * risk_off_pressure
+        - 0.20 * hard_negative_penalty
+        - 0.16 * positive_forward_penalty
+        - 0.14 * opportunity_cost_penalty
+        - 0.10 * dead_branch_risk,
+        0.0,
+        1.0,
+    )
+    allocation_trade_quality_target = _clip_series(
+        0.24 * receiver_realized_deploy_proxy
+        + 0.20 * source_realized_release_proxy
+        + 0.18 * receiver_source_spread_reward
+        + 0.14 * source_release_preference
+        + 0.10 * allocation_risk_adjusted_return_target
+        + 0.08 * transfer_regret_target
+        + 0.06 * transfer_score
+        - 0.22 * hard_negative_penalty
+        - 0.18 * positive_forward_penalty
+        - 0.16 * opportunity_cost_penalty
+        - 0.12 * dead_branch_risk,
+        0.0,
+        1.0,
+    )
+    allocation_drawdown_control_target = _clip_series(
+        0.34 * risk_off_pressure
+        + 0.24 * benchmark_downside_timing
+        + 0.16 * drawdown_pressure
+        + 0.12 * cash_defense_value
+        + 0.08 * multi_horizon_forward_risk
+        + 0.06 * dead_branch_risk
+        - 0.18 * allocation_cash_deployment_target
+        - 0.10 * benchmark_upside_timing,
+        0.0,
+        1.0,
+    )
+    allocation_monthly_quality_target = _clip_series(
+        0.24 * allocation_risk_adjusted_return_target
+        + 0.22 * allocation_trade_quality_target
+        + 0.18 * benchmark_upside_timing
+        + 0.14 * receiver_source_spread_reward
+        + 0.12 * deploy_cash_alignment
+        + 0.10 * (1.0 - drawdown_pressure)
+        - 0.20 * hard_negative_penalty
+        - 0.14 * positive_forward_penalty
+        - 0.12 * opportunity_cost_penalty
+        - 0.10 * dead_branch_risk,
+        0.0,
+        1.0,
+    )
     objective = _clip_series(
         unified_receiver * 0.34
-        + unified_source * 0.34
+        + unified_source * 0.28
+        + source_release_preference * 0.12
         + source_distribution_spread_reward * 0.16
         + transfer_score * 0.10
+        + transfer_regret_target * 0.10
         + deploy_cash_alignment * 0.10
         + defensive_cash_alignment * 0.06
         - positive_forward_penalty * 0.22
@@ -366,6 +509,21 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         - hard_negative_penalty * 0.24
         - opportunity_cost_penalty * 0.18
         - dead_branch_risk * 0.08,
+        0.0,
+        1.0,
+    )
+    allocation_final_objective = _clip_series(
+        0.22 * objective
+        + 0.20 * allocation_trade_quality_target
+        + 0.18 * allocation_risk_adjusted_return_target
+        + 0.16 * allocation_cash_deployment_target
+        + 0.12 * allocation_monthly_quality_target
+        + 0.08 * transfer_regret_target
+        + 0.04 * (1.0 - allocation_drawdown_control_target)
+        - 0.18 * hard_negative_penalty
+        - 0.12 * positive_forward_penalty
+        - 0.10 * opportunity_cost_penalty
+        - 0.08 * dead_branch_risk,
         0.0,
         1.0,
     )
@@ -377,8 +535,17 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     working["portfolio_daily_source_opportunity_cost_penalty"] = opportunity_cost_penalty
     working["portfolio_daily_source_strong_false_sell_penalty"] = strong_false_sell_penalty
     working["portfolio_daily_source_hard_negative_penalty"] = hard_negative_penalty
+    working["portfolio_daily_source_tail_false_sell_penalty"] = tail_false_sell_penalty
+    working["portfolio_daily_source_release_preference"] = source_release_preference
     working["portfolio_daily_receiver_source_spread_reward"] = receiver_source_spread_reward
+    working["portfolio_daily_transfer_regret_target"] = transfer_regret_target
     working["portfolio_daily_unified_allocation_objective"] = objective
+    working["portfolio_daily_allocation_trade_quality_target"] = allocation_trade_quality_target
+    working["portfolio_daily_allocation_cash_deployment_target"] = allocation_cash_deployment_target
+    working["portfolio_daily_allocation_risk_adjusted_return_target"] = allocation_risk_adjusted_return_target
+    working["portfolio_daily_allocation_drawdown_control_target"] = allocation_drawdown_control_target
+    working["portfolio_daily_allocation_monthly_quality_target"] = allocation_monthly_quality_target
+    working["portfolio_daily_allocation_final_objective"] = allocation_final_objective
     working["portfolio_daily_unified_receiver_candidate"] = (
         (unified_receiver > 0.0) & receiver_mask & (receiver_exec > 0.05)
     ).astype(float)
@@ -460,7 +627,15 @@ def solve_semidifferentiable_allocation(
     current_cash = float(max(0.0, 1.0 - current.sum()))
     available_cash_to_deploy = float(max(0.0, current_cash - cash_reserve_target))
 
-    source_scores = _clip_series(problem["portfolio_daily_unified_source_score"], 0.0, 1.0)
+    source_scores = _clip_series(
+        0.58 * problem["portfolio_daily_unified_source_score"].astype(float)
+        + 0.18 * problem["portfolio_daily_allocation_trade_quality_target"].astype(float)
+        + 0.12 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.08 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        - 0.16 * problem["portfolio_daily_source_hard_negative_penalty"].astype(float),
+        0.0,
+        1.0,
+    )
     source_candidates = _series(problem, "portfolio_daily_unified_source_candidate") > 0.5
     source_capacity = current.where(source_candidates, 0.0).clip(lower=0.0)
     sell_budget = min(float(source_capacity.sum()), turnover_limit * 0.5)
@@ -468,7 +643,15 @@ def solve_semidifferentiable_allocation(
     target = (current - sells).clip(lower=0.0, upper=max_position_weight)
     sell_turnover = float((current - target).clip(lower=0.0).sum())
 
-    receiver_scores = _clip_series(problem["portfolio_daily_unified_receiver_score"], 0.0, 1.0)
+    receiver_scores = _clip_series(
+        0.58 * problem["portfolio_daily_unified_receiver_score"].astype(float)
+        + 0.16 * problem["portfolio_daily_allocation_cash_deployment_target"].astype(float)
+        + 0.12 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.10 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        + 0.04 * problem["portfolio_daily_allocation_monthly_quality_target"].astype(float),
+        0.0,
+        1.0,
+    )
     receiver_candidates = _series(problem, "portfolio_daily_unified_receiver_candidate") > 0.5
     receiver_headroom = _clip_series(
         _coalesce_series(
@@ -524,7 +707,7 @@ def solve_semidifferentiable_allocation(
     expected_turnover = float((target - current).abs().sum())
     objective = float(
         (
-            problem["portfolio_daily_unified_allocation_objective"].astype(float)
+            problem["portfolio_daily_allocation_final_objective"].astype(float)
             * (sells.reindex(problem.index).fillna(0.0) + buys.reindex(problem.index).fillna(0.0))
         ).sum()
     )
@@ -566,13 +749,31 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
             "portfolio_daily_source_opportunity_cost_penalty": 0.0,
             "portfolio_daily_source_strong_false_sell_penalty": 0.0,
             "portfolio_daily_source_hard_negative_penalty": 0.0,
+            "portfolio_daily_source_tail_false_sell_penalty": 0.0,
+            "portfolio_daily_source_release_preference": 0.0,
             "portfolio_daily_receiver_source_spread_reward": 0.0,
+            "portfolio_daily_transfer_regret_target": 0.0,
+            "portfolio_daily_allocation_trade_quality_target": 0.0,
+            "portfolio_daily_allocation_cash_deployment_target": 0.0,
+            "portfolio_daily_allocation_risk_adjusted_return_target": 0.0,
+            "portfolio_daily_allocation_drawdown_control_target": 0.0,
+            "portfolio_daily_allocation_monthly_quality_target": 0.0,
+            "portfolio_daily_allocation_final_objective": 0.0,
+            "portfolio_daily_source_hard_negative_prevalence": 0.0,
+            "portfolio_daily_source_hard_negative_selected_pressure": 0.0,
             "portfolio_daily_unified_receiver_candidate_count": 0.0,
             "portfolio_daily_unified_source_candidate_count": 0.0,
             "portfolio_daily_unified_constraint_violations": 0.0,
         }
     problem = build_unified_allocation_problem(label_frame)
     solution = solve_semidifferentiable_allocation(problem)
+    source_candidate = problem["portfolio_daily_unified_source_candidate"].astype(float) > 0.5
+    hard_negative = problem["portfolio_daily_source_hard_negative_penalty"].astype(float)
+    hard_negative_selected_pressure = (
+        float(hard_negative.where(source_candidate, np.nan).mean())
+        if bool(source_candidate.any())
+        else 0.0
+    )
     return {
         "portfolio_daily_unified_allocation_objective": float(problem["portfolio_daily_unified_allocation_objective"].mean()),
         "portfolio_daily_unified_receiver_score": float(problem["portfolio_daily_unified_receiver_score"].mean()),
@@ -582,7 +783,18 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
         "portfolio_daily_source_opportunity_cost_penalty": float(problem["portfolio_daily_source_opportunity_cost_penalty"].mean()),
         "portfolio_daily_source_strong_false_sell_penalty": float(problem["portfolio_daily_source_strong_false_sell_penalty"].mean()),
         "portfolio_daily_source_hard_negative_penalty": float(problem["portfolio_daily_source_hard_negative_penalty"].mean()),
+        "portfolio_daily_source_tail_false_sell_penalty": float(problem["portfolio_daily_source_tail_false_sell_penalty"].mean()),
+        "portfolio_daily_source_release_preference": float(problem["portfolio_daily_source_release_preference"].mean()),
         "portfolio_daily_receiver_source_spread_reward": float(problem["portfolio_daily_receiver_source_spread_reward"].mean()),
+        "portfolio_daily_transfer_regret_target": float(problem["portfolio_daily_transfer_regret_target"].mean()),
+        "portfolio_daily_allocation_trade_quality_target": float(problem["portfolio_daily_allocation_trade_quality_target"].mean()),
+        "portfolio_daily_allocation_cash_deployment_target": float(problem["portfolio_daily_allocation_cash_deployment_target"].mean()),
+        "portfolio_daily_allocation_risk_adjusted_return_target": float(problem["portfolio_daily_allocation_risk_adjusted_return_target"].mean()),
+        "portfolio_daily_allocation_drawdown_control_target": float(problem["portfolio_daily_allocation_drawdown_control_target"].mean()),
+        "portfolio_daily_allocation_monthly_quality_target": float(problem["portfolio_daily_allocation_monthly_quality_target"].mean()),
+        "portfolio_daily_allocation_final_objective": float(problem["portfolio_daily_allocation_final_objective"].mean()),
+        "portfolio_daily_source_hard_negative_prevalence": float((hard_negative >= 0.55).mean()),
+        "portfolio_daily_source_hard_negative_selected_pressure": hard_negative_selected_pressure,
         "portfolio_daily_unified_receiver_candidate_count": float(problem["portfolio_daily_unified_receiver_candidate"].sum()),
         "portfolio_daily_unified_source_candidate_count": float(problem["portfolio_daily_unified_source_candidate"].sum()),
         "portfolio_daily_unified_expected_turnover": float(solution.expected_turnover),
