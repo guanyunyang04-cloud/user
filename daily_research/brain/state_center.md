@@ -72,3 +72,9 @@
 - continuous_policy 设计合同历史：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
 - episodic 历史原文：`daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`。
 - 读取纪律：当前状态以本文件上方章节为准；归档文件只作为历史证据与追溯入口。
+
+## 2026-05-02 主线停环审计
+- 已生成并采纳 `daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md`。结论：continuous_policy 自 r19 以来不是完全原地踏步，但 r34-r39 已明确进入同一组矛盾的局部补丁循环。
+- 当前停止“r39 后继续追加局部 source/cash/reduce penalty 或 guard”的旧路线；下一主线必须以 `end-to-end allocation layer` 为目标，而不是继续包装旧 action-head / simulator-guard 路径。
+- r20-r23、r31、r33 只作为最后安全边界冻结；`portfolio_daily_ranking_v2_gated`、`action_budget_split_v1`、`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 若在 r40+ 继续作为主路径，必须先给出明确架构差异和退出旧路径的证据。
+- 当前真正瓶颈：source / receiver / cash 的 credit assignment 尚未在同一个可优化 allocation objective / allocation layer 内闭合；simulator guard 不能再承担主策略逻辑。

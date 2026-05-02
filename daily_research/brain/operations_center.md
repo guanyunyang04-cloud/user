@@ -81,3 +81,8 @@
 - 操作中枢早期标题索引：`daily_research/brain/references/operations_center_evidence_index_20260424.md`。
 - 归档规则：`daily_research/brain/references/archive_rules.md`。
 - 读取纪律：当前操作以本文件上方章节为准；旧命令仅作为复现和审计证据，不自动提升为当前推荐命令。
+
+## 2026-05-02 主线循环审计命令
+- 审计命令：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/continuous_policy_cycle_audit.py --write --json`
+- 审计产物：`daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md` 与 `.json`。
+- 后续 r40+ 研究立项前必须先读该审计；若新 profile 仍沿用 `action_budget_split_v1`、v15 simulator calibration 和 `portfolio_daily_ranking_v2_gated` 作为主路径，需要先证明不是旧局部补丁循环。

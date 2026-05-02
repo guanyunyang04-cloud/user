@@ -98,3 +98,9 @@
 - 早期标题索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
 - 过程复盘入口：`daily_research/brain/episodic_memory.md`。
 - 读取纪律：当前合同以本文件上方章节为准；历史合同只作为证据与演化追溯。
+
+## 2026-05-02 r39 后停环合同
+- 主线循环审计产物：`daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md` 与同名 JSON。审计结论为存在重复循环，必须停止把 r39 后续工作继续包装成局部 penalty / guard 修补。
+- 禁止路线：新增单边 source false-sell penalty、cash penalty、reduce/exit rescue、receiver hard guard，只要仍依赖 `action_budget_split_v1` + `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` + `portfolio_daily_ranking_v2_gated` 作为主路径，就视为旧方案换皮。
+- 保留路线：r20-r23 execution、r31 receiver executable subset、r33 source distribution clean-pass 继续保留为最后安全边界；它们不能再承担主策略收益、资金释放、现金时机的主逻辑。
+- 新主线定义：下一阶段必须以 `end-to-end allocation layer` 为名称和目标，让 allocation objective / optimizer 同时决定 source、receiver、cash、turnover、position cap、transaction cost、drawdown 与 monthly quality；simulator guard 只允许做最终安全裁剪。

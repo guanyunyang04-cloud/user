@@ -1201,3 +1201,10 @@
 - 未通过原因：execblend confirm 仍为 `promotion_status = shadow_only`，v2 gate 只过 `9/12`，失败项为 `exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`；stable confirm 失败项为 `confirm_gate_pass` 与 `confirm_source_count_floor`。主要残余指标为 `source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`。
 - 本质结论：r39 证明“统一 allocation objective + execution blend”比 r38 单边防错更接近正路，能恢复收益、receiver 广度和正 receiver-source spread，同时继续压住 source positive false sell；但它还没有完成真正稳定的资金来源分布和现金时机控制。下一轮最有效方向不是回到局部 guard，而是在 r39 基础上提高 clean source breadth、让 cash timing / drawdown 的日级触发进入 allocation layer，并降低过高 cash reserve。
 - 决策：r39 继续 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-02 continuous_policy 主线循环审计与停环
+- 触发：用户要求先检阅本主线自成立以来所有研究、方案、代码、讨论和失败记录，判断是否一直在相同问题之间兜圈，并在发现循环后停止旧思路、重组任务。
+- 执行：新增 `daily_research/tools/continuous_policy_cycle_audit.py`，用 yolos 前台运行生成 `daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md` 与 `.json`。
+- 结论：存在结构性重复循环。反复问题为 source 卖错、receiver 买不了或买不宽、cash 死分支或过度保守、收益/回撤/月度质量不过线、confirm 不稳定、旧 action translation / simulator guard 主路径残留。
+- 停止路线：不再把 r39 后续包装成新增 source/cash/reduce 局部 penalty 或 guard；不再用单项 gate 清零、短窗 smoke 高分或 insufficient evidence confirm 作为阶段成功；不再让 simulator guard 承担主策略逻辑。
+- 新主线：冻结 r20-r23、r31、r33 为最后安全边界；下一阶段应命名并执行为 `end-to-end allocation layer`，让 allocation objective / optimizer 同时决定 source、receiver、cash、成本、换手、仓位上限、回撤和月度质量。
