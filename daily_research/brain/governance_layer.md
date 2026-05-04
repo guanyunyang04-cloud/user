@@ -35,6 +35,6 @@
   - `episodic_memory.md`
 
 ## 5. 守卫
-- `python daily_research/tools/brain_integrity_check.py --json`
-- `python daily_research/tools/project_consistency_check.py`
-- `python daily_research/tools/doc_guard.py check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`

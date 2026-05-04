@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-02`
+快照日期：`2026-05-04`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -75,9 +75,9 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：不要继续单边加重 source false-sell 或 cash penalty；先在 r39 objective consolidation 基础上提高 clean source breadth、降低过高 cash reserve，并把 cash timing / drawdown 的日级触发直接并入 allocation layer。
-- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 objective / feedback。
-- 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking。
+- 短期：以 r40 end-to-end allocation layer 为待重跑架构入口，不再把 r39 后续包装成局部 penalty / guard；先取得干净 bounded confirm，再讨论策略有效性。
+- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
+- 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
 ## 阶段索引
 - r1-r11b：alpha prior、split heads、translation guard、sell attribution、value arbitration、sell-source contract，详见 `daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
@@ -89,9 +89,10 @@
 - r34：allocation breadth 入口，聚焦 receiver/source breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
 - r35：unified allocation 入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
 - r36：risk-aware unified allocation 入口，聚焦 risk-aware cash/source distribution objective、unified allocation consistency loss 与 source distribution 执行旁路封闭。
-- r37：当前执行入口，聚焦 source hard-negative、strong false sell、预测 penalty 推理消费与 decision-focused allocation regret。
+- r37：decision-focused allocation 入口，聚焦 source hard-negative、strong false sell、预测 penalty 推理消费与 decision-focused allocation regret。
 - r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
-- r39：当前执行入口，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
+- r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
+- r40：当前待重跑架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径与 stdout/stderr 持久日志运行通道。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
@@ -104,3 +105,10 @@
 - 禁止路线：新增单边 source false-sell penalty、cash penalty、reduce/exit rescue、receiver hard guard，只要仍依赖 `action_budget_split_v1` + `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` + `portfolio_daily_ranking_v2_gated` 作为主路径，就视为旧方案换皮。
 - 保留路线：r20-r23 execution、r31 receiver executable subset、r33 source distribution clean-pass 继续保留为最后安全边界；它们不能再承担主策略收益、资金释放、现金时机的主逻辑。
 - 新主线定义：下一阶段必须以 `end-to-end allocation layer` 为名称和目标，让 allocation objective / optimizer 同时决定 source、receiver、cash、turnover、position cap、transaction cost、drawdown 与 monthly quality；simulator guard 只允许做最终安全裁剪。
+## 2026-05-02 r40 end-to-end allocation layer 合同
+- r40 新入口为 `split_heads_portfolio_daily_end_to_end_allocation_layer_r40`；其 objective 必须是 `end_to_end_allocation_layer_v1`，预算语义必须是 `allocation_layer_v1`，预算校准必须是 `end_to_end_allocation_layer_v1`。该入口不得重新回落到 `action_budget_split_v1` 或 v15 receiver-exec guard 作为主路径。
+- r40 执行合同：`solve_semidifferentiable_allocation` 是 source/receiver/cash 的主 allocation 层，显式约束 cash reserve、turnover、position cap、transaction cost、slippage 与 sell tax；`portfolio_simulator.py` 只在其后做安全裁剪、状态更新和诊断记录。
+- r40 候选合同：所有 receiver/source 目标必须先通过硬 executable candidate 掩码；`portfolio_daily_receiver_executable_candidate = 0` 或 `portfolio_daily_source_executable_candidate = 0` 时，raw score、action label、unified score 均不得绕过进入最终 allocation target。
+- r40 语义合同：direct action open/add/reduce/exit 在 r40 中只能作为辅助表征或兼容输入，不能再生成主策略目标；诊断项 `allocation_layer_primary_mode` 必须明确标记新路径，`direct_action_open_signal_count` 等旧信号不得被伪造为 r40 主目标。
+- r40 判定边界：当前已完成代码入口、profile 注册、硬候选约束、合同测试与一次 bounded study；但 `self_opt_study_r40_end_to_end_allocation_layer_20260502` 受外层 stdout 管道失效影响，trial_02、trial_03 与 confirm_01 被 `[Errno 22] Invalid argument` 污染，不能被解释为有效策略或 promotion 依据。
+- r40 运行通道合同：超过外层捕获窗口的前台任务必须把 stdout/stderr 写入持久日志；stage 的持久化 JSON 是正式合同，控制台 JSON 只能是诊断输出，不得因 stdout 失效而否定已写出的 train/evaluate/protocol 产物。

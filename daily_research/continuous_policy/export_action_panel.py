@@ -24,13 +24,14 @@ from daily_research.continuous_policy.portfolio_simulator import (
 )
 from daily_research.continuous_policy.runtime import (
     EXPORTS_ROOT,
+    load_runtime_state,
     now_iso,
     resolve_latest_model_artifact,
+    safe_print_json,
     save_runtime_state,
     timestamp_tag,
     update_latest_summary,
     write_json,
-    load_runtime_state,
 )
 from daily_research.continuous_policy.state_builder import (
     DEFAULT_ALPHA_PRIOR_SOURCE,
@@ -347,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     update_latest_summary("export", summary_payload)
     write_json(export_root / "export_summary.json", summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False, indent=2))
+    safe_print_json(summary_payload)
     return 0
 
 

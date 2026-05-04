@@ -41,9 +41,9 @@
 
 ## 4. 当前默认接脑方式
 - 只接主脑：
-  - `python daily_research/tools/brain_bootstrap.py`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py`
 - 接主脑并进入目标分脑：
-  - `python daily_research/tools/brain_bootstrap.py --child <brain_id>`
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id>`
 
 ## 5. 当前主问题
 - 当前最重要的事情已经不是“有没有脑结构”

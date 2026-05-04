@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-05-02`
+快照日期：`2026-05-04`
 
 ## 当前结论
 - `daily_research` 仍是当前工作区的正式生产研究与执行主线。
@@ -9,7 +9,7 @@
 - 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
-- continuous_policy 最新有效研究状态为 r39 allocation objective consolidation bounded confirm 之后的 `research / shadow_only`：r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation、r36 risk-aware unified allocation、r37 decision-focused allocation、r38 source hard-negative regret 仍保留；r39 已把收益、回撤、现金部署、交易质量、月度质量与 final allocation objective 写入统一训练入口，并把 r39 final objective 回写到 receiver/source/cash 执行评分，但未过 v2 gate / stable confirm。
+- continuous_policy 最新有效研究状态仍为 r39 allocation objective consolidation bounded confirm 之后的 `research / shadow_only`；r40 end-to-end allocation layer 已完成代码入口、执行合同和运行通道修复，但 `self_opt_study_r40_end_to_end_allocation_layer_20260502` 被外层 stdout 失效污染，不能作为策略 verdict。r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation、r36 risk-aware unified allocation、r37 decision-focused allocation、r38 source hard-negative regret 与 r39 allocation objective consolidation 仍保留；未过 v2 gate / stable confirm 前不得 promotion / live。
 - 未完成正式判定前，不得 promotion、不得 live、不得改 active artifact。
 
 ## 当前接管入口
@@ -78,3 +78,14 @@
 - 当前停止“r39 后继续追加局部 source/cash/reduce penalty 或 guard”的旧路线；下一主线必须以 `end-to-end allocation layer` 为目标，而不是继续包装旧 action-head / simulator-guard 路径。
 - r20-r23、r31、r33 只作为最后安全边界冻结；`portfolio_daily_ranking_v2_gated`、`action_budget_split_v1`、`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 若在 r40+ 继续作为主路径，必须先给出明确架构差异和退出旧路径的证据。
 - 当前真正瓶颈：source / receiver / cash 的 credit assignment 尚未在同一个可优化 allocation objective / allocation layer 内闭合；simulator guard 不能再承担主策略逻辑。
+## 2026-05-02 r40 end-to-end allocation layer 入口落地
+- 已新增 `split_heads_portfolio_daily_end_to_end_allocation_layer_r40`，默认 objective 为 `end_to_end_allocation_layer_v1`，预算语义为 `allocation_layer_v1`，校准为 `end_to_end_allocation_layer_v1`；它不再沿用 `action_budget_split_v1` + v15 receiver-exec guard 作为主路径。
+- `portfolio_simulator.py` 已新增 allocation-layer 主模式：在 r40 语义下由 `solve_semidifferentiable_allocation` 直接输出目标权重；direct action 信号降级为非主导辅助，不再伪造 receiver/source 主目标。
+- `allocation_optimizer.py` 已要求 `portfolio_daily_receiver_executable_candidate` 与 `portfolio_daily_source_executable_candidate` 作为硬候选掩码；raw score 或 action label 不能绕过 executable candidate。
+- r40 当前已完成一次 bounded study，但不是有效训练 verdict；本轮暴露的是超长前台任务 stdout 失效导致的 protocol 阶段异常，而不是 allocation layer 训练有效性通过。因此仍为 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
+## 2026-05-04 r40 bounded study 结果与运行通道修复
+- 已前台自然结束 `self_opt_study_r40_end_to_end_allocation_layer_20260502`；进程没有陷入循环，PID 自然消失，最终生成 `study_summary.json`。
+- 本轮 screening 只有 `trial_01` 完整完成，`trial_02`、`trial_03` 与 `confirm_01` 在训练或评估产物写出后报 `[Errno 22] Invalid argument`。根因是外层 10h shell 捕获窗口超时返回后，Python 主进程继续运行但 stdout 管道失效，后续 stage 的 JSON 打印把已完成 stage 误标为失败。
+- 已加固 continuous_policy 输出路径：train / evaluate / export / protocol / behavior audit / conclusion ledger / self-optimizing study 的末尾 JSON 打印改为 `safe_print_json`；stdout 失效只影响控制台显示，不得再使已持久化的 stage 失败。`progress.py` 同步降级失效 stdout。
+- r40 本轮唯一可评估 champion 为 screening `trial_01`：`annual_return = 0.064530`、`sharpe = 0.354676`、`max_drawdown = -0.196677`、`monthly_return_mean = 0.006319`、`training_evidence_status = insufficient`、v2 gate `8/12`，失败项为 `training_evidence_sufficient`、`reduce_success_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`。
+- 结论：r40 架构入口成立，但本轮 bounded study 不能用于策略判定；下一次正式 r40 confirm 必须在前台使用持久 stdout/stderr 日志，并按 2h 轮询，不让外层捕获窗口关闭污染主进程。

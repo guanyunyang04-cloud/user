@@ -9,6 +9,25 @@ from typing import Iterator, TypeVar
 T = TypeVar("T")
 
 _ACTIVE_STAGE_PROGRESS_STACK: list["StageProgress"] = []
+_STDOUT_AVAILABLE = True
+
+
+def _write_stdout(text: str) -> bool:
+    global _STDOUT_AVAILABLE
+    if not _STDOUT_AVAILABLE:
+        return False
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return True
+    except OSError as exc:
+        if getattr(exc, "errno", None) in {5, 22, 32}:
+            _STDOUT_AVAILABLE = False
+            return False
+        raise
+    except ValueError:
+        _STDOUT_AVAILABLE = False
+        return False
 
 
 def _current_stage_progress() -> "StageProgress | None":
@@ -80,19 +99,17 @@ class _SimpleProgress:
         body = _truncate_text(self.desc, available_text)
         line = f"\r{prefix}{body} | {counts}"
         padding = max(self._last_width - len(line), 0)
-        sys.stdout.write(line + (" " * padding))
-        sys.stdout.flush()
-        self._last_width = len(line)
+        if _write_stdout(line + (" " * padding)):
+            self._last_width = len(line)
 
     def close(self) -> None:
         if self.closed:
             return
         if self.leave:
             self.refresh()
-            sys.stdout.write("\n")
+            _write_stdout("\n")
         else:
-            sys.stdout.write("\r" + (" " * self._last_width) + "\r")
-        sys.stdout.flush()
+            _write_stdout("\r" + (" " * self._last_width) + "\r")
         self.closed = True
 
 
@@ -190,7 +207,7 @@ def progress_write(message: str) -> None:
     if active_stage is not None:
         active_stage.log(str(message))
         return
-    print(str(message))
+    _write_stdout(f"{message}\n")
 
 
 class StageProgress:
@@ -264,9 +281,8 @@ class StageProgress:
             return
         line = self._compose_line()
         padding = max(self._last_width - len(line), 0)
-        sys.stdout.write(line + (" " * padding))
-        sys.stdout.flush()
-        self._last_width = len(line)
+        if _write_stdout(line + (" " * padding)):
+            self._last_width = len(line)
         self._refresh_tick += 1
 
     def _attach_child(self, child: _StageChildProgress) -> None:
@@ -319,10 +335,9 @@ class StageProgress:
             return
         if self.leave:
             self._refresh()
-            sys.stdout.write("\n")
+            _write_stdout("\n")
         else:
-            sys.stdout.write("\r" + (" " * self._last_width) + "\r")
-        sys.stdout.flush()
+            _write_stdout("\r" + (" " * self._last_width) + "\r")
         self._closed = True
         if self in _ACTIVE_STAGE_PROGRESS_STACK:
             _ACTIVE_STAGE_PROGRESS_STACK[:] = [

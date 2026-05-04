@@ -45,6 +45,7 @@ from daily_research.continuous_policy.runtime import (
     MODELS_ROOT,
     PROTOCOLS_ROOT,
     now_iso,
+    safe_print_json,
     timestamp_tag,
     update_latest_summary,
     write_json,
@@ -728,7 +729,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_json(protocol_summary_path, summary_payload)
     update_latest_summary("protocol", summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False, indent=2))
+    safe_print_json(summary_payload)
     return 0
 
 

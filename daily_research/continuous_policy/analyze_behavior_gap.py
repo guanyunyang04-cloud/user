@@ -19,6 +19,7 @@ from daily_research.continuous_policy.runtime import (
     LATEST_EVALUATION_SUMMARY_PATH,
     now_iso,
     read_json,
+    safe_print_json,
     timestamp_tag,
     update_latest_summary,
     write_json,
@@ -3054,7 +3055,7 @@ def main(argv: list[str] | None = None) -> int:
     write_json(output_path, payload)
     payload["output_path"] = str(output_path.resolve())
     update_latest_summary("behavior_audit", payload)
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    safe_print_json(payload)
     return 0
 
 

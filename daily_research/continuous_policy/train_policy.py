@@ -36,7 +36,14 @@ from daily_research.continuous_policy.portfolio_simulator import (
     DEFAULT_EXECUTION_SEMANTICS,
     EXECUTION_SEMANTICS_CHOICES,
 )
-from daily_research.continuous_policy.runtime import MODELS_ROOT, now_iso, timestamp_tag, update_latest_summary, write_json
+from daily_research.continuous_policy.runtime import (
+    MODELS_ROOT,
+    now_iso,
+    safe_print_json,
+    timestamp_tag,
+    update_latest_summary,
+    write_json,
+)
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
@@ -374,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     write_json(run_root / "train_summary.json", summary_payload)
     update_latest_summary("train", summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False, indent=2))
+    safe_print_json(summary_payload)
     return 0
 
 

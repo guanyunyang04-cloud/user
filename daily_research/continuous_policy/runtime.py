@@ -62,6 +62,26 @@ def write_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def safe_print_json(payload: dict[str, Any]) -> bool:
+    """Best-effort JSON console output that never invalidates completed work.
+
+    Long foreground studies can outlive the outer console capture window on
+    Windows. Once that pipe is gone, a plain print can raise OSError 22 even
+    after summaries have been written successfully. Console output is
+    diagnostic only; persisted JSON remains the contract.
+    """
+
+    try:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
+        return True
+    except OSError as exc:
+        if getattr(exc, "errno", None) in {5, 22, 32}:
+            return False
+        raise
+    except ValueError:
+        return False
+
+
 def update_latest_summary(kind: str, payload: dict[str, Any]) -> Path:
     normalized = str(kind or "").strip().lower()
     if normalized == "train":

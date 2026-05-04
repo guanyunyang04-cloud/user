@@ -6,6 +6,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from daily_research.continuous_policy.allocation_optimizer import (
+    AllocationOptimizerConstraints,
+    solve_semidifferentiable_allocation,
+)
+
 
 DEFAULT_MAX_POSITIONS = 8
 DEFAULT_MAX_POSITION_WEIGHT = 0.20
@@ -18,8 +23,9 @@ DEFAULT_EXECUTION_SEMANTICS = EXECUTION_SEMANTICS_SEMANTIC
 EXECUTION_SEMANTICS_CHOICES = (EXECUTION_SEMANTICS_LEGACY, EXECUTION_SEMANTICS_SEMANTIC)
 BUDGET_SEMANTICS_LEGACY = "legacy_total_candidate"
 BUDGET_SEMANTICS_SPLIT = "action_budget_split_v1"
+BUDGET_SEMANTICS_ALLOCATION_LAYER = "allocation_layer_v1"
 DEFAULT_BUDGET_SEMANTICS = BUDGET_SEMANTICS_LEGACY
-BUDGET_SEMANTICS_CHOICES = (BUDGET_SEMANTICS_LEGACY, BUDGET_SEMANTICS_SPLIT)
+BUDGET_SEMANTICS_CHOICES = (BUDGET_SEMANTICS_LEGACY, BUDGET_SEMANTICS_SPLIT, BUDGET_SEMANTICS_ALLOCATION_LAYER)
 BUDGET_CALIBRATION_NONE = "none"
 BUDGET_CALIBRATION_CASH_EXIT = "cash_exit_guard_v1"
 BUDGET_CALIBRATION_CASH_TRANSLATION = "cash_translation_guard_v2"
@@ -42,6 +48,7 @@ BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC = (
 BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC = (
     "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"
 )
+BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER = "end_to_end_allocation_layer_v1"
 BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
@@ -66,6 +73,7 @@ BUDGET_CALIBRATION_CHOICES = (
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_CASH_AWARE,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_SOURCE_EXEC,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+    BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
 )
 
 
@@ -99,6 +107,9 @@ def normalize_budget_semantics(value: str | None) -> str:
         "action_split": BUDGET_SEMANTICS_SPLIT,
         "action_budget_split": BUDGET_SEMANTICS_SPLIT,
         "action_budget_split_v1": BUDGET_SEMANTICS_SPLIT,
+        "allocation": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "allocation_layer": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "allocation_layer_v1": BUDGET_SEMANTICS_ALLOCATION_LAYER,
     }
     if text not in aliases:
         raise ValueError(
@@ -178,6 +189,9 @@ def normalize_budget_calibration(value: str | None) -> str:
         "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
         "portfolio_daily_ranking_receiver_exec": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
         "portfolio_daily_ranking_receiver_exec_guard_v15": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        "allocation_layer": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "end_to_end_allocation_layer": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "end_to_end_allocation_layer_v1": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
     }
     if text not in aliases:
         raise ValueError(
@@ -696,6 +710,14 @@ class PortfolioState:
                 "exit_timing_pressure": 0.0,
             }
         )
+        for required_column, default_value in {
+            "action_label": "skip",
+            "action_strength": 0.0,
+            "target_delta_hint": 0.0,
+            "hold_boost": 0.0,
+        }.items():
+            if required_column not in policy.columns:
+                policy[required_column] = default_value
 
         current = self.current_weights(prices.index)
         gross_exposure_target = float((global_targets or {}).get("gross_exposure_target", max(0.20, min(0.95, 1.0 - self.cash_weight))))
@@ -734,6 +756,10 @@ class PortfolioState:
         budget_model_constraint_only_mode = float((global_targets or {}).get("budget_model_constraint_only_mode", 0.0) or 0.0)
         hierarchical_budget_mode = budget_model_hierarchical_mode > 0.5
         portfolio_daily_calibration_mode = budget_calibration in BUDGET_CALIBRATION_PORTFOLIO_DAILY_RANKING_SET
+        end_to_end_allocation_layer_mode = (
+            budget_semantics == BUDGET_SEMANTICS_ALLOCATION_LAYER
+            or budget_calibration == BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER
+        )
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -771,7 +797,7 @@ class PortfolioState:
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
         } or portfolio_daily_calibration_mode
-        portfolio_daily_ranking_mode = portfolio_daily_calibration_mode
+        portfolio_daily_ranking_mode = portfolio_daily_calibration_mode or end_to_end_allocation_layer_mode
         direct_action_pair_cost_guard_mode = budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT_DIRECT_ACTION_PAIR_COST_GUARD,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING,
@@ -3906,6 +3932,115 @@ class PortfolioState:
             gross_exposure_target,
             position_cap=position_cap_target,
         )
+        allocation_layer_expected_turnover = 0.0
+        allocation_layer_cash_after = float(max(0.0, 1.0 - float(target_weights.sum())))
+        allocation_layer_buy_turnover = 0.0
+        allocation_layer_sell_turnover = 0.0
+        allocation_layer_available_cash_to_deploy = 0.0
+        allocation_layer_objective_value = 0.0
+        allocation_layer_constraint_violations = 0.0
+        allocation_layer_receiver_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
+        allocation_layer_source_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
+        if end_to_end_allocation_layer_mode:
+            if "portfolio_daily_receiver_executable_candidate" in policy.columns:
+                allocation_layer_receiver_executable_candidate = (
+                    _policy_numeric("portfolio_daily_receiver_executable_candidate") > 0.5
+                )
+            else:
+                allocation_layer_receiver_executable_candidate = (
+                    portfolio_daily_receiver_candidate | portfolio_daily_unified_receiver_candidate
+                )
+            if "portfolio_daily_source_executable_candidate" in policy.columns:
+                allocation_layer_source_executable_candidate = (
+                    _policy_numeric("portfolio_daily_source_executable_candidate") > 0.5
+                )
+            else:
+                allocation_layer_source_executable_candidate = (
+                    portfolio_daily_source_candidate | portfolio_daily_unified_source_candidate
+                )
+            allocation_problem = policy.copy()
+            allocation_problem["stock"] = prices.index.astype(str)
+            allocation_problem["current_weight"] = current.reindex(prices.index).fillna(0.0).astype(float)
+            allocation_problem["portfolio_daily_receiver_executable_candidate"] = (
+                allocation_layer_receiver_executable_candidate.astype(float)
+            )
+            allocation_problem["portfolio_daily_source_executable_candidate"] = (
+                allocation_layer_source_executable_candidate.astype(float)
+            )
+            allocation_solution = solve_semidifferentiable_allocation(
+                allocation_problem,
+                constraints=AllocationOptimizerConstraints(
+                    cash_reserve_target=float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05),
+                    turnover_limit=turnover_budget,
+                    max_position_weight=position_cap_target,
+                ),
+            )
+            target_weights = (
+                allocation_solution.target_weight.reindex(prices.index)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .clip(lower=0.0, upper=position_cap_target)
+                .astype(float)
+            )
+            desired_strength = target_weights.copy()
+            protected_floor = pd.Series(0.0, index=prices.index, dtype=float)
+            forced_zero = pd.Series(False, index=prices.index, dtype=bool)
+            budget_dropped = pd.Series(False, index=prices.index, dtype=bool)
+            budget_released_from_hold = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_add_signal = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_open_signal = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_deploy_signal = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_core_deploy_target = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_add_authorized = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_open_authorized = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_deploy_authorized = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_reallocation_source = pd.Series(False, index=prices.index, dtype=bool)
+            direct_action_pair_reallocation_source = pd.Series(False, index=prices.index, dtype=bool)
+            receiver_authorization_subset_violation_count = 0
+            allocation_delta_preview = (target_weights - current).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            receiver_delta_threshold = pd.concat(
+                [
+                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 1.25, index=prices.index, dtype=float),
+                    current.clip(lower=0.0) * 0.010,
+                ],
+                axis=1,
+            ).max(axis=1)
+            source_delta_threshold = pd.concat(
+                [
+                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 1.25, index=prices.index, dtype=float),
+                    current.clip(lower=0.0) * 0.010,
+                ],
+                axis=1,
+            ).max(axis=1)
+            portfolio_daily_receiver_target = (
+                allocation_layer_receiver_executable_candidate
+                & (allocation_delta_preview > receiver_delta_threshold)
+            )
+            portfolio_daily_source_target = (
+                allocation_layer_source_executable_candidate
+                & (allocation_delta_preview < -source_delta_threshold)
+            )
+            portfolio_daily_receiver_candidate = allocation_layer_receiver_executable_candidate.copy()
+            portfolio_daily_source_candidate = allocation_layer_source_executable_candidate.copy()
+            portfolio_daily_receiver_target_count = int(portfolio_daily_receiver_target.sum())
+            portfolio_daily_source_target_count = int(portfolio_daily_source_target.sum())
+            sell_authorized_mask = (
+                (current > 1e-8)
+                & (
+                    portfolio_daily_source_target
+                    | model_release_signal
+                    | weak_tail_zero_candidate
+                )
+            )
+            allocation_layer_expected_turnover = float(allocation_solution.expected_turnover)
+            allocation_layer_cash_after = float(allocation_solution.cash_after)
+            allocation_layer_buy_turnover = float(allocation_solution.buy_turnover)
+            allocation_layer_sell_turnover = float(allocation_solution.sell_turnover)
+            allocation_layer_available_cash_to_deploy = float(allocation_solution.available_cash_to_deploy)
+            allocation_layer_objective_value = float(allocation_solution.allocation_objective_value)
+            allocation_layer_constraint_violations = float(
+                allocation_solution.diagnostics.get("constraint_violations", 0.0)
+            )
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
         portfolio_daily_source_exec_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if portfolio_daily_source_exec_guard_mode and bool(portfolio_daily_source_target.any()):
@@ -5256,6 +5391,26 @@ class PortfolioState:
             "direct_action_preserving_mode": float(bool(direct_action_preserving_mode)),
             "direct_action_pair_cost_guard_mode": float(bool(direct_action_pair_cost_guard_mode)),
             "portfolio_daily_ranking_mode": float(bool(portfolio_daily_ranking_mode)),
+            "allocation_layer_primary_mode": float(bool(end_to_end_allocation_layer_mode)),
+            "allocation_layer_expected_turnover": float(allocation_layer_expected_turnover),
+            "allocation_layer_buy_turnover": float(allocation_layer_buy_turnover),
+            "allocation_layer_sell_turnover": float(allocation_layer_sell_turnover),
+            "allocation_layer_cash_after": float(allocation_layer_cash_after),
+            "allocation_layer_available_cash_to_deploy": float(allocation_layer_available_cash_to_deploy),
+            "allocation_layer_objective_value": float(allocation_layer_objective_value),
+            "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
+            "allocation_layer_receiver_executable_candidate_count": int(
+                allocation_layer_receiver_executable_candidate.sum()
+            ),
+            "allocation_layer_source_executable_candidate_count": int(
+                allocation_layer_source_executable_candidate.sum()
+            ),
+            "allocation_layer_receiver_target_count": int(portfolio_daily_receiver_target.sum())
+            if end_to_end_allocation_layer_mode
+            else 0,
+            "allocation_layer_source_target_count": int(portfolio_daily_source_target.sum())
+            if end_to_end_allocation_layer_mode
+            else 0,
             "direct_action_funding_release_authorized_count": int(direct_action_funding_release_authorized.sum()),
             "direct_action_funding_protected_count": int(direct_action_funding_protected.sum()),
             "direct_action_add_signal_count": int(direct_action_add_signal.sum()),

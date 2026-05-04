@@ -124,6 +124,10 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         | action.isin({"reduce", "exit"})
         | ((source_raw > 0.05) & (current_weight > 1.0e-8))
     )
+    if "portfolio_daily_receiver_executable_candidate" in working.columns:
+        receiver_mask = receiver_mask & (_series(working, "portfolio_daily_receiver_executable_candidate") > 0.5)
+    if "portfolio_daily_source_executable_candidate" in working.columns:
+        source_mask = source_mask & (_series(working, "portfolio_daily_source_executable_candidate") > 0.5)
     receiver_exec = _clip_series(_series(working, "portfolio_daily_receiver_executability", default=1.0), 0.0, 1.0)
     source_exec = _clip_series(_series(working, "portfolio_daily_source_executability", default=1.0), 0.0, 1.0)
     receiver_headroom = _clip_series(

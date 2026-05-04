@@ -1,6 +1,6 @@
 # 主脑状态中枢
 
-快照日期：`2026-04-29`
+快照日期：`2026-05-04`
 
 ## 当前接管摘要
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
@@ -18,19 +18,19 @@
 - 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务默认前台运行，窗口时限按 `10` 小时处理，不得中途人为中断。
+- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务默认前台运行，窗口时限按 `10` 小时处理，不得中途人为中断；长任务必须保留持久 stdout/stderr 日志，并按 `2` 小时轮询。
 
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
-- `daily_research` 的 continuous_policy r31/r33 仍是研究证据，不得 promotion、不得 live、不得改 active artifact。
+- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 已进入 end-to-end allocation layer 架构入口但尚无干净 bounded confirm verdict，不得 promotion、不得 live、不得改 active artifact。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 
 ## 当前风险
 - 如果主脑继续追加日期日志，接管会重新退化为长文扫描。
 - 如果只改分脑、不改主脑，跨项目规则会再次漂移。
 - 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
-- 如果训练结果未核验 `device = cuda`、`cuda_available = true` 与 yolos 解释器，就不能写成正式证据。
+- 如果训练结果未核验 `device = cuda`、`cuda_available = true`、yolos 解释器与持久日志完整性，就不能写成正式证据。
 
 ## 推荐下一步
 - 结构变更先跑 `brain_integrity_check.py --json`，再跑 `doc_guard.py check` 与 `project_consistency_check.py`。

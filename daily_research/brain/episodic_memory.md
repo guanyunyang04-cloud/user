@@ -1208,3 +1208,30 @@
 - 结论：存在结构性重复循环。反复问题为 source 卖错、receiver 买不了或买不宽、cash 死分支或过度保守、收益/回撤/月度质量不过线、confirm 不稳定、旧 action translation / simulator guard 主路径残留。
 - 停止路线：不再把 r39 后续包装成新增 source/cash/reduce 局部 penalty 或 guard；不再用单项 gate 清零、短窗 smoke 高分或 insufficient evidence confirm 作为阶段成功；不再让 simulator guard 承担主策略逻辑。
 - 新主线：冻结 r20-r23、r31、r33 为最后安全边界；下一阶段应命名并执行为 `end-to-end allocation layer`，让 allocation objective / optimizer 同时决定 source、receiver、cash、成本、换手、仓位上限、回撤和月度质量。
+## 2026-05-02 r40 end-to-end allocation layer 入口落地
+- 触发：用户要求继续下一步，并要求不要停留在分析层面；上一轮审计已确定 r39 后不能继续局部 penalty/guard 循环，因此本轮目标是把新主线从文档判断推进到可执行代码入口。
+- TDD 红灯：先新增 r40 profile 脱离旧 action-budget、optimizer 硬候选约束、simulator allocation-layer 主路径三项合同测试。首次运行暴露缺少 `BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER` / `BUDGET_SEMANTICS_ALLOCATION_LAYER` 常量，随后暴露 allocation-only 输入缺少旧 action 辅助列时的 KeyError。
+- 已完成实现：`portfolio_simulator.py` 新增 `allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，r40 模式下由 `solve_semidifferentiable_allocation` 直接覆盖目标权重，并输出 `allocation_layer_primary_mode`、turnover、cash、constraint violation、receiver/source executable candidate 与 target 诊断。
+- 已完成实现：`allocation_optimizer.py` 新增硬 executable candidate 掩码约束；只要 `portfolio_daily_receiver_executable_candidate` 或 `portfolio_daily_source_executable_candidate` 存在，raw score、action label 与 unified score 均不能绕过该掩码。
+- 已完成实现：`run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_end_to_end_allocation_layer_r40`，默认 objective 为 `end_to_end_allocation_layer_v1`，并把 portfolio-daily confirm/stability gate 识别扩展到该 objective。
+- 已完成实现：`continuous_policy_cycle_audit.py` 增加 r40 是否退出旧 action-budget 主路径的结构字段，用于后续防止 r40 被重新包装成旧补丁路线。
+- 验证：新增三项合同测试已在 yolos 前台通过。当前尚未运行 r40 bounded screening / fresh confirm，因此 r40 只代表架构入口和执行合同落地，不代表策略有效性 verdict；仍为 `research / shadow_only`，不 promotion、不 live、不改 active artifact。
+
+## 2026-05-04 r40 bounded study 自然结束与 stdout 失效修复
+- 执行：按用户要求继续下一步，前台启动 `self_opt_study_r40_end_to_end_allocation_layer_20260502`。原始外层 shell 捕获窗口在 10h 左右返回 timeout，但主 Python 进程继续自然运行；之后按用户最新规则改为 `2` 小时轮询，直到 PID `21332` 在 2026-05-04 16:05:30 左右自然消失并生成 `study_summary.json`。
+- 过程证据：进程运行期间 CPU 持续增长，trial checkpoint 持续更新，依次完成 trial_01、trial_02、trial_03 训练，并进入 `confirm_01` 训练；不存在脚本陷入死循环或无法自然中止的证据。
+- 失败现象：最终 `study_summary.json` 显示 `completed_trial_count = 1`、`failed_trial_count = 2`、`confirmatory_completed_trial_count = 0`。`trial_02`、`trial_03` 与 `confirm_01` 的 error 均为 `[Errno 22] Invalid argument`。
+- 根因判断：这不是 r40 allocation layer 训练逻辑本身的失败。根因是外层 shell 工具超时返回后，Python 主进程仍继续运行，但 stdout 管道已经失效；后续 train/evaluate/protocol stage 在写出持久化产物后仍会 `print(json.dumps(...))`，Windows 对失效 stdout 抛出 `[Errno 22] Invalid argument`，导致已完成 stage 被上层 study 误记为 failed。
+- r40 有效结果边界：唯一完整完成的 screening `trial_01` 为 `shadow_only`，`training_evidence_status = insufficient`，v2 gate `8/12`，失败项为 `training_evidence_sufficient`、`reduce_success_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`；其 `annual_return = 0.064530`、`sharpe = 0.354676`、`max_drawdown = -0.196677`、`monthly_return_mean = 0.006319`。因此本轮不能作为 r40 策略 verdict。
+- 已完成修复：新增 `runtime.safe_print_json`，并把 `train_policy.py`、`evaluate_policy.py`、`export_action_panel.py`、`run_continuous_policy_protocol.py`、`analyze_behavior_gap.py`、`conclusion_ledger.py`、`run_self_optimizing_study.py` 的末尾 JSON 打印改为安全输出；stdout 失效时只跳过控制台输出，不再使已持久化 stage 失败。
+- 已完成修复：`progress.py` 的 stdout 写入改为失效后自动降级，避免长任务超过外层捕获窗口后因进度条写入失败中断训练。
+- 操作规则更新：后续可能超过外层窗口的前台训练/study 必须同步写入持久 stdout/stderr 日志，轮询间隔固定为 `2` 小时。该规则不改变“前台运行、不中断、使用 yolos”的铁律，只是避免失效控制台管道污染主进程。
+- 决策：r40 继续为 `research / shadow_only`；不 promotion、不 live、不改 active artifact。下一次 r40 正式判定必须在持久日志加固后重新跑 bounded screening + fresh confirm。
+
+## 2026-05-04 主分脑口径维护与运行纪律收敛
+- 执行：按用户要求系统审阅主脑与 `daily_research` 分脑，重点检查当前状态、长期规则、操作入口、治理守卫、continuous_policy 设计合同与 r40 运行通道记录。
+- 修复：主脑 `state_center.md` 从旧 r31/r33 当前口径更新为 r39 有效证据基线与 r40 待重跑架构入口；主脑 `knowledge_center.md` 删除 r19-r22 日期型分脑细节，压缩为 continuous_policy 路由边界，避免主脑重新变成实验日志。
+- 修复：主脑 `operations_center.md`、`master_brain.md`、`governance_layer.md` 与 `daily_research/brain/governance_layer.md` 的守卫命令统一改为显式 yolos Python；长任务规则统一为前台、10h、持久 stdout/stderr 日志、2h 轮询。
+- 修复：`daily_research/brain/operations_center.md` 明确 continuous_policy 是 `research / shadow_only`，正式 live 默认仍以 `active_execution_strategy.json` 为真源；r40 长任务推荐命令先创建 study 目录再重定向日志，避免日志路径不存在。
+- 修复：`continuous_policy_design_contract.md` 把 r39 改为当前有效证据基线，把 r40 改为当前待重跑架构入口，删除“r37/r39 当前执行入口”的过期口径。
+- 决策：本轮不启动新训练、不切换 live、不改 promotion、不写 active artifact；维护目标是降低后续接管误读与旧方案循环风险。

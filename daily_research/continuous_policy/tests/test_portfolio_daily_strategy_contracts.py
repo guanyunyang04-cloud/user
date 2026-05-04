@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 import pandas as pd
@@ -23,10 +24,14 @@ from daily_research.continuous_policy.model_seq_v3 import (
 )
 from daily_research.continuous_policy.model_v2 import ACTION_CLASSES, DURATION_CLASSES
 from daily_research.continuous_policy.portfolio_simulator import (
+    BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
     BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+    BUDGET_SEMANTICS_ALLOCATION_LAYER,
     BUDGET_SEMANTICS_SPLIT,
     HoldingState,
     PortfolioState,
+    normalize_budget_calibration,
+    normalize_budget_semantics,
 )
 from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILE_BASE_TRIALS,
@@ -37,6 +42,7 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     _portfolio_daily_v2_confirm_stability,
     _score_protocol_summary,
 )
+from daily_research.continuous_policy.runtime import safe_print_json
 
 
 def _protocol_summary(metrics: dict | None = None, semantic: dict | None = None) -> dict:
@@ -1292,6 +1298,118 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         )
         self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
 
+    def test_r40_end_to_end_allocation_layer_profile_exits_action_budget_path(self) -> None:
+        profile = "split_heads_portfolio_daily_end_to_end_allocation_layer_r40"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v25")
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertEqual(
+            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
+            BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        )
+        self.assertEqual(
+            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"],
+            BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        )
+        self.assertNotEqual(
+            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
+            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+        )
+        self.assertNotEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
+
+    def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "stock": ["HELD_BAD", "HELD_GOOD", "FLAT_BAD", "FLAT_GOOD"],
+                "current_weight": [0.20, 0.20, 0.0, 0.0],
+                "action_label": ["reduce", "reduce", "open", "open"],
+                "portfolio_daily_receiver_score": [0.00, 0.00, 0.99, 0.58],
+                "portfolio_daily_source_score": [0.99, 0.58, 0.00, 0.00],
+                "portfolio_daily_cash_score": [0.10, 0.10, 0.10, 0.10],
+                "portfolio_daily_receiver_executability": [0.0, 0.0, 1.0, 1.0],
+                "portfolio_daily_source_executability": [1.0, 1.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.0, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.20, 0.20, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 0.0, 0.0, 1.0],
+                "portfolio_daily_source_executable_candidate": [0.0, 1.0, 0.0, 0.0],
+            }
+        )
+
+        problem = build_unified_allocation_problem(frame)
+        solution = solve_semidifferentiable_allocation(
+            frame,
+            constraints=AllocationOptimizerConstraints(
+                cash_reserve_target=0.05,
+                turnover_limit=0.40,
+                max_position_weight=0.30,
+                min_trade_weight=0.0,
+            ),
+        )
+
+        self.assertEqual(float(problem.loc[0, "portfolio_daily_unified_source_candidate"]), 0.0)
+        self.assertEqual(float(problem.loc[1, "portfolio_daily_unified_source_candidate"]), 1.0)
+        self.assertEqual(float(problem.loc[2, "portfolio_daily_unified_receiver_candidate"]), 0.0)
+        self.assertEqual(float(problem.loc[3, "portfolio_daily_unified_receiver_candidate"]), 1.0)
+        self.assertGreater(solution.target_weight["HELD_BAD"], 0.19)
+        self.assertLess(solution.target_weight["HELD_GOOD"], 0.20)
+        self.assertEqual(float(solution.target_weight["FLAT_BAD"]), 0.0)
+        self.assertGreater(solution.target_weight["FLAT_GOOD"], 0.0)
+
+    def test_end_to_end_allocation_layer_step_uses_optimizer_targets_without_direct_action(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.80,
+            holdings={"HELD": HoldingState(weight=0.20, entry_price=10.0, peak_price=10.0)},
+            max_positions=4,
+            max_position_weight=0.30,
+            turnover_limit=0.40,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV_BAD": 10.0, "RECV_GOOD": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.99, 0.62],
+                "portfolio_daily_source_score": [0.82, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.10, 0.10, 0.10],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 1.0],
+                "portfolio_daily_source_executability": [1.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.20, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 0.0, 1.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0, 0.0],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-02",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.45,
+                "turnover_budget": 0.40,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(normalize_budget_semantics("allocation_layer"), BUDGET_SEMANTICS_ALLOCATION_LAYER)
+        self.assertEqual(
+            normalize_budget_calibration("end_to_end_allocation_layer"),
+            BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        )
+        self.assertGreater(result.weights["RECV_GOOD"], 0.0)
+        self.assertEqual(float(result.weights["RECV_BAD"]), 0.0)
+        self.assertLess(result.weights["HELD"], 0.20)
+        self.assertEqual(result.diagnostics["allocation_layer_primary_mode"], 1.0)
+        self.assertEqual(result.diagnostics["allocation_layer_receiver_target_count"], 1)
+        self.assertEqual(result.diagnostics["allocation_layer_source_target_count"], 1)
+        self.assertEqual(result.diagnostics["direct_action_open_signal_count"], 0)
+
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(
             "insufficient_winner",
@@ -1413,6 +1531,32 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
 
         self.assertFalse(stability["stable_confirmatory"])
         self.assertIn("source_training_evidence_sufficient", stability["failed_stability_checks"])
+
+    def test_safe_print_json_does_not_fail_completed_stage_on_closed_stdout(self) -> None:
+        class ClosedStdout:
+            def write(self, _text: str) -> None:
+                raise OSError(22, "Invalid argument")
+
+            def flush(self) -> None:
+                raise OSError(22, "Invalid argument")
+
+        with patch("sys.stdout", ClosedStdout()):
+            emitted = safe_print_json({"stage": "completed"})
+
+        self.assertFalse(emitted)
+
+    def test_safe_print_json_does_not_fail_completed_stage_on_value_error_stdout(self) -> None:
+        class ClosedStdout:
+            def write(self, _text: str) -> None:
+                raise ValueError("I/O operation on closed file")
+
+            def flush(self) -> None:
+                raise ValueError("I/O operation on closed file")
+
+        with patch("sys.stdout", ClosedStdout()):
+            emitted = safe_print_json({"stage": "completed"})
+
+        self.assertFalse(emitted)
 
 
 if __name__ == "__main__":

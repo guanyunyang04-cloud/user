@@ -214,6 +214,8 @@ def _profile_continuity() -> dict[str, Any]:
         study_code.find('"split_heads_portfolio_daily_allocation_breadth_r34"') :
         study_code.find("def _normalize_date_text")
     ]
+    r40_start = study_code.find('"split_heads_portfolio_daily_end_to_end_allocation_layer_r40"')
+    r40_block = study_code[r40_start : r40_start + 2200] if r40_start >= 0 else ""
     profile_keys = sorted(
         set(re.findall(r'"(split_heads_portfolio_daily_[^"]+_r(?:3[4-9]))"', r34_r39_block))
     )
@@ -228,6 +230,28 @@ def _profile_continuity() -> dict[str, Any]:
             "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"
         ),
         "r34_r39_split_v2_mentions": r34_r39_block.count("split_v2"),
+        "r40_end_to_end_profile_exists": bool(r40_block),
+        "r40_allocation_layer_v1_mentions": r40_block.count("allocation_layer_v1")
+        + r40_block.count("BUDGET_SEMANTICS_ALLOCATION_LAYER"),
+        "r40_end_to_end_calibration_mentions": r40_block.count("end_to_end_allocation_layer_v1")
+        + r40_block.count("BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER"),
+        "r40_action_budget_split_v1_mentions": r40_block.count("action_budget_split_v1"),
+        "r40_v15_calibration_mentions": r40_block.count(
+            "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15"
+        ),
+        "r40_exits_old_action_budget_path": bool(
+            r40_block
+            and (
+                "end_to_end_allocation_layer_v1" in r40_block
+                or "BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER" in r40_block
+            )
+            and (
+                "allocation_layer_v1" in r40_block
+                or "BUDGET_SEMANTICS_ALLOCATION_LAYER" in r40_block
+            )
+            and "action_budget_split_v1" not in r40_block
+            and "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15" not in r40_block
+        ),
     }
 
 

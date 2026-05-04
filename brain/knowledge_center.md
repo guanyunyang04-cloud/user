@@ -26,7 +26,8 @@
 - 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 项目任务运行纪律已改为前台优先：训练、评估、审计、bounded study、confirmatory rerun 与执行任务不得默认后台化，不得中途人为中断，单次窗口时限统一按 `10` 小时处理
-- 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda` 与 `cuda_available = true`
+- 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；监控轮询间隔固定为 `2` 小时，进程自然结束后立即解析产物
+- 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 
 ## 3. 当前长期边界
 - 主脑不是分脑事实库
@@ -34,16 +35,8 @@
 - `daily_research` 负责正式生产研究与执行主线
 - `t0_project` 负责盘中实验与 RL 原型，不直接替代正式主线
 - `daily_stock_analysis-main` 是独立产品分脑，不改写 `daily_research` 默认执行
-## 2026-04-25 daily_research r19 路由说明
-- 主脑事实：`split_heads_portfolio_daily_ranking_r19` 只属于 `daily_research`，是 `research / shadow` 的组合级 receiver/source/cash 路径；没有改变 live artifact、生产默认或 promotion gate。
 
-## 2026-04-26 daily_research r20 路由说明
-- 主脑事实：`portfolio_daily_ranking_v2_gated`、`cash_constraint_portfolio_daily_ranking_cash_aware_guard_v13`、`split_heads_portfolio_daily_ranking_stability_r20`、`portfolio_daily_effective_model_action`、`source_realized_sell_floor` 和 stable confirm gate 都是 `daily_research` 分脑事实；主脑只保留它们仍为 `research / shadow_only` 的全局边界。
-
-## 2026-04-26 daily_research r21 路由说明
-- 主脑事实：`cash_constraint_portfolio_daily_ranking_source_exec_guard_v14`、`split_heads_portfolio_daily_ranking_source_exec_r21`、`source_not_sold_ceiling` 与 `portfolio_daily_effective_capital_transfer_count` 都是 `daily_research` 分脑事实；主脑只保留它们用于修复 source target 真实释放资金，且仍为 `research / shadow_only`。
-- 全局教训：source execution 修复必须同时继承 cash-aware 分支；否则会从“不会释放 source”转成“会释放 source 但现金分支再死”。r21 retry2 已把下一瓶颈推到 order translation 与 add-to-hold 冲突。
-
-## 2026-04-26 daily_research r22 路由说明
-- 主脑事实：`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`、`split_heads_portfolio_daily_ranking_receiver_exec_r22`、`portfolio_daily_receiver_exec_guarded`、`portfolio_daily_receiver_add_headroom` 与 `portfolio_daily_receiver_realized_deploy_rate` 都是 `daily_research` 分脑事实；主脑只保留它们用于修复 receiver target 的真实可买性，且仍为 `research / shadow_only`。
-- 全局教训：组合级 receiver 不能只按信号排序，还必须在进入 core deploy 前满足执行 headroom；否则 source 已释放资金也会被 add-to-hold 冲突吞掉。r22 smoke 证明该 guard 有效，但 smoke 过 gate 不等于 promotion。
+## 4. daily_research continuous_policy 路由边界
+- `daily_research` 的 continuous_policy 细节只写入分脑；主脑只保留跨项目边界：该主线在未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
+- r20-r23 执行合同、r31 receiver 可执行闭包、r33 source clean-pass、r39 证据基线与 r40 end-to-end allocation layer 入口均属于 `daily_research` 分脑事实；不得在主脑展开 trial 指标、长 tag 或局部命令。
+- 全局教训：组合级 receiver/source/cash 必须作为同一个资金分配问题处理；单项 smoke、局部 guard 清零或短窗高分不能成为 promotion / live / active artifact 切换依据。

@@ -24,9 +24,9 @@
    - 如结果改写路径，立刻更新 state 与 next step
 
 ## 3. 守卫
-- `python daily_research/tools/brain_bootstrap.py --child <brain_id> --json`
-- `python daily_research/tools/brain_integrity_check.py --json`
-- `python daily_research/tools/doc_guard.py check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id> --json`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - 结构升级后必须保证：
   - manifest 可解析
   - 读取顺序可执行
