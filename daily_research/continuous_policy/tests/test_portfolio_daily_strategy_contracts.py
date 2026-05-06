@@ -1,4 +1,8 @@
+import json
+import time
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -40,7 +44,9 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     TrialResult,
     _pick_confirmatory_candidates,
     _portfolio_daily_v2_confirm_stability,
+    _run_protocol_with_progress,
     _score_protocol_summary,
+    _write_study_progress_event,
 )
 from daily_research.continuous_policy.runtime import safe_print_json
 
@@ -1557,6 +1563,62 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             emitted = safe_print_json({"stage": "completed"})
 
         self.assertFalse(emitted)
+
+    def test_study_progress_event_writes_latest_state_and_jsonl(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            study_root = Path(temp_dir)
+
+            _write_study_progress_event(
+                study_root,
+                event="trial_start",
+                trial_tag="study__trial_01",
+                phase="screening",
+                status="running",
+            )
+
+            state = json.loads((study_root / "study_progress.json").read_text(encoding="utf-8"))
+            lines = (study_root / "study_progress.jsonl").read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(state["event"], "trial_start")
+        self.assertEqual(state["trial_tag"], "study__trial_01")
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0])["phase"], "screening")
+
+    def test_protocol_progress_heartbeat_updates_while_stage_runs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            study_root = Path(temp_dir)
+            calls = {"count": 0}
+
+            def slow_protocol(_argv: list[str]) -> int:
+                calls["count"] += 1
+                time.sleep(0.05)
+                return 0
+
+            exit_code = _run_protocol_with_progress(
+                study_root=study_root,
+                phase="screening",
+                role="",
+                trial_id=1,
+                trial_tag="study__trial_01",
+                source_trial_tag="",
+                protocol_args=["--tag", "study__trial_01"],
+                protocol_fn=slow_protocol,
+                heartbeat_interval_seconds=0.01,
+            )
+
+            state = json.loads((study_root / "study_progress.json").read_text(encoding="utf-8"))
+            events = [
+                json.loads(line)
+                for line in (study_root / "study_progress.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls["count"], 1)
+        self.assertEqual(state["event"], "protocol_complete")
+        self.assertEqual(state["trial_tag"], "study__trial_01")
+        self.assertTrue(any(event["event"] == "protocol_heartbeat" for event in events))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ import json
 import os
 import random
 import sys
+import threading
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -4415,6 +4417,86 @@ def _restore_latest_state(snapshot: dict[str, str | None]) -> None:
         path.write_text(payload, encoding="utf-8")
 
 
+def _write_study_progress_event(study_root: Path, *, event: str, **payload: Any) -> dict[str, Any]:
+    study_root.mkdir(parents=True, exist_ok=True)
+    progress_event = {
+        "event": str(event),
+        "updated_at": now_iso(),
+        **payload,
+    }
+    progress_jsonl = study_root / "study_progress.jsonl"
+    with progress_jsonl.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(progress_event, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.flush()
+    write_json(study_root / "study_progress.json", progress_event)
+    return progress_event
+
+
+def _run_protocol_with_progress(
+    *,
+    study_root: Path,
+    phase: str,
+    role: str,
+    trial_id: int,
+    trial_tag: str,
+    source_trial_tag: str,
+    protocol_args: list[str],
+    protocol_fn: Any = protocol_main,
+    heartbeat_interval_seconds: float = 300.0,
+    progress_context: dict[str, Any] | None = None,
+) -> int:
+    started_monotonic = time.monotonic()
+    stop_event = threading.Event()
+    progress_lock = threading.Lock()
+
+    def emit(event: str, **payload: Any) -> None:
+        progress_payload = {
+            "phase": phase,
+            "role": role,
+            "trial_id": int(trial_id),
+            "trial_tag": trial_tag,
+            "source_trial_tag": source_trial_tag,
+            "elapsed_seconds": round(time.monotonic() - started_monotonic, 3),
+            "process_id": os.getpid(),
+            "protocol_args": list(protocol_args),
+        }
+        progress_payload.update(dict(progress_context or {}))
+        progress_payload.update(payload)
+        with progress_lock:
+            _write_study_progress_event(
+                study_root,
+                event=event,
+                **progress_payload,
+            )
+
+    def heartbeat_loop() -> None:
+        while not stop_event.wait(float(heartbeat_interval_seconds)):
+            emit("protocol_heartbeat", status="running")
+
+    emit("protocol_start", status="running")
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_loop,
+        name=f"study-progress-{trial_tag}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        exit_code = int(protocol_fn(protocol_args))
+    except Exception as exc:
+        stop_event.set()
+        heartbeat_thread.join(timeout=1.0)
+        emit("protocol_failed", status="failed", error=str(exc))
+        raise
+
+    stop_event.set()
+    heartbeat_thread.join(timeout=1.0)
+    if exit_code == 0:
+        emit("protocol_complete", status="completed", exit_code=exit_code)
+    else:
+        emit("protocol_failed", status="failed", exit_code=exit_code)
+    return exit_code
+
+
 def _read_seed_study_trials(
     seed_study_tag: str,
     *,
@@ -4978,8 +5060,20 @@ def main(argv: list[str] | None = None) -> int:
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
+        "study_progress_json": str((study_root / "study_progress.json").resolve()),
+        "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
     }
     write_json(study_root / "study_plan.json", study_plan)
+    _write_study_progress_event(
+        study_root,
+        event="study_plan_written",
+        status="dry_run" if args.dry_run else "planned",
+        study_tag=study_tag,
+        search_profile=args.search_profile,
+        objective_profile=objective_profile,
+        screening_trial_count=len(selected_trials),
+        confirmatory_enabled=not bool(args.disable_confirmatory),
+    )
     if args.dry_run:
         safe_print_json(study_plan)
         return 0
@@ -4988,26 +5082,72 @@ def main(argv: list[str] | None = None) -> int:
     screening_results: list[TrialResult] = []
     confirmatory_results: list[TrialResult] = []
     try:
+        _write_study_progress_event(
+            study_root,
+            event="study_start",
+            status="running",
+            study_tag=study_tag,
+            screening_trial_count=len(selected_trials),
+            confirmatory_enabled=not bool(args.disable_confirmatory),
+            process_id=os.getpid(),
+        )
         if args.skip_screening and screening_seed_trials:
             screening_results = list(screening_seed_trials)
+            _write_study_progress_event(
+                study_root,
+                event="screening_seed_loaded",
+                status="completed",
+                study_tag=study_tag,
+                loaded_trial_count=len(screening_results),
+            )
         else:
             for index, trial_config in enumerate(selected_trials, start=1):
                 trial_tag = f"{study_tag}__trial_{index:02d}"
                 protocol_args = _build_protocol_args(args, trial_config, trial_tag)
                 trial_error = ""
                 try:
-                    exit_code = int(protocol_main(protocol_args))
+                    exit_code = int(
+                        _run_protocol_with_progress(
+                            study_root=study_root,
+                            phase="screening",
+                            role="",
+                            trial_id=index,
+                            trial_tag=trial_tag,
+                            source_trial_tag="",
+                            protocol_args=protocol_args,
+                            progress_context={
+                                "study_tag": study_tag,
+                                "progress_index": index,
+                                "progress_total": len(selected_trials),
+                                "progress_label": f"screening {index}/{len(selected_trials)}",
+                            },
+                        )
+                    )
                     if exit_code != 0:
                         raise RuntimeError(f"protocol exited with code {exit_code}")
                     protocol_summary_path = PROTOCOLS_ROOT / trial_tag / "protocol_summary.json"
-                    screening_results.append(
-                        _build_trial_result_from_protocol(
-                            trial_id=index,
-                            trial_tag=trial_tag,
-                            trial_config=trial_config,
-                            protocol_summary_path=protocol_summary_path,
-                            objective_profile=objective_profile,
-                        )
+                    built = _build_trial_result_from_protocol(
+                        trial_id=index,
+                        trial_tag=trial_tag,
+                        trial_config=trial_config,
+                        protocol_summary_path=protocol_summary_path,
+                        objective_profile=objective_profile,
+                    )
+                    screening_results.append(built)
+                    _write_study_progress_event(
+                        study_root,
+                        event="trial_completed",
+                        status="completed",
+                        study_tag=study_tag,
+                        phase="screening",
+                        trial_id=index,
+                        trial_tag=trial_tag,
+                        progress_index=index,
+                        progress_total=len(selected_trials),
+                        composite_score=float(built.composite_score),
+                        performance_score=float(built.performance_score),
+                        stability_score=float(built.stability_score),
+                        protocol_summary_json=str(protocol_summary_path.resolve()),
                     )
                 except Exception as exc:
                     trial_error = traceback.format_exc().strip() or str(exc)
@@ -5034,6 +5174,19 @@ def main(argv: list[str] | None = None) -> int:
                             error=trial_error,
                         )
                     )
+                    _write_study_progress_event(
+                        study_root,
+                        event="trial_failed",
+                        status="failed",
+                        study_tag=study_tag,
+                        phase="screening",
+                        trial_id=index,
+                        trial_tag=trial_tag,
+                        progress_index=index,
+                        progress_total=len(selected_trials),
+                        protocol_summary_json=str((PROTOCOLS_ROOT / trial_tag / "protocol_summary.json").resolve()),
+                        error=trial_error[-4000:],
+                    )
 
         screening_results.sort(key=lambda item: float(item.composite_score), reverse=True)
         completed_screening = [item for item in screening_results if item.status == "completed"]
@@ -5048,7 +5201,23 @@ def main(argv: list[str] | None = None) -> int:
                 protocol_args = _build_confirmatory_protocol_args(args, source_trial.trial_config, confirm_tag)
                 trial_error = ""
                 try:
-                    exit_code = int(protocol_main(protocol_args))
+                    exit_code = int(
+                        _run_protocol_with_progress(
+                            study_root=study_root,
+                            phase="confirmatory",
+                            role=role,
+                            trial_id=index,
+                            trial_tag=confirm_tag,
+                            source_trial_tag=source_trial.trial_tag,
+                            protocol_args=protocol_args,
+                            progress_context={
+                                "study_tag": study_tag,
+                                "progress_index": index,
+                                "progress_total": len(confirmatory_candidates),
+                                "progress_label": f"confirmatory {index}/{len(confirmatory_candidates)}",
+                            },
+                        )
+                    )
                     if exit_code != 0:
                         raise RuntimeError(f"protocol exited with code {exit_code}")
                     protocol_summary_path = PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json"
@@ -5067,6 +5236,23 @@ def main(argv: list[str] | None = None) -> int:
                     built.role = role
                     built.source_trial_tag = source_trial.trial_tag
                     confirmatory_results.append(built)
+                    _write_study_progress_event(
+                        study_root,
+                        event="trial_completed",
+                        status="completed",
+                        study_tag=study_tag,
+                        phase="confirmatory",
+                        role=role,
+                        source_trial_tag=source_trial.trial_tag,
+                        trial_id=index,
+                        trial_tag=confirm_tag,
+                        progress_index=index,
+                        progress_total=len(confirmatory_candidates),
+                        composite_score=float(built.composite_score),
+                        performance_score=float(built.performance_score),
+                        stability_score=float(built.stability_score),
+                        protocol_summary_json=str(protocol_summary_path.resolve()),
+                    )
                 except Exception as exc:
                     trial_error = traceback.format_exc().strip() or str(exc)
                     confirmatory_results.append(
@@ -5095,6 +5281,21 @@ def main(argv: list[str] | None = None) -> int:
                             total_check_count=0,
                             error=trial_error,
                         )
+                    )
+                    _write_study_progress_event(
+                        study_root,
+                        event="trial_failed",
+                        status="failed",
+                        study_tag=study_tag,
+                        phase="confirmatory",
+                        role=role,
+                        source_trial_tag=source_trial.trial_tag,
+                        trial_id=index,
+                        trial_tag=confirm_tag,
+                        progress_index=index,
+                        progress_total=len(confirmatory_candidates),
+                        protocol_summary_json=str((PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json").resolve()),
+                        error=trial_error[-4000:],
                     )
         confirmatory_results.sort(key=lambda item: float(item.composite_score), reverse=True)
     finally:
@@ -5224,6 +5425,8 @@ def main(argv: list[str] | None = None) -> int:
         "budget_semantics": active_budget_semantics,
         "budget_calibration": active_budget_calibration,
         "study_plan_json": str((study_root / "study_plan.json").resolve()),
+        "study_progress_json": str((study_root / "study_progress.json").resolve()),
+        "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
         "trial_ranking_csv": str((study_root / "trial_ranking.csv").resolve()),
         "trial_count": len(selected_trials),
         "completed_trial_count": len(completed_screening),
@@ -5263,6 +5466,17 @@ def main(argv: list[str] | None = None) -> int:
     }
     write_json(study_root / "study_summary.json", study_summary)
     update_latest_summary("study", study_summary)
+    _write_study_progress_event(
+        study_root,
+        event="study_complete",
+        status="completed",
+        study_tag=study_tag,
+        completed_trial_count=len(completed_screening),
+        failed_trial_count=len([item for item in screening_results if item.status != "completed"]),
+        confirmatory_completed_trial_count=len(completed_confirmatory),
+        study_summary_json=str((study_root / "study_summary.json").resolve()),
+        trial_ranking_csv=str((study_root / "trial_ranking.csv").resolve()),
+    )
     safe_print_json(study_summary)
     return 0
 

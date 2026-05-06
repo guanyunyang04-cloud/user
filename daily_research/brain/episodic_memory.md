@@ -1235,3 +1235,13 @@
 - 修复：`daily_research/brain/operations_center.md` 明确 continuous_policy 是 `research / shadow_only`，正式 live 默认仍以 `active_execution_strategy.json` 为真源；r40 长任务推荐命令先创建 study 目录再重定向日志，避免日志路径不存在。
 - 修复：`continuous_policy_design_contract.md` 把 r39 改为当前有效证据基线，把 r40 改为当前待重跑架构入口，删除“r37/r39 当前执行入口”的过期口径。
 - 决策：本轮不启动新训练、不切换 live、不改 promotion、不写 active artifact；维护目标是降低后续接管误读与旧方案循环风险。
+
+## 2026-05-07 r40 clean rerun 前台监控与最终复盘
+- 行动前纠偏：原计划包含用新 tag 重跑 r40 clean rerun，但 P0/P1 预检发现旧 `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 进程仍在运行；为避免重复训练、同类 tag 竞争和 latest 状态覆盖，实际动作改为继续前台监控原进程，不再启动 clean_r2。
+- 运行纪律：已取消此前自动化监控项，改为 Codex 前台持续轮询；用户指定轮询周期为 `2` 小时。clean_r1 进程启动早于 `study_progress.json/jsonl` 补丁，因此轮询以 PID、checkpoint、protocol 产物、`study_summary.json` 与 `trial_ranking.csv` 为准。
+- 通道结果：PID `21944` 最终自然退出，`study_summary.json` 与 `trial_ranking.csv` 写入完成；`foreground.log` 仍停在旧 stdout 管道失效时间，但没有阻止最终 study/protocol/model/ranking 产物读取。事实结论是最终训练结果可正常读取。
+- Study 证据：`executed_at = 2026-05-07T04:54:27+08:00`、`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、`portfolio_daily_v2_stable_confirmatory_trials = []`、`rejected_confirmatory_trials = 2`、`latest_state_restored = true`，恢复源为 `cp_v3_portfolio_daily_allocation_breadth_r34_bounded_20260430__confirm_01`。
+- Ranking 证据：screening `trial_02` 与 `trial_03` 年化收益约 `0.799`、Sharpe 约 `2.34`，但 `training_evidence_status = insufficient`，不能作为 verdict；confirm_01 为 `annual_return = 0.328016`、`sharpe = 1.079482`、`max_drawdown = -0.165923`，失败于 `exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`；confirm_02 为 `annual_return = 0.688870`、`sharpe = 2.448261`、`max_drawdown = -0.106384`，失败于 `cash_timing_quality_1d`、`max_drawdown`。
+- Diagnostics 证据：5 个 run 的训练均为 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`trainer_backend = formal_torch_seq_v3`、`loss_profile = alpha_result_value_budget_split_v25`；screening 完成 `40` epochs，confirmatory 完成 `64` epochs，模型 artifact 存在。
+- 结构诊断：r40 的运行通道已成功，但策略层未过线。confirm_02 的 receiver 侧很宽，`portfolio_daily_receiver_target_count = 408` 且 realized deploy 为 `1.0`；但 `portfolio_daily_source_target_count = 0`、`portfolio_daily_source_realized_sell_rate = 0`、`cash_timing_quality_1d = -0.114171`、`order_translation_conflict_rate = 0.907379`，说明 source/receiver/cash credit assignment 没有在 end-to-end allocation layer 中稳定闭合。
+- 决策：r40 clean_r1 继续 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。当前有效证据基线仍为 r39；后续若继续推进，不能重跑同一 clean_r1 期望随机改善，而应围绕 source 释放、cash timing、drawdown 与 order translation drift 做结构性诊断和改造。

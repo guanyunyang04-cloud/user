@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-04`
+快照日期：`2026-05-07`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/` 或 `episodic_memory.md`。
@@ -58,7 +58,7 @@
 - r38 最新 bounded confirm 证据入口：`self_opt_study_r38_source_hard_negative_regret_20260501`；读取 `study_summary.json`、`protocols/self_opt_study_r38_source_hard_negative_regret_20260501__confirm_01/protocol_summary.json` 与对应 `training_diagnostics.json`，重点看 source false-sell 是否被压住、source/receiver 广度是否足够、cash 是否过度保守、v2 gate failed checks 与 `portfolio_daily_v2_confirm_stability_checks`。
 - r39 最新 bounded confirm 证据入口：`self_opt_study_r39_allocation_objective_consolidation_execblend_20260502`；读取 `study_summary.json`、`protocols/self_opt_study_r39_allocation_objective_consolidation_execblend_20260502__confirm_01/protocol_summary.json` 与对应 `training_diagnostics.json`，重点看 final objective 是否真正进入执行评分、source count 是否达标、cash timing / drawdown 是否仍失败、source false-sell 是否仍受控。
 - 当前有效证据基线仍是 r39：`alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`，对应 simulator calibration 为 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
-- 当前待重跑架构入口是 r40：`alpha_result_value_budget_split_v25` 与 `end_to_end_allocation_layer_v1`，预算语义为 `allocation_layer_v1`，预算校准为 `end_to_end_allocation_layer_v1`；未完成干净 bounded confirm 前不得替代 r39 证据基线。
+- 当前已完成 r40 clean rerun：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`，使用 `alpha_result_value_budget_split_v25`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，已完整生成 study/protocol/model/ranking 证据；但 stable confirm 为空，仍不得替代 r39 证据基线。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；多条审计必须顺序执行，不得并行抢写。
 
@@ -98,5 +98,19 @@
 - 若涉及 PyTorch / MKL / OpenMP 导入冲突，前台命令显式设置 `KMP_DUPLICATE_LIB_OK=TRUE`；所有训练、测试、审计继续使用 yolos Python。
 - r40 当前只允许作为 research / shadow 入口；`self_opt_study_r40_end_to_end_allocation_layer_20260502` 已自然结束但因外层 stdout 管道失效污染后续 trial/protocol 状态，不能作为有效 bounded verdict，不得 promotion、不得 live、不得写 active artifact。
 - r40 或更长 study 的前台运行建议命令形态：
-  - `$tag='<tag>'; New-Item -ItemType Directory -Force -Path "daily_research/output/continuous_policy/studies/$tag" | Out-Null; $env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_end_to_end_allocation_layer_r40 --study-tag $tag *> "daily_research/output/continuous_policy/studies/$tag/foreground.log"`
+  - `$tag='<tag>'; New-Item -ItemType Directory -Force -Path "daily_research/output/continuous_policy/studies/$tag" | Out-Null; $env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_end_to_end_allocation_layer_r40 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag $tag *> "daily_research/output/continuous_policy/studies/$tag/foreground.log"`
   - 该命令仍为前台运行；持久日志用于避免外层捕获窗口超时后 stdout 失效导致 `[Errno 22] Invalid argument`。
+  - 2026-05-05 后续长训练默认仍可由 Codex 在本机前台执行；用户另行指定时才改为本人执行。不得使用自动化重复监控；由 Codex 执行时采用 `2` 小时轮询，并优先读取 `study_progress.json` / `study_progress.jsonl`。
+  - `run_self_optimizing_study` 已新增持久进度入口：`study_progress.json` 保存最新状态，`study_progress.jsonl` 保存事件流；每个 protocol 默认 5 分钟写一次 `protocol_heartbeat`，最终 `study_summary.json` 会记录这两个路径。
+  - 进度读取优先级：先看 `daily_research/output/continuous_policy/studies/<study_tag>/study_progress.json`，再看同目录 `study_progress.jsonl` 和 `foreground.log`；最终结论仍以 `study_summary.json`、`trial_ranking.csv` 与 protocol/model JSON 为准。
+
+## 2026-05-07 r40 clean rerun 产物读取口径
+- 已完成 study tag：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`。
+- 优先读取：
+  - `daily_research/output/continuous_policy/studies/self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504/study_summary.json`
+  - `daily_research/output/continuous_policy/studies/self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504/trial_ranking.csv`
+  - `daily_research/output/continuous_policy/protocols/self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504__<trial_or_confirm>/protocol_summary.json`
+  - `daily_research/output/continuous_policy/models/self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504__<trial_or_confirm>__train/training_diagnostics.json`
+- 本次 clean_r1 启动早于进度文件补丁，因此 `study_progress.json` / `study_progress.jsonl` 不存在属于预期；后续新 run 才应以进度文件作为轮询主入口。
+- 本次 `foreground.log` 仍停在旧 stdout 管道失效时间，不作为最终成败判断；最终判断以 `study_summary.json`、`trial_ranking.csv`、protocol summary 与模型 diagnostics 为准。
+- clean_r1 结论只允许写作 `research / shadow_only`：`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`，但 stable confirm 为空，confirm_01/confirm_02 均未过 gate。

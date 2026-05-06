@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-04`
+快照日期：`2026-05-07`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -67,6 +67,7 @@
 - r37b screening 证明：source hard-negative 与 decision-focused allocation loss 的工程路径已接通，推理侧也会消费预测 penalty heads；但模型学出的 penalty 仍太弱，`source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`。当前问题不是字段未接或 guard 漏洞，而是 source hard-negative 信号的学习强度和信用分配仍不足。
 - r38 bounded confirm 证明：source hard-negative tail、release preference 与 transfer regret 能把 positive source false sell 压住，confirm 中 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`receiver_minus_source_forward_excess_5d = 0.037347`；但 `annual_return = 0.009111`、`sharpe = 0.164855`、`source_target_count = 1`、`cash_reserve_rate = 0.981728`，说明当前失败已转为收益弱、交易广度不足和现金过度保守。
 - r39 bounded confirm 证明：统一 allocation objective 和 execution blend 能恢复收益、正 spread 与 receiver 广度，execblend confirm 达到 `annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`receiver_minus_source_forward_excess_5d = 0.066883`、`source_positive_forward_sell_share = 0.0`；但仍未稳定，`source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`，v2 gate 只过 `9/12`。
+- r40 clean rerun 证明：end-to-end allocation layer 的运行通道、持久产物与 confirmatory 流程已经可完整跑通，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、模型 diagnostics 为 yolos + CUDA；但 stable confirm 为空，confirm_01 / confirm_02 均为 `shadow_only`，且 source 释放为 0、cash timing 为负、drawdown 未过线，因此 r40 不是 promotion verdict。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -75,7 +76,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：以 r40 end-to-end allocation layer 为待重跑架构入口，不再把 r39 后续包装成局部 penalty / guard；先取得干净 bounded confirm，再讨论策略有效性。
+- 短期：r40 end-to-end allocation layer 已取得干净完整产物，但结果弱于 r39 且未过 stable confirm；后续若继续推进，必须围绕 source/receiver/cash credit assignment、cash timing 与 drawdown 在 allocation layer 内闭合，而不是重跑同一 clean_r1 或回到局部 penalty / guard。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -92,7 +93,7 @@
 - r37：decision-focused allocation 入口，聚焦 source hard-negative、strong false sell、预测 penalty 推理消费与 decision-focused allocation regret。
 - r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
 - r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
-- r40：当前待重跑架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径与 stdout/stderr 持久日志运行通道。
+- r40：当前已完成 clean rerun 的架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径、持久产物读取，以及 source/receiver/cash credit assignment 未稳定闭合的结构诊断。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
@@ -110,5 +111,12 @@
 - r40 执行合同：`solve_semidifferentiable_allocation` 是 source/receiver/cash 的主 allocation 层，显式约束 cash reserve、turnover、position cap、transaction cost、slippage 与 sell tax；`portfolio_simulator.py` 只在其后做安全裁剪、状态更新和诊断记录。
 - r40 候选合同：所有 receiver/source 目标必须先通过硬 executable candidate 掩码；`portfolio_daily_receiver_executable_candidate = 0` 或 `portfolio_daily_source_executable_candidate = 0` 时，raw score、action label、unified score 均不得绕过进入最终 allocation target。
 - r40 语义合同：direct action open/add/reduce/exit 在 r40 中只能作为辅助表征或兼容输入，不能再生成主策略目标；诊断项 `allocation_layer_primary_mode` 必须明确标记新路径，`direct_action_open_signal_count` 等旧信号不得被伪造为 r40 主目标。
-- r40 判定边界：当前已完成代码入口、profile 注册、硬候选约束、合同测试与一次 bounded study；但 `self_opt_study_r40_end_to_end_allocation_layer_20260502` 受外层 stdout 管道失效影响，trial_02、trial_03 与 confirm_01 被 `[Errno 22] Invalid argument` 污染，不能被解释为有效策略或 promotion 依据。
+- r40 判定边界：`self_opt_study_r40_end_to_end_allocation_layer_20260502` 仍因外层 stdout 管道失效污染而不能作为有效策略依据；后续 clean rerun `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 已完整产出 3 个 screening 与 2 个 confirmatory，但 stable confirm 为空，confirmatory 均为 `shadow_only`，因此同样不能作为 promotion 依据。
 - r40 运行通道合同：超过外层捕获窗口的前台任务必须把 stdout/stderr 写入持久日志；stage 的持久化 JSON 是正式合同，控制台 JSON 只能是诊断输出，不得因 stdout 失效而否定已写出的 train/evaluate/protocol 产物。
+
+## 2026-05-07 r40 clean rerun 合同复盘
+- 事实：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 自然完成，`executed_at = 2026-05-07T04:54:27+08:00`，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`，confirmatory diagnostics 显示 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`trainer_backend = formal_torch_seq_v3`。
+- 事实：screening `trial_02` / `trial_03` 高收益但 `training_evidence_status = insufficient`；confirm_01 / confirm_02 为 `training_evidence_status = sufficient`，但 `portfolio_daily_v2_stable_confirmatory_trials = []`，且均未过 promotion gate。
+- 推断：r40 的工程通道已经从 stdout 管道污染中恢复，最终训练结果可读；策略失败不是“结果无法读取”，而是 confirm 层经济质量和稳定性不足。
+- 结构约束：后续不得把 screening 高收益但 evidence insufficient 的分支作为 champion，不得把 receiver deploy 数量单独解释为成功；必须同时满足 source 释放、cash timing、drawdown、v2 gate 与 stable confirm。
+- 边界：r40 clean_r1 仍是 `research / shadow_only`，当前有效证据基线仍是 r39。
