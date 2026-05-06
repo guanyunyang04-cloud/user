@@ -29,6 +29,9 @@ UNIFIED_ALLOCATION_COLUMNS: tuple[str, ...] = (
     "portfolio_daily_allocation_drawdown_control_target",
     "portfolio_daily_allocation_monthly_quality_target",
     "portfolio_daily_allocation_final_objective",
+    "portfolio_daily_allocation_uncertainty_pressure_target",
+    "portfolio_daily_allocation_tail_risk_control_target",
+    "portfolio_daily_allocation_decision_focused_objective",
     "portfolio_daily_unified_receiver_candidate",
     "portfolio_daily_unified_source_candidate",
 )
@@ -531,6 +534,90 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
+    computed_uncertainty_pressure_target = _clip_series(
+        0.26 * multi_horizon_forward_risk
+        + 0.22 * market_downside
+        + 0.18 * drawdown_pressure
+        + 0.12 * dead_branch_risk
+        + 0.10 * bad_spread_risk
+        + 0.08 * economic_block_risk
+        + 0.04 * cash_regime
+        - 0.12 * receiver_source_spread_reward,
+        0.0,
+        1.0,
+    )
+    predicted_uncertainty_pressure_target = (
+        _clip_series(_series(working, "portfolio_daily_allocation_uncertainty_pressure_target"), 0.0, 1.0)
+        if "portfolio_daily_allocation_uncertainty_pressure_target" in working.columns
+        else computed_uncertainty_pressure_target
+    )
+    allocation_uncertainty_pressure_target = _clip_series(
+        pd.Series(
+            np.maximum(
+                computed_uncertainty_pressure_target.to_numpy(dtype=float),
+                predicted_uncertainty_pressure_target.to_numpy(dtype=float),
+            ),
+            index=working.index,
+        ),
+        0.0,
+        1.0,
+    )
+    computed_tail_risk_control_target = _clip_series(
+        0.30 * drawdown_pressure
+        + 0.24 * benchmark_downside_timing
+        + 0.18 * multi_horizon_forward_risk
+        + 0.12 * market_downside
+        + 0.08 * hard_negative_penalty
+        + 0.05 * tail_false_sell_penalty
+        + 0.03 * cash_defense_value
+        - 0.10 * benchmark_upside_timing
+        - 0.06 * receiver_source_spread_reward,
+        0.0,
+        1.0,
+    )
+    predicted_tail_risk_control_target = (
+        _clip_series(_series(working, "portfolio_daily_allocation_tail_risk_control_target"), 0.0, 1.0)
+        if "portfolio_daily_allocation_tail_risk_control_target" in working.columns
+        else computed_tail_risk_control_target
+    )
+    allocation_tail_risk_control_target = _clip_series(
+        pd.Series(
+            np.maximum(
+                computed_tail_risk_control_target.to_numpy(dtype=float),
+                predicted_tail_risk_control_target.to_numpy(dtype=float),
+            ),
+            index=working.index,
+        ),
+        0.0,
+        1.0,
+    )
+    computed_decision_focused_objective = _clip_series(
+        0.24 * allocation_final_objective
+        + 0.18 * allocation_trade_quality_target
+        + 0.16 * allocation_risk_adjusted_return_target
+        + 0.14 * allocation_cash_deployment_target
+        + 0.10 * source_release_preference
+        + 0.08 * receiver_source_spread_reward
+        + 0.06 * transfer_score
+        + 0.05 * receiver_realized_deploy_proxy
+        + 0.04 * source_realized_release_proxy
+        - 0.20 * allocation_uncertainty_pressure_target
+        - 0.18 * allocation_tail_risk_control_target
+        - 0.12 * hard_negative_penalty
+        - 0.08 * positive_forward_penalty,
+        0.0,
+        1.0,
+    )
+    predicted_decision_focused_objective = (
+        _clip_series(_series(working, "portfolio_daily_allocation_decision_focused_objective"), 0.0, 1.0)
+        if "portfolio_daily_allocation_decision_focused_objective" in working.columns
+        else computed_decision_focused_objective
+    )
+    allocation_decision_focused_objective = _clip_series(
+        0.68 * computed_decision_focused_objective + 0.32 * predicted_decision_focused_objective,
+        0.0,
+        1.0,
+    )
 
     working["portfolio_daily_unified_receiver_score"] = unified_receiver
     working["portfolio_daily_unified_source_score"] = unified_source
@@ -550,6 +637,9 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     working["portfolio_daily_allocation_drawdown_control_target"] = allocation_drawdown_control_target
     working["portfolio_daily_allocation_monthly_quality_target"] = allocation_monthly_quality_target
     working["portfolio_daily_allocation_final_objective"] = allocation_final_objective
+    working["portfolio_daily_allocation_uncertainty_pressure_target"] = allocation_uncertainty_pressure_target
+    working["portfolio_daily_allocation_tail_risk_control_target"] = allocation_tail_risk_control_target
+    working["portfolio_daily_allocation_decision_focused_objective"] = allocation_decision_focused_objective
     working["portfolio_daily_unified_receiver_candidate"] = (
         (unified_receiver > 0.0) & receiver_mask & (receiver_exec > 0.05)
     ).astype(float)
@@ -630,12 +720,18 @@ def solve_semidifferentiable_allocation(
     cash_reserve_target = float(np.clip(constraints.cash_reserve_target, 0.0, 1.0))
     current_cash = float(max(0.0, 1.0 - current.sum()))
     available_cash_to_deploy = float(max(0.0, current_cash - cash_reserve_target))
+    uncertainty_pressure = _clip_series(_series(problem, "portfolio_daily_allocation_uncertainty_pressure_target"), 0.0, 1.0)
+    tail_risk_control = _clip_series(_series(problem, "portfolio_daily_allocation_tail_risk_control_target"), 0.0, 1.0)
+    decision_objective = _clip_series(_series(problem, "portfolio_daily_allocation_decision_focused_objective"), 0.0, 1.0)
 
     source_scores = _clip_series(
-        0.58 * problem["portfolio_daily_unified_source_score"].astype(float)
-        + 0.18 * problem["portfolio_daily_allocation_trade_quality_target"].astype(float)
-        + 0.12 * problem["portfolio_daily_allocation_final_objective"].astype(float)
-        + 0.08 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        0.46 * problem["portfolio_daily_unified_source_score"].astype(float)
+        + 0.16 * problem["portfolio_daily_allocation_trade_quality_target"].astype(float)
+        + 0.16 * decision_objective
+        + 0.08 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.06 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        + 0.04 * tail_risk_control * (1.0 - problem["portfolio_daily_source_hard_negative_penalty"].astype(float))
+        - 0.10 * uncertainty_pressure
         - 0.16 * problem["portfolio_daily_source_hard_negative_penalty"].astype(float),
         0.0,
         1.0,
@@ -648,11 +744,14 @@ def solve_semidifferentiable_allocation(
     sell_turnover = float((current - target).clip(lower=0.0).sum())
 
     receiver_scores = _clip_series(
-        0.58 * problem["portfolio_daily_unified_receiver_score"].astype(float)
+        0.50 * problem["portfolio_daily_unified_receiver_score"].astype(float)
         + 0.16 * problem["portfolio_daily_allocation_cash_deployment_target"].astype(float)
-        + 0.12 * problem["portfolio_daily_allocation_final_objective"].astype(float)
-        + 0.10 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
-        + 0.04 * problem["portfolio_daily_allocation_monthly_quality_target"].astype(float),
+        + 0.18 * decision_objective
+        + 0.08 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.08 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        + 0.04 * problem["portfolio_daily_allocation_monthly_quality_target"].astype(float)
+        - 0.24 * uncertainty_pressure
+        - 0.20 * tail_risk_control,
         0.0,
         1.0,
     )
@@ -687,6 +786,24 @@ def solve_semidifferentiable_allocation(
         remaining_turnover,
         max(0.0, sell_turnover + available_cash_to_deploy - cost_buffer * max(remaining_turnover, 0.0)),
     )
+    if bool(receiver_candidates.any()):
+        receiver_risk_brake = float(
+            pd.concat(
+                [
+                    uncertainty_pressure.where(receiver_candidates, np.nan),
+                    tail_risk_control.where(receiver_candidates, np.nan),
+                ],
+                axis=1,
+            )
+            .max(axis=1)
+            .dropna()
+            .mean()
+        )
+    else:
+        receiver_risk_brake = float(pd.concat([uncertainty_pressure, tail_risk_control], axis=1).max(axis=1).mean())
+    if not np.isfinite(receiver_risk_brake):
+        receiver_risk_brake = 0.0
+    buy_budget *= float(np.clip(1.0 - 0.82 * receiver_risk_brake, 0.0, 1.0))
     buys = _allocate_capped_budget(receiver_scores.where(receiver_candidates, 0.0), buy_capacity, buy_budget)
     target = (target + buys).clip(lower=0.0, upper=max_position_weight)
     buy_turnover = float((target - (current - sells)).clip(lower=0.0).sum())
@@ -763,6 +880,9 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
             "portfolio_daily_allocation_drawdown_control_target": 0.0,
             "portfolio_daily_allocation_monthly_quality_target": 0.0,
             "portfolio_daily_allocation_final_objective": 0.0,
+            "portfolio_daily_allocation_uncertainty_pressure_target": 0.0,
+            "portfolio_daily_allocation_tail_risk_control_target": 0.0,
+            "portfolio_daily_allocation_decision_focused_objective": 0.0,
             "portfolio_daily_source_hard_negative_prevalence": 0.0,
             "portfolio_daily_source_hard_negative_selected_pressure": 0.0,
             "portfolio_daily_unified_receiver_candidate_count": 0.0,
@@ -797,6 +917,9 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
         "portfolio_daily_allocation_drawdown_control_target": float(problem["portfolio_daily_allocation_drawdown_control_target"].mean()),
         "portfolio_daily_allocation_monthly_quality_target": float(problem["portfolio_daily_allocation_monthly_quality_target"].mean()),
         "portfolio_daily_allocation_final_objective": float(problem["portfolio_daily_allocation_final_objective"].mean()),
+        "portfolio_daily_allocation_uncertainty_pressure_target": float(problem["portfolio_daily_allocation_uncertainty_pressure_target"].mean()),
+        "portfolio_daily_allocation_tail_risk_control_target": float(problem["portfolio_daily_allocation_tail_risk_control_target"].mean()),
+        "portfolio_daily_allocation_decision_focused_objective": float(problem["portfolio_daily_allocation_decision_focused_objective"].mean()),
         "portfolio_daily_source_hard_negative_prevalence": float((hard_negative >= 0.55).mean()),
         "portfolio_daily_source_hard_negative_selected_pressure": hard_negative_selected_pressure,
         "portfolio_daily_unified_receiver_candidate_count": float(problem["portfolio_daily_unified_receiver_candidate"].sum()),

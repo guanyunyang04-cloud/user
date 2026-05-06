@@ -1376,6 +1376,38 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v25"] = {
         "portfolio_allocation_objective_consolidation_total": 0.86,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v26"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v25"]["sample_scalar_loss_weights"],
+        "portfolio_daily_unified_receiver_score": 2.42,
+        "portfolio_daily_unified_source_score": 2.66,
+        "portfolio_daily_unified_cash_score": 2.28,
+        "portfolio_daily_allocation_drawdown_control_target": 2.36,
+        "portfolio_daily_allocation_final_objective": 2.92,
+        "portfolio_daily_allocation_uncertainty_pressure_target": 2.42,
+        "portfolio_daily_allocation_tail_risk_control_target": 2.50,
+        "portfolio_daily_allocation_decision_focused_objective": 3.02,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v25"]["daily_target_loss_weights"],
+        "budget_risk_signal_target": 1.62,
+        "budget_deploy_signal_target": 1.74,
+        "budget_cash_timing_signal_target": 1.90,
+        "budget_alpha_focus_signal_target": 1.68,
+        "turnover_budget": 1.48,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v25"]["multi_objective_loss_weights"],
+        "action_total": 0.05,
+        "duration_total": 0.04,
+        "scalar_total": 3.66,
+        "portfolio_cash_margin_total": 0.34,
+        "portfolio_unified_allocation_total": 0.66,
+        "portfolio_decision_regret_total": 0.50,
+        "portfolio_allocation_objective_consolidation_total": 0.92,
+        "portfolio_risk_sensitive_allocation_total": 0.54,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -2001,6 +2033,119 @@ def _allocation_objective_consolidation_loss(
         + dead_cash_loss * 0.26
         + missed_objective_loss * 0.10
         + defensive_cash_loss * 0.08
+    )
+
+
+def _risk_sensitive_allocation_objective_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    required_outputs = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_allocation_uncertainty_pressure_target",
+        "portfolio_daily_allocation_tail_risk_control_target",
+        "portfolio_daily_allocation_decision_focused_objective",
+    }
+    required_targets = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_allocation_uncertainty_pressure_target",
+        "portfolio_daily_allocation_tail_risk_control_target",
+        "portfolio_daily_allocation_decision_focused_objective",
+        "portfolio_daily_allocation_drawdown_control_target",
+        "portfolio_daily_allocation_cash_deployment_target",
+        "portfolio_daily_receiver_candidate_mask",
+        "portfolio_daily_source_candidate_mask",
+    }
+    device = next(iter(outputs.values())).device
+    if not required_outputs.issubset(outputs) or not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+
+    receiver_score = torch.clamp(outputs["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    source_score = torch.clamp(outputs["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    cash_score = torch.clamp(outputs["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    pred_uncertainty = torch.clamp(outputs["portfolio_daily_allocation_uncertainty_pressure_target"].to(device), 0.0, 1.0)
+    pred_tail = torch.clamp(outputs["portfolio_daily_allocation_tail_risk_control_target"].to(device), 0.0, 1.0)
+    pred_decision = torch.clamp(outputs["portfolio_daily_allocation_decision_focused_objective"].to(device), 0.0, 1.0)
+
+    target_receiver = torch.clamp(targets["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    target_source = torch.clamp(targets["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    target_cash = torch.clamp(targets["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    target_uncertainty = torch.clamp(targets["portfolio_daily_allocation_uncertainty_pressure_target"].to(device), 0.0, 1.0)
+    target_tail = torch.clamp(targets["portfolio_daily_allocation_tail_risk_control_target"].to(device), 0.0, 1.0)
+    target_decision = torch.clamp(targets["portfolio_daily_allocation_decision_focused_objective"].to(device), 0.0, 1.0)
+    target_drawdown = torch.clamp(targets["portfolio_daily_allocation_drawdown_control_target"].to(device), 0.0, 1.0)
+    target_deploy = torch.clamp(targets["portfolio_daily_allocation_cash_deployment_target"].to(device), 0.0, 1.0)
+    receiver_mask = torch.clamp(targets["portfolio_daily_receiver_candidate_mask"].to(device), 0.0, 1.0)
+    source_mask = torch.clamp(targets["portfolio_daily_source_candidate_mask"].to(device), 0.0, 1.0)
+    zero = torch.zeros_like(target_receiver)
+    hard_negative = torch.clamp(targets.get("portfolio_daily_source_hard_negative_penalty", zero).to(device), 0.0, 1.0)
+    positive_forward = torch.clamp(
+        targets.get("portfolio_daily_source_positive_forward_penalty", zero).to(device),
+        0.0,
+        1.0,
+    )
+    opportunity = torch.clamp(
+        targets.get("portfolio_daily_source_opportunity_cost_penalty", zero).to(device),
+        0.0,
+        1.0,
+    )
+    risk_pressure = torch.clamp(torch.maximum(target_uncertainty, torch.maximum(target_tail, target_drawdown)), 0.0, 1.0)
+    clean_transfer_pressure = torch.clamp(
+        target_decision + 0.28 * target_deploy - 0.42 * risk_pressure,
+        0.0,
+        1.0,
+    )
+    false_source_pressure = torch.clamp(
+        torch.maximum(hard_negative, torch.maximum(positive_forward, opportunity)) + 0.22 * target_tail,
+        0.0,
+        1.0,
+    ) * source_mask
+
+    regression_loss = (
+        nn.functional.smooth_l1_loss(pred_uncertainty, target_uncertainty) * 0.18
+        + nn.functional.smooth_l1_loss(pred_tail, target_tail) * 0.20
+        + nn.functional.smooth_l1_loss(pred_decision, target_decision) * 0.24
+        + nn.functional.smooth_l1_loss(receiver_score, target_receiver) * 0.08
+        + nn.functional.smooth_l1_loss(source_score, target_source) * 0.08
+        + nn.functional.smooth_l1_loss(cash_score, target_cash) * 0.08
+    )
+    tail_deploy_loss = (
+        risk_pressure
+        * torch.square(receiver_score)
+        * torch.clamp(1.0 - target_deploy + 0.15, 0.0, 1.0)
+        * torch.clamp(receiver_mask + 0.15, 0.0, 1.0)
+    ).mean()
+    weak_cash_defense_loss = (
+        torch.relu(torch.maximum(target_tail, target_drawdown) - cash_score)
+        * torch.clamp(risk_pressure + 0.10, 0.0, 1.0)
+    ).mean()
+    clean_receiver_regret = (
+        torch.relu(clean_transfer_pressure * target_receiver - receiver_score)
+        * receiver_mask
+        * torch.clamp(1.0 - risk_pressure, 0.0, 1.0)
+    ).mean()
+    clean_source_regret = (
+        torch.relu(clean_transfer_pressure * target_source - source_score)
+        * source_mask
+        * torch.clamp(1.0 - false_source_pressure, 0.0, 1.0)
+    ).mean()
+    false_source_loss = (false_source_pressure * torch.square(source_score)).mean()
+    decision_reversal_loss = torch.relu(target_decision - pred_decision).mean() * 0.55 + torch.relu(
+        pred_decision - target_decision
+    ).mean() * 0.45
+
+    return (
+        regression_loss
+        + tail_deploy_loss * 0.26
+        + weak_cash_defense_loss * 0.30
+        + clean_receiver_regret * 0.14
+        + clean_source_regret * 0.12
+        + false_source_loss * 0.18
+        + decision_reversal_loss * 0.12
     )
 
 
@@ -2861,6 +3006,9 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_allocation_drawdown_control_target_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_allocation_monthly_quality_target_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_allocation_final_objective_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_allocation_uncertainty_pressure_target_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_allocation_tail_risk_control_target_head = nn.Linear(int(hidden_dim), 1)
+        self.portfolio_allocation_decision_focused_objective_head = nn.Linear(int(hidden_dim), 1)
 
     def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
         _, hidden = self.sequence_encoder(sequence_x)
@@ -2947,6 +3095,9 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_allocation_drawdown_control_target": torch.sigmoid(self.portfolio_allocation_drawdown_control_target_head(fused).squeeze(-1)),
             "portfolio_daily_allocation_monthly_quality_target": torch.sigmoid(self.portfolio_allocation_monthly_quality_target_head(fused).squeeze(-1)),
             "portfolio_daily_allocation_final_objective": torch.sigmoid(self.portfolio_allocation_final_objective_head(fused).squeeze(-1)),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.sigmoid(self.portfolio_allocation_uncertainty_pressure_target_head(fused).squeeze(-1)),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.sigmoid(self.portfolio_allocation_tail_risk_control_target_head(fused).squeeze(-1)),
+            "portfolio_daily_allocation_decision_focused_objective": torch.sigmoid(self.portfolio_allocation_decision_focused_objective_head(fused).squeeze(-1)),
         }
 
 
@@ -4097,6 +4248,10 @@ def fit_policy_models_v3(
                 outputs,
                 sample_batch_targets,
             )
+            portfolio_risk_sensitive_allocation_loss = _risk_sensitive_allocation_objective_loss(
+                outputs,
+                sample_batch_targets,
+            )
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -4130,6 +4285,8 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("portfolio_transfer_regret_total", 0.0) * portfolio_transfer_regret_loss
                 + multi_objective_loss_weights.get("portfolio_allocation_objective_consolidation_total", 0.0)
                 * portfolio_allocation_objective_consolidation_loss
+                + multi_objective_loss_weights.get("portfolio_risk_sensitive_allocation_total", 0.0)
+                * portfolio_risk_sensitive_allocation_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -4193,6 +4350,10 @@ def fit_policy_models_v3(
                 val_outputs,
                 val_targets,
             )
+            val_portfolio_risk_sensitive_allocation_loss = _risk_sensitive_allocation_objective_loss(
+                val_outputs,
+                val_targets,
+            )
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -4230,6 +4391,8 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("portfolio_transfer_regret_total", 0.0) * val_portfolio_transfer_regret_loss
                     + multi_objective_loss_weights.get("portfolio_allocation_objective_consolidation_total", 0.0)
                     * val_portfolio_allocation_objective_consolidation_loss
+                    + multi_objective_loss_weights.get("portfolio_risk_sensitive_allocation_total", 0.0)
+                    * val_portfolio_risk_sensitive_allocation_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -4417,6 +4580,14 @@ def fit_policy_models_v3(
                 "portfolio_daily_allocation_final_objective",
             )
         ),
+        "supports_portfolio_risk_sensitive_allocation_heads": all(
+            name in sample_scalar_loss_weights
+            for name in (
+                "portfolio_daily_allocation_uncertainty_pressure_target",
+                "portfolio_daily_allocation_tail_risk_control_target",
+                "portfolio_daily_allocation_decision_focused_objective",
+            )
+        ),
         "supports_portfolio_unified_allocation_consistency_loss": (
             multi_objective_loss_weights.get("portfolio_unified_allocation_total", 0.0) > 0.0
         ),
@@ -4434,6 +4605,9 @@ def fit_policy_models_v3(
         ),
         "supports_portfolio_allocation_objective_consolidation_loss": (
             multi_objective_loss_weights.get("portfolio_allocation_objective_consolidation_total", 0.0) > 0.0
+        ),
+        "supports_portfolio_risk_sensitive_allocation_loss": (
+            multi_objective_loss_weights.get("portfolio_risk_sensitive_allocation_total", 0.0) > 0.0
         ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
@@ -4880,6 +5054,27 @@ def predict_policy_v3(
         predicted_portfolio_allocation_final_objective = (
             np.clip(outputs["portfolio_daily_allocation_final_objective"].cpu().numpy(), 0.0, 1.0)
             if supports_portfolio_allocation_objective_consolidation_heads and "portfolio_daily_allocation_final_objective" in outputs
+            else None
+        )
+        supports_portfolio_risk_sensitive_allocation_heads = bool(
+            artifact.training_diagnostics.get("supports_portfolio_risk_sensitive_allocation_heads", False)
+        )
+        predicted_portfolio_allocation_uncertainty_pressure_target = (
+            np.clip(outputs["portfolio_daily_allocation_uncertainty_pressure_target"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_risk_sensitive_allocation_heads
+            and "portfolio_daily_allocation_uncertainty_pressure_target" in outputs
+            else None
+        )
+        predicted_portfolio_allocation_tail_risk_control_target = (
+            np.clip(outputs["portfolio_daily_allocation_tail_risk_control_target"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_risk_sensitive_allocation_heads
+            and "portfolio_daily_allocation_tail_risk_control_target" in outputs
+            else None
+        )
+        predicted_portfolio_allocation_decision_focused_objective = (
+            np.clip(outputs["portfolio_daily_allocation_decision_focused_objective"].cpu().numpy(), 0.0, 1.0)
+            if supports_portfolio_risk_sensitive_allocation_heads
+            and "portfolio_daily_allocation_decision_focused_objective" in outputs
             else None
         )
         supports_portfolio_allocation_teacher_heads = bool(
@@ -6761,6 +6956,35 @@ def predict_policy_v3(
         if predicted_portfolio_allocation_final_objective is not None
         else portfolio_daily_unified_allocation_objective.copy()
     )
+    portfolio_daily_allocation_uncertainty_pressure_target = (
+        _finite_array(predicted_portfolio_allocation_uncertainty_pressure_target, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_allocation_uncertainty_pressure_target is not None
+        else np.clip(0.62 * multi_horizon_forward_risk + 0.38 * portfolio_daily_allocation_drawdown_control_target, 0.0, 1.0)
+    )
+    portfolio_daily_allocation_tail_risk_control_target = (
+        _finite_array(predicted_portfolio_allocation_tail_risk_control_target, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_allocation_tail_risk_control_target is not None
+        else np.clip(
+            0.58 * portfolio_daily_allocation_drawdown_control_target
+            + 0.28 * multi_horizon_forward_risk
+            + 0.14 * portfolio_daily_source_hard_negative_penalty,
+            0.0,
+            1.0,
+        )
+    )
+    portfolio_daily_allocation_decision_focused_objective = (
+        _finite_array(predicted_portfolio_allocation_decision_focused_objective, default=0.0, low=0.0, high=1.0)
+        if predicted_portfolio_allocation_decision_focused_objective is not None
+        else np.clip(
+            0.62 * portfolio_daily_allocation_final_objective
+            + 0.18 * portfolio_daily_allocation_cash_deployment_target
+            + 0.12 * portfolio_daily_allocation_risk_adjusted_return_target
+            - 0.16 * portfolio_daily_allocation_uncertainty_pressure_target
+            - 0.14 * portfolio_daily_allocation_tail_risk_control_target,
+            0.0,
+            1.0,
+        )
+    )
     if predicted_portfolio_allocation_final_objective is not None:
         portfolio_daily_unified_receiver_score = np.clip(
             0.58 * portfolio_daily_unified_receiver_score
@@ -6806,6 +7030,31 @@ def predict_policy_v3(
         portfolio_daily_cash_score = np.clip(
             0.68 * portfolio_daily_cash_score
             + 0.32 * portfolio_daily_unified_cash_score,
+            0.0,
+            1.0,
+        )
+    if predicted_portfolio_allocation_decision_focused_objective is not None:
+        portfolio_daily_unified_receiver_score = np.clip(
+            0.70 * portfolio_daily_unified_receiver_score
+            + 0.18 * portfolio_daily_allocation_decision_focused_objective
+            - 0.14 * portfolio_daily_allocation_uncertainty_pressure_target
+            - 0.12 * portfolio_daily_allocation_tail_risk_control_target,
+            0.0,
+            1.0,
+        )
+        portfolio_daily_unified_source_score = np.clip(
+            0.72 * portfolio_daily_unified_source_score
+            + 0.16 * portfolio_daily_allocation_decision_focused_objective
+            - 0.10 * portfolio_daily_allocation_uncertainty_pressure_target
+            - 0.12 * portfolio_daily_source_hard_negative_penalty,
+            0.0,
+            1.0,
+        )
+        portfolio_daily_unified_cash_score = np.clip(
+            0.70 * portfolio_daily_unified_cash_score
+            + 0.18 * portfolio_daily_allocation_tail_risk_control_target
+            + 0.14 * portfolio_daily_allocation_uncertainty_pressure_target
+            - 0.12 * portfolio_daily_allocation_decision_focused_objective,
             0.0,
             1.0,
         )
@@ -7688,6 +7937,9 @@ def predict_policy_v3(
             "portfolio_daily_allocation_drawdown_control_target": portfolio_daily_allocation_drawdown_control_target,
             "portfolio_daily_allocation_monthly_quality_target": portfolio_daily_allocation_monthly_quality_target,
             "portfolio_daily_allocation_final_objective": portfolio_daily_allocation_final_objective,
+            "portfolio_daily_allocation_uncertainty_pressure_target": portfolio_daily_allocation_uncertainty_pressure_target,
+            "portfolio_daily_allocation_tail_risk_control_target": portfolio_daily_allocation_tail_risk_control_target,
+            "portfolio_daily_allocation_decision_focused_objective": portfolio_daily_allocation_decision_focused_objective,
             "portfolio_daily_receiver_funding_coverage": portfolio_daily_receiver_funding_coverage,
             "portfolio_daily_funding_closure_score": portfolio_daily_funding_closure_score,
             "portfolio_daily_allocation_transfer_score": portfolio_daily_allocation_transfer_score,

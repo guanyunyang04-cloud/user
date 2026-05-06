@@ -40,6 +40,8 @@
 - r38 balance 合同：压住强势误卖后，必须同步约束 `source_target_count`、receiver/source breadth、cash deployment、open/reduce/exit 质量、monthly return 与 drawdown；不得把接近全现金的语义安全状态解释为成功。
 - r39 allocation objective consolidation 合同：`portfolio_daily_allocation_trade_quality_target`、`portfolio_daily_allocation_cash_deployment_target`、`portfolio_daily_allocation_risk_adjusted_return_target`、`portfolio_daily_allocation_drawdown_control_target`、`portfolio_daily_allocation_monthly_quality_target` 与 `portfolio_daily_allocation_final_objective` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective 与 profile；`alpha_result_value_budget_split_v25` 中 action loss 只能作为辅助，不能继续主导 allocation objective。
 - r39 execution blend 合同：当 r39 objective heads 可用时，`portfolio_daily_allocation_final_objective` 必须回写 `portfolio_daily_unified_receiver_score/source_score/cash_score` 和核心 receiver/source/cash score；否则会重回“训练目标已接入、执行仍走旧 score”的半旧路径。
+- r41 risk-sensitive allocation layer 合同：`portfolio_daily_allocation_uncertainty_pressure_target`、`portfolio_daily_allocation_tail_risk_control_target` 与 `portfolio_daily_allocation_decision_focused_objective` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective 与 profile；solver 必须在高 uncertainty / tail risk 下压制 receiver deploy 并提高 cash defense，同时不能杀死 clean source release。
+- r41 推理融合合同：当 r41 heads 可用时，预测的 uncertainty / tail / decision objective 必须参与 unified receiver/source/cash score 和 `solve_semidifferentiable_allocation`，不能只停留在训练 loss；旧 artifact 缺少 r41 heads 时只能走可解释 fallback target，不能默认为策略成功。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -68,6 +70,7 @@
 - r38 bounded confirm 证明：source hard-negative tail、release preference 与 transfer regret 能把 positive source false sell 压住，confirm 中 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`receiver_minus_source_forward_excess_5d = 0.037347`；但 `annual_return = 0.009111`、`sharpe = 0.164855`、`source_target_count = 1`、`cash_reserve_rate = 0.981728`，说明当前失败已转为收益弱、交易广度不足和现金过度保守。
 - r39 bounded confirm 证明：统一 allocation objective 和 execution blend 能恢复收益、正 spread 与 receiver 广度，execblend confirm 达到 `annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`receiver_minus_source_forward_excess_5d = 0.066883`、`source_positive_forward_sell_share = 0.0`；但仍未稳定，`source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`，v2 gate 只过 `9/12`。
 - r40 clean rerun 证明：end-to-end allocation layer 的运行通道、持久产物与 confirmatory 流程已经可完整跑通，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、模型 diagnostics 为 yolos + CUDA；但 stable confirm 为空，confirm_01 / confirm_02 均为 `shadow_only`，且 source 释放为 0、cash timing 为负、drawdown 未过线，因此 r40 不是 promotion verdict。
+- r41 代码合同证明：risk-sensitive / uncertainty-aware allocation layer 已完成实现和合同测试，覆盖目标构造、solver 风险刹车、v26 loss profile、risk-sensitive loss、模型 heads、推理导出与 profile 注册；但尚未运行 bounded study，因此不能作为策略有效性事实。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -76,7 +79,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r40 end-to-end allocation layer 已取得干净完整产物，但结果弱于 r39 且未过 stable confirm；后续若继续推进，必须围绕 source/receiver/cash credit assignment、cash timing 与 drawdown 在 allocation layer 内闭合，而不是重跑同一 clean_r1 或回到局部 penalty / guard。
+- 短期：r41 已把 r40 失败后的最优结构改造落成代码入口；后续若继续推进，必须用 r41 clean study 验证 source/receiver/cash credit assignment、cash timing 与 drawdown 是否在 allocation layer 内闭合，而不是重跑 r40 clean_r1 或回到局部 penalty / guard。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -94,6 +97,7 @@
 - r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
 - r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
 - r40：当前已完成 clean rerun 的架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径、持久产物读取，以及 source/receiver/cash credit assignment 未稳定闭合的结构诊断。
+- r41：当前已完成代码合同的下一 research profile，聚焦 risk-sensitive allocation layer、uncertainty pressure、tail risk control、decision-focused objective、receiver risk brake 与 cash defense 内生化；尚无 study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

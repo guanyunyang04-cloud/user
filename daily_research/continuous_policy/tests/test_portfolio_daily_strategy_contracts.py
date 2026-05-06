@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 import pandas as pd
 
+import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
 from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     build_unified_allocation_problem,
@@ -1324,6 +1325,204 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
         )
         self.assertNotEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
+
+    def test_r41_unified_allocation_problem_exposes_uncertainty_aware_decision_objective(self) -> None:
+        low_risk_frame = pd.DataFrame(
+            {
+                "stock": ["receiver", "source"],
+                "action_label": ["open", "reduce"],
+                "current_weight": [0.0, 0.20],
+                "portfolio_daily_receiver_score": [0.90, 0.05],
+                "portfolio_daily_source_score": [0.05, 0.78],
+                "portfolio_daily_cash_score": [0.20, 0.20],
+                "portfolio_daily_receiver_candidate_mask": [1.0, 0.0],
+                "portfolio_daily_source_candidate_mask": [0.0, 1.0],
+                "portfolio_daily_receiver_executability": [0.95, 0.20],
+                "portfolio_daily_receiver_add_headroom": [0.18, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.92],
+                "portfolio_daily_source_release_capacity": [0.0, 0.20],
+                "portfolio_daily_source_release_quality": [0.0, 0.84],
+                "portfolio_daily_source_economic_release_score": [0.0, 0.80],
+                "portfolio_daily_source_opportunity_cost": [0.0, 0.03],
+                "portfolio_daily_source_forward_excess_5d": [0.0, -0.035],
+                "portfolio_daily_source_receiver_forward_spread": [0.070, 0.070],
+                "portfolio_daily_receiver_forward_excess_5d": [0.045, 0.045],
+                "portfolio_daily_allocation_transfer_score": [0.84, 0.84],
+                "portfolio_daily_allocation_dead_branch_risk": [0.02, 0.02],
+                "market_downside_pressure": [0.03, 0.03],
+                "cash_regime_pressure": [0.02, 0.02],
+                "portfolio_cash_pressure": [0.70, 0.70],
+                "multi_horizon_forward_risk": [0.04, 0.04],
+                "cash_defense_value": [0.03, 0.03],
+                "portfolio_drawdown_20d": [-0.005, -0.005],
+                "forward_benchmark_return_1d": [0.014, 0.014],
+                "forward_benchmark_return_3d": [0.030, 0.030],
+            }
+        )
+        high_risk_frame = low_risk_frame.assign(
+            market_downside_pressure=[0.92, 0.92],
+            cash_regime_pressure=[0.88, 0.88],
+            multi_horizon_forward_risk=[0.90, 0.90],
+            cash_defense_value=[0.86, 0.86],
+            portfolio_drawdown_20d=[-0.18, -0.18],
+            forward_benchmark_return_1d=[-0.045, -0.045],
+            forward_benchmark_return_3d=[-0.080, -0.080],
+        )
+
+        low_risk = build_unified_allocation_problem(low_risk_frame)
+        high_risk = build_unified_allocation_problem(high_risk_frame)
+
+        required = {
+            "portfolio_daily_allocation_uncertainty_pressure_target",
+            "portfolio_daily_allocation_tail_risk_control_target",
+            "portfolio_daily_allocation_decision_focused_objective",
+        }
+        self.assertTrue(required.issubset(low_risk.columns))
+        self.assertGreater(
+            float(high_risk["portfolio_daily_allocation_uncertainty_pressure_target"].mean()),
+            float(low_risk["portfolio_daily_allocation_uncertainty_pressure_target"].mean()) + 0.35,
+        )
+        self.assertGreater(
+            float(high_risk["portfolio_daily_allocation_tail_risk_control_target"].mean()),
+            float(low_risk["portfolio_daily_allocation_tail_risk_control_target"].mean()) + 0.35,
+        )
+        self.assertGreater(
+            float(low_risk["portfolio_daily_allocation_decision_focused_objective"].mean()),
+            float(high_risk["portfolio_daily_allocation_decision_focused_objective"].mean()) + 0.20,
+        )
+
+    def test_r41_solver_brakes_receiver_deploy_under_tail_risk_without_killing_clean_source_release(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "stock": ["RECV", "SRC"],
+                "action_label": ["open", "reduce"],
+                "current_weight": [0.0, 0.20],
+                "portfolio_daily_receiver_score": [0.92, 0.0],
+                "portfolio_daily_source_score": [0.0, 0.86],
+                "portfolio_daily_cash_score": [0.12, 0.12],
+                "portfolio_daily_receiver_candidate_mask": [1.0, 0.0],
+                "portfolio_daily_source_candidate_mask": [0.0, 1.0],
+                "portfolio_daily_receiver_executability": [0.96, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.20, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.94],
+                "portfolio_daily_source_release_capacity": [0.0, 0.20],
+                "portfolio_daily_source_release_quality": [0.0, 0.86],
+                "portfolio_daily_source_economic_release_score": [0.0, 0.82],
+                "portfolio_daily_source_opportunity_cost": [0.0, 0.02],
+                "portfolio_daily_source_forward_excess_5d": [0.0, -0.040],
+                "portfolio_daily_source_receiver_forward_spread": [0.080, 0.080],
+                "portfolio_daily_receiver_forward_excess_5d": [0.050, 0.050],
+                "portfolio_daily_allocation_transfer_score": [0.88, 0.88],
+                "portfolio_daily_allocation_dead_branch_risk": [0.02, 0.02],
+                "market_downside_pressure": [0.03, 0.03],
+                "cash_regime_pressure": [0.02, 0.02],
+                "portfolio_cash_pressure": [0.65, 0.65],
+                "multi_horizon_forward_risk": [0.03, 0.03],
+                "cash_defense_value": [0.02, 0.02],
+                "portfolio_drawdown_20d": [-0.005, -0.005],
+                "forward_benchmark_return_1d": [0.016, 0.016],
+                "forward_benchmark_return_3d": [0.034, 0.034],
+            }
+        )
+        stressed = frame.assign(
+            market_downside_pressure=[0.94, 0.94],
+            cash_regime_pressure=[0.90, 0.90],
+            multi_horizon_forward_risk=[0.92, 0.92],
+            cash_defense_value=[0.88, 0.88],
+            portfolio_drawdown_20d=[-0.20, -0.20],
+            forward_benchmark_return_1d=[-0.050, -0.050],
+            forward_benchmark_return_3d=[-0.090, -0.090],
+        )
+
+        constraints = AllocationOptimizerConstraints(
+            cash_reserve_target=0.05,
+            turnover_limit=0.40,
+            max_position_weight=0.25,
+            min_trade_weight=0.0,
+        )
+        normal_solution = solve_semidifferentiable_allocation(frame, constraints=constraints)
+        stressed_solution = solve_semidifferentiable_allocation(stressed, constraints=constraints)
+
+        self.assertLess(normal_solution.target_weight["SRC"], 0.20)
+        self.assertGreater(normal_solution.target_weight["RECV"], 0.05)
+        self.assertLess(stressed_solution.buy_turnover, normal_solution.buy_turnover * 0.55)
+        self.assertGreaterEqual(stressed_solution.cash_after, normal_solution.cash_after + 0.05)
+
+    def test_r41_loss_profile_is_risk_sensitive_allocation_layer_not_r40_reuse(self) -> None:
+        profile = "split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41"
+        loss_profile = "alpha_result_value_budget_split_v26"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"], BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_ALLOCATION_LAYER)
+        self.assertNotEqual(
+            SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"],
+            SEARCH_PROFILE_BASE_TRIALS["split_heads_portfolio_daily_end_to_end_allocation_layer_r40"]["loss_profile"],
+        )
+
+        config = LOSS_PROFILE_CONFIGS[loss_profile]
+        sample_weights = config["sample_scalar_loss_weights"]
+        multi_weights = config["multi_objective_loss_weights"]
+        for name in (
+            "portfolio_daily_allocation_uncertainty_pressure_target",
+            "portfolio_daily_allocation_tail_risk_control_target",
+            "portfolio_daily_allocation_decision_focused_objective",
+        ):
+            self.assertIn(name, sample_weights)
+            self.assertGreater(
+                sample_weights[name],
+                LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v25"]["sample_scalar_loss_weights"][
+                    "portfolio_daily_allocation_final_objective"
+                ]
+                * 0.75,
+            )
+        self.assertLessEqual(multi_weights["action_total"], 0.05)
+        self.assertGreater(multi_weights["portfolio_risk_sensitive_allocation_total"], 0.40)
+
+    def test_r41_risk_sensitive_loss_penalizes_tail_deploy_and_weak_cash_defense(self) -> None:
+        loss_fn = getattr(model_seq_v3, "_risk_sensitive_allocation_objective_loss", None)
+        self.assertIsNotNone(loss_fn)
+        targets = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.84, 0.12]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.72, 0.08]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.12, 0.82]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.78, 0.10]),
+            "portfolio_daily_allocation_decision_focused_objective": torch.tensor([0.82, 0.08]),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.tensor([0.08, 0.88]),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.tensor([0.06, 0.90]),
+            "portfolio_daily_allocation_drawdown_control_target": torch.tensor([0.08, 0.84]),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([0.78, 0.05]),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.04, 0.82]),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.04, 0.78]),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.05, 0.76]),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0]),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0]),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.80, 0.06]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.68, 0.04]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.14, 0.86]),
+            "portfolio_daily_allocation_decision_focused_objective": torch.tensor([0.78, 0.06]),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.tensor([0.10, 0.84]),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.tensor([0.08, 0.86]),
+        }
+        bad_outputs = {
+            **good_outputs,
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.28, 0.70]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.22, 0.72]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.76, 0.16]),
+            "portfolio_daily_allocation_decision_focused_objective": torch.tensor([0.22, 0.68]),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.tensor([0.16, 0.24]),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.tensor([0.12, 0.20]),
+        }
+
+        good_loss = loss_fn(good_outputs, targets)
+        bad_loss = loss_fn(bad_outputs, targets)
+
+        self.assertGreater(float(bad_loss), float(good_loss) + 0.20)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

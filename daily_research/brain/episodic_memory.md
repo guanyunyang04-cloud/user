@@ -1245,3 +1245,12 @@
 - Diagnostics 证据：5 个 run 的训练均为 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`trainer_backend = formal_torch_seq_v3`、`loss_profile = alpha_result_value_budget_split_v25`；screening 完成 `40` epochs，confirmatory 完成 `64` epochs，模型 artifact 存在。
 - 结构诊断：r40 的运行通道已成功，但策略层未过线。confirm_02 的 receiver 侧很宽，`portfolio_daily_receiver_target_count = 408` 且 realized deploy 为 `1.0`；但 `portfolio_daily_source_target_count = 0`、`portfolio_daily_source_realized_sell_rate = 0`、`cash_timing_quality_1d = -0.114171`、`order_translation_conflict_rate = 0.907379`，说明 source/receiver/cash credit assignment 没有在 end-to-end allocation layer 中稳定闭合。
 - 决策：r40 clean_r1 继续 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。当前有效证据基线仍为 r39；后续若继续推进，不能重跑同一 clean_r1 期望随机改善，而应围绕 source 释放、cash timing、drawdown 与 order translation drift 做结构性诊断和改造。
+
+## 2026-05-07 r41 risk-sensitive allocation layer 代码合约落地复盘
+- 行动前判断：r40 clean rerun 已证明运行通道可用但 source 释放为 0、cash timing 为负、drawdown 未过线；继续重跑 r40 或追加局部 guard 不是最高价值动作。更有效的方向是把 r40 改造成 risk-sensitive、uncertainty-aware、decision-focused 的 allocation layer，让风险和不确定性在训练目标与 optimizer 内部闭合。
+- 已执行 TDD 红灯：先新增 r41 合同测试，覆盖 uncertainty / tail / decision objective 目标暴露、tail risk 下 receiver deploy 刹车但保留 clean source release、v26 loss profile 注册、risk-sensitive loss 惩罚 tail deploy 与弱 cash defense。首次运行在设置 `KMP_DUPLICATE_LIB_OK=TRUE` 后按预期红灯失败。
+- 已完成实现：`allocation_optimizer.py` 新增 `portfolio_daily_allocation_uncertainty_pressure_target`、`portfolio_daily_allocation_tail_risk_control_target` 与 `portfolio_daily_allocation_decision_focused_objective`，并让 `solve_semidifferentiable_allocation` 在高 uncertainty / tail risk 下压低 receiver buy budget、提高 cash defense，同时保留 clean source release。
+- 已完成模型接入：`model_seq_v3.py` 新增 `alpha_result_value_budget_split_v26`、三个 r41 heads、`_risk_sensitive_allocation_objective_loss`、训练/验证损失接入、diagnostics support flags，以及推理阶段 r41 predicted heads 对 unified receiver/source/cash score 的融合。
+- 已完成 study 入口：`run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41`，默认使用 `end_to_end_allocation_layer_v1` objective、`allocation_layer_v1` budget semantics 与 `end_to_end_allocation_layer_v1` budget calibration。
+- 验证：4 个 r41 合同测试通过；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 44 项通过；相关 continuous_policy 文件 `py_compile` 通过；`git diff --check` 通过。
+- 决策：r41 当前只是代码合约和下一 research profile，不是训练 verdict。当前有效证据基线仍为 r39；r40 clean_r1 继续作为失败诊断证据；不得 promotion、不得 live、不得改 active artifact。
