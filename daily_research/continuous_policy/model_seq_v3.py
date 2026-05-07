@@ -1457,6 +1457,32 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"] = {
         "portfolio_primal_dual_decision_total": 1.08,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v29"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"]["sample_scalar_loss_weights"],
+        "portfolio_daily_unified_receiver_score": 3.02,
+        "portfolio_daily_unified_source_score": 3.22,
+        "portfolio_daily_unified_cash_score": 2.68,
+        "portfolio_daily_allocation_final_objective": 3.48,
+        "portfolio_daily_allocation_decision_focused_objective": 3.54,
+        "portfolio_daily_allocation_net_utility_target": 3.82,
+        "portfolio_daily_allocation_credit_closure_target": 3.96,
+        "portfolio_daily_allocation_resource_efficiency_target": 3.52,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"]["multi_objective_loss_weights"],
+        "action_total": 0.018,
+        "duration_total": 0.018,
+        "scalar_total": 3.54,
+        "portfolio_unified_allocation_total": 0.60,
+        "portfolio_decision_regret_total": 0.54,
+        "portfolio_allocation_objective_consolidation_total": 0.86,
+        "portfolio_risk_sensitive_allocation_total": 0.60,
+        "portfolio_utility_credit_closure_total": 0.84,
+        "portfolio_primal_dual_decision_total": 0.96,
+        "portfolio_entropic_transport_decision_total": 1.24,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -2517,6 +2543,288 @@ def _portfolio_primal_dual_decision_loss(
         risk_cash_loss = torch.relu(day_risk - day_cash_score + 0.06) * torch.clamp(day_risk - desired_deploy + 0.08, 0.0, 1.0)
         funding_imbalance = torch.square(torch.relu(desired_deploy - desired_release - current_cash_proxy - 0.02))
         day_losses.append(regret + 0.40 * false_source_loss + 0.26 * dead_cash_loss + 0.20 * risk_cash_loss + 0.18 * funding_imbalance)
+
+    if not day_losses:
+        return torch.tensor(0.0, device=device)
+    return torch.stack(day_losses).mean()
+
+
+def _sinkhorn_transport_plan(
+    logits: torch.Tensor,
+    row_marginal: torch.Tensor,
+    col_marginal: torch.Tensor,
+    *,
+    iterations: int = 7,
+) -> torch.Tensor:
+    row = torch.clamp(row_marginal, min=1.0e-6)
+    row = row / torch.clamp(row.sum(), min=1.0e-6)
+    col = torch.clamp(col_marginal, min=1.0e-6)
+    col = col / torch.clamp(col.sum(), min=1.0e-6)
+    plan = torch.exp(torch.clamp(logits - logits.max(), min=-30.0, max=30.0))
+    for _ in range(iterations):
+        plan = plan * (row.unsqueeze(1) / torch.clamp(plan.sum(dim=1, keepdim=True), min=1.0e-6))
+        plan = plan * (col.unsqueeze(0) / torch.clamp(plan.sum(dim=0, keepdim=True), min=1.0e-6))
+    return plan / torch.clamp(plan.sum(), min=1.0e-6)
+
+
+def _portfolio_entropic_transport_decision_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    required_outputs = {
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+        "portfolio_daily_allocation_final_objective",
+        "portfolio_daily_allocation_net_utility_target",
+        "portfolio_daily_allocation_credit_closure_target",
+        "portfolio_daily_allocation_resource_efficiency_target",
+    }
+    required_targets = {
+        "date_code",
+        "current_weight",
+        "portfolio_daily_receiver_candidate_mask",
+        "portfolio_daily_source_candidate_mask",
+        "portfolio_daily_unified_receiver_score",
+        "portfolio_daily_unified_source_score",
+        "portfolio_daily_unified_cash_score",
+    }
+    device = next(iter(outputs.values())).device
+    if not required_outputs.issubset(outputs) or not required_targets.issubset(targets):
+        return torch.tensor(0.0, device=device)
+
+    receiver_score = torch.clamp(outputs["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    source_score = torch.clamp(outputs["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    cash_score = torch.clamp(outputs["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    final_objective = torch.clamp(outputs["portfolio_daily_allocation_final_objective"].to(device), 0.0, 1.0)
+    net_utility = torch.clamp(outputs["portfolio_daily_allocation_net_utility_target"].to(device), 0.0, 1.0)
+    credit_closure = torch.clamp(outputs["portfolio_daily_allocation_credit_closure_target"].to(device), 0.0, 1.0)
+    resource_efficiency = torch.clamp(outputs["portfolio_daily_allocation_resource_efficiency_target"].to(device), 0.0, 1.0)
+
+    target_receiver = torch.clamp(targets["portfolio_daily_unified_receiver_score"].to(device), 0.0, 1.0)
+    target_source = torch.clamp(targets["portfolio_daily_unified_source_score"].to(device), 0.0, 1.0)
+    target_cash = torch.clamp(targets["portfolio_daily_unified_cash_score"].to(device), 0.0, 1.0)
+    receiver_mask = torch.clamp(targets["portfolio_daily_receiver_candidate_mask"].to(device), 0.0, 1.0)
+    source_mask = torch.clamp(targets["portfolio_daily_source_candidate_mask"].to(device), 0.0, 1.0)
+    current_weight = torch.clamp(targets["current_weight"].to(device), 0.0, 1.0)
+    date_code = targets["date_code"].to(device).long()
+    zero = torch.zeros_like(receiver_score)
+
+    receiver_forward = torch.clamp(
+        targets.get("portfolio_daily_receiver_forward_excess_5d", targets.get("forward_excess_5d", zero)).to(device),
+        -0.35,
+        0.35,
+    )
+    source_forward = torch.clamp(
+        targets.get("portfolio_daily_source_forward_excess_5d", targets.get("forward_excess_5d", zero)).to(device),
+        -0.35,
+        0.35,
+    )
+    target_net = torch.clamp(targets.get("portfolio_daily_allocation_net_utility_target", target_receiver).to(device), 0.0, 1.0)
+    target_credit = torch.clamp(targets.get("portfolio_daily_allocation_credit_closure_target", target_source).to(device), 0.0, 1.0)
+    target_efficiency = torch.clamp(
+        targets.get("portfolio_daily_allocation_resource_efficiency_target", target_receiver).to(device),
+        0.0,
+        1.0,
+    )
+    uncertainty = torch.clamp(
+        targets.get("portfolio_daily_allocation_uncertainty_pressure_target", zero).to(device),
+        0.0,
+        1.0,
+    )
+    tail = torch.clamp(
+        targets.get("portfolio_daily_allocation_tail_risk_control_target", zero).to(device),
+        0.0,
+        1.0,
+    )
+    drawdown = torch.clamp(
+        targets.get("portfolio_daily_allocation_drawdown_control_target", zero).to(device),
+        0.0,
+        1.0,
+    )
+    deploy_target = torch.clamp(
+        targets.get("portfolio_daily_allocation_cash_deployment_target", target_net).to(device),
+        0.0,
+        1.0,
+    )
+    positive_forward = torch.clamp(
+        torch.maximum(
+            targets.get("portfolio_daily_source_positive_forward_penalty", zero).to(device),
+            torch.clamp(source_forward / 0.08, 0.0, 1.0),
+        ),
+        0.0,
+        1.0,
+    )
+    opportunity = torch.clamp(
+        targets.get("portfolio_daily_source_opportunity_cost_penalty", zero).to(device),
+        0.0,
+        1.0,
+    )
+    hard_negative = torch.clamp(
+        torch.maximum(
+            targets.get("portfolio_daily_source_hard_negative_penalty", zero).to(device),
+            targets.get("portfolio_daily_source_tail_false_sell_penalty", zero).to(device),
+        ),
+        0.0,
+        1.0,
+    )
+    release_preference = torch.clamp(
+        targets.get("portfolio_daily_source_release_preference", target_source).to(device),
+        0.0,
+        1.0,
+    )
+    spread_reward = torch.clamp(
+        targets.get("portfolio_daily_receiver_source_spread_reward", zero).to(device),
+        0.0,
+        1.0,
+    )
+    transfer_regret = torch.clamp(
+        targets.get("portfolio_daily_transfer_regret_target", target_credit).to(device),
+        0.0,
+        1.0,
+    )
+    risk_pressure = torch.clamp(torch.maximum(uncertainty, torch.maximum(tail, drawdown)), 0.0, 1.0)
+    false_source_pressure = torch.clamp(
+        torch.maximum(hard_negative, 0.60 * positive_forward + 0.40 * opportunity),
+        0.0,
+        1.0,
+    )
+
+    day_losses: list[torch.Tensor] = []
+    for date_value in torch.unique(date_code):
+        day_mask = date_code == date_value
+        receiver_day = day_mask & (receiver_mask > 0.05)
+        source_day = day_mask & (source_mask > 0.05) & (current_weight > 1.0e-8)
+        if int(receiver_day.sum().detach().cpu().item()) == 0 and int(source_day.sum().detach().cpu().item()) == 0:
+            continue
+
+        day_risk = risk_pressure[day_mask].mean()
+        day_cash_score = cash_score[day_mask].mean()
+        day_target_cash = target_cash[day_mask].mean()
+        day_credit = target_credit[day_mask].mean()
+        day_utility = target_net[day_mask].mean()
+        day_efficiency = target_efficiency[day_mask].mean()
+        desired_deploy = torch.clamp(
+            0.42 * day_credit + 0.34 * day_utility + 0.18 * day_efficiency + 0.12 * deploy_target[day_mask].mean() - 0.44 * day_risk,
+            0.0,
+            1.0,
+        )
+        current_cash_proxy = torch.clamp(1.0 - current_weight[day_mask].sum(), 0.0, 1.0)
+        desired_release = torch.clamp(desired_deploy - current_cash_proxy + 0.08 + 0.22 * transfer_regret[day_mask].mean(), 0.0, 1.0)
+        desired_flow = torch.clamp(0.46 * desired_deploy + 0.38 * desired_release + 0.16 * (1.0 - current_cash_proxy), 0.05, 1.0)
+
+        receiver_value = torch.empty(0, device=device)
+        receiver_pred_logits = torch.empty(0, device=device)
+        receiver_oracle_logits = torch.empty(0, device=device)
+        if int(receiver_day.sum().detach().cpu().item()) > 0:
+            receiver_value = torch.clamp(
+                0.54 * torch.clamp(receiver_forward[receiver_day] / 0.10, -1.0, 1.0)
+                + 0.20 * target_receiver[receiver_day]
+                + 0.16 * target_net[receiver_day]
+                + 0.12 * spread_reward[receiver_day]
+                - 0.24 * risk_pressure[receiver_day],
+                -1.0,
+                1.0,
+            )
+            receiver_pred_logits = 3.8 * (
+                receiver_score[receiver_day]
+                + 0.30 * net_utility[receiver_day]
+                + 0.22 * credit_closure[receiver_day]
+                + 0.18 * resource_efficiency[receiver_day]
+                + 0.12 * final_objective[receiver_day]
+                - 0.24 * risk_pressure[receiver_day]
+            )
+            receiver_oracle_logits = 3.8 * (
+                receiver_value + target_receiver[receiver_day] + 0.14 * target_credit[receiver_day] - 0.16 * risk_pressure[receiver_day]
+            )
+
+        source_release_value = torch.empty(0, device=device)
+        source_pred_logits = torch.empty(0, device=device)
+        source_oracle_logits = torch.empty(0, device=device)
+        source_false = torch.empty(0, device=device)
+        if int(source_day.sum().detach().cpu().item()) > 0:
+            source_keep_cost = torch.clamp(
+                0.48 * torch.clamp(source_forward[source_day] / 0.10, -1.0, 1.0)
+                + 0.24 * false_source_pressure[source_day]
+                + 0.14 * opportunity[source_day]
+                - 0.22 * release_preference[source_day]
+                - 0.14 * target_credit[source_day],
+                -1.0,
+                1.0,
+            )
+            source_release_value = torch.clamp(-source_keep_cost + 0.24 * release_preference[source_day], -1.0, 1.0)
+            source_false = false_source_pressure[source_day]
+            source_pred_logits = 3.8 * (
+                source_score[source_day]
+                + 0.24 * credit_closure[source_day]
+                + 0.18 * resource_efficiency[source_day]
+                + 0.14 * net_utility[source_day]
+                + 0.16 * release_preference[source_day]
+                - 0.62 * false_source_pressure[source_day]
+            )
+            source_oracle_logits = 3.8 * (
+                source_release_value + target_source[source_day] + 0.16 * target_credit[source_day] - 0.88 * false_source_pressure[source_day]
+            )
+
+        cash_source_pred_logit = (3.8 * (current_cash_proxy + 0.20 * day_cash_score + 0.16 * torch.relu(desired_deploy - desired_release) - 0.18 * day_risk)).view(1)
+        cash_source_oracle_logit = (3.8 * (current_cash_proxy + 0.22 * torch.relu(desired_deploy - desired_release) - 0.18 * day_risk)).view(1)
+        cash_sink_pred_logit = (3.8 * (day_cash_score + 0.52 * day_risk - 0.28 * desired_deploy)).view(1)
+        cash_sink_oracle_logit = (3.8 * (day_target_cash + 0.58 * day_risk + 0.18 * torch.relu(1.0 - desired_deploy))).view(1)
+
+        row_pred = torch.softmax(torch.cat([source_pred_logits, cash_source_pred_logit]), dim=0)
+        row_oracle = torch.softmax(torch.cat([source_oracle_logits, cash_source_oracle_logit]), dim=0)
+        col_pred = torch.softmax(torch.cat([receiver_pred_logits, cash_sink_pred_logit]), dim=0)
+        col_oracle = torch.softmax(torch.cat([receiver_oracle_logits, cash_sink_oracle_logit]), dim=0)
+
+        source_count = int(source_release_value.numel())
+        receiver_count = int(receiver_value.numel())
+        pair_value = torch.zeros((source_count + 1, receiver_count + 1), device=device)
+        if source_count > 0 and receiver_count > 0:
+            pair_value[:source_count, :receiver_count] = source_release_value.unsqueeze(1) + receiver_value.unsqueeze(0) - 0.08 * day_risk
+        if receiver_count > 0:
+            pair_value[source_count, :receiver_count] = receiver_value + 0.06 * day_utility - 0.05 * torch.relu(desired_release - current_cash_proxy)
+        if source_count > 0:
+            pair_value[:source_count, receiver_count] = source_release_value + 0.22 * day_risk - 0.18 * desired_deploy
+        pair_value[source_count, receiver_count] = 0.22 * day_risk - 0.14 * desired_deploy + 0.08 * day_target_cash
+        pair_value = torch.clamp(pair_value, -1.25, 1.25)
+
+        pred_pair_logits = 4.0 * pair_value
+        oracle_pair_logits = 4.0 * pair_value
+        if source_count > 0:
+            pred_pair_logits[:source_count, :] = pred_pair_logits[:source_count, :] + source_pred_logits.unsqueeze(1) * 0.16
+            oracle_pair_logits[:source_count, :] = oracle_pair_logits[:source_count, :] + source_oracle_logits.unsqueeze(1) * 0.16
+        if receiver_count > 0:
+            pred_pair_logits[:, :receiver_count] = pred_pair_logits[:, :receiver_count] + receiver_pred_logits.unsqueeze(0) * 0.16
+            oracle_pair_logits[:, :receiver_count] = oracle_pair_logits[:, :receiver_count] + receiver_oracle_logits.unsqueeze(0) * 0.16
+
+        pred_plan = _sinkhorn_transport_plan(pred_pair_logits, row_pred, col_pred)
+        oracle_plan = _sinkhorn_transport_plan(oracle_pair_logits, row_oracle, col_oracle)
+        pred_utility = desired_flow * (pred_plan * pair_value).sum()
+        oracle_utility = desired_flow * (oracle_plan * pair_value).sum()
+        regret = torch.relu(oracle_utility - pred_utility + 0.015)
+        marginal_loss = nn.functional.mse_loss(pred_plan.sum(dim=1), row_oracle) + nn.functional.mse_loss(pred_plan.sum(dim=0), col_oracle)
+
+        false_source_loss = torch.tensor(0.0, device=device)
+        source_shortfall = torch.tensor(0.0, device=device)
+        if source_count > 0:
+            real_source_mass = pred_plan[:source_count, :].sum(dim=1)
+            false_source_loss = desired_flow * (real_source_mass * source_false).sum()
+            source_shortfall = torch.relu(desired_release - real_source_mass.sum())
+        receiver_shortfall = torch.tensor(0.0, device=device)
+        if receiver_count > 0:
+            receiver_shortfall = torch.relu(desired_deploy - pred_plan[:, :receiver_count].sum())
+        cash_sink_mass = pred_plan[:, receiver_count].sum()
+        cash_to_cash_mass = pred_plan[source_count, receiver_count]
+        dead_cash_loss = torch.relu(desired_deploy - day_risk + 0.04) * (cash_sink_mass + cash_to_cash_mass)
+        risk_cash_loss = torch.relu(day_risk - cash_sink_mass + 0.06) * torch.clamp(day_risk - desired_deploy + 0.08, 0.0, 1.0)
+        day_losses.append(
+            regret
+            + 0.44 * marginal_loss
+            + 0.38 * false_source_loss
+            + 0.24 * dead_cash_loss
+            + 0.22 * risk_cash_loss
+            + 0.16 * (source_shortfall + receiver_shortfall)
+        )
 
     if not day_losses:
         return torch.tensor(0.0, device=device)
@@ -4688,6 +4996,10 @@ def fit_policy_models_v3(
                 outputs,
                 sample_batch_targets,
             )
+            portfolio_entropic_transport_decision_loss = _portfolio_entropic_transport_decision_loss(
+                outputs,
+                sample_batch_targets,
+            )
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -4727,6 +5039,8 @@ def fit_policy_models_v3(
                 * portfolio_utility_credit_closure_loss
                 + multi_objective_loss_weights.get("portfolio_primal_dual_decision_total", 0.0)
                 * portfolio_primal_dual_decision_loss
+                + multi_objective_loss_weights.get("portfolio_entropic_transport_decision_total", 0.0)
+                * portfolio_entropic_transport_decision_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -4802,6 +5116,10 @@ def fit_policy_models_v3(
                 val_outputs,
                 val_targets,
             )
+            val_portfolio_entropic_transport_decision_loss = _portfolio_entropic_transport_decision_loss(
+                val_outputs,
+                val_targets,
+            )
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -4845,6 +5163,8 @@ def fit_policy_models_v3(
                     * val_portfolio_utility_credit_closure_loss
                     + multi_objective_loss_weights.get("portfolio_primal_dual_decision_total", 0.0)
                     * val_portfolio_primal_dual_decision_loss
+                    + multi_objective_loss_weights.get("portfolio_entropic_transport_decision_total", 0.0)
+                    * val_portfolio_entropic_transport_decision_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -5074,6 +5394,9 @@ def fit_policy_models_v3(
         ),
         "supports_portfolio_primal_dual_decision_loss": (
             multi_objective_loss_weights.get("portfolio_primal_dual_decision_total", 0.0) > 0.0
+        ),
+        "supports_portfolio_entropic_transport_decision_loss": (
+            multi_objective_loss_weights.get("portfolio_entropic_transport_decision_total", 0.0) > 0.0
         ),
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0

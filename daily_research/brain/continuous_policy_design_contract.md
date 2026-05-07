@@ -46,6 +46,8 @@
 - r42 resource gate 合同：`split_heads_portfolio_daily_utility_credit_allocation_r42` 默认必须用短 screening 验证，profile 内默认 `epochs = 24`、`min_epochs = 16`，不得被命令行默认值静默覆盖为长训；screening 后若出现 source dead、cash timing bad、drawdown bad 或 receiver deploy 不干净且经济信号弱，必须阻断 confirmatory，不能继续消耗长训练资源。
 - r43 primal-dual decision allocation 合同：`alpha_result_value_budget_split_v28` 必须让 `portfolio_primal_dual_decision_total` 强于单票 action / duration 辅助损失，并把同一交易日内的 receiver/source/cash soft allocation regret、tail false-source、dead cash、risk cash under-defense 与 funding imbalance 写入训练和验证损失；r41/r42 目标列必须进入 `sample_targets`，不得只存在于 label/head/export 代码里。
 - r43 profile 合同：`split_heads_portfolio_daily_primal_dual_decision_allocation_r43` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 20`、`min_epochs = 14`，用于先排除低信息方向，不得静默升级为长训。
+- r44 entropic transport allocation 合同：`alpha_result_value_budget_split_v29` 必须让 `portfolio_entropic_transport_decision_total` 强于 r43 primal-dual 辅助损失，并用 Sinkhorn 风格可微运输计划同时约束 source supply、receiver demand、cash source、cash sink、运输 regret、false-source flow、dead cash 与 risk cash under-defense；不得退回分离 source/receiver/cash ranking 的旧损失。
+- r44 profile 合同：`split_heads_portfolio_daily_entropic_transport_allocation_r44` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 18`、`min_epochs = 12`，用于先排除低信息方向，不得静默升级为长训。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -77,6 +79,7 @@
 - r41 代码合同证明：risk-sensitive / uncertainty-aware allocation layer 已完成实现和合同测试，覆盖目标构造、solver 风险刹车、v26 loss profile、risk-sensitive loss、模型 heads、推理导出与 profile 注册；但尚未运行 bounded study，因此不能作为策略有效性事实。
 - r42 代码合同证明：utility-credit allocation 已完成实现、合同测试与 dry-run，覆盖 net utility / credit closure / resource efficiency 三个目标、v27 loss profile、utility credit closure loss、模型 heads、推理融合、optimizer utility relief / budget multiplier 与 study resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r43 代码合同证明：primal-dual decision allocation 已完成实现、合同测试与 dry-run，覆盖 v28 loss profile、date-grouped primal-dual decision loss、r41/r42 目标列 sample target 接线、artifact support flags、r43 search profile 与 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
+- r44 代码合同证明：entropic transport allocation 已完成实现、合同测试与 dry-run，覆盖 v29 loss profile、Sinkhorn 风格可微资金运输损失、transport-first search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -85,7 +88,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r43 已取代 r42 / r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r43 短 screening + resource gate 验证 source/receiver/cash credit assignment、cash timing、drawdown、tail false-source 与资源效率是否有正信号，而不是直接启动 r42/r41 full clean 或重跑 r40 clean_r1。
+- 短期：r44 已取代 r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r44 短 screening + resource gate 验证 source/receiver/cash credit assignment、cash timing、drawdown、tail false-source、transport balance 与资源效率是否有正信号，而不是直接启动 r43/r42/r41 full clean 或重跑 r40 clean_r1。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -106,6 +109,7 @@
 - r41：当前已完成代码合同的下一 research profile，聚焦 risk-sensitive allocation layer、uncertainty pressure、tail risk control、decision-focused objective、receiver risk brake 与 cash defense 内生化；尚无 study verdict。
 - r42：当前已完成代码合同和 dry-run 的下一优先 research profile，聚焦 utility-credit allocation、net utility、credit closure、resource efficiency、solver utility relief / budget multiplier 与 screening resource gate；尚无 study verdict。
 - r43：当前已完成代码合同和 dry-run 的下一优先 research profile，聚焦 primal-dual decision allocation、date-grouped allocation regret、tail false-source、dead cash、risk cash under-defense、funding imbalance 与 target wiring；尚无 study verdict。
+- r44：当前已完成代码合同和 dry-run 的下一优先 research profile，聚焦 entropic transport allocation、source-to-receiver/cash transport plan、Sinkhorn marginal matching、transport regret、false-source flow、dead cash 与 risk cash under-defense；尚无 study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

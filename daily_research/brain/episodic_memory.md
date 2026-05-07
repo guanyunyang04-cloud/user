@@ -1286,3 +1286,24 @@
   - 事实：r43 已比 r42 更接近现代 decision-focused / risk-sensitive allocation 方向，且修复了 r41/r42 target wiring 可能让新目标“看似接入、实际训练缺列”的风险。
   - 推断：当前已经摆脱了继续在 r41/r42 上直接长训的低信息路径；下一优先 research profile 应为 r43，而不是 r42/r41 full clean。
   - 边界：r43 仍不是完整 OptNet/cvxpylayers 式端到端可微优化层，也尚无正式 screening / confirmatory verdict；当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-07 r44 entropic transport allocation 到位性复盘
+- 行动前自检：
+  - 事实：r43 已把最终日频 receiver/source/cash regret 写入训练损失，但其 receiver softmax、source softmax 与 cash penalty 仍是分离项，没有显式形成 source-to-receiver/cash 的同一资金运输矩阵。
+  - 文献推断：OptNet / cvxpylayers 的核心不是“再加目标头”，而是让约束优化解进入可反传路径；Differentiable Ranking and Sorting using Optimal Transport 说明 entropic regularization + Sinkhorn iterations 可把离散 assignment/ranking 变成可微代理；risk-sensitive RL / OCE 与 offline RL / OPE 文献则要求风险和离线选择不能只靠事后 gate。
+  - 假设：在当前不新增外部优化依赖、不重写 simulator 的约束下，用纯 PyTorch Sinkhorn 风格资金运输损失，是比直接引入 cvxpylayers 更稳的当前最优工程升级。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v29`，把 `portfolio_entropic_transport_decision_total = 1.24` 设为高于 r43 primal-dual 的主导损失，action/duration 降为 `0.018`。
+  - 新增 `_sinkhorn_transport_plan` 与 `_portfolio_entropic_transport_decision_loss`：按 `date_code` 构造 source supply、cash source、receiver demand、cash sink，生成预测与 oracle 的可微运输计划，惩罚 transport regret、边际不匹配、false-source flow、dead cash、risk cash under-defense 与 source/receiver shortfall。
+  - 训练和验证损失均接入 `portfolio_entropic_transport_decision_total`，并在 diagnostics 中新增 `supports_portfolio_entropic_transport_decision_loss`。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_entropic_transport_allocation_r44`，默认 `epochs = 18`、`min_epochs = 12`，使用 `alpha_result_value_budget_split_v29`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，并带更严格 resource gate。
+  - 合同测试新增 r44 profile 非 r43 换名、transport loss 惩罚 unfunded / false-source flow 两项。
+- 验证证据：
+  - r44 两项定向合同测试通过。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 53 项通过。
+  - 相关 continuous_policy 文件 `py_compile` 通过。
+  - r44 dry-run `self_opt_study_r44_entropic_transport_allocation_dry_run_20260507` 通过，确认 3 个 screening trial 均使用 r44 profile、v29 loss、18/12 默认训练资源与 resource gate。
+- 行动后复盘：
+  - 事实：r44 比 r43 更接近可微优化层思想，因为它不再只比较分离 ranking regret，而是在同一日频运输计划里联合学习 source、receiver 与 cash。
+  - 推断：当前已经进一步摆脱 r43 仍残留的“分离头损失 + 后验 gate”限制；下一优先 research profile 应为 r44。
+  - 边界：r44 仍是 entropic transport surrogate，不是完整 convex solver / cvxpylayers 层；尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
