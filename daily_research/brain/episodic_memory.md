@@ -1344,3 +1344,20 @@
   - 事实：r46 比 r45 更接近真正 decision-focused optimization layer，因为关键 allocation 约束已经进入训练图，而不是只留给外部 solver 或后验 gate。
   - 推断：当前下一优先 research profile 应为 r46；r41-r45 作为保留检查点，不再默认长训。
   - 边界：r46 仍是纯 PyTorch differentiable surrogate，不是完整 cvxpylayers/convex solver 依赖层，也尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-07 r46 一次性强化复盘
+- 行动前自检：
+  - 事实：原 r46 已把 soft allocation 与 KKT/constraint residual 接入训练图，但仍有三类旧限制：`max_position_weight` / `turnover_limit` / `cost_rate` 仍偏固定常量；r46 loss 只输出总量，无法定位失败分量；offline behavior support、OPE 保守性与路径级 drawdown/CVaR/OCE 还没有进入同一个 allocation loss。
+  - 推断：若直接启动 r46 长训，可能重复 r40/r41 的资源消耗风险，即代码入口正确但训练后才发现 source/cash/path risk 某一分量失败。更有效动作是先把可诊断项、数据驱动约束、离线支持约束和路径风险一次性写入 r46，再跑 dry-run / contract gate。
+  - 边界：本轮不新增 cvxpylayers 外部依赖，不改 production/live/active artifact，不启动正式 screening；本轮结论只能写作代码合同和运行链路准备完成。
+- 已完成实现：
+  - `_portfolio_differentiable_convex_allocation_loss` 新增 `return_terms=True` 诊断模式，输出 `regret`、`constraint_residual`、`unsupported_mass`、`false_source_mass`、`cash_timing_loss`、`source_receiver_shortfall`、`kkt_stationarity`、`kkt_complementarity`、`position_residual`、`gross_exposure_residual`、`candidate_breadth_loss`、`behavior_support_loss`、`conservative_ope_loss`、`path_risk_loss` 与 `total`。
+  - sample targets 从日级 `daily_frame` 映射 `gross_exposure_target`、`candidate_budget`、`turnover_budget`、`max_position_weight_target` 与 `budget_cash_timing_signal_target` 到个股样本；r46 loss 不再依赖固定 position/turnover/cash timing 口径。
+  - r46 loss 新增 behavior-support / conservative OPE 保守项，惩罚离线数据支持不足或相对当前持仓行为价值不足的资金流；新增路径级 CVaR、drawdown 与 OCE 风险项，避免 drawdown 只在后验 gate 才暴露。
+  - KKT stationarity / complementarity 改为按 buy/sell activity 启动，避免无交易日被微小权重方差错误惩罚。
+  - training diagnostics 新增 `supports_portfolio_differentiable_convex_allocation_diagnostics`、`supports_portfolio_path_risk_loss` 与 `portfolio_differentiable_convex_allocation_terms`。
+  - 合同测试扩展为检查 r46 分项 terms、data-driven constraints 分项响应，以及 bad allocation 相对 good allocation 的惩罚仍然成立。
+- 行动后复盘：
+  - 事实：r46 已从“可微 surrogate 入口”推进到“可诊断、日级约束驱动、带离线支持与路径风险的 allocation loss”。这仍不是完整 convex solver/cvxpylayers 层，但已经显著减少训练后才发现单分量失败的盲区。
+  - 推断：当前最优 research 入口仍是 r46；若后续正式运行，必须先短 screening + resource gate，并读取 component diagnostics，而不是直接长训或回退 r41-r45。
+  - 边界：没有正式 screening / confirmatory 结果，不能写成策略有效性事实。r39 仍是当前有效证据基线，r46 仍为 research / shadow-only 入口。

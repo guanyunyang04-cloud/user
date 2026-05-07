@@ -2192,6 +2192,12 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.0, 0.02, 0.82, 0.0, 0.04, 0.0]),
             "portfolio_daily_source_release_preference": torch.tensor([0.0, 0.82, 0.04, 0.0, 0.74, 0.0]),
             "portfolio_daily_receiver_source_spread_reward": torch.tensor([0.72, 0.04, 0.02, 0.08, 0.12, 0.76]),
+            "gross_exposure_target": torch.tensor([0.62, 0.62, 0.62, 0.42, 0.42, 0.42]),
+            "candidate_budget": torch.tensor([4.0, 4.0, 4.0, 3.0, 3.0, 3.0]),
+            "turnover_budget": torch.tensor([0.42, 0.42, 0.42, 0.28, 0.28, 0.28]),
+            "max_position_weight_target": torch.tensor([0.22, 0.22, 0.22, 0.18, 0.18, 0.18]),
+            "budget_cash_timing_signal_target": torch.tensor([0.08, 0.08, 0.08, 0.84, 0.84, 0.84]),
+            "forward_benchmark_return_1d": torch.tensor([0.01, 0.01, 0.01, -0.02, -0.02, -0.02]),
         }
         good_outputs = {
             "portfolio_daily_unified_receiver_score": torch.tensor([0.88, 0.04, 0.04, 0.06, 0.08, 0.74]),
@@ -2215,8 +2221,40 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
 
         good_loss = _portfolio_differentiable_convex_allocation_loss(good_outputs, targets)
         bad_loss = _portfolio_differentiable_convex_allocation_loss(bad_outputs, targets)
+        good_terms = _portfolio_differentiable_convex_allocation_loss(good_outputs, targets, return_terms=True)
 
         self.assertGreater(float(bad_loss), float(good_loss) + 0.05)
+        self.assertIsInstance(good_terms, dict)
+        for term_name in (
+            "regret",
+            "constraint_residual",
+            "behavior_support_loss",
+            "conservative_ope_loss",
+            "path_risk_loss",
+            "total",
+        ):
+            self.assertIn(term_name, good_terms)
+            self.assertGreaterEqual(float(good_terms[term_name]), 0.0)
+        self.assertAlmostEqual(float(good_terms["total"]), float(good_loss), places=6)
+
+        tight_targets = {
+            **targets,
+            "gross_exposure_target": torch.tensor([0.08, 0.08, 0.08, 0.08, 0.08, 0.08]),
+            "turnover_budget": torch.tensor([0.04, 0.04, 0.04, 0.04, 0.04, 0.04]),
+            "max_position_weight_target": torch.tensor([0.08, 0.08, 0.08, 0.08, 0.08, 0.08]),
+        }
+        loose_targets = {
+            **targets,
+            "gross_exposure_target": torch.tensor([0.76, 0.76, 0.76, 0.76, 0.76, 0.76]),
+            "turnover_budget": torch.tensor([0.62, 0.62, 0.62, 0.62, 0.62, 0.62]),
+            "max_position_weight_target": torch.tensor([0.28, 0.28, 0.28, 0.28, 0.28, 0.28]),
+        }
+        tight_terms = _portfolio_differentiable_convex_allocation_loss(good_outputs, tight_targets, return_terms=True)
+        loose_terms = _portfolio_differentiable_convex_allocation_loss(good_outputs, loose_targets, return_terms=True)
+        self.assertIsInstance(tight_terms, dict)
+        self.assertIsInstance(loose_terms, dict)
+        self.assertGreater(float(tight_terms["position_residual"]), float(loose_terms["position_residual"]) + 0.002)
+        self.assertGreater(float(tight_terms["constraint_residual"]), float(loose_terms["constraint_residual"]) + 0.001)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

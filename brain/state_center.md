@@ -9,7 +9,7 @@
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
 ## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，最新代码入口为 r46 differentiable convex allocation，二者均属 `research / shadow_only`。
+- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，最新代码入口为 r46 differentiable convex allocation（含 component diagnostics、data-driven constraints、behavior/OPE 与 path risk），二者均属 `research / shadow_only`。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 
@@ -23,7 +23,7 @@
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
-- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r46 只是最新代码合同与 dry-run 入口，尚无正式 screening / confirm verdict，不得 promotion、不得 live、不得改 active artifact。
+- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r46 只是最新代码合同与 dry-run 入口，即使已补分项诊断、数据驱动约束、behavior/OPE 与路径风险，仍尚无正式 screening / confirm verdict，不得 promotion、不得 live、不得改 active artifact。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 
 ## 当前风险
