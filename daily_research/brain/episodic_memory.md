@@ -1264,3 +1264,25 @@
 - dry-run 证据：`self_opt_study_r42_utility_credit_allocation_dry_run_20260507` 已生成 dry-run study plan，确认 r42 使用 `alpha_result_value_budget_split_v27`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1`，且 3 个 screening trials 保持 `epochs = 24`、`min_epochs = 16` 并包含 `resource_gate`。
 - 验证证据：r42 四个合同测试通过；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 通过；相关 continuous_policy 文件 `py_compile` 通过；`git diff --check` 通过。最终写回后还需再次运行 brain guard 与项目一致性检查。
 - 决策：r42 替代 r41 成为下一优先 research profile；r42 仍只是代码合同与 dry-run，不是策略 verdict。后续若继续推进，只允许先做 r42 短 screening + resource gate，不直接进入 r41 full clean 长训。
+
+## 2026-05-07 r43 primal-dual decision allocation 到位性复盘
+- 行动前自检：
+  - 事实：r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r41/r42 只是代码合同和 dry-run，没有策略 verdict；生产 live / active artifact 仍由 `short_expert_policy_v5b` 负责。
+  - 推断：结合 OptNet / cvxpylayers / decision-focused learning / risk-sensitive RL / offline RL 与 OPE 文献，r42 虽比 r41 更强，但仍偏“目标头 + 半可微 solver + 事后 resource gate”，没有把最终日频 receiver/source/cash 决策 regret 足够前移到训练损失。
+  - 假设：在不重写全部 simulator 与数据管线的当前约束下，最有效改动是让同一交易日内的 soft allocation regret、tail false-source、dead cash、risk cash under-defense 与 funding imbalance 进入训练/验证损失，并保留短 screening resource gate 防止长训浪费。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v28`，把 action/duration 降为辅助，并让 `portfolio_primal_dual_decision_total = 1.08` 成为主导损失项。
+  - 新增 `_portfolio_primal_dual_decision_loss`：按 `date_code` 分组，使用预测 receiver/source/cash、allocation final objective、net utility、credit closure、resource efficiency 与 source/receiver/risk targets 构造可反传 soft allocation regret，并惩罚 tail false-source、dead cash、risk cash under-defense 与 funding imbalance。
+  - 修复 r41/r42 目标列未显式进入 `sample_targets` 的结构缺口：`portfolio_daily_allocation_uncertainty_pressure_target`、`tail_risk_control_target`、`decision_focused_objective`、`net_utility_target`、`credit_closure_target`、`resource_efficiency_target` 均已接入训练样本目标。
+  - artifact loader diagnostics 新增 r41/r42 support flags，避免旧 artifact 缺 head 时被误判为已支持。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_primal_dual_decision_allocation_r43`，默认 `epochs = 20`、`min_epochs = 14`，使用 `alpha_result_value_budget_split_v28`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，并带 r43 resource gate。
+  - 合同测试新增 target wiring、r43 profile 非 r42 换名、primal-dual loss 惩罚 tail false-source / dead cash 三项。
+- 验证证据：
+  - r43 三项合同测试通过。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 通过。
+  - 相关 continuous_policy 文件 `py_compile` 通过。
+  - r43 dry-run `self_opt_study_r43_primal_dual_decision_allocation_dry_run_20260507` 通过，确认 3 个 screening trial 均使用 r43 profile、v28 loss、20/14 默认训练资源与 resource gate。
+- 行动后复盘：
+  - 事实：r43 已比 r42 更接近现代 decision-focused / risk-sensitive allocation 方向，且修复了 r41/r42 target wiring 可能让新目标“看似接入、实际训练缺列”的风险。
+  - 推断：当前已经摆脱了继续在 r41/r42 上直接长训的低信息路径；下一优先 research profile 应为 r43，而不是 r42/r41 full clean。
+  - 边界：r43 仍不是完整 OptNet/cvxpylayers 式端到端可微优化层，也尚无正式 screening / confirmatory verdict；当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。

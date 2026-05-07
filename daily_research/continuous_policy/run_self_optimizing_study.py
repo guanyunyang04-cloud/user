@@ -923,6 +923,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_primal_dual_decision_allocation_r43": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v28"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [4.8e-4, 5.2e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.22, 0.24],
+        "daily_dropout": [0.16],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1757,6 +1774,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 24,
         "min_epochs": 16,
     },
+    "split_heads_portfolio_daily_primal_dual_decision_allocation_r43": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v28",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 4.8e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.22,
+        "daily_dropout": 0.16,
+        "batch_size": 512,
+        "epochs": 20,
+        "min_epochs": 14,
+    },
 }
 
 
@@ -1810,6 +1846,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_end_to_end_allocation_layer_r40": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_utility_credit_allocation_r42": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_primal_dual_decision_allocation_r43": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -1827,6 +1864,16 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "monthly_return_floor": -0.002,
         "annual_return_floor": 0.04,
         "receiver_unrealized_cap": 0.08,
+    },
+    "split_heads_portfolio_daily_primal_dual_decision_allocation_r43": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.22,
+        "cash_timing_floor": -0.08,
+        "drawdown_floor": -0.18,
+        "monthly_return_floor": 0.0,
+        "annual_return_floor": 0.06,
+        "receiver_unrealized_cap": 0.06,
     },
 }
 
