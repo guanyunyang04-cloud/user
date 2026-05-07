@@ -10,11 +10,7 @@
 - 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
 - continuous_policy 最新有效研究状态仍为 r39 allocation objective consolidation bounded confirm 之后的 `research / shadow_only`；r40 end-to-end allocation layer clean rerun `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 已自然完成 `3` 个 screening 与 `2` 个 confirmatory，运行通道和持久产物可用，但 `stable_confirmatory_count = 0`，两个 confirmatory 均为 `shadow_only` 且失败于 `cash_timing_quality_1d` / `max_drawdown` 等 gate，因此不能替代 r39 证据基线。r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation、r36 risk-aware unified allocation、r37 decision-focused allocation、r38 source hard-negative regret 与 r39 allocation objective consolidation 仍保留；未过 v2 gate / stable confirm 前不得 promotion / live。
-- r41 risk-sensitive allocation layer 已完成代码合约入口：新增 uncertainty pressure、tail risk control 与 decision-focused objective 三个 allocation target / heads / loss / predict exports / solver brakes / search profile；当前只代表实现与合同测试通过，尚无训练 verdict，不能替代 r39 证据基线。
-- r42 utility-credit allocation 已完成大改入口：新增 net utility、credit closure、resource efficiency 三个目标、v27 loss、模型 heads、solver utility relief / budget multiplier 与 screening resource gate；它取代 r41 成为下一优先 research profile，目标是先用短 screening 和资源闸门排除低信息长训，再决定是否进入 confirmatory。
-- r43 primal-dual decision allocation 已完成进一步大改入口：事实是新增 `alpha_result_value_budget_split_v28`、`_portfolio_primal_dual_decision_loss`、r41/r42 target 的 `sample_targets` 显式接线、artifact support flags、`split_heads_portfolio_daily_primal_dual_decision_allocation_r43` 与 dry-run；推断是 r42 仍受“target heads + 半可微 solver + 事后 resource gate”的旧框架限制，r43 把最终日频 receiver/source/cash 决策 regret、false-source、dead-cash 与 risk-cash 防守推进训练目标，取代 r42 成为下一优先 research profile。
-- r44 entropic transport allocation 已完成当前更到位的大改入口：事实是新增 `alpha_result_value_budget_split_v29`、`_portfolio_entropic_transport_decision_loss`、Sinkhorn 风格可微资金运输计划、`split_heads_portfolio_daily_entropic_transport_allocation_r44` 与 dry-run；推断是 r43 仍把 receiver/source/cash regret 分开计算，r44 才把 source-to-receiver/cash 资金流放进同一个可反传运输矩阵，取代 r43 成为下一优先 research profile。
-- r45 conservative transport allocation 已完成进一步大改入口：事实是新增 `alpha_result_value_budget_split_v30`、`_portfolio_offline_conservative_support_loss`、CQL/OPE 启发的 offline support / OOD action 保守损失、`split_heads_portfolio_daily_conservative_transport_allocation_r45` 与 dry-run；推断是 r44 虽已有 transport surrogate，但仍可能在离线数据支持不足的 receiver/source 动作上过度自信，r45 取代 r44 成为下一优先 research profile。
+- r41-r45 是当前 end-to-end allocation layer 升级链：r41 risk-sensitive、r42 utility-credit、r43 primal-dual decision、r44 entropic transport、r45 conservative transport。事实：r45 已新增 `alpha_result_value_budget_split_v30`、`_portfolio_offline_conservative_support_loss`、CQL/OPE 启发的 offline support / OOD action 保守损失、`split_heads_portfolio_daily_conservative_transport_allocation_r45` 与 dry-run；推断：r45 是当前下一优先 research 入口，r41-r44 仅作为保留检查点，均不得替代 r39 证据基线。
 - 未完成正式判定前，不得 promotion、不得 live、不得改 active artifact。
 
 ## 当前接管入口
@@ -42,11 +38,7 @@
 - P1：维护主分脑入口精炼，避免 `state_center.md` 和 `operations_center.md` 继续变成长日志。
 - P2：继续把 receiver 可执行性、source 分布质量、monthly return、exposure utilization、realized deploy、cash timing 与 drawdown 写入 objective / feedback / gate。
 - P3：下一轮研究不再优先加单边 source false-sell 或 cash penalty；r39 已说明 final objective 接入后可以恢复收益和正 spread，但仍 source count 过窄、现金过高、cash timing 与 drawdown 不稳。下一优先级应在不放松 source hard-negative 的前提下，提高 clean source breadth 和可卖源分布，并把 cash timing / drawdown 的日级触发从后验 gate 推进到 allocation layer。
-- P3a：r41 已把 P3 技术路线落成可测代码入口；后续若进入长训练，必须先做无冲突进程、无同名 tag、dry-run / contract gate 预检，再以前台持久日志和进度文件方式运行，不能把代码测试通过写成策略有效。
-- P3b：r42 已把“避免 r41 长训低收益”写入代码主线；后续优先跑 r42 短 screening + resource gate，不优先启动 r41 full clean study。
-- P3c：r43 已把“r42 仍偏 target-head / 事后 gate”的结构缺口继续前移到 primal-dual decision loss；后续优先跑 r43 短 screening + resource gate，不再优先跑 r42 或 r41 长训，除非 r43 dry-run / contract / target wiring 失败。
-- P3d：r44 已把“r43 仍缺少同一资金运输矩阵”的结构缺口推进到 entropic transport loss；后续优先跑 r44 短 screening + resource gate，不再优先跑 r43/r42/r41 长训，除非 r44 dry-run / contract 失败。
-- P3e：r45 已把“r44 仍缺少离线分布支持/保守价值估计”的结构缺口推进到 offline conservative support loss；后续优先跑 r45 短 screening + resource gate，不再优先跑 r44/r43/r42/r41 长训，除非 r45 dry-run / contract 失败。
+- P3a：当前只把 r45 作为下一 research 入口；先跑 r45 短 screening + resource gate，不再优先启动 r44/r43/r42/r41 长训。任何 r41+ 正式研究都必须先完成无冲突进程、无同名 tag、dry-run / contract gate 预检，并以前台持久日志和进度文件方式运行；代码测试通过不能写成策略有效。
 - P4：中期正路仍是 source/receiver/cash listwise allocation teacher 向正式 allocation layer 迁移；`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 cash、turnover、position cap 与 transaction cost；simulator guard 只保留最后安全层。
 
 ## 当前边界

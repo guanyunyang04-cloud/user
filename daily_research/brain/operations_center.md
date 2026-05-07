@@ -64,10 +64,7 @@
 - r39 最新 bounded confirm 证据入口：`self_opt_study_r39_allocation_objective_consolidation_execblend_20260502`；读取 `study_summary.json`、`protocols/self_opt_study_r39_allocation_objective_consolidation_execblend_20260502__confirm_01/protocol_summary.json` 与对应 `training_diagnostics.json`，重点看 final objective 是否真正进入执行评分、source count 是否达标、cash timing / drawdown 是否仍失败、source false-sell 是否仍受控。
 - 当前有效证据基线仍是 r39：`alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`，对应 simulator calibration 为 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
 - 当前已完成 r40 clean rerun：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`，使用 `alpha_result_value_budget_split_v25`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，已完整生成 study/protocol/model/ranking 证据；但 stable confirm 为空，仍不得替代 r39 证据基线。
-- 当前已完成 r41 代码入口：使用 `alpha_result_value_budget_split_v26`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`；尚未生成 study/protocol/model/ranking 证据，不能作为正式 verdict。
-- 当前已完成 r42 代码入口与 dry-run：使用 `alpha_result_value_budget_split_v27`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`；默认短 screening 为 `epochs = 24`、`min_epochs = 16`，并带 `resource_gate`，但尚未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
-- 当前已完成 r43 代码入口与 dry-run：使用 `alpha_result_value_budget_split_v28`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`；默认短 screening 为 `epochs = 20`、`min_epochs = 14`，并带 `resource_gate`，但尚未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
-- 当前已完成 r44 代码入口与 dry-run：使用 `alpha_result_value_budget_split_v29`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`；默认短 screening 为 `epochs = 18`、`min_epochs = 12`，并带更严格 `resource_gate`，但尚未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
+- r41-r44 已完成代码入口或 dry-run，但均为保留检查点，不是当前默认长训入口；当前优先 research 入口为 r45：`split_heads_portfolio_daily_conservative_transport_allocation_r45` / `alpha_result_value_budget_split_v30` / `epochs = 16` / `min_epochs = 10` / 更严格 `resource_gate`。r45 仍未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；多条审计必须顺序执行，不得并行抢写。
 
@@ -124,51 +121,8 @@
 - 本次 `foreground.log` 仍停在旧 stdout 管道失效时间，不作为最终成败判断；最终判断以 `study_summary.json`、`trial_ranking.csv`、protocol summary 与模型 diagnostics 为准。
 - clean_r1 结论只允许写作 `research / shadow_only`：`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`，但 stable confirm 为空，confirm_01/confirm_02 均未过 gate。
 
-## 2026-05-07 r41 risk-sensitive allocation layer 操作入口
-- r41 profile：`split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41`。
-- r41 loss：`alpha_result_value_budget_split_v26`。
-- r41 objective：`end_to_end_allocation_layer_v1`。
-- r41 budget semantics：`allocation_layer_v1`。
-- r41 budget calibration：`end_to_end_allocation_layer_v1`。
-- r41 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r41_unified_allocation_problem_exposes_uncertainty_aware_decision_objective daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r41_solver_brakes_receiver_deploy_under_tail_risk_without_killing_clean_source_release daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r41_loss_profile_is_risk_sensitive_allocation_layer_not_r40_reuse daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r41_risk_sensitive_loss_penalizes_tail_deploy_and_weak_cash_defense`。
-- r41 若启动长训练，必须先确认无冲突 Python study 进程、无同名 study tag、当前 active artifact 未改动；训练必须以前台命令运行，stdout/stderr 重定向到 study 目录 `foreground.log`，轮询优先读取 `study_progress.json` / `study_progress.jsonl`，周期维持 `2` 小时。
-- r41 当前只允许作为 research / shadow 入口；代码合同和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
-
-## 2026-05-07 r42 utility-credit allocation 操作入口
-- r42 profile：`split_heads_portfolio_daily_utility_credit_allocation_r42`。
-- r42 loss：`alpha_result_value_budget_split_v27`。
-- r42 objective：`end_to_end_allocation_layer_v1`。
-- r42 budget semantics：`allocation_layer_v1`。
-- r42 budget calibration：`end_to_end_allocation_layer_v1`。
-- r42 默认 screening 资源口径：profile 内 `epochs = 24`、`min_epochs = 16`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。
-- r42 dry-run 命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_utility_credit_allocation_r42 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --dry-run`。
-- r42 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r42_allocation_problem_exposes_utility_credit_closure_targets daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r42_solver_uses_utility_to_deploy_when_credit_closure_is_strong daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r42_loss_profile_and_resource_gate_are_not_long_r41_reuse daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r42_utility_credit_loss_penalizes_disconnected_allocation`。
-- r42 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 显示 source release、cash timing、drawdown、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
-- r42 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
-
-## 2026-05-07 r43 primal-dual decision allocation 操作入口
-- r43 profile：`split_heads_portfolio_daily_primal_dual_decision_allocation_r43`。
-- r43 loss：`alpha_result_value_budget_split_v28`。
-- r43 objective：`end_to_end_allocation_layer_v1`。
-- r43 budget semantics：`allocation_layer_v1`。
-- r43 budget calibration：`end_to_end_allocation_layer_v1`。
-- r43 默认 screening 资源口径：profile 内 `epochs = 20`、`min_epochs = 14`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。
-- r43 dry-run 命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_primal_dual_decision_allocation_r43 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --dry-run`。
-- r43 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r42_risk_and_utility_targets_are_wired_into_fit_targets daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r43_primal_dual_profile_is_decision_first_not_r42_relabel daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r43_primal_dual_decision_loss_penalizes_tail_false_source_and_dead_cash`。
-- r43 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 同时显示 source release、cash timing、drawdown、tail false-source、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
-- r43 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
-
-## 2026-05-07 r44 entropic transport allocation 操作入口
-- r44 profile：`split_heads_portfolio_daily_entropic_transport_allocation_r44`。
-- r44 loss：`alpha_result_value_budget_split_v29`。
-- r44 objective：`end_to_end_allocation_layer_v1`。
-- r44 budget semantics：`allocation_layer_v1`。
-- r44 budget calibration：`end_to_end_allocation_layer_v1`。
-- r44 默认 screening 资源口径：profile 内 `epochs = 18`、`min_epochs = 12`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。
-- r44 dry-run 命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_entropic_transport_allocation_r44 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --dry-run`。
-- r44 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r44_entropic_transport_profile_is_transport_first_not_r43_relabel daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r44_entropic_transport_loss_penalizes_unfunded_and_false_source_flow`。
-- r44 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 同时显示 source release、cash timing、drawdown、tail false-source、transport balance、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
-- r44 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
+## 2026-05-07 r41-r44 保留检查点
+- r41-r44 已分别覆盖 risk-sensitive、utility-credit、primal-dual decision 与 entropic transport；当前不作为默认长训入口。若必须回溯验证，只能先 dry-run / contract gate，再以前台持久日志短 screening 执行；任何代码合同、dry-run 或单测通过都不得写成策略有效、promotion、live 或 active artifact 切换依据。
 
 ## 2026-05-07 r45 conservative transport allocation 操作入口
 - r45 profile / loss：`split_heads_portfolio_daily_conservative_transport_allocation_r45` / `alpha_result_value_budget_split_v30`。
