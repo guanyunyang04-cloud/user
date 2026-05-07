@@ -23,6 +23,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _allocation_objective_consolidation_loss,
     _decision_focused_allocation_regret_loss,
     _portfolio_entropic_transport_decision_loss,
+    _portfolio_offline_conservative_support_loss,
     _portfolio_primal_dual_decision_loss,
     _portfolio_utility_credit_closure_loss,
     _source_hard_negative_tail_loss,
@@ -1993,6 +1994,115 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         bad_loss = _portfolio_entropic_transport_decision_loss(bad_outputs, targets)
 
         self.assertGreater(float(bad_loss), float(good_loss) + 0.08)
+
+    def test_r45_conservative_transport_profile_adds_offline_support_gate(self) -> None:
+        profile = "split_heads_portfolio_daily_conservative_transport_allocation_r45"
+        loss_profile = "alpha_result_value_budget_split_v30"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 16)
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 10)
+
+        multi_weights = LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
+        self.assertGreater(multi_weights["portfolio_offline_conservative_support_total"], 0.60)
+        self.assertGreater(multi_weights["portfolio_entropic_transport_decision_total"], 1.10)
+        self.assertGreater(
+            multi_weights["portfolio_entropic_transport_decision_total"],
+            multi_weights["portfolio_primal_dual_decision_total"],
+        )
+        self.assertGreater(
+            multi_weights["portfolio_offline_conservative_support_total"],
+            multi_weights["action_total"] * 40.0,
+        )
+
+        bad_trial = TrialResult(
+            trial_id=1,
+            trial_tag="bad_trial",
+            status="completed",
+            phase="screening",
+            role="",
+            source_trial_tag="",
+            trial_config=SEARCH_PROFILE_BASE_TRIALS[profile],
+            protocol_summary_path="",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-1.0,
+            score_breakdown={},
+            primary_metrics={
+                "training_evidence_status": "sufficient",
+                "annual_return": 0.079,
+                "monthly_return_mean": 0.0008,
+                "max_drawdown": -0.165,
+                "cash_timing_quality_1d": -0.041,
+                "portfolio_daily_receiver_target_count": 4,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.041,
+                "portfolio_daily_source_target_count": 1,
+                "portfolio_daily_source_realized_sell_rate": 0.25,
+            },
+            promotion_status="shadow_only",
+            failed_checks=["cash_timing_quality_1d", "max_drawdown"],
+            gate_pass_ratio=0.25,
+            passed_check_count=3,
+            total_check_count=12,
+        )
+        gate = _resource_gate_after_screening(profile, [bad_trial], selected_trial_count=3)
+        self.assertTrue(gate["resource_gate_triggered"])
+        self.assertFalse(gate["continue_screening"])
+        self.assertIn("cash_timing_bad", gate["failed_resource_checks"])
+
+    def test_r45_offline_conservative_support_loss_penalizes_ood_overconfidence(self) -> None:
+        targets = {
+            "date_code": torch.tensor([0, 0, 0, 1, 1, 1]),
+            "current_weight": torch.tensor([0.0, 0.18, 0.20, 0.0, 0.16, 0.0]),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 1.0, 1.0, 0.0, 1.0, 0.0]),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 1.0, 0.0, 0.0, 1.0, 0.0]),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.88, 0.04, 0.05, 0.16, 0.04, 0.04]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.82, 0.06, 0.04, 0.74, 0.04]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.08, 0.08, 0.08, 0.82, 0.82, 0.82]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.86, 0.82, 0.22, 0.20, 0.18, 0.14]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.84, 0.80, 0.20, 0.18, 0.16, 0.12]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.82, 0.78, 0.18, 0.16, 0.14, 0.10]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.84, 0.78, 0.18, 0.16, 0.14, 0.10]),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.tensor([0.06, 0.06, 0.06, 0.84, 0.84, 0.84]),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.tensor([0.04, 0.04, 0.04, 0.88, 0.88, 0.88]),
+            "portfolio_daily_allocation_drawdown_control_target": torch.tensor([0.06, 0.06, 0.06, 0.86, 0.86, 0.86]),
+            "portfolio_daily_receiver_forward_excess_5d": torch.tensor([0.09, 0.0, 0.0, 0.03, 0.0, 0.0]),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([0.0, -0.08, 0.13, 0.0, 0.11, 0.0]),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.0, 0.02, 0.90, 0.0, 0.86, 0.0]),
+            "portfolio_daily_source_tail_false_sell_penalty": torch.tensor([0.0, 0.02, 0.88, 0.0, 0.84, 0.0]),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.0, 0.02, 0.88, 0.0, 0.82, 0.0]),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.0, 0.02, 0.82, 0.0, 0.78, 0.0]),
+            "portfolio_daily_source_release_preference": torch.tensor([0.0, 0.82, 0.04, 0.0, 0.06, 0.0]),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.86, 0.04, 0.04, 0.06, 0.04, 0.04]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.82, 0.04, 0.04, 0.04, 0.04]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.08, 0.08, 0.08, 0.86, 0.86, 0.86]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.82, 0.78, 0.16, 0.14, 0.12, 0.10]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.84, 0.80, 0.18, 0.16, 0.14, 0.12]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.82, 0.78, 0.16, 0.14, 0.12, 0.10]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.80, 0.76, 0.14, 0.12, 0.10, 0.08]),
+        }
+        bad_outputs = {
+            **good_outputs,
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.10, 0.08, 0.80, 0.82, 0.08, 0.76]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.78, 0.10, 0.88, 0.74, 0.86, 0.72]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.84, 0.82, 0.80, 0.08, 0.08, 0.08]),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.18, 0.14, 0.86, 0.84, 0.80, 0.76]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.20, 0.16, 0.86, 0.84, 0.80, 0.76]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.18, 0.14, 0.84, 0.82, 0.80, 0.76]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.16, 0.12, 0.82, 0.80, 0.76, 0.72]),
+        }
+
+        good_loss = _portfolio_offline_conservative_support_loss(good_outputs, targets)
+        bad_loss = _portfolio_offline_conservative_support_loss(bad_outputs, targets)
+
+        self.assertGreater(float(bad_loss), float(good_loss) + 0.12)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

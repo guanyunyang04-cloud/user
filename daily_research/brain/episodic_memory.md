@@ -1307,3 +1307,23 @@
   - 事实：r44 比 r43 更接近可微优化层思想，因为它不再只比较分离 ranking regret，而是在同一日频运输计划里联合学习 source、receiver 与 cash。
   - 推断：当前已经进一步摆脱 r43 仍残留的“分离头损失 + 后验 gate”限制；下一优先 research profile 应为 r44。
   - 边界：r44 仍是 entropic transport surrogate，不是完整 convex solver / cvxpylayers 层；尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-07 r45 conservative transport allocation 到位性复盘
+- 行动前自检：
+  - 事实：r44 已把 source-to-receiver/cash transport plan 写入训练损失，但它仍主要优化运输匹配与平均 regret，没有显式约束离线数据支持外的 receiver/source 动作过度自信。
+  - 文献推断：CQL / offline RL 强调静态历史数据中分布外动作容易被高估；SharpeRatio@k OPE 强调离线策略选择要同时看收益和风险效率；OCE / CVaR 风险敏感 RL 强调尾部风险不应只靠事后 gate；因此 r44 仍有直接升级空间。
+  - 假设：在当前不引入外部 solver、不重写数据管线的约束下，把 CQL 启发的 offline support / OOD action penalty 加到 r44 transport profile，是当前最有效、资源最省的进一步大改。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v30`，在保留 r44 `portfolio_entropic_transport_decision_total` 主导地位的同时新增 `portfolio_offline_conservative_support_total = 0.66`，action/duration 降为 `0.014`。
+  - 新增 `_portfolio_offline_conservative_support_loss`：使用 receiver/source candidate mask、executable candidate、held current weight、risk targets、false-source pressure 与 per-date logsumexp conservative gap，惩罚非 executable receiver 高分、非 held/source 高分、强 positive-forward false source 高分、高风险低 cash 与低风险高 deploy 机会下 dead cash。
+  - 训练和验证损失均接入 `portfolio_offline_conservative_support_total`，并在 diagnostics 中新增 `supports_portfolio_offline_conservative_support_loss`。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_conservative_transport_allocation_r45`，默认 `epochs = 16`、`min_epochs = 10`，使用 `alpha_result_value_budget_split_v30`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，并带更严格 resource gate：source sell rate floor `0.26`、cash timing floor `-0.04`、drawdown floor `-0.16`、receiver unrealized cap `0.04`。
+  - 合同测试新增 r45 profile 非 r44 换名、offline conservative support gate 与 OOD overconfidence loss 惩罚两项。
+- 验证证据：
+  - r45/r44 四项定向合同测试通过。
+  - 相关 continuous_policy 文件 `py_compile` 通过。
+  - r45 dry-run `self_opt_study_r45_conservative_transport_allocation_dry_run_20260507_verify` 通过，确认 3 个 screening trial 均使用 r45 profile、v30 loss、16/10 默认训练资源与 resource gate。
+- 行动后复盘：
+  - 事实：r45 比 r44 更进一步，因为它不只学习资金运输计划，还把离线数据支持边界和 OOD 动作保守性写进训练/验证损失。
+  - 推断：当前已进一步摆脱 r44 残留的“transport surrogate 可能高估 unsupported action”的限制；下一优先 research profile 应为 r45。
+  - 边界：r45 仍不是完整 convex solver / cvxpylayers 层，也尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
