@@ -21,8 +21,11 @@ from daily_research.continuous_policy.allocation_teacher import build_allocation
 from daily_research.continuous_policy.model_seq_v3 import (
     LOSS_PROFILE_CONFIGS,
     _allocation_objective_consolidation_loss,
+    _cvxpy_convex_layer_available,
+    _cvxpy_convex_layer_status,
     _decision_focused_allocation_regret_loss,
     _portfolio_differentiable_convex_allocation_loss,
+    _portfolio_cvxpy_convex_allocation_loss,
     _portfolio_entropic_transport_decision_loss,
     _portfolio_offline_conservative_support_loss,
     _portfolio_primal_dual_decision_loss,
@@ -2255,6 +2258,119 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIsInstance(loose_terms, dict)
         self.assertGreater(float(tight_terms["position_residual"]), float(loose_terms["position_residual"]) + 0.002)
         self.assertGreater(float(tight_terms["constraint_residual"]), float(loose_terms["constraint_residual"]) + 0.001)
+
+    def test_r47_true_convex_solver_profile_uses_cvxpy_layer_not_surrogate_only(self) -> None:
+        profile = "split_heads_portfolio_daily_true_convex_solver_allocation_r47"
+        loss_profile = "alpha_result_value_budget_split_v32"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 10)
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 7)
+
+        multi_weights = LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_cvxpy_convex_allocation_total"], 1.30)
+        self.assertGreater(
+            multi_weights["portfolio_cvxpy_convex_allocation_total"],
+            multi_weights["portfolio_differentiable_convex_allocation_total"],
+        )
+
+        status = _cvxpy_convex_layer_status()
+        self.assertTrue(status["available"], status.get("error", ""))
+        self.assertTrue({"SCS", "DIFFCP"}.intersection(set(status["installed_solvers"])))
+
+    def test_r47_true_cvxpy_convex_layer_solves_and_backpropagates(self) -> None:
+        if not _cvxpy_convex_layer_available():
+            self.skipTest("cvxpy/cvxpylayers not installed in this environment")
+
+        targets = {
+            "date_code": torch.tensor([0, 0, 0, 0], dtype=torch.float32),
+            "current_weight": torch.tensor([0.00, 0.16, 0.18, 0.00], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0, 0.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 1.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([1.0, 0.0, 0.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.86, 0.05, 0.04, 0.74], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.82, 0.04, 0.04], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.10, 0.10, 0.10, 0.10], dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.86, 0.80, 0.14, 0.78], dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.88, 0.82, 0.12, 0.80], dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.84, 0.80, 0.10, 0.76], dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.82, 0.78, 0.12, 0.74], dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([0.80, 0.74, 0.10, 0.72], dtype=torch.float32),
+            "portfolio_daily_receiver_forward_excess_5d": torch.tensor([0.09, 0.00, 0.00, 0.07], dtype=torch.float32),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([0.00, -0.07, 0.12, 0.00], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.0, 0.02, 0.88, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_tail_false_sell_penalty": torch.tensor([0.0, 0.02, 0.86, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.0, 0.02, 0.86, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.0, 0.02, 0.82, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.0, 0.82, 0.04, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_source_spread_reward": torch.tensor([0.74, 0.04, 0.02, 0.70], dtype=torch.float32),
+            "gross_exposure_target": torch.tensor([0.54, 0.54, 0.54, 0.54], dtype=torch.float32),
+            "turnover_budget": torch.tensor([0.36, 0.36, 0.36, 0.36], dtype=torch.float32),
+            "max_position_weight_target": torch.tensor([0.22, 0.22, 0.22, 0.22], dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.tensor([0.08, 0.08, 0.08, 0.08], dtype=torch.float32),
+            "forward_benchmark_return_1d": torch.tensor([0.01, 0.01, 0.01, 0.01], dtype=torch.float32),
+        }
+        outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.84, 0.05, 0.06, 0.72], requires_grad=True),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.80, 0.08, 0.05], requires_grad=True),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.12, 0.12, 0.12, 0.12], requires_grad=True),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.84, 0.78, 0.14, 0.76], requires_grad=True),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.86, 0.80, 0.12, 0.78], requires_grad=True),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.82, 0.78, 0.12, 0.74], requires_grad=True),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.80, 0.76, 0.10, 0.72], requires_grad=True),
+        }
+
+        terms = _portfolio_cvxpy_convex_allocation_loss(outputs, targets, slot_count=4, max_days=1, return_terms=True)
+        self.assertIsInstance(terms, dict)
+        self.assertGreater(float(terms["solver_success_rate"]), 0.99)
+        self.assertGreaterEqual(float(terms["total"]), 0.0)
+        loss = terms["total"]
+        loss.backward()
+        grad_norm = sum(
+            float(value.grad.abs().sum())
+            for value in outputs.values()
+            if value.grad is not None
+        )
+        self.assertGreater(grad_norm, 0.0)
+
+    def test_r47_cvxpy_layer_keeps_current_weight_feasible_when_held_receiver_exceeds_cap(self) -> None:
+        if not _cvxpy_convex_layer_available():
+            self.skipTest("cvxpy/cvxpylayers not installed in this environment")
+
+        outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.90, 0.62, 0.04, 0.40], requires_grad=True),
+            "portfolio_daily_unified_source_score": torch.tensor([0.10, 0.04, 0.80, 0.05], requires_grad=True),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.20, 0.20, 0.20, 0.20], requires_grad=True),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.88, 0.60, 0.08, 0.40], requires_grad=True),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.86, 0.58, 0.06, 0.38], requires_grad=True),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.70, 0.56, 0.74, 0.34], requires_grad=True),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.76, 0.54, 0.08, 0.32], requires_grad=True),
+        }
+        targets = {
+            "date_code": torch.zeros(4, dtype=torch.float32),
+            "current_weight": torch.tensor([0.32, 0.00, 0.10, 0.00], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 0.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 0.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.88, 0.62, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.0, 0.0, 0.72, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((4,), 0.20, dtype=torch.float32),
+            "gross_exposure_target": torch.full((4,), 0.42, dtype=torch.float32),
+            "turnover_budget": torch.full((4,), 0.04, dtype=torch.float32),
+            "max_position_weight_target": torch.full((4,), 0.20, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((4,), 0.20, dtype=torch.float32),
+        }
+
+        terms = _portfolio_cvxpy_convex_allocation_loss(outputs, targets, slot_count=4, max_days=1, return_terms=True)
+        self.assertGreater(float(terms["solver_success_rate"]), 0.99)
+        self.assertEqual(float(terms["fallback_surrogate_loss"]), 0.0)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

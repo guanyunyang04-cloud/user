@@ -1361,3 +1361,20 @@
   - 事实：r46 已从“可微 surrogate 入口”推进到“可诊断、日级约束驱动、带离线支持与路径风险的 allocation loss”。这仍不是完整 convex solver/cvxpylayers 层，但已经显著减少训练后才发现单分量失败的盲区。
   - 推断：当前最优 research 入口仍是 r46；若后续正式运行，必须先短 screening + resource gate，并读取 component diagnostics，而不是直接长训或回退 r41-r45。
   - 边界：没有正式 screening / confirmatory 结果，不能写成策略有效性事实。r39 仍是当前有效证据基线，r46 仍为 research / shadow-only 入口。
+
+## 2026-05-07 r47 true convex solver layer 复盘
+- 行动前自检：
+  - 事实：r46 已把 differentiable convex allocation surrogate、data-driven constraints、behavior/OPE 与 path risk 写入训练图，但它仍不是 `cvxpylayers` / convex solver 依赖层。
+  - 推断：若直接训练 r46，仍可能被“看起来像优化层、实际不是优化器解进入反传路径”的旧限制卡住；用户要求一次性实现真正 convex solver layer，因此应直接接入真实 `cvxpy` / `cvxpylayers`，而不是再追加 surrogate penalty。
+  - 假设：在当前全 A 股规模、训练资源和已有日频数据管线约束下，最可执行的真实 solver 形态是 fixed-slot candidate bank：先从 receiver/source/held support 中选出有限候选，再用同一个 DPP-compliant `CvxpyLayer` 求解预测 utility 与 oracle utility 下的权重，并把 solver regret 反传给模型。
+- 已完成实现：
+  - yolos 环境已安装 `cvxpy`、`cvxpylayers`、`diffcp`、`scs` 与 `clarabel`，`environment.yml` 同步写入依赖边界。
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v32`、`_get_portfolio_cvxpy_allocation_layer`、`_portfolio_cvxpy_convex_allocation_loss`、DPP 合同检查、fixed-slot padding、CPU solver / device 回传边界、r46 fallback surrogate、training / validation 接线与 diagnostics。
+  - r47 solver 问题显式约束 long-only、position upper bound、sum weight、gross target slack 与 turnover limit slack；同一 `CvxpyLayer` 同时求解 predicted utility 与 oracle utility，用 solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 构成训练项。
+  - 回归加固：当已持仓 receiver 当前权重高于日级 position cap 且 turnover budget 很小时，solver upper bound 保证当前权重仍可行，position cap 超限保留为 `position_residual` 诊断惩罚，避免真实 solver 因旧 cap 处理方式退化为 fallback。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_true_convex_solver_allocation_r47`，默认 `epochs = 10`、`min_epochs = 7`、`alpha_result_value_budget_split_v32`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格 resource gate。
+  - 合同测试新增 r47 profile 不是 r46 换名、真实 `cvxpy` layer 可用、solver terms 可求解并可反传梯度、已持仓 receiver 超 cap 仍可成功求解三项。
+- 行动后复盘：
+  - 事实：r47 已从 r46 surrogate 推进到真实 `cvxpylayers` fixed-slot convex solver layer；这不是旧 action head、旧 simulator guard 或纯 PyTorch surrogate 的换皮。
+  - 推断：当前下一优先 research 入口应切换为 r47；r41-r46 作为保留检查点，不再默认长训。
+  - 边界：r47 仍不是把所有上证和深证 A 股一次性放入一个大规模 convex program，而是先经候选 bank 压缩后的真实 solver layer；尚无正式 screening / confirmatory verdict，不能写成策略有效性事实。r39 仍是当前有效证据基线，production live / active artifact 均未改动。

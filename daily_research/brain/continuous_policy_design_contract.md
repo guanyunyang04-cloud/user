@@ -53,6 +53,10 @@
 - r46 differentiable convex allocation 合同：`alpha_result_value_budget_split_v31` 必须让 `portfolio_differentiable_convex_allocation_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 降为 `0`；torch 图内必须同时惩罚 KKT / budget / turnover / position / gross exposure residual、unsupported receiver/source mass、false-source mass、cash timing、source/receiver shortfall、candidate breadth、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 风险与 oracle regret。
 - r46 diagnostics / target 合同：r46 loss 不得继续写死 position cap、turnover、gross exposure 或 cash timing；训练 sample targets 必须从日级 `gross_exposure_target`、`candidate_budget`、`turnover_budget`、`max_position_weight_target`、`budget_cash_timing_signal_target` 映射到个股样本，并在 diagnostics 中输出 `portfolio_differentiable_convex_allocation_terms`，至少包含 constraint、support、OPE、path risk 与 total。
 - r46 profile 合同：`split_heads_portfolio_daily_differentiable_convex_allocation_r46` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 14`、`min_epochs = 9`，用于先验证真正可微信用闭合，不得静默升级为长训。
+- r47 true convex solver allocation 合同：`alpha_result_value_budget_split_v32` 必须让 `portfolio_cvxpy_convex_allocation_total` 成为主导 allocation loss，并让 `portfolio_differentiable_convex_allocation_total` 退为 fallback / auxiliary；r47 必须通过真实 `cvxpy` / `cvxpylayers` / `diffcp` 的 DPP-compliant convex solver layer 求解 fixed-slot 候选组合，不能只复用 r46 torch surrogate 或半可微 numpy solver。
+- r47 fixed-slot solver 合同：训练时按 date 构造 receiver/source/held support candidate bank，选择固定 `slot_count` 的可执行候选，使用同一 `CvxpyLayer` 分别求解 predicted utility 与 oracle utility 下的组合权重；loss 必须惩罚 solver regret、solution tracking、gross / turnover / position residual、unsupported mass、false-source mass、cash timing、path risk 与 solver success rate。
+- r47 dependency / diagnostics 合同：yolos 环境必须安装 `cvxpy`、`cvxpylayers`、`diffcp` 与至少 `SCS` / `DIFFCP` solver；训练 diagnostics 必须输出 `supports_portfolio_cvxpy_convex_allocation_layer`、`portfolio_cvxpy_convex_layer_status` 与 `portfolio_cvxpy_convex_allocation_terms`。若 solver 不可用，只能显式 fallback 到 r46 surrogate 并记录 status，不能默认为 r47 策略成功。
+- r47 profile 合同：`split_heads_portfolio_daily_true_convex_solver_allocation_r47` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 10`、`min_epochs = 7`，用于先验证真实 solver layer 的训练成本、梯度稳定性、source release、cash timing、drawdown 和 support 诊断，不得静默升级为长训。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -87,6 +91,7 @@
 - r44 代码合同证明：entropic transport allocation 已完成实现、合同测试与 dry-run，覆盖 v29 loss profile、Sinkhorn 风格可微资金运输损失、transport-first search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r45 代码合同证明：conservative transport allocation 已完成实现、合同测试与 dry-run，覆盖 v30 loss profile、offline support / OOD action 保守损失、training/validation 接线、diagnostics support flag、r45 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r46 代码合同证明：differentiable convex allocation 已完成实现与合同测试，覆盖 v31 loss profile、torch 图内 allocation surrogate、KKT/constraint residual、data-driven 日级约束 target、executable support targets、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 风险、training/validation 接线、component diagnostics support flag、r46 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
+- r47 代码合同证明：true convex solver allocation 已完成实现与合同测试，覆盖 v32 loss profile、真实 `cvxpy` / `cvxpylayers` fixed-slot solver layer、DPP 合同检查、solver regret / solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、training/validation 接线、diagnostics support flag、r47 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -95,7 +100,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r46 已取代 r45/r44/r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r46 短 screening + resource gate 验证 torch 图内 allocation surrogate、source/receiver/cash credit assignment、cash timing、drawdown、support conservatism、tail false-source、constraint residual、behavior/OPE、path risk 与资源效率是否有正信号，而不是直接启动 r45/r44/r43/r42/r41 full clean 或重跑 r40 clean_r1。
+- 短期：r47 已取代 r46/r45/r44/r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r47 短 screening + resource gate 验证真实 convex solver layer、source/receiver/cash credit assignment、cash timing、drawdown、support conservatism、tail false-source、solver regret、constraint residual、path risk 与资源效率是否有正信号，而不是直接启动 r46/r45/r44/r43/r42/r41 full clean 或重跑 r40 clean_r1。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -114,7 +119,8 @@
 - r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
 - r40：当前已完成 clean rerun 的架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径、持久产物读取，以及 source/receiver/cash credit assignment 未稳定闭合的结构诊断。
 - r41-r45：已完成代码合同或 dry-run 的保留检查点，分别聚焦 risk-sensitive、utility-credit、primal-dual decision、entropic transport 与 conservative transport；尚无 study verdict，不再作为默认长训入口。
-- r46：当前已完成代码合同的下一优先 research profile，聚焦 differentiable convex allocation、torch 图内 KKT/constraint residual、data-driven 日级约束 target、executable support、false-source pressure、cash timing、source/receiver shortfall、behavior-support / OPE、路径级 CVaR / drawdown / OCE、legacy action loss 归零与更严格短筛 resource gate；尚无 study verdict。
+- r46：已完成代码合同的保留检查点，聚焦 differentiable convex allocation、torch 图内 KKT/constraint residual、data-driven 日级约束 target、executable support、false-source pressure、cash timing、source/receiver shortfall、behavior-support / OPE、路径级 CVaR / drawdown / OCE、legacy action loss 归零与更严格短筛 resource gate；尚无 study verdict。
+- r47：当前已完成代码合同的下一优先 research profile，聚焦真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer、DPP 合同、predicted/oracle solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、r46 surrogate fallback 与更严格短筛 resource gate；尚无 study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
