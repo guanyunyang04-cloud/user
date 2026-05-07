@@ -50,6 +50,8 @@
 - r44 profile 合同：`split_heads_portfolio_daily_entropic_transport_allocation_r44` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 18`、`min_epochs = 12`，用于先排除低信息方向，不得静默升级为长训。
 - r45 conservative transport allocation 合同：`alpha_result_value_budget_split_v30` 必须在 r44 entropic transport 之上加入 `portfolio_offline_conservative_support_total`，用 offline support / OOD action 保守损失压制非 executable receiver、非 held/source、强 false-source 与高风险低 cash 的过度自信；不得把离线数据未支持的动作高分解释为泛化突破。
 - r45 profile 合同：`split_heads_portfolio_daily_conservative_transport_allocation_r45` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格的短 screening resource gate；profile 默认 `epochs = 16`、`min_epochs = 10`，用于先排除低信息方向，不得静默升级为长训。
+- r46 differentiable convex allocation 合同：`alpha_result_value_budget_split_v31` 必须让 `portfolio_differentiable_convex_allocation_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 降为 `0`；torch 图内必须同时惩罚 KKT / budget / turnover / position residual、unsupported receiver/source mass、false-source mass、cash timing、source/receiver shortfall 与 oracle regret。
+- r46 profile 合同：`split_heads_portfolio_daily_differentiable_convex_allocation_r46` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 14`、`min_epochs = 9`，用于先验证真正可微信用闭合，不得静默升级为长训。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -83,6 +85,7 @@
 - r43 代码合同证明：primal-dual decision allocation 已完成实现、合同测试与 dry-run，覆盖 v28 loss profile、date-grouped primal-dual decision loss、r41/r42 目标列 sample target 接线、artifact support flags、r43 search profile 与 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r44 代码合同证明：entropic transport allocation 已完成实现、合同测试与 dry-run，覆盖 v29 loss profile、Sinkhorn 风格可微资金运输损失、transport-first search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r45 代码合同证明：conservative transport allocation 已完成实现、合同测试与 dry-run，覆盖 v30 loss profile、offline support / OOD action 保守损失、training/validation 接线、diagnostics support flag、r45 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
+- r46 代码合同证明：differentiable convex allocation 已完成实现与合同测试，覆盖 v31 loss profile、torch 图内 allocation surrogate、KKT/constraint residual、executable support targets、training/validation 接线、diagnostics support flag、r46 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -91,7 +94,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r45 已取代 r44/r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r45 短 screening + resource gate 验证 source/receiver/cash credit assignment、offline support conservatism、cash timing、drawdown、tail false-source、transport balance 与资源效率是否有正信号，而不是直接启动 r44/r43/r42/r41 full clean 或重跑 r40 clean_r1。
+- 短期：r46 已取代 r45/r44/r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r46 短 screening + resource gate 验证 torch 图内 allocation surrogate、source/receiver/cash credit assignment、cash timing、drawdown、support conservatism、tail false-source、constraint residual 与资源效率是否有正信号，而不是直接启动 r45/r44/r43/r42/r41 full clean 或重跑 r40 clean_r1。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -109,8 +112,8 @@
 - r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
 - r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
 - r40：当前已完成 clean rerun 的架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径、持久产物读取，以及 source/receiver/cash credit assignment 未稳定闭合的结构诊断。
-- r41-r44：已完成代码合同或 dry-run 的保留检查点，分别聚焦 risk-sensitive、utility-credit、primal-dual decision 与 entropic transport；尚无 study verdict，不再作为默认长训入口。
-- r45：当前已完成代码合同和 dry-run 的下一优先 research profile，聚焦 conservative transport allocation、offline support / OOD action 保守损失、executable receiver support、held source support、false-source pressure、risk cash defense 与更严格短筛 resource gate；尚无 study verdict。
+- r41-r45：已完成代码合同或 dry-run 的保留检查点，分别聚焦 risk-sensitive、utility-credit、primal-dual decision、entropic transport 与 conservative transport；尚无 study verdict，不再作为默认长训入口。
+- r46：当前已完成代码合同的下一优先 research profile，聚焦 differentiable convex allocation、torch 图内 KKT/constraint residual、executable support、false-source pressure、cash timing、source/receiver shortfall、legacy action loss 归零与更严格短筛 resource gate；尚无 study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

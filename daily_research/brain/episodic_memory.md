@@ -1327,3 +1327,20 @@
   - 事实：r45 比 r44 更进一步，因为它不只学习资金运输计划，还把离线数据支持边界和 OOD 动作保守性写进训练/验证损失。
   - 推断：当前已进一步摆脱 r44 残留的“transport surrogate 可能高估 unsupported action”的限制；下一优先 research profile 应为 r45。
   - 边界：r45 仍不是完整 convex solver / cvxpylayers 层，也尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-07 r46 differentiable convex allocation 到位性复盘
+- 行动前自检：
+  - 事实：r45 已有 transport + offline support 保守损失，但最终仍依赖半可微 pandas/numpy solver 与后验 resource gate，legacy action/duration loss 仍非零。
+  - 推断：若继续只加保守 penalty，会保留“训练目标像 allocation、实际 credit assignment 仍分散”的旧限制；更有效动作是把 torch 图内 soft allocation、约束残差、KKT 近似、cash timing 与 support violation 一次性并入主损失。
+  - 边界：当前不新增 cvxpylayers 外部依赖、不改 live、不启动正式训练；目标是完成 r46 代码合同和 dry-run gate，而不是宣称策略有效。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v31`，把 `action_total = 0`、`duration_total = 0`，并新增主导项 `portfolio_differentiable_convex_allocation_total = 1.56`。
+  - 新增 `_portfolio_differentiable_convex_allocation_loss`：按 `date_code` 构造 torch 图内 soft source/receiver allocation，惩罚 oracle regret、budget/cash/turnover/position residual、unsupported receiver/source mass、false-source mass、cash timing、source/receiver shortfall 与 stationarity/complementarity 近似残差。
+  - 训练与验证损失均接入 r46 loss；sample targets 新增 `portfolio_daily_receiver_executable_candidate` 与 `portfolio_daily_source_executable_candidate`，避免 executable support 只在测试或推理里存在。
+  - diagnostics 新增 `supports_portfolio_differentiable_convex_allocation_loss`。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_differentiable_convex_allocation_r46`，默认 `epochs = 14`、`min_epochs = 9`，使用 `alpha_result_value_budget_split_v31`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格 resource gate。
+  - 合同测试新增 r46 profile 非 action reuse、legacy loss 归零、r46 resource gate，以及 differentiable convex loss 对 KKT/support/cash/source 违规的惩罚。
+- 行动后复盘：
+  - 事实：r46 比 r45 更接近真正 decision-focused optimization layer，因为关键 allocation 约束已经进入训练图，而不是只留给外部 solver 或后验 gate。
+  - 推断：当前下一优先 research profile 应为 r46；r41-r45 作为保留检查点，不再默认长训。
+  - 边界：r46 仍是纯 PyTorch differentiable surrogate，不是完整 cvxpylayers/convex solver 依赖层，也尚无正式 screening / confirmatory verdict。当前有效证据基线仍是 r39。不得 promotion、不得 live、不得改 active artifact。
