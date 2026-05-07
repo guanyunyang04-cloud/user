@@ -48,6 +48,8 @@ SEQUENCE_STEP_ORDER: tuple[int, ...] = tuple(sorted(STATE_SEQUENCE_LAGS, reverse
 MAX_CONTINUOUS_HOLDING_DAYS = 20.0
 CVXPY_CONVEX_ALLOCATION_SLOT_COUNT = 16
 CVXPY_CONVEX_ALLOCATION_MAX_DAYS_PER_BATCH = 4
+CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 48
+CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 3
 CVXPY_CONVEX_ALLOCATION_SOLVER_ARGS: dict[str, float | int | str | bool] = {
     "solve_method": "SCS",
     "eps": 1.0e-4,
@@ -1584,6 +1586,36 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"] = {
         "portfolio_offline_conservative_support_total": 0.54,
         "portfolio_differentiable_convex_allocation_total": 0.74,
         "portfolio_cvxpy_convex_allocation_total": 1.42,
+    },
+}
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v33"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"]["sample_scalar_loss_weights"],
+        "portfolio_daily_unified_receiver_score": 3.46,
+        "portfolio_daily_unified_source_score": 3.64,
+        "portfolio_daily_unified_cash_score": 3.22,
+        "portfolio_daily_allocation_final_objective": 4.18,
+        "portfolio_daily_allocation_decision_focused_objective": 4.20,
+        "portfolio_daily_allocation_net_utility_target": 4.34,
+        "portfolio_daily_allocation_credit_closure_target": 4.40,
+        "portfolio_daily_allocation_resource_efficiency_target": 4.06,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 1.84,
+        "portfolio_unified_allocation_total": 0.18,
+        "portfolio_decision_regret_total": 0.20,
+        "portfolio_allocation_objective_consolidation_total": 0.34,
+        "portfolio_risk_sensitive_allocation_total": 0.32,
+        "portfolio_utility_credit_closure_total": 0.38,
+        "portfolio_primal_dual_decision_total": 0.42,
+        "portfolio_entropic_transport_decision_total": 0.48,
+        "portfolio_offline_conservative_support_total": 0.46,
+        "portfolio_differentiable_convex_allocation_total": 0.50,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 1.68,
     },
 }
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
@@ -3634,6 +3666,8 @@ def _portfolio_cvxpy_convex_allocation_loss(
     *,
     slot_count: int = CVXPY_CONVEX_ALLOCATION_SLOT_COUNT,
     max_days: int = CVXPY_CONVEX_ALLOCATION_MAX_DAYS_PER_BATCH,
+    full_universe_mode: bool = False,
+    conservative_ope_mode: bool = False,
     return_terms: bool = False,
 ) -> torch.Tensor | dict[str, torch.Tensor]:
     required_outputs = {
@@ -3663,6 +3697,13 @@ def _portfolio_cvxpy_convex_allocation_loss(
         "behavior_support_loss",
         "cash_timing_loss",
         "path_risk_loss",
+        "candidate_coverage_loss",
+        "universe_expansion_loss",
+        "liquidity_impact_loss",
+        "concentration_risk_loss",
+        "ope_lower_bound_loss",
+        "propensity_support_loss",
+        "doubly_robust_gap_loss",
         "solver_success_rate",
         "fallback_surrogate_loss",
         "total",
@@ -3709,7 +3750,6 @@ def _portfolio_cvxpy_convex_allocation_loss(
         )
     receiver_support = torch.clamp(receiver_support, 0.0, 1.0)
     source_support = torch.clamp(source_support, 0.0, 1.0)
-    candidate_support = torch.clamp(receiver_support + source_support + held_support, 0.0, 1.0)
 
     target_receiver = torch.clamp(targets.get("portfolio_daily_unified_receiver_score", receiver_support).to(device), 0.0, 1.0)
     target_source = torch.clamp(targets.get("portfolio_daily_unified_source_score", source_support).to(device), 0.0, 1.0)
@@ -3745,6 +3785,7 @@ def _portfolio_cvxpy_convex_allocation_loss(
         0.35,
     )
     forward_benchmark_1d = torch.clamp(targets.get("forward_benchmark_return_1d", zero).to(device), -0.25, 0.25)
+    forward_benchmark_3d = torch.clamp(targets.get("forward_benchmark_return_3d", forward_benchmark_1d).to(device), -0.35, 0.35)
     uncertainty = torch.clamp(targets.get("portfolio_daily_allocation_uncertainty_pressure_target", zero).to(device), 0.0, 1.0)
     tail = torch.clamp(targets.get("portfolio_daily_allocation_tail_risk_control_target", zero).to(device), 0.0, 1.0)
     drawdown = torch.clamp(targets.get("portfolio_daily_allocation_drawdown_control_target", zero).to(device), 0.0, 1.0)
@@ -3773,6 +3814,58 @@ def _portfolio_cvxpy_convex_allocation_loss(
         0.0,
         1.0,
     )
+    liquidity_support = torch.clamp(targets.get("portfolio_daily_liquidity_support", torch.ones_like(receiver_score)).to(device), 0.0, 1.0)
+    impact_cost = torch.clamp(
+        targets.get("portfolio_daily_impact_cost", 0.0020 + 0.0060 * (1.0 - liquidity_support)).to(device),
+        0.0005,
+        0.0400,
+    )
+    factor_concentration = torch.clamp(
+        targets.get("portfolio_daily_factor_concentration_proxy", torch.full_like(receiver_score, 0.10)).to(device),
+        0.0,
+        1.0,
+    )
+    behavior_propensity = torch.clamp(
+        targets.get(
+            "portfolio_daily_behavior_propensity",
+            0.08 + 0.60 * held_support + 0.18 * receiver_support + 0.14 * source_support,
+        ).to(device),
+        0.02,
+        1.0,
+    )
+    universe_receiver_gate = torch.clamp(
+        (
+            0.28 * receiver_score
+            + 0.20 * final_objective
+            + 0.18 * net_utility
+            + 0.14 * target_receiver
+            + 0.12 * resource_efficiency
+            + 0.08 * liquidity_support
+            - 0.24 * risk_pressure
+        )
+        * (1.0 - held_support),
+        0.0,
+        1.0,
+    )
+    universe_source_gate = torch.clamp(
+        (
+            0.30 * source_score
+            + 0.20 * target_source
+            + 0.18 * target_credit
+            + 0.16 * release_preference
+            - 0.32 * false_source_pressure
+            - 0.10 * risk_pressure
+        )
+        * held_support,
+        0.0,
+        1.0,
+    )
+    receiver_solver_support = receiver_support
+    source_solver_support = source_support
+    if full_universe_mode:
+        receiver_solver_support = torch.clamp(torch.maximum(receiver_support, universe_receiver_gate * liquidity_support), 0.0, 1.0)
+        source_solver_support = torch.clamp(torch.maximum(source_support, universe_source_gate), 0.0, 1.0)
+    candidate_support = torch.clamp(receiver_solver_support + source_solver_support + held_support, 0.0, 1.0)
     date_code = targets["date_code"].to(device).long()
 
     term_values: dict[str, list[torch.Tensor]] = {name: [] for name in term_names if name not in {"path_risk_loss", "total"}}
@@ -3854,16 +3947,23 @@ def _portfolio_cvxpy_convex_allocation_loss(
         selected_count = min(int(slot_count), day_size)
         selected_local = torch.topk(priority, k=selected_count, largest=True).indices
         selected_current = current_day[selected_local]
-        selected_receiver_support = receiver_support[day_mask][selected_local]
-        selected_source_support = source_support[day_mask][selected_local]
+        selected_receiver_support = receiver_solver_support[day_mask][selected_local]
+        selected_source_support = source_solver_support[day_mask][selected_local]
+        selected_legacy_receiver_support = receiver_support[day_mask][selected_local]
+        selected_legacy_source_support = source_support[day_mask][selected_local]
         selected_false_source = false_source_pressure[day_mask][selected_local]
         selected_risk = risk_pressure[day_mask][selected_local]
+        selected_liquidity = liquidity_support[day_mask][selected_local]
+        selected_impact_cost = impact_cost[day_mask][selected_local]
+        selected_factor_concentration = factor_concentration[day_mask][selected_local]
+        selected_propensity = behavior_propensity[day_mask][selected_local]
         selected_forward = torch.where(
             selected_current > 1.0e-8,
             source_forward[day_mask][selected_local],
             receiver_forward[day_mask][selected_local],
         )
         selected_benchmark = forward_benchmark_1d[day_mask][selected_local]
+        selected_benchmark_3d = forward_benchmark_3d[day_mask][selected_local]
         selected_predicted_utility = predicted_utility[selected_local]
         selected_oracle_utility = oracle_utility[selected_local]
         target_position_cap = torch.full_like(selected_current, day_position_cap)
@@ -3880,9 +3980,20 @@ def _portfolio_cvxpy_convex_allocation_loss(
         upper_vec = _pad_fixed_slot_vector(selected_upper, int(slot_count), dtype=torch.float64)
         receiver_support_vec = _pad_fixed_slot_vector(selected_receiver_support, int(slot_count), dtype=receiver_score.dtype)
         source_support_vec = _pad_fixed_slot_vector(selected_source_support, int(slot_count), dtype=receiver_score.dtype)
+        legacy_receiver_support_vec = _pad_fixed_slot_vector(selected_legacy_receiver_support, int(slot_count), dtype=receiver_score.dtype)
+        legacy_source_support_vec = _pad_fixed_slot_vector(selected_legacy_source_support, int(slot_count), dtype=receiver_score.dtype)
         false_source_vec = _pad_fixed_slot_vector(selected_false_source, int(slot_count), dtype=receiver_score.dtype)
         risk_vec = _pad_fixed_slot_vector(selected_risk, int(slot_count), dtype=receiver_score.dtype)
-        forward_vec = _pad_fixed_slot_vector(selected_forward - selected_benchmark, int(slot_count), dtype=receiver_score.dtype)
+        liquidity_vec = _pad_fixed_slot_vector(selected_liquidity, int(slot_count), dtype=receiver_score.dtype)
+        impact_cost_vec = _pad_fixed_slot_vector(selected_impact_cost, int(slot_count), dtype=receiver_score.dtype)
+        factor_concentration_vec = _pad_fixed_slot_vector(selected_factor_concentration, int(slot_count), dtype=receiver_score.dtype)
+        propensity_vec = _pad_fixed_slot_vector(selected_propensity, int(slot_count), dtype=receiver_score.dtype)
+        benchmark_vec = _pad_fixed_slot_vector(selected_benchmark, int(slot_count), dtype=receiver_score.dtype)
+        forward_vec = _pad_fixed_slot_vector(
+            0.68 * (selected_forward - selected_benchmark) + 0.32 * (selected_forward - selected_benchmark_3d),
+            int(slot_count),
+            dtype=receiver_score.dtype,
+        )
         gross_param = torch.clamp(day_gross_target, 0.02, 1.0).detach().to(dtype=torch.float64)
         turnover_param = torch.clamp(day_turnover_limit, 0.04, 1.0).detach().to(dtype=torch.float64)
 
@@ -3917,8 +4028,19 @@ def _portfolio_cvxpy_convex_allocation_loss(
         oracle_turnover = torch.abs(oracle_solution - current_slot).sum()
         release_flow = torch.relu(current_slot - solution)
         deploy_flow = torch.relu(solution - current_slot)
-        oracle_value = (oracle_solution * oracle_slot).sum() - 0.004 * oracle_turnover - 0.08 * (oracle_solution * risk_vec).sum()
-        realized_value = (solution * oracle_slot).sum() - 0.004 * turnover - 0.08 * (solution * risk_vec).sum()
+        dynamic_cost = torch.clamp(impact_cost_vec + 0.0025 * (1.0 - liquidity_vec) + 0.0030 * risk_vec, 0.0005, 0.0500)
+        oracle_value = (
+            (oracle_solution * oracle_slot).sum()
+            - (dynamic_cost * torch.abs(oracle_solution - current_slot)).sum()
+            - 0.08 * (oracle_solution * risk_vec).sum()
+            - 0.03 * torch.square(oracle_solution).sum()
+        )
+        realized_value = (
+            (solution * oracle_slot).sum()
+            - (dynamic_cost * torch.abs(solution - current_slot)).sum()
+            - 0.08 * (solution * risk_vec).sum()
+            - 0.03 * torch.square(solution).sum()
+        )
         solver_regret = torch.relu(oracle_value - realized_value + 0.006)
         solution_tracking_loss = nn.functional.smooth_l1_loss(solution, oracle_solution.detach())
         gross_residual = torch.square(torch.relu(solution.sum() - day_gross_target - 0.02)) + torch.square(
@@ -3931,12 +4053,75 @@ def _portfolio_cvxpy_convex_allocation_loss(
         ).sum()
         false_source_mass = (release_flow * false_source_vec).sum()
         behavior_support_loss = unsupported_mass + 0.50 * false_source_mass
-        cash_after = torch.clamp(1.0 - solution.sum() - 0.004 * turnover, 0.0, 1.0)
+        cash_after = torch.clamp(1.0 - solution.sum() - (dynamic_cost * torch.abs(solution - current_slot)).sum(), 0.0, 1.0)
         cash_timing_loss = (
             torch.relu(deploy_pressure - day_risk - 0.05) * torch.square(cash_after)
             + torch.relu(day_risk - deploy_pressure + 0.05) * torch.square(torch.relu(day_cash_timing_signal - cash_after))
         )
-        day_return_proxy = torch.clamp((solution * forward_vec).sum() - 0.004 * turnover, -0.50, 0.50)
+        deploy_flow = torch.relu(solution - current_slot)
+        release_flow = torch.relu(current_slot - solution)
+        selected_indicator = torch.zeros(day_size, device=device, dtype=receiver_score.dtype)
+        selected_indicator[selected_local] = 1.0
+        full_day_predicted_priority = torch.clamp(
+            0.30 * predicted_utility
+            + 0.24 * receiver_solver_support[day_mask]
+            + 0.16 * source_solver_support[day_mask]
+            + 0.14 * liquidity_support[day_mask]
+            + 0.10 * current_day
+            - 0.14 * risk_pressure[day_mask],
+            -1.0,
+            1.0,
+        )
+        full_day_oracle_priority = torch.clamp(
+            0.34 * target_net[day_mask]
+            + 0.24 * target_receiver[day_mask]
+            + 0.18 * target_efficiency[day_mask]
+            + 0.14 * liquidity_support[day_mask]
+            + 0.10 * torch.clamp(receiver_forward[day_mask] / 0.10, -1.0, 1.0)
+            - 0.20 * risk_pressure[day_mask],
+            0.0,
+            1.0,
+        )
+        missed_candidate = torch.clamp((1.0 - selected_indicator) * (1.0 - held_support[day_mask]), 0.0, 1.0)
+        candidate_coverage_loss = (
+            missed_candidate
+            * torch.clamp(full_day_oracle_priority - 0.48, 0.0, 1.0)
+            * torch.relu(full_day_oracle_priority - full_day_predicted_priority + 0.025)
+        ).sum() / torch.clamp(missed_candidate.sum(), min=1.0)
+        expansion_deploy = deploy_flow * torch.clamp(1.0 - legacy_receiver_support_vec, 0.0, 1.0)
+        expansion_release = release_flow * torch.clamp(1.0 - legacy_source_support_vec, 0.0, 1.0)
+        universe_expansion_loss = (
+            (expansion_deploy * torch.square(1.0 - liquidity_vec)).sum()
+            + 0.60 * (expansion_deploy * torch.relu(0.10 - propensity_vec)).sum()
+            + 0.35 * (expansion_release * torch.relu(0.10 - propensity_vec)).sum()
+        )
+        liquidity_impact_loss = (
+            (torch.abs(solution - current_slot) * dynamic_cost).sum()
+            + 0.18 * (deploy_flow * torch.square(1.0 - liquidity_vec)).sum()
+        )
+        concentration_risk_loss = (
+            0.70 * torch.square(solution).sum()
+            + 0.30 * (solution * factor_concentration_vec).sum()
+        ) * torch.clamp(0.40 + day_risk, 0.40, 1.30)
+        behavior_return_proxy = (current_slot * forward_vec).sum()
+        policy_return_proxy = (solution * forward_vec).sum() - (dynamic_cost * torch.abs(solution - current_slot)).sum()
+        propensity_support_loss = (
+            torch.abs(solution - current_slot) * torch.square(torch.relu(0.12 - propensity_vec))
+        ).sum()
+        centered_policy_advantage = (solution - current_slot) * forward_vec
+        advantage_variance_proxy = torch.square(centered_policy_advantage).sum()
+        ope_lower_bound = policy_return_proxy - 0.35 * torch.sqrt(advantage_variance_proxy + 1.0e-6) - 0.04 * turnover
+        ope_lower_bound_loss = torch.relu(behavior_return_proxy - ope_lower_bound + 0.006) if conservative_ope_mode else torch.tensor(0.0, device=device)
+        doubly_robust_proxy = (
+            policy_return_proxy
+            + ((solution - current_slot) * (forward_vec - benchmark_vec) / torch.clamp(propensity_vec, min=0.05)).sum() * 0.10
+        )
+        doubly_robust_gap_loss = (
+            torch.relu(behavior_return_proxy - doubly_robust_proxy + 0.005) * torch.clamp(turnover, 0.0, 1.0)
+            if conservative_ope_mode
+            else torch.tensor(0.0, device=device)
+        )
+        day_return_proxy = torch.clamp(policy_return_proxy + cash_after * torch.clamp(forward_benchmark_1d[day_mask].mean(), -0.08, 0.08), -0.50, 0.50)
         day_return_proxies.append(day_return_proxy)
         component_values = {
             "solver_regret": solver_regret,
@@ -3948,6 +4133,13 @@ def _portfolio_cvxpy_convex_allocation_loss(
             "false_source_mass": false_source_mass,
             "behavior_support_loss": behavior_support_loss,
             "cash_timing_loss": cash_timing_loss,
+            "candidate_coverage_loss": candidate_coverage_loss,
+            "universe_expansion_loss": universe_expansion_loss,
+            "liquidity_impact_loss": liquidity_impact_loss,
+            "concentration_risk_loss": concentration_risk_loss,
+            "ope_lower_bound_loss": ope_lower_bound_loss,
+            "propensity_support_loss": propensity_support_loss,
+            "doubly_robust_gap_loss": doubly_robust_gap_loss,
             "solver_success_rate": torch.tensor(1.0, device=device),
             "fallback_surrogate_loss": torch.tensor(0.0, device=device),
         }
@@ -3962,6 +4154,13 @@ def _portfolio_cvxpy_convex_allocation_loss(
             + 0.22 * unsupported_mass
             + 0.24 * false_source_mass
             + 0.12 * cash_timing_loss
+            + (0.16 if full_universe_mode else 0.04) * candidate_coverage_loss
+            + (0.14 if full_universe_mode else 0.04) * universe_expansion_loss
+            + 0.13 * liquidity_impact_loss
+            + 0.10 * concentration_risk_loss
+            + (0.18 if conservative_ope_mode else 0.0) * ope_lower_bound_loss
+            + (0.12 if conservative_ope_mode else 0.0) * propensity_support_loss
+            + (0.12 if conservative_ope_mode else 0.0) * doubly_robust_gap_loss
             - 0.04 * (solution * utility_slot).mean()
         )
 
@@ -4007,6 +4206,23 @@ def _portfolio_cvxpy_convex_allocation_loss(
         terms["total"] = total
         return terms
     return total
+
+
+def _portfolio_full_universe_convex_allocation_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    *,
+    return_terms: bool = False,
+) -> torch.Tensor | dict[str, torch.Tensor]:
+    return _portfolio_cvxpy_convex_allocation_loss(
+        outputs,
+        targets,
+        slot_count=CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT,
+        max_days=CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH,
+        full_universe_mode=True,
+        conservative_ope_mode=True,
+        return_terms=return_terms,
+    )
 
 
 def _source_hard_negative_tail_loss(
@@ -6052,6 +6268,56 @@ def fit_policy_models_v3(
         ),
         "date_code": pd.factorize(pd.to_datetime(sample_frame["date"]).dt.strftime("%Y-%m-%d"))[0].astype(np.float32),
     }
+    current_weight_target = np.clip(sample_targets["current_weight"], 0.0, 1.0)
+    receiver_candidate_target = np.clip(sample_targets["portfolio_daily_receiver_candidate_mask"], 0.0, 1.0)
+    source_candidate_target = np.clip(sample_targets["portfolio_daily_source_candidate_mask"], 0.0, 1.0)
+    holding_target = np.clip(sample_targets["holding_flag_target"], 0.0, 1.0)
+    liquidity_default = np.clip(
+        sample_frame.get(
+            "portfolio_daily_liquidity_support",
+            sample_frame.get(
+                "liquidity_score",
+                sample_frame.get("tradability_score", pd.Series(np.ones(len(sample_frame)), index=sample_frame.index)),
+            ),
+        ).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    sample_targets["portfolio_daily_liquidity_support"] = liquidity_default
+    sample_targets["portfolio_daily_impact_cost"] = np.clip(
+        sample_frame.get(
+            "portfolio_daily_impact_cost",
+            pd.Series(0.0015 + 0.0060 * (1.0 - liquidity_default), index=sample_frame.index),
+        ).astype(float).to_numpy(dtype=np.float32),
+        0.0005,
+        0.0400,
+    )
+    sample_targets["portfolio_daily_factor_concentration_proxy"] = np.clip(
+        sample_frame.get(
+            "portfolio_daily_factor_concentration_proxy",
+            sample_frame.get(
+                "industry_concentration_proxy",
+                sample_frame.get("style_concentration_proxy", pd.Series(np.full(len(sample_frame), 0.10), index=sample_frame.index)),
+            ),
+        ).astype(float).to_numpy(dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    sample_targets["portfolio_daily_behavior_propensity"] = np.clip(
+        sample_frame.get(
+            "portfolio_daily_behavior_propensity",
+            pd.Series(
+                0.06
+                + 0.58 * np.clip(current_weight_target * 4.0, 0.0, 1.0)
+                + 0.16 * receiver_candidate_target
+                + 0.14 * source_candidate_target
+                + 0.10 * holding_target,
+                index=sample_frame.index,
+            ),
+        ).astype(float).to_numpy(dtype=np.float32),
+        0.02,
+        1.0,
+    )
     daily_targets = {
         name: daily_frame[name].astype(float).to_numpy(dtype=np.float32)
         for name in ALL_DAILY_TARGET_NAMES
@@ -6155,9 +6421,12 @@ def fit_policy_models_v3(
 
     uses_cvxpy_convex_allocation_layer = (
         multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0
+        or multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
     )
     if uses_cvxpy_convex_allocation_layer:
         _get_portfolio_cvxpy_allocation_layer()
+        if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
+            _get_portfolio_cvxpy_allocation_layer(CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT)
     sample_target_names = tuple(sample_targets.keys())
     dataset = TensorDataset(
         torch.as_tensor(X_static[train_idx], dtype=torch.float32),
@@ -6276,6 +6545,14 @@ def fit_policy_models_v3(
                 if multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
+            portfolio_full_universe_convex_allocation_loss = (
+                _portfolio_full_universe_convex_allocation_loss(
+                    outputs,
+                    sample_batch_targets,
+                )
+                if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
+                else torch.tensor(0.0, device=device)
+            )
             value_arbitration_loss = _value_arbitration_consistency_loss(outputs, sample_batch_targets)
             three_value_gate_loss = _three_value_gate_consistency_loss(outputs, sample_batch_targets)
             hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(outputs, sample_batch_targets)
@@ -6323,6 +6600,8 @@ def fit_policy_models_v3(
                 * portfolio_differentiable_convex_allocation_loss
                 + multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0)
                 * portfolio_cvxpy_convex_allocation_loss
+                + multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0)
+                * portfolio_full_universe_convex_allocation_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
                 + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * three_value_gate_loss
                 + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * hierarchical_three_value_gate_loss
@@ -6422,6 +6701,14 @@ def fit_policy_models_v3(
                 if multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
+            val_portfolio_full_universe_convex_allocation_loss = (
+                _portfolio_full_universe_convex_allocation_loss(
+                    val_outputs,
+                    val_targets,
+                )
+                if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
+                else torch.tensor(0.0, device=device)
+            )
             val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
             val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
             val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
@@ -6473,6 +6760,8 @@ def fit_policy_models_v3(
                     * val_portfolio_differentiable_convex_allocation_loss
                     + multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0)
                     * val_portfolio_cvxpy_convex_allocation_loss
+                    + multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0)
+                    * val_portfolio_full_universe_convex_allocation_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
                     + multi_objective_loss_weights.get("three_value_gate_total", 0.0) * val_three_value_gate_loss
                     + multi_objective_loss_weights.get("hierarchical_three_value_total", 0.0) * val_hierarchical_three_value_gate_loss
@@ -6540,6 +6829,19 @@ def fit_policy_models_v3(
             portfolio_cvxpy_convex_terms = {
                 name: float(value.detach().cpu())
                 for name, value in raw_cvxpy_terms.items()
+            }
+    portfolio_full_universe_convex_terms: dict[str, float] = {}
+    if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
+        final_val_outputs = sample_model(X_static_val, X_sequence_val)
+        raw_full_universe_terms = _portfolio_full_universe_convex_allocation_loss(
+            final_val_outputs,
+            val_targets,
+            return_terms=True,
+        )
+        if isinstance(raw_full_universe_terms, dict):
+            portfolio_full_universe_convex_terms = {
+                name: float(value.detach().cpu())
+                for name, value in raw_full_universe_terms.items()
             }
 
     diagnostics = {
@@ -6751,6 +7053,19 @@ def fit_policy_models_v3(
         "portfolio_cvxpy_convex_layer_status": _cvxpy_convex_layer_status(),
         "supports_portfolio_cvxpy_convex_allocation_diagnostics": bool(portfolio_cvxpy_convex_terms),
         "portfolio_cvxpy_convex_allocation_terms": portfolio_cvxpy_convex_terms,
+        "supports_portfolio_full_universe_convex_allocation_loss": (
+            multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
+        ),
+        "supports_portfolio_full_universe_candidate_coverage": bool(
+            portfolio_full_universe_convex_terms
+            and "candidate_coverage_loss" in portfolio_full_universe_convex_terms
+        ),
+        "supports_portfolio_full_universe_ope_diagnostics": bool(
+            portfolio_full_universe_convex_terms
+            and "ope_lower_bound_loss" in portfolio_full_universe_convex_terms
+            and "doubly_robust_gap_loss" in portfolio_full_universe_convex_terms
+        ),
+        "portfolio_full_universe_convex_allocation_terms": portfolio_full_universe_convex_terms,
         "supports_funding_release_discipline": (
             multi_objective_loss_weights.get("funding_release_total", 0.0) > 0.0
             and all(

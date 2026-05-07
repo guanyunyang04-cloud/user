@@ -1378,3 +1378,25 @@
   - 事实：r47 已从 r46 surrogate 推进到真实 `cvxpylayers` fixed-slot convex solver layer；这不是旧 action head、旧 simulator guard 或纯 PyTorch surrogate 的换皮。
   - 推断：当前下一优先 research 入口应切换为 r47；r41-r46 作为保留检查点，不再默认长训。
   - 边界：r47 仍不是把所有上证和深证 A 股一次性放入一个大规模 convex program，而是先经候选 bank 压缩后的真实 solver layer；尚无正式 screening / confirmatory verdict，不能写成策略有效性事实。r39 仍是当前有效证据基线，production live / active artifact 均未改动。
+
+## 2026-05-08 r48 full-universe convex OPE allocation 复盘
+- 行动前自检：
+  - 事实：r47 已接入真实 `cvxpylayers` solver，但仍是 16-slot fixed candidate bank；候选入口仍较依赖旧 receiver/source mask；solver objective 里的现实约束和 OPE 诊断仍不足。
+  - 推断：若直接训练 r47，可能仍被旧 candidate mask 盲区、简化成本风险和离线高估困住；更有效动作是一次性补齐 full-universe aware candidate coverage、现实成本风险和 OPE lower-bound。
+  - 假设：当前不适合把全 A 股数千只股票一次性放入单个 CVXPY problem；最可执行的升级是扩大 solver bank 到 48-slot，并让未进入旧 mask 的高 oracle 机会通过 coverage loss 获得梯度。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v33` 与 `_portfolio_full_universe_convex_allocation_loss`，主导项为 `portfolio_full_universe_convex_allocation_total = 1.68`，r47 fixed-slot 主项降为 `0`。
+  - r48 使用 48-slot full-universe aware candidate bank；`candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，降低旧 mask 对全部梯度入口的控制。
+  - r48 新增 `portfolio_daily_liquidity_support`、`portfolio_daily_impact_cost`、`portfolio_daily_factor_concentration_proxy`、`portfolio_daily_behavior_propensity` sample targets，并在缺列时用当前权重、candidate mask、holding flag 和 liquidity proxy 构造保守 fallback。
+  - r48 solver / loss 新增 `universe_expansion_loss`、`liquidity_impact_loss`、`concentration_risk_loss`，将 liquidity、impact cost、dynamic cost、turnover、risk pressure 与 concentration proxy 写入训练诊断。
+  - r48 OPE 新增 `ope_lower_bound_loss`、`propensity_support_loss` 与 `doubly_robust_gap_loss`，用行为 propensity、当前持仓行为收益 proxy、policy lower-bound 和 DR gap 抑制离线分布外动作高估。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48`，默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256` 与更严格 resource gate。
+  - 合同测试新增 r48 profile / slot bank / v33 loss、旧 mask blind spot candidate coverage、OPE / cost / concentration 响应三项。
+- 验证：
+  - r48 三项定向合同测试通过。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 63 项通过。
+  - r48 dry-run `self_opt_study_r48_full_universe_convex_ope_allocation_dry_run_20260508_verify` 通过，确认 3 个 screening trial 使用 v33、8/6、batch 256、`allocation_layer_v1` 与更严格 resource gate。
+- 行动后复盘：
+  - 事实：r48 已补齐 r47 的四个主要代码层差距：更大候选覆盖、旧 mask 盲区约束、更现实的成本风险诊断、OPE lower-bound / propensity / DR gap。
+  - 推断：当前下一优先 research 入口应切换为 r48；r41-r47 作为保留检查点，不再默认长训。
+  - 边界：r48 仍不是全 A 股单体大规模 convex program，也尚无正式 screening / confirmatory verdict；不能写成策略有效性事实。r39 仍是当前有效证据基线，production live / active artifact 均未改动。

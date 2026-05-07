@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-07`
+快照日期：`2026-05-08`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/` 或 `episodic_memory.md`。
@@ -59,6 +59,7 @@
 - r45 conservative transport allocation 入口：`split_heads_portfolio_daily_conservative_transport_allocation_r45`，重点读取 `supports_portfolio_offline_conservative_support_loss`、`portfolio_offline_conservative_support_total`、offline support / OOD action penalty、executable receiver support、held source support、false-source pressure、risk cash defense、`resource_gate`、`source_target_count`、`source_realized_sell_rate`、`cash_timing_quality_1d`、`max_drawdown` 与 confirm stability。
 - r46 differentiable convex allocation 入口：`split_heads_portfolio_daily_differentiable_convex_allocation_r46`，重点读取 `supports_portfolio_differentiable_convex_allocation_loss`、`supports_portfolio_differentiable_convex_allocation_diagnostics`、`supports_portfolio_path_risk_loss`、`portfolio_differentiable_convex_allocation_total`、legacy action/duration loss 是否为 0、`portfolio_differentiable_convex_allocation_terms` 内的 KKT / constraint residual、unsupported mass、false-source mass、cash timing、source/receiver shortfall、behavior support、conservative OPE、path risk、`resource_gate`、`source_target_count`、`source_realized_sell_rate`、`cash_timing_quality_1d`、`max_drawdown` 与 confirm stability。
 - r47 true convex solver allocation 入口：`split_heads_portfolio_daily_true_convex_solver_allocation_r47`，重点读取 `supports_portfolio_cvxpy_convex_allocation_layer`、`portfolio_cvxpy_convex_layer_status`、`supports_portfolio_cvxpy_convex_allocation_diagnostics`、`portfolio_cvxpy_convex_allocation_total`、`portfolio_cvxpy_convex_allocation_terms` 内的 solver regret、solution tracking、gross / turnover / position residual、unsupported mass、false-source mass、cash timing、path risk、solver success rate、`resource_gate`、`source_target_count`、`source_realized_sell_rate`、`cash_timing_quality_1d`、`max_drawdown` 与 confirm stability。
+- r48 full-universe convex OPE allocation 入口：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48`，重点读取 `supports_portfolio_full_universe_convex_allocation_loss`、`supports_portfolio_full_universe_candidate_coverage`、`supports_portfolio_full_universe_ope_diagnostics`、`portfolio_full_universe_convex_allocation_terms` 内的 candidate coverage、universe expansion、liquidity impact、concentration risk、OPE lower-bound、propensity support、doubly-robust gap、solver success rate、`resource_gate`、`source_target_count`、`source_realized_sell_rate`、`cash_timing_quality_1d`、`max_drawdown` 与 confirm stability。
 - r34 最新证据入口：`cp_v3_portfolio_daily_allocation_breadth_r34_bounded_20260430` 与 `cp_v3_portfolio_daily_allocation_breadth_r34_evidence_confirm_20260430`；读取 `portfolio_daily_v2_confirm_stability_checks`，重点看 `receiver_minus_source_forward_excess_5d`、`source_positive_forward_sell_share`、`source_strong_positive_forward_sell_count` 与 `training_evidence_status`。
 - r35 已形成修复后正式 bounded confirm 证据；读取 `cp_v3_portfolio_daily_unified_allocation_r35_postfix4_bounded_confirm_20260430`，重点看 `confirm_02`、`portfolio_daily_v2_stable_confirmatory_trials`、`failed_checks`、source positive distribution、cash timing 与 drawdown。
 - r37 screening 证据入口：`cp_v3_portfolio_daily_decision_focused_allocation_r37b_screening64_20260501`；读取 `trial_01`、`training_diagnostics.json`、`unified_allocation_summary_mean` 与 v2 gate report，重点看 predicted source penalty 是否进入 allocation path、source positive distribution、receiver-source spread、cash timing 与 drawdown。
@@ -66,7 +67,7 @@
 - r39 最新 bounded confirm 证据入口：`self_opt_study_r39_allocation_objective_consolidation_execblend_20260502`；读取 `study_summary.json`、`protocols/self_opt_study_r39_allocation_objective_consolidation_execblend_20260502__confirm_01/protocol_summary.json` 与对应 `training_diagnostics.json`，重点看 final objective 是否真正进入执行评分、source count 是否达标、cash timing / drawdown 是否仍失败、source false-sell 是否仍受控。
 - 当前有效证据基线仍是 r39：`alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`，对应 simulator calibration 为 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
 - 当前已完成 r40 clean rerun：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`，使用 `alpha_result_value_budget_split_v25`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，已完整生成 study/protocol/model/ranking 证据；但 stable confirm 为空，仍不得替代 r39 证据基线。
-- r41-r46 已完成代码入口或 dry-run，但均为保留检查点，不是当前默认长训入口；当前优先 research 入口为 r47：`split_heads_portfolio_daily_true_convex_solver_allocation_r47` / `alpha_result_value_budget_split_v32` / `epochs = 10` / `min_epochs = 7` / 更严格 `resource_gate`。r47 已补真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer 与 solver diagnostics，但仍未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
+- r41-r47 已完成代码入口或 dry-run，但均为保留检查点，不是当前默认长训入口；当前优先 research 入口为 r48：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` / `alpha_result_value_budget_split_v33` / `epochs = 8` / `min_epochs = 6` / `batch_size = 256` / 更严格 `resource_gate`。r48 已补 full-universe candidate coverage、真实 solver、现实成本风险与 OPE 诊断，但仍未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；多条审计必须顺序执行，不得并行抢写。
 
@@ -123,8 +124,8 @@
 - 本次 `foreground.log` 仍停在旧 stdout 管道失效时间，不作为最终成败判断；最终判断以 `study_summary.json`、`trial_ranking.csv`、protocol summary 与模型 diagnostics 为准。
 - clean_r1 结论只允许写作 `research / shadow_only`：`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`，但 stable confirm 为空，confirm_01/confirm_02 均未过 gate。
 
-## 2026-05-07 r41-r46 保留检查点
-- r41-r46 已分别覆盖 risk-sensitive、utility-credit、primal-dual decision、entropic transport、conservative transport 与 differentiable convex allocation；当前不作为默认长训入口。若必须回溯验证，只能先 dry-run / contract gate，再以前台持久日志短 screening 执行；任何代码合同、dry-run 或单测通过都不得写成策略有效、promotion、live 或 active artifact 切换依据。
+## 2026-05-07 r41-r47 保留检查点
+- r41-r47 已分别覆盖 risk-sensitive、utility-credit、primal-dual decision、entropic transport、conservative transport、differentiable convex allocation 与 true convex solver allocation；当前不作为默认长训入口。若必须回溯验证，只能先 dry-run / contract gate，再以前台持久日志短 screening 执行；任何代码合同、dry-run 或单测通过都不得写成策略有效、promotion、live 或 active artifact 切换依据。
 
 ## 2026-05-07 r45 conservative transport allocation 操作入口
 - r45 profile / loss：`split_heads_portfolio_daily_conservative_transport_allocation_r45` / `alpha_result_value_budget_split_v30`。
@@ -155,3 +156,13 @@
 - r47 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r47_true_convex_solver_profile_uses_cvxpy_layer_not_surrogate_only daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r47_true_cvxpy_convex_layer_solves_and_backpropagates`。
 - r47 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 同时显示 solver success、source release、cash timing、drawdown、support conservatism、constraint residual、path risk、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
 - r47 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
+
+## 2026-05-08 r48 full-universe convex OPE allocation 操作入口
+- r48 profile / loss：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` / `alpha_result_value_budget_split_v33`。
+- r48 objective / budget：`end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1`。
+- r48 默认 screening 资源口径：profile 内 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。
+- r48 诊断读取：训练 diagnostics 需优先读取 `portfolio_full_universe_convex_allocation_terms`，其中 `candidate_coverage_loss`、`universe_expansion_loss`、`liquidity_impact_loss`、`concentration_risk_loss`、`ope_lower_bound_loss`、`propensity_support_loss`、`doubly_robust_gap_loss`、`solver_success_rate`、`fallback_surrogate_loss` 与 `total` 是判断是否值得正式 screening 的关键前置信号。
+- r48 dry-run 命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --dry-run`。
+- r48 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_profile_extends_r47_with_ope_and_larger_slot_bank daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_candidate_coverage_penalizes_old_mask_blind_spots daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_ope_and_realistic_cost_terms_respond_to_bad_support`。
+- r48 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 同时显示 solver success、candidate coverage、source release、cash timing、drawdown、OPE、propensity support、cost/risk diagnostics、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
+- r48 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
