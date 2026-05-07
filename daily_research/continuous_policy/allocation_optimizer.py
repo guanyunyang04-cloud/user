@@ -32,6 +32,9 @@ UNIFIED_ALLOCATION_COLUMNS: tuple[str, ...] = (
     "portfolio_daily_allocation_uncertainty_pressure_target",
     "portfolio_daily_allocation_tail_risk_control_target",
     "portfolio_daily_allocation_decision_focused_objective",
+    "portfolio_daily_allocation_net_utility_target",
+    "portfolio_daily_allocation_credit_closure_target",
+    "portfolio_daily_allocation_resource_efficiency_target",
     "portfolio_daily_unified_receiver_candidate",
     "portfolio_daily_unified_source_candidate",
 )
@@ -618,6 +621,82 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
         0.0,
         1.0,
     )
+    computed_credit_closure_target = _clip_series(
+        0.20 * allocation_cash_deployment_target
+        + 0.18 * source_release_preference
+        + 0.16 * receiver_source_spread_reward
+        + 0.14 * transfer_regret_target
+        + 0.12 * transfer_score
+        + 0.10 * receiver_realized_deploy_proxy
+        + 0.10 * source_realized_release_proxy
+        - 0.18 * dead_branch_risk
+        - 0.16 * opportunity_cost_penalty
+        - 0.14 * positive_forward_penalty
+        - 0.10 * hard_negative_penalty,
+        0.0,
+        1.0,
+    )
+    predicted_credit_closure_target = (
+        _clip_series(_series(working, "portfolio_daily_allocation_credit_closure_target"), 0.0, 1.0)
+        if "portfolio_daily_allocation_credit_closure_target" in working.columns
+        else computed_credit_closure_target
+    )
+    allocation_credit_closure_target = _clip_series(
+        0.72 * computed_credit_closure_target + 0.28 * predicted_credit_closure_target,
+        0.0,
+        1.0,
+    )
+    computed_net_utility_target = _clip_series(
+        0.22 * allocation_final_objective
+        + 0.18 * allocation_decision_focused_objective
+        + 0.16 * allocation_credit_closure_target
+        + 0.14 * allocation_risk_adjusted_return_target
+        + 0.10 * allocation_monthly_quality_target
+        + 0.10 * receiver_source_spread_reward
+        + 0.06 * allocation_trade_quality_target
+        + 0.04 * allocation_cash_deployment_target
+        - 0.16 * allocation_uncertainty_pressure_target
+        - 0.14 * allocation_tail_risk_control_target
+        - 0.12 * allocation_drawdown_control_target
+        - 0.10 * dead_branch_risk
+        - 0.08 * hard_negative_penalty,
+        0.0,
+        1.0,
+    )
+    predicted_net_utility_target = (
+        _clip_series(_series(working, "portfolio_daily_allocation_net_utility_target"), 0.0, 1.0)
+        if "portfolio_daily_allocation_net_utility_target" in working.columns
+        else computed_net_utility_target
+    )
+    allocation_net_utility_target = _clip_series(
+        0.72 * computed_net_utility_target + 0.28 * predicted_net_utility_target,
+        0.0,
+        1.0,
+    )
+    computed_resource_efficiency_target = _clip_series(
+        0.28 * allocation_net_utility_target
+        + 0.24 * allocation_credit_closure_target
+        + 0.16 * allocation_decision_focused_objective
+        + 0.12 * allocation_trade_quality_target
+        + 0.10 * allocation_cash_deployment_target
+        + 0.10 * receiver_source_spread_reward
+        - 0.16 * allocation_tail_risk_control_target
+        - 0.14 * allocation_uncertainty_pressure_target
+        - 0.12 * dead_branch_risk
+        - 0.08 * bad_spread_risk,
+        0.0,
+        1.0,
+    )
+    predicted_resource_efficiency_target = (
+        _clip_series(_series(working, "portfolio_daily_allocation_resource_efficiency_target"), 0.0, 1.0)
+        if "portfolio_daily_allocation_resource_efficiency_target" in working.columns
+        else computed_resource_efficiency_target
+    )
+    allocation_resource_efficiency_target = _clip_series(
+        0.72 * computed_resource_efficiency_target + 0.28 * predicted_resource_efficiency_target,
+        0.0,
+        1.0,
+    )
 
     working["portfolio_daily_unified_receiver_score"] = unified_receiver
     working["portfolio_daily_unified_source_score"] = unified_source
@@ -640,6 +719,9 @@ def build_unified_allocation_problem(label_frame: pd.DataFrame) -> pd.DataFrame:
     working["portfolio_daily_allocation_uncertainty_pressure_target"] = allocation_uncertainty_pressure_target
     working["portfolio_daily_allocation_tail_risk_control_target"] = allocation_tail_risk_control_target
     working["portfolio_daily_allocation_decision_focused_objective"] = allocation_decision_focused_objective
+    working["portfolio_daily_allocation_net_utility_target"] = allocation_net_utility_target
+    working["portfolio_daily_allocation_credit_closure_target"] = allocation_credit_closure_target
+    working["portfolio_daily_allocation_resource_efficiency_target"] = allocation_resource_efficiency_target
     working["portfolio_daily_unified_receiver_candidate"] = (
         (unified_receiver > 0.0) & receiver_mask & (receiver_exec > 0.05)
     ).astype(float)
@@ -723,16 +805,22 @@ def solve_semidifferentiable_allocation(
     uncertainty_pressure = _clip_series(_series(problem, "portfolio_daily_allocation_uncertainty_pressure_target"), 0.0, 1.0)
     tail_risk_control = _clip_series(_series(problem, "portfolio_daily_allocation_tail_risk_control_target"), 0.0, 1.0)
     decision_objective = _clip_series(_series(problem, "portfolio_daily_allocation_decision_focused_objective"), 0.0, 1.0)
+    net_utility = _clip_series(_series(problem, "portfolio_daily_allocation_net_utility_target"), 0.0, 1.0)
+    credit_closure = _clip_series(_series(problem, "portfolio_daily_allocation_credit_closure_target"), 0.0, 1.0)
+    resource_efficiency = _clip_series(_series(problem, "portfolio_daily_allocation_resource_efficiency_target"), 0.0, 1.0)
 
     source_scores = _clip_series(
-        0.46 * problem["portfolio_daily_unified_source_score"].astype(float)
-        + 0.16 * problem["portfolio_daily_allocation_trade_quality_target"].astype(float)
-        + 0.16 * decision_objective
-        + 0.08 * problem["portfolio_daily_allocation_final_objective"].astype(float)
-        + 0.06 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        0.34 * problem["portfolio_daily_unified_source_score"].astype(float)
+        + 0.16 * credit_closure
+        + 0.14 * net_utility
+        + 0.12 * problem["portfolio_daily_allocation_trade_quality_target"].astype(float)
+        + 0.10 * decision_objective
+        + 0.07 * resource_efficiency
+        + 0.05 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.04 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
         + 0.04 * tail_risk_control * (1.0 - problem["portfolio_daily_source_hard_negative_penalty"].astype(float))
-        - 0.10 * uncertainty_pressure
-        - 0.16 * problem["portfolio_daily_source_hard_negative_penalty"].astype(float),
+        - 0.08 * uncertainty_pressure
+        - 0.18 * problem["portfolio_daily_source_hard_negative_penalty"].astype(float),
         0.0,
         1.0,
     )
@@ -744,14 +832,17 @@ def solve_semidifferentiable_allocation(
     sell_turnover = float((current - target).clip(lower=0.0).sum())
 
     receiver_scores = _clip_series(
-        0.50 * problem["portfolio_daily_unified_receiver_score"].astype(float)
-        + 0.16 * problem["portfolio_daily_allocation_cash_deployment_target"].astype(float)
-        + 0.18 * decision_objective
-        + 0.08 * problem["portfolio_daily_allocation_final_objective"].astype(float)
-        + 0.08 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
+        0.36 * problem["portfolio_daily_unified_receiver_score"].astype(float)
+        + 0.18 * net_utility
+        + 0.14 * credit_closure
+        + 0.12 * problem["portfolio_daily_allocation_cash_deployment_target"].astype(float)
+        + 0.10 * decision_objective
+        + 0.08 * resource_efficiency
+        + 0.06 * problem["portfolio_daily_allocation_final_objective"].astype(float)
+        + 0.06 * problem["portfolio_daily_allocation_risk_adjusted_return_target"].astype(float)
         + 0.04 * problem["portfolio_daily_allocation_monthly_quality_target"].astype(float)
-        - 0.24 * uncertainty_pressure
-        - 0.20 * tail_risk_control,
+        - 0.20 * uncertainty_pressure
+        - 0.16 * tail_risk_control,
         0.0,
         1.0,
     )
@@ -803,7 +894,23 @@ def solve_semidifferentiable_allocation(
         receiver_risk_brake = float(pd.concat([uncertainty_pressure, tail_risk_control], axis=1).max(axis=1).mean())
     if not np.isfinite(receiver_risk_brake):
         receiver_risk_brake = 0.0
-    buy_budget *= float(np.clip(1.0 - 0.82 * receiver_risk_brake, 0.0, 1.0))
+    if bool(receiver_candidates.any()):
+        receiver_utility_relief = float(
+            (
+                0.40 * credit_closure.where(receiver_candidates, np.nan)
+                + 0.36 * net_utility.where(receiver_candidates, np.nan)
+                + 0.24 * resource_efficiency.where(receiver_candidates, np.nan)
+            )
+            .dropna()
+            .mean()
+        )
+    else:
+        receiver_utility_relief = float((0.40 * credit_closure + 0.36 * net_utility + 0.24 * resource_efficiency).mean())
+    if not np.isfinite(receiver_utility_relief):
+        receiver_utility_relief = 0.0
+    receiver_risk_brake = float(np.clip(receiver_risk_brake - 0.55 * receiver_utility_relief, 0.0, 1.0))
+    receiver_utility_budget_multiplier = float(np.clip(0.30 + 0.95 * receiver_utility_relief, 0.0, 1.0))
+    buy_budget *= float(np.clip(1.0 - 0.82 * receiver_risk_brake, 0.0, 1.0)) * receiver_utility_budget_multiplier
     buys = _allocate_capped_budget(receiver_scores.where(receiver_candidates, 0.0), buy_capacity, buy_budget)
     target = (target + buys).clip(lower=0.0, upper=max_position_weight)
     buy_turnover = float((target - (current - sells)).clip(lower=0.0).sum())
@@ -844,6 +951,12 @@ def solve_semidifferentiable_allocation(
         "transaction_cost_estimate": float(cost),
         "source_release_budget": float(sell_budget),
         "receiver_buy_budget": float(buy_budget),
+        "receiver_risk_brake": float(receiver_risk_brake),
+        "receiver_utility_relief": float(receiver_utility_relief),
+        "receiver_utility_budget_multiplier": float(receiver_utility_budget_multiplier),
+        "portfolio_daily_allocation_net_utility_mean": float(net_utility.mean()),
+        "portfolio_daily_allocation_credit_closure_mean": float(credit_closure.mean()),
+        "portfolio_daily_allocation_resource_efficiency_mean": float(resource_efficiency.mean()),
         "max_position_weight": max_position_weight,
         "turnover_limit": turnover_limit,
     }
@@ -883,6 +996,9 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
             "portfolio_daily_allocation_uncertainty_pressure_target": 0.0,
             "portfolio_daily_allocation_tail_risk_control_target": 0.0,
             "portfolio_daily_allocation_decision_focused_objective": 0.0,
+            "portfolio_daily_allocation_net_utility_target": 0.0,
+            "portfolio_daily_allocation_credit_closure_target": 0.0,
+            "portfolio_daily_allocation_resource_efficiency_target": 0.0,
             "portfolio_daily_source_hard_negative_prevalence": 0.0,
             "portfolio_daily_source_hard_negative_selected_pressure": 0.0,
             "portfolio_daily_unified_receiver_candidate_count": 0.0,
@@ -920,6 +1036,9 @@ def build_unified_allocation_summary(label_frame: pd.DataFrame) -> dict[str, flo
         "portfolio_daily_allocation_uncertainty_pressure_target": float(problem["portfolio_daily_allocation_uncertainty_pressure_target"].mean()),
         "portfolio_daily_allocation_tail_risk_control_target": float(problem["portfolio_daily_allocation_tail_risk_control_target"].mean()),
         "portfolio_daily_allocation_decision_focused_objective": float(problem["portfolio_daily_allocation_decision_focused_objective"].mean()),
+        "portfolio_daily_allocation_net_utility_target": float(problem["portfolio_daily_allocation_net_utility_target"].mean()),
+        "portfolio_daily_allocation_credit_closure_target": float(problem["portfolio_daily_allocation_credit_closure_target"].mean()),
+        "portfolio_daily_allocation_resource_efficiency_target": float(problem["portfolio_daily_allocation_resource_efficiency_target"].mean()),
         "portfolio_daily_source_hard_negative_prevalence": float((hard_negative >= 0.55).mean()),
         "portfolio_daily_source_hard_negative_selected_pressure": hard_negative_selected_pressure,
         "portfolio_daily_unified_receiver_candidate_count": float(problem["portfolio_daily_unified_receiver_candidate"].sum()),

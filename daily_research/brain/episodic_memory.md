@@ -1254,3 +1254,13 @@
 - 已完成 study 入口：`run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41`，默认使用 `end_to_end_allocation_layer_v1` objective、`allocation_layer_v1` budget semantics 与 `end_to_end_allocation_layer_v1` budget calibration。
 - 验证：4 个 r41 合同测试通过；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 44 项通过；相关 continuous_policy 文件 `py_compile` 通过；`git diff --check` 通过。
 - 决策：r41 当前只是代码合约和下一 research profile，不是训练 verdict。当前有效证据基线仍为 r39；r40 clean_r1 继续作为失败诊断证据；不得 promotion、不得 live、不得改 active artifact。
+## 2026-05-07 r42 utility-credit allocation 大改复盘
+- 行动前纠偏：用户要求避免 r41 耗费大量训练资源但成果不大；事实是 r41 只完成代码入口且尚无 verdict，r40 已暴露 source dead、cash timing bad、drawdown bad。推断是直接长训 r41 的信息收益不够高，优先动作应改为更强的 utility-credit allocation 与 resource gate。
+- 进程边界：已中止此前 r41 长训进程，保留磁盘上的 partial r41 tag 作为未完成过程证据，不把它写成策略结论；live / active artifact / promotion gate 均未改动。
+- 已执行 TDD 红灯：先新增 r42 合同测试，覆盖 utility-credit 目标暴露、强 credit closure 下 solver deploy、v27 loss/profile/resource gate 区分于 r41，以及 `_portfolio_utility_credit_closure_loss` 对断裂资金分配的惩罚。首次运行暴露缺少 r42 loss 入口，随后补齐实现。
+- 已完成 allocation layer 大改：`allocation_optimizer.py` 新增 `portfolio_daily_allocation_net_utility_target`、`portfolio_daily_allocation_credit_closure_target` 与 `portfolio_daily_allocation_resource_efficiency_target`，并让 `solve_semidifferentiable_allocation` 使用 utility relief 与 utility budget multiplier 调整 receiver buy budget、source score、receiver score 和 diagnostics。
+- 已完成模型大改：`model_seq_v3.py` 新增 `alpha_result_value_budget_split_v27`、三个 r42 heads、`_portfolio_utility_credit_closure_loss`、训练/验证损失项 `portfolio_utility_credit_closure_total`、diagnostics support flags，以及推理阶段 r42 predicted heads 对 unified receiver/source/cash score 与 policy frame 的融合。
+- 已完成 study runner 大改：`run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_utility_credit_allocation_r42`，并把 `--epochs` / `--min-epochs` 默认值改为未显式传入时不覆盖 profile 默认值；r42 默认 `epochs = 24`、`min_epochs = 16`。新增 `_resource_gate_after_screening`，screening 后若 source dead 与 cash/drawdown 失败或 receiver deploy 不干净且经济信号弱，则停止 confirmatory。
+- dry-run 证据：`self_opt_study_r42_utility_credit_allocation_dry_run_20260507` 已生成 dry-run study plan，确认 r42 使用 `alpha_result_value_budget_split_v27`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1`，且 3 个 screening trials 保持 `epochs = 24`、`min_epochs = 16` 并包含 `resource_gate`。
+- 验证证据：r42 四个合同测试通过；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 通过；相关 continuous_policy 文件 `py_compile` 通过；`git diff --check` 通过。最终写回后还需再次运行 brain guard 与项目一致性检查。
+- 决策：r42 替代 r41 成为下一优先 research profile；r42 仍只是代码合同与 dry-run，不是策略 verdict。后续若继续推进，只允许先做 r42 短 screening + resource gate，不直接进入 r41 full clean 长训。

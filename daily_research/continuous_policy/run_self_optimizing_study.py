@@ -906,6 +906,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [512],
     },
+    "split_heads_portfolio_daily_utility_credit_allocation_r42": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v27"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [5.2e-4, 5.8e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.20, 0.22],
+        "daily_dropout": [0.16],
+        "batch_size": [512],
+    },
 }
 
 
@@ -1721,6 +1738,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "daily_dropout": 0.16,
         "batch_size": 512,
     },
+    "split_heads_portfolio_daily_utility_credit_allocation_r42": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v27",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 5.2e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.20,
+        "daily_dropout": 0.16,
+        "batch_size": 512,
+        "epochs": 24,
+        "min_epochs": 16,
+    },
 }
 
 
@@ -1773,11 +1809,25 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_allocation_objective_consolidation_r39": "portfolio_daily_ranking_v2_gated",
     "split_heads_portfolio_daily_end_to_end_allocation_layer_r40": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_utility_credit_allocation_r42": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
     "portfolio_daily_ranking_v2_gated",
     "end_to_end_allocation_layer_v1",
+}
+
+RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
+    "split_heads_portfolio_daily_utility_credit_allocation_r42": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.20,
+        "cash_timing_floor": -0.10,
+        "drawdown_floor": -0.20,
+        "monthly_return_floor": -0.002,
+        "annual_return_floor": 0.04,
+        "receiver_unrealized_cap": 0.08,
+    },
 }
 
 
@@ -4918,6 +4968,89 @@ def _trial_is_portfolio_daily_v2_qualified(item: TrialResult) -> bool:
     return _trial_has_sufficient_training_evidence(item) and _portfolio_daily_v2_gate_pass(item.primary_metrics)
 
 
+def _resource_gate_after_screening(
+    profile_name: str,
+    screening_results: list[TrialResult],
+    *,
+    selected_trial_count: int,
+) -> dict[str, Any]:
+    config = RESOURCE_GATED_SEARCH_PROFILES.get(str(profile_name), {})
+    completed = [item for item in screening_results if item.status == "completed"]
+    if not config:
+        return {
+            "resource_gate_enabled": False,
+            "resource_gate_triggered": False,
+            "continue_screening": True,
+            "failed_resource_checks": [],
+            "estimated_saved_screening_trials": 0,
+        }
+    min_completed = int(config.get("min_completed_screening", 1) or 1)
+    if len(completed) < min_completed:
+        return {
+            "resource_gate_enabled": True,
+            "resource_gate_triggered": False,
+            "continue_screening": True,
+            "completed_screening_count": len(completed),
+            "failed_resource_checks": [],
+            "estimated_saved_screening_trials": 0,
+        }
+
+    latest = completed[-1]
+    metrics = dict(latest.primary_metrics or {})
+    source_count = float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0)
+    source_sell_rate = float(metrics.get("portfolio_daily_source_realized_sell_rate", 0.0) or 0.0)
+    receiver_count = float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0)
+    receiver_unrealized = float(metrics.get("portfolio_daily_receiver_unrealized_deploy_share", 1.0) or 0.0)
+    cash_timing = float(metrics.get("cash_timing_quality_1d", 0.0) or 0.0)
+    max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
+    monthly_return = float(metrics.get("monthly_return_mean", 0.0) or 0.0)
+    annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
+    failed: list[str] = []
+    if source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
+        config.get("source_sell_rate_floor", 0.20) or 0.20
+    ):
+        failed.append("source_release_dead")
+    if receiver_count < 3.0 or receiver_unrealized > float(config.get("receiver_unrealized_cap", 0.08) or 0.08):
+        failed.append("receiver_deploy_not_clean")
+    if cash_timing < float(config.get("cash_timing_floor", -0.10) or -0.10):
+        failed.append("cash_timing_bad")
+    if max_drawdown < float(config.get("drawdown_floor", -0.20) or -0.20):
+        failed.append("drawdown_bad")
+    if annual_return < float(config.get("annual_return_floor", 0.04) or 0.04) or monthly_return < float(
+        config.get("monthly_return_floor", -0.002) or -0.002
+    ):
+        failed.append("economic_signal_too_weak")
+
+    trigger_reasons = set(failed)
+    terminal_failure = (
+        "source_release_dead" in trigger_reasons
+        and ("cash_timing_bad" in trigger_reasons or "drawdown_bad" in trigger_reasons)
+    ) or (
+        "receiver_deploy_not_clean" in trigger_reasons
+        and ("economic_signal_too_weak" in trigger_reasons or "drawdown_bad" in trigger_reasons)
+    )
+    remaining = max(0, int(selected_trial_count) - len(screening_results))
+    return {
+        "resource_gate_enabled": True,
+        "resource_gate_triggered": bool(terminal_failure),
+        "continue_screening": not bool(terminal_failure),
+        "completed_screening_count": len(completed),
+        "evaluated_trial_tag": latest.trial_tag,
+        "failed_resource_checks": failed,
+        "estimated_saved_screening_trials": remaining if terminal_failure else 0,
+        "resource_gate_metrics": {
+            "portfolio_daily_source_target_count": source_count,
+            "portfolio_daily_source_realized_sell_rate": source_sell_rate,
+            "portfolio_daily_receiver_target_count": receiver_count,
+            "portfolio_daily_receiver_unrealized_deploy_share": receiver_unrealized,
+            "cash_timing_quality_1d": cash_timing,
+            "max_drawdown": max_drawdown,
+            "monthly_return_mean": monthly_return,
+            "annual_return": annual_return,
+        },
+    }
+
+
 def _pick_confirmatory_candidates(
     completed_trials: list[TrialResult],
     *,
@@ -5016,8 +5149,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alpha-prior-target-weight-panel", default="")
     parser.add_argument("--trainer-backend", default=TRAINER_BACKEND_FORMAL_SEQ_V3, choices=TRAINER_BACKENDS)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
-    parser.add_argument("--epochs", type=int, default=40)
-    parser.add_argument("--min-epochs", type=int, default=32)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--min-epochs", type=int, default=None)
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
     parser.add_argument("--search-profile", default="focused_seq_v1", choices=tuple(sorted(SEARCH_PROFILES)))
@@ -5048,11 +5181,15 @@ def main(argv: list[str] | None = None) -> int:
         or SEARCH_PROFILE_DEFAULT_OBJECTIVES.get(args.search_profile, "promotion_balanced_v2")
     )
 
-    base_trial = {
-        **dict(SEARCH_PROFILE_BASE_TRIALS[args.search_profile]),
-        "epochs": int(args.epochs),
-        "min_epochs": int(args.min_epochs),
-    }
+    base_trial = dict(SEARCH_PROFILE_BASE_TRIALS[args.search_profile])
+    if args.epochs is not None:
+        base_trial["epochs"] = int(args.epochs)
+    else:
+        base_trial.setdefault("epochs", 40)
+    if args.min_epochs is not None:
+        base_trial["min_epochs"] = int(args.min_epochs)
+    else:
+        base_trial.setdefault("min_epochs", 32)
     active_budget_semantics = str(base_trial.get("budget_semantics", args.budget_semantics))
     active_budget_calibration = str(base_trial.get("budget_calibration", args.budget_calibration))
     active_budget_objective = str(base_trial.get("budget_objective", args.budget_objective))
@@ -5095,6 +5232,7 @@ def main(argv: list[str] | None = None) -> int:
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
+        "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         "study_progress_json": str((study_root / "study_progress.json").resolve()),
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
     }
@@ -5116,6 +5254,13 @@ def main(argv: list[str] | None = None) -> int:
     latest_snapshot = _snapshot_latest_state()
     screening_results: list[TrialResult] = []
     confirmatory_results: list[TrialResult] = []
+    resource_gate_summary: dict[str, Any] = {
+        "resource_gate_enabled": bool(args.search_profile in RESOURCE_GATED_SEARCH_PROFILES),
+        "resource_gate_triggered": False,
+        "continue_screening": True,
+        "failed_resource_checks": [],
+        "estimated_saved_screening_trials": 0,
+    }
     try:
         _write_study_progress_event(
             study_root,
@@ -5222,10 +5367,27 @@ def main(argv: list[str] | None = None) -> int:
                         protocol_summary_json=str((PROTOCOLS_ROOT / trial_tag / "protocol_summary.json").resolve()),
                         error=trial_error[-4000:],
                     )
+                resource_gate_summary = _resource_gate_after_screening(
+                    args.search_profile,
+                    screening_results,
+                    selected_trial_count=len(selected_trials),
+                )
+                if bool(resource_gate_summary.get("resource_gate_triggered", False)):
+                    _write_study_progress_event(
+                        study_root,
+                        event="resource_gate_stopped_screening",
+                        status="stopped",
+                        study_tag=study_tag,
+                        phase="screening",
+                        progress_index=index,
+                        progress_total=len(selected_trials),
+                        **resource_gate_summary,
+                    )
+                    break
 
         screening_results.sort(key=lambda item: float(item.composite_score), reverse=True)
         completed_screening = [item for item in screening_results if item.status == "completed"]
-        if not args.disable_confirmatory:
+        if not args.disable_confirmatory and not bool(resource_gate_summary.get("resource_gate_triggered", False)):
             confirmatory_candidates = _pick_confirmatory_candidates(
                 completed_screening,
                 base_sequence_layers=int(base_trial.get("sequence_layers", 1)),
@@ -5487,6 +5649,7 @@ def main(argv: list[str] | None = None) -> int:
             else []
         ),
         "rejected_confirmatory_trials": rejected_confirmatory,
+        "resource_gate": resource_gate_summary,
         "historical_leaderboard": historical,
         "latest_state_restored": True,
         "seed_study_tag": str(args.seed_study_tag or ""),

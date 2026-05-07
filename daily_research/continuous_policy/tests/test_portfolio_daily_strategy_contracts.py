@@ -21,6 +21,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     LOSS_PROFILE_CONFIGS,
     _allocation_objective_consolidation_loss,
     _decision_focused_allocation_regret_loss,
+    _portfolio_utility_credit_closure_loss,
     _source_hard_negative_tail_loss,
     _source_listwise_release_regret_loss,
     _transfer_level_allocation_regret_loss,
@@ -45,6 +46,7 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     TrialResult,
     _pick_confirmatory_candidates,
     _portfolio_daily_v2_confirm_stability,
+    _resource_gate_after_screening,
     _run_protocol_with_progress,
     _score_protocol_summary,
     _write_study_progress_event,
@@ -1523,6 +1525,241 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         bad_loss = loss_fn(bad_outputs, targets)
 
         self.assertGreater(float(bad_loss), float(good_loss) + 0.20)
+
+    def test_r42_allocation_problem_exposes_utility_credit_closure_targets(self) -> None:
+        strong_frame = pd.DataFrame(
+            {
+                "stock": ["RECV", "SRC"],
+                "action_label": ["open", "reduce"],
+                "current_weight": [0.0, 0.20],
+                "portfolio_daily_receiver_score": [0.92, 0.04],
+                "portfolio_daily_source_score": [0.04, 0.88],
+                "portfolio_daily_cash_score": [0.12, 0.12],
+                "portfolio_daily_receiver_candidate_mask": [1.0, 0.0],
+                "portfolio_daily_source_candidate_mask": [0.0, 1.0],
+                "portfolio_daily_receiver_executability": [0.96, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.20, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.94],
+                "portfolio_daily_source_release_capacity": [0.0, 0.20],
+                "portfolio_daily_source_release_quality": [0.0, 0.90],
+                "portfolio_daily_source_economic_release_score": [0.0, 0.88],
+                "portfolio_daily_source_opportunity_cost": [0.0, 0.02],
+                "portfolio_daily_source_forward_excess_5d": [0.0, -0.045],
+                "portfolio_daily_source_receiver_forward_spread": [0.090, 0.090],
+                "portfolio_daily_receiver_forward_excess_5d": [0.055, 0.055],
+                "portfolio_daily_allocation_transfer_score": [0.90, 0.90],
+                "portfolio_daily_allocation_dead_branch_risk": [0.02, 0.02],
+                "portfolio_daily_receiver_realized_deploy_proxy": [0.90, 0.0],
+                "portfolio_daily_source_realized_release_proxy": [0.0, 0.88],
+                "market_downside_pressure": [0.04, 0.04],
+                "cash_regime_pressure": [0.04, 0.04],
+                "portfolio_cash_pressure": [0.72, 0.72],
+                "multi_horizon_forward_risk": [0.05, 0.05],
+                "cash_defense_value": [0.04, 0.04],
+                "portfolio_drawdown_20d": [-0.006, -0.006],
+                "forward_benchmark_return_1d": [0.018, 0.018],
+                "forward_benchmark_return_3d": [0.038, 0.038],
+            }
+        )
+        weak_frame = strong_frame.assign(
+            portfolio_daily_source_score=[0.04, 0.16],
+            portfolio_daily_source_release_quality=[0.0, 0.18],
+            portfolio_daily_source_economic_release_score=[0.0, 0.14],
+            portfolio_daily_source_opportunity_cost=[0.0, 0.72],
+            portfolio_daily_source_forward_excess_5d=[0.0, 0.090],
+            portfolio_daily_source_receiver_forward_spread=[-0.040, -0.040],
+            portfolio_daily_allocation_transfer_score=[0.18, 0.18],
+            portfolio_daily_allocation_dead_branch_risk=[0.78, 0.78],
+            market_downside_pressure=[0.70, 0.70],
+            cash_regime_pressure=[0.72, 0.72],
+            multi_horizon_forward_risk=[0.74, 0.74],
+            portfolio_drawdown_20d=[-0.16, -0.16],
+            forward_benchmark_return_1d=[-0.030, -0.030],
+            forward_benchmark_return_3d=[-0.060, -0.060],
+        )
+
+        strong = build_unified_allocation_problem(strong_frame)
+        weak = build_unified_allocation_problem(weak_frame)
+
+        required = {
+            "portfolio_daily_allocation_net_utility_target",
+            "portfolio_daily_allocation_credit_closure_target",
+            "portfolio_daily_allocation_resource_efficiency_target",
+        }
+        self.assertTrue(required.issubset(strong.columns))
+        self.assertGreater(
+            float(strong["portfolio_daily_allocation_net_utility_target"].mean()),
+            float(weak["portfolio_daily_allocation_net_utility_target"].mean()) + 0.35,
+        )
+        self.assertGreater(
+            float(strong["portfolio_daily_allocation_credit_closure_target"].mean()),
+            float(weak["portfolio_daily_allocation_credit_closure_target"].mean()) + 0.35,
+        )
+        self.assertGreater(
+            float(strong["portfolio_daily_allocation_resource_efficiency_target"].mean()),
+            float(weak["portfolio_daily_allocation_resource_efficiency_target"].mean()) + 0.30,
+        )
+
+    def test_r42_solver_uses_utility_to_deploy_when_credit_closure_is_strong(self) -> None:
+        base = pd.DataFrame(
+            {
+                "stock": ["RECV", "SRC"],
+                "action_label": ["open", "reduce"],
+                "current_weight": [0.0, 0.20],
+                "portfolio_daily_receiver_score": [0.92, 0.0],
+                "portfolio_daily_source_score": [0.0, 0.88],
+                "portfolio_daily_cash_score": [0.20, 0.20],
+                "portfolio_daily_receiver_candidate_mask": [1.0, 0.0],
+                "portfolio_daily_source_candidate_mask": [0.0, 1.0],
+                "portfolio_daily_receiver_executability": [0.96, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.20, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.94],
+                "portfolio_daily_source_release_capacity": [0.0, 0.20],
+                "portfolio_daily_source_release_quality": [0.0, 0.90],
+                "portfolio_daily_source_economic_release_score": [0.0, 0.88],
+                "portfolio_daily_source_opportunity_cost": [0.0, 0.02],
+                "portfolio_daily_source_forward_excess_5d": [0.0, -0.050],
+                "portfolio_daily_source_receiver_forward_spread": [0.100, 0.100],
+                "portfolio_daily_receiver_forward_excess_5d": [0.060, 0.060],
+                "portfolio_daily_allocation_transfer_score": [0.92, 0.92],
+                "portfolio_daily_allocation_dead_branch_risk": [0.02, 0.02],
+                "market_downside_pressure": [0.42, 0.42],
+                "cash_regime_pressure": [0.36, 0.36],
+                "portfolio_cash_pressure": [0.70, 0.70],
+                "multi_horizon_forward_risk": [0.40, 0.40],
+                "cash_defense_value": [0.32, 0.32],
+                "portfolio_drawdown_20d": [-0.055, -0.055],
+                "forward_benchmark_return_1d": [0.006, 0.006],
+                "forward_benchmark_return_3d": [0.012, 0.012],
+            }
+        )
+        broken = base.assign(
+            portfolio_daily_source_score=[0.0, 0.12],
+            portfolio_daily_source_release_quality=[0.0, 0.16],
+            portfolio_daily_source_economic_release_score=[0.0, 0.12],
+            portfolio_daily_source_opportunity_cost=[0.0, 0.82],
+            portfolio_daily_source_forward_excess_5d=[0.0, 0.11],
+            portfolio_daily_source_receiver_forward_spread=[-0.050, -0.050],
+            portfolio_daily_allocation_transfer_score=[0.16, 0.16],
+            portfolio_daily_allocation_dead_branch_risk=[0.82, 0.82],
+        )
+
+        constraints = AllocationOptimizerConstraints(
+            cash_reserve_target=0.05,
+            turnover_limit=0.40,
+            max_position_weight=0.25,
+            min_trade_weight=0.0,
+        )
+        strong_solution = solve_semidifferentiable_allocation(base, constraints=constraints)
+        broken_solution = solve_semidifferentiable_allocation(broken, constraints=constraints)
+
+        self.assertLess(strong_solution.target_weight["SRC"], 0.20)
+        self.assertGreater(strong_solution.target_weight["RECV"], broken_solution.target_weight["RECV"] + 0.05)
+        self.assertGreater(
+            strong_solution.diagnostics["portfolio_daily_allocation_credit_closure_mean"],
+            broken_solution.diagnostics["portfolio_daily_allocation_credit_closure_mean"] + 0.20,
+        )
+
+    def test_r42_loss_profile_and_resource_gate_are_not_long_r41_reuse(self) -> None:
+        profile = "split_heads_portfolio_daily_utility_credit_allocation_r42"
+        loss_profile = "alpha_result_value_budget_split_v27"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 24)
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 16)
+
+        config = LOSS_PROFILE_CONFIGS[loss_profile]
+        sample_weights = config["sample_scalar_loss_weights"]
+        multi_weights = config["multi_objective_loss_weights"]
+        for name in (
+            "portfolio_daily_allocation_net_utility_target",
+            "portfolio_daily_allocation_credit_closure_target",
+            "portfolio_daily_allocation_resource_efficiency_target",
+        ):
+            self.assertIn(name, sample_weights)
+            self.assertGreater(sample_weights[name], 2.5)
+        self.assertGreater(multi_weights["portfolio_utility_credit_closure_total"], 0.70)
+        self.assertGreater(
+            multi_weights["portfolio_utility_credit_closure_total"],
+            multi_weights["action_total"] * 16.0,
+        )
+
+        bad_trial = TrialResult(
+            trial_id=1,
+            trial_tag="bad_trial",
+            status="completed",
+            phase="screening",
+            role="",
+            source_trial_tag="",
+            trial_config=SEARCH_PROFILE_BASE_TRIALS[profile],
+            protocol_summary_path="",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-1.0,
+            score_breakdown={},
+            primary_metrics={
+                "training_evidence_status": "sufficient",
+                "annual_return": 0.02,
+                "monthly_return_mean": -0.004,
+                "max_drawdown": -0.21,
+                "cash_timing_quality_1d": -0.14,
+                "portfolio_daily_receiver_target_count": 6,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                "portfolio_daily_source_target_count": 0,
+                "portfolio_daily_source_realized_sell_rate": 0.0,
+            },
+            promotion_status="shadow_only",
+            failed_checks=["cash_timing_quality_1d", "max_drawdown"],
+            gate_pass_ratio=0.25,
+            passed_check_count=3,
+            total_check_count=12,
+        )
+        gate = _resource_gate_after_screening(profile, [bad_trial], selected_trial_count=3)
+        self.assertFalse(gate["continue_screening"])
+        self.assertTrue(gate["resource_gate_triggered"])
+        self.assertIn("source_release_dead", gate["failed_resource_checks"])
+        self.assertEqual(gate["estimated_saved_screening_trials"], 2)
+
+    def test_r42_utility_credit_loss_penalizes_disconnected_allocation(self) -> None:
+        targets = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.86, 0.08]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.10, 0.84]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.16, 0.20]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.88, 0.82]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.86, 0.84]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.82, 0.78]),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.tensor([0.18, 0.16]),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.tensor([0.16, 0.14]),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([0.78, 0.74]),
+            "portfolio_daily_allocation_drawdown_control_target": torch.tensor([0.14, 0.12]),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 0.0]),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 1.0]),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.82, 0.06]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.06, 0.80]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.16, 0.20]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.84, 0.78]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.82, 0.80]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.78, 0.74]),
+        }
+        bad_outputs = {
+            **good_outputs,
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.12, 0.70]),
+            "portfolio_daily_unified_source_score": torch.tensor([0.68, 0.12]),
+            "portfolio_daily_unified_cash_score": torch.tensor([0.78, 0.74]),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.24, 0.20]),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.22, 0.18]),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.18, 0.16]),
+        }
+
+        good_loss = _portfolio_utility_credit_closure_loss(good_outputs, targets)
+        bad_loss = _portfolio_utility_credit_closure_loss(bad_outputs, targets)
+
+        self.assertGreater(float(bad_loss), float(good_loss) + 0.25)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(
