@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-08`
+快照日期：`2026-05-09`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -57,7 +57,7 @@
 - r47 fixed-slot solver 合同：训练时按 date 构造 receiver/source/held support candidate bank，选择固定 `slot_count` 的可执行候选，使用同一 `CvxpyLayer` 分别求解 predicted utility 与 oracle utility 下的组合权重；loss 必须惩罚 solver regret、solution tracking、gross / turnover / position residual、unsupported mass、false-source mass、cash timing、path risk 与 solver success rate。
 - r47 dependency / diagnostics 合同：yolos 环境必须安装 `cvxpy`、`cvxpylayers`、`diffcp` 与至少 `SCS` / `DIFFCP` solver；训练 diagnostics 必须输出 `supports_portfolio_cvxpy_convex_allocation_layer`、`portfolio_cvxpy_convex_layer_status` 与 `portfolio_cvxpy_convex_allocation_terms`。若 solver 不可用，只能显式 fallback 到 r46 surrogate 并记录 status，不能默认为 r47 策略成功。
 - r47 profile 合同：`split_heads_portfolio_daily_true_convex_solver_allocation_r47` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 10`、`min_epochs = 7`，用于先验证真实 solver layer 的训练成本、梯度稳定性、source release、cash timing、drawdown 和 support 诊断，不得静默升级为长训。
-- r48 full-universe convex OPE 合同：`alpha_result_value_budget_split_v33` 必须让 `portfolio_full_universe_convex_allocation_total` 成为主导 allocation loss，r47 fixed-slot loss 不得继续主导；r48 必须把 solver 候选银行扩大到 full-universe aware 48-slot，并用 `candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，不能让旧 mask 决定全部梯度入口。
+- r48 full-universe convex OPE 合同：`alpha_result_value_budget_split_v33` 必须让 `portfolio_full_universe_convex_allocation_total` 成为主导 allocation loss，r47 fixed-slot loss 不得继续主导；r48 必须把 solver 候选银行扩大到 full-universe aware resource-safe slot bank，并用 `candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，不能让旧 mask 决定全部梯度入口。当前训练口径显式固定为 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2`、`train_solver_enabled = false`，最终 diagnostics 仍运行 solver terms；不得再把 r48 误写成未受资源约束的 48-slot / 3-day 长训口径。
 - r48 realistic objective 合同：r48 solver / loss 必须显式输出并训练 `liquidity_impact_loss`、`concentration_risk_loss`、`universe_expansion_loss`，将 liquidity support、impact cost、factor concentration proxy、dynamic cost、turnover、risk pressure 与 path risk 纳入真实 solver 诊断；不得只用固定 cost / position cap / turnover slack 解释为现实可交易约束。
 - r48 OPE 合同：r48 必须输出 `ope_lower_bound_loss`、`propensity_support_loss` 与 `doubly_robust_gap_loss`，用 behavior propensity、当前持仓行为收益 proxy、policy lower bound 与 DR gap 对离线分布外动作保持保守；dry-run / 单测只能证明接线，不能证明离线策略安全。
 - r48 profile 合同：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`，用于先验证 full-universe coverage、OPE、成本风险和 solver 成本，不得静默升级为长训。
@@ -96,7 +96,7 @@
 - r45 代码合同证明：conservative transport allocation 已完成实现、合同测试与 dry-run，覆盖 v30 loss profile、offline support / OOD action 保守损失、training/validation 接线、diagnostics support flag、r45 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r46 代码合同证明：differentiable convex allocation 已完成实现与合同测试，覆盖 v31 loss profile、torch 图内 allocation surrogate、KKT/constraint residual、data-driven 日级约束 target、executable support targets、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 风险、training/validation 接线、component diagnostics support flag、r46 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
 - r47 代码合同证明：true convex solver allocation 已完成实现与合同测试，覆盖 v32 loss profile、真实 `cvxpy` / `cvxpylayers` fixed-slot solver layer、DPP 合同检查、solver regret / solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、training/validation 接线、diagnostics support flag、r47 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r48 代码合同证明：full-universe convex OPE allocation 已完成实现、合同测试与 dry-run，覆盖 v33 loss profile、48-slot full-universe aware candidate bank、candidate coverage loss、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap、training/validation 接线、diagnostics support flags、r48 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
+- r48 正式研究事实：full-universe convex OPE allocation 已完成实现、合同测试、dry-run、formal screening 与 confirmatory，覆盖 v33 loss profile、resource-safe full-universe aware candidate bank、candidate coverage loss、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap、training/validation 接线、diagnostics support flags、r48 search profile 与更严格 resource gate。tag `self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3` 完成 `1` 个 screening 与 `1` 个 confirmatory，但 stable confirm 为空；confirm_01 为 `training_evidence_status = insufficient`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`。因此 r48 是失败 verdict，不是策略有效性事实。
 
 ## 当前禁止事项
 - 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
@@ -105,7 +105,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r48 已取代 r47/r46/r45/r44/r43/r42/r41 长训成为下一优先 research 入口；后续若继续推进，必须先用 r48 短 screening + resource gate 验证 full-universe candidate coverage、真实 solver layer、source/receiver/cash credit assignment、cash timing、drawdown、support conservatism、tail false-source、solver regret、OPE lower bound、propensity support、现实成本风险与资源效率是否有正信号，而不是直接启动 r47/r46/r45/r44/r43/r42/r41 full clean 或重跑 r40 clean_r1。
+- 短期：r48 已完成正式 screening + confirmatory，但未过 stable confirm。后续若继续推进，必须以 r48 失败证据为起点，优先解决 source release dead、exposure utilization floor、training evidence edge、cash timing gate 与 stable confirm 失败；不能直接启动 r47/r46/r45/r44/r43/r42/r41 full clean，也不能重复 r48 同 tag 或只延长训练就宣称结构问题已解决。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -126,7 +126,7 @@
 - r41-r45：已完成代码合同或 dry-run 的保留检查点，分别聚焦 risk-sensitive、utility-credit、primal-dual decision、entropic transport 与 conservative transport；尚无 study verdict，不再作为默认长训入口。
 - r46：已完成代码合同的保留检查点，聚焦 differentiable convex allocation、torch 图内 KKT/constraint residual、data-driven 日级约束 target、executable support、false-source pressure、cash timing、source/receiver shortfall、behavior-support / OPE、路径级 CVaR / drawdown / OCE、legacy action loss 归零与更严格短筛 resource gate；尚无 study verdict。
 - r47：已完成代码合同的保留检查点，聚焦真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer、DPP 合同、predicted/oracle solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、r46 surrogate fallback 与更严格短筛 resource gate；尚无 study verdict。
-- r48：当前已完成代码合同的下一优先 research profile，聚焦 full-universe aware 48-slot solver、候选覆盖、旧 mask 盲区修复、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap 与更严格短筛 resource gate；尚无 study verdict。
+- r48：当前已完成代码合同与正式研究的失败 profile，聚焦 full-universe aware resource-safe solver、候选覆盖、旧 mask 盲区修复、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap 与更严格短筛 resource gate；study verdict 为 `research / shadow_only` 且不可 promotion。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

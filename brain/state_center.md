@@ -1,6 +1,6 @@
 # 主脑状态中枢
 
-快照日期：`2026-05-08`
+快照日期：`2026-05-09`
 
 ## 当前接管摘要
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
@@ -9,7 +9,7 @@
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
 ## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，最新代码入口为 r48 full-universe convex OPE allocation（基于真实 `cvxpy` / `cvxpylayers` solver layer，扩展候选覆盖、现实成本风险与 OPE 诊断），二者均属 `research / shadow_only`。
+- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，r48 full-universe convex OPE allocation 已完成 formal screening + confirmatory 但 stable confirm 为空，仍属 `research / shadow_only`，不能 promotion / live / active artifact。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 
@@ -23,7 +23,7 @@
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
-- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r48 只是最新代码合同与 dry-run 入口，即使已扩展到 full-universe aware solver / OPE 诊断，也仍尚无正式 screening / confirm verdict，不得 promotion、不得 live、不得改 active artifact。
+- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r48 已有正式 screening / confirmatory verdict，但同样 stable confirm 为空且 source / exposure / training evidence 未闭合，不得 promotion、不得 live、不得改 active artifact。详细指标只读 `daily_research/brain/state_center.md` 与 `daily_research/brain/operations_center.md`。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 
 ## 当前风险

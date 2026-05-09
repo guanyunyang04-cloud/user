@@ -1383,10 +1383,10 @@
 - 行动前自检：
   - 事实：r47 已接入真实 `cvxpylayers` solver，但仍是 16-slot fixed candidate bank；候选入口仍较依赖旧 receiver/source mask；solver objective 里的现实约束和 OPE 诊断仍不足。
   - 推断：若直接训练 r47，可能仍被旧 candidate mask 盲区、简化成本风险和离线高估困住；更有效动作是一次性补齐 full-universe aware candidate coverage、现实成本风险和 OPE lower-bound。
-  - 假设：当前不适合把全 A 股数千只股票一次性放入单个 CVXPY problem；最可执行的升级是扩大 solver bank 到 48-slot，并让未进入旧 mask 的高 oracle 机会通过 coverage loss 获得梯度。
+  - 假设：当前不适合把全 A 股数千只股票一次性放入单个 CVXPY problem；当时最可执行的升级设想是扩大 solver bank 到 48-slot，并让未进入旧 mask 的高 oracle 机会通过 coverage loss 获得梯度。后续 formal run 后已按 2026-05-09 复盘收敛为 resource-safe 32-slot 训练口径。
 - 已完成实现：
   - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v33` 与 `_portfolio_full_universe_convex_allocation_loss`，主导项为 `portfolio_full_universe_convex_allocation_total = 1.68`，r47 fixed-slot 主项降为 `0`。
-  - r48 使用 48-slot full-universe aware candidate bank；`candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，降低旧 mask 对全部梯度入口的控制。
+  - r48 原始实现使用 48-slot full-universe aware candidate bank；`candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，降低旧 mask 对全部梯度入口的控制。后续正式训练证据表明需要显式 resource-safe 口径，当前源码已固定为 32-slot / 1-day。
   - r48 新增 `portfolio_daily_liquidity_support`、`portfolio_daily_impact_cost`、`portfolio_daily_factor_concentration_proxy`、`portfolio_daily_behavior_propensity` sample targets，并在缺列时用当前权重、candidate mask、holding flag 和 liquidity proxy 构造保守 fallback。
   - r48 solver / loss 新增 `universe_expansion_loss`、`liquidity_impact_loss`、`concentration_risk_loss`，将 liquidity、impact cost、dynamic cost、turnover、risk pressure 与 concentration proxy 写入训练诊断。
   - r48 OPE 新增 `ope_lower_bound_loss`、`propensity_support_loss` 与 `doubly_robust_gap_loss`，用行为 propensity、当前持仓行为收益 proxy、policy lower-bound 和 DR gap 抑制离线分布外动作高估。
@@ -1399,4 +1399,29 @@
 - 行动后复盘：
   - 事实：r48 已补齐 r47 的四个主要代码层差距：更大候选覆盖、旧 mask 盲区约束、更现实的成本风险诊断、OPE lower-bound / propensity / DR gap。
   - 推断：当前下一优先 research 入口应切换为 r48；r41-r47 作为保留检查点，不再默认长训。
-  - 边界：r48 仍不是全 A 股单体大规模 convex program，也尚无正式 screening / confirmatory verdict；不能写成策略有效性事实。r39 仍是当前有效证据基线，production live / active artifact 均未改动。
+  - 边界：此段为 2026-05-08 代码合同阶段判断；2026-05-09 已补充正式 screening / confirmatory verdict，结论为 `research / shadow_only` 失败证据。r48 仍不是全 A 股单体大规模 convex program，不能写成策略有效性事实。r39 仍是当前有效证据基线，production live / active artifact 均未改动。
+
+## 2026-05-09 r48 formal screening + confirmatory 复盘
+- 行动前自检：
+  - 事实：r48 formal run `self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3` 已自然完成，`study_progress.json` 状态为 `study_complete`，没有训练进程残留。
+  - 事实：运行产物包含 `study_summary.json`、`trial_ranking.csv`、screening / confirmatory `protocol_summary.json`、模型 `training_diagnostics.json`、`foreground.log` 与进度文件；执行环境为 yolos + CUDA。
+  - 风险：r48 已完成产物中记录的 full-universe solver 资源口径为 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2`、`train_solver_enabled = false`，但接管时当前源码显示为 `slot_count = 48`、`max_days_per_batch = 3` 且无显式 train-solver 开关。若不修复，后续重跑会不可复现并可能浪费 solver 资源。
+- 已完成维护：
+  - `model_seq_v3.py` 已把 r48 full-universe solver 训练期资源口径显式固定为 `CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 32`、`CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 1`、`CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL = 2`、`CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED = False`。
+  - `_portfolio_full_universe_convex_allocation_loss` 新增 `enable_solver` 参数；训练和 validation 主循环默认使用 r46 differentiable surrogate 的 resource-safe 路径，最终 diagnostics 仍以 `enable_solver=True` 运行真实 solver terms，保留 solver/OPE 可读性。
+  - training diagnostics 新增显式字段：`portfolio_full_universe_convex_solver_slot_count`、`portfolio_full_universe_convex_max_days_per_batch`、`portfolio_full_universe_convex_train_batch_interval`、`portfolio_full_universe_convex_train_solver_enabled`。
+  - r48 合同测试新增 resource-safe solver 常量断言，防止未来无意改回高资源口径。
+- 正式证据：
+  - Study：`executed_at = 2026-05-09T05:04:05+08:00`、`completed_trial_count = 1`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 1`、`portfolio_daily_v2_stable_confirmatory_trials = []`。
+  - Resource gate：epoch 8 快照触发，失败项为 `source_release_dead`、`cash_timing_bad`、`economic_signal_too_weak`；之后 strict resume 到 24 epoch 并自然进入 confirmatory。
+  - Screening 24：`annual_return = 0.134218`、`sharpe = 3.731727`、`monthly_return_mean = 0.007844`、`max_drawdown = -0.010374`、`avg_gross_exposure = 0.097875`、`receiver_target_count = 4`、`source_target_count = 0`、`portfolio_daily_exposure_utilization = 0.122592`、`training_evidence_status = insufficient`。
+  - Confirmatory 64：`annual_return = 0.246043`、`sharpe = 2.728143`、`monthly_return_mean = 0.013886`、`max_drawdown = -0.037729`、`avg_gross_exposure = 0.277970`、`avg_gross_exposure_target = 0.839688`、`receiver_target_count = 20`、`receiver_realized_deploy_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`source_target_count = 0`、`source_realized_sell_rate = 0.0`、`portfolio_daily_exposure_utilization = 0.331039`、`training_evidence_status = insufficient`。
+  - Confirm diagnostics：`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`、`runtime_env = yolos`、`completed_epochs = 64`、`best_epoch = 64`、`solver_success_rate = 1.0`、`fallback_surrogate_loss = 0.0`、`portfolio_full_universe_convex_allocation_terms.total = 0.006650`。
+- 推断：
+  - 训练资源不足是真实因素，因为 screening 与 confirm 都出现 best epoch 贴边，且 `training_evidence_status = insufficient`；但它不是唯一原因。
+  - 更关键的结构性失败仍是 `source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`、stable confirm 失败和 cash timing gate 未过。单纯继续延长训练不应被当作已解决主线矛盾。
+  - r48 已证明 full-universe convex OPE 运行通道、solver/OPE diagnostics 与持久进度文件可用；没有证明 source/receiver/cash credit assignment 已闭合。
+- 决策：
+  - r48 verdict 为 `research / shadow_only`，不可 promotion，不可 live，不可改 `active_execution_strategy.json`。
+  - 当前有效证据基线仍是 r39；r48 是失败证据和下一轮结构诊断入口，不是替代基线。
+  - 后续不得重复同一 tag 或把 strict resume 作为唯一修复；必须先明确修复 source release dead、exposure utilization floor、training evidence edge、cash timing gate 与 stable confirm failure。

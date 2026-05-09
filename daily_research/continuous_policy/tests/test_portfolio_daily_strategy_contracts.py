@@ -2393,6 +2393,10 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT,
             model_seq_v3.CVXPY_CONVEX_ALLOCATION_SLOT_COUNT,
         )
+        self.assertEqual(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT, 32)
+        self.assertEqual(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH, 1)
+        self.assertEqual(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL, 2)
+        self.assertFalse(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED)
         self.assertIn(loss_profile, model_seq_v3.LOSS_PROFILE_CONFIGS)
 
     def test_r48_full_universe_candidate_coverage_penalizes_old_mask_blind_spots(self) -> None:

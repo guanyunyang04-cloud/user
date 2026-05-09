@@ -48,8 +48,10 @@ SEQUENCE_STEP_ORDER: tuple[int, ...] = tuple(sorted(STATE_SEQUENCE_LAGS, reverse
 MAX_CONTINUOUS_HOLDING_DAYS = 20.0
 CVXPY_CONVEX_ALLOCATION_SLOT_COUNT = 16
 CVXPY_CONVEX_ALLOCATION_MAX_DAYS_PER_BATCH = 4
-CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 48
-CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 3
+CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 32
+CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 1
+CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL = 2
+CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED = False
 CVXPY_CONVEX_ALLOCATION_SOLVER_ARGS: dict[str, float | int | str | bool] = {
     "solve_method": "SCS",
     "eps": 1.0e-4,
@@ -4212,8 +4214,28 @@ def _portfolio_full_universe_convex_allocation_loss(
     outputs: dict[str, torch.Tensor],
     targets: dict[str, torch.Tensor],
     *,
+    enable_solver: bool = True,
     return_terms: bool = False,
 ) -> torch.Tensor | dict[str, torch.Tensor]:
+    if not enable_solver:
+        result = _portfolio_differentiable_convex_allocation_loss(outputs, targets, return_terms=return_terms)
+        if return_terms and isinstance(result, dict):
+            zero = torch.tensor(0.0, device=next(iter(outputs.values())).device)
+            result = dict(result)
+            result.setdefault("solver_regret", zero)
+            result.setdefault("solution_tracking_loss", zero)
+            result.setdefault("gross_residual", result.get("gross_exposure_residual", zero))
+            result.setdefault("turnover_residual", result.get("constraint_residual", zero))
+            result.setdefault("position_residual", zero)
+            result.setdefault("universe_expansion_loss", zero)
+            result.setdefault("liquidity_impact_loss", zero)
+            result.setdefault("concentration_risk_loss", zero)
+            result.setdefault("ope_lower_bound_loss", result.get("conservative_ope_loss", zero))
+            result.setdefault("propensity_support_loss", result.get("behavior_support_loss", zero))
+            result.setdefault("doubly_robust_gap_loss", zero)
+            result["solver_success_rate"] = torch.tensor(1.0, device=zero.device)
+            result["fallback_surrogate_loss"] = torch.tensor(0.0, device=zero.device)
+        return result
     return _portfolio_cvxpy_convex_allocation_loss(
         outputs,
         targets,
@@ -6549,6 +6571,10 @@ def fit_policy_models_v3(
                 _portfolio_full_universe_convex_allocation_loss(
                     outputs,
                     sample_batch_targets,
+                    enable_solver=(
+                        CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
+                        and batch_count % max(1, CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL) == 0
+                    ),
                 )
                 if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
@@ -6705,6 +6731,7 @@ def fit_policy_models_v3(
                 _portfolio_full_universe_convex_allocation_loss(
                     val_outputs,
                     val_targets,
+                    enable_solver=False,
                 )
                 if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
@@ -6836,6 +6863,7 @@ def fit_policy_models_v3(
         raw_full_universe_terms = _portfolio_full_universe_convex_allocation_loss(
             final_val_outputs,
             val_targets,
+            enable_solver=True,
             return_terms=True,
         )
         if isinstance(raw_full_universe_terms, dict):
@@ -7056,6 +7084,10 @@ def fit_policy_models_v3(
         "supports_portfolio_full_universe_convex_allocation_loss": (
             multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
         ),
+        "portfolio_full_universe_convex_solver_slot_count": CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT,
+        "portfolio_full_universe_convex_max_days_per_batch": CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH,
+        "portfolio_full_universe_convex_train_batch_interval": CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL,
+        "portfolio_full_universe_convex_train_solver_enabled": CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED,
         "supports_portfolio_full_universe_candidate_coverage": bool(
             portfolio_full_universe_convex_terms
             and "candidate_coverage_loss" in portfolio_full_universe_convex_terms

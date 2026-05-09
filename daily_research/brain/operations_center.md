@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-08`
+快照日期：`2026-05-09`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/` 或 `episodic_memory.md`。
@@ -67,7 +67,7 @@
 - r39 最新 bounded confirm 证据入口：`self_opt_study_r39_allocation_objective_consolidation_execblend_20260502`；读取 `study_summary.json`、`protocols/self_opt_study_r39_allocation_objective_consolidation_execblend_20260502__confirm_01/protocol_summary.json` 与对应 `training_diagnostics.json`，重点看 final objective 是否真正进入执行评分、source count 是否达标、cash timing / drawdown 是否仍失败、source false-sell 是否仍受控。
 - 当前有效证据基线仍是 r39：`alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`，对应 simulator calibration 为 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
 - 当前已完成 r40 clean rerun：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`，使用 `alpha_result_value_budget_split_v25`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`，已完整生成 study/protocol/model/ranking 证据；但 stable confirm 为空，仍不得替代 r39 证据基线。
-- r41-r47 已完成代码入口或 dry-run，但均为保留检查点，不是当前默认长训入口；当前优先 research 入口为 r48：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` / `alpha_result_value_budget_split_v33` / `epochs = 8` / `min_epochs = 6` / `batch_size = 256` / 更严格 `resource_gate`。r48 已补 full-universe candidate coverage、真实 solver、现实成本风险与 OPE 诊断，但仍未生成正式 screening/protocol/ranking 证据，不能作为正式 verdict。
+- r41-r47 已完成代码入口或 dry-run，但均为保留检查点，不是当前默认长训入口；r48 formal screening + confirmatory 已完成：`self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3` / `split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` / `alpha_result_value_budget_split_v33` / `allocation_layer_v1`。r48 已补 full-universe candidate coverage、真实 solver、现实成本风险与 OPE 诊断，但 stable confirm 为空，仍不能作为正式 promotion verdict。当前有效证据基线仍是 r39。
 - 月度收益评价继续读取 `monthly_returns.csv` / `shadow_monthly_returns.csv`，重点看 `monthly_return_mean`、`monthly_win_rate`、`monthly_worst_return`、`monthly_max_consecutive_loss_months`、`monthly_consistency_score`。
 - `analyze_behavior_gap.py` 会写 latest 行为摘要；多条审计必须顺序执行，不得并行抢写。
 
@@ -160,9 +160,15 @@
 ## 2026-05-08 r48 full-universe convex OPE allocation 操作入口
 - r48 profile / loss：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` / `alpha_result_value_budget_split_v33`。
 - r48 objective / budget：`end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1`。
-- r48 默认 screening 资源口径：profile 内 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。
+- r48 默认 screening 资源口径：profile 内 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`；命令行未显式传入 `--epochs` / `--min-epochs` 时不得覆盖该默认值。当前源码显式固定 full-universe solver 训练资源口径为 `CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 32`、`CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 1`、`CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL = 2`、`CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED = False`；最终 diagnostics 仍读取 solver terms，不得再把当前源码误读成 48-slot / 3-day 训练长跑口径。
 - r48 诊断读取：训练 diagnostics 需优先读取 `portfolio_full_universe_convex_allocation_terms`，其中 `candidate_coverage_loss`、`universe_expansion_loss`、`liquidity_impact_loss`、`concentration_risk_loss`、`ope_lower_bound_loss`、`propensity_support_loss`、`doubly_robust_gap_loss`、`solver_success_rate`、`fallback_surrogate_loss` 与 `total` 是判断是否值得正式 screening 的关键前置信号。
 - r48 dry-run 命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --dry-run`。
 - r48 合同测试命令：`$env:KMP_DUPLICATE_LIB_OK='TRUE'; C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m unittest daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_profile_extends_r47_with_ope_and_larger_slot_bank daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_candidate_coverage_penalizes_old_mask_blind_spots daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts.PortfolioDailyStrategyContractsTest.test_r48_full_universe_ope_and_realistic_cost_terms_respond_to_bad_support`。
-- r48 若启动正式研究，优先只跑短 screening；若 `resource_gate.triggered = true`，不得进入 confirmatory。只有 resource gate 未触发且 screening 同时显示 solver success、candidate coverage、source release、cash timing、drawdown、OPE、propensity support、cost/risk diagnostics、receiver deploy 与经济信号有同步改善时，才允许规划 confirmatory。
-- r48 当前只允许作为 research / shadow 入口；代码合同、dry-run 和单测通过不等于策略有效，不得 promotion、不得 live、不得改 active artifact。
+- r48 formal run 已完成，tag：`self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3`。优先读取：
+  - `daily_research/output/continuous_policy/studies/self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3/study_summary.json`
+  - `daily_research/output/continuous_policy/studies/self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3/trial_ranking.csv`
+  - `daily_research/output/continuous_policy/protocols/self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3__trial_01/protocol_summary.json`
+  - `daily_research/output/continuous_policy/protocols/self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3__confirm_01/protocol_summary.json`
+  - `daily_research/output/continuous_policy/models/self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3__confirm_01__train/training_diagnostics.json`
+- r48 已知结果：`completed_trial_count = 1`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 1`、`portfolio_daily_v2_stable_confirmatory_trials = []`；confirm_01 为 `annual_return = 0.246043`、`sharpe = 2.728143`、`monthly_return_mean = 0.013886`、`max_drawdown = -0.037729`、`receiver_target_count = 20`、`receiver_realized_deploy_rate = 1.0`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`、`training_evidence_status = insufficient`。失败项：`training_evidence_sufficient`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`；stable confirm failed checks 为 `source_training_evidence_sufficient`、`confirm_training_evidence_sufficient`、`confirm_gate_pass`、`confirm_source_count_floor`、`confirm_exposure_utilization_floor`。
+- r48 当前只允许作为 research / shadow 失败证据；不得 promotion、不得 live、不得改 active artifact。后续若继续研究，不能重复同一 tag 或直接延长训练当作唯一修复，必须先解决 source dead、exposure utilization 低和 training evidence edge。
