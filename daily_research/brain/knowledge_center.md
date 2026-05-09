@@ -867,10 +867,14 @@
 - 新知识 3：现金分支既不能死，也不能无条件释放。
   - 低风险、高部署压力下的高 cash score 应触发 `over_cash_loss`。
   - 高风险、现金防守目标高时，现金不足应通过 `cash_timing_loss` / `cash_defense_mean` 体现；因此 r49 不是简单 cash penalty。
-  - 2026-05-09 加固后，`cash_defense_loss`、`deploy_pressure_mean`、`risk_pressure_mean`、`risk_cash_need_mean` 与 `predicted_gross_mean` 必须一起读；只看混合的 `cash_timing_loss` 仍可能把“该防守时没留现金”和“该部署时现金过高”混成同一类问题。
+  - 2026-05-09 加固后，`cash_defense_loss`、`cash_coherence_loss`、`deploy_pressure_mean`、`risk_pressure_mean`、`risk_cash_need_mean` 与 `predicted_gross_mean` 必须一起读；只看混合的 `cash_timing_loss` 仍可能把“该防守时没留现金”和“该部署时现金过高”混成同一类问题。
 - 新知识 4：false-source 保护必须和 source breadth 同时存在。
   - 为恢复 source count 粗暴放宽 positive-forward / hard-negative source 会回退到 r36/r37 的强势误卖。
   - r49 合同测试要求强 positive-forward / hard-negative source 高分释放会提高 `false_source_loss`，同时 clean source 供给不足会提高 `source_dead_loss`。
+  - source 释放不能只靠一个大仓位解释；`source_breadth_loss` 用于把 source count / breadth 从后验 resource gate 前置进训练目标。
+- 新知识 4b：同一持仓不能同时高分扮演 source 和 receiver。
+  - held add 可以是 receiver 语义，held reduce/exit 可以是 source 语义，但同一标的同日同时高 receiver 与高 source 会造成自我融资幻觉。
+  - `role_overlap_loss` 用于惩罚同一持仓在 receiver/source 两个角色头上同时被高分激活。
 - 新知识 5：resource gate 需要把 exposure utilization 纳入早停。
   - r48 证明只看 source dead、cash timing、drawdown 和经济信号仍可能遗漏“高目标暴露但实际低暴露”的保守分支。
   - r49 resource gate 在 `avg_gross_exposure_target >= 0.42` 时要求 `portfolio_daily_exposure_utilization >= 0.50`，用于提前停止低信息长训。

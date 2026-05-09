@@ -4404,8 +4404,11 @@ def _portfolio_capital_flow_closure_loss(
         "over_cash_loss",
         "cash_defense_loss",
         "cash_timing_loss",
+        "cash_coherence_loss",
         "exposure_gap_loss",
         "flow_conservation_loss",
+        "role_overlap_loss",
+        "source_breadth_loss",
         "receiver_demand_mean",
         "desired_receiver_flow_mean",
         "effective_receiver_flow_mean",
@@ -4662,6 +4665,11 @@ def _portfolio_capital_flow_closure_loss(
             1.0,
         )
         cash_timing_loss = 0.62 * over_cash_loss + 0.38 * cash_defense_loss
+        cash_coherence_loss = torch.mean(torch.square(cash_score[day_mask] - day_cash_score)) * torch.clamp(
+            0.50 + 0.25 * deploy_pressure + 0.25 * day_risk,
+            0.0,
+            1.0,
+        )
         predicted_gross = torch.clamp(current_gross - effective_source_flow + effective_receiver_flow, 0.0, 1.0)
         exposure_gap_loss = (
             torch.square(torch.relu(day_gross_target - predicted_gross)) * torch.clamp(deploy_pressure - day_risk + 0.10, 0.0, 1.0)
@@ -4669,6 +4677,25 @@ def _portfolio_capital_flow_closure_loss(
         )
         source_excess_loss = torch.square(torch.relu(effective_source_flow - effective_receiver_flow - risk_cash_need - 0.02))
         flow_conservation_loss = torch.square(torch.relu(effective_receiver_flow - effective_source_flow - cash_release)) + 0.45 * source_excess_loss
+        role_overlap_capacity = current_day * receiver_support_day * source_support_day
+        role_overlap_loss = (
+            (
+                role_overlap_capacity
+                * receiver_score[day_mask]
+                * source_score[day_mask]
+            ).sum()
+            / torch.clamp(role_overlap_capacity.sum(), min=1.0e-6)
+        ) * torch.clamp(source_need + desired_receiver_flow + 0.20, 0.0, 1.0)
+        desired_source_breadth = torch.minimum(
+            torch.tensor(3.0, device=device, dtype=receiver_score.dtype),
+            torch.clamp(source_support_day.sum(), 0.0, 3.0),
+        )
+        soft_source_breadth = (source_support_day * torch.clamp(predicted_source_intensity / 0.36, 0.0, 1.0)).sum()
+        source_breadth_loss = (
+            torch.square(torch.relu(desired_source_breadth - soft_source_breadth))
+            / torch.clamp(desired_source_breadth, min=1.0)
+            * torch.clamp(source_need + 0.50 * deploy_pressure, 0.0, 1.0)
+        )
 
         component_values = {
             "receiver_demand_loss": receiver_demand_loss,
@@ -4678,8 +4705,11 @@ def _portfolio_capital_flow_closure_loss(
             "over_cash_loss": over_cash_loss,
             "cash_defense_loss": cash_defense_loss,
             "cash_timing_loss": cash_timing_loss,
+            "cash_coherence_loss": cash_coherence_loss,
             "exposure_gap_loss": exposure_gap_loss,
             "flow_conservation_loss": flow_conservation_loss,
+            "role_overlap_loss": role_overlap_loss,
+            "source_breadth_loss": source_breadth_loss,
             "receiver_demand_mean": desired_receiver_flow,
             "desired_receiver_flow_mean": desired_receiver_flow,
             "effective_receiver_flow_mean": effective_receiver_flow,
@@ -4703,8 +4733,11 @@ def _portfolio_capital_flow_closure_loss(
             + 0.30 * false_source_loss
             + 0.22 * over_cash_loss
             + 0.22 * cash_timing_loss
+            + 0.16 * cash_coherence_loss
             + 0.24 * exposure_gap_loss
             + 0.24 * flow_conservation_loss
+            + 0.24 * role_overlap_loss
+            + 0.20 * source_breadth_loss
         )
 
     if not day_losses:
