@@ -6,6 +6,12 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  # Keep the compiled numerical stack in conda where possible.
+  # The current yolos env historically mixed conda MKL/intel-openmp,
+  # PyTorch's bundled Intel OpenMP DLL, and pip numerical wheels. The torch
+  # libiomp5md.dll copy is isolated in .openmp_conflict_backup_20260509.
+  # Validate OpenMP without KMP_DUPLICATE_LIB_OK:
+  #   python daily_research/tools/openmp_runtime_check.py --strict
   - numpy>=1.24,<3
   - pandas>=2.0,<3
   - scipy>=1.10,<2

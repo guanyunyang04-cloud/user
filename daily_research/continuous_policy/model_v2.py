@@ -3,15 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import torch
 from torch import nn

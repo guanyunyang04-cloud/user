@@ -4,6 +4,8 @@
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理
 - strongest-model research winner、deployable learned-control、live mainline 必须显式区分
 - `daily_research/environment.yml` 现在是依赖环境真源
+- 当前 `yolos` 环境的 OpenMP runtime 冲突已原地修复：PyTorch wheel 自带 `torch/lib/libiomp5md.dll` 已隔离到 `torch/lib/.openmp_conflict_backup_20260509/libiomp5md.dll`，运行时只保留 conda `Library/bin/libiomp5md.dll`
+- OpenMP 根治验收标准：在不设置 `KMP_DUPLICATE_LIB_OK` 的前提下，`daily_research/tools/openmp_runtime_check.py --strict` 必须通过，并且 `numpy`、`torch`、`sklearn`、`cvxpy/cvxpylayers`、`daily_research.continuous_policy.model_seq_v3` 的导入组合不再触发 `OMP: Error #15`
 - `daily_research/execution/run_execution_app.py` 现在是执行侧统一应用入口
 - `daily_research/execution/run_execution_web.py` 现在是执行侧本地 Web 控制台入口
 - 执行侧运行时状态、事件、锁与作业日志统一落到 `daily_research/output/execution_app`
@@ -854,3 +856,21 @@
 - 新知识 4：下一轮应从“防错强度”转向“防错约束下的有效交易”。
   - 保留 r38 hard-negative 和 source distribution 约束，但把 open/reduce/exit 质量、cash timing、monthly return、drawdown、receiver/source breadth 和 exposure utilization 写进同一个 transfer-level allocation objective。
   - 不应为了恢复收益直接放宽 source clean-pass 或 positive-forward 惩罚，否则会回退到 r36/r37 的强势误卖。
+
+## 2026-05-09 r49 capital-flow closure 知识沉淀
+- 新知识 1：solver 成功不等于资金流闭合。
+  - r48 confirm 的 `solver_success_rate = 1.0` 与 `fallback_surrogate_loss = 0.0` 只能证明 solver 通道可用。
+  - 同一结果中 `source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039` 说明 receiver/source/cash credit assignment 仍可断裂。
+- 新知识 2：receiver demand 必须有资金来源解释。
+  - `receiver_realized_deploy_rate = 1.0` 不是充分成功条件；如果 clean source supply 或 cash release 没有同步闭合，模型仍可能靠低暴露或现金分支绕开资金责任链。
+  - r49 将 `funding_shortfall_loss`、`source_dead_loss`、`flow_conservation_loss` 与 `exposure_gap_loss` 作为一组共同残差，而不是分散在后验 gate。
+- 新知识 3：现金分支既不能死，也不能无条件释放。
+  - 低风险、高部署压力下的高 cash score 应触发 `over_cash_loss`。
+  - 高风险、现金防守目标高时，现金不足应通过 `cash_timing_loss` / `cash_defense_mean` 体现；因此 r49 不是简单 cash penalty。
+  - 2026-05-09 加固后，`cash_defense_loss`、`deploy_pressure_mean`、`risk_pressure_mean`、`risk_cash_need_mean` 与 `predicted_gross_mean` 必须一起读；只看混合的 `cash_timing_loss` 仍可能把“该防守时没留现金”和“该部署时现金过高”混成同一类问题。
+- 新知识 4：false-source 保护必须和 source breadth 同时存在。
+  - 为恢复 source count 粗暴放宽 positive-forward / hard-negative source 会回退到 r36/r37 的强势误卖。
+  - r49 合同测试要求强 positive-forward / hard-negative source 高分释放会提高 `false_source_loss`，同时 clean source 供给不足会提高 `source_dead_loss`。
+- 新知识 5：resource gate 需要把 exposure utilization 纳入早停。
+  - r48 证明只看 source dead、cash timing、drawdown 和经济信号仍可能遗漏“高目标暴露但实际低暴露”的保守分支。
+  - r49 resource gate 在 `avg_gross_exposure_target >= 0.42` 时要求 `portfolio_daily_exposure_utilization >= 0.50`，用于提前停止低信息长训。

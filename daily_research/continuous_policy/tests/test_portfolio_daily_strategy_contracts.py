@@ -25,6 +25,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _cvxpy_convex_layer_status,
     _decision_focused_allocation_regret_loss,
     _portfolio_differentiable_convex_allocation_loss,
+    _portfolio_capital_flow_closure_loss,
     _portfolio_cvxpy_convex_allocation_loss,
     _portfolio_entropic_transport_decision_loss,
     _portfolio_full_universe_convex_allocation_loss,
@@ -2503,6 +2504,226 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(float(bad_terms["liquidity_impact_loss"]), float(good_terms["liquidity_impact_loss"]) + 0.001)
         self.assertGreater(float(bad_terms["propensity_support_loss"]), float(good_terms["propensity_support_loss"]) + 0.0001)
         self.assertGreater(float(bad_terms["concentration_risk_loss"]), float(good_terms["concentration_risk_loss"]) + 0.001)
+
+    def test_r49_capital_flow_closure_profile_targets_source_receiver_cash_residual(self) -> None:
+        profile = "split_heads_portfolio_daily_capital_flow_closure_r49"
+        loss_profile = "alpha_result_value_budget_split_v34"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 8)
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 256)
+
+        multi_weights = LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], 1.60)
+        self.assertGreater(
+            multi_weights["portfolio_capital_flow_closure_total"],
+            multi_weights["portfolio_full_universe_convex_allocation_total"],
+        )
+
+        bad_trial = TrialResult(
+            trial_id=1,
+            trial_tag="bad_trial",
+            status="completed",
+            phase="screening",
+            role="",
+            source_trial_tag="",
+            trial_config=SEARCH_PROFILE_BASE_TRIALS[profile],
+            protocol_summary_path="",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-1.0,
+            score_breakdown={},
+            primary_metrics={
+                "training_evidence_status": "sufficient",
+                "annual_return": 0.14,
+                "monthly_return_mean": 0.004,
+                "max_drawdown": -0.08,
+                "cash_timing_quality_1d": -0.001,
+                "avg_gross_exposure_target": 0.60,
+                "portfolio_daily_exposure_utilization": 0.34,
+                "portfolio_daily_receiver_target_count": 20,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                "portfolio_daily_source_target_count": 0,
+                "portfolio_daily_source_realized_sell_rate": 0.0,
+            },
+            promotion_status="shadow_only",
+            failed_checks=["confirm_source_count_floor", "confirm_exposure_utilization_floor"],
+            gate_pass_ratio=0.25,
+            passed_check_count=3,
+            total_check_count=12,
+        )
+        gate = _resource_gate_after_screening(profile, [bad_trial], selected_trial_count=3)
+        self.assertTrue(gate["resource_gate_triggered"])
+        self.assertFalse(gate["continue_screening"])
+        self.assertIn("source_release_dead", gate["failed_resource_checks"])
+        self.assertIn("exposure_utilization_low", gate["failed_resource_checks"])
+
+    def test_r49_capital_flow_loss_penalizes_receiver_deploy_without_source_or_cash_release(self) -> None:
+        targets = {
+            "date_code": torch.zeros(6, dtype=torch.float32),
+            "current_weight": torch.tensor([0.0, 0.0, 0.16, 0.14, 0.12, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.90, 0.86, 0.0, 0.0, 0.0, 0.78], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.0, 0.0, 0.82, 0.78, 0.72, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((6,), 0.10, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.90, 0.86, 0.74, 0.70, 0.66, 0.78], dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.92, 0.88, 0.76, 0.72, 0.68, 0.80], dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.86, 0.82, 0.82, 0.78, 0.72, 0.78], dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.84, 0.80, 0.78, 0.74, 0.70, 0.76], dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((6,), 0.82, dtype=torch.float32),
+            "portfolio_daily_receiver_forward_excess_5d": torch.tensor([0.10, 0.08, 0.0, 0.0, 0.0, 0.07], dtype=torch.float32),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([0.0, 0.0, -0.08, -0.06, -0.04, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.0, 0.0, 0.84, 0.80, 0.76, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_source_spread_reward": torch.tensor([0.80, 0.76, 0.10, 0.10, 0.10, 0.70], dtype=torch.float32),
+            "gross_exposure_target": torch.full((6,), 0.68, dtype=torch.float32),
+            "turnover_budget": torch.full((6,), 0.42, dtype=torch.float32),
+            "max_position_weight_target": torch.full((6,), 0.22, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((6,), 0.06, dtype=torch.float32),
+        }
+        good_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.88, 0.84, 0.04, 0.04, 0.04, 0.76], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.04, 0.82, 0.78, 0.72, 0.04], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((6,), 0.10, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.88, 0.84, 0.74, 0.70, 0.66, 0.76], dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.90, 0.86, 0.76, 0.72, 0.68, 0.78], dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.84, 0.80, 0.82, 0.78, 0.72, 0.76], dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.82, 0.78, 0.78, 0.74, 0.70, 0.74], dtype=torch.float32),
+        }
+        bad_outputs = {
+            **good_outputs,
+            "portfolio_daily_unified_source_score": torch.full((6,), 0.03, dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((6,), 0.92, dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((6,), 0.12, dtype=torch.float32),
+        }
+
+        good_terms = _portfolio_capital_flow_closure_loss(good_outputs, targets, return_terms=True)
+        bad_terms = _portfolio_capital_flow_closure_loss(bad_outputs, targets, return_terms=True)
+        self.assertIsInstance(good_terms, dict)
+        self.assertIsInstance(bad_terms, dict)
+        self.assertGreater(float(bad_terms["total"]), float(good_terms["total"]) + 0.04)
+        self.assertGreater(float(bad_terms["source_dead_loss"]), float(good_terms["source_dead_loss"]) + 0.002)
+        self.assertGreater(float(bad_terms["funding_shortfall_loss"]), float(good_terms["funding_shortfall_loss"]) + 0.002)
+        self.assertGreater(float(bad_terms["over_cash_loss"]), float(good_terms["over_cash_loss"]) + 0.05)
+        for term_name in (
+            "receiver_demand_mean",
+            "clean_source_supply_mean",
+            "cash_release_mean",
+            "cash_defense_mean",
+            "flow_conservation_loss",
+            "total",
+        ):
+            self.assertIn(term_name, good_terms)
+            self.assertGreaterEqual(float(good_terms[term_name]), 0.0)
+
+    def test_r49_capital_flow_loss_keeps_false_source_protection(self) -> None:
+        targets = {
+            "date_code": torch.zeros(4, dtype=torch.float32),
+            "current_weight": torch.tensor([0.0, 0.0, 0.18, 0.16], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.82, 0.78, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.0, 0.0, 0.80, 0.76], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((4,), 0.12, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((4,), 0.78, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((4,), 0.80, dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((4,), 0.78, dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.full((4,), 0.76, dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((4,), 0.78, dtype=torch.float32),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([0.0, 0.0, 0.12, 0.10], dtype=torch.float32),
+            "portfolio_daily_source_positive_forward_penalty": torch.tensor([0.0, 0.0, 0.88, 0.82], dtype=torch.float32),
+            "portfolio_daily_source_hard_negative_penalty": torch.tensor([0.0, 0.0, 0.80, 0.76], dtype=torch.float32),
+            "portfolio_daily_source_tail_false_sell_penalty": torch.tensor([0.0, 0.0, 0.82, 0.78], dtype=torch.float32),
+            "portfolio_daily_source_opportunity_cost_penalty": torch.tensor([0.0, 0.0, 0.76, 0.72], dtype=torch.float32),
+            "portfolio_daily_source_release_preference": torch.tensor([0.0, 0.0, 0.06, 0.06], dtype=torch.float32),
+            "gross_exposure_target": torch.full((4,), 0.55, dtype=torch.float32),
+            "turnover_budget": torch.full((4,), 0.34, dtype=torch.float32),
+            "max_position_weight_target": torch.full((4,), 0.22, dtype=torch.float32),
+        }
+        protected_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.80, 0.76, 0.04, 0.04], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.04, 0.04, 0.04], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((4,), 0.14, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((4,), 0.76, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((4,), 0.78, dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((4,), 0.74, dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.full((4,), 0.74, dtype=torch.float32),
+        }
+        false_source_outputs = {
+            **protected_outputs,
+            "portfolio_daily_unified_source_score": torch.tensor([0.04, 0.04, 0.90, 0.86], dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((4,), 0.86, dtype=torch.float32),
+        }
+
+        protected_terms = _portfolio_capital_flow_closure_loss(protected_outputs, targets, return_terms=True)
+        false_terms = _portfolio_capital_flow_closure_loss(false_source_outputs, targets, return_terms=True)
+        self.assertGreater(float(false_terms["false_source_loss"]), float(protected_terms["false_source_loss"]) + 0.10)
+        self.assertGreater(float(false_terms["total"]), float(protected_terms["total"]) + 0.01)
+
+    def test_r49_capital_flow_terms_separate_cash_defense_from_dead_cash(self) -> None:
+        targets = {
+            "date_code": torch.zeros(5, dtype=torch.float32),
+            "current_weight": torch.tensor([0.18, 0.16, 0.14, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([1.0, 1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.0, 0.0, 0.0, 0.28, 0.24], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.34, 0.32, 0.30, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((5,), 0.88, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((5,), 0.24, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((5,), 0.22, dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((5,), 0.32, dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.full((5,), 0.30, dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((5,), 0.10, dtype=torch.float32),
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.full((5,), 0.92, dtype=torch.float32),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.full((5,), 0.90, dtype=torch.float32),
+            "portfolio_daily_allocation_drawdown_control_target": torch.full((5,), 0.88, dtype=torch.float32),
+            "market_downside_pressure": torch.full((5,), 0.90, dtype=torch.float32),
+            "cash_regime_pressure": torch.full((5,), 0.84, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((5,), 0.90, dtype=torch.float32),
+            "gross_exposure_target": torch.full((5,), 0.46, dtype=torch.float32),
+            "turnover_budget": torch.full((5,), 0.24, dtype=torch.float32),
+            "max_position_weight_target": torch.full((5,), 0.22, dtype=torch.float32),
+        }
+        under_defended_outputs = {
+            "portfolio_daily_unified_receiver_score": torch.full((5,), 0.08, dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.full((5,), 0.24, dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((5,), 0.08, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((5,), 0.20, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((5,), 0.20, dtype=torch.float32),
+            "portfolio_daily_allocation_credit_closure_target": torch.full((5,), 0.30, dtype=torch.float32),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.full((5,), 0.28, dtype=torch.float32),
+        }
+        defended_outputs = {
+            **under_defended_outputs,
+            "portfolio_daily_unified_cash_score": torch.full((5,), 0.88, dtype=torch.float32),
+        }
+
+        under_terms = _portfolio_capital_flow_closure_loss(under_defended_outputs, targets, return_terms=True)
+        defended_terms = _portfolio_capital_flow_closure_loss(defended_outputs, targets, return_terms=True)
+        self.assertGreater(float(under_terms["cash_defense_loss"]), float(defended_terms["cash_defense_loss"]) + 0.20)
+        self.assertLess(float(defended_terms["over_cash_loss"]), 0.01)
+        for term_name in (
+            "cash_defense_loss",
+            "desired_receiver_flow_mean",
+            "effective_receiver_flow_mean",
+            "effective_source_flow_mean",
+            "source_need_mean",
+            "risk_cash_need_mean",
+            "current_cash_mean",
+            "predicted_gross_mean",
+            "deploy_pressure_mean",
+            "risk_pressure_mean",
+        ):
+            self.assertIn(term_name, defended_terms)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

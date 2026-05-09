@@ -13,11 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# The Windows yolos environment can load Intel OpenMP through both pandas/numpy
-# and torch. Set this before third-party imports so the foreground orchestrator
-# can run instead of failing before any training starts.
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-
 import pandas as pd
 
 if __package__ in {None, ""}:
@@ -1025,6 +1020,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [256],
     },
+    "split_heads_portfolio_daily_capital_flow_closure_r49": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v34"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [2.2e-4, 2.6e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.30, 0.34],
+        "daily_dropout": [0.16],
+        "batch_size": [256],
+    },
 }
 
 
@@ -1973,6 +1985,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 8,
         "min_epochs": 6,
     },
+    "split_heads_portfolio_daily_capital_flow_closure_r49": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v34",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 2.4e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.32,
+        "daily_dropout": 0.16,
+        "batch_size": 256,
+        "epochs": 8,
+        "min_epochs": 6,
+    },
 }
 
 
@@ -2032,6 +2063,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_differentiable_convex_allocation_r46": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_true_convex_solver_allocation_r47": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_capital_flow_closure_r49": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2109,6 +2141,17 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "monthly_return_floor": 0.0025,
         "annual_return_floor": 0.12,
         "receiver_unrealized_cap": 0.030,
+    },
+    "split_heads_portfolio_daily_capital_flow_closure_r49": {
+        "min_completed_screening": 1,
+        "source_count_floor": 3.0,
+        "source_sell_rate_floor": 0.35,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
     },
 }
 
@@ -5287,6 +5330,8 @@ def _resource_gate_after_screening(
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
     monthly_return = float(metrics.get("monthly_return_mean", 0.0) or 0.0)
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
+    exposure_utilization = float(metrics.get("portfolio_daily_exposure_utilization", 0.0) or 0.0)
+    avg_gross_exposure_target = float(metrics.get("avg_gross_exposure_target", 0.0) or 0.0)
     failed: list[str] = []
     if source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
         config.get("source_sell_rate_floor", 0.20) or 0.20
@@ -5302,14 +5347,25 @@ def _resource_gate_after_screening(
         config.get("monthly_return_floor", -0.002) or -0.002
     ):
         failed.append("economic_signal_too_weak")
+    if "exposure_utilization_floor" in config and avg_gross_exposure_target >= 0.42:
+        if exposure_utilization < float(config.get("exposure_utilization_floor", 0.50) or 0.50):
+            failed.append("exposure_utilization_low")
 
     trigger_reasons = set(failed)
     terminal_failure = (
         "source_release_dead" in trigger_reasons
-        and ("cash_timing_bad" in trigger_reasons or "drawdown_bad" in trigger_reasons)
+        and (
+            "cash_timing_bad" in trigger_reasons
+            or "drawdown_bad" in trigger_reasons
+            or "exposure_utilization_low" in trigger_reasons
+        )
     ) or (
         "receiver_deploy_not_clean" in trigger_reasons
-        and ("economic_signal_too_weak" in trigger_reasons or "drawdown_bad" in trigger_reasons)
+        and (
+            "economic_signal_too_weak" in trigger_reasons
+            or "drawdown_bad" in trigger_reasons
+            or "exposure_utilization_low" in trigger_reasons
+        )
     )
     remaining = max(0, int(selected_trial_count) - len(screening_results))
     return {
@@ -5329,6 +5385,8 @@ def _resource_gate_after_screening(
             "max_drawdown": max_drawdown,
             "monthly_return_mean": monthly_return,
             "annual_return": annual_return,
+            "portfolio_daily_exposure_utilization": exposure_utilization,
+            "avg_gross_exposure_target": avg_gross_exposure_target,
         },
     }
 

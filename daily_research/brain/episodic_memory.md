@@ -1425,3 +1425,87 @@
   - r48 verdict 为 `research / shadow_only`，不可 promotion，不可 live，不可改 `active_execution_strategy.json`。
   - 当前有效证据基线仍是 r39；r48 是失败证据和下一轮结构诊断入口，不是替代基线。
   - 后续不得重复同一 tag 或把 strict resume 作为唯一修复；必须先明确修复 source release dead、exposure utilization floor、training evidence edge、cash timing gate 与 stable confirm failure。
+
+## 2026-05-09 OpenMP runtime 冲突审计复盘
+- 行动前自检：
+  - 事实：主脑和操作中枢长期把 `KMP_DUPLICATE_LIB_OK=TRUE` 写成 Windows 运行兼容规则；r19-r48 多数训练、测试和审计命令都依赖该前缀。
+  - 事实：在不设置该变量时，`numpy -> torch -> sklearn`、`torch -> numpy -> sklearn` 与 `daily_research.continuous_policy.model_seq_v3` 导入会触发 `OMP: Error #15: Initializing libiomp5md.dll, but found libiomp5md.dll already initialized`。
+  - 事实：当前 `yolos` 环境内同时存在 `Lib/site-packages/torch/lib/libiomp5md.dll` 与 `Library/bin/libiomp5md.dll` 两份 Intel OpenMP runtime，并且还有 `vcomp140.dll` 与 `libgomp-1.dll` 等其他 OpenMP runtime 家族。
+- 已完成维护：
+  - 新增 `daily_research/tools/openmp_runtime_check.py`，用于枚举当前 Python 环境内 OpenMP runtime DLL，并在不设置 `KMP_DUPLICATE_LIB_OK` 的子进程中验证 `numpy/torch/sklearn`、`cvxpy/cvxpylayers` 与 continuous_policy 导入组合。
+  - 运行 `openmp_runtime_check.py` 已确认当前 `yolos` 的 `duplicate_intel_openmp_runtime = true`、`mixed_openmp_runtime_families = true`、`strict_ok = false`、`root_fix_required = true`；`--strict` 按预期返回非零。
+  - `state_center.md`、`operations_center.md` 与 `knowledge_center.md` 已把 `KMP_DUPLICATE_LIB_OK=TRUE` 从默认解决方案降级为临时兼容开关，并把 `openmp_runtime_check.py --strict` 写成根治验收入口。
+  - `daily_research/environment.yml` 已补充依赖环境说明：后续重建或迁移环境后必须在无 `KMP_DUPLICATE_LIB_OK` 时通过 OpenMP strict check。
+- 推断：
+  - OpenMP 问题不是策略逻辑 bug，而是 Windows 二进制数值栈混装导致的进程级 runtime 冲突；它会影响训练、测试、study orchestrator 和导入检查的稳定性。
+  - 继续依赖 `KMP_DUPLICATE_LIB_OK=TRUE` 有潜在性能退化、崩溃或静默错误风险；真正根治应新建干净环境并统一数值运行时来源，而不是在当前 `yolos` 中手工删除 DLL。
+- 决策：
+  - 当前 `yolos` 作为既有研究环境不做原地破坏性迁移；短期可保留临时兼容开关以读取历史产物和维持既有验证链路。
+  - 后续若要根治，优先新建 clean env，避免 pip/conda 数值栈混装，安装完成后以 `openmp_runtime_check.py --strict` 作为进入正式长训前的硬门槛。
+
+## 2026-05-09 yolos OpenMP 原地修复复盘
+- 行动前自检：
+  - 事实：用户明确要求只在 `yolos` 环境内解决，不走新建 clean env 路线。
+  - 事实：无 `KMP_DUPLICATE_LIB_OK` 时，`torch` 单独导入会触发 `OMP: Error #15`；设置该变量后用 `psutil` 观察到同一进程同时加载 `yolos/Library/bin/libiomp5md.dll` 与 `yolos/Lib/site-packages/torch/lib/libiomp5md.dll`。
+  - 风险：原地删除 DLL 不可取；必须使用可回滚隔离，并且先确认没有运行中的 Python 训练进程。
+- 已完成修复：
+  - 确认修复前无正在运行的 Python 进程。
+  - 将 `C:/Users/ASUS/miniconda3/envs/yolos/Lib/site-packages/torch/lib/libiomp5md.dll` 移动到同目录备份 `C:/Users/ASUS/miniconda3/envs/yolos/Lib/site-packages/torch/lib/.openmp_conflict_backup_20260509/libiomp5md.dll`，保留 SHA256 备份可回滚；运行时只保留 `Library/bin/libiomp5md.dll`。
+  - 更新 `daily_research/tools/openmp_runtime_check.py`，忽略 `.openmp_conflict_backup_*` 目录中的备份 DLL，避免把已隔离副本误判为运行时冲突。
+  - 移除 `run_self_optimizing_study.py`、`model_v2.py`、`portfolio_daily_ranking_gate_report.py` 中自动设置 `KMP_DUPLICATE_LIB_OK=TRUE` 的兼容代码。
+  - 更新 `state_center.md`、`operations_center.md`、`knowledge_center.md` 与 `environment.yml`，把当前状态改为 yolos 内已修复，并记录 strict check 验收口径。
+- 验收事实：
+  - 无 `KMP_DUPLICATE_LIB_OK` 时，`import torch` 成功且 `torch.cuda.is_available() = True`。
+  - 无 `KMP_DUPLICATE_LIB_OK` 时，`numpy/pandas/scipy/sklearn/torch/cvxpy/cvxpylayers/lightgbm` 组合导入成功。
+  - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/openmp_runtime_check.py --strict` 通过：`duplicate_intel_openmp_runtime = false`、`strict_ok = true`、`root_fix_required = false`。
+- 决策：
+  - 后续 yolos 下训练、测试和审计命令不应再默认设置 `KMP_DUPLICATE_LIB_OK=TRUE`。
+  - 如 PyTorch 被 pip/conda 重装，必须重新运行 `openmp_runtime_check.py --strict`；若 torch 自带 `libiomp5md.dll` 回来并再次触发冲突，按同一备份隔离流程处理或重建依赖。
+  - 回滚方式：把备份目录中的 `libiomp5md.dll` 移回 `torch/lib/`，但只有在 torch 无法加载或上游依赖明确要求时才允许回滚。
+
+## 2026-05-09 r49 capital-flow closure 代码合同复盘
+- 行动前自检：
+  - 事实：r48 formal screening + confirmatory 已完成但失败，核心失败不是 solver 通道，而是 `source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`、`training_evidence_status = insufficient` 与 stable confirm 为空。
+  - 推断：继续加单边 source/cash penalty 或只延长 r48 训练，容易重复 r34-r48 的旧循环；更有效动作是把 receiver demand、clean source supply、cash release、cash defense、exposure gap 与资金守恒放进同一个日级残差。
+  - 边界：本轮只做 research profile 代码合同、dry-run 和测试；不启动长训，不改 production/live/active artifact。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v34`，将 `portfolio_capital_flow_closure_total = 1.72` 设为强于 r48 full-universe auxiliary 的主导资金闭合项，legacy action / duration loss 继续为 `0`。
+  - 新增 `_portfolio_capital_flow_closure_loss(return_terms=True)`，按 date 聚合计算 `receiver_demand_loss`、`funding_shortfall_loss`、`source_dead_loss`、`false_source_loss`、`over_cash_loss`、`cash_timing_loss`、`exposure_gap_loss`、`flow_conservation_loss`、`receiver_demand_mean`、`clean_source_supply_mean`、`cash_release_mean`、`cash_defense_mean` 与 `total`。
+  - training / validation 主循环已接入 `portfolio_capital_flow_closure_total`；训练 diagnostics 新增 `supports_portfolio_capital_flow_closure_loss`、`supports_portfolio_capital_flow_closure_diagnostics` 与 `portfolio_capital_flow_closure_terms`。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_capital_flow_closure_r49`，默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`、`loss_profile = alpha_result_value_budget_split_v34`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`。
+  - r49 resource gate 新增 exposure utilization floor：当 `avg_gross_exposure_target >= 0.42` 且 `portfolio_daily_exposure_utilization < 0.50` 时标记 `exposure_utilization_low`；若同时 source dead 或 receiver deploy 不干净，则阻断继续消耗 confirmatory 资源。
+  - 合同测试新增三项：r49 profile / resource gate 注册；receiver 有需求但 source 近零且现金过高的旧失败模式会提高 loss；强 positive-forward / hard-negative source 被高分释放仍会被 false-source loss 惩罚。
+- 验证：
+  - `py_compile` 通过：`model_seq_v3.py`、`run_self_optimizing_study.py`、`test_portfolio_daily_strategy_contracts.py`。
+  - r49 三项定向合同测试通过。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 66 项通过。
+  - r49 dry-run `self_opt_study_r49_capital_flow_closure_dry_run_20260509` 通过，确认 3 个 screening trial 使用 v34、8/6、batch 256、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与 source/exposure/cash resource gate。
+- 行动后复盘：
+  - 事实：r49 已把 r48 暴露的旧失败模式前置到训练目标、diagnostics、profile 与 resource gate，而不是只在最终 v2 gate 后验发现。
+  - 推断：r49 是当前最贴近“source / receiver / cash 同一资金流闭合”的 research 入口，比继续重训 r48 更有信息收益。
+  - 边界：r49 仍不是策略有效性事实；只有 formal screening / confirmatory 同时通过 training evidence、source count、source realized sell、exposure utilization、cash timing、drawdown、monthly quality 与 stable confirm，才可讨论替代 r39 或 promotion。
+
+## 2026-05-09 r49 接管后主脑维护复盘
+- 行动前自检：
+  - 事实：r49 代码合同、单测和 dry-run 已完成；唯一遗留守卫问题是 `operations_center.md` 超过 doc_guard 结构警告阈值。
+  - 推断：继续把 r45-r47 长命令保留在当前操作中心，会增加接管噪声并弱化 r49 当前入口纪律。
+  - 边界：本次维护只整理 brain 路由和验证状态，不启动正式训练，不改 live / active artifact。
+- 已完成动作：
+  - 将 `operations_center.md` 中 r45-r47 长操作块压缩为保留检查点索引；当前操作入口聚焦 r48 失败证据和 r49 capital-flow closure。
+  - 保留 r45-r47 的 research / shadow 边界、dry-run / contract gate 先行规则，以及“代码合同不等于策略有效”的判定纪律。
+- 行动后复盘：
+  - 事实：主操作中心已回到 doc_guard 行数阈值内；r49 仍是当前最新 research profile，但没有 formal screening / confirmatory verdict。
+  - 决策：后续如推进训练，仍必须先做无冲突进程、无同名 tag、contract/dry-run gate，并以前台持久日志和进度文件运行。
+
+## 2026-05-09 r49 diagnostics 加固复盘
+- 行动前自检：
+  - 事实：r49 已有 `cash_timing_loss`，但该项混合了低风险过高现金与高风险现金防守不足。
+  - 推断：如果下一轮 formal screening 只看混合 cash timing，可能重复把相反的现金问题当成一个方向调参。
+  - 边界：本次只增加 diagnostics 可解释性和合同测试，不改变 r49 训练权重、profile 资源口径或 live/active artifact。
+- 已完成动作：
+  - `portfolio_capital_flow_closure_terms` 新增 `cash_defense_loss`、`desired_receiver_flow_mean`、`effective_receiver_flow_mean`、`effective_source_flow_mean`、`source_need_mean`、`risk_cash_need_mean`、`current_cash_mean`、`predicted_gross_mean`、`deploy_pressure_mean` 与 `risk_pressure_mean`。
+  - 新增合同测试 `test_r49_capital_flow_terms_separate_cash_defense_from_dead_cash`，验证高风险防守不足会提高 `cash_defense_loss`，且高风险下合理现金不会被误判为 dead cash。
+  - 同步更新 `state_center.md`、`operations_center.md`、`knowledge_center.md` 与 `continuous_policy_design_contract.md`，把新增字段纳入正式读取口径。
+- 行动后复盘：
+  - 事实：r49 diagnostics 加固后仍只是代码合同，不是 strategy verdict。
+  - 决策：正式训练结果解析时，必须把 `cash_defense_loss` 和 `over_cash_loss` 分开读，并结合 `deploy_pressure_mean` / `risk_pressure_mean` 判断现金问题方向。

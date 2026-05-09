@@ -3,12 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from pathlib import Path
 from typing import Any
-
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import pandas as pd
 
