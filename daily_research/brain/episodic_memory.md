@@ -1530,3 +1530,23 @@
   - 事实：r50 已补齐“真实 solver 训练参与”和“fallback 诊断说真话”两个关键代码层差距，并把 r49 资金流闭合保留为主导项。
   - 推断：r50 比 r49 更接近用户目标，因为它不再只是最终诊断 solver 通道，而是让真实 convex layer 在短筛训练内参与一部分梯度；但它仍不是全 A 股一次性大规模 convex program，也没有 formal screening / confirmatory verdict。
   - 决策：r50 当前状态为 `research / shadow_only` 代码合同与 dry-run；不得 promotion、不得 live、不得改 `active_execution_strategy.json`。若后续启动正式研究，必须先做无冲突进程、无同名 tag、contract/dry-run gate，并以前台持久日志和进度文件运行短 screening。
+
+## 2026-05-09 r49 capital-flow closure 底层审阅与加固复盘
+- 行动前自检：
+  - 事实：r49 已把 receiver demand、clean source supply、cash release / defense、exposure gap 和 flow conservation 放进同一日级资金流残差；但 sample model 的 receiver/source/cash 仍是多个独立 sigmoid head，不是天然资金守恒结构。
+  - 推断：若只依赖原有资金短缺和守恒残差，模型仍可能出现三类旧框架残留：现金作为逐股票 head 在同一日内各说各话、同一持仓同时被高分标成 receiver 与 source、source 释放集中在极窄候选上但训练后才被 resource gate 发现。
+  - 边界：本次只加固 r49 capital-flow closure tensor loss 与合同测试，不启动 formal screening，不改 production / live / active artifact。
+- 已完成动作：
+  - `_portfolio_capital_flow_closure_loss` 新增 `cash_coherence_loss`，惩罚同一交易日内 cash head 离散，避免把全局现金决策错误表达成逐股票噪声。
+  - 新增 `role_overlap_loss`，直接惩罚同一持仓在 receiver/source 两个角色头上同时高分，降低自我融资幻觉。
+  - 新增 `source_breadth_loss`，把 source breadth / source count 从后验 resource gate 前置进训练目标，降低“一个大 source 解释全部资金释放”的退化风险。
+  - 合同测试新增 `test_r49_capital_flow_loss_requires_daily_cash_coherence` 与 `test_r49_capital_flow_loss_blocks_role_overlap_and_narrow_source`。
+  - 同步更新 `state_center.md`、`operations_center.md`、`knowledge_center.md` 与 `continuous_policy_design_contract.md`。
+- 验证：
+  - r49 六项定向合同测试通过。
+  - `py_compile` 通过：`model_seq_v3.py`、`run_self_optimizing_study.py`、`test_portfolio_daily_strategy_contracts.py`。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 74 项通过；仅有 cvxpylayers / numpy 2.0 copy keyword deprecation warning，非本次逻辑失败。
+- 行动后复盘：
+  - 事实：r49 现在不只惩罚“资金不够”，还惩罚 cash 日内不一致、source/receiver 同票冲突和 source 过窄。
+  - 推断：这比继续调单边 source/cash 权重更贴近“资金流闭合账本”的目标，也更适合在不触发 r50 solver 高负荷的前提下继续研究。
+  - 边界：r49 仍没有 formal screening / confirmatory verdict；代码合同通过不能写成策略有效，不能 promotion、不能 live、不能改 active artifact。
