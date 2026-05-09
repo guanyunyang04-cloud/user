@@ -64,6 +64,10 @@
 - r49 capital-flow closure 合同：`alpha_result_value_budget_split_v34` 必须让 `portfolio_capital_flow_closure_total` 成为强于 full-universe convex auxiliary 的主导资金闭合损失；loss 必须输出 `portfolio_capital_flow_closure_terms`，至少包含 `receiver_demand_loss`、`funding_shortfall_loss`、`source_dead_loss`、`false_source_loss`、`over_cash_loss`、`cash_defense_loss`、`cash_timing_loss`、`exposure_gap_loss`、`flow_conservation_loss`、`desired_receiver_flow_mean`、`effective_receiver_flow_mean`、`effective_source_flow_mean`、`risk_cash_need_mean`、`predicted_gross_mean`、`deploy_pressure_mean`、`risk_pressure_mean` 与 `total`。r49 的目标不是再加单边 source/cash penalty，而是让 receiver demand 必须被 clean source supply 或 cash release 解释，并能区分低风险死现金与高风险现金防守不足。
 - r49 旧失败阻断合同：当 receiver demand 高、clean source target 存在但 predicted source 近零，或 cash score 在低风险高部署压力下过高，或 avg gross exposure target 高而 exposure utilization 低时，训练 loss 和 resource gate 必须显式失败；不得把 `receiver_realized_deploy_rate = 1.0` 但 `source_target_count = 0` / `portfolio_daily_exposure_utilization` 低解释为结构成功。
 - r49 profile 合同：`split_heads_portfolio_daily_capital_flow_closure_r49` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`。resource gate 必须至少约束 source count、source realized sell rate、cash timing、drawdown、monthly / annual return、receiver unrealized deploy 与 exposure utilization。
+- r50 integrated convex capital-flow 合同：`alpha_result_value_budget_split_v35` 必须同时保留 r49 capital-flow closure、r48 full-universe/OPE、r47 true convex solver、r41 risk-sensitive 与 r45 offline support 的核心训练信号；`portfolio_cvxpy_convex_allocation_total` 必须大于 `0`，`portfolio_full_universe_convex_allocation_total` 与 `portfolio_capital_flow_closure_total` 必须继续保持主导地位，legacy `action_total` / `duration_total` 必须为 `0`。
+- r50 真实 solver 训练合同：全局 full-universe train solver 默认保持关闭，只有 `alpha_result_value_budget_split_v35` 通过 `CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES` 受控启用；训练期 solver 必须继续受 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2` 约束，不得静默升级为无界全 A 股大规模 solver 长训。
+- r50 diagnostics 合同：训练 diagnostics 必须输出 `portfolio_full_universe_convex_train_solver_effective` 与 train-solver loss profile 列表；当 full-universe loss 走 surrogate fallback 时，`solver_success_rate` 必须为 `0` 且 `fallback_surrogate_loss` 必须反映 surrogate total，不得再把 fallback 写成 solver 成功。
+- r50 profile 合同：`split_heads_portfolio_daily_integrated_convex_capital_flow_r50` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 6`、`min_epochs = 5`、`batch_size = 192`，用于先验证真实 solver 训练参与、资金闭合与资源消耗，不得静默升级为长训。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -109,7 +113,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r48 已完成正式 screening + confirmatory，但未过 stable confirm；r49 已把 source release dead、exposure utilization floor、cash timing 与资金流守恒写入代码合同。后续若正式推进，必须以前台持久日志运行 r49 短 screening，并用 `portfolio_capital_flow_closure_terms` 与 v2 / stability gate 联合判定；不能重复 r48 同 tag 或只延长训练就宣称结构问题已解决。
+- 短期：r48 已完成正式 screening + confirmatory，但未过 stable confirm；r49 已把 source release dead、exposure utilization floor、cash timing 与资金流守恒写入代码合同；r50 已把真实 solver 训练参与、full-universe/OPE 与 capital-flow closure 集成到短筛入口。后续若正式推进，优先以 r50 短 screening 验证 `portfolio_full_universe_convex_train_solver_effective`、`portfolio_capital_flow_closure_terms` 与 v2 / stability gate；不能重复 r48 同 tag 或只延长训练就宣称结构问题已解决。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 allocation objective / feedback。
 - 长期：推进真正的 listwise 组合日决策，让模型直接输出当日 source/receiver/cash allocation ranking，simulator guard 只作为最后安全裁剪。
 
@@ -132,6 +136,7 @@
 - r47：已完成代码合同的保留检查点，聚焦真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer、DPP 合同、predicted/oracle solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、r46 surrogate fallback 与更严格短筛 resource gate；尚无 study verdict。
 - r48：当前已完成代码合同与正式研究的失败 profile，聚焦 full-universe aware resource-safe solver、候选覆盖、旧 mask 盲区修复、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap 与更严格短筛 resource gate；study verdict 为 `research / shadow_only` 且不可 promotion。
 - r49：当前已完成代码合同与 dry-run 的最新 research profile，聚焦 capital-flow closure、receiver demand、clean source supply、cash release / defense、exposure gap、flow conservation、source dead 阻断与 false-source 保护；尚无 formal study verdict。
+- r50：当前已完成代码合同与 dry-run 的最新 integrated research profile，聚焦真实 convex solver 训练参与、full-universe/OPE、capital-flow closure、risk-sensitive/offline support、fallback diagnostics 修正与短筛 resource gate；尚无 formal study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

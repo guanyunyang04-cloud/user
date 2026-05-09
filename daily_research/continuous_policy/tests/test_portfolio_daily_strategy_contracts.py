@@ -29,6 +29,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _portfolio_cvxpy_convex_allocation_loss,
     _portfolio_entropic_transport_decision_loss,
     _portfolio_full_universe_convex_allocation_loss,
+    _loss_profile_enables_full_universe_train_solver,
     _portfolio_offline_conservative_support_loss,
     _portfolio_primal_dual_decision_loss,
     _portfolio_utility_credit_closure_loss,
@@ -2724,6 +2725,103 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             "risk_pressure_mean",
         ):
             self.assertIn(term_name, defended_terms)
+
+    def test_r50_integrated_convex_capital_flow_profile_enables_real_solver_training(self) -> None:
+        profile = "split_heads_portfolio_daily_integrated_convex_capital_flow_r50"
+        loss_profile = "alpha_result_value_budget_split_v35"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
+        self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 192)
+
+        multi_weights = LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_full_universe_convex_allocation_total"], 1.30)
+        self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], 1.60)
+        self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], multi_weights["portfolio_full_universe_convex_allocation_total"])
+        self.assertTrue(_loss_profile_enables_full_universe_train_solver(loss_profile))
+        self.assertFalse(_loss_profile_enables_full_universe_train_solver("alpha_result_value_budget_split_v34"))
+        self.assertFalse(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED)
+        self.assertIn(loss_profile, model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES)
+        self.assertIn(loss_profile, model_seq_v3.LOSS_PROFILE_CONFIGS)
+
+        bad_trial = TrialResult(
+            trial_id=1,
+            trial_tag="bad_r50_trial",
+            status="completed",
+            phase="screening",
+            role="",
+            source_trial_tag="",
+            trial_config=SEARCH_PROFILE_BASE_TRIALS[profile],
+            protocol_summary_path="",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-1.0,
+            score_breakdown={},
+            primary_metrics={
+                "training_evidence_status": "sufficient",
+                "annual_return": 0.16,
+                "monthly_return_mean": 0.004,
+                "max_drawdown": -0.08,
+                "cash_timing_quality_1d": -0.001,
+                "avg_gross_exposure_target": 0.62,
+                "portfolio_daily_exposure_utilization": 0.36,
+                "portfolio_daily_receiver_target_count": 18,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                "portfolio_daily_source_target_count": 0,
+                "portfolio_daily_source_realized_sell_rate": 0.0,
+            },
+            promotion_status="shadow_only",
+            failed_checks=["confirm_source_count_floor", "confirm_exposure_utilization_floor"],
+            gate_pass_ratio=0.25,
+            passed_check_count=3,
+            total_check_count=12,
+        )
+        gate = _resource_gate_after_screening(profile, [bad_trial], selected_trial_count=3)
+        self.assertTrue(gate["resource_gate_triggered"])
+        self.assertFalse(gate["continue_screening"])
+        self.assertIn("source_release_dead", gate["failed_resource_checks"])
+        self.assertIn("exposure_utilization_low", gate["failed_resource_checks"])
+
+    def test_r50_full_universe_fallback_terms_do_not_report_fake_solver_success(self) -> None:
+        outputs = {
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.82, 0.78, 0.12, 0.10], requires_grad=True),
+            "portfolio_daily_unified_source_score": torch.tensor([0.06, 0.06, 0.72, 0.68], requires_grad=True),
+            "portfolio_daily_unified_cash_score": torch.full((4,), 0.16, requires_grad=True),
+            "portfolio_daily_allocation_final_objective": torch.tensor([0.80, 0.76, 0.22, 0.20], requires_grad=True),
+            "portfolio_daily_allocation_net_utility_target": torch.tensor([0.82, 0.78, 0.20, 0.18], requires_grad=True),
+            "portfolio_daily_allocation_credit_closure_target": torch.tensor([0.76, 0.72, 0.70, 0.66], requires_grad=True),
+            "portfolio_daily_allocation_resource_efficiency_target": torch.tensor([0.78, 0.74, 0.18, 0.16], requires_grad=True),
+        }
+        targets = {
+            "date_code": torch.zeros(4, dtype=torch.float32),
+            "current_weight": torch.tensor([0.0, 0.0, 0.18, 0.14], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.84, 0.80, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.0, 0.0, 0.74, 0.70], dtype=torch.float32),
+            "portfolio_daily_unified_cash_score": torch.full((4,), 0.14, dtype=torch.float32),
+            "gross_exposure_target": torch.full((4,), 0.55, dtype=torch.float32),
+            "turnover_budget": torch.full((4,), 0.34, dtype=torch.float32),
+            "max_position_weight_target": torch.full((4,), 0.20, dtype=torch.float32),
+        }
+
+        terms = _portfolio_full_universe_convex_allocation_loss(
+            outputs,
+            targets,
+            enable_solver=False,
+            return_terms=True,
+        )
+        self.assertEqual(float(terms["solver_success_rate"]), 0.0)
+        self.assertGreater(float(terms["fallback_surrogate_loss"]), 0.0)
+        self.assertGreater(float(terms["total"]), 0.0)
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(

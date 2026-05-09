@@ -1509,3 +1509,24 @@
 - 行动后复盘：
   - 事实：r49 diagnostics 加固后仍只是代码合同，不是 strategy verdict。
   - 决策：正式训练结果解析时，必须把 `cash_defense_loss` 和 `over_cash_loss` 分开读，并结合 `deploy_pressure_mean` / `risk_pressure_mean` 判断现金问题方向。
+
+## 2026-05-09 r50 integrated convex capital-flow 代码合同复盘
+- 行动前自检：
+  - 事实：r49 已补资金流闭合，但 full-universe convex loss 在训练期仍默认不启用真实 solver；r48/r49 的最终 diagnostics 能运行 solver terms，不等于训练期 solver 参与了 credit assignment。
+  - 推断：继续只在 r49 上加局部权重，容易重复“诊断更完整但训练 credit assignment 仍半旧”的问题；更有效动作是新增 r50，把真实 solver 训练参与、full-universe/OPE 与 capital-flow closure 放入同一个短筛合同。
+  - 边界：本轮只做 research profile、代码合同、dry-run 和测试；不启动长训练，不改 production/live/active artifact。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v35`，保持 `action_total = 0.0`、`duration_total = 0.0`，并同时启用 `portfolio_cvxpy_convex_allocation_total = 0.24`、`portfolio_full_universe_convex_allocation_total = 1.34`、`portfolio_capital_flow_closure_total = 1.68`。
+  - 新增 `CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES = {"alpha_result_value_budget_split_v35"}` 与 `_loss_profile_enables_full_universe_train_solver`，让 r50 在训练期受控启用 full-universe solver，而不是改大全局开关。
+  - 训练 diagnostics 新增 `portfolio_full_universe_convex_train_solver_loss_profiles` 与 `portfolio_full_universe_convex_train_solver_effective`。
+  - 修正 `_portfolio_full_universe_convex_allocation_loss(enable_solver=False, return_terms=True)`：fallback path 不再伪报 `solver_success_rate = 1.0` 和 `fallback_surrogate_loss = 0.0`，而是记录 `solver_success_rate = 0` 与 surrogate total。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_integrated_convex_capital_flow_r50`，默认 `epochs = 6`、`min_epochs = 5`、`batch_size = 192`，使用 `end_to_end_allocation_layer_v1` / `allocation_layer_v1` / `end_to_end_allocation_layer_v1` 与 source/exposure/cash resource gate。
+  - 合同测试新增 r50 profile / solver-enable / resource-gate 测试，以及 fallback diagnostics 不伪报 solver 成功的回归测试。
+- 已完成验证：
+  - `py_compile` 通过：`model_seq_v3.py`、`run_self_optimizing_study.py`、`test_portfolio_daily_strategy_contracts.py`。
+  - 定向 r50 合同测试通过：`test_r50_integrated_convex_capital_flow_profile_enables_real_solver_training`、`test_r50_full_universe_fallback_terms_do_not_report_fake_solver_success`。
+  - r50 dry-run `self_opt_study_r50_integrated_convex_capital_flow_dry_run_20260509` 通过，确认 3 个 screening trial 使用 v35、6/5、batch 192、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与 exposure utilization floor `0.52`。
+- 行动后复盘：
+  - 事实：r50 已补齐“真实 solver 训练参与”和“fallback 诊断说真话”两个关键代码层差距，并把 r49 资金流闭合保留为主导项。
+  - 推断：r50 比 r49 更接近用户目标，因为它不再只是最终诊断 solver 通道，而是让真实 convex layer 在短筛训练内参与一部分梯度；但它仍不是全 A 股一次性大规模 convex program，也没有 formal screening / confirmatory verdict。
+  - 决策：r50 当前状态为 `research / shadow_only` 代码合同与 dry-run；不得 promotion、不得 live、不得改 `active_execution_strategy.json`。若后续启动正式研究，必须先做无冲突进程、无同名 tag、contract/dry-run gate，并以前台持久日志和进度文件运行短 screening。

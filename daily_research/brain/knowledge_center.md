@@ -874,3 +874,17 @@
 - 新知识 5：resource gate 需要把 exposure utilization 纳入早停。
   - r48 证明只看 source dead、cash timing、drawdown 和经济信号仍可能遗漏“高目标暴露但实际低暴露”的保守分支。
   - r49 resource gate 在 `avg_gross_exposure_target >= 0.42` 时要求 `portfolio_daily_exposure_utilization >= 0.50`，用于提前停止低信息长训。
+
+## 2026-05-09 r50 integrated convex capital-flow 知识沉淀
+- 新知识 1：真实 solver 训练参与必须显式记录，而不能靠最终 diagnostics 推断。
+  - r48/r49 的 full-universe 训练主循环默认走 surrogate，最终 diagnostics 再运行 solver terms；这能证明 solver 通道可读，但不能证明 solver 在训练期参与了 credit assignment。
+  - r50 用 `alpha_result_value_budget_split_v35` 显式启用 full-universe train solver，并输出 `portfolio_full_universe_convex_train_solver_effective`，避免把“诊断可运行”误写成“训练已端到端使用 solver”。
+- 新知识 2：solver 不应取代资金流闭合。
+  - v35 同时保留 `portfolio_full_universe_convex_allocation_total` 与 `portfolio_capital_flow_closure_total`，且 capital-flow closure 仍强于 full-universe auxiliary。
+  - 这反映当前判断：convex solver 解决可行组合权重和约束投影，不自动解决 receiver demand 从 clean source / cash release 获得资金解释的问题。
+- 新知识 3：fallback diagnostics 必须说真话。
+  - `_portfolio_full_universe_convex_allocation_loss(enable_solver=False, return_terms=True)` 过去会把 fallback path 记录为 `solver_success_rate = 1.0`、`fallback_surrogate_loss = 0.0`，容易误导后续复盘。
+  - r50 已修正为 fallback 时 `solver_success_rate = 0`，`fallback_surrogate_loss` 记录 surrogate total；后续读 diagnostics 必须据此区分真实 solver 与 surrogate。
+- 新知识 4：短筛资源口径是架构安全的一部分。
+  - r50 默认 `epochs = 6`、`min_epochs = 5`、`batch_size = 192`，并继续使用 32-slot、1-day、2-batch interval 的 full-universe solver 约束。
+  - 这不是降低目标，而是防止在尚未证明 source release、exposure utilization、cash timing 与 drawdown 闭合前，把真实 solver 训练变成高成本低信息长训。

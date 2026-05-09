@@ -52,6 +52,9 @@ CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT = 32
 CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH = 1
 CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL = 2
 CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED = False
+CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES = frozenset(
+    {"alpha_result_value_budget_split_v35"}
+)
 CVXPY_CONVEX_ALLOCATION_SOLVER_ARGS: dict[str, float | int | str | bool] = {
     "solve_method": "SCS",
     "eps": 1.0e-4,
@@ -1651,6 +1654,37 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"] = {
         "portfolio_capital_flow_closure_total": 1.72,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v35"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"]["sample_scalar_loss_weights"],
+        "portfolio_daily_unified_receiver_score": 3.70,
+        "portfolio_daily_unified_source_score": 4.10,
+        "portfolio_daily_unified_cash_score": 3.50,
+        "portfolio_daily_allocation_final_objective": 4.36,
+        "portfolio_daily_allocation_decision_focused_objective": 4.38,
+        "portfolio_daily_allocation_net_utility_target": 4.48,
+        "portfolio_daily_allocation_credit_closure_target": 4.68,
+        "portfolio_daily_allocation_resource_efficiency_target": 4.22,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 1.55,
+        "portfolio_unified_allocation_total": 0.12,
+        "portfolio_decision_regret_total": 0.14,
+        "portfolio_allocation_objective_consolidation_total": 0.28,
+        "portfolio_risk_sensitive_allocation_total": 0.36,
+        "portfolio_utility_credit_closure_total": 0.34,
+        "portfolio_primal_dual_decision_total": 0.36,
+        "portfolio_entropic_transport_decision_total": 0.40,
+        "portfolio_offline_conservative_support_total": 0.48,
+        "portfolio_differentiable_convex_allocation_total": 0.38,
+        "portfolio_cvxpy_convex_allocation_total": 0.24,
+        "portfolio_full_universe_convex_allocation_total": 1.34,
+        "portfolio_capital_flow_closure_total": 1.68,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -1702,6 +1736,11 @@ def resolve_loss_profile(loss_profile: str | None) -> tuple[str, dict[str, dict[
         "daily_target_loss_weights": dict(config["daily_target_loss_weights"]),
         "multi_objective_loss_weights": dict(config["multi_objective_loss_weights"]),
     }
+
+
+def _loss_profile_enables_full_universe_train_solver(loss_profile: str | None) -> bool:
+    profile_name = str(loss_profile or "").strip()
+    return profile_name in CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES
 
 
 def _weighted_scalar_heads_loss(
@@ -4264,8 +4303,8 @@ def _portfolio_full_universe_convex_allocation_loss(
             result.setdefault("ope_lower_bound_loss", result.get("conservative_ope_loss", zero))
             result.setdefault("propensity_support_loss", result.get("behavior_support_loss", zero))
             result.setdefault("doubly_robust_gap_loss", zero)
-            result["solver_success_rate"] = torch.tensor(1.0, device=zero.device)
-            result["fallback_surrogate_loss"] = torch.tensor(0.0, device=zero.device)
+            result["solver_success_rate"] = zero
+            result["fallback_surrogate_loss"] = result.get("total", zero)
         return result
     return _portfolio_cvxpy_convex_allocation_loss(
         outputs,
@@ -6822,6 +6861,10 @@ def fit_policy_models_v3(
         multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0
         or multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
     )
+    full_universe_train_solver_enabled = (
+        CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
+        or _loss_profile_enables_full_universe_train_solver(resolved_loss_profile)
+    )
     if uses_cvxpy_convex_allocation_layer:
         _get_portfolio_cvxpy_allocation_layer()
         if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
@@ -6949,7 +6992,7 @@ def fit_policy_models_v3(
                     outputs,
                     sample_batch_targets,
                     enable_solver=(
-                        CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
+                        full_universe_train_solver_enabled
                         and batch_count % max(1, CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL) == 0
                     ),
                 )
@@ -7499,6 +7542,10 @@ def fit_policy_models_v3(
         "portfolio_full_universe_convex_max_days_per_batch": CVXPY_FULL_UNIVERSE_ALLOCATION_MAX_DAYS_PER_BATCH,
         "portfolio_full_universe_convex_train_batch_interval": CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL,
         "portfolio_full_universe_convex_train_solver_enabled": CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED,
+        "portfolio_full_universe_convex_train_solver_loss_profiles": sorted(
+            CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES
+        ),
+        "portfolio_full_universe_convex_train_solver_effective": bool(full_universe_train_solver_enabled),
         "supports_portfolio_full_universe_candidate_coverage": bool(
             portfolio_full_universe_convex_terms
             and "candidate_coverage_loss" in portfolio_full_universe_convex_terms
