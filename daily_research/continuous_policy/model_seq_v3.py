@@ -62,6 +62,13 @@ CVXPY_CONVEX_ALLOCATION_SOLVER_ARGS: dict[str, float | int | str | bool] = {
     "verbose": False,
 }
 _CVXPY_ALLOCATION_LAYER_CACHE: dict[int, Any] = {}
+THREAD_LIMIT_ENV_KEYS: tuple[str, ...] = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "TORCH_NUM_THREADS",
+)
 LOSS_PROFILE_CONFIGS: dict[str, dict[str, dict[str, float]]] = {
     "dual_channel_default_v1": {
         "sample_scalar_loss_weights": {
@@ -1446,6 +1453,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v27"] = {
         "portfolio_daily_allocation_credit_closure_target": 3.56,
         "portfolio_daily_allocation_resource_efficiency_target": 3.18,
     },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v26"]["daily_target_loss_weights"],
+    },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v26"]["multi_objective_loss_weights"],
         "action_total": 0.035,
@@ -1469,6 +1479,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"] = {
         "portfolio_daily_allocation_net_utility_target": 3.62,
         "portfolio_daily_allocation_credit_closure_target": 3.78,
         "portfolio_daily_allocation_resource_efficiency_target": 3.36,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v27"]["daily_target_loss_weights"],
     },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v27"]["multi_objective_loss_weights"],
@@ -1494,6 +1507,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v29"] = {
         "portfolio_daily_allocation_net_utility_target": 3.82,
         "portfolio_daily_allocation_credit_closure_target": 3.96,
         "portfolio_daily_allocation_resource_efficiency_target": 3.52,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"]["daily_target_loss_weights"],
     },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v28"]["multi_objective_loss_weights"],
@@ -1521,6 +1537,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v30"] = {
         "portfolio_daily_allocation_credit_closure_target": 4.04,
         "portfolio_daily_allocation_resource_efficiency_target": 3.62,
     },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v29"]["daily_target_loss_weights"],
+    },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v29"]["multi_objective_loss_weights"],
         "action_total": 0.014,
@@ -1547,6 +1566,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v31"] = {
         "portfolio_daily_allocation_net_utility_target": 4.12,
         "portfolio_daily_allocation_credit_closure_target": 4.22,
         "portfolio_daily_allocation_resource_efficiency_target": 3.88,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v30"]["daily_target_loss_weights"],
     },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v30"]["multi_objective_loss_weights"],
@@ -1576,6 +1598,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"] = {
         "portfolio_daily_allocation_credit_closure_target": 4.32,
         "portfolio_daily_allocation_resource_efficiency_target": 3.96,
     },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v31"]["daily_target_loss_weights"],
+    },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v31"]["multi_objective_loss_weights"],
         "action_total": 0.0,
@@ -1604,6 +1629,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v33"] = {
         "portfolio_daily_allocation_net_utility_target": 4.34,
         "portfolio_daily_allocation_credit_closure_target": 4.40,
         "portfolio_daily_allocation_resource_efficiency_target": 4.06,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"]["daily_target_loss_weights"],
     },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v32"]["multi_objective_loss_weights"],
@@ -1635,6 +1663,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"] = {
         "portfolio_daily_allocation_credit_closure_target": 4.56,
         "portfolio_daily_allocation_resource_efficiency_target": 4.12,
     },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v33"]["daily_target_loss_weights"],
+    },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v33"]["multi_objective_loss_weights"],
         "action_total": 0.0,
@@ -1665,6 +1696,9 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v35"] = {
         "portfolio_daily_allocation_net_utility_target": 4.48,
         "portfolio_daily_allocation_credit_closure_target": 4.68,
         "portfolio_daily_allocation_resource_efficiency_target": 4.22,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"]["daily_target_loss_weights"],
     },
     "multi_objective_loss_weights": {
         **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v34"]["multi_objective_loss_weights"],
@@ -1741,6 +1775,29 @@ def resolve_loss_profile(loss_profile: str | None) -> tuple[str, dict[str, dict[
 def _loss_profile_enables_full_universe_train_solver(loss_profile: str | None) -> bool:
     profile_name = str(loss_profile or "").strip()
     return profile_name in CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES
+
+
+def _apply_torch_thread_env_limits() -> dict[str, Any]:
+    env_limits = {
+        key: str(os.environ.get(key, "") or "")
+        for key in THREAD_LIMIT_ENV_KEYS
+        if str(os.environ.get(key, "") or "").strip()
+    }
+    requested = str(os.environ.get("TORCH_NUM_THREADS", "") or os.environ.get("OMP_NUM_THREADS", "") or "").strip()
+    applied_limit = 0
+    apply_error = ""
+    if requested:
+        try:
+            applied_limit = max(1, int(float(requested)))
+            torch.set_num_threads(applied_limit)
+        except Exception as exc:  # pragma: no cover - runtime diagnostic only
+            apply_error = str(exc)
+    return {
+        "thread_env_limits": env_limits,
+        "torch_num_threads": int(torch.get_num_threads()),
+        "torch_thread_limit_requested": applied_limit,
+        "torch_thread_limit_error": apply_error,
+    }
 
 
 def _weighted_scalar_heads_loss(
@@ -6131,6 +6188,7 @@ def fit_policy_models_v3(
     contract = dict(training_contract or {})
     if str(contract.get("trainer_backend", "") or "") != TRAINER_BACKEND_FORMAL_SEQ_V3:
         raise ValueError("fit_policy_models_v3 requires the formal_torch_seq_v3 training contract.")
+    resource_runtime = _apply_torch_thread_env_limits()
     device = _resolve_device(contract)
     torch.manual_seed(int(random_seed))
     np.random.seed(int(random_seed))
@@ -7333,6 +7391,7 @@ def fit_policy_models_v3(
         "python_executable": str(sys.executable),
         "conda_prefix": str(os.environ.get("CONDA_PREFIX", "")),
         "runtime_env": "yolos" if "yolos" in str(sys.executable).lower() else "",
+        "resource_runtime": resource_runtime,
         "epochs_requested": int(epochs),
         "min_epochs": int(min_epochs),
         "completed_epochs": int(history[-1]["epoch"]) if history else 0,

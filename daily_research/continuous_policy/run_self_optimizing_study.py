@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +24,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     DAILY_HEAD_LAYOUT_CHOICES,
     DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
     DEFAULT_LOSS_PROFILE,
+    resolve_loss_profile,
 )
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
@@ -40,7 +42,6 @@ from daily_research.continuous_policy.portfolio_simulator import (
 )
 from daily_research.continuous_policy.run_continuous_policy_protocol import (
     PROMOTION_THRESHOLDS,
-    main as protocol_main,
 )
 from daily_research.continuous_policy.runtime import (
     LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH,
@@ -75,6 +76,30 @@ LATEST_STATE_PATHS: dict[str, Path] = {
     "latest_conclusion_ledger": LATEST_CONCLUSION_LEDGER_PATH,
     "runtime_state": RUNTIME_STATE_PATH,
 }
+
+RUNTIME_CHANNEL_FAILURE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("cuda_unavailable", "requires CUDA, but torch.cuda.is_available() is False"),
+    ("cuda_init_unknown_error", "CUDA initialization: CUDA unknown error"),
+    ("cuda_no_gpu_available", "No CUDA GPUs are available"),
+    ("openmp_duplicate_runtime", "OMP: Error #15"),
+    ("openmp_duplicate_runtime", "libiomp5md.dll already initialized"),
+)
+
+RESOURCE_PROFILE_CHOICES: tuple[str, ...] = ("auto", "safe", "balanced", "full")
+RESOURCE_PRIORITY_CHOICES: tuple[str, ...] = ("auto", "normal", "below_normal", "idle")
+THREAD_LIMIT_ENV_KEYS: tuple[str, ...] = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "TORCH_NUM_THREADS",
+)
+TRUE_SOLVER_RESOURCE_SEARCH_PROFILES = frozenset(
+    {
+        "split_heads_portfolio_daily_true_convex_solver_allocation_r47",
+        "split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
+    }
+)
 
 
 SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
@@ -4890,6 +4915,139 @@ def _write_study_progress_event(study_root: Path, *, event: str, **payload: Any)
     return progress_event
 
 
+def _detect_runtime_channel_failure(error_text: str) -> str:
+    payload = str(error_text or "").strip()
+    if not payload:
+        return ""
+    for reason, pattern in RUNTIME_CHANNEL_FAILURE_PATTERNS:
+        if pattern in payload:
+            return reason
+    return ""
+
+
+def _default_resource_profile(search_profile: str) -> str:
+    return "safe" if str(search_profile or "") in TRUE_SOLVER_RESOURCE_SEARCH_PROFILES else "balanced"
+
+
+def _logical_cpu_count() -> int:
+    return max(1, int(os.cpu_count() or 1))
+
+
+def _resolve_thread_limit(resource_profile: str, requested_thread_limit: int | None = None) -> int:
+    if requested_thread_limit is not None and int(requested_thread_limit) > 0:
+        return max(1, int(requested_thread_limit))
+    profile = str(resource_profile or "balanced").strip().lower()
+    logical = _logical_cpu_count()
+    if profile == "full":
+        return 0
+    if profile == "safe":
+        return max(1, min(4, logical // 2 if logical > 1 else 1))
+    return max(1, min(8, max(2, logical // 2)))
+
+
+def _resolve_resource_priority(resource_profile: str, requested_priority: str = "auto") -> str:
+    priority = str(requested_priority or "auto").strip().lower()
+    if priority != "auto":
+        return priority
+    profile = str(resource_profile or "balanced").strip().lower()
+    if profile == "safe":
+        return "below_normal"
+    if profile == "full":
+        return "normal"
+    return "below_normal"
+
+
+def _resolve_cpu_affinity_mask(
+    resource_profile: str,
+    thread_limit: int,
+    requested_cpu_count: int | None = None,
+) -> int:
+    logical = _logical_cpu_count()
+    requested = int(requested_cpu_count or 0)
+    if requested > 0:
+        cpu_count = max(1, min(logical, requested))
+    elif str(resource_profile or "").strip().lower() == "full" or int(thread_limit) <= 0:
+        return 0
+    else:
+        cpu_count = max(1, min(logical, int(thread_limit)))
+    return (1 << cpu_count) - 1
+
+
+def _build_resource_limits(
+    *,
+    search_profile: str,
+    resource_profile: str = "auto",
+    thread_limit: int | None = None,
+    process_priority: str = "auto",
+    cpu_affinity_count: int | None = None,
+) -> dict[str, Any]:
+    resolved_profile = str(resource_profile or "auto").strip().lower()
+    if resolved_profile == "auto":
+        resolved_profile = _default_resource_profile(search_profile)
+    if resolved_profile not in RESOURCE_PROFILE_CHOICES or resolved_profile == "auto":
+        raise ValueError(f"Unsupported resource profile: {resource_profile}")
+    resolved_thread_limit = _resolve_thread_limit(resolved_profile, thread_limit)
+    resolved_priority = _resolve_resource_priority(resolved_profile, process_priority)
+    if resolved_priority not in RESOURCE_PRIORITY_CHOICES or resolved_priority == "auto":
+        raise ValueError(f"Unsupported process priority: {process_priority}")
+    affinity_mask = _resolve_cpu_affinity_mask(resolved_profile, resolved_thread_limit, cpu_affinity_count)
+    return {
+        "resource_profile": resolved_profile,
+        "search_profile": str(search_profile or ""),
+        "thread_limit": int(resolved_thread_limit),
+        "process_priority": resolved_priority,
+        "cpu_affinity_count": int(cpu_affinity_count or 0),
+        "cpu_affinity_mask": int(affinity_mask),
+        "logical_cpu_count": _logical_cpu_count(),
+        "thread_env_keys": list(THREAD_LIMIT_ENV_KEYS),
+        "applies_thread_env": bool(resolved_thread_limit > 0),
+        "applies_cpu_affinity": bool(affinity_mask > 0),
+    }
+
+
+def _resource_limited_child_env(resource_limits: dict[str, Any]) -> dict[str, str]:
+    env = dict(os.environ)
+    thread_limit = int(resource_limits.get("thread_limit", 0) or 0)
+    if thread_limit > 0:
+        for key in THREAD_LIMIT_ENV_KEYS:
+            env[key] = str(thread_limit)
+    env["CONTINUOUS_POLICY_RESOURCE_PROFILE"] = str(resource_limits.get("resource_profile", "") or "")
+    env["CONTINUOUS_POLICY_PROCESS_PRIORITY"] = str(resource_limits.get("process_priority", "") or "")
+    env["CONTINUOUS_POLICY_CPU_AFFINITY_MASK"] = str(int(resource_limits.get("cpu_affinity_mask", 0) or 0))
+    return env
+
+
+def _apply_windows_process_limits(process: subprocess.Popen[Any], resource_limits: dict[str, Any]) -> dict[str, Any]:
+    applied: dict[str, Any] = {"priority_applied": False, "affinity_applied": False, "error": ""}
+    if os.name != "nt":
+        applied["platform"] = os.name
+        return applied
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x0200 | 0x0400 | 0x0100, False, int(process.pid))
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "OpenProcess failed")
+        try:
+            priority_map = {
+                "normal": 0x00000020,
+                "below_normal": 0x00004000,
+                "idle": 0x00000040,
+            }
+            priority = str(resource_limits.get("process_priority", "normal") or "normal").lower()
+            if priority in priority_map:
+                applied["priority_applied"] = bool(kernel32.SetPriorityClass(handle, priority_map[priority]))
+            affinity_mask = int(resource_limits.get("cpu_affinity_mask", 0) or 0)
+            if affinity_mask > 0:
+                applied["affinity_applied"] = bool(kernel32.SetProcessAffinityMask(handle, ctypes.c_size_t(affinity_mask)))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception as exc:
+        applied["error"] = str(exc)
+    return applied
+
+
 def _run_protocol_with_progress(
     *,
     study_root: Path,
@@ -4899,13 +5057,23 @@ def _run_protocol_with_progress(
     trial_tag: str,
     source_trial_tag: str,
     protocol_args: list[str],
-    protocol_fn: Any = protocol_main,
+    protocol_fn: Any | None = None,
     heartbeat_interval_seconds: float = 300.0,
     progress_context: dict[str, Any] | None = None,
+    resource_limits: dict[str, Any] | None = None,
 ) -> int:
     started_monotonic = time.monotonic()
     stop_event = threading.Event()
     progress_lock = threading.Lock()
+    runner_command: list[str] = [
+        str(sys.executable),
+        "-m",
+        "daily_research.continuous_policy.run_continuous_policy_protocol",
+        *list(protocol_args),
+    ]
+    runner_mode = "subprocess" if protocol_fn is None else "callable"
+    resolved_resource_limits = dict(resource_limits or {})
+    process_limit_result: dict[str, Any] = {}
 
     def emit(event: str, **payload: Any) -> None:
         progress_payload = {
@@ -4917,7 +5085,14 @@ def _run_protocol_with_progress(
             "elapsed_seconds": round(time.monotonic() - started_monotonic, 3),
             "process_id": os.getpid(),
             "protocol_args": list(protocol_args),
+            "protocol_runner_mode": runner_mode,
         }
+        if runner_mode == "subprocess":
+            progress_payload["protocol_runner_command"] = list(runner_command)
+        if resolved_resource_limits:
+            progress_payload["resource_limits"] = dict(resolved_resource_limits)
+        if process_limit_result:
+            progress_payload["process_limit_result"] = dict(process_limit_result)
         progress_payload.update(dict(progress_context or {}))
         progress_payload.update(payload)
         with progress_lock:
@@ -4939,7 +5114,18 @@ def _run_protocol_with_progress(
     )
     heartbeat_thread.start()
     try:
-        exit_code = int(protocol_fn(protocol_args))
+        if protocol_fn is None:
+            process = subprocess.Popen(
+                runner_command,
+                cwd=str(Path(__file__).resolve().parents[2]),
+                env=_resource_limited_child_env(resolved_resource_limits),
+            )
+            if resolved_resource_limits:
+                process_limit_result.update(_apply_windows_process_limits(process, resolved_resource_limits))
+                emit("protocol_resource_limits_applied", status="running", child_process_id=int(process.pid))
+            exit_code = int(process.wait())
+        else:
+            exit_code = int(protocol_fn(protocol_args))
     except Exception as exc:
         stop_event.set()
         heartbeat_thread.join(timeout=1.0)
@@ -5553,6 +5739,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--study-tag", default="")
     parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument(
+        "--resource-profile",
+        default="auto",
+        choices=RESOURCE_PROFILE_CHOICES,
+        help="Resource guard for subprocess studies. auto uses safe mode for true solver profiles and balanced mode otherwise.",
+    )
+    parser.add_argument(
+        "--thread-limit",
+        type=int,
+        default=0,
+        help="Override BLAS/OpenMP/Torch thread count for protocol subprocesses; 0 lets the resource profile decide.",
+    )
+    parser.add_argument(
+        "--process-priority",
+        default="auto",
+        choices=RESOURCE_PRIORITY_CHOICES,
+        help="Windows process priority for protocol subprocesses.",
+    )
+    parser.add_argument(
+        "--cpu-affinity-count",
+        type=int,
+        default=0,
+        help="Limit protocol subprocesses to the first N logical CPUs; 0 lets the resource profile decide.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -5567,6 +5777,13 @@ def main(argv: list[str] | None = None) -> int:
     objective_profile = str(
         args.objective_profile
         or SEARCH_PROFILE_DEFAULT_OBJECTIVES.get(args.search_profile, "promotion_balanced_v2")
+    )
+    resource_limits = _build_resource_limits(
+        search_profile=args.search_profile,
+        resource_profile=args.resource_profile,
+        thread_limit=args.thread_limit if int(args.thread_limit or 0) > 0 else None,
+        process_priority=args.process_priority,
+        cpu_affinity_count=args.cpu_affinity_count if int(args.cpu_affinity_count or 0) > 0 else None,
     )
 
     base_trial = dict(SEARCH_PROFILE_BASE_TRIALS[args.search_profile])
@@ -5589,6 +5806,8 @@ def main(argv: list[str] | None = None) -> int:
         trial_count=args.trial_count,
         random_seed=args.random_seed,
     )
+    for index, trial_config in enumerate(selected_trials, start=1):
+        resolve_loss_profile(str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE)))
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
     if str(args.seed_study_tag or "").strip():
@@ -5620,6 +5839,7 @@ def main(argv: list[str] | None = None) -> int:
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
+        "resource_limits": resource_limits,
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         "study_progress_json": str((study_root / "study_progress.json").resolve()),
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
@@ -5634,6 +5854,7 @@ def main(argv: list[str] | None = None) -> int:
         objective_profile=objective_profile,
         screening_trial_count=len(selected_trials),
         confirmatory_enabled=not bool(args.disable_confirmatory),
+        resource_limits=resource_limits,
     )
     if args.dry_run:
         safe_print_json(study_plan)
@@ -5658,6 +5879,7 @@ def main(argv: list[str] | None = None) -> int:
             screening_trial_count=len(selected_trials),
             confirmatory_enabled=not bool(args.disable_confirmatory),
             process_id=os.getpid(),
+            resource_limits=resource_limits,
         )
         if args.skip_screening and screening_seed_trials:
             screening_results = list(screening_seed_trials)
@@ -5689,6 +5911,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "progress_total": len(selected_trials),
                                 "progress_label": f"screening {index}/{len(selected_trials)}",
                             },
+                            resource_limits=resource_limits,
                         )
                     )
                     if exit_code != 0:
@@ -5755,6 +5978,31 @@ def main(argv: list[str] | None = None) -> int:
                         protocol_summary_json=str((PROTOCOLS_ROOT / trial_tag / "protocol_summary.json").resolve()),
                         error=trial_error[-4000:],
                     )
+                    runtime_channel_reason = _detect_runtime_channel_failure(trial_error)
+                    if runtime_channel_reason:
+                        remaining = max(0, int(len(selected_trials)) - int(index))
+                        resource_gate_summary = {
+                            "resource_gate_enabled": True,
+                            "resource_gate_triggered": True,
+                            "continue_screening": False,
+                            "failed_resource_checks": ["runtime_channel_failure"],
+                            "estimated_saved_screening_trials": remaining,
+                            "runtime_channel_failure": True,
+                            "runtime_channel_failure_reason": runtime_channel_reason,
+                        }
+                        _write_study_progress_event(
+                            study_root,
+                            event="runtime_channel_stopped_screening",
+                            status="stopped",
+                            study_tag=study_tag,
+                            phase="screening",
+                            trial_id=index,
+                            trial_tag=trial_tag,
+                            progress_index=index,
+                            progress_total=len(selected_trials),
+                            **resource_gate_summary,
+                        )
+                        break
                 resource_gate_summary = _resource_gate_after_screening(
                     args.search_profile,
                     screening_results,
@@ -5801,6 +6049,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "progress_total": len(confirmatory_candidates),
                                 "progress_label": f"confirmatory {index}/{len(confirmatory_candidates)}",
                             },
+                            resource_limits=resource_limits,
                         )
                     )
                     if exit_code != 0:
@@ -5882,6 +6131,26 @@ def main(argv: list[str] | None = None) -> int:
                         protocol_summary_json=str((PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json").resolve()),
                         error=trial_error[-4000:],
                     )
+                    runtime_channel_reason = _detect_runtime_channel_failure(trial_error)
+                    if runtime_channel_reason:
+                        remaining = max(0, int(len(confirmatory_candidates)) - int(index))
+                        _write_study_progress_event(
+                            study_root,
+                            event="runtime_channel_stopped_confirmatory",
+                            status="stopped",
+                            study_tag=study_tag,
+                            phase="confirmatory",
+                            role=role,
+                            source_trial_tag=source_trial.trial_tag,
+                            trial_id=index,
+                            trial_tag=confirm_tag,
+                            progress_index=index,
+                            progress_total=len(confirmatory_candidates),
+                            runtime_channel_failure=True,
+                            runtime_channel_failure_reason=runtime_channel_reason,
+                            estimated_saved_confirmatory_trials=remaining,
+                        )
+                        break
         confirmatory_results.sort(key=lambda item: float(item.composite_score), reverse=True)
     finally:
         _restore_latest_state(latest_snapshot)
@@ -6014,6 +6283,7 @@ def main(argv: list[str] | None = None) -> int:
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
         "trial_ranking_csv": str((study_root / "trial_ranking.csv").resolve()),
         "trial_count": len(selected_trials),
+        "resource_limits": resource_limits,
         "completed_trial_count": len(completed_screening),
         "failed_trial_count": len([item for item in screening_results if item.status != "completed"]),
         "screening_trials": [item.to_summary() for item in screening_results],

@@ -55,9 +55,11 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILE_DEFAULT_OBJECTIVES,
     SEARCH_PROFILES,
     TrialResult,
+    _build_resource_limits,
     _pick_confirmatory_candidates,
     _portfolio_daily_v2_confirm_stability,
     _resource_gate_after_screening,
+    _resource_limited_child_env,
     _run_protocol_with_progress,
     _score_protocol_summary,
     _write_study_progress_event,
@@ -2737,6 +2739,12 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
         self.assertLessEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 192)
 
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        self.assertIn("daily_target_loss_weights", resolved_config)
+        self.assertGreater(len(resolved_config["daily_target_loss_weights"]), 0)
+        self.assertIn("budget_cash_timing_signal_target", resolved_config["daily_target_loss_weights"])
+
         multi_weights = LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
         self.assertEqual(multi_weights["action_total"], 0.0)
         self.assertEqual(multi_weights["duration_total"], 0.0)
@@ -2744,8 +2752,9 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(multi_weights["portfolio_full_universe_convex_allocation_total"], 1.30)
         self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], 1.60)
         self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], multi_weights["portfolio_full_universe_convex_allocation_total"])
-        self.assertTrue(_loss_profile_enables_full_universe_train_solver(loss_profile))
         self.assertFalse(_loss_profile_enables_full_universe_train_solver("alpha_result_value_budget_split_v34"))
+        self.assertEqual(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_BATCH_INTERVAL, 2)
+        self.assertTrue(_loss_profile_enables_full_universe_train_solver(loss_profile))
         self.assertFalse(model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED)
         self.assertIn(loss_profile, model_seq_v3.CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES)
         self.assertIn(loss_profile, model_seq_v3.LOSS_PROFILE_CONFIGS)
@@ -2822,6 +2831,34 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(float(terms["solver_success_rate"]), 0.0)
         self.assertGreater(float(terms["fallback_surrogate_loss"]), 0.0)
         self.assertGreater(float(terms["total"]), 0.0)
+
+    def test_true_solver_resource_profile_defaults_to_safe_not_full_machine(self) -> None:
+        limits = _build_resource_limits(
+            search_profile="split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
+            resource_profile="auto",
+        )
+
+        self.assertEqual(limits["resource_profile"], "safe")
+        self.assertGreater(int(limits["thread_limit"]), 0)
+        self.assertLessEqual(int(limits["thread_limit"]), 4)
+        self.assertEqual(limits["process_priority"], "below_normal")
+        self.assertGreater(int(limits["cpu_affinity_mask"]), 0)
+
+        env = _resource_limited_child_env(limits)
+        for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS"):
+            self.assertEqual(env[key], str(limits["thread_limit"]))
+        self.assertEqual(env["CONTINUOUS_POLICY_RESOURCE_PROFILE"], "safe")
+
+    def test_full_resource_profile_is_explicit_and_unlimited(self) -> None:
+        limits = _build_resource_limits(
+            search_profile="split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
+            resource_profile="full",
+        )
+
+        self.assertEqual(limits["resource_profile"], "full")
+        self.assertEqual(int(limits["thread_limit"]), 0)
+        self.assertEqual(int(limits["cpu_affinity_mask"]), 0)
+        self.assertEqual(limits["process_priority"], "normal")
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(
@@ -3103,6 +3140,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 protocol_args=["--tag", "study__trial_01"],
                 protocol_fn=slow_protocol,
                 heartbeat_interval_seconds=0.01,
+                resource_limits={"resource_profile": "safe", "thread_limit": 2, "process_priority": "below_normal"},
             )
 
             state = json.loads((study_root / "study_progress.json").read_text(encoding="utf-8"))
@@ -3116,7 +3154,18 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(calls["count"], 1)
         self.assertEqual(state["event"], "protocol_complete")
         self.assertEqual(state["trial_tag"], "study__trial_01")
+        self.assertEqual(state["resource_limits"]["thread_limit"], 2)
         self.assertTrue(any(event["event"] == "protocol_heartbeat" for event in events))
+
+    def test_every_registered_search_profile_loss_profile_resolves(self) -> None:
+        for profile_name, base_trial in SEARCH_PROFILE_BASE_TRIALS.items():
+            with self.subTest(profile_name=profile_name):
+                loss_profile = str(base_trial.get("loss_profile", model_seq_v3.DEFAULT_LOSS_PROFILE))
+                resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+                self.assertEqual(resolved_name, loss_profile)
+                self.assertIn("sample_scalar_loss_weights", resolved_config)
+                self.assertIn("daily_target_loss_weights", resolved_config)
+                self.assertIn("multi_objective_loss_weights", resolved_config)
 
 
 if __name__ == "__main__":
