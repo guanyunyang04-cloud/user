@@ -4,136 +4,66 @@
 
 ## 当前结论
 - `daily_research` 仍是当前工作区的正式生产研究与执行主线。
-- active 执行物化真源为 `daily_research/output/active_execution_strategy.json`。
-- 当前 live 默认执行 label 为 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
-- 当前 effective live execution profile 为 `regoff_k1_20d_ensemble_native_anchor`。
-- 当前 production root 为 `daily_research/output/short_expert_policy_v5b_execalign_production_default`。
-- 当前执行权重语义固定为 `research_raw_target_weight`，权重上限语义固定为 `follow_research_raw_no_global_cap`。
-- continuous_policy 最新有效研究状态仍为 r39 allocation objective consolidation bounded confirm 之后的 `research / shadow_only`；r40 end-to-end allocation layer clean rerun `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 已自然完成 `3` 个 screening 与 `2` 个 confirmatory，运行通道和持久产物可用，但 `stable_confirmatory_count = 0`，两个 confirmatory 均为 `shadow_only` 且失败于 `cash_timing_quality_1d` / `max_drawdown` 等 gate，因此不能替代 r39 证据基线。r31 receiver 语义闭包、r33 source clean-pass、r34 allocation breadth、r35 unified allocation、r36 risk-aware unified allocation、r37 decision-focused allocation、r38 source hard-negative regret 与 r39 allocation objective consolidation 仍保留；未过 v2 gate / stable confirm 前不得 promotion / live。
-- r41-r48 是当前 end-to-end allocation layer 升级链：r41 risk-sensitive、r42 utility-credit、r43 primal-dual decision、r44 entropic transport、r45 conservative transport、r46 differentiable convex allocation、r47 true convex solver allocation、r48 full-universe convex OPE allocation。事实：r48 formal screening + confirmatory 已完成，tag 为 `self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3`，`completed_trial_count = 1`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 1`、`portfolio_daily_v2_stable_confirmatory_trials = []`；confirm_01 为 `training_evidence_status = insufficient`、`annual_return = 0.246043`、`sharpe = 2.728143`、`max_drawdown = -0.037729`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`，promotion gate 为 `shadow_only`。推断：r48 运行通道和 solver/OPE diagnostics 可用，但 source/receiver/cash credit assignment 仍未闭合，不能替代 r39 证据基线。
-- r49 capital-flow closure 已完成代码合同、训练/验证/diagnostics 接线、profile 注册、resource gate、dry-run 与诊断加固。入口为 `split_heads_portfolio_daily_capital_flow_closure_r49`，loss 为 `alpha_result_value_budget_split_v34`，新增主导项 `portfolio_capital_flow_closure_total = 1.72` 与 `portfolio_capital_flow_closure_terms`，直接惩罚 receiver demand 未被 clean source / cash release 供给、source dead、over-cash、cash defense 缺口、cash timing、cash coherence、role overlap、source breadth、exposure gap、flow conservation 与 false-source，并显式输出有效 source/receiver flow、风险现金需求、预测暴露、部署压力和风险压力。`self_opt_study_r49_capital_flow_closure_dry_run_20260509` 已确认 3 个 screening trial 使用 v34、8/6、batch 256、`allocation_layer_v1` 与 source/exposure/cash resource gate；最新 74 项 continuous_policy 合同测试通过。边界：r49 尚无 formal screening / confirmatory verdict，不得 promotion、不得 live、不得改 active artifact。
-- r50 integrated convex capital-flow 已完成代码合同、训练期真实 solver 受控启用、fallback diagnostics 修正、profile 注册、resource gate、合同测试与 dry-run。入口为 `split_heads_portfolio_daily_integrated_convex_capital_flow_r50`，loss 为 `alpha_result_value_budget_split_v35`；事实：v35 同时启用 `portfolio_cvxpy_convex_allocation_total > 0`、`portfolio_full_universe_convex_allocation_total = 1.34`、`portfolio_capital_flow_closure_total = 1.68`，并且只有 v35 通过 `CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES` 让 full-universe solver 在训练期按 batch interval 受控参与。`self_opt_study_r50_integrated_convex_capital_flow_dry_run_20260509` 已确认 3 个 screening trial 使用 v35、6/5、batch 192、`allocation_layer_v1` 与 source/exposure/cash resource gate。边界：r50 仍只是 research 代码合同与 dry-run，不是 formal strategy verdict。
-- r51 native allocation vector 已完成代码合同、profile 注册、torch-only projection/loss、预测输出与 simulator 优先接线、合同测试与 dry-run；入口为 `split_heads_portfolio_daily_native_allocation_vector_r51`，loss 为 `alpha_result_value_budget_split_v36`。事实：v36 将 `action_total = 0.0`、`duration_total = 0.0`，以 `portfolio_native_allocation_vector_total = 2.10` 为主导，保留 `portfolio_capital_flow_closure_total = 0.70` 作为辅助诊断，并显式关闭 `portfolio_cvxpy_convex_allocation_total` 与 `portfolio_full_universe_convex_allocation_total`。`self_opt_study_r51_native_allocation_vector_dry_run_20260510` 已确认 3 个 screening trial 均使用 v36、8/6、batch 256、`native_allocation_vector_support = true`、`full_universe_train_solver_effective = false`，且 plan/progress 均写入 native support 与 resource gate。r51 不启用 `cvxpy/diffcp` 真 solver，不进入 r50 true-solver resource guard；目标是让模型直接输出日级目标仓位向量和现金比例，再从 `target_delta` 自然推导 source / receiver / cash，而不是继续多 head 对账。边界：r51 仍只是 research 代码合同与 dry-run，尚无 formal strategy verdict。
-- r52 day-set native allocation vector 已完成代码合同、完整日级 padded set batch、slot attention 模型、day-level projection/loss、profile 注册、dry-run 与合同测试；入口为 `split_heads_portfolio_daily_day_set_native_allocation_vector_r52`，loss 为 `alpha_result_value_budget_split_v37`。事实：v37 将 `action_total = 0.0`、`duration_total = 0.0`，以 `portfolio_day_set_native_allocation_vector_total = 2.40` 为主导，保留 `portfolio_capital_flow_closure_total = 0.50`，关闭 r51 row-wise native loss 与所有 cvxpy/full-universe solver loss。`self_opt_study_r52_day_set_native_allocation_vector_dry_run_20260510` 已确认 3 个 screening trial 均使用 v37、6/4、day batch 1/2、`day_set_native_allocation_vector_support = true`、`full_universe_train_solver_effective = false`，且 plan/progress 均写入 day-set support 与 resource gate。边界：r52 是 r51 的结构升级，不是 r51 formal verdict；仍只是 research 代码合同与 dry-run，尚无 formal strategy verdict。
+- active 执行物化真源：`daily_research/output/active_execution_strategy.json`。
+- 当前 live 默认执行 label：`short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`。
+- 当前 effective live execution profile：`regoff_k1_20d_ensemble_native_anchor`。
+- 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
+- 当前执行权重语义：`research_raw_target_weight`；权重上限语义：`follow_research_raw_no_global_cap`。
+- continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
+- 当前有效研究证据基线仍是 r39 allocation objective consolidation 的 `alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`。
+- r48 formal screening + confirmatory 已完成但 stable confirm 为空；r49-r52 是 research 入口与结构升级，不是策略有效 verdict。
+- r52 native source-delta closure 已修通部分 source 通道，但未完成策略闭合：2/3 screening trials 恢复 source target，3/3 仍为 `training_evidence_status = insufficient`。
 
 ## 当前接管入口
 - 读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
 - `episodic_memory.md` 只作为过程复盘入口；历史原文、长命令和标题索引默认进入 `daily_research/brain/references/`。
 - 运行 `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- Windows 下默认设置：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`；2026-05-09 已在 `yolos` 内隔离 PyTorch wheel 自带 `torch/lib/libiomp5md.dll` 到 `.openmp_conflict_backup_20260509`，当前 OpenMP 根治验收口径为无 `KMP_DUPLICATE_LIB_OK` 运行 `daily_research/tools/openmp_runtime_check.py --strict` 必须通过。
+- Windows 默认设置：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`。
+- OpenMP 根治验收口径：无 `KMP_DUPLICATE_LIB_OK` 运行 `daily_research/tools/openmp_runtime_check.py --strict` 必须通过。
 - PowerShell 出现中文乱码时，先用显式 UTF-8 复读，不得直接判定文档损坏。
 
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
-- continuous_policy 的深层瓶颈已经从“单票动作是否能学会”推进到“组合日资金如何分配”。
-- r31 已把 receiver 授权闭包前置：所有 direct add/open authorized 必须是 executable receiver candidate 子集；无 headroom held add 必须在语义层降级并审计。
-- r33 已把 source 分布防错前置：`portfolio_daily_source_forward_proxy_keep_risk`、`portfolio_daily_source_release_conviction` 与 `portfolio_daily_source_distribution_clean_pass` 必须共同约束 source candidate。
-- r34 bounded screening 暴露 candidate selection 合同漏洞：旧逻辑会让 `training_evidence_status = insufficient` 的高分 trial 进入 confirm；已修为 confirm 候选优先 evidence sufficient + v2 gate qualified。
-- r38 bounded confirm 指向的真实瓶颈仍成立：source 分布方向被明显拉正，`source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`，但收益太弱、source 数量过窄、cash timing / reduce / exit / drawdown 未过线。
-- r39 bounded confirm 证明架构性收敛入口已能前台跑通并形成强收益/正 spread：execblend confirm 为 `training_evidence_status = sufficient`、`annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`receiver_unrealized_deploy_share = 0.0`、`source_realized_sell_rate = 1.0`、`source_positive_forward_sell_share = 0.0`、`receiver_minus_source_forward_excess_5d = 0.066883`；但 `source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`，v2 gate 仍只过 `9/12`，stable confirm 失败于 `confirm_gate_pass` 与 `confirm_source_count_floor`。
-- r40 clean rerun 证明 end-to-end allocation layer 运行通道已可完整产出 study/protocol/model/ranking 证据：`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、模型诊断为 yolos + CUDA；但策略层失败清晰，stable confirm 为空，confirm_01 为 `annual_return = 0.328016`、`sharpe = 1.079482`、`max_drawdown = -0.165923`，confirm_02 为 `annual_return = 0.688870`、`sharpe = 2.448261`、`max_drawdown = -0.106384`，两者均 `source_target_count = 0`、`source_realized_sell_rate = 0`、`cash_timing_quality_1d ≈ -0.114` 且 `promotion_status = shadow_only`。
-- 当前 r31 profile 标记：`split_heads_portfolio_daily_receiver_semantic_closure_r31`；核心审计字段为 `direct_action_authorization_subset_violation_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`。
-- 当前 r33 profile 标记：`split_heads_portfolio_daily_source_forward_proxy_r33`；当前 r34 profile 标记：`split_heads_portfolio_daily_allocation_breadth_r34`；当前 r35 profile 标记：`split_heads_portfolio_daily_unified_allocation_r35`；当前 r36 profile 标记：`split_heads_portfolio_daily_risk_aware_unified_allocation_r36`；当前 r37 profile 标记：`split_heads_portfolio_daily_decision_focused_allocation_r37`；当前 r38 profile 标记：`split_heads_portfolio_daily_source_hard_negative_regret_r38`；当前 r39 profile 标记：`split_heads_portfolio_daily_allocation_objective_consolidation_r39`；当前 r41-r52 profile 分别为 risk-sensitive、utility-credit、primal-dual decision、entropic transport、conservative transport、differentiable convex allocation、true convex solver allocation、full-universe convex OPE allocation、capital-flow closure、integrated convex capital-flow、native allocation vector 与 day-set native allocation vector。
-- 当前有效证据基线仍为 r39 的 `alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`；r48 已完成 formal screening + confirmatory，但只证明 r48 full-universe convex OPE 运行通道、diagnostics 与持久产物可用，不证明策略有效。r48 新实现标记为 `alpha_result_value_budget_split_v33`、`portfolio_full_universe_convex_allocation_total`、`supports_portfolio_full_universe_convex_allocation_loss`、`supports_portfolio_full_universe_candidate_coverage`、`supports_portfolio_full_universe_ope_diagnostics`、`portfolio_full_universe_convex_allocation_terms`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与 `end_to_end_allocation_layer_v1`；当前源码已显式固定 r48 resource-safe solver 口径为 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2`、`train_solver_enabled = false`，最终 diagnostics 仍运行 solver terms。r41-r47 目标和 loss 作为保留检查点，不能替代 r39 证据基线。
-- 当前一致性保留 marker：`portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate`、`portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty`、`portfolio_daily_receiver_source_spread_reward`；`source/receiver/cash listwise allocation teacher` 仍只是 teacher / warm start，不是 active 执行路径。
+- continuous_policy 的深层瓶颈是组合日资金分配：同一天谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
+- r31 / r33 / r34-r39 保留为 receiver/source/cash 合同与证据基线；r40-r52 是 allocation layer 升级链。
+- r52 当前最新问题不是单纯训练资源不足，而是 native target valid rate 低、source delta 阈值鲁棒性不足、turnover / constraint violation 仍高。
+- 下一轮若继续 r52/r53，应先修 native target validity、source threshold 和 turnover constraint，再重新 safe screening。
+
+## 近期研究索引
+- r31：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，保留 receiver executable closure 合同。
+- r31 审计 marker：`direct_action_authorization_subset_violation_count`、`authorized_add_no_weight_change_share`、`deploy_intent_unrealized_share`。
+- r33：`split_heads_portfolio_daily_source_forward_proxy_r33`，保留 `portfolio_daily_source_forward_proxy_keep_risk`、`portfolio_daily_source_release_conviction` 与 `portfolio_daily_source_distribution_clean_pass`。
+- r34：`split_heads_portfolio_daily_allocation_breadth_r34`，保留 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth` 与 `portfolio_daily_joint_economic_quality_gate`。
+- r35：`split_heads_portfolio_daily_unified_allocation_r35`，保留 `portfolio_daily_unified_allocation_objective`。
+- r36-r39：risk-aware / decision-focused / source hard-negative / allocation objective consolidation 是当前有效证据链，保留 `portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty`、`portfolio_daily_receiver_source_spread_reward`。
+- r39 当前仍对应 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 证据基线。
+- r40-r48：end-to-end allocation layer、convex/OPE 方向可用但未过 stable confirm。
+- r49-r52：capital-flow closure、true solver 入口、native allocation vector 与 day-set native allocation vector 均为 research / shadow；`source/receiver/cash listwise allocation teacher` 仍只是 teacher / warm start。
 
 ## 当前优先级
-- P0：保持 live / active artifact 冻结，只在 research / shadow 范围推进。
-- P1：维护主分脑入口精炼，避免 `state_center.md` 和 `operations_center.md` 继续变成长日志。
+- P0：冻结 live / active artifact，只在 research / shadow 范围推进。
+- P1：保持主分脑入口精炼，dated log 必须进入 `references/` archive。
 - P2：继续把 receiver 可执行性、source 分布质量、monthly return、exposure utilization、realized deploy、cash timing 与 drawdown 写入 objective / feedback / gate。
-- P3：下一轮研究不再优先加单边 source false-sell 或 cash penalty；r39 已说明 final objective 接入后可以恢复收益和正 spread，但仍 source count 过窄、现金过高、cash timing 与 drawdown 不稳。下一优先级应在不放松 source hard-negative 的前提下，提高 clean source breadth 和可卖源分布，并把 cash timing / drawdown 的日级触发从后验 gate 推进到 allocation layer。
-- P3a：r48 formal screening + confirmatory 已完成且失败，不能继续用同一 tag 重跑期待随机改善。r49 当前是修复 r48 `source_target_count = 0`、`exposure_utilization` 低、cash timing 与资金流断裂的代码合同入口；正式研究前仍必须完成无冲突进程、无同名 tag、dry-run / contract gate 预检，并以前台持久日志和进度文件方式运行。代码测试和 dry-run 通过不能写成策略有效。
-- P3b：r50 当前是 r49 之后的最新 research 入口，目标是把真实 `cvxpy/cvxpylayers` solver 训练参与、full-universe/OPE、capital-flow closure、risk-sensitive 与 offline support 放到同一短筛合同内；它修复了“训练期 fallback 却诊断写成 solver success”的旧问题。正式训练前仍必须先做无冲突进程、无同名 tag、contract/dry-run gate，且不得把 r50 dry-run 写成策略有效。
-- P3c：r51 当前是绕开 r50 高负荷 solver 的最新轻量 research 入口，目标是验证“神经网络直接学习目标仓位向量 + 现金比例”是否比多 head 对账更自然闭合 source / receiver / cash。dry-run gate 已完成；若进入正式训练，仍必须先确认无冲突进程、无同名 tag，并以前台持久日志和进度文件运行。不得把 r51 代码合同、单测或 dry-run 写成策略有效，也不得删除 r49/r50 作为对照入口。
-- P3d：r52 当前是 r51 的结构升级入口，目标是用完整交易日 padded set batch 和 slot attention 让模型一次看到同日全部股票，避免 r51 的随机 row batch 破坏日级组合约束。dry-run gate 已完成；若进入正式训练，仍必须先确认无冲突进程、无同名 tag，并以前台持久日志和进度文件运行。不得把 r52 代码合同、单测或 dry-run 写成策略有效。
-- P4：中期正路是把 r48 的 full-universe aware solver 从 resource-safe 32-slot 候选银行继续向可扩展组合优化层迁移；当前 r48 已把候选覆盖、现实成本风险、concentration proxy 与 OPE lower-bound / propensity / doubly-robust 诊断接入训练/诊断链路，但仍不是全 A 股一次性大规模 convex program。`solve_semidifferentiable_allocation` 仍保留为推理/模拟安全层，simulator guard 只保留最后安全裁剪。
+- P3：不再优先追加单边 source/cash/reduce guard；优先推进统一 allocation objective / native allocation vector 的结构闭合。
+- P4：r50 true solver 保留为 research 入口，但因本机负荷过高，不作为当前默认长训路径。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。
-- smoke、dry-run、replay、short-window check、repaired confirm 和 insufficient training evidence 都不能升级为正式 verdict。
-- `training_evidence_status = sufficient`、v2 gates 全过、confirm-vs-screening 稳定、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate >= 0.35`、`cash_reserve_rate > 0`、收益/月度质量/回撤/source 分布同时达标前，不进入 promotion 讨论。
-- `receiver_unrealized_deploy_share = 0` 或 `source_positive_forward_sell_share = 0` 只是必要条件，不是完成态。
-- 语义干净但收益弱、收益强但强势误卖、source 休眠、cash dead branch 都只能作为研究证据。
+- smoke、dry-run、short-window check、repaired confirm、insufficient evidence 都不能升级为正式 verdict。
+- `receiver_unrealized_deploy_share = 0`、`source_positive_forward_sell_share = 0` 或 source 通道恢复都只是必要条件，不是完成态。
+- 不得用 safe screening 或代码合同结果改 `active_execution_strategy.json`。
 
 ## 当前风险
-- 如果继续堆 simulator guard，系统会变成“翻译器补漏洞”，而不是学习组合资金分配。
-- 如果放宽 source clean-pass，容易从 source dormant 退回强势误卖。
-- 如果只看 release conviction，会放过尾部正 forward source；r33 已证明该风险真实存在。
-- 如果只看 receiver headroom，可能得到语义干净但 receiver 数量不足或收益弱的 dead branch。
-- 如果入口文档继续按日期堆积，接管会重新变慢，且当前结论会被历史细节淹没。
-
-## 近期研究索引
-- r19-r23：组合日频 receiver/source/cash ranking、v2 gated、cash-aware、source execution、receiver execution 与 stable confirmatory 搜索。
-- r24-r26：receiver 可买性训练信号、source-release listwise、allocation teacher、funding closure / transfer / dead branch。
-- r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
-- r31：receiver semantic closure，修复 direct add/open 授权绕过 executable receiver gate。
-- r33：source forward proxy、release conviction 与 distribution clean-pass，修复强势 source 误卖但尚未恢复足够 clean breadth。
-- r34：allocation breadth bounded/evidence-confirm 已完成；工程链路可执行，训练证据可充分，但 fresh confirm 未通过 v2/stability，失败核心是 source 分布与 receiver-source spread，而不是 receiver 可执行性或 GPU/yolos 训练链路。
-- r35：unified allocation 已完成修复后 bounded confirm；入口为 `split_heads_portfolio_daily_unified_allocation_r35`、loss 为 `alpha_result_value_budget_split_v21`。`postfix4_bounded_confirm_20260430` 完成 4 个 screening 与 2 个 confirm，`stable_confirmatory_count = 1`，champion 为 `confirm_02`，但 `promotion_status = shadow_only`。
-- r36：risk-aware unified allocation 已完成代码接入与 3 轮 screening。入口为 `split_heads_portfolio_daily_risk_aware_unified_allocation_r36`、loss 为 `alpha_result_value_budget_split_v22`。r36c 已封住 unified source 绕过 `source_distribution_clean_pass` 的执行层旁路，并在 `64/48` screening 中达到 `training_evidence_status = sufficient`；但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且真实 source 未来分布仍未过线。
-- r37：decision-focused allocation 已完成代码接入与两轮 `64/48` screening。入口为 `split_heads_portfolio_daily_decision_focused_allocation_r37`、loss 为 `alpha_result_value_budget_split_v23`。r37b 已确认推理侧 unified allocation 会消费预测 source penalty heads，训练 diagnostics 为 yolos + CUDA 且 `training_evidence_status = sufficient`；但 `promotion_gate.status = shadow_only`，失败项仍为 `open_win_rate_5d`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且 `source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`，说明 source hard-negative 信号已接通但学习强度仍不足。
-- r38：source hard-negative regret 已完成代码接入与 bounded screening + fresh confirm。入口为 `split_heads_portfolio_daily_source_hard_negative_regret_r38`、loss 为 `alpha_result_value_budget_split_v24`。本轮 diagnostics 为 yolos + CUDA，`completed_epochs = 64`，`training_evidence_status = sufficient`；confirm 中 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`receiver_minus_source_forward_excess_5d = 0.037347`、`source_realized_sell_rate = 1.0`、`receiver_unrealized_deploy_share = 0.0`、`cash_reserve_rate = 0.981728`，但 `promotion_gate.status = shadow_only`，失败项为 `reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，且 `annual_return = 0.009111`、`sharpe = 0.164855`、`source_target_count = 1`，说明 source 防错已过强而收益/广度/时机不足。
-- r39：allocation objective consolidation 已完成代码接入、两轮 bounded screening + fresh confirm。入口为 `split_heads_portfolio_daily_allocation_objective_consolidation_r39`、loss 为 `alpha_result_value_budget_split_v25`。第二轮 `execblend` 在预测阶段把 final objective 回写 receiver/source/cash core scores；confirm 为 `training_evidence_status = sufficient`、`annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`source_target_count = 1`、`receiver_unrealized_deploy_share = 0.0`、`source_realized_sell_rate = 1.0`、`source_positive_forward_sell_share = 0.0`、`receiver_minus_source_forward_excess_5d = 0.066883`，但 `promotion_status = shadow_only`，v2 gate 只过 `9/12`，失败项为 `exit_timeliness_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`，stable confirm 失败于 `confirm_gate_pass` 与 `confirm_source_count_floor`。
-- r40：end-to-end allocation layer clean rerun `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 已完整结束并可读取最终结果；screening 高收益分支因 `training_evidence_status = insufficient` 不可作为 verdict，confirmatory 分支训练证据充分但 stable confirm 为空。主要瓶颈不是前台运行或 GPU/yolos，而是 allocation layer 下 source 释放/资金来源仍休眠、cash timing 为负、drawdown 未过线、order translation drift 仍存在。
-- r41：risk-sensitive allocation layer 已完成代码入口和合同测试。入口为 `split_heads_portfolio_daily_risk_sensitive_allocation_layer_r41`、loss 为 `alpha_result_value_budget_split_v26`，目标是把 uncertainty pressure、tail risk control、decision-focused objective、receiver risk brake 与 cash defense 内生到 allocation layer；当前没有 study / protocol / ranking 证据，因此只可作为保留 research profile。
-- r42：utility-credit allocation 已完成代码入口和合同测试。入口为 `split_heads_portfolio_daily_utility_credit_allocation_r42`、loss 为 `alpha_result_value_budget_split_v27`，目标是把 net utility、credit closure 与 resource efficiency 写入 allocation layer，并在 screening 后用 resource gate 阻断 source dead / cash timing bad / drawdown bad 的低信息长训；当前只完成 dry-run 产物，不是策略 verdict。
-- r43：primal-dual decision allocation 已完成代码入口、合同测试和 dry-run。入口为 `split_heads_portfolio_daily_primal_dual_decision_allocation_r43`、loss 为 `alpha_result_value_budget_split_v28`，目标是让日频 receiver/source/cash 的最终 soft allocation regret、tail false-source、dead cash、risk cash under-defense 与 funding imbalance 进入训练/验证损失；当前只完成 dry-run 产物，不是策略 verdict。
-- r44：entropic transport allocation 已完成代码入口、合同测试和 dry-run。入口为 `split_heads_portfolio_daily_entropic_transport_allocation_r44`、loss 为 `alpha_result_value_budget_split_v29`，目标是让 source-to-receiver/cash 的资金运输矩阵、边际匹配、运输 regret、false-source flow、dead cash 与 risk cash under-defense 进入训练/验证损失；当前只完成 dry-run 产物，不是策略 verdict。
-- r45：conservative transport allocation 已完成代码入口、合同测试和 dry-run。入口为 `split_heads_portfolio_daily_conservative_transport_allocation_r45`、loss 为 `alpha_result_value_budget_split_v30`，目标是在 r44 transport 基础上加入 offline support / OOD action 保守损失，压制非 executable receiver、非 held/source、强 positive-forward false source 与高风险低 cash 的过度自信；当前只完成 dry-run 产物，不是策略 verdict。
-- r46：differentiable convex allocation 已完成代码入口和合同测试。入口为 `split_heads_portfolio_daily_differentiable_convex_allocation_r46`、loss 为 `alpha_result_value_budget_split_v31`，目标是把 torch 图内 soft allocation、KKT/constraint residual、data-driven gross/turnover/position/cash constraints、unsupported mass、false-source、cash timing、source/receiver shortfall、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 与 legacy action loss 归零写入训练；当前只完成代码合同，不是策略 verdict。
-- r47：true convex solver allocation 已完成代码入口和合同测试。入口为 `split_heads_portfolio_daily_true_convex_solver_allocation_r47`、loss 为 `alpha_result_value_budget_split_v32`，目标是用真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer 求解预测 utility 与 oracle utility 下的组合权重，并把 solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 诊断写入训练；当前只完成代码合同和 dry-run gate，不是策略 verdict。
-- r48：full-universe convex OPE allocation 已完成代码入口、合同测试、dry-run、formal screening 与 confirmatory。入口为 `split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48`、loss 为 `alpha_result_value_budget_split_v33`。本轮 tag `self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3` 在 `2026-05-09T05:04:05+08:00` 自然完成，`completed_trial_count = 1`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 1`，但 stable confirm 为空；confirm_01 失败于 `training_evidence_sufficient`、`reduce_success_rate_5d`、`exit_timeliness_rate_5d`、`cash_timing_quality_1d`，且 stability 失败于 `source_training_evidence_sufficient`、`confirm_training_evidence_sufficient`、`confirm_gate_pass`、`confirm_source_count_floor`、`confirm_exposure_utilization_floor`。结论：r48 是完整失败 verdict，不可 promotion，不替代 r39。
-- r49：capital-flow closure 已完成代码入口、合同测试与 dry-run。入口为 `split_heads_portfolio_daily_capital_flow_closure_r49`、loss 为 `alpha_result_value_budget_split_v34`。目标是把 receiver demand、clean source supply、cash release、cash defense、exposure utilization 与 flow conservation 放进同一个日级资金流残差；当前只是代码合同和 dry-run，不是 strategy verdict。
-- r50：integrated convex capital-flow 已完成代码入口、合同测试与 dry-run。入口为 `split_heads_portfolio_daily_integrated_convex_capital_flow_r50`、loss 为 `alpha_result_value_budget_split_v35`。目标是在 r49 资金闭合基础上让真实 convex solver 在训练期受控参与，并联合 full-universe/OPE、risk-sensitive、offline support 与 source/exposure/cash resource gate；当前只是代码合同和 dry-run，不是 strategy verdict。
-- r51：native allocation vector 已完成代码入口、合同测试、预测输出、simulator native target 优先路径与 dry-run。入口为 `split_heads_portfolio_daily_native_allocation_vector_r51`、loss 为 `alpha_result_value_budget_split_v36`。目标是让模型直接输出 `portfolio_daily_target_weight` / `portfolio_daily_target_cash_weight`，并从 `target_delta` 推导 native receiver/source/cash score；当前只是代码合同与 dry-run，不是 strategy verdict。
-- r52：day-set native allocation vector 已完成代码入口、合同测试、完整日级 padded set batch、slot attention、预测兼容路径与 dry-run。入口为 `split_heads_portfolio_daily_day_set_native_allocation_vector_r52`、loss 为 `alpha_result_value_budget_split_v37`。目标是用完整交易日 batch 输出目标仓位向量和日级现金；当前只是代码合同与 dry-run，不是 strategy verdict。
-- 过程细节与完整实验复盘以 `daily_research/brain/episodic_memory.md` 为准。
+- 继续堆 simulator guard 会让系统退回“翻译器补漏洞”，不是学习组合资金分配。
+- 放宽 source clean-pass 容易从 source dormant 退回强势误卖。
+- 只加训练资源可能掩盖 native target 约束问题，并再次触发本机资源风险。
+- 主文档若继续按日期堆积，接管会被历史细节淹没。
 
 ## 历史归档入口
+- 本文件归档前完整快照：`daily_research/brain/references/state_center_archive_20260510.md`。
 - 早期状态原文：`daily_research/brain/references/state_center_history_raw_20260424.md`。
-- 早期标题索引：`daily_research/brain/references/state_center_evidence_index_20260424.md`。
-- continuous_policy 设计合同历史：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
-- episodic 历史原文：`daily_research/brain/references/episodic_memory_history_raw_20260317_20260422.md`。
-- 读取纪律：当前状态以本文件上方章节为准；归档文件只作为历史证据与追溯入口。
-
-## 2026-05-02 主线停环审计
-- 已生成并采纳 `daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md`。结论：continuous_policy 自 r19 以来不是完全原地踏步，但 r34-r39 已明确进入同一组矛盾的局部补丁循环。
-- 当前停止“r39 后继续追加局部 source/cash/reduce penalty 或 guard”的旧路线；下一主线必须以 `end-to-end allocation layer` 为目标，而不是继续包装旧 action-head / simulator-guard 路径。
-- r20-r23、r31、r33 只作为最后安全边界冻结；`portfolio_daily_ranking_v2_gated`、`action_budget_split_v1`、`cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` 若在 r40+ 继续作为主路径，必须先给出明确架构差异和退出旧路径的证据。
-- 当前真正瓶颈：source / receiver / cash 的 credit assignment 尚未在同一个可优化 allocation objective / allocation layer 内闭合；simulator guard 不能再承担主策略逻辑。
-## 2026-05-02 r40 end-to-end allocation layer 入口落地
-- 已新增 `split_heads_portfolio_daily_end_to_end_allocation_layer_r40`，默认 objective 为 `end_to_end_allocation_layer_v1`，预算语义为 `allocation_layer_v1`，校准为 `end_to_end_allocation_layer_v1`；它不再沿用 `action_budget_split_v1` + v15 receiver-exec guard 作为主路径。
-- `portfolio_simulator.py` 已新增 allocation-layer 主模式：在 r40 语义下由 `solve_semidifferentiable_allocation` 直接输出目标权重；direct action 信号降级为非主导辅助，不再伪造 receiver/source 主目标。
-- `allocation_optimizer.py` 已要求 `portfolio_daily_receiver_executable_candidate` 与 `portfolio_daily_source_executable_candidate` 作为硬候选掩码；raw score 或 action label 不能绕过 executable candidate。
-- r40 当前已完成一次 bounded study，但不是有效训练 verdict；本轮暴露的是超长前台任务 stdout 失效导致的 protocol 阶段异常，而不是 allocation layer 训练有效性通过。因此仍为 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact。
-## 2026-05-04 r40 bounded study 结果与运行通道修复
-- 已前台自然结束 `self_opt_study_r40_end_to_end_allocation_layer_20260502`；进程没有陷入循环，PID 自然消失，最终生成 `study_summary.json`。
-- 本轮 screening 只有 `trial_01` 完整完成，`trial_02`、`trial_03` 与 `confirm_01` 在训练或评估产物写出后报 `[Errno 22] Invalid argument`。根因是外层 10h shell 捕获窗口超时返回后，Python 主进程继续运行但 stdout 管道失效，后续 stage 的 JSON 打印把已完成 stage 误标为失败。
-- 已加固 continuous_policy 输出路径：train / evaluate / export / protocol / behavior audit / conclusion ledger / self-optimizing study 的末尾 JSON 打印改为 `safe_print_json`；stdout 失效只影响控制台显示，不得再使已持久化的 stage 失败。`progress.py` 同步降级失效 stdout。
-- r40 本轮唯一可评估 champion 为 screening `trial_01`：`annual_return = 0.064530`、`sharpe = 0.354676`、`max_drawdown = -0.196677`、`monthly_return_mean = 0.006319`、`training_evidence_status = insufficient`、v2 gate `8/12`，失败项为 `training_evidence_sufficient`、`reduce_success_rate_5d`、`cash_timing_quality_1d`、`max_drawdown`。
-- 结论：r40 架构入口成立，但本轮 bounded study 不能用于策略判定；下一次正式 r40 confirm 必须在前台使用持久 stdout/stderr 日志，并按 2h 轮询，不让外层捕获窗口关闭污染主进程。
-
-## 2026-05-07 r40 clean rerun 结果与当前判定
-- 已完成并解析 `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504`：`executed_at = 2026-05-07T04:54:27+08:00`，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、`portfolio_daily_v2_stable_confirmatory_trials = []`。
-- 运行通道判定：原 PID 自然退出，`study_summary.json`、`trial_ranking.csv`、protocol summary 与模型 artifact 均可读取；`foreground.log` 停在旧 stdout 管道失效时间不影响最终持久产物。该 clean_r1 进程启动早于 `study_progress.json/jsonl` 补丁，所以缺少进度文件是预期现象。
-- 策略判定：screening `trial_02` 与 `trial_03` 年化收益约 `0.799`、Sharpe 约 `2.34`，但 `training_evidence_status = insufficient`；confirm_01 / confirm_02 为 `training_evidence_status = sufficient`，但均为 `shadow_only`，stable confirm 为空，失败项集中在 `cash_timing_quality_1d`、`max_drawdown`，confirm_01 另失败 `exit_timeliness_rate_5d`。
-- 结构诊断：r40 证明新运行通道可用，但没有证明策略强于 r39。confirm_02 虽有 `annual_return = 0.688870`、`sharpe = 2.448261`、`receiver_target_count = 408`、`receiver_realized_deploy_rate = 1.0`，仍有 `source_target_count = 0`、`source_realized_sell_rate = 0`、`cash_timing_quality_1d = -0.114171`、`max_drawdown = -0.106384`、`order_translation_conflict_rate = 0.907379`，说明 source/receiver/cash credit assignment 尚未在 allocation layer 内稳定闭合。
-- 决策：r40 clean_r1 继续为 `research / shadow_only`，不得 promotion、不得 live、不得改 active artifact；当前有效证据基线仍是 r39。
-
-## 2026-05-10 r52 safe screening 结果与当前判定
-- 事实：`self_opt_study_r52_day_set_native_allocation_vector_screening_safe_20260510_01` 首轮 safe screening 因 `_project_native_allocation_vector` 中 `torch.full_like(..., Tensor)` 在 CUDA 训练路径触发 `TypeError`，`completed_trial_count = 0`、`failed_trial_count = 3`；已修复为 `torch.ones_like(...) * tensor`，并让 r52 projection 合同测试在 CUDA 可用时覆盖该路径。
-- 事实：修复后 `self_opt_study_r52_day_set_native_allocation_vector_screening_safe_20260510_02` 自然完成 safe screening-only，`completed_trial_count = 2`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 0`、`confirmatory_enabled = false`；resource gate 触发并节省第 3 个 screening trial，失败项为 `source_release_dead`、`economic_signal_too_weak`、`exposure_utilization_low`。
-- 事实：两个 completed trials 均为 `sample_model_type = temporal_day_set`、`supports_portfolio_day_set_native_allocation_vector = true`、`portfolio_full_universe_convex_train_solver_effective = false`、`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`。
-- 关键指标：trial_01 为 `annual_return = 0.005293`、`monthly_return_mean = 0.000469`、`max_drawdown = -0.042694`、`cash_timing_quality_1d = 0.019888`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 54`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 0.559323`、`training_evidence_status = insufficient`；trial_02 为 `annual_return = -0.017049`、`monthly_return_mean = -0.000821`、`max_drawdown = -0.063852`、`cash_timing_quality_1d = 0.038652`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 64`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 0.499263`、`training_evidence_status = insufficient`。
-- 推断：r52 运行通道、day-set 模型、CUDA/yolos 与 safe 资源口径已验证可用，但核心策略仍没有闭合 source release；它改善了完整日级 batch 结构，却没有解决 `source_target_count = 0` 与训练证据不足，因此不能进入 confirmatory。
-- 决策：r52 当前仍为 `research / shadow_only` 失败 screening 证据，不得 promotion、不得 live、不得改 active artifact；当前有效证据基线仍为 r39。后续若继续 r52/r53，必须先解决 native allocation target 对 held source release 的可学习性和训练证据 edge 问题，而不是直接延长 confirmatory。
-
-## 2026-05-10 r52 native source-delta closure 修复与判定
-- 事实：已按 r52 native source-delta closure 方案修复训练侧与 simulator 侧的旧 source mask 断路。`model_seq_v3.py` 中 r51/r52 native projection 的 source 支撑从旧 `portfolio_daily_source_candidate_mask` 改为“当前持仓且可卖”，旧 source mask 只保留为质量 prior 与诊断项；新增 `source_dead_loss`、`native_source_threshold_loss`、`legacy_mask_block_loss`、`native_negative_delta_count`、`native_source_candidate_count`、`native_source_blocked_by_legacy_mask`、`native_source_audit_threshold_gap` 等项。
-- 事实：`portfolio_simulator.py` 已在 native target 有效时优先从 `target_weight - current_weight` 推导 source / receiver target，native source 不再依赖旧 `portfolio_daily_source_candidate`；held add 不再因为 receiver executable mask 为 0 被误判为 native target 无效；fallback 仍保留给 native target 缺失或约束严重违规场景。
-- 事实：`pipeline_utils.py` 与 `run_self_optimizing_study.py` 已补齐 native-to-simulator 证据输出，包含 `allocation_layer_native_target_used`、`allocation_layer_source_target_count`、`native_negative_delta_count`、`native_source_target_count`、`native_target_valid` 与 `native_source_delta_alignment_support`。
-- 验证：`py_compile` 通过；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 为 `90` 项 OK；`git diff --check` 通过。dry-run `self_opt_study_r52_native_source_delta_closure_dryrun_20260510_02` 通过，确认 3 个 trial 均为 v37、r52 profile、`day_set_native_allocation_vector_support = true`、`native_source_delta_alignment_support = true`、true solver false、confirmatory false。
-- 事实：修复后 safe screening `self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02` 自然完成 `3` 个 screening trials，`failed_trial_count = 0`、`confirmatory_completed_trial_count = 0`；resource gate 在 screening 末尾触发，失败项为 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak`。
-- 关键指标：trial_01 恢复 source 通道，`source_target_count = 51`、`source_realized_sell_rate = 1.0`、`receiver_target_count = 42`、`receiver_unrealized_deploy_share = 0`、`exposure_utilization = 1.837`、`cash_timing_quality_1d = 0.0510`、`max_drawdown = -0.0627`、`annual_return = 0.0390`、`training_evidence_status = insufficient`；trial_02 恢复 source 通道，`source_target_count = 260`、`source_realized_sell_rate = 1.0`、`receiver_target_count = 45`、`receiver_unrealized_deploy_share = 0`、`exposure_utilization = 1.426`、`cash_timing_quality_1d = 0.0427`、`max_drawdown = -0.0708`、`annual_return = -0.0220`、`training_evidence_status = insufficient`；trial_03 仍 source dead，`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 1`、`exposure_utilization = 0.492`、`cash_timing_quality_1d = 0.00307`、`max_drawdown = -0.0201`、`annual_return = 0.0391`、`training_evidence_status = insufficient`。
-- 推断：本轮修复证明 r52 source 断路并非单纯训练资源不足；native source delta 已能穿透 simulator，并在 2/3 screening trials 中恢复真实 source target 与 sell rate。但 r52 仍未彻底闭合：native target valid rate 仍低，训练诊断中 `native_source_threshold_loss` / `native_source_audit_threshold_gap` / `turnover_violation` 仍高，且三个 trial 均为 evidence insufficient。
-- 决策：r52 native source-delta closure 当前是结构修复成功、策略判定未通过。不得 promotion、不得 live、不得改 active artifact；不得直接进入 confirmatory 或长训。后续若继续，应先修 native target validity、source delta 阈值鲁棒性和 turnover constraint，再重新 safe screening。
+- 早期状态索引：`daily_research/brain/references/state_center_evidence_index_20260424.md`。
+- 过程复盘归档：`daily_research/brain/references/episodic_memory_archive_20260510.md`。
+- 知识中枢归档：`daily_research/brain/references/knowledge_center_archive_20260510.md`。
+- 操作中枢归档：`daily_research/brain/references/operations_center_archive_20260510.md`。
+- 早期历史原文与索引仍保留在 `daily_research/brain/references/*_history_raw_*.md` 与 `*_evidence_index_*.md`。

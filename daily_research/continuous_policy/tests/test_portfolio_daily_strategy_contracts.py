@@ -3375,6 +3375,22 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertTrue(torch.equal(batch["sample_mask"], torch.tensor([[True, True, True], [True, True, False]])))
         self.assertEqual(float(batch["sample_targets"]["current_weight"][1, 2]), 0.0)
 
+    def test_r52_refactored_native_helpers_remain_reexported(self) -> None:
+        from daily_research.continuous_policy import day_set_batching
+        from daily_research.continuous_policy import day_set_modules
+        from daily_research.continuous_policy import native_allocation
+
+        self.assertIs(model_seq_v3._project_native_allocation_vector, native_allocation._project_native_allocation_vector)
+        self.assertIs(model_seq_v3._portfolio_native_allocation_vector_loss, native_allocation._portfolio_native_allocation_vector_loss)
+        self.assertIs(model_seq_v3._project_day_set_native_allocation_vector, native_allocation._project_day_set_native_allocation_vector)
+        self.assertIs(
+            model_seq_v3._portfolio_day_set_native_allocation_vector_loss,
+            native_allocation._portfolio_day_set_native_allocation_vector_loss,
+        )
+        self.assertIs(model_seq_v3.DaySetTensorDataset, day_set_batching.DaySetTensorDataset)
+        self.assertIs(model_seq_v3._collate_day_set_batch, day_set_batching._collate_day_set_batch)
+        self.assertIs(model_seq_v3.PortfolioSlotAttention, day_set_modules.PortfolioSlotAttention)
+
     def test_r52_day_set_model_outputs_day_level_cash_and_row_weights(self) -> None:
         model = TemporalDaySetPolicyNet(
             static_input_dim=3,
