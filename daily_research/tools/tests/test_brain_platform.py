@@ -9,6 +9,7 @@ from daily_research.tools.brain_platform import (
     load_workflow_registry,
     resolve_artifact_freshness,
     resolve_bootstrap,
+    resolve_study_evidence,
 )
 
 
@@ -63,6 +64,21 @@ class BrainPlatformTest(unittest.TestCase):
             workflow = registry[workflow_id]
             for key in ("preflight", "artifacts", "writeback_routes", "forbidden_actions"):
                 self.assertIn(key, workflow, workflow_id)
+
+    def test_explicit_study_evidence_capsule_reads_coherent_r52_trials(self) -> None:
+        tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"
+        report = resolve_study_evidence(tag)
+        payload = report.to_dict()
+
+        self.assertEqual(payload["study_tag"], tag)
+        self.assertEqual(payload["completed_trial_count"], 3)
+        self.assertEqual(len(payload["trials"]), 3)
+        self.assertTrue(payload["artifact_freshness"]["is_stale_risk"])
+        first = payload["trials"][0]
+        self.assertEqual(first["loss_profile"], "alpha_result_value_budget_split_v37")
+        self.assertEqual(first["sample_model_type"], "temporal_day_set")
+        self.assertIn("native_target_valid", first["metrics"])
+        self.assertIn("native_source_threshold_loss", first["training_terms"])
 
 
 if __name__ == "__main__":

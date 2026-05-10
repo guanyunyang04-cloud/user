@@ -27,7 +27,9 @@
 - 平台化接管胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow handoff --child daily_research --json`
 - 工作流健康检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow health --json`
 - continuous_policy 状态胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --json`
+- 指定 study 证据胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <tag> --json`
 - 写回计划预览：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow writeback-plan --source latest --json`
+- 指定 study 写回计划：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow writeback-plan --source study:<tag> --json`
 - 守卫检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
 - 文档守卫：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - 项目一致性：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
@@ -51,12 +53,20 @@
 - r52：`split_heads_portfolio_daily_day_set_native_allocation_vector_r52` / `alpha_result_value_budget_split_v37`，使用完整交易日 day-set batch，不启用 true solver。
 - r52 诊断优先读取：`supports_portfolio_day_set_native_allocation_vector`、`portfolio_day_set_native_allocation_vector_terms`、`sample_model_type`、`day_set_batch_size`、`allocation_layer_native_target_used`、`native_source_delta_alignment_support`、`native_target_valid`、`native_source_target_count`、`native_source_audit_threshold_gap`。
 - r52 当前判定：native source-delta closure 已部分修通，但 evidence insufficient，不能进入 confirmatory。
+- r52b：`split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`，优先修 native target validity、turnover 同口径与 source audit threshold；诊断必须读取 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段。
 
 ## r52 dry-run 模板
 ```powershell
 $env:PYTHONUTF8='1'
 $env:PYTHONIOENCODING='utf-8'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_allocation_vector_r52 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
+```
+
+## r52b dry-run 模板
+```powershell
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
 ```
 
 ## 产物读取入口

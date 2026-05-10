@@ -2263,12 +2263,19 @@ def compute_continuity_metrics(
         )
         for native_metric_column in (
             "allocation_layer_native_target_used",
+            "allocation_layer_native_fallback_used",
             "allocation_layer_source_target_count",
             "allocation_layer_source_executable_candidate_count",
             "native_negative_delta_count",
             "native_source_target_count",
             "native_target_valid",
             "native_target_constraint_violations",
+            "native_target_invalid_sum_count",
+            "native_target_invalid_turnover_count",
+            "native_target_invalid_cap_count",
+            "native_target_invalid_negative_weight_count",
+            "native_target_invalid_unsupported_receiver_count",
+            "native_target_invalid_sell_nonheld_count",
         ):
             if native_metric_column in turnover_frame.columns and native_metric_column not in metrics:
                 native_metric_values = pd.to_numeric(turnover_frame[native_metric_column], errors="coerce").fillna(0.0)

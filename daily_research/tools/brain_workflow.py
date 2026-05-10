@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.tools.brain_platform import (
     build_workflow_state,
@@ -35,11 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="Build workflow status from registry and latest artifacts.")
     status.add_argument("--workflow", required=True)
+    status.add_argument("--study-tag", default="")
     status.add_argument("--json", action="store_true")
     status.add_argument("--write-output", action="store_true")
 
     preflight = sub.add_parser("preflight", help="Build read-only preflight state for a workflow.")
     preflight.add_argument("--workflow", required=True)
+    preflight.add_argument("--study-tag", default="")
     preflight.add_argument("--json", action="store_true")
     preflight.add_argument("--write-output", action="store_true")
 
@@ -57,7 +64,7 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command == "health":
         return "health", check_brain_health().to_dict()
     if args.command in {"status", "preflight"}:
-        payload = build_workflow_state(args.workflow).to_dict()
+        payload = build_workflow_state(args.workflow, study_tag=str(getattr(args, "study_tag", "") or "")).to_dict()
         if args.command == "preflight":
             payload = dict(payload)
             payload["preflight_only"] = True

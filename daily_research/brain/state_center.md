@@ -13,6 +13,8 @@
 - 当前有效研究证据基线仍是 r39 allocation objective consolidation 的 `alpha_result_value_budget_split_v25` 与 `portfolio_daily_ranking_v2_gated`。
 - r48 formal screening + confirmatory 已完成但 stable confirm 为空；r49-r52 是 research 入口与结构升级，不是策略有效 verdict。
 - r52 native source-delta closure 已修通部分 source 通道，但未完成策略闭合：2/3 screening trials 恢复 source target，3/3 仍为 `training_evidence_status = insufficient`。
+- 2026-05-11 已新增 explicit study evidence capsule：`brain_workflow status --workflow continuous_policy --study-tag <tag> --json` 可按指定 study 聚合 study / protocol / training / evaluation 证据；loose `latest_*` 仍显示 r52 study 与 r34 protocol/audit/ledger 不同源，不能直接作为真源。
+- r52b 结构入口为 `split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`；它是 r52 的 native target validity 修复入口，不是 formal verdict。
 
 ## 当前接管入口
 - 读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -28,6 +30,7 @@
 - r31 / r33 / r34-r39 保留为 receiver/source/cash 合同与证据基线；r40-r52 是 allocation layer 升级链。
 - r52 当前最新问题不是单纯训练资源不足，而是 native target valid rate 低、source delta 阈值鲁棒性不足、turnover / constraint violation 仍高。
 - 下一轮若继续 r52/r53，应先修 native target validity、source threshold 和 turnover constraint，再重新 safe screening。
+- r52b 验收优先看 `native_target_valid`、`allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段；若 validity 未明显改善，不进入 22 epoch 长训。
 
 ## 近期研究索引
 - r31：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，保留 receiver executable closure 合同。

@@ -3944,6 +3944,13 @@ class PortfolioState:
         native_negative_delta_count = 0
         native_source_target_count = 0
         native_target_constraint_violations = 0.0
+        native_target_invalid_sum_count = 0
+        native_target_invalid_turnover_count = 0
+        native_target_invalid_cap_count = 0
+        native_target_invalid_negative_weight_count = 0
+        native_target_invalid_unsupported_receiver_count = 0
+        native_target_invalid_sell_nonheld_count = 0
+        allocation_layer_native_fallback_used = 0.0
         allocation_layer_receiver_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         allocation_layer_source_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         if end_to_end_allocation_layer_mode:
@@ -4005,13 +4012,19 @@ class PortfolioState:
                 native_sell_nonheld_count = int(
                     (native_negative_delta & (current_for_native <= 1.0e-8)).sum()
                 )
+                native_target_invalid_sum_count = int(float(native_target_weights_raw.clip(lower=0.0).sum()) > 1.0 + 1.0e-6)
+                native_target_invalid_turnover_count = int(native_turnover > float(turnover_budget) + 1.0e-6)
+                native_target_invalid_cap_count = native_position_cap_violation_count
+                native_target_invalid_negative_weight_count = native_negative_weight_count
+                native_target_invalid_unsupported_receiver_count = native_unsupported_receiver_count
+                native_target_invalid_sell_nonheld_count = native_sell_nonheld_count
                 native_constraint_violations = float(
-                    int(float(native_target_weights_raw.clip(lower=0.0).sum()) > 1.0 + 1.0e-6)
-                    + int(native_turnover > float(turnover_budget) + 1.0e-6)
-                    + native_position_cap_violation_count
-                    + native_negative_weight_count
-                    + native_unsupported_receiver_count
-                    + native_sell_nonheld_count
+                    native_target_invalid_sum_count
+                    + native_target_invalid_turnover_count
+                    + native_target_invalid_cap_count
+                    + native_target_invalid_negative_weight_count
+                    + native_target_invalid_unsupported_receiver_count
+                    + native_target_invalid_sell_nonheld_count
                 )
                 native_target_constraint_violations = native_constraint_violations
                 if native_constraint_violations <= 0.0:
@@ -4029,6 +4042,7 @@ class PortfolioState:
                     allocation_layer_objective_value = 0.0
                     allocation_layer_constraint_violations = 0.0
             if allocation_solution is None and not native_target_weights_valid:
+                allocation_layer_native_fallback_used = 1.0 if "portfolio_daily_target_weight" in policy.columns else 0.0
                 allocation_solution = solve_semidifferentiable_allocation(
                     allocation_problem,
                     constraints=AllocationOptimizerConstraints(
@@ -5474,10 +5488,17 @@ class PortfolioState:
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),
+            "allocation_layer_native_fallback_used": float(allocation_layer_native_fallback_used),
             "native_target_valid": float(native_target_valid),
             "native_negative_delta_count": int(native_negative_delta_count),
             "native_source_target_count": int(native_source_target_count),
             "native_target_constraint_violations": float(native_target_constraint_violations),
+            "native_target_invalid_sum_count": int(native_target_invalid_sum_count),
+            "native_target_invalid_turnover_count": int(native_target_invalid_turnover_count),
+            "native_target_invalid_cap_count": int(native_target_invalid_cap_count),
+            "native_target_invalid_negative_weight_count": int(native_target_invalid_negative_weight_count),
+            "native_target_invalid_unsupported_receiver_count": int(native_target_invalid_unsupported_receiver_count),
+            "native_target_invalid_sell_nonheld_count": int(native_target_invalid_sell_nonheld_count),
             "allocation_layer_receiver_executable_candidate_count": int(
                 allocation_layer_receiver_executable_candidate.sum()
             ),

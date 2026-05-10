@@ -32,6 +32,7 @@
 - `Start-Job` 只属于局部联调经验，不应写成用户侧公开启动默认。
 - 中文主分脑文档必须保持 UTF-8；PowerShell here-string 不是默认中文写入方案，批量整理中文正文时需用 `apply_patch` 或显式 UTF-8 写入并复核。
 - `latest_*` 文件不得被直接视为无条件真源；必须先经 artifact freshness 判断 study / protocol / audit / ledger 是否同源、是否 stale。
+- 当 loose `latest_*` 不同源时，必须用 explicit study tag capsule 读取：`brain_workflow status --workflow continuous_policy --study-tag <tag> --json`；指定 study 证据优先于混杂 latest 指针。
 - workflow JSON 是运行态证据胶囊，不是 brain 权威事实；稳定结论仍必须写回对应中枢或 references archive。
 
 ## 3. 已验证教训
@@ -43,6 +44,7 @@
 - r39 证明统一 allocation objective 能恢复收益和正 receiver-source spread，但 source breadth、cash timing 与 drawdown 仍未闭合。
 - r48 证明 full-universe convex OPE 运行通道可用，但 source dead / exposure 低 / evidence edge 仍会失败。
 - r52 证明 day-set native allocation vector 结构更接近目标，但 source release 不会自动闭合；native target validity 和 source threshold 仍需修复。
+- r52b 的核心不是加长训练，而是让训练 projection、预测导出和 simulator validity 使用同一约束口径；若 `native_target_valid` 仍低，继续加 epoch 只会放大无效目标。
 - `cp_v3_seq_holdcash_r1`、`cp_v3_seq_holdcash_r2`、`cp_v3_seq_holdcash_v5_formal_r1` 共同证明 hold/cash 改善必须经 formal evidence 复核。
 - `cp_hier_v4_holdcash_r5` 证明 hierarchical branch 可改善 reversal，但没有学出 hold 前仍只是 research branch。
 
@@ -57,6 +59,7 @@
 | r40-r48 | end-to-end allocation layer 与 convex/OPE 方向正确，但策略证据未过 stable confirm。 |
 | r49-r50 | capital-flow closure 与 true solver 入口保留；r50 因本机负荷过高不作为默认长训路径。 |
 | r51-r52 | native allocation vector 与 day-set batch 是当前轻量主线，但仍需修 target validity / source threshold。 |
+| r52b | validity-first native target closure：优先降低 simulator fallback 与分原因 invalid，再决定是否 strict resume。 |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

@@ -102,7 +102,9 @@
     ],
     "allowed_commands": [
       "daily_research/tools/brain_workflow.py status --workflow continuous_policy --json",
-      "daily_research/tools/brain_workflow.py writeback-plan --source latest --json"
+      "daily_research/tools/brain_workflow.py status --workflow continuous_policy --study-tag <tag> --json",
+      "daily_research/tools/brain_workflow.py writeback-plan --source latest --json",
+      "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json"
     ],
     "forbidden_actions": [
       "promote_from_screening_only",
@@ -123,6 +125,7 @@
     },
     "completion": [
       "freshness_report_written",
+      "explicit_study_evidence_capsule_read_if_latest_is_stale",
       "evidence_gap_listed",
       "next_allowed_action_selected"
     ]
@@ -136,6 +139,7 @@
     ],
     "allowed_commands": [
       "daily_research/tools/brain_workflow.py writeback-plan --source latest --json",
+      "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json",
       "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json --apply-brain-writeback"
     ],
     "forbidden_actions": [

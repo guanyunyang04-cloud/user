@@ -1776,6 +1776,25 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v37"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v38"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v37"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v37"]["daily_target_loss_weights"],
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v37"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 1.05,
+        "portfolio_day_set_native_allocation_vector_total": 2.85,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_capital_flow_closure_total": 0.45,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -7112,6 +7131,7 @@ def fit_policy_models_v3(
     uses_day_set_native_allocation = (
         multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
     )
+    native_target_validity_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v38"
     if uses_day_set_native_allocation:
         sample_model = TemporalDaySetPolicyNet(
             static_input_dim=len(static_feature_names),
@@ -7402,6 +7422,7 @@ def fit_policy_models_v3(
                     day_set_outputs,
                     day_set_targets,
                     day_set_mask,
+                    validity_first=native_target_validity_closure_enabled,
                 )
                 if (
                     day_set_outputs is not None
@@ -7619,6 +7640,7 @@ def fit_policy_models_v3(
                     val_day_set_outputs,
                     val_day_set_targets,
                     val_day_set_mask,
+                    validity_first=native_target_validity_closure_enabled,
                 )
                 if (
                     val_day_set_outputs is not None
@@ -7826,6 +7848,7 @@ def fit_policy_models_v3(
                     final_day_set_outputs,
                     final_day_set_targets,
                     final_day_set_mask,
+                    validity_first=native_target_validity_closure_enabled,
                     return_terms=True,
                 )
             else:
@@ -8099,6 +8122,7 @@ def fit_policy_models_v3(
             multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
             and str(getattr(sample_model, "sample_model_type", "temporal_sample")) == "temporal_day_set"
         ),
+        "supports_native_target_validity_closure": bool(native_target_validity_closure_enabled),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
         "day_set_batch_size": int(batch_size)
@@ -11550,7 +11574,12 @@ def predict_policy_v3(
                 _state_column("portfolio_daily_source_forward_excess_5d", 0.0)
             ),
         }
-        native_projection = _project_native_allocation_vector(outputs, native_targets, return_terms=False)
+        native_projection = _project_native_allocation_vector(
+            outputs,
+            native_targets,
+            validity_first=bool(artifact.training_diagnostics.get("supports_native_target_validity_closure", False)),
+            return_terms=False,
+        )
         for column_name in _NATIVE_ALLOCATION_VECTOR_NAMES:
             if column_name not in native_projection:
                 continue

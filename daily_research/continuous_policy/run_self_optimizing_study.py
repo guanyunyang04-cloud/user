@@ -1115,6 +1115,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v38"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.4e-4, 1.8e-4],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.28, 0.32],
+        "daily_dropout": [0.14],
+        "batch_size": [1, 2],
+    },
 }
 
 
@@ -2139,6 +2156,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 6,
         "min_epochs": 4,
     },
+    "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v38",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.4e-4,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.28,
+        "daily_dropout": 0.14,
+        "batch_size": 1,
+        "epochs": 6,
+        "min_epochs": 4,
+    },
 }
 
 
@@ -2202,6 +2238,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_integrated_convex_capital_flow_r50": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_native_allocation_vector_r51": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_allocation_vector_r52": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2314,6 +2351,17 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "exposure_utilization_floor": 0.50,
     },
     "split_heads_portfolio_daily_day_set_native_allocation_vector_r52": {
+        "min_completed_screening": 1,
+        "source_count_floor": 3.0,
+        "source_sell_rate_floor": 0.35,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
+    },
+    "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": {
         "min_completed_screening": 1,
         "source_count_floor": 3.0,
         "source_sell_rate_floor": 0.35,
@@ -5939,6 +5987,9 @@ def main(argv: list[str] | None = None) -> int:
     native_source_delta_alignment_support = bool(
         native_allocation_vector_support or day_set_native_allocation_vector_support
     )
+    native_target_validity_closure_support = any(
+        name == "alpha_result_value_budget_split_v38" for name in selected_trial_loss_profiles
+    )
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
     if str(args.seed_study_tag or "").strip():
@@ -5983,6 +6034,9 @@ def main(argv: list[str] | None = None) -> int:
             native_source_delta_alignment_support = bool(
                 native_allocation_vector_support or day_set_native_allocation_vector_support
             )
+            native_target_validity_closure_support = any(
+                name == "alpha_result_value_budget_split_v38" for name in selected_trial_loss_profiles
+            )
     study_plan = {
         "run_tag": study_tag,
         "created_at": now_iso(),
@@ -6009,6 +6063,7 @@ def main(argv: list[str] | None = None) -> int:
         "native_allocation_vector_support": bool(native_allocation_vector_support),
         "day_set_native_allocation_vector_support": bool(day_set_native_allocation_vector_support),
         "native_source_delta_alignment_support": bool(native_source_delta_alignment_support),
+        "native_target_validity_closure_support": bool(native_target_validity_closure_support),
         "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
@@ -6023,12 +6078,14 @@ def main(argv: list[str] | None = None) -> int:
         study_tag=study_tag,
         search_profile=args.search_profile,
         objective_profile=objective_profile,
+        trial_count=len(selected_trials),
         screening_trial_count=len(selected_trials),
         confirmatory_enabled=not bool(args.disable_confirmatory),
         selected_trial_loss_profiles=selected_trial_loss_profiles,
         native_allocation_vector_support=bool(native_allocation_vector_support),
         day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
         native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
+        native_target_validity_closure_support=bool(native_target_validity_closure_support),
         full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
         resource_gate=RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         resource_limits=resource_limits,

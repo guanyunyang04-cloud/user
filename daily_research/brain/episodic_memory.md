@@ -39,3 +39,8 @@
 - 行动前自检：7 中枢结构、强归档、`doc_guard`、`brain_integrity_check` 与 `project_consistency_check` 已通过，问题不在文档数量，而在接管、预检、freshness、写回计划仍缺少统一机器状态。
 - 执行动作：新增 workflow registry、共享平台模块与统一 CLI；`brain_bootstrap --json` 兼容原字段并补充 `artifact_freshness`、`workflow_hints` 与 `encoding_report`。
 - 边界：workflow JSON 是运行态胶囊，不替代 brain 主文件；默认只读，写回 brain 必须显式触发。
+
+## 2026-05-11 r52b native target validity closure 复盘
+- 行动前自检：r52 safe screening `self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02` 完成 3/3 trial，source delta 在 2/3 trial 中恢复，但 `native_target_valid` 仅约 1%-6%，且 loose `latest_*` 混有 r52 study 与 r34 protocol/audit/ledger。
+- 执行动作：新增 explicit study evidence capsule，`status --study-tag <tag>` 可聚合 study / protocol / training / evaluation；simulator 输出 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段；新增 r52b/v38 validity-first native allocation profile。
+- 边界：r52b 仍是 research / shadow 入口，不改 production/live/active artifact，不启用 true solver；是否进入长训取决于后续 dry-run 与 safe screening 的 native target validity 证据。
