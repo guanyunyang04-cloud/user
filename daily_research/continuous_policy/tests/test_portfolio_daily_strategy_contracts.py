@@ -19,8 +19,14 @@ from daily_research.continuous_policy.allocation_optimizer import (
 from daily_research.continuous_policy.analyze_behavior_gap import _compute_exposure_utilization_from_turnover
 from daily_research.continuous_policy.allocation_teacher import build_allocation_teacher_summary
 from daily_research.continuous_policy.model_seq_v3 import (
+    DailyControllerNet,
+    DaySetTensorDataset,
     LOSS_PROFILE_CONFIGS,
+    TemporalDaySetPolicyNet,
+    TemporalSamplePolicyNet,
+    TorchContinuousPolicySeqArtifact,
     _allocation_objective_consolidation_loss,
+    _collate_day_set_batch,
     _cvxpy_convex_layer_available,
     _cvxpy_convex_layer_status,
     _decision_focused_allocation_regret_loss,
@@ -29,7 +35,9 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _portfolio_cvxpy_convex_allocation_loss,
     _portfolio_entropic_transport_decision_loss,
     _portfolio_full_universe_convex_allocation_loss,
+    _portfolio_day_set_native_allocation_vector_loss,
     _portfolio_native_allocation_vector_loss,
+    _project_day_set_native_allocation_vector,
     _project_native_allocation_vector,
     _loss_profile_enables_full_universe_train_solver,
     _portfolio_offline_conservative_support_loss,
@@ -39,6 +47,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _source_listwise_release_regret_loss,
     _transfer_level_allocation_regret_loss,
     _unified_allocation_consistency_loss,
+    load_torch_seq_artifact,
     predict_policy_v3,
 )
 from daily_research.continuous_policy.model_v2 import ACTION_CLASSES, DURATION_CLASSES
@@ -56,6 +65,7 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILE_BASE_TRIALS,
     SEARCH_PROFILE_DEFAULT_OBJECTIVES,
     SEARCH_PROFILES,
+    TRUE_SOLVER_RESOURCE_SEARCH_PROFILES,
     TrialResult,
     _build_resource_limits,
     _pick_confirmatory_candidates,
@@ -3238,6 +3248,355 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(result.diagnostics["allocation_layer_source_target_count"], 1)
         self.assertGreater(result.weights["RECV"], 0.0)
         self.assertEqual(float(result.weights["OTHER"]), 0.0)
+
+    def test_r52_day_set_dataset_returns_complete_days(self) -> None:
+        date_codes = torch.tensor([0, 0, 0, 1, 1], dtype=torch.long)
+        dataset = DaySetTensorDataset(
+            date_codes=date_codes,
+            static_x=torch.arange(15, dtype=torch.float32).reshape(5, 3),
+            sequence_x=torch.arange(30, dtype=torch.float32).reshape(5, 2, 3),
+            action=torch.tensor([0, 1, 2, 3, 4], dtype=torch.long),
+            duration=torch.tensor([0, 1, 2, 0, 1], dtype=torch.long),
+            action_soft=torch.zeros(5, len(ACTION_CLASSES), dtype=torch.float32),
+            sample_targets={"current_weight": torch.tensor([0.1, 0.2, 0.0, 0.3, 0.0])},
+            daily_x=torch.arange(8, dtype=torch.float32).reshape(2, 4),
+            daily_targets={"gross_exposure_target": torch.tensor([0.5, 0.6])},
+        )
+
+        self.assertEqual(len(dataset), 2)
+        first_day = dataset[0]
+        second_day = dataset[1]
+        self.assertEqual(first_day["static_x"].shape[0], 3)
+        self.assertEqual(second_day["static_x"].shape[0], 2)
+        self.assertTrue(bool(torch.all(first_day["date_code"] == 0)))
+        self.assertTrue(bool(torch.all(second_day["date_code"] == 1)))
+
+        batch = _collate_day_set_batch([first_day, second_day])
+        self.assertEqual(tuple(batch["static_x"].shape), (2, 3, 3))
+        self.assertEqual(tuple(batch["sequence_x"].shape), (2, 3, 2, 3))
+        self.assertTrue(torch.equal(batch["sample_mask"], torch.tensor([[True, True, True], [True, True, False]])))
+        self.assertEqual(float(batch["sample_targets"]["current_weight"][1, 2]), 0.0)
+
+    def test_r52_day_set_model_outputs_day_level_cash_and_row_weights(self) -> None:
+        model = TemporalDaySetPolicyNet(
+            static_input_dim=3,
+            sequence_feature_dim=2,
+            sequence_steps=2,
+            daily_input_dim=4,
+            hidden_dim=16,
+            sequence_hidden_dim=8,
+            sequence_layers=1,
+            slot_count=4,
+            slot_dim=8,
+            dropout=0.0,
+        )
+        outputs = model(
+            static_x=torch.randn(2, 3, 3),
+            sequence_x=torch.randn(2, 3, 2, 2),
+            daily_x=torch.randn(2, 4),
+            sample_mask=torch.tensor([[True, True, True], [True, False, False]]),
+        )
+
+        self.assertEqual(tuple(outputs["portfolio_daily_allocation_weight_logit"].shape), (2, 3))
+        self.assertEqual(tuple(outputs["portfolio_daily_cash_reserve_logit"].shape), (2,))
+        self.assertEqual(tuple(outputs["portfolio_daily_allocation_risk_buffer_logit"].shape), (2,))
+        self.assertLess(float(outputs["portfolio_daily_allocation_weight_logit"][1, 1]), -1.0e5)
+        self.assertEqual(tuple(outputs["action_logits"].shape), (2, 3, len(ACTION_CLASSES)))
+
+    def test_r52_day_set_projection_enforces_full_day_constraints(self) -> None:
+        sample_mask = torch.tensor([[True, True, True, True, False]], dtype=torch.bool)
+        outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([[2.2, 1.8, 5.0, 8.0, 9.0]], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.tensor([-2.0], dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.tensor([-1.0], dtype=torch.float32),
+        }
+        targets = {
+            "current_weight": torch.tensor([[0.16, 0.14, 0.0, 0.0, 0.0]], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([[0.0, 0.0, 1.0, 1.0, 1.0]], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([[0.0, 0.0, 1.0, 0.0, 1.0]], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32),
+            "gross_exposure_target": torch.tensor([0.54], dtype=torch.float32),
+            "turnover_budget": torch.tensor([0.18], dtype=torch.float32),
+            "max_position_weight_target": torch.tensor([0.20], dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.tensor([0.02], dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([[0.75, 0.75, 0.75, 0.75, 0.0]], dtype=torch.float32),
+        }
+
+        projection = _project_day_set_native_allocation_vector(outputs, targets, sample_mask, return_terms=True)
+        target_weight = projection["portfolio_daily_target_weight"]
+        target_delta = projection["portfolio_daily_target_delta"]
+        cash_weight = projection["portfolio_daily_target_cash_weight"]
+        receiver_score = projection["portfolio_daily_native_receiver_score"]
+        source_score = projection["portfolio_daily_native_source_score"]
+
+        self.assertTrue(bool(torch.all(target_weight >= -1.0e-8)))
+        self.assertTrue(bool(torch.all(target_weight <= 0.200001)))
+        self.assertEqual(float(target_weight[0, 4]), 0.0)
+        self.assertAlmostEqual(float(target_weight[0, 3]), 0.0, places=6)
+        self.assertLessEqual(float(target_weight[0].sum() + cash_weight[0]), 1.0001)
+        self.assertLessEqual(float(projection["portfolio_daily_target_turnover"][0]), 0.1801)
+        self.assertTrue(bool(torch.all(target_delta[targets["current_weight"] <= 1.0e-8] >= -1.0e-8)))
+        self.assertLess(float((receiver_score * source_score).max()), 1.0e-8)
+        self.assertLess(float(projection["unsupported_receiver_weight"]), 1.0e-7)
+        self.assertLess(float(projection["sell_nonheld_violation"]), 1.0e-7)
+        self.assertLess(float(projection["padding_weight_violation"]), 1.0e-7)
+
+    def test_r52_loss_profile_uses_day_set_native_loss_without_solver(self) -> None:
+        loss_profile = "alpha_result_value_budget_split_v37"
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        multi_weights = resolved_config["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertEqual(multi_weights["scalar_total"], 1.10)
+        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 2.0)
+        self.assertEqual(multi_weights["portfolio_native_allocation_vector_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
+        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
+
+        terms = _portfolio_day_set_native_allocation_vector_loss(
+            {
+                "portfolio_daily_allocation_weight_logit": torch.zeros(1, 3),
+                "portfolio_daily_cash_reserve_logit": torch.zeros(1),
+                "portfolio_daily_allocation_risk_buffer_logit": torch.zeros(1),
+            },
+            {
+                "current_weight": torch.tensor([[0.1, 0.0, 0.0]], dtype=torch.float32),
+                "portfolio_daily_receiver_candidate_mask": torch.tensor([[0.0, 1.0, 1.0]], dtype=torch.float32),
+                "portfolio_daily_source_candidate_mask": torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32),
+                "portfolio_daily_receiver_executable_candidate": torch.tensor([[0.0, 1.0, 1.0]], dtype=torch.float32),
+                "portfolio_daily_source_executable_candidate": torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32),
+                "gross_exposure_target": torch.tensor([0.45], dtype=torch.float32),
+                "turnover_budget": torch.tensor([0.20], dtype=torch.float32),
+                "max_position_weight_target": torch.tensor([0.20], dtype=torch.float32),
+            },
+            torch.tensor([[True, True, False]], dtype=torch.bool),
+            return_terms=True,
+        )
+        for name in (
+            "day_set_full_day_batch",
+            "day_set_sample_mask_coverage",
+            "day_set_padding_weight_violation",
+            "allocation_sum_error",
+            "cash_reserve_error",
+            "position_cap_violation",
+            "turnover_violation",
+            "unsupported_receiver_weight",
+            "sell_nonheld_violation",
+            "receiver_flow_mean",
+            "source_flow_mean",
+            "funding_shortfall_loss",
+            "cash_timing_loss",
+            "decision_utility_loss",
+            "risk_cost_loss",
+            "source_breadth_loss",
+            "exposure_utilization_loss",
+            "total",
+        ):
+            self.assertIn(name, terms)
+
+    def test_r52_profile_registers_day_set_native_allocation_vector(self) -> None:
+        profile = "split_heads_portfolio_daily_day_set_native_allocation_vector_r52"
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v37")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 4)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 1)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
+        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
+        self.assertEqual(limits["resource_profile"], "balanced")
+
+    def test_r52_artifact_loads_old_and_new_model_types(self) -> None:
+        feature_arrays = {
+            "static_fill_values": pd.Series([0.0]).to_numpy(dtype=float),
+            "static_means": pd.Series([0.0]).to_numpy(dtype=float),
+            "static_stds": pd.Series([1.0]).to_numpy(dtype=float),
+            "sequence_fill_values": pd.Series([0.0]).to_numpy(dtype=float),
+            "sequence_means": pd.Series([0.0]).to_numpy(dtype=float),
+            "sequence_stds": pd.Series([1.0]).to_numpy(dtype=float),
+            "daily_fill_values": pd.Series([0.0]).to_numpy(dtype=float),
+            "daily_means": pd.Series([0.0]).to_numpy(dtype=float),
+            "daily_stds": pd.Series([1.0]).to_numpy(dtype=float),
+        }
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_sample = TemporalSamplePolicyNet(
+                static_input_dim=1,
+                sequence_feature_dim=1,
+                sequence_steps=1,
+                hidden_dim=8,
+                sequence_hidden_dim=4,
+                sequence_layers=1,
+                dropout=0.0,
+            )
+            daily_model = DailyControllerNet(input_dim=1, hidden_dim=8, dropout=0.0)
+            old_payload = {
+                "artifact_type": "continuous_policy_torch_seq_v3",
+                "static_feature_names": ["static_feature"],
+                "sequence_base_names": ["seq_feature"],
+                "sequence_steps": [0],
+                "sequence_columns": ["seq_feature"],
+                "daily_feature_names": ["daily_feature"],
+                **{name: values.tolist() for name, values in feature_arrays.items()},
+                "sample_model_state_dict": old_sample.state_dict(),
+                "daily_model_state_dict": daily_model.state_dict(),
+                "sample_model_config": {
+                    "static_input_dim": 1,
+                    "sequence_feature_dim": 1,
+                    "sequence_steps": 1,
+                    "hidden_dim": 8,
+                    "sequence_hidden_dim": 4,
+                    "sequence_layers": 1,
+                    "dropout": 0.0,
+                },
+                "daily_model_config": {"input_dim": 1, "hidden_dim": 8, "dropout": 0.0},
+                "train_summary": {},
+                "training_diagnostics": {},
+                "training_contract": {},
+                "trained_at": "2026-05-10T00:00:00",
+            }
+            old_path = temp_path / "old_artifact.pt"
+            torch.save(old_payload, old_path)
+
+            loaded_old = load_torch_seq_artifact(old_path)
+            self.assertIsInstance(loaded_old.sample_model, TemporalSamplePolicyNet)
+            self.assertEqual(loaded_old.training_diagnostics["sample_model_type"], "temporal_sample")
+
+            day_set_sample = TemporalDaySetPolicyNet(
+                static_input_dim=1,
+                sequence_feature_dim=1,
+                sequence_steps=1,
+                daily_input_dim=1,
+                hidden_dim=8,
+                sequence_hidden_dim=4,
+                sequence_layers=1,
+                slot_count=2,
+                slot_dim=4,
+                dropout=0.0,
+            )
+            artifact = TorchContinuousPolicySeqArtifact(
+                sample_model=day_set_sample,
+                daily_model=daily_model,
+                static_feature_names=["static_feature"],
+                sequence_base_names=["seq_feature"],
+                sequence_steps=[0],
+                sequence_columns=["seq_feature"],
+                daily_feature_names=["daily_feature"],
+                **feature_arrays,
+                train_summary={},
+                training_diagnostics={"supports_portfolio_day_set_native_allocation_vector": True},
+                training_contract={},
+                trained_at="2026-05-10T00:00:00",
+            )
+            new_path = artifact.save(temp_path / "r52_artifact.pt")
+
+            loaded_new = load_torch_seq_artifact(new_path)
+            self.assertIsInstance(loaded_new.sample_model, TemporalDaySetPolicyNet)
+            self.assertEqual(loaded_new.training_diagnostics["sample_model_type"], "temporal_day_set")
+            self.assertTrue(loaded_new.training_diagnostics["supports_portfolio_day_set_native_allocation_vector"])
+            self.assertEqual(loaded_new.training_diagnostics["day_set_slot_count"], 2)
+
+    def test_r52_predict_exports_native_target_weight(self) -> None:
+        sample_model = TemporalDaySetPolicyNet(
+            static_input_dim=1,
+            sequence_feature_dim=1,
+            sequence_steps=1,
+            daily_input_dim=1,
+            hidden_dim=16,
+            sequence_hidden_dim=8,
+            sequence_layers=1,
+            slot_count=2,
+            slot_dim=8,
+            dropout=0.0,
+        )
+        daily_model = DailyControllerNet(input_dim=1, hidden_dim=8, dropout=0.0)
+        sample_model.eval()
+        daily_model.eval()
+        feature_array = pd.Series([0.0]).to_numpy(dtype=float)
+        scale_array = pd.Series([1.0]).to_numpy(dtype=float)
+        artifact = TorchContinuousPolicySeqArtifact(
+            sample_model=sample_model,
+            daily_model=daily_model,
+            static_feature_names=["static_feature"],
+            sequence_base_names=["seq_feature"],
+            sequence_steps=[0],
+            sequence_columns=["seq_feature"],
+            daily_feature_names=["daily_feature"],
+            static_fill_values=feature_array,
+            static_means=feature_array,
+            static_stds=scale_array,
+            sequence_fill_values=feature_array,
+            sequence_means=feature_array,
+            sequence_stds=scale_array,
+            daily_fill_values=feature_array,
+            daily_means=feature_array,
+            daily_stds=scale_array,
+            train_summary={},
+            training_diagnostics={
+                "sample_model_type": "temporal_day_set",
+                "supports_portfolio_day_set_native_allocation_vector": True,
+            },
+            training_contract={},
+            trained_at="2026-05-10T00:00:00",
+        )
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["HELD", "RECV", "OTHER"],
+                "current_weight": [0.20, 0.0, 0.0],
+                "static_feature": [0.2, 0.4, -0.1],
+                "seq_feature": [0.1, 0.3, -0.2],
+            }
+        )
+
+        policy, _ = predict_policy_v3(artifact, state_frame=state_frame, daily_features={"daily_feature": 0.0})
+
+        for column in (
+            "portfolio_daily_target_weight",
+            "portfolio_daily_target_delta",
+            "portfolio_daily_target_cash_weight",
+            "portfolio_daily_native_receiver_score",
+            "portfolio_daily_native_source_score",
+            "portfolio_daily_native_cash_score",
+        ):
+            self.assertIn(column, policy.columns)
+        self.assertAlmostEqual(
+            float(policy["portfolio_daily_native_cash_score"].max()),
+            float(policy["portfolio_daily_native_cash_score"].min()),
+            places=7,
+        )
+
+        policy["portfolio_daily_receiver_executable_candidate"] = (
+            policy["portfolio_daily_target_delta"].astype(float) > 1.0e-8
+        ).astype(float)
+        policy["portfolio_daily_source_executable_candidate"] = (
+            (policy["portfolio_daily_target_delta"].astype(float) < -1.0e-8)
+            & (state_frame.set_index("stock")["current_weight"].reindex(policy.index).fillna(0.0) > 1.0e-8)
+        ).astype(float)
+        state = PortfolioState(
+            cash_weight=0.80,
+            holdings={"HELD": HoldingState(weight=0.20, entry_price=10.0, peak_price=10.0)},
+            max_positions=4,
+            max_position_weight=0.50,
+            turnover_limit=1.00,
+        )
+        result = state.step(
+            date="2026-05-10",
+            prices=pd.Series({"HELD": 10.0, "RECV": 10.0, "OTHER": 10.0}),
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.70,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.50,
+                "cash_reserve_target": 0.05,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+        self.assertEqual(result.diagnostics["allocation_layer_native_target_used"], 1.0)
 
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(

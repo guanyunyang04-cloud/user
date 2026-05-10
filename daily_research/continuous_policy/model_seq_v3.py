@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 try:
     import cvxpy as cp
@@ -1744,6 +1744,25 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v36"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
         "portfolio_native_allocation_vector_total": 2.10,
         "portfolio_capital_flow_closure_total": 0.70,
+    },
+}
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v37"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v36"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v36"]["daily_target_loss_weights"],
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v36"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 1.10,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_day_set_native_allocation_vector_total": 2.40,
+        "portfolio_capital_flow_closure_total": 0.50,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
@@ -4771,6 +4790,167 @@ def _portfolio_native_allocation_vector_loss(
     return projection.get("total", torch.tensor(0.0, device=next(iter(outputs.values())).device))
 
 
+_DAY_SET_NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
+    "day_set_full_day_batch",
+    "day_set_sample_mask_coverage",
+    "day_set_padding_weight_violation",
+    "allocation_sum_error",
+    "cash_reserve_error",
+    "position_cap_violation",
+    "turnover_violation",
+    "unsupported_receiver_weight",
+    "sell_nonheld_violation",
+    "receiver_flow_mean",
+    "source_flow_mean",
+    "funding_shortfall_loss",
+    "cash_timing_loss",
+    "decision_utility_loss",
+    "risk_cost_loss",
+    "source_breadth_loss",
+    "exposure_utilization_loss",
+    "total",
+)
+
+
+def _project_day_set_native_allocation_vector(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    sample_mask: torch.Tensor,
+    *,
+    return_terms: bool = False,
+) -> dict[str, torch.Tensor]:
+    device = next(iter(outputs.values())).device
+    dtype = next(iter(outputs.values())).dtype
+    mask = sample_mask.to(device=device, dtype=torch.bool)
+    if mask.ndim != 2:
+        raise ValueError("day-set native allocation projection requires sample_mask with shape [B,N].")
+    batch_size, max_rows = int(mask.shape[0]), int(mask.shape[1])
+
+    def _output_matrix(name: str) -> torch.Tensor:
+        value = outputs[name].to(device=device, dtype=dtype)
+        if value.ndim == 1 and value.numel() == batch_size:
+            value = value[:, None].expand(batch_size, max_rows)
+        if value.shape != mask.shape:
+            value = value.reshape(batch_size, max_rows)
+        return value
+
+    def _target_matrix(name: str, default: float) -> torch.Tensor:
+        if name not in targets:
+            return torch.full((batch_size, max_rows), float(default), device=device, dtype=dtype)
+        value = targets[name].to(device=device, dtype=dtype)
+        if value.ndim == 0:
+            return torch.full((batch_size, max_rows), float(value.detach().cpu()), device=device, dtype=dtype)
+        if value.ndim == 1:
+            if value.numel() == batch_size:
+                return value[:, None].expand(batch_size, max_rows)
+            if value.numel() == batch_size * max_rows:
+                return value.reshape(batch_size, max_rows)
+        if tuple(value.shape) == (batch_size, max_rows):
+            return value
+        return torch.full((batch_size, max_rows), float(default), device=device, dtype=dtype)
+
+    weight_logit = _output_matrix("portfolio_daily_allocation_weight_logit")
+    cash_logit = _output_matrix("portfolio_daily_cash_reserve_logit")
+    risk_buffer_logit = _output_matrix("portfolio_daily_allocation_risk_buffer_logit")
+    masked_weight_logit = torch.where(mask, weight_logit, torch.full_like(weight_logit, -1.0e9))
+
+    flat_outputs = {
+        "portfolio_daily_allocation_weight_logit": masked_weight_logit.reshape(-1),
+        "portfolio_daily_cash_reserve_logit": cash_logit.reshape(-1),
+        "portfolio_daily_allocation_risk_buffer_logit": risk_buffer_logit.reshape(-1),
+    }
+    flat_targets = {
+        "date_code": torch.arange(batch_size, device=device, dtype=dtype)[:, None].expand(batch_size, max_rows).reshape(-1),
+        "current_weight": _target_matrix("current_weight", 0.0).reshape(-1),
+        "portfolio_daily_receiver_candidate_mask": (_target_matrix("portfolio_daily_receiver_candidate_mask", 0.0) * mask.to(dtype)).reshape(-1),
+        "portfolio_daily_source_candidate_mask": (_target_matrix("portfolio_daily_source_candidate_mask", 0.0) * mask.to(dtype)).reshape(-1),
+    }
+    for name, default in (
+        ("portfolio_daily_receiver_executable_candidate", 0.0),
+        ("portfolio_daily_source_executable_candidate", 0.0),
+        ("gross_exposure_target", 0.60),
+        ("turnover_budget", 0.36),
+        ("max_position_weight_target", 0.20),
+        ("budget_cash_timing_signal_target", 0.0),
+        ("portfolio_daily_allocation_cash_deployment_target", 0.0),
+        ("portfolio_daily_allocation_net_utility_target", 0.0),
+        ("portfolio_daily_allocation_final_objective", 0.0),
+        ("portfolio_daily_unified_receiver_score", 0.0),
+        ("portfolio_daily_unified_source_score", 0.0),
+        ("portfolio_daily_receiver_forward_excess_5d", 0.0),
+        ("portfolio_daily_source_forward_excess_5d", 0.0),
+        ("portfolio_daily_allocation_uncertainty_pressure_target", 0.0),
+        ("portfolio_daily_allocation_tail_risk_control_target", 0.0),
+        ("portfolio_daily_allocation_drawdown_control_target", 0.0),
+        ("market_downside_pressure", 0.0),
+        ("cash_regime_pressure", 0.0),
+    ):
+        value = _target_matrix(name, default)
+        if name.endswith("candidate") or name.endswith("mask"):
+            value = value * mask.to(dtype)
+        flat_targets[name] = value.reshape(-1)
+
+    flat_projection = _project_native_allocation_vector(flat_outputs, flat_targets, return_terms=True)
+
+    def _reshape(name: str) -> torch.Tensor:
+        return flat_projection[name].reshape(batch_size, max_rows) * mask.to(dtype)
+
+    target_weight = _reshape("portfolio_daily_target_weight")
+    target_delta = _reshape("portfolio_daily_target_delta")
+    native_receiver_score = _reshape("portfolio_daily_native_receiver_score")
+    native_source_score = _reshape("portfolio_daily_native_source_score")
+    native_cash_score = _reshape("portfolio_daily_native_cash_score")
+    target_cash_matrix = flat_projection["portfolio_daily_target_cash_weight"].reshape(batch_size, max_rows)
+    target_turnover_matrix = flat_projection["portfolio_daily_target_turnover"].reshape(batch_size, max_rows)
+    valid_counts = torch.clamp(mask.to(dtype).sum(dim=1), min=1.0)
+    target_cash_weight = (target_cash_matrix * mask.to(dtype)).sum(dim=1) / valid_counts
+    target_turnover = (target_turnover_matrix * mask.to(dtype)).sum(dim=1) / valid_counts
+    padding_weight_violation = torch.square(target_weight * (~mask).to(dtype)).mean()
+
+    result = {
+        "portfolio_daily_target_weight": target_weight,
+        "portfolio_daily_target_delta": target_delta,
+        "portfolio_daily_target_cash_weight": target_cash_weight,
+        "portfolio_daily_target_turnover": target_turnover,
+        "portfolio_daily_native_receiver_score": native_receiver_score,
+        "portfolio_daily_native_source_score": native_source_score,
+        "portfolio_daily_native_cash_score": native_cash_score,
+        "padding_weight_violation": padding_weight_violation,
+    }
+    if return_terms:
+        zero = torch.tensor(0.0, device=device, dtype=dtype)
+        result.update(
+            {
+                "day_set_full_day_batch": torch.tensor(1.0, device=device, dtype=dtype),
+                "day_set_sample_mask_coverage": mask.to(dtype).mean() if mask.numel() else zero,
+                "day_set_padding_weight_violation": padding_weight_violation,
+            }
+        )
+        for name in _NATIVE_ALLOCATION_TERM_NAMES:
+            result[name] = flat_projection.get(name, zero)
+        result["total"] = result["total"] + 0.10 * padding_weight_violation
+    return result
+
+
+def _portfolio_day_set_native_allocation_vector_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    sample_mask: torch.Tensor,
+    *,
+    return_terms: bool = False,
+) -> torch.Tensor | dict[str, torch.Tensor]:
+    projection = _project_day_set_native_allocation_vector(outputs, targets, sample_mask, return_terms=True)
+    if return_terms:
+        return {
+            name: projection.get(
+                name,
+                torch.tensor(0.0, device=next(iter(outputs.values())).device),
+            )
+            for name in _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES
+        }
+    return projection.get("total", torch.tensor(0.0, device=next(iter(outputs.values())).device))
+
+
 def _portfolio_capital_flow_closure_loss(
     outputs: dict[str, torch.Tensor],
     targets: dict[str, torch.Tensor],
@@ -6017,11 +6197,14 @@ class TemporalSamplePolicyNet(nn.Module):
         self.portfolio_daily_cash_reserve_logit_head = nn.Linear(int(hidden_dim), 1)
         self.portfolio_daily_allocation_risk_buffer_logit_head = nn.Linear(int(hidden_dim), 1)
 
-    def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _encode_features(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> torch.Tensor:
         _, hidden = self.sequence_encoder(sequence_x)
         seq_hidden = hidden[-1]
         static_hidden = self.static_backbone(static_x)
-        fused = self.fusion(torch.cat([static_hidden, seq_hidden], dim=-1))
+        return self.fusion(torch.cat([static_hidden, seq_hidden], dim=-1))
+
+    def forward(self, static_x: torch.Tensor, sequence_x: torch.Tensor) -> dict[str, torch.Tensor]:
+        fused = self._encode_features(static_x, sequence_x)
         return {
             "action_logits": self.action_head(fused),
             "duration_logits": self.duration_head(fused),
@@ -6112,6 +6295,139 @@ class TemporalSamplePolicyNet(nn.Module):
             "portfolio_daily_cash_reserve_logit": self.portfolio_daily_cash_reserve_logit_head(fused).squeeze(-1),
             "portfolio_daily_allocation_risk_buffer_logit": self.portfolio_daily_allocation_risk_buffer_logit_head(fused).squeeze(-1),
         }
+
+
+class PortfolioSlotAttention(nn.Module):
+    def __init__(self, *, input_dim: int, slot_count: int = 32, slot_dim: int = 128) -> None:
+        super().__init__()
+        self.slot_count = max(1, int(slot_count))
+        self.slot_dim = max(1, int(slot_dim))
+        self.slot_queries = nn.Parameter(torch.randn(self.slot_count, self.slot_dim) * 0.02)
+        self.key_projection = nn.Linear(int(input_dim), self.slot_dim)
+        self.value_projection = nn.Linear(int(input_dim), int(input_dim))
+        self.output_projection = nn.Linear(int(input_dim), int(input_dim))
+
+    def forward(self, row_features: torch.Tensor, sample_mask: torch.Tensor) -> torch.Tensor:
+        mask = sample_mask.to(device=row_features.device, dtype=torch.bool)
+        keys = self.key_projection(row_features)
+        values = self.value_projection(row_features)
+        logits = torch.einsum("bnd,kd->bkn", keys, self.slot_queries) / math.sqrt(float(self.slot_dim))
+        logits = logits.masked_fill(~mask[:, None, :], -1.0e9)
+        attention = torch.softmax(logits, dim=-1)
+        attention = torch.where(mask[:, None, :], attention, torch.zeros_like(attention))
+        normalizer = torch.clamp(attention.sum(dim=-1, keepdim=True), min=1.0e-8)
+        attention = attention / normalizer
+        slot_context = torch.einsum("bkn,bnh->bkh", attention, values)
+        pooled = slot_context.mean(dim=1)
+        return self.output_projection(pooled)
+
+
+class TemporalDaySetPolicyNet(nn.Module):
+    sample_model_type = "temporal_day_set"
+
+    def __init__(
+        self,
+        *,
+        static_input_dim: int,
+        sequence_feature_dim: int,
+        sequence_steps: int,
+        daily_input_dim: int,
+        hidden_dim: int = 192,
+        sequence_hidden_dim: int = 128,
+        sequence_layers: int = 2,
+        slot_count: int = 32,
+        slot_dim: int = 128,
+        dropout: float = 0.10,
+    ) -> None:
+        super().__init__()
+        self.daily_input_dim = int(daily_input_dim)
+        self.slot_count = max(1, int(slot_count))
+        self.slot_dim = max(1, int(slot_dim))
+        self.hidden_dim = int(hidden_dim)
+        self.sequence_hidden_dim = int(sequence_hidden_dim)
+        self.sequence_layers = max(1, int(sequence_layers))
+        self.dropout = float(dropout)
+        self.sample_model = TemporalSamplePolicyNet(
+            static_input_dim=int(static_input_dim),
+            sequence_feature_dim=int(sequence_feature_dim),
+            sequence_steps=int(sequence_steps),
+            hidden_dim=int(hidden_dim),
+            sequence_hidden_dim=int(sequence_hidden_dim),
+            sequence_layers=int(sequence_layers),
+            dropout=float(dropout),
+        )
+        self.daily_projection = nn.Sequential(
+            nn.Linear(int(daily_input_dim), int(hidden_dim)),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.slot_attention = PortfolioSlotAttention(
+            input_dim=int(hidden_dim),
+            slot_count=self.slot_count,
+            slot_dim=self.slot_dim,
+        )
+        decoder_dim = int(hidden_dim) * 3
+        self.day_set_weight_decoder = nn.Sequential(
+            nn.Linear(decoder_dim, int(hidden_dim)),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(int(hidden_dim), 1),
+        )
+        self.day_cash_decoder = nn.Sequential(
+            nn.Linear(int(hidden_dim) * 2, int(hidden_dim)),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(int(hidden_dim), 1),
+        )
+        self.day_risk_decoder = nn.Sequential(
+            nn.Linear(int(hidden_dim) * 2, int(hidden_dim)),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(int(hidden_dim), 1),
+        )
+
+    def forward(
+        self,
+        static_x: torch.Tensor,
+        sequence_x: torch.Tensor,
+        daily_x: torch.Tensor,
+        sample_mask: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        if static_x.ndim != 3 or sequence_x.ndim != 4:
+            raise ValueError("TemporalDaySetPolicyNet expects static_x [B,N,S] and sequence_x [B,N,T,F].")
+        batch_size, max_rows = int(static_x.shape[0]), int(static_x.shape[1])
+        mask = sample_mask.to(device=static_x.device, dtype=torch.bool)
+        flat_static = static_x.reshape(batch_size * max_rows, static_x.shape[-1])
+        flat_sequence = sequence_x.reshape(batch_size * max_rows, sequence_x.shape[-2], sequence_x.shape[-1])
+        flat_outputs = self.sample_model(flat_static, flat_sequence)
+        flat_features = self.sample_model._encode_features(flat_static, flat_sequence)
+        row_features = flat_features.reshape(batch_size, max_rows, -1)
+        daily_context = self.daily_projection(daily_x)
+        slot_context = self.slot_attention(row_features, mask)
+        decoder_features = torch.cat(
+            [
+                row_features,
+                daily_context[:, None, :].expand(batch_size, max_rows, -1),
+                slot_context[:, None, :].expand(batch_size, max_rows, -1),
+            ],
+            dim=-1,
+        )
+        weight_logit = self.day_set_weight_decoder(decoder_features).squeeze(-1)
+        weight_logit = torch.where(mask, weight_logit, torch.full_like(weight_logit, -1.0e6))
+        day_context = torch.cat([daily_context, slot_context], dim=-1)
+        cash_logit = self.day_cash_decoder(day_context).squeeze(-1)
+        risk_logit = self.day_risk_decoder(day_context).squeeze(-1)
+
+        outputs: dict[str, torch.Tensor] = {}
+        for name, value in flat_outputs.items():
+            if value.ndim == 2:
+                outputs[name] = value.reshape(batch_size, max_rows, value.shape[-1])
+            else:
+                outputs[name] = value.reshape(batch_size, max_rows) * mask.to(value.dtype)
+        outputs["portfolio_daily_allocation_weight_logit"] = weight_logit
+        outputs["portfolio_daily_cash_reserve_logit"] = cash_logit
+        outputs["portfolio_daily_allocation_risk_buffer_logit"] = risk_logit
+        return outputs
 
 
 class DailyControllerNet(nn.Module):
@@ -6225,8 +6541,44 @@ class TorchContinuousPolicySeqArtifact:
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
+        sample_model_type = str(getattr(self.sample_model, "sample_model_type", "temporal_sample") or "temporal_sample")
+        if sample_model_type == "temporal_day_set":
+            base_sample_model = self.sample_model.sample_model
+            sample_model_config = {
+                "static_input_dim": len(self.static_feature_names),
+                "sequence_feature_dim": len(self.sequence_base_names),
+                "sequence_steps": len(self.sequence_steps),
+                "hidden_dim": int(base_sample_model.static_backbone[0].out_features),
+                "sequence_hidden_dim": int(base_sample_model.sequence_encoder.hidden_size),
+                "sequence_layers": int(getattr(base_sample_model, "sequence_layers", 1)),
+                "dropout": float(base_sample_model.static_backbone[2].p),
+            }
+            day_set_model_config = {
+                "static_input_dim": len(self.static_feature_names),
+                "sequence_feature_dim": len(self.sequence_base_names),
+                "sequence_steps": len(self.sequence_steps),
+                "daily_input_dim": len(self.daily_feature_names),
+                "hidden_dim": int(getattr(self.sample_model, "hidden_dim", sample_model_config["hidden_dim"])),
+                "sequence_hidden_dim": int(getattr(self.sample_model, "sequence_hidden_dim", sample_model_config["sequence_hidden_dim"])),
+                "sequence_layers": int(getattr(self.sample_model, "sequence_layers", sample_model_config["sequence_layers"])),
+                "slot_count": int(getattr(self.sample_model, "slot_count", 32)),
+                "slot_dim": int(getattr(self.sample_model, "slot_dim", 128)),
+                "dropout": float(getattr(self.sample_model, "dropout", sample_model_config["dropout"])),
+            }
+        else:
+            sample_model_config = {
+                "static_input_dim": len(self.static_feature_names),
+                "sequence_feature_dim": len(self.sequence_base_names),
+                "sequence_steps": len(self.sequence_steps),
+                "hidden_dim": int(self.sample_model.static_backbone[0].out_features),
+                "sequence_hidden_dim": int(self.sample_model.sequence_encoder.hidden_size),
+                "sequence_layers": int(getattr(self.sample_model, "sequence_layers", 1)),
+                "dropout": float(self.sample_model.static_backbone[2].p),
+            }
+            day_set_model_config = {}
         payload = {
             "artifact_type": "continuous_policy_torch_seq_v3",
+            "sample_model_type": sample_model_type,
             "static_feature_names": self.static_feature_names,
             "sequence_base_names": self.sequence_base_names,
             "sequence_steps": self.sequence_steps,
@@ -6243,15 +6595,8 @@ class TorchContinuousPolicySeqArtifact:
             "daily_stds": self.daily_stds.tolist(),
             "sample_model_state_dict": self.sample_model.state_dict(),
             "daily_model_state_dict": self.daily_model.state_dict(),
-            "sample_model_config": {
-                "static_input_dim": len(self.static_feature_names),
-                "sequence_feature_dim": len(self.sequence_base_names),
-                "sequence_steps": len(self.sequence_steps),
-                "hidden_dim": int(self.sample_model.static_backbone[0].out_features),
-                "sequence_hidden_dim": int(self.sample_model.sequence_encoder.hidden_size),
-                "sequence_layers": int(getattr(self.sample_model, "sequence_layers", 1)),
-                "dropout": float(self.sample_model.static_backbone[2].p),
-            },
+            "sample_model_config": sample_model_config,
+            "day_set_model_config": day_set_model_config,
             "daily_model_config": {
                 "input_dim": len(self.daily_feature_names),
                 "hidden_dim": int(self.daily_model.backbone[0].out_features),
@@ -6284,6 +6629,145 @@ def _finite_array(values: Any, *, default: float = 0.0, low: float | None = None
     return array
 
 
+class DaySetTensorDataset(Dataset):
+    """Dataset that keeps every trading date as a complete stock set."""
+
+    def __init__(
+        self,
+        *,
+        date_codes: torch.Tensor | np.ndarray,
+        static_x: torch.Tensor | np.ndarray,
+        sequence_x: torch.Tensor | np.ndarray,
+        action: torch.Tensor | np.ndarray,
+        duration: torch.Tensor | np.ndarray,
+        action_soft: torch.Tensor | np.ndarray,
+        sample_targets: dict[str, torch.Tensor | np.ndarray],
+        daily_x: torch.Tensor | np.ndarray,
+        daily_targets: dict[str, torch.Tensor | np.ndarray] | None = None,
+        allowed_date_codes: torch.Tensor | np.ndarray | list[int] | None = None,
+    ) -> None:
+        self.date_codes = torch.as_tensor(date_codes, dtype=torch.long).flatten()
+        self.static_x = torch.as_tensor(static_x, dtype=torch.float32)
+        self.sequence_x = torch.as_tensor(sequence_x, dtype=torch.float32)
+        self.action = torch.as_tensor(action, dtype=torch.long).flatten()
+        self.duration = torch.as_tensor(duration, dtype=torch.long).flatten()
+        self.action_soft = torch.as_tensor(action_soft, dtype=torch.float32)
+        self.sample_targets = {
+            str(name): torch.as_tensor(values, dtype=torch.float32).flatten()
+            for name, values in dict(sample_targets or {}).items()
+        }
+        self.daily_x = torch.as_tensor(daily_x, dtype=torch.float32)
+        self.daily_targets = {
+            str(name): torch.as_tensor(values, dtype=torch.float32).flatten()
+            for name, values in dict(daily_targets or {}).items()
+        }
+        if self.static_x.shape[0] != self.date_codes.numel() or self.sequence_x.shape[0] != self.date_codes.numel():
+            raise ValueError("DaySetTensorDataset requires aligned date/static/sequence row counts.")
+        all_codes = torch.unique(self.date_codes).tolist()
+        if allowed_date_codes is None:
+            selected_codes = [int(code) for code in all_codes]
+        else:
+            allowed = {int(code) for code in torch.as_tensor(allowed_date_codes, dtype=torch.long).flatten().tolist()}
+            selected_codes = [int(code) for code in all_codes if int(code) in allowed]
+        self.date_code_values = sorted(selected_codes)
+        self.row_indices_by_date = [
+            torch.nonzero(self.date_codes == int(code), as_tuple=False).flatten()
+            for code in self.date_code_values
+        ]
+
+    def __len__(self) -> int:
+        return len(self.date_code_values)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        date_code = int(self.date_code_values[index])
+        row_indices = self.row_indices_by_date[index]
+        daily_index = min(max(date_code, 0), max(0, int(self.daily_x.shape[0]) - 1))
+        return {
+            "date_code": self.date_codes[row_indices],
+            "row_indices": row_indices,
+            "static_x": self.static_x[row_indices],
+            "sequence_x": self.sequence_x[row_indices],
+            "action": self.action[row_indices],
+            "duration": self.duration[row_indices],
+            "action_soft": self.action_soft[row_indices],
+            "sample_targets": {
+                name: values[row_indices]
+                for name, values in self.sample_targets.items()
+            },
+            "daily_x": self.daily_x[daily_index],
+            "daily_targets": {
+                name: values[daily_index]
+                for name, values in self.daily_targets.items()
+                if values.numel() > daily_index
+            },
+        }
+
+
+def _collate_day_set_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
+    if not items:
+        raise ValueError("_collate_day_set_batch requires at least one day item.")
+    batch_size = len(items)
+    max_rows = max(int(item["static_x"].shape[0]) for item in items)
+    static_dim = int(items[0]["static_x"].shape[-1])
+    sequence_steps = int(items[0]["sequence_x"].shape[-2])
+    sequence_dim = int(items[0]["sequence_x"].shape[-1])
+    action_classes = int(items[0]["action_soft"].shape[-1])
+    daily_dim = int(items[0]["daily_x"].shape[-1])
+
+    static_x = torch.zeros(batch_size, max_rows, static_dim, dtype=torch.float32)
+    sequence_x = torch.zeros(batch_size, max_rows, sequence_steps, sequence_dim, dtype=torch.float32)
+    action = torch.zeros(batch_size, max_rows, dtype=torch.long)
+    duration = torch.zeros(batch_size, max_rows, dtype=torch.long)
+    action_soft = torch.zeros(batch_size, max_rows, action_classes, dtype=torch.float32)
+    sample_mask = torch.zeros(batch_size, max_rows, dtype=torch.bool)
+    date_code = torch.zeros(batch_size, max_rows, dtype=torch.long)
+    row_indices = torch.full((batch_size, max_rows), -1, dtype=torch.long)
+    daily_x = torch.zeros(batch_size, daily_dim, dtype=torch.float32)
+
+    sample_target_names = sorted({name for item in items for name in item["sample_targets"].keys()})
+    daily_target_names = sorted({name for item in items for name in item["daily_targets"].keys()})
+    sample_targets = {
+        name: torch.zeros(batch_size, max_rows, dtype=torch.float32)
+        for name in sample_target_names
+    }
+    daily_targets = {
+        name: torch.zeros(batch_size, dtype=torch.float32)
+        for name in daily_target_names
+    }
+
+    for batch_index, item in enumerate(items):
+        row_count = int(item["static_x"].shape[0])
+        static_x[batch_index, :row_count] = item["static_x"].float()
+        sequence_x[batch_index, :row_count] = item["sequence_x"].float()
+        action[batch_index, :row_count] = item["action"].long()
+        duration[batch_index, :row_count] = item["duration"].long()
+        action_soft[batch_index, :row_count] = item["action_soft"].float()
+        sample_mask[batch_index, :row_count] = True
+        date_code[batch_index, :row_count] = item["date_code"].long()
+        row_indices[batch_index, :row_count] = item["row_indices"].long()
+        daily_x[batch_index] = item["daily_x"].float()
+        for name in sample_target_names:
+            if name in item["sample_targets"]:
+                sample_targets[name][batch_index, :row_count] = item["sample_targets"][name].float()
+        for name in daily_target_names:
+            if name in item["daily_targets"]:
+                daily_targets[name][batch_index] = item["daily_targets"][name].float()
+
+    return {
+        "static_x": static_x,
+        "sequence_x": sequence_x,
+        "action": action,
+        "duration": duration,
+        "action_soft": action_soft,
+        "sample_mask": sample_mask,
+        "date_code": date_code,
+        "row_indices": row_indices,
+        "sample_targets": sample_targets,
+        "daily_x": daily_x,
+        "daily_targets": daily_targets,
+    }
+
+
 def _finite_mean(values: Any, *, default: float = 0.0) -> float:
     array = _finite_array(values, default=float(default))
     if array.size <= 0:
@@ -6298,7 +6782,19 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
         raise TypeError(f"Unsupported seq artifact type: {payload.get('artifact_type')!r}")
     sample_cfg = dict(payload.get("sample_model_config", {}) or {})
     daily_cfg = dict(payload.get("daily_model_config", {}) or {})
-    sample_model = TemporalSamplePolicyNet(**sample_cfg)
+    sample_model_type = str(payload.get("sample_model_type", "temporal_sample") or "temporal_sample")
+    if sample_model_type == "temporal_day_set":
+        day_set_cfg = dict(payload.get("day_set_model_config", {}) or {})
+        if not day_set_cfg:
+            day_set_cfg = {
+                **sample_cfg,
+                "daily_input_dim": len(payload.get("daily_feature_names", []) or []),
+                "slot_count": 32,
+                "slot_dim": 128,
+            }
+        sample_model = TemporalDaySetPolicyNet(**day_set_cfg)
+    else:
+        sample_model = TemporalSamplePolicyNet(**sample_cfg)
     daily_model = DailyControllerNet(**daily_cfg)
     sample_load = sample_model.load_state_dict(payload["sample_model_state_dict"], strict=False)
     daily_load = daily_model.load_state_dict(payload["daily_model_state_dict"], strict=False)
@@ -6425,6 +6921,11 @@ def load_torch_seq_artifact(path: str | Path) -> TorchContinuousPolicySeqArtifac
     sample_model.eval()
     daily_model.eval()
     training_diagnostics = dict(payload.get("training_diagnostics", {}) or {})
+    training_diagnostics["sample_model_type"] = sample_model_type
+    if sample_model_type == "temporal_day_set":
+        training_diagnostics["supports_portfolio_day_set_native_allocation_vector"] = True
+        training_diagnostics["day_set_slot_count"] = int(getattr(sample_model, "slot_count", 0) or 0)
+        training_diagnostics["day_set_full_day_integrity"] = True
     missing_key_names = {str(name) for name in sample_missing}
     training_diagnostics["supports_holding_days_head"] = not any(name.startswith("holding_days_head.") for name in missing_key_names)
     training_diagnostics["supports_sell_heads"] = not any(
@@ -7292,15 +7793,32 @@ def fit_policy_models_v3(
     train_idx, val_idx = _split_indices(len(sample_frame), random_seed)
     daily_train_idx, daily_val_idx = _split_indices(len(daily_frame), random_seed + 17)
 
-    sample_model = TemporalSamplePolicyNet(
-        static_input_dim=len(static_feature_names),
-        sequence_feature_dim=len(sequence_base_names),
-        sequence_steps=len(SEQUENCE_STEP_ORDER),
-        hidden_dim=hidden_dim,
-        sequence_hidden_dim=sequence_hidden_dim,
-        sequence_layers=sequence_layers,
-        dropout=dropout,
-    ).to(device)
+    uses_day_set_native_allocation = (
+        multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+    )
+    if uses_day_set_native_allocation:
+        sample_model = TemporalDaySetPolicyNet(
+            static_input_dim=len(static_feature_names),
+            sequence_feature_dim=len(sequence_base_names),
+            sequence_steps=len(SEQUENCE_STEP_ORDER),
+            daily_input_dim=len(daily_feature_names),
+            hidden_dim=hidden_dim,
+            sequence_hidden_dim=sequence_hidden_dim,
+            sequence_layers=sequence_layers,
+            slot_count=32,
+            slot_dim=128,
+            dropout=dropout,
+        ).to(device)
+    else:
+        sample_model = TemporalSamplePolicyNet(
+            static_input_dim=len(static_feature_names),
+            sequence_feature_dim=len(sequence_base_names),
+            sequence_steps=len(SEQUENCE_STEP_ORDER),
+            hidden_dim=hidden_dim,
+            sequence_hidden_dim=sequence_hidden_dim,
+            sequence_layers=sequence_layers,
+            dropout=dropout,
+        ).to(device)
     daily_model = DailyControllerNet(
         len(daily_feature_names),
         hidden_dim=daily_hidden_dim,
@@ -7372,12 +7890,33 @@ def fit_policy_models_v3(
         torch.as_tensor(y_action_soft[train_idx], dtype=torch.float32),
         *[torch.as_tensor(sample_targets[name][train_idx], dtype=torch.float32) for name in sample_target_names],
     )
-    loader = DataLoader(
-        dataset,
-        batch_size=max(32, int(batch_size)),
-        shuffle=not uses_cvxpy_convex_allocation_layer,
-        drop_last=False,
-    )
+    if uses_day_set_native_allocation:
+        day_dataset = DaySetTensorDataset(
+            date_codes=torch.as_tensor(sample_targets["date_code"], dtype=torch.long),
+            static_x=torch.as_tensor(X_static, dtype=torch.float32),
+            sequence_x=torch.as_tensor(X_sequence, dtype=torch.float32),
+            action=torch.as_tensor(y_action, dtype=torch.long),
+            duration=torch.as_tensor(y_duration, dtype=torch.long),
+            action_soft=torch.as_tensor(y_action_soft, dtype=torch.float32),
+            sample_targets={name: torch.as_tensor(sample_targets[name], dtype=torch.float32) for name in sample_target_names},
+            daily_x=torch.as_tensor(X_daily, dtype=torch.float32),
+            daily_targets={name: torch.as_tensor(values, dtype=torch.float32) for name, values in daily_targets.items()},
+            allowed_date_codes=daily_train_idx,
+        )
+        loader = DataLoader(
+            day_dataset,
+            batch_size=max(1, int(batch_size)),
+            shuffle=True,
+            drop_last=False,
+            collate_fn=_collate_day_set_batch,
+        )
+    else:
+        loader = DataLoader(
+            dataset,
+            batch_size=max(32, int(batch_size)),
+            shuffle=not uses_cvxpy_convex_allocation_layer,
+            drop_last=False,
+        )
     X_static_val = torch.as_tensor(X_static[val_idx], dtype=torch.float32, device=device)
     X_sequence_val = torch.as_tensor(X_sequence[val_idx], dtype=torch.float32, device=device)
     y_action_val = torch.as_tensor(y_action[val_idx], dtype=torch.long, device=device)
@@ -7396,13 +7935,54 @@ def fit_policy_models_v3(
         epoch_sample_loss = 0.0
         batch_count = 0
         for batch in loader:
-            batch = [item.to(device) for item in batch]
-            static_batch, sequence_batch, action_batch, duration_batch, action_soft_batch, *sample_target_batches = batch
-            sample_batch_targets = {
-                name: tensor
-                for name, tensor in zip(sample_target_names, sample_target_batches, strict=False)
-            }
-            outputs = sample_model(static_batch, sequence_batch)
+            day_set_outputs = None
+            day_set_targets = None
+            day_set_mask = None
+            if uses_day_set_native_allocation:
+                day_batch = {
+                    key: (value.to(device) if torch.is_tensor(value) else value)
+                    for key, value in batch.items()
+                }
+                day_batch["sample_targets"] = {
+                    name: value.to(device)
+                    for name, value in day_batch["sample_targets"].items()
+                }
+                day_set_mask = day_batch["sample_mask"].to(device)
+                day_set_outputs = sample_model(
+                    day_batch["static_x"],
+                    day_batch["sequence_x"],
+                    day_batch["daily_x"],
+                    day_set_mask,
+                )
+                flat_mask = day_set_mask.reshape(-1)
+                outputs = {
+                    name: (
+                        value.reshape(-1, value.shape[-1])[flat_mask]
+                        if value.ndim == 3
+                        else value.reshape(-1)[flat_mask]
+                        if value.ndim == 2
+                        else value.repeat_interleave(day_set_mask.shape[1])[flat_mask]
+                        if value.ndim == 1 and value.numel() == day_set_mask.shape[0]
+                        else value
+                    )
+                    for name, value in day_set_outputs.items()
+                }
+                action_batch = day_batch["action"].reshape(-1)[flat_mask]
+                duration_batch = day_batch["duration"].reshape(-1)[flat_mask]
+                action_soft_batch = day_batch["action_soft"].reshape(-1, day_batch["action_soft"].shape[-1])[flat_mask]
+                sample_batch_targets = {
+                    name: tensor.reshape(-1)[flat_mask]
+                    for name, tensor in day_batch["sample_targets"].items()
+                }
+                day_set_targets = dict(day_batch["sample_targets"])
+            else:
+                batch = [item.to(device) for item in batch]
+                static_batch, sequence_batch, action_batch, duration_batch, action_soft_batch, *sample_target_batches = batch
+                sample_batch_targets = {
+                    name: tensor
+                    for name, tensor in zip(sample_target_names, sample_target_batches, strict=False)
+                }
+                outputs = sample_model(static_batch, sequence_batch)
             action_ce_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
             action_soft_loss = nn.functional.kl_div(
                 nn.functional.log_softmax(outputs["action_logits"], dim=-1),
@@ -7501,6 +8081,20 @@ def fit_policy_models_v3(
                 if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
+            portfolio_day_set_native_allocation_vector_loss = (
+                _portfolio_day_set_native_allocation_vector_loss(
+                    day_set_outputs,
+                    day_set_targets,
+                    day_set_mask,
+                )
+                if (
+                    day_set_outputs is not None
+                    and day_set_targets is not None
+                    and day_set_mask is not None
+                    and multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+                )
+                else torch.tensor(0.0, device=device)
+            )
             portfolio_capital_flow_closure_loss = (
                 _portfolio_capital_flow_closure_loss(
                     outputs,
@@ -7560,6 +8154,8 @@ def fit_policy_models_v3(
                 * portfolio_full_universe_convex_allocation_loss
                 + multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0)
                 * portfolio_native_allocation_vector_loss
+                + multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0)
+                * portfolio_day_set_native_allocation_vector_loss
                 + multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0)
                 * portfolio_capital_flow_closure_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
@@ -7586,7 +8182,31 @@ def fit_policy_models_v3(
         sample_model.eval()
         daily_model.eval()
         with torch.no_grad():
-            val_outputs = sample_model(X_static_val, X_sequence_val)
+            val_day_set_outputs = None
+            val_day_set_targets = None
+            val_day_set_mask = None
+            if uses_day_set_native_allocation:
+                val_day_set_mask = torch.ones(1, X_static_val.shape[0], dtype=torch.bool, device=device)
+                val_daily_x_for_sample = X_daily_val[:1] if X_daily_val.shape[0] else torch.zeros(1, len(daily_feature_names), device=device)
+                val_day_set_outputs = sample_model(
+                    X_static_val.unsqueeze(0),
+                    X_sequence_val.unsqueeze(0),
+                    val_daily_x_for_sample,
+                    val_day_set_mask,
+                )
+                val_outputs = {
+                    name: (
+                        value.squeeze(0)
+                        if value.ndim >= 2
+                        else value.repeat(X_static_val.shape[0])
+                        if value.ndim == 1 and value.numel() == 1
+                        else value
+                    )
+                    for name, value in val_day_set_outputs.items()
+                }
+                val_day_set_targets = {name: tensor.unsqueeze(0) for name, tensor in val_targets.items()}
+            else:
+                val_outputs = sample_model(X_static_val, X_sequence_val)
             val_action_ce_loss = nn.functional.cross_entropy(val_outputs["action_logits"], y_action_val, weight=action_weight_tensor)
             val_action_soft_loss = nn.functional.kl_div(
                 nn.functional.log_softmax(val_outputs["action_logits"], dim=-1),
@@ -7678,6 +8298,20 @@ def fit_policy_models_v3(
                 if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
+            val_portfolio_day_set_native_allocation_vector_loss = (
+                _portfolio_day_set_native_allocation_vector_loss(
+                    val_day_set_outputs,
+                    val_day_set_targets,
+                    val_day_set_mask,
+                )
+                if (
+                    val_day_set_outputs is not None
+                    and val_day_set_targets is not None
+                    and val_day_set_mask is not None
+                    and multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+                )
+                else torch.tensor(0.0, device=device)
+            )
             val_portfolio_capital_flow_closure_loss = (
                 _portfolio_capital_flow_closure_loss(
                     val_outputs,
@@ -7741,6 +8375,8 @@ def fit_policy_models_v3(
                     * val_portfolio_full_universe_convex_allocation_loss
                     + multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0)
                     * val_portfolio_native_allocation_vector_loss
+                    + multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0)
+                    * val_portfolio_day_set_native_allocation_vector_loss
                     + multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0)
                     * val_portfolio_capital_flow_closure_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
@@ -7784,10 +8420,34 @@ def fit_policy_models_v3(
     daily_model.load_state_dict(best_state["daily_model_state_dict"])
     sample_model.eval()
     daily_model.eval()
+
+    def _validation_sample_outputs() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor] | None, dict[str, torch.Tensor] | None, torch.Tensor | None]:
+        if uses_day_set_native_allocation:
+            mask = torch.ones(1, X_static_val.shape[0], dtype=torch.bool, device=device)
+            daily_for_sample = X_daily_val[:1] if X_daily_val.shape[0] else torch.zeros(1, len(daily_feature_names), device=device)
+            day_outputs = sample_model(
+                X_static_val.unsqueeze(0),
+                X_sequence_val.unsqueeze(0),
+                daily_for_sample,
+                mask,
+            )
+            flat_outputs = {
+                name: (
+                    value.squeeze(0)
+                    if value.ndim >= 2
+                    else value.repeat(X_static_val.shape[0])
+                    if value.ndim == 1 and value.numel() == 1
+                    else value
+                )
+                for name, value in day_outputs.items()
+            }
+            return flat_outputs, day_outputs, {name: tensor.unsqueeze(0) for name, tensor in val_targets.items()}, mask
+        return sample_model(X_static_val, X_sequence_val), None, None, None
+
     portfolio_differentiable_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_differentiable_convex_allocation_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs = sample_model(X_static_val, X_sequence_val)
+            final_val_outputs, _, _, _ = _validation_sample_outputs()
             raw_terms = _portfolio_differentiable_convex_allocation_loss(
                 final_val_outputs,
                 val_targets,
@@ -7800,12 +8460,13 @@ def fit_policy_models_v3(
             }
     portfolio_cvxpy_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0:
-        final_val_outputs = sample_model(X_static_val, X_sequence_val)
-        raw_cvxpy_terms = _portfolio_cvxpy_convex_allocation_loss(
-            final_val_outputs,
-            val_targets,
-            return_terms=True,
-        )
+        with torch.no_grad():
+            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            raw_cvxpy_terms = _portfolio_cvxpy_convex_allocation_loss(
+                final_val_outputs,
+                val_targets,
+                return_terms=True,
+            )
         if isinstance(raw_cvxpy_terms, dict):
             portfolio_cvxpy_convex_terms = {
                 name: float(value.detach().cpu())
@@ -7813,13 +8474,14 @@ def fit_policy_models_v3(
             }
     portfolio_full_universe_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
-        final_val_outputs = sample_model(X_static_val, X_sequence_val)
-        raw_full_universe_terms = _portfolio_full_universe_convex_allocation_loss(
-            final_val_outputs,
-            val_targets,
-            enable_solver=True,
-            return_terms=True,
-        )
+        with torch.no_grad():
+            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            raw_full_universe_terms = _portfolio_full_universe_convex_allocation_loss(
+                final_val_outputs,
+                val_targets,
+                enable_solver=True,
+                return_terms=True,
+            )
         if isinstance(raw_full_universe_terms, dict):
             portfolio_full_universe_convex_terms = {
                 name: float(value.detach().cpu())
@@ -7828,7 +8490,7 @@ def fit_policy_models_v3(
     portfolio_native_allocation_vector_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs = sample_model(X_static_val, X_sequence_val)
+            final_val_outputs, _, _, _ = _validation_sample_outputs()
             raw_native_terms = _portfolio_native_allocation_vector_loss(
                 final_val_outputs,
                 val_targets,
@@ -7839,10 +8501,28 @@ def fit_policy_models_v3(
                 name: float(value.detach().cpu())
                 for name, value in raw_native_terms.items()
             }
+    portfolio_day_set_native_allocation_vector_terms: dict[str, float] = {}
+    if multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0:
+        with torch.no_grad():
+            _, final_day_set_outputs, final_day_set_targets, final_day_set_mask = _validation_sample_outputs()
+            if final_day_set_outputs is not None and final_day_set_targets is not None and final_day_set_mask is not None:
+                raw_day_set_terms = _portfolio_day_set_native_allocation_vector_loss(
+                    final_day_set_outputs,
+                    final_day_set_targets,
+                    final_day_set_mask,
+                    return_terms=True,
+                )
+            else:
+                raw_day_set_terms = {}
+        if isinstance(raw_day_set_terms, dict):
+            portfolio_day_set_native_allocation_vector_terms = {
+                name: float(value.detach().cpu())
+                for name, value in raw_day_set_terms.items()
+            }
     portfolio_capital_flow_closure_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs = sample_model(X_static_val, X_sequence_val)
+            final_val_outputs, _, _, _ = _validation_sample_outputs()
             raw_capital_flow_terms = _portfolio_capital_flow_closure_loss(
                 final_val_outputs,
                 val_targets,
@@ -8099,6 +8779,19 @@ def fit_policy_models_v3(
         ),
         "supports_portfolio_native_allocation_vector_diagnostics": bool(portfolio_native_allocation_vector_terms),
         "portfolio_native_allocation_vector_terms": portfolio_native_allocation_vector_terms,
+        "supports_portfolio_day_set_native_allocation_vector": (
+            multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+            and str(getattr(sample_model, "sample_model_type", "temporal_sample")) == "temporal_day_set"
+        ),
+        "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
+        "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
+        "day_set_batch_size": int(batch_size)
+        if multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+        else 0,
+        "day_set_slot_count": int(getattr(sample_model, "slot_count", 0) or 0),
+        "day_set_full_day_integrity": bool(
+            multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+        ),
         "supports_portfolio_capital_flow_closure_loss": (
             multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0) > 0.0
         ),
@@ -8187,7 +8880,35 @@ def predict_policy_v3(
             ),
             dtype=torch.float32,
         )
-        outputs = artifact.sample_model(static_x, sequence_x)
+        sample_model_type = str(artifact.training_diagnostics.get("sample_model_type", "temporal_sample") or "temporal_sample")
+        if sample_model_type == "temporal_day_set":
+            daily_row_for_sample = pd.DataFrame([{name: float(daily_features.get(name, 0.0) or 0.0) for name in artifact.daily_feature_names}])
+            daily_x_for_sample = torch.as_tensor(
+                _apply_matrix(
+                    daily_row_for_sample,
+                    artifact.daily_feature_names,
+                    artifact.daily_fill_values,
+                    artifact.daily_means,
+                    artifact.daily_stds,
+                ),
+                dtype=torch.float32,
+            )
+            day_outputs = artifact.sample_model(
+                static_x.unsqueeze(0),
+                sequence_x.unsqueeze(0),
+                daily_x_for_sample,
+                torch.ones(1, len(state_frame), dtype=torch.bool),
+            )
+            outputs = {}
+            for name, value in day_outputs.items():
+                if torch.is_tensor(value) and value.ndim >= 2:
+                    outputs[name] = value.squeeze(0)
+                elif torch.is_tensor(value) and value.ndim == 1 and value.numel() == 1:
+                    outputs[name] = value.repeat(len(state_frame))
+                else:
+                    outputs[name] = value
+        else:
+            outputs = artifact.sample_model(static_x, sequence_x)
         action_prob = torch.softmax(outputs["action_logits"], dim=-1).cpu().numpy()
         duration_prob = torch.softmax(outputs["duration_logits"], dim=-1).cpu().numpy()
         predicted_labels = np.asarray(ACTION_CLASSES, dtype=object)[action_prob.argmax(axis=1)]
@@ -8617,7 +9338,10 @@ def predict_policy_v3(
             else None
         )
         supports_portfolio_native_allocation_vector_heads = bool(
-            artifact.training_diagnostics.get("supports_portfolio_native_allocation_vector_heads", False)
+            (
+                artifact.training_diagnostics.get("supports_portfolio_native_allocation_vector_heads", False)
+                or artifact.training_diagnostics.get("supports_portfolio_day_set_native_allocation_vector", False)
+            )
             and all(name in outputs for name in (
                 "portfolio_daily_allocation_weight_logit",
                 "portfolio_daily_cash_reserve_logit",

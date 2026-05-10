@@ -1573,3 +1573,29 @@
   - 事实：r51 已把主路径从“多 head 对账 + 资金流残差”推进到“native target weight / cash vector + delta 派生角色”，并保留 r49 capital-flow closure 作为辅助诊断；它不触发 r50 的真实 solver 高负荷训练路径。
   - 推断：r51 更符合用户当前目标，即在不压垮本机资源的前提下，让神经网络结构本身表达组合日资金分配。但它仍是 row-wise encoder + day-grouped projection，不是完整 day-set encoder，也没有 formal screening / confirmatory 证据。
   - 决策：r51 当前状态为 `research / shadow_only` 代码合同与 dry-run；不得 promotion、不得 live、不得改 `active_execution_strategy.json`。若后续启动正式研究，必须先确认无冲突进程、无同名 tag，并以前台持久日志和进度文件运行短 screening。
+
+## 2026-05-10 r52 day-set native allocation vector 代码合同复盘
+- 行动前自检：
+  - 事实：r51 已有 native target weight / cash vector，但训练仍使用 row-wise `TensorDataset`，day-level projection 只能在随机 batch 内按 `date_code` 聚合，不能保证每个 batch 是完整交易日。
+  - 推断：如果继续依赖 row-wise batch，source / receiver / cash 的组合约束仍会受旧框架限制；更直接的结构升级是让模型一次看到完整交易日股票集合，并在日级 batch 内输出目标仓位向量和日级现金。
+  - 边界：本轮只新增 r52 research profile、day-set 代码合同、测试、dry-run 与 brain 写回；不启用 `cvxpy/diffcp`，不启动 formal screening，不改 production / live / active artifact，不删除 r49/r50/r51。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `DaySetTensorDataset` 与 `_collate_day_set_batch`，按完整 `date_code` 取样并 pad 到 `[B,Nmax,*]`，padding 行通过 `sample_mask` 屏蔽。
+  - 新增 `PortfolioSlotAttention` 与 `TemporalDaySetPolicyNet`，复用 row-level static / GRU encoder，加入 daily feature projection 和 `O(B*N*K)` slot attention，避免全股票 `O(N^2)` self-attention；现金与 risk buffer 为 day-level scalar。
+  - 新增 `alpha_result_value_budget_split_v37`，以 `portfolio_day_set_native_allocation_vector_total = 2.40` 为主导，`action_total = 0.0`、`duration_total = 0.0`、row-wise native allocation 与 true solver loss 均为 `0.0`，保留 `portfolio_capital_flow_closure_total = 0.50` 作为辅助诊断。
+  - 新增 `_project_day_set_native_allocation_vector` 与 `_portfolio_day_set_native_allocation_vector_loss`，保证 padding 权重为 0、unsupported receiver 权重为 0、非持仓不产生负 delta、单票 cap、cash budget、turnover budget、同日 cash score 一致，并从 `target_delta` 派生 native receiver/source/cash score。
+  - `fit_policy_models_v3` 接入 r52 day-set 训练路径：当 v37 启用时，`batch_size` 解释为 day batch size，训练 DataLoader 使用完整交易日样本；diagnostics 写入 `supports_portfolio_day_set_native_allocation_vector`、`sample_model_type = temporal_day_set`、`day_set_batch_size`、`day_set_slot_count` 与 day-set terms。
+  - artifact schema 增量扩展：新增 `sample_model_type` 与 `day_set_model_config`，旧 artifact 默认 `temporal_sample`；`load_torch_seq_artifact` 可按类型恢复 `TemporalSamplePolicyNet` 或 `TemporalDaySetPolicyNet`。
+  - `predict_policy_v3` 支持 r52 artifact：按预测日构造 `[1,N,*]` day-set batch，导出与 r51 兼容的 `portfolio_daily_target_weight`、`portfolio_daily_target_delta`、`portfolio_daily_target_cash_weight` 与 native scores。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_day_set_native_allocation_vector_r52`，默认 `epochs = 6`、`min_epochs = 4`、base `batch_size = 1`、search `batch_size = [1, 2]`、resource profile 为 `balanced`，不加入 true-solver resource guard；dry-run plan/progress 写入 `day_set_native_allocation_vector_support`。
+  - 同步更新 `state_center.md`、`continuous_policy_design_contract.md`、`operations_center.md` 与 `knowledge_center.md`，明确 r52 是 r51 的结构升级，不是 r51 formal verdict，也不替代 r50 的 solver research 入口。
+- 验证证据：
+  - r52 `7` 项定向合同测试覆盖 day-set dataset/collate、day-set model shape、projection 约束、v37 loss profile、r52 profile 注册、旧/新 artifact load 与 r52 predict/simulator native target 消费。
+  - `py_compile` 覆盖 `model_seq_v3.py`、`run_self_optimizing_study.py`、`portfolio_simulator.py` 与 `test_portfolio_daily_strategy_contracts.py`。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 通过：`85` 项 OK；仅有 cvxpylayers / numpy 2.0 copy keyword deprecation warning，非 r52 逻辑失败。
+  - r52 dry-run `self_opt_study_r52_day_set_native_allocation_vector_dry_run_20260510` 通过，确认 `trial_count = 3`，3 个 selected trials 均使用 `alpha_result_value_budget_split_v37`，`day_set_native_allocation_vector_support = true`，`full_universe_train_solver_effective = false`，base trial 为 `6/4`、day batch `1`，search trial 包含 day batch `1/2`，resource gate 包含 source count、source sell rate、cash timing、drawdown、monthly/annual return、receiver unrealized 与 exposure utilization。
+  - `git diff --check` 通过。
+- 行动后复盘：
+  - 事实：r52 已把 r51 的 native allocation vector 从“row-wise encoder + batch 内 date 聚合”推进到“完整交易日 padded set batch + day-level cash + slot attention portfolio context”。
+  - 推断：这更接近用户目标中的天然 allocation vector 模型，因为 source / receiver / cash 不再由多个独立 head 对账，而是从完整日级目标仓位向量自然派生。
+  - 决策：r52 当前状态为 `research / shadow_only` 代码合同与 dry-run；策略有效性仍必须由后续 formal screening / confirmatory 证明。不得 promotion、不得 live、不得改 `active_execution_strategy.json`。

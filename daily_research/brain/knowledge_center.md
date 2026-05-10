@@ -906,3 +906,17 @@
 - 新知识 4：r51 不是 formal verdict。
   - r51 dry-run / 单测只能证明 profile、loss、projection、推理字段和 fallback 接线正确。
   - 是否真正解决 source release、exposure utilization、cash timing、drawdown 与 training evidence，需要 formal screening / confirmatory 后才能判断；当前有效证据基线仍是 r39。
+
+## 2026-05-10 r52 day-set native allocation vector 知识沉淀
+- 新知识 1：完整交易日 batch 是 native allocation vector 的结构前提。
+  - r51 在随机 row-wise batch 内按 `date_code` 聚合，不能保证 batch 内包含完整交易日，因此日级预算、现金和换手约束仍可能被 batch 切碎。
+  - r52 用 `DaySetTensorDataset` 和 padded `sample_mask` 保证每个训练 item 是完整交易日，才真正让目标仓位向量代表组合层决策。
+- 新知识 2：slot attention 是本机资源下的折中实现。
+  - 全股票 self-attention 是 `O(N^2)`，对全 A 股日级 batch 过重。
+  - r52 使用固定 slot 数的 `O(B*N*K)` attention，让模型能读到同日横截面上下文，同时避免 r50 真实 solver 那类高负荷路径。
+- 新知识 3：日级 cash 必须是 scalar。
+  - r51 已尽量让 cash score 同日一致，但 cash head 仍来自逐股票输出。
+  - r52 将 cash / risk buffer 作为 day-level scalar，再在推理导出时复制到每只股票，语义上更接近真实组合现金决策。
+- 新知识 4：r52 仍不是 formal verdict。
+  - r52 dry-run / 单测只能证明 day-set 架构、profile、loss、projection 和推理兼容接线正确。
+  - 是否解决 source release、exposure utilization、cash timing、drawdown 与 training evidence，仍必须等待 formal screening / confirmatory。
