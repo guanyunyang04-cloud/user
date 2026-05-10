@@ -31,6 +31,8 @@
 - 当前文档不得把 `KMP_DUPLICATE_LIB_OK` 写成默认解决方案；历史记录中出现该变量只作为历史事实。
 - `Start-Job` 只属于局部联调经验，不应写成用户侧公开启动默认。
 - 中文主分脑文档必须保持 UTF-8；PowerShell here-string 不是默认中文写入方案，批量整理中文正文时需用 `apply_patch` 或显式 UTF-8 写入并复核。
+- `latest_*` 文件不得被直接视为无条件真源；必须先经 artifact freshness 判断 study / protocol / audit / ledger 是否同源、是否 stale。
+- workflow JSON 是运行态证据胶囊，不是 brain 权威事实；稳定结论仍必须写回对应中枢或 references archive。
 
 ## 3. 已验证教训
 - 个股动作和组合决策不是同一个问题；真正目标是当前组合状态下最优仓位调整集合。

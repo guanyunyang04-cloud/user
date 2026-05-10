@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+
+from daily_research.tools.brain_platform import check_text_encoding, read_text as platform_read_text
+
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
 
@@ -113,7 +119,7 @@ def _workspace_path(relative_path: str | Path) -> Path:
 
 
 def _read_text(relative_path: str | Path) -> str:
-    return _workspace_path(relative_path).read_text(encoding="utf-8-sig")
+    return platform_read_text(relative_path)
 
 
 def _read_json(relative_path: str | Path) -> dict[str, Any]:
@@ -237,8 +243,9 @@ def _validate_markdown_and_encoding(findings: list[Finding], relative_path: str)
     if not path.exists() or not path.is_file():
         return
     text = _read_text(relative_path)
+    encoding = check_text_encoding(relative_path)
     markers = [marker for marker in MOJIBAKE_MARKERS if marker in text]
-    if markers:
+    if markers or not encoding.is_utf8 or encoding.has_replacement_char:
         findings.append(
             Finding(
                 "error",

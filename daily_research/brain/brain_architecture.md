@@ -41,3 +41,8 @@
 - 不再把“执行入口”拆成 project_map / procedural / action / environment / handoff_rules 五份
 - 主文件只放当前状态、稳定规则、操作入口和最新复盘摘要；dated log、长命令、历史实验细节必须进入 `daily_research/brain/references/` 归档。
 - 归档不等于删除：主文件保留索引，完整历史快照保存在 `*_archive_*.md`、`*_history_raw_*.md` 或 `*_evidence_index_*.md`。
+
+## 6. 平台化边界
+- `daily_research/brain/*.md` 仍是权威脑区；`daily_research/brain/workflow_registry.json` 只声明工作流状态机，不新增第 8 个中枢。
+- `daily_research/tools/brain_workflow.py` 输出的是运行态接管胶囊、预检状态、产物 freshness 和写回计划。
+- workflow 输出默认落在 `daily_research/output/brain_workflow/`，不得被当作 brain 主文件的替代事实。

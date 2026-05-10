@@ -24,6 +24,10 @@
 
 ## 高频命令
 - 主脑接管：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child daily_research --json`
+- 平台化接管胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow handoff --child daily_research --json`
+- 工作流健康检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow health --json`
+- continuous_policy 状态胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --json`
+- 写回计划预览：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow writeback-plan --source latest --json`
 - 守卫检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
 - 文档守卫：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - 项目一致性：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
@@ -69,6 +73,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - 设计边界和成功判定：`continuous_policy_design_contract.md`。
 - 过程证据、动作后复盘：`episodic_memory.md`。
 - 大段历史原文、标题索引和归档说明：`daily_research/brain/references/`。
+- 默认先用 `brain_workflow writeback-plan` 生成路由建议；只有显式确认写回时才修改 brain 主文件。
 
 ## 历史归档入口
 - 本文件归档前完整快照：`daily_research/brain/references/operations_center_archive_20260510.md`。

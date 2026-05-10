@@ -1,0 +1,162 @@
+{
+  "brain_handoff": {
+    "description": "Resolve the main-brain and child-brain handoff capsule before entering project body work.",
+    "preflight": [
+      "brain_integrity",
+      "doc_guard"
+    ],
+    "allowed_commands": [
+      "daily_research/tools/brain_workflow.py handoff --child <brain_id> --json",
+      "daily_research/tools/brain_bootstrap.py --child <brain_id> --json"
+    ],
+    "forbidden_actions": [
+      "edit_brain_docs",
+      "start_training",
+      "modify_active_execution_artifact"
+    ],
+    "artifacts": [
+      "brain/brain_manifest.json",
+      "daily_research/brain/brain_manifest.json"
+    ],
+    "writeback_routes": {
+      "state": "daily_research/brain/state_center.md",
+      "operations": "daily_research/brain/operations_center.md",
+      "episodic": "daily_research/brain/episodic_memory.md"
+    },
+    "completion": [
+      "boot_order_resolved",
+      "fast_handoff_paths_resolved",
+      "encoding_report_clean"
+    ]
+  },
+  "brain_maintenance": {
+    "description": "Maintain compact brain documents, archive long history, and verify structure without changing project behavior.",
+    "preflight": [
+      "brain_integrity",
+      "doc_guard",
+      "project_consistency"
+    ],
+    "allowed_commands": [
+      "daily_research/tools/doc_guard.py check",
+      "daily_research/tools/brain_integrity_check.py --json",
+      "daily_research/tools/project_consistency_check.py"
+    ],
+    "forbidden_actions": [
+      "start_training",
+      "modify_active_execution_artifact",
+      "write_runtime_state_as_brain_truth"
+    ],
+    "artifacts": [
+      "daily_research/brain/references/"
+    ],
+    "writeback_routes": {
+      "state": "daily_research/brain/state_center.md",
+      "knowledge": "daily_research/brain/knowledge_center.md",
+      "operations": "daily_research/brain/operations_center.md",
+      "episodic": "daily_research/brain/episodic_memory.md"
+    },
+    "completion": [
+      "doc_guard_ok",
+      "brain_integrity_ok",
+      "operations_center_under_line_limit"
+    ]
+  },
+  "continuous_policy_safe_screening": {
+    "description": "Run only resource-safe continuous_policy screening after explicit launch approval.",
+    "preflight": [
+      "brain_handoff",
+      "resource_limits",
+      "no_conflict_process",
+      "unique_study_tag"
+    ],
+    "allowed_commands": [
+      "run_self_optimizing_study --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4"
+    ],
+    "forbidden_actions": [
+      "enable_true_solver_by_default",
+      "start_confirmatory",
+      "modify_active_execution_artifact",
+      "use_KMP_DUPLICATE_LIB_OK"
+    ],
+    "artifacts": [
+      "daily_research/output/continuous_policy/studies/<study_tag>/study_progress.json",
+      "daily_research/output/continuous_policy/studies/<study_tag>/study_summary.json"
+    ],
+    "writeback_routes": {
+      "state": "daily_research/brain/state_center.md",
+      "operations": "daily_research/brain/operations_center.md",
+      "episodic": "daily_research/brain/episodic_memory.md"
+    },
+    "completion": [
+      "at_least_one_screening_trial_completed",
+      "resource_gate_explained",
+      "training_evidence_read"
+    ]
+  },
+  "continuous_policy_result_review": {
+    "description": "Read study/protocol/audit/ledger artifacts and decide whether evidence supports continuation.",
+    "preflight": [
+      "artifact_freshness",
+      "study_summary_readable",
+      "protocol_summary_readable_if_available"
+    ],
+    "allowed_commands": [
+      "daily_research/tools/brain_workflow.py status --workflow continuous_policy --json",
+      "daily_research/tools/brain_workflow.py writeback-plan --source latest --json"
+    ],
+    "forbidden_actions": [
+      "promote_from_screening_only",
+      "modify_active_execution_artifact",
+      "treat_loose_latest_as_truth_without_freshness"
+    ],
+    "artifacts": [
+      "daily_research/output/continuous_policy/latest_study_summary.json",
+      "daily_research/output/continuous_policy/latest_protocol_summary.json",
+      "daily_research/output/continuous_policy/latest_behavior_audit_summary.json",
+      "daily_research/output/continuous_policy/latest_conclusion_ledger.json"
+    ],
+    "writeback_routes": {
+      "state": "daily_research/brain/state_center.md",
+      "knowledge": "daily_research/brain/knowledge_center.md",
+      "operations": "daily_research/brain/operations_center.md",
+      "episodic": "daily_research/brain/episodic_memory.md"
+    },
+    "completion": [
+      "freshness_report_written",
+      "evidence_gap_listed",
+      "next_allowed_action_selected"
+    ]
+  },
+  "brain_writeback": {
+    "description": "Generate or apply a routed brain writeback from verified evidence.",
+    "preflight": [
+      "artifact_freshness",
+      "writeback_plan_generated",
+      "doc_guard"
+    ],
+    "allowed_commands": [
+      "daily_research/tools/brain_workflow.py writeback-plan --source latest --json",
+      "daily_research/tools/brain_workflow.py writeback-plan --source study:<tag> --json --apply-brain-writeback"
+    ],
+    "forbidden_actions": [
+      "write_unverified_latest_to_brain",
+      "append_dated_logs_to_main_centers",
+      "use_powershell_here_string_for_chinese_docs"
+    ],
+    "artifacts": [
+      "daily_research/output/brain_workflow/writeback_plan_*.json"
+    ],
+    "writeback_routes": {
+      "state": "daily_research/brain/state_center.md",
+      "knowledge": "daily_research/brain/knowledge_center.md",
+      "operations": "daily_research/brain/operations_center.md",
+      "episodic": "daily_research/brain/episodic_memory.md",
+      "references": "daily_research/brain/references/"
+    },
+    "completion": [
+      "routes_explicit",
+      "archive_boundary_explicit",
+      "doc_guard_ok_after_write"
+    ]
+  }
+}

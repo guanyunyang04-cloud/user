@@ -60,3 +60,8 @@
 - 不再保留 `project_map / procedural / environment / action / handoff_rules` 五份平行操作文档
 - 新文档默认先判断能否并入现有中枢
 - 只有当信息类型无法归入现有中枢时，才允许新增模块
+
+## 6. 平台化边界
+- 脑区 Markdown 仍是权威事实、规则和边界来源。
+- workflow JSON / CLI 输出只代表运行态胶囊，用于接管、预检、产物 freshness 和写回建议。
+- 运行态 JSON 不得替代 `state_center.md`、`knowledge_center.md` 或 `operations_center.md` 的权威写回。

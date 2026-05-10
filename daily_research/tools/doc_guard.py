@@ -12,6 +12,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
+from daily_research.tools.brain_platform import read_text as platform_read_text
 from daily_research.tools.brain_integrity_check import run_checks as run_brain_integrity_checks
 
 
@@ -33,6 +34,7 @@ DEFAULT_DOCS = [
     "daily_research/brain/governance_layer.md",
     "daily_research/brain/episodic_memory.md",
     "daily_research/brain/brain_manifest.json",
+    "daily_research/brain/workflow_registry.json",
     "t0_project/brain/identity_layer.md",
     "t0_project/brain/state_center.md",
     "t0_project/brain/knowledge_center.md",
@@ -144,6 +146,10 @@ DOC_RULES = {
     "daily_research/brain/brain_manifest.json": DocRule(
         warn_lines=180,
         max_lines=260,
+    ),
+    "daily_research/brain/workflow_registry.json": DocRule(
+        warn_lines=220,
+        max_lines=320,
     ),
     "t0_project/brain/identity_layer.md": DocRule(
         warn_lines=160,
@@ -423,7 +429,7 @@ MOJIBAKE_TOKENS = (
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8-sig")
+    return platform_read_text(path)
 
 
 def _load_main_manifest() -> dict[str, Any]:

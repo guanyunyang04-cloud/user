@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 OPTIONAL_BRAIN_KEYS = (
     "identity_path",
@@ -16,6 +19,30 @@ OPTIONAL_BRAIN_KEYS = (
     "governance_path",
 )
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
+
+
+def _platform_runtime_fields(boot_order: list[str]) -> dict[str, Any]:
+    from daily_research.tools.brain_platform import (
+        check_text_encoding,
+        load_workflow_registry,
+        resolve_artifact_freshness,
+    )
+
+    reports = {path: check_text_encoding(Path(path)).to_dict() for path in boot_order}
+    return {
+        "artifact_freshness": resolve_artifact_freshness().to_dict(),
+        "workflow_hints": {
+            "available_workflows": sorted(load_workflow_registry()),
+            "recommended_default": "brain_handoff",
+        },
+        "encoding_report": {
+            "reports": reports,
+            "has_errors": any(
+                (not item["is_utf8"]) or item["has_replacement_char"] or item["suspicious_mojibake_count"] > 0
+                for item in reports.values()
+            ),
+        },
+    }
 
 
 def _read_json(rel_path: Path) -> dict[str, Any]:
@@ -222,6 +249,7 @@ def build_bootstrap_payload(child_id: str | None) -> dict[str, Any]:
 
     if child_id is None:
         payload["boot_order"] = payload["main_boot_order"]
+        payload.update(_platform_runtime_fields(payload["boot_order"]))
         return payload
 
     child_ref = _resolve_child(main_manifest, child_id)
@@ -248,6 +276,7 @@ def build_bootstrap_payload(child_id: str | None) -> dict[str, Any]:
         }
     )
     payload.update(_collect_optional_brain_paths("child", child_manifest))
+    payload.update(_platform_runtime_fields(payload["boot_order"]))
     return payload
 
 

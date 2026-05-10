@@ -6,6 +6,7 @@
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
 - 当前最新复盘是 r52 native source-delta closure 与本轮主分脑强归档 / r52 代码模块拆分维护。
+- 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
 - 当前状态：`daily_research/brain/state_center.md`。
@@ -33,3 +34,8 @@
 - 代码动作：r51/r52 native allocation projection/loss 拆入 `native_allocation.py`；day-set dataset/collate 拆入 `day_set_batching.py`；slot attention 拆入 `day_set_modules.py`；`model_seq_v3.py` 继续 re-export 原符号以保持兼容。
 - 边界：本轮不改 r52/r51 行为、不改 loss 权重、不改 profile、不启动 screening/confirmatory、不改 production/live/active artifact。
 - 完整验证结果以本轮最终输出和 `git diff` 为准。
+
+## 2026-05-10 脑区平台化与工作流状态机复盘
+- 行动前自检：7 中枢结构、强归档、`doc_guard`、`brain_integrity_check` 与 `project_consistency_check` 已通过，问题不在文档数量，而在接管、预检、freshness、写回计划仍缺少统一机器状态。
+- 执行动作：新增 workflow registry、共享平台模块与统一 CLI；`brain_bootstrap --json` 兼容原字段并补充 `artifact_freshness`、`workflow_hints` 与 `encoding_report`。
+- 边界：workflow JSON 是运行态胶囊，不替代 brain 主文件；默认只读，写回 brain 必须显式触发。
