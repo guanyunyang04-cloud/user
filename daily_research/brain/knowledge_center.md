@@ -1,6 +1,6 @@
 # Daily Research 知识中枢
 
-快照日期：`2026-05-10`
+快照日期：`2026-05-11`
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
@@ -45,6 +45,7 @@
 - r48 证明 full-universe convex OPE 运行通道可用，但 source dead / exposure 低 / evidence edge 仍会失败。
 - r52 证明 day-set native allocation vector 结构更接近目标，但 source release 不会自动闭合；native target validity 和 source threshold 仍需修复。
 - r52b 的核心不是加长训练，而是让训练 projection、预测导出和 simulator validity 使用同一约束口径；若 `native_target_valid` 仍低，继续加 epoch 只会放大无效目标。
+- r52b safe screening 已验证：validity-first projection 还没有把 native target 有效消费率拉出 r52 低位区间；当 invalid reason 集中在 `native_target_invalid_unsupported_receiver_count` 时，首要问题是 receiver 可执行域和导出 mask 同口径，而不是训练资源不足。
 - `cp_v3_seq_holdcash_r1`、`cp_v3_seq_holdcash_r2`、`cp_v3_seq_holdcash_v5_formal_r1` 共同证明 hold/cash 改善必须经 formal evidence 复核。
 - `cp_hier_v4_holdcash_r5` 证明 hierarchical branch 可改善 reversal，但没有学出 hold 前仍只是 research branch。
 
@@ -59,7 +60,7 @@
 | r40-r48 | end-to-end allocation layer 与 convex/OPE 方向正确，但策略证据未过 stable confirm。 |
 | r49-r50 | capital-flow closure 与 true solver 入口保留；r50 因本机负荷过高不作为默认长训路径。 |
 | r51-r52 | native allocation vector 与 day-set batch 是当前轻量主线，但仍需修 target validity / source threshold。 |
-| r52b | validity-first native target closure：优先降低 simulator fallback 与分原因 invalid，再决定是否 strict resume。 |
+| r52b | safe screening 未通过 validity 目标：native target valid 仍仅 1.25%-6.25%，fallback 仍 93.75%-98.75%，下一步应修 receiver executable mask / native target export / simulator validity 同口径。 |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

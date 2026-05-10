@@ -1,11 +1,11 @@
 # Daily Research 过程复盘入口
 
-快照日期：`2026-05-10`
+快照日期：`2026-05-11`
 
 ## 当前结论
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
-- 当前最新复盘是 r52 native source-delta closure 与本轮主分脑强归档 / r52 代码模块拆分维护。
+- 当前最新复盘是 r52b safe screening 验证与 native target validity 失败归因。
 - 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
@@ -44,3 +44,11 @@
 - 行动前自检：r52 safe screening `self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02` 完成 3/3 trial，source delta 在 2/3 trial 中恢复，但 `native_target_valid` 仅约 1%-6%，且 loose `latest_*` 混有 r52 study 与 r34 protocol/audit/ledger。
 - 执行动作：新增 explicit study evidence capsule，`status --study-tag <tag>` 可聚合 study / protocol / training / evaluation；simulator 输出 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段；新增 r52b/v38 validity-first native allocation profile。
 - 边界：r52b 仍是 research / shadow 入口，不改 production/live/active artifact，不启用 true solver；是否进入长训取决于后续 dry-run 与 safe screening 的 native target validity 证据。
+
+## 2026-05-11 r52b safe screening 验证复盘
+- 行动前自检：`py_compile`、脑区平台测试 `14` 项、continuous_policy 合同测试 `94` 项、brain/doc/project/OpenMP strict 与 `git diff --check` 均通过；无冲突训练进程；screening tag 未存在。
+- dry-run gate：`self_opt_study_r52b_native_target_validity_closure_dryrun_safe_20260511_01` 通过，3 个 trial 均为 `alpha_result_value_budget_split_v38`，`native_target_validity_closure_support = true`，`full_universe_train_solver_effective = false`，`confirmatory_enabled = false`，`resource_profile = safe`。
+- screening 结果：`self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 完成 2/3 screening trials、0 failed；resource gate 因 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak` 早停，节省 1 个 trial。
+- 关键证据：trial_01 `native_target_valid = 0.0625`、`allocation_layer_native_fallback_used = 0.9375`、`source_target_count = 62`、`source_realized_sell_rate = 1.0`；trial_02 `native_target_valid = 0.0125`、`allocation_layer_native_fallback_used = 0.9875`、`source_target_count = 0`、`source_realized_sell_rate = 0`。
+- invalid reason：两个 trial 的主要 simulator invalid reason 均是 unsupported receiver，`native_target_invalid_unsupported_receiver_count = 306 / 346`；sum、turnover、cap、negative weight、sell nonheld 的 simulator invalid count 为 0。
+- 行动后判断：r52b 路径可运行，但没有解决 native target validity 主瓶颈，不能进入 confirmatory、promotion 或 22 epoch strict resume；下一轮优先修 receiver executable mask、native target export 与 simulator validity 同口径。

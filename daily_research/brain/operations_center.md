@@ -1,6 +1,6 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-10`
+快照日期：`2026-05-11`
 
 ## 默认操作纪律
 - 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/`。
@@ -54,6 +54,8 @@
 - r52 诊断优先读取：`supports_portfolio_day_set_native_allocation_vector`、`portfolio_day_set_native_allocation_vector_terms`、`sample_model_type`、`day_set_batch_size`、`allocation_layer_native_target_used`、`native_source_delta_alignment_support`、`native_target_valid`、`native_source_target_count`、`native_source_audit_threshold_gap`。
 - r52 当前判定：native source-delta closure 已部分修通，但 evidence insufficient，不能进入 confirmatory。
 - r52b：`split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`，优先修 native target validity、turnover 同口径与 source audit threshold；诊断必须读取 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段。
+- r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已验证：2/3 trials completed、0 failed、`confirmatory_enabled = false`、`resource_profile = safe`、true solver 未启用；resource gate 因 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak` 早停。
+- r52b 当前停止条件已触发：`native_target_valid = 0.0625 / 0.0125`，未高于 r52 的 1%-6% 区间；`allocation_layer_native_fallback_used = 0.9375 / 0.9875`；不得进入 confirmatory 或 22 epoch resume。
 
 ## r52 dry-run 模板
 ```powershell
@@ -67,6 +69,13 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 $env:PYTHONUTF8='1'
 $env:PYTHONIOENCODING='utf-8'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
+```
+
+## r52b safe screening 口径
+```powershell
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal
 ```
 
 ## 产物读取入口
