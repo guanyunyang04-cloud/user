@@ -1599,3 +1599,23 @@
   - 事实：r52 已把 r51 的 native allocation vector 从“row-wise encoder + batch 内 date 聚合”推进到“完整交易日 padded set batch + day-level cash + slot attention portfolio context”。
   - 推断：这更接近用户目标中的天然 allocation vector 模型，因为 source / receiver / cash 不再由多个独立 head 对账，而是从完整日级目标仓位向量自然派生。
   - 决策：r52 当前状态为 `research / shadow_only` 代码合同与 dry-run；策略有效性仍必须由后续 formal screening / confirmatory 证明。不得 promotion、不得 live、不得改 `active_execution_strategy.json`。
+
+## 2026-05-10 r52 safe screening-only 复盘
+- 行动前自检：
+  - 事实：r52 已完成代码合同与 dry-run，但尚无正式 screening 证据；用户机器曾因 r50 true solver 负荷过高黑屏，因此本轮只允许 `safe` 资源口径、`--disable-confirmatory`、前台持久日志与进度文件监控。
+  - 推断：若 r52 连 safe screening 都不能完成或 resource gate 直接阻断，则不应进入 confirmatory，也不应继续靠训练资源硬撑。
+  - 边界：本轮不得改 production / live / active artifact，不使用 `KMP_DUPLICATE_LIB_OK`，不覆盖已有 tag。
+- 执行过程：
+  - 预检通过：`py_compile` 覆盖 `model_seq_v3.py`、`run_self_optimizing_study.py`、`portfolio_simulator.py` 与合同测试文件；完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 为 `85` 项 OK。
+  - 首轮 tag `self_opt_study_r52_day_set_native_allocation_vector_screening_safe_20260510_01` 失败：3 个 trial 均在 train 阶段触发 `TypeError: full_like(): argument 'fill_value' must be Number, not Tensor`，根因是 CUDA 训练路径中 `_project_native_allocation_vector` 用 Tensor 作为 `torch.full_like` 填充值。
+  - 修复动作：将 `cash_score_day` 与 `target_turnover` 的 Tensor 标量广播改为 `torch.ones_like(current_day) * tensor`，并同步修复同类 `target_position_cap` 广播；r52 projection 合同测试改为 CUDA 可用时在 CUDA 上运行，覆盖本次失败路径。
+  - 修复验证：r52 定向测试通过，完整 85 项合同测试通过，safe dry-run `self_opt_study_r52_day_set_native_allocation_vector_dryrun_safe_20260510_02` 确认 `trial_count = 3`、3 个 trial 均为 v37、`day_set_native_allocation_vector_support = true`、`full_universe_train_solver_effective = false`、`confirmatory_enabled = false`、resource profile 为 `safe`。
+- 筛选结果：
+  - 修复后正式 tag `self_opt_study_r52_day_set_native_allocation_vector_screening_safe_20260510_02` 自然完成，`completed_trial_count = 2`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 0`；resource gate 触发，停止第 3 个 screening trial，失败项为 `source_release_dead`、`economic_signal_too_weak`、`exposure_utilization_low`。
+  - 两个 completed trials 均满足运行通道要求：`sample_model_type = temporal_day_set`、`supports_portfolio_day_set_native_allocation_vector = true`、`portfolio_full_universe_convex_train_solver_effective = false`、`device = cuda`、`cuda_available = true`、`python_executable = C:\Users\ASUS\miniconda3\envs\yolos\python.exe`。
+  - trial_01：`training_evidence_status = insufficient`、`annual_return = 0.005293`、`monthly_return_mean = 0.000469`、`max_drawdown = -0.042694`、`cash_timing_quality_1d = 0.019888`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 54`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 0.559323`。
+  - trial_02：`training_evidence_status = insufficient`、`annual_return = -0.017049`、`monthly_return_mean = -0.000821`、`max_drawdown = -0.063852`、`cash_timing_quality_1d = 0.038652`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 64`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 0.499263`。
+- 行动后复盘：
+  - 事实：r52 safe screening 证明 day-set 模型和 safe 资源通道可运行，不再是单纯 dry-run；但 source release 仍完全死亡，且训练证据不足。
+  - 推断：r52 的结构升级解决了“完整日级 batch”问题，但没有自动让模型学会卖出资金来源；native target vector 仍需要更强的 held-source release 学习信号或目标构造。
+  - 决策：r52 不进入 confirmatory，仍为 `research / shadow_only` 失败 screening 证据。后续不应直接加 epoch 期待随机改善，应先诊断 v37 target/projection 为什么 receiver 有需求但 source 目标为 0，再制定 r53 或 r52 修复计划。

@@ -3304,23 +3304,24 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(tuple(outputs["action_logits"].shape), (2, 3, len(ACTION_CLASSES)))
 
     def test_r52_day_set_projection_enforces_full_day_constraints(self) -> None:
-        sample_mask = torch.tensor([[True, True, True, True, False]], dtype=torch.bool)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        sample_mask = torch.tensor([[True, True, True, True, False]], dtype=torch.bool, device=device)
         outputs = {
-            "portfolio_daily_allocation_weight_logit": torch.tensor([[2.2, 1.8, 5.0, 8.0, 9.0]], dtype=torch.float32),
-            "portfolio_daily_cash_reserve_logit": torch.tensor([-2.0], dtype=torch.float32),
-            "portfolio_daily_allocation_risk_buffer_logit": torch.tensor([-1.0], dtype=torch.float32),
+            "portfolio_daily_allocation_weight_logit": torch.tensor([[2.2, 1.8, 5.0, 8.0, 9.0]], dtype=torch.float32, device=device),
+            "portfolio_daily_cash_reserve_logit": torch.tensor([-2.0], dtype=torch.float32, device=device),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.tensor([-1.0], dtype=torch.float32, device=device),
         }
         targets = {
-            "current_weight": torch.tensor([[0.16, 0.14, 0.0, 0.0, 0.0]], dtype=torch.float32),
-            "portfolio_daily_receiver_candidate_mask": torch.tensor([[0.0, 0.0, 1.0, 1.0, 1.0]], dtype=torch.float32),
-            "portfolio_daily_source_candidate_mask": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32),
-            "portfolio_daily_receiver_executable_candidate": torch.tensor([[0.0, 0.0, 1.0, 0.0, 1.0]], dtype=torch.float32),
-            "portfolio_daily_source_executable_candidate": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32),
-            "gross_exposure_target": torch.tensor([0.54], dtype=torch.float32),
-            "turnover_budget": torch.tensor([0.18], dtype=torch.float32),
-            "max_position_weight_target": torch.tensor([0.20], dtype=torch.float32),
-            "budget_cash_timing_signal_target": torch.tensor([0.02], dtype=torch.float32),
-            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([[0.75, 0.75, 0.75, 0.75, 0.0]], dtype=torch.float32),
+            "current_weight": torch.tensor([[0.16, 0.14, 0.0, 0.0, 0.0]], dtype=torch.float32, device=device),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([[0.0, 0.0, 1.0, 1.0, 1.0]], dtype=torch.float32, device=device),
+            "portfolio_daily_source_candidate_mask": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=device),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([[0.0, 0.0, 1.0, 0.0, 1.0]], dtype=torch.float32, device=device),
+            "portfolio_daily_source_executable_candidate": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=device),
+            "gross_exposure_target": torch.tensor([0.54], dtype=torch.float32, device=device),
+            "turnover_budget": torch.tensor([0.18], dtype=torch.float32, device=device),
+            "max_position_weight_target": torch.tensor([0.20], dtype=torch.float32, device=device),
+            "budget_cash_timing_signal_target": torch.tensor([0.02], dtype=torch.float32, device=device),
+            "portfolio_daily_allocation_cash_deployment_target": torch.tensor([[0.75, 0.75, 0.75, 0.75, 0.0]], dtype=torch.float32, device=device),
         }
 
         projection = _project_day_set_native_allocation_vector(outputs, targets, sample_mask, return_terms=True)

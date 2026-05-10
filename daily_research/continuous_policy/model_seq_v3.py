@@ -4141,7 +4141,7 @@ def _portfolio_cvxpy_convex_allocation_loss(
         selected_benchmark_3d = forward_benchmark_3d[day_mask][selected_local]
         selected_predicted_utility = predicted_utility[selected_local]
         selected_oracle_utility = oracle_utility[selected_local]
-        target_position_cap = torch.full_like(selected_current, day_position_cap)
+        target_position_cap = torch.ones_like(selected_current) * day_position_cap
         selected_upper = torch.where(
             selected_receiver_support > 0.0,
             torch.maximum(target_position_cap, selected_current),
@@ -4643,12 +4643,12 @@ def _project_native_allocation_vector(
         receiver_headroom = torch.clamp(cap_day - current_day, min=1.0e-6)
         receiver_score_day = torch.clamp(torch.relu(delta_day) / receiver_headroom, 0.0, 1.0) * receiver_support_day
         source_score_day = torch.clamp(torch.relu(-delta_day) / torch.clamp(current_day, min=1.0e-6), 0.0, 1.0) * source_support_day
-        cash_score_day = torch.full_like(current_day, cash_after)
+        cash_score_day = torch.ones_like(current_day) * cash_after
 
         target_weight[day_mask] = target_day
         target_delta[day_mask] = delta_day
         target_cash_weight[day_mask] = cash_score_day
-        target_turnover[day_mask] = torch.full_like(current_day, turnover_day)
+        target_turnover[day_mask] = torch.ones_like(current_day) * turnover_day
         native_receiver_score[day_mask] = receiver_score_day
         native_source_score[day_mask] = source_score_day
         native_cash_score[day_mask] = cash_score_day
