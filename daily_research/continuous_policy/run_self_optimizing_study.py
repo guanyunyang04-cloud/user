@@ -21,9 +21,11 @@ if __package__ in {None, ""}:
 
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.continuous_policy.model_seq_v3 import (
+    CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED,
     DAILY_HEAD_LAYOUT_CHOICES,
     DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
     DEFAULT_LOSS_PROFILE,
+    _loss_profile_enables_full_universe_train_solver,
     resolve_loss_profile,
 )
 from daily_research.continuous_policy.pipeline_utils import (
@@ -1079,6 +1081,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [192],
     },
+    "split_heads_portfolio_daily_native_allocation_vector_r51": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v36"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [2.0e-4, 2.4e-4],
+        "hidden_dim": [224],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.30, 0.34],
+        "daily_dropout": [0.16],
+        "batch_size": [256],
+    },
 }
 
 
@@ -2065,6 +2084,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 6,
         "min_epochs": 5,
     },
+    "split_heads_portfolio_daily_native_allocation_vector_r51": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v36",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 2.0e-4,
+        "hidden_dim": 224,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.30,
+        "daily_dropout": 0.16,
+        "batch_size": 256,
+        "epochs": 8,
+        "min_epochs": 6,
+    },
 }
 
 
@@ -2126,6 +2164,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_capital_flow_closure_r49": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_integrated_convex_capital_flow_r50": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_native_allocation_vector_r51": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2225,6 +2264,17 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "annual_return_floor": 0.12,
         "receiver_unrealized_cap": 0.025,
         "exposure_utilization_floor": 0.52,
+    },
+    "split_heads_portfolio_daily_native_allocation_vector_r51": {
+        "min_completed_screening": 1,
+        "source_count_floor": 3.0,
+        "source_sell_rate_floor": 0.35,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
     },
 }
 
@@ -5806,8 +5856,28 @@ def main(argv: list[str] | None = None) -> int:
         trial_count=args.trial_count,
         random_seed=args.random_seed,
     )
+    selected_trial_loss_profiles: list[str] = []
+    selected_trial_resolved_loss_configs: list[dict[str, Any]] = []
     for index, trial_config in enumerate(selected_trials, start=1):
-        resolve_loss_profile(str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE)))
+        resolved_loss_name, resolved_loss_config = resolve_loss_profile(
+            str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
+        )
+        selected_trial_loss_profiles.append(resolved_loss_name)
+        selected_trial_resolved_loss_configs.append(resolved_loss_config)
+    native_allocation_vector_support = any(
+        float(
+            config.get("multi_objective_loss_weights", {}).get(
+                "portfolio_native_allocation_vector_total",
+                0.0,
+            )
+        )
+        > 0.0
+        for config in selected_trial_resolved_loss_configs
+    )
+    full_universe_train_solver_effective = bool(
+        CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
+        and any(_loss_profile_enables_full_universe_train_solver(name) for name in selected_trial_loss_profiles)
+    )
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
     if str(args.seed_study_tag or "").strip():
@@ -5817,6 +5887,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         if screening_seed_trials:
             selected_trials = [dict(item.trial_config) for item in screening_seed_trials]
+            selected_trial_loss_profiles = []
+            selected_trial_resolved_loss_configs = []
+            for trial_config in selected_trials:
+                resolved_loss_name, resolved_loss_config = resolve_loss_profile(
+                    str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
+                )
+                selected_trial_loss_profiles.append(resolved_loss_name)
+                selected_trial_resolved_loss_configs.append(resolved_loss_config)
+            native_allocation_vector_support = any(
+                float(
+                    config.get("multi_objective_loss_weights", {}).get(
+                        "portfolio_native_allocation_vector_total",
+                        0.0,
+                    )
+                )
+                > 0.0
+                for config in selected_trial_resolved_loss_configs
+            )
+            full_universe_train_solver_effective = bool(
+                CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
+                and any(_loss_profile_enables_full_universe_train_solver(name) for name in selected_trial_loss_profiles)
+            )
     study_plan = {
         "run_tag": study_tag,
         "created_at": now_iso(),
@@ -5839,6 +5931,9 @@ def main(argv: list[str] | None = None) -> int:
         "trial_count": len(selected_trials),
         "base_trial": base_trial,
         "selected_trials": selected_trials,
+        "selected_trial_loss_profiles": selected_trial_loss_profiles,
+        "native_allocation_vector_support": bool(native_allocation_vector_support),
+        "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         "study_progress_json": str((study_root / "study_progress.json").resolve()),
@@ -5854,6 +5949,10 @@ def main(argv: list[str] | None = None) -> int:
         objective_profile=objective_profile,
         screening_trial_count=len(selected_trials),
         confirmatory_enabled=not bool(args.disable_confirmatory),
+        selected_trial_loss_profiles=selected_trial_loss_profiles,
+        native_allocation_vector_support=bool(native_allocation_vector_support),
+        full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
+        resource_gate=RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         resource_limits=resource_limits,
     )
     if args.dry_run:

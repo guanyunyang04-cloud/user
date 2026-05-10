@@ -1550,3 +1550,26 @@
   - 事实：r49 现在不只惩罚“资金不够”，还惩罚 cash 日内不一致、source/receiver 同票冲突和 source 过窄。
   - 推断：这比继续调单边 source/cash 权重更贴近“资金流闭合账本”的目标，也更适合在不触发 r50 solver 高负荷的前提下继续研究。
   - 边界：r49 仍没有 formal screening / confirmatory verdict；代码合同通过不能写成策略有效，不能 promotion、不能 live、不能改 active artifact。
+
+## 2026-05-10 r51 native allocation vector 代码合同复盘
+- 行动前自检：
+  - 事实：r50 真实 solver 训练路径理论更完整，但本机负荷过高；用户明确要求在 r49 轻量方向继续优化，并希望神经网络本身直接学习 allocation，而不是依赖额外重型优化器长训。
+  - 推断：继续在 r49 多 head 上追加局部 penalty，会保留 source / receiver / cash 事后对账的旧结构；更有效动作是新增 r51，让模型直接输出日级目标仓位向量和现金比例，再由 `target_delta` 派生 source / receiver / cash。
+  - 边界：本轮只做 research profile、代码合同、dry-run 和测试；不启动 formal screening，不改 production / live / active artifact，不删除 r49/r50 对照入口。
+- 已完成实现：
+  - `model_seq_v3.py` 新增 `alpha_result_value_budget_split_v36`，将 `action_total = 0.0`、`duration_total = 0.0`，以 `portfolio_native_allocation_vector_total = 2.10` 为主导，并保留 `portfolio_capital_flow_closure_total = 0.70` 作为辅助诊断；`portfolio_cvxpy_convex_allocation_total` 与 `portfolio_full_universe_convex_allocation_total` 均为 `0`。
+  - `TemporalSamplePolicyNet` 新增 native allocation vector heads：`portfolio_daily_allocation_weight_logit`、`portfolio_daily_cash_reserve_logit`、`portfolio_daily_allocation_risk_buffer_logit`。
+  - 新增 `_project_native_allocation_vector` 和 `_portfolio_native_allocation_vector_loss`，按 `date_code` 做 torch-only projection，输出 `portfolio_daily_target_weight`、`portfolio_daily_target_delta`、`portfolio_daily_target_cash_weight`、`portfolio_daily_target_turnover` 与 native receiver/source/cash score，并诊断 allocation sum、cash reserve、position cap、turnover、unsupported receiver、sell nonheld、funding shortfall、cash timing、decision utility、risk cost、source breadth、exposure utilization 与 total。
+  - 训练 / 验证 / diagnostics / predict 接线已支持 native allocation vector；推理产物存在 `portfolio_daily_target_weight` 时，`portfolio_simulator.py` 的 allocation-layer 路径优先使用 native target，若 target 缺失或约束违规再回退到现有 safety verifier / allocation layer。
+  - `run_self_optimizing_study.py` 新增 `split_heads_portfolio_daily_native_allocation_vector_r51`，默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`、learning rate `[2.0e-4, 2.4e-4]`、dropout `[0.30, 0.34]`，不加入 true-solver resource guard。
+  - dry-run plan/progress 均新增 `selected_trial_loss_profiles`、`native_allocation_vector_support`、`full_universe_train_solver_effective` 与 `resource_gate`，方便后续轮询直接读进度文件。
+  - 同步更新 `state_center.md`、`continuous_policy_design_contract.md`、`operations_center.md` 与 `knowledge_center.md`，明确 r51 是 native allocation vector research profile，不是 formal strategy verdict。
+- 已完成验证：
+  - `py_compile` 通过：`model_seq_v3.py`、`run_self_optimizing_study.py`、`test_portfolio_daily_strategy_contracts.py`、`portfolio_simulator.py`。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 通过：`78` 项 OK；仅有 cvxpylayers / numpy 2.0 copy keyword deprecation warning，非本次逻辑失败。
+  - r51 dry-run `self_opt_study_r51_native_allocation_vector_dry_run_20260510` 通过，确认 `trial_count = 3`，3 个 selected trials 均使用 `alpha_result_value_budget_split_v36`，`native_allocation_vector_support = true`，`full_universe_train_solver_effective = false`，base trial 为 `8/6`、batch `256`，resource gate 包含 source count、source sell rate、cash timing、drawdown、monthly/annual return、receiver unrealized 与 exposure utilization。
+  - `git diff --check` 通过。
+- 行动后复盘：
+  - 事实：r51 已把主路径从“多 head 对账 + 资金流残差”推进到“native target weight / cash vector + delta 派生角色”，并保留 r49 capital-flow closure 作为辅助诊断；它不触发 r50 的真实 solver 高负荷训练路径。
+  - 推断：r51 更符合用户当前目标，即在不压垮本机资源的前提下，让神经网络结构本身表达组合日资金分配。但它仍是 row-wise encoder + day-grouped projection，不是完整 day-set encoder，也没有 formal screening / confirmatory 证据。
+  - 决策：r51 当前状态为 `research / shadow_only` 代码合同与 dry-run；不得 promotion、不得 live、不得改 `active_execution_strategy.json`。若后续启动正式研究，必须先确认无冲突进程、无同名 tag，并以前台持久日志和进度文件运行短 screening。

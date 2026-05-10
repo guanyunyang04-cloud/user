@@ -892,3 +892,17 @@
 - 新知识 4：短筛资源口径是架构安全的一部分。
   - r50 默认 `epochs = 6`、`min_epochs = 5`、`batch_size = 192`，并继续使用 32-slot、1-day、2-batch interval 的 full-universe solver 约束。
   - 这不是降低目标，而是防止在尚未证明 source release、exposure utilization、cash timing 与 drawdown 闭合前，把真实 solver 训练变成高成本低信息长训。
+
+## 2026-05-10 r51 native allocation vector 知识沉淀
+- 新知识 1：目标仓位向量比多 head 对账更接近资金真实语义。
+  - r49 的 receiver/source/cash 仍是多个逐股票 head，资金闭合主要靠 loss 约束；r51 改为先学习 `portfolio_daily_target_weight` 与现金比例，再从 `target_delta` 派生 receiver/source/cash。
+  - 这样同一股票不需要同时“高 receiver / 高 source”来解释资金流，角色冲突会自然减少，并由 native loss 继续诊断。
+- 新知识 2：轻量 projection 可以替代 r50 重型 solver 作为当前主线入口。
+  - r50 的真实 solver 训练能提高理论完整性，但在本机上计算负荷过大；r51 不启用 `cvxpy` / `diffcp` 训练主路径，把约束投影留在 torch 内完成。
+  - 这不是否定 solver 思想，而是把 solver 的可行域思想内化成可训练的 native allocation vector，先验证策略结构是否值得投入更重资源。
+- 新知识 3：native target 必须先于 simulator guard，但 guard 仍是最后防线。
+  - 推理侧若存在 `portfolio_daily_target_weight`，allocation-layer simulator 应优先消费它；若 target 缺失或违反预算、换手、cap、support 约束，再回退到现有 `allocation_layer_v1` safety path。
+  - 读取结果时要看 `allocation_layer_native_target_used`，不能只看最终交易是否可执行。
+- 新知识 4：r51 不是 formal verdict。
+  - r51 dry-run / 单测只能证明 profile、loss、projection、推理字段和 fallback 接线正确。
+  - 是否真正解决 source release、exposure utilization、cash timing、drawdown 与 training evidence，需要 formal screening / confirmatory 后才能判断；当前有效证据基线仍是 r39。

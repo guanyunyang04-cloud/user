@@ -3939,6 +3939,7 @@ class PortfolioState:
         allocation_layer_available_cash_to_deploy = 0.0
         allocation_layer_objective_value = 0.0
         allocation_layer_constraint_violations = 0.0
+        allocation_layer_native_target_used = 0.0
         allocation_layer_receiver_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         allocation_layer_source_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         if end_to_end_allocation_layer_mode:
@@ -3967,21 +3968,74 @@ class PortfolioState:
             allocation_problem["portfolio_daily_source_executable_candidate"] = (
                 allocation_layer_source_executable_candidate.astype(float)
             )
-            allocation_solution = solve_semidifferentiable_allocation(
-                allocation_problem,
-                constraints=AllocationOptimizerConstraints(
-                    cash_reserve_target=float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05),
-                    turnover_limit=turnover_budget,
-                    max_position_weight=position_cap_target,
-                ),
-            )
-            target_weights = (
-                allocation_solution.target_weight.reindex(prices.index)
-                .replace([np.inf, -np.inf], np.nan)
-                .fillna(0.0)
-                .clip(lower=0.0, upper=position_cap_target)
-                .astype(float)
-            )
+            allocation_solution = None
+            native_target_weights_valid = False
+            if "portfolio_daily_target_weight" in policy.columns:
+                native_target_weights_raw = (
+                    _policy_numeric("portfolio_daily_target_weight")
+                    .reindex(prices.index)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .astype(float)
+                )
+                native_position_cap_violation_count = int((native_target_weights_raw > position_cap_target + 1.0e-6).sum())
+                native_negative_weight_count = int((native_target_weights_raw < -1.0e-8).sum())
+                native_target_weights = native_target_weights_raw.clip(lower=0.0, upper=position_cap_target).astype(float)
+                native_delta = (native_target_weights - current.reindex(prices.index).fillna(0.0)).replace(
+                    [np.inf, -np.inf],
+                    np.nan,
+                ).fillna(0.0)
+                native_turnover = float(native_delta.abs().sum())
+                native_cash_after = float(max(0.0, 1.0 - float(native_target_weights.sum())))
+                native_positive_delta = native_delta > max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
+                native_negative_delta = native_delta < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
+                native_unsupported_receiver_count = int(
+                    (native_positive_delta & (~allocation_layer_receiver_executable_candidate)).sum()
+                )
+                native_false_source_count = int(
+                    (
+                        native_negative_delta
+                        & (current.reindex(prices.index).fillna(0.0) > 1.0e-8)
+                        & (~allocation_layer_source_executable_candidate)
+                    ).sum()
+                )
+                native_constraint_violations = float(
+                    int(float(native_target_weights_raw.clip(lower=0.0).sum()) > 1.0 + 1.0e-6)
+                    + int(native_turnover > float(turnover_budget) + 1.0e-6)
+                    + native_position_cap_violation_count
+                    + native_negative_weight_count
+                    + native_unsupported_receiver_count
+                    + native_false_source_count
+                )
+                if native_constraint_violations <= 0.0:
+                    native_target_weights_valid = True
+                    allocation_layer_native_target_used = 1.0
+                    target_weights = native_target_weights
+                    allocation_layer_expected_turnover = native_turnover
+                    allocation_layer_cash_after = native_cash_after
+                    allocation_layer_buy_turnover = float(native_delta.clip(lower=0.0).sum())
+                    allocation_layer_sell_turnover = float((-native_delta.clip(upper=0.0)).sum())
+                    allocation_layer_available_cash_to_deploy = float(
+                        max(0.0, native_cash_after - float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05))
+                    )
+                    allocation_layer_objective_value = 0.0
+                    allocation_layer_constraint_violations = 0.0
+            if allocation_solution is None and not native_target_weights_valid:
+                allocation_solution = solve_semidifferentiable_allocation(
+                    allocation_problem,
+                    constraints=AllocationOptimizerConstraints(
+                        cash_reserve_target=float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05),
+                        turnover_limit=turnover_budget,
+                        max_position_weight=position_cap_target,
+                    ),
+                )
+                target_weights = (
+                    allocation_solution.target_weight.reindex(prices.index)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .clip(lower=0.0, upper=position_cap_target)
+                    .astype(float)
+                )
             desired_strength = target_weights.copy()
             protected_floor = pd.Series(0.0, index=prices.index, dtype=float)
             forced_zero = pd.Series(False, index=prices.index, dtype=bool)
@@ -4032,15 +4086,16 @@ class PortfolioState:
                     | weak_tail_zero_candidate
                 )
             )
-            allocation_layer_expected_turnover = float(allocation_solution.expected_turnover)
-            allocation_layer_cash_after = float(allocation_solution.cash_after)
-            allocation_layer_buy_turnover = float(allocation_solution.buy_turnover)
-            allocation_layer_sell_turnover = float(allocation_solution.sell_turnover)
-            allocation_layer_available_cash_to_deploy = float(allocation_solution.available_cash_to_deploy)
-            allocation_layer_objective_value = float(allocation_solution.allocation_objective_value)
-            allocation_layer_constraint_violations = float(
-                allocation_solution.diagnostics.get("constraint_violations", 0.0)
-            )
+            if allocation_solution is not None:
+                allocation_layer_expected_turnover = float(allocation_solution.expected_turnover)
+                allocation_layer_cash_after = float(allocation_solution.cash_after)
+                allocation_layer_buy_turnover = float(allocation_solution.buy_turnover)
+                allocation_layer_sell_turnover = float(allocation_solution.sell_turnover)
+                allocation_layer_available_cash_to_deploy = float(allocation_solution.available_cash_to_deploy)
+                allocation_layer_objective_value = float(allocation_solution.allocation_objective_value)
+                allocation_layer_constraint_violations = float(
+                    allocation_solution.diagnostics.get("constraint_violations", 0.0)
+                )
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
         portfolio_daily_source_exec_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
         if portfolio_daily_source_exec_guard_mode and bool(portfolio_daily_source_target.any()):
@@ -5399,6 +5454,7 @@ class PortfolioState:
             "allocation_layer_available_cash_to_deploy": float(allocation_layer_available_cash_to_deploy),
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
+            "allocation_layer_native_target_used": float(allocation_layer_native_target_used),
             "allocation_layer_receiver_executable_candidate_count": int(
                 allocation_layer_receiver_executable_candidate.sum()
             ),

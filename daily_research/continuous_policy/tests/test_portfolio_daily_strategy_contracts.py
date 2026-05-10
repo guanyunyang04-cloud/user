@@ -29,6 +29,8 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _portfolio_cvxpy_convex_allocation_loss,
     _portfolio_entropic_transport_decision_loss,
     _portfolio_full_universe_convex_allocation_loss,
+    _portfolio_native_allocation_vector_loss,
+    _project_native_allocation_vector,
     _loss_profile_enables_full_universe_train_solver,
     _portfolio_offline_conservative_support_loss,
     _portfolio_primal_dual_decision_loss,
@@ -2920,6 +2922,150 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(float(terms["fallback_surrogate_loss"]), 0.0)
         self.assertGreater(float(terms["total"]), 0.0)
 
+    def test_r51_native_allocation_vector_profile_uses_torch_only_loss(self) -> None:
+        profile = "split_heads_portfolio_daily_native_allocation_vector_r51"
+        loss_profile = "alpha_result_value_budget_split_v36"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 8)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 6)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 256)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        multi_weights = resolved_config["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertEqual(multi_weights["scalar_total"], 1.25)
+        self.assertGreater(multi_weights["portfolio_native_allocation_vector_total"], 2.0)
+        self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
+        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
+
+        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
+        self.assertEqual(limits["resource_profile"], "balanced")
+        self.assertGreaterEqual(int(limits["thread_limit"]), 1)
+
+    def test_r51_native_projection_enforces_allocation_constraints_and_derived_roles(self) -> None:
+        outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([2.2, 1.8, 3.6, 8.0, 2.0], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((5,), -2.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((5,), -1.0, dtype=torch.float32),
+        }
+        targets = {
+            "date_code": torch.zeros(5, dtype=torch.float32),
+            "current_weight": torch.tensor([0.16, 0.14, 0.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0.0, 0.0, 1.0, 0.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32),
+            "gross_exposure_target": torch.full((5,), 0.54, dtype=torch.float32),
+            "turnover_budget": torch.full((5,), 0.18, dtype=torch.float32),
+            "max_position_weight_target": torch.full((5,), 0.20, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((5,), 0.02, dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((5,), 0.75, dtype=torch.float32),
+        }
+
+        projection = _project_native_allocation_vector(outputs, targets, return_terms=True)
+        target_weight = projection["portfolio_daily_target_weight"]
+        target_delta = projection["portfolio_daily_target_delta"]
+        cash_weight = projection["portfolio_daily_target_cash_weight"]
+        turnover = projection["portfolio_daily_target_turnover"]
+        receiver_score = projection["portfolio_daily_native_receiver_score"]
+        source_score = projection["portfolio_daily_native_source_score"]
+
+        self.assertTrue(bool(torch.all(target_weight >= -1.0e-8)))
+        self.assertTrue(bool(torch.all(target_weight <= 0.200001)))
+        self.assertLessEqual(float(target_weight.sum() + cash_weight[0]), 1.0001)
+        self.assertLessEqual(float(turnover[0]), 0.1801)
+        self.assertAlmostEqual(float(target_weight[3]), 0.0, places=6)
+        self.assertTrue(bool(torch.all(target_delta[targets["current_weight"] <= 1.0e-8] >= -1.0e-8)))
+        self.assertLess(float((receiver_score * source_score).max()), 1.0e-8)
+        self.assertLess(float(projection["unsupported_receiver_weight"]), 1.0e-7)
+        self.assertLess(float(projection["sell_nonheld_violation"]), 1.0e-7)
+        self.assertLess(float(torch.max(torch.abs(cash_weight - cash_weight[0]))), 1.0e-7)
+
+    def test_r51_native_allocation_loss_penalizes_unfunded_receiver_and_underdefended_cash(self) -> None:
+        base_targets = {
+            "date_code": torch.zeros(6, dtype=torch.float32),
+            "current_weight": torch.tensor([0.23, 0.22, 0.20, 0.18, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 1.0, 1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([1.0, 1.0, 1.0, 1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0.0, 0.0, 0.0, 0.0, 0.92, 0.88], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.76, 0.72, 0.68, 0.64, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((6,), 0.82, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((6,), 0.80, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((6,), 0.80, dtype=torch.float32),
+            "portfolio_daily_receiver_forward_excess_5d": torch.tensor([0.0, 0.0, 0.0, 0.0, 0.10, 0.08], dtype=torch.float32),
+            "portfolio_daily_source_forward_excess_5d": torch.tensor([-0.04, -0.03, -0.02, -0.01, 0.0, 0.0], dtype=torch.float32),
+            "gross_exposure_target": torch.full((6,), 0.95, dtype=torch.float32),
+            "turnover_budget": torch.full((6,), 0.30, dtype=torch.float32),
+            "max_position_weight_target": torch.full((6,), 0.24, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((6,), 0.05, dtype=torch.float32),
+        }
+        high_receiver_outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([4.0, 4.0, 4.0, 4.0, 7.0, 7.0], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((6,), -4.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((6,), -4.0, dtype=torch.float32),
+        }
+        low_receiver_outputs = {
+            **high_receiver_outputs,
+            "portfolio_daily_allocation_weight_logit": torch.tensor([5.0, 5.0, 5.0, 5.0, -5.0, -5.0], dtype=torch.float32),
+        }
+        high_risk_targets = {
+            **base_targets,
+            "portfolio_daily_allocation_uncertainty_pressure_target": torch.full((6,), 0.92, dtype=torch.float32),
+            "portfolio_daily_allocation_tail_risk_control_target": torch.full((6,), 0.90, dtype=torch.float32),
+            "portfolio_daily_allocation_drawdown_control_target": torch.full((6,), 0.88, dtype=torch.float32),
+            "market_downside_pressure": torch.full((6,), 0.90, dtype=torch.float32),
+            "cash_regime_pressure": torch.full((6,), 0.86, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((6,), 0.88, dtype=torch.float32),
+        }
+        low_cash_outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.full((6,), 2.0, dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((6,), -6.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((6,), -6.0, dtype=torch.float32),
+        }
+        defended_cash_outputs = {
+            **low_cash_outputs,
+            "portfolio_daily_cash_reserve_logit": torch.full((6,), 6.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((6,), 6.0, dtype=torch.float32),
+        }
+
+        high_receiver_terms = _portfolio_native_allocation_vector_loss(high_receiver_outputs, base_targets, return_terms=True)
+        low_receiver_terms = _portfolio_native_allocation_vector_loss(low_receiver_outputs, base_targets, return_terms=True)
+        low_cash_terms = _portfolio_native_allocation_vector_loss(low_cash_outputs, high_risk_targets, return_terms=True)
+        defended_cash_terms = _portfolio_native_allocation_vector_loss(defended_cash_outputs, high_risk_targets, return_terms=True)
+
+        self.assertGreater(float(high_receiver_terms["funding_shortfall_loss"]), float(low_receiver_terms["funding_shortfall_loss"]) + 0.0001)
+        self.assertGreater(float(low_cash_terms["cash_timing_loss"]), float(defended_cash_terms["cash_timing_loss"]) + 0.0001)
+        self.assertGreater(float(low_cash_terms["risk_cost_loss"]), float(defended_cash_terms["risk_cost_loss"]) + 0.0001)
+        for term_name in (
+            "allocation_sum_error",
+            "cash_reserve_error",
+            "position_cap_violation",
+            "turnover_violation",
+            "unsupported_receiver_weight",
+            "sell_nonheld_violation",
+            "receiver_flow_mean",
+            "source_flow_mean",
+            "funding_shortfall_loss",
+            "cash_timing_loss",
+            "decision_utility_loss",
+            "risk_cost_loss",
+            "source_breadth_loss",
+            "exposure_utilization_loss",
+            "total",
+        ):
+            self.assertIn(term_name, high_receiver_terms)
+            self.assertGreaterEqual(float(high_receiver_terms[term_name]), 0.0)
+
     def test_true_solver_resource_profile_defaults_to_safe_not_full_machine(self) -> None:
         limits = _build_resource_limits(
             search_profile="split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
@@ -3038,6 +3184,60 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(result.diagnostics["allocation_layer_receiver_target_count"], 1)
         self.assertEqual(result.diagnostics["allocation_layer_source_target_count"], 1)
         self.assertEqual(result.diagnostics["direct_action_open_signal_count"], 0)
+
+    def test_r51_native_target_weight_takes_priority_in_allocation_layer(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.80,
+            holdings={"HELD": HoldingState(weight=0.20, entry_price=10.0, peak_price=10.0)},
+            max_positions=4,
+            max_position_weight=0.30,
+            turnover_limit=0.40,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV": 10.0, "OTHER": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.10, 0.99],
+                "portfolio_daily_source_score": [0.10, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.20, 0.20, 0.20],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 1.0],
+                "portfolio_daily_source_executability": [1.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.20, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0, 0.0],
+                "portfolio_daily_target_weight": [0.10, 0.18, 0.0],
+                "portfolio_daily_target_delta": [-0.10, 0.18, 0.0],
+                "portfolio_daily_target_cash_weight": [0.72, 0.72, 0.72],
+                "portfolio_daily_target_turnover": [0.28, 0.28, 0.28],
+                "portfolio_daily_native_receiver_score": [0.0, 0.60, 0.0],
+                "portfolio_daily_native_source_score": [0.50, 0.0, 0.0],
+                "portfolio_daily_native_cash_score": [0.72, 0.72, 0.72],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-03",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.28,
+                "turnover_budget": 0.40,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_native_target_used"], 1.0)
+        self.assertAlmostEqual(result.diagnostics["allocation_layer_expected_turnover"], 0.28, places=6)
+        self.assertEqual(result.diagnostics["allocation_layer_receiver_target_count"], 1)
+        self.assertEqual(result.diagnostics["allocation_layer_source_target_count"], 1)
+        self.assertGreater(result.weights["RECV"], 0.0)
+        self.assertEqual(float(result.weights["OTHER"]), 0.0)
 
     def test_confirmatory_candidate_selection_requires_sufficient_training_evidence(self) -> None:
         insufficient_winner = _trial(
