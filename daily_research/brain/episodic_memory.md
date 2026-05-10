@@ -1619,3 +1619,28 @@
   - 事实：r52 safe screening 证明 day-set 模型和 safe 资源通道可运行，不再是单纯 dry-run；但 source release 仍完全死亡，且训练证据不足。
   - 推断：r52 的结构升级解决了“完整日级 batch”问题，但没有自动让模型学会卖出资金来源；native target vector 仍需要更强的 held-source release 学习信号或目标构造。
   - 决策：r52 不进入 confirmatory，仍为 `research / shadow_only` 失败 screening 证据。后续不应直接加 epoch 期待随机改善，应先诊断 v37 target/projection 为什么 receiver 有需求但 source 目标为 0，再制定 r53 或 r52 修复计划。
+
+## 2026-05-10 r52 native source-delta closure 修复复盘
+- 行动前自检：
+  - 事实：上一轮 r52 safe screening 已证明 day-set 模型与 safe 资源通道可运行，但两个 completed trials 均 `source_target_count = 0`、`source_realized_sell_rate = 0`。这不能只用 6 epoch 训练资源不足解释。
+  - 推断：主要断点在 native target vector 没有穿透旧 source candidate / audit 体系；如果 source 仍由旧语义候选 mask 决定，r52 就会退回“目标仓位向量 + 旧 source gate”的混合旧框架。
+  - 决策：先修 source-delta closure，不重启 r50 true solver，不加长训，不改 production / live / active artifact。
+- 执行过程：
+  - 训练侧修复：`_project_native_allocation_vector` 的 source 支撑改为当前持仓 delta 口径；旧 `portfolio_daily_source_candidate_mask` 不再作为 native source 硬门，只作为 source 质量 prior 与 `legacy_mask_block_loss` / diagnostics。
+  - simulator 修复：native target 有效时，source target 由 `current_weight - target_weight` 超过阈值直接生成，即使旧 source candidate / score 为 0 也可卖；receiver target 同理由正 delta 推导；held add 不再被 receiver executable mask 错误拦截。
+  - loss 与诊断修复：新增 `source_dead_loss`、`native_source_threshold_loss`、`legacy_mask_block_loss`、`native_negative_delta_count`、`native_source_candidate_count`、`native_source_blocked_by_legacy_mask`、`native_source_audit_threshold_gap` 等项，并将 native-to-simulator 字段写入 continuity metrics / study progress。
+  - TDD 复盘：先补测试暴露旧问题，包括 legacy source mask 为 0 时 native source score 仍为 0、tiny release 过不了执行阈值、held add 被误判 native target invalid；再实现修复并让测试转绿。
+- 验证：
+  - `py_compile` 通过，覆盖 `model_seq_v3.py`、`portfolio_simulator.py`、`run_self_optimizing_study.py`、`pipeline_utils.py` 与合同测试文件。
+  - 完整 `daily_research.continuous_policy.tests.test_portfolio_daily_strategy_contracts` 为 `90` 项 OK；只有 cvxpylayers / numpy deprecation warnings，非本轮失败。
+  - `git diff --check` 通过。
+  - dry-run `self_opt_study_r52_native_source_delta_closure_dryrun_20260510_02` 通过，确认 r52 / v37、true solver false、confirmatory false、native source-delta alignment support true。
+- 筛选结果：
+  - safe screening `self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02` 完成 `3` 个 screening trials，`failed_trial_count = 0`，不进入 confirmatory；resource gate 在末尾触发，失败项为 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak`。
+  - trial_01 source 恢复：`source_target_count = 51`、`source_realized_sell_rate = 1.0`、`receiver_target_count = 42`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 1.837`、`cash_timing_quality_1d = 0.0510`、`max_drawdown = -0.0627`、`annual_return = 0.0390`，但 `training_evidence_status = insufficient`。
+  - trial_02 source 恢复更强：`source_target_count = 260`、`source_realized_sell_rate = 1.0`、`receiver_target_count = 45`、`receiver_unrealized_deploy_share = 0`、`portfolio_daily_exposure_utilization = 1.426`、`cash_timing_quality_1d = 0.0427`、`max_drawdown = -0.0708`、`annual_return = -0.0220`，但 `training_evidence_status = insufficient`。
+  - trial_03 仍 source dead：`source_target_count = 0`、`source_realized_sell_rate = 0`、`receiver_target_count = 1`、`portfolio_daily_exposure_utilization = 0.492`、`cash_timing_quality_1d = 0.00307`、`max_drawdown = -0.0201`、`annual_return = 0.0391`，且 `training_evidence_status = insufficient`。
+- 行动后复盘：
+  - 事实：r52 source 断路已被部分修通，2/3 screening trials 出现可执行 source target 与 sell rate；这比上一轮两个 completed trials 均 source dead 明显改善。
+  - 推断：当前失败的主因已从“source delta 被旧 mask 截断”转为“native target valid rate 低、source delta 常低于 audit threshold、turnover constraint / native target constraint violation 高、训练证据不足”。资源不足会影响 evidence，但不是唯一或首要瓶颈。
+  - 决策：本轮不进入 confirmatory、不加长训、不切 live。下一轮若继续，应做 native target validity / source threshold / turnover constraint 修复，再以 safe screening 复核；不得直接把本轮部分恢复写成策略有效。

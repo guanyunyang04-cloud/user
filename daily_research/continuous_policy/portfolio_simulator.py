@@ -3940,6 +3940,10 @@ class PortfolioState:
         allocation_layer_objective_value = 0.0
         allocation_layer_constraint_violations = 0.0
         allocation_layer_native_target_used = 0.0
+        native_target_valid = 0.0
+        native_negative_delta_count = 0
+        native_source_target_count = 0
+        native_target_constraint_violations = 0.0
         allocation_layer_receiver_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         allocation_layer_source_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         if end_to_end_allocation_layer_mode:
@@ -3981,7 +3985,8 @@ class PortfolioState:
                 native_position_cap_violation_count = int((native_target_weights_raw > position_cap_target + 1.0e-6).sum())
                 native_negative_weight_count = int((native_target_weights_raw < -1.0e-8).sum())
                 native_target_weights = native_target_weights_raw.clip(lower=0.0, upper=position_cap_target).astype(float)
-                native_delta = (native_target_weights - current.reindex(prices.index).fillna(0.0)).replace(
+                current_for_native = current.reindex(prices.index).fillna(0.0).astype(float)
+                native_delta = (native_target_weights - current_for_native).replace(
                     [np.inf, -np.inf],
                     np.nan,
                 ).fillna(0.0)
@@ -3989,15 +3994,16 @@ class PortfolioState:
                 native_cash_after = float(max(0.0, 1.0 - float(native_target_weights.sum())))
                 native_positive_delta = native_delta > max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
                 native_negative_delta = native_delta < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
+                native_negative_delta_count = int((native_negative_delta & (current_for_native > 1.0e-8)).sum())
                 native_unsupported_receiver_count = int(
-                    (native_positive_delta & (~allocation_layer_receiver_executable_candidate)).sum()
-                )
-                native_false_source_count = int(
                     (
-                        native_negative_delta
-                        & (current.reindex(prices.index).fillna(0.0) > 1.0e-8)
-                        & (~allocation_layer_source_executable_candidate)
+                        native_positive_delta
+                        & (current_for_native <= 1.0e-8)
+                        & (~allocation_layer_receiver_executable_candidate)
                     ).sum()
+                )
+                native_sell_nonheld_count = int(
+                    (native_negative_delta & (current_for_native <= 1.0e-8)).sum()
                 )
                 native_constraint_violations = float(
                     int(float(native_target_weights_raw.clip(lower=0.0).sum()) > 1.0 + 1.0e-6)
@@ -4005,11 +4011,13 @@ class PortfolioState:
                     + native_position_cap_violation_count
                     + native_negative_weight_count
                     + native_unsupported_receiver_count
-                    + native_false_source_count
+                    + native_sell_nonheld_count
                 )
+                native_target_constraint_violations = native_constraint_violations
                 if native_constraint_violations <= 0.0:
                     native_target_weights_valid = True
                     allocation_layer_native_target_used = 1.0
+                    native_target_valid = 1.0
                     target_weights = native_target_weights
                     allocation_layer_expected_turnover = native_turnover
                     allocation_layer_cash_after = native_cash_after
@@ -4070,12 +4078,23 @@ class PortfolioState:
                 allocation_layer_receiver_executable_candidate
                 & (allocation_delta_preview > receiver_delta_threshold)
             )
-            portfolio_daily_source_target = (
-                allocation_layer_source_executable_candidate
-                & (allocation_delta_preview < -source_delta_threshold)
-            )
             portfolio_daily_receiver_candidate = allocation_layer_receiver_executable_candidate.copy()
-            portfolio_daily_source_candidate = allocation_layer_source_executable_candidate.copy()
+            if native_target_weights_valid:
+                portfolio_daily_source_target = (
+                    (current > 1e-8)
+                    & (allocation_delta_preview < -source_delta_threshold)
+                )
+                portfolio_daily_source_candidate = (
+                    (current > 1e-8)
+                    & (allocation_delta_preview < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8))
+                )
+                native_source_target_count = int(portfolio_daily_source_target.sum())
+            else:
+                portfolio_daily_source_target = (
+                    allocation_layer_source_executable_candidate
+                    & (allocation_delta_preview < -source_delta_threshold)
+                )
+                portfolio_daily_source_candidate = allocation_layer_source_executable_candidate.copy()
             portfolio_daily_receiver_target_count = int(portfolio_daily_receiver_target.sum())
             portfolio_daily_source_target_count = int(portfolio_daily_source_target.sum())
             sell_authorized_mask = (
@@ -5455,6 +5474,10 @@ class PortfolioState:
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),
+            "native_target_valid": float(native_target_valid),
+            "native_negative_delta_count": int(native_negative_delta_count),
+            "native_source_target_count": int(native_source_target_count),
+            "native_target_constraint_violations": float(native_target_constraint_violations),
             "allocation_layer_receiver_executable_candidate_count": int(
                 allocation_layer_receiver_executable_candidate.sum()
             ),

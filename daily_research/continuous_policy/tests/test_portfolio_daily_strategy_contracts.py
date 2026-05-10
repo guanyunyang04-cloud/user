@@ -3249,6 +3249,104 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(result.weights["RECV"], 0.0)
         self.assertEqual(float(result.weights["OTHER"]), 0.0)
 
+    def test_r52_native_target_source_delta_bypasses_legacy_source_candidate_in_simulator(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.80,
+            holdings={"HELD": HoldingState(weight=0.20, entry_price=10.0, peak_price=10.0)},
+            max_positions=4,
+            max_position_weight=0.30,
+            turnover_limit=0.40,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV": 10.0, "OTHER": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.10, 0.0],
+                "portfolio_daily_source_score": [0.0, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.20, 0.20, 0.20],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [0.0, 0.0, 0.0],
+                "portfolio_daily_source_candidate": [0.0, 0.0, 0.0],
+                "portfolio_daily_target_weight": [0.10, 0.18, 0.0],
+                "portfolio_daily_target_delta": [-0.10, 0.18, 0.0],
+                "portfolio_daily_target_cash_weight": [0.72, 0.72, 0.72],
+                "portfolio_daily_target_turnover": [0.28, 0.28, 0.28],
+                "portfolio_daily_native_receiver_score": [0.0, 0.60, 0.0],
+                "portfolio_daily_native_source_score": [0.50, 0.0, 0.0],
+                "portfolio_daily_native_cash_score": [0.72, 0.72, 0.72],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-10",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.28,
+                "turnover_budget": 0.40,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_native_target_used"], 1.0)
+        self.assertEqual(result.diagnostics["allocation_layer_source_target_count"], 1)
+        self.assertEqual(result.diagnostics["native_source_target_count"], 1)
+        self.assertEqual(result.diagnostics["native_target_valid"], 1.0)
+        self.assertGreater(result.diagnostics["native_negative_delta_count"], 0)
+        self.assertLess(result.weights["HELD"], 0.20)
+
+    def test_r52_native_target_held_add_does_not_invalidate_receiver_support(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.90,
+            holdings={"HELD": HoldingState(weight=0.10, entry_price=10.0, peak_price=10.0)},
+            max_positions=4,
+            max_position_weight=0.30,
+            turnover_limit=0.40,
+        )
+        prices = pd.Series({"HELD": 10.0, "OTHER": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip"],
+                "action_strength": [0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.0],
+                "portfolio_daily_source_score": [0.0, 0.0],
+                "portfolio_daily_cash_score": [0.20, 0.20],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [0.0, 0.0],
+                "portfolio_daily_target_weight": [0.15, 0.0],
+                "portfolio_daily_target_delta": [0.05, 0.0],
+                "portfolio_daily_target_cash_weight": [0.85, 0.85],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-11",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.15,
+                "turnover_budget": 0.40,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_native_target_used"], 1.0)
+        self.assertEqual(result.diagnostics["native_target_valid"], 1.0)
+        self.assertGreater(result.weights["HELD"], 0.10)
+
     def test_r52_day_set_dataset_returns_complete_days(self) -> None:
         date_codes = torch.tensor([0, 0, 0, 1, 1], dtype=torch.long)
         dataset = DaySetTensorDataset(
@@ -3343,6 +3441,56 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertLess(float(projection["sell_nonheld_violation"]), 1.0e-7)
         self.assertLess(float(projection["padding_weight_violation"]), 1.0e-7)
 
+    def test_r52_native_source_delta_ignores_legacy_source_candidate_mask(self) -> None:
+        outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([0.0, -2.0], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.tensor([4.0, 4.0], dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.tensor([0.0, 0.0], dtype=torch.float32),
+        }
+        targets = {
+            "date_code": torch.tensor([0.0, 0.0], dtype=torch.float32),
+            "current_weight": torch.tensor([0.30, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([0.0, 0.0], dtype=torch.float32),
+            "gross_exposure_target": torch.tensor([0.12, 0.12], dtype=torch.float32),
+            "turnover_budget": torch.tensor([0.50, 0.50], dtype=torch.float32),
+            "max_position_weight_target": torch.tensor([0.50, 0.50], dtype=torch.float32),
+        }
+
+        projection = _project_native_allocation_vector(outputs, targets, return_terms=True)
+
+        self.assertLess(float(projection["portfolio_daily_target_delta"][0]), -0.05)
+        self.assertGreater(float(projection["portfolio_daily_native_source_score"][0]), 0.0)
+        self.assertGreater(float(projection["native_negative_delta_count"]), 0.0)
+        self.assertGreater(float(projection["native_source_candidate_count"]), 0.0)
+        self.assertGreater(float(projection["native_source_blocked_by_legacy_mask"]), 0.0)
+
+    def test_r52_native_projection_concentrates_tiny_releases_above_execution_threshold(self) -> None:
+        row_count = 10
+        outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.zeros(row_count, dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((row_count,), 2.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.zeros(row_count, dtype=torch.float32),
+        }
+        targets = {
+            "date_code": torch.zeros(row_count, dtype=torch.float32),
+            "current_weight": torch.full((row_count,), 0.02, dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.zeros(row_count, dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.zeros(row_count, dtype=torch.float32),
+            "gross_exposure_target": torch.full((row_count,), 0.19, dtype=torch.float32),
+            "turnover_budget": torch.full((row_count,), 0.05, dtype=torch.float32),
+            "max_position_weight_target": torch.full((row_count,), 0.05, dtype=torch.float32),
+        }
+
+        projection = _project_native_allocation_vector(outputs, targets, return_terms=True)
+
+        self.assertGreater(float(projection["source_flow_mean"]), 0.0)
+        self.assertGreater(float(projection["native_negative_delta_count"]), 0.0)
+        self.assertGreater(float(projection["native_source_candidate_count"]), 0.0)
+        self.assertLess(float(projection["native_source_audit_threshold_gap"]), 0.02)
+
     def test_r52_loss_profile_uses_day_set_native_loss_without_solver(self) -> None:
         loss_profile = "alpha_result_value_budget_split_v37"
         resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
@@ -3394,9 +3542,43 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             "risk_cost_loss",
             "source_breadth_loss",
             "exposure_utilization_loss",
+            "source_dead_loss",
+            "native_source_threshold_loss",
+            "legacy_mask_block_loss",
+            "native_negative_delta_count",
+            "native_source_candidate_count",
+            "native_source_flow_without_sellable_support",
+            "native_source_blocked_by_legacy_mask",
+            "native_source_audit_threshold_gap",
             "total",
         ):
             self.assertIn(name, terms)
+        self.assertGreaterEqual(float(terms["source_dead_loss"]), 0.0)
+
+    def test_r52_day_set_loss_penalizes_receiver_demand_without_native_source(self) -> None:
+        terms = _portfolio_day_set_native_allocation_vector_loss(
+            {
+                "portfolio_daily_allocation_weight_logit": torch.tensor([[0.0, 4.0, 3.0]], dtype=torch.float32),
+                "portfolio_daily_cash_reserve_logit": torch.tensor([-4.0], dtype=torch.float32),
+                "portfolio_daily_allocation_risk_buffer_logit": torch.tensor([-4.0], dtype=torch.float32),
+            },
+            {
+                "current_weight": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+                "portfolio_daily_receiver_candidate_mask": torch.tensor([[0.0, 1.0, 1.0]], dtype=torch.float32),
+                "portfolio_daily_source_candidate_mask": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+                "portfolio_daily_receiver_executable_candidate": torch.tensor([[0.0, 1.0, 1.0]], dtype=torch.float32),
+                "portfolio_daily_source_executable_candidate": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+                "gross_exposure_target": torch.tensor([0.60], dtype=torch.float32),
+                "turnover_budget": torch.tensor([0.70], dtype=torch.float32),
+                "max_position_weight_target": torch.tensor([0.40], dtype=torch.float32),
+                "portfolio_daily_allocation_cash_deployment_target": torch.tensor([[0.95, 0.95, 0.95]], dtype=torch.float32),
+            },
+            torch.tensor([[True, True, True]], dtype=torch.bool),
+            return_terms=True,
+        )
+
+        self.assertEqual(float(terms["native_source_candidate_count"]), 0.0)
+        self.assertGreater(float(terms["source_dead_loss"]), 0.0)
 
     def test_r52_profile_registers_day_set_native_allocation_vector(self) -> None:
         profile = "split_heads_portfolio_daily_day_set_native_allocation_vector_r52"

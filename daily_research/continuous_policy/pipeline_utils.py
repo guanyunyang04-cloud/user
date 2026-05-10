@@ -2261,6 +2261,21 @@ def compute_continuity_metrics(
             if avg_gross_exposure_target > 0.0
             else 0.0
         )
+        for native_metric_column in (
+            "allocation_layer_native_target_used",
+            "allocation_layer_source_target_count",
+            "allocation_layer_source_executable_candidate_count",
+            "native_negative_delta_count",
+            "native_source_target_count",
+            "native_target_valid",
+            "native_target_constraint_violations",
+        ):
+            if native_metric_column in turnover_frame.columns and native_metric_column not in metrics:
+                native_metric_values = pd.to_numeric(turnover_frame[native_metric_column], errors="coerce").fillna(0.0)
+                if native_metric_column.endswith("_count"):
+                    metrics[native_metric_column] = float(native_metric_values.sum())
+                else:
+                    metrics[native_metric_column] = float(native_metric_values.mean())
         metrics["avg_position_cap_target"] = float(turnover_frame["max_position_weight_target"].mean())
         metrics["avg_hold_bias_target"] = float(turnover_frame["hold_bias_target"].mean())
         metrics["avg_reduce_bias_target"] = float(turnover_frame["reduce_bias_target"].mean()) if "reduce_bias_target" in turnover_frame.columns else 0.0

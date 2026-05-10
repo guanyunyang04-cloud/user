@@ -4445,6 +4445,14 @@ _NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "risk_cost_loss",
     "source_breadth_loss",
     "exposure_utilization_loss",
+    "source_dead_loss",
+    "native_source_threshold_loss",
+    "legacy_mask_block_loss",
+    "native_negative_delta_count",
+    "native_source_candidate_count",
+    "native_source_flow_without_sellable_support",
+    "native_source_blocked_by_legacy_mask",
+    "native_source_audit_threshold_gap",
     "total",
 )
 
@@ -4520,13 +4528,8 @@ def _project_native_allocation_vector(
             0.0,
             1.0,
         )
-    source_support = source_mask * held_support
-    if "portfolio_daily_source_executable_candidate" in targets:
-        source_support = source_support * torch.clamp(
-            targets["portfolio_daily_source_executable_candidate"].to(device).flatten(),
-            0.0,
-            1.0,
-        )
+    legacy_source_support = torch.clamp(source_mask * held_support, 0.0, 1.0)
+    source_support = held_support
     receiver_support = torch.clamp(receiver_support, 0.0, 1.0)
     source_support = torch.clamp(source_support, 0.0, 1.0)
     eligible_support = torch.clamp(held_support + receiver_support, 0.0, 1.0)
@@ -4581,6 +4584,7 @@ def _project_native_allocation_vector(
         risk_buffer_day = risk_buffer_logit[day_mask]
         receiver_support_day = receiver_support[day_mask]
         source_support_day = source_support[day_mask]
+        legacy_source_support_day = legacy_source_support[day_mask]
         eligible_day = eligible_support[day_mask]
         held_day = held_support[day_mask]
         gross_day = torch.clamp(gross_exposure_target[day_mask].mean(), 0.0, 1.0)
@@ -4630,6 +4634,68 @@ def _project_native_allocation_vector(
             delta_day = target_day - current_day
             turnover_day = torch.abs(delta_day).sum()
 
+        source_audit_threshold = torch.maximum(
+            torch.full_like(current_day, 0.00125),
+            torch.clamp(current_day, min=0.0) * 0.010,
+        )
+        clamped_current_day = torch.clamp(current_day, 0.0, cap_day)
+        preliminary_release = torch.relu(clamped_current_day - target_day) * held_day
+        preliminary_source_count = (
+            (preliminary_release > source_audit_threshold).to(dtype=dtype, device=device) * held_day
+        ).sum()
+        held_count = held_day.sum()
+        total_preliminary_release = preliminary_release.sum()
+        desired_source_count = torch.minimum(held_count, torch.tensor(3.0, device=device, dtype=dtype))
+        if (
+            float(total_preliminary_release.detach().cpu()) > 1.0e-8
+            and float(held_count.detach().cpu()) > 0.0
+            and float(preliminary_source_count.detach().cpu()) < float(desired_source_count.detach().cpu())
+        ):
+            selected_count = max(1, min(3, int(float(held_count.detach().cpu()))))
+            source_order_score = (
+                preliminary_release
+                + 0.030 * torch.clamp(target_source[day_mask], 0.0, 1.0)
+                + 0.020 * torch.relu(-source_forward[day_mask])
+                + 0.010 * legacy_source_support_day
+            )
+            source_order_score = torch.where(
+                held_day > 0.0,
+                source_order_score,
+                torch.full_like(source_order_score, -1.0e9),
+            )
+            selected_indices = torch.topk(source_order_score, k=selected_count).indices
+            concentrated_release = torch.zeros_like(current_day)
+            remaining_release = total_preliminary_release
+            release_floor = torch.maximum(
+                source_audit_threshold * 1.35,
+                total_preliminary_release / float(selected_count),
+            )
+            for index_tensor in selected_indices:
+                index = int(index_tensor.detach().cpu())
+                capacity = clamped_current_day[index]
+                proposed_release = torch.minimum(
+                    capacity,
+                    torch.maximum(preliminary_release[index], release_floor[index]),
+                )
+                assigned_release = torch.minimum(proposed_release, remaining_release)
+                concentrated_release[index] = assigned_release
+                remaining_release = torch.relu(remaining_release - assigned_release)
+            if float(remaining_release.detach().cpu()) > 1.0e-8:
+                for index_tensor in selected_indices:
+                    if float(remaining_release.detach().cpu()) <= 1.0e-8:
+                        break
+                    index = int(index_tensor.detach().cpu())
+                    extra_capacity = torch.relu(clamped_current_day[index] - concentrated_release[index])
+                    extra_release = torch.minimum(extra_capacity, remaining_release)
+                    concentrated_release[index] = concentrated_release[index] + extra_release
+                    remaining_release = torch.relu(remaining_release - extra_release)
+            releasable_rows = preliminary_release > 1.0e-8
+            target_day = torch.where(releasable_rows, clamped_current_day, target_day)
+            target_day = target_day - concentrated_release
+            target_day = torch.clamp(target_day, 0.0, cap_day) * eligible_day
+            delta_day = target_day - current_day
+            turnover_day = torch.abs(delta_day).sum()
+
         cost_proxy = torch.clamp(0.0015 * turnover_day, 0.0, 0.03)
         total_with_cost = target_day.sum() + cost_proxy
         if float(total_with_cost.detach().cpu()) > 1.0 + 1.0e-8:
@@ -4644,6 +4710,19 @@ def _project_native_allocation_vector(
         receiver_score_day = torch.clamp(torch.relu(delta_day) / receiver_headroom, 0.0, 1.0) * receiver_support_day
         source_score_day = torch.clamp(torch.relu(-delta_day) / torch.clamp(current_day, min=1.0e-6), 0.0, 1.0) * source_support_day
         cash_score_day = torch.ones_like(current_day) * cash_after
+        release_amount = torch.relu(-delta_day) * held_day
+        audit_threshold = torch.maximum(
+            torch.full_like(current_day, 0.00125),
+            torch.clamp(current_day, min=0.0) * 0.010,
+        )
+        native_source_active = (release_amount > audit_threshold).to(dtype=dtype, device=device) * held_day
+        native_negative_delta = (release_amount > 1.0e-8).to(dtype=dtype, device=device) * held_day
+        legacy_blocked_source_flow = release_amount * (1.0 - legacy_source_support_day)
+        native_source_threshold_gap = (
+            torch.relu(audit_threshold - release_amount)
+            * (release_amount > 1.0e-8).to(dtype=dtype, device=device)
+            * held_day
+        ).sum()
 
         target_weight[day_mask] = target_day
         target_delta[day_mask] = delta_day
@@ -4660,7 +4739,7 @@ def _project_native_allocation_vector(
         unsupported_receiver_weight = (torch.relu(delta_day) * (1.0 - receiver_support_day)).sum()
         sell_nonheld_violation = (torch.relu(-delta_day) * (1.0 - held_day)).sum()
         receiver_flow = torch.relu(delta_day).sum()
-        source_flow = torch.relu(-delta_day).sum()
+        source_flow = release_amount.sum()
         current_cash = torch.clamp(1.0 - current_day.sum(), 0.0, 1.0)
         cash_release = torch.relu(current_cash - cash_after)
         raw_receiver_demand = (
@@ -4705,8 +4784,7 @@ def _project_native_allocation_vector(
         )
         source_count = source_support_day.sum()
         if float(source_count.detach().cpu()) > 0.0:
-            release_ratio = torch.relu(-delta_day) / torch.clamp(current_day, min=1.0e-6)
-            soft_source_breadth = (torch.sigmoid((release_ratio - 0.05) * 32.0) * source_support_day).sum()
+            soft_source_breadth = native_source_active.sum()
             target_source_breadth = torch.minimum(source_count, torch.tensor(3.0, device=device, dtype=dtype))
             source_breadth_loss = torch.square(torch.relu(target_source_breadth - soft_source_breadth)) / torch.clamp(
                 target_source_breadth.square(),
@@ -4719,6 +4797,27 @@ def _project_native_allocation_vector(
             0.0,
             1.25,
         )
+        native_source_candidate_count = native_source_active.sum()
+        native_negative_delta_count = native_negative_delta.sum()
+        native_source_flow_without_sellable_support = (torch.relu(-delta_day) * (1.0 - held_day)).sum()
+        native_source_blocked_by_legacy_mask = legacy_blocked_source_flow.sum()
+        receiver_pressure_for_source = torch.clamp(
+            raw_receiver_demand + torch.relu(stock_budget - target_day.sum()),
+            0.0,
+            1.0,
+        )
+        source_dead_loss = (
+            torch.square(torch.relu(torch.minimum(source_count, torch.tensor(3.0, device=device, dtype=dtype)) - native_source_candidate_count))
+            / torch.clamp(torch.minimum(source_count, torch.tensor(3.0, device=device, dtype=dtype)).square(), min=1.0)
+            if float(source_count.detach().cpu()) > 0.0
+            else torch.tensor(1.0, device=device, dtype=dtype)
+        ) * receiver_pressure_for_source
+        native_source_threshold_loss = (
+            torch.square(native_source_threshold_gap)
+            + torch.square(torch.relu(torch.tensor(1.0, device=device, dtype=dtype) - native_source_candidate_count))
+            * receiver_pressure_for_source
+        )
+        legacy_mask_block_loss = torch.square(native_source_blocked_by_legacy_mask)
 
         component_loss = (
             0.10 * allocation_sum_error
@@ -4733,6 +4832,9 @@ def _project_native_allocation_vector(
             + 0.18 * risk_cost_loss
             + 0.20 * source_breadth_loss
             + 0.24 * exposure_utilization_loss
+            + 0.24 * source_dead_loss
+            + 0.18 * native_source_threshold_loss
+            + 0.08 * legacy_mask_block_loss
         )
         day_losses.append(component_loss)
         receiver_flow_values.append(receiver_flow)
@@ -4749,6 +4851,14 @@ def _project_native_allocation_vector(
         term_values["risk_cost_loss"].append(risk_cost_loss)
         term_values["source_breadth_loss"].append(source_breadth_loss)
         term_values["exposure_utilization_loss"].append(exposure_utilization_loss)
+        term_values["source_dead_loss"].append(source_dead_loss)
+        term_values["native_source_threshold_loss"].append(native_source_threshold_loss)
+        term_values["legacy_mask_block_loss"].append(legacy_mask_block_loss)
+        term_values["native_negative_delta_count"].append(native_negative_delta_count)
+        term_values["native_source_candidate_count"].append(native_source_candidate_count)
+        term_values["native_source_flow_without_sellable_support"].append(native_source_flow_without_sellable_support)
+        term_values["native_source_blocked_by_legacy_mask"].append(native_source_blocked_by_legacy_mask)
+        term_values["native_source_audit_threshold_gap"].append(native_source_threshold_gap)
 
     result = {
         "portfolio_daily_target_weight": target_weight,
@@ -4808,6 +4918,14 @@ _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "risk_cost_loss",
     "source_breadth_loss",
     "exposure_utilization_loss",
+    "source_dead_loss",
+    "native_source_threshold_loss",
+    "legacy_mask_block_loss",
+    "native_negative_delta_count",
+    "native_source_candidate_count",
+    "native_source_flow_without_sellable_support",
+    "native_source_blocked_by_legacy_mask",
+    "native_source_audit_threshold_gap",
     "total",
 )
 

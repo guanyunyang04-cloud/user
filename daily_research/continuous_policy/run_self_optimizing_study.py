@@ -5936,6 +5936,9 @@ def main(argv: list[str] | None = None) -> int:
         CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
         and any(_loss_profile_enables_full_universe_train_solver(name) for name in selected_trial_loss_profiles)
     )
+    native_source_delta_alignment_support = bool(
+        native_allocation_vector_support or day_set_native_allocation_vector_support
+    )
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
     if str(args.seed_study_tag or "").strip():
@@ -5977,6 +5980,9 @@ def main(argv: list[str] | None = None) -> int:
                 CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_ENABLED
                 and any(_loss_profile_enables_full_universe_train_solver(name) for name in selected_trial_loss_profiles)
             )
+            native_source_delta_alignment_support = bool(
+                native_allocation_vector_support or day_set_native_allocation_vector_support
+            )
     study_plan = {
         "run_tag": study_tag,
         "created_at": now_iso(),
@@ -6002,6 +6008,7 @@ def main(argv: list[str] | None = None) -> int:
         "selected_trial_loss_profiles": selected_trial_loss_profiles,
         "native_allocation_vector_support": bool(native_allocation_vector_support),
         "day_set_native_allocation_vector_support": bool(day_set_native_allocation_vector_support),
+        "native_source_delta_alignment_support": bool(native_source_delta_alignment_support),
         "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
@@ -6021,6 +6028,7 @@ def main(argv: list[str] | None = None) -> int:
         selected_trial_loss_profiles=selected_trial_loss_profiles,
         native_allocation_vector_support=bool(native_allocation_vector_support),
         day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
+        native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
         full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
         resource_gate=RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         resource_limits=resource_limits,
