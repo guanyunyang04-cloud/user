@@ -43,7 +43,11 @@
 - Web / Desktop：
   - `npm ci`
   - `npm run lint`
+  - `npm run test`
   - `npm run build`
+  - `npm run test:smoke`
+  - `powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1`
+  - `powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1`
 - AI 资产检查：
   - `python scripts/check_ai_assets.py`
 - AI 兼容入口修改后：
@@ -53,6 +57,11 @@
   - 本地运行：`python main.py`
   - Web 入口：`python webui.py` 或项目中对应 Web/API 启动脚本
   - Docker / GitHub Actions 部署说明保留在公开 README 与 `docs/`，但配置字段变更必须回写 brain 与 `.env.example`
+
+## 3.1 2026-05-11 验证口径补充
+- 在 Windows PowerShell 中，后端 gate 可按 `py_compile`、`python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics`、`./test.sh code`、`./test.sh yfinance`、`python -m pytest -m "not network"` 分项执行。
+- 当前 `bash scripts/ci_gate.sh all` 会进入 WSL bash，若 WSL 内没有 `python` 会失败；这属于环境入口问题，不代表后端测试失败。
+- Web smoke 默认按当前后端认证状态执行：`ADMIN_AUTH_ENABLED=false` 时跳过登录页表单专项，认证开启时必须设置 `DSA_WEB_SMOKE_PASSWORD`。
 
 ## 4. README 稳定内容收口
 - 产品能力：

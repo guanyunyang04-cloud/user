@@ -74,7 +74,7 @@
 - r52 day-set native allocation vector 合同：`alpha_result_value_budget_split_v37` 必须让 `portfolio_day_set_native_allocation_vector_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 置为 `0`；r51 row-wise native allocation loss、cvxpy solver loss 与 full-universe solver loss 必须为 `0`。r52 必须以完整交易日 padded set batch 训练，不得回退到随机 row-wise batch 内 `date_code` 聚合。
 - r52 model / diagnostics 合同：`TemporalDaySetPolicyNet` 必须输入 `[B,N,*]` day-set tensor、日级特征和 `sample_mask`，使用 slot attention 而非全股票 `O(N^2)` self-attention；输出目标仓位 logits `[B,N]`、日级 cash / risk logits `[B]`。`_portfolio_day_set_native_allocation_vector_loss` 必须输出 day-set full-day、mask coverage、padding violation、allocation/cash/cap/turnover/support/source/cash timing/risk/exposure/total 诊断。
 - r52 profile 合同：`split_heads_portfolio_daily_day_set_native_allocation_vector_r52` 必须继续使用 `holdcash_v3`、`budget_v3`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 6`、`min_epochs = 4`、day batch `1`，搜索允许 day batch `1/2`。r52 不加入 true-solver resource guard，不作为 production / live / active artifact，dry-run / 单测只能证明接线和合同正确，不能证明策略有效。
-- r52b/r52c 证据边界：r52b 证明 native target validity 的主失败来自 unsupported receiver；r52c 证明 receiver executable closure 可在 simulator 边界关闭该失败，但同时把最新瓶颈暴露为 training evidence、cash timing、exposure utilization 与 source depth。后续 r52d 不得重复 receiver mask 修补，也不得把 screening-only 高 native validity 解释为 confirmatory 资格。
+- r52b/r52c/r52d 证据边界：r52b 证明 native target validity 的主失败来自 unsupported receiver；r52c 证明 receiver executable closure 可在 simulator 边界关闭该失败，但同时把瓶颈暴露为 training evidence、cash timing、exposure utilization 与 source depth；r52d 只新增 validation closure 的代码合同、dry-run 与 safe screening-only 证据，不得把代码合同或 screening-only 结果解释为 confirmatory 资格。
 - foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
 - listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
 - repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
@@ -120,7 +120,7 @@
 - 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
 
 ## 下一步方向
-- 短期：r48 已完成正式 screening + confirmatory 但未过 stable confirm；r49 已把 source release dead、exposure utilization floor、cash timing 与资金流守恒写入代码合同；r50 已验证真实 solver 训练入口但计算负荷过高，不作为当前默认推进路径；r51 改走 native allocation vector；r52/r52c 进一步改为完整 day-set native allocation vector 并闭合 receiver executable validity。后续若正式推进，优先以短 screening 验证 deployment / cash timing / exposure utilization / source breadth 的 native target feedback 与 v2 / stability gate。
+- 短期：r48 已完成正式 screening + confirmatory 但未过 stable confirm；r49 已把 source release dead、exposure utilization floor、cash timing 与资金流守恒写入代码合同；r50 已验证真实 solver 训练入口但计算负荷过高，不作为当前默认推进路径；r51 改走 native allocation vector；r52/r52c 进一步改为完整 day-set native allocation vector 并闭合 receiver executable validity；r52d 已把 validation closure 写成代码合同并完成 safe screening-only 验证。后续若正式推进，必须先复核 deployment / cash timing / exposure utilization / source breadth 的 native feedback 与 v2 / stability gate，再决定是否单独开启 confirmatory。
 - 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 native target-weight feedback，而不是回到 source / receiver / cash 独立 head 对账。
 - 长期：若 r51 formal evidence 有效，再考虑 day-set encoder / set transformer 级别的日级组合模型；simulator guard 只作为最后安全裁剪。
 
@@ -145,7 +145,8 @@
 - r49：当前已完成代码合同与 dry-run 的最新 research profile，聚焦 capital-flow closure、receiver demand、clean source supply、cash release / defense、exposure gap、flow conservation、source dead 阻断与 false-source 保护；尚无 formal study verdict。
 - r50：当前已完成代码合同与 dry-run 的最新 integrated research profile，聚焦真实 convex solver 训练参与、full-universe/OPE、capital-flow closure、risk-sensitive/offline support、fallback diagnostics 修正与短筛 resource gate；尚无 formal study verdict。
 - r51：当前最新轻量 research profile，聚焦 native allocation vector、日级目标仓位/现金输出、torch-only projection、从 target delta 自然派生 source / receiver / cash、r49 capital-flow closure 辅助诊断与 r50 solver 高负荷规避；尚无 formal study verdict。
-- r52/r52c：当前最新 day-set research profile，聚焦完整交易日 padded set batch、slot attention、日级目标仓位/现金输出、day-set native allocation vector loss、receiver executable validity、r49 capital-flow closure 辅助诊断与 r50 solver 高负荷规避；r52c 已过 safe screening 的 receiver validity，但尚无 formal study verdict。
+- r52/r52c：day-set research profile，聚焦完整交易日 padded set batch、slot attention、日级目标仓位/现金输出、day-set native allocation vector loss、receiver executable validity、r49 capital-flow closure 辅助诊断与 r50 solver 高负荷规避；r52c 已过 safe screening 的 receiver validity，但尚无 formal study verdict。
+- r52d：当前最新代码合同 profile，聚焦 validation closure、train/sim alignment、shared deadband 与 native feedback；合同测试、dry-run 与 safe screening-only 已通过基础运行验证，但尚无 confirmatory / stable study verdict。
 
 ## 历史归档入口
 - 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。

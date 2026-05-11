@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -147,6 +150,7 @@ class ArtifactFreshnessReport:
 class BrainHealthReport:
     status: str
     checks: dict[str, dict[str, Any]]
+    elapsed_seconds: float
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -628,26 +632,78 @@ def resolve_study_evidence(study_tag: str) -> StudyEvidenceReport:
     )
 
 
-def _run_check(name: str, command: list[str]) -> dict[str, Any]:
-    result = subprocess.run(command, cwd=str(WORKSPACE_ROOT), capture_output=True, text=True, encoding="utf-8", check=False)
+def _openmp_strict_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.pop("KMP_DUPLICATE_LIB_OK", None)
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+
+
+def _run_check(name: str, command: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    started = time.perf_counter()
+    result = subprocess.run(
+        command,
+        cwd=str(WORKSPACE_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        env=env,
+    )
+    elapsed = time.perf_counter() - started
     return {
         "name": name,
         "returncode": result.returncode,
         "ok": result.returncode == 0,
         "stdout_tail": (result.stdout or "")[-4000:],
         "stderr_tail": (result.stderr or "")[-2000:],
+        "elapsed_seconds": round(elapsed, 3),
     }
 
 
 def check_brain_health() -> BrainHealthReport:
-    checks = {
-        "brain_integrity": _run_check("brain_integrity", [PYTHON_EXECUTABLE, "daily_research/tools/brain_integrity_check.py", "--json"]),
-        "doc_guard": _run_check("doc_guard", [PYTHON_EXECUTABLE, "daily_research/tools/doc_guard.py", "check"]),
-        "project_consistency": _run_check("project_consistency", [PYTHON_EXECUTABLE, "daily_research/tools/project_consistency_check.py"]),
-        "openmp_strict": _run_check("openmp_strict", [PYTHON_EXECUTABLE, "daily_research/tools/openmp_runtime_check.py", "--strict"]),
+    started = time.perf_counter()
+    check_commands = {
+        "brain_integrity": {
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/brain_integrity_check.py", "--json"],
+            "env": None,
+        },
+        "doc_guard": {
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/doc_guard.py", "check"],
+            "env": None,
+        },
+        "project_consistency": {
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/project_consistency_check.py"],
+            "env": None,
+        },
+        "openmp_strict": {
+            "command": [PYTHON_EXECUTABLE, "daily_research/tools/openmp_runtime_check.py", "--strict"],
+            "env": _openmp_strict_env(),
+        },
     }
+    checks: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=len(check_commands)) as executor:
+        futures = {
+            executor.submit(_run_check, name, spec["command"], env=spec["env"]): name
+            for name, spec in check_commands.items()
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                checks[name] = future.result()
+            except Exception as exc:  # defensive: health should report every lane, not crash on one lane
+                checks[name] = {
+                    "name": name,
+                    "returncode": -1,
+                    "ok": False,
+                    "stdout_tail": "",
+                    "stderr_tail": str(exc),
+                    "elapsed_seconds": 0.0,
+                }
+    checks = {name: checks[name] for name in check_commands}
     status = "ok" if all(item["ok"] for item in checks.values()) else "failed"
-    return BrainHealthReport(status=status, checks=checks)
+    return BrainHealthReport(status=status, checks=checks, elapsed_seconds=round(time.perf_counter() - started, 3))
 
 
 def _continuous_policy_evidence_gaps(freshness: ArtifactFreshnessReport) -> list[str]:

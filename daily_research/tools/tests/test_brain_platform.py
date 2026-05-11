@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from daily_research.tools.brain_platform import (
+    PYTHON_EXECUTABLE,
+    _run_check,
+    check_brain_health,
     check_text_encoding,
     check_text_encoding_text,
     load_workflow_registry,
@@ -90,6 +95,64 @@ class BrainPlatformTest(unittest.TestCase):
             "native_receiver_mask_mismatch_count",
         ):
             self.assertIn(key, brain_platform.STUDY_SUMMARY_METRIC_KEYS)
+
+    def test_run_check_reports_elapsed_seconds(self) -> None:
+        result = _run_check("quick", [PYTHON_EXECUTABLE, "-c", "print('ok')"])
+
+        self.assertTrue(result["ok"])
+        self.assertIn("elapsed_seconds", result)
+        self.assertGreaterEqual(result["elapsed_seconds"], 0.0)
+
+    def test_health_checks_run_in_parallel(self) -> None:
+        from daily_research.tools import brain_platform
+
+        def slow_ok(name: str, _command: list[str], *, env: dict[str, str] | None = None) -> dict:
+            time.sleep(0.15)
+            return {
+                "name": name,
+                "returncode": 0,
+                "ok": True,
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "elapsed_seconds": 0.15,
+            }
+
+        started = time.perf_counter()
+        with patch.object(brain_platform, "_run_check", side_effect=slow_ok):
+            payload = check_brain_health().to_dict()
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertLess(elapsed, 0.45)
+        self.assertIn("elapsed_seconds", payload)
+        for check in payload["checks"].values():
+            self.assertIn("elapsed_seconds", check)
+
+    def test_health_openmp_lane_sanitizes_parent_workaround_env(self) -> None:
+        from daily_research.tools import brain_platform
+
+        captured_envs: dict[str, dict[str, str] | None] = {}
+
+        def ok_with_env(name: str, _command: list[str], *, env: dict[str, str] | None = None) -> dict:
+            captured_envs[name] = env
+            return {
+                "name": name,
+                "returncode": 0,
+                "ok": True,
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "elapsed_seconds": 0.001,
+            }
+
+        with patch.dict("os.environ", {"KMP_DUPLICATE_LIB_OK": "True"}):
+            with patch.object(brain_platform, "_run_check", side_effect=ok_with_env):
+                payload = check_brain_health().to_dict()
+
+        self.assertEqual(payload["status"], "ok")
+        openmp_env = captured_envs["openmp_strict"]
+        self.assertIsNotNone(openmp_env)
+        self.assertNotIn("KMP_DUPLICATE_LIB_OK", openmp_env or {})
+        self.assertEqual((openmp_env or {})["PYTHONUTF8"], "1")
 
 
 if __name__ == "__main__":

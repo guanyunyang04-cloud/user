@@ -1,6 +1,6 @@
 # 主脑状态中枢
 
-快照日期：`2026-05-09`
+快照日期：`2026-05-11`
 
 ## 当前接管摘要
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
@@ -9,7 +9,7 @@
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
 ## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，r48 full-universe convex OPE allocation 已完成 formal screening + confirmatory 但 stable confirm 为空，仍属 `research / shadow_only`，不能 promotion / live / active artifact。
+- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，r48-r52d 均属 `research / shadow_only`，其中 r52d 已有代码合同、dry-run 与 safe screening-only 证据，但没有 confirmatory / stable verdict，不能 promotion / live / active artifact。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 

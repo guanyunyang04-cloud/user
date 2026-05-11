@@ -218,6 +218,18 @@ BRAIN_DOC_PREFIXES = (
     "t0_project/brain/",
     "daily_stock_analysis-main/brain/",
 )
+FORBIDDEN_CODEX_URI_PATTERN = re.compile(r"\b" + "codex" + r"://", re.IGNORECASE)
+GENERATED_DOC_PATH_PARTS = frozenset(
+    {
+        ".pytest_cache",
+        ".electron-builder-cache",
+        "build",
+        "dist",
+        "node_modules",
+        "playwright-report",
+        "test-results",
+    }
+)
 
 ALLOWED_EXTERNAL_DOC_PREFIXES = (
     "daily_research/cache/",
@@ -828,6 +840,8 @@ def _is_allowed_doc_path(relative_path: str) -> bool:
         return True
     if relative_path.startswith(BRAIN_DOC_PREFIXES):
         return True
+    if any(part in GENERATED_DOC_PATH_PARTS for part in relative_path.split("/")):
+        return True
     return relative_path.startswith(ALLOWED_EXTERNAL_DOC_PREFIXES)
 
 
@@ -864,6 +878,26 @@ def _check_document_layout() -> list[str]:
             if snippet not in text:
                 issues.append(f"required_doc_snippet_missing:{relative_path}:{snippet}")
 
+    return issues
+
+
+def _check_brain_thread_deeplinks() -> list[str]:
+    issues: list[str] = []
+    for prefix in BRAIN_DOC_PREFIXES:
+        root = WORKSPACE_ROOT / prefix
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.suffix.lower() not in {".md", ".json"}:
+                continue
+            try:
+                text = _read_text(path)
+            except UnicodeDecodeError:
+                continue
+            relative_path = _normalized_path(path.relative_to(WORKSPACE_ROOT))
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if FORBIDDEN_CODEX_URI_PATTERN.search(line):
+                    issues.append(f"forbidden_codex_thread_uri:{relative_path}:{line_number}")
     return issues
 
 
@@ -995,6 +1029,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     if layout_issues:
         has_issue = True
         for issue in layout_issues[: args.show_lines]:
+            print(f"    ! {issue}")
+
+    thread_deeplink_issues = _check_brain_thread_deeplinks()
+    print(f"[thread-deeplink] forbidden_codex_uri_issues={len(thread_deeplink_issues)}")
+    if thread_deeplink_issues:
+        has_issue = True
+        for issue in thread_deeplink_issues[: args.show_lines]:
             print(f"    ! {issue}")
 
     active_alignment_issues = _check_active_execution_brain_alignment()

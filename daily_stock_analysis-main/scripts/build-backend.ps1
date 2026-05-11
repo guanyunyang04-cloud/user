@@ -13,6 +13,9 @@ if ([string]::IsNullOrWhiteSpace($pythonBin)) {
   $pythonBin = 'python'
 }
 
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+
 Write-Host "Using Python: $pythonBin"
 
 function Test-PythonCode {
@@ -105,6 +108,9 @@ $pyInstallerArgs = @(
   '--onedir',
   '--noconfirm',
   '--noconsole',
+  '--exclude-module', 'torch',
+  '--exclude-module', 'torchvision',
+  '--exclude-module', 'torchaudio',
   '--add-data', 'static;static',
   '--collect-data', 'litellm',
   '--collect-data', 'tiktoken'

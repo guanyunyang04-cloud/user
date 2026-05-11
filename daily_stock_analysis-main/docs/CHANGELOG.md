@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### 修复
 
+- 🧰 **Windows 后端构建固定 UTF-8 依赖安装环境** — `scripts/build-backend.ps1` 现在在调用 `pip install -r requirements.txt` 前显式设置 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8`，避免 Windows 本地编码按 GBK 读取含中文注释的 UTF-8 requirements 时失败。
+- 🧳 **Windows 后端打包排除无关 torch 可选栈** — `scripts/build-backend.ps1` 现在显式排除 `torch` / `torchvision` / `torchaudio`，避免本机全局 Python 环境中残留的可选 ML 包触发 PyInstaller hook 扫描失败。
+- 🧪 **本地验证链路排除生成目录干扰** — `setup.cfg` 与 Web ESLint flat config 现在显式排除 `node_modules`、Playwright 结果和构建缓存，避免安装前端依赖或运行 smoke 后让 Python/ESLint 扫描生成物。
+- 🔐 **Web smoke 兼容认证关闭场景** — Playwright smoke 现在会先读取认证状态；认证关闭时直接验证工作台，认证开启时才要求 `DSA_WEB_SMOKE_PASSWORD` 并走登录流程。
+- 🧾 **源码静态测试固定 UTF-8 读取** — `tests/test_market_analyzer_generate_text.py` 的源码 AST guard 现在显式按 UTF-8 读取 `src/market_analyzer.py`，避免 Windows 默认 GBK 解码失败。
 - 📦 **恢复 LiteLLM 官方 PyPI 安装并锁定安全上限** — `requirements.txt` 重新使用 `pip install litellm` 的官方 PyPI 安装路径，并在保留历史最低要求 `>=1.80.10` 的同时增加 `<1.82.7` 的安全上限，避免误装已被移除的 `1.82.7` / `1.82.8` 风险版本；Windows 桌面打包脚本也同步回退到标准 `pip install -r requirements.txt` 链路，减少特殊下载分支带来的维护成本。
 - 📨 **Telegram Markdown 解析失败回退纯文本**（fixes #850）— `src/notification_sender/telegram_sender.py` 现在会在 Telegram 返回 `HTTP 400` 且包含 `can't parse entities` / Markdown 解析错误时，自动去掉 `parse_mode` 后重试纯文本发送，避免 `*ST` 等正文内容直接导致整条通知失败。
 - 🔢 **A 股同码实时行情保留交易所提示**（fixes #852）— `DataFetcherManager` 与 `TushareFetcher` 现在会保留 `SZ000001` / `000001.SZ` 这类显式沪深提示，旧版 Tushare 实时行情降级分支不再把深市 `000001` 误判成 `sh000001` 上证指数。

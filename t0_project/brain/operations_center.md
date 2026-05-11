@@ -18,8 +18,14 @@
 - 先确认实验边界和隔离规则
 - 先看文档归宿和 body 入口，再进代码
 - 长篇研究文档与历史说明统一收口到 `brain/references/`
+- 默认只做离线、mock 或静态验证；连接真实通达信、券商或 live broker 前必须显式确认
 
-## 3. 写回路由
+## 3. 验证入口
+- Python 静态编译：
+  - `python -m py_compile <all t0_project/**/*.py>`
+- 实验入口仅在 dry-run / mock 边界明确时运行；不得把实验结果自动上行到生产主线
+
+## 4. 写回路由
 - 当前状态与下一步：
   - `state_center.md`
 - 稳定事实、规则、教训：

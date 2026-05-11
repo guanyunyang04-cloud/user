@@ -1,45 +1,21 @@
 import { expect, test, type Page } from '@playwright/test';
-
-const smokePassword = process.env.DSA_WEB_SMOKE_PASSWORD;
+import { enterWorkspace, getAuthStatus } from './smokeAuth';
 
 async function login(page: Page) {
-  test.skip(!smokePassword, 'Set DSA_WEB_SMOKE_PASSWORD to run authenticated smoke tests.');
-
-  // Navigate to login page
-  await page.goto('/login');
-  await page.waitForLoadState('domcontentloaded');
-
-  // Wait for password input to be visible
-  await expect(page.locator('#password')).toBeVisible({ timeout: 10_000 });
-
-  // Fill password and submit
-  await page.locator('#password').fill(smokePassword!);
-
-  // Wait for and click the submit button
-  const submitButton = page.getByRole('button', { name: /授权进入工作台|完成设置并登录/ });
-  await expect(submitButton).toBeVisible();
-
-  await Promise.all([
-    page.waitForResponse(
-      (response) => response.url().includes('/api/v1/auth/login') && response.status() === 200,
-      { timeout: 15_000 }
-    ),
-    submitButton.click(),
-  ]);
-
-  // Wait for navigation to home page after login
-  await page.waitForURL('/', { timeout: 15_000 });
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(1000);
+  await enterWorkspace(page, 'Set DSA_WEB_SMOKE_PASSWORD to run authenticated smoke tests.');
 }
 
 test.describe('web smoke', () => {
   test('login page renders password form', async ({ page }) => {
+    const authStatus = await getAuthStatus(page);
+    test.skip(!authStatus.authEnabled, 'Authentication is disabled; /login redirects to the workspace.');
+
     await page.goto('/login');
     await page.waitForLoadState('domcontentloaded');
 
     // Check for branding
-    await expect(page.getByText('DAILY STOCK').first()).toBeVisible();
+    await expect(page.getByText('DAILY').first()).toBeVisible();
+    await expect(page.getByText('STOCK').first()).toBeVisible();
     await expect(page.getByText('Analysis Engine')).toBeVisible();
 
     // Check for password input

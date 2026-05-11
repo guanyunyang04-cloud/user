@@ -5,7 +5,7 @@
 ## 当前结论
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
-- 当前最新复盘是 r52c safe screening 与 evidence export closure：receiver executable closure 已验证，剩余瓶颈转为 deployment / cash timing / exposure utilization / training evidence。
+- 当前最新复盘是全仓维护与 r52d 状态纠偏：r52c receiver executable closure 已验证，r52d 代码合同、dry-run 与 safe screening-only 已存在，但无 confirmatory / stable verdict，剩余瓶颈仍是 deployment / cash timing / exposure utilization / training evidence。
 - 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
@@ -62,3 +62,11 @@
   all trials `cash_timing_quality_1d<0`, and exposure utilization stayed near `0.33`.
 - Action: patched `run_self_optimizing_study.py` so ranking/summary exports include native validity + fallback + invalid-reason metrics directly in `primary_metrics`.
 - Evidence: `brain_workflow status --workflow continuous_policy --study-tag ... --json` now returns coherent trial-level native metrics without relying on stale loose latest files.
+
+## 2026-05-11 全仓维护与 r52d 状态纠偏复盘
+- 行动前自检：主脑已取消任务线程深链分配；代码中已有 r52d profile、v40 loss contract 与合同测试，但分脑仍主要写成“后续设计 r52d”。
+- 执行动作：补充 brain 文档守卫禁止 brain 文档保存运行时线程 URI；`brain_workflow health` 改为并行聚合四项健康检查并输出每项耗时；主分脑写回 r52d code-contract-only 状态。
+- 验证补充：`self_opt_study_r52d_validation_closure_dryrun_20260511_01` dry-run 通过，3 个 trials 均为 `alpha_result_value_budget_split_v40`，confirmatory disabled，true solver disabled。
+- 运行态发现：既有 `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` safe screening 后续已自然结束，产出 `study_summary.json`；结果为 3/3 screening trials completed、0 failed、confirmatory disabled、true solver disabled。
+- 边界：本轮不改 `active_execution_strategy.json`，不切换 live/default/promotion，不从 loose `latest_*` 自动落盘。
+- 行动后判断：r52d 只能作为 screening-only research result；没有 confirmatory、stable confirm 和 promotion verdict 前，不能写成策略结论。

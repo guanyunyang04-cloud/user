@@ -63,10 +63,13 @@ class BrainWorkflowCliTest(unittest.TestCase):
         payload = run_cli("health", "--json")
 
         self.assertEqual(payload["status"], "ok")
+        self.assertIn("elapsed_seconds", payload)
         self.assertIn("brain_integrity", payload["checks"])
         self.assertIn("doc_guard", payload["checks"])
         self.assertIn("project_consistency", payload["checks"])
         self.assertIn("openmp_strict", payload["checks"])
+        for check_payload in payload["checks"].values():
+            self.assertIn("elapsed_seconds", check_payload)
 
     def test_preflight_cli_does_not_create_study_directories(self) -> None:
         studies_root = ROOT / "daily_research/output/continuous_policy/studies"
