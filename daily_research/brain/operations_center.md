@@ -98,3 +98,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - 本文件归档前完整快照：`daily_research/brain/references/operations_center_archive_20260510.md`。
 - 历史操作原文：`daily_research/brain/references/operations_center_history_raw_20260424.md`。
 - 历史操作索引：`daily_research/brain/references/operations_center_evidence_index_20260424.md`。
+## 2026-05-11 r52c Safe Screening Operational Note
+- Screening tag: `self_opt_study_r52c_native_executable_receiver_closure_screening_safe_20260511_01` (safe profile, thread-limit=4, cpu-affinity=4, process-priority=below_normal, confirmatory disabled).
+- Ranking/export has been repaired: `trial_ranking.csv` now includes `native_target_valid`, `allocation_layer_native_fallback_used`, and `native_target_invalid_*` columns from protocol evidence.
+- When reviewing r52c/r52d studies, use explicit capsule first:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <tag> --json`
+- Do not gate decisions on loose `latest_protocol_summary` while stale-risk is true.

@@ -80,6 +80,17 @@ class BrainPlatformTest(unittest.TestCase):
         self.assertIn("native_target_valid", first["metrics"])
         self.assertIn("native_source_threshold_loss", first["training_terms"])
 
+    def test_evidence_metric_registry_includes_r52c_receiver_mask_metrics(self) -> None:
+        from daily_research.tools import brain_platform
+
+        for key in (
+            "native_receiver_executable_mask_count",
+            "native_positive_delta_count",
+            "native_positive_delta_unsupported_share",
+            "native_receiver_mask_mismatch_count",
+        ):
+            self.assertIn(key, brain_platform.STUDY_SUMMARY_METRIC_KEYS)
+
 
 if __name__ == "__main__":
     unittest.main()

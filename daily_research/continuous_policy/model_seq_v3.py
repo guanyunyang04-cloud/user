@@ -48,6 +48,7 @@ from daily_research.continuous_policy.native_allocation import (
     _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES,
     _NATIVE_ALLOCATION_TERM_NAMES,
     _NATIVE_ALLOCATION_VECTOR_NAMES,
+    build_native_receiver_executable_mask,
     _portfolio_day_set_native_allocation_vector_loss,
     _portfolio_native_allocation_vector_loss,
     _project_day_set_native_allocation_vector,
@@ -1791,6 +1792,25 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v38"] = {
         "portfolio_day_set_native_allocation_vector_total": 2.85,
         "portfolio_native_allocation_vector_total": 0.0,
         "portfolio_capital_flow_closure_total": 0.45,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v39"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v38"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v38"]["daily_target_loss_weights"],
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v38"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 0.95,
+        "portfolio_day_set_native_allocation_vector_total": 3.10,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_capital_flow_closure_total": 0.40,
         "portfolio_cvxpy_convex_allocation_total": 0.0,
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
@@ -7131,7 +7151,11 @@ def fit_policy_models_v3(
     uses_day_set_native_allocation = (
         multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
     )
-    native_target_validity_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v38"
+    native_target_validity_closure_enabled = resolved_loss_profile in {
+        "alpha_result_value_budget_split_v38",
+        "alpha_result_value_budget_split_v39",
+    }
+    native_executable_receiver_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v39"
     if uses_day_set_native_allocation:
         sample_model = TemporalDaySetPolicyNet(
             static_input_dim=len(static_feature_names),
@@ -8123,6 +8147,7 @@ def fit_policy_models_v3(
             and str(getattr(sample_model, "sample_model_type", "temporal_sample")) == "temporal_day_set"
         ),
         "supports_native_target_validity_closure": bool(native_target_validity_closure_enabled),
+        "supports_native_executable_receiver_closure": bool(native_executable_receiver_closure_enabled),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
         "day_set_batch_size": int(batch_size)
@@ -10058,6 +10083,22 @@ def predict_policy_v3(
         if predicted_portfolio_receiver_executability is not None
         else fallback_receiver_executability
     )
+    flat_receiver_executable = (
+        (portfolio_daily_receiver_executability > 0.08)
+        & (portfolio_daily_receiver_add_capacity > 0.0)
+    ).astype(np.float32)
+    portfolio_daily_receiver_executable_candidate = (
+        build_native_receiver_executable_mask(
+            current_weight=torch.as_tensor(np.clip(current_weight, 0.0, 1.0), dtype=torch.float32),
+            receiver_candidate_mask=torch.as_tensor(flat_receiver_executable, dtype=torch.float32),
+            receiver_executable_candidate=torch.as_tensor(flat_receiver_executable, dtype=torch.float32),
+            dtype=torch.float32,
+        )
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
     receiver_action_value = np.where(current_weight > 1.0e-8, add_action_value, open_action_value)
     fallback_portfolio_receiver_score = np.clip(
         0.30 * portfolio_daily_receiver_executability
@@ -11500,14 +11541,7 @@ def predict_policy_v3(
 
     native_allocation_columns: dict[str, np.ndarray] = {}
     if supports_portfolio_native_allocation_vector_heads:
-        receiver_candidate_mask = np.asarray(
-            (
-                (portfolio_daily_receiver_executability > 0.08)
-                | (portfolio_daily_receiver_score > 0.12)
-                | (current_weight > 1.0e-8)
-            ),
-            dtype=np.float32,
-        )
+        receiver_candidate_mask = portfolio_daily_receiver_executable_candidate.astype(np.float32, copy=True)
         source_candidate_mask = np.asarray(
             (
                 (current_weight > 1.0e-8)
@@ -11519,6 +11553,8 @@ def predict_policy_v3(
             ),
             dtype=np.float32,
         )
+        native_allocation_columns["portfolio_daily_receiver_executable_candidate"] = receiver_candidate_mask
+        native_allocation_columns["portfolio_daily_source_executable_candidate"] = source_candidate_mask
 
         def _state_column(name: str, default: float = 0.0) -> np.ndarray:
             if name in state_frame.columns:
@@ -11574,12 +11610,44 @@ def predict_policy_v3(
                 _state_column("portfolio_daily_source_forward_excess_5d", 0.0)
             ),
         }
-        native_projection = _project_native_allocation_vector(
-            outputs,
-            native_targets,
-            validity_first=bool(artifact.training_diagnostics.get("supports_native_target_validity_closure", False)),
-            return_terms=False,
-        )
+        native_projection: dict[str, torch.Tensor]
+        if sample_model_type == "temporal_day_set" and outputs.get("portfolio_daily_allocation_weight_logit") is not None:
+            day_set_outputs = {
+                "portfolio_daily_allocation_weight_logit": outputs["portfolio_daily_allocation_weight_logit"].reshape(1, -1),
+                "portfolio_daily_cash_reserve_logit": outputs["portfolio_daily_cash_reserve_logit"].reshape(-1)[:1],
+                "portfolio_daily_allocation_risk_buffer_logit": outputs[
+                    "portfolio_daily_allocation_risk_buffer_logit"
+                ].reshape(-1)[:1],
+            }
+            day_set_targets = {
+                name: value.reshape(1, -1)
+                for name, value in native_targets.items()
+                if name not in {"date_code"}
+            }
+            native_projection = _project_day_set_native_allocation_vector(
+                day_set_outputs,
+                day_set_targets,
+                torch.ones(1, len(state_frame), dtype=torch.bool),
+                validity_first=bool(artifact.training_diagnostics.get("supports_native_target_validity_closure", False)),
+                return_terms=False,
+            )
+            native_projection = {
+                name: (
+                    value.reshape(-1)
+                    if torch.is_tensor(value) and value.ndim >= 2
+                    else value.repeat(len(state_frame))
+                    if torch.is_tensor(value) and value.ndim == 1 and value.numel() == 1
+                    else value
+                )
+                for name, value in native_projection.items()
+            }
+        else:
+            native_projection = _project_native_allocation_vector(
+                outputs,
+                native_targets,
+                validity_first=bool(artifact.training_diagnostics.get("supports_native_target_validity_closure", False)),
+                return_terms=False,
+            )
         for column_name in _NATIVE_ALLOCATION_VECTOR_NAMES:
             if column_name not in native_projection:
                 continue

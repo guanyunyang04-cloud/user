@@ -3,6 +3,40 @@ from __future__ import annotations
 import torch
 
 SIMULATOR_NATIVE_DEADBAND_ABS = 0.0010
+SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER = 1.25
+
+
+def build_native_receiver_executable_mask(
+    *,
+    current_weight: torch.Tensor,
+    receiver_candidate_mask: torch.Tensor | None = None,
+    receiver_executable_candidate: torch.Tensor | None = None,
+    sample_mask: torch.Tensor | None = None,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """Return the simulator-aligned hard support for native buy deltas."""
+    device = current_weight.device
+    output_dtype = dtype or current_weight.dtype
+    held_support = (torch.clamp(current_weight.to(device), min=0.0) > 1.0e-8).to(
+        device=device,
+        dtype=output_dtype,
+    )
+    if receiver_executable_candidate is not None:
+        flat_support = (receiver_executable_candidate.to(device) > 0.5).to(
+            device=device,
+            dtype=output_dtype,
+        )
+    elif receiver_candidate_mask is not None:
+        flat_support = (receiver_candidate_mask.to(device) > 0.5).to(
+            device=device,
+            dtype=output_dtype,
+        )
+    else:
+        flat_support = torch.zeros_like(held_support, device=device, dtype=output_dtype)
+    support = torch.clamp(held_support + flat_support * (1.0 - held_support), 0.0, 1.0)
+    if sample_mask is not None:
+        support = support * sample_mask.to(device=device, dtype=output_dtype)
+    return support
 
 
 _NATIVE_ALLOCATION_VECTOR_NAMES: tuple[str, ...] = (
@@ -48,6 +82,9 @@ _NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "native_target_invalid_reason_negative_weight",
     "native_target_invalid_reason_unsupported_receiver",
     "native_target_invalid_reason_sell_nonheld",
+    "simulator_exact_unsupported_receiver_count_proxy",
+    "simulator_exact_native_valid_proxy",
+    "simulator_exact_receiver_mask_mismatch_loss",
     "total",
 )
 
@@ -117,13 +154,19 @@ def _project_native_allocation_vector(
         return value
 
     held_support = (current_weight > 1.0e-8).to(dtype=dtype, device=device)
-    receiver_support = receiver_mask
+    receiver_executable_mask = None
     if "portfolio_daily_receiver_executable_candidate" in targets:
-        receiver_support = receiver_support * torch.clamp(
+        receiver_executable_mask = torch.clamp(
             targets["portfolio_daily_receiver_executable_candidate"].to(device).flatten(),
             0.0,
             1.0,
         )
+    receiver_support = build_native_receiver_executable_mask(
+        current_weight=current_weight,
+        receiver_candidate_mask=receiver_mask,
+        receiver_executable_candidate=receiver_executable_mask,
+        dtype=dtype,
+    )
     legacy_source_support = torch.clamp(source_mask * held_support, 0.0, 1.0)
     source_support = held_support
     receiver_support = torch.clamp(receiver_support, 0.0, 1.0)
@@ -185,6 +228,11 @@ def _project_native_allocation_vector(
         held_day = held_support[day_mask]
         gross_day = torch.clamp(gross_exposure_target[day_mask].mean(), 0.0, 1.0)
         turnover_limit = torch.clamp(turnover_budget[day_mask].mean(), 0.02, 1.0)
+        turnover_projection_limit = torch.clamp(
+            turnover_limit * (0.999 if validity_first else 1.0),
+            0.0,
+            1.0,
+        )
         cap_day = torch.clamp(max_position_weight_target[day_mask].mean(), 0.02, 0.50)
         risk_day = torch.clamp(risk_pressure[day_mask].mean(), 0.0, 1.0)
         cash_timing_day = torch.clamp(cash_timing_target[day_mask].mean(), 0.0, 1.0)
@@ -236,8 +284,8 @@ def _project_native_allocation_vector(
                 target_day = torch.clamp(target_day, 0.0, cap_day) * eligible_day
             delta_day = target_day - current_day
             turnover_day = torch.abs(delta_day).sum()
-        if float(turnover_day.detach().cpu()) > float(turnover_limit.detach().cpu()) + 1.0e-8:
-            scale = torch.clamp(turnover_limit / torch.clamp(turnover_day, min=1.0e-8), 0.0, 1.0)
+        if float(turnover_day.detach().cpu()) > float(turnover_projection_limit.detach().cpu()) + 1.0e-8:
+            scale = torch.clamp(turnover_projection_limit / torch.clamp(turnover_day, min=1.0e-8), 0.0, 1.0)
             target_day = current_day + delta_day * scale
             target_day = torch.clamp(target_day, 0.0, cap_day) * eligible_day
             delta_day = target_day - current_day
@@ -315,8 +363,8 @@ def _project_native_allocation_vector(
             cost_proxy = torch.clamp(0.0015 * turnover_day, 0.0, 0.03)
         if validity_first:
             for _ in range(2):
-                if float(turnover_day.detach().cpu()) > float(turnover_limit.detach().cpu()) + 1.0e-8:
-                    scale = torch.clamp(turnover_limit / torch.clamp(turnover_day, min=1.0e-8), 0.0, 1.0)
+                if float(turnover_day.detach().cpu()) > float(turnover_projection_limit.detach().cpu()) + 1.0e-8:
+                    scale = torch.clamp(turnover_projection_limit / torch.clamp(turnover_day, min=1.0e-8), 0.0, 1.0)
                     target_day = current_day + delta_day * scale
                     target_day = torch.clamp(target_day, 0.0, cap_day) * eligible_day
                     delta_day = target_day - current_day
@@ -349,17 +397,20 @@ def _project_native_allocation_vector(
             * held_day
         ).sum()
         receiver_audit_threshold = torch.maximum(
-            torch.full_like(current_day, SIMULATOR_NATIVE_DEADBAND_ABS * 1.25),
+            torch.full_like(current_day, SIMULATOR_NATIVE_DEADBAND_ABS * SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER),
             torch.clamp(current_day, min=0.0) * 0.010,
         )
-        native_receiver_active = (
-            (torch.relu(delta_day) > receiver_audit_threshold).to(dtype=dtype, device=device)
-            * receiver_support_day
-        )
+        raw_positive_delta_active = (torch.relu(delta_day) > receiver_audit_threshold).to(dtype=dtype, device=device)
+        native_receiver_active = raw_positive_delta_active * receiver_support_day
         native_target_invalid_reason_sum = torch.relu(target_day.sum() - 1.0)
         native_target_invalid_reason_turnover = torch.relu(turnover_day - turnover_limit)
         native_target_invalid_reason_cap = torch.relu(target_day - cap_day).sum()
         native_target_invalid_reason_negative_weight = torch.relu(-target_day).sum()
+        simulator_exact_unsupported_receiver_count_proxy = (
+            raw_positive_delta_active
+            * (1.0 - receiver_support_day)
+            * (current_day <= 1.0e-8).to(dtype=dtype, device=device)
+        ).sum()
         native_target_invalid_reason_unsupported_receiver = (
             torch.relu(delta_day)
             * (1.0 - receiver_support_day)
@@ -376,8 +427,11 @@ def _project_native_allocation_vector(
             + native_target_invalid_reason_negative_weight
             + native_target_invalid_reason_unsupported_receiver
             + native_target_invalid_reason_sell_nonheld
+            + simulator_exact_unsupported_receiver_count_proxy
         )
         native_target_valid_proxy = torch.exp(-30.0 * native_invalid_total)
+        simulator_exact_native_valid_proxy = torch.exp(-4.0 * native_invalid_total)
+        simulator_exact_receiver_mask_mismatch_loss = torch.square(simulator_exact_unsupported_receiver_count_proxy)
         native_turnover_budget_ratio = turnover_day / torch.clamp(turnover_limit, min=1.0e-8)
         native_source_delta_above_audit_threshold_share = native_source_active.sum() / torch.clamp(native_negative_delta.sum(), min=1.0)
         native_receiver_delta_above_threshold_share = native_receiver_active.sum() / torch.clamp(
@@ -506,6 +560,8 @@ def _project_native_allocation_vector(
             component_loss = component_loss + (
                 0.42 * torch.square(1.0 - native_target_valid_proxy)
                 + 0.34 * torch.square(torch.relu(native_turnover_budget_ratio - 1.0))
+                + 0.30 * simulator_exact_receiver_mask_mismatch_loss
+                + 0.24 * torch.square(1.0 - simulator_exact_native_valid_proxy)
                 + 0.28 * torch.square(torch.relu(0.60 - native_source_delta_above_audit_threshold_share))
                 * receiver_pressure_for_source
                 + 0.18 * torch.square(torch.relu(0.40 - native_receiver_delta_above_threshold_share))
@@ -544,6 +600,13 @@ def _project_native_allocation_vector(
         term_values["native_target_invalid_reason_negative_weight"].append(native_target_invalid_reason_negative_weight)
         term_values["native_target_invalid_reason_unsupported_receiver"].append(native_target_invalid_reason_unsupported_receiver)
         term_values["native_target_invalid_reason_sell_nonheld"].append(native_target_invalid_reason_sell_nonheld)
+        term_values["simulator_exact_unsupported_receiver_count_proxy"].append(
+            simulator_exact_unsupported_receiver_count_proxy
+        )
+        term_values["simulator_exact_native_valid_proxy"].append(simulator_exact_native_valid_proxy)
+        term_values["simulator_exact_receiver_mask_mismatch_loss"].append(
+            simulator_exact_receiver_mask_mismatch_loss
+        )
 
     result = {
         "portfolio_daily_target_weight": target_weight,
@@ -621,6 +684,9 @@ _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "native_target_invalid_reason_negative_weight",
     "native_target_invalid_reason_unsupported_receiver",
     "native_target_invalid_reason_sell_nonheld",
+    "simulator_exact_unsupported_receiver_count_proxy",
+    "simulator_exact_native_valid_proxy",
+    "simulator_exact_receiver_mask_mismatch_loss",
     "total",
 )
 

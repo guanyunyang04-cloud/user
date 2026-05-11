@@ -52,3 +52,13 @@
 - 关键证据：trial_01 `native_target_valid = 0.0625`、`allocation_layer_native_fallback_used = 0.9375`、`source_target_count = 62`、`source_realized_sell_rate = 1.0`；trial_02 `native_target_valid = 0.0125`、`allocation_layer_native_fallback_used = 0.9875`、`source_target_count = 0`、`source_realized_sell_rate = 0`。
 - invalid reason：两个 trial 的主要 simulator invalid reason 均是 unsupported receiver，`native_target_invalid_unsupported_receiver_count = 306 / 346`；sum、turnover、cap、negative weight、sell nonheld 的 simulator invalid count 为 0。
 - 行动后判断：r52b 路径可运行，但没有解决 native target validity 主瓶颈，不能进入 confirmatory、promotion 或 22 epoch strict resume；下一轮优先修 receiver executable mask、native target export 与 simulator validity 同口径。
+## 2026-05-11 r52c Safe Screening + Evidence Export Closure
+- Fact: `self_opt_study_r52c_native_executable_receiver_closure_screening_safe_20260511_01` completed 3/3 safe screening trials (0 failed), confirmatory disabled.
+- Fact: native executable receiver closure worked at simulator boundary:
+  `native_target_valid=0.975~1.0`, `allocation_layer_native_fallback_used=0~0.025`,
+  `native_target_invalid_unsupported_receiver_count=0` across trials.
+- Fact: acceptance still failed on closure depth:
+  `training_evidence_status=insufficient` for all trials, one trial `source_target_count=2<3`,
+  all trials `cash_timing_quality_1d<0`, and exposure utilization stayed near `0.33`.
+- Action: patched `run_self_optimizing_study.py` so ranking/summary exports include native validity + fallback + invalid-reason metrics directly in `primary_metrics`.
+- Evidence: `brain_workflow status --workflow continuous_policy --study-tag ... --json` now returns coherent trial-level native metrics without relying on stale loose latest files.

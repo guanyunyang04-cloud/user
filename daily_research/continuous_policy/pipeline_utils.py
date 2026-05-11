@@ -2267,6 +2267,9 @@ def compute_continuity_metrics(
             "allocation_layer_source_target_count",
             "allocation_layer_source_executable_candidate_count",
             "native_negative_delta_count",
+            "native_receiver_executable_mask_count",
+            "native_positive_delta_count",
+            "native_receiver_mask_mismatch_count",
             "native_source_target_count",
             "native_target_valid",
             "native_target_constraint_violations",
@@ -2283,6 +2286,19 @@ def compute_continuity_metrics(
                     metrics[native_metric_column] = float(native_metric_values.sum())
                 else:
                     metrics[native_metric_column] = float(native_metric_values.mean())
+        if "native_positive_delta_unsupported_share" in turnover_frame.columns and "native_positive_delta_unsupported_share" not in metrics:
+            unsupported_share_values = pd.to_numeric(
+                turnover_frame["native_positive_delta_unsupported_share"],
+                errors="coerce",
+            ).fillna(0.0)
+            positive_delta_values = (
+                pd.to_numeric(turnover_frame["native_positive_delta_count"], errors="coerce").fillna(0.0)
+                if "native_positive_delta_count" in turnover_frame.columns
+                else pd.Series(np.ones(len(turnover_frame)), index=turnover_frame.index, dtype=float)
+            )
+            metrics["native_positive_delta_unsupported_share"] = float(
+                (unsupported_share_values * positive_delta_values).sum() / max(float(positive_delta_values.sum()), 1.0)
+            )
         metrics["avg_position_cap_target"] = float(turnover_frame["max_position_weight_target"].mean())
         metrics["avg_hold_bias_target"] = float(turnover_frame["hold_bias_target"].mean())
         metrics["avg_reduce_bias_target"] = float(turnover_frame["reduce_bias_target"].mean()) if "reduce_bias_target" in turnover_frame.columns else 0.0

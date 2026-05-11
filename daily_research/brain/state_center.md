@@ -71,3 +71,9 @@
 - 知识中枢归档：`daily_research/brain/references/knowledge_center_archive_20260510.md`。
 - 操作中枢归档：`daily_research/brain/references/operations_center_archive_20260510.md`。
 - 早期历史原文与索引仍保留在 `daily_research/brain/references/*_history_raw_*.md` 与 `*_evidence_index_*.md`。
+## 2026-05-11 r52c Safe Screening Latest Verdict
+- study tag: `self_opt_study_r52c_native_executable_receiver_closure_screening_safe_20260511_01` completed 3/3 trials, 0 failed, confirmatory disabled.
+- receiver executable closure is effective in this round: `native_target_valid=0.975~1.0`, `allocation_layer_native_fallback_used=0~0.025`, `native_target_invalid_unsupported_receiver_count=0`.
+- remaining blockers are no longer unsupported receiver validity; now the bottleneck is deployment/cash timing closure with weak utilization.
+- stop conditions still triggered: `training_evidence_status=insufficient`; one trial has `source_target_count=2<3`; all trials have `cash_timing_quality_1d<0`; `portfolio_daily_exposure_utilization~0.33`.
+- decision boundary: do not enter confirmatory and do not start 22-epoch resume on r52c; keep this branch as research/shadow-only.

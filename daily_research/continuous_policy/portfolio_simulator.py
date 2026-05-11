@@ -10,6 +10,7 @@ from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     solve_semidifferentiable_allocation,
 )
+from daily_research.continuous_policy.native_allocation import SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER
 
 
 DEFAULT_MAX_POSITIONS = 8
@@ -3942,6 +3943,7 @@ class PortfolioState:
         allocation_layer_native_target_used = 0.0
         native_target_valid = 0.0
         native_negative_delta_count = 0
+        native_positive_delta_count = 0
         native_source_target_count = 0
         native_target_constraint_violations = 0.0
         native_target_invalid_sum_count = 0
@@ -3950,6 +3952,8 @@ class PortfolioState:
         native_target_invalid_negative_weight_count = 0
         native_target_invalid_unsupported_receiver_count = 0
         native_target_invalid_sell_nonheld_count = 0
+        native_positive_delta_unsupported_share = 0.0
+        native_receiver_mask_mismatch_count = 0
         allocation_layer_native_fallback_used = 0.0
         allocation_layer_receiver_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
         allocation_layer_source_executable_candidate = pd.Series(False, index=prices.index, dtype=bool)
@@ -4001,13 +4005,17 @@ class PortfolioState:
                 native_cash_after = float(max(0.0, 1.0 - float(native_target_weights.sum())))
                 native_positive_delta = native_delta > max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
                 native_negative_delta = native_delta < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
+                native_positive_delta_count = int(native_positive_delta.sum())
                 native_negative_delta_count = int((native_negative_delta & (current_for_native > 1.0e-8)).sum())
-                native_unsupported_receiver_count = int(
-                    (
-                        native_positive_delta
-                        & (current_for_native <= 1.0e-8)
-                        & (~allocation_layer_receiver_executable_candidate)
-                    ).sum()
+                native_unsupported_receiver_mask = (
+                    native_positive_delta
+                    & (current_for_native <= 1.0e-8)
+                    & (~allocation_layer_receiver_executable_candidate)
+                )
+                native_unsupported_receiver_count = int(native_unsupported_receiver_mask.sum())
+                native_receiver_mask_mismatch_count = native_unsupported_receiver_count
+                native_positive_delta_unsupported_share = (
+                    float(native_unsupported_receiver_count) / max(float(native_positive_delta_count), 1.0)
                 )
                 native_sell_nonheld_count = int(
                     (native_negative_delta & (current_for_native <= 1.0e-8)).sum()
@@ -4076,7 +4084,11 @@ class PortfolioState:
             allocation_delta_preview = (target_weights - current).replace([np.inf, -np.inf], np.nan).fillna(0.0)
             receiver_delta_threshold = pd.concat(
                 [
-                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 1.25, index=prices.index, dtype=float),
+                    pd.Series(
+                        DEFAULT_EXECUTION_DEADBAND_ABS * SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER,
+                        index=prices.index,
+                        dtype=float,
+                    ),
                     current.clip(lower=0.0) * 0.010,
                 ],
                 axis=1,
@@ -5490,6 +5502,10 @@ class PortfolioState:
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),
             "allocation_layer_native_fallback_used": float(allocation_layer_native_fallback_used),
             "native_target_valid": float(native_target_valid),
+            "native_receiver_executable_mask_count": int(allocation_layer_receiver_executable_candidate.sum()),
+            "native_positive_delta_count": int(native_positive_delta_count),
+            "native_positive_delta_unsupported_share": float(native_positive_delta_unsupported_share),
+            "native_receiver_mask_mismatch_count": int(native_receiver_mask_mismatch_count),
             "native_negative_delta_count": int(native_negative_delta_count),
             "native_source_target_count": int(native_source_target_count),
             "native_target_constraint_violations": float(native_target_constraint_violations),

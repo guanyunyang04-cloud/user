@@ -1132,6 +1132,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v39"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.4e-4, 1.8e-4],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.28, 0.32],
+        "daily_dropout": [0.14],
+        "batch_size": [1, 2],
+    },
 }
 
 
@@ -2175,6 +2192,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 6,
         "min_epochs": 4,
     },
+    "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v39",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.4e-4,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.28,
+        "daily_dropout": 0.14,
+        "batch_size": 1,
+        "epochs": 6,
+        "min_epochs": 4,
+    },
 }
 
 
@@ -2239,6 +2275,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_native_allocation_vector_r51": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_allocation_vector_r52": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2372,6 +2409,17 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "receiver_unrealized_cap": 0.025,
         "exposure_utilization_floor": 0.50,
     },
+    "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": {
+        "min_completed_screening": 1,
+        "source_count_floor": 3.0,
+        "source_sell_rate_floor": 0.35,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
+    },
 }
 
 
@@ -2424,6 +2472,19 @@ def _score_protocol_summary(
 
     def _semantic_metric(key: str, default: float = 0.0) -> float:
         value = semantic_conflicts.get(key, None)
+        if value is None or value == "":
+            return float(default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _summary_metric(key: str, default: float = 0.0) -> float:
+        value = semantic_conflicts.get(key, None)
+        if value is None or value == "":
+            value = continuity.get(key, None)
+        if value is None or value == "":
+            value = metrics.get(key, default)
         if value is None or value == "":
             return float(default)
         try:
@@ -4776,6 +4837,30 @@ def _score_protocol_summary(
         "performance": performance_breakdown,
         "stability": stability_breakdown,
     }
+    native_target_metrics = {
+        "allocation_layer_native_target_used": _summary_metric("allocation_layer_native_target_used"),
+        "allocation_layer_native_fallback_used": _summary_metric("allocation_layer_native_fallback_used"),
+        "allocation_layer_source_target_count": _summary_metric("allocation_layer_source_target_count"),
+        "allocation_layer_source_executable_candidate_count": _summary_metric(
+            "allocation_layer_source_executable_candidate_count"
+        ),
+        "native_negative_delta_count": _summary_metric("native_negative_delta_count"),
+        "native_receiver_executable_mask_count": _summary_metric("native_receiver_executable_mask_count"),
+        "native_positive_delta_count": _summary_metric("native_positive_delta_count"),
+        "native_positive_delta_unsupported_share": _summary_metric("native_positive_delta_unsupported_share"),
+        "native_receiver_mask_mismatch_count": _summary_metric("native_receiver_mask_mismatch_count"),
+        "native_source_target_count": _summary_metric("native_source_target_count"),
+        "native_target_valid": _summary_metric("native_target_valid"),
+        "native_target_constraint_violations": _summary_metric("native_target_constraint_violations"),
+        "native_target_invalid_sum_count": _summary_metric("native_target_invalid_sum_count"),
+        "native_target_invalid_turnover_count": _summary_metric("native_target_invalid_turnover_count"),
+        "native_target_invalid_cap_count": _summary_metric("native_target_invalid_cap_count"),
+        "native_target_invalid_negative_weight_count": _summary_metric("native_target_invalid_negative_weight_count"),
+        "native_target_invalid_unsupported_receiver_count": _summary_metric(
+            "native_target_invalid_unsupported_receiver_count"
+        ),
+        "native_target_invalid_sell_nonheld_count": _summary_metric("native_target_invalid_sell_nonheld_count"),
+    }
     return {
         "performance_score": performance_score,
         "stability_score": stability_score,
@@ -4936,6 +5021,7 @@ def _score_protocol_summary(
             "release_translation_deploy_funding_score": release_translation_deploy_funding_score,
             "release_translation_deploy_model_release_score": release_translation_deploy_model_release_score,
             "release_translation_deploy_failure_mode": release_translation_deploy_failure_mode,
+            **native_target_metrics,
             "training_evidence_status": str(training_evidence.get("status", "") or ""),
         },
     }
@@ -5988,7 +6074,11 @@ def main(argv: list[str] | None = None) -> int:
         native_allocation_vector_support or day_set_native_allocation_vector_support
     )
     native_target_validity_closure_support = any(
-        name == "alpha_result_value_budget_split_v38" for name in selected_trial_loss_profiles
+        name in {"alpha_result_value_budget_split_v38", "alpha_result_value_budget_split_v39"}
+        for name in selected_trial_loss_profiles
+    )
+    native_executable_receiver_closure_support = any(
+        name == "alpha_result_value_budget_split_v39" for name in selected_trial_loss_profiles
     )
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
@@ -6035,7 +6125,11 @@ def main(argv: list[str] | None = None) -> int:
                 native_allocation_vector_support or day_set_native_allocation_vector_support
             )
             native_target_validity_closure_support = any(
-                name == "alpha_result_value_budget_split_v38" for name in selected_trial_loss_profiles
+                name in {"alpha_result_value_budget_split_v38", "alpha_result_value_budget_split_v39"}
+                for name in selected_trial_loss_profiles
+            )
+            native_executable_receiver_closure_support = any(
+                name == "alpha_result_value_budget_split_v39" for name in selected_trial_loss_profiles
             )
     study_plan = {
         "run_tag": study_tag,
@@ -6064,6 +6158,7 @@ def main(argv: list[str] | None = None) -> int:
         "day_set_native_allocation_vector_support": bool(day_set_native_allocation_vector_support),
         "native_source_delta_alignment_support": bool(native_source_delta_alignment_support),
         "native_target_validity_closure_support": bool(native_target_validity_closure_support),
+        "native_executable_receiver_closure_support": bool(native_executable_receiver_closure_support),
         "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
@@ -6086,6 +6181,7 @@ def main(argv: list[str] | None = None) -> int:
         day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
         native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
         native_target_validity_closure_support=bool(native_target_validity_closure_support),
+        native_executable_receiver_closure_support=bool(native_executable_receiver_closure_support),
         full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
         resource_gate=RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         resource_limits=resource_limits,
@@ -6112,6 +6208,12 @@ def main(argv: list[str] | None = None) -> int:
             study_tag=study_tag,
             screening_trial_count=len(selected_trials),
             confirmatory_enabled=not bool(args.disable_confirmatory),
+            native_allocation_vector_support=bool(native_allocation_vector_support),
+            day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
+            native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
+            native_target_validity_closure_support=bool(native_target_validity_closure_support),
+            native_executable_receiver_closure_support=bool(native_executable_receiver_closure_support),
+            full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
             process_id=os.getpid(),
             resource_limits=resource_limits,
         )
@@ -6517,6 +6619,12 @@ def main(argv: list[str] | None = None) -> int:
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
         "trial_ranking_csv": str((study_root / "trial_ranking.csv").resolve()),
         "trial_count": len(selected_trials),
+        "native_allocation_vector_support": bool(native_allocation_vector_support),
+        "day_set_native_allocation_vector_support": bool(day_set_native_allocation_vector_support),
+        "native_source_delta_alignment_support": bool(native_source_delta_alignment_support),
+        "native_target_validity_closure_support": bool(native_target_validity_closure_support),
+        "native_executable_receiver_closure_support": bool(native_executable_receiver_closure_support),
+        "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
         "completed_trial_count": len(completed_screening),
         "failed_trial_count": len([item for item in screening_results if item.status != "completed"]),
@@ -6564,6 +6672,12 @@ def main(argv: list[str] | None = None) -> int:
         completed_trial_count=len(completed_screening),
         failed_trial_count=len([item for item in screening_results if item.status != "completed"]),
         confirmatory_completed_trial_count=len(completed_confirmatory),
+        native_allocation_vector_support=bool(native_allocation_vector_support),
+        day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
+        native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
+        native_target_validity_closure_support=bool(native_target_validity_closure_support),
+        native_executable_receiver_closure_support=bool(native_executable_receiver_closure_support),
+        full_universe_train_solver_effective=bool(full_universe_train_solver_effective),
         study_summary_json=str((study_root / "study_summary.json").resolve()),
         trial_ranking_csv=str((study_root / "trial_ranking.csv").resolve()),
     )
