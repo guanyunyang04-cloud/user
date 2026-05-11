@@ -1815,6 +1815,33 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v39"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v39"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v39"]["daily_target_loss_weights"],
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v39"]["multi_objective_loss_weights"],
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "scalar_total": 0.78,
+        "daily_total": 0.72,
+        "action_soft": 0.62,
+        "action_value_total": 0.68,
+        "portfolio_source_pairwise_total": 0.52,
+        "portfolio_receiver_pairwise_total": 0.30,
+        "portfolio_transfer_regret_total": 0.30,
+        "funding_release_total": 0.30,
+        "portfolio_cash_margin_total": 0.24,
+        "portfolio_capital_flow_closure_total": 0.34,
+        "portfolio_day_set_native_allocation_vector_total": 3.65,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -7154,8 +7181,13 @@ def fit_policy_models_v3(
     native_target_validity_closure_enabled = resolved_loss_profile in {
         "alpha_result_value_budget_split_v38",
         "alpha_result_value_budget_split_v39",
+        "alpha_result_value_budget_split_v40",
     }
-    native_executable_receiver_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v39"
+    native_executable_receiver_closure_enabled = resolved_loss_profile in {
+        "alpha_result_value_budget_split_v39",
+        "alpha_result_value_budget_split_v40",
+    }
+    native_validation_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v40"
     if uses_day_set_native_allocation:
         sample_model = TemporalDaySetPolicyNet(
             static_input_dim=len(static_feature_names),
@@ -7287,6 +7319,164 @@ def fit_policy_models_v3(
     X_daily_val = torch.as_tensor(X_daily[daily_val_idx], dtype=torch.float32, device=device)
     daily_targets_train = {name: torch.as_tensor(values[daily_train_idx], dtype=torch.float32, device=device) for name, values in daily_targets.items()}
     daily_targets_val = {name: torch.as_tensor(values[daily_val_idx], dtype=torch.float32, device=device) for name, values in daily_targets.items()}
+    val_day_loader: DataLoader | None = None
+    val_day_unique_count = 0
+    if uses_day_set_native_allocation:
+        val_day_dataset = DaySetTensorDataset(
+            date_codes=torch.as_tensor(sample_targets["date_code"], dtype=torch.long),
+            static_x=torch.as_tensor(X_static, dtype=torch.float32),
+            sequence_x=torch.as_tensor(X_sequence, dtype=torch.float32),
+            action=torch.as_tensor(y_action, dtype=torch.long),
+            duration=torch.as_tensor(y_duration, dtype=torch.long),
+            action_soft=torch.as_tensor(y_action_soft, dtype=torch.float32),
+            sample_targets={name: torch.as_tensor(sample_targets[name], dtype=torch.float32) for name in sample_target_names},
+            daily_x=torch.as_tensor(X_daily, dtype=torch.float32),
+            daily_targets={name: torch.as_tensor(values, dtype=torch.float32) for name, values in daily_targets.items()},
+            allowed_date_codes=daily_val_idx,
+        )
+        val_day_unique_count = int(len(val_day_dataset))
+        if val_day_unique_count <= 0:
+            raise ValueError("day-set validation requires at least one full trading day batch.")
+        val_day_loader = DataLoader(
+            val_day_dataset,
+            batch_size=max(1, int(batch_size)),
+            shuffle=False,
+            drop_last=False,
+            collate_fn=_collate_day_set_batch,
+        )
+    last_val_day_set_integrity_stats = {
+        "val_day_set_integrity": False,
+        "val_unique_day_count": 0.0,
+        "val_padding_ratio": 0.0,
+        "val_mask_coverage": 0.0,
+    }
+
+    def _run_day_set_validation_pass(
+        *,
+        return_day_set_terms: bool = False,
+    ) -> tuple[
+        dict[str, torch.Tensor],
+        dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, torch.Tensor],
+        dict[str, float],
+    ]:
+        if val_day_loader is None:
+            raise RuntimeError("day-set validation loader is required for day-set allocation profiles.")
+        output_chunks: dict[str, list[torch.Tensor]] = {}
+        target_chunks: dict[str, list[torch.Tensor]] = {}
+        action_chunks: list[torch.Tensor] = []
+        duration_chunks: list[torch.Tensor] = []
+        action_soft_chunks: list[torch.Tensor] = []
+        day_set_loss_sum = torch.tensor(0.0, device=device)
+        day_set_weight_sum = 0.0
+        day_set_term_sums: dict[str, torch.Tensor] = {}
+        valid_slot_count = 0.0
+        total_slot_count = 0.0
+        unique_date_codes: set[int] = set()
+        for batch in val_day_loader:
+            day_batch = {
+                key: (value.to(device) if torch.is_tensor(value) else value)
+                for key, value in batch.items()
+            }
+            day_batch["sample_targets"] = {
+                name: value.to(device)
+                for name, value in day_batch["sample_targets"].items()
+            }
+            day_set_mask = day_batch["sample_mask"].to(device)
+            day_set_outputs = sample_model(
+                day_batch["static_x"],
+                day_batch["sequence_x"],
+                day_batch["daily_x"],
+                day_set_mask,
+            )
+            flat_mask = day_set_mask.reshape(-1)
+            for name, value in day_set_outputs.items():
+                flat_value = (
+                    value.reshape(-1, value.shape[-1])[flat_mask]
+                    if value.ndim == 3
+                    else value.reshape(-1)[flat_mask]
+                    if value.ndim == 2
+                    else value.repeat_interleave(day_set_mask.shape[1])[flat_mask]
+                    if value.ndim == 1 and value.numel() == day_set_mask.shape[0]
+                    else value
+                )
+                output_chunks.setdefault(name, []).append(flat_value)
+            action_chunks.append(day_batch["action"].reshape(-1)[flat_mask])
+            duration_chunks.append(day_batch["duration"].reshape(-1)[flat_mask])
+            action_soft_chunks.append(
+                day_batch["action_soft"].reshape(-1, day_batch["action_soft"].shape[-1])[flat_mask]
+            )
+            for name, tensor in day_batch["sample_targets"].items():
+                target_chunks.setdefault(name, []).append(tensor.reshape(-1)[flat_mask])
+            day_set_terms = _portfolio_day_set_native_allocation_vector_loss(
+                day_set_outputs,
+                dict(day_batch["sample_targets"]),
+                day_set_mask,
+                validity_first=native_target_validity_closure_enabled,
+                return_terms=return_day_set_terms,
+            )
+            batch_weight = float(day_set_mask.shape[0])
+            day_set_weight_sum += batch_weight
+            if return_day_set_terms and isinstance(day_set_terms, dict):
+                total_term = day_set_terms.get("total", torch.tensor(0.0, device=device))
+                day_set_loss_sum = day_set_loss_sum + total_term * batch_weight
+                for name, value in day_set_terms.items():
+                    day_set_term_sums[name] = day_set_term_sums.get(
+                        name,
+                        torch.tensor(0.0, device=device),
+                    ) + value * batch_weight
+            elif torch.is_tensor(day_set_terms):
+                day_set_loss_sum = day_set_loss_sum + day_set_terms * batch_weight
+            valid_slot_count += float(day_set_mask.sum().detach().cpu())
+            total_slot_count += float(day_set_mask.numel())
+            day_codes = day_batch["date_code"].reshape(-1)[flat_mask].detach().cpu().tolist()
+            unique_date_codes.update(int(code) for code in day_codes)
+
+        if not action_chunks:
+            raise RuntimeError("day-set validation produced no rows; cannot score validation loss.")
+        flat_outputs = {
+            name: torch.cat(chunks, dim=0)
+            for name, chunks in output_chunks.items()
+            if chunks
+        }
+        flat_targets = {
+            name: torch.cat(chunks, dim=0)
+            for name, chunks in target_chunks.items()
+            if chunks
+        }
+        weighted_day_set_loss = day_set_loss_sum / max(day_set_weight_sum, 1.0)
+        if return_day_set_terms and day_set_term_sums:
+            averaged_terms = {
+                name: value / max(day_set_weight_sum, 1.0)
+                for name, value in day_set_term_sums.items()
+            }
+        else:
+            averaged_terms = {}
+        mask_coverage = float(valid_slot_count / max(total_slot_count, 1.0))
+        integrity_stats = {
+            "val_day_set_integrity": bool(
+                total_slot_count > 0.0
+                and mask_coverage > 0.0
+                and int(len(unique_date_codes)) == int(val_day_unique_count)
+            ),
+            "val_unique_day_count": float(len(unique_date_codes)),
+            "val_padding_ratio": float(max(0.0, 1.0 - mask_coverage)),
+            "val_mask_coverage": float(mask_coverage),
+        }
+        return (
+            flat_outputs,
+            flat_targets,
+            torch.cat(action_chunks, dim=0),
+            torch.cat(duration_chunks, dim=0),
+            torch.cat(action_soft_chunks, dim=0),
+            weighted_day_set_loss,
+            averaged_terms,
+            integrity_stats,
+        )
 
     patience_used = 0
     for epoch in range(start_epoch + 1, int(epochs) + 1):
@@ -7543,93 +7733,100 @@ def fit_policy_models_v3(
         sample_model.eval()
         daily_model.eval()
         with torch.no_grad():
-            val_day_set_outputs = None
-            val_day_set_targets = None
-            val_day_set_mask = None
+            val_day_set_integrity_stats = {
+                "val_day_set_integrity": False,
+                "val_unique_day_count": 0.0,
+                "val_padding_ratio": 0.0,
+                "val_mask_coverage": 0.0,
+            }
+            val_targets_epoch = val_targets
+            y_action_val_epoch = y_action_val
+            y_duration_val_epoch = y_duration_val
+            y_action_soft_val_epoch = y_action_soft_val
+            val_portfolio_day_set_native_allocation_vector_loss = torch.tensor(0.0, device=device)
             if uses_day_set_native_allocation:
-                val_day_set_mask = torch.ones(1, X_static_val.shape[0], dtype=torch.bool, device=device)
-                val_daily_x_for_sample = X_daily_val[:1] if X_daily_val.shape[0] else torch.zeros(1, len(daily_feature_names), device=device)
-                val_day_set_outputs = sample_model(
-                    X_static_val.unsqueeze(0),
-                    X_sequence_val.unsqueeze(0),
-                    val_daily_x_for_sample,
-                    val_day_set_mask,
-                )
-                val_outputs = {
-                    name: (
-                        value.squeeze(0)
-                        if value.ndim >= 2
-                        else value.repeat(X_static_val.shape[0])
-                        if value.ndim == 1 and value.numel() == 1
-                        else value
-                    )
-                    for name, value in val_day_set_outputs.items()
-                }
-                val_day_set_targets = {name: tensor.unsqueeze(0) for name, tensor in val_targets.items()}
+                (
+                    val_outputs,
+                    val_targets_epoch,
+                    y_action_val_epoch,
+                    y_duration_val_epoch,
+                    y_action_soft_val_epoch,
+                    val_portfolio_day_set_native_allocation_vector_loss,
+                    _,
+                    val_day_set_integrity_stats,
+                ) = _run_day_set_validation_pass(return_day_set_terms=False)
             else:
                 val_outputs = sample_model(X_static_val, X_sequence_val)
-            val_action_ce_loss = nn.functional.cross_entropy(val_outputs["action_logits"], y_action_val, weight=action_weight_tensor)
+            val_action_ce_loss = nn.functional.cross_entropy(
+                val_outputs["action_logits"],
+                y_action_val_epoch,
+                weight=action_weight_tensor,
+            )
             val_action_soft_loss = nn.functional.kl_div(
                 nn.functional.log_softmax(val_outputs["action_logits"], dim=-1),
-                y_action_soft_val,
+                y_action_soft_val_epoch,
                 reduction="batchmean",
             )
             val_action_loss = (
                 multi_objective_loss_weights["action_hard"] * val_action_ce_loss
                 + multi_objective_loss_weights["action_soft"] * val_action_soft_loss
             )
-            val_duration_loss = nn.functional.cross_entropy(val_outputs["duration_logits"], y_duration_val)
-            val_scalar_loss = _weighted_scalar_heads_loss(val_outputs, val_targets, sample_scalar_loss_weights)
-            val_arbitration_loss = _lifecycle_arbitration_loss(val_outputs, val_targets)
-            val_sell_rank_pairwise_loss = _sell_rank_pairwise_loss(val_outputs, val_targets)
+            val_duration_loss = nn.functional.cross_entropy(val_outputs["duration_logits"], y_duration_val_epoch)
+            val_scalar_loss = _weighted_scalar_heads_loss(
+                val_outputs,
+                val_targets_epoch,
+                sample_scalar_loss_weights,
+            )
+            val_arbitration_loss = _lifecycle_arbitration_loss(val_outputs, val_targets_epoch)
+            val_sell_rank_pairwise_loss = _sell_rank_pairwise_loss(val_outputs, val_targets_epoch)
             val_portfolio_receiver_pairwise_loss = _date_rank_pairwise_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
                 score_name="portfolio_daily_receiver_score",
                 target_name="portfolio_daily_receiver_score",
                 candidate_mask_name="portfolio_daily_receiver_candidate_mask",
             )
             val_portfolio_source_pairwise_loss = _date_rank_pairwise_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
                 score_name="portfolio_daily_source_score",
                 target_name="portfolio_daily_source_score",
                 candidate_mask_name="portfolio_daily_source_candidate_mask",
             )
-            val_portfolio_cash_margin_loss = _portfolio_cash_margin_loss(val_outputs, val_targets)
-            val_portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(val_outputs, val_targets)
-            val_portfolio_decision_regret_loss = _decision_focused_allocation_regret_loss(val_outputs, val_targets)
-            val_portfolio_source_hard_negative_tail_loss = _source_hard_negative_tail_loss(val_outputs, val_targets)
-            val_portfolio_source_listwise_release_loss = _source_listwise_release_regret_loss(val_outputs, val_targets)
-            val_portfolio_transfer_regret_loss = _transfer_level_allocation_regret_loss(val_outputs, val_targets)
+            val_portfolio_cash_margin_loss = _portfolio_cash_margin_loss(val_outputs, val_targets_epoch)
+            val_portfolio_unified_allocation_loss = _unified_allocation_consistency_loss(val_outputs, val_targets_epoch)
+            val_portfolio_decision_regret_loss = _decision_focused_allocation_regret_loss(val_outputs, val_targets_epoch)
+            val_portfolio_source_hard_negative_tail_loss = _source_hard_negative_tail_loss(val_outputs, val_targets_epoch)
+            val_portfolio_source_listwise_release_loss = _source_listwise_release_regret_loss(val_outputs, val_targets_epoch)
+            val_portfolio_transfer_regret_loss = _transfer_level_allocation_regret_loss(val_outputs, val_targets_epoch)
             val_portfolio_allocation_objective_consolidation_loss = _allocation_objective_consolidation_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_risk_sensitive_allocation_loss = _risk_sensitive_allocation_objective_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_utility_credit_closure_loss = _portfolio_utility_credit_closure_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_primal_dual_decision_loss = _portfolio_primal_dual_decision_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_entropic_transport_decision_loss = _portfolio_entropic_transport_decision_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_offline_conservative_support_loss = _portfolio_offline_conservative_support_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
             )
             val_portfolio_differentiable_convex_allocation_loss = (
                 _portfolio_differentiable_convex_allocation_loss(
                     val_outputs,
-                    val_targets,
+                    val_targets_epoch,
                 )
                 if multi_objective_loss_weights.get("portfolio_differentiable_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
@@ -7637,7 +7834,7 @@ def fit_policy_models_v3(
             val_portfolio_cvxpy_convex_allocation_loss = (
                 _portfolio_cvxpy_convex_allocation_loss(
                     val_outputs,
-                    val_targets,
+                    val_targets_epoch,
                 )
                 if multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
@@ -7645,7 +7842,7 @@ def fit_policy_models_v3(
             val_portfolio_full_universe_convex_allocation_loss = (
                 _portfolio_full_universe_convex_allocation_loss(
                     val_outputs,
-                    val_targets,
+                    val_targets_epoch,
                     enable_solver=False,
                 )
                 if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0
@@ -7654,49 +7851,40 @@ def fit_policy_models_v3(
             val_portfolio_native_allocation_vector_loss = (
                 _portfolio_native_allocation_vector_loss(
                     val_outputs,
-                    val_targets,
+                    val_targets_epoch,
                 )
                 if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0
-                else torch.tensor(0.0, device=device)
-            )
-            val_portfolio_day_set_native_allocation_vector_loss = (
-                _portfolio_day_set_native_allocation_vector_loss(
-                    val_day_set_outputs,
-                    val_day_set_targets,
-                    val_day_set_mask,
-                    validity_first=native_target_validity_closure_enabled,
-                )
-                if (
-                    val_day_set_outputs is not None
-                    and val_day_set_targets is not None
-                    and val_day_set_mask is not None
-                    and multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
-                )
                 else torch.tensor(0.0, device=device)
             )
             val_portfolio_capital_flow_closure_loss = (
                 _portfolio_capital_flow_closure_loss(
                     val_outputs,
-                    val_targets,
+                    val_targets_epoch,
                 )
                 if multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
-            val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets)
-            val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets)
-            val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(val_outputs, val_targets)
+            val_value_arbitration_loss = _value_arbitration_consistency_loss(val_outputs, val_targets_epoch)
+            val_three_value_gate_loss = _three_value_gate_consistency_loss(val_outputs, val_targets_epoch)
+            val_hierarchical_three_value_gate_loss = _hierarchical_three_value_gate_consistency_loss(
+                val_outputs,
+                val_targets_epoch,
+            )
             val_funding_release_loss = _funding_release_discipline_loss(
                 val_outputs,
-                val_targets,
+                val_targets_epoch,
                 variant=funding_release_loss_variant,
             )
-            val_action_value_consistency_loss = _action_value_consistency_loss(val_outputs, val_targets)
+            val_action_value_consistency_loss = _action_value_consistency_loss(
+                val_outputs,
+                val_targets_epoch,
+            )
             val_clipped_intent_loss = (
                 nn.functional.binary_cross_entropy(
                     torch.clamp(val_outputs["clipped_intent_risk"], 1.0e-4, 1.0 - 1.0e-4),
-                    torch.clamp(val_targets["clipped_intent_risk"], 0.0, 1.0),
+                    torch.clamp(val_targets_epoch["clipped_intent_risk"], 0.0, 1.0),
                 )
-                if "clipped_intent_risk" in val_targets
+                if "clipped_intent_risk" in val_targets_epoch
                 else torch.tensor(0.0, device=device)
             )
             val_daily_outputs = daily_model(X_daily_val)
@@ -7749,6 +7937,7 @@ def fit_policy_models_v3(
                     + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * val_clipped_intent_loss
                 ).detach().cpu()
             )
+            last_val_day_set_integrity_stats = dict(val_day_set_integrity_stats)
 
         train_loss = float(epoch_sample_loss / max(batch_count, 1))
         history.append({"epoch": int(epoch), "train_loss": train_loss, "validation_loss": val_loss})
@@ -7783,36 +7972,37 @@ def fit_policy_models_v3(
     sample_model.eval()
     daily_model.eval()
 
-    def _validation_sample_outputs() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor] | None, dict[str, torch.Tensor] | None, torch.Tensor | None]:
+    final_val_outputs_cache: dict[str, torch.Tensor] | None = None
+    final_val_targets = val_targets
+    final_day_set_terms_cache: dict[str, torch.Tensor] = {}
+    if uses_day_set_native_allocation:
+        with torch.no_grad():
+            (
+                final_val_outputs_cache,
+                final_val_targets,
+                _,
+                _,
+                _,
+                _,
+                final_day_set_terms_cache,
+                final_day_set_stats,
+            ) = _run_day_set_validation_pass(return_day_set_terms=True)
+        last_val_day_set_integrity_stats = dict(final_day_set_stats)
+
+    def _validation_sample_outputs() -> dict[str, torch.Tensor]:
         if uses_day_set_native_allocation:
-            mask = torch.ones(1, X_static_val.shape[0], dtype=torch.bool, device=device)
-            daily_for_sample = X_daily_val[:1] if X_daily_val.shape[0] else torch.zeros(1, len(daily_feature_names), device=device)
-            day_outputs = sample_model(
-                X_static_val.unsqueeze(0),
-                X_sequence_val.unsqueeze(0),
-                daily_for_sample,
-                mask,
-            )
-            flat_outputs = {
-                name: (
-                    value.squeeze(0)
-                    if value.ndim >= 2
-                    else value.repeat(X_static_val.shape[0])
-                    if value.ndim == 1 and value.numel() == 1
-                    else value
-                )
-                for name, value in day_outputs.items()
-            }
-            return flat_outputs, day_outputs, {name: tensor.unsqueeze(0) for name, tensor in val_targets.items()}, mask
-        return sample_model(X_static_val, X_sequence_val), None, None, None
+            if final_val_outputs_cache is None:
+                raise RuntimeError("day-set validation cache is missing.")
+            return final_val_outputs_cache
+        return sample_model(X_static_val, X_sequence_val)
 
     portfolio_differentiable_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_differentiable_convex_allocation_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            final_val_outputs = _validation_sample_outputs()
             raw_terms = _portfolio_differentiable_convex_allocation_loss(
                 final_val_outputs,
-                val_targets,
+                final_val_targets,
                 return_terms=True,
             )
         if isinstance(raw_terms, dict):
@@ -7823,10 +8013,10 @@ def fit_policy_models_v3(
     portfolio_cvxpy_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_cvxpy_convex_allocation_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            final_val_outputs = _validation_sample_outputs()
             raw_cvxpy_terms = _portfolio_cvxpy_convex_allocation_loss(
                 final_val_outputs,
-                val_targets,
+                final_val_targets,
                 return_terms=True,
             )
         if isinstance(raw_cvxpy_terms, dict):
@@ -7837,10 +8027,10 @@ def fit_policy_models_v3(
     portfolio_full_universe_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            final_val_outputs = _validation_sample_outputs()
             raw_full_universe_terms = _portfolio_full_universe_convex_allocation_loss(
                 final_val_outputs,
-                val_targets,
+                final_val_targets,
                 enable_solver=True,
                 return_terms=True,
             )
@@ -7852,10 +8042,10 @@ def fit_policy_models_v3(
     portfolio_native_allocation_vector_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            final_val_outputs = _validation_sample_outputs()
             raw_native_terms = _portfolio_native_allocation_vector_loss(
                 final_val_outputs,
-                val_targets,
+                final_val_targets,
                 return_terms=True,
             )
         if isinstance(raw_native_terms, dict):
@@ -7865,18 +8055,7 @@ def fit_policy_models_v3(
             }
     portfolio_day_set_native_allocation_vector_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0:
-        with torch.no_grad():
-            _, final_day_set_outputs, final_day_set_targets, final_day_set_mask = _validation_sample_outputs()
-            if final_day_set_outputs is not None and final_day_set_targets is not None and final_day_set_mask is not None:
-                raw_day_set_terms = _portfolio_day_set_native_allocation_vector_loss(
-                    final_day_set_outputs,
-                    final_day_set_targets,
-                    final_day_set_mask,
-                    validity_first=native_target_validity_closure_enabled,
-                    return_terms=True,
-                )
-            else:
-                raw_day_set_terms = {}
+        raw_day_set_terms = final_day_set_terms_cache if uses_day_set_native_allocation else {}
         if isinstance(raw_day_set_terms, dict):
             portfolio_day_set_native_allocation_vector_terms = {
                 name: float(value.detach().cpu())
@@ -7885,10 +8064,10 @@ def fit_policy_models_v3(
     portfolio_capital_flow_closure_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0) > 0.0:
         with torch.no_grad():
-            final_val_outputs, _, _, _ = _validation_sample_outputs()
+            final_val_outputs = _validation_sample_outputs()
             raw_capital_flow_terms = _portfolio_capital_flow_closure_loss(
                 final_val_outputs,
-                val_targets,
+                final_val_targets,
                 return_terms=True,
             )
         if isinstance(raw_capital_flow_terms, dict):
@@ -8148,6 +8327,7 @@ def fit_policy_models_v3(
         ),
         "supports_native_target_validity_closure": bool(native_target_validity_closure_enabled),
         "supports_native_executable_receiver_closure": bool(native_executable_receiver_closure_enabled),
+        "supports_native_validation_closure": bool(native_validation_closure_enabled),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
         "day_set_batch_size": int(batch_size)
@@ -8157,6 +8337,10 @@ def fit_policy_models_v3(
         "day_set_full_day_integrity": bool(
             multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
         ),
+        "val_day_set_integrity": bool(last_val_day_set_integrity_stats.get("val_day_set_integrity", False)),
+        "val_unique_day_count": float(last_val_day_set_integrity_stats.get("val_unique_day_count", 0.0)),
+        "val_padding_ratio": float(last_val_day_set_integrity_stats.get("val_padding_ratio", 0.0)),
+        "val_mask_coverage": float(last_val_day_set_integrity_stats.get("val_mask_coverage", 0.0)),
         "supports_portfolio_capital_flow_closure_loss": (
             multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0) > 0.0
         ),

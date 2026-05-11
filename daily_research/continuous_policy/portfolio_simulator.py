@@ -10,13 +10,18 @@ from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     solve_semidifferentiable_allocation,
 )
-from daily_research.continuous_policy.native_allocation import SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER
+from daily_research.continuous_policy.native_allocation import (
+    SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
+    SIMULATOR_NATIVE_DEADBAND_ABS,
+    SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER,
+    SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER,
+)
 
 
 DEFAULT_MAX_POSITIONS = 8
 DEFAULT_MAX_POSITION_WEIGHT = 0.20
 DEFAULT_TURNOVER_LIMIT = 0.60
-DEFAULT_EXECUTION_DEADBAND_ABS = 0.0010
+DEFAULT_EXECUTION_DEADBAND_ABS = SIMULATOR_NATIVE_DEADBAND_ABS
 DEFAULT_EXECUTION_DEADBAND_REL = 0.04
 EXECUTION_SEMANTICS_LEGACY = "legacy_weight_derived"
 EXECUTION_SEMANTICS_SEMANTIC = "semantic_preserving_v1"
@@ -4003,8 +4008,14 @@ class PortfolioState:
                 ).fillna(0.0)
                 native_turnover = float(native_delta.abs().sum())
                 native_cash_after = float(max(0.0, 1.0 - float(native_target_weights.sum())))
-                native_positive_delta = native_delta > max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
-                native_negative_delta = native_delta < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8)
+                native_positive_delta = native_delta > max(
+                    DEFAULT_EXECUTION_DEADBAND_ABS * SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
+                    1.0e-8,
+                )
+                native_negative_delta = native_delta < -max(
+                    DEFAULT_EXECUTION_DEADBAND_ABS * SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
+                    1.0e-8,
+                )
                 native_positive_delta_count = int(native_positive_delta.sum())
                 native_negative_delta_count = int((native_negative_delta & (current_for_native > 1.0e-8)).sum())
                 native_unsupported_receiver_mask = (
@@ -4095,7 +4106,11 @@ class PortfolioState:
             ).max(axis=1)
             source_delta_threshold = pd.concat(
                 [
-                    pd.Series(DEFAULT_EXECUTION_DEADBAND_ABS * 1.25, index=prices.index, dtype=float),
+                    pd.Series(
+                        DEFAULT_EXECUTION_DEADBAND_ABS * SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER,
+                        index=prices.index,
+                        dtype=float,
+                    ),
                     current.clip(lower=0.0) * 0.010,
                 ],
                 axis=1,
@@ -4112,7 +4127,13 @@ class PortfolioState:
                 )
                 portfolio_daily_source_candidate = (
                     (current > 1e-8)
-                    & (allocation_delta_preview < -max(DEFAULT_EXECUTION_DEADBAND_ABS * 0.50, 1.0e-8))
+                    & (
+                        allocation_delta_preview
+                        < -max(
+                            DEFAULT_EXECUTION_DEADBAND_ABS * SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
+                            1.0e-8,
+                        )
+                    )
                 )
                 native_source_target_count = int(portfolio_daily_source_target.sum())
             else:

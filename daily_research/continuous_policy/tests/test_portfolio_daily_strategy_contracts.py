@@ -11,6 +11,8 @@ import torch
 import pandas as pd
 
 import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
+import daily_research.continuous_policy.native_allocation as native_allocation_module
+import daily_research.continuous_policy.portfolio_simulator as portfolio_simulator_module
 from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     build_unified_allocation_problem,
@@ -3765,6 +3767,90 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
         limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
         self.assertEqual(limits["resource_profile"], "balanced")
+
+    def test_r52d_loss_profile_registers_validation_closure_without_solver(self) -> None:
+        profile = "split_heads_portfolio_daily_day_set_native_validation_closure_r52d"
+        loss_profile = "alpha_result_value_budget_split_v40"
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 4)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
+
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        multi_weights = resolved_config["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertLess(multi_weights["scalar_total"], 0.95)
+        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 3.50)
+        self.assertEqual(multi_weights["portfolio_native_allocation_vector_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
+        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
+        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
+        self.assertEqual(limits["resource_profile"], "balanced")
+
+    def test_r52d_day_set_validation_contract_avoids_single_day_synthetic_fallback(self) -> None:
+        source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+        self.assertNotIn("X_daily_val[:1]", source)
+        self.assertNotIn("torch.ones(1, X_static_val.shape[0]", source)
+        for field in (
+            "val_day_set_integrity",
+            "val_unique_day_count",
+            "val_padding_ratio",
+            "val_mask_coverage",
+        ):
+            self.assertIn(field, source)
+
+    def test_r52d_projection_exposes_train_sim_alignment_terms(self) -> None:
+        outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([0.0, 4.0, 3.0], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((3,), -3.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((3,), -3.0, dtype=torch.float32),
+        }
+        targets = {
+            "date_code": torch.zeros(3, dtype=torch.float32),
+            "current_weight": torch.tensor([0.24, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0.0, 1.0, 1.0], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0.0, 1.0, 1.0], dtype=torch.float32),
+            "gross_exposure_target": torch.full((3,), 0.44, dtype=torch.float32),
+            "turnover_budget": torch.full((3,), 0.28, dtype=torch.float32),
+            "max_position_weight_target": torch.full((3,), 0.24, dtype=torch.float32),
+        }
+        projection = _project_native_allocation_vector(
+            outputs,
+            targets,
+            validity_first=True,
+            return_terms=True,
+        )
+        for name in (
+            "native_train_sim_turnover_gap",
+            "native_train_sim_source_threshold_gap",
+            "native_train_sim_validity_gap",
+        ):
+            self.assertIn(name, projection)
+            self.assertGreaterEqual(float(projection[name]), 0.0)
+
+    def test_r52d_native_and_simulator_share_deadband_constants(self) -> None:
+        self.assertAlmostEqual(
+            float(portfolio_simulator_module.DEFAULT_EXECUTION_DEADBAND_ABS),
+            float(native_allocation_module.SIMULATOR_NATIVE_DEADBAND_ABS),
+            places=12,
+        )
+        self.assertAlmostEqual(
+            float(portfolio_simulator_module.SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER),
+            float(native_allocation_module.SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER),
+            places=12,
+        )
+        self.assertAlmostEqual(
+            float(portfolio_simulator_module.SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER),
+            float(native_allocation_module.SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER),
+            places=12,
+        )
 
     def test_r52c_native_receiver_executable_mask_keeps_held_and_blocks_flat_unsupported(self) -> None:
         mask = build_native_receiver_executable_mask(
