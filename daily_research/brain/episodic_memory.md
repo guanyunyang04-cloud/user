@@ -77,3 +77,18 @@
 - 事实：3/3 screening trials completed、0 failed、confirmatory disabled、true solver disabled；`native_target_valid = 1.0 / 1.0 / 0.987654`，fallback `0 / 0 / 0.012346`。
 - 失败证据：3 个 trials 均 `training_evidence_status=insufficient`、`composite_score<0`、`cash_timing_quality_1d<0`、`portfolio_daily_exposure_utilization~0.33`；trial 03 还出现 `source_target_count=0` 与负收益。
 - 行动后判断：`r52d screening-only failed confirmatory eligibility`；不得 confirmatory、strict resume、promotion、live/default 或改 active artifact。下一步只应在 research code/objective 层修 deployment、cash timing、exposure utilization 与 training evidence 闭合。
+
+## 2026-05-11 r52e Deployment/Cash/Exposure Closure Implementation
+- 行动前自检：r52d 已明确失败在 deployment / cash timing / exposure utilization / training evidence 闭合，不应继续用加长训练或 confirmatory 掩盖逻辑问题。
+- 测试先行：新增 focused tests 先复现 actual cash 高、cash reserve signal 为 0、receiver 有支持但 target exposure 低于 stock budget、resource gate 未阻断的失败形态。
+- 执行动作：新增 allocation closure diagnostics，补充 native allocation deployable idle cash / stock budget gap loss，导出 actual cash/exposure 指标，并把 scoring/resource gate 改为惩罚实际闲置现金和 `cash_semantics_mismatch`。
+- 执行动作：新增 r52e profile `split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e` 与 loss profile `alpha_result_value_budget_split_v41`；不复用 r52d verdict。
+- 行动后判断：r52e 目前是代码合同，不是 study verdict；下一步只允许 dry-run / safe screening 验证，confirmatory、strict resume、promotion、live/default 继续阻断。
+
+## 2026-05-12 r52e Safe Screening Failure + Export Fix
+- 行动前自检：r52e dry-run 通过后才启动 safe screening；命令显式设置 `--disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`，未修改 active/live/default。
+- 运行结果：`self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01` 完成 1/3 screening trials、0 failed；resource gate 早停并节省 2 个 trial。
+- 失败证据：trial 01 `composite_score=-45.938456`、`annual_return=-0.268027`、`cash_timing_quality_1d=-0.053696`、`portfolio_daily_exposure_utilization=0.331584`、`training_evidence_status=insufficient`、`source_target_count=0`。
+- 过程发现：原 study summary 未把 `cash_semantics_mismatch` 写入 gate，因为 behavior audit 从聚合后的 `day_merge` 计算 closure，丢失 turnover export 的 stock budget / target sum / receiver target 字段。
+- 修复动作：改为从 turnover export 计算 closure，并让 diagnostic 识别 simulator-native 列名；recomputed audit 显示 `deployable_idle_cash_mean=0.540194`、`cash_semantics_mismatch=1.0`、`receiver_candidate_without_target_day_share=0.925926`。
+- 行动后判断：r52e 首轮 screening 失败；不得 confirmatory、strict resume、promotion、live/default。下一步应审计 target weight sum 为什么锁在约 0.28，而 stock budget / gross target 仍约 0.83-0.85。

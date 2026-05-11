@@ -13,6 +13,9 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.continuous_policy.label_builder import build_future_path_metrics
+from daily_research.continuous_policy.allocation_closure_diagnostics import (
+    summarize_allocation_closure_from_turnover,
+)
 from daily_research.continuous_policy.pipeline_utils import run_policy_rollout
 from daily_research.continuous_policy.runtime import (
     CONTINUOUS_POLICY_ROOT,
@@ -942,6 +945,15 @@ def _build_semantic_conflicts(
             "gross_exposure",
             "gross_exposure_target",
             "gross_exposure_target_raw",
+            "allocation_layer_cash_after",
+            "allocation_layer_available_cash_to_deploy",
+            "allocation_layer_stock_budget",
+            "allocation_layer_target_weight_sum",
+            "allocation_layer_objective_value",
+            "allocation_layer_receiver_executable_candidate_count",
+            "allocation_layer_receiver_target_count",
+            "allocation_layer_source_target_count",
+            "allocation_layer_native_fallback_used",
             "candidate_budget",
             "candidate_budget_raw",
             "turnover_budget",
@@ -965,6 +977,10 @@ def _build_semantic_conflicts(
             "deploy_intent_unrealized_share",
             "portfolio_daily_receiver_semantic_no_headroom_count",
             "portfolio_daily_receiver_open_breadth_candidate_count",
+            "portfolio_daily_cash_reserve_signal",
+            "portfolio_daily_receiver_candidate_count",
+            "portfolio_daily_receiver_target_count",
+            "portfolio_daily_source_target_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
@@ -1001,6 +1017,7 @@ def _build_semantic_conflicts(
         day_merge["budget_clipped"] = False
         day_merge["budget_drop_count"] = 0.0
         day_merge["cash_weight"] = np.nan
+        allocation_closure_frame = day_merge
     else:
         turnover_working = turnover_working.copy()
         turnover_working["date"] = turnover_working["date"].astype(str)
@@ -1010,6 +1027,15 @@ def _build_semantic_conflicts(
         for optional_column in (
             "gross_exposure",
             "gross_exposure_target_raw",
+            "allocation_layer_cash_after",
+            "allocation_layer_available_cash_to_deploy",
+            "allocation_layer_stock_budget",
+            "allocation_layer_target_weight_sum",
+            "allocation_layer_objective_value",
+            "allocation_layer_receiver_executable_candidate_count",
+            "allocation_layer_receiver_target_count",
+            "allocation_layer_source_target_count",
+            "allocation_layer_native_fallback_used",
             "candidate_budget",
             "candidate_budget_raw",
             "turnover_budget",
@@ -1033,6 +1059,10 @@ def _build_semantic_conflicts(
             "deploy_intent_unrealized_share",
             "portfolio_daily_receiver_semantic_no_headroom_count",
             "portfolio_daily_receiver_open_breadth_candidate_count",
+            "portfolio_daily_cash_reserve_signal",
+            "portfolio_daily_receiver_candidate_count",
+            "portfolio_daily_receiver_target_count",
+            "portfolio_daily_source_target_count",
             "deploy_intent_candidate_count",
             "deploy_intent_candidate_realized_count",
             "deploy_intent_candidate_realized_rate",
@@ -1065,6 +1095,7 @@ def _build_semantic_conflicts(
         ):
             if optional_column not in turnover_working.columns:
                 turnover_working[optional_column] = 0.0
+        allocation_closure_frame = turnover_working
         day_merge = by_date.merge(
             turnover_working[
                 [
@@ -1836,6 +1867,7 @@ def _build_semantic_conflicts(
     avg_gross_exposure_target, portfolio_daily_exposure_utilization = _compute_exposure_utilization_from_turnover(
         day_merge
     )
+    allocation_closure = summarize_allocation_closure_from_turnover(allocation_closure_frame)
     high_cash_sell_mask = working["high_cash_day"].astype(bool) & realized_sell_mask
     high_cash_sell_action_count = int(high_cash_sell_mask.sum())
     high_cash_budget_origin_sell_share = (
@@ -2215,6 +2247,30 @@ def _build_semantic_conflicts(
         "portfolio_daily_receiver_minus_source_forward_excess_5d": portfolio_daily_receiver_minus_source_forward_excess_5d,
         "avg_gross_exposure_target": avg_gross_exposure_target,
         "portfolio_daily_exposure_utilization": portfolio_daily_exposure_utilization,
+        "portfolio_daily_actual_cash_weight_mean": float(
+            allocation_closure.get("actual_cash_weight_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_actual_gross_exposure_mean": float(
+            allocation_closure.get("actual_gross_exposure_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_deployable_idle_cash_mean": float(
+            allocation_closure.get("deployable_idle_cash_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_cash_semantics_mismatch": float(
+            bool(allocation_closure.get("cash_semantics_mismatch", False))
+        ),
+        "portfolio_daily_receiver_candidate_without_target_day_share": float(
+            allocation_closure.get("receiver_candidate_without_target_day_share", 0.0) or 0.0
+        ),
+        "portfolio_daily_source_dead_day_share": float(
+            allocation_closure.get("source_dead_day_share", 0.0) or 0.0
+        ),
+        "portfolio_daily_allocation_objective_mean": float(
+            allocation_closure.get("allocation_objective_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_native_fallback_mean": float(
+            allocation_closure.get("native_fallback_mean", 0.0) or 0.0
+        ),
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,

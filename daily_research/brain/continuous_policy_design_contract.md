@@ -173,3 +173,8 @@
 - 推断：r40 的工程通道已经从 stdout 管道污染中恢复，最终训练结果可读；策略失败不是“结果无法读取”，而是 confirm 层经济质量和稳定性不足。
 - 结构约束：后续不得把 screening 高收益但 evidence insufficient 的分支作为 champion，不得把 receiver deploy 数量单独解释为成功；必须同时满足 source 释放、cash timing、drawdown、v2 gate 与 stable confirm。
 - 边界：r40 clean_r1 仍是 `research / shadow_only`，当前有效证据基线仍是 r39。
+
+## 2026-05-11 r52e Deployment/Cash/Exposure Closure Contract
+- r52e entry: `split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e` / `alpha_result_value_budget_split_v41`; evidence must include actual cash, actual exposure, idle cash, receiver/source support, fallback, and `cash_semantics_mismatch`.
+- Confirmatory remains blocked until explicit screening evidence satisfies positive composite, sufficient training evidence, non-negative cash timing, exposure utilization >= 0.60, valid source/deploy realization, no native fallback main path, and no v2 hard gate failure.
+- Boundary update: safe screening failed, so r52e is screening-only research; next inspect target weight sum near `0.28` vs stock budget / gross target near `0.83-0.85`, without live/default/promotion or active changes.

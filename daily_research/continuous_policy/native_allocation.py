@@ -67,6 +67,9 @@ _NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "risk_cost_loss",
     "source_breadth_loss",
     "exposure_utilization_loss",
+    "stock_budget_gap_loss",
+    "deployable_idle_cash_loss",
+    "receiver_deploy_headroom",
     "source_dead_loss",
     "native_source_threshold_loss",
     "legacy_mask_block_loss",
@@ -487,6 +490,9 @@ def _project_native_allocation_vector(
         source_flow = release_amount.sum()
         current_cash = torch.clamp(1.0 - current_day.sum(), 0.0, 1.0)
         cash_release = torch.relu(current_cash - cash_after)
+        deployable_receiver_headroom = (
+            torch.clamp(cap_day - current_day, min=0.0) * receiver_support_day
+        ).sum()
         raw_receiver_demand = (
             torch.sigmoid(weight_logit_day)
             * receiver_support_day
@@ -542,11 +548,31 @@ def _project_native_allocation_vector(
             0.0,
             1.25,
         )
+        gross_stock_budget_gap = torch.relu(gross_day - stock_budget)
+        gross_target_gap = torch.relu(gross_day - target_day.sum())
+        deploy_pressure = torch.clamp(deploy_day - 0.35 * risk_day, 0.0, 1.0)
+        stock_budget_gap_loss = torch.square(
+            gross_target_gap + 0.25 * raw_cash_reserve * deploy_pressure
+        ) * torch.clamp(0.25 + deploy_pressure, 0.0, 1.35)
+        deployable_gap = torch.minimum(gross_target_gap, torch.clamp(deployable_receiver_headroom, 0.0, 1.0))
+        raw_cash_deploy_conflict = raw_cash_reserve * deploy_pressure * torch.clamp(
+            deployable_receiver_headroom,
+            0.0,
+            1.0,
+        )
+        deployable_idle_cash_loss = (
+            torch.square(deployable_gap)
+            + 0.50 * torch.square(raw_cash_deploy_conflict)
+            + 0.25 * torch.square(gross_stock_budget_gap) * deploy_pressure
+        ) * torch.clamp(0.35 + deploy_pressure - 0.35 * risk_day, 0.0, 1.50)
         if validity_first:
             exposure_utilization_loss = (
                 torch.square(torch.relu(stock_budget - target_day.sum()))
                 + 0.35 * torch.square(torch.relu(target_day.sum() - torch.clamp(stock_budget + 0.05, 0.0, 1.0)))
             ) * torch.clamp(0.35 + deploy_day - risk_day, 0.0, 1.25)
+            stock_budget_gap_loss = stock_budget_gap_loss + 0.20 * torch.square(
+                torch.relu(target_day.sum() - torch.clamp(gross_day + 0.05, 0.0, 1.0))
+            )
         native_source_candidate_count = native_source_active.sum()
         native_negative_delta_count = native_negative_delta.sum()
         native_source_flow_without_sellable_support = (torch.relu(-delta_day) * (1.0 - held_day)).sum()
@@ -582,6 +608,8 @@ def _project_native_allocation_vector(
             + 0.18 * risk_cost_loss
             + 0.20 * source_breadth_loss
             + 0.24 * exposure_utilization_loss
+            + 0.30 * stock_budget_gap_loss
+            + 0.34 * deployable_idle_cash_loss
             + 0.24 * source_dead_loss
             + 0.18 * native_source_threshold_loss
             + 0.08 * legacy_mask_block_loss
@@ -612,6 +640,9 @@ def _project_native_allocation_vector(
         term_values["risk_cost_loss"].append(risk_cost_loss)
         term_values["source_breadth_loss"].append(source_breadth_loss)
         term_values["exposure_utilization_loss"].append(exposure_utilization_loss)
+        term_values["stock_budget_gap_loss"].append(stock_budget_gap_loss)
+        term_values["deployable_idle_cash_loss"].append(deployable_idle_cash_loss)
+        term_values["receiver_deploy_headroom"].append(deployable_receiver_headroom)
         term_values["source_dead_loss"].append(source_dead_loss)
         term_values["native_source_threshold_loss"].append(native_source_threshold_loss)
         term_values["legacy_mask_block_loss"].append(legacy_mask_block_loss)
@@ -701,6 +732,9 @@ _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "risk_cost_loss",
     "source_breadth_loss",
     "exposure_utilization_loss",
+    "stock_budget_gap_loss",
+    "deployable_idle_cash_loss",
+    "receiver_deploy_headroom",
     "source_dead_loss",
     "native_source_threshold_loss",
     "legacy_mask_block_loss",

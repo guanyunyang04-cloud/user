@@ -88,3 +88,18 @@
 - Confirmatory gate failed: all trials have `training_evidence_status=insufficient`, `composite_score<0`, `cash_timing_quality_1d<0`, and `portfolio_daily_exposure_utilization~0.33`; trial 03 also has `source_target_count=0` and negative return.
 - Current verdict: `r52d screening-only failed confirmatory eligibility`; there is no confirmatory run, stable confirm, promotion verdict, or live/default decision.
 - Boundary: r52d may only be treated as a research/shadow screening result; do not promote it into live/default/promotion language.
+
+## 2026-05-11 r52e Deployment/Cash/Exposure Closure Contract
+- Fact: r52d is frozen as a failed screening-only baseline; it must not be extended into confirmatory, strict resume, promotion, live/default, or active artifact changes.
+- Fact: r52e code contract now exists as `split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e` with loss profile `alpha_result_value_budget_split_v41`.
+- Fact: r52e adds first-class allocation closure diagnostics for actual cash weight, actual gross exposure, deployable idle cash, target-vs-budget gap, receiver target support, source target support, native fallback, and `cash_semantics_mismatch`.
+- Fact: scoring and resource gates now penalize high actual idle cash, excessive actual cash weight, low exposure utilization, receiver-target underuse, source dead days, and cash semantics mismatch.
+- Boundary update: r52e now has a failed safe-screening verdict; it remains blocked from confirmatory, strict resume, promotion, live/default, and active artifact changes.
+
+## 2026-05-12 r52e Safe Screening Verdict
+- Fact: `self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01` ran with safe resources, confirmatory disabled, and true solver disabled.
+- Fact: resource gate stopped after 1/3 screening trials, saving 2 trials; original failures were `source_release_dead`, `economic_signal_too_weak`, `exposure_utilization_low`, and `actual_cash_weight_high`.
+- Fact: trial 01 was not close to acceptance: `composite_score=-45.938456`, `annual_return=-0.268027`, `cash_timing_quality_1d=-0.053696`, `portfolio_daily_exposure_utilization=0.331584`, and `training_evidence_status=insufficient`.
+- Fact: recomputed closure audit after the export fix shows `deployable_idle_cash_mean=0.540194`, `cash_semantics_mismatch=1.0`, and `receiver_candidate_without_target_day_share=0.925926`; patched resource gate would also fail `actual_cash_idle_high` and `cash_semantics_mismatch`.
+- Evidence capsule: `daily_research/brain/references/r52e_deployment_cash_exposure_closure_status_20260512.md`.
+- Current verdict: `r52e safe-screening failed resume and confirmatory eligibility`; next work must inspect target-weight underdeployment and source release dead, not add epochs or run confirmatory.

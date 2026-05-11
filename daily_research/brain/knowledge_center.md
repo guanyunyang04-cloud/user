@@ -65,6 +65,7 @@
 | r52b | safe screening 未通过 validity 目标：native target valid 仍仅 1.25%-6.25%，fallback 仍 93.75%-98.75%，下一步应修 receiver executable mask / native target export / simulator validity 同口径。 |
 | r52c | receiver executable closure 已通过 simulator 边界验证，但最新瓶颈转为 cash timing 为负、exposure utilization 约 0.33、training evidence insufficient 与 source depth 不稳；下一步不应重复 receiver mask 修补。 |
 | r52d | validation closure 代码合同、测试、dry-run 与 safe screening-only 证据已存在；explicit capsule 判定 3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不进入 confirmatory / resume / promotion / live。 |
+| r52e | safe screening failed after 1/3 trials: resource gate stopped on source release dead, weak economics, low exposure and high actual cash; recomputed closure audit shows high deployable idle cash and `cash_semantics_mismatch`, so r52e cannot enter resume / confirmatory / promotion. |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

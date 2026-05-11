@@ -1166,6 +1166,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v41"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.0e-4, 1.4e-4],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.28, 0.32],
+        "daily_dropout": [0.14],
+        "batch_size": [1, 2],
+    },
 }
 
 
@@ -2247,6 +2264,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 6,
         "min_epochs": 4,
     },
+    "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v41",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.0e-4,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.28,
+        "daily_dropout": 0.14,
+        "batch_size": 1,
+        "epochs": 6,
+        "min_epochs": 4,
+    },
 }
 
 
@@ -2313,6 +2349,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_validation_closure_r52d": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2467,6 +2504,20 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "annual_return_floor": 0.12,
         "receiver_unrealized_cap": 0.025,
         "exposure_utilization_floor": 0.50,
+    },
+    "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": {
+        "min_completed_screening": 1,
+        "source_count_floor": 3.0,
+        "source_sell_rate_floor": 0.35,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
+        "actual_cash_idle_cap": 0.24,
+        "actual_cash_weight_cap": 0.62,
+        "cash_semantics_mismatch_block": True,
     },
 }
 
@@ -3231,6 +3282,35 @@ def _score_protocol_summary(
         portfolio_daily_exposure_utilization = float(
             avg_gross_exposure / max(avg_gross_exposure_target, 1.0e-8)
         )
+    portfolio_daily_actual_cash_weight_mean = _summary_metric(
+        "portfolio_daily_actual_cash_weight_mean",
+        max(0.0, 1.0 - avg_gross_exposure) if avg_gross_exposure > 0.0 else 0.0,
+    )
+    portfolio_daily_actual_gross_exposure_mean = _summary_metric(
+        "portfolio_daily_actual_gross_exposure_mean",
+        avg_gross_exposure,
+    )
+    if portfolio_daily_actual_gross_exposure_mean <= 0.0 and portfolio_daily_actual_cash_weight_mean > 0.0:
+        portfolio_daily_actual_gross_exposure_mean = max(0.0, 1.0 - portfolio_daily_actual_cash_weight_mean)
+    portfolio_daily_deployable_idle_cash_mean = _summary_metric(
+        "portfolio_daily_deployable_idle_cash_mean",
+        0.0,
+    )
+    portfolio_daily_cash_semantics_mismatch = _summary_metric(
+        "portfolio_daily_cash_semantics_mismatch",
+        0.0,
+    )
+    portfolio_daily_receiver_candidate_without_target_day_share = _summary_metric(
+        "portfolio_daily_receiver_candidate_without_target_day_share",
+        0.0,
+    )
+    portfolio_daily_source_dead_day_share = _summary_metric(
+        "portfolio_daily_source_dead_day_share",
+        0.0,
+    )
+    actual_cash_idle_gap = max(0.0, portfolio_daily_deployable_idle_cash_mean - 0.18)
+    actual_cash_weight_gap = max(0.0, portfolio_daily_actual_cash_weight_mean - 0.58)
+    cash_semantics_mismatch_flag = 1.0 if portfolio_daily_cash_semantics_mismatch >= 0.5 else 0.0
     sell_selection_quality = float(continuity.get("sell_selection_quality_5d", 0.0) or 0.0)
     budget_origin_sell_share = float(semantic_conflicts.get("budget_origin_sell_share", 0.0) or 0.0)
     high_cash_budget_origin_sell_share = float(semantic_conflicts.get("high_cash_budget_origin_sell_share", 0.0) or 0.0)
@@ -4291,6 +4371,19 @@ def _score_protocol_summary(
             * portfolio_daily_ranking_weight,
             "portfolio_daily_cash_drag_penalty": -portfolio_daily_cash_drag_penalty
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_actual_cash_idle_penalty": -(
+                actual_cash_idle_gap * 2.10 + actual_cash_weight_gap * 1.25
+            )
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_cash_semantics_mismatch_penalty": -cash_semantics_mismatch_flag
+            * 0.95
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_candidate_without_target_penalty": -portfolio_daily_receiver_candidate_without_target_day_share
+            * 0.55
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_dead_day_penalty": -portfolio_daily_source_dead_day_share
+            * 0.65
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_funding_coverage_gap_penalty": -portfolio_daily_funding_coverage_gap
             * 1.10
             * portfolio_daily_ranking_weight,
@@ -4520,6 +4613,19 @@ def _score_protocol_summary(
             "portfolio_daily_effective_transfer_sparse_penalty": -portfolio_daily_effective_transfer_sparse_penalty
             * 1.12
             * portfolio_daily_ranking_weight,
+            "portfolio_daily_actual_cash_idle_penalty": -(
+                actual_cash_idle_gap * 1.55 + actual_cash_weight_gap * 0.95
+            )
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_cash_semantics_mismatch_penalty": -cash_semantics_mismatch_flag
+            * 0.80
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_receiver_candidate_without_target_penalty": -portfolio_daily_receiver_candidate_without_target_day_share
+            * 0.42
+            * portfolio_daily_ranking_weight,
+            "portfolio_daily_source_dead_day_penalty": -portfolio_daily_source_dead_day_share
+            * 0.50
+            * portfolio_daily_ranking_weight,
             "portfolio_daily_receiver_activity_gap_penalty": -portfolio_daily_receiver_activity_gap
             * 0.74
             * portfolio_daily_ranking_weight,
@@ -4612,6 +4718,13 @@ def _score_protocol_summary(
                 else 0.0
             )
             v2_cash_dead_branch = 1.0 if v2_observed and portfolio_daily_cash_reserve_rate <= 0.0 else 0.0
+            v2_actual_cash_idle_gap = (
+                max(0.0, portfolio_daily_deployable_idle_cash_mean - 0.24)
+                if avg_gross_exposure_target >= 0.42
+                else 0.0
+            )
+            v2_actual_cash_weight_gap = max(0.0, portfolio_daily_actual_cash_weight_mean - 0.62)
+            v2_cash_semantics_mismatch = cash_semantics_mismatch_flag
             v2_receiver_activity_gap = max(0.0, 3.0 - portfolio_daily_receiver_target_count)
             v2_source_activity_gap = (
                 max(0.0, 1.0 - portfolio_daily_source_target_count)
@@ -4649,6 +4762,9 @@ def _score_protocol_summary(
                     avg_gross_exposure_target < 0.42
                     or portfolio_daily_exposure_utilization >= 0.50
                 )
+                and portfolio_daily_deployable_idle_cash_mean <= 0.24
+                and portfolio_daily_actual_cash_weight_mean <= 0.62
+                and cash_semantics_mismatch_flag <= 0.0
                 and direct_translation_penalty <= 0.24
                 and add_to_hold_conflict_share <= 0.35
                 and (not v2_observed or portfolio_daily_cash_reserve_rate > 0.0)
@@ -4670,6 +4786,9 @@ def _score_protocol_summary(
                             -v2_source_release_conviction_gap * 7.0
                         ),
                         "portfolio_daily_v2_exposure_utilization_gate": -v2_exposure_utilization_gap * 3.0,
+                        "portfolio_daily_v2_actual_cash_idle_gate": -v2_actual_cash_idle_gap * 5.0,
+                        "portfolio_daily_v2_actual_cash_weight_gate": -v2_actual_cash_weight_gap * 3.4,
+                        "portfolio_daily_v2_cash_semantics_mismatch_gate": -v2_cash_semantics_mismatch * 1.8,
                         "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 1.35,
                         "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 1.10,
                         "portfolio_daily_v2_dead_allocation_branch_gate": -v2_dead_allocation_branch * 3.20,
@@ -4696,6 +4815,9 @@ def _score_protocol_summary(
                         ),
                         "portfolio_daily_v2_exposure_utilization_gate": -v2_exposure_utilization_gap * 2.4,
                         "portfolio_daily_v2_cash_dead_branch_gate": -v2_cash_dead_branch * 1.6,
+                        "portfolio_daily_v2_actual_cash_idle_gate": -v2_actual_cash_idle_gap * 3.8,
+                        "portfolio_daily_v2_actual_cash_weight_gate": -v2_actual_cash_weight_gap * 2.6,
+                        "portfolio_daily_v2_cash_semantics_mismatch_gate": -v2_cash_semantics_mismatch * 1.4,
                         "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 0.85,
                         "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 0.70,
                         "portfolio_daily_v2_dead_allocation_branch_gate": -v2_dead_allocation_branch * 2.20,
@@ -5048,6 +5170,14 @@ def _score_protocol_summary(
             ),
             "avg_gross_exposure_target": avg_gross_exposure_target,
             "portfolio_daily_exposure_utilization": portfolio_daily_exposure_utilization,
+            "portfolio_daily_actual_cash_weight_mean": portfolio_daily_actual_cash_weight_mean,
+            "portfolio_daily_actual_gross_exposure_mean": portfolio_daily_actual_gross_exposure_mean,
+            "portfolio_daily_deployable_idle_cash_mean": portfolio_daily_deployable_idle_cash_mean,
+            "portfolio_daily_cash_semantics_mismatch": portfolio_daily_cash_semantics_mismatch,
+            "portfolio_daily_receiver_candidate_without_target_day_share": (
+                portfolio_daily_receiver_candidate_without_target_day_share
+            ),
+            "portfolio_daily_source_dead_day_share": portfolio_daily_source_dead_day_share,
             "deploy_intent_unrealized_share": deploy_intent_unrealized_share,
             "sell_selection_quality_5d": sell_selection_quality,
             "budget_origin_sell_share": budget_origin_sell_share,
@@ -5627,6 +5757,9 @@ def _portfolio_daily_v2_gate_pass(metrics: dict[str, Any]) -> bool:
             float(metrics.get("avg_gross_exposure_target", 0.0) or 0.0) < 0.42
             or float(metrics.get("portfolio_daily_exposure_utilization", 0.0) or 0.0) >= 0.50
         )
+        and float(metrics.get("portfolio_daily_deployable_idle_cash_mean", 0.0) or 0.0) <= 0.24
+        and float(metrics.get("portfolio_daily_actual_cash_weight_mean", 0.0) or 0.0) <= 0.62
+        and float(metrics.get("portfolio_daily_cash_semantics_mismatch", 0.0) or 0.0) < 0.5
         and float(metrics.get("order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("direct_action_order_translation_conflict_rate", 0.0) or 0.0) <= 0.24
         and float(metrics.get("add_to_hold_conflict_share", 0.0) or 0.0) <= 0.35
@@ -5846,6 +5979,9 @@ def _resource_gate_after_screening(
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     exposure_utilization = float(metrics.get("portfolio_daily_exposure_utilization", 0.0) or 0.0)
     avg_gross_exposure_target = float(metrics.get("avg_gross_exposure_target", 0.0) or 0.0)
+    actual_cash_weight = float(metrics.get("portfolio_daily_actual_cash_weight_mean", 0.0) or 0.0)
+    deployable_idle_cash = float(metrics.get("portfolio_daily_deployable_idle_cash_mean", 0.0) or 0.0)
+    cash_semantics_mismatch = float(metrics.get("portfolio_daily_cash_semantics_mismatch", 0.0) or 0.0)
     failed: list[str] = []
     if source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
         config.get("source_sell_rate_floor", 0.20) or 0.20
@@ -5864,6 +6000,16 @@ def _resource_gate_after_screening(
     if "exposure_utilization_floor" in config and avg_gross_exposure_target >= 0.42:
         if exposure_utilization < float(config.get("exposure_utilization_floor", 0.50) or 0.50):
             failed.append("exposure_utilization_low")
+    if "actual_cash_idle_cap" in config and deployable_idle_cash > float(
+        config.get("actual_cash_idle_cap", 0.24) or 0.24
+    ):
+        failed.append("actual_cash_idle_high")
+    if "actual_cash_weight_cap" in config and actual_cash_weight > float(
+        config.get("actual_cash_weight_cap", 0.62) or 0.62
+    ):
+        failed.append("actual_cash_weight_high")
+    if bool(config.get("cash_semantics_mismatch_block", False)) and cash_semantics_mismatch >= 0.5:
+        failed.append("cash_semantics_mismatch")
 
     trigger_reasons = set(failed)
     terminal_failure = (
@@ -5880,6 +6026,13 @@ def _resource_gate_after_screening(
             or "drawdown_bad" in trigger_reasons
             or "exposure_utilization_low" in trigger_reasons
         )
+    ) or (
+        (
+            "actual_cash_idle_high" in trigger_reasons
+            or "actual_cash_weight_high" in trigger_reasons
+            or "cash_semantics_mismatch" in trigger_reasons
+        )
+        and "exposure_utilization_low" in trigger_reasons
     )
     remaining = max(0, int(selected_trial_count) - len(screening_results))
     return {
@@ -5901,6 +6054,9 @@ def _resource_gate_after_screening(
             "annual_return": annual_return,
             "portfolio_daily_exposure_utilization": exposure_utilization,
             "avg_gross_exposure_target": avg_gross_exposure_target,
+            "portfolio_daily_actual_cash_weight_mean": actual_cash_weight,
+            "portfolio_daily_deployable_idle_cash_mean": deployable_idle_cash,
+            "portfolio_daily_cash_semantics_mismatch": cash_semantics_mismatch,
         },
     }
 
@@ -6122,15 +6278,27 @@ def main(argv: list[str] | None = None) -> int:
         native_allocation_vector_support or day_set_native_allocation_vector_support
     )
     native_target_validity_closure_support = any(
-        name in {"alpha_result_value_budget_split_v38", "alpha_result_value_budget_split_v39", "alpha_result_value_budget_split_v40"}
+        name
+        in {
+            "alpha_result_value_budget_split_v38",
+            "alpha_result_value_budget_split_v39",
+            "alpha_result_value_budget_split_v40",
+            "alpha_result_value_budget_split_v41",
+        }
         for name in selected_trial_loss_profiles
     )
     native_executable_receiver_closure_support = any(
-        name in {"alpha_result_value_budget_split_v39", "alpha_result_value_budget_split_v40"}
+        name
+        in {
+            "alpha_result_value_budget_split_v39",
+            "alpha_result_value_budget_split_v40",
+            "alpha_result_value_budget_split_v41",
+        }
         for name in selected_trial_loss_profiles
     )
     native_validation_closure_support = any(
-        name == "alpha_result_value_budget_split_v40" for name in selected_trial_loss_profiles
+        name in {"alpha_result_value_budget_split_v40", "alpha_result_value_budget_split_v41"}
+        for name in selected_trial_loss_profiles
     )
     seed_study_summary: dict[str, Any] = {}
     screening_seed_trials: list[TrialResult] = []
@@ -6177,15 +6345,27 @@ def main(argv: list[str] | None = None) -> int:
                 native_allocation_vector_support or day_set_native_allocation_vector_support
             )
             native_target_validity_closure_support = any(
-                name in {"alpha_result_value_budget_split_v38", "alpha_result_value_budget_split_v39", "alpha_result_value_budget_split_v40"}
+                name
+                in {
+                    "alpha_result_value_budget_split_v38",
+                    "alpha_result_value_budget_split_v39",
+                    "alpha_result_value_budget_split_v40",
+                    "alpha_result_value_budget_split_v41",
+                }
                 for name in selected_trial_loss_profiles
             )
             native_executable_receiver_closure_support = any(
-                name in {"alpha_result_value_budget_split_v39", "alpha_result_value_budget_split_v40"}
+                name
+                in {
+                    "alpha_result_value_budget_split_v39",
+                    "alpha_result_value_budget_split_v40",
+                    "alpha_result_value_budget_split_v41",
+                }
                 for name in selected_trial_loss_profiles
             )
             native_validation_closure_support = any(
-                name == "alpha_result_value_budget_split_v40" for name in selected_trial_loss_profiles
+                name in {"alpha_result_value_budget_split_v40", "alpha_result_value_budget_split_v41"}
+                for name in selected_trial_loss_profiles
             )
     study_plan = {
         "run_tag": study_tag,

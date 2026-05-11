@@ -3943,6 +3943,7 @@ class PortfolioState:
         allocation_layer_buy_turnover = 0.0
         allocation_layer_sell_turnover = 0.0
         allocation_layer_available_cash_to_deploy = 0.0
+        allocation_layer_stock_budget = float(gross_exposure_target)
         allocation_layer_objective_value = 0.0
         allocation_layer_constraint_violations = 0.0
         allocation_layer_native_target_used = 0.0
@@ -5518,6 +5519,8 @@ class PortfolioState:
             "allocation_layer_sell_turnover": float(allocation_layer_sell_turnover),
             "allocation_layer_cash_after": float(allocation_layer_cash_after),
             "allocation_layer_available_cash_to_deploy": float(allocation_layer_available_cash_to_deploy),
+            "allocation_layer_stock_budget": float(allocation_layer_stock_budget),
+            "allocation_layer_target_weight_sum": float(target_weights.sum()),
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),

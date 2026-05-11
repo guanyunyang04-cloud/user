@@ -119,3 +119,18 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - Verdict: `r52d screening-only failed confirmatory eligibility`.
 - Stop rule: do not start confirmatory / strict resume / promotion from `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01`.
 - Next research focus: deployment, cash timing, exposure utilization, and training evidence closure; do not repeat receiver mask repair as the main path.
+
+## 2026-05-11 r52e Diagnostic / Safe Screening Commands
+- Explicit r52d diagnostic baseline:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.allocation_closure_diagnostics --study-tag self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01 --json`
+- r52e dry-run contract check:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e --study-tag self_opt_study_r52e_deployment_cash_exposure_closure_dryrun_20260511_01 --disable-confirmatory --dry-run`
+- r52e boundary: use explicit study tags only; do not infer decisions from mixed loose `latest_*` files.
+- r52e boundary: safe screening may be proposed after tests and dry-run pass; confirmatory / strict resume / promotion remain blocked until explicit gate evidence exists.
+
+## 2026-05-12 r52e Screening Operational Verdict
+- Screening tag: `self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01`.
+- Evidence capsule: `daily_research/brain/references/r52e_deployment_cash_exposure_closure_status_20260512.md`.
+- Safe screening command used:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01 --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`
+- Stop rule: do not run confirmatory or strict resume from this tag; resource gate already stopped after 1/3 trials and closure diagnostics still show high idle cash / low exposure.

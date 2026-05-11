@@ -1842,6 +1842,40 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["daily_target_loss_weights"],
+        "gross_exposure_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["daily_target_loss_weights"].get(
+            "gross_exposure_target",
+            1.0,
+        )
+        * 1.08,
+        "budget_deploy_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["daily_target_loss_weights"].get(
+            "budget_deploy_signal_target",
+            1.0,
+        )
+        * 1.10,
+        "budget_cash_timing_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["daily_target_loss_weights"].get(
+            "budget_cash_timing_signal_target",
+            1.0,
+        )
+        * 1.08,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v40"]["multi_objective_loss_weights"],
+        "scalar_total": 0.72,
+        "daily_total": 0.78,
+        "portfolio_cash_margin_total": 0.30,
+        "portfolio_capital_flow_closure_total": 0.38,
+        "portfolio_day_set_native_allocation_vector_total": 3.95,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -7182,12 +7216,17 @@ def fit_policy_models_v3(
         "alpha_result_value_budget_split_v38",
         "alpha_result_value_budget_split_v39",
         "alpha_result_value_budget_split_v40",
+        "alpha_result_value_budget_split_v41",
     }
     native_executable_receiver_closure_enabled = resolved_loss_profile in {
         "alpha_result_value_budget_split_v39",
         "alpha_result_value_budget_split_v40",
+        "alpha_result_value_budget_split_v41",
     }
-    native_validation_closure_enabled = resolved_loss_profile == "alpha_result_value_budget_split_v40"
+    native_validation_closure_enabled = resolved_loss_profile in {
+        "alpha_result_value_budget_split_v40",
+        "alpha_result_value_budget_split_v41",
+    }
     if uses_day_set_native_allocation:
         sample_model = TemporalDaySetPolicyNet(
             static_input_dim=len(static_feature_names),
