@@ -57,7 +57,7 @@
 - r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已验证：2/3 trials completed、0 failed、`confirmatory_enabled = false`、`resource_profile = safe`、true solver 未启用；resource gate 因 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak` 早停。
 - r52b 停止条件已触发：`native_target_valid = 0.0625 / 0.0125`，未高于 r52 的 1%-6% 区间；`allocation_layer_native_fallback_used = 0.9375 / 0.9875`；不得进入 confirmatory 或 22 epoch resume。
 - r52c：`split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c` / `alpha_result_value_budget_split_v39`，已验证 receiver executable closure；当前复核重点改为 `training_evidence_status`、`cash_timing_quality_1d`、`portfolio_daily_exposure_utilization`、`native_source_target_count` 与 deployment closure，不再把 unsupported receiver validity 当作主阻塞。
-- r52d：`split_heads_portfolio_daily_day_set_native_validation_closure_r52d` / `alpha_result_value_budget_split_v40`，仅为 screening-only research result；dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过，safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 完成 3/3 trials、0 failed、confirmatory disabled；复核重点是 `supports_native_validation_closure`、train/sim alignment 诊断、shared deadband 常量、deployment/cash timing/exposure/source breadth native feedback；无 confirmatory / stable verdict 前不得升级。
+- r52d：`split_heads_portfolio_daily_day_set_native_validation_closure_r52d` / `alpha_result_value_budget_split_v40`，仅为 screening-only research result；dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过，safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 完成 3/3 trials、0 failed、confirmatory disabled；explicit capsule 判定不具备 confirmatory eligibility，后续不得直接 confirmatory、resume 或加长同 tag 训练。
 
 ## r52 dry-run 模板
 ```powershell
@@ -113,3 +113,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - When reviewing r52c/r52d studies, use explicit capsule first:
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <tag> --json`
 - Do not gate decisions on loose `latest_protocol_summary` while stale-risk is true.
+
+## 2026-05-11 r52d Screening Verdict Note
+- Evidence capsule: `daily_research/brain/references/r52d_native_validation_closure_status_20260511.md`.
+- Verdict: `r52d screening-only failed confirmatory eligibility`.
+- Stop rule: do not start confirmatory / strict resume / promotion from `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01`.
+- Next research focus: deployment, cash timing, exposure utilization, and training evidence closure; do not repeat receiver mask repair as the main path.

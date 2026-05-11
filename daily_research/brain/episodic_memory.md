@@ -5,7 +5,7 @@
 ## 当前结论
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
-- 当前最新复盘是全仓维护与 r52d 状态纠偏：r52c receiver executable closure 已验证，r52d 代码合同、dry-run 与 safe screening-only 已存在，但无 confirmatory / stable verdict，剩余瓶颈仍是 deployment / cash timing / exposure utilization / training evidence。
+- 当前最新复盘是 r52d explicit evidence 裁决：r52d 代码合同、dry-run 与 safe screening-only 已存在，但 3/3 trials 均未通过 confirmatory eligibility；剩余瓶颈仍是 deployment / cash timing / exposure utilization / training evidence。
 - 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
@@ -70,3 +70,10 @@
 - 运行态发现：既有 `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` safe screening 后续已自然结束，产出 `study_summary.json`；结果为 3/3 screening trials completed、0 failed、confirmatory disabled、true solver disabled。
 - 边界：本轮不改 `active_execution_strategy.json`，不切换 live/default/promotion，不从 loose `latest_*` 自动落盘。
 - 行动后判断：r52d 只能作为 screening-only research result；没有 confirmatory、stable confirm 和 promotion verdict 前，不能写成策略结论。
+
+## 2026-05-11 r52d Explicit Evidence Verdict
+- 行动前自检：上一轮只确认 r52d safe screening 完成，并未裁决是否值得进入 confirmatory；loose `latest_*` 仍混有 r52d study 与 r34 protocol/audit/ledger，不能作为自动真源。
+- 执行动作：读取 `brain_workflow status --workflow continuous_policy --study-tag self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01 --json`，并固化 reference capsule：`daily_research/brain/references/r52d_native_validation_closure_status_20260511.md`。
+- 事实：3/3 screening trials completed、0 failed、confirmatory disabled、true solver disabled；`native_target_valid = 1.0 / 1.0 / 0.987654`，fallback `0 / 0 / 0.012346`。
+- 失败证据：3 个 trials 均 `training_evidence_status=insufficient`、`composite_score<0`、`cash_timing_quality_1d<0`、`portfolio_daily_exposure_utilization~0.33`；trial 03 还出现 `source_target_count=0` 与负收益。
+- 行动后判断：`r52d screening-only failed confirmatory eligibility`；不得 confirmatory、strict resume、promotion、live/default 或改 active artifact。下一步只应在 research code/objective 层修 deployment、cash timing、exposure utilization 与 training evidence 闭合。

@@ -17,7 +17,7 @@
 - r52b 结构入口为 `split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`；它是 r52 的 native target validity 修复入口，不是 formal verdict。
 - r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已完成 2/3 screening trials、0 failed，并因 resource gate 早停；结论是运行通道可用但 validity 未改善，不能进入 confirmatory 或 22 epoch resume。
 - r52c 结构入口为 `split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c` / `alpha_result_value_budget_split_v39`；safe screening 已完成 3/3 trials、0 failed，receiver executable closure 在 simulator 边界有效，但仍不是 formal verdict。
-- r52d 代码合同已存在：`split_heads_portfolio_daily_day_set_native_validation_closure_r52d` / `alpha_result_value_budget_split_v40`，并已有 validation closure、train/sim alignment、deadband 常量共享的合同测试；dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过；safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 已完成 3/3 trials、0 failed、confirmatory disabled、true solver disabled；这仍只是 screening-only 证据，不得 promotion / live / active artifact。
+- r52d 代码合同已存在：`split_heads_portfolio_daily_day_set_native_validation_closure_r52d` / `alpha_result_value_budget_split_v40`，并已有 validation closure、train/sim alignment、deadband 常量共享的合同测试；dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过；safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 已完成 3/3 trials、0 failed、confirmatory disabled、true solver disabled；explicit capsule 已判定 `r52d screening-only failed confirmatory eligibility`，不得 promotion / live / active artifact。
 
 ## 当前接管入口
 - 读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -33,7 +33,7 @@
 - r31 / r33 / r34-r39 保留为 receiver/source/cash 合同与证据基线；r40-r52 是 allocation layer 升级链。
 - r52c 之后当前最新问题不再是 unsupported receiver validity；瓶颈已转为 deployment / cash timing 闭合、exposure utilization 偏低、source depth 不稳与 formal training evidence 不足。
 - r52c safe screening 中 `native_target_valid = 0.975~1.0`，`allocation_layer_native_fallback_used = 0~0.025`，`native_target_invalid_unsupported_receiver_count = 0`；但全部 trials 仍为 `training_evidence_status = insufficient`，`cash_timing_quality_1d < 0`，`portfolio_daily_exposure_utilization ~= 0.33`。
-- 下一轮若继续 r52 系列，应先用 explicit capsule 读取 r52d 完整 screening-only 证据，再判断 deployment / cash timing / exposure utilization / source breadth 的 native feedback 与 resource gate；不得回到 receiver mask 修补，也不得直接 confirmatory、resume 或加长训练资源。
+- r52d 完整 screening-only 证据已用 explicit capsule 读取；当前结论是不进入 confirmatory、resume 或加长同 tag 训练。下一轮若继续 r52 系列，应优先修 deployment / cash timing / exposure utilization / training evidence 闭合，而不是回到 receiver mask 修补。
 
 ## 近期研究索引
 - r31：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，保留 receiver executable closure 合同。
@@ -80,9 +80,11 @@
 - stop conditions still triggered: `training_evidence_status=insufficient`; one trial has `source_target_count=2<3`; all trials have `cash_timing_quality_1d<0`; `portfolio_daily_exposure_utilization~0.33`.
 - decision boundary: do not enter confirmatory and do not start 22-epoch resume on r52c; keep this branch as research/shadow-only.
 
-## 2026-05-11 r52d Code Contract Status
+## 2026-05-11 r52d Screening Verdict
 - Fact: r52d profile and v40 loss contract are present in code and covered by focused tests for validation closure, train/sim alignment fields, and shared deadband constants.
 - Fact: dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` passed with 3 v40 trials, `confirmatory_enabled=false`, `native_validation_closure_support=true`, and true solver disabled.
 - Fact: safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` completed 3/3 trials, 0 failed, with `confirmatory_enabled=false`, `native_validation_closure_support=true`, and true solver disabled.
-- Current verdict: r52d has screening-only evidence, but no confirmatory run, stable confirm, promotion verdict, or live/default decision.
+- Evidence capsule: `daily_research/brain/references/r52d_native_validation_closure_status_20260511.md`.
+- Confirmatory gate failed: all trials have `training_evidence_status=insufficient`, `composite_score<0`, `cash_timing_quality_1d<0`, and `portfolio_daily_exposure_utilization~0.33`; trial 03 also has `source_target_count=0` and negative return.
+- Current verdict: `r52d screening-only failed confirmatory eligibility`; there is no confirmatory run, stable confirm, promotion verdict, or live/default decision.
 - Boundary: r52d may only be treated as a research/shadow screening result; do not promote it into live/default/promotion language.

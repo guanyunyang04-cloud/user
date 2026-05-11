@@ -47,7 +47,7 @@
 - r52b 的核心不是加长训练，而是让训练 projection、预测导出和 simulator validity 使用同一约束口径；若 `native_target_valid` 仍低，继续加 epoch 只会放大无效目标。
 - r52b safe screening 已验证：validity-first projection 还没有把 native target 有效消费率拉出 r52 低位区间；当 invalid reason 集中在 `native_target_invalid_unsupported_receiver_count` 时，首要问题是 receiver 可执行域和导出 mask 同口径，而不是训练资源不足。
 - r52c safe screening 已验证：receiver executable closure 可以把 simulator 边界的 `native_target_valid` 拉到 `0.975~1.0`、fallback 压到 `0~0.025`，但这只关闭 unsupported receiver validity；deployment / cash timing、exposure utilization、source depth 与 training evidence 仍未闭合，因此不能进入 confirmatory 或 22 epoch resume。
-- r52d 当前只证明代码合同、dry-run 与 safe screening-only 路径成立：validation closure、train/sim alignment 与 deadband 常量共享已有测试，dry-run 与 safe screening 均确认 v40 / support flags / true-solver-disabled；没有 confirmatory / stable verdict 时，不得解释成策略进展。
+- r52d 当前只证明代码合同、dry-run 与 safe screening-only 路径成立：validation closure、train/sim alignment 与 deadband 常量共享已有测试，dry-run 与 safe screening 均确认 v40 / support flags / true-solver-disabled；explicit capsule 已进一步确认其不具备 confirmatory eligibility，不能解释成策略进展。
 - `cp_v3_seq_holdcash_r1`、`cp_v3_seq_holdcash_r2`、`cp_v3_seq_holdcash_v5_formal_r1` 共同证明 hold/cash 改善必须经 formal evidence 复核。
 - `cp_hier_v4_holdcash_r5` 证明 hierarchical branch 可改善 reversal，但没有学出 hold 前仍只是 research branch。
 
@@ -64,7 +64,7 @@
 | r51-r52 | native allocation vector 与 day-set batch 是当前轻量主线，但仍需修 target validity / source threshold。 |
 | r52b | safe screening 未通过 validity 目标：native target valid 仍仅 1.25%-6.25%，fallback 仍 93.75%-98.75%，下一步应修 receiver executable mask / native target export / simulator validity 同口径。 |
 | r52c | receiver executable closure 已通过 simulator 边界验证，但最新瓶颈转为 cash timing 为负、exposure utilization 约 0.33、training evidence insufficient 与 source depth 不稳；下一步不应重复 receiver mask 修补。 |
-| r52d | validation closure 代码合同、测试、dry-run 与 safe screening-only 证据已存在；safe screening 3/3 completed、0 failed、confirmatory disabled，下一步只能复核完整证据后决定是否值得新一轮 confirmatory，不能 promotion / live。 |
+| r52d | validation closure 代码合同、测试、dry-run 与 safe screening-only 证据已存在；explicit capsule 判定 3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不进入 confirmatory / resume / promotion / live。 |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

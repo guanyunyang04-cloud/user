@@ -13,6 +13,7 @@
 - `brain_workflow health` 改为并行运行 `brain_integrity`、`doc_guard`、`project_consistency`、`openmp_strict`，并输出每项耗时与总耗时。
 - 新增/更新单测覆盖 health 并行聚合、每项耗时输出、brain 文档线程 URI 禁止规则与 pytest cache 例外。
 - `daily_research` 分脑已写回 r52d 当前状态：profile、v40 loss、合同测试、dry-run 与 safe screening-only 证据存在，但尚无 confirmatory / stable 策略结论。
+- `daily_research` 已补充 r52d explicit evidence capsule，并裁决 `r52d screening-only failed confirmatory eligibility`；本轮不启动 confirmatory / resume / promotion。
 - `daily_stock_analysis-main` 修正 Windows 后端构建脚本、后端验证配置、Web ESLint flat config、Web smoke 认证边界和 Windows UTF-8 源码测试。
 - `t0_project` 只做离线静态验收并写回实验隔离边界。
 
@@ -27,7 +28,7 @@
 - Web smoke 曾在 `ADMIN_AUTH_ENABLED=false` 时错误期待登录页；已改为先读认证状态。
 
 ## 4. 未修复或需决策问题
-- r52d 仍缺 confirmatory / stable verdict；是否启动 confirmatory 必须先复核 safe screening-only 的 deployment、cash timing、exposure utilization、source breadth 与 v2/stability gate。
+- r52d 已完成 safe screening-only 裁决：3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不启动 confirmatory；仍缺的是下一轮 deployment / cash timing / exposure utilization / training evidence 修复方案。
 - `bash scripts/ci_gate.sh all` 在当前 Windows 环境会进入 WSL bash，WSL 内没有 `python`，因此该入口未通过；PowerShell 等价分项已通过。
 - DSA 桌面构建仍受 Windows Developer Mode / electron-builder symlink 与网络下载影响，未形成通过结论。
 - Web `npm audit` 仍提示依赖漏洞，Vite build 仍提示主 chunk 偏大；需要产品/依赖升级决策。
@@ -45,6 +46,8 @@
   - `pytest daily_research/tools/tests daily_research/continuous_policy/tests -q`：`126 passed`
   - r52d dry-run：`self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过
   - r52d safe screening-only：`self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 完成 3/3 trials、0 failed、confirmatory disabled、true solver disabled
+  - r52d explicit evidence verdict：`r52d screening-only failed confirmatory eligibility`
+  - r52d evidence capsule：`daily_research/brain/references/r52d_native_validation_closure_status_20260511.md`
 - `daily_stock_analysis-main` 通过：
   - `python scripts/check_ai_assets.py`
   - backend `py_compile`
@@ -56,9 +59,9 @@
 - `t0_project` 通过：
   - `python -m py_compile` 覆盖全部 `t0_project/**/*.py`
 - 全仓收尾：
-  - `rg --hidden --glob '!**/.git/**' --glob '!**/node_modules/**' -n "codex://"`：无匹配
+  - 全仓运行时线程 URI 搜索：无匹配
   - `git diff --check`：通过
-  - `git status --short --branch`：仅保留本轮源码、测试、brain 文档、报告与 DSA changelog 改动；未提交、未推送
+  - `git status --short --branch`：当前仅保留本轮 `daily_research` brain/reference 与维护报告写回改动；未提交、未推送
 
 ## 6. 回滚建议
 - 若 health 并行聚合出现平台兼容问题，回滚 `daily_research/tools/brain_platform.py` 的 `ThreadPoolExecutor` 调度改动，并保留 `_run_check` 耗时字段。
