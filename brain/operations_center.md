@@ -26,6 +26,7 @@
 - 工作区级拓扑写回 `brain/master_brain.md`
 - 工作区级治理写回 `brain/governance_layer.md`
 - 工作区级方法、环境与守卫入口写回 `brain/operations_center.md`
+- 不写回 Codex 线程深链；任务连续性用 brain 路由、分脑状态、产物路径、study tag 或 run tag 表达。
 
 ## 4. 守卫入口
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
