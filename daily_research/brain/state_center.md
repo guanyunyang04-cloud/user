@@ -16,6 +16,7 @@
 - 2026-05-11 已新增 explicit study evidence capsule：`brain_workflow status --workflow continuous_policy --study-tag <tag> --json` 可按指定 study 聚合 study / protocol / training / evaluation 证据；loose `latest_*` 仍显示 r52 study 与 r34 protocol/audit/ledger 不同源，不能直接作为真源。
 - r52b 结构入口为 `split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`；它是 r52 的 native target validity 修复入口，不是 formal verdict。
 - r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已完成 2/3 screening trials、0 failed，并因 resource gate 早停；结论是运行通道可用但 validity 未改善，不能进入 confirmatory 或 22 epoch resume。
+- r52c 结构入口为 `split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c` / `alpha_result_value_budget_split_v39`；safe screening 已完成 3/3 trials、0 failed，receiver executable closure 在 simulator 边界有效，但仍不是 formal verdict。
 
 ## 当前接管入口
 - 读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -29,9 +30,9 @@
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
 - continuous_policy 的深层瓶颈是组合日资金分配：同一天谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
 - r31 / r33 / r34-r39 保留为 receiver/source/cash 合同与证据基线；r40-r52 是 allocation layer 升级链。
-- r52 当前最新问题不是单纯训练资源不足，而是 native target valid rate 低、source delta 阈值鲁棒性不足、turnover / constraint violation 仍高。
-- r52b safe screening 中 `native_target_valid = 0.0625 / 0.0125`，`allocation_layer_native_fallback_used = 0.9375 / 0.9875`，主要 simulator invalid reason 是 `native_target_invalid_unsupported_receiver_count = 306 / 346`。
-- 下一轮若继续 r52 系列，应先修 native target receiver 可执行域、导出 mask 与 simulator validity 同口径问题，再重新 safe screening；不得直接加长训练资源。
+- r52c 之后当前最新问题不再是 unsupported receiver validity；瓶颈已转为 deployment / cash timing 闭合、exposure utilization 偏低、source depth 不稳与 formal training evidence 不足。
+- r52c safe screening 中 `native_target_valid = 0.975~1.0`，`allocation_layer_native_fallback_used = 0~0.025`，`native_target_invalid_unsupported_receiver_count = 0`；但全部 trials 仍为 `training_evidence_status = insufficient`，`cash_timing_quality_1d < 0`，`portfolio_daily_exposure_utilization ~= 0.33`。
+- 下一轮若继续 r52 系列，应优先围绕 deployment / cash timing / exposure utilization / source breadth 的 native target feedback 与 resource gate 设计 r52d；不得回到 receiver mask 修补，也不得直接加长训练资源。
 
 ## 近期研究索引
 - r31：`split_heads_portfolio_daily_receiver_semantic_closure_r31`，保留 receiver executable closure 合同。

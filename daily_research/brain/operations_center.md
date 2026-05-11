@@ -55,7 +55,8 @@
 - r52 当前判定：native source-delta closure 已部分修通，但 evidence insufficient，不能进入 confirmatory。
 - r52b：`split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`，优先修 native target validity、turnover 同口径与 source audit threshold；诊断必须读取 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段。
 - r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已验证：2/3 trials completed、0 failed、`confirmatory_enabled = false`、`resource_profile = safe`、true solver 未启用；resource gate 因 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak` 早停。
-- r52b 当前停止条件已触发：`native_target_valid = 0.0625 / 0.0125`，未高于 r52 的 1%-6% 区间；`allocation_layer_native_fallback_used = 0.9375 / 0.9875`；不得进入 confirmatory 或 22 epoch resume。
+- r52b 停止条件已触发：`native_target_valid = 0.0625 / 0.0125`，未高于 r52 的 1%-6% 区间；`allocation_layer_native_fallback_used = 0.9375 / 0.9875`；不得进入 confirmatory 或 22 epoch resume。
+- r52c：`split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c` / `alpha_result_value_budget_split_v39`，已验证 receiver executable closure；当前复核重点改为 `training_evidence_status`、`cash_timing_quality_1d`、`portfolio_daily_exposure_utilization`、`native_source_target_count` 与 deployment closure，不再把 unsupported receiver validity 当作主阻塞。
 
 ## r52 dry-run 模板
 ```powershell

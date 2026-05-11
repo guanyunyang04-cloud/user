@@ -5,7 +5,7 @@
 ## 当前结论
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
-- 当前最新复盘是 r52b safe screening 验证与 native target validity 失败归因。
+- 当前最新复盘是 r52c safe screening 与 evidence export closure：receiver executable closure 已验证，剩余瓶颈转为 deployment / cash timing / exposure utilization / training evidence。
 - 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
