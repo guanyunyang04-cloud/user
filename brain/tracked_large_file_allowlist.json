@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "max_tracked_file_size_bytes": 10485760,
+  "allowed": [
+    {
+      "path": "daily_stock_analysis-main/sources/2026-01-10_155341_daily_analysis.gif",
+      "max_size_bytes": 41943040,
+      "reason": "Product documentation/demo visual asset retained in upstream product tree."
+    },
+    {
+      "path": "daily_stock_analysis-main/sources/dsa_vi/darklogo.psd",
+      "max_size_bytes": 20971520,
+      "reason": "Source design asset retained for product branding reproduction."
+    },
+    {
+      "path": "daily_stock_analysis-main/sources/dsa_vi/lightlogo.psd",
+      "max_size_bytes": 12582912,
+      "reason": "Source design asset retained for product branding reproduction."
+    }
+  ]
+}

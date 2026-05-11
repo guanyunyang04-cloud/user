@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -219,6 +220,8 @@ BRAIN_DOC_PREFIXES = (
     "daily_stock_analysis-main/brain/",
 )
 FORBIDDEN_CODEX_URI_PATTERN = re.compile(r"\b" + "codex" + r"://", re.IGNORECASE)
+TRACKED_LARGE_FILE_ALLOWLIST = Path("brain/tracked_large_file_allowlist.json")
+DEFAULT_TRACKED_LARGE_FILE_LIMIT_BYTES = 10 * 1024**2
 GENERATED_DOC_PATH_PARTS = frozenset(
     {
         ".pytest_cache",
@@ -901,6 +904,65 @@ def _check_brain_thread_deeplinks() -> list[str]:
     return issues
 
 
+def _git_tracked_paths() -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=str(WORKSPACE_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _load_tracked_large_file_policy() -> tuple[int, dict[str, dict[str, Any]], list[str]]:
+    path = WORKSPACE_ROOT / TRACKED_LARGE_FILE_ALLOWLIST
+    if not path.exists():
+        return DEFAULT_TRACKED_LARGE_FILE_LIMIT_BYTES, {}, []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return DEFAULT_TRACKED_LARGE_FILE_LIMIT_BYTES, {}, [f"tracked_large_file_allowlist_invalid_json:{exc}"]
+    threshold = int(payload.get("max_tracked_file_size_bytes") or DEFAULT_TRACKED_LARGE_FILE_LIMIT_BYTES)
+    allowed: dict[str, dict[str, Any]] = {}
+    issues: list[str] = []
+    for index, item in enumerate(payload.get("allowed", [])):
+        if not isinstance(item, dict):
+            issues.append(f"tracked_large_file_allowlist_entry_invalid:{index}")
+            continue
+        relative_path = str(item.get("path", "")).replace("\\", "/").strip()
+        reason = str(item.get("reason", "")).strip()
+        if not relative_path or not reason:
+            issues.append(f"tracked_large_file_allowlist_entry_missing_path_or_reason:{index}")
+            continue
+        allowed[relative_path] = item
+    return threshold, allowed, issues
+
+
+def _check_tracked_large_files(tracked_paths: Iterable[str] | None = None) -> list[str]:
+    threshold, allowed, issues = _load_tracked_large_file_policy()
+    paths = list(tracked_paths) if tracked_paths is not None else _git_tracked_paths()
+    for raw_path in paths:
+        relative_path = raw_path.replace("\\", "/").strip().strip('"')
+        path = WORKSPACE_ROOT / relative_path
+        if not path.exists() or not path.is_file():
+            continue
+        size = path.stat().st_size
+        if size <= threshold:
+            continue
+        allowed_entry = allowed.get(relative_path)
+        if not allowed_entry:
+            issues.append(f"tracked_large_file_not_allowlisted:{relative_path}:{size}")
+            continue
+        max_size = int(allowed_entry.get("max_size_bytes") or threshold)
+        if size > max_size:
+            issues.append(f"tracked_large_file_exceeds_allowlist:{relative_path}:{size}>{max_size}")
+    return issues
+
+
 def _check_active_execution_brain_alignment() -> list[str]:
     issues: list[str] = []
     active_path = WORKSPACE_ROOT / "daily_research/output/active_execution_strategy.json"
@@ -1043,6 +1105,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     if active_alignment_issues:
         has_issue = True
         for issue in active_alignment_issues[: args.show_lines]:
+            print(f"    ! {issue}")
+
+    tracked_large_file_issues = _check_tracked_large_files()
+    print(f"[tracked-large-files] issues={len(tracked_large_file_issues)}")
+    if tracked_large_file_issues:
+        has_issue = True
+        for issue in tracked_large_file_issues[: args.show_lines]:
             print(f"    ! {issue}")
 
     brain_findings = run_brain_integrity_checks()

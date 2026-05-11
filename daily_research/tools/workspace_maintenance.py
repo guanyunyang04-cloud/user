@@ -34,6 +34,7 @@ REPORT_ALERT_THRESHOLDS = {
 }
 ARCHIVE_MONITORED_SOURCES = ("daily_research/cache", "daily_research/output")
 HOTSPOT_PREVIEW_LIMIT = 5
+DEFAULT_PRUNE_ARCHIVE_PREFIX = "daily_research/archive/cache/"
 
 TARGET_SPECS = {
     "pycache": {
@@ -819,6 +820,120 @@ def cmd_archive(args: argparse.Namespace) -> int:
     return 0
 
 
+def build_archive_prune_plan(root: Path, manifest_path: Path, selected_rules: Iterable[str]) -> dict[str, Any]:
+    selected = {name for name in selected_rules if name}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    candidates: list[dict[str, Any]] = []
+    for item in manifest.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        rule = str(item.get("rule", "")).strip()
+        if selected and rule not in selected:
+            continue
+        archived_path = str(item.get("archived_path", "")).replace("\\", "/").strip()
+        if not archived_path.startswith(DEFAULT_PRUNE_ARCHIVE_PREFIX):
+            continue
+        target = root / archived_path
+        if not target.exists():
+            continue
+        candidate = dict(item)
+        candidate["archived_path"] = archived_path
+        candidate["actual_size_bytes"] = path_size(target)
+        candidates.append(candidate)
+    return {
+        "source_manifest": str(manifest_path.relative_to(root)) if manifest_path.is_relative_to(root) else str(manifest_path),
+        "source_batch_id": manifest.get("batch_id", ""),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "prune_scope": DEFAULT_PRUNE_ARCHIVE_PREFIX,
+        "selected_rules": sorted(selected),
+        "candidate_count": len(candidates),
+        "candidate_size_bytes": sum(int(item.get("actual_size_bytes", item.get("size_bytes", 0))) for item in candidates),
+        "candidates": candidates,
+    }
+
+
+def _ensure_prune_target_is_safe(root: Path, target: Path) -> None:
+    allowed_root = (root / DEFAULT_PRUNE_ARCHIVE_PREFIX).resolve()
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError as exc:
+        raise SystemExit(f"Refusing to prune outside {allowed_root}: {resolved}") from exc
+
+
+def print_archive_prune_plan(plan: dict[str, Any], limit: int) -> None:
+    print(f"Source manifest: {plan['source_manifest']}")
+    print(f"Source batch: {plan['source_batch_id']}")
+    print(f"Prune scope: {plan['prune_scope']}")
+    print(f"Candidates: {plan['candidate_count']}")
+    print(f"Candidate size: {format_bytes(plan['candidate_size_bytes'])}")
+    preview = plan["candidates"] if limit == 0 else plan["candidates"][:limit]
+    for item in preview:
+        kind = "dir " if item.get("is_dir") else "file"
+        size = int(item.get("actual_size_bytes", item.get("size_bytes", 0)))
+        print(f"  - [{kind}] {item['archived_path']} ({format_bytes(size)})")
+    hidden = len(plan["candidates"]) - len(preview)
+    if hidden > 0:
+        print(f"  ... {hidden} more candidate(s)")
+
+
+def cmd_prune_archive(args: argparse.Namespace) -> int:
+    manifest_path = resolve_workspace_path(args.manifest)
+    selected_rules = [item.strip() for item in args.rules.split(",") if item.strip()]
+    plan = build_archive_prune_plan(WORKSPACE_ROOT, manifest_path, selected_rules)
+    print_archive_prune_plan(plan, args.limit)
+
+    if args.json_out:
+        out_path = resolve_workspace_path(args.json_out)
+        write_json(out_path, plan)
+        print()
+        print(f"Archive prune plan JSON written to: {out_path}")
+
+    if not args.apply:
+        print()
+        print("Dry run only. Re-run with --apply to delete the matched archived cache payloads.")
+        return 0
+
+    removed_items: list[dict[str, Any]] = []
+    removed_size = 0
+    for item in plan["candidates"]:
+        target = WORKSPACE_ROOT / item["archived_path"]
+        if not target.exists():
+            continue
+        _ensure_prune_target_is_safe(WORKSPACE_ROOT, target)
+        size = path_size(target)
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=False)
+        else:
+            target.unlink(missing_ok=True)
+        removed = dict(item)
+        removed["removed_size_bytes"] = size
+        removed_items.append(removed)
+        removed_size += size
+
+    prune_manifest = {
+        "source_manifest": plan["source_manifest"],
+        "source_batch_id": plan["source_batch_id"],
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "prune_scope": plan["prune_scope"],
+        "removed_count": len(removed_items),
+        "removed_size_bytes": removed_size,
+        "items": removed_items,
+    }
+    manifest_out = (
+        resolve_workspace_path(args.manifest_out)
+        if args.manifest_out
+        else WORKSPACE_ROOT / "daily_research" / "archive" / "manifests" / f"prune_{plan['source_batch_id'] or datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
+    write_json(manifest_out, prune_manifest)
+
+    print()
+    print(f"Pruned items: {len(removed_items)}")
+    print(f"Pruned size: {format_bytes(removed_size)}")
+    print(f"Prune manifest written to: {manifest_out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Workspace report and cleanup helper for daily_research + t0_project.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -846,6 +961,15 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("--batch-name", default="", help="Optional archive batch id; defaults to a timestamp.")
     archive.add_argument("--apply", action="store_true", help="Actually move matched items into the archive area.")
     archive.set_defaults(func=cmd_archive)
+
+    prune = sub.add_parser("prune-archive", help="Delete archived cache payloads listed in an archive manifest. Dry-run by default.")
+    prune.add_argument("--manifest", required=True, help="Archive manifest JSON path.")
+    prune.add_argument("--rules", default="", help="Optional comma-separated cache archive rule names.")
+    prune.add_argument("--limit", type=int, default=20, help="Preview at most N candidates. Use 0 for all.")
+    prune.add_argument("--json-out", default="", help="Optional path for a UTF-8 prune plan.")
+    prune.add_argument("--manifest-out", default="", help="Optional path for the prune manifest when --apply is used.")
+    prune.add_argument("--apply", action="store_true", help="Actually delete matched archived cache payloads.")
+    prune.set_defaults(func=cmd_prune_archive)
     return parser
 
 

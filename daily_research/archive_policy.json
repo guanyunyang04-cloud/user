@@ -46,7 +46,7 @@
       "source": "daily_research/cache/deep_alpha/features",
       "archive_subdir": "cache/deep_alpha/features",
       "path_kind": "file",
-      "keep_recent_count": 12,
+      "keep_recent_count": 2,
       "keep_recent_days": 21,
       "max_hot_size_mb": 3072,
       "protect_globs": []
@@ -57,7 +57,7 @@
       "source": "daily_research/cache/deep_alpha/corpus",
       "archive_subdir": "cache/deep_alpha/corpus",
       "path_kind": "file",
-      "keep_recent_count": 6,
+      "keep_recent_count": 1,
       "keep_recent_days": 21,
       "max_hot_size_mb": 4096,
       "protect_globs": []

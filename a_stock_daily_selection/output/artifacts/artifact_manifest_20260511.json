@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-05-11",
+  "purpose": "Lightweight manifest for large generated research artifacts removed from Git tracking.",
+  "tracking_policy": "Payload files remain local/ignored and must not be committed; regenerate from the a_stock_daily_selection pipeline when needed.",
+  "artifacts": [
+    {
+      "path": "a_stock_daily_selection/output/artifacts/scored_predictions.pkl",
+      "size_bytes": 75839422,
+      "sha256": "dd6a0b8e71762bac521ff7270c2186638522063aa4e0ee8bb57f30a86ed8e22b"
+    },
+    {
+      "path": "a_stock_daily_selection/output/artifacts/feature_label_panel.pkl",
+      "size_bytes": 68262917,
+      "sha256": "300376da911f35701d8d7a66b19c6033a8bcf4f57c310e49e4fac78e4bae7367"
+    },
+    {
+      "path": "a_stock_daily_selection/output/artifacts/training_dataset.pkl",
+      "size_bytes": 68184209,
+      "sha256": "d3fd10e7f74c2b256753065f0cdd249f778132f766666e7c1beb14ab51edee76"
+    },
+    {
+      "path": "a_stock_daily_selection/output/artifacts/ranker.pkl",
+      "size_bytes": 1279681,
+      "sha256": "e880549d8a50d00b0272e31cabd3d3c5a4577543dbee4b57687ed10bf72895f6"
+    }
+  ]
+}

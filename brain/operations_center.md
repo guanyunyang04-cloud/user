@@ -33,6 +33,7 @@
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
 - `doc_guard.py check` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `brain_integrity_check.py --json` 便于快速定位
+- 不再单独运行全仓 Codex 线程 URI 深链搜索；该规则由 `doc_guard.py check` 的 thread-deeplink 守卫统一验收。
 
 ## 5. 环境基线
 - brain 文档统一使用 UTF-8

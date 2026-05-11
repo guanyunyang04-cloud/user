@@ -1,0 +1,135 @@
+{
+  "batch_id": "20260511_full_slim_r2_cache_policy",
+  "generated_at": "2026-05-11T21:53:51",
+  "policy_path": "daily_research\\archive_policy.json",
+  "policy_version": 1,
+  "archive_root": "daily_research/archive",
+  "selected_rules": [
+    "deep_alpha_features_cache",
+    "deep_alpha_corpus_cache"
+  ],
+  "moved_count": 15,
+  "moved_size_bytes": 44863025146,
+  "items": [
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\7c3c31803ceefa7a.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\7c3c31803ceefa7a.pkl",
+      "size_bytes": 1895048860,
+      "is_dir": false,
+      "latest_mtime": "2026-04-21T23:05:22"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\3d1bda5571243f0b.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\3d1bda5571243f0b.pkl",
+      "size_bytes": 1897328867,
+      "is_dir": false,
+      "latest_mtime": "2026-04-22T16:09:56"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\5be6b185a9179294.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\5be6b185a9179294.pkl",
+      "size_bytes": 1899610178,
+      "is_dir": false,
+      "latest_mtime": "2026-04-23T15:46:20"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\a1de4b0fea097bd8.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\a1de4b0fea097bd8.pkl",
+      "size_bytes": 1751731427,
+      "is_dir": false,
+      "latest_mtime": "2026-04-24T16:14:08"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\67e34c0ab186795a.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\67e34c0ab186795a.pkl",
+      "size_bytes": 1753094887,
+      "is_dir": false,
+      "latest_mtime": "2026-04-27T15:39:30"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\eb33042f6f24a37c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\eb33042f6f24a37c.pkl",
+      "size_bytes": 1754458401,
+      "is_dir": false,
+      "latest_mtime": "2026-04-28T15:17:24"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\430aa9bb0dc5f7ca.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\430aa9bb0dc5f7ca.pkl",
+      "size_bytes": 1755821733,
+      "is_dir": false,
+      "latest_mtime": "2026-04-29T15:21:04"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\ad67864ac8d5d19c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\ad67864ac8d5d19c.pkl",
+      "size_bytes": 1757185044,
+      "is_dir": false,
+      "latest_mtime": "2026-04-30T15:14:30"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\b1bb3b2efe595db3.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\b1bb3b2efe595db3.pkl",
+      "size_bytes": 1758548236,
+      "is_dir": false,
+      "latest_mtime": "2026-05-06T15:30:48"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\7d395eba307cc146.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\20260511_full_slim_r2_cache_policy\\7d395eba307cc146.pkl",
+      "size_bytes": 1759911253,
+      "is_dir": false,
+      "latest_mtime": "2026-05-07T15:15:04"
+    },
+    {
+      "rule": "deep_alpha_corpus_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\corpus\\e20ca638ad73c86d.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\corpus\\20260511_full_slim_r2_cache_policy\\e20ca638ad73c86d.pkl",
+      "size_bytes": 6394861564,
+      "is_dir": false,
+      "latest_mtime": "2026-04-11T10:08:42"
+    },
+    {
+      "rule": "deep_alpha_corpus_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\corpus\\efa218cfdbe44f06.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\corpus\\20260511_full_slim_r2_cache_policy\\efa218cfdbe44f06.pkl",
+      "size_bytes": 6667592003,
+      "is_dir": false,
+      "latest_mtime": "2026-04-11T01:40:14"
+    },
+    {
+      "rule": "deep_alpha_corpus_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\corpus\\47f4d0fbde232bcb.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\corpus\\20260511_full_slim_r2_cache_policy\\47f4d0fbde232bcb.pkl",
+      "size_bytes": 3538746613,
+      "is_dir": false,
+      "latest_mtime": "2026-04-11T00:44:42"
+    },
+    {
+      "rule": "deep_alpha_corpus_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\corpus\\e2a288480716f298.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\corpus\\20260511_full_slim_r2_cache_policy\\e2a288480716f298.pkl",
+      "size_bytes": 6715618642,
+      "is_dir": false,
+      "latest_mtime": "2026-04-10T17:11:56"
+    },
+    {
+      "rule": "deep_alpha_corpus_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\corpus\\d953ed512930b149.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\corpus\\20260511_full_slim_r2_cache_policy\\d953ed512930b149.pkl",
+      "size_bytes": 3563467438,
+      "is_dir": false,
+      "latest_mtime": "2026-04-10T16:19:46"
+    }
+  ]
+}
