@@ -66,6 +66,7 @@
 | r52c | receiver executable closure 已通过 simulator 边界验证，但最新瓶颈转为 cash timing 为负、exposure utilization 约 0.33、training evidence insufficient 与 source depth 不稳；下一步不应重复 receiver mask 修补。 |
 | r52d | validation closure 代码合同、测试、dry-run 与 safe screening-only 证据已存在；explicit capsule 判定 3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不进入 confirmatory / resume / promotion / live。 |
 | r52e | safe screening failed after 1/3 trials: resource gate stopped on source release dead, weak economics, low exposure and high actual cash; recomputed closure audit shows high deployable idle cash and `cash_semantics_mismatch`, so r52e cannot enter resume / confirmatory / promotion. |
+| r53 | cash-funded allocation core v2 is a new research line. It materially improved cash/exposure closure in safe screening, but still has insufficient training evidence, negative cash timing, and strongly negative composite score; it is not eligible for confirmatory, strict resume, promotion, live/default, or active artifact changes. |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

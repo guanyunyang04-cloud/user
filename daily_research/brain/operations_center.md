@@ -134,3 +134,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - Safe screening command used:
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01 --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`
 - Stop rule: do not run confirmatory or strict resume from this tag; resource gate already stopped after 1/3 trials and closure diagnostics still show high idle cash / low exposure.
+
+## 2026-05-12 r53 Operational Note
+- r53 dry-run tag: `self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03`.
+- r53 safe screening tag: `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03`.
+- Evidence capsule: `daily_research/brain/references/r53_cash_funded_allocation_core_status_20260512.md`.
+- r53 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, 2-hour foreground polling for long runs.
+- Stop rule: do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from r53 until a later explicit safe screening fixes negative cash timing and insufficient training evidence.

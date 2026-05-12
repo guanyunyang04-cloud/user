@@ -35,6 +35,23 @@ def _first_numeric(frame: pd.DataFrame, names: tuple[str, ...], default: float =
     return pd.Series(default, index=frame.index, dtype=float)
 
 
+def _first_text(frame: pd.DataFrame, names: tuple[str, ...], default: str = "") -> pd.Series:
+    for name in names:
+        if name in frame.columns:
+            return frame[name].fillna(default).astype(str)
+    return pd.Series(default, index=frame.index, dtype=str)
+
+
+def _mode_text(series: pd.Series) -> str:
+    if series.empty:
+        return ""
+    cleaned = series.fillna("").astype(str)
+    cleaned = cleaned[cleaned.str.len() > 0]
+    if cleaned.empty:
+        return ""
+    return str(cleaned.value_counts().sort_values(ascending=False).index[0])
+
+
 def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> dict[str, Any]:
     """Summarize cash/exposure closure from a shadow turnover panel."""
     if turnover_frame.empty:
@@ -52,6 +69,13 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
             "source_dead_day_share": 0.0,
             "allocation_objective_mean": 0.0,
             "native_fallback_mean": 0.0,
+            "target_sum_gap": 0.0,
+            "cash_funded_deploy_amount_mean": 0.0,
+            "source_funded_deploy_amount_mean": 0.0,
+            "unused_receiver_headroom_mean": 0.0,
+            "receiver_headroom_utilization_mean": 0.0,
+            "source_release_required": False,
+            "underdeployment_reason": "",
         }
 
     working = turnover_frame.copy()
@@ -125,6 +149,42 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
         0.0,
     )
     native_fallback = _first_numeric(working, ("allocation_layer_native_fallback_used",), 0.0).clip(0.0, 1.0)
+    target_sum_gap = _first_numeric(
+        working,
+        ("allocation_layer_target_sum_gap", "target_sum_gap"),
+        np.nan,
+    )
+    target_sum_gap = target_sum_gap.where(target_sum_gap.notna(), (stock_budget - target_weight_sum).clip(lower=0.0))
+    cash_funded_deploy_amount = _first_numeric(
+        working,
+        ("allocation_layer_cash_funded_deploy_amount", "cash_funded_deploy_amount"),
+        0.0,
+    ).clip(lower=0.0)
+    source_funded_deploy_amount = _first_numeric(
+        working,
+        ("allocation_layer_source_funded_deploy_amount", "source_funded_deploy_amount"),
+        0.0,
+    ).clip(lower=0.0)
+    unused_receiver_headroom = _first_numeric(
+        working,
+        ("allocation_layer_unused_receiver_headroom", "unused_receiver_headroom"),
+        0.0,
+    ).clip(lower=0.0)
+    receiver_headroom_utilization = _first_numeric(
+        working,
+        ("allocation_layer_receiver_headroom_utilization", "receiver_headroom_utilization"),
+        0.0,
+    ).clip(0.0, 1.0)
+    source_release_required = _first_numeric(
+        working,
+        ("allocation_layer_source_release_required", "source_release_required"),
+        0.0,
+    ).clip(0.0, 1.0)
+    underdeployment_reason = _first_text(
+        working,
+        ("allocation_layer_underdeployment_reason", "underdeployment_reason"),
+        "",
+    )
 
     day_count = int(working["date"].nunique()) if "date" in working.columns else int(len(working))
     avg_gross_target = _safe_mean(gross_target)
@@ -151,6 +211,13 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
         "source_dead_day_share": source_dead_share,
         "allocation_objective_mean": _safe_mean(allocation_objective),
         "native_fallback_mean": _safe_mean(native_fallback),
+        "target_sum_gap": _safe_mean(target_sum_gap),
+        "cash_funded_deploy_amount_mean": _safe_mean(cash_funded_deploy_amount),
+        "source_funded_deploy_amount_mean": _safe_mean(source_funded_deploy_amount),
+        "unused_receiver_headroom_mean": _safe_mean(unused_receiver_headroom),
+        "receiver_headroom_utilization_mean": _safe_mean(receiver_headroom_utilization),
+        "source_release_required": bool(_safe_mean(source_release_required) >= 0.5),
+        "underdeployment_reason": _mode_text(underdeployment_reason),
     }
 
 

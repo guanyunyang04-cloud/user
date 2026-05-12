@@ -69,3 +69,9 @@
 - 若 r52d 后续 confirmatory 或 stability 失败，只回写分脑状态与报告，不回滚 r52d 代码合同，除非测试证明合同本身错误。
 - 若 DSA smoke helper 在认证开启环境异常，优先复核 `/api/v1/auth/status` 与 `DSA_WEB_SMOKE_PASSWORD`，不要退回固定登录页假设。
 - 若桌面构建仍失败，优先在启用 Developer Mode 或 CI Windows runner 上复验 electron-builder 缓存解压，再判断是否需要脚本级修正。
+## 2026-05-12 r53 Addendum
+- Scope: continued only the `daily_research` mainline. DSA, t0, live/default/promotion, and `active_execution_strategy.json` were not changed.
+- Code: added r53 cash-funded allocation core v2, r53/v43 registration, simulator v2 path, closure diagnostics, and cash-first resource gate semantics.
+- Evidence: dry-run `self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03` passed; safe screening `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03` completed 3/3 trials with confirmatory disabled.
+- Result: r53 materially fixed the high-cash / low-exposure failure shape, but remains research/shadow-only because training evidence is insufficient, cash timing is negative, and composite score is strongly negative.
+- Guardrail: no confirmatory, strict resume, promotion, live/default, or active artifact change is allowed from this evidence.

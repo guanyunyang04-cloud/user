@@ -10,6 +10,10 @@ from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     solve_semidifferentiable_allocation,
 )
+from daily_research.continuous_policy.allocation_core_v2 import (
+    AllocationCoreV2Constraints,
+    solve_cash_funded_allocation_v2,
+)
 from daily_research.continuous_policy.native_allocation import (
     SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
     SIMULATOR_NATIVE_DEADBAND_ABS,
@@ -766,6 +770,13 @@ class PortfolioState:
             budget_semantics == BUDGET_SEMANTICS_ALLOCATION_LAYER
             or budget_calibration == BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER
         )
+        allocation_core_v2_global_mode = float(
+            (global_targets or {}).get(
+                "allocation_core_v2_mode",
+                (global_targets or {}).get("cash_funded_allocation_core_v2_mode", 0.0),
+            )
+            or 0.0
+        ) > 0.5
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -870,6 +881,15 @@ class PortfolioState:
             if name not in policy.columns:
                 return None
             return pd.to_numeric(policy[name], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+        allocation_core_v2_policy_mode = _optional_policy_numeric("allocation_core_v2_mode")
+        allocation_core_v2_mode = bool(
+            allocation_core_v2_global_mode
+            or (
+                allocation_core_v2_policy_mode is not None
+                and bool((allocation_core_v2_policy_mode > 0.5).any())
+            )
+        )
 
         def _masked_mean(values: pd.Series, mask: pd.Series) -> float:
             selected = values.loc[mask.reindex(values.index).fillna(False)]
@@ -3947,6 +3967,14 @@ class PortfolioState:
         allocation_layer_objective_value = 0.0
         allocation_layer_constraint_violations = 0.0
         allocation_layer_native_target_used = 0.0
+        allocation_layer_core_v2_used = 0.0
+        allocation_layer_target_sum_gap = float(max(0.0, float(gross_exposure_target) - float(target_weights.sum())))
+        allocation_layer_cash_funded_deploy_amount = 0.0
+        allocation_layer_source_funded_deploy_amount = 0.0
+        allocation_layer_unused_receiver_headroom = 0.0
+        allocation_layer_receiver_headroom_utilization = 0.0
+        allocation_layer_source_release_required = 0.0
+        allocation_layer_underdeployment_reason = "not_applicable"
         native_target_valid = 0.0
         native_negative_delta_count = 0
         native_positive_delta_count = 0
@@ -3980,6 +4008,35 @@ class PortfolioState:
                 allocation_layer_source_executable_candidate = (
                     portfolio_daily_source_candidate | portfolio_daily_unified_source_candidate
                 )
+            if allocation_core_v2_mode:
+                receiver_signal = pd.concat(
+                    [
+                        _policy_numeric("portfolio_daily_receiver_executability").rename("executability"),
+                        _policy_numeric("portfolio_daily_receiver_score").rename("score"),
+                        _policy_numeric("portfolio_daily_unified_receiver_score").rename("unified_score"),
+                    ],
+                    axis=1,
+                ).max(axis=1)
+                receiver_headroom_for_core = (position_cap_target - current.reindex(prices.index).fillna(0.0)).clip(
+                    lower=0.0
+                )
+                broad_receiver = (receiver_signal > 0.02) & (receiver_headroom_for_core > 1.0e-8)
+                allocation_layer_receiver_executable_candidate = (
+                    allocation_layer_receiver_executable_candidate | broad_receiver
+                )
+                source_signal = pd.concat(
+                    [
+                        _policy_numeric("portfolio_daily_source_executability").rename("executability"),
+                        _policy_numeric("portfolio_daily_source_score").rename("score"),
+                        _policy_numeric("portfolio_daily_unified_source_score").rename("unified_score"),
+                        _policy_numeric("portfolio_daily_source_release_capacity").rename("release_capacity"),
+                    ],
+                    axis=1,
+                ).max(axis=1)
+                broad_source = (source_signal > 0.02) & (current.reindex(prices.index).fillna(0.0) > 1.0e-8)
+                allocation_layer_source_executable_candidate = (
+                    allocation_layer_source_executable_candidate | broad_source
+                )
             allocation_problem = policy.copy()
             allocation_problem["stock"] = prices.index.astype(str)
             allocation_problem["current_weight"] = current.reindex(prices.index).fillna(0.0).astype(float)
@@ -3990,8 +4047,72 @@ class PortfolioState:
                 allocation_layer_source_executable_candidate.astype(float)
             )
             allocation_solution = None
+            allocation_core_v2_solution = None
             native_target_weights_valid = False
-            if "portfolio_daily_target_weight" in policy.columns:
+            if allocation_core_v2_mode:
+                allocation_core_v2_stock_budget_floor = float(
+                    (global_targets or {}).get("allocation_core_v2_stock_budget_floor", 0.0) or 0.0
+                )
+                allocation_core_v2_gross_target = float(
+                    max(float(gross_exposure_target), allocation_core_v2_stock_budget_floor)
+                )
+                allocation_core_v2_solution = solve_cash_funded_allocation_v2(
+                    allocation_problem,
+                    constraints=AllocationCoreV2Constraints(
+                        gross_target=allocation_core_v2_gross_target,
+                        cash_reserve_target=float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05),
+                        turnover_limit=float(turnover_budget),
+                        position_cap=float(position_cap_target),
+                    ),
+                )
+                target_weights = (
+                    allocation_core_v2_solution.target_weight.reindex(prices.index)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .clip(lower=0.0, upper=position_cap_target)
+                    .astype(float)
+                )
+                allocation_layer_core_v2_used = 1.0
+                native_target_valid = 1.0
+                native_target_weights_valid = False
+                allocation_layer_native_target_used = 0.0
+                allocation_layer_native_fallback_used = 0.0
+                allocation_layer_expected_turnover = float(
+                    allocation_core_v2_solution.buy_turnover + allocation_core_v2_solution.sell_turnover
+                )
+                allocation_layer_cash_after = float(allocation_core_v2_solution.cash_after)
+                allocation_layer_buy_turnover = float(allocation_core_v2_solution.buy_turnover)
+                allocation_layer_sell_turnover = float(allocation_core_v2_solution.sell_turnover)
+                allocation_layer_available_cash_to_deploy = float(
+                    allocation_core_v2_solution.diagnostics.get("available_cash_to_deploy", 0.0)
+                )
+                allocation_layer_stock_budget = float(
+                    allocation_core_v2_solution.diagnostics.get("stock_budget", allocation_layer_stock_budget)
+                )
+                allocation_layer_target_sum_gap = float(
+                    allocation_core_v2_solution.diagnostics.get("target_sum_gap", 0.0)
+                )
+                allocation_layer_cash_funded_deploy_amount = float(
+                    allocation_core_v2_solution.cash_funded_deploy_amount
+                )
+                allocation_layer_source_funded_deploy_amount = float(
+                    allocation_core_v2_solution.source_funded_deploy_amount
+                )
+                allocation_layer_unused_receiver_headroom = float(
+                    allocation_core_v2_solution.unused_receiver_headroom
+                )
+                allocation_layer_receiver_headroom_utilization = float(
+                    allocation_core_v2_solution.receiver_headroom_utilization
+                )
+                allocation_layer_source_release_required = float(
+                    bool(allocation_core_v2_solution.source_release_required)
+                )
+                allocation_layer_underdeployment_reason = str(
+                    allocation_core_v2_solution.underdeployment_reason or "none"
+                )
+                allocation_layer_objective_value = float(max(0.0, 1.0 - allocation_layer_target_sum_gap))
+                allocation_layer_constraint_violations = 0.0
+            elif "portfolio_daily_target_weight" in policy.columns:
                 native_target_weights_raw = (
                     _policy_numeric("portfolio_daily_target_weight")
                     .reindex(prices.index)
@@ -4061,7 +4182,7 @@ class PortfolioState:
                     )
                     allocation_layer_objective_value = 0.0
                     allocation_layer_constraint_violations = 0.0
-            if allocation_solution is None and not native_target_weights_valid:
+            if allocation_solution is None and allocation_core_v2_solution is None and not native_target_weights_valid:
                 allocation_layer_native_fallback_used = 1.0 if "portfolio_daily_target_weight" in policy.columns else 0.0
                 allocation_solution = solve_semidifferentiable_allocation(
                     allocation_problem,
@@ -4162,6 +4283,9 @@ class PortfolioState:
                 allocation_layer_objective_value = float(allocation_solution.allocation_objective_value)
                 allocation_layer_constraint_violations = float(
                     allocation_solution.diagnostics.get("constraint_violations", 0.0)
+                )
+                allocation_layer_target_sum_gap = float(
+                    max(0.0, allocation_layer_stock_budget - float(target_weights.sum()))
                 )
         protected_floor = protected_floor.clip(lower=0.0, upper=position_cap_target)
         portfolio_daily_source_exec_cap_guarded = pd.Series(False, index=prices.index, dtype=bool)
@@ -5521,6 +5645,14 @@ class PortfolioState:
             "allocation_layer_available_cash_to_deploy": float(allocation_layer_available_cash_to_deploy),
             "allocation_layer_stock_budget": float(allocation_layer_stock_budget),
             "allocation_layer_target_weight_sum": float(target_weights.sum()),
+            "allocation_layer_core_v2_used": float(allocation_layer_core_v2_used),
+            "allocation_layer_target_sum_gap": float(allocation_layer_target_sum_gap),
+            "allocation_layer_cash_funded_deploy_amount": float(allocation_layer_cash_funded_deploy_amount),
+            "allocation_layer_source_funded_deploy_amount": float(allocation_layer_source_funded_deploy_amount),
+            "allocation_layer_unused_receiver_headroom": float(allocation_layer_unused_receiver_headroom),
+            "allocation_layer_receiver_headroom_utilization": float(allocation_layer_receiver_headroom_utilization),
+            "allocation_layer_source_release_required": float(allocation_layer_source_release_required),
+            "allocation_layer_underdeployment_reason": str(allocation_layer_underdeployment_reason),
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),

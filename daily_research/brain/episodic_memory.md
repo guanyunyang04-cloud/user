@@ -86,6 +86,16 @@
 - 行动后判断：r52e 目前是代码合同，不是 study verdict；下一步只允许 dry-run / safe screening 验证，confirmatory、strict resume、promotion、live/default 继续阻断。
 
 ## 2026-05-12 r52e Safe Screening Failure + Export Fix
+
+## 2026-05-12 r53 Cash-Funded Allocation Core Rebuild
+- Action before self-check: r52e was already submitted and failed because deployment/cash/exposure did not close; the next line was allowed to rebuild only the allocation core, not data/training/brain/live frameworks.
+- Implementation: added `allocation_core_v2.py`, r53 search profile, v43 loss profile, simulator r53 path, closure diagnostics, r53 cash-first scoring/resource gate, and contract tests.
+- First r53 screening finding: old receiver executable candidate gates still limited v2 support; fixed by broadening r53 receiver/source support from score, executability, and headroom.
+- Second r53 screening finding: learned gross target could collapse r53 stock budget to about `0.20`; fixed by adding `allocation_core_v2_stock_budget_floor` and honoring it in simulator constraints.
+- Third r53 screening result: `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03` completed 3/3 safe screening trials with confirmatory disabled. Best trial closed cash/exposure materially better but still had insufficient training evidence, negative cash timing, and strongly negative composite score.
+- Follow-up fix: r53 resource gate now requires cash-funded deployment only when deployment is actually needed; recomputing the best trial leaves only `cash_timing_bad`.
+- Post-action verdict: r53 is a successful code-contract and cash/exposure closure improvement, not a final model. Do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from this evidence.
+
 - 行动前自检：r52e dry-run 通过后才启动 safe screening；命令显式设置 `--disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`，未修改 active/live/default。
 - 运行结果：`self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01` 完成 1/3 screening trials、0 failed；resource gate 早停并节省 2 个 trial。
 - 失败证据：trial 01 `composite_score=-45.938456`、`annual_return=-0.268027`、`cash_timing_quality_1d=-0.053696`、`portfolio_daily_exposure_utilization=0.331584`、`training_evidence_status=insufficient`、`source_target_count=0`。

@@ -1183,6 +1183,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_cash_funded_allocation_core_r53": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v43"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [1.0e-4, 1.3e-4],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.28, 0.32],
+        "daily_dropout": [0.14],
+        "batch_size": [1, 2],
+    },
 }
 
 
@@ -2283,6 +2300,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 6,
         "min_epochs": 4,
     },
+    "split_heads_portfolio_daily_cash_funded_allocation_core_r53": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v43",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 1.0e-4,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.28,
+        "daily_dropout": 0.14,
+        "batch_size": 1,
+        "epochs": 6,
+        "min_epochs": 4,
+    },
 }
 
 
@@ -2350,6 +2386,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_day_set_native_validation_closure_r52d": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_cash_funded_allocation_core_r53": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2518,6 +2555,23 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "actual_cash_idle_cap": 0.24,
         "actual_cash_weight_cap": 0.62,
         "cash_semantics_mismatch_block": True,
+    },
+    "split_heads_portfolio_daily_cash_funded_allocation_core_r53": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.20,
+        "cash_timing_floor": 0.0,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.50,
+        "actual_cash_idle_cap": 0.24,
+        "actual_cash_weight_cap": 0.62,
+        "cash_funded_deploy_floor": 0.12,
+        "unused_receiver_headroom_cap": 0.22,
+        "target_sum_gap_cap": 0.20,
+        "cash_first_source_gate": True,
     },
 }
 
@@ -3306,6 +3360,27 @@ def _score_protocol_summary(
     )
     portfolio_daily_source_dead_day_share = _summary_metric(
         "portfolio_daily_source_dead_day_share",
+        0.0,
+    )
+    portfolio_daily_target_sum_gap = _summary_metric("portfolio_daily_target_sum_gap", 0.0)
+    portfolio_daily_cash_funded_deploy_amount_mean = _summary_metric(
+        "portfolio_daily_cash_funded_deploy_amount_mean",
+        0.0,
+    )
+    portfolio_daily_source_funded_deploy_amount_mean = _summary_metric(
+        "portfolio_daily_source_funded_deploy_amount_mean",
+        0.0,
+    )
+    portfolio_daily_unused_receiver_headroom_mean = _summary_metric(
+        "portfolio_daily_unused_receiver_headroom_mean",
+        0.0,
+    )
+    portfolio_daily_receiver_headroom_utilization_mean = _summary_metric(
+        "portfolio_daily_receiver_headroom_utilization_mean",
+        0.0,
+    )
+    portfolio_daily_source_release_required = _summary_metric(
+        "portfolio_daily_source_release_required",
         0.0,
     )
     actual_cash_idle_gap = max(0.0, portfolio_daily_deployable_idle_cash_mean - 0.18)
@@ -4725,6 +4800,14 @@ def _score_protocol_summary(
             )
             v2_actual_cash_weight_gap = max(0.0, portfolio_daily_actual_cash_weight_mean - 0.62)
             v2_cash_semantics_mismatch = cash_semantics_mismatch_flag
+            v2_cash_funded_deploy_gap = max(0.0, 0.12 - portfolio_daily_cash_funded_deploy_amount_mean)
+            v2_unused_receiver_headroom_gap = max(0.0, portfolio_daily_unused_receiver_headroom_mean - 0.22)
+            v2_target_sum_gap = max(0.0, portfolio_daily_target_sum_gap - 0.20)
+            v2_source_dead_when_required_gap = (
+                max(0.0, 1.0 - portfolio_daily_source_target_count)
+                if portfolio_daily_source_release_required >= 0.5
+                else 0.0
+            )
             v2_receiver_activity_gap = max(0.0, 3.0 - portfolio_daily_receiver_target_count)
             v2_source_activity_gap = (
                 max(0.0, 1.0 - portfolio_daily_source_target_count)
@@ -4764,6 +4847,10 @@ def _score_protocol_summary(
                 )
                 and portfolio_daily_deployable_idle_cash_mean <= 0.24
                 and portfolio_daily_actual_cash_weight_mean <= 0.62
+                and v2_cash_funded_deploy_gap <= 0.0
+                and v2_unused_receiver_headroom_gap <= 0.0
+                and v2_target_sum_gap <= 0.0
+                and v2_source_dead_when_required_gap <= 0.0
                 and cash_semantics_mismatch_flag <= 0.0
                 and direct_translation_penalty <= 0.24
                 and add_to_hold_conflict_share <= 0.35
@@ -4788,6 +4875,10 @@ def _score_protocol_summary(
                         "portfolio_daily_v2_exposure_utilization_gate": -v2_exposure_utilization_gap * 3.0,
                         "portfolio_daily_v2_actual_cash_idle_gate": -v2_actual_cash_idle_gap * 5.0,
                         "portfolio_daily_v2_actual_cash_weight_gate": -v2_actual_cash_weight_gap * 3.4,
+                        "portfolio_daily_v2_cash_funded_deploy_gate": -v2_cash_funded_deploy_gap * 4.0,
+                        "portfolio_daily_v2_unused_receiver_headroom_gate": -v2_unused_receiver_headroom_gap * 2.4,
+                        "portfolio_daily_v2_target_sum_gap_gate": -v2_target_sum_gap * 3.4,
+                        "portfolio_daily_v2_source_required_gate": -v2_source_dead_when_required_gap * 1.8,
                         "portfolio_daily_v2_cash_semantics_mismatch_gate": -v2_cash_semantics_mismatch * 1.8,
                         "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 1.35,
                         "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 1.10,
@@ -4817,6 +4908,10 @@ def _score_protocol_summary(
                         "portfolio_daily_v2_cash_dead_branch_gate": -v2_cash_dead_branch * 1.6,
                         "portfolio_daily_v2_actual_cash_idle_gate": -v2_actual_cash_idle_gap * 3.8,
                         "portfolio_daily_v2_actual_cash_weight_gate": -v2_actual_cash_weight_gap * 2.6,
+                        "portfolio_daily_v2_cash_funded_deploy_gate": -v2_cash_funded_deploy_gap * 2.8,
+                        "portfolio_daily_v2_unused_receiver_headroom_gate": -v2_unused_receiver_headroom_gap * 1.8,
+                        "portfolio_daily_v2_target_sum_gap_gate": -v2_target_sum_gap * 2.4,
+                        "portfolio_daily_v2_source_required_gate": -v2_source_dead_when_required_gap * 1.2,
                         "portfolio_daily_v2_cash_semantics_mismatch_gate": -v2_cash_semantics_mismatch * 1.4,
                         "portfolio_daily_v2_receiver_activity_gate": -v2_receiver_activity_gap * 0.85,
                         "portfolio_daily_v2_source_activity_gate": -v2_source_activity_gap * 0.70,
@@ -5178,6 +5273,14 @@ def _score_protocol_summary(
                 portfolio_daily_receiver_candidate_without_target_day_share
             ),
             "portfolio_daily_source_dead_day_share": portfolio_daily_source_dead_day_share,
+            "portfolio_daily_target_sum_gap": portfolio_daily_target_sum_gap,
+            "portfolio_daily_cash_funded_deploy_amount_mean": portfolio_daily_cash_funded_deploy_amount_mean,
+            "portfolio_daily_source_funded_deploy_amount_mean": portfolio_daily_source_funded_deploy_amount_mean,
+            "portfolio_daily_unused_receiver_headroom_mean": portfolio_daily_unused_receiver_headroom_mean,
+            "portfolio_daily_receiver_headroom_utilization_mean": (
+                portfolio_daily_receiver_headroom_utilization_mean
+            ),
+            "portfolio_daily_source_release_required": portfolio_daily_source_release_required,
             "deploy_intent_unrealized_share": deploy_intent_unrealized_share,
             "sell_selection_quality_5d": sell_selection_quality,
             "budget_origin_sell_share": budget_origin_sell_share,
@@ -5982,12 +6085,35 @@ def _resource_gate_after_screening(
     actual_cash_weight = float(metrics.get("portfolio_daily_actual_cash_weight_mean", 0.0) or 0.0)
     deployable_idle_cash = float(metrics.get("portfolio_daily_deployable_idle_cash_mean", 0.0) or 0.0)
     cash_semantics_mismatch = float(metrics.get("portfolio_daily_cash_semantics_mismatch", 0.0) or 0.0)
+    cash_funded_deploy_amount = float(metrics.get("portfolio_daily_cash_funded_deploy_amount_mean", 0.0) or 0.0)
+    unused_receiver_headroom = float(metrics.get("portfolio_daily_unused_receiver_headroom_mean", 0.0) or 0.0)
+    target_sum_gap = float(metrics.get("portfolio_daily_target_sum_gap", 0.0) or 0.0)
+    source_release_required = float(metrics.get("portfolio_daily_source_release_required", 0.0) or 0.0)
+    cash_first_source_gate = bool(config.get("cash_first_source_gate", False))
+    exposure_floor = float(config.get("exposure_utilization_floor", 0.50) or 0.50)
+    actual_cash_cap = float(config.get("actual_cash_weight_cap", 0.62) or 0.62)
+    actual_cash_idle_cap = float(config.get("actual_cash_idle_cap", 0.24) or 0.24)
+    target_sum_gap_cap = float(config.get("target_sum_gap_cap", 0.20) or 0.20)
+    receiver_activity_required = bool(
+        (not cash_first_source_gate)
+        or source_release_required >= 0.5
+        or target_sum_gap > min(target_sum_gap_cap, 0.05)
+        or (avg_gross_exposure_target >= 0.42 and exposure_utilization < exposure_floor)
+        or actual_cash_weight > actual_cash_cap
+        or deployable_idle_cash > actual_cash_idle_cap
+    )
     failed: list[str] = []
-    if source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
+    source_release_dead = source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
         config.get("source_sell_rate_floor", 0.20) or 0.20
-    ):
+    )
+    if cash_first_source_gate:
+        if source_release_required >= 0.5 and source_release_dead:
+            failed.append("source_release_dead_when_required")
+    elif source_release_dead:
         failed.append("source_release_dead")
-    if receiver_count < 3.0 or receiver_unrealized > float(config.get("receiver_unrealized_cap", 0.08) or 0.08):
+    if receiver_activity_required and (
+        receiver_count < 3.0 or receiver_unrealized > float(config.get("receiver_unrealized_cap", 0.08) or 0.08)
+    ):
         failed.append("receiver_deploy_not_clean")
     if cash_timing < float(config.get("cash_timing_floor", -0.10) or -0.10):
         failed.append("cash_timing_bad")
@@ -5998,42 +6124,71 @@ def _resource_gate_after_screening(
     ):
         failed.append("economic_signal_too_weak")
     if "exposure_utilization_floor" in config and avg_gross_exposure_target >= 0.42:
-        if exposure_utilization < float(config.get("exposure_utilization_floor", 0.50) or 0.50):
+        if exposure_utilization < exposure_floor:
             failed.append("exposure_utilization_low")
-    if "actual_cash_idle_cap" in config and deployable_idle_cash > float(
-        config.get("actual_cash_idle_cap", 0.24) or 0.24
-    ):
+    if "actual_cash_idle_cap" in config and deployable_idle_cash > actual_cash_idle_cap:
         failed.append("actual_cash_idle_high")
-    if "actual_cash_weight_cap" in config and actual_cash_weight > float(
-        config.get("actual_cash_weight_cap", 0.62) or 0.62
-    ):
+    if "actual_cash_weight_cap" in config and actual_cash_weight > actual_cash_cap:
         failed.append("actual_cash_weight_high")
     if bool(config.get("cash_semantics_mismatch_block", False)) and cash_semantics_mismatch >= 0.5:
         failed.append("cash_semantics_mismatch")
+    if cash_first_source_gate:
+        if receiver_activity_required and cash_funded_deploy_amount < float(
+            config.get("cash_funded_deploy_floor", 0.12) or 0.12
+        ):
+            failed.append("cash_funded_deployment_failed")
+        if receiver_activity_required and unused_receiver_headroom > float(
+            config.get("unused_receiver_headroom_cap", 0.22) or 0.22
+        ):
+            failed.append("receiver_headroom_unused")
+        if target_sum_gap > target_sum_gap_cap:
+            failed.append("target_sum_underdeployed")
 
     trigger_reasons = set(failed)
-    terminal_failure = (
-        "source_release_dead" in trigger_reasons
-        and (
-            "cash_timing_bad" in trigger_reasons
-            or "drawdown_bad" in trigger_reasons
-            or "exposure_utilization_low" in trigger_reasons
+    if cash_first_source_gate:
+        terminal_failure = (
+            (
+                "cash_funded_deployment_failed" in trigger_reasons
+                or "receiver_headroom_unused" in trigger_reasons
+                or "target_sum_underdeployed" in trigger_reasons
+                or "source_release_dead_when_required" in trigger_reasons
+            )
+            and (
+                "exposure_utilization_low" in trigger_reasons
+                or "actual_cash_idle_high" in trigger_reasons
+                or "actual_cash_weight_high" in trigger_reasons
+            )
+        ) or (
+            "receiver_deploy_not_clean" in trigger_reasons
+            and (
+                "economic_signal_too_weak" in trigger_reasons
+                or "drawdown_bad" in trigger_reasons
+                or "exposure_utilization_low" in trigger_reasons
+            )
         )
-    ) or (
-        "receiver_deploy_not_clean" in trigger_reasons
-        and (
-            "economic_signal_too_weak" in trigger_reasons
-            or "drawdown_bad" in trigger_reasons
-            or "exposure_utilization_low" in trigger_reasons
+    else:
+        terminal_failure = (
+            "source_release_dead" in trigger_reasons
+            and (
+                "cash_timing_bad" in trigger_reasons
+                or "drawdown_bad" in trigger_reasons
+                or "exposure_utilization_low" in trigger_reasons
+            )
+        ) or (
+            "receiver_deploy_not_clean" in trigger_reasons
+            and (
+                "economic_signal_too_weak" in trigger_reasons
+                or "drawdown_bad" in trigger_reasons
+                or "exposure_utilization_low" in trigger_reasons
+            )
+        ) or (
+            (
+                "actual_cash_idle_high" in trigger_reasons
+                or "actual_cash_weight_high" in trigger_reasons
+                or "cash_semantics_mismatch" in trigger_reasons
+            )
+            and "exposure_utilization_low" in trigger_reasons
         )
-    ) or (
-        (
-            "actual_cash_idle_high" in trigger_reasons
-            or "actual_cash_weight_high" in trigger_reasons
-            or "cash_semantics_mismatch" in trigger_reasons
-        )
-        and "exposure_utilization_low" in trigger_reasons
-    )
     remaining = max(0, int(selected_trial_count) - len(screening_results))
     return {
         "resource_gate_enabled": True,
@@ -6057,6 +6212,10 @@ def _resource_gate_after_screening(
             "portfolio_daily_actual_cash_weight_mean": actual_cash_weight,
             "portfolio_daily_deployable_idle_cash_mean": deployable_idle_cash,
             "portfolio_daily_cash_semantics_mismatch": cash_semantics_mismatch,
+            "portfolio_daily_cash_funded_deploy_amount_mean": cash_funded_deploy_amount,
+            "portfolio_daily_unused_receiver_headroom_mean": unused_receiver_headroom,
+            "portfolio_daily_target_sum_gap": target_sum_gap,
+            "portfolio_daily_source_release_required": source_release_required,
         },
     }
 
@@ -6284,6 +6443,7 @@ def main(argv: list[str] | None = None) -> int:
             "alpha_result_value_budget_split_v39",
             "alpha_result_value_budget_split_v40",
             "alpha_result_value_budget_split_v41",
+            "alpha_result_value_budget_split_v43",
         }
         for name in selected_trial_loss_profiles
     )
@@ -6293,11 +6453,17 @@ def main(argv: list[str] | None = None) -> int:
             "alpha_result_value_budget_split_v39",
             "alpha_result_value_budget_split_v40",
             "alpha_result_value_budget_split_v41",
+            "alpha_result_value_budget_split_v43",
         }
         for name in selected_trial_loss_profiles
     )
     native_validation_closure_support = any(
-        name in {"alpha_result_value_budget_split_v40", "alpha_result_value_budget_split_v41"}
+        name
+        in {
+            "alpha_result_value_budget_split_v40",
+            "alpha_result_value_budget_split_v41",
+            "alpha_result_value_budget_split_v43",
+        }
         for name in selected_trial_loss_profiles
     )
     seed_study_summary: dict[str, Any] = {}
@@ -6351,6 +6517,7 @@ def main(argv: list[str] | None = None) -> int:
                     "alpha_result_value_budget_split_v39",
                     "alpha_result_value_budget_split_v40",
                     "alpha_result_value_budget_split_v41",
+                    "alpha_result_value_budget_split_v43",
                 }
                 for name in selected_trial_loss_profiles
             )
@@ -6360,11 +6527,17 @@ def main(argv: list[str] | None = None) -> int:
                     "alpha_result_value_budget_split_v39",
                     "alpha_result_value_budget_split_v40",
                     "alpha_result_value_budget_split_v41",
+                    "alpha_result_value_budget_split_v43",
                 }
                 for name in selected_trial_loss_profiles
             )
             native_validation_closure_support = any(
-                name in {"alpha_result_value_budget_split_v40", "alpha_result_value_budget_split_v41"}
+                name
+                in {
+                    "alpha_result_value_budget_split_v40",
+                    "alpha_result_value_budget_split_v41",
+                    "alpha_result_value_budget_split_v43",
+                }
                 for name in selected_trial_loss_profiles
             )
     study_plan = {

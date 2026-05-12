@@ -2271,6 +2271,27 @@ def _build_semantic_conflicts(
         "portfolio_daily_native_fallback_mean": float(
             allocation_closure.get("native_fallback_mean", 0.0) or 0.0
         ),
+        "portfolio_daily_target_sum_gap": float(
+            allocation_closure.get("target_sum_gap", 0.0) or 0.0
+        ),
+        "portfolio_daily_cash_funded_deploy_amount_mean": float(
+            allocation_closure.get("cash_funded_deploy_amount_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_source_funded_deploy_amount_mean": float(
+            allocation_closure.get("source_funded_deploy_amount_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_unused_receiver_headroom_mean": float(
+            allocation_closure.get("unused_receiver_headroom_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_receiver_headroom_utilization_mean": float(
+            allocation_closure.get("receiver_headroom_utilization_mean", 0.0) or 0.0
+        ),
+        "portfolio_daily_source_release_required": float(
+            bool(allocation_closure.get("source_release_required", False))
+        ),
+        "portfolio_daily_underdeployment_reason": str(
+            allocation_closure.get("underdeployment_reason", "") or ""
+        ),
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,

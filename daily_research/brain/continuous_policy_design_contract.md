@@ -178,3 +178,10 @@
 - r52e entry: `split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e` / `alpha_result_value_budget_split_v41`; evidence must include actual cash, actual exposure, idle cash, receiver/source support, fallback, and `cash_semantics_mismatch`.
 - Confirmatory remains blocked until explicit screening evidence satisfies positive composite, sufficient training evidence, non-negative cash timing, exposure utilization >= 0.60, valid source/deploy realization, no native fallback main path, and no v2 hard gate failure.
 - Boundary update: safe screening failed, so r52e is screening-only research; next inspect target weight sum near `0.28` vs stock budget / gross target near `0.83-0.85`, without live/default/promotion or active changes.
+
+## 2026-05-12 r53 Cash-Funded Allocation Core Contract
+- r53 entry: `split_heads_portfolio_daily_cash_funded_allocation_core_r53` / `alpha_result_value_budget_split_v43`.
+- r53 allocator contract: `allocation_core_v2.py` owns the final cash-funded target-weight solve for r53 only; r52/r52e native allocation behavior must remain compatible.
+- r53 budget contract: when the learned daily gross target collapses too low, r53 must emit and honor `allocation_core_v2_stock_budget_floor`; the cash-funded allocator must not be evaluated against a false `0.20` stock budget.
+- r53 gate contract: cash-funded deployment and receiver-headroom utilization are required only when deployment is actually needed. If actual cash, deployable idle cash, exposure utilization, and target sum gap already show a closed budget, zero fresh receiver targets must not be scored as allocator failure.
+- r53 verdict boundary: safe screening improved cash/exposure closure but still fails strategy quality through insufficient training evidence, negative cash timing, and strongly negative composite score. It remains blocked from confirmatory, strict resume, promotion, live/default, and active artifact changes.

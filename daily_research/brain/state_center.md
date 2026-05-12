@@ -103,3 +103,11 @@
 - Fact: recomputed closure audit after the export fix shows `deployable_idle_cash_mean=0.540194`, `cash_semantics_mismatch=1.0`, and `receiver_candidate_without_target_day_share=0.925926`; patched resource gate would also fail `actual_cash_idle_high` and `cash_semantics_mismatch`.
 - Evidence capsule: `daily_research/brain/references/r52e_deployment_cash_exposure_closure_status_20260512.md`.
 - Current verdict: `r52e safe-screening failed resume and confirmatory eligibility`; next work must inspect target-weight underdeployment and source release dead, not add epochs or run confirmatory.
+
+## 2026-05-12 r53 Cash-Funded Allocation Core Verdict
+- Fact: r53 is a new research line, not a continuation of r52e patching. Code contract exists as `allocation_core_v2.py`, profile `split_heads_portfolio_daily_cash_funded_allocation_core_r53`, and loss profile `alpha_result_value_budget_split_v43`.
+- Fact: r53 safe screening `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03` completed 3/3 trials with confirmatory disabled and no live/default/active change.
+- Fact: r53 fixed the main cash/exposure closure failure shape: best screening trial has actual cash about `0.189`, actual gross about `0.811`, target gap about `0.0049`, native fallback `0`, and `native_target_valid=1.0`.
+- Fact: patched r53 resource gate re-evaluates the best trial as only `cash_timing_bad`; it no longer mislabels a budget-closed day as `cash_funded_deployment_failed`.
+- Current verdict: r53 is code-contract plus safe-screening improvement, not a strategy verdict. Confirmatory, strict resume, promotion, live/default, and active artifact changes remain blocked because training evidence is insufficient, cash timing is negative, and composite score remains strongly negative.
+- Evidence capsule: `daily_research/brain/references/r53_cash_funded_allocation_core_status_20260512.md`.

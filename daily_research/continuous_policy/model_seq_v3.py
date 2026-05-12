@@ -1876,6 +1876,40 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["sample_scalar_loss_weights"],
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["daily_target_loss_weights"],
+        "gross_exposure_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["daily_target_loss_weights"].get(
+            "gross_exposure_target",
+            1.0,
+        )
+        * 1.10,
+        "budget_deploy_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["daily_target_loss_weights"].get(
+            "budget_deploy_signal_target",
+            1.0,
+        )
+        * 1.12,
+        "budget_cash_timing_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["daily_target_loss_weights"].get(
+            "budget_cash_timing_signal_target",
+            1.0,
+        )
+        * 0.96,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v41"]["multi_objective_loss_weights"],
+        "scalar_total": 0.68,
+        "daily_total": 0.84,
+        "portfolio_cash_margin_total": 0.36,
+        "portfolio_capital_flow_closure_total": 0.46,
+        "portfolio_day_set_native_allocation_vector_total": 4.25,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -7217,15 +7251,18 @@ def fit_policy_models_v3(
         "alpha_result_value_budget_split_v39",
         "alpha_result_value_budget_split_v40",
         "alpha_result_value_budget_split_v41",
+        "alpha_result_value_budget_split_v43",
     }
     native_executable_receiver_closure_enabled = resolved_loss_profile in {
         "alpha_result_value_budget_split_v39",
         "alpha_result_value_budget_split_v40",
         "alpha_result_value_budget_split_v41",
+        "alpha_result_value_budget_split_v43",
     }
     native_validation_closure_enabled = resolved_loss_profile in {
         "alpha_result_value_budget_split_v40",
         "alpha_result_value_budget_split_v41",
+        "alpha_result_value_budget_split_v43",
     }
     if uses_day_set_native_allocation:
         sample_model = TemporalDaySetPolicyNet(
@@ -8367,6 +8404,9 @@ def fit_policy_models_v3(
         "supports_native_target_validity_closure": bool(native_target_validity_closure_enabled),
         "supports_native_executable_receiver_closure": bool(native_executable_receiver_closure_enabled),
         "supports_native_validation_closure": bool(native_validation_closure_enabled),
+        "supports_cash_funded_allocation_core_v2": bool(
+            resolved_loss_profile == "alpha_result_value_budget_split_v43"
+        ),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
         "day_set_batch_size": int(batch_size)
@@ -9072,6 +9112,12 @@ def predict_policy_v3(
     min_position_cap_target = 0.10 if is_holdcash_v3_decoder else 0.08
     budget_objective_name = str(artifact.train_summary.get("budget_objective", "") or "").strip().lower()
     loss_profile_name = str(artifact.train_summary.get("loss_profile", "") or "").strip().lower()
+    cash_funded_allocation_core_v2_mode = bool(
+        loss_profile_name == "alpha_result_value_budget_split_v43"
+        or artifact.training_diagnostics.get("supports_cash_funded_allocation_core_v2", False)
+    )
+    if cash_funded_allocation_core_v2_mode:
+        global_targets["allocation_core_v2_mode"] = 1.0
     direct_action_value_mode = (
         loss_profile_name in DIRECT_ACTION_VALUE_LOSS_PROFILES
         or str(artifact.train_summary.get("policy_decision_mode", "") or "").strip().lower()
@@ -9377,6 +9423,29 @@ def predict_policy_v3(
         "budget_model_risk_deploy_gap": float(np.clip(budget_model_risk_signal - budget_model_deploy_signal, -1.0, 1.0)),
         "budget_head_layout": str(getattr(artifact.daily_model, "head_layout", DAILY_HEAD_LAYOUT_MONOLITHIC_V1)),
     }
+    if cash_funded_allocation_core_v2_mode:
+        r53_stock_budget_floor = float(
+            np.clip(
+                0.78
+                + 0.08 * budget_model_deploy_signal
+                + 0.04 * budget_model_alpha_focus_signal
+                - 0.12 * blended_budget_risk
+                - 0.05 * open_risk_off_score
+                - 0.03 * held_exit_support_score,
+                0.72,
+                0.88,
+            )
+        )
+        global_targets["gross_exposure_target"] = float(
+            max(global_targets["gross_exposure_target"], r53_stock_budget_floor)
+        )
+        global_targets["candidate_budget"] = float(max(global_targets["candidate_budget"], 6.0))
+        global_targets["turnover_budget"] = float(max(global_targets["turnover_budget"], 0.35))
+        global_targets["cash_reserve_target"] = float(
+            np.clip(0.05 + 0.12 * blended_budget_risk + 0.04 * blended_cash_timing, 0.03, 0.22)
+        )
+        global_targets["allocation_core_v2_mode"] = 1.0
+        global_targets["allocation_core_v2_stock_budget_floor"] = r53_stock_budget_floor
 
     probability_map = {label: action_prob[:, idx] for idx, label in enumerate(ACTION_CLASSES)}
     current_weight = state_frame["current_weight"].astype(float).to_numpy(dtype=float) if "current_weight" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
@@ -11983,6 +12052,11 @@ def predict_policy_v3(
             "decision_portfolio_defense_signal": np.full(len(state_frame), portfolio_defense_signal, dtype=float),
             "budget_model_hierarchical_mode": np.full(len(state_frame), 1.0 if hierarchical_stock_gate_mode else 0.0, dtype=float),
             "budget_model_constraint_only_mode": np.full(len(state_frame), 1.0 if pure_portfolio_defense_mode else 0.0, dtype=float),
+            "allocation_core_v2_mode": np.full(
+                len(state_frame),
+                1.0 if cash_funded_allocation_core_v2_mode else 0.0,
+                dtype=float,
+            ),
             "clipped_intent_risk": clipped_intent_risk,
             "exit_timing_pressure": exit_timing_pressure_values,
             "planned_holding_bucket": predicted_duration_labels,

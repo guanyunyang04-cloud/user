@@ -3239,6 +3239,253 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(result.diagnostics["native_target_valid"], 1.0)
         self.assertGreater(result.weights["HELD"], 0.10)
 
+    def test_r53_predict_policy_lifts_low_gross_target_to_cash_funded_floor(self) -> None:
+        class _LowGrossDailyModel:
+            def __call__(self, daily_x: torch.Tensor) -> dict[str, torch.Tensor]:
+                return {
+                    "gross_exposure_target": torch.tensor([0.20], dtype=torch.float32),
+                    "candidate_budget": torch.tensor([2.0], dtype=torch.float32),
+                    "turnover_budget": torch.tensor([0.12], dtype=torch.float32),
+                    "max_position_weight_target": torch.tensor([0.12], dtype=torch.float32),
+                    "hold_bias_target": torch.tensor([0.20], dtype=torch.float32),
+                    "budget_risk_signal_target": torch.tensor([0.05], dtype=torch.float32),
+                    "budget_deploy_signal_target": torch.tensor([0.10], dtype=torch.float32),
+                    "budget_cash_timing_signal_target": torch.tensor([0.10], dtype=torch.float32),
+                    "budget_alpha_focus_signal_target": torch.tensor([0.20], dtype=torch.float32),
+                }
+
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["held", "recv_a", "recv_b"],
+                "current_weight": [0.28, 0.0, 0.0],
+                "static_feature": [0.0, 0.0, 0.0],
+                "seq_feature": [0.0, 0.0, 0.0],
+            }
+        )
+        artifact = SimpleNamespace(
+            sample_model=_FakePolicyModel(),
+            daily_model=_LowGrossDailyModel(),
+            static_feature_names=["static_feature"],
+            sequence_base_names=["seq_feature"],
+            sequence_steps=[0],
+            sequence_columns=["seq_feature"],
+            daily_feature_names=["daily_feature"],
+            static_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            static_means=pd.Series([0.0]).to_numpy(dtype=float),
+            static_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            sequence_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_means=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            daily_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_means=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            train_summary={
+                "decoder_profile": "holdcash_v3",
+                "loss_profile": "alpha_result_value_budget_split_v43",
+                "budget_objective": "result_value_v10",
+            },
+            training_diagnostics={
+                "supports_sell_heads": False,
+                "supports_portfolio_listwise_heads": True,
+                "supports_portfolio_unified_allocation_heads": True,
+                "supports_portfolio_allocation_objective_consolidation_heads": True,
+                "supports_cash_funded_allocation_core_v2": True,
+            },
+        )
+
+        policy, global_targets = predict_policy_v3(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"daily_feature": 0.0},
+        )
+
+        self.assertEqual(global_targets["allocation_core_v2_mode"], 1.0)
+        self.assertGreaterEqual(global_targets["gross_exposure_target"], 0.72)
+        self.assertGreaterEqual(global_targets["candidate_budget"], 6.0)
+        self.assertGreaterEqual(global_targets["turnover_budget"], 0.35)
+        self.assertLessEqual(global_targets["cash_reserve_target"], 0.22)
+        self.assertGreaterEqual(global_targets["allocation_core_v2_stock_budget_floor"], 0.72)
+        self.assertTrue(bool((policy["allocation_core_v2_mode"] == 1.0).all()))
+
+    def test_r53_resource_gate_does_not_require_deploy_when_budget_is_closed(self) -> None:
+        profile = "split_heads_portfolio_daily_cash_funded_allocation_core_r53"
+        trial = _trial(
+            "budget_closed_trial",
+            evidence_status="insufficient",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-2.0,
+        )
+        trial.trial_config = SEARCH_PROFILE_BASE_TRIALS[profile]
+        trial.primary_metrics.update(
+            {
+                "annual_return": 0.19,
+                "monthly_return_mean": 0.012,
+                "max_drawdown": -0.10,
+                "cash_timing_quality_1d": -0.168,
+                "avg_gross_exposure_target": 0.747,
+                "portfolio_daily_exposure_utilization": 1.08,
+                "portfolio_daily_actual_cash_weight_mean": 0.19,
+                "portfolio_daily_deployable_idle_cash_mean": 0.005,
+                "portfolio_daily_cash_semantics_mismatch": 0.0,
+                "portfolio_daily_target_sum_gap": 0.005,
+                "portfolio_daily_cash_funded_deploy_amount_mean": 0.01,
+                "portfolio_daily_unused_receiver_headroom_mean": 300.0,
+                "portfolio_daily_source_release_required": 0.0,
+                "portfolio_daily_receiver_target_count": 0.0,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                "portfolio_daily_source_target_count": 0.0,
+                "portfolio_daily_source_realized_sell_rate": 0.0,
+            }
+        )
+
+        gate = _resource_gate_after_screening(profile, [trial], selected_trial_count=3)
+
+        self.assertFalse(gate["resource_gate_triggered"])
+        self.assertNotIn("receiver_deploy_not_clean", gate["failed_resource_checks"])
+        self.assertNotIn("cash_funded_deployment_failed", gate["failed_resource_checks"])
+        self.assertNotIn("receiver_headroom_unused", gate["failed_resource_checks"])
+        self.assertIn("cash_timing_bad", gate["failed_resource_checks"])
+
+    def test_r53_resource_gate_still_blocks_unfilled_cash_budget(self) -> None:
+        profile = "split_heads_portfolio_daily_cash_funded_allocation_core_r53"
+        trial = _trial(
+            "underdeployed_trial",
+            evidence_status="insufficient",
+            performance_score=-1.0,
+            stability_score=-1.0,
+            composite_score=-2.0,
+        )
+        trial.trial_config = SEARCH_PROFILE_BASE_TRIALS[profile]
+        trial.primary_metrics.update(
+            {
+                "annual_return": 0.04,
+                "monthly_return_mean": 0.001,
+                "max_drawdown": -0.08,
+                "cash_timing_quality_1d": -0.05,
+                "avg_gross_exposure_target": 0.85,
+                "portfolio_daily_exposure_utilization": 0.34,
+                "portfolio_daily_actual_cash_weight_mean": 0.72,
+                "portfolio_daily_deployable_idle_cash_mean": 0.32,
+                "portfolio_daily_cash_semantics_mismatch": 0.0,
+                "portfolio_daily_target_sum_gap": 0.52,
+                "portfolio_daily_cash_funded_deploy_amount_mean": 0.0,
+                "portfolio_daily_unused_receiver_headroom_mean": 0.60,
+                "portfolio_daily_source_release_required": 0.0,
+                "portfolio_daily_receiver_target_count": 0.0,
+                "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                "portfolio_daily_source_target_count": 0.0,
+                "portfolio_daily_source_realized_sell_rate": 0.0,
+            }
+        )
+
+        gate = _resource_gate_after_screening(profile, [trial], selected_trial_count=3)
+
+        self.assertTrue(gate["resource_gate_triggered"])
+        self.assertIn("receiver_deploy_not_clean", gate["failed_resource_checks"])
+        self.assertIn("cash_funded_deployment_failed", gate["failed_resource_checks"])
+        self.assertIn("receiver_headroom_unused", gate["failed_resource_checks"])
+        self.assertIn("target_sum_underdeployed", gate["failed_resource_checks"])
+
+    def test_r53_allocation_core_v2_recomputes_low_native_target_sum(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.72,
+            holdings={"HELD": HoldingState(weight=0.28, entry_price=10.0, peak_price=10.0)},
+            max_positions=5,
+            max_position_weight=0.30,
+            turnover_limit=1.00,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV_A": 10.0, "RECV_B": 10.0, "RECV_C": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.95, 0.90, 0.85],
+                "portfolio_daily_source_score": [0.20, 0.0, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.05, 0.05, 0.05, 0.05],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 1.0, 1.0],
+                "portfolio_daily_source_executability": [1.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.10, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0, 1.0, 1.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_target_weight": [0.28, 0.0, 0.0, 0.0],
+                "portfolio_daily_target_delta": [0.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_target_cash_weight": [0.72, 0.72, 0.72, 0.72],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-12",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.85,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+                "allocation_core_v2_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_core_v2_used"], 1.0)
+        self.assertEqual(result.diagnostics["allocation_layer_native_target_used"], 0.0)
+        self.assertEqual(result.diagnostics["allocation_layer_native_fallback_used"], 0.0)
+        self.assertGreaterEqual(float(result.weights.sum()), 0.75)
+        self.assertGreater(result.diagnostics["allocation_layer_cash_funded_deploy_amount"], 0.40)
+        self.assertEqual(result.diagnostics["allocation_layer_source_release_required"], 0.0)
+        self.assertLess(result.diagnostics["allocation_layer_target_sum_gap"], 0.12)
+        self.assertGreaterEqual(result.diagnostics["allocation_layer_receiver_target_count"], 2)
+
+    def test_r53_allocation_core_v2_broadens_receiver_support_beyond_old_candidate_gate(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.72,
+            holdings={"HELD": HoldingState(weight=0.28, entry_price=10.0, peak_price=10.0)},
+            max_positions=5,
+            max_position_weight=0.30,
+            turnover_limit=1.00,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV_A": 10.0, "RECV_B": 10.0, "RECV_C": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.95, 0.90, 0.85],
+                "portfolio_daily_source_score": [0.20, 0.0, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.05, 0.05, 0.05, 0.05],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 1.0, 1.0],
+                "portfolio_daily_source_executability": [1.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.10, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0, 0.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0, 0.0, 0.0],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-12",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.85,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+                "allocation_core_v2_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_core_v2_used"], 1.0)
+        self.assertGreaterEqual(result.diagnostics["allocation_layer_receiver_executable_candidate_count"], 3)
+        self.assertGreaterEqual(float(result.weights.sum()), 0.75)
+        self.assertLess(result.diagnostics["allocation_layer_target_sum_gap"], 0.12)
+
     def test_r52_day_set_dataset_returns_complete_days(self) -> None:
         date_codes = torch.tensor([0, 0, 0, 1, 1], dtype=torch.long)
         dataset = DaySetTensorDataset(
