@@ -34,8 +34,6 @@
 - 保留轻量 manifest：`a_stock_daily_selection/output/artifacts/artifact_manifest_20260511.json`。
 - 新增 tracked-large-file 守卫：`doc_guard.py check` 默认禁止未 allowlist 的大型 tracked `.pkl/.pt/.gif/.psd` 等文件。
 - 当前 allowlist：`brain/tracked_large_file_allowlist.json`，仅保留 DSA 已有品牌资产。
-- 深链规则后续不再单独跑全仓搜索；Codex 线程 URI 禁止由 `doc_guard.py check` 的 thread-deeplink 守卫覆盖。
-
 ## 代码结构
 - 第一批行为保持拆分只移动测试夹具：`daily_research/continuous_policy/tests/portfolio_daily_fixtures.py`。
 - `test_portfolio_daily_strategy_contracts.py` 保留原测试合同和调用名，生产策略逻辑未修改。

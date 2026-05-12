@@ -38,9 +38,6 @@
   - 项目事实只在分脑维护
 - `brain-as-doc-hub`
   - 权威说明只留在 `brain/` 或 `brain/references/`
-- `no-thread-deeplink-registry`
-  - 主脑不为每个任务分配、记录或维护 Codex 线程深链；任务接管只使用 brain 路由、分脑入口、产物路径和必要的 study / run tag。
-
 ## 4. 当前默认接脑方式
 - 只接主脑：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py`

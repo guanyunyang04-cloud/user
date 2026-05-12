@@ -22,7 +22,6 @@
 
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
-- 主脑不得为每个任务分配或保存 Codex 线程深度链接；线程 URI 只属于运行时会话，不作为长期接管真源。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
 - `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r48 已有正式 screening / confirmatory verdict，但同样 stable confirm 为空且 source / exposure / training evidence 未闭合，不得 promotion、不得 live、不得改 active artifact。详细指标只读 `daily_research/brain/state_center.md` 与 `daily_research/brain/operations_center.md`。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。

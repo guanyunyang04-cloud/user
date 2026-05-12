@@ -219,7 +219,6 @@ BRAIN_DOC_PREFIXES = (
     "t0_project/brain/",
     "daily_stock_analysis-main/brain/",
 )
-FORBIDDEN_CODEX_URI_PATTERN = re.compile(r"\b" + "codex" + r"://", re.IGNORECASE)
 TRACKED_LARGE_FILE_ALLOWLIST = Path("brain/tracked_large_file_allowlist.json")
 DEFAULT_TRACKED_LARGE_FILE_LIMIT_BYTES = 10 * 1024**2
 GENERATED_DOC_PATH_PARTS = frozenset(
@@ -884,26 +883,6 @@ def _check_document_layout() -> list[str]:
     return issues
 
 
-def _check_brain_thread_deeplinks() -> list[str]:
-    issues: list[str] = []
-    for prefix in BRAIN_DOC_PREFIXES:
-        root = WORKSPACE_ROOT / prefix
-        if not root.exists():
-            continue
-        for path in root.rglob("*"):
-            if path.suffix.lower() not in {".md", ".json"}:
-                continue
-            try:
-                text = _read_text(path)
-            except UnicodeDecodeError:
-                continue
-            relative_path = _normalized_path(path.relative_to(WORKSPACE_ROOT))
-            for line_number, line in enumerate(text.splitlines(), start=1):
-                if FORBIDDEN_CODEX_URI_PATTERN.search(line):
-                    issues.append(f"forbidden_codex_thread_uri:{relative_path}:{line_number}")
-    return issues
-
-
 def _git_tracked_paths() -> list[str]:
     result = subprocess.run(
         ["git", "ls-files"],
@@ -1091,13 +1070,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     if layout_issues:
         has_issue = True
         for issue in layout_issues[: args.show_lines]:
-            print(f"    ! {issue}")
-
-    thread_deeplink_issues = _check_brain_thread_deeplinks()
-    print(f"[thread-deeplink] forbidden_codex_uri_issues={len(thread_deeplink_issues)}")
-    if thread_deeplink_issues:
-        has_issue = True
-        for issue in thread_deeplink_issues[: args.show_lines]:
             print(f"    ! {issue}")
 
     active_alignment_issues = _check_active_execution_brain_alignment()

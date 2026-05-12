@@ -91,6 +91,228 @@ from daily_research.continuous_policy.runtime import safe_print_json
 
 
 class PortfolioDailyStrategyContractsTest(unittest.TestCase):
+    def _assert_search_profile_contract(
+        self,
+        profile: str,
+        *,
+        loss_profile: str,
+        objective_profile: str,
+        base_equals: dict[str, object] | None = None,
+        base_not_equals: dict[str, object] | None = None,
+        forbid_true_solver: bool = False,
+        sample_keys: tuple[str, ...] = (),
+        sample_greater: dict[str, float] | None = None,
+        multi_keys: tuple[str, ...] = (),
+        multi_equals: dict[str, float] | None = None,
+        multi_greater: dict[str, float] | None = None,
+        multi_less: dict[str, float] | None = None,
+        multi_relative_greater: tuple[tuple[str, str, float], ...] = (),
+        no_full_universe_train_solver: bool = False,
+        auto_resource_profile: str | None = None,
+    ) -> None:
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        base_trial = SEARCH_PROFILE_BASE_TRIALS[profile]
+        self.assertEqual(base_trial["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], objective_profile)
+
+        for key, expected in (base_equals or {}).items():
+            self.assertEqual(base_trial[key], expected)
+        for key, unexpected in (base_not_equals or {}).items():
+            self.assertNotEqual(base_trial[key], unexpected)
+        if forbid_true_solver:
+            self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
+
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        sample_weights = resolved_config.get("sample_scalar_loss_weights", {})
+        multi_weights = resolved_config.get("multi_objective_loss_weights", {})
+        for key in sample_keys:
+            self.assertIn(key, sample_weights)
+        for key, floor in (sample_greater or {}).items():
+            self.assertGreater(sample_weights[key], floor)
+        for key in multi_keys:
+            self.assertIn(key, multi_weights)
+        for key, expected in (multi_equals or {}).items():
+            self.assertEqual(multi_weights[key], expected)
+        for key, floor in (multi_greater or {}).items():
+            self.assertGreater(multi_weights[key], floor)
+        for key, ceiling in (multi_less or {}).items():
+            self.assertLess(multi_weights[key], ceiling)
+        for key, baseline_key, ratio in multi_relative_greater:
+            self.assertGreater(multi_weights[key], multi_weights[baseline_key] * ratio)
+        if no_full_universe_train_solver:
+            self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
+        if auto_resource_profile is not None:
+            limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
+            self.assertEqual(limits["resource_profile"], auto_resource_profile)
+            self.assertGreaterEqual(int(limits["thread_limit"]), 1)
+
+    def test_search_profile_registry_contracts_cover_research_lines(self) -> None:
+        cases = [
+            {
+                "profile": "split_heads_portfolio_daily_allocation_breadth_r34",
+                "loss_profile": "alpha_result_value_budget_split_v20",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "base_equals": {
+                    "budget_calibration": "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
+                },
+            },
+            {
+                "profile": "split_heads_portfolio_daily_unified_allocation_r35",
+                "loss_profile": "alpha_result_value_budget_split_v21",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "sample_keys": (
+                    "portfolio_daily_unified_receiver_score",
+                    "portfolio_daily_unified_source_score",
+                    "portfolio_daily_unified_cash_score",
+                    "portfolio_daily_source_positive_forward_penalty",
+                    "portfolio_daily_source_opportunity_cost_penalty",
+                    "portfolio_daily_receiver_source_spread_reward",
+                    "portfolio_daily_unified_allocation_objective",
+                ),
+            },
+            {
+                "profile": "split_heads_portfolio_daily_risk_aware_unified_allocation_r36",
+                "loss_profile": "alpha_result_value_budget_split_v22",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "sample_greater": {"portfolio_daily_unified_cash_score": 1.60},
+                "multi_greater": {"portfolio_unified_allocation_total": 0.0},
+            },
+            {
+                "profile": "split_heads_portfolio_daily_decision_focused_allocation_r37",
+                "loss_profile": "alpha_result_value_budget_split_v23",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "multi_greater": {"portfolio_decision_regret_total": 0.0},
+                "multi_relative_greater": (
+                    ("portfolio_decision_regret_total", "portfolio_unified_allocation_total", 0.40),
+                ),
+            },
+            {
+                "profile": "split_heads_portfolio_daily_source_hard_negative_regret_r38",
+                "loss_profile": "alpha_result_value_budget_split_v24",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "sample_keys": (
+                    "portfolio_daily_source_hard_negative_penalty",
+                    "portfolio_daily_source_tail_false_sell_penalty",
+                    "portfolio_daily_source_release_preference",
+                    "portfolio_daily_transfer_regret_target",
+                ),
+                "multi_greater": {
+                    "portfolio_source_hard_negative_tail_total": 0.0,
+                    "portfolio_source_listwise_release_total": 0.0,
+                    "portfolio_transfer_regret_total": 0.0,
+                },
+                "multi_relative_greater": (
+                    ("portfolio_source_hard_negative_tail_total", "portfolio_unified_allocation_total", 0.40),
+                ),
+            },
+            {
+                "profile": "split_heads_portfolio_daily_allocation_objective_consolidation_r39",
+                "loss_profile": "alpha_result_value_budget_split_v25",
+                "objective_profile": "portfolio_daily_ranking_v2_gated",
+                "base_equals": {
+                    "budget_calibration": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+                    "budget_semantics": BUDGET_SEMANTICS_SPLIT,
+                },
+            },
+            {
+                "profile": "split_heads_portfolio_daily_end_to_end_allocation_layer_r40",
+                "loss_profile": "alpha_result_value_budget_split_v25",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {
+                    "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+                    "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+                },
+                "base_not_equals": {
+                    "budget_calibration": BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
+                    "budget_semantics": BUDGET_SEMANTICS_SPLIT,
+                },
+            },
+            {
+                "profile": "split_heads_portfolio_daily_native_allocation_vector_r51",
+                "loss_profile": "alpha_result_value_budget_split_v36",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 8, "min_epochs": 6, "batch_size": 256},
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "scalar_total": 1.25,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_greater": {
+                    "portfolio_native_allocation_vector_total": 2.0,
+                    "portfolio_capital_flow_closure_total": 0.0,
+                },
+                "no_full_universe_train_solver": True,
+                "auto_resource_profile": "balanced",
+            },
+            {
+                "profile": "split_heads_portfolio_daily_day_set_native_allocation_vector_r52",
+                "loss_profile": "alpha_result_value_budget_split_v37",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 6, "min_epochs": 4, "batch_size": 1},
+                "forbid_true_solver": True,
+                "auto_resource_profile": "balanced",
+            },
+            {
+                "profile": "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c",
+                "loss_profile": "alpha_result_value_budget_split_v39",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 6, "min_epochs": 4},
+                "forbid_true_solver": True,
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "portfolio_native_allocation_vector_total": 0.0,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_less": {"scalar_total": 1.05},
+                "multi_greater": {"portfolio_day_set_native_allocation_vector_total": 3.0},
+                "no_full_universe_train_solver": True,
+                "auto_resource_profile": "balanced",
+            },
+            {
+                "profile": "split_heads_portfolio_daily_day_set_native_validation_closure_r52d",
+                "loss_profile": "alpha_result_value_budget_split_v40",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 6, "min_epochs": 4},
+                "forbid_true_solver": True,
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "portfolio_native_allocation_vector_total": 0.0,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_less": {"scalar_total": 0.95},
+                "multi_greater": {"portfolio_day_set_native_allocation_vector_total": 3.50},
+                "no_full_universe_train_solver": True,
+                "auto_resource_profile": "balanced",
+            },
+            {
+                "profile": "split_heads_portfolio_daily_semantic_budget_controller_r54",
+                "loss_profile": "alpha_result_value_budget_split_v44",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 8, "min_epochs": 6},
+                "forbid_true_solver": True,
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_greater": {"portfolio_day_set_native_allocation_vector_total": 4.00},
+            },
+        ]
+        for case in cases:
+            case = dict(case)
+            profile = str(case.pop("profile"))
+            with self.subTest(profile=profile):
+                self._assert_search_profile_contract(profile, **case)
+
     def test_v2_scoring_rewards_receiver_and_clean_source_breadth(self) -> None:
         narrow = _score_protocol_summary(
             _protocol_summary(
@@ -183,17 +405,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(metrics["native_target_invalid_unsupported_receiver_count"], 0.0)
         self.assertEqual(metrics["native_receiver_mask_mismatch_count"], 1.0)
         self.assertEqual(metrics["native_source_target_count"], 2.0)
-
-    def test_r34_profile_exists_for_bounded_breadth_confirmatory(self) -> None:
-        tag = "split_heads_portfolio_daily_allocation_breadth_r34"
-        self.assertIn(tag, SEARCH_PROFILES)
-        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v20")
-        self.assertEqual(
-            SEARCH_PROFILE_BASE_TRIALS[tag]["budget_calibration"],
-            "cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15",
-        )
 
     def test_allocation_teacher_summary_exposes_source_receiver_cash_targets(self) -> None:
         frame = pd.DataFrame(
@@ -731,74 +942,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreaterEqual(target.loc["bad_source"], target.loc["clean_source"])
         self.assertTrue(solution.diagnostics["constraint_violations"] == 0.0)
 
-    def test_r35_unified_allocation_profile_and_loss_targets_are_registered(self) -> None:
-        tag = "split_heads_portfolio_daily_unified_allocation_r35"
-        self.assertIn(tag, SEARCH_PROFILES)
-        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v21")
-
-        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v21"]["sample_scalar_loss_weights"]
-        for column in (
-            "portfolio_daily_unified_receiver_score",
-            "portfolio_daily_unified_source_score",
-            "portfolio_daily_unified_cash_score",
-            "portfolio_daily_source_positive_forward_penalty",
-            "portfolio_daily_source_opportunity_cost_penalty",
-            "portfolio_daily_receiver_source_spread_reward",
-            "portfolio_daily_unified_allocation_objective",
-        ):
-            self.assertIn(column, weights)
-
-    def test_r36_risk_aware_unified_allocation_profile_is_registered(self) -> None:
-        tag = "split_heads_portfolio_daily_risk_aware_unified_allocation_r36"
-        self.assertIn(tag, SEARCH_PROFILES)
-        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v22")
-
-        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v22"]
-        self.assertGreater(weights["sample_scalar_loss_weights"]["portfolio_daily_unified_cash_score"], 1.60)
-        self.assertGreater(weights["multi_objective_loss_weights"]["portfolio_unified_allocation_total"], 0.0)
-
-    def test_r37_decision_focused_allocation_profile_is_registered(self) -> None:
-        tag = "split_heads_portfolio_daily_decision_focused_allocation_r37"
-        self.assertIn(tag, SEARCH_PROFILES)
-        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v23")
-
-        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v23"]
-        self.assertGreater(weights["multi_objective_loss_weights"]["portfolio_decision_regret_total"], 0.0)
-        self.assertGreater(
-            weights["multi_objective_loss_weights"]["portfolio_decision_regret_total"],
-            weights["multi_objective_loss_weights"]["portfolio_unified_allocation_total"] * 0.40,
-        )
-
-    def test_r38_source_hard_negative_regret_profile_is_registered(self) -> None:
-        tag = "split_heads_portfolio_daily_source_hard_negative_regret_r38"
-        self.assertIn(tag, SEARCH_PROFILES)
-        self.assertIn(tag, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[tag], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[tag]["loss_profile"], "alpha_result_value_budget_split_v24")
-
-        weights = LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v24"]
-        for column in (
-            "portfolio_daily_source_hard_negative_penalty",
-            "portfolio_daily_source_tail_false_sell_penalty",
-            "portfolio_daily_source_release_preference",
-            "portfolio_daily_transfer_regret_target",
-        ):
-            self.assertIn(column, weights["sample_scalar_loss_weights"])
-        multi = weights["multi_objective_loss_weights"]
-        self.assertGreater(multi["portfolio_source_hard_negative_tail_total"], 0.0)
-        self.assertGreater(multi["portfolio_source_listwise_release_total"], 0.0)
-        self.assertGreater(multi["portfolio_transfer_regret_total"], 0.0)
-        self.assertGreater(
-            multi["portfolio_source_hard_negative_tail_total"],
-            multi["portfolio_unified_allocation_total"] * 0.40,
-        )
-
     def test_exposure_utilization_uses_cash_weight_when_gross_exposure_is_empty(self) -> None:
         turnover_frame = pd.DataFrame(
             {
@@ -1164,40 +1307,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         bad_loss = _allocation_objective_consolidation_loss(bad_outputs, targets)
 
         self.assertGreater(float(bad_loss), float(good_loss) + 0.15)
-
-    def test_r39_search_profile_is_architecture_consolidation(self) -> None:
-        profile = "split_heads_portfolio_daily_allocation_objective_consolidation_r39"
-
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v25")
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "portfolio_daily_ranking_v2_gated")
-        self.assertEqual(
-            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
-            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
-        )
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
-
-    def test_r40_end_to_end_allocation_layer_profile_exits_action_budget_path(self) -> None:
-        profile = "split_heads_portfolio_daily_end_to_end_allocation_layer_r40"
-
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v25")
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-        self.assertEqual(
-            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
-            BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
-        )
-        self.assertEqual(
-            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"],
-            BUDGET_SEMANTICS_ALLOCATION_LAYER,
-        )
-        self.assertNotEqual(
-            SEARCH_PROFILE_BASE_TRIALS[profile]["budget_calibration"],
-            BUDGET_CALIBRATION_CASH_CONSTRAINT_PORTFOLIO_DAILY_RANKING_RECEIVER_EXEC,
-        )
-        self.assertNotEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["budget_semantics"], BUDGET_SEMANTICS_SPLIT)
 
     def test_r41_unified_allocation_problem_exposes_uncertainty_aware_decision_objective(self) -> None:
         low_risk_frame = pd.DataFrame(
@@ -2778,34 +2887,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreater(float(terms["fallback_surrogate_loss"]), 0.0)
         self.assertGreater(float(terms["total"]), 0.0)
 
-    def test_r51_native_allocation_vector_profile_uses_torch_only_loss(self) -> None:
-        profile = "split_heads_portfolio_daily_native_allocation_vector_r51"
-        loss_profile = "alpha_result_value_budget_split_v36"
-
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 8)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 6)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 256)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-
-        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
-        self.assertEqual(resolved_name, loss_profile)
-        multi_weights = resolved_config["multi_objective_loss_weights"]
-        self.assertEqual(multi_weights["action_total"], 0.0)
-        self.assertEqual(multi_weights["duration_total"], 0.0)
-        self.assertEqual(multi_weights["scalar_total"], 1.25)
-        self.assertGreater(multi_weights["portfolio_native_allocation_vector_total"], 2.0)
-        self.assertGreater(multi_weights["portfolio_capital_flow_closure_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
-        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
-
-        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
-        self.assertEqual(limits["resource_profile"], "balanced")
-        self.assertGreaterEqual(int(limits["thread_limit"]), 1)
-
     def test_r51_native_projection_enforces_allocation_constraints_and_derived_roles(self) -> None:
         outputs = {
             "portfolio_daily_allocation_weight_logit": torch.tensor([2.2, 1.8, 3.6, 8.0, 2.0], dtype=torch.float32),
@@ -2922,7 +3003,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             self.assertIn(term_name, high_receiver_terms)
             self.assertGreaterEqual(float(high_receiver_terms[term_name]), 0.0)
 
-    def test_true_solver_resource_profile_defaults_to_safe_not_full_machine(self) -> None:
+    def test_resource_profiles_stay_bounded_unless_full_is_explicit(self) -> None:
         limits = _build_resource_limits(
             search_profile="split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
             resource_profile="auto",
@@ -2939,16 +3020,15 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             self.assertEqual(env[key], str(limits["thread_limit"]))
         self.assertEqual(env["CONTINUOUS_POLICY_RESOURCE_PROFILE"], "safe")
 
-    def test_full_resource_profile_is_explicit_and_unlimited(self) -> None:
-        limits = _build_resource_limits(
+        full_limits = _build_resource_limits(
             search_profile="split_heads_portfolio_daily_integrated_convex_capital_flow_r50",
             resource_profile="full",
         )
 
-        self.assertEqual(limits["resource_profile"], "full")
-        self.assertEqual(int(limits["thread_limit"]), 0)
-        self.assertEqual(int(limits["cpu_affinity_mask"]), 0)
-        self.assertEqual(limits["process_priority"], "normal")
+        self.assertEqual(full_limits["resource_profile"], "full")
+        self.assertEqual(int(full_limits["thread_limit"]), 0)
+        self.assertEqual(int(full_limits["cpu_affinity_mask"]), 0)
+        self.assertEqual(full_limits["process_priority"], "normal")
 
     def test_unified_allocation_problem_respects_hard_executable_candidate_masks(self) -> None:
         frame = pd.DataFrame(
@@ -3566,27 +3646,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreaterEqual(float(result.weights.sum()), 0.75)
         self.assertLess(result.diagnostics["allocation_layer_target_sum_gap"], 0.12)
 
-    def test_r54_profile_registers_semantic_budget_controller_without_solver(self) -> None:
-        profile = "split_heads_portfolio_daily_semantic_budget_controller_r54"
-        loss_profile = "alpha_result_value_budget_split_v44"
-
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 8)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 6)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
-
-        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
-        self.assertEqual(resolved_name, loss_profile)
-        multi_weights = resolved_config["multi_objective_loss_weights"]
-        self.assertEqual(multi_weights["action_total"], 0.0)
-        self.assertEqual(multi_weights["duration_total"], 0.0)
-        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 4.00)
-        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
-
     def test_r54_predict_policy_exports_target_weight_intent_mode(self) -> None:
         state_frame = pd.DataFrame(
             {
@@ -4057,56 +4116,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             self.assertIn(name, terms)
         self.assertGreater(float(terms["native_target_valid_proxy"]), 0.0)
 
-    def test_r52c_loss_profile_registers_executable_receiver_closure_without_solver(self) -> None:
-        profile = "split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c"
-        loss_profile = "alpha_result_value_budget_split_v39"
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 4)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
-
-        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
-        self.assertEqual(resolved_name, loss_profile)
-        multi_weights = resolved_config["multi_objective_loss_weights"]
-        self.assertEqual(multi_weights["action_total"], 0.0)
-        self.assertEqual(multi_weights["duration_total"], 0.0)
-        self.assertLess(multi_weights["scalar_total"], 1.05)
-        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 3.0)
-        self.assertEqual(multi_weights["portfolio_native_allocation_vector_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
-        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
-        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
-        self.assertEqual(limits["resource_profile"], "balanced")
-
-    def test_r52d_loss_profile_registers_validation_closure_without_solver(self) -> None:
-        profile = "split_heads_portfolio_daily_day_set_native_validation_closure_r52d"
-        loss_profile = "alpha_result_value_budget_split_v40"
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 4)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
-
-        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
-        self.assertEqual(resolved_name, loss_profile)
-        multi_weights = resolved_config["multi_objective_loss_weights"]
-        self.assertEqual(multi_weights["action_total"], 0.0)
-        self.assertEqual(multi_weights["duration_total"], 0.0)
-        self.assertLess(multi_weights["scalar_total"], 0.95)
-        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 3.50)
-        self.assertEqual(multi_weights["portfolio_native_allocation_vector_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
-        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
-        self.assertFalse(_loss_profile_enables_full_universe_train_solver(loss_profile))
-        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
-        self.assertEqual(limits["resource_profile"], "balanced")
-
     def test_r52d_day_set_validation_contract_avoids_single_day_synthetic_fallback(self) -> None:
         source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
         self.assertNotIn("X_daily_val[:1]", source)
@@ -4329,19 +4338,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
 
         self.assertEqual(float(terms["native_source_candidate_count"]), 0.0)
         self.assertGreater(float(terms["source_dead_loss"]), 0.0)
-
-    def test_r52_profile_registers_day_set_native_allocation_vector(self) -> None:
-        profile = "split_heads_portfolio_daily_day_set_native_allocation_vector_r52"
-        self.assertIn(profile, SEARCH_PROFILES)
-        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], "alpha_result_value_budget_split_v37")
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 6)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 4)
-        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["batch_size"], 1)
-        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
-        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
-        limits = _build_resource_limits(search_profile=profile, resource_profile="auto")
-        self.assertEqual(limits["resource_profile"], "balanced")
 
     def test_r52_artifact_loads_old_and_new_model_types(self) -> None:
         feature_arrays = {
@@ -4648,31 +4644,26 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertFalse(stability["stable_confirmatory"])
         self.assertIn("source_training_evidence_sufficient", stability["failed_stability_checks"])
 
-    def test_safe_print_json_does_not_fail_completed_stage_on_closed_stdout(self) -> None:
+    def test_safe_print_json_ignores_runtime_channel_failures(self) -> None:
         class ClosedStdout:
+            def __init__(self, exc: Exception) -> None:
+                self.exc = exc
+
             def write(self, _text: str) -> None:
-                raise OSError(22, "Invalid argument")
+                raise self.exc
 
             def flush(self) -> None:
-                raise OSError(22, "Invalid argument")
+                raise self.exc
 
-        with patch("sys.stdout", ClosedStdout()):
-            emitted = safe_print_json({"stage": "completed"})
+        failures = (
+            OSError(22, "Invalid argument"),
+            ValueError("I/O operation on closed file"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__), patch("sys.stdout", ClosedStdout(failure)):
+                emitted = safe_print_json({"stage": "completed"})
 
-        self.assertFalse(emitted)
-
-    def test_safe_print_json_does_not_fail_completed_stage_on_value_error_stdout(self) -> None:
-        class ClosedStdout:
-            def write(self, _text: str) -> None:
-                raise ValueError("I/O operation on closed file")
-
-            def flush(self) -> None:
-                raise ValueError("I/O operation on closed file")
-
-        with patch("sys.stdout", ClosedStdout()):
-            emitted = safe_print_json({"stage": "completed"})
-
-        self.assertFalse(emitted)
+            self.assertFalse(emitted)
 
     def test_study_progress_event_writes_latest_state_and_jsonl(self) -> None:
         with TemporaryDirectory() as temp_dir:

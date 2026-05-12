@@ -26,15 +26,11 @@
 - 工作区级拓扑写回 `brain/master_brain.md`
 - 工作区级治理写回 `brain/governance_layer.md`
 - 工作区级方法、环境与守卫入口写回 `brain/operations_center.md`
-- 不写回 Codex 线程深链；任务连续性用 brain 路由、分脑状态、产物路径、study tag 或 run tag 表达。
-
 ## 4. 守卫入口
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
 - `doc_guard.py check` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `brain_integrity_check.py --json` 便于快速定位
-- 不再单独运行全仓 Codex 线程 URI 深链搜索；该规则由 `doc_guard.py check` 的 thread-deeplink 守卫统一验收。
-
 ## 5. 环境基线
 - brain 文档统一使用 UTF-8
 - brain 当前层正文、标题、复盘和规则写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文。
