@@ -777,6 +777,9 @@ class PortfolioState:
             )
             or 0.0
         ) > 0.5
+        allocation_intent_v2_global_mode = float(
+            (global_targets or {}).get("allocation_intent_v2_mode", 0.0) or 0.0
+        ) > 0.5
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -883,8 +886,17 @@ class PortfolioState:
             return pd.to_numeric(policy[name], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
 
         allocation_core_v2_policy_mode = _optional_policy_numeric("allocation_core_v2_mode")
+        allocation_intent_v2_policy_mode = _optional_policy_numeric("allocation_intent_v2_mode")
+        allocation_intent_v2_mode = bool(
+            allocation_intent_v2_global_mode
+            or (
+                allocation_intent_v2_policy_mode is not None
+                and bool((allocation_intent_v2_policy_mode > 0.5).any())
+            )
+        )
         allocation_core_v2_mode = bool(
             allocation_core_v2_global_mode
+            or allocation_intent_v2_mode
             or (
                 allocation_core_v2_policy_mode is not None
                 and bool((allocation_core_v2_policy_mode > 0.5).any())
@@ -3975,6 +3987,12 @@ class PortfolioState:
         allocation_layer_receiver_headroom_utilization = 0.0
         allocation_layer_source_release_required = 0.0
         allocation_layer_underdeployment_reason = "not_applicable"
+        allocation_layer_budget_closed = 0.0
+        allocation_layer_deployment_required = 0.0
+        allocation_layer_risk_reduction_required = 0.0
+        allocation_layer_receiver_activity_required = 0.0
+        allocation_layer_intent_translation_conflict_count = 0
+        allocation_layer_intent_translation_active_count = 0
         native_target_valid = 0.0
         native_negative_delta_count = 0
         native_positive_delta_count = 0
@@ -4009,11 +4027,21 @@ class PortfolioState:
                     portfolio_daily_source_candidate | portfolio_daily_unified_source_candidate
                 )
             if allocation_core_v2_mode:
+                target_weight_intent = _optional_policy_numeric("portfolio_daily_target_weight_intent")
+                target_weight_intent_delta = (
+                    target_weight_intent.reindex(prices.index).fillna(0.0).astype(float)
+                    - current.reindex(prices.index).fillna(0.0).astype(float)
+                    if target_weight_intent is not None
+                    else pd.Series(0.0, index=prices.index, dtype=float)
+                )
+                intent_receiver_signal = target_weight_intent_delta.clip(lower=0.0)
+                intent_source_signal = (-target_weight_intent_delta.clip(upper=0.0)).clip(lower=0.0)
                 receiver_signal = pd.concat(
                     [
                         _policy_numeric("portfolio_daily_receiver_executability").rename("executability"),
                         _policy_numeric("portfolio_daily_receiver_score").rename("score"),
                         _policy_numeric("portfolio_daily_unified_receiver_score").rename("unified_score"),
+                        intent_receiver_signal.rename("target_weight_intent"),
                     ],
                     axis=1,
                 ).max(axis=1)
@@ -4030,6 +4058,7 @@ class PortfolioState:
                         _policy_numeric("portfolio_daily_source_score").rename("score"),
                         _policy_numeric("portfolio_daily_unified_source_score").rename("unified_score"),
                         _policy_numeric("portfolio_daily_source_release_capacity").rename("release_capacity"),
+                        intent_source_signal.rename("target_weight_intent_release"),
                     ],
                     axis=1,
                 ).max(axis=1)
@@ -4046,6 +4075,31 @@ class PortfolioState:
             allocation_problem["portfolio_daily_source_executable_candidate"] = (
                 allocation_layer_source_executable_candidate.astype(float)
             )
+            if allocation_intent_v2_mode:
+                target_weight_intent = _optional_policy_numeric("portfolio_daily_target_weight_intent")
+                if target_weight_intent is not None:
+                    intent_delta = (
+                        target_weight_intent.reindex(prices.index).fillna(0.0).astype(float)
+                        - current.reindex(prices.index).fillna(0.0).astype(float)
+                    )
+                    allocation_problem["receiver_score"] = pd.concat(
+                        [
+                            _policy_numeric("portfolio_daily_receiver_score").rename("receiver_score"),
+                            _policy_numeric("portfolio_daily_unified_receiver_score").rename("unified_receiver_score"),
+                            intent_delta.clip(lower=0.0).rename("target_weight_intent_receiver"),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                    allocation_problem["source_score"] = pd.concat(
+                        [
+                            _policy_numeric("portfolio_daily_source_score").rename("source_score"),
+                            _policy_numeric("portfolio_daily_unified_source_score").rename("unified_source_score"),
+                            (-intent_delta.clip(upper=0.0)).clip(lower=0.0).rename(
+                                "target_weight_intent_source"
+                            ),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
             allocation_solution = None
             allocation_core_v2_solution = None
             native_target_weights_valid = False
@@ -4109,6 +4163,18 @@ class PortfolioState:
                 )
                 allocation_layer_underdeployment_reason = str(
                     allocation_core_v2_solution.underdeployment_reason or "none"
+                )
+                allocation_layer_budget_closed = float(
+                    bool(allocation_core_v2_solution.diagnostics.get("budget_closed", False))
+                )
+                allocation_layer_deployment_required = float(
+                    bool(allocation_core_v2_solution.diagnostics.get("deployment_required", False))
+                )
+                allocation_layer_risk_reduction_required = float(
+                    bool(allocation_core_v2_solution.diagnostics.get("risk_reduction_required", False))
+                )
+                allocation_layer_receiver_activity_required = float(
+                    bool(allocation_core_v2_solution.diagnostics.get("receiver_activity_required", False))
                 )
                 allocation_layer_objective_value = float(max(0.0, 1.0 - allocation_layer_target_sum_gap))
                 allocation_layer_constraint_violations = 0.0
@@ -4882,12 +4948,17 @@ class PortfolioState:
                         execution_action = "hold"
                 deadband = effective_deadband
             if execution_semantics == EXECUTION_SEMANTICS_SEMANTIC:
-                execution_action, semantic_translation_reason = _semantic_execution_action(
-                    model_action=model_action,
-                    previous_weight=previous_weight,
-                    new_weight=new_weight,
-                    weight_action=weight_change_action,
-                )
+                if allocation_intent_v2_mode:
+                    execution_action = weight_change_action
+                    state_update_action = weight_change_action
+                    semantic_translation_reason = "allocation_intent_v2_delta"
+                else:
+                    execution_action, semantic_translation_reason = _semantic_execution_action(
+                        model_action=model_action,
+                        previous_weight=previous_weight,
+                        new_weight=new_weight,
+                        weight_action=weight_change_action,
+                    )
 
             budget_dropped_flag = bool(budget_dropped.get(stock, False))
             budget_released_from_hold_flag = bool(budget_released_from_hold.get(stock, False))
@@ -4987,7 +5058,9 @@ class PortfolioState:
                     sell_suppression_origin = "weight_translation"
 
             portfolio_daily_effective_model_action = model_action_name
-            if portfolio_daily_receiver_flag:
+            if allocation_intent_v2_mode:
+                portfolio_daily_effective_model_action = str(weight_change_action).strip().lower()
+            elif portfolio_daily_receiver_flag:
                 portfolio_daily_effective_model_action = "add" if previous_weight > 1e-8 else "open"
             elif (
                 portfolio_daily_ranking_mode
@@ -5007,6 +5080,20 @@ class PortfolioState:
                     "model_action": model_action,
                     "portfolio_daily_effective_model_action": portfolio_daily_effective_model_action,
                     "policy_decision_mode": str(policy.at[stock, "policy_decision_mode"] or "") if "policy_decision_mode" in policy.columns else "",
+                    "allocation_intent_v2_mode": bool(allocation_intent_v2_mode),
+                    "portfolio_daily_target_weight_intent": float(
+                        policy.at[stock, "portfolio_daily_target_weight_intent"]
+                    )
+                    if "portfolio_daily_target_weight_intent" in policy.columns
+                    else 0.0,
+                    "portfolio_daily_target_delta_intent": float(
+                        (
+                            policy.at[stock, "portfolio_daily_target_weight_intent"]
+                            if "portfolio_daily_target_weight_intent" in policy.columns
+                            else previous_weight
+                        )
+                        - previous_weight
+                    ),
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,
                     "direct_action_value_selected": float(policy.at[stock, "direct_action_value_selected"] or 0.0) if "direct_action_value_selected" in policy.columns else 0.0,
@@ -5351,6 +5438,47 @@ class PortfolioState:
             for item in actions
             if _intent_action(item) != str(item.get("weight_change_action", "") or "").strip().lower()
         )
+        intent_translation_items = [
+            item
+            for item in actions
+            if bool(item.get("allocation_intent_v2_mode", False))
+        ]
+        def _item_execution_deadband(item: Mapping[str, object]) -> float:
+            return max(float(item.get("execution_deadband", 0.0) or 0.0), DEFAULT_EXECUTION_DEADBAND_ABS, 1.0e-8)
+
+        def _deadbanded_weight_change_action(previous_weight: float, new_weight: float, deadband: float) -> str:
+            if abs(float(new_weight) - float(previous_weight)) <= float(deadband):
+                return "hold" if float(previous_weight) > 1.0e-8 else "skip"
+            return _weight_change_action(float(previous_weight), float(new_weight))
+
+        intent_translation_active_items = [
+            item
+            for item in intent_translation_items
+            if abs(float(item.get("portfolio_daily_target_delta_intent", 0.0) or 0.0))
+            > _item_execution_deadband(item)
+            or abs(float(item.get("delta_weight", 0.0) or 0.0))
+            > _item_execution_deadband(item)
+        ]
+        intent_translation_conflict_count = sum(
+            1
+            for item in intent_translation_active_items
+            if (
+                _deadbanded_weight_change_action(
+                    float(item.get("current_weight", 0.0) or 0.0),
+                    float(item.get("portfolio_daily_target_weight_intent", 0.0) or 0.0),
+                    _item_execution_deadband(item),
+                )
+                != _deadbanded_weight_change_action(
+                    float(item.get("current_weight", 0.0) or 0.0),
+                    float(item.get("target_weight", 0.0) or 0.0),
+                    _item_execution_deadband(item),
+                )
+                and abs(float(item.get("portfolio_daily_target_delta_intent", 0.0) or 0.0))
+                > _item_execution_deadband(item)
+            )
+        )
+        allocation_layer_intent_translation_conflict_count = int(intent_translation_conflict_count)
+        allocation_layer_intent_translation_active_count = int(len(intent_translation_active_items))
         deploy_intent_items = [
             item
             for item in actions
@@ -5653,6 +5781,11 @@ class PortfolioState:
             "allocation_layer_receiver_headroom_utilization": float(allocation_layer_receiver_headroom_utilization),
             "allocation_layer_source_release_required": float(allocation_layer_source_release_required),
             "allocation_layer_underdeployment_reason": str(allocation_layer_underdeployment_reason),
+            "allocation_layer_budget_closed": float(allocation_layer_budget_closed),
+            "allocation_layer_deployment_required": float(allocation_layer_deployment_required),
+            "allocation_layer_risk_reduction_required": float(allocation_layer_risk_reduction_required),
+            "allocation_layer_receiver_activity_required": float(allocation_layer_receiver_activity_required),
+            "allocation_intent_v2_mode_used": float(bool(allocation_intent_v2_mode)),
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),
@@ -5915,6 +6048,15 @@ class PortfolioState:
             "semantic_conflict_rate": float(semantic_conflict_count / action_count),
             "order_translation_conflict_count": int(order_translation_conflict_count),
             "order_translation_conflict_rate": float(order_translation_conflict_count / action_count),
+            "intent_translation_conflict_count": int(allocation_layer_intent_translation_conflict_count),
+            "intent_translation_active_count": int(allocation_layer_intent_translation_active_count),
+            "intent_translation_conflict_rate": float(
+                allocation_layer_intent_translation_conflict_count
+                / max(allocation_layer_intent_translation_active_count, 1)
+            ),
+            "lifecycle_hint_conflict_rate": float(semantic_conflict_count / action_count)
+            if allocation_intent_v2_mode
+            else 0.0,
             "deploy_intent_action_count": int(deploy_intent_count),
             "deploy_intent_realized_count": int(deploy_realized_count),
             "deploy_intent_realized_rate": float(deploy_realized_count / deploy_intent_count) if deploy_intent_count else 0.0,

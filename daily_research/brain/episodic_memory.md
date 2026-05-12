@@ -96,6 +96,15 @@
 - Follow-up fix: r53 resource gate now requires cash-funded deployment only when deployment is actually needed; recomputing the best trial leaves only `cash_timing_bad`.
 - Post-action verdict: r53 is a successful code-contract and cash/exposure closure improvement, not a final model. Do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from this evidence.
 
+## 2026-05-12 r54 Semantic Budget Controller Implementation
+- 行动前自检：r53 已修现金/敞口闭合，但 audit/scoring 会把预算已闭合且无新增部署需求误判为 receiver/headroom 失败；下一步应修语义和评分，而不是继续 strict resume。
+- 测试先行：新增 r53 budget-closed gate 测试、r54 profile / predict-policy / simulator intent 合同测试，以及 deadband-aware intent translation 回归测试。
+- 执行动作：新增 r54 `alpha_result_value_budget_split_v44` 和 `split_heads_portfolio_daily_semantic_budget_controller_r54`；预测层导出 target-weight intent，simulator 用 r53 allocator 解最终权重并由 delta 派生 execution action。
+- 纠偏动作：`_score_protocol_summary`、resource gate、behavior audit 与 simulator diagnostics 统一 `receiver_activity_required` 口径；intent translation conflict 改为 deadband-aware。
+- 验证动作：focused tests 通过；dry-run `self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02` 通过；safe screening `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02` 完成，confirmatory disabled。
+- 筛选结果：2 个 trial completed，1 个 trial failed；best completed trial 02 `composite_score=4.80437`，actual cash about `0.1885`，actual gross about `0.8115`，target gap about `0.0048`，intent translation conflict `0`，native fallback `0`。
+- 行动后判断：r54 改善了评分形态并保持 cash/exposure closure 干净，但仍被 `training_evidence_status=insufficient`、negative cash timing、reduce/exit quality 和 trial 03 abnormal exit 阻断；不得 confirmatory、promotion、live/default 或改 active artifact。
+
 - 行动前自检：r52e dry-run 通过后才启动 safe screening；命令显式设置 `--disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`，未修改 active/live/default。
 - 运行结果：`self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01` 完成 1/3 screening trials、0 failed；resource gate 早停并节省 2 个 trial。
 - 失败证据：trial 01 `composite_score=-45.938456`、`annual_return=-0.268027`、`cash_timing_quality_1d=-0.053696`、`portfolio_daily_exposure_utilization=0.331584`、`training_evidence_status=insufficient`、`source_target_count=0`。

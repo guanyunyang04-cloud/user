@@ -65,7 +65,12 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
             "deployable_idle_cash_mean": 0.0,
             "cash_reserve_signal_mean": 0.0,
             "cash_semantics_mismatch": False,
+            "budget_closed": True,
+            "deployment_required": False,
+            "risk_reduction_required": False,
+            "receiver_activity_required": False,
             "receiver_candidate_without_target_day_share": 0.0,
+            "receiver_candidate_without_target_required_day_share": 0.0,
             "source_dead_day_share": 0.0,
             "allocation_objective_mean": 0.0,
             "native_fallback_mean": 0.0,
@@ -194,7 +199,32 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
     signal_mean = _safe_mean(cash_reserve_signal)
     idle_mean = _safe_mean(deployable_idle_cash)
     mismatch = bool(actual_cash >= 0.55 and signal_mean <= 0.05 and idle_mean >= 0.20)
+    day_exposure_utilization = (
+        gross_exposure / gross_target.replace(0.0, np.nan)
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    day_deployment_required = (
+        (source_release_required >= 0.5)
+        | (target_sum_gap > 0.05)
+        | ((gross_target >= 0.42) & (day_exposure_utilization < 0.50))
+        | (cash_weight > 0.62)
+        | (deployable_idle_cash > 0.24)
+    )
+    day_risk_reduction_required = (
+        (gross_exposure > (stock_budget + 0.05))
+        | ((cash_reserve_signal >= 0.5) & (cash_weight < cash_reserve_signal))
+    )
+    day_receiver_activity_required = day_deployment_required | (source_release_required >= 0.5)
+    day_budget_closed = (
+        (target_sum_gap <= 0.05)
+        & (cash_weight <= 0.45)
+        & (deployable_idle_cash <= 0.24)
+        & ((gross_target < 0.42) | (day_exposure_utilization >= 0.50))
+        & (source_release_required < 0.5)
+    )
     receiver_gap_share = _safe_mean((receiver_candidates > receiver_targets).astype(float))
+    receiver_required_gap_share = _safe_mean(
+        ((receiver_candidates > receiver_targets) & day_receiver_activity_required).astype(float)
+    )
     source_dead_share = _safe_mean(((receiver_targets > 0.0) & (source_targets <= 0.0)).astype(float))
 
     return {
@@ -207,7 +237,12 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
         "deployable_idle_cash_mean": idle_mean,
         "cash_reserve_signal_mean": signal_mean,
         "cash_semantics_mismatch": mismatch,
+        "budget_closed": bool(_safe_mean(day_budget_closed.astype(float)) >= 0.5),
+        "deployment_required": bool(_safe_mean(day_deployment_required.astype(float)) >= 0.5),
+        "risk_reduction_required": bool(_safe_mean(day_risk_reduction_required.astype(float)) >= 0.5),
+        "receiver_activity_required": bool(_safe_mean(day_receiver_activity_required.astype(float)) >= 0.5),
         "receiver_candidate_without_target_day_share": receiver_gap_share,
+        "receiver_candidate_without_target_required_day_share": receiver_required_gap_share,
         "source_dead_day_share": source_dead_share,
         "allocation_objective_mean": _safe_mean(allocation_objective),
         "native_fallback_mean": _safe_mean(native_fallback),

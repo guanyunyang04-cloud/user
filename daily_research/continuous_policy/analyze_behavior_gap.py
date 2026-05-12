@@ -74,6 +74,22 @@ def _safe_bool(value: Any) -> bool:
     return text in {"1", "true", "yes", "y"}
 
 
+def _weight_change_action(previous_weight: float, new_weight: float) -> str:
+    previous = float(previous_weight)
+    new = float(new_weight)
+    if previous <= 1.0e-8 and new <= 1.0e-8:
+        return "skip"
+    if previous <= 1.0e-8 and new > 1.0e-8:
+        return "open"
+    if previous > 1.0e-8 and new <= 1.0e-8:
+        return "exit"
+    if new > previous + 1.0e-8:
+        return "add"
+    if new < previous - 1.0e-8:
+        return "reduce"
+    return "hold"
+
+
 def _coerce_numeric(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     if frame.empty:
         return frame
@@ -644,6 +660,9 @@ def _build_semantic_conflicts(
             "direct_action_value_low_margin_share": 0.0,
             "direct_action_order_translation_conflict_rate": 0.0,
             "direct_action_intent_preserved_share": 0.0,
+            "allocation_intent_v2_mode_share": 0.0,
+            "intent_translation_conflict_rate": 0.0,
+            "lifecycle_hint_conflict_rate": 0.0,
             "direct_action_funding_authorized_sell_share": 0.0,
             "direct_action_funding_protected_sell_share": 0.0,
             "direct_action_release_advantage_mean": 0.0,
@@ -692,6 +711,10 @@ def _build_semantic_conflicts(
             "portfolio_daily_effective_capital_transfer_count": 0,
             "portfolio_daily_cash_score_mean": 0.0,
             "portfolio_daily_cash_reserve_rate": 0.0,
+            "portfolio_daily_budget_closed": 0.0,
+            "portfolio_daily_deployment_required": 0.0,
+            "portfolio_daily_risk_reduction_required": 0.0,
+            "portfolio_daily_receiver_activity_required": 0.0,
             "portfolio_daily_receiver_score_mean": 0.0,
             "portfolio_daily_source_score_mean": 0.0,
             "portfolio_daily_source_gap_mean": 0.0,
@@ -847,6 +870,8 @@ def _build_semantic_conflicts(
             "portfolio_daily_source_gap",
             "portfolio_daily_source_score",
             "portfolio_daily_cash_score",
+            "portfolio_daily_target_weight_intent",
+            "portfolio_daily_target_delta_intent",
         ],
     ).copy()
     working["model_action"] = working.get("model_action", pd.Series("", index=working.index)).astype(str)
@@ -898,6 +923,7 @@ def _build_semantic_conflicts(
         "portfolio_daily_source_candidate",
         "portfolio_daily_source_target",
         "portfolio_daily_cash_reserve_signal",
+        "allocation_intent_v2_mode",
     ):
         working[bool_column] = working.get(
             bool_column,
@@ -921,6 +947,49 @@ def _build_semantic_conflicts(
     working = _compute_held_side_support_columns(working)
     working["small_delta_order_translation_conflict"] = working["is_order_translation_conflict"] & (
         working["abs_delta_weight"] <= working.get("execution_deadband", pd.Series(0.0, index=working.index)).fillna(0.0)
+    )
+    intent_delta_abs = working.get(
+        "portfolio_daily_target_delta_intent",
+        pd.Series(0.0, index=working.index),
+    ).abs()
+    intent_deadband = working.get("execution_deadband", pd.Series(0.0, index=working.index)).fillna(0.0).clip(
+        lower=1.0e-8
+    )
+    def _deadbanded_weight_change_action(previous_weight: float, new_weight: float, deadband: float) -> str:
+        if abs(float(new_weight) - float(previous_weight)) <= float(deadband):
+            return "hold" if float(previous_weight) > 1.0e-8 else "skip"
+        return _weight_change_action(float(previous_weight), float(new_weight))
+
+    working["intent_weight_change_action"] = [
+        _deadbanded_weight_change_action(
+            float(previous_weight),
+            float(intent_weight),
+            float(deadband),
+        )
+        for previous_weight, intent_weight, deadband in zip(
+            working["current_weight"].fillna(0.0),
+            working.get("portfolio_daily_target_weight_intent", pd.Series(0.0, index=working.index)).fillna(0.0),
+            intent_deadband,
+        )
+    ]
+    working["final_weight_change_action_deadbanded"] = [
+        _deadbanded_weight_change_action(
+            float(previous_weight),
+            float(target_weight),
+            float(deadband),
+        )
+        for previous_weight, target_weight, deadband in zip(
+            working["current_weight"].fillna(0.0),
+            working.get("target_weight", pd.Series(0.0, index=working.index)).fillna(0.0),
+            intent_deadband,
+        )
+    ]
+    working["intent_translation_active"] = working["allocation_intent_v2_mode"] & (
+        (intent_delta_abs > intent_deadband) | (working["abs_delta_weight"] > intent_deadband)
+    )
+    working["intent_translation_conflict"] = working["intent_translation_active"] & (
+        (working["intent_weight_change_action"] != working["final_weight_change_action_deadbanded"])
+        & (intent_delta_abs > intent_deadband)
     )
 
     by_date = (
@@ -949,6 +1018,21 @@ def _build_semantic_conflicts(
             "allocation_layer_available_cash_to_deploy",
             "allocation_layer_stock_budget",
             "allocation_layer_target_weight_sum",
+            "allocation_layer_target_sum_gap",
+            "allocation_layer_cash_funded_deploy_amount",
+            "allocation_layer_source_funded_deploy_amount",
+            "allocation_layer_unused_receiver_headroom",
+            "allocation_layer_receiver_headroom_utilization",
+            "allocation_layer_source_release_required",
+            "allocation_layer_budget_closed",
+            "allocation_layer_deployment_required",
+            "allocation_layer_risk_reduction_required",
+            "allocation_layer_receiver_activity_required",
+            "allocation_intent_v2_mode_used",
+            "intent_translation_conflict_count",
+            "intent_translation_active_count",
+            "intent_translation_conflict_rate",
+            "lifecycle_hint_conflict_rate",
             "allocation_layer_objective_value",
             "allocation_layer_receiver_executable_candidate_count",
             "allocation_layer_receiver_target_count",
@@ -1031,6 +1115,21 @@ def _build_semantic_conflicts(
             "allocation_layer_available_cash_to_deploy",
             "allocation_layer_stock_budget",
             "allocation_layer_target_weight_sum",
+            "allocation_layer_target_sum_gap",
+            "allocation_layer_cash_funded_deploy_amount",
+            "allocation_layer_source_funded_deploy_amount",
+            "allocation_layer_unused_receiver_headroom",
+            "allocation_layer_receiver_headroom_utilization",
+            "allocation_layer_source_release_required",
+            "allocation_layer_budget_closed",
+            "allocation_layer_deployment_required",
+            "allocation_layer_risk_reduction_required",
+            "allocation_layer_receiver_activity_required",
+            "allocation_intent_v2_mode_used",
+            "intent_translation_conflict_count",
+            "intent_translation_active_count",
+            "intent_translation_conflict_rate",
+            "lifecycle_hint_conflict_rate",
             "allocation_layer_objective_value",
             "allocation_layer_receiver_executable_candidate_count",
             "allocation_layer_receiver_target_count",
@@ -1108,6 +1207,16 @@ def _build_semantic_conflicts(
                     "realized_turnover",
                     "gross_exposure_target",
                     "gross_exposure_target_raw",
+                    "allocation_layer_target_sum_gap",
+                    "allocation_layer_budget_closed",
+                    "allocation_layer_deployment_required",
+                    "allocation_layer_risk_reduction_required",
+                    "allocation_layer_receiver_activity_required",
+                    "allocation_intent_v2_mode_used",
+                    "intent_translation_conflict_count",
+                    "intent_translation_active_count",
+                    "intent_translation_conflict_rate",
+                    "lifecycle_hint_conflict_rate",
                     "candidate_budget",
                     "candidate_budget_raw",
                     "turnover_budget",
@@ -1190,6 +1299,15 @@ def _build_semantic_conflicts(
     diagnoses: list[str] = []
     semantic_conflict_rate = _safe_mean(working["is_conflict"].astype(float))
     order_translation_conflict_rate = _safe_mean(working["is_order_translation_conflict"].astype(float))
+    allocation_intent_v2_mode_share = _safe_mean(working["allocation_intent_v2_mode"].astype(float))
+    if bool(working["intent_translation_active"].any()):
+        intent_active_rows = working.loc[working["intent_translation_active"]]
+        intent_translation_conflict_rate = _safe_mean(intent_active_rows["intent_translation_conflict"].astype(float))
+    else:
+        intent_translation_conflict_rate = _safe_mean(
+            day_merge.get("intent_translation_conflict_rate", pd.Series(0.0, index=day_merge.index)).fillna(0.0)
+        )
+    lifecycle_hint_conflict_rate = semantic_conflict_rate if allocation_intent_v2_mode_share >= 0.5 else 0.0
     micro_rebalance_conflict_rate = _safe_mean(working["contradictory_micro_rebalance"].astype(float))
     deadband_conflict_rate = _safe_mean((working["is_semantic_conflict"] & working["deadband_active"]).astype(float))
     deadband_order_translation_conflict_rate = _safe_mean(
@@ -2165,6 +2283,9 @@ def _build_semantic_conflicts(
         "direct_action_value_low_margin_share": direct_action_value_low_margin_share,
         "direct_action_order_translation_conflict_rate": direct_action_order_translation_conflict_rate,
         "direct_action_intent_preserved_share": direct_action_intent_preserved_share,
+        "allocation_intent_v2_mode_share": allocation_intent_v2_mode_share,
+        "intent_translation_conflict_rate": intent_translation_conflict_rate,
+        "lifecycle_hint_conflict_rate": lifecycle_hint_conflict_rate,
         "direct_action_funding_authorized_sell_share": direct_action_funding_authorized_sell_share,
         "direct_action_funding_protected_sell_share": direct_action_funding_protected_sell_share,
         "direct_action_release_advantage_mean": direct_action_release_advantage_mean,
@@ -2227,6 +2348,14 @@ def _build_semantic_conflicts(
         "portfolio_daily_effective_capital_transfer_count": int(portfolio_daily_effective_capital_transfer_count),
         "portfolio_daily_cash_score_mean": portfolio_daily_cash_score_mean,
         "portfolio_daily_cash_reserve_rate": portfolio_daily_cash_reserve_rate,
+        "portfolio_daily_budget_closed": float(bool(allocation_closure.get("budget_closed", False))),
+        "portfolio_daily_deployment_required": float(bool(allocation_closure.get("deployment_required", False))),
+        "portfolio_daily_risk_reduction_required": float(
+            bool(allocation_closure.get("risk_reduction_required", False))
+        ),
+        "portfolio_daily_receiver_activity_required": float(
+            bool(allocation_closure.get("receiver_activity_required", False))
+        ),
         "portfolio_daily_receiver_score_mean": portfolio_daily_receiver_score_mean,
         "portfolio_daily_source_score_mean": portfolio_daily_source_score_mean,
         "portfolio_daily_source_gap_mean": portfolio_daily_source_gap_mean,
@@ -2261,6 +2390,9 @@ def _build_semantic_conflicts(
         ),
         "portfolio_daily_receiver_candidate_without_target_day_share": float(
             allocation_closure.get("receiver_candidate_without_target_day_share", 0.0) or 0.0
+        ),
+        "portfolio_daily_receiver_candidate_without_target_required_day_share": float(
+            allocation_closure.get("receiver_candidate_without_target_required_day_share", 0.0) or 0.0
         ),
         "portfolio_daily_source_dead_day_share": float(
             allocation_closure.get("source_dead_day_share", 0.0) or 0.0

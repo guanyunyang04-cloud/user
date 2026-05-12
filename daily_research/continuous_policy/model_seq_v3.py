@@ -1910,6 +1910,41 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"]["sample_scalar_loss_weights"],
+        "sell_release_value": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"][
+            "sample_scalar_loss_weights"
+        ].get("sell_release_value", 1.0)
+        * 1.08,
+        "cash_defense_value": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"][
+            "sample_scalar_loss_weights"
+        ].get("cash_defense_value", 1.0)
+        * 1.06,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"]["daily_target_loss_weights"],
+        "gross_exposure_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"][
+            "daily_target_loss_weights"
+        ].get("gross_exposure_target", 1.0)
+        * 1.04,
+        "budget_cash_timing_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"][
+            "daily_target_loss_weights"
+        ].get("budget_cash_timing_signal_target", 1.0)
+        * 1.16,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v43"]["multi_objective_loss_weights"],
+        "scalar_total": 0.66,
+        "daily_total": 0.88,
+        "portfolio_cash_margin_total": 0.40,
+        "portfolio_capital_flow_closure_total": 0.50,
+        "portfolio_day_set_native_allocation_vector_total": 4.55,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -8405,7 +8440,10 @@ def fit_policy_models_v3(
         "supports_native_executable_receiver_closure": bool(native_executable_receiver_closure_enabled),
         "supports_native_validation_closure": bool(native_validation_closure_enabled),
         "supports_cash_funded_allocation_core_v2": bool(
-            resolved_loss_profile == "alpha_result_value_budget_split_v43"
+            resolved_loss_profile in {"alpha_result_value_budget_split_v43", "alpha_result_value_budget_split_v44"}
+        ),
+        "supports_allocation_intent_v2_mode": bool(
+            resolved_loss_profile == "alpha_result_value_budget_split_v44"
         ),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
@@ -9113,11 +9151,17 @@ def predict_policy_v3(
     budget_objective_name = str(artifact.train_summary.get("budget_objective", "") or "").strip().lower()
     loss_profile_name = str(artifact.train_summary.get("loss_profile", "") or "").strip().lower()
     cash_funded_allocation_core_v2_mode = bool(
-        loss_profile_name == "alpha_result_value_budget_split_v43"
+        loss_profile_name in {"alpha_result_value_budget_split_v43", "alpha_result_value_budget_split_v44"}
         or artifact.training_diagnostics.get("supports_cash_funded_allocation_core_v2", False)
+    )
+    allocation_intent_v2_mode = bool(
+        loss_profile_name == "alpha_result_value_budget_split_v44"
+        or artifact.training_diagnostics.get("supports_allocation_intent_v2_mode", False)
     )
     if cash_funded_allocation_core_v2_mode:
         global_targets["allocation_core_v2_mode"] = 1.0
+    if allocation_intent_v2_mode:
+        global_targets["allocation_intent_v2_mode"] = 1.0
     direct_action_value_mode = (
         loss_profile_name in DIRECT_ACTION_VALUE_LOSS_PROFILES
         or str(artifact.train_summary.get("policy_decision_mode", "") or "").strip().lower()
@@ -9446,6 +9490,8 @@ def predict_policy_v3(
         )
         global_targets["allocation_core_v2_mode"] = 1.0
         global_targets["allocation_core_v2_stock_budget_floor"] = r53_stock_budget_floor
+        if allocation_intent_v2_mode:
+            global_targets["allocation_intent_v2_mode"] = 1.0
 
     probability_map = {label: action_prob[:, idx] for idx, label in enumerate(ACTION_CLASSES)}
     current_weight = state_frame["current_weight"].astype(float).to_numpy(dtype=float) if "current_weight" in state_frame.columns else np.zeros(len(state_frame), dtype=float)
@@ -11956,6 +12002,60 @@ def predict_policy_v3(
                 neginf=-1.0,
             )
 
+    portfolio_daily_target_weight_intent = np.asarray(
+        native_allocation_columns.get("portfolio_daily_target_weight", current_weight),
+        dtype=float,
+    ).copy()
+    if allocation_intent_v2_mode:
+        if "portfolio_daily_target_weight" not in native_allocation_columns:
+            position_cap = float(global_targets.get("max_position_weight_target", 0.20) or 0.20)
+            stock_budget = float(
+                min(
+                    float(global_targets.get("gross_exposure_target", 0.60) or 0.60),
+                    1.0 - float(global_targets.get("cash_reserve_target", 0.05) or 0.05),
+                )
+            )
+            intent = np.clip(current_weight, 0.0, position_cap)
+            receiver_capacity = np.clip(position_cap - intent, 0.0, None) * (
+                (portfolio_daily_receiver_executability > 0.05)
+                | (portfolio_daily_unified_receiver_score > 0.08)
+                | (portfolio_daily_receiver_score > 0.08)
+            )
+            receiver_priority = np.clip(
+                0.50 * portfolio_daily_unified_receiver_score
+                + 0.35 * portfolio_daily_receiver_score
+                + 0.15 * portfolio_daily_receiver_executability,
+                0.0,
+                1.0,
+            )
+            deploy_amount = min(
+                max(0.0, stock_budget - float(np.nansum(intent))),
+                float(np.nansum(receiver_capacity)),
+            )
+            if deploy_amount > 1.0e-12 and float(np.nansum(receiver_priority * (receiver_capacity > 0.0))) > 1.0e-12:
+                weights = receiver_priority * (receiver_capacity > 0.0)
+                weights = weights / max(float(np.nansum(weights)), 1.0e-12)
+                remaining = deploy_amount
+                while remaining > 1.0e-12 and bool(np.any(receiver_capacity > 1.0e-12)):
+                    proposal = weights * remaining
+                    assigned = np.minimum(proposal, receiver_capacity)
+                    intent = intent + assigned
+                    assigned_sum = float(np.nansum(assigned))
+                    if assigned_sum <= 1.0e-12:
+                        break
+                    remaining -= assigned_sum
+                    receiver_capacity = np.clip(receiver_capacity - assigned, 0.0, None)
+                    weights = receiver_priority * (receiver_capacity > 1.0e-12)
+                    weights = weights / max(float(np.nansum(weights)), 1.0e-12)
+            portfolio_daily_target_weight_intent = np.clip(intent, 0.0, position_cap)
+        else:
+            portfolio_daily_target_weight_intent = np.clip(
+                np.nan_to_num(portfolio_daily_target_weight_intent, nan=0.0, posinf=1.0, neginf=0.0),
+                0.0,
+                float(global_targets.get("max_position_weight_target", 0.20) or 0.20),
+            )
+    portfolio_daily_target_delta_intent = portfolio_daily_target_weight_intent - current_weight
+
     policy = pd.DataFrame(
         {
             "stock": state_frame["stock"].astype(str).to_numpy(),
@@ -12046,6 +12146,8 @@ def predict_policy_v3(
             "portfolio_daily_funding_closure_score": portfolio_daily_funding_closure_score,
             "portfolio_daily_allocation_transfer_score": portfolio_daily_allocation_transfer_score,
             "portfolio_daily_allocation_dead_branch_risk": portfolio_daily_allocation_dead_branch_risk,
+            "portfolio_daily_target_weight_intent": portfolio_daily_target_weight_intent,
+            "portfolio_daily_target_delta_intent": portfolio_daily_target_delta_intent,
             "decision_deploy_gate": decision_deploy_gate,
             "decision_release_gate": decision_release_gate,
             "decision_defense_signal": decision_defense_signal,
@@ -12055,6 +12157,11 @@ def predict_policy_v3(
             "allocation_core_v2_mode": np.full(
                 len(state_frame),
                 1.0 if cash_funded_allocation_core_v2_mode else 0.0,
+                dtype=float,
+            ),
+            "allocation_intent_v2_mode": np.full(
+                len(state_frame),
+                1.0 if allocation_intent_v2_mode else 0.0,
                 dtype=float,
             ),
             "clipped_intent_risk": clipped_intent_risk,

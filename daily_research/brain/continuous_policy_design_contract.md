@@ -185,3 +185,11 @@
 - r53 budget contract: when the learned daily gross target collapses too low, r53 must emit and honor `allocation_core_v2_stock_budget_floor`; the cash-funded allocator must not be evaluated against a false `0.20` stock budget.
 - r53 gate contract: cash-funded deployment and receiver-headroom utilization are required only when deployment is actually needed. If actual cash, deployable idle cash, exposure utilization, and target sum gap already show a closed budget, zero fresh receiver targets must not be scored as allocator failure.
 - r53 verdict boundary: safe screening improved cash/exposure closure but still fails strategy quality through insufficient training evidence, negative cash timing, and strongly negative composite score. It remains blocked from confirmatory, strict resume, promotion, live/default, and active artifact changes.
+
+## 2026-05-12 r54 Semantic Budget Controller Contract
+- r54 entry: `split_heads_portfolio_daily_semantic_budget_controller_r54` / `alpha_result_value_budget_split_v44`.
+- r54 semantic contract: `portfolio_daily_target_weight_intent` is the main model intent; lifecycle `action_label` is a hint/reporting surface and must not override final target weights.
+- r54 simulator contract: final weights are solved through the r53 cash-funded allocator, then execution actions are derived from target-weight deltas.
+- r54 audit contract: intent translation conflict must compare target-weight intent delta with final execution delta after applying execution deadband; micro deltas below deadband are not semantic failures.
+- r54 gate contract: receiver activity, cash-funded deployment, and unused receiver headroom are failures only when deployment is actually required. Budget-closed days must not be scored as deployment failures.
+- r54 verdict boundary: safe screening improved score shape and kept cash/exposure closure clean, but training evidence, cash timing, reduce/exit quality, and one abnormal trial exit still block confirmatory, promotion, live/default, and active artifact changes.

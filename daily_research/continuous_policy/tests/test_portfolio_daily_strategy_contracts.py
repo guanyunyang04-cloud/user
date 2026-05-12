@@ -3347,6 +3347,49 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertNotIn("receiver_headroom_unused", gate["failed_resource_checks"])
         self.assertIn("cash_timing_bad", gate["failed_resource_checks"])
 
+    def test_r53_scoring_does_not_penalize_closed_budget_for_inactive_receiver(self) -> None:
+        scored = _score_protocol_summary(
+            _protocol_summary(
+                metrics={
+                    "annual_return": 0.19,
+                    "sharpe": 1.08,
+                    "monthly_return_mean": 0.012,
+                    "monthly_consistency_score": 0.58,
+                    "max_drawdown": -0.10,
+                    "avg_gross_exposure": 0.81,
+                },
+                semantic={
+                    "avg_gross_exposure_target": 0.747,
+                    "portfolio_daily_exposure_utilization": 1.08,
+                    "portfolio_daily_actual_cash_weight_mean": 0.19,
+                    "portfolio_daily_actual_gross_exposure_mean": 0.81,
+                    "portfolio_daily_deployable_idle_cash_mean": 0.005,
+                    "portfolio_daily_cash_semantics_mismatch": 0.0,
+                    "portfolio_daily_target_sum_gap": 0.005,
+                    "portfolio_daily_cash_funded_deploy_amount_mean": 0.01,
+                    "portfolio_daily_unused_receiver_headroom_mean": 300.0,
+                    "portfolio_daily_source_release_required": 0.0,
+                    "portfolio_daily_receiver_target_count": 0.0,
+                    "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                    "portfolio_daily_source_target_count": 0.0,
+                    "portfolio_daily_source_realized_sell_rate": 0.0,
+                    "portfolio_daily_receiver_candidate_without_target_day_share": 1.0,
+                    "receiver_activity_required": 0.0,
+                    "budget_closed": 1.0,
+                },
+            ),
+            objective_profile="end_to_end_allocation_layer_v1",
+        )
+
+        perf = scored["score_breakdown"]["performance"]
+        stability = scored["score_breakdown"]["stability"]
+        self.assertEqual(perf.get("portfolio_daily_v2_cash_funded_deploy_gate", 0.0), 0.0)
+        self.assertEqual(perf.get("portfolio_daily_v2_unused_receiver_headroom_gate", 0.0), 0.0)
+        self.assertEqual(perf.get("portfolio_daily_v2_receiver_activity_gate", 0.0), 0.0)
+        self.assertEqual(perf.get("portfolio_daily_receiver_candidate_without_target_penalty", 0.0), 0.0)
+        self.assertEqual(stability.get("portfolio_daily_v2_cash_funded_deploy_gate", 0.0), 0.0)
+        self.assertEqual(stability.get("portfolio_daily_v2_unused_receiver_headroom_gate", 0.0), 0.0)
+
     def test_r53_resource_gate_still_blocks_unfilled_cash_budget(self) -> None:
         profile = "split_heads_portfolio_daily_cash_funded_allocation_core_r53"
         trial = _trial(
@@ -3386,6 +3429,43 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIn("cash_funded_deployment_failed", gate["failed_resource_checks"])
         self.assertIn("receiver_headroom_unused", gate["failed_resource_checks"])
         self.assertIn("target_sum_underdeployed", gate["failed_resource_checks"])
+
+    def test_r53_scoring_still_blocks_unfilled_cash_budget(self) -> None:
+        scored = _score_protocol_summary(
+            _protocol_summary(
+                metrics={
+                    "annual_return": 0.04,
+                    "sharpe": 0.20,
+                    "monthly_return_mean": 0.001,
+                    "max_drawdown": -0.08,
+                    "avg_gross_exposure": 0.28,
+                },
+                semantic={
+                    "avg_gross_exposure_target": 0.85,
+                    "portfolio_daily_exposure_utilization": 0.34,
+                    "portfolio_daily_actual_cash_weight_mean": 0.72,
+                    "portfolio_daily_actual_gross_exposure_mean": 0.28,
+                    "portfolio_daily_deployable_idle_cash_mean": 0.32,
+                    "portfolio_daily_cash_semantics_mismatch": 0.0,
+                    "portfolio_daily_target_sum_gap": 0.52,
+                    "portfolio_daily_cash_funded_deploy_amount_mean": 0.0,
+                    "portfolio_daily_unused_receiver_headroom_mean": 0.60,
+                    "portfolio_daily_source_release_required": 0.0,
+                    "portfolio_daily_receiver_target_count": 0.0,
+                    "portfolio_daily_receiver_unrealized_deploy_share": 0.0,
+                    "portfolio_daily_source_target_count": 0.0,
+                    "portfolio_daily_source_realized_sell_rate": 0.0,
+                    "portfolio_daily_receiver_candidate_without_target_day_share": 1.0,
+                },
+            ),
+            objective_profile="end_to_end_allocation_layer_v1",
+        )
+
+        perf = scored["score_breakdown"]["performance"]
+        self.assertLess(perf.get("portfolio_daily_v2_cash_funded_deploy_gate", 0.0), 0.0)
+        self.assertLess(perf.get("portfolio_daily_v2_unused_receiver_headroom_gate", 0.0), 0.0)
+        self.assertLess(perf.get("portfolio_daily_v2_receiver_activity_gate", 0.0), 0.0)
+        self.assertLess(perf.get("portfolio_daily_receiver_candidate_without_target_penalty", 0.0), 0.0)
 
     def test_r53_allocation_core_v2_recomputes_low_native_target_sum(self) -> None:
         state = PortfolioState(
@@ -3485,6 +3565,188 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertGreaterEqual(result.diagnostics["allocation_layer_receiver_executable_candidate_count"], 3)
         self.assertGreaterEqual(float(result.weights.sum()), 0.75)
         self.assertLess(result.diagnostics["allocation_layer_target_sum_gap"], 0.12)
+
+    def test_r54_profile_registers_semantic_budget_controller_without_solver(self) -> None:
+        profile = "split_heads_portfolio_daily_semantic_budget_controller_r54"
+        loss_profile = "alpha_result_value_budget_split_v44"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 8)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 6)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertNotIn(profile, TRUE_SOLVER_RESOURCE_SEARCH_PROFILES)
+
+        resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        multi_weights = resolved_config["multi_objective_loss_weights"]
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_day_set_native_allocation_vector_total"], 4.00)
+        self.assertEqual(multi_weights["portfolio_cvxpy_convex_allocation_total"], 0.0)
+        self.assertEqual(multi_weights["portfolio_full_universe_convex_allocation_total"], 0.0)
+
+    def test_r54_predict_policy_exports_target_weight_intent_mode(self) -> None:
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["held", "recv_a", "recv_b"],
+                "current_weight": [0.28, 0.0, 0.0],
+                "static_feature": [0.0, 0.0, 0.0],
+                "seq_feature": [0.0, 0.0, 0.0],
+            }
+        )
+        artifact = SimpleNamespace(
+            sample_model=_FakePolicyModel(),
+            daily_model=_FakeDailyModel(),
+            static_feature_names=["static_feature"],
+            sequence_base_names=["seq_feature"],
+            sequence_steps=[0],
+            sequence_columns=["seq_feature"],
+            daily_feature_names=["daily_feature"],
+            static_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            static_means=pd.Series([0.0]).to_numpy(dtype=float),
+            static_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            sequence_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_means=pd.Series([0.0]).to_numpy(dtype=float),
+            sequence_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            daily_fill_values=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_means=pd.Series([0.0]).to_numpy(dtype=float),
+            daily_stds=pd.Series([1.0]).to_numpy(dtype=float),
+            train_summary={
+                "decoder_profile": "holdcash_v3",
+                "loss_profile": "alpha_result_value_budget_split_v44",
+                "budget_objective": "result_value_v10",
+            },
+            training_diagnostics={
+                "supports_sell_heads": False,
+                "supports_portfolio_listwise_heads": True,
+                "supports_portfolio_unified_allocation_heads": True,
+                "supports_portfolio_allocation_objective_consolidation_heads": True,
+                "supports_allocation_intent_v2_mode": True,
+            },
+        )
+
+        policy, global_targets = predict_policy_v3(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"daily_feature": 0.0},
+        )
+
+        self.assertEqual(global_targets["allocation_core_v2_mode"], 1.0)
+        self.assertEqual(global_targets["allocation_intent_v2_mode"], 1.0)
+        self.assertIn("portfolio_daily_target_weight_intent", policy.columns)
+        self.assertIn("allocation_intent_v2_mode", policy.columns)
+        self.assertTrue(bool((policy["allocation_intent_v2_mode"] == 1.0).all()))
+        self.assertTrue(bool((policy["portfolio_daily_target_weight_intent"] >= 0.0).all()))
+
+    def test_r54_simulator_derives_execution_from_target_weight_intent(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.72,
+            holdings={"HELD": HoldingState(weight=0.28, entry_price=10.0, peak_price=10.0)},
+            max_positions=5,
+            max_position_weight=0.30,
+            turnover_limit=1.00,
+        )
+        prices = pd.Series({"HELD": 10.0, "RECV_A": 10.0, "RECV_B": 10.0, "RECV_C": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip", "skip", "skip"],
+                "action_strength": [0.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_target_weight_intent": [0.28, 0.30, 0.27, 0.00],
+                "portfolio_daily_receiver_score": [0.0, 0.95, 0.90, 0.0],
+                "portfolio_daily_source_score": [0.20, 0.0, 0.0, 0.0],
+                "portfolio_daily_cash_score": [0.05, 0.05, 0.05, 0.05],
+                "portfolio_daily_receiver_executability": [0.0, 1.0, 1.0, 0.0],
+                "portfolio_daily_source_executability": [1.0, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_add_headroom": [0.0, 0.30, 0.30, 0.30],
+                "portfolio_daily_source_release_capacity": [0.10, 0.0, 0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0, 1.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0, 0.0, 0.0],
+                "allocation_core_v2_mode": [1.0, 1.0, 1.0, 1.0],
+                "allocation_intent_v2_mode": [1.0, 1.0, 1.0, 1.0],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-12",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.85,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+                "allocation_core_v2_mode": 1.0,
+                "allocation_intent_v2_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_layer_core_v2_used"], 1.0)
+        self.assertEqual(result.diagnostics["allocation_intent_v2_mode_used"], 1.0)
+        self.assertGreaterEqual(float(result.weights.sum()), 0.75)
+        self.assertLessEqual(result.diagnostics["intent_translation_conflict_rate"], 0.10)
+        opened = {
+            item["stock"]: item
+            for item in result.actions
+            if item["stock"] in {"RECV_A", "RECV_B"}
+        }
+        self.assertEqual(opened["RECV_A"]["execution_action"], "open")
+        self.assertEqual(opened["RECV_A"]["portfolio_daily_effective_model_action"], "open")
+        self.assertEqual(opened["RECV_A"]["semantic_translation_reason"], "allocation_intent_v2_delta")
+
+    def test_r54_intent_translation_ignores_deadband_micro_delta(self) -> None:
+        state = PortfolioState(
+            cash_weight=0.43702,
+            holdings={
+                "H1": HoldingState(weight=0.28149, entry_price=10.0, peak_price=10.0),
+                "H2": HoldingState(weight=0.28149, entry_price=10.0, peak_price=10.0),
+            },
+            max_positions=5,
+            max_position_weight=0.30,
+            turnover_limit=0.10,
+        )
+        prices = pd.Series({"H1": 10.0, "H2": 10.0})
+        policy = pd.DataFrame(
+            {
+                "action_label": ["skip", "skip"],
+                "action_strength": [0.0, 0.0],
+                "portfolio_daily_target_weight_intent": [0.28, 0.28],
+                "portfolio_daily_receiver_score": [0.0, 0.0],
+                "portfolio_daily_source_score": [0.0, 0.0],
+                "portfolio_daily_receiver_executability": [0.0, 0.0],
+                "portfolio_daily_source_executability": [0.0, 0.0],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 0.0],
+                "portfolio_daily_source_executable_candidate": [0.0, 0.0],
+                "allocation_core_v2_mode": [1.0, 1.0],
+                "allocation_intent_v2_mode": [1.0, 1.0],
+            },
+            index=prices.index,
+        )
+
+        result = state.step(
+            date="2026-05-13",
+            prices=prices,
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.56298,
+                "turnover_budget": 0.10,
+                "max_position_weight_target": 0.30,
+                "cash_reserve_target": 0.05,
+                "allocation_core_v2_mode": 1.0,
+                "allocation_intent_v2_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertEqual(result.diagnostics["allocation_intent_v2_mode_used"], 1.0)
+        self.assertEqual(result.diagnostics["intent_translation_conflict_count"], 0)
+        self.assertEqual(result.diagnostics["intent_translation_conflict_rate"], 0.0)
+        self.assertTrue(all(item["weight_change_action"] == "hold" for item in result.actions))
 
     def test_r52_day_set_dataset_returns_complete_days(self) -> None:
         date_codes = torch.tensor([0, 0, 0, 1, 1], dtype=torch.long)

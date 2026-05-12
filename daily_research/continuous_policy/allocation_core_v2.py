@@ -244,6 +244,20 @@ def solve_cash_funded_allocation_v2(
     target_sum = float(target.sum())
     target_sum_gap = max(0.0, stock_budget - target_sum)
     turnover_limited = bool(total_turnover >= turnover_limit - 1.0e-9 and target_sum_gap > 1.0e-8)
+    deployment_required = bool(
+        target_sum_gap > 0.05
+        or cash_after > 0.62
+        or (deployable_idle_cash := min(available_cash, max(0.0, stock_budget - target_sum))) > 0.24
+        or source_release_required
+    )
+    risk_reduction_required = bool(current_gross > stock_budget + 0.05)
+    budget_closed = bool(
+        target_sum_gap <= 0.05
+        and cash_after <= 0.45
+        and deployable_idle_cash <= 0.24
+        and not source_release_required
+    )
+    receiver_activity_required = bool(deployment_required or source_release_required)
     if target_sum_gap <= 1.0e-8:
         underdeployment_reason = "none"
     elif turnover_limited:
@@ -269,6 +283,10 @@ def solve_cash_funded_allocation_v2(
         "unused_receiver_headroom": unused_receiver_headroom,
         "receiver_headroom_total": receiver_headroom_total,
         "receiver_headroom_utilization": receiver_headroom_utilization,
+        "budget_closed": budget_closed,
+        "deployment_required": deployment_required,
+        "risk_reduction_required": risk_reduction_required,
+        "receiver_activity_required": receiver_activity_required,
         "source_release_required": source_release_required,
         "underdeployment_reason": underdeployment_reason,
         "turnover_limit": turnover_limit,

@@ -117,6 +117,39 @@ class AllocationClosureDiagnosticsTest(unittest.TestCase):
         self.assertFalse(summary["source_release_required"])
         self.assertEqual(summary["underdeployment_reason"], "cash_funded_deployment_failed")
 
+    def test_diagnostic_marks_budget_closed_without_receiver_activity_requirement(self) -> None:
+        from daily_research.continuous_policy.allocation_closure_diagnostics import (
+            summarize_allocation_closure_from_turnover,
+        )
+
+        turnover_frame = pd.DataFrame(
+            {
+                "date": ["2026-05-12", "2026-05-13"],
+                "cash_weight": [0.19, 0.20],
+                "gross_exposure_target": [0.75, 0.75],
+                "gross_exposure": [0.81, 0.80],
+                "allocation_layer_available_cash_to_deploy": [0.004, 0.006],
+                "allocation_layer_stock_budget": [0.75, 0.75],
+                "allocation_layer_target_weight_sum": [0.81, 0.80],
+                "allocation_layer_target_sum_gap": [0.004, 0.006],
+                "allocation_layer_cash_funded_deploy_amount": [0.01, 0.01],
+                "allocation_layer_unused_receiver_headroom": [280.0, 300.0],
+                "allocation_layer_receiver_executable_candidate_count": [4, 4],
+                "allocation_layer_receiver_target_count": [0, 0],
+                "allocation_layer_source_target_count": [0, 0],
+                "allocation_layer_source_release_required": [0.0, 0.0],
+                "portfolio_daily_cash_reserve_signal": [0.0, 0.0],
+            }
+        )
+
+        summary = summarize_allocation_closure_from_turnover(turnover_frame)
+
+        self.assertTrue(summary["budget_closed"])
+        self.assertFalse(summary["deployment_required"])
+        self.assertFalse(summary["receiver_activity_required"])
+        self.assertEqual(summary["receiver_candidate_without_target_day_share"], 1.0)
+        self.assertEqual(summary["receiver_candidate_without_target_required_day_share"], 0.0)
+
     def test_native_allocation_loss_penalizes_deployable_idle_cash(self) -> None:
         row_count = 6
         targets = {

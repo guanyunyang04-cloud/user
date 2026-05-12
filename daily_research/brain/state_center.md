@@ -111,3 +111,13 @@
 - Fact: patched r53 resource gate re-evaluates the best trial as only `cash_timing_bad`; it no longer mislabels a budget-closed day as `cash_funded_deployment_failed`.
 - Current verdict: r53 is code-contract plus safe-screening improvement, not a strategy verdict. Confirmatory, strict resume, promotion, live/default, and active artifact changes remain blocked because training evidence is insufficient, cash timing is negative, and composite score remains strongly negative.
 - Evidence capsule: `daily_research/brain/references/r53_cash_funded_allocation_core_status_20260512.md`.
+
+## 2026-05-12 r54 Semantic Budget Controller Verdict
+- Fact: r54 code contract exists as `split_heads_portfolio_daily_semantic_budget_controller_r54` / `alpha_result_value_budget_split_v44`; it makes target-weight intent the main policy surface and derives execution actions from final target-weight deltas.
+- Fact: r54 corrected r53 scorer/audit semantics: budget-closed days no longer require fresh receiver activity, and intent translation conflict is now deadband-aware.
+- Fact: dry-run `self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02` passed with confirmatory disabled and true solver disabled.
+- Fact: safe screening `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02` completed with 2 completed trials and 1 failed trial; confirmatory remained disabled.
+- Best completed trial: `trial_02`, `composite_score=4.80437`, `annual_return=0.153993`, actual cash about `0.1885`, actual gross about `0.8115`, exposure utilization about `1.083`, target gap about `0.0048`, native fallback `0`, intent translation conflict `0`.
+- Remaining blockers: training evidence is insufficient (`best_epoch=8` at edge), `cash_timing_quality_1d=-0.168248`, reduce/exit quality still fails, and trial 03 exited with code `3221226505` despite writing a protocol summary.
+- Evidence capsule: `daily_research/brain/references/r54_semantic_budget_controller_status_20260512.md`.
+- Current verdict: r54 is a code-contract and safe-screening improvement, not a strategy-success verdict; do not run confirmatory, promotion, live/default, or active artifact changes from this evidence.

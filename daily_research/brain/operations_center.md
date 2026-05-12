@@ -141,3 +141,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - Evidence capsule: `daily_research/brain/references/r53_cash_funded_allocation_core_status_20260512.md`.
 - r53 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, 2-hour foreground polling for long runs.
 - Stop rule: do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from r53 until a later explicit safe screening fixes negative cash timing and insufficient training evidence.
+
+## 2026-05-12 r54 Operational Note
+- r54 dry-run tag: `self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02`.
+- r54 safe screening tag: `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02`.
+- Evidence capsule: `daily_research/brain/references/r54_semantic_budget_controller_status_20260512.md`.
+- r54 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, foreground polling window `2` hours, and immediate result parsing when the process ends early.
+- Stop rule: do not run confirmatory, promotion, live/default, or active artifact changes from r54. Strict resume requires a separate explicit decision after investigating the trial 03 abnormal exit and the remaining cash-timing / best-epoch blockers.
