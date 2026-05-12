@@ -11,6 +11,7 @@
 - 当前命令不得默认设置 `KMP_DUPLICATE_LIB_OK`。
 - 所有训练、评估、审计、bounded study、confirmatory rerun、execution app 与交易计划任务默认前台运行，不得为规避窗口而后台化。
 - 长任务 stdout/stderr 必须写入持久日志；监控轮询间隔固定为 `2` 小时；进程自然结束后立即解析产物。
+- self-optimizing study 的 protocol trial 默认在同一 Python 进程内运行；不得再按父进程/子进程模型设计训练监控或资源限制。
 - GPU 训练完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable`。
 
 ## 项目地图
@@ -148,3 +149,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - Evidence capsule: `daily_research/brain/references/r54_semantic_budget_controller_status_20260512.md`.
 - r54 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, foreground polling window `2` hours, and immediate result parsing when the process ends early.
 - Stop rule: do not run confirmatory, promotion, live/default, or active artifact changes from r54. Strict resume requires a separate explicit decision after investigating the trial 03 abnormal exit and the remaining cash-timing / best-epoch blockers.
+
+## 2026-05-12 Single-Process Study Runner Note
+- self-optimizing study no longer launches `run_continuous_policy_protocol` as a child process for each trial.
+- `_run_protocol_with_progress` now calls protocol main in-process and writes progress events with `protocol_runner_mode=in_process`.
+- Resource controls now apply to the current process environment, current process priority/affinity on Windows, and Torch thread limits where available.
+- Monitoring rule: track the single study/training process plus progress files; do not search for separate protocol child processes.

@@ -5,7 +5,6 @@ import itertools
 import json
 import os
 import random
-import subprocess
 import sys
 import threading
 import time
@@ -44,6 +43,7 @@ from daily_research.continuous_policy.portfolio_simulator import (
 )
 from daily_research.continuous_policy.run_continuous_policy_protocol import (
     PROMOTION_THRESHOLDS,
+    main as protocol_main,
 )
 from daily_research.continuous_policy.runtime import (
     LATEST_BEHAVIOR_AUDIT_SUMMARY_PATH,
@@ -5662,20 +5662,83 @@ def _build_resource_limits(
     }
 
 
-def _resource_limited_child_env(resource_limits: dict[str, Any]) -> dict[str, str]:
-    env = dict(os.environ)
+def _resource_limit_env_updates(resource_limits: dict[str, Any]) -> dict[str, str]:
+    env_updates: dict[str, str] = {}
     thread_limit = int(resource_limits.get("thread_limit", 0) or 0)
     if thread_limit > 0:
         for key in THREAD_LIMIT_ENV_KEYS:
-            env[key] = str(thread_limit)
-    env["CONTINUOUS_POLICY_RESOURCE_PROFILE"] = str(resource_limits.get("resource_profile", "") or "")
-    env["CONTINUOUS_POLICY_PROCESS_PRIORITY"] = str(resource_limits.get("process_priority", "") or "")
-    env["CONTINUOUS_POLICY_CPU_AFFINITY_MASK"] = str(int(resource_limits.get("cpu_affinity_mask", 0) or 0))
-    return env
+            env_updates[key] = str(thread_limit)
+    env_updates["CONTINUOUS_POLICY_RESOURCE_PROFILE"] = str(resource_limits.get("resource_profile", "") or "")
+    env_updates["CONTINUOUS_POLICY_PROCESS_PRIORITY"] = str(resource_limits.get("process_priority", "") or "")
+    env_updates["CONTINUOUS_POLICY_CPU_AFFINITY_MASK"] = str(int(resource_limits.get("cpu_affinity_mask", 0) or 0))
+    return env_updates
 
 
-def _apply_windows_process_limits(process: subprocess.Popen[Any], resource_limits: dict[str, Any]) -> dict[str, Any]:
-    applied: dict[str, Any] = {"priority_applied": False, "affinity_applied": False, "error": ""}
+def _apply_resource_limit_env(resource_limits: dict[str, Any]) -> dict[str, str | None]:
+    updates = _resource_limit_env_updates(resource_limits)
+    previous = {key: os.environ.get(key) for key in updates}
+    for key, value in updates.items():
+        os.environ[key] = str(value)
+    return previous
+
+
+def _restore_resource_limit_env(previous: dict[str, str | None]) -> None:
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _apply_torch_thread_limit(resource_limits: dict[str, Any]) -> dict[str, Any]:
+    thread_limit = int(resource_limits.get("thread_limit", 0) or 0)
+    state: dict[str, Any] = {"torch_applied": False, "error": ""}
+    if thread_limit <= 0:
+        return state
+    try:
+        import torch
+
+        state["previous_num_threads"] = int(torch.get_num_threads())
+        try:
+            state["previous_num_interop_threads"] = int(torch.get_num_interop_threads())
+        except Exception:
+            state["previous_num_interop_threads"] = None
+        torch.set_num_threads(thread_limit)
+        if state.get("previous_num_interop_threads") is not None:
+            try:
+                torch.set_num_interop_threads(max(1, min(thread_limit, int(state["previous_num_interop_threads"]))))
+            except RuntimeError:
+                state["interop_restore_only"] = True
+        state["torch_applied"] = True
+    except Exception as exc:
+        state["error"] = str(exc)
+    return state
+
+
+def _restore_torch_thread_limit(state: dict[str, Any]) -> None:
+    if not state.get("torch_applied"):
+        return
+    try:
+        import torch
+
+        if state.get("previous_num_threads") is not None:
+            torch.set_num_threads(int(state["previous_num_threads"]))
+        if state.get("previous_num_interop_threads") is not None and not state.get("interop_restore_only"):
+            try:
+                torch.set_num_interop_threads(int(state["previous_num_interop_threads"]))
+            except RuntimeError:
+                pass
+    except Exception:
+        return
+
+
+def _apply_windows_current_process_limits(resource_limits: dict[str, Any]) -> dict[str, Any]:
+    applied: dict[str, Any] = {
+        "priority_applied": False,
+        "affinity_applied": False,
+        "target_process": "current",
+        "error": "",
+    }
     if os.name != "nt":
         applied["platform"] = os.name
         return applied
@@ -5683,26 +5746,57 @@ def _apply_windows_process_limits(process: subprocess.Popen[Any], resource_limit
         import ctypes
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(0x0200 | 0x0400 | 0x0100, False, int(process.pid))
-        if not handle:
-            raise OSError(ctypes.get_last_error(), "OpenProcess failed")
-        try:
-            priority_map = {
-                "normal": 0x00000020,
-                "below_normal": 0x00004000,
-                "idle": 0x00000040,
-            }
-            priority = str(resource_limits.get("process_priority", "normal") or "normal").lower()
-            if priority in priority_map:
-                applied["priority_applied"] = bool(kernel32.SetPriorityClass(handle, priority_map[priority]))
-            affinity_mask = int(resource_limits.get("cpu_affinity_mask", 0) or 0)
-            if affinity_mask > 0:
-                applied["affinity_applied"] = bool(kernel32.SetProcessAffinityMask(handle, ctypes.c_size_t(affinity_mask)))
-        finally:
-            kernel32.CloseHandle(handle)
+        handle = kernel32.GetCurrentProcess()
+        priority_map = {
+            "normal": 0x00000020,
+            "below_normal": 0x00004000,
+            "idle": 0x00000040,
+        }
+        previous_priority = int(kernel32.GetPriorityClass(handle))
+        if previous_priority:
+            applied["previous_priority_class"] = previous_priority
+        process_mask = ctypes.c_size_t(0)
+        system_mask = ctypes.c_size_t(0)
+        if kernel32.GetProcessAffinityMask(handle, ctypes.byref(process_mask), ctypes.byref(system_mask)):
+            applied["previous_affinity_mask"] = int(process_mask.value)
+            applied["system_affinity_mask"] = int(system_mask.value)
+        priority = str(resource_limits.get("process_priority", "normal") or "normal").lower()
+        if priority in priority_map:
+            applied["priority_applied"] = bool(kernel32.SetPriorityClass(handle, priority_map[priority]))
+        affinity_mask = int(resource_limits.get("cpu_affinity_mask", 0) or 0)
+        system_affinity = int(applied.get("system_affinity_mask", 0) or 0)
+        if affinity_mask > 0:
+            effective_affinity = affinity_mask & system_affinity if system_affinity > 0 else affinity_mask
+            if effective_affinity > 0:
+                applied["affinity_applied"] = bool(kernel32.SetProcessAffinityMask(handle, ctypes.c_size_t(effective_affinity)))
+                applied["applied_affinity_mask"] = int(effective_affinity)
     except Exception as exc:
         applied["error"] = str(exc)
     return applied
+
+
+def _restore_windows_current_process_limits(applied: dict[str, Any]) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.GetCurrentProcess()
+        previous_affinity = int(applied.get("previous_affinity_mask", 0) or 0)
+        if previous_affinity > 0:
+            kernel32.SetProcessAffinityMask(handle, ctypes.c_size_t(previous_affinity))
+        previous_priority = int(applied.get("previous_priority_class", 0) or 0)
+        if previous_priority > 0:
+            kernel32.SetPriorityClass(handle, previous_priority)
+    except Exception:
+        return
+
+
+def _callable_name(callable_obj: Any) -> str:
+    module_name = str(getattr(callable_obj, "__module__", "") or "")
+    qualname = str(getattr(callable_obj, "__qualname__", getattr(callable_obj, "__name__", "")) or "")
+    return f"{module_name}.{qualname}".strip(".")
 
 
 def _run_protocol_with_progress(
@@ -5722,15 +5816,11 @@ def _run_protocol_with_progress(
     started_monotonic = time.monotonic()
     stop_event = threading.Event()
     progress_lock = threading.Lock()
-    runner_command: list[str] = [
-        str(sys.executable),
-        "-m",
-        "daily_research.continuous_policy.run_continuous_policy_protocol",
-        *list(protocol_args),
-    ]
-    runner_mode = "subprocess" if protocol_fn is None else "callable"
+    protocol_callable = protocol_main if protocol_fn is None else protocol_fn
+    runner_mode = "in_process"
     resolved_resource_limits = dict(resource_limits or {})
     process_limit_result: dict[str, Any] = {}
+    torch_thread_result: dict[str, Any] = {}
 
     def emit(event: str, **payload: Any) -> None:
         progress_payload = {
@@ -5743,13 +5833,14 @@ def _run_protocol_with_progress(
             "process_id": os.getpid(),
             "protocol_args": list(protocol_args),
             "protocol_runner_mode": runner_mode,
+            "protocol_runner_function": _callable_name(protocol_callable),
         }
-        if runner_mode == "subprocess":
-            progress_payload["protocol_runner_command"] = list(runner_command)
         if resolved_resource_limits:
             progress_payload["resource_limits"] = dict(resolved_resource_limits)
         if process_limit_result:
             progress_payload["process_limit_result"] = dict(process_limit_result)
+        if torch_thread_result:
+            progress_payload["torch_thread_limit_result"] = dict(torch_thread_result)
         progress_payload.update(dict(progress_context or {}))
         progress_payload.update(payload)
         with progress_lock:
@@ -5770,24 +5861,32 @@ def _run_protocol_with_progress(
         daemon=True,
     )
     heartbeat_thread.start()
+    previous_env: dict[str, str | None] = {}
+    previous_cwd: Path | None = None
     try:
-        if protocol_fn is None:
-            process = subprocess.Popen(
-                runner_command,
-                cwd=str(Path(__file__).resolve().parents[2]),
-                env=_resource_limited_child_env(resolved_resource_limits),
-            )
-            if resolved_resource_limits:
-                process_limit_result.update(_apply_windows_process_limits(process, resolved_resource_limits))
-                emit("protocol_resource_limits_applied", status="running", child_process_id=int(process.pid))
-            exit_code = int(process.wait())
-        else:
-            exit_code = int(protocol_fn(protocol_args))
+        if resolved_resource_limits:
+            previous_env = _apply_resource_limit_env(resolved_resource_limits)
+            torch_thread_result.update(_apply_torch_thread_limit(resolved_resource_limits))
+            process_limit_result.update(_apply_windows_current_process_limits(resolved_resource_limits))
+            emit("protocol_resource_limits_applied", status="running")
+        protocol_cwd = Path(__file__).resolve().parents[2]
+        previous_cwd = Path.cwd()
+        if previous_cwd.resolve() != protocol_cwd.resolve():
+            os.chdir(protocol_cwd)
+        exit_code = int(protocol_callable(protocol_args))
     except Exception as exc:
         stop_event.set()
         heartbeat_thread.join(timeout=1.0)
         emit("protocol_failed", status="failed", error=str(exc))
         raise
+    finally:
+        if previous_cwd is not None:
+            os.chdir(previous_cwd)
+        _restore_torch_thread_limit(torch_thread_result)
+        if process_limit_result:
+            _restore_windows_current_process_limits(process_limit_result)
+        if previous_env:
+            _restore_resource_limit_env(previous_env)
 
     stop_event.set()
     heartbeat_thread.join(timeout=1.0)
@@ -6482,25 +6581,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--resource-profile",
         default="auto",
         choices=RESOURCE_PROFILE_CHOICES,
-        help="Resource guard for subprocess studies. auto uses safe mode for true solver profiles and balanced mode otherwise.",
+        help="Resource guard for in-process protocol runs. auto uses safe mode for true solver profiles and balanced mode otherwise.",
     )
     parser.add_argument(
         "--thread-limit",
         type=int,
         default=0,
-        help="Override BLAS/OpenMP/Torch thread count for protocol subprocesses; 0 lets the resource profile decide.",
+        help="Override BLAS/OpenMP/Torch thread count for protocol runs; 0 lets the resource profile decide.",
     )
     parser.add_argument(
         "--process-priority",
         default="auto",
         choices=RESOURCE_PRIORITY_CHOICES,
-        help="Windows process priority for protocol subprocesses.",
+        help="Windows process priority for the current study/protocol process.",
     )
     parser.add_argument(
         "--cpu-affinity-count",
         type=int,
         default=0,
-        help="Limit protocol subprocesses to the first N logical CPUs; 0 lets the resource profile decide.",
+        help="Limit the current study/protocol process to the first N logical CPUs; 0 lets the resource profile decide.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser

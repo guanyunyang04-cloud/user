@@ -74,7 +74,7 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     _pick_confirmatory_candidates,
     _portfolio_daily_v2_confirm_stability,
     _resource_gate_after_screening,
-    _resource_limited_child_env,
+    _resource_limit_env_updates,
     _run_protocol_with_progress,
     _score_protocol_summary,
     _write_study_progress_event,
@@ -2934,7 +2934,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(limits["process_priority"], "below_normal")
         self.assertGreater(int(limits["cpu_affinity_mask"]), 0)
 
-        env = _resource_limited_child_env(limits)
+        env = _resource_limit_env_updates(limits)
         for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS"):
             self.assertEqual(env[key], str(limits["thread_limit"]))
         self.assertEqual(env["CONTINUOUS_POLICY_RESOURCE_PROFILE"], "safe")
@@ -4731,6 +4731,46 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(state["trial_tag"], "study__trial_01")
         self.assertEqual(state["resource_limits"]["thread_limit"], 2)
         self.assertTrue(any(event["event"] == "protocol_heartbeat" for event in events))
+
+    def test_protocol_progress_default_runner_is_single_process(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            study_root = Path(temp_dir)
+            calls = {"argv": None}
+
+            def fake_protocol(argv: list[str]) -> int:
+                calls["argv"] = list(argv)
+                return 0
+
+            with patch(
+                "daily_research.continuous_policy.run_self_optimizing_study.protocol_main",
+                side_effect=fake_protocol,
+            ), patch(
+                "subprocess.Popen",
+                side_effect=AssertionError("protocol must not spawn a child process"),
+            ):
+                exit_code = _run_protocol_with_progress(
+                    study_root=study_root,
+                    phase="screening",
+                    role="",
+                    trial_id=1,
+                    trial_tag="study__trial_01",
+                    source_trial_tag="",
+                    protocol_args=["--tag", "study__trial_01"],
+                    heartbeat_interval_seconds=0.01,
+                    resource_limits={"resource_profile": "safe", "thread_limit": 2, "process_priority": "below_normal"},
+                )
+
+            events = [
+                json.loads(line)
+                for line in (study_root / "study_progress.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls["argv"], ["--tag", "study__trial_01"])
+        self.assertTrue(events)
+        self.assertTrue(all(event["protocol_runner_mode"] == "in_process" for event in events))
+        self.assertFalse(any("protocol_runner_command" in event for event in events))
 
     def test_every_registered_search_profile_loss_profile_resolves(self) -> None:
         for profile_name, base_trial in SEARCH_PROFILE_BASE_TRIALS.items():

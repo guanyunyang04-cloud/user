@@ -105,6 +105,12 @@
 - 筛选结果：2 个 trial completed，1 个 trial failed；best completed trial 02 `composite_score=4.80437`，actual cash about `0.1885`，actual gross about `0.8115`，target gap about `0.0048`，intent translation conflict `0`，native fallback `0`。
 - 行动后判断：r54 改善了评分形态并保持 cash/exposure closure 干净，但仍被 `training_evidence_status=insufficient`、negative cash timing、reduce/exit quality 和 trial 03 abnormal exit 阻断；不得 confirmatory、promotion、live/default 或改 active artifact。
 
+## 2026-05-12 Single-Process Study Runner Correction
+- 行动前自检：r54 screening 监控暴露出父进程/子进程口径增加了不必要复杂度；用户明确要求训练就是一个进程。
+- 测试先行：新增合同测试，默认 `_run_protocol_with_progress` 必须调用 in-process `protocol_main`，且不得触发 `subprocess.Popen` 或写出 `protocol_runner_command`。
+- 执行动作：取消默认 protocol subprocess 路径；resource env、Windows priority/affinity 与 Torch thread limit 改为应用到当前进程；progress 事件固定写 `protocol_runner_mode=in_process`。
+- 行动后判断：后续 long-run 监控只看单一 study/training 进程和 progress files，不再按父/子进程拆分判断。
+
 - 行动前自检：r52e dry-run 通过后才启动 safe screening；命令显式设置 `--disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`，未修改 active/live/default。
 - 运行结果：`self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01` 完成 1/3 screening trials、0 failed；resource gate 早停并节省 2 个 trial。
 - 失败证据：trial 01 `composite_score=-45.938456`、`annual_return=-0.268027`、`cash_timing_quality_1d=-0.053696`、`portfolio_daily_exposure_utilization=0.331584`、`training_evidence_status=insufficient`、`source_target_count=0`。
