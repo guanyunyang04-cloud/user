@@ -77,6 +77,13 @@
 - Inference: release-first allocator/decoder semantics are not behavior-evaluable until the r56 day-set v46 training path completes at least one protocol summary.
 - Rule: if r56 remains source-dead after a completed protocol, the conclusion must be "allocator/intent wiring still not connected"; if there is no completed protocol, the conclusion must remain "runtime evidence missing".
 
+## 2026-05-13 r58 Framework Simplification Lesson
+- Fact: the r57 subprocess watchdog path added parent/child process complexity without creating completed r56 behavior evidence.
+- Fact: r58 keeps progress files and tag collision protection, but restores study/protocol execution to a foreground in-process default.
+- Fact: active new-study profiles are intentionally small: `focused_seq_v1`, r53, r54, r55, and r56. Older profile definitions are legacy compatibility data, not a menu for new research runs.
+- Inference: when a research line lacks completed protocol summaries, adding more orchestration layers can hide the true blocker. Prefer a direct protocol smoke, then dry-run study, then safe screening.
+- Rule: do not treat new runner layers, more loss weights, or another r-number profile as progress unless they reduce a specific blocker and preserve completed evidence semantics.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

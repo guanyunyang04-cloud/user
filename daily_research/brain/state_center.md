@@ -148,3 +148,12 @@
 - Inference: r56 allocator/source behavior cannot yet be judged; the current blocker is r56 training runtime completion under day-set v46, not source/reduce/exit semantics.
 - Boundary: r56 remains research / shadow-only. Do not enter strict resume, confirmatory, promotion, live/default, or active artifact changes from this evidence.
 - Next: add a shorter r56 GPU smoke/safe checkpoint or stronger epoch-level progress diagnostics before another full safe screening; do not repackage this as "add loss/epoch".
+
+## 2026-05-13 r58 Framework Simplification Status
+- Fact: r58 removes the r57 parent/child subprocess protocol runner and watchdog path from `run_self_optimizing_study.py`.
+- Fact: r58 keeps low-complexity runtime observability: protocol progress JSONL, training progress events, study progress events, and explicit study-tag collision protection.
+- Fact: active new-study search profiles are now limited to `focused_seq_v1`, r53, r54, r55, and r56 through `research_profile_registry.py`; legacy r19-r52 profiles remain historical compatibility data, not default new-study entrypoints.
+- Fact: focused regression passed with `136 passed, 24 warnings`.
+- Evidence capsule: `daily_research/brain/references/r58_framework_simplification_status_20260513.md`.
+- Current verdict: r58 is research framework simplification only. It is not strategy evidence, confirmatory evidence, promotion support, live/default change, or active artifact change.
+- Next workflow: use direct foreground protocol smoke before dry-run study and safe screening; do not use parent/child subprocess watchdog as the default research path.

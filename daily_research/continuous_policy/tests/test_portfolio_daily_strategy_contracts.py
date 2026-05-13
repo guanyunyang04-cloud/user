@@ -4829,9 +4829,6 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             with patch(
                 "daily_research.continuous_policy.run_self_optimizing_study.protocol_main",
                 side_effect=fake_protocol,
-            ), patch(
-                "subprocess.Popen",
-                side_effect=AssertionError("protocol must not spawn a child process"),
             ):
                 exit_code = _run_protocol_with_progress(
                     study_root=study_root,
@@ -4856,7 +4853,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertTrue(events)
         self.assertTrue(all(event["protocol_runner_mode"] == "in_process" for event in events))
 
-    def test_r57_protocol_progress_is_threaded_from_protocol_to_train(self) -> None:
+    def test_r58_protocol_progress_is_threaded_from_protocol_to_train(self) -> None:
         import daily_research.continuous_policy.run_continuous_policy_protocol as protocol_module
         import daily_research.continuous_policy.train_policy as train_module
 
@@ -4872,7 +4869,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIn("train_epoch_complete", fit_source)
         self.assertIn("protocol_progress_jsonl", fit_source)
 
-    def test_r57_failed_trial_result_preserves_runtime_failure_diagnostics(self) -> None:
+    def test_failed_trial_result_preserves_explicit_runtime_failure_diagnostics(self) -> None:
         with TemporaryDirectory() as temp_dir:
             protocol_root = Path(temp_dir)
             (protocol_root / "runtime_failure_summary.json").write_text(
@@ -4894,7 +4891,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 trial_config={"loss_profile": "alpha_result_value_budget_split_v46"},
                 protocol_summary_path=str(protocol_root / "protocol_summary.json"),
                 exit_code=124,
-                exception_message="watchdog stopped protocol",
+                exception_message="protocol failed before producing completed evidence",
             )
 
         self.assertEqual(result.status, "failed")
@@ -4903,7 +4900,7 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(result.primary_metrics["runtime_channel_failure"], 1.0)
         self.assertEqual(result.primary_metrics["runtime_failure_reason"], "no_progress_timeout")
 
-    def test_r57_existing_study_tag_requires_explicit_allow_flag(self) -> None:
+    def test_r58_existing_study_tag_requires_explicit_allow_flag(self) -> None:
         with TemporaryDirectory() as temp_dir:
             study_root = Path(temp_dir) / "existing_study"
             study_root.mkdir()

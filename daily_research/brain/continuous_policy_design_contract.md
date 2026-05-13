@@ -217,3 +217,11 @@
 - Loss contract: v46 keeps `action_total=0.0` and `duration_total=0.0`, keeps true solver disabled, and adds positive release-first/cash-timing/source-release/reduce-exit allocation terms.
 - Evidence contract: failed or timed-out trials before a parseable `protocol_summary.json` have `completed_evidence=0.0`. They may diagnose runtime but must not be used as completed screening evidence.
 - Current verdict boundary: dry-run passed, but safe screening has `0` completed r56 trials; r56 cannot enter strict resume, confirmatory, promotion, live/default, or active artifact changes until completed safe evidence exists and passes gates.
+
+## 2026-05-13 r58 Framework Simplification Contract
+- Default study execution is foreground and in-process. The study runner must not spawn a protocol subprocess, run a parent/child watchdog, or expose default wall-time / stale-progress subprocess timeout options.
+- Runtime observability is cooperative and file-based: protocol progress JSONL, latest protocol progress JSON, training progress events, and study progress events are allowed and encouraged.
+- Search profile registration is split from the study runner. New study entrypoints must come from the active registry, currently limited to `focused_seq_v1`, r53, r54, r55, and r56.
+- Legacy r19-r52 profile definitions may remain available for historical artifact compatibility, but they must not be default CLI choices for new studies.
+- Runtime triage workflow is fixed as: direct foreground protocol smoke, then dry-run study, then safe screening. Failed runtime attempts without parseable protocol summaries remain diagnostics only.
+- This framework contract does not alter live/default/promotion rules and must never write `daily_research/output/active_execution_strategy.json`.
