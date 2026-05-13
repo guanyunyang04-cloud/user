@@ -20,9 +20,17 @@ def _float(mapping: dict[str, Any], key: str, default: float = 0.0) -> float:
         return float(default)
 
 
+def _continuity_metrics(summary: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    merged.update(_section(summary, "shadow", "continuity_metrics"))
+    merged.update(_section(summary, "evaluation", "continuity_metrics"))
+    merged.update(_section(summary, "continuity_metrics"))
+    return merged
+
+
 def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[str, Any]:
     evaluation_metrics = _section(protocol_summary, "evaluation", "continuous_policy_metrics")
-    continuity = _section(protocol_summary, "evaluation", "continuity_metrics")
+    continuity = _continuity_metrics(protocol_summary)
     training = _section(protocol_summary, "training_evidence")
     promotion = _section(protocol_summary, "promotion_gate")
     failed_checks = list(promotion.get("failed_checks", []) or [])
@@ -35,6 +43,7 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
     exposure_utilization = _float(continuity, "portfolio_daily_exposure_utilization")
     target_sum_gap = _float(continuity, "portfolio_daily_target_sum_gap")
     intent_conflict = _float(continuity, "intent_translation_conflict_rate")
+    intent_conflict_present = "intent_translation_conflict_rate" in continuity
     best_epoch = int(training.get("best_epoch", 0) or 0)
     completed_epochs = int(training.get("completed_epochs", 0) or 0)
 
@@ -57,7 +66,8 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
         1.0 - min(target_sum_gap, 1.0),
     )
     if intent_conflict == 0.0:
-        allocation_closure_score = max(allocation_closure_score, 0.90)
+        if intent_conflict_present:
+            allocation_closure_score = max(allocation_closure_score, 0.90)
 
     return {
         "run_tag": str(protocol_summary.get("run_tag", "")),
@@ -78,7 +88,7 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
         },
         "progress_assets": {
             "allocation_closure_score": allocation_closure_score,
-            "intent_translation_clean": intent_conflict <= 0.01,
+            "intent_translation_clean": bool(intent_conflict_present and intent_conflict <= 0.01),
             "exposure_closed": exposure_utilization >= 0.60 and target_sum_gap <= 0.05,
         },
         "next_focus": [

@@ -235,3 +235,13 @@
 - Registry contract: active new-study profiles are `focused_seq_v1`, `split_heads_portfolio_daily_release_first_constrained_decoder_r56`, and `split_heads_portfolio_daily_release_first_core_v4_r59`. r53-r55 may remain readable as legacy compatibility data but are not default new-study entrypoints.
 - Evidence contract: direct smoke and dry-run can prove wiring only. They must not be written as strategy effectiveness, safe-screening, confirmatory, live/default, promotion, or active artifact evidence.
 - Guard contract: r59 must not write `daily_research/output/active_execution_strategy.json`.
+
+## 2026-05-13 r60 Profile-Bound Protocol Contract
+- Direct protocol contract: when `--search-profile` is an active profile, protocol arguments must apply profile base-trial defaults with precedence explicit CLI value > profile base trial > parser default.
+- Profile-binding contract: protocol summaries must include `profile_binding` with requested profile, applied status, explicit overrides, active-profile status, and effective base trial.
+- Legacy-entry contract: non-active legacy profiles must not start new direct protocols through `--search-profile`; they are historical compatibility data only.
+- Diagnostics contract: evaluation and shadow continuity metrics must surface release-first/source/cash/intent diagnostics from turnover CSV, including source intent count, source target count, source realized sell rate, target sum gap, actual cash weight, and intent translation conflict.
+- Bottleneck contract: behavior bottleneck reports must use enriched continuity metrics and must not mark intent translation as clean when the diagnostic field is missing.
+- Core-v4 intent contract: core-v4 prediction must reuse `derive_release_first_intent(...)` for release score, action hint, intent delta, and block reason.
+- Evidence boundary: r60 safe screening completed but failed behaviorally. It proves profile-bound execution and diagnostic visibility, not strategy success or promotion readiness.
+- Next-work boundary: future work must target release/source target generation and target-delta-to-allocator wiring before any confirmatory or long resume.

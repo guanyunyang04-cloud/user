@@ -31,6 +31,9 @@ from daily_research.continuous_policy.pipeline_utils import (
     DEFAULT_BUDGET_OBJECTIVE,
     run_policy_rollout,
 )
+from daily_research.continuous_policy.protocol_release_diagnostics import (
+    enrich_summary_with_release_first_diagnostics,
+)
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_CHOICES,
     BUDGET_SEMANTICS_CHOICES,
@@ -52,6 +55,7 @@ from daily_research.continuous_policy.runtime import (
     write_json,
 )
 from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
+from daily_research.continuous_policy.research_profile_registry import get_search_profile_config
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
@@ -79,6 +83,89 @@ TRAINING_EVIDENCE_THRESHOLDS = {
     "teacher_action_rows_per_train_day": 6.0,
     "best_epoch_edge_margin": 2,
 }
+
+PROFILE_BOUND_ARG_DESTS: tuple[str, ...] = (
+    "label_preset",
+    "decoder_profile",
+    "trainer_backend",
+    "loss_profile",
+    "budget_semantics",
+    "budget_calibration",
+    "budget_objective",
+    "alpha_prior_source",
+    "daily_head_layout",
+    "learning_rate",
+    "hidden_dim",
+    "sequence_layers",
+    "daily_hidden_dim",
+    "dropout",
+    "daily_dropout",
+    "batch_size",
+    "epochs",
+    "min_epochs",
+)
+
+
+def _explicit_cli_dests(parser: argparse.ArgumentParser, raw_argv: list[str]) -> set[str]:
+    option_dest: dict[str, str] = {}
+    for action in parser._actions:
+        for option in action.option_strings:
+            option_dest[option] = action.dest
+    explicit: set[str] = set()
+    for token in raw_argv:
+        if token == "--":
+            break
+        if not token.startswith("--"):
+            continue
+        option = token.split("=", 1)[0]
+        dest = option_dest.get(option)
+        if dest:
+            explicit.add(dest)
+    return explicit
+
+
+def _apply_search_profile_binding(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    raw_argv: list[str],
+) -> dict[str, Any]:
+    requested = str(args.search_profile or "").strip()
+    binding: dict[str, Any] = {
+        "requested_search_profile": requested,
+        "profile_applied": False,
+        "active_profile": False,
+        "explicit_overrides": {},
+        "effective_base_trial": {},
+    }
+    if not requested:
+        return binding
+    try:
+        profile_config = get_search_profile_config(requested)
+    except KeyError as exc:
+        parser.error(str(exc))
+    base_trial = dict(profile_config.get("base_trial", {}) or {})
+    explicit_dests = _explicit_cli_dests(parser, raw_argv)
+    explicit_overrides: dict[str, Any] = {}
+    effective_base_trial = dict(base_trial)
+    for dest in PROFILE_BOUND_ARG_DESTS:
+        if dest not in base_trial or not hasattr(args, dest):
+            continue
+        if dest in explicit_dests:
+            explicit_overrides[dest] = getattr(args, dest)
+            effective_base_trial[dest] = getattr(args, dest)
+        else:
+            setattr(args, dest, base_trial[dest])
+            effective_base_trial[dest] = base_trial[dest]
+    binding.update(
+        {
+            "profile_applied": True,
+            "active_profile": True,
+            "explicit_overrides": explicit_overrides,
+            "effective_base_trial": effective_base_trial,
+        }
+    )
+    return binding
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -340,8 +427,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_args_with_profile_binding(argv: list[str] | None = None) -> tuple[argparse.Namespace, dict[str, Any]]:
+    parser = build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    profile_binding = _apply_search_profile_binding(args, parser=parser, raw_argv=raw_argv)
+    return args, profile_binding
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args, profile_binding = _parse_args_with_profile_binding(argv)
     protocol_tag = str(args.tag or timestamp_tag("protocol"))
     protocol_root = PROTOCOLS_ROOT / protocol_tag
     protocol_root.mkdir(parents=True, exist_ok=True)
@@ -496,7 +591,9 @@ def main(argv: list[str] | None = None) -> int:
         eval_args.extend(["--reference-panel", f"policy_v5b={v5b_panel}"])
         discovered_references.append({"label": "policy_v5b", "panel_path": str(v5b_panel)})
     _call_stage("evaluate", evaluate_main, eval_args, progress_sink=progress_sink)
-    evaluation_summary = _read_json(EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json")
+    evaluation_summary_path = EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json"
+    evaluation_summary = enrich_summary_with_release_first_diagnostics(_read_json(evaluation_summary_path))
+    write_json(evaluation_summary_path, evaluation_summary)
 
     progress_sink.emit("stage_start", stage="shadow")
     shadow_stage_started_at = pd.Timestamp.now()
@@ -582,6 +679,7 @@ def main(argv: list[str] | None = None) -> int:
         "returns_csv": str(shadow_returns_path.resolve()),
         "monthly_returns_csv": str(shadow_monthly_returns_path.resolve()),
     }
+    shadow_summary = enrich_summary_with_release_first_diagnostics(shadow_summary)
     write_json(shadow_summary_path, shadow_summary)
     progress_sink.emit(
         "stage_complete",
@@ -644,6 +742,7 @@ def main(argv: list[str] | None = None) -> int:
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
         "search_profile": str(args.search_profile or ""),
+        "profile_binding": profile_binding,
         "label_preset": args.label_preset,
         "trainer_backend": str(train_summary.get("trainer_backend", args.trainer_backend) or args.trainer_backend),
         "decoder_profile": str(train_summary.get("decoder_profile", args.decoder_profile) or args.decoder_profile),

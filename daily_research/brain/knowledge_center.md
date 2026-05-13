@@ -92,6 +92,14 @@
 - Rule: future core-v4 work must stay parallel and shadow-only until explicit safe-screening evidence exists. Do not copy v3 historical loss/profile chains into core-v4 just for compatibility.
 - Rule: active new-study profiles should remain small: `focused_seq_v1`, r56 v3 reference, and r59 core-v4 unless a future writeback explicitly changes the active set.
 
+## 2026-05-13 r60 Profile Binding Lesson
+- Fact: r59 direct smoke originally accepted a search profile label without applying profile defaults, so it could appear to test r59 while actually running legacy budget/objective/prior semantics.
+- Fact: r60 fixes this by binding active profile defaults into direct protocol and recording `profile_binding`.
+- Fact: once r60 made diagnostics visible, safe screening showed core-v4 release-first mode is enabled but release/source behavior is still dead: source intent count `0`, source target count `0`, rotation `0`, high cash, high target gap, and high intent translation conflict.
+- Inference: the current blocker is not evidence volume. It is core-v4 release/source target generation and allocator-consumable target-delta wiring.
+- Rule: any future protocol smoke with `--search-profile` must verify `profile_binding.profile_applied=true` before behavior interpretation.
+- Rule: if release/source remains zero with profile binding and enriched diagnostics present, the conclusion must be "release-first wiring/training target still not connected," not "run more epochs" or "add generic loss weight."
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

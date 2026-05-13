@@ -170,3 +170,17 @@
 - Evidence capsule: `daily_research/brain/references/r59_core_v4_release_first_status_20260513.md`.
 - Current verdict: r59 is research / shadow-only / core-v4 infrastructure. It is not safe-screening evidence, strategy-effectiveness evidence, confirmatory evidence, promotion support, live/default change, or active artifact change.
 - Next: if continuing r59, run explicit-tag safe screening only after smoke and dry-run remain clean; do not infer strategy quality from smoke metrics.
+
+## 2026-05-13 r60 Profile-Bound Core V4 Screening Status
+- Fact: r60 fixes direct protocol profile binding. `--search-profile split_heads_portfolio_daily_release_first_core_v4_r59` now applies r59 base-trial defaults unless explicitly overridden.
+- Fact: protocol summaries now include `profile_binding` and enriched release-first/source/cash/intent continuity diagnostics from turnover CSV.
+- Fact: focused regression passed with `140 passed, 24 warnings`.
+- Fact: direct smoke `protocol_r60_profile_bound_core_v4_smoke_20260513_01` completed with `profile_binding.profile_applied=true`, backend `formal_torch_core_v4`, loss `alpha_result_value_budget_split_v46`, allocation-layer semantics, result-value objective, and active strategy prior.
+- Fact: dry run `self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01` selected only the r59 core-v4 profile.
+- Fact: safe screening `self_opt_study_r60_profile_bound_core_v4_screening_safe_20260513_01` completed 1/1 trials, 0 failed, confirmatory disabled.
+- Safe-screening verdict: completed evidence is negative. Trial 01 has `composite_score=-36.684195`, `release_first_source_intent_count=0`, `portfolio_daily_source_target_count=0`, `portfolio_daily_target_sum_gap~0.6148`, `portfolio_daily_actual_cash_weight_mean~0.8468`, `intent_translation_conflict_rate~0.8434`, reduce/exit still `0`, and resource gate stopped on source-dead/underdeployment/high-cash failures.
+- Positive note: training evidence became sufficient (`best_epoch=6`, `completed_epochs=12`) and cash timing improved to `0.026076`, but this does not offset source/release/deployment failure.
+- Fact: `daily_research/output/active_execution_strategy.json` remains unchanged.
+- Evidence capsule: `daily_research/brain/references/r60_profile_bound_core_v4_screening_status_20260513.md`.
+- Current verdict: r60 is research / shadow-only. It proves correct profile binding and diagnostic surfacing, but it is not eligible for r61 strict resume, confirmatory, promotion, live/default, or active artifact changes.
+- Next: inspect core-v4 release/source target generation and allocator-consumable target-delta wiring; do not reframe this as simply needing more epochs or loss weight.

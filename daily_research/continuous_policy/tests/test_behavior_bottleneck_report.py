@@ -85,6 +85,48 @@ class BehaviorBottleneckReportTest(unittest.TestCase):
             report = json.loads(Path(output_path).read_text(encoding="utf-8"))
             self.assertEqual(report["primary_blocker"], "cash_timing_negative")
 
+    def test_missing_intent_translation_metric_is_not_reported_as_clean(self) -> None:
+        report = build_behavior_bottleneck_report(
+            {
+                "run_tag": "missing_diagnostics",
+                "evaluation": {
+                    "continuity_metrics": {
+                        "portfolio_daily_source_target_count": 0.0,
+                        "portfolio_daily_source_realized_sell_rate": 0.0,
+                    }
+                },
+                "training_evidence": {"status": "insufficient"},
+                "promotion_gate": {"failed_checks": []},
+            }
+        )
+
+        self.assertIn("sell_intent_dead", report["blockers"])
+        self.assertFalse(report["progress_assets"]["intent_translation_clean"])
+
+    def test_enriched_intent_translation_metric_drives_report(self) -> None:
+        report = build_behavior_bottleneck_report(
+            {
+                "run_tag": "enriched_diagnostics",
+                "evaluation": {
+                    "continuity_metrics": {
+                        "cash_timing_quality_1d": -0.01,
+                        "reduce_success_rate_5d": 0.5,
+                        "exit_timeliness_rate_5d": 0.5,
+                        "portfolio_daily_source_target_count": 1.0,
+                        "portfolio_daily_source_realized_sell_rate": 0.5,
+                        "portfolio_daily_exposure_utilization": 0.9,
+                        "portfolio_daily_target_sum_gap": 0.02,
+                        "intent_translation_conflict_rate": 0.25,
+                    }
+                },
+                "training_evidence": {"status": "sufficient", "best_epoch": 4, "completed_epochs": 8},
+                "promotion_gate": {"failed_checks": []},
+            }
+        )
+
+        self.assertEqual(report["metrics"]["intent_translation_conflict_rate"], 0.25)
+        self.assertFalse(report["progress_assets"]["intent_translation_clean"])
+
 
 if __name__ == "__main__":
     unittest.main()

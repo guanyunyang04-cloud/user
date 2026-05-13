@@ -12,6 +12,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from daily_research.continuous_policy.model_v2 import _apply_matrix, _prepare_matrix, _split_indices
+from daily_research.continuous_policy.semantic_budget_intent import derive_release_first_intent
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_CORE_V4
 from daily_research.continuous_policy.training_runtime_acceleration import (
     autocast_context,
@@ -220,7 +221,7 @@ def _heuristic_outputs(artifact: TorchContinuousPolicyCoreV4Artifact, state_fram
         "release_intent": release_intent,
         "source_score": (release_intent * 0.72 + (target_delta < -0.003).astype(float) * 0.18).clip(0.0, 1.0),
         "source_release_quality": (release_intent * 0.80 + current.clip(0.0, 0.20) * 0.50).clip(0.0, 1.0),
-        "source_economic_block_risk": (0.18 - release_intent * 0.12).clip(0.0, 1.0),
+        "source_economic_block_risk": (0.10 - release_intent * 0.10).clip(0.0, 1.0),
         "reduce_quality": release_intent.clip(0.0, 1.0),
         "exit_hazard": (release_intent * (target_delta.abs() >= (current * 0.60).clip(lower=0.02)).astype(float)).clip(0.0, 1.0),
     }
@@ -274,17 +275,30 @@ def predict_policy_core_v4(
     outputs = _model_outputs(artifact, policy)
     target_weight = outputs["target_weight"].clip(0.0, 0.24)
     target_delta = outputs["target_delta"].clip(-0.18, 0.18)
-    release_intent = outputs["release_intent"].where(current > 0.0, 0.0).clip(0.0, 1.0)
-    reduce_mask = (current > 0.0) & (target_delta < -0.003)
-    exit_mask = reduce_mask & ((release_intent >= 0.66) | (target_delta.abs() >= (current * 0.70).clip(lower=0.02)))
+    source_score = outputs["source_score"].where(current > 0.0, 0.0).clip(0.0, 1.0)
+    source_release_quality = outputs["source_release_quality"].where(current > 0.0, 0.0).clip(0.0, 1.0)
+    source_economic_block_risk = outputs["source_economic_block_risk"].clip(0.0, 1.0)
+    reduce_quality = outputs["reduce_quality"].clip(0.0, 1.0)
+    exit_hazard = outputs["exit_hazard"].clip(0.0, 1.0)
+    intent_frame = policy.copy()
+    intent_frame["current_weight"] = current.astype(float)
+    intent_frame["portfolio_daily_target_delta_intent"] = target_delta.astype(float)
+    intent_frame["portfolio_daily_source_score"] = source_score.astype(float)
+    intent_frame["portfolio_daily_source_release_quality"] = source_release_quality.astype(float)
+    intent_frame["portfolio_daily_source_economic_block_risk"] = source_economic_block_risk.astype(float)
+    intent_frame["reduce_quality"] = reduce_quality.astype(float)
+    intent_frame["exit_hazard"] = exit_hazard.astype(float)
+    release_first = derive_release_first_intent(intent_frame, deadband=0.003, min_intent=0.35)
+    release_intent = pd.to_numeric(release_first["release_first_intent_score"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    release_action_hint = release_first["release_first_action_hint"].astype(str)
     add_mask = (current > 0.0) & (target_delta > 0.003)
     open_mask = (current <= 0.0) & (target_delta > 0.003)
     actions = pd.Series("hold", index=policy.index, dtype=object)
     actions.loc[current <= 0.0] = "skip"
     actions.loc[add_mask] = "add"
     actions.loc[open_mask] = "open"
-    actions.loc[reduce_mask] = "reduce"
-    actions.loc[exit_mask] = "exit"
+    release_mask = release_action_hint.isin(["reduce", "exit"])
+    actions.loc[release_mask] = release_action_hint.loc[release_mask]
 
     policy["action_label"] = actions.astype(str)
     policy["planned_holding_bucket"] = np.where(actions.isin(["open", "add", "hold"]), "swing", "short")
@@ -292,13 +306,15 @@ def predict_policy_core_v4(
     policy["portfolio_daily_target_weight_intent"] = target_weight.astype(float)
     policy["portfolio_daily_target_delta_intent"] = target_delta.astype(float)
     policy["portfolio_daily_release_first_intent"] = release_intent.astype(float)
-    policy["release_first_action_hint"] = actions.where(actions.isin(["reduce", "exit"]), "hold").astype(str)
-    policy["portfolio_daily_source_score"] = outputs["source_score"].where(current > 0.0, 0.0).clip(0.0, 1.0)
+    policy["release_first_intent_delta"] = release_first["release_first_intent_delta"].astype(float)
+    policy["release_first_action_hint"] = release_action_hint
+    policy["release_first_block_reason"] = release_first["release_first_block_reason"].astype(str)
+    policy["portfolio_daily_source_score"] = source_score
     policy["portfolio_daily_unified_source_score"] = policy["portfolio_daily_source_score"]
-    policy["portfolio_daily_source_release_quality"] = outputs["source_release_quality"].where(current > 0.0, 0.0).clip(0.0, 1.0)
-    policy["portfolio_daily_source_economic_block_risk"] = outputs["source_economic_block_risk"].clip(0.0, 1.0)
-    policy["reduce_quality"] = outputs["reduce_quality"].clip(0.0, 1.0)
-    policy["exit_hazard"] = outputs["exit_hazard"].clip(0.0, 1.0)
+    policy["portfolio_daily_source_release_quality"] = source_release_quality
+    policy["portfolio_daily_source_economic_block_risk"] = source_economic_block_risk
+    policy["reduce_quality"] = reduce_quality
+    policy["exit_hazard"] = exit_hazard
     policy["exit_urgency"] = policy["exit_hazard"]
     policy["entry_quality"] = np.where(open_mask, 0.64, 0.36)
     policy["hold_quality"] = np.where(current > 0.0, 0.58, 0.34)

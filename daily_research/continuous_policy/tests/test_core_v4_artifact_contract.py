@@ -84,7 +84,10 @@ class CoreV4ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_target_delta_intent", frame.columns)
             self.assertIn("portfolio_daily_release_first_intent", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)
+            self.assertIn("release_first_block_reason", frame.columns)
             self.assertGreater(float(frame.loc[0, "portfolio_daily_release_first_intent"]), 0.0)
+            self.assertIn(str(frame.loc[0, "release_first_action_hint"]), {"reduce", "exit"})
+            self.assertEqual(str(frame.loc[1, "release_first_block_reason"]), "not_held")
         self.assertEqual(global_targets["release_first_allocation_v3_mode"], 1.0)
         self.assertEqual(generic_globals["release_first_allocation_v3_mode"], 1.0)
 
