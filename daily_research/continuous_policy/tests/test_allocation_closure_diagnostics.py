@@ -1,3 +1,4 @@
+import inspect
 import unittest
 
 import pandas as pd
@@ -426,6 +427,24 @@ class AllocationClosureDiagnosticsTest(unittest.TestCase):
             float(wrong_terms["source_release_intent_loss"]),
             float(defensive_terms["source_release_intent_loss"]),
         )
+
+    def test_r56_release_first_loss_profile_and_diagnostics_contract(self) -> None:
+        loss_profile = "alpha_result_value_budget_split_v46"
+        self.assertIn(loss_profile, model_seq_v3.LOSS_PROFILE_CONFIGS)
+        multi_weights = model_seq_v3.LOSS_PROFILE_CONFIGS[loss_profile]["multi_objective_loss_weights"]
+
+        self.assertGreater(multi_weights["portfolio_release_first_allocation_total"], 0.0)
+        self.assertGreater(multi_weights["portfolio_source_release_intent_total"], 0.0)
+        self.assertEqual(multi_weights["action_total"], 0.0)
+        self.assertEqual(multi_weights["duration_total"], 0.0)
+
+        fit_source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+        for snippet in (
+            "portfolio_release_first_allocation_total",
+            "supports_release_first_allocation_v3_mode",
+            "release_first_allocation_terms",
+        ):
+            self.assertIn(snippet, fit_source)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,12 @@ SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER = 0.50
 SIMULATOR_NATIVE_CONSTRAINT_EPS = 1.0e-6
 
 
+def _safe_negative_mask_fill_value(tensor: torch.Tensor, preferred: float = -1.0e9) -> float:
+    if not tensor.is_floating_point():
+        return float(preferred)
+    return float(max(float(torch.finfo(tensor.dtype).min), float(preferred)))
+
+
 def build_native_receiver_executable_mask(
     *,
     current_weight: torch.Tensor,
@@ -275,7 +281,7 @@ def _project_native_allocation_vector(
             masked_logits = torch.where(
                 eligible_day > 0.0,
                 weight_logit_day,
-                torch.full_like(weight_logit_day, -1.0e9),
+                torch.full_like(weight_logit_day, _safe_negative_mask_fill_value(weight_logit_day)),
             )
             base_weight = torch.softmax(masked_logits, dim=0) * eligible_day
             base_weight = base_weight / torch.clamp(base_weight.sum(), min=1.0e-8)
@@ -333,7 +339,7 @@ def _project_native_allocation_vector(
             source_order_score = torch.where(
                 held_day > 0.0,
                 source_order_score,
-                torch.full_like(source_order_score, -1.0e9),
+                torch.full_like(source_order_score, _safe_negative_mask_fill_value(source_order_score)),
             )
             selected_indices = torch.topk(source_order_score, k=selected_count).indices
             concentrated_release = torch.zeros_like(current_day)
@@ -832,7 +838,11 @@ def _project_day_set_native_allocation_vector(
     weight_logit = _output_matrix("portfolio_daily_allocation_weight_logit")
     cash_logit = _output_matrix("portfolio_daily_cash_reserve_logit")
     risk_buffer_logit = _output_matrix("portfolio_daily_allocation_risk_buffer_logit")
-    masked_weight_logit = torch.where(mask, weight_logit, torch.full_like(weight_logit, -1.0e9))
+    masked_weight_logit = torch.where(
+        mask,
+        weight_logit,
+        torch.full_like(weight_logit, _safe_negative_mask_fill_value(weight_logit)),
+    )
 
     flat_outputs = {
         "portfolio_daily_allocation_weight_logit": masked_weight_logit.reshape(-1),

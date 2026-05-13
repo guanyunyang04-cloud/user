@@ -81,6 +81,11 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
             "receiver_headroom_utilization_mean": 0.0,
             "source_release_required": False,
             "underdeployment_reason": "",
+            "release_first_source_intent_count": 0.0,
+            "release_first_source_realized_count": 0.0,
+            "release_first_rotation_amount_mean": 0.0,
+            "release_first_cash_buffer_amount_mean": 0.0,
+            "release_first_block_reason": "",
         }
 
     working = turnover_frame.copy()
@@ -190,6 +195,27 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
         ("allocation_layer_underdeployment_reason", "underdeployment_reason"),
         "",
     )
+    release_first_source_intent_count = _first_numeric(
+        working,
+        ("release_first_source_intent_count",),
+        0.0,
+    ).clip(lower=0.0)
+    release_first_source_realized_count = _first_numeric(
+        working,
+        ("release_first_source_realized_count",),
+        0.0,
+    ).clip(lower=0.0)
+    release_first_rotation_amount = _first_numeric(
+        working,
+        ("release_first_rotation_amount",),
+        0.0,
+    ).clip(lower=0.0)
+    release_first_cash_buffer_amount = _first_numeric(
+        working,
+        ("release_first_cash_buffer_amount",),
+        0.0,
+    ).clip(lower=0.0)
+    release_first_block_reason = _first_text(working, ("release_first_block_reason",), "")
 
     day_count = int(working["date"].nunique()) if "date" in working.columns else int(len(working))
     avg_gross_target = _safe_mean(gross_target)
@@ -253,6 +279,11 @@ def summarize_allocation_closure_from_turnover(turnover_frame: pd.DataFrame) -> 
         "receiver_headroom_utilization_mean": _safe_mean(receiver_headroom_utilization),
         "source_release_required": bool(_safe_mean(source_release_required) >= 0.5),
         "underdeployment_reason": _mode_text(underdeployment_reason),
+        "release_first_source_intent_count": _safe_mean(release_first_source_intent_count),
+        "release_first_source_realized_count": _safe_mean(release_first_source_realized_count),
+        "release_first_rotation_amount_mean": _safe_mean(release_first_rotation_amount),
+        "release_first_cash_buffer_amount_mean": _safe_mean(release_first_cash_buffer_amount),
+        "release_first_block_reason": _mode_text(release_first_block_reason),
     }
 
 

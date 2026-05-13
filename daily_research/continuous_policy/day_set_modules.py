@@ -6,6 +6,12 @@ import torch
 from torch import nn
 
 
+def safe_negative_mask_fill_value(tensor: torch.Tensor, preferred: float = -1.0e9) -> float:
+    if not tensor.is_floating_point():
+        return float(preferred)
+    return float(max(float(torch.finfo(tensor.dtype).min), float(preferred)))
+
+
 class PortfolioSlotAttention(nn.Module):
     def __init__(self, *, input_dim: int, slot_count: int = 32, slot_dim: int = 128) -> None:
         super().__init__()
@@ -21,7 +27,7 @@ class PortfolioSlotAttention(nn.Module):
         keys = self.key_projection(row_features)
         values = self.value_projection(row_features)
         logits = torch.einsum("bnd,kd->bkn", keys, self.slot_queries) / math.sqrt(float(self.slot_dim))
-        logits = logits.masked_fill(~mask[:, None, :], -1.0e9)
+        logits = logits.masked_fill(~mask[:, None, :], safe_negative_mask_fill_value(logits))
         attention = torch.softmax(logits, dim=-1)
         attention = torch.where(mask[:, None, :], attention, torch.zeros_like(attention))
         normalizer = torch.clamp(attention.sum(dim=-1, keepdim=True), min=1.0e-8)

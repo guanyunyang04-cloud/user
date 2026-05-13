@@ -1236,6 +1236,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_release_first_constrained_decoder_r56": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v46"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [7.0e-5],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.30],
+        "daily_dropout": [0.16],
+        "batch_size": [2],
+    },
 }
 
 
@@ -2393,6 +2410,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 16,
         "min_epochs": 10,
     },
+    "split_heads_portfolio_daily_release_first_constrained_decoder_r56": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v46",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 7.0e-5,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.30,
+        "daily_dropout": 0.16,
+        "batch_size": 2,
+        "epochs": 24,
+        "min_epochs": 16,
+    },
 }
 
 
@@ -2463,6 +2499,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_cash_funded_allocation_core_r53": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_semantic_budget_controller_r54": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_cash_timing_release_controller_r55": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_release_first_constrained_decoder_r56": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2682,6 +2719,24 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "unused_receiver_headroom_cap": 0.22,
         "target_sum_gap_cap": 0.05,
         "cash_first_source_gate": True,
+    },
+    "split_heads_portfolio_daily_release_first_constrained_decoder_r56": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.01,
+        "cash_timing_floor": -0.168208,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": -0.002,
+        "annual_return_floor": 0.00,
+        "receiver_unrealized_cap": 0.20,
+        "exposure_utilization_floor": 0.60,
+        "actual_cash_idle_cap": 0.24,
+        "actual_cash_weight_cap": 0.45,
+        "cash_funded_deploy_floor": 0.04,
+        "unused_receiver_headroom_cap": 0.24,
+        "target_sum_gap_cap": 0.05,
+        "cash_first_source_gate": True,
+        "release_first_source_intent_floor": 1.0,
     },
 }
 
@@ -3538,6 +3593,10 @@ def _score_protocol_summary(
         "portfolio_daily_source_release_required",
         0.0,
     )
+    release_first_source_intent_count = _summary_metric("release_first_source_intent_count", 0.0)
+    release_first_source_realized_count = _summary_metric("release_first_source_realized_count", 0.0)
+    release_first_rotation_amount_mean = _summary_metric("release_first_rotation_amount_mean", 0.0)
+    release_first_cash_buffer_amount_mean = _summary_metric("release_first_cash_buffer_amount_mean", 0.0)
     portfolio_daily_receiver_activity_required = _cash_first_receiver_activity_required(
         {
             "avg_gross_exposure_target": avg_gross_exposure_target,
@@ -5481,6 +5540,10 @@ def _score_protocol_summary(
                 portfolio_daily_receiver_headroom_utilization_mean
             ),
             "portfolio_daily_source_release_required": portfolio_daily_source_release_required,
+            "release_first_source_intent_count": release_first_source_intent_count,
+            "release_first_source_realized_count": release_first_source_realized_count,
+            "release_first_rotation_amount_mean": release_first_rotation_amount_mean,
+            "release_first_cash_buffer_amount_mean": release_first_cash_buffer_amount_mean,
             "deploy_intent_unrealized_share": deploy_intent_unrealized_share,
             "sell_selection_quality_5d": sell_selection_quality,
             "budget_origin_sell_share": budget_origin_sell_share,
@@ -6430,6 +6493,9 @@ def _resource_gate_after_screening(
     metrics = dict(latest.primary_metrics or {})
     source_count = float(metrics.get("portfolio_daily_source_target_count", 0.0) or 0.0)
     source_sell_rate = float(metrics.get("portfolio_daily_source_realized_sell_rate", 0.0) or 0.0)
+    release_first_source_intent = float(metrics.get("release_first_source_intent_count", 0.0) or 0.0)
+    release_first_source_realized = float(metrics.get("release_first_source_realized_count", 0.0) or 0.0)
+    release_first_rotation_amount = float(metrics.get("release_first_rotation_amount_mean", 0.0) or 0.0)
     receiver_count = float(metrics.get("portfolio_daily_receiver_target_count", 0.0) or 0.0)
     receiver_unrealized = float(metrics.get("portfolio_daily_receiver_unrealized_deploy_share", 1.0) or 0.0)
     cash_timing = float(metrics.get("cash_timing_quality_1d", 0.0) or 0.0)
@@ -6462,6 +6528,11 @@ def _resource_gate_after_screening(
     source_release_dead = source_count < float(config.get("source_count_floor", 1.0) or 1.0) or source_sell_rate < float(
         config.get("source_sell_rate_floor", 0.20) or 0.20
     )
+    release_first_intent_dead = release_first_source_intent < float(
+        config.get("release_first_source_intent_floor", 0.0) or 0.0
+    )
+    if release_first_intent_dead:
+        failed.append("release_first_source_intent_dead")
     if cash_first_source_gate:
         if source_release_required >= 0.5 and source_release_dead:
             failed.append("source_release_dead_when_required")
@@ -6508,6 +6579,7 @@ def _resource_gate_after_screening(
                 or "receiver_headroom_unused" in trigger_reasons
                 or "target_sum_underdeployed" in trigger_reasons
                 or "source_release_dead_when_required" in trigger_reasons
+                or "release_first_source_intent_dead" in trigger_reasons
             )
             and (
                 "exposure_utilization_low" in trigger_reasons
@@ -6572,6 +6644,9 @@ def _resource_gate_after_screening(
             "portfolio_daily_unused_receiver_headroom_mean": unused_receiver_headroom,
             "portfolio_daily_target_sum_gap": target_sum_gap,
             "portfolio_daily_source_release_required": source_release_required,
+            "release_first_source_intent_count": release_first_source_intent,
+            "release_first_source_realized_count": release_first_source_realized,
+            "release_first_rotation_amount_mean": release_first_rotation_amount,
         },
     }
 

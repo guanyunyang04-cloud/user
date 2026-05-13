@@ -13,6 +13,7 @@ import pandas as pd
 import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
 import daily_research.continuous_policy.native_allocation as native_allocation_module
 import daily_research.continuous_policy.portfolio_simulator as portfolio_simulator_module
+from daily_research.continuous_policy.day_set_modules import safe_negative_mask_fill_value
 from daily_research.continuous_policy.allocation_optimizer import (
     AllocationOptimizerConstraints,
     build_unified_allocation_problem,
@@ -320,6 +321,28 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 },
                 "multi_greater": {
                     "portfolio_day_set_native_allocation_vector_total": 4.20,
+                    "portfolio_cash_timing_directional_total": 0.0,
+                    "portfolio_source_release_intent_total": 0.0,
+                    "portfolio_reduce_exit_intent_total": 0.0,
+                },
+                "no_full_universe_train_solver": True,
+                "auto_resource_profile": "balanced",
+            },
+            {
+                "profile": "split_heads_portfolio_daily_release_first_constrained_decoder_r56",
+                "loss_profile": "alpha_result_value_budget_split_v46",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 24, "min_epochs": 16, "batch_size": 2},
+                "forbid_true_solver": True,
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_greater": {
+                    "portfolio_day_set_native_allocation_vector_total": 4.20,
+                    "portfolio_release_first_allocation_total": 0.0,
                     "portfolio_cash_timing_directional_total": 0.0,
                     "portfolio_source_release_intent_total": 0.0,
                     "portfolio_reduce_exit_intent_total": 0.0,
@@ -3872,6 +3895,23 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIs(model_seq_v3._collate_day_set_batch, day_set_batching._collate_day_set_batch)
         self.assertIs(model_seq_v3.PortfolioSlotAttention, day_set_modules.PortfolioSlotAttention)
 
+    def test_r56_day_set_attention_mask_fill_is_amp_safe(self) -> None:
+        logits = torch.zeros(1, 2, 3, dtype=torch.float16)
+        fill_value = safe_negative_mask_fill_value(logits)
+        masked = logits.masked_fill(torch.tensor([[[False, True, True], [False, False, True]]]), fill_value)
+
+        self.assertGreaterEqual(fill_value, float(torch.finfo(torch.float16).min))
+        self.assertTrue(bool(torch.isfinite(masked).all()))
+        self.assertLess(float(masked[0, 0, 1]), -1.0e4)
+
+    def test_r56_amp_classification_losses_use_float_logits(self) -> None:
+        source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+
+        self.assertIn("action_logits_for_loss = outputs[\"action_logits\"].float()", source)
+        self.assertIn("duration_logits_for_loss = outputs[\"duration_logits\"].float()", source)
+        self.assertIn("val_action_logits_for_loss = val_outputs[\"action_logits\"].float()", source)
+        self.assertNotIn("with torch.no_grad(), autocast_context", source)
+
     def test_r52_day_set_model_outputs_day_level_cash_and_row_weights(self) -> None:
         model = TemporalDaySetPolicyNet(
             static_input_dim=3,
@@ -4160,6 +4200,25 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             '"gpu_acceleration"',
         ):
             self.assertIn(snippet, source)
+
+    def test_r56_release_first_simulator_contract_is_explicit(self) -> None:
+        simulator_source = inspect.getsource(portfolio_simulator_module)
+        predictor_source = inspect.getsource(model_seq_v3.predict_policy_v3)
+        fit_source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+
+        for snippet in (
+            "solve_release_first_allocation_v3",
+            "release_first_allocation_v3_mode",
+            "release_first_source_intent_count",
+            "release_first_source_realized_count",
+            "release_first_rotation_amount",
+            "release_first_cash_buffer_amount",
+        ):
+            self.assertIn(snippet, simulator_source)
+
+        self.assertIn("supports_release_first_allocation_v3_mode", fit_source)
+        self.assertIn("release_first_allocation_v3_mode", predictor_source)
+        self.assertIn("alpha_result_value_budget_split_v46", predictor_source)
 
     def test_r52d_projection_exposes_train_sim_alignment_terms(self) -> None:
         outputs = {

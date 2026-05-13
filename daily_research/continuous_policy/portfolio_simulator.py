@@ -14,13 +14,20 @@ from daily_research.continuous_policy.allocation_core_v2 import (
     AllocationCoreV2Constraints,
     solve_cash_funded_allocation_v2,
 )
+from daily_research.continuous_policy.allocation_core_v3 import (
+    ReleaseFirstAllocationConstraints,
+    solve_release_first_allocation_v3,
+)
 from daily_research.continuous_policy.native_allocation import (
     SIMULATOR_NATIVE_ACTIVITY_DEADBAND_MULTIPLIER,
     SIMULATOR_NATIVE_DEADBAND_ABS,
     SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER,
     SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER,
 )
-from daily_research.continuous_policy.semantic_budget_intent import derive_release_intent_from_target_delta
+from daily_research.continuous_policy.semantic_budget_intent import (
+    derive_release_first_intent,
+    derive_release_intent_from_target_delta,
+)
 
 
 DEFAULT_MAX_POSITIONS = 8
@@ -781,6 +788,9 @@ class PortfolioState:
         allocation_intent_v2_global_mode = float(
             (global_targets or {}).get("allocation_intent_v2_mode", 0.0) or 0.0
         ) > 0.5
+        release_first_allocation_v3_global_mode = float(
+            (global_targets or {}).get("release_first_allocation_v3_mode", 0.0) or 0.0
+        ) > 0.5
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -888,8 +898,17 @@ class PortfolioState:
 
         allocation_core_v2_policy_mode = _optional_policy_numeric("allocation_core_v2_mode")
         allocation_intent_v2_policy_mode = _optional_policy_numeric("allocation_intent_v2_mode")
+        release_first_allocation_v3_policy_mode = _optional_policy_numeric("release_first_allocation_v3_mode")
+        release_first_allocation_v3_mode = bool(
+            release_first_allocation_v3_global_mode
+            or (
+                release_first_allocation_v3_policy_mode is not None
+                and bool((release_first_allocation_v3_policy_mode > 0.5).any())
+            )
+        )
         allocation_intent_v2_mode = bool(
             allocation_intent_v2_global_mode
+            or release_first_allocation_v3_mode
             or (
                 allocation_intent_v2_policy_mode is not None
                 and bool((allocation_intent_v2_policy_mode > 0.5).any())
@@ -919,6 +938,31 @@ class PortfolioState:
                 release_intent["release_intent_score"].reindex(policy.index).fillna(0.0).astype(float)
             )
             policy["allocation_intent_release_action"] = release_actions.astype(str)
+            policy["action_label"] = action_names.astype(str)
+        release_first_intent_target_count = 0.0
+        if release_first_allocation_v3_mode:
+            release_first_policy = policy.copy()
+            release_first_policy["current_weight"] = current.reindex(policy.index).fillna(0.0).astype(float)
+            release_first_intent = derive_release_first_intent(
+                release_first_policy,
+                deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
+            )
+            policy["release_first_intent_score"] = (
+                release_first_intent["release_first_intent_score"].reindex(policy.index).fillna(0.0).astype(float)
+            )
+            policy["release_first_intent_delta"] = (
+                release_first_intent["release_first_intent_delta"].reindex(policy.index).fillna(0.0).astype(float)
+            )
+            release_first_actions = (
+                release_first_intent["release_first_action_hint"].reindex(policy.index).fillna("hold").astype(str)
+            )
+            policy["release_first_action_hint"] = release_first_actions
+            policy["release_first_block_reason"] = (
+                release_first_intent["release_first_block_reason"].reindex(policy.index).fillna("").astype(str)
+            )
+            release_first_mask = release_first_actions.isin({"reduce", "exit"})
+            action_names = action_names.where(~release_first_mask, release_first_actions)
+            release_first_intent_target_count = float(release_first_mask.sum())
             policy["action_label"] = action_names.astype(str)
 
         def _masked_mean(values: pd.Series, mask: pd.Series) -> float:
@@ -4009,6 +4053,12 @@ class PortfolioState:
         allocation_layer_deployment_required = 0.0
         allocation_layer_risk_reduction_required = 0.0
         allocation_layer_receiver_activity_required = 0.0
+        release_first_allocation_v3_used = 0.0
+        release_first_source_intent_count = 0.0
+        release_first_source_realized_count = 0.0
+        release_first_rotation_amount = 0.0
+        release_first_cash_buffer_amount = 0.0
+        release_first_block_reason = "not_applicable"
         allocation_layer_intent_translation_conflict_count = 0
         allocation_layer_intent_translation_active_count = 0
         native_target_valid = 0.0
@@ -4120,8 +4170,174 @@ class PortfolioState:
                     ).max(axis=1)
             allocation_solution = None
             allocation_core_v2_solution = None
+            release_first_allocation_solution = None
             native_target_weights_valid = False
-            if allocation_core_v2_mode:
+            if release_first_allocation_v3_mode:
+                if "release_first_intent_score" not in allocation_problem.columns:
+                    release_first_problem = allocation_problem.copy()
+                    release_first_problem["current_weight"] = current.reindex(prices.index).fillna(0.0).astype(float)
+                    release_first_intent = derive_release_first_intent(
+                        release_first_problem,
+                        deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
+                    )
+                    for column_name in (
+                        "release_first_intent_score",
+                        "release_first_intent_delta",
+                        "release_first_action_hint",
+                        "release_first_block_reason",
+                    ):
+                        allocation_problem[column_name] = release_first_intent[column_name].reindex(
+                            allocation_problem.index
+                        )
+                if "receiver_score" not in allocation_problem.columns:
+                    allocation_problem["receiver_score"] = pd.concat(
+                        [
+                            _policy_numeric("portfolio_daily_receiver_score").rename("receiver_score"),
+                            _policy_numeric("portfolio_daily_unified_receiver_score").rename("unified_receiver_score"),
+                            _policy_numeric("portfolio_daily_receiver_executability").rename("receiver_executability"),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                else:
+                    allocation_problem["receiver_score"] = pd.concat(
+                        [
+                            pd.to_numeric(allocation_problem["receiver_score"], errors="coerce")
+                            .replace([np.inf, -np.inf], np.nan)
+                            .fillna(0.0)
+                            .rename("receiver_score"),
+                            _policy_numeric("portfolio_daily_unified_receiver_score").rename("unified_receiver_score"),
+                            _policy_numeric("portfolio_daily_receiver_executability").rename("receiver_executability"),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                if "source_score" not in allocation_problem.columns:
+                    allocation_problem["source_score"] = pd.concat(
+                        [
+                            _policy_numeric("portfolio_daily_source_score").rename("source_score"),
+                            _policy_numeric("portfolio_daily_unified_source_score").rename("unified_source_score"),
+                            _policy_numeric("portfolio_daily_source_release_quality").rename("source_release_quality"),
+                            _policy_numeric("release_first_intent_score").rename("release_first_intent_score"),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                else:
+                    allocation_problem["source_score"] = pd.concat(
+                        [
+                            pd.to_numeric(allocation_problem["source_score"], errors="coerce")
+                            .replace([np.inf, -np.inf], np.nan)
+                            .fillna(0.0)
+                            .rename("source_score"),
+                            _policy_numeric("portfolio_daily_unified_source_score").rename("unified_source_score"),
+                            _policy_numeric("portfolio_daily_source_release_quality").rename("source_release_quality"),
+                            _policy_numeric("release_first_intent_score").rename("release_first_intent_score"),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                release_first_cash_defense_intent = float(
+                    np.clip(
+                        max(
+                            budget_model_cash_timing_signal,
+                            budget_model_cash_defense_signal,
+                            budget_risk_off_score,
+                        ),
+                        0.0,
+                        1.0,
+                    )
+                )
+                release_first_allocation_solution = solve_release_first_allocation_v3(
+                    allocation_problem,
+                    constraints=ReleaseFirstAllocationConstraints(
+                        gross_target=float(gross_exposure_target),
+                        cash_reserve_target=float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05),
+                        turnover_limit=float(turnover_budget),
+                        position_cap=float(position_cap_target),
+                        cash_defense_intent=release_first_cash_defense_intent,
+                        min_release_intent=0.30,
+                        activity_threshold=max(DEFAULT_EXECUTION_DEADBAND_ABS, 1.0e-8),
+                    ),
+                )
+                target_weights = (
+                    release_first_allocation_solution.target_weight.reindex(prices.index)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .clip(lower=0.0, upper=position_cap_target)
+                    .astype(float)
+                )
+                release_first_allocation_v3_used = 1.0
+                native_target_valid = 1.0
+                allocation_layer_native_target_used = 0.0
+                allocation_layer_native_fallback_used = 0.0
+                allocation_layer_core_v2_used = 0.0
+                current_for_core = current.reindex(prices.index).fillna(0.0).astype(float)
+                allocation_core_delta = (target_weights - current_for_core).replace(
+                    [np.inf, -np.inf],
+                    np.nan,
+                ).fillna(0.0)
+                allocation_layer_buy_turnover = float(allocation_core_delta.clip(lower=0.0).sum())
+                allocation_layer_sell_turnover = float((-allocation_core_delta.clip(upper=0.0)).sum())
+                allocation_layer_expected_turnover = float(
+                    allocation_layer_buy_turnover + allocation_layer_sell_turnover
+                )
+                allocation_layer_cash_after = float(release_first_allocation_solution.cash_after)
+                allocation_layer_available_cash_to_deploy = float(
+                    release_first_allocation_solution.diagnostics.get("available_cash_to_deploy", 0.0)
+                )
+                allocation_layer_stock_budget = float(
+                    release_first_allocation_solution.diagnostics.get("stock_budget", allocation_layer_stock_budget)
+                )
+                allocation_layer_target_sum_gap = float(
+                    release_first_allocation_solution.diagnostics.get("target_sum_gap", 0.0)
+                )
+                allocation_layer_cash_funded_deploy_amount = float(
+                    release_first_allocation_solution.cash_funded_deploy_amount
+                )
+                allocation_layer_source_funded_deploy_amount = float(
+                    release_first_allocation_solution.source_funded_deploy_amount
+                )
+                allocation_layer_unused_receiver_headroom = float(
+                    release_first_allocation_solution.unused_receiver_headroom
+                )
+                allocation_layer_receiver_headroom_utilization = float(
+                    release_first_allocation_solution.receiver_headroom_utilization
+                )
+                allocation_layer_source_release_required = float(
+                    bool(release_first_allocation_solution.source_release_required)
+                )
+                allocation_layer_underdeployment_reason = str(
+                    release_first_allocation_solution.underdeployment_reason or "none"
+                )
+                allocation_layer_budget_closed = float(
+                    allocation_layer_target_sum_gap <= 0.05 and allocation_layer_cash_after <= 0.45
+                )
+                allocation_layer_deployment_required = float(
+                    allocation_layer_target_sum_gap > 0.05
+                    or allocation_layer_cash_after > 0.45
+                    or allocation_layer_source_release_required >= 0.5
+                )
+                allocation_layer_risk_reduction_required = float(release_first_cash_defense_intent >= 0.5)
+                allocation_layer_receiver_activity_required = float(
+                    allocation_layer_deployment_required >= 0.5
+                    or allocation_layer_source_release_required >= 0.5
+                )
+                allocation_layer_objective_value = float(max(0.0, 1.0 - allocation_layer_target_sum_gap))
+                allocation_layer_constraint_violations = 0.0
+                release_first_source_intent_count = float(
+                    release_first_allocation_solution.diagnostics.get("release_first_source_intent_count", 0.0)
+                )
+                release_first_source_realized_count = float(
+                    release_first_allocation_solution.diagnostics.get("release_first_source_realized_count", 0.0)
+                )
+                release_first_rotation_amount = float(
+                    release_first_allocation_solution.diagnostics.get("release_first_rotation_amount", 0.0)
+                )
+                release_first_cash_buffer_amount = float(
+                    release_first_allocation_solution.diagnostics.get("release_first_cash_buffer_amount", 0.0)
+                )
+                release_first_block_reason = str(
+                    release_first_allocation_solution.diagnostics.get("release_first_block_reason", "none")
+                    or "none"
+                )
+            elif allocation_core_v2_mode:
                 allocation_core_v2_stock_budget_floor = float(
                     (global_targets or {}).get("allocation_core_v2_stock_budget_floor", 0.0) or 0.0
                 )
@@ -4309,7 +4525,12 @@ class PortfolioState:
                     )
                     allocation_layer_objective_value = 0.0
                     allocation_layer_constraint_violations = 0.0
-            if allocation_solution is None and allocation_core_v2_solution is None and not native_target_weights_valid:
+            if (
+                allocation_solution is None
+                and allocation_core_v2_solution is None
+                and release_first_allocation_solution is None
+                and not native_target_weights_valid
+            ):
                 allocation_layer_native_fallback_used = 1.0 if "portfolio_daily_target_weight" in policy.columns else 0.0
                 allocation_solution = solve_semidifferentiable_allocation(
                     allocation_problem,
@@ -5142,6 +5363,19 @@ class PortfolioState:
                     "portfolio_daily_effective_model_action": portfolio_daily_effective_model_action,
                     "policy_decision_mode": str(policy.at[stock, "policy_decision_mode"] or "") if "policy_decision_mode" in policy.columns else "",
                     "allocation_intent_v2_mode": bool(allocation_intent_v2_mode),
+                    "release_first_allocation_v3_mode": bool(release_first_allocation_v3_mode),
+                    "release_first_intent_score": float(policy.at[stock, "release_first_intent_score"] or 0.0)
+                    if "release_first_intent_score" in policy.columns
+                    else 0.0,
+                    "release_first_intent_delta": float(policy.at[stock, "release_first_intent_delta"] or 0.0)
+                    if "release_first_intent_delta" in policy.columns
+                    else 0.0,
+                    "release_first_action_hint": str(policy.at[stock, "release_first_action_hint"] or "")
+                    if "release_first_action_hint" in policy.columns
+                    else "",
+                    "release_first_block_reason": str(policy.at[stock, "release_first_block_reason"] or "")
+                    if "release_first_block_reason" in policy.columns
+                    else "",
                     "portfolio_daily_target_weight_intent": float(
                         policy.at[stock, "portfolio_daily_target_weight_intent"]
                     )
@@ -5835,6 +6069,14 @@ class PortfolioState:
             "allocation_layer_stock_budget": float(allocation_layer_stock_budget),
             "allocation_layer_target_weight_sum": float(target_weights.sum()),
             "allocation_layer_core_v2_used": float(allocation_layer_core_v2_used),
+            "release_first_allocation_v3_mode_used": float(bool(release_first_allocation_v3_mode)),
+            "release_first_allocation_v3_used": float(release_first_allocation_v3_used),
+            "release_first_intent_target_count": float(release_first_intent_target_count),
+            "release_first_source_intent_count": float(release_first_source_intent_count),
+            "release_first_source_realized_count": float(release_first_source_realized_count),
+            "release_first_rotation_amount": float(release_first_rotation_amount),
+            "release_first_cash_buffer_amount": float(release_first_cash_buffer_amount),
+            "release_first_block_reason": str(release_first_block_reason),
             "allocation_layer_target_sum_gap": float(allocation_layer_target_sum_gap),
             "allocation_layer_cash_funded_deploy_amount": float(allocation_layer_cash_funded_deploy_amount),
             "allocation_layer_source_funded_deploy_amount": float(allocation_layer_source_funded_deploy_amount),

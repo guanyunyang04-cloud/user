@@ -1024,6 +1024,13 @@ def _build_semantic_conflicts(
             "allocation_layer_unused_receiver_headroom",
             "allocation_layer_receiver_headroom_utilization",
             "allocation_layer_source_release_required",
+            "release_first_allocation_v3_mode_used",
+            "release_first_allocation_v3_used",
+            "release_first_intent_target_count",
+            "release_first_source_intent_count",
+            "release_first_source_realized_count",
+            "release_first_rotation_amount",
+            "release_first_cash_buffer_amount",
             "allocation_layer_budget_closed",
             "allocation_layer_deployment_required",
             "allocation_layer_risk_reduction_required",
@@ -1121,6 +1128,13 @@ def _build_semantic_conflicts(
             "allocation_layer_unused_receiver_headroom",
             "allocation_layer_receiver_headroom_utilization",
             "allocation_layer_source_release_required",
+            "release_first_allocation_v3_mode_used",
+            "release_first_allocation_v3_used",
+            "release_first_intent_target_count",
+            "release_first_source_intent_count",
+            "release_first_source_realized_count",
+            "release_first_rotation_amount",
+            "release_first_cash_buffer_amount",
             "allocation_layer_budget_closed",
             "allocation_layer_deployment_required",
             "allocation_layer_risk_reduction_required",
@@ -2424,6 +2438,19 @@ def _build_semantic_conflicts(
         "portfolio_daily_underdeployment_reason": str(
             allocation_closure.get("underdeployment_reason", "") or ""
         ),
+        "release_first_source_intent_count": float(
+            allocation_closure.get("release_first_source_intent_count", 0.0) or 0.0
+        ),
+        "release_first_source_realized_count": float(
+            allocation_closure.get("release_first_source_realized_count", 0.0) or 0.0
+        ),
+        "release_first_rotation_amount_mean": float(
+            allocation_closure.get("release_first_rotation_amount_mean", 0.0) or 0.0
+        ),
+        "release_first_cash_buffer_amount_mean": float(
+            allocation_closure.get("release_first_cash_buffer_amount_mean", 0.0) or 0.0
+        ),
+        "release_first_block_reason": str(allocation_closure.get("release_first_block_reason", "") or ""),
         "avg_value_arbitration_target": avg_value_arbitration_target,
         "avg_deploy_value_target": avg_deploy_value_target,
         "avg_release_value_target": avg_release_value_target,

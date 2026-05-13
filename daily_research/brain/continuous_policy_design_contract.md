@@ -207,3 +207,13 @@
 - Cvxpy/cvxpylayer profiles must disable AMP for solver safety while retaining pinned memory and non-blocking transfer.
 - Training diagnostics must expose `gpu_acceleration`, `amp_enabled`, `data_loader_pin_memory`, `non_blocking_transfer`, and per-epoch `train_seconds` / `validation_seconds` / `epoch_seconds` so future speed claims can be evidence-based.
 - This contract is infrastructure-only; it must not be interpreted as strategy evidence, confirmatory eligibility, live/default change, promotion support, or active artifact change.
+
+## 2026-05-13 r56 Release-First Constrained Decoder Contract
+- r56 entry: `split_heads_portfolio_daily_release_first_constrained_decoder_r56` / `alpha_result_value_budget_split_v46`.
+- Allocator contract: `allocation_core_v3.py` owns the r56-only release-first solve. It must generate held-source release supply before receiver allocation, may keep release as cash under cash-defense pressure, and must close gross/cash/turnover/position-cap diagnostics.
+- Intent contract: `derive_release_first_intent(...)` may create release intent only for held names. Negative target-delta, high release quality, source score, and exit hazard may raise release; high forward keep-risk or economic block risk must suppress release.
+- Simulator contract: `release_first_allocation_v3_mode` must call v3 before the compatible r53-r55 v2 path. Lifecycle `action_label` remains a hint/reporting surface; final execution semantics are still derived from target-weight delta.
+- Diagnostics contract: r56 protocols must preserve `release_first_source_intent_count`, `release_first_source_realized_count`, `release_first_rotation_amount`, `release_first_cash_buffer_amount`, `release_first_block_reason`, `target_sum_gap`, and `turnover_used`.
+- Loss contract: v46 keeps `action_total=0.0` and `duration_total=0.0`, keeps true solver disabled, and adds positive release-first/cash-timing/source-release/reduce-exit allocation terms.
+- Evidence contract: failed or timed-out trials before a parseable `protocol_summary.json` have `completed_evidence=0.0`. They may diagnose runtime but must not be used as completed screening evidence.
+- Current verdict boundary: dry-run passed, but safe screening has `0` completed r56 trials; r56 cannot enter strict resume, confirmatory, promotion, live/default, or active artifact changes until completed safe evidence exists and passes gates.

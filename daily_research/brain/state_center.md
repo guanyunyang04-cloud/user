@@ -137,3 +137,14 @@
 - Fact: seq_v3 diagnostics now write `gpu_acceleration`, `amp_enabled`, `data_loader_pin_memory`, `non_blocking_transfer`, and per-epoch timing fields.
 - Evidence capsule: `daily_research/brain/references/r55_gpu_training_runtime_acceleration_status_20260513.md`.
 - Boundary: this is training infrastructure and observability only; it does not change r55 verdict, active strategy, live/default, promotion, or confirmatory eligibility.
+
+## 2026-05-13 r56 Release-First Constrained Decoder Status
+- Fact: r56 code contract exists as `split_heads_portfolio_daily_release_first_constrained_decoder_r56` / `alpha_result_value_budget_split_v46`, with `allocation_core_v3.py`, `derive_release_first_intent(...)`, simulator `release_first_allocation_v3_mode`, and release-first diagnostics.
+- Fact: focused required tests passed after implementation: `136 passed, 24 warnings`.
+- Fact: dry run `self_opt_study_r56_release_first_constrained_decoder_dryrun_20260513_01` passed with confirmatory disabled, true solver disabled, and safe resource resolution.
+- Fact: safe screening tags `self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_01`, `_02`, and `_03` failed before completed protocol summaries due AMP/runtime issues; tag `_04` timed out after more than one hour and was stopped without a protocol summary.
+- Fact: completed r56 safe-screening evidence is `0`; failed/timeout attempts are diagnostics only and must not enter completed evidence.
+- Fact: `daily_research/output/active_execution_strategy.json` remains unchanged.
+- Inference: r56 allocator/source behavior cannot yet be judged; the current blocker is r56 training runtime completion under day-set v46, not source/reduce/exit semantics.
+- Boundary: r56 remains research / shadow-only. Do not enter strict resume, confirmatory, promotion, live/default, or active artifact changes from this evidence.
+- Next: add a shorter r56 GPU smoke/safe checkpoint or stronger epoch-level progress diagnostics before another full safe screening; do not repackage this as "add loss/epoch".
