@@ -50,6 +50,7 @@ from daily_research.continuous_policy.runtime import (
     update_latest_summary,
     write_json,
 )
+from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
@@ -89,10 +90,23 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _call_stage(label: str, fn: Any, argv: list[str]) -> None:
-    code = int(fn(argv))
+def _call_stage(label: str, fn: Any, argv: list[str], *, progress_sink: JsonlProgressSink | None = None) -> None:
+    started_at = pd.Timestamp.now()
+    if progress_sink is not None:
+        progress_sink.emit("stage_start", stage=label)
+    try:
+        code = int(fn(argv))
+    except Exception as exc:
+        if progress_sink is not None:
+            progress_sink.emit("stage_failed", stage=label, error=str(exc))
+        raise
+    elapsed = max(0.0, (pd.Timestamp.now() - started_at).total_seconds())
     if code != 0:
+        if progress_sink is not None:
+            progress_sink.emit("stage_failed", stage=label, exit_code=code, train_seconds=elapsed)
         raise RuntimeError(f"continuous_policy {label} stage failed with exit code {code}.")
+    if progress_sink is not None:
+        progress_sink.emit("stage_complete", stage=label, exit_code=code, train_seconds=elapsed)
 
 
 def _discover_policy_v5b_reference_panel() -> Path | None:
@@ -319,6 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--force-bootstrap-from-account", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--protocol-progress-jsonl", default="")
     parser.add_argument("--tag", default="")
     return parser
 
@@ -328,6 +343,12 @@ def main(argv: list[str] | None = None) -> int:
     protocol_tag = str(args.tag or timestamp_tag("protocol"))
     protocol_root = PROTOCOLS_ROOT / protocol_tag
     protocol_root.mkdir(parents=True, exist_ok=True)
+    protocol_progress_jsonl = (
+        Path(str(args.protocol_progress_jsonl)).expanduser()
+        if str(args.protocol_progress_jsonl or "").strip()
+        else protocol_root / "protocol_progress.jsonl"
+    )
+    progress_sink = JsonlProgressSink(protocol_progress_jsonl, run_tag=protocol_tag, stage="protocol")
 
     train_tag = f"{protocol_tag}__train"
     train_args = [
@@ -403,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
         str(args.early_stop_patience),
         "--resume-mode",
         args.resume_mode,
+        "--protocol-progress-jsonl",
+        str(protocol_progress_jsonl.resolve()),
         "--tag",
         train_tag,
     ]
@@ -410,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         train_args.extend(["--csv-folder", str(args.csv_folder)])
     if args.refresh_cache:
         train_args.append("--refresh-cache")
-    _call_stage("train", train_main, train_args)
+    _call_stage("train", train_main, train_args, progress_sink=progress_sink)
     train_summary = _read_json(MODELS_ROOT / train_tag / "train_summary.json")
     artifact_path = Path(str(train_summary.get("model_artifact_path", "") or "")).expanduser().resolve()
     if not artifact_path.exists():
@@ -470,52 +493,58 @@ def main(argv: list[str] | None = None) -> int:
     if v5b_panel is not None:
         eval_args.extend(["--reference-panel", f"policy_v5b={v5b_panel}"])
         discovered_references.append({"label": "policy_v5b", "panel_path": str(v5b_panel)})
-    _call_stage("evaluate", evaluate_main, eval_args)
+    _call_stage("evaluate", evaluate_main, eval_args, progress_sink=progress_sink)
     evaluation_summary = _read_json(EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json")
 
-    shadow_start_date = str(args.shadow_start_date or "").strip() or _default_shadow_start(args.eval_start_date, args.shadow_end_date)
-    shadow_end_date = str(args.shadow_end_date or "").strip() or str(args.eval_end_date)
-    account_snapshot = app_service.load_account_snapshot()
-    holdings = [str(item.get("stock", "")).strip().upper() for item in account_snapshot.get("positions", [])]
-    shadow_prepared = prepare_policy_inputs(
-        pool_name=args.pool_name,
-        start_date=shadow_start_date,
-        end_date=shadow_end_date,
-        benchmark=args.benchmark,
-        data_source=args.data_source,
-        csv_folder=args.csv_folder,
-        extra_stocks=holdings,
-        max_universe_size=args.max_universe_size,
-        pool_rebalance_days=args.pool_rebalance_days,
-        pool_adv_window=args.pool_adv_window,
-        alpha_prior_source=args.alpha_prior_source,
-        alpha_prior_score_panel=args.alpha_prior_score_panel,
-        alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
-        refresh_cache=args.refresh_cache,
-        progress_desc="continuous policy protocol shadow",
-    )
-    shadow_dates = [dt for dt in shadow_prepared.close.index if dt >= pd.Timestamp(shadow_start_date) and dt <= pd.Timestamp(shadow_end_date)]
-    if len(shadow_dates) < 2:
-        raise ValueError("continuous_policy protocol shadow window must contain at least two signal dates.")
-    initial_portfolio = PortfolioState.from_account_snapshot(
-        account_snapshot=account_snapshot,
-        latest_prices=shadow_prepared.close.loc[shadow_dates[0]],
-    )
-    shadow_rollout = run_policy_rollout(
-        prepared=shadow_prepared,
-        artifact=load_artifact(artifact_path),
-        start_date=shadow_start_date,
-        end_date=shadow_end_date,
-        initial_portfolio=initial_portfolio,
-        transaction_cost_bps=args.transaction_cost_bps,
-        slippage_bps=args.slippage_bps,
-        sell_tax_bps=args.sell_tax_bps,
-        source_label="continuous_policy_shadow",
-        execution_semantics=args.execution_semantics,
-        budget_semantics=args.budget_semantics,
-        budget_calibration=args.budget_calibration,
-        budget_objective=args.budget_objective,
-    )
+    progress_sink.emit("stage_start", stage="shadow")
+    shadow_stage_started_at = pd.Timestamp.now()
+    try:
+        shadow_start_date = str(args.shadow_start_date or "").strip() or _default_shadow_start(args.eval_start_date, args.shadow_end_date)
+        shadow_end_date = str(args.shadow_end_date or "").strip() or str(args.eval_end_date)
+        account_snapshot = app_service.load_account_snapshot()
+        holdings = [str(item.get("stock", "")).strip().upper() for item in account_snapshot.get("positions", [])]
+        shadow_prepared = prepare_policy_inputs(
+            pool_name=args.pool_name,
+            start_date=shadow_start_date,
+            end_date=shadow_end_date,
+            benchmark=args.benchmark,
+            data_source=args.data_source,
+            csv_folder=args.csv_folder,
+            extra_stocks=holdings,
+            max_universe_size=args.max_universe_size,
+            pool_rebalance_days=args.pool_rebalance_days,
+            pool_adv_window=args.pool_adv_window,
+            alpha_prior_source=args.alpha_prior_source,
+            alpha_prior_score_panel=args.alpha_prior_score_panel,
+            alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
+            refresh_cache=args.refresh_cache,
+            progress_desc="continuous policy protocol shadow",
+        )
+        shadow_dates = [dt for dt in shadow_prepared.close.index if dt >= pd.Timestamp(shadow_start_date) and dt <= pd.Timestamp(shadow_end_date)]
+        if len(shadow_dates) < 2:
+            raise ValueError("continuous_policy protocol shadow window must contain at least two signal dates.")
+        initial_portfolio = PortfolioState.from_account_snapshot(
+            account_snapshot=account_snapshot,
+            latest_prices=shadow_prepared.close.loc[shadow_dates[0]],
+        )
+        shadow_rollout = run_policy_rollout(
+            prepared=shadow_prepared,
+            artifact=load_artifact(artifact_path),
+            start_date=shadow_start_date,
+            end_date=shadow_end_date,
+            initial_portfolio=initial_portfolio,
+            transaction_cost_bps=args.transaction_cost_bps,
+            slippage_bps=args.slippage_bps,
+            sell_tax_bps=args.sell_tax_bps,
+            source_label="continuous_policy_shadow",
+            execution_semantics=args.execution_semantics,
+            budget_semantics=args.budget_semantics,
+            budget_calibration=args.budget_calibration,
+            budget_objective=args.budget_objective,
+        )
+    except Exception as exc:
+        progress_sink.emit("stage_failed", stage="shadow", error=str(exc))
+        raise
 
     shadow_action_panel_path = protocol_root / "shadow_daily_action_panel.csv"
     shadow_action_outcomes_path = protocol_root / "shadow_daily_action_outcomes.csv"
@@ -552,6 +581,12 @@ def main(argv: list[str] | None = None) -> int:
         "monthly_returns_csv": str(shadow_monthly_returns_path.resolve()),
     }
     write_json(shadow_summary_path, shadow_summary)
+    progress_sink.emit(
+        "stage_complete",
+        stage="shadow",
+        train_seconds=max(0.0, (pd.Timestamp.now() - shadow_stage_started_at).total_seconds()),
+        signal_date_count=len(shadow_rollout["dates"]),
+    )
 
     export_tag = f"{protocol_tag}__export"
     export_args = [
@@ -598,7 +633,7 @@ def main(argv: list[str] | None = None) -> int:
         export_args.append("--refresh-cache")
     if args.force_bootstrap_from_account:
         export_args.append("--force-bootstrap-from-account")
-    _call_stage("export", export_main, export_args)
+    _call_stage("export", export_main, export_args, progress_sink=progress_sink)
     export_summary = _read_json(EXPORTS_ROOT / export_tag / "export_summary.json")
 
     summary_payload = {
@@ -707,6 +742,7 @@ def main(argv: list[str] | None = None) -> int:
             "--tag",
             audit_tag,
         ],
+        progress_sink=progress_sink,
     )
     latest_behavior_audit = _read_json(
         OUTPUT_ROOT / "continuous_policy" / "analysis" / "behavior_audits" / f"{audit_tag}.json"
@@ -723,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
             "--tag",
             ledger_tag,
         ],
+        progress_sink=progress_sink,
     )
     summary_payload["latest_conclusion_ledger"] = _read_json(
         OUTPUT_ROOT / "continuous_policy" / "analysis" / "conclusion_ledgers" / f"{ledger_tag}.json"

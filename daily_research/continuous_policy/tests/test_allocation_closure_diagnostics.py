@@ -1,5 +1,8 @@
 import inspect
+import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 import torch
@@ -12,6 +15,7 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILES,
     TRUE_SOLVER_RESOURCE_SEARCH_PROFILES,
     TrialResult,
+    _build_failed_trial_result,
     _resource_gate_after_screening,
     _score_protocol_summary,
 )
@@ -445,6 +449,30 @@ class AllocationClosureDiagnosticsTest(unittest.TestCase):
             "release_first_allocation_terms",
         ):
             self.assertIn(snippet, fit_source)
+
+    def test_runtime_failed_trial_does_not_count_as_completed_evidence(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            protocol_root = Path(temp_dir)
+            (protocol_root / "runtime_failure_summary.json").write_text(
+                json.dumps({"runtime_failure_reason": "wall_timeout", "exit_code": 124}),
+                encoding="utf-8",
+            )
+
+            result = _build_failed_trial_result(
+                trial_id=1,
+                trial_tag="study__trial_01",
+                phase="screening",
+                source_trial_tag="",
+                trial_config={},
+                protocol_summary_path=str(protocol_root / "protocol_summary.json"),
+                exit_code=124,
+                exception_message="wall timeout",
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.primary_metrics["completed_evidence"], 0.0)
+        self.assertEqual(result.primary_metrics["protocol_summary_parse_ok"], 0.0)
+        self.assertEqual(result.primary_metrics["runtime_failure_reason"], "wall_timeout")
 
 
 if __name__ == "__main__":

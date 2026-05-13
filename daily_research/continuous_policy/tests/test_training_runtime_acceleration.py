@@ -1,8 +1,10 @@
 import unittest
+import inspect
 from unittest.mock import patch
 
 import torch
 
+import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
 from daily_research.continuous_policy.training_runtime_acceleration import (
     configure_torch_training_acceleration,
 )
@@ -43,6 +45,16 @@ class TrainingRuntimeAccelerationTest(unittest.TestCase):
         self.assertFalse(runtime.pin_memory)
         self.assertFalse(runtime.non_blocking_transfer)
         self.assertEqual(runtime.disabled_reason, "non_cuda_device")
+
+    def test_seq_v3_training_diagnostics_include_progress_contract(self) -> None:
+        source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+
+        self.assertIn("train_dataframe_ready", source)
+        self.assertIn("train_dataloader_ready", source)
+        self.assertIn("train_epoch_complete", source)
+        self.assertIn("training_complete", source)
+        self.assertIn("progress_event_count", source)
+        self.assertNotIn("with torch.no_grad(), autocast_context", source)
 
 
 if __name__ == "__main__":

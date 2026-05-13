@@ -50,6 +50,7 @@ from daily_research.continuous_policy.training_runtime_acceleration import (
     configure_torch_training_acceleration,
     move_to_device,
 )
+from daily_research.continuous_policy.runtime_progress import summarize_progress_log
 from daily_research.continuous_policy.native_allocation import (
     _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES,
     _NATIVE_ALLOCATION_TERM_NAMES,
@@ -6695,6 +6696,7 @@ def fit_policy_models_v3(
     early_stop_patience: int = 10,
     resume_mode: str = "strict",
     loss_profile: str = DEFAULT_LOSS_PROFILE,
+    progress_sink: Any | None = None,
 ) -> TorchContinuousPolicySeqArtifact:
     if sample_frame.empty or daily_frame.empty:
         raise ValueError("continuous_policy formal_torch_seq_v3 received empty training data.")
@@ -7500,6 +7502,24 @@ def fit_policy_models_v3(
             name: value.float() if torch.is_tensor(value) and value.is_floating_point() else value
             for name, value in outputs.items()
         }
+
+    def _emit_training_progress(event: str, **payload: Any) -> dict[str, Any]:
+        if progress_sink is None:
+            return {}
+        emit_payload = {
+            "device": str(device),
+            "amp_enabled": bool(training_acceleration.amp_enabled),
+        }
+        emit_payload.update(payload)
+        return progress_sink.emit(event, **emit_payload)
+
+    _emit_training_progress(
+        "train_dataframe_ready",
+        train_sample_rows=int(len(train_idx)),
+        validation_sample_rows=int(len(val_idx)),
+        train_day_count=int(len(daily_train_idx)),
+        validation_day_count=int(len(daily_val_idx)),
+    )
     dataset = TensorDataset(
         torch.as_tensor(X_static[train_idx], dtype=torch.float32),
         torch.as_tensor(X_sequence[train_idx], dtype=torch.float32),
@@ -7573,6 +7593,13 @@ def fit_policy_models_v3(
             collate_fn=_collate_day_set_batch,
             pin_memory=training_acceleration.pin_memory,
         )
+    _emit_training_progress(
+        "train_dataloader_ready",
+        train_batch_count=int(len(loader)),
+        validation_batch_count=int(len(val_day_loader)) if val_day_loader is not None else 1,
+        day_set_native_allocation=bool(uses_day_set_native_allocation),
+        batch_size=int(batch_size),
+    )
     last_val_day_set_integrity_stats = {
         "val_day_set_integrity": False,
         "val_unique_day_count": 0.0,
@@ -7710,6 +7737,7 @@ def fit_policy_models_v3(
         )
 
     patience_used = 0
+    last_batch_progress_at = 0.0
     for epoch in range(start_epoch + 1, int(epochs) + 1):
         epoch_started_at = time.perf_counter()
         train_started_at = epoch_started_at
@@ -7717,6 +7745,14 @@ def fit_policy_models_v3(
         daily_model.train()
         epoch_sample_loss = 0.0
         batch_count = 0
+        total_train_batches = int(len(loader))
+        _emit_training_progress(
+            "train_epoch_start",
+            epoch=int(epoch),
+            completed_epochs=int(epoch - 1),
+            batch_index=0,
+            train_batch_count=total_train_batches,
+        )
         for batch in loader:
             day_set_outputs = None
             day_set_targets = None
@@ -8014,6 +8050,17 @@ def fit_policy_models_v3(
                 sample_optimizer.step()
             epoch_sample_loss += float(loss.detach().cpu())
             batch_count += 1
+            now_perf = time.perf_counter()
+            if batch_count == 1 or batch_count == total_train_batches or now_perf - last_batch_progress_at >= 30.0:
+                last_batch_progress_at = now_perf
+                _emit_training_progress(
+                    "train_batch_progress",
+                    epoch=int(epoch),
+                    completed_epochs=int(epoch - 1),
+                    batch_index=int(batch_count),
+                    train_batch_count=total_train_batches,
+                    train_seconds=float(now_perf - train_started_at),
+                )
 
         with autocast_context(training_acceleration):
             daily_outputs = daily_model(X_daily_train)
@@ -8036,6 +8083,7 @@ def fit_policy_models_v3(
         sample_model.eval()
         daily_model.eval()
         validation_started_at = time.perf_counter()
+        _emit_training_progress("validation_start", epoch=int(epoch), completed_epochs=int(epoch - 1))
         with torch.no_grad():
             val_day_set_integrity_stats = {
                 "val_day_set_integrity": False,
@@ -8276,8 +8324,15 @@ def fit_policy_models_v3(
             )
             last_val_day_set_integrity_stats = dict(val_day_set_integrity_stats)
         validation_seconds = float(time.perf_counter() - validation_started_at)
+        _emit_training_progress(
+            "validation_complete",
+            epoch=int(epoch),
+            completed_epochs=int(epoch - 1),
+            validation_seconds=validation_seconds,
+        )
 
         train_loss = float(epoch_sample_loss / max(batch_count, 1))
+        epoch_seconds = float(time.perf_counter() - epoch_started_at)
         history.append(
             {
                 "epoch": int(epoch),
@@ -8285,7 +8340,7 @@ def fit_policy_models_v3(
                 "validation_loss": val_loss,
                 "train_seconds": train_seconds,
                 "validation_seconds": validation_seconds,
-                "epoch_seconds": float(time.perf_counter() - epoch_started_at),
+                "epoch_seconds": epoch_seconds,
                 "train_batch_count": int(batch_count),
             }
         )
@@ -8301,6 +8356,13 @@ def fit_policy_models_v3(
             "signature_hash": signature_hash,
         }
         _save_checkpoint(checkpoint_last, checkpoint_payload)
+        _emit_training_progress(
+            "checkpoint_saved",
+            epoch=int(epoch),
+            completed_epochs=int(epoch),
+            train_seconds=train_seconds,
+            validation_seconds=validation_seconds,
+        )
         if val_loss < best_val_loss - 1e-6:
             best_val_loss = val_loss
             best_epoch = int(epoch)
@@ -8310,6 +8372,19 @@ def fit_policy_models_v3(
             _save_checkpoint(checkpoint_best, checkpoint_payload)
         else:
             patience_used += 1
+        _emit_training_progress(
+            "train_epoch_complete",
+            epoch=int(epoch),
+            completed_epochs=int(epoch),
+            batch_index=int(batch_count),
+            train_loss=train_loss,
+            validation_loss=val_loss,
+            train_seconds=train_seconds,
+            validation_seconds=validation_seconds,
+            epoch_seconds=epoch_seconds,
+            patience_used=int(patience_used),
+            best_epoch=int(best_epoch),
+        )
 
         if int(epoch) >= int(min_epochs) and int(patience_used) >= int(early_stop_patience):
             break
@@ -8434,6 +8509,21 @@ def fit_policy_models_v3(
                 for name, value in raw_capital_flow_terms.items()
             }
 
+    progress_path = Path(str(getattr(progress_sink, "path", "") or "")) if progress_sink is not None else Path("")
+    progress_summary = summarize_progress_log(progress_path) if progress_path and str(progress_path) != "." else {}
+    last_progress_event = dict(progress_summary.get("last_event", {}) or {})
+    epoch_seconds_values = [float(item.get("epoch_seconds", 0.0) or 0.0) for item in history]
+    validation_seconds_values = [float(item.get("validation_seconds", 0.0) or 0.0) for item in history]
+    _emit_training_progress(
+        "training_complete",
+        completed_epochs=int(history[-1]["epoch"]) if history else 0,
+        epoch=int(history[-1]["epoch"]) if history else 0,
+        train_seconds=float(history[-1].get("train_seconds", 0.0) if history else 0.0),
+        validation_seconds=float(history[-1].get("validation_seconds", 0.0) if history else 0.0),
+    )
+    progress_summary = summarize_progress_log(progress_path) if progress_path and str(progress_path) != "." else progress_summary
+    last_progress_event = dict(progress_summary.get("last_event", {}) or last_progress_event)
+
     diagnostics = {
         "trainer_backend": TRAINER_BACKEND_FORMAL_SEQ_V3,
         "device": str(device),
@@ -8458,6 +8548,12 @@ def fit_policy_models_v3(
         "checkpoint_last": str(checkpoint_last.resolve()),
         "checkpoint_best": str(checkpoint_best.resolve()) if checkpoint_best.exists() else "",
         "training_diagnostics_json": str(diagnostics_path.resolve()),
+        "protocol_progress_jsonl": str(progress_path.resolve()) if progress_path and str(progress_path) != "." else "",
+        "last_progress_event": last_progress_event,
+        "max_epoch_seconds": max(epoch_seconds_values) if epoch_seconds_values else 0.0,
+        "mean_epoch_seconds": float(sum(epoch_seconds_values) / len(epoch_seconds_values)) if epoch_seconds_values else 0.0,
+        "max_validation_seconds": max(validation_seconds_values) if validation_seconds_values else 0.0,
+        "progress_event_count": int(progress_summary.get("event_count", 0) or 0),
         "signature_hash": signature_hash,
         "sequence_base_count": len(sequence_base_names),
         "sequence_step_count": len(SEQUENCE_STEP_ORDER),

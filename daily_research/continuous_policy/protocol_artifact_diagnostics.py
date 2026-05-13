@@ -52,10 +52,15 @@ def inspect_json_artifact(path: str | Path) -> dict[str, Any]:
 def summarize_protocol_artifacts(protocol_root: str | Path, *, exit_code: int = 0) -> dict[str, Any]:
     root = Path(protocol_root)
     protocol_summary_path = root / "protocol_summary.json"
+    runtime_failure_summary_path = root / "runtime_failure_summary.json"
     protocol_health = inspect_json_artifact(protocol_summary_path)
+    runtime_failure_health = inspect_json_artifact(runtime_failure_summary_path)
     protocol_summary: dict[str, Any] = {}
     if protocol_health.get("parse_ok"):
         protocol_summary = json.loads(protocol_summary_path.read_text(encoding="utf-8"))
+    runtime_failure_summary: dict[str, Any] = {}
+    if runtime_failure_health.get("parse_ok"):
+        runtime_failure_summary = json.loads(runtime_failure_summary_path.read_text(encoding="utf-8"))
 
     training_evidence = dict(protocol_summary.get("training_evidence", {}) or {})
     promotion_gate = dict(protocol_summary.get("promotion_gate", {}) or {})
@@ -66,6 +71,8 @@ def summarize_protocol_artifacts(protocol_root: str | Path, *, exit_code: int = 
         diagnostic_flags.append("abnormal_exit")
     if not protocol_health.get("parse_ok"):
         diagnostic_flags.append("protocol_summary_unparseable")
+    if runtime_failure_summary:
+        diagnostic_flags.append("runtime_failure_summary_present")
 
     return {
         "protocol_root": str(root.resolve()) if root.exists() else str(root),
@@ -73,6 +80,8 @@ def summarize_protocol_artifacts(protocol_root: str | Path, *, exit_code: int = 
         "completed_evidence": int(exit_code) == 0 and bool(protocol_health.get("parse_ok")),
         "diagnostic_flags": diagnostic_flags,
         "protocol_summary_health": protocol_health,
+        "runtime_failure_summary_health": runtime_failure_health,
+        "runtime_failure_summary": runtime_failure_summary,
         "protocol_summary": protocol_summary,
         "training_evidence_status": str(training_evidence.get("status", "")),
         "best_epoch": int(training_evidence.get("best_epoch", 0) or 0),

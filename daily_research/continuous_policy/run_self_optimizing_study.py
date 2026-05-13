@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -33,6 +34,7 @@ from daily_research.continuous_policy.pipeline_utils import (
     DEFAULT_BUDGET_OBJECTIVE,
 )
 from daily_research.continuous_policy.protocol_artifact_diagnostics import summarize_protocol_artifacts
+from daily_research.continuous_policy.runtime_progress import summarize_progress_log
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
     BUDGET_CALIBRATION_CHOICES,
@@ -5700,6 +5702,25 @@ def _write_study_progress_event(study_root: Path, *, event: str, **payload: Any)
     return progress_event
 
 
+def _ensure_fresh_study_root(study_root: Path, *, allow_existing: bool = False) -> None:
+    if allow_existing:
+        study_root.mkdir(parents=True, exist_ok=True)
+        return
+    collision_markers = (
+        "study_progress.jsonl",
+        "study_progress.json",
+        "study_plan.json",
+        "study_summary.json",
+        "trial_ranking.csv",
+    )
+    if study_root.exists() and any((study_root / name).exists() for name in collision_markers):
+        raise FileExistsError(
+            f"study tag already has progress or summary artifacts: {study_root}. "
+            "Use a new explicit study tag, or pass --allow-existing-study-tag only for an intentional append/resume."
+        )
+    study_root.mkdir(parents=True, exist_ok=True)
+
+
 def _detect_runtime_channel_failure(error_text: str) -> str:
     payload = str(error_text or "").strip()
     if not payload:
@@ -5927,6 +5948,147 @@ def _callable_name(callable_obj: Any) -> str:
     return f"{module_name}.{qualname}".strip(".")
 
 
+def _write_runtime_failure_summary(
+    protocol_root: Path,
+    *,
+    trial_tag: str,
+    exit_code: int,
+    runtime_failure_reason: str,
+    elapsed_seconds: float,
+    protocol_progress_json: Path | None = None,
+    stdout_log_path: Path | None = None,
+    stderr_log_path: Path | None = None,
+    command: list[str] | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    progress_summary = {}
+    if protocol_progress_json is not None:
+        progress_jsonl = protocol_progress_json.with_name("protocol_progress.jsonl")
+        progress_summary = summarize_progress_log(progress_jsonl)
+        if not progress_summary.get("exists") and protocol_progress_json.exists():
+            progress_summary = {
+                "exists": True,
+                "last_event": read_json(protocol_progress_json),
+                "stale_seconds": max(0.0, time.time() - protocol_progress_json.stat().st_mtime),
+            }
+    payload = {
+        "trial_tag": str(trial_tag),
+        "exit_code": int(exit_code),
+        "runtime_channel_failure": bool(runtime_failure_reason),
+        "runtime_failure_reason": str(runtime_failure_reason or ""),
+        "elapsed_seconds": round(float(elapsed_seconds), 3),
+        "protocol_progress_json": str(protocol_progress_json.resolve()) if protocol_progress_json else "",
+        "stdout_log_path": str(stdout_log_path.resolve()) if stdout_log_path else "",
+        "stderr_log_path": str(stderr_log_path.resolve()) if stderr_log_path else "",
+        "command": list(command or []),
+        "progress_summary": progress_summary,
+        "error": str(error or ""),
+        "updated_at": now_iso(),
+    }
+    write_json(protocol_root / "runtime_failure_summary.json", payload)
+    return payload
+
+
+def _run_subprocess_with_watchdog(
+    *,
+    command: list[str],
+    cwd: Path,
+    study_root: Path,
+    trial_tag: str,
+    protocol_progress_json: Path,
+    stdout_log_path: Path,
+    stderr_log_path: Path,
+    max_wall_seconds: float = 0.0,
+    max_stale_seconds: float = 0.0,
+    progress_grace_seconds: float = 0.0,
+    poll_interval_seconds: float = 1.0,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    stdout_log_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+    protocol_root = protocol_progress_json.parent
+    protocol_root.mkdir(parents=True, exist_ok=True)
+    with stdout_log_path.open("w", encoding="utf-8", errors="replace") as stdout_handle, stderr_log_path.open(
+        "w",
+        encoding="utf-8",
+        errors="replace",
+    ) as stderr_handle:
+        process = subprocess.Popen(
+            list(command),
+            cwd=str(cwd),
+            env=env,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+        )
+        runtime_failure_reason = ""
+        while True:
+            return_code = process.poll()
+            elapsed = time.monotonic() - started
+            if return_code is not None:
+                if int(return_code) != 0:
+                    runtime_failure_reason = "subprocess_exit"
+                    _write_runtime_failure_summary(
+                        protocol_root,
+                        trial_tag=trial_tag,
+                        exit_code=int(return_code),
+                        runtime_failure_reason=runtime_failure_reason,
+                        elapsed_seconds=elapsed,
+                        protocol_progress_json=protocol_progress_json,
+                        stdout_log_path=stdout_log_path,
+                        stderr_log_path=stderr_log_path,
+                        command=command,
+                    )
+                return {
+                    "exit_code": int(return_code),
+                    "runtime_failure_reason": runtime_failure_reason,
+                    "elapsed_seconds": round(float(elapsed), 3),
+                    "stdout_log_path": str(stdout_log_path.resolve()),
+                    "stderr_log_path": str(stderr_log_path.resolve()),
+                }
+            if max_wall_seconds and elapsed >= float(max_wall_seconds):
+                runtime_failure_reason = "wall_timeout"
+                break
+            if max_stale_seconds and elapsed >= float(progress_grace_seconds):
+                if not protocol_progress_json.exists():
+                    if elapsed >= float(progress_grace_seconds) + float(max_stale_seconds):
+                        runtime_failure_reason = "no_progress_timeout"
+                        break
+                else:
+                    stale_seconds = max(0.0, time.time() - protocol_progress_json.stat().st_mtime)
+                    if stale_seconds >= float(max_stale_seconds):
+                        runtime_failure_reason = "no_progress_timeout"
+                        break
+            time.sleep(max(0.01, float(poll_interval_seconds)))
+
+        process.terminate()
+        try:
+            process.wait(timeout=30.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10.0)
+        elapsed = time.monotonic() - started
+        _write_runtime_failure_summary(
+            protocol_root,
+            trial_tag=trial_tag,
+            exit_code=124,
+            runtime_failure_reason=runtime_failure_reason,
+            elapsed_seconds=elapsed,
+            protocol_progress_json=protocol_progress_json,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
+            command=command,
+        )
+        return {
+            "exit_code": 124,
+            "runtime_failure_reason": runtime_failure_reason,
+            "elapsed_seconds": round(float(elapsed), 3),
+            "stdout_log_path": str(stdout_log_path.resolve()),
+            "stderr_log_path": str(stderr_log_path.resolve()),
+        }
+
+
 def _run_protocol_with_progress(
     *,
     study_root: Path,
@@ -5940,15 +6102,24 @@ def _run_protocol_with_progress(
     heartbeat_interval_seconds: float = 300.0,
     progress_context: dict[str, Any] | None = None,
     resource_limits: dict[str, Any] | None = None,
+    protocol_runner: str = "auto",
+    protocol_max_wall_seconds: float = 0.0,
+    protocol_max_stale_seconds: float = 0.0,
+    protocol_progress_grace_seconds: float = 0.0,
 ) -> int:
     started_monotonic = time.monotonic()
     stop_event = threading.Event()
     progress_lock = threading.Lock()
     protocol_callable = protocol_main if protocol_fn is None else protocol_fn
-    runner_mode = "in_process"
+    timeout_requested = bool(float(protocol_max_wall_seconds or 0.0) > 0.0 or float(protocol_max_stale_seconds or 0.0) > 0.0)
+    requested_runner = str(protocol_runner or "auto").strip().lower().replace("_", "-")
+    runner_mode = "subprocess" if requested_runner == "subprocess" or (requested_runner == "auto" and timeout_requested) else "in_process"
+    if protocol_fn is not None:
+        runner_mode = "in_process"
     resolved_resource_limits = dict(resource_limits or {})
     process_limit_result: dict[str, Any] = {}
     torch_thread_result: dict[str, Any] = {}
+    protocol_terminal_event_emitted = False
 
     def emit(event: str, **payload: Any) -> None:
         progress_payload = {
@@ -6001,7 +6172,36 @@ def _run_protocol_with_progress(
         previous_cwd = Path.cwd()
         if previous_cwd.resolve() != protocol_cwd.resolve():
             os.chdir(protocol_cwd)
-        exit_code = int(protocol_callable(protocol_args))
+        if runner_mode == "subprocess":
+            protocol_progress_json = PROTOCOLS_ROOT / trial_tag / "protocol_progress.json"
+            command = [
+                sys.executable,
+                "-m",
+                "daily_research.continuous_policy.run_continuous_policy_protocol",
+                *list(protocol_args),
+            ]
+            log_root = study_root / "protocol_logs"
+            result = _run_subprocess_with_watchdog(
+                command=command,
+                cwd=protocol_cwd,
+                study_root=study_root,
+                trial_tag=trial_tag,
+                protocol_progress_json=protocol_progress_json,
+                stdout_log_path=log_root / f"{trial_tag}.stdout.log",
+                stderr_log_path=log_root / f"{trial_tag}.stderr.log",
+                max_wall_seconds=float(protocol_max_wall_seconds or 0.0),
+                max_stale_seconds=float(protocol_max_stale_seconds or 0.0),
+                progress_grace_seconds=float(protocol_progress_grace_seconds or 0.0),
+                env={**os.environ, **_resource_limit_env_updates(resolved_resource_limits)},
+            )
+            exit_code = int(result.get("exit_code", 1) or 1)
+            if result.get("runtime_failure_reason"):
+                failure_payload = dict(result)
+                failure_payload.pop("exit_code", None)
+                emit("protocol_failed", status="failed", exit_code=exit_code, **failure_payload)
+                protocol_terminal_event_emitted = True
+        else:
+            exit_code = int(protocol_callable(protocol_args))
     except Exception as exc:
         stop_event.set()
         heartbeat_thread.join(timeout=1.0)
@@ -6018,10 +6218,11 @@ def _run_protocol_with_progress(
 
     stop_event.set()
     heartbeat_thread.join(timeout=1.0)
-    if exit_code == 0:
-        emit("protocol_complete", status="completed", exit_code=exit_code)
-    else:
-        emit("protocol_failed", status="failed", exit_code=exit_code)
+    if not protocol_terminal_event_emitted:
+        if exit_code == 0:
+            emit("protocol_complete", status="completed", exit_code=exit_code)
+        else:
+            emit("protocol_failed", status="failed", exit_code=exit_code)
     return exit_code
 
 
@@ -6423,9 +6624,18 @@ def _build_failed_trial_result(
     role: str = "",
 ) -> TrialResult:
     health = summarize_protocol_artifacts(Path(protocol_summary_path).parent, exit_code=int(exit_code))
+    runtime_failure = dict(health.get("runtime_failure_summary", {}) or {})
+    runtime_failure_reason = str(
+        runtime_failure.get("runtime_failure_reason", "")
+        or _detect_runtime_channel_failure(exception_message)
+        or ("subprocess_exit" if int(exit_code) not in (0, 124) else "")
+    )
+    runtime_channel_failure = bool(runtime_failure_reason or runtime_failure.get("runtime_channel_failure"))
     primary_metrics = {
         "exit_code": int(exit_code),
         "completed_evidence": 0.0,
+        "runtime_channel_failure": 1.0 if runtime_channel_failure else 0.0,
+        "runtime_failure_reason": runtime_failure_reason,
         "protocol_summary_parse_ok": 1.0
         if bool((health.get("protocol_summary_health", {}) or {}).get("parse_ok"))
         else 0.0,
@@ -6446,6 +6656,7 @@ def _build_failed_trial_result(
         composite_score=-999.0,
         score_breakdown={
             "artifact_health": health,
+            "runtime_failure_summary": runtime_failure,
             "exception_message": str(exception_message),
         },
         primary_metrics=primary_metrics,
@@ -6789,6 +7000,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Limit the current study/protocol process to the first N logical CPUs; 0 lets the resource profile decide.",
     )
+    parser.add_argument(
+        "--protocol-runner",
+        default="auto",
+        choices=("auto", "in-process", "subprocess"),
+        help="Protocol execution mode. auto keeps legacy in-process unless a protocol timeout is configured.",
+    )
+    parser.add_argument("--protocol-max-wall-seconds", type=float, default=0.0)
+    parser.add_argument("--protocol-max-stale-seconds", type=float, default=0.0)
+    parser.add_argument("--protocol-progress-grace-seconds", type=float, default=0.0)
+    parser.add_argument(
+        "--allow-existing-study-tag",
+        action="store_true",
+        help="Allow appending to an existing study tag. Default refuses existing progress/summary artifacts.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -6799,7 +7024,7 @@ def main(argv: list[str] | None = None) -> int:
 
     study_tag = str(args.study_tag or timestamp_tag("self_opt_study"))
     study_root = STUDIES_ROOT / study_tag
-    study_root.mkdir(parents=True, exist_ok=True)
+    _ensure_fresh_study_root(study_root, allow_existing=bool(args.allow_existing_study_tag))
     objective_profile = str(
         args.objective_profile
         or SEARCH_PROFILE_DEFAULT_OBJECTIVES.get(args.search_profile, "promotion_balanced_v2")
@@ -7008,6 +7233,10 @@ def main(argv: list[str] | None = None) -> int:
         "native_validation_closure_support": bool(native_validation_closure_support),
         "full_universe_train_solver_effective": bool(full_universe_train_solver_effective),
         "resource_limits": resource_limits,
+        "protocol_runner": str(args.protocol_runner),
+        "protocol_max_wall_seconds": float(args.protocol_max_wall_seconds or 0.0),
+        "protocol_max_stale_seconds": float(args.protocol_max_stale_seconds or 0.0),
+        "protocol_progress_grace_seconds": float(args.protocol_progress_grace_seconds or 0.0),
         "resource_gate": RESOURCE_GATED_SEARCH_PROFILES.get(args.search_profile, {}),
         "study_progress_json": str((study_root / "study_progress.json").resolve()),
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),
@@ -7098,6 +7327,10 @@ def main(argv: list[str] | None = None) -> int:
                                 "progress_label": f"screening {index}/{len(selected_trials)}",
                             },
                             resource_limits=resource_limits,
+                            protocol_runner=str(args.protocol_runner),
+                            protocol_max_wall_seconds=float(args.protocol_max_wall_seconds or 0.0),
+                            protocol_max_stale_seconds=float(args.protocol_max_stale_seconds or 0.0),
+                            protocol_progress_grace_seconds=float(args.protocol_progress_grace_seconds or 0.0),
                         )
                     )
                     if exit_code != 0:
@@ -7231,6 +7464,10 @@ def main(argv: list[str] | None = None) -> int:
                                 "progress_label": f"confirmatory {index}/{len(confirmatory_candidates)}",
                             },
                             resource_limits=resource_limits,
+                            protocol_runner=str(args.protocol_runner),
+                            protocol_max_wall_seconds=float(args.protocol_max_wall_seconds or 0.0),
+                            protocol_max_stale_seconds=float(args.protocol_max_stale_seconds or 0.0),
+                            protocol_progress_grace_seconds=float(args.protocol_progress_grace_seconds or 0.0),
                         )
                     )
                     if exit_code != 0:

@@ -71,7 +71,9 @@ from daily_research.continuous_policy.run_self_optimizing_study import (
     SEARCH_PROFILES,
     TRUE_SOLVER_RESOURCE_SEARCH_PROFILES,
     TrialResult,
+    _build_failed_trial_result,
     _build_resource_limits,
+    _ensure_fresh_study_root,
     _pick_confirmatory_candidates,
     _portfolio_daily_v2_confirm_stability,
     _resource_gate_after_screening,
@@ -4853,7 +4855,64 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertEqual(calls["argv"], ["--tag", "study__trial_01"])
         self.assertTrue(events)
         self.assertTrue(all(event["protocol_runner_mode"] == "in_process" for event in events))
-        self.assertFalse(any("protocol_runner_command" in event for event in events))
+
+    def test_r57_protocol_progress_is_threaded_from_protocol_to_train(self) -> None:
+        import daily_research.continuous_policy.run_continuous_policy_protocol as protocol_module
+        import daily_research.continuous_policy.train_policy as train_module
+
+        protocol_source = inspect.getsource(protocol_module.main)
+        train_source = inspect.getsource(train_module.main)
+        fit_source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+
+        self.assertIn("--protocol-progress-jsonl", protocol_source)
+        self.assertIn("JsonlProgressSink", train_source)
+        self.assertIn("train_data_prepare_start", train_source)
+        self.assertIn("train_data_prepare_heartbeat", train_source)
+        self.assertIn("progress_sink=progress_sink", train_source)
+        self.assertIn("train_epoch_complete", fit_source)
+        self.assertIn("protocol_progress_jsonl", fit_source)
+
+    def test_r57_failed_trial_result_preserves_runtime_failure_diagnostics(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            protocol_root = Path(temp_dir)
+            (protocol_root / "runtime_failure_summary.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_channel_failure": True,
+                        "runtime_failure_reason": "no_progress_timeout",
+                        "exit_code": 124,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = _build_failed_trial_result(
+                trial_id=1,
+                trial_tag="study__trial_01",
+                phase="screening",
+                source_trial_tag="",
+                trial_config={"loss_profile": "alpha_result_value_budget_split_v46"},
+                protocol_summary_path=str(protocol_root / "protocol_summary.json"),
+                exit_code=124,
+                exception_message="watchdog stopped protocol",
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.primary_metrics["completed_evidence"], 0.0)
+        self.assertEqual(result.primary_metrics["protocol_summary_parse_ok"], 0.0)
+        self.assertEqual(result.primary_metrics["runtime_channel_failure"], 1.0)
+        self.assertEqual(result.primary_metrics["runtime_failure_reason"], "no_progress_timeout")
+
+    def test_r57_existing_study_tag_requires_explicit_allow_flag(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            study_root = Path(temp_dir) / "existing_study"
+            study_root.mkdir()
+            (study_root / "study_progress.jsonl").write_text("old event\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(FileExistsError, "study tag already has progress"):
+                _ensure_fresh_study_root(study_root, allow_existing=False)
+
+            _ensure_fresh_study_root(study_root, allow_existing=True)
 
     def test_every_registered_search_profile_loss_profile_resolves(self) -> None:
         for profile_name, base_trial in SEARCH_PROFILE_BASE_TRIALS.items():

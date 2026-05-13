@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +45,7 @@ from daily_research.continuous_policy.runtime import (
     update_latest_summary,
     write_json,
 )
+from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
@@ -151,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
+    parser.add_argument("--protocol-progress-jsonl", default="")
     parser.add_argument("--tag", default="")
     return parser
 
@@ -212,6 +215,26 @@ def main(argv: list[str] | None = None) -> int:
     run_tag = str(args.tag or timestamp_tag("train"))
     run_root = MODELS_ROOT / run_tag
     run_root.mkdir(parents=True, exist_ok=True)
+    progress_sink = JsonlProgressSink(
+        args.protocol_progress_jsonl if str(args.protocol_progress_jsonl or "").strip() else None,
+        run_tag=run_tag,
+        stage="train",
+    )
+    data_prepare_stop = threading.Event()
+
+    def data_prepare_heartbeat() -> None:
+        while not data_prepare_stop.wait(120.0):
+            progress_sink.emit("train_data_prepare_heartbeat")
+
+    heartbeat_thread: threading.Thread | None = None
+    if getattr(progress_sink, "path", None) is not None:
+        progress_sink.emit("train_data_prepare_start")
+        heartbeat_thread = threading.Thread(
+            target=data_prepare_heartbeat,
+            name=f"continuous-policy-train-prepare-{run_tag}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
 
     training_contract = build_training_contract(
         trainer_backend=backend,
@@ -268,6 +291,16 @@ def main(argv: list[str] | None = None) -> int:
         teacher_summary=teacher_summary,
         training_contract=training_contract,
     )
+    progress_sink.emit(
+        "train_data_prepare_complete",
+        sample_rows=int(len(sample_frame)),
+        daily_rows=int(len(daily_frame)),
+        feature_count=int(len(feature_names)),
+        daily_feature_count=int(len(daily_feature_names)),
+    )
+    data_prepare_stop.set()
+    if heartbeat_thread is not None:
+        heartbeat_thread.join(timeout=1.0)
 
     if backend == TRAINER_BACKEND_FORMAL_V2:
         artifact = fit_policy_models_v2(
@@ -342,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
             early_stop_patience=args.early_stop_patience,
             resume_mode=args.resume_mode,
             loss_profile=args.loss_profile,
+            progress_sink=progress_sink,
         )
         artifact_path = run_root / "continuous_policy_v3_seq_artifact.pt"
         training_diagnostics = dict(artifact.training_diagnostics or {})
