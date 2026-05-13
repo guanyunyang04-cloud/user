@@ -18,6 +18,7 @@ from daily_research.continuous_policy.label_builder import LABEL_CONFIGS
 from daily_research.continuous_policy.evaluate_policy import main as evaluate_main
 from daily_research.continuous_policy.export_action_panel import main as export_main
 from daily_research.continuous_policy.model import load_artifact
+from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_seq_v3 import (
     DAILY_HEAD_LAYOUT_CHOICES,
     DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
@@ -250,6 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     defaults = resolve_active_policy_defaults()
     latest_completed = get_latest_completed_trading_date()
     parser = argparse.ArgumentParser(description="Run the continuous-policy protocol: train -> evaluate -> shadow continuity -> export.")
+    parser.add_argument("--search-profile", default="", help="Optional study profile label recorded for r59+ protocol traceability.")
     parser.add_argument(
         "--pool-name",
         default=defaults["pool_name"] or "liquid500",
@@ -328,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
-    parser.add_argument("--loss-profile", default=DEFAULT_LOSS_PROFILE, choices=LOSS_PROFILE_NAMES)
+    parser.add_argument("--loss-profile", default=DEFAULT_LOSS_PROFILE, choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES))))
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--force-bootstrap-from-account", action="store_true")
@@ -641,6 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         "executed_at": now_iso(),
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
+        "search_profile": str(args.search_profile or ""),
         "label_preset": args.label_preset,
         "trainer_backend": str(train_summary.get("trainer_backend", args.trainer_backend) or args.trainer_backend),
         "decoder_profile": str(train_summary.get("decoder_profile", args.decoder_profile) or args.decoder_profile),

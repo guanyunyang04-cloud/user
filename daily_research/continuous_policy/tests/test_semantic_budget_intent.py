@@ -117,6 +117,24 @@ class SemanticBudgetIntentTest(unittest.TestCase):
         self.assertLess(result.loc["BLOCKED", "release_first_intent_score"], 0.10)
         self.assertEqual(result.loc["BLOCKED", "release_first_block_reason"], "economic_block")
 
+    def test_release_first_intent_treats_missing_optional_risk_columns_as_zero_series(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "stock": ["HELD"],
+                "current_weight": [0.20],
+                "portfolio_daily_target_delta_intent": [-0.04],
+                "portfolio_daily_source_score": [0.90],
+                "portfolio_daily_source_release_quality": [0.80],
+                "exit_hazard": [0.30],
+            }
+        ).set_index("stock")
+
+        result = derive_release_first_intent(frame, deadband=0.01)
+
+        self.assertGreater(result.loc["HELD", "release_first_intent_score"], 0.0)
+        self.assertEqual(result.loc["HELD", "release_first_block_reason"], "none")
+        self.assertEqual(result.loc["HELD", "release_first_action_hint"], "reduce")
+
 
 if __name__ == "__main__":
     unittest.main()

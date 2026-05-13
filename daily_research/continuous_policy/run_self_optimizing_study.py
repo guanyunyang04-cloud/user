@@ -3482,6 +3482,8 @@ def _historical_leaderboard(
 
 def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any], protocol_tag: str) -> list[str]:
     protocol_args = [
+        "--search-profile",
+        str(args.search_profile),
         "--pool-name",
         str(args.pool_name),
         "--benchmark",
@@ -3533,7 +3535,7 @@ def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any],
         "--label-preset",
         str(trial_config["label_preset"]),
         "--trainer-backend",
-        str(args.trainer_backend),
+        str(trial_config.get("trainer_backend", args.trainer_backend)),
         "--decoder-profile",
         str(trial_config["decoder_profile"]),
         "--loss-profile",

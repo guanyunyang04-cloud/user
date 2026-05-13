@@ -225,3 +225,13 @@
 - Legacy r19-r52 profile definitions may remain available for historical artifact compatibility, but they must not be default CLI choices for new studies.
 - Runtime triage workflow is fixed as: direct foreground protocol smoke, then dry-run study, then safe screening. Failed runtime attempts without parseable protocol summaries remain diagnostics only.
 - This framework contract does not alter live/default/promotion rules and must never write `daily_research/output/active_execution_strategy.json`.
+
+## 2026-05-13 r59 Parallel Core V4 Contract
+- Backend contract: `formal_torch_core_v4` is a parallel research backend for release-first allocation work. It must not replace v3 artifact loading/replay, and `model_seq_v3.py` must not become the home for new r59 main logic.
+- Promotion contract: core-v4 training contracts are epoch-based, resume-capable, and GPU-required, but `promotable=False`. Protocol promotion gates must treat core-v4 artifacts as shadow-only unless a future explicit contract changes this.
+- Artifact contract: core-v4 artifacts use type `continuous_policy_torch_core_v4` and file name `continuous_policy_core_v4_artifact.pt`. Generic loading/prediction may support them, but old v3 artifact behavior must remain unchanged.
+- Prediction contract: core-v4 prediction must emit release-first-compatible target-weight intent, target-delta intent, release/source support fields, and global target `release_first_allocation_v3_mode=1.0`.
+- Loss contract: core-v4 may accept only `alpha_result_value_budget_split_v46` and alias `core_v4_release_first_v1` as new training losses. It must not migrate v1-v45 legacy loss history into the new backend.
+- Registry contract: active new-study profiles are `focused_seq_v1`, `split_heads_portfolio_daily_release_first_constrained_decoder_r56`, and `split_heads_portfolio_daily_release_first_core_v4_r59`. r53-r55 may remain readable as legacy compatibility data but are not default new-study entrypoints.
+- Evidence contract: direct smoke and dry-run can prove wiring only. They must not be written as strategy effectiveness, safe-screening, confirmatory, live/default, promotion, or active artifact evidence.
+- Guard contract: r59 must not write `daily_research/output/active_execution_strategy.json`.

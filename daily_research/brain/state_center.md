@@ -157,3 +157,16 @@
 - Evidence capsule: `daily_research/brain/references/r58_framework_simplification_status_20260513.md`.
 - Current verdict: r58 is research framework simplification only. It is not strategy evidence, confirmatory evidence, promotion support, live/default change, or active artifact change.
 - Next workflow: use direct foreground protocol smoke before dry-run study and safe screening; do not use parent/child subprocess watchdog as the default research path.
+
+## 2026-05-13 r59 Parallel Core V4 Status
+- Fact: r59 adds parallel backend `formal_torch_core_v4` for the release-first research line, without replacing v3 artifacts or adding r59 logic to `model_seq_v3.py`.
+- Fact: core-v4 training contract is epoch-based, resume-capable, and GPU-required, but explicitly `promotable=False`.
+- Fact: core-v4 artifact type is `continuous_policy_torch_core_v4`; prediction emits target-weight intent, target-delta intent, release-first support fields, and `release_first_allocation_v3_mode=1.0`.
+- Fact: active new-study search profiles are now limited to `focused_seq_v1`, r56 v3 reference, and r59 core-v4; r53-r55 remain legacy-compatible history, not default new-study entrypoints.
+- Fact: focused regression passed with `136 passed, 24 warnings`.
+- Fact: direct smoke `protocol_r59_core_v4_direct_smoke_20260513_03` completed with backend `formal_torch_core_v4`, CUDA AMP/pinned-memory/non-blocking diagnostics, parseable protocol summary, and `training_evidence_status=insufficient`.
+- Fact: dry run `self_opt_study_r59_core_v4_release_first_dryrun_20260513_01` selected only the r59 core-v4 profile with `alpha_result_value_budget_split_v46`, `allocation_layer_v1`, `result_value_v10`, and `active_execution_strategy` prior.
+- Fact: `daily_research/output/active_execution_strategy.json` remains unchanged.
+- Evidence capsule: `daily_research/brain/references/r59_core_v4_release_first_status_20260513.md`.
+- Current verdict: r59 is research / shadow-only / core-v4 infrastructure. It is not safe-screening evidence, strategy-effectiveness evidence, confirmatory evidence, promotion support, live/default change, or active artifact change.
+- Next: if continuing r59, run explicit-tag safe screening only after smoke and dry-run remain clean; do not infer strategy quality from smoke metrics.

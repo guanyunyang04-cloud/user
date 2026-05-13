@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
 
 from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_future_path_metrics
 from daily_research.continuous_policy.model import fit_policy_models
+from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES, fit_policy_models_core_v4
 from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES, fit_policy_models_v2
 from daily_research.continuous_policy.model_seq_v3 import (
@@ -49,6 +50,7 @@ from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_HIER_V4,
     TRAINER_BACKEND_FORMAL_V2,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
@@ -148,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--loss-profile",
         default=DEFAULT_LOSS_PROFILE,
-        choices=LOSS_PROFILE_NAMES,
+        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES))),
         help="Loss contract for seq_v3: use default imitation balance or teacher-aux continuous-primary profiles.",
     )
     parser.add_argument("--early-stop-patience", type=int, default=10)
@@ -325,6 +327,33 @@ def main(argv: list[str] | None = None) -> int:
             resume_mode=args.resume_mode,
         )
         artifact_path = run_root / "continuous_policy_v2_artifact.pt"
+        training_diagnostics = dict(artifact.training_diagnostics or {})
+    elif backend == TRAINER_BACKEND_FORMAL_CORE_V4:
+        artifact = fit_policy_models_core_v4(
+            sample_frame=sample_frame,
+            daily_frame=daily_frame,
+            feature_names=feature_names,
+            daily_feature_names=daily_feature_names,
+            random_seed=args.random_seed,
+            train_summary=train_summary,
+            trained_at=trained_at,
+            training_contract=training_contract,
+            run_root=run_root,
+            epochs=args.epochs,
+            min_epochs=args.min_epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            hidden_dim=max(int(args.hidden_dim), 128),
+            sequence_layers=max(int(args.sequence_layers), 1),
+            daily_hidden_dim=args.daily_hidden_dim,
+            dropout=max(float(args.dropout), 0.10),
+            daily_dropout=args.daily_dropout,
+            early_stop_patience=args.early_stop_patience,
+            resume_mode=args.resume_mode,
+            loss_profile=args.loss_profile,
+            progress_sink=progress_sink,
+        )
+        artifact_path = run_root / "continuous_policy_core_v4_artifact.pt"
         training_diagnostics = dict(artifact.training_diagnostics or {})
     elif backend == TRAINER_BACKEND_FORMAL_HIER_V4:
         artifact = fit_policy_models_v4(

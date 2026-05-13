@@ -7,11 +7,13 @@ TRAINER_BACKEND_PROTOTYPE_V1 = "prototype_gbdt_v1"
 TRAINER_BACKEND_FORMAL_V2 = "formal_torch_v2"
 TRAINER_BACKEND_FORMAL_SEQ_V3 = "formal_torch_seq_v3"
 TRAINER_BACKEND_FORMAL_HIER_V4 = "formal_torch_hier_v4"
+TRAINER_BACKEND_FORMAL_CORE_V4 = "formal_torch_core_v4"
 TRAINER_BACKENDS = (
     TRAINER_BACKEND_PROTOTYPE_V1,
     TRAINER_BACKEND_FORMAL_V2,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
     TRAINER_BACKEND_FORMAL_HIER_V4,
+    TRAINER_BACKEND_FORMAL_CORE_V4,
 )
 
 
@@ -37,6 +39,11 @@ def normalize_trainer_backend(value: str | None) -> str:
         "hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
         "torch_hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
         "formal_hier_v4": TRAINER_BACKEND_FORMAL_HIER_V4,
+        "core": TRAINER_BACKEND_FORMAL_CORE_V4,
+        "core_v4": TRAINER_BACKEND_FORMAL_CORE_V4,
+        "torch_core_v4": TRAINER_BACKEND_FORMAL_CORE_V4,
+        "formal_core_v4": TRAINER_BACKEND_FORMAL_CORE_V4,
+        "formal_torch_core_v4": TRAINER_BACKEND_FORMAL_CORE_V4,
         "v4": TRAINER_BACKEND_FORMAL_HIER_V4,
     }
     canonical = aliases.get(text, text)
@@ -55,6 +62,29 @@ def build_training_contract(
 ) -> dict[str, Any]:
     backend = normalize_trainer_backend(trainer_backend)
     resume_mode_text = str(resume_mode or "").strip().lower()
+    if backend == TRAINER_BACKEND_FORMAL_CORE_V4:
+        requested_epochs = max(int(requested_epochs or 0), 1)
+        min_epochs = max(int(min_epochs or 0), 1)
+        if not resume_mode_text:
+            resume_mode_text = "strict"
+        return {
+            "trainer_backend": backend,
+            "contract_class": "epoch_resume_shadow_research_candidate",
+            "epoch_based": True,
+            "promotable": False,
+            "resume_capable": True,
+            "gpu_required": True,
+            "runtime_env": str(runtime_env or "yolos"),
+            "min_start_epoch_budget": 1,
+            "requested_epochs": requested_epochs,
+            "min_epochs": min_epochs,
+            "resume_mode": resume_mode_text,
+            "notes": [
+                "formal_torch_core_v4 is a parallel shadow-only research backend for release-first allocation.",
+                "It is allowed to use epoch/resume GPU training, but it is not promotion-eligible by default.",
+                "Promotion/live/default changes require a later explicit governance decision outside this backend contract.",
+            ],
+        }
     if backend in {TRAINER_BACKEND_FORMAL_V2, TRAINER_BACKEND_FORMAL_SEQ_V3, TRAINER_BACKEND_FORMAL_HIER_V4}:
         requested_epochs = max(int(requested_epochs or 0), 32)
         min_epochs = max(int(min_epochs or 0), 32)

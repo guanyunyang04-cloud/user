@@ -11,6 +11,7 @@ import torch
 import pandas as pd
 
 import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
+import daily_research.continuous_policy.model_core_v4 as model_core_v4
 import daily_research.continuous_policy.native_allocation as native_allocation_module
 import daily_research.continuous_policy.portfolio_simulator as portfolio_simulator_module
 from daily_research.continuous_policy.day_set_modules import safe_negative_mask_fill_value
@@ -4221,6 +4222,50 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertIn("supports_release_first_allocation_v3_mode", fit_source)
         self.assertIn("release_first_allocation_v3_mode", predictor_source)
         self.assertIn("alpha_result_value_budget_split_v46", predictor_source)
+
+    def test_r59_core_v4_profile_registers_release_first_shadow_backend(self) -> None:
+        profile = "split_heads_portfolio_daily_release_first_core_v4_r59"
+        loss_profile = "alpha_result_value_budget_split_v46"
+
+        self.assertIn(profile, SEARCH_PROFILES)
+        self.assertIn(profile, SEARCH_PROFILE_BASE_TRIALS)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["trainer_backend"], "formal_torch_core_v4")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["loss_profile"], loss_profile)
+        self.assertEqual(SEARCH_PROFILE_DEFAULT_OBJECTIVES[profile], "end_to_end_allocation_layer_v1")
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["epochs"], 12)
+        self.assertEqual(SEARCH_PROFILE_BASE_TRIALS[profile]["min_epochs"], 8)
+
+        resolved_name, resolved_config = model_core_v4.resolve_core_v4_loss_profile(loss_profile)
+        self.assertEqual(resolved_name, loss_profile)
+        self.assertEqual(resolved_config["multi_objective_loss_weights"]["action_total"], 0.0)
+        self.assertGreater(
+            resolved_config["multi_objective_loss_weights"]["release_first_allocation_total"],
+            0.0,
+        )
+
+    def test_r59_core_v4_prediction_fields_feed_release_first_simulator_path(self) -> None:
+        simulator_source = inspect.getsource(portfolio_simulator_module)
+        predictor_source = inspect.getsource(model_core_v4.predict_policy_core_v4)
+
+        for snippet in (
+            "release_first_allocation_v3_mode",
+            "portfolio_daily_target_weight_intent",
+            "portfolio_daily_target_delta_intent",
+            "portfolio_daily_source_score",
+            "portfolio_daily_source_release_quality",
+            "portfolio_daily_source_economic_block_risk",
+            "release_first_action_hint",
+        ):
+            self.assertIn(snippet, predictor_source)
+        for snippet in (
+            "release_first_allocation_v3_mode",
+            "portfolio_daily_target_delta_intent",
+            "portfolio_daily_source_score",
+            "portfolio_daily_source_release_quality",
+            "portfolio_daily_source_economic_block_risk",
+            "release_first_action_hint",
+        ):
+            self.assertIn(snippet, simulator_source)
 
     def test_r52d_projection_exposes_train_sim_alignment_terms(self) -> None:
         outputs = {

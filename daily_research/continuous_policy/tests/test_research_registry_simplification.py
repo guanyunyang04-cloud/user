@@ -17,16 +17,15 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
             active_profiles,
             (
                 "focused_seq_v1",
-                "split_heads_portfolio_daily_cash_funded_allocation_core_r53",
-                "split_heads_portfolio_daily_semantic_budget_controller_r54",
-                "split_heads_portfolio_daily_cash_timing_release_controller_r55",
                 "split_heads_portfolio_daily_release_first_constrained_decoder_r56",
+                "split_heads_portfolio_daily_release_first_core_v4_r59",
             ),
         )
-        self.assertLessEqual(len(active_profiles), 5)
+        self.assertLessEqual(len(active_profiles), 3)
         self.assertNotIn("split_heads_portfolio_daily_end_to_end_allocation_layer_r40", active_profiles)
         self.assertNotIn("split_heads_portfolio_daily_integrated_convex_capital_flow_r50", active_profiles)
         self.assertNotIn("split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e", active_profiles)
+        self.assertNotIn("split_heads_portfolio_daily_cash_timing_release_controller_r55", active_profiles)
 
     def test_active_profile_config_is_copy_safe_and_complete(self) -> None:
         profile_name = "split_heads_portfolio_daily_release_first_constrained_decoder_r56"
@@ -41,6 +40,18 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
         self.assertTrue(is_resource_gated_profile(profile_name))
         self.assertEqual(fresh_config["resource_gate"]["release_first_source_intent_floor"], 1.0)
 
+    def test_r59_core_v4_profile_is_active_and_shadow_only(self) -> None:
+        profile_name = "split_heads_portfolio_daily_release_first_core_v4_r59"
+
+        config = get_search_profile_config(profile_name)
+
+        self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_core_v4")
+        self.assertEqual(config["base_trial"]["loss_profile"], "alpha_result_value_budget_split_v46")
+        self.assertEqual(config["base_trial"]["epochs"], 12)
+        self.assertEqual(config["base_trial"]["min_epochs"], 8)
+        self.assertEqual(get_default_objective(profile_name), "end_to_end_allocation_layer_v1")
+        self.assertTrue(is_resource_gated_profile(profile_name))
+
     def test_legacy_profiles_are_not_new_study_entrypoints(self) -> None:
         parser = study_runner.build_parser()
         search_action = next(action for action in parser._actions if action.dest == "search_profile")
@@ -48,6 +59,8 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
         self.assertEqual(tuple(search_action.choices), get_active_search_profiles())
         with self.assertRaises(KeyError):
             get_search_profile_config("split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e")
+        with self.assertRaises(KeyError):
+            get_search_profile_config("split_heads_portfolio_daily_cash_timing_release_controller_r55")
 
     def test_study_runner_no_longer_exposes_subprocess_protocol_options(self) -> None:
         parser = study_runner.build_parser()

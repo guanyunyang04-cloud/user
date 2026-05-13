@@ -4,6 +4,12 @@ import numpy as np
 import pandas as pd
 
 
+def _numeric_policy_series(policy_frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+    if column not in policy_frame.columns:
+        return pd.Series(float(default), index=policy_frame.index, dtype=float)
+    return pd.to_numeric(policy_frame[column], errors="coerce").fillna(float(default))
+
+
 def derive_cash_timing_intent(
     *,
     risk_score: float,
@@ -63,38 +69,30 @@ def derive_release_first_intent(
     min_intent: float = 0.35,
 ) -> pd.DataFrame:
     result = pd.DataFrame(index=policy_frame.index)
-    current_weight = pd.to_numeric(policy_frame.get("current_weight", 0.0), errors="coerce").fillna(0.0)
-    target_delta = pd.to_numeric(
-        policy_frame.get("portfolio_daily_target_delta_intent", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    source_score = pd.to_numeric(
-        policy_frame.get(
-            "portfolio_daily_source_score",
-            policy_frame.get("source_score", 0.0),
-        ),
-        errors="coerce",
-    ).fillna(0.0)
-    release_quality = pd.to_numeric(
-        policy_frame.get(
-            "portfolio_daily_source_release_quality",
-            policy_frame.get("reduce_quality", policy_frame.get("sell_release_value", 0.0)),
-        ),
-        errors="coerce",
-    ).fillna(0.0)
-    exit_hazard = pd.to_numeric(policy_frame.get("exit_hazard", 0.0), errors="coerce").fillna(0.0)
-    keep_risk = pd.to_numeric(
-        policy_frame.get("portfolio_daily_source_forward_proxy_keep_risk", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    block_risk = pd.to_numeric(
-        policy_frame.get("portfolio_daily_source_economic_block_risk", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    receiver_score = pd.to_numeric(
-        policy_frame.get("portfolio_daily_receiver_score", policy_frame.get("receiver_score", 0.0)),
-        errors="coerce",
-    ).fillna(0.0)
+    current_weight = _numeric_policy_series(policy_frame, "current_weight")
+    target_delta = _numeric_policy_series(policy_frame, "portfolio_daily_target_delta_intent")
+    source_score = (
+        _numeric_policy_series(policy_frame, "portfolio_daily_source_score")
+        if "portfolio_daily_source_score" in policy_frame.columns
+        else _numeric_policy_series(policy_frame, "source_score")
+    )
+    release_quality = (
+        _numeric_policy_series(policy_frame, "portfolio_daily_source_release_quality")
+        if "portfolio_daily_source_release_quality" in policy_frame.columns
+        else (
+            _numeric_policy_series(policy_frame, "reduce_quality")
+            if "reduce_quality" in policy_frame.columns
+            else _numeric_policy_series(policy_frame, "sell_release_value")
+        )
+    )
+    exit_hazard = _numeric_policy_series(policy_frame, "exit_hazard")
+    keep_risk = _numeric_policy_series(policy_frame, "portfolio_daily_source_forward_proxy_keep_risk")
+    block_risk = _numeric_policy_series(policy_frame, "portfolio_daily_source_economic_block_risk")
+    receiver_score = (
+        _numeric_policy_series(policy_frame, "portfolio_daily_receiver_score")
+        if "portfolio_daily_receiver_score" in policy_frame.columns
+        else _numeric_policy_series(policy_frame, "receiver_score")
+    )
 
     held = current_weight > float(deadband)
     release_size = (-target_delta).clip(lower=0.0)

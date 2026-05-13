@@ -84,6 +84,14 @@
 - Inference: when a research line lacks completed protocol summaries, adding more orchestration layers can hide the true blocker. Prefer a direct protocol smoke, then dry-run study, then safe screening.
 - Rule: do not treat new runner layers, more loss weights, or another r-number profile as progress unless they reduce a specific blocker and preserve completed evidence semantics.
 
+## 2026-05-13 r59 Core V4 Lesson
+- Fact: `model_seq_v3.py` had become the main domain-layer complexity sink. r59 adds `formal_torch_core_v4` as a parallel backend instead of continuing to stack r56-specific heads, losses, diagnostics, and compatibility branches into v3.
+- Fact: core-v4 is deliberately narrow: it only accepts release-first loss aliases for the r56/r59 line and rejects legacy v1-v45 losses as new core-v4 training inputs.
+- Fact: smoke failures found real infrastructure issues: AMP needs logits-safe BCE, and release-first intent must tolerate missing optional risk columns with series-shaped defaults.
+- Inference: a small backend can expose failure causes faster than another broad profile inside the v3 monolith.
+- Rule: future core-v4 work must stay parallel and shadow-only until explicit safe-screening evidence exists. Do not copy v3 historical loss/profile chains into core-v4 just for compatibility.
+- Rule: active new-study profiles should remain small: `focused_seq_v1`, r56 v3 reference, and r59 core-v4 unless a future writeback explicitly changes the active set.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。
