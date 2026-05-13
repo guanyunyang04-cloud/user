@@ -4,6 +4,7 @@ import json
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,11 @@ from daily_research.continuous_policy.state_builder import STATE_SEQUENCE_BASES,
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_SEQ_V3
 from daily_research.continuous_policy.day_set_batching import DaySetTensorDataset, _collate_day_set_batch
 from daily_research.continuous_policy.day_set_modules import PortfolioSlotAttention
+from daily_research.continuous_policy.training_runtime_acceleration import (
+    autocast_context,
+    configure_torch_training_acceleration,
+    move_to_device,
+)
 from daily_research.continuous_policy.native_allocation import (
     _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES,
     _NATIVE_ALLOCATION_TERM_NAMES,
@@ -7433,6 +7439,11 @@ def fit_policy_models_v3(
         _get_portfolio_cvxpy_allocation_layer()
         if multi_objective_loss_weights.get("portfolio_full_universe_convex_allocation_total", 0.0) > 0.0:
             _get_portfolio_cvxpy_allocation_layer(CVXPY_FULL_UNIVERSE_ALLOCATION_SLOT_COUNT)
+    training_acceleration = configure_torch_training_acceleration(
+        device,
+        cvxpy_layers_enabled=uses_cvxpy_convex_allocation_layer,
+    )
+    grad_scaler = torch.amp.GradScaler("cuda", enabled=training_acceleration.amp_enabled)
     sample_target_names = tuple(sample_targets.keys())
     dataset = TensorDataset(
         torch.as_tensor(X_static[train_idx], dtype=torch.float32),
@@ -7461,6 +7472,7 @@ def fit_policy_models_v3(
             shuffle=True,
             drop_last=False,
             collate_fn=_collate_day_set_batch,
+            pin_memory=training_acceleration.pin_memory,
         )
     else:
         loader = DataLoader(
@@ -7468,6 +7480,7 @@ def fit_policy_models_v3(
             batch_size=max(32, int(batch_size)),
             shuffle=not uses_cvxpy_convex_allocation_layer,
             drop_last=False,
+            pin_memory=training_acceleration.pin_memory,
         )
     X_static_val = torch.as_tensor(X_static[val_idx], dtype=torch.float32, device=device)
     X_sequence_val = torch.as_tensor(X_sequence[val_idx], dtype=torch.float32, device=device)
@@ -7503,6 +7516,7 @@ def fit_policy_models_v3(
             shuffle=False,
             drop_last=False,
             collate_fn=_collate_day_set_batch,
+            pin_memory=training_acceleration.pin_memory,
         )
     last_val_day_set_integrity_stats = {
         "val_day_set_integrity": False,
@@ -7539,20 +7553,28 @@ def fit_policy_models_v3(
         unique_date_codes: set[int] = set()
         for batch in val_day_loader:
             day_batch = {
-                key: (value.to(device) if torch.is_tensor(value) else value)
+                key: move_to_device(
+                    value,
+                    device,
+                    non_blocking=training_acceleration.non_blocking_transfer,
+                )
                 for key, value in batch.items()
             }
-            day_batch["sample_targets"] = {
-                name: value.to(device)
-                for name, value in day_batch["sample_targets"].items()
-            }
-            day_set_mask = day_batch["sample_mask"].to(device)
-            day_set_outputs = sample_model(
-                day_batch["static_x"],
-                day_batch["sequence_x"],
-                day_batch["daily_x"],
-                day_set_mask,
-            )
+            day_set_mask = day_batch["sample_mask"]
+            with autocast_context(training_acceleration):
+                day_set_outputs = sample_model(
+                    day_batch["static_x"],
+                    day_batch["sequence_x"],
+                    day_batch["daily_x"],
+                    day_set_mask,
+                )
+                day_set_terms = _portfolio_day_set_native_allocation_vector_loss(
+                    day_set_outputs,
+                    dict(day_batch["sample_targets"]),
+                    day_set_mask,
+                    validity_first=native_target_validity_closure_enabled,
+                    return_terms=return_day_set_terms,
+                )
             flat_mask = day_set_mask.reshape(-1)
             for name, value in day_set_outputs.items():
                 flat_value = (
@@ -7572,13 +7594,6 @@ def fit_policy_models_v3(
             )
             for name, tensor in day_batch["sample_targets"].items():
                 target_chunks.setdefault(name, []).append(tensor.reshape(-1)[flat_mask])
-            day_set_terms = _portfolio_day_set_native_allocation_vector_loss(
-                day_set_outputs,
-                dict(day_batch["sample_targets"]),
-                day_set_mask,
-                validity_first=native_target_validity_closure_enabled,
-                return_terms=return_day_set_terms,
-            )
             batch_weight = float(day_set_mask.shape[0])
             day_set_weight_sum += batch_weight
             if return_day_set_terms and isinstance(day_set_terms, dict):
@@ -7640,6 +7655,8 @@ def fit_policy_models_v3(
 
     patience_used = 0
     for epoch in range(start_epoch + 1, int(epochs) + 1):
+        epoch_started_at = time.perf_counter()
+        train_started_at = epoch_started_at
         sample_model.train()
         daily_model.train()
         epoch_sample_loss = 0.0
@@ -7650,20 +7667,21 @@ def fit_policy_models_v3(
             day_set_mask = None
             if uses_day_set_native_allocation:
                 day_batch = {
-                    key: (value.to(device) if torch.is_tensor(value) else value)
+                    key: move_to_device(
+                        value,
+                        device,
+                        non_blocking=training_acceleration.non_blocking_transfer,
+                    )
                     for key, value in batch.items()
                 }
-                day_batch["sample_targets"] = {
-                    name: value.to(device)
-                    for name, value in day_batch["sample_targets"].items()
-                }
-                day_set_mask = day_batch["sample_mask"].to(device)
-                day_set_outputs = sample_model(
-                    day_batch["static_x"],
-                    day_batch["sequence_x"],
-                    day_batch["daily_x"],
-                    day_set_mask,
-                )
+                day_set_mask = day_batch["sample_mask"]
+                with autocast_context(training_acceleration):
+                    day_set_outputs = sample_model(
+                        day_batch["static_x"],
+                        day_batch["sequence_x"],
+                        day_batch["daily_x"],
+                        day_set_mask,
+                    )
                 flat_mask = day_set_mask.reshape(-1)
                 outputs = {
                     name: (
@@ -7686,13 +7704,21 @@ def fit_policy_models_v3(
                 }
                 day_set_targets = dict(day_batch["sample_targets"])
             else:
-                batch = [item.to(device) for item in batch]
+                batch = [
+                    move_to_device(
+                        item,
+                        device,
+                        non_blocking=training_acceleration.non_blocking_transfer,
+                    )
+                    for item in batch
+                ]
                 static_batch, sequence_batch, action_batch, duration_batch, action_soft_batch, *sample_target_batches = batch
                 sample_batch_targets = {
                     name: tensor
                     for name, tensor in zip(sample_target_names, sample_target_batches, strict=False)
                 }
-                outputs = sample_model(static_batch, sequence_batch)
+                with autocast_context(training_acceleration):
+                    outputs = sample_model(static_batch, sequence_batch)
             action_ce_loss = nn.functional.cross_entropy(outputs["action_logits"], action_batch, weight=action_weight_tensor)
             action_soft_loss = nn.functional.kl_div(
                 nn.functional.log_softmax(outputs["action_logits"], dim=-1),
@@ -7904,22 +7930,41 @@ def fit_policy_models_v3(
                 + multi_objective_loss_weights.get("clipped_intent_total", 0.0) * clipped_intent_loss
             )
             sample_optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            if training_acceleration.amp_enabled:
+                grad_scaler.scale(loss).backward()
+                grad_scaler.unscale_(sample_optimizer)
+            else:
+                loss.backward()
             nn.utils.clip_grad_norm_(sample_model.parameters(), max_norm=2.0)
-            sample_optimizer.step()
+            if training_acceleration.amp_enabled:
+                grad_scaler.step(sample_optimizer)
+                grad_scaler.update()
+            else:
+                sample_optimizer.step()
             epoch_sample_loss += float(loss.detach().cpu())
             batch_count += 1
 
-        daily_outputs = daily_model(X_daily_train)
-        daily_loss = _weighted_scalar_heads_loss(daily_outputs, daily_targets_train, daily_target_loss_weights)
+        with autocast_context(training_acceleration):
+            daily_outputs = daily_model(X_daily_train)
+            daily_loss = _weighted_scalar_heads_loss(daily_outputs, daily_targets_train, daily_target_loss_weights)
         daily_optimizer.zero_grad(set_to_none=True)
-        daily_loss.backward()
+        if training_acceleration.amp_enabled:
+            grad_scaler.scale(daily_loss).backward()
+            grad_scaler.unscale_(daily_optimizer)
+        else:
+            daily_loss.backward()
         nn.utils.clip_grad_norm_(daily_model.parameters(), max_norm=2.0)
-        daily_optimizer.step()
+        if training_acceleration.amp_enabled:
+            grad_scaler.step(daily_optimizer)
+            grad_scaler.update()
+        else:
+            daily_optimizer.step()
+        train_seconds = float(time.perf_counter() - train_started_at)
 
         sample_model.eval()
         daily_model.eval()
-        with torch.no_grad():
+        validation_started_at = time.perf_counter()
+        with torch.no_grad(), autocast_context(training_acceleration):
             val_day_set_integrity_stats = {
                 "val_day_set_integrity": False,
                 "val_unique_day_count": 0.0,
@@ -8147,9 +8192,20 @@ def fit_policy_models_v3(
                 ).detach().cpu()
             )
             last_val_day_set_integrity_stats = dict(val_day_set_integrity_stats)
+        validation_seconds = float(time.perf_counter() - validation_started_at)
 
         train_loss = float(epoch_sample_loss / max(batch_count, 1))
-        history.append({"epoch": int(epoch), "train_loss": train_loss, "validation_loss": val_loss})
+        history.append(
+            {
+                "epoch": int(epoch),
+                "train_loss": train_loss,
+                "validation_loss": val_loss,
+                "train_seconds": train_seconds,
+                "validation_seconds": validation_seconds,
+                "epoch_seconds": float(time.perf_counter() - epoch_started_at),
+                "train_batch_count": int(batch_count),
+            }
+        )
         checkpoint_payload = {
             "epoch": int(epoch),
             "best_epoch": int(best_epoch),
@@ -8203,7 +8259,8 @@ def fit_policy_models_v3(
             if final_val_outputs_cache is None:
                 raise RuntimeError("day-set validation cache is missing.")
             return final_val_outputs_cache
-        return sample_model(X_static_val, X_sequence_val)
+        with autocast_context(training_acceleration):
+            return sample_model(X_static_val, X_sequence_val)
 
     portfolio_differentiable_convex_terms: dict[str, float] = {}
     if multi_objective_loss_weights.get("portfolio_differentiable_convex_allocation_total", 0.0) > 0.0:
@@ -8293,6 +8350,11 @@ def fit_policy_models_v3(
         "conda_prefix": str(os.environ.get("CONDA_PREFIX", "")),
         "runtime_env": "yolos" if "yolos" in str(sys.executable).lower() else "",
         "resource_runtime": resource_runtime,
+        "gpu_acceleration": training_acceleration.to_diagnostics(),
+        "amp_enabled": bool(training_acceleration.amp_enabled),
+        "amp_dtype": str(training_acceleration.amp_dtype),
+        "data_loader_pin_memory": bool(training_acceleration.pin_memory),
+        "non_blocking_transfer": bool(training_acceleration.non_blocking_transfer),
         "epochs_requested": int(epochs),
         "min_epochs": int(min_epochs),
         "completed_epochs": int(history[-1]["epoch"]) if history else 0,

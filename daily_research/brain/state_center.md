@@ -130,3 +130,10 @@
 - Remaining blockers: training evidence remains insufficient with best epoch at edge, cash timing is still strongly negative, and source/reduce/exit are still all dead (`source_target_count=0`, realized sell rate `0`, reduce/exit `0`).
 - Evidence capsule: `daily_research/brain/references/r55_cash_timing_release_controller_status_20260512.md`.
 - Current verdict: r55 is research/shadow-only and not eligible for strict resume, confirmatory, promotion, live/default, or active artifact changes.
+
+## 2026-05-13 GPU Training Runtime Acceleration
+- Fact: seq_v3 training already used CUDA in r55; the runtime gap was missing AMP/GradScaler, pinned DataLoader memory, non-blocking transfers, and timing diagnostics.
+- Fact: `training_runtime_acceleration.py` now configures CUDA AMP for non-cvxpy profiles and keeps cvxpy-layer profiles out of AMP while preserving fast transfers.
+- Fact: seq_v3 diagnostics now write `gpu_acceleration`, `amp_enabled`, `data_loader_pin_memory`, `non_blocking_transfer`, and per-epoch timing fields.
+- Evidence capsule: `daily_research/brain/references/r55_gpu_training_runtime_acceleration_status_20260513.md`.
+- Boundary: this is training infrastructure and observability only; it does not change r55 verdict, active strategy, live/default, promotion, or confirmatory eligibility.

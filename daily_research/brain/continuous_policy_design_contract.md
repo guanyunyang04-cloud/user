@@ -201,3 +201,9 @@
 - r55 loss contract: v45 keeps true solver disabled and uses day-set native allocation plus explicit `cash_timing_directional_loss`, `source_release_intent_loss`, and `reduce_exit_intent_loss`; legacy action/duration totals remain `0.0`.
 - r55 simulator contract: only explicit `portfolio_daily_target_delta_intent < -deadband` may force allocation-intent-v2 release target weights; r54 target-weight micro deltas without explicit target-delta intent must remain deadband-protected.
 - r55 verdict boundary: safe screening improved best composite to `5.128541`, but cash timing remains strongly negative and source/reduce/exit remain dead, so r55 is research/shadow-only and blocked from strict resume, confirmatory, promotion, live/default, and active artifact changes.
+
+## 2026-05-13 GPU Training Runtime Contract
+- seq_v3 CUDA training must use the shared `training_runtime_acceleration.py` runtime for AMP/GradScaler, pinned DataLoader memory, non-blocking transfer, and acceleration diagnostics.
+- Cvxpy/cvxpylayer profiles must disable AMP for solver safety while retaining pinned memory and non-blocking transfer.
+- Training diagnostics must expose `gpu_acceleration`, `amp_enabled`, `data_loader_pin_memory`, `non_blocking_transfer`, and per-epoch `train_seconds` / `validation_seconds` / `epoch_seconds` so future speed claims can be evidence-based.
+- This contract is infrastructure-only; it must not be interpreted as strategy evidence, confirmatory eligibility, live/default change, promotion support, or active artifact change.

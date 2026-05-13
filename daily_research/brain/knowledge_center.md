@@ -69,6 +69,7 @@
 | r53 | cash-funded allocation core v2 is a new research line. It materially improved cash/exposure closure in safe screening, but still has insufficient training evidence, negative cash timing, and strongly negative composite score; it is not eligible for confirmatory, strict resume, promotion, live/default, or active artifact changes. |
 | r54 | semantic-budget controller makes target-weight intent the main policy surface and fixes r53 budget-closed audit semantics. Safe screening improved composite score and kept cash/exposure closure clean, but still has insufficient training evidence, negative cash timing, weak reduce/exit quality, and one abnormal trial exit; it is not eligible for confirmatory, promotion, live/default, or active artifact changes. |
 | r55 | cash-timing release controller adds failed-trial artifact diagnostics, explicit bottleneck reports, and v45 cash/source/reduce-exit native loss terms. Safe screening completed 2/2 with no failed trials and best composite `5.128541`, but cash timing only nudged to `-0.168208` and source/reduce/exit stayed all dead; it is not eligible for strict resume, confirmatory, promotion, live/default, or active artifact changes. |
+| gpu-runtime-20260513 | seq_v3 training-runtime acceleration adds CUDA AMP/GradScaler, pinned DataLoader memory, non-blocking transfers, and per-epoch timing diagnostics. It is an infrastructure speed/observability improvement only, not strategy evidence or promotion support. |
 
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。

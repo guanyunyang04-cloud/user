@@ -4149,6 +4149,18 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         ):
             self.assertIn(field, source)
 
+    def test_seq_v3_training_uses_gpu_acceleration_runtime_contract(self) -> None:
+        source = inspect.getsource(model_seq_v3.fit_policy_models_v3)
+        for snippet in (
+            "configure_torch_training_acceleration",
+            "autocast_context(training_acceleration)",
+            "GradScaler",
+            "pin_memory=training_acceleration.pin_memory",
+            "non_blocking=training_acceleration.non_blocking_transfer",
+            '"gpu_acceleration"',
+        ):
+            self.assertIn(snippet, source)
+
     def test_r52d_projection_exposes_train_sim_alignment_terms(self) -> None:
         outputs = {
             "portfolio_daily_allocation_weight_logit": torch.tensor([0.0, 4.0, 3.0], dtype=torch.float32),
