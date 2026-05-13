@@ -121,3 +121,12 @@
 - Remaining blockers: training evidence is insufficient (`best_epoch=8` at edge), `cash_timing_quality_1d=-0.168248`, reduce/exit quality still fails, and trial 03 exited with code `3221226505` despite writing a protocol summary.
 - Evidence capsule: `daily_research/brain/references/r54_semantic_budget_controller_status_20260512.md`.
 - Current verdict: r54 is a code-contract and safe-screening improvement, not a strategy-success verdict; do not run confirmatory, promotion, live/default, or active artifact changes from this evidence.
+
+## 2026-05-12 r55 Cash Timing Release Controller Verdict
+- Fact: r55 code contract exists as `split_heads_portfolio_daily_cash_timing_release_controller_r55` / `alpha_result_value_budget_split_v45`; it adds failed-trial artifact diagnostics, per-trial behavior bottleneck reports, and explicit cash-timing/source-release/reduce-exit native loss terms.
+- Fact: dry-run `self_opt_study_r55_cash_timing_release_controller_dryrun_20260512_01` passed with confirmatory disabled and true solver disabled.
+- Fact: safe screening `self_opt_study_r55_cash_timing_release_controller_screening_safe_20260512_01` completed 2/2 trials, 0 failed, confirmatory disabled.
+- Best screening trial: `trial_02`, `composite_score=5.128541`, `cash_timing_quality_1d=-0.168208`, actual cash about `0.187927`, target gap about `0.004817`, exposure utilization about `1.078645`, intent translation conflict `0`.
+- Remaining blockers: training evidence remains insufficient with best epoch at edge, cash timing is still strongly negative, and source/reduce/exit are still all dead (`source_target_count=0`, realized sell rate `0`, reduce/exit `0`).
+- Evidence capsule: `daily_research/brain/references/r55_cash_timing_release_controller_status_20260512.md`.
+- Current verdict: r55 is research/shadow-only and not eligible for strict resume, confirmatory, promotion, live/default, or active artifact changes.

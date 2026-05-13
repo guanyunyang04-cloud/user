@@ -381,6 +381,52 @@ class AllocationClosureDiagnosticsTest(unittest.TestCase):
 
         self.assertIn("source_release_dead_when_required", source_required_gate["failed_resource_checks"])
 
+    def test_r55_native_loss_penalizes_wrong_cash_timing_and_dead_source_release(self) -> None:
+        from daily_research.continuous_policy.native_allocation import _portfolio_native_allocation_vector_loss
+
+        row_count = 4
+        targets = {
+            "date_code": torch.zeros(row_count, dtype=torch.float32),
+            "current_weight": torch.tensor([0.25, 0.20, 0.0, 0.0], dtype=torch.float32),
+            "portfolio_daily_receiver_candidate_mask": torch.tensor([0, 0, 1, 1], dtype=torch.float32),
+            "portfolio_daily_source_candidate_mask": torch.tensor([1, 1, 0, 0], dtype=torch.float32),
+            "portfolio_daily_receiver_executable_candidate": torch.tensor([0, 0, 1, 1], dtype=torch.float32),
+            "portfolio_daily_source_executable_candidate": torch.tensor([1, 1, 0, 0], dtype=torch.float32),
+            "gross_exposure_target": torch.full((row_count,), 0.80, dtype=torch.float32),
+            "turnover_budget": torch.full((row_count,), 1.0, dtype=torch.float32),
+            "max_position_weight_target": torch.full((row_count,), 0.30, dtype=torch.float32),
+            "budget_cash_timing_signal_target": torch.full((row_count,), 0.90, dtype=torch.float32),
+            "portfolio_daily_allocation_cash_deployment_target": torch.full((row_count,), 0.20, dtype=torch.float32),
+            "portfolio_daily_allocation_net_utility_target": torch.full((row_count,), 0.80, dtype=torch.float32),
+            "portfolio_daily_allocation_final_objective": torch.full((row_count,), 0.80, dtype=torch.float32),
+            "portfolio_daily_unified_receiver_score": torch.tensor([0, 0, 0.55, 0.52], dtype=torch.float32),
+            "portfolio_daily_unified_source_score": torch.tensor([0.90, 0.86, 0, 0], dtype=torch.float32),
+        }
+        wrong_outputs = {
+            "portfolio_daily_allocation_weight_logit": torch.tensor([4.0, 4.0, 4.0, 4.0], dtype=torch.float32),
+            "portfolio_daily_cash_reserve_logit": torch.full((row_count,), -5.0, dtype=torch.float32),
+            "portfolio_daily_allocation_risk_buffer_logit": torch.full((row_count,), -5.0, dtype=torch.float32),
+        }
+        defensive_outputs = {
+            **wrong_outputs,
+            "portfolio_daily_cash_reserve_logit": torch.full((row_count,), 5.0, dtype=torch.float32),
+            "portfolio_daily_allocation_weight_logit": torch.tensor([-3.0, -3.0, 0.0, 0.0], dtype=torch.float32),
+        }
+
+        wrong_terms = _portfolio_native_allocation_vector_loss(wrong_outputs, targets, return_terms=True)
+        defensive_terms = _portfolio_native_allocation_vector_loss(defensive_outputs, targets, return_terms=True)
+
+        self.assertIn("cash_timing_directional_loss", wrong_terms)
+        self.assertIn("source_release_intent_loss", wrong_terms)
+        self.assertGreater(
+            float(wrong_terms["cash_timing_directional_loss"]),
+            float(defensive_terms["cash_timing_directional_loss"]),
+        )
+        self.assertGreater(
+            float(wrong_terms["source_release_intent_loss"]),
+            float(defensive_terms["source_release_intent_loss"]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

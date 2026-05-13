@@ -27,10 +27,12 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _loss_profile_enables_full_universe_train_solver,
     resolve_loss_profile,
 )
+from daily_research.continuous_policy.behavior_bottleneck_report import build_behavior_bottleneck_report
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
     DEFAULT_BUDGET_OBJECTIVE,
 )
+from daily_research.continuous_policy.protocol_artifact_diagnostics import summarize_protocol_artifacts
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
     BUDGET_CALIBRATION_CHOICES,
@@ -1217,6 +1219,23 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.14],
         "batch_size": [1, 2],
     },
+    "split_heads_portfolio_daily_cash_timing_release_controller_r55": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "loss_profile": ["alpha_result_value_budget_split_v45"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [7.0e-5, 9.0e-5],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [128],
+        "dropout": [0.30],
+        "daily_dropout": [0.16],
+        "batch_size": [1, 2],
+    },
 }
 
 
@@ -2355,6 +2374,25 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 8,
         "min_epochs": 6,
     },
+    "split_heads_portfolio_daily_cash_timing_release_controller_r55": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "loss_profile": "alpha_result_value_budget_split_v45",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 7.0e-5,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 128,
+        "dropout": 0.30,
+        "daily_dropout": 0.16,
+        "batch_size": 1,
+        "epochs": 16,
+        "min_epochs": 10,
+    },
 }
 
 
@@ -2424,6 +2462,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_cash_funded_allocation_core_r53": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_semantic_budget_controller_r54": "end_to_end_allocation_layer_v1",
+    "split_heads_portfolio_daily_cash_timing_release_controller_r55": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -2621,6 +2660,23 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "receiver_unrealized_cap": 0.025,
         "exposure_utilization_floor": 0.60,
         "actual_cash_idle_cap": 0.24,
+        "actual_cash_weight_cap": 0.45,
+        "cash_funded_deploy_floor": 0.08,
+        "unused_receiver_headroom_cap": 0.22,
+        "target_sum_gap_cap": 0.05,
+        "cash_first_source_gate": True,
+    },
+    "split_heads_portfolio_daily_cash_timing_release_controller_r55": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.20,
+        "cash_timing_floor": -0.02,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": 0.003,
+        "annual_return_floor": 0.12,
+        "receiver_unrealized_cap": 0.025,
+        "exposure_utilization_floor": 0.60,
+        "actual_cash_idle_cap": 0.20,
         "actual_cash_weight_cap": 0.45,
         "cash_funded_deploy_floor": 0.08,
         "unused_receiver_headroom_cap": 0.22,
@@ -5538,6 +5594,15 @@ def _build_trial_result_from_protocol(
     )
 
 
+def _write_behavior_bottleneck_report(protocol_summary_path: Path) -> str:
+    protocol_summary = read_json(protocol_summary_path)
+    if not protocol_summary:
+        return ""
+    output_path = protocol_summary_path.parent / "behavior_bottleneck_report.json"
+    write_json(output_path, build_behavior_bottleneck_report(protocol_summary))
+    return str(output_path.resolve())
+
+
 def _snapshot_latest_state() -> dict[str, str | None]:
     snapshot: dict[str, str | None] = {}
     for label, path in LATEST_STATE_PATHS.items():
@@ -6282,6 +6347,54 @@ def _trial_has_sufficient_training_evidence(item: TrialResult) -> bool:
     return str(item.primary_metrics.get("training_evidence_status", "") or "").strip().lower() == "sufficient"
 
 
+def _build_failed_trial_result(
+    *,
+    trial_id: int,
+    trial_tag: str,
+    phase: str,
+    source_trial_tag: str,
+    trial_config: dict[str, Any],
+    protocol_summary_path: str,
+    exit_code: int,
+    exception_message: str,
+    role: str = "",
+) -> TrialResult:
+    health = summarize_protocol_artifacts(Path(protocol_summary_path).parent, exit_code=int(exit_code))
+    primary_metrics = {
+        "exit_code": int(exit_code),
+        "completed_evidence": 0.0,
+        "protocol_summary_parse_ok": 1.0
+        if bool((health.get("protocol_summary_health", {}) or {}).get("parse_ok"))
+        else 0.0,
+        "best_epoch": float(health.get("best_epoch", 0) or 0),
+        "completed_epochs": float(health.get("completed_epochs", 0) or 0),
+    }
+    return TrialResult(
+        trial_id=int(trial_id),
+        trial_tag=str(trial_tag),
+        status="failed",
+        phase=str(phase),
+        role=str(role or ""),
+        source_trial_tag=str(source_trial_tag or ""),
+        trial_config=dict(trial_config),
+        protocol_summary_path=str(protocol_summary_path),
+        performance_score=-999.0,
+        stability_score=-999.0,
+        composite_score=-999.0,
+        score_breakdown={
+            "artifact_health": health,
+            "exception_message": str(exception_message),
+        },
+        primary_metrics=primary_metrics,
+        promotion_status="failed",
+        failed_checks=["trial_execution_failed"],
+        gate_pass_ratio=0.0,
+        passed_check_count=0,
+        total_check_count=1,
+        error=str(exception_message),
+    )
+
+
 def _trial_is_portfolio_daily_v2_qualified(item: TrialResult) -> bool:
     return _trial_has_sufficient_training_evidence(item) and _portfolio_daily_v2_gate_pass(item.primary_metrics)
 
@@ -6892,6 +7005,7 @@ def main(argv: list[str] | None = None) -> int:
                 trial_tag = f"{study_tag}__trial_{index:02d}"
                 protocol_args = _build_protocol_args(args, trial_config, trial_tag)
                 trial_error = ""
+                exit_code = 0
                 try:
                     exit_code = int(
                         _run_protocol_with_progress(
@@ -6921,6 +7035,7 @@ def main(argv: list[str] | None = None) -> int:
                         protocol_summary_path=protocol_summary_path,
                         objective_profile=objective_profile,
                     )
+                    behavior_bottleneck_report_path = _write_behavior_bottleneck_report(protocol_summary_path)
                     screening_results.append(built)
                     _write_study_progress_event(
                         study_root,
@@ -6936,30 +7051,22 @@ def main(argv: list[str] | None = None) -> int:
                         performance_score=float(built.performance_score),
                         stability_score=float(built.stability_score),
                         protocol_summary_json=str(protocol_summary_path.resolve()),
+                        behavior_bottleneck_report_json=behavior_bottleneck_report_path,
                     )
                 except Exception as exc:
                     trial_error = traceback.format_exc().strip() or str(exc)
+                    failed_protocol_summary_path = PROTOCOLS_ROOT / trial_tag / "protocol_summary.json"
+                    behavior_bottleneck_report_path = _write_behavior_bottleneck_report(failed_protocol_summary_path)
                     screening_results.append(
-                        TrialResult(
+                        _build_failed_trial_result(
                             trial_id=index,
                             trial_tag=trial_tag,
-                            status="failed",
                             phase="screening",
-                            role="",
                             source_trial_tag="",
                             trial_config=trial_config,
-                            protocol_summary_path=str((PROTOCOLS_ROOT / trial_tag / "protocol_summary.json").resolve()),
-                            performance_score=-999.0,
-                            stability_score=-999.0,
-                            composite_score=-999.0,
-                            score_breakdown={},
-                            primary_metrics={},
-                            promotion_status="failed",
-                            failed_checks=["trial_execution_failed"],
-                            gate_pass_ratio=0.0,
-                            passed_check_count=0,
-                            total_check_count=0,
-                            error=trial_error,
+                            protocol_summary_path=str(failed_protocol_summary_path.resolve()),
+                            exit_code=int(exit_code),
+                            exception_message=trial_error,
                         )
                     )
                     _write_study_progress_event(
@@ -6972,7 +7079,8 @@ def main(argv: list[str] | None = None) -> int:
                         trial_tag=trial_tag,
                         progress_index=index,
                         progress_total=len(selected_trials),
-                        protocol_summary_json=str((PROTOCOLS_ROOT / trial_tag / "protocol_summary.json").resolve()),
+                        protocol_summary_json=str(failed_protocol_summary_path.resolve()),
+                        behavior_bottleneck_report_json=behavior_bottleneck_report_path,
                         error=trial_error[-4000:],
                     )
                     runtime_channel_reason = _detect_runtime_channel_failure(trial_error)
@@ -7030,6 +7138,7 @@ def main(argv: list[str] | None = None) -> int:
                 confirm_tag = f"{study_tag}__confirm_{index:02d}"
                 protocol_args = _build_confirmatory_protocol_args(args, source_trial.trial_config, confirm_tag)
                 trial_error = ""
+                exit_code = 0
                 try:
                     exit_code = int(
                         _run_protocol_with_progress(
@@ -7066,6 +7175,7 @@ def main(argv: list[str] | None = None) -> int:
                     built.phase = "confirmatory"
                     built.role = role
                     built.source_trial_tag = source_trial.trial_tag
+                    behavior_bottleneck_report_path = _write_behavior_bottleneck_report(protocol_summary_path)
                     confirmatory_results.append(built)
                     _write_study_progress_event(
                         study_root,
@@ -7083,14 +7193,16 @@ def main(argv: list[str] | None = None) -> int:
                         performance_score=float(built.performance_score),
                         stability_score=float(built.stability_score),
                         protocol_summary_json=str(protocol_summary_path.resolve()),
+                        behavior_bottleneck_report_json=behavior_bottleneck_report_path,
                     )
                 except Exception as exc:
                     trial_error = traceback.format_exc().strip() or str(exc)
+                    failed_protocol_summary_path = PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json"
+                    behavior_bottleneck_report_path = _write_behavior_bottleneck_report(failed_protocol_summary_path)
                     confirmatory_results.append(
-                        TrialResult(
+                        _build_failed_trial_result(
                             trial_id=index,
                             trial_tag=confirm_tag,
-                            status="failed",
                             phase="confirmatory",
                             role=role,
                             source_trial_tag=source_trial.trial_tag,
@@ -7099,18 +7211,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "epochs": int(args.confirmatory_epochs),
                                 "min_epochs": int(args.confirmatory_min_epochs),
                             },
-                            protocol_summary_path=str((PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json").resolve()),
-                            performance_score=-999.0,
-                            stability_score=-999.0,
-                            composite_score=-999.0,
-                            score_breakdown={},
-                            primary_metrics={},
-                            promotion_status="failed",
-                            failed_checks=["trial_execution_failed"],
-                            gate_pass_ratio=0.0,
-                            passed_check_count=0,
-                            total_check_count=0,
-                            error=trial_error,
+                            protocol_summary_path=str(failed_protocol_summary_path.resolve()),
+                            exit_code=int(exit_code),
+                            exception_message=trial_error,
                         )
                     )
                     _write_study_progress_event(
@@ -7125,7 +7228,8 @@ def main(argv: list[str] | None = None) -> int:
                         trial_tag=confirm_tag,
                         progress_index=index,
                         progress_total=len(confirmatory_candidates),
-                        protocol_summary_json=str((PROTOCOLS_ROOT / confirm_tag / "protocol_summary.json").resolve()),
+                        protocol_summary_json=str(failed_protocol_summary_path.resolve()),
+                        behavior_bottleneck_report_json=behavior_bottleneck_report_path,
                         error=trial_error[-4000:],
                     )
                     runtime_channel_reason = _detect_runtime_channel_failure(trial_error)

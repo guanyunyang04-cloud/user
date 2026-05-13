@@ -63,6 +63,9 @@ _NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "source_flow_mean",
     "funding_shortfall_loss",
     "cash_timing_loss",
+    "cash_timing_directional_loss",
+    "source_release_intent_loss",
+    "reduce_exit_intent_loss",
     "decision_utility_loss",
     "risk_cost_loss",
     "source_breadth_loss",
@@ -512,6 +515,25 @@ def _project_native_allocation_vector(
             1.5,
         )
         cash_timing_loss = 0.55 * over_cash_loss + 0.45 * under_cash_loss
+        cash_timing_directional_loss = torch.square(torch.relu(cash_timing_day - raw_cash_reserve)) + torch.square(
+            torch.relu(deploy_day - (1.0 - raw_cash_reserve))
+        )
+        held_weight_day = torch.clamp(current_day.sum(), min=1.0e-6)
+        sell_flow_ratio = torch.clamp(source_flow / held_weight_day, 0.0, 1.0)
+        source_support_count = torch.clamp(source_support_day.sum(), min=1.0)
+        source_release_pressure = torch.clamp(
+            (
+                torch.clamp(target_source[day_mask], 0.0, 1.0)
+                * source_support_day
+            ).sum()
+            / source_support_count,
+            0.0,
+            1.0,
+        )
+        source_release_intent_loss = torch.square(torch.relu(source_release_pressure * 0.55 - sell_flow_ratio))
+        reduce_exit_intent_loss = torch.square(
+            torch.relu(source_release_pressure * cash_timing_day * 0.35 - sell_flow_ratio)
+        )
         receiver_alpha = (
             torch.relu(delta_day)
             * receiver_support_day
@@ -636,6 +658,9 @@ def _project_native_allocation_vector(
         term_values["sell_nonheld_violation"].append(sell_nonheld_violation)
         term_values["funding_shortfall_loss"].append(funding_shortfall_loss)
         term_values["cash_timing_loss"].append(cash_timing_loss)
+        term_values["cash_timing_directional_loss"].append(cash_timing_directional_loss)
+        term_values["source_release_intent_loss"].append(source_release_intent_loss)
+        term_values["reduce_exit_intent_loss"].append(reduce_exit_intent_loss)
         term_values["decision_utility_loss"].append(decision_utility_loss)
         term_values["risk_cost_loss"].append(risk_cost_loss)
         term_values["source_breadth_loss"].append(source_breadth_loss)
@@ -728,6 +753,9 @@ _DAY_SET_NATIVE_ALLOCATION_TERM_NAMES: tuple[str, ...] = (
     "source_flow_mean",
     "funding_shortfall_loss",
     "cash_timing_loss",
+    "cash_timing_directional_loss",
+    "source_release_intent_loss",
+    "reduce_exit_intent_loss",
     "decision_utility_loss",
     "risk_cost_loss",
     "source_breadth_loss",

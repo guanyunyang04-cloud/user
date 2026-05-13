@@ -306,6 +306,27 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 },
                 "multi_greater": {"portfolio_day_set_native_allocation_vector_total": 4.00},
             },
+            {
+                "profile": "split_heads_portfolio_daily_cash_timing_release_controller_r55",
+                "loss_profile": "alpha_result_value_budget_split_v45",
+                "objective_profile": "end_to_end_allocation_layer_v1",
+                "base_equals": {"epochs": 16, "min_epochs": 10, "batch_size": 1},
+                "forbid_true_solver": True,
+                "multi_equals": {
+                    "action_total": 0.0,
+                    "duration_total": 0.0,
+                    "portfolio_cvxpy_convex_allocation_total": 0.0,
+                    "portfolio_full_universe_convex_allocation_total": 0.0,
+                },
+                "multi_greater": {
+                    "portfolio_day_set_native_allocation_vector_total": 4.20,
+                    "portfolio_cash_timing_directional_total": 0.0,
+                    "portfolio_source_release_intent_total": 0.0,
+                    "portfolio_reduce_exit_intent_total": 0.0,
+                },
+                "no_full_universe_train_solver": True,
+                "auto_resource_profile": "balanced",
+            },
         ]
         for case in cases:
             case = dict(case)
@@ -4772,6 +4793,72 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
                 self.assertIn("sample_scalar_loss_weights", resolved_config)
                 self.assertIn("daily_target_loss_weights", resolved_config)
                 self.assertIn("multi_objective_loss_weights", resolved_config)
+
+    def test_failed_trial_result_preserves_artifact_health_without_completed_evidence(self) -> None:
+        from daily_research.continuous_policy.run_self_optimizing_study import _build_failed_trial_result
+
+        result = _build_failed_trial_result(
+            trial_id=3,
+            trial_tag="study__trial_03",
+            phase="screening",
+            source_trial_tag="",
+            trial_config={"epochs": 8, "min_epochs": 6},
+            protocol_summary_path="H:/missing/protocol_summary.json",
+            exit_code=3221226505,
+            exception_message="protocol exited with code 3221226505",
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.composite_score, -999.0)
+        self.assertIn("trial_execution_failed", result.failed_checks)
+        self.assertEqual(result.primary_metrics["exit_code"], 3221226505)
+        self.assertEqual(result.primary_metrics["completed_evidence"], 0.0)
+        self.assertIn("abnormal_exit", result.score_breakdown["artifact_health"]["diagnostic_flags"])
+
+    def test_allocation_intent_v2_negative_delta_creates_release_actions(self) -> None:
+        from daily_research.continuous_policy.portfolio_simulator import HoldingState, PortfolioState
+
+        state = PortfolioState(
+            cash_weight=0.70,
+            holdings={"HELD": HoldingState(weight=0.30, entry_price=10.0, peak_price=11.0)},
+            max_positions=4,
+            max_position_weight=0.50,
+            turnover_limit=1.00,
+        )
+        policy = pd.DataFrame(
+            {
+                "stock": ["HELD", "RECV"],
+                "current_weight": [0.30, 0.0],
+                "action_label": ["hold", "open"],
+                "portfolio_daily_target_weight_intent": [0.10, 0.20],
+                "portfolio_daily_target_delta_intent": [-0.20, 0.20],
+                "allocation_intent_v2_mode": [1.0, 1.0],
+                "exit_hazard": [0.75, 0.0],
+                "reduce_quality": [0.80, 0.0],
+                "receiver": [0, 1],
+                "source": [1, 0],
+                "portfolio_daily_receiver_executable_candidate": [0, 1],
+                "portfolio_daily_source_executable_candidate": [1, 0],
+            }
+        ).set_index("stock")
+
+        result = state.step(
+            date="2026-05-12",
+            prices=pd.Series({"HELD": 10.0, "RECV": 10.0}),
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.50,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.50,
+                "cash_reserve_target": 0.05,
+                "allocation_intent_v2_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertGreater(result.diagnostics["allocation_intent_release_target_count"], 0.0)
+        self.assertGreater(result.diagnostics["sell_turnover"], 0.0)
 
 
 if __name__ == "__main__":

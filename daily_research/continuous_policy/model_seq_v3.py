@@ -1945,6 +1945,46 @@ LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"] = {
         "portfolio_full_universe_convex_allocation_total": 0.0,
     },
 }
+LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v45"] = {
+    "sample_scalar_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"]["sample_scalar_loss_weights"],
+        "sell_release_value": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"][
+            "sample_scalar_loss_weights"
+        ].get("sell_release_value", 1.0)
+        * 1.08,
+        "reduce_quality": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"][
+            "sample_scalar_loss_weights"
+        ].get("reduce_quality", 1.0)
+        * 1.04,
+        "exit_urgency": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"][
+            "sample_scalar_loss_weights"
+        ].get("exit_urgency", 1.0)
+        * 1.04,
+    },
+    "daily_target_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"]["daily_target_loss_weights"],
+        "budget_cash_timing_signal_target": LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"][
+            "daily_target_loss_weights"
+        ].get("budget_cash_timing_signal_target", 1.0)
+        * 1.10,
+    },
+    "multi_objective_loss_weights": {
+        **LOSS_PROFILE_CONFIGS["alpha_result_value_budget_split_v44"]["multi_objective_loss_weights"],
+        "scalar_total": 0.64,
+        "daily_total": 0.90,
+        "portfolio_cash_margin_total": 0.40,
+        "portfolio_capital_flow_closure_total": 0.50,
+        "portfolio_day_set_native_allocation_vector_total": 4.35,
+        "portfolio_cash_timing_directional_total": 0.42,
+        "portfolio_source_release_intent_total": 0.54,
+        "portfolio_reduce_exit_intent_total": 0.48,
+        "action_total": 0.0,
+        "duration_total": 0.0,
+        "portfolio_native_allocation_vector_total": 0.0,
+        "portfolio_cvxpy_convex_allocation_total": 0.0,
+        "portfolio_full_universe_convex_allocation_total": 0.0,
+    },
+}
 DIRECT_ACTION_VALUE_POLICY_MODE = "direct_action_value_v1"
 DIRECT_ACTION_VALUE_LOSS_PROFILES = frozenset(
     {
@@ -7281,6 +7321,15 @@ def fit_policy_models_v3(
     uses_day_set_native_allocation = (
         multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
     )
+    native_intent_loss_weight_names = (
+        ("portfolio_cash_timing_directional_total", "cash_timing_directional_loss"),
+        ("portfolio_source_release_intent_total", "source_release_intent_loss"),
+        ("portfolio_reduce_exit_intent_total", "reduce_exit_intent_loss"),
+    )
+    uses_native_intent_losses = any(
+        multi_objective_loss_weights.get(weight_name, 0.0) > 0.0
+        for weight_name, _ in native_intent_loss_weight_names
+    )
     native_target_validity_closure_enabled = resolved_loss_profile in {
         "alpha_result_value_budget_split_v38",
         "alpha_result_value_budget_split_v39",
@@ -7742,21 +7791,42 @@ def fit_policy_models_v3(
                 if multi_objective_loss_weights.get("portfolio_native_allocation_vector_total", 0.0) > 0.0
                 else torch.tensor(0.0, device=device)
             )
-            portfolio_day_set_native_allocation_vector_loss = (
-                _portfolio_day_set_native_allocation_vector_loss(
+            portfolio_cash_timing_directional_loss = torch.tensor(0.0, device=device)
+            portfolio_source_release_intent_loss = torch.tensor(0.0, device=device)
+            portfolio_reduce_exit_intent_loss = torch.tensor(0.0, device=device)
+            portfolio_day_set_native_allocation_vector_loss = torch.tensor(0.0, device=device)
+            if (
+                day_set_outputs is not None
+                and day_set_targets is not None
+                and day_set_mask is not None
+                and multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
+            ):
+                day_set_native_terms = _portfolio_day_set_native_allocation_vector_loss(
                     day_set_outputs,
                     day_set_targets,
                     day_set_mask,
                     validity_first=native_target_validity_closure_enabled,
+                    return_terms=uses_native_intent_losses,
                 )
-                if (
-                    day_set_outputs is not None
-                    and day_set_targets is not None
-                    and day_set_mask is not None
-                    and multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0) > 0.0
-                )
-                else torch.tensor(0.0, device=device)
-            )
+                if isinstance(day_set_native_terms, dict):
+                    portfolio_day_set_native_allocation_vector_loss = day_set_native_terms.get(
+                        "total",
+                        torch.tensor(0.0, device=device),
+                    )
+                    portfolio_cash_timing_directional_loss = day_set_native_terms.get(
+                        "cash_timing_directional_loss",
+                        torch.tensor(0.0, device=device),
+                    )
+                    portfolio_source_release_intent_loss = day_set_native_terms.get(
+                        "source_release_intent_loss",
+                        torch.tensor(0.0, device=device),
+                    )
+                    portfolio_reduce_exit_intent_loss = day_set_native_terms.get(
+                        "reduce_exit_intent_loss",
+                        torch.tensor(0.0, device=device),
+                    )
+                elif torch.is_tensor(day_set_native_terms):
+                    portfolio_day_set_native_allocation_vector_loss = day_set_native_terms
             portfolio_capital_flow_closure_loss = (
                 _portfolio_capital_flow_closure_loss(
                     outputs,
@@ -7818,6 +7888,12 @@ def fit_policy_models_v3(
                 * portfolio_native_allocation_vector_loss
                 + multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0)
                 * portfolio_day_set_native_allocation_vector_loss
+                + multi_objective_loss_weights.get("portfolio_cash_timing_directional_total", 0.0)
+                * portfolio_cash_timing_directional_loss
+                + multi_objective_loss_weights.get("portfolio_source_release_intent_total", 0.0)
+                * portfolio_source_release_intent_loss
+                + multi_objective_loss_weights.get("portfolio_reduce_exit_intent_total", 0.0)
+                * portfolio_reduce_exit_intent_loss
                 + multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0)
                 * portfolio_capital_flow_closure_loss
                 + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * value_arbitration_loss
@@ -7855,6 +7931,9 @@ def fit_policy_models_v3(
             y_duration_val_epoch = y_duration_val
             y_action_soft_val_epoch = y_action_soft_val
             val_portfolio_day_set_native_allocation_vector_loss = torch.tensor(0.0, device=device)
+            val_portfolio_cash_timing_directional_loss = torch.tensor(0.0, device=device)
+            val_portfolio_source_release_intent_loss = torch.tensor(0.0, device=device)
+            val_portfolio_reduce_exit_intent_loss = torch.tensor(0.0, device=device)
             if uses_day_set_native_allocation:
                 (
                     val_outputs,
@@ -7863,9 +7942,22 @@ def fit_policy_models_v3(
                     y_duration_val_epoch,
                     y_action_soft_val_epoch,
                     val_portfolio_day_set_native_allocation_vector_loss,
-                    _,
+                    val_day_set_terms,
                     val_day_set_integrity_stats,
-                ) = _run_day_set_validation_pass(return_day_set_terms=False)
+                ) = _run_day_set_validation_pass(return_day_set_terms=uses_native_intent_losses)
+                if uses_native_intent_losses and val_day_set_terms:
+                    val_portfolio_cash_timing_directional_loss = val_day_set_terms.get(
+                        "cash_timing_directional_loss",
+                        torch.tensor(0.0, device=device),
+                    )
+                    val_portfolio_source_release_intent_loss = val_day_set_terms.get(
+                        "source_release_intent_loss",
+                        torch.tensor(0.0, device=device),
+                    )
+                    val_portfolio_reduce_exit_intent_loss = val_day_set_terms.get(
+                        "reduce_exit_intent_loss",
+                        torch.tensor(0.0, device=device),
+                    )
             else:
                 val_outputs = sample_model(X_static_val, X_sequence_val)
             val_action_ce_loss = nn.functional.cross_entropy(
@@ -8038,6 +8130,12 @@ def fit_policy_models_v3(
                     * val_portfolio_native_allocation_vector_loss
                     + multi_objective_loss_weights.get("portfolio_day_set_native_allocation_vector_total", 0.0)
                     * val_portfolio_day_set_native_allocation_vector_loss
+                    + multi_objective_loss_weights.get("portfolio_cash_timing_directional_total", 0.0)
+                    * val_portfolio_cash_timing_directional_loss
+                    + multi_objective_loss_weights.get("portfolio_source_release_intent_total", 0.0)
+                    * val_portfolio_source_release_intent_loss
+                    + multi_objective_loss_weights.get("portfolio_reduce_exit_intent_total", 0.0)
+                    * val_portfolio_reduce_exit_intent_loss
                     + multi_objective_loss_weights.get("portfolio_capital_flow_closure_total", 0.0)
                     * val_portfolio_capital_flow_closure_loss
                     + multi_objective_loss_weights.get("value_arbitration_total", 0.0) * val_value_arbitration_loss
@@ -8440,10 +8538,19 @@ def fit_policy_models_v3(
         "supports_native_executable_receiver_closure": bool(native_executable_receiver_closure_enabled),
         "supports_native_validation_closure": bool(native_validation_closure_enabled),
         "supports_cash_funded_allocation_core_v2": bool(
-            resolved_loss_profile in {"alpha_result_value_budget_split_v43", "alpha_result_value_budget_split_v44"}
+            resolved_loss_profile
+            in {
+                "alpha_result_value_budget_split_v43",
+                "alpha_result_value_budget_split_v44",
+                "alpha_result_value_budget_split_v45",
+            }
         ),
         "supports_allocation_intent_v2_mode": bool(
-            resolved_loss_profile == "alpha_result_value_budget_split_v44"
+            resolved_loss_profile
+            in {
+                "alpha_result_value_budget_split_v44",
+                "alpha_result_value_budget_split_v45",
+            }
         ),
         "portfolio_day_set_native_allocation_vector_terms": locals().get("portfolio_day_set_native_allocation_vector_terms", {}),
         "sample_model_type": str(getattr(sample_model, "sample_model_type", "temporal_sample")),
@@ -9151,11 +9258,20 @@ def predict_policy_v3(
     budget_objective_name = str(artifact.train_summary.get("budget_objective", "") or "").strip().lower()
     loss_profile_name = str(artifact.train_summary.get("loss_profile", "") or "").strip().lower()
     cash_funded_allocation_core_v2_mode = bool(
-        loss_profile_name in {"alpha_result_value_budget_split_v43", "alpha_result_value_budget_split_v44"}
+        loss_profile_name
+        in {
+            "alpha_result_value_budget_split_v43",
+            "alpha_result_value_budget_split_v44",
+            "alpha_result_value_budget_split_v45",
+        }
         or artifact.training_diagnostics.get("supports_cash_funded_allocation_core_v2", False)
     )
     allocation_intent_v2_mode = bool(
-        loss_profile_name == "alpha_result_value_budget_split_v44"
+        loss_profile_name
+        in {
+            "alpha_result_value_budget_split_v44",
+            "alpha_result_value_budget_split_v45",
+        }
         or artifact.training_diagnostics.get("supports_allocation_intent_v2_mode", False)
     )
     if cash_funded_allocation_core_v2_mode:

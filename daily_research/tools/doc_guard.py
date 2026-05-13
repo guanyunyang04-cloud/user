@@ -251,6 +251,7 @@ DOCUMENT_REDIRECTS = {
 }
 
 ALLOWED_EXTERNAL_DOCS = {
+    "docs/superpowers/plans/2026-05-12-continuous-policy-key-progress.md",
     "daily_research/README.md",
     "daily_research/execution/使用教程.md",
     "daily_stock_analysis-main/AGENTS.md",

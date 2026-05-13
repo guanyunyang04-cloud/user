@@ -20,6 +20,7 @@ from daily_research.continuous_policy.native_allocation import (
     SIMULATOR_NATIVE_RECEIVER_DEADBAND_MULTIPLIER,
     SIMULATOR_NATIVE_SOURCE_DEADBAND_MULTIPLIER,
 )
+from daily_research.continuous_policy.semantic_budget_intent import derive_release_intent_from_target_delta
 
 
 DEFAULT_MAX_POSITIONS = 8
@@ -902,6 +903,23 @@ class PortfolioState:
                 and bool((allocation_core_v2_policy_mode > 0.5).any())
             )
         )
+        allocation_intent_release_target_count = 0.0
+        if allocation_intent_v2_mode and "portfolio_daily_target_delta_intent" in policy.columns:
+            release_policy = policy.copy()
+            release_policy["current_weight"] = current.reindex(policy.index).fillna(0.0).astype(float)
+            release_intent = derive_release_intent_from_target_delta(
+                release_policy,
+                deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
+            )
+            release_actions = release_intent["release_intent_action"].reindex(policy.index).fillna("hold")
+            release_mask = release_actions.isin({"reduce", "exit"})
+            action_names = action_names.where(~release_mask, release_actions)
+            allocation_intent_release_target_count = float(release_mask.sum())
+            policy["allocation_intent_release_score"] = (
+                release_intent["release_intent_score"].reindex(policy.index).fillna(0.0).astype(float)
+            )
+            policy["allocation_intent_release_action"] = release_actions.astype(str)
+            policy["action_label"] = action_names.astype(str)
 
         def _masked_mean(values: pd.Series, mask: pd.Series) -> float:
             selected = values.loc[mask.reindex(values.index).fillna(False)]
@@ -4126,17 +4144,60 @@ class PortfolioState:
                     .clip(lower=0.0, upper=position_cap_target)
                     .astype(float)
                 )
+                if allocation_intent_v2_mode and "portfolio_daily_target_delta_intent" in policy.columns:
+                    current_for_intent = current.reindex(prices.index).fillna(0.0).astype(float)
+                    explicit_target_delta_intent = (
+                        _policy_numeric("portfolio_daily_target_delta_intent")
+                        .reindex(prices.index)
+                        .fillna(0.0)
+                        .astype(float)
+                    )
+                    target_weight_intent_for_release = _optional_policy_numeric("portfolio_daily_target_weight_intent")
+                    if target_weight_intent_for_release is None:
+                        target_weight_intent_for_release = current_for_intent + explicit_target_delta_intent
+                    if target_weight_intent_for_release is not None:
+                        intent_target_weights = (
+                            target_weight_intent_for_release.reindex(prices.index)
+                            .replace([np.inf, -np.inf], np.nan)
+                            .fillna(current_for_intent)
+                            .clip(lower=0.0, upper=position_cap_target)
+                            .astype(float)
+                        )
+                        release_deadband = max(DEFAULT_EXECUTION_DEADBAND_ABS, 1.0e-8)
+                        intent_release_mask = (
+                            (current_for_intent > 1.0e-8)
+                            & (explicit_target_delta_intent < -release_deadband)
+                            & (intent_target_weights < target_weights - 1.0e-12)
+                        )
+                        if bool(intent_release_mask.any()):
+                            target_weights = target_weights.copy()
+                            target_weights.loc[intent_release_mask] = intent_target_weights.loc[
+                                intent_release_mask
+                            ]
+                            allocation_core_v2_solution.diagnostics["intent_release_target_count"] = float(
+                                intent_release_mask.sum()
+                            )
+                            allocation_core_v2_solution.diagnostics["intent_release_target_weight_sum"] = float(
+                                target_weights.loc[intent_release_mask].sum()
+                            )
                 allocation_layer_core_v2_used = 1.0
                 native_target_valid = 1.0
                 native_target_weights_valid = False
                 allocation_layer_native_target_used = 0.0
                 allocation_layer_native_fallback_used = 0.0
+                current_for_core = current.reindex(prices.index).fillna(0.0).astype(float)
+                allocation_core_delta = (target_weights - current_for_core).replace(
+                    [np.inf, -np.inf],
+                    np.nan,
+                ).fillna(0.0)
+                allocation_layer_buy_turnover = float(allocation_core_delta.clip(lower=0.0).sum())
+                allocation_layer_sell_turnover = float((-allocation_core_delta.clip(upper=0.0)).sum())
                 allocation_layer_expected_turnover = float(
-                    allocation_core_v2_solution.buy_turnover + allocation_core_v2_solution.sell_turnover
+                    allocation_layer_buy_turnover + allocation_layer_sell_turnover
                 )
-                allocation_layer_cash_after = float(allocation_core_v2_solution.cash_after)
-                allocation_layer_buy_turnover = float(allocation_core_v2_solution.buy_turnover)
-                allocation_layer_sell_turnover = float(allocation_core_v2_solution.sell_turnover)
+                allocation_layer_cash_after = float(
+                    max(0.0, 1.0 - float(target_weights.sum()) - 0.0015 * allocation_layer_expected_turnover)
+                )
                 allocation_layer_available_cash_to_deploy = float(
                     allocation_core_v2_solution.diagnostics.get("available_cash_to_deploy", 0.0)
                 )
@@ -4144,7 +4205,7 @@ class PortfolioState:
                     allocation_core_v2_solution.diagnostics.get("stock_budget", allocation_layer_stock_budget)
                 )
                 allocation_layer_target_sum_gap = float(
-                    allocation_core_v2_solution.diagnostics.get("target_sum_gap", 0.0)
+                    max(0.0, allocation_layer_stock_budget - float(target_weights.sum()))
                 )
                 allocation_layer_cash_funded_deploy_amount = float(
                     allocation_core_v2_solution.cash_funded_deploy_amount
@@ -5786,6 +5847,7 @@ class PortfolioState:
             "allocation_layer_risk_reduction_required": float(allocation_layer_risk_reduction_required),
             "allocation_layer_receiver_activity_required": float(allocation_layer_receiver_activity_required),
             "allocation_intent_v2_mode_used": float(bool(allocation_intent_v2_mode)),
+            "allocation_intent_release_target_count": float(allocation_intent_release_target_count),
             "allocation_layer_objective_value": float(allocation_layer_objective_value),
             "allocation_layer_constraint_violations": float(allocation_layer_constraint_violations),
             "allocation_layer_native_target_used": float(allocation_layer_native_target_used),

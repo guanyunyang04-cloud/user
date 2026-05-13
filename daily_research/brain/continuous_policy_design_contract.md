@@ -193,3 +193,11 @@
 - r54 audit contract: intent translation conflict must compare target-weight intent delta with final execution delta after applying execution deadband; micro deltas below deadband are not semantic failures.
 - r54 gate contract: receiver activity, cash-funded deployment, and unused receiver headroom are failures only when deployment is actually required. Budget-closed days must not be scored as deployment failures.
 - r54 verdict boundary: safe screening improved score shape and kept cash/exposure closure clean, but training evidence, cash timing, reduce/exit quality, and one abnormal trial exit still block confirmatory, promotion, live/default, and active artifact changes.
+
+## 2026-05-12 r55 Cash Timing Release Controller Contract
+- r55 entry: `split_heads_portfolio_daily_cash_timing_release_controller_r55` / `alpha_result_value_budget_split_v45`.
+- r55 diagnostic contract: abnormal trials may preserve artifact health and parse diagnostics, but failed trials have `completed_evidence=0.0` and must not be counted as completed screening evidence.
+- r55 behavior contract: every completed protocol writes `behavior_bottleneck_report.json` so `cash_timing_negative`, `sell_intent_dead`, `reduce_quality_weak`, `exit_timeliness_weak`, `training_evidence_insufficient`, and `best_epoch_at_edge` are explicit blockers rather than inferred from composite score.
+- r55 loss contract: v45 keeps true solver disabled and uses day-set native allocation plus explicit `cash_timing_directional_loss`, `source_release_intent_loss`, and `reduce_exit_intent_loss`; legacy action/duration totals remain `0.0`.
+- r55 simulator contract: only explicit `portfolio_daily_target_delta_intent < -deadband` may force allocation-intent-v2 release target weights; r54 target-weight micro deltas without explicit target-delta intent must remain deadband-protected.
+- r55 verdict boundary: safe screening improved best composite to `5.128541`, but cash timing remains strongly negative and source/reduce/exit remain dead, so r55 is research/shadow-only and blocked from strict resume, confirmatory, promotion, live/default, and active artifact changes.
