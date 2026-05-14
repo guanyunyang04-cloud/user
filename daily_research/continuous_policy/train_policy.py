@@ -15,6 +15,12 @@ from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_
 from daily_research.continuous_policy.model import fit_policy_models
 from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES, fit_policy_models_core_v4
 from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
+from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
+    PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID,
+    PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES,
+    fit_policy_models_portfolio_set_v5,
+)
 from daily_research.continuous_policy.model_v2 import DECODER_PROFILE_NAMES, fit_policy_models_v2
 from daily_research.continuous_policy.model_seq_v3 import (
     DAILY_HEAD_LAYOUT_CHOICES,
@@ -58,6 +64,7 @@ from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_HIER_V4,
+    TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
     TRAINER_BACKEND_FORMAL_V2,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
     TRAINER_BACKEND_PROTOTYPE_V1,
@@ -138,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional root for the local DuckDB/Parquet research data lake.",
     )
     parser.add_argument(
+        "--training-dataset-id",
+        default="",
+        help="Optional DuckDB/Parquet Gold training dataset id to load directly. r65 portfolio-set v5 defaults to the full-universe strict Gold dataset when available.",
+    )
+    parser.add_argument(
         "--prepare-only",
         action="store_true",
         help="Build and cache training matrices, write previews and summary, then exit without fitting a model.",
@@ -152,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--trainer-backend",
         default=TRAINER_BACKEND_FORMAL_V2,
         choices=TRAINER_BACKENDS,
-        help="prototype_gbdt_v1 stays shadow-only; formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4 are promotable epoch/resume backends.",
+        help="prototype_gbdt_v1 stays shadow-only; formal_torch_v2 / formal_torch_seq_v3 / formal_torch_hier_v4 are promotable epoch/resume backends; core_v4/v5 remain shadow-only.",
     )
     parser.add_argument(
         "--decoder-profile",
@@ -178,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--loss-profile",
         default=DEFAULT_LOSS_PROFILE,
-        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES))),
+        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES) | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES))),
         help="Loss contract for seq_v3: use default imitation balance or teacher-aux continuous-primary profiles.",
     )
     parser.add_argument("--early-stop-patience", type=int, default=10)
@@ -273,45 +285,111 @@ def main(argv: list[str] | None = None) -> int:
         min_epochs=args.min_epochs,
         resume_mode=args.resume_mode,
     )
-    prepared = prepare_policy_inputs(
-        pool_name=args.pool_name,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        benchmark=args.benchmark,
-        data_source=args.data_source,
-        csv_folder=args.csv_folder,
-        max_universe_size=args.max_universe_size,
-        pool_rebalance_days=args.pool_rebalance_days,
-        pool_adv_window=args.pool_adv_window,
-        alpha_prior_source=args.alpha_prior_source,
-        alpha_prior_score_panel=args.alpha_prior_score_panel,
-        alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
-        refresh_cache=args.refresh_cache,
-        progress_desc="continuous policy train",
-    )
-    prepared_summary = prepared.to_summary()
-    training_dataset_cache_spec = build_training_dataset_cache_spec(
-        args=args,
-        prepared_summary=prepared_summary,
-        universe=list(prepared.universe),
-    )
+    direct_dataset_record = None
+    direct_dataset_id = str(getattr(args, "training_dataset_id", "") or "").strip()
+    if not direct_dataset_id and backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
+        direct_dataset_id = PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID
+    if direct_dataset_id:
+        try:
+            from daily_research.data_lake import ResearchDataLake
+
+            direct_dataset_record = ResearchDataLake(str(getattr(args, "data_lake_root", "") or "") or None).load_training_dataset(direct_dataset_id)
+        except Exception:
+            if str(getattr(args, "training_dataset_id", "") or "").strip():
+                raise
+            direct_dataset_record = None
+
+    if direct_dataset_record is not None:
+        sample_frame = direct_dataset_record.sample_frame.copy()
+        daily_frame = direct_dataset_record.daily_frame.copy()
+        teacher_summary = dict(direct_dataset_record.teacher_summary)
+        label_summary = dict(direct_dataset_record.label_completeness_summary or {})
+        if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and not bool(label_summary.get("is_training_safe", False)):
+            raise ValueError(f"portfolio-set v5 requires a strict training-safe Gold dataset: {direct_dataset_id}")
+        prepared_summary = {
+            "pool_name": str(direct_dataset_record.metadata.get("universe", args.pool_name) or args.pool_name),
+            "benchmark": str(direct_dataset_record.metadata.get("benchmark", args.benchmark) or args.benchmark),
+            "start_date": str(direct_dataset_record.metadata.get("start_date", args.start_date) or args.start_date),
+            "end_date": str(direct_dataset_record.metadata.get("end_date", args.end_date) or args.end_date),
+            "universe_size": int(direct_dataset_record.metadata.get("universe_size", 0) or 0),
+            "source": "data_lake_direct",
+            "dataset_id": str(direct_dataset_record.dataset_id),
+        }
+
+        class _PreparedSummary:
+            pool_name = prepared_summary["pool_name"]
+            benchmark = prepared_summary["benchmark"]
+            end_date = prepared_summary["end_date"]
+            universe = list(sample_frame["stock"].astype(str).unique()) if "stock" in sample_frame.columns else []
+
+            def to_summary(self) -> dict[str, object]:
+                return dict(prepared_summary)
+
+        prepared = _PreparedSummary()
+        training_dataset_cache_spec = dict(direct_dataset_record.metadata.get("parameters", {}) or {})
+        training_dataset_cache_summary: dict[str, object] = {
+            "mode": "direct_dataset_id",
+            "status": "hit",
+            "store": "data_lake",
+            "dataset_id": str(direct_dataset_record.dataset_id),
+            "cache_key": str(direct_dataset_record.fingerprint),
+            "cache_dir": str(direct_dataset_record.root.resolve()),
+            "sample_rows": int(len(sample_frame)),
+            "daily_rows": int(len(daily_frame)),
+            "label_completeness_summary": label_summary,
+        }
+        progress_sink.emit(
+            "train_dataset_cache_hit",
+            cache_key=str(direct_dataset_record.fingerprint),
+            dataset_id=str(direct_dataset_record.dataset_id),
+            sample_rows=int(len(sample_frame)),
+            daily_rows=int(len(daily_frame)),
+        )
+    else:
+        prepared = prepare_policy_inputs(
+            pool_name=args.pool_name,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            benchmark=args.benchmark,
+            data_source=args.data_source,
+            csv_folder=args.csv_folder,
+            max_universe_size=args.max_universe_size,
+            pool_rebalance_days=args.pool_rebalance_days,
+            pool_adv_window=args.pool_adv_window,
+            alpha_prior_source=args.alpha_prior_source,
+            alpha_prior_score_panel=args.alpha_prior_score_panel,
+            alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
+            refresh_cache=args.refresh_cache,
+            progress_desc="continuous policy train",
+        )
+        prepared_summary = prepared.to_summary()
+        training_dataset_cache_spec = build_training_dataset_cache_spec(
+            args=args,
+            prepared_summary=prepared_summary,
+            universe=list(prepared.universe),
+        )
+        training_dataset_cache_summary = {}
+        sample_frame = pd.DataFrame()
+        daily_frame = pd.DataFrame()
+        teacher_summary = {}
     cache_mode = str(getattr(args, "training_dataset_cache_mode", "auto") or "auto")
     cache_record = None
-    training_dataset_cache_summary: dict[str, object] = {
-        "mode": cache_mode,
-        "status": "off" if cache_mode == "off" else "miss",
-        "store": str(getattr(args, "training_dataset_store", "lake") or "lake"),
-        "cache_key": "",
-        "cache_dir": "",
-    }
-    if cache_mode != "off" and cache_mode != "refresh" and not bool(getattr(args, "refresh_cache", False)):
+    if direct_dataset_record is None:
+        training_dataset_cache_summary = {
+            "mode": cache_mode,
+            "status": "off" if cache_mode == "off" else "miss",
+            "store": str(getattr(args, "training_dataset_store", "lake") or "lake"),
+            "cache_key": "",
+            "cache_dir": "",
+        }
+    if direct_dataset_record is None and cache_mode != "off" and cache_mode != "refresh" and not bool(getattr(args, "refresh_cache", False)):
         cache_record = load_reusable_training_dataset(
             spec=training_dataset_cache_spec,
             lake_root=str(getattr(args, "data_lake_root", "") or "") or None,
             prefer_data_lake=str(getattr(args, "training_dataset_store", "lake") or "lake") == "lake",
             zone="strict_train",
         )
-    if cache_record is not None:
+    if direct_dataset_record is None and cache_record is not None:
         sample_frame = cache_record.sample_frame.copy()
         daily_frame = cache_record.daily_frame.copy()
         teacher_summary = dict(cache_record.teacher_summary)
@@ -330,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             sample_rows=int(len(sample_frame)),
             daily_rows=int(len(daily_frame)),
         )
-    else:
+    elif direct_dataset_record is None:
         if cache_mode != "off":
             progress_sink.emit("train_dataset_cache_miss", cache_mode=cache_mode)
         future_metrics = build_future_path_metrics(prepared)
@@ -481,6 +559,33 @@ def main(argv: list[str] | None = None) -> int:
             progress_sink=progress_sink,
         )
         artifact_path = run_root / "continuous_policy_core_v4_artifact.pt"
+        training_diagnostics = dict(artifact.training_diagnostics or {})
+    elif backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
+        artifact = fit_policy_models_portfolio_set_v5(
+            sample_frame=sample_frame,
+            daily_frame=daily_frame,
+            feature_names=feature_names,
+            daily_feature_names=daily_feature_names,
+            random_seed=args.random_seed,
+            train_summary=train_summary,
+            trained_at=trained_at,
+            training_contract=training_contract,
+            run_root=run_root,
+            epochs=args.epochs,
+            min_epochs=args.min_epochs,
+            batch_size=max(1, min(int(args.batch_size), 2)),
+            learning_rate=args.learning_rate,
+            model_dim=max(int(args.hidden_dim), 128),
+            temporal_layers=max(int(args.sequence_layers), 1),
+            cross_layers=max(int(args.sequence_layers), 1),
+            latent_count=max(8, int(args.daily_hidden_dim)),
+            dropout=max(float(args.dropout), 0.05),
+            early_stop_patience=args.early_stop_patience,
+            resume_mode=args.resume_mode,
+            loss_profile=args.loss_profile,
+            progress_sink=progress_sink,
+        )
+        artifact_path = run_root / PORTFOLIO_SET_V5_ARTIFACT_FILENAME
         training_diagnostics = dict(artifact.training_diagnostics or {})
     elif backend == TRAINER_BACKEND_FORMAL_HIER_V4:
         artifact = fit_policy_models_v4(

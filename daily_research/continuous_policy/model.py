@@ -71,6 +71,10 @@ def load_artifact(path: str | Path) -> Any:
             from daily_research.continuous_policy.model_core_v4 import load_torch_core_v4_artifact
 
             return load_torch_core_v4_artifact(resolved)
+        if artifact_type == "continuous_policy_torch_portfolio_set_v5":
+            from daily_research.continuous_policy.model_portfolio_set_v5 import load_torch_portfolio_set_v5_artifact
+
+            return load_torch_portfolio_set_v5_artifact(resolved)
         if artifact_type == "continuous_policy_torch_hier_v4":
             from daily_research.continuous_policy.model_hier_v4 import load_torch_hier_v4_artifact
 
@@ -249,11 +253,14 @@ def predict_policy(
     if not isinstance(artifact, ContinuousPolicyArtifact):
         from daily_research.continuous_policy.model_core_v4 import TorchContinuousPolicyCoreV4Artifact, predict_policy_core_v4
         from daily_research.continuous_policy.model_hier_v4 import TorchContinuousPolicyHierV4Artifact, predict_policy_v4
+        from daily_research.continuous_policy.model_portfolio_set_v5 import TorchPortfolioSetV5Artifact, predict_policy_portfolio_set_v5
         from daily_research.continuous_policy.model_seq_v3 import TorchContinuousPolicySeqArtifact, predict_policy_v3
         from daily_research.continuous_policy.model_v2 import TorchContinuousPolicyArtifact, predict_policy_v2
 
         if isinstance(artifact, TorchContinuousPolicyCoreV4Artifact):
             return predict_policy_core_v4(artifact, state_frame=state_frame, daily_features=daily_features)
+        if isinstance(artifact, TorchPortfolioSetV5Artifact):
+            return predict_policy_portfolio_set_v5(artifact, state_frame=state_frame, daily_features=daily_features)
         if isinstance(artifact, TorchContinuousPolicyArtifact):
             return predict_policy_v2(artifact, state_frame=state_frame, daily_features=daily_features)
         if isinstance(artifact, TorchContinuousPolicySeqArtifact):

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 15,
+  "record_count": 16,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -436,6 +436,38 @@
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
         "continuous_policy_training_matrices__strict_train__03ce80c27c93371d6b5dcf47",
         "continuous_policy_training_matrices__realtime_research__acf000b3d5cf52b558706926"
+      ]
+    },
+    {
+      "id": "r65",
+      "date": "2026-05-14",
+      "r_id": "r65",
+      "path": "daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md",
+      "tags": [
+        "r65",
+        "continuous_policy",
+        "core-v4"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r65_portfolio_set_v5_smoke_20260514_01",
+        "protocol_summary",
+        "self_opt_study_r65_portfolio_set_v5_dryrun_20260514_01",
+        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01",
+        "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01"
+      ],
+      "verdict": "Important nuance: the protocol wrote a parseable `protocol_summary.json`, but the outer study wrapper was interrupted before final `study_summary.json`. Therefore this is parseable protocol-level evidence, not a completed study-summary verdict.; Backend/loss: `formal_torch_portfolio_set_v5` / `alpha_result_value_budget_split_v48`.; Dataset: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`, training safe true.; Training diagnostics: `completed_epochs=12`, `best_epoch=5`, `train_day_count=256`, raw train day count `3949`, day cap `256`.; Training evidence: `insufficient`, failed because `teacher_action_rows=0`.",
+      "blockers": [
+        "`release_flow_primary_blocker=no_held_negative_delta`"
+      ],
+      "next_allowed_actions": [
+        "r65 adds the parallel backend `formal_torch_portfolio_set_v5` to replace MLP-style core-v4 as the next research mainline, without replacing v3/v4 artifact loading.",
+        "r65 uses full-universe strict Gold dataset `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1` as the default training-safe dataset.",
+        "This note uses explicit tags only and does not infer conclusions from loose `latest_*` pointers."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]
     }
   ]

@@ -18,7 +18,7 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
             (
                 "focused_seq_v1",
                 "split_heads_portfolio_daily_release_first_constrained_decoder_r56",
-                "split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61",
+                "split_heads_portfolio_daily_release_first_portfolio_set_v5_r65",
             ),
         )
         self.assertLessEqual(len(active_profiles), 3)
@@ -40,40 +40,42 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
         self.assertTrue(is_resource_gated_profile(profile_name))
         self.assertEqual(fresh_config["resource_gate"]["release_first_source_intent_floor"], 1.0)
 
-    def test_r61_core_v4_profile_is_active_and_shadow_only(self) -> None:
-        profile_name = "split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61"
+    def test_r65_portfolio_set_v5_profile_is_active_and_shadow_only(self) -> None:
+        profile_name = "split_heads_portfolio_daily_release_first_portfolio_set_v5_r65"
 
         config = get_search_profile_config(profile_name)
 
-        self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_core_v4")
-        self.assertEqual(config["base_trial"]["loss_profile"], "alpha_result_value_budget_split_v47")
+        self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_portfolio_set_v5")
+        self.assertEqual(config["base_trial"]["loss_profile"], "alpha_result_value_budget_split_v48")
         self.assertEqual(config["base_trial"]["epochs"], 12)
         self.assertEqual(config["base_trial"]["min_epochs"], 8)
         self.assertEqual(get_default_objective(profile_name), "end_to_end_allocation_layer_v1")
         self.assertTrue(is_resource_gated_profile(profile_name))
 
-    def test_study_runner_resolves_core_v4_loss_with_core_v4_resolver(self) -> None:
+    def test_study_runner_resolves_portfolio_set_v5_loss_with_v5_resolver(self) -> None:
         resolved_name, resolved_config = study_runner._resolve_trial_loss_profile(
             {
-                "trainer_backend": "formal_torch_core_v4",
-                "loss_profile": "alpha_result_value_budget_split_v47",
+                "trainer_backend": "formal_torch_portfolio_set_v5",
+                "loss_profile": "alpha_result_value_budget_split_v48",
             }
         )
 
-        self.assertEqual(resolved_name, "alpha_result_value_budget_split_v47")
+        self.assertEqual(resolved_name, "alpha_result_value_budget_split_v48")
         self.assertGreater(
-            resolved_config["multi_objective_loss_weights"]["release_receiver_flow_surrogate_total"],
+            resolved_config["multi_objective_loss_weights"]["release_flow_balance_total"],
             0.0,
         )
 
-    def test_r59_core_v4_profile_remains_readable_but_not_active(self) -> None:
-        profile_name = "split_heads_portfolio_daily_release_first_core_v4_r59"
+    def test_r59_and_r61_core_v4_profiles_remain_readable_but_not_active(self) -> None:
+        for profile_name, loss_profile in (
+            ("split_heads_portfolio_daily_release_first_core_v4_r59", "alpha_result_value_budget_split_v46"),
+            ("split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61", "alpha_result_value_budget_split_v47"),
+        ):
+            self.assertNotIn(profile_name, get_active_search_profiles())
+            config = get_search_profile_config(profile_name)
 
-        self.assertNotIn(profile_name, get_active_search_profiles())
-        config = get_search_profile_config(profile_name)
-
-        self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_core_v4")
-        self.assertEqual(config["base_trial"]["loss_profile"], "alpha_result_value_budget_split_v46")
+            self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_core_v4")
+            self.assertEqual(config["base_trial"]["loss_profile"], loss_profile)
 
     def test_legacy_profiles_are_not_new_study_entrypoints(self) -> None:
         parser = study_runner.build_parser()

@@ -28,6 +28,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     resolve_loss_profile,
 )
 from daily_research.continuous_policy.model_core_v4 import resolve_core_v4_loss_profile
+from daily_research.continuous_policy.model_portfolio_set_v5 import resolve_portfolio_set_v5_loss_profile
 from daily_research.continuous_policy.behavior_bottleneck_report import build_behavior_bottleneck_report
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
@@ -69,6 +70,7 @@ from daily_research.continuous_policy.runtime import (
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_CORE_V4,
+    TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
 )
 from daily_research.continuous_policy.research_profile_registry import (
@@ -118,6 +120,8 @@ def _resolve_trial_loss_profile(trial_config: dict[str, Any]) -> tuple[str, dict
     trainer_backend = str(trial_config.get("trainer_backend", "") or "")
     if trainer_backend == TRAINER_BACKEND_FORMAL_CORE_V4:
         return resolve_core_v4_loss_profile(loss_profile)
+    if trainer_backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
+        return resolve_portfolio_set_v5_loss_profile(loss_profile)
     return resolve_loss_profile(loss_profile)
 
 

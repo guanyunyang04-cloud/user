@@ -4958,12 +4958,17 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
 
     def test_every_registered_search_profile_loss_profile_resolves(self) -> None:
         from daily_research.continuous_policy.model_core_v4 import resolve_core_v4_loss_profile
+        from daily_research.continuous_policy.model_portfolio_set_v5 import resolve_portfolio_set_v5_loss_profile
 
         for profile_name, base_trial in SEARCH_PROFILE_BASE_TRIALS.items():
             with self.subTest(profile_name=profile_name):
                 loss_profile = str(base_trial.get("loss_profile", model_seq_v3.DEFAULT_LOSS_PROFILE))
                 if str(base_trial.get("trainer_backend", "")) == "formal_torch_core_v4":
                     resolved_name, resolved_config = resolve_core_v4_loss_profile(loss_profile)
+                    self.assertIn("multi_objective_loss_weights", resolved_config)
+                    continue
+                if str(base_trial.get("trainer_backend", "")) == "formal_torch_portfolio_set_v5":
+                    resolved_name, resolved_config = resolve_portfolio_set_v5_loss_profile(loss_profile)
                     self.assertIn("multi_objective_loss_weights", resolved_config)
                     continue
                 resolved_name, resolved_config = model_seq_v3.resolve_loss_profile(loss_profile)
@@ -5091,6 +5096,59 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
         self.assertLessEqual(result.diagnostics["allocation_layer_target_sum_gap"], 0.05)
         self.assertEqual(result.diagnostics["release_flow_primary_blocker"], "none")
         self.assertGreaterEqual(result.diagnostics["release_flow_held_negative_delta_count"], 1.0)
+
+    def test_r65_portfolio_set_v5_policy_fields_feed_release_first_simulator_path(self) -> None:
+        from daily_research.continuous_policy.portfolio_simulator import HoldingState, PortfolioState
+
+        state = PortfolioState(
+            cash_weight=0.70,
+            holdings={"SRC": HoldingState(weight=0.30, entry_price=10.0, peak_price=11.0)},
+            max_positions=4,
+            max_position_weight=0.50,
+            turnover_limit=1.00,
+        )
+        policy = pd.DataFrame(
+            {
+                "stock": ["SRC", "RCV"],
+                "current_weight": [0.30, 0.0],
+                "action_label": ["reduce", "open"],
+                "portfolio_daily_target_weight_intent": [0.12, 0.24],
+                "portfolio_daily_target_delta_intent": [-0.18, 0.24],
+                "portfolio_daily_release_first_intent": [0.92, 0.0],
+                "release_first_action_hint": ["reduce", "hold"],
+                "release_first_block_reason": ["none", "not_held"],
+                "portfolio_daily_source_score": [0.94, 0.0],
+                "portfolio_daily_unified_source_score": [0.94, 0.0],
+                "portfolio_daily_source_release_quality": [0.90, 0.0],
+                "portfolio_daily_source_economic_block_risk": [0.01, 0.0],
+                "portfolio_daily_receiver_score": [0.0, 0.96],
+                "portfolio_daily_unified_receiver_score": [0.0, 0.96],
+                "portfolio_daily_receiver_executable_candidate": [0.0, 1.0],
+                "portfolio_daily_source_executable_candidate": [1.0, 0.0],
+                "portfolio_set_v5_source_supply_score": [0.94, 0.0],
+                "portfolio_set_v5_receiver_demand_score": [0.0, 0.96],
+                "portfolio_set_v5_cash_buffer_score": [0.05, 0.05],
+            }
+        ).set_index("stock")
+
+        result = state.step(
+            date="2026-05-14",
+            prices=pd.Series({"SRC": 10.0, "RCV": 10.0}),
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.36,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.50,
+                "cash_reserve_target": 0.05,
+                "release_first_allocation_v3_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        self.assertGreaterEqual(result.diagnostics["release_first_source_intent_count"], 1.0)
+        self.assertGreaterEqual(result.diagnostics["portfolio_daily_source_target_count"], 1.0)
+        self.assertGreaterEqual(result.diagnostics["portfolio_daily_receiver_target_count"], 1.0)
 
 
 if __name__ == "__main__":

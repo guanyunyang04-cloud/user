@@ -134,6 +134,16 @@
 - Rule: realtime Gold can support research and audit, but rows with `is_observed=false` must never be counted as completed training evidence.
 - Rule: do not describe full-window `2010-01-04 -> 2026-05-13` Gold as ready until explicit full-window dataset ids and audit reports exist.
 
+## 2026-05-14 r65 Portfolio-Set V5 Lesson
+- Fact: replacing the MLP-style core-v4 mainline with a portfolio-set backend is now implemented as a parallel shadow-only backend, not as a production replacement.
+- Fact: latent set attention can keep full-universe day-set modeling away from full `O(N^2)` cross-sectional self-attention while still exposing portfolio-level competition signals.
+- Fact: strict Gold lake-backed loading works in the v5 path, but first-pass training still caps day coverage for safety; dataset availability is no longer the only bottleneck.
+- Fact: r65 smoke and safe protocol both showed source/receiver behavior remains dead even with clean target-sum gap, so closure metrics alone are insufficient.
+- Inference: the current failure is a release/source/receiver target semantics and intent translation failure inside the portfolio-set loop, not a reason to go back to generic MLP losses.
+- Rule: future r66+ work should inspect target construction, held-source creation, receiver target realization, and day-set sampling before simply increasing epochs or widening the model.
+- Rule: r61 core-v4 should remain a baseline/ablation; new main research logic should not be added to the MLP backend unless it is needed for comparison.
+- Rule: interrupted outer studies with parseable protocol summaries may be diagnostic protocol evidence, but they are not completed study-summary verdicts.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

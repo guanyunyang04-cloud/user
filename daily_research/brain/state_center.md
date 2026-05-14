@@ -222,3 +222,13 @@
 - Blocker: full-window realtime Gold is still pending and must not be counted as completed training evidence.
 - Evidence capsule: `daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md`.
 - Current verdict: r64 has produced reusable full-universe strict Gold training data. It is data infrastructure, not continuous_policy strategy evidence, and must not affect live/default/promotion or the active artifact.
+
+## 2026-05-14 r65 Portfolio-Set V5 Status
+- Fact: r65 adds parallel backend `formal_torch_portfolio_set_v5`, artifact type `continuous_policy_torch_portfolio_set_v5`, and active profile `split_heads_portfolio_daily_release_first_portfolio_set_v5_r65` / `alpha_result_value_budget_split_v48`.
+- Fact: r65 uses strict Gold dataset `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`, with `is_training_safe=true`, as the default lake-backed training dataset.
+- Fact: direct smoke `protocol_r65_portfolio_set_v5_smoke_20260514_01` completed with profile binding, CUDA AMP/pinned-memory/non-blocking diagnostics, latent set attention, and `release_first_allocation_v3_mode=1.0`.
+- Fact: dry run `self_opt_study_r65_portfolio_set_v5_dryrun_20260514_01` selected only the r65 v5 profile, kept confirmatory disabled, and used foreground in-process protocol execution.
+- Fact: safe protocol `self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01` completed and wrote a parseable protocol summary, but the outer study wrapper was interrupted before final `study_summary.json`.
+- Screening protocol verdict: architecture and data wiring work, but behavior remains blocked. Evaluation has `release_first_source_intent_count=0`, `portfolio_daily_source_target_count=0`, `portfolio_daily_receiver_target_count=0`, `intent_translation_conflict_rate=1.0`, and `release_flow_primary_blocker=no_held_source`; shadow remains source/receiver dead.
+- Evidence capsule: `daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md`.
+- Current verdict: r65 is `research / shadow-only / architecture upgrade`. Do not enter confirmatory, promotion, live/default, or active artifact changes. Next work should repair portfolio-set release/source/receiver target generation and intent translation conflict, not reframe this as simply needing more epochs or a return to MLP core-v4.

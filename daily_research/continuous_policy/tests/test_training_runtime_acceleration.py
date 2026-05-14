@@ -6,6 +6,7 @@ import torch
 
 import daily_research.continuous_policy.model_seq_v3 as model_seq_v3
 import daily_research.continuous_policy.model_core_v4 as model_core_v4
+import daily_research.continuous_policy.model_portfolio_set_v5 as model_portfolio_set_v5
 from daily_research.continuous_policy.training_runtime_acceleration import (
     configure_torch_training_acceleration,
 )
@@ -67,6 +68,20 @@ class TrainingRuntimeAccelerationTest(unittest.TestCase):
         self.assertIn("train_epoch_complete", source)
         self.assertIn("binary_cross_entropy_with_logits", source)
         self.assertNotIn("binary_cross_entropy(pred", source)
+
+    def test_portfolio_set_v5_training_uses_shared_runtime_acceleration(self) -> None:
+        source = inspect.getsource(model_portfolio_set_v5.fit_policy_models_portfolio_set_v5)
+        module_source = inspect.getsource(model_portfolio_set_v5)
+
+        self.assertIn("configure_torch_training_acceleration", source)
+        self.assertIn("amp_enabled", source)
+        self.assertIn("data_loader_pin_memory", source)
+        self.assertIn("non_blocking_transfer", source)
+        self.assertIn("train_epoch_complete", source)
+        self.assertIn("portfolio_set_v5_uses_latent_attention", source)
+        self.assertIn("portfolio_set_v5_full_self_attention", source)
+        self.assertIn("binary_cross_entropy_with_logits", module_source)
+        self.assertNotIn("binary_cross_entropy(pred", module_source)
 
 
 if __name__ == "__main__":

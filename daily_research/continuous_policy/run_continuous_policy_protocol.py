@@ -19,6 +19,7 @@ from daily_research.continuous_policy.evaluate_policy import main as evaluate_ma
 from daily_research.continuous_policy.export_action_panel import main as export_main
 from daily_research.continuous_policy.model import load_artifact
 from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES
+from daily_research.continuous_policy.model_portfolio_set_v5 import PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_seq_v3 import (
     DAILY_HEAD_LAYOUT_CHOICES,
     DAILY_HEAD_LAYOUT_MONOLITHIC_V1,
@@ -423,7 +424,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--daily-dropout", type=float, default=0.05)
-    parser.add_argument("--loss-profile", default=DEFAULT_LOSS_PROFILE, choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES))))
+    parser.add_argument(
+        "--loss-profile",
+        default=DEFAULT_LOSS_PROFILE,
+        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES) | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES))),
+    )
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
     parser.add_argument("--force-bootstrap-from-account", action="store_true")

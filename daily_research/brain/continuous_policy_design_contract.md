@@ -246,15 +246,12 @@
 - Evidence boundary: r60 safe screening completed but failed behaviorally. It proves profile-bound execution and diagnostic visibility, not strategy success or promotion readiness.
 - Next-work boundary: future work must target release/source target generation and target-delta-to-allocator wiring before any confirmatory or long resume.
 
-## 2026-05-14 r61 Decision-Focused Core V4 Contract
-- r61 entry: `split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61` / `alpha_result_value_budget_split_v47`.
-- Registry contract: active new-study profiles are `focused_seq_v1`, `split_heads_portfolio_daily_release_first_constrained_decoder_r56`, and `split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61`. r59 is legacy-compatible historical evidence, not an active new-study entrypoint.
-- Dataset contract: all constructed training dataset surfaces must be reusable. At minimum, `sample_frame`, `daily_frame`, `teacher_summary`, and cache metadata must be persisted by fingerprint and reloadable before rebuilding. Default mode is `auto`; `refresh` rebuilds; `off` disables read/write.
-- Target contract: core-v4 r61 target construction must create release targets only for held names, suppress release with high keep-risk or economic block risk, create receiver support only when headroom exists, and keep target weight / target delta coherent.
-- Loss contract: core-v4 v47 keeps `action_total=0.0` and `duration_total=0.0`, adds positive receiver support, target-delta coherence, and release-receiver flow surrogate weights, and does not import legacy v1-v45 losses.
-- Trace contract: release-first simulator/protocol outputs must include release-flow trace fields and must identify blockers such as `no_held_negative_delta`, `source_executable_dead`, `receiver_score_dead`, and `target_delta_weight_conflict`.
-- Bottleneck contract: if source/release counts are below floor and release-flow trace has a non-`none` blocker, behavior reporting must include `release_flow_disconnected`.
-- Evidence boundary: r61 smoke/dry-run prove wiring. The parseable safe protocol shows behavior remains blocked and the outer study wrapper was interrupted before final study-summary write. This is not confirmatory, promotion, live/default, or active artifact evidence.
-
-## 2026-05-14 r62/r63 Research Data And Brain Operating Contract
-- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; `learned_all_a/1200` is only capped evidence, while the data lake target/default is uncapped full universe (`max_universe_size=0`); full Bronze/Silver now exists, but full Gold remains incomplete. Brain capsules and evidence registry are operating context, not strategy evidence; failed/interrupted/timeout/smoke/dry-run/realtime-tail artifacts cannot become completed evidence through writeback; active artifact guard remains mandatory.
+## 2026-05-14 r61-r65 Current Research Contracts
+- r61 core-v4 remains a reusable baseline/ablation: reusable training surfaces, coherent release-first targets, release-flow trace, and v47 decision loss are valid; smoke/dry-run/interrupted safe protocol are not promotion evidence.
+- r62-r64 data contract: constructed training datasets belong in `daily_research.data_lake`; full-window strict Gold is training-safe only when audited and label-complete, while realtime full-window Gold is still pending and realtime tail labels remain research/audit only.
+- r63 brain contract: capsules, evidence registry, query, rules, and project skill are operating context, not strategy evidence; failed/interrupted/timeout/smoke/dry-run artifacts cannot become completed evidence by writeback.
+- r65 entry: `split_heads_portfolio_daily_release_first_portfolio_set_v5_r65` / `alpha_result_value_budget_split_v48`, backend `formal_torch_portfolio_set_v5`, artifact type `continuous_policy_torch_portfolio_set_v5`, `promotable=False`.
+- r65 architecture contract: use temporal per-symbol state, portfolio state tokens, and latent set attention or equivalent resource-safe set encoder; default full-universe `O(N^2)` self-attention is forbidden.
+- r65 dataset/loss/prediction contract: default to audited strict Gold `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`; v48 owns v5 release-first behavior; prediction must emit release-first source/receiver/cash/target fields and `release_first_allocation_v3_mode=1.0`.
+- r65 registry/evidence boundary: active new-study profiles are `focused_seq_v1`, r56, and r65; r61 is legacy-compatible baseline evidence. r65 smoke/dry-run prove wiring only, and the parseable behavior-negative safe protocol is not a completed study-summary verdict.
+- r65 next-work boundary: repair held source creation, receiver target realization, target/action translation, and day-set sampling before increasing epochs, widening the model, or returning to MLP core-v4 as the main path.
