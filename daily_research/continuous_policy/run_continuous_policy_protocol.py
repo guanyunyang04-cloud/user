@@ -141,16 +141,11 @@ def _apply_search_profile_binding(
     }
     if not requested:
         return binding
-    active_profiles = set(get_active_search_profiles())
-    if requested not in active_profiles:
-        parser.error(
-            f"Search profile {requested!r} is not an active direct-protocol profile; "
-            "legacy profiles are only available for historical evidence reads."
-        )
     try:
         profile_config = get_search_profile_config(requested)
     except KeyError as exc:
         parser.error(str(exc))
+    active_profile = bool(profile_config.get("active_profile", requested in set(get_active_search_profiles())))
     base_trial = dict(profile_config.get("base_trial", {}) or {})
     explicit_dests = _explicit_cli_dests(parser, raw_argv)
     explicit_overrides: dict[str, Any] = {}
@@ -167,7 +162,7 @@ def _apply_search_profile_binding(
     binding.update(
         {
             "profile_applied": True,
-            "active_profile": True,
+            "active_profile": active_profile,
             "explicit_overrides": explicit_overrides,
             "effective_base_trial": effective_base_trial,
         }
@@ -287,6 +282,17 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         or 0
     )
     teacher_action_rows = int(teacher_summary.get("action_rows", 0) or 0)
+    decision_target_source_count = float(diagnostics.get("decision_target_source_count", 0.0) or 0.0)
+    decision_target_receiver_count = float(diagnostics.get("decision_target_receiver_count", 0.0) or 0.0)
+    decision_oracle_metrics = dict(diagnostics.get("decision_oracle_metrics", {}) or {})
+    paper_reproduction_metrics = dict(diagnostics.get("paper_reproduction_metrics", {}) or {})
+    decision_oracle_constraint_violation = float(
+        decision_oracle_metrics.get(
+            "decision_oracle_constraint_violation_mean",
+            diagnostics.get("decision_target_constraint_violation_mean", 0.0),
+        )
+        or 0.0
+    )
     raw_min_teacher_action_rows = int(TRAINING_EVIDENCE_THRESHOLDS["min_teacher_action_rows"])
     adaptive_min_teacher_action_rows = int(
         max(
@@ -303,6 +309,12 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         "train_day_count": train_day_count >= int(TRAINING_EVIDENCE_THRESHOLDS["min_train_day_count"]),
         "teacher_action_rows": teacher_action_rows >= effective_min_teacher_action_rows,
         "best_epoch_not_at_edge": bool(best_epoch_not_at_edge),
+    }
+    dfl_decision_evidence_checks = {
+        "decision_target_source_count": decision_target_source_count > 0.0,
+        "decision_target_receiver_count": decision_target_receiver_count > 0.0,
+        "decision_oracle_constraint_violation": decision_oracle_constraint_violation <= 1.0e-5,
+        "paper_reproduction_metrics": bool(paper_reproduction_metrics),
     }
     failed_checks = [name for name, ok in checks.items() if not ok]
     status = "sufficient" if not failed_checks else "insufficient"
@@ -337,6 +349,15 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         "validation_day_count": validation_day_count,
         "train_sample_rows": train_sample_rows,
         "teacher_action_rows": teacher_action_rows,
+        "dfl_decision_evidence": {
+            "status": "available" if all(dfl_decision_evidence_checks.values()) else "incomplete",
+            "checks": dfl_decision_evidence_checks,
+            "decision_target_source_count": decision_target_source_count,
+            "decision_target_receiver_count": decision_target_receiver_count,
+            "decision_oracle_constraint_violation": decision_oracle_constraint_violation,
+            "paper_reproduction_metric_count": len(paper_reproduction_metrics),
+            "promotion_gate_note": "DFL decision evidence is diagnostic only and does not relax training_evidence_sufficient.",
+        },
         "recommended_actions": recommended_actions,
     }
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 19,
+  "record_count": 20,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -569,6 +569,40 @@
         "Keep r67 and r68 as mechanism/translation closure evidence, not live or promotion evidence."
       ],
       "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
+    },
+    {
+      "id": "r69",
+      "date": "2026-05-14",
+      "r_id": "r69",
+      "path": "daily_research/brain/references/r69_value_arbitration_v5_status_20260514.md",
+      "tags": [
+        "r69",
+        "continuous_policy",
+        "portfolio_set_v5"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
+        "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
+        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
+      ],
+      "verdict": "Status: `research / shadow-only / behavior-quality mechanism progress`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r69 adds `portfolio_set_v5_dfl_pg_v1_r69_value_arbitration` as an explicit internal loss/profile line for deploy / release / defense value arbitration.",
+      "blockers": [
+        "r69 does not pass first-stage behavior acceptance yet.",
+        "Full r69 behavior smoke did not complete evaluation/shadow because TDX returned empty data.",
+        "Receiver target coverage remains lower than r68.",
+        "Constraint violation regressed from effectively zero to about `0.0223` target mean / `0.0329` validation oracle mean."
+      ],
+      "next_allowed_actions": [
+        "Reduce r69 oracle constraint violation while preserving `source_wrong_side_sell_share=0.0`.",
+        "Rebalance deploy/release/defense so receiver coverage does not collapse relative to r68.",
+        "Fix or bypass the TDX empty-batch evaluate blocker with an explicit cached/csv evaluation source.",
+        "Rerun a full r69 tiny strict-Gold behavior smoke only after the mechanism target violation is near zero and receiver coverage is materially healthier."
+      ],
+      "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]

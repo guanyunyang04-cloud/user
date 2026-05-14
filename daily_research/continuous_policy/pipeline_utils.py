@@ -1302,6 +1302,37 @@ def compute_continuity_metrics(
             ),
             errors="coerce",
         ).fillna(0.0)
+        r69_deploy_value = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_deploy_value", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r69_release_value = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_release_value", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r69_defense_value = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_defense_value", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r69_cash_timing_value = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_cash_timing_value", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r69_spread_value = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r69_receiver_source_spread_value",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r69_reversal_guarded = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_reversal_guarded", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        r69_wrong_side_sell = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r69_source_wrong_side_sell", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
         portfolio_source_protected_release_override = action_outcomes.get(
             "portfolio_daily_source_protected_release_override",
             pd.Series(False, index=action_outcomes.index),
@@ -1664,6 +1695,32 @@ def compute_continuity_metrics(
             if bool(cashflow_decision_mode.any())
             else 0.0
         )
+        metrics["r69_value_arbitration_deploy_release_spread_mean"] = (
+            float((r69_deploy_value - r69_release_value).loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
+        metrics["r69_value_arbitration_defense_value_mean"] = (
+            float(r69_defense_value.loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
+        metrics["r69_value_arbitration_cash_timing_value_mean"] = (
+            float(r69_cash_timing_value.loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
+        metrics["r69_value_arbitration_receiver_source_spread_value_mean"] = (
+            float(r69_spread_value.loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
+        metrics["r69_value_arbitration_source_wrong_side_sell_share"] = (
+            float((r69_wrong_side_sell & portfolio_source_target).sum() / portfolio_source_target.sum())
+            if bool(portfolio_source_target.any())
+            else 0.0
+        )
+        metrics["r69_reversal_guarded_count"] = float((r69_reversal_guarded & portfolio_source_target).sum())
         metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
             float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
             if bool(portfolio_receiver_target.any())

@@ -9,6 +9,7 @@ import torch
 from daily_research.continuous_policy.model import load_artifact, predict_policy
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
+    PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     TorchPortfolioSetV5Artifact,
     load_torch_portfolio_set_v5_artifact,
     predict_policy_portfolio_set_v5,
@@ -47,7 +48,7 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
                 "cross_layers": 1,
                 "latent_count": 4,
                 "dropout": 0.0,
-                "portfolio_set_v5_internal_version": "portfolio_set_v5_dfl_pg_v1",
+                "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
             },
             global_target_defaults={"gross_exposure_target": 0.7},
         )
@@ -77,7 +78,7 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertIsInstance(loaded_direct, TorchPortfolioSetV5Artifact)
         self.assertIsInstance(loaded_generic, TorchPortfolioSetV5Artifact)
         self.assertEqual(loaded_direct.training_diagnostics["trainer_backend"], TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5)
-        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_internal_version"], "portfolio_set_v5_dfl_pg_v1")
+        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_internal_version"], PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)
 
     def test_predict_policy_portfolio_set_v5_outputs_release_first_semantics(self) -> None:
         artifact = self._artifact()
@@ -114,6 +115,15 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_source_release_quality", frame.columns)
             self.assertIn("portfolio_daily_receiver_add_headroom", frame.columns)
             self.assertIn("portfolio_set_v5_cash_buffer_score", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_deploy_value", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_release_value", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_defense_value", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_cash_timing_value", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_source_opportunity_cost", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_receiver_source_spread_value", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_reversal_risk_penalty", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_source_wrong_side_sell_penalty", frame.columns)
+            self.assertIn("portfolio_set_v5_r69_reversal_guarded", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_constraint_violation", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_feasible", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)

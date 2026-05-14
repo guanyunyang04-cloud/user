@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_DECISION_TARGET_NAMES,
     PortfolioSetDayDataset,
     build_portfolio_set_v5_targets,
     collate_portfolio_set_days,
@@ -76,7 +77,7 @@ class PortfolioSetV5DaySetDatasetTest(unittest.TestCase):
         self.assertEqual(tuple(batch["static_x"].shape), (2, 2, 2))
         self.assertEqual(tuple(batch["sequence_x"].shape), (2, 2, 1, 1))
         self.assertEqual(tuple(batch["sample_mask"].shape), (2, 2))
-        self.assertEqual(tuple(batch["decision_target_y"].shape), (2, 2, 8))
+        self.assertEqual(tuple(batch["decision_target_y"].shape), (2, 2, len(PORTFOLIO_SET_V5_DECISION_TARGET_NAMES)))
         self.assertEqual(int(batch["sample_mask"][0].sum().item()), 2)
         self.assertEqual(int(batch["sample_mask"][1].sum().item()), 1)
         self.assertGreater(float(batch["source_mask"].sum().item()), 0.0)

@@ -18,7 +18,7 @@ from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
     PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID,
-    PORTFOLIO_SET_V5_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
     PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES,
     fit_policy_models_portfolio_set_v5,
 )
@@ -208,7 +208,7 @@ def _loss_profile_was_explicit(raw_argv: list[str]) -> bool:
 def _apply_backend_default_loss(args: argparse.Namespace, raw_argv: list[str]) -> str:
     backend = normalize_trainer_backend(args.trainer_backend)
     if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and not _loss_profile_was_explicit(raw_argv):
-        args.loss_profile = PORTFOLIO_SET_V5_INTERNAL_VERSION
+        args.loss_profile = PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
     return backend
 
 

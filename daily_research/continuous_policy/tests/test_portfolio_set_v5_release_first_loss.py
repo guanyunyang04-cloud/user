@@ -3,7 +3,9 @@ import unittest
 import torch
 
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
     PORTFOLIO_SET_V5_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     _portfolio_set_loss,
     portfolio_set_v5_decision_diagnostics,
     project_portfolio_set_v5_cashflow_oracle,
@@ -15,8 +17,10 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
     def test_v48_and_alias_resolve_to_portfolio_set_release_first_loss(self) -> None:
         expected_names = {
             "alpha_result_value_budget_split_v48": "alpha_result_value_budget_split_v48",
-            "portfolio_set_release_first_decision_v1": PORTFOLIO_SET_V5_INTERNAL_VERSION,
+            "portfolio_set_release_first_decision_v1": PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
+            PORTFOLIO_SET_V5_DFL_PG_V1_VERSION: PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
             PORTFOLIO_SET_V5_INTERNAL_VERSION: PORTFOLIO_SET_V5_INTERNAL_VERSION,
+            PORTFOLIO_SET_V5_R69_INTERNAL_VERSION: PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
         }
         for name, expected_resolved in expected_names.items():
             resolved, config = resolve_portfolio_set_v5_loss_profile(name)
@@ -36,6 +40,10 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
             self.assertGreater(weights["decision_oracle_total"], 0.0)
             self.assertGreater(weights["pg_dfl_surrogate_total"], 0.0)
             self.assertGreater(weights["constraint_violation_total"], 0.0)
+            if expected_resolved == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
+                self.assertGreater(weights["value_arbitration_total"], 0.0)
+                self.assertGreater(weights["cash_timing_value_total"], 0.0)
+                self.assertGreater(weights["reversal_guard_total"], 0.0)
 
     def test_legacy_losses_are_rejected_for_v5(self) -> None:
         for legacy in ("alpha_result_value_budget_split_v47", "alpha_result_value_budget_split_v46", "teacher_imitation"):
@@ -113,6 +121,115 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
         self.assertGreaterEqual(int(receiver_mask.sum()), 1)
         self.assertEqual(int((source_mask & receiver_mask).sum()), 0)
         self.assertLessEqual(float((oracle["target_weight"] - current).abs().sum()), 0.14 + 1.0e-6)
+
+    def test_r69_oracle_rejects_wrong_side_source_when_receiver_is_good(self) -> None:
+        current = torch.tensor([[0.18, 0.18, 0.00]], dtype=torch.float32)
+        source_score = torch.tensor([[0.90, 0.90, 0.00]], dtype=torch.float32)
+        receiver_score = torch.tensor([[0.00, 0.00, 0.95]], dtype=torch.float32)
+
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=source_score,
+            receiver_score=receiver_score,
+            cash_buffer_score=torch.zeros_like(current),
+            deploy_value=torch.tensor([[0.0, 0.0, 0.95]], dtype=torch.float32),
+            release_value=torch.tensor([[0.90, 0.90, 0.0]], dtype=torch.float32),
+            defense_value=torch.zeros_like(current),
+            cash_timing_value=torch.zeros_like(current),
+            source_opportunity_cost=torch.tensor([[0.85, 0.05, 0.0]], dtype=torch.float32),
+            receiver_source_spread_value=torch.tensor([[0.0, 0.90, 0.90]], dtype=torch.float32),
+            reversal_risk_penalty=torch.zeros_like(current),
+            source_wrong_side_sell_penalty=torch.tensor([[0.95, 0.0, 0.0]], dtype=torch.float32),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.12], dtype=torch.float32),
+            risk_budget=torch.tensor([0.05], dtype=torch.float32),
+        )
+
+        self.assertLess(float(oracle["source_supply"][0, 0]), 0.003)
+        self.assertGreater(float(oracle["source_supply"][0, 1]), 0.003)
+        self.assertGreater(float(oracle["receiver_demand"][0, 2]), 0.003)
+        self.assertLess(float(oracle["constraint_violation"][0]), 1.0e-6)
+
+    def test_r69_oracle_prefers_cash_on_risk_off_without_spread(self) -> None:
+        current = torch.tensor([[0.16, 0.00, 0.00]], dtype=torch.float32)
+        source_score = torch.tensor([[0.80, 0.00, 0.00]], dtype=torch.float32)
+        receiver_score = torch.tensor([[0.00, 0.65, 0.60]], dtype=torch.float32)
+
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=source_score,
+            receiver_score=receiver_score,
+            cash_buffer_score=torch.ones_like(current) * 0.90,
+            deploy_value=torch.tensor([[0.0, 0.15, 0.12]], dtype=torch.float32),
+            release_value=torch.tensor([[0.85, 0.0, 0.0]], dtype=torch.float32),
+            defense_value=torch.ones_like(current) * 0.95,
+            cash_timing_value=torch.ones_like(current) * 0.95,
+            source_opportunity_cost=torch.zeros_like(current),
+            receiver_source_spread_value=torch.zeros_like(current),
+            reversal_risk_penalty=torch.zeros_like(current),
+            source_wrong_side_sell_penalty=torch.zeros_like(current),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.16], dtype=torch.float32),
+            risk_budget=torch.tensor([0.95], dtype=torch.float32),
+        )
+
+        self.assertGreater(float(oracle["source_supply"][0, 0]), 0.003)
+        self.assertLess(float(oracle["receiver_demand"].sum()), 0.003)
+        self.assertGreater(float(oracle["cash_buffer"][0]), float(1.0 - current.sum()))
+
+    def test_r69_oracle_defense_allows_source_even_without_receiver(self) -> None:
+        current = torch.tensor([[0.20, 0.10, 0.00]], dtype=torch.float32)
+        source_score = torch.tensor([[0.80, 0.20, 0.00]], dtype=torch.float32)
+        receiver_score = torch.zeros_like(current)
+
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=source_score,
+            receiver_score=receiver_score,
+            cash_buffer_score=torch.ones_like(current) * 0.80,
+            release_value=torch.tensor([[0.90, 0.10, 0.0]], dtype=torch.float32),
+            defense_value=torch.ones_like(current) * 0.90,
+            cash_timing_value=torch.ones_like(current) * 0.80,
+            source_opportunity_cost=torch.tensor([[0.05, 0.60, 0.0]], dtype=torch.float32),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.10], dtype=torch.float32),
+            risk_budget=torch.tensor([0.90], dtype=torch.float32),
+        )
+
+        self.assertGreater(float(oracle["source_supply"][0, 0]), 0.003)
+        self.assertLess(float(oracle["source_supply"][0, 1]), 0.003)
+        self.assertEqual(int((oracle["receiver_demand"] > 0.003).sum()), 0)
+        self.assertLess(float(oracle["target_weight"].sum()), float(current.sum()))
+
+    def test_r69_oracle_reversal_penalty_blocks_reduce_trap(self) -> None:
+        current = torch.tensor([[0.18, 0.18, 0.00]], dtype=torch.float32)
+        base_kwargs = dict(
+            current_weight=current,
+            source_score=torch.tensor([[0.90, 0.90, 0.00]], dtype=torch.float32),
+            receiver_score=torch.tensor([[0.00, 0.00, 0.85]], dtype=torch.float32),
+            cash_buffer_score=torch.zeros_like(current),
+            deploy_value=torch.tensor([[0.0, 0.0, 0.90]], dtype=torch.float32),
+            release_value=torch.tensor([[0.90, 0.90, 0.0]], dtype=torch.float32),
+            defense_value=torch.zeros_like(current),
+            cash_timing_value=torch.zeros_like(current),
+            source_opportunity_cost=torch.zeros_like(current),
+            receiver_source_spread_value=torch.tensor([[0.80, 0.80, 0.80]], dtype=torch.float32),
+            source_wrong_side_sell_penalty=torch.zeros_like(current),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.12], dtype=torch.float32),
+            risk_budget=torch.tensor([0.05], dtype=torch.float32),
+        )
+        guarded = project_portfolio_set_v5_cashflow_oracle(
+            **base_kwargs,
+            reversal_risk_penalty=torch.tensor([[0.95, 0.00, 0.0]], dtype=torch.float32),
+        )
+        clean = project_portfolio_set_v5_cashflow_oracle(
+            **base_kwargs,
+            reversal_risk_penalty=torch.zeros_like(current),
+        )
+
+        self.assertLess(float(guarded["source_supply"][0, 0]), float(clean["source_supply"][0, 0]))
+        self.assertGreater(float(guarded["source_supply"][0, 1]), 0.003)
 
     def test_pg_dfl_surrogate_prefers_oracle_aligned_logits(self) -> None:
         weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]

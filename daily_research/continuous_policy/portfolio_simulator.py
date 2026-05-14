@@ -5630,6 +5630,48 @@ class PortfolioState:
                     "portfolio_set_v5_turnover_used": float(policy.at[stock, "portfolio_set_v5_turnover_used"] or 0.0)
                     if "portfolio_set_v5_turnover_used" in policy.columns
                     else 0.0,
+                    "portfolio_set_v5_r69_deploy_value": float(policy.at[stock, "portfolio_set_v5_r69_deploy_value"] or 0.0)
+                    if "portfolio_set_v5_r69_deploy_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_release_value": float(policy.at[stock, "portfolio_set_v5_r69_release_value"] or 0.0)
+                    if "portfolio_set_v5_r69_release_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_defense_value": float(policy.at[stock, "portfolio_set_v5_r69_defense_value"] or 0.0)
+                    if "portfolio_set_v5_r69_defense_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_cash_timing_value": float(policy.at[stock, "portfolio_set_v5_r69_cash_timing_value"] or 0.0)
+                    if "portfolio_set_v5_r69_cash_timing_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_source_opportunity_cost": float(
+                        policy.at[stock, "portfolio_set_v5_r69_source_opportunity_cost"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_source_opportunity_cost" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_receiver_source_spread_value": float(
+                        policy.at[stock, "portfolio_set_v5_r69_receiver_source_spread_value"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_receiver_source_spread_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_reversal_risk_penalty": float(
+                        policy.at[stock, "portfolio_set_v5_r69_reversal_risk_penalty"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_reversal_risk_penalty" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_source_wrong_side_sell_penalty": float(
+                        policy.at[stock, "portfolio_set_v5_r69_source_wrong_side_sell_penalty"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_source_wrong_side_sell_penalty" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_reversal_guarded": float(
+                        policy.at[stock, "portfolio_set_v5_r69_reversal_guarded"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_reversal_guarded" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r69_source_wrong_side_sell": float(
+                        policy.at[stock, "portfolio_set_v5_r69_source_wrong_side_sell"] or 0.0
+                    )
+                    if "portfolio_set_v5_r69_source_wrong_side_sell" in policy.columns
+                    else 0.0,
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,
                     "direct_action_value_selected": float(policy.at[stock, "direct_action_value_selected"] or 0.0) if "direct_action_value_selected" in policy.columns else 0.0,
@@ -6345,6 +6387,19 @@ class PortfolioState:
             ),
             "release_flow_cashflow_decision_cash_conservation_gap": float(
                 release_flow_trace.get("cashflow_decision_cash_conservation_gap", 0.0)
+            ),
+            "release_flow_r69_source_wrong_side_sell_count": float(
+                release_flow_trace.get("r69_source_wrong_side_sell_count", 0.0)
+            ),
+            "release_flow_r69_reversal_guarded_count": float(
+                release_flow_trace.get("r69_reversal_guarded_count", 0.0)
+            ),
+            "release_flow_r69_defense_value_mean": float(release_flow_trace.get("r69_defense_value_mean", 0.0)),
+            "release_flow_r69_cash_timing_value_mean": float(
+                release_flow_trace.get("r69_cash_timing_value_mean", 0.0)
+            ),
+            "release_flow_r69_receiver_source_spread_value_mean": float(
+                release_flow_trace.get("r69_receiver_source_spread_value_mean", 0.0)
             ),
             "release_flow_receiver_score_dead_count": float(release_flow_trace.get("receiver_score_dead_count", 0.0)),
             "release_flow_target_delta_weight_conflict_count": float(
