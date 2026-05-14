@@ -31,6 +31,41 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertIn("daily_research/brain/references/r62_research_data_lake_status_20260514.md", match["path"])
         self.assertTrue(any("policy_input_bundle" in item for item in match["dataset_ids"]))
 
+    def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
+        registry = build_evidence_registry()
+        matches = [record for record in registry["records"] if record["id"] == "r65"]
+
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertIn("portfolio_set_v5", match["tags"])
+        self.assertNotIn("core_v4", match["tags"])
+        self.assertTrue(any("continuous_policy_training_matrices__strict_train" in item for item in match["dataset_ids"]))
+        self.assertFalse(
+            any("replaces MLP-style core-v4" in item for item in match["next_allowed_actions"]),
+            match["next_allowed_actions"],
+        )
+
+    def test_query_finds_r64_strict_gold_dataset(self) -> None:
+        payload = query_evidence_registry("continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1")
+
+        self.assertGreaterEqual(payload["match_count"], 1)
+        ids = {match["id"] for match in payload["matches"]}
+        self.assertIn("r64", ids)
+        self.assertIn("r65", ids)
+
+    def test_brain_maintenance_records_are_brain_workflow(self) -> None:
+        registry = build_evidence_registry()
+        matches = [record for record in registry["records"] if record["id"] == "r66"]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "brain")
+        self.assertIn("brain", matches[0]["tags"])
+        self.assertNotIn("data_lake", matches[0]["tags"])
+        self.assertFalse(
+            any("Evidence registry no longer treats early summary bullets" in item for item in matches[0]["next_allowed_actions"]),
+            matches[0]["next_allowed_actions"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

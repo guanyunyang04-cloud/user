@@ -1,257 +1,76 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-09`
+快照日期：`2026-05-14`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
-- 模型直接从市场全局状态、个股演化路径与持仓上下文中学习 `source / receiver / cash allocation ranking`。
-- 目标是在尽量少的人为执行桥约束下，综合权衡未来收益、风险、成本、现金防守与部署可执行性。
+- 模型应从市场全局状态、个股时序路径、持仓上下文与组合约束中学习 `source / receiver / cash allocation`。
+- 最终目标是组合层资金分配质量，不是固定调仓频率、固定持有周期或单股动作分类。
+- 执行层只翻译策略语义为权重与订单，不得静默改写策略本体。
 
 ## 非目标
-- 不把固定调仓频率、固定持有周期或人工执行桥作为最终目标。
 - 不把更像 teacher 当作最终目标；teacher 只是 warm start / auxiliary prior / heuristic scaffold。
-- 不用 screening 高收益、短窗 smoke、replay 单项改善或单一局部指标替代正式 verdict。
+- 不用 screening 高收益、短窗口 smoke、单项 replay 改善或单层指标替代正式 verdict。
+- 不把 simulator guard 当主策略逻辑；guard 只能做最后安全裁剪和诊断。
+- 不把 realtime tail label、failed trial、interrupted outer study 或 loose latest 写成 completed evidence。
 
 ## 当前绑定原则
 - 个股动作语义与组合预算语义必须分层：个股层表达生命周期动作，组合层表达资金接收、资金释放、现金保留、gross / turnover / cost。
-- 个股未来上涨不等于今天该加仓；持仓仍有正 forward 也不一定永远不能卖，关键是相对 receiver、现金与风险的机会成本。
 - 卖出、现金与资金来源是同一条 credit assignment 链；source 必须解释为“当前组合状态下更适合释放资金”，不是简单看跌。
-- 执行层只翻译策略语义为权重和订单，不得静默改写策略本体。
-- 日频数据不能完整学习盘中冲击、真实滑点、新闻驱动、盘口流动性和开盘跳空过程；所有 promotion 判断必须保留这个盲区。
-- 2024-2026 的有效独立 regime 和月度样本有限；高收益分支必须经 confirm-vs-screening 稳定性与月度质量复核。
+- 个股未来上涨不等于今天该加仓；持仓仍有正 forward 也不一定永远不能卖，关键是相对 receiver、现金和风险的机会成本。
+- 训练、预测、simulator 和 reporting 必须使用一致的 target weight / target delta 语义。
+- full-universe strict Gold 可作为训练数据真源；realtime Gold 只能作为 research/audit，除非 tail label 完全 observed 且 catalog 标记 training-safe。
 
-## 当前阶段合同
-- r31 receiver 授权闭包：所有 `direct_action_add_authorized` 与 `direct_action_open_authorized` 必须是 executable `portfolio_daily_receiver_target` 的子集；`direct_action_authorization_subset_violation_count > 0` 时不得通过 v2 gate。
-- r31 no-headroom 降级：无 headroom 的 held add 必须在语义层提前降级为 hold/no-op，并计入 `portfolio_daily_receiver_semantic_no_headroom`、`authorized_add_no_weight_change_share` 或 `deploy_intent_unrealized_share`。
-- r31 receiver 广度：高现金、低持仓数、gross exposure target 较高时，flat open candidate 的 listwise 排名必须能重新进入 receiver path，不能只反复加已到目标权重的 held 名字。
-- r33 source forward proxy：`portfolio_daily_source_forward_proxy_keep_risk` 必须进入 label、训练头、推理融合、source candidate gate、feedback、continuity metrics、study scoring 与 behavior audit；旧 artifact 缺少该 head 时只能使用 fallback proxy。
-- r33 release conviction：`portfolio_daily_source_release_conviction` 必须联合 source score、release quality、economic release、executability、release capacity、opportunity cost、forward-strength brake、bad forward spread、economic block 与 proxy keep-risk。
-- r33 distribution clean-pass：source candidate 必须同时通过 forward proxy、`portfolio_daily_source_release_conviction_pass` 与 `portfolio_daily_source_distribution_clean_pass`；强势正 forward 误卖不得被均值掩盖。
-- r34 allocation breadth scaffold：`split_heads_portfolio_daily_allocation_breadth_r34` 只作为 bounded confirm 搜索入口，必须保留 r31/r33 守门，并通过 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth` 与 `portfolio_daily_joint_economic_quality_gate` 把广度和经济质量写入 scoring。
-- r34 confirm candidate 合同：v2 gated profile 的 confirm 候选必须优先满足 `training_evidence_status = sufficient` 与 v2 gate qualified；不得让 insufficient screening 高分 trial 绕过 confirm 候选选择。
-- r35 unified allocation 合同：`split_heads_portfolio_daily_unified_allocation_r35` 必须把 source、receiver 与 cash 当作同一个 listwise allocation problem；`portfolio_daily_unified_receiver_score`、`portfolio_daily_unified_source_score`、`portfolio_daily_unified_cash_score`、`portfolio_daily_unified_allocation_objective` 是训练 surface，不得作为普通 feature 泄漏。
-- r35 经济 credit assignment 合同：`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward` 必须写入训练目标、summary 与 scoring；不能只在 v2 gate 后验拦截正 forward source 误卖或负 receiver-source spread。
-- r35 optimizer 合同：`solve_semidifferentiable_allocation` 是半可微最终 allocation 层合同，显式约束 `cash_reserve_target`、`turnover_limit`、`max_position_weight`、transaction cost、slippage 与 sell tax；simulator guard 只做最后安全层，不再承担主策略逻辑。
-- r36 risk-aware unified allocation 合同：cash timing、drawdown、market downside、forward benchmark return、source positive forward penalty、source opportunity cost penalty 与 receiver-source spread reward 必须进入 unified allocation target 与 consistency loss；不能只靠 v2 gate 后验拦截。
-- r36 source distribution 执行合同：所有 unified source candidate 必须满足 `portfolio_daily_source_distribution_clean_pass`，或满足更严格的低 penalty / 低 opportunity cost / 低 brake-risk / 高 spread relief 条件；普通 source candidate 与 unified source candidate 的 OR 合并不得绕过 source distribution gate。
-- r37 source hard-negative 合同：`portfolio_daily_source_strong_false_sell_penalty` 与 `portfolio_daily_source_hard_negative_penalty` 必须作为 source candidate、unified source score、allocation objective、summary、study scoring 与 decision-focused loss 的一等信号；推理阶段没有未来标签时必须消费模型预测的 positive-forward / opportunity-cost penalty heads，不能退回全零惩罚路径。
-- r37 decision-focused allocation 合同：`portfolio_decision_regret_total` 必须同时惩罚错误释放强正 forward source、receiver/source ranking regret、dead cash 与 cash/objective regret；它是 source/receiver/cash 同一 allocation problem 的训练反馈，不得被解释为单票 action head 的附属损失。
-- r38 source hard-negative regret 合同：`portfolio_daily_source_tail_false_sell_penalty`、`portfolio_daily_source_release_preference` 与 `portfolio_daily_transfer_regret_target` 必须进入训练 heads、sample targets、listwise / pairwise loss、unified allocation summary、study scoring 与 protocol metrics；source 防错不能只靠后验 v2 gate。
-- r38 balance 合同：压住强势误卖后，必须同步约束 `source_target_count`、receiver/source breadth、cash deployment、open/reduce/exit 质量、monthly return 与 drawdown；不得把接近全现金的语义安全状态解释为成功。
-- r39 allocation objective consolidation 合同：`portfolio_daily_allocation_trade_quality_target`、`portfolio_daily_allocation_cash_deployment_target`、`portfolio_daily_allocation_risk_adjusted_return_target`、`portfolio_daily_allocation_drawdown_control_target`、`portfolio_daily_allocation_monthly_quality_target` 与 `portfolio_daily_allocation_final_objective` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective 与 profile；`alpha_result_value_budget_split_v25` 中 action loss 只能作为辅助，不能继续主导 allocation objective。
-- r39 execution blend 合同：当 r39 objective heads 可用时，`portfolio_daily_allocation_final_objective` 必须回写 `portfolio_daily_unified_receiver_score/source_score/cash_score` 和核心 receiver/source/cash score；否则会重回“训练目标已接入、执行仍走旧 score”的半旧路径。
-- r41 risk-sensitive allocation layer 合同：`portfolio_daily_allocation_uncertainty_pressure_target`、`portfolio_daily_allocation_tail_risk_control_target` 与 `portfolio_daily_allocation_decision_focused_objective` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective 与 profile；solver 必须在高 uncertainty / tail risk 下压制 receiver deploy 并提高 cash defense，同时不能杀死 clean source release。
-- r41 推理融合合同：当 r41 heads 可用时，预测的 uncertainty / tail / decision objective 必须参与 unified receiver/source/cash score 和 `solve_semidifferentiable_allocation`，不能只停留在训练 loss；旧 artifact 缺少 r41 heads 时只能走可解释 fallback target，不能默认为策略成功。
-- r42 utility-credit allocation 合同：`portfolio_daily_allocation_net_utility_target`、`portfolio_daily_allocation_credit_closure_target` 与 `portfolio_daily_allocation_resource_efficiency_target` 必须进入 label、heads、sample targets、loss、predict policy frame、optimizer objective、summary 与 profile；目标不是继续加 risk brake，而是直接约束 source/receiver/cash 的同日资金信用闭合、净效用和单位训练资源效率。
-- r42 resource gate 合同：`split_heads_portfolio_daily_utility_credit_allocation_r42` 默认必须用短 screening 验证，profile 内默认 `epochs = 24`、`min_epochs = 16`，不得被命令行默认值静默覆盖为长训；screening 后若出现 source dead、cash timing bad、drawdown bad 或 receiver deploy 不干净且经济信号弱，必须阻断 confirmatory，不能继续消耗长训练资源。
-- r43 primal-dual decision allocation 合同：`alpha_result_value_budget_split_v28` 必须让 `portfolio_primal_dual_decision_total` 强于单票 action / duration 辅助损失，并把同一交易日内的 receiver/source/cash soft allocation regret、tail false-source、dead cash、risk cash under-defense 与 funding imbalance 写入训练和验证损失；r41/r42 目标列必须进入 `sample_targets`，不得只存在于 label/head/export 代码里。
-- r43 profile 合同：`split_heads_portfolio_daily_primal_dual_decision_allocation_r43` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 20`、`min_epochs = 14`，用于先排除低信息方向，不得静默升级为长训。
-- r44 entropic transport allocation 合同：`alpha_result_value_budget_split_v29` 必须让 `portfolio_entropic_transport_decision_total` 强于 r43 primal-dual 辅助损失，并用 Sinkhorn 风格可微运输计划同时约束 source supply、receiver demand、cash source、cash sink、运输 regret、false-source flow、dead cash 与 risk cash under-defense；不得退回分离 source/receiver/cash ranking 的旧损失。
-- r44 profile 合同：`split_heads_portfolio_daily_entropic_transport_allocation_r44` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 18`、`min_epochs = 12`，用于先排除低信息方向，不得静默升级为长训。
-- r45 conservative transport allocation 合同：`alpha_result_value_budget_split_v30` 必须在 r44 entropic transport 之上加入 `portfolio_offline_conservative_support_total`，用 offline support / OOD action 保守损失压制非 executable receiver、非 held/source、强 false-source 与高风险低 cash 的过度自信；不得把离线数据未支持的动作高分解释为泛化突破。
-- r45 profile 合同：`split_heads_portfolio_daily_conservative_transport_allocation_r45` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格的短 screening resource gate；profile 默认 `epochs = 16`、`min_epochs = 10`，用于先排除低信息方向，不得静默升级为长训。
-- r46 differentiable convex allocation 合同：`alpha_result_value_budget_split_v31` 必须让 `portfolio_differentiable_convex_allocation_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 降为 `0`；torch 图内必须同时惩罚 KKT / budget / turnover / position / gross exposure residual、unsupported receiver/source mass、false-source mass、cash timing、source/receiver shortfall、candidate breadth、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 风险与 oracle regret。
-- r46 diagnostics / target 合同：r46 loss 不得继续写死 position cap、turnover、gross exposure 或 cash timing；训练 sample targets 必须从日级 `gross_exposure_target`、`candidate_budget`、`turnover_budget`、`max_position_weight_target`、`budget_cash_timing_signal_target` 映射到个股样本，并在 diagnostics 中输出 `portfolio_differentiable_convex_allocation_terms`，至少包含 constraint、support、OPE、path risk 与 total。
-- r46 profile 合同：`split_heads_portfolio_daily_differentiable_convex_allocation_r46` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 14`、`min_epochs = 9`，用于先验证真正可微信用闭合，不得静默升级为长训。
-- r47 true convex solver allocation 合同：`alpha_result_value_budget_split_v32` 必须让 `portfolio_cvxpy_convex_allocation_total` 成为主导 allocation loss，并让 `portfolio_differentiable_convex_allocation_total` 退为 fallback / auxiliary；r47 必须通过真实 `cvxpy` / `cvxpylayers` / `diffcp` 的 DPP-compliant convex solver layer 求解 fixed-slot 候选组合，不能只复用 r46 torch surrogate 或半可微 numpy solver。
-- r47 fixed-slot solver 合同：训练时按 date 构造 receiver/source/held support candidate bank，选择固定 `slot_count` 的可执行候选，使用同一 `CvxpyLayer` 分别求解 predicted utility 与 oracle utility 下的组合权重；loss 必须惩罚 solver regret、solution tracking、gross / turnover / position residual、unsupported mass、false-source mass、cash timing、path risk 与 solver success rate。
-- r47 dependency / diagnostics 合同：yolos 环境必须安装 `cvxpy`、`cvxpylayers`、`diffcp` 与至少 `SCS` / `DIFFCP` solver；训练 diagnostics 必须输出 `supports_portfolio_cvxpy_convex_allocation_layer`、`portfolio_cvxpy_convex_layer_status` 与 `portfolio_cvxpy_convex_allocation_terms`。若 solver 不可用，只能显式 fallback 到 r46 surrogate 并记录 status，不能默认为 r47 策略成功。
-- r47 profile 合同：`split_heads_portfolio_daily_true_convex_solver_allocation_r47` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 10`、`min_epochs = 7`，用于先验证真实 solver layer 的训练成本、梯度稳定性、source release、cash timing、drawdown 和 support 诊断，不得静默升级为长训。
-- r48 full-universe convex OPE 合同：`alpha_result_value_budget_split_v33` 必须让 `portfolio_full_universe_convex_allocation_total` 成为主导 allocation loss，r47 fixed-slot loss 不得继续主导；r48 必须把 solver 候选银行扩大到 full-universe aware resource-safe slot bank，并用 `candidate_coverage_loss` 惩罚旧 receiver/source mask 漏掉的高 oracle 机会，不能让旧 mask 决定全部梯度入口。当前训练口径显式固定为 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2`、`train_solver_enabled = false`，最终 diagnostics 仍运行 solver terms；不得再把 r48 误写成未受资源约束的 48-slot / 3-day 长训口径。
-- r48 realistic objective 合同：r48 solver / loss 必须显式输出并训练 `liquidity_impact_loss`、`concentration_risk_loss`、`universe_expansion_loss`，将 liquidity support、impact cost、factor concentration proxy、dynamic cost、turnover、risk pressure 与 path risk 纳入真实 solver 诊断；不得只用固定 cost / position cap / turnover slack 解释为现实可交易约束。
-- r48 OPE 合同：r48 必须输出 `ope_lower_bound_loss`、`propensity_support_loss` 与 `doubly_robust_gap_loss`，用 behavior propensity、当前持仓行为收益 proxy、policy lower bound 与 DR gap 对离线分布外动作保持保守；dry-run / 单测只能证明接线，不能证明离线策略安全。
-- r48 profile 合同：`split_heads_portfolio_daily_full_universe_convex_ope_allocation_r48` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与更严格短 screening resource gate；profile 默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`，用于先验证 full-universe coverage、OPE、成本风险和 solver 成本，不得静默升级为长训。
-- r49 capital-flow closure 合同：`alpha_result_value_budget_split_v34` 必须让 `portfolio_capital_flow_closure_total` 成为强于 full-universe convex auxiliary 的主导资金闭合损失；loss 必须输出 `portfolio_capital_flow_closure_terms`，至少包含 `receiver_demand_loss`、`funding_shortfall_loss`、`source_dead_loss`、`false_source_loss`、`over_cash_loss`、`cash_defense_loss`、`cash_timing_loss`、`cash_coherence_loss`、`exposure_gap_loss`、`flow_conservation_loss`、`role_overlap_loss`、`source_breadth_loss`、`desired_receiver_flow_mean`、`effective_receiver_flow_mean`、`effective_source_flow_mean`、`risk_cash_need_mean`、`predicted_gross_mean`、`deploy_pressure_mean`、`risk_pressure_mean` 与 `total`。r49 的目标不是再加单边 source/cash penalty，而是让 receiver demand 必须被 clean source supply 或 cash release 解释，并能区分低风险死现金与高风险现金防守不足。
-- r49 旧失败阻断合同：当 receiver demand 高、clean source target 存在但 predicted source 近零，或 cash score 在低风险高部署压力下过高，或同一持仓同时被模型高分标成 receiver 与 source，或 source 释放集中在过窄候选上，或 avg gross exposure target 高而 exposure utilization 低时，训练 loss 和 resource gate 必须显式失败；不得把 `receiver_realized_deploy_rate = 1.0` 但 `source_target_count = 0` / `portfolio_daily_exposure_utilization` 低解释为结构成功。
-- r49 profile 合同：`split_heads_portfolio_daily_capital_flow_closure_r49` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`。resource gate 必须至少约束 source count、source realized sell rate、cash timing、drawdown、monthly / annual return、receiver unrealized deploy 与 exposure utilization。
-- r50 integrated convex capital-flow 合同：`alpha_result_value_budget_split_v35` 必须同时保留 r49 capital-flow closure、r48 full-universe/OPE、r47 true convex solver、r41 risk-sensitive 与 r45 offline support 的核心训练信号；`portfolio_cvxpy_convex_allocation_total` 必须大于 `0`，`portfolio_full_universe_convex_allocation_total` 与 `portfolio_capital_flow_closure_total` 必须继续保持主导地位，legacy `action_total` / `duration_total` 必须为 `0`。
-- r50 真实 solver 训练合同：全局 full-universe train solver 默认保持关闭，只有 `alpha_result_value_budget_split_v35` 通过 `CVXPY_FULL_UNIVERSE_ALLOCATION_TRAIN_SOLVER_LOSS_PROFILES` 受控启用；训练期 solver 必须继续受 `slot_count = 32`、`max_days_per_batch = 1`、`train_batch_interval = 2` 约束，不得静默升级为无界全 A 股大规模 solver 长训。
-- r50 diagnostics 合同：训练 diagnostics 必须输出 `portfolio_full_universe_convex_train_solver_effective` 与 train-solver loss profile 列表；当 full-universe loss 走 surrogate fallback 时，`solver_success_rate` 必须为 `0` 且 `fallback_surrogate_loss` 必须反映 surrogate total，不得再把 fallback 写成 solver 成功。
-- r50 profile 合同：`split_heads_portfolio_daily_integrated_convex_capital_flow_r50` 必须继续使用 `end_to_end_allocation_layer_v1`、`allocation_layer_v1`、`end_to_end_allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 6`、`min_epochs = 5`、`batch_size = 192`，用于先验证真实 solver 训练参与、资金闭合与资源消耗，不得静默升级为长训。
-- r51 native allocation vector 合同：`alpha_result_value_budget_split_v36` 必须让 `portfolio_native_allocation_vector_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 置为 `0`；`portfolio_cvxpy_convex_allocation_total` 与 `portfolio_full_universe_convex_allocation_total` 必须为 `0`，不得调用 `cvxpy` / `diffcp` 训练主路径。r51 的目标不是继续让 source、receiver、cash 多个独立 head 事后对账，而是让模型直接输出日级目标仓位向量和现金比例，再从 `target_delta` 自然推导 source / receiver / cash。
-- r51 projection / diagnostics 合同：`_project_native_allocation_vector` 必须在 torch 内按 `date_code` 聚合，输出 `portfolio_daily_target_weight`、`portfolio_daily_target_delta`、`portfolio_daily_target_cash_weight`、`portfolio_daily_target_turnover`、`portfolio_daily_native_receiver_score`、`portfolio_daily_native_source_score` 与 `portfolio_daily_native_cash_score`；投影后必须保证不可交易 receiver 权重为 0、非持仓不能产生卖出、单票上限、现金预算、换手预算和资金流守恒。`_portfolio_native_allocation_vector_loss` 必须输出 allocation sum、cash reserve、position cap、turnover、unsupported receiver、sell nonheld、funding shortfall、cash timing、decision utility、risk cost、source breadth、exposure utilization 与 total 诊断。
-- r51 profile 合同：`split_heads_portfolio_daily_native_allocation_vector_r51` 必须继续使用 `holdcash_v3`、`budget_v3`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 8`、`min_epochs = 6`、`batch_size = 256`。r51 不加入 true-solver resource guard，不作为 production / live / active artifact，dry-run / 单测只能证明接线和合同正确，不能证明策略有效。
-- r52 day-set native allocation vector 合同：`alpha_result_value_budget_split_v37` 必须让 `portfolio_day_set_native_allocation_vector_total` 成为主导 allocation loss，并把 legacy `action_total` / `duration_total` 置为 `0`；r51 row-wise native allocation loss、cvxpy solver loss 与 full-universe solver loss 必须为 `0`。r52 必须以完整交易日 padded set batch 训练，不得回退到随机 row-wise batch 内 `date_code` 聚合。
-- r52 model / diagnostics 合同：`TemporalDaySetPolicyNet` 必须输入 `[B,N,*]` day-set tensor、日级特征和 `sample_mask`，使用 slot attention 而非全股票 `O(N^2)` self-attention；输出目标仓位 logits `[B,N]`、日级 cash / risk logits `[B]`。`_portfolio_day_set_native_allocation_vector_loss` 必须输出 day-set full-day、mask coverage、padding violation、allocation/cash/cap/turnover/support/source/cash timing/risk/exposure/total 诊断。
-- r52 profile 合同：`split_heads_portfolio_daily_day_set_native_allocation_vector_r52` 必须继续使用 `holdcash_v3`、`budget_v3`、`end_to_end_allocation_layer_v1`、`allocation_layer_v1` 与短 screening resource gate；profile 默认 `epochs = 6`、`min_epochs = 4`、day batch `1`，搜索允许 day batch `1/2`。r52 不加入 true-solver resource guard，不作为 production / live / active artifact，dry-run / 单测只能证明接线和合同正确，不能证明策略有效。
-- r52b/r52c/r52d 证据边界：r52b 证明 native target validity 的主失败来自 unsupported receiver；r52c 证明 receiver executable closure 可在 simulator 边界关闭该失败，但同时把瓶颈暴露为 training evidence、cash timing、exposure utilization 与 source depth；r52d 只新增 validation closure 的代码合同、dry-run 与 safe screening-only 证据，不得把代码合同或 screening-only 结果解释为 confirmatory 资格。
-- foundation model 合同：foundation model 只能作为状态表征增强或 encoder prior，不能替代 source/receiver/cash allocation decision layer；最终资金分配必须仍由可审计的 listwise allocation objective 与 optimizer layer 负责。
-- listwise allocation teacher：`build_allocation_teacher_summary` 只输出 source/receiver/cash teacher surface 摘要，当前不得替代 simulator 或 active 执行路径。
-- repeat release relief 只能用于 clean-pass 已通过、recent sell blocking 明显过强、opportunity cost 低、release capacity 足、economic block 受控的窄场景。
-- 当前 gate / scoring 合同继续使用 `portfolio_daily_ranking_v2_gated`，不能用局部 clean-pass 指标替代 v2 gates 与 confirm stability。
+## 当前 Active Research Contract
+- Active production anchor 仍是 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`；continuous_policy 不得替代 live/default。
+- Active new-study profiles 当前限制为：
+  - `focused_seq_v1`
+  - `split_heads_portfolio_daily_release_first_constrained_decoder_r56`
+  - `split_heads_portfolio_daily_release_first_portfolio_set_v5_r65`
+- r65 entry：`split_heads_portfolio_daily_release_first_portfolio_set_v5_r65` / `alpha_result_value_budget_split_v48`。
+- r65 backend：`formal_torch_portfolio_set_v5`，artifact type `continuous_policy_torch_portfolio_set_v5`，`promotable=False`。
+- r65 默认 dataset：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
+- r65 architecture：per-symbol temporal encoder、portfolio state token、latent set attention、release-first decoder；默认禁止 full-universe `O(N^2)` self-attention。
+- r65 prediction 必须输出 release-first source/receiver/cash/target fields，并设置 `release_first_allocation_v3_mode=1.0`。
+- r61 core-v4 保留为 baseline/ablation；不再作为下一代主模型承载新主线。
 
 ## 成功判定
-- 训练证据：`training_evidence_status = sufficient`，且 diagnostics 显示 `device = cuda`、`cuda_available = true`、`python_executable` 指向 yolos。
-- v2 gates：收益、Sharpe、max drawdown、monthly return、monthly consistency、receiver/source/cash 质量、执行冲突与 source 分布全部过线。
-- 稳定性：confirm-vs-screening 不能靠单点偶然，`stable_confirmatory` 必须成立。
-- receiver：`receiver_target_count >= 3`、`receiver_unrealized_deploy_share = 0`、direct add/open authorization subset 无违规。
-- source：`source_target_count >= 3`、`source_realized_sell_rate >= 0.35`、positive forward sell share / strong false sell / max forward 受控。
-- cash：`cash_reserve_rate > 0`，但不能退化为高现金 dead branch。
-- 经济质量：`monthly_return_mean`、`monthly_consistency_score`、`portfolio_daily_exposure_utilization`、receiver realized deploy、receiver-source spread、drawdown 必须联合判断。
+- 训练证据必须 sufficient：足够 train days、teacher/action evidence 或等价有效证据、best epoch 不贴边，且使用 training-safe dataset。
+- 行为证据必须闭合：source intent/source target/receiver target 非零且可解释，target gap、cash、intent translation conflict、reduce/exit、drawdown 不触发硬门槛。
+- Study 证据必须完整：completed protocol summary + completed study summary；若外层 study 未汇总，只能写 protocol-level evidence。
+- Promotion 讨论前必须同时满足 formal evidence、v2 gate、stable confirm、drawdown/monthly quality、source/receiver/cash closure 与 active artifact guard。
 
-## 当前已知事实
-- r31 已证明 receiver 语义旁路可以前置到 receiver target 层；bounded confirm 中 authorization subset、authorized add no weight、deploy unrealized 与 receiver unrealized 均可压到 0。
-- r31 仍未证明 promotion readiness：training evidence、source activity、confirm gate 与收益质量仍不足。
-- r33 trainable proxy 可以防错，但会让 source dormant；source-soft 可以恢复 source，却会强势误卖。
-- r33 release conviction 可以恢复收益和 source 数量，但单独不足以控制尾部正 forward source。
-- r33 clean-pass + repeat relief 可以清掉强势误卖，但 clean-pass bounded 仍出现 source/receiver 广度不足和 receiver-source spread 不稳。
-- r34 已补上 receiver/source breadth scoring、joint economic quality penalty 与 allocation teacher summary，并完成 bounded/evidence-confirm；最新 fresh confirm 训练证据充分且 receiver/cash/source 执行率达标，但因 `receiver-source spread` 转负、`source_positive_forward_sell_share` 与 `source_strong_positive_forward_sell_count` 失控，仍不是 verdict。
-- r35 已完成 unified allocation 修复后 bounded confirm：`postfix4_bounded_confirm_20260430` 完成 4 个 screening、2 个 confirm，`stable_confirmatory_count = 1`，champion `confirm_02` 达到 `training_evidence_status = sufficient`、`annual_return = 1.409793`、`sharpe = 2.846432`、`receiver_unrealized_deploy_share = 0`、`source_realized_sell_rate = 1.0`、`cash_reserve_rate = 0.806071`、`receiver_minus_source_forward_excess_5d = 0.206611`，但仍 `promotion_status = shadow_only`。
-- 当前瓶颈已经从“能不能卖”推进到“能否在 unified allocation 下同时控制 cash timing、drawdown、reduce/exit 质量和 source positive distribution”。
-- r36c screening 证明：执行层 source distribution 旁路已被封住，source target 行全部为 `portfolio_daily_source_distribution_clean_pass = true`；但真实未来分布仍失败，`source_positive_forward_sell_share = 0.666667`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.029367`。剩余根因不是 simulator OR 旁路，而是模型对 source 正向前景与机会成本的低估。
-- r37b screening 证明：source hard-negative 与 decision-focused allocation loss 的工程路径已接通，推理侧也会消费预测 penalty heads；但模型学出的 penalty 仍太弱，`source_positive_forward_sell_share = 0.833333`、`source_strong_positive_forward_sell_count = 2`、`receiver_minus_source_forward_excess_5d = -0.057937`。当前问题不是字段未接或 guard 漏洞，而是 source hard-negative 信号的学习强度和信用分配仍不足。
-- r38 bounded confirm 证明：source hard-negative tail、release preference 与 transfer regret 能把 positive source false sell 压住，confirm 中 `source_positive_forward_sell_share = 0.0`、`source_strong_positive_forward_sell_count = 0`、`receiver_minus_source_forward_excess_5d = 0.037347`；但 `annual_return = 0.009111`、`sharpe = 0.164855`、`source_target_count = 1`、`cash_reserve_rate = 0.981728`，说明当前失败已转为收益弱、交易广度不足和现金过度保守。
-- r39 bounded confirm 证明：统一 allocation objective 和 execution blend 能恢复收益、正 spread 与 receiver 广度，execblend confirm 达到 `annual_return = 2.676289`、`sharpe = 3.802282`、`monthly_return_mean = 0.115004`、`receiver_target_count = 6`、`receiver_minus_source_forward_excess_5d = 0.066883`、`source_positive_forward_sell_share = 0.0`；但仍未稳定，`source_target_count = 1`、`cash_reserve_rate = 0.947020`、`cash_timing_quality_1d = -0.138133`、`max_drawdown = -0.109069`，v2 gate 只过 `9/12`。
-- r40 clean rerun 证明：end-to-end allocation layer 的运行通道、持久产物与 confirmatory 流程已经可完整跑通，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`、模型 diagnostics 为 yolos + CUDA；但 stable confirm 为空，confirm_01 / confirm_02 均为 `shadow_only`，且 source 释放为 0、cash timing 为负、drawdown 未过线，因此 r40 不是 promotion verdict。
-- r41 代码合同证明：risk-sensitive / uncertainty-aware allocation layer 已完成实现和合同测试，覆盖目标构造、solver 风险刹车、v26 loss profile、risk-sensitive loss、模型 heads、推理导出与 profile 注册；但尚未运行 bounded study，因此不能作为策略有效性事实。
-- r42 代码合同证明：utility-credit allocation 已完成实现、合同测试与 dry-run，覆盖 net utility / credit closure / resource efficiency 三个目标、v27 loss profile、utility credit closure loss、模型 heads、推理融合、optimizer utility relief / budget multiplier 与 study resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r43 代码合同证明：primal-dual decision allocation 已完成实现、合同测试与 dry-run，覆盖 v28 loss profile、date-grouped primal-dual decision loss、r41/r42 目标列 sample target 接线、artifact support flags、r43 search profile 与 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r44 代码合同证明：entropic transport allocation 已完成实现、合同测试与 dry-run，覆盖 v29 loss profile、Sinkhorn 风格可微资金运输损失、transport-first search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r45 代码合同证明：conservative transport allocation 已完成实现、合同测试与 dry-run，覆盖 v30 loss profile、offline support / OOD action 保守损失、training/validation 接线、diagnostics support flag、r45 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r46 代码合同证明：differentiable convex allocation 已完成实现与合同测试，覆盖 v31 loss profile、torch 图内 allocation surrogate、KKT/constraint residual、data-driven 日级约束 target、executable support targets、behavior-support / conservative OPE、路径级 CVaR / drawdown / OCE 风险、training/validation 接线、component diagnostics support flag、r46 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r47 代码合同证明：true convex solver allocation 已完成实现与合同测试，覆盖 v32 loss profile、真实 `cvxpy` / `cvxpylayers` fixed-slot solver layer、DPP 合同检查、solver regret / solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、training/validation 接线、diagnostics support flag、r47 search profile 与更严格 resource gate；但尚未运行正式 screening，因此不能作为策略有效性事实。
-- r48 正式研究事实：full-universe convex OPE allocation 已完成实现、合同测试、dry-run、formal screening 与 confirmatory，覆盖 v33 loss profile、resource-safe full-universe aware candidate bank、candidate coverage loss、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap、training/validation 接线、diagnostics support flags、r48 search profile 与更严格 resource gate。tag `self_opt_study_r48_full_universe_convex_ope_allocation_screening_20260508_p0p5_r3` 完成 `1` 个 screening 与 `1` 个 confirmatory，但 stable confirm 为空；confirm_01 为 `training_evidence_status = insufficient`、`source_target_count = 0`、`source_realized_sell_rate = 0`、`portfolio_daily_exposure_utilization = 0.331039`。因此 r48 是失败 verdict，不是策略有效性事实。
-- r49 代码合同事实：capital-flow closure 已完成实现、合同测试与 dry-run，覆盖 v34 loss profile、`_portfolio_capital_flow_closure_loss`、training/validation 接线、diagnostics support flags、r49 search profile、source/exposure/cash resource gate，以及旧失败模式测试；后续加固已把 `cash_defense_loss`、有效 source/receiver flow、风险现金需求、预测暴露、部署压力和风险压力纳入 diagnostics。dry-run `self_opt_study_r49_capital_flow_closure_dry_run_20260509` 只证明接线和配置正确，尚未证明策略有效。
+## 当前已知断点
+- r53-r55：cash/exposure closure 改善，但 cash timing、source/reduce/exit 未闭合。
+- r56：release-first allocator 代码合同存在，但安全筛选缺 completed evidence。
+- r60-r61：profile binding、diagnostics、core-v4 接线有效，但 release/source/receiver/target translation 仍断。
+- r64：full-window strict Gold 完成；realtime full-window Gold pending。
+- r65：portfolio-set v5 接线成功，但 behavior negative：source intent/target、receiver target 仍为 0，intent conflict 为 1.0。
 
-## 当前禁止事项
-- 不得把 r31/r33 任一 replay、smoke、bounded 或 insufficient run 写成 promotion / live / active artifact 切换依据。
-- 不得为了恢复 source count 粗暴放宽 source forward proxy、release conviction 或 distribution clean-pass。
-- 不得把 `receiver_unrealized_deploy_share = 0`、`source_positive_forward_sell_share = 0` 或 `add_to_hold_conflict_share = 0` 单独解释为成功。
-- 不得让 simulator guard 继续承担主要策略翻译职责；guard 只能是最后防线。
+## 禁止事项
+- 禁止从 smoke、dry-run、interrupted wrapper、failed trial、runtime timeout 或 realtime tail label 推 promotion。
+- 禁止默认启用 true solver、恢复父子进程 watchdog，或把 active profile 扩成历史菜单。
+- 禁止把 source/reduce/exit dead 包装成“只需更多 epoch/loss”。
+- 禁止在 `model_seq_v3.py` 或 core-v4 MLP 上继续堆下一代主逻辑，除非是 baseline/compatibility。
+- 禁止修改 `daily_research/output/active_execution_strategy.json`。
 
 ## 下一步方向
-- 短期：r48 已完成正式 screening + confirmatory 但未过 stable confirm；r49 已把 source release dead、exposure utilization floor、cash timing 与资金流守恒写入代码合同；r50 已验证真实 solver 训练入口但计算负荷过高，不作为当前默认推进路径；r51 改走 native allocation vector；r52/r52c 进一步改为完整 day-set native allocation vector 并闭合 receiver executable validity；r52d 已把 validation closure 写成代码合同并完成 safe screening-only 验证。后续若正式推进，必须先复核 deployment / cash timing / exposure utilization / source breadth 的 native feedback 与 v2 / stability gate，再决定是否单独开启 confirmatory。
-- 中期：把 monthly return、exposure utilization、receiver realized deploy、source realized sell、positive spread distribution、cash timing 和 drawdown 更深地写进 native target-weight feedback，而不是回到 source / receiver / cash 独立 head 对账。
-- 长期：若 r51 formal evidence 有效，再考虑 day-set encoder / set transformer 级别的日级组合模型；simulator guard 只作为最后安全裁剪。
+- r66 当前任务是 brain/workflow maintenance，不推进策略训练。
+- r65 后续策略研究应优先修 held source creation、receiver target realization、target/action translation 和 day-set sampling。
+- 后台运行只作为 OS 级 launcher/轮询能力，不能改变 study/protocol 单进程研究本体。
+- 数据层下一步是 full-window realtime Gold build/audit；仍不得作为 completed training evidence。
 
-## 阶段索引
-- r1-r11b：alpha prior、split heads、translation guard、sell attribution、value arbitration、sell-source contract，详见 `daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
-- r12-r18：release/translation/deploy、action-value、direct action、pair reallocation 与 pair-source cost，详见 `daily_research/brain/episodic_memory.md`。
-- r19-r23：portfolio daily ranking、v2 gated、cash-aware、source/receiver execution 与 stable confirmatory。
-- r24-r26：listwise allocation、source-release listwise、allocation teacher。
-- r27-r30：source economic release、forward-strength brake、direct-release relief 与 cash-relief。
-- r31/r33：当前合同核心，分别约束 receiver 语义闭包与 source distribution clean-pass。
-- r34：allocation breadth 入口，聚焦 receiver/source breadth、经济质量内生化与 source/receiver/cash teacher surface 摘要。
-- r35：unified allocation 入口，聚焦 unified allocation surface、半可微 optimizer layer、经济 credit assignment 与 simulator guard 降级为最后安全层。
-- r36：risk-aware unified allocation 入口，聚焦 risk-aware cash/source distribution objective、unified allocation consistency loss 与 source distribution 执行旁路封闭。
-- r37：decision-focused allocation 入口，聚焦 source hard-negative、strong false sell、预测 penalty 推理消费与 decision-focused allocation regret。
-- r38：source hard-negative regret 入口，聚焦 source hard-negative tail、source release preference、transfer-level allocation regret，以及防错后恢复收益、广度和资金时机。
-- r39：当前有效证据基线，聚焦 allocation objective consolidation、final objective execution blend、action loss 降级为辅助，以及 cash timing / drawdown / clean source breadth 的统一收敛。
-- r40：当前已完成 clean rerun 的架构入口，聚焦 end-to-end allocation layer、硬 executable candidate 掩码、半可微 allocation optimizer 主路径、持久产物读取，以及 source/receiver/cash credit assignment 未稳定闭合的结构诊断。
-- r41-r45：已完成代码合同或 dry-run 的保留检查点，分别聚焦 risk-sensitive、utility-credit、primal-dual decision、entropic transport 与 conservative transport；尚无 study verdict，不再作为默认长训入口。
-- r46：已完成代码合同的保留检查点，聚焦 differentiable convex allocation、torch 图内 KKT/constraint residual、data-driven 日级约束 target、executable support、false-source pressure、cash timing、source/receiver shortfall、behavior-support / OPE、路径级 CVaR / drawdown / OCE、legacy action loss 归零与更严格短筛 resource gate；尚无 study verdict。
-- r47：已完成代码合同的保留检查点，聚焦真实 `cvxpy` / `cvxpylayers` fixed-slot convex solver layer、DPP 合同、predicted/oracle solver regret、solution tracking、gross / turnover / position / support / cash timing / path risk 诊断、r46 surrogate fallback 与更严格短筛 resource gate；尚无 study verdict。
-- r48：当前已完成代码合同与正式研究的失败 profile，聚焦 full-universe aware resource-safe solver、候选覆盖、旧 mask 盲区修复、liquidity / impact / concentration risk、propensity support、OPE lower-bound、doubly-robust gap 与更严格短筛 resource gate；study verdict 为 `research / shadow_only` 且不可 promotion。
-- r49：当前已完成代码合同与 dry-run 的最新 research profile，聚焦 capital-flow closure、receiver demand、clean source supply、cash release / defense、exposure gap、flow conservation、source dead 阻断与 false-source 保护；尚无 formal study verdict。
-- r50：当前已完成代码合同与 dry-run 的最新 integrated research profile，聚焦真实 convex solver 训练参与、full-universe/OPE、capital-flow closure、risk-sensitive/offline support、fallback diagnostics 修正与短筛 resource gate；尚无 formal study verdict。
-- r51：当前最新轻量 research profile，聚焦 native allocation vector、日级目标仓位/现金输出、torch-only projection、从 target delta 自然派生 source / receiver / cash、r49 capital-flow closure 辅助诊断与 r50 solver 高负荷规避；尚无 formal study verdict。
-- r52/r52c：day-set research profile，聚焦完整交易日 padded set batch、slot attention、日级目标仓位/现金输出、day-set native allocation vector loss、receiver executable validity、r49 capital-flow closure 辅助诊断与 r50 solver 高负荷规避；r52c 已过 safe screening 的 receiver validity，但尚无 formal study verdict。
-- r52d：当前最新代码合同 profile，聚焦 validation closure、train/sim alignment、shared deadband 与 native feedback；合同测试、dry-run 与 safe screening-only 已通过基础运行验证，但尚无 confirmatory / stable study verdict。
+## 历史索引
+- r31-r39：receiver/source/cash contract 与 allocation objective baseline。
+- r40-r48：end-to-end allocation、convex/OPE/solver 方向，均未过 stable confirm。
+- r49-r52：capital-flow closure、native allocation vector、validation closure 研究链。
+- r53-r55：cash-funded allocator、semantic budget、cash timing release controller。
+- r56-r61：release-first allocator、core-v4、profile binding、decision-focused wiring。
+- r62-r64：DuckDB + Parquet data lake 与 full-universe strict Gold。
+- r65：portfolio-set v5 architecture upgrade。
+- 完整证据入口：`daily_research/brain/references/evidence_registry.json` 与 `daily_research/brain/references/r*_*.md`。
 
-## 历史归档入口
-- 早期设计合同原文：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
-- 早期标题索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
+## 归档入口
+- 早期合同历史：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
+- 早期合同索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
 - 过程复盘入口：`daily_research/brain/episodic_memory.md`。
-- 读取纪律：当前合同以本文件上方章节为准；历史合同只作为证据与演化追溯。
-
-## 2026-05-02 r39 后停环合同
-- 主线循环审计产物：`daily_research/output/continuous_policy/analysis/cycle_audits/continuous_policy_cycle_audit_20260502.md` 与同名 JSON。审计结论为存在重复循环，必须停止把 r39 后续工作继续包装成局部 penalty / guard 修补。
-- 禁止路线：新增单边 source false-sell penalty、cash penalty、reduce/exit rescue、receiver hard guard，只要仍依赖 `action_budget_split_v1` + `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15` + `portfolio_daily_ranking_v2_gated` 作为主路径，就视为旧方案换皮。
-- 保留路线：r20-r23 execution、r31 receiver executable subset、r33 source distribution clean-pass 继续保留为最后安全边界；它们不能再承担主策略收益、资金释放、现金时机的主逻辑。
-- 新主线定义：下一阶段必须以 `end-to-end allocation layer` 为名称和目标，让 allocation objective / optimizer 同时决定 source、receiver、cash、turnover、position cap、transaction cost、drawdown 与 monthly quality；simulator guard 只允许做最终安全裁剪。
-## 2026-05-02 r40 end-to-end allocation layer 合同
-- r40 新入口为 `split_heads_portfolio_daily_end_to_end_allocation_layer_r40`；其 objective 必须是 `end_to_end_allocation_layer_v1`，预算语义必须是 `allocation_layer_v1`，预算校准必须是 `end_to_end_allocation_layer_v1`。该入口不得重新回落到 `action_budget_split_v1` 或 v15 receiver-exec guard 作为主路径。
-- r40 执行合同：`solve_semidifferentiable_allocation` 是 source/receiver/cash 的主 allocation 层，显式约束 cash reserve、turnover、position cap、transaction cost、slippage 与 sell tax；`portfolio_simulator.py` 只在其后做安全裁剪、状态更新和诊断记录。
-- r40 候选合同：所有 receiver/source 目标必须先通过硬 executable candidate 掩码；`portfolio_daily_receiver_executable_candidate = 0` 或 `portfolio_daily_source_executable_candidate = 0` 时，raw score、action label、unified score 均不得绕过进入最终 allocation target。
-- r40 语义合同：direct action open/add/reduce/exit 在 r40 中只能作为辅助表征或兼容输入，不能再生成主策略目标；诊断项 `allocation_layer_primary_mode` 必须明确标记新路径，`direct_action_open_signal_count` 等旧信号不得被伪造为 r40 主目标。
-- r40 判定边界：`self_opt_study_r40_end_to_end_allocation_layer_20260502` 仍因外层 stdout 管道失效污染而不能作为有效策略依据；后续 clean rerun `self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 已完整产出 3 个 screening 与 2 个 confirmatory，但 stable confirm 为空，confirmatory 均为 `shadow_only`，因此同样不能作为 promotion 依据。
-- r40 运行通道合同：超过外层捕获窗口的前台任务必须把 stdout/stderr 写入持久日志；stage 的持久化 JSON 是正式合同，控制台 JSON 只能是诊断输出，不得因 stdout 失效而否定已写出的 train/evaluate/protocol 产物。
-
-## 2026-05-07 r40 clean rerun 合同复盘
-- 事实：`self_opt_study_r40_end_to_end_allocation_layer_clean_r1_20260504` 自然完成，`executed_at = 2026-05-07T04:54:27+08:00`，`completed_trial_count = 3`、`failed_trial_count = 0`、`confirmatory_completed_trial_count = 2`，confirmatory diagnostics 显示 `device = cuda`、`cuda_available = true`、`runtime_env = yolos`、`trainer_backend = formal_torch_seq_v3`。
-- 事实：screening `trial_02` / `trial_03` 高收益但 `training_evidence_status = insufficient`；confirm_01 / confirm_02 为 `training_evidence_status = sufficient`，但 `portfolio_daily_v2_stable_confirmatory_trials = []`，且均未过 promotion gate。
-- 推断：r40 的工程通道已经从 stdout 管道污染中恢复，最终训练结果可读；策略失败不是“结果无法读取”，而是 confirm 层经济质量和稳定性不足。
-- 结构约束：后续不得把 screening 高收益但 evidence insufficient 的分支作为 champion，不得把 receiver deploy 数量单独解释为成功；必须同时满足 source 释放、cash timing、drawdown、v2 gate 与 stable confirm。
-- 边界：r40 clean_r1 仍是 `research / shadow_only`，当前有效证据基线仍是 r39。
-
-## 2026-05-11 r52e Deployment/Cash/Exposure Closure Contract
-- r52e entry: `split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e` / `alpha_result_value_budget_split_v41`; evidence must include actual cash, actual exposure, idle cash, receiver/source support, fallback, and `cash_semantics_mismatch`.
-- Confirmatory remains blocked until explicit screening evidence satisfies positive composite, sufficient training evidence, non-negative cash timing, exposure utilization >= 0.60, valid source/deploy realization, no native fallback main path, and no v2 hard gate failure.
-- Boundary update: safe screening failed, so r52e is screening-only research; next inspect target weight sum near `0.28` vs stock budget / gross target near `0.83-0.85`, without live/default/promotion or active changes.
-
-## 2026-05-12 r53 Cash-Funded Allocation Core Contract
-- r53 entry: `split_heads_portfolio_daily_cash_funded_allocation_core_r53` / `alpha_result_value_budget_split_v43`.
-- r53 allocator contract: `allocation_core_v2.py` owns the final cash-funded target-weight solve for r53 only; r52/r52e native allocation behavior must remain compatible.
-- r53 budget contract: when the learned daily gross target collapses too low, r53 must emit and honor `allocation_core_v2_stock_budget_floor`; the cash-funded allocator must not be evaluated against a false `0.20` stock budget.
-- r53 gate contract: cash-funded deployment and receiver-headroom utilization are required only when deployment is actually needed. If actual cash, deployable idle cash, exposure utilization, and target sum gap already show a closed budget, zero fresh receiver targets must not be scored as allocator failure.
-- r53 verdict boundary: safe screening improved cash/exposure closure but still fails strategy quality through insufficient training evidence, negative cash timing, and strongly negative composite score. It remains blocked from confirmatory, strict resume, promotion, live/default, and active artifact changes.
-
-## 2026-05-12 r54 Semantic Budget Controller Contract
-- r54 entry: `split_heads_portfolio_daily_semantic_budget_controller_r54` / `alpha_result_value_budget_split_v44`.
-- r54 semantic contract: `portfolio_daily_target_weight_intent` is the main model intent; lifecycle `action_label` is a hint/reporting surface and must not override final target weights.
-- r54 simulator contract: final weights are solved through the r53 cash-funded allocator, then execution actions are derived from target-weight deltas.
-- r54 audit contract: intent translation conflict must compare target-weight intent delta with final execution delta after applying execution deadband; micro deltas below deadband are not semantic failures.
-- r54 gate contract: receiver activity, cash-funded deployment, and unused receiver headroom are failures only when deployment is actually required. Budget-closed days must not be scored as deployment failures.
-- r54 verdict boundary: safe screening improved score shape and kept cash/exposure closure clean, but training evidence, cash timing, reduce/exit quality, and one abnormal trial exit still block confirmatory, promotion, live/default, and active artifact changes.
-
-## 2026-05-12 r55 Cash Timing Release Controller Contract
-- r55 entry: `split_heads_portfolio_daily_cash_timing_release_controller_r55` / `alpha_result_value_budget_split_v45`.
-- r55 diagnostic contract: abnormal trials may preserve artifact health and parse diagnostics, but failed trials have `completed_evidence=0.0` and must not be counted as completed screening evidence.
-- r55 behavior contract: every completed protocol writes `behavior_bottleneck_report.json` so `cash_timing_negative`, `sell_intent_dead`, `reduce_quality_weak`, `exit_timeliness_weak`, `training_evidence_insufficient`, and `best_epoch_at_edge` are explicit blockers rather than inferred from composite score.
-- r55 loss contract: v45 keeps true solver disabled and uses day-set native allocation plus explicit `cash_timing_directional_loss`, `source_release_intent_loss`, and `reduce_exit_intent_loss`; legacy action/duration totals remain `0.0`.
-- r55 simulator contract: only explicit `portfolio_daily_target_delta_intent < -deadband` may force allocation-intent-v2 release target weights; r54 target-weight micro deltas without explicit target-delta intent must remain deadband-protected.
-- r55 verdict boundary: safe screening improved best composite to `5.128541`, but cash timing remains strongly negative and source/reduce/exit remain dead, so r55 is research/shadow-only and blocked from strict resume, confirmatory, promotion, live/default, and active artifact changes.
-
-## 2026-05-13 GPU Training Runtime Contract
-- seq_v3 CUDA training must use the shared `training_runtime_acceleration.py` runtime for AMP/GradScaler, pinned DataLoader memory, non-blocking transfer, and acceleration diagnostics.
-- Cvxpy/cvxpylayer profiles must disable AMP for solver safety while retaining pinned memory and non-blocking transfer.
-- Training diagnostics must expose `gpu_acceleration`, `amp_enabled`, `data_loader_pin_memory`, `non_blocking_transfer`, and per-epoch `train_seconds` / `validation_seconds` / `epoch_seconds` so future speed claims can be evidence-based.
-- This contract is infrastructure-only; it must not be interpreted as strategy evidence, confirmatory eligibility, live/default change, promotion support, or active artifact change.
-
-## 2026-05-13 r56 Release-First Constrained Decoder Contract
-- r56 entry: `split_heads_portfolio_daily_release_first_constrained_decoder_r56` / `alpha_result_value_budget_split_v46`.
-- Allocator contract: `allocation_core_v3.py` owns the r56-only release-first solve. It must generate held-source release supply before receiver allocation, may keep release as cash under cash-defense pressure, and must close gross/cash/turnover/position-cap diagnostics.
-- Intent contract: `derive_release_first_intent(...)` may create release intent only for held names. Negative target-delta, high release quality, source score, and exit hazard may raise release; high forward keep-risk or economic block risk must suppress release.
-- Simulator contract: `release_first_allocation_v3_mode` must call v3 before the compatible r53-r55 v2 path. Lifecycle `action_label` remains a hint/reporting surface; final execution semantics are still derived from target-weight delta.
-- Diagnostics contract: r56 protocols must preserve `release_first_source_intent_count`, `release_first_source_realized_count`, `release_first_rotation_amount`, `release_first_cash_buffer_amount`, `release_first_block_reason`, `target_sum_gap`, and `turnover_used`.
-- Loss contract: v46 keeps `action_total=0.0` and `duration_total=0.0`, keeps true solver disabled, and adds positive release-first/cash-timing/source-release/reduce-exit allocation terms.
-- Evidence contract: failed or timed-out trials before a parseable `protocol_summary.json` have `completed_evidence=0.0`. They may diagnose runtime but must not be used as completed screening evidence.
-- Current verdict boundary: dry-run passed, but safe screening has `0` completed r56 trials; r56 cannot enter strict resume, confirmatory, promotion, live/default, or active artifact changes until completed safe evidence exists and passes gates.
-
-## 2026-05-13 r58 Framework Simplification Contract
-- Default study execution is foreground and in-process. The study runner must not spawn a protocol subprocess, run a parent/child watchdog, or expose default wall-time / stale-progress subprocess timeout options.
-- Runtime observability is cooperative and file-based: protocol progress JSONL, latest protocol progress JSON, training progress events, and study progress events are allowed and encouraged.
-- Search profile registration is split from the study runner. New study entrypoints must come from the active registry, currently limited to `focused_seq_v1`, r53, r54, r55, and r56.
-- Legacy r19-r52 profile definitions may remain available for historical artifact compatibility, but they must not be default CLI choices for new studies.
-- Runtime triage workflow is fixed as: direct foreground protocol smoke, then dry-run study, then safe screening. Failed runtime attempts without parseable protocol summaries remain diagnostics only.
-- This framework contract does not alter live/default/promotion rules and must never write `daily_research/output/active_execution_strategy.json`.
-
-## 2026-05-13 r59 Parallel Core V4 Contract
-- Backend contract: `formal_torch_core_v4` is a parallel research backend for release-first allocation work. It must not replace v3 artifact loading/replay, and `model_seq_v3.py` must not become the home for new r59 main logic.
-- Promotion contract: core-v4 training contracts are epoch-based, resume-capable, and GPU-required, but `promotable=False`. Protocol promotion gates must treat core-v4 artifacts as shadow-only unless a future explicit contract changes this.
-- Artifact contract: core-v4 artifacts use type `continuous_policy_torch_core_v4` and file name `continuous_policy_core_v4_artifact.pt`. Generic loading/prediction may support them, but old v3 artifact behavior must remain unchanged.
-- Prediction contract: core-v4 prediction must emit release-first-compatible target-weight intent, target-delta intent, release/source support fields, and global target `release_first_allocation_v3_mode=1.0`.
-- Loss contract: core-v4 may accept only `alpha_result_value_budget_split_v46` and alias `core_v4_release_first_v1` as new training losses. It must not migrate v1-v45 legacy loss history into the new backend.
-- Registry contract: active new-study profiles are `focused_seq_v1`, `split_heads_portfolio_daily_release_first_constrained_decoder_r56`, and `split_heads_portfolio_daily_release_first_core_v4_r59`. r53-r55 may remain readable as legacy compatibility data but are not default new-study entrypoints.
-- Evidence contract: direct smoke and dry-run can prove wiring only. They must not be written as strategy effectiveness, safe-screening, confirmatory, live/default, promotion, or active artifact evidence.
-- Guard contract: r59 must not write `daily_research/output/active_execution_strategy.json`.
-
-## 2026-05-13 r60 Profile-Bound Protocol Contract
-- Direct protocol contract: when `--search-profile` is an active profile, protocol arguments must apply profile base-trial defaults with precedence explicit CLI value > profile base trial > parser default.
-- Profile-binding contract: protocol summaries must include `profile_binding` with requested profile, applied status, explicit overrides, active-profile status, and effective base trial.
-- Legacy-entry contract: non-active legacy profiles must not start new direct protocols through `--search-profile`; they are historical compatibility data only.
-- Diagnostics contract: evaluation and shadow continuity metrics must surface release-first/source/cash/intent diagnostics from turnover CSV, including source intent count, source target count, source realized sell rate, target sum gap, actual cash weight, and intent translation conflict.
-- Bottleneck contract: behavior bottleneck reports must use enriched continuity metrics and must not mark intent translation as clean when the diagnostic field is missing.
-- Core-v4 intent contract: core-v4 prediction must reuse `derive_release_first_intent(...)` for release score, action hint, intent delta, and block reason.
-- Evidence boundary: r60 safe screening completed but failed behaviorally. It proves profile-bound execution and diagnostic visibility, not strategy success or promotion readiness.
-- Next-work boundary: future work must target release/source target generation and target-delta-to-allocator wiring before any confirmatory or long resume.
-
-## 2026-05-14 r61-r65 Current Research Contracts
-- r61 core-v4 remains a reusable baseline/ablation: reusable training surfaces, coherent release-first targets, release-flow trace, and v47 decision loss are valid; smoke/dry-run/interrupted safe protocol are not promotion evidence.
-- r62-r64 data contract: constructed training datasets belong in `daily_research.data_lake`; full-window strict Gold is training-safe only when audited and label-complete, while realtime full-window Gold is still pending and realtime tail labels remain research/audit only.
-- r63 brain contract: capsules, evidence registry, query, rules, and project skill are operating context, not strategy evidence; failed/interrupted/timeout/smoke/dry-run artifacts cannot become completed evidence by writeback.
-- r65 entry: `split_heads_portfolio_daily_release_first_portfolio_set_v5_r65` / `alpha_result_value_budget_split_v48`, backend `formal_torch_portfolio_set_v5`, artifact type `continuous_policy_torch_portfolio_set_v5`, `promotable=False`.
-- r65 architecture contract: use temporal per-symbol state, portfolio state tokens, and latent set attention or equivalent resource-safe set encoder; default full-universe `O(N^2)` self-attention is forbidden.
-- r65 dataset/loss/prediction contract: default to audited strict Gold `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`; v48 owns v5 release-first behavior; prediction must emit release-first source/receiver/cash/target fields and `release_first_allocation_v3_mode=1.0`.
-- r65 registry/evidence boundary: active new-study profiles are `focused_seq_v1`, r56, and r65; r61 is legacy-compatible baseline evidence. r65 smoke/dry-run prove wiring only, and the parseable behavior-negative safe protocol is not a completed study-summary verdict.
-- r65 next-work boundary: repair held source creation, receiver target realization, target/action translation, and day-set sampling before increasing epochs, widening the model, or returning to MLP core-v4 as the main path.

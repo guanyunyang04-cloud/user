@@ -1,175 +1,75 @@
 # Daily Research 操作中枢
 
-快照日期：`2026-05-11`
+快照日期：`2026-05-14`
 
 ## 默认操作纪律
-- 本文件只保留当前高频入口、运行纪律和写回路由；旧命令长记录进入 `daily_research/brain/references/`。
-- `daily_research` 程序必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`，不得依赖当前 shell Python。
-- Windows 默认设置：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`。
-- 中文文档正文不得用 PowerShell here-string 直接写入；优先使用 `apply_patch`，批量生成时必须显式 `encoding='utf-8'` 并用 Python 复核。
-- 当前 `yolos` 已完成 OpenMP 原地修复；根治验收命令为 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/openmp_runtime_check.py --strict`。
-- 当前命令不得默认设置 `KMP_DUPLICATE_LIB_OK`。
-- 所有训练、评估、审计、bounded study、confirmatory rerun、execution app 与交易计划任务默认前台运行，不得为规避窗口而后台化。
-- 长任务 stdout/stderr 必须写入持久日志；监控轮询间隔固定为 `2` 小时；进程自然结束后立即解析产物。
-- self-optimizing study 的 protocol trial 默认在同一 Python 进程内运行；不得再按父进程/子进程模型设计训练监控或资源限制。
-- GPU 训练完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable`。
+- 默认工作分支：`main`。
+- Python 入口：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
+- 不使用 `KMP_DUPLICATE_LIB_OK` 作为默认方案。
+- 不触碰 `daily_research/output/active_execution_strategy.json`，除非有明确 promotion 决策。
+- 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
+- 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
+- PowerShell 中文写入不作为默认文档编辑方式；中文正文优先用 `apply_patch` 或显式 UTF-8 工具链。
 
 ## 项目地图
-- 当前状态与边界：`daily_research/brain/state_center.md`。
-- 稳定事实、规则和教训：`daily_research/brain/knowledge_center.md`。
-- continuous_policy 设计合同：`daily_research/brain/continuous_policy_design_contract.md`。
-- 过程复盘：`daily_research/brain/episodic_memory.md`。
-- 执行与交易计划：`daily_research/execution`。
-- 连续策略研究：`daily_research/continuous_policy`。
-- 产物、评估、协议、审计：`daily_research/output`。
+- brain 真源：`daily_research/brain/`。
+- research data lake：`daily_research/output/research_data_lake/`。
+- continuous_policy studies：`daily_research/output/continuous_policy/studies/`。
+- continuous_policy protocols：`daily_research/output/continuous_policy/protocols/`。
+- production active artifact：`daily_research/output/active_execution_strategy.json`。
+- execution app：`daily_research/execution/run_execution_app.py`。
 
-## 高频命令
-- 主脑接管：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child daily_research --json`
-- 平台化接管胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow handoff --child daily_research --json`
-- 工作流健康检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow health --json`
-- continuous_policy 状态胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --json`
-- 指定 study 证据胶囊：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <tag> --json`
-- 写回计划预览：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow writeback-plan --source latest --json`
-- 指定 study 写回计划：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow writeback-plan --source study:<tag> --json`
-- 守卫检查：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
-- 文档守卫：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
-- 项目一致性：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/project_consistency_check.py`
-- OpenMP strict：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/openmp_runtime_check.py --strict`
-- execution app：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/execution/run_execution_app.py status`
-- execution web：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/execution/run_execution_app.py web --port 8765`
-- continuous_policy protocol：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_continuous_policy_protocol --help`
-- self-optimizing study：`C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --help`
+## 高频 Brain 命令
+- task capsule：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
+- explicit evidence status：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <study_tag> --json`
+- evidence registry rebuild：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow evidence-index --rebuild --json`
+- evidence query：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q <r_id|tag|dataset_id> --json`
+- brain guards：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
 
-## 当前 continuous_policy 操作口径
-- 当前 live 默认执行链仍以 `active_execution_strategy.json` 为真源；continuous_policy 当前仍是 `research / shadow_only`。
-- 当前有效证据基线仍是 r39；r48 是失败 verdict；r49-r52d 是 research profile，不是 production 默认。
-- r31：`split_heads_portfolio_daily_receiver_semantic_closure_r31`。
-- r31 重点看 `direct_action_authorization_subset_violation_count`。
-- r33：`split_heads_portfolio_daily_source_forward_proxy_r33`，重点看 `portfolio_daily_source_forward_proxy_keep_risk`、`portfolio_daily_source_release_conviction` 与 `portfolio_daily_source_distribution_clean_pass`。
-- r34：`split_heads_portfolio_daily_allocation_breadth_r34`，重点看 `portfolio_daily_receiver_candidate_breadth`、`portfolio_daily_clean_source_candidate_breadth`、`portfolio_daily_joint_economic_quality_gate` 与 `allocation_teacher_summary_mean`。
-- r35：`split_heads_portfolio_daily_unified_allocation_r35`，重点看 `unified_allocation_summary_mean`、`portfolio_daily_unified_allocation_objective`、`portfolio_daily_source_positive_forward_penalty`、`portfolio_daily_source_opportunity_cost_penalty` 与 `portfolio_daily_receiver_source_spread_reward`。
-- r39 当前证据基线仍读 `portfolio_daily_ranking_v2_gated` 与 `cash_constraint_portfolio_daily_ranking_receiver_exec_guard_v15`。
-- 月度收益评价读取 `monthly_returns.csv` 与对应 shadow 月度文件。
-- r51：`split_heads_portfolio_daily_native_allocation_vector_r51` / `alpha_result_value_budget_split_v36`，不启用 `cvxpy/diffcp` 训练主路径。
-- r52：`split_heads_portfolio_daily_day_set_native_allocation_vector_r52` / `alpha_result_value_budget_split_v37`，使用完整交易日 day-set batch，不启用 true solver。
-- r52 诊断优先读取：`supports_portfolio_day_set_native_allocation_vector`、`portfolio_day_set_native_allocation_vector_terms`、`sample_model_type`、`day_set_batch_size`、`allocation_layer_native_target_used`、`native_source_delta_alignment_support`、`native_target_valid`、`native_source_target_count`、`native_source_audit_threshold_gap`。
-- r52 当前判定：native source-delta closure 已部分修通，但 evidence insufficient，不能进入 confirmatory。
-- r52b：`split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b` / `alpha_result_value_budget_split_v38`，优先修 native target validity、turnover 同口径与 source audit threshold；诊断必须读取 `allocation_layer_native_fallback_used` 与 `native_target_invalid_*` 分原因字段。
-- r52b safe screening `self_opt_study_r52b_native_target_validity_closure_screening_safe_20260511_01` 已验证：2/3 trials completed、0 failed、`confirmatory_enabled = false`、`resource_profile = safe`、true solver 未启用；resource gate 因 `source_release_dead`、`receiver_deploy_not_clean`、`economic_signal_too_weak` 早停。
-- r52b 停止条件已触发：`native_target_valid = 0.0625 / 0.0125`，未高于 r52 的 1%-6% 区间；`allocation_layer_native_fallback_used = 0.9375 / 0.9875`；不得进入 confirmatory 或 22 epoch resume。
-- r52c：`split_heads_portfolio_daily_day_set_native_executable_receiver_closure_r52c` / `alpha_result_value_budget_split_v39`，已验证 receiver executable closure；当前复核重点改为 `training_evidence_status`、`cash_timing_quality_1d`、`portfolio_daily_exposure_utilization`、`native_source_target_count` 与 deployment closure，不再把 unsupported receiver validity 当作主阻塞。
-- r52d：`split_heads_portfolio_daily_day_set_native_validation_closure_r52d` / `alpha_result_value_budget_split_v40`，仅为 screening-only research result；dry-run `self_opt_study_r52d_validation_closure_dryrun_20260511_01` 通过，safe screening `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01` 完成 3/3 trials、0 failed、confirmatory disabled；explicit capsule 判定不具备 confirmatory eligibility，后续不得直接 confirmatory、resume 或加长同 tag 训练。
+## Continuous Policy 运行口径
+- Direct protocol smoke 先于 dry-run study，dry-run study 先于 safe screening。
+- 默认 protocol runner 为 `in_process`；不恢复 r57 父/子进程 watchdog。
+- Study runner 是逻辑编排层：选 trial、写 plan、调用 protocol、汇总 `study_summary.json`。
+- Protocol 是单次训练/评估/shadow/export 层，写 `protocol_summary.json`。
+- 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
+- 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
 
-## r52 dry-run 模板
-```powershell
-$env:PYTHONUTF8='1'
-$env:PYTHONIOENCODING='utf-8'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_allocation_vector_r52 --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
-```
+## 当前 r65 口径
+- Active research profile：`split_heads_portfolio_daily_release_first_portfolio_set_v5_r65`。
+- Backend/loss：`formal_torch_portfolio_set_v5` / `alpha_result_value_budget_split_v48`。
+- 默认 strict Gold dataset：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
+- r65 是 `research / shadow-only / architecture upgrade`；不得 confirmatory、promotion、live/default 或 active artifact change。
+- r65 下一步应修 held source creation、receiver target realization、target/action translation 与 day-set sampling。
 
-## r52b dry-run 模板
-```powershell
-$env:PYTHONUTF8='1'
-$env:PYTHONIOENCODING='utf-8'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
-```
+## Data Lake 口径
+- Full-window strict Gold 已完成并 audit-clean：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
+- Full-window realtime Gold 仍 pending；realtime tail labels 只能用于 research/audit。
+- 构建或读取数据集必须使用 explicit dataset id，不用 loose latest 判断完成。
+- Gold 构建采用 sharded/resumable builder，不再通过训练入口强行构建全量 Gold。
 
-## r52d dry-run 模板
-```powershell
-$env:PYTHONUTF8='1'
-$env:PYTHONIOENCODING='utf-8'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_validation_closure_r52d --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --dry-run
-```
-
-## r52b safe screening 口径
-```powershell
-$env:PYTHONUTF8='1'
-$env:PYTHONIOENCODING='utf-8'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_day_set_native_target_validity_closure_r52b --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag <tag> --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal
-```
-
-## 产物读取入口
-- study 摘要：`daily_research/output/continuous_policy/studies/<study_tag>/study_summary.json`。
-- protocol 摘要：`daily_research/output/continuous_policy/protocols/<run_tag>/protocol_summary.json`。
-- 模型诊断：`daily_research/output/continuous_policy/models/<run_tag>__train/training_diagnostics.json`。
-- evaluation 摘要：`daily_research/output/continuous_policy/evaluations/<eval_tag>/evaluation_summary.json`。
-- behavior audit：`daily_research/output/continuous_policy/analysis/behavior_audits/`。
+## 必跑守卫
+- `git diff -- daily_research/output/active_execution_strategy.json`
+- `git diff --check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
+- `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+- 修改 brain workflow / registry / rules 后，跑：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/tools/tests/test_brain_capsule.py daily_research/tools/tests/test_brain_evidence_registry.py daily_research/tools/tests/test_brain_rules.py daily_research/tools/tests/test_brain_workflow_cli.py daily_research/tools/tests/test_daily_research_brain_skill.py -q`
 
 ## 写回路由
-- 当前状态、优先级、边界：`state_center.md`。
-- 稳定事实、规则、术语：`knowledge_center.md`。
-- 新命令口径、环境和流程：`operations_center.md`。
-- 设计边界和成功判定：`continuous_policy_design_contract.md`。
-- 过程证据、动作后复盘：`episodic_memory.md`。
-- 大段历史原文、标题索引和归档说明：`daily_research/brain/references/`。
-- 默认先用 `brain_workflow writeback-plan` 生成路由建议；只有显式确认写回时才修改 brain 主文件。
+- 当前状态和允许动作：`daily_research/brain/state_center.md`。
+- 稳定规则和长期教训：`daily_research/brain/knowledge_center.md`。
+- 操作命令和流程纪律：`daily_research/brain/operations_center.md`。
+- 设计边界和 active research contract：`daily_research/brain/continuous_policy_design_contract.md`。
+- 完整 rXX 证据、长命令、复盘：`daily_research/brain/references/`。
+- 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口
 - 本文件归档前完整快照：`daily_research/brain/references/operations_center_archive_20260510.md`。
-- 历史操作原文：`daily_research/brain/references/operations_center_history_raw_20260424.md`。
-- 历史操作索引：`daily_research/brain/references/operations_center_evidence_index_20260424.md`。
-## 2026-05-11 r52c Safe Screening Operational Note
-- Screening tag: `self_opt_study_r52c_native_executable_receiver_closure_screening_safe_20260511_01` (safe profile, thread-limit=4, cpu-affinity=4, process-priority=below_normal, confirmatory disabled).
-- Ranking/export has been repaired: `trial_ranking.csv` now includes `native_target_valid`, `allocation_layer_native_fallback_used`, and `native_target_invalid_*` columns from protocol evidence.
-- When reviewing r52c/r52d studies, use explicit capsule first:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <tag> --json`
-- Do not gate decisions on loose `latest_protocol_summary` while stale-risk is true.
-
-## 2026-05-11 r52d Screening Verdict Note
-- Evidence capsule: `daily_research/brain/references/r52d_native_validation_closure_status_20260511.md`.
-- Verdict: `r52d screening-only failed confirmatory eligibility`.
-- Stop rule: do not start confirmatory / strict resume / promotion from `self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01`.
-- Next research focus: deployment, cash timing, exposure utilization, and training evidence closure; do not repeat receiver mask repair as the main path.
-
-## 2026-05-11 r52e Diagnostic / Safe Screening Commands
-- Explicit r52d diagnostic baseline:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.allocation_closure_diagnostics --study-tag self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01 --json`
-- r52e dry-run contract check:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e --study-tag self_opt_study_r52e_deployment_cash_exposure_closure_dryrun_20260511_01 --disable-confirmatory --dry-run`
-- r52e boundary: use explicit study tags only; do not infer decisions from mixed loose `latest_*` files.
-- r52e boundary: safe screening may be proposed after tests and dry-run pass; confirmatory / strict resume / promotion remain blocked until explicit gate evidence exists.
-
-## 2026-05-12 r52e Screening Operational Verdict
-- Screening tag: `self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01`.
-- Evidence capsule: `daily_research/brain/references/r52e_deployment_cash_exposure_closure_status_20260512.md`.
-- Safe screening command used:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -X utf8 -m daily_research.continuous_policy.run_self_optimizing_study --search-profile split_heads_portfolio_daily_deployment_cash_exposure_closure_r52e --objective-profile end_to_end_allocation_layer_v1 --budget-semantics allocation_layer_v1 --budget-calibration end_to_end_allocation_layer_v1 --budget-objective result_value_v10 --study-tag self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01 --disable-confirmatory --resource-profile safe --thread-limit 4 --cpu-affinity-count 4 --process-priority below_normal`
-- Stop rule: do not run confirmatory or strict resume from this tag; resource gate already stopped after 1/3 trials and closure diagnostics still show high idle cash / low exposure.
-
-## 2026-05-12 r53 Operational Note
-- r53 dry-run tag: `self_opt_study_r53_cash_funded_allocation_core_dryrun_20260512_03`.
-- r53 safe screening tag: `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03`.
-- Evidence capsule: `daily_research/brain/references/r53_cash_funded_allocation_core_status_20260512.md`.
-- r53 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, 2-hour foreground polling for long runs.
-- Stop rule: do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from r53 until a later explicit safe screening fixes negative cash timing and insufficient training evidence.
-
-## 2026-05-12 r54 Operational Note
-- r54 dry-run tag: `self_opt_study_r54_semantic_budget_controller_dryrun_20260512_02`.
-- r54 safe screening tag: `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02`.
-- Evidence capsule: `daily_research/brain/references/r54_semantic_budget_controller_status_20260512.md`.
-- r54 command discipline: safe screening only, `--disable-confirmatory`, safe resources, persistent stdout/stderr logs, foreground polling window `2` hours, and immediate result parsing when the process ends early.
-- Stop rule: do not run confirmatory, promotion, live/default, or active artifact changes from r54. Strict resume requires a separate explicit decision after investigating the trial 03 abnormal exit and the remaining cash-timing / best-epoch blockers.
-
-## 2026-05-12 Single-Process Study Runner Note
-- self-optimizing study no longer launches `run_continuous_policy_protocol` as a child process for each trial.
-- `_run_protocol_with_progress` now calls protocol main in-process and writes progress events with `protocol_runner_mode=in_process`.
-- Resource controls now apply to the current process environment, current process priority/affinity on Windows, and Torch thread limits where available.
-- Monitoring rule: track the single study/training process plus progress files; do not search for separate protocol child processes.
-
-## 2026-05-14 r63 Brain Workflow Commands
-- Task capsule: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
-- Evidence registry rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow evidence-index --rebuild --json`
-- Evidence query: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q "<r-id/tag/dataset/blocker>" --json`
-- Project skill sync dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/install_project_skills.py --dry-run`
-- Guard rule: global skill install is explicit only via `--install`; dry-run must not be reported as installed.
-
-## 2026-05-14 r64 Gold Data Lake Commands
-- Full-universe Gold smoke evidence: `daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md`.
-- Build sharded Gold from existing Bronze/Silver lake data:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_gold_training_dataset --universe learned_all_a --max-universe-size 0 --benchmark 000300.SH --start-date <start> --end-date <end> --zones strict_train,realtime_research --source-market-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --shard-frequency month --resume --progress-jsonl <progress.jsonl>`
-- Audit a Gold dataset:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.audit_gold_dataset --dataset-id <dataset_id>`
-- Full strict dataset ready: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
-- Next allowed full realtime build:
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_gold_training_dataset --universe learned_all_a --max-universe-size 0 --benchmark 000300.SH --start-date 2010-01-04 --end-date 2026-05-13 --zones realtime_research --source-market-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --shard-frequency month --resume --progress-jsonl daily_research/output/research_data_lake/r64_full_realtime_progress_20100104_20260513.jsonl`
-- Stop rule: do not report realtime Gold as ready until the catalog has explicit full-window realtime dataset id and audit `status=ok`.
+- 早期操作原文：`daily_research/brain/references/operations_center_history_raw_20260424.md`。
+- 早期操作索引：`daily_research/brain/references/operations_center_evidence_index_20260424.md`。

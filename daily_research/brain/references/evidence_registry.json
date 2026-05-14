@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 16,
+  "record_count": 17,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -38,12 +38,11 @@
       "study_tags": [
         "self_opt_study_r52d_native_validation_closure_screening_safe_20260511_01"
       ],
-      "verdict": "Verdict: `r52d screening-only failed confirmatory eligibility`.; Do not start confirmatory, strict resume, promotion, live/default switch, or active artifact update from this tag.; Keep r39 as the current effective continuous_policy evidence baseline.; Next allowed work should target deployment/cash timing/exposure utilization/training evidence closure at the research-code objective or feedback level, not receiver mask repair or extra epochs on the same r52d evidence.",
+      "verdict": "Verdict: `r52d screening-only failed confirmatory eligibility`.",
       "blockers": [
         "Study completed `3/3` screening trials with `0` failed.",
-        "`confirmatory_enabled = false`; `confirmatory_completed_trial_count = 0`.",
-        "`native_validation_closure_support = true`.",
-        "`full_universe_train_solver_effective = false`."
+        "no v2/stability hard gate failure relevant to strategy acceptance.",
+        "Verdict: `r52d screening-only failed confirmatory eligibility`."
       ],
       "next_allowed_actions": [
         "Next allowed work should target deployment/cash timing/exposure utilization/training evidence closure at the research-code objective or feedback level, not receiver mask repair or extra epochs on the same r52d evidence."
@@ -65,13 +64,15 @@
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01",
         "self_opt_study_r52e_deployment_cash_exposure_closure_screening_safe_20260511_01__trial_01__audit_recomputed_after_closure_fix_20260512_01"
       ],
-      "verdict": "## Verdict; r52e safe screening failed the strict resume gate and failed confirmatory eligibility.; Do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from this tag.; The issue remains deployment/cash/exposure closure and source release, not lack of confirmatory compute.; Next work should inspect why target weight sum remains near `0.28` while stock budget / gross target is near `0.83-0.85`, and why source release stays dead despite receiver candidates.",
+      "verdict": "r52e safe screening failed the strict resume gate and failed confirmatory eligibility.; Do not run confirmatory, strict resume, promotion, live/default, or active artifact changes from this tag.; The issue remains deployment/cash/exposure closure and source release, not lack of confirmatory compute.; Next work should inspect why target weight sum remains near `0.28` while stock budget / gross target is near `0.83-0.85`, and why source release stays dead despite receiver candidates.",
       "blockers": [
         "Completed screening trials: `1/3`; failed trials: `0`.",
-        "Resource gate triggered after trial 01 and saved 2 screening trials.",
         "Original resource gate failures: `source_release_dead`, `economic_signal_too_weak`, `exposure_utilization_low`, `actual_cash_weight_high`.",
         "Original trial 01 score: `composite_score=-45.938456`, `annual_return=-0.268027`, `cash_timing_quality_1d=-0.053696`, `portfolio_daily_exposure_utilization=0.331584`, `training_evidence_status=insufficient`.",
-        "Native validity stayed mostly healthy: `native_target_valid=0.987654`, `allocation_layer_native_fallback_used=0.012346`; fallback was not the main path."
+        "Independent allocation closure diagnostic on the trial turnover export found the same r52d-like failure shape:",
+        "Recomputed score/gate check would add `actual_cash_idle_high` and `cash_semantics_mismatch` to the resource failures.",
+        "r52e safe screening failed the strict resume gate and failed confirmatory eligibility.",
+        "Next work should inspect why target weight sum remains near `0.28` while stock budget / gross target is near `0.83-0.85`, and why source release stays dead despite receiver candidates."
       ],
       "next_allowed_actions": [
         "Next work should inspect why target weight sum remains near `0.28` while stock budget / gross target is near `0.83-0.85`, and why source release stays dead despite receiver candidates."
@@ -94,14 +95,14 @@
         "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03",
         "self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03__trial_03"
       ],
-      "verdict": "## Verdict; r53 has a valid code contract and safe-screening evidence that the high-cash / low-budget deployment bug is materially improved.; r53 is not a strategy-success verdict.; r53 must not enter confirmatory, strict resume, promotion, live/default, or active artifact changes yet.",
+      "verdict": "r53 has a valid code contract and safe-screening evidence that the high-cash / low-budget deployment bug is materially improved.; r53 is not a strategy-success verdict.; r53 must not enter confirmatory, strict resume, promotion, live/default, or active artifact changes yet.; all screening trials still have `training_evidence_status=insufficient`;",
       "blockers": [
         "Safe screening `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03` completed `3/3` screening trials, `0` failed trials, `confirmatory_enabled=false`, `confirmatory_completed_trial_count=0`.",
-        "Best screening trial by ranking: `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03__trial_03`.",
-        "`composite_score=-1310.310271`."
+        "`training_evidence_status=insufficient`.",
+        "Third screening showed the budget/cash/exposure closure works materially better: cash fell from the previous high-cash failure shape to about `0.19`, target gap was near zero, and fallback was not used.",
+        "all screening trials still have `training_evidence_status=insufficient`;"
       ],
       "next_allowed_actions": [
-        "## Next Decision",
         "Do not run confirmatory from `self_opt_study_r53_cash_funded_allocation_core_screening_safe_20260512_03`.",
         "Do not simply add epochs as the next move.",
         "Next work should inspect why cash timing stays negative and why scoring remains deeply negative despite cash/exposure closure improvement.",
@@ -127,14 +128,18 @@
         "self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_03",
         "protocol_summary"
       ],
-      "verdict": "## Verdict; r54 fixes the r53 audit/scoring false-negative around budget-closed days and makes intent translation conflict measurement deadband-aware.; r54 materially improves score shape versus r53: best completed screening composite is positive while cash/exposure closure remains clean.; r54 is still not a strategy-success verdict.; r54 must not enter confirmatory, promotion, live/default, or active artifact changes.",
+      "verdict": "r54 fixes the r53 audit/scoring false-negative around budget-closed days and makes intent translation conflict measurement deadband-aware.; r54 materially improves score shape versus r53: best completed screening composite is positive while cash/exposure closure remains clean.; r54 is still not a strategy-success verdict.; r54 must not enter confirmatory, promotion, live/default, or active artifact changes.",
       "blockers": [
+        "Safe screening tag: `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02`.",
+        "Run completed at `2026-05-12T20:30:32+08:00`.",
+        "Study summary: `daily_research/output/continuous_policy/studies/self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02/study_summary.json`.",
+        "Completed screening trials: `2`.",
         "Failed screening trials: `1`.",
         "Confirmatory remained disabled; confirmatory completed count was `0`.",
-        "Resource gate evaluated trial 02 and did not stop screening early; remaining resource-gate failure was `cash_timing_bad`."
+        "Resource gate evaluated trial 02 and did not stop screening early; remaining resource-gate failure was `cash_timing_bad`.",
+        "Trial tag: `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02__trial_02`."
       ],
       "next_allowed_actions": [
-        "## Next Decision",
         "Do not run confirmatory from `self_opt_study_r54_semantic_budget_controller_screening_safe_20260512_02`.",
         "A strict resume is only reasonable if it keeps the same explicit r54 tag lineage, first investigates the trial 03 abnormal exit, and targets the known `best_epoch_at_edge` / cash-timing blockers.",
         "The next code work should focus on cash-timing and risk-reduction intent quality, not allocator closure or receiver-headroom gates."
@@ -159,13 +164,15 @@
       "verdict": "Current verdict: r55 is a useful diagnostic/code-contract and screening improvement over r54 composite, but not a strategy-success verdict.",
       "blockers": [
         "Added artifact diagnostics for abnormal trial exits: failed trials can record JSON existence/parse state/exit code, but failed trial `completed_evidence` is forced to `0.0`.",
-        "Added per-protocol `behavior_bottleneck_report.json` generation.",
-        "Added semantic budget intent helpers for cash timing and explicit negative target-delta release intent.",
-        "Added v45 native allocation terms: `cash_timing_directional_loss`, `source_release_intent_loss`, and `reduce_exit_intent_loss`.",
-        "Added r55 search profile and resource gate with true solver disabled."
+        "Simulator now uses explicit `portfolio_daily_target_delta_intent < -deadband` under allocation-intent-v2 to derive reduce/exit hints and release target weights.",
+        "Failed trials: 0.",
+        "Trial 01: `composite_score=3.178243`, `cash_timing_quality_1d=-0.168382`, `training_evidence_status=insufficient`, `best_epoch=16`, `completed_epochs=16`.",
+        "Trial 02: `composite_score=5.128541`, `cash_timing_quality_1d=-0.168208`, `training_evidence_status=insufficient`, `best_epoch=15`, `completed_epochs=16`.",
+        "Both trials remain source/reduce/exit dead: `portfolio_daily_source_target_count=0.0`, `portfolio_daily_source_realized_sell_rate=0.0`, `reduce_success_rate_5d=0.0`, `exit_timeliness_rate_5d=0.0`.",
+        "Strict resume is blocked because source/reduce/exit are still all dead.",
+        "Confirmatory is blocked because cash timing is still far below `-0.02`, source target count and realized sell rate are zero, reduce/exit metrics are zero, and training evidence is insufficient."
       ],
       "next_allowed_actions": [
-        "## Next Focus",
         "Do not continue by running confirmatory.",
         "Do not promote, change live/default, or edit the active execution artifact.",
         "Next research should make explicit release/source target generation nonzero under target-weight intent, then re-test cash timing without losing cash/exposure closure."
@@ -181,22 +188,16 @@
       "tags": [
         "r55",
         "continuous_policy",
-        "GPU"
+        "gpu"
       ],
       "workflow": "continuous_policy",
       "study_tags": [],
       "verdict": "",
       "blockers": [
         "RED: `test_training_runtime_acceleration.py` failed with missing module before implementation.",
-        "GREEN: targeted tests passed after implementation.",
-        "Regression command passed: `132 passed, 24 warnings`.",
-        "Local CUDA smoke step passed with `device = cuda`, `output_dtype = torch.float16`, `loss_dtype = torch.float32`, `amp_enabled = true`, `pin_memory = true`, and `non_blocking_transfer = true`.",
-        "Production anchor check after implementation: `git diff -- daily_research/output/active_execution_strategy.json` produced no output."
-      ],
-      "next_allowed_actions": [
-        "The next continuous-policy training run should spend less time in FP32 forward/backward and host-to-device transfer stalls, especially for day-set native allocation profiles.",
         "This change improves training throughput and observability; it does not by itself solve r55 cash timing or source/reduce/exit dead behavior."
       ],
+      "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
     },
@@ -218,16 +219,20 @@
         "self_opt_study_r56_release_first_constrained_decoder_screening_safe_20260513_04",
         "protocol_summary"
       ],
-      "verdict": "## Verdict; r56 code contract is implemented and unit/contract tests pass.; r56 has not produced completed safe-screening evidence.; Failed and timed-out screening attempts must be treated as diagnostics only; `completed_evidence=0.0`.; Do not enter strict resume, confirmatory, promotion, live/default, or active artifact changes.",
+      "verdict": "r56 code contract is implemented and unit/contract tests pass.; r56 has not produced completed safe-screening evidence.; Failed and timed-out screening attempts must be treated as diagnostics only; `completed_evidence=0.0`.; Do not enter strict resume, confirmatory, promotion, live/default, or active artifact changes.",
       "blockers": [
         "Fact: safe screening tags `..._01`, `..._02`, and `..._03` failed before any completed protocol summary; tag `..._04` timed out and was stopped with no completed protocol summary.",
-        "Fact: completed r56 safe-screening evidence is `0`.",
         "Fact: failed and timed-out attempts are diagnostics only and have `completed_evidence=0.0`.",
-        "Inference: r56 allocator/source semantics cannot yet be judged from behavior metrics because no completed r56 protocol exists.",
-        "Inference: the immediate bottleneck is r56 training runtime completion under AMP/day-set v46, not another loss-weight increase."
+        "Safe screening exact plan tag failed diagnostically:",
+        "completed trials: 0; failed trials: 1.",
+        "failure: AMP half mask overflow, `value cannot be converted to type at::Half without overflow`.",
+        "Retry tag failed diagnostically:",
+        "failure: AMP classification loss dtype mismatch, `expected scalar type Half but found Float`."
       ],
       "next_allowed_actions": [
-        "Assumption: the next attempt remains research / shadow-only and must not touch live/default/promotion/active artifacts."
+        "The next blocker is training runtime completion under r56 day-set v46, not allocator/source semantics yet.",
+        "Do not claim source/reduce/exit success or failure from r56, because no completed r56 protocol exists.",
+        "Before another full safe screening, run a shorter r56 protocol or add progress/epoch-level diagnostics that prove AMP loss boundaries and runtime throughput are healthy."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
@@ -243,7 +248,7 @@
       ],
       "workflow": "continuous_policy",
       "study_tags": [],
-      "verdict": "",
+      "verdict": "The project had entered a framework-complexity loop: adding more runner layers and loss/profile variants was increasing operational surface without producing completed r56 behavior evidence.; r58 deliberately does not judge strategy quality. It restores a smaller operating loop so r56/r59 research can be evaluated through completed protocol summaries rather than orchestration machinery.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
@@ -257,9 +262,8 @@
       "tags": [
         "r59",
         "continuous_policy",
-        "core-v4",
-        "Core-v4",
-        "GPU"
+        "gpu",
+        "core_v4"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
@@ -268,16 +272,13 @@
         "protocol_r59_core_v4_direct_smoke_20260513_03__train",
         "self_opt_study_r59_core_v4_release_first_dryrun_20260513_01"
       ],
-      "verdict": "Limitation: r59 has no safe screening evidence and no strategy-effectiveness verdict.; Rule: do not use r59 smoke metrics as completed evidence, confirmatory evidence, promotion evidence, or live/default support.",
+      "verdict": "Fact: r59 proves the core-v4 training, artifact, prediction, registry, and study dry-run wiring exists and is test-covered.; Inference: core-v4 reduces future r56/r59 work pressure on `model_seq_v3.py` by moving new release-first semantics into a small parallel backend.; Limitation: r59 has no safe screening evidence and no strategy-effectiveness verdict.; Rule: do not use r59 smoke metrics as completed evidence, confirmatory evidence, promotion evidence, or live/default support.",
       "blockers": [
         "Direct smoke `_01` failed during training because AMP autocast rejected `binary_cross_entropy`; this exposed an unsafe loss implementation.",
-        "Fix: core-v4 now uses logits with `binary_cross_entropy_with_logits`.",
         "Direct smoke `_02` completed training but failed during evaluation because `derive_release_first_intent(...)` treated missing optional risk columns as floats and then called `.fillna(...)`.",
-        "Fix: optional release-first intent inputs now use a series helper with stable defaults.",
-        "Direct smoke `_03` completed successfully:"
+        "Training evidence: `insufficient`, with `best_epoch=1` and `completed_epochs=1`."
       ],
       "next_allowed_actions": [
-        "## Next Gate",
         "A future safe screening can be considered only after direct smoke and dry-run remain clean, active artifact remains unchanged, and the run uses explicit r59 tags.",
         "If r59 later fails behaviorally, the conclusion must distinguish \"core-v4 infrastructure works\" from \"release-first strategy semantics still fail\"."
       ],
@@ -292,8 +293,7 @@
       "tags": [
         "r60",
         "continuous_policy",
-        "core-v4",
-        "Core-v4"
+        "core_v4"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
@@ -301,16 +301,16 @@
         "self_opt_study_r60_profile_bound_core_v4_dryrun_20260513_01",
         "self_opt_study_r60_profile_bound_core_v4_screening_safe_20260513_01"
       ],
-      "verdict": "",
+      "verdict": "Fact: r60 fixed the profile-binding bug; direct protocol no longer silently runs r59 smoke with legacy budget/objective/prior semantics.; Fact: r60 fixed diagnostic surfacing; release-first/source/cash/intent metrics are now visible in protocol summaries and bottleneck reports.; Fact: r60 safe screening produced completed evidence, and that evidence is negative.; Inference: current core-v4 release-first behavior is not connected enough for r61 resume or confirmatory. The model enters release-first mode but does not produce source intent/source targets, remains highly underdeployed, and carries large intent translation conflict.",
       "blockers": [
+        "Training evidence: `insufficient`, `best_epoch=1`, `completed_epochs=1`.",
         "Completed trials: `1`; failed trials: `0`; confirmatory disabled.",
-        "Trial 01 protocol summary is parseable and profile-bound to r59 core-v4.",
-        "Training evidence became `sufficient`, with `best_epoch=6`, `completed_epochs=12`.",
-        "Composite score: `-36.684195`.",
-        "Evaluation: annual return `-0.044853`, max drawdown `-0.071089`, cash timing quality `0.026076`, reduce success `0.0`, exit timeliness `0.0`."
+        "Resource gate triggered and stopped after the single requested screening trial. Failed checks: `release_first_source_intent_dead`, `receiver_deploy_not_clean`, `economic_signal_too_weak`, `exposure_utilization_low`, `actual_cash_idle_high`, `actual_cash_weight_high`, `cash_funded_deployment_failed`, `target_sum_underdeployed`."
       ],
       "next_allowed_actions": [
-        "Rule: do not package this as \"needs more epoch/loss.\" The next fix must target core-v4 release/source target generation and allocator-consumable target-delta wiring."
+        "r61 should not start with confirmatory or long resume.",
+        "Minimum next work: inspect why core-v4 target-delta/release intent yields zero `release_first_source_intent_count` and zero `portfolio_daily_source_target_count` under r59 profile-bound safe screening.",
+        "Any future safe screening must keep explicit tags, profile binding diagnostics, enriched release-first continuity metrics, and active artifact guard."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
@@ -323,7 +323,7 @@
       "tags": [
         "r61",
         "continuous_policy",
-        "core-v4"
+        "core_v4"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
@@ -333,9 +333,16 @@
         "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01",
         "self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01"
       ],
-      "verdict": "Important nuance: the protocol wrote a parseable `protocol_summary.json`, but the outer study wrapper was interrupted before writing final `study_summary.json`. Therefore this is parseable protocol-level safe-screening evidence, not a completed study-summary verdict.; Profile binding: `profile_applied=true`, active profile true.; Backend/loss: `formal_torch_core_v4` / `alpha_result_value_budget_split_v47`.; Training dataset cache: stored, key `7dc0c3e7b12db4f05a8d6924`, `sample_rows=558000`, `daily_rows=465`.; Training diagnostics: `completed_epochs=12`, `best_epoch=12`, CUDA enabled, AMP enabled, pinned memory enabled, non-blocking transfers enabled.",
+      "verdict": "Fact: r61 fixed several infrastructure and wiring blockers from r60. Profile binding, core-v4 v47 loss resolution, reusable dataset cache, release-flow trace, and protocol diagnostics all work.; Fact: release/source is no longer fully absent in evaluation, but it is far below the r61 floor of `>= 1.0`; shadow remains fully source-dead.; Inference: the release/source/receiver/target-delta loop is still not behavior-closed. The current blocker is not a generic need for more loss weight. It is that held negative delta and executable source semantics are still not produced reliably enough for the allocator.; Inference: the very high intent translation conflict rate means target intent and final execution semantics remain misaligned even when target-sum closure is clean.",
       "blockers": [
-        "Smoke interpretation: wiring improved. Evaluation produced nonzero release/source counts, but shadow still had `release_first_source_intent_count=0` and `release_flow_primary_blocker=source_executable_dead`. Smoke is wiring evidence only, not strategy evidence."
+        "Screening study tag attempted: `self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01`.",
+        "Protocol tag completed: `self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01`.",
+        "Important nuance: the protocol wrote a parseable `protocol_summary.json`, but the outer study wrapper was interrupted before writing final `study_summary.json`. Therefore this is parseable protocol-level safe-screening evidence, not a completed study-summary verdict.",
+        "Profile binding: `profile_applied=true`, active profile true.",
+        "Backend/loss: `formal_torch_core_v4` / `alpha_result_value_budget_split_v47`.",
+        "Training dataset cache: stored, key `7dc0c3e7b12db4f05a8d6924`, `sample_rows=558000`, `daily_rows=465`.",
+        "Training diagnostics: `completed_epochs=12`, `best_epoch=12`, CUDA enabled, AMP enabled, pinned memory enabled, non-blocking transfers enabled.",
+        "Stratified core-v4 sample diagnostics: `core_v4_train_release_rows=1144`, `core_v4_train_receiver_rows=2121`, `core_v4_train_held_rows=2728`."
       ],
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
@@ -349,22 +356,19 @@
       "tags": [
         "r62",
         "continuous_policy",
-        "Data Lake",
-        "data lake",
-        "Data lake"
+        "data_lake"
       ],
       "workflow": "continuous_policy",
       "study_tags": [],
-      "verdict": "",
+      "verdict": "r62 implements a local research data lake using DuckDB catalog metadata plus Parquet storage.; Scope completed: reusable catalog APIs, Bronze/Silver market-feature storage, Gold training dataset registration, train-policy lake-backed reuse with legacy pickle fallback, and CLI tooling.; Boundary: this is research infrastructure only. It does not change live/default/promotion behavior and does not modify `daily_research/output/active_execution_strategy.json`.",
       "blockers": [
-        "## Blocker",
         "Full Gold construction for `2010-01-04` to `2026-05-13`, uncapped `learned_all_a`, is not complete.",
         "Attempt 1: full strict+realtime build wrote Bronze/Silver, then was stopped before Gold because memory pressure rose and free physical memory fell to about `2.4GB`.",
         "Attempt 2: strict-only full Gold build was stopped after about `31` CPU minutes and about `6.2GB` working set, with no Gold files written.",
-        "Attempt 3: 2024-2026 Gold rebuild was also stopped after a long no-output training-matrix phase; existing 2024-2025 reusable caches were imported instead."
+        "Attempt 3: 2024-2026 Gold rebuild was also stopped after a long no-output training-matrix phase; existing 2024-2025 reusable caches were imported instead.",
+        "Diagnosis: the bottleneck is not DuckDB/Parquet. It is `build_training_matrices(...)`, which constructs large continuous-policy training surfaces in memory without chunk progress or checkpointed shards."
       ],
       "next_allowed_actions": [
-        "## Next",
         "r63 should split Gold training construction into resumable date shards, with explicit progress events and per-shard catalog registration.",
         "Do not describe full 8-year Gold as completed until a parseable catalog entry exists with strict/realtime label completeness.",
         "The current reusable database is valid for market/feature audit and existing Gold cache reuse, but not yet for full-window continuous-policy Gold training."
@@ -384,22 +388,19 @@
       "path": "daily_research/brain/references/r63_brain_skill_operating_system_status_20260514.md",
       "tags": [
         "r63",
-        "continuous_policy"
+        "brain"
       ],
-      "workflow": "continuous_policy",
+      "workflow": "brain",
       "study_tags": [],
-      "verdict": "",
+      "verdict": "Fact: r63 adds `daily_research/brain/brain_operating_protocol.md` as a compact operating protocol for task capsules, preflight, evidence rules, and writeback discipline.; Fact: `brain_workflow.py` now exposes `capsule`, `evidence-index`, and `query` commands in addition to existing handoff/status/preflight/writeback-plan paths.; Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.; Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
       "blockers": [
         "Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.",
-        "Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
-        "Fact: `install_project_skills.py --dry-run` reports the skill sync plan but does not install globally unless `--install` is explicitly used.",
         "Fact: `brain_rules.py` adds phased guard checks for active artifact diffs, stale loose latest pointers, failed-trial completed-evidence mistakes, full Gold claims without catalog evidence, and realtime-tail training evidence misuse."
       ],
       "next_allowed_actions": [
-        "Fact: `daily_research/brain/references/evidence_registry.json` is now the machine-readable index for reference evidence. It indexes recent r-number docs, study tags, blockers, next actions, active-artifact impact, and dataset ids.",
-        "Fact: repo-canonical project skill `daily_research/brain/skills/daily-research-brain` now exists and points agents to brain capsule/preflight/query/writeback commands without copying long r-number history.",
-        "Fact: `install_project_skills.py --dry-run` reports the skill sync plan but does not install globally unless `--install` is explicitly used.",
-        "Fact: `brain_rules.py` adds phased guard checks for active artifact diffs, stale loose latest pointers, failed-trial completed-evidence mistakes, full Gold claims without catalog evidence, and realtime-tail training evidence misuse."
+        "Continue using task capsules before substantial `daily_research` work.",
+        "Keep main brain centers compact; put detailed r-number evidence in `references/` and rebuild `evidence_registry.json`.",
+        "If desired later, explicitly run `install_project_skills.py --install` to sync the repo-canonical skill into the Codex global skills directory."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
@@ -412,21 +413,18 @@
       "tags": [
         "r64",
         "continuous_policy",
-        "Data Lake",
-        "data lake"
+        "data_lake"
       ],
       "workflow": "continuous_policy",
       "study_tags": [],
-      "verdict": "Current verdict: r64 infrastructure and full-window `strict_train` Gold are complete and audit-clean. Full-window `realtime_research` Gold is still pending.; Boundary: this is research data infrastructure only. It is not strategy evidence and does not change live/default/promotion behavior.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.",
+      "verdict": "Fact: r64 adds a resumable, sharded Gold training dataset builder for the DuckDB + Parquet research data lake.; Fact: the builder uses the existing full-universe Bronze/Silver dataset `policy_input_bundle__0f116a9b78c92ff045a6853d` instead of refetching from TQ.; Fact: the first full-universe lake-backed smoke passed for uncapped `learned_all_a` with `3,070` symbols over `2019-01-02` to `2019-06-30`.; Fact: full-window strict Gold now exists for uncapped `learned_all_a`, sourced from `policy_input_bundle__0f116a9b78c92ff045a6853d`.",
       "blockers": [
-        "## Blocker",
         "Full-window `strict_train` Gold is no longer blocked.",
         "Full-window `realtime_research` Gold for uncapped `learned_all_a`, `2010-01-04` to `2026-05-13`, is still pending.",
         "The previous r62 blocker was one-shot in-memory `build_training_matrices(...)`; r64 removes that architectural blocker by adding resumable shards and checkpoints.",
         "Do not write realtime Gold as training-ready; realtime Gold must remain research/audit data only. Its unobserved tail labels must not count as completed training evidence."
       ],
       "next_allowed_actions": [
-        "## Next",
         "Next allowed realtime build:",
         "If a realtime full build is interrupted, record the last completed shard, failure reason, and exact resume command. Do not call realtime complete until audit passes."
       ],
@@ -446,7 +444,7 @@
       "tags": [
         "r65",
         "continuous_policy",
-        "core-v4"
+        "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
@@ -456,19 +454,44 @@
         "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01",
         "self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01"
       ],
-      "verdict": "Important nuance: the protocol wrote a parseable `protocol_summary.json`, but the outer study wrapper was interrupted before final `study_summary.json`. Therefore this is parseable protocol-level evidence, not a completed study-summary verdict.; Backend/loss: `formal_torch_portfolio_set_v5` / `alpha_result_value_budget_split_v48`.; Dataset: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`, training safe true.; Training diagnostics: `completed_epochs=12`, `best_epoch=5`, `train_day_count=256`, raw train day count `3949`, day cap `256`.; Training evidence: `insufficient`, failed because `teacher_action_rows=0`.",
+      "verdict": "Status: `research / shadow-only / architecture upgrade`.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.; Active live strategy remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r65 adds the parallel backend `formal_torch_portfolio_set_v5` to replace MLP-style core-v4 as the next research mainline, without replacing v3/v4 artifact loading.",
       "blockers": [
-        "`release_flow_primary_blocker=no_held_negative_delta`"
+        "Screening study tag attempted: `self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01`.",
+        "Protocol tag completed: `self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01`.",
+        "Protocol summary: `daily_research/output/continuous_policy/protocols/self_opt_study_r65_portfolio_set_v5_screening_safe_20260514_01__trial_01/protocol_summary.json`.",
+        "Important nuance: the protocol wrote a parseable `protocol_summary.json`, but the outer study wrapper was interrupted before final `study_summary.json`. Therefore this is parseable protocol-level evidence, not a completed study-summary verdict.",
+        "Backend/loss: `formal_torch_portfolio_set_v5` / `alpha_result_value_budget_split_v48`.",
+        "Dataset: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`, training safe true.",
+        "Training diagnostics: `completed_epochs=12`, `best_epoch=5`, `train_day_count=256`, raw train day count `3949`, day cap `256`.",
+        "Training evidence: `insufficient`, failed because `teacher_action_rows=0`."
       ],
-      "next_allowed_actions": [
-        "r65 adds the parallel backend `formal_torch_portfolio_set_v5` to replace MLP-style core-v4 as the next research mainline, without replacing v3/v4 artifact loading.",
-        "r65 uses full-universe strict Gold dataset `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1` as the default training-safe dataset.",
-        "This note uses explicit tags only and does not infer conclusions from loose `latest_*` pointers."
-      ],
+      "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]
+    },
+    {
+      "id": "r66",
+      "date": "2026-05-14",
+      "r_id": "r66",
+      "path": "daily_research/brain/references/r66_brain_maintenance_status_20260514.md",
+      "tags": [
+        "r66",
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain / workflow maintenance / control-plane compaction`.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.; This is not strategy evidence, training evidence, promotion support, live/default change, or continuous_policy effectiveness evidence.; This note uses explicit brain-tool checks and file paths only; it does not infer conclusions from loose `latest_*`.",
+      "blockers": [
+        "Compacted `daily_research/brain/continuous_policy_design_contract.md` into current design boundaries, active r65 research contract, success criteria, known blockers, and historical index.",
+        "Updated `daily_research.tools.brain_evidence_registry` to use section-aware evidence extraction for verdict, blockers, and next actions.",
+        "Evidence registry extraction now prefers explicit sections such as Summary, Verdict, Blocker, Behavior Evidence, Safe Screening Evidence, and Next.",
+        "r65 portfolio-set v5 behavior remains source/receiver dead; this maintenance round does not change strategy behavior."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     }
   ]
 }

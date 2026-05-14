@@ -10,6 +10,12 @@ from daily_research.tools.brain_platform import WORKSPACE_ROOT, resolve_artifact
 
 
 ACTIVE_ARTIFACT = Path("daily_research/output/active_execution_strategy.json")
+CONTROL_PLANE_DOC_LIMITS = {
+    Path("daily_research/brain/state_center.md"): 180,
+    Path("daily_research/brain/knowledge_center.md"): 180,
+    Path("daily_research/brain/operations_center.md"): 150,
+    Path("daily_research/brain/continuous_policy_design_contract.md"): 180,
+}
 
 
 @dataclass(frozen=True)
@@ -110,12 +116,33 @@ def findings_for_realtime_completed_evidence(label_summary: Mapping[str, Any]) -
     return []
 
 
+def findings_for_control_plane_doc_lengths(
+    limits: Mapping[Path, int] | None = None,
+) -> list[BrainRuleFinding]:
+    findings: list[BrainRuleFinding] = []
+    for rel_path, max_lines in (limits or CONTROL_PLANE_DOC_LIMITS).items():
+        path = WORKSPACE_ROOT / rel_path
+        if not path.exists():
+            continue
+        line_count = len(path.read_text(encoding="utf-8-sig").splitlines())
+        if line_count > max_lines:
+            findings.append(
+                BrainRuleFinding(
+                    "warning",
+                    "brain_control_plane_doc_too_long",
+                    f"{rel_path.as_posix()} has {line_count} lines; target <= {max_lines}",
+                )
+            )
+    return findings
+
+
 def run_brain_rules(
     *,
     study_evidence: Mapping[str, Any] | None = None,
     has_explicit_study_tag: bool = False,
     claim_text: str = "",
     label_summaries: Iterable[Mapping[str, Any]] = (),
+    check_control_plane_lengths: bool = True,
 ) -> dict[str, Any]:
     findings: list[BrainRuleFinding] = []
     active = check_active_artifact_diff()
@@ -131,6 +158,8 @@ def run_brain_rules(
         findings.append(gold)
     for summary in label_summaries:
         findings.extend(findings_for_realtime_completed_evidence(summary))
+    if check_control_plane_lengths:
+        findings.extend(findings_for_control_plane_doc_lengths())
     errors = [finding for finding in findings if finding.severity == "error"]
     warnings = [finding for finding in findings if finding.severity == "warning"]
     return {

@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from daily_research.tools.brain_platform import WORKSPACE_ROOT, read_text, write_json
 
@@ -65,27 +65,81 @@ def _r_id_from(path: Path, text: str) -> str:
     return match.group(0).lower() if match else ""
 
 
-def _lines_after_keywords(lines: list[str], keywords: Iterable[str], limit: int = 4) -> list[str]:
+def _normalize_bullet(line: str) -> str:
+    return line.strip().lstrip("- ").strip()
+
+
+def _heading_text(line: str) -> str:
+    return line.strip().lstrip("#").strip().lower()
+
+
+def _section_bullets(lines: Sequence[str], heading_keywords: Iterable[str], *, limit: int = 8) -> list[str]:
+    out: list[str] = []
+    lowered = [keyword.lower() for keyword in heading_keywords]
+    in_section = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = _heading_text(stripped)
+            if in_section:
+                break
+            in_section = any(keyword in heading for keyword in lowered)
+            continue
+        if not in_section or not stripped.startswith("-"):
+            continue
+        out.append(_normalize_bullet(stripped))
+        if len(out) >= limit:
+            break
+    return _dedupe(out)
+
+
+def _inline_keyword_bullets(lines: Sequence[str], keywords: Iterable[str], *, limit: int = 8) -> list[str]:
     out: list[str] = []
     lowered = [keyword.lower() for keyword in keywords]
-    for index, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
-        if not stripped:
+        if not stripped.startswith("-"):
             continue
-        haystack = stripped.lower()
-        if not any(keyword in haystack for keyword in lowered):
+        text = _normalize_bullet(stripped)
+        haystack = text.lower()
+        if any(keyword in haystack for keyword in lowered):
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return _dedupe(out)
+
+
+def _inline_next_action_bullets(lines: Sequence[str], *, limit: int = 6) -> list[str]:
+    out: list[str] = []
+    prefixes = ("next allowed", "next work", "next research", "next focus", "next gate", "next decision", "下一步", "后续")
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("-"):
             continue
-        out.append(stripped.lstrip("- ").strip())
-        for follow in lines[index + 1 : index + 1 + limit]:
-            follow_text = follow.strip()
-            if not follow_text:
-                continue
-            if follow_text.startswith("#"):
-                break
-            if follow_text.startswith("-"):
-                out.append(follow_text.lstrip("- ").strip())
-        break
-    return _dedupe(out)[:8]
+        text = _normalize_bullet(stripped)
+        lowered = text.lower()
+        if any(lowered.startswith(prefix) for prefix in prefixes):
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return _dedupe(out)
+
+
+def _evidence_summary(lines: Sequence[str]) -> tuple[str, list[str], list[str]]:
+    verdict = _section_bullets(lines, ("verdict", "current verdict", "interpretation", "summary", "结论", "判定"), limit=4)
+    blockers = _section_bullets(
+        lines,
+        ("blocker", "remaining blocker", "behavior evidence", "safe screening evidence", "阻塞", "失败"),
+        limit=8,
+    )
+    next_actions = _section_bullets(lines, ("next", "next focus", "next gate", "next decision", "下一步", "后续"), limit=6)
+    if not verdict:
+        verdict = _inline_keyword_bullets(lines, ("current verdict", "verdict", "boundary", "边界"), limit=4)
+    if not blockers:
+        blockers = _inline_keyword_bullets(lines, ("blocker", "failed", "failure", "dead", "insufficient"), limit=8)
+    if not next_actions:
+        next_actions = _inline_next_action_bullets(lines, limit=6)
+    return "; ".join(verdict), blockers, next_actions
 
 
 def _dedupe(items: Iterable[str]) -> list[str]:
@@ -102,6 +156,8 @@ def _dedupe(items: Iterable[str]) -> list[str]:
 
 def _workflow_from(path: Path, text: str) -> str:
     lower = f"{path.name}\n{text}".lower()
+    if "brain maintenance" in lower or "brain-skill" in lower or "brain_skill" in lower:
+        return "brain"
     if "continuous_policy" in lower or "core_v4" in lower or "release_first" in lower:
         return "continuous_policy"
     if "data lake" in lower or "research_data_lake" in lower:
@@ -109,6 +165,25 @@ def _workflow_from(path: Path, text: str) -> str:
     if "brain" in lower:
         return "brain"
     return "daily_research"
+
+
+def _tags_from(path: Path, text: str, r_id: str, workflow: str) -> list[str]:
+    haystack = f"{path.name}\n{text[:800]}".lower()
+    tags = [r_id, workflow]
+    if workflow == "brain":
+        return _dedupe([*tags, "brain"])
+    is_portfolio_set_v5 = "portfolio-set" in haystack or "portfolio_set" in haystack or "portfolio set" in haystack
+    if "data lake" in haystack or "research_data_lake" in haystack:
+        tags.append("data_lake")
+    if "gpu" in haystack or "cuda" in haystack:
+        tags.append("gpu")
+    if not is_portfolio_set_v5 and ("core-v4" in haystack or "core_v4" in haystack):
+        tags.append("core_v4")
+    if is_portfolio_set_v5:
+        tags.append("portfolio_set_v5")
+    if "brain-skill" in haystack or "brain skill" in haystack:
+        tags.append("brain")
+    return _dedupe(tags)
 
 
 def _active_artifact_impact(text: str) -> str:
@@ -128,18 +203,19 @@ def build_evidence_record(path: Path) -> EvidenceRecord:
     lines = text.splitlines()
     r_id = _r_id_from(path, text)
     record_id = r_id or path.stem
-    tags = _dedupe([r_id, *_workflow_from(path, text).split(), *re.findall(r"\bcore-v4\b|\bdata lake\b|\bGPU\b", text, flags=re.IGNORECASE)])
+    workflow = _workflow_from(path, text)
+    verdict, blockers, next_allowed_actions = _evidence_summary(lines)
     return EvidenceRecord(
         id=record_id,
         date=_first_date(text, path),
         r_id=r_id,
         path=rel_path,
-        tags=tags,
-        workflow=_workflow_from(path, text),
+        tags=_tags_from(path, text, r_id, workflow),
+        workflow=workflow,
         study_tags=_dedupe(STUDY_TAG_PATTERN.findall(text)),
-        verdict="; ".join(_lines_after_keywords(lines, ("verdict", "current verdict", "当前 verdict", "当前结论", "Current verdict"))),
-        blockers=_lines_after_keywords(lines, ("blocker", "remaining blocker", "阻塞", "失败", "failed")),
-        next_allowed_actions=_lines_after_keywords(lines, ("next", "next work", "下一步", "后续")),
+        verdict=verdict,
+        blockers=blockers,
+        next_allowed_actions=next_allowed_actions,
         active_artifact_impact=_active_artifact_impact(text),
         dataset_ids=_dedupe(DATASET_ID_PATTERN.findall(text)),
     )

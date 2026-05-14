@@ -7,6 +7,7 @@ from daily_research.tools import brain_rules
 from daily_research.tools.brain_rules import (
     finding_for_full_gold_claim_without_catalog,
     finding_for_stale_latest_without_explicit_tag,
+    findings_for_control_plane_doc_lengths,
     findings_for_failed_completed_trials,
     findings_for_realtime_completed_evidence,
 )
@@ -39,7 +40,7 @@ class BrainRulesTest(unittest.TestCase):
 
     def test_active_artifact_diff_is_hard_failure(self) -> None:
         with patch.object(brain_rules, "_run_git_diff_name", return_value="diff --git ..."):
-            payload = brain_rules.run_brain_rules(has_explicit_study_tag=True)
+            payload = brain_rules.run_brain_rules(has_explicit_study_tag=True, check_control_plane_lengths=False)
 
         self.assertEqual(payload["status"], "failed")
         self.assertIn("active_artifact_diff", {finding["code"] for finding in payload["findings"]})
@@ -67,6 +68,20 @@ class BrainRulesTest(unittest.TestCase):
 
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].code, "realtime_tail_counted_as_training_evidence")
+
+    def test_control_plane_doc_length_warning(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "too_long.md"
+            path.write_text("a\nb\nc\n", encoding="utf-8")
+            with patch.object(brain_rules, "WORKSPACE_ROOT", Path(tmp)):
+                findings = findings_for_control_plane_doc_lengths({Path("too_long.md"): 2})
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "warning")
+        self.assertEqual(findings[0].code, "brain_control_plane_doc_too_long")
 
 
 if __name__ == "__main__":

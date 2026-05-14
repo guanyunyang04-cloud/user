@@ -1,158 +1,64 @@
 # Daily Research 知识中枢
 
-快照日期：`2026-05-11`
+快照日期：`2026-05-14`
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
 - strongest-model research winner、deployable learned-control、live mainline 必须显式区分。
-- 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
-- `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
-- 当前 `yolos` OpenMP runtime 冲突已原地修复；无 `KMP_DUPLICATE_LIB_OK` 的 `openmp_runtime_check.py --strict` 是验收标准。
 - 当前 live 默认执行仍由 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active` 承担。
-- `daily_research/execution/run_execution_app.py` 是执行侧统一应用入口；execution app 运行态落到 `daily_research/output/execution_app`。
-- execution Web 控制台使用 FastAPI，本地只监听 `127.0.0.1`，用户界面与使用教程统一使用简体中文，并包含 `/continuous-policy` 页面。
-- continuous_policy 的终局目标是以日为单位进行连续决策的交易执行模型，不是固定调仓频率、固定持有周期或人工执行桥。
-- continuous_policy 训练入口包括 `prototype_gbdt_v1`、`formal_torch_v2`、`formal_torch_seq_v3`、`formal_torch_hier_v4`；正式入口以 `run_continuous_policy_protocol.py` 为准。
-- continuous_policy label / decoder 历史仍保留 `holdcash_v3`、`holdcash_v5` 等关键对照。
-- latest 行为与结论真源为 `latest_behavior_audit_summary.json` 与 `latest_conclusion_ledger.json`。
-- r39 是当前 continuous_policy 有效证据基线；r40-r52d 是 research / shadow 升级链。
+- `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
+- 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
+- continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
+- r39 仍是 continuous_policy 有效证据基线；r40-r65 是 research / shadow 升级链或基础设施证据。
+- r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
 
 ## 2. 硬规则
-- 必须 `brain-first`；默认接管顺序为 `identity -> state -> knowledge -> operations`。
-- formal 验证采用滚动窗口协议；formal、recent、promotion、live 不得混写。
-- recent 验证现在是 strongest-model 研究闭环必备伴随证据；recent 胜利不能直接当 promotion 结论。
-- 默认做最高效、最合理的实验，允许扩实验但必须写清假设、成本边界和停止条件，不做无目的广扫。
-- `epoch formal candidate` 至少从 `32` epoch 起步；不够就沿同一 run_dir 做 `strict resume`。
-- continuous_policy formal protocol 必须显式产出 `training_evidence`；当前下限包括 `train_day_count >= 180`、`teacher_action_rows >= 10000`，且 `best_epoch` 不能贴着 `completed_epochs` 边缘。
-- smoke、dry-run、short-window check、repaired confirm、insufficient evidence 不得升级为正式 verdict。
-- continuous_policy 进入 promotion 讨论前，必须满足训练证据、v2 gate、stable confirm、receiver/source/cash 与 drawdown / monthly quality 同时达标。
-- 所有训练、评估、bounded study 与 confirmatory rerun 默认前台运行；长任务必须有持久日志和进度文件。
-- 代码合同、单测和 dry-run 只能证明接线正确，不能证明策略有效。
-- 当前文档不得把 `KMP_DUPLICATE_LIB_OK` 写成默认解决方案；历史记录中出现该变量只作为历史事实。
-- `Start-Job` 只属于局部联调经验，不应写成用户侧公开启动默认。
-- 中文主分脑文档必须保持 UTF-8；PowerShell here-string 不是默认中文写入方案，批量整理中文正文时需用 `apply_patch` 或显式 UTF-8 写入并复核。
-- `latest_*` 文件不得被直接视为无条件真源；必须先经 artifact freshness 判断 study / protocol / audit / ledger 是否同源、是否 stale。
-- 当 loose `latest_*` 不同源时，必须用 explicit study tag capsule 读取：`brain_workflow status --workflow continuous_policy --study-tag <tag> --json`；指定 study 证据优先于混杂 latest 指针。
-- workflow JSON 是运行态证据胶囊，不是 brain 权威事实；稳定结论仍必须写回对应中枢或 references archive。
+- 必须 brain-first；默认接管顺序为 `identity -> state -> knowledge -> design contract -> operations -> governance`。
+- formal、recent、promotion、live 不得混写。
+- `latest_*` 文件不得被直接视为无条件真源；必须先判断 freshness，同源性和 explicit tag。
+- code contract、unit tests、smoke、dry-run 只能证明接线正确，不能证明策略有效。
+- failed / timeout / interrupted trial 只能写诊断，不得写 completed evidence。
+- realtime tail label 必须显式标记 unobserved，不得计入 completed training evidence。
+- active artifact diff 是硬失败。
+- 主脑文档只保留控制面；长历史、完整 rXX 证据、长命令和复盘进入 `references/`。
 
-## 3. 已验证教训
-- 个股动作和组合决策不是同一个问题；真正目标是当前组合状态下最优仓位调整集合。
-- 卖出比买入更难，因为卖出要判断继续持有的机会成本、现金价值和资金来源责任。
-- simulator guard 只能做最后安全裁剪，不能承担主策略逻辑。
-- 只追求单项 gate 清零会制造假进展；必须同时看收益、月度质量、drawdown、source count、cash timing 与 exposure utilization。
-- r38 证明单边 source hard-negative 会压住强势误卖，但也会退化为过度保守和收益弱。
-- r39 证明统一 allocation objective 能恢复收益和正 receiver-source spread，但 source breadth、cash timing 与 drawdown 仍未闭合。
-- r48 证明 full-universe convex OPE 运行通道可用，但 source dead / exposure 低 / evidence edge 仍会失败。
-- r52 证明 day-set native allocation vector 结构更接近目标，但 source release 不会自动闭合；native target validity 和 source threshold 仍需修复。
-- r52b 的核心不是加长训练，而是让训练 projection、预测导出和 simulator validity 使用同一约束口径；若 `native_target_valid` 仍低，继续加 epoch 只会放大无效目标。
-- r52b safe screening 已验证：validity-first projection 还没有把 native target 有效消费率拉出 r52 低位区间；当 invalid reason 集中在 `native_target_invalid_unsupported_receiver_count` 时，首要问题是 receiver 可执行域和导出 mask 同口径，而不是训练资源不足。
-- r52c safe screening 已验证：receiver executable closure 可以把 simulator 边界的 `native_target_valid` 拉到 `0.975~1.0`、fallback 压到 `0~0.025`，但这只关闭 unsupported receiver validity；deployment / cash timing、exposure utilization、source depth 与 training evidence 仍未闭合，因此不能进入 confirmatory 或 22 epoch resume。
-- r52d 当前只证明代码合同、dry-run 与 safe screening-only 路径成立：validation closure、train/sim alignment 与 deadband 常量共享已有测试，dry-run 与 safe screening 均确认 v40 / support flags / true-solver-disabled；explicit capsule 已进一步确认其不具备 confirmatory eligibility，不能解释成策略进展。
-- `cp_v3_seq_holdcash_r1`、`cp_v3_seq_holdcash_r2`、`cp_v3_seq_holdcash_v5_formal_r1` 共同证明 hold/cash 改善必须经 formal evidence 复核。
-- `cp_hier_v4_holdcash_r5` 证明 hierarchical branch 可改善 reversal，但没有学出 hold 前仍只是 research branch。
+## 3. 长期教训
+- 个股动作和组合资金分配不是同一问题；真正目标是当前组合状态下最优仓位调整集合。
+- 卖出比买入更难，因为卖出同时涉及继续持有机会成本、现金价值、资金来源责任和风险状态。
+- 只追求单项 gate 清零会制造假进展；必须同时看收益、月度质量、drawdown、source count、cash timing、exposure 和 intent conflict。
+- Clean target-sum closure 可以与 release/source/receiver flow disconnected 同时存在；closure 不是行为闭合的充分条件。
+- 更强模型不是自动解决方案；若 target construction、receiver/source semantics 或 evidence route 错，放大模型只会更快放大错误。
+- 工程复杂度会制造循环；runner、profile、loss、diagnostics 必须减少活动面，服务明确阻塞点。
+- 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
+- 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 
-## 4. r10-r52d 知识索引
-| 范围 | 结论 |
-| --- | --- |
-| r10-r18 | 旧 action/head + translation guard 能改善语义，但无法替代组合资金分配本体。 |
-| r19-r23 | receiver/source/cash ranking 是正确转向，但执行合同干净不等于策略有效。 |
-| r24-r30 | listwise / teacher / release / relief 暴露 source 放宽与 source 休眠的跷跷板。 |
-| r31-r34 | receiver executable 与 source clean-pass 合同质量提高，但 confirm 仍不稳。 |
-| r35-r39 | unified allocation / decision-focused / final objective 是当前最有效证据基线。 |
-| r40-r48 | end-to-end allocation layer 与 convex/OPE 方向正确，但策略证据未过 stable confirm。 |
-| r49-r50 | capital-flow closure 与 true solver 入口保留；r50 因本机负荷过高不作为默认长训路径。 |
-| r51-r52 | native allocation vector 与 day-set batch 是当前轻量主线，但仍需修 target validity / source threshold。 |
-| r52b | safe screening 未通过 validity 目标：native target valid 仍仅 1.25%-6.25%，fallback 仍 93.75%-98.75%，下一步应修 receiver executable mask / native target export / simulator validity 同口径。 |
-| r52c | receiver executable closure 已通过 simulator 边界验证，但最新瓶颈转为 cash timing 为负、exposure utilization 约 0.33、training evidence insufficient 与 source depth 不稳；下一步不应重复 receiver mask 修补。 |
-| r52d | validation closure 代码合同、测试、dry-run 与 safe screening-only 证据已存在；explicit capsule 判定 3/3 trials 均 evidence insufficient、composite<0、cash timing<0、exposure~0.33，因此不进入 confirmatory / resume / promotion / live。 |
-| r52e | safe screening failed after 1/3 trials: resource gate stopped on source release dead, weak economics, low exposure and high actual cash; recomputed closure audit shows high deployable idle cash and `cash_semantics_mismatch`, so r52e cannot enter resume / confirmatory / promotion. |
-| r53 | cash-funded allocation core v2 is a new research line. It materially improved cash/exposure closure in safe screening, but still has insufficient training evidence, negative cash timing, and strongly negative composite score; it is not eligible for confirmatory, strict resume, promotion, live/default, or active artifact changes. |
-| r54 | semantic-budget controller makes target-weight intent the main policy surface and fixes r53 budget-closed audit semantics. Safe screening improved composite score and kept cash/exposure closure clean, but still has insufficient training evidence, negative cash timing, weak reduce/exit quality, and one abnormal trial exit; it is not eligible for confirmatory, promotion, live/default, or active artifact changes. |
-| r55 | cash-timing release controller adds failed-trial artifact diagnostics, explicit bottleneck reports, and v45 cash/source/reduce-exit native loss terms. Safe screening completed 2/2 with no failed trials and best composite `5.128541`, but cash timing only nudged to `-0.168208` and source/reduce/exit stayed all dead; it is not eligible for strict resume, confirmatory, promotion, live/default, or active artifact changes. |
-| gpu-runtime-20260513 | seq_v3 training-runtime acceleration adds CUDA AMP/GradScaler, pinned DataLoader memory, non-blocking transfers, and per-epoch timing diagnostics. It is an infrastructure speed/observability improvement only, not strategy evidence or promotion support. |
-| r56 | release-first constrained decoder code contract exists and tests pass, but safe screening has `0` completed trials because early attempts failed on AMP/loss boundaries and the latest retry timed out. r56 has no behavioral verdict yet and cannot enter strict resume, confirmatory, promotion, live/default, or active artifact changes. |
+## 4. 研究主线索引
+- r10-r18：action/head + translation guard 改善语义，但不能替代组合资金分配本体。
+- r19-r30：receiver/source/cash ranking、listwise、teacher、release/relief 暴露 source 放宽与休眠问题。
+- r31-r39：receiver executable、source clean-pass、unified allocation、decision-focused objective，形成当前有效证据基线。
+- r40-r48：end-to-end allocation layer、convex/OPE/solver 方向正确，但未过 stable confirm。
+- r49-r52：capital-flow closure、true solver 入口、native allocation vector；仍受 source/exposure/evidence 阻塞。
+- r53-r55：cash/exposure closure 有改善，cash timing 与 source/reduce/exit 仍死。
+- r56-r61：release-first / core-v4 接线与诊断改善，但 release/source/receiver/target translation 未闭合。
+- r62-r64：通用 data lake 与 full-universe strict Gold 完成，realtime full-window pending。
+- r65：portfolio-set v5 替代 MLP 主线成为下一代 research backend，但首轮行为仍 negative。
 
-## 2026-05-13 r56 Runtime Lesson
-- Fact: failed r56 screening attempts before a parseable `protocol_summary.json` are diagnostics only and must not be converted into completed screening evidence.
-- Inference: release-first allocator/decoder semantics are not behavior-evaluable until the r56 day-set v46 training path completes at least one protocol summary.
-- Rule: if r56 remains source-dead after a completed protocol, the conclusion must be "allocator/intent wiring still not connected"; if there is no completed protocol, the conclusion must remain "runtime evidence missing".
+## 5. 当前方法论
+- 先直接 protocol smoke，再 study dry-run，再 safe screening；不得跳到 confirmatory。
+- 每个重大研究结论必须写成 facts / inferences / assumptions / boundary。
+- explicit dataset id、study tag、protocol tag 优先于 loose latest。
+- 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。
+- 若 full Gold 或 realtime Gold 状态变化，必须同时记录 catalog entry、audit、row counts 和 label completeness。
 
-## 2026-05-13 r58 Framework Simplification Lesson
-- Fact: the r57 subprocess watchdog path added parent/child process complexity without creating completed r56 behavior evidence.
-- Fact: r58 keeps progress files and tag collision protection, but restores study/protocol execution to a foreground in-process default.
-- Fact: active new-study profiles are intentionally small: `focused_seq_v1`, r53, r54, r55, and r56. Older profile definitions are legacy compatibility data, not a menu for new research runs.
-- Inference: when a research line lacks completed protocol summaries, adding more orchestration layers can hide the true blocker. Prefer a direct protocol smoke, then dry-run study, then safe screening.
-- Rule: do not treat new runner layers, more loss weights, or another r-number profile as progress unless they reduce a specific blocker and preserve completed evidence semantics.
+## 6. 文档边界
+- `state_center.md`：当前状态、阻塞、优先级、边界和 evidence 索引。
+- `knowledge_center.md`：稳定事实、硬规则、长期教训和研究主线索引。
+- `operations_center.md`：命令、流程、运行纪律和写回路线。
+- `continuous_policy_design_contract.md`：仍有效设计边界和当前 active research contract。
+- `references/`：完整 rXX 证据、历史失败路径、长命令、完整复盘。
+- `evidence_registry.json`：机器可查 evidence 索引。
 
-## 2026-05-13 r59 Core V4 Lesson
-- Fact: `model_seq_v3.py` had become the main domain-layer complexity sink. r59 adds `formal_torch_core_v4` as a parallel backend instead of continuing to stack r56-specific heads, losses, diagnostics, and compatibility branches into v3.
-- Fact: core-v4 is deliberately narrow: it only accepts release-first loss aliases for the r56/r59 line and rejects legacy v1-v45 losses as new core-v4 training inputs.
-- Fact: smoke failures found real infrastructure issues: AMP needs logits-safe BCE, and release-first intent must tolerate missing optional risk columns with series-shaped defaults.
-- Inference: a small backend can expose failure causes faster than another broad profile inside the v3 monolith.
-- Rule: future core-v4 work must stay parallel and shadow-only until explicit safe-screening evidence exists. Do not copy v3 historical loss/profile chains into core-v4 just for compatibility.
-- Rule: active new-study profiles should remain small: `focused_seq_v1`, r56 v3 reference, and r59 core-v4 unless a future writeback explicitly changes the active set.
-
-## 2026-05-13 r60 Profile Binding Lesson
-- Fact: r59 direct smoke originally accepted a search profile label without applying profile defaults, so it could appear to test r59 while actually running legacy budget/objective/prior semantics.
-- Fact: r60 fixes this by binding active profile defaults into direct protocol and recording `profile_binding`.
-- Fact: once r60 made diagnostics visible, safe screening showed core-v4 release-first mode is enabled but release/source behavior is still dead: source intent count `0`, source target count `0`, rotation `0`, high cash, high target gap, and high intent translation conflict.
-- Inference: the current blocker is not evidence volume. It is core-v4 release/source target generation and allocator-consumable target-delta wiring.
-- Rule: any future protocol smoke with `--search-profile` must verify `profile_binding.profile_applied=true` before behavior interpretation.
-- Rule: if release/source remains zero with profile binding and enriched diagnostics present, the conclusion must be "release-first wiring/training target still not connected," not "run more epochs" or "add generic loss weight."
-
-## 2026-05-14 r61 Decision-Focused Core V4 Lesson
-- Fact: reusable training datasets are now first-class evidence assets. Every constructed training surface must be reusable by fingerprint, including `sample_frame`, `daily_frame`, and `teacher_summary`.
-- Fact: r61 proves profile binding, core-v4 v47 loss resolution, CUDA AMP training, release-flow trace surfacing, and reusable dataset caching can run together in a direct protocol and study dry-run.
-- Fact: safe protocol evidence remains behavior-negative: source/release is still below the required floor, shadow remains source-dead, and intent translation conflict remains near 1.0.
-- Inference: clean target-sum closure can coexist with a broken release/source/receiver flow. Therefore target gap alone is not sufficient evidence that release-first allocation is behavior-closed.
-- Rule: if `release_first_source_intent_count < 1.0` or `portfolio_daily_source_target_count < 1.0` and release-flow trace reports a blocker other than `none`, write the conclusion as release-flow disconnected.
-- Rule: do not explain r61 failure as "needs more epoch" while best epoch is at edge and release-flow trace shows missing held negative delta or source executable semantics.
-- Rule: future r62 work should first repair held negative-delta generation, executable source semantics, and target-delta/action translation before expanding model size, epochs, or historical loss chains.
-
-## 2026-05-14 r62 Research Data Lake Lesson
-- Fact: reusable training datasets are no longer only a continuous-policy cache concern. r62 promotes them into a general DuckDB + Parquet research data lake with catalog metadata, label-completeness summaries, and SQL-queryable manifests.
-- Fact: full-universe market/feature coverage is feasible locally for uncapped `learned_all_a` from `2010-01-04` to `2026-05-13` when feature panels are stored as wide Parquet panels rather than exploded feature-value long rows.
-- Fact: `1200` is only a past engineering cap. The data lake target and default are full resolved universe (`--max-universe-size 0`), currently `3,070` cached A-share symbols.
-- Fact: full Gold training construction is not yet feasible through the current one-shot `build_training_matrices(...)` path; the slow phase is continuous-policy sample construction and portfolio teacher rollout, not data lake IO.
-- Inference: the next data-infrastructure bottleneck is resumable full-universe Gold construction by date shard, not database backend choice.
-- Rule: do not claim a full-window training dataset exists until the catalog contains a Gold dataset entry with row counts, date range, and label completeness.
-- Rule: realtime tail labels must remain explicitly marked as unobserved and must not be counted as completed training evidence.
-- Rule: future constructed training sets should be registered in the data lake catalog, while legacy pickle caches may remain fallback compatibility data.
-
-## 2026-05-14 r63 Brain-Skill Operating System Lesson
-- Fact: the brain is the project truth store; the project skill is only a procedural entrypoint.
-- Fact: task capsules, evidence registry, query, and phased rules now make brain use more machine-readable.
-- Rule: substantial `daily_research` work should start from a capsule and end with explicit validation/writeback or a reason no writeback is needed.
-- Rule: skills must not copy long r-number histories; they should point to brain workflow commands and reference evidence.
-
-## 2026-05-14 r64 Full-Universe Gold Data Lake Lesson
-- Fact: full-universe Gold construction is now a resumable data-engineering workflow, not a training-entry side effect.
-- Fact: lake-backed policy input loading avoids TQ refetch failures once Bronze/Silver has been registered in the DuckDB + Parquet lake.
-- Fact: shard checkpoints must preserve `PortfolioState`; resetting portfolio state at shard boundaries would invalidate held/reduce/exit labels.
-- Inference: the r62 blocker moved from architecture to execution, and r64 completed the full-window strict execution path. The remaining data-lake work is realtime full-window build/audit, not another one-shot cache attempt.
-- Rule: strict Gold can be training evidence only when `unobserved_label_rows=0`, `is_training_safe=true`, catalog row counts match shard files, and audit `status=ok`.
-- Rule: realtime Gold can support research and audit, but rows with `is_observed=false` must never be counted as completed training evidence.
-- Rule: do not describe full-window `2010-01-04 -> 2026-05-13` Gold as ready until explicit full-window dataset ids and audit reports exist.
-
-## 2026-05-14 r65 Portfolio-Set V5 Lesson
-- Fact: replacing the MLP-style core-v4 mainline with a portfolio-set backend is now implemented as a parallel shadow-only backend, not as a production replacement.
-- Fact: latent set attention can keep full-universe day-set modeling away from full `O(N^2)` cross-sectional self-attention while still exposing portfolio-level competition signals.
-- Fact: strict Gold lake-backed loading works in the v5 path, but first-pass training still caps day coverage for safety; dataset availability is no longer the only bottleneck.
-- Fact: r65 smoke and safe protocol both showed source/receiver behavior remains dead even with clean target-sum gap, so closure metrics alone are insufficient.
-- Inference: the current failure is a release/source/receiver target semantics and intent translation failure inside the portfolio-set loop, not a reason to go back to generic MLP losses.
-- Rule: future r66+ work should inspect target construction, held-source creation, receiver target realization, and day-set sampling before simply increasing epochs or widening the model.
-- Rule: r61 core-v4 should remain a baseline/ablation; new main research logic should not be added to the MLP backend unless it is needed for comparison.
-- Rule: interrupted outer studies with parseable protocol summaries may be diagnostic protocol evidence, but they are not completed study-summary verdicts.
-
-## 5. 文档边界
-- `identity_layer.md`：使命、北极星、硬约束与禁区。
-- `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。
-- `knowledge_center.md`：稳定事实、硬规则、长期教训和知识索引。
-- `operations_center.md`：地图、环境、命令、流程和写回入口。
-- `governance_layer.md`：治理闭环与接管纪律。
-- `episodic_memory.md`：最新动作后复盘和 archive 入口；长历史进入 `references/`。
-
-## 6. 归档入口
+## 7. 归档入口
 - 本文件归档前完整快照：`daily_research/brain/references/knowledge_center_archive_20260510.md`。
 - 早期 continuous_policy 合同历史：`daily_research/brain/references/continuous_policy_design_contract_history_raw_20260424.md`。
 - 早期证据索引：`daily_research/brain/references/continuous_policy_design_contract_evidence_index_20260424.md`。
