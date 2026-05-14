@@ -312,6 +312,25 @@ class ResearchDataLake:
     def _dataset_dir(self, dataset_kind: str, zone: str, fingerprint: str) -> Path:
         return self.parquet_root / "gold" / dataset_kind / str(zone) / fingerprint
 
+    def build_training_dataset_identity(self, *, spec: Mapping[str, Any], zone: str) -> dict[str, str]:
+        resolved_zone = str(zone or "strict_train")
+        dataset_kind = "continuous_policy_training_matrices"
+        fingerprint = _stable_hash(
+            {
+                "schema_version": DATA_LAKE_SCHEMA_VERSION,
+                "dataset_kind": dataset_kind,
+                "zone": resolved_zone,
+                "spec": dict(spec),
+            }
+        )
+        return {
+            "dataset_kind": dataset_kind,
+            "zone": resolved_zone,
+            "fingerprint": fingerprint,
+            "dataset_id": f"{dataset_kind}__{resolved_zone}__{fingerprint}",
+            "dataset_dir": str(self._dataset_dir(dataset_kind, resolved_zone, fingerprint).resolve()),
+        }
+
     def save_training_dataset(
         self,
         *,
@@ -385,11 +404,144 @@ class ResearchDataLake:
         )
         return self.load_training_dataset(dataset_id, status="stored")
 
+    def save_sharded_training_dataset(
+        self,
+        *,
+        spec: Mapping[str, Any],
+        zone: str,
+        shard_records: Sequence[Mapping[str, Any]],
+        teacher_summary: Mapping[str, Any],
+        label_completeness_summary: Mapping[str, Any],
+        source_cache: Mapping[str, Any] | None = None,
+        status: str = "stored",
+    ) -> LakeTrainingDatasetRecord:
+        resolved_zone = str(zone or "strict_train")
+        identity = self.build_training_dataset_identity(spec=spec, zone=resolved_zone)
+        dataset_kind = identity["dataset_kind"]
+        fingerprint = identity["fingerprint"]
+        dataset_id = identity["dataset_id"]
+        dataset_dir = Path(identity["dataset_dir"])
+        shard_manifest_path = dataset_dir / "shard_manifest.json"
+        teacher_summary_path = dataset_dir / "teacher_summary.json"
+        audit_report_path = dataset_dir / "audit_report.json"
+        content_paths = {
+            "dataset_root": str(dataset_dir.resolve()),
+            "sample_frame_shards": str((dataset_dir / "sample_frame" / "*.parquet").resolve()),
+            "daily_frame_shards": str((dataset_dir / "daily_frame" / "*.parquet").resolve()),
+            "teacher_summary": str(teacher_summary_path.resolve()),
+            "shard_manifest": str(shard_manifest_path.resolve()),
+            "portfolio_checkpoints": str((dataset_dir / "portfolio_checkpoint" / "*.json").resolve()),
+            "audit_report": str(audit_report_path.resolve()),
+        }
+        label_summary = dict(label_completeness_summary or {})
+        if resolved_zone == "strict_train" and int(label_summary.get("unobserved_label_rows", 0) or 0) != 0:
+            raise ValueError("strict_train sharded datasets cannot contain unobserved forward labels.")
+        if resolved_zone == "strict_train" and not bool(label_summary.get("is_training_safe", False)):
+            raise ValueError("strict_train sharded datasets must be marked training safe.")
+
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        safe_shards = [_json_safe(dict(item)) for item in shard_records]
+        _write_json(
+            shard_manifest_path,
+            {
+                "dataset_id": dataset_id,
+                "fingerprint": fingerprint,
+                "zone": resolved_zone,
+                "sharded": True,
+                "shard_count": len(safe_shards),
+                "completed_shard_count": int(sum(1 for item in safe_shards if str(item.get("status", "")) == "stored")),
+                "shards": safe_shards,
+            },
+        )
+        _write_json(teacher_summary_path, dict(teacher_summary or {}))
+        if not audit_report_path.exists():
+            _write_json(audit_report_path, {"status": "not_run", "dataset_id": dataset_id})
+
+        sample_rows = int(sum(int(item.get("sample_rows", 0) or 0) for item in safe_shards))
+        daily_rows = int(sum(int(item.get("daily_rows", 0) or 0) for item in safe_shards))
+        completed = int(sum(1 for item in safe_shards if str(item.get("status", "")) == "stored"))
+        row_counts: dict[str, Any] = {
+            "sample_frame": sample_rows,
+            "daily_frame": daily_rows,
+            "shard_count": int(len(safe_shards)),
+            "completed_shard_count": completed,
+        }
+        start_dates = [str(item.get("start_date", "") or "") for item in safe_shards if str(item.get("start_date", "") or "")]
+        end_dates = [str(item.get("end_date", "") or "") for item in safe_shards if str(item.get("end_date", "") or "")]
+        if start_dates and end_dates:
+            row_counts["_date_bounds"] = {"start_date": min(start_dates), "end_date": max(end_dates)}
+        merged_spec = {
+            **dict(spec),
+            "sharded": True,
+            "start_date": str(spec.get("start_date", "") or (min(start_dates) if start_dates else "")),
+            "end_date": str(spec.get("end_date", "") or (max(end_dates) if end_dates else "")),
+        }
+        merged_source_cache = {
+            **dict(source_cache or {}),
+            "sharded": True,
+            "shards": safe_shards,
+        }
+        self._upsert_dataset(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            domain="gold",
+            zone=resolved_zone,
+            source=str(spec.get("data_source", spec.get("source", "")) or ""),
+            spec=merged_spec,
+            label_completeness_summary=label_summary,
+            content_paths=content_paths,
+            row_counts=row_counts,
+            source_cache=merged_source_cache,
+            fingerprint=fingerprint,
+            status=str(status or "stored"),
+        )
+        metadata = self.describe_dataset(dataset_id)
+        return LakeTrainingDatasetRecord(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            zone=resolved_zone,
+            fingerprint=fingerprint,
+            status=str(status or "stored"),
+            root=self.root,
+            content_paths=dict(metadata.get("content_paths", {}) or {}),
+            row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+            metadata=metadata,
+            sample_frame=pd.DataFrame(),
+            daily_frame=pd.DataFrame(),
+            teacher_summary=dict(teacher_summary or {}),
+            label_completeness_summary=label_summary,
+        )
+
     def load_training_dataset(self, dataset_id: str, *, status: str = "loaded") -> LakeTrainingDatasetRecord:
         metadata = self.describe_dataset(dataset_id)
         paths = dict(metadata.get("content_paths", {}) or {})
-        sample_frame = pd.read_parquet(paths["sample_frame"])
-        daily_frame = pd.read_parquet(paths["daily_frame"])
+        source_cache = dict(metadata.get("source_cache", {}) or {})
+        is_sharded = bool(source_cache.get("sharded", False) or paths.get("shard_manifest"))
+        if is_sharded:
+            shard_rows = list(source_cache.get("shards", []) or [])
+            if not shard_rows and paths.get("shard_manifest"):
+                shard_rows = list(_read_json(Path(paths["shard_manifest"])).get("shards", []) or [])
+            sample_paths = [Path(str(item.get("sample_path", ""))) for item in shard_rows if str(item.get("sample_path", "") or "")]
+            daily_paths = [Path(str(item.get("daily_path", ""))) for item in shard_rows if str(item.get("daily_path", "") or "")]
+            sample_frames = [pd.read_parquet(path) for path in sample_paths if path.exists()]
+            daily_frames = [pd.read_parquet(path) for path in daily_paths if path.exists()]
+            sample_frame = (
+                pd.concat(sample_frames, ignore_index=True)
+                if sample_frames
+                else pd.DataFrame()
+            )
+            daily_frame = (
+                pd.concat(daily_frames, ignore_index=True)
+                if daily_frames
+                else pd.DataFrame()
+            )
+            if not sample_frame.empty and {"date", "stock"}.issubset(sample_frame.columns):
+                sample_frame = sample_frame.sort_values(["date", "stock"]).reset_index(drop=True)
+            if not daily_frame.empty and "date" in daily_frame.columns:
+                daily_frame = daily_frame.sort_values(["date"]).reset_index(drop=True)
+        else:
+            sample_frame = pd.read_parquet(paths["sample_frame"])
+            daily_frame = pd.read_parquet(paths["daily_frame"])
         teacher_summary = _read_json(Path(paths["teacher_summary"]))
         return LakeTrainingDatasetRecord(
             dataset_id=str(metadata["dataset_id"]),
@@ -408,21 +560,38 @@ class ResearchDataLake:
         )
 
     def find_training_dataset(self, *, spec: Mapping[str, Any], zone: str) -> LakeTrainingDatasetRecord | None:
-        fingerprint = _stable_hash(
-            {
-                "schema_version": DATA_LAKE_SCHEMA_VERSION,
-                "dataset_kind": "continuous_policy_training_matrices",
-                "zone": str(zone or "strict_train"),
-                "spec": dict(spec),
-            }
-        )
-        existing = self._existing_by_fingerprint(fingerprint)
+        identity = self.build_training_dataset_identity(spec=spec, zone=zone)
+        existing = self._existing_by_fingerprint(identity["fingerprint"])
         if existing is None:
             return None
         try:
             return self.load_training_dataset(str(existing["dataset_id"]), status="hit")
         except Exception:
             return None
+
+    def update_dataset_audit_report(self, dataset_id: str, audit_report: Mapping[str, Any]) -> None:
+        metadata = self.describe_dataset(dataset_id)
+        paths = dict(metadata.get("content_paths", {}) or {})
+        audit_path_text = str(paths.get("audit_report", "") or "").strip()
+        if audit_path_text:
+            audit_path = Path(audit_path_text)
+            _write_json(audit_path, dict(audit_report))
+        source_cache = dict(metadata.get("source_cache", {}) or {})
+        source_cache["audit_report"] = _json_safe(dict(audit_report))
+        self._upsert_dataset(
+            dataset_id=str(metadata["dataset_id"]),
+            dataset_kind=str(metadata["dataset_kind"]),
+            domain=str(metadata.get("domain", "") or "gold"),
+            zone=str(metadata["zone"]),
+            source=str(metadata.get("source", "") or ""),
+            spec=dict(metadata.get("parameters", {}) or {}),
+            label_completeness_summary=dict(metadata.get("label_completeness_summary", {}) or {}),
+            content_paths=paths,
+            row_counts=dict(metadata.get("row_counts", {}) or {}),
+            source_cache=source_cache,
+            fingerprint=str(metadata["fingerprint"]),
+            status=str(metadata.get("status", "") or "stored"),
+        )
 
     def save_market_data_bundle(
         self,

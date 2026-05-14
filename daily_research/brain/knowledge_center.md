@@ -125,6 +125,15 @@
 - Rule: substantial `daily_research` work should start from a capsule and end with explicit validation/writeback or a reason no writeback is needed.
 - Rule: skills must not copy long r-number histories; they should point to brain workflow commands and reference evidence.
 
+## 2026-05-14 r64 Full-Universe Gold Data Lake Lesson
+- Fact: full-universe Gold construction is now a resumable data-engineering workflow, not a training-entry side effect.
+- Fact: lake-backed policy input loading avoids TQ refetch failures once Bronze/Silver has been registered in the DuckDB + Parquet lake.
+- Fact: shard checkpoints must preserve `PortfolioState`; resetting portfolio state at shard boundaries would invalidate held/reduce/exit labels.
+- Inference: the r62 blocker moved from architecture to execution, and r64 completed the full-window strict execution path. The remaining data-lake work is realtime full-window build/audit, not another one-shot cache attempt.
+- Rule: strict Gold can be training evidence only when `unobserved_label_rows=0`, `is_training_safe=true`, catalog row counts match shard files, and audit `status=ok`.
+- Rule: realtime Gold can support research and audit, but rows with `is_observed=false` must never be counted as completed training evidence.
+- Rule: do not describe full-window `2010-01-04 -> 2026-05-13` Gold as ready until explicit full-window dataset ids and audit reports exist.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

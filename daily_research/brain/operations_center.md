@@ -162,3 +162,14 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - Evidence query: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q "<r-id/tag/dataset/blocker>" --json`
 - Project skill sync dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/install_project_skills.py --dry-run`
 - Guard rule: global skill install is explicit only via `--install`; dry-run must not be reported as installed.
+
+## 2026-05-14 r64 Gold Data Lake Commands
+- Full-universe Gold smoke evidence: `daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md`.
+- Build sharded Gold from existing Bronze/Silver lake data:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_gold_training_dataset --universe learned_all_a --max-universe-size 0 --benchmark 000300.SH --start-date <start> --end-date <end> --zones strict_train,realtime_research --source-market-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --shard-frequency month --resume --progress-jsonl <progress.jsonl>`
+- Audit a Gold dataset:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.audit_gold_dataset --dataset-id <dataset_id>`
+- Full strict dataset ready: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
+- Next allowed full realtime build:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_lake.build_gold_training_dataset --universe learned_all_a --max-universe-size 0 --benchmark 000300.SH --start-date 2010-01-04 --end-date 2026-05-13 --zones realtime_research --source-market-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --shard-frequency month --resume --progress-jsonl daily_research/output/research_data_lake/r64_full_realtime_progress_20100104_20260513.jsonl`
+- Stop rule: do not report realtime Gold as ready until the catalog has explicit full-window realtime dataset id and audit `status=ok`.

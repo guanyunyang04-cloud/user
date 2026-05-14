@@ -212,3 +212,13 @@
 - Fact: the skill is stored in repo canonical source only; dry-run sync is available, but no global skill install has been claimed.
 - Evidence capsule: `daily_research/brain/references/r63_brain_skill_operating_system_status_20260514.md`.
 - Current verdict: r63 is brain/workflow infrastructure. It improves agent handoff, retrieval, guard checks, and writeback discipline, but it is not strategy evidence and must not affect live/default/promotion or the active artifact.
+
+## 2026-05-14 r64 Full-Universe Gold Data Lake Status
+- Fact: r64 adds resumable sharded Gold construction, lake-backed policy-input loading, portfolio checkpoints across shards, transparent sharded Gold loading, and Gold audit writeback.
+- Fact: full-universe 2019H1 smoke passed from explicit Bronze/Silver dataset `policy_input_bundle__0f116a9b78c92ff045a6853d` with uncapped `learned_all_a` (`3,070` symbols).
+- Fact: strict smoke dataset `continuous_policy_training_matrices__strict_train__03ce80c27c93371d6b5dcf47` has `78,450` sample rows, `98` daily rows, `5/5` shards, `unobserved_label_rows=0`, and audit `status=ok`.
+- Fact: realtime smoke dataset `continuous_policy_training_matrices__realtime_research__acf000b3d5cf52b558706926` has `84,573` sample rows, `118` daily rows, `6/6` shards, `6,202` unobserved tail rows, `is_training_safe=false`, and audit `status=ok`.
+- Fact: full-window strict Gold dataset `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1` is registered for `learned_all_a`, `2010-01-04` to `2026-05-13`, strict observed through `2026-04-10`, with `1,863,468` sample rows, `3,949` daily rows, `196/196` shards, `unobserved_label_rows=0`, `is_training_safe=true`, loader check passed, and audit `status=ok`.
+- Blocker: full-window realtime Gold is still pending and must not be counted as completed training evidence.
+- Evidence capsule: `daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md`.
+- Current verdict: r64 has produced reusable full-universe strict Gold training data. It is data infrastructure, not continuous_policy strategy evidence, and must not affect live/default/promotion or the active artifact.

@@ -7,6 +7,7 @@ import pandas as pd
 from daily_research.data_lake import ResearchDataLake, build_label_completeness_summary
 from daily_research.data_lake import build_research_database
 from daily_research.data_lake.import_legacy_training_caches import import_legacy_training_dataset_caches
+from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
 from daily_research.continuous_policy.training_dataset_cache import save_training_dataset_cache
 
 
@@ -122,6 +123,51 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(record.row_counts["silver_feature_cells"], 4)
         self.assertTrue(membership_exists)
 
+    def test_market_bundle_can_be_loaded_as_policy_inputs_without_tq(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 20.0], [10.5, 19.8], [10.7, 20.2]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+        membership_frame = pd.DataFrame(True, index=dates, columns=stocks)
+        feature_frames = {
+            "score_none": close * 0.0,
+            "score_v2": close * 0.0 + 0.1,
+            "score_blend": close * 0.0 + 0.05,
+            "ret_1d": close.pct_change(),
+            "score_delta_1d": close * 0.0,
+            "score_blend_lag1": close.shift(1) * 0.0,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+            )
+
+        self.assertEqual(prepared.universe, tuple(stocks))
+        pd.testing.assert_frame_equal(prepared.close, close)
+        self.assertEqual(prepared.raw_cache_meta["source"], "data_lake")
+        self.assertIn("score_blend_lag1", prepared.derived_frames)
+
     def test_label_completeness_separates_strict_and_realtime_zones(self) -> None:
         trade_dates = pd.to_datetime(
             ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"]
@@ -202,6 +248,99 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(len(imported), 1)
         self.assertEqual(len(listed), 1)
         self.assertEqual(imported[0]["zone"], "strict_train")
+
+    def test_sharded_training_dataset_registers_and_loads_sorted_frames(self) -> None:
+        first_sample = pd.DataFrame(
+            {
+                "date": ["2026-01-06", "2026-01-05"],
+                "stock": ["B", "A"],
+                "action_label": ["hold", "open"],
+            }
+        )
+        second_sample = pd.DataFrame(
+            {
+                "date": ["2026-01-07"],
+                "stock": ["A"],
+                "action_label": ["reduce"],
+            }
+        )
+        first_daily = pd.DataFrame({"date": ["2026-01-05", "2026-01-06"], "gross_exposure_target": [0.7, 0.8]})
+        second_daily = pd.DataFrame({"date": ["2026-01-07"], "gross_exposure_target": [0.6]})
+        spec = {
+            "dataset": "continuous_policy_training_matrices",
+            "pool_name": "learned_all_a",
+            "benchmark": "000300.SH",
+            "start_date": "2026-01-05",
+            "end_date": "2026-01-07",
+            "label_preset": "holdcash_v3",
+            "sharded": True,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            identity = lake.build_training_dataset_identity(spec=spec, zone="strict_train")
+            root = Path(identity["dataset_dir"])
+            sample_dir = root / "sample_frame"
+            daily_dir = root / "daily_frame"
+            sample_dir.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            first_sample_path = sample_dir / "2026-01-05_2026-01-06.parquet"
+            second_sample_path = sample_dir / "2026-01-07_2026-01-07.parquet"
+            first_daily_path = daily_dir / "2026-01-05_2026-01-06.parquet"
+            second_daily_path = daily_dir / "2026-01-07_2026-01-07.parquet"
+            first_sample.to_parquet(first_sample_path, index=False)
+            second_sample.to_parquet(second_sample_path, index=False)
+            first_daily.to_parquet(first_daily_path, index=False)
+            second_daily.to_parquet(second_daily_path, index=False)
+            record = lake.save_sharded_training_dataset(
+                spec=spec,
+                zone="strict_train",
+                shard_records=[
+                    {
+                        "status": "stored",
+                        "start_date": "2026-01-05",
+                        "end_date": "2026-01-06",
+                        "sample_path": str(first_sample_path),
+                        "daily_path": str(first_daily_path),
+                        "sample_rows": 2,
+                        "daily_rows": 2,
+                        "observed_label_rows": 2,
+                        "daily_observed_rows": 2,
+                    },
+                    {
+                        "status": "stored",
+                        "start_date": "2026-01-07",
+                        "end_date": "2026-01-07",
+                        "sample_path": str(second_sample_path),
+                        "daily_path": str(second_daily_path),
+                        "sample_rows": 1,
+                        "daily_rows": 1,
+                        "observed_label_rows": 1,
+                        "daily_observed_rows": 1,
+                    },
+                ],
+                teacher_summary={"label_preset": "holdcash_v3", "sharded": True},
+                label_completeness_summary={
+                    "zone": "strict_train",
+                    "sample_rows": 3,
+                    "daily_rows": 3,
+                    "observed_label_rows": 3,
+                    "unobserved_label_rows": 0,
+                    "observed_label_row_ratio": 1.0,
+                    "daily_observed_rows": 3,
+                    "daily_unobserved_rows": 0,
+                    "strict_end_date": "2026-01-07",
+                    "is_training_safe": True,
+                },
+            )
+            loaded = lake.load_training_dataset(record.dataset_id)
+            described = lake.describe_dataset(record.dataset_id)
+
+        self.assertEqual(record.row_counts["sample_frame"], 3)
+        self.assertTrue(described["parameters"]["sharded"])
+        self.assertEqual(loaded.sample_frame[["date", "stock"]].values.tolist(), [["2026-01-05", "A"], ["2026-01-06", "B"], ["2026-01-07", "A"]])
+        self.assertEqual(loaded.daily_frame["date"].tolist(), ["2026-01-05", "2026-01-06", "2026-01-07"])
+        self.assertTrue(loaded.teacher_summary["sharded"])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 14,
+  "record_count": 15,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -403,6 +403,40 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": []
+    },
+    {
+      "id": "r64",
+      "date": "2026-05-14",
+      "r_id": "r64",
+      "path": "daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md",
+      "tags": [
+        "r64",
+        "continuous_policy",
+        "Data Lake",
+        "data lake"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [],
+      "verdict": "Current verdict: r64 infrastructure and full-window `strict_train` Gold are complete and audit-clean. Full-window `realtime_research` Gold is still pending.; Boundary: this is research data infrastructure only. It is not strategy evidence and does not change live/default/promotion behavior.; Production anchor: `daily_research/output/active_execution_strategy.json` remains unchanged.",
+      "blockers": [
+        "## Blocker",
+        "Full-window `strict_train` Gold is no longer blocked.",
+        "Full-window `realtime_research` Gold for uncapped `learned_all_a`, `2010-01-04` to `2026-05-13`, is still pending.",
+        "The previous r62 blocker was one-shot in-memory `build_training_matrices(...)`; r64 removes that architectural blocker by adding resumable shards and checkpoints.",
+        "Do not write realtime Gold as training-ready; realtime Gold must remain research/audit data only. Its unobserved tail labels must not count as completed training evidence."
+      ],
+      "next_allowed_actions": [
+        "## Next",
+        "Next allowed realtime build:",
+        "If a realtime full build is interrupted, record the last completed shard, failure reason, and exact resume command. Do not call realtime complete until audit passes."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+        "continuous_policy_training_matrices__strict_train__03ce80c27c93371d6b5dcf47",
+        "continuous_policy_training_matrices__realtime_research__acf000b3d5cf52b558706926"
+      ]
     }
   ]
 }
