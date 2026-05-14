@@ -29,11 +29,15 @@ class CoreV4ArtifactContractTest(unittest.TestCase):
                 "target_weight": {"alpha_score": 0.03, "current_weight": 0.65},
                 "target_delta": {"portfolio_daily_target_delta_intent": 1.0, "alpha_score": 0.01},
                 "release_intent": {"current_weight": 1.0, "portfolio_daily_target_delta_intent": -4.0},
+                "receiver_score": {"alpha_score": 1.0, "current_weight": -1.0},
+                "receiver_support": {"alpha_score": 1.0, "current_weight": -1.0},
             },
             linear_biases={
                 "target_weight": 0.02,
                 "target_delta": 0.0,
                 "release_intent": 0.0,
+                "receiver_score": 0.0,
+                "receiver_support": 0.0,
             },
             train_summary={"run_tag": "core_v4_test"},
             training_diagnostics={
@@ -83,11 +87,22 @@ class CoreV4ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_target_weight_intent", frame.columns)
             self.assertIn("portfolio_daily_target_delta_intent", frame.columns)
             self.assertIn("portfolio_daily_release_first_intent", frame.columns)
+            self.assertIn("portfolio_daily_receiver_score", frame.columns)
+            self.assertIn("portfolio_daily_unified_receiver_score", frame.columns)
+            self.assertIn("portfolio_daily_receiver_executable_candidate", frame.columns)
+            self.assertIn("core_v4_target_delta_weight_conflict_count", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)
             self.assertIn("release_first_block_reason", frame.columns)
             self.assertGreater(float(frame.loc[0, "portfolio_daily_release_first_intent"]), 0.0)
             self.assertIn(str(frame.loc[0, "release_first_action_hint"]), {"reduce", "exit"})
             self.assertEqual(str(frame.loc[1, "release_first_block_reason"]), "not_held")
+            self.assertAlmostEqual(
+                float(frame.loc[0, "portfolio_daily_target_delta_intent"]),
+                float(frame.loc[0, "portfolio_daily_target_weight_intent"]) - 0.12,
+                places=8,
+            )
+            self.assertGreater(float(frame.loc[1, "portfolio_daily_receiver_score"]), 0.0)
+            self.assertEqual(float(frame.loc[1, "portfolio_daily_receiver_executable_candidate"]), 1.0)
         self.assertEqual(global_targets["release_first_allocation_v3_mode"], 1.0)
         self.assertEqual(generic_globals["release_first_allocation_v3_mode"], 1.0)
 

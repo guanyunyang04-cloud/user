@@ -100,6 +100,15 @@
 - Rule: any future protocol smoke with `--search-profile` must verify `profile_binding.profile_applied=true` before behavior interpretation.
 - Rule: if release/source remains zero with profile binding and enriched diagnostics present, the conclusion must be "release-first wiring/training target still not connected," not "run more epochs" or "add generic loss weight."
 
+## 2026-05-14 r61 Decision-Focused Core V4 Lesson
+- Fact: reusable training datasets are now first-class evidence assets. Every constructed training surface must be reusable by fingerprint, including `sample_frame`, `daily_frame`, and `teacher_summary`.
+- Fact: r61 proves profile binding, core-v4 v47 loss resolution, CUDA AMP training, release-flow trace surfacing, and reusable dataset caching can run together in a direct protocol and study dry-run.
+- Fact: safe protocol evidence remains behavior-negative: source/release is still below the required floor, shadow remains source-dead, and intent translation conflict remains near 1.0.
+- Inference: clean target-sum closure can coexist with a broken release/source/receiver flow. Therefore target gap alone is not sufficient evidence that release-first allocation is behavior-closed.
+- Rule: if `release_first_source_intent_count < 1.0` or `portfolio_daily_source_target_count < 1.0` and release-flow trace reports a blocker other than `none`, write the conclusion as release-flow disconnected.
+- Rule: do not explain r61 failure as "needs more epoch" while best epoch is at edge and release-flow trace shows missing held negative delta or source executable semantics.
+- Rule: future r62 work should first repair held negative-delta generation, executable source semantics, and target-delta/action translation before expanding model size, epochs, or historical loss chains.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

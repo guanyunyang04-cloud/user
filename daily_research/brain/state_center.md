@@ -184,3 +184,14 @@
 - Evidence capsule: `daily_research/brain/references/r60_profile_bound_core_v4_screening_status_20260513.md`.
 - Current verdict: r60 is research / shadow-only. It proves correct profile binding and diagnostic surfacing, but it is not eligible for r61 strict resume, confirmatory, promotion, live/default, or active artifact changes.
 - Next: inspect core-v4 release/source target generation and allocator-consumable target-delta wiring; do not reframe this as simply needing more epochs or loss weight.
+
+## 2026-05-14 r61 Decision-Focused Core V4 Status
+- Fact: r61 adds release-flow trace diagnostics, core-v4 release-first target construction, receiver support outputs, v47 decision-focused core-v4 loss, active r61 registry entry, and reusable training dataset cache.
+- Fact: all constructed training dataset surfaces are now reusable by fingerprint: `sample_frame.pkl`, `daily_frame.pkl`, `teacher_summary.json`, and `metadata.json`; `train_policy.py` defaults to `--training-dataset-cache-mode auto`.
+- Fact: focused regression passed with `154 passed, 24 warnings`; doc guard passed; active artifact diff is empty.
+- Fact: smoke `protocol_r61_release_first_decision_core_v4_smoke_20260514_03` completed with profile binding, core-v4/v47, CUDA AMP, cache hit, and parseable release-flow diagnostics.
+- Fact: dry run `self_opt_study_r61_release_first_decision_core_v4_dryrun_20260514_02` selected only the r61 active profile and kept `protocol_runner=in_process`.
+- Fact: safe protocol `self_opt_study_r61_release_first_decision_core_v4_screening_safe_20260514_01__trial_01` completed and wrote a parseable protocol summary, but the outer study wrapper was interrupted before final `study_summary.json`.
+- Screening protocol verdict: wiring improved but behavior remains blocked. Evaluation has tiny nonzero source intent/target `0.0241`, clean target gap `0.0026`, but conflict rate `0.99998`, cash timing `-0.16636`, and trace blocker `no_held_negative_delta`; shadow remains source-dead with `release_flow_primary_blocker=source_executable_dead`.
+- Evidence capsule: `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`.
+- Current verdict: r61 is research / shadow-only. Do not enter confirmatory, strict promotion, live/default, or active artifact changes. Next work must repair held negative-delta/source executable semantics and intent translation conflict, not repackage this as simply needing more epoch or generic loss weight.

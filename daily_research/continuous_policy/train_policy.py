@@ -48,6 +48,11 @@ from daily_research.continuous_policy.runtime import (
 )
 from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.continuous_policy.training_dataset_cache import (
+    build_training_dataset_cache_spec,
+    load_training_dataset_cache,
+    save_training_dataset_cache,
+)
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_CORE_V4,
@@ -114,6 +119,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slippage-bps", type=float, default=7.0)
     parser.add_argument("--sell-tax-bps", type=float, default=10.0)
     parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument(
+        "--training-dataset-cache-mode",
+        default="auto",
+        choices=("auto", "refresh", "off"),
+        help="Reuse constructed training matrices by fingerprint. auto loads/writes, refresh rebuilds, off disables.",
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Build and cache training matrices, write previews and summary, then exit without fitting a model.",
+    )
     parser.add_argument(
         "--label-preset",
         default="balanced_v2",
@@ -261,23 +277,81 @@ def main(argv: list[str] | None = None) -> int:
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy train",
     )
-    future_metrics = build_future_path_metrics(prepared)
-    sample_frame, daily_frame, teacher_summary = build_training_matrices(
-        prepared=prepared,
-        future_metrics=future_metrics,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        transaction_cost_bps=args.transaction_cost_bps,
-        slippage_bps=args.slippage_bps,
-        sell_tax_bps=args.sell_tax_bps,
-        random_seed=args.random_seed,
-        skip_multiplier=args.skip_multiplier,
-        label_preset=args.label_preset,
-        execution_semantics=args.execution_semantics,
-        budget_semantics=args.budget_semantics,
-        budget_calibration=args.budget_calibration,
-        budget_objective=args.budget_objective,
+    prepared_summary = prepared.to_summary()
+    training_dataset_cache_spec = build_training_dataset_cache_spec(
+        args=args,
+        prepared_summary=prepared_summary,
+        universe=list(prepared.universe),
     )
+    cache_mode = str(getattr(args, "training_dataset_cache_mode", "auto") or "auto")
+    cache_record = None
+    training_dataset_cache_summary: dict[str, object] = {
+        "mode": cache_mode,
+        "status": "off" if cache_mode == "off" else "miss",
+        "cache_key": "",
+        "cache_dir": "",
+    }
+    if cache_mode != "off" and cache_mode != "refresh" and not bool(getattr(args, "refresh_cache", False)):
+        cache_record = load_training_dataset_cache(spec=training_dataset_cache_spec)
+    if cache_record is not None:
+        sample_frame = cache_record.sample_frame.copy()
+        daily_frame = cache_record.daily_frame.copy()
+        teacher_summary = dict(cache_record.teacher_summary)
+        training_dataset_cache_summary = {
+            "mode": cache_mode,
+            "status": "hit",
+            "cache_key": cache_record.cache_key,
+            "cache_dir": str(cache_record.cache_dir.resolve()),
+            "sample_rows": int(len(sample_frame)),
+            "daily_rows": int(len(daily_frame)),
+        }
+        progress_sink.emit(
+            "train_dataset_cache_hit",
+            cache_key=cache_record.cache_key,
+            sample_rows=int(len(sample_frame)),
+            daily_rows=int(len(daily_frame)),
+        )
+    else:
+        if cache_mode != "off":
+            progress_sink.emit("train_dataset_cache_miss", cache_mode=cache_mode)
+        future_metrics = build_future_path_metrics(prepared)
+        sample_frame, daily_frame, teacher_summary = build_training_matrices(
+            prepared=prepared,
+            future_metrics=future_metrics,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            transaction_cost_bps=args.transaction_cost_bps,
+            slippage_bps=args.slippage_bps,
+            sell_tax_bps=args.sell_tax_bps,
+            random_seed=args.random_seed,
+            skip_multiplier=args.skip_multiplier,
+            label_preset=args.label_preset,
+            execution_semantics=args.execution_semantics,
+            budget_semantics=args.budget_semantics,
+            budget_calibration=args.budget_calibration,
+            budget_objective=args.budget_objective,
+        )
+        if cache_mode != "off":
+            saved_cache = save_training_dataset_cache(
+                spec=training_dataset_cache_spec,
+                sample_frame=sample_frame,
+                daily_frame=daily_frame,
+                teacher_summary=teacher_summary,
+            )
+            training_dataset_cache_summary = {
+                "mode": cache_mode,
+                "status": "refreshed" if cache_mode == "refresh" or bool(getattr(args, "refresh_cache", False)) else "stored",
+                "cache_key": saved_cache.cache_key,
+                "cache_dir": str(saved_cache.cache_dir.resolve()),
+                "sample_rows": int(len(sample_frame)),
+                "daily_rows": int(len(daily_frame)),
+            }
+            progress_sink.emit(
+                "train_dataset_cache_store",
+                cache_key=saved_cache.cache_key,
+                sample_rows=int(len(sample_frame)),
+                daily_rows=int(len(daily_frame)),
+            )
     feature_names = select_feature_columns(sample_frame)
     daily_feature_names = select_daily_feature_columns(daily_frame)
     trained_at = now_iso()
@@ -293,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         teacher_summary=teacher_summary,
         training_contract=training_contract,
     )
+    train_summary["training_dataset_cache"] = training_dataset_cache_summary
     progress_sink.emit(
         "train_data_prepare_complete",
         sample_rows=int(len(sample_frame)),
@@ -303,6 +378,27 @@ def main(argv: list[str] | None = None) -> int:
     data_prepare_stop.set()
     if heartbeat_thread is not None:
         heartbeat_thread.join(timeout=1.0)
+
+    if bool(getattr(args, "prepare_only", False)):
+        sample_frame.head(4000).to_csv(run_root / "training_samples_preview.csv", index=False, encoding="utf-8-sig")
+        daily_frame.to_csv(run_root / "daily_training_targets.csv", index=False, encoding="utf-8-sig")
+        summary_payload = {
+            **train_summary,
+            "prepare_only": True,
+            "training_diagnostics": {
+                "status": "prepare_only_complete",
+                "trainer_backend": str(training_contract.get("trainer_backend", "") or ""),
+                "train_sample_rows": int(len(sample_frame)),
+                "daily_rows": int(len(daily_frame)),
+                "model_fit_skipped": True,
+            },
+            "model_artifact_path": "",
+            "sample_preview_csv": str((run_root / "training_samples_preview.csv").resolve()),
+            "daily_training_targets_csv": str((run_root / "daily_training_targets.csv").resolve()),
+        }
+        write_json(run_root / "train_summary.json", summary_payload)
+        safe_print_json(summary_payload)
+        return 0
 
     if backend == TRAINER_BACKEND_FORMAL_V2:
         artifact = fit_policy_models_v2(

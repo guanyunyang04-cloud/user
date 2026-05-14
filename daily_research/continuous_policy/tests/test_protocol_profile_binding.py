@@ -5,18 +5,18 @@ from daily_research.continuous_policy.run_continuous_policy_protocol import (
 )
 
 
-R59_PROFILE = "split_heads_portfolio_daily_release_first_core_v4_r59"
+R61_PROFILE = "split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61"
 
 
 class ProtocolProfileBindingTest(unittest.TestCase):
-    def test_r59_search_profile_applies_registry_defaults_without_identity_flags(self) -> None:
-        args, binding = _parse_args_with_profile_binding(["--search-profile", R59_PROFILE])
+    def test_r61_search_profile_applies_registry_defaults_without_identity_flags(self) -> None:
+        args, binding = _parse_args_with_profile_binding(["--search-profile", R61_PROFILE])
 
         self.assertTrue(binding["profile_applied"])
         self.assertTrue(binding["active_profile"])
-        self.assertEqual(binding["requested_search_profile"], R59_PROFILE)
+        self.assertEqual(binding["requested_search_profile"], R61_PROFILE)
         self.assertEqual(args.trainer_backend, "formal_torch_core_v4")
-        self.assertEqual(args.loss_profile, "alpha_result_value_budget_split_v46")
+        self.assertEqual(args.loss_profile, "alpha_result_value_budget_split_v47")
         self.assertEqual(args.budget_semantics, "allocation_layer_v1")
         self.assertEqual(args.budget_calibration, "end_to_end_allocation_layer_v1")
         self.assertEqual(args.budget_objective, "result_value_v10")
@@ -31,7 +31,7 @@ class ProtocolProfileBindingTest(unittest.TestCase):
         args, binding = _parse_args_with_profile_binding(
             [
                 "--search-profile",
-                R59_PROFILE,
+                R61_PROFILE,
                 "--epochs",
                 "1",
                 "--min-epochs",
@@ -54,7 +54,7 @@ class ProtocolProfileBindingTest(unittest.TestCase):
     def test_non_active_legacy_profile_is_rejected_for_direct_protocol(self) -> None:
         with self.assertRaises(SystemExit):
             _parse_args_with_profile_binding(
-                ["--search-profile", "split_heads_portfolio_daily_cash_timing_release_controller_r55"]
+                ["--search-profile", "split_heads_portfolio_daily_release_first_core_v4_r59"]
             )
 
 

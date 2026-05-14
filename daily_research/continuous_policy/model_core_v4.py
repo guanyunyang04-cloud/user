@@ -12,6 +12,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from daily_research.continuous_policy.model_v2 import _apply_matrix, _prepare_matrix, _split_indices
+from daily_research.continuous_policy.core_v4_release_targets import build_core_v4_release_first_targets
 from daily_research.continuous_policy.semantic_budget_intent import derive_release_first_intent
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_CORE_V4
 from daily_research.continuous_policy.training_runtime_acceleration import (
@@ -24,11 +25,15 @@ from daily_research.continuous_policy.training_runtime_acceleration import (
 CORE_V4_RELEASE_FIRST_LOSS_ALIASES: tuple[str, ...] = (
     "alpha_result_value_budget_split_v46",
     "core_v4_release_first_v1",
+    "alpha_result_value_budget_split_v47",
+    "core_v4_release_first_decision_v2",
 )
 CORE_V4_LOSS_PROFILE_NAMES: tuple[str, ...] = CORE_V4_RELEASE_FIRST_LOSS_ALIASES
 CORE_V4_OUTPUT_NAMES: tuple[str, ...] = (
     "target_weight",
     "target_delta",
+    "receiver_score",
+    "receiver_support",
     "release_intent",
     "source_score",
     "source_release_quality",
@@ -43,7 +48,8 @@ def resolve_core_v4_loss_profile(profile_name: str | None) -> tuple[str, dict[st
     name = str(profile_name or "alpha_result_value_budget_split_v46").strip() or "alpha_result_value_budget_split_v46"
     if name not in CORE_V4_RELEASE_FIRST_LOSS_ALIASES:
         raise ValueError(f"Unsupported core-v4 loss profile: {profile_name!r}. Only r56 release-first v46 is supported.")
-    return "alpha_result_value_budget_split_v46", {
+    decision_focused = name in {"alpha_result_value_budget_split_v47", "core_v4_release_first_decision_v2"}
+    return ("alpha_result_value_budget_split_v47" if decision_focused else "alpha_result_value_budget_split_v46"), {
         "multi_objective_loss_weights": {
             "action_total": 0.0,
             "duration_total": 0.0,
@@ -52,6 +58,9 @@ def resolve_core_v4_loss_profile(profile_name: str | None) -> tuple[str, dict[st
             "source_release_intent_total": 0.42,
             "reduce_exit_intent_total": 0.28,
             "release_first_allocation_total": 0.66,
+            "receiver_support_total": 0.34 if decision_focused else 0.0,
+            "target_delta_weight_coherence_total": 0.28 if decision_focused else 0.0,
+            "release_receiver_flow_surrogate_total": 0.44 if decision_focused else 0.0,
         }
     }
 
@@ -183,12 +192,14 @@ def _decode_raw_outputs(raw: np.ndarray, current_weight: pd.Series) -> dict[str,
     return {
         "target_weight": target_weight,
         "target_delta": target_delta,
-        "release_intent": pd.Series(sigmoid(raw[:, 2]), index=frame_index).clip(0.0, 1.0),
-        "source_score": pd.Series(sigmoid(raw[:, 3]), index=frame_index).clip(0.0, 1.0),
-        "source_release_quality": pd.Series(sigmoid(raw[:, 4]), index=frame_index).clip(0.0, 1.0),
-        "source_economic_block_risk": pd.Series(sigmoid(raw[:, 5]), index=frame_index).clip(0.0, 1.0),
-        "reduce_quality": pd.Series(sigmoid(raw[:, 6]), index=frame_index).clip(0.0, 1.0),
-        "exit_hazard": pd.Series(sigmoid(raw[:, 7]), index=frame_index).clip(0.0, 1.0),
+        "receiver_score": pd.Series(sigmoid(raw[:, 2]), index=frame_index).clip(0.0, 1.0),
+        "receiver_support": pd.Series(sigmoid(raw[:, 3]), index=frame_index).clip(0.0, 1.0),
+        "release_intent": pd.Series(sigmoid(raw[:, 4]), index=frame_index).clip(0.0, 1.0),
+        "source_score": pd.Series(sigmoid(raw[:, 5]), index=frame_index).clip(0.0, 1.0),
+        "source_release_quality": pd.Series(sigmoid(raw[:, 6]), index=frame_index).clip(0.0, 1.0),
+        "source_economic_block_risk": pd.Series(sigmoid(raw[:, 7]), index=frame_index).clip(0.0, 1.0),
+        "reduce_quality": pd.Series(sigmoid(raw[:, 8]), index=frame_index).clip(0.0, 1.0),
+        "exit_hazard": pd.Series(sigmoid(raw[:, 9]), index=frame_index).clip(0.0, 1.0),
     }
 
 
@@ -215,9 +226,18 @@ def _heuristic_outputs(artifact: TorchContinuousPolicyCoreV4Artifact, state_fram
     )
     release_intent = (1.0 / (1.0 + np.exp(-np.clip(release_raw, -40.0, 40.0)))).where(current > 0.0, 0.0)
     release_intent = release_intent.clip(0.0, 1.0)
+    receiver_raw = _linear_score(
+        state_frame,
+        artifact.linear_weights.get("receiver_score", {}),
+        float(artifact.linear_biases.get("receiver_score", 0.0)),
+    )
+    receiver_score = (1.0 / (1.0 + np.exp(-np.clip(receiver_raw, -40.0, 40.0)))).where(current < 0.24, 0.0)
+    receiver_support = receiver_score.where(current < 0.24, 0.0).clip(0.0, 1.0)
     return {
         "target_weight": target_weight,
         "target_delta": target_delta,
+        "receiver_score": receiver_score.clip(0.0, 1.0),
+        "receiver_support": receiver_support,
         "release_intent": release_intent,
         "source_score": (release_intent * 0.72 + (target_delta < -0.003).astype(float) * 0.18).clip(0.0, 1.0),
         "source_release_quality": (release_intent * 0.80 + current.clip(0.0, 0.20) * 0.50).clip(0.0, 1.0),
@@ -259,6 +279,16 @@ def _model_outputs(artifact: TorchContinuousPolicyCoreV4Artifact, state_frame: p
             0.60 * _numeric_series(state_frame, "portfolio_daily_target_weight_intent", 0.0)
             + 0.40 * outputs["target_weight"]
         ).clip(0.0, 0.24)
+    if "portfolio_daily_receiver_score" in state_frame.columns:
+        outputs["receiver_score"] = pd.concat(
+            [
+                outputs["receiver_score"].rename("model_receiver"),
+                _numeric_series(state_frame, "portfolio_daily_receiver_score", 0.0).rename("policy_receiver"),
+                _numeric_series(state_frame, "portfolio_daily_unified_receiver_score", 0.0).rename("unified_receiver"),
+            ],
+            axis=1,
+        ).max(axis=1).clip(0.0, 1.0)
+        outputs["receiver_support"] = outputs["receiver_score"].clip(0.0, 1.0)
     return outputs
 
 
@@ -273,8 +303,43 @@ def predict_policy_core_v4(
     policy = state_frame.copy()
     current = _current_weight(policy)
     outputs = _model_outputs(artifact, policy)
-    target_weight = outputs["target_weight"].clip(0.0, 0.24)
-    target_delta = outputs["target_delta"].clip(-0.18, 0.18)
+    raw_target_weight = outputs["target_weight"].clip(0.0, 0.24)
+    raw_target_delta = outputs["target_delta"].clip(-0.18, 0.18)
+    receiver_score = outputs.get("receiver_score", pd.Series(0.0, index=policy.index, dtype=float)).clip(0.0, 1.0)
+    receiver_support = outputs.get("receiver_support", receiver_score).clip(0.0, 1.0)
+    headroom = (0.24 - current).clip(lower=0.0)
+    release_candidate = (current > 0.003) & (raw_target_delta < -0.003)
+    receiver_candidate = (headroom > 0.003) & (raw_target_delta > 0.003) & (receiver_support >= 0.30)
+    coherent_target_weight = raw_target_weight.copy()
+    coherent_target_weight = coherent_target_weight.where(
+        ~release_candidate,
+        pd.concat(
+            [
+                coherent_target_weight.rename("target_weight"),
+                (current + raw_target_delta).clip(lower=0.0).rename("delta_weight"),
+            ],
+            axis=1,
+        ).min(axis=1),
+    )
+    coherent_target_weight = coherent_target_weight.where(
+        ~receiver_candidate,
+        pd.concat(
+            [
+                coherent_target_weight.rename("target_weight"),
+                (current + raw_target_delta.clip(lower=0.0)).rename("delta_weight"),
+            ],
+            axis=1,
+        ).max(axis=1),
+    )
+    target_delta_weight_conflict = (
+        ((raw_target_weight - current) * raw_target_delta < -(0.003 ** 2))
+        | ((raw_target_delta < -0.003) & (raw_target_weight > current + 0.003))
+        | ((raw_target_delta > 0.003) & (raw_target_weight < current - 0.003))
+    )
+    target_weight = coherent_target_weight.clip(0.0, 0.24)
+    target_delta = (target_weight - current).clip(-0.18, 0.18)
+    target_delta = target_delta.where(target_delta.abs() >= 0.003, 0.0)
+    target_weight = (current + target_delta).clip(0.0, 0.24)
     source_score = outputs["source_score"].where(current > 0.0, 0.0).clip(0.0, 1.0)
     source_release_quality = outputs["source_release_quality"].where(current > 0.0, 0.0).clip(0.0, 1.0)
     source_economic_block_risk = outputs["source_economic_block_risk"].clip(0.0, 1.0)
@@ -311,6 +376,13 @@ def predict_policy_core_v4(
     policy["release_first_block_reason"] = release_first["release_first_block_reason"].astype(str)
     policy["portfolio_daily_source_score"] = source_score
     policy["portfolio_daily_unified_source_score"] = policy["portfolio_daily_source_score"]
+    policy["portfolio_daily_source_executable_candidate"] = ((current > 0.003) & (release_intent >= 0.30)).astype(float)
+    policy["portfolio_daily_receiver_score"] = receiver_score.astype(float)
+    policy["portfolio_daily_unified_receiver_score"] = receiver_score.astype(float)
+    policy["portfolio_daily_receiver_executable_candidate"] = (
+        (current < 0.24 - 0.003) & (receiver_score >= 0.30) & (target_delta > 0.003)
+    ).astype(float)
+    policy["core_v4_target_delta_weight_conflict_count"] = int(target_delta_weight_conflict.sum())
     policy["portfolio_daily_source_release_quality"] = source_release_quality
     policy["portfolio_daily_source_economic_block_risk"] = source_economic_block_risk
     policy["reduce_quality"] = reduce_quality
@@ -340,38 +412,74 @@ def predict_policy_core_v4(
 
 
 def _training_targets(sample_frame: pd.DataFrame) -> np.ndarray:
-    current = _current_weight(sample_frame)
-    action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).astype(str)
-    target_delta = pd.Series(0.0, index=sample_frame.index, dtype=float)
-    if "portfolio_daily_target_delta_intent" in sample_frame.columns:
-        target_delta = _numeric_series(sample_frame, "portfolio_daily_target_delta_intent", 0.0)
-    elif "target_delta_hint" in sample_frame.columns:
-        target_delta = _numeric_series(sample_frame, "target_delta_hint", 0.0)
-    else:
-        target_delta.loc[action.isin(["open", "add"])] = 0.035
-        target_delta.loc[action.isin(["reduce"])] = -0.035
-        target_delta.loc[action.isin(["exit"])] = -0.08
-    target_weight = (current + target_delta).clip(0.0, 0.24)
-    if "portfolio_daily_target_weight_intent" in sample_frame.columns:
-        target_weight = _numeric_series(sample_frame, "portfolio_daily_target_weight_intent", 0.0).clip(0.0, 0.24)
-    release_intent = ((current > 0.0) & (target_delta < -0.003)).astype(float)
-    exit_hazard = ((current > 0.0) & action.isin(["exit"])).astype(float)
-    reduce_quality = ((current > 0.0) & action.isin(["reduce", "exit"])).astype(float)
-    source_score = release_intent * 0.78
-    release_quality = (release_intent * 0.82 + current.clip(0.0, 0.20) * 0.40).clip(0.0, 1.0)
-    block_risk = (0.20 - release_intent * 0.12).clip(0.0, 1.0)
+    targets = build_core_v4_release_first_targets(sample_frame, deadband=0.003, position_cap=0.24)
     return np.column_stack(
         [
-            target_weight / 0.18,
-            np.clip(target_delta / 0.10, -1.0, 1.0),
-            release_intent,
-            source_score,
-            release_quality,
-            block_risk,
-            reduce_quality,
-            exit_hazard,
+            targets["target_weight"].clip(0.0, 0.24) / 0.18,
+            np.clip(targets["target_delta"] / 0.10, -1.0, 1.0),
+            targets["receiver_score"].clip(0.0, 1.0),
+            targets["receiver_support"].clip(0.0, 1.0),
+            targets["release_intent"].clip(0.0, 1.0),
+            targets["source_score"].clip(0.0, 1.0),
+            targets["source_release_quality"].clip(0.0, 1.0),
+            targets["source_economic_block_risk"].clip(0.0, 1.0),
+            targets["reduce_quality"].clip(0.0, 1.0),
+            targets["exit_hazard"].clip(0.0, 1.0),
         ]
     ).astype(np.float32)
+
+
+def _select_core_v4_train_frame(sample_frame: pd.DataFrame, random_seed: int) -> tuple[pd.DataFrame, dict[str, int]]:
+    def _held_mask(frame: pd.DataFrame) -> pd.Series:
+        holding = _numeric_series(frame, "holding_flag", 0.0) > 0.5
+        return holding | (_current_weight(frame) > 0.003)
+
+    if len(sample_frame) <= CORE_V4_MAX_TRAIN_ROWS:
+        targets = build_core_v4_release_first_targets(sample_frame, deadband=0.003, position_cap=0.24)
+        held = _held_mask(sample_frame)
+        return sample_frame, {
+            "core_v4_train_release_rows": int(((targets["release_intent"] > 0.0) & (targets["target_delta"] < -0.003)).sum()),
+            "core_v4_train_receiver_rows": int((targets["receiver_support"] > 0.0).sum()),
+            "core_v4_train_held_rows": int(held.sum()),
+        }
+
+    targets = build_core_v4_release_first_targets(sample_frame, deadband=0.003, position_cap=0.24)
+    held = _held_mask(sample_frame)
+    action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).fillna("hold").astype(str).str.lower()
+    masks = (
+        (targets["release_intent"] > 0.0) & (targets["target_delta"] < -0.003),
+        held & (targets["release_intent"] <= 0.0),
+        (targets["receiver_support"] > 0.0) | action.isin({"open", "add"}),
+        (~held) & action.isin({"skip", "hold"}),
+    )
+    quota = max(1, CORE_V4_MAX_TRAIN_ROWS // (len(masks) + 1))
+    selected: list[pd.Index] = []
+    used: set[Any] = set()
+    for mask in masks:
+        candidates = sample_frame.index[mask.fillna(False)]
+        if len(candidates) == 0:
+            continue
+        take = min(quota, len(candidates))
+        sampled = sample_frame.loc[candidates].sample(n=take, random_state=int(random_seed)).index
+        selected.append(sampled)
+        used.update(sampled.tolist())
+    remaining = max(0, CORE_V4_MAX_TRAIN_ROWS - len(used))
+    if remaining > 0:
+        rest = sample_frame.loc[~sample_frame.index.isin(list(used))]
+        if len(rest) > 0:
+            selected.append(rest.sample(n=min(remaining, len(rest)), random_state=int(random_seed)).index)
+    selected_values: list[Any] = []
+    for index in selected:
+        selected_values.extend(pd.Index(index).tolist())
+    selected_index = pd.Index(pd.unique(selected_values))
+    train_frame = sample_frame.loc[selected_index].sort_index()
+    selected_targets = targets.loc[train_frame.index]
+    selected_held = held.loc[train_frame.index]
+    return train_frame, {
+        "core_v4_train_release_rows": int(((selected_targets["release_intent"] > 0.0) & (selected_targets["target_delta"] < -0.003)).sum()),
+        "core_v4_train_receiver_rows": int((selected_targets["receiver_support"] > 0.0).sum()),
+        "core_v4_train_held_rows": int(selected_held.sum()),
+    }
 
 
 def _global_defaults(daily_frame: pd.DataFrame) -> dict[str, float]:
@@ -432,18 +540,22 @@ def fit_policy_models_core_v4(
     np.random.seed(int(random_seed))
     run_root.mkdir(parents=True, exist_ok=True)
 
-    train_frame = sample_frame
-    if len(train_frame) > CORE_V4_MAX_TRAIN_ROWS:
-        train_frame = train_frame.sample(n=CORE_V4_MAX_TRAIN_ROWS, random_state=int(random_seed)).sort_index()
+    train_frame, stratified_diagnostics = _select_core_v4_train_frame(sample_frame, int(random_seed))
     feature_frame = _ensure_features(train_frame, feature_names)
     X, fill, means, stds = _prepare_matrix(feature_frame, feature_names)
     daily_feature_frame = _ensure_features(daily_frame, daily_feature_names)
     _, daily_fill, daily_means, daily_stds = _prepare_matrix(daily_feature_frame, daily_feature_names)
     y = _training_targets(train_frame)
+    current_y = _current_weight(train_frame).to_numpy(dtype=np.float32).reshape(-1, 1)
     train_idx, val_idx = _split_indices(len(X), int(random_seed))
-    train_dataset = TensorDataset(torch.as_tensor(X[train_idx], dtype=torch.float32), torch.as_tensor(y[train_idx], dtype=torch.float32))
+    train_dataset = TensorDataset(
+        torch.as_tensor(X[train_idx], dtype=torch.float32),
+        torch.as_tensor(y[train_idx], dtype=torch.float32),
+        torch.as_tensor(current_y[train_idx], dtype=torch.float32),
+    )
     val_x = torch.as_tensor(X[val_idx], dtype=torch.float32)
     val_y = torch.as_tensor(y[val_idx], dtype=torch.float32)
+    val_current = torch.as_tensor(current_y[val_idx], dtype=torch.float32)
     loader = DataLoader(
         train_dataset,
         batch_size=max(1, int(batch_size or 1)),
@@ -470,8 +582,12 @@ def fit_policy_models_core_v4(
         model.train()
         train_loss_sum = 0.0
         train_count = 0
-        for batch_x, batch_y in loader:
-            batch_x, batch_y = move_to_device((batch_x, batch_y), device, non_blocking=runtime.non_blocking_transfer)
+        for batch_x, batch_y, batch_current in loader:
+            batch_x, batch_y, batch_current = move_to_device(
+                (batch_x, batch_y, batch_current),
+                device,
+                non_blocking=runtime.non_blocking_transfer,
+            )
             optimizer.zero_grad(set_to_none=True)
             with autocast_context(runtime):
                 raw = model(batch_x)
@@ -479,16 +595,54 @@ def fit_policy_models_core_v4(
                 pred_delta = torch.tanh(raw[:, 1])
                 target_weight = torch.clamp(batch_y[:, 0], 0.0, 1.333)
                 target_delta = torch.clamp(batch_y[:, 1], -1.0, 1.0)
-                target_other = torch.clamp(batch_y[:, 2:], 0.0, 1.0)
+                target_receiver_score = torch.clamp(batch_y[:, 2], 0.0, 1.0)
+                target_receiver_support = torch.clamp(batch_y[:, 3], 0.0, 1.0)
+                target_release = torch.clamp(batch_y[:, 4], 0.0, 1.0)
+                target_source = torch.clamp(batch_y[:, 5], 0.0, 1.0)
+                target_reduce = torch.clamp(batch_y[:, 8], 0.0, 1.0)
+                target_exit = torch.clamp(batch_y[:, 9], 0.0, 1.0)
+                pred_receiver_score = torch.sigmoid(raw[:, 2])
+                pred_receiver_support = torch.sigmoid(raw[:, 3])
+                pred_release = torch.sigmoid(raw[:, 4])
+                pred_source = torch.sigmoid(raw[:, 5])
+                pred_reduce = torch.sigmoid(raw[:, 8])
+                pred_exit = torch.sigmoid(raw[:, 9])
+                current_actual = torch.clamp(batch_current[:, 0], 0.0, 1.0)
+                pred_weight_actual = pred_weight * 0.18
+                pred_delta_actual = pred_delta * 0.10
+                coherence_target = torch.clamp((pred_weight_actual - current_actual) / 0.10, -1.0, 1.0)
+                release_supply = pred_release * pred_source * (current_actual > 0.003).float()
+                receiver_demand = pred_receiver_support * pred_receiver_score
+                release_target_pressure = target_release * target_source
+                receiver_target_pressure = target_receiver_support * target_receiver_score
+                flow_surrogate = (
+                    torch.relu(release_target_pressure.mean() - release_supply.mean())
+                    + torch.relu(receiver_target_pressure.mean() - receiver_demand.mean())
+                    + torch.relu(release_supply.mean() - receiver_demand.mean() - 0.15)
+                    + (pred_release * (current_actual <= 0.003).float()).mean()
+                    + (pred_release * torch.clamp(batch_y[:, 7], 0.0, 1.0)).mean()
+                    + torch.relu(target_weight.mean() - pred_weight.mean())
+                )
                 loss = (
                     weights["target_weight_closure_total"] * nn.functional.smooth_l1_loss(pred_weight, target_weight)
                     + weights["cash_timing_directional_total"] * nn.functional.smooth_l1_loss(pred_delta, target_delta)
                     + weights["source_release_intent_total"]
-                    * nn.functional.binary_cross_entropy_with_logits(raw[:, 2], target_other[:, 0])
+                    * nn.functional.binary_cross_entropy_with_logits(raw[:, 4], target_release)
                     + weights["reduce_exit_intent_total"]
-                    * nn.functional.binary_cross_entropy_with_logits(raw[:, 6], target_other[:, 4])
+                    * (
+                        nn.functional.binary_cross_entropy_with_logits(raw[:, 8], target_reduce)
+                        + nn.functional.binary_cross_entropy_with_logits(raw[:, 9], target_exit)
+                    )
                     + weights["release_first_allocation_total"]
-                    * nn.functional.smooth_l1_loss(torch.sigmoid(raw[:, 3]), target_other[:, 1])
+                    * nn.functional.smooth_l1_loss(pred_source, target_source)
+                    + weights.get("receiver_support_total", 0.0)
+                    * (
+                        nn.functional.smooth_l1_loss(pred_receiver_score, target_receiver_score)
+                        + nn.functional.binary_cross_entropy_with_logits(raw[:, 3], target_receiver_support)
+                    )
+                    + weights.get("target_delta_weight_coherence_total", 0.0)
+                    * nn.functional.smooth_l1_loss(pred_delta, coherence_target)
+                    + weights.get("release_receiver_flow_surrogate_total", 0.0) * flow_surrogate
                 )
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -497,7 +651,11 @@ def fit_policy_models_core_v4(
             train_count += int(batch_x.shape[0])
         model.eval()
         with torch.no_grad():
-            val_x_device, val_y_device = move_to_device((val_x, val_y), device, non_blocking=runtime.non_blocking_transfer)
+            val_x_device, val_y_device, _ = move_to_device(
+                (val_x, val_y, val_current),
+                device,
+                non_blocking=runtime.non_blocking_transfer,
+            )
             raw = model(val_x_device)
             val_pred = torch.cat([torch.sigmoid(raw[:, :1]), torch.tanh(raw[:, 1:2]), torch.sigmoid(raw[:, 2:])], dim=1)
             val_loss = float(nn.functional.smooth_l1_loss(val_pred, val_y_device).detach().cpu())
@@ -538,6 +696,7 @@ def fit_policy_models_core_v4(
         "train_sample_rows": int(len(train_frame)),
         "raw_train_sample_rows": int(len(sample_frame)),
         "train_sample_cap": int(CORE_V4_MAX_TRAIN_ROWS),
+        **stratified_diagnostics,
         "progress_event_count": int(progress_event_count),
         "supports_release_first_allocation_v3_mode": True,
         "core_v4_shadow_only": True,
@@ -558,8 +717,10 @@ def fit_policy_models_core_v4(
             "target_weight": {"current_weight": 0.65, "alpha_score": 0.03},
             "target_delta": {"portfolio_daily_target_delta_intent": 1.0, "alpha_score": 0.01},
             "release_intent": {"current_weight": 1.0, "portfolio_daily_target_delta_intent": -4.0},
+            "receiver_score": {"alpha_score": 1.0, "current_weight": -1.0, "portfolio_daily_target_delta_intent": 2.0},
+            "receiver_support": {"alpha_score": 1.0, "current_weight": -1.0, "portfolio_daily_target_delta_intent": 2.0},
         },
-        linear_biases={"target_weight": 0.02, "target_delta": 0.0, "release_intent": 0.0},
+        linear_biases={"target_weight": 0.02, "target_delta": 0.0, "release_intent": 0.0, "receiver_score": 0.0, "receiver_support": 0.0},
         train_summary=dict(train_summary or {}),
         training_diagnostics=diagnostics,
         training_contract=contract,

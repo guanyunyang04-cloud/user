@@ -127,6 +127,51 @@ class BehaviorBottleneckReportTest(unittest.TestCase):
         self.assertEqual(report["metrics"]["intent_translation_conflict_rate"], 0.25)
         self.assertFalse(report["progress_assets"]["intent_translation_clean"])
 
+    def test_release_flow_disconnect_is_reported_as_behavior_blocker(self) -> None:
+        report = build_behavior_bottleneck_report(
+            {
+                "run_tag": "release_flow_dead",
+                "evaluation": {
+                    "continuity_metrics": {
+                        "portfolio_daily_source_target_count": 0.0,
+                        "release_first_source_intent_count": 0.0,
+                        "release_flow_receiver_score_dead_count": 2.0,
+                        "release_flow_target_delta_weight_conflict_count": 0.0,
+                        "intent_translation_conflict_rate": 0.5,
+                    }
+                },
+                "training_evidence": {"status": "sufficient", "best_epoch": 4, "completed_epochs": 8},
+                "promotion_gate": {"failed_checks": []},
+            }
+        )
+
+        self.assertIn("release_flow_disconnected", report["blockers"])
+        self.assertEqual(report["primary_blocker"], "sell_intent_dead")
+
+    def test_low_nonzero_source_with_trace_blocker_is_reported_as_release_flow_disconnected(self) -> None:
+        report = build_behavior_bottleneck_report(
+            {
+                "run_tag": "release_flow_low_nonzero",
+                "evaluation": {
+                    "continuity_metrics": {
+                        "portfolio_daily_source_target_count": 0.024,
+                        "portfolio_daily_source_realized_sell_rate": 1.0,
+                        "release_first_source_intent_count": 0.024,
+                        "release_flow_primary_blocker": "no_held_negative_delta",
+                        "release_flow_receiver_score_dead_count": 0.0,
+                        "release_flow_target_delta_weight_conflict_count": 0.0,
+                        "release_flow_source_intent_without_realization_count": 0.0,
+                        "intent_translation_conflict_rate": 0.99,
+                    }
+                },
+                "training_evidence": {"status": "sufficient", "best_epoch": 4, "completed_epochs": 8},
+                "promotion_gate": {"failed_checks": []},
+            }
+        )
+
+        self.assertIn("release_flow_disconnected", report["blockers"])
+        self.assertEqual(report["metrics"]["release_flow_primary_blocker"], "no_held_negative_delta")
+
 
 if __name__ == "__main__":
     unittest.main()

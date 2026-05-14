@@ -245,3 +245,13 @@
 - Core-v4 intent contract: core-v4 prediction must reuse `derive_release_first_intent(...)` for release score, action hint, intent delta, and block reason.
 - Evidence boundary: r60 safe screening completed but failed behaviorally. It proves profile-bound execution and diagnostic visibility, not strategy success or promotion readiness.
 - Next-work boundary: future work must target release/source target generation and target-delta-to-allocator wiring before any confirmatory or long resume.
+
+## 2026-05-14 r61 Decision-Focused Core V4 Contract
+- r61 entry: `split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61` / `alpha_result_value_budget_split_v47`.
+- Registry contract: active new-study profiles are `focused_seq_v1`, `split_heads_portfolio_daily_release_first_constrained_decoder_r56`, and `split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61`. r59 is legacy-compatible historical evidence, not an active new-study entrypoint.
+- Dataset contract: all constructed training dataset surfaces must be reusable. At minimum, `sample_frame`, `daily_frame`, `teacher_summary`, and cache metadata must be persisted by fingerprint and reloadable before rebuilding. Default mode is `auto`; `refresh` rebuilds; `off` disables read/write.
+- Target contract: core-v4 r61 target construction must create release targets only for held names, suppress release with high keep-risk or economic block risk, create receiver support only when headroom exists, and keep target weight / target delta coherent.
+- Loss contract: core-v4 v47 keeps `action_total=0.0` and `duration_total=0.0`, adds positive receiver support, target-delta coherence, and release-receiver flow surrogate weights, and does not import legacy v1-v45 losses.
+- Trace contract: release-first simulator/protocol outputs must include release-flow trace fields and must identify blockers such as `no_held_negative_delta`, `source_executable_dead`, `receiver_score_dead`, and `target_delta_weight_conflict`.
+- Bottleneck contract: if source/release counts are below floor and release-flow trace has a non-`none` blocker, behavior reporting must include `release_flow_disconnected`.
+- Evidence boundary: r61 smoke/dry-run prove wiring. The parseable safe protocol shows behavior remains blocked and the outer study wrapper was interrupted before final study-summary write. This is not confirmatory, promotion, live/default, or active artifact evidence.

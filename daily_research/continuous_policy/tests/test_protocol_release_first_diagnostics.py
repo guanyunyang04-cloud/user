@@ -24,6 +24,16 @@ class ProtocolReleaseFirstDiagnosticsTest(unittest.TestCase):
                     "release_first_rotation_amount": [0.05, 0.01],
                     "release_first_cash_buffer_amount": [0.02, 0.00],
                     "portfolio_daily_source_target_count": [2.0, 0.0],
+                    "release_flow_held_count": [3.0, 2.0],
+                    "release_flow_source_executable_count": [2.0, 1.0],
+                    "release_flow_receiver_executable_count": [2.0, 1.0],
+                    "release_flow_held_negative_delta_count": [2.0, 1.0],
+                    "release_flow_receiver_positive_delta_count": [2.0, 1.0],
+                    "release_flow_release_score_above_threshold_count": [2.0, 1.0],
+                    "release_flow_release_action_hint_count": [2.0, 1.0],
+                    "release_flow_source_intent_without_realization_count": [1.0, 1.0],
+                    "release_flow_receiver_score_dead_count": [0.0, 1.0],
+                    "release_flow_target_delta_weight_conflict_count": [0.0, 0.0],
                     "allocation_layer_target_sum_gap": [0.02, 0.04],
                     "cash_weight": [0.20, 0.30],
                     "intent_translation_conflict_rate": [0.00, 0.02],
@@ -44,6 +54,9 @@ class ProtocolReleaseFirstDiagnosticsTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["portfolio_daily_target_sum_gap"], 0.03)
         self.assertAlmostEqual(metrics["portfolio_daily_actual_cash_weight_mean"], 0.25)
         self.assertAlmostEqual(metrics["intent_translation_conflict_rate"], 0.01)
+        self.assertEqual(metrics["release_flow_held_negative_delta_count"], 1.5)
+        self.assertEqual(metrics["release_flow_receiver_score_dead_count"], 0.5)
+        self.assertEqual(metrics["release_flow_target_delta_weight_conflict_count"], 0.0)
         self.assertEqual(diagnostics["missing_columns"], [])
 
     def test_missing_columns_fill_safe_defaults_and_record_missing_columns(self) -> None:
@@ -59,6 +72,7 @@ class ProtocolReleaseFirstDiagnosticsTest(unittest.TestCase):
         self.assertEqual(metrics["portfolio_daily_source_realized_sell_rate"], 0.0)
         self.assertEqual(metrics["portfolio_daily_actual_cash_weight_mean"], 0.45)
         self.assertIn("release_first_source_intent_count", diagnostics["missing_columns"])
+        self.assertIn("release_flow_held_negative_delta_count", diagnostics["missing_columns"])
         self.assertIn("portfolio_daily_source_target_count", diagnostics["missing_columns"])
 
     def test_enriches_existing_continuity_metrics_without_dropping_existing_values(self) -> None:

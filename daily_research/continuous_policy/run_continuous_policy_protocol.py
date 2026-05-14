@@ -55,7 +55,7 @@ from daily_research.continuous_policy.runtime import (
     write_json,
 )
 from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
-from daily_research.continuous_policy.research_profile_registry import get_search_profile_config
+from daily_research.continuous_policy.research_profile_registry import get_active_search_profiles, get_search_profile_config
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
@@ -140,6 +140,12 @@ def _apply_search_profile_binding(
     }
     if not requested:
         return binding
+    active_profiles = set(get_active_search_profiles())
+    if requested not in active_profiles:
+        parser.error(
+            f"Search profile {requested!r} is not an active direct-protocol profile; "
+            "legacy profiles are only available for historical evidence reads."
+        )
     try:
         profile_config = get_search_profile_config(requested)
     except KeyError as exc:
@@ -774,6 +780,7 @@ def main(argv: list[str] | None = None) -> int:
             "budget_calibration": train_summary.get("budget_calibration", args.budget_calibration),
             "budget_objective": train_summary.get("budget_objective", args.budget_objective),
             "alpha_prior_source": train_summary.get("alpha_prior_source", args.alpha_prior_source),
+            "training_dataset_cache": train_summary.get("training_dataset_cache", {}),
             "training_contract": train_summary.get("training_contract", {}),
             "training_diagnostics": train_summary.get("training_diagnostics", {}),
             "teacher_summary": train_summary.get("teacher_summary", {}),

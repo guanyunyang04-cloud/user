@@ -33,13 +33,10 @@ def derive_release_intent_from_target_delta(
     deadband: float = 0.003,
 ) -> pd.DataFrame:
     result = pd.DataFrame(index=policy_frame.index)
-    current_weight = pd.to_numeric(policy_frame.get("current_weight", 0.0), errors="coerce").fillna(0.0)
-    target_delta = pd.to_numeric(
-        policy_frame.get("portfolio_daily_target_delta_intent", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    exit_hazard = pd.to_numeric(policy_frame.get("exit_hazard", 0.0), errors="coerce").fillna(0.0)
-    reduce_quality = pd.to_numeric(policy_frame.get("reduce_quality", 0.0), errors="coerce").fillna(0.0)
+    current_weight = _numeric_policy_series(policy_frame, "current_weight", 0.0)
+    target_delta = _numeric_policy_series(policy_frame, "portfolio_daily_target_delta_intent", 0.0)
+    exit_hazard = _numeric_policy_series(policy_frame, "exit_hazard", 0.0)
+    reduce_quality = _numeric_policy_series(policy_frame, "reduce_quality", 0.0)
 
     held = current_weight > float(deadband)
     release_size = (-target_delta).clip(lower=0.0)

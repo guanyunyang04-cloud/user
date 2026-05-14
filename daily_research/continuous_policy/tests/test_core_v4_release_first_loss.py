@@ -8,7 +8,12 @@ from daily_research.continuous_policy.model_core_v4 import (
 
 class CoreV4ReleaseFirstLossTest(unittest.TestCase):
     def test_v46_and_alias_resolve_to_release_first_loss(self) -> None:
-        for profile_name in ("alpha_result_value_budget_split_v46", "core_v4_release_first_v1"):
+        for profile_name in (
+            "alpha_result_value_budget_split_v46",
+            "core_v4_release_first_v1",
+            "alpha_result_value_budget_split_v47",
+            "core_v4_release_first_decision_v2",
+        ):
             with self.subTest(profile_name=profile_name):
                 resolved_name, config = resolve_core_v4_loss_profile(profile_name)
 
@@ -21,9 +26,13 @@ class CoreV4ReleaseFirstLossTest(unittest.TestCase):
                 self.assertGreater(weights["source_release_intent_total"], 0.0)
                 self.assertGreater(weights["reduce_exit_intent_total"], 0.0)
                 self.assertGreater(weights["release_first_allocation_total"], 0.0)
+                if profile_name in ("alpha_result_value_budget_split_v47", "core_v4_release_first_decision_v2"):
+                    self.assertGreater(weights["receiver_support_total"], 0.0)
+                    self.assertGreater(weights["target_delta_weight_coherence_total"], 0.0)
+                    self.assertGreater(weights["release_receiver_flow_surrogate_total"], 0.0)
 
     def test_legacy_loss_profiles_are_not_core_v4_training_entrypoints(self) -> None:
-        for profile_name in ("alpha_result_value_budget_split_v45", "default_v1"):
+        for profile_name in ("alpha_result_value_budget_split_v45", "alpha_result_value_budget_split_v44", "default_v1"):
             with self.subTest(profile_name=profile_name):
                 with self.assertRaises(ValueError):
                     resolve_core_v4_loss_profile(profile_name)

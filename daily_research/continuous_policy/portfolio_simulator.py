@@ -28,6 +28,7 @@ from daily_research.continuous_policy.semantic_budget_intent import (
     derive_release_first_intent,
     derive_release_intent_from_target_delta,
 )
+from daily_research.continuous_policy.release_flow_trace import build_release_flow_trace
 
 
 DEFAULT_MAX_POSITIONS = 8
@@ -4059,6 +4060,20 @@ class PortfolioState:
         release_first_rotation_amount = 0.0
         release_first_cash_buffer_amount = 0.0
         release_first_block_reason = "not_applicable"
+        release_flow_trace = {
+            "held_count": 0,
+            "source_executable_count": 0,
+            "receiver_executable_count": 0,
+            "held_negative_delta_count": 0,
+            "receiver_positive_delta_count": 0,
+            "release_score_above_threshold_count": 0,
+            "release_action_hint_count": 0,
+            "source_intent_without_realization_count": 0,
+            "receiver_score_dead_count": 0,
+            "target_delta_weight_conflict_count": 0,
+            "release_block_reason_counts": {},
+            "primary_blocker": "not_applicable",
+        }
         allocation_layer_intent_translation_conflict_count = 0
         allocation_layer_intent_translation_active_count = 0
         native_target_valid = 0.0
@@ -4336,6 +4351,12 @@ class PortfolioState:
                 release_first_block_reason = str(
                     release_first_allocation_solution.diagnostics.get("release_first_block_reason", "none")
                     or "none"
+                )
+                release_flow_trace = build_release_flow_trace(
+                    policy,
+                    allocation_problem=allocation_problem,
+                    allocation_result=release_first_allocation_solution,
+                    deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
                 )
             elif allocation_core_v2_mode:
                 allocation_core_v2_stock_budget_floor = float(
@@ -6077,6 +6098,24 @@ class PortfolioState:
             "release_first_rotation_amount": float(release_first_rotation_amount),
             "release_first_cash_buffer_amount": float(release_first_cash_buffer_amount),
             "release_first_block_reason": str(release_first_block_reason),
+            "release_flow_held_count": float(release_flow_trace.get("held_count", 0.0)),
+            "release_flow_source_executable_count": float(release_flow_trace.get("source_executable_count", 0.0)),
+            "release_flow_receiver_executable_count": float(release_flow_trace.get("receiver_executable_count", 0.0)),
+            "release_flow_held_negative_delta_count": float(release_flow_trace.get("held_negative_delta_count", 0.0)),
+            "release_flow_receiver_positive_delta_count": float(release_flow_trace.get("receiver_positive_delta_count", 0.0)),
+            "release_flow_release_score_above_threshold_count": float(
+                release_flow_trace.get("release_score_above_threshold_count", 0.0)
+            ),
+            "release_flow_release_action_hint_count": float(release_flow_trace.get("release_action_hint_count", 0.0)),
+            "release_flow_source_intent_without_realization_count": float(
+                release_flow_trace.get("source_intent_without_realization_count", 0.0)
+            ),
+            "release_flow_receiver_score_dead_count": float(release_flow_trace.get("receiver_score_dead_count", 0.0)),
+            "release_flow_target_delta_weight_conflict_count": float(
+                release_flow_trace.get("target_delta_weight_conflict_count", 0.0)
+            ),
+            "release_flow_primary_blocker": str(release_flow_trace.get("primary_blocker", "not_applicable")),
+            "release_flow_block_reason_counts": str(release_flow_trace.get("release_block_reason_counts", {})),
             "allocation_layer_target_sum_gap": float(allocation_layer_target_sum_gap),
             "allocation_layer_cash_funded_deploy_amount": float(allocation_layer_cash_funded_deploy_amount),
             "allocation_layer_source_funded_deploy_amount": float(allocation_layer_source_funded_deploy_amount),

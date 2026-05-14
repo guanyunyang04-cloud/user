@@ -44,6 +44,11 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
     target_sum_gap = _float(continuity, "portfolio_daily_target_sum_gap")
     intent_conflict = _float(continuity, "intent_translation_conflict_rate")
     intent_conflict_present = "intent_translation_conflict_rate" in continuity
+    release_source_intent = _float(continuity, "release_first_source_intent_count")
+    release_flow_receiver_dead = _float(continuity, "release_flow_receiver_score_dead_count")
+    release_flow_delta_conflict = _float(continuity, "release_flow_target_delta_weight_conflict_count")
+    release_flow_source_gap = _float(continuity, "release_flow_source_intent_without_realization_count")
+    release_flow_primary_blocker = str(continuity.get("release_flow_primary_blocker", "") or "").strip()
     best_epoch = int(training.get("best_epoch", 0) or 0)
     completed_epochs = int(training.get("completed_epochs", 0) or 0)
 
@@ -52,6 +57,17 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
         blockers.append("cash_timing_negative")
     if source_count < 1.0 or source_sell_rate < 0.20:
         blockers.append("sell_intent_dead")
+    if (
+        release_source_intent < 1.0
+        and source_count < 1.0
+        and (
+            release_flow_receiver_dead > 0.0
+            or release_flow_delta_conflict > 0.0
+            or release_flow_source_gap > 0.0
+            or release_flow_primary_blocker not in {"", "none"}
+        )
+    ):
+        blockers.append("release_flow_disconnected")
     if reduce_success < 0.45 or "reduce_success_rate_5d" in failed_checks:
         blockers.append("reduce_quality_weak")
     if exit_timeliness < 0.45 or "exit_timeliness_rate_5d" in failed_checks:
@@ -85,6 +101,11 @@ def build_behavior_bottleneck_report(protocol_summary: dict[str, Any]) -> dict[s
             "portfolio_daily_exposure_utilization": exposure_utilization,
             "portfolio_daily_target_sum_gap": target_sum_gap,
             "intent_translation_conflict_rate": intent_conflict,
+            "release_first_source_intent_count": release_source_intent,
+            "release_flow_receiver_score_dead_count": release_flow_receiver_dead,
+            "release_flow_target_delta_weight_conflict_count": release_flow_delta_conflict,
+            "release_flow_source_intent_without_realization_count": release_flow_source_gap,
+            "release_flow_primary_blocker": release_flow_primary_blocker,
         },
         "progress_assets": {
             "allocation_closure_score": allocation_closure_score,

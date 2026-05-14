@@ -15,6 +15,16 @@ _DIRECT_MEAN_COLUMNS: tuple[str, ...] = (
     "release_first_source_realized_count",
     "release_first_rotation_amount",
     "release_first_cash_buffer_amount",
+    "release_flow_held_count",
+    "release_flow_source_executable_count",
+    "release_flow_receiver_executable_count",
+    "release_flow_held_negative_delta_count",
+    "release_flow_receiver_positive_delta_count",
+    "release_flow_release_score_above_threshold_count",
+    "release_flow_release_action_hint_count",
+    "release_flow_source_intent_without_realization_count",
+    "release_flow_receiver_score_dead_count",
+    "release_flow_target_delta_weight_conflict_count",
 )
 
 _REQUIRED_DIAGNOSTIC_COLUMNS: tuple[str, ...] = (
@@ -50,6 +60,7 @@ def summarize_release_first_turnover_diagnostics(turnover_csv: str | Path) -> di
                 "portfolio_daily_target_sum_gap": 0.0,
                 "portfolio_daily_actual_cash_weight_mean": 0.0,
                 "intent_translation_conflict_rate": 1.0,
+                "release_flow_primary_blocker": "missing_turnover_csv",
             },
             "missing_columns": list(_REQUIRED_DIAGNOSTIC_COLUMNS),
             "turnover_csv": str(path),
@@ -80,6 +91,11 @@ def summarize_release_first_turnover_diagnostics(turnover_csv: str | Path) -> di
             "portfolio_daily_target_sum_gap": _safe_mean(frame, "allocation_layer_target_sum_gap"),
             "portfolio_daily_actual_cash_weight_mean": _safe_mean(frame, "cash_weight"),
             "intent_translation_conflict_rate": _safe_mean(frame, "intent_translation_conflict_rate", 1.0),
+            "release_flow_primary_blocker": str(
+                frame["release_flow_primary_blocker"].mode().iloc[0]
+                if "release_flow_primary_blocker" in frame.columns and not frame["release_flow_primary_blocker"].dropna().empty
+                else "missing"
+            ),
         }
     )
     return {

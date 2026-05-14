@@ -27,6 +27,7 @@ from daily_research.continuous_policy.model_seq_v3 import (
     _loss_profile_enables_full_universe_train_solver,
     resolve_loss_profile,
 )
+from daily_research.continuous_policy.model_core_v4 import resolve_core_v4_loss_profile
 from daily_research.continuous_policy.behavior_bottleneck_report import build_behavior_bottleneck_report
 from daily_research.continuous_policy.pipeline_utils import (
     BUDGET_OBJECTIVE_CHOICES,
@@ -67,6 +68,7 @@ from daily_research.continuous_policy.runtime import (
 )
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
 )
 from daily_research.continuous_policy.research_profile_registry import (
@@ -109,6 +111,14 @@ THREAD_LIMIT_ENV_KEYS: tuple[str, ...] = (
     "NUMEXPR_NUM_THREADS",
     "TORCH_NUM_THREADS",
 )
+
+
+def _resolve_trial_loss_profile(trial_config: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    loss_profile = str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
+    trainer_backend = str(trial_config.get("trainer_backend", "") or "")
+    if trainer_backend == TRAINER_BACKEND_FORMAL_CORE_V4:
+        return resolve_core_v4_loss_profile(loss_profile)
+    return resolve_loss_profile(loss_profile)
 
 
 def _normalize_date_text(value: str) -> str:
@@ -4238,9 +4248,7 @@ def main(argv: list[str] | None = None) -> int:
     selected_trial_loss_profiles: list[str] = []
     selected_trial_resolved_loss_configs: list[dict[str, Any]] = []
     for index, trial_config in enumerate(selected_trials, start=1):
-        resolved_loss_name, resolved_loss_config = resolve_loss_profile(
-            str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
-        )
+        resolved_loss_name, resolved_loss_config = _resolve_trial_loss_profile(trial_config)
         selected_trial_loss_profiles.append(resolved_loss_name)
         selected_trial_resolved_loss_configs.append(resolved_loss_config)
     native_allocation_vector_support = any(
@@ -4315,9 +4323,7 @@ def main(argv: list[str] | None = None) -> int:
             selected_trial_loss_profiles = []
             selected_trial_resolved_loss_configs = []
             for trial_config in selected_trials:
-                resolved_loss_name, resolved_loss_config = resolve_loss_profile(
-                    str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
-                )
+                resolved_loss_name, resolved_loss_config = _resolve_trial_loss_profile(trial_config)
                 selected_trial_loss_profiles.append(resolved_loss_name)
                 selected_trial_resolved_loss_configs.append(resolved_loss_config)
             native_allocation_vector_support = any(
