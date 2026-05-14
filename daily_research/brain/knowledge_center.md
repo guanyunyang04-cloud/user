@@ -119,6 +119,12 @@
 - Rule: realtime tail labels must remain explicitly marked as unobserved and must not be counted as completed training evidence.
 - Rule: future constructed training sets should be registered in the data lake catalog, while legacy pickle caches may remain fallback compatibility data.
 
+## 2026-05-14 r63 Brain-Skill Operating System Lesson
+- Fact: the brain is the project truth store; the project skill is only a procedural entrypoint.
+- Fact: task capsules, evidence registry, query, and phased rules now make brain use more machine-readable.
+- Rule: substantial `daily_research` work should start from a capsule and end with explicit validation/writeback or a reason no writeback is needed.
+- Rule: skills must not copy long r-number histories; they should point to brain workflow commands and reference evidence.
+
 ## 5. 文档边界
 - `identity_layer.md`：使命、北极星、硬约束与禁区。
 - `state_center.md`：当前状态、当前问题、优先级、边界和 handoff 摘要。

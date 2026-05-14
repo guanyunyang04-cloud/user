@@ -60,6 +60,7 @@ OPTIONAL_CHILD_PATH_KEYS = (
     "knowledge_path",
     "operations_path",
     "governance_path",
+    "operating_protocol_path",
 )
 
 MOJIBAKE_MARKERS = (
@@ -92,6 +93,7 @@ COMPACT_CORE_LINE_WARNINGS = {
     "daily_research/brain/identity_layer.md": 220,
     "daily_research/brain/brain_architecture.md": 180,
     "daily_research/brain/governance_layer.md": 220,
+    "daily_research/brain/brain_operating_protocol.md": 180,
     "t0_project/brain/identity_layer.md": 180,
     "t0_project/brain/brain_architecture.md": 160,
     "t0_project/brain/governance_layer.md": 180,

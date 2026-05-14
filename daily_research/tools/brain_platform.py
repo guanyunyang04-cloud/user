@@ -24,6 +24,7 @@ OPTIONAL_BRAIN_KEYS = (
     "knowledge_path",
     "operations_path",
     "governance_path",
+    "operating_protocol_path",
 )
 MOJIBAKE_MARKERS = (
     "\ufffd",
@@ -335,6 +336,16 @@ def _derive_child_read_order(main_manifest: dict[str, Any], child_manifest: dict
             if path.as_posix() not in seen:
                 seen.add(path.as_posix())
                 ordered.append(path)
+    for module in child_manifest.get("modules", []):
+        if not isinstance(module, dict):
+            continue
+        for raw_path in module.get("paths", []):
+            path = Path(str(raw_path))
+            normalized = path.as_posix()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(path)
     return _dedupe(ordered)
 
 

@@ -256,5 +256,5 @@
 - Bottleneck contract: if source/release counts are below floor and release-flow trace has a non-`none` blocker, behavior reporting must include `release_flow_disconnected`.
 - Evidence boundary: r61 smoke/dry-run prove wiring. The parseable safe protocol shows behavior remains blocked and the outer study wrapper was interrupted before final study-summary write. This is not confirmatory, promotion, live/default, or active artifact evidence.
 
-## 2026-05-14 r62 Research Data Lake Contract
-- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; `learned_all_a/1200` is only capped evidence, while the data lake target/default is uncapped full universe (`max_universe_size=0`); full Bronze/Silver now exists, but full Gold remains incomplete.
+## 2026-05-14 r62/r63 Research Data And Brain Operating Contract
+- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; `learned_all_a/1200` is only capped evidence, while the data lake target/default is uncapped full universe (`max_universe_size=0`); full Bronze/Silver now exists, but full Gold remains incomplete. Brain capsules and evidence registry are operating context, not strategy evidence; failed/interrupted/timeout/smoke/dry-run/realtime-tail artifacts cannot become completed evidence through writeback; active artifact guard remains mandatory.

@@ -34,6 +34,7 @@ DEFAULT_DOCS = [
     "daily_research/brain/operations_center.md",
     "daily_research/brain/governance_layer.md",
     "daily_research/brain/episodic_memory.md",
+    "daily_research/brain/brain_operating_protocol.md",
     "daily_research/brain/brain_manifest.json",
     "daily_research/brain/workflow_registry.json",
     "t0_project/brain/identity_layer.md",
@@ -143,6 +144,13 @@ DOC_RULES = {
     ),
     "daily_research/brain/episodic_memory.md": DocRule(
         enforce_non_decreasing_dated_headings=True,
+    ),
+    "daily_research/brain/brain_operating_protocol.md": DocRule(
+        warn_lines=120,
+        max_lines=180,
+        forbidden_heading_patterns=(
+            (r"^##\s+20\d{2}-\d{2}-\d{2}\b", "brain operating protocol should stay procedural instead of becoming a dated log"),
+        ),
     ),
     "daily_research/brain/brain_manifest.json": DocRule(
         warn_lines=180,
@@ -621,6 +629,7 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
             "knowledge_path",
             "operations_path",
             "governance_path",
+            "operating_protocol_path",
         ):
             optional_path = str(data.get(optional_key, "")).strip()
             if optional_path and not Path(optional_path).exists():
@@ -826,6 +835,7 @@ def _check_manifest_semantics(path: Path, text: str) -> list[str]:
             "knowledge_path",
             "operations_path",
             "governance_path",
+            "operating_protocol_path",
         ):
             optional_path = str(data.get(optional_key, "")).strip()
             if not optional_path:

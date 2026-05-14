@@ -16,6 +16,12 @@ from daily_research.tools.brain_platform import (
     resolve_bootstrap,
     write_workflow_output,
 )
+from daily_research.tools.brain_capsule import build_task_capsule
+from daily_research.tools.brain_evidence_registry import (
+    build_evidence_registry,
+    query_evidence_registry,
+    write_evidence_registry,
+)
 
 
 def _maybe_write(kind: str, payload: dict[str, Any], enabled: bool) -> dict[str, Any]:
@@ -47,8 +53,27 @@ def build_parser() -> argparse.ArgumentParser:
     preflight = sub.add_parser("preflight", help="Build read-only preflight state for a workflow.")
     preflight.add_argument("--workflow", required=True)
     preflight.add_argument("--study-tag", default="")
+    preflight.add_argument("--task", default="")
     preflight.add_argument("--json", action="store_true")
     preflight.add_argument("--write-output", action="store_true")
+
+    capsule = sub.add_parser("capsule", help="Build a task-scoped daily_research brain capsule.")
+    capsule.add_argument("--child", default="daily_research")
+    capsule.add_argument("--task", default="")
+    capsule.add_argument("--workflow", default="brain_handoff")
+    capsule.add_argument("--study-tag", default="")
+    capsule.add_argument("--json", action="store_true")
+    capsule.add_argument("--write-output", action="store_true")
+
+    evidence = sub.add_parser("evidence-index", help="Build or read the brain evidence registry.")
+    evidence.add_argument("--rebuild", action="store_true")
+    evidence.add_argument("--json", action="store_true")
+    evidence.add_argument("--write-output", action="store_true")
+
+    query = sub.add_parser("query", help="Query the brain evidence registry without inferring new conclusions.")
+    query.add_argument("--q", required=True)
+    query.add_argument("--json", action="store_true")
+    query.add_argument("--write-output", action="store_true")
 
     writeback = sub.add_parser("writeback-plan", help="Generate a routed brain writeback plan.")
     writeback.add_argument("--source", default="latest")
@@ -68,7 +93,24 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         if args.command == "preflight":
             payload = dict(payload)
             payload["preflight_only"] = True
+            payload["task"] = str(getattr(args, "task", "") or "")
         return args.command, payload
+    if args.command == "capsule":
+        return "capsule", build_task_capsule(
+            child=str(getattr(args, "child", "") or "daily_research"),
+            task=str(getattr(args, "task", "") or ""),
+            workflow=str(getattr(args, "workflow", "") or "brain_handoff"),
+            study_tag=str(getattr(args, "study_tag", "") or ""),
+        )
+    if args.command == "evidence-index":
+        if bool(getattr(args, "rebuild", False)):
+            output_path = write_evidence_registry()
+            payload = build_evidence_registry()
+            payload["registry_path"] = output_path.as_posix()
+            return "evidence_index", payload
+        return "evidence_index", build_evidence_registry()
+    if args.command == "query":
+        return "query", query_evidence_registry(str(getattr(args, "q", "") or ""))
     if args.command == "writeback-plan":
         return "writeback_plan", build_writeback_plan(args.source, apply_brain_writeback=args.apply_brain_writeback)
     raise ValueError(f"Unsupported command: {args.command}")

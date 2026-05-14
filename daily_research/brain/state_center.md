@@ -205,3 +205,10 @@
 - Blocker: full-universe Gold training-set construction is not complete; repeated Gold attempts showed `build_training_matrices(...)` is the bottleneck, not DuckDB/Parquet.
 - Evidence capsule: `daily_research/brain/references/r62_research_data_lake_status_20260514.md`.
 - Current verdict: r62 is research infrastructure. It improves data reuse and auditability, but it is not strategy evidence and must not affect live/default/promotion or the active artifact.
+
+## 2026-05-14 r63 Brain-Skill Operating System Status
+- Fact: r63 adds a compact brain operating protocol, task capsule CLI, evidence registry/query CLI, phased brain rules, and repo-canonical `daily-research-brain` project skill.
+- Fact: evidence registry rebuild is clean and queryable; `r62` lookup returns market/feature and imported Gold dataset ids.
+- Fact: the skill is stored in repo canonical source only; dry-run sync is available, but no global skill install has been claimed.
+- Evidence capsule: `daily_research/brain/references/r63_brain_skill_operating_system_status_20260514.md`.
+- Current verdict: r63 is brain/workflow infrastructure. It improves agent handoff, retrieval, guard checks, and writeback discipline, but it is not strategy evidence and must not affect live/default/promotion or the active artifact.

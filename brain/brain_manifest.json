@@ -52,7 +52,7 @@
     "derive_read_order_from_modules": true,
     "default_module_order": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
     "required_modules": ["identity_layer", "state_center", "knowledge_center", "brain_architecture", "operations_center", "governance_layer", "episodic_memory"],
-    "optional_modules": [],
+    "optional_modules": ["brain_operating_protocol"],
     "fast_handoff_modules": ["identity_layer", "state_center", "knowledge_center", "operations_center"],
     "region_bindings": {
       "orientation_system": ["identity_layer", "state_center", "brain_architecture"],

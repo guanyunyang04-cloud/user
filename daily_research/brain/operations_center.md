@@ -155,3 +155,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.continuous_poli
 - `_run_protocol_with_progress` now calls protocol main in-process and writes progress events with `protocol_runner_mode=in_process`.
 - Resource controls now apply to the current process environment, current process priority/affinity on Windows, and Torch thread limits where available.
 - Monitoring rule: track the single study/training process plus progress files; do not search for separate protocol child processes.
+
+## 2026-05-14 r63 Brain Workflow Commands
+- Task capsule: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
+- Evidence registry rebuild: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow evidence-index --rebuild --json`
+- Evidence query: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q "<r-id/tag/dataset/blocker>" --json`
+- Project skill sync dry-run: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/install_project_skills.py --dry-run`
+- Guard rule: global skill install is explicit only via `--install`; dry-run must not be reported as installed.
