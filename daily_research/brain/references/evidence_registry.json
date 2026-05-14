@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 20,
+  "record_count": 21,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -587,22 +587,62 @@
       "study_tags": [
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_01",
         "protocol_r69_value_arbitration_v5_behavior_smoke_20260514_02",
-        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
+        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03"
       ],
       "verdict": "Status: `research / shadow-only / behavior-quality mechanism progress`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r69 adds `portfolio_set_v5_dfl_pg_v1_r69_value_arbitration` as an explicit internal loss/profile line for deploy / release / defense value arbitration.",
       "blockers": [
-        "r69 does not pass first-stage behavior acceptance yet.",
-        "Full r69 behavior smoke did not complete evaluation/shadow because TDX returned empty data.",
-        "Receiver target coverage remains lower than r68.",
-        "Constraint violation regressed from effectively zero to about `0.0223` target mean / `0.0329` validation oracle mean."
+        "Evaluate failed with `RuntimeError: TDX returned empty data for batch starting at 1344`.",
+        "Evaluate failed with the same TDX empty batch error.",
+        "Constraint violation is now the main mechanism blocker before r69 can be treated as behavior-quality evidence.",
+        "The TDX empty-batch failure is an infrastructure/data access blocker for protocol completion, separate from model/oracle behavior.",
+        "Train-only evidence is useful for mechanism debugging but insufficient for r69 acceptance.",
+        "Fix or bypass the TDX empty-batch evaluate blocker with an explicit cached/csv evaluation source."
       ],
       "next_allowed_actions": [
         "Reduce r69 oracle constraint violation while preserving `source_wrong_side_sell_share=0.0`.",
         "Rebalance deploy/release/defense so receiver coverage does not collapse relative to r68.",
         "Fix or bypass the TDX empty-batch evaluate blocker with an explicit cached/csv evaluation source.",
-        "Rerun a full r69 tiny strict-Gold behavior smoke only after the mechanism target violation is near zero and receiver coverage is materially healthier."
+        "Rerun a full r69 tiny strict-Gold behavior smoke only after the mechanism target violation is near zero and receiver coverage is materially healthier.",
+        "Keep r68 as the current translation-closure evidence baseline."
       ],
-      "active_artifact_impact": "unchanged",
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
+    },
+    {
+      "id": "r70",
+      "date": "2026-05-14",
+      "r_id": "r70",
+      "path": "daily_research/brain/references/r70_v5_version_boundary_oracle_repair_status_20260514.md",
+      "tags": [
+        "r70",
+        "continuous_policy",
+        "portfolio_set_v5"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01",
+        "protocol_r69_value_arbitration_v5_behavior_traincheck_20260514_03"
+      ],
+      "verdict": "Status: `research / shadow-only / version-boundary and mechanism-repair evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r70 restores the base portfolio-set v5 internal version to `portfolio_set_v5_dfl_pg_v1` and keeps `portfolio_set_v5_dfl_pg_v1_r69_value_arbitration` behind explicit loss/profile or artifact metadata.",
+      "blockers": [
+        "r70 repairs the r69 oracle constraint violation and allows the tiny strict-Gold behavior smoke to complete past the previous TDX empty-batch blocker.",
+        "Training evidence remains `insufficient` because `teacher_action_rows=0` and `best_epoch=2` equals completed epochs.",
+        "`release_flow_primary_blocker=none`.",
+        "TDX empty-batch handling is improved and the r70 smoke passed the previous evaluate blocker.",
+        "The r69 high oracle-violation blocker was mainly an oracle budgeting/order issue, not an unavoidable value-arbitration objective property.",
+        "The remaining r69/r70 blocker is behavior quality, not translation closure or oracle feasibility."
+      ],
+      "next_allowed_actions": [
+        "Keep r68 as translation-closure baseline and r70 as version-boundary/oracle-repair evidence.",
+        "Improve r69/r70 receiver coverage without reintroducing source wrong-side sells or oracle violations.",
+        "Replace or supplement the r69 cash timing / defense objective so `cash_timing_quality_1d` improves in evaluation and shadow.",
+        "Add source opportunity-cost and reversal diagnostics that reduce positive-forward sell share and immediate reversal without breaking cashflow validity.",
+        "Only after a tiny behavior smoke improves at least two behavior metrics should a longer strict resume be considered."
+      ],
+      "active_artifact_impact": "guarded",
       "dataset_ids": [
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]

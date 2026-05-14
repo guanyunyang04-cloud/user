@@ -9,6 +9,8 @@ import torch
 from daily_research.continuous_policy.model import load_artifact, predict_policy
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
+    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+    PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     TorchPortfolioSetV5Artifact,
     load_torch_portfolio_set_v5_artifact,
@@ -48,13 +50,28 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
                 "cross_layers": 1,
                 "latent_count": 4,
                 "dropout": 0.0,
-                "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
             },
             global_target_defaults={"gross_exposure_target": 0.7},
         )
 
-    def _biased_artifact(self) -> TorchPortfolioSetV5Artifact:
+    def _r69_artifact(self) -> TorchPortfolioSetV5Artifact:
         artifact = self._artifact()
+        artifact.training_diagnostics = {
+            **artifact.training_diagnostics,
+            "loss_profile": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            "portfolio_set_v5_behavior_mode": PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+        }
+        artifact.model_config = {
+            **artifact.model_config,
+            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            "portfolio_set_v5_behavior_mode": PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+            "portfolio_set_v5_loss_profile_requested": PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+        }
+        return artifact
+
+    def _biased_artifact(self) -> TorchPortfolioSetV5Artifact:
+        artifact = self._r69_artifact()
         from daily_research.continuous_policy.model_portfolio_set_v5 import _make_model
 
         state = {key: value.detach().clone() for key, value in _make_model(artifact).state_dict().items()}
@@ -78,7 +95,8 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertIsInstance(loaded_direct, TorchPortfolioSetV5Artifact)
         self.assertIsInstance(loaded_generic, TorchPortfolioSetV5Artifact)
         self.assertEqual(loaded_direct.training_diagnostics["trainer_backend"], TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5)
-        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_internal_version"], PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)
+        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_internal_version"], "portfolio_set_v5_dfl_pg_v1")
+        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_behavior_mode"], "dfl_pg_v1")
 
     def test_predict_policy_portfolio_set_v5_outputs_release_first_semantics(self) -> None:
         artifact = self._artifact()
@@ -115,15 +133,9 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_source_release_quality", frame.columns)
             self.assertIn("portfolio_daily_receiver_add_headroom", frame.columns)
             self.assertIn("portfolio_set_v5_cash_buffer_score", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_deploy_value", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_release_value", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_defense_value", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_cash_timing_value", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_source_opportunity_cost", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_receiver_source_spread_value", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_reversal_risk_penalty", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_source_wrong_side_sell_penalty", frame.columns)
-            self.assertIn("portfolio_set_v5_r69_reversal_guarded", frame.columns)
+            self.assertIn(PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN, frame.columns)
+            self.assertEqual(float(frame[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN].iloc[0]), 0.0)
+            self.assertNotIn("portfolio_set_v5_r69_deploy_value", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_constraint_violation", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_feasible", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)
@@ -138,6 +150,31 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertEqual(generic_globals["release_first_allocation_v3_mode"], 1.0)
         self.assertEqual(global_targets["portfolio_cashflow_decision_v1_mode"], 1.0)
         self.assertEqual(generic_globals["portfolio_cashflow_decision_v1_mode"], 1.0)
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN], 0.0)
+        self.assertEqual(generic_globals[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN], 0.0)
+
+    def test_r69_artifact_predicts_value_arbitration_fields_only_when_explicit(self) -> None:
+        artifact = self._r69_artifact()
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["SRC", "RCV"],
+                "alpha_score": [0.1, 0.9],
+                "current_weight": [0.12, 0.0],
+                "portfolio_daily_target_delta_intent": [-0.05, 0.06],
+                "portfolio_daily_receiver_source_spread_reward": [0.0, 0.9],
+            }
+        )
+
+        policy, global_targets = predict_policy_portfolio_set_v5(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"market_downside_pressure": 0.1},
+        )
+
+        self.assertEqual(float(policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN].iloc[0]), 1.0)
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN], 1.0)
+        self.assertIn("portfolio_set_v5_r69_deploy_value", policy.columns)
+        self.assertIn("portfolio_set_v5_r69_reversal_guarded", policy.columns)
 
     def test_predict_policy_portfolio_set_v5_opens_receiver_from_cash_in_cashflow_mode(self) -> None:
         artifact = self._biased_artifact()

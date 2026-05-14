@@ -90,8 +90,9 @@ def build_release_flow_trace(
     cashflow_mode = _numeric(frame, ("portfolio_cashflow_decision_v1_mode",), 0.0) > 0.5
     source_supply = _numeric(frame, ("portfolio_set_v5_source_supply",), 0.0).clip(lower=0.0)
     receiver_demand = _numeric(frame, ("portfolio_set_v5_receiver_demand",), 0.0).clip(lower=0.0)
-    r69_wrong_side = _numeric(frame, ("portfolio_set_v5_r69_source_wrong_side_sell",), 0.0) > 0.5
-    r69_reversal_guarded = _numeric(frame, ("portfolio_set_v5_r69_reversal_guarded",), 0.0) > 0.5
+    r69_mode = _numeric(frame, ("portfolio_set_v5_value_arbitration_mode",), 0.0) > 0.5
+    r69_wrong_side = (_numeric(frame, ("portfolio_set_v5_r69_source_wrong_side_sell",), 0.0) > 0.5) & r69_mode
+    r69_reversal_guarded = (_numeric(frame, ("portfolio_set_v5_r69_reversal_guarded",), 0.0) > 0.5) & r69_mode
     r69_defense = _numeric(frame, ("portfolio_set_v5_r69_defense_value",), 0.0).clip(lower=0.0)
     r69_cash_timing = _numeric(frame, ("portfolio_set_v5_r69_cash_timing_value",), 0.0).clip(lower=0.0)
     r69_spread = _numeric(frame, ("portfolio_set_v5_r69_receiver_source_spread_value",), 0.0)
@@ -166,9 +167,9 @@ def build_release_flow_trace(
         "cashflow_decision_cash_conservation_gap": float(cashflow_cash_conservation_gap),
         "r69_source_wrong_side_sell_count": int((r69_wrong_side & cashflow_source_intent).sum()),
         "r69_reversal_guarded_count": int((r69_reversal_guarded & cashflow_source_intent).sum()),
-        "r69_defense_value_mean": float(r69_defense.loc[cashflow_mode].mean()) if bool(cashflow_mode.any()) else 0.0,
-        "r69_cash_timing_value_mean": float(r69_cash_timing.loc[cashflow_mode].mean()) if bool(cashflow_mode.any()) else 0.0,
-        "r69_receiver_source_spread_value_mean": float(r69_spread.loc[cashflow_mode].mean()) if bool(cashflow_mode.any()) else 0.0,
+        "r69_defense_value_mean": float(r69_defense.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
+        "r69_cash_timing_value_mean": float(r69_cash_timing.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
+        "r69_receiver_source_spread_value_mean": float(r69_spread.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
         "receiver_score_dead_count": int(receiver_dead),
         "target_delta_weight_conflict_count": int(target_delta_weight_conflict.sum()),
         "release_block_reason_counts": dict(reason_counts),

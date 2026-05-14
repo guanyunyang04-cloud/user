@@ -103,6 +103,8 @@ class PortfolioCashflowDecisionTest(unittest.TestCase):
         self.assertEqual(actions["RCV"]["weight_change_action"], "open")
         self.assertEqual(actions["SRC"]["portfolio_cashflow_decision_v1_mode"], 1.0)
         self.assertEqual(actions["RCV"]["portfolio_cashflow_decision_v1_mode"], 1.0)
+        self.assertEqual(actions["SRC"]["portfolio_set_v5_value_arbitration_mode"], 0.0)
+        self.assertEqual(actions["RCV"]["portfolio_set_v5_value_arbitration_mode"], 0.0)
         self.assertEqual(actions["SRC"]["portfolio_daily_source_target_intent"], True)
         self.assertEqual(actions["RCV"]["portfolio_daily_receiver_target_intent"], True)
         self.assertGreater(actions["SRC"]["portfolio_set_v5_source_supply"], 0.003)

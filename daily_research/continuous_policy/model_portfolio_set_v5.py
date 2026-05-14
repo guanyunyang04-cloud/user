@@ -30,7 +30,10 @@ PORTFOLIO_SET_V5_ARTIFACT_FILENAME = "continuous_policy_portfolio_set_v5_artifac
 PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID = "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
 PORTFOLIO_SET_V5_DFL_PG_V1_VERSION = "portfolio_set_v5_dfl_pg_v1"
 PORTFOLIO_SET_V5_R69_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration"
-PORTFOLIO_SET_V5_INTERNAL_VERSION = PORTFOLIO_SET_V5_R69_INTERNAL_VERSION
+PORTFOLIO_SET_V5_INTERNAL_VERSION = PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
+PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1 = "dfl_pg_v1"
+PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION = "r69_value_arbitration"
+PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN = "portfolio_set_v5_value_arbitration_mode"
 
 PORTFOLIO_SET_V5_OUTPUT_NAMES: tuple[str, ...] = (
     "target_weight",
@@ -65,7 +68,6 @@ PORTFOLIO_SET_V5_LOSS_ALIASES: tuple[str, ...] = (
     "portfolio_set_release_first_decision_v1",
     PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
-    PORTFOLIO_SET_V5_INTERNAL_VERSION,
 )
 PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES: tuple[str, ...] = PORTFOLIO_SET_V5_LOSS_ALIASES
 PORTFOLIO_SET_V5_MAX_TRAIN_DAYS = 256
@@ -82,12 +84,18 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
         )
     resolved_name = (
         PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
-        if name in {PORTFOLIO_SET_V5_DFL_PG_V1_VERSION, "portfolio_set_release_first_decision_v1"}
+        if name in {
+            PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
+            "alpha_result_value_budget_split_v48",
+            "portfolio_set_release_first_decision_v1",
+        }
         else name
     )
     if name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
         resolved_name = PORTFOLIO_SET_V5_R69_INTERNAL_VERSION
+    behavior_mode = _portfolio_set_v5_behavior_mode_from_version(resolved_name)
     return resolved_name, {
+        "portfolio_set_v5_behavior_mode": behavior_mode,
         "multi_objective_loss_weights": {
             "action_total": 0.0,
             "duration_total": 0.0,
@@ -107,6 +115,56 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
             "reversal_guard_total": 0.34 if resolved_name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION else 0.0,
         }
     }
+
+
+def _portfolio_set_v5_behavior_mode_from_version(version: str | None) -> str:
+    text = str(version or "").strip()
+    if text == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
+        return PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
+    return PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1
+
+
+def _portfolio_set_v5_value_arbitration_enabled_from_weights(weights: dict[str, float] | None) -> bool:
+    values = dict(weights or {})
+    return any(
+        float(values.get(key, 0.0) or 0.0) > 0.0
+        for key in ("value_arbitration_total", "cash_timing_value_total", "reversal_guard_total")
+    )
+
+
+def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artifact") -> str:
+    model_config = dict(getattr(artifact, "model_config", {}) or {})
+    diagnostics = dict(getattr(artifact, "training_diagnostics", {}) or {})
+    for key in (
+        "portfolio_set_v5_behavior_mode",
+        "portfolio_set_v5_internal_version",
+        "portfolio_set_v5_loss_profile_requested",
+    ):
+        if key in model_config:
+            value = str(model_config.get(key, "") or "").strip()
+            if value:
+                if value in {
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+                }:
+                    return value
+                return _portfolio_set_v5_behavior_mode_from_version(value)
+    for key in (
+        "portfolio_set_v5_behavior_mode",
+        "portfolio_set_v5_internal_version",
+        "portfolio_set_v5_loss_profile_requested",
+        "loss_profile",
+    ):
+        if key in diagnostics:
+            value = str(diagnostics.get(key, "") or "").strip()
+            if value:
+                if value in {
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+                }:
+                    return value
+                return _portfolio_set_v5_behavior_mode_from_version(value)
+    return PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1
 
 
 def _numeric_series(frame: pd.DataFrame, name: str, default: float = 0.0) -> pd.Series:
@@ -268,44 +326,11 @@ def project_portfolio_set_v5_cashflow_oracle(
         if turnover.numel() == 1 and current.shape[0] > 1:
             turnover = turnover.expand(current.shape[0])
         turnover = turnover.to(device=device, dtype=dtype).clamp(0.0, 0.50)
-    desired_cash_floor = (0.04 + 0.20 * risk).clamp(0.02, 0.35)
-    if value_arbitration_mode:
-        desired_cash_floor = (desired_cash_floor + 0.18 * defense_pressure.mean(dim=1)).clamp(0.02, 0.55)
-        reachable_cash_floor = cash_now + torch.minimum(source_capacity.sum(dim=1), turnover)
-        cash_floor = torch.minimum(desired_cash_floor, reachable_cash_floor)
-    else:
-        cash_floor = torch.minimum(desired_cash_floor, cash_now)
 
     source_capacity_sum = source_capacity.sum(dim=1)
     receiver_capacity_sum = receiver_capacity.sum(dim=1)
-    cash_shortfall = (cash_floor - cash_now).clamp_min(0.0)
-    cash_available = (cash_now - cash_floor).clamp_min(0.0)
     receiver_signal = (receiver_capacity_sum > float(deadband)).to(dtype=dtype)
     source_signal = (source_capacity_sum > float(deadband)).to(dtype=dtype)
-    rotation_release_need = torch.minimum(
-        source_capacity_sum,
-        torch.maximum(receiver_capacity_sum * 0.65, turnover * 0.20 * receiver_signal),
-    )
-    source_budget = torch.minimum(
-        source_capacity_sum,
-        torch.minimum(turnover, torch.maximum(rotation_release_need, cash_shortfall)),
-    )
-    cash_deploy_budget = torch.minimum(cash_available, turnover) * (0.45 + 0.35 * (1.0 - risk))
-    no_spread_defense = torch.zeros_like(cash_deploy_budget, dtype=torch.bool)
-    if value_arbitration_mode:
-        defense_mean = defense_pressure.mean(dim=1)
-        receiver_spread_mean = (
-            (spread_value * (headroom > float(deadband)).to(dtype=dtype)).sum(dim=1)
-            / (headroom > float(deadband)).to(dtype=dtype).sum(dim=1).clamp_min(1.0)
-        )
-        cash_deploy_budget = cash_deploy_budget * (1.0 - 0.70 * defense_mean).clamp(0.05, 1.0)
-        no_spread_defense = (defense_mean > 0.55) & (receiver_spread_mean < 0.20)
-        cash_deploy_budget = torch.where(no_spread_defense, torch.zeros_like(cash_deploy_budget), cash_deploy_budget)
-    cash_deploy_budget = torch.minimum(cash_deploy_budget, cash_available).clamp_min(0.0)
-    receiver_budget = torch.minimum(
-        receiver_capacity_sum,
-        torch.minimum(turnover, source_budget + cash_deploy_budget),
-    )
 
     eps = torch.tensor(1.0e-8, dtype=dtype, device=device)
     source_rank_count = int(max(1, min(6, current.shape[1])))
@@ -337,6 +362,28 @@ def project_portfolio_set_v5_cashflow_oracle(
     receiver_capacity_sparse = receiver_capacity * receiver_rank_mask.to(dtype=dtype)
     source_capacity_sparse_sum = source_capacity_sparse.sum(dim=1)
     receiver_capacity_sparse_sum = receiver_capacity_sparse.sum(dim=1)
+    desired_cash_floor = (0.04 + 0.20 * risk).clamp(0.02, 0.35)
+    if value_arbitration_mode:
+        desired_cash_floor = (desired_cash_floor + 0.18 * defense_pressure.mean(dim=1)).clamp(0.02, 0.55)
+        reachable_cash_floor = cash_now + torch.minimum(source_capacity_sparse_sum, turnover)
+        cash_floor = torch.minimum(desired_cash_floor, reachable_cash_floor)
+    else:
+        cash_floor = torch.minimum(desired_cash_floor, cash_now)
+    cash_shortfall = (cash_floor - cash_now).clamp_min(0.0)
+    cash_available = (cash_now - cash_floor).clamp_min(0.0)
+    cash_deploy_budget = torch.minimum(cash_available, turnover) * (0.45 + 0.35 * (1.0 - risk))
+    no_spread_defense = torch.zeros_like(cash_deploy_budget, dtype=torch.bool)
+    receiver_spread_mean_all = torch.zeros_like(cash_deploy_budget)
+    if value_arbitration_mode:
+        defense_mean = defense_pressure.mean(dim=1)
+        receiver_spread_mean_all = (
+            (spread_value * (headroom > float(deadband)).to(dtype=dtype)).sum(dim=1)
+            / (headroom > float(deadband)).to(dtype=dtype).sum(dim=1).clamp_min(1.0)
+        )
+        cash_deploy_budget = cash_deploy_budget * (1.0 - 0.70 * defense_mean).clamp(0.05, 1.0)
+        no_spread_defense = (defense_mean > 0.55) & (receiver_spread_mean_all < 0.20)
+        cash_deploy_budget = torch.where(no_spread_defense, torch.zeros_like(cash_deploy_budget), cash_deploy_budget)
+    cash_deploy_budget = torch.minimum(cash_deploy_budget, cash_available).clamp_min(0.0)
     cash_shortfall_budget = torch.minimum(source_capacity_sparse_sum, torch.minimum(turnover, cash_shortfall))
     if value_arbitration_mode:
         defense_mean = defense_pressure.mean(dim=1)
@@ -354,7 +401,11 @@ def project_portfolio_set_v5_cashflow_oracle(
         deploy_competition = (receiver_capacity_sparse_sum > float(deadband)) & (receiver_spread_mean >= 0.20)
         defense_cap = torch.where(
             deploy_competition,
-            (turnover - cash_shortfall_budget).clamp_min(0.0) * 0.55,
+            (turnover - cash_shortfall_budget).clamp_min(0.0) * torch.where(
+                receiver_spread_mean >= 0.45,
+                torch.full_like(receiver_spread_mean, 0.35),
+                torch.full_like(receiver_spread_mean, 0.55),
+            ),
             (turnover - cash_shortfall_budget).clamp_min(0.0),
         )
         defense_cash_release_budget = torch.minimum(defense_cash_release_budget, defense_cap)
@@ -414,6 +465,10 @@ def project_portfolio_set_v5_cashflow_oracle(
         "turnover_used": turnover_used,
         "trade_cost_turnover": trade_cost_turnover,
         "cash_floor": cash_floor,
+        "cash_floor_violation": cash_violation,
+        "turnover_violation": turnover_violation,
+        "source_capacity_violation": source_violation,
+        "receiver_capacity_violation": receiver_violation,
         "deploy_value": deploy,
         "release_value": release,
         "defense_value": defense_pressure,
@@ -473,6 +528,10 @@ def _oracle_numpy(
         "turnover_budget": float(oracle["turnover_budget"][0].detach().cpu()),
         "risk_budget": float(oracle["risk_budget"][0].detach().cpu()),
         "constraint_violation": float(oracle["constraint_violation"][0].detach().cpu()),
+        "cash_floor_violation": float(oracle["cash_floor_violation"][0].detach().cpu()),
+        "turnover_violation": float(oracle["turnover_violation"][0].detach().cpu()),
+        "source_capacity_violation": float(oracle["source_capacity_violation"][0].detach().cpu()),
+        "receiver_capacity_violation": float(oracle["receiver_capacity_violation"][0].detach().cpu()),
         "decision_value": float(oracle["decision_value"][0].detach().cpu()),
         "deploy_value": oracle["deploy_value"][0].detach().cpu().numpy().astype(float),
         "release_value": oracle["release_value"][0].detach().cpu().numpy().astype(float),
@@ -485,7 +544,17 @@ def _oracle_numpy(
     }
 
 
-def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: float = 0.003) -> pd.DataFrame:
+def build_portfolio_set_v5_targets(
+    sample_frame: pd.DataFrame,
+    *,
+    loss_profile: str | None = None,
+    deadband: float = 0.003,
+) -> pd.DataFrame:
+    resolved_loss_profile, _ = resolve_portfolio_set_v5_loss_profile(loss_profile)
+    value_arbitration_mode = (
+        _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
+        == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
+    )
     current = _current_weight(sample_frame)
     held = _holding_mask(sample_frame, current, deadband=deadband)
     raw_delta = _numeric_series(sample_frame, "portfolio_daily_target_delta_intent", 0.0)
@@ -508,6 +577,7 @@ def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: floa
     keep_risk = _numeric_series(sample_frame, "portfolio_daily_source_forward_proxy_keep_risk", 0.0).clip(0.0, 1.0)
     block_risk = _numeric_series(sample_frame, "portfolio_daily_source_economic_block_risk", 0.0).clip(0.0, 1.0)
     source_score = source_score.where(held & (keep_risk < 0.78) & (block_risk < 0.78), 0.0).clip(0.0, 1.0)
+    base_source_score = source_score.copy()
     deploy_value = _max_numeric_columns(
         sample_frame,
         (
@@ -600,15 +670,18 @@ def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: floa
             "portfolio_daily_source_forward_proxy_keep_risk",
         ),
     ).clip(0.0, 1.0)
-    source_score = (
-        0.52 * source_score
-        + 0.30 * release_value
-        + 0.16 * defense_value
-        + 0.12 * receiver_source_spread_value
-        - 0.36 * source_opportunity_cost
-        - 0.42 * positive_forward_sell_penalty
-        - 0.30 * reversal_risk_penalty
-    ).where(held, 0.0).clip(0.0, 1.0)
+    if value_arbitration_mode:
+        source_score = (
+            0.52 * source_score
+            + 0.30 * release_value
+            + 0.16 * defense_value
+            + 0.12 * receiver_source_spread_value
+            - 0.36 * source_opportunity_cost
+            - 0.42 * positive_forward_sell_penalty
+            - 0.30 * reversal_risk_penalty
+        ).where(held, 0.0).clip(0.0, 1.0)
+    else:
+        source_score = base_source_score
     receiver_score = _max_numeric_columns(
         sample_frame,
         (
@@ -624,20 +697,24 @@ def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: floa
     receiver_action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).fillna("hold").astype(str).str.lower().isin({"open", "add"}).astype(float)
     headroom = (0.24 - current).clip(lower=0.0)
     receiver_score = pd.concat([receiver_score.rename("receiver_score"), receiver_action.rename("receiver_action"), (raw_delta.clip(lower=0.0) / headroom.clip(lower=float(deadband))).clip(0.0, 1.0).rename("positive_delta")], axis=1).max(axis=1)
-    receiver_score = (
-        0.62 * receiver_score
-        + 0.36 * deploy_value
-        + 0.22 * receiver_source_spread_value
-        - 0.14 * defense_value
-        - 0.06 * cash_timing_value
-    ).clip(0.0, 1.0)
-    receiver_score = pd.concat(
-        [
-            receiver_score.rename("receiver_value_score"),
-            ((deploy_value - defense_value.clip(upper=0.60) * 0.35 + receiver_source_spread_value * 0.25).clip(0.0, 1.0)).rename("deploy_floor"),
-        ],
-        axis=1,
-    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    base_receiver_score = receiver_score.copy()
+    if value_arbitration_mode:
+        receiver_score = (
+            0.62 * receiver_score
+            + 0.36 * deploy_value
+            + 0.22 * receiver_source_spread_value
+            - 0.14 * defense_value
+            - 0.06 * cash_timing_value
+        ).clip(0.0, 1.0)
+        receiver_score = pd.concat(
+            [
+                receiver_score.rename("receiver_value_score"),
+                ((deploy_value - defense_value.clip(upper=0.60) * 0.35 + receiver_source_spread_value * 0.25).clip(0.0, 1.0)).rename("deploy_floor"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    else:
+        receiver_score = base_receiver_score
     receiver_score = receiver_score.where(headroom > float(deadband), 0.0).clip(0.0, 1.0)
     risk_budget = _max_numeric_columns(
         sample_frame,
@@ -664,14 +741,14 @@ def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: floa
             source_score=source_score.loc[idx].to_numpy(dtype=float),
             receiver_score=receiver_score.loc[idx].to_numpy(dtype=float),
             cash_score=risk_budget.loc[idx].to_numpy(dtype=float),
-            deploy_value=deploy_value.loc[idx].to_numpy(dtype=float),
-            release_value=release_value.loc[idx].to_numpy(dtype=float),
-            defense_value=defense_value.loc[idx].to_numpy(dtype=float),
-            cash_timing_value=cash_timing_value.loc[idx].to_numpy(dtype=float),
-            source_opportunity_cost=source_opportunity_cost.loc[idx].to_numpy(dtype=float),
-            receiver_source_spread_value=receiver_source_spread_value.loc[idx].to_numpy(dtype=float),
-            reversal_risk_penalty=reversal_risk_penalty.loc[idx].to_numpy(dtype=float),
-            source_wrong_side_sell_penalty=positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float),
+            deploy_value=deploy_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            release_value=release_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            defense_value=defense_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            cash_timing_value=cash_timing_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            source_opportunity_cost=source_opportunity_cost.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            receiver_source_spread_value=receiver_source_spread_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            reversal_risk_penalty=reversal_risk_penalty.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            source_wrong_side_sell_penalty=positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
             turnover_budget=float(turnover_budget.loc[idx].median()) if len(idx) else 0.12,
             risk_budget=float(np.maximum(risk_budget.loc[idx], defense_value.loc[idx]).median()) if len(idx) else 0.0,
         )
@@ -701,14 +778,24 @@ def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: floa
             source_supply * source_score.loc[idx].to_numpy(dtype=float)
             + receiver_demand * receiver_score.loc[idx].to_numpy(dtype=float)
         )
-        enriched.loc[idx, "deploy_value"] = deploy_value.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "release_value"] = release_value.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "defense_value"] = defense_value.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "cash_timing_value"] = cash_timing_value.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "source_opportunity_cost"] = source_opportunity_cost.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "receiver_source_spread_value"] = receiver_source_spread_value.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "reversal_risk_penalty"] = reversal_risk_penalty.loc[idx].to_numpy(dtype=float)
-        enriched.loc[idx, "source_wrong_side_sell_penalty"] = positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float)
+        if value_arbitration_mode:
+            enriched.loc[idx, "deploy_value"] = deploy_value.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "release_value"] = release_value.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "defense_value"] = defense_value.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "cash_timing_value"] = cash_timing_value.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "source_opportunity_cost"] = source_opportunity_cost.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "receiver_source_spread_value"] = receiver_source_spread_value.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "reversal_risk_penalty"] = reversal_risk_penalty.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "source_wrong_side_sell_penalty"] = positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float)
+        else:
+            enriched.loc[idx, "deploy_value"] = 0.0
+            enriched.loc[idx, "release_value"] = 0.0
+            enriched.loc[idx, "defense_value"] = risk_budget.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "cash_timing_value"] = risk_budget.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "source_opportunity_cost"] = 0.0
+            enriched.loc[idx, "receiver_source_spread_value"] = 0.0
+            enriched.loc[idx, "reversal_risk_penalty"] = 0.0
+            enriched.loc[idx, "source_wrong_side_sell_penalty"] = 0.0
     enriched["target_delta"] = (enriched["target_weight"] - current).where(lambda s: s.abs() >= float(deadband), 0.0)
     enriched["target_weight"] = (current + enriched["target_delta"]).clip(0.0, 0.24)
     enriched["held_mask"] = held.astype(float)
@@ -1040,6 +1127,14 @@ class TorchPortfolioSetV5Artifact:
         path.parent.mkdir(parents=True, exist_ok=True)
         model_config = dict(self.model_config or {})
         model_config.setdefault("portfolio_set_v5_internal_version", PORTFOLIO_SET_V5_INTERNAL_VERSION)
+        model_config.setdefault(
+            "portfolio_set_v5_behavior_mode",
+            _portfolio_set_v5_behavior_mode_from_version(model_config.get("portfolio_set_v5_internal_version")),
+        )
+        model_config.setdefault(
+            "portfolio_set_v5_loss_profile_requested",
+            str(model_config.get("portfolio_set_v5_internal_version", PORTFOLIO_SET_V5_INTERNAL_VERSION)),
+        )
         payload = {
             "artifact_type": PORTFOLIO_SET_V5_ARTIFACT_TYPE,
             "feature_names": list(self.feature_names),
@@ -1123,6 +1218,7 @@ def _decision_target_column(decision_target: torch.Tensor | None, index: int, fa
 
 def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weights: dict[str, float]) -> torch.Tensor:
     pred = _decode_raw(raw)
+    value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(weights)
     target = batch["target_y"]
     decision_target = batch.get("decision_target_y")
     mask = batch["sample_mask"].float()
@@ -1153,27 +1249,37 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
     oracle_cash = _decision_target_column(decision_target, 2, cash_target).clamp(0.0, 1.0)
     oracle_target_weight = _decision_target_column(decision_target, 3, target_weight).clamp(0.0, 0.24)
     target_value = (_decision_target_column(decision_target, 7, zero_target).clamp_min(0.0) * mask).sum(dim=1)
-    deploy_value = _decision_target_column(decision_target, 8, zero_target).clamp(0.0, 1.0)
-    release_value = _decision_target_column(decision_target, 9, zero_target).clamp(0.0, 1.0)
-    defense_value = _decision_target_column(decision_target, 10, cash_target).clamp(0.0, 1.0)
-    cash_timing_value = _decision_target_column(decision_target, 11, cash_target).clamp(0.0, 1.0)
-    source_opportunity_cost = _decision_target_column(decision_target, 12, zero_target).clamp(0.0, 1.0)
-    receiver_source_spread_value = _decision_target_column(decision_target, 13, zero_target).clamp(0.0, 1.0)
-    reversal_risk_penalty = _decision_target_column(decision_target, 14, zero_target).clamp(0.0, 1.0)
-    wrong_side_penalty = _decision_target_column(decision_target, 15, zero_target).clamp(0.0, 1.0)
+    if value_arbitration_mode:
+        deploy_value = _decision_target_column(decision_target, 8, zero_target).clamp(0.0, 1.0)
+        release_value = _decision_target_column(decision_target, 9, zero_target).clamp(0.0, 1.0)
+        defense_value = _decision_target_column(decision_target, 10, cash_target).clamp(0.0, 1.0)
+        cash_timing_value = _decision_target_column(decision_target, 11, cash_target).clamp(0.0, 1.0)
+        source_opportunity_cost = _decision_target_column(decision_target, 12, zero_target).clamp(0.0, 1.0)
+        receiver_source_spread_value = _decision_target_column(decision_target, 13, zero_target).clamp(0.0, 1.0)
+        reversal_risk_penalty = _decision_target_column(decision_target, 14, zero_target).clamp(0.0, 1.0)
+        wrong_side_penalty = _decision_target_column(decision_target, 15, zero_target).clamp(0.0, 1.0)
+    else:
+        deploy_value = zero_target
+        release_value = zero_target
+        defense_value = cash_target
+        cash_timing_value = cash_target
+        source_opportunity_cost = zero_target
+        receiver_source_spread_value = zero_target
+        reversal_risk_penalty = zero_target
+        wrong_side_penalty = zero_target
     oracle = project_portfolio_set_v5_cashflow_oracle(
         current_weight=current,
         source_score=pred["source_supply_score"],
         receiver_score=pred["receiver_demand_score"],
         cash_buffer_score=pred["cash_buffer_score"],
-        deploy_value=deploy_value,
-        release_value=release_value,
-        defense_value=defense_value,
-        cash_timing_value=cash_timing_value,
-        source_opportunity_cost=source_opportunity_cost,
-        receiver_source_spread_value=receiver_source_spread_value,
-        reversal_risk_penalty=reversal_risk_penalty,
-        source_wrong_side_sell_penalty=wrong_side_penalty,
+        deploy_value=deploy_value if value_arbitration_mode else None,
+        release_value=release_value if value_arbitration_mode else None,
+        defense_value=defense_value if value_arbitration_mode else None,
+        cash_timing_value=cash_timing_value if value_arbitration_mode else None,
+        source_opportunity_cost=source_opportunity_cost if value_arbitration_mode else None,
+        receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
+        reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
+        source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
         sample_mask=batch["sample_mask"],
     )
     oracle_target_loss = (
@@ -1189,14 +1295,14 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         source_score=(pred["source_supply_score"] + perturb_strength * source_target).clamp(0.0, 1.0),
         receiver_score=(pred["receiver_demand_score"] + perturb_strength * receiver_target).clamp(0.0, 1.0),
         cash_buffer_score=pred["cash_buffer_score"],
-        deploy_value=deploy_value,
-        release_value=release_value,
-        defense_value=defense_value,
-        cash_timing_value=cash_timing_value,
-        source_opportunity_cost=source_opportunity_cost,
-        receiver_source_spread_value=receiver_source_spread_value,
-        reversal_risk_penalty=reversal_risk_penalty,
-        source_wrong_side_sell_penalty=wrong_side_penalty,
+        deploy_value=deploy_value if value_arbitration_mode else None,
+        release_value=release_value if value_arbitration_mode else None,
+        defense_value=defense_value if value_arbitration_mode else None,
+        cash_timing_value=cash_timing_value if value_arbitration_mode else None,
+        source_opportunity_cost=source_opportunity_cost if value_arbitration_mode else None,
+        receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
+        reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
+        source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
         sample_mask=batch["sample_mask"],
     )
     minus_oracle = project_portfolio_set_v5_cashflow_oracle(
@@ -1204,14 +1310,14 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         source_score=(pred["source_supply_score"] - perturb_strength * source_target).clamp(0.0, 1.0),
         receiver_score=(pred["receiver_demand_score"] - perturb_strength * receiver_target).clamp(0.0, 1.0),
         cash_buffer_score=pred["cash_buffer_score"],
-        deploy_value=deploy_value,
-        release_value=release_value,
-        defense_value=defense_value,
-        cash_timing_value=cash_timing_value,
-        source_opportunity_cost=source_opportunity_cost,
-        receiver_source_spread_value=receiver_source_spread_value,
-        reversal_risk_penalty=reversal_risk_penalty,
-        source_wrong_side_sell_penalty=wrong_side_penalty,
+        deploy_value=deploy_value if value_arbitration_mode else None,
+        release_value=release_value if value_arbitration_mode else None,
+        defense_value=defense_value if value_arbitration_mode else None,
+        cash_timing_value=cash_timing_value if value_arbitration_mode else None,
+        source_opportunity_cost=source_opportunity_cost if value_arbitration_mode else None,
+        receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
+        reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
+        source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
         sample_mask=batch["sample_mask"],
     )
     pg_margin = plus_oracle["decision_value"] - minus_oracle["decision_value"]
@@ -1265,6 +1371,8 @@ def portfolio_set_v5_decision_diagnostics(
     weights: dict[str, float] | None = None,
 ) -> dict[str, float]:
     with torch.no_grad():
+        effective_weights = weights or resolve_portfolio_set_v5_loss_profile(None)[1]["multi_objective_loss_weights"]
+        value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(effective_weights)
         pred = _decode_raw(raw)
         mask = batch["sample_mask"].float()
         current = batch["current_weight"].clamp(0.0, 1.0)
@@ -1275,27 +1383,37 @@ def portfolio_set_v5_decision_diagnostics(
         target_receiver = _decision_target_column(target, 1, zero_target).clamp(0.0, 1.0)
         target_weight = _decision_target_column(target, 3, batch["target_y"][..., 0].clamp(0.0, 0.24)).clamp(0.0, 0.24)
         target_value = (_decision_target_column(target, 7, zero_target).clamp_min(0.0) * mask).sum(dim=1)
-        deploy_value = _decision_target_column(target, 8, zero_target).clamp(0.0, 1.0)
-        release_value = _decision_target_column(target, 9, zero_target).clamp(0.0, 1.0)
-        defense_value = _decision_target_column(target, 10, cash_target).clamp(0.0, 1.0)
-        cash_timing_value = _decision_target_column(target, 11, cash_target).clamp(0.0, 1.0)
-        opportunity_cost = _decision_target_column(target, 12, zero_target).clamp(0.0, 1.0)
-        spread_value = _decision_target_column(target, 13, zero_target).clamp(0.0, 1.0)
-        reversal_penalty = _decision_target_column(target, 14, zero_target).clamp(0.0, 1.0)
-        wrong_side_penalty = _decision_target_column(target, 15, zero_target).clamp(0.0, 1.0)
+        if value_arbitration_mode:
+            deploy_value = _decision_target_column(target, 8, zero_target).clamp(0.0, 1.0)
+            release_value = _decision_target_column(target, 9, zero_target).clamp(0.0, 1.0)
+            defense_value = _decision_target_column(target, 10, cash_target).clamp(0.0, 1.0)
+            cash_timing_value = _decision_target_column(target, 11, cash_target).clamp(0.0, 1.0)
+            opportunity_cost = _decision_target_column(target, 12, zero_target).clamp(0.0, 1.0)
+            spread_value = _decision_target_column(target, 13, zero_target).clamp(0.0, 1.0)
+            reversal_penalty = _decision_target_column(target, 14, zero_target).clamp(0.0, 1.0)
+            wrong_side_penalty = _decision_target_column(target, 15, zero_target).clamp(0.0, 1.0)
+        else:
+            deploy_value = zero_target
+            release_value = zero_target
+            defense_value = cash_target
+            cash_timing_value = cash_target
+            opportunity_cost = zero_target
+            spread_value = zero_target
+            reversal_penalty = zero_target
+            wrong_side_penalty = zero_target
         oracle = project_portfolio_set_v5_cashflow_oracle(
             current_weight=current,
             source_score=pred["source_supply_score"],
             receiver_score=pred["receiver_demand_score"],
             cash_buffer_score=pred["cash_buffer_score"],
-            deploy_value=deploy_value,
-            release_value=release_value,
-            defense_value=defense_value,
-            cash_timing_value=cash_timing_value,
-            source_opportunity_cost=opportunity_cost,
-            receiver_source_spread_value=spread_value,
-            reversal_risk_penalty=reversal_penalty,
-            source_wrong_side_sell_penalty=wrong_side_penalty,
+            deploy_value=deploy_value if value_arbitration_mode else None,
+            release_value=release_value if value_arbitration_mode else None,
+            defense_value=defense_value if value_arbitration_mode else None,
+            cash_timing_value=cash_timing_value if value_arbitration_mode else None,
+            source_opportunity_cost=opportunity_cost if value_arbitration_mode else None,
+            receiver_source_spread_value=spread_value if value_arbitration_mode else None,
+            reversal_risk_penalty=reversal_penalty if value_arbitration_mode else None,
+            source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
             sample_mask=batch["sample_mask"],
         )
         source_count = ((oracle["source_supply"] > 0.003) & batch["sample_mask"]).sum().item()
@@ -1311,10 +1429,14 @@ def portfolio_set_v5_decision_diagnostics(
             / max(float((defense_value.mean(dim=1) > 0.5).sum().item()), 1.0)
         )
         return {
-            "paper_reproduction_pg_surrogate_loss": float(_portfolio_set_loss(raw, batch, weights or resolve_portfolio_set_v5_loss_profile(None)[1]["multi_objective_loss_weights"]).detach().cpu()),
+            "paper_reproduction_pg_surrogate_loss": float(_portfolio_set_loss(raw, batch, effective_weights).detach().cpu()),
             "decision_oracle_value_mean": float(oracle["decision_value"].mean().detach().cpu()),
             "decision_oracle_target_value_mean": float(target_value.mean().detach().cpu()),
             "decision_oracle_constraint_violation_mean": float(oracle["constraint_violation"].mean().detach().cpu()),
+            "decision_oracle_cash_floor_violation_mean": float(oracle["cash_floor_violation"].mean().detach().cpu()),
+            "decision_oracle_turnover_violation_mean": float(oracle["turnover_violation"].mean().detach().cpu()),
+            "decision_oracle_source_capacity_violation_mean": float(oracle["source_capacity_violation"].mean().detach().cpu()),
+            "decision_oracle_receiver_capacity_violation_mean": float(oracle["receiver_capacity_violation"].mean().detach().cpu()),
             "decision_oracle_source_l1": float(_masked_mean((oracle["source_supply"] - target_source).abs(), mask).detach().cpu()),
             "decision_oracle_receiver_l1": float(_masked_mean((oracle["receiver_demand"] - target_receiver).abs(), mask).detach().cpu()),
             "decision_oracle_target_weight_l1": float(_masked_mean((oracle["target_weight"] - target_weight).abs(), mask).detach().cpu()),
@@ -1672,24 +1794,29 @@ def predict_policy_portfolio_set_v5(
     current = _current_weight(policy)
     source_score = outputs["source_supply_score"].clip(0.0, 1.0)
     receiver_score = outputs["receiver_demand_score"].clip(0.0, 1.0)
-    value_inputs = _predict_value_arbitration_inputs(policy, outputs, current)
+    behavior_mode = _portfolio_set_v5_artifact_behavior_mode(artifact)
+    value_arbitration_mode = behavior_mode == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
+    value_inputs = _predict_value_arbitration_inputs(policy, outputs, current) if value_arbitration_mode else None
     cashflow_turnover_budget = _predict_cashflow_turnover_budget(artifact)
+    risk_components = [outputs["cash_buffer_score"]]
+    if value_inputs is not None:
+        risk_components.extend([value_inputs["defense_value"], value_inputs["cash_timing_value"]])
     oracle = project_portfolio_set_v5_cashflow_oracle(
         current_weight=torch.as_tensor(current.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         source_score=torch.as_tensor(source_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         receiver_score=torch.as_tensor(receiver_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         cash_buffer_score=torch.as_tensor(outputs["cash_buffer_score"].clip(0.0, 1.0).to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        deploy_value=torch.as_tensor(value_inputs["deploy_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        release_value=torch.as_tensor(value_inputs["release_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        defense_value=torch.as_tensor(value_inputs["defense_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        cash_timing_value=torch.as_tensor(value_inputs["cash_timing_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        source_opportunity_cost=torch.as_tensor(value_inputs["source_opportunity_cost"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        receiver_source_spread_value=torch.as_tensor(value_inputs["receiver_source_spread_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        reversal_risk_penalty=torch.as_tensor(value_inputs["reversal_risk_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
-        source_wrong_side_sell_penalty=torch.as_tensor(value_inputs["source_wrong_side_sell_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
+        deploy_value=torch.as_tensor(value_inputs["deploy_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        release_value=torch.as_tensor(value_inputs["release_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        defense_value=torch.as_tensor(value_inputs["defense_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        cash_timing_value=torch.as_tensor(value_inputs["cash_timing_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        source_opportunity_cost=torch.as_tensor(value_inputs["source_opportunity_cost"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        receiver_source_spread_value=torch.as_tensor(value_inputs["receiver_source_spread_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        reversal_risk_penalty=torch.as_tensor(value_inputs["reversal_risk_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        source_wrong_side_sell_penalty=torch.as_tensor(value_inputs["source_wrong_side_sell_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
         sample_mask=torch.ones((1, len(policy)), dtype=torch.bool),
         turnover_budget=torch.as_tensor([cashflow_turnover_budget], dtype=torch.float32),
-        risk_budget=torch.as_tensor([float(np.clip(pd.concat([outputs["cash_buffer_score"], value_inputs["defense_value"], value_inputs["cash_timing_value"]], axis=1).max(axis=1).mean(), 0.0, 1.0))], dtype=torch.float32),
+        risk_budget=torch.as_tensor([float(np.clip(pd.concat(risk_components, axis=1).max(axis=1).mean(), 0.0, 1.0))], dtype=torch.float32),
     )
     target_weight = pd.Series(oracle["target_weight"][0].detach().cpu().numpy().astype(float), index=policy.index)
     target_delta = (target_weight - current).clip(-0.18, 0.18)
@@ -1729,22 +1856,24 @@ def predict_policy_portfolio_set_v5(
     policy["portfolio_daily_receiver_executability"] = policy["portfolio_daily_receiver_executable_candidate"].astype(float)
     policy["portfolio_daily_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
     policy["portfolio_daily_unified_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
-    policy["portfolio_set_v5_r69_deploy_value"] = value_inputs["deploy_value"].astype(float)
-    policy["portfolio_set_v5_r69_release_value"] = value_inputs["release_value"].astype(float)
-    policy["portfolio_set_v5_r69_defense_value"] = value_inputs["defense_value"].astype(float)
-    policy["portfolio_set_v5_r69_cash_timing_value"] = value_inputs["cash_timing_value"].astype(float)
-    policy["portfolio_set_v5_r69_source_opportunity_cost"] = value_inputs["source_opportunity_cost"].astype(float)
-    policy["portfolio_set_v5_r69_receiver_source_spread_value"] = value_inputs["receiver_source_spread_value"].astype(float)
-    policy["portfolio_set_v5_r69_reversal_risk_penalty"] = value_inputs["reversal_risk_penalty"].astype(float)
-    policy["portfolio_set_v5_r69_source_wrong_side_sell_penalty"] = value_inputs["source_wrong_side_sell_penalty"].astype(float)
-    policy["portfolio_set_v5_r69_reversal_guarded"] = (
-        (policy["portfolio_daily_source_target_intent"] > 0.5)
-        & (policy["portfolio_set_v5_r69_reversal_risk_penalty"] > 0.5)
-    ).astype(float)
-    policy["portfolio_set_v5_r69_source_wrong_side_sell"] = (
-        (policy["portfolio_daily_source_target_intent"] > 0.5)
-        & (policy["portfolio_set_v5_r69_source_wrong_side_sell_penalty"] > 0.5)
-    ).astype(float)
+    policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN] = 1.0 if value_arbitration_mode else 0.0
+    if value_inputs is not None:
+        policy["portfolio_set_v5_r69_deploy_value"] = value_inputs["deploy_value"].astype(float)
+        policy["portfolio_set_v5_r69_release_value"] = value_inputs["release_value"].astype(float)
+        policy["portfolio_set_v5_r69_defense_value"] = value_inputs["defense_value"].astype(float)
+        policy["portfolio_set_v5_r69_cash_timing_value"] = value_inputs["cash_timing_value"].astype(float)
+        policy["portfolio_set_v5_r69_source_opportunity_cost"] = value_inputs["source_opportunity_cost"].astype(float)
+        policy["portfolio_set_v5_r69_receiver_source_spread_value"] = value_inputs["receiver_source_spread_value"].astype(float)
+        policy["portfolio_set_v5_r69_reversal_risk_penalty"] = value_inputs["reversal_risk_penalty"].astype(float)
+        policy["portfolio_set_v5_r69_source_wrong_side_sell_penalty"] = value_inputs["source_wrong_side_sell_penalty"].astype(float)
+        policy["portfolio_set_v5_r69_reversal_guarded"] = (
+            (policy["portfolio_daily_source_target_intent"] > 0.5)
+            & (policy["portfolio_set_v5_r69_reversal_risk_penalty"] > 0.5)
+        ).astype(float)
+        policy["portfolio_set_v5_r69_source_wrong_side_sell"] = (
+            (policy["portfolio_daily_source_target_intent"] > 0.5)
+            & (policy["portfolio_set_v5_r69_source_wrong_side_sell_penalty"] > 0.5)
+        ).astype(float)
     policy["portfolio_set_v5_source_supply_score"] = source_score.astype(float)
     policy["portfolio_set_v5_receiver_demand_score"] = receiver_score.astype(float)
     policy["portfolio_set_v5_source_supply"] = source_supply.astype(float)
@@ -1753,25 +1882,30 @@ def predict_policy_portfolio_set_v5(
     policy["portfolio_set_v5_turnover_budget"] = cashflow_turnover_budget
     policy["portfolio_set_v5_turnover_used"] = float(oracle["turnover_used"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_constraint_violation"] = float(oracle["constraint_violation"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_cash_floor_violation"] = float(oracle["cash_floor_violation"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_turnover_violation"] = float(oracle["turnover_violation"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_source_capacity_violation"] = float(oracle["source_capacity_violation"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_receiver_capacity_violation"] = float(oracle["receiver_capacity_violation"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_decision_value"] = float(oracle["decision_value"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_feasible"] = float(float(oracle["constraint_violation"][0].detach().cpu()) <= 1.0e-6)
-    source_target_count = max(float(policy["portfolio_daily_source_target_intent"].sum()), 1.0)
-    defense_days = max(float((policy["portfolio_set_v5_r69_defense_value"] > 0.5).sum()), 1.0)
-    policy["portfolio_set_v5_r69_deploy_release_spread_mean"] = float(
-        (policy["portfolio_set_v5_r69_deploy_value"] - policy["portfolio_set_v5_r69_release_value"]).mean()
-    )
-    policy["portfolio_set_v5_r69_source_wrong_side_sell_share"] = float(policy["portfolio_set_v5_r69_source_wrong_side_sell"].sum() / source_target_count)
-    policy["portfolio_set_v5_r69_cash_timing_decision_quality"] = float(
-        float(oracle["cash_buffer"][0].detach().cpu())
-        * max(float(policy["portfolio_set_v5_r69_defense_value"].mean()), float(policy["portfolio_set_v5_r69_cash_timing_value"].mean()))
-    )
-    policy["portfolio_set_v5_r69_reversal_risk_penalty_mean"] = float(
-        (policy["portfolio_set_v5_source_supply"] * policy["portfolio_set_v5_r69_reversal_risk_penalty"]).mean()
-    )
-    policy["portfolio_set_v5_r69_defense_win_rate"] = float(
-        ((policy["portfolio_set_v5_cash_buffer_score"] >= float(oracle["cash_floor"][0].detach().cpu()) - 1.0e-6) & (policy["portfolio_set_v5_r69_defense_value"] > 0.5)).sum()
-        / defense_days
-    )
+    if value_arbitration_mode:
+        source_target_count = max(float(policy["portfolio_daily_source_target_intent"].sum()), 1.0)
+        defense_days = max(float((policy["portfolio_set_v5_r69_defense_value"] > 0.5).sum()), 1.0)
+        policy["portfolio_set_v5_r69_deploy_release_spread_mean"] = float(
+            (policy["portfolio_set_v5_r69_deploy_value"] - policy["portfolio_set_v5_r69_release_value"]).mean()
+        )
+        policy["portfolio_set_v5_r69_source_wrong_side_sell_share"] = float(policy["portfolio_set_v5_r69_source_wrong_side_sell"].sum() / source_target_count)
+        policy["portfolio_set_v5_r69_cash_timing_decision_quality"] = float(
+            float(oracle["cash_buffer"][0].detach().cpu())
+            * max(float(policy["portfolio_set_v5_r69_defense_value"].mean()), float(policy["portfolio_set_v5_r69_cash_timing_value"].mean()))
+        )
+        policy["portfolio_set_v5_r69_reversal_risk_penalty_mean"] = float(
+            (policy["portfolio_set_v5_source_supply"] * policy["portfolio_set_v5_r69_reversal_risk_penalty"]).mean()
+        )
+        policy["portfolio_set_v5_r69_defense_win_rate"] = float(
+            ((policy["portfolio_set_v5_cash_buffer_score"] >= float(oracle["cash_floor"][0].detach().cpu()) - 1.0e-6) & (policy["portfolio_set_v5_r69_defense_value"] > 0.5)).sum()
+            / defense_days
+        )
     policy["portfolio_set_v5_target_delta_weight_conflict_count"] = int((((target_weight - current) * target_delta) < -(0.003 ** 2)).sum())
     add_mask = (current > 0.0) & (target_delta > 0.003)
     open_mask = (current <= 0.0) & (target_delta > 0.003)
@@ -1795,6 +1929,7 @@ def predict_policy_portfolio_set_v5(
     global_targets.update(
         {
             PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN: 1.0,
+            PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN: 1.0 if value_arbitration_mode else 0.0,
             "release_first_allocation_v3_mode": 1.0,
             "allocation_intent_v2_mode": 1.0,
             "target_weight_intent_mode": 1.0,
@@ -1833,7 +1968,9 @@ def fit_policy_models_portfolio_set_v5(
     contract = dict(training_contract or {})
     if str(contract.get("trainer_backend", "") or "") != TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
         raise ValueError("fit_policy_models_portfolio_set_v5 requires the formal_torch_portfolio_set_v5 training contract.")
-    resolved_loss_profile, loss_config = resolve_portfolio_set_v5_loss_profile(loss_profile)
+    requested_loss_profile = str(loss_profile or PORTFOLIO_SET_V5_INTERNAL_VERSION)
+    resolved_loss_profile, loss_config = resolve_portfolio_set_v5_loss_profile(requested_loss_profile)
+    behavior_mode = str(loss_config.get("portfolio_set_v5_behavior_mode", PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1))
     if not torch.cuda.is_available() and bool(contract.get("gpu_required", False)):
         raise RuntimeError("continuous_policy formal_torch_portfolio_set_v5 requires CUDA, but torch.cuda.is_available() is False.")
     device = torch.device("cuda" if bool(contract.get("gpu_required", False)) else "cpu")
@@ -1842,7 +1979,7 @@ def fit_policy_models_portfolio_set_v5(
     np.random.seed(int(random_seed))
     run_root.mkdir(parents=True, exist_ok=True)
     train_frame, day_diagnostics = _select_train_days(sample_frame, int(random_seed))
-    targets = build_portfolio_set_v5_targets(train_frame)
+    targets = build_portfolio_set_v5_targets(train_frame, loss_profile=resolved_loss_profile)
     target_diagnostics = _target_diagnostics(targets)
     static_feature_names, sequence_bases, sequence_columns = _resolve_static_and_sequence_columns(feature_names)
     static_matrix, static_fill, static_means, static_stds = _prepare_matrix(_ensure_features(train_frame, static_feature_names), static_feature_names)
@@ -1969,7 +2106,9 @@ def fit_policy_models_portfolio_set_v5(
         "trainer_backend": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
         "loss_profile": resolved_loss_profile,
         "status": "portfolio_set_v5_complete",
-        "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_INTERNAL_VERSION,
+        "portfolio_set_v5_internal_version": resolved_loss_profile,
+        "portfolio_set_v5_behavior_mode": behavior_mode,
+        "portfolio_set_v5_loss_profile_requested": requested_loss_profile,
         "paper_reproduction_metrics": {
             "method": "pg_dfl_surrogate",
             "surrogate": "positive_negative_score_perturbation",
@@ -1981,6 +2120,7 @@ def fit_policy_models_portfolio_set_v5(
             "long_only": True,
             "source_receiver_cash_conservation": True,
             "value_arbitration": resolved_loss_profile == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            "behavior_mode": behavior_mode,
             **last_val_decision_diagnostics,
         },
         "release_flow_metrics": {
@@ -2046,7 +2186,9 @@ def fit_policy_models_portfolio_set_v5(
             "cross_layers": int(cross_layers),
             "latent_count": int(latent_count),
             "dropout": float(dropout),
-            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_INTERNAL_VERSION,
+            "portfolio_set_v5_internal_version": resolved_loss_profile,
+            "portfolio_set_v5_behavior_mode": behavior_mode,
+            "portfolio_set_v5_loss_profile_requested": requested_loss_profile,
         },
         model_state_dict={key: value.detach().cpu() for key, value in model.state_dict().items()},
         global_target_defaults=_global_defaults(daily_frame),

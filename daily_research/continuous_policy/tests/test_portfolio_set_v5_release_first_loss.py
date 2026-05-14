@@ -16,7 +16,7 @@ from daily_research.continuous_policy.model_portfolio_set_v5 import (
 class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
     def test_v48_and_alias_resolve_to_portfolio_set_release_first_loss(self) -> None:
         expected_names = {
-            "alpha_result_value_budget_split_v48": "alpha_result_value_budget_split_v48",
+            "alpha_result_value_budget_split_v48": PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
             "portfolio_set_release_first_decision_v1": PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
             PORTFOLIO_SET_V5_DFL_PG_V1_VERSION: PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
             PORTFOLIO_SET_V5_INTERNAL_VERSION: PORTFOLIO_SET_V5_INTERNAL_VERSION,
@@ -232,7 +232,7 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
         self.assertGreater(float(guarded["source_supply"][0, 1]), 0.003)
 
     def test_pg_dfl_surrogate_prefers_oracle_aligned_logits(self) -> None:
-        weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]
+        weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]
         current = torch.tensor([[0.20, 0.00]], dtype=torch.float32)
         decision_target = torch.tensor(
             [[[0.08, 0.00, 0.50, 0.12, 0.18, 0.10, 0.00, 0.08], [0.00, 0.08, 0.50, 0.08, 0.18, 0.10, 0.00, 0.08]]],
@@ -259,6 +259,32 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
         self.assertGreater(diagnostics["decision_oracle_value_mean"], 0.0)
         self.assertGreater(diagnostics["release_flow_source_target_count"], 0.0)
         self.assertGreater(diagnostics["release_flow_receiver_target_count"], 0.0)
+
+    def test_base_loss_ignores_r69_extension_columns(self) -> None:
+        weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]
+        current = torch.tensor([[0.20, 0.00]], dtype=torch.float32)
+        target_y = torch.tensor(
+            [[[0.12, -0.08, 1.00, 0.00, 0.50, 1.00, 1.00, 0.00], [0.08, 0.08, 0.00, 1.00, 0.50, 0.00, 0.00, 0.00]]],
+            dtype=torch.float32,
+        )
+        base_decision = torch.tensor(
+            [[[0.08, 0.00, 0.50, 0.12, 0.18, 0.10, 0.00, 0.08, 0, 0, 0, 0, 0, 0, 0, 0],
+              [0.00, 0.08, 0.50, 0.08, 0.18, 0.10, 0.00, 0.08, 0, 0, 0, 0, 0, 0, 0, 0]]],
+            dtype=torch.float32,
+        )
+        perturbed_decision = base_decision.clone()
+        perturbed_decision[..., 8:] = torch.tensor([1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3])
+        raw = torch.tensor([[[0.0, -0.5, 3.0, -3.0, 0.0, 3.0, 3.0, -3.0], [-1.0, 0.5, -3.0, 3.0, 0.0, -3.0, -3.0, -3.0]]], dtype=torch.float32)
+        common = {
+            "target_y": target_y,
+            "sample_mask": torch.ones((1, 2), dtype=torch.bool),
+            "current_weight": current,
+        }
+
+        loss_base = float(_portfolio_set_loss(raw, {**common, "decision_target_y": base_decision}, weights))
+        loss_perturbed = float(_portfolio_set_loss(raw, {**common, "decision_target_y": perturbed_decision}, weights))
+
+        self.assertAlmostEqual(loss_base, loss_perturbed, places=7)
 
 
 if __name__ == "__main__":

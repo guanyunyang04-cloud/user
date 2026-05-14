@@ -36,6 +36,7 @@ STYLE_SECTOR_CODES = {
 MARKET_DATA_FIELDS = ("Open", "High", "Low", "Close", "Volume", "Amount")
 TQ_FETCH_BATCH_SIZE = 64
 _TQ_SESSION_COUNTER = 0
+TQ_FETCH_EMPTY_BATCH_RETRY_COUNT = 2
 
 
 def _run_tq_quietly(func, *args, **kwargs):
@@ -104,6 +105,63 @@ def _try_import_tq():
             except Exception:
                 return None
         return None
+
+
+def _fetch_tq_market_data_batch(
+    tq,
+    *,
+    stock_list: List[str],
+    start_date: str,
+    end_date: str,
+    count: int,
+    dividend_type: str,
+    batch_start: int,
+) -> dict:
+    for attempt in range(TQ_FETCH_EMPTY_BATCH_RETRY_COUNT + 1):
+        batch_dict = tq.get_market_data(
+            field_list=list(MARKET_DATA_FIELDS),
+            stock_list=stock_list,
+            start_time=start_date,
+            end_time=end_date,
+            count=count,
+            dividend_type=dividend_type,
+            period="1d",
+        )
+        if batch_dict and "Close" in batch_dict:
+            return batch_dict
+        if attempt < TQ_FETCH_EMPTY_BATCH_RETRY_COUNT:
+            time.sleep(0.35 * (attempt + 1))
+    if len(stock_list) <= 1:
+        stock_text = stock_list[0] if stock_list else "<empty>"
+        raise RuntimeError(
+            "TDX returned empty data for singleton batch "
+            f"stock={stock_text} start_date={start_date} end_date={end_date or '<latest>'} batch_start={batch_start}."
+        )
+    midpoint = max(1, len(stock_list) // 2)
+    left = _fetch_tq_market_data_batch(
+        tq,
+        stock_list=stock_list[:midpoint],
+        start_date=start_date,
+        end_date=end_date,
+        count=count,
+        dividend_type=dividend_type,
+        batch_start=batch_start,
+    )
+    right = _fetch_tq_market_data_batch(
+        tq,
+        stock_list=stock_list[midpoint:],
+        start_date=start_date,
+        end_date=end_date,
+        count=count,
+        dividend_type=dividend_type,
+        batch_start=batch_start + midpoint,
+    )
+    merged: dict = {}
+    for field in MARKET_DATA_FIELDS:
+        frames = [payload.get(field) for payload in (left, right) if payload.get(field) is not None]
+        if frames:
+            merged[field] = pd.concat(frames, axis=1)
+    return merged
 
 
 def get_universe_cache_file(universe_scope: str = "all_a") -> Path:
@@ -483,17 +541,15 @@ def _fetch_tq_data(
         ) as progress:
             for start in range(0, len(stock_list), chunk_size):
                 batch = stock_list[start:start + chunk_size]
-                batch_dict = tq.get_market_data(
-                    field_list=list(MARKET_DATA_FIELDS),
+                batch_dict = _fetch_tq_market_data_batch(
+                    tq,
                     stock_list=batch,
-                    start_time=start_date,
-                    end_time=end_date,
+                    start_date=start_date,
+                    end_date=end_date,
                     count=count,
                     dividend_type=dividend_type,
-                    period="1d",
+                    batch_start=start,
                 )
-                if not batch_dict or "Close" not in batch_dict:
-                    raise RuntimeError(f"TDX returned empty data for batch starting at {start}.")
                 for field in MARKET_DATA_FIELDS:
                     frame = batch_dict.get(field)
                     if frame is None or frame.empty:

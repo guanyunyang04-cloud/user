@@ -33,6 +33,7 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
     normalize_portfolio_cashflow_decision,
     portfolio_cashflow_decision_enabled,
 )
+from daily_research.continuous_policy.model_portfolio_set_v5 import PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN
 from daily_research.continuous_policy.release_flow_trace import build_release_flow_trace
 
 
@@ -5543,6 +5544,11 @@ class PortfolioState:
                     "release_first_allocation_v3_mode": bool(release_first_allocation_v3_mode),
                     "portfolio_cashflow_decision_v1_mode": float(policy.at[stock, PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN])
                     if PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN]
+                    )
+                    if PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN in policy.columns
                     else 0.0,
                     "portfolio_cashflow_decision_v1_valid": float(
                         policy.at[stock, "portfolio_cashflow_decision_v1_valid"]

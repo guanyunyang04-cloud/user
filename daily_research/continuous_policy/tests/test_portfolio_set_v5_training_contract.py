@@ -2,7 +2,13 @@ import inspect
 import unittest
 
 from daily_research.continuous_policy import train_policy
-from daily_research.continuous_policy.model_portfolio_set_v5 import resolve_portfolio_set_v5_loss_profile
+from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
+    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+    PORTFOLIO_SET_V5_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+    resolve_portfolio_set_v5_loss_profile,
+)
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
     TRAINER_BACKENDS,
@@ -66,8 +72,25 @@ class PortfolioSetV5TrainingContractTest(unittest.TestCase):
         resolved, config = resolve_portfolio_set_v5_loss_profile("portfolio_set_v5_dfl_pg_v1")
 
         self.assertEqual(resolved, "portfolio_set_v5_dfl_pg_v1")
+        self.assertEqual(PORTFOLIO_SET_V5_INTERNAL_VERSION, "portfolio_set_v5_dfl_pg_v1")
+        self.assertEqual(config["portfolio_set_v5_behavior_mode"], PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1)
         self.assertGreater(config["multi_objective_loss_weights"]["pg_dfl_surrogate_total"], 0.0)
         self.assertGreater(config["multi_objective_loss_weights"]["decision_oracle_total"], 0.0)
+        self.assertEqual(config["multi_objective_loss_weights"]["value_arbitration_total"], 0.0)
+
+    def test_legacy_loss_alias_resolves_to_base_internal_version(self) -> None:
+        resolved, config = resolve_portfolio_set_v5_loss_profile("alpha_result_value_budget_split_v48")
+
+        self.assertEqual(resolved, "portfolio_set_v5_dfl_pg_v1")
+        self.assertEqual(config["portfolio_set_v5_behavior_mode"], PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1)
+        self.assertEqual(config["multi_objective_loss_weights"]["value_arbitration_total"], 0.0)
+
+    def test_r69_loss_profile_is_explicit_value_arbitration_mode(self) -> None:
+        resolved, config = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)
+
+        self.assertEqual(resolved, PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)
+        self.assertEqual(config["portfolio_set_v5_behavior_mode"], PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION)
+        self.assertGreater(config["multi_objective_loss_weights"]["value_arbitration_total"], 0.0)
 
 
 if __name__ == "__main__":
