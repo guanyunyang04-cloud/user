@@ -195,3 +195,12 @@
 - Screening protocol verdict: wiring improved but behavior remains blocked. Evaluation has tiny nonzero source intent/target `0.0241`, clean target gap `0.0026`, but conflict rate `0.99998`, cash timing `-0.16636`, and trace blocker `no_held_negative_delta`; shadow remains source-dead with `release_flow_primary_blocker=source_executable_dead`.
 - Evidence capsule: `daily_research/brain/references/r61_release_first_decision_core_v4_status_20260514.md`.
 - Current verdict: r61 is research / shadow-only. Do not enter confirmatory, strict promotion, live/default, or active artifact changes. Next work must repair held negative-delta/source executable semantics and intent translation conflict, not repackage this as simply needing more epoch or generic loss weight.
+
+## 2026-05-14 r62 Research Data Lake Status
+- Fact: r62 adds a local DuckDB + Parquet research data lake in `daily_research.data_lake`, with catalog APIs, build/import CLIs, and train-policy lake-backed reusable dataset lookup.
+- Fact: full Bronze/Silver market-feature data is registered for `learned_all_a/1200`, `000300.SH`, `2018-05-14` to `2026-05-13`: `2,328,000` market rows, `109` feature panels, and `253,752,000` feature cells.
+- Fact: existing reusable Gold training caches were imported into the lake: `liquid500` and `learned_all_a` strict-train datasets for `2024-01-02` to `2025-12-31`.
+- Fact: small real strict/realtime data lake smoke succeeded and explicitly marked realtime tail labels as unobserved.
+- Blocker: full 8-year Gold training-set construction did not complete; repeated attempts showed `build_training_matrices(...)` is the bottleneck, not DuckDB/Parquet.
+- Evidence capsule: `daily_research/brain/references/r62_research_data_lake_status_20260514.md`.
+- Current verdict: r62 is research infrastructure. It improves data reuse and auditability, but it is not strategy evidence and must not affect live/default/promotion or the active artifact.

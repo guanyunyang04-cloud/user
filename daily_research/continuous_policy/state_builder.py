@@ -485,6 +485,7 @@ def prepare_policy_inputs(
     alpha_prior_score_panel: str = "",
     alpha_prior_target_weight_panel: str = "",
     refresh_cache: bool = False,
+    auto_trim_history: bool = True,
     progress_desc: str = "continuous policy prepare",
 ) -> PreparedPolicyInputs:
     resolved_pool_name = normalize_policy_pool_name(pool_name)
@@ -501,7 +502,7 @@ def prepare_policy_inputs(
         requested_start_date=str(start_date or "").strip() or "20250318",
         end_date=str(end_date or "").strip(),
         mode="train",
-        auto_trim_history=True,
+        auto_trim_history=bool(auto_trim_history),
     )
     raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
         data_source=str(data_source or "tq"),

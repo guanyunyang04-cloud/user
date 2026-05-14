@@ -255,3 +255,6 @@
 - Trace contract: release-first simulator/protocol outputs must include release-flow trace fields and must identify blockers such as `no_held_negative_delta`, `source_executable_dead`, `receiver_score_dead`, and `target_delta_weight_conflict`.
 - Bottleneck contract: if source/release counts are below floor and release-flow trace has a non-`none` blocker, behavior reporting must include `release_flow_disconnected`.
 - Evidence boundary: r61 smoke/dry-run prove wiring. The parseable safe protocol shows behavior remains blocked and the outer study wrapper was interrupted before final study-summary write. This is not confirmatory, promotion, live/default, or active artifact evidence.
+
+## 2026-05-14 r62 Research Data Lake Contract
+- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; full Bronze/Silver `learned_all_a/1200` exists for `2018-05-14` to `2026-05-13`, but full Gold remains incomplete and must be sharded before becoming a training default.

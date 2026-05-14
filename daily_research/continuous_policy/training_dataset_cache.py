@@ -26,6 +26,17 @@ class TrainingDatasetCacheRecord:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ReusableTrainingDatasetRecord:
+    store: str
+    cache_key: str
+    cache_dir: Path
+    sample_frame: pd.DataFrame
+    daily_frame: pd.DataFrame
+    teacher_summary: dict[str, Any]
+    metadata: dict[str, Any]
+
+
 def _json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
@@ -131,6 +142,90 @@ def load_training_dataset_cache(
         teacher_summary=teacher_summary,
         metadata=dict(metadata),
     )
+
+
+def _legacy_to_reusable(record: TrainingDatasetCacheRecord) -> ReusableTrainingDatasetRecord:
+    return ReusableTrainingDatasetRecord(
+        store="legacy_pickle",
+        cache_key=record.cache_key,
+        cache_dir=record.cache_dir,
+        sample_frame=record.sample_frame,
+        daily_frame=record.daily_frame,
+        teacher_summary=record.teacher_summary,
+        metadata=record.metadata,
+    )
+
+
+def _lake_to_reusable(record: Any) -> ReusableTrainingDatasetRecord:
+    return ReusableTrainingDatasetRecord(
+        store="data_lake",
+        cache_key=str(getattr(record, "dataset_id", "") or ""),
+        cache_dir=Path(getattr(record, "root", Path("."))),
+        sample_frame=record.sample_frame,
+        daily_frame=record.daily_frame,
+        teacher_summary=dict(record.teacher_summary),
+        metadata=dict(getattr(record, "metadata", {}) or {}),
+    )
+
+
+def load_reusable_training_dataset(
+    *,
+    cache_root: str | Path | None = None,
+    lake_root: str | Path | None = None,
+    spec: Mapping[str, Any],
+    prefer_data_lake: bool = True,
+    zone: str = "strict_train",
+) -> ReusableTrainingDatasetRecord | None:
+    if prefer_data_lake:
+        try:
+            from daily_research.data_lake import ResearchDataLake
+
+            lake_record = ResearchDataLake(lake_root).find_training_dataset(spec=spec, zone=zone)
+            if lake_record is not None:
+                return _lake_to_reusable(lake_record)
+        except Exception:
+            pass
+    legacy = load_training_dataset_cache(cache_root=cache_root, spec=spec)
+    if legacy is not None:
+        return _legacy_to_reusable(legacy)
+    return None
+
+
+def save_reusable_training_dataset(
+    *,
+    cache_root: str | Path | None = None,
+    lake_root: str | Path | None = None,
+    spec: Mapping[str, Any],
+    sample_frame: pd.DataFrame,
+    daily_frame: pd.DataFrame,
+    teacher_summary: Mapping[str, Any],
+    prefer_data_lake: bool = True,
+    zone: str = "strict_train",
+    label_completeness_summary: Mapping[str, Any] | None = None,
+) -> ReusableTrainingDatasetRecord:
+    legacy = save_training_dataset_cache(
+        cache_root=cache_root,
+        spec=spec,
+        sample_frame=sample_frame,
+        daily_frame=daily_frame,
+        teacher_summary=teacher_summary,
+    )
+    if prefer_data_lake:
+        try:
+            from daily_research.data_lake import ResearchDataLake
+
+            lake_record = ResearchDataLake(lake_root).save_training_dataset(
+                spec=spec,
+                sample_frame=sample_frame,
+                daily_frame=daily_frame,
+                teacher_summary=teacher_summary,
+                zone=zone,
+                label_completeness_summary=label_completeness_summary,
+            )
+            return _lake_to_reusable(lake_record)
+        except Exception:
+            return _legacy_to_reusable(legacy)
+    return _legacy_to_reusable(legacy)
 
 
 def build_training_dataset_cache_spec(

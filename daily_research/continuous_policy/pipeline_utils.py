@@ -4895,6 +4895,7 @@ def build_training_matrices(
     budget_semantics: str = DEFAULT_BUDGET_SEMANTICS,
     budget_calibration: str = DEFAULT_BUDGET_CALIBRATION,
     budget_objective: str = DEFAULT_BUDGET_OBJECTIVE,
+    max_forward_horizon: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     resolved_label_config = resolve_label_config(label_preset)
     resolved_budget_objective = resolve_budget_objective(budget_objective)
@@ -4902,7 +4903,9 @@ def build_training_matrices(
         prepared,
         start_date=start_date,
         end_date=end_date,
-        max_forward_horizon=max(int(item) for item in future_metrics.horizons),
+        max_forward_horizon=max(int(item) for item in future_metrics.horizons)
+        if max_forward_horizon is None
+        else int(max_forward_horizon),
     )
     if len(dates) < 25:
         raise ValueError("Continuous-policy training window is too short after forward-horizon trimming.")

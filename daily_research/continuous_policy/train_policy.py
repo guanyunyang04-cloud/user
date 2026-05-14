@@ -50,9 +50,10 @@ from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.training_dataset_cache import (
     build_training_dataset_cache_spec,
-    load_training_dataset_cache,
-    save_training_dataset_cache,
+    load_reusable_training_dataset,
+    save_reusable_training_dataset,
 )
+from daily_research.data_lake import build_label_completeness_summary
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
     TRAINER_BACKEND_FORMAL_CORE_V4,
@@ -124,6 +125,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         choices=("auto", "refresh", "off"),
         help="Reuse constructed training matrices by fingerprint. auto loads/writes, refresh rebuilds, off disables.",
+    )
+    parser.add_argument(
+        "--training-dataset-store",
+        default="lake",
+        choices=("lake", "legacy"),
+        help="Reusable training dataset store. lake writes DuckDB/Parquet catalog records and preserves legacy pickle fallback.",
+    )
+    parser.add_argument(
+        "--data-lake-root",
+        default="",
+        help="Optional root for the local DuckDB/Parquet research data lake.",
     )
     parser.add_argument(
         "--prepare-only",
@@ -288,11 +300,17 @@ def main(argv: list[str] | None = None) -> int:
     training_dataset_cache_summary: dict[str, object] = {
         "mode": cache_mode,
         "status": "off" if cache_mode == "off" else "miss",
+        "store": str(getattr(args, "training_dataset_store", "lake") or "lake"),
         "cache_key": "",
         "cache_dir": "",
     }
     if cache_mode != "off" and cache_mode != "refresh" and not bool(getattr(args, "refresh_cache", False)):
-        cache_record = load_training_dataset_cache(spec=training_dataset_cache_spec)
+        cache_record = load_reusable_training_dataset(
+            spec=training_dataset_cache_spec,
+            lake_root=str(getattr(args, "data_lake_root", "") or "") or None,
+            prefer_data_lake=str(getattr(args, "training_dataset_store", "lake") or "lake") == "lake",
+            zone="strict_train",
+        )
     if cache_record is not None:
         sample_frame = cache_record.sample_frame.copy()
         daily_frame = cache_record.daily_frame.copy()
@@ -300,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         training_dataset_cache_summary = {
             "mode": cache_mode,
             "status": "hit",
+            "store": str(cache_record.store),
             "cache_key": cache_record.cache_key,
             "cache_dir": str(cache_record.cache_dir.resolve()),
             "sample_rows": int(len(sample_frame)),
@@ -332,15 +351,27 @@ def main(argv: list[str] | None = None) -> int:
             budget_objective=args.budget_objective,
         )
         if cache_mode != "off":
-            saved_cache = save_training_dataset_cache(
+            label_completeness_summary = build_label_completeness_summary(
+                sample_frame=sample_frame,
+                daily_frame=daily_frame,
+                zone="strict_train",
+                available_trade_dates=list(prepared.close.index),
+                max_forward_horizon=max(int(item) for item in getattr(future_metrics, "horizons", (20,))),
+            )
+            saved_cache = save_reusable_training_dataset(
                 spec=training_dataset_cache_spec,
                 sample_frame=sample_frame,
                 daily_frame=daily_frame,
                 teacher_summary=teacher_summary,
+                lake_root=str(getattr(args, "data_lake_root", "") or "") or None,
+                prefer_data_lake=str(getattr(args, "training_dataset_store", "lake") or "lake") == "lake",
+                zone="strict_train",
+                label_completeness_summary=label_completeness_summary,
             )
             training_dataset_cache_summary = {
                 "mode": cache_mode,
                 "status": "refreshed" if cache_mode == "refresh" or bool(getattr(args, "refresh_cache", False)) else "stored",
+                "store": str(saved_cache.store),
                 "cache_key": saved_cache.cache_key,
                 "cache_dir": str(saved_cache.cache_dir.resolve()),
                 "sample_rows": int(len(sample_frame)),
