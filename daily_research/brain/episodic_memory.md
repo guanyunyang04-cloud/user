@@ -5,8 +5,8 @@
 ## 当前结论
 - `episodic_memory.md` 只保留最新动作后复盘和历史 archive 入口。
 - 2026-05-10 之前的大段过程记录已强归档到 `daily_research/brain/references/episodic_memory_archive_20260510.md`。
-- 当前最新复盘是 r52d explicit evidence 裁决：r52d 代码合同、dry-run 与 safe screening-only 已存在，但 3/3 trials 均未通过 confirmatory eligibility；剩余瓶颈仍是 deployment / cash timing / exposure utilization / training evidence。
-- 本轮新增脑区平台化与工作流状态机：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
+- 当前最新接管复盘是 2026-05-14 handoff：主脑与 `daily_research` 分脑已按 brain-first 顺序完成接管，守卫通过；r65 仍是 research / shadow-only，下一步只能围绕 held source creation、receiver target realization、target/action translation 与 day-set sampling 做研究修复。
+- 脑区平台化与工作流状态机已完成：保留 7 中枢结构，新增 `workflow_registry.json`、`brain_platform.py` 与 `brain_workflow.py`，用于接管胶囊、预检、freshness 和写回计划。
 
 ## 证据索引
 - 当前状态：`daily_research/brain/state_center.md`。
@@ -117,3 +117,12 @@
 - 过程发现：原 study summary 未把 `cash_semantics_mismatch` 写入 gate，因为 behavior audit 从聚合后的 `day_merge` 计算 closure，丢失 turnover export 的 stock budget / target sum / receiver target 字段。
 - 修复动作：改为从 turnover export 计算 closure，并让 diagnostic 识别 simulator-native 列名；recomputed audit 显示 `deployable_idle_cash_mean=0.540194`、`cash_semantics_mismatch=1.0`、`receiver_candidate_without_target_day_share=0.925926`。
 - 行动后判断：r52e 首轮 screening 失败；不得 confirmatory、strict resume、promotion、live/default。下一步应审计 target weight sum 为什么锁在约 0.28，而 stock budget / gross target 仍约 0.83-0.85。
+
+## 2026-05-14 项目接管复盘
+- 行动前自检：先读主脑 manifest、identity、state、knowledge、topology、operations、governance，再进入 `daily_research` 分脑；PowerShell 初次中文输出疑似乱码，已用显式 UTF-8 和 `brain_bootstrap.py --json` 复核，确认是终端编码显示问题，不是 brain 文件损坏。
+- 事实：当前分支为 `main`，本地相对 `origin/main` 超前 2 个提交；接管时工作区无未提交改动；`daily_research/output/active_execution_strategy.json` 无 diff。
+- 事实：当前 live/default 仍由 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active` 承担；continuous_policy 仍是 `research / shadow_only`，r65 portfolio-set v5 只是 architecture upgrade，不是策略有效性证据。
+- 事实：守卫通过：`git diff --check` 无输出，`doc_guard.py check` 通过，`brain_integrity_check.py --json` 返回 `status=ok`。
+- 风险：`latest_*` 存在来源不一致提醒，latest study tag 与 latest protocol tag 不同；后续必须继续使用 explicit study tag、protocol tag 或 dataset id。
+- 推断：当前最合理下一步不是启动 confirmatory 或改 live，而是先修 r65 的 held source creation、receiver target realization、target/action translation 与 day-set sampling。
+- 边界：本轮只完成接管、核对和复盘写回；不修改 active artifact，不写 completed strategy evidence，不进入 promotion / live / default 切换。
