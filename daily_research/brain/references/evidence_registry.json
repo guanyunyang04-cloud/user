@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 17,
+  "record_count": 18,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -492,6 +492,47 @@
       "next_allowed_actions": [],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "r67",
+      "date": "2026-05-14",
+      "r_id": "r67",
+      "path": "daily_research/brain/references/r67_paper_dfl_replace_v5_status_20260514.md",
+      "tags": [
+        "r67",
+        "continuous_policy",
+        "portfolio_set_v5"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_01",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_02__audit_recheck_after_max_universe_fix",
+        "protocol_r67_paper_dfl_replace_v5_smoke_20260514_04",
+        "protocol_summary"
+      ],
+      "verdict": "Status: `research / shadow-only / paper-mechanism reproduction`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r67 directly replaces the internal `portfolio_set_v5` training target, loss, prediction translation, and active r65 profile default with `portfolio_set_v5_dfl_pg_v1`, while preserving backend name `formal_torch_portfolio_set_v5`, artifact type, loader, and predict API.",
+      "blockers": [
+        "Behavior audit now preserves evaluation universe sizing by reading `max_universe_size` / `prepared_summary.universe_size` from evaluation summary before recomputing teacher rollout. This fixes the r67 smoke audit failure where audit ignored `--max-universe-size 80` and fetched full TDX universe.",
+        "Warnings are existing cvxpylayers / numpy deprecation warnings, not r67 failures.",
+        "Failed / partial runs:",
+        "`protocol_r67_paper_dfl_replace_v5_smoke_20260514_01`: failed during train with CUDA OOM; diagnostic only.",
+        "`protocol_r67_paper_dfl_replace_v5_smoke_20260514_02`: train/evaluate/shadow/export wrote a protocol summary, but behavior audit failed because audit ignored smoke universe sizing; partial evidence only.",
+        "Training evidence: `insufficient`.",
+        "Failed training checks: `teacher_action_rows`, `best_epoch_not_at_edge`.",
+        "`release_translation_deploy_failure_mode=funding_release_not_observed`."
+      ],
+      "next_allowed_actions": [
+        "Continue research/shadow-only on `portfolio_set_v5_dfl_pg_v1`.",
+        "Fix prediction-to-simulator behavior so strict-Gold evaluation produces nonzero, explainable source targets, not only receiver targets.",
+        "Investigate shadow `intent_translation_conflict_rate=0.7415795586527294` before any broader study.",
+        "After source/translation closure improves, run a longer strict resume or wider strict-Gold smoke; training evidence must become sufficient before stronger conclusions.",
+        "Keep r61/r65 old evidence as baseline/ablation only; do not revive legacy direct-protocol profiles as active entrypoints."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
     }
   ]
 }

@@ -10,9 +10,10 @@
 - 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义：`research_raw_target_weight`；权重上限语义：`follow_research_raw_no_global_cap`。
 - continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
-- 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r65 均为 research / shadow 升级链或基础设施证据。
+- 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r67 均为 research / shadow 升级链或基础设施证据。
 - r64 已产出 full-window strict Gold：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`，`2010-01-04 -> 2026-04-10` observed strict window，`is_training_safe=true`，audit `ok`。
 - r65 已新增 portfolio-set v5 后端，但 safe protocol 行为仍 source/receiver dead；不是策略有效性证据。
+- r67 已用论文驱动 DFL-PG v1 替换 portfolio-set v5 内核默认目标、loss、oracle 与 profile default；tiny strict-Gold smoke `protocol_r67_paper_dfl_replace_v5_smoke_20260514_04` 完整跑通，但 training evidence 仍 `insufficient`，promotion gate 仍 `shadow_only`。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -28,11 +29,12 @@
 - r56-r61 推进 release-first / core-v4 接线，证明诊断与部分接线有效，但行为仍未闭合。
 - r62-r64 完成通用 data lake 与 full-window strict Gold；数据基础设施已不再是 strict 训练集的主阻塞。
 - r65 用 portfolio-set v5 取代 MLP 主线，接线通过但行为失败：`release_first_source_intent_count=0`、`portfolio_daily_source_target_count=0`、`portfolio_daily_receiver_target_count=0`、`intent_translation_conflict_rate=1.0`。
+- r67 修复第一层机制闭环：训练 target `source/receiver/cash` 非零且 `target_intent_translation_conflict_count=0`；但评估 `portfolio_daily_source_target_count=0.0`、shadow `intent_translation_conflict_rate=0.7415795586527294`，行为闭合仍未完成。
 
 ## 当前优先级
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
 - P1：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P2：围绕 r65 修复 held source creation、receiver target realization、target/action translation 与 day-set sampling。
+- P2：围绕 r67 DFL-PG v1 修复 evaluation/shadow 中 source target realization、prediction-to-simulator translation 与 release funding closure。
 - P3：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
 - P4：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复。
 
@@ -57,10 +59,11 @@
 - r64 full-universe strict Gold：`daily_research/brain/references/r64_full_universe_gold_data_lake_status_20260514.md`。
 - r65 portfolio-set v5：`daily_research/brain/references/r65_portfolio_set_v5_status_20260514.md`。
 - r66 brain maintenance：`daily_research/brain/references/r66_brain_maintenance_status_20260514.md`。
+- r67 paper-DFL replace v5：`daily_research/brain/references/r67_paper_dfl_replace_v5_status_20260514.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口
 - 本文件归档前完整快照：`daily_research/brain/references/state_center_archive_20260510.md`。
 - 早期状态原文：`daily_research/brain/references/state_center_history_raw_20260424.md`。
 - 早期状态索引：`daily_research/brain/references/state_center_evidence_index_20260424.md`。
-- r50-r65 详细证据：`daily_research/brain/references/r*_*.md`。
+- r50-r67 详细证据：`daily_research/brain/references/r*_*.md`。

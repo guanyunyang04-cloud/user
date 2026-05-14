@@ -46,7 +46,8 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
         config = get_search_profile_config(profile_name)
 
         self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_portfolio_set_v5")
-        self.assertEqual(config["base_trial"]["loss_profile"], "alpha_result_value_budget_split_v48")
+        self.assertEqual(config["search_space"]["loss_profile"], ["portfolio_set_v5_dfl_pg_v1"])
+        self.assertEqual(config["base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1")
         self.assertEqual(config["base_trial"]["epochs"], 12)
         self.assertEqual(config["base_trial"]["min_epochs"], 8)
         self.assertEqual(get_default_objective(profile_name), "end_to_end_allocation_layer_v1")
@@ -56,11 +57,11 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
         resolved_name, resolved_config = study_runner._resolve_trial_loss_profile(
             {
                 "trainer_backend": "formal_torch_portfolio_set_v5",
-                "loss_profile": "alpha_result_value_budget_split_v48",
+                "loss_profile": "portfolio_set_v5_dfl_pg_v1",
             }
         )
 
-        self.assertEqual(resolved_name, "alpha_result_value_budget_split_v48")
+        self.assertEqual(resolved_name, "portfolio_set_v5_dfl_pg_v1")
         self.assertGreater(
             resolved_config["multi_objective_loss_weights"]["release_flow_balance_total"],
             0.0,

@@ -46,6 +46,7 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
                 "cross_layers": 1,
                 "latent_count": 4,
                 "dropout": 0.0,
+                "portfolio_set_v5_internal_version": "portfolio_set_v5_dfl_pg_v1",
             },
             global_target_defaults={"gross_exposure_target": 0.7},
         )
@@ -61,6 +62,7 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertIsInstance(loaded_direct, TorchPortfolioSetV5Artifact)
         self.assertIsInstance(loaded_generic, TorchPortfolioSetV5Artifact)
         self.assertEqual(loaded_direct.training_diagnostics["trainer_backend"], TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5)
+        self.assertEqual(loaded_direct.model_config["portfolio_set_v5_internal_version"], "portfolio_set_v5_dfl_pg_v1")
 
     def test_predict_policy_portfolio_set_v5_outputs_release_first_semantics(self) -> None:
         artifact = self._artifact()
@@ -92,12 +94,15 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_source_score", frame.columns)
             self.assertIn("portfolio_daily_receiver_executable_candidate", frame.columns)
             self.assertIn("portfolio_set_v5_cash_buffer_score", frame.columns)
+            self.assertIn("portfolio_set_v5_oracle_constraint_violation", frame.columns)
+            self.assertIn("portfolio_set_v5_oracle_feasible", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)
             self.assertAlmostEqual(
                 float(frame.loc[0, "portfolio_daily_target_delta_intent"]),
                 float(frame.loc[0, "portfolio_daily_target_weight_intent"]) - 0.12,
                 places=8,
             )
+            self.assertEqual(float(frame["portfolio_set_v5_target_delta_weight_conflict_count"].iloc[0]), 0.0)
         self.assertEqual(global_targets["release_first_allocation_v3_mode"], 1.0)
         self.assertEqual(generic_globals["release_first_allocation_v3_mode"], 1.0)
 

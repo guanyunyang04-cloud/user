@@ -42,6 +42,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _coerce_positive_int(value: Any, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return parsed if parsed > 0 else int(default)
+
+
+def _resolve_audit_prepare_kwargs(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
+    prepared_summary = dict(evaluation_summary.get("prepared_summary", {}) or {})
+    alpha_summary = dict(prepared_summary.get("alpha_prior_summary", {}) or {})
+    max_universe_size = _coerce_positive_int(evaluation_summary.get("max_universe_size"), 0)
+    if max_universe_size <= 0:
+        max_universe_size = _coerce_positive_int(prepared_summary.get("max_universe_size"), 0)
+    if max_universe_size <= 0:
+        max_universe_size = _coerce_positive_int(prepared_summary.get("universe_size"), 0)
+    return {
+        "pool_name": str(evaluation_summary.get("pool_name", "") or prepared_summary.get("pool_name", "") or "liquid500"),
+        "start_date": str(evaluation_summary.get("start_date", "") or prepared_summary.get("requested_start_date", "") or "20250318"),
+        "end_date": str(evaluation_summary.get("end_date", "") or prepared_summary.get("end_date", "") or ""),
+        "benchmark": str(evaluation_summary.get("benchmark", "") or prepared_summary.get("benchmark", "") or "000300.SH"),
+        "data_source": str(evaluation_summary.get("data_source", "") or prepared_summary.get("data_source", "") or "tq"),
+        "csv_folder": str(evaluation_summary.get("csv_folder", "") or prepared_summary.get("csv_folder", "") or ""),
+        "max_universe_size": int(max_universe_size),
+        "alpha_prior_source": str(evaluation_summary.get("alpha_prior_source", "") or alpha_summary.get("source", "") or ""),
+        "alpha_prior_score_panel": str(evaluation_summary.get("alpha_prior_score_panel", "") or alpha_summary.get("score_panel_csv", "") or ""),
+        "alpha_prior_target_weight_panel": str(
+            evaluation_summary.get("alpha_prior_target_weight_panel", "") or alpha_summary.get("target_weight_panel_csv", "") or ""
+        ),
+        "progress_desc": "continuous policy behavior audit",
+    }
+
+
 def _safe_float(mapping: dict[str, Any], key: str) -> float:
     return float(mapping.get(key, 0.0) or 0.0)
 
@@ -2541,13 +2574,7 @@ def main(argv: list[str] | None = None) -> int:
     if not evaluation_summary:
         raise FileNotFoundError(f"Evaluation summary not found or unreadable: {evaluation_summary_path}")
 
-    prepared = prepare_policy_inputs(
-        pool_name=str(evaluation_summary.get("pool_name", "") or "liquid500"),
-        start_date=str(evaluation_summary.get("start_date", "") or "20250318"),
-        end_date=str(evaluation_summary.get("end_date", "") or ""),
-        benchmark=str(evaluation_summary.get("benchmark", "") or "000300.SH"),
-        progress_desc="continuous policy behavior audit",
-    )
+    prepared = prepare_policy_inputs(**_resolve_audit_prepare_kwargs(evaluation_summary))
     future_metrics = build_future_path_metrics(prepared)
     teacher_rollout = run_policy_rollout(
         prepared=prepared,

@@ -36,6 +36,10 @@ class PortfolioSetV5DaySetDatasetTest(unittest.TestCase):
         self.assertGreater(float(targets.loc[0, "source_supply_score"]), 0.0)
         self.assertGreater(float(targets.loc[1, "receiver_demand_score"]), 0.0)
         self.assertEqual(float(targets.loc[2, "source_supply_score"]), 0.0)
+        self.assertGreater(float(targets.loc[0, "source_supply"]), 0.0)
+        self.assertGreater(float(targets.loc[1, "receiver_demand"]), 0.0)
+        self.assertLess(float(targets["constraint_violation"].max()), 1.0e-6)
+        self.assertEqual(float(targets["target_delta_weight_conflict"].sum()), 0.0)
         self.assertEqual(float(targets.loc[0, "source_mask"]), 1.0)
         self.assertEqual(float(targets.loc[1, "receiver_mask"]), 1.0)
 
@@ -72,6 +76,7 @@ class PortfolioSetV5DaySetDatasetTest(unittest.TestCase):
         self.assertEqual(tuple(batch["static_x"].shape), (2, 2, 2))
         self.assertEqual(tuple(batch["sequence_x"].shape), (2, 2, 1, 1))
         self.assertEqual(tuple(batch["sample_mask"].shape), (2, 2))
+        self.assertEqual(tuple(batch["decision_target_y"].shape), (2, 2, 8))
         self.assertEqual(int(batch["sample_mask"][0].sum().item()), 2)
         self.assertEqual(int(batch["sample_mask"][1].sum().item()), 1)
         self.assertGreater(float(batch["source_mask"].sum().item()), 0.0)

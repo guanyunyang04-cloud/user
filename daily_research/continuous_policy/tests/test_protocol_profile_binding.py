@@ -5,18 +5,18 @@ from daily_research.continuous_policy.run_continuous_policy_protocol import (
 )
 
 
-R61_PROFILE = "split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61"
+ACTIVE_V5_PROFILE = "split_heads_portfolio_daily_release_first_portfolio_set_v5_r65"
 
 
 class ProtocolProfileBindingTest(unittest.TestCase):
-    def test_r61_search_profile_applies_registry_defaults_without_identity_flags(self) -> None:
-        args, binding = _parse_args_with_profile_binding(["--search-profile", R61_PROFILE])
+    def test_active_v5_search_profile_applies_registry_defaults_without_identity_flags(self) -> None:
+        args, binding = _parse_args_with_profile_binding(["--search-profile", ACTIVE_V5_PROFILE])
 
         self.assertTrue(binding["profile_applied"])
         self.assertTrue(binding["active_profile"])
-        self.assertEqual(binding["requested_search_profile"], R61_PROFILE)
-        self.assertEqual(args.trainer_backend, "formal_torch_core_v4")
-        self.assertEqual(args.loss_profile, "alpha_result_value_budget_split_v47")
+        self.assertEqual(binding["requested_search_profile"], ACTIVE_V5_PROFILE)
+        self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
+        self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1")
         self.assertEqual(args.budget_semantics, "allocation_layer_v1")
         self.assertEqual(args.budget_calibration, "end_to_end_allocation_layer_v1")
         self.assertEqual(args.budget_objective, "result_value_v10")
@@ -24,14 +24,14 @@ class ProtocolProfileBindingTest(unittest.TestCase):
         self.assertEqual(args.daily_head_layout, "split_v2")
         self.assertEqual(args.epochs, 12)
         self.assertEqual(args.min_epochs, 8)
-        self.assertEqual(args.batch_size, 2)
-        self.assertEqual(binding["effective_base_trial"]["trainer_backend"], "formal_torch_core_v4")
+        self.assertEqual(args.batch_size, 1)
+        self.assertEqual(binding["effective_base_trial"]["trainer_backend"], "formal_torch_portfolio_set_v5")
 
     def test_explicit_cli_values_override_profile_defaults_and_are_recorded(self) -> None:
         args, binding = _parse_args_with_profile_binding(
             [
                 "--search-profile",
-                R61_PROFILE,
+                ACTIVE_V5_PROFILE,
                 "--epochs",
                 "1",
                 "--min-epochs",
@@ -52,10 +52,13 @@ class ProtocolProfileBindingTest(unittest.TestCase):
         self.assertEqual(binding["effective_base_trial"]["batch_size"], 1)
 
     def test_non_active_legacy_profile_is_rejected_for_direct_protocol(self) -> None:
-        with self.assertRaises(SystemExit):
-            _parse_args_with_profile_binding(
-                ["--search-profile", "split_heads_portfolio_daily_release_first_core_v4_r59"]
-            )
+        for profile in (
+            "split_heads_portfolio_daily_release_first_core_v4_r59",
+            "split_heads_portfolio_daily_release_first_decision_focused_core_v4_r61",
+        ):
+            with self.subTest(profile=profile):
+                with self.assertRaises(SystemExit):
+                    _parse_args_with_profile_binding(["--search-profile", profile])
 
 
 if __name__ == "__main__":

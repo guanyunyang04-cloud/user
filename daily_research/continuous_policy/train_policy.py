@@ -18,6 +18,7 @@ from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
     PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID,
+    PORTFOLIO_SET_V5_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES,
     fit_policy_models_portfolio_set_v5,
 )
@@ -200,6 +201,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _loss_profile_was_explicit(raw_argv: list[str]) -> bool:
+    return any(token == "--loss-profile" or token.startswith("--loss-profile=") for token in raw_argv)
+
+
+def _apply_backend_default_loss(args: argparse.Namespace, raw_argv: list[str]) -> str:
+    backend = normalize_trainer_backend(args.trainer_backend)
+    if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and not _loss_profile_was_explicit(raw_argv):
+        args.loss_profile = PORTFOLIO_SET_V5_INTERNAL_VERSION
+    return backend
+
+
 def _build_common_train_summary(
     *,
     run_tag: str,
@@ -252,8 +264,10 @@ def _build_common_train_summary(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    backend = normalize_trainer_backend(args.trainer_backend)
+    parser = build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    backend = _apply_backend_default_loss(args, raw_argv)
     run_tag = str(args.tag or timestamp_tag("train"))
     run_root = MODELS_ROOT / run_tag
     run_root.mkdir(parents=True, exist_ok=True)
@@ -575,10 +589,10 @@ def main(argv: list[str] | None = None) -> int:
             min_epochs=args.min_epochs,
             batch_size=max(1, min(int(args.batch_size), 2)),
             learning_rate=args.learning_rate,
-            model_dim=max(int(args.hidden_dim), 128),
+            model_dim=max(int(args.hidden_dim), 16),
             temporal_layers=max(int(args.sequence_layers), 1),
             cross_layers=max(int(args.sequence_layers), 1),
-            latent_count=max(8, int(args.daily_hidden_dim)),
+            latent_count=max(4, int(args.daily_hidden_dim)),
             dropout=max(float(args.dropout), 0.05),
             early_stop_patience=args.early_stop_patience,
             resume_mode=args.resume_mode,

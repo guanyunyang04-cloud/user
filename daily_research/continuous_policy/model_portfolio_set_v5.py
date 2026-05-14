@@ -11,10 +11,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from daily_research.continuous_policy.core_v4_release_targets import build_core_v4_release_first_targets
 from daily_research.continuous_policy.model_seq_v3 import SEQUENCE_STEP_ORDER, resolve_sequence_columns
 from daily_research.continuous_policy.model_v2 import _apply_matrix, _prepare_matrix, _split_indices
-from daily_research.continuous_policy.semantic_budget_intent import derive_release_first_intent
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5
 from daily_research.continuous_policy.training_runtime_acceleration import (
     autocast_context,
@@ -26,6 +24,7 @@ from daily_research.continuous_policy.training_runtime_acceleration import (
 PORTFOLIO_SET_V5_ARTIFACT_TYPE = "continuous_policy_torch_portfolio_set_v5"
 PORTFOLIO_SET_V5_ARTIFACT_FILENAME = "continuous_policy_portfolio_set_v5_artifact.pt"
 PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID = "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+PORTFOLIO_SET_V5_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1"
 
 PORTFOLIO_SET_V5_OUTPUT_NAMES: tuple[str, ...] = (
     "target_weight",
@@ -37,9 +36,20 @@ PORTFOLIO_SET_V5_OUTPUT_NAMES: tuple[str, ...] = (
     "reduce_quality",
     "exit_hazard",
 )
+PORTFOLIO_SET_V5_DECISION_TARGET_NAMES: tuple[str, ...] = (
+    "source_supply",
+    "receiver_demand",
+    "cash_buffer",
+    "target_weight",
+    "turnover_budget",
+    "risk_budget",
+    "constraint_violation",
+    "decision_value",
+)
 PORTFOLIO_SET_V5_LOSS_ALIASES: tuple[str, ...] = (
     "alpha_result_value_budget_split_v48",
     "portfolio_set_release_first_decision_v1",
+    PORTFOLIO_SET_V5_INTERNAL_VERSION,
 )
 PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES: tuple[str, ...] = PORTFOLIO_SET_V5_LOSS_ALIASES
 PORTFOLIO_SET_V5_MAX_TRAIN_DAYS = 256
@@ -47,13 +57,15 @@ PORTFOLIO_SET_V5_MAX_STOCKS_PER_DAY = 3070
 
 
 def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str, dict[str, dict[str, float]]]:
-    name = str(profile_name or "alpha_result_value_budget_split_v48").strip() or "alpha_result_value_budget_split_v48"
+    name = str(profile_name or PORTFOLIO_SET_V5_INTERNAL_VERSION).strip() or PORTFOLIO_SET_V5_INTERNAL_VERSION
     if name not in PORTFOLIO_SET_V5_LOSS_ALIASES:
         raise ValueError(
             f"Unsupported portfolio-set v5 loss profile: {profile_name!r}. "
-            "Only alpha_result_value_budget_split_v48 / portfolio_set_release_first_decision_v1 are supported."
+            "Only alpha_result_value_budget_split_v48 / portfolio_set_release_first_decision_v1 / "
+            f"{PORTFOLIO_SET_V5_INTERNAL_VERSION} are supported."
         )
-    return "alpha_result_value_budget_split_v48", {
+    resolved_name = PORTFOLIO_SET_V5_INTERNAL_VERSION if name in {PORTFOLIO_SET_V5_INTERNAL_VERSION, "portfolio_set_release_first_decision_v1"} else name
+    return resolved_name, {
         "multi_objective_loss_weights": {
             "action_total": 0.0,
             "duration_total": 0.0,
@@ -65,6 +77,9 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
             "release_flow_balance_total": 0.48,
             "underdeployment_high_cash_total": 0.36,
             "intent_translation_conflict_total": 0.34,
+            "decision_oracle_total": 1.20,
+            "pg_dfl_surrogate_total": 0.42,
+            "constraint_violation_total": 0.60,
         }
     }
 
@@ -80,6 +95,19 @@ def _current_weight(frame: pd.DataFrame) -> pd.Series:
         if name in frame.columns:
             return _numeric_series(frame, name, 0.0).clip(0.0, 1.0)
     return pd.Series(0.0, index=frame.index, dtype=float)
+
+
+def _holding_mask(frame: pd.DataFrame, current: pd.Series, deadband: float = 0.003) -> pd.Series:
+    holding_flag = _numeric_series(frame, "holding_flag", 0.0) > 0.5
+    holding_flag = holding_flag | (_numeric_series(frame, "holding_flag_target", 0.0) > 0.5)
+    return holding_flag | (current > float(deadband))
+
+
+def _max_numeric_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: float = 0.0) -> pd.Series:
+    values = [_numeric_series(frame, column, default).rename(column) for column in columns if column in frame.columns]
+    if not values:
+        return pd.Series(float(default), index=frame.index, dtype=float)
+    return pd.concat(values, axis=1).max(axis=1).fillna(float(default))
 
 
 def _ensure_features(frame: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
@@ -98,33 +126,243 @@ def _date_column(frame: pd.DataFrame) -> str:
     raise ValueError("portfolio-set v5 requires a date or trade_date column.")
 
 
+def project_portfolio_set_v5_cashflow_oracle(
+    *,
+    current_weight: torch.Tensor,
+    source_score: torch.Tensor,
+    receiver_score: torch.Tensor,
+    cash_buffer_score: torch.Tensor | None = None,
+    sample_mask: torch.Tensor | None = None,
+    turnover_budget: torch.Tensor | None = None,
+    risk_budget: torch.Tensor | None = None,
+    transaction_cost: float = 0.001,
+    position_cap: float = 0.24,
+    deadband: float = 0.003,
+) -> dict[str, torch.Tensor]:
+    """Project scores into a long-only source/receiver/cash decision surface."""
+    current = current_weight.float().clamp(0.0, 1.0)
+    if current.ndim == 1:
+        current = current.unsqueeze(0)
+    mask = torch.ones_like(current, dtype=torch.bool) if sample_mask is None else sample_mask.bool()
+    if mask.ndim == 1:
+        mask = mask.unsqueeze(0)
+    source = source_score.float()
+    receiver = receiver_score.float()
+    if source.ndim == 1:
+        source = source.unsqueeze(0)
+    if receiver.ndim == 1:
+        receiver = receiver.unsqueeze(0)
+    source = source.clamp(0.0, 1.0)
+    receiver = receiver.clamp(0.0, 1.0)
+    dtype = current.dtype
+    device = current.device
+    mask_f = mask.to(dtype=dtype)
+    held = (current > float(deadband)).to(dtype=dtype) * mask_f
+    headroom = (float(position_cap) - current).clamp_min(0.0) * mask_f
+    source_capacity = current * source * held
+    receiver_capacity = headroom * receiver
+    cash_now = (1.0 - (current * mask_f).sum(dim=1)).clamp(0.0, 1.0)
+
+    if cash_buffer_score is None:
+        cash_seed = torch.zeros_like(current)
+    else:
+        cash_seed = cash_buffer_score.float()
+        if cash_seed.ndim == 1:
+            cash_seed = cash_seed.unsqueeze(0)
+        cash_seed = cash_seed.clamp(0.0, 1.0)
+    if risk_budget is None:
+        risk = (cash_seed * mask_f).sum(dim=1) / mask_f.sum(dim=1).clamp_min(1.0)
+    else:
+        risk = risk_budget.float().flatten()
+        if risk.numel() == 1 and current.shape[0] > 1:
+            risk = risk.expand(current.shape[0])
+    risk = risk.to(device=device, dtype=dtype).clamp(0.0, 1.0)
+    if turnover_budget is None:
+        turnover = (0.18 - 0.08 * risk).clamp(0.04, 0.24)
+    else:
+        turnover = turnover_budget.float().flatten()
+        if turnover.numel() == 1 and current.shape[0] > 1:
+            turnover = turnover.expand(current.shape[0])
+        turnover = turnover.to(device=device, dtype=dtype).clamp(0.0, 0.50)
+    cash_floor = torch.minimum((0.04 + 0.20 * risk).clamp(0.02, 0.35), cash_now)
+
+    source_capacity_sum = source_capacity.sum(dim=1)
+    receiver_capacity_sum = receiver_capacity.sum(dim=1)
+    cash_shortfall = (cash_floor - cash_now).clamp_min(0.0)
+    rotation_release_need = torch.minimum(source_capacity_sum, torch.maximum(receiver_capacity_sum * 0.65, turnover * 0.20))
+    source_budget = torch.minimum(source_capacity_sum, torch.minimum(turnover, torch.maximum(rotation_release_need, cash_shortfall)))
+    cash_deploy_budget = (cash_now - cash_floor).clamp_min(0.0) * 0.30
+    receiver_budget = torch.minimum(receiver_capacity_sum, torch.minimum(turnover, source_budget + cash_deploy_budget))
+
+    eps = torch.tensor(1.0e-8, dtype=dtype, device=device)
+    source_alloc = source_capacity * (source_budget / source_capacity_sum.clamp_min(eps)).unsqueeze(1)
+    receiver_alloc = receiver_capacity * (receiver_budget / receiver_capacity_sum.clamp_min(eps)).unsqueeze(1)
+    target_weight = (current - source_alloc + receiver_alloc).clamp(0.0, float(position_cap)) * mask_f
+    target_delta = (target_weight - current) * mask_f
+    source_used = source_alloc.sum(dim=1)
+    receiver_used = receiver_alloc.sum(dim=1)
+    cash_after = (cash_now + source_used - receiver_used).clamp(0.0, 1.0)
+    turnover_used = torch.maximum(source_used, receiver_used)
+    trade_cost_turnover = source_used + receiver_used
+    cap_violation = (target_weight - float(position_cap)).clamp_min(0.0).sum(dim=1)
+    floor_violation = (-target_weight).clamp_min(0.0).sum(dim=1)
+    source_violation = (source_alloc - current).clamp_min(0.0).sum(dim=1)
+    receiver_violation = (receiver_alloc - headroom).clamp_min(0.0).sum(dim=1)
+    turnover_violation = (turnover_used - turnover).clamp_min(0.0)
+    cash_violation = (cash_floor - cash_after).clamp_min(0.0)
+    violation = cap_violation + floor_violation + source_violation + receiver_violation + turnover_violation + cash_violation
+    decision_value = (
+        (source_alloc * source).sum(dim=1)
+        + (receiver_alloc * receiver).sum(dim=1)
+        + cash_after * risk
+        - float(transaction_cost) * trade_cost_turnover
+        - 2.0 * violation
+    )
+    return {
+        "source_supply": source_alloc * mask_f,
+        "receiver_demand": receiver_alloc * mask_f,
+        "cash_buffer": cash_after,
+        "target_weight": target_weight,
+        "target_delta": target_delta,
+        "turnover_budget": turnover,
+        "risk_budget": risk,
+        "constraint_violation": violation,
+        "decision_value": decision_value,
+        "turnover_used": turnover_used,
+        "trade_cost_turnover": trade_cost_turnover,
+        "cash_floor": cash_floor,
+    }
+
+
+def _oracle_numpy(
+    *,
+    current: np.ndarray,
+    source_score: np.ndarray,
+    receiver_score: np.ndarray,
+    cash_score: np.ndarray,
+    turnover_budget: float,
+    risk_budget: float,
+) -> dict[str, np.ndarray | float]:
+    oracle = project_portfolio_set_v5_cashflow_oracle(
+        current_weight=torch.as_tensor(current[None, :], dtype=torch.float32),
+        source_score=torch.as_tensor(source_score[None, :], dtype=torch.float32),
+        receiver_score=torch.as_tensor(receiver_score[None, :], dtype=torch.float32),
+        cash_buffer_score=torch.as_tensor(cash_score[None, :], dtype=torch.float32),
+        turnover_budget=torch.as_tensor([float(turnover_budget)], dtype=torch.float32),
+        risk_budget=torch.as_tensor([float(risk_budget)], dtype=torch.float32),
+        sample_mask=torch.ones((1, len(current)), dtype=torch.bool),
+    )
+    return {
+        "source_supply": oracle["source_supply"][0].detach().cpu().numpy().astype(float),
+        "receiver_demand": oracle["receiver_demand"][0].detach().cpu().numpy().astype(float),
+        "cash_buffer": float(oracle["cash_buffer"][0].detach().cpu()),
+        "target_weight": oracle["target_weight"][0].detach().cpu().numpy().astype(float),
+        "target_delta": oracle["target_delta"][0].detach().cpu().numpy().astype(float),
+        "turnover_budget": float(oracle["turnover_budget"][0].detach().cpu()),
+        "risk_budget": float(oracle["risk_budget"][0].detach().cpu()),
+        "constraint_violation": float(oracle["constraint_violation"][0].detach().cpu()),
+        "decision_value": float(oracle["decision_value"][0].detach().cpu()),
+    }
+
+
 def build_portfolio_set_v5_targets(sample_frame: pd.DataFrame, *, deadband: float = 0.003) -> pd.DataFrame:
-    targets = build_core_v4_release_first_targets(sample_frame, deadband=deadband)
     current = _current_weight(sample_frame)
-    target_delta = pd.to_numeric(targets["target_delta"], errors="coerce").fillna(0.0)
-    receiver_support = pd.to_numeric(targets["receiver_support"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    receiver_score = pd.to_numeric(targets["receiver_score"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    release_intent = pd.to_numeric(targets["release_intent"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    source_score = pd.to_numeric(targets["source_score"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    held = current > float(deadband)
-    receiver = (target_delta > float(deadband)) & (receiver_support > 0.0)
-    source = (target_delta < -float(deadband)) & held & (release_intent > 0.0)
+    held = _holding_mask(sample_frame, current, deadband=deadband)
+    raw_delta = _numeric_series(sample_frame, "portfolio_daily_target_delta_intent", 0.0)
+    if "portfolio_daily_target_delta_intent" not in sample_frame.columns and "target_delta_hint" in sample_frame.columns:
+        raw_delta = _numeric_series(sample_frame, "target_delta_hint", 0.0)
+    source_score = _max_numeric_columns(
+        sample_frame,
+        (
+            "portfolio_daily_source_score",
+            "portfolio_daily_unified_source_score",
+            "portfolio_daily_source_release_preference",
+            "portfolio_daily_source_release_quality",
+            "sell_release_value",
+            "release_value_target",
+            "release_gate_target",
+        ),
+    ).clip(0.0, 1.0)
+    release_action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).fillna("hold").astype(str).str.lower().isin({"reduce", "exit"}).astype(float)
+    source_score = pd.concat([source_score.rename("source_score"), release_action.rename("release_action"), (-raw_delta.clip(upper=0.0) / current.clip(lower=float(deadband))).clip(0.0, 1.0).rename("negative_delta")], axis=1).max(axis=1)
+    keep_risk = _numeric_series(sample_frame, "portfolio_daily_source_forward_proxy_keep_risk", 0.0).clip(0.0, 1.0)
+    block_risk = _numeric_series(sample_frame, "portfolio_daily_source_economic_block_risk", 0.0).clip(0.0, 1.0)
+    source_score = source_score.where(held & (keep_risk < 0.78) & (block_risk < 0.78), 0.0).clip(0.0, 1.0)
+    receiver_score = _max_numeric_columns(
+        sample_frame,
+        (
+            "portfolio_daily_receiver_score",
+            "portfolio_daily_unified_receiver_score",
+            "alpha_opportunity_value",
+            "deploy_value_target",
+            "deploy_gate_target",
+            "result_value_deploy_gate_target",
+            "result_value_alpha_opportunity_value",
+        ),
+    ).clip(0.0, 1.0)
+    receiver_action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).fillna("hold").astype(str).str.lower().isin({"open", "add"}).astype(float)
+    headroom = (0.24 - current).clip(lower=0.0)
+    receiver_score = pd.concat([receiver_score.rename("receiver_score"), receiver_action.rename("receiver_action"), (raw_delta.clip(lower=0.0) / headroom.clip(lower=float(deadband))).clip(0.0, 1.0).rename("positive_delta")], axis=1).max(axis=1)
+    receiver_score = receiver_score.where(headroom > float(deadband), 0.0).clip(0.0, 1.0)
+    risk_budget = _max_numeric_columns(
+        sample_frame,
+        (
+            "cash_defense_value",
+            "portfolio_daily_cash_score",
+            "cash_regime_pressure",
+            "market_downside_pressure",
+            "portfolio_daily_allocation_uncertainty_pressure_target",
+            "portfolio_daily_allocation_tail_risk_control_target",
+        ),
+    ).clip(0.0, 1.0)
+    turnover_budget = (
+        0.18
+        - 0.08 * risk_budget
+        + 0.04 * _numeric_series(sample_frame, "portfolio_daily_allocation_trade_quality_target", 0.0).clip(0.0, 1.0)
+    ).clip(0.04, 0.24)
     enriched = pd.DataFrame(index=sample_frame.index)
-    enriched["target_weight"] = pd.to_numeric(targets["target_weight"], errors="coerce").fillna(current).clip(0.0, 0.24)
-    enriched["target_delta"] = (enriched["target_weight"] - current).where(lambda s: s.abs() >= float(deadband), 0.0)
-    enriched["source_supply_score"] = (release_intent * source_score).where(source, 0.0).clip(0.0, 1.0)
-    enriched["receiver_demand_score"] = (receiver_support * receiver_score).where(receiver, 0.0).clip(0.0, 1.0)
     day_col = _date_column(sample_frame)
-    day_receiver = enriched["receiver_demand_score"].groupby(sample_frame[day_col].astype(str)).transform("sum")
-    day_source = enriched["source_supply_score"].groupby(sample_frame[day_col].astype(str)).transform("sum")
-    defensive = _numeric_series(sample_frame, "market_downside_pressure", 0.0).clip(0.0, 1.0)
-    enriched["cash_buffer_score"] = ((day_source - day_receiver).clip(lower=0.0) + defensive * 0.30).clip(0.0, 1.0)
-    enriched["release_intent"] = release_intent.where(source, 0.0).clip(0.0, 1.0)
-    enriched["reduce_quality"] = pd.to_numeric(targets["reduce_quality"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    enriched["exit_hazard"] = pd.to_numeric(targets["exit_hazard"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    for _, group in sample_frame.groupby(sample_frame[day_col].astype(str), sort=True):
+        idx = group.index
+        decision = _oracle_numpy(
+            current=current.loc[idx].to_numpy(dtype=float),
+            source_score=source_score.loc[idx].to_numpy(dtype=float),
+            receiver_score=receiver_score.loc[idx].to_numpy(dtype=float),
+            cash_score=risk_budget.loc[idx].to_numpy(dtype=float),
+            turnover_budget=float(turnover_budget.loc[idx].median()) if len(idx) else 0.12,
+            risk_budget=float(risk_budget.loc[idx].median()) if len(idx) else 0.0,
+        )
+        source_supply = np.asarray(decision["source_supply"], dtype=float)
+        receiver_demand = np.asarray(decision["receiver_demand"], dtype=float)
+        target_weight = np.asarray(decision["target_weight"], dtype=float)
+        target_delta = np.asarray(decision["target_delta"], dtype=float)
+        current_values = current.loc[idx].to_numpy(dtype=float)
+        headroom_values = (0.24 - current.loc[idx]).clip(lower=0.0).to_numpy(dtype=float)
+        source_ratio = np.divide(source_supply, np.maximum(current_values, float(deadband)), out=np.zeros_like(source_supply), where=current_values > float(deadband))
+        receiver_ratio = np.divide(receiver_demand, np.maximum(headroom_values, float(deadband)), out=np.zeros_like(receiver_demand), where=headroom_values > float(deadband))
+        enriched.loc[idx, "target_weight"] = target_weight
+        enriched.loc[idx, "target_delta"] = target_delta
+        enriched.loc[idx, "source_supply_score"] = np.clip(source_ratio, 0.0, 1.0)
+        enriched.loc[idx, "receiver_demand_score"] = np.clip(receiver_ratio, 0.0, 1.0)
+        enriched.loc[idx, "cash_buffer_score"] = float(decision["cash_buffer"])
+        enriched.loc[idx, "release_intent"] = np.clip(source_ratio, 0.0, 1.0)
+        enriched.loc[idx, "reduce_quality"] = source_score.loc[idx].to_numpy(dtype=float)
+        enriched.loc[idx, "exit_hazard"] = ((source_supply >= current_values * 0.72) & (current_values > float(deadband))).astype(float)
+        enriched.loc[idx, "source_supply"] = source_supply
+        enriched.loc[idx, "receiver_demand"] = receiver_demand
+        enriched.loc[idx, "cash_buffer"] = float(decision["cash_buffer"])
+        enriched.loc[idx, "turnover_budget"] = float(decision["turnover_budget"])
+        enriched.loc[idx, "risk_budget"] = float(decision["risk_budget"])
+        enriched.loc[idx, "constraint_violation"] = float(decision["constraint_violation"])
+        enriched.loc[idx, "decision_value"] = (
+            source_supply * source_score.loc[idx].to_numpy(dtype=float)
+            + receiver_demand * receiver_score.loc[idx].to_numpy(dtype=float)
+        )
+    enriched["target_delta"] = (enriched["target_weight"] - current).where(lambda s: s.abs() >= float(deadband), 0.0)
+    enriched["target_weight"] = (current + enriched["target_delta"]).clip(0.0, 0.24)
     enriched["held_mask"] = held.astype(float)
-    enriched["source_mask"] = source.astype(float)
-    enriched["receiver_mask"] = receiver.astype(float)
+    enriched["source_mask"] = (enriched["source_supply"] > float(deadband)).astype(float)
+    enriched["receiver_mask"] = (enriched["receiver_demand"] > float(deadband)).astype(float)
     enriched["target_delta_weight_conflict"] = (
         ((enriched["target_weight"] - current) * enriched["target_delta"] < -(float(deadband) ** 2))
     ).astype(float)
@@ -245,6 +483,7 @@ class PortfolioSetDayDataset(Dataset[dict[str, np.ndarray]]):
             "daily_x": daily,
             "current_weight": _current_weight(day).to_numpy(dtype=np.float32),
             "target_y": target.reindex(columns=PORTFOLIO_SET_V5_OUTPUT_NAMES).to_numpy(dtype=np.float32),
+            "decision_target_y": target.reindex(columns=PORTFOLIO_SET_V5_DECISION_TARGET_NAMES).to_numpy(dtype=np.float32),
             "held_mask": target["held_mask"].to_numpy(dtype=np.float32),
             "source_mask": target["source_mask"].to_numpy(dtype=np.float32),
             "receiver_mask": target["receiver_mask"].to_numpy(dtype=np.float32),
@@ -258,9 +497,11 @@ def collate_portfolio_set_days(batch: list[dict[str, np.ndarray]]) -> dict[str, 
     sequence_steps = int(batch[0]["sequence_x"].shape[1])
     sequence_dim = int(batch[0]["sequence_x"].shape[2])
     output_dim = len(PORTFOLIO_SET_V5_OUTPUT_NAMES)
+    decision_output_dim = len(PORTFOLIO_SET_V5_DECISION_TARGET_NAMES)
     static_x = np.zeros((batch_size, max_items, static_dim), dtype=np.float32)
     sequence_x = np.zeros((batch_size, max_items, sequence_steps, sequence_dim), dtype=np.float32)
     target_y = np.zeros((batch_size, max_items, output_dim), dtype=np.float32)
+    decision_target_y = np.zeros((batch_size, max_items, decision_output_dim), dtype=np.float32)
     current_weight = np.zeros((batch_size, max_items), dtype=np.float32)
     held_mask = np.zeros((batch_size, max_items), dtype=np.float32)
     source_mask = np.zeros((batch_size, max_items), dtype=np.float32)
@@ -272,6 +513,7 @@ def collate_portfolio_set_days(batch: list[dict[str, np.ndarray]]) -> dict[str, 
         static_x[batch_idx, :size] = item["static_x"]
         sequence_x[batch_idx, :size] = item["sequence_x"]
         target_y[batch_idx, :size] = item["target_y"]
+        decision_target_y[batch_idx, :size] = item["decision_target_y"]
         current_weight[batch_idx, :size] = item["current_weight"]
         held_mask[batch_idx, :size] = item["held_mask"]
         source_mask[batch_idx, :size] = item["source_mask"]
@@ -282,6 +524,7 @@ def collate_portfolio_set_days(batch: list[dict[str, np.ndarray]]) -> dict[str, 
         "sequence_x": torch.as_tensor(sequence_x, dtype=torch.float32),
         "daily_x": torch.as_tensor(daily_x, dtype=torch.float32),
         "target_y": torch.as_tensor(target_y, dtype=torch.float32),
+        "decision_target_y": torch.as_tensor(decision_target_y, dtype=torch.float32),
         "current_weight": torch.as_tensor(current_weight, dtype=torch.float32),
         "held_mask": torch.as_tensor(held_mask, dtype=torch.float32),
         "source_mask": torch.as_tensor(source_mask, dtype=torch.float32),
@@ -444,6 +687,8 @@ class TorchPortfolioSetV5Artifact:
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
+        model_config = dict(self.model_config or {})
+        model_config.setdefault("portfolio_set_v5_internal_version", PORTFOLIO_SET_V5_INTERNAL_VERSION)
         payload = {
             "artifact_type": PORTFOLIO_SET_V5_ARTIFACT_TYPE,
             "feature_names": list(self.feature_names),
@@ -463,7 +708,7 @@ class TorchPortfolioSetV5Artifact:
             "training_diagnostics": self.training_diagnostics,
             "training_contract": self.training_contract,
             "trained_at": self.trained_at,
-            "model_config": self.model_config,
+            "model_config": model_config,
             "model_state_dict": self.model_state_dict,
             "global_target_defaults": self.global_target_defaults,
         }
@@ -522,6 +767,7 @@ def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weights: dict[str, float]) -> torch.Tensor:
     pred = _decode_raw(raw)
     target = batch["target_y"]
+    decision_target = batch.get("decision_target_y")
     mask = batch["sample_mask"].float()
     current = batch["current_weight"].clamp(0.0, 1.0)
     target_weight = target[..., 0].clamp(0.0, 0.24)
@@ -540,6 +786,49 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
     target_day_receiver = (receiver_target * mask).sum(dim=1)
     pred_delta_from_weight = pred["target_weight"] - current
     conflict = torch.relu(-(pred_delta_from_weight * pred["target_delta"]) - (0.003 ** 2))
+    oracle = project_portfolio_set_v5_cashflow_oracle(
+        current_weight=current,
+        source_score=pred["source_supply_score"],
+        receiver_score=pred["receiver_demand_score"],
+        cash_buffer_score=pred["cash_buffer_score"],
+        sample_mask=batch["sample_mask"],
+    )
+    if decision_target is None:
+        oracle_target_weight = target_weight
+        oracle_source = target[..., 2].clamp(0.0, 1.0) * current
+        oracle_receiver = target[..., 3].clamp(0.0, 1.0) * (0.24 - current).clamp_min(0.0)
+        oracle_cash = target[..., 4].clamp(0.0, 1.0)
+        target_value = torch.zeros_like(oracle["decision_value"])
+    else:
+        oracle_source = decision_target[..., 0].clamp(0.0, 1.0)
+        oracle_receiver = decision_target[..., 1].clamp(0.0, 1.0)
+        oracle_cash = decision_target[..., 2].clamp(0.0, 1.0)
+        oracle_target_weight = decision_target[..., 3].clamp(0.0, 0.24)
+        target_value = (decision_target[..., 7].clamp_min(0.0) * mask).sum(dim=1)
+    oracle_target_loss = (
+        _masked_mean(nn.functional.smooth_l1_loss(oracle["target_weight"], oracle_target_weight, reduction="none"), mask)
+        + _masked_mean(nn.functional.smooth_l1_loss(oracle["source_supply"], oracle_source, reduction="none"), mask)
+        + _masked_mean(nn.functional.smooth_l1_loss(oracle["receiver_demand"], oracle_receiver, reduction="none"), mask)
+        + nn.functional.smooth_l1_loss(oracle["cash_buffer"], (oracle_cash * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1.0))
+    )
+    value_gap = torch.relu(target_value - oracle["decision_value"]).mean()
+    perturb_strength = 0.05
+    plus_oracle = project_portfolio_set_v5_cashflow_oracle(
+        current_weight=current,
+        source_score=(pred["source_supply_score"] + perturb_strength * source_target).clamp(0.0, 1.0),
+        receiver_score=(pred["receiver_demand_score"] + perturb_strength * receiver_target).clamp(0.0, 1.0),
+        cash_buffer_score=pred["cash_buffer_score"],
+        sample_mask=batch["sample_mask"],
+    )
+    minus_oracle = project_portfolio_set_v5_cashflow_oracle(
+        current_weight=current,
+        source_score=(pred["source_supply_score"] - perturb_strength * source_target).clamp(0.0, 1.0),
+        receiver_score=(pred["receiver_demand_score"] - perturb_strength * receiver_target).clamp(0.0, 1.0),
+        cash_buffer_score=pred["cash_buffer_score"],
+        sample_mask=batch["sample_mask"],
+    )
+    pg_margin = plus_oracle["decision_value"] - minus_oracle["decision_value"]
+    pg_surrogate = torch.relu(0.001 - pg_margin).mean()
     loss = (
         float(weights["target_weight_closure_total"]) * _masked_mean(nn.functional.smooth_l1_loss(pred["target_weight"], target_weight, reduction="none"), mask)
         + float(weights["source_supply_total"]) * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 2], source_target, reduction="none"), mask)
@@ -554,11 +843,58 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         )
         + float(weights["underdeployment_high_cash_total"]) * torch.relu(target_weight.sum(dim=1) - pred["target_weight"].sum(dim=1)).mean()
         + float(weights["intent_translation_conflict_total"]) * _masked_mean(conflict, mask)
+        + float(weights.get("decision_oracle_total", 0.0)) * (oracle_target_loss + value_gap)
+        + float(weights.get("pg_dfl_surrogate_total", 0.0)) * pg_surrogate
+        + float(weights.get("constraint_violation_total", 0.0)) * oracle["constraint_violation"].mean()
         + 0.10 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 5], release_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 6], reduce_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 7], exit_target, reduction="none"), mask)
     )
     return loss
+
+
+def portfolio_set_v5_decision_diagnostics(
+    raw: torch.Tensor,
+    batch: dict[str, torch.Tensor],
+    weights: dict[str, float] | None = None,
+) -> dict[str, float]:
+    with torch.no_grad():
+        pred = _decode_raw(raw)
+        mask = batch["sample_mask"].float()
+        current = batch["current_weight"].clamp(0.0, 1.0)
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=pred["source_supply_score"],
+            receiver_score=pred["receiver_demand_score"],
+            cash_buffer_score=pred["cash_buffer_score"],
+            sample_mask=batch["sample_mask"],
+        )
+        target = batch.get("decision_target_y")
+        if target is not None:
+            target_source = target[..., 0].clamp(0.0, 1.0)
+            target_receiver = target[..., 1].clamp(0.0, 1.0)
+            target_weight = target[..., 3].clamp(0.0, 0.24)
+            target_value = (target[..., 7].clamp_min(0.0) * mask).sum(dim=1)
+        else:
+            target_source = torch.zeros_like(current)
+            target_receiver = torch.zeros_like(current)
+            target_weight = batch["target_y"][..., 0].clamp(0.0, 0.24)
+            target_value = torch.zeros_like(oracle["decision_value"])
+        source_count = ((oracle["source_supply"] > 0.003) & batch["sample_mask"]).sum().item()
+        receiver_count = ((oracle["receiver_demand"] > 0.003) & batch["sample_mask"]).sum().item()
+        conflict = ((oracle["target_weight"] - current) * oracle["target_delta"] < -(0.003 ** 2)) & batch["sample_mask"]
+        return {
+            "paper_reproduction_pg_surrogate_loss": float(_portfolio_set_loss(raw, batch, weights or resolve_portfolio_set_v5_loss_profile(None)[1]["multi_objective_loss_weights"]).detach().cpu()),
+            "decision_oracle_value_mean": float(oracle["decision_value"].mean().detach().cpu()),
+            "decision_oracle_target_value_mean": float(target_value.mean().detach().cpu()),
+            "decision_oracle_constraint_violation_mean": float(oracle["constraint_violation"].mean().detach().cpu()),
+            "decision_oracle_source_l1": float(_masked_mean((oracle["source_supply"] - target_source).abs(), mask).detach().cpu()),
+            "decision_oracle_receiver_l1": float(_masked_mean((oracle["receiver_demand"] - target_receiver).abs(), mask).detach().cpu()),
+            "decision_oracle_target_weight_l1": float(_masked_mean((oracle["target_weight"] - target_weight).abs(), mask).detach().cpu()),
+            "release_flow_source_target_count": float(source_count),
+            "release_flow_receiver_target_count": float(receiver_count),
+            "release_flow_intent_translation_conflict_count": float(conflict.sum().item()),
+        }
 
 
 def _global_defaults(daily_frame: pd.DataFrame) -> dict[str, float]:
@@ -588,6 +924,21 @@ def _select_train_days(sample_frame: pd.DataFrame, random_seed: int, max_days: i
         "portfolio_set_v5_raw_train_day_count": raw_day_count,
         "portfolio_set_v5_train_day_count": len(selected),
         "portfolio_set_v5_train_day_cap": int(max_days),
+    }
+
+
+def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
+    source = pd.to_numeric(targets.get("source_supply", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    receiver = pd.to_numeric(targets.get("receiver_demand", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    conflict = pd.to_numeric(targets.get("target_delta_weight_conflict", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    violation = pd.to_numeric(targets.get("constraint_violation", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    value = pd.to_numeric(targets.get("decision_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    return {
+        "decision_target_source_count": float((source > 0.003).sum()),
+        "decision_target_receiver_count": float((receiver > 0.003).sum()),
+        "decision_target_constraint_violation_mean": float(violation.mean()) if len(violation) else 0.0,
+        "decision_target_value_mean": float(value.mean()) if len(value) else 0.0,
+        "decision_target_intent_translation_conflict_count": float((conflict > 0.0).sum()),
     }
 
 
@@ -649,37 +1000,48 @@ def predict_policy_portfolio_set_v5(
     current = _current_weight(policy)
     source_score = outputs["source_supply_score"].clip(0.0, 1.0)
     receiver_score = outputs["receiver_demand_score"].clip(0.0, 1.0)
-    raw_target_weight = outputs["target_weight"].clip(0.0, 0.24)
-    raw_delta = outputs["target_delta"].clip(-0.18, 0.18)
-    release_candidate = (current > 0.003) & ((raw_delta < -0.003) | (source_score >= 0.30))
-    receiver_candidate = (current < 0.24 - 0.003) & ((raw_delta > 0.003) | (receiver_score >= 0.30))
-    target_weight = raw_target_weight.copy()
-    target_weight = target_weight.where(~release_candidate, np.minimum(target_weight, (current - raw_delta.abs().clip(lower=0.01)).clip(lower=0.0)))
-    target_weight = target_weight.where(~receiver_candidate, np.maximum(target_weight, (current + raw_delta.clip(lower=0.01)).clip(upper=0.24)))
+    oracle = project_portfolio_set_v5_cashflow_oracle(
+        current_weight=torch.as_tensor(current.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
+        source_score=torch.as_tensor(source_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
+        receiver_score=torch.as_tensor(receiver_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
+        cash_buffer_score=torch.as_tensor(outputs["cash_buffer_score"].clip(0.0, 1.0).to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
+        sample_mask=torch.ones((1, len(policy)), dtype=torch.bool),
+        turnover_budget=torch.as_tensor([float(dict(artifact.global_target_defaults or {}).get("turnover_budget", 0.18) or 0.18)], dtype=torch.float32),
+        risk_budget=torch.as_tensor([float(np.clip(outputs["cash_buffer_score"].clip(0.0, 1.0).mean(), 0.0, 1.0))], dtype=torch.float32),
+    )
+    target_weight = pd.Series(oracle["target_weight"][0].detach().cpu().numpy().astype(float), index=policy.index)
     target_delta = (target_weight - current).clip(-0.18, 0.18)
     target_delta = target_delta.where(target_delta.abs() >= 0.003, 0.0)
     target_weight = (current + target_delta).clip(0.0, 0.24)
-    intent_frame = policy.copy()
-    intent_frame["portfolio_daily_target_delta_intent"] = target_delta.astype(float)
-    intent_frame["portfolio_daily_source_score"] = source_score.astype(float)
-    intent_frame["portfolio_daily_source_release_quality"] = outputs["release_intent"].clip(0.0, 1.0).astype(float)
-    intent_frame["portfolio_daily_source_economic_block_risk"] = 0.0
-    release_first = derive_release_first_intent(intent_frame)
-    release_intent = pd.to_numeric(release_first["release_first_intent_score"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    source_supply = pd.Series(oracle["source_supply"][0].detach().cpu().numpy().astype(float), index=policy.index)
+    receiver_demand = pd.Series(oracle["receiver_demand"][0].detach().cpu().numpy().astype(float), index=policy.index)
+    source_capacity = current.clip(lower=0.003)
+    release_intent = (source_supply / source_capacity).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    release_action = pd.Series("hold", index=policy.index, dtype=object)
+    release_action.loc[(current > 0.003) & (target_delta < -0.003) & (target_weight > 0.003)] = "reduce"
+    release_action.loc[(current > 0.003) & (target_delta < -0.003) & (target_weight <= 0.003)] = "exit"
+    release_block = pd.Series("none", index=policy.index, dtype=object)
+    release_block.loc[current <= 0.003] = "not_held"
+    release_block.loc[(current > 0.003) & (source_score < 0.02) & (target_delta >= -0.003)] = "source_score_dead"
     policy["portfolio_daily_target_weight_intent"] = target_weight.astype(float)
     policy["portfolio_daily_target_delta_intent"] = target_delta.astype(float)
     policy["portfolio_daily_release_first_intent"] = release_intent.astype(float)
-    policy["release_first_action_hint"] = release_first["release_first_action_hint"].astype(str)
-    policy["release_first_block_reason"] = release_first["release_first_block_reason"].astype(str)
+    policy["release_first_action_hint"] = release_action.astype(str)
+    policy["release_first_block_reason"] = release_block.astype(str)
     policy["portfolio_daily_source_score"] = source_score.astype(float)
     policy["portfolio_daily_unified_source_score"] = source_score.astype(float)
-    policy["portfolio_daily_source_executable_candidate"] = ((current > 0.003) & (release_intent >= 0.30)).astype(float)
+    policy["portfolio_daily_source_executable_candidate"] = ((current > 0.003) & (source_supply > 0.003)).astype(float)
     policy["portfolio_daily_receiver_score"] = receiver_score.astype(float)
     policy["portfolio_daily_unified_receiver_score"] = receiver_score.astype(float)
-    policy["portfolio_daily_receiver_executable_candidate"] = ((current < 0.24 - 0.003) & (receiver_score >= 0.30) & (target_delta > 0.003)).astype(float)
+    policy["portfolio_daily_receiver_executable_candidate"] = ((current < 0.24 - 0.003) & (receiver_demand > 0.003) & (target_delta > 0.003)).astype(float)
     policy["portfolio_set_v5_source_supply_score"] = source_score.astype(float)
     policy["portfolio_set_v5_receiver_demand_score"] = receiver_score.astype(float)
-    policy["portfolio_set_v5_cash_buffer_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
+    policy["portfolio_set_v5_source_supply"] = source_supply.astype(float)
+    policy["portfolio_set_v5_receiver_demand"] = receiver_demand.astype(float)
+    policy["portfolio_set_v5_cash_buffer_score"] = float(oracle["cash_buffer"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_constraint_violation"] = float(oracle["constraint_violation"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_decision_value"] = float(oracle["decision_value"][0].detach().cpu())
+    policy["portfolio_set_v5_oracle_feasible"] = float(float(oracle["constraint_violation"][0].detach().cpu()) <= 1.0e-6)
     policy["portfolio_set_v5_target_delta_weight_conflict_count"] = int((((target_weight - current) * target_delta) < -(0.003 ** 2)).sum())
     add_mask = (current > 0.0) & (target_delta > 0.003)
     open_mask = (current <= 0.0) & (target_delta > 0.003)
@@ -723,7 +1085,7 @@ def fit_policy_models_portfolio_set_v5(
     dropout: float = 0.18,
     early_stop_patience: int = 10,
     resume_mode: str = "strict",
-    loss_profile: str = "alpha_result_value_budget_split_v48",
+    loss_profile: str = PORTFOLIO_SET_V5_INTERNAL_VERSION,
     progress_sink: Any | None = None,
 ) -> TorchPortfolioSetV5Artifact:
     if sample_frame.empty or daily_frame.empty:
@@ -741,6 +1103,7 @@ def fit_policy_models_portfolio_set_v5(
     run_root.mkdir(parents=True, exist_ok=True)
     train_frame, day_diagnostics = _select_train_days(sample_frame, int(random_seed))
     targets = build_portfolio_set_v5_targets(train_frame)
+    target_diagnostics = _target_diagnostics(targets)
     static_feature_names, sequence_bases, sequence_columns = _resolve_static_and_sequence_columns(feature_names)
     static_matrix, static_fill, static_means, static_stds = _prepare_matrix(_ensure_features(train_frame, static_feature_names), static_feature_names)
     if sequence_columns:
@@ -805,6 +1168,8 @@ def fit_policy_models_portfolio_set_v5(
     best_epoch = 0
     completed_epochs = 0
     progress_event_count = 0
+    last_train_decision_diagnostics: dict[str, float] = {}
+    last_val_decision_diagnostics: dict[str, float] = {}
     started = time.monotonic()
     for epoch in range(1, max(int(epochs or 0), 1) + 1):
         epoch_started = time.monotonic()
@@ -822,6 +1187,7 @@ def fit_policy_models_portfolio_set_v5(
             scaler.update()
             train_loss_sum += float(loss.detach().cpu())
             train_count += 1
+            last_train_decision_diagnostics = portfolio_set_v5_decision_diagnostics(raw.detach(), batch, weights)
         model.eval()
         val_losses: list[float] = []
         with torch.no_grad():
@@ -829,6 +1195,7 @@ def fit_policy_models_portfolio_set_v5(
                 batch = move_to_device(batch, device, non_blocking=runtime.non_blocking_transfer)
                 raw = model(batch["static_x"], batch["sequence_x"], batch["daily_x"], batch["sample_mask"])["raw"]
                 val_losses.append(float(_portfolio_set_loss(raw, batch, weights).detach().cpu()))
+                last_val_decision_diagnostics = portfolio_set_v5_decision_diagnostics(raw.detach(), batch, weights)
         val_loss = float(np.mean(val_losses)) if val_losses else float(train_loss_sum / max(train_count, 1))
         completed_epochs = epoch
         if val_loss < best_loss:
@@ -847,6 +1214,8 @@ def fit_policy_models_portfolio_set_v5(
                 data_loader_pin_memory=runtime.pin_memory,
                 non_blocking_transfer=runtime.non_blocking_transfer,
                 portfolio_set_v5=True,
+                paper_reproduction_metrics=last_train_decision_diagnostics,
+                decision_oracle_metrics=last_val_decision_diagnostics,
             )
             progress_event_count += 1
         if epoch >= int(min_epochs or 0) and epoch - best_epoch >= int(early_stop_patience or 0):
@@ -856,6 +1225,24 @@ def fit_policy_models_portfolio_set_v5(
         "trainer_backend": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
         "loss_profile": resolved_loss_profile,
         "status": "portfolio_set_v5_complete",
+        "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_INTERNAL_VERSION,
+        "paper_reproduction_metrics": {
+            "method": "pg_dfl_surrogate",
+            "surrogate": "positive_negative_score_perturbation",
+            "oracle": "torch_long_only_cashflow_projection",
+            **last_train_decision_diagnostics,
+        },
+        "decision_oracle_metrics": {
+            "position_cap": 0.24,
+            "long_only": True,
+            "source_receiver_cash_conservation": True,
+            **last_val_decision_diagnostics,
+        },
+        "release_flow_metrics": {
+            "target_source_count": target_diagnostics["decision_target_source_count"],
+            "target_receiver_count": target_diagnostics["decision_target_receiver_count"],
+            "target_intent_translation_conflict_count": target_diagnostics["decision_target_intent_translation_conflict_count"],
+        },
         "device": str(device),
         "gpu_acceleration": runtime.to_diagnostics(),
         "amp_enabled": runtime.amp_enabled,
@@ -874,6 +1261,7 @@ def fit_policy_models_portfolio_set_v5(
         "supports_release_first_allocation_v3_mode": True,
         "progress_event_count": int(progress_event_count),
         "train_seconds": round(time.monotonic() - started, 3),
+        **target_diagnostics,
         **day_diagnostics,
     }
     if progress_sink is not None:
@@ -902,6 +1290,7 @@ def fit_policy_models_portfolio_set_v5(
             "cross_layers": int(cross_layers),
             "latent_count": int(latent_count),
             "dropout": float(dropout),
+            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_INTERNAL_VERSION,
         },
         model_state_dict={key: value.detach().cpu() for key, value in model.state_dict().items()},
         global_target_defaults=_global_defaults(daily_frame),
