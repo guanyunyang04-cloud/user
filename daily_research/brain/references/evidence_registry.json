@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 18,
+  "record_count": 19,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -528,6 +528,45 @@
         "Investigate shadow `intent_translation_conflict_rate=0.7415795586527294` before any broader study.",
         "After source/translation closure improves, run a longer strict resume or wider strict-Gold smoke; training evidence must become sufficient before stronger conclusions.",
         "Keep r61/r65 old evidence as baseline/ablation only; do not revive legacy direct-protocol profiles as active entrypoints."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
+    },
+    {
+      "id": "r68",
+      "date": "2026-05-14",
+      "r_id": "r68",
+      "path": "daily_research/brain/references/r68_cashflow_decision_v1_close_v5_status_20260514.md",
+      "tags": [
+        "r68",
+        "continuous_policy",
+        "portfolio_set_v5"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_01",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_02",
+        "protocol_r68_cashflow_decision_v1_close_v5_smoke_20260514_03",
+        "protocol_summary"
+      ],
+      "verdict": "Status: `research / shadow-only / source-translation closure evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r68 adds a shared `portfolio_cashflow_decision_v1` contract so v5 prediction, simulator, release trace, and continuity metrics use the same source / receiver / cash semantics.",
+      "blockers": [
+        "Failed promotion checks include `contract_promotable`, `training_evidence_sufficient`, `open_win_rate_5d`, `exit_timeliness_rate_5d`, `cash_timing_quality_1d`, `max_drawdown`, `shadow_reversal`, `annual_return_vs_active`, and `sharpe_vs_active`.",
+        "`cashflow_decision_failed_closed` sum: `0.0`.",
+        "`release_flow_primary_blocker`: `none` on all 21 days.",
+        "Warnings are existing cvxpylayers / numpy deprecation warnings, not r68 failures.",
+        "The r67 blocker was not only model no-op behavior; it also included budget semantics drift between v5 predict/oracle and simulator cashflow validation.",
+        "r68 turns the next blocker from translation closure into quality and evidence: cash timing, source selection quality, drawdown, reversal, and sufficient training evidence are still unresolved.",
+        "Run a longer strict resume or wider strict-Gold smoke only after deciding the evidence question; training evidence remains insufficient in the tiny smoke.",
+        "Improve source selection quality, cash timing, drawdown, and reversal behavior now that source/receiver translation is no longer the primary blocker."
+      ],
+      "next_allowed_actions": [
+        "Continue research/shadow-only on `portfolio_set_v5_dfl_pg_v1`.",
+        "Run a longer strict resume or wider strict-Gold smoke only after deciding the evidence question; training evidence remains insufficient in the tiny smoke.",
+        "Improve source selection quality, cash timing, drawdown, and reversal behavior now that source/receiver translation is no longer the primary blocker.",
+        "Keep r67 and r68 as mechanism/translation closure evidence, not live or promotion evidence."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [

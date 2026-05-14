@@ -67,6 +67,52 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
         source = float(oracle["source_supply"].sum())
         receiver = float(oracle["receiver_demand"].sum())
         self.assertAlmostEqual(cash_after, cash_now + source - receiver, places=6)
+        self.assertLessEqual(
+            float(oracle["source_supply"].sum() + oracle["receiver_demand"].sum()),
+            0.18 + 1.0e-6,
+        )
+
+    def test_torch_projection_oracle_seeds_cash_funded_receiver_from_flat_book(self) -> None:
+        current = torch.zeros((1, 5), dtype=torch.float32)
+        source_score = torch.zeros_like(current)
+        receiver_score = torch.tensor([[0.10, 0.95, 0.20, 0.75, 0.05]], dtype=torch.float32)
+
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=source_score,
+            receiver_score=receiver_score,
+            cash_buffer_score=torch.zeros_like(current),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.12], dtype=torch.float32),
+            risk_budget=torch.tensor([0.05], dtype=torch.float32),
+        )
+
+        self.assertEqual(int((oracle["source_supply"] > 0.003).sum()), 0)
+        self.assertGreaterEqual(int((oracle["receiver_demand"] > 0.003).sum()), 1)
+        self.assertGreater(float(oracle["target_delta"][0, 1]), 0.003)
+        self.assertLessEqual(float((oracle["target_weight"] - current).abs().sum()), 0.12 + 1.0e-6)
+
+    def test_torch_projection_oracle_keeps_source_receiver_roles_disjoint(self) -> None:
+        current = torch.tensor([[0.18, 0.00, 0.10, 0.00, 0.00]], dtype=torch.float32)
+        source_score = torch.tensor([[0.95, 0.05, 0.80, 0.00, 0.00]], dtype=torch.float32)
+        receiver_score = torch.tensor([[0.99, 0.97, 0.90, 0.88, 0.20]], dtype=torch.float32)
+
+        oracle = project_portfolio_set_v5_cashflow_oracle(
+            current_weight=current,
+            source_score=source_score,
+            receiver_score=receiver_score,
+            cash_buffer_score=torch.zeros_like(current),
+            sample_mask=torch.ones_like(current, dtype=torch.bool),
+            turnover_budget=torch.tensor([0.14], dtype=torch.float32),
+            risk_budget=torch.tensor([0.10], dtype=torch.float32),
+        )
+
+        source_mask = oracle["source_supply"] > 0.003
+        receiver_mask = oracle["receiver_demand"] > 0.003
+        self.assertGreaterEqual(int(source_mask.sum()), 1)
+        self.assertGreaterEqual(int(receiver_mask.sum()), 1)
+        self.assertEqual(int((source_mask & receiver_mask).sum()), 0)
+        self.assertLessEqual(float((oracle["target_weight"] - current).abs().sum()), 0.14 + 1.0e-6)
 
     def test_pg_dfl_surrogate_prefers_oracle_aligned_logits(self) -> None:
         weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]

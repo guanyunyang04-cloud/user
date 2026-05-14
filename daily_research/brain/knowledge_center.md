@@ -9,7 +9,7 @@
 - `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
-- r39 仍是 continuous_policy 有效证据基线；r40-r67 是 research / shadow 升级链或基础设施证据。
+- r39 仍是 continuous_policy 有效证据基线；r40-r68 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
 
 ## 2. 硬规则
@@ -43,6 +43,7 @@
 - r62-r64：通用 data lake 与 full-universe strict Gold 完成，realtime full-window pending。
 - r65：portfolio-set v5 替代 MLP 主线成为下一代 research backend，但首轮行为仍 negative。
 - r67：论文驱动 DFL-PG v1 替换 portfolio-set v5 默认目标/loss/oracle/profile，机制 smoke 通过；评估/影子 source funding 与 translation 仍未闭合。
+- r68：新增 `portfolio_cashflow_decision_v1` 合同并闭合 v5 source/receiver/cash translation；tiny strict-Gold shadow smoke 中 source target、receiver target、cashflow valid 与 intent conflict 指标已闭合，但仍不是 promotion 或 strategy-success 证据。
 
 ## 5. 当前方法论
 - 先直接 protocol smoke，再 study dry-run，再 safe screening；不得跳到 confirmatory。

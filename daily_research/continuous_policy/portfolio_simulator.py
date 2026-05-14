@@ -28,6 +28,11 @@ from daily_research.continuous_policy.semantic_budget_intent import (
     derive_release_first_intent,
     derive_release_intent_from_target_delta,
 )
+from daily_research.continuous_policy.portfolio_cashflow_decision import (
+    PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN,
+    normalize_portfolio_cashflow_decision,
+    portfolio_cashflow_decision_enabled,
+)
 from daily_research.continuous_policy.release_flow_trace import build_release_flow_trace
 
 
@@ -688,6 +693,13 @@ class PortfolioState:
         prices.index = prices.index.map(str)
         policy = policy_frame.copy()
         policy.index = policy.index.map(str)
+        if "stock" in policy.columns:
+            stock_index = policy["stock"].astype(str)
+            current_overlap = len(set(policy.index) & set(prices.index))
+            stock_overlap = len(set(stock_index) & set(prices.index))
+            if stock_overlap > current_overlap:
+                policy = policy.copy()
+                policy.index = stock_index
         policy = policy.reindex(prices.index).fillna(
             {
                 "action_label": "skip",
@@ -792,6 +804,7 @@ class PortfolioState:
         release_first_allocation_v3_global_mode = float(
             (global_targets or {}).get("release_first_allocation_v3_mode", 0.0) or 0.0
         ) > 0.5
+        portfolio_cashflow_decision_v1_mode = portfolio_cashflow_decision_enabled(policy, global_targets)
         constraint_only_budget_mode = budget_model_constraint_only_mode > 0.5 or budget_calibration in {
             BUDGET_CALIBRATION_CASH_CONSTRAINT,
             BUDGET_CALIBRATION_CASH_CONSTRAINT_INTENT,
@@ -900,6 +913,14 @@ class PortfolioState:
         allocation_core_v2_policy_mode = _optional_policy_numeric("allocation_core_v2_mode")
         allocation_intent_v2_policy_mode = _optional_policy_numeric("allocation_intent_v2_mode")
         release_first_allocation_v3_policy_mode = _optional_policy_numeric("release_first_allocation_v3_mode")
+        portfolio_cashflow_decision_policy_mode = _optional_policy_numeric(PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN)
+        portfolio_cashflow_decision_v1_mode = bool(
+            portfolio_cashflow_decision_v1_mode
+            or (
+                portfolio_cashflow_decision_policy_mode is not None
+                and bool((portfolio_cashflow_decision_policy_mode > 0.5).any())
+            )
+        )
         release_first_allocation_v3_mode = bool(
             release_first_allocation_v3_global_mode
             or (
@@ -909,6 +930,7 @@ class PortfolioState:
         )
         allocation_intent_v2_mode = bool(
             allocation_intent_v2_global_mode
+            or portfolio_cashflow_decision_v1_mode
             or release_first_allocation_v3_mode
             or (
                 allocation_intent_v2_policy_mode is not None
@@ -4076,6 +4098,23 @@ class PortfolioState:
         }
         allocation_layer_intent_translation_conflict_count = 0
         allocation_layer_intent_translation_active_count = 0
+        cashflow_decision_diagnostics: dict[str, Any] = {
+            "cashflow_decision_valid": 0.0,
+            "cashflow_decision_invalid_reason": "not_applicable",
+            "cashflow_decision_source_intent_count": 0,
+            "cashflow_decision_receiver_intent_count": 0,
+            "cashflow_decision_source_candidate_count": 0,
+            "cashflow_decision_receiver_candidate_count": 0,
+            "cashflow_decision_cash_conservation_gap": 0.0,
+            "cashflow_decision_turnover": 0.0,
+            "cashflow_decision_buy_turnover": 0.0,
+            "cashflow_decision_sell_turnover": 0.0,
+            "cashflow_decision_cash_after": 0.0,
+            "cashflow_decision_guarded_count": 0,
+            "cashflow_decision_violation_count": 0,
+        }
+        cashflow_decision_used = False
+        cashflow_decision_failed_closed = False
         native_target_valid = 0.0
         native_negative_delta_count = 0
         native_positive_delta_count = 0
@@ -4109,7 +4148,7 @@ class PortfolioState:
                 allocation_layer_source_executable_candidate = (
                     portfolio_daily_source_candidate | portfolio_daily_unified_source_candidate
                 )
-            if allocation_core_v2_mode:
+            if allocation_core_v2_mode and not portfolio_cashflow_decision_v1_mode:
                 target_weight_intent = _optional_policy_numeric("portfolio_daily_target_weight_intent")
                 target_weight_intent_delta = (
                     target_weight_intent.reindex(prices.index).fillna(0.0).astype(float)
@@ -4152,12 +4191,20 @@ class PortfolioState:
             allocation_problem = policy.copy()
             allocation_problem["stock"] = prices.index.astype(str)
             allocation_problem["current_weight"] = current.reindex(prices.index).fillna(0.0).astype(float)
-            allocation_problem["portfolio_daily_receiver_executable_candidate"] = (
-                allocation_layer_receiver_executable_candidate.astype(float)
-            )
-            allocation_problem["portfolio_daily_source_executable_candidate"] = (
-                allocation_layer_source_executable_candidate.astype(float)
-            )
+            if not portfolio_cashflow_decision_v1_mode:
+                allocation_problem["portfolio_daily_receiver_executable_candidate"] = (
+                    allocation_layer_receiver_executable_candidate.astype(float)
+                )
+                allocation_problem["portfolio_daily_source_executable_candidate"] = (
+                    allocation_layer_source_executable_candidate.astype(float)
+                )
+            else:
+                for candidate_column in (
+                    "portfolio_daily_receiver_executable_candidate",
+                    "portfolio_daily_source_executable_candidate",
+                ):
+                    if candidate_column not in allocation_problem.columns:
+                        allocation_problem[candidate_column] = 0.0
             if allocation_intent_v2_mode:
                 target_weight_intent = _optional_policy_numeric("portfolio_daily_target_weight_intent")
                 if target_weight_intent is not None:
@@ -4187,7 +4234,108 @@ class PortfolioState:
             allocation_core_v2_solution = None
             release_first_allocation_solution = None
             native_target_weights_valid = False
-            if release_first_allocation_v3_mode:
+            if portfolio_cashflow_decision_v1_mode:
+                cashflow_turnover_limit = float(turnover_budget)
+                if "portfolio_set_v5_turnover_budget" in allocation_problem.columns:
+                    cashflow_budget_values = pd.to_numeric(
+                        allocation_problem["portfolio_set_v5_turnover_budget"],
+                        errors="coerce",
+                    ).replace([np.inf, -np.inf], np.nan).dropna()
+                    if len(cashflow_budget_values):
+                        cashflow_turnover_limit = float(
+                            min(cashflow_turnover_limit, max(float(cashflow_budget_values.median()), 0.0))
+                        )
+                cashflow_decision = normalize_portfolio_cashflow_decision(
+                    allocation_problem,
+                    current_weight=current.reindex(prices.index).fillna(0.0).astype(float),
+                    position_cap=position_cap_target,
+                    turnover_limit=cashflow_turnover_limit,
+                    deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
+                    fail_closed=True,
+                )
+                policy = cashflow_decision.frame.reindex(prices.index)
+                allocation_problem = cashflow_decision.frame.copy()
+                action_names = policy["action_label"].astype(str).str.strip().str.lower()
+                target_weights = cashflow_decision.target_weight.reindex(prices.index).fillna(0.0).astype(float)
+                target_weights = target_weights.clip(lower=0.0, upper=position_cap_target)
+                cashflow_decision_used = True
+                cashflow_decision_failed_closed = not bool(cashflow_decision.valid)
+                cashflow_decision_diagnostics = dict(cashflow_decision.diagnostics)
+                current_for_cashflow = current.reindex(prices.index).fillna(0.0).astype(float)
+                cashflow_delta = (target_weights - current_for_cashflow).replace(
+                    [np.inf, -np.inf],
+                    np.nan,
+                ).fillna(0.0)
+                allocation_layer_expected_turnover = float(cashflow_delta.abs().sum())
+                allocation_layer_buy_turnover = float(cashflow_delta.clip(lower=0.0).sum())
+                allocation_layer_sell_turnover = float((-cashflow_delta.clip(upper=0.0)).sum())
+                allocation_layer_cash_after = float(cashflow_decision_diagnostics.get("cashflow_decision_cash_after", 0.0))
+                allocation_layer_available_cash_to_deploy = float(
+                    max(0.0, allocation_layer_cash_after - float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05))
+                )
+                allocation_layer_stock_budget = min(
+                    float(gross_exposure_target),
+                    max(0.0, 1.0 - float((global_targets or {}).get("cash_reserve_target", 0.05) or 0.05)),
+                )
+                allocation_layer_target_sum_gap = float(max(0.0, allocation_layer_stock_budget - float(target_weights.sum())))
+                allocation_layer_cash_funded_deploy_amount = float(
+                    max(0.0, allocation_layer_buy_turnover - allocation_layer_sell_turnover)
+                )
+                allocation_layer_source_funded_deploy_amount = float(
+                    min(allocation_layer_buy_turnover, allocation_layer_sell_turnover)
+                )
+                allocation_layer_unused_receiver_headroom = float(
+                    (position_cap_target - target_weights).clip(lower=0.0).where(
+                        cashflow_decision.receiver_candidate.reindex(prices.index).fillna(False),
+                        0.0,
+                    ).sum()
+                )
+                receiver_headroom_initial = (position_cap_target - current_for_cashflow).clip(lower=0.0).where(
+                    cashflow_decision.receiver_candidate.reindex(prices.index).fillna(False),
+                    0.0,
+                )
+                receiver_headroom_total = float(receiver_headroom_initial.sum())
+                allocation_layer_receiver_headroom_utilization = (
+                    float((receiver_headroom_initial - (position_cap_target - target_weights).clip(lower=0.0)).clip(lower=0.0).sum())
+                    / max(receiver_headroom_total, 1.0e-12)
+                    if receiver_headroom_total > 0.0
+                    else 0.0
+                )
+                allocation_layer_source_release_required = float(bool(cashflow_decision.source_target.any()))
+                allocation_layer_underdeployment_reason = (
+                    "cashflow_contract_invalid"
+                    if cashflow_decision_failed_closed
+                    else ("none" if allocation_layer_target_sum_gap <= 0.05 else "cashflow_target_sum_gap")
+                )
+                allocation_layer_budget_closed = float(allocation_layer_target_sum_gap <= 0.05)
+                allocation_layer_deployment_required = float(
+                    allocation_layer_target_sum_gap > 0.05 or bool(cashflow_decision.receiver_target.any())
+                )
+                allocation_layer_risk_reduction_required = float(bool(cashflow_decision.source_target.any()) and not bool(cashflow_decision.receiver_target.any()))
+                allocation_layer_receiver_activity_required = float(bool(cashflow_decision.receiver_target.any()))
+                allocation_layer_objective_value = float(max(0.0, 1.0 - allocation_layer_target_sum_gap))
+                allocation_layer_constraint_violations = float(cashflow_decision_diagnostics.get("cashflow_decision_violation_count", 0.0))
+                allocation_layer_native_target_used = 1.0
+                allocation_layer_native_fallback_used = 0.0
+                native_target_valid = 1.0 if cashflow_decision.valid else 0.0
+                native_target_weights_valid = True
+                release_first_source_intent_count = float(cashflow_decision.source_target.sum())
+                release_first_source_realized_count = float(cashflow_decision.source_target.sum()) if cashflow_decision.valid else 0.0
+                release_first_rotation_amount = float(min(allocation_layer_buy_turnover, allocation_layer_sell_turnover))
+                release_first_cash_buffer_amount = float(max(0.0, allocation_layer_sell_turnover - allocation_layer_buy_turnover))
+                release_first_block_reason = "cashflow_contract_invalid" if cashflow_decision_failed_closed else "none"
+                release_flow_trace = build_release_flow_trace(
+                    policy,
+                    allocation_problem=allocation_problem,
+                    allocation_result={
+                        "release_first_source_intent_count": int(cashflow_decision.source_target.sum()),
+                        "release_first_source_realized_count": int(cashflow_decision.source_target.sum())
+                        if cashflow_decision.valid
+                        else 0,
+                    },
+                    deadband=DEFAULT_EXECUTION_DEADBAND_ABS,
+                )
+            elif release_first_allocation_v3_mode:
                 if "release_first_intent_score" not in allocation_problem.columns:
                     release_first_problem = allocation_problem.copy()
                     release_first_problem["current_weight"] = current.reindex(prices.index).fillna(0.0).astype(float)
@@ -4611,7 +4759,15 @@ class PortfolioState:
                 & (allocation_delta_preview > receiver_delta_threshold)
             )
             portfolio_daily_receiver_candidate = allocation_layer_receiver_executable_candidate.copy()
-            if native_target_weights_valid:
+            if cashflow_decision_used:
+                portfolio_daily_receiver_target = cashflow_decision.receiver_target.reindex(prices.index).fillna(False).astype(bool)
+                portfolio_daily_receiver_candidate = cashflow_decision.receiver_candidate.reindex(prices.index).fillna(False).astype(bool)
+                portfolio_daily_source_target = cashflow_decision.source_target.reindex(prices.index).fillna(False).astype(bool)
+                portfolio_daily_source_candidate = cashflow_decision.source_candidate.reindex(prices.index).fillna(False).astype(bool)
+                allocation_layer_receiver_executable_candidate = portfolio_daily_receiver_candidate.copy()
+                allocation_layer_source_executable_candidate = portfolio_daily_source_candidate.copy()
+                native_source_target_count = int(portfolio_daily_source_target.sum())
+            elif native_target_weights_valid:
                 portfolio_daily_source_target = (
                     (current > 1e-8)
                     & (allocation_delta_preview < -source_delta_threshold)
@@ -5385,6 +5541,29 @@ class PortfolioState:
                     "policy_decision_mode": str(policy.at[stock, "policy_decision_mode"] or "") if "policy_decision_mode" in policy.columns else "",
                     "allocation_intent_v2_mode": bool(allocation_intent_v2_mode),
                     "release_first_allocation_v3_mode": bool(release_first_allocation_v3_mode),
+                    "portfolio_cashflow_decision_v1_mode": float(policy.at[stock, PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN])
+                    if PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN in policy.columns
+                    else 0.0,
+                    "portfolio_cashflow_decision_v1_valid": float(
+                        policy.at[stock, "portfolio_cashflow_decision_v1_valid"]
+                    )
+                    if "portfolio_cashflow_decision_v1_valid" in policy.columns
+                    else 0.0,
+                    "portfolio_cashflow_decision_v1_invalid_reason": str(
+                        policy.at[stock, "portfolio_cashflow_decision_v1_invalid_reason"] or ""
+                    )
+                    if "portfolio_cashflow_decision_v1_invalid_reason" in policy.columns
+                    else "",
+                    "portfolio_cashflow_decision_v1_violation_count": float(
+                        policy.at[stock, "portfolio_cashflow_decision_v1_violation_count"]
+                    )
+                    if "portfolio_cashflow_decision_v1_violation_count" in policy.columns
+                    else 0.0,
+                    "portfolio_cashflow_decision_v1_cash_conservation_gap": float(
+                        policy.at[stock, "portfolio_cashflow_decision_v1_cash_conservation_gap"]
+                    )
+                    if "portfolio_cashflow_decision_v1_cash_conservation_gap" in policy.columns
+                    else 0.0,
                     "release_first_intent_score": float(policy.at[stock, "release_first_intent_score"] or 0.0)
                     if "release_first_intent_score" in policy.columns
                     else 0.0,
@@ -5410,6 +5589,47 @@ class PortfolioState:
                         )
                         - previous_weight
                     ),
+                    "portfolio_daily_source_target_intent": bool(
+                        float(policy.at[stock, "portfolio_daily_source_target_intent"] or 0.0) > 0.5
+                    )
+                    if "portfolio_daily_source_target_intent" in policy.columns
+                    else False,
+                    "portfolio_daily_receiver_target_intent": bool(
+                        float(policy.at[stock, "portfolio_daily_receiver_target_intent"] or 0.0) > 0.5
+                    )
+                    if "portfolio_daily_receiver_target_intent" in policy.columns
+                    else False,
+                    "portfolio_daily_source_executable_candidate": bool(
+                        float(policy.at[stock, "portfolio_daily_source_executable_candidate"] or 0.0) > 0.5
+                    )
+                    if "portfolio_daily_source_executable_candidate" in policy.columns
+                    else False,
+                    "portfolio_daily_receiver_executable_candidate": bool(
+                        float(policy.at[stock, "portfolio_daily_receiver_executable_candidate"] or 0.0) > 0.5
+                    )
+                    if "portfolio_daily_receiver_executable_candidate" in policy.columns
+                    else False,
+                    "portfolio_set_v5_source_supply": float(policy.at[stock, "portfolio_set_v5_source_supply"] or 0.0)
+                    if "portfolio_set_v5_source_supply" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_receiver_demand": float(
+                        policy.at[stock, "portfolio_set_v5_receiver_demand"] or 0.0
+                    )
+                    if "portfolio_set_v5_receiver_demand" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_cash_buffer_score": float(
+                        policy.at[stock, "portfolio_set_v5_cash_buffer_score"] or 0.0
+                    )
+                    if "portfolio_set_v5_cash_buffer_score" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_turnover_budget": float(
+                        policy.at[stock, "portfolio_set_v5_turnover_budget"] or 0.0
+                    )
+                    if "portfolio_set_v5_turnover_budget" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_turnover_used": float(policy.at[stock, "portfolio_set_v5_turnover_used"] or 0.0)
+                    if "portfolio_set_v5_turnover_used" in policy.columns
+                    else 0.0,
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,
                     "direct_action_value_selected": float(policy.at[stock, "direct_action_value_selected"] or 0.0) if "direct_action_value_selected" in policy.columns else 0.0,
@@ -6082,6 +6302,10 @@ class PortfolioState:
             "direct_action_pair_cost_guard_mode": float(bool(direct_action_pair_cost_guard_mode)),
             "portfolio_daily_ranking_mode": float(bool(portfolio_daily_ranking_mode)),
             "allocation_layer_primary_mode": float(bool(end_to_end_allocation_layer_mode)),
+            "portfolio_cashflow_decision_v1_mode_used": float(bool(portfolio_cashflow_decision_v1_mode)),
+            "cashflow_decision_used": float(bool(cashflow_decision_used)),
+            "cashflow_decision_failed_closed": float(bool(cashflow_decision_failed_closed)),
+            **cashflow_decision_diagnostics,
             "allocation_layer_expected_turnover": float(allocation_layer_expected_turnover),
             "allocation_layer_buy_turnover": float(allocation_layer_buy_turnover),
             "allocation_layer_sell_turnover": float(allocation_layer_sell_turnover),
@@ -6109,6 +6333,18 @@ class PortfolioState:
             "release_flow_release_action_hint_count": float(release_flow_trace.get("release_action_hint_count", 0.0)),
             "release_flow_source_intent_without_realization_count": float(
                 release_flow_trace.get("source_intent_without_realization_count", 0.0)
+            ),
+            "release_flow_cashflow_decision_mode_count": float(
+                release_flow_trace.get("cashflow_decision_mode_count", 0.0)
+            ),
+            "release_flow_cashflow_decision_source_intent_count": float(
+                release_flow_trace.get("cashflow_decision_source_intent_count", 0.0)
+            ),
+            "release_flow_cashflow_decision_receiver_intent_count": float(
+                release_flow_trace.get("cashflow_decision_receiver_intent_count", 0.0)
+            ),
+            "release_flow_cashflow_decision_cash_conservation_gap": float(
+                release_flow_trace.get("cashflow_decision_cash_conservation_gap", 0.0)
             ),
             "release_flow_receiver_score_dead_count": float(release_flow_trace.get("receiver_score_dead_count", 0.0)),
             "release_flow_target_delta_weight_conflict_count": float(

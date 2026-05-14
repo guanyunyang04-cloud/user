@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
+import torch
 
 from daily_research.continuous_policy.model import load_artifact, predict_policy
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
@@ -51,6 +52,20 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             global_target_defaults={"gross_exposure_target": 0.7},
         )
 
+    def _biased_artifact(self) -> TorchPortfolioSetV5Artifact:
+        artifact = self._artifact()
+        from daily_research.continuous_policy.model_portfolio_set_v5 import _make_model
+
+        state = {key: value.detach().clone() for key, value in _make_model(artifact).state_dict().items()}
+        state["head.weight"] = torch.zeros_like(state["head.weight"])
+        state["head.bias"] = torch.tensor(
+            [0.0, 0.0, 0.0, 2.4, -3.0, 0.0, 0.0, 0.0],
+            dtype=state["head.bias"].dtype,
+        )
+        artifact.model_state_dict = state
+        artifact.global_target_defaults = {"gross_exposure_target": 0.7, "turnover_budget": 0.08}
+        return artifact
+
     def test_portfolio_set_v5_artifact_round_trips_through_generic_loader(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / PORTFOLIO_SET_V5_ARTIFACT_FILENAME
@@ -90,9 +105,14 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_daily_target_weight_intent", frame.columns)
             self.assertIn("portfolio_daily_target_delta_intent", frame.columns)
             self.assertIn("portfolio_daily_release_first_intent", frame.columns)
+            self.assertIn("portfolio_cashflow_decision_v1_mode", frame.columns)
+            self.assertIn("portfolio_daily_source_target_intent", frame.columns)
+            self.assertIn("portfolio_daily_receiver_target_intent", frame.columns)
             self.assertIn("portfolio_daily_receiver_score", frame.columns)
             self.assertIn("portfolio_daily_source_score", frame.columns)
             self.assertIn("portfolio_daily_receiver_executable_candidate", frame.columns)
+            self.assertIn("portfolio_daily_source_release_quality", frame.columns)
+            self.assertIn("portfolio_daily_receiver_add_headroom", frame.columns)
             self.assertIn("portfolio_set_v5_cash_buffer_score", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_constraint_violation", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_feasible", frame.columns)
@@ -103,8 +123,35 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
                 places=8,
             )
             self.assertEqual(float(frame["portfolio_set_v5_target_delta_weight_conflict_count"].iloc[0]), 0.0)
+            self.assertEqual(float(frame["portfolio_cashflow_decision_v1_mode"].iloc[0]), 1.0)
         self.assertEqual(global_targets["release_first_allocation_v3_mode"], 1.0)
         self.assertEqual(generic_globals["release_first_allocation_v3_mode"], 1.0)
+        self.assertEqual(global_targets["portfolio_cashflow_decision_v1_mode"], 1.0)
+        self.assertEqual(generic_globals["portfolio_cashflow_decision_v1_mode"], 1.0)
+
+    def test_predict_policy_portfolio_set_v5_opens_receiver_from_cash_in_cashflow_mode(self) -> None:
+        artifact = self._biased_artifact()
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["AAA", "BBB", "CCC"],
+                "alpha_score": [0.2, 0.9, 0.4],
+                "current_weight": [0.0, 0.0, 0.0],
+                "portfolio_daily_target_delta_intent": [0.0, 0.0, 0.0],
+            }
+        )
+
+        policy, global_targets = predict_policy_portfolio_set_v5(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"market_downside_pressure": 0.0},
+        )
+
+        self.assertEqual(global_targets["portfolio_cashflow_decision_v1_mode"], 1.0)
+        self.assertGreater(float(policy["portfolio_daily_receiver_target_intent"].sum()), 0.0)
+        self.assertGreater(float(policy["portfolio_daily_target_delta_intent"].clip(lower=0.0).sum()), 0.003)
+        self.assertLessEqual(float(policy["portfolio_daily_target_delta_intent"].abs().sum()), 0.08 + 1.0e-6)
+        self.assertEqual(float(policy["portfolio_daily_source_target_intent"].sum()), 0.0)
+        self.assertTrue(set(policy.loc[policy["portfolio_daily_receiver_target_intent"] > 0.5, "action_label"]).issubset({"open"}))
 
 
 if __name__ == "__main__":

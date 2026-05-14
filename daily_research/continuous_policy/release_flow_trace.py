@@ -87,12 +87,29 @@ def build_release_flow_trace(
         ("release_first_intent_score", "portfolio_daily_release_first_intent", "release_intent_score"),
         0.0,
     ).clip(0.0, 1.0)
+    cashflow_mode = _numeric(frame, ("portfolio_cashflow_decision_v1_mode",), 0.0) > 0.5
+    source_supply = _numeric(frame, ("portfolio_set_v5_source_supply",), 0.0).clip(lower=0.0)
+    receiver_demand = _numeric(frame, ("portfolio_set_v5_receiver_demand",), 0.0).clip(lower=0.0)
+    cashflow_source_intent = (
+        (_numeric(frame, ("portfolio_daily_source_target_intent",), 0.0) > 0.5)
+        | ((source_supply > float(deadband)) & (target_delta < -float(deadband)))
+    )
+    cashflow_receiver_intent = (
+        (_numeric(frame, ("portfolio_daily_receiver_target_intent",), 0.0) > 0.5)
+        | ((receiver_demand > float(deadband)) & (target_delta > float(deadband)))
+    )
     action_hint = _strings(frame, "release_first_action_hint", "hold").str.lower()
     block_reason = _strings(frame, "release_first_block_reason", "none").replace("", "none")
 
     held = current > float(deadband)
     held_negative_delta = held & (target_delta < -float(deadband))
     receiver_positive_delta = receiver_executable & (target_delta > float(deadband))
+    cashflow_active = bool(cashflow_mode.any())
+    if cashflow_active:
+        source_executable = source_executable | cashflow_source_intent | (source_supply > float(deadband))
+        receiver_executable = receiver_executable | cashflow_receiver_intent | (receiver_demand > float(deadband))
+        held_negative_delta = held_negative_delta | cashflow_source_intent
+        receiver_positive_delta = receiver_positive_delta | cashflow_receiver_intent
     release_score_active = held & (release_score >= float(release_threshold))
     release_action_active = held & action_hint.isin({"reduce", "exit"})
     target_delta_weight_conflict = (
@@ -101,9 +118,16 @@ def build_release_flow_trace(
         | ((target_delta > float(deadband)) & (target_weight < current - float(deadband)))
     )
     source_intent = int(max(_allocation_metric(allocation_result, "release_first_source_intent_count", 0.0), float(release_score_active.sum())))
+    if cashflow_active:
+        source_intent = int(max(source_intent, int(cashflow_source_intent.sum()), int((source_supply > float(deadband)).sum())))
     source_realized = int(_allocation_metric(allocation_result, "release_first_source_realized_count", 0.0))
+    if cashflow_active and allocation_result is None:
+        source_realized = int(max(source_realized, int(cashflow_source_intent.sum())))
     source_intent_without_realization = max(0, source_intent - source_realized)
     receiver_dead = int(((receiver_executable | (target_delta > float(deadband))) & (receiver_score <= 0.02)).sum())
+    current_cash = max(0.0, 1.0 - float(current.sum()))
+    target_cash = max(0.0, 1.0 - float(target_weight.sum()))
+    cashflow_cash_conservation_gap = abs(target_cash - (current_cash + float(source_supply.sum()) - float(receiver_demand.sum())))
 
     blocker = "none"
     if int(held.sum()) == 0:
@@ -129,6 +153,12 @@ def build_release_flow_trace(
         "release_score_above_threshold_count": int(release_score_active.sum()),
         "release_action_hint_count": int(release_action_active.sum()),
         "source_intent_without_realization_count": int(source_intent_without_realization),
+        "cashflow_decision_mode_count": int(cashflow_mode.sum()),
+        "cashflow_decision_source_intent_count": int(cashflow_source_intent.sum()),
+        "cashflow_decision_receiver_intent_count": int(cashflow_receiver_intent.sum()),
+        "cashflow_decision_source_supply_sum": float(source_supply.sum()),
+        "cashflow_decision_receiver_demand_sum": float(receiver_demand.sum()),
+        "cashflow_decision_cash_conservation_gap": float(cashflow_cash_conservation_gap),
         "receiver_score_dead_count": int(receiver_dead),
         "target_delta_weight_conflict_count": int(target_delta_weight_conflict.sum()),
         "release_block_reason_counts": dict(reason_counts),

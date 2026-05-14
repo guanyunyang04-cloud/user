@@ -11,6 +11,10 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
+from daily_research.continuous_policy.portfolio_cashflow_decision import (
+    PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN,
+    normalize_portfolio_cashflow_decision,
+)
 from daily_research.continuous_policy.model_seq_v3 import SEQUENCE_STEP_ORDER, resolve_sequence_columns
 from daily_research.continuous_policy.model_v2 import _apply_matrix, _prepare_matrix, _split_indices
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5
@@ -189,20 +193,75 @@ def project_portfolio_set_v5_cashflow_oracle(
     source_capacity_sum = source_capacity.sum(dim=1)
     receiver_capacity_sum = receiver_capacity.sum(dim=1)
     cash_shortfall = (cash_floor - cash_now).clamp_min(0.0)
-    rotation_release_need = torch.minimum(source_capacity_sum, torch.maximum(receiver_capacity_sum * 0.65, turnover * 0.20))
-    source_budget = torch.minimum(source_capacity_sum, torch.minimum(turnover, torch.maximum(rotation_release_need, cash_shortfall)))
-    cash_deploy_budget = (cash_now - cash_floor).clamp_min(0.0) * 0.30
-    receiver_budget = torch.minimum(receiver_capacity_sum, torch.minimum(turnover, source_budget + cash_deploy_budget))
+    cash_available = (cash_now - cash_floor).clamp_min(0.0)
+    receiver_signal = (receiver_capacity_sum > float(deadband)).to(dtype=dtype)
+    source_signal = (source_capacity_sum > float(deadband)).to(dtype=dtype)
+    rotation_release_need = torch.minimum(
+        source_capacity_sum,
+        torch.maximum(receiver_capacity_sum * 0.65, turnover * 0.20 * receiver_signal),
+    )
+    source_budget = torch.minimum(
+        source_capacity_sum,
+        torch.minimum(turnover, torch.maximum(rotation_release_need, cash_shortfall)),
+    )
+    cash_deploy_budget = torch.minimum(cash_available, turnover) * (0.45 + 0.35 * (1.0 - risk))
+    cash_deploy_budget = torch.minimum(cash_deploy_budget, cash_available).clamp_min(0.0)
+    receiver_budget = torch.minimum(
+        receiver_capacity_sum,
+        torch.minimum(turnover, source_budget + cash_deploy_budget),
+    )
 
     eps = torch.tensor(1.0e-8, dtype=dtype, device=device)
-    source_alloc = source_capacity * (source_budget / source_capacity_sum.clamp_min(eps)).unsqueeze(1)
-    receiver_alloc = receiver_capacity * (receiver_budget / receiver_capacity_sum.clamp_min(eps)).unsqueeze(1)
+    source_rank_count = int(max(1, min(6, current.shape[1])))
+    receiver_rank_count = int(max(1, min(8, current.shape[1])))
+    source_rank_mask = torch.zeros_like(source_capacity, dtype=torch.bool)
+    receiver_rank_mask = torch.zeros_like(receiver_capacity, dtype=torch.bool)
+    source_positive = source_capacity > float(deadband)
+    receiver_positive = receiver_capacity > float(deadband)
+    if source_capacity.shape[1] > 0:
+        source_k = min(source_rank_count, source_capacity.shape[1])
+        source_top_idx = torch.topk(source_capacity, k=source_k, dim=1).indices
+        source_rank_mask.scatter_(1, source_top_idx, True)
+        source_rank_mask = source_rank_mask & source_positive
+    if receiver_capacity.shape[1] > 0:
+        receiver_score_rank = receiver_capacity * (~source_positive).to(dtype=dtype)
+        receiver_k = min(receiver_rank_count, receiver_capacity.shape[1])
+        receiver_top_idx = torch.topk(receiver_score_rank, k=receiver_k, dim=1).indices
+        receiver_rank_mask.scatter_(1, receiver_top_idx, True)
+        receiver_rank_mask = receiver_rank_mask & receiver_positive & (~source_rank_mask)
+        missing_receiver = receiver_signal.bool() & (~receiver_rank_mask.any(dim=1))
+        if bool(missing_receiver.any()):
+            fallback_eligible = receiver_positive & (~source_rank_mask)
+            fallback_scores = receiver_capacity * fallback_eligible.to(dtype=dtype)
+            missing_receiver = missing_receiver & fallback_eligible.any(dim=1)
+            fallback_idx = torch.argmax(fallback_scores, dim=1)
+            receiver_rank_mask[missing_receiver, :] = False
+            receiver_rank_mask[missing_receiver, fallback_idx[missing_receiver]] = True
+    source_capacity_sparse = source_capacity * source_rank_mask.to(dtype=dtype)
+    receiver_capacity_sparse = receiver_capacity * receiver_rank_mask.to(dtype=dtype)
+    source_capacity_sparse_sum = source_capacity_sparse.sum(dim=1)
+    receiver_capacity_sparse_sum = receiver_capacity_sparse.sum(dim=1)
+    cash_shortfall_budget = torch.minimum(source_capacity_sparse_sum, torch.minimum(turnover, cash_shortfall))
+    residual_source_capacity = (source_capacity_sparse_sum - cash_shortfall_budget).clamp_min(0.0)
+    residual_turnover = (turnover - cash_shortfall_budget).clamp_min(0.0)
+    pair_seed_budget = torch.minimum(
+        torch.minimum(residual_source_capacity, receiver_capacity_sparse_sum),
+        residual_turnover * 0.35 * source_signal * receiver_signal,
+    )
+    cash_buy_budget = torch.minimum(
+        (receiver_capacity_sparse_sum - pair_seed_budget).clamp_min(0.0),
+        torch.minimum(cash_deploy_budget, (residual_turnover - 2.0 * pair_seed_budget).clamp_min(0.0)),
+    )
+    source_budget = cash_shortfall_budget + pair_seed_budget
+    receiver_budget = pair_seed_budget + cash_buy_budget
+    source_alloc = source_capacity_sparse * (source_budget / source_capacity_sparse_sum.clamp_min(eps)).unsqueeze(1)
+    receiver_alloc = receiver_capacity_sparse * (receiver_budget / receiver_capacity_sparse_sum.clamp_min(eps)).unsqueeze(1)
     target_weight = (current - source_alloc + receiver_alloc).clamp(0.0, float(position_cap)) * mask_f
     target_delta = (target_weight - current) * mask_f
     source_used = source_alloc.sum(dim=1)
     receiver_used = receiver_alloc.sum(dim=1)
     cash_after = (cash_now + source_used - receiver_used).clamp(0.0, 1.0)
-    turnover_used = torch.maximum(source_used, receiver_used)
+    turnover_used = source_used + receiver_used
     trade_cost_turnover = source_used + receiver_used
     cap_violation = (target_weight - float(position_cap)).clamp_min(0.0).sum(dim=1)
     floor_violation = (-target_weight).clamp_min(0.0).sum(dim=1)
@@ -987,6 +1046,11 @@ def _predict_outputs(artifact: TorchPortfolioSetV5Artifact, state_frame: pd.Data
     return pd.DataFrame({name: tensor.detach().cpu().numpy().astype(float) for name, tensor in decoded.items()}, index=state_frame.index)
 
 
+def _predict_cashflow_turnover_budget(artifact: TorchPortfolioSetV5Artifact) -> float:
+    raw = float(dict(artifact.global_target_defaults or {}).get("turnover_budget", 0.08) or 0.08)
+    return float(np.clip(min(raw, 0.08), 0.04, 0.08))
+
+
 def predict_policy_portfolio_set_v5(
     artifact: TorchPortfolioSetV5Artifact,
     *,
@@ -1000,13 +1064,14 @@ def predict_policy_portfolio_set_v5(
     current = _current_weight(policy)
     source_score = outputs["source_supply_score"].clip(0.0, 1.0)
     receiver_score = outputs["receiver_demand_score"].clip(0.0, 1.0)
+    cashflow_turnover_budget = _predict_cashflow_turnover_budget(artifact)
     oracle = project_portfolio_set_v5_cashflow_oracle(
         current_weight=torch.as_tensor(current.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         source_score=torch.as_tensor(source_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         receiver_score=torch.as_tensor(receiver_score.to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         cash_buffer_score=torch.as_tensor(outputs["cash_buffer_score"].clip(0.0, 1.0).to_numpy(dtype=np.float32)[None, :], dtype=torch.float32),
         sample_mask=torch.ones((1, len(policy)), dtype=torch.bool),
-        turnover_budget=torch.as_tensor([float(dict(artifact.global_target_defaults or {}).get("turnover_budget", 0.18) or 0.18)], dtype=torch.float32),
+        turnover_budget=torch.as_tensor([cashflow_turnover_budget], dtype=torch.float32),
         risk_budget=torch.as_tensor([float(np.clip(outputs["cash_buffer_score"].clip(0.0, 1.0).mean(), 0.0, 1.0))], dtype=torch.float32),
     )
     target_weight = pd.Series(oracle["target_weight"][0].detach().cpu().numpy().astype(float), index=policy.index)
@@ -1025,20 +1090,35 @@ def predict_policy_portfolio_set_v5(
     release_block.loc[(current > 0.003) & (source_score < 0.02) & (target_delta >= -0.003)] = "source_score_dead"
     policy["portfolio_daily_target_weight_intent"] = target_weight.astype(float)
     policy["portfolio_daily_target_delta_intent"] = target_delta.astype(float)
+    policy["target_delta_hint"] = target_delta.astype(float)
     policy["portfolio_daily_release_first_intent"] = release_intent.astype(float)
     policy["release_first_action_hint"] = release_action.astype(str)
     policy["release_first_block_reason"] = release_block.astype(str)
     policy["portfolio_daily_source_score"] = source_score.astype(float)
     policy["portfolio_daily_unified_source_score"] = source_score.astype(float)
     policy["portfolio_daily_source_executable_candidate"] = ((current > 0.003) & (source_supply > 0.003)).astype(float)
+    policy["portfolio_daily_source_target_intent"] = ((current > 0.003) & (source_supply > 0.003) & (target_delta < -0.003)).astype(float)
+    policy["portfolio_daily_source_release_quality"] = release_intent.astype(float)
+    policy["portfolio_daily_source_release_capacity"] = release_intent.astype(float)
+    policy["portfolio_daily_source_release_preference"] = release_intent.astype(float)
+    policy["portfolio_daily_source_executability"] = policy["portfolio_daily_source_executable_candidate"].astype(float)
+    policy["portfolio_daily_source_economic_release_score"] = release_intent.astype(float)
     policy["portfolio_daily_receiver_score"] = receiver_score.astype(float)
     policy["portfolio_daily_unified_receiver_score"] = receiver_score.astype(float)
     policy["portfolio_daily_receiver_executable_candidate"] = ((current < 0.24 - 0.003) & (receiver_demand > 0.003) & (target_delta > 0.003)).astype(float)
+    policy["portfolio_daily_receiver_target_intent"] = policy["portfolio_daily_receiver_executable_candidate"].astype(float)
+    policy["portfolio_daily_receiver_add_headroom"] = (0.24 - current).clip(lower=0.0).astype(float)
+    policy["portfolio_daily_receiver_add_capacity"] = policy["portfolio_daily_receiver_add_headroom"].astype(float)
+    policy["portfolio_daily_receiver_executability"] = policy["portfolio_daily_receiver_executable_candidate"].astype(float)
+    policy["portfolio_daily_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
+    policy["portfolio_daily_unified_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
     policy["portfolio_set_v5_source_supply_score"] = source_score.astype(float)
     policy["portfolio_set_v5_receiver_demand_score"] = receiver_score.astype(float)
     policy["portfolio_set_v5_source_supply"] = source_supply.astype(float)
     policy["portfolio_set_v5_receiver_demand"] = receiver_demand.astype(float)
     policy["portfolio_set_v5_cash_buffer_score"] = float(oracle["cash_buffer"][0].detach().cpu())
+    policy["portfolio_set_v5_turnover_budget"] = cashflow_turnover_budget
+    policy["portfolio_set_v5_turnover_used"] = float(oracle["turnover_used"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_constraint_violation"] = float(oracle["constraint_violation"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_decision_value"] = float(oracle["decision_value"][0].detach().cpu())
     policy["portfolio_set_v5_oracle_feasible"] = float(float(oracle["constraint_violation"][0].detach().cpu()) <= 1.0e-6)
@@ -1052,9 +1132,19 @@ def predict_policy_portfolio_set_v5(
     policy.loc[add_mask, "action_label"] = "add"
     policy.loc[reduce_mask, "action_label"] = "reduce"
     policy.loc[exit_mask, "action_label"] = "exit"
+    policy[PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN] = 1.0
+    cashflow_decision = normalize_portfolio_cashflow_decision(
+        policy,
+        current_weight=current,
+        position_cap=0.24,
+        turnover_limit=cashflow_turnover_budget,
+        fail_closed=True,
+    )
+    policy = cashflow_decision.frame
     global_targets = dict(artifact.global_target_defaults or {})
     global_targets.update(
         {
+            PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN: 1.0,
             "release_first_allocation_v3_mode": 1.0,
             "allocation_intent_v2_mode": 1.0,
             "target_weight_intent_mode": 1.0,
@@ -1242,6 +1332,12 @@ def fit_policy_models_portfolio_set_v5(
             "target_source_count": target_diagnostics["decision_target_source_count"],
             "target_receiver_count": target_diagnostics["decision_target_receiver_count"],
             "target_intent_translation_conflict_count": target_diagnostics["decision_target_intent_translation_conflict_count"],
+            "source_recall_observed_count": target_diagnostics["decision_target_source_count"],
+            "receiver_recall_observed_count": target_diagnostics["decision_target_receiver_count"],
+            "receiver_source_balance_ratio": float(
+                target_diagnostics["decision_target_receiver_count"]
+                / max(target_diagnostics["decision_target_source_count"], 1.0)
+            ),
         },
         "device": str(device),
         "gpu_acceleration": runtime.to_diagnostics(),
@@ -1259,6 +1355,7 @@ def fit_policy_models_portfolio_set_v5(
         "portfolio_set_v5_full_self_attention": False,
         "portfolio_set_v5_shadow_only": True,
         "supports_release_first_allocation_v3_mode": True,
+        "supports_portfolio_cashflow_decision_v1_mode": True,
         "progress_event_count": int(progress_event_count),
         "train_seconds": round(time.monotonic() - started, 3),
         **target_diagnostics,

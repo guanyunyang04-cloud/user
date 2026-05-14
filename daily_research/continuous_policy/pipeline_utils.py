@@ -1273,6 +1273,35 @@ def compute_continuity_metrics(
             "portfolio_daily_source_target",
             pd.Series(False, index=action_outcomes.index),
         ).astype(bool)
+        cashflow_decision_mode = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_cashflow_decision_v1_mode",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        cashflow_source_intent = action_outcomes.get(
+            "portfolio_daily_source_target_intent",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        cashflow_receiver_intent = action_outcomes.get(
+            "portfolio_daily_receiver_target_intent",
+            pd.Series(False, index=action_outcomes.index),
+        ).astype(bool)
+        cashflow_contract_valid = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_cashflow_decision_v1_valid",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        cashflow_cash_gap = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_cashflow_decision_v1_cash_conservation_gap",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_source_protected_release_override = action_outcomes.get(
             "portfolio_daily_source_protected_release_override",
             pd.Series(False, index=action_outcomes.index),
@@ -1612,6 +1641,29 @@ def compute_continuity_metrics(
             else 0.0
         )
         metrics["portfolio_daily_receiver_target_count"] = float(portfolio_receiver_target.sum())
+        metrics["cashflow_decision_mode_count"] = float(cashflow_decision_mode.sum())
+        metrics["cashflow_decision_contract_valid_rate"] = (
+            float(cashflow_contract_valid.loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
+        metrics["cashflow_decision_source_intent_count"] = float(cashflow_source_intent.sum())
+        metrics["cashflow_decision_receiver_intent_count"] = float(cashflow_receiver_intent.sum())
+        metrics["cashflow_decision_source_target_alignment_rate"] = (
+            float((cashflow_source_intent & portfolio_source_target).sum() / cashflow_source_intent.sum())
+            if bool(cashflow_source_intent.any())
+            else 0.0
+        )
+        metrics["cashflow_decision_receiver_target_alignment_rate"] = (
+            float((cashflow_receiver_intent & portfolio_receiver_target).sum() / cashflow_receiver_intent.sum())
+            if bool(cashflow_receiver_intent.any())
+            else 0.0
+        )
+        metrics["cashflow_decision_cash_conservation_gap_mean"] = (
+            float(cashflow_cash_gap.loc[cashflow_decision_mode].mean())
+            if bool(cashflow_decision_mode.any())
+            else 0.0
+        )
         metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
             float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
             if bool(portfolio_receiver_target.any())
