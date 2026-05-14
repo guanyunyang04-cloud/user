@@ -27,7 +27,12 @@ from daily_research.data_lake import ResearchDataLake, build_label_completeness_
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build the local DuckDB/Parquet research data lake.")
     parser.add_argument("--universe", default="learned_all_a", help="Continuous-policy pool/universe name.")
-    parser.add_argument("--max-universe-size", type=int, default=1200)
+    parser.add_argument(
+        "--max-universe-size",
+        type=int,
+        default=0,
+        help="Maximum universe size. 0 means full resolved universe with no cap.",
+    )
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--start-date", default="auto")
     parser.add_argument("--end-date", default="latest")

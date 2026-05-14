@@ -111,9 +111,10 @@
 
 ## 2026-05-14 r62 Research Data Lake Lesson
 - Fact: reusable training datasets are no longer only a continuous-policy cache concern. r62 promotes them into a general DuckDB + Parquet research data lake with catalog metadata, label-completeness summaries, and SQL-queryable manifests.
-- Fact: full market/feature coverage is feasible locally for `learned_all_a/1200` from `2018-05-14` to `2026-05-13` when feature panels are stored as wide Parquet panels rather than exploded feature-value long rows.
+- Fact: full-universe market/feature coverage is feasible locally for uncapped `learned_all_a` from `2010-01-04` to `2026-05-13` when feature panels are stored as wide Parquet panels rather than exploded feature-value long rows.
+- Fact: `1200` is only a past engineering cap. The data lake target and default are full resolved universe (`--max-universe-size 0`), currently `3,070` cached A-share symbols.
 - Fact: full Gold training construction is not yet feasible through the current one-shot `build_training_matrices(...)` path; the slow phase is continuous-policy sample construction and portfolio teacher rollout, not data lake IO.
-- Inference: the next data-infrastructure bottleneck is resumable Gold construction by date shard, not database backend choice.
+- Inference: the next data-infrastructure bottleneck is resumable full-universe Gold construction by date shard, not database backend choice.
 - Rule: do not claim a full-window training dataset exists until the catalog contains a Gold dataset entry with row counts, date range, and label completeness.
 - Rule: realtime tail labels must remain explicitly marked as unobserved and must not be counted as completed training evidence.
 - Rule: future constructed training sets should be registered in the data lake catalog, while legacy pickle caches may remain fallback compatibility data.

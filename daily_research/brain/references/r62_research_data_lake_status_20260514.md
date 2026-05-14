@@ -14,13 +14,20 @@
 - Environment: `daily_research/environment.yml` now includes `duckdb>=1.0,<2`; local `yolos` env was updated with `duckdb 1.5.2`.
 
 ## Data Evidence
-- Full Bronze/Silver data lake built under `daily_research/output/research_data_lake`.
+- Full-universe Bronze/Silver data lake built under `daily_research/output/research_data_lake`.
 - Catalog manifest: `daily_research/output/research_data_lake/manifest_latest.json`.
 - Full market dataset:
+  - dataset_id: `policy_input_bundle__0f116a9b78c92ff045a6853d`
+  - universe: `learned_all_a`, max universe size `0` (uncapped), benchmark `000300.SH`
+  - resolved symbol count: `3,070` stocks plus benchmark during data fetch
+  - date window: `2010-01-04` to `2026-05-13`
+  - rows/cells: `12,184,830` Bronze market rows, `3,969` benchmark rows, `3,969` membership rows, `109` feature panels, `1,328,146,470` feature cells.
+- Prior capped market dataset retained for comparison:
   - dataset_id: `policy_input_bundle__4db1a32ab6e7d77ac7b8671c`
   - universe: `learned_all_a`, max universe size `1200`, benchmark `000300.SH`
   - date window: `2018-05-14` to `2026-05-13`
   - rows/cells: `2,328,000` Bronze market rows, `1,940` benchmark rows, `1,940` membership rows, `109` feature panels, `253,752,000` feature cells.
+- Clarification: `1200` was an engineering cap, not the project target. Data lake CLI default is now `--max-universe-size 0`, meaning full resolved universe.
 - Gold training datasets registered from existing reusable caches:
   - `continuous_policy_training_matrices__strict_train__a6e4d2c45a8f1c41d8165651`: `liquid500`, `2024-01-02` to `2025-12-31`, `232,500` sample rows, `465` daily rows, observed-label ratio `1.0`.
   - `continuous_policy_training_matrices__strict_train__22298f27aeb8e5a6bfe113a4`: `learned_all_a`, `2024-01-02` to `2025-12-31`, `558,000` sample rows, `465` daily rows, observed-label ratio `1.0`.
@@ -29,7 +36,7 @@
   - realtime zone: `1,140` sample rows, `57` daily rows, `400` unobserved tail-label rows explicitly marked.
 
 ## Blocker
-- Full Gold construction for `2018-05-14` to `2026-05-13`, `learned_all_a/1200`, is not complete.
+- Full Gold construction for `2010-01-04` to `2026-05-13`, uncapped `learned_all_a`, is not complete.
 - Attempt 1: full strict+realtime build wrote Bronze/Silver, then was stopped before Gold because memory pressure rose and free physical memory fell to about `2.4GB`.
 - Attempt 2: strict-only full Gold build was stopped after about `31` CPU minutes and about `6.2GB` working set, with no Gold files written.
 - Attempt 3: 2024-2026 Gold rebuild was also stopped after a long no-output training-matrix phase; existing 2024-2025 reusable caches were imported instead.

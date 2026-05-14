@@ -198,9 +198,10 @@
 
 ## 2026-05-14 r62 Research Data Lake Status
 - Fact: r62 adds a local DuckDB + Parquet research data lake in `daily_research.data_lake`, with catalog APIs, build/import CLIs, and train-policy lake-backed reusable dataset lookup.
-- Fact: full Bronze/Silver market-feature data is registered for `learned_all_a/1200`, `000300.SH`, `2018-05-14` to `2026-05-13`: `2,328,000` market rows, `109` feature panels, and `253,752,000` feature cells.
+- Fact: full-universe Bronze/Silver market-feature data is registered for uncapped `learned_all_a`, `000300.SH`, `2010-01-04` to `2026-05-13`: `12,184,830` market rows, `109` feature panels, and `1,328,146,470` feature cells across `3,070` stocks.
+- Fact: `1200` was only a prior engineering cap and remains in catalog as comparison evidence; data lake CLI default is now full universe via `--max-universe-size 0`.
 - Fact: existing reusable Gold training caches were imported into the lake: `liquid500` and `learned_all_a` strict-train datasets for `2024-01-02` to `2025-12-31`.
 - Fact: small real strict/realtime data lake smoke succeeded and explicitly marked realtime tail labels as unobserved.
-- Blocker: full 8-year Gold training-set construction did not complete; repeated attempts showed `build_training_matrices(...)` is the bottleneck, not DuckDB/Parquet.
+- Blocker: full-universe Gold training-set construction is not complete; repeated Gold attempts showed `build_training_matrices(...)` is the bottleneck, not DuckDB/Parquet.
 - Evidence capsule: `daily_research/brain/references/r62_research_data_lake_status_20260514.md`.
 - Current verdict: r62 is research infrastructure. It improves data reuse and auditability, but it is not strategy evidence and must not affect live/default/promotion or the active artifact.

@@ -163,12 +163,14 @@ class ResearchDataLakeTest(unittest.TestCase):
         parser = build_research_database.build_parser()
         market_only = parser.parse_args(["--market-only"])
         skip_market = parser.parse_args(["--skip-market", "--zones", "strict_train"])
+        defaults = parser.parse_args([])
         option_strings = {option for action in parser._actions for option in action.option_strings}
 
         self.assertIn("--market-only", option_strings)
         self.assertIn("--skip-market", option_strings)
         self.assertTrue(market_only.market_only)
         self.assertTrue(skip_market.skip_market)
+        self.assertEqual(defaults.max_universe_size, 0)
 
     def test_import_legacy_training_cache_registers_gold_dataset(self) -> None:
         sample_frame = pd.DataFrame({"date": ["2026-01-05"], "stock": ["000001.SZ"], "action_label": ["open"]})

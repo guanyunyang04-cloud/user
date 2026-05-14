@@ -257,4 +257,4 @@
 - Evidence boundary: r61 smoke/dry-run prove wiring. The parseable safe protocol shows behavior remains blocked and the outer study wrapper was interrupted before final study-summary write. This is not confirmatory, promotion, live/default, or active artifact evidence.
 
 ## 2026-05-14 r62 Research Data Lake Contract
-- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; full Bronze/Silver `learned_all_a/1200` exists for `2018-05-14` to `2026-05-13`, but full Gold remains incomplete and must be sharded before becoming a training default.
+- Research datasets should be registered in `daily_research.data_lake` with catalog metadata and label completeness; `learned_all_a/1200` is only capped evidence, while the data lake target/default is uncapped full universe (`max_universe_size=0`); full Bronze/Silver now exists, but full Gold remains incomplete.
