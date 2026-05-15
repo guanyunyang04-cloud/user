@@ -15,6 +15,13 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
     PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN,
     normalize_portfolio_cashflow_decision,
 )
+from daily_research.continuous_policy.portfolio_decision_features import (
+    PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+    attach_portfolio_decision_features,
+)
 from daily_research.continuous_policy.model_seq_v3 import SEQUENCE_STEP_ORDER, resolve_sequence_columns
 from daily_research.continuous_policy.model_v2 import _apply_matrix, _prepare_matrix, _split_indices
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5
@@ -389,6 +396,25 @@ def project_portfolio_set_v5_cashflow_oracle(
         - wrong_side_penalty * 0.52
         - crowding * (0.16 if multistage_regret_mode else 0.0)
     ).clamp(0.0, 1.0)
+    source_rotation_floor = torch.zeros_like(source_utility)
+    if multistage_regret_mode:
+        source_rotation_gate = (
+            (release > 0.62)
+            & (spread_value > 0.30)
+            & (wrong_side_penalty < 0.62)
+            & (reversal_penalty < 0.55)
+        ).to(dtype=dtype)
+        source_rotation_floor = (
+            release * 0.86
+            + spread_value * 0.36
+            + defense_pressure * 0.12
+            - opportunity_cost * 0.20
+            - wrong_side_penalty * 0.22
+            - reversal_penalty * 0.14
+            - source_hold_regret * 0.12
+            - reversal_action_regret * 0.10
+            - 0.04
+        ).clamp(0.0, 1.0) * source_rotation_gate
     receiver_utility = (
         receiver * (0.60 if value_arbitration_mode else 1.0)
         + deploy * 0.35
@@ -399,6 +425,13 @@ def project_portfolio_set_v5_cashflow_oracle(
     ).clamp(0.0, 1.0)
     if multistage_regret_mode:
         source_utility = (source_utility * (1.0 - 0.80 * torch.maximum(source_hold_regret, reversal_action_regret))).clamp(0.0, 1.0)
+        source_utility = torch.maximum(
+            source_utility,
+            (
+                source_rotation_floor
+                * (1.0 - 0.35 * torch.maximum(source_hold_regret, reversal_action_regret))
+            ).clamp(0.0, 1.0),
+        )
         receiver_utility = (
             torch.maximum(receiver_utility, positive_deploy_floor)
             * (1.0 - 0.45 * receiver_deploy_regret)
@@ -1048,12 +1081,23 @@ def build_portfolio_set_v5_targets(
                 * (1.0 - 0.95 * receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float)).clip(0.0, 1.0)
                 * (1.0 - 0.95 * rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float)).clip(0.0, 1.0)
             )
-            receiver_floor_candidates = (
+            receiver_floor_base = (
                 (receiver_floor_values > 0.25)
                 & (receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float) < 0.18)
                 & (rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float) < 0.12)
                 & (defense_value.loc[idx].to_numpy(dtype=float) < 0.45)
                 & (headroom_values > float(deadband))
+            )
+            live_receiver_floor = receiver_floor_base & (receiver_demand > float(deadband))
+            if bool(live_receiver_floor.any()) and float(source_supply.sum()) > float(deadband):
+                live_budget = min(float(receiver_demand[live_receiver_floor].sum()), float(source_supply.sum()))
+                if live_budget > float(deadband):
+                    live_weight = receiver_demand[live_receiver_floor].clip(min=0.0)
+                    live_weight_sum = float(live_weight.sum())
+                    if live_weight_sum > 0.0:
+                        r71_receiver_coverage_floor[live_receiver_floor] = live_budget * live_weight / live_weight_sum
+            receiver_floor_candidates = (
+                receiver_floor_base
                 & (receiver_demand <= float(deadband))
             )
             if bool(receiver_floor_candidates.any()):
@@ -1064,22 +1108,27 @@ def build_portfolio_set_v5_targets(
                 selected_local = np.flatnonzero(receiver_floor_candidates)
                 selected_local = selected_local[np.argsort(receiver_floor_values[selected_local])[::-1]][:4]
                 source_floor_values = (
-                    release_value.loc[idx].to_numpy(dtype=float) * 0.58
-                    + receiver_floor_values.max(initial=0.0) * 0.20
-                    - source_hold_regret_5d.loc[idx].to_numpy(dtype=float) * 0.62
-                    - positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) * 0.62
-                    - reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) * 0.42
+                    release_value.loc[idx].to_numpy(dtype=float) * 0.84
+                    + receiver_floor_values.max(initial=0.0) * 0.24
+                    + receiver_source_spread_value.loc[idx].to_numpy(dtype=float) * 0.18
+                    - source_opportunity_cost.loc[idx].to_numpy(dtype=float) * 0.20
+                    - source_hold_regret_5d.loc[idx].to_numpy(dtype=float) * 0.16
+                    - positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) * 0.22
+                    - reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) * 0.14
+                    - 0.04
                 ).clip(0.0, 1.0)
                 source_floor_capacity = np.maximum(
                     0.0,
-                    current_values - target_weight - float(deadband),
+                    np.minimum(current_values, current_values * np.maximum(source_floor_values, 0.0)) - float(deadband),
                 )
                 source_candidates = np.flatnonzero(
-                    (source_floor_values > 0.12)
+                    (source_floor_values > 0.18)
                     & (source_floor_capacity > float(deadband))
                     & (current_values > float(deadband))
-                    & (source_hold_regret_5d.loc[idx].to_numpy(dtype=float) < 0.35)
-                    & (positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) < 0.45)
+                    & (release_value.loc[idx].to_numpy(dtype=float) > 0.62)
+                    & (receiver_source_spread_value.loc[idx].to_numpy(dtype=float) > 0.30)
+                    & (positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) < 0.62)
+                    & (reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) < 0.55)
                 )
                 source_candidates = source_candidates[np.argsort(source_floor_values[source_candidates])[::-1]][:4]
                 rotation_budget = min(
@@ -2495,8 +2544,8 @@ def predict_policy_portfolio_set_v5(
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     if state_frame.empty:
         raise ValueError("state_frame is empty.")
-    policy = state_frame.copy()
-    outputs = _predict_outputs(artifact, state_frame, daily_features)
+    policy = attach_portfolio_decision_features(state_frame.copy(), mode="predict")
+    outputs = _predict_outputs(artifact, policy, daily_features)
     current = _current_weight(policy)
     source_score = outputs["source_supply_score"].clip(0.0, 1.0)
     receiver_score = outputs["receiver_demand_score"].clip(0.0, 1.0)
@@ -2515,6 +2564,52 @@ def predict_policy_portfolio_set_v5(
         )
         if value_arbitration_mode
         else None
+    )
+    value_deploy = value_inputs["deploy_value"] if value_inputs is not None else pd.Series(0.0, index=policy.index)
+    value_release = value_inputs["release_value"] if value_inputs is not None else pd.Series(0.0, index=policy.index)
+    value_defense = value_inputs["defense_value"] if value_inputs is not None else pd.Series(0.0, index=policy.index)
+    value_spread = (
+        value_inputs["receiver_source_spread_value"] if value_inputs is not None else pd.Series(0.0, index=policy.index)
+    )
+    pre_oracle_source_strength = (
+        pd.concat(
+            [source_score.rename("source_output"), value_release.rename("release_value")],
+            axis=1,
+        )
+        .max(axis=1)
+        .fillna(0.0)
+        .clip(0.0, 1.0)
+    )
+    pre_oracle_receiver_strength = (
+        pd.concat(
+            [
+                receiver_score.rename("receiver_output"),
+                value_deploy.rename("deploy_value"),
+                value_spread.rename("spread_value"),
+            ],
+            axis=1,
+        )
+        .max(axis=1)
+        .fillna(0.0)
+        .clip(0.0, 1.0)
+    )
+    pre_oracle_source_candidate = (current > 0.003) & (pre_oracle_source_strength > 0.02)
+    pre_oracle_receiver_candidate = (current < 0.24 - 0.003) & (pre_oracle_receiver_strength > 0.02)
+    pre_oracle_source_capacity = float((current * pre_oracle_source_strength).where(pre_oracle_source_candidate, 0.0).sum())
+    pre_oracle_receiver_headroom = float(((0.24 - current).clip(lower=0.0)).where(pre_oracle_receiver_candidate, 0.0).sum())
+    pre_oracle_cash_dominance = float(
+        (
+            pd.concat(
+                [
+                    outputs["cash_buffer_score"].clip(0.0, 1.0).rename("cash_output"),
+                    value_defense.rename("defense_value"),
+                ],
+                axis=1,
+            )
+            .max(axis=1)
+            .fillna(0.0)
+            > pre_oracle_receiver_strength
+        ).mean()
     )
     cashflow_turnover_budget = _predict_cashflow_turnover_budget(artifact)
     risk_components = [outputs["cash_buffer_score"]]
@@ -2584,6 +2679,14 @@ def predict_policy_portfolio_set_v5(
     policy["portfolio_daily_receiver_executability"] = policy["portfolio_daily_receiver_executable_candidate"].astype(float)
     policy["portfolio_daily_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
     policy["portfolio_daily_unified_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
+    policy["portfolio_set_v5_r73_pre_oracle_source_candidate_count"] = float(pre_oracle_source_candidate.sum())
+    policy["portfolio_set_v5_r73_pre_oracle_receiver_candidate_count"] = float(pre_oracle_receiver_candidate.sum())
+    policy["portfolio_set_v5_r73_pre_oracle_source_capacity"] = pre_oracle_source_capacity
+    policy["portfolio_set_v5_r73_pre_oracle_receiver_headroom"] = pre_oracle_receiver_headroom
+    policy["portfolio_set_v5_r73_pre_oracle_cash_dominance"] = pre_oracle_cash_dominance
+    policy["portfolio_set_v5_r73_pre_oracle_source_strength"] = pre_oracle_source_strength.astype(float)
+    policy["portfolio_set_v5_r73_pre_oracle_receiver_strength"] = pre_oracle_receiver_strength.astype(float)
+    policy["portfolio_set_v5_r73_oracle_target_delta_abs_sum"] = float(target_delta.abs().sum())
     policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN] = 1.0 if value_arbitration_mode else 0.0
     policy[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN] = 1.0 if multistage_regret_mode else 0.0
     if value_inputs is not None:
@@ -2688,6 +2791,15 @@ def predict_policy_portfolio_set_v5(
     policy.loc[reduce_mask, "action_label"] = "reduce"
     policy.loc[exit_mask, "action_label"] = "exit"
     policy[PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN] = 1.0
+    oracle_source_count = int((source_supply > 0.003).sum())
+    oracle_receiver_count = int((receiver_demand > 0.003).sum())
+    if int(pre_oracle_receiver_candidate.sum()) <= 0 and int(pre_oracle_source_candidate.sum()) <= 0:
+        collapse_layer = "feature_candidate_layer"
+    elif oracle_source_count <= 0 and oracle_receiver_count <= 0 and float(target_delta.abs().sum()) <= 0.003:
+        collapse_layer = "oracle_layer"
+    else:
+        collapse_layer = "none"
+    policy["portfolio_set_v5_r73_collapse_layer"] = collapse_layer
     cashflow_decision = normalize_portfolio_cashflow_decision(
         policy,
         current_weight=current,
@@ -2696,12 +2808,46 @@ def predict_policy_portfolio_set_v5(
         fail_closed=True,
     )
     policy = cashflow_decision.frame
+    post_cashflow_delta_abs_sum = float(
+        (
+            pd.to_numeric(policy["portfolio_daily_target_weight_intent"], errors="coerce").fillna(0.0)
+            - current.reindex(policy.index).fillna(0.0)
+        )
+        .abs()
+        .sum()
+    )
+    if collapse_layer == "none" and float(target_delta.abs().sum()) > 0.003 and post_cashflow_delta_abs_sum <= 0.003:
+        policy["portfolio_set_v5_r73_collapse_layer"] = "cashflow_contract_layer"
+    policy["portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum"] = post_cashflow_delta_abs_sum
     global_targets = dict(artifact.global_target_defaults or {})
     global_targets.update(
         {
             PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN: 1.0,
             PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN: 1.0 if value_arbitration_mode else 0.0,
             PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN: 1.0 if multistage_regret_mode else 0.0,
+            PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN: 1.0,
+            PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN: float(
+                pd.to_numeric(
+                    policy.get(
+                        PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN,
+                        pd.Series(0.0, index=policy.index),
+                    ),
+                    errors="coerce",
+                )
+                .fillna(0.0)
+                .max()
+            ),
+            PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN: float(
+                pd.to_numeric(
+                    policy.get(
+                        PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+                        pd.Series(0.0, index=policy.index),
+                    ),
+                    errors="coerce",
+                )
+                .fillna(0.0)
+                .max()
+            ),
             "release_first_allocation_v3_mode": 1.0,
             "allocation_intent_v2_mode": 1.0,
             "target_weight_intent_mode": 1.0,

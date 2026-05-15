@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 22,
+  "record_count": 24,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -716,6 +716,42 @@
         "Use `--data-source lake --lake-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d` for future r71 evaluate/shadow/export smoke runs.",
         "Repair r71 prediction/oracle behavior until source and receiver target counts are nonzero under the lake smoke.",
         "Only consider strict resume after translation remains closed and at least two behavior metrics improve versus r70 without source/receiver collapse."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
+    },
+    {
+      "id": "r73",
+      "date": "2026-05-15",
+      "r_id": "r73",
+      "path": "daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md",
+      "tags": [
+        "r73",
+        "continuous_policy",
+        "portfolio_set_v5",
+        "data_lake",
+        "r71"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02",
+        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
+      ],
+      "verdict": "Status: `research / shadow-only / lake-native utilization and r71 collapse-repair evidence`. r73 repairs the r72 lake-smoke source/receiver target collapse and adds data-lake feature utilization evidence, but it is not promotion evidence, confirmatory evidence, or live evidence.",
+      "blockers": [
+        "training_evidence.status=insufficient",
+        "promotion_gate.status=shadow_only",
+        "shadow cash_timing_quality_1d remains negative",
+        "shadow source positive-forward sell share remains high",
+        "shadow receiver-source spread remains negative"
+      ],
+      "next_allowed_actions": [
+        "Continue r71/r73 research on cash timing, source quality, receiver-source spread, and reversal quality.",
+        "Use the lake feature utilization report to promote high-value unused lake panels into the decision bundle.",
+        "Only consider strict resume after a fresh tiny lake smoke preserves cashflow closure and improves at least two behavior metrics versus r70/r72."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [

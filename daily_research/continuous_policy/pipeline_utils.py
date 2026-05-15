@@ -1406,6 +1406,80 @@ def compute_continuity_metrics(
             action_outcomes.get("portfolio_set_v5_r71_receiver_regreted_buy", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0) > 0.5
+        decision_feature_bundle_mode = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_decision_feature_bundle_v1_mode",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        decision_feature_missing_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_decision_feature_contract_missing_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_feature_neutral_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_decision_feature_contract_neutral_default_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_pre_source_candidate_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_pre_oracle_source_candidate_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_pre_receiver_candidate_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_pre_oracle_receiver_candidate_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_source_capacity = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_pre_oracle_source_capacity",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_receiver_headroom = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_pre_oracle_receiver_headroom",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_cash_dominance = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_pre_oracle_cash_dominance",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_oracle_delta_abs_sum = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_oracle_target_delta_abs_sum",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_post_cashflow_delta_abs_sum = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r73_collapse_layer = action_outcomes.get(
+            "portfolio_set_v5_r73_collapse_layer",
+            pd.Series("", index=action_outcomes.index),
+        ).fillna("").astype(str)
         portfolio_source_protected_release_override = action_outcomes.get(
             "portfolio_daily_source_protected_release_override",
             pd.Series(False, index=action_outcomes.index),
@@ -1825,6 +1899,50 @@ def compute_continuity_metrics(
             if bool((portfolio_receiver_target & r71_multistage_regret_mode).any())
             else 0.0
         )
+        r73_metric_mask = cashflow_decision_mode & r71_multistage_regret_mode
+        metrics["portfolio_decision_feature_bundle_v1_mode_count"] = float(decision_feature_bundle_mode.sum())
+        metrics["portfolio_decision_feature_contract_missing_count_max"] = (
+            float(decision_feature_missing_count.loc[decision_feature_bundle_mode].max())
+            if bool(decision_feature_bundle_mode.any())
+            else 0.0
+        )
+        metrics["portfolio_decision_feature_contract_neutral_default_count_max"] = (
+            float(decision_feature_neutral_count.loc[decision_feature_bundle_mode].max())
+            if bool(decision_feature_bundle_mode.any())
+            else 0.0
+        )
+        metrics["r73_pre_oracle_source_candidate_count_mean"] = (
+            float(r73_pre_source_candidate_count.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_pre_oracle_receiver_candidate_count_mean"] = (
+            float(r73_pre_receiver_candidate_count.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_pre_oracle_source_capacity_mean"] = (
+            float(r73_source_capacity.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_pre_oracle_receiver_headroom_mean"] = (
+            float(r73_receiver_headroom.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_pre_oracle_cash_dominance_mean"] = (
+            float(r73_cash_dominance.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_oracle_target_delta_abs_sum_mean"] = (
+            float(r73_oracle_delta_abs_sum.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        metrics["r73_post_cashflow_target_delta_abs_sum_mean"] = (
+            float(r73_post_cashflow_delta_abs_sum.loc[r73_metric_mask].mean()) if bool(r73_metric_mask.any()) else 0.0
+        )
+        if bool(r73_metric_mask.any()):
+            layer_counts = r73_collapse_layer.loc[r73_metric_mask].replace("", "unknown").value_counts()
+            metrics["r73_collapse_layer_none_share"] = float((r73_collapse_layer.loc[r73_metric_mask] == "none").mean())
+            metrics["r73_collapse_layer_feature_candidate_count"] = float(layer_counts.get("feature_candidate_layer", 0.0))
+            metrics["r73_collapse_layer_oracle_count"] = float(layer_counts.get("oracle_layer", 0.0))
+            metrics["r73_collapse_layer_cashflow_contract_count"] = float(layer_counts.get("cashflow_contract_layer", 0.0))
+        else:
+            metrics["r73_collapse_layer_none_share"] = 0.0
+            metrics["r73_collapse_layer_feature_candidate_count"] = 0.0
+            metrics["r73_collapse_layer_oracle_count"] = 0.0
+            metrics["r73_collapse_layer_cashflow_contract_count"] = 0.0
         metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
             float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
             if bool(portfolio_receiver_target.any())

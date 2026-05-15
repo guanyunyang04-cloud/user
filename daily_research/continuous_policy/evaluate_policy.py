@@ -17,6 +17,7 @@ from daily_research.continuous_policy.pipeline_utils import (
     load_target_weight_panel,
     run_policy_rollout,
 )
+from daily_research.continuous_policy.portfolio_decision_features import build_lake_feature_utilization_report
 from daily_research.continuous_policy.portfolio_simulator import (
     BUDGET_CALIBRATION_CHOICES,
     BUDGET_SEMANTICS_CHOICES,
@@ -181,6 +182,15 @@ def main(argv: list[str] | None = None) -> int:
         refresh_cache=args.refresh_cache,
         progress_desc="continuous policy evaluate",
     )
+    lake_feature_utilization_report = (
+        build_lake_feature_utilization_report(
+            prepared,
+            used_feature_names=getattr(artifact, "feature_names", []),
+            daily_feature_names=getattr(artifact, "daily_feature_names", []),
+        )
+        if str(args.data_source).strip().lower() == "lake"
+        else {}
+    )
     future_metrics = build_future_path_metrics(prepared)
     model_rollout = run_policy_rollout(
         prepared=prepared,
@@ -304,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         "alpha_prior_score_panel": alpha_prior_score_panel,
         "alpha_prior_target_weight_panel": alpha_prior_target_weight_panel,
         "prepared_summary": prepared.to_summary(),
+        "lake_feature_utilization_report": lake_feature_utilization_report,
         "continuous_policy_metrics": model_rollout["metrics"],
         "continuity_metrics": model_rollout["continuity_metrics"],
         "teacher_oracle_metrics": teacher_rollout["metrics"],

@@ -123,6 +123,17 @@ def build_release_flow_trace(
     r71_crowding = _numeric(frame, ("portfolio_set_v5_r71_crowding_penalty",), 0.0)
     r71_source_regreted_sell = (_numeric(frame, ("portfolio_set_v5_r71_source_regreted_sell",), 0.0) > 0.5) & r71_mode
     r71_receiver_regreted_buy = (_numeric(frame, ("portfolio_set_v5_r71_receiver_regreted_buy",), 0.0) > 0.5) & r71_mode
+    decision_feature_mode = _numeric(frame, ("portfolio_decision_feature_bundle_v1_mode",), 0.0) > 0.5
+    decision_feature_missing = _numeric(frame, ("portfolio_decision_feature_contract_missing_count",), 0.0)
+    decision_feature_neutral = _numeric(frame, ("portfolio_decision_feature_contract_neutral_default_count",), 0.0)
+    r73_pre_source_candidate = _numeric(frame, ("portfolio_set_v5_r73_pre_oracle_source_candidate_count",), 0.0)
+    r73_pre_receiver_candidate = _numeric(frame, ("portfolio_set_v5_r73_pre_oracle_receiver_candidate_count",), 0.0)
+    r73_source_capacity = _numeric(frame, ("portfolio_set_v5_r73_pre_oracle_source_capacity",), 0.0)
+    r73_receiver_headroom = _numeric(frame, ("portfolio_set_v5_r73_pre_oracle_receiver_headroom",), 0.0)
+    r73_cash_dominance = _numeric(frame, ("portfolio_set_v5_r73_pre_oracle_cash_dominance",), 0.0)
+    r73_oracle_delta_abs = _numeric(frame, ("portfolio_set_v5_r73_oracle_target_delta_abs_sum",), 0.0)
+    r73_post_cashflow_delta_abs = _numeric(frame, ("portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum",), 0.0)
+    r73_collapse_layer = _strings(frame, "portfolio_set_v5_r73_collapse_layer", "")
     cashflow_source_intent = (
         (_numeric(frame, ("portfolio_daily_source_target_intent",), 0.0) > 0.5)
         | ((source_supply > float(deadband)) & (target_delta < -float(deadband)))
@@ -206,6 +217,17 @@ def build_release_flow_trace(
         "r71_rotation_spread_regret_mean": float(r71_rotation_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
         "r71_reversal_action_regret_mean": float(r71_reversal_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
         "r71_crowding_penalty_mean": float(r71_crowding.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "portfolio_decision_feature_bundle_v1_mode_count": int(decision_feature_mode.sum()),
+        "portfolio_decision_feature_contract_missing_count_max": float(decision_feature_missing.loc[decision_feature_mode].max()) if bool(decision_feature_mode.any()) else 0.0,
+        "portfolio_decision_feature_contract_neutral_default_count_max": float(decision_feature_neutral.loc[decision_feature_mode].max()) if bool(decision_feature_mode.any()) else 0.0,
+        "r73_pre_oracle_source_candidate_count": float(r73_pre_source_candidate.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_pre_oracle_receiver_candidate_count": float(r73_pre_receiver_candidate.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_pre_oracle_source_capacity": float(r73_source_capacity.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_pre_oracle_receiver_headroom": float(r73_receiver_headroom.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_pre_oracle_cash_dominance": float(r73_cash_dominance.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_oracle_target_delta_abs_sum": float(r73_oracle_delta_abs.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_post_cashflow_target_delta_abs_sum": float(r73_post_cashflow_delta_abs.loc[cashflow_mode & r71_mode].max()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r73_collapse_layer_counts": dict(Counter(r73_collapse_layer.loc[cashflow_mode & r71_mode].replace("", "unknown").astype(str))) if bool((cashflow_mode & r71_mode).any()) else {},
         "receiver_score_dead_count": int(receiver_dead),
         "target_delta_weight_conflict_count": int(target_delta_weight_conflict.sum()),
         "release_block_reason_counts": dict(reason_counts),

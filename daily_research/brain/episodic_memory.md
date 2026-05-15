@@ -126,3 +126,11 @@
 - 风险：`latest_*` 存在来源不一致提醒，latest study tag 与 latest protocol tag 不同；后续必须继续使用 explicit study tag、protocol tag 或 dataset id。
 - 推断：当前最合理下一步不是启动 confirmatory 或改 live，而是先修 r65 的 held source creation、receiver target realization、target/action translation 与 day-set sampling。
 - 边界：本轮只完成接管、核对和复盘写回；不修改 active artifact，不写 completed strategy evidence，不进入 promotion / live / default 切换。
+
+## 2026-05-15 r73 Lake-Native R71 Collapse Repair 复盘
+- 行动前自检：运行 task capsule，确认 `daily_research/output/active_execution_strategy.json` clean；固定证据 tag 为 `protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02`，不使用 loose `latest_*` 作结论真源。
+- 事实：r73 实现了 `portfolio_decision_feature_bundle_v1`、lake feature utilization report、r71/lake collapse diagnostics，并修复 r72 lake smoke 中 source/receiver target 为 0 的坍缩。
+- 事实：`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通；eval/shadow 均为 `cashflow_decision_contract_valid_rate=1.0`、`intent_translation_conflict_rate=0.0`，且 source/receiver target 均非零。
+- 事实：完整回归通过：continuous_policy `248 passed`，data_lake `15 passed`，`git diff --check` clean，`doc_guard.py check` 通过，`brain_integrity_check.py --json` 为 `status=ok`，active artifact diff 为空。
+- 推断：当前 blocker 已从 lake provider / source-receiver collapse 转移到 behavior quality 与 training evidence：cash timing、source positive-forward sell、receiver-source spread、training evidence insufficient。
+- 边界：r73 是 research / shadow evidence，不是 promotion、confirmatory、live 或 completed strategy verdict；不得把 lake eval 或 realtime/tail label 写成 completed training evidence。

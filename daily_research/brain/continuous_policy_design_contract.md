@@ -1,6 +1,6 @@
 # Continuous Policy 设计合同
 
-快照日期：`2026-05-14`
+快照日期：`2026-05-15`
 
 ## 北极星
 - 构建一个以日为单位进行连续决策的交易执行模型。
@@ -40,6 +40,7 @@
 - r69 value arbitration：source/release/defense/cash/reversal 只能作为训练目标与诊断改进，不得绕过 r68 cashflow contract，不得用 guard 静默修正成 promotion-looking behavior。
 - r70 after repair：oracle feasibility 与 cashflow translation 不再是 r69/r70 主 blocker；后续不能再通过放宽版本边界、静默启用 r69 mode 或二次 solver 重算来制造改善。
 - r71 multistage regret：source rebound、receiver deploy regret、cash defense regret、rotation spread regret、reversal action regret 与 crowding 只能作为显式 r71 训练目标和诊断；不得绕过 r68 cashflow contract，不得把 failed smoke 写成 behavior acceptance。
+- r73 lake-native decision features：data lake 可作为 evaluate/shadow/export 的可复现市场输入与决策特征审计源；`portfolio_decision_feature_bundle_v1` 只能对齐训练/评估字段语义和诊断利用率，不得把 lake eval 写成 completed training evidence。
 - r61 core-v4 保留为 baseline/ablation；不再作为下一代主模型承载新主线。
 
 ## 成功判定
@@ -60,6 +61,7 @@
 - r70：version boundary 与 oracle feasibility 修复完成，tiny strict-Gold smoke `protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01` 完整通过，oracle violation 近零、cashflow valid=1、intent conflict=0；但 training evidence 仍 insufficient，cash timing、source quality 与 reversal 仍失败。
 - r71：multi-stage regret 代码/测试闭合，base/r69/r71 版本边界保持隔离；但 `protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01/_02/_03` evaluate 均被 TDX singleton empty data 阻断，`_04` train 被 CUDA busy 阻断，尚无 completed tiny behavior smoke。
 - r72：`data_source=lake` 已成为 evaluate/shadow/export 的通用研究路径；默认 market bundle 为 `policy_input_bundle__0f116a9b78c92ff045a6853d`。`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通但 source/receiver target 为 0，不能作为 r71 behavior acceptance。
+- r73：lake-native utilization 与 r71 collapse repair 完成首轮 research/shadow smoke；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 中 eval/shadow source/receiver target 均非零、cashflow valid=1、intent conflict=0，但 training evidence 仍 insufficient，cash timing、source quality 与 receiver-source spread 仍是主 blocker。
 
 ## 禁止事项
 - 禁止从 smoke、dry-run、interrupted wrapper、failed trial、runtime timeout 或 realtime tail label 推 promotion。
@@ -70,7 +72,7 @@
 
 ## 下一步方向
 - r66 当前任务是 brain/workflow maintenance，不推进策略训练。
-- r71 后续策略研究应使用 lake evaluator，先修复 source/receiver target collapse；只有 translation 不退化、oracle violation 近零且至少两个 behavior 指标优于 r70，才能考虑 strict resume。
+- r71/r73 后续策略研究应使用 lake evaluator 与 decision-feature utilization report，继续修 cash timing、source quality、receiver-source spread 与 training evidence；只有 translation 不退化、oracle violation 近零且至少两个 behavior 指标优于 r70，才能考虑 strict resume。
 - 后台运行只作为 OS 级 launcher/轮询能力，不能改变 study/protocol 单进程研究本体。
 - 数据层下一步是 full-window realtime Gold build/audit；仍不得作为 completed training evidence。
 
@@ -88,6 +90,7 @@
 - r70：version-boundary and oracle-feasibility repair for portfolio-set v5 / r69 value arbitration。
 - r71：multi-stage regret behavior-quality mechanism for portfolio-set v5。
 - r72：generic data lake evaluator for evaluate/shadow/export.
+- r73：lake-native decision feature utilization and r71 source/receiver collapse repair.
 - 完整证据入口：`daily_research/brain/references/evidence_registry.json` 与 `daily_research/brain/references/r*_*.md`。
 
 ## 归档入口

@@ -103,6 +103,20 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         artifact.global_target_defaults = {"gross_exposure_target": 0.7, "turnover_budget": 0.08}
         return artifact
 
+    def _cash_biased_r71_artifact(self) -> TorchPortfolioSetV5Artifact:
+        artifact = self._r71_artifact()
+        from daily_research.continuous_policy.model_portfolio_set_v5 import _make_model
+
+        state = {key: value.detach().clone() for key, value in _make_model(artifact).state_dict().items()}
+        state["head.weight"] = torch.zeros_like(state["head.weight"])
+        state["head.bias"] = torch.tensor(
+            [0.0, 0.0, -4.0, -4.0, 1.2, 0.0, 0.0, 0.0],
+            dtype=state["head.bias"].dtype,
+        )
+        artifact.model_state_dict = state
+        artifact.global_target_defaults = {"gross_exposure_target": 0.7, "turnover_budget": 0.08}
+        return artifact
+
     def test_portfolio_set_v5_artifact_round_trips_through_generic_loader(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / PORTFOLIO_SET_V5_ARTIFACT_FILENAME
@@ -255,6 +269,78 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertLessEqual(float(policy["portfolio_daily_target_delta_intent"].abs().sum()), 0.08 + 1.0e-6)
         self.assertEqual(float(policy["portfolio_daily_source_target_intent"].sum()), 0.0)
         self.assertTrue(set(policy.loc[policy["portfolio_daily_receiver_target_intent"] > 0.5, "action_label"]).issubset({"open"}))
+
+    def test_r71_predict_uses_decision_feature_bundle_to_prevent_cash_only_lake_collapse(self) -> None:
+        artifact = self._cash_biased_r71_artifact()
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["AAA", "BBB", "CCC"],
+                "score_blend": [-0.8, 1.8, 0.2],
+                "score_rank_pct": [0.1, 1.0, 0.5],
+                "ret_1d": [-0.02, 0.03, 0.0],
+                "ret_3d": [-0.04, 0.05, 0.0],
+                "ret_5d": [-0.06, 0.07, 0.0],
+                "ret_accel_5_20": [-0.03, 0.04, 0.0],
+                "vol_20d": [0.03, 0.02, 0.03],
+                "distance_to_20d_high": [-0.12, -0.01, -0.04],
+                "distance_to_20d_low": [0.01, 0.10, 0.03],
+                "in_pool": [1.0, 1.0, 1.0],
+                "current_weight": [0.0, 0.0, 0.0],
+                "holding_flag": [0.0, 0.0, 0.0],
+                "market_downside_pressure": [0.0, 0.0, 0.0],
+            }
+        )
+
+        policy, global_targets = predict_policy_portfolio_set_v5(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"market_downside_pressure": 0.0},
+        )
+
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN], 1.0)
+        self.assertIn("portfolio_decision_feature_bundle_v1_mode", policy.columns)
+        self.assertGreater(float(policy["portfolio_set_v5_r73_pre_oracle_receiver_candidate_count"].iloc[0]), 0.0)
+        self.assertGreater(float(policy["portfolio_set_v5_r73_pre_oracle_receiver_headroom"].iloc[0]), 0.0)
+        self.assertGreater(float(policy["portfolio_daily_receiver_target_intent"].sum()), 0.0)
+        self.assertEqual(str(policy["portfolio_set_v5_r73_collapse_layer"].iloc[0]), "none")
+        self.assertEqual(float(policy["portfolio_daily_source_target_intent"].sum()), 0.0)
+
+    def test_r71_predict_keeps_source_funded_rotation_alive_for_weak_held_lake_source(self) -> None:
+        artifact = self._cash_biased_r71_artifact()
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["SRC", "RCV", "MID"],
+                "score_blend": [-1.5, 2.2, 0.3],
+                "score_rank_pct": [0.02, 1.0, 0.45],
+                "ret_1d": [-0.035, 0.035, 0.0],
+                "ret_3d": [-0.060, 0.060, 0.0],
+                "ret_5d": [-0.085, 0.080, 0.0],
+                "ret_accel_5_20": [-0.045, 0.045, 0.0],
+                "vol_20d": [0.035, 0.020, 0.030],
+                "distance_to_20d_high": [-0.13, -0.01, -0.04],
+                "distance_to_20d_low": [0.01, 0.11, 0.04],
+                "drawdown_from_peak": [-0.09, 0.0, 0.0],
+                "signal_decay_speed": [0.90, 0.0, 0.0],
+                "in_pool": [1.0, 1.0, 1.0],
+                "current_weight": [0.012, 0.0, 0.0],
+                "holding_flag": [1.0, 0.0, 0.0],
+                "market_downside_pressure": [0.02, 0.02, 0.02],
+            }
+        )
+
+        policy, global_targets = predict_policy_portfolio_set_v5(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"market_downside_pressure": 0.0},
+        )
+
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN], 1.0)
+        self.assertGreater(float(policy["portfolio_daily_source_target_intent"].sum()), 0.0)
+        self.assertGreater(float(policy["portfolio_daily_receiver_target_intent"].sum()), 0.0)
+        self.assertLess(float(policy.loc[0, "portfolio_daily_target_delta_intent"]), -0.003)
+        self.assertGreater(float(policy.loc[1, "portfolio_daily_target_delta_intent"]), 0.003)
+        self.assertEqual(float(policy["portfolio_set_v5_target_delta_weight_conflict_count"].iloc[0]), 0.0)
+        self.assertEqual(str(policy["portfolio_set_v5_r73_collapse_layer"].iloc[0]), "none")
 
 
 if __name__ == "__main__":

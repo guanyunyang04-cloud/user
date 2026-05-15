@@ -276,14 +276,35 @@ def _release_translation_deploy_health(
     model_release_signal_forward_excess_5d: float,
     model_release_against_protected_hold_share: float,
     model_release_release_consistent_share: float,
+    cashflow_source_target_count: float = 0.0,
+    cashflow_source_release_consistent_share: float = 0.0,
+    cashflow_source_forward_excess_5d: float = 0.0,
+    cashflow_source_positive_forward_sell_share: float = 0.0,
+    cashflow_source_realized_sell_rate: float = 0.0,
 ) -> dict[str, Any]:
     deploy_observed = float(deploy_intent_action_count) >= 3.0
-    funding_observed = float(deploy_funding_rebalance_sell_count) >= 5.0
+    cashflow_source_observed = float(cashflow_source_target_count) >= 5.0
+    funding_observed = float(deploy_funding_rebalance_sell_count) >= 5.0 or cashflow_source_observed
     release_observed = float(model_release_signal_sell_count) >= 5.0
 
     deploy_score = _bounded_unit(deploy_intent_realized_rate, 0.35, 0.85) if deploy_observed else 0.0
+    effective_release_consistent_share = (
+        max(float(deploy_funding_release_consistent_share), float(cashflow_source_release_consistent_share))
+        if cashflow_source_observed
+        else float(deploy_funding_release_consistent_share)
+    )
+    effective_forward_excess_5d = (
+        float(cashflow_source_forward_excess_5d)
+        if cashflow_source_observed and float(deploy_funding_rebalance_sell_count) < 5.0
+        else float(deploy_funding_rebalance_forward_excess_5d)
+    )
+    effective_positive_forward_sell_share = (
+        float(cashflow_source_positive_forward_sell_share)
+        if cashflow_source_observed
+        else max(0.0, float(deploy_funding_rebalance_forward_excess_5d))
+    )
     release_score = (
-        _bounded_unit(deploy_funding_release_consistent_share, 0.05, 0.65)
+        _bounded_unit(effective_release_consistent_share, 0.05, 0.65)
         if funding_observed
         else 0.0
     )
@@ -293,20 +314,24 @@ def _release_translation_deploy_health(
         0.05,
         0.35,
     )
-    funding_forward_score = 1.0 - _bounded_unit(max(0.0, deploy_funding_rebalance_forward_excess_5d), 0.0, 0.04)
+    funding_forward_score = 1.0 - _bounded_unit(max(0.0, effective_forward_excess_5d), 0.0, 0.04)
     protected_hold_score = 1.0 - _bounded_unit(deploy_funding_against_protected_hold_share, 0.10, 0.45)
     funding_sell_share_score = 1.0 - _bounded_unit(
         max(0.0, deploy_funding_rebalance_sell_share - 0.35),
         0.0,
         0.45,
     )
+    cashflow_realized_score = _bounded_unit(cashflow_source_realized_sell_rate, 0.50, 0.95)
+    cashflow_wrong_side_score = 1.0 - _bounded_unit(effective_positive_forward_sell_share, 0.18, 0.55)
     budget_origin_score = 1.0 - _bounded_unit(budget_origin_sell_share, 0.0, 0.35)
     funding_score = (
         _weighted_unit_score(
             [
                 (funding_forward_score, 0.30),
-                (protected_hold_score, 0.30),
-                (funding_sell_share_score, 0.20),
+                (protected_hold_score, 0.22),
+                (funding_sell_share_score, 0.12),
+                (cashflow_realized_score, 0.18 if cashflow_source_observed else 0.0),
+                (cashflow_wrong_side_score, 0.18 if cashflow_source_observed else 0.0),
                 (budget_origin_score, 0.20),
             ]
         )
@@ -363,6 +388,9 @@ def _release_translation_deploy_health(
         "funding_forward_score": funding_forward_score if funding_observed else 0.0,
         "protected_hold_score": protected_hold_score if funding_observed else 0.0,
         "funding_sell_share_score": funding_sell_share_score if funding_observed else 0.0,
+        "cashflow_source_observed": float(cashflow_source_observed),
+        "cashflow_source_realized_score": cashflow_realized_score if cashflow_source_observed else 0.0,
+        "cashflow_source_wrong_side_score": cashflow_wrong_side_score if cashflow_source_observed else 0.0,
         "budget_origin_score": budget_origin_score,
     }
     return {
@@ -2123,6 +2151,17 @@ def _build_semantic_conflicts(
         if deploy_funding_rebalance_sell_mask.any()
         else pd.Series(dtype=float)
     )
+    cashflow_source_release_consistent_share = _safe_mean(
+        (
+            funding_release_support.loc[portfolio_source_target]
+            > protected_hold_support.loc[portfolio_source_target] + support_margin
+        ).astype(float)
+        if portfolio_source_target.any()
+        else pd.Series(dtype=float)
+    )
+    cashflow_source_forward_excess_5d = portfolio_daily_source_forward_excess_5d
+    cashflow_source_positive_forward_sell_share = portfolio_daily_source_positive_forward_sell_share
+    cashflow_source_realized_sell_rate = portfolio_daily_source_realized_sell_rate
     if semantic_conflict_rate >= 0.05:
         diagnoses.append("执行层仍在非小概率地重写模型动作语义，策略学习闭环还不干净。")
     if order_translation_conflict_rate >= 0.05:
@@ -2280,6 +2319,11 @@ def _build_semantic_conflicts(
         model_release_signal_forward_excess_5d=model_release_signal_forward_excess_5d,
         model_release_against_protected_hold_share=model_release_against_protected_hold_share,
         model_release_release_consistent_share=model_release_release_consistent_share,
+        cashflow_source_target_count=float(portfolio_daily_source_target_count),
+        cashflow_source_release_consistent_share=cashflow_source_release_consistent_share,
+        cashflow_source_forward_excess_5d=cashflow_source_forward_excess_5d,
+        cashflow_source_positive_forward_sell_share=cashflow_source_positive_forward_sell_share,
+        cashflow_source_realized_sell_rate=cashflow_source_realized_sell_rate,
     )
     return {
         "action_rows": int(len(working)),
@@ -2560,6 +2604,10 @@ def _build_semantic_conflicts(
         "model_release_release_consistent_share": model_release_release_consistent_share,
         "deploy_funding_against_protected_hold_share": deploy_funding_against_protected_hold_share,
         "deploy_funding_release_consistent_share": deploy_funding_release_consistent_share,
+        "cashflow_source_release_consistent_share": cashflow_source_release_consistent_share,
+        "cashflow_source_forward_excess_5d": cashflow_source_forward_excess_5d,
+        "cashflow_source_positive_forward_sell_share": cashflow_source_positive_forward_sell_share,
+        "cashflow_source_realized_sell_rate": cashflow_source_realized_sell_rate,
         "avg_clipped_intent_risk": avg_clipped_intent_risk,
         "clipped_intent_risk_conflict_gap": clipped_intent_risk_conflict_gap,
         "high_cash_up_market_share": high_cash_up_market_share,

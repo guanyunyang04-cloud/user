@@ -1,6 +1,6 @@
 # Daily Research 知识中枢
 
-快照日期：`2026-05-14`
+快照日期：`2026-05-15`
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
@@ -9,7 +9,7 @@
 - `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
-- r39 仍是 continuous_policy 有效证据基线；r40-r72 是 research / shadow 升级链或基础设施证据。
+- r39 仍是 continuous_policy 有效证据基线；r40-r73 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
 
 ## 2. 硬规则
@@ -48,6 +48,7 @@
 - r70：修复 v5 base/r69 版本边界、r69 oracle constraint violation 与 TDX empty-batch evaluate blocker；tiny strict-Gold smoke 完整通过，但 behavior quality 与 training evidence 仍未达标，仍只能作为 research / shadow mechanism evidence。
 - r71：新增显式 multi-stage regret 研究线，把 source rebound、receiver deploy regret、cash defense regret、rotation spread regret、reversal action regret 与 crowding diagnostics 写入 v5 target/oracle；代码与测试闭合，但 tiny behavior smoke 仍被 TDX singleton / CUDA blocker 中断，不能视为 behavior acceptance。
 - r72：通用 data lake evaluator 已接入 evaluate / shadow / export，绕开 TDX singleton empty；`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通但 source/receiver target 仍为 0，因此是 infrastructure evidence，不是 r71 behavior acceptance。
+- r73：新增 lake-native decision feature bundle 与 utilization report，并修复 r71 lake smoke source/receiver target collapse；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通且 source/receiver 非零，但 cash timing、source quality、receiver-source spread 与 training evidence 仍未达标，仍不是 promotion 或 behavior-success verdict。
 
 ## 5. 当前方法论
 - 先直接 protocol smoke，再 study dry-run，再 safe screening；不得跳到 confirmatory。

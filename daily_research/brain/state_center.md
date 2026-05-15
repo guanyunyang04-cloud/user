@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-05-14`
+快照日期：`2026-05-15`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线。
@@ -10,7 +10,7 @@
 - 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义：`research_raw_target_weight`；权重上限语义：`follow_research_raw_no_global_cap`。
 - continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
-- 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r72 均为 research / shadow 升级链或基础设施证据。
+- 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r73 均为 research / shadow 升级链或基础设施证据。
 - r64 已产出 full-window strict Gold：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`，`2010-01-04 -> 2026-04-10` observed strict window，`is_training_safe=true`，audit `ok`。
 - r65 已新增 portfolio-set v5 后端，但 safe protocol 行为仍 source/receiver dead；不是策略有效性证据。
 - r67 已用论文驱动 DFL-PG v1 替换 portfolio-set v5 内核默认目标、loss、oracle 与 profile default；tiny strict-Gold smoke `protocol_r67_paper_dfl_replace_v5_smoke_20260514_04` 完整跑通，但 training evidence 仍 `insufficient`，promotion gate 仍 `shadow_only`。
@@ -19,6 +19,7 @@
 - r70 已修复 v5 版本边界与 r69 oracle violation：base 默认回到 `portfolio_set_v5_dfl_pg_v1`，r69 value arbitration 只在显式 profile/loss 或 artifact metadata 下启用；tiny strict-Gold smoke `protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01` 完整通过 train/evaluate/shadow/export，oracle violation 近零、cashflow valid=1、intent conflict=0，但 training evidence 仍 `insufficient`，cash timing/reversal/source quality 仍失败，promotion gate 仍 `shadow_only`。
 - r71 已新增显式 `portfolio_set_v5_dfl_pg_v1_r71_multistage_regret` 研究线，用 multi-stage regret / ordered goal-programming 改写行为质量目标；unit/contract/regression 已通过，但 `_01/_02/_03` evaluate 被 TDX singleton empty data 阻断、`_04` train 被 CUDA busy 阻断，尚无 completed tiny behavior smoke，不是 behavior acceptance。
 - r72 已把 evaluate/shadow/export 接到通用 data lake evaluator；`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通且无 TDX empty blocker，但 source/receiver target 仍为 0，仍不是 r71 behavior acceptance。
+- r73 已把 data lake 接入决策特征利用审计与 r71 collapse 诊断；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通，eval/shadow 均保持 cashflow valid=1、intent conflict=0 且 source/receiver target 非零，但 training evidence 仍 `insufficient`、promotion gate 仍 `shadow_only`，行为质量仍有 cash timing、source quality、receiver-source spread 阻塞。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -38,12 +39,12 @@
 - r68 修复 v5 资金流翻译闭环：cashflow contract 在 `_03` shadow 21/21 天 valid，source/receiver target 均非零，release trace primary blocker 为 `none`。下一 blocker 已转为训练证据不足、source 选择质量、cash timing、drawdown/reversal，而不是 source/receiver translation dead。
 - r69 将下一 blocker 进一步定位为：value arbitration 目标覆盖有所改善，但 receiver 覆盖不足、oracle constraint violation 偏高、完整 evaluate/shadow smoke 受 TDX 数据读取阻塞。
 - r70 已解除“oracle feasibility / TDX empty batch”这两个机制阻塞；当前 blocker 继续收敛到 receiver 覆盖、cash timing、reversal、source positive-forward sell 与 sufficient training evidence。
-- r71 已把上述 blocker 显式写入 multi-stage regret target/oracle/head calibration；r72 已解除 provider evaluate 阻塞，下一步必须先修复 lake smoke 中 source/receiver target collapse，再判断是否进入 strict resume。
+- r71 已把上述 blocker 显式写入 multi-stage regret target/oracle/head calibration；r72 已解除 provider evaluate 阻塞；r73 已修复 lake smoke source/receiver target collapse，下一步必须围绕 cash timing、source quality、receiver-source spread 与 sufficient training evidence 继续修正，再判断是否进入 strict resume。
 
 ## 当前优先级
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
 - P1：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P2：围绕 r71 multi-stage regret 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality 与 sufficient training evidence；translation closure 和 oracle feasibility 不再是当前主 blocker。
+- P2：围绕 r71/r73 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
 - P3：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
 - P4：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复。
 
@@ -74,10 +75,11 @@
 - r70 v5 version boundary / oracle repair：`daily_research/brain/references/r70_v5_version_boundary_oracle_repair_status_20260514.md`。
 - r71 multistage regret v5：`daily_research/brain/references/r71_multistage_regret_v5_status_20260514.md`。
 - r72 data lake evaluator：`daily_research/brain/references/r72_data_lake_evaluator_status_20260515.md`。
+- r73 lake-native r71 utilization：`daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口
 - 本文件归档前完整快照：`daily_research/brain/references/state_center_archive_20260510.md`。
 - 早期状态原文：`daily_research/brain/references/state_center_history_raw_20260424.md`。
 - 早期状态索引：`daily_research/brain/references/state_center_evidence_index_20260424.md`。
-- r50-r72 详细证据：`daily_research/brain/references/r*_*.md`。
+- r50-r73 详细证据：`daily_research/brain/references/r*_*.md`。

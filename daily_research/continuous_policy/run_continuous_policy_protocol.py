@@ -853,6 +853,7 @@ def main(argv: list[str] | None = None) -> int:
             "continuous_policy_metrics": evaluation_summary.get("continuous_policy_metrics", {}),
             "continuity_metrics": evaluation_summary.get("continuity_metrics", {}),
             "teacher_oracle_metrics": evaluation_summary.get("teacher_oracle_metrics", {}),
+            "lake_feature_utilization_report": evaluation_summary.get("lake_feature_utilization_report", {}),
             "reference_panels": evaluation_summary.get("reference_panels", []),
             "evaluation_summary_json": str((EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json").resolve()),
         },

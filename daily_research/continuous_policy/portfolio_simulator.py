@@ -33,6 +33,12 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
     normalize_portfolio_cashflow_decision,
     portfolio_cashflow_decision_enabled,
 )
+from daily_research.continuous_policy.portfolio_decision_features import (
+    PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+)
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN,
     PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN,
@@ -5578,6 +5584,26 @@ class PortfolioState:
                     )
                     if "portfolio_cashflow_decision_v1_cash_conservation_gap" in policy.columns
                     else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN]
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN]
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN]
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN: str(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN] or ""
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN in policy.columns
+                    else "",
                     "release_first_intent_score": float(policy.at[stock, "release_first_intent_score"] or 0.0)
                     if "release_first_intent_score" in policy.columns
                     else 0.0,
@@ -5644,6 +5670,56 @@ class PortfolioState:
                     "portfolio_set_v5_turnover_used": float(policy.at[stock, "portfolio_set_v5_turnover_used"] or 0.0)
                     if "portfolio_set_v5_turnover_used" in policy.columns
                     else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_source_candidate_count": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_source_candidate_count"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_source_candidate_count" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_receiver_candidate_count": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_receiver_candidate_count"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_receiver_candidate_count" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_source_capacity": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_source_capacity"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_source_capacity" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_receiver_headroom": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_receiver_headroom"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_receiver_headroom" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_cash_dominance": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_cash_dominance"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_cash_dominance" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_source_strength": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_source_strength"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_source_strength" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_pre_oracle_receiver_strength": float(
+                        policy.at[stock, "portfolio_set_v5_r73_pre_oracle_receiver_strength"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_pre_oracle_receiver_strength" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_oracle_target_delta_abs_sum": float(
+                        policy.at[stock, "portfolio_set_v5_r73_oracle_target_delta_abs_sum"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_oracle_target_delta_abs_sum" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum": float(
+                        policy.at[stock, "portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum"] or 0.0
+                    )
+                    if "portfolio_set_v5_r73_post_cashflow_target_delta_abs_sum" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r73_collapse_layer": str(
+                        policy.at[stock, "portfolio_set_v5_r73_collapse_layer"] or ""
+                    )
+                    if "portfolio_set_v5_r73_collapse_layer" in policy.columns
+                    else "",
                     "portfolio_set_v5_r69_deploy_value": float(policy.at[stock, "portfolio_set_v5_r69_deploy_value"] or 0.0)
                     if "portfolio_set_v5_r69_deploy_value" in policy.columns
                     else 0.0,
