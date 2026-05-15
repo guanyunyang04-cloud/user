@@ -8,6 +8,8 @@ from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+    _target_diagnostics,
     _portfolio_set_loss,
     build_portfolio_set_v5_targets,
     portfolio_set_v5_decision_diagnostics,
@@ -25,6 +27,7 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
             PORTFOLIO_SET_V5_INTERNAL_VERSION: PORTFOLIO_SET_V5_INTERNAL_VERSION,
             PORTFOLIO_SET_V5_R69_INTERNAL_VERSION: PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
             PORTFOLIO_SET_V5_R71_INTERNAL_VERSION: PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+            PORTFOLIO_SET_V5_R74_INTERNAL_VERSION: PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
         }
         for name, expected_resolved in expected_names.items():
             resolved, config = resolve_portfolio_set_v5_loss_profile(name)
@@ -55,6 +58,13 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
                 self.assertGreater(weights["multistage_regret_total"], 0.0)
                 self.assertGreater(weights["goal_programming_quality_total"], 0.0)
                 self.assertGreater(weights["crowding_penalty_total"], 0.0)
+            if expected_resolved == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION:
+                self.assertGreater(weights["value_arbitration_total"], 0.0)
+                self.assertGreater(weights["multistage_regret_total"], 0.0)
+                self.assertGreater(weights["lake_behavior_quality_total"], 0.0)
+                self.assertGreater(weights["r74_cash_timing_alignment_total"], 0.0)
+                self.assertGreater(weights["r74_source_quality_total"], 0.0)
+                self.assertGreater(weights["r74_receiver_spread_quality_total"], 0.0)
 
     def test_legacy_losses_are_rejected_for_v5(self) -> None:
         for legacy in ("alpha_result_value_budget_split_v47", "alpha_result_value_budget_split_v46", "teacher_imitation"):
@@ -385,6 +395,85 @@ class PortfolioSetV5ReleaseFirstLossTest(unittest.TestCase):
             float(r71["source_supply"].sum() + r71["receiver_demand"].sum()),
             float(r71["turnover_budget"].iloc[0]) + 1.0e-6,
         )
+
+    def test_r74_target_builder_uses_decision_feature_bundle_for_lake_behavior_quality(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "date": ["2026-05-14", "2026-05-14"],
+                "stock": ["SRC", "RCV"],
+                "score_blend": [-1.2, 2.0],
+                "score_rank_pct": [0.05, 1.0],
+                "ret_1d": [-0.02, 0.02],
+                "ret_3d": [-0.05, 0.04],
+                "ret_5d": [-0.08, 0.06],
+                "ret_accel_5_20": [-0.04, 0.04],
+                "vol_20d": [0.05, 0.02],
+                "distance_to_20d_high": [-0.12, -0.01],
+                "distance_to_20d_low": [0.01, 0.10],
+                "in_pool": [1.0, 1.0],
+                "current_weight": [0.12, 0.0],
+                "holding_flag": [1.0, 0.0],
+                "adv20": [1000.0, 5000.0],
+                "amount": [1.0e6, 5.0e6],
+                "volume": [100.0, 500.0],
+                "z_drawdown_20": [1.2, 0.0],
+                "z_volatility_20": [0.8, 0.1],
+                "z_vol_ratio_5_20": [0.7, 0.0],
+                "z_price_volume_divergence": [0.3, 0.0],
+                "z_breakout_volume": [0.0, 1.5],
+                "portfolio_daily_receiver_forward_excess_5d": [0.0, 0.03],
+                "portfolio_daily_source_forward_excess_5d": [-0.03, 0.0],
+                "forward_excess_1d": [-0.01, 0.02],
+                "forward_excess_3d": [-0.02, 0.025],
+                "forward_excess_5d": [-0.03, 0.03],
+                "market_downside_pressure": [0.15, 0.15],
+            }
+        )
+
+        r71 = build_portfolio_set_v5_targets(frame, loss_profile=PORTFOLIO_SET_V5_R71_INTERNAL_VERSION)
+        r74 = build_portfolio_set_v5_targets(frame, loss_profile=PORTFOLIO_SET_V5_R74_INTERNAL_VERSION)
+
+        self.assertIn("cash_defense_regret_1d", r74.columns)
+        self.assertGreater(float(r74["cash_defense_regret_1d"].mean()), float(r71["cash_defense_regret_1d"].mean()))
+        self.assertGreater(float(r74["receiver_source_spread_value"].iloc[1]), float(r71["receiver_source_spread_value"].iloc[1]))
+        self.assertGreaterEqual(float(r74["crowding_penalty"].max()), float(r71["crowding_penalty"].max()))
+        self.assertGreater(float(r74["source_supply"].sum()), 0.003)
+        self.assertGreater(float(r74["receiver_demand"].sum()), 0.003)
+        self.assertLess(float(r74["constraint_violation"].mean()), 1.0e-6)
+
+    def test_r74_target_diagnostics_use_cash_and_spread_fields(self) -> None:
+        targets = pd.DataFrame(
+            {
+                "source_supply": [0.06, 0.0],
+                "receiver_demand": [0.0, 0.06],
+                "cash_buffer": [0.20, 0.20],
+                "receiver_source_spread_value": [0.0, 0.80],
+                "target_delta_weight_conflict": [0.0, 0.0],
+                "constraint_violation": [0.0, 0.0],
+                "decision_value": [0.10, 0.20],
+                "deploy_value": [0.0, 0.80],
+                "release_value": [0.60, 0.0],
+                "defense_value": [0.25, 0.25],
+                "cash_timing_value": [0.20, 0.20],
+                "reversal_risk_penalty": [0.0, 0.0],
+                "source_wrong_side_sell_penalty": [0.0, 0.0],
+                "source_hold_regret_3d": [0.10, 0.0],
+                "source_hold_regret_5d": [0.05, 0.0],
+                "receiver_deploy_regret_3d": [0.0, 0.10],
+                "receiver_deploy_regret_5d": [0.0, 0.05],
+                "cash_defense_regret_1d": [0.50, 0.50],
+                "cash_defense_regret_3d": [0.40, 0.40],
+                "rotation_spread_regret_5d": [0.0, 0.0],
+                "reversal_action_regret_3d": [0.0, 0.0],
+                "crowding_penalty": [0.0, 0.10],
+            }
+        )
+
+        diagnostics = _target_diagnostics(targets)
+
+        self.assertAlmostEqual(diagnostics["r74_target_cash_timing_alignment_1d"], 0.10)
+        self.assertGreater(diagnostics["r74_target_source_quality_score"], 0.0)
+        self.assertGreater(diagnostics["r74_target_receiver_source_spread_quality"], 0.0)
 
     def test_pg_dfl_surrogate_prefers_oracle_aligned_logits(self) -> None:
         weights = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)[1]["multi_objective_loss_weights"]

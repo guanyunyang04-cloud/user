@@ -758,6 +758,43 @@
         "policy_input_bundle__0f116a9b78c92ff045a6853d",
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]
+    },
+    {
+      "id": "r74",
+      "date": "2026-05-15",
+      "r_id": "r74",
+      "path": "daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md",
+      "tags": [
+        "r74",
+        "continuous_policy",
+        "portfolio_set_v5",
+        "data_lake",
+        "behavior_quality"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
+        "protocol_r74_lake_behavior_quality_v5_smoke_20260515_02",
+        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
+      ],
+      "verdict": "Status: `research / shadow-only / lake-native behavior-quality evidence`. r74 keeps cashflow/intent translation closed and improves several behavior metrics versus r73, but source/receiver coverage shrinks, feature contract degraded rate is 1.0, and training evidence remains insufficient; it is not promotion, confirmatory, or live evidence.",
+      "blockers": [
+        "training_evidence.status=insufficient",
+        "promotion_gate.status=shadow_only",
+        "source/receiver coverage shrank versus r73",
+        "r74_feature_contract_degraded_rate=1.0",
+        "best_epoch=2 equals completed_epochs=2"
+      ],
+      "next_allowed_actions": [
+        "Repair feature-contract degradation without weakening cashflow/intent closure.",
+        "Recover source/receiver coverage while preserving lower wrong-side sell and reversal metrics.",
+        "Only consider strict resume after a fresh tiny lake smoke keeps translation closed and behavior improvements survive without coverage collapse."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
     }
   ]
 }

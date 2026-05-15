@@ -1347,6 +1347,13 @@ def compute_continuity_metrics(
             ),
             errors="coerce",
         ).fillna(0.0) > 0.5
+        r74_lake_behavior_quality_mode = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_lake_behavior_quality_mode",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
         r71_source_hold_regret = pd.concat(
             [
                 pd.to_numeric(
@@ -1425,6 +1432,32 @@ def compute_continuity_metrics(
                 "portfolio_decision_feature_contract_neutral_default_count",
                 pd.Series(0.0, index=action_outcomes.index),
             ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_feature_degraded_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_decision_feature_contract_degraded_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_feature_blocker_count = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_decision_feature_contract_blocker_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        r74_cash_timing_alignment = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r74_cash_timing_alignment_1d", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r74_source_quality_score = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r74_source_quality_score", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r74_receiver_source_spread_quality = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r74_receiver_source_spread_quality", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0)
         r73_pre_source_candidate_count = pd.to_numeric(
@@ -1909,6 +1942,41 @@ def compute_continuity_metrics(
         metrics["portfolio_decision_feature_contract_neutral_default_count_max"] = (
             float(decision_feature_neutral_count.loc[decision_feature_bundle_mode].max())
             if bool(decision_feature_bundle_mode.any())
+            else 0.0
+        )
+        metrics["portfolio_decision_feature_contract_degraded_count_max"] = (
+            float(decision_feature_degraded_count.loc[decision_feature_bundle_mode].max())
+            if bool(decision_feature_bundle_mode.any())
+            else 0.0
+        )
+        metrics["portfolio_decision_feature_contract_blocker_count_max"] = (
+            float(decision_feature_blocker_count.loc[decision_feature_bundle_mode].max())
+            if bool(decision_feature_bundle_mode.any())
+            else 0.0
+        )
+        r74_metric_mask = cashflow_decision_mode & r74_lake_behavior_quality_mode
+        metrics["r74_lake_behavior_quality_mode_count"] = float(r74_metric_mask.sum())
+        metrics["r74_cash_timing_alignment_1d"] = (
+            float(r74_cash_timing_alignment.loc[r74_metric_mask].mean()) if bool(r74_metric_mask.any()) else 0.0
+        )
+        metrics["r74_source_quality_score"] = (
+            float(r74_source_quality_score.loc[r74_metric_mask & portfolio_source_target].mean())
+            if bool((r74_metric_mask & portfolio_source_target).any())
+            else 0.0
+        )
+        metrics["r74_receiver_source_spread_quality"] = (
+            float(r74_receiver_source_spread_quality.loc[r74_metric_mask & portfolio_receiver_target].mean())
+            if bool((r74_metric_mask & portfolio_receiver_target).any())
+            else 0.0
+        )
+        metrics["r74_feature_contract_degraded_rate"] = (
+            float((decision_feature_degraded_count.loc[r74_metric_mask] > 0.0).mean())
+            if bool(r74_metric_mask.any())
+            else 0.0
+        )
+        metrics["r74_feature_contract_blocker_rate"] = (
+            float((decision_feature_blocker_count.loc[r74_metric_mask] > 0.0).mean())
+            if bool(r74_metric_mask.any())
             else 0.0
         )
         metrics["r73_pre_oracle_source_candidate_count_mean"] = (

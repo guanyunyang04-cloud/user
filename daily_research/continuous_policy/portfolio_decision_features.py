@@ -14,7 +14,35 @@ PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN = (
 PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN = (
     "portfolio_decision_feature_contract_neutral_default_count"
 )
+PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN = (
+    "portfolio_decision_feature_contract_degraded_count"
+)
+PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN = (
+    "portfolio_decision_feature_contract_blocker_count"
+)
+PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN = "portfolio_decision_feature_contract_severity"
 PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN = "portfolio_decision_feature_contract_blocker"
+PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_REASON_COLUMN = (
+    "portfolio_decision_feature_contract_degraded_reason"
+)
+
+
+R74_HIGH_VALUE_LAKE_FEATURES: tuple[str, ...] = (
+    "adv20",
+    "amount",
+    "volume",
+    "z_drawdown_20",
+    "z_volatility_20",
+    "z_vol_ratio_5_20",
+    "z_price_volume_divergence",
+    "z_breakout_volume",
+    "z_volatility_contraction",
+    "z_volume_contraction",
+)
+R74_CRITICAL_SCORE_FEATURES: tuple[str, ...] = ("score_blend", "score_rank_pct", "score_v2", "score_none")
+R74_CRITICAL_MEMBERSHIP_FEATURES: tuple[str, ...] = ("in_pool",)
+R74_CRITICAL_PRICE_FEATURES: tuple[str, ...] = ("close", "open", "high", "low")
+R74_CORE_BEHAVIOR_FEATURES: tuple[str, ...] = ("ret_1d", "ret_3d", "ret_5d", "vol_20d")
 
 
 DECISION_ORACLE_INPUT_COLUMNS: tuple[str, ...] = (
@@ -152,6 +180,26 @@ def _rank_pct(values: pd.Series) -> pd.Series:
     return clean.rank(pct=True, method="average").fillna(0.0).clip(0.0, 1.0)
 
 
+def _rank_or_scaled_feature(frame: pd.DataFrame, name: str, default: float = 0.5) -> pd.Series:
+    if name not in frame.columns:
+        return pd.Series(float(default), index=frame.index, dtype=float)
+    values = pd.to_numeric(frame[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
+    if values.notna().sum() <= 1:
+        scaled = values.fillna(float(default))
+        if float(scaled.abs().max() if len(scaled) else 0.0) > 1.0:
+            return pd.Series(float(default), index=frame.index, dtype=float)
+        return scaled.fillna(float(default)).clip(0.0, 1.0)
+    return _rank_pct(values).fillna(float(default)).clip(0.0, 1.0)
+
+
+def _z_positive(frame: pd.DataFrame, name: str, scale: float = 3.0) -> pd.Series:
+    return (_numeric_series(frame, name, 0.0).clip(lower=0.0, upper=float(scale)) / float(scale)).clip(0.0, 1.0)
+
+
+def _z_abs(frame: pd.DataFrame, name: str, scale: float = 3.0) -> pd.Series:
+    return (_numeric_series(frame, name, 0.0).abs().clip(upper=float(scale)) / float(scale)).clip(0.0, 1.0)
+
+
 def _max_columns(frame: pd.DataFrame, names: Iterable[str], default: float = 0.0) -> pd.Series:
     values = [_numeric_series(frame, name, default).rename(name) for name in names if name in frame.columns]
     if not values:
@@ -180,16 +228,46 @@ def attach_portfolio_decision_features(
         out[PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN] = 1.0
         out[PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN] = 0.0
         out[PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN] = 0.0
+        out[PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN] = 0.0
+        out[PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN] = 1.0
+        out[PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN] = "blocker"
         out[PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN] = "empty_frame"
+        out[PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_REASON_COLUMN] = "empty_frame"
         return out
 
     result = frame.copy()
+    has_score_signal = any(name in result.columns for name in R74_CRITICAL_SCORE_FEATURES)
+    has_membership_signal = any(name in result.columns for name in R74_CRITICAL_MEMBERSHIP_FEATURES)
+    missing_price_inputs = [name for name in R74_CRITICAL_PRICE_FEATURES if name not in result.columns]
+    missing_core_inputs = [name for name in R74_CORE_BEHAVIOR_FEATURES if name not in result.columns]
+    missing_high_value_inputs = [name for name in R74_HIGH_VALUE_LAKE_FEATURES if name not in result.columns]
     missing_inputs = [
         name
         for name in ("score_blend", "score_rank_pct", "ret_3d", "ret_5d", "vol_20d", "in_pool")
         if name not in result.columns
     ]
     neutral_default_count = len(missing_inputs)
+    blocker_reasons: list[str] = []
+    if not has_score_signal:
+        blocker_reasons.append("missing_score_signal")
+    if not has_membership_signal:
+        blocker_reasons.append("missing_membership_signal")
+    degraded_reasons: list[str] = []
+    if missing_price_inputs:
+        degraded_reasons.append("missing_price_ohlc")
+    if "volume" not in result.columns and "volume_rank" not in result.columns:
+        degraded_reasons.append("missing_volume_signal")
+    if "amount" not in result.columns and "adv20" not in result.columns and "adv20_rank" not in result.columns:
+        degraded_reasons.append("missing_liquidity_signal")
+    if missing_core_inputs:
+        degraded_reasons.append("missing_core_return_volatility")
+    missing_high_value_degraded = [
+        name
+        for name in missing_high_value_inputs
+        if name in {"z_drawdown_20", "z_volatility_20", "z_vol_ratio_5_20", "z_price_volume_divergence", "z_breakout_volume"}
+    ]
+    if missing_high_value_degraded:
+        degraded_reasons.append("missing_r74_high_value_features")
 
     current = _numeric_series(result, "current_weight", 0.0).clip(0.0, 1.0)
     held = ((_numeric_series(result, "holding_flag", 0.0) > 0.5) | (current > 0.003)).astype(float)
@@ -239,6 +317,37 @@ def attach_portfolio_decision_features(
         default=0.5,
     )
     liquidity_value = (0.5 + (liquidity_value - 0.5).clip(-1.0, 1.0)).clip(0.0, 1.0)
+    r74_adv20_liquidity = _rank_or_scaled_feature(result, "adv20", default=0.5)
+    r74_amount_liquidity = _rank_or_scaled_feature(result, "amount", default=0.5)
+    r74_volume_liquidity = _rank_or_scaled_feature(result, "volume", default=0.5)
+    r74_liquidity_quality = pd.concat(
+        [
+            liquidity_value.rename("legacy_liquidity"),
+            r74_adv20_liquidity.rename("adv20"),
+            r74_amount_liquidity.rename("amount"),
+            r74_volume_liquidity.rename("volume"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.5).clip(0.0, 1.0)
+    r74_volume_contraction = _z_positive(result, "z_volume_contraction")
+    r74_volatility_contraction = _z_positive(result, "z_volatility_contraction")
+    r74_drawdown_pressure = pd.concat(
+        [
+            _z_positive(result, "z_drawdown_20").rename("z_drawdown_20"),
+            (-_numeric_series(result, "portfolio_drawdown_20d", 0.0) / 0.10).clip(0.0, 1.0).rename("portfolio_drawdown_20d"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    r74_volatility_pressure = pd.concat(
+        [
+            _z_positive(result, "z_volatility_20").rename("z_volatility_20"),
+            _z_positive(result, "z_vol_ratio_5_20").rename("z_vol_ratio_5_20"),
+            _numeric_series(result, "volatility_expansion", 0.0).clip(0.0, 1.0).rename("volatility_expansion"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    r74_price_volume_divergence = _z_abs(result, "z_price_volume_divergence")
+    r74_breakout_volume = _z_positive(result, "z_breakout_volume")
     vol_20d = _numeric_series(result, "vol_20d", 0.0).abs()
     vol_pressure = pd.concat(
         [
@@ -263,6 +372,14 @@ def attach_portfolio_decision_features(
         + 0.20 * portfolio_drawdown
         + 0.16 * vol_pressure
         + 0.10 * _numeric_series(result, "portfolio_cash_deficit", 0.0).clip(0.0, 1.0)
+    ).clip(0.0, 1.0)
+    r74_cash_defense = (
+        0.36 * market_pressure
+        + 0.22 * r74_drawdown_pressure
+        + 0.20 * r74_volatility_pressure
+        + 0.12 * r74_volume_contraction
+        + 0.10 * (1.0 - r74_liquidity_quality).clip(0.0, 1.0)
+        - 0.08 * r74_breakout_volume
     ).clip(0.0, 1.0)
 
     reentry_pressure = _numeric_series(result, "reentry_cooldown", 0.0).clip(0.0, 1.0)
@@ -292,6 +409,16 @@ def attach_portfolio_decision_features(
         ],
         axis=1,
     ).max(axis=1).where((in_pool > 0.5) & (headroom > 0.003), 0.0).clip(0.0, 1.0)
+    r74_deploy_value = (
+        0.44 * alpha_opportunity
+        + 0.18 * momentum_positive
+        + 0.14 * r74_liquidity_quality
+        + 0.12 * r74_breakout_volume
+        + 0.06 * local_rebound
+        - 0.22 * r74_cash_defense
+        - 0.14 * r74_volatility_pressure
+        - 0.10 * r74_price_volume_divergence
+    ).where((in_pool > 0.5) & (headroom > 0.003), 0.0).clip(0.0, 1.0)
 
     unrealized_pnl = _numeric_series(result, "unrealized_pnl", 0.0)
     drawdown_from_peak = _numeric_series(result, "drawdown_from_peak", 0.0)
@@ -313,6 +440,23 @@ def attach_portfolio_decision_features(
         + 0.12 * signal_decay
         + 0.06 * cash_defense
     ).where(held > 0.5, 0.0).clip(0.0, 1.0)
+    r74_source_quality_penalty = pd.concat(
+        [
+            held_quality.rename("held_quality"),
+            momentum_positive.rename("momentum_positive"),
+            (r74_breakout_volume * 0.85).rename("breakout_volume"),
+            (1.0 - r74_liquidity_quality).clip(0.0, 1.0).mul(0.55).rename("illiquidity"),
+        ],
+        axis=1,
+    ).max(axis=1).where(held > 0.5, 0.0).clip(0.0, 1.0)
+    r74_release_value = (
+        0.38 * release_value
+        + 0.22 * drawdown_release
+        + 0.16 * r74_cash_defense
+        + 0.12 * momentum_negative
+        + 0.12 * signal_decay
+        - 0.24 * r74_source_quality_penalty
+    ).where(held > 0.5, 0.0).clip(0.0, 1.0)
     opportunity_cost = pd.concat(
         [
             held_quality.rename("held_quality"),
@@ -325,6 +469,16 @@ def attach_portfolio_decision_features(
     held_reference = float(held_quality.loc[held > 0.5].median()) if bool((held > 0.5).any()) else 0.0
     receiver_spread = (
         (deploy_value - held_reference + (0.18 if held_reference > 0.0 else 0.0)) / 0.55
+    ).clip(0.0, 1.0)
+    r74_receiver_spread = (
+        (
+            r74_deploy_value
+            - held_reference
+            + (0.16 if held_reference > 0.0 else 0.0)
+            - 0.18 * r74_cash_defense
+            - 0.10 * r74_price_volume_divergence
+        )
+        / 0.50
     ).clip(0.0, 1.0)
     if held_reference <= 0.0:
         receiver_spread = pd.concat(
@@ -367,6 +521,13 @@ def attach_portfolio_decision_features(
     source_forward_proxy = expected_forward.where(held > 0.5, 0.0)
     receiver_forward_proxy = expected_forward.where((in_pool > 0.5) & (headroom > 0.003), 0.0)
     crowding_penalty = (vol_pressure * 0.20 + (1.0 - liquidity_value).clip(0.0, 1.0) * 0.18).clip(0.0, 1.0)
+    r74_crowding_penalty = (
+        0.26 * r74_volatility_pressure
+        + 0.22 * r74_price_volume_divergence
+        + 0.20 * (1.0 - r74_liquidity_quality).clip(0.0, 1.0)
+        + 0.12 * r74_volume_contraction
+        - 0.08 * r74_volatility_contraction
+    ).clip(0.0, 1.0)
 
     assignments = {
         "alpha_opportunity_value": alpha_opportunity,
@@ -418,19 +579,42 @@ def attach_portfolio_decision_features(
         "portfolio_decision_release_value": release_value,
         "portfolio_decision_defense_value": cash_defense,
         "portfolio_decision_receiver_source_spread_value": receiver_spread,
+        "portfolio_decision_r74_liquidity_quality": r74_liquidity_quality,
+        "portfolio_decision_r74_drawdown_pressure": r74_drawdown_pressure,
+        "portfolio_decision_r74_volatility_pressure": r74_volatility_pressure,
+        "portfolio_decision_r74_volume_contraction": r74_volume_contraction,
+        "portfolio_decision_r74_price_volume_divergence": r74_price_volume_divergence,
+        "portfolio_decision_r74_breakout_volume": r74_breakout_volume,
+        "portfolio_decision_r74_cash_defense_value": r74_cash_defense,
+        "portfolio_decision_r74_deploy_value": r74_deploy_value,
+        "portfolio_decision_r74_release_value": r74_release_value,
+        "portfolio_decision_r74_source_quality_penalty": r74_source_quality_penalty,
+        "portfolio_decision_r74_receiver_source_spread_value": r74_receiver_spread,
+        "portfolio_decision_r74_crowding_liquidity_penalty": r74_crowding_penalty,
     }
     for name, values in assignments.items():
         _assign_decision_column(result, name, pd.Series(values, index=result.index, dtype=float))
 
-    blocker = "none"
-    if "score_blend" not in result.columns and "score_rank_pct" not in result.columns:
-        blocker = "feature_contract_blocker:missing_score_signal"
-    elif "in_pool" not in result.columns:
-        blocker = "feature_contract_blocker:missing_membership_signal"
+    blocker = "none" if not blocker_reasons else "feature_contract_blocker:" + ",".join(blocker_reasons)
+    degraded_reason = "none" if not degraded_reasons else "feature_contract_degraded:" + ",".join(sorted(set(degraded_reasons)))
+    blocker_count = float(len(blocker_reasons))
+    degraded_count = float(len(sorted(set(degraded_reasons))))
+    if blocker_count > 0.0:
+        severity = "blocker"
+    elif degraded_count > 0.0:
+        severity = "degraded"
+    elif neutral_default_count > 0:
+        severity = "neutral_default"
+    else:
+        severity = "ok"
     result[PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN] = 1.0
     result[PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN] = float(len(missing_inputs))
     result[PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN] = float(neutral_default_count)
+    result[PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN] = degraded_count
+    result[PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN] = blocker_count
+    result[PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN] = severity
     result[PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN] = blocker
+    result[PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_REASON_COLUMN] = degraded_reason
     result["portfolio_decision_feature_bundle_version"] = PORTFOLIO_DECISION_FEATURE_BUNDLE_VERSION
     result["portfolio_decision_feature_bundle_mode"] = str(mode or "predict")
     return result
@@ -491,6 +675,7 @@ def build_lake_feature_utilization_report(
     state_inputs = set(STATE_BUILDER_FEATURE_INPUTS)
     label_inputs = set(LABEL_BUILDER_DECISION_COLUMNS)
     oracle_inputs = set(DECISION_ORACLE_INPUT_COLUMNS)
+    r74_inputs = set(R74_HIGH_VALUE_LAKE_FEATURES)
 
     panels: dict[str, pd.DataFrame | pd.Series] = {}
     for name in ("score_none", "score_v2", "score_blend", "close", "open", "high", "low", "volume", "amount"):
@@ -519,6 +704,7 @@ def build_lake_feature_utilization_report(
         report["used_by_label_builder"] = bool(name in label_inputs)
         report["used_by_v5_oracle"] = bool(name in oracle_inputs)
         report["used_by_r71_diagnostics"] = bool("regret" in name or "spread" in name or "crowding" in name)
+        report["used_by_r74_behavior_quality"] = bool(name in r74_inputs)
         report["actually_used"] = bool(
             report["used_by_model_feature_matrix"]
             or report["used_by_daily_feature_matrix"]
@@ -526,8 +712,15 @@ def build_lake_feature_utilization_report(
             or report["used_by_label_builder"]
             or report["used_by_v5_oracle"]
             or report["used_by_r71_diagnostics"]
+            or report["used_by_r74_behavior_quality"]
         )
         report["high_value_hint"] = bool(any(token in name.lower() for token in HIGH_VALUE_FEATURE_HINTS))
+        if name in {"close", "open", "high", "low", "volume", "amount", "score_blend", "score_v2", "score_none"} and float(report["finite_ratio"]) < 0.80:
+            report["feature_contract_severity"] = "blocker"
+        elif bool(report["low_variance"]) or (name in r74_inputs and float(report["finite_ratio"]) < 0.80):
+            report["feature_contract_severity"] = "degraded"
+        else:
+            report["feature_contract_severity"] = "ok"
         reports.append(report)
 
     available = [item["feature"] for item in reports if float(item["finite_ratio"]) > 0.0]
@@ -545,6 +738,14 @@ def build_lake_feature_utilization_report(
         for item in reports
         if float(item["finite_ratio"]) <= 0.0 or bool(item["low_variance"])
     ]
+    high_value_used = [
+        item["feature"]
+        for item in reports
+        if bool(item["high_value_hint"]) and bool(item["actually_used"]) and float(item["finite_ratio"]) > 0.0
+    ]
+    blocker_features = [item["feature"] for item in reports if item.get("feature_contract_severity") == "blocker"]
+    degraded_features = [item["feature"] for item in reports if item.get("feature_contract_severity") == "degraded"]
+    missing_high_value_features = [name for name in R74_HIGH_VALUE_LAKE_FEATURES if name not in panels]
     return {
         "version": PORTFOLIO_DECISION_FEATURE_BUNDLE_VERSION,
         "status": "ok",
@@ -557,9 +758,17 @@ def build_lake_feature_utilization_report(
         "actually_used_feature_count": int(len(actually_used)),
         "unused_high_value_feature_count": int(len(unused_high_value)),
         "missing_or_low_variance_feature_count": int(len(missing_or_low_variance)),
+        "decision_feature_high_value_used_count": int(len(high_value_used)),
+        "decision_feature_high_value_unused_count": int(len(unused_high_value)),
+        "decision_feature_degraded_count": int(len(degraded_features) + len(missing_high_value_features)),
+        "decision_feature_blocker_count": int(len(blocker_features)),
         "available_features": available,
         "actually_used_features": actually_used,
+        "high_value_used_features": high_value_used[:80],
         "unused_high_value_features": unused_high_value[:80],
         "missing_or_low_variance_features": missing_or_low_variance[:80],
+        "missing_high_value_features": missing_high_value_features[:80],
+        "feature_contract_degraded_features": (degraded_features + missing_high_value_features)[:80],
+        "feature_contract_blocker_features": blocker_features[:80],
         "feature_reports": reports,
     }

@@ -36,10 +36,14 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
 from daily_research.continuous_policy.portfolio_decision_features import (
     PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN,
 )
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN,
     PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN,
     PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN,
 )
@@ -5564,6 +5568,11 @@ class PortfolioState:
                     )
                     if PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN in policy.columns
                     else 0.0,
+                    PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN]
+                    )
+                    if PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN in policy.columns
+                    else 0.0,
                     "portfolio_cashflow_decision_v1_valid": float(
                         policy.at[stock, "portfolio_cashflow_decision_v1_valid"]
                     )
@@ -5599,6 +5608,21 @@ class PortfolioState:
                     )
                     if PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN in policy.columns
                     else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN]
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN]
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN in policy.columns
+                    else 0.0,
+                    PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN: str(
+                        policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN] or ""
+                    )
+                    if PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN in policy.columns
+                    else "",
                     PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN: str(
                         policy.at[stock, PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN] or ""
                     )
@@ -5816,6 +5840,46 @@ class PortfolioState:
                         policy.at[stock, "portfolio_set_v5_r71_receiver_regreted_buy"] or 0.0
                     )
                     if "portfolio_set_v5_r71_receiver_regreted_buy" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_cash_defense_value": float(
+                        policy.at[stock, "portfolio_set_v5_r74_cash_defense_value"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_cash_defense_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_liquidity_quality": float(
+                        policy.at[stock, "portfolio_set_v5_r74_liquidity_quality"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_liquidity_quality" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_source_quality_penalty": float(
+                        policy.at[stock, "portfolio_set_v5_r74_source_quality_penalty"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_source_quality_penalty" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_receiver_source_spread_value": float(
+                        policy.at[stock, "portfolio_set_v5_r74_receiver_source_spread_value"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_receiver_source_spread_value" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_crowding_liquidity_penalty": float(
+                        policy.at[stock, "portfolio_set_v5_r74_crowding_liquidity_penalty"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_crowding_liquidity_penalty" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_cash_timing_alignment_1d": float(
+                        policy.at[stock, "portfolio_set_v5_r74_cash_timing_alignment_1d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_cash_timing_alignment_1d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_source_quality_score": float(
+                        policy.at[stock, "portfolio_set_v5_r74_source_quality_score"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_source_quality_score" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r74_receiver_source_spread_quality": float(
+                        policy.at[stock, "portfolio_set_v5_r74_receiver_source_spread_quality"] or 0.0
+                    )
+                    if "portfolio_set_v5_r74_receiver_source_spread_quality" in policy.columns
                     else 0.0,
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,

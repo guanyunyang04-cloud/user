@@ -31,6 +31,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pipeline-root", default="")
     parser.add_argument("--active-manifest", default=str(DEFAULT_ACTIVE_MANIFEST))
     parser.add_argument("--python-executable", default=resolve_project_python_executable(sys.executable))
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Preview the active manifest payload without writing it. This is the default.",
+    )
+    parser.add_argument(
+        "--write-active-manifest",
+        dest="dry_run",
+        action="store_false",
+        help="Allow writing the active execution strategy manifest. Requires --confirm-active-manifest-write.",
+    )
+    parser.add_argument(
+        "--confirm-active-manifest-write",
+        action="store_true",
+        help="Explicitly confirm that this command may modify the active execution strategy manifest.",
+    )
     return parser.parse_args()
 
 
@@ -161,6 +178,17 @@ def main() -> None:
             "promoted_at": datetime.now().isoformat(),
         }
     )
+    if args.dry_run:
+        print("dry_run=true")
+        print(f"active_execution_strategy_manifest={active_manifest_path}")
+        print(f"active_execution_strategy_name={new_payload.get('strategy_name', '')}")
+        print(json.dumps(new_payload, ensure_ascii=False, indent=2, default=str))
+        return
+    if not bool(args.confirm_active_manifest_write):
+        raise RuntimeError(
+            "--write-active-manifest would modify the active execution manifest. "
+            "Pass --confirm-active-manifest-write to make this write explicit."
+        )
     write_strategy_manifest(new_payload, path=active_manifest_path)
     written_manifest = load_strategy_manifest(active_manifest_path)
     if str(written_manifest.get("score_panel_role", "")).strip() != resolved_score_panel_role:

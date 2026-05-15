@@ -11,8 +11,11 @@ from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_ARTIFACT_FILENAME,
     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+    PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN,
     PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN,
     PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     TorchPortfolioSetV5Artifact,
@@ -86,6 +89,22 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
             "portfolio_set_v5_behavior_mode": PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
             "portfolio_set_v5_loss_profile_requested": PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+        }
+        return artifact
+
+    def _r74_artifact(self) -> TorchPortfolioSetV5Artifact:
+        artifact = self._artifact()
+        artifact.training_diagnostics = {
+            **artifact.training_diagnostics,
+            "loss_profile": PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+            "portfolio_set_v5_behavior_mode": PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+        }
+        artifact.model_config = {
+            **artifact.model_config,
+            "portfolio_set_v5_internal_version": PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+            "portfolio_set_v5_behavior_mode": PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+            "portfolio_set_v5_loss_profile_requested": PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
         }
         return artifact
 
@@ -168,10 +187,13 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
             self.assertIn("portfolio_set_v5_cash_buffer_score", frame.columns)
             self.assertIn(PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN, frame.columns)
             self.assertIn(PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN, frame.columns)
+            self.assertIn(PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN, frame.columns)
             self.assertEqual(float(frame[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN].iloc[0]), 0.0)
             self.assertEqual(float(frame[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN].iloc[0]), 0.0)
+            self.assertEqual(float(frame[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN].iloc[0]), 0.0)
             self.assertNotIn("portfolio_set_v5_r69_deploy_value", frame.columns)
             self.assertNotIn("portfolio_set_v5_r71_source_hold_regret_3d", frame.columns)
+            self.assertNotIn("portfolio_set_v5_r74_cash_timing_alignment_1d", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_constraint_violation", frame.columns)
             self.assertIn("portfolio_set_v5_oracle_feasible", frame.columns)
             self.assertIn("release_first_action_hint", frame.columns)
@@ -190,6 +212,8 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertEqual(generic_globals[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN], 0.0)
         self.assertEqual(global_targets[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN], 0.0)
         self.assertEqual(generic_globals[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN], 0.0)
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN], 0.0)
+        self.assertEqual(generic_globals[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN], 0.0)
 
     def test_r69_artifact_predicts_value_arbitration_fields_only_when_explicit(self) -> None:
         artifact = self._r69_artifact()
@@ -245,6 +269,54 @@ class PortfolioSetV5ArtifactContractTest(unittest.TestCase):
         self.assertIn("portfolio_set_v5_r71_source_hold_regret_3d", policy.columns)
         self.assertIn("portfolio_set_v5_r71_receiver_deploy_regret_5d", policy.columns)
         self.assertIn("portfolio_set_v5_r71_source_regreted_sell", policy.columns)
+        self.assertEqual(float(policy[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN].iloc[0]), 0.0)
+        self.assertNotIn("portfolio_set_v5_r74_cash_timing_alignment_1d", policy.columns)
+
+    def test_r74_artifact_predicts_lake_behavior_quality_fields_only_when_explicit(self) -> None:
+        artifact = self._r74_artifact()
+        state_frame = pd.DataFrame(
+            {
+                "stock": ["SRC", "RCV"],
+                "score_blend": [-0.9, 1.8],
+                "score_rank_pct": [0.1, 1.0],
+                "ret_1d": [-0.01, 0.02],
+                "ret_3d": [-0.03, 0.04],
+                "ret_5d": [-0.05, 0.06],
+                "vol_20d": [0.03, 0.02],
+                "in_pool": [1.0, 1.0],
+                "current_weight": [0.12, 0.0],
+                "holding_flag": [1.0, 0.0],
+                "adv20": [1000.0, 5000.0],
+                "amount": [1.0e6, 5.0e6],
+                "volume": [100.0, 500.0],
+                "z_drawdown_20": [0.8, 0.0],
+                "z_volatility_20": [0.5, 0.1],
+                "z_vol_ratio_5_20": [0.5, 0.0],
+                "z_price_volume_divergence": [0.2, 0.0],
+                "z_breakout_volume": [0.0, 1.2],
+                "portfolio_daily_receiver_source_spread_reward": [0.0, 0.9],
+                "portfolio_daily_source_forward_excess_5d": [-0.03, 0.0],
+                "portfolio_daily_receiver_forward_excess_5d": [0.0, 0.07],
+                "forward_excess_3d": [-0.02, 0.04],
+                "forward_excess_5d": [-0.03, 0.07],
+            }
+        )
+
+        policy, global_targets = predict_policy_portfolio_set_v5(
+            artifact,
+            state_frame=state_frame,
+            daily_features={"market_downside_pressure": 0.1},
+        )
+
+        self.assertEqual(float(policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN].iloc[0]), 1.0)
+        self.assertEqual(float(policy[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN].iloc[0]), 1.0)
+        self.assertEqual(float(policy[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN].iloc[0]), 1.0)
+        self.assertEqual(global_targets[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN], 1.0)
+        self.assertIn("portfolio_set_v5_r69_deploy_value", policy.columns)
+        self.assertIn("portfolio_set_v5_r71_source_hold_regret_3d", policy.columns)
+        self.assertIn("portfolio_set_v5_r74_cash_timing_alignment_1d", policy.columns)
+        self.assertIn("portfolio_set_v5_r74_source_quality_score", policy.columns)
+        self.assertIn("portfolio_set_v5_r74_receiver_source_spread_quality", policy.columns)
 
     def test_predict_policy_portfolio_set_v5_opens_receiver_from_cash_in_cashflow_mode(self) -> None:
         artifact = self._biased_artifact()

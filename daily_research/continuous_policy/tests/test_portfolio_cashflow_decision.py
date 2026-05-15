@@ -5,6 +5,14 @@ import pandas as pd
 from daily_research.continuous_policy.portfolio_cashflow_decision import (
     normalize_portfolio_cashflow_decision,
 )
+from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN,
+)
+from daily_research.continuous_policy.portfolio_decision_features import (
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN,
+)
 from daily_research.continuous_policy.portfolio_simulator import HoldingState, PortfolioState
 from daily_research.continuous_policy.release_flow_trace import build_release_flow_trace
 
@@ -110,6 +118,47 @@ class PortfolioCashflowDecisionTest(unittest.TestCase):
         self.assertGreater(actions["SRC"]["portfolio_set_v5_source_supply"], 0.003)
         self.assertGreater(actions["RCV"]["portfolio_set_v5_receiver_demand"], 0.003)
         self.assertEqual(actions["SRC"]["portfolio_cashflow_decision_v1_invalid_reason"], "none")
+
+    def test_simulator_action_rows_preserve_r74_behavior_quality_evidence(self) -> None:
+        policy = self._cashflow_policy()
+        policy[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN] = 1.0
+        policy[PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN] = [1.0, 0.0, 0.0]
+        policy[PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN] = [0.0, 0.0, 0.0]
+        policy[PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN] = ["degraded", "ok", "ok"]
+        policy["portfolio_set_v5_r74_cash_timing_alignment_1d"] = [0.20, 0.20, 0.20]
+        policy["portfolio_set_v5_r74_source_quality_score"] = [0.80, 1.00, 1.00]
+        policy["portfolio_set_v5_r74_receiver_source_spread_quality"] = [0.00, 0.70, 0.00]
+        state = PortfolioState(
+            cash_weight=0.70,
+            holdings={"SRC": HoldingState(weight=0.30, entry_price=10.0, peak_price=11.0)},
+            max_positions=4,
+            max_position_weight=0.50,
+            turnover_limit=1.00,
+        )
+
+        result = state.step(
+            date="2026-05-14",
+            prices=pd.Series({"SRC": 10.0, "RCV": 10.0, "CASH_ONLY": 10.0}),
+            policy_frame=policy,
+            global_targets={
+                "gross_exposure_target": 0.30,
+                "turnover_budget": 1.00,
+                "max_position_weight_target": 0.50,
+                "cash_reserve_target": 0.05,
+                "portfolio_cashflow_decision_v1_mode": 1.0,
+            },
+            budget_semantics="allocation_layer_v1",
+            budget_calibration="end_to_end_allocation_layer_v1",
+        )
+
+        actions = {item["stock"]: item for item in result.actions}
+        self.assertEqual(actions["SRC"][PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN], 1.0)
+        self.assertEqual(actions["SRC"][PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN], 1.0)
+        self.assertEqual(actions["SRC"][PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN], 0.0)
+        self.assertEqual(actions["SRC"][PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN], "degraded")
+        self.assertEqual(actions["SRC"]["portfolio_set_v5_r74_cash_timing_alignment_1d"], 0.20)
+        self.assertEqual(actions["SRC"]["portfolio_set_v5_r74_source_quality_score"], 0.80)
+        self.assertEqual(actions["RCV"]["portfolio_set_v5_r74_receiver_source_spread_quality"], 0.70)
 
     def test_simulator_cashflow_mode_uses_v5_turnover_contract_limit(self) -> None:
         policy = self._cashflow_policy()

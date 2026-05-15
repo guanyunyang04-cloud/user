@@ -193,7 +193,10 @@ def parse_args() -> argparse.Namespace:
         "--activate-strategy",
         dest="activate_strategy",
         action="store_true",
-        help="Write the promoted strategy into the active execution manifest so daily execution follows it by default.",
+        help=(
+            "Write the promoted strategy into the active execution manifest so daily execution follows it by default. "
+            "Requires --confirm-active-manifest-write."
+        ),
     )
     parser.add_argument(
         "--no-activate-strategy",
@@ -201,7 +204,12 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Skip writing the active execution manifest.",
     )
-    parser.set_defaults(activate_strategy=True, resume_existing_run=True)
+    parser.add_argument(
+        "--confirm-active-manifest-write",
+        action="store_true",
+        help="Explicitly confirm that this command may modify the active execution strategy manifest.",
+    )
+    parser.set_defaults(activate_strategy=False, resume_existing_run=True)
     return parser.parse_args()
 
 
@@ -1581,6 +1589,11 @@ def main() -> None:
             }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
+    if bool(args.activate_strategy) and not bool(args.confirm_active_manifest_write):
+        raise RuntimeError(
+            "--activate-strategy would modify the active execution manifest. "
+            "Pass --confirm-active-manifest-write to make this write explicit."
+        )
 
     latest_trainable_date, internal_monitor_start_date, internal_monitor_days = _resolve_training_dates(
         source_run_dir=source_run_dir,

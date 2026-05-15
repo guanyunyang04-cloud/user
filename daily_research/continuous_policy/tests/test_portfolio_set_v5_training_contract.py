@@ -5,8 +5,10 @@ from daily_research.continuous_policy import train_policy
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
     PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
     PORTFOLIO_SET_V5_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
     resolve_portfolio_set_v5_loss_profile,
 )
 from daily_research.continuous_policy.training_contracts import (
@@ -91,6 +93,15 @@ class PortfolioSetV5TrainingContractTest(unittest.TestCase):
         self.assertEqual(resolved, PORTFOLIO_SET_V5_R69_INTERNAL_VERSION)
         self.assertEqual(config["portfolio_set_v5_behavior_mode"], PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION)
         self.assertGreater(config["multi_objective_loss_weights"]["value_arbitration_total"], 0.0)
+
+    def test_r74_loss_profile_is_explicit_lake_behavior_quality_mode(self) -> None:
+        resolved, config = resolve_portfolio_set_v5_loss_profile(PORTFOLIO_SET_V5_R74_INTERNAL_VERSION)
+
+        self.assertEqual(resolved, PORTFOLIO_SET_V5_R74_INTERNAL_VERSION)
+        self.assertEqual(config["portfolio_set_v5_behavior_mode"], PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY)
+        self.assertGreater(config["multi_objective_loss_weights"]["value_arbitration_total"], 0.0)
+        self.assertGreater(config["multi_objective_loss_weights"]["multistage_regret_total"], 0.0)
+        self.assertGreater(config["multi_objective_loss_weights"]["lake_behavior_quality_total"], 0.0)
 
 
 if __name__ == "__main__":

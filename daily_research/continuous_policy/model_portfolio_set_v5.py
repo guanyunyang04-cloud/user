@@ -18,8 +18,11 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
 from daily_research.continuous_policy.portfolio_decision_features import (
     PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN,
     PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+    PORTFOLIO_DECISION_FEATURE_CONTRACT_SEVERITY_COLUMN,
     attach_portfolio_decision_features,
 )
 from daily_research.continuous_policy.model_seq_v3 import SEQUENCE_STEP_ORDER, resolve_sequence_columns
@@ -38,12 +41,15 @@ PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID = "continuous_policy_training_ma
 PORTFOLIO_SET_V5_DFL_PG_V1_VERSION = "portfolio_set_v5_dfl_pg_v1"
 PORTFOLIO_SET_V5_R69_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration"
 PORTFOLIO_SET_V5_R71_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret"
+PORTFOLIO_SET_V5_R74_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality"
 PORTFOLIO_SET_V5_INTERNAL_VERSION = PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
 PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1 = "dfl_pg_v1"
 PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION = "r69_value_arbitration"
 PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET = "r71_multistage_regret"
+PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY = "r74_lake_behavior_quality"
 PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN = "portfolio_set_v5_value_arbitration_mode"
 PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN = "portfolio_set_v5_multistage_regret_mode"
+PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN = "portfolio_set_v5_lake_behavior_quality_mode"
 
 PORTFOLIO_SET_V5_OUTPUT_NAMES: tuple[str, ...] = (
     "target_weight",
@@ -88,6 +94,7 @@ PORTFOLIO_SET_V5_LOSS_ALIASES: tuple[str, ...] = (
     PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
     PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
 )
 PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES: tuple[str, ...] = PORTFOLIO_SET_V5_LOSS_ALIASES
 PORTFOLIO_SET_V5_MAX_TRAIN_DAYS = 256
@@ -101,7 +108,7 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
             f"Unsupported portfolio-set v5 loss profile: {profile_name!r}. "
             "Only alpha_result_value_budget_split_v48 / portfolio_set_release_first_decision_v1 / "
             f"{PORTFOLIO_SET_V5_DFL_PG_V1_VERSION} / {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION} / "
-            f"{PORTFOLIO_SET_V5_R71_INTERNAL_VERSION} are supported."
+            f"{PORTFOLIO_SET_V5_R71_INTERNAL_VERSION} / {PORTFOLIO_SET_V5_R74_INTERNAL_VERSION} are supported."
         )
     resolved_name = (
         PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
@@ -116,9 +123,16 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
         resolved_name = PORTFOLIO_SET_V5_R69_INTERNAL_VERSION
     if name == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION:
         resolved_name = PORTFOLIO_SET_V5_R71_INTERNAL_VERSION
+    if name == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION:
+        resolved_name = PORTFOLIO_SET_V5_R74_INTERNAL_VERSION
     behavior_mode = _portfolio_set_v5_behavior_mode_from_version(resolved_name)
-    behavior_mode_is_value = resolved_name in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION}
-    behavior_mode_is_multistage = resolved_name == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION
+    behavior_mode_is_value = resolved_name in {
+        PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+        PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+        PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+    }
+    behavior_mode_is_multistage = resolved_name in {PORTFOLIO_SET_V5_R71_INTERNAL_VERSION, PORTFOLIO_SET_V5_R74_INTERNAL_VERSION}
+    behavior_mode_is_r74 = resolved_name == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION
     return resolved_name, {
         "portfolio_set_v5_behavior_mode": behavior_mode,
         "multi_objective_loss_weights": {
@@ -142,12 +156,18 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
             "goal_programming_quality_total": 0.42 if behavior_mode_is_multistage else 0.0,
             "receiver_recall_total": 3.00 if behavior_mode_is_multistage else 0.0,
             "crowding_penalty_total": 0.12 if behavior_mode_is_multistage else 0.0,
+            "lake_behavior_quality_total": 0.55 if behavior_mode_is_r74 else 0.0,
+            "r74_cash_timing_alignment_total": 0.30 if behavior_mode_is_r74 else 0.0,
+            "r74_source_quality_total": 0.36 if behavior_mode_is_r74 else 0.0,
+            "r74_receiver_spread_quality_total": 0.36 if behavior_mode_is_r74 else 0.0,
         }
     }
 
 
 def _portfolio_set_v5_behavior_mode_from_version(version: str | None) -> str:
     text = str(version or "").strip()
+    if text == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION:
+        return PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY
     if text == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION:
         return PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
     if text == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
@@ -171,6 +191,19 @@ def _portfolio_set_v5_multistage_regret_enabled_from_weights(weights: dict[str, 
     )
 
 
+def _portfolio_set_v5_r74_lake_behavior_enabled_from_weights(weights: dict[str, float] | None) -> bool:
+    values = dict(weights or {})
+    return any(
+        float(values.get(key, 0.0) or 0.0) > 0.0
+        for key in (
+            "lake_behavior_quality_total",
+            "r74_cash_timing_alignment_total",
+            "r74_source_quality_total",
+            "r74_receiver_spread_quality_total",
+        )
+    )
+
+
 def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artifact") -> str:
     model_config = dict(getattr(artifact, "model_config", {}) or {})
     diagnostics = dict(getattr(artifact, "training_diagnostics", {}) or {})
@@ -186,6 +219,7 @@ def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artif
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
                 }:
                     return value
                 return _portfolio_set_v5_behavior_mode_from_version(value)
@@ -202,6 +236,7 @@ def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artif
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
                 }:
                     return value
                 return _portfolio_set_v5_behavior_mode_from_version(value)
@@ -734,12 +769,25 @@ def build_portfolio_set_v5_targets(
     resolved_loss_profile, _ = resolve_portfolio_set_v5_loss_profile(loss_profile)
     value_arbitration_mode = (
         _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
-        in {PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION, PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET}
+        in {
+            PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+            PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+            PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+        }
     )
     multistage_regret_mode = (
         _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
-        == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
+        in {
+            PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+            PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+        }
     )
+    r74_lake_behavior_mode = (
+        _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
+        == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY
+    )
+    if r74_lake_behavior_mode:
+        sample_frame = attach_portfolio_decision_features(sample_frame.copy(), mode="target")
     current = _current_weight(sample_frame)
     held = _holding_mask(sample_frame, current, deadband=deadband)
     raw_delta = _numeric_series(sample_frame, "portfolio_daily_target_delta_intent", 0.0)
@@ -925,6 +973,88 @@ def build_portfolio_set_v5_targets(
             "correlation_cluster_score",
         ),
     ).clip(0.0, 1.0)
+    r74_liquidity_quality = _numeric_series(sample_frame, "portfolio_decision_r74_liquidity_quality", 0.5).clip(0.0, 1.0)
+    r74_drawdown_pressure = _numeric_series(sample_frame, "portfolio_decision_r74_drawdown_pressure", 0.0).clip(0.0, 1.0)
+    r74_volatility_pressure = _numeric_series(sample_frame, "portfolio_decision_r74_volatility_pressure", 0.0).clip(0.0, 1.0)
+    r74_volume_contraction = _numeric_series(sample_frame, "portfolio_decision_r74_volume_contraction", 0.0).clip(0.0, 1.0)
+    r74_price_volume_divergence = _numeric_series(sample_frame, "portfolio_decision_r74_price_volume_divergence", 0.0).clip(0.0, 1.0)
+    r74_breakout_volume = _numeric_series(sample_frame, "portfolio_decision_r74_breakout_volume", 0.0).clip(0.0, 1.0)
+    r74_cash_defense_value = _numeric_series(sample_frame, "portfolio_decision_r74_cash_defense_value", 0.0).clip(0.0, 1.0)
+    r74_deploy_value = _numeric_series(sample_frame, "portfolio_decision_r74_deploy_value", 0.0).clip(0.0, 1.0)
+    r74_release_value = _numeric_series(sample_frame, "portfolio_decision_r74_release_value", 0.0).clip(0.0, 1.0)
+    r74_source_quality_penalty = _numeric_series(sample_frame, "portfolio_decision_r74_source_quality_penalty", 0.0).clip(0.0, 1.0)
+    r74_receiver_spread_value = _numeric_series(sample_frame, "portfolio_decision_r74_receiver_source_spread_value", 0.0).clip(0.0, 1.0)
+    r74_crowding_liquidity_penalty = _numeric_series(sample_frame, "portfolio_decision_r74_crowding_liquidity_penalty", 0.0).clip(0.0, 1.0)
+    if r74_lake_behavior_mode:
+        defense_value = pd.concat(
+            [defense_value.rename("defense_value"), r74_cash_defense_value.rename("r74_cash_defense")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        cash_timing_value = pd.concat(
+            [
+                cash_timing_value.rename("cash_timing_value"),
+                r74_cash_defense_value.rename("r74_cash_defense"),
+                (r74_drawdown_pressure * 0.55 + r74_volatility_pressure * 0.45).rename("risk_expansion"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        deploy_value = pd.concat(
+            [
+                deploy_value.rename("deploy_value"),
+                (r74_deploy_value * (1.0 - 0.35 * r74_crowding_liquidity_penalty)).rename("r74_deploy_quality"),
+            ],
+            axis=1,
+        ).max(axis=1).where(headroom > float(deadband), 0.0).fillna(0.0).clip(0.0, 1.0)
+        release_value = pd.concat(
+            [release_value.rename("release_value"), r74_release_value.rename("r74_release_value")],
+            axis=1,
+        ).max(axis=1).where(held, 0.0).fillna(0.0).clip(0.0, 1.0)
+        source_opportunity_cost = pd.concat(
+            [
+                source_opportunity_cost.rename("source_opportunity_cost"),
+                r74_source_quality_penalty.rename("r74_source_quality_penalty"),
+                r74_breakout_volume.mul(0.65).rename("breakout_hold_risk"),
+            ],
+            axis=1,
+        ).max(axis=1).where(held, 0.0).fillna(0.0).clip(0.0, 1.0)
+        receiver_source_spread_value = pd.concat(
+            [
+                receiver_source_spread_value.rename("spread_value"),
+                (r74_receiver_spread_value * (1.0 - 0.35 * r74_cash_defense_value)).rename("r74_spread_value"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        positive_forward_sell_penalty = pd.concat(
+            [
+                positive_forward_sell_penalty.rename("positive_forward_sell_penalty"),
+                r74_source_quality_penalty.mul(0.80).rename("r74_source_quality_penalty"),
+                r74_breakout_volume.mul(0.70).rename("breakout_source_brake"),
+            ],
+            axis=1,
+        ).max(axis=1).where(held, 0.0).fillna(0.0).clip(0.0, 1.0)
+        receiver_deploy_regret_5d = pd.concat(
+            [
+                receiver_deploy_regret_5d.rename("receiver_deploy_regret_5d"),
+                (r74_crowding_liquidity_penalty * deploy_value).rename("crowded_receiver_regret"),
+                ((r74_cash_defense_value - r74_receiver_spread_value).clip(0.0, 1.0)).rename("cash_beats_spread"),
+            ],
+            axis=1,
+        ).max(axis=1).where(headroom > float(deadband), 0.0).fillna(0.0).clip(0.0, 1.0)
+        cash_defense_regret_1d = pd.concat(
+            [cash_defense_regret_1d.rename("cash_defense_regret_1d"), r74_cash_defense_value.rename("r74_cash_defense")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        rotation_spread_regret_5d = pd.concat(
+            [
+                rotation_spread_regret_5d.rename("rotation_spread_regret_5d"),
+                (1.0 - r74_receiver_spread_value).mul(deploy_value).rename("r74_negative_spread"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        crowding_penalty = pd.concat(
+            [crowding_penalty.rename("crowding_penalty"), r74_crowding_liquidity_penalty.rename("r74_crowding")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
     if value_arbitration_mode:
         if multistage_regret_mode:
             source_opportunity_cost = pd.concat(
@@ -1653,6 +1783,7 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
     pred = _decode_raw(raw)
     value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(weights)
     multistage_regret_mode = _portfolio_set_v5_multistage_regret_enabled_from_weights(weights)
+    r74_lake_behavior_mode = _portfolio_set_v5_r74_lake_behavior_enabled_from_weights(weights)
     target = batch["target_y"]
     decision_target = batch.get("decision_target_y")
     mask = batch["sample_mask"].float()
@@ -1888,6 +2019,26 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         + _masked_mean(torch.relu(raw[..., 3]) * torch.maximum(receiver_deploy_regret, rotation_spread_regret_5d), mask)
     )
     crowding_loss = _masked_mean((source_alloc + receiver_alloc) * crowding_penalty, mask)
+    r74_cash_alignment_loss = (
+        _masked_mean(nn.functional.smooth_l1_loss(pred["cash_buffer_score"], torch.maximum(cash_defense_regret, defense_value), reduction="none"), mask)
+        + _masked_mean((1.0 - pred["cash_buffer_score"]) * cash_defense_regret, mask) * 0.50
+        + _masked_mean(pred["cash_buffer_score"] * torch.relu(0.18 - cash_defense_regret), mask) * 0.35
+    )
+    r74_source_quality_loss = (
+        _masked_mean(source_alloc * (wrong_side_penalty + source_hold_regret + reversal_action_regret_3d), mask)
+        + _masked_mean(pred["source_supply_score"] * torch.maximum(wrong_side_penalty, source_hold_regret), mask) * 0.65
+    )
+    r74_receiver_spread_loss = (
+        _masked_mean(receiver_alloc * (receiver_deploy_regret + rotation_spread_regret_5d + crowding_penalty), mask)
+        + _masked_mean(pred["receiver_demand_score"] * torch.maximum(rotation_spread_regret_5d, receiver_deploy_regret), mask) * 0.55
+        + _masked_mean(torch.relu(0.20 - receiver_source_spread_value) * receiver_alloc, mask)
+    )
+    r74_behavior_quality_loss = (
+        r74_cash_alignment_loss
+        + r74_source_quality_loss
+        + r74_receiver_spread_loss
+        + oracle["constraint_violation"].mean() * 2.0
+    )
     loss = (
         float(weights["target_weight_closure_total"]) * _masked_mean(nn.functional.smooth_l1_loss(pred["target_weight"], target_weight, reduction="none"), mask)
         + float(weights["source_supply_total"]) * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 2], source_target, reduction="none"), mask)
@@ -1912,10 +2063,16 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         + float(weights.get("goal_programming_quality_total", 0.0)) * goal_programming_quality_loss
         + float(weights.get("receiver_recall_total", 0.0)) * (receiver_recall_loss + regret_propensity_loss)
         + float(weights.get("crowding_penalty_total", 0.0)) * crowding_loss
+        + float(weights.get("lake_behavior_quality_total", 0.0)) * r74_behavior_quality_loss
+        + float(weights.get("r74_cash_timing_alignment_total", 0.0)) * r74_cash_alignment_loss
+        + float(weights.get("r74_source_quality_total", 0.0)) * r74_source_quality_loss
+        + float(weights.get("r74_receiver_spread_quality_total", 0.0)) * r74_receiver_spread_loss
         + 0.10 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 5], release_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 6], reduce_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 7], exit_target, reduction="none"), mask)
     )
+    if r74_lake_behavior_mode:
+        loss = loss + 0.0 * r74_behavior_quality_loss
     return loss
 
 
@@ -1928,6 +2085,7 @@ def portfolio_set_v5_decision_diagnostics(
         effective_weights = weights or resolve_portfolio_set_v5_loss_profile(None)[1]["multi_objective_loss_weights"]
         value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(effective_weights)
         multistage_regret_mode = _portfolio_set_v5_multistage_regret_enabled_from_weights(effective_weights)
+        r74_lake_behavior_mode = _portfolio_set_v5_r74_lake_behavior_enabled_from_weights(effective_weights)
         pred = _decode_raw(raw)
         mask = batch["sample_mask"].float()
         current = batch["current_weight"].clamp(0.0, 1.0)
@@ -2052,6 +2210,16 @@ def portfolio_set_v5_decision_diagnostics(
                 ((oracle["cash_buffer"] >= oracle["cash_floor"] - 1.0e-6) & r71_cash_win_days).sum().item()
                 / max(float(r71_cash_win_days.sum().item()), 1.0)
             ),
+            "r74_lake_behavior_mode_count": float(mask.sum().item() if r74_lake_behavior_mode else 0.0),
+            "r74_cash_timing_alignment_1d": float(
+                _masked_mean(oracle["cash_buffer"].unsqueeze(1) * torch.maximum(cash_defense_regret, defense_value), mask).detach().cpu()
+            ) if r74_lake_behavior_mode else 0.0,
+            "r74_source_quality_score": float(
+                _masked_mean((1.0 - torch.maximum(wrong_side_penalty, source_hold_regret)) * source_target_mask.to(dtype=mask.dtype), mask).detach().cpu()
+            ) if r74_lake_behavior_mode else 0.0,
+            "r74_receiver_source_spread_quality": float(
+                _masked_mean(spread_value * receiver_target_mask.to(dtype=mask.dtype), mask).detach().cpu()
+            ) if r74_lake_behavior_mode else 0.0,
         }
 
 
@@ -2192,9 +2360,11 @@ def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
     conflict = pd.to_numeric(targets.get("target_delta_weight_conflict", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     violation = pd.to_numeric(targets.get("constraint_violation", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     value = pd.to_numeric(targets.get("decision_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    cash = pd.to_numeric(targets.get("cash_buffer", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     deploy = pd.to_numeric(targets.get("deploy_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     release = pd.to_numeric(targets.get("release_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     defense = pd.to_numeric(targets.get("defense_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    spread = pd.to_numeric(targets.get("receiver_source_spread_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     cash_timing = pd.to_numeric(targets.get("cash_timing_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     reversal = pd.to_numeric(targets.get("reversal_risk_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     wrong_side = pd.to_numeric(targets.get("source_wrong_side_sell_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
@@ -2224,6 +2394,9 @@ def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
     crowding = pd.to_numeric(targets.get("crowding_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     source_mask = source > 0.003
     receiver_mask = receiver > 0.003
+    r74_cash_alignment = cash * cash_defense_regret
+    r74_source_quality = (1.0 - pd.concat([wrong_side, source_hold_regret, reversal_action_regret], axis=1).max(axis=1)).clip(0.0, 1.0)
+    r74_receiver_spread_quality = (spread * (1.0 - 0.35 * crowding)).clip(0.0, 1.0)
     return {
         "decision_target_source_count": float((source > 0.003).sum()),
         "decision_target_receiver_count": float((receiver > 0.003).sum()),
@@ -2256,6 +2429,13 @@ def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
             float(reversal_action_regret.loc[source_mask].mean()) if bool(source_mask.any()) else 0.0
         ),
         "r71_target_crowding_penalty_mean": float(crowding.mean()) if len(crowding) else 0.0,
+        "r74_target_cash_timing_alignment_1d": float(r74_cash_alignment.mean()) if len(r74_cash_alignment) else 0.0,
+        "r74_target_source_quality_score": (
+            float(r74_source_quality.loc[source_mask].mean()) if bool(source_mask.any()) else 0.0
+        ),
+        "r74_target_receiver_source_spread_quality": (
+            float(r74_receiver_spread_quality.loc[receiver_mask].mean()) if bool(receiver_mask.any()) else 0.0
+        ),
     }
 
 
@@ -2315,6 +2495,7 @@ def _predict_value_arbitration_inputs(
     current: pd.Series,
     *,
     multistage_regret_mode: bool = False,
+    r74_lake_behavior_mode: bool = False,
 ) -> dict[str, pd.Series]:
     deploy_value = _max_numeric_columns(
         policy,
@@ -2485,6 +2666,70 @@ def _predict_value_arbitration_inputs(
             "correlation_cluster_score",
         ),
     ).clip(0.0, 1.0)
+    r74_cash_defense_value = _numeric_series(policy, "portfolio_decision_r74_cash_defense_value", 0.0).clip(0.0, 1.0)
+    r74_deploy_value = _numeric_series(policy, "portfolio_decision_r74_deploy_value", 0.0).clip(0.0, 1.0)
+    r74_release_value = _numeric_series(policy, "portfolio_decision_r74_release_value", 0.0).clip(0.0, 1.0)
+    r74_source_quality_penalty = _numeric_series(policy, "portfolio_decision_r74_source_quality_penalty", 0.0).clip(0.0, 1.0)
+    r74_receiver_spread_value = _numeric_series(policy, "portfolio_decision_r74_receiver_source_spread_value", 0.0).clip(0.0, 1.0)
+    r74_crowding_penalty = _numeric_series(policy, "portfolio_decision_r74_crowding_liquidity_penalty", 0.0).clip(0.0, 1.0)
+    if r74_lake_behavior_mode:
+        defense_value = pd.concat(
+            [defense_value.rename("defense_value"), r74_cash_defense_value.rename("r74_cash_defense")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        cash_timing_value = pd.concat(
+            [cash_timing_value.rename("cash_timing_value"), r74_cash_defense_value.rename("r74_cash_defense")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        deploy_value = pd.concat(
+            [
+                deploy_value.rename("deploy_value"),
+                (r74_deploy_value * (1.0 - 0.35 * r74_crowding_penalty)).rename("r74_deploy_quality"),
+            ],
+            axis=1,
+        ).max(axis=1).where(current < 0.24 - 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+        release_value = pd.concat(
+            [release_value.rename("release_value"), r74_release_value.rename("r74_release_value")],
+            axis=1,
+        ).max(axis=1).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+        opportunity_cost = pd.concat(
+            [opportunity_cost.rename("opportunity_cost"), r74_source_quality_penalty.rename("r74_source_quality_penalty")],
+            axis=1,
+        ).max(axis=1).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+        spread_value = pd.concat(
+            [
+                spread_value.rename("spread_value"),
+                (r74_receiver_spread_value * (1.0 - 0.35 * r74_cash_defense_value)).rename("r74_spread_value"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        wrong_side_penalty = pd.concat(
+            [wrong_side_penalty.rename("wrong_side_penalty"), r74_source_quality_penalty.mul(0.80).rename("r74_source_quality")],
+            axis=1,
+        ).max(axis=1).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+        receiver_deploy_regret_5d = pd.concat(
+            [
+                receiver_deploy_regret_5d.rename("receiver_deploy_regret_5d"),
+                (r74_crowding_penalty * deploy_value).rename("crowded_receiver_regret"),
+                ((r74_cash_defense_value - r74_receiver_spread_value).clip(0.0, 1.0)).rename("cash_beats_spread"),
+            ],
+            axis=1,
+        ).max(axis=1).where(current < 0.24 - 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+        cash_defense_regret_1d = pd.concat(
+            [cash_defense_regret_1d.rename("cash_defense_regret_1d"), r74_cash_defense_value.rename("r74_cash_defense")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        rotation_spread_regret_5d = pd.concat(
+            [
+                rotation_spread_regret_5d.rename("rotation_spread_regret_5d"),
+                (1.0 - r74_receiver_spread_value).mul(deploy_value).rename("r74_negative_spread"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        crowding_penalty = pd.concat(
+            [crowding_penalty.rename("crowding_penalty"), r74_crowding_penalty.rename("r74_crowding")],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
     if multistage_regret_mode:
         opportunity_cost = pd.concat(
             [opportunity_cost.rename("opportunity_cost"), source_hold_regret_3d, source_hold_regret_5d],
@@ -2553,14 +2798,20 @@ def predict_policy_portfolio_set_v5(
     value_arbitration_mode = behavior_mode in {
         PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
         PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+        PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
     }
-    multistage_regret_mode = behavior_mode == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
+    multistage_regret_mode = behavior_mode in {
+        PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+        PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY,
+    }
+    r74_lake_behavior_mode = behavior_mode == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R74_LAKE_BEHAVIOR_QUALITY
     value_inputs = (
         _predict_value_arbitration_inputs(
             policy,
             outputs,
             current,
             multistage_regret_mode=multistage_regret_mode,
+            r74_lake_behavior_mode=r74_lake_behavior_mode,
         )
         if value_arbitration_mode
         else None
@@ -2689,6 +2940,7 @@ def predict_policy_portfolio_set_v5(
     policy["portfolio_set_v5_r73_oracle_target_delta_abs_sum"] = float(target_delta.abs().sum())
     policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN] = 1.0 if value_arbitration_mode else 0.0
     policy[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN] = 1.0 if multistage_regret_mode else 0.0
+    policy[PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN] = 1.0 if r74_lake_behavior_mode else 0.0
     if value_inputs is not None:
         policy["portfolio_set_v5_r69_deploy_value"] = value_inputs["deploy_value"].astype(float)
         policy["portfolio_set_v5_r69_release_value"] = value_inputs["release_value"].astype(float)
@@ -2730,6 +2982,24 @@ def predict_policy_portfolio_set_v5(
                     | (policy["portfolio_set_v5_r71_receiver_deploy_regret_5d"] > 0.5)
                 )
             ).astype(float)
+        if r74_lake_behavior_mode:
+            policy["portfolio_set_v5_r74_cash_defense_value"] = _numeric_series(policy, "portfolio_decision_r74_cash_defense_value", 0.0).clip(0.0, 1.0)
+            policy["portfolio_set_v5_r74_liquidity_quality"] = _numeric_series(policy, "portfolio_decision_r74_liquidity_quality", 0.5).clip(0.0, 1.0)
+            policy["portfolio_set_v5_r74_source_quality_penalty"] = _numeric_series(policy, "portfolio_decision_r74_source_quality_penalty", 0.0).clip(0.0, 1.0)
+            policy["portfolio_set_v5_r74_receiver_source_spread_value"] = _numeric_series(policy, "portfolio_decision_r74_receiver_source_spread_value", 0.0).clip(0.0, 1.0)
+            policy["portfolio_set_v5_r74_crowding_liquidity_penalty"] = _numeric_series(policy, "portfolio_decision_r74_crowding_liquidity_penalty", 0.0).clip(0.0, 1.0)
+            oracle_cash_buffer_value = float(oracle["cash_buffer"][0].detach().cpu())
+            policy["portfolio_set_v5_r74_cash_timing_alignment_1d"] = (
+                oracle_cash_buffer_value
+                * policy["portfolio_set_v5_r74_cash_defense_value"].astype(float)
+            ).astype(float)
+            policy["portfolio_set_v5_r74_source_quality_score"] = (
+                1.0 - policy["portfolio_set_v5_r74_source_quality_penalty"].astype(float)
+            ).clip(0.0, 1.0)
+            policy["portfolio_set_v5_r74_receiver_source_spread_quality"] = (
+                policy["portfolio_set_v5_r74_receiver_source_spread_value"].astype(float)
+                * (1.0 - 0.35 * policy["portfolio_set_v5_r74_crowding_liquidity_penalty"].astype(float))
+            ).clip(0.0, 1.0)
     policy["portfolio_set_v5_source_supply_score"] = source_score.astype(float)
     policy["portfolio_set_v5_receiver_demand_score"] = receiver_score.astype(float)
     policy["portfolio_set_v5_source_supply"] = source_supply.astype(float)
@@ -2780,6 +3050,34 @@ def predict_policy_portfolio_set_v5(
         policy["portfolio_set_v5_r71_rotation_spread_regret_mean"] = float(
             policy["portfolio_set_v5_r71_rotation_spread_regret_5d"].mean()
         )
+    if r74_lake_behavior_mode:
+        source_target_count = max(float(policy["portfolio_daily_source_target_intent"].sum()), 1.0)
+        receiver_target_count = max(float(policy["portfolio_daily_receiver_target_intent"].sum()), 1.0)
+        policy["portfolio_set_v5_r74_feature_contract_blocker_count"] = pd.to_numeric(
+            policy.get(PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN, pd.Series(0.0, index=policy.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        policy["portfolio_set_v5_r74_feature_contract_degraded_count"] = pd.to_numeric(
+            policy.get(PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN, pd.Series(0.0, index=policy.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        policy["portfolio_set_v5_r74_source_quality_score_mean"] = float(
+            (
+                policy["portfolio_set_v5_r74_source_quality_score"]
+                * policy["portfolio_daily_source_target_intent"].astype(float)
+            ).sum()
+            / source_target_count
+        )
+        policy["portfolio_set_v5_r74_receiver_source_spread_quality_mean"] = float(
+            (
+                policy["portfolio_set_v5_r74_receiver_source_spread_quality"]
+                * policy["portfolio_daily_receiver_target_intent"].astype(float)
+            ).sum()
+            / receiver_target_count
+        )
+        policy["portfolio_set_v5_r74_cash_timing_alignment_1d_mean"] = float(
+            policy["portfolio_set_v5_r74_cash_timing_alignment_1d"].mean()
+        )
     policy["portfolio_set_v5_target_delta_weight_conflict_count"] = int((((target_weight - current) * target_delta) < -(0.003 ** 2)).sum())
     add_mask = (current > 0.0) & (target_delta > 0.003)
     open_mask = (current <= 0.0) & (target_delta > 0.003)
@@ -2825,6 +3123,7 @@ def predict_policy_portfolio_set_v5(
             PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN: 1.0,
             PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN: 1.0 if value_arbitration_mode else 0.0,
             PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN: 1.0 if multistage_regret_mode else 0.0,
+            PORTFOLIO_SET_V5_LAKE_BEHAVIOR_QUALITY_MODE_COLUMN: 1.0 if r74_lake_behavior_mode else 0.0,
             PORTFOLIO_DECISION_FEATURE_BUNDLE_MODE_COLUMN: 1.0,
             PORTFOLIO_DECISION_FEATURE_CONTRACT_MISSING_COUNT_COLUMN: float(
                 pd.to_numeric(
@@ -2841,6 +3140,28 @@ def predict_policy_portfolio_set_v5(
                 pd.to_numeric(
                     policy.get(
                         PORTFOLIO_DECISION_FEATURE_CONTRACT_NEUTRAL_DEFAULT_COUNT_COLUMN,
+                        pd.Series(0.0, index=policy.index),
+                    ),
+                    errors="coerce",
+                )
+                .fillna(0.0)
+                .max()
+            ),
+            PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN: float(
+                pd.to_numeric(
+                    policy.get(
+                        PORTFOLIO_DECISION_FEATURE_CONTRACT_DEGRADED_COUNT_COLUMN,
+                        pd.Series(0.0, index=policy.index),
+                    ),
+                    errors="coerce",
+                )
+                .fillna(0.0)
+                .max()
+            ),
+            PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN: float(
+                pd.to_numeric(
+                    policy.get(
+                        PORTFOLIO_DECISION_FEATURE_CONTRACT_BLOCKER_COUNT_COLUMN,
                         pd.Series(0.0, index=policy.index),
                     ),
                     errors="coerce",
@@ -3037,8 +3358,13 @@ def fit_policy_models_portfolio_set_v5(
             "position_cap": 0.24,
             "long_only": True,
             "source_receiver_cash_conservation": True,
-            "value_arbitration": resolved_loss_profile in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION},
-            "multistage_regret": resolved_loss_profile == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+            "value_arbitration": resolved_loss_profile in {
+                PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+                PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+                PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+            },
+            "multistage_regret": resolved_loss_profile in {PORTFOLIO_SET_V5_R71_INTERNAL_VERSION, PORTFOLIO_SET_V5_R74_INTERNAL_VERSION},
+            "lake_behavior_quality": resolved_loss_profile == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
             "behavior_mode": behavior_mode,
             **last_val_decision_diagnostics,
         },
@@ -3062,6 +3388,9 @@ def fit_policy_models_portfolio_set_v5(
             "r71_target_reversal_action_regret_mean": target_diagnostics["r71_target_reversal_action_regret_mean"],
             "r71_target_crowding_penalty_mean": target_diagnostics["r71_target_crowding_penalty_mean"],
             "r71_target_receiver_coverage_floor_count": target_diagnostics["r71_target_receiver_coverage_floor_count"],
+            "r74_target_cash_timing_alignment_1d": target_diagnostics.get("r74_target_cash_timing_alignment_1d", 0.0),
+            "r74_target_source_quality_score": target_diagnostics.get("r74_target_source_quality_score", 0.0),
+            "r74_target_receiver_source_spread_quality": target_diagnostics.get("r74_target_receiver_source_spread_quality", 0.0),
         },
         "device": str(device),
         "gpu_acceleration": runtime.to_diagnostics(),
@@ -3080,8 +3409,13 @@ def fit_policy_models_portfolio_set_v5(
         "portfolio_set_v5_shadow_only": True,
         "supports_release_first_allocation_v3_mode": True,
         "supports_portfolio_cashflow_decision_v1_mode": True,
-        "supports_portfolio_set_v5_r69_value_arbitration": resolved_loss_profile in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION},
-        "supports_portfolio_set_v5_r71_multistage_regret": resolved_loss_profile == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+        "supports_portfolio_set_v5_r69_value_arbitration": resolved_loss_profile in {
+            PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
+            PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
+        },
+        "supports_portfolio_set_v5_r71_multistage_regret": resolved_loss_profile in {PORTFOLIO_SET_V5_R71_INTERNAL_VERSION, PORTFOLIO_SET_V5_R74_INTERNAL_VERSION},
+        "supports_portfolio_set_v5_r74_lake_behavior_quality": resolved_loss_profile == PORTFOLIO_SET_V5_R74_INTERNAL_VERSION,
         "progress_event_count": int(progress_event_count),
         "train_seconds": round(time.monotonic() - started, 3),
         **target_diagnostics,
