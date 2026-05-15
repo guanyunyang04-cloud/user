@@ -56,6 +56,24 @@ class BehaviorAuditPrepareContractTest(unittest.TestCase):
         self.assertEqual(kwargs["alpha_prior_score_panel"], "H:/legacy_score.csv")
         self.assertEqual(kwargs["alpha_prior_target_weight_panel"], "H:/legacy_weight.csv")
 
+    def test_behavior_audit_preserves_lake_evaluation_source(self) -> None:
+        kwargs = _resolve_audit_prepare_kwargs(
+            {
+                "pool_name": "learned_all_a",
+                "start_date": "20190401",
+                "end_date": "20190430",
+                "benchmark": "000300.SH",
+                "data_source": "lake",
+                "lake_dataset_id": "policy_input_bundle__fixture",
+                "data_lake_root": "H:/lake",
+                "prepared_summary": {"universe_size": 3},
+            }
+        )
+
+        self.assertEqual(kwargs["data_source"], "lake")
+        self.assertEqual(kwargs["lake_dataset_id"], "policy_input_bundle__fixture")
+        self.assertEqual(kwargs["data_lake_root"], "H:/lake")
+
 
 if __name__ == "__main__":
     unittest.main()

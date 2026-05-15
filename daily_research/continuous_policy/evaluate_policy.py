@@ -35,6 +35,7 @@ from daily_research.continuous_policy.runtime import (
     write_json,
 )
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
+from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 from daily_research.execution.strategy_manifest import load_strategy_manifest
 
 
@@ -70,8 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-date", default=defaults["start_date"] or "20250318")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
     parser.add_argument("--max-universe-size", type=int, default=0)
@@ -167,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         benchmark=args.benchmark,
         data_source=args.data_source,
         csv_folder=args.csv_folder,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,
@@ -285,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         "benchmark": prepared.benchmark,
         "data_source": str(args.data_source),
         "csv_folder": str(args.csv_folder or ""),
+        "lake_dataset_id": str(args.lake_dataset_id or ""),
+        "data_lake_root": str(args.data_lake_root or ""),
         "max_universe_size": int(args.max_universe_size),
         "start_date": args.start_date,
         "end_date": args.end_date or prepared.end_date,

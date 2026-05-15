@@ -16,6 +16,7 @@ from daily_research.continuous_policy.pipeline_utils import BUDGET_OBJECTIVE_CHO
 from daily_research.continuous_policy.run_self_optimizing_study import _score_protocol_summary
 from daily_research.continuous_policy.runtime import timestamp_tag
 from daily_research.continuous_policy.state_builder import prepare_policy_inputs
+from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 TARGET_COLUMNS: tuple[str, ...] = (
@@ -64,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--data-source", default="tq")
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--max-universe-size", type=int, default=1200)
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
@@ -122,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         "benchmark": args.benchmark,
         "data_source": args.data_source,
         "csv_folder": args.csv_folder,
+        "lake_dataset_id": args.lake_dataset_id,
+        "data_lake_root": args.data_lake_root,
         "max_universe_size": int(args.max_universe_size),
         "pool_rebalance_days": int(args.pool_rebalance_days),
         "pool_adv_window": int(args.pool_adv_window),

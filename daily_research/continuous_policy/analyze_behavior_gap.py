@@ -65,6 +65,18 @@ def _resolve_audit_prepare_kwargs(evaluation_summary: dict[str, Any]) -> dict[st
         "benchmark": str(evaluation_summary.get("benchmark", "") or prepared_summary.get("benchmark", "") or "000300.SH"),
         "data_source": str(evaluation_summary.get("data_source", "") or prepared_summary.get("data_source", "") or "tq"),
         "csv_folder": str(evaluation_summary.get("csv_folder", "") or prepared_summary.get("csv_folder", "") or ""),
+        "lake_dataset_id": str(
+            evaluation_summary.get("lake_dataset_id", "")
+            or prepared_summary.get("raw_cache_meta", {}).get("dataset_id", "")
+            or prepared_summary.get("prepared_cache_meta", {}).get("dataset_id", "")
+            or ""
+        ),
+        "data_lake_root": str(
+            evaluation_summary.get("data_lake_root", "")
+            or prepared_summary.get("raw_cache_meta", {}).get("data_lake_root", "")
+            or prepared_summary.get("prepared_cache_meta", {}).get("data_lake_root", "")
+            or ""
+        ),
         "max_universe_size": int(max_universe_size),
         "alpha_prior_source": str(evaluation_summary.get("alpha_prior_source", "") or alpha_summary.get("source", "") or ""),
         "alpha_prior_score_panel": str(evaluation_summary.get("alpha_prior_score_panel", "") or alpha_summary.get("score_panel_csv", "") or ""),

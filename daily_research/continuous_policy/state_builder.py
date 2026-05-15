@@ -476,6 +476,9 @@ def prepare_policy_inputs(
     benchmark: str = "000300.SH",
     data_source: str = "tq",
     csv_folder: str = "",
+    lake_dataset_id: str = "",
+    data_lake_root: str = "",
+    lake_min_trading_days: int = 2,
     extra_stocks: Iterable[str] | None = None,
     max_universe_size: int = 0,
     pool_rebalance_days: int = DEFAULT_POOL_REBALANCE_DAYS,
@@ -489,6 +492,33 @@ def prepare_policy_inputs(
     progress_desc: str = "continuous policy prepare",
 ) -> PreparedPolicyInputs:
     resolved_pool_name = normalize_policy_pool_name(pool_name)
+    resolved_data_source = str(data_source or "tq").strip().lower()
+    if resolved_data_source == "lake":
+        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake, load_policy_inputs_from_lake
+
+        requested_universe: list[str] | None = None
+        if resolved_pool_name and not is_learned_all_a_pool_name(resolved_pool_name):
+            try:
+                pool_file = get_named_pool_file(resolved_pool_name)
+                if pool_file.exists():
+                    requested_universe = _read_pool_file(pool_file)
+            except Exception:
+                requested_universe = None
+        return load_policy_inputs_from_lake(
+            lake=ResearchDataLake(str(data_lake_root or "").strip() or None),
+            dataset_id=str(lake_dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID),
+            start_date=str(start_date or "").strip() or "20250318",
+            end_date=str(end_date or "").strip(),
+            pool_name=resolved_pool_name,
+            benchmark=str(benchmark or "000300.SH"),
+            universe=requested_universe,
+            extra_stocks=list(extra_stocks or []),
+            max_universe_size=int(max_universe_size or 0),
+            min_trading_days=int(lake_min_trading_days or 1),
+            alpha_prior_source=alpha_prior_source,
+            alpha_prior_score_panel=alpha_prior_score_panel,
+            alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
+        )
     universe = resolve_policy_universe(
         pool_name=resolved_pool_name,
         extra_stocks=extra_stocks,
@@ -505,7 +535,7 @@ def prepare_policy_inputs(
         auto_trim_history=bool(auto_trim_history),
     )
     raw_df_dict, raw_cache_meta = load_raw_data_with_cache(
-        data_source=str(data_source or "tq"),
+        data_source=resolved_data_source,
         csv_folder=str(csv_folder or "").strip() or None,
         universe=universe,
         benchmark=str(benchmark or "000300.SH"),
@@ -588,7 +618,7 @@ def prepare_policy_inputs(
         universe=tuple(universe),
         pool_name=resolved_pool_name,
         benchmark=str(benchmark or "000300.SH"),
-        data_source=str(data_source or "tq"),
+        data_source=resolved_data_source,
         csv_folder=str(csv_folder or ""),
         start_date=str(start_date or "").strip() or history_window.requested_start_date,
         end_date=str(end_date or "").strip() or history_window.end_date,

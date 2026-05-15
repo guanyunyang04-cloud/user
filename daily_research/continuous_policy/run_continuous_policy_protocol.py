@@ -60,6 +60,7 @@ from daily_research.continuous_policy.research_profile_registry import get_activ
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
 from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
+from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 from daily_research.execution import app_service
 
 
@@ -373,8 +374,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to run learned selection over the whole A-share universe.",
     )
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
     parser.add_argument("--max-universe-size", type=int, default=0)
@@ -491,6 +494,10 @@ def main(argv: list[str] | None = None) -> int:
         args.benchmark,
         "--data-source",
         args.data_source,
+        "--lake-dataset-id",
+        str(args.lake_dataset_id),
+        "--data-lake-root",
+        str(args.data_lake_root),
         "--pool-rebalance-days",
         str(args.pool_rebalance_days),
         "--pool-adv-window",
@@ -582,6 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         args.benchmark,
         "--data-source",
         args.data_source,
+        "--lake-dataset-id",
+        str(args.lake_dataset_id),
+        "--data-lake-root",
+        str(args.data_lake_root),
         "--pool-rebalance-days",
         str(args.pool_rebalance_days),
         "--pool-adv-window",
@@ -641,6 +652,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark=args.benchmark,
             data_source=args.data_source,
             csv_folder=args.csv_folder,
+            lake_dataset_id=args.lake_dataset_id,
+            data_lake_root=args.data_lake_root,
             extra_stocks=holdings,
             max_universe_size=args.max_universe_size,
             pool_rebalance_days=args.pool_rebalance_days,
@@ -732,6 +745,10 @@ def main(argv: list[str] | None = None) -> int:
         args.benchmark,
         "--data-source",
         args.data_source,
+        "--lake-dataset-id",
+        str(args.lake_dataset_id),
+        "--data-lake-root",
+        str(args.data_lake_root),
         "--pool-rebalance-days",
         str(args.pool_rebalance_days),
         "--pool-adv-window",
@@ -773,6 +790,9 @@ def main(argv: list[str] | None = None) -> int:
         "executed_at": now_iso(),
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
+        "data_source": str(args.data_source),
+        "lake_dataset_id": str(args.lake_dataset_id or ""),
+        "data_lake_root": str(args.data_lake_root or ""),
         "search_profile": str(args.search_profile or ""),
         "profile_binding": profile_binding,
         "label_preset": args.label_preset,
@@ -816,6 +836,9 @@ def main(argv: list[str] | None = None) -> int:
             "model_artifact_path": str(artifact_path),
         },
         "evaluation": {
+            "data_source": str(args.data_source),
+            "lake_dataset_id": str(args.lake_dataset_id or ""),
+            "data_lake_root": str(args.data_lake_root or ""),
             "run_tag": evaluation_summary.get("run_tag", eval_tag),
             "label_preset": evaluation_summary.get("label_preset", args.label_preset),
             "trainer_backend": evaluation_summary.get("trainer_backend", train_summary.get("trainer_backend", args.trainer_backend)),
@@ -834,6 +857,9 @@ def main(argv: list[str] | None = None) -> int:
             "evaluation_summary_json": str((EVALUATIONS_ROOT / eval_tag / "evaluation_summary.json").resolve()),
         },
         "shadow": {
+            "data_source": str(args.data_source),
+            "lake_dataset_id": str(args.lake_dataset_id or ""),
+            "data_lake_root": str(args.data_lake_root or ""),
             "metrics": shadow_summary.get("metrics", {}),
             "continuity_metrics": shadow_summary.get("continuity_metrics", {}),
             "execution_semantics": shadow_summary.get("execution_semantics", args.execution_semantics),
@@ -845,6 +871,9 @@ def main(argv: list[str] | None = None) -> int:
             "shadow_summary_json": str(shadow_summary_path.resolve()),
         },
         "latest_export": {
+            "data_source": str(args.data_source),
+            "lake_dataset_id": str(args.lake_dataset_id or ""),
+            "data_lake_root": str(args.data_lake_root or ""),
             "signal_date": export_summary.get("signal_date", shadow_end_date),
             "trainer_backend": export_summary.get("trainer_backend", train_summary.get("trainer_backend", args.trainer_backend)),
             "action_counts": export_summary.get("action_counts", {}),

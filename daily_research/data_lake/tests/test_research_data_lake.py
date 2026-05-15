@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import pandas as pd
 
@@ -8,6 +9,7 @@ from daily_research.data_lake import ResearchDataLake, build_label_completeness_
 from daily_research.data_lake import build_research_database
 from daily_research.data_lake.import_legacy_training_caches import import_legacy_training_dataset_caches
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from daily_research.continuous_policy.state_builder import prepare_policy_inputs
 from daily_research.continuous_policy.training_dataset_cache import save_training_dataset_cache
 
 
@@ -167,6 +169,131 @@ class ResearchDataLakeTest(unittest.TestCase):
         pd.testing.assert_frame_equal(prepared.close, close)
         self.assertEqual(prepared.raw_cache_meta["source"], "data_lake")
         self.assertIn("score_blend_lag1", prepared.derived_frames)
+
+    def test_prepare_policy_inputs_lake_uses_data_lake(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "000002.SZ", "000003.SZ"]
+        close = pd.DataFrame(
+            [[10.0, 20.0, 30.0], [10.5, 20.5, 30.5], [11.0, 21.0, 31.0]],
+            index=dates,
+            columns=stocks,
+        )
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+        membership_frame = pd.DataFrame(True, index=dates, columns=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            with mock.patch(
+                "daily_research.continuous_policy.state_builder.load_universe_from_tq",
+                side_effect=AssertionError("lake mode must not call TDX universe resolution"),
+            ):
+                prepared = prepare_policy_inputs(
+                    pool_name="learned_all_a",
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    benchmark="000300.SH",
+                    data_source="lake",
+                    lake_dataset_id=record.dataset_id,
+                    data_lake_root=temp_dir,
+                    max_universe_size=2,
+                    extra_stocks=["000003.SZ"],
+                )
+
+        self.assertEqual(prepared.data_source, "lake")
+        self.assertEqual(prepared.raw_cache_meta["dataset_id"], record.dataset_id)
+        self.assertEqual(prepared.raw_cache_meta["lake_coverage_report"]["status"], "ok")
+        self.assertEqual(prepared.universe, tuple(stocks))
+
+    def test_policy_input_loader_reports_lake_coverage_blocker_for_missing_benchmark(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "000002.SZ"]
+        close = pd.DataFrame([[10.0, 20.0], [10.5, 20.5], [11.0, 21.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+        membership_frame = pd.DataFrame(True, index=dates, columns=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(dtype=float, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            with self.assertRaisesRegex(ValueError, "lake_coverage_blocker"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                )
+
+    def test_lake_loader_allows_single_day_export_preflight_when_requested(self) -> None:
+        dates = pd.to_datetime(["2026-01-05"])
+        stocks = ["000001.SZ", "000002.SZ"]
+        close = pd.DataFrame([[10.0, 20.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+        benchmark_close = pd.Series([4000.0], index=dates, name="000300.SH")
+        membership_frame = pd.DataFrame(True, index=dates, columns=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            with self.assertRaisesRegex(ValueError, "insufficient_trading_days"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-05",
+                )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-05",
+                min_trading_days=1,
+            )
+
+        self.assertEqual(len(prepared.close.index), 1)
+        self.assertEqual(prepared.raw_cache_meta["lake_coverage_report"]["min_trading_days"], 1)
 
     def test_label_completeness_separates_strict_and_realtime_zones(self) -> None:
         trade_dates = pd.to_datetime(

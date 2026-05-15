@@ -22,6 +22,7 @@ from daily_research.continuous_policy.state_builder import (
     prepare_policy_inputs,
 )
 from daily_research.data_lake import ResearchDataLake, build_label_completeness_summary
+from daily_research.data_lake.policy_input_loader import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,8 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-date", default="auto")
     parser.add_argument("--end-date", default="latest")
     parser.add_argument("--zones", default="strict_train,realtime_research")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     parser.add_argument("--label-preset", default="holdcash_v3", choices=tuple(sorted(LABEL_CONFIGS)))
     parser.add_argument("--execution-semantics", default=DEFAULT_EXECUTION_SEMANTICS)
     parser.add_argument("--budget-semantics", default=DEFAULT_BUDGET_SEMANTICS)
@@ -116,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         benchmark=args.benchmark,
         data_source=args.data_source,
         csv_folder=args.csv_folder,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
         max_universe_size=args.max_universe_size,
         pool_rebalance_days=args.pool_rebalance_days,
         pool_adv_window=args.pool_adv_window,

@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shard-frequency", default="quarter", choices=("month", "quarter", "year", "all"))
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--refresh", action="store_true")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--label-preset", default="holdcash_v3", choices=tuple(sorted(LABEL_CONFIGS)))
     parser.add_argument("--execution-semantics", default=DEFAULT_EXECUTION_SEMANTICS)
@@ -136,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
             dataset_id=str(args.source_market_dataset_id).strip(),
             start_date=requested_start,
             end_date=requested_end,
+            pool_name=args.universe,
+            benchmark=args.benchmark,
+            max_universe_size=args.max_universe_size,
+            min_trading_days=2,
             alpha_prior_source=args.alpha_prior_source,
             alpha_prior_score_panel=args.alpha_prior_score_panel,
             alpha_prior_target_weight_panel=args.alpha_prior_target_weight_panel,
@@ -148,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark=args.benchmark,
             data_source=args.data_source,
             csv_folder=args.csv_folder,
+            lake_dataset_id=args.source_market_dataset_id,
+            data_lake_root=args.data_lake_root,
             max_universe_size=args.max_universe_size,
             pool_rebalance_days=args.pool_rebalance_days,
             pool_adv_window=args.pool_adv_window,

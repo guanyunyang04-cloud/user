@@ -86,8 +86,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-date", default=defaults["start_date"] or "20250318")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument(
+        "--lake-dataset-id",
+        default="",
+        help="Optional policy_input_bundle dataset id for data-source=lake prepare paths. Training v5 still defaults to strict Gold unless --training-dataset-id overrides it.",
+    )
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
     parser.add_argument("--max-universe-size", type=int, default=0)
@@ -367,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark=args.benchmark,
             data_source=args.data_source,
             csv_folder=args.csv_folder,
+            lake_dataset_id=args.lake_dataset_id,
+            data_lake_root=args.data_lake_root,
             max_universe_size=args.max_universe_size,
             pool_rebalance_days=args.pool_rebalance_days,
             pool_adv_window=args.pool_adv_window,

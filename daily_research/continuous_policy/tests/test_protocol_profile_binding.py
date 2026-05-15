@@ -80,6 +80,23 @@ class ProtocolProfileBindingTest(unittest.TestCase):
         self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
         self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
 
+    def test_protocol_parser_accepts_lake_evaluator_arguments(self) -> None:
+        args, binding = _parse_args_with_profile_binding(
+            [
+                "--data-source",
+                "lake",
+                "--lake-dataset-id",
+                "policy_input_bundle__fixture",
+                "--data-lake-root",
+                "H:/lake",
+            ]
+        )
+
+        self.assertFalse(binding["profile_applied"])
+        self.assertEqual(args.data_source, "lake")
+        self.assertEqual(args.lake_dataset_id, "policy_input_bundle__fixture")
+        self.assertEqual(args.data_lake_root, "H:/lake")
+
 
 if __name__ == "__main__":
     unittest.main()

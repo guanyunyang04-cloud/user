@@ -59,6 +59,7 @@
 - r69：value-arbitration traincheck 有机制进展，source target=1185、receiver target=160、wrong-side sell share=0；但 receiver 覆盖低于 r68、constraint violation 偏高、完整 evaluate/shadow smoke 因 TDX empty batch 未完成。
 - r70：version boundary 与 oracle feasibility 修复完成，tiny strict-Gold smoke `protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01` 完整通过，oracle violation 近零、cashflow valid=1、intent conflict=0；但 training evidence 仍 insufficient，cash timing、source quality 与 reversal 仍失败。
 - r71：multi-stage regret 代码/测试闭合，base/r69/r71 版本边界保持隔离；但 `protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01/_02/_03` evaluate 均被 TDX singleton empty data 阻断，`_04` train 被 CUDA busy 阻断，尚无 completed tiny behavior smoke。
+- r72：`data_source=lake` 已成为 evaluate/shadow/export 的通用研究路径；默认 market bundle 为 `policy_input_bundle__0f116a9b78c92ff045a6853d`。`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通但 source/receiver target 为 0，不能作为 r71 behavior acceptance。
 
 ## 禁止事项
 - 禁止从 smoke、dry-run、interrupted wrapper、failed trial、runtime timeout 或 realtime tail label 推 promotion。
@@ -69,7 +70,7 @@
 
 ## 下一步方向
 - r66 当前任务是 brain/workflow maintenance，不推进策略训练。
-- r71 后续策略研究应先解决 provider/GPU blocker 并完成 post-calibration tiny behavior smoke；只有 translation 不退化、oracle violation 近零且至少两个 behavior 指标优于 r70，才能考虑 strict resume。
+- r71 后续策略研究应使用 lake evaluator，先修复 source/receiver target collapse；只有 translation 不退化、oracle violation 近零且至少两个 behavior 指标优于 r70，才能考虑 strict resume。
 - 后台运行只作为 OS 级 launcher/轮询能力，不能改变 study/protocol 单进程研究本体。
 - 数据层下一步是 full-window realtime Gold build/audit；仍不得作为 completed training evidence。
 
@@ -86,6 +87,7 @@
 - r69：value arbitration behavior-quality mechanism for portfolio-set v5。
 - r70：version-boundary and oracle-feasibility repair for portfolio-set v5 / r69 value arbitration。
 - r71：multi-stage regret behavior-quality mechanism for portfolio-set v5。
+- r72：generic data lake evaluator for evaluate/shadow/export.
 - 完整证据入口：`daily_research/brain/references/evidence_registry.json` 与 `daily_research/brain/references/r*_*.md`。
 
 ## 归档入口

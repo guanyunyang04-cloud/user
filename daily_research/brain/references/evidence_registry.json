@@ -687,6 +687,41 @@
       "dataset_ids": [
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
       ]
+    },
+    {
+      "id": "r72",
+      "date": "2026-05-15",
+      "r_id": "r72",
+      "path": "daily_research/brain/references/r72_data_lake_evaluator_status_20260515.md",
+      "tags": [
+        "r72",
+        "continuous_policy",
+        "data_lake",
+        "evaluator"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
+        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
+      ],
+      "verdict": "Status: `research / shadow-only / infrastructure progress`.; Scope completed: `evaluate_policy.py`, protocol shadow, export, behavior audit, and related helper CLIs can use `data_source=lake`.; Default market lake dataset: `policy_input_bundle__0f116a9b78c92ff045a6853d`.; Training remains strict Gold by default for portfolio-set v5: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.; This is not promotion evidence, not confirmatory evidence, and not live evidence.",
+      "blockers": [
+        "r72 unblocks reproducible lake evaluation, but it does not prove r71 behavior acceptance.",
+        "In completed smoke `_02`, training evidence remains `insufficient`.",
+        "In completed smoke `_02`, shadow `portfolio_daily_source_target_count=0.0`.",
+        "In completed smoke `_02`, shadow `portfolio_daily_receiver_target_count=0.0`.",
+        "Promotion gate remains `shadow_only`."
+      ],
+      "next_allowed_actions": [
+        "Use `--data-source lake --lake-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d` for future r71 evaluate/shadow/export smoke runs.",
+        "Repair r71 prediction/oracle behavior until source and receiver target counts are nonzero under the lake smoke.",
+        "Only consider strict resume after translation remains closed and at least two behavior metrics improve versus r70 without source/receiver collapse."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
     }
   ]
 }
