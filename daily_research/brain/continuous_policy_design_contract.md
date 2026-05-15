@@ -29,6 +29,7 @@
   - `split_heads_portfolio_daily_release_first_portfolio_set_v5_r65`
 - r65/r67/r68 entry：`split_heads_portfolio_daily_release_first_portfolio_set_v5_r65` / `portfolio_set_v5_dfl_pg_v1`。
 - r69 explicit research entry：`split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69` / `portfolio_set_v5_dfl_pg_v1_r69_value_arbitration`；registered for explicit protocol/traincheck use but not part of active/default search profiles.
+- r71 explicit research entry：`split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71` / `portfolio_set_v5_dfl_pg_v1_r71_multistage_regret`；registered for explicit protocol/smoke use but not part of active/default search profiles.
 - r65 backend：`formal_torch_portfolio_set_v5`，artifact type `continuous_policy_torch_portfolio_set_v5`，`promotable=False`。
 - r65 默认 dataset：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`。
 - r67 internal version：`portfolio_set_v5_dfl_pg_v1`；旧 v5 artifacts 与 `alpha_result_value_budget_split_v48` alias 可兼容读取，但新训练默认只产出 DFL-PG v1 metadata。
@@ -38,6 +39,7 @@
 - r68 cashflow contract：`portfolio_cashflow_decision_v1` 是 v5 prediction、simulator、release trace 与 continuity metrics 的共享资金流语义；缺字段、方向冲突、oracle infeasible 或 turnover violation 必须 fail closed 并显式诊断。
 - r69 value arbitration：source/release/defense/cash/reversal 只能作为训练目标与诊断改进，不得绕过 r68 cashflow contract，不得用 guard 静默修正成 promotion-looking behavior。
 - r70 after repair：oracle feasibility 与 cashflow translation 不再是 r69/r70 主 blocker；后续不能再通过放宽版本边界、静默启用 r69 mode 或二次 solver 重算来制造改善。
+- r71 multistage regret：source rebound、receiver deploy regret、cash defense regret、rotation spread regret、reversal action regret 与 crowding 只能作为显式 r71 训练目标和诊断；不得绕过 r68 cashflow contract，不得把 failed smoke 写成 behavior acceptance。
 - r61 core-v4 保留为 baseline/ablation；不再作为下一代主模型承载新主线。
 
 ## 成功判定
@@ -56,6 +58,7 @@
 - r68：v5 cashflow translation closure smoke 通过，shadow source target=97、receiver target=139、intent conflict=0、cashflow valid=21/21；下一 blocker 是 evidence sufficiency、source quality、cash timing、drawdown/reversal，不再是 source/receiver translation dead。
 - r69：value-arbitration traincheck 有机制进展，source target=1185、receiver target=160、wrong-side sell share=0；但 receiver 覆盖低于 r68、constraint violation 偏高、完整 evaluate/shadow smoke 因 TDX empty batch 未完成。
 - r70：version boundary 与 oracle feasibility 修复完成，tiny strict-Gold smoke `protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01` 完整通过，oracle violation 近零、cashflow valid=1、intent conflict=0；但 training evidence 仍 insufficient，cash timing、source quality 与 reversal 仍失败。
+- r71：multi-stage regret 代码/测试闭合，base/r69/r71 版本边界保持隔离；但 `protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01/_02/_03` evaluate 均被 TDX singleton empty data 阻断，`_04` train 被 CUDA busy 阻断，尚无 completed tiny behavior smoke。
 
 ## 禁止事项
 - 禁止从 smoke、dry-run、interrupted wrapper、failed trial、runtime timeout 或 realtime tail label 推 promotion。
@@ -66,7 +69,7 @@
 
 ## 下一步方向
 - r66 当前任务是 brain/workflow maintenance，不推进策略训练。
-- r70 后续策略研究应优先修 receiver/deploy 覆盖、cash timing、source positive-forward sell、drawdown/reversal 与 sufficient training evidence；不得从 tiny smoke mechanism evidence 直接进入 promotion。
+- r71 后续策略研究应先解决 provider/GPU blocker 并完成 post-calibration tiny behavior smoke；只有 translation 不退化、oracle violation 近零且至少两个 behavior 指标优于 r70，才能考虑 strict resume。
 - 后台运行只作为 OS 级 launcher/轮询能力，不能改变 study/protocol 单进程研究本体。
 - 数据层下一步是 full-window realtime Gold build/audit；仍不得作为 completed training evidence。
 
@@ -82,6 +85,7 @@
 - r68：cashflow decision v1 translation closure for portfolio-set v5。
 - r69：value arbitration behavior-quality mechanism for portfolio-set v5。
 - r70：version-boundary and oracle-feasibility repair for portfolio-set v5 / r69 value arbitration。
+- r71：multi-stage regret behavior-quality mechanism for portfolio-set v5。
 - 完整证据入口：`daily_research/brain/references/evidence_registry.json` 与 `daily_research/brain/references/r*_*.md`。
 
 ## 归档入口

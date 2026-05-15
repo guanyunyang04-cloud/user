@@ -30,10 +30,13 @@ PORTFOLIO_SET_V5_ARTIFACT_FILENAME = "continuous_policy_portfolio_set_v5_artifac
 PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID = "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
 PORTFOLIO_SET_V5_DFL_PG_V1_VERSION = "portfolio_set_v5_dfl_pg_v1"
 PORTFOLIO_SET_V5_R69_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration"
+PORTFOLIO_SET_V5_R71_INTERNAL_VERSION = "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret"
 PORTFOLIO_SET_V5_INTERNAL_VERSION = PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
 PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1 = "dfl_pg_v1"
 PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION = "r69_value_arbitration"
+PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET = "r71_multistage_regret"
 PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN = "portfolio_set_v5_value_arbitration_mode"
+PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN = "portfolio_set_v5_multistage_regret_mode"
 
 PORTFOLIO_SET_V5_OUTPUT_NAMES: tuple[str, ...] = (
     "target_weight",
@@ -62,12 +65,22 @@ PORTFOLIO_SET_V5_DECISION_TARGET_NAMES: tuple[str, ...] = (
     "receiver_source_spread_value",
     "reversal_risk_penalty",
     "source_wrong_side_sell_penalty",
+    "source_hold_regret_3d",
+    "source_hold_regret_5d",
+    "receiver_deploy_regret_3d",
+    "receiver_deploy_regret_5d",
+    "cash_defense_regret_1d",
+    "cash_defense_regret_3d",
+    "rotation_spread_regret_5d",
+    "reversal_action_regret_3d",
+    "crowding_penalty",
 )
 PORTFOLIO_SET_V5_LOSS_ALIASES: tuple[str, ...] = (
     "alpha_result_value_budget_split_v48",
     "portfolio_set_release_first_decision_v1",
     PORTFOLIO_SET_V5_DFL_PG_V1_VERSION,
     PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+    PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
 )
 PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES: tuple[str, ...] = PORTFOLIO_SET_V5_LOSS_ALIASES
 PORTFOLIO_SET_V5_MAX_TRAIN_DAYS = 256
@@ -80,7 +93,8 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
         raise ValueError(
             f"Unsupported portfolio-set v5 loss profile: {profile_name!r}. "
             "Only alpha_result_value_budget_split_v48 / portfolio_set_release_first_decision_v1 / "
-            f"{PORTFOLIO_SET_V5_DFL_PG_V1_VERSION} / {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION} are supported."
+            f"{PORTFOLIO_SET_V5_DFL_PG_V1_VERSION} / {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION} / "
+            f"{PORTFOLIO_SET_V5_R71_INTERNAL_VERSION} are supported."
         )
     resolved_name = (
         PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
@@ -93,7 +107,11 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
     )
     if name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
         resolved_name = PORTFOLIO_SET_V5_R69_INTERNAL_VERSION
+    if name == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION:
+        resolved_name = PORTFOLIO_SET_V5_R71_INTERNAL_VERSION
     behavior_mode = _portfolio_set_v5_behavior_mode_from_version(resolved_name)
+    behavior_mode_is_value = resolved_name in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION}
+    behavior_mode_is_multistage = resolved_name == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION
     return resolved_name, {
         "portfolio_set_v5_behavior_mode": behavior_mode,
         "multi_objective_loss_weights": {
@@ -110,15 +128,21 @@ def resolve_portfolio_set_v5_loss_profile(profile_name: str | None) -> tuple[str
             "decision_oracle_total": 1.20,
             "pg_dfl_surrogate_total": 0.42,
             "constraint_violation_total": 0.60,
-            "value_arbitration_total": 0.54 if resolved_name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION else 0.0,
-            "cash_timing_value_total": 0.26 if resolved_name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION else 0.0,
-            "reversal_guard_total": 0.34 if resolved_name == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION else 0.0,
+            "value_arbitration_total": 0.54 if behavior_mode_is_value else 0.0,
+            "cash_timing_value_total": 0.26 if behavior_mode_is_value else 0.0,
+            "reversal_guard_total": 0.34 if behavior_mode_is_value else 0.0,
+            "multistage_regret_total": 0.50 if behavior_mode_is_multistage else 0.0,
+            "goal_programming_quality_total": 0.42 if behavior_mode_is_multistage else 0.0,
+            "receiver_recall_total": 3.00 if behavior_mode_is_multistage else 0.0,
+            "crowding_penalty_total": 0.12 if behavior_mode_is_multistage else 0.0,
         }
     }
 
 
 def _portfolio_set_v5_behavior_mode_from_version(version: str | None) -> str:
     text = str(version or "").strip()
+    if text == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION:
+        return PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
     if text == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION:
         return PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
     return PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1
@@ -129,6 +153,14 @@ def _portfolio_set_v5_value_arbitration_enabled_from_weights(weights: dict[str, 
     return any(
         float(values.get(key, 0.0) or 0.0) > 0.0
         for key in ("value_arbitration_total", "cash_timing_value_total", "reversal_guard_total")
+    )
+
+
+def _portfolio_set_v5_multistage_regret_enabled_from_weights(weights: dict[str, float] | None) -> bool:
+    values = dict(weights or {})
+    return any(
+        float(values.get(key, 0.0) or 0.0) > 0.0
+        for key in ("multistage_regret_total", "goal_programming_quality_total", "receiver_recall_total", "crowding_penalty_total")
     )
 
 
@@ -146,6 +178,7 @@ def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artif
                 if value in {
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
                 }:
                     return value
                 return _portfolio_set_v5_behavior_mode_from_version(value)
@@ -161,6 +194,7 @@ def _portfolio_set_v5_artifact_behavior_mode(artifact: "TorchPortfolioSetV5Artif
                 if value in {
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_DFL_PG_V1,
                     PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+                    PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
                 }:
                     return value
                 return _portfolio_set_v5_behavior_mode_from_version(value)
@@ -223,6 +257,15 @@ def project_portfolio_set_v5_cashflow_oracle(
     receiver_source_spread_value: torch.Tensor | None = None,
     reversal_risk_penalty: torch.Tensor | None = None,
     source_wrong_side_sell_penalty: torch.Tensor | None = None,
+    source_hold_regret_3d: torch.Tensor | None = None,
+    source_hold_regret_5d: torch.Tensor | None = None,
+    receiver_deploy_regret_3d: torch.Tensor | None = None,
+    receiver_deploy_regret_5d: torch.Tensor | None = None,
+    cash_defense_regret_1d: torch.Tensor | None = None,
+    cash_defense_regret_3d: torch.Tensor | None = None,
+    rotation_spread_regret_5d: torch.Tensor | None = None,
+    reversal_action_regret_3d: torch.Tensor | None = None,
+    crowding_penalty: torch.Tensor | None = None,
     sample_mask: torch.Tensor | None = None,
     turnover_budget: torch.Tensor | None = None,
     risk_budget: torch.Tensor | None = None,
@@ -270,6 +313,29 @@ def project_portfolio_set_v5_cashflow_oracle(
             receiver_source_spread_value,
             reversal_risk_penalty,
             source_wrong_side_sell_penalty,
+            source_hold_regret_3d,
+            source_hold_regret_5d,
+            receiver_deploy_regret_3d,
+            receiver_deploy_regret_5d,
+            cash_defense_regret_1d,
+            cash_defense_regret_3d,
+            rotation_spread_regret_5d,
+            reversal_action_regret_3d,
+            crowding_penalty,
+        )
+    )
+    multistage_regret_mode = any(
+        item is not None
+        for item in (
+            source_hold_regret_3d,
+            source_hold_regret_5d,
+            receiver_deploy_regret_3d,
+            receiver_deploy_regret_5d,
+            cash_defense_regret_1d,
+            cash_defense_regret_3d,
+            rotation_spread_regret_5d,
+            reversal_action_regret_3d,
+            crowding_penalty,
         )
     )
 
@@ -291,7 +357,28 @@ def project_portfolio_set_v5_cashflow_oracle(
     spread_value = _optional_value(receiver_source_spread_value)
     reversal_penalty = _optional_value(reversal_risk_penalty)
     wrong_side_penalty = _optional_value(source_wrong_side_sell_penalty)
+    source_hold_regret = torch.maximum(_optional_value(source_hold_regret_3d), _optional_value(source_hold_regret_5d))
+    receiver_deploy_regret = torch.maximum(_optional_value(receiver_deploy_regret_3d), _optional_value(receiver_deploy_regret_5d))
+    cash_defense_regret = torch.maximum(_optional_value(cash_defense_regret_1d), _optional_value(cash_defense_regret_3d))
+    rotation_regret = _optional_value(rotation_spread_regret_5d)
+    reversal_action_regret = _optional_value(reversal_action_regret_3d)
+    crowding = _optional_value(crowding_penalty)
     defense_pressure = torch.maximum(defense, cash_timing)
+    if multistage_regret_mode:
+        defense_pressure = torch.maximum(defense_pressure, cash_defense_regret)
+        raw_spread_value = spread_value
+        positive_deploy_floor = (
+            torch.relu(deploy * 0.66 + raw_spread_value * 0.58 - defense_pressure * 0.35 - 0.20)
+            * (1.0 - 0.95 * receiver_deploy_regret).clamp(0.0, 1.0)
+            * (1.0 - 0.95 * rotation_regret).clamp(0.0, 1.0)
+        ).clamp(0.0, 1.0)
+        spread_value = torch.maximum(
+            spread_value * (1.0 - rotation_regret),
+            positive_deploy_floor * (1.0 - 0.55 * receiver_deploy_regret),
+        ).clamp(0.0, 1.0)
+        opportunity_cost = torch.maximum(opportunity_cost, source_hold_regret)
+        reversal_penalty = torch.maximum(reversal_penalty, reversal_action_regret)
+        wrong_side_penalty = torch.maximum(wrong_side_penalty, source_hold_regret * 0.70)
     source_utility = (
         source * (0.55 if value_arbitration_mode else 1.0)
         + release * 0.35
@@ -300,13 +387,23 @@ def project_portfolio_set_v5_cashflow_oracle(
         - opportunity_cost * 0.42
         - reversal_penalty * 0.36
         - wrong_side_penalty * 0.52
+        - crowding * (0.16 if multistage_regret_mode else 0.0)
     ).clamp(0.0, 1.0)
     receiver_utility = (
         receiver * (0.60 if value_arbitration_mode else 1.0)
         + deploy * 0.35
         + spread_value * 0.16
         - defense_pressure * 0.22
+        - receiver_deploy_regret * (0.24 if multistage_regret_mode else 0.0)
+        - crowding * (0.10 if multistage_regret_mode else 0.0)
     ).clamp(0.0, 1.0)
+    if multistage_regret_mode:
+        source_utility = (source_utility * (1.0 - 0.80 * torch.maximum(source_hold_regret, reversal_action_regret))).clamp(0.0, 1.0)
+        receiver_utility = (
+            torch.maximum(receiver_utility, positive_deploy_floor)
+            * (1.0 - 0.45 * receiver_deploy_regret)
+            * (1.0 - 0.38 * rotation_regret)
+        ).clamp(0.0, 1.0)
     if value_arbitration_mode:
         source = source_utility
         receiver = receiver_utility
@@ -362,6 +459,17 @@ def project_portfolio_set_v5_cashflow_oracle(
     receiver_capacity_sparse = receiver_capacity * receiver_rank_mask.to(dtype=dtype)
     source_capacity_sparse_sum = source_capacity_sparse.sum(dim=1)
     receiver_capacity_sparse_sum = receiver_capacity_sparse.sum(dim=1)
+    receiver_budget_scale = torch.ones_like(receiver_capacity_sparse_sum)
+    pair_seed_fraction = torch.full_like(receiver_capacity_sparse_sum, 0.35)
+    if multistage_regret_mode:
+        receiver_quality_rank = (
+            torch.relu(deploy * 0.66 + spread_value * 0.58 - defense_pressure * 0.35 - 0.20)
+            * (1.0 - 0.95 * receiver_deploy_regret).clamp(0.0, 1.0)
+            * (1.0 - 0.95 * rotation_regret).clamp(0.0, 1.0)
+            * receiver_rank_mask.to(dtype=dtype)
+        )
+        receiver_budget_scale = receiver_quality_rank.max(dim=1).values.clamp(0.0, 1.0)
+        pair_seed_fraction = (0.36 + 0.12 * receiver_budget_scale).clamp(0.0, 0.48)
     desired_cash_floor = (0.04 + 0.20 * risk).clamp(0.02, 0.35)
     if value_arbitration_mode:
         desired_cash_floor = (desired_cash_floor + 0.18 * defense_pressure.mean(dim=1)).clamp(0.02, 0.55)
@@ -416,11 +524,14 @@ def project_portfolio_set_v5_cashflow_oracle(
     pair_seed_gate = (~no_spread_defense).to(dtype=dtype)
     pair_seed_budget = torch.minimum(
         torch.minimum(residual_source_capacity, receiver_capacity_sparse_sum),
-        residual_turnover * 0.35 * source_signal * receiver_signal * pair_seed_gate,
+        residual_turnover * pair_seed_fraction * receiver_budget_scale * source_signal * receiver_signal * pair_seed_gate,
     )
     cash_buy_budget = torch.minimum(
         (receiver_capacity_sparse_sum - pair_seed_budget).clamp_min(0.0),
-        torch.minimum(cash_deploy_budget, (residual_turnover - 2.0 * pair_seed_budget).clamp_min(0.0)),
+        torch.minimum(
+            cash_deploy_budget * receiver_budget_scale,
+            (residual_turnover - 2.0 * pair_seed_budget).clamp_min(0.0),
+        ),
     )
     source_budget = cash_shortfall_budget + defense_cash_release_budget + pair_seed_budget
     receiver_budget = pair_seed_budget + cash_buy_budget
@@ -452,6 +563,13 @@ def project_portfolio_set_v5_cashflow_oracle(
             (source_alloc * (opportunity_cost + reversal_penalty + wrong_side_penalty)).sum(dim=1)
             + (receiver_alloc * defense_pressure).sum(dim=1) * 0.25
         )
+    if multistage_regret_mode:
+        decision_value = decision_value - (
+            (source_alloc * (source_hold_regret + reversal_action_regret + rotation_regret)).sum(dim=1)
+            + (receiver_alloc * receiver_deploy_regret).sum(dim=1)
+            + torch.relu(cash_floor - cash_after) * cash_defense_regret.mean(dim=1)
+            + (source_alloc + receiver_alloc).mul(crowding).sum(dim=1) * 0.20
+        )
     return {
         "source_supply": source_alloc * mask_f,
         "receiver_demand": receiver_alloc * mask_f,
@@ -477,6 +595,12 @@ def project_portfolio_set_v5_cashflow_oracle(
         "receiver_source_spread_value": spread_value,
         "reversal_risk_penalty": reversal_penalty,
         "source_wrong_side_sell_penalty": wrong_side_penalty,
+        "source_hold_regret": source_hold_regret,
+        "receiver_deploy_regret": receiver_deploy_regret,
+        "cash_defense_regret": cash_defense_regret,
+        "rotation_spread_regret": rotation_regret,
+        "reversal_action_regret": reversal_action_regret,
+        "crowding_penalty": crowding,
     }
 
 
@@ -494,6 +618,15 @@ def _oracle_numpy(
     receiver_source_spread_value: np.ndarray | None = None,
     reversal_risk_penalty: np.ndarray | None = None,
     source_wrong_side_sell_penalty: np.ndarray | None = None,
+    source_hold_regret_3d: np.ndarray | None = None,
+    source_hold_regret_5d: np.ndarray | None = None,
+    receiver_deploy_regret_3d: np.ndarray | None = None,
+    receiver_deploy_regret_5d: np.ndarray | None = None,
+    cash_defense_regret_1d: np.ndarray | None = None,
+    cash_defense_regret_3d: np.ndarray | None = None,
+    rotation_spread_regret_5d: np.ndarray | None = None,
+    reversal_action_regret_3d: np.ndarray | None = None,
+    crowding_penalty: np.ndarray | None = None,
     turnover_budget: float,
     risk_budget: float,
 ) -> dict[str, np.ndarray | float]:
@@ -515,6 +648,15 @@ def _oracle_numpy(
         receiver_source_spread_value=_tensor_or_none(receiver_source_spread_value),
         reversal_risk_penalty=_tensor_or_none(reversal_risk_penalty),
         source_wrong_side_sell_penalty=_tensor_or_none(source_wrong_side_sell_penalty),
+        source_hold_regret_3d=_tensor_or_none(source_hold_regret_3d),
+        source_hold_regret_5d=_tensor_or_none(source_hold_regret_5d),
+        receiver_deploy_regret_3d=_tensor_or_none(receiver_deploy_regret_3d),
+        receiver_deploy_regret_5d=_tensor_or_none(receiver_deploy_regret_5d),
+        cash_defense_regret_1d=_tensor_or_none(cash_defense_regret_1d),
+        cash_defense_regret_3d=_tensor_or_none(cash_defense_regret_3d),
+        rotation_spread_regret_5d=_tensor_or_none(rotation_spread_regret_5d),
+        reversal_action_regret_3d=_tensor_or_none(reversal_action_regret_3d),
+        crowding_penalty=_tensor_or_none(crowding_penalty),
         turnover_budget=torch.as_tensor([float(turnover_budget)], dtype=torch.float32),
         risk_budget=torch.as_tensor([float(risk_budget)], dtype=torch.float32),
         sample_mask=torch.ones((1, len(current)), dtype=torch.bool),
@@ -541,6 +683,12 @@ def _oracle_numpy(
         "receiver_source_spread_value": oracle["receiver_source_spread_value"][0].detach().cpu().numpy().astype(float),
         "reversal_risk_penalty": oracle["reversal_risk_penalty"][0].detach().cpu().numpy().astype(float),
         "source_wrong_side_sell_penalty": oracle["source_wrong_side_sell_penalty"][0].detach().cpu().numpy().astype(float),
+        "source_hold_regret": oracle["source_hold_regret"][0].detach().cpu().numpy().astype(float),
+        "receiver_deploy_regret": oracle["receiver_deploy_regret"][0].detach().cpu().numpy().astype(float),
+        "cash_defense_regret": oracle["cash_defense_regret"][0].detach().cpu().numpy().astype(float),
+        "rotation_spread_regret": oracle["rotation_spread_regret"][0].detach().cpu().numpy().astype(float),
+        "reversal_action_regret": oracle["reversal_action_regret"][0].detach().cpu().numpy().astype(float),
+        "crowding_penalty": oracle["crowding_penalty"][0].detach().cpu().numpy().astype(float),
     }
 
 
@@ -553,7 +701,11 @@ def build_portfolio_set_v5_targets(
     resolved_loss_profile, _ = resolve_portfolio_set_v5_loss_profile(loss_profile)
     value_arbitration_mode = (
         _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
-        == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
+        in {PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION, PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET}
+    )
+    multistage_regret_mode = (
+        _portfolio_set_v5_behavior_mode_from_version(resolved_loss_profile)
+        == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
     )
     current = _current_weight(sample_frame)
     held = _holding_mask(sample_frame, current, deadband=deadband)
@@ -632,6 +784,9 @@ def build_portfolio_set_v5_targets(
     ).clip(0.0, 1.0)
     receiver_forward = _numeric_series(sample_frame, "portfolio_daily_receiver_forward_excess_5d", 0.0)
     source_forward = _numeric_series(sample_frame, "portfolio_daily_source_forward_excess_5d", 0.0)
+    forward_1d = _numeric_series(sample_frame, "forward_excess_1d", 0.0)
+    forward_3d = _numeric_series(sample_frame, "forward_excess_3d", 0.0)
+    forward_5d = _numeric_series(sample_frame, "forward_excess_5d", 0.0)
     receiver_source_spread_value = _max_numeric_columns(
         sample_frame,
         (
@@ -670,7 +825,110 @@ def build_portfolio_set_v5_targets(
             "portfolio_daily_source_forward_proxy_keep_risk",
         ),
     ).clip(0.0, 1.0)
+    headroom = (0.24 - current).clip(lower=0.0)
+    source_hold_regret_3d = pd.concat(
+        [
+            (forward_3d / 0.075).clip(0.0, 1.0).rename("own_forward_3d"),
+            (source_forward / 0.075).clip(0.0, 1.0).rename("source_forward_5d"),
+            source_opportunity_cost.rename("source_opportunity_cost"),
+        ],
+        axis=1,
+    ).max(axis=1).where(held, 0.0).fillna(0.0).clip(0.0, 1.0)
+    source_hold_regret_5d = pd.concat(
+        [
+            (forward_5d / 0.095).clip(0.0, 1.0).rename("own_forward_5d"),
+            (source_forward / 0.095).clip(0.0, 1.0).rename("source_forward_5d"),
+            positive_forward_sell_penalty.rename("positive_forward_sell"),
+        ],
+        axis=1,
+    ).max(axis=1).where(held, 0.0).fillna(0.0).clip(0.0, 1.0)
+    receiver_deploy_regret_3d = pd.concat(
+        [
+            (-forward_3d / 0.075).clip(0.0, 1.0).rename("own_bad_forward_3d"),
+            ((source_forward - receiver_forward) / 0.075).clip(0.0, 1.0).rename("source_beats_receiver_5d"),
+            defense_value.mul(0.35).rename("defense_drag"),
+        ],
+        axis=1,
+    ).max(axis=1).where(headroom > float(deadband), 0.0).fillna(0.0).clip(0.0, 1.0)
+    receiver_deploy_regret_5d = pd.concat(
+        [
+            (-forward_5d / 0.095).clip(0.0, 1.0).rename("own_bad_forward_5d"),
+            ((source_forward - receiver_forward) / 0.095).clip(0.0, 1.0).rename("source_beats_receiver_5d"),
+            (1.0 - receiver_source_spread_value).mul(deploy_value).mul(0.45).rename("deploy_without_spread"),
+        ],
+        axis=1,
+    ).max(axis=1).where(headroom > float(deadband), 0.0).fillna(0.0).clip(0.0, 1.0)
+    cash_defense_regret_1d = pd.concat(
+        [
+            (-forward_1d / 0.045).clip(0.0, 1.0).rename("cash_wins_1d"),
+            defense_value.rename("defense_value"),
+            cash_timing_value.rename("cash_timing_value"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    cash_defense_regret_3d = pd.concat(
+        [
+            (-forward_3d / 0.075).clip(0.0, 1.0).rename("cash_wins_3d"),
+            defense_value.mul(0.80).rename("defense_value"),
+            cash_timing_value.mul(0.80).rename("cash_timing_value"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    rotation_spread_regret_5d = ((source_forward - receiver_forward) / 0.075).clip(0.0, 1.0).fillna(0.0)
+    reversal_action_regret_3d = pd.concat(
+        [
+            reversal_risk_penalty.rename("reversal_risk"),
+            source_hold_regret_3d.mul(0.70).rename("source_rebound"),
+            ((forward_3d > 0.0).astype(float) * held.astype(float)).rename("reduce_rebound"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    crowding_penalty = _max_numeric_columns(
+        sample_frame,
+        (
+            "portfolio_daily_crowding_penalty",
+            "industry_crowding_score",
+            "style_crowding_score",
+            "correlation_cluster_score",
+        ),
+    ).clip(0.0, 1.0)
     if value_arbitration_mode:
+        if multistage_regret_mode:
+            source_opportunity_cost = pd.concat(
+                [
+                    source_opportunity_cost.rename("source_opportunity_cost"),
+                    source_hold_regret_3d.rename("source_hold_regret_3d"),
+                    source_hold_regret_5d.rename("source_hold_regret_5d"),
+                ],
+                axis=1,
+            ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+            receiver_source_spread_value = (
+                receiver_source_spread_value * (1.0 - rotation_spread_regret_5d)
+            ).fillna(0.0).clip(0.0, 1.0)
+            receiver_deploy_floor = (
+                (
+                    deploy_value * 0.66
+                    + receiver_source_spread_value * 0.58
+                    - defense_value * 0.35
+                    - 0.20
+                ).clip(0.0, 1.0)
+                * (1.0 - 0.95 * receiver_deploy_regret_5d).clip(0.0, 1.0)
+                * (1.0 - 0.95 * rotation_spread_regret_5d).clip(0.0, 1.0)
+            ).clip(0.0, 1.0)
+            reversal_risk_penalty = pd.concat(
+                [
+                    reversal_risk_penalty.rename("reversal_risk_penalty"),
+                    reversal_action_regret_3d.rename("reversal_action_regret_3d"),
+                ],
+                axis=1,
+            ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+            positive_forward_sell_penalty = pd.concat(
+                [
+                    positive_forward_sell_penalty.rename("positive_forward_sell_penalty"),
+                    source_hold_regret_5d.mul(0.85).rename("source_hold_regret_5d"),
+                ],
+                axis=1,
+            ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
         source_score = (
             0.52 * source_score
             + 0.30 * release_value
@@ -679,6 +937,7 @@ def build_portfolio_set_v5_targets(
             - 0.36 * source_opportunity_cost
             - 0.42 * positive_forward_sell_penalty
             - 0.30 * reversal_risk_penalty
+            - (0.20 * crowding_penalty if multistage_regret_mode else 0.0)
         ).where(held, 0.0).clip(0.0, 1.0)
     else:
         source_score = base_source_score
@@ -695,7 +954,6 @@ def build_portfolio_set_v5_targets(
         ),
     ).clip(0.0, 1.0)
     receiver_action = sample_frame.get("action_label", pd.Series("hold", index=sample_frame.index)).fillna("hold").astype(str).str.lower().isin({"open", "add"}).astype(float)
-    headroom = (0.24 - current).clip(lower=0.0)
     receiver_score = pd.concat([receiver_score.rename("receiver_score"), receiver_action.rename("receiver_action"), (raw_delta.clip(lower=0.0) / headroom.clip(lower=float(deadband))).clip(0.0, 1.0).rename("positive_delta")], axis=1).max(axis=1)
     base_receiver_score = receiver_score.copy()
     if value_arbitration_mode:
@@ -705,11 +963,21 @@ def build_portfolio_set_v5_targets(
             + 0.22 * receiver_source_spread_value
             - 0.14 * defense_value
             - 0.06 * cash_timing_value
+            - (0.16 * receiver_deploy_regret_5d if multistage_regret_mode else 0.0)
+            - (0.12 * crowding_penalty if multistage_regret_mode else 0.0)
         ).clip(0.0, 1.0)
         receiver_score = pd.concat(
             [
                 receiver_score.rename("receiver_value_score"),
                 ((deploy_value - defense_value.clip(upper=0.60) * 0.35 + receiver_source_spread_value * 0.25).clip(0.0, 1.0)).rename("deploy_floor"),
+                (
+                    (deploy_value + receiver_source_spread_value * 0.50 - receiver_deploy_regret_5d * 0.12)
+                    .clip(0.0, 1.0)
+                    .rename("multistage_deploy_floor")
+                ) if multistage_regret_mode else pd.Series(0.0, index=sample_frame.index, name="multistage_deploy_floor"),
+                (
+                    receiver_deploy_floor.rename("positive_spread_receiver_floor")
+                ) if multistage_regret_mode else pd.Series(0.0, index=sample_frame.index, name="positive_spread_receiver_floor"),
             ],
             axis=1,
         ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
@@ -749,6 +1017,15 @@ def build_portfolio_set_v5_targets(
             receiver_source_spread_value=receiver_source_spread_value.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
             reversal_risk_penalty=reversal_risk_penalty.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
             source_wrong_side_sell_penalty=positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) if value_arbitration_mode else None,
+            source_hold_regret_3d=source_hold_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            source_hold_regret_5d=source_hold_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            receiver_deploy_regret_3d=receiver_deploy_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            receiver_deploy_regret_5d=receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            cash_defense_regret_1d=cash_defense_regret_1d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            cash_defense_regret_3d=cash_defense_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            rotation_spread_regret_5d=rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            reversal_action_regret_3d=reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
+            crowding_penalty=crowding_penalty.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else None,
             turnover_budget=float(turnover_budget.loc[idx].median()) if len(idx) else 0.12,
             risk_budget=float(np.maximum(risk_budget.loc[idx], defense_value.loc[idx]).median()) if len(idx) else 0.0,
         )
@@ -758,19 +1035,106 @@ def build_portfolio_set_v5_targets(
         target_delta = np.asarray(decision["target_delta"], dtype=float)
         current_values = current.loc[idx].to_numpy(dtype=float)
         headroom_values = (0.24 - current.loc[idx]).clip(lower=0.0).to_numpy(dtype=float)
+        r71_receiver_coverage_floor = np.zeros_like(receiver_demand, dtype=float)
+        cash_buffer_value = float(decision["cash_buffer"])
+        if multistage_regret_mode and len(idx):
+            receiver_floor_values = (
+                (
+                    deploy_value.loc[idx].to_numpy(dtype=float) * 0.66
+                    + receiver_source_spread_value.loc[idx].to_numpy(dtype=float) * 0.58
+                    - defense_value.loc[idx].to_numpy(dtype=float) * 0.35
+                    - 0.20
+                ).clip(0.0, 1.0)
+                * (1.0 - 0.95 * receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float)).clip(0.0, 1.0)
+                * (1.0 - 0.95 * rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float)).clip(0.0, 1.0)
+            )
+            receiver_floor_candidates = (
+                (receiver_floor_values > 0.25)
+                & (receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float) < 0.18)
+                & (rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float) < 0.12)
+                & (defense_value.loc[idx].to_numpy(dtype=float) < 0.45)
+                & (headroom_values > float(deadband))
+                & (receiver_demand <= float(deadband))
+            )
+            if bool(receiver_floor_candidates.any()):
+                turnover_slack = max(
+                    0.0,
+                    float(decision["turnover_budget"]) - float(source_supply.sum() + receiver_demand.sum()),
+                )
+                selected_local = np.flatnonzero(receiver_floor_candidates)
+                selected_local = selected_local[np.argsort(receiver_floor_values[selected_local])[::-1]][:4]
+                source_floor_values = (
+                    release_value.loc[idx].to_numpy(dtype=float) * 0.58
+                    + receiver_floor_values.max(initial=0.0) * 0.20
+                    - source_hold_regret_5d.loc[idx].to_numpy(dtype=float) * 0.62
+                    - positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) * 0.62
+                    - reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) * 0.42
+                ).clip(0.0, 1.0)
+                source_floor_capacity = np.maximum(
+                    0.0,
+                    current_values - target_weight - float(deadband),
+                )
+                source_candidates = np.flatnonzero(
+                    (source_floor_values > 0.12)
+                    & (source_floor_capacity > float(deadband))
+                    & (current_values > float(deadband))
+                    & (source_hold_regret_5d.loc[idx].to_numpy(dtype=float) < 0.35)
+                    & (positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float) < 0.45)
+                )
+                source_candidates = source_candidates[np.argsort(source_floor_values[source_candidates])[::-1]][:4]
+                rotation_budget = min(
+                    turnover_slack * 0.50,
+                    float(source_floor_capacity[source_candidates].sum()) if len(source_candidates) else 0.0,
+                    float(headroom_values[selected_local].sum()) if len(selected_local) else 0.0,
+                    0.0045 * float(min(len(selected_local), max(len(source_candidates), 1))),
+                )
+                if rotation_budget > float(deadband) and len(selected_local) and len(source_candidates):
+                    receiver_weight = receiver_floor_values[selected_local] * np.maximum(headroom_values[selected_local], float(deadband))
+                    source_weight = source_floor_values[source_candidates] * np.maximum(source_floor_capacity[source_candidates], float(deadband))
+                    receiver_weight_sum = float(receiver_weight.sum())
+                    source_weight_sum = float(source_weight.sum())
+                    if receiver_weight_sum > 0.0 and source_weight_sum > 0.0:
+                        add_alloc = np.minimum(
+                            headroom_values[selected_local],
+                            rotation_budget * receiver_weight / receiver_weight_sum,
+                        )
+                        release_alloc = np.minimum(
+                            source_floor_capacity[source_candidates],
+                            rotation_budget * source_weight / source_weight_sum,
+                        )
+                        paired_budget = min(float(add_alloc.sum()), float(release_alloc.sum()))
+                        if paired_budget > float(deadband):
+                            add_alloc = add_alloc * paired_budget / max(float(add_alloc.sum()), 1.0e-12)
+                            release_alloc = release_alloc * paired_budget / max(float(release_alloc.sum()), 1.0e-12)
+                            receiver_live = add_alloc > float(deadband)
+                            source_live = release_alloc > float(deadband)
+                            if bool(receiver_live.any()) and bool(source_live.any()):
+                                live_receiver_idx = selected_local[receiver_live]
+                                live_source_idx = source_candidates[source_live]
+                                add_alloc = add_alloc[receiver_live]
+                                release_alloc = release_alloc[source_live]
+                                live_budget = min(float(add_alloc.sum()), float(release_alloc.sum()))
+                                add_alloc = add_alloc * live_budget / max(float(add_alloc.sum()), 1.0e-12)
+                                release_alloc = release_alloc * live_budget / max(float(release_alloc.sum()), 1.0e-12)
+                                receiver_demand[live_receiver_idx] += add_alloc
+                                source_supply[live_source_idx] += release_alloc
+                                target_weight[live_receiver_idx] = np.minimum(0.24, target_weight[live_receiver_idx] + add_alloc)
+                                target_weight[live_source_idx] = np.maximum(0.0, target_weight[live_source_idx] - release_alloc)
+                                r71_receiver_coverage_floor[live_receiver_idx] = add_alloc
+                                target_delta = target_weight - current_values
         source_ratio = np.divide(source_supply, np.maximum(current_values, float(deadband)), out=np.zeros_like(source_supply), where=current_values > float(deadband))
         receiver_ratio = np.divide(receiver_demand, np.maximum(headroom_values, float(deadband)), out=np.zeros_like(receiver_demand), where=headroom_values > float(deadband))
         enriched.loc[idx, "target_weight"] = target_weight
         enriched.loc[idx, "target_delta"] = target_delta
         enriched.loc[idx, "source_supply_score"] = np.clip(source_ratio, 0.0, 1.0)
         enriched.loc[idx, "receiver_demand_score"] = np.clip(receiver_ratio, 0.0, 1.0)
-        enriched.loc[idx, "cash_buffer_score"] = float(decision["cash_buffer"])
+        enriched.loc[idx, "cash_buffer_score"] = cash_buffer_value
         enriched.loc[idx, "release_intent"] = np.clip(source_ratio, 0.0, 1.0)
         enriched.loc[idx, "reduce_quality"] = source_score.loc[idx].to_numpy(dtype=float)
         enriched.loc[idx, "exit_hazard"] = ((source_supply >= current_values * 0.72) & (current_values > float(deadband))).astype(float)
         enriched.loc[idx, "source_supply"] = source_supply
         enriched.loc[idx, "receiver_demand"] = receiver_demand
-        enriched.loc[idx, "cash_buffer"] = float(decision["cash_buffer"])
+        enriched.loc[idx, "cash_buffer"] = cash_buffer_value
         enriched.loc[idx, "turnover_budget"] = float(decision["turnover_budget"])
         enriched.loc[idx, "risk_budget"] = float(decision["risk_budget"])
         enriched.loc[idx, "constraint_violation"] = float(decision["constraint_violation"])
@@ -787,6 +1151,16 @@ def build_portfolio_set_v5_targets(
             enriched.loc[idx, "receiver_source_spread_value"] = receiver_source_spread_value.loc[idx].to_numpy(dtype=float)
             enriched.loc[idx, "reversal_risk_penalty"] = reversal_risk_penalty.loc[idx].to_numpy(dtype=float)
             enriched.loc[idx, "source_wrong_side_sell_penalty"] = positive_forward_sell_penalty.loc[idx].to_numpy(dtype=float)
+            enriched.loc[idx, "source_hold_regret_3d"] = source_hold_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "source_hold_regret_5d"] = source_hold_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "receiver_deploy_regret_3d"] = receiver_deploy_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "receiver_deploy_regret_5d"] = receiver_deploy_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "cash_defense_regret_1d"] = cash_defense_regret_1d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "cash_defense_regret_3d"] = cash_defense_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "rotation_spread_regret_5d"] = rotation_spread_regret_5d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "reversal_action_regret_3d"] = reversal_action_regret_3d.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "crowding_penalty"] = crowding_penalty.loc[idx].to_numpy(dtype=float) if multistage_regret_mode else 0.0
+            enriched.loc[idx, "r71_receiver_coverage_floor"] = r71_receiver_coverage_floor if multistage_regret_mode else 0.0
         else:
             enriched.loc[idx, "deploy_value"] = 0.0
             enriched.loc[idx, "release_value"] = 0.0
@@ -796,6 +1170,16 @@ def build_portfolio_set_v5_targets(
             enriched.loc[idx, "receiver_source_spread_value"] = 0.0
             enriched.loc[idx, "reversal_risk_penalty"] = 0.0
             enriched.loc[idx, "source_wrong_side_sell_penalty"] = 0.0
+            enriched.loc[idx, "source_hold_regret_3d"] = 0.0
+            enriched.loc[idx, "source_hold_regret_5d"] = 0.0
+            enriched.loc[idx, "receiver_deploy_regret_3d"] = 0.0
+            enriched.loc[idx, "receiver_deploy_regret_5d"] = 0.0
+            enriched.loc[idx, "cash_defense_regret_1d"] = 0.0
+            enriched.loc[idx, "cash_defense_regret_3d"] = 0.0
+            enriched.loc[idx, "rotation_spread_regret_5d"] = 0.0
+            enriched.loc[idx, "reversal_action_regret_3d"] = 0.0
+            enriched.loc[idx, "crowding_penalty"] = 0.0
+            enriched.loc[idx, "r71_receiver_coverage_floor"] = 0.0
     enriched["target_delta"] = (enriched["target_weight"] - current).where(lambda s: s.abs() >= float(deadband), 0.0)
     enriched["target_weight"] = (current + enriched["target_delta"]).clip(0.0, 0.24)
     enriched["held_mask"] = held.astype(float)
@@ -1219,6 +1603,7 @@ def _decision_target_column(decision_target: torch.Tensor | None, index: int, fa
 def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weights: dict[str, float]) -> torch.Tensor:
     pred = _decode_raw(raw)
     value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(weights)
+    multistage_regret_mode = _portfolio_set_v5_multistage_regret_enabled_from_weights(weights)
     target = batch["target_y"]
     decision_target = batch.get("decision_target_y")
     mask = batch["sample_mask"].float()
@@ -1258,6 +1643,15 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         receiver_source_spread_value = _decision_target_column(decision_target, 13, zero_target).clamp(0.0, 1.0)
         reversal_risk_penalty = _decision_target_column(decision_target, 14, zero_target).clamp(0.0, 1.0)
         wrong_side_penalty = _decision_target_column(decision_target, 15, zero_target).clamp(0.0, 1.0)
+        source_hold_regret_3d = _decision_target_column(decision_target, 16, zero_target).clamp(0.0, 1.0)
+        source_hold_regret_5d = _decision_target_column(decision_target, 17, zero_target).clamp(0.0, 1.0)
+        receiver_deploy_regret_3d = _decision_target_column(decision_target, 18, zero_target).clamp(0.0, 1.0)
+        receiver_deploy_regret_5d = _decision_target_column(decision_target, 19, zero_target).clamp(0.0, 1.0)
+        cash_defense_regret_1d = _decision_target_column(decision_target, 20, zero_target).clamp(0.0, 1.0)
+        cash_defense_regret_3d = _decision_target_column(decision_target, 21, zero_target).clamp(0.0, 1.0)
+        rotation_spread_regret_5d = _decision_target_column(decision_target, 22, zero_target).clamp(0.0, 1.0)
+        reversal_action_regret_3d = _decision_target_column(decision_target, 23, zero_target).clamp(0.0, 1.0)
+        crowding_penalty = _decision_target_column(decision_target, 24, zero_target).clamp(0.0, 1.0)
     else:
         deploy_value = zero_target
         release_value = zero_target
@@ -1267,6 +1661,15 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         receiver_source_spread_value = zero_target
         reversal_risk_penalty = zero_target
         wrong_side_penalty = zero_target
+        source_hold_regret_3d = zero_target
+        source_hold_regret_5d = zero_target
+        receiver_deploy_regret_3d = zero_target
+        receiver_deploy_regret_5d = zero_target
+        cash_defense_regret_1d = zero_target
+        cash_defense_regret_3d = zero_target
+        rotation_spread_regret_5d = zero_target
+        reversal_action_regret_3d = zero_target
+        crowding_penalty = zero_target
     oracle = project_portfolio_set_v5_cashflow_oracle(
         current_weight=current,
         source_score=pred["source_supply_score"],
@@ -1280,6 +1683,15 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
         reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
         source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
+        source_hold_regret_3d=source_hold_regret_3d if multistage_regret_mode else None,
+        source_hold_regret_5d=source_hold_regret_5d if multistage_regret_mode else None,
+        receiver_deploy_regret_3d=receiver_deploy_regret_3d if multistage_regret_mode else None,
+        receiver_deploy_regret_5d=receiver_deploy_regret_5d if multistage_regret_mode else None,
+        cash_defense_regret_1d=cash_defense_regret_1d if multistage_regret_mode else None,
+        cash_defense_regret_3d=cash_defense_regret_3d if multistage_regret_mode else None,
+        rotation_spread_regret_5d=rotation_spread_regret_5d if multistage_regret_mode else None,
+        reversal_action_regret_3d=reversal_action_regret_3d if multistage_regret_mode else None,
+        crowding_penalty=crowding_penalty if multistage_regret_mode else None,
         sample_mask=batch["sample_mask"],
     )
     oracle_target_loss = (
@@ -1303,6 +1715,15 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
         reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
         source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
+        source_hold_regret_3d=source_hold_regret_3d if multistage_regret_mode else None,
+        source_hold_regret_5d=source_hold_regret_5d if multistage_regret_mode else None,
+        receiver_deploy_regret_3d=receiver_deploy_regret_3d if multistage_regret_mode else None,
+        receiver_deploy_regret_5d=receiver_deploy_regret_5d if multistage_regret_mode else None,
+        cash_defense_regret_1d=cash_defense_regret_1d if multistage_regret_mode else None,
+        cash_defense_regret_3d=cash_defense_regret_3d if multistage_regret_mode else None,
+        rotation_spread_regret_5d=rotation_spread_regret_5d if multistage_regret_mode else None,
+        reversal_action_regret_3d=reversal_action_regret_3d if multistage_regret_mode else None,
+        crowding_penalty=crowding_penalty if multistage_regret_mode else None,
         sample_mask=batch["sample_mask"],
     )
     minus_oracle = project_portfolio_set_v5_cashflow_oracle(
@@ -1318,6 +1739,15 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         receiver_source_spread_value=receiver_source_spread_value if value_arbitration_mode else None,
         reversal_risk_penalty=reversal_risk_penalty if value_arbitration_mode else None,
         source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
+        source_hold_regret_3d=source_hold_regret_3d if multistage_regret_mode else None,
+        source_hold_regret_5d=source_hold_regret_5d if multistage_regret_mode else None,
+        receiver_deploy_regret_3d=receiver_deploy_regret_3d if multistage_regret_mode else None,
+        receiver_deploy_regret_5d=receiver_deploy_regret_5d if multistage_regret_mode else None,
+        cash_defense_regret_1d=cash_defense_regret_1d if multistage_regret_mode else None,
+        cash_defense_regret_3d=cash_defense_regret_3d if multistage_regret_mode else None,
+        rotation_spread_regret_5d=rotation_spread_regret_5d if multistage_regret_mode else None,
+        reversal_action_regret_3d=reversal_action_regret_3d if multistage_regret_mode else None,
+        crowding_penalty=crowding_penalty if multistage_regret_mode else None,
         sample_mask=batch["sample_mask"],
     )
     pg_margin = plus_oracle["decision_value"] - minus_oracle["decision_value"]
@@ -1338,6 +1768,77 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         _masked_mean(source_alloc * (reversal_risk_penalty + wrong_side_penalty + source_opportunity_cost), mask)
         + _masked_mean(receiver_alloc * defense_value, mask) * 0.25
     )
+    source_hold_regret = torch.maximum(source_hold_regret_3d, source_hold_regret_5d)
+    receiver_deploy_regret = torch.maximum(receiver_deploy_regret_3d, receiver_deploy_regret_5d)
+    cash_defense_regret = torch.maximum(cash_defense_regret_1d, cash_defense_regret_3d)
+    multistage_regret_loss = (
+        _masked_mean(source_alloc * (source_hold_regret + rotation_spread_regret_5d + reversal_action_regret_3d), mask)
+        + _masked_mean(receiver_alloc * receiver_deploy_regret, mask)
+        + _masked_mean(pred["receiver_demand_score"] * receiver_deploy_regret, mask) * 0.80
+        + _masked_mean(pred["source_supply_score"] * torch.maximum(source_hold_regret, reversal_action_regret_3d), mask) * 0.80
+        + _masked_mean(pred["cash_buffer_score"] * torch.relu(0.25 - cash_defense_regret), mask)
+        + _masked_mean((1.0 - pred["cash_buffer_score"]) * cash_defense_regret, mask) * 0.35
+    )
+    receiver_positive_floor = (
+        torch.relu(deploy_value * 0.66 + receiver_source_spread_value * 0.58 - defense_value * 0.35 - 0.20)
+        * (1.0 - 0.95 * receiver_deploy_regret).clamp(0.0, 1.0)
+        * (1.0 - 0.95 * rotation_spread_regret_5d).clamp(0.0, 1.0)
+    ).clamp(0.0, 1.0)
+    receiver_positive_mask = ((oracle_receiver > 0.003) | (receiver_positive_floor > 0.12)).float() * mask
+    receiver_recall_target = torch.maximum(
+        receiver_target,
+        torch.maximum((oracle_receiver / (0.24 - current).clamp_min(0.003)).clamp(0.0, 1.0), receiver_positive_floor),
+    ).clamp(0.0, 1.0)
+    receiver_negative_mask = (mask - receiver_positive_mask).clamp_min(0.0)
+    receiver_positive_count = receiver_positive_mask.sum().clamp_min(1.0)
+    receiver_negative_count = receiver_negative_mask.sum().clamp_min(1.0)
+    goal_programming_quality_loss = (
+        oracle["constraint_violation"].mean() * 3.0
+        + _masked_mean(conflict, mask) * 2.0
+        + _masked_mean(source_alloc * wrong_side_penalty, mask)
+        + _masked_mean(receiver_alloc * rotation_spread_regret_5d, mask)
+        + torch.relu(0.002 - (oracle["decision_value"] - target_value.detach())).mean()
+    )
+    receiver_recall_loss = (
+        (
+            nn.functional.binary_cross_entropy_with_logits(
+                raw[..., 3],
+                receiver_recall_target.clamp_min(0.35),
+                reduction="none",
+            )
+            * receiver_positive_mask
+        ).sum()
+        / receiver_positive_count
+        + 0.05
+        * (
+            nn.functional.binary_cross_entropy_with_logits(
+                raw[..., 3],
+                receiver_recall_target.clamp(0.0, 0.05),
+                reduction="none",
+            )
+            * receiver_negative_mask
+        ).sum()
+        / receiver_negative_count
+        + (torch.relu(1.20 - raw[..., 3]) * receiver_positive_mask).sum() / receiver_positive_count
+        + (
+            nn.functional.smooth_l1_loss(
+                pred["target_delta"],
+                (oracle_target_weight - current).clamp(-0.18, 0.18),
+                reduction="none",
+            )
+            * receiver_positive_mask
+        ).sum()
+        / receiver_positive_mask.sum().clamp_min(1.0)
+        + _masked_mean(
+            torch.relu(oracle_receiver - receiver_alloc) * (1.0 + 4.0 * receiver_positive_mask),
+            mask,
+        )
+    )
+    regret_propensity_loss = (
+        _masked_mean(torch.relu(raw[..., 2]) * torch.maximum(source_hold_regret, reversal_action_regret_3d), mask)
+        + _masked_mean(torch.relu(raw[..., 3]) * torch.maximum(receiver_deploy_regret, rotation_spread_regret_5d), mask)
+    )
+    crowding_loss = _masked_mean((source_alloc + receiver_alloc) * crowding_penalty, mask)
     loss = (
         float(weights["target_weight_closure_total"]) * _masked_mean(nn.functional.smooth_l1_loss(pred["target_weight"], target_weight, reduction="none"), mask)
         + float(weights["source_supply_total"]) * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 2], source_target, reduction="none"), mask)
@@ -1358,6 +1859,10 @@ def _portfolio_set_loss(raw: torch.Tensor, batch: dict[str, torch.Tensor], weigh
         + float(weights.get("value_arbitration_total", 0.0)) * value_arbitration_loss
         + float(weights.get("cash_timing_value_total", 0.0)) * cash_timing_loss
         + float(weights.get("reversal_guard_total", 0.0)) * reversal_guard_loss
+        + float(weights.get("multistage_regret_total", 0.0)) * multistage_regret_loss
+        + float(weights.get("goal_programming_quality_total", 0.0)) * goal_programming_quality_loss
+        + float(weights.get("receiver_recall_total", 0.0)) * (receiver_recall_loss + regret_propensity_loss)
+        + float(weights.get("crowding_penalty_total", 0.0)) * crowding_loss
         + 0.10 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 5], release_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 6], reduce_target, reduction="none"), mask)
         + 0.08 * _masked_mean(nn.functional.binary_cross_entropy_with_logits(raw[..., 7], exit_target, reduction="none"), mask)
@@ -1373,6 +1878,7 @@ def portfolio_set_v5_decision_diagnostics(
     with torch.no_grad():
         effective_weights = weights or resolve_portfolio_set_v5_loss_profile(None)[1]["multi_objective_loss_weights"]
         value_arbitration_mode = _portfolio_set_v5_value_arbitration_enabled_from_weights(effective_weights)
+        multistage_regret_mode = _portfolio_set_v5_multistage_regret_enabled_from_weights(effective_weights)
         pred = _decode_raw(raw)
         mask = batch["sample_mask"].float()
         current = batch["current_weight"].clamp(0.0, 1.0)
@@ -1392,6 +1898,15 @@ def portfolio_set_v5_decision_diagnostics(
             spread_value = _decision_target_column(target, 13, zero_target).clamp(0.0, 1.0)
             reversal_penalty = _decision_target_column(target, 14, zero_target).clamp(0.0, 1.0)
             wrong_side_penalty = _decision_target_column(target, 15, zero_target).clamp(0.0, 1.0)
+            source_hold_regret_3d = _decision_target_column(target, 16, zero_target).clamp(0.0, 1.0)
+            source_hold_regret_5d = _decision_target_column(target, 17, zero_target).clamp(0.0, 1.0)
+            receiver_deploy_regret_3d = _decision_target_column(target, 18, zero_target).clamp(0.0, 1.0)
+            receiver_deploy_regret_5d = _decision_target_column(target, 19, zero_target).clamp(0.0, 1.0)
+            cash_defense_regret_1d = _decision_target_column(target, 20, zero_target).clamp(0.0, 1.0)
+            cash_defense_regret_3d = _decision_target_column(target, 21, zero_target).clamp(0.0, 1.0)
+            rotation_spread_regret_5d = _decision_target_column(target, 22, zero_target).clamp(0.0, 1.0)
+            reversal_action_regret_3d = _decision_target_column(target, 23, zero_target).clamp(0.0, 1.0)
+            crowding_penalty = _decision_target_column(target, 24, zero_target).clamp(0.0, 1.0)
         else:
             deploy_value = zero_target
             release_value = zero_target
@@ -1401,6 +1916,15 @@ def portfolio_set_v5_decision_diagnostics(
             spread_value = zero_target
             reversal_penalty = zero_target
             wrong_side_penalty = zero_target
+            source_hold_regret_3d = zero_target
+            source_hold_regret_5d = zero_target
+            receiver_deploy_regret_3d = zero_target
+            receiver_deploy_regret_5d = zero_target
+            cash_defense_regret_1d = zero_target
+            cash_defense_regret_3d = zero_target
+            rotation_spread_regret_5d = zero_target
+            reversal_action_regret_3d = zero_target
+            crowding_penalty = zero_target
         oracle = project_portfolio_set_v5_cashflow_oracle(
             current_weight=current,
             source_score=pred["source_supply_score"],
@@ -1414,6 +1938,15 @@ def portfolio_set_v5_decision_diagnostics(
             receiver_source_spread_value=spread_value if value_arbitration_mode else None,
             reversal_risk_penalty=reversal_penalty if value_arbitration_mode else None,
             source_wrong_side_sell_penalty=wrong_side_penalty if value_arbitration_mode else None,
+            source_hold_regret_3d=source_hold_regret_3d if multistage_regret_mode else None,
+            source_hold_regret_5d=source_hold_regret_5d if multistage_regret_mode else None,
+            receiver_deploy_regret_3d=receiver_deploy_regret_3d if multistage_regret_mode else None,
+            receiver_deploy_regret_5d=receiver_deploy_regret_5d if multistage_regret_mode else None,
+            cash_defense_regret_1d=cash_defense_regret_1d if multistage_regret_mode else None,
+            cash_defense_regret_3d=cash_defense_regret_3d if multistage_regret_mode else None,
+            rotation_spread_regret_5d=rotation_spread_regret_5d if multistage_regret_mode else None,
+            reversal_action_regret_3d=reversal_action_regret_3d if multistage_regret_mode else None,
+            crowding_penalty=crowding_penalty if multistage_regret_mode else None,
             sample_mask=batch["sample_mask"],
         )
         source_count = ((oracle["source_supply"] > 0.003) & batch["sample_mask"]).sum().item()
@@ -1428,6 +1961,11 @@ def portfolio_set_v5_decision_diagnostics(
             float(((oracle["cash_buffer"] >= oracle["cash_floor"] - 1.0e-6) & (defense_value.mean(dim=1) > 0.5)).sum().item())
             / max(float((defense_value.mean(dim=1) > 0.5).sum().item()), 1.0)
         )
+        source_hold_regret = torch.maximum(source_hold_regret_3d, source_hold_regret_5d)
+        receiver_deploy_regret = torch.maximum(receiver_deploy_regret_3d, receiver_deploy_regret_5d)
+        cash_defense_regret = torch.maximum(cash_defense_regret_1d, cash_defense_regret_3d)
+        receiver_target_mask = (oracle["receiver_demand"] > 0.003) & batch["sample_mask"]
+        r71_cash_win_days = cash_defense_regret.mean(dim=1) > 0.5
         return {
             "paper_reproduction_pg_surrogate_loss": float(_portfolio_set_loss(raw, batch, effective_weights).detach().cpu()),
             "decision_oracle_value_mean": float(oracle["decision_value"].mean().detach().cpu()),
@@ -1449,6 +1987,22 @@ def portfolio_set_v5_decision_diagnostics(
             "value_arbitration_reversal_risk_penalty": float(_masked_mean(oracle["source_supply"] * reversal_penalty, mask).detach().cpu()),
             "value_arbitration_defense_win_rate": float(defense_win_rate),
             "r69_reversal_guarded_count": float(((reversal_penalty > 0.5) & source_target_mask).sum().item()),
+            "r71_multistage_source_hold_regret_mean": float(_masked_mean(source_hold_regret, mask).detach().cpu()),
+            "r71_multistage_receiver_deploy_regret_mean": float(_masked_mean(receiver_deploy_regret, mask).detach().cpu()),
+            "r71_multistage_cash_defense_regret_mean": float(_masked_mean(cash_defense_regret, mask).detach().cpu()),
+            "r71_multistage_rotation_spread_regret_mean": float(_masked_mean(rotation_spread_regret_5d, mask).detach().cpu()),
+            "r71_multistage_reversal_action_regret_mean": float(_masked_mean(reversal_action_regret_3d, mask).detach().cpu()),
+            "r71_multistage_crowding_penalty_mean": float(_masked_mean(crowding_penalty, mask).detach().cpu()),
+            "r71_multistage_source_regreted_sell_share": float(
+                ((source_hold_regret > 0.5) & source_target_mask).sum().item() / max(float(source_count), 1.0)
+            ),
+            "r71_multistage_receiver_regreted_buy_share": float(
+                ((receiver_deploy_regret > 0.5) & receiver_target_mask).sum().item() / max(float(receiver_count), 1.0)
+            ),
+            "r71_multistage_cash_defense_win_rate": float(
+                ((oracle["cash_buffer"] >= oracle["cash_floor"] - 1.0e-6) & r71_cash_win_days).sum().item()
+                / max(float(r71_cash_win_days.sum().item()), 1.0)
+            ),
         }
 
 
@@ -1595,10 +2149,38 @@ def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
     cash_timing = pd.to_numeric(targets.get("cash_timing_value", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     reversal = pd.to_numeric(targets.get("reversal_risk_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     wrong_side = pd.to_numeric(targets.get("source_wrong_side_sell_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    source_hold_regret = pd.concat(
+        [
+            pd.to_numeric(targets.get("source_hold_regret_3d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+            pd.to_numeric(targets.get("source_hold_regret_5d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    receiver_deploy_regret = pd.concat(
+        [
+            pd.to_numeric(targets.get("receiver_deploy_regret_3d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+            pd.to_numeric(targets.get("receiver_deploy_regret_5d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    cash_defense_regret = pd.concat(
+        [
+            pd.to_numeric(targets.get("cash_defense_regret_1d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+            pd.to_numeric(targets.get("cash_defense_regret_3d", pd.Series(dtype=float)), errors="coerce").fillna(0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    rotation_regret = pd.to_numeric(targets.get("rotation_spread_regret_5d", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    reversal_action_regret = pd.to_numeric(targets.get("reversal_action_regret_3d", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    crowding = pd.to_numeric(targets.get("crowding_penalty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     source_mask = source > 0.003
+    receiver_mask = receiver > 0.003
     return {
         "decision_target_source_count": float((source > 0.003).sum()),
         "decision_target_receiver_count": float((receiver > 0.003).sum()),
+        "r71_target_receiver_coverage_floor_count": float(
+            (pd.to_numeric(targets.get("r71_receiver_coverage_floor", pd.Series(dtype=float)), errors="coerce").fillna(0.0) > 0.003).sum()
+        ),
         "decision_target_constraint_violation_mean": float(violation.mean()) if len(violation) else 0.0,
         "decision_target_value_mean": float(value.mean()) if len(value) else 0.0,
         "decision_target_intent_translation_conflict_count": float((conflict > 0.0).sum()),
@@ -1611,6 +2193,20 @@ def _target_diagnostics(targets: pd.DataFrame) -> dict[str, float]:
         "r69_target_reversal_risk_penalty_mean": (
             float(reversal.loc[source_mask].mean()) if bool(source_mask.any()) else 0.0
         ),
+        "r71_target_source_hold_regret_mean": (
+            float(source_hold_regret.loc[source_mask].mean()) if bool(source_mask.any()) else 0.0
+        ),
+        "r71_target_receiver_deploy_regret_mean": (
+            float(receiver_deploy_regret.loc[receiver_mask].mean()) if bool(receiver_mask.any()) else 0.0
+        ),
+        "r71_target_cash_defense_regret_mean": float(cash_defense_regret.mean()) if len(cash_defense_regret) else 0.0,
+        "r71_target_rotation_spread_regret_mean": (
+            float(rotation_regret.loc[receiver_mask].mean()) if bool(receiver_mask.any()) else 0.0
+        ),
+        "r71_target_reversal_action_regret_mean": (
+            float(reversal_action_regret.loc[source_mask].mean()) if bool(source_mask.any()) else 0.0
+        ),
+        "r71_target_crowding_penalty_mean": float(crowding.mean()) if len(crowding) else 0.0,
     }
 
 
@@ -1668,6 +2264,8 @@ def _predict_value_arbitration_inputs(
     policy: pd.DataFrame,
     outputs: pd.DataFrame,
     current: pd.Series,
+    *,
+    multistage_regret_mode: bool = False,
 ) -> dict[str, pd.Series]:
     deploy_value = _max_numeric_columns(
         policy,
@@ -1737,6 +2335,9 @@ def _predict_value_arbitration_inputs(
     ).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
     receiver_forward = _numeric_series(policy, "portfolio_daily_receiver_forward_excess_5d", 0.0)
     source_forward = _numeric_series(policy, "portfolio_daily_source_forward_excess_5d", 0.0)
+    forward_1d = _numeric_series(policy, "forward_excess_1d", 0.0)
+    forward_3d = _numeric_series(policy, "forward_excess_3d", 0.0)
+    forward_5d = _numeric_series(policy, "forward_excess_5d", 0.0)
     spread_value = _max_numeric_columns(
         policy,
         (
@@ -1769,6 +2370,102 @@ def _predict_value_arbitration_inputs(
             "portfolio_daily_source_forward_proxy_keep_risk",
         ),
     ).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+    source_hold_regret_3d = pd.concat(
+        [
+            (forward_3d / 0.075).clip(0.0, 1.0).rename("own_forward_3d"),
+            (source_forward / 0.075).clip(0.0, 1.0).rename("source_forward_5d"),
+            opportunity_cost.rename("source_opportunity_cost"),
+        ],
+        axis=1,
+    ).max(axis=1).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+    source_hold_regret_5d = pd.concat(
+        [
+            (forward_5d / 0.095).clip(0.0, 1.0).rename("own_forward_5d"),
+            (source_forward / 0.095).clip(0.0, 1.0).rename("source_forward_5d"),
+            wrong_side_penalty.rename("wrong_side_penalty"),
+        ],
+        axis=1,
+    ).max(axis=1).where(current > 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+    receiver_deploy_regret_3d = pd.concat(
+        [
+            (-forward_3d / 0.075).clip(0.0, 1.0).rename("own_bad_forward_3d"),
+            ((source_forward - receiver_forward) / 0.075).clip(0.0, 1.0).rename("source_beats_receiver_5d"),
+            defense_value.mul(0.35).rename("defense_drag"),
+        ],
+        axis=1,
+    ).max(axis=1).where(current < 0.24 - 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+    receiver_deploy_regret_5d = pd.concat(
+        [
+            (-forward_5d / 0.095).clip(0.0, 1.0).rename("own_bad_forward_5d"),
+            ((source_forward - receiver_forward) / 0.095).clip(0.0, 1.0).rename("source_beats_receiver_5d"),
+            (1.0 - spread_value).mul(deploy_value).mul(0.45).rename("deploy_without_spread"),
+        ],
+        axis=1,
+    ).max(axis=1).where(current < 0.24 - 0.003, 0.0).fillna(0.0).clip(0.0, 1.0)
+    cash_defense_regret_1d = pd.concat(
+        [
+            (-forward_1d / 0.045).clip(0.0, 1.0).rename("cash_wins_1d"),
+            defense_value.rename("defense_value"),
+            cash_timing_value.rename("cash_timing_value"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    cash_defense_regret_3d = pd.concat(
+        [
+            (-forward_3d / 0.075).clip(0.0, 1.0).rename("cash_wins_3d"),
+            defense_value.mul(0.80).rename("defense_value"),
+            cash_timing_value.mul(0.80).rename("cash_timing_value"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    rotation_spread_regret_5d = ((source_forward - receiver_forward) / 0.075).clip(0.0, 1.0).fillna(0.0)
+    reversal_action_regret_3d = pd.concat(
+        [
+            reversal_penalty.rename("reversal_penalty"),
+            source_hold_regret_3d.mul(0.70).rename("source_rebound"),
+            ((forward_3d > 0.0).astype(float) * (current > 0.003).astype(float)).rename("reduce_rebound"),
+        ],
+        axis=1,
+    ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+    crowding_penalty = _max_numeric_columns(
+        policy,
+        (
+            "portfolio_daily_crowding_penalty",
+            "industry_crowding_score",
+            "style_crowding_score",
+            "correlation_cluster_score",
+        ),
+    ).clip(0.0, 1.0)
+    if multistage_regret_mode:
+        opportunity_cost = pd.concat(
+            [opportunity_cost.rename("opportunity_cost"), source_hold_regret_3d, source_hold_regret_5d],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        wrong_side_penalty = pd.concat(
+            [wrong_side_penalty.rename("wrong_side_penalty"), source_hold_regret_5d.mul(0.85)],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        reversal_penalty = pd.concat(
+            [reversal_penalty.rename("reversal_penalty"), reversal_action_regret_3d],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
+        receiver_deploy_floor = (
+            (
+                deploy_value * 0.66
+                + spread_value * 0.58
+                - defense_value * 0.35
+                - 0.20
+            ).clip(0.0, 1.0)
+            * (1.0 - 0.95 * receiver_deploy_regret_5d).clip(0.0, 1.0)
+            * (1.0 - 0.95 * rotation_spread_regret_5d).clip(0.0, 1.0)
+        ).clip(0.0, 1.0)
+        spread_value = pd.concat(
+            [
+                (spread_value * (1.0 - rotation_spread_regret_5d)).rename("spread_after_regret"),
+                receiver_deploy_floor.rename("positive_spread_receiver_floor"),
+            ],
+            axis=1,
+        ).max(axis=1).fillna(0.0).clip(0.0, 1.0)
     return {
         "deploy_value": deploy_value.astype(float),
         "release_value": release_value.astype(float),
@@ -1778,6 +2475,15 @@ def _predict_value_arbitration_inputs(
         "receiver_source_spread_value": spread_value.astype(float),
         "reversal_risk_penalty": reversal_penalty.astype(float),
         "source_wrong_side_sell_penalty": wrong_side_penalty.astype(float),
+        "source_hold_regret_3d": (source_hold_regret_3d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "source_hold_regret_5d": (source_hold_regret_5d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "receiver_deploy_regret_3d": (receiver_deploy_regret_3d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "receiver_deploy_regret_5d": (receiver_deploy_regret_5d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "cash_defense_regret_1d": (cash_defense_regret_1d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "cash_defense_regret_3d": (cash_defense_regret_3d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "rotation_spread_regret_5d": (rotation_spread_regret_5d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "reversal_action_regret_3d": (reversal_action_regret_3d if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
+        "crowding_penalty": (crowding_penalty if multistage_regret_mode else pd.Series(0.0, index=policy.index)).astype(float),
     }
 
 
@@ -1795,8 +2501,21 @@ def predict_policy_portfolio_set_v5(
     source_score = outputs["source_supply_score"].clip(0.0, 1.0)
     receiver_score = outputs["receiver_demand_score"].clip(0.0, 1.0)
     behavior_mode = _portfolio_set_v5_artifact_behavior_mode(artifact)
-    value_arbitration_mode = behavior_mode == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION
-    value_inputs = _predict_value_arbitration_inputs(policy, outputs, current) if value_arbitration_mode else None
+    value_arbitration_mode = behavior_mode in {
+        PORTFOLIO_SET_V5_BEHAVIOR_MODE_R69_VALUE_ARBITRATION,
+        PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET,
+    }
+    multistage_regret_mode = behavior_mode == PORTFOLIO_SET_V5_BEHAVIOR_MODE_R71_MULTISTAGE_REGRET
+    value_inputs = (
+        _predict_value_arbitration_inputs(
+            policy,
+            outputs,
+            current,
+            multistage_regret_mode=multistage_regret_mode,
+        )
+        if value_arbitration_mode
+        else None
+    )
     cashflow_turnover_budget = _predict_cashflow_turnover_budget(artifact)
     risk_components = [outputs["cash_buffer_score"]]
     if value_inputs is not None:
@@ -1814,6 +2533,15 @@ def predict_policy_portfolio_set_v5(
         receiver_source_spread_value=torch.as_tensor(value_inputs["receiver_source_spread_value"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
         reversal_risk_penalty=torch.as_tensor(value_inputs["reversal_risk_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
         source_wrong_side_sell_penalty=torch.as_tensor(value_inputs["source_wrong_side_sell_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if value_inputs is not None else None,
+        source_hold_regret_3d=torch.as_tensor(value_inputs["source_hold_regret_3d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        source_hold_regret_5d=torch.as_tensor(value_inputs["source_hold_regret_5d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        receiver_deploy_regret_3d=torch.as_tensor(value_inputs["receiver_deploy_regret_3d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        receiver_deploy_regret_5d=torch.as_tensor(value_inputs["receiver_deploy_regret_5d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        cash_defense_regret_1d=torch.as_tensor(value_inputs["cash_defense_regret_1d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        cash_defense_regret_3d=torch.as_tensor(value_inputs["cash_defense_regret_3d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        rotation_spread_regret_5d=torch.as_tensor(value_inputs["rotation_spread_regret_5d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        reversal_action_regret_3d=torch.as_tensor(value_inputs["reversal_action_regret_3d"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
+        crowding_penalty=torch.as_tensor(value_inputs["crowding_penalty"].to_numpy(dtype=np.float32)[None, :], dtype=torch.float32) if multistage_regret_mode and value_inputs is not None else None,
         sample_mask=torch.ones((1, len(policy)), dtype=torch.bool),
         turnover_budget=torch.as_tensor([cashflow_turnover_budget], dtype=torch.float32),
         risk_budget=torch.as_tensor([float(np.clip(pd.concat(risk_components, axis=1).max(axis=1).mean(), 0.0, 1.0))], dtype=torch.float32),
@@ -1857,6 +2585,7 @@ def predict_policy_portfolio_set_v5(
     policy["portfolio_daily_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
     policy["portfolio_daily_unified_cash_score"] = outputs["cash_buffer_score"].clip(0.0, 1.0).astype(float)
     policy[PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN] = 1.0 if value_arbitration_mode else 0.0
+    policy[PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN] = 1.0 if multistage_regret_mode else 0.0
     if value_inputs is not None:
         policy["portfolio_set_v5_r69_deploy_value"] = value_inputs["deploy_value"].astype(float)
         policy["portfolio_set_v5_r69_release_value"] = value_inputs["release_value"].astype(float)
@@ -1874,6 +2603,30 @@ def predict_policy_portfolio_set_v5(
             (policy["portfolio_daily_source_target_intent"] > 0.5)
             & (policy["portfolio_set_v5_r69_source_wrong_side_sell_penalty"] > 0.5)
         ).astype(float)
+        if multistage_regret_mode:
+            policy["portfolio_set_v5_r71_source_hold_regret_3d"] = value_inputs["source_hold_regret_3d"].astype(float)
+            policy["portfolio_set_v5_r71_source_hold_regret_5d"] = value_inputs["source_hold_regret_5d"].astype(float)
+            policy["portfolio_set_v5_r71_receiver_deploy_regret_3d"] = value_inputs["receiver_deploy_regret_3d"].astype(float)
+            policy["portfolio_set_v5_r71_receiver_deploy_regret_5d"] = value_inputs["receiver_deploy_regret_5d"].astype(float)
+            policy["portfolio_set_v5_r71_cash_defense_regret_1d"] = value_inputs["cash_defense_regret_1d"].astype(float)
+            policy["portfolio_set_v5_r71_cash_defense_regret_3d"] = value_inputs["cash_defense_regret_3d"].astype(float)
+            policy["portfolio_set_v5_r71_rotation_spread_regret_5d"] = value_inputs["rotation_spread_regret_5d"].astype(float)
+            policy["portfolio_set_v5_r71_reversal_action_regret_3d"] = value_inputs["reversal_action_regret_3d"].astype(float)
+            policy["portfolio_set_v5_r71_crowding_penalty"] = value_inputs["crowding_penalty"].astype(float)
+            policy["portfolio_set_v5_r71_source_regreted_sell"] = (
+                (policy["portfolio_daily_source_target_intent"] > 0.5)
+                & (
+                    (policy["portfolio_set_v5_r71_source_hold_regret_3d"] > 0.5)
+                    | (policy["portfolio_set_v5_r71_source_hold_regret_5d"] > 0.5)
+                )
+            ).astype(float)
+            policy["portfolio_set_v5_r71_receiver_regreted_buy"] = (
+                (policy["portfolio_daily_receiver_target_intent"] > 0.5)
+                & (
+                    (policy["portfolio_set_v5_r71_receiver_deploy_regret_3d"] > 0.5)
+                    | (policy["portfolio_set_v5_r71_receiver_deploy_regret_5d"] > 0.5)
+                )
+            ).astype(float)
     policy["portfolio_set_v5_source_supply_score"] = source_score.astype(float)
     policy["portfolio_set_v5_receiver_demand_score"] = receiver_score.astype(float)
     policy["portfolio_set_v5_source_supply"] = source_supply.astype(float)
@@ -1906,6 +2659,24 @@ def predict_policy_portfolio_set_v5(
             ((policy["portfolio_set_v5_cash_buffer_score"] >= float(oracle["cash_floor"][0].detach().cpu()) - 1.0e-6) & (policy["portfolio_set_v5_r69_defense_value"] > 0.5)).sum()
             / defense_days
         )
+    if multistage_regret_mode:
+        source_target_count = max(float(policy["portfolio_daily_source_target_intent"].sum()), 1.0)
+        receiver_target_count = max(float(policy["portfolio_daily_receiver_target_intent"].sum()), 1.0)
+        policy["portfolio_set_v5_r71_source_regreted_sell_share"] = float(
+            policy["portfolio_set_v5_r71_source_regreted_sell"].sum() / source_target_count
+        )
+        policy["portfolio_set_v5_r71_receiver_regreted_buy_share"] = float(
+            policy["portfolio_set_v5_r71_receiver_regreted_buy"].sum() / receiver_target_count
+        )
+        policy["portfolio_set_v5_r71_cash_defense_regret_mean"] = float(
+            np.maximum(
+                policy["portfolio_set_v5_r71_cash_defense_regret_1d"].to_numpy(dtype=float),
+                policy["portfolio_set_v5_r71_cash_defense_regret_3d"].to_numpy(dtype=float),
+            ).mean()
+        )
+        policy["portfolio_set_v5_r71_rotation_spread_regret_mean"] = float(
+            policy["portfolio_set_v5_r71_rotation_spread_regret_5d"].mean()
+        )
     policy["portfolio_set_v5_target_delta_weight_conflict_count"] = int((((target_weight - current) * target_delta) < -(0.003 ** 2)).sum())
     add_mask = (current > 0.0) & (target_delta > 0.003)
     open_mask = (current <= 0.0) & (target_delta > 0.003)
@@ -1930,6 +2701,7 @@ def predict_policy_portfolio_set_v5(
         {
             PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN: 1.0,
             PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN: 1.0 if value_arbitration_mode else 0.0,
+            PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN: 1.0 if multistage_regret_mode else 0.0,
             "release_first_allocation_v3_mode": 1.0,
             "allocation_intent_v2_mode": 1.0,
             "target_weight_intent_mode": 1.0,
@@ -2119,7 +2891,8 @@ def fit_policy_models_portfolio_set_v5(
             "position_cap": 0.24,
             "long_only": True,
             "source_receiver_cash_conservation": True,
-            "value_arbitration": resolved_loss_profile == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+            "value_arbitration": resolved_loss_profile in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION},
+            "multistage_regret": resolved_loss_profile == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
             "behavior_mode": behavior_mode,
             **last_val_decision_diagnostics,
         },
@@ -2136,6 +2909,13 @@ def fit_policy_models_portfolio_set_v5(
             "r69_target_source_wrong_side_sell_share": target_diagnostics["r69_target_source_wrong_side_sell_share"],
             "r69_target_reversal_risk_penalty_mean": target_diagnostics["r69_target_reversal_risk_penalty_mean"],
             "r69_target_cash_timing_value_mean": target_diagnostics["r69_target_cash_timing_value_mean"],
+            "r71_target_source_hold_regret_mean": target_diagnostics["r71_target_source_hold_regret_mean"],
+            "r71_target_receiver_deploy_regret_mean": target_diagnostics["r71_target_receiver_deploy_regret_mean"],
+            "r71_target_cash_defense_regret_mean": target_diagnostics["r71_target_cash_defense_regret_mean"],
+            "r71_target_rotation_spread_regret_mean": target_diagnostics["r71_target_rotation_spread_regret_mean"],
+            "r71_target_reversal_action_regret_mean": target_diagnostics["r71_target_reversal_action_regret_mean"],
+            "r71_target_crowding_penalty_mean": target_diagnostics["r71_target_crowding_penalty_mean"],
+            "r71_target_receiver_coverage_floor_count": target_diagnostics["r71_target_receiver_coverage_floor_count"],
         },
         "device": str(device),
         "gpu_acceleration": runtime.to_diagnostics(),
@@ -2154,7 +2934,8 @@ def fit_policy_models_portfolio_set_v5(
         "portfolio_set_v5_shadow_only": True,
         "supports_release_first_allocation_v3_mode": True,
         "supports_portfolio_cashflow_decision_v1_mode": True,
-        "supports_portfolio_set_v5_r69_value_arbitration": resolved_loss_profile == PORTFOLIO_SET_V5_R69_INTERNAL_VERSION,
+        "supports_portfolio_set_v5_r69_value_arbitration": resolved_loss_profile in {PORTFOLIO_SET_V5_R69_INTERNAL_VERSION, PORTFOLIO_SET_V5_R71_INTERNAL_VERSION},
+        "supports_portfolio_set_v5_r71_multistage_regret": resolved_loss_profile == PORTFOLIO_SET_V5_R71_INTERNAL_VERSION,
         "progress_event_count": int(progress_event_count),
         "train_seconds": round(time.monotonic() - started, 3),
         **target_diagnostics,

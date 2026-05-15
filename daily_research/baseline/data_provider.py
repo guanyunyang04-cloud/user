@@ -116,8 +116,11 @@ def _fetch_tq_market_data_batch(
     count: int,
     dividend_type: str,
     batch_start: int,
+    reinitialize_callback=None,
 ) -> dict:
     for attempt in range(TQ_FETCH_EMPTY_BATCH_RETRY_COUNT + 1):
+        if attempt > 0 and reinitialize_callback is not None:
+            reinitialize_callback(tq)
         batch_dict = tq.get_market_data(
             field_list=list(MARKET_DATA_FIELDS),
             stock_list=stock_list,
@@ -146,6 +149,7 @@ def _fetch_tq_market_data_batch(
         count=count,
         dividend_type=dividend_type,
         batch_start=batch_start,
+        reinitialize_callback=reinitialize_callback,
     )
     right = _fetch_tq_market_data_batch(
         tq,
@@ -155,6 +159,7 @@ def _fetch_tq_market_data_batch(
         count=count,
         dividend_type=dividend_type,
         batch_start=batch_start + midpoint,
+        reinitialize_callback=reinitialize_callback,
     )
     merged: dict = {}
     for field in MARKET_DATA_FIELDS:
@@ -549,6 +554,7 @@ def _fetch_tq_data(
                     count=count,
                     dividend_type=dividend_type,
                     batch_start=start,
+                    reinitialize_callback=_initialize_tq_client,
                 )
                 for field in MARKET_DATA_FIELDS:
                     frame = batch_dict.get(field)

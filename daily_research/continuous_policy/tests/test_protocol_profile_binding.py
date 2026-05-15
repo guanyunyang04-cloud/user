@@ -7,6 +7,7 @@ from daily_research.continuous_policy.run_continuous_policy_protocol import (
 
 ACTIVE_V5_PROFILE = "split_heads_portfolio_daily_release_first_portfolio_set_v5_r65"
 R69_RESEARCH_PROFILE = "split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69"
+R71_RESEARCH_PROFILE = "split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71"
 
 
 class ProtocolProfileBindingTest(unittest.TestCase):
@@ -69,6 +70,15 @@ class ProtocolProfileBindingTest(unittest.TestCase):
         self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
         self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration")
         self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration")
+
+    def test_registered_r71_research_profile_can_run_explicit_protocol_without_becoming_active(self) -> None:
+        args, binding = _parse_args_with_profile_binding(["--search-profile", R71_RESEARCH_PROFILE])
+
+        self.assertTrue(binding["profile_applied"])
+        self.assertFalse(binding["active_profile"])
+        self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
+        self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
+        self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
 
 
 if __name__ == "__main__":

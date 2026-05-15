@@ -96,6 +96,33 @@ def build_release_flow_trace(
     r69_defense = _numeric(frame, ("portfolio_set_v5_r69_defense_value",), 0.0).clip(lower=0.0)
     r69_cash_timing = _numeric(frame, ("portfolio_set_v5_r69_cash_timing_value",), 0.0).clip(lower=0.0)
     r69_spread = _numeric(frame, ("portfolio_set_v5_r69_receiver_source_spread_value",), 0.0)
+    r71_mode = _numeric(frame, ("portfolio_set_v5_multistage_regret_mode",), 0.0) > 0.5
+    r71_source_hold_regret = pd.concat(
+        [
+            _numeric(frame, ("portfolio_set_v5_r71_source_hold_regret_3d",), 0.0),
+            _numeric(frame, ("portfolio_set_v5_r71_source_hold_regret_5d",), 0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    r71_receiver_deploy_regret = pd.concat(
+        [
+            _numeric(frame, ("portfolio_set_v5_r71_receiver_deploy_regret_3d",), 0.0),
+            _numeric(frame, ("portfolio_set_v5_r71_receiver_deploy_regret_5d",), 0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    r71_cash_defense_regret = pd.concat(
+        [
+            _numeric(frame, ("portfolio_set_v5_r71_cash_defense_regret_1d",), 0.0),
+            _numeric(frame, ("portfolio_set_v5_r71_cash_defense_regret_3d",), 0.0),
+        ],
+        axis=1,
+    ).max(axis=1)
+    r71_rotation_regret = _numeric(frame, ("portfolio_set_v5_r71_rotation_spread_regret_5d",), 0.0)
+    r71_reversal_regret = _numeric(frame, ("portfolio_set_v5_r71_reversal_action_regret_3d",), 0.0)
+    r71_crowding = _numeric(frame, ("portfolio_set_v5_r71_crowding_penalty",), 0.0)
+    r71_source_regreted_sell = (_numeric(frame, ("portfolio_set_v5_r71_source_regreted_sell",), 0.0) > 0.5) & r71_mode
+    r71_receiver_regreted_buy = (_numeric(frame, ("portfolio_set_v5_r71_receiver_regreted_buy",), 0.0) > 0.5) & r71_mode
     cashflow_source_intent = (
         (_numeric(frame, ("portfolio_daily_source_target_intent",), 0.0) > 0.5)
         | ((source_supply > float(deadband)) & (target_delta < -float(deadband)))
@@ -170,6 +197,15 @@ def build_release_flow_trace(
         "r69_defense_value_mean": float(r69_defense.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
         "r69_cash_timing_value_mean": float(r69_cash_timing.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
         "r69_receiver_source_spread_value_mean": float(r69_spread.loc[cashflow_mode & r69_mode].mean()) if bool((cashflow_mode & r69_mode).any()) else 0.0,
+        "r71_multistage_regret_mode_count": int((cashflow_mode & r71_mode).sum()),
+        "r71_source_regreted_sell_count": int((r71_source_regreted_sell & cashflow_source_intent).sum()),
+        "r71_receiver_regreted_buy_count": int((r71_receiver_regreted_buy & cashflow_receiver_intent).sum()),
+        "r71_source_hold_regret_mean": float(r71_source_hold_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r71_receiver_deploy_regret_mean": float(r71_receiver_deploy_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r71_cash_defense_regret_mean": float(r71_cash_defense_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r71_rotation_spread_regret_mean": float(r71_rotation_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r71_reversal_action_regret_mean": float(r71_reversal_regret.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
+        "r71_crowding_penalty_mean": float(r71_crowding.loc[cashflow_mode & r71_mode].mean()) if bool((cashflow_mode & r71_mode).any()) else 0.0,
         "receiver_score_dead_count": int(receiver_dead),
         "target_delta_weight_conflict_count": int(target_delta_weight_conflict.sum()),
         "release_block_reason_counts": dict(reason_counts),

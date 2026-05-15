@@ -33,7 +33,10 @@ from daily_research.continuous_policy.portfolio_cashflow_decision import (
     normalize_portfolio_cashflow_decision,
     portfolio_cashflow_decision_enabled,
 )
-from daily_research.continuous_policy.model_portfolio_set_v5 import PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN
+from daily_research.continuous_policy.model_portfolio_set_v5 import (
+    PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN,
+    PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN,
+)
 from daily_research.continuous_policy.release_flow_trace import build_release_flow_trace
 
 
@@ -5550,6 +5553,11 @@ class PortfolioState:
                     )
                     if PORTFOLIO_SET_V5_VALUE_ARBITRATION_MODE_COLUMN in policy.columns
                     else 0.0,
+                    PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN: float(
+                        policy.at[stock, PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN]
+                    )
+                    if PORTFOLIO_SET_V5_MULTISTAGE_REGRET_MODE_COLUMN in policy.columns
+                    else 0.0,
                     "portfolio_cashflow_decision_v1_valid": float(
                         policy.at[stock, "portfolio_cashflow_decision_v1_valid"]
                     )
@@ -5677,6 +5685,61 @@ class PortfolioState:
                         policy.at[stock, "portfolio_set_v5_r69_source_wrong_side_sell"] or 0.0
                     )
                     if "portfolio_set_v5_r69_source_wrong_side_sell" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_source_hold_regret_3d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_source_hold_regret_3d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_source_hold_regret_3d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_source_hold_regret_5d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_source_hold_regret_5d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_source_hold_regret_5d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_receiver_deploy_regret_3d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_receiver_deploy_regret_3d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_receiver_deploy_regret_3d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_receiver_deploy_regret_5d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_receiver_deploy_regret_5d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_receiver_deploy_regret_5d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_cash_defense_regret_1d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_cash_defense_regret_1d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_cash_defense_regret_1d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_cash_defense_regret_3d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_cash_defense_regret_3d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_cash_defense_regret_3d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_rotation_spread_regret_5d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_rotation_spread_regret_5d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_rotation_spread_regret_5d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_reversal_action_regret_3d": float(
+                        policy.at[stock, "portfolio_set_v5_r71_reversal_action_regret_3d"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_reversal_action_regret_3d" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_crowding_penalty": float(
+                        policy.at[stock, "portfolio_set_v5_r71_crowding_penalty"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_crowding_penalty" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_source_regreted_sell": float(
+                        policy.at[stock, "portfolio_set_v5_r71_source_regreted_sell"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_source_regreted_sell" in policy.columns
+                    else 0.0,
+                    "portfolio_set_v5_r71_receiver_regreted_buy": float(
+                        policy.at[stock, "portfolio_set_v5_r71_receiver_regreted_buy"] or 0.0
+                    )
+                    if "portfolio_set_v5_r71_receiver_regreted_buy" in policy.columns
                     else 0.0,
                     "direct_action_value_label": str(policy.at[stock, "direct_action_value_label"] or "") if "direct_action_value_label" in policy.columns else "",
                     "direct_action_value_applied": float(policy.at[stock, "direct_action_value_applied"] or 0.0) if "direct_action_value_applied" in policy.columns else 0.0,

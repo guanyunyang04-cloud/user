@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 21,
+  "record_count": 22,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -641,6 +641,47 @@
         "Replace or supplement the r69 cash timing / defense objective so `cash_timing_quality_1d` improves in evaluation and shadow.",
         "Add source opportunity-cost and reversal diagnostics that reduce positive-forward sell share and immediate reversal without breaking cashflow validity.",
         "Only after a tiny behavior smoke improves at least two behavior metrics should a longer strict resume be considered."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+      ]
+    },
+    {
+      "id": "r71",
+      "date": "2026-05-14",
+      "r_id": "r71",
+      "path": "daily_research/brain/references/r71_multistage_regret_v5_status_20260514.md",
+      "tags": [
+        "r71",
+        "continuous_policy",
+        "portfolio_set_v5"
+      ],
+      "workflow": "continuous_policy",
+      "study_tags": [
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_01",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_02",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_03",
+        "protocol_r71_multistage_regret_v5_behavior_smoke_20260514_04",
+        "protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01"
+      ],
+      "verdict": "Status: `research / shadow-only / multi-stage behavior-quality mechanism progress`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; r71 adds `portfolio_set_v5_dfl_pg_v1_r71_multistage_regret` as an explicit internal loss/profile line for multi-stage regret and ordered decision-quality objectives.",
+      "blockers": [
+        "r70 baseline tag: `protocol_r70_v5_version_boundary_oracle_repair_smoke_20260514_01`.",
+        "r70 completed tiny smoke established:",
+        "`cashflow_decision_contract_valid_rate=1.0`;",
+        "`intent_translation_conflict_rate=0.0`;",
+        "oracle violation near zero;",
+        "remaining failures in `training_evidence`, `cash_timing_quality_1d`, `immediate_reversal_rate_3d`, and `source_positive_forward_sell_share`.",
+        "r71 has not yet proved behavior improvement over r70 because all r71 smoke attempts are failed/incomplete.",
+        "Current blockers:"
+      ],
+      "next_allowed_actions": [
+        "Resolve the TDX singleton provider blocker or use a verified complete cached/csv evaluation path without lowering evidence standards.",
+        "Rerun a tiny r71 behavior smoke with the next unused explicit r71 smoke tag only when GPU/provider are available.",
+        "Inspect whether post-calibration train/evaluate diagnostics keep source targets nonzero and restore receiver target counts above zero.",
+        "Accept r71 first-stage progress only if a completed tiny smoke keeps `cashflow_decision_contract_valid_rate=1.0`, keeps `intent_translation_conflict_rate=0.0`, keeps oracle violation near zero, and improves at least two behavior metrics versus r70.",
+        "Keep r70 as version-boundary/oracle-feasibility evidence and r68 as translation-closure evidence until r71 has completed behavior evidence."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [

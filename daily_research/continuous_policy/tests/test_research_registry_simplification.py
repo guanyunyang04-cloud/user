@@ -78,6 +78,18 @@ class ResearchRegistrySimplificationTest(unittest.TestCase):
             self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_core_v4")
             self.assertEqual(config["base_trial"]["loss_profile"], loss_profile)
 
+    def test_r69_and_r71_v5_profiles_remain_explicit_research_only(self) -> None:
+        for profile_name, loss_profile in (
+            ("split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69", "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration"),
+            ("split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71", "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret"),
+        ):
+            self.assertNotIn(profile_name, get_active_search_profiles())
+            config = get_search_profile_config(profile_name)
+
+            self.assertEqual(config["base_trial"]["trainer_backend"], "formal_torch_portfolio_set_v5")
+            self.assertEqual(config["base_trial"]["loss_profile"], loss_profile)
+            self.assertTrue(config["resource_gate"]["portfolio_set_v5_shadow_only"])
+
     def test_legacy_profiles_are_not_new_study_entrypoints(self) -> None:
         parser = study_runner.build_parser()
         search_action = next(action for action in parser._actions if action.dest == "search_profile")

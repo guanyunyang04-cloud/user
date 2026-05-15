@@ -1340,6 +1340,72 @@ def compute_continuity_metrics(
             action_outcomes.get("portfolio_set_v5_r69_source_wrong_side_sell", pd.Series(0.0, index=action_outcomes.index)),
             errors="coerce",
         ).fillna(0.0) > 0.5
+        r71_multistage_regret_mode = pd.to_numeric(
+            action_outcomes.get(
+                "portfolio_set_v5_multistage_regret_mode",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        r71_source_hold_regret = pd.concat(
+            [
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_source_hold_regret_3d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_source_hold_regret_5d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+            ],
+            axis=1,
+        ).max(axis=1)
+        r71_receiver_deploy_regret = pd.concat(
+            [
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_receiver_deploy_regret_3d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_receiver_deploy_regret_5d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+            ],
+            axis=1,
+        ).max(axis=1)
+        r71_cash_defense_regret = pd.concat(
+            [
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_cash_defense_regret_1d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+                pd.to_numeric(
+                    action_outcomes.get("portfolio_set_v5_r71_cash_defense_regret_3d", pd.Series(0.0, index=action_outcomes.index)),
+                    errors="coerce",
+                ).fillna(0.0),
+            ],
+            axis=1,
+        ).max(axis=1)
+        r71_rotation_spread_regret = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r71_rotation_spread_regret_5d", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r71_reversal_action_regret = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r71_reversal_action_regret_3d", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r71_crowding_penalty = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r71_crowding_penalty", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        r71_source_regreted_sell = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r71_source_regreted_sell", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        r71_receiver_regreted_buy = pd.to_numeric(
+            action_outcomes.get("portfolio_set_v5_r71_receiver_regreted_buy", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
         portfolio_source_protected_release_override = action_outcomes.get(
             "portfolio_daily_source_protected_release_override",
             pd.Series(False, index=action_outcomes.index),
@@ -1729,6 +1795,36 @@ def compute_continuity_metrics(
             else 0.0
         )
         metrics["r69_reversal_guarded_count"] = float((r69_reversal_guarded & portfolio_source_target & r69_value_arbitration_mode).sum())
+        r71_metric_mask = cashflow_decision_mode & r71_multistage_regret_mode
+        metrics["r71_multistage_regret_mode_count"] = float(r71_metric_mask.sum())
+        metrics["r71_multistage_source_hold_regret_mean"] = (
+            float(r71_source_hold_regret.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_receiver_deploy_regret_mean"] = (
+            float(r71_receiver_deploy_regret.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_cash_defense_regret_mean"] = (
+            float(r71_cash_defense_regret.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_rotation_spread_regret_mean"] = (
+            float(r71_rotation_spread_regret.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_reversal_action_regret_mean"] = (
+            float(r71_reversal_action_regret.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_crowding_penalty_mean"] = (
+            float(r71_crowding_penalty.loc[r71_metric_mask].mean()) if bool(r71_metric_mask.any()) else 0.0
+        )
+        metrics["r71_multistage_source_regreted_sell_share"] = (
+            float((r71_source_regreted_sell & portfolio_source_target & r71_multistage_regret_mode).sum() / (portfolio_source_target & r71_multistage_regret_mode).sum())
+            if bool((portfolio_source_target & r71_multistage_regret_mode).any())
+            else 0.0
+        )
+        metrics["r71_multistage_receiver_regreted_buy_share"] = (
+            float((r71_receiver_regreted_buy & portfolio_receiver_target & r71_multistage_regret_mode).sum() / (portfolio_receiver_target & r71_multistage_regret_mode).sum())
+            if bool((portfolio_receiver_target & r71_multistage_regret_mode).any())
+            else 0.0
+        )
         metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
             float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
             if bool(portfolio_receiver_target.any())
