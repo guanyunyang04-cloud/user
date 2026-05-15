@@ -134,3 +134,11 @@
 - 事实：完整回归通过：continuous_policy `248 passed`，data_lake `15 passed`，`git diff --check` clean，`doc_guard.py check` 通过，`brain_integrity_check.py --json` 为 `status=ok`，active artifact diff 为空。
 - 推断：当前 blocker 已从 lake provider / source-receiver collapse 转移到 behavior quality 与 training evidence：cash timing、source positive-forward sell、receiver-source spread、training evidence insufficient。
 - 边界：r73 是 research / shadow evidence，不是 promotion、confirmatory、live 或 completed strategy verdict；不得把 lake eval 或 realtime/tail label 写成 completed training evidence。
+
+## 2026-05-15 接管确认与守卫复盘
+- 行动前自检：先读主脑 `brain_manifest.json`、identity、state、knowledge、topology、architecture、operations、governance，再通过 `brain_bootstrap.py --child daily_research --json` 进入 `daily_research` 分脑；PowerShell 中文显示问题已用显式 UTF-8 读取复核，不按文件损坏处理。
+- 事实：当前分支为 `main`，本地相对 `origin/main` 超前 11 个提交；接管时工作区无未提交改动。
+- 事实：`daily_research/output/active_execution_strategy.json` 无 diff，`git diff --check` 无输出，`brain_integrity_check.py --json` 返回 `status=ok`，`doc_guard.py check` 通过。
+- 事实：`brain_workflow capsule --child daily_research --task "接管并确认当前状态" --json` 返回 active artifact `clean`，但 rule report 有 `loose_latest_stale_requires_explicit_tag` warning：latest study tag 与 latest protocol tag 不同。
+- 推断：当前可安全继续 `daily_research` research / shadow-only 方向；后续判断必须使用 explicit study tag、protocol tag 或 dataset id，不能把 loose `latest_*` 当真源。
+- 边界：本轮只确认接管链路、守卫状态与当前限制；不修改 live/default/promotion，不写 completed strategy evidence，不启动训练或 confirmatory。
