@@ -9,6 +9,7 @@ TRAINER_BACKEND_FORMAL_SEQ_V3 = "formal_torch_seq_v3"
 TRAINER_BACKEND_FORMAL_HIER_V4 = "formal_torch_hier_v4"
 TRAINER_BACKEND_FORMAL_CORE_V4 = "formal_torch_core_v4"
 TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 = "formal_torch_portfolio_set_v5"
+TRAINER_BACKEND_FORMAL_DECISION_CORE_V6 = "formal_torch_decision_core_v6"
 TRAINER_BACKENDS = (
     TRAINER_BACKEND_PROTOTYPE_V1,
     TRAINER_BACKEND_FORMAL_V2,
@@ -16,6 +17,7 @@ TRAINER_BACKENDS = (
     TRAINER_BACKEND_FORMAL_HIER_V4,
     TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
+    TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
 )
 
 
@@ -51,8 +53,13 @@ def normalize_trainer_backend(value: str | None) -> str:
         "torch_portfolio_set_v5": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
         "formal_portfolio_set_v5": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
         "formal_torch_portfolio_set_v5": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
+        "decision_core_v6": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+        "torch_decision_core_v6": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+        "formal_decision_core_v6": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+        "formal_torch_decision_core_v6": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
         "v4": TRAINER_BACKEND_FORMAL_HIER_V4,
         "v5": TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
+        "v6": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
     }
     canonical = aliases.get(text, text)
     if canonical not in TRAINER_BACKENDS:
@@ -114,6 +121,29 @@ def build_training_contract(
                 "formal_torch_portfolio_set_v5 is a parallel shadow-only research backend for portfolio-set release-first allocation.",
                 "It uses temporal per-symbol encoding plus latent cross-sectional set attention; it is not promotion-eligible by default.",
                 "Promotion/live/default changes require a later explicit governance decision outside this backend contract.",
+            ],
+        }
+    if backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        requested_epochs = max(int(requested_epochs or 0), 32)
+        min_epochs = max(int(min_epochs or 0), 32)
+        if not resume_mode_text:
+            resume_mode_text = "strict"
+        return {
+            "trainer_backend": backend,
+            "contract_class": "epoch_resume_shadow_research_longrun_candidate",
+            "epoch_based": True,
+            "promotable": False,
+            "resume_capable": True,
+            "gpu_required": True,
+            "runtime_env": str(runtime_env or "yolos"),
+            "min_start_epoch_budget": 32,
+            "requested_epochs": requested_epochs,
+            "min_epochs": min_epochs,
+            "resume_mode": resume_mode_text,
+            "notes": [
+                "formal_torch_decision_core_v6 is a shadow-only unified decision-core research backend.",
+                "It must train against strict Gold targets and emit DecisionFrameV6-compatible predictions.",
+                "Promotion/live/default changes are forbidden for this backend; evidence remains research shadow-only.",
             ],
         }
     if backend in {TRAINER_BACKEND_FORMAL_V2, TRAINER_BACKEND_FORMAL_SEQ_V3, TRAINER_BACKEND_FORMAL_HIER_V4}:

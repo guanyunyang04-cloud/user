@@ -731,6 +731,7 @@ def compute_continuity_metrics(
 
     if not action_outcomes.empty:
         action_lookup = action_outcomes["execution_action"].astype(str)
+        hold_days_before = pd.to_numeric(action_outcomes["hold_days_before"], errors="coerce").fillna(0.0)
         date_positions = {
             pd.Timestamp(date_value).normalize().strftime("%Y-%m-%d"): position
             for position, date_value in enumerate(prepared.close.index)
@@ -738,13 +739,30 @@ def compute_continuity_metrics(
         for action_name in ("open", "add", "reduce", "exit", "hold"):
             metrics[f"{action_name}_count"] = float((action_lookup == action_name).sum())
 
-        held_rows = action_outcomes.loc[action_outcomes["hold_days_before"].fillna(0.0) > 0]
-        exit_rows = action_outcomes.loc[action_lookup == "exit"]
-        add_rows = action_outcomes.loc[action_lookup == "add"]
-        hold_rows = action_outcomes.loc[action_lookup == "hold"]
-        open_rows = action_outcomes.loc[action_lookup == "open"]
-        reduce_rows = action_outcomes.loc[action_lookup == "reduce"]
-        for optional_column in (
+        def _narrow_action_rows(row_mask: pd.Series, columns: list[str]) -> pd.DataFrame:
+            available_columns = [column for column in columns if column in action_outcomes.columns]
+            if not available_columns:
+                return pd.DataFrame(index=action_outcomes.index[row_mask.to_numpy(dtype=bool)])
+            return action_outcomes.loc[:, available_columns].loc[row_mask].copy()
+
+        action_summary_columns = [
+            "date",
+            "stock",
+            "execution_action",
+            "hold_days_before",
+            "forward_excess_5d",
+            "future_max_up_10d",
+            "future_min_down_10d",
+            "unrealized_pnl_before",
+            "drawdown_from_peak_before",
+        ]
+        held_rows = _narrow_action_rows(hold_days_before > 0.0, action_summary_columns)
+        exit_rows = _narrow_action_rows(action_lookup == "exit", action_summary_columns)
+        add_rows = _narrow_action_rows(action_lookup == "add", action_summary_columns)
+        hold_rows = _narrow_action_rows(action_lookup == "hold", action_summary_columns)
+        open_rows = _narrow_action_rows(action_lookup == "open", action_summary_columns)
+        reduce_rows = _narrow_action_rows(action_lookup == "reduce", action_summary_columns)
+        optional_metric_columns = (
             "sell_rank_score",
             "lifecycle_sell_gate",
             "large_upside_1d_target",
@@ -821,26 +839,56 @@ def compute_continuity_metrics(
             "defense_gate_target",
             "deploy_executability_target",
             "clipped_intent_risk",
-        ):
-            if optional_column not in action_outcomes.columns:
-                action_outcomes[optional_column] = 0.0
+        )
+        missing_optional_columns = [
+            optional_column
+            for optional_column in optional_metric_columns
+            if optional_column not in action_outcomes.columns
+        ]
+        if missing_optional_columns:
+            action_outcomes = pd.concat(
+                [
+                    action_outcomes,
+                    pd.DataFrame(0.0, index=action_outcomes.index, columns=missing_optional_columns),
+                ],
+                axis=1,
+            )
         add_forward_5d = add_rows["forward_excess_5d"].dropna()
         hold_forward_5d = hold_rows["forward_excess_5d"].dropna()
         open_forward_5d = open_rows["forward_excess_5d"].dropna()
         reduce_forward_5d = reduce_rows["forward_excess_5d"].dropna()
         exit_forward_5d = exit_rows["forward_excess_5d"].dropna()
-        open_add_rows = action_outcomes.loc[action_lookup.isin({"open", "add"})]
-        position_rows = action_outcomes.loc[action_lookup.isin({"open", "add", "hold"})]
-        sell_rows = action_outcomes.loc[action_lookup.isin({"reduce", "exit"})]
         main_leg_threshold_10d = 0.06
-        entry_max_up_10d = open_add_rows["future_max_up_10d"].dropna()
+        future_max_up_10d = pd.to_numeric(action_outcomes["future_max_up_10d"], errors="coerce")
+        future_min_down_10d = pd.to_numeric(action_outcomes["future_min_down_10d"], errors="coerce")
+        entry_max_up_10d = future_max_up_10d.loc[action_lookup.isin({"open", "add"})].dropna()
         hold_max_up_10d = hold_rows["future_max_up_10d"].dropna()
-        sell_leg_frame = sell_rows.loc[:, ["future_max_up_10d", "future_min_down_10d"]].dropna()
-        position_max_up_10d = position_rows["future_max_up_10d"].dropna()
-        held_decision_rows = action_outcomes.loc[
-            action_lookup.isin({"hold", "add", "reduce", "exit"})
-            & (action_outcomes["hold_days_before"].fillna(0.0) > 0.0)
-        ].copy()
+        sell_leg_frame = pd.DataFrame(
+            {
+                "future_max_up_10d": future_max_up_10d.loc[action_lookup.isin({"reduce", "exit"})],
+                "future_min_down_10d": future_min_down_10d.loc[action_lookup.isin({"reduce", "exit"})],
+            }
+        ).dropna()
+        position_max_up_10d = future_max_up_10d.loc[action_lookup.isin({"open", "add", "hold"})].dropna()
+        held_decision_columns = [
+            "date",
+            "execution_action",
+            "forward_excess_5d",
+            "hold_days_before",
+            "sell_rank_score",
+            "lifecycle_sell_gate",
+            "sell_release_value",
+            "release_value_target",
+            "release_gate_target",
+            "hold_continuation_value",
+            "clipped_intent_risk",
+            "weight_change_action",
+            "model_action",
+        ]
+        held_decision_rows = _narrow_action_rows(
+            action_lookup.isin({"hold", "add", "reduce", "exit"}) & (hold_days_before > 0.0),
+            held_decision_columns,
+        )
         sell_selection_spreads: list[float] = []
         sell_selection_hits = 0
 
@@ -1079,7 +1127,7 @@ def compute_continuity_metrics(
             model_action_lookup.isin({"open", "add", "hold", "reduce", "exit"})
             & (best_action_value > chosen_action_value + 0.08)
         )
-        held_value_rows = action_outcomes["hold_days_before"].fillna(0.0) > 0.0
+        held_value_rows = hold_days_before > 0.0
         keep_action_value = pd.concat([add_action_value_all.fillna(0.0), hold_action_value_all.fillna(0.0)], axis=1).max(axis=1)
         release_action_value = pd.concat([reduce_action_value_all.fillna(0.0), exit_action_value_all.fillna(0.0)], axis=1).max(axis=1)
         sell_against_keep_value_mask = (
@@ -1513,6 +1561,94 @@ def compute_continuity_metrics(
             "portfolio_set_v5_r73_collapse_layer",
             pd.Series("", index=action_outcomes.index),
         ).fillna("").astype(str)
+        decision_core_v6_mode = action_outcomes.get(
+            "decision_core_version",
+            pd.Series("", index=action_outcomes.index),
+        ).fillna("").astype(str).eq("v6")
+        decision_core_v6_contract_valid = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_contract_valid", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0) > 0.5
+        decision_core_v6_oracle_constraint_violation = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_oracle_constraint_violation",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_feature_blocker_count = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_feature_contract_blocker_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_feature_degraded_count = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_feature_contract_degraded_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_feature_neutral_fallback_count = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_feature_contract_neutral_fallback_count",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_weakness = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_source_weakness", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_keep_strength = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_source_keep_strength", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_opportunity_cost = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_source_opportunity_cost", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_wrong_side_sell_penalty = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_source_wrong_side_sell_penalty",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_reversal_risk_penalty = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_reversal_risk_penalty", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_receiver_source_spread_value = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_receiver_source_spread_value",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_release_utility = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_release_utility", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_release_gate = pd.to_numeric(
+            action_outcomes.get("decision_core_v6_release_gate", pd.Series(0.0, index=action_outcomes.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_release_evidence = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_source_release_evidence",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        decision_core_v6_source_false_sell_penalty = pd.to_numeric(
+            action_outcomes.get(
+                "decision_core_v6_source_false_sell_penalty",
+                pd.Series(0.0, index=action_outcomes.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
         portfolio_source_protected_release_override = action_outcomes.get(
             "portfolio_daily_source_protected_release_override",
             pd.Series(False, index=action_outcomes.index),
@@ -2011,6 +2147,83 @@ def compute_continuity_metrics(
             metrics["r73_collapse_layer_feature_candidate_count"] = 0.0
             metrics["r73_collapse_layer_oracle_count"] = 0.0
             metrics["r73_collapse_layer_cashflow_contract_count"] = 0.0
+        metrics["decision_core_v6_mode_count"] = float(decision_core_v6_mode.sum())
+        metrics["decision_core_v6_contract_valid_rate"] = (
+            float(decision_core_v6_contract_valid.loc[decision_core_v6_mode].mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        metrics["decision_oracle_constraint_violation_mean"] = (
+            float(decision_core_v6_oracle_constraint_violation.loc[decision_core_v6_mode].mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        metrics["feature_contract_blocker_rate"] = (
+            float((decision_core_v6_feature_blocker_count.loc[decision_core_v6_mode] > 0.0).mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        metrics["feature_contract_degraded_rate"] = (
+            float((decision_core_v6_feature_degraded_count.loc[decision_core_v6_mode] > 0.0).mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        metrics["feature_contract_neutral_fallback_rate"] = (
+            float((decision_core_v6_feature_neutral_fallback_count.loc[decision_core_v6_mode] > 0.0).mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        v6_source_metric_mask = decision_core_v6_mode & portfolio_source_target
+        metrics["decision_core_v6_source_weakness_mean"] = (
+            float(decision_core_v6_source_weakness.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_source_keep_strength_mean"] = (
+            float(decision_core_v6_source_keep_strength.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_source_opportunity_cost_mean"] = (
+            float(decision_core_v6_source_opportunity_cost.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_source_wrong_side_sell_penalty_mean"] = (
+            float(decision_core_v6_source_wrong_side_sell_penalty.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_reversal_risk_penalty_mean"] = (
+            float(decision_core_v6_reversal_risk_penalty.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_receiver_source_spread_value_mean"] = (
+            float(decision_core_v6_receiver_source_spread_value.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_release_utility_mean"] = (
+            float(decision_core_v6_release_utility.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_release_gate_rate"] = (
+            float((decision_core_v6_release_gate.loc[decision_core_v6_mode] > 0.5).mean())
+            if bool(decision_core_v6_mode.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_source_release_evidence_mean"] = (
+            float(decision_core_v6_source_release_evidence.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
+        metrics["decision_core_v6_source_false_sell_penalty_mean"] = (
+            float(decision_core_v6_source_false_sell_penalty.loc[v6_source_metric_mask].mean())
+            if bool(v6_source_metric_mask.any())
+            else 0.0
+        )
         metrics["portfolio_daily_receiver_realized_deploy_rate"] = (
             float(portfolio_receiver_realized_count / portfolio_receiver_target.sum())
             if bool(portfolio_receiver_target.any())
@@ -2238,7 +2451,7 @@ def compute_continuity_metrics(
         metrics["deploy_intent_hold_conflict_share"] = (
             float(deploy_hold_mask.sum() / deploy_intent_count) if deploy_intent_count else 0.0
         )
-        held_rank_rows = held_decision_rows.copy()
+        held_rank_rows = held_decision_rows
         if not held_rank_rows.empty:
             rank_signal = pd.to_numeric(held_rank_rows["sell_rank_score"], errors="coerce")
             lifecycle_signal = pd.to_numeric(held_rank_rows["lifecycle_sell_gate"], errors="coerce")

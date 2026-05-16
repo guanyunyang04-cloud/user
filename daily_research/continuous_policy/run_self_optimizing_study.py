@@ -28,6 +28,11 @@ from daily_research.continuous_policy.model_seq_v3 import (
     resolve_loss_profile,
 )
 from daily_research.continuous_policy.model_core_v4 import resolve_core_v4_loss_profile
+from daily_research.continuous_policy.decision_core_v6 import (
+    DECISION_CORE_V6_PROFILE,
+    DECISION_CORE_V6_STRICT_GOLD_DATASET_ID,
+    decision_core_v6_profile_name,
+)
 from daily_research.continuous_policy.model_portfolio_set_v5 import resolve_portfolio_set_v5_loss_profile
 from daily_research.continuous_policy.behavior_bottleneck_report import build_behavior_bottleneck_report
 from daily_research.continuous_policy.pipeline_utils import (
@@ -69,6 +74,7 @@ from daily_research.continuous_policy.runtime import (
 )
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
     TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
     TRAINER_BACKEND_FORMAL_SEQ_V3,
@@ -84,6 +90,7 @@ from daily_research.continuous_policy.research_profile_registry import (
     get_default_objective,
     get_search_profile_config,
 )
+from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 
 
 LATEST_STATE_PATHS: dict[str, Path] = {
@@ -118,11 +125,76 @@ THREAD_LIMIT_ENV_KEYS: tuple[str, ...] = (
 def _resolve_trial_loss_profile(trial_config: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     loss_profile = str(trial_config.get("loss_profile", DEFAULT_LOSS_PROFILE))
     trainer_backend = str(trial_config.get("trainer_backend", "") or "")
+    if trainer_backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        resolved = decision_core_v6_profile_name(loss_profile)
+        return resolved, {
+            "loss_profile": resolved,
+            "trainer_backend": TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+            "decision_core_version": "v6",
+            "artifact_schema": "continuous_policy_decision_core_v6_artifact",
+            "multi_objective_loss_weights": {},
+            "shadow_only": True,
+        }
     if trainer_backend == TRAINER_BACKEND_FORMAL_CORE_V4:
         return resolve_core_v4_loss_profile(loss_profile)
     if trainer_backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
         return resolve_portfolio_set_v5_loss_profile(loss_profile)
     return resolve_loss_profile(loss_profile)
+
+
+def _explicit_cli_dests(parser: argparse.ArgumentParser, raw_argv: list[str]) -> set[str]:
+    option_dest: dict[str, str] = {}
+    for action in parser._actions:
+        for option in action.option_strings:
+            option_dest[option] = action.dest
+    explicit: set[str] = set()
+    for token in raw_argv:
+        if token == "--":
+            break
+        if not token.startswith("--"):
+            continue
+        dest = option_dest.get(token.split("=", 1)[0])
+        if dest:
+            explicit.add(dest)
+    return explicit
+
+
+def _study_search_profile_choices() -> tuple[str, ...]:
+    return (*get_active_search_profiles(), DECISION_CORE_V6_PROFILE)
+
+
+def _default_objective_for_study_profile(profile_name: str) -> str:
+    if str(profile_name) in get_active_search_profiles():
+        return get_default_objective(profile_name)
+    return str(get_search_profile_config(profile_name).get("default_objective", "promotion_balanced_v2"))
+
+
+def _validate_study_decision_core_args(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    explicit_dests: set[str],
+) -> None:
+    decision_core = str(getattr(args, "decision_core", "") or "").strip()
+    search_profile = str(getattr(args, "search_profile", "") or "").strip()
+    trainer_backend = str(getattr(args, "trainer_backend", "") or "").strip()
+    if search_profile == DECISION_CORE_V6_PROFILE and decision_core != "v6":
+        parser.error(f"{DECISION_CORE_V6_PROFILE} requires --decision-core v6.")
+    if decision_core != "v6":
+        return
+    if search_profile != DECISION_CORE_V6_PROFILE:
+        parser.error(f"--decision-core v6 requires --search-profile {DECISION_CORE_V6_PROFILE}.")
+    if str(getattr(args, "data_source", "") or "").strip().lower() != "lake":
+        parser.error("--decision-core v6 requires --data-source lake.")
+    if "lake_dataset_id" not in explicit_dests:
+        parser.error("--decision-core v6 requires explicit --lake-dataset-id.")
+    if not str(getattr(args, "lake_dataset_id", "") or "").strip():
+        parser.error("--decision-core v6 requires explicit --lake-dataset-id.")
+    if str(getattr(args, "training_dataset_id", "") or "").strip() != DECISION_CORE_V6_STRICT_GOLD_DATASET_ID:
+        parser.error(f"--decision-core v6 requires --training-dataset-id {DECISION_CORE_V6_STRICT_GOLD_DATASET_ID}.")
+    if "trainer_backend" in explicit_dests and trainer_backend != TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        parser.error(f"--decision-core v6 requires --trainer-backend {TRAINER_BACKEND_FORMAL_DECISION_CORE_V6}.")
+    args.trainer_backend = TRAINER_BACKEND_FORMAL_DECISION_CORE_V6
 
 
 def _normalize_date_text(value: str) -> str:
@@ -255,6 +327,13 @@ def _score_protocol_summary(
     trend_capture = float(continuity.get("trend_capture_rate_10d", 0.0) or 0.0)
     reversal = float(continuity.get("immediate_reversal_rate_3d", 0.0) or 0.0)
     shadow_reversal = float(shadow_continuity.get("immediate_reversal_rate_3d", 0.0) or 0.0)
+    decision_core_v6_mode_count = _summary_metric("decision_core_v6_mode_count", 0.0)
+    decision_core_v6_contract_valid_rate = _summary_metric("decision_core_v6_contract_valid_rate", 0.0)
+    cashflow_decision_contract_valid_rate = _summary_metric("cashflow_decision_contract_valid_rate", 0.0)
+    decision_oracle_constraint_violation_mean = _summary_metric("decision_oracle_constraint_violation_mean", 0.0)
+    feature_contract_blocker_rate = _summary_metric("feature_contract_blocker_rate", 0.0)
+    feature_contract_degraded_rate = _summary_metric("feature_contract_degraded_rate", 0.0)
+    feature_contract_neutral_fallback_rate = _summary_metric("feature_contract_neutral_fallback_rate", 0.0)
     training_evidence_ok = str(training_evidence.get("status", "") or "") == "sufficient"
     semantic_conflict_rate = float(semantic_conflicts.get("semantic_conflict_rate", 0.0) or 0.0)
     order_translation_conflict_rate = float(
@@ -911,6 +990,9 @@ def _score_protocol_summary(
             continuity.get("portfolio_daily_receiver_minus_source_forward_excess_5d", 0.0),
         )
         or 0.0
+    )
+    shadow_receiver_minus_source_forward_excess_5d = float(
+        shadow_continuity.get("portfolio_daily_receiver_minus_source_forward_excess_5d", 0.0) or 0.0
     )
     avg_gross_exposure_target = float(
         semantic_conflicts.get(
@@ -2791,6 +2873,13 @@ def _score_protocol_summary(
             "trend_capture_rate_10d": trend_capture,
             "immediate_reversal_rate_3d": reversal,
             "shadow_reversal_rate_3d": shadow_reversal,
+            "decision_core_v6_mode_count": decision_core_v6_mode_count,
+            "decision_core_v6_contract_valid_rate": decision_core_v6_contract_valid_rate,
+            "cashflow_decision_contract_valid_rate": cashflow_decision_contract_valid_rate,
+            "decision_oracle_constraint_violation_mean": decision_oracle_constraint_violation_mean,
+            "feature_contract_blocker_rate": feature_contract_blocker_rate,
+            "feature_contract_degraded_rate": feature_contract_degraded_rate,
+            "feature_contract_neutral_fallback_rate": feature_contract_neutral_fallback_rate,
             "semantic_conflict_rate": semantic_conflict_rate,
             "order_translation_conflict_rate": order_translation_conflict_rate,
             "allocation_intent_v2_mode_share": allocation_intent_v2_mode_share,
@@ -2901,6 +2990,9 @@ def _score_protocol_summary(
             ),
             "portfolio_daily_receiver_minus_source_forward_excess_5d": (
                 portfolio_daily_receiver_minus_source_forward_excess_5d
+            ),
+            "shadow_portfolio_daily_receiver_minus_source_forward_excess_5d": (
+                shadow_receiver_minus_source_forward_excess_5d
             ),
             "avg_gross_exposure_target": avg_gross_exposure_target,
             "portfolio_daily_exposure_utilization": portfolio_daily_exposure_utilization,
@@ -3498,12 +3590,20 @@ def _build_protocol_args(args: argparse.Namespace, trial_config: dict[str, Any],
     protocol_args = [
         "--search-profile",
         str(args.search_profile),
+        "--decision-core",
+        str(args.decision_core),
         "--pool-name",
         str(args.pool_name),
         "--benchmark",
         str(args.benchmark),
         "--data-source",
         str(args.data_source),
+        "--lake-dataset-id",
+        str(args.lake_dataset_id),
+        "--data-lake-root",
+        str(args.data_lake_root),
+        "--training-dataset-id",
+        str(args.training_dataset_id),
         "--pool-rebalance-days",
         str(args.pool_rebalance_days),
         "--pool-adv-window",
@@ -3925,6 +4025,19 @@ def _resource_gate_after_screening(
     unused_receiver_headroom = float(metrics.get("portfolio_daily_unused_receiver_headroom_mean", 0.0) or 0.0)
     target_sum_gap = float(metrics.get("portfolio_daily_target_sum_gap", 0.0) or 0.0)
     source_release_required = float(metrics.get("portfolio_daily_source_release_required", 0.0) or 0.0)
+    cashflow_valid_rate = float(metrics.get("cashflow_decision_contract_valid_rate", 0.0) or 0.0)
+    decision_core_v6_contract_valid_rate = float(metrics.get("decision_core_v6_contract_valid_rate", 0.0) or 0.0)
+    decision_core_v6_mode_count = float(metrics.get("decision_core_v6_mode_count", 0.0) or 0.0)
+    oracle_violation = float(metrics.get("decision_oracle_constraint_violation_mean", 0.0) or 0.0)
+    feature_blocker_rate = float(metrics.get("feature_contract_blocker_rate", 0.0) or 0.0)
+    feature_degraded_rate = float(metrics.get("feature_contract_degraded_rate", 0.0) or 0.0)
+    source_positive_forward_sell_share = float(
+        metrics.get("portfolio_daily_source_positive_forward_sell_share", 0.0) or 0.0
+    )
+    immediate_reversal_rate_3d = float(metrics.get("immediate_reversal_rate_3d", 0.0) or 0.0)
+    shadow_receiver_source_forward_excess = float(
+        metrics.get("shadow_portfolio_daily_receiver_minus_source_forward_excess_5d", 0.0) or 0.0
+    )
     cash_first_source_gate = bool(config.get("cash_first_source_gate", False))
     exposure_floor = float(config.get("exposure_utilization_floor", 0.50) or 0.50)
     actual_cash_cap = float(config.get("actual_cash_weight_cap", 0.62) or 0.62)
@@ -3973,6 +4086,34 @@ def _resource_gate_after_screening(
         failed.append("actual_cash_weight_high")
     if bool(config.get("cash_semantics_mismatch_block", False)) and cash_semantics_mismatch >= 0.5:
         failed.append("cash_semantics_mismatch")
+    if "cashflow_decision_contract_valid_rate_floor" in config:
+        required_valid_rate = float(config.get("cashflow_decision_contract_valid_rate_floor", 1.0) or 1.0)
+        if cashflow_valid_rate < required_valid_rate:
+            failed.append("cashflow_decision_contract_invalid")
+    if "decision_oracle_constraint_violation_mean_cap" in config:
+        oracle_cap = float(config.get("decision_oracle_constraint_violation_mean_cap", 1.0e-6) or 1.0e-6)
+        if oracle_violation > oracle_cap:
+            failed.append("decision_oracle_constraint_violation")
+    if "feature_contract_blocker_rate_cap" in config:
+        blocker_cap = float(config.get("feature_contract_blocker_rate_cap", 0.0) or 0.0)
+        if feature_blocker_rate > blocker_cap:
+            failed.append("feature_contract_blocker")
+    if "feature_contract_degraded_rate_cap" in config:
+        degraded_cap = float(config.get("feature_contract_degraded_rate_cap", 0.25) or 0.25)
+        if feature_degraded_rate >= degraded_cap:
+            failed.append("feature_contract_degraded")
+    if "portfolio_daily_source_positive_forward_sell_share_cap" in config:
+        positive_sell_cap = float(config.get("portfolio_daily_source_positive_forward_sell_share_cap", 0.10) or 0.10)
+        if source_positive_forward_sell_share > positive_sell_cap:
+            failed.append("source_positive_forward_sell_high")
+    if "immediate_reversal_rate_3d_cap" in config:
+        reversal_cap = float(config.get("immediate_reversal_rate_3d_cap", 0.005) or 0.005)
+        if immediate_reversal_rate_3d > reversal_cap:
+            failed.append("immediate_reversal_high")
+    if "shadow_receiver_minus_source_forward_excess_5d_floor" in config:
+        shadow_spread_floor = float(config.get("shadow_receiver_minus_source_forward_excess_5d_floor", 0.0) or 0.0)
+        if shadow_receiver_source_forward_excess <= shadow_spread_floor:
+            failed.append("shadow_receiver_source_spread_nonpositive")
     if cash_first_source_gate:
         if receiver_activity_required and cash_funded_deploy_amount < float(
             config.get("cash_funded_deploy_floor", 0.12) or 0.12
@@ -3986,6 +4127,19 @@ def _resource_gate_after_screening(
             failed.append("target_sum_underdeployed")
 
     trigger_reasons = set(failed)
+    if bool(config.get("decision_core_v6_shadow_only", False)):
+        v6_terminal_failures = {
+            "cashflow_decision_contract_invalid",
+            "decision_oracle_constraint_violation",
+            "feature_contract_blocker",
+            "feature_contract_degraded",
+            "source_positive_forward_sell_high",
+            "immediate_reversal_high",
+            "shadow_receiver_source_spread_nonpositive",
+        }
+        v6_terminal_failure = bool(trigger_reasons & v6_terminal_failures)
+    else:
+        v6_terminal_failure = False
     if cash_first_source_gate:
         terminal_failure = (
             (
@@ -4031,6 +4185,7 @@ def _resource_gate_after_screening(
             )
             and "exposure_utilization_low" in trigger_reasons
         )
+    terminal_failure = bool(terminal_failure or v6_terminal_failure)
     remaining = max(0, int(selected_trial_count) - len(screening_results))
     return {
         "resource_gate_enabled": True,
@@ -4058,6 +4213,15 @@ def _resource_gate_after_screening(
             "portfolio_daily_unused_receiver_headroom_mean": unused_receiver_headroom,
             "portfolio_daily_target_sum_gap": target_sum_gap,
             "portfolio_daily_source_release_required": source_release_required,
+            "decision_core_v6_mode_count": decision_core_v6_mode_count,
+            "decision_core_v6_contract_valid_rate": decision_core_v6_contract_valid_rate,
+            "cashflow_decision_contract_valid_rate": cashflow_valid_rate,
+            "decision_oracle_constraint_violation_mean": oracle_violation,
+            "feature_contract_blocker_rate": feature_blocker_rate,
+            "feature_contract_degraded_rate": feature_degraded_rate,
+            "portfolio_daily_source_positive_forward_sell_share": source_positive_forward_sell_share,
+            "immediate_reversal_rate_3d": immediate_reversal_rate_3d,
+            "shadow_portfolio_daily_receiver_minus_source_forward_excess_5d": shadow_receiver_source_forward_excess,
             "release_first_source_intent_count": release_first_source_intent,
             "release_first_source_realized_count": release_first_source_realized,
             "release_first_rotation_amount_mean": release_first_rotation_amount,
@@ -4126,8 +4290,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pool-name", default="learned_all_a")
     parser.add_argument("--benchmark", default="000300.SH")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv"))
+    parser.add_argument(
+        "--decision-core",
+        default="",
+        choices=("", "v6"),
+        help="Explicit decision core selector. v6 studies are research/shadow-only and require lake + strict Gold inputs.",
+    )
+    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
     parser.add_argument("--csv-folder", default="")
+    parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    parser.add_argument("--data-lake-root", default="")
+    parser.add_argument("--training-dataset-id", default="")
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
     parser.add_argument("--max-universe-size", type=int, default=1200)
@@ -4167,7 +4340,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-epochs", type=int, default=None)
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--daily-head-layout", default=DAILY_HEAD_LAYOUT_MONOLITHIC_V1, choices=DAILY_HEAD_LAYOUT_CHOICES)
-    parser.add_argument("--search-profile", default="focused_seq_v1", choices=get_active_search_profiles())
+    parser.add_argument("--search-profile", default="focused_seq_v1", choices=_study_search_profile_choices())
     parser.add_argument("--objective-profile", default="")
     parser.add_argument("--trial-count", type=int, default=3)
     parser.add_argument("--seed-study-tag", default="")
@@ -4213,13 +4386,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    _validate_study_decision_core_args(args, parser=parser, explicit_dests=_explicit_cli_dests(parser, raw_argv))
     ensure_layout()
 
     study_tag = str(args.study_tag or timestamp_tag("self_opt_study"))
     study_root = STUDIES_ROOT / study_tag
     _ensure_fresh_study_root(study_root, allow_existing=bool(args.allow_existing_study_tag))
-    objective_profile = str(args.objective_profile or get_default_objective(args.search_profile))
+    objective_profile = str(args.objective_profile or _default_objective_for_study_profile(args.search_profile))
     resource_limits = _build_resource_limits(
         search_profile=args.search_profile,
         resource_profile=args.resource_profile,
@@ -4395,6 +4571,11 @@ def main(argv: list[str] | None = None) -> int:
         "created_at": now_iso(),
         "search_profile": args.search_profile,
         "objective_profile": objective_profile,
+        "decision_core": str(args.decision_core),
+        "data_source": str(args.data_source),
+        "lake_dataset_id": str(args.lake_dataset_id or ""),
+        "data_lake_root": str(args.data_lake_root or ""),
+        "training_dataset_id": str(args.training_dataset_id or ""),
         "seed_study_tag": str(args.seed_study_tag or ""),
         "skip_screening": bool(args.skip_screening),
         "confirmatory_enabled": not bool(args.disable_confirmatory),
@@ -4434,6 +4615,10 @@ def main(argv: list[str] | None = None) -> int:
         study_tag=study_tag,
         search_profile=args.search_profile,
         objective_profile=objective_profile,
+        decision_core=str(args.decision_core),
+        data_source=str(args.data_source),
+        lake_dataset_id=str(args.lake_dataset_id or ""),
+        training_dataset_id=str(args.training_dataset_id or ""),
         trial_count=len(selected_trials),
         screening_trial_count=len(selected_trials),
         confirmatory_enabled=not bool(args.disable_confirmatory),
@@ -4470,6 +4655,10 @@ def main(argv: list[str] | None = None) -> int:
             study_tag=study_tag,
             screening_trial_count=len(selected_trials),
             confirmatory_enabled=not bool(args.disable_confirmatory),
+            decision_core=str(args.decision_core),
+            data_source=str(args.data_source),
+            lake_dataset_id=str(args.lake_dataset_id or ""),
+            training_dataset_id=str(args.training_dataset_id or ""),
             native_allocation_vector_support=bool(native_allocation_vector_support),
             day_set_native_allocation_vector_support=bool(day_set_native_allocation_vector_support),
             native_source_delta_alignment_support=bool(native_source_delta_alignment_support),
@@ -4862,12 +5051,22 @@ def main(argv: list[str] | None = None) -> int:
         "executed_at": now_iso(),
         "objective_profile": objective_profile,
         "search_profile": args.search_profile,
+        "decision_core": str(args.decision_core),
+        "data_source": str(args.data_source),
+        "lake_dataset_id": str(args.lake_dataset_id or ""),
+        "data_lake_root": str(args.data_lake_root or ""),
+        "training_dataset_id": str(args.training_dataset_id or ""),
         "pool_name": args.pool_name,
         "benchmark": args.benchmark,
         "trainer_backend": args.trainer_backend,
         "execution_semantics": str(args.execution_semantics),
         "budget_semantics": active_budget_semantics,
         "budget_calibration": active_budget_calibration,
+        "conclusion_scope": (
+            "research / shadow-only / v6 longrun candidate evidence"
+            if str(args.decision_core) == "v6"
+            else "research study evidence"
+        ),
         "study_plan_json": str((study_root / "study_plan.json").resolve()),
         "study_progress_json": str((study_root / "study_progress.json").resolve()),
         "study_progress_jsonl": str((study_root / "study_progress.jsonl").resolve()),

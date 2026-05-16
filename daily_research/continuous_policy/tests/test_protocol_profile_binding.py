@@ -63,32 +63,40 @@ class ProtocolProfileBindingTest(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     _parse_args_with_profile_binding(["--search-profile", profile])
 
-    def test_registered_r69_research_profile_can_run_explicit_protocol_without_becoming_active(self) -> None:
-        args, binding = _parse_args_with_profile_binding(["--search-profile", R69_RESEARCH_PROFILE])
+    def test_registered_r69_r71_r74_research_profiles_are_rejected_for_new_protocol_runs(self) -> None:
+        for profile in (R69_RESEARCH_PROFILE, R71_RESEARCH_PROFILE, R74_RESEARCH_PROFILE):
+            with self.subTest(profile=profile):
+                with self.assertRaises(SystemExit):
+                    _parse_args_with_profile_binding(["--search-profile", profile])
 
-        self.assertTrue(binding["profile_applied"])
-        self.assertFalse(binding["active_profile"])
-        self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
-        self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration")
-        self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration")
+    def test_legacy_rxx_loss_profiles_are_rejected_for_new_protocol_runs(self) -> None:
+        for loss_profile in (
+            "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration",
+            "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret",
+            "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality",
+        ):
+            with self.subTest(loss_profile=loss_profile):
+                with self.assertRaises(SystemExit):
+                    _parse_args_with_profile_binding(["--loss-profile", loss_profile])
 
-    def test_registered_r71_research_profile_can_run_explicit_protocol_without_becoming_active(self) -> None:
-        args, binding = _parse_args_with_profile_binding(["--search-profile", R71_RESEARCH_PROFILE])
+    def test_decision_core_v6_protocol_requires_fixed_lake_contract(self) -> None:
+        args, binding = _parse_args_with_profile_binding(
+            [
+                "--decision-core",
+                "v6",
+                "--data-source",
+                "lake",
+                "--training-dataset-id",
+                "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+                "--lake-dataset-id",
+                "policy_input_bundle__fixture",
+            ]
+        )
 
-        self.assertTrue(binding["profile_applied"])
-        self.assertFalse(binding["active_profile"])
-        self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
-        self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
-        self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret")
-
-    def test_registered_r74_research_profile_can_run_explicit_protocol_without_becoming_active(self) -> None:
-        args, binding = _parse_args_with_profile_binding(["--search-profile", R74_RESEARCH_PROFILE])
-
-        self.assertTrue(binding["profile_applied"])
-        self.assertFalse(binding["active_profile"])
-        self.assertEqual(args.trainer_backend, "formal_torch_portfolio_set_v5")
-        self.assertEqual(args.loss_profile, "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality")
-        self.assertEqual(binding["effective_base_trial"]["loss_profile"], "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality")
+        self.assertFalse(binding["profile_applied"])
+        self.assertEqual(args.trainer_backend, "formal_torch_decision_core_v6")
+        self.assertEqual(args.loss_profile, "portfolio_decision_core_v6_longrun_candidate")
+        self.assertEqual(args.decision_core, "v6")
 
     def test_protocol_parser_accepts_lake_evaluator_arguments(self) -> None:
         args, binding = _parse_args_with_profile_binding(

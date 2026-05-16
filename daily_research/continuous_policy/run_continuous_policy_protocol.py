@@ -19,6 +19,12 @@ from daily_research.continuous_policy.evaluate_policy import main as evaluate_ma
 from daily_research.continuous_policy.export_action_panel import main as export_main
 from daily_research.continuous_policy.model import load_artifact
 from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES
+from daily_research.continuous_policy.decision_core_v6 import (
+    DECISION_CORE_V6_LOSS_PROFILE_NAMES,
+    DECISION_CORE_V6_PROFILE,
+    DECISION_CORE_V6_STRICT_GOLD_DATASET_ID,
+    decision_core_v6_profile_name,
+)
 from daily_research.continuous_policy.model_portfolio_set_v5 import PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES
 from daily_research.continuous_policy.model_seq_v3 import (
     DAILY_HEAD_LAYOUT_CHOICES,
@@ -59,7 +65,11 @@ from daily_research.continuous_policy.runtime_progress import JsonlProgressSink
 from daily_research.continuous_policy.research_profile_registry import get_active_search_profiles, get_search_profile_config
 from daily_research.continuous_policy.state_builder import DEFAULT_ALPHA_PRIOR_SOURCE, prepare_policy_inputs, resolve_active_policy_defaults
 from daily_research.continuous_policy.train_policy import main as train_main
-from daily_research.continuous_policy.training_contracts import TRAINER_BACKENDS, TRAINER_BACKEND_FORMAL_V2
+from daily_research.continuous_policy.training_contracts import (
+    TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+    TRAINER_BACKEND_FORMAL_V2,
+)
 from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
 from daily_research.execution import app_service
 
@@ -106,6 +116,20 @@ PROFILE_BOUND_ARG_DESTS: tuple[str, ...] = (
     "epochs",
     "min_epochs",
 )
+LEGACY_RXX_PROFILE_NAMES: frozenset[str] = frozenset(
+    {
+        "split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69",
+        "split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71",
+        "split_heads_portfolio_daily_lake_behavior_quality_portfolio_set_v5_r74",
+    }
+)
+LEGACY_RXX_LOSS_PROFILES: frozenset[str] = frozenset(
+    {
+        "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration",
+        "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret",
+        "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality",
+    }
+)
 
 
 def _explicit_cli_dests(parser: argparse.ArgumentParser, raw_argv: list[str]) -> set[str]:
@@ -142,6 +166,11 @@ def _apply_search_profile_binding(
     }
     if not requested:
         return binding
+    if requested in LEGACY_RXX_PROFILE_NAMES:
+        parser.error(
+            f"{requested} is a historical rXX research profile and is rejected for new protocol runs; "
+            f"use {DECISION_CORE_V6_PROFILE} with --decision-core v6."
+        )
     try:
         profile_config = get_search_profile_config(requested)
     except KeyError as exc:
@@ -235,6 +264,16 @@ def _build_promotion_gate(
         or evaluation_summary.get("training_contract", {})
         or {}
     )
+    if str(training_contract.get("trainer_backend", "") or "") == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        return {
+            "status": "shadow_only",
+            "failed_checks": ["decision_core_v6_research_shadow_only"],
+            "checks": {
+                "contract_promotable": False,
+                "decision_core_v6_research_shadow_only": True,
+            },
+            "note": "Decision core v6 evidence is research / shadow-only; this protocol must not mutate live/default.",
+        }
     metrics = dict(evaluation_summary.get("continuous_policy_metrics", {}) or {})
     continuity = dict(evaluation_summary.get("continuity_metrics", {}) or {})
     reference_panels = evaluation_summary.get("reference_panels", []) or []
@@ -282,7 +321,28 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         diagnostics.get("train_sample_rows", teacher_summary.get("train_sample_rows", train_summary.get("sample_rows", 0)))
         or 0
     )
+    teacher_action_rows_source = "teacher_summary.action_rows"
     teacher_action_rows = int(teacher_summary.get("action_rows", 0) or 0)
+    if teacher_action_rows <= 0:
+        action_distribution = dict(teacher_summary.get("teacher_action_distribution", {}) or {})
+        non_skip_action_rows = sum(
+            int(count or 0)
+            for action, count in action_distribution.items()
+            if str(action).strip().lower() != "skip"
+        )
+        if non_skip_action_rows > 0:
+            teacher_action_rows = int(non_skip_action_rows)
+            teacher_action_rows_source = "teacher_summary.teacher_action_distribution.non_skip"
+    if teacher_action_rows <= 0:
+        full_action_distribution = dict(teacher_summary.get("teacher_full_action_distribution", {}) or {})
+        non_skip_full_action_rows = sum(
+            int(count or 0)
+            for action, count in full_action_distribution.items()
+            if str(action).strip().lower() != "skip"
+        )
+        if non_skip_full_action_rows > 0:
+            teacher_action_rows = int(non_skip_full_action_rows)
+            teacher_action_rows_source = "teacher_summary.teacher_full_action_distribution.non_skip"
     decision_target_source_count = float(diagnostics.get("decision_target_source_count", 0.0) or 0.0)
     decision_target_receiver_count = float(diagnostics.get("decision_target_receiver_count", 0.0) or 0.0)
     decision_oracle_metrics = dict(diagnostics.get("decision_oracle_metrics", {}) or {})
@@ -350,6 +410,7 @@ def _build_training_evidence_assessment(train_summary: dict[str, Any]) -> dict[s
         "validation_day_count": validation_day_count,
         "train_sample_rows": train_sample_rows,
         "teacher_action_rows": teacher_action_rows,
+        "teacher_action_rows_source": teacher_action_rows_source,
         "dfl_decision_evidence": {
             "status": "available" if all(dfl_decision_evidence_checks.values()) else "incomplete",
             "checks": dfl_decision_evidence_checks,
@@ -369,6 +430,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the continuous-policy protocol: train -> evaluate -> shadow continuity -> export.")
     parser.add_argument("--search-profile", default="", help="Optional study profile label recorded for r59+ protocol traceability.")
     parser.add_argument(
+        "--decision-core",
+        default="",
+        choices=("", "v6"),
+        help="Explicit decision core selector. v6 requires lake data and strict Gold dataset id.",
+    )
+    parser.add_argument(
         "--pool-name",
         default=defaults["pool_name"] or "liquid500",
         help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to run learned selection over the whole A-share universe.",
@@ -378,6 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     parser.add_argument("--data-lake-root", default="")
+    parser.add_argument("--training-dataset-id", default="")
     parser.add_argument("--pool-rebalance-days", type=int, default=21)
     parser.add_argument("--pool-adv-window", type=int, default=20)
     parser.add_argument("--max-universe-size", type=int, default=0)
@@ -451,7 +519,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--loss-profile",
         default=DEFAULT_LOSS_PROFILE,
-        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES) | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES))),
+        choices=tuple(
+            sorted(
+                set(LOSS_PROFILE_NAMES)
+                | set(CORE_V4_LOSS_PROFILE_NAMES)
+                | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES)
+                | set(DECISION_CORE_V6_LOSS_PROFILE_NAMES)
+            )
+        ),
     )
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--resume-mode", default="strict", choices=("strict", "fresh"))
@@ -467,7 +542,34 @@ def _parse_args_with_profile_binding(argv: list[str] | None = None) -> tuple[arg
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_argv)
     profile_binding = _apply_search_profile_binding(args, parser=parser, raw_argv=raw_argv)
+    explicit_dests = _explicit_cli_dests(parser, raw_argv)
+    _validate_protocol_decision_core(args, parser=parser, explicit_dests=explicit_dests)
     return args, profile_binding
+
+
+def _validate_protocol_decision_core(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    explicit_dests: set[str] | None = None,
+) -> None:
+    if str(args.loss_profile or "").strip() in LEGACY_RXX_LOSS_PROFILES:
+        parser.error(
+            f"{args.loss_profile} is a historical rXX loss profile and is rejected for new protocol runs; "
+            f"use {DECISION_CORE_V6_PROFILE} with --decision-core v6."
+        )
+    if str(args.decision_core or "").strip() != "v6":
+        return
+    args.trainer_backend = TRAINER_BACKEND_FORMAL_DECISION_CORE_V6
+    args.loss_profile = decision_core_v6_profile_name(args.loss_profile if args.loss_profile != DEFAULT_LOSS_PROFILE else DECISION_CORE_V6_PROFILE)
+    if str(args.data_source or "").strip().lower() != "lake":
+        parser.error("--decision-core v6 requires --data-source lake.")
+    if str(args.training_dataset_id or "").strip() != DECISION_CORE_V6_STRICT_GOLD_DATASET_ID:
+        parser.error(f"--decision-core v6 requires --training-dataset-id {DECISION_CORE_V6_STRICT_GOLD_DATASET_ID}.")
+    if "lake_dataset_id" not in set(explicit_dests or set()):
+        parser.error("--decision-core v6 requires explicit --lake-dataset-id.")
+    if not str(args.lake_dataset_id or "").strip():
+        parser.error("--decision-core v6 requires explicit --lake-dataset-id.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -494,10 +596,14 @@ def main(argv: list[str] | None = None) -> int:
         args.benchmark,
         "--data-source",
         args.data_source,
+        "--decision-core",
+        str(args.decision_core),
         "--lake-dataset-id",
         str(args.lake_dataset_id),
         "--data-lake-root",
         str(args.data_lake_root),
+        "--training-dataset-id",
+        str(args.training_dataset_id),
         "--pool-rebalance-days",
         str(args.pool_rebalance_days),
         "--pool-adv-window",
@@ -733,6 +839,11 @@ def main(argv: list[str] | None = None) -> int:
         signal_date_count=len(shadow_rollout["dates"]),
     )
 
+    shadow_signal_date = (
+        pd.Timestamp(shadow_rollout["dates"][-1]).strftime("%Y%m%d")
+        if shadow_rollout["dates"]
+        else str(shadow_end_date)
+    )
     export_tag = f"{protocol_tag}__export"
     export_args = [
         "--model-path",
@@ -740,7 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         "--pool-name",
         args.pool_name,
         "--signal-date",
-        shadow_end_date,
+        shadow_signal_date,
         "--benchmark",
         args.benchmark,
         "--data-source",
@@ -889,6 +1000,28 @@ def main(argv: list[str] | None = None) -> int:
         },
     }
     summary_payload["training_evidence"] = _build_training_evidence_assessment(train_summary)
+    if str(summary_payload.get("trainer_backend", "") or "") == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        eval_continuity = dict(evaluation_summary.get("continuity_metrics", {}) or {})
+        shadow_continuity = dict(shadow_summary.get("continuity_metrics", {}) or {})
+        summary_payload["decision_core_v6_contract_metrics"] = {
+            "evaluation": {
+                "cashflow_decision_contract_valid_rate": eval_continuity.get("cashflow_decision_contract_valid_rate", 0.0),
+                "intent_translation_conflict_rate": eval_continuity.get("intent_translation_conflict_rate", 0.0),
+                "decision_oracle_constraint_violation_mean": eval_continuity.get("decision_oracle_constraint_violation_mean", 0.0),
+                "feature_contract_blocker_rate": eval_continuity.get("feature_contract_blocker_rate", 0.0),
+                "feature_contract_degraded_rate": eval_continuity.get("feature_contract_degraded_rate", 0.0),
+                "feature_contract_neutral_fallback_rate": eval_continuity.get("feature_contract_neutral_fallback_rate", 0.0),
+            },
+            "shadow": {
+                "cashflow_decision_contract_valid_rate": shadow_continuity.get("cashflow_decision_contract_valid_rate", 0.0),
+                "intent_translation_conflict_rate": shadow_continuity.get("intent_translation_conflict_rate", 0.0),
+                "decision_oracle_constraint_violation_mean": shadow_continuity.get("decision_oracle_constraint_violation_mean", 0.0),
+                "feature_contract_blocker_rate": shadow_continuity.get("feature_contract_blocker_rate", 0.0),
+                "feature_contract_degraded_rate": shadow_continuity.get("feature_contract_degraded_rate", 0.0),
+                "feature_contract_neutral_fallback_rate": shadow_continuity.get("feature_contract_neutral_fallback_rate", 0.0),
+            },
+            "status": "research_shadow_only",
+        }
     summary_payload["promotion_gate"] = _build_promotion_gate(
         train_summary=train_summary,
         evaluation_summary=evaluation_summary,

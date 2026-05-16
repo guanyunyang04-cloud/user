@@ -4957,12 +4957,16 @@ class PortfolioDailyStrategyContractsTest(unittest.TestCase):
             _ensure_fresh_study_root(study_root, allow_existing=True)
 
     def test_every_registered_search_profile_loss_profile_resolves(self) -> None:
+        from daily_research.continuous_policy.decision_core_v6 import decision_core_v6_profile_name
         from daily_research.continuous_policy.model_core_v4 import resolve_core_v4_loss_profile
         from daily_research.continuous_policy.model_portfolio_set_v5 import resolve_portfolio_set_v5_loss_profile
 
         for profile_name, base_trial in SEARCH_PROFILE_BASE_TRIALS.items():
             with self.subTest(profile_name=profile_name):
                 loss_profile = str(base_trial.get("loss_profile", model_seq_v3.DEFAULT_LOSS_PROFILE))
+                if str(base_trial.get("trainer_backend", "")) == "formal_torch_decision_core_v6":
+                    self.assertEqual(decision_core_v6_profile_name(loss_profile), loss_profile)
+                    continue
                 if str(base_trial.get("trainer_backend", "")) == "formal_torch_core_v4":
                     resolved_name, resolved_config = resolve_core_v4_loss_profile(loss_profile)
                     self.assertIn("multi_objective_loss_weights", resolved_config)

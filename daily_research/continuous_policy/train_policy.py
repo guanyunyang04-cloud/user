@@ -13,6 +13,14 @@ if __package__ in {None, ""}:
 
 from daily_research.continuous_policy.label_builder import LABEL_CONFIGS, build_future_path_metrics
 from daily_research.continuous_policy.model import fit_policy_models
+from daily_research.continuous_policy.decision_core_v6 import (
+    DECISION_CORE_V6_ARTIFACT_FILENAME,
+    DECISION_CORE_V6_LOSS_PROFILE_NAMES,
+    DECISION_CORE_V6_PROFILE,
+    DECISION_CORE_V6_STRICT_GOLD_DATASET_ID,
+    decision_core_v6_profile_name,
+    fit_policy_models_decision_core_v6,
+)
 from daily_research.continuous_policy.model_core_v4 import CORE_V4_LOSS_PROFILE_NAMES, fit_policy_models_core_v4
 from daily_research.continuous_policy.model_hier_v4 import fit_policy_models_v4
 from daily_research.continuous_policy.model_portfolio_set_v5 import (
@@ -48,6 +56,7 @@ from daily_research.continuous_policy.portfolio_simulator import (
 from daily_research.continuous_policy.runtime import (
     MODELS_ROOT,
     now_iso,
+    read_json,
     safe_print_json,
     timestamp_tag,
     update_latest_summary,
@@ -63,6 +72,7 @@ from daily_research.continuous_policy.training_dataset_cache import (
 from daily_research.data_lake import build_label_completeness_summary
 from daily_research.continuous_policy.training_contracts import (
     TRAINER_BACKENDS,
+    TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
     TRAINER_BACKEND_FORMAL_CORE_V4,
     TRAINER_BACKEND_FORMAL_HIER_V4,
     TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5,
@@ -87,6 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
     parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
+    parser.add_argument(
+        "--decision-core",
+        default="",
+        choices=("", "v6"),
+        help="Explicit decision core selector. v6 requires formal_torch_decision_core_v6 and strict Gold training.",
+    )
     parser.add_argument("--csv-folder", default="")
     parser.add_argument(
         "--lake-dataset-id",
@@ -196,7 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--loss-profile",
         default=DEFAULT_LOSS_PROFILE,
-        choices=tuple(sorted(set(LOSS_PROFILE_NAMES) | set(CORE_V4_LOSS_PROFILE_NAMES) | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES))),
+        choices=tuple(
+            sorted(
+                set(LOSS_PROFILE_NAMES)
+                | set(CORE_V4_LOSS_PROFILE_NAMES)
+                | set(PORTFOLIO_SET_V5_LOSS_PROFILE_NAMES)
+                | set(DECISION_CORE_V6_LOSS_PROFILE_NAMES)
+            )
+        ),
         help="Loss contract for seq_v3: use default imitation balance or teacher-aux continuous-primary profiles.",
     )
     parser.add_argument("--early-stop-patience", type=int, default=10)
@@ -212,9 +235,43 @@ def _loss_profile_was_explicit(raw_argv: list[str]) -> bool:
 
 def _apply_backend_default_loss(args: argparse.Namespace, raw_argv: list[str]) -> str:
     backend = normalize_trainer_backend(args.trainer_backend)
+    if str(getattr(args, "decision_core", "") or "").strip() == "v6":
+        backend = TRAINER_BACKEND_FORMAL_DECISION_CORE_V6
+        args.trainer_backend = backend
+    if backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        if not _loss_profile_was_explicit(raw_argv):
+            args.loss_profile = DECISION_CORE_V6_PROFILE
+        decision_core_v6_profile_name(args.loss_profile)
     if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and not _loss_profile_was_explicit(raw_argv):
         args.loss_profile = PORTFOLIO_SET_V5_DFL_PG_V1_VERSION
+    if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and str(args.loss_profile or "").strip() in {
+        "portfolio_set_v5_dfl_pg_v1_r69_value_arbitration",
+        "portfolio_set_v5_dfl_pg_v1_r71_multistage_regret",
+        "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality",
+    }:
+        raise ValueError(
+            f"{args.loss_profile} is a historical rXX continuous_policy profile and is rejected for new training; "
+            f"use {DECISION_CORE_V6_PROFILE} with --decision-core v6."
+        )
     return backend
+
+
+def _validate_v6_train_args(args: argparse.Namespace, backend: str) -> None:
+    if backend != TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        return
+    if str(getattr(args, "decision_core", "") or "").strip() != "v6":
+        raise ValueError("formal_torch_decision_core_v6 requires --decision-core v6.")
+    if str(getattr(args, "data_source", "") or "").strip().lower() != "lake":
+        raise ValueError("formal_torch_decision_core_v6 requires --data-source lake.")
+    training_dataset_id = str(getattr(args, "training_dataset_id", "") or "").strip()
+    if training_dataset_id != DECISION_CORE_V6_STRICT_GOLD_DATASET_ID:
+        raise ValueError(
+            "formal_torch_decision_core_v6 requires "
+            f"--training-dataset-id {DECISION_CORE_V6_STRICT_GOLD_DATASET_ID}."
+        )
+    if str(getattr(args, "lake_dataset_id", "") or "").strip() == "":
+        raise ValueError("formal_torch_decision_core_v6 requires an explicit --lake-dataset-id.")
+    decision_core_v6_profile_name(getattr(args, "loss_profile", ""))
 
 
 def _build_common_train_summary(
@@ -268,11 +325,68 @@ def _build_common_train_summary(
     }
 
 
+def _try_reuse_decision_core_v6_training(
+    *,
+    run_root: Path,
+    args: argparse.Namespace,
+    training_contract: dict[str, object],
+    progress_sink: JsonlProgressSink,
+) -> dict[str, object] | None:
+    if str(getattr(args, "resume_mode", "") or "") != "strict":
+        return None
+    artifact_path = run_root / DECISION_CORE_V6_ARTIFACT_FILENAME
+    summary_path = run_root / "train_summary.json"
+    if not artifact_path.exists() or not summary_path.exists():
+        return None
+    summary = read_json(summary_path)
+    diagnostics = dict(summary.get("training_diagnostics", {}) or {})
+    summary_contract = dict(summary.get("training_contract", {}) or {})
+    cache_summary = dict(summary.get("training_dataset_cache", {}) or {})
+    required_dataset_id = str(getattr(args, "training_dataset_id", "") or "").strip() or DECISION_CORE_V6_STRICT_GOLD_DATASET_ID
+    checks = {
+        "artifact_schema": str(diagnostics.get("artifact_schema", "") or "") == "continuous_policy_decision_core_v6_artifact",
+        "trainer_backend": str(summary.get("trainer_backend", "") or summary_contract.get("trainer_backend", "") or "")
+        == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6,
+        "loss_profile": str(summary.get("loss_profile", "") or "") == DECISION_CORE_V6_PROFILE,
+        "dataset_id": str(cache_summary.get("dataset_id", "") or diagnostics.get("training_dataset_id", "") or "")
+        == required_dataset_id,
+        "completed_epochs": int(diagnostics.get("completed_epochs", 0) or 0) >= int(training_contract.get("min_epochs", 32) or 32),
+        "best_epoch_edge": int(diagnostics.get("best_epoch", 0) or 0)
+        <= max(int(diagnostics.get("completed_epochs", 0) or 0) - 2, 0),
+        "model_artifact_path": Path(str(summary.get("model_artifact_path", artifact_path) or artifact_path)).expanduser().exists(),
+    }
+    if not all(checks.values()):
+        progress_sink.emit(
+            "train_strict_resume_rejected",
+            decision_core_version="v6",
+            existing_artifact_path=str(artifact_path.resolve()),
+            failed_checks=[name for name, ok in checks.items() if not ok],
+        )
+        return None
+    reused_summary = dict(summary)
+    reused_diagnostics = dict(reused_summary.get("training_diagnostics", {}) or {})
+    reused_diagnostics["strict_resume_reused_artifact"] = True
+    reused_diagnostics["strict_resume_reused_at"] = now_iso()
+    reused_summary["training_diagnostics"] = reused_diagnostics
+    reused_summary["model_artifact_path"] = str(artifact_path.resolve())
+    write_json(summary_path, reused_summary)
+    update_latest_summary("train", reused_summary)
+    progress_sink.emit(
+        "train_strict_resume_reused_artifact",
+        decision_core_version="v6",
+        artifact_path=str(artifact_path.resolve()),
+        completed_epochs=int(reused_diagnostics.get("completed_epochs", 0) or 0),
+        best_epoch=int(reused_diagnostics.get("best_epoch", 0) or 0),
+    )
+    return reused_summary
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_argv)
     backend = _apply_backend_default_loss(args, raw_argv)
+    _validate_v6_train_args(args, backend)
     run_tag = str(args.tag or timestamp_tag("train"))
     run_root = MODELS_ROOT / run_tag
     run_root.mkdir(parents=True, exist_ok=True)
@@ -304,10 +418,25 @@ def main(argv: list[str] | None = None) -> int:
         min_epochs=args.min_epochs,
         resume_mode=args.resume_mode,
     )
+    if backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        reused_summary = _try_reuse_decision_core_v6_training(
+            run_root=run_root,
+            args=args,
+            training_contract=training_contract,
+            progress_sink=progress_sink,
+        )
+        if reused_summary is not None:
+            data_prepare_stop.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=1.0)
+            safe_print_json(reused_summary)
+            return 0
     direct_dataset_record = None
     direct_dataset_id = str(getattr(args, "training_dataset_id", "") or "").strip()
     if not direct_dataset_id and backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5:
         direct_dataset_id = PORTFOLIO_SET_V5_DEFAULT_STRICT_GOLD_DATASET_ID
+    if not direct_dataset_id and backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        direct_dataset_id = DECISION_CORE_V6_STRICT_GOLD_DATASET_ID
     if direct_dataset_id:
         try:
             from daily_research.data_lake import ResearchDataLake
@@ -323,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
         daily_frame = direct_dataset_record.daily_frame.copy()
         teacher_summary = dict(direct_dataset_record.teacher_summary)
         label_summary = dict(direct_dataset_record.label_completeness_summary or {})
-        if backend == TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5 and not bool(label_summary.get("is_training_safe", False)):
+        if backend in {TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5, TRAINER_BACKEND_FORMAL_DECISION_CORE_V6} and not bool(label_summary.get("is_training_safe", False)):
             raise ValueError(f"portfolio-set v5 requires a strict training-safe Gold dataset: {direct_dataset_id}")
         prepared_summary = {
             "pool_name": str(direct_dataset_record.metadata.get("universe", args.pool_name) or args.pool_name),
@@ -607,6 +736,33 @@ def main(argv: list[str] | None = None) -> int:
             progress_sink=progress_sink,
         )
         artifact_path = run_root / PORTFOLIO_SET_V5_ARTIFACT_FILENAME
+        training_diagnostics = dict(artifact.training_diagnostics or {})
+    elif backend == TRAINER_BACKEND_FORMAL_DECISION_CORE_V6:
+        artifact = fit_policy_models_decision_core_v6(
+            sample_frame=sample_frame,
+            daily_frame=daily_frame,
+            feature_names=feature_names,
+            daily_feature_names=daily_feature_names,
+            random_seed=args.random_seed,
+            train_summary=train_summary,
+            trained_at=trained_at,
+            training_contract=training_contract,
+            run_root=run_root,
+            epochs=max(int(args.epochs), 32),
+            min_epochs=max(int(args.min_epochs), 32),
+            batch_size=max(1, min(int(args.batch_size), 2)),
+            learning_rate=args.learning_rate,
+            model_dim=max(int(args.hidden_dim), 16),
+            temporal_layers=max(int(args.sequence_layers), 1),
+            cross_layers=max(int(args.sequence_layers), 1),
+            latent_count=max(4, int(args.daily_hidden_dim)),
+            dropout=max(float(args.dropout), 0.05),
+            early_stop_patience=args.early_stop_patience,
+            resume_mode=args.resume_mode,
+            decision_profile=args.loss_profile,
+            progress_sink=progress_sink,
+        )
+        artifact_path = run_root / DECISION_CORE_V6_ARTIFACT_FILENAME
         training_diagnostics = dict(artifact.training_diagnostics or {})
     elif backend == TRAINER_BACKEND_FORMAL_HIER_V4:
         artifact = fit_policy_models_v4(

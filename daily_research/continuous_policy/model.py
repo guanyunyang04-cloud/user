@@ -75,6 +75,10 @@ def load_artifact(path: str | Path) -> Any:
             from daily_research.continuous_policy.model_portfolio_set_v5 import load_torch_portfolio_set_v5_artifact
 
             return load_torch_portfolio_set_v5_artifact(resolved)
+        if artifact_type == "continuous_policy_decision_core_v6_artifact":
+            from daily_research.continuous_policy.decision_core_v6 import load_decision_core_v6_artifact
+
+            return load_decision_core_v6_artifact(resolved)
         if artifact_type == "continuous_policy_torch_hier_v4":
             from daily_research.continuous_policy.model_hier_v4 import load_torch_hier_v4_artifact
 
@@ -252,6 +256,7 @@ def predict_policy(
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     if not isinstance(artifact, ContinuousPolicyArtifact):
         from daily_research.continuous_policy.model_core_v4 import TorchContinuousPolicyCoreV4Artifact, predict_policy_core_v4
+        from daily_research.continuous_policy.decision_core_v6 import TorchDecisionCoreV6Artifact, predict_policy_decision_core_v6
         from daily_research.continuous_policy.model_hier_v4 import TorchContinuousPolicyHierV4Artifact, predict_policy_v4
         from daily_research.continuous_policy.model_portfolio_set_v5 import TorchPortfolioSetV5Artifact, predict_policy_portfolio_set_v5
         from daily_research.continuous_policy.model_seq_v3 import TorchContinuousPolicySeqArtifact, predict_policy_v3
@@ -259,6 +264,8 @@ def predict_policy(
 
         if isinstance(artifact, TorchContinuousPolicyCoreV4Artifact):
             return predict_policy_core_v4(artifact, state_frame=state_frame, daily_features=daily_features)
+        if isinstance(artifact, TorchDecisionCoreV6Artifact):
+            return predict_policy_decision_core_v6(artifact, state_frame=state_frame, daily_features=daily_features)
         if isinstance(artifact, TorchPortfolioSetV5Artifact):
             return predict_policy_portfolio_set_v5(artifact, state_frame=state_frame, daily_features=daily_features)
         if isinstance(artifact, TorchContinuousPolicyArtifact):

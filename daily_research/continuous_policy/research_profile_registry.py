@@ -1273,6 +1273,24 @@ SEARCH_PROFILES: dict[str, dict[str, list[Any]]] = {
         "daily_dropout": [0.16],
         "batch_size": [1],
     },
+    "portfolio_decision_core_v6_longrun_candidate": {
+        "label_preset": ["holdcash_v3"],
+        "decoder_profile": ["budget_v3"],
+        "trainer_backend": ["formal_torch_decision_core_v6"],
+        "loss_profile": ["portfolio_decision_core_v6_longrun_candidate"],
+        "budget_semantics": [BUDGET_SEMANTICS_ALLOCATION_LAYER],
+        "budget_calibration": [BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER],
+        "budget_objective": ["result_value_v10"],
+        "alpha_prior_source": ["active_execution_strategy"],
+        "daily_head_layout": ["split_v2"],
+        "learning_rate": [5.0e-5],
+        "hidden_dim": [192],
+        "sequence_layers": [2],
+        "daily_hidden_dim": [64],
+        "dropout": [0.18],
+        "daily_dropout": [0.16],
+        "batch_size": [1],
+    },
 }
 
 
@@ -2569,6 +2587,26 @@ SEARCH_PROFILE_BASE_TRIALS: dict[str, dict[str, Any]] = {
         "epochs": 12,
         "min_epochs": 8,
     },
+    "portfolio_decision_core_v6_longrun_candidate": {
+        "label_preset": "holdcash_v3",
+        "decoder_profile": "budget_v3",
+        "trainer_backend": "formal_torch_decision_core_v6",
+        "loss_profile": "portfolio_decision_core_v6_longrun_candidate",
+        "budget_semantics": BUDGET_SEMANTICS_ALLOCATION_LAYER,
+        "budget_calibration": BUDGET_CALIBRATION_END_TO_END_ALLOCATION_LAYER,
+        "budget_objective": "result_value_v10",
+        "alpha_prior_source": "active_execution_strategy",
+        "daily_head_layout": "split_v2",
+        "learning_rate": 5.0e-5,
+        "hidden_dim": 192,
+        "sequence_layers": 2,
+        "daily_hidden_dim": 64,
+        "dropout": 0.18,
+        "daily_dropout": 0.16,
+        "batch_size": 1,
+        "epochs": 32,
+        "min_epochs": 32,
+    },
 }
 
 
@@ -2646,6 +2684,7 @@ SEARCH_PROFILE_DEFAULT_OBJECTIVES: dict[str, str] = {
     "split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71": "end_to_end_allocation_layer_v1",
     "split_heads_portfolio_daily_lake_behavior_quality_portfolio_set_v5_r74": "end_to_end_allocation_layer_v1",
+    "portfolio_decision_core_v6_longrun_candidate": "end_to_end_allocation_layer_v1",
 }
 
 PORTFOLIO_DAILY_GATE_OBJECTIVES = {
@@ -3008,6 +3047,34 @@ RESOURCE_GATED_SEARCH_PROFILES: dict[str, dict[str, Any]] = {
         "release_flow_trace_required": True,
         "portfolio_set_v5_shadow_only": True,
     },
+    "portfolio_decision_core_v6_longrun_candidate": {
+        "min_completed_screening": 1,
+        "source_count_floor": 1.0,
+        "source_sell_rate_floor": 0.01,
+        "cash_timing_floor": -0.168208,
+        "drawdown_floor": -0.135,
+        "monthly_return_floor": -0.002,
+        "annual_return_floor": 0.00,
+        "receiver_unrealized_cap": 0.20,
+        "exposure_utilization_floor": 0.50,
+        "actual_cash_idle_cap": 0.30,
+        "actual_cash_weight_cap": 0.70,
+        "cash_funded_deploy_floor": 0.02,
+        "unused_receiver_headroom_cap": 0.30,
+        "target_sum_gap_cap": 0.25,
+        "intent_translation_conflict_cap": 0.0,
+        "cash_first_source_gate": True,
+        "release_first_source_intent_floor": 1.0,
+        "release_flow_trace_required": True,
+        "decision_core_v6_shadow_only": True,
+        "cashflow_decision_contract_valid_rate_floor": 1.0,
+        "decision_oracle_constraint_violation_mean_cap": 1.0e-6,
+        "feature_contract_blocker_rate_cap": 0.0,
+        "feature_contract_degraded_rate_cap": 0.25,
+        "portfolio_daily_source_positive_forward_sell_share_cap": 0.10,
+        "immediate_reversal_rate_3d_cap": 0.005,
+        "shadow_receiver_minus_source_forward_excess_5d_floor": 0.0,
+    },
 }
 
 
@@ -3024,6 +3091,7 @@ LEGACY_COMPATIBLE_SEARCH_PROFILE_NAMES: tuple[str, ...] = (
     "split_heads_portfolio_daily_value_arbitration_portfolio_set_v5_r69",
     "split_heads_portfolio_daily_multistage_regret_portfolio_set_v5_r71",
     "split_heads_portfolio_daily_lake_behavior_quality_portfolio_set_v5_r74",
+    "portfolio_decision_core_v6_longrun_candidate",
 )
 
 

@@ -70,6 +70,18 @@ class PortfolioSetV5TrainingContractTest(unittest.TestCase):
         self.assertEqual(backend, TRAINER_BACKEND_FORMAL_PORTFOLIO_SET_V5)
         self.assertEqual(args.loss_profile, "alpha_result_value_budget_split_v48")
 
+    def test_portfolio_set_v5_backend_rejects_historical_rxx_profiles_for_new_training(self) -> None:
+        argv = [
+            "--trainer-backend",
+            "formal_torch_portfolio_set_v5",
+            "--loss-profile",
+            "portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality",
+        ]
+        args = train_policy.build_parser().parse_args(argv)
+
+        with self.assertRaises(ValueError):
+            train_policy._apply_backend_default_loss(args, argv)
+
     def test_dfl_pg_loss_profile_is_recorded_as_internal_version(self) -> None:
         resolved, config = resolve_portfolio_set_v5_loss_profile("portfolio_set_v5_dfl_pg_v1")
 

@@ -5553,6 +5553,122 @@ class PortfolioState:
                     "model_action": model_action,
                     "portfolio_daily_effective_model_action": portfolio_daily_effective_model_action,
                     "policy_decision_mode": str(policy.at[stock, "policy_decision_mode"] or "") if "policy_decision_mode" in policy.columns else "",
+                    "decision_core_version": str(policy.at[stock, "decision_core_version"] or "")
+                    if "decision_core_version" in policy.columns
+                    else "",
+                    "decision_core_v6_source_supply": float(policy.at[stock, "decision_core_v6_source_supply"] or 0.0)
+                    if "decision_core_v6_source_supply" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_receiver_demand": float(policy.at[stock, "decision_core_v6_receiver_demand"] or 0.0)
+                    if "decision_core_v6_receiver_demand" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_cash_reserve": float(policy.at[stock, "decision_core_v6_cash_reserve"] or 0.0)
+                    if "decision_core_v6_cash_reserve" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_target_weight": float(policy.at[stock, "decision_core_v6_target_weight"] or 0.0)
+                    if "decision_core_v6_target_weight" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_target_delta": float(policy.at[stock, "decision_core_v6_target_delta"] or 0.0)
+                    if "decision_core_v6_target_delta" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_intent": str(policy.at[stock, "decision_core_v6_intent"] or "")
+                    if "decision_core_v6_intent" in policy.columns
+                    else "",
+                    "decision_core_v6_reason_code": str(policy.at[stock, "decision_core_v6_reason_code"] or "")
+                    if "decision_core_v6_reason_code" in policy.columns
+                    else "",
+                    "decision_core_v6_contract_status": str(policy.at[stock, "decision_core_v6_contract_status"] or "")
+                    if "decision_core_v6_contract_status" in policy.columns
+                    else "",
+                    "decision_core_v6_contract_blocker_reason": str(
+                        policy.at[stock, "decision_core_v6_contract_blocker_reason"] or ""
+                    )
+                    if "decision_core_v6_contract_blocker_reason" in policy.columns
+                    else "",
+                    "decision_core_v6_contract_valid": float(policy.at[stock, "decision_core_v6_contract_valid"] or 0.0)
+                    if "decision_core_v6_contract_valid" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_oracle_constraint_violation": float(
+                        policy.at[stock, "decision_core_v6_oracle_constraint_violation"] or 0.0
+                    )
+                    if "decision_core_v6_oracle_constraint_violation" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_feature_contract_blocker_count": float(
+                        policy.at[stock, "decision_core_v6_feature_contract_blocker_count"] or 0.0
+                    )
+                    if "decision_core_v6_feature_contract_blocker_count" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_feature_contract_degraded_count": float(
+                        policy.at[stock, "decision_core_v6_feature_contract_degraded_count"] or 0.0
+                    )
+                    if "decision_core_v6_feature_contract_degraded_count" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_feature_contract_neutral_fallback_count": float(
+                        policy.at[stock, "decision_core_v6_feature_contract_neutral_fallback_count"] or 0.0
+                    )
+                    if "decision_core_v6_feature_contract_neutral_fallback_count" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_weakness": float(policy.at[stock, "decision_core_v6_source_weakness"] or 0.0)
+                    if "decision_core_v6_source_weakness" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_keep_strength": float(
+                        policy.at[stock, "decision_core_v6_source_keep_strength"] or 0.0
+                    )
+                    if "decision_core_v6_source_keep_strength" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_receiver_quality": float(policy.at[stock, "decision_core_v6_receiver_quality"] or 0.0)
+                    if "decision_core_v6_receiver_quality" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_deploy_value": float(policy.at[stock, "decision_core_v6_deploy_value"] or 0.0)
+                    if "decision_core_v6_deploy_value" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_release_value": float(policy.at[stock, "decision_core_v6_release_value"] or 0.0)
+                    if "decision_core_v6_release_value" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_defense_value": float(policy.at[stock, "decision_core_v6_defense_value"] or 0.0)
+                    if "decision_core_v6_defense_value" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_cash_timing_value": float(
+                        policy.at[stock, "decision_core_v6_cash_timing_value"] or 0.0
+                    )
+                    if "decision_core_v6_cash_timing_value" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_opportunity_cost": float(
+                        policy.at[stock, "decision_core_v6_source_opportunity_cost"] or 0.0
+                    )
+                    if "decision_core_v6_source_opportunity_cost" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_wrong_side_sell_penalty": float(
+                        policy.at[stock, "decision_core_v6_source_wrong_side_sell_penalty"] or 0.0
+                    )
+                    if "decision_core_v6_source_wrong_side_sell_penalty" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_reversal_risk_penalty": float(
+                        policy.at[stock, "decision_core_v6_reversal_risk_penalty"] or 0.0
+                    )
+                    if "decision_core_v6_reversal_risk_penalty" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_receiver_source_spread_value": float(
+                        policy.at[stock, "decision_core_v6_receiver_source_spread_value"] or 0.0
+                    )
+                    if "decision_core_v6_receiver_source_spread_value" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_release_utility": float(policy.at[stock, "decision_core_v6_release_utility"] or 0.0)
+                    if "decision_core_v6_release_utility" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_release_gate": float(policy.at[stock, "decision_core_v6_release_gate"] or 0.0)
+                    if "decision_core_v6_release_gate" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_release_evidence": float(
+                        policy.at[stock, "decision_core_v6_source_release_evidence"] or 0.0
+                    )
+                    if "decision_core_v6_source_release_evidence" in policy.columns
+                    else 0.0,
+                    "decision_core_v6_source_false_sell_penalty": float(
+                        policy.at[stock, "decision_core_v6_source_false_sell_penalty"] or 0.0
+                    )
+                    if "decision_core_v6_source_false_sell_penalty" in policy.columns
+                    else 0.0,
                     "allocation_intent_v2_mode": bool(allocation_intent_v2_mode),
                     "release_first_allocation_v3_mode": bool(release_first_allocation_v3_mode),
                     "portfolio_cashflow_decision_v1_mode": float(policy.at[stock, PORTFOLIO_CASHFLOW_DECISION_MODE_COLUMN])
