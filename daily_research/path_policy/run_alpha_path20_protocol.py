@@ -39,6 +39,15 @@ from daily_research.path_policy.rl_dataset import (
     build_sequence_tensors,
     full_year_window,
 )
+from daily_research.path_policy.rl_episode import (
+    EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS,
+    Path20MarketEpisode,
+    build_path20_market_episode,
+    episode_policy_rollout_loss,
+    episode_to_arrays,
+    fit_episode_normalization,
+    predict_episode_targets,
+)
 from daily_research.path_policy.rl_models import (
     DecisionTransformerTargetWeightPolicy,
     SequencePolicyConfig,
@@ -52,8 +61,14 @@ PATH_POLICY_OUTPUT_ROOT = Path("daily_research/output/path_policy")
 PATH_POLICY_STUDIES_ROOT = PATH_POLICY_OUTPUT_ROOT / "studies"
 PATH_POLICY_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "datasets"
 PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_datasets"
+PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
 LEGACY_NEURAL_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
-SEQUENCE_RL_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
+SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
+SEQUENCE_RL_EPISODE_STAGES = frozenset({"rl-episode-dataset", "rl-train-episode", "rl-replay-episode", "rl-walkforward-study"})
+SEQUENCE_RL_STAGES = SEQUENCE_RL_SMOKE_STAGES | SEQUENCE_RL_EPISODE_STAGES
+WALKFORWARD_TRAIN_YEARS = (2019, 2020)
+WALKFORWARD_VALIDATION_YEARS = (2022,)
+WALKFORWARD_TEST_YEARS = (2024,)
 
 NON_PATH20_FEATURE_COLUMNS = {
     "date",
@@ -640,6 +655,230 @@ def _make_sequence_policy(args: argparse.Namespace, *, stock_feature_dim: int, p
     raise ValueError(f"Unsupported path20 sequence model family: {args.model_family!r}")
 
 
+def _build_episode_dataset_artifact(
+    *,
+    prepared: Any,
+    study_root: Path,
+    tag: str,
+    args: argparse.Namespace,
+    year: int | str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    resolved_start = str(start_date or args.start_date)
+    resolved_end = str(end_date or args.end_date)
+    episode = build_path20_market_episode(
+        prepared,
+        start_date=resolved_start,
+        end_date=resolved_end,
+        lake_dataset_id=str(args.lake_dataset_id or ""),
+        year=year,
+        sequence_length=int(args.sequence_length),
+        execution_mode=args.execution_mode,
+        reward_profile=args.reward_profile,
+        max_feature_columns=int(args.rl_max_feature_columns),
+        min_trading_days=int(args.min_year_trading_days) if year is not None else 2,
+    )
+    dataset_id = str(episode.manifest["dataset_id"])
+    dataset_root = PATH_POLICY_EPISODE_DATASETS_ROOT / dataset_id
+    dataset_path = dataset_root / "market_episode.csv"
+    manifest_path = dataset_root / "dataset_manifest.json"
+    long_frame = episode.to_long_frame()
+    _write_frame(dataset_path, long_frame)
+    manifest = {
+        **episode.manifest,
+        "policy_profile": ALPHA_PATH20_SEQUENCE_POLICY_PROFILE,
+        "data_source": args.data_source,
+        "dataset_csv": str(dataset_path.resolve()),
+        "manifest_json": str(manifest_path.resolve()),
+        "row_count": int(len(long_frame)),
+        "run_tag": tag,
+    }
+    write_json(manifest_path, manifest)
+    write_json(study_root / "episode_dataset_manifest.json", manifest)
+    return {"episode": episode, "dataset_frame": long_frame, "manifest": manifest}
+
+
+def _episode_train_model(
+    *,
+    episodes: list[Path20MarketEpisode],
+    validation_episodes: list[Path20MarketEpisode],
+    study_root: Path,
+    args: argparse.Namespace,
+    train_years: list[int] | None = None,
+    validation_years: list[int] | None = None,
+) -> dict[str, Any]:
+    import torch
+
+    completed_train = [episode for episode in episodes if str(episode.manifest.get("status", "")) == "completed"]
+    if not completed_train:
+        return {"summary": {"status": "skipped", "reason": "no_completed_train_episodes"}}
+    normalization = fit_episode_normalization(completed_train)
+    base_feature_count = int(len(completed_train[0].feature_columns))
+    stock_feature_dim = base_feature_count + len(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS)
+    model = _make_sequence_policy(args, stock_feature_dim=stock_feature_dim, portfolio_feature_dim=8)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.smoke_lr), weight_decay=1.0e-4)
+    losses: list[float] = []
+    projection_summaries: list[dict[str, float]] = []
+    for _ in range(max(int(args.smoke_epochs), 1)):
+        epoch_losses: list[float] = []
+        for episode in completed_train:
+            optimizer.zero_grad(set_to_none=True)
+            result = episode_policy_rollout_loss(
+                model,
+                episode,
+                sequence_length=int(args.sequence_length),
+                normalization=normalization,
+                model_family=str(args.model_family),
+                transaction_cost_bps=float(args.transaction_cost_bps),
+                slippage_bps=float(args.slippage_bps),
+                sell_tax_bps=float(args.sell_tax_bps),
+                max_position_weight=float(args.max_position_weight),
+                max_gross_exposure=float(args.max_gross_exposure),
+                max_positions=int(args.max_positions),
+                turnover_budget=float(args.turnover_budget),
+            )
+            if result.get("status") != "completed":
+                continue
+            loss = result["loss"]
+            loss.backward()
+            optimizer.step()
+            epoch_losses.append(float(loss.detach().cpu()))
+            projection_summaries.append(dict(result.get("diagnostics", {}) or {}))
+        losses.append(float(np.mean(epoch_losses)) if epoch_losses else 0.0)
+    validation_rollout: dict[str, Any] = {}
+    completed_validation = [episode for episode in validation_episodes if str(episode.manifest.get("status", "")) == "completed"]
+    if completed_validation:
+        with torch.no_grad():
+            validation_result = episode_policy_rollout_loss(
+                model,
+                completed_validation[0],
+                sequence_length=int(args.sequence_length),
+                normalization=normalization,
+                model_family=str(args.model_family),
+                transaction_cost_bps=float(args.transaction_cost_bps),
+                slippage_bps=float(args.slippage_bps),
+                sell_tax_bps=float(args.sell_tax_bps),
+                max_position_weight=float(args.max_position_weight),
+                max_gross_exposure=float(args.max_gross_exposure),
+                max_positions=int(args.max_positions),
+                turnover_budget=float(args.turnover_budget),
+            )
+        validation_rollout = {
+            "status": str(validation_result.get("status", "unknown")),
+            "loss": float(validation_result["loss"].detach().cpu()) if "loss" in validation_result else 0.0,
+            "diagnostics": validation_result.get("diagnostics", {}),
+            "used_projected_weights_for_loss": bool(validation_result.get("used_projected_weights_for_loss", False)),
+        }
+    artifact_path = study_root / "sequence_policy_episode.pt"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_family": str(args.model_family),
+            "state_dict": model.state_dict(),
+            "feature_columns": completed_train[0].feature_columns,
+            "dynamic_stock_feature_columns": list(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS),
+            "sequence_length": int(args.sequence_length),
+            "reward_profile": str(args.reward_profile),
+            "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+            "normalization": normalization,
+            "shadow_only": True,
+        },
+        artifact_path,
+    )
+    projection_summary = _summarize_projection_dicts(projection_summaries)
+    summary = {
+        "status": "completed",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "model_family": str(args.model_family),
+        "reward_profile": str(args.reward_profile),
+        "train_years": list(train_years or []),
+        "validation_years": list(validation_years or []),
+        "epoch_count": int(max(int(args.smoke_epochs), 1)),
+        "episode_count": int(len(completed_train)),
+        "train_loss_curve": losses,
+        "final_train_loss": float(losses[-1]) if losses else 0.0,
+        "validation_replay_metrics": validation_rollout,
+        "projection_diagnostics_summary": projection_summary,
+        "normalization": normalization,
+        "artifact_pt": str(artifact_path.resolve()),
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+    }
+    write_json(study_root / "sequence_train_episode_summary.json", _json_ready(summary))
+    return {"summary": summary, "model": model, "normalization": normalization}
+
+
+def _summarize_projection_dicts(rows: list[dict[str, float]]) -> dict[str, float]:
+    if not rows:
+        return {}
+    frame = pd.DataFrame(rows)
+    return {
+        str(column): float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).mean())
+        for column in frame.columns
+    }
+
+
+def _run_episode_replay(
+    *,
+    prepared: Any,
+    episode: Path20MarketEpisode,
+    model: Any,
+    normalization: dict[str, Any],
+    study_root: Path,
+    args: argparse.Namespace,
+    prefix: str = "episode",
+) -> dict[str, Any]:
+    target_by_date, training_projection_summary = predict_episode_targets(
+        model,
+        episode,
+        sequence_length=int(args.sequence_length),
+        normalization=normalization,
+        model_family=str(args.model_family),
+        max_position_weight=float(args.max_position_weight),
+        max_gross_exposure=float(args.max_gross_exposure),
+        max_positions=int(args.max_positions),
+        turnover_budget=float(args.turnover_budget),
+    )
+    rollout = run_sequence_policy_replay(
+        trajectory=episode.to_trajectory(),
+        target_weight_by_date=target_by_date,
+        execution_price_frame=_execution_price_frame(prepared, args.execution_mode),
+        transaction_cost_bps=float(args.transaction_cost_bps),
+        slippage_bps=float(args.slippage_bps),
+        sell_tax_bps=float(args.sell_tax_bps),
+        max_position_weight=float(args.max_position_weight),
+        max_gross_exposure=float(args.max_gross_exposure),
+        max_positions=int(args.max_positions),
+        turnover_budget=float(args.turnover_budget),
+    )
+    paths = {
+        "action_panel_csv": _write_frame(study_root / f"{prefix}_rl_action_panel.csv", rollout["action_panel"]),
+        "turnover_csv": _write_frame(study_root / f"{prefix}_rl_turnover.csv", rollout["turnover_frame"]),
+        "position_history_csv": _write_frame(study_root / f"{prefix}_rl_position_history.csv", rollout["position_history"]),
+        "projection_diagnostics_csv": _write_frame(study_root / f"{prefix}_rl_projection_diagnostics.csv", rollout["projection_diagnostics"]),
+        "returns_csv": _write_frame(study_root / f"{prefix}_rl_returns.csv", _series_frame(rollout["returns"], index_name="date", value_name="net_return")),
+    }
+    summary = {
+        "status": "completed",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "stage": "rl_replay_episode",
+        "model_family": str(args.model_family),
+        "date_count": int(len(rollout["dates"])),
+        "return_count": int(len(rollout["returns"])),
+        "metrics": rollout["metrics"],
+        "training_projection_diagnostics_summary": training_projection_summary,
+        "artifacts": paths,
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / f"{prefix}_rl_replay_summary.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
 def _run_sequence_train_smoke(
     trajectory: Path20TrajectoryDataset,
     *,
@@ -896,6 +1135,129 @@ def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.
     return _json_ready(summary)
 
 
+def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
+    years = [*WALKFORWARD_TRAIN_YEARS, *WALKFORWARD_VALIDATION_YEARS, *WALKFORWARD_TEST_YEARS]
+    yearly: dict[str, Any] = {}
+    train_episodes: list[Path20MarketEpisode] = []
+    validation_episodes: list[Path20MarketEpisode] = []
+    for year in years:
+        start_date, end_date = full_year_window(year)
+        year_root = study_root / str(year)
+        year_root.mkdir(parents=True, exist_ok=True)
+        prepared = _prepare_for_window(args, start_date=start_date, end_date=end_date, tag=f"{tag}_{year}")
+        dataset_payload = _build_episode_dataset_artifact(
+            prepared=prepared,
+            study_root=year_root,
+            tag=f"{tag}_{year}",
+            args=args,
+            year=year,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        episode = dataset_payload["episode"]
+        yearly[str(year)] = {
+            "role": _walkforward_role(year),
+            "dataset_summary": dataset_payload["manifest"],
+            "prepared_summary": prepared.to_summary(),
+            "train_summary": {"status": "pending"},
+            "replay_summary": {"status": "pending"},
+        }
+        if str(episode.manifest.get("status", "")) != "completed":
+            skip = {
+                "status": "skipped",
+                "reason": "incomplete_dataset",
+                "incomplete_reason": str(episode.manifest.get("incomplete_reason", "")),
+                "trading_day_count": int(episode.manifest.get("trading_day_count", 0) or 0),
+            }
+            yearly[str(year)]["train_summary"] = skip
+            yearly[str(year)]["replay_summary"] = skip
+            continue
+        if year in WALKFORWARD_TRAIN_YEARS:
+            train_episodes.append(episode)
+        elif year in WALKFORWARD_VALIDATION_YEARS:
+            validation_episodes.append(episode)
+    train_payload = _episode_train_model(
+        episodes=train_episodes,
+        validation_episodes=validation_episodes,
+        study_root=study_root,
+        args=args,
+        train_years=list(WALKFORWARD_TRAIN_YEARS),
+        validation_years=list(WALKFORWARD_VALIDATION_YEARS),
+    )
+    train_summary = dict(train_payload.get("summary", train_payload))
+    if train_summary.get("status") == "completed":
+        for year in years:
+            year_text = str(year)
+            if yearly[year_text]["dataset_summary"].get("status") != "completed":
+                continue
+            start_date, end_date = full_year_window(year)
+            year_root = study_root / year_text
+            prepared = _prepare_for_window(args, start_date=start_date, end_date=end_date, tag=f"{tag}_{year}_replay")
+            episode = build_path20_market_episode(
+                prepared,
+                start_date=start_date,
+                end_date=end_date,
+                lake_dataset_id=str(args.lake_dataset_id or ""),
+                year=year,
+                sequence_length=int(args.sequence_length),
+                execution_mode=args.execution_mode,
+                reward_profile=args.reward_profile,
+                max_feature_columns=int(args.rl_max_feature_columns),
+                min_trading_days=int(args.min_year_trading_days),
+            )
+            replay_summary = _run_episode_replay(
+                prepared=prepared,
+                episode=episode,
+                model=train_payload["model"],
+                normalization=train_payload["normalization"],
+                study_root=year_root,
+                args=args,
+                prefix=f"episode_{year}",
+            )
+            yearly[year_text]["train_summary"] = train_summary if year in WALKFORWARD_TRAIN_YEARS else {"status": "not_train_year"}
+            yearly[year_text]["replay_summary"] = replay_summary
+    aggregate = _walkforward_aggregate(yearly)
+    summary = {
+        "status": "completed" if train_summary.get("status") == "completed" else "skipped",
+        "stage": "rl_walkforward_study",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "train_years": list(WALKFORWARD_TRAIN_YEARS),
+        "validation_years": list(WALKFORWARD_VALIDATION_YEARS),
+        "test_years": list(WALKFORWARD_TEST_YEARS),
+        "yearly": yearly,
+        "train_summary": train_summary,
+        "aggregate": aggregate,
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / "sequence_walkforward_summary.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
+def _walkforward_role(year: int) -> str:
+    if year in WALKFORWARD_TRAIN_YEARS:
+        return "train"
+    if year in WALKFORWARD_VALIDATION_YEARS:
+        return "validation"
+    if year in WALKFORWARD_TEST_YEARS:
+        return "test"
+    return "unused"
+
+
+def _walkforward_aggregate(yearly: dict[str, Any]) -> dict[str, Any]:
+    by_role: dict[str, dict[str, Any]] = {}
+    for role in ("train", "validation", "test"):
+        role_yearly = {
+            year: result
+            for year, result in yearly.items()
+            if str(result.get("role", "")) == role
+        }
+        by_role[role] = _multiyear_aggregate(role_yearly)
+    return by_role
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -906,7 +1268,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stage",
         choices=tuple(sorted(LEGACY_NEURAL_STAGES | SEQUENCE_RL_STAGES)),
-        default="rl-dataset-smoke",
+        default="rl-episode-dataset",
     )
     parser.add_argument("--tag", required=True, help="Explicit protocol/study tag. Loose latest is forbidden.")
     parser.add_argument("--policy-version", default=ALPHA_PATH20_SEQUENCE_POLICY_VERSION)
@@ -976,6 +1338,40 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     effective_lake_dataset_id = str(args.lake_dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID).strip()
     args.lake_dataset_id = effective_lake_dataset_id
+    if args.stage == "rl-walkforward-study":
+        summary = {
+            "status": "completed",
+            "run_tag": tag,
+            "study_tag": tag,
+            "created_at": now_iso(),
+            "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+            "policy_profile": ALPHA_PATH20_SEQUENCE_POLICY_PROFILE,
+            "research_status": "research / shadow-only / alpha_path20_sequence_policy_v1 walk-forward evidence",
+            "stage": args.stage,
+            "data_source": args.data_source,
+            "lake_dataset_id": effective_lake_dataset_id,
+            "execution_mode": args.execution_mode,
+            "sequence_policy": _run_walkforward_study(study_root=study_root, tag=tag, args=args),
+            "facts": [
+                "alpha_path20_sequence_policy_v1 is the path20 main research line.",
+                "Walk-forward evidence separates train, validation, and final shadow test years.",
+                "Exact replay remains PortfolioState.step after deterministic safety projection.",
+            ],
+            "boundaries": [
+                "shadow_only=true",
+                "no live/default promotion",
+                "no active_execution_strategy.json modification",
+                "no loose latest references",
+                "oracle inputs are forbidden for sequence policy training and replay",
+            ],
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+        summary = _json_ready(summary)
+        write_json(study_root / "study_summary.json", summary)
+        safe_print_json(summary)
+        return summary
     if args.stage == "rl-multiyear-smoke":
         summary = {
             "status": "completed",
@@ -1025,6 +1421,66 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         progress_desc=f"alpha_path20 prepare {tag}",
     )
     if args.stage in SEQUENCE_RL_STAGES:
+        if args.stage in SEQUENCE_RL_EPISODE_STAGES:
+            dataset_payload = _build_episode_dataset_artifact(prepared=prepared, study_root=study_root, tag=tag, args=args)
+            train_summary = {"status": "not_run"}
+            replay_summary = {"status": "not_run"}
+            if args.stage in {"rl-train-episode", "rl-replay-episode"}:
+                train_payload = _episode_train_model(
+                    episodes=[dataset_payload["episode"]],
+                    validation_episodes=[],
+                    study_root=study_root,
+                    args=args,
+                    train_years=[],
+                    validation_years=[],
+                )
+                train_summary = dict(train_payload.get("summary", train_payload))
+                if args.stage == "rl-replay-episode" and train_summary.get("status") == "completed":
+                    replay_summary = _run_episode_replay(
+                        prepared=prepared,
+                        episode=dataset_payload["episode"],
+                        model=train_payload["model"],
+                        normalization=train_payload["normalization"],
+                        study_root=study_root,
+                        args=args,
+                        prefix="episode",
+                    )
+            summary = {
+                "status": "completed",
+                "run_tag": tag,
+                "study_tag": tag,
+                "created_at": now_iso(),
+                "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+                "policy_profile": ALPHA_PATH20_SEQUENCE_POLICY_PROFILE,
+                "research_status": "research / shadow-only / alpha_path20_sequence_policy_v1 episode evidence",
+                "stage": args.stage,
+                "data_source": args.data_source,
+                "lake_dataset_id": effective_lake_dataset_id,
+                "execution_mode": args.execution_mode,
+                "prepared_summary": prepared.to_summary(),
+                "episode_dataset_summary": dataset_payload["manifest"],
+                "episode_train_summary": train_summary,
+                "episode_replay_summary": replay_summary,
+                "facts": [
+                    "Market episode artifacts keep reward columns out of model input features.",
+                    "Episode training rolls current weights forward and trains on projected target weights.",
+                    "Exact replay uses PortfolioState.step after deterministic safety projection.",
+                ],
+                "boundaries": [
+                    "shadow_only=true",
+                    "no live/default promotion",
+                    "no active_execution_strategy.json modification",
+                    "no loose latest references",
+                    "oracle inputs are forbidden for sequence policy training and replay",
+                ],
+                "shadow_only": True,
+                "promotion_allowed": False,
+                "active_execution_strategy_expected_diff": "none",
+            }
+            summary = _json_ready(summary)
+            write_json(study_root / "study_summary.json", summary)
+            safe_print_json(summary)
+            return summary
         dataset_payload = _build_sequence_dataset_artifact(prepared=prepared, study_root=study_root, tag=tag, args=args)
         train_summary: dict[str, Any] = {"status": "not_run"}
         replay_summary: dict[str, Any] = {"status": "not_run"}
