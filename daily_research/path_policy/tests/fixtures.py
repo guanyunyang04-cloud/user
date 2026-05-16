@@ -12,8 +12,13 @@ from daily_research.continuous_policy.state_builder import (
 )
 
 
-def make_prepared_policy_inputs(*, days: int = 34, stocks: tuple[str, ...] = ("AAA", "BBB", "CCC", "DDD")) -> PreparedPolicyInputs:
-    dates = pd.bdate_range("2024-01-02", periods=int(days))
+def make_prepared_policy_inputs(
+    *,
+    days: int = 34,
+    stocks: tuple[str, ...] = ("AAA", "BBB", "CCC", "DDD"),
+    start_date: str = "2024-01-02",
+) -> PreparedPolicyInputs:
+    dates = pd.bdate_range(str(start_date), periods=int(days))
     columns = list(stocks)
     base = np.arange(len(dates), dtype=float).reshape(-1, 1)
     multipliers = np.linspace(1.0, 1.6, len(columns)).reshape(1, -1)

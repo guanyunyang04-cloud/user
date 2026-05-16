@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,7 @@ from daily_research.continuous_policy.pipeline_utils import select_feature_colum
 from daily_research.continuous_policy.portfolio_simulator import PortfolioState
 from daily_research.continuous_policy.state_builder import PreparedPolicyInputs, build_cross_section_state
 from daily_research.path_policy import ALPHA_PATH20_SEQUENCE_POLICY_VERSION
+from daily_research.path_policy.adapter import project_target_weights
 from daily_research.path_policy.rl_dataset import (
     DEFAULT_RL_REWARD_PROFILE,
     Path20TrajectoryDataset,
@@ -43,6 +45,17 @@ EPISODE_NON_INPUT_COLUMNS = {
     "benchmark_return",
     "next_open_excess_return",
     "reward_profile",
+}
+EPISODE_MANIFEST_HASH_EXCLUDE_KEYS = {
+    "array_manifest_json",
+    "array_hash",
+    "arrays_npz",
+    "artifact_reuse_enabled",
+    "artifact_reused",
+    "dataset_csv",
+    "manifest_hash",
+    "manifest_json",
+    "run_tag",
 }
 
 
@@ -81,6 +94,106 @@ def stable_market_episode_id(payload: dict[str, Any]) -> str:
     normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:24]
     return f"alpha_path20_market_episode__{digest}"
+
+
+def stable_episode_manifest_hash(manifest: dict[str, Any]) -> str:
+    payload = {
+        str(key): value
+        for key, value in dict(manifest).items()
+        if str(key) not in EPISODE_MANIFEST_HASH_EXCLUDE_KEYS
+    }
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def _array_sha1(array: np.ndarray) -> str:
+    values = np.asarray(array)
+    header = json.dumps({"shape": list(values.shape), "dtype": str(values.dtype)}, sort_keys=True).encode("utf-8")
+    digest = hashlib.sha1(header)
+    if values.dtype.kind in {"O", "U", "S"}:
+        digest.update("\n".join(str(item) for item in values.reshape(-1).tolist()).encode("utf-8"))
+    else:
+        digest.update(np.ascontiguousarray(values).tobytes())
+    return digest.hexdigest()
+
+
+def episode_array_manifest(
+    arrays: dict[str, np.ndarray],
+    *,
+    manifest: dict[str, Any],
+    arrays_npz_path: str,
+) -> dict[str, Any]:
+    array_entries: dict[str, dict[str, Any]] = {}
+    for name, values in arrays.items():
+        array = np.asarray(values)
+        array_entries[str(name)] = {
+            "shape": [int(item) for item in array.shape],
+            "dtype": str(array.dtype),
+            "sha1": _array_sha1(array),
+        }
+    array_hash_payload = {name: entry["sha1"] for name, entry in sorted(array_entries.items())}
+    array_hash = hashlib.sha1(json.dumps(array_hash_payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "artifact_type": "market_episode_arrays",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "dataset_id": str(manifest.get("dataset_id", "")),
+        "lake_dataset_id": str(manifest.get("lake_dataset_id", "")),
+        "run_tag": str(manifest.get("run_tag", "")),
+        "year": manifest.get("year", ""),
+        "role": str(manifest.get("role", "")),
+        "source_manifest_hash": str(manifest.get("manifest_hash", stable_episode_manifest_hash(manifest))),
+        "arrays_npz": str(arrays_npz_path),
+        "array_hash": array_hash,
+        "arrays": array_entries,
+        "loose_latest_allowed": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+    }
+
+
+def save_episode_arrays(path: str | Path, arrays: dict[str, np.ndarray]) -> str:
+    resolved = Path(path)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(arrays)
+    if "dates" in payload:
+        payload["dates"] = np.asarray(payload["dates"]).astype(str)
+    if "stocks" in payload:
+        payload["stocks"] = np.asarray(payload["stocks"]).astype(str)
+    np.savez_compressed(resolved, **payload)
+    return str(resolved.resolve())
+
+
+def load_episode_arrays(path: str | Path) -> dict[str, np.ndarray]:
+    with np.load(path, allow_pickle=False) as loaded:
+        return {str(name): loaded[name] for name in loaded.files}
+
+
+def market_episode_from_long_frame(frame: pd.DataFrame, manifest: dict[str, Any]) -> Path20MarketEpisode:
+    feature_columns = [str(item) for item in manifest.get("feature_columns", [])]
+    if not feature_columns:
+        feature_columns = [
+            str(column)
+            for column in frame.columns
+            if str(column) not in EPISODE_NON_INPUT_COLUMNS and not str(column).startswith("portfolio_")
+        ]
+    validate_no_oracle_or_future_inputs(feature_columns)
+    if frame.empty:
+        return Path20MarketEpisode(daily_frames=[], feature_columns=feature_columns, dates=[], manifest=dict(manifest))
+    working = frame.copy()
+    working["date"] = pd.to_datetime(working["date"])
+    daily_frames: list[pd.DataFrame] = []
+    dates: list[pd.Timestamp] = []
+    for dt, group in working.sort_values(["date", "stock"]).groupby("date", sort=True):
+        daily = group.copy().reset_index(drop=True)
+        daily["date"] = pd.Timestamp(dt).strftime("%Y-%m-%d")
+        daily_frames.append(daily)
+        dates.append(pd.Timestamp(dt))
+    return Path20MarketEpisode(
+        daily_frames=daily_frames,
+        feature_columns=feature_columns,
+        dates=dates,
+        manifest=dict(manifest),
+    )
 
 
 def _resolve_episode_feature_columns(sample: pd.DataFrame, max_feature_columns: int) -> list[str]:
@@ -323,6 +436,73 @@ def project_target_weights_torch(
     return {"projected_target_weight": projected, "diagnostics": diagnostics}
 
 
+def projection_parity_diagnostics(
+    raw_target_weight: np.ndarray | pd.Series | torch.Tensor,
+    current_weight: np.ndarray | pd.Series | torch.Tensor,
+    tradable_mask: np.ndarray | pd.Series | torch.Tensor,
+    *,
+    stocks: list[str] | np.ndarray | None = None,
+    max_position_weight: float,
+    max_gross_exposure: float,
+    max_positions: int,
+    turnover_budget: float,
+    max_l1_gap: float = 0.02,
+) -> dict[str, Any]:
+    def _to_numpy(value: np.ndarray | pd.Series | torch.Tensor) -> np.ndarray:
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().numpy()
+        if isinstance(value, pd.Series):
+            return value.to_numpy()
+        return np.asarray(value)
+
+    raw_np = np.asarray(_to_numpy(raw_target_weight), dtype=np.float32).reshape(-1)
+    current_np = np.asarray(_to_numpy(current_weight), dtype=np.float32).reshape(-1)
+    mask_np = np.asarray(_to_numpy(tradable_mask)).reshape(-1).astype(bool)
+    if not (len(raw_np) == len(current_np) == len(mask_np)):
+        raise ValueError("Projection parity inputs must have the same stock dimension.")
+    stock_index = [str(item) for item in stocks] if stocks is not None else [str(idx) for idx in range(len(raw_np))]
+    if len(stock_index) != len(raw_np):
+        raise ValueError("Projection parity stocks must match the input stock dimension.")
+
+    torch_result = project_target_weights_torch(
+        torch.tensor(raw_np, dtype=torch.float32),
+        torch.tensor(current_np, dtype=torch.float32),
+        torch.tensor(mask_np, dtype=torch.bool),
+        max_position_weight=max_position_weight,
+        max_gross_exposure=max_gross_exposure,
+        max_positions=max_positions,
+        turnover_budget=turnover_budget,
+    )
+    torch_target = torch_result["projected_target_weight"].detach().cpu().numpy().astype(float)
+    pandas_target, pandas_diag = project_target_weights(
+        pd.Series(raw_np, index=stock_index, dtype=float),
+        current_weight=pd.Series(current_np, index=stock_index, dtype=float),
+        tradable_mask=pd.Series(mask_np, index=stock_index, dtype=bool),
+        max_position_weight=max_position_weight,
+        max_gross_exposure=max_gross_exposure,
+        max_positions=max_positions,
+        turnover_budget=turnover_budget,
+    )
+    pandas_target_np = pandas_target.reindex(stock_index).fillna(0.0).to_numpy(dtype=float)
+    gap = float(np.abs(torch_target - pandas_target_np).sum())
+    torch_diag = torch_result["diagnostics"]
+    summary = {
+        "status": "passed" if gap <= float(max_l1_gap) else "warning",
+        "projection_mismatch_warning": bool(gap > float(max_l1_gap)),
+        "max_l1_gap": float(max_l1_gap),
+        "target_l1_gap": gap,
+        "torch_projected_gross_exposure": float(np.clip(torch_target, 0.0, None).sum()),
+        "pandas_projected_gross_exposure": float(pandas_target.clip(lower=0.0).sum()),
+        "torch_projected_turnover": float(np.abs(torch_target - current_np).sum()),
+        "pandas_projected_turnover": float(pandas_diag.projected_turnover),
+        "torch_target_count": int((torch_target > 1.0e-12).sum()),
+        "pandas_target_count": int(pandas_diag.target_count),
+        "torch_raw_gross_exposure": float(torch_diag["raw_gross_exposure"].detach().cpu()),
+        "pandas_raw_gross_exposure": float(pandas_diag.raw_sum),
+    }
+    return summary
+
+
 def _portfolio_feature_tensor(
     current_weight: torch.Tensor,
     recent_turnovers: list[torch.Tensor],
@@ -376,7 +556,14 @@ def episode_policy_rollout_loss(
     drawdown_penalty: float = 0.10,
     entropy_bonus: float = 0.001,
     detach_rollout_state: bool = True,
+    rollout_grad_mode: str = "detached",
+    rollout_chunk_days: int = 20,
 ) -> dict[str, Any]:
+    grad_mode = str(rollout_grad_mode or "detached").strip().lower()
+    if grad_mode not in {"detached", "truncated"}:
+        raise ValueError("rollout_grad_mode must be 'detached' or 'truncated'.")
+    chunk_days = max(int(rollout_chunk_days), 1)
+    detach_rollout = bool(detach_rollout_state) if grad_mode == "detached" else False
     arrays = normalize_episode_arrays(episode_to_arrays(episode), normalization)
     state_np = arrays["state"]
     if state_np.shape[0] < int(sequence_length):
@@ -396,13 +583,25 @@ def episode_policy_rollout_loss(
     portfolio_context: list[torch.Tensor] = []
     losses: list[torch.Tensor] = []
     diagnostics_rows: list[dict[str, float]] = []
+    previous_weight_nonzero_checks: list[float] = []
+    previous_reward_nonzero_checks: list[float] = []
     equity = torch.ones((), dtype=torch.float32, device=device)
     peak_equity = torch.ones((), dtype=torch.float32, device=device)
     previous_reward = torch.zeros((), dtype=torch.float32, device=device)
     for idx in range(int(state.shape[0])):
-        current_for_context = current_weight.detach() if detach_rollout_state else current_weight
+        if grad_mode == "truncated" and idx > 0 and idx % chunk_days == 0:
+            current_weight = current_weight.detach()
+            previous_reward = previous_reward.detach()
+            equity = equity.detach()
+            peak_equity = peak_equity.detach()
+            weight_context = [item.detach() for item in weight_context]
+            reward_context = [item.detach() for item in reward_context]
+            portfolio_context = [item.detach() for item in portfolio_context]
+            recent_turnovers = [item.detach() for item in recent_turnovers]
+            recent_rewards = [item.detach() for item in recent_rewards]
+        current_for_context = current_weight.detach() if detach_rollout else current_weight
         weight_context.append(current_for_context)
-        reward_context.append(previous_reward.detach() if detach_rollout_state else previous_reward)
+        reward_context.append(previous_reward.detach() if detach_rollout else previous_reward)
         portfolio_context.append(_portfolio_feature_tensor(current_for_context, recent_turnovers, recent_rewards))
         if idx < seq_len - 1:
             previous_reward = torch.zeros((), dtype=torch.float32, device=device)
@@ -414,6 +613,8 @@ def episode_policy_rollout_loss(
         portfolio_window = torch.stack(portfolio_context[idx - seq_len + 1 : idx + 1], dim=0).unsqueeze(0)
         reward_window = torch.stack(reward_context[idx - seq_len + 1 : idx + 1], dim=0).unsqueeze(0)
         mask_now = mask[idx].unsqueeze(0)
+        previous_weight_nonzero_checks.append(float((weight_window.abs().sum(dim=1) > 1.0e-12).float().mean().detach().cpu()))
+        previous_reward_nonzero_checks.append(float((reward_window.abs().reshape(-1) > 1.0e-12).float().mean().detach().cpu()))
         if str(model_family).strip().lower() == "decision_transformer":
             pred = model(
                 model_state,
@@ -445,7 +646,7 @@ def episode_policy_rollout_loss(
         gross_return = (projected * future_return[idx].nan_to_num(0.0)).sum()
         net_reward = gross_return - cost
         equity = equity * (1.0 + net_reward).clamp_min(0.05)
-        peak_equity = torch.maximum(peak_equity, equity.detach() if detach_rollout_state else equity)
+        peak_equity = torch.maximum(peak_equity, equity.detach() if detach_rollout else equity)
         drawdown = (equity / peak_equity.clamp_min(1.0e-8) - 1.0).clamp(max=0.0)
         concentration = (projected**2).sum()
         entropy = -(projected.clamp_min(1.0e-12) * projected.clamp_min(1.0e-12).log()).sum()
@@ -460,11 +661,19 @@ def episode_policy_rollout_loss(
         recent_turnovers.append(diag["projected_turnover"].detach())
         recent_rewards.append(net_reward.detach())
         previous_reward = net_reward
-        current_weight = projected.detach() if detach_rollout_state else projected
+        current_weight = projected.detach() if detach_rollout else projected
     if not losses:
         zero = torch.zeros((), dtype=torch.float32, device=device)
         return {"status": "skipped", "reason": "empty_rollout_loss", "loss": zero}
     loss_tensor = torch.stack(losses).mean()
+    weight_rate = float(np.mean(previous_weight_nonzero_checks)) if previous_weight_nonzero_checks else 0.0
+    reward_rate = float(np.mean(previous_reward_nonzero_checks)) if previous_reward_nonzero_checks else 0.0
+    is_dt = str(model_family).strip().lower() == "decision_transformer"
+    context_coverage = {
+        "previous_weight_nonzero_rate": weight_rate,
+        "previous_reward_nonzero_rate": reward_rate,
+        "context_underused_warning": bool(is_dt and (weight_rate <= 0.0 or reward_rate <= 0.0)),
+    }
     return {
         "status": "completed",
         "loss": loss_tensor,
@@ -472,9 +681,12 @@ def episode_policy_rollout_loss(
         "diagnostics": _summarize_diagnostics(diagnostics_rows),
         "used_projected_weights_for_loss": True,
         "rolled_current_weight": True,
+        "rollout_grad_mode": grad_mode,
+        "rollout_chunk_days": int(chunk_days),
+        "context_coverage": context_coverage,
         "decision_transformer_previous_context_nonzero": bool(
             str(model_family).strip().lower() == "decision_transformer"
-            and any(float(item.abs().sum().detach().cpu()) > 0.0 for item in reward_context)
+            and (weight_rate > 0.0 or reward_rate > 0.0)
         ),
     }
 
@@ -562,4 +774,3 @@ def predict_episode_targets(
             previous_reward = net_reward.detach()
             current_weight = projected.detach()
     return target_by_date, _summarize_diagnostics(diagnostics_rows)
-

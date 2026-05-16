@@ -43,10 +43,16 @@ from daily_research.path_policy.rl_episode import (
     EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS,
     Path20MarketEpisode,
     build_path20_market_episode,
+    episode_array_manifest,
     episode_policy_rollout_loss,
     episode_to_arrays,
     fit_episode_normalization,
+    load_episode_arrays,
+    market_episode_from_long_frame,
     predict_episode_targets,
+    projection_parity_diagnostics,
+    save_episode_arrays,
+    stable_episode_manifest_hash,
 )
 from daily_research.path_policy.rl_models import (
     DecisionTransformerTargetWeightPolicy,
@@ -64,7 +70,9 @@ PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_dataset
 PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
 LEGACY_NEURAL_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
 SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
-SEQUENCE_RL_EPISODE_STAGES = frozenset({"rl-episode-dataset", "rl-train-episode", "rl-replay-episode", "rl-walkforward-study"})
+SEQUENCE_RL_EPISODE_STAGES = frozenset(
+    {"rl-episode-dataset", "rl-train-episode", "rl-replay-episode", "rl-walkforward-study", "rl-walkforward-matrix"}
+)
 SEQUENCE_RL_STAGES = SEQUENCE_RL_SMOKE_STAGES | SEQUENCE_RL_EPISODE_STAGES
 WALKFORWARD_TRAIN_YEARS = (2019, 2020)
 WALKFORWARD_VALIDATION_YEARS = (2022,)
@@ -101,6 +109,13 @@ def _write_frame(path: Path, frame: pd.DataFrame) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False, encoding="utf-8-sig")
     return str(path.resolve())
+
+
+def _read_frame_allow_empty(path: Path) -> pd.DataFrame:
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _series_frame(series: pd.Series, *, index_name: str, value_name: str) -> pd.DataFrame:
@@ -667,6 +682,7 @@ def _build_episode_dataset_artifact(
 ) -> dict[str, Any]:
     resolved_start = str(start_date or args.start_date)
     resolved_end = str(end_date or args.end_date)
+    role = _walkforward_role(int(year)) if year is not None and str(year).strip() else "single"
     episode = build_path20_market_episode(
         prepared,
         start_date=resolved_start,
@@ -683,20 +699,63 @@ def _build_episode_dataset_artifact(
     dataset_root = PATH_POLICY_EPISODE_DATASETS_ROOT / dataset_id
     dataset_path = dataset_root / "market_episode.csv"
     manifest_path = dataset_root / "dataset_manifest.json"
-    long_frame = episode.to_long_frame()
-    _write_frame(dataset_path, long_frame)
-    manifest = {
+    arrays_path = dataset_root / "market_episode_arrays.npz"
+    array_manifest_path = dataset_root / "array_manifest.json"
+    base_manifest = {
         **episode.manifest,
         "policy_profile": ALPHA_PATH20_SEQUENCE_POLICY_PROFILE,
         "data_source": args.data_source,
+        "role": role,
         "dataset_csv": str(dataset_path.resolve()),
         "manifest_json": str(manifest_path.resolve()),
-        "row_count": int(len(long_frame)),
+        "arrays_npz": str(arrays_path.resolve()),
+        "array_manifest_json": str(array_manifest_path.resolve()),
         "run_tag": tag,
+        "row_count": int(sum(len(frame) for frame in episode.daily_frames)),
+        "normalization_scope": "train_years_only",
+        "artifact_reuse_enabled": bool(getattr(args, "reuse_episode_artifacts", True)),
     }
+    base_manifest["manifest_hash"] = stable_episode_manifest_hash(base_manifest)
+    if bool(getattr(args, "reuse_episode_artifacts", True)) and any(
+        path.exists() for path in (manifest_path, dataset_path, arrays_path, array_manifest_path)
+    ):
+        missing_paths = [
+            str(path.resolve())
+            for path in (manifest_path, dataset_path, arrays_path, array_manifest_path)
+            if not path.exists()
+        ]
+        if missing_paths:
+            raise ValueError(f"Existing episode artifact is incomplete for {dataset_id}; missing: {missing_paths}")
+        existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        existing_hash = str(existing_manifest.get("manifest_hash", "") or "")
+        if existing_hash != str(base_manifest["manifest_hash"]):
+            raise ValueError(
+                f"Existing episode artifact hash mismatch for {dataset_id}: "
+                f"{existing_hash or 'missing'} != {base_manifest['manifest_hash']}"
+            )
+        long_frame = _read_frame_allow_empty(dataset_path)
+        reused_episode = market_episode_from_long_frame(long_frame, existing_manifest)
+        write_json(study_root / "episode_dataset_manifest.json", {**existing_manifest, "artifact_reused": True})
+        return {
+            "episode": reused_episode,
+            "dataset_frame": long_frame,
+            "manifest": {**existing_manifest, "artifact_reused": True},
+            "arrays": load_episode_arrays(arrays_path),
+            "array_manifest": json.loads(array_manifest_path.read_text(encoding="utf-8")) if array_manifest_path.exists() else {},
+        }
+    long_frame = episode.to_long_frame()
+    _write_frame(dataset_path, long_frame)
+    arrays = episode_to_arrays(episode)
+    arrays_npz = save_episode_arrays(arrays_path, arrays)
+    manifest = {**base_manifest, "row_count": int(len(long_frame))}
+    manifest["manifest_hash"] = stable_episode_manifest_hash(manifest)
+    array_manifest = episode_array_manifest(arrays, manifest=manifest, arrays_npz_path=arrays_npz)
+    write_json(array_manifest_path, array_manifest)
+    manifest["array_hash"] = array_manifest["array_hash"]
+    manifest["manifest_hash"] = stable_episode_manifest_hash(manifest)
     write_json(manifest_path, manifest)
     write_json(study_root / "episode_dataset_manifest.json", manifest)
-    return {"episode": episode, "dataset_frame": long_frame, "manifest": manifest}
+    return {"episode": episode, "dataset_frame": long_frame, "manifest": manifest, "arrays": arrays, "array_manifest": array_manifest}
 
 
 def _episode_train_model(
@@ -720,6 +779,7 @@ def _episode_train_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.smoke_lr), weight_decay=1.0e-4)
     losses: list[float] = []
     projection_summaries: list[dict[str, float]] = []
+    context_summaries: list[dict[str, Any]] = []
     for _ in range(max(int(args.smoke_epochs), 1)):
         epoch_losses: list[float] = []
         for episode in completed_train:
@@ -737,6 +797,8 @@ def _episode_train_model(
                 max_gross_exposure=float(args.max_gross_exposure),
                 max_positions=int(args.max_positions),
                 turnover_budget=float(args.turnover_budget),
+                rollout_grad_mode=str(getattr(args, "rollout_grad_mode", "detached")),
+                rollout_chunk_days=int(getattr(args, "rollout_chunk_days", 20)),
             )
             if result.get("status") != "completed":
                 continue
@@ -745,8 +807,9 @@ def _episode_train_model(
             optimizer.step()
             epoch_losses.append(float(loss.detach().cpu()))
             projection_summaries.append(dict(result.get("diagnostics", {}) or {}))
+            context_summaries.append(dict(result.get("context_coverage", {}) or {}))
         losses.append(float(np.mean(epoch_losses)) if epoch_losses else 0.0)
-    validation_rollout: dict[str, Any] = {}
+    validation_surrogate: dict[str, Any] = {}
     completed_validation = [episode for episode in validation_episodes if str(episode.manifest.get("status", "")) == "completed"]
     if completed_validation:
         with torch.no_grad():
@@ -763,13 +826,32 @@ def _episode_train_model(
                 max_gross_exposure=float(args.max_gross_exposure),
                 max_positions=int(args.max_positions),
                 turnover_budget=float(args.turnover_budget),
+                rollout_grad_mode=str(getattr(args, "rollout_grad_mode", "detached")),
+                rollout_chunk_days=int(getattr(args, "rollout_chunk_days", 20)),
             )
-        validation_rollout = {
+        validation_surrogate = {
             "status": str(validation_result.get("status", "unknown")),
             "loss": float(validation_result["loss"].detach().cpu()) if "loss" in validation_result else 0.0,
             "diagnostics": validation_result.get("diagnostics", {}),
+            "context_coverage": validation_result.get("context_coverage", {}),
             "used_projected_weights_for_loss": bool(validation_result.get("used_projected_weights_for_loss", False)),
         }
+    normalization_manifest = {
+        "artifact_type": "normalization_manifest",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "model_family": str(args.model_family),
+        "train_years": list(train_years or []),
+        "validation_years": list(validation_years or []),
+        "lake_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "normalization_scope": "train_years_only",
+        "feature_columns": normalization.get("feature_columns", []),
+        "mean": normalization.get("mean", []),
+        "std": normalization.get("std", []),
+        "shadow_only": True,
+        "promotion_allowed": False,
+    }
+    normalization_manifest_path = study_root / "normalization_manifest.json"
+    write_json(normalization_manifest_path, _json_ready(normalization_manifest))
     artifact_path = study_root / "sequence_policy_episode.pt"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -786,7 +868,29 @@ def _episode_train_model(
         },
         artifact_path,
     )
+    model_manifest = {
+        "artifact_type": "sequence_policy_model_manifest",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "model_family": str(args.model_family),
+        "train_years": list(train_years or []),
+        "validation_years": list(validation_years or []),
+        "lake_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "model_pt": str(artifact_path.resolve()),
+        "normalization_manifest_json": str(normalization_manifest_path.resolve()),
+        "feature_columns": completed_train[0].feature_columns,
+        "dynamic_stock_feature_columns": list(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS),
+        "sequence_length": int(args.sequence_length),
+        "reward_profile": str(args.reward_profile),
+        "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
+        "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+    }
+    model_manifest_path = study_root / "model_manifest.json"
+    write_json(model_manifest_path, _json_ready(model_manifest))
     projection_summary = _summarize_projection_dicts(projection_summaries)
+    context_coverage = _summarize_context_coverage(context_summaries)
     summary = {
         "status": "completed",
         "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
@@ -798,10 +902,15 @@ def _episode_train_model(
         "episode_count": int(len(completed_train)),
         "train_loss_curve": losses,
         "final_train_loss": float(losses[-1]) if losses else 0.0,
-        "validation_replay_metrics": validation_rollout,
+        "validation_surrogate_metrics": validation_surrogate,
         "projection_diagnostics_summary": projection_summary,
+        "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
+        "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
+        "context_coverage": context_coverage,
         "normalization": normalization,
+        "normalization_manifest_json": str(normalization_manifest_path.resolve()),
         "artifact_pt": str(artifact_path.resolve()),
+        "model_manifest_json": str(model_manifest_path.resolve()),
         "oracle_used": False,
         "shadow_only": True,
         "promotion_allowed": False,
@@ -820,6 +929,64 @@ def _summarize_projection_dicts(rows: list[dict[str, float]]) -> dict[str, float
     }
 
 
+def _summarize_context_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "previous_weight_nonzero_rate": 0.0,
+            "previous_reward_nonzero_rate": 0.0,
+            "context_underused_warning": False,
+        }
+    weight_rates = [float(row.get("previous_weight_nonzero_rate", 0.0) or 0.0) for row in rows]
+    reward_rates = [float(row.get("previous_reward_nonzero_rate", 0.0) or 0.0) for row in rows]
+    return {
+        "previous_weight_nonzero_rate": _finite_mean(weight_rates),
+        "previous_reward_nonzero_rate": _finite_mean(reward_rates),
+        "context_underused_warning": any(bool(row.get("context_underused_warning", False)) for row in rows),
+    }
+
+
+def _episode_projection_parity_summary(
+    episode: Path20MarketEpisode,
+    *,
+    args: argparse.Namespace,
+    max_samples: int = 3,
+) -> dict[str, Any]:
+    arrays = episode_to_arrays(episode)
+    if arrays["mask"].shape[0] <= 0:
+        return {"status": "skipped", "reason": "empty_episode", "projection_mismatch_warning": False}
+    stocks = [str(item) for item in arrays["stocks"].tolist()]
+    sample_count = min(int(max_samples), int(arrays["mask"].shape[0]))
+    rows: list[dict[str, Any]] = []
+    current = np.zeros(int(arrays["mask"].shape[1]), dtype=np.float32)
+    for idx in range(sample_count):
+        mask = np.asarray(arrays["mask"][idx], dtype=bool)
+        raw = np.where(mask, np.linspace(0.01, float(args.max_position_weight) * 1.5, len(stocks)), 0.0).astype(np.float32)
+        row = projection_parity_diagnostics(
+            raw,
+            current,
+            mask,
+            stocks=stocks,
+            max_position_weight=float(args.max_position_weight),
+            max_gross_exposure=float(args.max_gross_exposure),
+            max_positions=int(args.max_positions),
+            turnover_budget=float(args.turnover_budget),
+            max_l1_gap=float(getattr(args, "projection_parity_max_l1", 0.02)),
+        )
+        row["date"] = str(arrays["dates"][idx])
+        rows.append(row)
+    gaps = [float(row.get("target_l1_gap", 0.0) or 0.0) for row in rows]
+    warning = any(bool(row.get("projection_mismatch_warning", False)) for row in rows)
+    return {
+        "status": "warning" if warning else "passed",
+        "sample_count": int(len(rows)),
+        "max_l1_gap": float(getattr(args, "projection_parity_max_l1", 0.02)),
+        "max_target_l1_gap": float(max(gaps) if gaps else 0.0),
+        "mean_target_l1_gap": _finite_mean(gaps),
+        "projection_mismatch_warning": bool(warning),
+        "samples": rows,
+    }
+
+
 def _run_episode_replay(
     *,
     prepared: Any,
@@ -829,6 +996,8 @@ def _run_episode_replay(
     study_root: Path,
     args: argparse.Namespace,
     prefix: str = "episode",
+    year: int | str | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
     target_by_date, training_projection_summary = predict_episode_targets(
         model,
@@ -865,16 +1034,24 @@ def _run_episode_replay(
         "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
         "stage": "rl_replay_episode",
         "model_family": str(args.model_family),
+        "year": int(year) if year is not None and str(year).strip() else episode.manifest.get("year", ""),
+        "role": str(role or episode.manifest.get("role", "")),
+        "run_tag": str(episode.manifest.get("run_tag", "")),
+        "lake_dataset_id": str(args.lake_dataset_id or ""),
         "date_count": int(len(rollout["dates"])),
         "return_count": int(len(rollout["returns"])),
         "metrics": rollout["metrics"],
         "training_projection_diagnostics_summary": training_projection_summary,
+        "projection_parity_summary": _episode_projection_parity_summary(episode, args=args),
         "artifacts": paths,
         "oracle_used": False,
         "shadow_only": True,
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",
     }
+    replay_manifest_path = study_root / f"{prefix}_rl_replay_manifest.json"
+    summary["replay_manifest_json"] = str(replay_manifest_path.resolve())
+    write_json(replay_manifest_path, _json_ready(summary))
     write_json(study_root / f"{prefix}_rl_replay_summary.json", _json_ready(summary))
     return _json_ready(summary)
 
@@ -1140,11 +1317,14 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
     yearly: dict[str, Any] = {}
     train_episodes: list[Path20MarketEpisode] = []
     validation_episodes: list[Path20MarketEpisode] = []
+    prepared_by_year: dict[int, Any] = {}
+    episode_by_year: dict[int, Path20MarketEpisode] = {}
     for year in years:
         start_date, end_date = full_year_window(year)
         year_root = study_root / str(year)
         year_root.mkdir(parents=True, exist_ok=True)
         prepared = _prepare_for_window(args, start_date=start_date, end_date=end_date, tag=f"{tag}_{year}")
+        prepared_by_year[int(year)] = prepared
         dataset_payload = _build_episode_dataset_artifact(
             prepared=prepared,
             study_root=year_root,
@@ -1155,9 +1335,11 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
             end_date=end_date,
         )
         episode = dataset_payload["episode"]
+        episode_by_year[int(year)] = episode
         yearly[str(year)] = {
             "role": _walkforward_role(year),
             "dataset_summary": dataset_payload["manifest"],
+            "array_manifest": dataset_payload.get("array_manifest", {}),
             "prepared_summary": prepared.to_summary(),
             "train_summary": {"status": "pending"},
             "replay_summary": {"status": "pending"},
@@ -1190,33 +1372,25 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
             year_text = str(year)
             if yearly[year_text]["dataset_summary"].get("status") != "completed":
                 continue
-            start_date, end_date = full_year_window(year)
             year_root = study_root / year_text
-            prepared = _prepare_for_window(args, start_date=start_date, end_date=end_date, tag=f"{tag}_{year}_replay")
-            episode = build_path20_market_episode(
-                prepared,
-                start_date=start_date,
-                end_date=end_date,
-                lake_dataset_id=str(args.lake_dataset_id or ""),
-                year=year,
-                sequence_length=int(args.sequence_length),
-                execution_mode=args.execution_mode,
-                reward_profile=args.reward_profile,
-                max_feature_columns=int(args.rl_max_feature_columns),
-                min_trading_days=int(args.min_year_trading_days),
-            )
             replay_summary = _run_episode_replay(
-                prepared=prepared,
-                episode=episode,
+                prepared=prepared_by_year[int(year)],
+                episode=episode_by_year[int(year)],
                 model=train_payload["model"],
                 normalization=train_payload["normalization"],
                 study_root=year_root,
                 args=args,
                 prefix=f"episode_{year}",
+                year=year,
+                role=_walkforward_role(year),
             )
             yearly[year_text]["train_summary"] = train_summary if year in WALKFORWARD_TRAIN_YEARS else {"status": "not_train_year"}
             yearly[year_text]["replay_summary"] = replay_summary
     aggregate = _walkforward_aggregate(yearly)
+    projection_parity_summary = _walkforward_projection_parity(yearly)
+    surrogate_exact_gap = _surrogate_exact_gap(train_summary, yearly)
+    exact_validation_metrics = _role_exact_metrics(yearly, "validation")
+    exact_test_metrics = _role_exact_metrics(yearly, "test")
     summary = {
         "status": "completed" if train_summary.get("status") == "completed" else "skipped",
         "stage": "rl_walkforward_study",
@@ -1227,6 +1401,19 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
         "yearly": yearly,
         "train_summary": train_summary,
         "aggregate": aggregate,
+        "projection_parity_summary": projection_parity_summary,
+        "validation_surrogate_metrics": train_summary.get("validation_surrogate_metrics", {}),
+        "validation_exact_replay_metrics": exact_validation_metrics,
+        "test_exact_replay_metrics": exact_test_metrics,
+        "surrogate_exact_gap": surrogate_exact_gap,
+        "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
+        "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
+        "evidence_verdict": _walkforward_evidence_verdict(
+            aggregate=aggregate,
+            projection_parity_summary=projection_parity_summary,
+            validation_exact_replay_metrics=exact_validation_metrics,
+            test_exact_replay_metrics=exact_test_metrics,
+        ),
         "oracle_used": False,
         "shadow_only": True,
         "promotion_allowed": False,
@@ -1256,6 +1443,160 @@ def _walkforward_aggregate(yearly: dict[str, Any]) -> dict[str, Any]:
         }
         by_role[role] = _multiyear_aggregate(role_yearly)
     return by_role
+
+
+def _walkforward_projection_parity(yearly: dict[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for year, result in yearly.items():
+        replay_summary = dict(result.get("replay_summary", {}) or {})
+        parity = dict(replay_summary.get("projection_parity_summary", {}) or {})
+        if not parity:
+            continue
+        rows.append({"year": str(year), "role": str(result.get("role", "")), **parity})
+    warning = any(bool(row.get("projection_mismatch_warning", False)) for row in rows)
+    gaps = [float(row.get("max_target_l1_gap", 0.0) or 0.0) for row in rows]
+    return {
+        "status": "warning" if warning else ("passed" if rows else "not_run"),
+        "projection_mismatch_warning": bool(warning),
+        "year_count": int(len(rows)),
+        "max_target_l1_gap": float(max(gaps) if gaps else 0.0),
+        "mean_max_target_l1_gap": _finite_mean(gaps),
+        "by_year": rows,
+    }
+
+
+def _role_exact_metrics(yearly: dict[str, Any], role: str) -> dict[str, Any]:
+    role_years = {
+        year: result
+        for year, result in yearly.items()
+        if str(result.get("role", "")) == str(role)
+        and str(dict(result.get("dataset_summary", {}) or {}).get("status", "")) == "completed"
+        and str(dict(result.get("replay_summary", {}) or {}).get("status", "")) == "completed"
+    }
+    if not role_years:
+        return {"status": "not_available", "role": str(role), "year_count": 0}
+    aggregate = _multiyear_aggregate(role_years)
+    by_year = {
+        str(year): dict(dict(result.get("replay_summary", {}) or {}).get("metrics", {}) or {})
+        for year, result in role_years.items()
+    }
+    return {"status": "completed", "role": str(role), "year_count": int(len(role_years)), "aggregate": aggregate, "by_year": by_year}
+
+
+def _surrogate_exact_gap(train_summary: dict[str, Any], yearly: dict[str, Any]) -> dict[str, Any]:
+    surrogate = dict(train_summary.get("validation_surrogate_metrics", {}) or {})
+    exact = _role_exact_metrics(yearly, "validation")
+    if surrogate.get("status") != "completed" or exact.get("status") != "completed":
+        return {"status": "not_available", "reason": "missing_surrogate_or_exact_validation"}
+    surrogate_diag = dict(surrogate.get("diagnostics", {}) or {})
+    exact_aggregate = dict(exact.get("aggregate", {}) or {})
+    return {
+        "status": "completed",
+        "surrogate_loss": float(surrogate.get("loss", 0.0) or 0.0),
+        "surrogate_avg_projection_l1_distance": float(surrogate_diag.get("avg_projection_l1_distance", 0.0) or 0.0),
+        "exact_mean_total_return": float(exact_aggregate.get("mean_total_return", 0.0) or 0.0),
+        "exact_mean_avg_projection_l1_distance": float(exact_aggregate.get("mean_avg_projection_l1_distance", 0.0) or 0.0),
+        "projection_l1_gap": float(
+            (surrogate_diag.get("avg_projection_l1_distance", 0.0) or 0.0)
+            - (exact_aggregate.get("mean_avg_projection_l1_distance", 0.0) or 0.0)
+        ),
+    }
+
+
+def _walkforward_evidence_verdict(
+    *,
+    aggregate: dict[str, Any],
+    projection_parity_summary: dict[str, Any],
+    validation_exact_replay_metrics: dict[str, Any],
+    test_exact_replay_metrics: dict[str, Any],
+) -> str:
+    validation_aggregate = dict(aggregate.get("validation", {}) or {})
+    test_aggregate = dict(aggregate.get("test", {}) or {})
+    if bool(projection_parity_summary.get("projection_mismatch_warning", False)):
+        return "insufficient_or_incomplete"
+    if int(validation_aggregate.get("completed_year_count", 0) or 0) < len(WALKFORWARD_VALIDATION_YEARS):
+        return "insufficient_or_incomplete"
+    validation_return = _safe_metric(dict(validation_aggregate), "mean_total_return")
+    validation_drawdown = _safe_metric(dict(validation_aggregate), "worst_max_drawdown")
+    validation_promising = validation_return is not None and validation_return > 0.0 and validation_drawdown is not None
+    if not validation_promising:
+        return "contract_passed"
+    if int(test_aggregate.get("completed_year_count", 0) or 0) < len(WALKFORWARD_TEST_YEARS):
+        return "validation_promising"
+    test_return = _safe_metric(dict(test_aggregate), "mean_total_return")
+    if test_return is not None and test_return > 0.0 and validation_exact_replay_metrics.get("status") == "completed" and test_exact_replay_metrics.get("status") == "completed":
+        return "test_promising"
+    return "validation_promising"
+
+
+def _matrix_evidence_verdict(model_results: dict[str, Any]) -> str:
+    if not model_results:
+        return "insufficient_or_incomplete"
+    verdicts = [
+        str(dict(result.get("walkforward_summary", {}) or {}).get("evidence_verdict", "insufficient_or_incomplete"))
+        for result in model_results.values()
+    ]
+    if any(verdict == "test_promising" for verdict in verdicts):
+        return "test_promising"
+    if any(verdict == "validation_promising" for verdict in verdicts):
+        return "validation_promising"
+    if any(verdict == "contract_passed" for verdict in verdicts):
+        return "contract_passed"
+    return "insufficient_or_incomplete"
+
+
+def _clone_args_with_model_family(args: argparse.Namespace, family: str) -> argparse.Namespace:
+    payload = vars(args).copy()
+    payload["model_family"] = str(family)
+    return argparse.Namespace(**payload)
+
+
+def _run_walkforward_matrix(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
+    families = [
+        item.strip()
+        for item in str(getattr(args, "model_family_matrix", "sequence_gru,decision_transformer")).split(",")
+        if item.strip()
+    ]
+    allowed = {"sequence_gru", "decision_transformer"}
+    invalid = sorted(set(families) - allowed)
+    if invalid:
+        raise ValueError(f"Unsupported --model-family-matrix entries: {invalid}")
+    model_results: dict[str, Any] = {}
+    for family in families:
+        family_root = study_root / family
+        family_root.mkdir(parents=True, exist_ok=True)
+        family_args = _clone_args_with_model_family(args, family)
+        walk_summary = _run_walkforward_study(study_root=family_root, tag=f"{tag}_{family}", args=family_args)
+        model_results[family] = {
+            "model_family": family,
+            "artifact_root": str(family_root.resolve()),
+            "walkforward_summary": walk_summary,
+            "validation_exact_replay_metrics": walk_summary.get("validation_exact_replay_metrics", {}),
+            "test_exact_replay_metrics": walk_summary.get("test_exact_replay_metrics", {}),
+            "projection_parity_summary": walk_summary.get("projection_parity_summary", {}),
+            "surrogate_exact_gap": walk_summary.get("surrogate_exact_gap", {}),
+            "evidence_verdict": walk_summary.get("evidence_verdict", "insufficient_or_incomplete"),
+        }
+    summary = {
+        "status": "completed",
+        "stage": "rl_walkforward_matrix",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "model_family_matrix": families,
+        "train_years": list(WALKFORWARD_TRAIN_YEARS),
+        "validation_years": list(WALKFORWARD_VALIDATION_YEARS),
+        "test_years": list(WALKFORWARD_TEST_YEARS),
+        "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
+        "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
+        "projection_parity_max_l1": float(getattr(args, "projection_parity_max_l1", 0.02)),
+        "models": model_results,
+        "evidence_verdict": _matrix_evidence_verdict(model_results),
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / "sequence_walkforward_matrix_summary.json", _json_ready(summary))
+    return _json_ready(summary)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1307,6 +1648,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rl-dropout", type=float, default=0.0)
     parser.add_argument("--rl-max-feature-columns", type=int, default=96)
     parser.add_argument("--min-year-trading-days", type=int, default=180)
+    parser.add_argument("--rollout-grad-mode", default="detached", choices=("detached", "truncated"))
+    parser.add_argument("--rollout-chunk-days", type=int, default=20)
+    parser.add_argument("--projection-parity-max-l1", type=float, default=0.02)
+    parser.add_argument("--reuse-episode-artifacts", dest="reuse_episode_artifacts", action="store_true", default=True)
+    parser.add_argument("--no-reuse-episode-artifacts", dest="reuse_episode_artifacts", action="store_false")
+    parser.add_argument("--model-family-matrix", default="sequence_gru,decision_transformer")
     return parser
 
 
@@ -1327,6 +1674,19 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         parser.error(f"RL stages require --policy-version {ALPHA_PATH20_SEQUENCE_POLICY_VERSION}.")
     if args.stage in SEQUENCE_RL_STAGES and not bool(args.no_oracle_input):
         parser.error("RL stages require --no-oracle-input; oracle inputs are not allowed.")
+    if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
+        parser.error("--rollout-chunk-days must be positive.")
+    if float(getattr(args, "projection_parity_max_l1", 0.02)) < 0.0:
+        parser.error("--projection-parity-max-l1 must be non-negative.")
+    if args.stage == "rl-walkforward-matrix":
+        families = [
+            item.strip()
+            for item in str(getattr(args, "model_family_matrix", "")).split(",")
+            if item.strip()
+        ]
+        invalid = sorted(set(families) - {"sequence_gru", "decision_transformer"})
+        if not families or invalid:
+            parser.error("--model-family-matrix must contain sequence_gru and/or decision_transformer.")
 
 
 def main(argv: list[str] | None = None) -> dict[str, Any]:
@@ -1338,7 +1698,12 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     effective_lake_dataset_id = str(args.lake_dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID).strip()
     args.lake_dataset_id = effective_lake_dataset_id
-    if args.stage == "rl-walkforward-study":
+    if args.stage in {"rl-walkforward-study", "rl-walkforward-matrix"}:
+        sequence_policy_summary = (
+            _run_walkforward_matrix(study_root=study_root, tag=tag, args=args)
+            if args.stage == "rl-walkforward-matrix"
+            else _run_walkforward_study(study_root=study_root, tag=tag, args=args)
+        )
         summary = {
             "status": "completed",
             "run_tag": tag,
@@ -1351,11 +1716,12 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
             "data_source": args.data_source,
             "lake_dataset_id": effective_lake_dataset_id,
             "execution_mode": args.execution_mode,
-            "sequence_policy": _run_walkforward_study(study_root=study_root, tag=tag, args=args),
+            "sequence_policy": sequence_policy_summary,
             "facts": [
                 "alpha_path20_sequence_policy_v1 is the path20 main research line.",
                 "Walk-forward evidence separates train, validation, and final shadow test years.",
                 "Exact replay remains PortfolioState.step after deterministic safety projection.",
+                "v3 matrix evidence compares fixed GRU and Decision Transformer families when rl-walkforward-matrix is selected.",
             ],
             "boundaries": [
                 "shadow_only=true",
