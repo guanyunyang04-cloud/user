@@ -12,6 +12,7 @@ from daily_research.tools.brain_platform import WORKSPACE_ROOT, read_text, write
 REGISTRY_PATH = Path("daily_research/brain/references/evidence_registry.json")
 REFERENCE_ROOT = Path("daily_research/brain/references")
 STATUS_DOC_PATTERN = re.compile(r"^(r\d+[a-z]?|gpu-runtime)-.+\.md$")
+PATH_POLICY_DOC_PATTERN = re.compile(r"^alpha_path20_.+\.md$")
 R_ID_PATTERN = re.compile(r"\br\d+[a-z]?\b", re.IGNORECASE)
 STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol)_[A-Za-z0-9_]+")
 DATASET_ID_PATTERN = re.compile(r"\b[A-Za-z0-9_]+(?:__[A-Za-z0-9_]+)*__[0-9a-f]{16,32}\b")
@@ -43,7 +44,12 @@ def _reference_files() -> list[Path]:
     return sorted(
         path
         for path in root.glob("*.md")
-        if path.is_file() and (STATUS_DOC_PATTERN.match(path.name) or path.name.startswith("r"))
+        if path.is_file()
+        and (
+            STATUS_DOC_PATTERN.match(path.name)
+            or PATH_POLICY_DOC_PATTERN.match(path.name)
+            or path.name.startswith("r")
+        )
     )
 
 
@@ -158,6 +164,8 @@ def _workflow_from(path: Path, text: str) -> str:
     lower = f"{path.name}\n{text}".lower()
     if "brain maintenance" in lower or "brain-skill" in lower or "brain_skill" in lower:
         return "brain"
+    if "path_policy" in lower or "alpha_path20" in lower:
+        return "path_policy"
     if "continuous_policy" in lower or "core_v4" in lower or "release_first" in lower:
         return "continuous_policy"
     if "data lake" in lower or "research_data_lake" in lower:
@@ -169,12 +177,14 @@ def _workflow_from(path: Path, text: str) -> str:
 
 def _tags_from(path: Path, text: str, r_id: str, workflow: str) -> list[str]:
     haystack = f"{path.name}\n{text[:800]}".lower()
-    tags = [r_id, workflow]
+    tags = [r_id, workflow] if r_id else [workflow]
     if workflow == "brain":
         return _dedupe([*tags, "brain"])
     is_portfolio_set_v5 = "portfolio-set" in haystack or "portfolio_set" in haystack or "portfolio set" in haystack
     if "data lake" in haystack or "research_data_lake" in haystack:
         tags.append("data_lake")
+    if "path_policy" in haystack or "alpha_path20" in haystack:
+        tags.append("path_policy")
     if "gpu" in haystack or "cuda" in haystack:
         tags.append("gpu")
     if not is_portfolio_set_v5 and ("core-v4" in haystack or "core_v4" in haystack):

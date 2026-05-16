@@ -1,10 +1,36 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 24,
+  "record_count": 26,
   "duplicates": [],
   "missing_paths": [],
   "records": [
+    {
+      "id": "alpha_path20_neural_policy_v1_status_20260516",
+      "date": "2026-05-16",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_neural_policy_v1_status_20260516.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `research / shadow-only / alpha_path20_neural_policy_v1 smoke evidence`.; This is an isolated new research line under `daily_research/path_policy/`; it does not replace `deep_alpha`, does not continue `continuous_policy/v6`, and does not touch live/default promotion.; The first lake tiny smoke completed with explicit study tag `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01` and fixed lake dataset id `policy_input_bundle__0f116a9b78c92ff045a6853d`.; `active_execution_strategy.json remains unchanged`; it remains guarded and must stay unchanged for this line.",
+      "blockers": [
+        "The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction."
+      ],
+      "next_allowed_actions": [
+        "Run oracle upper-bound studies over 2019Q1, 2020Q1, 2022Q1, and 2024Q1 before committing large forecaster training.",
+        "Build full path20 training datasets with explicit manifests and no loose latest aliases.",
+        "Train and compare linear/DLinear, GRU, and PatchTransformer forecasters on IC, top-bottom spread, quantile coverage, direction accuracy, and downside calibration.",
+        "Train the pure neural allocator first on oracle paths, then on predicted paths, and evaluate only through target-weight replay."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
+      ]
+    },
     {
       "id": "r50",
       "date": "2026-05-09",
@@ -697,20 +723,23 @@
         "r72",
         "continuous_policy",
         "data_lake",
-        "evaluator"
+        "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_01",
         "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
       ],
-      "verdict": "Status: `research / shadow-only / infrastructure progress`.; Scope completed: `evaluate_policy.py`, protocol shadow, export, behavior audit, and related helper CLIs can use `data_source=lake`.; Default market lake dataset: `policy_input_bundle__0f116a9b78c92ff045a6853d`.; Training remains strict Gold by default for portfolio-set v5: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.; This is not promotion evidence, not confirmatory evidence, and not live evidence.",
+      "verdict": "Status: `research / shadow-only / infrastructure progress`.; Scope completed: `evaluate_policy.py`, protocol shadow, export, behavior audit, and related helper CLIs can use `data_source=lake`.; Default market lake dataset: `policy_input_bundle__0f116a9b78c92ff045a6853d`.; Training remains strict Gold by default for portfolio-set v5: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
       "blockers": [
-        "r72 unblocks reproducible lake evaluation, but it does not prove r71 behavior acceptance.",
-        "In completed smoke `_02`, training evidence remains `insufficient`.",
-        "In completed smoke `_02`, shadow `portfolio_daily_source_target_count=0.0`.",
-        "In completed smoke `_02`, shadow `portfolio_daily_receiver_target_count=0.0`.",
-        "Promotion gate remains `shadow_only`."
+        "Lake coverage preflight reports `lake_coverage_blocker` for missing market fields, benchmark, membership, or insufficient trading days.",
+        "Failed diagnostic smoke:",
+        "export failed because the first r72 coverage rule incorrectly required two trading days for single-day export;",
+        "no TDX singleton empty blocker occurred;",
+        "In completed smoke `_02`, training evidence remains `insufficient`:",
+        "r72 solves the TDX singleton evaluate/shadow/export blocker by adding a generic lake evaluator path.",
+        "r71 now has one completed lake-backed tiny protocol, but its behavior acceptance failed because source/receiver targets remained zero in eval/shadow.",
+        "The current r71 blocker has moved from provider availability to model/oracle/head behavior quality."
       ],
       "next_allowed_actions": [
         "Use `--data-source lake --lake-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d` for future r71 evaluate/shadow/export smoke runs.",
@@ -730,33 +759,31 @@
       "path": "daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md",
       "tags": [
         "r73",
-        "continuous_policy",
-        "portfolio_set_v5",
-        "data_lake",
-        "r71"
+        "continuous_policy"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
-        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02",
-        "protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02"
+        "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
       ],
-      "verdict": "Status: `research / shadow-only / lake-native utilization and r71 collapse-repair evidence`. r73 repairs the r72 lake-smoke source/receiver target collapse and adds data-lake feature utilization evidence, but it is not promotion evidence, confirmatory evidence, or live evidence.",
+      "verdict": "Status: `research / shadow-only / lake-native utilization and r71 collapse-repair evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; Training dataset remains strict Gold: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
       "blockers": [
-        "training_evidence.status=insufficient",
-        "promotion_gate.status=shadow_only",
-        "shadow cash_timing_quality_1d remains negative",
-        "shadow source positive-forward sell share remains high",
-        "shadow receiver-source spread remains negative"
+        "`training_evidence.status=insufficient`.",
+        "Failed training evidence checks include `teacher_action_rows` and `best_epoch_not_at_edge`.",
+        "Promotion gate remains `shadow_only`.",
+        "Promotion checks still fail on `contract_promotable`, `training_evidence_sufficient`, `open_win_rate_5d`, `exit_timeliness_rate_5d`, `cash_timing_quality_1d`, `annual_return_vs_active`, and `sharpe_vs_active`.",
+        "Shadow `cash_timing_quality_1d=-0.27509539900014823` remains negative.",
+        "Shadow `portfolio_daily_source_positive_forward_sell_share=0.38095238095238093` is still too high.",
+        "Shadow `portfolio_daily_receiver_minus_source_forward_excess_5d=-0.006483055107116782` is not yet a healthy rotation-spread result."
       ],
       "next_allowed_actions": [
-        "Continue r71/r73 research on cash timing, source quality, receiver-source spread, and reversal quality.",
-        "Use the lake feature utilization report to promote high-value unused lake panels into the decision bundle.",
-        "Only consider strict resume after a fresh tiny lake smoke preserves cashflow closure and improves at least two behavior metrics versus r70/r72."
+        "Continue r71/r73 research on behavior quality: cash timing, source positive-forward sell share, receiver-source spread, and reversal quality.",
+        "Use the r73 utilization report to decide which currently unused high-value lake features should feed the decision bundle next.",
+        "Only consider strict resume after a fresh tiny lake smoke preserves cashflow closure, keeps source/receiver nonzero, and improves at least two behavior metrics versus r70/r72 without increasing oracle violations."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
-        "policy_input_bundle__0f116a9b78c92ff045a6853d",
-        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
     },
     {
@@ -767,33 +794,32 @@
       "tags": [
         "r74",
         "continuous_policy",
-        "portfolio_set_v5",
-        "data_lake",
-        "behavior_quality"
+        "portfolio_set_v5"
       ],
       "workflow": "continuous_policy",
       "study_tags": [
         "protocol_r74_lake_behavior_quality_v5_smoke_20260515_03",
-        "protocol_r74_lake_behavior_quality_v5_smoke_20260515_02",
         "protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02"
       ],
-      "verdict": "Status: `research / shadow-only / lake-native behavior-quality evidence`. r74 keeps cashflow/intent translation closed and improves several behavior metrics versus r73, but source/receiver coverage shrinks, feature contract degraded rate is 1.0, and training evidence remains insufficient; it is not promotion, confirmatory, or live evidence.",
+      "verdict": "Status: `research / shadow-only / lake-native behavior-quality evidence`.; Production anchor: `daily_research/output/active_execution_strategy.json` unchanged.; Live default remains `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active`.; Training dataset remains strict Gold: `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.",
       "blockers": [
-        "training_evidence.status=insufficient",
-        "promotion_gate.status=shadow_only",
-        "source/receiver coverage shrank versus r73",
-        "r74_feature_contract_degraded_rate=1.0",
-        "best_epoch=2 equals completed_epochs=2"
+        "`training_evidence.status=insufficient`.",
+        "`promotion_gate.status=shadow_only`.",
+        "`best_epoch=2` equals `completed_epochs=2`.",
+        "`teacher_action_rows` remains insufficient for promotion-style evidence.",
+        "r74 source/receiver coverage is lower than r73.",
+        "r74 feature contract degraded rate is `1.0`.",
+        "Lake evaluation remains research/shadow evidence and must not be counted as completed training evidence."
       ],
       "next_allowed_actions": [
-        "Repair feature-contract degradation without weakening cashflow/intent closure.",
-        "Recover source/receiver coverage while preserving lower wrong-side sell and reversal metrics.",
-        "Only consider strict resume after a fresh tiny lake smoke keeps translation closed and behavior improvements survive without coverage collapse."
+        "Repair feature-contract degradation so high-value lake fields are used without forcing every action row into degraded severity.",
+        "Recover source/receiver coverage while preserving zero intent conflict, cashflow validity, and lower wrong-side sell share.",
+        "Only consider strict resume after a fresh tiny lake smoke keeps r74 translation closed, keeps oracle violation near zero, and preserves at least two behavior improvements without severe source/receiver coverage shrinkage."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
-        "policy_input_bundle__0f116a9b78c92ff045a6853d",
-        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1"
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
     }
   ]
