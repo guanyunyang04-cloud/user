@@ -1,0 +1,884 @@
+{
+  "batch_id": "handoff_simplification_20260516_01",
+  "generated_at": "2026-05-16T22:17:05",
+  "policy_path": "daily_research\\archive_policy.json",
+  "policy_version": 1,
+  "archive_root": "daily_research/archive",
+  "selected_rules": [],
+  "moved_count": 109,
+  "moved_size_bytes": 22626401457,
+  "items": [
+    {
+      "rule": "output_runs",
+      "source_path": "daily_research\\output\\deep_alpha_short_alpha_execalign_production_default",
+      "archived_path": "daily_research\\archive\\output\\runs\\handoff_simplification_20260516_01\\deep_alpha_short_alpha_execalign_production_default",
+      "size_bytes": 5654437,
+      "is_dir": true,
+      "latest_mtime": "2026-04-16T16:14:32"
+    },
+    {
+      "rule": "output_runs",
+      "source_path": "daily_research\\output\\global_deployable_strategy_leaderboard_20260416_r1",
+      "archived_path": "daily_research\\archive\\output\\runs\\handoff_simplification_20260516_01\\global_deployable_strategy_leaderboard_20260416_r1",
+      "size_bytes": 3950,
+      "is_dir": true,
+      "latest_mtime": "2026-04-16T16:12:00"
+    },
+    {
+      "rule": "output_runs",
+      "source_path": "daily_research\\output\\project_review",
+      "archived_path": "daily_research\\archive\\output\\runs\\handoff_simplification_20260516_01\\project_review",
+      "size_bytes": 4043,
+      "is_dir": true,
+      "latest_mtime": "2026-04-14T16:39:12"
+    },
+    {
+      "rule": "deep_alpha_raw_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\raw\\55b3ca65741078d7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\raw\\handoff_simplification_20260516_01\\55b3ca65741078d7.pkl",
+      "size_bytes": 189409096,
+      "is_dir": false,
+      "latest_mtime": "2026-04-24T16:07:44"
+    },
+    {
+      "rule": "deep_alpha_raw_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\raw\\1bee9dfb70848971.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\raw\\handoff_simplification_20260516_01\\1bee9dfb70848971.pkl",
+      "size_bytes": 189200115,
+      "is_dir": false,
+      "latest_mtime": "2026-04-23T15:38:44"
+    },
+    {
+      "rule": "deep_alpha_raw_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\raw\\02cee48660634569.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\raw\\handoff_simplification_20260516_01\\02cee48660634569.pkl",
+      "size_bytes": 189052851,
+      "is_dir": false,
+      "latest_mtime": "2026-04-22T16:02:06"
+    },
+    {
+      "rule": "deep_alpha_raw_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\raw\\f9ab9358e9ac7982.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\raw\\handoff_simplification_20260516_01\\f9ab9358e9ac7982.pkl",
+      "size_bytes": 188905587,
+      "is_dir": false,
+      "latest_mtime": "2026-04-21T18:38:46"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\1434ddb1cb7cf3cd.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\handoff_simplification_20260516_01\\1434ddb1cb7cf3cd.pkl",
+      "size_bytes": 1761274189,
+      "is_dir": false,
+      "latest_mtime": "2026-05-08T15:14:48"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\5189e725bac84a2b.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\handoff_simplification_20260516_01\\5189e725bac84a2b.pkl",
+      "size_bytes": 1762637368,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T15:27:28"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\0e174e697c95d419.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\handoff_simplification_20260516_01\\0e174e697c95d419.pkl",
+      "size_bytes": 1764000595,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T15:16:00"
+    },
+    {
+      "rule": "deep_alpha_features_cache",
+      "source_path": "daily_research\\cache\\deep_alpha\\features\\06e7c9d51106030c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\deep_alpha\\features\\handoff_simplification_20260516_01\\06e7c9d51106030c.pkl",
+      "size_bytes": 1766173126,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T15:43:14"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\ff3523c802d3c75e35f0.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\ff3523c802d3c75e35f0.pkl",
+      "size_bytes": 88574,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T20:11:06"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\19fbb3e1f47f90ec3628.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\19fbb3e1f47f90ec3628.pkl",
+      "size_bytes": 86514,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T20:10:24"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\548a1d4982707ff0b754.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\548a1d4982707ff0b754.pkl",
+      "size_bytes": 12499579,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:51:46"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\481d1b4ffb9cee6b52f7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\481d1b4ffb9cee6b52f7.pkl",
+      "size_bytes": 101675,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:50:40"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\adef793725a44ea9956a.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\adef793725a44ea9956a.pkl",
+      "size_bytes": 505928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:49:56"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\75e98de2c3cc29c3bb6d.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\75e98de2c3cc29c3bb6d.pkl",
+      "size_bytes": 4890525,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:41:52"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\c3ded6cedd3c54830b1c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\c3ded6cedd3c54830b1c.pkl",
+      "size_bytes": 66307,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:34:08"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\77df0a80a18e5baeb817.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\77df0a80a18e5baeb817.pkl",
+      "size_bytes": 211189,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:33:44"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\3bd3630aed25ca95ad97.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\3bd3630aed25ca95ad97.pkl",
+      "size_bytes": 2042213,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:29:06"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\98439faa1d369e6ab377.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\98439faa1d369e6ab377.pkl",
+      "size_bytes": 6524081,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:01:32"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\cded4b7db5d4e43c670d.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\cded4b7db5d4e43c670d.pkl",
+      "size_bytes": 12053286,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T15:49:16"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\5fc9fa11a0559a5fb060.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\5fc9fa11a0559a5fb060.pkl",
+      "size_bytes": 62813,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T11:38:22"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\54c4d013ac2e17b87b3f.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\54c4d013ac2e17b87b3f.pkl",
+      "size_bytes": 585366160,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T10:19:08"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\7851b2dcb385cccece82.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\7851b2dcb385cccece82.pkl",
+      "size_bytes": 32815401,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T09:35:12"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\04c8f2a52b49c86da392.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\04c8f2a52b49c86da392.pkl",
+      "size_bytes": 111974313,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T09:00:14"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\c02ca6f4a196a57e94d3.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\c02ca6f4a196a57e94d3.pkl",
+      "size_bytes": 111974313,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T08:30:14"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\e77f8d4e40cfc4c757a3.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\e77f8d4e40cfc4c757a3.pkl",
+      "size_bytes": 62813,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T08:24:16"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\82a241e840e85811df61.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\82a241e840e85811df61.pkl",
+      "size_bytes": 32815401,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T07:45:10"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\d6d54da08afb9e44fad3.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\d6d54da08afb9e44fad3.pkl",
+      "size_bytes": 12352123,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:29:52"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\d483dc8dd17b854f0d49.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\d483dc8dd17b854f0d49.pkl",
+      "size_bytes": 101675,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:29:12"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\a6f921a1026c52d740a1.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\a6f921a1026c52d740a1.pkl",
+      "size_bytes": 505928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:28:50"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\21a15a2095f2dba22914.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\21a15a2095f2dba22914.pkl",
+      "size_bytes": 4832829,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:23:08"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\744bd93963b7ab4098e5.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\744bd93963b7ab4098e5.pkl",
+      "size_bytes": 42154,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T20:56:32"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\a26d2556584c2d058f8c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\a26d2556584c2d058f8c.pkl",
+      "size_bytes": 66307,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:40:30"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\853a5a6e53fcd08d11d4.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\853a5a6e53fcd08d11d4.pkl",
+      "size_bytes": 211189,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:40:16"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\d0b7f7a83d21408ea767.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\d0b7f7a83d21408ea767.pkl",
+      "size_bytes": 2018117,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:23:48"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\7ddca54304241550a4dc.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\7ddca54304241550a4dc.pkl",
+      "size_bytes": 11704721,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T18:59:18"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\1c0bbc14ee1d94a06516.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\1c0bbc14ee1d94a06516.pkl",
+      "size_bytes": 6524081,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T15:45:24"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\0dc224eff59c0685255b.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\0dc224eff59c0685255b.pkl",
+      "size_bytes": 12053286,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T15:34:20"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\c3a25155a1243901b379.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\c3a25155a1243901b379.pkl",
+      "size_bytes": 4775133,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T14:33:04"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\bc8031081fc9b7a11335.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\bc8031081fc9b7a11335.pkl",
+      "size_bytes": 28026633,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T09:08:40"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\cfce6b238b8f2c884478.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\cfce6b238b8f2c884478.pkl",
+      "size_bytes": 101675,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T18:15:54"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\a6fdd40ff7b29e5406ba.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\a6fdd40ff7b29e5406ba.pkl",
+      "size_bytes": 12204667,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:14:58"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\4812ae84a6f6a95f4108.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\4812ae84a6f6a95f4108.pkl",
+      "size_bytes": 448184,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:14:26"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\760207e042453dcaf950.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\760207e042453dcaf950.pkl",
+      "size_bytes": 505928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:14:06"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\617cb2e38e6978d6404c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\617cb2e38e6978d6404c.pkl",
+      "size_bytes": 4775133,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:05:52"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\5e4267185753a87f3304.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\5e4267185753a87f3304.pkl",
+      "size_bytes": 6524081,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T15:18:04"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\ef6c52d5667545923df7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\ef6c52d5667545923df7.pkl",
+      "size_bytes": 12053286,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T15:06:50"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\a28d25395be240bcc4b6.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\a28d25395be240bcc4b6.pkl",
+      "size_bytes": 28026633,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T23:15:42"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\e9c4c127a3da7486cad0.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\e9c4c127a3da7486cad0.pkl",
+      "size_bytes": 101675,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T17:18:58"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\57d522613f087d7de613.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\57d522613f087d7de613.pkl",
+      "size_bytes": 12057211,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:23:26"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\ced93685917c0d042d1f.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\ced93685917c0d042d1f.pkl",
+      "size_bytes": 390431,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:23:00"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\402de289b5928ea65e13.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\402de289b5928ea65e13.pkl",
+      "size_bytes": 505928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:22:40"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\379a8186ecef15c9d3dd.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\379a8186ecef15c9d3dd.pkl",
+      "size_bytes": 4717437,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:15:56"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\6501c85f57d7ecfb1a2e.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\6501c85f57d7ecfb1a2e.pkl",
+      "size_bytes": 6524081,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T15:29:22"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\1f925e6ea7f0d6151782.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\1f925e6ea7f0d6151782.pkl",
+      "size_bytes": 12053286,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T15:18:32"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\44fbd4348d0ac1a240ea.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\44fbd4348d0ac1a240ea.pkl",
+      "size_bytes": 101675,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T14:07:00"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\8c6fe32e763c187c44c0.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\8c6fe32e763c187c44c0.pkl",
+      "size_bytes": 11909755,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:12:30"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\b2d136334505f2039b95.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\b2d136334505f2039b95.pkl",
+      "size_bytes": 332669,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:11:50"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\a8e1cbafbfbb3726e8f1.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\a8e1cbafbfbb3726e8f1.pkl",
+      "size_bytes": 505928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:11:30"
+    },
+    {
+      "rule": "advanced_ml_raw_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\raw\\c2f6033d3b8eefd31094.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\raw\\handoff_simplification_20260516_01\\c2f6033d3b8eefd31094.pkl",
+      "size_bytes": 4659741,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:04:24"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7fbbcf40c33f6af6c21a.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7fbbcf40c33f6af6c21a.pkl",
+      "size_bytes": 1097296,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T20:11:06"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\f170087c540aae44d958.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\f170087c540aae44d958.pkl",
+      "size_bytes": 1071287,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T20:10:24"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\cf324032e73c65cd9398.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\cf324032e73c65cd9398.pkl",
+      "size_bytes": 159470960,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:51:54"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\2d4c2a34e3caab48d512.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\2d4c2a34e3caab48d512.pkl",
+      "size_bytes": 870671,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:50:42"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\011a999f6edf8999f934.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\011a999f6edf8999f934.pkl",
+      "size_bytes": 6062373,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:50:00"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7a6ee8a9c09cc24eb41b.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7a6ee8a9c09cc24eb41b.pkl",
+      "size_bytes": 62371138,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:41:56"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7c5b065540ef23c3b8de.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7c5b065540ef23c3b8de.pkl",
+      "size_bytes": 680503,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:34:10"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\b8307fdfd580eb681ab7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\b8307fdfd580eb681ab7.pkl",
+      "size_bytes": 2538814,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:33:46"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\690bd9e7e0f4fc03bb52.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\690bd9e7e0f4fc03bb52.pkl",
+      "size_bytes": 26023593,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:29:08"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\62ce3fea65229febcf56.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\62ce3fea65229febcf56.pkl",
+      "size_bytes": 83510584,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T16:01:34"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\d6d911deb774bbba5278.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\d6d911deb774bbba5278.pkl",
+      "size_bytes": 755836,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T11:38:22"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\d87fa9bc1487324dc3b2.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\d87fa9bc1487324dc3b2.pkl",
+      "size_bytes": 7519634574,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T10:21:06"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\9becdc3e3f41813bc98b.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\9becdc3e3f41813bc98b.pkl",
+      "size_bytes": 421000399,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T09:35:20"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\e65f9f484ec93ddbabee.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\e65f9f484ec93ddbabee.pkl",
+      "size_bytes": 1437610432,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T09:00:34"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\22a06389260ad6e155c7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\22a06389260ad6e155c7.pkl",
+      "size_bytes": 1437610432,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T08:30:34"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\9ea28ce432c8ce006986.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\9ea28ce432c8ce006986.pkl",
+      "size_bytes": 755836,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T08:24:16"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\904df206b94136945e39.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\904df206b94136945e39.pkl",
+      "size_bytes": 421000399,
+      "is_dir": false,
+      "latest_mtime": "2026-05-14T07:45:16"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\df2da4c4afb7c183c3cc.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\df2da4c4afb7c183c3cc.pkl",
+      "size_bytes": 157576202,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:30:02"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\23fe6cc166fafbfbafcf.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\23fe6cc166fafbfbafcf.pkl",
+      "size_bytes": 870671,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:29:14"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7022a6aa9e3c1fdc7155.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7022a6aa9e3c1fdc7155.pkl",
+      "size_bytes": 6062373,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:28:54"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\3513388db7e08cef4589.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\3513388db7e08cef4589.pkl",
+      "size_bytes": 61630170,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T21:23:12"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\76d7f9928cc8a4fc8050.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\76d7f9928cc8a4fc8050.pkl",
+      "size_bytes": 370772,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T20:56:32"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\93dfdbc2d57836a5b828.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\93dfdbc2d57836a5b828.pkl",
+      "size_bytes": 680503,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:40:32"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\00257fa616bde1111ca7.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\00257fa616bde1111ca7.pkl",
+      "size_bytes": 2538814,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:40:18"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\52c795e96bb3dcf564e9.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\52c795e96bb3dcf564e9.pkl",
+      "size_bytes": 25714525,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T19:23:50"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\a6f6bb021665f0eec7c9.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\a6f6bb021665f0eec7c9.pkl",
+      "size_bytes": 149960538,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T18:59:22"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\2e6e5e7ef427b60b8ab0.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\2e6e5e7ef427b60b8ab0.pkl",
+      "size_bytes": 83510586,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T15:45:26"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\e5d18816c1a0d4acdd09.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\e5d18816c1a0d4acdd09.pkl",
+      "size_bytes": 60889202,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T14:33:08"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\fec864a82327271f053a.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\fec864a82327271f053a.pkl",
+      "size_bytes": 359499974,
+      "is_dir": false,
+      "latest_mtime": "2026-05-13T09:08:48"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\8965fb57f60778d1720f.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\8965fb57f60778d1720f.pkl",
+      "size_bytes": 870671,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T18:15:56"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\b710addd4d2769244126.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\b710addd4d2769244126.pkl",
+      "size_bytes": 155681444,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:15:06"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\75568f716c1eaf251907.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\75568f716c1eaf251907.pkl",
+      "size_bytes": 5320786,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:14:30"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\f4cfec64a3f1484e66af.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\f4cfec64a3f1484e66af.pkl",
+      "size_bytes": 6062373,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:14:08"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\cb5b4e305ccd0909d528.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\cb5b4e305ccd0909d528.pkl",
+      "size_bytes": 60889202,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T16:05:56"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\0ab84eb27033e7078717.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\0ab84eb27033e7078717.pkl",
+      "size_bytes": 83510586,
+      "is_dir": false,
+      "latest_mtime": "2026-05-12T15:18:06"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\484ed35fcd47bb152ba1.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\484ed35fcd47bb152ba1.pkl",
+      "size_bytes": 359499974,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T23:15:48"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7dc29ae66f29f4e63712.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7dc29ae66f29f4e63712.pkl",
+      "size_bytes": 870671,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T17:19:02"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\d9ea308477e0f0227798.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\d9ea308477e0f0227798.pkl",
+      "size_bytes": 153786686,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:23:34"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\fd22fbfe8e5264459435.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\fd22fbfe8e5264459435.pkl",
+      "size_bytes": 4578893,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:23:04"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\6c2295a63f330ad8d04c.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\6c2295a63f330ad8d04c.pkl",
+      "size_bytes": 6062373,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:22:44"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\a1cda2493f1201f71116.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\a1cda2493f1201f71116.pkl",
+      "size_bytes": 60148234,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T16:16:00"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\7dfbdd867551fc3bb002.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\7dfbdd867551fc3bb002.pkl",
+      "size_bytes": 83510586,
+      "is_dir": false,
+      "latest_mtime": "2026-05-11T15:29:24"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\fc1757908473efb0deeb.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\fc1757908473efb0deeb.pkl",
+      "size_bytes": 870671,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T14:07:02"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\66418abe19d4ecef5771.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\66418abe19d4ecef5771.pkl",
+      "size_bytes": 151891928,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:12:36"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\fe6783c210c5c2205f08.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\fe6783c210c5c2205f08.pkl",
+      "size_bytes": 3837261,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:11:52"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\c775701f75e2681c8803.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\c775701f75e2681c8803.pkl",
+      "size_bytes": 6062373,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:11:32"
+    },
+    {
+      "rule": "advanced_ml_prepared_cache",
+      "source_path": "daily_research\\cache\\advanced_ml\\prepared\\856a93956ab9e5e0a883.pkl",
+      "archived_path": "daily_research\\archive\\cache\\advanced_ml\\prepared\\handoff_simplification_20260516_01\\856a93956ab9e5e0a883.pkl",
+      "size_bytes": 59407266,
+      "is_dir": false,
+      "latest_mtime": "2026-05-10T13:04:26"
+    }
+  ]
+}

@@ -72,3 +72,34 @@ python daily_research/tools/workspace_maintenance.py archive --apply
 
 1. 用 `workspace_maintenance.py report` 复核热区体积是否下降。
 2. 将新的归档 manifest 连同相关说明一起提交到 Git。
+
+## 2026-05-16 接管减负批次
+
+- 批次名：`handoff_simplification_20260516_01`。
+- Manifest：`daily_research/archive/manifests/archive_handoff_simplification_20260516_01.json`。
+- 执行命令：
+
+```bash
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/workspace_maintenance.py archive --batch-name handoff_simplification_20260516_01 --apply
+```
+
+- 移动结果：`109` 项，约 `21.07GB`，主要来自 `advanced_ml` 与 `deep_alpha` 缓存，以及少量过期 output run。
+- 本批次只做归档，不做删除；未运行 `clean --apply` 或 `prune-archive --apply`。
+- 本批次不修改 `daily_research/output/active_execution_strategy.json`，不触发训练、评估、study、production refresh 或 live/default 切换。
+
+### 本批次保留热区
+
+- `daily_research/output/continuous_policy/`：当前 research / shadow evidence 热区，仍需 explicit tag 或 dataset id 读取。
+- `daily_research/output/research_data_lake/`：当前 DuckDB + Parquet data lake 真源热区。
+- `daily_research/output/short_expert_policy_v5b_execalign_production_default/`：当前 production root。
+- `daily_research/output/active_execution_strategy.json`：当前 live/default 物化真源，禁止归档或修改。
+
+### 后续复核命令
+
+```bash
+git diff -- daily_research/output/active_execution_strategy.json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/workspace_maintenance.py report
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json
+git diff --check
+```
