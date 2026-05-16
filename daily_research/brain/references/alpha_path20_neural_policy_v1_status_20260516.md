@@ -1,8 +1,9 @@
 # alpha_path20_neural_policy_v1 Status 2026-05-16
 
 ## Verdict
-- Status: `research / shadow-only / alpha_path20_neural_policy_v1 smoke evidence`.
-- This is an isolated new research line under `daily_research/path_policy/`; it does not replace `deep_alpha`, does not continue `continuous_policy/v6`, and does not touch live/default promotion.
+- Status: `legacy / diagnostic-only / no-new-mainline-budget`.
+- `alpha_path20_neural_policy_v1` is no longer the path20 main research route. It is retained only for oracle upper-bound, path-label, forecaster-baseline, and historical diagnostic evidence.
+- The active path20 mainline is `alpha_path20_sequence_policy_v1`.
 - The first lake tiny smoke completed with explicit study tag `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01` and fixed lake dataset id `policy_input_bundle__0f116a9b78c92ff045a6853d`.
 - `active_execution_strategy.json remains unchanged`; it remains guarded and must stay unchanged for this line.
 
@@ -11,7 +12,11 @@
 - Added target-weight-only adapter: `portfolio_daily_target_weight` is the execution truth; source/receiver fields are derived from target delta for diagnostics and simulator compatibility only.
 - Added oracle upper-bound rollout using real future path labels and existing `PortfolioState.step` allocation-layer replay.
 - Added neural primitives and baselines: linear, DLinear, GRU, PatchTransformer, MLP forecasters plus pure neural target-weight allocator and path/portfolio losses.
-- Added protocol CLI: `python -m daily_research.path_policy.run_alpha_path20_protocol --stage tiny-smoke --tag <explicit_tag> --data-source lake --lake-dataset-id <fixed_id>`.
+- Legacy protocol stages remain available for diagnostics only:
+  - `dataset-smoke`
+  - `oracle-smoke`
+  - `tiny-smoke`
+- These stages now require explicit `--allow-legacy-neural-policy`. Without that flag the protocol must fail and direct the runner to `rl-*` sequence stages.
 - Added focused tests under `daily_research/path_policy/tests`; command passed: `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests -q` with `7 passed`.
 
 ## Smoke Evidence
@@ -25,7 +30,8 @@
 ## Inferences
 - The first oracle-path smoke supports the premise that, under this simulator and short window, knowing the future path can produce positive portfolio returns.
 - The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction.
-- The main research uncertainty has now shifted from v6 teacher correctness to prediction quality and decision-focused allocator robustness.
+- The old neural v1 route is useful as a diagnostic microscope, but it is structurally misaligned with the current pure sequence/RL goal because it centers path labels, oracle upper-bound, and forecaster/allocator decomposition.
+- New path20 budget should flow to `alpha_path20_sequence_policy_v1`, where the network directly outputs target weights from historical market and portfolio state.
 
 ## Assumptions
 - Lake bundle `policy_input_bundle__0f116a9b78c92ff045a6853d` remains the canonical market input source for near-term path20 smokes.
@@ -35,11 +41,10 @@
 ## Boundaries
 - Shadow-only: no promotion, no live/default routing, no `active_execution_strategy.json` changes.
 - No loose latest: every run must cite explicit protocol/study tag and dataset id.
-- Do not claim longrun evidence from the tiny smoke; multi-window 2019Q1/2020Q1/2022Q1/2024Q1 oracle upper-bound and predicted rollout studies remain pending.
-- Long training has not been started for this line; when started, it must not be interrupted before producing results.
+- Do not claim sequence/RL progress from neural v1 evidence.
+- Do not use oracle upper-bound or path-label results as sequence policy success evidence.
+- Do not start new mainline training from `alpha_path20_neural_policy_v1`; use it only when a diagnostic question explicitly requires the legacy protocol and pass `--allow-legacy-neural-policy`.
 
 ## Next Allowed Actions
-- Run oracle upper-bound studies over 2019Q1, 2020Q1, 2022Q1, and 2024Q1 before committing large forecaster training.
-- Build full path20 training datasets with explicit manifests and no loose latest aliases.
-- Train and compare linear/DLinear, GRU, and PatchTransformer forecasters on IC, top-bottom spread, quantile coverage, direction accuracy, and downside calibration.
-- Train the pure neural allocator first on oracle paths, then on predicted paths, and evaluate only through target-weight replay.
+- Run a legacy stage only for a named diagnostic purpose, for example checking oracle upper-bound replay behavior or path-label schema compatibility.
+- Prefer `rl-dataset-smoke`, `rl-train-smoke`, `rl-replay-smoke`, and `rl-multiyear-smoke` for all new path20 mainline work.

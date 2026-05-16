@@ -134,12 +134,19 @@ def run_sequence_policy_replay(
     if not projection_frame.empty:
         metrics["avg_projection_l1_distance"] = float(pd.to_numeric(projection_frame["projection_l1_distance"], errors="coerce").fillna(0.0).mean())
         metrics["avg_projected_gross_exposure"] = float(pd.to_numeric(projection_frame["projected_gross_exposure"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_projected_turnover"] = float(pd.to_numeric(projection_frame["projected_turnover"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_raw_turnover"] = float(pd.to_numeric(projection_frame["raw_turnover"], errors="coerce").fillna(0.0).mean())
+    turnover_frame = pd.DataFrame(turnover_rows)
+    if not turnover_frame.empty and "realized_turnover" in turnover_frame.columns:
+        metrics["avg_turnover"] = float(pd.to_numeric(turnover_frame["realized_turnover"], errors="coerce").fillna(0.0).mean())
+    elif not projection_frame.empty and "projected_turnover" in projection_frame.columns:
+        metrics["avg_turnover"] = float(pd.to_numeric(projection_frame["projected_turnover"], errors="coerce").fillna(0.0).mean())
     return {
         "dates": [pd.Timestamp(dt).strftime("%Y-%m-%d") for dt in dates],
         "returns": returns_series,
         "metrics": metrics,
         "action_panel": pd.DataFrame(action_rows),
-        "turnover_frame": pd.DataFrame(turnover_rows),
+        "turnover_frame": turnover_frame,
         "position_history": pd.DataFrame(position_rows),
         "projection_diagnostics": projection_frame,
     }

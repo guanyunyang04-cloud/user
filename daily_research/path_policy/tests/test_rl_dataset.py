@@ -63,3 +63,20 @@ def test_rl_leakage_guard_rejects_oracle_and_future_columns() -> None:
 def test_full_year_windows_are_calendar_year_requests() -> None:
     assert full_year_window(2019) == ("20190101", "20191231")
     assert full_year_window("2024") == ("20240101", "20241231")
+
+
+def test_annual_manifest_marks_low_trading_day_window_incomplete() -> None:
+    prepared = make_prepared_policy_inputs(days=30, stocks=("AAA", "BBB"))
+    trajectory = build_path20_sequence_trajectory_dataset(
+        prepared,
+        start_date="20240102",
+        end_date="20240215",
+        lake_dataset_id="policy_input_bundle__fixture",
+        year=2024,
+        sequence_length=4,
+        min_trading_days=180,
+    )
+
+    assert trajectory.manifest["status"] == "incomplete"
+    assert trajectory.manifest["incomplete_reason"] == "trading_day_count_below_180"
+    assert trajectory.manifest["trading_day_count"] < 180

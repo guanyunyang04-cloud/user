@@ -52,6 +52,8 @@ PATH_POLICY_OUTPUT_ROOT = Path("daily_research/output/path_policy")
 PATH_POLICY_STUDIES_ROOT = PATH_POLICY_OUTPUT_ROOT / "studies"
 PATH_POLICY_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "datasets"
 PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_datasets"
+LEGACY_NEURAL_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
+SEQUENCE_RL_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
 
 NON_PATH20_FEATURE_COLUMNS = {
     "date",
@@ -122,6 +124,88 @@ def _extend_end_date_for_labels(end_date: str, *, days: int = 60) -> str:
 def _finite_mean(values: list[float]) -> float:
     finite = [float(item) for item in values if np.isfinite(float(item))]
     return float(np.mean(finite)) if finite else 0.0
+
+
+def _finite_sum(values: list[float]) -> float:
+    finite = [float(item) for item in values if np.isfinite(float(item))]
+    return float(np.sum(finite)) if finite else 0.0
+
+
+def _safe_metric(metrics: dict[str, Any], key: str) -> float | None:
+    value = metrics.get(key)
+    if value is None:
+        return None
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    return resolved if np.isfinite(resolved) else None
+
+
+def _is_loose_lake_dataset_id(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized in {"latest", "default"} or normalized.startswith("latest_") or normalized.startswith("latest-")
+
+
+def _multiyear_aggregate(yearly: dict[str, Any]) -> dict[str, Any]:
+    completed_years: list[str] = []
+    incomplete_years: dict[str, dict[str, Any]] = {}
+    total_returns: list[float] = []
+    annual_returns: list[float] = []
+    sharpes: list[float] = []
+    max_drawdowns: list[float] = []
+    monthly_win_rates: list[float] = []
+    turnovers: list[float] = []
+    gross_exposures: list[float] = []
+    projection_distances: list[float] = []
+    for year, result in yearly.items():
+        dataset_summary = dict(result.get("dataset_summary", {}) or {})
+        replay_summary = dict(result.get("replay_summary", {}) or {})
+        metrics = dict(replay_summary.get("metrics", {}) or {})
+        dataset_status = str(dataset_summary.get("status", "") or "")
+        replay_status = str(replay_summary.get("status", "") or "")
+        if dataset_status == "completed" and replay_status == "completed":
+            completed_years.append(str(year))
+            for values, key in (
+                (total_returns, "total_return"),
+                (annual_returns, "annual_return"),
+                (sharpes, "sharpe"),
+                (max_drawdowns, "max_drawdown"),
+                (monthly_win_rates, "monthly_win_rate"),
+                (turnovers, "avg_turnover"),
+                (gross_exposures, "avg_projected_gross_exposure"),
+                (projection_distances, "avg_projection_l1_distance"),
+            ):
+                metric = _safe_metric(metrics, key)
+                if metric is not None:
+                    values.append(metric)
+            continue
+        reasons: list[str] = []
+        if dataset_status != "completed":
+            reasons.append(str(dataset_summary.get("incomplete_reason") or f"dataset_status={dataset_status or 'unknown'}"))
+        if replay_status != "completed":
+            reasons.append(str(replay_summary.get("reason") or f"replay_status={replay_status or 'unknown'}"))
+        incomplete_years[str(year)] = {
+            "dataset_status": dataset_status or "unknown",
+            "replay_status": replay_status or "unknown",
+            "reason": "; ".join(reason for reason in reasons if reason) or "not_completed",
+            "trading_day_count": int(dataset_summary.get("trading_day_count", 0) or 0),
+        }
+    return {
+        "completed_year_count": int(len(completed_years)),
+        "completed_years": completed_years,
+        "incomplete_year_count": int(len(incomplete_years)),
+        "incomplete_years": incomplete_years,
+        "total_return_sum": _finite_sum(total_returns),
+        "mean_total_return": _finite_mean(total_returns),
+        "mean_annual_return": _finite_mean(annual_returns),
+        "mean_sharpe": _finite_mean(sharpes),
+        "worst_max_drawdown": float(np.min(max_drawdowns)) if max_drawdowns else 0.0,
+        "mean_monthly_win_rate": _finite_mean(monthly_win_rates),
+        "mean_avg_turnover": _finite_mean(turnovers),
+        "mean_avg_projected_gross_exposure": _finite_mean(gross_exposures),
+        "mean_avg_projection_l1_distance": _finite_mean(projection_distances),
+    }
 
 
 def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str) -> float:
@@ -720,6 +804,23 @@ def _run_sequence_pipeline_for_prepared(
         start_date=start_date,
         end_date=end_date,
     )
+    dataset_summary = dataset_payload["manifest"]
+    if str(dataset_summary.get("status", "") or "") != "completed":
+        skip_summary = {
+            "status": "skipped",
+            "reason": "incomplete_dataset",
+            "dataset_status": str(dataset_summary.get("status", "") or "unknown"),
+            "incomplete_reason": str(dataset_summary.get("incomplete_reason", "") or ""),
+            "trading_day_count": int(dataset_summary.get("trading_day_count", 0) or 0),
+            "min_year_trading_days": int(args.min_year_trading_days),
+            "shadow_only": True,
+            "promotion_allowed": False,
+        }
+        return {
+            "dataset_summary": dataset_summary,
+            "train_summary": skip_summary,
+            "replay_summary": skip_summary,
+        }
     train_payload = _run_sequence_train_smoke(dataset_payload["trajectory"], study_root=study_root, args=args)
     replay_summary: dict[str, Any] = {"status": "not_run"}
     if train_payload.get("summary", {}).get("status") == "completed":
@@ -733,7 +834,7 @@ def _run_sequence_pipeline_for_prepared(
             prefix=prefix,
         )
     return {
-        "dataset_summary": dataset_payload["manifest"],
+        "dataset_summary": dataset_summary,
         "train_summary": train_payload.get("summary", train_payload),
         "replay_summary": replay_summary,
     }
@@ -758,7 +859,6 @@ def _prepare_for_window(args: argparse.Namespace, *, start_date: str, end_date: 
 
 def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
     yearly: dict[str, Any] = {}
-    total_returns: list[float] = []
     for year in DEFAULT_FULL_YEAR_WINDOWS:
         start_date, end_date = full_year_window(year)
         year_root = study_root / str(year)
@@ -775,19 +875,18 @@ def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.
             prefix=f"sequence_{year}",
         )
         yearly[str(year)] = result
-        metrics = dict(result.get("replay_summary", {}).get("metrics", {}) or {})
-        if "total_return" in metrics:
-            total_returns.append(float(metrics.get("total_return", 0.0) or 0.0))
+    aggregate = _multiyear_aggregate(yearly)
     summary = {
         "status": "completed",
         "stage": "rl_multiyear_smoke",
         "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
         "fixed_years": list(DEFAULT_FULL_YEAR_WINDOWS.keys()),
         "yearly": yearly,
-        "aggregate": {
-            "completed_year_count": int(len(yearly)),
-            "mean_total_return": float(np.mean(total_returns)) if total_returns else 0.0,
-        },
+        "aggregate": aggregate,
+        "leakage_guard_passed": all(
+            dict(result.get("dataset_summary", {}) or {}).get("leakage_guard", {}).get("status") == "passed"
+            for result in yearly.values()
+        ),
         "oracle_used": False,
         "shadow_only": True,
         "promotion_allowed": False,
@@ -798,22 +897,24 @@ def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run isolated alpha_path20_neural_policy_v1 research protocol.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run path20 sequence/RL mainline protocol. "
+            "Legacy alpha_path20_neural_policy_v1 stages are diagnostic-only and require an explicit allow flag."
+        )
+    )
     parser.add_argument(
         "--stage",
-        choices=(
-            "dataset-smoke",
-            "oracle-smoke",
-            "tiny-smoke",
-            "rl-dataset-smoke",
-            "rl-train-smoke",
-            "rl-replay-smoke",
-            "rl-multiyear-smoke",
-        ),
-        default="tiny-smoke",
+        choices=tuple(sorted(LEGACY_NEURAL_STAGES | SEQUENCE_RL_STAGES)),
+        default="rl-dataset-smoke",
     )
     parser.add_argument("--tag", required=True, help="Explicit protocol/study tag. Loose latest is forbidden.")
-    parser.add_argument("--policy-version", default="")
+    parser.add_argument("--policy-version", default=ALPHA_PATH20_SEQUENCE_POLICY_VERSION)
+    parser.add_argument(
+        "--allow-legacy-neural-policy",
+        action="store_true",
+        help="Allow diagnostic-only alpha_path20_neural_policy_v1 stages: dataset-smoke, oracle-smoke, tiny-smoke.",
+    )
     parser.add_argument("--data-source", default="lake", choices=("lake", "csv", "tq"))
     parser.add_argument("--lake-dataset-id", default="", help="Required for --data-source lake.")
     parser.add_argument("--data-lake-root", default="")
@@ -847,21 +948,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> dict[str, Any]:
-    parser = build_arg_parser()
-    args = parser.parse_args(argv)
+def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.data_source == "lake" and not str(args.lake_dataset_id or "").strip():
         parser.error("--data-source lake requires explicit --lake-dataset-id; do not rely on loose latest/default.")
-    if str(args.lake_dataset_id or "").strip().lower() in {"latest", "default"}:
-        parser.error("--lake-dataset-id must be a fixed dataset id, not latest/default.")
-    rl_stages = {"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"}
-    if args.stage in rl_stages and str(args.policy_version or "").strip() not in {
+    if _is_loose_lake_dataset_id(str(args.lake_dataset_id or "")):
+        parser.error("--lake-dataset-id must be a fixed dataset id, not latest/default/latest_*.")
+    if args.stage in LEGACY_NEURAL_STAGES and not bool(args.allow_legacy_neural_policy):
+        parser.error(
+            "dataset-smoke/oracle-smoke/tiny-smoke are legacy alpha_path20_neural_policy_v1 diagnostic stages. "
+            "Pass --allow-legacy-neural-policy to run them, or use rl-* stages for the path20 mainline."
+        )
+    if args.stage in SEQUENCE_RL_STAGES and str(args.policy_version or "").strip() not in {
         "",
         ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
     }:
         parser.error(f"RL stages require --policy-version {ALPHA_PATH20_SEQUENCE_POLICY_VERSION}.")
-    if args.stage in rl_stages and not bool(args.no_oracle_input):
+    if args.stage in SEQUENCE_RL_STAGES and not bool(args.no_oracle_input):
         parser.error("RL stages require --no-oracle-input; oracle inputs are not allowed.")
+
+
+def main(argv: list[str] | None = None) -> dict[str, Any]:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    _validate_protocol_args(parser, args)
     tag = str(args.tag or "").strip()
     study_root = PATH_POLICY_STUDIES_ROOT / tag
     study_root.mkdir(parents=True, exist_ok=True)
@@ -904,7 +1013,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     prepared = prepare_policy_inputs(
         pool_name=args.pool_name,
         start_date=args.start_date,
-        end_date=args.end_date if args.stage in rl_stages else _extend_end_date_for_labels(args.end_date),
+        end_date=args.end_date if args.stage in SEQUENCE_RL_STAGES else _extend_end_date_for_labels(args.end_date),
         benchmark=args.benchmark,
         data_source=args.data_source,
         csv_folder=args.csv_folder,
@@ -915,7 +1024,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         progress_desc=f"alpha_path20 prepare {tag}",
     )
-    if args.stage in rl_stages:
+    if args.stage in SEQUENCE_RL_STAGES:
         dataset_payload = _build_sequence_dataset_artifact(prepared=prepared, study_root=study_root, tag=tag, args=args)
         train_summary: dict[str, Any] = {"status": "not_run"}
         replay_summary: dict[str, Any] = {"status": "not_run"}
@@ -997,7 +1106,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "created_at": now_iso(),
         "policy_version": ALPHA_PATH20_POLICY_VERSION,
         "policy_profile": ALPHA_PATH20_POLICY_PROFILE,
-        "research_status": "research / shadow-only / alpha_path20_neural_policy_v1 smoke evidence",
+        "research_status": "legacy / diagnostic-only / alpha_path20_neural_policy_v1 evidence",
+        "legacy_diagnostic_only": True,
+        "no_new_mainline_budget": True,
         "stage": args.stage,
         "data_source": args.data_source,
         "lake_dataset_id": effective_lake_dataset_id,
@@ -1008,13 +1119,13 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "allocator_smoke": allocator_summary,
         "oracle_path_upper_bound": oracle_summary,
         "facts": [
-            "alpha_path20_neural_policy_v1 is isolated under daily_research/path_policy.",
+            "alpha_path20_neural_policy_v1 is legacy diagnostic-only evidence under daily_research/path_policy.",
             "The protocol writes path-policy artifacts under daily_research/output/path_policy with explicit tag and dataset id.",
             "target_weight is the only execution truth; source/receiver fields are derived diagnostics.",
         ],
         "inferences": [
             "This smoke can validate schema, next-open labels, target-weight projection, and oracle-path replay plumbing.",
-            "It is not sufficient promotion or longrun evidence; full multi-window forecaster and allocator training remain pending.",
+            "It is not sequence/RL mainline evidence and must not justify new mainline budget.",
         ],
         "assumptions": [
             "Lake policy bundle inputs already contain adjusted open/close panels and universe membership.",
@@ -1022,6 +1133,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         ],
         "boundaries": [
             "shadow_only=true",
+            "legacy_diagnostic_only=true",
             "no live/default promotion",
             "no active_execution_strategy.json modification",
             "no loose latest references",
