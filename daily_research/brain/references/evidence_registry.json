@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 33,
+  "record_count": 34,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -24,6 +24,32 @@
         "Diagnose whether the limiting factor is path forecast quality, target-weight projection dominance, or allocator objective shape before expanding budget."
       ],
       "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_neural_forecaster_stage1_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_neural_forecaster_stage1_contract_20260517.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `implemented supervised forecast contract / research / shadow-only / no promotion`.; Current Path20 research mainline pointer remains `alpha_path20_neural_policy_v1`.; Stage 1 scope is only forecast validation: past stock state sequence -> future 20 trading-day excess-return path.; This is not allocator, oracle, replay, or live/default strategy evidence.",
+      "blockers": [
+        "`insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.",
+        "`forecast_failed` when validation rank/spread/calibration gates fail.",
+        "Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress."
+      ],
+      "next_allowed_actions": [
+        "Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.",
+        "After explicit approval, run:",
+        "Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments."
+      ],
+      "active_artifact_impact": "guarded",
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]

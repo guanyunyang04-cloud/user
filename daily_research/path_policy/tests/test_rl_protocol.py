@@ -6,6 +6,7 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 from daily_research.path_policy.run_alpha_path20_protocol import (
     _aggregate_projection_parity_summaries,
     _baseline_targets_for_episode,
+    _run_forecast_walkforward_study,
     _run_baseline_suite,
     _run_v5_dt_validation_study,
     _matrix_evidence_diagnostics,
@@ -64,6 +65,31 @@ def test_protocol_parser_defaults_to_current_neural_mainline_dataset_stage() -> 
 
     assert args.stage == "dataset-smoke"
     assert args.policy_version == "alpha_path20_neural_policy_v1"
+
+
+def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_defaults() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.stage == "forecast-walkforward-study"
+    assert args.policy_version == "alpha_path20_neural_policy_v1"
+    assert args.forecast_lookback_days == 252
+    assert args.forecast_train_start_year == 2019
+    assert args.forecast_train_end_year == 2022
+    assert args.forecast_validation_year == 2023
+    assert args.forecast_test_year == 2024
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -143,6 +169,58 @@ def test_protocol_parser_accepts_v5_dt_validation_stage() -> None:
     assert args.rl_hidden_dim == 64
     assert args.rl_dropout == pytest.approx(0.1)
     assert args.smoke_lr == pytest.approx(3.0e-4)
+
+
+def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_fixture",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-lookback-days",
+            "5",
+            "--forecast-train-start-year",
+            "2018",
+            "--forecast-train-end-year",
+            "2019",
+            "--forecast-validation-year",
+            "2020",
+            "--forecast-test-year",
+            "2021",
+            "--forecast-model-families",
+            "linear_last_day",
+            "--forecast-epochs",
+            "1",
+            "--forecast-batch-size",
+            "4",
+            "--forecast-max-samples-per-role",
+            "8",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    summary = _run_forecast_walkforward_study(
+        prepared=prepared,
+        study_root=tmp_path,
+        tag="unit_forecast_fixture",
+        args=args,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["stage"] == "forecast_walkforward_study"
+    assert summary["policy_version"] == "alpha_path20_neural_policy_v1"
+    assert summary["shadow_only"] is True
+    assert summary["promotion_allowed"] is False
+    assert summary["active_execution_strategy_expected_diff"] == "none"
+    assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
+    assert "linear_last_day" in summary["training_summary"]["models"]
 
 
 def test_current_neural_mainline_stage_no_longer_requires_legacy_allow_flag() -> None:

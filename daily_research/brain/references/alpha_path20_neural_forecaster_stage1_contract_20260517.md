@@ -1,0 +1,49 @@
+# alpha_path20 Neural Forecaster Stage 1 Contract 2026-05-17
+
+## Verdict
+- Status: `implemented supervised forecast contract / research / shadow-only / no promotion`.
+- Current Path20 research mainline pointer remains `alpha_path20_neural_policy_v1`.
+- Stage 1 scope is only forecast validation: past stock state sequence -> future 20 trading-day excess-return path.
+- This is not allocator, oracle, replay, or live/default strategy evidence.
+- `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.
+
+## Facts
+- Added forecast sequence data contract under `daily_research/path_policy/forecast_dataset.py`.
+- Added forecast training/evaluation contract under `daily_research/path_policy/forecast_training.py`.
+- Extended `daily_research/path_policy/run_alpha_path20_protocol.py` with stages:
+  - `forecast-dataset`
+  - `forecast-train`
+  - `forecast-walkforward-study`
+- Default forecast window is train `2019-2022`, validation `2023`, test `2024`, lookback `252`, horizon `20`.
+- Default lake input remains `policy_input_bundle__0f116a9b78c92ff045a6853d`.
+- Model families are `linear_last_day`, `gru_sequence`, and `patch_transformer`.
+- Training uses `target_scale=100.0`; persisted prediction CSV values are restored to true return units.
+- Forecast verdicts are validation-first:
+  - `insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.
+  - `forecast_failed` when validation rank/spread/calibration gates fail.
+  - `forecast_promising` when validation gates pass.
+  - `forecast_test_confirmed` only when validation has passed and test rank/spread are also positive.
+
+## Inferences
+- This contract matches the forecast-then-allocation framing, but explicitly avoids claiming portfolio success from forecast loss alone.
+- Validation `rank_ic_20d`, `top_bottom_spread_20d`, and quantile coverage are more decision-relevant than daily MSE alone because allocation will amplify forecast errors.
+- Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress.
+
+## Assumptions
+- Past one-year input means the signal date plus the previous `lookback_days-1` trading days.
+- Future 20d labels use `next_open` semantics unless explicitly changed.
+- Because existing `next_open` labels enter on next open and exit on the future open, role-tail purge is implemented as `horizon + 1` trading days to guarantee labels do not cross roles.
+- Full real lake training is not started by this contract; it requires a separate explicit user approval.
+
+## Boundaries
+- Shadow-only: no live/default promotion.
+- No writes to `daily_research/output/active_execution_strategy.json`.
+- No allocator/replay/oracle second-stage claim from Stage 1.
+- No loose latest/default dataset ids.
+- Mainline remains switchable by explicit future user/project decision.
+
+## Next Allowed Actions
+- Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.
+- After explicit approval, run:
+  `forecast-walkforward-study --data-source lake --lake-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --forecast-train-start-year 2019 --forecast-train-end-year 2022 --forecast-validation-year 2023 --forecast-test-year 2024`
+- Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments.

@@ -239,17 +239,21 @@ Scope: this document is the rolling review entry for all attempted project mainl
 ### Facts
 - 2026-05-17 user decision switches the current Path20 research mainline pointer to `alpha_path20_neural_policy_v1`.
 - Stages `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` are current neural-policy mainline stages.
+- Stages `forecast-dataset`, `forecast-train`, and `forecast-walkforward-study` are current neural-policy supervised forecaster Stage 1 stages.
 - These stages no longer require `--allow-legacy-neural-policy`.
 - Parser default stage is `dataset-smoke`.
 - Existing tiny smoke evidence remains `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01`.
+- Stage 1 forecast contract is recorded in `daily_research/brain/references/alpha_path20_neural_forecaster_stage1_contract_20260517.md`.
 
 ### Inference
-- The current Path20 research question moves to path-label quality, oracle upper-bound, forecaster baseline, and neural target-weight allocation.
+- The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
 - Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
+- Forecast success must be judged validation-first with positive `rank_ic_20d`, positive `top_bottom_spread_20d`, and reasonable quantile coverage; daily MSE alone is insufficient.
 
 ### Current Stance
 - Current Path20 research route.
 - Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
+- Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
 - Do not start long training or touch active execution without a separate explicit task.
 
 ## 18. Path20 Sequence Policy v1

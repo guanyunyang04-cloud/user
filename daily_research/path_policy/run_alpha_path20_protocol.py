@@ -22,6 +22,8 @@ from daily_research.path_policy import (
     ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
 )
 from daily_research.path_policy.adapter import build_path_policy_frame
+from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset, save_forecast_sequence_dataset
+from daily_research.path_policy.forecast_training import FORECAST_MODEL_FAMILIES, train_forecast_models
 from daily_research.path_policy.labels import PATH20_HORIZON, build_path20_dataset_frame
 from daily_research.path_policy.models import (
     LinearPath20Forecaster,
@@ -72,7 +74,8 @@ PATH_POLICY_STUDIES_ROOT = PATH_POLICY_OUTPUT_ROOT / "studies"
 PATH_POLICY_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "datasets"
 PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_datasets"
 PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
-NEURAL_MAINLINE_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
+FORECAST_MAINLINE_STAGES = frozenset({"forecast-dataset", "forecast-train", "forecast-walkforward-study"})
+NEURAL_MAINLINE_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"}) | FORECAST_MAINLINE_STAGES
 LEGACY_NEURAL_STAGES = frozenset()
 SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
 SEQUENCE_RL_EPISODE_STAGES = frozenset(
@@ -529,6 +532,96 @@ def _run_forecaster_smoke(dataset: pd.DataFrame, *, study_root: Path, args: argp
     metrics["prediction_csv"] = str(prediction_path.resolve())
     write_json(study_root / "predicted_path_quality_summary.json", metrics)
     return metrics
+
+
+def _forecast_model_families(value: str | None) -> tuple[str, ...]:
+    families = tuple(item.strip() for item in str(value or "").split(",") if item.strip())
+    return families or tuple(FORECAST_MODEL_FAMILIES)
+
+
+def _run_forecast_walkforward_study(
+    *,
+    prepared: Any,
+    study_root: Path,
+    tag: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    families = _forecast_model_families(getattr(args, "forecast_model_families", ""))
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=int(args.forecast_train_start_year),
+        train_end_year=int(args.forecast_train_end_year),
+        validation_year=int(args.forecast_validation_year),
+        test_year=int(args.forecast_test_year),
+        lookback_days=int(args.forecast_lookback_days),
+        horizon=PATH20_HORIZON,
+        execution_mode=args.execution_mode,
+        max_samples_per_role=int(args.forecast_max_samples_per_role),
+    )
+    dataset_manifest = save_forecast_sequence_dataset(dataset, study_root)
+    training_summary: dict[str, Any] = {"status": "not_run"}
+    if args.stage in {"forecast-train", "forecast-walkforward-study"}:
+        training_summary = train_forecast_models(
+            dataset,
+            study_root=study_root,
+            model_families=families,
+            epochs=int(args.forecast_epochs),
+            batch_size=int(args.forecast_batch_size),
+            lr=float(args.forecast_lr),
+        )
+    status = "completed"
+    if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
+        "insufficient_or_incomplete",
+        "failed",
+    }:
+        status = "insufficient_or_incomplete"
+    summary = {
+        "status": status,
+        "run_tag": tag,
+        "study_tag": tag,
+        "created_at": now_iso(),
+        "policy_version": ALPHA_PATH20_POLICY_VERSION,
+        "policy_profile": ALPHA_PATH20_POLICY_PROFILE,
+        "research_status": "research / shadow-only / alpha_path20_neural_policy_v1 supervised forecaster stage1",
+        "path20_research_mainline": True,
+        "stage": str(args.stage).replace("-", "_"),
+        "data_source": args.data_source,
+        "lake_dataset_id": args.lake_dataset_id,
+        "execution_mode": args.execution_mode,
+        "prepared_summary": prepared.to_summary(),
+        "dataset_manifest": dataset_manifest,
+        "training_summary": training_summary,
+        "evidence_verdict": training_summary.get("evidence_verdict", "insufficient_or_incomplete"),
+        "forecast_model_families": list(families),
+        "facts": [
+            "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer.",
+            "Stage 1 is strict supervised forecasting: past stock state sequence to future 20d excess-return path.",
+            "Validation evidence is interpreted before test evidence.",
+            "Model outputs are trained with target_scale=100 and persisted predictions are restored to return units.",
+        ],
+        "inferences": [
+            "Positive validation rank_ic_20d and top_bottom_spread_20d indicate the forecast task is worth continuing.",
+            "This stage does not prove allocator, oracle, replay, or live strategy quality.",
+        ],
+        "assumptions": [
+            "Past one-year input means the signal date and previous lookback-1 trading days.",
+            "Future 20d labels follow next_open semantics unless --execution-mode close is explicitly selected.",
+        ],
+        "boundaries": [
+            "shadow_only=true",
+            "promotion_allowed=false",
+            "active_execution_strategy_expected_diff=none",
+            "no active_execution_strategy.json modification",
+            "no allocator/replay/live execution in stage1",
+        ],
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    summary = _json_ready(summary)
+    write_json(study_root / "forecast_walkforward_summary.json", summary)
+    write_json(study_root / "study_summary.json", summary)
+    return summary
 
 
 def _run_allocator_smoke(dataset: pd.DataFrame, *, study_root: Path, args: argparse.Namespace) -> dict[str, Any]:
@@ -3019,6 +3112,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allocator-max-names", type=int, default=80)
     parser.add_argument("--smoke-epochs", type=int, default=2)
     parser.add_argument("--smoke-lr", type=float, default=None)
+    parser.add_argument("--forecast-lookback-days", type=int, default=252)
+    parser.add_argument("--forecast-train-start-year", type=int, default=2019)
+    parser.add_argument("--forecast-train-end-year", type=int, default=2022)
+    parser.add_argument("--forecast-validation-year", type=int, default=2023)
+    parser.add_argument("--forecast-test-year", type=int, default=2024)
+    parser.add_argument("--forecast-model-families", default="linear_last_day,gru_sequence,patch_transformer")
+    parser.add_argument("--forecast-epochs", type=int, default=2)
+    parser.add_argument("--forecast-batch-size", type=int, default=512)
+    parser.add_argument("--forecast-lr", type=float, default=3.0e-4)
+    parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
     parser.add_argument("--model-family", default="sequence_gru", choices=("sequence_gru", "decision_transformer", "decision_transformer_v2"))
@@ -3066,6 +3169,30 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         parser.error(f"RL stages require --policy-version {ALPHA_PATH20_SEQUENCE_POLICY_VERSION}.")
     if args.stage in SEQUENCE_RL_STAGES and not bool(args.no_oracle_input):
         parser.error("RL stages require --no-oracle-input; oracle inputs are not allowed.")
+    if args.stage in FORECAST_MAINLINE_STAGES:
+        if int(getattr(args, "forecast_lookback_days", 252)) <= 0:
+            parser.error("--forecast-lookback-days must be positive.")
+        if int(getattr(args, "forecast_epochs", 2)) <= 0:
+            parser.error("--forecast-epochs must be positive.")
+        if int(getattr(args, "forecast_batch_size", 512)) <= 0:
+            parser.error("--forecast-batch-size must be positive.")
+        if float(getattr(args, "forecast_lr", 3.0e-4)) <= 0.0:
+            parser.error("--forecast-lr must be positive.")
+        if int(getattr(args, "forecast_max_samples_per_role", 0)) < 0:
+            parser.error("--forecast-max-samples-per-role must be >= 0.")
+        if not (
+            int(args.forecast_train_start_year)
+            <= int(args.forecast_train_end_year)
+            < int(args.forecast_validation_year)
+            < int(args.forecast_test_year)
+        ):
+            parser.error(
+                "Forecast years require train_start <= train_end < validation_year < test_year."
+            )
+        families = _forecast_model_families(getattr(args, "forecast_model_families", ""))
+        invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
+        if invalid:
+            parser.error(f"Unsupported --forecast-model-families: {', '.join(invalid)}.")
     if int(getattr(args, "rollout_chunk_days", 20)) <= 0:
         parser.error("--rollout-chunk-days must be positive.")
     if float(getattr(args, "projection_parity_max_l1", 0.02)) < 0.0:
@@ -3265,10 +3392,17 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         safe_print_json(summary)
         return summary
 
+    prepare_start_date = args.start_date
+    prepare_end_date = args.end_date
+    if args.stage in FORECAST_MAINLINE_STAGES:
+        prepare_start_date = f"{int(args.forecast_train_start_year) - 1}0101"
+        prepare_end_date = f"{int(args.forecast_test_year)}1231"
     prepared = prepare_policy_inputs(
         pool_name=args.pool_name,
-        start_date=args.start_date,
-        end_date=args.end_date if args.stage in SEQUENCE_RL_STAGES else _extend_end_date_for_labels(args.end_date),
+        start_date=prepare_start_date,
+        end_date=prepare_end_date
+        if args.stage in (SEQUENCE_RL_STAGES | FORECAST_MAINLINE_STAGES)
+        else _extend_end_date_for_labels(prepare_end_date),
         benchmark=args.benchmark,
         data_source=args.data_source,
         csv_folder=args.csv_folder,
@@ -3279,6 +3413,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         progress_desc=f"alpha_path20 prepare {tag}",
     )
+    if args.stage in FORECAST_MAINLINE_STAGES:
+        summary = _run_forecast_walkforward_study(prepared=prepared, study_root=study_root, tag=tag, args=args)
+        safe_print_json(summary)
+        return summary
     if args.stage in SEQUENCE_RL_STAGES:
         if args.stage in SEQUENCE_RL_EPISODE_STAGES:
             dataset_payload = _build_episode_dataset_artifact(prepared=prepared, study_root=study_root, tag=tag, args=args)
