@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 26,
+  "record_count": 27,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -29,6 +29,33 @@
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d",
         "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
+      ]
+    },
+    {
+      "id": "alpha_path20_sequence_policy_v4_validation_repair_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v4_validation_repair_contract_20260517.md",
+      "tags": [
+        "path_policy",
+        "path20",
+        "sequence_rl"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `research / shadow-only / path20 v4 validation-first repair contract`.; v4 chooses checkpoints only with 2022 exact validation replay and treats 2024 test replay as interpretable only after validation passes.; Baselines use the same exact replay, costs, and projection constraints; `v3_final_checkpoint` requires an explicit model path and must not be faked.; `promotion_allowed=false`; `active_execution_strategy.json` remains guarded and unchanged.",
+      "blockers": [
+        "Prior v3 and training-sufficiency evidence showed negative 2022 validation after more epochs or added 2021 training, so training volume alone is not the current root-cause explanation.",
+        "No full-year v4 evidence run has been approved or completed in this contract update."
+      ],
+      "next_allowed_actions": [
+        "Run fixture or small contract tests for `rl-v4-validation-repair-study` before any expensive full-year v4 execution.",
+        "Only run full-year v4 with explicit tag, fixed lake id, fixed seeds, and the validation-first selection rules.",
+        "Do not interpret 2024 test returns unless 2022 validation first passes and beats baselines."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
     },
     {

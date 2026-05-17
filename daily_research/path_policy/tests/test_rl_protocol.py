@@ -4,10 +4,17 @@ import pytest
 
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 from daily_research.path_policy.run_alpha_path20_protocol import (
+    _aggregate_projection_parity_summaries,
+    _baseline_targets_for_episode,
+    _run_baseline_suite,
     _matrix_evidence_diagnostics,
     _multiyear_aggregate,
+    _run_v4_validation_repair_study,
     _run_walkforward_matrix,
     _run_walkforward_study,
+    _select_v4_checkpoint,
+    _v4_multi_seed_summary,
+    _v4_verdict,
     _walkforward_evidence_diagnostics,
     _walkforward_evidence_verdict,
     _validate_protocol_args,
@@ -76,6 +83,32 @@ def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
     assert args.stage == "rl-walkforward-matrix"
     assert args.model_family_matrix == "sequence_gru,decision_transformer"
     assert args.rollout_grad_mode == "truncated"
+
+
+def test_protocol_parser_accepts_v4_validation_repair_stage() -> None:
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v4-validation-repair-study",
+            "--tag",
+            "unit_v4",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--rl-seed-matrix",
+            "7,11",
+            "--projection-penalty-grid",
+            "0.05,0.20",
+            "--tail-mass-penalty-weight",
+            "0.1",
+        ]
+    )
+
+    assert args.stage == "rl-v4-validation-repair-study"
+    assert args.rl_seed_matrix == "7,11"
+    assert args.projection_penalty_grid == "0.05,0.20"
+    assert args.tail_mass_penalty_weight == pytest.approx(0.1)
 
 
 def test_legacy_neural_stage_requires_explicit_allow_flag() -> None:
@@ -499,3 +532,319 @@ def test_matrix_evidence_diagnostics_selects_best_validation_family() -> None:
 
     assert diagnostics["status"] == "diagnosed"
     assert diagnostics["best_validation_family"] == "b"
+
+
+def test_v4_checkpoint_selection_ignores_test_metrics() -> None:
+    selected = _select_v4_checkpoint(
+        [
+            {
+                "epoch": 1,
+                "validation_metrics": {
+                    "total_return": -0.01,
+                    "sharpe": -0.1,
+                    "avg_projection_l1_distance": 0.01,
+                    "avg_turnover": 0.01,
+                },
+                "test_metrics": {"total_return": 10.0},
+            },
+            {
+                "epoch": 2,
+                "validation_metrics": {
+                    "total_return": 0.01,
+                    "sharpe": 0.2,
+                    "avg_projection_l1_distance": 0.10,
+                    "avg_turnover": 0.20,
+                },
+                "test_metrics": {"total_return": -10.0},
+            },
+        ]
+    )
+
+    assert selected["epoch"] == 2
+    assert selected["test_metrics_used_for_selection"] is False
+
+
+def test_v4_verdict_requires_positive_validation_and_baseline_win() -> None:
+    verdict = _v4_verdict(
+        selected_checkpoint={
+            "status": "selected",
+            "validation_metrics": {"total_return": 0.01, "sharpe": 0.4},
+        },
+        baseline_comparison={
+            "score_blend_top30": {
+                "validation": {"aggregate": {"mean_total_return": 0.02}},
+            }
+        },
+        projection_parity_summary={"projection_mismatch_warning": False},
+    )
+
+    assert verdict == "diagnosed_failure"
+
+    promising = _v4_verdict(
+        selected_checkpoint={
+            "status": "selected",
+            "validation_metrics": {"total_return": 0.03, "sharpe": 0.4},
+        },
+        baseline_comparison={
+            "score_blend_top30": {
+                "validation": {"aggregate": {"mean_total_return": 0.02}},
+            }
+        },
+        projection_parity_summary={"projection_mismatch_warning": False},
+    )
+    assert promising == "validation_promising"
+
+
+def test_v4_projection_mismatch_downgrades_verdict() -> None:
+    parity = _aggregate_projection_parity_summaries(
+        [
+            {"status": "passed", "max_target_l1_gap": 0.0, "projection_mismatch_warning": False},
+            {"status": "warning", "max_target_l1_gap": 0.05, "projection_mismatch_warning": True},
+        ]
+    )
+    verdict = _v4_verdict(
+        selected_checkpoint={
+            "status": "selected",
+            "validation_metrics": {"total_return": 0.03, "sharpe": 0.4},
+        },
+        baseline_comparison={
+            "score_blend_top30": {
+                "validation": {"aggregate": {"mean_total_return": 0.02}},
+            }
+        },
+        projection_parity_summary=parity,
+    )
+
+    assert parity["projection_mismatch_warning"] is True
+    assert verdict == "insufficient_or_incomplete"
+
+
+def test_v4_multiseed_summary_calculates_distribution() -> None:
+    summary = _v4_multi_seed_summary(
+        [
+            {"selected_checkpoint": {"validation_metrics": {"total_return": -0.01, "sharpe": -0.1}}},
+            {"selected_checkpoint": {"validation_metrics": {"total_return": 0.03, "sharpe": 0.4}}},
+            {"selected_checkpoint": {"validation_metrics": {"total_return": 0.01, "sharpe": 0.2}}},
+        ]
+    )
+
+    assert summary["seed_count"] == 3
+    assert summary["validation_return_median"] == pytest.approx(0.01)
+    assert summary["positive_validation_seed_count"] == 2
+
+
+def test_v4_baseline_targets_do_not_use_oracle_or_future_columns() -> None:
+    from daily_research.path_policy.rl_episode import build_path20_market_episode
+
+    prepared = make_prepared_policy_inputs(days=12, stocks=("AAA", "BBB", "CCC"), start_date="2022-01-02")
+    episode = build_path20_market_episode(
+        prepared,
+        start_date="20220101",
+        end_date="20221231",
+        lake_dataset_id="policy_input_bundle__fixture",
+        year=2022,
+        sequence_length=3,
+        min_trading_days=2,
+    )
+
+    targets = _baseline_targets_for_episode(episode, "score_blend_top30", max_positions=2)
+
+    assert targets
+    assert not any("oracle" in str(column).lower() or "future" in str(column).lower() for column in episode.feature_columns)
+    assert all(float(target.sum()) <= 1.0 for target in targets.values())
+
+
+def test_v4_v3_final_checkpoint_baseline_skips_without_explicit_model(tmp_path) -> None:
+    from daily_research.path_policy.rl_episode import build_path20_market_episode
+
+    prepared = make_prepared_policy_inputs(days=12, stocks=("AAA", "BBB", "CCC"), start_date="2022-01-02")
+    episode = build_path20_market_episode(
+        prepared,
+        start_date="20220101",
+        end_date="20221231",
+        lake_dataset_id="policy_input_bundle__fixture",
+        year=2022,
+        sequence_length=3,
+        min_trading_days=2,
+    )
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v4-validation-repair-study",
+            "--tag",
+            "unit_v4",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--sequence-length",
+            "3",
+            "--max-positions",
+            "2",
+            "--min-year-trading-days",
+            "2",
+        ]
+    )
+    results = _run_baseline_suite(
+        prepared_by_year={2022: prepared, 2024: prepared},
+        episode_by_year={2022: episode, 2024: episode},
+        study_root=tmp_path,
+        args=args,
+    )
+
+    assert results["v3_final_checkpoint"]["status"] == "skipped"
+    assert results["v3_final_checkpoint"]["reason"] == "missing_explicit_v3_checkpoint_model_pt"
+
+
+def test_v4_v3_final_checkpoint_baseline_loads_explicit_checkpoint(tmp_path) -> None:
+    import torch
+
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+    from daily_research.path_policy.rl_episode import (
+        EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS,
+        build_path20_market_episode,
+        fit_episode_normalization,
+    )
+    from daily_research.path_policy.rl_models import SequencePolicyConfig, SequenceTargetWeightPolicy
+
+    prepared = make_prepared_policy_inputs(days=12, stocks=("AAA", "BBB", "CCC"), start_date="2022-01-02")
+    episode = build_path20_market_episode(
+        prepared,
+        start_date="20220101",
+        end_date="20221231",
+        lake_dataset_id="policy_input_bundle__fixture",
+        year=2022,
+        sequence_length=3,
+        min_trading_days=2,
+    )
+    config = SequencePolicyConfig(
+        stock_feature_dim=len(episode.feature_columns) + len(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS),
+        portfolio_feature_dim=8,
+        hidden_dim=8,
+        dropout=0.0,
+        max_position_weight=0.20,
+    )
+    checkpoint_path = tmp_path / "sequence_policy_episode.pt"
+    torch.save(
+        {
+            "model_family": "sequence_gru",
+            "state_dict": SequenceTargetWeightPolicy(config).state_dict(),
+            "feature_columns": episode.feature_columns,
+            "dynamic_stock_feature_columns": list(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS),
+            "sequence_length": 3,
+            "normalization": fit_episode_normalization([episode]),
+            "policy_version": "alpha_path20_sequence_policy_v1",
+            "shadow_only": True,
+        },
+        checkpoint_path,
+    )
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v4-validation-repair-study",
+            "--tag",
+            "unit_v4",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--sequence-length",
+            "3",
+            "--max-position-weight",
+            "0.20",
+            "--max-gross-exposure",
+            "0.50",
+            "--max-positions",
+            "2",
+            "--turnover-budget",
+            "0.40",
+            "--min-year-trading-days",
+            "2",
+            "--v3-checkpoint-model-pt",
+            str(checkpoint_path),
+        ]
+    )
+    called = {"value": False}
+    original_predict = protocol.predict_episode_targets
+
+    def wrapped_predict(*items, **kwargs):
+        called["value"] = True
+        return original_predict(*items, **kwargs)
+
+    protocol.predict_episode_targets = wrapped_predict
+    try:
+        results = _run_baseline_suite(
+            prepared_by_year={2022: prepared, 2024: prepared},
+            episode_by_year={2022: episode, 2024: episode},
+            study_root=tmp_path / "baselines",
+            args=args,
+        )
+    finally:
+        protocol.predict_episode_targets = original_predict
+
+    baseline = results["v3_final_checkpoint"]
+    assert called["value"] is True
+    assert baseline["status"] == "completed"
+    assert baseline["checkpoint_model_pt"] == str(checkpoint_path.resolve())
+    assert baseline["checkpoint_model_family"] == "sequence_gru"
+
+
+def test_v4_validation_repair_study_contract_fixture(tmp_path, monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v4-validation-repair-study",
+            "--tag",
+            "unit_v4",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--sequence-length",
+            "3",
+            "--smoke-epochs",
+            "1",
+            "--rl-hidden-dim",
+            "8",
+            "--max-position-weight",
+            "0.20",
+            "--max-gross-exposure",
+            "0.50",
+            "--max-positions",
+            "2",
+            "--turnover-budget",
+            "0.40",
+            "--min-year-trading-days",
+            "2",
+            "--rl-seed-matrix",
+            "7",
+            "--projection-penalty-grid",
+            "0.05",
+        ]
+    )
+    args.lake_dataset_id = "policy_input_bundle__fixed"
+    monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_for_window",
+        lambda args, start_date, end_date, tag: make_prepared_policy_inputs(
+            days=12,
+            stocks=("AAA", "BBB", "CCC"),
+            start_date=f"{start_date[:4]}-01-02",
+        ),
+    )
+
+    summary = _run_v4_validation_repair_study(study_root=tmp_path / "v4", tag="unit_v4", args=args)
+
+    assert summary["stage"] == "rl_v4_validation_repair_study"
+    assert summary["seeds"] == [7]
+    assert summary["projection_penalty_grid"] == [0.05]
+    assert "checkpoint_exact_replay" in summary
+    assert summary["selected_checkpoint"]["test_metrics_used_for_selection"] is False
+    assert "baseline_comparison" in summary
+    assert "multi_seed_summary" in summary
+    assert "projection_tail_mass_summary" in summary
+    assert summary["test_interpretable"] is summary["validation_passed"]
+    assert summary["promotion_allowed"] is False

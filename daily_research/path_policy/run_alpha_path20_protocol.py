@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,7 @@ from daily_research.path_policy.rl_dataset import (
 )
 from daily_research.path_policy.rl_episode import (
     EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS,
+    EPISODE_PORTFOLIO_FEATURE_COLUMNS,
     Path20MarketEpisode,
     build_path20_market_episode,
     episode_array_manifest,
@@ -71,12 +74,28 @@ PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
 LEGACY_NEURAL_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
 SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
 SEQUENCE_RL_EPISODE_STAGES = frozenset(
-    {"rl-episode-dataset", "rl-train-episode", "rl-replay-episode", "rl-walkforward-study", "rl-walkforward-matrix"}
+    {
+        "rl-episode-dataset",
+        "rl-train-episode",
+        "rl-replay-episode",
+        "rl-walkforward-study",
+        "rl-walkforward-matrix",
+        "rl-v4-validation-repair-study",
+    }
 )
 SEQUENCE_RL_STAGES = SEQUENCE_RL_SMOKE_STAGES | SEQUENCE_RL_EPISODE_STAGES
 WALKFORWARD_TRAIN_YEARS = (2019, 2020)
 WALKFORWARD_VALIDATION_YEARS = (2022,)
 WALKFORWARD_TEST_YEARS = (2024,)
+V4_DEFAULT_SEEDS = (7, 11, 19)
+V4_PROJECTION_PENALTY_GRID = (0.05, 0.20, 0.50)
+V4_BASELINES = (
+    "cash_no_trade",
+    "liquidity_equal_top30",
+    "score_blend_top30",
+    "alpha_prior_target_weight",
+    "v3_final_checkpoint",
+)
 
 NON_PATH20_FEATURE_COLUMNS = {
     "date",
@@ -170,6 +189,33 @@ def _safe_metric(metrics: dict[str, Any], key: str) -> float | None:
     except (TypeError, ValueError):
         return None
     return resolved if np.isfinite(resolved) else None
+
+
+def _parse_int_list(value: str | None, *, default: tuple[int, ...]) -> list[int]:
+    text = str(value or "").strip()
+    if not text:
+        return [int(item) for item in default]
+    return [int(item.strip()) for item in text.split(",") if item.strip()]
+
+
+def _parse_float_list(value: str | None, *, default: tuple[float, ...]) -> list[float]:
+    text = str(value or "").strip()
+    if not text:
+        return [float(item) for item in default]
+    return [float(item.strip()) for item in text.split(",") if item.strip()]
+
+
+def _set_research_seed(seed: int) -> None:
+    random.seed(int(seed))
+    np.random.seed(int(seed))
+    try:
+        import torch
+
+        torch.manual_seed(int(seed))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(int(seed))
+    except Exception:
+        pass
 
 
 def _is_loose_lake_dataset_id(value: str) -> bool:
@@ -670,6 +716,87 @@ def _make_sequence_policy(args: argparse.Namespace, *, stock_feature_dim: int, p
     raise ValueError(f"Unsupported path20 sequence model family: {args.model_family!r}")
 
 
+def _load_sequence_policy_checkpoint(
+    checkpoint_path: str | Path,
+    args: argparse.Namespace,
+    episode: Path20MarketEpisode,
+) -> dict[str, Any]:
+    import torch
+
+    resolved_path = Path(checkpoint_path)
+    if not resolved_path.exists() or not resolved_path.is_file():
+        raise FileNotFoundError(f"v3 checkpoint model path does not exist: {resolved_path}")
+    payload = torch.load(str(resolved_path), map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict):
+        raise ValueError("v3 checkpoint payload must be a dictionary.")
+    state_dict = payload.get("state_dict")
+    if not isinstance(state_dict, dict) or not state_dict:
+        raise ValueError("v3 checkpoint payload is missing a non-empty state_dict.")
+    model_family = str(payload.get("model_family", "") or "").strip().lower()
+    if model_family not in {"sequence_gru", "decision_transformer"}:
+        raise ValueError(f"Unsupported v3 checkpoint model_family: {model_family!r}")
+    checkpoint_features = [str(item) for item in payload.get("feature_columns", [])]
+    if not checkpoint_features:
+        checkpoint_features = [str(item) for item in dict(payload.get("normalization", {}) or {}).get("feature_columns", [])]
+    if checkpoint_features != list(episode.feature_columns):
+        raise ValueError(
+            "v3 checkpoint feature_columns do not match the current episode artifact; "
+            "refusing to run a mislabeled baseline."
+        )
+    dynamic_columns = [str(item) for item in payload.get("dynamic_stock_feature_columns", EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS)]
+    if dynamic_columns != list(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS):
+        raise ValueError("v3 checkpoint dynamic stock features are incompatible with the v4 episode contract.")
+    normalization = dict(payload.get("normalization", {}) or {})
+    if not normalization:
+        raise ValueError("v3 checkpoint payload is missing normalization stats.")
+    hidden_dim = 0
+    num_layers = 1
+    if model_family == "sequence_gru":
+        weight = state_dict.get("encoder.weight_hh_l0")
+        if weight is None:
+            raise ValueError("sequence_gru checkpoint is missing encoder.weight_hh_l0.")
+        hidden_dim = int(weight.shape[1])
+    else:
+        weight = state_dict.get("input_proj.weight")
+        if weight is None:
+            raise ValueError("decision_transformer checkpoint is missing input_proj.weight.")
+        hidden_dim = int(weight.shape[0])
+        layer_ids: set[int] = set()
+        for key in state_dict:
+            parts = str(key).split(".")
+            if len(parts) > 2 and parts[0] == "encoder" and parts[1] == "layers":
+                try:
+                    layer_ids.add(int(parts[2]))
+                except ValueError:
+                    pass
+        num_layers = max(layer_ids) + 1 if layer_ids else 1
+    config = SequencePolicyConfig(
+        stock_feature_dim=int(len(checkpoint_features) + len(dynamic_columns)),
+        portfolio_feature_dim=len(EPISODE_PORTFOLIO_FEATURE_COLUMNS),
+        hidden_dim=int(hidden_dim),
+        dropout=0.0,
+        max_position_weight=float(args.max_position_weight),
+    )
+    if model_family == "sequence_gru":
+        model = SequenceTargetWeightPolicy(config)
+    else:
+        num_heads = 4 if int(hidden_dim) % 4 == 0 else 1
+        model = DecisionTransformerTargetWeightPolicy(config, num_layers=int(num_layers), num_heads=int(num_heads))
+    model.load_state_dict(state_dict)
+    model.eval()
+    return {
+        "model": model,
+        "model_family": model_family,
+        "normalization": normalization,
+        "sequence_length": int(payload.get("sequence_length", args.sequence_length)),
+        "checkpoint_model_pt": str(resolved_path.resolve()),
+        "feature_columns": checkpoint_features,
+        "dynamic_stock_feature_columns": dynamic_columns,
+        "policy_version": str(payload.get("policy_version", "")),
+        "shadow_only": bool(payload.get("shadow_only", True)),
+    }
+
+
 def _build_episode_dataset_artifact(
     *,
     prepared: Any,
@@ -800,6 +927,9 @@ def _episode_train_model(
                 max_gross_exposure=float(args.max_gross_exposure),
                 max_positions=int(args.max_positions),
                 turnover_budget=float(args.turnover_budget),
+                turnover_penalty=float(getattr(args, "turnover_penalty_weight", 0.20)),
+                projection_penalty=float(getattr(args, "projection_penalty_weight", 0.05)),
+                tail_mass_penalty=float(getattr(args, "tail_mass_penalty_weight", 0.0)),
                 rollout_grad_mode=str(getattr(args, "rollout_grad_mode", "detached")),
                 rollout_chunk_days=int(getattr(args, "rollout_chunk_days", 20)),
             )
@@ -833,6 +963,9 @@ def _episode_train_model(
                 max_gross_exposure=float(args.max_gross_exposure),
                 max_positions=int(args.max_positions),
                 turnover_budget=float(args.turnover_budget),
+                turnover_penalty=float(getattr(args, "turnover_penalty_weight", 0.20)),
+                projection_penalty=float(getattr(args, "projection_penalty_weight", 0.05)),
+                tail_mass_penalty=float(getattr(args, "tail_mass_penalty_weight", 0.0)),
                 rollout_grad_mode=str(getattr(args, "rollout_grad_mode", "detached")),
                 rollout_chunk_days=int(getattr(args, "rollout_chunk_days", 20)),
             )
@@ -906,6 +1039,9 @@ def _episode_train_model(
         "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
         "model_family": str(args.model_family),
         "reward_profile": str(args.reward_profile),
+        "turnover_penalty_weight": float(getattr(args, "turnover_penalty_weight", 0.20)),
+        "projection_penalty_weight": float(getattr(args, "projection_penalty_weight", 0.05)),
+        "tail_mass_penalty_weight": float(getattr(args, "tail_mass_penalty_weight", 0.0)),
         "train_years": list(train_years or []),
         "validation_years": list(validation_years or []),
         "epoch_count": int(max(int(args.smoke_epochs), 1)),
@@ -1016,6 +1152,22 @@ def _episode_projection_parity_summary(
     }
 
 
+def _aggregate_projection_parity_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [dict(summary) for summary in summaries if isinstance(summary, dict) and summary]
+    if not rows:
+        return {"status": "not_run", "projection_mismatch_warning": False, "summary_count": 0}
+    warning = any(bool(row.get("projection_mismatch_warning", False)) for row in rows)
+    gaps = [float(row.get("max_target_l1_gap", 0.0) or row.get("target_l1_gap", 0.0) or 0.0) for row in rows]
+    return {
+        "status": "warning" if warning else "passed",
+        "projection_mismatch_warning": bool(warning),
+        "summary_count": int(len(rows)),
+        "max_target_l1_gap": float(max(gaps) if gaps else 0.0),
+        "mean_target_l1_gap": _finite_mean(gaps),
+        "summaries": rows,
+    }
+
+
 def _summarize_replay_attribution(frame: pd.DataFrame) -> dict[str, Any]:
     if frame is None or frame.empty:
         return {"status": "not_available", "row_count": 0}
@@ -1109,6 +1261,532 @@ def _run_episode_replay(
     summary["replay_manifest_json"] = str(replay_manifest_path.resolve())
     write_json(replay_manifest_path, _json_ready(summary))
     write_json(study_root / f"{prefix}_rl_replay_summary.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
+def _run_target_replay(
+    *,
+    prepared: Any,
+    episode: Path20MarketEpisode,
+    target_by_date: dict[str, pd.Series],
+    study_root: Path,
+    args: argparse.Namespace,
+    prefix: str,
+    year: int | str,
+    role: str,
+    source_label: str,
+) -> dict[str, Any]:
+    rollout = run_sequence_policy_replay(
+        trajectory=episode.to_trajectory(),
+        target_weight_by_date=target_by_date,
+        execution_price_frame=_execution_price_frame(prepared, args.execution_mode),
+        transaction_cost_bps=float(args.transaction_cost_bps),
+        slippage_bps=float(args.slippage_bps),
+        sell_tax_bps=float(args.sell_tax_bps),
+        max_position_weight=float(args.max_position_weight),
+        max_gross_exposure=float(args.max_gross_exposure),
+        max_positions=int(args.max_positions),
+        turnover_budget=float(args.turnover_budget),
+        source_label=source_label,
+    )
+    paths = {
+        "action_panel_csv": _write_frame(study_root / f"{prefix}_rl_action_panel.csv", rollout["action_panel"]),
+        "turnover_csv": _write_frame(study_root / f"{prefix}_rl_turnover.csv", rollout["turnover_frame"]),
+        "position_history_csv": _write_frame(study_root / f"{prefix}_rl_position_history.csv", rollout["position_history"]),
+        "projection_diagnostics_csv": _write_frame(study_root / f"{prefix}_rl_projection_diagnostics.csv", rollout["projection_diagnostics"]),
+        "attribution_csv": _write_frame(study_root / f"{prefix}_rl_attribution.csv", rollout["attribution_frame"]),
+        "returns_csv": _write_frame(study_root / f"{prefix}_rl_returns.csv", _series_frame(rollout["returns"], index_name="date", value_name="net_return")),
+    }
+    summary = {
+        "status": "completed",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "stage": "rl_target_replay",
+        "source_label": str(source_label),
+        "year": int(year),
+        "role": str(role),
+        "date_count": int(len(rollout["dates"])),
+        "return_count": int(len(rollout["returns"])),
+        "metrics": rollout["metrics"],
+        "attribution_summary": _summarize_replay_attribution(rollout["attribution_frame"]),
+        "artifacts": paths,
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / f"{prefix}_rl_replay_summary.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
+def _baseline_targets_for_episode(episode: Path20MarketEpisode, baseline_name: str, *, max_positions: int) -> dict[str, pd.Series]:
+    targets: dict[str, pd.Series] = {}
+    name = str(baseline_name)
+    if name == "v3_final_checkpoint":
+        raise ValueError("v3_final_checkpoint baseline must be generated by loading an explicit checkpoint model.")
+    for daily in episode.daily_frames:
+        date_text = pd.Timestamp(daily["date"].iloc[0]).strftime("%Y-%m-%d")
+        stocks = daily["stock"].astype(str)
+        target = pd.Series(0.0, index=stocks, dtype=float)
+        tradable = pd.to_numeric(daily.get("tradable_mask", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.5
+        if name == "cash_no_trade":
+            targets[date_text] = target
+            continue
+        if name == "alpha_prior_target_weight" and "alpha_prior_target_weight" in daily.columns:
+            target = pd.to_numeric(daily["alpha_prior_target_weight"], errors="coerce").fillna(0.0).astype(float)
+            target.index = stocks
+            targets[date_text] = target.clip(lower=0.0)
+            continue
+        score_column = "score_blend" if name == "score_blend_top30" and "score_blend" in daily.columns else ""
+        if name == "liquidity_equal_top30" and "adv20_rank" in daily.columns:
+            score = pd.to_numeric(daily["adv20_rank"], errors="coerce").fillna(0.0).astype(float)
+        elif score_column:
+            score = pd.to_numeric(daily[score_column], errors="coerce").fillna(0.0).astype(float)
+        else:
+            score = pd.Series(np.arange(len(daily), 0, -1), index=daily.index, dtype=float)
+        score.index = stocks
+        score = score.where(pd.Series(tradable, index=stocks), -np.inf)
+        selected = score.sort_values(ascending=False).head(max(int(max_positions), 1))
+        selected = selected[np.isfinite(selected.to_numpy(dtype=float))]
+        if len(selected):
+            target.loc[selected.index] = 1.0 / float(len(selected))
+        targets[date_text] = target
+    return targets
+
+
+def _run_baseline_suite(
+    *,
+    prepared_by_year: dict[int, Any],
+    episode_by_year: dict[int, Path20MarketEpisode],
+    study_root: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    results: dict[str, Any] = {}
+    for baseline in V4_BASELINES:
+        checkpoint_bundle: dict[str, Any] | None = None
+        if baseline == "v3_final_checkpoint" and not str(getattr(args, "v3_checkpoint_model_pt", "") or "").strip():
+            results[baseline] = {
+                "status": "skipped",
+                "baseline_name": baseline,
+                "reason": "missing_explicit_v3_checkpoint_model_pt",
+                "oracle_used": False,
+                "shadow_only": True,
+                "promotion_allowed": False,
+            }
+            continue
+        if baseline == "v3_final_checkpoint":
+            checkpoint_bundle = _load_sequence_policy_checkpoint(
+                str(getattr(args, "v3_checkpoint_model_pt", "") or "").strip(),
+                args,
+                episode_by_year[int(WALKFORWARD_VALIDATION_YEARS[0])],
+            )
+        baseline_root = study_root / "baselines" / baseline
+        yearly: dict[str, Any] = {}
+        for year, role in ((WALKFORWARD_VALIDATION_YEARS[0], "validation"), (WALKFORWARD_TEST_YEARS[0], "test")):
+            year_root = baseline_root / str(year)
+            year_root.mkdir(parents=True, exist_ok=True)
+            episode = episode_by_year[int(year)]
+            checkpoint_projection_summary: dict[str, Any] = {}
+            if checkpoint_bundle is not None:
+                if list(checkpoint_bundle.get("feature_columns", [])) != list(episode.feature_columns):
+                    raise ValueError(
+                        f"v3 checkpoint feature_columns do not match {year} episode artifact; "
+                        "refusing to run a mislabeled baseline."
+                    )
+                target_by_date, checkpoint_projection_summary = predict_episode_targets(
+                    checkpoint_bundle["model"],
+                    episode,
+                    sequence_length=int(checkpoint_bundle["sequence_length"]),
+                    normalization=dict(checkpoint_bundle["normalization"]),
+                    model_family=str(checkpoint_bundle["model_family"]),
+                    max_position_weight=float(args.max_position_weight),
+                    max_gross_exposure=float(args.max_gross_exposure),
+                    max_positions=int(args.max_positions),
+                    turnover_budget=float(args.turnover_budget),
+                )
+            else:
+                target_by_date = _baseline_targets_for_episode(episode, baseline, max_positions=int(args.max_positions))
+            replay_summary = _run_target_replay(
+                prepared=prepared_by_year[int(year)],
+                episode=episode,
+                target_by_date=target_by_date,
+                study_root=year_root,
+                args=args,
+                prefix=f"{baseline}_{year}",
+                year=year,
+                role=role,
+                source_label=f"path20_v4_baseline_{baseline}",
+            )
+            yearly[str(year)] = {
+                "role": role,
+                "dataset_summary": episode.manifest,
+                "replay_summary": replay_summary,
+                "checkpoint_projection_summary": checkpoint_projection_summary,
+            }
+        results[baseline] = {
+            "status": "completed",
+            "baseline_name": baseline,
+            "checkpoint_model_pt": str(checkpoint_bundle.get("checkpoint_model_pt", "")) if checkpoint_bundle is not None else "",
+            "checkpoint_model_family": str(checkpoint_bundle.get("model_family", "")) if checkpoint_bundle is not None else "",
+            "yearly": yearly,
+            "validation": _role_exact_metrics(yearly, "validation"),
+            "test": _role_exact_metrics(yearly, "test"),
+            "oracle_used": False,
+            "shadow_only": True,
+            "promotion_allowed": False,
+        }
+    write_json(study_root / "baseline_comparison.json", _json_ready(results))
+    return _json_ready(results)
+
+
+def _baseline_validation_return(baseline_result: dict[str, Any]) -> float:
+    aggregate = dict(dict(baseline_result.get("validation", {}) or {}).get("aggregate", {}) or {})
+    return float(aggregate.get("mean_total_return", 0.0) or 0.0)
+
+
+def _checkpoint_sort_key(row: dict[str, Any]) -> tuple[int, int, float, float, float]:
+    metrics = dict(row.get("validation_metrics", {}) or {})
+    total_return = float(metrics.get("total_return", 0.0) or 0.0)
+    sharpe = float(metrics.get("sharpe", 0.0) or 0.0)
+    projection_l1 = float(metrics.get("avg_projection_l1_distance", 0.0) or 0.0)
+    turnover = float(metrics.get("avg_turnover", 0.0) or 0.0)
+    return (
+        1 if total_return > 0.0 else 0,
+        1 if sharpe > 0.0 else 0,
+        total_return,
+        -projection_l1,
+        -turnover,
+    )
+
+
+def _select_v4_checkpoint(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {"status": "not_available", "selection_reason": "no_checkpoints"}
+    selected = max(rows, key=_checkpoint_sort_key)
+    metrics = dict(selected.get("validation_metrics", {}) or {})
+    reason = (
+        "positive_validation_return_and_sharpe"
+        if float(metrics.get("total_return", 0.0) or 0.0) > 0.0 and float(metrics.get("sharpe", 0.0) or 0.0) > 0.0
+        else "best_available_validation_exact_replay"
+    )
+    return {**selected, "status": "selected", "selection_reason": reason, "test_metrics_used_for_selection": False}
+
+
+def _v4_multi_seed_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {"status": "not_available", "seed_count": 0}
+    validation_returns = [float(row.get("selected_checkpoint", {}).get("validation_metrics", {}).get("total_return", 0.0) or 0.0) for row in rows]
+    validation_sharpes = [float(row.get("selected_checkpoint", {}).get("validation_metrics", {}).get("sharpe", 0.0) or 0.0) for row in rows]
+    return {
+        "status": "completed",
+        "seed_count": int(len(rows)),
+        "validation_return_mean": _finite_mean(validation_returns),
+        "validation_return_median": float(np.median(validation_returns)) if validation_returns else 0.0,
+        "validation_return_std": float(np.std(validation_returns)) if validation_returns else 0.0,
+        "validation_sharpe_mean": _finite_mean(validation_sharpes),
+        "positive_validation_seed_count": int(sum(1 for value in validation_returns if value > 0.0)),
+    }
+
+
+def _v4_verdict(
+    *,
+    selected_checkpoint: dict[str, Any],
+    baseline_comparison: dict[str, Any],
+    projection_parity_summary: dict[str, Any],
+) -> str:
+    if bool(projection_parity_summary.get("projection_mismatch_warning", False)):
+        return "insufficient_or_incomplete"
+    metrics = dict(selected_checkpoint.get("validation_metrics", {}) or {})
+    validation_return = float(metrics.get("total_return", 0.0) or 0.0)
+    validation_sharpe = float(metrics.get("sharpe", 0.0) or 0.0)
+    best_baseline_return = max((_baseline_validation_return(result) for result in baseline_comparison.values()), default=0.0)
+    if validation_return > 0.0 and validation_sharpe > 0.0 and validation_return > best_baseline_return:
+        return "validation_promising"
+    if selected_checkpoint.get("status") == "selected":
+        return "diagnosed_failure"
+    return "contract_passed"
+
+
+def _run_v4_seed_penalty_experiment(
+    *,
+    prepared_by_year: dict[int, Any],
+    episode_by_year: dict[int, Path20MarketEpisode],
+    study_root: Path,
+    tag: str,
+    args: argparse.Namespace,
+    seed: int,
+    projection_penalty: float,
+) -> dict[str, Any]:
+    import torch
+
+    _set_research_seed(int(seed))
+    experiment_root = study_root / f"seed_{int(seed)}" / f"projection_penalty_{str(float(projection_penalty)).replace('.', '_')}"
+    experiment_root.mkdir(parents=True, exist_ok=True)
+    train_episodes = [episode_by_year[int(year)] for year in WALKFORWARD_TRAIN_YEARS]
+    validation_episode = episode_by_year[int(WALKFORWARD_VALIDATION_YEARS[0])]
+    test_episode = episode_by_year[int(WALKFORWARD_TEST_YEARS[0])]
+    completed_train = [episode for episode in train_episodes if str(episode.manifest.get("status", "")) == "completed"]
+    if not completed_train:
+        return {"status": "skipped", "reason": "no_completed_train_episodes"}
+    normalization = fit_episode_normalization(completed_train)
+    base_feature_count = int(len(completed_train[0].feature_columns))
+    stock_feature_dim = base_feature_count + len(EPISODE_DYNAMIC_STOCK_FEATURE_COLUMNS)
+    experiment_args = copy.copy(args)
+    experiment_args.model_family = "sequence_gru"
+    experiment_args.projection_penalty_weight = float(projection_penalty)
+    model = _make_sequence_policy(experiment_args, stock_feature_dim=stock_feature_dim, portfolio_feature_dim=8)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.smoke_lr), weight_decay=1.0e-4)
+    checkpoint_rows: list[dict[str, Any]] = []
+    losses: list[float] = []
+    raw_intent_rows: list[dict[str, float]] = []
+    projection_rows: list[dict[str, float]] = []
+    for epoch in range(1, max(int(args.smoke_epochs), 1) + 1):
+        epoch_losses: list[float] = []
+        for episode in completed_train:
+            optimizer.zero_grad(set_to_none=True)
+            result = episode_policy_rollout_loss(
+                model,
+                episode,
+                sequence_length=int(args.sequence_length),
+                normalization=normalization,
+                model_family="sequence_gru",
+                transaction_cost_bps=float(args.transaction_cost_bps),
+                slippage_bps=float(args.slippage_bps),
+                sell_tax_bps=float(args.sell_tax_bps),
+                max_position_weight=float(args.max_position_weight),
+                max_gross_exposure=float(args.max_gross_exposure),
+                max_positions=int(args.max_positions),
+                turnover_budget=float(args.turnover_budget),
+                turnover_penalty=float(getattr(args, "turnover_penalty_weight", 0.20)),
+                projection_penalty=float(projection_penalty),
+                tail_mass_penalty=float(getattr(args, "tail_mass_penalty_weight", 0.0)),
+                rollout_grad_mode=str(getattr(args, "rollout_grad_mode", "detached")),
+                rollout_chunk_days=int(getattr(args, "rollout_chunk_days", 20)),
+            )
+            if result.get("status") != "completed":
+                continue
+            loss = result["loss"]
+            loss.backward()
+            optimizer.step()
+            epoch_losses.append(float(loss.detach().cpu()))
+            raw_intent_rows.append(dict(result.get("raw_intent_diagnostics", {}) or {}))
+            projection_rows.append(dict(result.get("diagnostics", {}) or {}))
+        losses.append(float(np.mean(epoch_losses)) if epoch_losses else 0.0)
+        checkpoint_path = experiment_root / f"checkpoint_epoch_{epoch}.pt"
+        torch.save(
+            {
+                "model_family": "sequence_gru",
+                "state_dict": model.state_dict(),
+                "seed": int(seed),
+                "epoch": int(epoch),
+                "projection_penalty_weight": float(projection_penalty),
+                "normalization": normalization,
+                "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+                "shadow_only": True,
+                "promotion_allowed": False,
+            },
+            checkpoint_path,
+        )
+        validation_root = experiment_root / "validation_checkpoints" / f"epoch_{epoch}"
+        validation_root.mkdir(parents=True, exist_ok=True)
+        validation_replay = _run_episode_replay(
+            prepared=prepared_by_year[int(WALKFORWARD_VALIDATION_YEARS[0])],
+            episode=validation_episode,
+            model=model,
+            normalization=normalization,
+            study_root=validation_root,
+            args=experiment_args,
+            prefix=f"checkpoint_epoch_{epoch}_validation",
+            year=WALKFORWARD_VALIDATION_YEARS[0],
+            role="validation",
+        )
+        checkpoint_rows.append(
+            {
+                "epoch": int(epoch),
+                "checkpoint_pt": str(checkpoint_path.resolve()),
+                "train_loss": float(losses[-1]),
+                "validation_metrics": validation_replay.get("metrics", {}),
+                "validation_replay_summary_json": validation_replay.get("replay_manifest_json", ""),
+                "validation_projection_parity_summary": validation_replay.get("projection_parity_summary", {}),
+                "projection_tail_mass_summary": _summarize_projection_dicts(raw_intent_rows),
+                "test_metrics_used_for_selection": False,
+            }
+        )
+    selected = _select_v4_checkpoint(checkpoint_rows)
+    selected_epoch = int(selected.get("epoch", 0) or 0)
+    selected_state = (
+        torch.load(str(selected.get("checkpoint_pt")), map_location="cpu", weights_only=False)
+        if selected.get("checkpoint_pt")
+        else None
+    )
+    if selected_state:
+        model.load_state_dict(selected_state["state_dict"])
+    selected_validation_passed = (
+        float(dict(selected.get("validation_metrics", {}) or {}).get("total_return", 0.0) or 0.0) > 0.0
+        and float(dict(selected.get("validation_metrics", {}) or {}).get("sharpe", 0.0) or 0.0) > 0.0
+    )
+    test_root = experiment_root / "selected_test_replay"
+    test_root.mkdir(parents=True, exist_ok=True)
+    test_replay = _run_episode_replay(
+        prepared=prepared_by_year[int(WALKFORWARD_TEST_YEARS[0])],
+        episode=test_episode,
+        model=model,
+        normalization=normalization,
+        study_root=test_root,
+        args=experiment_args,
+        prefix=f"selected_epoch_{selected_epoch}_test",
+        year=WALKFORWARD_TEST_YEARS[0],
+        role="test",
+    )
+    summary = {
+        "status": "completed",
+        "stage": "rl_v4_seed_projection_penalty_experiment",
+        "tag": str(tag),
+        "seed": int(seed),
+        "model_family": "sequence_gru",
+        "projection_penalty_weight": float(projection_penalty),
+        "turnover_penalty_weight": float(getattr(args, "turnover_penalty_weight", 0.20)),
+        "tail_mass_penalty_weight": float(getattr(args, "tail_mass_penalty_weight", 0.0)),
+        "train_years": list(WALKFORWARD_TRAIN_YEARS),
+        "validation_years": list(WALKFORWARD_VALIDATION_YEARS),
+        "test_years": list(WALKFORWARD_TEST_YEARS),
+        "train_loss_curve": losses,
+        "checkpoint_exact_replay": checkpoint_rows,
+        "selected_checkpoint": selected,
+        "selection_reason": str(selected.get("selection_reason", "")),
+        "validation_passed": bool(selected_validation_passed),
+        "test_interpretable": bool(selected_validation_passed),
+        "test_exact_replay_metrics": test_replay.get("metrics", {}),
+        "test_replay_summary": test_replay,
+        "projection_tail_mass_summary": _summarize_projection_dicts(raw_intent_rows),
+        "projection_diagnostics_summary": _summarize_projection_dicts(projection_rows),
+        "projection_parity_summary": _aggregate_projection_parity_summaries(
+            [
+                dict(row.get("validation_projection_parity_summary", {}) or {})
+                for row in checkpoint_rows
+            ]
+            + [dict(test_replay.get("projection_parity_summary", {}) or {})]
+        ),
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(experiment_root / "v4_seed_projection_penalty_summary.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
+def _run_v4_validation_repair_study(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
+    years = [*WALKFORWARD_TRAIN_YEARS, *WALKFORWARD_VALIDATION_YEARS, *WALKFORWARD_TEST_YEARS]
+    prepared_by_year: dict[int, Any] = {}
+    episode_by_year: dict[int, Path20MarketEpisode] = {}
+    yearly: dict[str, Any] = {}
+    for year in years:
+        start_date, end_date = full_year_window(year)
+        year_root = study_root / "episodes" / str(year)
+        year_root.mkdir(parents=True, exist_ok=True)
+        prepared = _prepare_for_window(args, start_date=start_date, end_date=end_date, tag=f"{tag}_{year}")
+        prepared_by_year[int(year)] = prepared
+        dataset_payload = _build_episode_dataset_artifact(
+            prepared=prepared,
+            study_root=year_root,
+            tag=f"{tag}_{year}",
+            args=args,
+            year=year,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        episode = dataset_payload["episode"]
+        episode_by_year[int(year)] = episode
+        yearly[str(year)] = {
+            "role": _walkforward_role(year),
+            "dataset_summary": dataset_payload["manifest"],
+            "array_manifest": dataset_payload.get("array_manifest", {}),
+            "prepared_summary": prepared.to_summary(),
+        }
+    baseline_comparison = _run_baseline_suite(
+        prepared_by_year=prepared_by_year,
+        episode_by_year=episode_by_year,
+        study_root=study_root,
+        args=args,
+    )
+    seeds = _parse_int_list(str(getattr(args, "rl_seed_matrix", "")), default=V4_DEFAULT_SEEDS)
+    projection_grid = _parse_float_list(
+        str(getattr(args, "projection_penalty_grid", "")),
+        default=V4_PROJECTION_PENALTY_GRID,
+    )
+    experiment_results: list[dict[str, Any]] = []
+    for seed in seeds:
+        for projection_penalty in projection_grid:
+            experiment_results.append(
+                _run_v4_seed_penalty_experiment(
+                    prepared_by_year=prepared_by_year,
+                    episode_by_year=episode_by_year,
+                    study_root=study_root,
+                    tag=tag,
+                    args=args,
+                    seed=int(seed),
+                    projection_penalty=float(projection_penalty),
+                )
+            )
+    best_experiment = max(
+        experiment_results,
+        key=lambda row: _checkpoint_sort_key(dict(row.get("selected_checkpoint", {}) or {})),
+        default={},
+    )
+    best_selected = dict(best_experiment.get("selected_checkpoint", {}) or {})
+    baseline_returns = {
+        name: _baseline_validation_return(dict(result))
+        for name, result in baseline_comparison.items()
+    }
+    best_baseline_return = max(baseline_returns.values(), default=0.0)
+    validation_metrics = dict(best_selected.get("validation_metrics", {}) or {})
+    validation_passed = (
+        float(validation_metrics.get("total_return", 0.0) or 0.0) > 0.0
+        and float(validation_metrics.get("sharpe", 0.0) or 0.0) > 0.0
+        and float(validation_metrics.get("total_return", 0.0) or 0.0) > float(best_baseline_return)
+    )
+    projection_parity_summary = _aggregate_projection_parity_summaries(
+        [dict(result.get("projection_parity_summary", {}) or {}) for result in experiment_results]
+    )
+    summary = {
+        "status": "completed",
+        "stage": "rl_v4_validation_repair_study",
+        "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+        "model_family": "sequence_gru",
+        "train_years": list(WALKFORWARD_TRAIN_YEARS),
+        "validation_years": list(WALKFORWARD_VALIDATION_YEARS),
+        "test_years": list(WALKFORWARD_TEST_YEARS),
+        "seeds": seeds,
+        "projection_penalty_grid": projection_grid,
+        "yearly": yearly,
+        "baseline_comparison": baseline_comparison,
+        "checkpoint_exact_replay": experiment_results,
+        "selected_checkpoint": best_selected,
+        "selection_reason": str(best_selected.get("selection_reason", "")),
+        "best_experiment": best_experiment,
+        "multi_seed_summary": _v4_multi_seed_summary(experiment_results),
+        "projection_tail_mass_summary": _summarize_projection_dicts(
+            [
+                dict(result.get("projection_tail_mass_summary", {}) or {})
+                for result in experiment_results
+                if result.get("status") == "completed"
+            ]
+        ),
+        "validation_passed": bool(validation_passed),
+        "test_interpretable": bool(validation_passed),
+        "baseline_validation_returns": baseline_returns,
+        "evidence_verdict": _v4_verdict(
+            selected_checkpoint=best_selected,
+            baseline_comparison=baseline_comparison,
+            projection_parity_summary=projection_parity_summary,
+        ),
+        "projection_parity_summary": projection_parity_summary,
+        "oracle_used": False,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / "v4_validation_repair_summary.json", _json_ready(summary))
     return _json_ready(summary)
 
 
@@ -1900,6 +2578,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reuse-episode-artifacts", dest="reuse_episode_artifacts", action="store_true", default=True)
     parser.add_argument("--no-reuse-episode-artifacts", dest="reuse_episode_artifacts", action="store_false")
     parser.add_argument("--model-family-matrix", default="sequence_gru,decision_transformer")
+    parser.add_argument("--rl-seed-matrix", default="7,11,19")
+    parser.add_argument("--projection-penalty-grid", default="0.05,0.20,0.50")
+    parser.add_argument("--projection-penalty-weight", type=float, default=0.05)
+    parser.add_argument("--tail-mass-penalty-weight", type=float, default=0.0)
+    parser.add_argument("--turnover-penalty-weight", type=float, default=0.20)
+    parser.add_argument("--v3-checkpoint-model-pt", default="")
     return parser
 
 
@@ -1933,6 +2617,18 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         invalid = sorted(set(families) - {"sequence_gru", "decision_transformer"})
         if not families or invalid:
             parser.error("--model-family-matrix must contain sequence_gru and/or decision_transformer.")
+    if args.stage == "rl-v4-validation-repair-study":
+        try:
+            _parse_int_list(str(getattr(args, "rl_seed_matrix", "")), default=V4_DEFAULT_SEEDS)
+            _parse_float_list(str(getattr(args, "projection_penalty_grid", "")), default=V4_PROJECTION_PENALTY_GRID)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if float(getattr(args, "projection_penalty_weight", 0.05)) < 0.0:
+            parser.error("--projection-penalty-weight must be non-negative.")
+        if float(getattr(args, "tail_mass_penalty_weight", 0.0)) < 0.0:
+            parser.error("--tail-mass-penalty-weight must be non-negative.")
+        if float(getattr(args, "turnover_penalty_weight", 0.20)) < 0.0:
+            parser.error("--turnover-penalty-weight must be non-negative.")
 
 
 def main(argv: list[str] | None = None) -> dict[str, Any]:
@@ -1944,6 +2640,41 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     effective_lake_dataset_id = str(args.lake_dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID).strip()
     args.lake_dataset_id = effective_lake_dataset_id
+    if args.stage == "rl-v4-validation-repair-study":
+        sequence_policy_summary = _run_v4_validation_repair_study(study_root=study_root, tag=tag, args=args)
+        summary = {
+            "status": "completed",
+            "run_tag": tag,
+            "study_tag": tag,
+            "created_at": now_iso(),
+            "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
+            "policy_profile": ALPHA_PATH20_SEQUENCE_POLICY_PROFILE,
+            "research_status": "research / shadow-only / alpha_path20_sequence_policy_v1 v4 validation-first repair evidence",
+            "stage": args.stage,
+            "data_source": args.data_source,
+            "lake_dataset_id": effective_lake_dataset_id,
+            "execution_mode": args.execution_mode,
+            "sequence_policy": sequence_policy_summary,
+            "facts": [
+                "v4 selects checkpoints only with 2022 exact validation replay.",
+                "2024 test replay is interpretable only after validation passes.",
+                "Baseline comparisons use the same exact replay, costs, and projection constraints.",
+            ],
+            "boundaries": [
+                "shadow_only=true",
+                "no live/default promotion",
+                "no active_execution_strategy.json modification",
+                "no loose latest references",
+                "oracle inputs are forbidden for sequence policy training and replay",
+            ],
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+        summary = _json_ready(summary)
+        write_json(study_root / "study_summary.json", summary)
+        safe_print_json(summary)
+        return summary
     if args.stage in {"rl-walkforward-study", "rl-walkforward-matrix"}:
         sequence_policy_summary = (
             _run_walkforward_matrix(study_root=study_root, tag=tag, args=args)

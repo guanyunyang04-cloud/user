@@ -553,6 +553,7 @@ def episode_policy_rollout_loss(
     turnover_penalty: float = 0.20,
     concentration_penalty: float = 0.02,
     projection_penalty: float = 0.05,
+    tail_mass_penalty: float = 0.0,
     drawdown_penalty: float = 0.10,
     entropy_bonus: float = 0.001,
     detach_rollout_state: bool = True,
@@ -632,16 +633,8 @@ def episode_policy_rollout_loss(
         positive_sum = raw_positive.sum().clamp_min(1.0e-12)
         top_k = min(max(int(max_positions), 1), int(raw_positive.numel()))
         top_k_sum = torch.topk(raw_positive, k=top_k).values.sum() if top_k > 0 else torch.zeros((), device=device)
+        raw_tail_mass = ((positive_sum - top_k_sum) / positive_sum).clamp_min(0.0)
         raw_entropy = -(raw_positive.clamp_min(1.0e-12) / positive_sum * (raw_positive.clamp_min(1.0e-12) / positive_sum).log()).sum()
-        raw_intent_rows.append(
-            {
-                "raw_gross_exposure": float(raw_positive.sum().detach().cpu()),
-                "raw_topk_concentration": float((top_k_sum / positive_sum).detach().cpu()),
-                "raw_negative_count": float((raw_clean < 0.0).float().sum().detach().cpu()),
-                "raw_over_cap_count": float((raw_clean > float(max_position_weight)).float().sum().detach().cpu()),
-                "raw_entropy": float(raw_entropy.detach().cpu()),
-            }
-        )
         projection = project_target_weights_torch(
             raw,
             current_weight,
@@ -653,6 +646,32 @@ def episode_policy_rollout_loss(
         )
         projected = projection["projected_target_weight"]
         diag = projection["diagnostics"]
+        raw_np = raw_positive.detach().cpu().numpy().astype(float)
+        projected_np = projected.detach().cpu().numpy().astype(float)
+        raw_positive_indices = [int(idx) for idx in np.argsort(-raw_np)[:top_k] if raw_np[int(idx)] > 1.0e-12]
+        projected_positive_indices = [int(idx) for idx in np.argsort(-projected_np)[:top_k] if projected_np[int(idx)] > 1.0e-12]
+        raw_set = set(raw_positive_indices)
+        projected_set = set(projected_positive_indices)
+        overlap_denominator = max(len(projected_set), 1)
+        rank_corr = 0.0
+        if raw_np.size > 1 and np.nanstd(raw_np) > 1.0e-12 and np.nanstd(projected_np) > 1.0e-12:
+            raw_rank = pd.Series(raw_np).rank(method="average").to_numpy(dtype=float)
+            projected_rank = pd.Series(projected_np).rank(method="average").to_numpy(dtype=float)
+            corr = np.corrcoef(raw_rank, projected_rank)[0, 1]
+            rank_corr = float(corr) if np.isfinite(corr) else 0.0
+        raw_intent_rows.append(
+            {
+                "raw_gross_exposure": float(raw_positive.sum().detach().cpu()),
+                "raw_topk_concentration": float((top_k_sum / positive_sum).detach().cpu()),
+                "raw_tail_mass_outside_topk": float(raw_tail_mass.detach().cpu()),
+                "raw_target_count": float((raw_positive > 1.0e-12).float().sum().detach().cpu()),
+                "raw_projected_topk_overlap": float(len(raw_set & projected_set) / overlap_denominator),
+                "raw_projected_rank_correlation": float(rank_corr),
+                "raw_negative_count": float((raw_clean < 0.0).float().sum().detach().cpu()),
+                "raw_over_cap_count": float((raw_clean > float(max_position_weight)).float().sum().detach().cpu()),
+                "raw_entropy": float(raw_entropy.detach().cpu()),
+            }
+        )
         buy_turnover = (projected - current_weight).clamp_min(0.0).sum()
         sell_turnover = (current_weight - projected).clamp_min(0.0).sum()
         cost = (
@@ -670,6 +689,7 @@ def episode_policy_rollout_loss(
         loss = loss + float(turnover_penalty) * diag["projected_turnover"]
         loss = loss + float(concentration_penalty) * concentration
         loss = loss + float(projection_penalty) * diag["projection_l1_distance"]
+        loss = loss + float(tail_mass_penalty) * raw_tail_mass
         loss = loss + float(drawdown_penalty) * (-drawdown)
         loss = loss - float(entropy_bonus) * entropy
         losses.append(loss)
