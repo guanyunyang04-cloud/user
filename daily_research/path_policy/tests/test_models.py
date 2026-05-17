@@ -31,7 +31,7 @@ def test_forecaster_variants_emit_path20_contract() -> None:
         assert set(prediction) == {"mu", "q10", "q50", "q90", "aux"}
         assert prediction["mu"].shape == (6, 20)
         assert prediction["q10"].shape == (6, 20)
-        assert prediction["aux"].shape == (6, 6)
+        assert prediction["aux"].shape == (6, 8)
         assert torch.all(prediction["q10"] <= prediction["q50"])
         assert torch.all(prediction["q50"] <= prediction["q90"])
 
@@ -71,7 +71,7 @@ def test_losses_are_finite_and_allocator_respects_weight_constraints() -> None:
     policy = NeuralTargetWeightPolicy(
         PathPolicyModelConfig(
             stock_feature_dim=4,
-            path_feature_dim=86,
+            path_feature_dim=88,
             portfolio_feature_dim=8,
             hidden_dim=16,
             dropout=0.0,
@@ -80,7 +80,7 @@ def test_losses_are_finite_and_allocator_respects_weight_constraints() -> None:
     )
     out = policy(
         torch.randn(10, 4),
-        torch.randn(10, 86),
+        torch.randn(10, 88),
         torch.zeros(8),
         tradable_mask=torch.ones(10, dtype=torch.bool),
     )

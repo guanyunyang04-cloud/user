@@ -40,8 +40,10 @@
       "study_tags": [],
       "verdict": "Status: `implemented supervised forecast contract / research / shadow-only / no promotion`.; Current Path20 research mainline pointer remains `alpha_path20_neural_policy_v1`.; Stage 1 scope is only forecast validation: past stock state sequence -> future 20 trading-day excess-return path.; This is not allocator, oracle, replay, or live/default strategy evidence.",
       "blockers": [
+        "Training summaries include `selected_signal_profile`, one of `multiscale`, `trend_20d`, `short_burst`, or `failed`.",
         "`insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.",
         "`forecast_failed` when validation rank/spread/calibration gates fail.",
+        "Validation rank/spread now needs to be read as a profile: 20d trend, short burst, multiscale, or failed. This avoids losing stocks whose real opportunity is concentrated in the first few days of the 20d window.",
         "Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress."
       ],
       "next_allowed_actions": [

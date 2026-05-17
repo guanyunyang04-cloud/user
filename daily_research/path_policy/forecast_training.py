@@ -18,6 +18,7 @@ from daily_research.path_policy.models import (
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
+    PATH20_FORECAST_AUX_DIM,
     Path20ForecasterMLP,
     pairwise_rank_loss,
     pinball_loss,
@@ -25,6 +26,14 @@ from daily_research.path_policy.models import (
 
 
 FORECAST_MODEL_FAMILIES = ("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer")
+FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst")
+FORECAST_RISK_AUX_NAMES = ("downside_floor_20d", "worst_1d_20d", "upside_20d")
+FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
+FORECAST_PROFILE_HORIZON_WEIGHTS: dict[str, dict[int, float]] = {
+    "multiscale": {1: 0.05, 3: 0.15, 5: 0.20, 10: 0.25, 20: 0.25},
+    "trend20": {10: 0.35, 20: 0.65},
+    "short_burst": {1: 0.05, 3: 0.35, 5: 0.30, 10: 0.15, 20: 0.05},
+}
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -127,13 +136,25 @@ def _forecast_loss(
     y_cum_scaled: torch.Tensor,
     y_risk_scaled: torch.Tensor,
 ) -> torch.Tensor:
-    loss = F.huber_loss(prediction["mu"], y_daily_scaled)
+    daily_weights = torch.ones((y_daily_scaled.shape[1],), device=y_daily_scaled.device, dtype=y_daily_scaled.dtype)
+    daily_weights[:3] = 1.15
+    daily_weights[3:5] = 1.05
+    daily_loss = F.huber_loss(prediction["mu"], y_daily_scaled, reduction="none")
+    loss = (daily_loss * daily_weights.reshape(1, -1)).mean()
     loss = loss + 0.20 * pinball_loss(prediction["q10"], y_daily_scaled, 0.10)
     loss = loss + 0.20 * pinball_loss(prediction["q50"], y_daily_scaled, 0.50)
     loss = loss + 0.20 * pinball_loss(prediction["q90"], y_daily_scaled, 0.90)
-    loss = loss + 0.25 * F.huber_loss(prediction["aux"][:, :3], y_cum_scaled)
-    loss = loss + 0.05 * F.huber_loss(prediction["aux"][:, 3:6], y_risk_scaled)
-    loss = loss + 0.02 * pairwise_rank_loss(prediction["mu"].sum(dim=1), y_daily_scaled.sum(dim=1))
+    cum_count = len(PATH20_CUMULATIVE_HORIZONS)
+    loss = loss + 0.25 * F.huber_loss(prediction["aux"][:, :cum_count], y_cum_scaled)
+    loss = loss + 0.05 * F.huber_loss(prediction["aux"][:, cum_count : cum_count + 3], y_risk_scaled)
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0))
+        if weight <= 0.0:
+            continue
+        score = prediction["mu"][:, : int(horizon)].sum(dim=1)
+        target = y_cum_scaled[:, pos]
+        loss = loss + weight * pairwise_rank_loss(score, target)
+    loss = loss + 0.005 * pairwise_rank_loss(prediction["aux"][:, cum_count + 2], y_risk_scaled[:, 2])
     return loss
 
 
@@ -174,7 +195,14 @@ def _predict_all(
                 pred = model(batch)
             for key in chunks:
                 chunks[key].append(pred[key].detach().cpu().numpy())
-    return {key: np.concatenate(values, axis=0) if values else np.empty((0, PATH20_HORIZON)) for key, values in chunks.items()}
+    empty_shapes = {
+        "mu": (0, PATH20_HORIZON),
+        "q10": (0, PATH20_HORIZON),
+        "q50": (0, PATH20_HORIZON),
+        "q90": (0, PATH20_HORIZON),
+        "aux": (0, PATH20_FORECAST_AUX_DIM),
+    }
+    return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
 
 
 def _predict_indices(
@@ -192,7 +220,7 @@ def _predict_indices(
             "q10": np.empty((0, PATH20_HORIZON)),
             "q50": np.empty((0, PATH20_HORIZON)),
             "q90": np.empty((0, PATH20_HORIZON)),
-            "aux": np.empty((0, 6)),
+            "aux": np.empty((0, PATH20_FORECAST_AUX_DIM)),
         }
     return _predict_all(
         model,
@@ -269,9 +297,15 @@ def _prediction_frame(
         }
     )
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        frame[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
         frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
         frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
         frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+    frame["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    frame["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    frame["pred_aux_upside_20d"] = aux[:, risk_start + 2]
     for step in range(1, PATH20_HORIZON + 1):
         offset = step - 1
         frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
@@ -315,9 +349,15 @@ def _prediction_frame_for_indices(
         }
     )
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        frame[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
         frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
         frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
         frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+    frame["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    frame["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    frame["pred_aux_upside_20d"] = aux[:, risk_start + 2]
     for step in range(1, PATH20_HORIZON + 1):
         offset = step - 1
         frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
@@ -344,25 +384,115 @@ def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
             q10_coverages.append(float((target.loc[valid_q10] >= q10.loc[valid_q10]).mean()))
         if bool(valid_q90.any()):
             q90_coverages.append(float((target.loc[valid_q90] <= q90.loc[valid_q90]).mean()))
-    pred20 = pd.to_numeric(frame["pred_cum_mu_20d"], errors="coerce")
-    target20 = pd.to_numeric(frame["future_cum_excess_return_20d"], errors="coerce")
-    valid20 = pred20.notna() & target20.notna()
-    return {
+    metrics: dict[str, Any] = {
         "status": "completed",
         "row_count": int(len(frame)),
         "date_count": int(frame["date"].nunique()),
-        "rank_ic_20d": _rank_ic_by_date(frame, "pred_cum_mu_20d", "future_cum_excess_return_20d"),
-        "top_bottom_spread_20d": _top_bottom_spread_by_date(
-            frame,
-            "pred_cum_mu_20d",
-            "future_cum_excess_return_20d",
-        ),
         "q10_coverage_mean": float(np.mean(q10_coverages)) if q10_coverages else 0.0,
         "q90_coverage_mean": float(np.mean(q90_coverages)) if q90_coverages else 0.0,
-        "direction_accuracy_20d": float((np.sign(pred20.loc[valid20]) == np.sign(target20.loc[valid20])).mean())
-        if bool(valid20.any())
-        else 0.0,
     }
+    for horizon in PATH20_CUMULATIVE_HORIZONS:
+        pred = pd.to_numeric(frame[f"pred_cum_mu_{horizon}d"], errors="coerce")
+        target = pd.to_numeric(frame[f"future_cum_excess_return_{horizon}d"], errors="coerce")
+        valid = pred.notna() & target.notna()
+        metrics[f"rank_ic_{horizon}d"] = _rank_ic_by_date(
+            frame,
+            f"pred_cum_mu_{horizon}d",
+            f"future_cum_excess_return_{horizon}d",
+        )
+        metrics[f"top_bottom_spread_{horizon}d"] = _top_bottom_spread_by_date(
+            frame,
+            f"pred_cum_mu_{horizon}d",
+            f"future_cum_excess_return_{horizon}d",
+        )
+        metrics[f"direction_accuracy_{horizon}d"] = (
+            float((np.sign(pred.loc[valid]) == np.sign(target.loc[valid])).mean()) if bool(valid.any()) else 0.0
+        )
+    if {"pred_aux_upside_20d", "future_path_upside_capture_20d"}.issubset(frame.columns):
+        metrics["rank_ic_upside_20d"] = _rank_ic_by_date(
+            frame,
+            "pred_aux_upside_20d",
+            "future_path_upside_capture_20d",
+        )
+        metrics["top_bottom_spread_upside_20d"] = _top_bottom_spread_by_date(
+            frame,
+            "pred_aux_upside_20d",
+            "future_path_upside_capture_20d",
+        )
+    else:
+        metrics["rank_ic_upside_20d"] = 0.0
+        metrics["top_bottom_spread_upside_20d"] = 0.0
+    metrics["selected_signal_profile"] = forecast_signal_profile(metrics)
+    return metrics
+
+
+def _coverage_pass(metrics: dict[str, Any], coverage_range: tuple[float, float]) -> bool:
+    q10 = float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
+    q90 = float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
+    low, high = coverage_range
+    return bool(low <= q10 <= high and low <= q90 <= high)
+
+
+def _horizon_gate(metrics: dict[str, Any], horizon: int) -> bool:
+    return bool(
+        float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0) > 0.0
+        and float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0) > 0.0
+    )
+
+
+def _short_burst_gate(metrics: dict[str, Any]) -> bool:
+    gates = [
+        _horizon_gate(metrics, 3),
+        _horizon_gate(metrics, 5),
+        bool(
+            float(metrics.get("rank_ic_upside_20d", 0.0) or 0.0) > 0.0
+            and float(metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0) > 0.0
+        ),
+    ]
+    return sum(1 for item in gates if item) >= 2
+
+
+def forecast_signal_profile(metrics: dict[str, Any]) -> str:
+    if metrics.get("status") != "completed":
+        return "failed"
+    trend = _horizon_gate(metrics, 20)
+    short_burst = _short_burst_gate(metrics)
+    if trend and short_burst:
+        return "multiscale"
+    if trend:
+        return "trend_20d"
+    if short_burst:
+        return "short_burst"
+    return "failed"
+
+
+def _profile_pass(metrics: dict[str, Any], selection_profile: str) -> bool:
+    profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "trend20":
+        return _horizon_gate(metrics, 20)
+    if profile == "short_burst":
+        return _short_burst_gate(metrics)
+    return _horizon_gate(metrics, 20) or _short_burst_gate(metrics)
+
+
+def _profile_score(metrics: dict[str, Any], validation_loss: float, coverage_range: tuple[float, float], selection_profile: str) -> float:
+    if metrics.get("status") != "completed":
+        return -float(validation_loss)
+    profile = str(selection_profile or "multiscale").strip().lower()
+    weights = FORECAST_PROFILE_HORIZON_WEIGHTS.get(profile, FORECAST_PROFILE_HORIZON_WEIGHTS["multiscale"])
+    rank_score = sum(
+        float(weight) * float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0)
+        for horizon, weight in weights.items()
+    )
+    spread_score = sum(
+        float(weight) * float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0)
+        for horizon, weight in weights.items()
+    )
+    upside_weight = 0.10 if profile in {"multiscale", "short_burst"} else 0.03
+    rank_score += upside_weight * float(metrics.get("rank_ic_upside_20d", 0.0) or 0.0)
+    spread_score += upside_weight * float(metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0)
+    gate_bonus = 1_000.0 if _profile_pass(metrics, profile) and _coverage_pass(metrics, coverage_range) else 0.0
+    return float(gate_bonus + rank_score * 10.0 + spread_score - max(float(validation_loss), 0.0) * 1.0e-3)
 
 
 def forecast_evidence_verdict(
@@ -370,22 +500,16 @@ def forecast_evidence_verdict(
     validation_metrics: dict[str, Any],
     test_metrics: dict[str, Any] | None = None,
     coverage_range: tuple[float, float] = (0.65, 0.95),
+    selection_profile: str = "multiscale",
 ) -> str:
     if validation_metrics.get("status") != "completed":
         return "insufficient_or_incomplete"
-    rank_ic = float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0)
-    spread = float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    q10 = float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0)
-    q90 = float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0)
-    low, high = coverage_range
-    validation_promising = rank_ic > 0.0 and spread > 0.0 and low <= q10 <= high and low <= q90 <= high
+    validation_promising = _profile_pass(validation_metrics, selection_profile) and _coverage_pass(validation_metrics, coverage_range)
     if not validation_promising:
         return "forecast_failed"
     if not test_metrics or test_metrics.get("status") != "completed":
         return "forecast_promising"
-    test_rank_ic = float(test_metrics.get("rank_ic_20d", 0.0) or 0.0)
-    test_spread = float(test_metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    if test_rank_ic > 0.0 and test_spread > 0.0:
+    if _profile_pass(test_metrics, selection_profile):
         return "forecast_test_confirmed"
     return "forecast_promising"
 
@@ -400,16 +524,13 @@ def _normalize_seeds(seeds: tuple[int, ...] | list[int] | str | None, *, default
     return parsed or (int(default_seed),)
 
 
-def _validation_score(metrics: dict[str, Any], validation_loss: float, coverage_range: tuple[float, float]) -> float:
-    if metrics.get("status") != "completed":
-        return -float(validation_loss)
-    rank_ic = float(metrics.get("rank_ic_20d", 0.0) or 0.0)
-    spread = float(metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    q10 = float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
-    q90 = float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
-    low, high = coverage_range
-    gate_bonus = 1_000.0 if rank_ic > 0.0 and spread > 0.0 and low <= q10 <= high and low <= q90 <= high else 0.0
-    return float(gate_bonus + rank_ic * 10.0 + spread - max(float(validation_loss), 0.0) * 1.0e-3)
+def _validation_score(
+    metrics: dict[str, Any],
+    validation_loss: float,
+    coverage_range: tuple[float, float],
+    selection_profile: str,
+) -> float:
+    return _profile_score(metrics, validation_loss, coverage_range, selection_profile)
 
 
 def _evaluate_loss(
@@ -447,50 +568,97 @@ def _evaluate_loss(
 
 def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]:
     validation_metrics = [dict(item.get("validation_metrics", {})) for item in seed_summaries.values()]
-    rank_values = [
-        float(metrics.get("rank_ic_20d", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
-    ]
-    spread_values = [
-        float(metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
-    ]
+    completed_metrics = [metrics for metrics in validation_metrics if metrics.get("status") == "completed"]
     q10_values = [
         float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
+        for metrics in completed_metrics
     ]
     q90_values = [
         float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
+        for metrics in completed_metrics
+    ]
+    multiscale_scores = [
+        float(item.get("validation_multiscale_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
+    trend_scores = [
+        float(item.get("validation_trend20_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
+    short_scores = [
+        float(item.get("validation_short_burst_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
     ]
     count = max(len(seed_summaries), 1)
-    return {
+    summary: dict[str, Any] = {
         "seed_count": int(len(seed_summaries)),
-        "validation_rank_ic_20d_mean": float(np.mean(rank_values)) if rank_values else 0.0,
-        "validation_rank_ic_20d_std": float(np.std(rank_values, ddof=0)) if rank_values else 0.0,
-        "validation_top_bottom_spread_20d_mean": float(np.mean(spread_values)) if spread_values else 0.0,
-        "validation_top_bottom_spread_20d_std": float(np.std(spread_values, ddof=0)) if spread_values else 0.0,
         "validation_q10_coverage_mean": float(np.mean(q10_values)) if q10_values else 0.0,
         "validation_q90_coverage_mean": float(np.mean(q90_values)) if q90_values else 0.0,
-        "validation_rank_ic_positive_seed_rate": float(sum(1 for value in rank_values if value > 0.0) / count),
-        "validation_top_bottom_spread_positive_seed_rate": float(sum(1 for value in spread_values if value > 0.0) / count),
+        "validation_multiscale_score_mean": float(np.mean(multiscale_scores)) if multiscale_scores else 0.0,
+        "validation_multiscale_score_std": float(np.std(multiscale_scores, ddof=0)) if multiscale_scores else 0.0,
+        "validation_trend20_score_mean": float(np.mean(trend_scores)) if trend_scores else 0.0,
+        "validation_short_burst_score_mean": float(np.mean(short_scores)) if short_scores else 0.0,
     }
+    profile_counts: dict[str, int] = {"trend_20d": 0, "short_burst": 0, "multiscale": 0, "failed": 0}
+    for metrics in completed_metrics:
+        profile_counts[forecast_signal_profile(metrics)] = profile_counts.get(forecast_signal_profile(metrics), 0) + 1
+    summary["validation_signal_profile_counts"] = profile_counts
+    for horizon in PATH20_CUMULATIVE_HORIZONS:
+        rank_values = [
+            float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0)
+            for metrics in completed_metrics
+        ]
+        spread_values = [
+            float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0)
+            for metrics in completed_metrics
+        ]
+        summary[f"validation_rank_ic_{int(horizon)}d_mean"] = float(np.mean(rank_values)) if rank_values else 0.0
+        summary[f"validation_rank_ic_{int(horizon)}d_std"] = float(np.std(rank_values, ddof=0)) if rank_values else 0.0
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_mean"] = (
+            float(np.mean(spread_values)) if spread_values else 0.0
+        )
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_std"] = (
+            float(np.std(spread_values, ddof=0)) if spread_values else 0.0
+        )
+        summary[f"validation_rank_ic_{int(horizon)}d_positive_seed_rate"] = (
+            float(sum(1 for value in rank_values if value > 0.0) / count)
+        )
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_positive_seed_rate"] = (
+            float(sum(1 for value in spread_values if value > 0.0) / count)
+        )
+    summary["validation_rank_ic_positive_seed_rate"] = summary.get("validation_rank_ic_20d_positive_seed_rate", 0.0)
+    summary["validation_top_bottom_spread_positive_seed_rate"] = summary.get(
+        "validation_top_bottom_spread_20d_positive_seed_rate",
+        0.0,
+    )
+    return summary
 
 
-def _select_family_seed(model_summaries: dict[str, dict[str, Any]]) -> tuple[str, int]:
+def _selection_score_key(selection_profile: str) -> str:
+    profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "trend20":
+        return "validation_trend20_score"
+    if profile == "short_burst":
+        return "validation_short_burst_score"
+    return "validation_multiscale_score"
+
+
+def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection_profile: str) -> tuple[str, int]:
+    score_key = _selection_score_key(selection_profile)
+
     def family_score(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float]:
         _, summary = item
         metrics = dict(summary.get("family_summary", {}))
+        score = float(metrics.get(f"{score_key}_mean", 0.0) or 0.0)
         rank = float(metrics.get("validation_rank_ic_20d_mean", 0.0) or 0.0)
         spread = float(metrics.get("validation_top_bottom_spread_20d_mean", 0.0) or 0.0)
         q10 = float(metrics.get("validation_q10_coverage_mean", 0.0) or 0.0)
         q90 = float(metrics.get("validation_q90_coverage_mean", 0.0) or 0.0)
-        passed = 1 if rank > 0.0 and spread > 0.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
-        return (passed, rank, spread)
+        passed = 1 if score > 1_000.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
+        return (passed, score, rank + spread)
 
     if not model_summaries:
         return "", 0
@@ -502,12 +670,12 @@ def _select_family_seed(model_summaries: dict[str, dict[str, Any]]) -> tuple[str
     def seed_score(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float]:
         _, summary = item
         validation = dict(summary.get("validation_metrics", {}))
-        verdict = forecast_evidence_verdict(validation_metrics=validation, test_metrics=None)
+        verdict = forecast_evidence_verdict(validation_metrics=validation, test_metrics=None, selection_profile=selection_profile)
         passed = 1 if verdict == "forecast_promising" else 0
         return (
             passed,
+            float(summary.get(score_key, 0.0) or 0.0),
             float(validation.get("rank_ic_20d", 0.0) or 0.0),
-            float(validation.get("top_bottom_spread_20d", 0.0) or 0.0),
         )
 
     selected_seed_text = max(seed_summaries.items(), key=seed_score)[0]
@@ -538,6 +706,7 @@ def train_forecast_models(
     grad_accum_steps: int = 1,
     weight_decay: float = 1.0e-4,
     write_all_predictions: bool = False,
+    selection_profile: str = "multiscale",
     target_scale: float = 100.0,
     seed: int = 7,
 ) -> dict[str, Any]:
@@ -549,6 +718,9 @@ def train_forecast_models(
     invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
     if invalid:
         raise ValueError(f"Unsupported forecast model families: {', '.join(invalid)}")
+    selection_profile = str(selection_profile or "multiscale").strip().lower()
+    if selection_profile not in FORECAST_SELECTION_PROFILES:
+        raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
     if dataset.x.shape[0] == 0:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -557,6 +729,8 @@ def train_forecast_models(
             "family_summary": {},
             "selected_seed": 0,
             "selected_model_family": "",
+            "selected_signal_profile": "failed",
+            "validation_multiscale_score": 0.0,
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -586,6 +760,8 @@ def train_forecast_models(
             "family_summary": {},
             "selected_seed": 0,
             "selected_model_family": "",
+            "selected_signal_profile": "failed",
+            "validation_multiscale_score": 0.0,
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -702,7 +878,8 @@ def train_forecast_models(
                     target_scale=target_scale,
                 )
                 validation_metrics = forecast_prediction_metrics(validation_frame)
-                score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95))
+                score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95), selection_profile)
+                multiscale_score = _profile_score(validation_metrics, validation_loss, (0.65, 0.95), "multiscale")
                 improved = score > best_score + float(early_stop_min_delta)
                 if improved:
                     best_score = score
@@ -737,8 +914,19 @@ def train_forecast_models(
                         "epoch": int(epoch),
                         "train_loss": float(last_train_loss),
                         "validation_loss": float(validation_loss),
+                        "validation_multiscale_score": float(multiscale_score),
+                        "validation_selection_score": float(score),
+                        "selected_signal_profile": forecast_signal_profile(validation_metrics),
                         "rank_ic_20d": float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0),
                         "top_bottom_spread_20d": float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0),
+                        "rank_ic_5d": float(validation_metrics.get("rank_ic_5d", 0.0) or 0.0),
+                        "top_bottom_spread_5d": float(validation_metrics.get("top_bottom_spread_5d", 0.0) or 0.0),
+                        "rank_ic_3d": float(validation_metrics.get("rank_ic_3d", 0.0) or 0.0),
+                        "top_bottom_spread_3d": float(validation_metrics.get("top_bottom_spread_3d", 0.0) or 0.0),
+                        "rank_ic_upside_20d": float(validation_metrics.get("rank_ic_upside_20d", 0.0) or 0.0),
+                        "top_bottom_spread_upside_20d": float(
+                            validation_metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0
+                        ),
                         "q10_coverage_mean": float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0),
                         "q90_coverage_mean": float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0),
                         "direction_accuracy_20d": float(validation_metrics.get("direction_accuracy_20d", 0.0) or 0.0),
@@ -799,6 +987,16 @@ def train_forecast_models(
                 family=family,
                 target_scale=target_scale,
             )
+            final_validation_metrics = forecast_prediction_metrics(validation_frame)
+            final_test_metrics = forecast_prediction_metrics(test_frame)
+            final_multiscale_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "multiscale")
+            final_trend20_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "trend20")
+            final_short_burst_score = _profile_score(
+                final_validation_metrics,
+                best_validation_loss,
+                (0.65, 0.95),
+                "short_burst",
+            )
             if bool(write_all_predictions):
                 _write_frame(
                     study_root / f"forecast_predictions_validation_{family}_seed{int(current_seed)}.csv",
@@ -821,8 +1019,19 @@ def train_forecast_models(
                 "best_train_loss": float(best_train_loss),
                 "best_validation_loss": float(best_validation_loss),
                 "best_validation_metrics": best_validation_metrics,
-                "validation_metrics": forecast_prediction_metrics(validation_frame),
-                "test_metrics": forecast_prediction_metrics(test_frame),
+                "validation_metrics": final_validation_metrics,
+                "test_metrics": final_test_metrics,
+                "validation_signal_profile": forecast_signal_profile(final_validation_metrics),
+                "validation_multiscale_score": float(final_multiscale_score),
+                "validation_trend20_score": float(final_trend20_score),
+                "validation_short_burst_score": float(final_short_burst_score),
+                "validation_selection_score": float(
+                    {
+                        "multiscale": final_multiscale_score,
+                        "trend20": final_trend20_score,
+                        "short_burst": final_short_burst_score,
+                    }[selection_profile]
+                ),
                 "checkpoint_pt": str(best_checkpoint_path.resolve()),
             }
         model_summaries[family] = {
@@ -835,6 +1044,7 @@ def train_forecast_models(
             "lr": float(lr),
             "hidden_dim": int(hidden_dim),
             "feature_count": int(dataset.x.shape[-1]),
+            "selection_profile": selection_profile,
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
@@ -844,7 +1054,7 @@ def train_forecast_models(
 
     learning_curve_path = study_root / "forecast_learning_curve.csv"
     _write_frame(learning_curve_path, pd.DataFrame(learning_rows))
-    selected_family, selected_seed = _select_family_seed(model_summaries)
+    selected_family, selected_seed = _select_family_seed(model_summaries, selection_profile=selection_profile)
     selected_seed_summary = dict(
         model_summaries.get(selected_family, {}).get("seed_summaries", {}).get(str(int(selected_seed)), {})
     )
@@ -908,7 +1118,12 @@ def train_forecast_models(
     test_csv = _write_frame(study_root / "forecast_predictions_test.csv", test_predictions)
     validation_metrics = dict(selected_seed_summary.get("validation_metrics", {}))
     test_metrics = dict(selected_seed_summary.get("test_metrics", {}))
-    verdict = forecast_evidence_verdict(validation_metrics=validation_metrics, test_metrics=test_metrics)
+    verdict = forecast_evidence_verdict(
+        validation_metrics=validation_metrics,
+        test_metrics=test_metrics,
+        selection_profile=selection_profile,
+    )
+    selected_signal_profile = forecast_signal_profile(validation_metrics)
     summary = {
         "status": "completed",
         "stage": "forecast_train",
@@ -932,19 +1147,22 @@ def train_forecast_models(
             "transformer_layers": int(transformer_layers),
             "transformer_heads": int(transformer_heads),
             "patch_sizes": [int(item) for item in patch_sizes],
+            "selection_profile": selection_profile,
         },
         "models": model_summaries,
         "family_summary": {family: dict(summary.get("family_summary", {})) for family, summary in model_summaries.items()},
         "selected_model_family": selected_family,
         "selected_seed": int(selected_seed),
         "selected_checkpoint_pt": selected_checkpoint_path,
-        "selection_rule": "family_mean_validation_rank_ic_after_positive_rank_spread_coverage_gates_then_seed_rank_ic",
+        "selection_rule": f"{selection_profile}_validation_score_after_profile_and_coverage_gates_then_seed_score",
+        "selected_signal_profile": selected_signal_profile,
+        "validation_multiscale_score": float(selected_seed_summary.get("validation_multiscale_score", 0.0) or 0.0),
+        "validation_selection_score": float(selected_seed_summary.get("validation_selection_score", 0.0) or 0.0),
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
         "test_interpretable": verdict in {"forecast_test_confirmed", "forecast_promising"}
         and validation_metrics.get("status") == "completed"
-        and float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0) > 0.0
-        and float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0) > 0.0,
+        and _profile_pass(validation_metrics, selection_profile),
         "evidence_verdict": verdict,
         "forecast_predictions_validation_csv": validation_csv,
         "forecast_predictions_test_csv": test_csv,

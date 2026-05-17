@@ -101,6 +101,7 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_min_epochs == 20
     assert args.forecast_early_stop_patience == 12
     assert args.forecast_seeds == "7"
+    assert args.forecast_selection_profile == "multiscale"
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -228,6 +229,8 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--no-forecast-amp",
             "--forecast-seeds",
             "7,11",
+            "--forecast-selection-profile",
+            "multiscale",
             "--forecast-max-samples-per-role",
             "8",
         ]
@@ -251,6 +254,8 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     assert "linear_last_day" in summary["training_summary"]["models"]
     assert "mlp_last_day" in summary["training_summary"]["models"]
     assert summary["training_summary"]["selected_seed"] in {7, 11}
+    assert summary["training_summary"]["selected_signal_profile"] in {"trend_20d", "short_burst", "multiscale", "failed"}
+    assert "validation_multiscale_score" in summary["training_summary"]
     assert "forecast_learning_curve_csv" in summary["training_summary"]
 
 

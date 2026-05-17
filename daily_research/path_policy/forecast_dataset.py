@@ -30,6 +30,7 @@ class ForecastSequenceDataset:
     x: np.ndarray
     y_daily_excess: np.ndarray
     y_cum_excess: np.ndarray
+    y_rank_by_horizon: np.ndarray
     y_rank_20d: np.ndarray
     y_max_drawdown_20d: np.ndarray
     y_worst_1d_20d: np.ndarray
@@ -171,6 +172,7 @@ def _empty_dataset(
         x=x,
         y_daily_excess=np.empty((0, int(horizon)), dtype=np.float32),
         y_cum_excess=np.empty((0, len(PATH20_CUMULATIVE_HORIZONS)), dtype=np.float32),
+        y_rank_by_horizon=np.empty((0, len(PATH20_CUMULATIVE_HORIZONS)), dtype=np.float32),
         y_rank_20d=np.empty((0,), dtype=np.float32),
         y_max_drawdown_20d=np.empty((0,), dtype=np.float32),
         y_worst_1d_20d=np.empty((0,), dtype=np.float32),
@@ -230,6 +232,7 @@ def build_forecast_sequence_dataset(
     x_rows: list[np.ndarray] = []
     y_daily_rows: list[list[float]] = []
     y_cum_rows: list[list[float]] = []
+    y_rank_by_horizon_rows: list[list[float]] = []
     y_rank_rows: list[float] = []
     y_drawdown_rows: list[float] = []
     y_worst_rows: list[float] = []
@@ -270,11 +273,23 @@ def build_forecast_sequence_dataset(
                     _safe_label_value(labels.cumulative_excess_return[step], signal_dt, str(stock))
                     for step in PATH20_CUMULATIVE_HORIZONS
                 ]
+                rank_by_horizon_target = [
+                    _safe_label_value(labels.forward_rank[step], signal_dt, str(stock))
+                    for step in PATH20_CUMULATIVE_HORIZONS
+                ]
                 rank_target = _safe_label_value(labels.forward_rank[horizon], signal_dt, str(stock))
                 drawdown_target = _safe_label_value(labels.path_max_drawdown_20d, signal_dt, str(stock))
                 worst_target = _safe_label_value(labels.path_worst_1d_20d, signal_dt, str(stock))
                 upside_target = _safe_label_value(labels.path_upside_capture_20d, signal_dt, str(stock))
-                all_targets = [*daily_target, *cum_target, rank_target, drawdown_target, worst_target, upside_target]
+                all_targets = [
+                    *daily_target,
+                    *cum_target,
+                    *rank_by_horizon_target,
+                    rank_target,
+                    drawdown_target,
+                    worst_target,
+                    upside_target,
+                ]
                 if not np.isfinite(np.asarray(all_targets, dtype=float)).all():
                     dropped_target_nan += 1
                     continue
@@ -295,6 +310,7 @@ def build_forecast_sequence_dataset(
                 x_rows.append(sequence)
                 y_daily_rows.append(daily_target)
                 y_cum_rows.append(cum_target)
+                y_rank_by_horizon_rows.append(rank_by_horizon_target)
                 y_rank_rows.append(rank_target)
                 y_drawdown_rows.append(drawdown_target)
                 y_worst_rows.append(worst_target)
@@ -327,6 +343,8 @@ def build_forecast_sequence_dataset(
         "role_purge_trading_days": int(label_forward_offset),
         "next_open_label_extra_trading_day": int(next_open_extra_day),
         "feature_columns": list(feature_columns),
+        "cumulative_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
+        "rank_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
         "sample_count_by_role": {key: int(value) for key, value in sample_count_by_role.items()},
         "dropped_target_nan": int(dropped_target_nan),
         "dropped_missing_lookback": int(dropped_missing_lookback),
@@ -383,6 +401,7 @@ def build_forecast_sequence_dataset(
         x=x,
         y_daily_excess=np.asarray(y_daily_rows, dtype=np.float32),
         y_cum_excess=np.asarray(y_cum_rows, dtype=np.float32),
+        y_rank_by_horizon=np.asarray(y_rank_by_horizon_rows, dtype=np.float32),
         y_rank_20d=np.asarray(y_rank_rows, dtype=np.float32),
         y_max_drawdown_20d=np.asarray(y_drawdown_rows, dtype=np.float32),
         y_worst_1d_20d=np.asarray(y_worst_rows, dtype=np.float32),
@@ -407,6 +426,7 @@ def save_forecast_sequence_dataset(dataset: ForecastSequenceDataset, root: Path)
         x=dataset.x,
         y_daily_excess=dataset.y_daily_excess,
         y_cum_excess=dataset.y_cum_excess,
+        y_rank_by_horizon=dataset.y_rank_by_horizon,
         y_rank_20d=dataset.y_rank_20d,
         y_max_drawdown_20d=dataset.y_max_drawdown_20d,
         y_worst_1d_20d=dataset.y_worst_1d_20d,

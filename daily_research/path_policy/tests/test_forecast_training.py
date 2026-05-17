@@ -29,7 +29,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
         assert pred["mu"].shape == (4, 20)
         assert pred["q10"].shape == (4, 20)
-        assert pred["aux"].shape == (4, 6)
+        assert pred["aux"].shape == (4, 8)
         assert torch.all(pred["q10"] <= pred["q50"])
         assert torch.all(pred["q50"] <= pred["q90"])
 
@@ -73,6 +73,8 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
     assert summary["active_execution_strategy_expected_diff"] == "none"
     assert set(summary["models"]) == {"linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer"}
     assert summary["selected_seed"] in {7, 11}
+    assert summary["selected_signal_profile"] in {"trend_20d", "short_burst", "multiscale", "failed"}
+    assert "validation_multiscale_score" in summary
     assert "family_summary" in summary
     assert "seed_summaries" in summary["models"]["patch_transformer"]
     assert (tmp_path / "forecast_training_summary.json").exists()
@@ -82,9 +84,23 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
     assert (tmp_path / "forecast_model_linear_last_day_seed7_best.pt").exists()
 
     validation_predictions = pd.read_csv(tmp_path / "forecast_predictions_validation.csv")
-    assert {"pred_cum_mu_20d", "future_cum_excess_return_20d", "pred_q10_1d", "pred_q90_20d"}.issubset(
-        validation_predictions.columns
-    )
+    assert {
+        "pred_aux_cum_1d",
+        "pred_aux_cum_3d",
+        "pred_cum_mu_20d",
+        "future_cum_excess_return_1d",
+        "future_cum_excess_return_3d",
+        "future_cum_excess_return_20d",
+        "pred_q10_1d",
+        "pred_q90_20d",
+    }.issubset(validation_predictions.columns)
+    validation_metrics = summary["validation_metrics"]
+    for horizon in (1, 3, 5, 10, 20):
+        assert f"rank_ic_{horizon}d" in validation_metrics
+        assert f"top_bottom_spread_{horizon}d" in validation_metrics
+        assert f"direction_accuracy_{horizon}d" in validation_metrics
+    assert "rank_ic_upside_20d" in validation_metrics
+    assert "top_bottom_spread_upside_20d" in validation_metrics
 
 
 def test_forecast_evidence_verdict_requires_positive_validation_and_calibration() -> None:

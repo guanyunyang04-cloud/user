@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset
+from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 
 
@@ -24,7 +25,16 @@ def test_forecast_sequence_dataset_builds_roles_with_purge_and_train_normalizati
     assert dataset.x.shape[1] == 5
     assert dataset.x.shape[2] == len(dataset.feature_columns)
     assert dataset.y_daily_excess.shape == (dataset.x.shape[0], 20)
-    assert dataset.y_cum_excess.shape == (dataset.x.shape[0], 3)
+    assert PATH20_CUMULATIVE_HORIZONS == (1, 3, 5, 10, 20)
+    assert dataset.y_cum_excess.shape == (dataset.x.shape[0], 5)
+    assert dataset.y_rank_by_horizon.shape == (dataset.x.shape[0], 5)
+    np.testing.assert_allclose(dataset.y_cum_excess[:, 0], dataset.y_daily_excess[:, 0], rtol=1.0e-6, atol=1.0e-6)
+    np.testing.assert_allclose(
+        dataset.y_cum_excess[:, 1],
+        dataset.y_daily_excess[:, :3].sum(axis=1),
+        rtol=1.0e-5,
+        atol=1.0e-5,
+    )
     assert set(dataset.role.tolist()) == {"train", "validation", "test"}
     assert dataset.normalization_manifest["fit_role"] == "train_only"
 

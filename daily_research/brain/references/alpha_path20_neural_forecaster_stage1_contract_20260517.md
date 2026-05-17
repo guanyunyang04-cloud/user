@@ -20,6 +20,14 @@
   - repaired full bundle: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`
   - repaired full bundle passed strict audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
 - Model families are `linear_last_day`, `mlp_last_day`, `gru_sequence`, and `patch_transformer`.
+- 2026-05-17 multi-horizon opportunity upgrade changes the Stage 1 forecast target from mostly 20d-centered supervision to multi-scale opportunity supervision:
+  - cumulative auxiliary horizons are now `1,3,5,10,20` instead of only `5,10,20`;
+  - forecaster `aux` output is now 8-dimensional: five cumulative excess-return heads plus downside floor, worst 1d, and upside opportunity heads;
+  - forecast datasets persist `y_rank_by_horizon` for `1,3,5,10,20` while retaining `y_rank_20d` for compatibility;
+  - persisted prediction CSVs include `pred_aux_cum_1d`, `pred_aux_cum_3d`, and matching `future_cum_excess_return_1d/3d` columns.
+- Multi-horizon evaluation now records `rank_ic`, `top_bottom_spread`, and direction accuracy for `1d/3d/5d/10d/20d`, plus `rank_ic_upside_20d` and `top_bottom_spread_upside_20d`.
+- `--forecast-selection-profile` controls validation-first model selection and defaults to `multiscale`; supported values are `multiscale`, `trend20`, and `short_burst`.
+- Training summaries include `selected_signal_profile`, one of `multiscale`, `trend_20d`, `short_burst`, or `failed`.
 - 2026-05-17 aggressive upgrade before full training:
   - `linear_last_day` remains a pure linear last-day baseline.
   - `mlp_last_day` is added as a nonlinear last-day baseline.
@@ -28,6 +36,7 @@
   - Training is device-aware with `auto|cpu|cuda`, optional AMP, mini-batch DataLoader, gradient clipping, weight decay, early stopping, best checkpoint selection, and learning-curve output.
   - Multi-seed training is supported through `--forecast-seeds`; default smoke CLI remains one seed, while full-run recommendations can explicitly use `7,11,19`.
 - Training uses `target_scale=100.0`; persisted prediction CSV values are restored to true return units.
+- Forecast cumulative excess-return auxiliary targets are aligned to the daily excess-return path by summing daily excess labels over the requested horizon; this keeps `pred_cum_mu_<h>d` comparable to the supervised cumulative target.
 - Best checkpoints are written as `forecast_model_<family>_seed<seed>_best.pt`; selected predictions are written only for the selected family/seed unless `--forecast-write-all-predictions` is set.
 - Forecast verdicts are validation-first:
   - `insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.
@@ -37,7 +46,8 @@
 
 ## Inferences
 - This contract matches the forecast-then-allocation framing, but explicitly avoids claiming portfolio success from forecast loss alone.
-- Validation `rank_ic_20d`, `top_bottom_spread_20d`, and quantile coverage are more decision-relevant than daily MSE alone because allocation will amplify forecast errors.
+- Validation rank/spread now needs to be read as a profile: 20d trend, short burst, multiscale, or failed. This avoids losing stocks whose real opportunity is concentrated in the first few days of the 20d window.
+- Validation `rank_ic_20d`, `top_bottom_spread_20d`, short-horizon rank/spread, upside capture rank/spread, and quantile coverage are more decision-relevant than daily MSE alone because allocation will amplify forecast errors.
 - Stronger architectures and longer training improve the information value of a negative or positive result, but only if validation-first selection, seed stability, calibration gates, and shadow-only boundaries are preserved.
 - Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress.
 
@@ -45,6 +55,7 @@
 - Past one-year input means the signal date plus the previous `lookback_days-1` trading days.
 - Future 20d labels use `next_open` semantics unless explicitly changed.
 - Because existing `next_open` labels enter on next open and exit on the future open, role-tail purge is implemented as `horizon + 1` trading days to guarantee labels do not cross roles.
+- `cum1/cum3` are intended to help the forecaster learn short burst opportunities, but 1d evidence is kept low-weighted so daily noise cannot dominate model selection.
 - Full real lake training is not started by this contract; it requires a separate explicit user approval.
 - Full-universe Stage 1 training also requires memory-safe sequence loading; capped pilots may use the repaired full bundle with `--max-universe-size`.
 - Smoke defaults remain intentionally small; an evidence-grade local RTX 2060 run should explicitly set longer training controls such as `--forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`.

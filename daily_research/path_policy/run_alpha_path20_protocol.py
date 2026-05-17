@@ -591,6 +591,7 @@ def _run_forecast_walkforward_study(
             grad_accum_steps=int(args.forecast_grad_accum_steps),
             weight_decay=float(args.forecast_weight_decay),
             write_all_predictions=bool(args.forecast_write_all_predictions),
+            selection_profile=str(args.forecast_selection_profile),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -619,11 +620,12 @@ def _run_forecast_walkforward_study(
         "facts": [
             "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer.",
             "Stage 1 is strict supervised forecasting: past stock state sequence to future 20d excess-return path.",
+            "Stage 1 now evaluates 1d/3d/5d/10d/20d horizons plus 20d upside opportunity.",
             "Validation evidence is interpreted before test evidence.",
             "Model outputs are trained with target_scale=100 and persisted predictions are restored to return units.",
         ],
         "inferences": [
-            "Positive validation rank_ic_20d and top_bottom_spread_20d indicate the forecast task is worth continuing.",
+            "Positive validation multi-horizon rank/spread metrics indicate whether the forecast task is trend-led, short-burst-led, or failed.",
             "This stage does not prove allocator, oracle, replay, or live strategy quality.",
         ],
         "assumptions": [
@@ -3162,6 +3164,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-grad-accum-steps", type=int, default=1)
     parser.add_argument("--forecast-weight-decay", type=float, default=1.0e-4)
     parser.add_argument("--forecast-write-all-predictions", action="store_true")
+    parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
