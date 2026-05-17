@@ -539,6 +539,13 @@ def _forecast_model_families(value: str | None) -> tuple[str, ...]:
     return families or tuple(FORECAST_MODEL_FAMILIES)
 
 
+def _forecast_int_tuple(value: str | None, *, default: tuple[int, ...]) -> tuple[int, ...]:
+    text = str(value or "").strip()
+    if not text:
+        return tuple(int(item) for item in default)
+    return tuple(int(item.strip()) for item in text.split(",") if item.strip())
+
+
 def _run_forecast_walkforward_study(
     *,
     prepared: Any,
@@ -566,8 +573,24 @@ def _run_forecast_walkforward_study(
             study_root=study_root,
             model_families=families,
             epochs=int(args.forecast_epochs),
+            min_epochs=int(args.forecast_min_epochs),
+            early_stop_patience=int(args.forecast_early_stop_patience),
+            early_stop_min_delta=float(args.forecast_early_stop_min_delta),
             batch_size=int(args.forecast_batch_size),
             lr=float(args.forecast_lr),
+            hidden_dim=int(args.forecast_hidden_dim),
+            dropout=float(args.forecast_dropout),
+            gru_layers=int(args.forecast_gru_layers),
+            transformer_layers=int(args.forecast_transformer_layers),
+            transformer_heads=int(args.forecast_transformer_heads),
+            patch_sizes=_forecast_int_tuple(args.forecast_patch_sizes, default=(4, 20)),
+            device=args.forecast_device,
+            amp=bool(args.forecast_amp),
+            seeds=args.forecast_seeds,
+            grad_clip=float(args.forecast_grad_clip),
+            grad_accum_steps=int(args.forecast_grad_accum_steps),
+            weight_decay=float(args.forecast_weight_decay),
+            write_all_predictions=bool(args.forecast_write_all_predictions),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -3117,10 +3140,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-train-end-year", type=int, default=2022)
     parser.add_argument("--forecast-validation-year", type=int, default=2023)
     parser.add_argument("--forecast-test-year", type=int, default=2024)
-    parser.add_argument("--forecast-model-families", default="linear_last_day,gru_sequence,patch_transformer")
+    parser.add_argument("--forecast-model-families", default="linear_last_day,mlp_last_day,gru_sequence,patch_transformer")
     parser.add_argument("--forecast-epochs", type=int, default=2)
     parser.add_argument("--forecast-batch-size", type=int, default=512)
     parser.add_argument("--forecast-lr", type=float, default=3.0e-4)
+    parser.add_argument("--forecast-hidden-dim", type=int, default=192)
+    parser.add_argument("--forecast-dropout", type=float, default=0.15)
+    parser.add_argument("--forecast-gru-layers", type=int, default=2)
+    parser.add_argument("--forecast-transformer-layers", type=int, default=4)
+    parser.add_argument("--forecast-transformer-heads", type=int, default=6)
+    parser.add_argument("--forecast-patch-sizes", default="4,20")
+    parser.add_argument("--forecast-device", default="auto", choices=("auto", "cpu", "cuda"))
+    parser.add_argument("--forecast-amp", dest="forecast_amp", action="store_true", default=True)
+    parser.add_argument("--no-forecast-amp", dest="forecast_amp", action="store_false")
+    parser.add_argument("--forecast-seeds", default="7")
+    parser.add_argument("--forecast-min-epochs", type=int, default=20)
+    parser.add_argument("--forecast-early-stop-patience", type=int, default=12)
+    parser.add_argument("--forecast-early-stop-min-delta", type=float, default=1.0e-4)
+    parser.add_argument("--forecast-grad-clip", type=float, default=1.0)
+    parser.add_argument("--forecast-grad-accum-steps", type=int, default=1)
+    parser.add_argument("--forecast-weight-decay", type=float, default=1.0e-4)
+    parser.add_argument("--forecast-write-all-predictions", action="store_true")
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
@@ -3178,6 +3218,40 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-batch-size must be positive.")
         if float(getattr(args, "forecast_lr", 3.0e-4)) <= 0.0:
             parser.error("--forecast-lr must be positive.")
+        if int(getattr(args, "forecast_hidden_dim", 192)) <= 0:
+            parser.error("--forecast-hidden-dim must be positive.")
+        if not (0.0 <= float(getattr(args, "forecast_dropout", 0.15)) < 1.0):
+            parser.error("--forecast-dropout must be in [0, 1).")
+        if int(getattr(args, "forecast_gru_layers", 2)) <= 0:
+            parser.error("--forecast-gru-layers must be positive.")
+        if int(getattr(args, "forecast_transformer_layers", 4)) <= 0:
+            parser.error("--forecast-transformer-layers must be positive.")
+        if int(getattr(args, "forecast_transformer_heads", 6)) <= 0:
+            parser.error("--forecast-transformer-heads must be positive.")
+        try:
+            patch_sizes = _forecast_int_tuple(getattr(args, "forecast_patch_sizes", ""), default=(4, 20))
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not patch_sizes or any(int(item) <= 0 for item in patch_sizes):
+            parser.error("--forecast-patch-sizes must contain positive integers.")
+        if int(getattr(args, "forecast_min_epochs", 20)) <= 0:
+            parser.error("--forecast-min-epochs must be positive.")
+        if int(getattr(args, "forecast_early_stop_patience", 12)) <= 0:
+            parser.error("--forecast-early-stop-patience must be positive.")
+        if float(getattr(args, "forecast_early_stop_min_delta", 1.0e-4)) < 0.0:
+            parser.error("--forecast-early-stop-min-delta must be non-negative.")
+        if float(getattr(args, "forecast_grad_clip", 1.0)) <= 0.0:
+            parser.error("--forecast-grad-clip must be positive.")
+        if int(getattr(args, "forecast_grad_accum_steps", 1)) <= 0:
+            parser.error("--forecast-grad-accum-steps must be positive.")
+        if float(getattr(args, "forecast_weight_decay", 1.0e-4)) < 0.0:
+            parser.error("--forecast-weight-decay must be non-negative.")
+        try:
+            seeds = _forecast_int_tuple(getattr(args, "forecast_seeds", ""), default=(7,))
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not seeds or any(int(item) < 0 for item in seeds):
+            parser.error("--forecast-seeds must contain non-negative integer seeds.")
         if int(getattr(args, "forecast_max_samples_per_role", 0)) < 0:
             parser.error("--forecast-max-samples-per-role must be >= 0.")
         if not (

@@ -14,8 +14,17 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 
 def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     x = torch.randn(4, 6, 5)
-    for family in ("linear_last_day", "gru_sequence", "patch_transformer"):
-        model = make_forecast_model(family, input_dim=5, hidden_dim=16, horizon=20)
+    for family in ("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer"):
+        model = make_forecast_model(
+            family,
+            input_dim=5,
+            hidden_dim=24,
+            horizon=20,
+            gru_layers=2,
+            transformer_layers=2,
+            transformer_heads=3,
+            patch_sizes=(2, 3),
+        )
         pred = model(x)
         assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
         assert pred["mu"].shape == (4, 20)
@@ -41,22 +50,36 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
     summary = train_forecast_models(
         dataset,
         study_root=tmp_path,
-        model_families=("linear_last_day", "gru_sequence", "patch_transformer"),
-        epochs=1,
+        model_families=("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer"),
+        epochs=5,
+        min_epochs=1,
+        early_stop_patience=1,
         batch_size=4,
         lr=1.0e-3,
-        hidden_dim=16,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7, 11),
+        device="cpu",
+        amp=False,
+        gru_layers=2,
+        transformer_layers=1,
+        transformer_heads=3,
+        patch_sizes=(2, 3),
     )
 
     assert summary["status"] == "completed"
     assert summary["shadow_only"] is True
     assert summary["promotion_allowed"] is False
     assert summary["active_execution_strategy_expected_diff"] == "none"
-    assert set(summary["models"]) == {"linear_last_day", "gru_sequence", "patch_transformer"}
+    assert set(summary["models"]) == {"linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer"}
+    assert summary["selected_seed"] in {7, 11}
+    assert "family_summary" in summary
+    assert "seed_summaries" in summary["models"]["patch_transformer"]
     assert (tmp_path / "forecast_training_summary.json").exists()
+    assert (tmp_path / "forecast_learning_curve.csv").exists()
     assert (tmp_path / "forecast_predictions_validation.csv").exists()
     assert (tmp_path / "forecast_predictions_test.csv").exists()
-    assert (tmp_path / "forecast_model_linear_last_day.pt").exists()
+    assert (tmp_path / "forecast_model_linear_last_day_seed7_best.pt").exists()
 
     validation_predictions = pd.read_csv(tmp_path / "forecast_predictions_validation.csv")
     assert {"pred_cum_mu_20d", "future_cum_excess_return_20d", "pred_q10_1d", "pred_q90_20d"}.issubset(

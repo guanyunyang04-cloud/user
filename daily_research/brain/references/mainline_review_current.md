@@ -244,17 +244,22 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Parser default stage is `dataset-smoke`.
 - Existing tiny smoke evidence remains `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01`.
 - Stage 1 forecast contract is recorded in `daily_research/brain/references/alpha_path20_neural_forecaster_stage1_contract_20260517.md`.
+- 2026-05-17 aggressive forecast upgrade expands model families to `linear_last_day`, `mlp_last_day`, `gru_sequence`, and `patch_transformer`.
+- `gru_sequence` now uses multi-layer GRU sequence encoding with attention pooling; `patch_transformer` now uses learned positional embeddings, CLS pooling, and multi-scale patches.
+- Forecast training now supports device-aware CUDA/CPU selection, AMP, mini-batch loading, early stopping, best checkpoints, learning curves, and multi-seed family summaries.
 
 ### Inference
 - The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
 - Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
 - Forecast success must be judged validation-first with positive `rank_ic_20d`, positive `top_bottom_spread_20d`, and reasonable quantile coverage; daily MSE alone is insufficient.
+- The aggressive upgrade increases model capacity and training auditability before long training, but does not itself create strategy evidence or a promotion path.
 
 ### Current Stance
 - Current Path20 research route.
 - Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
 - Do not start long training or touch active execution without a separate explicit task.
+- Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
 
 ## 18. Path20 Sequence Policy v1
 

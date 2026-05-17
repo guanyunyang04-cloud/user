@@ -36,6 +36,32 @@ def test_forecaster_variants_emit_path20_contract() -> None:
         assert torch.all(prediction["q50"] <= prediction["q90"])
 
 
+def test_sequence_forecasters_use_temporal_pooling_and_position_information() -> None:
+    x = torch.randn(3, 8, 5)
+    gru = GRUPath20Forecaster(input_dim=5, hidden_dim=8, num_layers=2, dropout=0.1)
+    gru_prediction = gru(x)
+    assert hasattr(gru, "attention_pool")
+    assert torch.isfinite(gru_prediction["mu"]).all()
+
+    transformer = PatchTransformerPath20Forecaster(
+        input_dim=5,
+        hidden_dim=8,
+        patch_sizes=(2,),
+        num_heads=2,
+        num_layers=1,
+        dropout=0.0,
+    )
+    transformer.eval()
+    ordered = torch.zeros(1, 4, 5)
+    ordered[:, :2, :] = 1.0
+    ordered[:, 2:, :] = -1.0
+    swapped = ordered[:, [2, 3, 0, 1], :]
+    with torch.no_grad():
+        ordered_prediction = transformer(ordered)["mu"]
+        swapped_prediction = transformer(swapped)["mu"]
+    assert not torch.allclose(ordered_prediction, swapped_prediction)
+
+
 def test_losses_are_finite_and_allocator_respects_weight_constraints() -> None:
     pred = torch.tensor([0.0, 0.1, -0.1])
     target = torch.tensor([0.05, -0.02, 0.2])

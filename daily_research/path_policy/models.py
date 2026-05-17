@@ -92,26 +92,47 @@ class DLinearPath20Forecaster(nn.Module):
 
 
 class GRUPath20Forecaster(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 96, dropout: float = 0.10, horizon: int = 20) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 96,
+        dropout: float = 0.10,
+        horizon: int = 20,
+        num_layers: int = 1,
+    ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.hidden_dim = int(hidden_dim)
+        self.num_layers = max(int(num_layers), 1)
         self.gru = nn.GRU(
             input_size=int(input_dim),
-            hidden_size=int(hidden_dim),
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_layers,
             batch_first=True,
-            dropout=0.0,
+            dropout=float(dropout) if self.num_layers > 1 else 0.0,
+        )
+        self.attention_pool = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, 1),
         )
         self.head = nn.Sequential(
-            nn.LayerNorm(int(hidden_dim)),
+            nn.LayerNorm(self.hidden_dim * 2),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(hidden_dim), self.horizon * 4 + 6),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, self.horizon * 4 + 6),
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if x.ndim == 2:
             x = x.unsqueeze(1)
-        _, hidden = self.gru(x)
-        return _split_path20_outputs(self.head(hidden[-1]), self.horizon)
+        outputs, hidden = self.gru(x)
+        attention_logits = self.attention_pool(outputs).squeeze(-1)
+        attention_weight = torch.softmax(attention_logits, dim=1).unsqueeze(-1)
+        pooled = torch.sum(outputs * attention_weight, dim=1)
+        encoded = torch.cat([pooled, hidden[-1]], dim=-1)
+        return _split_path20_outputs(self.head(encoded), self.horizon)
 
 
 class PatchTransformerPath20Forecaster(nn.Module):
@@ -121,19 +142,33 @@ class PatchTransformerPath20Forecaster(nn.Module):
         hidden_dim: int = 96,
         horizon: int = 20,
         patch_size: int = 4,
+        patch_sizes: tuple[int, ...] | list[int] | None = None,
         num_layers: int = 2,
         num_heads: int = 4,
         dropout: float = 0.10,
+        max_patches: int = 512,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
-        self.patch_size = max(int(patch_size), 1)
+        resolved_patch_sizes = tuple(int(item) for item in (patch_sizes or (patch_size,)) if int(item) > 0)
+        self.patch_sizes = tuple(dict.fromkeys(resolved_patch_sizes or (max(int(patch_size), 1),)))
+        self.patch_size = self.patch_sizes[0]
         self.input_dim = int(input_dim)
-        self.patch_proj = nn.Linear(self.input_dim * self.patch_size, int(hidden_dim))
+        self.hidden_dim = int(hidden_dim)
+        self.max_patches = max(int(max_patches), 1)
+        self.patch_projs = nn.ModuleList(
+            [nn.Linear(self.input_dim * int(size), self.hidden_dim) for size in self.patch_sizes]
+        )
+        self.position_embeddings = nn.ParameterList(
+            [nn.Parameter(torch.zeros(1, self.max_patches, self.hidden_dim)) for _ in self.patch_sizes]
+        )
+        self.scale_embeddings = nn.Parameter(torch.zeros(1, len(self.patch_sizes), self.hidden_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
+        self.input_dropout = nn.Dropout(float(dropout))
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=int(hidden_dim),
+            d_model=self.hidden_dim,
             nhead=max(int(num_heads), 1),
-            dim_feedforward=int(hidden_dim) * 4,
+            dim_feedforward=self.hidden_dim * 4,
             dropout=float(dropout),
             activation="gelu",
             batch_first=True,
@@ -141,9 +176,16 @@ class PatchTransformerPath20Forecaster(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(int(num_layers), 1))
         self.head = nn.Sequential(
-            nn.LayerNorm(int(hidden_dim)),
-            nn.Linear(int(hidden_dim), self.horizon * 4 + 6),
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(self.hidden_dim, self.horizon * 4 + 6),
         )
+        nn.init.normal_(self.cls_token, std=0.02)
+        nn.init.normal_(self.scale_embeddings, std=0.02)
+        for embedding in self.position_embeddings:
+            nn.init.normal_(embedding, std=0.02)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if x.ndim == 2:
@@ -151,12 +193,25 @@ class PatchTransformerPath20Forecaster(nn.Module):
         batch, steps, features = x.shape
         if int(features) != self.input_dim:
             raise ValueError(f"Expected input_dim={self.input_dim}, got {features}.")
-        pad = (-steps) % self.patch_size
-        if pad:
-            x = F.pad(x, (0, 0, 0, pad))
-        patches = x.reshape(batch, -1, self.patch_size * self.input_dim)
-        encoded = self.encoder(self.patch_proj(patches))
-        pooled = encoded.mean(dim=1)
+        tokens: list[torch.Tensor] = []
+        for scale_idx, patch_size in enumerate(self.patch_sizes):
+            work = x
+            pad = (-steps) % int(patch_size)
+            if pad:
+                work = F.pad(work, (0, 0, 0, pad))
+            patches = work.reshape(batch, -1, int(patch_size) * self.input_dim)
+            if patches.shape[1] > self.max_patches:
+                raise ValueError(
+                    f"Patch count {patches.shape[1]} exceeds max_patches={self.max_patches} for patch_size={patch_size}."
+                )
+            projected = self.patch_projs[scale_idx](patches)
+            projected = projected + self.position_embeddings[scale_idx][:, : projected.shape[1], :]
+            projected = projected + self.scale_embeddings[:, scale_idx : scale_idx + 1, :]
+            tokens.append(projected)
+        token_sequence = torch.cat(tokens, dim=1)
+        cls = self.cls_token.expand(batch, -1, -1)
+        encoded = self.encoder(self.input_dropout(torch.cat([cls, token_sequence], dim=1)))
+        pooled = encoded[:, 0, :]
         return _split_path20_outputs(self.head(pooled), self.horizon)
 
 

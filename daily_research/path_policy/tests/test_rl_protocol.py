@@ -90,6 +90,17 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_train_end_year == 2022
     assert args.forecast_validation_year == 2023
     assert args.forecast_test_year == 2024
+    assert args.forecast_hidden_dim == 192
+    assert args.forecast_dropout == pytest.approx(0.15)
+    assert args.forecast_gru_layers == 2
+    assert args.forecast_transformer_layers == 4
+    assert args.forecast_transformer_heads == 6
+    assert args.forecast_patch_sizes == "4,20"
+    assert args.forecast_device == "auto"
+    assert args.forecast_amp is True
+    assert args.forecast_min_epochs == 20
+    assert args.forecast_early_stop_patience == 12
+    assert args.forecast_seeds == "7"
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -195,11 +206,28 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--forecast-test-year",
             "2021",
             "--forecast-model-families",
-            "linear_last_day",
+            "linear_last_day,mlp_last_day",
             "--forecast-epochs",
+            "3",
+            "--forecast-min-epochs",
+            "1",
+            "--forecast-early-stop-patience",
             "1",
             "--forecast-batch-size",
             "4",
+            "--forecast-hidden-dim",
+            "24",
+            "--forecast-transformer-heads",
+            "3",
+            "--forecast-transformer-layers",
+            "1",
+            "--forecast-patch-sizes",
+            "2,3",
+            "--forecast-device",
+            "cpu",
+            "--no-forecast-amp",
+            "--forecast-seeds",
+            "7,11",
             "--forecast-max-samples-per-role",
             "8",
         ]
@@ -221,6 +249,9 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     assert summary["active_execution_strategy_expected_diff"] == "none"
     assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
     assert "linear_last_day" in summary["training_summary"]["models"]
+    assert "mlp_last_day" in summary["training_summary"]["models"]
+    assert summary["training_summary"]["selected_seed"] in {7, 11}
+    assert "forecast_learning_curve_csv" in summary["training_summary"]
 
 
 def test_current_neural_mainline_stage_no_longer_requires_legacy_allow_flag() -> None:
