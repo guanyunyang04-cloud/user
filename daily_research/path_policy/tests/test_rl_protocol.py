@@ -4,9 +4,11 @@ import pytest
 
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 from daily_research.path_policy.run_alpha_path20_protocol import (
+    _matrix_evidence_diagnostics,
     _multiyear_aggregate,
     _run_walkforward_matrix,
     _run_walkforward_study,
+    _walkforward_evidence_diagnostics,
     _walkforward_evidence_verdict,
     _validate_protocol_args,
     build_arg_parser,
@@ -240,8 +242,14 @@ def test_walkforward_summary_separates_train_validation_test(tmp_path, monkeypat
     assert "validation_exact_replay_metrics" in summary
     assert "surrogate_exact_gap" in summary
     assert "projection_parity_summary" in summary
+    assert "evidence_diagnostics" in summary
+    assert "attribution_by_role" in summary["evidence_diagnostics"]
+    assert "attribution_csv" in summary["yearly"]["2024"]["replay_summary"]["artifacts"]
+    assert "raw_intent_diagnostics_summary" in summary["train_summary"]
+    assert "projected_learning_health" in summary["train_summary"]
     assert summary["evidence_verdict"] in {
         "contract_passed",
+        "diagnosed_failure",
         "validation_promising",
         "test_promising",
         "insufficient_or_incomplete",
@@ -339,6 +347,80 @@ def test_walkforward_verdict_requires_complete_validation_before_test_success() 
     assert verdict == "insufficient_or_incomplete"
 
 
+def test_walkforward_verdict_negative_validation_can_be_diagnosed_failure() -> None:
+    diagnostics = {
+        "warnings": {
+            "validation_generalization_failure": True,
+            "under_exposure_warning": False,
+            "projection_overcorrection_warning": False,
+            "surrogate_exact_gap_warning": False,
+        }
+    }
+
+    verdict = _walkforward_evidence_verdict(
+        aggregate={
+            "validation": {"completed_year_count": 1, "mean_total_return": -0.01, "mean_sharpe": -0.2, "worst_max_drawdown": -0.01},
+            "test": {"completed_year_count": 1, "mean_total_return": 0.10, "mean_sharpe": 0.8, "worst_max_drawdown": -0.01},
+        },
+        projection_parity_summary={"projection_mismatch_warning": False},
+        validation_exact_replay_metrics={"status": "completed"},
+        test_exact_replay_metrics={"status": "completed"},
+        evidence_diagnostics=diagnostics,
+    )
+
+    assert verdict == "diagnosed_failure"
+
+
+def test_walkforward_evidence_diagnostics_flags_projection_and_exposure() -> None:
+    yearly = {
+        "2022": {
+            "role": "validation",
+            "replay_summary": {
+                "status": "completed",
+                "attribution_summary": {
+                    "status": "completed",
+                    "gross_return_sum": -0.01,
+                    "estimated_cost_sum": 0.001,
+                    "net_return_sum": -0.011,
+                    "benchmark_return_sum": 0.0,
+                    "excess_return_sum": -0.011,
+                    "avg_cash_weight": 0.96,
+                    "avg_projected_gross_exposure": 0.04,
+                    "avg_projected_turnover": 0.01,
+                    "avg_projection_l1_distance": 0.10,
+                    "avg_target_count": 1.0,
+                },
+            },
+        }
+    }
+    diagnostics = _walkforward_evidence_diagnostics(
+        yearly=yearly,
+        train_summary={
+            "raw_intent_diagnostics_summary": {"avg_raw_gross_exposure": 0.20},
+            "projection_diagnostics_summary": {"avg_projection_l1_distance": 0.10},
+        },
+        aggregate={
+            "train": {"mean_total_return": 0.05},
+            "validation": {
+                "mean_total_return": -0.02,
+                "mean_sharpe": -0.5,
+                "mean_avg_projected_gross_exposure": 0.04,
+                "mean_avg_projection_l1_distance": 0.10,
+                "mean_avg_turnover": 0.01,
+            },
+            "test": {"mean_total_return": 0.01},
+        },
+        projection_parity_summary={"projection_mismatch_warning": False},
+        surrogate_exact_gap={"status": "completed", "projection_l1_gap": 0.03},
+    )
+
+    assert diagnostics["status"] == "diagnosed"
+    assert diagnostics["warnings"]["under_exposure_warning"] is True
+    assert diagnostics["warnings"]["projection_overcorrection_warning"] is True
+    assert diagnostics["warnings"]["surrogate_exact_gap_warning"] is True
+    assert diagnostics["warnings"]["validation_generalization_failure"] is True
+
+
 def test_walkforward_matrix_outputs_two_model_families(tmp_path, monkeypatch) -> None:
     import daily_research.path_policy.run_alpha_path20_protocol as protocol
 
@@ -390,9 +472,30 @@ def test_walkforward_matrix_outputs_two_model_families(tmp_path, monkeypatch) ->
     assert set(summary["models"]) == {"sequence_gru", "decision_transformer"}
     assert summary["models"]["sequence_gru"]["walkforward_summary"]["stage"] == "rl_walkforward_study"
     assert summary["models"]["decision_transformer"]["walkforward_summary"]["train_summary"]["model_family"] == "decision_transformer"
+    assert "evidence_diagnostics" in summary
+    assert "evidence_diagnostics" in summary["models"]["sequence_gru"]
     assert summary["evidence_verdict"] in {
         "contract_passed",
+        "diagnosed_failure",
         "validation_promising",
         "test_promising",
         "insufficient_or_incomplete",
     }
+
+
+def test_matrix_evidence_diagnostics_selects_best_validation_family() -> None:
+    diagnostics = _matrix_evidence_diagnostics(
+        {
+            "a": {
+                "walkforward_summary": {"aggregate": {"validation": {"mean_total_return": -0.10}}},
+                "evidence_diagnostics": {"warnings": {"validation_generalization_failure": True}},
+            },
+            "b": {
+                "walkforward_summary": {"aggregate": {"validation": {"mean_total_return": 0.02}}},
+                "evidence_diagnostics": {"warnings": {}},
+            },
+        }
+    )
+
+    assert diagnostics["status"] == "diagnosed"
+    assert diagnostics["best_validation_family"] == "b"

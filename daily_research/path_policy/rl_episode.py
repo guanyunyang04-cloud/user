@@ -583,6 +583,7 @@ def episode_policy_rollout_loss(
     portfolio_context: list[torch.Tensor] = []
     losses: list[torch.Tensor] = []
     diagnostics_rows: list[dict[str, float]] = []
+    raw_intent_rows: list[dict[str, float]] = []
     previous_weight_nonzero_checks: list[float] = []
     previous_reward_nonzero_checks: list[float] = []
     equity = torch.ones((), dtype=torch.float32, device=device)
@@ -626,6 +627,21 @@ def episode_policy_rollout_loss(
         else:
             pred = model(model_state, portfolio_window, tradable_mask=mask_now)
         raw = pred["raw_target_weight"].squeeze(0)
+        raw_clean = torch.nan_to_num(raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        raw_positive = raw_clean.clamp_min(0.0)
+        positive_sum = raw_positive.sum().clamp_min(1.0e-12)
+        top_k = min(max(int(max_positions), 1), int(raw_positive.numel()))
+        top_k_sum = torch.topk(raw_positive, k=top_k).values.sum() if top_k > 0 else torch.zeros((), device=device)
+        raw_entropy = -(raw_positive.clamp_min(1.0e-12) / positive_sum * (raw_positive.clamp_min(1.0e-12) / positive_sum).log()).sum()
+        raw_intent_rows.append(
+            {
+                "raw_gross_exposure": float(raw_positive.sum().detach().cpu()),
+                "raw_topk_concentration": float((top_k_sum / positive_sum).detach().cpu()),
+                "raw_negative_count": float((raw_clean < 0.0).float().sum().detach().cpu()),
+                "raw_over_cap_count": float((raw_clean > float(max_position_weight)).float().sum().detach().cpu()),
+                "raw_entropy": float(raw_entropy.detach().cpu()),
+            }
+        )
         projection = project_target_weights_torch(
             raw,
             current_weight,
@@ -679,6 +695,7 @@ def episode_policy_rollout_loss(
         "loss": loss_tensor,
         "step_count": int(len(losses)),
         "diagnostics": _summarize_diagnostics(diagnostics_rows),
+        "raw_intent_diagnostics": _summarize_raw_intent(raw_intent_rows),
         "used_projected_weights_for_loss": True,
         "rolled_current_weight": True,
         "rollout_grad_mode": grad_mode,
@@ -699,6 +716,19 @@ def _summarize_diagnostics(rows: list[dict[str, float]]) -> dict[str, float]:
         f"avg_{column}": float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).mean())
         for column in frame.columns
     }
+
+
+def _summarize_raw_intent(rows: list[dict[str, float]]) -> dict[str, float]:
+    if not rows:
+        return {}
+    frame = pd.DataFrame(rows)
+    result = {
+        f"avg_{column}": float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).mean())
+        for column in frame.columns
+    }
+    for column in frame.columns:
+        result[f"last_{column}"] = float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).iloc[-1])
+    return result
 
 
 def predict_episode_targets(

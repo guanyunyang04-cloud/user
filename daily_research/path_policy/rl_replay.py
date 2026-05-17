@@ -57,12 +57,14 @@ def run_sequence_policy_replay(
             "turnover_frame": pd.DataFrame(),
             "position_history": pd.DataFrame(),
             "projection_diagnostics": pd.DataFrame(),
+            "attribution_frame": pd.DataFrame(),
         }
     portfolio = PortfolioState(max_positions=int(max_positions), max_position_weight=float(max_position_weight))
     action_rows: list[dict[str, Any]] = []
     turnover_rows: list[dict[str, Any]] = []
     position_rows: list[dict[str, Any]] = []
     projection_rows: list[dict[str, Any]] = []
+    attribution_rows: list[dict[str, Any]] = []
     returns: list[float] = []
     return_dates: list[str] = []
     dates = trajectory.dates
@@ -92,13 +94,12 @@ def run_sequence_policy_replay(
             source_label=source_label,
         )
         target = _numeric(policy_frame, "portfolio_daily_target_weight", 0.0)
-        projection_rows.append(
-            {
-                "date": date_text,
-                **_diagnose_projection(raw_target, target, current),
-                **{key: value for key, value in global_targets.items() if str(key).startswith("path_policy_")},
-            }
-        )
+        projection_diagnostics = {
+            "date": date_text,
+            **_diagnose_projection(raw_target, target, current),
+            **{key: value for key, value in global_targets.items() if str(key).startswith("path_policy_")},
+        }
+        projection_rows.append(projection_diagnostics)
         step_result = portfolio.step(
             date=dt,
             prices=execution_price_frame.loc[dt],
@@ -117,11 +118,31 @@ def run_sequence_policy_replay(
             next_returns = execution_price_frame.loc[next_dt].div(execution_price_frame.loc[dt]).sub(1.0)
             next_returns = next_returns.replace([np.inf, -np.inf], np.nan).fillna(0.0)
             gross_return = float(step_result.weights.reindex(next_returns.index).fillna(0.0).mul(next_returns).sum())
-            net_return = gross_return - estimate_trading_cost(
+            estimated_cost = estimate_trading_cost(
                 diagnostics=step_result.diagnostics,
                 transaction_cost_bps=transaction_cost_bps,
                 slippage_bps=slippage_bps,
                 sell_tax_bps=sell_tax_bps,
+            )
+            net_return = gross_return - estimated_cost
+            benchmark_return = float(_numeric(daily, "benchmark_return", 0.0).iloc[0]) if len(daily) else 0.0
+            attribution_rows.append(
+                {
+                    "signal_date": date_text,
+                    "return_date": pd.Timestamp(next_dt).strftime("%Y-%m-%d"),
+                    "gross_return": float(gross_return),
+                    "estimated_cost": float(estimated_cost),
+                    "net_return": float(net_return),
+                    "benchmark_return": float(benchmark_return),
+                    "excess_return": float(net_return - benchmark_return),
+                    "cash_weight": float(projection_diagnostics.get("path_policy_cash_weight", max(0.0, 1.0 - float(projection_diagnostics.get("projected_gross_exposure", 0.0))))),
+                    "raw_gross_exposure": float(projection_diagnostics.get("raw_gross_exposure", 0.0)),
+                    "projected_gross_exposure": float(projection_diagnostics.get("projected_gross_exposure", 0.0)),
+                    "raw_turnover": float(projection_diagnostics.get("raw_turnover", 0.0)),
+                    "projected_turnover": float(projection_diagnostics.get("projected_turnover", 0.0)),
+                    "projection_l1_distance": float(projection_diagnostics.get("projection_l1_distance", 0.0)),
+                    "target_count": float(projection_diagnostics.get("path_policy_target_count", 0.0)),
+                }
             )
             returns.append(net_return)
             return_dates.append(pd.Timestamp(next_dt).strftime("%Y-%m-%d"))
@@ -141,6 +162,14 @@ def run_sequence_policy_replay(
         metrics["avg_turnover"] = float(pd.to_numeric(turnover_frame["realized_turnover"], errors="coerce").fillna(0.0).mean())
     elif not projection_frame.empty and "projected_turnover" in projection_frame.columns:
         metrics["avg_turnover"] = float(pd.to_numeric(projection_frame["projected_turnover"], errors="coerce").fillna(0.0).mean())
+    attribution_frame = pd.DataFrame(attribution_rows)
+    if not attribution_frame.empty:
+        metrics["gross_return_sum"] = float(pd.to_numeric(attribution_frame["gross_return"], errors="coerce").fillna(0.0).sum())
+        metrics["estimated_cost_sum"] = float(pd.to_numeric(attribution_frame["estimated_cost"], errors="coerce").fillna(0.0).sum())
+        metrics["excess_return_sum"] = float(pd.to_numeric(attribution_frame["excess_return"], errors="coerce").fillna(0.0).sum())
+        metrics["avg_cash_weight"] = float(pd.to_numeric(attribution_frame["cash_weight"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_estimated_cost"] = float(pd.to_numeric(attribution_frame["estimated_cost"], errors="coerce").fillna(0.0).mean())
+        metrics["avg_benchmark_return"] = float(pd.to_numeric(attribution_frame["benchmark_return"], errors="coerce").fillna(0.0).mean())
     return {
         "dates": [pd.Timestamp(dt).strftime("%Y-%m-%d") for dt in dates],
         "returns": returns_series,
@@ -149,4 +178,5 @@ def run_sequence_policy_replay(
         "turnover_frame": turnover_frame,
         "position_history": pd.DataFrame(position_rows),
         "projection_diagnostics": projection_frame,
+        "attribution_frame": attribution_frame,
     }

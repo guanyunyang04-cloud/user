@@ -34,5 +34,21 @@ def test_sequence_replay_writes_projection_diagnostics_and_returns() -> None:
 
     assert result["metrics"]["return_count"] > 0
     assert not result["projection_diagnostics"].empty
+    assert not result["attribution_frame"].empty
     assert result["projection_diagnostics"]["projected_gross_exposure"].max() <= 0.50 + 1.0e-6
     assert "projection_l1_distance" in result["projection_diagnostics"].columns
+    attribution = result["attribution_frame"]
+    assert {
+        "gross_return",
+        "estimated_cost",
+        "net_return",
+        "benchmark_return",
+        "excess_return",
+        "cash_weight",
+        "projected_gross_exposure",
+        "projected_turnover",
+        "projection_l1_distance",
+    }.issubset(set(attribution.columns))
+    diff = (attribution["net_return"] - (attribution["gross_return"] - attribution["estimated_cost"])).abs().max()
+    assert diff < 1.0e-12
+    assert result["metrics"]["estimated_cost_sum"] >= 0.0

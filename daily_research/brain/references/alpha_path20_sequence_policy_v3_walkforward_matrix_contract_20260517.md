@@ -4,6 +4,7 @@
 - Promote the v2 episode loop to evidence-grade walk-forward interpretation.
 - Keep `alpha_path20_sequence_policy_v1` as the policy version; v3 is the evidence and training/replay consistency contract.
 - Produce shadow-only research evidence only. No live/default mutation and no `daily_research/output/active_execution_strategy.json` write are allowed.
+- After the 2026-05-17 full-year matrix, v3 must also diagnose failed validation evidence. `contract_passed` means the evidence loop is intact; it does not mean alpha success.
 
 ## Fixed Split
 - Train: `2019`, `2020`.
@@ -24,7 +25,8 @@
 - Training loss uses torch projected weights as a surrogate, but final evidence comes from exact `build_path_policy_frame` plus `PortfolioState.step` replay.
 - `validation_surrogate_metrics` is not exact replay evidence.
 - Exact replay metrics must be reported separately as `validation_exact_replay_metrics` and `test_exact_replay_metrics`.
-- Summaries must include surrogate-vs-exact gap, projection diagnostics, context coverage, `oracle_used=false`, `shadow_only=true`, and `promotion_allowed=false`.
+- Summaries must include surrogate-vs-exact gap, projection diagnostics, context coverage, evidence diagnostics, `oracle_used=false`, `shadow_only=true`, and `promotion_allowed=false`.
+- Replay attribution must expose gross return, estimated cost, net return, benchmark return, excess return, cash weight, projected gross, turnover, and projection distance.
 
 ## Projection Parity
 - Torch projection and pandas exact projection are compared on fixture and sampled episode states.
@@ -36,10 +38,12 @@
 - `rl-walkforward-matrix` runs fixed-family comparison for `sequence_gru` and `decision_transformer`.
 - Verdict levels:
   - `contract_passed`
+  - `diagnosed_failure`
   - `validation_promising`
   - `test_promising`
   - `insufficient_or_incomplete`
 - Validation completeness is required before any test success interpretation.
+- Negative validation exact replay must not be promoted. If the diagnostics can identify exposure, projection, surrogate/exact, or generalization failure, use `diagnosed_failure`.
 - All matrix verdicts remain `promotion_allowed=false`.
 
 ## Boundaries

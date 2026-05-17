@@ -780,8 +780,11 @@ def _episode_train_model(
     losses: list[float] = []
     projection_summaries: list[dict[str, float]] = []
     context_summaries: list[dict[str, Any]] = []
+    raw_intent_summaries: list[dict[str, float]] = []
+    epoch_projection_summaries: list[dict[str, float]] = []
     for _ in range(max(int(args.smoke_epochs), 1)):
         epoch_losses: list[float] = []
+        epoch_projection_rows: list[dict[str, float]] = []
         for episode in completed_train:
             optimizer.zero_grad(set_to_none=True)
             result = episode_policy_rollout_loss(
@@ -806,8 +809,12 @@ def _episode_train_model(
             loss.backward()
             optimizer.step()
             epoch_losses.append(float(loss.detach().cpu()))
-            projection_summaries.append(dict(result.get("diagnostics", {}) or {}))
+            projection_diag = dict(result.get("diagnostics", {}) or {})
+            projection_summaries.append(projection_diag)
+            epoch_projection_rows.append(projection_diag)
             context_summaries.append(dict(result.get("context_coverage", {}) or {}))
+            raw_intent_summaries.append(dict(result.get("raw_intent_diagnostics", {}) or {}))
+        epoch_projection_summaries.append(_summarize_projection_dicts(epoch_projection_rows))
         losses.append(float(np.mean(epoch_losses)) if epoch_losses else 0.0)
     validation_surrogate: dict[str, Any] = {}
     completed_validation = [episode for episode in validation_episodes if str(episode.manifest.get("status", "")) == "completed"]
@@ -833,6 +840,7 @@ def _episode_train_model(
             "status": str(validation_result.get("status", "unknown")),
             "loss": float(validation_result["loss"].detach().cpu()) if "loss" in validation_result else 0.0,
             "diagnostics": validation_result.get("diagnostics", {}),
+            "raw_intent_diagnostics": validation_result.get("raw_intent_diagnostics", {}),
             "context_coverage": validation_result.get("context_coverage", {}),
             "used_projected_weights_for_loss": bool(validation_result.get("used_projected_weights_for_loss", False)),
         }
@@ -890,6 +898,8 @@ def _episode_train_model(
     model_manifest_path = study_root / "model_manifest.json"
     write_json(model_manifest_path, _json_ready(model_manifest))
     projection_summary = _summarize_projection_dicts(projection_summaries)
+    raw_intent_summary = _summarize_projection_dicts(raw_intent_summaries)
+    projected_learning_health = _projected_learning_health(epoch_projection_summaries)
     context_coverage = _summarize_context_coverage(context_summaries)
     summary = {
         "status": "completed",
@@ -904,6 +914,8 @@ def _episode_train_model(
         "final_train_loss": float(losses[-1]) if losses else 0.0,
         "validation_surrogate_metrics": validation_surrogate,
         "projection_diagnostics_summary": projection_summary,
+        "raw_intent_diagnostics_summary": raw_intent_summary,
+        "projected_learning_health": projected_learning_health,
         "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
         "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
         "context_coverage": context_coverage,
@@ -943,6 +955,23 @@ def _summarize_context_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "previous_reward_nonzero_rate": _finite_mean(reward_rates),
         "context_underused_warning": any(bool(row.get("context_underused_warning", False)) for row in rows),
     }
+
+
+def _projected_learning_health(epoch_rows: list[dict[str, float]]) -> dict[str, Any]:
+    rows = [dict(row) for row in epoch_rows if row]
+    if not rows:
+        return {"status": "not_available", "epoch_count": 0}
+    def values_for(key: str) -> list[float]:
+        return [float(row.get(key, 0.0) or 0.0) for row in rows]
+
+    result: dict[str, Any] = {"status": "completed", "epoch_count": int(len(rows)), "by_epoch": rows}
+    for key in ("avg_projection_l1_distance", "avg_projected_gross_exposure", "avg_projected_turnover"):
+        values = values_for(key)
+        result[f"{key}_first"] = float(values[0])
+        result[f"{key}_last"] = float(values[-1])
+        result[f"{key}_delta"] = float(values[-1] - values[0])
+        result[f"{key}_decreased"] = bool(values[-1] < values[0]) if len(values) > 1 else False
+    return result
 
 
 def _episode_projection_parity_summary(
@@ -987,6 +1016,30 @@ def _episode_projection_parity_summary(
     }
 
 
+def _summarize_replay_attribution(frame: pd.DataFrame) -> dict[str, Any]:
+    if frame is None or frame.empty:
+        return {"status": "not_available", "row_count": 0}
+    numeric = frame.copy()
+    for column in numeric.columns:
+        if column not in {"signal_date", "return_date"}:
+            numeric[column] = pd.to_numeric(numeric[column], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    summary = {
+        "status": "completed",
+        "row_count": int(len(numeric)),
+        "gross_return_sum": float(numeric.get("gross_return", pd.Series(dtype=float)).sum()),
+        "estimated_cost_sum": float(numeric.get("estimated_cost", pd.Series(dtype=float)).sum()),
+        "net_return_sum": float(numeric.get("net_return", pd.Series(dtype=float)).sum()),
+        "benchmark_return_sum": float(numeric.get("benchmark_return", pd.Series(dtype=float)).sum()),
+        "excess_return_sum": float(numeric.get("excess_return", pd.Series(dtype=float)).sum()),
+        "avg_cash_weight": float(numeric.get("cash_weight", pd.Series(dtype=float)).mean()) if "cash_weight" in numeric else 0.0,
+        "avg_projected_gross_exposure": float(numeric.get("projected_gross_exposure", pd.Series(dtype=float)).mean()) if "projected_gross_exposure" in numeric else 0.0,
+        "avg_projected_turnover": float(numeric.get("projected_turnover", pd.Series(dtype=float)).mean()) if "projected_turnover" in numeric else 0.0,
+        "avg_projection_l1_distance": float(numeric.get("projection_l1_distance", pd.Series(dtype=float)).mean()) if "projection_l1_distance" in numeric else 0.0,
+        "avg_target_count": float(numeric.get("target_count", pd.Series(dtype=float)).mean()) if "target_count" in numeric else 0.0,
+    }
+    return {key: (0.0 if isinstance(value, float) and not np.isfinite(value) else value) for key, value in summary.items()}
+
+
 def _run_episode_replay(
     *,
     prepared: Any,
@@ -1027,8 +1080,10 @@ def _run_episode_replay(
         "turnover_csv": _write_frame(study_root / f"{prefix}_rl_turnover.csv", rollout["turnover_frame"]),
         "position_history_csv": _write_frame(study_root / f"{prefix}_rl_position_history.csv", rollout["position_history"]),
         "projection_diagnostics_csv": _write_frame(study_root / f"{prefix}_rl_projection_diagnostics.csv", rollout["projection_diagnostics"]),
+        "attribution_csv": _write_frame(study_root / f"{prefix}_rl_attribution.csv", rollout["attribution_frame"]),
         "returns_csv": _write_frame(study_root / f"{prefix}_rl_returns.csv", _series_frame(rollout["returns"], index_name="date", value_name="net_return")),
     }
+    attribution_summary = _summarize_replay_attribution(rollout["attribution_frame"])
     summary = {
         "status": "completed",
         "policy_version": ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
@@ -1041,6 +1096,7 @@ def _run_episode_replay(
         "date_count": int(len(rollout["dates"])),
         "return_count": int(len(rollout["returns"])),
         "metrics": rollout["metrics"],
+        "attribution_summary": attribution_summary,
         "training_projection_diagnostics_summary": training_projection_summary,
         "projection_parity_summary": _episode_projection_parity_summary(episode, args=args),
         "artifacts": paths,
@@ -1180,6 +1236,7 @@ def _run_sequence_replay_smoke(
         "turnover_csv": _write_frame(study_root / f"{prefix}_rl_turnover.csv", rollout["turnover_frame"]),
         "position_history_csv": _write_frame(study_root / f"{prefix}_rl_position_history.csv", rollout["position_history"]),
         "projection_diagnostics_csv": _write_frame(study_root / f"{prefix}_rl_projection_diagnostics.csv", rollout["projection_diagnostics"]),
+        "attribution_csv": _write_frame(study_root / f"{prefix}_rl_attribution.csv", rollout["attribution_frame"]),
         "returns_csv": _write_frame(study_root / f"{prefix}_rl_returns.csv", _series_frame(rollout["returns"], index_name="date", value_name="net_return")),
     }
     summary = {
@@ -1190,6 +1247,7 @@ def _run_sequence_replay_smoke(
         "date_count": int(len(rollout["dates"])),
         "return_count": int(len(rollout["returns"])),
         "metrics": rollout["metrics"],
+        "attribution_summary": _summarize_replay_attribution(rollout["attribution_frame"]),
         "artifacts": paths,
         "oracle_used": False,
         "shadow_only": True,
@@ -1391,6 +1449,13 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
     surrogate_exact_gap = _surrogate_exact_gap(train_summary, yearly)
     exact_validation_metrics = _role_exact_metrics(yearly, "validation")
     exact_test_metrics = _role_exact_metrics(yearly, "test")
+    evidence_diagnostics = _walkforward_evidence_diagnostics(
+        yearly=yearly,
+        train_summary=train_summary,
+        aggregate=aggregate,
+        projection_parity_summary=projection_parity_summary,
+        surrogate_exact_gap=surrogate_exact_gap,
+    )
     summary = {
         "status": "completed" if train_summary.get("status") == "completed" else "skipped",
         "stage": "rl_walkforward_study",
@@ -1406,6 +1471,7 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
         "validation_exact_replay_metrics": exact_validation_metrics,
         "test_exact_replay_metrics": exact_test_metrics,
         "surrogate_exact_gap": surrogate_exact_gap,
+        "evidence_diagnostics": evidence_diagnostics,
         "rollout_grad_mode": str(getattr(args, "rollout_grad_mode", "detached")),
         "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
         "evidence_verdict": _walkforward_evidence_verdict(
@@ -1413,6 +1479,7 @@ def _run_walkforward_study(*, study_root: Path, tag: str, args: argparse.Namespa
             projection_parity_summary=projection_parity_summary,
             validation_exact_replay_metrics=exact_validation_metrics,
             test_exact_replay_metrics=exact_test_metrics,
+            evidence_diagnostics=evidence_diagnostics,
         ),
         "oracle_used": False,
         "shadow_only": True,
@@ -1503,12 +1570,132 @@ def _surrogate_exact_gap(train_summary: dict[str, Any], yearly: dict[str, Any]) 
     }
 
 
+def _role_attribution_summary(yearly: dict[str, Any], role: str) -> dict[str, Any]:
+    rows = [
+        dict(dict(result.get("replay_summary", {}) or {}).get("attribution_summary", {}) or {})
+        for result in yearly.values()
+        if str(result.get("role", "")) == str(role)
+        and str(dict(result.get("replay_summary", {}) or {}).get("status", "")) == "completed"
+    ]
+    rows = [row for row in rows if row.get("status") == "completed"]
+    if not rows:
+        return {"status": "not_available", "role": str(role), "year_count": 0}
+    keys = [
+        "gross_return_sum",
+        "estimated_cost_sum",
+        "net_return_sum",
+        "benchmark_return_sum",
+        "excess_return_sum",
+        "avg_cash_weight",
+        "avg_projected_gross_exposure",
+        "avg_projected_turnover",
+        "avg_projection_l1_distance",
+        "avg_target_count",
+    ]
+    result: dict[str, Any] = {"status": "completed", "role": str(role), "year_count": int(len(rows))}
+    for key in keys:
+        values = [float(row.get(key, 0.0) or 0.0) for row in rows]
+        if key.endswith("_sum"):
+            result[key] = _finite_sum(values)
+        else:
+            result[key] = _finite_mean(values)
+    return result
+
+
+def _walkforward_evidence_diagnostics(
+    *,
+    yearly: dict[str, Any],
+    train_summary: dict[str, Any],
+    aggregate: dict[str, Any],
+    projection_parity_summary: dict[str, Any],
+    surrogate_exact_gap: dict[str, Any],
+) -> dict[str, Any]:
+    train_agg = dict(aggregate.get("train", {}) or {})
+    validation_agg = dict(aggregate.get("validation", {}) or {})
+    test_agg = dict(aggregate.get("test", {}) or {})
+    validation_return = _safe_metric(validation_agg, "mean_total_return")
+    train_return = _safe_metric(train_agg, "mean_total_return")
+    test_return = _safe_metric(test_agg, "mean_total_return")
+    validation_sharpe = _safe_metric(validation_agg, "mean_sharpe")
+    validation_gross = _safe_metric(validation_agg, "mean_avg_projected_gross_exposure")
+    validation_projection_l1 = _safe_metric(validation_agg, "mean_avg_projection_l1_distance")
+    validation_turnover = _safe_metric(validation_agg, "mean_avg_turnover")
+    raw_diag = dict(train_summary.get("raw_intent_diagnostics_summary", {}) or {})
+    train_projection_diag = dict(train_summary.get("projection_diagnostics_summary", {}) or {})
+    surrogate_gap = float(surrogate_exact_gap.get("projection_l1_gap", 0.0) or 0.0) if surrogate_exact_gap.get("status") == "completed" else 0.0
+    train_validation_gap = (
+        float(validation_return - train_return)
+        if validation_return is not None and train_return is not None
+        else None
+    )
+    validation_test_gap = (
+        float(test_return - validation_return)
+        if validation_return is not None and test_return is not None
+        else None
+    )
+    attribution_by_role = {
+        role: _role_attribution_summary(yearly, role)
+        for role in ("train", "validation", "test")
+    }
+    warnings = {
+        "under_exposure_warning": bool(validation_gross is not None and validation_gross < 0.10),
+        "projection_overcorrection_warning": bool(
+            validation_projection_l1 is not None
+            and validation_gross is not None
+            and validation_projection_l1 > max(validation_gross, 1.0e-8)
+        ),
+        "surrogate_exact_gap_warning": bool(abs(surrogate_gap) > 0.02),
+        "validation_generalization_failure": bool(validation_return is not None and validation_return <= 0.0),
+        "projection_mismatch_warning": bool(projection_parity_summary.get("projection_mismatch_warning", False)),
+    }
+    diagnosed = any(
+        warnings[key]
+        for key in (
+            "under_exposure_warning",
+            "projection_overcorrection_warning",
+            "surrogate_exact_gap_warning",
+            "validation_generalization_failure",
+        )
+    )
+    return {
+        "status": "diagnosed" if diagnosed else "clean",
+        "warnings": warnings,
+        "train_validation_return_gap": train_validation_gap,
+        "validation_test_return_gap": validation_test_gap,
+        "validation_return": validation_return,
+        "validation_sharpe": validation_sharpe,
+        "validation_avg_turnover": validation_turnover,
+        "validation_avg_projected_gross_exposure": validation_gross,
+        "validation_avg_projection_l1_distance": validation_projection_l1,
+        "raw_intent_summary": raw_diag,
+        "projected_training_summary": train_projection_diag,
+        "attribution_by_role": attribution_by_role,
+        "next_research_actions": _diagnostic_next_actions(warnings),
+    }
+
+
+def _diagnostic_next_actions(warnings: dict[str, bool]) -> list[str]:
+    actions: list[str] = []
+    if warnings.get("under_exposure_warning"):
+        actions.append("Investigate cash/gross regularization and policy output scale; validation exposure is below research-useful range.")
+    if warnings.get("projection_overcorrection_warning"):
+        actions.append("Reduce raw/projected mismatch before model changes; projection is dominating neural intent.")
+    if warnings.get("surrogate_exact_gap_warning"):
+        actions.append("Improve surrogate-exact alignment or train selection on exact replay diagnostics.")
+    if warnings.get("validation_generalization_failure"):
+        actions.append("Do not interpret positive test return without validation repair; inspect 2022 regime and train-validation feature drift.")
+    if not actions:
+        actions.append("No blocking diagnostic warning; continue with controlled training/reward ablation.")
+    return actions
+
+
 def _walkforward_evidence_verdict(
     *,
     aggregate: dict[str, Any],
     projection_parity_summary: dict[str, Any],
     validation_exact_replay_metrics: dict[str, Any],
     test_exact_replay_metrics: dict[str, Any],
+    evidence_diagnostics: dict[str, Any] | None = None,
 ) -> str:
     validation_aggregate = dict(aggregate.get("validation", {}) or {})
     test_aggregate = dict(aggregate.get("test", {}) or {})
@@ -1518,8 +1705,27 @@ def _walkforward_evidence_verdict(
         return "insufficient_or_incomplete"
     validation_return = _safe_metric(dict(validation_aggregate), "mean_total_return")
     validation_drawdown = _safe_metric(dict(validation_aggregate), "worst_max_drawdown")
-    validation_promising = validation_return is not None and validation_return > 0.0 and validation_drawdown is not None
+    validation_sharpe = _safe_metric(dict(validation_aggregate), "mean_sharpe")
+    validation_promising = (
+        validation_return is not None
+        and validation_return > 0.0
+        and validation_sharpe is not None
+        and validation_sharpe > 0.0
+        and validation_drawdown is not None
+    )
     if not validation_promising:
+        diagnostics = dict(evidence_diagnostics or {})
+        warnings = dict(diagnostics.get("warnings", {}) or {})
+        if any(
+            bool(warnings.get(key, False))
+            for key in (
+                "under_exposure_warning",
+                "projection_overcorrection_warning",
+                "surrogate_exact_gap_warning",
+                "validation_generalization_failure",
+            )
+        ):
+            return "diagnosed_failure"
         return "contract_passed"
     if int(test_aggregate.get("completed_year_count", 0) or 0) < len(WALKFORWARD_TEST_YEARS):
         return "validation_promising"
@@ -1540,9 +1746,46 @@ def _matrix_evidence_verdict(model_results: dict[str, Any]) -> str:
         return "test_promising"
     if any(verdict == "validation_promising" for verdict in verdicts):
         return "validation_promising"
+    if any(verdict == "diagnosed_failure" for verdict in verdicts):
+        return "diagnosed_failure"
     if any(verdict == "contract_passed" for verdict in verdicts):
         return "contract_passed"
     return "insufficient_or_incomplete"
+
+
+def _matrix_evidence_diagnostics(model_results: dict[str, Any]) -> dict[str, Any]:
+    if not model_results:
+        return {"status": "not_available", "model_count": 0}
+    warnings_by_model = {
+        family: dict(dict(result.get("evidence_diagnostics", {}) or {}).get("warnings", {}) or {})
+        for family, result in model_results.items()
+    }
+    active_warnings = sorted(
+        {
+            key
+            for warnings in warnings_by_model.values()
+            for key, value in warnings.items()
+            if bool(value)
+        }
+    )
+    validation_returns: dict[str, float | None] = {}
+    for family, result in model_results.items():
+        walk_summary = dict(result.get("walkforward_summary", {}) or {})
+        validation_agg = dict(dict(walk_summary.get("aggregate", {}) or {}).get("validation", {}) or {})
+        validation_returns[family] = _safe_metric(validation_agg, "mean_total_return")
+    best_family = max(
+        (family for family, value in validation_returns.items() if value is not None),
+        key=lambda family: float(validation_returns[family]),
+        default="",
+    )
+    return {
+        "status": "diagnosed" if active_warnings else "clean",
+        "model_count": int(len(model_results)),
+        "warnings_by_model": warnings_by_model,
+        "active_warnings": active_warnings,
+        "validation_returns": validation_returns,
+        "best_validation_family": best_family,
+    }
 
 
 def _clone_args_with_model_family(args: argparse.Namespace, family: str) -> argparse.Namespace:
@@ -1575,8 +1818,10 @@ def _run_walkforward_matrix(*, study_root: Path, tag: str, args: argparse.Namesp
             "test_exact_replay_metrics": walk_summary.get("test_exact_replay_metrics", {}),
             "projection_parity_summary": walk_summary.get("projection_parity_summary", {}),
             "surrogate_exact_gap": walk_summary.get("surrogate_exact_gap", {}),
+            "evidence_diagnostics": walk_summary.get("evidence_diagnostics", {}),
             "evidence_verdict": walk_summary.get("evidence_verdict", "insufficient_or_incomplete"),
         }
+    matrix_diagnostics = _matrix_evidence_diagnostics(model_results)
     summary = {
         "status": "completed",
         "stage": "rl_walkforward_matrix",
@@ -1589,6 +1834,7 @@ def _run_walkforward_matrix(*, study_root: Path, tag: str, args: argparse.Namesp
         "rollout_chunk_days": int(getattr(args, "rollout_chunk_days", 20)),
         "projection_parity_max_l1": float(getattr(args, "projection_parity_max_l1", 0.02)),
         "models": model_results,
+        "evidence_diagnostics": matrix_diagnostics,
         "evidence_verdict": _matrix_evidence_verdict(model_results),
         "oracle_used": False,
         "shadow_only": True,
