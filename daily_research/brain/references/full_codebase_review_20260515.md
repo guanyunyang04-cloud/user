@@ -804,3 +804,70 @@ flowchart TD
 - 所有结论均按事实、推断、假设和边界拆分。
 - 当前最重要的接管结论是：production anchor 保持稳定，continuous_policy 保持 shadow-only，后续工作围绕明确 blocker 而不是扩大模型或追 loose latest。
 
+## 11. 2026-05-17 增量更新：当前代码库复核
+
+### 写回原因
+- 用户要求更新代码审阅文档，并要求后续持续记得同步更新。
+- 本节是对 2026-05-15 全仓审阅的增量复核，不覆盖原报告的历史判断。
+- 独立主线审阅已拆出到 `daily_research/brain/references/mainline_review_current.md`，避免后续只更新代码结构而漏掉主线状态。
+
+### 事实
+- 复核任务 capsule 已执行；active artifact guard 为 `clean`。
+- 当前工作树复核时为 `main...origin/main [ahead 10]`。
+- `git diff -- daily_research/output/active_execution_strategy.json` 无输出，active 执行物未被修改。
+- 当前 `daily_research` 下 Python 文件数为 `302`，较 2026-05-15 报告增加；主要增量来自 `path_policy`。
+- 当前 Python 文件分布：
+  - `continuous_policy`: `74`
+  - `tools`: `68`
+  - `deep_alpha`: `52`
+  - `baseline`: `44`
+  - `execution`: `29`
+  - `path_policy`: `21`
+  - `data_lake`: `10`
+- 当前最大热点文件：
+  - `daily_research/continuous_policy/model_seq_v3.py`: `12596` 行
+  - `daily_research/continuous_policy/portfolio_simulator.py`: `7078` 行
+  - `daily_research/continuous_policy/pipeline_utils.py`: `5974` 行
+  - `daily_research/continuous_policy/tests/test_portfolio_daily_strategy_contracts.py`: `5159` 行
+  - `daily_research/continuous_policy/run_self_optimizing_study.py`: `5144` 行
+  - `daily_research/path_policy/run_alpha_path20_protocol.py`: `3460` 行
+  - `daily_research/continuous_policy/model_portfolio_set_v5.py`: `3458` 行
+  - `daily_research/continuous_policy/analyze_behavior_gap.py`: `3386` 行
+  - `daily_research/continuous_policy/research_profile_registry.py`: `3127` 行
+  - `daily_research/baseline/generate_daily_trade_plan.py`: `3071` 行
+- `path_policy` 已成为 2026-05-15 之后必须单独审阅的新代码层；旧报告未覆盖这一层。
+- `path_policy/run_alpha_path20_protocol.py` 明确拒绝 loose `latest/default/latest_*` lake dataset id，legacy neural stages 需要 `--allow-legacy-neural-policy`，sequence RL stages 需要 `alpha_path20_sequence_policy_v1` 且禁止 oracle input。
+- `path_policy` 输出摘要多处写明 `promotion_allowed=false` 与 `active_execution_strategy_expected_diff=none`。
+- `continuous_policy/training_contracts.py` 中 `formal_torch_core_v4`、`formal_torch_portfolio_set_v5`、`formal_torch_decision_core_v6` 均为 shadow research，`promotable=false`。
+- `run_continuous_policy_protocol.py` 对 `decision_core_v6` promotion gate 直接返回 `shadow_only`，并记录 `decision_core_v6_research_shadow_only`。
+- `research_profile_registry.py` 保持 active profiles 与 legacy-compatible profiles 分离；r69/r71/r74/v6 等显式研究线不得被误当作默认 active search。
+- `data_lake/policy_input_loader.py` 的默认 policy input bundle 仍是 `policy_input_bundle__0f116a9b78c92ff045a6853d`，缺字段/缺覆盖会抛 `lake_coverage_blocker`。
+- `execution/update_default_candidate_production.py` 写 active manifest 仍要求 `--activate-strategy` 与 `--confirm-active-manifest-write` 双开关。
+
+### 推断
+- 当前仓库的主风险没有从 2026-05-15 的判断发生根本变化：live/default 边界、evidence 口径、latest 指针、portfolio simulator 语义仍是最高优先级。
+- 新增变化是 `path_policy` 已经从一次性实验脚本成长为独立 shadow research route；后续所有“完整代码库审阅”必须覆盖它。
+- 当前接管重点应从“找到最新结果”转为“维护明确证据入口”：code review 看源码和守卫，mainline review 看路线状态和可继续/不可继续边界。
+
+### 假设
+- 本次写回只更新审阅文档和写回纪律，不改变任何 live/default/promotion 结论。
+- `mainline_review_current.md` 作为后续主线审阅的滚动入口；若未来创建 dated successor，必须在本文件和 operating protocol 中同步更新链接。
+
+### 2026-05-17 验证
+- `git diff --check`: passed。
+- `daily_research/tools/doc_guard.py check`: passed。
+- `daily_research/tools/brain_integrity_check.py --json`: `status=ok`，errors=0，warnings=0。
+- `pytest daily_research/tools/tests daily_research/data_lake/tests -q`: 初次并发批次出现一次 `brain_workflow health` 非稳定失败；单测复现通过，整批重跑 `52 passed`。
+- continuous targeted tests：`47 passed`。
+- Path20 lightweight contract tests：`25 passed`。
+- Path20 protocol parser/gate subset：`8 passed`。
+- Path20 v5 parser subset：`1 passed`。
+
+### 新增风险记录
+- `brain_workflow health --json` 在并发测试环境中出现过一次非稳定 `status=failed`，随后单测与整批重跑均通过；当前按 health 聚合/编码输出脆弱点记录，不按业务守卫失败处理。
+- Path20 与 continuous state builder 测试产生大量 pandas `PerformanceWarning: DataFrame is highly fragmented`，集中在 `daily_research/continuous_policy/state_builder.py` 动态插列区域；当前不是语义失败，但属于性能债。
+
+### 后续写回规则
+- 以后只要做完整代码库审阅，必须同步更新本文件或其明确 successor。
+- 以后只要做主线复盘/路线判断，必须同步更新 `daily_research/brain/references/mainline_review_current.md`。
+- 若新增/替换 reference 审阅文档，应重建 `daily_research/brain/references/evidence_registry.json`，并至少运行 doc guard、brain integrity、active artifact diff guard。

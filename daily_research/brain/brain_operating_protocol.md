@@ -36,3 +36,6 @@ The brain remains the source of project facts, evidence, state, and governance. 
 - Long dated evidence, command transcripts, and detailed r-number status go to `daily_research/brain/references/`.
 - Machine-readable evidence indexing belongs in `daily_research/brain/references/evidence_registry.json`.
 - `workflow_registry.json` describes workflows; it is not a replacement for brain truth.
+- After any full codebase review, update `daily_research/brain/references/full_codebase_review_20260515.md` or its explicit successor.
+- After any mainline review, reroute, deprecation, or promotion analysis, update `daily_research/brain/references/mainline_review_current.md`.
+- After adding or materially changing reference review documents, rebuild the evidence registry and run the brain/document guards before claiming the writeback is complete.
