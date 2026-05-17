@@ -24,7 +24,8 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
 
 
 def test_rl_protocol_parser_accepts_sequence_stage_and_rejects_latest_in_main() -> None:
-    args = build_arg_parser().parse_args(
+    parser = build_arg_parser()
+    args = parser.parse_args(
         [
             "--stage",
             "rl-dataset-smoke",
@@ -40,14 +41,16 @@ def test_rl_protocol_parser_accepts_sequence_stage_and_rejects_latest_in_main() 
             "sequence_gru",
         ]
     )
+    _validate_protocol_args(parser, args)
 
     assert args.stage == "rl-dataset-smoke"
     assert args.no_oracle_input is True
     assert args.policy_version == "alpha_path20_sequence_policy_v1"
 
 
-def test_protocol_parser_accepts_episode_mainline_default_stage() -> None:
-    args = build_arg_parser().parse_args(
+def test_protocol_parser_defaults_to_current_neural_mainline_dataset_stage() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
         [
             "--tag",
             "unit",
@@ -57,8 +60,10 @@ def test_protocol_parser_accepts_episode_mainline_default_stage() -> None:
             "policy_input_bundle__fixed",
         ]
     )
+    _validate_protocol_args(parser, args)
 
-    assert args.stage == "rl-episode-dataset"
+    assert args.stage == "dataset-smoke"
+    assert args.policy_version == "alpha_path20_neural_policy_v1"
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -140,7 +145,7 @@ def test_protocol_parser_accepts_v5_dt_validation_stage() -> None:
     assert args.smoke_lr == pytest.approx(3.0e-4)
 
 
-def test_legacy_neural_stage_requires_explicit_allow_flag() -> None:
+def test_current_neural_mainline_stage_no_longer_requires_legacy_allow_flag() -> None:
     parser = build_arg_parser()
     args = parser.parse_args(
         [
@@ -155,23 +160,9 @@ def test_legacy_neural_stage_requires_explicit_allow_flag() -> None:
         ]
     )
 
-    with pytest.raises(SystemExit):
-        _validate_protocol_args(parser, args)
-
-    allowed = parser.parse_args(
-        [
-            "--stage",
-            "tiny-smoke",
-            "--tag",
-            "unit",
-            "--data-source",
-            "lake",
-            "--lake-dataset-id",
-            "policy_input_bundle__fixed",
-            "--allow-legacy-neural-policy",
-        ]
-    )
-    _validate_protocol_args(parser, allowed)
+    _validate_protocol_args(parser, args)
+    assert args.stage == "tiny-smoke"
+    assert args.policy_version == "alpha_path20_neural_policy_v1"
 
 
 def test_rl_stage_rejects_loose_latest_dataset_id() -> None:

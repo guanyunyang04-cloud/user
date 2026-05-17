@@ -2,6 +2,7 @@
 
 ## Summary
 - Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.
+- 2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, v5 sequence/DT evidence is shadow comparison evidence, not current Path20 mainline evidence.
 - v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.
 - The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.
 - `active_execution_strategy.json remains unchanged`; live/default promotion is forbidden.

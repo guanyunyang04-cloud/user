@@ -1,8 +1,10 @@
 # path20 Route Consolidation 2026-05-16
 
 ## Decision
-- `alpha_path20_sequence_policy_v1` is the path20 main research line.
-- `alpha_path20_neural_policy_v1` is legacy diagnostic-only and has `no-new-mainline-budget`.
+- 2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. See `daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md`.
+- Path20 research mainline is a switchable routing state; this 2026-05-16 consolidation remains historical context, not a permanent hierarchy.
+- Superseded 2026-05-16 decision: `alpha_path20_sequence_policy_v1` was the path20 main research line.
+- Superseded 2026-05-16 decision: `alpha_path20_neural_policy_v1` was legacy diagnostic-only and had `no-new-mainline-budget`.
 - The near-term objective is a reproducible full-year sequence/RL loop, not live/default promotion.
 
 ## Facts
@@ -19,8 +21,8 @@
 - `daily_research/output/active_execution_strategy.json` is not part of this research loop and must remain unchanged.
 
 ## Inferences
-- The neural v1 route is valuable for oracle upper-bound, path-label schema, and forecaster baseline diagnostics, but it is not aligned with the current pure sequence/RL objective.
-- The sequence/RL route is more valuable for the project because it directly optimizes target weights from historical market and portfolio state, avoids oracle imitation as the default teacher, and produces replay evidence in the same units the simulator executes.
+- 2026-05-16 historical inference: the neural v1 route was treated as diagnostic-only because it centered oracle upper-bound, path-label schema, and forecaster baseline diagnostics.
+- 2026-05-17 current inference: after the route switch, neural v1 is the current Path20 research mainline and sequence/RL is comparison evidence unless the pointer is explicitly switched again.
 - Annual completeness is part of evidence quality. A year with fewer than 180 trading days is an incomplete artifact, not a failed strategy and not aggregate evidence.
 
 ## Assumptions
@@ -34,14 +36,13 @@
 - No loose `latest_*` or `default` dataset ids as evidence.
 - No deletion of old neural v1 evidence.
 - No oracle/future/path-label inputs in sequence/RL training or replay.
-- Legacy stages `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` require `--allow-legacy-neural-policy`.
+- 2026-05-17 route-switch update: neural-policy stages `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` no longer require `--allow-legacy-neural-policy`.
 
-## Evidence Contract
-- Mainline CLI stages:
+## Historical Evidence Contract
+- These 2026-05-16 sequence/RL stages remain valid as shadow comparison stages while the current Path20 pointer is neural-policy:
   - `rl-dataset-smoke`
   - `rl-train-smoke`
   - `rl-replay-smoke`
   - `rl-multiyear-smoke`
 - Required annual manifest fields include policy version, dataset id, source lake id, year, requested date range, actual signal range, trading-day count, feature columns, portfolio feature columns, reward profile, leakage guard, and `loose_latest_allowed=false`.
 - Required replay summary fields include yearly metrics, projection diagnostics path, returns path, turnover path, position history path, `oracle_used=false`, `shadow_only=true`, `promotion_allowed=false`, and `active_execution_strategy_expected_diff=none`.
-

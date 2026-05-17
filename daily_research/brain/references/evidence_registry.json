@@ -1,10 +1,33 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 32,
+  "record_count": 33,
   "duplicates": [],
   "missing_paths": [],
   "records": [
+    {
+      "id": "alpha_path20_mainline_switch_status_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `current path20 research mainline pointer / research / shadow-only / neural-policy route`.; User decision on 2026-05-17 switches the current Path20 research mainline pointer to `alpha_path20_neural_policy_v1`.; The Path20 research mainline is intentionally switchable; this record is the current routing state, not a permanent hierarchy.; `alpha_path20_sequence_policy_v1` remains available as a shadow comparison / secondary research route, but is no longer the current Path20 mainline.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Run neural-policy `dataset-smoke` on a fixed lake slice to revalidate path-label schema and current defaults.",
+        "Run `oracle-smoke` only to quantify upper-bound replay and projection/turnover behavior.",
+        "Run `tiny-smoke` only as short diagnostic evidence for forecast quality and allocator utility.",
+        "Diagnose whether the limiting factor is path forecast quality, target-weight projection dominance, or allocator objective shape before expanding budget."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
     {
       "id": "alpha_path20_neural_policy_v1_status_20260516",
       "date": "2026-05-16",
@@ -15,13 +38,15 @@
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Status: `legacy / diagnostic-only / no-new-mainline-budget`.; `alpha_path20_neural_policy_v1` is no longer the path20 main research route. It is retained only for oracle upper-bound, path-label, forecaster-baseline, and historical diagnostic evidence.; The active path20 mainline is `alpha_path20_sequence_policy_v1`.; The first lake tiny smoke completed with explicit study tag `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01` and fixed lake dataset id `policy_input_bundle__0f116a9b78c92ff045a6853d`.",
+      "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. See `daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md`.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; The older 2026-05-16 status below is retained as historical context only.; Superseded 2026-05-16 status: `legacy / diagnostic-only / no-new-mainline-budget`.",
       "blockers": [
         "The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction."
       ],
       "next_allowed_actions": [
-        "Run a legacy stage only for a named diagnostic purpose, for example checking oracle upper-bound replay behavior or path-label schema compatibility.",
-        "Prefer `rl-dataset-smoke`, `rl-train-smoke`, `rl-replay-smoke`, and `rl-multiyear-smoke` for all new path20 mainline work."
+        "Run neural-policy `dataset-smoke` on a fixed lake slice to revalidate path-label schema and current defaults.",
+        "Run `oracle-smoke` only to quantify upper-bound replay and projection/turnover behavior.",
+        "Run `tiny-smoke` only as short diagnostic evidence for forecast quality and allocator utility.",
+        "Treat sequence/RL stages as shadow comparison unless the Path20 mainline pointer is explicitly switched again."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
@@ -39,17 +64,16 @@
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.; `alpha_path20_sequence_policy_v1` is the only active path20 main research route after the 2026-05-16 route consolidation.; The first milestone is not promotion. The first milestone is a reproducible annual dataset -> train -> replay -> report loop for the fixed full-year windows.; v2 training evidence must prioritize walk-forward results, not per-year in-sample smoke results.",
+      "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. `alpha_path20_sequence_policy_v1` remains a shadow comparison / secondary research route.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; Superseded 2026-05-16 status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.; Superseded 2026-05-16 statement: `alpha_path20_sequence_policy_v1` was the only active path20 main research route after the 2026-05-16 route consolidation.",
       "blockers": [
         "Projection mismatch warnings downgrade evidence interpretation to `insufficient_or_incomplete`."
       ],
       "next_allowed_actions": [
-        "Run `rl-dataset-smoke` on a small fixed lake slice.",
-        "Run `rl-train-smoke` and `rl-replay-smoke` only as shadow research plumbing.",
-        "Run `rl-multiyear-smoke` over 2019, 2020, 2022, and 2024 after the small smoke passes. Treat low-coverage years as incomplete rather than forcing them into the aggregate.",
+        "Run `rl-dataset-smoke`, `rl-train-smoke`, and `rl-replay-smoke` only as shadow comparison plumbing while the Path20 pointer is neural-policy.",
+        "Run `rl-multiyear-smoke` over 2019, 2020, 2022, and 2024 only as comparison evidence after small smoke passes. Treat low-coverage years as incomplete rather than forcing them into the aggregate.",
         "Run `rl-episode-dataset`, `rl-train-episode`, and `rl-replay-episode` on fixtures or small fixed slices before any full-year walk-forward run.",
-        "Use `rl-walkforward-study` for main sequence/RL verdicts after small episode contracts pass.",
-        "Use `rl-walkforward-matrix` for v3 evidence-grade GRU vs Decision Transformer comparison after fixture contracts pass. Full-year matrix runs require separate approval because they are expensive."
+        "Use `rl-walkforward-study` or `rl-walkforward-matrix` for sequence/RL comparison verdicts only; they become Path20 mainline verdicts only after an explicit future mainline switch.",
+        "Full-year matrix runs require separate approval because they are expensive."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
@@ -66,7 +90,7 @@
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Annual windows below 180 trading days are `incomplete` and cannot enter verdict aggregates.; Train replay is diagnostic. Main verdicts must distinguish train, validation, and test metrics.; v2 does not define the GRU vs Decision Transformer matrix verdict.",
+      "verdict": "2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, this v2 sequence/RL contract is shadow comparison evidence.; v2 sequence/RL evidence becomes current Path20 mainline evidence only after an explicit future pointer switch.; This contract remains valid for annual episode-loop mechanics and leakage/replay boundaries.",
       "blockers": [],
       "next_allowed_actions": [],
       "active_artifact_impact": "guarded",
@@ -152,7 +176,7 @@
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.; v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.; The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.; `active_execution_strategy.json remains unchanged`; live/default promotion is forbidden.",
+      "verdict": "Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.; 2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, v5 sequence/DT evidence is shadow comparison evidence, not current Path20 mainline evidence.; v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.; The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.",
       "blockers": [
         "No full-year v5 evidence run has been approved or completed in this contract update.",
         "v5 is an architecture/evidence upgrade, not alpha success evidence.",

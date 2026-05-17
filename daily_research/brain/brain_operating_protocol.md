@@ -20,6 +20,12 @@ The brain remains the source of project facts, evidence, state, and governance. 
 - After major actions, run the relevant guards and decide whether a brain writeback is required.
 - If no writeback is required, say why.
 
+## Mainline Switching
+- Treat every project mainline as a switchable current work pointer, not a permanent hierarchy.
+- When the user or project governance explicitly switches a mainline, continue subsequent work along the newly selected mainline.
+- Preserve old mainline evidence as historical or comparison evidence unless a future switch selects it again.
+- Research-mainline switching does not imply live/default promotion or permission to modify `daily_research/output/active_execution_strategy.json`.
+
 ## Evidence Rules
 - Failed, interrupted, timeout, smoke, dry-run, and diagnostic-only runs are not completed evidence.
 - Realtime tail labels with unobserved forward outcomes are never completed training evidence.

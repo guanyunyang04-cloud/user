@@ -72,7 +72,8 @@ PATH_POLICY_STUDIES_ROOT = PATH_POLICY_OUTPUT_ROOT / "studies"
 PATH_POLICY_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "datasets"
 PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_datasets"
 PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
-LEGACY_NEURAL_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
+NEURAL_MAINLINE_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"})
+LEGACY_NEURAL_STAGES = frozenset()
 SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
 SEQUENCE_RL_EPISODE_STAGES = frozenset(
     {
@@ -175,6 +176,12 @@ def _json_ready(value: Any) -> Any:
 
 
 def _apply_stage_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    if not str(getattr(args, "policy_version", "") or "").strip():
+        args.policy_version = (
+            ALPHA_PATH20_SEQUENCE_POLICY_VERSION
+            if args.stage in SEQUENCE_RL_STAGES
+            else ALPHA_PATH20_POLICY_VERSION
+        )
     if getattr(args, "smoke_lr", None) is None:
         args.smoke_lr = V5_DEFAULT_LR if args.stage == "rl-v5-dt-validation-study" else 1.0e-3
     if getattr(args, "rl_hidden_dim", None) is None:
@@ -2973,21 +2980,22 @@ def _run_walkforward_matrix(*, study_root: Path, tag: str, args: argparse.Namesp
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run path20 sequence/RL mainline protocol. "
-            "Legacy alpha_path20_neural_policy_v1 stages are diagnostic-only and require an explicit allow flag."
+            "Run the path20 research protocol. "
+            "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer; "
+            "sequence/RL stages remain available as shadow comparison routes."
         )
     )
     parser.add_argument(
         "--stage",
-        choices=tuple(sorted(LEGACY_NEURAL_STAGES | SEQUENCE_RL_STAGES)),
-        default="rl-episode-dataset",
+        choices=tuple(sorted(NEURAL_MAINLINE_STAGES | SEQUENCE_RL_STAGES)),
+        default="dataset-smoke",
     )
     parser.add_argument("--tag", required=True, help="Explicit protocol/study tag. Loose latest is forbidden.")
-    parser.add_argument("--policy-version", default=ALPHA_PATH20_SEQUENCE_POLICY_VERSION)
+    parser.add_argument("--policy-version", default="", help="Optional explicit policy version; defaults from the selected stage.")
     parser.add_argument(
         "--allow-legacy-neural-policy",
         action="store_true",
-        help="Allow diagnostic-only alpha_path20_neural_policy_v1 stages: dataset-smoke, oracle-smoke, tiny-smoke.",
+        help="Compatibility no-op retained for old scripts; neural policy stages are now the current Path20 research mainline.",
     )
     parser.add_argument("--data-source", default="lake", choices=("lake", "csv", "tq"))
     parser.add_argument("--lake-dataset-id", default="", help="Required for --data-source lake.")
@@ -3046,11 +3054,11 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
         parser.error("--data-source lake requires explicit --lake-dataset-id; do not rely on loose latest/default.")
     if _is_loose_lake_dataset_id(str(args.lake_dataset_id or "")):
         parser.error("--lake-dataset-id must be a fixed dataset id, not latest/default/latest_*.")
-    if args.stage in LEGACY_NEURAL_STAGES and not bool(args.allow_legacy_neural_policy):
-        parser.error(
-            "dataset-smoke/oracle-smoke/tiny-smoke are legacy alpha_path20_neural_policy_v1 diagnostic stages. "
-            "Pass --allow-legacy-neural-policy to run them, or use rl-* stages for the path20 mainline."
-        )
+    if args.stage in NEURAL_MAINLINE_STAGES and str(args.policy_version or "").strip() not in {
+        "",
+        ALPHA_PATH20_POLICY_VERSION,
+    }:
+        parser.error(f"Neural Path20 stages require --policy-version {ALPHA_PATH20_POLICY_VERSION}.")
     if args.stage in SEQUENCE_RL_STAGES and str(args.policy_version or "").strip() not in {
         "",
         ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
@@ -3413,9 +3421,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "created_at": now_iso(),
         "policy_version": ALPHA_PATH20_POLICY_VERSION,
         "policy_profile": ALPHA_PATH20_POLICY_PROFILE,
-        "research_status": "legacy / diagnostic-only / alpha_path20_neural_policy_v1 evidence",
-        "legacy_diagnostic_only": True,
-        "no_new_mainline_budget": True,
+        "research_status": "current path20 research mainline pointer / research / shadow-only / alpha_path20_neural_policy_v1 evidence",
+        "path20_research_mainline": True,
+        "legacy_diagnostic_only": False,
+        "no_new_mainline_budget": False,
         "stage": args.stage,
         "data_source": args.data_source,
         "lake_dataset_id": effective_lake_dataset_id,
@@ -3426,13 +3435,13 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "allocator_smoke": allocator_summary,
         "oracle_path_upper_bound": oracle_summary,
         "facts": [
-            "alpha_path20_neural_policy_v1 is legacy diagnostic-only evidence under daily_research/path_policy.",
+            "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer under daily_research/path_policy.",
             "The protocol writes path-policy artifacts under daily_research/output/path_policy with explicit tag and dataset id.",
             "target_weight is the only execution truth; source/receiver fields are derived diagnostics.",
         ],
         "inferences": [
             "This smoke can validate schema, next-open labels, target-weight projection, and oracle-path replay plumbing.",
-            "It is not sequence/RL mainline evidence and must not justify new mainline budget.",
+            "It is current Path20 neural-policy mainline evidence, but it is not live/default or promotion evidence.",
         ],
         "assumptions": [
             "Lake policy bundle inputs already contain adjusted open/close panels and universe membership.",
@@ -3440,7 +3449,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         ],
         "boundaries": [
             "shadow_only=true",
-            "legacy_diagnostic_only=true",
+            "path20_research_mainline=true",
+            "mainline pointer is switchable by explicit future decision",
             "no live/default promotion",
             "no active_execution_strategy.json modification",
             "no loose latest references",

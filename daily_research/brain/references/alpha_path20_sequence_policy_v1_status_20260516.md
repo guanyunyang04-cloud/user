@@ -1,8 +1,10 @@
 # alpha_path20_sequence_policy_v1 Status 2026-05-16
 
 ## Verdict
-- Status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.
-- `alpha_path20_sequence_policy_v1` is the only active path20 main research route after the 2026-05-16 route consolidation.
+- 2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. `alpha_path20_sequence_policy_v1` remains a shadow comparison / secondary research route.
+- Path20 research mainline is a switchable routing state, not a permanent hierarchy.
+- Superseded 2026-05-16 status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.
+- Superseded 2026-05-16 statement: `alpha_path20_sequence_policy_v1` was the only active path20 main research route after the 2026-05-16 route consolidation.
 - The first milestone is not promotion. The first milestone is a reproducible annual dataset -> train -> replay -> report loop for the fixed full-year windows.
 - v2 training evidence must prioritize walk-forward results, not per-year in-sample smoke results.
 - v3 evidence must prioritize `rl-walkforward-matrix` contract results over single-family smoke or in-sample train replay.
@@ -26,8 +28,8 @@
   - `rl-walkforward-study`
 - Added v3 evidence-matrix stage:
   - `rl-walkforward-matrix`
-- These `rl-*` stages are now the default path20 protocol route.
-- Legacy `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` are gated behind `--allow-legacy-neural-policy` and are not mainline evidence.
+- 2026-05-17 route-switch update: `rl-*` stages are no longer the default Path20 protocol route; they remain available as shadow comparison routes.
+- 2026-05-17 route-switch update: `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` are current neural-policy mainline stages and are no longer gated behind `--allow-legacy-neural-policy`.
 - Fixed full-year windows:
   - `2019`: `20190101 -> 20191231`
   - `2020`: `20200101 -> 20201231`
@@ -66,9 +68,8 @@
 - `git diff -- daily_research/output/active_execution_strategy.json`
 
 ## Next Allowed Actions
-- Run `rl-dataset-smoke` on a small fixed lake slice.
-- Run `rl-train-smoke` and `rl-replay-smoke` only as shadow research plumbing.
-- Run `rl-multiyear-smoke` over 2019, 2020, 2022, and 2024 after the small smoke passes. Treat low-coverage years as incomplete rather than forcing them into the aggregate.
+- Run `rl-dataset-smoke`, `rl-train-smoke`, and `rl-replay-smoke` only as shadow comparison plumbing while the Path20 pointer is neural-policy.
+- Run `rl-multiyear-smoke` over 2019, 2020, 2022, and 2024 only as comparison evidence after small smoke passes. Treat low-coverage years as incomplete rather than forcing them into the aggregate.
 - Run `rl-episode-dataset`, `rl-train-episode`, and `rl-replay-episode` on fixtures or small fixed slices before any full-year walk-forward run.
-- Use `rl-walkforward-study` for main sequence/RL verdicts after small episode contracts pass.
-- Use `rl-walkforward-matrix` for v3 evidence-grade GRU vs Decision Transformer comparison after fixture contracts pass. Full-year matrix runs require separate approval because they are expensive.
+- Use `rl-walkforward-study` or `rl-walkforward-matrix` for sequence/RL comparison verdicts only; they become Path20 mainline verdicts only after an explicit future mainline switch.
+- Full-year matrix runs require separate approval because they are expensive.

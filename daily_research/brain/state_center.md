@@ -9,6 +9,8 @@
 - 当前 effective live execution profile：`regoff_k1_20d_ensemble_native_anchor`。
 - 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义：`research_raw_target_weight`；权重上限语义：`follow_research_raw_no_global_cap`。
+- 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，但不自动代表 live/default、promotion 或 active artifact 变更。
+- Path20 当前研究主线指针：`alpha_path20_neural_policy_v1`（2026-05-17 用户决策切换）；`alpha_path20_sequence_policy_v1` 暂作 shadow comparison / secondary research route；两者均不代表 live/default。
 - continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
 - 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r74 均为 research / shadow 升级链或基础设施证据。
 - r64 已产出 full-window strict Gold：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`，`2010-01-04 -> 2026-04-10` observed strict window，`is_training_safe=true`，audit `ok`。

@@ -14,12 +14,16 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - `path_policy` remains `research / shadow-only`.
 - Reusable strict training-safe Gold dataset remains `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
 - Near-term path/sequence policy input bundle remains `policy_input_bundle__0f116a9b78c92ff045a6853d`.
+- All project mainlines are switchable current work pointers.
+- After an explicit user or governance switch, subsequent work should continue along the newly selected mainline.
 
 ### Boundaries
 - No live/default change may be inferred from this review.
 - No smoke, dry-run, unit test, interrupted run, failed run, or realtime-tail label is completed strategy evidence.
 - No loose `latest_*`, `latest`, or `default` pointer is a truth source without freshness and explicit tag checks.
 - Any active execution write requires explicit future promotion authority and active artifact guards.
+- Research-mainline switching does not automatically change live/default execution, promotion status, or `daily_research/output/active_execution_strategy.json`.
+- Prior mainline evidence remains historical or comparison evidence unless the pointer is switched back.
 
 ## 1. Baseline Factor / Rule Trading
 
@@ -230,23 +234,28 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Review only with explicit protocol/study tags.
 - Do not use loose latest v6 summaries as a single truth source.
 
-## 17. Path20 Legacy Neural Policy v1
+## 17. Path20 Neural Policy v1
 
 ### Facts
-- `alpha_path20_neural_policy_v1` is documented as `legacy / diagnostic-only / no-new-mainline-budget`.
-- Legacy stages are gated behind `--allow-legacy-neural-policy`.
+- 2026-05-17 user decision switches the current Path20 research mainline pointer to `alpha_path20_neural_policy_v1`.
+- Stages `dataset-smoke`, `oracle-smoke`, and `tiny-smoke` are current neural-policy mainline stages.
+- These stages no longer require `--allow-legacy-neural-policy`.
+- Parser default stage is `dataset-smoke`.
+- Existing tiny smoke evidence remains `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01`.
 
 ### Inference
-- This line remains useful for oracle upper-bound, path-label schema, and historical diagnostic evidence, but it is no longer the path20 main research route.
+- The current Path20 research question moves to path-label quality, oracle upper-bound, forecaster baseline, and neural target-weight allocation.
+- Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
 
 ### Current Stance
-- No new mainline budget.
-- Use only for explicit diagnostic questions.
+- Current Path20 research route.
+- Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
+- Do not start long training or touch active execution without a separate explicit task.
 
 ## 18. Path20 Sequence Policy v1
 
 ### Facts
-- `alpha_path20_sequence_policy_v1` is the active path20 main research line after 2026-05-16 route consolidation.
+- `alpha_path20_sequence_policy_v1` was the active path20 main research line after 2026-05-16 route consolidation, but the current pointer switched to neural-policy on 2026-05-17.
 - Code lives under `daily_research/path_policy/`.
 - Main protocol file is `daily_research/path_policy/run_alpha_path20_protocol.py`.
 - Current stages include `rl-dataset-smoke`, `rl-train-smoke`, `rl-replay-smoke`, `rl-multiyear-smoke`, `rl-episode-dataset`, `rl-train-episode`, `rl-replay-episode`, `rl-walkforward-study`, `rl-walkforward-matrix`, and `rl-v5-dt-validation-study`.
@@ -254,10 +263,10 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Protocol summaries mark `shadow_only=true`, `promotion_allowed=false`, and `active_execution_strategy_expected_diff=none`.
 
 ### Inference
-- Path20 sequence policy is the newest distinct research line. Its first milestone is reproducible dataset -> train -> replay -> report evidence, not live/default promotion.
+- Path20 sequence policy remains a useful shadow comparison route, especially for dataset -> train -> replay -> report evidence, but it is no longer the current Path20 mainline.
 
 ### Current Stance
-- Active path20 research route.
+- Secondary / shadow comparison route.
 - Keep v5/Decision Transformer evidence validation-first and shadow-only.
 - Do not use oracle inputs as default teacher.
 

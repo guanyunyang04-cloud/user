@@ -1,10 +1,16 @@
 # alpha_path20_sequence_policy_v2 Training Contract 2026-05-16
 
+## Verdict
+- 2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, this v2 sequence/RL contract is shadow comparison evidence.
+- v2 sequence/RL evidence becomes current Path20 mainline evidence only after an explicit future pointer switch.
+- This contract remains valid for annual episode-loop mechanics and leakage/replay boundaries.
+
 ## Purpose
 - Upgrade path20 sequence/RL from smoke training to an auditable annual episode loop.
 - Keep `alpha_path20_sequence_policy_v1` as the policy version while using v2 training semantics.
 - Do not modify live/default or `daily_research/output/active_execution_strategy.json`.
 - Scope note after 2026-05-17: v2 is the episode training contract. v3 is the evidence matrix contract layered on top of v2.
+- Route-switch note after 2026-05-17: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, this contract remains valid only as sequence/RL shadow comparison evidence.
 
 ## Dataset Contract
 - `market_episode` artifacts contain historical market state, tradable mask, next-open returns, benchmark returns, and explicit reward columns.
@@ -34,5 +40,6 @@
 
 ## Boundaries
 - Oracle remains diagnostic upper-bound only.
-- Legacy neural v1 stages remain diagnostic-only and require `--allow-legacy-neural-policy`.
+- Neural v1 stages are governed by `alpha_path20_mainline_switch_status_20260517`; they are not diagnostic-only while the Path20 pointer is neural-policy.
+- Sequence/RL v2 stages become Path20 mainline evidence only after an explicit future pointer switch.
 - No loose `latest_*` or `default` lake ids are allowed as evidence.

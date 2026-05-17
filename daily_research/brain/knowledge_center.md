@@ -8,6 +8,8 @@
 - 当前 live 默认执行仍由 `short_expert_policy_v5b__regoff_k1_20d_ensemble_native_anchor__active` 承担。
 - `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
+- 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，旧主线保留为历史或对照证据。
+- Path20 当前研究主线指针是 `alpha_path20_neural_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
 - r39 仍是 continuous_policy 有效证据基线；r40-r74 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
