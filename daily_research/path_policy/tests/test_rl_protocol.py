@@ -7,6 +7,7 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
     _aggregate_projection_parity_summaries,
     _baseline_targets_for_episode,
     _run_baseline_suite,
+    _run_v5_dt_validation_study,
     _matrix_evidence_diagnostics,
     _multiyear_aggregate,
     _run_v4_validation_repair_study,
@@ -109,6 +110,34 @@ def test_protocol_parser_accepts_v4_validation_repair_stage() -> None:
     assert args.rl_seed_matrix == "7,11"
     assert args.projection_penalty_grid == "0.05,0.20"
     assert args.tail_mass_penalty_weight == pytest.approx(0.1)
+
+
+def test_protocol_parser_accepts_v5_dt_validation_stage() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "rl-v5-dt-validation-study",
+            "--tag",
+            "unit_v5",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--dt-context-grid",
+            "20,60",
+        ]
+    )
+
+    assert args.stage == "rl-v5-dt-validation-study"
+    assert args.dt_context_grid == "20,60"
+    assert args.rl_hidden_dim is None
+    assert args.rl_dropout is None
+    assert args.smoke_lr is None
+    _validate_protocol_args(parser, args)
+    assert args.rl_hidden_dim == 64
+    assert args.rl_dropout == pytest.approx(0.1)
+    assert args.smoke_lr == pytest.approx(3.0e-4)
 
 
 def test_legacy_neural_stage_requires_explicit_allow_flag() -> None:
@@ -848,3 +877,107 @@ def test_v4_validation_repair_study_contract_fixture(tmp_path, monkeypatch) -> N
     assert "projection_tail_mass_summary" in summary
     assert summary["test_interpretable"] is summary["validation_passed"]
     assert summary["promotion_allowed"] is False
+
+
+def test_v5_dt_validation_study_contract_fixture(tmp_path, monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v5-dt-validation-study",
+            "--tag",
+            "unit_v5",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--dt-context-grid",
+            "3,5",
+            "--smoke-epochs",
+            "1",
+            "--rl-hidden-dim",
+            "8",
+            "--dt-num-heads",
+            "1",
+            "--max-position-weight",
+            "0.20",
+            "--max-gross-exposure",
+            "0.50",
+            "--max-positions",
+            "2",
+            "--turnover-budget",
+            "0.40",
+            "--min-year-trading-days",
+            "2",
+            "--rl-seed-matrix",
+            "7",
+        ]
+    )
+    args.lake_dataset_id = "policy_input_bundle__fixed"
+    monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_for_window",
+        lambda args, start_date, end_date, tag: make_prepared_policy_inputs(
+            days=12,
+            stocks=("AAA", "BBB", "CCC"),
+            start_date=f"{start_date[:4]}-01-02",
+        ),
+    )
+
+    summary = _run_v5_dt_validation_study(study_root=tmp_path / "v5", tag="unit_v5", args=args)
+
+    assert summary["stage"] == "rl_v5_dt_validation_study"
+    assert summary["model_family"] == "decision_transformer_v2"
+    assert summary["architecture_contract"]["action_imitation"] is False
+    assert "context_length_comparison" in summary
+    assert "baseline_comparison" in summary
+    assert "temporal_context_diagnostics" in summary
+    assert summary["selected_checkpoint"]["test_metrics_used_for_selection"] is False
+    assert summary["promotion_allowed"] is False
+
+
+def test_v5_long_context_incomplete_downgrades_verdict(tmp_path, monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    args = build_arg_parser().parse_args(
+        [
+            "--stage",
+            "rl-v5-dt-validation-study",
+            "--tag",
+            "unit_v5_incomplete",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--dt-context-grid",
+            "60",
+            "--smoke-epochs",
+            "1",
+            "--rl-hidden-dim",
+            "8",
+            "--dt-num-heads",
+            "1",
+            "--min-year-trading-days",
+            "2",
+            "--rl-seed-matrix",
+            "7",
+        ]
+    )
+    args.lake_dataset_id = "policy_input_bundle__fixed"
+    monkeypatch.setattr(protocol, "PATH_POLICY_EPISODE_DATASETS_ROOT", tmp_path / "episode_datasets")
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_for_window",
+        lambda args, start_date, end_date, tag: make_prepared_policy_inputs(
+            days=12,
+            stocks=("AAA", "BBB", "CCC"),
+            start_date=f"{start_date[:4]}-01-02",
+        ),
+    )
+
+    summary = _run_v5_dt_validation_study(study_root=tmp_path / "v5_incomplete", tag="unit_v5_incomplete", args=args)
+
+    assert summary["long_context_incomplete_warning"] is True
+    assert summary["evidence_verdict"] == "insufficient_or_incomplete"

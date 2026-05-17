@@ -617,7 +617,7 @@ def episode_policy_rollout_loss(
         mask_now = mask[idx].unsqueeze(0)
         previous_weight_nonzero_checks.append(float((weight_window.abs().sum(dim=1) > 1.0e-12).float().mean().detach().cpu()))
         previous_reward_nonzero_checks.append(float((reward_window.abs().reshape(-1) > 1.0e-12).float().mean().detach().cpu()))
-        if str(model_family).strip().lower() == "decision_transformer":
+        if str(model_family).strip().lower() in {"decision_transformer", "decision_transformer_v2"}:
             pred = model(
                 model_state,
                 portfolio_window,
@@ -704,7 +704,7 @@ def episode_policy_rollout_loss(
     loss_tensor = torch.stack(losses).mean()
     weight_rate = float(np.mean(previous_weight_nonzero_checks)) if previous_weight_nonzero_checks else 0.0
     reward_rate = float(np.mean(previous_reward_nonzero_checks)) if previous_reward_nonzero_checks else 0.0
-    is_dt = str(model_family).strip().lower() == "decision_transformer"
+    is_dt = str(model_family).strip().lower() in {"decision_transformer", "decision_transformer_v2"}
     context_coverage = {
         "previous_weight_nonzero_rate": weight_rate,
         "previous_reward_nonzero_rate": reward_rate,
@@ -722,7 +722,7 @@ def episode_policy_rollout_loss(
         "rollout_chunk_days": int(chunk_days),
         "context_coverage": context_coverage,
         "decision_transformer_previous_context_nonzero": bool(
-            str(model_family).strip().lower() == "decision_transformer"
+            str(model_family).strip().lower() in {"decision_transformer", "decision_transformer_v2"}
             and (weight_rate > 0.0 or reward_rate > 0.0)
         ),
     }
@@ -794,7 +794,7 @@ def predict_episode_targets(
             state_window = torch.cat([state[idx - seq_len + 1 : idx + 1], weight_window.unsqueeze(-1)], dim=-1).unsqueeze(0)
             portfolio_window = torch.stack(portfolio_context[idx - seq_len + 1 : idx + 1], dim=0).unsqueeze(0)
             reward_window = torch.stack(reward_context[idx - seq_len + 1 : idx + 1], dim=0).unsqueeze(0)
-            if str(model_family).strip().lower() == "decision_transformer":
+            if str(model_family).strip().lower() in {"decision_transformer", "decision_transformer_v2"}:
                 pred = model(
                     state_window,
                     portfolio_window,

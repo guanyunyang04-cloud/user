@@ -14,6 +14,8 @@ class SequencePolicyConfig:
     hidden_dim: int = 96
     dropout: float = 0.10
     max_position_weight: float = 0.10
+    max_sequence_length: int = 128
+    max_stock_slots: int = 512
 
 
 class SequenceTargetWeightPolicy(nn.Module):
@@ -130,6 +132,134 @@ class DecisionTransformerTargetWeightPolicy(nn.Module):
         stock_weight = torch.softmax(logits, dim=-1)
         pooled = latest.mean(dim=1)
         cash_weight = torch.sigmoid(self.cash_head(pooled).squeeze(-1)).clamp(0.0, 0.95)
+        gross = (1.0 - cash_weight).clamp(0.0, 1.0)
+        raw_target_weight = (stock_weight * gross.unsqueeze(-1)).clamp(min=0.0, max=float(self.config.max_position_weight))
+        total = raw_target_weight.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
+        raw_target_weight = torch.where(total > gross.unsqueeze(-1), raw_target_weight / total * gross.unsqueeze(-1), raw_target_weight)
+        return {
+            "raw_target_weight": raw_target_weight,
+            "cash_logit": torch.logit(cash_weight.clamp(1.0e-6, 1.0 - 1.0e-6)),
+            "score_logits": logits,
+            "policy_aux": pooled,
+        }
+
+
+class PortfolioDecisionTransformerPolicy(nn.Module):
+    def __init__(
+        self,
+        config: SequencePolicyConfig,
+        *,
+        temporal_layers: int = 2,
+        cross_layers: int = 1,
+        num_heads: int = 4,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        hidden_dim = int(config.hidden_dim)
+        heads = max(int(num_heads), 1)
+        if hidden_dim % heads != 0:
+            heads = 1
+        input_dim = int(config.stock_feature_dim) + int(config.portfolio_feature_dim) + 2
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.time_embedding = nn.Embedding(int(config.max_sequence_length), hidden_dim)
+        self.stock_slot_embedding = nn.Embedding(int(config.max_stock_slots), hidden_dim)
+        self.context_embedding = nn.Parameter(torch.zeros(1, 1, 1, hidden_dim))
+        temporal_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=heads,
+            dim_feedforward=hidden_dim * 4,
+            dropout=float(config.dropout),
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        cross_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=heads,
+            dim_feedforward=hidden_dim * 4,
+            dropout=float(config.dropout),
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.temporal_encoder = nn.TransformerEncoder(temporal_layer, num_layers=max(int(temporal_layers), 1))
+        self.cross_encoder = nn.TransformerEncoder(cross_layer, num_layers=max(int(cross_layers), 1))
+        self.score_head = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, 1),
+        )
+        self.cash_head = nn.Sequential(
+            nn.LayerNorm(hidden_dim + int(config.portfolio_feature_dim)),
+            nn.Linear(hidden_dim + int(config.portfolio_feature_dim), max(hidden_dim // 2, 8)),
+            nn.GELU(),
+            nn.Linear(max(hidden_dim // 2, 8), 1),
+        )
+
+    @staticmethod
+    def _causal_mask(steps: int, device: torch.device) -> torch.Tensor:
+        return torch.triu(torch.ones(steps, steps, device=device, dtype=torch.bool), diagonal=1)
+
+    def temporal_encode(
+        self,
+        state_sequence: torch.Tensor,
+        portfolio_sequence: torch.Tensor,
+        previous_weight_sequence: torch.Tensor | None = None,
+        previous_reward_sequence: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if state_sequence.ndim != 4:
+            raise ValueError("state_sequence must have shape [batch, steps, stocks, features].")
+        batch, steps, stocks, _ = state_sequence.shape
+        if steps > int(self.config.max_sequence_length):
+            raise ValueError("state_sequence exceeds max_sequence_length for PortfolioDecisionTransformerPolicy.")
+        if stocks > int(self.config.max_stock_slots):
+            raise ValueError("stock dimension exceeds max_stock_slots for PortfolioDecisionTransformerPolicy.")
+        if portfolio_sequence.ndim == 2:
+            portfolio_sequence = portfolio_sequence.unsqueeze(1).expand(batch, steps, -1)
+        if previous_weight_sequence is None:
+            previous_weight_sequence = torch.zeros(batch, steps, stocks, device=state_sequence.device, dtype=state_sequence.dtype)
+        if previous_reward_sequence is None:
+            previous_reward_sequence = torch.zeros(batch, steps, device=state_sequence.device, dtype=state_sequence.dtype)
+        portfolio_expanded = portfolio_sequence.unsqueeze(2).expand(batch, steps, stocks, portfolio_sequence.shape[-1])
+        reward_expanded = previous_reward_sequence.unsqueeze(-1).unsqueeze(-1).expand(batch, steps, stocks, 1)
+        weight_expanded = previous_weight_sequence.unsqueeze(-1)
+        tokens = torch.cat([state_sequence, portfolio_expanded, weight_expanded, reward_expanded], dim=-1)
+        tokens = self.input_proj(tokens)
+        time_ids = torch.arange(steps, device=state_sequence.device)
+        stock_ids = torch.arange(stocks, device=state_sequence.device)
+        time_bias = self.time_embedding(time_ids).view(1, steps, 1, -1)
+        stock_bias = self.stock_slot_embedding(stock_ids).view(1, 1, stocks, -1)
+        tokens = tokens + time_bias + stock_bias + self.context_embedding
+        temporal_tokens = tokens.permute(0, 2, 1, 3).reshape(batch * stocks, steps, tokens.shape[-1])
+        temporal_encoded = self.temporal_encoder(temporal_tokens, mask=self._causal_mask(steps, state_sequence.device))
+        return temporal_encoded.reshape(batch, stocks, steps, -1).permute(0, 2, 1, 3)
+
+    def forward(
+        self,
+        state_sequence: torch.Tensor,
+        portfolio_sequence: torch.Tensor,
+        previous_weight_sequence: torch.Tensor | None = None,
+        previous_reward_sequence: torch.Tensor | None = None,
+        tradable_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        temporal_encoded = self.temporal_encode(
+            state_sequence,
+            portfolio_sequence,
+            previous_weight_sequence=previous_weight_sequence,
+            previous_reward_sequence=previous_reward_sequence,
+        )
+        latest_stock = temporal_encoded[:, -1, :, :]
+        cross_latent = self.cross_encoder(latest_stock)
+        logits = self.score_head(cross_latent).squeeze(-1)
+        if tradable_mask is not None:
+            logits = logits.masked_fill(~tradable_mask.bool(), -1.0e9)
+        stock_weight = torch.softmax(logits, dim=-1)
+        if portfolio_sequence.ndim == 2:
+            latest_portfolio = portfolio_sequence
+        else:
+            latest_portfolio = portfolio_sequence[:, -1, :]
+        pooled = cross_latent.mean(dim=1)
+        cash_input = torch.cat([pooled, latest_portfolio], dim=-1)
+        cash_weight = torch.sigmoid(self.cash_head(cash_input).squeeze(-1)).clamp(0.0, 0.95)
         gross = (1.0 - cash_weight).clamp(0.0, 1.0)
         raw_target_weight = (stock_weight * gross.unsqueeze(-1)).clamp(min=0.0, max=float(self.config.max_position_weight))
         total = raw_target_weight.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)

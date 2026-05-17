@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 27,
+  "record_count": 32,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -15,15 +15,13 @@
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Status: `research / shadow-only / alpha_path20_neural_policy_v1 smoke evidence`.; This is an isolated new research line under `daily_research/path_policy/`; it does not replace `deep_alpha`, does not continue `continuous_policy/v6`, and does not touch live/default promotion.; The first lake tiny smoke completed with explicit study tag `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01` and fixed lake dataset id `policy_input_bundle__0f116a9b78c92ff045a6853d`.; `active_execution_strategy.json remains unchanged`; it remains guarded and must stay unchanged for this line.",
+      "verdict": "Status: `legacy / diagnostic-only / no-new-mainline-budget`.; `alpha_path20_neural_policy_v1` is no longer the path20 main research route. It is retained only for oracle upper-bound, path-label, forecaster-baseline, and historical diagnostic evidence.; The active path20 mainline is `alpha_path20_sequence_policy_v1`.; The first lake tiny smoke completed with explicit study tag `alpha_path20_neural_policy_v1_tiny_smoke_20260516_01` and fixed lake dataset id `policy_input_bundle__0f116a9b78c92ff045a6853d`.",
       "blockers": [
         "The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction."
       ],
       "next_allowed_actions": [
-        "Run oracle upper-bound studies over 2019Q1, 2020Q1, 2022Q1, and 2024Q1 before committing large forecaster training.",
-        "Build full path20 training datasets with explicit manifests and no loose latest aliases.",
-        "Train and compare linear/DLinear, GRU, and PatchTransformer forecasters on IC, top-bottom spread, quantile coverage, direction accuracy, and downside calibration.",
-        "Train the pure neural allocator first on oracle paths, then on predicted paths, and evaluate only through target-weight replay."
+        "Run a legacy stage only for a named diagnostic purpose, for example checking oracle upper-bound replay behavior or path-label schema compatibility.",
+        "Prefer `rl-dataset-smoke`, `rl-train-smoke`, `rl-replay-smoke`, and `rl-multiyear-smoke` for all new path20 mainline work."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
@@ -32,26 +30,139 @@
       ]
     },
     {
+      "id": "alpha_path20_sequence_policy_v1_status_20260516",
+      "date": "2026-05-16",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v1_status_20260516.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.; `alpha_path20_sequence_policy_v1` is the only active path20 main research route after the 2026-05-16 route consolidation.; The first milestone is not promotion. The first milestone is a reproducible annual dataset -> train -> replay -> report loop for the fixed full-year windows.; v2 training evidence must prioritize walk-forward results, not per-year in-sample smoke results.",
+      "blockers": [
+        "Projection mismatch warnings downgrade evidence interpretation to `insufficient_or_incomplete`."
+      ],
+      "next_allowed_actions": [
+        "Run `rl-dataset-smoke` on a small fixed lake slice.",
+        "Run `rl-train-smoke` and `rl-replay-smoke` only as shadow research plumbing.",
+        "Run `rl-multiyear-smoke` over 2019, 2020, 2022, and 2024 after the small smoke passes. Treat low-coverage years as incomplete rather than forcing them into the aggregate.",
+        "Run `rl-episode-dataset`, `rl-train-episode`, and `rl-replay-episode` on fixtures or small fixed slices before any full-year walk-forward run.",
+        "Use `rl-walkforward-study` for main sequence/RL verdicts after small episode contracts pass.",
+        "Use `rl-walkforward-matrix` for v3 evidence-grade GRU vs Decision Transformer comparison after fixture contracts pass. Full-year matrix runs require separate approval because they are expensive."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_sequence_policy_v2_training_contract_20260516",
+      "date": "2026-05-16",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v2_training_contract_20260516.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Annual windows below 180 trading days are `incomplete` and cannot enter verdict aggregates.; Train replay is diagnostic. Main verdicts must distinguish train, validation, and test metrics.; v2 does not define the GRU vs Decision Transformer matrix verdict.",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "alpha_path20_sequence_policy_v3_diagnostic_note_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v3_diagnostic_note_20260517.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "The v3 evidence loop is operational, but the strategy has not proved validation alpha.; 2024 positive test numbers must not be interpreted as success because 2022 validation is negative.; Decision Transformer shows low projected gross exposure in validation/test, so exposure collapse is a likely diagnostic target.; GRU has stronger test return but still failed validation, so generalization and 2022 regime behavior need diagnosis before any model promotion discussion.",
+      "blockers": [
+        "GRU has stronger test return but still failed validation, so generalization and 2022 regime behavior need diagnosis before any model promotion discussion.",
+        "Add matrix-level `evidence_diagnostics` with warnings for under-exposure, projection overcorrection, surrogate/exact gap, and validation generalization failure.",
+        "Do not change reward, loss, or model architecture until the diagnostic output identifies the dominant failure mode."
+      ],
+      "next_allowed_actions": [
+        "Add replay attribution for gross return, cost, net return, benchmark return, excess return, cash, exposure, turnover, and projection distance.",
+        "Add matrix-level `evidence_diagnostics` with warnings for under-exposure, projection overcorrection, surrogate/exact gap, and validation generalization failure.",
+        "Preserve old evidence fields while adding diagnostics; old summaries remain readable.",
+        "Do not change reward, loss, or model architecture until the diagnostic output identifies the dominant failure mode."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "`rl-walkforward-matrix` runs fixed-family comparison for `sequence_gru` and `decision_transformer`.; Verdict levels:; `contract_passed`; `diagnosed_failure`",
+      "blockers": [
+        "After the 2026-05-17 full-year matrix, v3 must also diagnose failed validation evidence. `contract_passed` means the evidence loop is intact; it does not mean alpha success.",
+        "Projection mismatch downgrades verdict to `insufficient_or_incomplete`; it cannot be written as a success conclusion.",
+        "`diagnosed_failure`",
+        "`insufficient_or_incomplete`",
+        "Negative validation exact replay must not be promoted. If the diagnostics can identify exposure, projection, surrogate/exact, or generalization failure, use `diagnosed_failure`."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
       "id": "alpha_path20_sequence_policy_v4_validation_repair_contract_20260517",
       "date": "2026-05-17",
       "r_id": "",
       "path": "daily_research/brain/references/alpha_path20_sequence_policy_v4_validation_repair_contract_20260517.md",
       "tags": [
-        "path_policy",
-        "path20",
-        "sequence_rl"
+        "path_policy"
       ],
       "workflow": "path_policy",
       "study_tags": [],
-      "verdict": "Status: `research / shadow-only / path20 v4 validation-first repair contract`.; v4 chooses checkpoints only with 2022 exact validation replay and treats 2024 test replay as interpretable only after validation passes.; Baselines use the same exact replay, costs, and projection constraints; `v3_final_checkpoint` requires an explicit model path and must not be faked.; `promotion_allowed=false`; `active_execution_strategy.json` remains guarded and unchanged.",
+      "verdict": "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.; `contract_passed`: pipeline ran but validation did not prove usefulness.; `diagnosed_failure`: pipeline ran and selected checkpoint exists, but validation is negative or fails baseline comparison.; `validation_promising`: exact 2022 replay is positive, sharpe is positive, and baselines are beaten.",
       "blockers": [
-        "Prior v3 and training-sufficiency evidence showed negative 2022 validation after more epochs or added 2021 training, so training volume alone is not the current root-cause explanation.",
-        "No full-year v4 evidence run has been approved or completed in this contract update."
+        "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.",
+        "`diagnosed_failure`: pipeline ran and selected checkpoint exists, but validation is negative or fails baseline comparison."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_sequence_policy_v5_dt_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_sequence_policy_v5_dt_contract_20260517.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.; v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.; The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.; `active_execution_strategy.json remains unchanged`; live/default promotion is forbidden.",
+      "blockers": [
+        "No full-year v5 evidence run has been approved or completed in this contract update.",
+        "v5 is an architecture/evidence upgrade, not alpha success evidence.",
+        "Prior v3/v4 evidence means 2024 test strength cannot be interpreted without 2022 validation success."
       ],
       "next_allowed_actions": [
-        "Run fixture or small contract tests for `rl-v4-validation-repair-study` before any expensive full-year v4 execution.",
-        "Only run full-year v4 with explicit tag, fixed lake id, fixed seeds, and the validation-first selection rules.",
-        "Do not interpret 2024 test returns unless 2022 validation first passes and beats baselines."
+        "Run fixture and small smoke tests for `rl-v5-dt-validation-study`.",
+        "Use the default `20,60` context grid for approved full-year v5 evidence runs.",
+        "Compare v5 only through exact 2022 validation replay and the shared baseline suite.",
+        "Keep v4 GRU as the stable validation-first baseline until v5 produces stronger validation evidence."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
