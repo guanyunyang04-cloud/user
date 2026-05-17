@@ -13,7 +13,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - `continuous_policy` remains `research / shadow_only`.
 - `path_policy` remains `research / shadow-only`.
 - Reusable strict training-safe Gold dataset remains `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
-- Near-term path/sequence policy input bundle remains `policy_input_bundle__0f116a9b78c92ff045a6853d`.
+- Near-term repaired policy input bundle is `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
 - All project mainlines are switchable current work pointers.
 - After an explicit user or governance switch, subsequent work should continue along the newly selected mainline.
 
@@ -178,6 +178,29 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Use explicit strict dataset ids.
 - Never count realtime unobserved labels as completed training evidence.
 
+## 12.5 Data Lake Universal Repair
+
+### Facts
+- 2026-05-17 current infrastructure pointer is `data_lake_universal_repair`.
+- Repair contract is recorded in `daily_research/brain/references/data_lake_universal_repair_contract_20260517.md`.
+- `policy_input_bundle__0f116a9b78c92ff045a6853d` is full-universe-shaped but has missing `000300.SH` benchmark coverage before `2018-05-14`.
+- `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` is usable from `2018-05-14`, but is capped at `1200` symbols.
+- Data lake policy bundles now support persisted benchmark `open` in `silver_benchmark.parquet`.
+- `load_policy_inputs_from_lake(..., require_benchmark_open=True)` blocks silent close-as-open fallback.
+- `python -m daily_research.data_lake.policy_input_audit` audits policy input bundle market, benchmark, membership, and feature-panel coverage.
+- Cap80 repaired smoke bundle `policy_input_bundle__c4886777fe70bfe6616e1259` passed strict audit with benchmark open required.
+- Full repaired bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict audit with benchmark open required: `2010-01-04 -> 2026-05-13`, universe size `3070`, 109 feature panels, benchmark open/close rows `3969/3969`.
+- `DEFAULT_POLICY_INPUT_LAKE_DATASET_ID` now points to `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
+
+### Inference
+- The data-base correctness blocker is repaired for fixed-window capped pilots and future memory-safe full-universe work.
+- Path20 Stage 1 can resume on capped pilots with the repaired full bundle, but full-universe training still needs memory-safe sequence loading.
+
+### Current Stance
+- Current infrastructure repair route, completed through repaired full-bundle audit.
+- Do not mutate old bundle contents in place; create and audit a new repaired bundle.
+- Use explicit repaired dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d` for next Path20 Stage 1 pilots.
+
 ## 13. Continuous Policy r65: Portfolio-Set v5
 
 ### Facts
@@ -247,12 +270,17 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - 2026-05-17 aggressive forecast upgrade expands model families to `linear_last_day`, `mlp_last_day`, `gru_sequence`, and `patch_transformer`.
 - `gru_sequence` now uses multi-layer GRU sequence encoding with attention pooling; `patch_transformer` now uses learned positional embeddings, CLS pooling, and multi-scale patches.
 - Forecast training now supports device-aware CUDA/CPU selection, AMP, mini-batch loading, early stopping, best checkpoints, learning curves, and multi-seed family summaries.
+- 2026-05-17 preflight found `policy_input_bundle__0f116a9b78c92ff045a6853d` blocked for `2018-01-01 -> 2024-12-31` because benchmark coverage starts at `2018-05-14`.
+- `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` passed capped preflight from `2018-05-14`, but remains capped at `1200` symbols and is not full-universe evidence.
+- Repaired full-universe bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict data-lake audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
 
 ### Inference
 - The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
 - Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
 - Forecast success must be judged validation-first with positive `rank_ic_20d`, positive `top_bottom_spread_20d`, and reasonable quantile coverage; daily MSE alone is insufficient.
 - The aggressive upgrade increases model capacity and training auditability before long training, but does not itself create strategy evidence or a promotion path.
+- Path20 Stage 1 is no longer blocked by the old benchmark coverage gap for capped pilots, provided it uses the repaired full bundle explicitly.
+- Full-universe Stage 1 training remains blocked by eager dataset memory design until streaming/memmap sequence loading exists.
 
 ### Current Stance
 - Current Path20 research route.
@@ -260,6 +288,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
 - Do not start long training or touch active execution without a separate explicit task.
 - Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
+- Resume capped formal forecast pilots on `policy_input_bundle__7c8f58d851bce8179e1e9e2d`; do not run full universe until memory-safe sequence loading exists.
 
 ## 18. Path20 Sequence Policy v1
 

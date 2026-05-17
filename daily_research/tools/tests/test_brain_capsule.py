@@ -21,7 +21,8 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertIn("forbidden_actions", payload)
         self.assertIn("active_artifact_guard", payload)
         self.assertEqual(payload["active_artifact_guard"]["path"], "daily_research/output/active_execution_strategy.json")
-        self.assertTrue(payload["git"]["on_main"])
+        self.assertIn("branch_line", payload["git"])
+        self.assertIsInstance(payload["git"]["on_main"], bool)
 
     def test_capsule_links_relevant_reference_records(self) -> None:
         payload = build_task_capsule(

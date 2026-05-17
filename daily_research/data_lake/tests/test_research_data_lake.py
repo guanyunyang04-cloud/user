@@ -9,8 +9,36 @@ from daily_research.data_lake import ResearchDataLake, build_label_completeness_
 from daily_research.data_lake import build_research_database
 from daily_research.data_lake.import_legacy_training_caches import import_legacy_training_dataset_caches
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+from daily_research.data_lake.policy_input_audit import audit_policy_input_bundle
 from daily_research.continuous_policy.state_builder import prepare_policy_inputs
 from daily_research.continuous_policy.training_dataset_cache import save_training_dataset_cache
+
+
+def _synthetic_policy_bundle_parts(
+    dates: pd.DatetimeIndex,
+    stocks: list[str] | None = None,
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, pd.DataFrame]]:
+    resolved_stocks = stocks or ["000001.SZ", "600000.SH"]
+    close = pd.DataFrame(
+        [[10.0 + row + col for col in range(len(resolved_stocks))] for row in range(len(dates))],
+        index=dates,
+        columns=resolved_stocks,
+    )
+    market_frames = {
+        "Open": close - 0.1,
+        "High": close + 0.2,
+        "Low": close - 0.2,
+        "Close": close,
+        "Volume": pd.DataFrame(1000.0, index=dates, columns=resolved_stocks),
+        "Amount": pd.DataFrame(10000.0, index=dates, columns=resolved_stocks),
+    }
+    membership_frame = pd.DataFrame(True, index=dates, columns=resolved_stocks)
+    feature_frames = {
+        "score_none": close * 0.0,
+        "score_v2": close * 0.0 + 0.1,
+        "score_blend": close * 0.0 + 0.05,
+    }
+    return market_frames, membership_frame, feature_frames
 
 
 class ResearchDataLakeTest(unittest.TestCase):
@@ -170,6 +198,73 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(prepared.raw_cache_meta["source"], "data_lake")
         self.assertIn("score_blend_lag1", prepared.derived_frames)
 
+    def test_market_bundle_persists_benchmark_open_and_loader_uses_it(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+        benchmark_open = pd.Series([3995.0, 4005.0, 4015.0], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                benchmark_open=benchmark_open,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            saved_benchmark = pd.read_parquet(record.content_paths["silver_benchmark"])
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                require_benchmark_open=True,
+            )
+
+        self.assertIn("open", saved_benchmark.columns)
+        pd.testing.assert_series_equal(prepared.benchmark_open, benchmark_open, check_freq=False)
+        coverage = prepared.raw_cache_meta["lake_coverage_report"]
+        self.assertEqual(coverage["benchmark_open_source"], "silver_benchmark.open")
+        self.assertEqual(coverage["benchmark_open_rows"], 3)
+
+    def test_policy_input_loader_marks_close_fallback_and_blocks_when_open_required(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+            )
+            with self.assertRaisesRegex(ValueError, "missing_benchmark_open"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=record.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    require_benchmark_open=True,
+                )
+
+        pd.testing.assert_series_equal(prepared.benchmark_open, benchmark_close, check_freq=False)
+        coverage = prepared.raw_cache_meta["lake_coverage_report"]
+        self.assertEqual(coverage["benchmark_open_source"], "fallback_close")
+        self.assertEqual(coverage["benchmark_open_rows"], 3)
+
     def test_prepare_policy_inputs_lake_uses_data_lake(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
         stocks = ["000001.SZ", "000002.SZ", "000003.SZ"]
@@ -294,6 +389,87 @@ class ResearchDataLakeTest(unittest.TestCase):
 
         self.assertEqual(len(prepared.close.index), 1)
         self.assertEqual(prepared.raw_cache_meta["lake_coverage_report"]["min_trading_days"], 1)
+
+    def test_policy_input_audit_flags_missing_benchmark_window(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        benchmark_close = pd.Series([4000.0, 4020.0], index=dates[[0, 2]], name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            report = audit_policy_input_bundle(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                windows=[("unit", "2026-01-05", "2026-01-07")],
+            )
+
+        self.assertEqual(report["verdict"], "blocked")
+        self.assertEqual(report["windows"][0]["verdict"], "blocked")
+        self.assertIn("missing_benchmark_close", report["windows"][0]["blockers"])
+        self.assertIn("2026-01-06", report["windows"][0]["missing_benchmark_close_dates"])
+
+    def test_policy_input_audit_reports_feature_panel_mismatch(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        feature_frames["score_v2"] = feature_frames["score_v2"].iloc[:2].copy()
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            report = audit_policy_input_bundle(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                windows=[("unit", "2026-01-05", "2026-01-07")],
+            )
+
+        self.assertEqual(report["verdict"], "usable_with_warnings")
+        mismatched = {item["feature_name"] for item in report["features"]["mismatched_panels"]}
+        self.assertIn("score_v2", mismatched)
+        self.assertIn("feature_panel_mismatch", report["warnings"])
+
+    def test_policy_input_audit_sample_nan_scan_reports_feature_nan_ratio(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates)
+        feature_frames["score_blend"] = feature_frames["score_blend"].copy()
+        feature_frames["score_blend"].iloc[1, 0] = float("nan")
+        benchmark_close = pd.Series([4000.0, 4010.0, 4020.0], index=dates, name="000300.SH")
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=benchmark_close,
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            report = audit_policy_input_bundle(
+                lake=lake,
+                dataset_id=record.dataset_id,
+                windows=[("unit", "2026-01-05", "2026-01-07")],
+                sample_nan_scan=True,
+            )
+
+        self.assertTrue(report["sample_nan_scan"]["enabled"])
+        self.assertEqual(report["sample_nan_scan"]["status"], "completed")
+        self.assertGreater(report["sample_nan_scan"]["feature_nan_cells"], 0)
 
     def test_label_completeness_separates_strict_and_realtime_zones(self) -> None:
         trade_dates = pd.to_datetime(

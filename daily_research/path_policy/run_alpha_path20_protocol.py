@@ -2573,6 +2573,7 @@ def _prepare_for_window(args: argparse.Namespace, *, start_date: str, end_date: 
         lake_min_trading_days=int(args.lake_min_trading_days),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
+        require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
         progress_desc=f"alpha_path20 sequence prepare {tag}",
     )
 
@@ -3485,6 +3486,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         lake_min_trading_days=int(args.lake_min_trading_days),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
+        require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
         progress_desc=f"alpha_path20 prepare {tag}",
     )
     if args.stage in FORECAST_MAINLINE_STAGES:

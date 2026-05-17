@@ -15,7 +15,10 @@
   - `forecast-train`
   - `forecast-walkforward-study`
 - Default forecast window is train `2019-2022`, validation `2023`, test `2024`, lookback `252`, horizon `20`.
-- Default lake input remains `policy_input_bundle__0f116a9b78c92ff045a6853d`.
+- 2026-05-17 data-lake repair supersedes the old default input:
+  - old blocked bundle: `policy_input_bundle__0f116a9b78c92ff045a6853d`
+  - repaired full bundle: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`
+  - repaired full bundle passed strict audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
 - Model families are `linear_last_day`, `mlp_last_day`, `gru_sequence`, and `patch_transformer`.
 - 2026-05-17 aggressive upgrade before full training:
   - `linear_last_day` remains a pure linear last-day baseline.
@@ -43,6 +46,7 @@
 - Future 20d labels use `next_open` semantics unless explicitly changed.
 - Because existing `next_open` labels enter on next open and exit on the future open, role-tail purge is implemented as `horizon + 1` trading days to guarantee labels do not cross roles.
 - Full real lake training is not started by this contract; it requires a separate explicit user approval.
+- Full-universe Stage 1 training also requires memory-safe sequence loading; capped pilots may use the repaired full bundle with `--max-universe-size`.
 - Smoke defaults remain intentionally small; an evidence-grade local RTX 2060 run should explicitly set longer training controls such as `--forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`.
 
 ## Boundaries
@@ -55,5 +59,5 @@
 ## Next Allowed Actions
 - Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.
 - After explicit approval, run:
-  `forecast-walkforward-study --data-source lake --lake-dataset-id policy_input_bundle__0f116a9b78c92ff045a6853d --forecast-train-start-year 2019 --forecast-train-end-year 2022 --forecast-validation-year 2023 --forecast-test-year 2024 --forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`
+  `forecast-walkforward-study --data-source lake --lake-dataset-id policy_input_bundle__7c8f58d851bce8179e1e9e2d --max-universe-size 80 --forecast-train-start-year 2019 --forecast-train-end-year 2022 --forecast-validation-year 2023 --forecast-test-year 2024 --forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`
 - Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments.

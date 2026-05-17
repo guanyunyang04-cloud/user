@@ -487,6 +487,7 @@ def prepare_policy_inputs(
     alpha_prior_source: str = DEFAULT_ALPHA_PRIOR_SOURCE,
     alpha_prior_score_panel: str = "",
     alpha_prior_target_weight_panel: str = "",
+    require_lake_benchmark_open: bool = False,
     refresh_cache: bool = False,
     auto_trim_history: bool = True,
     progress_desc: str = "continuous policy prepare",
@@ -518,6 +519,7 @@ def prepare_policy_inputs(
             alpha_prior_source=alpha_prior_source,
             alpha_prior_score_panel=alpha_prior_score_panel,
             alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
+            require_benchmark_open=bool(require_lake_benchmark_open),
         )
     universe = resolve_policy_universe(
         pool_name=resolved_pool_name,

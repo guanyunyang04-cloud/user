@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 34,
+  "record_count": 35,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -51,7 +51,8 @@
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
-        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
     },
     {
@@ -217,6 +218,37 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "data_lake_universal_repair_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/data_lake_universal_repair_contract_20260517.md",
+      "tags": [
+        "research_data_lake",
+        "data_lake"
+      ],
+      "workflow": "research_data_lake",
+      "study_tags": [],
+      "verdict": "Status: `current infrastructure mainline / data_lake_universal_repair / research / shadow-only / no promotion`.; The current work pointer is temporarily switched from Path20 Stage 1 training to universal data-lake repair because the base policy input bundle must be trustworthy before forecast evidence is interpretable.; Boundary: this contract repairs data correctness and auditability only. It does not change live/default execution and does not modify `daily_research/output/active_execution_strategy.json`.",
+      "blockers": [
+        "Do not run Path20 Stage 1 formal training on `policy_input_bundle__0f116a9b78c92ff045a6853d` for `2019-2024`; use the repaired full bundle instead.",
+        "Do not treat `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` as full-universe evidence; it is capped and starts at `2018-05-14`.",
+        "Do not run full-universe Path20 forecast training with the eager `[N,252,F]` dataset until memory-safe sequence loading exists."
+      ],
+      "next_allowed_actions": [
+        "Use `policy_input_bundle__7c8f58d851bce8179e1e9e2d` for future repaired full-universe policy-input audits and capped Path20 Stage 1 pilots.",
+        "Do not run full-universe Path20 Stage 1 training until memory-safe sequence loading exists.",
+        "If running capped Stage 1 pilots, keep explicit `--lake-dataset-id policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
+        "Keep `active_execution_strategy.json` unchanged throughout this repair line."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "policy_input_bundle__4db1a32ab6e7d77ac7b8671c",
+        "policy_input_bundle__c4886777fe70bfe6616e1259",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
     },
     {
