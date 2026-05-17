@@ -7,22 +7,18 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from daily_research.continuous_policy.pipeline_utils import select_feature_columns
-from daily_research.continuous_policy.portfolio_simulator import PortfolioState
 from daily_research.continuous_policy.runtime import write_json
-from daily_research.continuous_policy.state_builder import PreparedPolicyInputs, build_cross_section_state
+from daily_research.continuous_policy.state_builder import PreparedPolicyInputs
+from daily_research.path_policy.forecast_features import (
+    DEFAULT_FORECAST_FEATURE_PROFILE,
+    DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
+    build_forecast_feature_panels,
+)
 from daily_research.path_policy.labels import (
     PATH20_CUMULATIVE_HORIZONS,
     PATH20_HORIZON,
     build_path20_labels,
 )
-
-
-NON_FORECAST_FEATURE_COLUMNS = {
-    "date",
-    "stock",
-    "in_universe",
-}
 
 
 @dataclass(frozen=True)
@@ -120,34 +116,6 @@ def _date_role_boundaries(
     return eligible
 
 
-def _state_feature_panels(
-    prepared: PreparedPolicyInputs,
-    dates: list[pd.Timestamp],
-    *,
-    max_feature_columns: int,
-) -> tuple[dict[pd.Timestamp, pd.DataFrame], list[str]]:
-    empty_portfolio = PortfolioState()
-    panels: dict[pd.Timestamp, pd.DataFrame] = {}
-    feature_columns: list[str] = []
-    for dt in dates:
-        state_frame = build_cross_section_state(prepared, date=dt, portfolio_state=empty_portfolio)
-        state_frame = state_frame.copy()
-        if not feature_columns:
-            feature_columns = [
-                column
-                for column in select_feature_columns(state_frame)
-                if column not in NON_FORECAST_FEATURE_COLUMNS
-            ][: max(int(max_feature_columns), 1)]
-        numeric = (
-            state_frame.set_index("stock")
-            .reindex(index=list(prepared.universe), columns=feature_columns)
-            .apply(pd.to_numeric, errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
-        )
-        panels[pd.Timestamp(dt).normalize()] = numeric.astype(float)
-    return panels, feature_columns
-
-
 def _safe_label_value(frame: pd.DataFrame, date: pd.Timestamp, stock: str) -> float:
     try:
         value = frame.loc[date, stock]
@@ -157,6 +125,28 @@ def _safe_label_value(frame: pd.DataFrame, date: pd.Timestamp, stock: str) -> fl
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _feature_nanmean_nanstd(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    finite = np.isfinite(values)
+    counts = finite.sum(axis=0)
+    sums = np.where(finite, values, 0.0).sum(axis=0)
+    mean = np.divide(
+        sums,
+        counts,
+        out=np.zeros((values.shape[-1],), dtype=np.float64),
+        where=counts > 0,
+    )
+    centered = np.where(finite, values - mean.reshape(1, -1), 0.0)
+    variance = np.divide(
+        np.square(centered).sum(axis=0),
+        counts,
+        out=np.zeros((values.shape[-1],), dtype=np.float64),
+        where=counts > 0,
+    )
+    std = np.sqrt(variance)
+    std = np.where(counts > 0, std, 1.0)
+    return mean.astype(np.float32), std.astype(np.float32)
 
 
 def _empty_dataset(
@@ -199,7 +189,8 @@ def build_forecast_sequence_dataset(
     horizon: int = PATH20_HORIZON,
     execution_mode: str = "next_open",
     max_samples_per_role: int = 0,
-    max_feature_columns: int = 96,
+    feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
+    max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
 ) -> ForecastSequenceDataset:
     lookback_days = int(lookback_days)
     horizon = int(horizon)
@@ -222,9 +213,10 @@ def build_forecast_sequence_dataset(
         test_year=test_year,
         purge_trading_days=label_forward_offset,
     )
-    panels, feature_columns = _state_feature_panels(
+    panels, feature_columns, feature_manifest = build_forecast_feature_panels(
         prepared,
         dates,
+        feature_profile=feature_profile,
         max_feature_columns=max_feature_columns,
     )
     labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon)
@@ -342,7 +334,16 @@ def build_forecast_sequence_dataset(
         },
         "role_purge_trading_days": int(label_forward_offset),
         "next_open_label_extra_trading_day": int(next_open_extra_day),
+        "feature_profile": str(feature_manifest.get("feature_profile", feature_profile)),
+        "feature_manifest": dict(feature_manifest),
         "feature_columns": list(feature_columns),
+        "feature_group_counts": dict(feature_manifest.get("feature_group_counts", {})),
+        "feature_count_before_cap": int(feature_manifest.get("feature_count_before_cap", len(feature_columns))),
+        "feature_count_after_cap": int(feature_manifest.get("feature_count_after_cap", len(feature_columns))),
+        "raw_kline_feature_count": int(feature_manifest.get("raw_kline_feature_count", 0)),
+        "market_context_feature_count": int(feature_manifest.get("market_context_feature_count", 0)),
+        "peer_context_feature_count": int(feature_manifest.get("peer_context_feature_count", 0)),
+        "alpha_prior_feature_count": int(feature_manifest.get("alpha_prior_feature_count", 0)),
         "cumulative_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
         "rank_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
         "sample_count_by_role": {key: int(value) for key, value in sample_count_by_role.items()},
@@ -368,8 +369,7 @@ def build_forecast_sequence_dataset(
     train_mask = roles_np == "train"
     if bool(train_mask.any()):
         train_values = x_raw[train_mask].reshape(-1, x_raw.shape[-1])
-        feature_mean = np.nanmean(train_values, axis=0)
-        feature_std = np.nanstd(train_values, axis=0)
+        feature_mean, feature_std = _feature_nanmean_nanstd(train_values)
     else:
         feature_mean = np.zeros((x_raw.shape[-1],), dtype=np.float32)
         feature_std = np.ones((x_raw.shape[-1],), dtype=np.float32)

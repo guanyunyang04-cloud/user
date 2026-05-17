@@ -75,6 +75,8 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
     assert summary["selected_seed"] in {7, 11}
     assert summary["selected_signal_profile"] in {"trend_20d", "short_burst", "multiscale", "failed"}
     assert "validation_multiscale_score" in summary
+    assert summary["feature_profile"] == dataset.manifest["feature_profile"]
+    assert summary["feature_manifest"]["feature_count_after_cap"] == dataset.x.shape[2]
     assert "family_summary" in summary
     assert "seed_summaries" in summary["models"]["patch_transformer"]
     assert (tmp_path / "forecast_training_summary.json").exists()

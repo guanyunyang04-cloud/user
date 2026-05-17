@@ -48,6 +48,7 @@
       ],
       "next_allowed_actions": [
         "Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.",
+        "Run feature ablations across `state_v1`, `raw_kline_v1`, `raw_kline_context_v1`, and `raw_kline_context_no_alpha_prior_v1` before treating the new input stack as evidence-improving.",
         "After explicit approval, run:",
         "Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments."
       ],

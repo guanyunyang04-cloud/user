@@ -102,6 +102,8 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_early_stop_patience == 12
     assert args.forecast_seeds == "7"
     assert args.forecast_selection_profile == "multiscale"
+    assert args.forecast_feature_profile == "raw_kline_context_v1"
+    assert args.forecast_max_feature_columns == 192
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -231,6 +233,10 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "7,11",
             "--forecast-selection-profile",
             "multiscale",
+            "--forecast-feature-profile",
+            "raw_kline_v1",
+            "--forecast-max-feature-columns",
+            "128",
             "--forecast-max-samples-per-role",
             "8",
         ]
@@ -251,6 +257,9 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     assert summary["promotion_allowed"] is False
     assert summary["active_execution_strategy_expected_diff"] == "none"
     assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
+    assert summary["dataset_manifest"]["feature_profile"] == "raw_kline_v1"
+    assert summary["dataset_manifest"]["feature_count_after_cap"] <= 128
+    assert summary["training_summary"]["feature_profile"] == "raw_kline_v1"
     assert "linear_last_day" in summary["training_summary"]["models"]
     assert "mlp_last_day" in summary["training_summary"]["models"]
     assert summary["training_summary"]["selected_seed"] in {7, 11}

@@ -37,6 +37,11 @@ def test_forecast_sequence_dataset_builds_roles_with_purge_and_train_normalizati
     )
     assert set(dataset.role.tolist()) == {"train", "validation", "test"}
     assert dataset.normalization_manifest["fit_role"] == "train_only"
+    assert dataset.manifest["feature_profile"] == "raw_kline_context_v1"
+    assert dataset.manifest["feature_count_after_cap"] <= 192
+    assert "raw_open_gap_1d" in dataset.feature_columns
+    assert "market_positive_share_1d" in dataset.feature_columns
+    assert "benchmark_ret_20d" in dataset.feature_columns
 
     validation_dates = dataset.dates_by_role["validation"]
     test_dates = dataset.dates_by_role["test"]
@@ -67,3 +72,24 @@ def test_forecast_sequence_dataset_validation_inputs_can_use_prior_history_witho
     assert dataset.sequence_start_dates[first_validation].year == 2019
     assert dataset.date[first_validation].year == 2020
     assert dataset.label_end_dates[first_validation].year == 2020
+
+
+def test_forecast_sequence_dataset_accepts_legacy_state_feature_profile() -> None:
+    prepared = make_prepared_policy_inputs(days=700, stocks=("AAA", "BBB", "CCC"), start_date="2019-01-02")
+
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=10,
+        horizon=20,
+        feature_profile="state_v1",
+        max_feature_columns=32,
+        max_samples_per_role=3,
+    )
+
+    assert dataset.manifest["feature_profile"] == "state_v1"
+    assert dataset.x.shape[2] <= 32
+    assert "raw_open_gap_1d" not in dataset.feature_columns

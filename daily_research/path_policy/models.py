@@ -177,7 +177,11 @@ class PatchTransformerPath20Forecaster(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(int(num_layers), 1))
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=max(int(num_layers), 1),
+            enable_nested_tensor=False,
+        )
         self.head = nn.Sequential(
             nn.LayerNorm(self.hidden_dim),
             nn.Linear(self.hidden_dim, self.hidden_dim),

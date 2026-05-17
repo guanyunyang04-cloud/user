@@ -28,6 +28,16 @@
 - Multi-horizon evaluation now records `rank_ic`, `top_bottom_spread`, and direction accuracy for `1d/3d/5d/10d/20d`, plus `rank_ic_upside_20d` and `top_bottom_spread_upside_20d`.
 - `--forecast-selection-profile` controls validation-first model selection and defaults to `multiscale`; supported values are `multiscale`, `trend20`, and `short_burst`.
 - Training summaries include `selected_signal_profile`, one of `multiscale`, `trend_20d`, `short_burst`, or `failed`.
+- 2026-05-17 input feature profile upgrade changes Stage 1 inputs from a single implicit state-column cap into an explicit, auditable feature profile contract:
+  - `state_v1` preserves the old state-feature selection path for ablation.
+  - `raw_kline_v1` adds raw OHLCV shape channels derived only from signal-day and historical data.
+  - `raw_kline_context_v1` is the new default and adds raw K-line shape, cross-sectional market breadth, benchmark context, and low-cost peer bucket context.
+  - `raw_kline_context_no_alpha_prior_v1` removes alpha-prior and old alpha-score dependencies to test whether the forecaster is merely replaying legacy alpha.
+- Default forecast input controls are now `--forecast-feature-profile raw_kline_context_v1` and `--forecast-max-feature-columns 192`.
+- Forecast dataset manifests now persist `feature_profile`, `feature_manifest`, feature group counts, cap-before/cap-after counts, and raw/market/peer/alpha-prior feature counts.
+- Forecast training summaries and best checkpoints persist the same feature profile metadata so metrics cannot be interpreted without their input contract.
+- The Stage 1 model is still a per-stock sequence forecaster: one sample remains `(signal_date, stock)` with tensor shape `[lookback, feature_dim]`.
+- Stock-to-stock interaction is represented in v1 through features, not true cross-attention: cross-sectional ranks, market breadth, benchmark state, and peer bucket context are repeated into each stock's sequence.
 - 2026-05-17 aggressive upgrade before full training:
   - `linear_last_day` remains a pure linear last-day baseline.
   - `mlp_last_day` is added as a nonlinear last-day baseline.
@@ -47,6 +57,9 @@
 ## Inferences
 - This contract matches the forecast-then-allocation framing, but explicitly avoids claiming portfolio success from forecast loss alone.
 - Validation rank/spread now needs to be read as a profile: 20d trend, short burst, multiscale, or failed. This avoids losing stocks whose real opportunity is concentrated in the first few days of the 20d window.
+- Input evidence now also needs ablation: `state_v1` vs `raw_kline_v1` vs `raw_kline_context_v1` vs `raw_kline_context_no_alpha_prior_v1`.
+- Raw K-line data is useful but not sufficient by itself; technical/state features, market regime, and peer context provide lower-noise summaries and interaction proxies.
+- True stock-to-stock attention may be valuable later, but it requires memory-safe day-grouped datasets and is intentionally outside this input-profile upgrade.
 - Validation `rank_ic_20d`, `top_bottom_spread_20d`, short-horizon rank/spread, upside capture rank/spread, and quantile coverage are more decision-relevant than daily MSE alone because allocation will amplify forecast errors.
 - Stronger architectures and longer training improve the information value of a negative or positive result, but only if validation-first selection, seed stability, calibration gates, and shadow-only boundaries are preserved.
 - Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress.
@@ -58,6 +71,8 @@
 - `cum1/cum3` are intended to help the forecaster learn short burst opportunities, but 1d evidence is kept low-weighted so daily noise cannot dominate model selection.
 - Full real lake training is not started by this contract; it requires a separate explicit user approval.
 - Full-universe Stage 1 training also requires memory-safe sequence loading; capped pilots may use the repaired full bundle with `--max-universe-size`.
+- Feature profiles must never include future returns, future labels, oracle outputs, or allocator/replay outcomes as inputs.
+- Industry/concept context is not a hard dependency in this version; liquidity/price/vol peer buckets are used as point-in-time-safe proxies until a validated point-in-time industry map exists.
 - Smoke defaults remain intentionally small; an evidence-grade local RTX 2060 run should explicitly set longer training controls such as `--forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`.
 
 ## Boundaries
@@ -69,6 +84,7 @@
 
 ## Next Allowed Actions
 - Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.
+- Run feature ablations across `state_v1`, `raw_kline_v1`, `raw_kline_context_v1`, and `raw_kline_context_no_alpha_prior_v1` before treating the new input stack as evidence-improving.
 - After explicit approval, run:
   `forecast-walkforward-study --data-source lake --lake-dataset-id policy_input_bundle__7c8f58d851bce8179e1e9e2d --max-universe-size 80 --forecast-train-start-year 2019 --forecast-train-end-year 2022 --forecast-validation-year 2023 --forecast-test-year 2024 --forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`
 - Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments.

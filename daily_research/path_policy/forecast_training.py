@@ -284,37 +284,35 @@ def _prediction_frame(
     aux = predictions["aux"][idx] / scale
     y_daily = dataset.y_daily_excess[idx]
     y_cum = dataset.y_cum_excess[idx]
-    frame = pd.DataFrame(
-        {
-            "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
-            "stock": dataset.stock[idx].astype(str),
-            "role": dataset.role[idx].astype(str),
-            "model_family": str(family),
-            "future_rank_20d": dataset.y_rank_20d[idx],
-            "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
-            "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
-            "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
-        }
-    )
+    columns: dict[str, Any] = {
+        "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
+        "stock": dataset.stock[idx].astype(str),
+        "role": dataset.role[idx].astype(str),
+        "model_family": str(family),
+        "future_rank_20d": dataset.y_rank_20d[idx],
+        "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
+        "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
+        "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
+    }
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+        columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
-        frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
-        frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+        columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+        columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
     risk_start = len(PATH20_CUMULATIVE_HORIZONS)
-    frame["pred_aux_downside_floor_20d"] = aux[:, risk_start]
-    frame["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
-    frame["pred_aux_upside_20d"] = aux[:, risk_start + 2]
+    columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
     for step in range(1, PATH20_HORIZON + 1):
         offset = step - 1
-        frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
-        frame[f"target_excess_{step}d"] = y_daily[:, offset]
-        frame[f"pred_mu_{step}d"] = mu[:, offset]
-        frame[f"pred_q10_{step}d"] = q10[:, offset]
-        frame[f"pred_q50_{step}d"] = q50[:, offset]
-        frame[f"pred_q90_{step}d"] = q90[:, offset]
-    return frame
+        columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+        columns[f"target_excess_{step}d"] = y_daily[:, offset]
+        columns[f"pred_mu_{step}d"] = mu[:, offset]
+        columns[f"pred_q10_{step}d"] = q10[:, offset]
+        columns[f"pred_q50_{step}d"] = q50[:, offset]
+        columns[f"pred_q90_{step}d"] = q90[:, offset]
+    return pd.DataFrame(columns)
 
 
 def _prediction_frame_for_indices(
@@ -336,37 +334,35 @@ def _prediction_frame_for_indices(
     aux = predictions["aux"] / scale
     y_daily = dataset.y_daily_excess[idx]
     y_cum = dataset.y_cum_excess[idx]
-    frame = pd.DataFrame(
-        {
-            "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
-            "stock": dataset.stock[idx].astype(str),
-            "role": dataset.role[idx].astype(str),
-            "model_family": str(family),
-            "future_rank_20d": dataset.y_rank_20d[idx],
-            "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
-            "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
-            "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
-        }
-    )
+    columns: dict[str, Any] = {
+        "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
+        "stock": dataset.stock[idx].astype(str),
+        "role": dataset.role[idx].astype(str),
+        "model_family": str(family),
+        "future_rank_20d": dataset.y_rank_20d[idx],
+        "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
+        "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
+        "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
+    }
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+        columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
-        frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
-        frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+        columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+        columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
     risk_start = len(PATH20_CUMULATIVE_HORIZONS)
-    frame["pred_aux_downside_floor_20d"] = aux[:, risk_start]
-    frame["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
-    frame["pred_aux_upside_20d"] = aux[:, risk_start + 2]
+    columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
     for step in range(1, PATH20_HORIZON + 1):
         offset = step - 1
-        frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
-        frame[f"target_excess_{step}d"] = y_daily[:, offset]
-        frame[f"pred_mu_{step}d"] = mu[:, offset]
-        frame[f"pred_q10_{step}d"] = q10[:, offset]
-        frame[f"pred_q50_{step}d"] = q50[:, offset]
-        frame[f"pred_q90_{step}d"] = q90[:, offset]
-    return frame
+        columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+        columns[f"target_excess_{step}d"] = y_daily[:, offset]
+        columns[f"pred_mu_{step}d"] = mu[:, offset]
+        columns[f"pred_q10_{step}d"] = q10[:, offset]
+        columns[f"pred_q50_{step}d"] = q50[:, offset]
+        columns[f"pred_q90_{step}d"] = q90[:, offset]
+    return pd.DataFrame(columns)
 
 
 def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
@@ -721,12 +717,16 @@ def train_forecast_models(
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
+    feature_profile = str(dataset.manifest.get("feature_profile", ""))
+    feature_manifest = dict(dataset.manifest.get("feature_manifest", {}))
     if dataset.x.shape[0] == 0:
         summary = {
             "status": "insufficient_or_incomplete",
             "reason": "empty_forecast_dataset",
             "models": {},
             "family_summary": {},
+            "feature_profile": feature_profile,
+            "feature_manifest": feature_manifest,
             "selected_seed": 0,
             "selected_model_family": "",
             "selected_signal_profile": "failed",
@@ -758,6 +758,8 @@ def train_forecast_models(
             "test_rows": int(len(test_indices)),
             "models": {},
             "family_summary": {},
+            "feature_profile": feature_profile,
+            "feature_manifest": feature_manifest,
             "selected_seed": 0,
             "selected_model_family": "",
             "selected_signal_profile": "failed",
@@ -894,6 +896,8 @@ def train_forecast_models(
                             "seed": int(current_seed),
                             "state_dict": model.state_dict(),
                             "feature_columns": list(dataset.feature_columns),
+                            "feature_profile": feature_profile,
+                            "feature_manifest": feature_manifest,
                             "normalization": dataset.normalization_manifest,
                             "target_scale": float(target_scale),
                             "lookback_days": int(dataset.x.shape[1]),
@@ -944,6 +948,8 @@ def train_forecast_models(
                         "seed": int(current_seed),
                         "state_dict": model.state_dict(),
                         "feature_columns": list(dataset.feature_columns),
+                        "feature_profile": feature_profile,
+                        "feature_manifest": feature_manifest,
                         "normalization": dataset.normalization_manifest,
                         "target_scale": float(target_scale),
                         "lookback_days": int(dataset.x.shape[1]),
@@ -955,7 +961,7 @@ def train_forecast_models(
                     },
                     best_checkpoint_path,
                 )
-            checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device)
+            checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device, weights_only=False)
             model.load_state_dict(checkpoint["state_dict"])
             validation_predictions = _predict_indices(
                 model,
@@ -1073,7 +1079,7 @@ def train_forecast_models(
             transformer_heads=int(transformer_heads),
             patch_sizes=tuple(int(item) for item in patch_sizes),
         ).to(resolved_device)
-        checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device)
+        checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)
         selected_model.load_state_dict(checkpoint["state_dict"])
         validation_predictions_np = _predict_indices(
             selected_model,
@@ -1131,6 +1137,8 @@ def train_forecast_models(
         "device": str(resolved_device),
         "amp_enabled": bool(amp_enabled),
         "seeds": [int(item) for item in seed_values],
+        "feature_profile": feature_profile,
+        "feature_manifest": feature_manifest,
         "training_config": {
             "epochs": int(max_epochs),
             "min_epochs": int(min_epochs),
@@ -1147,6 +1155,8 @@ def train_forecast_models(
             "transformer_layers": int(transformer_layers),
             "transformer_heads": int(transformer_heads),
             "patch_sizes": [int(item) for item in patch_sizes],
+            "feature_profile": feature_profile,
+            "feature_count": int(dataset.x.shape[-1]),
             "selection_profile": selection_profile,
         },
         "models": model_summaries,

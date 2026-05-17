@@ -23,6 +23,11 @@ from daily_research.path_policy import (
 )
 from daily_research.path_policy.adapter import build_path_policy_frame
 from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset, save_forecast_sequence_dataset
+from daily_research.path_policy.forecast_features import (
+    DEFAULT_FORECAST_FEATURE_PROFILE,
+    DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
+    FORECAST_FEATURE_PROFILES,
+)
 from daily_research.path_policy.forecast_training import FORECAST_MODEL_FAMILIES, train_forecast_models
 from daily_research.path_policy.labels import PATH20_HORIZON, build_path20_dataset_frame
 from daily_research.path_policy.models import (
@@ -563,6 +568,8 @@ def _run_forecast_walkforward_study(
         lookback_days=int(args.forecast_lookback_days),
         horizon=PATH20_HORIZON,
         execution_mode=args.execution_mode,
+        feature_profile=str(args.forecast_feature_profile),
+        max_feature_columns=int(args.forecast_max_feature_columns),
         max_samples_per_role=int(args.forecast_max_samples_per_role),
     )
     dataset_manifest = save_forecast_sequence_dataset(dataset, study_root)
@@ -3165,6 +3172,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-weight-decay", type=float, default=1.0e-4)
     parser.add_argument("--forecast-write-all-predictions", action="store_true")
     parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
+    parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
+    parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
@@ -3258,6 +3267,8 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-seeds must contain non-negative integer seeds.")
         if int(getattr(args, "forecast_max_samples_per_role", 0)) < 0:
             parser.error("--forecast-max-samples-per-role must be >= 0.")
+        if int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)) <= 0:
+            parser.error("--forecast-max-feature-columns must be positive.")
         if not (
             int(args.forecast_train_start_year)
             <= int(args.forecast_train_end_year)

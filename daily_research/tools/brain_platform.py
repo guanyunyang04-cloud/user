@@ -228,7 +228,8 @@ def read_text(path: str | Path) -> str:
 def write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     target = workspace_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     return target
 
 

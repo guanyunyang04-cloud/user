@@ -275,6 +275,14 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Forecast datasets now persist `y_rank_by_horizon` for `1/3/5/10/20d` while keeping `y_rank_20d` for compatibility.
 - Forecast training/evaluation now reports multi-horizon `rank_ic`, `top_bottom_spread`, direction accuracy, upside opportunity rank/spread, `validation_multiscale_score`, and `selected_signal_profile`.
 - `--forecast-selection-profile` defaults to `multiscale` and can select by `multiscale`, `trend20`, or `short_burst` validation evidence.
+- 2026-05-17 input feature profile upgrade adds explicit Stage 1 forecast input contracts:
+  - `state_v1` keeps the previous state-feature selection for ablation.
+  - `raw_kline_v1` adds raw OHLCV/K-line shape features.
+  - `raw_kline_context_v1` is the new default and adds raw K-line, market breadth, benchmark context, and low-cost peer bucket context.
+  - `raw_kline_context_no_alpha_prior_v1` removes alpha-prior and old alpha-score dependencies.
+- Forecast dataset manifests now record feature profile, feature group counts, feature columns, cap-before/cap-after counts, and raw/market/peer/alpha-prior feature counts.
+- Forecast training summaries and best checkpoints record the feature profile metadata used for the run.
+- Stage 1 remains a per-stock sequence forecaster, not a cross-sectional attention model; interaction is represented through market/peer/context features.
 - 2026-05-17 preflight found `policy_input_bundle__0f116a9b78c92ff045a6853d` blocked for `2018-01-01 -> 2024-12-31` because benchmark coverage starts at `2018-05-14`.
 - `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` passed capped preflight from `2018-05-14`, but remains capped at `1200` symbols and is not full-universe evidence.
 - Repaired full-universe bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict data-lake audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
@@ -284,6 +292,9 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
 - Forecast success must be judged validation-first by signal profile: 20d trend, short burst, multiscale, or failed. Daily MSE alone is insufficient.
 - The multi-horizon upgrade is designed to answer whether some stocks have useful 1-5d burst information inside the 20d path, without letting 1d noise dominate selection.
+- The feature profile upgrade is designed to test whether raw K-line shape and low-cost interaction context add signal beyond the old state-vector baseline.
+- Raw K-line is not treated as automatically sufficient; ablations must compare it against technical/state/context and no-alpha-prior variants.
+- True cross-sectional transformer or stock-to-stock attention is deferred until memory-safe day-grouped sequence loading exists.
 - The aggressive upgrade increases model capacity and training auditability before long training, but does not itself create strategy evidence or a promotion path.
 - Path20 Stage 1 is no longer blocked by the old benchmark coverage gap for capped pilots, provided it uses the repaired full bundle explicitly.
 - Full-universe Stage 1 training remains blocked by eager dataset memory design until streaming/memmap sequence loading exists.
@@ -294,6 +305,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
 - Do not start long training or touch active execution without a separate explicit task.
 - Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
+- Use `--forecast-feature-profile` explicitly in ablations; default `raw_kline_context_v1` is not self-proving without `state_v1` and no-alpha-prior comparisons.
 - Resume capped formal forecast pilots on `policy_input_bundle__7c8f58d851bce8179e1e9e2d`; do not run full universe until memory-safe sequence loading exists.
 
 ## 18. Path20 Sequence Policy v1
