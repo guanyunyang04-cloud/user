@@ -55,6 +55,30 @@ class DocGuardTest(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertIn("tracked_large_file_not_allowlisted:research/output/artifact.pkl", issues[0])
 
+    def test_language_policy_accepts_chinese_semantics_with_english_identifiers(self) -> None:
+        issues = doc_guard._check_language_policy_text(
+            "## 当前状态\n- 使用 `workflow_registry.json` 与 CLI command 作为工程标识。\n",
+            "brain/example.md",
+        )
+
+        self.assertEqual(issues, [])
+
+    def test_language_policy_flags_core_markdown_without_chinese(self) -> None:
+        issues = doc_guard._check_language_policy_text(
+            "# Operations\n- This core brain document has no Chinese semantics.\n",
+            "daily_research/brain/operations_center.md",
+        )
+
+        self.assertIn("core_brain_doc_missing_chinese_semantics", issues)
+
+    def test_language_policy_flags_real_mojibake(self) -> None:
+        issues = doc_guard._check_language_policy_text(
+            "# Daily Research 鎿嶄綔涓灑\n",
+            "daily_research/brain/operations_center.md",
+        )
+
+        self.assertIn("core_brain_doc_contains_mojibake_marker", issues)
+
 
 if __name__ == "__main__":
     unittest.main()

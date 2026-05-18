@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 39,
+  "record_count": 40,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -305,6 +305,25 @@
         "Use `capsule --workflow auto` as the API bootstrap entrypoint.",
         "Add new project-native workflows only when they have explicit checklist, stop conditions, completion criteria, and guard commands.",
         "Keep workflow docs compact; put long evidence and dated contracts in `daily_research/brain/references/`."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "brain_system_refactor_status_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_system_refactor_status_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain_system_refactor / completed control-plane migration`.; Workflow: `brain`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged by design.; Scope: brain catalog, split workflow registry, audit CLI, language policy, doc/integrity guards, and reference writeback.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `brain_system_audit` for future “脑区乱不乱 / 复杂不复杂 / 是否需要优化” questions.",
+        "Attach any future discovered brain only through `brain/brain_manifest.json` plus catalog/integrity guards."
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []

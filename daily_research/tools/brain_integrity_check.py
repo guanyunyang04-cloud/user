@@ -12,9 +12,10 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
-from daily_research.tools.brain_platform import check_text_encoding, read_text as platform_read_text
+from daily_research.tools.brain_platform import build_brain_catalog, check_text_encoding, read_text as platform_read_text
 
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
+BRAIN_CATALOG = Path("brain/brain_catalog.json")
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
 
 REQUIRED_MAIN_KEYS = (
@@ -578,6 +579,65 @@ def _validate_child_manifest(
         _validate_markdown_and_encoding(findings, item)
 
 
+def _validate_brain_catalog(findings: list[Finding], main_manifest: dict[str, Any]) -> None:
+    catalog_path = _rel(BRAIN_CATALOG)
+    if not _workspace_path(BRAIN_CATALOG).exists():
+        findings.append(Finding("error", "brain_catalog_missing", "brain/brain_catalog.json is missing", catalog_path))
+        return
+    try:
+        file_catalog = _read_json(BRAIN_CATALOG)
+    except Exception as exc:
+        findings.append(Finding("error", "brain_catalog_invalid_json", str(exc), catalog_path))
+        return
+    built_catalog = build_brain_catalog()
+    file_brains = file_catalog.get("brains")
+    if not isinstance(file_brains, list) or not file_brains:
+        findings.append(Finding("error", "brain_catalog_brains_invalid", "catalog brains must be a non-empty list", catalog_path))
+        return
+
+    records = {str(item.get("brain_id", "")): item for item in file_brains if isinstance(item, dict)}
+    if "workspace_root" not in records:
+        findings.append(Finding("error", "brain_catalog_workspace_root_missing", "workspace_root entry missing", catalog_path))
+    elif records["workspace_root"].get("status") != "canonical_root":
+        findings.append(Finding("error", "brain_catalog_workspace_root_status_invalid", "workspace_root must be canonical_root", catalog_path))
+
+    for child in main_manifest.get("child_brains", []):
+        if not isinstance(child, dict):
+            continue
+        child_id = str(child.get("id", "")).strip()
+        record = records.get(child_id)
+        if not record:
+            findings.append(Finding("error", "brain_catalog_attached_child_missing", f"missing attached child: {child_id}", catalog_path))
+            continue
+        if record.get("status") != "attached":
+            findings.append(Finding("error", "brain_catalog_attached_child_status_invalid", f"{child_id} must be attached", catalog_path))
+        if record.get("manifest_path") != child.get("path"):
+            findings.append(
+                Finding(
+                    "error",
+                    "brain_catalog_manifest_mismatch",
+                    f"{child_id} manifest mismatch: {record.get('manifest_path')} != {child.get('path')}",
+                    catalog_path,
+                )
+            )
+
+    built_records = {str(item.get("brain_id", "")): item for item in built_catalog.get("brains", []) if isinstance(item, dict)}
+    for brain_id, built in built_records.items():
+        if brain_id not in records:
+            findings.append(Finding("warning", "brain_catalog_discovered_entry_missing", f"catalog omits discovered brain: {brain_id}", catalog_path))
+    for brain_id, record in records.items():
+        status = str(record.get("status", ""))
+        if status in {"cache_legacy", "discovered_untracked", "missing_manifest"}:
+            findings.append(
+                Finding(
+                    "warning",
+                    "catalog_noncanonical_brain",
+                    f"{brain_id} is classified as {status} and is not a truth source",
+                    str(record.get("root", "") or catalog_path),
+                )
+            )
+
+
 def run_checks() -> list[Finding]:
     findings: list[Finding] = []
     if not _workspace_path(MAIN_MANIFEST).exists():
@@ -585,6 +645,7 @@ def run_checks() -> list[Finding]:
 
     main_manifest = _read_json(MAIN_MANIFEST)
     child_refs = _validate_main_manifest(findings, main_manifest)
+    _validate_brain_catalog(findings, main_manifest)
     _validate_markdown_and_encoding(findings, _rel(MAIN_MANIFEST))
     for item in main_manifest.get("read_order", []):
         _validate_markdown_and_encoding(findings, str(item))

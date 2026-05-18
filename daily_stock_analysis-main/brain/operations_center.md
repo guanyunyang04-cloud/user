@@ -35,6 +35,7 @@
 - 再按 body_map 进入产品代码
 - 不把 `README / docs / AGENTS.md / CLAUDE.md` 当成主入口
 - README 或 docs 中出现新的稳定能力、配置字段、运行入口或验证入口时，先整合到本分脑，再保留公开文档摘要
+- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、路径、tag 与代码符号保留英文。
 
 ## 3. 验证入口
 - 后端验证：

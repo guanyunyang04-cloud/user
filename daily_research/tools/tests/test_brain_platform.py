@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from daily_research.tools.brain_platform import (
     PYTHON_EXECUTABLE,
+    audit_brain_system,
+    build_brain_catalog,
     _run_check,
     check_brain_health,
     check_text_encoding,
@@ -63,12 +65,33 @@ class BrainPlatformTest(unittest.TestCase):
             "continuous_policy_safe_screening",
             "continuous_policy_result_review",
             "brain_writeback",
+            "brain_system_audit",
+            "brain_architecture_refactor",
         }
         self.assertTrue(expected.issubset(set(registry)))
         for workflow_id in expected:
             workflow = registry[workflow_id]
             for key in ("preflight", "artifacts", "writeback_routes", "forbidden_actions"):
                 self.assertIn(key, workflow, workflow_id)
+
+    def test_split_workflow_registry_and_catalog_are_available(self) -> None:
+        registry = load_workflow_registry()
+        catalog = build_brain_catalog()
+
+        self.assertIn("brain_system_audit", registry)
+        self.assertEqual(catalog["schema_version"], 1)
+        self.assertIn("brains", catalog)
+
+    def test_brain_system_audit_reports_verdict_and_noncanonical_brains(self) -> None:
+        payload = audit_brain_system(scope="all")
+
+        self.assertIn(payload["verdict"], {"clean", "usable_with_warnings", "needs_refactor", "blocked"})
+        self.assertIn("catalog", payload)
+        self.assertIn("workflow_registry", payload)
+        self.assertIn("language", payload)
+        self.assertIn("active_artifact_guard", payload)
+        self.assertIn("loose_latest", payload)
+        self.assertTrue(payload["discovered_noncanonical_brains"])
 
     def test_explicit_study_evidence_capsule_reads_coherent_r52_trials(self) -> None:
         tag = "self_opt_study_r52_native_source_delta_closure_screening_safe_20260510_02"

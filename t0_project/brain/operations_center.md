@@ -19,6 +19,7 @@
 - 先看文档归宿和 body 入口，再进代码
 - 长篇研究文档与历史说明统一收口到 `brain/references/`
 - 默认只做离线、mock 或静态验证；连接真实通达信、券商或 live broker 前必须显式确认
+- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；命令、路径、JSON key、workflow id 不翻译。
 
 ## 3. 验证入口
 - Python 静态编译：

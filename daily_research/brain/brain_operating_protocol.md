@@ -1,54 +1,55 @@
-# Daily Research Brain Operating Protocol
+# Daily Research 脑区操作协议
 
-Snapshot date: `2026-05-14`
+快照日期：`2026-05-14`
 
-## Purpose
-This protocol turns the `daily_research` brain from a passive memory store into the default operating system for agents working in this project.
+## 目的
+本协议把 `daily_research` 脑区从被动记忆库变成 agent 进入项目工作的默认操作系统。
 
-The brain remains the source of project facts, evidence, state, and governance. Skills and tools only provide reusable procedures for reading, checking, and writing that truth.
+脑区保存项目事实、证据、状态和治理规则。skills 与工具只提供读取、检查、执行和写回流程，不替代脑区真源。
 
-## Entry Sequence
-- Start every substantial `daily_research` task with a task capsule:
+## 进入顺序
+- 重大 `daily_research` 任务开始前，先运行 task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
-- Read the capsule before changing tracked files, starting training, running studies, or writing conclusions.
-- If the task involves a specific study, protocol, dataset, or r-number, use explicit tags or evidence references rather than loose `latest_*` pointers.
-- Keep work on `main` unless the user explicitly changes the branch rule.
+- 在修改 tracked files、启动训练、运行 study 或写结论前，先读 capsule。
+- 若任务涉及 study、protocol、dataset 或 r-number，必须使用 explicit tag 或 reference，不直接相信 loose `latest_*`。
+- 默认工作分支仍以当前仓库状态为准；用户明确切换分支规则时再调整。
 
-## Brain-Native Workflow Fallback
-- In API-only or no-plugin sessions, start with:
+## API / 无插件 fallback
+- API-only 或无插件场景，使用：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
-- Treat `selected_workflow`, `workflow_guide`, `required_checklist`, and `stop_conditions` as the task-local operating guide.
-- Use `workflow-guide --workflow <workflow_id> --json` to inspect a workflow without changing tracked files.
-- This fallback approximates plugin workflow discipline; it does not replace brain truth or grant active execution authority.
+- 把 `selected_workflow`、`workflow_guide`、`required_checklist` 和 `stop_conditions` 作为本轮任务的操作指南。
+- 用 `workflow-guide --workflow <workflow_id> --json` 只读查看 workflow。
+- 该 fallback 只近似插件纪律；它不替代脑区真源，也不授予 active execution 权限。
 
-## Action Discipline
-- Before major actions, separate facts, inferences, assumptions, and action boundaries.
-- During work, prefer existing brain workflow tools over ad hoc interpretation.
-- After major actions, run the relevant guards and decide whether a brain writeback is required.
-- If no writeback is required, say why.
+## 行动纪律
+- 重大动作前，区分事实、推断、假设和边界。
+- 工作中优先使用现有 brain workflow 工具，避免临时解释。
+- 重大动作后运行对应 guard，并判断是否需要 brain writeback。
+- 若不需要写回，说明原因。
 
-## Mainline Switching
-- Treat every project mainline as a switchable current work pointer, not a permanent hierarchy.
-- When the user or project governance explicitly switches a mainline, continue subsequent work along the newly selected mainline.
-- Preserve old mainline evidence as historical or comparison evidence unless a future switch selects it again.
-- Research-mainline switching does not imply live/default promotion or permission to modify `daily_research/output/active_execution_strategy.json`.
+## 主线切换
+- 每条研究主线都是可切换的当前工作指针，不是永久层级。
+- 用户或治理规则显式切换主线后，后续工作按新主线继续。
+- 旧主线证据保留为历史或对照，除非之后再次被选中。
+- research mainline 切换不等于 live/default promotion，也不允许修改 `daily_research/output/active_execution_strategy.json`。
 
-## Evidence Rules
-- Failed, interrupted, timeout, smoke, dry-run, and diagnostic-only runs are not completed evidence.
-- Realtime tail labels with unobserved forward outcomes are never completed training evidence.
-- Full Gold training-set claims require a registered Gold data-lake dataset with row counts, date range, and label completeness.
-- Active execution changes require explicit future promotion authority; ordinary research work must leave `daily_research/output/active_execution_strategy.json` unchanged.
+## 证据规则
+- failed、interrupted、timeout、smoke、dry-run、diagnostic-only run 都不是 completed evidence。
+- forward outcome 未观测的 realtime tail label 不能写成 completed training evidence。
+- Full Gold 训练集声明必须引用已注册的 Gold data-lake dataset，并给出 row count、date range 和 label completeness。
+- active execution 变更需要未来明确 promotion authority；普通 research 必须保持 `daily_research/output/active_execution_strategy.json` 不变。
 
-## Brain And Skill Split
-- Brain files store project truth: current state, rules, evidence, design contracts, and historical verdicts.
-- Project skills store repeatable procedures: handoff, preflight, evidence lookup, guarded execution, and writeback.
-- Skills must point back to the brain and must not copy long r-number histories.
+## Brain 与 Skill 分工
+- Brain files 保存项目真相：当前状态、规则、证据、设计合同和历史 verdict。
+- Project skills 保存可复用流程：handoff、preflight、evidence lookup、guarded execution 和 writeback。
+- Skills 必须指回 brain，不复制长 r-number 历史。
+- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识。
 
-## Writeback Rules
-- Main centers stay compact and current.
-- Long dated evidence, command transcripts, and detailed r-number status go to `daily_research/brain/references/`.
-- Machine-readable evidence indexing belongs in `daily_research/brain/references/evidence_registry.json`.
-- `workflow_registry.json` describes workflows; it is not a replacement for brain truth.
-- After any full codebase review, update `daily_research/brain/references/full_codebase_review_20260515.md` or its explicit successor.
-- After any mainline review, reroute, deprecation, or promotion analysis, update `daily_research/brain/references/mainline_review_current.md`.
-- After adding or materially changing reference review documents, rebuild the evidence registry and run the brain/document guards before claiming the writeback is complete.
+## 写回规则
+- 主中枢保持 compact/current。
+- 长 dated evidence、命令 transcript 和详细 r-number status 写入 `daily_research/brain/references/`。
+- 机器 evidence index 写入 `daily_research/brain/references/evidence_registry.json`。
+- `workflow_registry.json` 是兼容入口；完整 workflow contract 位于 `daily_research/brain/workflows/`。
+- full codebase review 后，更新 `daily_research/brain/references/full_codebase_review_20260515.md` 或明确 successor。
+- mainline review、reroute、deprecation 或 promotion analysis 后，更新 `daily_research/brain/references/mainline_review_current.md`。
+- 新增或 materially change reference review docs 后，重建 evidence registry，并运行 doc/brain guards 后再声明写回完成。

@@ -10,6 +10,7 @@
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
 - PowerShell 中文写入不作为默认文档编辑方式；中文正文优先用 `apply_patch` 或显式 UTF-8 工具链。
+- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、dataset id、workflow id、tag、模型名不强行翻译。
 
 ## 项目地图
 - brain 真源：`daily_research/brain/`。
