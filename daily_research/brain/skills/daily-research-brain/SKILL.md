@@ -15,6 +15,17 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_wor
 
 Use the capsule as the current project operating context. It provides boot order, state summary, hard rules, forbidden actions, related references, assumptions, and validation commands.
 
+## API fallback
+
+When this skill is unavailable, such as in an API-only session, use the brain-native workflow fallback instead of relying on plugin injection:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<user task>" --workflow auto --json
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow workflow-guide --workflow <selected_workflow> --json
+```
+
+The fallback returns the selected workflow, checklist, stop conditions, validation commands, and writeback routes. This skill remains a thin procedural entrypoint and must not copy external plugin text or long project histories.
+
 ## Operating Rules
 
 - Keep project truth in `daily_research/brain`; keep this skill procedural.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 37,
+  "record_count": 39,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -272,6 +272,42 @@
       "dataset_ids": [
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
+    },
+    {
+      "id": "api_agent_bootstrap_prompt_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/api_agent_bootstrap_prompt_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "brain_native_superpowers_contract_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_native_superpowers_contract_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain-native workflow migration contract / API fallback / no plugin dependency`.; Purpose: preserve useful Superpowers-style workflow discipline when API sessions cannot load the plugin.; This is a brain operating-system enhancement, not a research mainline switch, strategy change, or active execution change.; `daily_research/output/active_execution_strategy.json` must remain unchanged.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `capsule --workflow auto` as the API bootstrap entrypoint.",
+        "Add new project-native workflows only when they have explicit checklist, stop conditions, completion criteria, and guard commands.",
+        "Keep workflow docs compact; put long evidence and dated contracts in `daily_research/brain/references/`."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "data_lake_universal_repair_contract_20260517",

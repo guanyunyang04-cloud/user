@@ -14,6 +14,13 @@ The brain remains the source of project facts, evidence, state, and governance. 
 - If the task involves a specific study, protocol, dataset, or r-number, use explicit tags or evidence references rather than loose `latest_*` pointers.
 - Keep work on `main` unless the user explicitly changes the branch rule.
 
+## Brain-Native Workflow Fallback
+- In API-only or no-plugin sessions, start with:
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
+- Treat `selected_workflow`, `workflow_guide`, `required_checklist`, and `stop_conditions` as the task-local operating guide.
+- Use `workflow-guide --workflow <workflow_id> --json` to inspect a workflow without changing tracked files.
+- This fallback approximates plugin workflow discipline; it does not replace brain truth or grant active execution authority.
+
 ## Action Discipline
 - Before major actions, separate facts, inferences, assumptions, and action boundaries.
 - During work, prefer existing brain workflow tools over ad hoc interpretation.

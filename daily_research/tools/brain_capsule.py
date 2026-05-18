@@ -7,10 +7,12 @@ from typing import Any
 from daily_research.tools.brain_evidence_registry import query_evidence_registry
 from daily_research.tools.brain_platform import (
     WORKSPACE_ROOT,
+    build_workflow_guide,
     build_workflow_state,
     load_workflow_registry,
     read_text,
     resolve_bootstrap,
+    select_workflow_for_task,
 )
 from daily_research.tools.brain_rules import run_brain_rules
 
@@ -76,8 +78,11 @@ def _task_terms(task: str) -> list[str]:
 def build_task_capsule(*, child: str = "daily_research", task: str = "", workflow: str = "brain_handoff", study_tag: str = "") -> dict[str, Any]:
     bootstrap = resolve_bootstrap(child).to_dict()
     registry = load_workflow_registry()
-    workflow_id = workflow if workflow in registry else "brain_handoff"
+    selection = select_workflow_for_task(task) if workflow == "auto" else {"selected_workflow": workflow, "reason": "explicit workflow requested"}
+    selected_workflow = str(selection.get("selected_workflow", "") or "brain_handoff")
+    workflow_id = selected_workflow if selected_workflow in registry else "brain_handoff"
     workflow_state = build_workflow_state(workflow_id, study_tag=study_tag or None).to_dict()
+    workflow_guide = build_workflow_guide(workflow_id)
     git = _git_status()
     rules = run_brain_rules(has_explicit_study_tag=bool(study_tag))
     terms = _task_terms(task)
@@ -107,6 +112,11 @@ def build_task_capsule(*, child: str = "daily_research", task: str = "", workflo
         "child": child,
         "task": task,
         "workflow": workflow_id,
+        "selected_workflow": workflow_id,
+        "workflow_selection": selection,
+        "workflow_guide": workflow_guide,
+        "required_checklist": workflow_guide.get("checklist", []),
+        "stop_conditions": workflow_guide.get("stop_conditions", []),
         "study_tag": study_tag,
         "git": git,
         "active_artifact_guard": {

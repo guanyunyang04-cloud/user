@@ -760,6 +760,54 @@ def build_workflow_state(workflow_id: str, *, study_tag: str | None = None) -> W
     )
 
 
+def build_workflow_guide(workflow_id: str) -> dict[str, Any]:
+    registry = load_workflow_registry()
+    normalized = "continuous_policy_result_review" if workflow_id == "continuous_policy" else str(workflow_id or "").strip()
+    if normalized not in registry:
+        raise KeyError(f"Unknown workflow: {workflow_id}")
+    entry = dict(registry[normalized])
+    return {
+        "workflow_id": normalized,
+        "description": str(entry.get("description", "") or ""),
+        "preflight": list(entry.get("preflight", []) or []),
+        "checklist": list(entry.get("checklist", []) or []),
+        "allowed_commands": list(entry.get("allowed_commands", []) or []),
+        "forbidden_actions": list(entry.get("forbidden_actions", []) or []),
+        "stop_conditions": list(entry.get("stop_conditions", []) or []),
+        "completion": list(entry.get("completion", []) or []),
+        "validation_commands": list(entry.get("validation_commands", []) or []),
+        "writeback_routes": dict(entry.get("writeback_routes", {}) or {}),
+    }
+
+
+def select_workflow_for_task(task: str) -> dict[str, Any]:
+    text = str(task or "").strip()
+    lower = text.lower()
+
+    def has_any(*needles: str) -> bool:
+        return any(needle in lower or needle in text for needle in needles)
+
+    if has_any("报错", "失败", "bug", "error", "oom", "cuda", "异常", "中断", "debug", "修复"):
+        selected = "systematic_debugging"
+        reason = "task mentions a failure, runtime error, debugging, or repair signal"
+    elif has_any("是否全部完成", "完成了吗", "是否完成", "是否通过", "检查一下", "verify", "verification", "完成没"):
+        selected = "verification_before_completion"
+        reason = "task asks to verify completion or passing status"
+    elif has_any("更新脑区", "写回", "evidence", "registry", "主线审阅", "审阅文档", "入库"):
+        selected = "brain_writeback_verified"
+        reason = "task asks for brain writeback, evidence registry, or mainline review updates"
+    elif has_any("继续实施", "实施计划", "implement", "execute", "执行计划", "please implement"):
+        selected = "executing_plan"
+        reason = "task asks to implement or continue an explicit plan"
+    elif has_any("详细计划", "计划", "方案", "设计", "深入思考", "plan", "design"):
+        selected = "writing_plan"
+        reason = "task asks for a detailed plan, design, or implementation specification"
+    else:
+        selected = "brain_handoff"
+        reason = "no stronger task intent matched; default to brain handoff"
+    return {"task": text, "selected_workflow": selected, "reason": reason}
+
+
 def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) -> dict[str, Any]:
     registry = load_workflow_registry()
     routes = dict(registry["brain_writeback"].get("writeback_routes", {}) or {})
@@ -793,6 +841,11 @@ def write_workflow_output(kind: str, payload: dict[str, Any]) -> str:
 
 
 def print_json(payload: dict[str, Any]) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

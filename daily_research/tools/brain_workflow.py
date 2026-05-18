@@ -9,11 +9,13 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.tools.brain_platform import (
+    build_workflow_guide,
     build_workflow_state,
     build_writeback_plan,
     check_brain_health,
     print_json,
     resolve_bootstrap,
+    select_workflow_for_task,
     write_workflow_output,
 )
 from daily_research.tools.brain_capsule import build_task_capsule
@@ -75,6 +77,16 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--json", action="store_true")
     query.add_argument("--write-output", action="store_true")
 
+    guide = sub.add_parser("workflow-guide", help="Return a workflow checklist and guard guide.")
+    guide.add_argument("--workflow", required=True)
+    guide.add_argument("--json", action="store_true")
+    guide.add_argument("--write-output", action="store_true")
+
+    selector = sub.add_parser("select-workflow", help="Select a brain workflow from task intent.")
+    selector.add_argument("--task", required=True)
+    selector.add_argument("--json", action="store_true")
+    selector.add_argument("--write-output", action="store_true")
+
     writeback = sub.add_parser("writeback-plan", help="Generate a routed brain writeback plan.")
     writeback.add_argument("--source", default="latest")
     writeback.add_argument("--json", action="store_true")
@@ -111,6 +123,10 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "evidence_index", build_evidence_registry()
     if args.command == "query":
         return "query", query_evidence_registry(str(getattr(args, "q", "") or ""))
+    if args.command == "workflow-guide":
+        return "workflow_guide", build_workflow_guide(str(getattr(args, "workflow", "") or ""))
+    if args.command == "select-workflow":
+        return "select_workflow", select_workflow_for_task(str(getattr(args, "task", "") or ""))
     if args.command == "writeback-plan":
         return "writeback_plan", build_writeback_plan(args.source, apply_brain_writeback=args.apply_brain_writeback)
     raise ValueError(f"Unsupported command: {args.command}")

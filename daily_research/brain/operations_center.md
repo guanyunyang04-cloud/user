@@ -22,6 +22,10 @@
 ## 高频 Brain 命令
 - task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
+- API/no-plugin auto workflow capsule：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
+- workflow guide：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow workflow-guide --workflow <workflow_id> --json`
 - explicit evidence status：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <study_tag> --json`
 - evidence registry rebuild：

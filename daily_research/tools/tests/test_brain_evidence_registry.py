@@ -37,6 +37,14 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
         self.assertIn("data_lake_universal_repair_contract_20260517", ids)
 
+    def test_registry_indexes_brain_native_superpowers_contract(self) -> None:
+        registry = build_evidence_registry()
+        matches = [record for record in registry["records"] if record["id"] == "brain_native_superpowers_contract_20260518"]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "brain")
+        self.assertIn("brain", matches[0]["tags"])
+
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
         matches = [record for record in registry["records"] if record["id"] == "r65"]
