@@ -22,7 +22,16 @@ from daily_research.path_policy import (
     ALPHA_PATH20_SEQUENCE_POLICY_VERSION,
 )
 from daily_research.path_policy.adapter import build_path_policy_frame
-from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset, save_forecast_sequence_dataset
+from daily_research.path_policy.forecast_dataset import (
+    build_forecast_memmap_dataset,
+    build_forecast_sequence_dataset,
+    save_forecast_sequence_dataset,
+)
+from daily_research.path_policy.forecast_features import (
+    DEFAULT_FORECAST_FEATURE_PROFILE,
+    DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
+    FORECAST_FEATURE_PROFILES,
+)
 from daily_research.path_policy.forecast_training import FORECAST_MODEL_FAMILIES, train_forecast_models
 from daily_research.path_policy.labels import PATH20_HORIZON, build_path20_dataset_frame
 from daily_research.path_policy.models import (
@@ -554,18 +563,40 @@ def _run_forecast_walkforward_study(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     families = _forecast_model_families(getattr(args, "forecast_model_families", ""))
-    dataset = build_forecast_sequence_dataset(
-        prepared,
-        train_start_year=int(args.forecast_train_start_year),
-        train_end_year=int(args.forecast_train_end_year),
-        validation_year=int(args.forecast_validation_year),
-        test_year=int(args.forecast_test_year),
-        lookback_days=int(args.forecast_lookback_days),
-        horizon=PATH20_HORIZON,
-        execution_mode=args.execution_mode,
-        max_samples_per_role=int(args.forecast_max_samples_per_role),
-    )
-    dataset_manifest = save_forecast_sequence_dataset(dataset, study_root)
+    dataset_mode = str(getattr(args, "forecast_dataset_mode", "eager") or "eager").strip().lower()
+    if dataset_mode == "memmap":
+        dataset = build_forecast_memmap_dataset(
+            prepared,
+            root=study_root,
+            train_start_year=int(args.forecast_train_start_year),
+            train_end_year=int(args.forecast_train_end_year),
+            validation_year=int(args.forecast_validation_year),
+            test_year=int(args.forecast_test_year),
+            lookback_days=int(args.forecast_lookback_days),
+            horizon=PATH20_HORIZON,
+            execution_mode=args.execution_mode,
+            feature_profile=str(args.forecast_feature_profile),
+            max_feature_columns=int(args.forecast_max_feature_columns),
+            max_samples_per_role=int(args.forecast_max_samples_per_role),
+            min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
+        )
+        dataset_manifest = dict(dataset.manifest)
+        dataset_manifest["manifest_json"] = str((study_root / "forecast_dataset_manifest.json").resolve())
+    else:
+        dataset = build_forecast_sequence_dataset(
+            prepared,
+            train_start_year=int(args.forecast_train_start_year),
+            train_end_year=int(args.forecast_train_end_year),
+            validation_year=int(args.forecast_validation_year),
+            test_year=int(args.forecast_test_year),
+            lookback_days=int(args.forecast_lookback_days),
+            horizon=PATH20_HORIZON,
+            execution_mode=args.execution_mode,
+            feature_profile=str(args.forecast_feature_profile),
+            max_feature_columns=int(args.forecast_max_feature_columns),
+            max_samples_per_role=int(args.forecast_max_samples_per_role),
+        )
+        dataset_manifest = save_forecast_sequence_dataset(dataset, study_root)
     training_summary: dict[str, Any] = {"status": "not_run"}
     if args.stage in {"forecast-train", "forecast-walkforward-study"}:
         training_summary = train_forecast_models(
@@ -591,6 +622,9 @@ def _run_forecast_walkforward_study(
             grad_accum_steps=int(args.forecast_grad_accum_steps),
             weight_decay=float(args.forecast_weight_decay),
             write_all_predictions=bool(args.forecast_write_all_predictions),
+            selection_profile=str(args.forecast_selection_profile),
+            dataloader_num_workers=int(args.forecast_dataloader_num_workers),
+            prefetch_factor=int(args.forecast_prefetch_factor),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -619,11 +653,12 @@ def _run_forecast_walkforward_study(
         "facts": [
             "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer.",
             "Stage 1 is strict supervised forecasting: past stock state sequence to future 20d excess-return path.",
+            "Stage 1 now evaluates 1d/3d/5d/10d/20d horizons plus 20d upside opportunity.",
             "Validation evidence is interpreted before test evidence.",
             "Model outputs are trained with target_scale=100 and persisted predictions are restored to return units.",
         ],
         "inferences": [
-            "Positive validation rank_ic_20d and top_bottom_spread_20d indicate the forecast task is worth continuing.",
+            "Positive validation multi-horizon rank/spread metrics indicate whether the forecast task is trend-led, short-burst-led, or failed.",
             "This stage does not prove allocator, oracle, replay, or live strategy quality.",
         ],
         "assumptions": [
@@ -2573,6 +2608,7 @@ def _prepare_for_window(args: argparse.Namespace, *, start_date: str, end_date: 
         lake_min_trading_days=int(args.lake_min_trading_days),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
+        require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
         progress_desc=f"alpha_path20 sequence prepare {tag}",
     )
 
@@ -3161,7 +3197,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-grad-accum-steps", type=int, default=1)
     parser.add_argument("--forecast-weight-decay", type=float, default=1.0e-4)
     parser.add_argument("--forecast-write-all-predictions", action="store_true")
+    parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
+    parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
+    parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
+    parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
+    parser.add_argument("--forecast-min-lookback-valid-ratio", type=float, default=0.80)
+    parser.add_argument("--forecast-dataloader-num-workers", type=int, default=0)
+    parser.add_argument("--forecast-prefetch-factor", type=int, default=2)
     parser.add_argument("--sequence-length", type=int, default=20)
     parser.add_argument("--reward-profile", default=DEFAULT_RL_REWARD_PROFILE)
     parser.add_argument("--model-family", default="sequence_gru", choices=("sequence_gru", "decision_transformer", "decision_transformer_v2"))
@@ -3254,6 +3297,16 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-seeds must contain non-negative integer seeds.")
         if int(getattr(args, "forecast_max_samples_per_role", 0)) < 0:
             parser.error("--forecast-max-samples-per-role must be >= 0.")
+        if int(getattr(args, "forecast_max_feature_columns", DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)) <= 0:
+            parser.error("--forecast-max-feature-columns must be positive.")
+        if not (0.0 <= float(getattr(args, "forecast_min_lookback_valid_ratio", 0.80)) <= 1.0):
+            parser.error("--forecast-min-lookback-valid-ratio must be in [0, 1].")
+        if int(getattr(args, "forecast_dataloader_num_workers", 0)) < 0:
+            parser.error("--forecast-dataloader-num-workers must be >= 0.")
+        if int(getattr(args, "forecast_prefetch_factor", 2)) <= 0:
+            parser.error("--forecast-prefetch-factor must be positive.")
+        if int(getattr(args, "max_universe_size", 80)) == 0 and str(getattr(args, "forecast_dataset_mode", "eager")) == "eager":
+            parser.error("full_universe_requires_memmap_dataset_mode: use --forecast-dataset-mode memmap when --max-universe-size 0.")
         if not (
             int(args.forecast_train_start_year)
             <= int(args.forecast_train_end_year)
@@ -3485,6 +3538,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         lake_min_trading_days=int(args.lake_min_trading_days),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
+        require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
         progress_desc=f"alpha_path20 prepare {tag}",
     )
     if args.stage in FORECAST_MAINLINE_STAGES:

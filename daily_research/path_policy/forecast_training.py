@@ -9,15 +9,16 @@ import pandas as pd
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
 from daily_research.continuous_policy.runtime import write_json
-from daily_research.path_policy.forecast_dataset import ForecastSequenceDataset
+from daily_research.path_policy.forecast_dataset import ForecastMemmapDataset, ForecastSequenceDataset
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
+    PATH20_FORECAST_AUX_DIM,
     Path20ForecasterMLP,
     pairwise_rank_loss,
     pinball_loss,
@@ -25,6 +26,69 @@ from daily_research.path_policy.models import (
 
 
 FORECAST_MODEL_FAMILIES = ("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer")
+FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst")
+FORECAST_RISK_AUX_NAMES = ("downside_floor_20d", "worst_1d_20d", "upside_20d")
+FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
+FORECAST_PROFILE_HORIZON_WEIGHTS: dict[str, dict[int, float]] = {
+    "multiscale": {1: 0.05, 3: 0.15, 5: 0.20, 10: 0.25, 20: 0.25},
+    "trend20": {10: 0.35, 20: 0.65},
+    "short_burst": {1: 0.05, 3: 0.35, 5: 0.30, 10: 0.15, 20: 0.05},
+}
+
+
+class _EagerTorchDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset: ForecastSequenceDataset, indices: np.ndarray, *, target_scale: float) -> None:
+        self.dataset = dataset
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.target_scale = float(target_scale)
+
+    def __len__(self) -> int:
+        return int(len(self.indices))
+
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        row_idx = int(self.indices[int(item)])
+        y_risk = np.asarray(
+            [
+                self.dataset.y_max_drawdown_20d[row_idx],
+                self.dataset.y_worst_1d_20d[row_idx],
+                self.dataset.y_upside_20d[row_idx],
+            ],
+            dtype=np.float32,
+        )
+        return (
+            torch.as_tensor(self.dataset.x[row_idx], dtype=torch.float32),
+            torch.as_tensor(self.dataset.y_daily_excess[row_idx] * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(self.dataset.y_cum_excess[row_idx] * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(y_risk * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(row_idx, dtype=torch.long),
+        )
+
+
+class _ForecastDatasetView:
+    def __init__(self, dataset: ForecastSequenceDataset | ForecastMemmapDataset) -> None:
+        self.dataset = dataset
+        self.manifest = dict(dataset.manifest)
+        self.normalization_manifest = dict(dataset.normalization_manifest)
+        self.feature_columns = list(dataset.feature_columns)
+        self.dataset_mode = str(self.manifest.get("dataset_mode", "eager"))
+        if isinstance(dataset, ForecastMemmapDataset):
+            self.row_count = int(dataset.row_count)
+            self.input_dim = int(dataset.input_dim)
+            self.lookback_days = int(dataset.lookback_days)
+        else:
+            self.row_count = int(dataset.x.shape[0])
+            self.input_dim = int(dataset.x.shape[-1]) if dataset.x.ndim == 3 else 0
+            self.lookback_days = int(dataset.x.shape[1]) if dataset.x.ndim == 3 else int(self.manifest.get("lookback_days", 0))
+
+    def role_indices(self, role: str) -> np.ndarray:
+        if isinstance(self.dataset, ForecastMemmapDataset):
+            return self.dataset.role_indices(role)
+        return np.flatnonzero(self.dataset.role == role)
+
+    def torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
+        if isinstance(self.dataset, ForecastMemmapDataset):
+            return self.dataset.torch_dataset(indices, target_scale=target_scale)
+        return _EagerTorchDataset(self.dataset, indices, target_scale=target_scale)
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -121,19 +185,39 @@ def _write_frame(path: Path, frame: pd.DataFrame) -> str:
     return str(path.resolve())
 
 
+def _data_loader_kwargs(*, pin_memory: bool, dataloader_num_workers: int, prefetch_factor: int) -> dict[str, Any]:
+    workers = max(int(dataloader_num_workers), 0)
+    kwargs: dict[str, Any] = {"num_workers": workers, "pin_memory": bool(pin_memory)}
+    if workers > 0:
+        kwargs["prefetch_factor"] = max(int(prefetch_factor), 1)
+    return kwargs
+
+
 def _forecast_loss(
     prediction: dict[str, torch.Tensor],
     y_daily_scaled: torch.Tensor,
     y_cum_scaled: torch.Tensor,
     y_risk_scaled: torch.Tensor,
 ) -> torch.Tensor:
-    loss = F.huber_loss(prediction["mu"], y_daily_scaled)
+    daily_weights = torch.ones((y_daily_scaled.shape[1],), device=y_daily_scaled.device, dtype=y_daily_scaled.dtype)
+    daily_weights[:3] = 1.15
+    daily_weights[3:5] = 1.05
+    daily_loss = F.huber_loss(prediction["mu"], y_daily_scaled, reduction="none")
+    loss = (daily_loss * daily_weights.reshape(1, -1)).mean()
     loss = loss + 0.20 * pinball_loss(prediction["q10"], y_daily_scaled, 0.10)
     loss = loss + 0.20 * pinball_loss(prediction["q50"], y_daily_scaled, 0.50)
     loss = loss + 0.20 * pinball_loss(prediction["q90"], y_daily_scaled, 0.90)
-    loss = loss + 0.25 * F.huber_loss(prediction["aux"][:, :3], y_cum_scaled)
-    loss = loss + 0.05 * F.huber_loss(prediction["aux"][:, 3:6], y_risk_scaled)
-    loss = loss + 0.02 * pairwise_rank_loss(prediction["mu"].sum(dim=1), y_daily_scaled.sum(dim=1))
+    cum_count = len(PATH20_CUMULATIVE_HORIZONS)
+    loss = loss + 0.25 * F.huber_loss(prediction["aux"][:, :cum_count], y_cum_scaled)
+    loss = loss + 0.05 * F.huber_loss(prediction["aux"][:, cum_count : cum_count + 3], y_risk_scaled)
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0))
+        if weight <= 0.0:
+            continue
+        score = prediction["mu"][:, : int(horizon)].sum(dim=1)
+        target = y_cum_scaled[:, pos]
+        loss = loss + weight * pairwise_rank_loss(score, target)
+    loss = loss + 0.005 * pairwise_rank_loss(prediction["aux"][:, cum_count + 2], y_risk_scaled[:, 2])
     return loss
 
 
@@ -174,17 +258,25 @@ def _predict_all(
                 pred = model(batch)
             for key in chunks:
                 chunks[key].append(pred[key].detach().cpu().numpy())
-    return {key: np.concatenate(values, axis=0) if values else np.empty((0, PATH20_HORIZON)) for key, values in chunks.items()}
+    empty_shapes = {
+        "mu": (0, PATH20_HORIZON),
+        "q10": (0, PATH20_HORIZON),
+        "q50": (0, PATH20_HORIZON),
+        "q90": (0, PATH20_HORIZON),
+        "aux": (0, PATH20_FORECAST_AUX_DIM),
+    }
+    return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
 
 
 def _predict_indices(
     model: nn.Module,
-    x: torch.Tensor,
+    dataset_view_or_x: _ForecastDatasetView | torch.Tensor,
     indices: np.ndarray,
     *,
     batch_size: int,
     device: torch.device,
     amp_enabled: bool,
+    target_scale: float = 100.0,
 ) -> dict[str, np.ndarray]:
     if len(indices) == 0:
         return {
@@ -192,8 +284,33 @@ def _predict_indices(
             "q10": np.empty((0, PATH20_HORIZON)),
             "q50": np.empty((0, PATH20_HORIZON)),
             "q90": np.empty((0, PATH20_HORIZON)),
-            "aux": np.empty((0, 6)),
+            "aux": np.empty((0, PATH20_FORECAST_AUX_DIM)),
         }
+    if isinstance(dataset_view_or_x, _ForecastDatasetView):
+        model.eval()
+        chunks: dict[str, list[np.ndarray]] = {"mu": [], "q10": [], "q50": [], "q90": [], "aux": []}
+        loader = DataLoader(
+            dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+            batch_size=max(int(batch_size), 1),
+            shuffle=False,
+            pin_memory=device.type == "cuda",
+        )
+        with torch.no_grad():
+            for batch_x, _, _, _, _ in loader:
+                batch = batch_x.to(device, non_blocking=device.type == "cuda")
+                with _autocast_context(device, amp_enabled):
+                    pred = model(batch)
+                for key in chunks:
+                    chunks[key].append(pred[key].detach().cpu().numpy())
+        empty_shapes = {
+            "mu": (0, PATH20_HORIZON),
+            "q10": (0, PATH20_HORIZON),
+            "q50": (0, PATH20_HORIZON),
+            "q90": (0, PATH20_HORIZON),
+            "aux": (0, PATH20_FORECAST_AUX_DIM),
+        }
+        return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
+    x = dataset_view_or_x
     return _predict_all(
         model,
         x[torch.tensor(indices, dtype=torch.long)],
@@ -208,8 +325,8 @@ def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str)
     for _, group in frame.groupby("date", sort=True):
         if len(group) < 2:
             continue
-        score = pd.to_numeric(group[score_column], errors="coerce")
-        target = pd.to_numeric(group[target_column], errors="coerce")
+        score = pd.to_numeric(group[score_column], errors="coerce").astype("float64")
+        target = pd.to_numeric(group[target_column], errors="coerce").astype("float64")
         valid = score.notna() & target.notna()
         if int(valid.sum()) < 2:
             continue
@@ -223,8 +340,8 @@ def _top_bottom_spread_by_date(frame: pd.DataFrame, score_column: str, target_co
     values: list[float] = []
     for _, group in frame.groupby("date", sort=True):
         work = group[[score_column, target_column]].copy()
-        work[score_column] = pd.to_numeric(work[score_column], errors="coerce")
-        work[target_column] = pd.to_numeric(work[target_column], errors="coerce")
+        work[score_column] = pd.to_numeric(work[score_column], errors="coerce").astype("float64")
+        work[target_column] = pd.to_numeric(work[target_column], errors="coerce").astype("float64")
         work = work.dropna()
         if len(work) < 2:
             continue
@@ -256,31 +373,35 @@ def _prediction_frame(
     aux = predictions["aux"][idx] / scale
     y_daily = dataset.y_daily_excess[idx]
     y_cum = dataset.y_cum_excess[idx]
-    frame = pd.DataFrame(
-        {
-            "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
-            "stock": dataset.stock[idx].astype(str),
-            "role": dataset.role[idx].astype(str),
-            "model_family": str(family),
-            "future_rank_20d": dataset.y_rank_20d[idx],
-            "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
-            "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
-            "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
-        }
-    )
+    columns: dict[str, Any] = {
+        "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
+        "stock": dataset.stock[idx].astype(str),
+        "role": dataset.role[idx].astype(str),
+        "model_family": str(family),
+        "future_rank_20d": dataset.y_rank_20d[idx],
+        "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
+        "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
+        "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
+    }
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
-        frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
-        frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+        columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+        columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+    columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
     for step in range(1, PATH20_HORIZON + 1):
         offset = step - 1
-        frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
-        frame[f"target_excess_{step}d"] = y_daily[:, offset]
-        frame[f"pred_mu_{step}d"] = mu[:, offset]
-        frame[f"pred_q10_{step}d"] = q10[:, offset]
-        frame[f"pred_q50_{step}d"] = q50[:, offset]
-        frame[f"pred_q90_{step}d"] = q90[:, offset]
-    return frame
+        columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+        columns[f"target_excess_{step}d"] = y_daily[:, offset]
+        columns[f"pred_mu_{step}d"] = mu[:, offset]
+        columns[f"pred_q10_{step}d"] = q10[:, offset]
+        columns[f"pred_q50_{step}d"] = q50[:, offset]
+        columns[f"pred_q90_{step}d"] = q90[:, offset]
+    return pd.DataFrame(columns)
 
 
 def _prediction_frame_for_indices(
@@ -302,31 +423,97 @@ def _prediction_frame_for_indices(
     aux = predictions["aux"] / scale
     y_daily = dataset.y_daily_excess[idx]
     y_cum = dataset.y_cum_excess[idx]
-    frame = pd.DataFrame(
-        {
-            "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
-            "stock": dataset.stock[idx].astype(str),
-            "role": dataset.role[idx].astype(str),
+    columns: dict[str, Any] = {
+        "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
+        "stock": dataset.stock[idx].astype(str),
+        "role": dataset.role[idx].astype(str),
+        "model_family": str(family),
+        "future_rank_20d": dataset.y_rank_20d[idx],
+        "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
+        "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
+        "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
+    }
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+        columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+        columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+    columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+    columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+    columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
+    for step in range(1, PATH20_HORIZON + 1):
+        offset = step - 1
+        columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+        columns[f"target_excess_{step}d"] = y_daily[:, offset]
+        columns[f"pred_mu_{step}d"] = mu[:, offset]
+        columns[f"pred_q10_{step}d"] = q10[:, offset]
+        columns[f"pred_q50_{step}d"] = q50[:, offset]
+        columns[f"pred_q90_{step}d"] = q90[:, offset]
+    return pd.DataFrame(columns)
+
+
+def _prediction_frame_for_dataset_indices(
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    *,
+    indices: np.ndarray,
+    predictions: dict[str, np.ndarray],
+    family: str,
+    target_scale: float,
+) -> pd.DataFrame:
+    if isinstance(dataset, ForecastMemmapDataset):
+        if len(indices) == 0:
+            return pd.DataFrame()
+        scale = float(target_scale)
+        idx = np.asarray(indices, dtype=int)
+        rows = dataset.sample_index.iloc[idx].reset_index(drop=True)
+        mu = predictions["mu"] / scale
+        q10 = predictions["q10"] / scale
+        q50 = predictions["q50"] / scale
+        q90 = predictions["q90"] / scale
+        aux = predictions["aux"] / scale
+        y_daily = dataset.y_daily_excess[idx]
+        y_cum = dataset.y_cum_excess[idx]
+        columns: dict[str, Any] = {
+            "date": rows["date"].astype(str).tolist(),
+            "stock": rows["stock"].astype(str).to_numpy(),
+            "role": rows["role"].astype(str).to_numpy(),
             "model_family": str(family),
+            "stock_seen_in_train": rows.get("stock_seen_in_train", pd.Series(False, index=rows.index)).astype(bool).to_numpy(),
+            "history_bucket": rows.get("history_bucket", pd.Series("", index=rows.index)).astype(str).to_numpy(),
+            "history_valid_ratio": pd.to_numeric(rows.get("history_valid_ratio", pd.Series(np.nan, index=rows.index)), errors="coerce").to_numpy(),
             "future_rank_20d": dataset.y_rank_20d[idx],
             "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
             "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
             "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
         }
+        for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+            columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+        for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+            columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+            columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+            columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+        columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+        columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+        columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
+        for step in range(1, PATH20_HORIZON + 1):
+            offset = step - 1
+            columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+            columns[f"target_excess_{step}d"] = y_daily[:, offset]
+            columns[f"pred_mu_{step}d"] = mu[:, offset]
+            columns[f"pred_q10_{step}d"] = q10[:, offset]
+            columns[f"pred_q50_{step}d"] = q50[:, offset]
+            columns[f"pred_q90_{step}d"] = q90[:, offset]
+        return pd.DataFrame(columns)
+    return _prediction_frame_for_indices(
+        dataset,
+        indices=indices,
+        predictions=predictions,
+        family=family,
+        target_scale=target_scale,
     )
-    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
-        frame[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
-        frame[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
-        frame[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
-    for step in range(1, PATH20_HORIZON + 1):
-        offset = step - 1
-        frame[f"future_excess_return_{step}d"] = y_daily[:, offset]
-        frame[f"target_excess_{step}d"] = y_daily[:, offset]
-        frame[f"pred_mu_{step}d"] = mu[:, offset]
-        frame[f"pred_q10_{step}d"] = q10[:, offset]
-        frame[f"pred_q50_{step}d"] = q50[:, offset]
-        frame[f"pred_q90_{step}d"] = q90[:, offset]
-    return frame
 
 
 def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
@@ -344,25 +531,130 @@ def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
             q10_coverages.append(float((target.loc[valid_q10] >= q10.loc[valid_q10]).mean()))
         if bool(valid_q90.any()):
             q90_coverages.append(float((target.loc[valid_q90] <= q90.loc[valid_q90]).mean()))
-    pred20 = pd.to_numeric(frame["pred_cum_mu_20d"], errors="coerce")
-    target20 = pd.to_numeric(frame["future_cum_excess_return_20d"], errors="coerce")
-    valid20 = pred20.notna() & target20.notna()
-    return {
+    metrics: dict[str, Any] = {
         "status": "completed",
         "row_count": int(len(frame)),
         "date_count": int(frame["date"].nunique()),
-        "rank_ic_20d": _rank_ic_by_date(frame, "pred_cum_mu_20d", "future_cum_excess_return_20d"),
-        "top_bottom_spread_20d": _top_bottom_spread_by_date(
-            frame,
-            "pred_cum_mu_20d",
-            "future_cum_excess_return_20d",
-        ),
         "q10_coverage_mean": float(np.mean(q10_coverages)) if q10_coverages else 0.0,
         "q90_coverage_mean": float(np.mean(q90_coverages)) if q90_coverages else 0.0,
-        "direction_accuracy_20d": float((np.sign(pred20.loc[valid20]) == np.sign(target20.loc[valid20])).mean())
-        if bool(valid20.any())
-        else 0.0,
     }
+    for horizon in PATH20_CUMULATIVE_HORIZONS:
+        pred = pd.to_numeric(frame[f"pred_cum_mu_{horizon}d"], errors="coerce")
+        target = pd.to_numeric(frame[f"future_cum_excess_return_{horizon}d"], errors="coerce")
+        valid = pred.notna() & target.notna()
+        metrics[f"rank_ic_{horizon}d"] = _rank_ic_by_date(
+            frame,
+            f"pred_cum_mu_{horizon}d",
+            f"future_cum_excess_return_{horizon}d",
+        )
+        metrics[f"top_bottom_spread_{horizon}d"] = _top_bottom_spread_by_date(
+            frame,
+            f"pred_cum_mu_{horizon}d",
+            f"future_cum_excess_return_{horizon}d",
+        )
+        metrics[f"direction_accuracy_{horizon}d"] = (
+            float((np.sign(pred.loc[valid]) == np.sign(target.loc[valid])).mean()) if bool(valid.any()) else 0.0
+        )
+    if {"pred_aux_upside_20d", "future_path_upside_capture_20d"}.issubset(frame.columns):
+        metrics["rank_ic_upside_20d"] = _rank_ic_by_date(
+            frame,
+            "pred_aux_upside_20d",
+            "future_path_upside_capture_20d",
+        )
+        metrics["top_bottom_spread_upside_20d"] = _top_bottom_spread_by_date(
+            frame,
+            "pred_aux_upside_20d",
+            "future_path_upside_capture_20d",
+        )
+    else:
+        metrics["rank_ic_upside_20d"] = 0.0
+        metrics["top_bottom_spread_upside_20d"] = 0.0
+    metrics["selected_signal_profile"] = forecast_signal_profile(metrics)
+    return metrics
+
+
+def stratified_forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
+    if frame.empty:
+        return {}
+    out: dict[str, Any] = {}
+    if "stock_seen_in_train" in frame.columns:
+        for value, group in frame.groupby("stock_seen_in_train", dropna=False):
+            key = f"seen_in_train={str(bool(value)).lower()}" if pd.notna(value) else "seen_in_train=unknown"
+            out[key] = forecast_prediction_metrics(group)
+    if "history_bucket" in frame.columns:
+        for value, group in frame.groupby("history_bucket", dropna=False):
+            key = f"history_bucket={str(value)}"
+            out[key] = forecast_prediction_metrics(group)
+    return out
+
+
+def _coverage_pass(metrics: dict[str, Any], coverage_range: tuple[float, float]) -> bool:
+    q10 = float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
+    q90 = float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
+    low, high = coverage_range
+    return bool(low <= q10 <= high and low <= q90 <= high)
+
+
+def _horizon_gate(metrics: dict[str, Any], horizon: int) -> bool:
+    return bool(
+        float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0) > 0.0
+        and float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0) > 0.0
+    )
+
+
+def _short_burst_gate(metrics: dict[str, Any]) -> bool:
+    gates = [
+        _horizon_gate(metrics, 3),
+        _horizon_gate(metrics, 5),
+        bool(
+            float(metrics.get("rank_ic_upside_20d", 0.0) or 0.0) > 0.0
+            and float(metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0) > 0.0
+        ),
+    ]
+    return sum(1 for item in gates if item) >= 2
+
+
+def forecast_signal_profile(metrics: dict[str, Any]) -> str:
+    if metrics.get("status") != "completed":
+        return "failed"
+    trend = _horizon_gate(metrics, 20)
+    short_burst = _short_burst_gate(metrics)
+    if trend and short_burst:
+        return "multiscale"
+    if trend:
+        return "trend_20d"
+    if short_burst:
+        return "short_burst"
+    return "failed"
+
+
+def _profile_pass(metrics: dict[str, Any], selection_profile: str) -> bool:
+    profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "trend20":
+        return _horizon_gate(metrics, 20)
+    if profile == "short_burst":
+        return _short_burst_gate(metrics)
+    return _horizon_gate(metrics, 20) or _short_burst_gate(metrics)
+
+
+def _profile_score(metrics: dict[str, Any], validation_loss: float, coverage_range: tuple[float, float], selection_profile: str) -> float:
+    if metrics.get("status") != "completed":
+        return -float(validation_loss)
+    profile = str(selection_profile or "multiscale").strip().lower()
+    weights = FORECAST_PROFILE_HORIZON_WEIGHTS.get(profile, FORECAST_PROFILE_HORIZON_WEIGHTS["multiscale"])
+    rank_score = sum(
+        float(weight) * float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0)
+        for horizon, weight in weights.items()
+    )
+    spread_score = sum(
+        float(weight) * float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0)
+        for horizon, weight in weights.items()
+    )
+    upside_weight = 0.10 if profile in {"multiscale", "short_burst"} else 0.03
+    rank_score += upside_weight * float(metrics.get("rank_ic_upside_20d", 0.0) or 0.0)
+    spread_score += upside_weight * float(metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0)
+    gate_bonus = 1_000.0 if _profile_pass(metrics, profile) and _coverage_pass(metrics, coverage_range) else 0.0
+    return float(gate_bonus + rank_score * 10.0 + spread_score - max(float(validation_loss), 0.0) * 1.0e-3)
 
 
 def forecast_evidence_verdict(
@@ -370,22 +662,16 @@ def forecast_evidence_verdict(
     validation_metrics: dict[str, Any],
     test_metrics: dict[str, Any] | None = None,
     coverage_range: tuple[float, float] = (0.65, 0.95),
+    selection_profile: str = "multiscale",
 ) -> str:
     if validation_metrics.get("status") != "completed":
         return "insufficient_or_incomplete"
-    rank_ic = float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0)
-    spread = float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    q10 = float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0)
-    q90 = float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0)
-    low, high = coverage_range
-    validation_promising = rank_ic > 0.0 and spread > 0.0 and low <= q10 <= high and low <= q90 <= high
+    validation_promising = _profile_pass(validation_metrics, selection_profile) and _coverage_pass(validation_metrics, coverage_range)
     if not validation_promising:
         return "forecast_failed"
     if not test_metrics or test_metrics.get("status") != "completed":
         return "forecast_promising"
-    test_rank_ic = float(test_metrics.get("rank_ic_20d", 0.0) or 0.0)
-    test_spread = float(test_metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    if test_rank_ic > 0.0 and test_spread > 0.0:
+    if _profile_pass(test_metrics, selection_profile):
         return "forecast_test_confirmed"
     return "forecast_promising"
 
@@ -400,29 +686,27 @@ def _normalize_seeds(seeds: tuple[int, ...] | list[int] | str | None, *, default
     return parsed or (int(default_seed),)
 
 
-def _validation_score(metrics: dict[str, Any], validation_loss: float, coverage_range: tuple[float, float]) -> float:
-    if metrics.get("status") != "completed":
-        return -float(validation_loss)
-    rank_ic = float(metrics.get("rank_ic_20d", 0.0) or 0.0)
-    spread = float(metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-    q10 = float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
-    q90 = float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
-    low, high = coverage_range
-    gate_bonus = 1_000.0 if rank_ic > 0.0 and spread > 0.0 and low <= q10 <= high and low <= q90 <= high else 0.0
-    return float(gate_bonus + rank_ic * 10.0 + spread - max(float(validation_loss), 0.0) * 1.0e-3)
+def _validation_score(
+    metrics: dict[str, Any],
+    validation_loss: float,
+    coverage_range: tuple[float, float],
+    selection_profile: str,
+) -> float:
+    return _profile_score(metrics, validation_loss, coverage_range, selection_profile)
 
 
 def _evaluate_loss(
     model: nn.Module,
-    x: torch.Tensor,
-    y_daily: torch.Tensor,
-    y_cum: torch.Tensor,
-    y_risk: torch.Tensor,
+    dataset_view_or_x: _ForecastDatasetView | torch.Tensor,
+    y_daily: torch.Tensor | None,
+    y_cum: torch.Tensor | None,
+    y_risk: torch.Tensor | None,
     indices: np.ndarray,
     *,
     batch_size: int,
     device: torch.device,
     amp_enabled: bool,
+    target_scale: float = 100.0,
 ) -> float:
     if len(indices) == 0:
         return float("inf")
@@ -430,6 +714,27 @@ def _evaluate_loss(
     values: list[float] = []
     counts: list[int] = []
     with torch.no_grad():
+        if isinstance(dataset_view_or_x, _ForecastDatasetView):
+            loader = DataLoader(
+                dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+                batch_size=max(int(batch_size), 1),
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
+            for batch_x, batch_y_daily, batch_y_cum, batch_y_risk, _ in loader:
+                batch_x = batch_x.to(device, non_blocking=device.type == "cuda")
+                batch_y_daily = batch_y_daily.to(device, non_blocking=device.type == "cuda")
+                batch_y_cum = batch_y_cum.to(device, non_blocking=device.type == "cuda")
+                batch_y_risk = batch_y_risk.to(device, non_blocking=device.type == "cuda")
+                with _autocast_context(device, amp_enabled):
+                    pred = model(batch_x)
+                    loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                values.append(float(loss.detach().cpu()))
+                counts.append(int(batch_x.shape[0]))
+            total = sum(counts)
+            return float(np.average(values, weights=counts)) if total > 0 else float("inf")
+        x = dataset_view_or_x
+        assert y_daily is not None and y_cum is not None and y_risk is not None
         for start in range(0, len(indices), max(int(batch_size), 1)):
             batch_idx = torch.tensor(indices[start : start + max(int(batch_size), 1)], dtype=torch.long)
             batch_x = x[batch_idx].to(device, non_blocking=device.type == "cuda")
@@ -447,50 +752,97 @@ def _evaluate_loss(
 
 def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]:
     validation_metrics = [dict(item.get("validation_metrics", {})) for item in seed_summaries.values()]
-    rank_values = [
-        float(metrics.get("rank_ic_20d", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
-    ]
-    spread_values = [
-        float(metrics.get("top_bottom_spread_20d", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
-    ]
+    completed_metrics = [metrics for metrics in validation_metrics if metrics.get("status") == "completed"]
     q10_values = [
         float(metrics.get("q10_coverage_mean", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
+        for metrics in completed_metrics
     ]
     q90_values = [
         float(metrics.get("q90_coverage_mean", 0.0) or 0.0)
-        for metrics in validation_metrics
-        if metrics.get("status") == "completed"
+        for metrics in completed_metrics
+    ]
+    multiscale_scores = [
+        float(item.get("validation_multiscale_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
+    trend_scores = [
+        float(item.get("validation_trend20_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
+    short_scores = [
+        float(item.get("validation_short_burst_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
     ]
     count = max(len(seed_summaries), 1)
-    return {
+    summary: dict[str, Any] = {
         "seed_count": int(len(seed_summaries)),
-        "validation_rank_ic_20d_mean": float(np.mean(rank_values)) if rank_values else 0.0,
-        "validation_rank_ic_20d_std": float(np.std(rank_values, ddof=0)) if rank_values else 0.0,
-        "validation_top_bottom_spread_20d_mean": float(np.mean(spread_values)) if spread_values else 0.0,
-        "validation_top_bottom_spread_20d_std": float(np.std(spread_values, ddof=0)) if spread_values else 0.0,
         "validation_q10_coverage_mean": float(np.mean(q10_values)) if q10_values else 0.0,
         "validation_q90_coverage_mean": float(np.mean(q90_values)) if q90_values else 0.0,
-        "validation_rank_ic_positive_seed_rate": float(sum(1 for value in rank_values if value > 0.0) / count),
-        "validation_top_bottom_spread_positive_seed_rate": float(sum(1 for value in spread_values if value > 0.0) / count),
+        "validation_multiscale_score_mean": float(np.mean(multiscale_scores)) if multiscale_scores else 0.0,
+        "validation_multiscale_score_std": float(np.std(multiscale_scores, ddof=0)) if multiscale_scores else 0.0,
+        "validation_trend20_score_mean": float(np.mean(trend_scores)) if trend_scores else 0.0,
+        "validation_short_burst_score_mean": float(np.mean(short_scores)) if short_scores else 0.0,
     }
+    profile_counts: dict[str, int] = {"trend_20d": 0, "short_burst": 0, "multiscale": 0, "failed": 0}
+    for metrics in completed_metrics:
+        profile_counts[forecast_signal_profile(metrics)] = profile_counts.get(forecast_signal_profile(metrics), 0) + 1
+    summary["validation_signal_profile_counts"] = profile_counts
+    for horizon in PATH20_CUMULATIVE_HORIZONS:
+        rank_values = [
+            float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0)
+            for metrics in completed_metrics
+        ]
+        spread_values = [
+            float(metrics.get(f"top_bottom_spread_{int(horizon)}d", 0.0) or 0.0)
+            for metrics in completed_metrics
+        ]
+        summary[f"validation_rank_ic_{int(horizon)}d_mean"] = float(np.mean(rank_values)) if rank_values else 0.0
+        summary[f"validation_rank_ic_{int(horizon)}d_std"] = float(np.std(rank_values, ddof=0)) if rank_values else 0.0
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_mean"] = (
+            float(np.mean(spread_values)) if spread_values else 0.0
+        )
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_std"] = (
+            float(np.std(spread_values, ddof=0)) if spread_values else 0.0
+        )
+        summary[f"validation_rank_ic_{int(horizon)}d_positive_seed_rate"] = (
+            float(sum(1 for value in rank_values if value > 0.0) / count)
+        )
+        summary[f"validation_top_bottom_spread_{int(horizon)}d_positive_seed_rate"] = (
+            float(sum(1 for value in spread_values if value > 0.0) / count)
+        )
+    summary["validation_rank_ic_positive_seed_rate"] = summary.get("validation_rank_ic_20d_positive_seed_rate", 0.0)
+    summary["validation_top_bottom_spread_positive_seed_rate"] = summary.get(
+        "validation_top_bottom_spread_20d_positive_seed_rate",
+        0.0,
+    )
+    return summary
 
 
-def _select_family_seed(model_summaries: dict[str, dict[str, Any]]) -> tuple[str, int]:
+def _selection_score_key(selection_profile: str) -> str:
+    profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "trend20":
+        return "validation_trend20_score"
+    if profile == "short_burst":
+        return "validation_short_burst_score"
+    return "validation_multiscale_score"
+
+
+def _select_family_seed(model_summaries: dict[str, dict[str, Any]], *, selection_profile: str) -> tuple[str, int]:
+    score_key = _selection_score_key(selection_profile)
+
     def family_score(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float]:
         _, summary = item
         metrics = dict(summary.get("family_summary", {}))
+        score = float(metrics.get(f"{score_key}_mean", 0.0) or 0.0)
         rank = float(metrics.get("validation_rank_ic_20d_mean", 0.0) or 0.0)
         spread = float(metrics.get("validation_top_bottom_spread_20d_mean", 0.0) or 0.0)
         q10 = float(metrics.get("validation_q10_coverage_mean", 0.0) or 0.0)
         q90 = float(metrics.get("validation_q90_coverage_mean", 0.0) or 0.0)
-        passed = 1 if rank > 0.0 and spread > 0.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
-        return (passed, rank, spread)
+        passed = 1 if score > 1_000.0 and 0.65 <= q10 <= 0.95 and 0.65 <= q90 <= 0.95 else 0
+        return (passed, score, rank + spread)
 
     if not model_summaries:
         return "", 0
@@ -502,12 +854,12 @@ def _select_family_seed(model_summaries: dict[str, dict[str, Any]]) -> tuple[str
     def seed_score(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float]:
         _, summary = item
         validation = dict(summary.get("validation_metrics", {}))
-        verdict = forecast_evidence_verdict(validation_metrics=validation, test_metrics=None)
+        verdict = forecast_evidence_verdict(validation_metrics=validation, test_metrics=None, selection_profile=selection_profile)
         passed = 1 if verdict == "forecast_promising" else 0
         return (
             passed,
+            float(summary.get(score_key, 0.0) or 0.0),
             float(validation.get("rank_ic_20d", 0.0) or 0.0),
-            float(validation.get("top_bottom_spread_20d", 0.0) or 0.0),
         )
 
     selected_seed_text = max(seed_summaries.items(), key=seed_score)[0]
@@ -538,8 +890,11 @@ def train_forecast_models(
     grad_accum_steps: int = 1,
     weight_decay: float = 1.0e-4,
     write_all_predictions: bool = False,
+    selection_profile: str = "multiscale",
     target_scale: float = 100.0,
     seed: int = 7,
+    dataloader_num_workers: int = 0,
+    prefetch_factor: int = 2,
 ) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     resolved_device = _resolve_device(device)
@@ -549,14 +904,25 @@ def train_forecast_models(
     invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
     if invalid:
         raise ValueError(f"Unsupported forecast model families: {', '.join(invalid)}")
-    if dataset.x.shape[0] == 0:
+    selection_profile = str(selection_profile or "multiscale").strip().lower()
+    if selection_profile not in FORECAST_SELECTION_PROFILES:
+        raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
+    dataset_view = _ForecastDatasetView(dataset)
+    feature_profile = str(dataset_view.manifest.get("feature_profile", ""))
+    feature_manifest = dict(dataset_view.manifest.get("feature_manifest", {}))
+    if dataset_view.row_count == 0:
         summary = {
             "status": "insufficient_or_incomplete",
             "reason": "empty_forecast_dataset",
             "models": {},
             "family_summary": {},
+            "dataset_mode": dataset_view.dataset_mode,
+            "feature_profile": feature_profile,
+            "feature_manifest": feature_manifest,
             "selected_seed": 0,
             "selected_model_family": "",
+            "selected_signal_profile": "failed",
+            "validation_multiscale_score": 0.0,
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -564,17 +930,24 @@ def train_forecast_models(
         write_json(study_root / "forecast_training_summary.json", _json_ready(summary))
         return summary
 
-    x = torch.as_tensor(dataset.x, dtype=torch.float32)
-    y_daily = torch.as_tensor(dataset.y_daily_excess * float(target_scale), dtype=torch.float32)
-    y_cum = torch.as_tensor(dataset.y_cum_excess * float(target_scale), dtype=torch.float32)
-    y_risk_np = np.stack(
-        [dataset.y_max_drawdown_20d, dataset.y_worst_1d_20d, dataset.y_upside_20d],
-        axis=1,
-    )
-    y_risk = torch.as_tensor(y_risk_np * float(target_scale), dtype=torch.float32)
-    train_indices = np.flatnonzero(dataset.role == "train")
-    validation_indices = np.flatnonzero(dataset.role == "validation")
-    test_indices = np.flatnonzero(dataset.role == "test")
+    x: torch.Tensor | None = None
+    y_daily: torch.Tensor | None = None
+    y_cum: torch.Tensor | None = None
+    y_risk: torch.Tensor | None = None
+    if dataset_view.dataset_mode != "memmap":
+        eager_dataset = dataset
+        assert isinstance(eager_dataset, ForecastSequenceDataset)
+        x = torch.as_tensor(eager_dataset.x, dtype=torch.float32)
+        y_daily = torch.as_tensor(eager_dataset.y_daily_excess * float(target_scale), dtype=torch.float32)
+        y_cum = torch.as_tensor(eager_dataset.y_cum_excess * float(target_scale), dtype=torch.float32)
+        y_risk_np = np.stack(
+            [eager_dataset.y_max_drawdown_20d, eager_dataset.y_worst_1d_20d, eager_dataset.y_upside_20d],
+            axis=1,
+        )
+        y_risk = torch.as_tensor(y_risk_np * float(target_scale), dtype=torch.float32)
+    train_indices = dataset_view.role_indices("train")
+    validation_indices = dataset_view.role_indices("validation")
+    test_indices = dataset_view.role_indices("test")
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -584,8 +957,13 @@ def train_forecast_models(
             "test_rows": int(len(test_indices)),
             "models": {},
             "family_summary": {},
+            "dataset_mode": dataset_view.dataset_mode,
+            "feature_profile": feature_profile,
+            "feature_manifest": feature_manifest,
             "selected_seed": 0,
             "selected_model_family": "",
+            "selected_signal_profile": "failed",
+            "validation_multiscale_score": 0.0,
             "shadow_only": True,
             "promotion_allowed": False,
             "active_execution_strategy_expected_diff": "none",
@@ -601,6 +979,11 @@ def train_forecast_models(
     patience_limit = max(int(early_stop_patience), 1)
     accum_steps = max(int(grad_accum_steps), 1)
     pin_memory = resolved_device.type == "cuda"
+    loader_kwargs = _data_loader_kwargs(
+        pin_memory=pin_memory,
+        dataloader_num_workers=int(dataloader_num_workers),
+        prefetch_factor=int(prefetch_factor),
+    )
 
     for family in families:
         seed_summaries: dict[str, dict[str, Any]] = {}
@@ -611,7 +994,7 @@ def train_forecast_models(
                 torch.cuda.manual_seed_all(int(current_seed))
             model = make_forecast_model(
                 family,
-                input_dim=int(dataset.x.shape[-1]),
+                input_dim=int(dataset_view.input_dim),
                 hidden_dim=int(hidden_dim),
                 horizon=PATH20_HORIZON,
                 dropout=float(dropout),
@@ -625,11 +1008,11 @@ def train_forecast_models(
             generator = torch.Generator()
             generator.manual_seed(int(current_seed))
             train_loader = DataLoader(
-                TensorDataset(torch.as_tensor(train_indices, dtype=torch.long)),
+                dataset_view.torch_dataset(train_indices, target_scale=target_scale),
                 batch_size=batch_size,
                 shuffle=True,
                 generator=generator,
-                pin_memory=pin_memory,
+                **loader_kwargs,
             )
             best_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_best.pt"
             best_score = -float("inf")
@@ -654,17 +1037,16 @@ def train_forecast_models(
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
                 optimizer.zero_grad(set_to_none=True)
-                for step, (batch_idx_cpu,) in enumerate(train_loader, start=1):
-                    batch_idx = batch_idx_cpu.to(torch.long)
-                    batch_x = x[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_daily = y_daily[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_cum = y_cum[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_risk = y_risk[batch_idx].to(resolved_device, non_blocking=pin_memory)
+                for step, (batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _) in enumerate(train_loader, start=1):
+                    batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
                     with _autocast_context(resolved_device, amp_enabled):
                         pred = model(batch_x)
                         loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
                     epoch_losses.append(float(loss.detach().cpu()))
-                    epoch_counts.append(int(batch_idx.numel()))
+                    epoch_counts.append(int(batch_x.shape[0]))
                     scaler.scale(loss / float(accum_steps)).backward()
                     if step % accum_steps == 0 or step == len(train_loader):
                         scaler.unscale_(optimizer)
@@ -677,7 +1059,7 @@ def train_forecast_models(
                 )
                 validation_loss = _evaluate_loss(
                     model,
-                    x,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
                     y_daily,
                     y_cum,
                     y_risk,
@@ -685,16 +1067,18 @@ def train_forecast_models(
                     batch_size=batch_size,
                     device=resolved_device,
                     amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
                 validation_predictions = _predict_indices(
                     model,
-                    x,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
                     validation_indices,
                     batch_size=batch_size,
                     device=resolved_device,
                     amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
-                validation_frame = _prediction_frame_for_indices(
+                validation_frame = _prediction_frame_for_dataset_indices(
                     dataset,
                     indices=validation_indices,
                     predictions=validation_predictions,
@@ -702,7 +1086,8 @@ def train_forecast_models(
                     target_scale=target_scale,
                 )
                 validation_metrics = forecast_prediction_metrics(validation_frame)
-                score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95))
+                score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95), selection_profile)
+                multiscale_score = _profile_score(validation_metrics, validation_loss, (0.65, 0.95), "multiscale")
                 improved = score > best_score + float(early_stop_min_delta)
                 if improved:
                     best_score = score
@@ -717,9 +1102,11 @@ def train_forecast_models(
                             "seed": int(current_seed),
                             "state_dict": model.state_dict(),
                             "feature_columns": list(dataset.feature_columns),
+                            "feature_profile": feature_profile,
+                            "feature_manifest": feature_manifest,
                             "normalization": dataset.normalization_manifest,
                             "target_scale": float(target_scale),
-                            "lookback_days": int(dataset.x.shape[1]),
+                            "lookback_days": int(dataset_view.lookback_days),
                             "horizon": PATH20_HORIZON,
                             "model_config": model_config,
                             "best_epoch": int(best_epoch),
@@ -737,8 +1124,19 @@ def train_forecast_models(
                         "epoch": int(epoch),
                         "train_loss": float(last_train_loss),
                         "validation_loss": float(validation_loss),
+                        "validation_multiscale_score": float(multiscale_score),
+                        "validation_selection_score": float(score),
+                        "selected_signal_profile": forecast_signal_profile(validation_metrics),
                         "rank_ic_20d": float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0),
                         "top_bottom_spread_20d": float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0),
+                        "rank_ic_5d": float(validation_metrics.get("rank_ic_5d", 0.0) or 0.0),
+                        "top_bottom_spread_5d": float(validation_metrics.get("top_bottom_spread_5d", 0.0) or 0.0),
+                        "rank_ic_3d": float(validation_metrics.get("rank_ic_3d", 0.0) or 0.0),
+                        "top_bottom_spread_3d": float(validation_metrics.get("top_bottom_spread_3d", 0.0) or 0.0),
+                        "rank_ic_upside_20d": float(validation_metrics.get("rank_ic_upside_20d", 0.0) or 0.0),
+                        "top_bottom_spread_upside_20d": float(
+                            validation_metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0
+                        ),
                         "q10_coverage_mean": float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0),
                         "q90_coverage_mean": float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0),
                         "direction_accuracy_20d": float(validation_metrics.get("direction_accuracy_20d", 0.0) or 0.0),
@@ -756,9 +1154,11 @@ def train_forecast_models(
                         "seed": int(current_seed),
                         "state_dict": model.state_dict(),
                         "feature_columns": list(dataset.feature_columns),
+                        "feature_profile": feature_profile,
+                        "feature_manifest": feature_manifest,
                         "normalization": dataset.normalization_manifest,
                         "target_scale": float(target_scale),
-                        "lookback_days": int(dataset.x.shape[1]),
+                        "lookback_days": int(dataset_view.lookback_days),
                         "horizon": PATH20_HORIZON,
                         "model_config": model_config,
                         "best_epoch": int(max_epochs),
@@ -767,37 +1167,49 @@ def train_forecast_models(
                     },
                     best_checkpoint_path,
                 )
-            checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device)
+            checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device, weights_only=False)
             model.load_state_dict(checkpoint["state_dict"])
             validation_predictions = _predict_indices(
                 model,
-                x,
+                dataset_view if dataset_view.dataset_mode == "memmap" else x,
                 validation_indices,
                 batch_size=batch_size,
                 device=resolved_device,
                 amp_enabled=amp_enabled,
+                target_scale=target_scale,
             )
             test_predictions = _predict_indices(
                 model,
-                x,
+                dataset_view if dataset_view.dataset_mode == "memmap" else x,
                 test_indices,
                 batch_size=batch_size,
                 device=resolved_device,
                 amp_enabled=amp_enabled,
+                target_scale=target_scale,
             )
-            validation_frame = _prediction_frame_for_indices(
+            validation_frame = _prediction_frame_for_dataset_indices(
                 dataset,
                 indices=validation_indices,
                 predictions=validation_predictions,
                 family=family,
                 target_scale=target_scale,
             )
-            test_frame = _prediction_frame_for_indices(
+            test_frame = _prediction_frame_for_dataset_indices(
                 dataset,
                 indices=test_indices,
                 predictions=test_predictions,
                 family=family,
                 target_scale=target_scale,
+            )
+            final_validation_metrics = forecast_prediction_metrics(validation_frame)
+            final_test_metrics = forecast_prediction_metrics(test_frame)
+            final_multiscale_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "multiscale")
+            final_trend20_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "trend20")
+            final_short_burst_score = _profile_score(
+                final_validation_metrics,
+                best_validation_loss,
+                (0.65, 0.95),
+                "short_burst",
             )
             if bool(write_all_predictions):
                 _write_frame(
@@ -821,8 +1233,19 @@ def train_forecast_models(
                 "best_train_loss": float(best_train_loss),
                 "best_validation_loss": float(best_validation_loss),
                 "best_validation_metrics": best_validation_metrics,
-                "validation_metrics": forecast_prediction_metrics(validation_frame),
-                "test_metrics": forecast_prediction_metrics(test_frame),
+                "validation_metrics": final_validation_metrics,
+                "test_metrics": final_test_metrics,
+                "validation_signal_profile": forecast_signal_profile(final_validation_metrics),
+                "validation_multiscale_score": float(final_multiscale_score),
+                "validation_trend20_score": float(final_trend20_score),
+                "validation_short_burst_score": float(final_short_burst_score),
+                "validation_selection_score": float(
+                    {
+                        "multiscale": final_multiscale_score,
+                        "trend20": final_trend20_score,
+                        "short_burst": final_short_burst_score,
+                    }[selection_profile]
+                ),
                 "checkpoint_pt": str(best_checkpoint_path.resolve()),
             }
         model_summaries[family] = {
@@ -834,7 +1257,8 @@ def train_forecast_models(
             "batch_size": int(batch_size),
             "lr": float(lr),
             "hidden_dim": int(hidden_dim),
-            "feature_count": int(dataset.x.shape[-1]),
+            "feature_count": int(dataset_view.input_dim),
+            "selection_profile": selection_profile,
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
@@ -844,7 +1268,7 @@ def train_forecast_models(
 
     learning_curve_path = study_root / "forecast_learning_curve.csv"
     _write_frame(learning_curve_path, pd.DataFrame(learning_rows))
-    selected_family, selected_seed = _select_family_seed(model_summaries)
+    selected_family, selected_seed = _select_family_seed(model_summaries, selection_profile=selection_profile)
     selected_seed_summary = dict(
         model_summaries.get(selected_family, {}).get("seed_summaries", {}).get(str(int(selected_seed)), {})
     )
@@ -854,7 +1278,7 @@ def train_forecast_models(
     if selected_family and selected_seed and selected_checkpoint_path:
         selected_model = make_forecast_model(
             selected_family,
-            input_dim=int(dataset.x.shape[-1]),
+            input_dim=int(dataset_view.input_dim),
             hidden_dim=int(hidden_dim),
             horizon=PATH20_HORIZON,
             dropout=float(dropout),
@@ -863,32 +1287,34 @@ def train_forecast_models(
             transformer_heads=int(transformer_heads),
             patch_sizes=tuple(int(item) for item in patch_sizes),
         ).to(resolved_device)
-        checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device)
+        checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)
         selected_model.load_state_dict(checkpoint["state_dict"])
         validation_predictions_np = _predict_indices(
             selected_model,
-            x,
+            dataset_view if dataset_view.dataset_mode == "memmap" else x,
             validation_indices,
             batch_size=batch_size,
             device=resolved_device,
             amp_enabled=amp_enabled,
+            target_scale=target_scale,
         )
         test_predictions_np = _predict_indices(
             selected_model,
-            x,
+            dataset_view if dataset_view.dataset_mode == "memmap" else x,
             test_indices,
             batch_size=batch_size,
             device=resolved_device,
             amp_enabled=amp_enabled,
+            target_scale=target_scale,
         )
-        selected_predictions_validation = _prediction_frame_for_indices(
+        selected_predictions_validation = _prediction_frame_for_dataset_indices(
             dataset,
             indices=validation_indices,
             predictions=validation_predictions_np,
             family=selected_family,
             target_scale=target_scale,
         )
-        selected_predictions_test = _prediction_frame_for_indices(
+        selected_predictions_test = _prediction_frame_for_dataset_indices(
             dataset,
             indices=test_indices,
             predictions=test_predictions_np,
@@ -908,7 +1334,12 @@ def train_forecast_models(
     test_csv = _write_frame(study_root / "forecast_predictions_test.csv", test_predictions)
     validation_metrics = dict(selected_seed_summary.get("validation_metrics", {}))
     test_metrics = dict(selected_seed_summary.get("test_metrics", {}))
-    verdict = forecast_evidence_verdict(validation_metrics=validation_metrics, test_metrics=test_metrics)
+    verdict = forecast_evidence_verdict(
+        validation_metrics=validation_metrics,
+        test_metrics=test_metrics,
+        selection_profile=selection_profile,
+    )
+    selected_signal_profile = forecast_signal_profile(validation_metrics)
     summary = {
         "status": "completed",
         "stage": "forecast_train",
@@ -916,6 +1347,8 @@ def train_forecast_models(
         "device": str(resolved_device),
         "amp_enabled": bool(amp_enabled),
         "seeds": [int(item) for item in seed_values],
+        "feature_profile": feature_profile,
+        "feature_manifest": feature_manifest,
         "training_config": {
             "epochs": int(max_epochs),
             "min_epochs": int(min_epochs),
@@ -932,23 +1365,31 @@ def train_forecast_models(
             "transformer_layers": int(transformer_layers),
             "transformer_heads": int(transformer_heads),
             "patch_sizes": [int(item) for item in patch_sizes],
+            "feature_profile": feature_profile,
+            "feature_count": int(dataset_view.input_dim),
+            "selection_profile": selection_profile,
         },
         "models": model_summaries,
         "family_summary": {family: dict(summary.get("family_summary", {})) for family, summary in model_summaries.items()},
         "selected_model_family": selected_family,
         "selected_seed": int(selected_seed),
         "selected_checkpoint_pt": selected_checkpoint_path,
-        "selection_rule": "family_mean_validation_rank_ic_after_positive_rank_spread_coverage_gates_then_seed_rank_ic",
+        "selection_rule": f"{selection_profile}_validation_score_after_profile_and_coverage_gates_then_seed_score",
+        "selected_signal_profile": selected_signal_profile,
+        "validation_multiscale_score": float(selected_seed_summary.get("validation_multiscale_score", 0.0) or 0.0),
+        "validation_selection_score": float(selected_seed_summary.get("validation_selection_score", 0.0) or 0.0),
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
         "test_interpretable": verdict in {"forecast_test_confirmed", "forecast_promising"}
         and validation_metrics.get("status") == "completed"
-        and float(validation_metrics.get("rank_ic_20d", 0.0) or 0.0) > 0.0
-        and float(validation_metrics.get("top_bottom_spread_20d", 0.0) or 0.0) > 0.0,
+        and _profile_pass(validation_metrics, selection_profile),
         "evidence_verdict": verdict,
         "forecast_predictions_validation_csv": validation_csv,
         "forecast_predictions_test_csv": test_csv,
         "forecast_learning_curve_csv": str(learning_curve_path.resolve()),
+        "dataset_mode": dataset_view.dataset_mode,
+        "validation_stratified_metrics": stratified_forecast_prediction_metrics(validation_predictions),
+        "test_stratified_metrics": stratified_forecast_prediction_metrics(test_predictions),
         "shadow_only": True,
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",

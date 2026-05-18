@@ -10,6 +10,7 @@
 - 不把 smoke、dry-run、failed trial、interrupted outer study、realtime tail label 写成 completed evidence。
 - 长训练或 study 需要 progress JSONL、latest progress JSON、stdout/stderr log 和明确 tag。
 - PowerShell 中文写入不作为默认文档编辑方式；中文正文优先用 `apply_patch` 或显式 UTF-8 工具链。
+- 文档语言遵循 `brain/language_policy.md`：中文语义 + 英文工程标识；CLI、JSON key、dataset id、workflow id、tag、模型名不强行翻译。
 
 ## 项目地图
 - brain 真源：`daily_research/brain/`。
@@ -22,6 +23,10 @@
 ## 高频 Brain 命令
 - task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
+- API/no-plugin auto workflow capsule：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
+- workflow guide：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow workflow-guide --workflow <workflow_id> --json`
 - explicit evidence status：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow status --workflow continuous_policy --study-tag <study_tag> --json`
 - evidence registry rebuild：

@@ -40,7 +40,8 @@
 - `doc_guard.py check` 已包含主分脑完整性检查；结构变更后仍建议单独跑一次 `brain_integrity_check.py --json` 便于快速定位
 ## 5. 环境基线
 - brain 文档统一使用 UTF-8
-- brain 当前层正文、标题、复盘和规则写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文。
+- brain 当前层正文、标题、复盘和规则写回遵循 `brain/language_policy.md`：中文语义 + 英文工程标识。
+- 命令、路径、JSON key、workflow id、dataset id、tag、模型名等技术标识保留原文。
 - 工具调用优先走显式 Python 路径或显式脚本入口；当前 `daily_research` 相关 Python 命令统一使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`
 - 不依赖“当前 shell 恰好已经处于正确环境”的隐性状态
 

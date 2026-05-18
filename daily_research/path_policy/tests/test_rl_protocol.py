@@ -101,6 +101,34 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_min_epochs == 20
     assert args.forecast_early_stop_patience == 12
     assert args.forecast_seeds == "7"
+    assert args.forecast_selection_profile == "multiscale"
+    assert args.forecast_feature_profile == "raw_kline_context_v1"
+    assert args.forecast_max_feature_columns == 192
+    assert args.forecast_dataset_mode == "eager"
+    assert args.forecast_min_lookback_valid_ratio == pytest.approx(0.80)
+    assert args.forecast_dataloader_num_workers == 0
+    assert args.forecast_prefetch_factor == 2
+
+
+def test_protocol_rejects_full_universe_forecast_eager_dataset_mode() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_full",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--max-universe-size",
+            "0",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_protocol_args(parser, args)
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -228,6 +256,12 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
             "--no-forecast-amp",
             "--forecast-seeds",
             "7,11",
+            "--forecast-selection-profile",
+            "multiscale",
+            "--forecast-feature-profile",
+            "raw_kline_v1",
+            "--forecast-max-feature-columns",
+            "128",
             "--forecast-max-samples-per-role",
             "8",
         ]
@@ -248,10 +282,77 @@ def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     assert summary["promotion_allowed"] is False
     assert summary["active_execution_strategy_expected_diff"] == "none"
     assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
+    assert summary["dataset_manifest"]["feature_profile"] == "raw_kline_v1"
+    assert summary["dataset_manifest"]["feature_count_after_cap"] <= 128
+    assert summary["training_summary"]["feature_profile"] == "raw_kline_v1"
     assert "linear_last_day" in summary["training_summary"]["models"]
     assert "mlp_last_day" in summary["training_summary"]["models"]
     assert summary["training_summary"]["selected_seed"] in {7, 11}
+    assert summary["training_summary"]["selected_signal_profile"] in {"trend_20d", "short_burst", "multiscale", "failed"}
+    assert "validation_multiscale_score" in summary["training_summary"]
     assert "forecast_learning_curve_csv" in summary["training_summary"]
+
+
+def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_memmap_fixture",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-lookback-days",
+            "5",
+            "--forecast-train-start-year",
+            "2019",
+            "--forecast-train-end-year",
+            "2019",
+            "--forecast-validation-year",
+            "2020",
+            "--forecast-test-year",
+            "2021",
+            "--forecast-model-families",
+            "linear_last_day",
+            "--forecast-epochs",
+            "2",
+            "--forecast-min-epochs",
+            "1",
+            "--forecast-early-stop-patience",
+            "1",
+            "--forecast-batch-size",
+            "4",
+            "--forecast-hidden-dim",
+            "24",
+            "--forecast-device",
+            "cpu",
+            "--no-forecast-amp",
+            "--forecast-max-samples-per-role",
+            "8",
+            "--forecast-min-lookback-valid-ratio",
+            "0.80",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    summary = _run_forecast_walkforward_study(
+        prepared=prepared,
+        study_root=tmp_path,
+        tag="unit_forecast_memmap_fixture",
+        args=args,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["dataset_manifest"]["dataset_mode"] == "memmap"
+    assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
+    assert summary["training_summary"]["dataset_mode"] == "memmap"
+    assert "validation_stratified_metrics" in summary["training_summary"]
 
 
 def test_current_neural_mainline_stage_no_longer_requires_legacy_allow_flag() -> None:

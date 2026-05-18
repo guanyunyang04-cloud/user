@@ -14,10 +14,13 @@ from typing import Any
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
+BRAIN_CATALOG = Path("brain/brain_catalog.json")
 WORKFLOW_REGISTRY = Path("daily_research/brain/workflow_registry.json")
+SPLIT_WORKFLOW_REGISTRY = Path("daily_research/brain/workflows/registry.json")
 OUTPUT_ROOT = WORKSPACE_ROOT / "daily_research/output/brain_workflow"
 PYTHON_EXECUTABLE = "C:/Users/ASUS/miniconda3/envs/yolos/python.exe"
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
+LANGUAGE_POLICY_ID = "zh_semantic_en_identifiers_v1"
 OPTIONAL_BRAIN_KEYS = (
     "identity_path",
     "state_path",
@@ -28,15 +31,15 @@ OPTIONAL_BRAIN_KEYS = (
 )
 MOJIBAKE_MARKERS = (
     "\ufffd",
-    "鎿",
-    "鐭",
-    "绋",
-    "锛",
-    "銆",
-    "歚",
-    "乣",
-    "涓",
-    "浠",
+    "\u93bf",
+    "\u942d",
+    "\u7ecb",
+    "\u951b",
+    "\u9286",
+    "\u6b5a",
+    "\u4e63",
+    "\u6d93",
+    "\u6d60",
 )
 LATEST_ARTIFACTS = {
     "latest_study_summary": Path("daily_research/output/continuous_policy/latest_study_summary.json"),
@@ -228,7 +231,8 @@ def read_text(path: str | Path) -> str:
 def write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     target = workspace_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     return target
 
 
@@ -239,11 +243,168 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def _load_playbook(playbook_ref: str, workflow_id: str) -> dict[str, Any]:
+    path_text, _, fragment = str(playbook_ref).partition("#")
+    if not path_text:
+        raise ValueError(f"workflow {workflow_id} has empty playbook path")
+    payload = json.loads(read_text(Path(path_text)))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Workflow playbook must be a JSON object: {path_text}")
+    if fragment:
+        workflows = payload.get("workflows", payload)
+        if not isinstance(workflows, dict) or fragment not in workflows:
+            raise KeyError(f"Workflow playbook fragment not found: {playbook_ref}")
+        entry = workflows[fragment]
+    else:
+        entry = payload
+    if not isinstance(entry, dict):
+        raise ValueError(f"Workflow playbook entry must be an object: {playbook_ref}")
+    out = dict(entry)
+    out.setdefault("artifacts", [])
+    return out
+
+
+def _load_split_workflow_registry(path: str | Path) -> dict[str, dict[str, Any]]:
+    payload = json.loads(read_text(path))
+    if not isinstance(payload, dict):
+        raise ValueError("split workflow registry must be a JSON object")
+    workflows = payload.get("workflows")
+    if not isinstance(workflows, list):
+        raise ValueError("split workflow registry must declare workflows as a list")
+    out: dict[str, dict[str, Any]] = {}
+    for item in workflows:
+        if not isinstance(item, dict):
+            continue
+        workflow_id = str(item.get("id", "")).strip()
+        playbook = str(item.get("playbook", "")).strip()
+        if not workflow_id or not playbook:
+            continue
+        entry = _load_playbook(playbook, workflow_id)
+        entry.setdefault("title", str(item.get("title", "") or workflow_id))
+        entry.setdefault("category", str(item.get("category", "") or "general"))
+        entry.setdefault("playbook", playbook)
+        out[workflow_id] = entry
+    return out
+
+
 def load_workflow_registry() -> dict[str, dict[str, Any]]:
+    if workspace_path(SPLIT_WORKFLOW_REGISTRY).exists():
+        return _load_split_workflow_registry(SPLIT_WORKFLOW_REGISTRY)
+
     payload = json.loads(read_text(WORKFLOW_REGISTRY))
     if not isinstance(payload, dict):
         raise ValueError("workflow_registry.json must be a JSON object")
+    redirect = str(payload.get("redirect", "") or "").strip()
+    if redirect:
+        return _load_split_workflow_registry(Path(redirect))
     return {str(key): dict(value) for key, value in payload.items() if isinstance(value, dict)}
+
+
+def _reference_count(brain_root: Path) -> int:
+    references = workspace_path(brain_root / "references")
+    if not references.exists():
+        return 0
+    return sum(1 for item in references.iterdir() if item.is_file())
+
+
+def _catalog_record(
+    *,
+    brain_id: str,
+    root: Path,
+    manifest_path: Path | str,
+    status: str,
+    body_root: Path | str,
+    last_guard_status: str,
+) -> dict[str, Any]:
+    root_text = root.as_posix()
+    references = root / "references"
+    return {
+        "brain_id": brain_id,
+        "root": root_text,
+        "manifest_path": Path(str(manifest_path)).as_posix() if str(manifest_path).strip() else "",
+        "status": status,
+        "body_root": Path(str(body_root)).as_posix() if str(body_root).strip() else "",
+        "references_path": references.as_posix() if workspace_path(references).exists() else "",
+        "references_count": _reference_count(root),
+        "language_policy": LANGUAGE_POLICY_ID,
+        "last_guard_status": last_guard_status,
+    }
+
+
+def _discover_brain_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    for pattern in ("*/brain", "*/*/brain"):
+        for path in sorted(WORKSPACE_ROOT.glob(pattern)):
+            if not path.is_dir():
+                continue
+            rel = path.relative_to(WORKSPACE_ROOT)
+            if any(part in {"output", "archive", "node_modules", ".git", ".pytest_cache"} for part in rel.parts):
+                continue
+            candidates.append(Path(rel.as_posix()))
+    return _dedupe(candidates)
+
+
+def build_brain_catalog() -> dict[str, Any]:
+    main_manifest = load_manifest(MAIN_MANIFEST)
+    records: list[dict[str, Any]] = [
+        _catalog_record(
+            brain_id="workspace_root",
+            root=Path("brain"),
+            manifest_path=MAIN_MANIFEST,
+            status="canonical_root",
+            body_root=Path("."),
+            last_guard_status="ok",
+        )
+    ]
+    canonical_roots = {Path("brain").as_posix()}
+
+    for child in main_manifest.get("child_brains", []):
+        if not isinstance(child, dict):
+            continue
+        child_id = str(child.get("id", "")).strip()
+        child_path = Path(str(child.get("path", "")).strip())
+        root = child_path.parent if child_path.as_posix() else Path(str(child.get("body_root", ""))) / "brain"
+        if not child_id:
+            continue
+        canonical_roots.add(root.as_posix())
+        records.append(
+            _catalog_record(
+                brain_id=child_id,
+                root=root,
+                manifest_path=child_path,
+                status="attached" if str(child.get("attach_status", "")).startswith("attached") else "discovered_untracked",
+                body_root=Path(str(child.get("body_root", "") or root.parent.as_posix())),
+                last_guard_status="ok",
+            )
+        )
+
+    for root in _discover_brain_dirs():
+        if root.as_posix() in canonical_roots:
+            continue
+        manifest_path = root / "brain_manifest.json"
+        if root.as_posix() == "daily_research/cache/brain":
+            brain_id = "daily_research_cache_legacy"
+            status = "cache_legacy"
+        else:
+            brain_id = root.parent.as_posix().replace("/", "_").replace("-", "_")
+            status = "discovered_untracked" if workspace_path(manifest_path).exists() else "missing_manifest"
+        records.append(
+            _catalog_record(
+                brain_id=brain_id,
+                root=root,
+                manifest_path=manifest_path if workspace_path(manifest_path).exists() else "",
+                status=status,
+                body_root=root.parent,
+                last_guard_status="not_guarded",
+            )
+        )
+
+    return {
+        "schema_version": 1,
+        "generated_at": "2026-05-18",
+        "language_policy": LANGUAGE_POLICY_ID,
+        "brains": records,
+    }
 
 
 def check_text_encoding_text(text: str, *, label: str) -> EncodingReport:
@@ -496,6 +657,124 @@ def resolve_artifact_freshness() -> ArtifactFreshnessReport:
     if mismatch:
         reason = f"latest study tag differs from latest protocol tag: {study_tag} != {protocol_tag}"
     return ArtifactFreshnessReport(records, mismatch, reason)
+
+
+def _path_line_count(path: str | Path) -> int:
+    target = workspace_path(path)
+    if not target.exists() or not target.is_file():
+        return 0
+    return len(target.read_text(encoding="utf-8-sig").splitlines())
+
+
+def _brain_core_doc_stats(root: str) -> dict[str, Any]:
+    core_names = (
+        "identity_layer.md",
+        "state_center.md",
+        "knowledge_center.md",
+        "brain_architecture.md",
+        "operations_center.md",
+        "governance_layer.md",
+        "episodic_memory.md",
+        "brain_manifest.json",
+    )
+    stats: dict[str, Any] = {}
+    for name in core_names:
+        rel = Path(root) / name
+        target = workspace_path(rel)
+        if target.exists() and target.is_file():
+            stats[rel.as_posix()] = {
+                "line_count": _path_line_count(rel),
+                "encoding": check_text_encoding(rel).to_dict(),
+            }
+    return stats
+
+
+def _active_artifact_diff_status() -> dict[str, Any]:
+    command = ["git", "diff", "--", "daily_research/output/active_execution_strategy.json"]
+    result = subprocess.run(command, cwd=str(WORKSPACE_ROOT), capture_output=True, text=True, encoding="utf-8")
+    diff_text = result.stdout or ""
+    return {
+        "path": "daily_research/output/active_execution_strategy.json",
+        "status": "clean" if result.returncode == 0 and not diff_text.strip() else "dirty",
+        "returncode": result.returncode,
+        "diff_line_count": len(diff_text.splitlines()),
+    }
+
+
+def audit_brain_system(*, scope: str = "all") -> dict[str, Any]:
+    catalog = build_brain_catalog()
+    workflow_entries = load_workflow_registry()
+    freshness = resolve_artifact_freshness()
+    active_guard = _active_artifact_diff_status()
+
+    brain_stats = {
+        item["brain_id"]: {
+            "status": item["status"],
+            "root": item["root"],
+            "core_docs": _brain_core_doc_stats(str(item["root"])),
+            "references_count": item.get("references_count", 0),
+            "manifest_present": bool(item.get("manifest_path")),
+        }
+        for item in catalog["brains"]
+    }
+    noncanonical = [
+        item
+        for item in catalog["brains"]
+        if item.get("status") in {"discovered_untracked", "cache_legacy", "missing_manifest"}
+    ]
+    split_exists = workspace_path(SPLIT_WORKFLOW_REGISTRY).exists()
+    legacy_exists = workspace_path(WORKFLOW_REGISTRY).exists()
+    legacy_line_count = _path_line_count(WORKFLOW_REGISTRY) if legacy_exists else 0
+    split_line_count = _path_line_count(SPLIT_WORKFLOW_REGISTRY) if split_exists else 0
+    workflow_registry = {
+        "mode": "split" if split_exists else "legacy",
+        "legacy_path": WORKFLOW_REGISTRY.as_posix(),
+        "legacy_line_count": legacy_line_count,
+        "split_path": SPLIT_WORKFLOW_REGISTRY.as_posix() if split_exists else "",
+        "split_line_count": split_line_count,
+        "workflow_count": len(workflow_entries),
+        "workflow_ids": sorted(workflow_entries),
+    }
+    language = {
+        "policy": LANGUAGE_POLICY_ID,
+        "policy_path": "brain/language_policy.md",
+        "user_facing_language": "zh_cn",
+        "engineering_identifiers": "en",
+    }
+
+    warnings: list[str] = []
+    if noncanonical:
+        warnings.append("noncanonical_brains_discovered")
+    if freshness.is_stale_risk:
+        warnings.append("loose_latest_stale_requires_explicit_tag")
+    if legacy_line_count > 220 and not split_exists:
+        warnings.append("workflow_registry_line_count_warning")
+    if active_guard["status"] != "clean":
+        warnings.append("active_execution_artifact_dirty")
+
+    if active_guard["status"] != "clean":
+        verdict = "blocked"
+    elif legacy_line_count > 320 and not split_exists:
+        verdict = "needs_refactor"
+    elif warnings:
+        verdict = "usable_with_warnings"
+    else:
+        verdict = "clean"
+
+    return {
+        "schema_version": 1,
+        "scope": scope,
+        "verdict": verdict,
+        "warnings": warnings,
+        "catalog": catalog,
+        "attached_brains": [item for item in catalog["brains"] if item.get("status") in {"canonical_root", "attached"}],
+        "discovered_noncanonical_brains": noncanonical,
+        "brain_stats": brain_stats,
+        "language": language,
+        "workflow_registry": workflow_registry,
+        "loose_latest": freshness.to_dict(),
+        "active_artifact_guard": active_guard,
+    }
 
 
 def _study_summary_path(study_tag: str) -> Path:
@@ -759,6 +1038,60 @@ def build_workflow_state(workflow_id: str, *, study_tag: str | None = None) -> W
     )
 
 
+def build_workflow_guide(workflow_id: str) -> dict[str, Any]:
+    registry = load_workflow_registry()
+    normalized = "continuous_policy_result_review" if workflow_id == "continuous_policy" else str(workflow_id or "").strip()
+    if normalized not in registry:
+        raise KeyError(f"Unknown workflow: {workflow_id}")
+    entry = dict(registry[normalized])
+    return {
+        "workflow_id": normalized,
+        "description": str(entry.get("description", "") or ""),
+        "preflight": list(entry.get("preflight", []) or []),
+        "checklist": list(entry.get("checklist", []) or []),
+        "allowed_commands": list(entry.get("allowed_commands", []) or []),
+        "forbidden_actions": list(entry.get("forbidden_actions", []) or []),
+        "stop_conditions": list(entry.get("stop_conditions", []) or []),
+        "completion": list(entry.get("completion", []) or []),
+        "validation_commands": list(entry.get("validation_commands", []) or []),
+        "writeback_routes": dict(entry.get("writeback_routes", {}) or {}),
+    }
+
+
+def select_workflow_for_task(task: str) -> dict[str, Any]:
+    text = str(task or "").strip()
+    lower = text.lower()
+
+    def has_any(*needles: str) -> bool:
+        return any(needle in lower or needle in text for needle in needles)
+
+    if has_any("报错", "失败", "bug", "error", "oom", "cuda", "异常", "中断", "debug", "修复"):
+        selected = "systematic_debugging"
+        reason = "task mentions a failure, runtime error, debugging, or repair signal"
+    elif has_any("是否全部完成", "完成了吗", "是否完成", "是否通过", "检查一下", "verify", "verification", "完成没"):
+        selected = "verification_before_completion"
+        reason = "task asks to verify completion or passing status"
+    elif has_any("强重构", "脑区迁移", "结构重做", "brain refactor", "architecture refactor"):
+        selected = "brain_architecture_refactor"
+        reason = "task asks for a brain architecture refactor or migration"
+    elif has_any("脑区乱", "乱不乱", "复杂不复杂", "有没有错", "全中文", "需要优化", "脑区检查", "brain audit"):
+        selected = "brain_system_audit"
+        reason = "task asks to audit brain structure, complexity, language, or optimization need"
+    elif has_any("更新脑区", "写回", "evidence", "registry", "主线审阅", "审阅文档", "入库"):
+        selected = "brain_writeback_verified"
+        reason = "task asks for brain writeback, evidence registry, or mainline review updates"
+    elif has_any("继续实施", "实施计划", "implement", "execute", "执行计划", "please implement"):
+        selected = "executing_plan"
+        reason = "task asks to implement or continue an explicit plan"
+    elif has_any("详细计划", "计划", "方案", "设计", "深入思考", "plan", "design"):
+        selected = "writing_plan"
+        reason = "task asks for a detailed plan, design, or implementation specification"
+    else:
+        selected = "brain_handoff"
+        reason = "no stronger task intent matched; default to brain handoff"
+    return {"task": text, "selected_workflow": selected, "reason": reason}
+
+
 def build_writeback_plan(source: str, *, apply_brain_writeback: bool = False) -> dict[str, Any]:
     registry = load_workflow_registry()
     routes = dict(registry["brain_writeback"].get("writeback_routes", {}) or {})
@@ -792,6 +1125,11 @@ def write_workflow_output(kind: str, payload: dict[str, Any]) -> str:
 
 
 def print_json(payload: dict[str, Any]) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

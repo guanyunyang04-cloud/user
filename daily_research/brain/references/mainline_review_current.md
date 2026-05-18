@@ -1,6 +1,6 @@
 # daily_research 主线审阅 current
 
-Snapshot date: `2026-05-17`
+Snapshot date: `2026-05-18`
 
 Scope: this document is the rolling review entry for all attempted project mainlines since project start. It separates facts, inferences, assumptions, current stance, and next allowed actions. It does not replace `daily_research/brain/state_center.md`, and it must not be used as promotion authority.
 
@@ -13,7 +13,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - `continuous_policy` remains `research / shadow_only`.
 - `path_policy` remains `research / shadow-only`.
 - Reusable strict training-safe Gold dataset remains `continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`.
-- Near-term path/sequence policy input bundle remains `policy_input_bundle__0f116a9b78c92ff045a6853d`.
+- Near-term repaired policy input bundle is `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
 - All project mainlines are switchable current work pointers.
 - After an explicit user or governance switch, subsequent work should continue along the newly selected mainline.
 
@@ -178,6 +178,29 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Use explicit strict dataset ids.
 - Never count realtime unobserved labels as completed training evidence.
 
+## 12.5 Data Lake Universal Repair
+
+### Facts
+- 2026-05-17 current infrastructure pointer is `data_lake_universal_repair`.
+- Repair contract is recorded in `daily_research/brain/references/data_lake_universal_repair_contract_20260517.md`.
+- `policy_input_bundle__0f116a9b78c92ff045a6853d` is full-universe-shaped but has missing `000300.SH` benchmark coverage before `2018-05-14`.
+- `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` is usable from `2018-05-14`, but is capped at `1200` symbols.
+- Data lake policy bundles now support persisted benchmark `open` in `silver_benchmark.parquet`.
+- `load_policy_inputs_from_lake(..., require_benchmark_open=True)` blocks silent close-as-open fallback.
+- `python -m daily_research.data_lake.policy_input_audit` audits policy input bundle market, benchmark, membership, and feature-panel coverage.
+- Cap80 repaired smoke bundle `policy_input_bundle__c4886777fe70bfe6616e1259` passed strict audit with benchmark open required.
+- Full repaired bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict audit with benchmark open required: `2010-01-04 -> 2026-05-13`, universe size `3070`, 109 feature panels, benchmark open/close rows `3969/3969`.
+- `DEFAULT_POLICY_INPUT_LAKE_DATASET_ID` now points to `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.
+
+### Inference
+- The data-base correctness blocker is repaired for fixed-window capped pilots and future memory-safe full-universe work.
+- Path20 Stage 1 can resume on capped pilots with the repaired full bundle, but full-universe training still needs memory-safe sequence loading.
+
+### Current Stance
+- Current infrastructure repair route, completed through repaired full-bundle audit.
+- Do not mutate old bundle contents in place; create and audit a new repaired bundle.
+- Use explicit repaired dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d` for next Path20 Stage 1 pilots.
+
 ## 13. Continuous Policy r65: Portfolio-Set v5
 
 ### Facts
@@ -247,19 +270,70 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - 2026-05-17 aggressive forecast upgrade expands model families to `linear_last_day`, `mlp_last_day`, `gru_sequence`, and `patch_transformer`.
 - `gru_sequence` now uses multi-layer GRU sequence encoding with attention pooling; `patch_transformer` now uses learned positional embeddings, CLS pooling, and multi-scale patches.
 - Forecast training now supports device-aware CUDA/CPU selection, AMP, mini-batch loading, early stopping, best checkpoints, learning curves, and multi-seed family summaries.
+- 2026-05-17 multi-horizon opportunity upgrade expands Stage 1 cumulative forecast auxiliary targets from `5/10/20d` to `1/3/5/10/20d`.
+- Forecast model `aux` output now has 8 dimensions: `cum1/cum3/cum5/cum10/cum20`, downside floor, worst 1d, and upside opportunity.
+- Forecast datasets now persist `y_rank_by_horizon` for `1/3/5/10/20d` while keeping `y_rank_20d` for compatibility.
+- Forecast training/evaluation now reports multi-horizon `rank_ic`, `top_bottom_spread`, direction accuracy, upside opportunity rank/spread, `validation_multiscale_score`, and `selected_signal_profile`.
+- `--forecast-selection-profile` defaults to `multiscale` and can select by `multiscale`, `trend20`, or `short_burst` validation evidence.
+- 2026-05-17 input feature profile upgrade adds explicit Stage 1 forecast input contracts:
+  - `state_v1` keeps the previous state-feature selection for ablation.
+  - `raw_kline_v1` adds raw OHLCV/K-line shape features.
+  - `raw_kline_context_v1` is the new default and adds raw K-line, market breadth, benchmark context, and low-cost peer bucket context.
+  - `raw_kline_context_no_alpha_prior_v1` removes alpha-prior and old alpha-score dependencies.
+- Forecast dataset manifests now record feature profile, feature group counts, feature columns, cap-before/cap-after counts, and raw/market/peer/alpha-prior feature counts.
+- Forecast training summaries and best checkpoints record the feature profile metadata used for the run.
+- Stage 1 remains a per-stock sequence forecaster, not a cross-sectional attention model; interaction is represented through market/peer/context features.
+- 2026-05-17 preflight found `policy_input_bundle__0f116a9b78c92ff045a6853d` blocked for `2018-01-01 -> 2024-12-31` because benchmark coverage starts at `2018-05-14`.
+- `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` passed capped preflight from `2018-05-14`, but remains capped at `1200` symbols and is not full-universe evidence.
+- Repaired full-universe bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict data-lake audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
+- 2026-05-18 capped Stage 1 result is recorded in `daily_research/brain/references/alpha_path20_stage1_formal_cap80_result_20260518.md`.
+- Preflight tag `path20_stage1_preflight_cap80_repaired_20260518_01` completed on the repaired bundle with `raw_kline_context_v1`, `role_purge_trading_days=21`, and benchmark open loaded from `silver_benchmark.open`.
+- Pilot tag `path20_stage1_pilot_cap80_repaired_20260518_04` completed after fixing an AMP/float16 metric dtype bug in forecast metric evaluation.
+- Formal tag `path20_stage1_formal_cap80_repaired_20260518_01` completed with `max_universe_size=80`, `forecast_max_samples_per_role=8000`, four model families, seeds `7,11,19`, CUDA, AMP, best checkpoints, learning curve, and validation/test predictions.
+- Formal capped verdict is `forecast_test_confirmed`; selected model is `gru_sequence` seed `19`; selected signal profile is `multiscale`; active execution remained unchanged.
+- Selected validation metrics are positive across the five horizons: `rank_ic_1d/3d/5d/10d/20d = 0.054034/0.076536/0.087974/0.088521/0.051951` and `top_bottom_spread_1d/3d/5d/10d/20d = 0.001181/0.002272/0.001612/0.000575/0.003094`.
+- Selected validation opportunity metrics are positive: `rank_ic_upside_20d=0.090375`, `top_bottom_spread_upside_20d=0.020895`.
+- Test metrics are interpretable only because validation passed; selected test `rank_ic_20d=0.191404` and `top_bottom_spread_20d=0.058073`.
+- Patch Transformer family had stronger 20d robustness than the selected GRU family: all three seeds were `multiscale`, family validation `rank_ic_20d_mean=0.077252`, and `top_bottom_spread_20d_mean=0.012649`.
+- 2026-05-18 feature ablation result is recorded in `daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md`.
+- Feature ablation completed four profiles on the repaired bundle with cap80, samples `8000` per role, epochs `60`, seeds `7,11`, CUDA, and AMP:
+  - `state_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `7`, signal profile `trend_20d`, validation `rank_ic_20d=0.052529`, `top_bottom_spread_20d=0.000463`, `rank_ic_upside_20d=-0.035122`.
+  - `raw_kline_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.099878`, `top_bottom_spread_20d=0.011222`, `rank_ic_upside_20d=-0.006853`.
+  - `raw_kline_context_v1`: `forecast_test_confirmed`, selected `gru_sequence` seed `7`, signal profile `multiscale`, validation `rank_ic_20d=0.067361`, `top_bottom_spread_20d=0.004410`, `rank_ic_upside_20d=0.120046`.
+  - `raw_kline_context_no_alpha_prior_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.086905`, `top_bottom_spread_20d=0.015142`, `rank_ic_upside_20d=-0.050637`.
+- 2026-05-18 memory-safe forecast dataset pipe is implemented and recorded in `daily_research/brain/references/path20_memory_safe_forecast_dataset_contract_20260518.md`.
+- Stage 1 now supports `--forecast-dataset-mode memmap`, which writes a disk feature store `[date, stock, feature]`, a lightweight sample index, and label memmaps.
+- Forecast training now consumes eager or memmap datasets through a unified dataset view and can load lookback windows per batch instead of materializing all `[N,252,F]` samples in RAM.
+- Full-universe `--max-universe-size 0` with eager forecast mode is blocked by protocol validation and requires `--forecast-dataset-mode memmap`.
+- Memmap mode adds history-valid-ratio filtering and stratified validation/test metrics by train-seen status and history bucket.
+- This memory-safe pipe fixes the main RAM feasibility blocker but does not yet implement true cross-stock attention; stock-to-stock relations remain represented through context and peer features.
 
 ### Inference
 - The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
 - Neural-policy evidence is now current Path20 mainline evidence, but still shadow-only and not live/default promotion evidence.
-- Forecast success must be judged validation-first with positive `rank_ic_20d`, positive `top_bottom_spread_20d`, and reasonable quantile coverage; daily MSE alone is insufficient.
+- Forecast success must be judged validation-first by signal profile: 20d trend, short burst, multiscale, or failed. Daily MSE alone is insufficient.
+- The multi-horizon upgrade is designed to answer whether some stocks have useful 1-5d burst information inside the 20d path, without letting 1d noise dominate selection.
+- The feature profile upgrade is designed to test whether raw K-line shape and low-cost interaction context add signal beyond the old state-vector baseline.
+- Raw K-line is not treated as automatically sufficient; ablations must compare it against technical/state/context and no-alpha-prior variants.
+- True cross-sectional transformer or stock-to-stock attention is deferred until memory-safe day-grouped sequence loading exists.
 - The aggressive upgrade increases model capacity and training auditability before long training, but does not itself create strategy evidence or a promotion path.
+- Path20 Stage 1 is no longer blocked by the old benchmark coverage gap for capped pilots, provided it uses the repaired full bundle explicitly.
+- Capped formal Stage 1 evidence is positive for the prediction task and supports moving to ablation and Stage 2 design, but it remains capped, research-only, and non-promotional.
+- The selection rule needs review before larger runs because the chosen GRU seed is valid under the implemented family-level rule, while Patch Transformer looks stronger on 20d family stability.
+- Feature ablation supports using raw K-line features: `raw_kline_v1` materially improves validation rank/spread over `state_v1`.
+- Feature ablation supports that the signal is not only legacy alpha-prior replay: `raw_kline_context_no_alpha_prior_v1` remains multiscale and positive across validation 1d/3d/5d/10d/20d rank/spread.
+- Market/benchmark/peer context appears especially useful for upside opportunity capture because only `raw_kline_context_v1` selected run has strongly positive validation `rank_ic_upside_20d` and upside spread.
+- Full-universe Stage 1 training is no longer blocked by the eager-only design, but still requires a real repaired-bundle memmap dataset smoke and training smoke before evidence-grade full-universe runs.
 
 ### Current Stance
 - Current Path20 research route.
 - Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
-- Do not start long training or touch active execution without a separate explicit task.
+- Do not touch active execution or infer live/default promotion from capped forecast evidence.
 - Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
+- Use completed feature ablation as the input evidence baseline; do not treat any single profile as final without considering raw K-line, context, and no-alpha-prior tradeoffs.
+- Next priority is selection-rule review and Stage 2 allocator/oracle/replay design, with separate handling for multiscale trend/path and upside opportunity capture.
+- Do not run full-universe training until repaired-bundle memmap dataset and training smokes pass.
 
 ## 18. Path20 Sequence Policy v1
 

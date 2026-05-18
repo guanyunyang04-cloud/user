@@ -7,6 +7,9 @@ from torch import nn
 import torch.nn.functional as F
 
 
+PATH20_FORECAST_AUX_DIM = 8
+
+
 @dataclass(frozen=True)
 class PathPolicyModelConfig:
     stock_feature_dim: int
@@ -21,7 +24,7 @@ class Path20ForecasterMLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 128, dropout: float = 0.10, horizon: int = 20) -> None:
         super().__init__()
         self.horizon = int(horizon)
-        output_dim = self.horizon * 4 + 6
+        output_dim = self.horizon * 4 + PATH20_FORECAST_AUX_DIM
         self.net = nn.Sequential(
             nn.LayerNorm(int(input_dim)),
             nn.Linear(int(input_dim), int(hidden_dim)),
@@ -68,7 +71,7 @@ class LinearPath20Forecaster(nn.Module):
     def __init__(self, input_dim: int, horizon: int = 20) -> None:
         super().__init__()
         self.horizon = int(horizon)
-        self.head = nn.Linear(int(input_dim), self.horizon * 4 + 6)
+        self.head = nn.Linear(int(input_dim), self.horizon * 4 + PATH20_FORECAST_AUX_DIM)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         return _split_path20_outputs(self.head(x), self.horizon)
@@ -80,7 +83,7 @@ class DLinearPath20Forecaster(nn.Module):
         self.horizon = int(horizon)
         self.seasonal = nn.Linear(int(input_dim), int(hidden_dim))
         self.trend = nn.Linear(int(input_dim), int(hidden_dim))
-        self.head = nn.Linear(int(hidden_dim) * 2, self.horizon * 4 + 6)
+        self.head = nn.Linear(int(hidden_dim) * 2, self.horizon * 4 + PATH20_FORECAST_AUX_DIM)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if x.ndim == 2:
@@ -121,7 +124,7 @@ class GRUPath20Forecaster(nn.Module):
             nn.Linear(self.hidden_dim * 2, self.hidden_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(self.hidden_dim, self.horizon * 4 + 6),
+            nn.Linear(self.hidden_dim, self.horizon * 4 + PATH20_FORECAST_AUX_DIM),
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -174,13 +177,17 @@ class PatchTransformerPath20Forecaster(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(int(num_layers), 1))
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=max(int(num_layers), 1),
+            enable_nested_tensor=False,
+        )
         self.head = nn.Sequential(
             nn.LayerNorm(self.hidden_dim),
             nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(self.hidden_dim, self.horizon * 4 + 6),
+            nn.Linear(self.hidden_dim, self.horizon * 4 + PATH20_FORECAST_AUX_DIM),
         )
         nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.scale_embeddings, std=0.02)

@@ -23,6 +23,14 @@ class DailyResearchBrainSkillTest(unittest.TestCase):
         self.assertIn("writeback-plan", text)
         self.assertNotIn("r10-r52", text)
 
+    def test_skill_mentions_api_fallback(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("API fallback", text)
+        self.assertIn("workflow auto", text)
+        self.assertIn("workflow-guide", text)
+        self.assertNotIn("Superpowers plugin body", text)
+
     def test_install_dry_run_does_not_copy_skill(self) -> None:
         target_root = ROOT / "daily_research/output/test_skill_install_target"
         before_exists = target_root.exists()

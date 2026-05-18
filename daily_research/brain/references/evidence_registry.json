@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 34,
+  "record_count": 40,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -40,18 +40,21 @@
       "study_tags": [],
       "verdict": "Status: `implemented supervised forecast contract / research / shadow-only / no promotion`.; Current Path20 research mainline pointer remains `alpha_path20_neural_policy_v1`.; Stage 1 scope is only forecast validation: past stock state sequence -> future 20 trading-day excess-return path.; This is not allocator, oracle, replay, or live/default strategy evidence.",
       "blockers": [
+        "Training summaries include `selected_signal_profile`, one of `multiscale`, `trend_20d`, `short_burst`, or `failed`.",
         "`insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.",
         "`forecast_failed` when validation rank/spread/calibration gates fail.",
+        "Validation rank/spread now needs to be read as a profile: 20d trend, short burst, multiscale, or failed. This avoids losing stocks whose real opportunity is concentrated in the first few days of the 20d window.",
         "Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress."
       ],
       "next_allowed_actions": [
-        "Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.",
-        "After explicit approval, run:",
-        "Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments."
+        "Inspect selection policy before larger experiments: compare family mean, best seed, 20d robustness, multiscale score, and coverage gates.",
+        "Design Stage 2 allocator/oracle/replay experiments only as research/shadow follow-up to capped prediction and feature-ablation evidence.",
+        "Implement memory-safe sequence loading before any full-universe `max_universe_size=0` Stage 1 run."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
-        "policy_input_bundle__0f116a9b78c92ff045a6853d"
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
     },
     {
@@ -217,6 +220,143 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_stage1_feature_ablation_result_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `completed feature ablation evidence / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.; Shared window: train `2019-2022`, validation `2023`, test `2024`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Inspect and possibly revise forecast model-selection policy before larger experiments, because selected family/seed can differ from the family that is strongest on 20d robustness.",
+        "Run a lower-cost repeat ablation or bootstrap over different cap80 symbol slices if robustness across universe slice is required.",
+        "Design Stage 2 allocator/oracle/replay as a shadow-only follow-up, with separate tracks for:",
+        "multiscale trend/path allocation;",
+        "short-burst/opportunity capture;",
+        "alpha-prior-free allocation sanity checks."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_path20_stage1_formal_cap80_result_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_stage1_formal_cap80_result_20260518.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `completed capped formal forecast evidence / forecast_test_confirmed / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_stage1_formal_cap80_repaired_20260518_01`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
+      "blockers": [
+        "Pilot `_03` exposed a metric dtype bug: AMP/CUDA predictions could reach Pandas as `float16`, and `nlargest/nsmallest` failed during top-bottom spread computation."
+      ],
+      "next_allowed_actions": [
+        "Use completed feature ablation evidence in `daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md`.",
+        "Inspect why the family-level selector preferred GRU while Patch Transformer had stronger 20d family metrics; decide whether selection should prefer family mean, best seed, or a robustness-weighted hybrid before larger experiments.",
+        "Design Stage 2 allocator/oracle/replay only after documenting ablation results and preserving validation-first interpretation.",
+        "Before full-universe Stage 1, implement memory-safe sequence loading and batched prediction writing."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "api_agent_bootstrap_prompt_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/api_agent_bootstrap_prompt_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "",
+      "blockers": [],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "brain_native_superpowers_contract_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_native_superpowers_contract_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain-native workflow migration contract / API fallback / no plugin dependency`.; Purpose: preserve useful Superpowers-style workflow discipline when API sessions cannot load the plugin.; This is a brain operating-system enhancement, not a research mainline switch, strategy change, or active execution change.; `daily_research/output/active_execution_strategy.json` must remain unchanged.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `capsule --workflow auto` as the API bootstrap entrypoint.",
+        "Add new project-native workflows only when they have explicit checklist, stop conditions, completion criteria, and guard commands.",
+        "Keep workflow docs compact; put long evidence and dated contracts in `daily_research/brain/references/`."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "brain_system_refactor_status_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_system_refactor_status_20260518.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [],
+      "verdict": "Status: `brain_system_refactor / completed control-plane migration`.; Workflow: `brain`.; Active artifact impact: `daily_research/output/active_execution_strategy.json` remains unchanged by design.; Scope: brain catalog, split workflow registry, audit CLI, language policy, doc/integrity guards, and reference writeback.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Use `brain_system_audit` for future “脑区乱不乱 / 复杂不复杂 / 是否需要优化” questions.",
+        "Attach any future discovered brain only through `brain/brain_manifest.json` plus catalog/integrity guards."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
+    },
+    {
+      "id": "data_lake_universal_repair_contract_20260517",
+      "date": "2026-05-17",
+      "r_id": "",
+      "path": "daily_research/brain/references/data_lake_universal_repair_contract_20260517.md",
+      "tags": [
+        "research_data_lake",
+        "data_lake"
+      ],
+      "workflow": "research_data_lake",
+      "study_tags": [],
+      "verdict": "Status: `current infrastructure mainline / data_lake_universal_repair / research / shadow-only / no promotion`.; The current work pointer is temporarily switched from Path20 Stage 1 training to universal data-lake repair because the base policy input bundle must be trustworthy before forecast evidence is interpretable.; Boundary: this contract repairs data correctness and auditability only. It does not change live/default execution and does not modify `daily_research/output/active_execution_strategy.json`.",
+      "blockers": [
+        "Do not run Path20 Stage 1 formal training on `policy_input_bundle__0f116a9b78c92ff045a6853d` for `2019-2024`; use the repaired full bundle instead.",
+        "Do not treat `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` as full-universe evidence; it is capped and starts at `2018-05-14`.",
+        "Do not run full-universe Path20 forecast training with the eager `[N,252,F]` dataset until memory-safe sequence loading exists."
+      ],
+      "next_allowed_actions": [
+        "Use `policy_input_bundle__7c8f58d851bce8179e1e9e2d` for future repaired full-universe policy-input audits and capped Path20 Stage 1 pilots.",
+        "Do not run full-universe Path20 Stage 1 training until memory-safe sequence loading exists.",
+        "If running capped Stage 1 pilots, keep explicit `--lake-dataset-id policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
+        "Keep `active_execution_strategy.json` unchanged throughout this repair line."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d",
+        "policy_input_bundle__4db1a32ab6e7d77ac7b8671c",
+        "policy_input_bundle__c4886777fe70bfe6616e1259",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
     },
     {

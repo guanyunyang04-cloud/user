@@ -599,6 +599,7 @@ class ResearchDataLake:
         spec: Mapping[str, Any],
         market_frames: Mapping[str, pd.DataFrame],
         benchmark_close: pd.Series,
+        benchmark_open: pd.Series | None = None,
         membership_frame: pd.DataFrame,
         feature_frames: Mapping[str, pd.DataFrame],
         source: str,
@@ -606,12 +607,15 @@ class ResearchDataLake:
     ) -> LakeDatasetRecord:
         dataset_kind = "policy_input_bundle"
         zone = "research"
+        effective_spec = dict(spec)
+        if benchmark_open is not None and "benchmark_fields" not in effective_spec:
+            effective_spec["benchmark_fields"] = ["open", "close"]
         fingerprint = _stable_hash(
             {
                 "schema_version": DATA_LAKE_SCHEMA_VERSION,
                 "dataset_kind": dataset_kind,
                 "zone": zone,
-                "spec": dict(spec),
+                "spec": effective_spec,
             }
         )
         dataset_id = f"{dataset_kind}__{fingerprint}"
@@ -641,13 +645,22 @@ class ResearchDataLake:
         dataset_dir.mkdir(parents=True, exist_ok=True)
         market_long = self._market_frames_to_long(market_frames, source=source)
         market_long.to_parquet(content_paths["bronze_market_data"], index=False)
+        close_series = pd.Series(pd.to_numeric(benchmark_close, errors="coerce"), index=pd.to_datetime(benchmark_close.index), name=benchmark_close.name)
+        benchmark_dates = pd.Index(pd.to_datetime(close_series.index)).dropna().unique()
+        open_series: pd.Series | None = None
+        if benchmark_open is not None:
+            open_series = pd.Series(pd.to_numeric(benchmark_open, errors="coerce"), index=pd.to_datetime(benchmark_open.index), name=benchmark_open.name)
+            benchmark_dates = benchmark_dates.union(pd.Index(pd.to_datetime(open_series.index)).dropna().unique())
+        benchmark_dates = pd.Index(sorted(benchmark_dates))
         benchmark = pd.DataFrame(
             {
-                "trade_date": pd.to_datetime(benchmark_close.index).strftime("%Y-%m-%d"),
-                "benchmark": str(spec.get("benchmark", benchmark_close.name or "") or ""),
-                "close": pd.to_numeric(benchmark_close, errors="coerce").to_numpy(dtype=float),
+                "trade_date": pd.to_datetime(benchmark_dates).strftime("%Y-%m-%d"),
+                "benchmark": str(effective_spec.get("benchmark", benchmark_close.name or "") or ""),
+                "close": close_series.reindex(benchmark_dates).to_numpy(dtype=float),
             }
         )
+        if open_series is not None:
+            benchmark["open"] = open_series.reindex(benchmark_dates).to_numpy(dtype=float)
         benchmark.to_parquet(content_paths["silver_benchmark"], index=False)
         membership_out = membership_frame.copy()
         if "date" in membership_out.columns and "trade_date" not in membership_out.columns:
@@ -673,7 +686,11 @@ class ResearchDataLake:
             "silver_feature_cells": int(feature_cells),
             "_date_bounds": {"start_date": start_date, "end_date": end_date},
         }
-        merged_spec = {**dict(spec), "start_date": str(spec.get("start_date", "") or start_date), "end_date": str(spec.get("end_date", "") or end_date)}
+        merged_spec = {
+            **effective_spec,
+            "start_date": str(effective_spec.get("start_date", "") or start_date),
+            "end_date": str(effective_spec.get("end_date", "") or end_date),
+        }
         self._upsert_dataset(
             dataset_id=dataset_id,
             dataset_kind=dataset_kind,

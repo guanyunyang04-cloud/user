@@ -13,7 +13,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
-from daily_research.tools.brain_platform import read_text as platform_read_text
+from daily_research.tools.brain_platform import build_brain_catalog, read_text as platform_read_text
 from daily_research.tools.brain_integrity_check import run_checks as run_brain_integrity_checks
 
 
@@ -26,6 +26,8 @@ DEFAULT_DOCS = [
     "brain/operations_center.md",
     "brain/governance_layer.md",
     "brain/brain_manifest.json",
+    "brain/brain_catalog.json",
+    "brain/language_policy.md",
     "daily_research/brain/identity_layer.md",
     "daily_research/brain/state_center.md",
     "daily_research/brain/knowledge_center.md",
@@ -37,6 +39,8 @@ DEFAULT_DOCS = [
     "daily_research/brain/brain_operating_protocol.md",
     "daily_research/brain/brain_manifest.json",
     "daily_research/brain/workflow_registry.json",
+    "daily_research/brain/workflows/registry.json",
+    "daily_research/brain/workflows/playbooks/core.json",
     "t0_project/brain/identity_layer.md",
     "t0_project/brain/state_center.md",
     "t0_project/brain/knowledge_center.md",
@@ -385,24 +389,54 @@ REQUIRED_DOC_SNIPPETS = {
 MAIN_MANIFEST = Path("brain/brain_manifest.json")
 SHARED_CONTRACT_KEY = "shared_regional_brain_contract"
 MOJIBAKE_TOKENS = (
-    "銆",
-    "锛",
-    "€",
-    "identity銆",
-    "state銆",
-    "knowledge銆",
-    "operations銆",
-    "governance锛",
-    "鏃犵姸鎬",
-    "鍏堟帴",
-    "澶ц剳",
-    "韬唤",
-    "body 鍦板浘",
+    "\u93bf",
+    "\u942d",
+    "\u7ecb",
+    "\u951b",
+    "\u9286",
+    "\u6b5a",
+    "\u4e63",
+    "\u6d93",
+    "\u6d60",
+    "\u93c3",
+    "\u934f",
+    "\u6fbe",
+    "\u97ac",
+    "\u20ac",
 )
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _read_text(path: Path) -> str:
     return platform_read_text(path)
+
+
+def _default_docs() -> list[str]:
+    docs = list(DEFAULT_DOCS)
+    try:
+        catalog = build_brain_catalog()
+    except Exception:
+        return docs
+    for item in catalog.get("brains", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") not in {"canonical_root", "attached"}:
+            continue
+        root = Path(str(item.get("root", "")))
+        for name in (
+            "identity_layer.md",
+            "state_center.md",
+            "knowledge_center.md",
+            "brain_architecture.md",
+            "operations_center.md",
+            "governance_layer.md",
+            "episodic_memory.md",
+            "brain_manifest.json",
+        ):
+            candidate = (root / name).as_posix()
+            if candidate not in docs and (WORKSPACE_ROOT / candidate).exists():
+                docs.append(candidate)
+    return docs
 
 
 def _load_main_manifest() -> dict[str, Any]:
@@ -513,6 +547,25 @@ def _suspicious_mojibake_lines(lines: Iterable[str]) -> list[str]:
         if any(token in line for token in MOJIBAKE_TOKENS):
             out.append(line)
     return out
+
+
+def _is_core_brain_markdown(normalized: str) -> bool:
+    if not normalized.endswith(".md"):
+        return False
+    if "/references/" in normalized or "/skills/" in normalized:
+        return False
+    return normalized.startswith(BRAIN_DOC_PREFIXES)
+
+
+def _check_language_policy_text(text: str, normalized: str) -> list[str]:
+    issues: list[str] = []
+    if not _is_core_brain_markdown(normalized):
+        return issues
+    if not CJK_RE.search(text):
+        issues.append("core_brain_doc_missing_chinese_semantics")
+    if any(token in text for token in MOJIBAKE_TOKENS) or "\ufffd" in text:
+        issues.append("core_brain_doc_contains_mojibake_marker")
+    return issues
 
 
 def _normalized_path(path: Path) -> str:
@@ -964,6 +1017,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         tail = _tail_lines(text, args.tail_lines)
         tail_question_lines = _suspicious_question_lines(tail)
         mojibake_lines = _suspicious_mojibake_lines(lines)
+        normalized = _normalized_path(path)
+        language_issues = _check_language_policy_text(text, normalized)
         rule = _resolve_rule(path)
 
         print(f"[check] {path}")
@@ -971,6 +1026,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"  replacement_char_count={replacement_count}")
         print(f"  suspicious_question_lines_in_tail={len(tail_question_lines)}")
         print(f"  suspicious_mojibake_lines={len(mojibake_lines)}")
+        print(f"  language_policy_issues={len(language_issues)}")
 
         if replacement_count or tail_question_lines or mojibake_lines:
             has_issue = True
@@ -978,6 +1034,10 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(f"    ? {line}")
             for line in mojibake_lines[: args.show_lines]:
                 print(f"    ! {line}")
+        if language_issues:
+            has_issue = True
+            for issue in language_issues[: args.show_lines]:
+                print(f"    ! {issue}")
 
         if rule and rule.warn_lines is not None and line_count > rule.warn_lines:
             print(f"  structural_warning=line_count_exceeds_warning ({line_count} > {rule.warn_lines})")
@@ -1076,7 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("check", help="Check brain docs for encoding damage and structure drift.")
-    check.add_argument("--files", nargs="+", default=DEFAULT_DOCS)
+    check.add_argument("--files", nargs="+", default=_default_docs())
     check.add_argument("--tail-lines", type=int, default=120)
     check.add_argument("--show-lines", type=int, default=12)
     check.set_defaults(func=cmd_check)

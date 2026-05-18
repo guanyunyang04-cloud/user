@@ -95,7 +95,11 @@ class DecisionTransformerTargetWeightPolicy(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(layer, num_layers=max(int(num_layers), 1))
+        self.encoder = nn.TransformerEncoder(
+            layer,
+            num_layers=max(int(num_layers), 1),
+            enable_nested_tensor=False,
+        )
         self.score_head = nn.Linear(int(config.hidden_dim), 1)
         self.cash_head = nn.Sequential(
             nn.LayerNorm(int(config.hidden_dim)),
@@ -182,8 +186,16 @@ class PortfolioDecisionTransformerPolicy(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.temporal_encoder = nn.TransformerEncoder(temporal_layer, num_layers=max(int(temporal_layers), 1))
-        self.cross_encoder = nn.TransformerEncoder(cross_layer, num_layers=max(int(cross_layers), 1))
+        self.temporal_encoder = nn.TransformerEncoder(
+            temporal_layer,
+            num_layers=max(int(temporal_layers), 1),
+            enable_nested_tensor=False,
+        )
+        self.cross_encoder = nn.TransformerEncoder(
+            cross_layer,
+            num_layers=max(int(cross_layers), 1),
+            enable_nested_tensor=False,
+        )
         self.score_head = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, 1),

@@ -487,6 +487,7 @@ def prepare_policy_inputs(
     alpha_prior_source: str = DEFAULT_ALPHA_PRIOR_SOURCE,
     alpha_prior_score_panel: str = "",
     alpha_prior_target_weight_panel: str = "",
+    require_lake_benchmark_open: bool = False,
     refresh_cache: bool = False,
     auto_trim_history: bool = True,
     progress_desc: str = "continuous policy prepare",
@@ -518,6 +519,7 @@ def prepare_policy_inputs(
             alpha_prior_source=alpha_prior_source,
             alpha_prior_score_panel=alpha_prior_score_panel,
             alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
+            require_benchmark_open=bool(require_lake_benchmark_open),
         )
     universe = resolve_policy_universe(
         pool_name=resolved_pool_name,
@@ -795,6 +797,8 @@ def build_cross_section_state(
         0.0,
         np.clip((6.0 - np.nan_to_num(days_since_last_sell.to_numpy(dtype=float), nan=99.0)) / 6.0, 0.0, 1.0),
     )
+    # Consolidate the many assembled feature blocks before adding late diagnostic columns.
+    row = row.copy()
     row["recent_buy_flag"] = np.where(np.nan_to_num(days_since_last_buy.to_numpy(dtype=float), nan=99.0) <= 3.0, 1.0, 0.0)
     row["recent_sell_flag"] = np.where(np.nan_to_num(days_since_last_sell.to_numpy(dtype=float), nan=99.0) <= 5.0, 1.0, 0.0)
     for action_name in ("open", "hold", "add", "reduce", "exit"):

@@ -13,6 +13,7 @@ from daily_research.data_lake.gold_training_builder import (
     GoldBuildSpec,
     build_sharded_gold_training_dataset,
 )
+from daily_research.data_lake.policy_input_audit import audit_policy_input_bundle
 from daily_research.data_lake.policy_input_loader import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, load_policy_inputs_from_lake
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "ResearchDataLake",
     "GoldBuildSpec",
     "audit_gold_dataset",
+    "audit_policy_input_bundle",
     "build_label_completeness_summary",
     "build_sharded_gold_training_dataset",
     "DEFAULT_POLICY_INPUT_LAKE_DATASET_ID",

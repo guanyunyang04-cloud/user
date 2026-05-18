@@ -161,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 **base_spec,
                 "dataset": "policy_input_bundle",
                 "source": prepared.data_source,
+                "benchmark_fields": ["open", "close"],
             },
             market_frames={
                 "Open": prepared.open_,
@@ -171,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Amount": prepared.amount,
             },
             benchmark_close=prepared.benchmark_close,
+            benchmark_open=prepared.benchmark_open,
             membership_frame=prepared.membership_frame,
             feature_frames={
                 "score_none": prepared.score_none,

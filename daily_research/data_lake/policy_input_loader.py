@@ -13,7 +13,7 @@ from daily_research.continuous_policy.state_builder import (
 )
 from daily_research.data_lake.catalog import ResearchDataLake
 
-DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__0f116a9b78c92ff045a6853d"
+DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 
 
 def _read_feature_panel(path: Path) -> pd.DataFrame:
@@ -102,11 +102,14 @@ def _lake_coverage_report(
     volume: pd.DataFrame,
     amount: pd.DataFrame,
     benchmark_close: pd.Series,
+    benchmark_open: pd.Series,
+    benchmark_open_source: str,
     membership_frame: pd.DataFrame,
     start_date: str,
     end_date: str,
     dataset_id: str,
     min_trading_days: int,
+    require_benchmark_open: bool = False,
 ) -> dict[str, Any]:
     price_frames = {
         "close": close,
@@ -134,6 +137,10 @@ def _lake_coverage_report(
         blockers.append("missing_market_fields")
     if benchmark_close.empty or int(benchmark_close.notna().sum()) < max(1, trading_days):
         blockers.append("missing_benchmark")
+    benchmark_open_rows = int(benchmark_open.notna().sum()) if not benchmark_open.empty else 0
+    if bool(require_benchmark_open):
+        if str(benchmark_open_source) != "silver_benchmark.open" or benchmark_open_rows < max(1, trading_days):
+            blockers.append("missing_benchmark_open")
     if membership_frame.empty or membership_true_rows <= 0:
         blockers.append("missing_membership")
     return {
@@ -147,6 +154,10 @@ def _lake_coverage_report(
         "missing_fields": missing_fields,
         "market_nan_cells": frame_nan_cells,
         "benchmark_rows": int(benchmark_close.notna().sum()) if not benchmark_close.empty else 0,
+        "benchmark_close_rows": int(benchmark_close.notna().sum()) if not benchmark_close.empty else 0,
+        "benchmark_open_rows": benchmark_open_rows,
+        "benchmark_open_source": str(benchmark_open_source),
+        "require_benchmark_open": bool(require_benchmark_open),
         "membership_rows": int(len(membership_frame.index)),
         "membership_true_rows": membership_true_rows,
         "blockers": blockers,
@@ -181,6 +192,7 @@ def load_policy_inputs_from_lake(
     alpha_prior_source: str = "none",
     alpha_prior_score_panel: str = "",
     alpha_prior_target_weight_panel: str = "",
+    require_benchmark_open: bool = False,
 ) -> PreparedPolicyInputs:
     dataset_id = str(dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     metadata = lake.describe_dataset(dataset_id)
@@ -244,14 +256,18 @@ def load_policy_inputs_from_lake(
             index=pd.to_datetime(benchmark_frame["trade_date"]),
             name=str(benchmark or metadata.get("benchmark", "") or "000300.SH"),
         ).sort_index()
+        benchmark_close.index.name = None
     if "open" in benchmark_frame.columns and not benchmark_frame.empty:
         benchmark_open = pd.Series(
             pd.to_numeric(benchmark_frame["open"], errors="coerce").to_numpy(dtype=float),
             index=pd.to_datetime(benchmark_frame["trade_date"]),
             name=str(benchmark_close.name),
         ).sort_index()
+        benchmark_open.index.name = None
+        benchmark_open_source = "silver_benchmark.open"
     else:
         benchmark_open = benchmark_close.copy()
+        benchmark_open_source = "fallback_close"
 
     membership_path = str(paths.get("silver_membership", "") or "")
     if not membership_path:
@@ -294,11 +310,14 @@ def load_policy_inputs_from_lake(
         volume=volume,
         amount=amount,
         benchmark_close=benchmark_close,
+        benchmark_open=benchmark_open,
+        benchmark_open_source=benchmark_open_source,
         membership_frame=membership_frame,
         start_date=start_date,
         end_date=end_date,
         dataset_id=dataset_id,
         min_trading_days=int(min_trading_days or 1),
+        require_benchmark_open=bool(require_benchmark_open),
     )
     _raise_lake_coverage_blocker(coverage_report)
 

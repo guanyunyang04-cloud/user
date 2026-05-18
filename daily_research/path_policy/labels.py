@@ -12,7 +12,7 @@ from daily_research.continuous_policy.state_builder import PreparedPolicyInputs,
 
 PATH20_HORIZON = 20
 PATH20_QUANTILES: tuple[float, ...] = (0.10, 0.50, 0.90)
-PATH20_CUMULATIVE_HORIZONS: tuple[int, ...] = (5, 10, 20)
+PATH20_CUMULATIVE_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,9 @@ def build_path20_labels(
             horizon=step,
             execution_mode=execution_mode,
         )
-        excess = stock_ret.sub(bench_ret, axis=0)
+        excess = daily_excess_return[1].copy()
+        for daily_step in range(2, int(step) + 1):
+            excess = excess.add(daily_excess_return[daily_step], fill_value=np.nan)
         cumulative_return[step] = stock_ret
         cumulative_excess_return[step] = excess
         rank = excess.rank(axis=1, pct=True)
