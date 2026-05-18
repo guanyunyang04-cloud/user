@@ -12,7 +12,7 @@ from daily_research.tools.brain_platform import WORKSPACE_ROOT, read_text, write
 REGISTRY_PATH = Path("daily_research/brain/references/evidence_registry.json")
 REFERENCE_ROOT = Path("daily_research/brain/references")
 STATUS_DOC_PATTERN = re.compile(r"^(r\d+[a-z]?|gpu-runtime)-.+\.md$")
-PATH_POLICY_DOC_PATTERN = re.compile(r"^alpha_path20_.+\.md$")
+PATH_POLICY_DOC_PATTERN = re.compile(r"^(alpha_path20|path20)_.+\.md$")
 DATA_LAKE_DOC_PATTERN = re.compile(r"^data_lake_.+\.md$")
 BRAIN_NATIVE_DOC_PATTERN = re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$")
 R_ID_PATTERN = re.compile(r"\br\d+[a-z]?\b", re.IGNORECASE)

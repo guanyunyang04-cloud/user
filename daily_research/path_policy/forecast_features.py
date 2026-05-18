@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 import warnings
 
@@ -217,9 +218,11 @@ def _selected_columns_for_profile(
     state_columns: list[str],
     raw_columns: list[str],
     context_columns: list[str],
+    history_columns: list[str] | None = None,
     feature_profile: str,
 ) -> tuple[list[str], dict[str, str]]:
     column_groups: dict[str, str] = {column: "state" for column in state_columns}
+    history_columns = list(history_columns or [])
     if feature_profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
         column_groups.update({column: "raw_kline" for column in raw_columns})
     if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
@@ -230,11 +233,13 @@ def _selected_columns_for_profile(
                 column_groups[column] = "peer_context"
             else:
                 column_groups[column] = "context"
+        column_groups.update({column: "history_quality" for column in history_columns})
     columns = [column for column in state_columns if column in column_groups]
     if feature_profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
         columns.extend([column for column in raw_columns if column in column_groups])
     if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
         columns.extend([column for column in context_columns if column in column_groups])
+        columns.extend([column for column in history_columns if column in column_groups])
     if feature_profile == "raw_kline_context_no_alpha_prior_v1":
         columns = [column for column in columns if not _alpha_dependent_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
@@ -255,6 +260,7 @@ def _manifest_for_columns(
         "market_context": 0,
         "peer_context": 0,
         "alpha_prior": 0,
+        "history_quality": 0,
     }
     for column in selected_columns:
         group = column_groups.get(column, "state")
@@ -272,6 +278,7 @@ def _manifest_for_columns(
         "market_context_feature_count": int(group_counts["market_context"]),
         "peer_context_feature_count": int(group_counts["peer_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
+        "history_quality_feature_count": int(group_counts["history_quality"]),
         "feature_columns": list(selected_columns),
     }
 
@@ -289,8 +296,14 @@ def _cap_feature_columns(
 
     priority_groups = {"raw_kline"}
     if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
-        priority_groups.update({"market_context", "peer_context"})
-    priority_columns = [column for column in all_columns if column_groups.get(column) in priority_groups]
+        priority_groups.update({"market_context", "peer_context", "history_quality"})
+    priority_order = ["raw_kline", "history_quality", "market_context", "peer_context"]
+    priority_columns = [
+        column
+        for group in priority_order
+        for column in all_columns
+        if column_groups.get(column) == group and group in priority_groups
+    ]
     non_priority_columns = [column for column in all_columns if column not in set(priority_columns)]
     non_priority_budget = max(cap - len(priority_columns), 0)
     selected = non_priority_columns[:non_priority_budget]
@@ -347,6 +360,7 @@ def build_forecast_feature_panels(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
         context_columns=list(context_frames),
+        history_columns=[],
         feature_profile=profile,
     )
     cap = max(int(max_feature_columns), 1)
@@ -380,6 +394,180 @@ def build_forecast_feature_panels(
         panel = pd.DataFrame(extra_parts, index=universe).apply(pd.to_numeric, errors="coerce")
         panels[dt] = panel.reindex(columns=selected_columns).astype(float)
     return panels, selected_columns, manifest
+
+
+def _history_quality_feature_frames(
+    prepared: PreparedPolicyInputs,
+    *,
+    lookback_days: int,
+    min_lookback_valid_ratio: float,
+) -> dict[str, pd.DataFrame]:
+    columns = [str(item) for item in prepared.close.columns]
+    index = prepared.close.index
+    core_frames = [
+        prepared.open_.reindex(index=index, columns=columns),
+        prepared.high.reindex(index=index, columns=columns),
+        prepared.low.reindex(index=index, columns=columns),
+        prepared.close.reindex(index=index, columns=columns),
+        prepared.volume.reindex(index=index, columns=columns),
+        prepared.amount.reindex(index=index, columns=columns),
+    ]
+    daily_core_valid = core_frames[0].notna()
+    for frame in core_frames[1:]:
+        daily_core_valid = daily_core_valid & frame.notna()
+    window = max(int(lookback_days), 1)
+    valid_days = daily_core_valid.astype(float).rolling(window, min_periods=1).sum()
+    valid_ratio = valid_days.div(float(window)).clip(lower=0.0, upper=1.0)
+    low_history = valid_ratio.lt(float(min_lookback_valid_ratio)).astype(float).where(valid_ratio.notna())
+    return {
+        "history_valid_days_252": valid_days,
+        "history_valid_ratio_252": valid_ratio,
+        "core_ohlcv_valid_ratio_252": valid_ratio.copy(),
+        "is_low_history_like": low_history,
+    }
+
+
+def build_forecast_feature_store(
+    prepared: PreparedPolicyInputs,
+    dates: list[pd.Timestamp],
+    *,
+    root: Path,
+    feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
+    max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
+    lookback_days: int = 252,
+    min_lookback_valid_ratio: float = 0.80,
+) -> tuple[Path, list[str], dict[str, Any], pd.DataFrame]:
+    profile = str(feature_profile or DEFAULT_FORECAST_FEATURE_PROFILE).strip()
+    if profile not in FORECAST_FEATURE_PROFILES:
+        raise ValueError(f"Unsupported forecast feature profile: {profile}")
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    normalized_dates = [pd.Timestamp(dt).normalize() for dt in dates]
+    universe = [str(stock).strip().upper() for stock in prepared.universe]
+    feature_store_path = root / "forecast_feature_store.dat"
+    if not normalized_dates:
+        manifest = _manifest_for_columns(
+            feature_profile=profile,
+            all_columns=[],
+            selected_columns=[],
+            column_groups={},
+            max_feature_columns=max_feature_columns,
+        )
+        manifest.update(
+            {
+                "feature_store_path": str(feature_store_path.resolve()),
+                "feature_store_shape": [0, int(len(universe)), 0],
+                "feature_nan_ratio": 0.0,
+            }
+        )
+        return feature_store_path, [], manifest, pd.DataFrame(index=prepared.close.index, columns=universe, dtype=float)
+
+    empty_portfolio = PortfolioState()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="DataFrame is highly fragmented.*",
+            category=pd.errors.PerformanceWarning,
+            module=r"daily_research\.continuous_policy\.state_builder",
+        )
+        first_state = build_cross_section_state(prepared, date=normalized_dates[0], portfolio_state=empty_portfolio).copy()
+    first_state.index = pd.Index([str(item).strip().upper() for item in first_state["stock"].tolist()], name="stock")
+    state_columns = [
+        column
+        for column in select_feature_columns(first_state)
+        if column not in NON_FORECAST_STATE_COLUMNS
+    ]
+    raw_frames = (
+        _raw_kline_feature_frames(prepared)
+        if profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        else {}
+    )
+    context_frames = (
+        _context_feature_frames(prepared, raw_frames)
+        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        else {}
+    )
+    history_frames = (
+        _history_quality_feature_frames(
+            prepared,
+            lookback_days=int(lookback_days),
+            min_lookback_valid_ratio=float(min_lookback_valid_ratio),
+        )
+        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        else {}
+    )
+    all_columns, column_groups = _selected_columns_for_profile(
+        state_columns=state_columns,
+        raw_columns=list(raw_frames),
+        context_columns=list(context_frames),
+        history_columns=list(history_frames),
+        feature_profile=profile,
+    )
+    selected_columns = _cap_feature_columns(
+        all_columns=all_columns,
+        column_groups=column_groups,
+        feature_profile=profile,
+        max_feature_columns=max_feature_columns,
+    )
+    manifest = _manifest_for_columns(
+        feature_profile=profile,
+        all_columns=all_columns,
+        selected_columns=selected_columns,
+        column_groups=column_groups,
+        max_feature_columns=max_feature_columns,
+    )
+    shape = (int(len(normalized_dates)), int(len(universe)), int(len(selected_columns)))
+    store = np.memmap(feature_store_path, dtype="float32", mode="w+", shape=shape)
+    nan_count = 0
+    value_count = 0
+    needs_state_per_date = any(
+        column not in raw_frames and column not in context_frames and column not in history_frames
+        for column in selected_columns
+    )
+    empty_state = pd.DataFrame(index=universe)
+    for pos, dt in enumerate(normalized_dates):
+        if needs_state_per_date:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="DataFrame is highly fragmented.*",
+                    category=pd.errors.PerformanceWarning,
+                    module=r"daily_research\.continuous_policy\.state_builder",
+                )
+                state_frame = build_cross_section_state(prepared, date=dt, portfolio_state=empty_portfolio).copy()
+            state_frame.index = pd.Index([str(item).strip().upper() for item in state_frame["stock"].tolist()], name="stock")
+            state_numeric = state_frame.reindex(index=universe)
+        else:
+            state_numeric = empty_state
+        extra_parts: dict[str, pd.Series] = {}
+        for column in selected_columns:
+            if column in state_numeric.columns:
+                extra_parts[column] = pd.to_numeric(state_numeric[column], errors="coerce")
+            elif column in raw_frames:
+                extra_parts[column] = raw_frames[column].loc[dt].reindex(universe)
+            elif column in context_frames:
+                extra_parts[column] = context_frames[column].loc[dt].reindex(universe)
+            elif column in history_frames:
+                extra_parts[column] = history_frames[column].loc[dt].reindex(universe)
+            else:
+                extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
+        values = pd.DataFrame(extra_parts, index=universe).reindex(columns=selected_columns).to_numpy(dtype=np.float32)
+        nan_count += int(np.isnan(values).sum())
+        value_count += int(values.size)
+        store[pos, :, :] = values
+    store.flush()
+    manifest.update(
+        {
+            "feature_store_path": str(feature_store_path.resolve()),
+            "feature_store_shape": [int(item) for item in shape],
+            "feature_nan_ratio": float(nan_count / value_count) if value_count else 0.0,
+        }
+    )
+    history_ratio = history_frames.get(
+        "core_ohlcv_valid_ratio_252",
+        pd.DataFrame(1.0, index=prepared.close.index, columns=universe, dtype=float),
+    )
+    return feature_store_path, selected_columns, manifest, history_ratio
 
 
 def audit_forecast_feature_profile(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import torch
 
-from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset
+from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, build_forecast_sequence_dataset
 from daily_research.path_policy.forecast_training import (
     forecast_evidence_verdict,
     forecast_prediction_metrics,
@@ -36,10 +36,10 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
 
 
 def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path) -> None:
-    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
     dataset = build_forecast_sequence_dataset(
         prepared,
-        train_start_year=2018,
+        train_start_year=2019,
         train_end_year=2019,
         validation_year=2020,
         test_year=2021,
@@ -104,6 +104,45 @@ def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path
         assert f"direction_accuracy_{horizon}d" in validation_metrics
     assert "rank_ic_upside_20d" in validation_metrics
     assert "top_bottom_spread_upside_20d" in validation_metrics
+
+
+def test_train_forecast_models_accepts_memmap_dataset_view(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day", "mlp_last_day"),
+        epochs=2,
+        min_epochs=1,
+        early_stop_patience=1,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["dataset_mode"] == "memmap"
+    assert summary["feature_manifest"]["feature_count_after_cap"] == dataset.input_dim
+    assert (tmp_path / "study" / "forecast_predictions_validation.csv").exists()
+    assert "validation_stratified_metrics" in summary
 
 
 def test_forecast_evidence_verdict_requires_positive_validation_and_calibration() -> None:

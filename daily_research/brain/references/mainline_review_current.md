@@ -301,6 +301,12 @@ Scope: this document is the rolling review entry for all attempted project mainl
   - `raw_kline_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.099878`, `top_bottom_spread_20d=0.011222`, `rank_ic_upside_20d=-0.006853`.
   - `raw_kline_context_v1`: `forecast_test_confirmed`, selected `gru_sequence` seed `7`, signal profile `multiscale`, validation `rank_ic_20d=0.067361`, `top_bottom_spread_20d=0.004410`, `rank_ic_upside_20d=0.120046`.
   - `raw_kline_context_no_alpha_prior_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.086905`, `top_bottom_spread_20d=0.015142`, `rank_ic_upside_20d=-0.050637`.
+- 2026-05-18 memory-safe forecast dataset pipe is implemented and recorded in `daily_research/brain/references/path20_memory_safe_forecast_dataset_contract_20260518.md`.
+- Stage 1 now supports `--forecast-dataset-mode memmap`, which writes a disk feature store `[date, stock, feature]`, a lightweight sample index, and label memmaps.
+- Forecast training now consumes eager or memmap datasets through a unified dataset view and can load lookback windows per batch instead of materializing all `[N,252,F]` samples in RAM.
+- Full-universe `--max-universe-size 0` with eager forecast mode is blocked by protocol validation and requires `--forecast-dataset-mode memmap`.
+- Memmap mode adds history-valid-ratio filtering and stratified validation/test metrics by train-seen status and history bucket.
+- This memory-safe pipe fixes the main RAM feasibility blocker but does not yet implement true cross-stock attention; stock-to-stock relations remain represented through context and peer features.
 
 ### Inference
 - The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
@@ -317,7 +323,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Feature ablation supports using raw K-line features: `raw_kline_v1` materially improves validation rank/spread over `state_v1`.
 - Feature ablation supports that the signal is not only legacy alpha-prior replay: `raw_kline_context_no_alpha_prior_v1` remains multiscale and positive across validation 1d/3d/5d/10d/20d rank/spread.
 - Market/benchmark/peer context appears especially useful for upside opportunity capture because only `raw_kline_context_v1` selected run has strongly positive validation `rank_ic_upside_20d` and upside spread.
-- Full-universe Stage 1 training remains blocked by eager dataset memory design until streaming/memmap sequence loading exists.
+- Full-universe Stage 1 training is no longer blocked by the eager-only design, but still requires a real repaired-bundle memmap dataset smoke and training smoke before evidence-grade full-universe runs.
 
 ### Current Stance
 - Current Path20 research route.
@@ -327,7 +333,7 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
 - Use completed feature ablation as the input evidence baseline; do not treat any single profile as final without considering raw K-line, context, and no-alpha-prior tradeoffs.
 - Next priority is selection-rule review and Stage 2 allocator/oracle/replay design, with separate handling for multiscale trend/path and upside opportunity capture.
-- Do not run full universe until memory-safe sequence loading exists.
+- Do not run full-universe training until repaired-bundle memmap dataset and training smokes pass.
 
 ## 18. Path20 Sequence Policy v1
 

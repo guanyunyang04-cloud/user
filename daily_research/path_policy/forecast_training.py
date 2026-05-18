@@ -9,10 +9,10 @@ import pandas as pd
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
 from daily_research.continuous_policy.runtime import write_json
-from daily_research.path_policy.forecast_dataset import ForecastSequenceDataset
+from daily_research.path_policy.forecast_dataset import ForecastMemmapDataset, ForecastSequenceDataset
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
     GRUPath20Forecaster,
@@ -34,6 +34,61 @@ FORECAST_PROFILE_HORIZON_WEIGHTS: dict[str, dict[int, float]] = {
     "trend20": {10: 0.35, 20: 0.65},
     "short_burst": {1: 0.05, 3: 0.35, 5: 0.30, 10: 0.15, 20: 0.05},
 }
+
+
+class _EagerTorchDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset: ForecastSequenceDataset, indices: np.ndarray, *, target_scale: float) -> None:
+        self.dataset = dataset
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.target_scale = float(target_scale)
+
+    def __len__(self) -> int:
+        return int(len(self.indices))
+
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        row_idx = int(self.indices[int(item)])
+        y_risk = np.asarray(
+            [
+                self.dataset.y_max_drawdown_20d[row_idx],
+                self.dataset.y_worst_1d_20d[row_idx],
+                self.dataset.y_upside_20d[row_idx],
+            ],
+            dtype=np.float32,
+        )
+        return (
+            torch.as_tensor(self.dataset.x[row_idx], dtype=torch.float32),
+            torch.as_tensor(self.dataset.y_daily_excess[row_idx] * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(self.dataset.y_cum_excess[row_idx] * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(y_risk * self.target_scale, dtype=torch.float32),
+            torch.as_tensor(row_idx, dtype=torch.long),
+        )
+
+
+class _ForecastDatasetView:
+    def __init__(self, dataset: ForecastSequenceDataset | ForecastMemmapDataset) -> None:
+        self.dataset = dataset
+        self.manifest = dict(dataset.manifest)
+        self.normalization_manifest = dict(dataset.normalization_manifest)
+        self.feature_columns = list(dataset.feature_columns)
+        self.dataset_mode = str(self.manifest.get("dataset_mode", "eager"))
+        if isinstance(dataset, ForecastMemmapDataset):
+            self.row_count = int(dataset.row_count)
+            self.input_dim = int(dataset.input_dim)
+            self.lookback_days = int(dataset.lookback_days)
+        else:
+            self.row_count = int(dataset.x.shape[0])
+            self.input_dim = int(dataset.x.shape[-1]) if dataset.x.ndim == 3 else 0
+            self.lookback_days = int(dataset.x.shape[1]) if dataset.x.ndim == 3 else int(self.manifest.get("lookback_days", 0))
+
+    def role_indices(self, role: str) -> np.ndarray:
+        if isinstance(self.dataset, ForecastMemmapDataset):
+            return self.dataset.role_indices(role)
+        return np.flatnonzero(self.dataset.role == role)
+
+    def torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
+        if isinstance(self.dataset, ForecastMemmapDataset):
+            return self.dataset.torch_dataset(indices, target_scale=target_scale)
+        return _EagerTorchDataset(self.dataset, indices, target_scale=target_scale)
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -130,6 +185,14 @@ def _write_frame(path: Path, frame: pd.DataFrame) -> str:
     return str(path.resolve())
 
 
+def _data_loader_kwargs(*, pin_memory: bool, dataloader_num_workers: int, prefetch_factor: int) -> dict[str, Any]:
+    workers = max(int(dataloader_num_workers), 0)
+    kwargs: dict[str, Any] = {"num_workers": workers, "pin_memory": bool(pin_memory)}
+    if workers > 0:
+        kwargs["prefetch_factor"] = max(int(prefetch_factor), 1)
+    return kwargs
+
+
 def _forecast_loss(
     prediction: dict[str, torch.Tensor],
     y_daily_scaled: torch.Tensor,
@@ -207,12 +270,13 @@ def _predict_all(
 
 def _predict_indices(
     model: nn.Module,
-    x: torch.Tensor,
+    dataset_view_or_x: _ForecastDatasetView | torch.Tensor,
     indices: np.ndarray,
     *,
     batch_size: int,
     device: torch.device,
     amp_enabled: bool,
+    target_scale: float = 100.0,
 ) -> dict[str, np.ndarray]:
     if len(indices) == 0:
         return {
@@ -222,6 +286,31 @@ def _predict_indices(
             "q90": np.empty((0, PATH20_HORIZON)),
             "aux": np.empty((0, PATH20_FORECAST_AUX_DIM)),
         }
+    if isinstance(dataset_view_or_x, _ForecastDatasetView):
+        model.eval()
+        chunks: dict[str, list[np.ndarray]] = {"mu": [], "q10": [], "q50": [], "q90": [], "aux": []}
+        loader = DataLoader(
+            dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+            batch_size=max(int(batch_size), 1),
+            shuffle=False,
+            pin_memory=device.type == "cuda",
+        )
+        with torch.no_grad():
+            for batch_x, _, _, _, _ in loader:
+                batch = batch_x.to(device, non_blocking=device.type == "cuda")
+                with _autocast_context(device, amp_enabled):
+                    pred = model(batch)
+                for key in chunks:
+                    chunks[key].append(pred[key].detach().cpu().numpy())
+        empty_shapes = {
+            "mu": (0, PATH20_HORIZON),
+            "q10": (0, PATH20_HORIZON),
+            "q50": (0, PATH20_HORIZON),
+            "q90": (0, PATH20_HORIZON),
+            "aux": (0, PATH20_FORECAST_AUX_DIM),
+        }
+        return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
+    x = dataset_view_or_x
     return _predict_all(
         model,
         x[torch.tensor(indices, dtype=torch.long)],
@@ -365,6 +454,68 @@ def _prediction_frame_for_indices(
     return pd.DataFrame(columns)
 
 
+def _prediction_frame_for_dataset_indices(
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    *,
+    indices: np.ndarray,
+    predictions: dict[str, np.ndarray],
+    family: str,
+    target_scale: float,
+) -> pd.DataFrame:
+    if isinstance(dataset, ForecastMemmapDataset):
+        if len(indices) == 0:
+            return pd.DataFrame()
+        scale = float(target_scale)
+        idx = np.asarray(indices, dtype=int)
+        rows = dataset.sample_index.iloc[idx].reset_index(drop=True)
+        mu = predictions["mu"] / scale
+        q10 = predictions["q10"] / scale
+        q50 = predictions["q50"] / scale
+        q90 = predictions["q90"] / scale
+        aux = predictions["aux"] / scale
+        y_daily = dataset.y_daily_excess[idx]
+        y_cum = dataset.y_cum_excess[idx]
+        columns: dict[str, Any] = {
+            "date": rows["date"].astype(str).tolist(),
+            "stock": rows["stock"].astype(str).to_numpy(),
+            "role": rows["role"].astype(str).to_numpy(),
+            "model_family": str(family),
+            "stock_seen_in_train": rows.get("stock_seen_in_train", pd.Series(False, index=rows.index)).astype(bool).to_numpy(),
+            "history_bucket": rows.get("history_bucket", pd.Series("", index=rows.index)).astype(str).to_numpy(),
+            "history_valid_ratio": pd.to_numeric(rows.get("history_valid_ratio", pd.Series(np.nan, index=rows.index)), errors="coerce").to_numpy(),
+            "future_rank_20d": dataset.y_rank_20d[idx],
+            "future_path_max_drawdown_20d": dataset.y_max_drawdown_20d[idx],
+            "future_path_worst_1d_20d": dataset.y_worst_1d_20d[idx],
+            "future_path_upside_capture_20d": dataset.y_upside_20d[idx],
+        }
+        for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+            columns[f"future_rank_{horizon}d"] = dataset.y_rank_by_horizon[idx, pos]
+        for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+            columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
+            columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
+            columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        risk_start = len(PATH20_CUMULATIVE_HORIZONS)
+        columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
+        columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
+        columns["pred_aux_upside_20d"] = aux[:, risk_start + 2]
+        for step in range(1, PATH20_HORIZON + 1):
+            offset = step - 1
+            columns[f"future_excess_return_{step}d"] = y_daily[:, offset]
+            columns[f"target_excess_{step}d"] = y_daily[:, offset]
+            columns[f"pred_mu_{step}d"] = mu[:, offset]
+            columns[f"pred_q10_{step}d"] = q10[:, offset]
+            columns[f"pred_q50_{step}d"] = q50[:, offset]
+            columns[f"pred_q90_{step}d"] = q90[:, offset]
+        return pd.DataFrame(columns)
+    return _prediction_frame_for_indices(
+        dataset,
+        indices=indices,
+        predictions=predictions,
+        family=family,
+        target_scale=target_scale,
+    )
+
+
 def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
     if frame.empty:
         return {"status": "insufficient_or_incomplete", "reason": "empty_predictions"}
@@ -420,6 +571,21 @@ def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
         metrics["top_bottom_spread_upside_20d"] = 0.0
     metrics["selected_signal_profile"] = forecast_signal_profile(metrics)
     return metrics
+
+
+def stratified_forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
+    if frame.empty:
+        return {}
+    out: dict[str, Any] = {}
+    if "stock_seen_in_train" in frame.columns:
+        for value, group in frame.groupby("stock_seen_in_train", dropna=False):
+            key = f"seen_in_train={str(bool(value)).lower()}" if pd.notna(value) else "seen_in_train=unknown"
+            out[key] = forecast_prediction_metrics(group)
+    if "history_bucket" in frame.columns:
+        for value, group in frame.groupby("history_bucket", dropna=False):
+            key = f"history_bucket={str(value)}"
+            out[key] = forecast_prediction_metrics(group)
+    return out
 
 
 def _coverage_pass(metrics: dict[str, Any], coverage_range: tuple[float, float]) -> bool:
@@ -531,15 +697,16 @@ def _validation_score(
 
 def _evaluate_loss(
     model: nn.Module,
-    x: torch.Tensor,
-    y_daily: torch.Tensor,
-    y_cum: torch.Tensor,
-    y_risk: torch.Tensor,
+    dataset_view_or_x: _ForecastDatasetView | torch.Tensor,
+    y_daily: torch.Tensor | None,
+    y_cum: torch.Tensor | None,
+    y_risk: torch.Tensor | None,
     indices: np.ndarray,
     *,
     batch_size: int,
     device: torch.device,
     amp_enabled: bool,
+    target_scale: float = 100.0,
 ) -> float:
     if len(indices) == 0:
         return float("inf")
@@ -547,6 +714,27 @@ def _evaluate_loss(
     values: list[float] = []
     counts: list[int] = []
     with torch.no_grad():
+        if isinstance(dataset_view_or_x, _ForecastDatasetView):
+            loader = DataLoader(
+                dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
+                batch_size=max(int(batch_size), 1),
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+            )
+            for batch_x, batch_y_daily, batch_y_cum, batch_y_risk, _ in loader:
+                batch_x = batch_x.to(device, non_blocking=device.type == "cuda")
+                batch_y_daily = batch_y_daily.to(device, non_blocking=device.type == "cuda")
+                batch_y_cum = batch_y_cum.to(device, non_blocking=device.type == "cuda")
+                batch_y_risk = batch_y_risk.to(device, non_blocking=device.type == "cuda")
+                with _autocast_context(device, amp_enabled):
+                    pred = model(batch_x)
+                    loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                values.append(float(loss.detach().cpu()))
+                counts.append(int(batch_x.shape[0]))
+            total = sum(counts)
+            return float(np.average(values, weights=counts)) if total > 0 else float("inf")
+        x = dataset_view_or_x
+        assert y_daily is not None and y_cum is not None and y_risk is not None
         for start in range(0, len(indices), max(int(batch_size), 1)):
             batch_idx = torch.tensor(indices[start : start + max(int(batch_size), 1)], dtype=torch.long)
             batch_x = x[batch_idx].to(device, non_blocking=device.type == "cuda")
@@ -705,6 +893,8 @@ def train_forecast_models(
     selection_profile: str = "multiscale",
     target_scale: float = 100.0,
     seed: int = 7,
+    dataloader_num_workers: int = 0,
+    prefetch_factor: int = 2,
 ) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     resolved_device = _resolve_device(device)
@@ -717,14 +907,16 @@ def train_forecast_models(
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
-    feature_profile = str(dataset.manifest.get("feature_profile", ""))
-    feature_manifest = dict(dataset.manifest.get("feature_manifest", {}))
-    if dataset.x.shape[0] == 0:
+    dataset_view = _ForecastDatasetView(dataset)
+    feature_profile = str(dataset_view.manifest.get("feature_profile", ""))
+    feature_manifest = dict(dataset_view.manifest.get("feature_manifest", {}))
+    if dataset_view.row_count == 0:
         summary = {
             "status": "insufficient_or_incomplete",
             "reason": "empty_forecast_dataset",
             "models": {},
             "family_summary": {},
+            "dataset_mode": dataset_view.dataset_mode,
             "feature_profile": feature_profile,
             "feature_manifest": feature_manifest,
             "selected_seed": 0,
@@ -738,17 +930,24 @@ def train_forecast_models(
         write_json(study_root / "forecast_training_summary.json", _json_ready(summary))
         return summary
 
-    x = torch.as_tensor(dataset.x, dtype=torch.float32)
-    y_daily = torch.as_tensor(dataset.y_daily_excess * float(target_scale), dtype=torch.float32)
-    y_cum = torch.as_tensor(dataset.y_cum_excess * float(target_scale), dtype=torch.float32)
-    y_risk_np = np.stack(
-        [dataset.y_max_drawdown_20d, dataset.y_worst_1d_20d, dataset.y_upside_20d],
-        axis=1,
-    )
-    y_risk = torch.as_tensor(y_risk_np * float(target_scale), dtype=torch.float32)
-    train_indices = np.flatnonzero(dataset.role == "train")
-    validation_indices = np.flatnonzero(dataset.role == "validation")
-    test_indices = np.flatnonzero(dataset.role == "test")
+    x: torch.Tensor | None = None
+    y_daily: torch.Tensor | None = None
+    y_cum: torch.Tensor | None = None
+    y_risk: torch.Tensor | None = None
+    if dataset_view.dataset_mode != "memmap":
+        eager_dataset = dataset
+        assert isinstance(eager_dataset, ForecastSequenceDataset)
+        x = torch.as_tensor(eager_dataset.x, dtype=torch.float32)
+        y_daily = torch.as_tensor(eager_dataset.y_daily_excess * float(target_scale), dtype=torch.float32)
+        y_cum = torch.as_tensor(eager_dataset.y_cum_excess * float(target_scale), dtype=torch.float32)
+        y_risk_np = np.stack(
+            [eager_dataset.y_max_drawdown_20d, eager_dataset.y_worst_1d_20d, eager_dataset.y_upside_20d],
+            axis=1,
+        )
+        y_risk = torch.as_tensor(y_risk_np * float(target_scale), dtype=torch.float32)
+    train_indices = dataset_view.role_indices("train")
+    validation_indices = dataset_view.role_indices("validation")
+    test_indices = dataset_view.role_indices("test")
     if len(train_indices) < 2 or len(validation_indices) < 1:
         summary = {
             "status": "insufficient_or_incomplete",
@@ -758,6 +957,7 @@ def train_forecast_models(
             "test_rows": int(len(test_indices)),
             "models": {},
             "family_summary": {},
+            "dataset_mode": dataset_view.dataset_mode,
             "feature_profile": feature_profile,
             "feature_manifest": feature_manifest,
             "selected_seed": 0,
@@ -779,6 +979,11 @@ def train_forecast_models(
     patience_limit = max(int(early_stop_patience), 1)
     accum_steps = max(int(grad_accum_steps), 1)
     pin_memory = resolved_device.type == "cuda"
+    loader_kwargs = _data_loader_kwargs(
+        pin_memory=pin_memory,
+        dataloader_num_workers=int(dataloader_num_workers),
+        prefetch_factor=int(prefetch_factor),
+    )
 
     for family in families:
         seed_summaries: dict[str, dict[str, Any]] = {}
@@ -789,7 +994,7 @@ def train_forecast_models(
                 torch.cuda.manual_seed_all(int(current_seed))
             model = make_forecast_model(
                 family,
-                input_dim=int(dataset.x.shape[-1]),
+                input_dim=int(dataset_view.input_dim),
                 hidden_dim=int(hidden_dim),
                 horizon=PATH20_HORIZON,
                 dropout=float(dropout),
@@ -803,11 +1008,11 @@ def train_forecast_models(
             generator = torch.Generator()
             generator.manual_seed(int(current_seed))
             train_loader = DataLoader(
-                TensorDataset(torch.as_tensor(train_indices, dtype=torch.long)),
+                dataset_view.torch_dataset(train_indices, target_scale=target_scale),
                 batch_size=batch_size,
                 shuffle=True,
                 generator=generator,
-                pin_memory=pin_memory,
+                **loader_kwargs,
             )
             best_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_best.pt"
             best_score = -float("inf")
@@ -832,17 +1037,16 @@ def train_forecast_models(
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
                 optimizer.zero_grad(set_to_none=True)
-                for step, (batch_idx_cpu,) in enumerate(train_loader, start=1):
-                    batch_idx = batch_idx_cpu.to(torch.long)
-                    batch_x = x[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_daily = y_daily[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_cum = y_cum[batch_idx].to(resolved_device, non_blocking=pin_memory)
-                    batch_y_risk = y_risk[batch_idx].to(resolved_device, non_blocking=pin_memory)
+                for step, (batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _) in enumerate(train_loader, start=1):
+                    batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
+                    batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
                     with _autocast_context(resolved_device, amp_enabled):
                         pred = model(batch_x)
                         loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
                     epoch_losses.append(float(loss.detach().cpu()))
-                    epoch_counts.append(int(batch_idx.numel()))
+                    epoch_counts.append(int(batch_x.shape[0]))
                     scaler.scale(loss / float(accum_steps)).backward()
                     if step % accum_steps == 0 or step == len(train_loader):
                         scaler.unscale_(optimizer)
@@ -855,7 +1059,7 @@ def train_forecast_models(
                 )
                 validation_loss = _evaluate_loss(
                     model,
-                    x,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
                     y_daily,
                     y_cum,
                     y_risk,
@@ -863,16 +1067,18 @@ def train_forecast_models(
                     batch_size=batch_size,
                     device=resolved_device,
                     amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
                 validation_predictions = _predict_indices(
                     model,
-                    x,
+                    dataset_view if dataset_view.dataset_mode == "memmap" else x,
                     validation_indices,
                     batch_size=batch_size,
                     device=resolved_device,
                     amp_enabled=amp_enabled,
+                    target_scale=target_scale,
                 )
-                validation_frame = _prediction_frame_for_indices(
+                validation_frame = _prediction_frame_for_dataset_indices(
                     dataset,
                     indices=validation_indices,
                     predictions=validation_predictions,
@@ -900,7 +1106,7 @@ def train_forecast_models(
                             "feature_manifest": feature_manifest,
                             "normalization": dataset.normalization_manifest,
                             "target_scale": float(target_scale),
-                            "lookback_days": int(dataset.x.shape[1]),
+                            "lookback_days": int(dataset_view.lookback_days),
                             "horizon": PATH20_HORIZON,
                             "model_config": model_config,
                             "best_epoch": int(best_epoch),
@@ -952,7 +1158,7 @@ def train_forecast_models(
                         "feature_manifest": feature_manifest,
                         "normalization": dataset.normalization_manifest,
                         "target_scale": float(target_scale),
-                        "lookback_days": int(dataset.x.shape[1]),
+                        "lookback_days": int(dataset_view.lookback_days),
                         "horizon": PATH20_HORIZON,
                         "model_config": model_config,
                         "best_epoch": int(max_epochs),
@@ -965,28 +1171,30 @@ def train_forecast_models(
             model.load_state_dict(checkpoint["state_dict"])
             validation_predictions = _predict_indices(
                 model,
-                x,
+                dataset_view if dataset_view.dataset_mode == "memmap" else x,
                 validation_indices,
                 batch_size=batch_size,
                 device=resolved_device,
                 amp_enabled=amp_enabled,
+                target_scale=target_scale,
             )
             test_predictions = _predict_indices(
                 model,
-                x,
+                dataset_view if dataset_view.dataset_mode == "memmap" else x,
                 test_indices,
                 batch_size=batch_size,
                 device=resolved_device,
                 amp_enabled=amp_enabled,
+                target_scale=target_scale,
             )
-            validation_frame = _prediction_frame_for_indices(
+            validation_frame = _prediction_frame_for_dataset_indices(
                 dataset,
                 indices=validation_indices,
                 predictions=validation_predictions,
                 family=family,
                 target_scale=target_scale,
             )
-            test_frame = _prediction_frame_for_indices(
+            test_frame = _prediction_frame_for_dataset_indices(
                 dataset,
                 indices=test_indices,
                 predictions=test_predictions,
@@ -1049,7 +1257,7 @@ def train_forecast_models(
             "batch_size": int(batch_size),
             "lr": float(lr),
             "hidden_dim": int(hidden_dim),
-            "feature_count": int(dataset.x.shape[-1]),
+            "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
@@ -1070,7 +1278,7 @@ def train_forecast_models(
     if selected_family and selected_seed and selected_checkpoint_path:
         selected_model = make_forecast_model(
             selected_family,
-            input_dim=int(dataset.x.shape[-1]),
+            input_dim=int(dataset_view.input_dim),
             hidden_dim=int(hidden_dim),
             horizon=PATH20_HORIZON,
             dropout=float(dropout),
@@ -1083,28 +1291,30 @@ def train_forecast_models(
         selected_model.load_state_dict(checkpoint["state_dict"])
         validation_predictions_np = _predict_indices(
             selected_model,
-            x,
+            dataset_view if dataset_view.dataset_mode == "memmap" else x,
             validation_indices,
             batch_size=batch_size,
             device=resolved_device,
             amp_enabled=amp_enabled,
+            target_scale=target_scale,
         )
         test_predictions_np = _predict_indices(
             selected_model,
-            x,
+            dataset_view if dataset_view.dataset_mode == "memmap" else x,
             test_indices,
             batch_size=batch_size,
             device=resolved_device,
             amp_enabled=amp_enabled,
+            target_scale=target_scale,
         )
-        selected_predictions_validation = _prediction_frame_for_indices(
+        selected_predictions_validation = _prediction_frame_for_dataset_indices(
             dataset,
             indices=validation_indices,
             predictions=validation_predictions_np,
             family=selected_family,
             target_scale=target_scale,
         )
-        selected_predictions_test = _prediction_frame_for_indices(
+        selected_predictions_test = _prediction_frame_for_dataset_indices(
             dataset,
             indices=test_indices,
             predictions=test_predictions_np,
@@ -1156,7 +1366,7 @@ def train_forecast_models(
             "transformer_heads": int(transformer_heads),
             "patch_sizes": [int(item) for item in patch_sizes],
             "feature_profile": feature_profile,
-            "feature_count": int(dataset.x.shape[-1]),
+            "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
         },
         "models": model_summaries,
@@ -1177,6 +1387,9 @@ def train_forecast_models(
         "forecast_predictions_validation_csv": validation_csv,
         "forecast_predictions_test_csv": test_csv,
         "forecast_learning_curve_csv": str(learning_curve_path.resolve()),
+        "dataset_mode": dataset_view.dataset_mode,
+        "validation_stratified_metrics": stratified_forecast_prediction_metrics(validation_predictions),
+        "test_stratified_metrics": stratified_forecast_prediction_metrics(test_predictions),
         "shadow_only": True,
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",
