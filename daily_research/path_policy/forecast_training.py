@@ -236,8 +236,8 @@ def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str)
     for _, group in frame.groupby("date", sort=True):
         if len(group) < 2:
             continue
-        score = pd.to_numeric(group[score_column], errors="coerce")
-        target = pd.to_numeric(group[target_column], errors="coerce")
+        score = pd.to_numeric(group[score_column], errors="coerce").astype("float64")
+        target = pd.to_numeric(group[target_column], errors="coerce").astype("float64")
         valid = score.notna() & target.notna()
         if int(valid.sum()) < 2:
             continue
@@ -251,8 +251,8 @@ def _top_bottom_spread_by_date(frame: pd.DataFrame, score_column: str, target_co
     values: list[float] = []
     for _, group in frame.groupby("date", sort=True):
         work = group[[score_column, target_column]].copy()
-        work[score_column] = pd.to_numeric(work[score_column], errors="coerce")
-        work[target_column] = pd.to_numeric(work[target_column], errors="coerce")
+        work[score_column] = pd.to_numeric(work[score_column], errors="coerce").astype("float64")
+        work[target_column] = pd.to_numeric(work[target_column], errors="coerce").astype("float64")
         work = work.dropna()
         if len(work) < 2:
             continue

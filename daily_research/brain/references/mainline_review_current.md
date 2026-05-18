@@ -1,6 +1,6 @@
 # daily_research 主线审阅 current
 
-Snapshot date: `2026-05-17`
+Snapshot date: `2026-05-18`
 
 Scope: this document is the rolling review entry for all attempted project mainlines since project start. It separates facts, inferences, assumptions, current stance, and next allowed actions. It does not replace `daily_research/brain/state_center.md`, and it must not be used as promotion authority.
 
@@ -286,6 +286,21 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - 2026-05-17 preflight found `policy_input_bundle__0f116a9b78c92ff045a6853d` blocked for `2018-01-01 -> 2024-12-31` because benchmark coverage starts at `2018-05-14`.
 - `policy_input_bundle__4db1a32ab6e7d77ac7b8671c` passed capped preflight from `2018-05-14`, but remains capped at `1200` symbols and is not full-universe evidence.
 - Repaired full-universe bundle `policy_input_bundle__7c8f58d851bce8179e1e9e2d` passed strict data-lake audit for `2019-01-01 -> 2024-12-31` with benchmark open required.
+- 2026-05-18 capped Stage 1 result is recorded in `daily_research/brain/references/alpha_path20_stage1_formal_cap80_result_20260518.md`.
+- Preflight tag `path20_stage1_preflight_cap80_repaired_20260518_01` completed on the repaired bundle with `raw_kline_context_v1`, `role_purge_trading_days=21`, and benchmark open loaded from `silver_benchmark.open`.
+- Pilot tag `path20_stage1_pilot_cap80_repaired_20260518_04` completed after fixing an AMP/float16 metric dtype bug in forecast metric evaluation.
+- Formal tag `path20_stage1_formal_cap80_repaired_20260518_01` completed with `max_universe_size=80`, `forecast_max_samples_per_role=8000`, four model families, seeds `7,11,19`, CUDA, AMP, best checkpoints, learning curve, and validation/test predictions.
+- Formal capped verdict is `forecast_test_confirmed`; selected model is `gru_sequence` seed `19`; selected signal profile is `multiscale`; active execution remained unchanged.
+- Selected validation metrics are positive across the five horizons: `rank_ic_1d/3d/5d/10d/20d = 0.054034/0.076536/0.087974/0.088521/0.051951` and `top_bottom_spread_1d/3d/5d/10d/20d = 0.001181/0.002272/0.001612/0.000575/0.003094`.
+- Selected validation opportunity metrics are positive: `rank_ic_upside_20d=0.090375`, `top_bottom_spread_upside_20d=0.020895`.
+- Test metrics are interpretable only because validation passed; selected test `rank_ic_20d=0.191404` and `top_bottom_spread_20d=0.058073`.
+- Patch Transformer family had stronger 20d robustness than the selected GRU family: all three seeds were `multiscale`, family validation `rank_ic_20d_mean=0.077252`, and `top_bottom_spread_20d_mean=0.012649`.
+- 2026-05-18 feature ablation result is recorded in `daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md`.
+- Feature ablation completed four profiles on the repaired bundle with cap80, samples `8000` per role, epochs `60`, seeds `7,11`, CUDA, and AMP:
+  - `state_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `7`, signal profile `trend_20d`, validation `rank_ic_20d=0.052529`, `top_bottom_spread_20d=0.000463`, `rank_ic_upside_20d=-0.035122`.
+  - `raw_kline_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.099878`, `top_bottom_spread_20d=0.011222`, `rank_ic_upside_20d=-0.006853`.
+  - `raw_kline_context_v1`: `forecast_test_confirmed`, selected `gru_sequence` seed `7`, signal profile `multiscale`, validation `rank_ic_20d=0.067361`, `top_bottom_spread_20d=0.004410`, `rank_ic_upside_20d=0.120046`.
+  - `raw_kline_context_no_alpha_prior_v1`: `forecast_test_confirmed`, selected `patch_transformer` seed `11`, signal profile `multiscale`, validation `rank_ic_20d=0.086905`, `top_bottom_spread_20d=0.015142`, `rank_ic_upside_20d=-0.050637`.
 
 ### Inference
 - The current Path20 research question now starts with supervised path forecasting quality before allocator/oracle/replay expansion.
@@ -297,16 +312,22 @@ Scope: this document is the rolling review entry for all attempted project mainl
 - True cross-sectional transformer or stock-to-stock attention is deferred until memory-safe day-grouped sequence loading exists.
 - The aggressive upgrade increases model capacity and training auditability before long training, but does not itself create strategy evidence or a promotion path.
 - Path20 Stage 1 is no longer blocked by the old benchmark coverage gap for capped pilots, provided it uses the repaired full bundle explicitly.
+- Capped formal Stage 1 evidence is positive for the prediction task and supports moving to ablation and Stage 2 design, but it remains capped, research-only, and non-promotional.
+- The selection rule needs review before larger runs because the chosen GRU seed is valid under the implemented family-level rule, while Patch Transformer looks stronger on 20d family stability.
+- Feature ablation supports using raw K-line features: `raw_kline_v1` materially improves validation rank/spread over `state_v1`.
+- Feature ablation supports that the signal is not only legacy alpha-prior replay: `raw_kline_context_no_alpha_prior_v1` remains multiscale and positive across validation 1d/3d/5d/10d/20d rank/spread.
+- Market/benchmark/peer context appears especially useful for upside opportunity capture because only `raw_kline_context_v1` selected run has strongly positive validation `rank_ic_upside_20d` and upside spread.
 - Full-universe Stage 1 training remains blocked by eager dataset memory design until streaming/memmap sequence loading exists.
 
 ### Current Stance
 - Current Path20 research route.
 - Allow new neural-policy mainline diagnostics with explicit tags and fixed dataset ids.
 - Treat Stage 1 forecast evidence as prediction-task evidence only; it does not prove a portfolio strategy until Stage 2 allocator/replay evidence exists.
-- Do not start long training or touch active execution without a separate explicit task.
+- Do not touch active execution or infer live/default promotion from capped forecast evidence.
 - Keep smoke defaults small; require explicit long-run arguments for evidence-grade training such as larger `--forecast-epochs` and multi-seed settings.
-- Use `--forecast-feature-profile` explicitly in ablations; default `raw_kline_context_v1` is not self-proving without `state_v1` and no-alpha-prior comparisons.
-- Resume capped formal forecast pilots on `policy_input_bundle__7c8f58d851bce8179e1e9e2d`; do not run full universe until memory-safe sequence loading exists.
+- Use completed feature ablation as the input evidence baseline; do not treat any single profile as final without considering raw K-line, context, and no-alpha-prior tradeoffs.
+- Next priority is selection-rule review and Stage 2 allocator/oracle/replay design, with separate handling for multiscale trend/path and upside opportunity capture.
+- Do not run full universe until memory-safe sequence loading exists.
 
 ## 18. Path20 Sequence Policy v1
 

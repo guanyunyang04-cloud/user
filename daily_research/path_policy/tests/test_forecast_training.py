@@ -6,6 +6,7 @@ import torch
 from daily_research.path_policy.forecast_dataset import build_forecast_sequence_dataset
 from daily_research.path_policy.forecast_training import (
     forecast_evidence_verdict,
+    forecast_prediction_metrics,
     make_forecast_model,
     train_forecast_models,
 )
@@ -123,3 +124,33 @@ def test_forecast_evidence_verdict_requires_positive_validation_and_calibration(
         test_metrics={"status": "completed", "rank_ic_20d": 0.1, "top_bottom_spread_20d": 0.1},
     )
     assert confirmed == "forecast_test_confirmed"
+
+
+def test_forecast_prediction_metrics_accepts_amp_float16_predictions() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": ["2023-01-03"] * 5,
+            "stock": ["AAA", "BBB", "CCC", "DDD", "EEE"],
+            "future_path_upside_capture_20d": pd.Series([0.03, 0.01, -0.02, 0.04, 0.0], dtype="float16"),
+            "pred_aux_upside_20d": pd.Series([0.02, 0.01, -0.03, 0.05, 0.0], dtype="float16"),
+        }
+    )
+    for horizon in (1, 3, 5, 10, 20):
+        frame[f"future_cum_excess_return_{horizon}d"] = pd.Series(
+            [0.01, -0.01, 0.02, 0.03, -0.02],
+            dtype="float16",
+        )
+        frame[f"pred_cum_mu_{horizon}d"] = pd.Series(
+            [0.02, -0.02, 0.01, 0.04, -0.01],
+            dtype="float16",
+        )
+    for step in range(1, 21):
+        frame[f"target_excess_{step}d"] = pd.Series([0.001, -0.001, 0.002, 0.003, -0.002], dtype="float16")
+        frame[f"pred_q10_{step}d"] = pd.Series([-0.01, -0.01, -0.01, -0.01, -0.01], dtype="float16")
+        frame[f"pred_q90_{step}d"] = pd.Series([0.01, 0.01, 0.01, 0.01, 0.01], dtype="float16")
+
+    metrics = forecast_prediction_metrics(frame)
+
+    assert metrics["status"] == "completed"
+    assert "top_bottom_spread_20d" in metrics
+    assert "top_bottom_spread_upside_20d" in metrics

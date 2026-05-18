@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 35,
+  "record_count": 37,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -47,10 +47,9 @@
         "Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress."
       ],
       "next_allowed_actions": [
-        "Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.",
-        "Run feature ablations across `state_v1`, `raw_kline_v1`, `raw_kline_context_v1`, and `raw_kline_context_no_alpha_prior_v1` before treating the new input stack as evidence-improving.",
-        "After explicit approval, run:",
-        "Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments."
+        "Inspect selection policy before larger experiments: compare family mean, best seed, 20d robustness, multiscale score, and coverage gates.",
+        "Design Stage 2 allocator/oracle/replay experiments only as research/shadow follow-up to capped prediction and feature-ablation evidence.",
+        "Implement memory-safe sequence loading before any full-universe `max_universe_size=0` Stage 1 run."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
@@ -221,6 +220,57 @@
       "active_artifact_impact": "unchanged",
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
+      ]
+    },
+    {
+      "id": "alpha_path20_stage1_feature_ablation_result_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md",
+      "tags": [
+        "path_policy",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `completed feature ablation evidence / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.; Shared window: train `2019-2022`, validation `2023`, test `2024`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Inspect and possibly revise forecast model-selection policy before larger experiments, because selected family/seed can differ from the family that is strongest on 20d robustness.",
+        "Run a lower-cost repeat ablation or bootstrap over different cap80 symbol slices if robustness across universe slice is required.",
+        "Design Stage 2 allocator/oracle/replay as a shadow-only follow-up, with separate tracks for:",
+        "multiscale trend/path allocation;",
+        "short-burst/opportunity capture;",
+        "alpha-prior-free allocation sanity checks."
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "alpha_path20_stage1_formal_cap80_result_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_stage1_formal_cap80_result_20260518.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [],
+      "verdict": "Status: `completed capped formal forecast evidence / forecast_test_confirmed / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_stage1_formal_cap80_repaired_20260518_01`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
+      "blockers": [
+        "Pilot `_03` exposed a metric dtype bug: AMP/CUDA predictions could reach Pandas as `float16`, and `nlargest/nsmallest` failed during top-bottom spread computation."
+      ],
+      "next_allowed_actions": [
+        "Use completed feature ablation evidence in `daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md`.",
+        "Inspect why the family-level selector preferred GRU while Patch Transformer had stronger 20d family metrics; decide whether selection should prefer family mean, best seed, or a robustness-weighted hybrid before larger experiments.",
+        "Design Stage 2 allocator/oracle/replay only after documenting ablation results and preserving validation-first interpretation.",
+        "Before full-universe Stage 1, implement memory-safe sequence loading and batched prediction writing."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
       ]
     },
     {

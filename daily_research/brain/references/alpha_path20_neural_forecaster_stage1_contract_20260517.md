@@ -48,6 +48,18 @@
 - Training uses `target_scale=100.0`; persisted prediction CSV values are restored to true return units.
 - Forecast cumulative excess-return auxiliary targets are aligned to the daily excess-return path by summing daily excess labels over the requested horizon; this keeps `pred_cum_mu_<h>d` comparable to the supervised cumulative target.
 - Best checkpoints are written as `forecast_model_<family>_seed<seed>_best.pt`; selected predictions are written only for the selected family/seed unless `--forecast-write-all-predictions` is set.
+- 2026-05-18 capped formal Stage 1 evidence is recorded in `daily_research/brain/references/alpha_path20_stage1_formal_cap80_result_20260518.md`.
+- Formal capped tag `path20_stage1_formal_cap80_repaired_20260518_01` completed on `policy_input_bundle__7c8f58d851bce8179e1e9e2d` with `raw_kline_context_v1`, `max_universe_size=80`, `8000` samples per role, four model families, and seeds `7,11,19`.
+- Formal capped verdict is `forecast_test_confirmed`; selected family/seed is `gru_sequence` seed `19`; selected signal profile is `multiscale`.
+- Selected validation metrics include positive `rank_ic` and positive `top_bottom_spread` for `1d/3d/5d/10d/20d`; selected validation `rank_ic_20d=0.051951`, `top_bottom_spread_20d=0.003094`, `rank_ic_upside_20d=0.090375`, and `top_bottom_spread_upside_20d=0.020895`.
+- Patch Transformer family evidence is also strong: all three seeds are `multiscale`, with family validation `rank_ic_20d_mean=0.077252` and `top_bottom_spread_20d_mean=0.012649`; selection nuance should be reviewed before larger runs.
+- 2026-05-18 feature ablation evidence is recorded in `daily_research/brain/references/alpha_path20_stage1_feature_ablation_result_20260518.md`.
+- Feature ablation completed profiles `state_v1`, `raw_kline_v1`, `raw_kline_context_v1`, and `raw_kline_context_no_alpha_prior_v1` on the repaired bundle with cap80, train `2019-2022`, validation `2023`, test `2024`, samples `8000` per role, seeds `7,11`, and CUDA/AMP.
+- All four ablation profiles produced `forecast_test_confirmed`, but with different signal shapes:
+  - `state_v1` selected `trend_20d` and had weak/negative short-spread and upside metrics.
+  - `raw_kline_v1` selected `multiscale` and materially improved 3d/5d/10d/20d validation rank/spread.
+  - `raw_kline_context_v1` selected `multiscale` and was the only selected run with strongly positive upside opportunity metrics.
+  - `raw_kline_context_no_alpha_prior_v1` selected `multiscale` and remained positive across 1d/3d/5d/10d/20d rank/spread after removing alpha-prior fields.
 - Forecast verdicts are validation-first:
   - `insufficient_or_incomplete` for missing/incomplete data, severe target issues, or interrupted training.
   - `forecast_failed` when validation rank/spread/calibration gates fail.
@@ -63,6 +75,9 @@
 - Validation `rank_ic_20d`, `top_bottom_spread_20d`, short-horizon rank/spread, upside capture rank/spread, and quantile coverage are more decision-relevant than daily MSE alone because allocation will amplify forecast errors.
 - Stronger architectures and longer training improve the information value of a negative or positive result, but only if validation-first selection, seed stability, calibration gates, and shadow-only boundaries are preserved.
 - Test-year metrics are interpretable only after validation passes, preventing a validation-failed but test-good narrative from becoming false progress.
+- The first capped formal result is promising prediction evidence, but the selector nuance matters: GRU won by the implemented family-level selection rule, while Patch Transformer has stronger 20d family stability.
+- Feature ablation supports the input-upgrade hypothesis: raw K-line features add material signal beyond old state features, and no-alpha-prior context remains predictive, so the result is not simply legacy alpha-prior replay.
+- Alpha-prior/context may still matter for upside opportunity capture because the no-alpha-prior selected run lost upside opportunity signal while retaining 1d/3d/5d/10d/20d rank/spread signal.
 
 ## Assumptions
 - Past one-year input means the signal date plus the previous `lookback_days-1` trading days.
@@ -83,8 +98,6 @@
 - Mainline remains switchable by explicit future user/project decision.
 
 ## Next Allowed Actions
-- Run fixture and guard tests for the new forecast dataset, training, and protocol contracts.
-- Run feature ablations across `state_v1`, `raw_kline_v1`, `raw_kline_context_v1`, and `raw_kline_context_no_alpha_prior_v1` before treating the new input stack as evidence-improving.
-- After explicit approval, run:
-  `forecast-walkforward-study --data-source lake --lake-dataset-id policy_input_bundle__7c8f58d851bce8179e1e9e2d --max-universe-size 80 --forecast-train-start-year 2019 --forecast-train-end-year 2022 --forecast-validation-year 2023 --forecast-test-year 2024 --forecast-epochs 120 --forecast-min-epochs 20 --forecast-early-stop-patience 12 --forecast-seeds 7,11,19`
-- Only if validation becomes `forecast_promising` or stronger, design Stage 2 allocator/oracle/replay experiments.
+- Inspect selection policy before larger experiments: compare family mean, best seed, 20d robustness, multiscale score, and coverage gates.
+- Design Stage 2 allocator/oracle/replay experiments only as research/shadow follow-up to capped prediction and feature-ablation evidence.
+- Implement memory-safe sequence loading before any full-universe `max_universe_size=0` Stage 1 run.
