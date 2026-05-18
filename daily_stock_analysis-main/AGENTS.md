@@ -4,8 +4,9 @@
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。
 
-工作区级接管与长期状态的权威正文收口在 `daily_stock_analysis-main/brain/`。
-本文件保留为仓库原生 AI 生态兼容入口，必须与 `brain/state_center.md` 和 `brain/operations_center.md` 保持一致，不得单独漂移。
+`daily_stock_analysis-main` 产品分脑接管与长期状态的权威正文收口在 `daily_stock_analysis-main/brain/`。
+工作区级接管、跨项目边界和全局治理仍以主脑 `brain/` 为准。
+本文件保留为仓库原生 AI 生态兼容入口，必须与本产品分脑的 `brain/state_center.md` 和 `brain/operations_center.md` 保持一致，不得单独漂移；若与工作区主脑冲突，先服从主脑，再同步本产品分脑与兼容入口。
 
 ## 1. 硬规则
 
@@ -28,7 +29,8 @@
 
 ## 2. AI 协作资产治理
 
-- `AGENTS.md` 是仓库原生 AI 生态的兼容入口；工作区级接管、结构边界和稳定规则的真源仍收口在 `brain/`。
+- `AGENTS.md` 是仓库原生 AI 生态的兼容入口；本产品分脑的接管、结构边界和稳定规则真源仍收口在 `brain/`。
+- 工作区级规则、分脑拓扑、默认接管顺序和全局分支纪律由工作区主脑 `../brain/` 维护；若与本文件冲突，先服从主脑，再同步本产品分脑与兼容入口。
 - 本文件中的稳定规则必须摘要写入 `brain/knowledge_center.md` 或 `brain/operations_center.md`，不得单独扩展成平行真源。
 - `CLAUDE.md` 优先保持为指向 `AGENTS.md` 的软链接；若当前平台无建链权限，则退化为仅包含 `AGENTS.md` 的最小兼容入口。
 - `.github/copilot-instructions.md` 与 `.github/instructions/*.instructions.md` 是 GitHub Copilot / Coding Agent 的镜像或分层补充；若与本文件冲突，先按 `brain/` 纠偏，再同步本文件。

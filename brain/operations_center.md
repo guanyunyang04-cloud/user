@@ -6,6 +6,13 @@
 - 接主脑并进入目标分脑：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id>`
 
+## 1.1 Mutation 前预检
+- 先确认工作区和分支：
+  - `git status --short --branch --untracked-files=all`
+  - `git branch --show-current`
+- 如果当前分支不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
+- 分支异常是 preflight blocker；不得写成研究证据、promotion 证据或分脑当前结论。
+
 ## 2. 结构变更顺序
 - 先改 `brain/brain_architecture.md`
 - 再改 `brain/brain_manifest.json`

@@ -8,6 +8,11 @@
 - 默认接管顺序为：主脑 `identity -> state -> knowledge -> topology -> operations -> governance`，再进入目标分脑。
 - 主脑只维护跨项目边界、共享规则和路由；项目事实、实验指标、命令细节写入对应分脑。
 
+## 当前分支纠偏规则
+- 期望分支：所有后续代码、文档与实验工作默认在 `main` 分支展开。
+- 当前执行前置：如果 `git branch --show-current` 不是 `main`，任何会修改 repo-tracked 文件的任务都必须先纠偏到 `main`，或由用户显式撤销 `main-branch-only` 规则。
+- 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
+
 ## 当前分脑状态
 - `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，r48-r52d 均属 `research / shadow_only`，其中 r52d 已有代码合同、dry-run 与 safe screening-only 证据，但没有 confirmatory / stable verdict，不能 promotion / live / active artifact。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
