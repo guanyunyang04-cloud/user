@@ -25,6 +25,7 @@ from daily_research.tools.brain_evidence_registry import (
     query_evidence_registry,
     write_evidence_registry,
 )
+from daily_research.tools.selective_verification import build_verification_plan
 
 
 def _maybe_write(kind: str, payload: dict[str, Any], enabled: bool) -> dict[str, Any]:
@@ -98,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
     writeback.add_argument("--json", action="store_true")
     writeback.add_argument("--write-output", action="store_true")
     writeback.add_argument("--apply-brain-writeback", action="store_true")
+
+    verify = sub.add_parser("verify-plan", help="Recommend change-aware verification commands without running them.")
+    verify.add_argument("--base", default="")
+    verify.add_argument("--paths", nargs="*", default=None)
+    verify.add_argument("--json", action="store_true")
+    verify.add_argument("--write-output", action="store_true")
     return parser
 
 
@@ -137,6 +144,11 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return "audit_brain", audit_brain_system(scope=str(getattr(args, "scope", "") or "all"))
     if args.command == "writeback-plan":
         return "writeback_plan", build_writeback_plan(args.source, apply_brain_writeback=args.apply_brain_writeback)
+    if args.command == "verify-plan":
+        return "verify_plan", build_verification_plan(
+            paths=list(args.paths) if getattr(args, "paths", None) is not None else None,
+            base=str(getattr(args, "base", "") or "") or None,
+        )
     raise ValueError(f"Unsupported command: {args.command}")
 
 

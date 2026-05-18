@@ -33,6 +33,8 @@
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow evidence-index --rebuild --json`
 - evidence query：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow query --q <r_id|tag|dataset_id> --json`
+- selective verification plan：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow verify-plan --json`
 - brain guards：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
@@ -63,6 +65,10 @@
 - `git diff --check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
+- 日常验证先生成选择性验证计划：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow verify-plan --json`
+- 未触达的低耦合子系统可以跳过重测试；触达 shared core、execution/active 边界、promotion 边界或 evidence 边界时，必须扩大验证或记录人工复核。
+- 选择性验证计划只是 verification scheduling，不是 research evidence，不得用于 promotion、live/default 或 active artifact 结论。
 - 修改 brain workflow / registry / rules 后，跑：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/tools/tests/test_brain_capsule.py daily_research/tools/tests/test_brain_evidence_registry.py daily_research/tools/tests/test_brain_rules.py daily_research/tools/tests/test_brain_workflow_cli.py daily_research/tools/tests/test_daily_research_brain_skill.py -q`
 

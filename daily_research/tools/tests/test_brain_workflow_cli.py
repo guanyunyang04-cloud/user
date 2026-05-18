@@ -205,6 +205,19 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("stop_conditions", payload)
         self.assertEqual(payload["workflow_guide"]["workflow_id"], "executing_plan")
 
+    def test_verify_plan_cli_delegates_to_selective_verification(self) -> None:
+        payload = run_cli(
+            "verify-plan",
+            "--paths",
+            "daily_research/path_policy/forecast_features.py",
+            "--json",
+        )
+
+        self.assertEqual(payload["changed_paths"], ["daily_research/path_policy/forecast_features.py"])
+        joined = "\n".join(payload["selected_commands"])
+        self.assertIn("daily_research/path_policy/tests/test_forecast_features.py", joined)
+        self.assertIn("always_commands", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
