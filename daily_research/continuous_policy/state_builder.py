@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 import warnings
@@ -102,6 +102,8 @@ class PreparedPolicyInputs:
     rolling_pool_summary: dict[str, Any]
     alpha_prior_summary: dict[str, Any]
     derived_frames: dict[str, pd.DataFrame]
+    metadata_frames: dict[str, pd.DataFrame] = field(default_factory=dict)
+    metadata_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_summary(self) -> dict[str, Any]:
         return {
@@ -118,6 +120,7 @@ class PreparedPolicyInputs:
             "prepared_cache_meta": dict(self.prepared_cache_meta),
             "rolling_pool_summary": dict(self.rolling_pool_summary),
             "alpha_prior_summary": dict(self.alpha_prior_summary),
+            "metadata_summary": dict(self.metadata_summary),
         }
 
 
@@ -481,6 +484,8 @@ def prepare_policy_inputs(
     lake_min_trading_days: int = 2,
     pool_view_id: str = "",
     pool_view_spec: dict[str, Any] | None = None,
+    sector_board_view_id: str = "",
+    sector_board_view_spec: dict[str, Any] | None = None,
     extra_stocks: Iterable[str] | None = None,
     max_universe_size: int = 0,
     pool_rebalance_days: int = DEFAULT_POOL_REBALANCE_DAYS,
@@ -517,6 +522,8 @@ def prepare_policy_inputs(
             universe=requested_universe,
             pool_view_id=str(pool_view_id or ""),
             pool_view_spec=pool_view_spec,
+            sector_board_view_id=str(sector_board_view_id or ""),
+            sector_board_view_spec=sector_board_view_spec,
             extra_stocks=list(extra_stocks or []),
             max_universe_size=int(max_universe_size or 0),
             min_trading_days=int(lake_min_trading_days or 1),

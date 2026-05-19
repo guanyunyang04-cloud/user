@@ -59,6 +59,9 @@
 - Full-window realtime Gold 仍 pending；realtime tail labels 只能用于 research/audit。
 - 构建或读取数据集必须使用 explicit dataset id，不用 loose latest 判断完成。
 - Gold 构建采用 sharded/resumable builder，不再通过训练入口强行构建全量 Gold。
+- `policy_sector_board_view` 是板块/行业 metadata source lineage，不是 research evidence。
+- `latest_static_snapshot` 行业/板块视图不得冒充 point-in-time 历史成分；正式证据中必须记录 `source_sector_board_view_id`、`as_of_date` 和 `snapshot_semantics`。
+- 板块/行业视图只保存 membership/summary/manifest，不复制 OHLCV，不替代 `policy_input_bundle` 行情真源。
 
 ## 必跑守卫
 - `git diff -- daily_research/output/active_execution_strategy.json`

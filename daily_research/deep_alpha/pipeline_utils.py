@@ -401,6 +401,8 @@ def load_lake_market_data_with_pool_view(
     lake_dataset_id: str,
     pool_view_id: str = "",
     pool_view_spec: dict[str, Any] | None = None,
+    sector_board_view_id: str = "",
+    sector_board_view_spec: dict[str, Any] | None = None,
     start_date: str,
     end_date: str,
     benchmark: str,
@@ -417,6 +419,8 @@ def load_lake_market_data_with_pool_view(
         benchmark=str(benchmark or "000300.SH"),
         pool_view_id=str(pool_view_id or ""),
         pool_view_spec=pool_view_spec,
+        sector_board_view_id=str(sector_board_view_id or ""),
+        sector_board_view_spec=sector_board_view_spec,
         min_trading_days=int(min_trading_days or 1),
         require_benchmark_open=False,
     )
@@ -434,18 +438,44 @@ def load_lake_market_data_with_pool_view(
             "data_source": "lake",
             "lake_dataset_id": str(lake_dataset_id),
             "pool_view_id": str(pool_view_id or ""),
+            "sector_board_view_id": str(sector_board_view_id or ""),
             "start_date": str(start_date),
             "end_date": str(end_date),
             "benchmark": str(benchmark or "000300.SH"),
             "universe": list(prepared.universe),
         }
     )
+    industry_map = pd.Series(dtype=object)
+    industry_frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("industry_map")
+    if industry_frame is not None and not industry_frame.empty and {"symbol", "industry"}.issubset(industry_frame.columns):
+        industry_map = (
+            industry_frame.assign(symbol=industry_frame["symbol"].astype(str).str.strip().str.upper())
+            .drop_duplicates(subset=["symbol"])
+            .set_index("symbol")["industry"]
+            .reindex(list(prepared.universe))
+            .dropna()
+        )
+    style_map = pd.DataFrame(index=list(prepared.universe))
+    board_frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
+    if board_frame is not None and not board_frame.empty and {"symbol", "board_kind", "board_name"}.issubset(board_frame.columns):
+        board = board_frame.copy()
+        board["symbol"] = board["symbol"].astype(str).str.strip().str.upper()
+        board["style_name"] = board["board_kind"].astype(str).str.strip() + "_" + board["board_name"].astype(str).str.strip()
+        style_map = pd.DataFrame(False, index=list(prepared.universe), columns=sorted(board["style_name"].dropna().unique()))
+        for _, row in board.iterrows():
+            symbol = str(row["symbol"])
+            style_name = str(row["style_name"])
+            if symbol in style_map.index and style_name in style_map.columns:
+                style_map.loc[symbol, style_name] = True
     return {
         "prepared": prepared,
         "df_dict": df_dict,
         "benchmark_close": prepared.benchmark_close.copy(),
         "benchmark_open": prepared.benchmark_open.copy(),
         "rolling_membership_frame": prepared.membership_frame.copy(),
+        "industry_map": industry_map,
+        "style_map": style_map.astype(bool) if not style_map.empty else style_map,
+        "sector_board_view_id": str(prepared.metadata_summary.get("sector_board_view", {}).get("dataset_id", "")),
         "raw_key": f"lake:{raw_key}",
         "rolling_pool_key": str(prepared.rolling_pool_summary.get("pool_view_id", "") or ""),
     }

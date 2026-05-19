@@ -13,6 +13,7 @@ from daily_research.continuous_policy.state_builder import (
 )
 from daily_research.data_lake.catalog import ResearchDataLake
 from daily_research.data_lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
+from daily_research.data_lake.sector_board_views import SectorBoardViewSpec, resolve_sector_board_view_for_policy_inputs
 
 DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 
@@ -189,6 +190,8 @@ def load_policy_inputs_from_lake(
     universe: list[str] | None = None,
     pool_view_id: str = "",
     pool_view_spec: PoolViewSpec | dict[str, Any] | None = None,
+    sector_board_view_id: str = "",
+    sector_board_view_spec: SectorBoardViewSpec | dict[str, Any] | None = None,
     extra_stocks: list[str] | None = None,
     max_universe_size: int = 0,
     min_trading_days: int = 2,
@@ -222,12 +225,26 @@ def load_policy_inputs_from_lake(
         pool_view_id=str(pool_view_id or ""),
         pool_view_spec=pool_view_spec,
     )
+    sector_board_view = resolve_sector_board_view_for_policy_inputs(
+        lake=lake,
+        dataset_id=dataset_id,
+        sector_board_view_id=str(sector_board_view_id or ""),
+        sector_board_view_spec=sector_board_view_spec,
+    )
     if pool_view is not None:
         view_source_dataset_id = str(pool_view.metadata.get("parameters", {}).get("source_market_dataset_id", "") or "")
         if view_source_dataset_id and view_source_dataset_id != dataset_id:
             raise ValueError(
                 "pool_view_source_mismatch: "
                 f"pool_view_id={pool_view.dataset_id} source_market_dataset_id={view_source_dataset_id} "
+                f"requested_dataset_id={dataset_id}"
+            )
+    if sector_board_view is not None:
+        sector_source_dataset_id = str(sector_board_view.metadata.get("parameters", {}).get("source_market_dataset_id", "") or "")
+        if sector_source_dataset_id and sector_source_dataset_id != dataset_id:
+            raise ValueError(
+                "sector_board_view_source_mismatch: "
+                f"sector_board_view_id={sector_board_view.dataset_id} source_market_dataset_id={sector_source_dataset_id} "
                 f"requested_dataset_id={dataset_id}"
             )
     if pool_view is not None:
@@ -376,6 +393,42 @@ def load_policy_inputs_from_lake(
     derived_frames = {name: frame for name, frame in sliced_panels.items() if name not in {"score_none", "score_v2"}}
     derived_frames.update(alpha_prior_frames)
     derived_frames["score_blend"] = score_blend
+    metadata_frames: dict[str, pd.DataFrame] = {}
+    metadata_summary: dict[str, Any] = {}
+    sector_meta_for_cache: dict[str, Any] = {}
+    if sector_board_view is not None:
+        universe_set = set(resolved_universe)
+        industry_map = sector_board_view.industry_map_frame.copy()
+        if "symbol" in industry_map.columns:
+            industry_map["symbol"] = industry_map["symbol"].astype(str).str.strip().str.upper()
+            industry_map = industry_map.loc[industry_map["symbol"].isin(universe_set)].sort_values("symbol").reset_index(drop=True)
+        board_membership = sector_board_view.board_membership_frame.copy()
+        if "symbol" in board_membership.columns:
+            board_membership["symbol"] = board_membership["symbol"].astype(str).str.strip().str.upper()
+            board_membership = board_membership.loc[board_membership["symbol"].isin(universe_set)].reset_index(drop=True)
+        board_summary = sector_board_view.board_summary_frame.copy()
+        if not board_membership.empty and {"board_kind", "board_name", "board_code"}.issubset(board_membership.columns):
+            keys = board_membership[["board_kind", "board_name", "board_code"]].drop_duplicates()
+            if not board_summary.empty and {"board_kind", "board_name", "board_code"}.issubset(board_summary.columns):
+                board_summary = board_summary.merge(keys, on=["board_kind", "board_name", "board_code"], how="inner")
+        metadata_frames = {
+            "industry_map": industry_map,
+            "board_membership": board_membership,
+            "board_summary": board_summary,
+        }
+        source_cache = dict(sector_board_view.metadata.get("source_cache", {}) or {})
+        parameters = dict(sector_board_view.metadata.get("parameters", {}) or {})
+        sector_meta_for_cache = {
+            "dataset_id": sector_board_view.dataset_id,
+            "view_kind": str(parameters.get("view_kind", "") or ""),
+            "view_name": str(parameters.get("view_name", "") or ""),
+            "source_market_dataset_id": str(parameters.get("source_market_dataset_id", "") or ""),
+            "snapshot_semantics": str(parameters.get("snapshot_semantics", "") or source_cache.get("snapshot_semantics", "")),
+            "as_of_date": str(parameters.get("as_of_date", "") or source_cache.get("as_of_date", "")),
+            "industry_coverage": source_cache.get("industry_coverage", {}),
+            "board_coverage": source_cache.get("board_coverage", {}),
+        }
+        metadata_summary = {"sector_board_view": dict(sector_meta_for_cache)}
 
     history_window = HistoryWindow(
         mode="train",
@@ -417,6 +470,7 @@ def load_policy_inputs_from_lake(
                 if pool_view is not None
                 else {}
             ),
+            "sector_board_view": dict(sector_meta_for_cache),
         },
         prepared_cache_meta={
             "cache_hit": True,
@@ -434,6 +488,7 @@ def load_policy_inputs_from_lake(
                 if pool_view is not None
                 else {}
             ),
+            "sector_board_view": dict(sector_meta_for_cache),
         },
         close=close,
         open_=open_,
@@ -458,4 +513,6 @@ def load_policy_inputs_from_lake(
         },
         alpha_prior_summary=alpha_prior_summary,
         derived_frames=derived_frames,
+        metadata_frames=metadata_frames,
+        metadata_summary=metadata_summary,
     )

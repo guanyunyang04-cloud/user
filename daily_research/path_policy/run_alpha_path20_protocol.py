@@ -589,6 +589,13 @@ def _forecast_manifest_prepared_summary(manifest: dict[str, Any], *, args: argpa
         "prepared_cache_meta": {"source": "forecast_memmap_manifest", "artifact_reused": True},
         "rolling_pool_summary": {},
         "alpha_prior_summary": {},
+        "metadata_summary": {
+            "sector_board_view": {
+                "dataset_id": str(manifest.get("source_sector_board_view_id", "") or ""),
+                "view_kind": str(manifest.get("source_sector_board_view_kind", "") or ""),
+                "snapshot_semantics": str(manifest.get("source_sector_board_snapshot_semantics", "") or ""),
+            }
+        },
     }
 
 
@@ -2668,6 +2675,8 @@ def _prepare_for_window(args: argparse.Namespace, *, start_date: str, end_date: 
         lake_min_trading_days=int(args.lake_min_trading_days),
         pool_view_id=str(getattr(args, "pool_view_id", "") or ""),
         pool_view_spec=_pool_view_spec_from_args(args, start_date=start_date, end_date=end_date),
+        sector_board_view_id=str(getattr(args, "sector_board_view_id", "") or ""),
+        sector_board_view_spec=_sector_board_view_spec_from_args(args),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
@@ -2696,6 +2705,26 @@ def _pool_view_spec_from_args(args: argparse.Namespace, *, start_date: str, end_
         suffix = view_name.removeprefix("exchange_")
         spec["exchange_suffix"] = f".{suffix.upper()}" if suffix else ""
     return spec
+
+
+def _sector_board_view_spec_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    if str(getattr(args, "sector_board_view_id", "") or "").strip():
+        return None
+    view_kind = str(getattr(args, "sector_board_view_kind", "") or "").strip().lower()
+    as_of_date = str(getattr(args, "sector_board_as_of_date", "") or "").strip()
+    industry_source_path = str(getattr(args, "sector_board_industry_source_path", "") or "").strip()
+    board_source_path = str(getattr(args, "sector_board_source_path", "") or "").strip()
+    if not any([view_kind, as_of_date, industry_source_path, board_source_path]):
+        return None
+    return {
+        "source_market_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "view_kind": view_kind or "latest_static_snapshot",
+        "view_name": "sector_board_latest_static",
+        "snapshot_semantics": "latest_static_snapshot",
+        "as_of_date": as_of_date,
+        **({"industry_source_path": industry_source_path} if industry_source_path else {}),
+        **({"board_source_path": board_source_path} if board_source_path else {}),
+    }
 
 
 def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
@@ -3242,6 +3271,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pool-view-id", default="", help="Optional data-lake policy_pool_view dataset id.")
     parser.add_argument("--pool-view-kind", default="", choices=("", "learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
     parser.add_argument("--pool-view-name", default="")
+    parser.add_argument("--sector-board-view-id", default="", help="Optional data-lake policy_sector_board_view dataset id.")
+    parser.add_argument("--sector-board-view-kind", default="", choices=("", "latest_static_snapshot"))
+    parser.add_argument("--sector-board-as-of-date", default="")
+    parser.add_argument("--sector-board-industry-source-path", default="")
+    parser.add_argument("--sector-board-source-path", default="")
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--start-date", default="20240102")
     parser.add_argument("--end-date", default="20240329")
@@ -3643,6 +3677,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         lake_min_trading_days=int(args.lake_min_trading_days),
         pool_view_id=str(getattr(args, "pool_view_id", "") or ""),
         pool_view_spec=_pool_view_spec_from_args(args, start_date=prepare_start_date, end_date=prepare_end_date),
+        sector_board_view_id=str(getattr(args, "sector_board_view_id", "") or ""),
+        sector_board_view_spec=_sector_board_view_spec_from_args(args),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",

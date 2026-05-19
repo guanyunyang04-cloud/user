@@ -130,6 +130,9 @@ def parse_args():
     parser.add_argument("--pool-view-id", default="")
     parser.add_argument("--pool-view-kind", default="", choices=("", "learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
     parser.add_argument("--pool-view-name", default="")
+    parser.add_argument("--sector-board-view-id", default="")
+    parser.add_argument("--sector-board-view-kind", default="", choices=("", "latest_static_snapshot"))
+    parser.add_argument("--sector-board-as-of-date", default="")
     parser.add_argument("--force-raw-cache-path", default="")
     parser.add_argument("--stocks", default=None)
     parser.add_argument("--stocks-file", default=None, help="Path to txt/csv file containing stock codes.")
@@ -383,6 +386,22 @@ def _pool_view_spec_from_args(args: argparse.Namespace, *, start_date: str, end_
         suffix = view_name.removeprefix("exchange_")
         spec["exchange_suffix"] = f".{suffix.upper()}" if suffix else ""
     return spec
+
+
+def _sector_board_view_spec_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    if str(getattr(args, "sector_board_view_id", "") or "").strip():
+        return None
+    view_kind = str(getattr(args, "sector_board_view_kind", "") or "").strip().lower()
+    as_of_date = str(getattr(args, "sector_board_as_of_date", "") or "").strip()
+    if not any([view_kind, as_of_date]):
+        return None
+    return {
+        "source_market_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "view_kind": view_kind or "latest_static_snapshot",
+        "view_name": "sector_board_latest_static",
+        "snapshot_semantics": "latest_static_snapshot",
+        "as_of_date": as_of_date,
+    }
 
 
 def _load_cached_rolling_pool_union(pool_name: str, start_date: str, end_date: str) -> list[str]:
@@ -1706,6 +1725,7 @@ def main():
 
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
+    lake_payload: dict[str, Any] = {}
     if args.data_source == "lake":
         if not str(args.lake_dataset_id or "").strip():
             raise ValueError("--data-source lake requires --lake-dataset-id.")
@@ -1714,6 +1734,8 @@ def main():
             lake_dataset_id=str(args.lake_dataset_id),
             pool_view_id=str(args.pool_view_id or ""),
             pool_view_spec=_pool_view_spec_from_args(args, start_date=str(cfg.start_date), end_date=str(cfg.end_date)),
+            sector_board_view_id=str(args.sector_board_view_id or ""),
+            sector_board_view_spec=_sector_board_view_spec_from_args(args),
             start_date=str(cfg.start_date),
             end_date=str(cfg.end_date),
             benchmark=str(cfg.benchmark),
@@ -1800,6 +1822,9 @@ def main():
     stage_progress.start_stage(3, "Build features and targets")
     industry_map = None
     style_map = None
+    if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "lake":
+        industry_map = lake_payload.get("industry_map")
+        style_map = lake_payload.get("style_map")
     if (args.relation_layer or cfg.dynamic_graph_layer) and args.data_source == "tq":
         progress_write("Load relation priors: industry/style")
         try:

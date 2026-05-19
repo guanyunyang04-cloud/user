@@ -454,6 +454,8 @@ def build_forecast_sequence_dataset(
         "raw_kline_feature_count": int(feature_manifest.get("raw_kline_feature_count", 0)),
         "market_context_feature_count": int(feature_manifest.get("market_context_feature_count", 0)),
         "peer_context_feature_count": int(feature_manifest.get("peer_context_feature_count", 0)),
+        "sector_context_feature_count": int(feature_manifest.get("sector_context_feature_count", 0)),
+        "source_sector_board_view_id": str(feature_manifest.get("source_sector_board_view_id", "")),
         "alpha_prior_feature_count": int(feature_manifest.get("alpha_prior_feature_count", 0)),
         "cumulative_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
         "rank_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
@@ -842,6 +844,7 @@ def build_forecast_memmap_dataset(
     }
     raw_cache_meta = dict(getattr(prepared, "raw_cache_meta", {}) or {})
     pool_view_meta = dict(raw_cache_meta.get("pool_view", {}) or {})
+    sector_board_meta = dict(raw_cache_meta.get("sector_board_view", {}) or {})
     manifest: dict[str, Any] = {
         "status": "completed" if row_count else "insufficient_or_incomplete",
         "stage": "forecast_sequence_dataset",
@@ -850,6 +853,9 @@ def build_forecast_memmap_dataset(
         "source_pool_view_id": str(pool_view_meta.get("dataset_id", "") or ""),
         "source_pool_view_kind": str(pool_view_meta.get("view_kind", "") or ""),
         "source_pool_view_name": str(pool_view_meta.get("view_name", "") or ""),
+        "source_sector_board_view_id": str(sector_board_meta.get("dataset_id", "") or ""),
+        "source_sector_board_view_kind": str(sector_board_meta.get("view_kind", "") or ""),
+        "source_sector_board_snapshot_semantics": str(sector_board_meta.get("snapshot_semantics", "") or ""),
         "lookback_days": int(lookback_days),
         "horizon": int(horizon),
         "execution_mode": str(execution_mode),
@@ -871,6 +877,7 @@ def build_forecast_memmap_dataset(
         "raw_kline_feature_count": int(feature_manifest.get("raw_kline_feature_count", 0)),
         "market_context_feature_count": int(feature_manifest.get("market_context_feature_count", 0)),
         "peer_context_feature_count": int(feature_manifest.get("peer_context_feature_count", 0)),
+        "sector_context_feature_count": int(feature_manifest.get("sector_context_feature_count", 0)),
         "alpha_prior_feature_count": int(feature_manifest.get("alpha_prior_feature_count", 0)),
         "history_quality_feature_count": int(feature_manifest.get("history_quality_feature_count", 0)),
         "feature_store_path": str(feature_store_path.resolve()),

@@ -23,6 +23,13 @@ from daily_research.data_lake.pool_views import (
     load_pool_view,
     resolve_pool_view_for_policy_inputs,
 )
+from daily_research.data_lake.sector_board_views import (
+    SectorBoardViewRecord,
+    SectorBoardViewSpec,
+    build_sector_board_view_from_policy_bundle,
+    load_sector_board_view,
+    resolve_sector_board_view_for_policy_inputs,
+)
 
 __all__ = [
     "DATA_LAKE_SCHEMA_VERSION",
@@ -43,4 +50,9 @@ __all__ = [
     "build_pool_view_from_policy_bundle",
     "load_pool_view",
     "resolve_pool_view_for_policy_inputs",
+    "SectorBoardViewRecord",
+    "SectorBoardViewSpec",
+    "build_sector_board_view_from_policy_bundle",
+    "load_sector_board_view",
+    "resolve_sector_board_view_for_policy_inputs",
 ]

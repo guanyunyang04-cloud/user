@@ -7,8 +7,14 @@ import pandas as pd
 
 from daily_research.data_lake import ResearchDataLake, build_label_completeness_summary
 from daily_research.data_lake import build_pool_view
+from daily_research.data_lake import build_sector_board_view
 from daily_research.data_lake import build_research_database
 from daily_research.data_lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle, load_pool_view
+from daily_research.data_lake.sector_board_views import (
+    SectorBoardViewSpec,
+    build_sector_board_view_from_policy_bundle,
+    load_sector_board_view,
+)
 from daily_research.data_lake.import_legacy_training_caches import import_legacy_training_dataset_caches
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
 from daily_research.data_lake.policy_input_audit import audit_policy_input_bundle
@@ -584,6 +590,162 @@ class ResearchDataLakeTest(unittest.TestCase):
                         "--exchange-suffix",
                         ".SZ",
                     ]
+                )
+
+    def test_sector_board_view_reuses_fingerprint_and_writes_lightweight_metadata(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH", "430001.BJ"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            industry_csv = root / "industry.csv"
+            industry_csv.write_text(
+                "stock,industry\n000001.SZ,银行\n600000.SH,银行\n999999.SH,缺席行业\n",
+                encoding="utf-8-sig",
+            )
+            block_file = root / "infoharbor_block.dat"
+            block_file.write_text(
+                "#GN_银行,2,880001,20200101,20260519,,\n0#000001,1#600000,0#999999\n"
+                "#FG_高股息,1,880002,20200101,20260519,,\n1#600000,2#430001\n",
+                encoding="gbk",
+            )
+            lake = ResearchDataLake(root / "lake")
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            spec = SectorBoardViewSpec(
+                source_market_dataset_id=market_record.dataset_id,
+                industry_source_path=str(industry_csv),
+                board_source_path=str(block_file),
+                as_of_date="2026-05-19",
+            )
+            first = build_sector_board_view_from_policy_bundle(lake=lake, spec=spec)
+            second = build_sector_board_view_from_policy_bundle(lake=lake, spec=spec)
+            loaded = load_sector_board_view(lake=lake, sector_board_view_id=first.dataset_id)
+
+        self.assertEqual(second.dataset_id, first.dataset_id)
+        self.assertEqual(second.status, "hit")
+        self.assertEqual(first.dataset_kind, "policy_sector_board_view")
+        self.assertFalse(any("bronze_market_data" in key for key in first.content_paths))
+        self.assertEqual(loaded.metadata["parameters"]["snapshot_semantics"], "latest_static_snapshot")
+        self.assertEqual(loaded.metadata["source_cache"]["industry_coverage"]["covered_symbols"], 2)
+        self.assertIn("430001.BJ", loaded.metadata["source_cache"]["industry_coverage"]["missing_symbols"])
+        self.assertEqual(set(loaded.industry_map_frame["symbol"]), {"000001.SZ", "600000.SH"})
+        self.assertEqual(set(loaded.board_membership_frame["symbol"]), {"000001.SZ", "600000.SH", "430001.BJ"})
+        self.assertEqual(set(loaded.board_summary_frame["board_kind"]), {"GN", "FG"})
+
+    def test_sector_board_view_cli_blocks_active_artifact_diff(self) -> None:
+        with mock.patch("daily_research.data_lake.build_sector_board_view._active_artifact_has_diff", return_value=True):
+            with self.assertRaisesRegex(ValueError, "active_artifact_diff_blocker"):
+                build_sector_board_view.main(["--source-market-dataset-id", "policy_input_bundle__fixed"])
+
+    def test_lake_loader_attaches_sector_board_metadata_without_changing_universe(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            industry_csv = root / "industry.csv"
+            industry_csv.write_text("symbol,industry\n000001.SZ,银行\n600000.SH,银行\n", encoding="utf-8-sig")
+            block_file = root / "infoharbor_block.dat"
+            block_file.write_text("#GN_银行,2,880001,20200101,20260519,,\n0#000001,1#600000\n", encoding="gbk")
+            lake = ResearchDataLake(root / "lake")
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            sector_view = build_sector_board_view_from_policy_bundle(
+                lake=lake,
+                spec=SectorBoardViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    industry_source_path=str(industry_csv),
+                    board_source_path=str(block_file),
+                    as_of_date="2026-05-19",
+                ),
+            )
+            pool_view = build_pool_view_from_policy_bundle(
+                lake=lake,
+                spec=PoolViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    view_kind="exchange",
+                    view_name="exchange_sz",
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    exchange_suffix=".SZ",
+                ),
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=market_record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                pool_view_id=pool_view.dataset_id,
+                sector_board_view_id=sector_view.dataset_id,
+            )
+
+        self.assertEqual(prepared.universe, ("000001.SZ",))
+        self.assertIn("industry_map", prepared.metadata_frames)
+        self.assertIn("board_membership", prepared.metadata_frames)
+        self.assertIn("board_summary", prepared.metadata_frames)
+        self.assertEqual(prepared.raw_cache_meta["sector_board_view"]["dataset_id"], sector_view.dataset_id)
+        self.assertEqual(prepared.metadata_summary["sector_board_view"]["snapshot_semantics"], "latest_static_snapshot")
+        self.assertEqual(prepared.metadata_frames["industry_map"]["symbol"].tolist(), ["000001.SZ"])
+
+    def test_lake_loader_rejects_sector_board_view_from_different_bundle(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        market_frames, membership_frame, feature_frames = _synthetic_policy_bundle_parts(dates, stocks=stocks)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            industry_csv = root / "industry.csv"
+            industry_csv.write_text("stock,industry\n000001.SZ,银行\n", encoding="utf-8-sig")
+            block_file = root / "infoharbor_block.dat"
+            block_file.write_text("#GN_银行,1,880001,20200101,20260519,,\n0#000001\n", encoding="gbk")
+            lake = ResearchDataLake(root / "lake")
+            first = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic_a"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            second = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic_b"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=membership_frame,
+                feature_frames=feature_frames,
+                source="synthetic",
+            )
+            sector_view = build_sector_board_view_from_policy_bundle(
+                lake=lake,
+                spec=SectorBoardViewSpec(
+                    source_market_dataset_id=first.dataset_id,
+                    industry_source_path=str(industry_csv),
+                    board_source_path=str(block_file),
+                    as_of_date="2026-05-19",
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "sector_board_view_source_mismatch"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=second.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    sector_board_view_id=sector_view.dataset_id,
                 )
 
     def test_policy_input_loader_reports_lake_coverage_blocker_for_missing_benchmark(self) -> None:

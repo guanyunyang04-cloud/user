@@ -119,6 +119,51 @@ def test_raw_kline_context_profile_includes_market_benchmark_and_peer_context() 
     assert manifest["peer_context_feature_count"] > 0
 
 
+def test_sector_context_profile_uses_prepared_metadata_frames() -> None:
+    prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
+    industry_map = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC", "DDD"],
+            "industry": ["tech", "tech", "bank", "bank"],
+            "source": ["unit"] * 4,
+            "as_of_date": ["2026-05-19"] * 4,
+        }
+    )
+    board_membership = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "board_kind": ["GN", "GN", "FG"],
+            "board_name": ["ai", "ai", "dividend"],
+            "board_code": ["880001", "880001", "880002"],
+            "source": ["unit"] * 3,
+            "as_of_date": ["2026-05-19"] * 3,
+        }
+    )
+    prepared = replace(
+        prepared,
+        metadata_frames={"industry_map": industry_map, "board_membership": board_membership},
+        metadata_summary={"sector_board_view": {"dataset_id": "policy_sector_board_view__unit"}},
+    )
+    date = pd.Timestamp(prepared.close.index[-1]).normalize()
+
+    panels, feature_columns, manifest = build_forecast_feature_panels(
+        prepared,
+        [date],
+        feature_profile="raw_kline_context_sector_v1",
+        max_feature_columns=256,
+    )
+
+    assert "raw_kline_context_sector_v1" in FORECAST_FEATURE_PROFILES
+    assert "industry_ret_20_excess" in feature_columns
+    assert "industry_rank_ret_20" in feature_columns
+    assert "industry_member_count" in feature_columns
+    assert "board_member_count" in feature_columns
+    assert manifest["sector_context_feature_count"] == 4
+    assert manifest["source_sector_board_view_id"] == "policy_sector_board_view__unit"
+    assert panels[date].loc["AAA", "industry_member_count"] == pytest.approx(2.0)
+    assert panels[date].loc["DDD", "board_member_count"] == pytest.approx(0.0)
+
+
 def test_no_alpha_prior_profile_removes_old_alpha_score_dependencies() -> None:
     prepared = make_prepared_policy_inputs(days=90, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2024-01-02")
     date = pd.Timestamp(prepared.close.index[-1]).normalize()

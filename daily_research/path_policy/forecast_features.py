@@ -17,10 +17,19 @@ FORECAST_FEATURE_PROFILES: tuple[str, ...] = (
     "raw_kline_v1",
     "raw_kline_context_v1",
     "raw_kline_context_no_alpha_prior_v1",
+    "raw_kline_context_sector_v1",
 )
 DEFAULT_FORECAST_FEATURE_PROFILE = "raw_kline_context_v1"
 DEFAULT_FORECAST_MAX_FEATURE_COLUMNS = 192
 NON_FORECAST_STATE_COLUMNS = {"date", "stock", "in_universe"}
+
+
+def _source_sector_board_view_id(prepared: PreparedPolicyInputs) -> str:
+    summary = dict(getattr(prepared, "metadata_summary", {}) or {})
+    sector_summary = summary.get("sector_board_view", {})
+    if isinstance(sector_summary, dict):
+        return str(sector_summary.get("dataset_id", "") or "")
+    return ""
 
 
 def _safe_div(numerator: pd.DataFrame | pd.Series, denominator: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
@@ -196,6 +205,76 @@ def _context_feature_frames(prepared: PreparedPolicyInputs, raw_frames: dict[str
     return {key: value.replace([np.inf, -np.inf], np.nan) for key, value in frames.items()}
 
 
+def _metadata_industry_series(prepared: PreparedPolicyInputs, columns: list[str]) -> pd.Series:
+    frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("industry_map")
+    if frame is None or frame.empty or not {"symbol", "industry"}.issubset(frame.columns):
+        return pd.Series(index=columns, dtype=object)
+    data = frame.copy()
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    data["industry"] = data["industry"].astype(str).str.strip()
+    return data.drop_duplicates(subset=["symbol"]).set_index("symbol")["industry"].reindex(columns)
+
+
+def _metadata_board_count_series(prepared: PreparedPolicyInputs, columns: list[str]) -> pd.Series:
+    frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
+    if frame is None or frame.empty or "symbol" not in frame.columns:
+        return pd.Series(0.0, index=columns, dtype=float)
+    data = frame.copy()
+    data["symbol"] = data["symbol"].astype(str).str.strip().str.upper()
+    key_columns = [column for column in ("board_kind", "board_name", "board_code") if column in data.columns]
+    if key_columns:
+        count = data.drop_duplicates(subset=["symbol", *key_columns]).groupby("symbol").size()
+    else:
+        count = data.groupby("symbol").size()
+    return count.reindex(columns).fillna(0.0).astype(float)
+
+
+def _group_mean_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+    out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
+    for group_name in sorted(str(item) for item in group.dropna().unique()):
+        members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
+        if not members:
+            continue
+        mean = values[members].mean(axis=1)
+        out.loc[:, members] = np.repeat(mean.to_numpy(dtype=float).reshape(-1, 1), len(members), axis=1)
+    return out
+
+
+def _group_rank_frame(values: pd.DataFrame, group: pd.Series) -> pd.DataFrame:
+    out = pd.DataFrame(np.nan, index=values.index, columns=values.columns, dtype=float)
+    for group_name in sorted(str(item) for item in group.dropna().unique()):
+        members = [stock for stock in values.columns if str(group.get(stock, "")) == group_name]
+        if not members:
+            continue
+        out.loc[:, members] = values[members].rank(axis=1, pct=True, method="average")
+    return out
+
+
+def _sector_context_feature_frames(prepared: PreparedPolicyInputs) -> dict[str, pd.DataFrame]:
+    close = prepared.close.astype(float)
+    columns = [str(item).strip().upper() for item in close.columns]
+    industry = _metadata_industry_series(prepared, columns)
+    if industry.dropna().empty:
+        return {}
+    returns_20 = close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+    benchmark = prepared.benchmark_close.reindex(close.index).astype(float).pct_change(20).replace([np.inf, -np.inf], np.nan)
+    industry_mean = _group_mean_frame(returns_20, industry)
+    industry_ret_excess = industry_mean.sub(benchmark, axis=0)
+    industry_rank = _group_rank_frame(returns_20, industry)
+    member_count = industry.map(industry.value_counts()).reindex(columns).fillna(0.0).astype(float)
+    board_count = _metadata_board_count_series(prepared, columns)
+    return {
+        "industry_ret_20_excess": industry_ret_excess,
+        "industry_rank_ret_20": industry_rank,
+        "industry_member_count": pd.DataFrame(
+            np.repeat(member_count.to_numpy(dtype=float).reshape(1, -1), len(close.index), axis=0),
+            index=close.index,
+            columns=columns,
+        ),
+        "board_member_count": pd.DataFrame(np.repeat(board_count.to_numpy(dtype=float).reshape(1, -1), len(close.index), axis=0), index=close.index, columns=columns),
+    }
+
+
 def _state_frames_for_dates(prepared: PreparedPolicyInputs, dates: list[pd.Timestamp]) -> dict[pd.Timestamp, pd.DataFrame]:
     empty_portfolio = PortfolioState()
     out: dict[pd.Timestamp, pd.DataFrame] = {}
@@ -218,14 +297,18 @@ def _selected_columns_for_profile(
     state_columns: list[str],
     raw_columns: list[str],
     context_columns: list[str],
+    sector_columns: list[str] | None = None,
     history_columns: list[str] | None = None,
     feature_profile: str,
 ) -> tuple[list[str], dict[str, str]]:
     column_groups: dict[str, str] = {column: "state" for column in state_columns}
     history_columns = list(history_columns or [])
+    sector_columns = list(sector_columns or [])
     if feature_profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
         column_groups.update({column: "raw_kline" for column in raw_columns})
-    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
+    if feature_profile == "raw_kline_context_sector_v1":
+        column_groups.update({column: "raw_kline" for column in raw_columns})
+    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}:
         for column in context_columns:
             if column.startswith("market_") or column.startswith("benchmark_") or column.startswith("cs_"):
                 column_groups[column] = "market_context"
@@ -234,12 +317,14 @@ def _selected_columns_for_profile(
             else:
                 column_groups[column] = "context"
         column_groups.update({column: "history_quality" for column in history_columns})
+        column_groups.update({column: "sector_context" for column in sector_columns})
     columns = [column for column in state_columns if column in column_groups]
-    if feature_profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
+    if feature_profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}:
         columns.extend([column for column in raw_columns if column in column_groups])
-    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
+    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}:
         columns.extend([column for column in context_columns if column in column_groups])
         columns.extend([column for column in history_columns if column in column_groups])
+        columns.extend([column for column in sector_columns if column in column_groups])
     if feature_profile == "raw_kline_context_no_alpha_prior_v1":
         columns = [column for column in columns if not _alpha_dependent_column(column)]
         column_groups = {column: group for column, group in column_groups.items() if column in columns}
@@ -253,12 +338,14 @@ def _manifest_for_columns(
     selected_columns: list[str],
     column_groups: dict[str, str],
     max_feature_columns: int,
+    source_sector_board_view_id: str = "",
 ) -> dict[str, Any]:
     group_counts = {
         "state": 0,
         "raw_kline": 0,
         "market_context": 0,
         "peer_context": 0,
+        "sector_context": 0,
         "alpha_prior": 0,
         "history_quality": 0,
     }
@@ -277,8 +364,10 @@ def _manifest_for_columns(
         "raw_kline_feature_count": int(group_counts["raw_kline"]),
         "market_context_feature_count": int(group_counts["market_context"]),
         "peer_context_feature_count": int(group_counts["peer_context"]),
+        "sector_context_feature_count": int(group_counts["sector_context"]),
         "alpha_prior_feature_count": int(group_counts["alpha_prior"]),
         "history_quality_feature_count": int(group_counts["history_quality"]),
+        "source_sector_board_view_id": str(source_sector_board_view_id or ""),
         "feature_columns": list(selected_columns),
     }
 
@@ -295,9 +384,11 @@ def _cap_feature_columns(
         return all_columns[:cap]
 
     priority_groups = {"raw_kline"}
-    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}:
+    if feature_profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}:
         priority_groups.update({"market_context", "peer_context", "history_quality"})
-    priority_order = ["raw_kline", "history_quality", "market_context", "peer_context"]
+    if feature_profile == "raw_kline_context_sector_v1":
+        priority_groups.add("sector_context")
+    priority_order = ["raw_kline", "history_quality", "market_context", "peer_context", "sector_context"]
     priority_columns = [
         column
         for group in priority_order
@@ -337,6 +428,7 @@ def build_forecast_feature_panels(
             selected_columns=[],
             column_groups={},
             max_feature_columns=max_feature_columns,
+            source_sector_board_view_id=_source_sector_board_view_id(prepared),
         )
         return {}, [], manifest
 
@@ -348,18 +440,20 @@ def build_forecast_feature_panels(
     ]
     raw_frames = (
         _raw_kline_feature_frames(prepared)
-        if profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        if profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}
         else {}
     )
     context_frames = (
         _context_feature_frames(prepared, raw_frames)
-        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}
         else {}
     )
+    sector_frames = _sector_context_feature_frames(prepared) if profile == "raw_kline_context_sector_v1" else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
         context_columns=list(context_frames),
+        sector_columns=list(sector_frames),
         history_columns=[],
         feature_profile=profile,
     )
@@ -376,6 +470,7 @@ def build_forecast_feature_panels(
         selected_columns=selected_columns,
         column_groups=column_groups,
         max_feature_columns=cap,
+        source_sector_board_view_id=_source_sector_board_view_id(prepared),
     )
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     panels: dict[pd.Timestamp, pd.DataFrame] = {}
@@ -389,6 +484,8 @@ def build_forecast_feature_panels(
                 extra_parts[column] = raw_frames[column].loc[dt].reindex(universe)
             elif column in context_frames:
                 extra_parts[column] = context_frames[column].loc[dt].reindex(universe)
+            elif column in sector_frames:
+                extra_parts[column] = sector_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         panel = pd.DataFrame(extra_parts, index=universe).apply(pd.to_numeric, errors="coerce")
@@ -452,6 +549,7 @@ def build_forecast_feature_store(
             selected_columns=[],
             column_groups={},
             max_feature_columns=max_feature_columns,
+            source_sector_board_view_id=_source_sector_board_view_id(prepared),
         )
         manifest.update(
             {
@@ -479,12 +577,12 @@ def build_forecast_feature_store(
     ]
     raw_frames = (
         _raw_kline_feature_frames(prepared)
-        if profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        if profile in {"raw_kline_v1", "raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}
         else {}
     )
     context_frames = (
         _context_feature_frames(prepared, raw_frames)
-        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}
         else {}
     )
     history_frames = (
@@ -493,13 +591,15 @@ def build_forecast_feature_store(
             lookback_days=int(lookback_days),
             min_lookback_valid_ratio=float(min_lookback_valid_ratio),
         )
-        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1"}
+        if profile in {"raw_kline_context_v1", "raw_kline_context_no_alpha_prior_v1", "raw_kline_context_sector_v1"}
         else {}
     )
+    sector_frames = _sector_context_feature_frames(prepared) if profile == "raw_kline_context_sector_v1" else {}
     all_columns, column_groups = _selected_columns_for_profile(
         state_columns=state_columns,
         raw_columns=list(raw_frames),
         context_columns=list(context_frames),
+        sector_columns=list(sector_frames),
         history_columns=list(history_frames),
         feature_profile=profile,
     )
@@ -515,13 +615,14 @@ def build_forecast_feature_store(
         selected_columns=selected_columns,
         column_groups=column_groups,
         max_feature_columns=max_feature_columns,
+        source_sector_board_view_id=_source_sector_board_view_id(prepared),
     )
     shape = (int(len(normalized_dates)), int(len(universe)), int(len(selected_columns)))
     store = np.memmap(feature_store_path, dtype="float32", mode="w+", shape=shape)
     nan_count = 0
     value_count = 0
     needs_state_per_date = any(
-        column not in raw_frames and column not in context_frames and column not in history_frames
+        column not in raw_frames and column not in context_frames and column not in history_frames and column not in sector_frames
         for column in selected_columns
     )
     empty_state = pd.DataFrame(index=universe)
@@ -549,6 +650,8 @@ def build_forecast_feature_store(
                 extra_parts[column] = context_frames[column].loc[dt].reindex(universe)
             elif column in history_frames:
                 extra_parts[column] = history_frames[column].loc[dt].reindex(universe)
+            elif column in sector_frames:
+                extra_parts[column] = sector_frames[column].loc[dt].reindex(universe)
             else:
                 extra_parts[column] = pd.Series(np.nan, index=universe, dtype=float)
         values = pd.DataFrame(extra_parts, index=universe).reindex(columns=selected_columns).to_numpy(dtype=np.float32)

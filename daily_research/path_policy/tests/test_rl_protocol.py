@@ -356,6 +356,32 @@ def test_protocol_parser_accepts_v5_dt_validation_stage() -> None:
     assert args.smoke_lr == pytest.approx(3.0e-4)
 
 
+def test_protocol_parser_accepts_sector_board_view_arguments() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_sector_view",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--sector-board-view-id",
+            "policy_sector_board_view__fixed",
+            "--sector-board-view-kind",
+            "latest_static_snapshot",
+            "--sector-board-as-of-date",
+            "2026-05-19",
+        ]
+    )
+
+    assert args.sector_board_view_id == "policy_sector_board_view__fixed"
+    assert args.sector_board_view_kind == "latest_static_snapshot"
+    assert args.sector_board_as_of_date == "2026-05-19"
+
+
 def test_forecast_walkforward_study_contract_fixture(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=820, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
     parser = build_arg_parser()

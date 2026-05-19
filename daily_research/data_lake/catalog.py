@@ -315,6 +315,9 @@ class ResearchDataLake:
     def _pool_view_dir(self, fingerprint: str) -> Path:
         return self.parquet_root / "silver_view" / "policy_pool_view" / str(fingerprint)
 
+    def _sector_board_view_dir(self, fingerprint: str) -> Path:
+        return self.parquet_root / "silver_view" / "policy_sector_board_view" / str(fingerprint)
+
     def build_pool_view_identity(self, *, spec: Mapping[str, Any]) -> dict[str, str]:
         dataset_kind = "policy_pool_view"
         zone = "research"
@@ -424,6 +427,120 @@ class ResearchDataLake:
             zone="research",
             source=str(spec.get("source_market_dataset_id", "") or ""),
             spec=merged_spec,
+            label_completeness_summary={},
+            content_paths=content_paths,
+            row_counts=row_counts,
+            source_cache=source_cache,
+            fingerprint=fingerprint,
+            status="stored",
+        )
+        metadata = self.describe_dataset(dataset_id)
+        return LakeDatasetRecord(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            zone="research",
+            fingerprint=fingerprint,
+            status="stored",
+            root=self.root,
+            content_paths=dict(metadata.get("content_paths", {}) or {}),
+            row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+            metadata=metadata,
+        )
+
+    def build_sector_board_view_identity(self, *, spec: Mapping[str, Any]) -> dict[str, str]:
+        dataset_kind = "policy_sector_board_view"
+        zone = "research"
+        fingerprint = _stable_hash(
+            {
+                "schema_version": DATA_LAKE_SCHEMA_VERSION,
+                "dataset_kind": dataset_kind,
+                "zone": zone,
+                "spec": dict(spec),
+            }
+        )
+        return {
+            "dataset_kind": dataset_kind,
+            "zone": zone,
+            "fingerprint": fingerprint,
+            "dataset_id": f"{dataset_kind}__{fingerprint}",
+            "dataset_dir": str(self._sector_board_view_dir(fingerprint).resolve()),
+        }
+
+    def save_sector_board_view(
+        self,
+        *,
+        spec: Mapping[str, Any],
+        industry_map_frame: pd.DataFrame,
+        board_membership_frame: pd.DataFrame,
+        board_summary_frame: pd.DataFrame,
+        source_cache: Mapping[str, Any] | None = None,
+        reuse: bool = True,
+    ) -> LakeDatasetRecord:
+        identity = self.build_sector_board_view_identity(spec=spec)
+        dataset_kind = identity["dataset_kind"]
+        fingerprint = identity["fingerprint"]
+        dataset_id = identity["dataset_id"]
+        dataset_dir = Path(identity["dataset_dir"])
+        content_paths = {
+            "industry_map": str((dataset_dir / "industry_map.parquet").resolve()),
+            "board_membership": str((dataset_dir / "board_membership.parquet").resolve()),
+            "board_summary": str((dataset_dir / "board_summary.parquet").resolve()),
+            "sector_board_manifest": str((dataset_dir / "sector_board_manifest.json").resolve()),
+        }
+        existing = self._existing_by_fingerprint(fingerprint)
+        if reuse and existing is not None and all(Path(path).exists() for path in content_paths.values()):
+            metadata = self.describe_dataset(str(existing["dataset_id"]))
+            return LakeDatasetRecord(
+                dataset_id=str(metadata["dataset_id"]),
+                dataset_kind=str(metadata["dataset_kind"]),
+                zone=str(metadata["zone"]),
+                fingerprint=str(metadata["fingerprint"]),
+                status="hit",
+                root=self.root,
+                content_paths=dict(metadata.get("content_paths", {}) or {}),
+                row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+                metadata=metadata,
+            )
+
+        industry = industry_map_frame.copy()
+        board = board_membership_frame.copy()
+        summary = board_summary_frame.copy()
+        if industry.empty or not {"symbol", "industry"}.issubset(industry.columns):
+            raise ValueError("sector_board_view_blocker: industry_map frame is empty or invalid.")
+        if board.empty or not {"symbol", "board_kind", "board_name"}.issubset(board.columns):
+            raise ValueError("sector_board_view_blocker: board_membership frame is empty or invalid.")
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        industry.to_parquet(content_paths["industry_map"], index=False)
+        board.to_parquet(content_paths["board_membership"], index=False)
+        summary.to_parquet(content_paths["board_summary"], index=False)
+
+        manifest = {
+            "dataset_id": dataset_id,
+            "dataset_kind": dataset_kind,
+            "fingerprint": fingerprint,
+            "status": "stored",
+            "parameters": dict(spec),
+            "content_paths": content_paths,
+            "snapshot_semantics": str(spec.get("snapshot_semantics", "latest_static_snapshot") or "latest_static_snapshot"),
+            "industry_rows": int(len(industry)),
+            "board_membership_rows": int(len(board)),
+            "board_count": int(len(summary)),
+            "source_cache": dict(source_cache or {}),
+        }
+        _write_json(Path(content_paths["sector_board_manifest"]), manifest)
+
+        row_counts: dict[str, Any] = {
+            "industry_map": int(len(industry)),
+            "board_membership": int(len(board)),
+            "board_summary": int(len(summary)),
+        }
+        self._upsert_dataset(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            domain="silver_view",
+            zone="research",
+            source=str(spec.get("source_market_dataset_id", "") or ""),
+            spec=dict(spec),
             label_completeness_summary={},
             content_paths=content_paths,
             row_counts=row_counts,
