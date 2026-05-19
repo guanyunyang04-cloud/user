@@ -25,6 +25,7 @@ from daily_research.path_policy.adapter import build_path_policy_frame
 from daily_research.path_policy.forecast_dataset import (
     build_forecast_memmap_dataset,
     build_forecast_sequence_dataset,
+    load_forecast_memmap_dataset,
     save_forecast_sequence_dataset,
 )
 from daily_research.path_policy.forecast_features import (
@@ -84,6 +85,7 @@ PATH_POLICY_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "datasets"
 PATH_POLICY_SEQUENCE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "sequence_datasets"
 PATH_POLICY_EPISODE_DATASETS_ROOT = PATH_POLICY_OUTPUT_ROOT / "episode_datasets"
 FORECAST_MAINLINE_STAGES = frozenset({"forecast-dataset", "forecast-train", "forecast-walkforward-study"})
+FORECAST_TRAINING_STAGES = frozenset({"forecast-train", "forecast-walkforward-study"})
 NEURAL_MAINLINE_STAGES = frozenset({"dataset-smoke", "oracle-smoke", "tiny-smoke"}) | FORECAST_MAINLINE_STAGES
 LEGACY_NEURAL_STAGES = frozenset()
 SEQUENCE_RL_SMOKE_STAGES = frozenset({"rl-dataset-smoke", "rl-train-smoke", "rl-replay-smoke", "rl-multiyear-smoke"})
@@ -555,9 +557,44 @@ def _forecast_int_tuple(value: str | None, *, default: tuple[int, ...]) -> tuple
     return tuple(int(item.strip()) for item in text.split(",") if item.strip())
 
 
+def _forecast_manifest_prepared_summary(manifest: dict[str, Any], *, args: argparse.Namespace) -> dict[str, Any]:
+    role_years = dict(manifest.get("role_years", {}) or {})
+    feature_manifest = dict(manifest.get("feature_manifest", {}) or {})
+    feature_shape = list(manifest.get("feature_store_shape", []) or [])
+    return {
+        "source": "forecast_memmap_manifest",
+        "artifact_reused": True,
+        "universe_size": int(feature_shape[1]) if len(feature_shape) >= 2 else 0,
+        "pool_name": args.pool_name,
+        "benchmark": args.benchmark,
+        "data_source": args.data_source,
+        "csv_folder": args.csv_folder,
+        "start_date": f"{int(role_years.get('train_start_year', args.forecast_train_start_year)) - 1}0101"
+        if role_years.get("train_start_year", args.forecast_train_start_year)
+        else "",
+        "end_date": f"{int(role_years.get('test_year', args.forecast_test_year))}1231"
+        if role_years.get("test_year", args.forecast_test_year)
+        else "",
+        "requested_start_date": "",
+        "lake_dataset_id": args.lake_dataset_id,
+        "manifest_json": str(manifest.get("manifest_json", "") or ""),
+        "dataset_mode": str(manifest.get("dataset_mode", "")),
+        "sample_count": int(manifest.get("sample_count", 0) or 0),
+        "sample_count_by_role": dict(manifest.get("sample_count_by_role", {}) or {}),
+        "feature_profile": str(manifest.get("feature_profile", feature_manifest.get("feature_profile", ""))),
+        "feature_store_shape": feature_shape,
+        "history_valid_ratio_summary": dict(manifest.get("history_valid_ratio_summary", {}) or {}),
+        "role_years": role_years,
+        "raw_cache_meta": {},
+        "prepared_cache_meta": {"source": "forecast_memmap_manifest", "artifact_reused": True},
+        "rolling_pool_summary": {},
+        "alpha_prior_summary": {},
+    }
+
+
 def _run_forecast_walkforward_study(
     *,
-    prepared: Any,
+    prepared: Any | None,
     study_root: Path,
     tag: str,
     args: argparse.Namespace,
@@ -565,23 +602,28 @@ def _run_forecast_walkforward_study(
     families = _forecast_model_families(getattr(args, "forecast_model_families", ""))
     dataset_mode = str(getattr(args, "forecast_dataset_mode", "eager") or "eager").strip().lower()
     if dataset_mode == "memmap":
-        dataset = build_forecast_memmap_dataset(
-            prepared,
-            root=study_root,
-            train_start_year=int(args.forecast_train_start_year),
-            train_end_year=int(args.forecast_train_end_year),
-            validation_year=int(args.forecast_validation_year),
-            test_year=int(args.forecast_test_year),
-            lookback_days=int(args.forecast_lookback_days),
-            horizon=PATH20_HORIZON,
-            execution_mode=args.execution_mode,
-            feature_profile=str(args.forecast_feature_profile),
-            max_feature_columns=int(args.forecast_max_feature_columns),
-            max_samples_per_role=int(args.forecast_max_samples_per_role),
-            min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
-        )
+        manifest_path = str(getattr(args, "forecast_memmap_manifest", "") or "").strip()
+        if manifest_path:
+            dataset = load_forecast_memmap_dataset(manifest_path)
+        else:
+            dataset = build_forecast_memmap_dataset(
+                prepared,
+                root=study_root,
+                train_start_year=int(args.forecast_train_start_year),
+                train_end_year=int(args.forecast_train_end_year),
+                validation_year=int(args.forecast_validation_year),
+                test_year=int(args.forecast_test_year),
+                lookback_days=int(args.forecast_lookback_days),
+                horizon=PATH20_HORIZON,
+                execution_mode=args.execution_mode,
+                feature_profile=str(args.forecast_feature_profile),
+                max_feature_columns=int(args.forecast_max_feature_columns),
+                max_samples_per_role=int(args.forecast_max_samples_per_role),
+                min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
+            )
         dataset_manifest = dict(dataset.manifest)
-        dataset_manifest["manifest_json"] = str((study_root / "forecast_dataset_manifest.json").resolve())
+        if not dataset_manifest.get("manifest_json"):
+            dataset_manifest["manifest_json"] = str((study_root / "forecast_dataset_manifest.json").resolve())
     else:
         dataset = build_forecast_sequence_dataset(
             prepared,
@@ -645,7 +687,11 @@ def _run_forecast_walkforward_study(
         "data_source": args.data_source,
         "lake_dataset_id": args.lake_dataset_id,
         "execution_mode": args.execution_mode,
-        "prepared_summary": prepared.to_summary(),
+        "prepared_summary": (
+            prepared.to_summary()
+            if prepared is not None
+            else _forecast_manifest_prepared_summary(dataset_manifest, args=args)
+        ),
         "dataset_manifest": dataset_manifest,
         "training_summary": training_summary,
         "evidence_verdict": training_summary.get("evidence_verdict", "insufficient_or_incomplete"),
@@ -676,6 +722,17 @@ def _run_forecast_walkforward_study(
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",
     }
+    summary = _json_ready(summary)
+    write_json(study_root / "forecast_walkforward_summary.json", summary)
+    write_json(study_root / "study_summary.json", summary)
+    return summary
+
+
+def _run_forecast_manifest_reuse_fast_path(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
+    if str(getattr(args, "stage", "")) not in FORECAST_TRAINING_STAGES:
+        raise ValueError("--forecast-memmap-manifest fast path is only valid for forecast training stages.")
+    summary = _run_forecast_walkforward_study(prepared=None, study_root=study_root, tag=tag, args=args)
+    summary["forecast_memmap_manifest_fast_path"] = True
     summary = _json_ready(summary)
     write_json(study_root / "forecast_walkforward_summary.json", summary)
     write_json(study_root / "study_summary.json", summary)
@@ -3202,6 +3259,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
     parser.add_argument("--forecast-dataset-mode", default="eager", choices=("eager", "memmap"))
+    parser.add_argument("--forecast-memmap-manifest", default="", help="Reuse an existing forecast memmap dataset manifest.")
     parser.add_argument("--forecast-min-lookback-valid-ratio", type=float, default=0.80)
     parser.add_argument("--forecast-dataloader-num-workers", type=int, default=0)
     parser.add_argument("--forecast-prefetch-factor", type=int, default=2)
@@ -3307,6 +3365,8 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-prefetch-factor must be positive.")
         if int(getattr(args, "max_universe_size", 80)) == 0 and str(getattr(args, "forecast_dataset_mode", "eager")) == "eager":
             parser.error("full_universe_requires_memmap_dataset_mode: use --forecast-dataset-mode memmap when --max-universe-size 0.")
+        if str(getattr(args, "forecast_memmap_manifest", "") or "").strip() and str(getattr(args, "forecast_dataset_mode", "eager")) != "memmap":
+            parser.error("--forecast-memmap-manifest requires --forecast-dataset-mode memmap.")
         if not (
             int(args.forecast_train_start_year)
             <= int(args.forecast_train_end_year)
@@ -3516,6 +3576,11 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         }
         summary = _json_ready(summary)
         write_json(study_root / "study_summary.json", summary)
+        safe_print_json(summary)
+        return summary
+
+    if args.stage in FORECAST_TRAINING_STAGES and str(getattr(args, "forecast_memmap_manifest", "") or "").strip():
+        summary = _run_forecast_manifest_reuse_fast_path(study_root=study_root, tag=tag, args=args)
         safe_print_json(summary)
         return summary
 

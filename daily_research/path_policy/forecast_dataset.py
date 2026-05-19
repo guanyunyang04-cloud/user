@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -544,6 +545,92 @@ def _write_array_memmap(path: Path, values: np.ndarray, shape: tuple[int, ...]) 
         array[...] = values.astype(np.float32, copy=False).reshape(shape)
     array.flush()
     return np.memmap(path, dtype="float32", mode="r", shape=shape)
+
+
+def _resolve_manifest_path(value: Any, *, manifest_path: Path) -> Path:
+    path = Path(str(value or ""))
+    if not path.is_absolute():
+        path = manifest_path.parent / path
+    return path
+
+
+def _validate_memmap_file(path: Path, *, shape: tuple[int, ...], label: str) -> None:
+    if not path.exists():
+        raise ValueError(f"forecast memmap manifest missing {label}: {path}")
+    expected_bytes = int(np.prod(shape, dtype=np.int64)) * np.dtype("float32").itemsize
+    actual_bytes = int(path.stat().st_size)
+    if actual_bytes != expected_bytes:
+        raise ValueError(
+            f"forecast memmap manifest has invalid {label} size: "
+            f"expected {expected_bytes} bytes for shape {shape}, got {actual_bytes} bytes at {path}"
+        )
+
+
+def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDataset:
+    manifest_path = Path(manifest_json)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if str(manifest.get("dataset_mode", "")) != "memmap":
+        raise ValueError(f"forecast memmap manifest required dataset_mode=memmap: {manifest_path}")
+
+    root = manifest_path.parent
+    feature_store_shape = tuple(int(item) for item in manifest.get("feature_store_shape", []))
+    if len(feature_store_shape) != 3:
+        raise ValueError(f"forecast memmap manifest has invalid feature_store_shape: {manifest_path}")
+    sample_index_path = _resolve_manifest_path(manifest.get("sample_index_csv"), manifest_path=manifest_path)
+    if not sample_index_path.exists():
+        raise ValueError(f"forecast memmap manifest missing sample_index_csv: {sample_index_path}")
+    sample_index = pd.read_csv(sample_index_path)
+    row_count = int(manifest.get("sample_count", 0) or len(sample_index))
+    if row_count != len(sample_index):
+        raise ValueError(
+            f"forecast memmap manifest sample_count does not match sample_index_csv: "
+            f"sample_count={row_count}, sample_index_rows={len(sample_index)} at {manifest_path}"
+        )
+    horizon = int(manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
+    cumulative_count = len(manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS))
+    normalization = dict(manifest.get("normalization", {}) or {})
+    feature_columns = [str(item) for item in manifest.get("feature_columns", [])]
+    feature_mean = np.asarray(normalization.get("feature_mean", []), dtype=np.float32)
+    feature_std = np.asarray(normalization.get("feature_std", []), dtype=np.float32)
+    if len(feature_columns) != feature_mean.size or len(feature_columns) != feature_std.size:
+        raise ValueError(f"forecast memmap manifest normalization does not match feature columns: {manifest_path}")
+    if int(feature_store_shape[2]) != len(feature_columns):
+        raise ValueError(
+            f"forecast memmap manifest feature_store_shape does not match feature columns: "
+            f"feature_store_shape={feature_store_shape}, feature_columns={len(feature_columns)} at {manifest_path}"
+        )
+
+    feature_store_path = _resolve_manifest_path(manifest.get("feature_store_path"), manifest_path=manifest_path)
+    _validate_memmap_file(feature_store_path, shape=feature_store_shape, label="feature_store_path")
+    _validate_memmap_file(root / "forecast_y_daily_excess.dat", shape=(row_count, horizon), label="forecast_y_daily_excess")
+    _validate_memmap_file(root / "forecast_y_cum_excess.dat", shape=(row_count, cumulative_count), label="forecast_y_cum_excess")
+    _validate_memmap_file(root / "forecast_y_rank_by_horizon.dat", shape=(row_count, cumulative_count), label="forecast_y_rank_by_horizon")
+    _validate_memmap_file(root / "forecast_y_rank_20d.dat", shape=(row_count,), label="forecast_y_rank_20d")
+    _validate_memmap_file(root / "forecast_y_max_drawdown_20d.dat", shape=(row_count,), label="forecast_y_max_drawdown_20d")
+    _validate_memmap_file(root / "forecast_y_worst_1d_20d.dat", shape=(row_count,), label="forecast_y_worst_1d_20d")
+    _validate_memmap_file(root / "forecast_y_upside_20d.dat", shape=(row_count,), label="forecast_y_upside_20d")
+
+    manifest = {**manifest, "artifact_reused": True, "manifest_json": str(manifest_path.resolve())}
+    return ForecastMemmapDataset(
+        root=root,
+        feature_store_path=feature_store_path,
+        feature_store_shape=feature_store_shape,
+        sample_index=sample_index,
+        y_daily_excess=np.memmap(root / "forecast_y_daily_excess.dat", dtype="float32", mode="r", shape=(row_count, horizon)),
+        y_cum_excess=np.memmap(root / "forecast_y_cum_excess.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count)),
+        y_rank_by_horizon=np.memmap(root / "forecast_y_rank_by_horizon.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count)),
+        y_rank_20d=np.memmap(root / "forecast_y_rank_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
+        y_max_drawdown_20d=np.memmap(root / "forecast_y_max_drawdown_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
+        y_worst_1d_20d=np.memmap(root / "forecast_y_worst_1d_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
+        y_upside_20d=np.memmap(root / "forecast_y_upside_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
+        feature_columns=feature_columns,
+        normalization_manifest=normalization,
+        manifest=manifest,
+        feature_mean=feature_mean,
+        feature_std=feature_std,
+        date_values=np.array([], dtype=object),
+        stock_values=np.array([], dtype=object),
+    )
 
 
 def _summary_stats(values: list[float]) -> dict[str, float]:

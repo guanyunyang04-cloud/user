@@ -6,6 +6,7 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 from daily_research.path_policy.run_alpha_path20_protocol import (
     _aggregate_projection_parity_summaries,
     _baseline_targets_for_episode,
+    _run_forecast_manifest_reuse_fast_path,
     _run_forecast_walkforward_study,
     _run_baseline_suite,
     _run_v5_dt_validation_study,
@@ -21,6 +22,7 @@ from daily_research.path_policy.run_alpha_path20_protocol import (
     _walkforward_evidence_verdict,
     _validate_protocol_args,
     build_arg_parser,
+    main,
 )
 
 
@@ -129,6 +131,29 @@ def test_protocol_rejects_full_universe_forecast_eager_dataset_mode() -> None:
 
     with pytest.raises(SystemExit):
         _validate_protocol_args(parser, args)
+
+
+def test_protocol_accepts_existing_forecast_memmap_manifest_path() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_reuse_memmap",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-memmap-manifest",
+            "daily_research/output/path_policy/studies/existing/forecast_dataset_manifest.json",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_memmap_manifest.endswith("forecast_dataset_manifest.json")
 
 
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
@@ -353,6 +378,175 @@ def test_forecast_walkforward_study_memmap_contract_fixture(tmp_path) -> None:
     assert summary["dataset_manifest"]["normalization"]["fit_role"] == "train_only"
     assert summary["training_summary"]["dataset_mode"] == "memmap"
     assert "validation_stratified_metrics" in summary["training_summary"]
+
+
+def test_forecast_memmap_manifest_fast_path_skips_prepared_inputs(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset_root = tmp_path / "dataset"
+    parser = build_arg_parser()
+    build_args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_memmap_dataset",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-lookback-days",
+            "5",
+            "--forecast-train-start-year",
+            "2019",
+            "--forecast-train-end-year",
+            "2019",
+            "--forecast-validation-year",
+            "2020",
+            "--forecast-test-year",
+            "2021",
+            "--forecast-max-samples-per-role",
+            "8",
+        ]
+    )
+    _validate_protocol_args(parser, build_args)
+    _run_forecast_walkforward_study(
+        prepared=prepared,
+        study_root=dataset_root,
+        tag="unit_forecast_memmap_dataset",
+        args=build_args,
+    )
+
+    train_args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_memmap_fast_path",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-memmap-manifest",
+            str(dataset_root / "forecast_dataset_manifest.json"),
+            "--forecast-model-families",
+            "linear_last_day",
+            "--forecast-epochs",
+            "1",
+            "--forecast-min-epochs",
+            "1",
+            "--forecast-early-stop-patience",
+            "1",
+            "--forecast-batch-size",
+            "4",
+            "--forecast-hidden-dim",
+            "24",
+            "--forecast-device",
+            "cpu",
+            "--no-forecast-amp",
+        ]
+    )
+    _validate_protocol_args(parser, train_args)
+
+    summary = _run_forecast_manifest_reuse_fast_path(
+        study_root=tmp_path / "reuse",
+        tag="unit_forecast_memmap_fast_path",
+        args=train_args,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["forecast_memmap_manifest_fast_path"] is True
+    assert summary["dataset_manifest"]["artifact_reused"] is True
+    assert summary["prepared_summary"]["source"] == "forecast_memmap_manifest"
+    assert summary["prepared_summary"]["artifact_reused"] is True
+    assert summary["training_summary"]["dataset_mode"] == "memmap"
+
+
+def test_forecast_manifest_reuse_cli_does_not_prepare_inputs(tmp_path, monkeypatch) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset_root = tmp_path / "dataset"
+    parser = build_arg_parser()
+    build_args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_memmap_dataset_cli",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-lookback-days",
+            "5",
+            "--forecast-train-start-year",
+            "2019",
+            "--forecast-train-end-year",
+            "2019",
+            "--forecast-validation-year",
+            "2020",
+            "--forecast-test-year",
+            "2021",
+            "--forecast-max-samples-per-role",
+            "8",
+        ]
+    )
+    _validate_protocol_args(parser, build_args)
+    _run_forecast_walkforward_study(
+        prepared=prepared,
+        study_root=dataset_root,
+        tag="unit_forecast_memmap_dataset_cli",
+        args=build_args,
+    )
+
+    monkeypatch.setattr(protocol, "PATH_POLICY_STUDIES_ROOT", tmp_path / "studies")
+
+    def fail_prepare(*args, **kwargs):
+        raise AssertionError("prepare_policy_inputs should not run when --forecast-memmap-manifest is provided")
+
+    monkeypatch.setattr(protocol, "prepare_policy_inputs", fail_prepare)
+
+    summary = main(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_memmap_fast_path_cli",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-memmap-manifest",
+            str(dataset_root / "forecast_dataset_manifest.json"),
+            "--forecast-model-families",
+            "linear_last_day",
+            "--forecast-epochs",
+            "1",
+            "--forecast-min-epochs",
+            "1",
+            "--forecast-early-stop-patience",
+            "1",
+            "--forecast-batch-size",
+            "4",
+            "--forecast-hidden-dim",
+            "24",
+            "--forecast-device",
+            "cpu",
+            "--no-forecast-amp",
+        ]
+    )
+
+    assert summary["forecast_memmap_manifest_fast_path"] is True
+    assert summary["dataset_manifest"]["artifact_reused"] is True
+    assert summary["prepared_summary"]["source"] == "forecast_memmap_manifest"
 
 
 def test_current_neural_mainline_stage_no_longer_requires_legacy_allow_flag() -> None:
