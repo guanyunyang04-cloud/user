@@ -46,6 +46,8 @@
 - Protocol 是单次训练/评估/shadow/export 层，写 `protocol_summary.json`。
 - 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
 - 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
+- 长训练或 study 的默认轮询实现为 `Start-Process -PassThru` 记录 PID，并用 `Wait-Process -Id <pid> -Timeout 7200` 等待；进程提前结束时立即返回，随后解析 progress、日志、summary、checkpoint 与评估产物。
+- `7200` 秒是单轮默认最大等待上限；首个 progress 尚未生成、资源风险较高、用户询问状态或异常排障时，可以临时缩短 timeout，但不得改用裸 `Get-Process python` 或固定 sleep 作为主判断。
 
 ## 当前 r65 口径
 - Active research profile：`split_heads_portfolio_daily_release_first_portfolio_set_v5_r65`。

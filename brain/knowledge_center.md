@@ -30,7 +30,8 @@
 - 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
 - 项目任务运行纪律已改为前台优先：训练、评估、审计、bounded study、confirmatory rerun 与执行任务不得默认后台化，不得中途人为中断，单次窗口时限统一按 `10` 小时处理
-- 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；监控轮询间隔固定为 `2` 小时，进程自然结束后立即解析产物
+- 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；默认用 `Start-Process -PassThru` 记录 PID，再用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析产物
+- 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，首个 progress 未出现或排障时才临时缩短 timeout
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 
 ## 3. 当前长期边界

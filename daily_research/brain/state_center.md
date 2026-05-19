@@ -49,7 +49,7 @@
 - P1：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
 - P2：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
 - P3：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
-- P4：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复。
+- P4：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。
