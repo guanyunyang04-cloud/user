@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timedelta
 from pathlib import Path
+import time
 from typing import Any
 
 import numpy as np
@@ -182,6 +184,272 @@ def make_forecast_model(
 def _write_frame(path: Path, frame: pd.DataFrame) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False, encoding="utf-8-sig")
+    return str(path.resolve())
+
+
+def _now_iso_seconds() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _forecast_resume_contract(
+    *,
+    model_family: str,
+    seed: int,
+    feature_columns: list[str],
+    feature_profile: str,
+    lookback_days: int,
+    target_scale: float,
+    model_config: dict[str, Any],
+    optimizer_config: dict[str, Any],
+    selection_profile: str,
+) -> dict[str, Any]:
+    return {
+        "model_family": str(model_family),
+        "seed": int(seed),
+        "feature_columns": list(feature_columns),
+        "feature_profile": str(feature_profile),
+        "lookback_days": int(lookback_days),
+        "horizon": int(PATH20_HORIZON),
+        "target_scale": float(target_scale),
+        "model_config": _json_ready(model_config),
+        "optimizer_config": _json_ready(optimizer_config),
+        "selection_profile": str(selection_profile),
+    }
+
+
+def _forecast_model_state_dict(model: nn.Module) -> dict[str, Any]:
+    return {
+        str(key): value.detach().cpu().clone() if isinstance(value, torch.Tensor) else value
+        for key, value in model.state_dict().items()
+    }
+
+
+def _forecast_checkpoint_payload(
+    *,
+    checkpoint_kind: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer | None,
+    scaler: torch.amp.GradScaler | None,
+    model_family: str,
+    seed: int,
+    epoch: int,
+    best_epoch: int,
+    best_score: float,
+    best_validation_loss: float,
+    best_validation_metrics: dict[str, Any],
+    best_train_loss: float,
+    last_train_loss: float,
+    patience_used: int,
+    feature_columns: list[str],
+    feature_profile: str,
+    feature_manifest: dict[str, Any],
+    normalization_manifest: dict[str, Any],
+    target_scale: float,
+    lookback_days: int,
+    model_config: dict[str, Any],
+    training_config: dict[str, Any],
+    optimizer_config: dict[str, Any],
+    selection_profile: str,
+    learning_rows: list[dict[str, Any]],
+    best_checkpoint_pt: Path | None = None,
+    best_checkpoint_payload: dict[str, Any] | None = None,
+    rng_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "checkpoint_kind": str(checkpoint_kind),
+        "checkpoint_created_at": _now_iso_seconds(),
+        "model_family": str(model_family),
+        "seed": int(seed),
+        "epoch": int(epoch),
+        "state_dict": _forecast_model_state_dict(model),
+        "feature_columns": list(feature_columns),
+        "feature_profile": str(feature_profile),
+        "feature_manifest": _json_ready(feature_manifest),
+        "normalization": _json_ready(normalization_manifest),
+        "target_scale": float(target_scale),
+        "lookback_days": int(lookback_days),
+        "horizon": int(PATH20_HORIZON),
+        "model_config": _json_ready(model_config),
+        "training_config": _json_ready(training_config),
+        "optimizer_config": _json_ready(optimizer_config),
+        "resume_contract": _forecast_resume_contract(
+            model_family=model_family,
+            seed=int(seed),
+            feature_columns=list(feature_columns),
+            feature_profile=feature_profile,
+            lookback_days=int(lookback_days),
+            target_scale=float(target_scale),
+            model_config=model_config,
+            optimizer_config=optimizer_config,
+            selection_profile=selection_profile,
+        ),
+        "best_epoch": int(best_epoch),
+        "best_score": float(best_score),
+        "best_validation_loss": float(best_validation_loss),
+        "best_validation_metrics": _json_ready(best_validation_metrics),
+        "best_train_loss": float(best_train_loss),
+        "last_train_loss": float(last_train_loss),
+        "patience_used": int(patience_used),
+        "learning_rows": _json_ready(learning_rows),
+    }
+    if optimizer is not None:
+        payload["optimizer_state_dict"] = optimizer.state_dict()
+    if scaler is not None:
+        payload["scaler_state_dict"] = scaler.state_dict()
+    if best_checkpoint_pt is not None:
+        payload["best_checkpoint_pt"] = str(best_checkpoint_pt.resolve())
+    if best_checkpoint_payload is not None:
+        payload["best_checkpoint_payload"] = best_checkpoint_payload
+    if rng_state is not None:
+        payload["rng_state"] = rng_state
+    return payload
+
+
+def _save_forecast_checkpoint_atomic(path: Path, payload: dict[str, Any]) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(path.name + ".tmp")
+    torch.save(payload, temp_path)
+    temp_path.replace(path)
+    return str(path.resolve())
+
+
+def _load_forecast_resume_checkpoint(path: str | Path) -> dict[str, Any]:
+    resolved = Path(path)
+    if not resolved.exists():
+        raise FileNotFoundError(f"forecast resume checkpoint does not exist: {resolved}")
+    payload = torch.load(resolved, map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict):
+        raise ValueError("forecast resume checkpoint payload must be a dictionary.")
+    if payload.get("checkpoint_kind") != "last":
+        raise ValueError("forecast resume checkpoint must be a last checkpoint.")
+    for key in ("state_dict", "optimizer_state_dict", "scaler_state_dict", "epoch", "resume_contract"):
+        if key not in payload:
+            raise ValueError(f"forecast resume checkpoint is missing {key}.")
+    return payload
+
+
+def _validate_forecast_resume_checkpoint(
+    payload: dict[str, Any],
+    *,
+    model_family: str,
+    seed: int,
+    dataset_view: "_ForecastDatasetView",
+    target_scale: float,
+    model_config: dict[str, Any],
+    optimizer_config: dict[str, Any],
+    selection_profile: str,
+) -> None:
+    expected = _forecast_resume_contract(
+        model_family=model_family,
+        seed=int(seed),
+        feature_columns=list(dataset_view.feature_columns),
+        feature_profile=str(dataset_view.manifest.get("feature_profile", "")),
+        lookback_days=int(dataset_view.lookback_days),
+        target_scale=float(target_scale),
+        model_config=model_config,
+        optimizer_config=optimizer_config,
+        selection_profile=selection_profile,
+    )
+    actual = dict(payload.get("resume_contract", {}) or {})
+    if not actual:
+        raise ValueError("forecast resume checkpoint is missing resume_contract.")
+    for key, expected_value in expected.items():
+        if actual.get(key) != expected_value:
+            raise ValueError(
+                f"forecast resume checkpoint {key} mismatch: "
+                f"expected {expected_value!r}, got {actual.get(key)!r}"
+            )
+
+
+def _forecast_rng_state(generator: torch.Generator) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "torch_rng_state": torch.get_rng_state(),
+        "numpy_rng_state": np.random.get_state(),
+        "data_loader_generator_state": generator.get_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_forecast_rng_state(payload: dict[str, Any], generator: torch.Generator) -> None:
+    state = payload.get("rng_state")
+    if not isinstance(state, dict):
+        return
+    if "torch_rng_state" in state:
+        torch.set_rng_state(state["torch_rng_state"])
+    if "numpy_rng_state" in state:
+        np.random.set_state(state["numpy_rng_state"])
+    if "data_loader_generator_state" in state:
+        generator.set_state(state["data_loader_generator_state"])
+    if torch.cuda.is_available() and "cuda_rng_state_all" in state:
+        torch.cuda.set_rng_state_all(state["cuda_rng_state_all"])
+
+
+def _write_learning_curve_incremental(path: Path, learning_rows: list[dict[str, Any]]) -> str:
+    return _write_frame(path, pd.DataFrame(_json_ready(learning_rows)))
+
+
+def _write_forecast_progress(
+    path: Path,
+    *,
+    status: str,
+    model_family: str,
+    seed: int,
+    current_epoch: int,
+    max_epochs: int,
+    min_epochs: int,
+    patience_limit: int,
+    patience_used: int,
+    best_epoch: int,
+    best_score: float,
+    best_validation_loss: float,
+    best_validation_metrics: dict[str, Any],
+    last_train_loss: float,
+    epoch_seconds: float,
+    run_started_at: str,
+    elapsed_seconds: float,
+    learning_rows: list[dict[str, Any]],
+    last_checkpoint_pt: Path | None,
+    best_checkpoint_pt: Path | None,
+) -> str:
+    current_rows = [
+        row
+        for row in learning_rows
+        if str(row.get("model_family")) == str(model_family) and int(row.get("seed", -1)) == int(seed)
+    ]
+    epoch_durations = [float(row.get("epoch_seconds", 0.0) or 0.0) for row in current_rows if row.get("epoch_seconds") is not None]
+    avg_epoch_seconds = float(np.mean(epoch_durations)) if epoch_durations else float(epoch_seconds)
+    remaining_epochs = max(int(max_epochs) - int(current_epoch), 0) if str(status) == "running" else 0
+    estimated_remaining_seconds = float(avg_epoch_seconds * remaining_epochs)
+    eta_at = (
+        datetime.now().astimezone() + timedelta(seconds=estimated_remaining_seconds)
+    ).isoformat(timespec="seconds")
+    payload = {
+        "status": str(status),
+        "updated_at": _now_iso_seconds(),
+        "run_started_at": str(run_started_at),
+        "model_family": str(model_family),
+        "seed": int(seed),
+        "current_epoch": int(current_epoch),
+        "max_epochs": int(max_epochs),
+        "min_epochs": int(min_epochs),
+        "patience_limit": int(patience_limit),
+        "patience_used": int(patience_used),
+        "best_epoch": int(best_epoch),
+        "best_score": float(best_score),
+        "best_validation_loss": float(best_validation_loss),
+        "best_validation_metrics": _json_ready(best_validation_metrics),
+        "last_train_loss": float(last_train_loss),
+        "epoch_seconds": float(epoch_seconds),
+        "avg_epoch_seconds": float(avg_epoch_seconds),
+        "elapsed_seconds": float(elapsed_seconds),
+        "estimated_remaining_seconds": float(estimated_remaining_seconds),
+        "eta_at": eta_at,
+        "last_checkpoint_pt": str(last_checkpoint_pt.resolve()) if last_checkpoint_pt is not None else "",
+        "best_checkpoint_pt": str(best_checkpoint_pt.resolve()) if best_checkpoint_pt is not None else "",
+    }
+    write_json(path, _json_ready(payload))
     return str(path.resolve())
 
 
@@ -895,6 +1163,10 @@ def train_forecast_models(
     seed: int = 7,
     dataloader_num_workers: int = 0,
     prefetch_factor: int = 2,
+    resume_from: str | Path | None = None,
+    save_last_checkpoint: bool = True,
+    checkpoint_every_n_epochs: int = 0,
+    progress_json_name: str = "forecast_progress.json",
 ) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     resolved_device = _resolve_device(device)
@@ -904,6 +1176,12 @@ def train_forecast_models(
     invalid = sorted(set(families) - set(FORECAST_MODEL_FAMILIES))
     if invalid:
         raise ValueError(f"Unsupported forecast model families: {', '.join(invalid)}")
+    resume_path = Path(resume_from) if resume_from is not None and str(resume_from).strip() else None
+    resume_payload: dict[str, Any] | None = None
+    if resume_path is not None:
+        if len(families) != 1 or len(seed_values) != 1:
+            raise ValueError("forecast resume requires exactly one model family and one seed.")
+        resume_payload = _load_forecast_resume_checkpoint(resume_path)
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
@@ -973,10 +1251,16 @@ def train_forecast_models(
 
     model_summaries: dict[str, dict[str, Any]] = {}
     learning_rows: list[dict[str, Any]] = []
+    if resume_payload is not None and isinstance(resume_payload.get("learning_rows"), list):
+        learning_rows = [dict(row) for row in resume_payload.get("learning_rows", []) if isinstance(row, dict)]
+    run_started_at = _now_iso_seconds()
+    run_started_monotonic = time.monotonic()
+    progress_path = study_root / str(progress_json_name or "forecast_progress.json")
     batch_size = max(int(batch_size), 1)
     max_epochs = max(int(epochs), 1)
     min_epochs = max(int(min_epochs), 1)
     patience_limit = max(int(early_stop_patience), 1)
+    checkpoint_interval = max(int(checkpoint_every_n_epochs), 0)
     accum_steps = max(int(grad_accum_steps), 1)
     pin_memory = resolved_device.type == "cuda"
     loader_kwargs = _data_loader_kwargs(
@@ -1015,6 +1299,7 @@ def train_forecast_models(
                 **loader_kwargs,
             )
             best_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_best.pt"
+            last_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_last.pt"
             best_score = -float("inf")
             best_epoch = 0
             best_validation_loss = float("inf")
@@ -1023,6 +1308,9 @@ def train_forecast_models(
             stopped_reason = "max_epochs_reached"
             patience_used = 0
             last_train_loss = float("inf")
+            resume_from_checkpoint_pt = ""
+            resume_start_epoch = 1
+            best_checkpoint_payload: dict[str, Any] | None = None
             model_config = {
                 "model_family": family,
                 "hidden_dim": int(hidden_dim),
@@ -1032,7 +1320,70 @@ def train_forecast_models(
                 "transformer_heads": int(transformer_heads),
                 "patch_sizes": [int(item) for item in patch_sizes],
             }
-            for epoch in range(1, max_epochs + 1):
+            optimizer_config = {
+                "lr": float(lr),
+                "weight_decay": float(weight_decay),
+                "grad_clip": float(grad_clip),
+                "grad_accum_steps": int(accum_steps),
+            }
+            training_config = {
+                "epochs": int(max_epochs),
+                "min_epochs": int(min_epochs),
+                "early_stop_patience": int(patience_limit),
+                "early_stop_min_delta": float(early_stop_min_delta),
+                "batch_size": int(batch_size),
+                "lr": float(lr),
+                "weight_decay": float(weight_decay),
+                "grad_clip": float(grad_clip),
+                "grad_accum_steps": int(accum_steps),
+                "hidden_dim": int(hidden_dim),
+                "dropout": float(dropout),
+                "gru_layers": int(gru_layers),
+                "transformer_layers": int(transformer_layers),
+                "transformer_heads": int(transformer_heads),
+                "patch_sizes": [int(item) for item in patch_sizes],
+                "feature_profile": feature_profile,
+                "feature_count": int(dataset_view.input_dim),
+                "selection_profile": selection_profile,
+            }
+            if resume_payload is not None:
+                _validate_forecast_resume_checkpoint(
+                    resume_payload,
+                    model_family=family,
+                    seed=int(current_seed),
+                    dataset_view=dataset_view,
+                    target_scale=float(target_scale),
+                    model_config=model_config,
+                    optimizer_config=optimizer_config,
+                    selection_profile=selection_profile,
+                )
+                model.load_state_dict(resume_payload["state_dict"])
+                optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
+                scaler.load_state_dict(resume_payload["scaler_state_dict"])
+                _restore_forecast_rng_state(resume_payload, generator)
+                resume_from_checkpoint_pt = str(Path(resume_from).resolve()) if resume_from is not None else ""
+                resume_start_epoch = int(resume_payload.get("epoch", 0)) + 1
+                if resume_start_epoch > max_epochs:
+                    raise ValueError("--forecast-resume-from epoch must be lower than --forecast-epochs.")
+                best_score = float(resume_payload.get("best_score", -float("inf")) or -float("inf"))
+                best_epoch = int(resume_payload.get("best_epoch", 0) or 0)
+                best_validation_loss = float(resume_payload.get("best_validation_loss", float("inf")) or float("inf"))
+                best_validation_metrics = dict(resume_payload.get("best_validation_metrics", {}) or {})
+                best_train_loss = float(resume_payload.get("best_train_loss", float("inf")) or float("inf"))
+                last_train_loss = float(resume_payload.get("last_train_loss", float("inf")) or float("inf"))
+                patience_used = int(resume_payload.get("patience_used", 0) or 0)
+                if isinstance(resume_payload.get("best_checkpoint_payload"), dict):
+                    best_checkpoint_payload = dict(resume_payload["best_checkpoint_payload"])
+                    _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
+                else:
+                    prior_best_path = Path(str(resume_payload.get("best_checkpoint_pt", "") or ""))
+                    if prior_best_path.exists():
+                        prior_best_payload = torch.load(prior_best_path, map_location="cpu", weights_only=False)
+                        if isinstance(prior_best_payload, dict):
+                            best_checkpoint_payload = prior_best_payload
+                            _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
+            for epoch in range(resume_start_epoch, max_epochs + 1):
+                epoch_started_monotonic = time.monotonic()
                 model.train()
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
@@ -1096,27 +1447,37 @@ def train_forecast_models(
                     best_validation_metrics = dict(validation_metrics)
                     best_train_loss = float(last_train_loss)
                     patience_used = 0
-                    torch.save(
-                        {
-                            "model_family": family,
-                            "seed": int(current_seed),
-                            "state_dict": model.state_dict(),
-                            "feature_columns": list(dataset.feature_columns),
-                            "feature_profile": feature_profile,
-                            "feature_manifest": feature_manifest,
-                            "normalization": dataset.normalization_manifest,
-                            "target_scale": float(target_scale),
-                            "lookback_days": int(dataset_view.lookback_days),
-                            "horizon": PATH20_HORIZON,
-                            "model_config": model_config,
-                            "best_epoch": int(best_epoch),
-                            "best_validation_loss": float(best_validation_loss),
-                            "best_validation_metrics": _json_ready(best_validation_metrics),
-                        },
-                        best_checkpoint_path,
+                    best_checkpoint_payload = _forecast_checkpoint_payload(
+                        checkpoint_kind="best",
+                        model=model,
+                        optimizer=None,
+                        scaler=None,
+                        model_family=family,
+                        seed=int(current_seed),
+                        epoch=int(epoch),
+                        best_epoch=int(best_epoch),
+                        best_score=float(best_score),
+                        best_validation_loss=float(best_validation_loss),
+                        best_validation_metrics=best_validation_metrics,
+                        best_train_loss=float(best_train_loss),
+                        last_train_loss=float(last_train_loss),
+                        patience_used=int(patience_used),
+                        feature_columns=list(dataset_view.feature_columns),
+                        feature_profile=feature_profile,
+                        feature_manifest=feature_manifest,
+                        normalization_manifest=dataset_view.normalization_manifest,
+                        target_scale=float(target_scale),
+                        lookback_days=int(dataset_view.lookback_days),
+                        model_config=model_config,
+                        training_config=training_config,
+                        optimizer_config=optimizer_config,
+                        selection_profile=selection_profile,
+                        learning_rows=learning_rows,
                     )
+                    _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
                 else:
                     patience_used += 1
+                epoch_seconds = float(time.monotonic() - epoch_started_monotonic)
                 learning_rows.append(
                     {
                         "model_family": family,
@@ -1142,31 +1503,129 @@ def train_forecast_models(
                         "direction_accuracy_20d": float(validation_metrics.get("direction_accuracy_20d", 0.0) or 0.0),
                         "is_best": bool(improved),
                         "patience_used": int(patience_used),
+                        "epoch_seconds": float(epoch_seconds),
                     }
+                )
+                _write_learning_curve_incremental(study_root / "forecast_learning_curve.csv", learning_rows)
+                if bool(save_last_checkpoint):
+                    last_payload = _forecast_checkpoint_payload(
+                        checkpoint_kind="last",
+                        model=model,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        model_family=family,
+                        seed=int(current_seed),
+                        epoch=int(epoch),
+                        best_epoch=int(best_epoch),
+                        best_score=float(best_score),
+                        best_validation_loss=float(best_validation_loss),
+                        best_validation_metrics=best_validation_metrics,
+                        best_train_loss=float(best_train_loss),
+                        last_train_loss=float(last_train_loss),
+                        patience_used=int(patience_used),
+                        feature_columns=list(dataset_view.feature_columns),
+                        feature_profile=feature_profile,
+                        feature_manifest=feature_manifest,
+                        normalization_manifest=dataset_view.normalization_manifest,
+                        target_scale=float(target_scale),
+                        lookback_days=int(dataset_view.lookback_days),
+                        model_config=model_config,
+                        training_config=training_config,
+                        optimizer_config=optimizer_config,
+                        selection_profile=selection_profile,
+                        learning_rows=learning_rows,
+                        best_checkpoint_pt=best_checkpoint_path,
+                        best_checkpoint_payload=best_checkpoint_payload,
+                        rng_state=_forecast_rng_state(generator),
+                    )
+                    _save_forecast_checkpoint_atomic(last_checkpoint_path, last_payload)
+                if checkpoint_interval > 0 and int(epoch) % checkpoint_interval == 0:
+                    epoch_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_epoch{int(epoch)}.pt"
+                    epoch_payload = _forecast_checkpoint_payload(
+                        checkpoint_kind="epoch",
+                        model=model,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        model_family=family,
+                        seed=int(current_seed),
+                        epoch=int(epoch),
+                        best_epoch=int(best_epoch),
+                        best_score=float(best_score),
+                        best_validation_loss=float(best_validation_loss),
+                        best_validation_metrics=best_validation_metrics,
+                        best_train_loss=float(best_train_loss),
+                        last_train_loss=float(last_train_loss),
+                        patience_used=int(patience_used),
+                        feature_columns=list(dataset_view.feature_columns),
+                        feature_profile=feature_profile,
+                        feature_manifest=feature_manifest,
+                        normalization_manifest=dataset_view.normalization_manifest,
+                        target_scale=float(target_scale),
+                        lookback_days=int(dataset_view.lookback_days),
+                        model_config=model_config,
+                        training_config=training_config,
+                        optimizer_config=optimizer_config,
+                        selection_profile=selection_profile,
+                        learning_rows=learning_rows,
+                        best_checkpoint_pt=best_checkpoint_path,
+                        best_checkpoint_payload=best_checkpoint_payload,
+                        rng_state=_forecast_rng_state(generator),
+                    )
+                    _save_forecast_checkpoint_atomic(epoch_checkpoint_path, epoch_payload)
+                _write_forecast_progress(
+                    progress_path,
+                    status="running",
+                    model_family=family,
+                    seed=int(current_seed),
+                    current_epoch=int(epoch),
+                    max_epochs=int(max_epochs),
+                    min_epochs=int(min_epochs),
+                    patience_limit=int(patience_limit),
+                    patience_used=int(patience_used),
+                    best_epoch=int(best_epoch),
+                    best_score=float(best_score),
+                    best_validation_loss=float(best_validation_loss),
+                    best_validation_metrics=best_validation_metrics,
+                    last_train_loss=float(last_train_loss),
+                    epoch_seconds=float(epoch_seconds),
+                    run_started_at=run_started_at,
+                    elapsed_seconds=float(time.monotonic() - run_started_monotonic),
+                    learning_rows=learning_rows,
+                    last_checkpoint_pt=last_checkpoint_path if bool(save_last_checkpoint) else None,
+                    best_checkpoint_pt=best_checkpoint_path,
                 )
                 if epoch >= min_epochs and patience_used >= patience_limit:
                     stopped_reason = "early_stopping_patience_exhausted"
                     break
             if not best_checkpoint_path.exists():
-                torch.save(
-                    {
-                        "model_family": family,
-                        "seed": int(current_seed),
-                        "state_dict": model.state_dict(),
-                        "feature_columns": list(dataset.feature_columns),
-                        "feature_profile": feature_profile,
-                        "feature_manifest": feature_manifest,
-                        "normalization": dataset.normalization_manifest,
-                        "target_scale": float(target_scale),
-                        "lookback_days": int(dataset_view.lookback_days),
-                        "horizon": PATH20_HORIZON,
-                        "model_config": model_config,
-                        "best_epoch": int(max_epochs),
-                        "best_validation_loss": float(last_train_loss),
-                        "best_validation_metrics": _json_ready(best_validation_metrics),
-                    },
-                    best_checkpoint_path,
+                best_checkpoint_payload = _forecast_checkpoint_payload(
+                    checkpoint_kind="best",
+                    model=model,
+                    optimizer=None,
+                    scaler=None,
+                    model_family=family,
+                    seed=int(current_seed),
+                    epoch=int(max_epochs),
+                    best_epoch=int(best_epoch or max_epochs),
+                    best_score=float(best_score),
+                    best_validation_loss=float(best_validation_loss if np.isfinite(best_validation_loss) else last_train_loss),
+                    best_validation_metrics=best_validation_metrics,
+                    best_train_loss=float(best_train_loss if np.isfinite(best_train_loss) else last_train_loss),
+                    last_train_loss=float(last_train_loss),
+                    patience_used=int(patience_used),
+                    feature_columns=list(dataset_view.feature_columns),
+                    feature_profile=feature_profile,
+                    feature_manifest=feature_manifest,
+                    normalization_manifest=dataset_view.normalization_manifest,
+                    target_scale=float(target_scale),
+                    lookback_days=int(dataset_view.lookback_days),
+                    model_config=model_config,
+                    training_config=training_config,
+                    optimizer_config=optimizer_config,
+                    selection_profile=selection_profile,
+                    learning_rows=learning_rows,
                 )
+                _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
             checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device, weights_only=False)
             model.load_state_dict(checkpoint["state_dict"])
             validation_predictions = _predict_indices(
@@ -1232,6 +1691,7 @@ def train_forecast_models(
                 "final_train_loss": float(last_train_loss),
                 "best_train_loss": float(best_train_loss),
                 "best_validation_loss": float(best_validation_loss),
+                "best_score": float(best_score),
                 "best_validation_metrics": best_validation_metrics,
                 "validation_metrics": final_validation_metrics,
                 "test_metrics": final_test_metrics,
@@ -1247,6 +1707,9 @@ def train_forecast_models(
                     }[selection_profile]
                 ),
                 "checkpoint_pt": str(best_checkpoint_path.resolve()),
+                "last_checkpoint_pt": str(last_checkpoint_path.resolve()) if last_checkpoint_path.exists() else "",
+                "resume_from_checkpoint_pt": resume_from_checkpoint_pt,
+                "resume_start_epoch": int(resume_start_epoch),
             }
         model_summaries[family] = {
             "status": "completed",
@@ -1368,6 +1831,9 @@ def train_forecast_models(
             "feature_profile": feature_profile,
             "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
+            "save_last_checkpoint": bool(save_last_checkpoint),
+            "checkpoint_every_n_epochs": int(checkpoint_interval),
+            "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
         },
         "models": model_summaries,
         "family_summary": {family: dict(summary.get("family_summary", {})) for family, summary in model_summaries.items()},
@@ -1387,6 +1853,8 @@ def train_forecast_models(
         "forecast_predictions_validation_csv": validation_csv,
         "forecast_predictions_test_csv": test_csv,
         "forecast_learning_curve_csv": str(learning_curve_path.resolve()),
+        "progress_json": str(progress_path.resolve()),
+        "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
         "dataset_mode": dataset_view.dataset_mode,
         "validation_stratified_metrics": stratified_forecast_prediction_metrics(validation_predictions),
         "test_stratified_metrics": stratified_forecast_prediction_metrics(test_predictions),
@@ -1394,6 +1862,36 @@ def train_forecast_models(
         "promotion_allowed": False,
         "active_execution_strategy_expected_diff": "none",
     }
+    selected_rows = [
+        row
+        for row in learning_rows
+        if str(row.get("model_family")) == str(selected_family) and int(row.get("seed", -1)) == int(selected_seed)
+    ]
+    if selected_rows:
+        latest_selected_row = max(selected_rows, key=lambda row: int(row.get("epoch", 0) or 0))
+        selected_last_path_text = str(selected_seed_summary.get("last_checkpoint_pt", "") or "")
+        _write_forecast_progress(
+            progress_path,
+            status="completed",
+            model_family=str(selected_family),
+            seed=int(selected_seed),
+            current_epoch=int(selected_seed_summary.get("epochs_ran", latest_selected_row.get("epoch", 0)) or 0),
+            max_epochs=int(max_epochs),
+            min_epochs=int(min_epochs),
+            patience_limit=int(patience_limit),
+            patience_used=int(latest_selected_row.get("patience_used", 0) or 0),
+            best_epoch=int(selected_seed_summary.get("best_epoch", 0) or 0),
+            best_score=float(selected_seed_summary.get("best_score", 0.0) or 0.0),
+            best_validation_loss=float(selected_seed_summary.get("best_validation_loss", 0.0) or 0.0),
+            best_validation_metrics=dict(selected_seed_summary.get("best_validation_metrics", {}) or {}),
+            last_train_loss=float(selected_seed_summary.get("final_train_loss", 0.0) or 0.0),
+            epoch_seconds=float(latest_selected_row.get("epoch_seconds", 0.0) or 0.0),
+            run_started_at=run_started_at,
+            elapsed_seconds=float(time.monotonic() - run_started_monotonic),
+            learning_rows=learning_rows,
+            last_checkpoint_pt=Path(selected_last_path_text) if selected_last_path_text else None,
+            best_checkpoint_pt=Path(selected_checkpoint_path) if selected_checkpoint_path else None,
+        )
     summary = _json_ready(summary)
     write_json(study_root / "forecast_training_summary.json", summary)
     return summary

@@ -110,6 +110,58 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_min_lookback_valid_ratio == pytest.approx(0.80)
     assert args.forecast_dataloader_num_workers == 0
     assert args.forecast_prefetch_factor == 2
+    assert args.forecast_save_last is True
+    assert args.forecast_resume_from == ""
+    assert args.forecast_checkpoint_every_n_epochs == 0
+
+
+def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None:
+    resume_path = tmp_path / "forecast_model_linear_last_day_seed7_last.pt"
+    resume_path.write_bytes(b"placeholder")
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_resume",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-resume-from",
+            str(resume_path),
+            "--forecast-checkpoint-every-n-epochs",
+            "5",
+            "--no-forecast-save-last",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_resume_from == str(resume_path)
+    assert args.forecast_checkpoint_every_n_epochs == 5
+    assert args.forecast_save_last is False
+
+
+def test_protocol_rejects_negative_forecast_checkpoint_interval() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_forecast_bad_checkpoint_interval",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-checkpoint-every-n-epochs",
+            "-1",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_protocol_args(parser, args)
 
 
 def test_protocol_rejects_full_universe_forecast_eager_dataset_mode() -> None:

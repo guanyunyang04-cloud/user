@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
+import pytest
 import torch
 
 from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, build_forecast_sequence_dataset
@@ -143,6 +146,185 @@ def test_train_forecast_models_accepts_memmap_dataset_view(tmp_path) -> None:
     assert summary["feature_manifest"]["feature_count_after_cap"] == dataset.input_dim
     assert (tmp_path / "study" / "forecast_predictions_validation.csv").exists()
     assert "validation_stratified_metrics" in summary
+
+
+def test_train_forecast_models_writes_last_checkpoint_progress_and_incremental_curve(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path,
+        model_families=("linear_last_day",),
+        epochs=2,
+        min_epochs=2,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+    )
+
+    best_path = tmp_path / "forecast_model_linear_last_day_seed7_best.pt"
+    last_path = tmp_path / "forecast_model_linear_last_day_seed7_last.pt"
+    progress_path = tmp_path / "forecast_progress.json"
+    learning_curve_path = tmp_path / "forecast_learning_curve.csv"
+    assert best_path.exists()
+    assert last_path.exists()
+    assert progress_path.exists()
+    assert learning_curve_path.exists()
+
+    checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
+    assert checkpoint["checkpoint_kind"] == "last"
+    assert checkpoint["model_family"] == "linear_last_day"
+    assert checkpoint["seed"] == 7
+    assert checkpoint["epoch"] == 2
+    assert checkpoint["best_epoch"] >= 1
+    assert "optimizer_state_dict" in checkpoint
+    assert "scaler_state_dict" in checkpoint
+    assert checkpoint["patience_used"] >= 0
+    assert checkpoint["training_config"]["epochs"] == 2
+    assert checkpoint["feature_columns"] == list(dataset.feature_columns)
+
+    learning_curve = pd.read_csv(learning_curve_path)
+    assert list(learning_curve["epoch"]) == [1, 2]
+    assert "epoch_seconds" in learning_curve.columns
+
+    progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress["status"] == "completed"
+    assert progress["current_epoch"] == 2
+    assert progress["max_epochs"] == 2
+    assert progress["estimated_remaining_seconds"] == 0.0
+    assert progress["best_epoch"] >= 1
+    assert progress["last_checkpoint_pt"] == str(last_path.resolve())
+    assert progress["best_checkpoint_pt"] == str(best_path.resolve())
+    assert "estimated_remaining_seconds" in progress
+    assert "eta_at" in progress
+
+    seed_summary = summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    assert seed_summary["epochs_ran"] == 2
+    assert seed_summary["last_checkpoint_pt"] == str(last_path.resolve())
+    assert summary["progress_json"] == str(progress_path.resolve())
+
+
+def test_train_forecast_models_resumes_from_strict_last_checkpoint(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+
+    first_summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "first",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+    )
+    resume_path = tmp_path / "first" / "forecast_model_linear_last_day_seed7_last.pt"
+    assert first_summary["models"]["linear_last_day"]["seed_summaries"]["7"]["epochs_ran"] == 1
+
+    resumed_summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "resumed",
+        model_families=("linear_last_day",),
+        epochs=2,
+        min_epochs=2,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        resume_from=resume_path,
+    )
+
+    seed_summary = resumed_summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    assert resumed_summary["resume_from_checkpoint_pt"] == str(resume_path.resolve())
+    assert seed_summary["resume_from_checkpoint_pt"] == str(resume_path.resolve())
+    assert seed_summary["resume_start_epoch"] == 2
+    assert seed_summary["epochs_ran"] == 2
+    resumed_last = torch.load(
+        tmp_path / "resumed" / "forecast_model_linear_last_day_seed7_last.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert resumed_last["epoch"] == 2
+
+
+def test_train_forecast_models_rejects_resume_checkpoint_contract_mismatch(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+    train_forecast_models(
+        dataset,
+        study_root=tmp_path / "first",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+    )
+
+    with pytest.raises(ValueError, match="model_family"):
+        train_forecast_models(
+            dataset,
+            study_root=tmp_path / "mismatch",
+            model_families=("mlp_last_day",),
+            epochs=2,
+            min_epochs=2,
+            early_stop_patience=5,
+            batch_size=4,
+            lr=1.0e-3,
+            hidden_dim=24,
+            dropout=0.0,
+            seeds=(7,),
+            device="cpu",
+            amp=False,
+            resume_from=tmp_path / "first" / "forecast_model_linear_last_day_seed7_last.pt",
+        )
 
 
 def test_forecast_evidence_verdict_requires_positive_validation_and_calibration() -> None:

@@ -667,6 +667,9 @@ def _run_forecast_walkforward_study(
             selection_profile=str(args.forecast_selection_profile),
             dataloader_num_workers=int(args.forecast_dataloader_num_workers),
             prefetch_factor=int(args.forecast_prefetch_factor),
+            resume_from=str(args.forecast_resume_from or ""),
+            save_last_checkpoint=bool(args.forecast_save_last),
+            checkpoint_every_n_epochs=int(args.forecast_checkpoint_every_n_epochs),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -3282,6 +3285,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-grad-accum-steps", type=int, default=1)
     parser.add_argument("--forecast-weight-decay", type=float, default=1.0e-4)
     parser.add_argument("--forecast-write-all-predictions", action="store_true")
+    parser.add_argument("--forecast-resume-from", default="")
+    parser.add_argument("--forecast-save-last", dest="forecast_save_last", action="store_true", default=True)
+    parser.add_argument("--no-forecast-save-last", dest="forecast_save_last", action="store_false")
+    parser.add_argument("--forecast-checkpoint-every-n-epochs", type=int, default=0)
     parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
     parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
@@ -3375,6 +3382,11 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-grad-accum-steps must be positive.")
         if float(getattr(args, "forecast_weight_decay", 1.0e-4)) < 0.0:
             parser.error("--forecast-weight-decay must be non-negative.")
+        if int(getattr(args, "forecast_checkpoint_every_n_epochs", 0)) < 0:
+            parser.error("--forecast-checkpoint-every-n-epochs must be non-negative.")
+        resume_from = str(getattr(args, "forecast_resume_from", "") or "").strip()
+        if resume_from and not Path(resume_from).exists():
+            parser.error("--forecast-resume-from must point to an existing checkpoint.")
         try:
             seeds = _forecast_int_tuple(getattr(args, "forecast_seeds", ""), default=(7,))
         except ValueError as exc:
