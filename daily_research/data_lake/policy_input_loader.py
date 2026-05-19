@@ -12,6 +12,7 @@ from daily_research.continuous_policy.state_builder import (
     _build_alpha_prior_frames,
 )
 from daily_research.data_lake.catalog import ResearchDataLake
+from daily_research.data_lake.pool_views import PoolViewSpec, resolve_pool_view_for_policy_inputs
 
 DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 
@@ -186,6 +187,8 @@ def load_policy_inputs_from_lake(
     pool_name: str = "",
     benchmark: str = "000300.SH",
     universe: list[str] | None = None,
+    pool_view_id: str = "",
+    pool_view_spec: PoolViewSpec | dict[str, Any] | None = None,
     extra_stocks: list[str] | None = None,
     max_universe_size: int = 0,
     min_trading_days: int = 2,
@@ -213,11 +216,41 @@ def load_policy_inputs_from_lake(
     if market.empty:
         raise ValueError(f"lake_coverage_blocker: no market rows in lake dataset {dataset_id} for {start_date} -> {end_date}")
     available_symbols = sorted(str(item).strip().upper() for item in market["symbol"].dropna().astype(str).unique())
+    pool_view = resolve_pool_view_for_policy_inputs(
+        lake=lake,
+        dataset_id=dataset_id,
+        pool_view_id=str(pool_view_id or ""),
+        pool_view_spec=pool_view_spec,
+    )
+    if pool_view is not None:
+        view_source_dataset_id = str(pool_view.metadata.get("parameters", {}).get("source_market_dataset_id", "") or "")
+        if view_source_dataset_id and view_source_dataset_id != dataset_id:
+            raise ValueError(
+                "pool_view_source_mismatch: "
+                f"pool_view_id={pool_view.dataset_id} source_market_dataset_id={view_source_dataset_id} "
+                f"requested_dataset_id={dataset_id}"
+            )
+    if pool_view is not None:
+        available_set = set(available_symbols)
+        view_membership = pool_view.membership_frame.copy()
+        view_membership.index = pd.to_datetime(view_membership.index)
+        view_columns = [str(column).strip().upper() for column in view_membership.columns]
+        view_membership.columns = view_columns
+        view_membership = _slice_wide(
+            view_membership,
+            universe=[symbol for symbol in view_columns if symbol in available_set],
+            start_date=start_date,
+            end_date=end_date,
+        ).fillna(False).astype(bool)
+        requested_symbols = [symbol for symbol in view_membership.columns if bool(view_membership[symbol].any())]
+    else:
+        view_membership = pd.DataFrame()
+        requested_symbols = universe
     resolved_universe = _resolve_lake_universe(
         available_symbols=available_symbols,
-        requested_symbols=universe,
+        requested_symbols=requested_symbols,
         extra_stocks=extra_stocks,
-        max_universe_size=max_universe_size,
+        max_universe_size=0 if pool_view is not None else max_universe_size,
     )
     market["symbol"] = market["symbol"].astype(str).str.strip().str.upper()
     market = market.loc[market["symbol"].isin(resolved_universe)].copy()
@@ -269,27 +302,30 @@ def load_policy_inputs_from_lake(
         benchmark_open = benchmark_close.copy()
         benchmark_open_source = "fallback_close"
 
-    membership_path = str(paths.get("silver_membership", "") or "")
-    if not membership_path:
-        raise ValueError(f"lake_coverage_blocker: dataset has no silver_membership path: {dataset_id}")
-    membership_raw = pd.read_parquet(membership_path)
-    if "trade_date" in membership_raw.columns:
-        membership_raw = membership_raw.rename(columns={"trade_date": "date"})
-    if "date" in membership_raw.columns:
-        membership_raw["date"] = pd.to_datetime(membership_raw["date"])
-        membership_frame = membership_raw.set_index("date").sort_index()
+    if pool_view is not None:
+        membership_frame = view_membership.reindex(columns=resolved_universe, fill_value=False)
     else:
-        membership_frame = membership_raw.copy()
-        if len(membership_frame) == len(all_trade_dates):
-            membership_frame.index = all_trade_dates
-        elif len(membership_frame) == len(close.index):
-            membership_frame.index = close.index
+        membership_path = str(paths.get("silver_membership", "") or "")
+        if not membership_path:
+            raise ValueError(f"lake_coverage_blocker: dataset has no silver_membership path: {dataset_id}")
+        membership_raw = pd.read_parquet(membership_path)
+        if "trade_date" in membership_raw.columns:
+            membership_raw = membership_raw.rename(columns={"trade_date": "date"})
+        if "date" in membership_raw.columns:
+            membership_raw["date"] = pd.to_datetime(membership_raw["date"])
+            membership_frame = membership_raw.set_index("date").sort_index()
         else:
-            raise ValueError(
-                "Silver membership has no date column and row count does not match market dates: "
-                f"membership_rows={len(membership_frame)}, all_trade_dates={len(all_trade_dates)}, selected_dates={len(close.index)}"
-            )
-    membership_frame = _slice_wide(membership_frame, universe=resolved_universe, start_date=start_date, end_date=end_date).fillna(False).astype(bool)
+            membership_frame = membership_raw.copy()
+            if len(membership_frame) == len(all_trade_dates):
+                membership_frame.index = all_trade_dates
+            elif len(membership_frame) == len(close.index):
+                membership_frame.index = close.index
+            else:
+                raise ValueError(
+                    "Silver membership has no date column and row count does not match market dates: "
+                    f"membership_rows={len(membership_frame)}, all_trade_dates={len(all_trade_dates)}, selected_dates={len(close.index)}"
+                )
+        membership_frame = _slice_wide(membership_frame, universe=resolved_universe, start_date=start_date, end_date=end_date).fillna(False).astype(bool)
 
     panels = _load_feature_panels(str(paths["silver_feature_panels"]))
     sliced_panels = {
@@ -350,7 +386,14 @@ def load_policy_inputs_from_lake(
     )
     return PreparedPolicyInputs(
         universe=tuple(resolved_universe),
-        pool_name=str(pool_name or metadata.get("universe_name", "") or metadata.get("parameters", {}).get("pool_name", "") or metadata.get("parameters", {}).get("universe", "") or "learned_all_a"),
+        pool_name=str(
+            (pool_view.metadata.get("parameters", {}).get("view_name", "") if pool_view is not None else "")
+            or pool_name
+            or metadata.get("universe_name", "")
+            or metadata.get("parameters", {}).get("pool_name", "")
+            or metadata.get("parameters", {}).get("universe", "")
+            or "learned_all_a"
+        ),
         benchmark=str(benchmark or metadata.get("benchmark", "") or "000300.SH"),
         data_source="lake",
         csv_folder="",
@@ -364,6 +407,16 @@ def load_policy_inputs_from_lake(
             "dataset_id": dataset_id,
             "data_lake_root": str(lake.root.resolve()),
             "lake_coverage_report": coverage_report,
+            "pool_view": (
+                {
+                    "dataset_id": pool_view.dataset_id,
+                    "view_kind": str(pool_view.metadata.get("parameters", {}).get("view_kind", "") or ""),
+                    "view_name": str(pool_view.metadata.get("parameters", {}).get("view_name", "") or ""),
+                    "source_market_dataset_id": str(pool_view.metadata.get("parameters", {}).get("source_market_dataset_id", "") or ""),
+                }
+                if pool_view is not None
+                else {}
+            ),
         },
         prepared_cache_meta={
             "cache_hit": True,
@@ -371,6 +424,16 @@ def load_policy_inputs_from_lake(
             "dataset_id": dataset_id,
             "data_lake_root": str(lake.root.resolve()),
             "lake_coverage_report": coverage_report,
+            "pool_view": (
+                {
+                    "dataset_id": pool_view.dataset_id,
+                    "view_kind": str(pool_view.metadata.get("parameters", {}).get("view_kind", "") or ""),
+                    "view_name": str(pool_view.metadata.get("parameters", {}).get("view_name", "") or ""),
+                    "source_market_dataset_id": str(pool_view.metadata.get("parameters", {}).get("source_market_dataset_id", "") or ""),
+                }
+                if pool_view is not None
+                else {}
+            ),
         },
         close=close,
         open_=open_,
@@ -386,7 +449,13 @@ def load_policy_inputs_from_lake(
         feature_frames=feature_frames,
         market_features={},
         membership_frame=membership_frame.reindex(index=close.index, columns=close.columns, fill_value=False),
-        rolling_pool_summary={"source": "data_lake", "dataset_id": dataset_id},
+        rolling_pool_summary={
+            "source": "data_lake",
+            "dataset_id": dataset_id,
+            "pool_view_id": pool_view.dataset_id if pool_view is not None else "",
+            "pool_view_kind": str(pool_view.metadata.get("parameters", {}).get("view_kind", "") or "") if pool_view is not None else "",
+            "pool_view_name": str(pool_view.metadata.get("parameters", {}).get("view_name", "") or "") if pool_view is not None else "",
+        },
         alpha_prior_summary=alpha_prior_summary,
         derived_frames=derived_frames,
     )

@@ -61,6 +61,7 @@ from daily_research.deep_alpha.pipeline_utils import (
     load_cached_or_build_liquidity_buckets,
     load_cached_or_build_rolling_pool,
     load_cached_or_fit_market_state,
+    load_lake_market_data_with_pool_view,
     normalize_research_time_unit,
     load_raw_market_data,
     load_stocks_from_file,
@@ -122,8 +123,13 @@ from daily_research.progress import StageProgress, progress_write
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Deep alpha research branch: market state + sequence encoder + cross-sectional ranking")
-    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--data-source", choices=["tq", "csv", "lake"], default="tq")
     parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--lake-dataset-id", default="")
+    parser.add_argument("--data-lake-root", default="")
+    parser.add_argument("--pool-view-id", default="")
+    parser.add_argument("--pool-view-kind", default="", choices=("", "learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
+    parser.add_argument("--pool-view-name", default="")
     parser.add_argument("--force-raw-cache-path", default="")
     parser.add_argument("--stocks", default=None)
     parser.add_argument("--stocks-file", default=None, help="Path to txt/csv file containing stock codes.")
@@ -353,6 +359,30 @@ def parse_args():
             print(line)
         raise SystemExit(0)
     return args
+
+
+def _pool_view_spec_from_args(args: argparse.Namespace, *, start_date: str, end_date: str) -> dict[str, Any] | None:
+    if str(getattr(args, "pool_view_id", "") or "").strip():
+        return None
+    view_kind = str(getattr(args, "pool_view_kind", "") or "").strip().lower()
+    if not view_kind:
+        return None
+    view_name = str(getattr(args, "pool_view_name", "") or "").strip().lower() or view_kind
+    spec: dict[str, Any] = {
+        "source_market_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "view_kind": view_kind,
+        "view_name": view_name,
+        "start_date": str(start_date or ""),
+        "end_date": str(end_date or ""),
+    }
+    if view_kind == "rolling_liquidity":
+        spec["pool_name"] = view_name.removeprefix("rolling_") or str(getattr(args, "rolling_liquidity_pool", "") or "")
+        spec["rebalance_every_days"] = int(getattr(args, "pool_rebalance_days", 21))
+        spec["adv_window"] = int(getattr(args, "pool_adv_window", 20))
+    if view_kind == "exchange":
+        suffix = view_name.removeprefix("exchange_")
+        spec["exchange_suffix"] = f".{suffix.upper()}" if suffix else ""
+    return spec
 
 
 def _load_cached_rolling_pool_union(pool_name: str, start_date: str, end_date: str) -> list[str]:
@@ -1676,7 +1706,29 @@ def main():
 
     stocks_file = resolve_stocks_file(args)
     universe = load_stocks_from_file(stocks_file) or parse_stocks(args.stocks)
-    if args.data_source == "tq":
+    if args.data_source == "lake":
+        if not str(args.lake_dataset_id or "").strip():
+            raise ValueError("--data-source lake requires --lake-dataset-id.")
+        lake_payload = load_lake_market_data_with_pool_view(
+            data_lake_root=str(args.data_lake_root or ""),
+            lake_dataset_id=str(args.lake_dataset_id),
+            pool_view_id=str(args.pool_view_id or ""),
+            pool_view_spec=_pool_view_spec_from_args(args, start_date=str(cfg.start_date), end_date=str(cfg.end_date)),
+            start_date=str(cfg.start_date),
+            end_date=str(cfg.end_date),
+            benchmark=str(cfg.benchmark),
+            pool_name=str(args.rolling_liquidity_pool or args.liquidity_pool or "learned_all_a"),
+        )
+        raw_df_dict = dict(lake_payload["df_dict"])
+        raw_key = str(lake_payload["raw_key"])
+        benchmark_open = lake_payload["benchmark_open"]
+        benchmark_close = lake_payload["benchmark_close"]
+        df_dict = dict(lake_payload["df_dict"])
+        rolling_pool_artifact = None
+        rolling_membership_frame = lake_payload["rolling_membership_frame"]
+        rolling_pool_key = str(lake_payload.get("rolling_pool_key", "") or "")
+        universe = list(df_dict["Close"].columns)
+    elif args.data_source == "tq":
         if args.rolling_liquidity_pool:
             progress_write(f"Load rolling {args.rolling_liquidity_pool} base universe for research")
             try:
@@ -1698,26 +1750,27 @@ def main():
             universe = load_universe_from_tq(cfg.universe_scope)
         elif not universe:
             raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
-    raw_df_dict, raw_key = load_raw_market_data(cfg, args, universe)
+    else:
+        raw_df_dict, raw_key = load_raw_market_data(cfg, args, universe)
 
-    benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
-    df_dict, benchmark_close = split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
-    rolling_pool_artifact = None
-    rolling_membership_frame = None
-    rolling_pool_key = ""
-    if args.rolling_liquidity_pool:
-        rolling_pool_artifact, rolling_pool_key = load_cached_or_build_rolling_pool(
-            args=args,
-            cfg=cfg,
-            df_dict=df_dict,
-            raw_key=raw_key,
-        )
-        rolling_membership_frame = rolling_pool_artifact.membership_frame
-        rolling_union = rolling_membership_frame.columns[rolling_membership_frame.any(axis=0)].tolist()
-        if not rolling_union:
-            raise RuntimeError(f"Rolling {args.rolling_liquidity_pool} research pool is empty for the requested window.")
-        df_dict = subset_df_dict_to_stocks(df_dict, rolling_union)
-        rolling_membership_frame = rolling_membership_frame.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
+        benchmark_open = raw_df_dict["Open"][cfg.benchmark].copy()
+        df_dict, benchmark_close = split_benchmark_from_universe(raw_df_dict, cfg.benchmark)
+        rolling_pool_artifact = None
+        rolling_membership_frame = None
+        rolling_pool_key = ""
+        if args.rolling_liquidity_pool:
+            rolling_pool_artifact, rolling_pool_key = load_cached_or_build_rolling_pool(
+                args=args,
+                cfg=cfg,
+                df_dict=df_dict,
+                raw_key=raw_key,
+            )
+            rolling_membership_frame = rolling_pool_artifact.membership_frame
+            rolling_union = rolling_membership_frame.columns[rolling_membership_frame.any(axis=0)].tolist()
+            if not rolling_union:
+                raise RuntimeError(f"Rolling {args.rolling_liquidity_pool} research pool is empty for the requested window.")
+            df_dict = subset_df_dict_to_stocks(df_dict, rolling_union)
+            rolling_membership_frame = rolling_membership_frame.reindex(index=df_dict["Close"].index, columns=df_dict["Close"].columns).fillna(False)
     close = df_dict["Close"]
     train_end, valid_start, valid_end = resolve_split_window(
         close.index,

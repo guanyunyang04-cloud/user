@@ -6,7 +6,9 @@ from unittest import mock
 import pandas as pd
 
 from daily_research.data_lake import ResearchDataLake, build_label_completeness_summary
+from daily_research.data_lake import build_pool_view
 from daily_research.data_lake import build_research_database
+from daily_research.data_lake.pool_views import PoolViewSpec, build_pool_view_from_policy_bundle, load_pool_view
 from daily_research.data_lake.import_legacy_training_caches import import_legacy_training_dataset_caches
 from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
 from daily_research.data_lake.policy_input_audit import audit_policy_input_bundle
@@ -314,6 +316,275 @@ class ResearchDataLakeTest(unittest.TestCase):
         self.assertEqual(prepared.raw_cache_meta["dataset_id"], record.dataset_id)
         self.assertEqual(prepared.raw_cache_meta["lake_coverage_report"]["status"], "ok")
         self.assertEqual(prepared.universe, tuple(stocks))
+
+    def test_pool_view_reuses_fingerprint_and_does_not_copy_market_data(self) -> None:
+        dates = pd.date_range("2026-01-05", periods=30, freq="B")
+        stocks = ["000001.SZ", "000002.SZ", "600000.SH"]
+        close = pd.DataFrame(
+            [[10.0 + row, 20.0 + row, 30.0 + row] for row in range(len(dates))],
+            index=dates,
+            columns=stocks,
+        )
+        amount = pd.DataFrame(
+            [[10000.0 + row, 90000.0 + row, 50000.0 + row] for row in range(len(dates))],
+            index=dates,
+            columns=stocks,
+        )
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": amount,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            spec = PoolViewSpec(
+                source_market_dataset_id=market_record.dataset_id,
+                view_kind="rolling_liquidity",
+                view_name="rolling_liquid2",
+                pool_name="liquid2",
+                start_date="2026-01-05",
+                end_date="2026-02-13",
+                rebalance_every_days=5,
+                adv_window=2,
+            )
+            first = build_pool_view_from_policy_bundle(lake=lake, spec=spec)
+            second = build_pool_view_from_policy_bundle(lake=lake, spec=spec)
+            loaded = load_pool_view(lake=lake, pool_view_id=first.dataset_id)
+
+        self.assertEqual(second.dataset_id, first.dataset_id)
+        self.assertEqual(second.status, "hit")
+        self.assertEqual(first.dataset_kind, "policy_pool_view")
+        self.assertFalse(any("bronze_market_data" in key for key in first.content_paths))
+        self.assertEqual(loaded.membership_frame.shape[1], 3)
+        self.assertEqual(int(loaded.membership_frame.sum(axis=1).median()), 2)
+        self.assertEqual(loaded.metadata["parameters"]["source_market_dataset_id"], market_record.dataset_id)
+
+    def test_pool_view_exchange_filter_and_loader_pool_view_priority(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "000002.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 20.0, 30.0], [10.5, 20.5, 30.5], [11.0, 21.0, 31.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            view = build_pool_view_from_policy_bundle(
+                lake=lake,
+                spec=PoolViewSpec(
+                    source_market_dataset_id=market_record.dataset_id,
+                    view_kind="exchange",
+                    view_name="exchange_sh",
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    exchange_suffix=".SH",
+                ),
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=market_record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                universe=["000001.SZ", "000002.SZ"],
+                max_universe_size=1,
+                pool_view_id=view.dataset_id,
+            )
+
+        self.assertEqual(prepared.universe, ("600000.SH",))
+        self.assertEqual(prepared.pool_name, "exchange_sh")
+        self.assertEqual(prepared.raw_cache_meta["pool_view"]["dataset_id"], view.dataset_id)
+        self.assertTrue(prepared.membership_frame.eq(True).all().all())
+
+    def test_build_pool_view_cli_and_prepare_policy_inputs_lake_pool_view(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 30.0], [10.5, 30.5], [11.0, 31.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            manifest = build_pool_view.main(
+                [
+                    "--data-lake-root",
+                    temp_dir,
+                    "--source-market-dataset-id",
+                    market_record.dataset_id,
+                    "--view-kind",
+                    "exchange",
+                    "--view-name",
+                    "exchange_sz",
+                    "--exchange-suffix",
+                    ".SZ",
+                    "--start-date",
+                    "2026-01-05",
+                    "--end-date",
+                    "2026-01-07",
+                ]
+            )
+            prepared = prepare_policy_inputs(
+                pool_name="learned_all_a",
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                benchmark="000300.SH",
+                data_source="lake",
+                lake_dataset_id=market_record.dataset_id,
+                data_lake_root=temp_dir,
+                pool_view_id=manifest["dataset_id"],
+            )
+
+        self.assertEqual(manifest["status"], "ok")
+        self.assertEqual(manifest["view_kind"], "exchange")
+        self.assertEqual(prepared.universe, ("000001.SZ",))
+        self.assertEqual(prepared.rolling_pool_summary["pool_view_id"], manifest["dataset_id"])
+
+    def test_load_policy_inputs_builds_pool_view_from_explicit_spec(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 30.0], [10.5, 30.5], [11.0, 31.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            market_record = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            prepared = load_policy_inputs_from_lake(
+                lake=lake,
+                dataset_id=market_record.dataset_id,
+                start_date="2026-01-05",
+                end_date="2026-01-07",
+                pool_view_spec={
+                    "source_market_dataset_id": market_record.dataset_id,
+                    "view_kind": "exchange",
+                    "view_name": "exchange_sz",
+                    "exchange_suffix": ".SZ",
+                    "start_date": "2026-01-05",
+                    "end_date": "2026-01-07",
+                },
+            )
+
+        self.assertEqual(prepared.universe, ("000001.SZ",))
+        self.assertTrue(prepared.raw_cache_meta["pool_view"]["dataset_id"].startswith("policy_pool_view__"))
+        self.assertEqual(prepared.raw_cache_meta["pool_view"]["view_name"], "exchange_sz")
+
+    def test_loader_rejects_pool_view_from_different_source_bundle(self) -> None:
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])
+        stocks = ["000001.SZ", "600000.SH"]
+        close = pd.DataFrame([[10.0, 30.0], [10.5, 30.5], [11.0, 31.0]], index=dates, columns=stocks)
+        market_frames = {
+            "Open": close - 0.1,
+            "High": close + 0.2,
+            "Low": close - 0.2,
+            "Close": close,
+            "Volume": pd.DataFrame(1000.0, index=dates, columns=stocks),
+            "Amount": pd.DataFrame(10000.0, index=dates, columns=stocks),
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            lake = ResearchDataLake(Path(temp_dir))
+            first = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic_a"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            second = lake.save_market_data_bundle(
+                spec={"pool_name": "learned_all_a", "benchmark": "000300.SH", "source": "synthetic_b"},
+                market_frames=market_frames,
+                benchmark_close=pd.Series(4000.0, index=dates, name="000300.SH"),
+                membership_frame=pd.DataFrame(True, index=dates, columns=stocks),
+                feature_frames={"score_none": close * 0.0, "score_v2": close * 0.0 + 0.1},
+                source="synthetic",
+            )
+            view = build_pool_view_from_policy_bundle(
+                lake=lake,
+                spec=PoolViewSpec(
+                    source_market_dataset_id=first.dataset_id,
+                    view_kind="exchange",
+                    view_name="exchange_sz",
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    exchange_suffix=".SZ",
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "pool_view_source_mismatch"):
+                load_policy_inputs_from_lake(
+                    lake=lake,
+                    dataset_id=second.dataset_id,
+                    start_date="2026-01-05",
+                    end_date="2026-01-07",
+                    pool_view_id=view.dataset_id,
+                )
+
+    def test_build_pool_view_cli_blocks_when_active_artifact_has_diff(self) -> None:
+        with mock.patch("daily_research.data_lake.build_pool_view._active_artifact_has_diff", return_value=True):
+            with self.assertRaisesRegex(ValueError, "active_artifact_diff_blocker"):
+                build_pool_view.main(
+                    [
+                        "--source-market-dataset-id",
+                        "policy_input_bundle__fixed",
+                        "--view-kind",
+                        "exchange",
+                        "--view-name",
+                        "exchange_sz",
+                        "--exchange-suffix",
+                        ".SZ",
+                    ]
+                )
 
     def test_policy_input_loader_reports_lake_coverage_blocker_for_missing_benchmark(self) -> None:
         dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"])

@@ -2663,11 +2663,36 @@ def _prepare_for_window(args: argparse.Namespace, *, start_date: str, end_date: 
         lake_dataset_id=str(args.lake_dataset_id),
         data_lake_root=args.data_lake_root,
         lake_min_trading_days=int(args.lake_min_trading_days),
+        pool_view_id=str(getattr(args, "pool_view_id", "") or ""),
+        pool_view_spec=_pool_view_spec_from_args(args, start_date=start_date, end_date=end_date),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",
         progress_desc=f"alpha_path20 sequence prepare {tag}",
     )
+
+
+def _pool_view_spec_from_args(args: argparse.Namespace, *, start_date: str, end_date: str) -> dict[str, Any] | None:
+    if str(getattr(args, "pool_view_id", "") or "").strip():
+        return None
+    view_kind = str(getattr(args, "pool_view_kind", "") or "").strip().lower()
+    if not view_kind:
+        return None
+    view_name = str(getattr(args, "pool_view_name", "") or "").strip().lower() or view_kind
+    spec: dict[str, Any] = {
+        "source_market_dataset_id": str(getattr(args, "lake_dataset_id", "") or ""),
+        "view_kind": view_kind,
+        "view_name": view_name,
+        "start_date": str(start_date or ""),
+        "end_date": str(end_date or ""),
+    }
+    if view_kind == "rolling_liquidity":
+        pool_name = view_name.removeprefix("rolling_")
+        spec.update({"pool_name": pool_name or str(getattr(args, "pool_name", "") or "")})
+    if view_kind == "exchange":
+        suffix = view_name.removeprefix("exchange_")
+        spec["exchange_suffix"] = f".{suffix.upper()}" if suffix else ""
+    return spec
 
 
 def _run_sequence_multiyear_smoke(*, study_root: Path, tag: str, args: argparse.Namespace) -> dict[str, Any]:
@@ -3211,6 +3236,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--pool-name", default="learned_all_a")
+    parser.add_argument("--pool-view-id", default="", help="Optional data-lake policy_pool_view dataset id.")
+    parser.add_argument("--pool-view-kind", default="", choices=("", "learned_all_a", "rolling_liquidity", "exchange", "static_symbols"))
+    parser.add_argument("--pool-view-name", default="")
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--start-date", default="20240102")
     parser.add_argument("--end-date", default="20240329")
@@ -3601,6 +3629,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         lake_dataset_id=effective_lake_dataset_id,
         data_lake_root=args.data_lake_root,
         lake_min_trading_days=int(args.lake_min_trading_days),
+        pool_view_id=str(getattr(args, "pool_view_id", "") or ""),
+        pool_view_spec=_pool_view_spec_from_args(args, start_date=prepare_start_date, end_date=prepare_end_date),
         max_universe_size=int(args.max_universe_size),
         alpha_prior_source=DEFAULT_ALPHA_PRIOR_SOURCE,
         require_lake_benchmark_open=str(args.execution_mode or "next_open").strip().lower() == "next_open",

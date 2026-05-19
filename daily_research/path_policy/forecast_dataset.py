@@ -840,10 +840,16 @@ def build_forecast_memmap_dataset(
         "feature_std": feature_std.astype(float).tolist(),
         "raw_feature_nan_ratio": float(feature_manifest.get("feature_nan_ratio", 0.0) or 0.0),
     }
+    raw_cache_meta = dict(getattr(prepared, "raw_cache_meta", {}) or {})
+    pool_view_meta = dict(raw_cache_meta.get("pool_view", {}) or {})
     manifest: dict[str, Any] = {
         "status": "completed" if row_count else "insufficient_or_incomplete",
         "stage": "forecast_sequence_dataset",
         "dataset_mode": "memmap",
+        "source_market_dataset_id": str(pool_view_meta.get("source_market_dataset_id", "") or raw_cache_meta.get("dataset_id", "") or ""),
+        "source_pool_view_id": str(pool_view_meta.get("dataset_id", "") or ""),
+        "source_pool_view_kind": str(pool_view_meta.get("view_kind", "") or ""),
+        "source_pool_view_name": str(pool_view_meta.get("view_name", "") or ""),
         "lookback_days": int(lookback_days),
         "horizon": int(horizon),
         "execution_mode": str(execution_mode),

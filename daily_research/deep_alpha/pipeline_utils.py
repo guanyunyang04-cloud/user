@@ -15,6 +15,7 @@ from daily_research.deep_alpha.cache_utils import cache_key, frame_signature, ge
 from daily_research.deep_alpha.config import DeepAlphaConfig
 from daily_research.deep_alpha.market_state_model import build_state_frame, fit_market_state_model
 from daily_research.deep_alpha.sequence_dataset import build_liquidity_bucket_frame
+from daily_research.data_lake import ResearchDataLake, load_policy_inputs_from_lake
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership, get_named_pool_file
 from daily_research.progress import progress_write
 
@@ -392,6 +393,62 @@ def load_raw_market_data(
         progress_position=progress_position,
     )
     return raw_df_dict, raw_key
+
+
+def load_lake_market_data_with_pool_view(
+    *,
+    data_lake_root: str = "",
+    lake_dataset_id: str,
+    pool_view_id: str = "",
+    pool_view_spec: dict[str, Any] | None = None,
+    start_date: str,
+    end_date: str,
+    benchmark: str,
+    pool_name: str = "learned_all_a",
+    min_trading_days: int = 2,
+) -> dict[str, Any]:
+    lake = ResearchDataLake(str(data_lake_root or "").strip() or None)
+    prepared = load_policy_inputs_from_lake(
+        lake=lake,
+        dataset_id=str(lake_dataset_id),
+        start_date=str(start_date),
+        end_date=str(end_date),
+        pool_name=str(pool_name or "learned_all_a"),
+        benchmark=str(benchmark or "000300.SH"),
+        pool_view_id=str(pool_view_id or ""),
+        pool_view_spec=pool_view_spec,
+        min_trading_days=int(min_trading_days or 1),
+        require_benchmark_open=False,
+    )
+    df_dict = {
+        "Open": prepared.open_.copy(),
+        "High": prepared.high.copy(),
+        "Low": prepared.low.copy(),
+        "Close": prepared.close.copy(),
+        "Volume": prepared.volume.copy(),
+        "Amount": prepared.amount.copy(),
+    }
+    raw_key = cache_key(
+        {
+            "version": 1,
+            "data_source": "lake",
+            "lake_dataset_id": str(lake_dataset_id),
+            "pool_view_id": str(pool_view_id or ""),
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "benchmark": str(benchmark or "000300.SH"),
+            "universe": list(prepared.universe),
+        }
+    )
+    return {
+        "prepared": prepared,
+        "df_dict": df_dict,
+        "benchmark_close": prepared.benchmark_close.copy(),
+        "benchmark_open": prepared.benchmark_open.copy(),
+        "rolling_membership_frame": prepared.membership_frame.copy(),
+        "raw_key": f"lake:{raw_key}",
+        "rolling_pool_key": str(prepared.rolling_pool_summary.get("pool_view_id", "") or ""),
+    }
 
 
 def load_cached_or_build_rolling_pool(

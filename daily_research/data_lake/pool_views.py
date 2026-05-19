@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+import pandas as pd
+
+from daily_research.data_lake.catalog import LakeDatasetRecord, ResearchDataLake
+from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership
+
+
+@dataclass(frozen=True)
+class PoolViewSpec:
+    source_market_dataset_id: str
+    view_kind: str
+    view_name: str
+    start_date: str = ""
+    end_date: str = ""
+    pool_name: str = ""
+    rebalance_every_days: int = 21
+    adv_window: int = 20
+    min_price: float = 2.0
+    max_price: float = 300.0
+    exchange_suffix: str = ""
+    symbols: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["view_kind"] = str(payload["view_kind"] or "").strip().lower()
+        payload["view_name"] = str(payload["view_name"] or "").strip().lower()
+        payload["pool_name"] = str(payload["pool_name"] or "").strip().lower()
+        payload["exchange_suffix"] = str(payload["exchange_suffix"] or "").strip().upper()
+        payload["symbols"] = tuple(_normalize_symbols(payload.get("symbols", ())))
+        payload["rebalance_every_days"] = int(payload["rebalance_every_days"] or 21)
+        payload["adv_window"] = int(payload["adv_window"] or 20)
+        payload["min_price"] = float(payload["min_price"])
+        payload["max_price"] = float(payload["max_price"])
+        return payload
+
+
+@dataclass(frozen=True)
+class PoolViewRecord:
+    dataset_id: str
+    dataset_kind: str
+    fingerprint: str
+    status: str
+    content_paths: dict[str, str]
+    metadata: dict[str, Any]
+    membership_frame: pd.DataFrame
+    schedule_frame: pd.DataFrame
+    summary_frame: pd.DataFrame
+
+
+def _normalize_symbols(values: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = str(raw or "").strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _read_market_panel(lake: ResearchDataLake, dataset_id: str, start_date: str, end_date: str) -> pd.DataFrame:
+    metadata = lake.describe_dataset(dataset_id)
+    if str(metadata.get("dataset_kind", "")) != "policy_input_bundle":
+        raise ValueError(f"pool_view_blocker: source dataset is not policy_input_bundle: {dataset_id}")
+    market_path = str(dict(metadata.get("content_paths", {}) or {}).get("bronze_market_data", "") or "")
+    if not market_path or not Path(market_path).exists():
+        raise ValueError(f"pool_view_blocker: source bundle has no bronze_market_data: {dataset_id}")
+    market = pd.read_parquet(market_path)
+    if "trade_date" not in market.columns:
+        raise ValueError(f"pool_view_blocker: bronze_market_data has no trade_date column: {market_path}")
+    market["trade_date"] = pd.to_datetime(market["trade_date"])
+    start = pd.Timestamp(start_date or metadata.get("start_date", "") or market["trade_date"].min())
+    end = pd.Timestamp(end_date or metadata.get("end_date", "") or market["trade_date"].max())
+    market = market.loc[(market["trade_date"] >= start) & (market["trade_date"] <= end)].copy()
+    if market.empty:
+        raise ValueError(f"pool_view_blocker: no market rows for view window {start.date()} -> {end.date()}")
+    market["symbol"] = market["symbol"].astype(str).str.strip().str.upper()
+    return market
+
+
+def _pivot_market(market: pd.DataFrame, column: str) -> pd.DataFrame:
+    if column not in market.columns:
+        raise ValueError(f"pool_view_blocker: bronze_market_data has no {column} column.")
+    out = market.pivot(index="trade_date", columns="symbol", values=column).sort_index()
+    out.index.name = None
+    out.columns.name = None
+    return out
+
+
+def _metadata_summary(membership: pd.DataFrame, view_name: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(membership.index).strftime("%Y-%m-%d"),
+            "view_name": str(view_name),
+            "member_count": membership.sum(axis=1).astype(int).to_numpy(),
+        }
+    )
+
+
+def _build_membership_for_spec(
+    *,
+    market: pd.DataFrame,
+    spec: PoolViewSpec,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    payload = spec.to_dict()
+    view_kind = str(payload["view_kind"])
+    view_name = str(payload["view_name"] or view_kind)
+    close = _pivot_market(market, "close")
+    available_symbols = list(close.columns)
+    dates = close.index
+    schedule = pd.DataFrame()
+    source_cache: dict[str, Any] = {
+        "source_market_dataset_id": payload["source_market_dataset_id"],
+        "view_kind": view_kind,
+        "view_name": view_name,
+    }
+
+    if view_kind in {"learned_all_a", "all_a"}:
+        membership = close.notna().astype(bool)
+    elif view_kind == "rolling_liquidity":
+        amount = _pivot_market(market, "amount")
+        artifact = build_rolling_liquidity_membership(
+            close_frame=close,
+            amount_frame=amount,
+            pool_name=str(payload["pool_name"] or payload["view_name"]).replace("rolling_", ""),
+            signal_start_date=str(payload["start_date"] or ""),
+            signal_end_date=str(payload["end_date"] or ""),
+            rebalance_every_days=int(payload["rebalance_every_days"]),
+            adv_window=int(payload["adv_window"]),
+            min_price=float(payload["min_price"]),
+            max_price=float(payload["max_price"]),
+        )
+        membership = artifact.membership_frame.reindex(index=dates, columns=available_symbols, fill_value=False).astype(bool)
+        schedule = artifact.schedule_df
+        source_cache["rolling_pool_summary"] = {
+            "pool_name": artifact.pool_name,
+            "pool_size": int(artifact.pool_size),
+            "rebalance_every_days": int(artifact.rebalance_every_days),
+            "adv_window": int(artifact.adv_window),
+        }
+    elif view_kind == "exchange":
+        suffix = str(payload["exchange_suffix"] or "").upper()
+        if suffix and not suffix.startswith("."):
+            suffix = f".{suffix}"
+        if suffix not in {".SH", ".SZ"}:
+            raise ValueError(f"pool_view_blocker: unsupported exchange suffix: {suffix}")
+        keep = [symbol for symbol in available_symbols if symbol.upper().endswith(suffix)]
+        membership = pd.DataFrame(False, index=dates, columns=available_symbols)
+        if keep:
+            membership.loc[:, keep] = close.reindex(columns=keep).notna()
+    elif view_kind == "static_symbols":
+        keep = [symbol for symbol in _normalize_symbols(payload["symbols"]) if symbol in set(available_symbols)]
+        membership = pd.DataFrame(False, index=dates, columns=available_symbols)
+        if keep:
+            membership.loc[:, keep] = close.reindex(columns=keep).notna()
+    else:
+        raise ValueError(f"pool_view_blocker: unsupported view_kind: {view_kind}")
+
+    membership = membership.fillna(False).astype(bool)
+    if int(membership.to_numpy(dtype=bool).sum()) <= 0:
+        raise ValueError(f"pool_view_blocker: view produced empty membership: {view_name}")
+    summary = _metadata_summary(membership, view_name)
+    return membership, schedule, summary, source_cache
+
+
+def build_pool_view_from_policy_bundle(
+    *,
+    lake: ResearchDataLake,
+    spec: PoolViewSpec | Mapping[str, Any],
+    reuse: bool = True,
+) -> LakeDatasetRecord:
+    resolved = spec if isinstance(spec, PoolViewSpec) else PoolViewSpec(**dict(spec))
+    payload = resolved.to_dict()
+    market = _read_market_panel(
+        lake,
+        dataset_id=str(payload["source_market_dataset_id"]),
+        start_date=str(payload.get("start_date", "") or ""),
+        end_date=str(payload.get("end_date", "") or ""),
+    )
+    membership, schedule, summary, source_cache = _build_membership_for_spec(market=market, spec=resolved)
+    return lake.save_pool_view(
+        spec=payload,
+        membership_frame=membership,
+        schedule_frame=schedule,
+        summary_frame=summary,
+        source_cache=source_cache,
+        reuse=bool(reuse),
+    )
+
+
+def load_pool_view(*, lake: ResearchDataLake, pool_view_id: str) -> PoolViewRecord:
+    metadata = lake.describe_dataset(str(pool_view_id))
+    if str(metadata.get("dataset_kind", "")) != "policy_pool_view":
+        raise ValueError(f"pool_view_blocker: dataset is not policy_pool_view: {pool_view_id}")
+    paths = dict(metadata.get("content_paths", {}) or {})
+    membership_path = Path(str(paths.get("membership_frame", "") or ""))
+    if not membership_path.exists():
+        raise ValueError(f"pool_view_blocker: missing membership frame: {membership_path}")
+    membership_raw = pd.read_parquet(membership_path)
+    date_col = "date" if "date" in membership_raw.columns else membership_raw.columns[0]
+    membership_raw[date_col] = pd.to_datetime(membership_raw[date_col])
+    membership = membership_raw.set_index(date_col).sort_index().fillna(False).astype(bool)
+    membership.index.name = None
+    schedule_path = Path(str(paths.get("schedule_frame", "") or ""))
+    summary_path = Path(str(paths.get("summary_frame", "") or ""))
+    schedule = pd.read_parquet(schedule_path) if schedule_path.exists() else pd.DataFrame()
+    summary = pd.read_parquet(summary_path) if summary_path.exists() else pd.DataFrame()
+    return PoolViewRecord(
+        dataset_id=str(metadata["dataset_id"]),
+        dataset_kind=str(metadata["dataset_kind"]),
+        fingerprint=str(metadata["fingerprint"]),
+        status=str(metadata.get("status", "") or "loaded"),
+        content_paths=paths,
+        metadata=metadata,
+        membership_frame=membership,
+        schedule_frame=schedule,
+        summary_frame=summary,
+    )
+
+
+def resolve_pool_view_for_policy_inputs(
+    *,
+    lake: ResearchDataLake,
+    dataset_id: str,
+    pool_view_id: str = "",
+    pool_view_spec: PoolViewSpec | Mapping[str, Any] | None = None,
+) -> PoolViewRecord | None:
+    if str(pool_view_id or "").strip():
+        return load_pool_view(lake=lake, pool_view_id=str(pool_view_id).strip())
+    if pool_view_spec is None:
+        return None
+    payload = pool_view_spec if isinstance(pool_view_spec, PoolViewSpec) else PoolViewSpec(**dict(pool_view_spec))
+    spec_dict = payload.to_dict()
+    if not str(spec_dict.get("source_market_dataset_id", "") or "").strip():
+        spec_dict["source_market_dataset_id"] = str(dataset_id)
+        payload = PoolViewSpec(**spec_dict)
+    record = build_pool_view_from_policy_bundle(lake=lake, spec=payload)
+    return load_pool_view(lake=lake, pool_view_id=record.dataset_id)

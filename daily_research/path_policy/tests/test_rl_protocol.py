@@ -156,6 +156,75 @@ def test_protocol_accepts_existing_forecast_memmap_manifest_path() -> None:
     assert args.forecast_memmap_manifest.endswith("forecast_dataset_manifest.json")
 
 
+def test_protocol_parser_accepts_pool_view_arguments() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_pool_view",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--pool-view-id",
+            "policy_pool_view__fixed",
+            "--pool-view-kind",
+            "rolling_liquidity",
+            "--pool-view-name",
+            "rolling_liquid500",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.pool_view_id == "policy_pool_view__fixed"
+    assert args.pool_view_kind == "rolling_liquidity"
+    assert args.pool_view_name == "rolling_liquid500"
+
+
+def test_protocol_pool_view_kind_builds_explicit_spec_for_prepare(monkeypatch, tmp_path) -> None:
+    import daily_research.path_policy.run_alpha_path20_protocol as protocol
+
+    captured: dict[str, object] = {}
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+
+    def fake_prepare(**kwargs):
+        captured.update(kwargs)
+        return prepared
+
+    monkeypatch.setattr(protocol, "PATH_POLICY_STUDIES_ROOT", tmp_path / "studies")
+    monkeypatch.setattr(protocol, "prepare_policy_inputs", fake_prepare)
+    monkeypatch.setattr(protocol, "_run_forecast_walkforward_study", lambda **kwargs: {"status": "completed"})
+
+    summary = main(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_pool_view_spec",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--pool-view-kind",
+            "exchange",
+            "--pool-view-name",
+            "exchange_sz",
+        ]
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["pool_view_id"] == ""
+    assert captured["pool_view_spec"]["view_kind"] == "exchange"
+    assert captured["pool_view_spec"]["view_name"] == "exchange_sz"
+    assert captured["pool_view_spec"]["source_market_dataset_id"] == "policy_input_bundle__fixed"
+
+
 def test_protocol_parser_accepts_walkforward_matrix_stage() -> None:
     args = build_arg_parser().parse_args(
         [

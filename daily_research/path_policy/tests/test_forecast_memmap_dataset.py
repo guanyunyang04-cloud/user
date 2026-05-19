@@ -12,6 +12,13 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 
 def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    prepared.raw_cache_meta["dataset_id"] = "policy_input_bundle__unit"
+    prepared.raw_cache_meta["pool_view"] = {
+        "dataset_id": "policy_pool_view__unit",
+        "view_kind": "rolling_liquidity",
+        "view_name": "rolling_liquid500",
+        "source_market_dataset_id": "policy_input_bundle__unit",
+    }
 
     dataset = build_forecast_memmap_dataset(
         prepared,
@@ -27,6 +34,9 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     )
 
     assert not hasattr(dataset, "x")
+    assert dataset.manifest["source_market_dataset_id"] == "policy_input_bundle__unit"
+    assert dataset.manifest["source_pool_view_id"] == "policy_pool_view__unit"
+    assert dataset.manifest["source_pool_view_name"] == "rolling_liquid500"
     assert dataset.row_count > 0
     assert dataset.lookback_days == 5
     assert dataset.input_dim == len(dataset.feature_columns)

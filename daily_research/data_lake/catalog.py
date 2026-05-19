@@ -312,6 +312,138 @@ class ResearchDataLake:
     def _dataset_dir(self, dataset_kind: str, zone: str, fingerprint: str) -> Path:
         return self.parquet_root / "gold" / dataset_kind / str(zone) / fingerprint
 
+    def _pool_view_dir(self, fingerprint: str) -> Path:
+        return self.parquet_root / "silver_view" / "policy_pool_view" / str(fingerprint)
+
+    def build_pool_view_identity(self, *, spec: Mapping[str, Any]) -> dict[str, str]:
+        dataset_kind = "policy_pool_view"
+        zone = "research"
+        fingerprint = _stable_hash(
+            {
+                "schema_version": DATA_LAKE_SCHEMA_VERSION,
+                "dataset_kind": dataset_kind,
+                "zone": zone,
+                "spec": dict(spec),
+            }
+        )
+        return {
+            "dataset_kind": dataset_kind,
+            "zone": zone,
+            "fingerprint": fingerprint,
+            "dataset_id": f"{dataset_kind}__{fingerprint}",
+            "dataset_dir": str(self._pool_view_dir(fingerprint).resolve()),
+        }
+
+    def save_pool_view(
+        self,
+        *,
+        spec: Mapping[str, Any],
+        membership_frame: pd.DataFrame,
+        schedule_frame: pd.DataFrame | None = None,
+        summary_frame: pd.DataFrame | None = None,
+        source_cache: Mapping[str, Any] | None = None,
+        reuse: bool = True,
+    ) -> LakeDatasetRecord:
+        identity = self.build_pool_view_identity(spec=spec)
+        dataset_kind = identity["dataset_kind"]
+        fingerprint = identity["fingerprint"]
+        dataset_id = identity["dataset_id"]
+        dataset_dir = Path(identity["dataset_dir"])
+        content_paths = {
+            "membership_frame": str((dataset_dir / "membership_frame.parquet").resolve()),
+            "schedule_frame": str((dataset_dir / "schedule_frame.parquet").resolve()),
+            "summary_frame": str((dataset_dir / "summary_frame.parquet").resolve()),
+            "view_manifest": str((dataset_dir / "view_manifest.json").resolve()),
+        }
+        existing = self._existing_by_fingerprint(fingerprint)
+        if reuse and existing is not None and all(Path(path).exists() for path in content_paths.values()):
+            metadata = self.describe_dataset(str(existing["dataset_id"]))
+            return LakeDatasetRecord(
+                dataset_id=str(metadata["dataset_id"]),
+                dataset_kind=str(metadata["dataset_kind"]),
+                zone=str(metadata["zone"]),
+                fingerprint=str(metadata["fingerprint"]),
+                status="hit",
+                root=self.root,
+                content_paths=dict(metadata.get("content_paths", {}) or {}),
+                row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+                metadata=metadata,
+            )
+
+        membership = membership_frame.copy()
+        membership.index = pd.to_datetime(membership.index)
+        membership = membership.sort_index()
+        membership.columns = [str(column).strip().upper() for column in membership.columns]
+        membership = membership.fillna(False).astype(bool)
+        if membership.empty or int(membership.any(axis=1).sum()) <= 0:
+            raise ValueError("pool_view_blocker: membership frame is empty for requested view.")
+
+        schedule = schedule_frame.copy() if schedule_frame is not None else pd.DataFrame()
+        summary = summary_frame.copy() if summary_frame is not None else pd.DataFrame()
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+
+        membership_out = membership.reset_index()
+        membership_out = membership_out.rename(columns={membership_out.columns[0]: "date"})
+        membership_out["date"] = pd.to_datetime(membership_out["date"]).dt.strftime("%Y-%m-%d")
+        membership_out.to_parquet(content_paths["membership_frame"], index=False)
+        schedule.to_parquet(content_paths["schedule_frame"], index=False)
+        summary.to_parquet(content_paths["summary_frame"], index=False)
+        manifest = {
+            "dataset_id": dataset_id,
+            "dataset_kind": dataset_kind,
+            "fingerprint": fingerprint,
+            "status": "stored",
+            "parameters": dict(spec),
+            "content_paths": content_paths,
+            "membership_rows": int(len(membership.index)),
+            "membership_symbols": int(len(membership.columns)),
+            "membership_true_cells": int(membership.to_numpy(dtype=bool).sum()),
+            "universe_size": int(membership.any(axis=0).sum()),
+        }
+        _write_json(Path(content_paths["view_manifest"]), manifest)
+
+        start_date = membership.index.min().strftime("%Y-%m-%d")
+        end_date = membership.index.max().strftime("%Y-%m-%d")
+        row_counts: dict[str, Any] = {
+            "membership_frame": int(len(membership_out)),
+            "schedule_frame": int(len(schedule)),
+            "summary_frame": int(len(summary)),
+            "membership_symbols": int(len(membership.columns)),
+            "membership_true_cells": int(membership.to_numpy(dtype=bool).sum()),
+            "_date_bounds": {"start_date": start_date, "end_date": end_date},
+        }
+        merged_spec = {
+            **dict(spec),
+            "start_date": str(spec.get("start_date", "") or start_date),
+            "end_date": str(spec.get("end_date", "") or end_date),
+        }
+        self._upsert_dataset(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            domain="silver_view",
+            zone="research",
+            source=str(spec.get("source_market_dataset_id", "") or ""),
+            spec=merged_spec,
+            label_completeness_summary={},
+            content_paths=content_paths,
+            row_counts=row_counts,
+            source_cache=source_cache,
+            fingerprint=fingerprint,
+            status="stored",
+        )
+        metadata = self.describe_dataset(dataset_id)
+        return LakeDatasetRecord(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            zone="research",
+            fingerprint=fingerprint,
+            status="stored",
+            root=self.root,
+            content_paths=dict(metadata.get("content_paths", {}) or {}),
+            row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+            metadata=metadata,
+        )
+
     def build_training_dataset_identity(self, *, spec: Mapping[str, Any], zone: str) -> dict[str, str]:
         resolved_zone = str(zone or "strict_train")
         dataset_kind = "continuous_policy_training_matrices"
