@@ -116,6 +116,72 @@ def findings_for_realtime_completed_evidence(label_summary: Mapping[str, Any]) -
     return []
 
 
+def _text_contains_promotional_claim(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    needles = (
+        "activate_live",
+        "active_default",
+        "active execution",
+        "live_default",
+        "live/default",
+        "promotion_ready",
+        "promotion-ready",
+        "promotable",
+        "promote",
+        "production_ready",
+        "production-ready",
+    )
+    return any(needle in text for needle in needles)
+
+
+def _summary_is_shadow_only(summary: Mapping[str, Any]) -> bool:
+    gate = summary.get("promotion_gate", {})
+    gate_status = str(gate.get("status", "") if isinstance(gate, Mapping) else "").strip().lower()
+    return (
+        bool(summary.get("shadow_only", False))
+        or summary.get("promotion_allowed") is False
+        or gate_status in {"shadow_only", "research_shadow_only"}
+    )
+
+
+def _summary_has_promotional_claim(summary: Mapping[str, Any]) -> bool:
+    bool_keys = (
+        "active_default",
+        "active_execution",
+        "activate_strategy",
+        "live_default",
+        "live_default_change",
+        "promotion_ready",
+        "production_ready",
+    )
+    if any(bool(summary.get(key, False)) for key in bool_keys):
+        return True
+    text_keys = ("decision", "verdict", "status", "conclusion", "claim", "promotion_status")
+    return any(_text_contains_promotional_claim(summary.get(key, "")) for key in text_keys)
+
+
+def findings_for_shadow_promotional_claims(
+    evidence_summaries: Iterable[Mapping[str, Any]],
+) -> list[BrainRuleFinding]:
+    findings: list[BrainRuleFinding] = []
+    for idx, summary in enumerate(evidence_summaries):
+        if not isinstance(summary, Mapping):
+            continue
+        if not _summary_is_shadow_only(summary) or not _summary_has_promotional_claim(summary):
+            continue
+        run_tag = str(summary.get("run_tag", "") or summary.get("tag", "") or f"summary[{idx}]")
+        findings.append(
+            BrainRuleFinding(
+                "error",
+                "shadow_evidence_marked_promotional",
+                f"{run_tag} is shadow-only evidence but contains a live/promotion/active claim",
+            )
+        )
+    return findings
+
+
 def findings_for_control_plane_doc_lengths(
     limits: Mapping[Path, int] | None = None,
 ) -> list[BrainRuleFinding]:
@@ -142,6 +208,7 @@ def run_brain_rules(
     has_explicit_study_tag: bool = False,
     claim_text: str = "",
     label_summaries: Iterable[Mapping[str, Any]] = (),
+    evidence_summaries: Iterable[Mapping[str, Any]] = (),
     check_control_plane_lengths: bool = True,
 ) -> dict[str, Any]:
     findings: list[BrainRuleFinding] = []
@@ -158,6 +225,7 @@ def run_brain_rules(
         findings.append(gold)
     for summary in label_summaries:
         findings.extend(findings_for_realtime_completed_evidence(summary))
+    findings.extend(findings_for_shadow_promotional_claims(evidence_summaries))
     if check_control_plane_lengths:
         findings.extend(findings_for_control_plane_doc_lengths())
     errors = [finding for finding in findings if finding.severity == "error"]

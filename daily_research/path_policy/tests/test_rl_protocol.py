@@ -801,6 +801,27 @@ def test_rl_stage_rejects_loose_latest_dataset_id() -> None:
             _validate_protocol_args(parser, args)
 
 
+def test_forecast_stage_rejects_loose_latest_dataset_id() -> None:
+    parser = build_arg_parser()
+    for stage in ("forecast-dataset", "forecast-train", "forecast-walkforward-study"):
+        for loose_id in ("latest", "default", "latest_snapshot"):
+            args = parser.parse_args(
+                [
+                    "--stage",
+                    stage,
+                    "--tag",
+                    "unit",
+                    "--data-source",
+                    "lake",
+                    "--lake-dataset-id",
+                    loose_id,
+                ]
+            )
+
+            with pytest.raises(SystemExit):
+                _validate_protocol_args(parser, args)
+
+
 def test_protocol_parser_rejects_unknown_rl_model_family() -> None:
     with pytest.raises(SystemExit):
         build_arg_parser().parse_args(

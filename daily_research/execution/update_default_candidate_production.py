@@ -22,6 +22,7 @@ import daily_research.deep_alpha.run_deep_alpha_research as research_main
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.baseline.external_target_weight_bridge import build_target_weight_bridge
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+from daily_research.execution.active_manifest_guard import require_active_manifest_write_confirmation
 from daily_research.deep_alpha.family_epoch_budget import (
     DEFAULT_LATEST_MANIFEST_PATH,
     default_min_epochs_for_budget,
@@ -1589,11 +1590,11 @@ def main() -> None:
             }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if bool(args.activate_strategy) and not bool(args.confirm_active_manifest_write):
-        raise RuntimeError(
-            "--activate-strategy would modify the active execution manifest. "
-            "Pass --confirm-active-manifest-write to make this write explicit."
-        )
+    require_active_manifest_write_confirmation(
+        write_requested=bool(args.activate_strategy),
+        confirmed=bool(args.confirm_active_manifest_write),
+        action_flag="--activate-strategy",
+    )
 
     latest_trainable_date, internal_monitor_start_date, internal_monitor_days = _resolve_training_dates(
         source_run_dir=source_run_dir,

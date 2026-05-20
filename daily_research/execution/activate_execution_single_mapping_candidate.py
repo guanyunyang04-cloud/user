@@ -10,6 +10,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
+from daily_research.execution.active_manifest_guard import require_active_manifest_write_confirmation
 from daily_research.execution.output_root_resolver import (
     OUTPUT_ROOT,
     resolve_single_mapping_pipeline_root,
@@ -184,11 +185,11 @@ def main() -> None:
         print(f"active_execution_strategy_name={new_payload.get('strategy_name', '')}")
         print(json.dumps(new_payload, ensure_ascii=False, indent=2, default=str))
         return
-    if not bool(args.confirm_active_manifest_write):
-        raise RuntimeError(
-            "--write-active-manifest would modify the active execution manifest. "
-            "Pass --confirm-active-manifest-write to make this write explicit."
-        )
+    require_active_manifest_write_confirmation(
+        write_requested=not bool(args.dry_run),
+        confirmed=bool(args.confirm_active_manifest_write),
+        action_flag="--write-active-manifest",
+    )
     write_strategy_manifest(new_payload, path=active_manifest_path)
     written_manifest = load_strategy_manifest(active_manifest_path)
     if str(written_manifest.get("score_panel_role", "")).strip() != resolved_score_panel_role:

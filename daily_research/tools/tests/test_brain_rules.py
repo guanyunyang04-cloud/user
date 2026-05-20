@@ -7,6 +7,7 @@ from daily_research.tools import brain_rules
 from daily_research.tools.brain_rules import (
     finding_for_full_gold_claim_without_catalog,
     finding_for_stale_latest_without_explicit_tag,
+    findings_for_shadow_promotional_claims,
     findings_for_control_plane_doc_lengths,
     findings_for_failed_completed_trials,
     findings_for_realtime_completed_evidence,
@@ -68,6 +69,40 @@ class BrainRulesTest(unittest.TestCase):
 
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].code, "realtime_tail_counted_as_training_evidence")
+
+    def test_shadow_only_summary_cannot_be_marked_live_ready(self) -> None:
+        findings = findings_for_shadow_promotional_claims(
+            [
+                {
+                    "run_tag": "shadow_protocol",
+                    "shadow_only": True,
+                    "promotion_allowed": False,
+                    "promotion_gate": {"status": "shadow_only"},
+                    "verdict": "promotion_ready",
+                    "live_default_change": True,
+                }
+            ]
+        )
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].code, "shadow_evidence_marked_promotional")
+
+    def test_run_brain_rules_checks_shadow_promotional_evidence(self) -> None:
+        payload = brain_rules.run_brain_rules(
+            has_explicit_study_tag=True,
+            check_control_plane_lengths=False,
+            evidence_summaries=[
+                {
+                    "shadow_only": True,
+                    "promotion_allowed": False,
+                    "promotion_gate": {"status": "research_shadow_only"},
+                    "decision": "activate_live",
+                }
+            ],
+        )
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("shadow_evidence_marked_promotional", {finding["code"] for finding in payload["findings"]})
 
     def test_control_plane_doc_length_warning(self) -> None:
         from pathlib import Path
