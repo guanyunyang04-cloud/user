@@ -18,6 +18,14 @@
 - `main-branch-only`
   - 除非用户未来明确撤销该约束，所有后续代码、文档与实验工作都必须在 `main` 分支展开；不得创建或切换到新分支
   - 实际分支不为 `main` 时，任何 repo-tracked mutation 都必须先纠偏到 `main`，或取得用户对本次任务撤销该规则的明确授权
+- `skills-home-rule`
+  - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
+- `brain-cognitive-rule`
+  - brain 只保留事实、推断、假设、权威层级、项目状态、风险边界、证据索引、写回路由和必要命令入口；脑区不是通用操作技能仓库。
+- `project-fallback-rule`
+  - API 或 no-plugin 会话无法加载本机 skills 时，可以使用项目 `brain_workflow capsule/workflow-guide` 作为本地 fallback；fallback 只承载项目约束、预检、证据边界和验证调度，不宣称替代本机 skills。
+- `skills-brain-tools-matrix`
+  - 本机 skills 管通用操作能力；主脑和分脑管认知治理与项目真相；项目 `tools/` 管可执行守卫。项目安全边界高于通用 skill 默认行为。
 ## 2. 已验证教训
 - 如果主脑和分脑维护两套平行接管顺序，后续 agent 很快会漂移
 - 如果当前状态只写聊天或终端，不写 brain，接管可靠性会明显下降
@@ -33,6 +41,8 @@
 - 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；默认用 `Start-Process -PassThru` 记录 PID，再用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析产物
 - 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，首个 progress 未出现或排障时才临时缩短 timeout
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
+- 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。
+- 如果脑区和本机 skill 对“怎么做 TDD、调试、计划或验证”有重复描述，以本机 skill 为通用操作真源；脑区只记录本工作区和项目特例。
 
 ## 3. 当前长期边界
 - 主脑不是分脑事实库

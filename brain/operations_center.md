@@ -6,6 +6,13 @@
 - 接主脑并进入目标分脑：
   - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_bootstrap.py --child <brain_id>`
 
+## 1.0 Skills / Brain / Tools 调用顺序
+- 先读 brain 约束：确认事实、推断、假设、权威层级、分支纪律、active artifact 禁区和目标分脑边界。
+- 再调用适用的本机 skill：TDD、debugging、planning、verification、文档、前端、安全和部署等通用操作流程以 `C:/Users/ASUS/.codex/skills` 为准。
+- 最后跑项目守卫：项目特有预检、验证矩阵、证据查询和写回路线由对应分脑与 `daily_research/tools/` 提供。
+- 冲突时先服从项目安全边界：如果通用 skill 默认要求 worktree、commit、写 spec 或扩大执行，而 brain 明确要求 `main`、不提交、不触碰 active artifact，则以 brain 约束为准。
+- brain 只记录项目特例和必要命令索引；不得在主脑正文复制本机 skill 的完整方法正文。
+
 ## 1.1 Mutation 前预检
 - 先确认工作区和分支：
   - `git status --short --branch --untracked-files=all`
@@ -32,7 +39,8 @@
 - 工作区级固定规则与教训写回 `brain/knowledge_center.md`
 - 工作区级拓扑写回 `brain/master_brain.md`
 - 工作区级治理写回 `brain/governance_layer.md`
-- 工作区级方法、环境与守卫入口写回 `brain/operations_center.md`
+- 工作区级项目特例、环境与守卫入口写回 `brain/operations_center.md`
+- 通用操作技能的详细方法不写入 brain；需要时使用本机 `C:/Users/ASUS/.codex/skills`。
 ## 4. 守卫入口
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/brain_integrity_check.py --json`
 - `C:/Users/ASUS/miniconda3/envs/yolos/python.exe daily_research/tools/doc_guard.py check`

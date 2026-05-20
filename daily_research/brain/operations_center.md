@@ -21,6 +21,9 @@
 - execution app：`daily_research/execution/run_execution_app.py`。
 
 ## 高频 Brain 命令
+- `brain_workflow` 是 `daily_research` 项目本地接管、预检、证据查询、验证调度和写回辅助；它不是通用 skill 真源，不替代本机 `C:/Users/ASUS/.codex/skills`。
+- API/no-plugin 会话可用 `--workflow auto` 作为项目 fallback；fallback 只解释项目安全约束、active artifact 边界、证据规则和验证矩阵。
+- TDD、debugging、planning、verification 等通用操作方法以本机 skills 为准；本分脑只记录 daily_research 特例和必须使用的项目命令。
 - task capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
 - API/no-plugin auto workflow capsule：
