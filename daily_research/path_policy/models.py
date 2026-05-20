@@ -258,21 +258,24 @@ class PatchTransformerPath20Forecaster(nn.Module):
 
 
 class StaticContextEncoder(nn.Module):
-    field_order = ("symbol", "exchange", "industry", "liquidity_bucket", "price_bucket")
+    default_field_order = ("symbol", "exchange", "industry", "liquidity_bucket", "price_bucket")
 
     def __init__(
         self,
         *,
         vocab_sizes: dict[str, int] | None = None,
         embedding_dims: dict[str, int] | None = None,
+        fields: tuple[str, ...] | list[str] | None = None,
         dropout: float = 0.20,
     ) -> None:
         super().__init__()
+        self.field_order = tuple(str(item).strip() for item in (fields or self.default_field_order) if str(item).strip())
         resolved_vocab = dict(vocab_sizes or {})
         resolved_dims = {
             "symbol": 16,
             "exchange": 4,
             "industry": 8,
+            "board": 4,
             "liquidity_bucket": 4,
             "price_bucket": 4,
             **dict(embedding_dims or {}),
@@ -292,7 +295,7 @@ class StaticContextEncoder(nn.Module):
             static_context_ids = torch.zeros((batch_size, len(self.field_order)), dtype=torch.long, device=device)
         static_context_ids = static_context_ids.to(device=device, dtype=torch.long)
         if static_context_ids.ndim != 2 or static_context_ids.shape[1] < len(self.field_order):
-            raise ValueError("static_context_ids must have shape [batch, 5].")
+            raise ValueError(f"static_context_ids must have shape [batch, {len(self.field_order)}].")
         vectors = []
         for pos, field in enumerate(self.field_order):
             embedding = self.embeddings[field]
@@ -311,6 +314,7 @@ class StaticContextPath20Forecaster(nn.Module):
         horizon: int,
         vocab_sizes: dict[str, int] | None = None,
         embedding_dims: dict[str, int] | None = None,
+        static_fields: tuple[str, ...] | list[str] | None = None,
         static_dropout: float = 0.20,
         dropout: float = 0.10,
     ) -> None:
@@ -320,6 +324,7 @@ class StaticContextPath20Forecaster(nn.Module):
         self.static_encoder = StaticContextEncoder(
             vocab_sizes=vocab_sizes,
             embedding_dims=embedding_dims,
+            fields=static_fields,
             dropout=static_dropout,
         )
         self.head = nn.Sequential(

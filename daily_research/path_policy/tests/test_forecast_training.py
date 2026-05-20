@@ -11,6 +11,7 @@ from daily_research.path_policy.forecast_training import (
     forecast_evidence_verdict,
     forecast_prediction_metrics,
     make_forecast_model,
+    run_forecast_ranking_baseline,
     train_forecast_models,
 )
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
@@ -20,10 +21,10 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     x = torch.randn(4, 6, 5)
     static_ids = torch.tensor(
         [
-            [1, 1, 1, 1, 1],
-            [2, 2, 2, 2, 2],
-            [3, 1, 0, 3, 2],
-            [4, 2, 1, 4, 3],
+            [1, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2, 2],
+            [3, 1, 0, 0, 3, 2],
+            [4, 2, 1, 3, 4, 3],
         ],
         dtype=torch.long,
     )
@@ -50,6 +51,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
                 "symbol": 8,
                 "exchange": 4,
                 "industry": 4,
+                "board": 5,
                 "liquidity_bucket": 6,
                 "price_bucket": 6,
             },
@@ -57,6 +59,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
                 "symbol": 4,
                 "exchange": 2,
                 "industry": 3,
+                "board": 3,
                 "liquidity_bucket": 2,
                 "price_bucket": 2,
             },
@@ -118,6 +121,7 @@ def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> N
     checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
     assert checkpoint["resume_contract"]["static_context_schema"]["enabled"] is True
     assert checkpoint["resume_contract"]["symbol_vocab_fingerprint"] == dataset.manifest["symbol_vocab_fingerprint"]
+    assert checkpoint["resume_contract"]["loss_profile"] == "default"
 
     bad_manifest = {**dataset.manifest, "symbol_vocab_fingerprint": "changed"}
     dataset.manifest = bad_manifest
@@ -138,6 +142,110 @@ def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> N
             amp=False,
             resume_from=last_path,
         )
+
+
+def test_train_forecast_models_records_loss_profile_in_summary_and_resume_contract(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("gru_sequence",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+        loss_profile="rank_aux",
+    )
+
+    assert summary["training_config"]["loss_profile"] == "rank_aux"
+    seed_summary = summary["models"]["gru_sequence"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["loss_profile"] == "rank_aux"
+    assert checkpoint["training_config"]["loss_profile"] == "rank_aux"
+
+
+def test_ranking_baseline_dependency_missing_reports_status(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    summary = run_forecast_ranking_baseline(dataset, study_root=tmp_path / "study", baseline="missing_ranker")
+
+    assert summary["status"] == "dependency_missing"
+    assert summary["baseline"] == "missing_ranker"
+    assert summary["shadow_only"] is True
+    assert summary["active_execution_strategy_expected_diff"] == "none"
+
+
+def test_sector_slot_diagnostics_handles_missing_metadata(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("sector_slot_mixer_sequence",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+        slot_diagnostics=True,
+    )
+
+    slot_path = summary["models"]["sector_slot_mixer_sequence"]["seed_summaries"]["7"]["slot_diagnostics_path"]
+    diagnostics = json.loads(__import__("pathlib").Path(slot_path).read_text(encoding="utf-8"))
+    assert diagnostics["status"] == "completed"
+    assert diagnostics["slot_semantics"] == "dynamic_theme_factor_not_static_board"
+    assert diagnostics["slot_count"] == 8
+    assert diagnostics["industry_available"] is False
 
 
 def test_stock_mixer_uses_memmap_date_level_batching(tmp_path) -> None:

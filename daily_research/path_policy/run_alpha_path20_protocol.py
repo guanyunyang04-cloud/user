@@ -26,6 +26,7 @@ from daily_research.path_policy.forecast_dataset import (
     build_forecast_memmap_dataset,
     build_forecast_sequence_dataset,
     load_forecast_memmap_dataset,
+    normalize_static_context_fields,
     save_forecast_sequence_dataset,
 )
 from daily_research.path_policy.forecast_features import (
@@ -628,6 +629,7 @@ def _run_forecast_walkforward_study(
                 max_samples_per_role=int(args.forecast_max_samples_per_role),
                 min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
                 include_static_context=bool(args.forecast_include_static_context),
+                static_context_fields=normalize_static_context_fields(str(args.forecast_static_fields)),
             )
         dataset_manifest = dict(dataset.manifest)
         if not dataset_manifest.get("manifest_json"):
@@ -678,6 +680,9 @@ def _run_forecast_walkforward_study(
             resume_from=str(args.forecast_resume_from or ""),
             save_last_checkpoint=bool(args.forecast_save_last),
             checkpoint_every_n_epochs=int(args.forecast_checkpoint_every_n_epochs),
+            loss_profile=str(args.forecast_loss_profile),
+            ranking_baseline=str(args.forecast_ranking_baseline),
+            slot_diagnostics=bool(args.forecast_slot_diagnostics),
         )
     status = "completed"
     if dataset_manifest.get("status") != "completed" or training_summary.get("status") in {
@@ -3329,6 +3334,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write static symbol/exchange/industry ids into newly built memmap forecast datasets.",
     )
+    parser.add_argument(
+        "--forecast-static-fields",
+        default="symbol,exchange,industry,liquidity_bucket,price_bucket",
+        help="Comma-separated static context fields: symbol,exchange,industry,board,liquidity_bucket,price_bucket.",
+    )
+    parser.add_argument("--forecast-ranking-baseline", default="none", choices=("none", "lightgbm", "xgboost"))
+    parser.add_argument("--forecast-loss-profile", default="default", choices=("default", "rank_aux", "multitask_v1"))
+    parser.add_argument("--forecast-slot-diagnostics", action="store_true")
     parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
     parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
@@ -3424,6 +3437,10 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--forecast-weight-decay must be non-negative.")
         if int(getattr(args, "forecast_checkpoint_every_n_epochs", 0)) < 0:
             parser.error("--forecast-checkpoint-every-n-epochs must be non-negative.")
+        try:
+            normalize_static_context_fields(str(getattr(args, "forecast_static_fields", "")))
+        except ValueError as exc:
+            parser.error(str(exc))
         resume_from = str(getattr(args, "forecast_resume_from", "") or "").strip()
         if resume_from and not Path(resume_from).exists():
             parser.error("--forecast-resume-from must point to an existing checkpoint.")

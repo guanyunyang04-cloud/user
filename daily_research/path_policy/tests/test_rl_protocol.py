@@ -114,6 +114,10 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_resume_from == ""
     assert args.forecast_checkpoint_every_n_epochs == 0
     assert args.forecast_include_static_context is False
+    assert args.forecast_static_fields == "symbol,exchange,industry,liquidity_bucket,price_bucket"
+    assert args.forecast_ranking_baseline == "none"
+    assert args.forecast_loss_profile == "default"
+    assert args.forecast_slot_diagnostics is False
 
 
 def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None:
@@ -161,12 +165,47 @@ def test_protocol_accepts_static_context_forecast_family_and_dataset_flag() -> N
             "--forecast-model-families",
             "gru_sequence_static_context,stock_mixer_sequence,sector_slot_mixer_sequence",
             "--forecast-include-static-context",
+            "--forecast-static-fields",
+            "symbol,exchange,industry,board,liquidity_bucket,price_bucket",
+            "--forecast-ranking-baseline",
+            "lightgbm",
+            "--forecast-loss-profile",
+            "multitask_v1",
+            "--forecast-slot-diagnostics",
         ]
     )
     _validate_protocol_args(parser, args)
 
     assert args.forecast_include_static_context is True
+    assert args.forecast_static_fields == "symbol,exchange,industry,board,liquidity_bucket,price_bucket"
+    assert args.forecast_ranking_baseline == "lightgbm"
+    assert args.forecast_loss_profile == "multitask_v1"
+    assert args.forecast_slot_diagnostics is True
     assert args.forecast_model_families == "gru_sequence_static_context,stock_mixer_sequence,sector_slot_mixer_sequence"
+
+
+def test_protocol_rejects_unknown_forecast_static_field() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_bad_static_field",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-include-static-context",
+            "--forecast-static-fields",
+            "symbol,not_a_field",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_protocol_args(parser, args)
 
 
 def test_protocol_rejects_negative_forecast_checkpoint_interval() -> None:

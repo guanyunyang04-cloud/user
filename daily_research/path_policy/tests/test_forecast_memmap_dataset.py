@@ -138,6 +138,59 @@ def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path)
     assert tuple(loaded_static_ids.shape) == (5,)
 
 
+def test_static_context_can_include_stable_primary_board_id(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
+    prepared.metadata_frames["industry_map"] = __import__("pandas").DataFrame(
+        {
+            "symbol": ["AAA.SZ", "BBB.SH"],
+            "industry": ["bank", "electronics"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = __import__("pandas").DataFrame(
+        {
+            "symbol": ["AAA.SZ", "AAA.SZ", "BBB.SH"],
+            "board_kind": ["GN", "FG", "GN"],
+            "board_name": ["value", "dividend", "semiconductor"],
+            "board_code": ["GN001", "FG001", "GN002"],
+        }
+    )
+
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=6,
+        min_lookback_valid_ratio=0.80,
+        include_static_context=True,
+        static_context_fields=("symbol", "exchange", "industry", "board", "liquidity_bucket", "price_bucket"),
+    )
+
+    assert dataset.manifest["static_context_schema"]["fields"] == [
+        "symbol",
+        "exchange",
+        "industry",
+        "board",
+        "liquidity_bucket",
+        "price_bucket",
+    ]
+    assert dataset.manifest["static_context_shape"] == [dataset.row_count, 6]
+    assert "board_id" in dataset.sample_index.columns
+    aaa_rows = dataset.sample_index[dataset.sample_index["stock"] == "AAA.SZ"]
+    ccc_rows = dataset.sample_index[dataset.sample_index["stock"] == "CCC.SZ"]
+    assert int(aaa_rows["board_id"].iloc[0]) > 0
+    assert int(ccc_rows["board_id"].iloc[0]) == 0
+
+    loaded = load_forecast_memmap_dataset(tmp_path / "forecast_dataset_manifest.json")
+    assert loaded.static_context_ids is not None
+    _, _, _, _, _, static_ids = loaded.torch_dataset(loaded.role_indices("train")[:1], target_scale=100.0)[0]
+    assert tuple(static_ids.shape) == (6,)
+
+
 def test_date_batch_view_groups_memmap_samples_by_signal_date(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
     dataset = build_forecast_memmap_dataset(

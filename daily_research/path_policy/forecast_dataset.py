@@ -247,13 +247,53 @@ def _json_ready(value: Any) -> Any:
     return value
 
 
-STATIC_CONTEXT_FIELDS: tuple[str, ...] = (
-    "symbol_id",
-    "exchange_id",
-    "industry_id",
-    "liquidity_bucket_id",
-    "price_bucket_id",
+DEFAULT_STATIC_CONTEXT_FIELDS: tuple[str, ...] = (
+    "symbol",
+    "exchange",
+    "industry",
+    "liquidity_bucket",
+    "price_bucket",
 )
+AVAILABLE_STATIC_CONTEXT_FIELDS: tuple[str, ...] = (
+    "symbol",
+    "exchange",
+    "industry",
+    "board",
+    "liquidity_bucket",
+    "price_bucket",
+)
+STATIC_CONTEXT_ID_COLUMNS: dict[str, str] = {
+    "symbol": "symbol_id",
+    "exchange": "exchange_id",
+    "industry": "industry_id",
+    "board": "board_id",
+    "liquidity_bucket": "liquidity_bucket_id",
+    "price_bucket": "price_bucket_id",
+}
+STATIC_CONTEXT_FIELDS: tuple[str, ...] = tuple(STATIC_CONTEXT_ID_COLUMNS[field] for field in DEFAULT_STATIC_CONTEXT_FIELDS)
+
+
+def normalize_static_context_fields(fields: tuple[str, ...] | list[str] | str | None = None) -> tuple[str, ...]:
+    if fields is None:
+        values = list(DEFAULT_STATIC_CONTEXT_FIELDS)
+    elif isinstance(fields, str):
+        values = [item.strip() for item in fields.split(",") if item.strip()]
+    else:
+        values = [str(item).strip() for item in fields if str(item).strip()]
+    if not values:
+        values = list(DEFAULT_STATIC_CONTEXT_FIELDS)
+    normalized: list[str] = []
+    for item in values:
+        value = item[:-3] if item.endswith("_id") else item
+        if value not in AVAILABLE_STATIC_CONTEXT_FIELDS:
+            raise ValueError(f"Unsupported static context field: {item}")
+        if value not in normalized:
+            normalized.append(value)
+    return tuple(normalized)
+
+
+def static_context_id_columns(fields: tuple[str, ...] | list[str] | str | None = None) -> tuple[str, ...]:
+    return tuple(STATIC_CONTEXT_ID_COLUMNS[field] for field in normalize_static_context_fields(fields))
 
 
 def _fingerprint_mapping(mapping: dict[str, int]) -> str:
@@ -282,22 +322,41 @@ def _metadata_series(prepared: PreparedPolicyInputs, frame_name: str, value_colu
     return work.drop_duplicates(subset=["symbol"]).set_index("symbol")[value_column].reindex(universe).fillna("")
 
 
-def build_static_context_vocab(prepared: PreparedPolicyInputs) -> dict[str, Any]:
+def _primary_board_series(prepared: PreparedPolicyInputs, universe: list[str]) -> pd.Series:
+    board_frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
+    if board_frame is None or board_frame.empty or not {"symbol", "board_kind", "board_name"}.issubset(board_frame.columns):
+        return pd.Series("", index=universe, dtype=object)
+    board_work = board_frame.copy()
+    board_work["symbol"] = board_work["symbol"].astype(str).str.strip().str.upper()
+    board_work = board_work[board_work["symbol"].isin(universe)]
+    if board_work.empty:
+        return pd.Series("", index=universe, dtype=object)
+    board_work["board_key"] = (
+        board_work["board_kind"].astype(str).str.strip()
+        + ":"
+        + board_work["board_name"].astype(str).str.strip()
+    )
+    board_work = board_work[board_work["board_key"].astype(str).str.strip() != ":"]
+    if board_work.empty:
+        return pd.Series("", index=universe, dtype=object)
+    primary = (
+        board_work.sort_values(["symbol", "board_key"], kind="mergesort")
+        .drop_duplicates(subset=["symbol"], keep="first")
+        .set_index("symbol")["board_key"]
+    )
+    return primary.reindex(universe).fillna("")
+
+
+def build_static_context_vocab(
+    prepared: PreparedPolicyInputs,
+    *,
+    static_context_fields: tuple[str, ...] | list[str] | str | None = None,
+) -> dict[str, Any]:
+    fields = normalize_static_context_fields(static_context_fields)
     universe = sorted({str(stock).strip().upper() for stock in prepared.universe})
     industry = _metadata_series(prepared, "industry_map", "industry", universe)
-    board_frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
-    if board_frame is not None and not board_frame.empty and {"symbol", "board_kind", "board_name"}.issubset(board_frame.columns):
-        board_work = board_frame.copy()
-        board_work["symbol"] = board_work["symbol"].astype(str).str.strip().str.upper()
-        board_work = board_work[board_work["symbol"].isin(universe)]
-        board_work["board_key"] = (
-            board_work["board_kind"].astype(str).str.strip()
-            + ":"
-            + board_work["board_name"].astype(str).str.strip()
-        )
-        board_values = sorted({str(item) for item in board_work["board_key"].dropna().tolist() if str(item).strip()})
-    else:
-        board_values = []
+    board = _primary_board_series(prepared, universe)
+    board_values = sorted({str(item) for item in board.dropna().tolist() if str(item).strip()})
     symbol_vocab = {"<UNK>": 0, **{symbol: idx + 1 for idx, symbol in enumerate(universe)}}
     exchange_values = sorted({_exchange_for_symbol(symbol) for symbol in universe if _exchange_for_symbol(symbol) != "UNKNOWN"})
     exchange_vocab = {"<UNK>": 0, **{value: idx + 1 for idx, value in enumerate(exchange_values)}}
@@ -307,7 +366,8 @@ def build_static_context_vocab(prepared: PreparedPolicyInputs) -> dict[str, Any]
     bucket_vocab = {"<UNK>": 0, **{str(idx): idx for idx in range(1, 6)}}
     return {
         "enabled": True,
-        "fields": list(STATIC_CONTEXT_FIELDS),
+        "fields": list(fields),
+        "id_columns": list(static_context_id_columns(fields)),
         "symbol_vocab": symbol_vocab,
         "exchange_vocab": exchange_vocab,
         "industry_vocab": industry_vocab,
@@ -338,9 +398,11 @@ def _static_context_for_universe(
     vocab: dict[str, Any],
 ) -> pd.DataFrame:
     industry = _metadata_series(prepared, "industry_map", "industry", universe)
+    board = _primary_board_series(prepared, universe)
     symbol_vocab = dict(vocab.get("symbol_vocab", {}) or {})
     exchange_vocab = dict(vocab.get("exchange_vocab", {}) or {})
     industry_vocab = dict(vocab.get("industry_vocab", {}) or {})
+    board_vocab = dict(vocab.get("board_vocab", {}) or {})
     rows: list[dict[str, Any]] = []
     for symbol in universe:
         exchange = _exchange_for_symbol(symbol)
@@ -350,6 +412,7 @@ def _static_context_for_universe(
                 "symbol_id": int(symbol_vocab.get(symbol, 0)),
                 "exchange_id": int(exchange_vocab.get(exchange, 0)),
                 "industry_id": int(industry_vocab.get(str(industry.get(symbol, "") or ""), 0)),
+                "board_id": int(board_vocab.get(str(board.get(symbol, "") or ""), 0)),
                 "liquidity_bucket_id": 0,
                 "price_bucket_id": 0,
             }
@@ -377,10 +440,14 @@ def _cross_section_bucket(
     return out
 
 
-def _static_context_schema_disabled() -> dict[str, Any]:
+def _static_context_schema_disabled(
+    static_context_fields: tuple[str, ...] | list[str] | str | None = None,
+) -> dict[str, Any]:
+    fields = normalize_static_context_fields(static_context_fields)
     return {
         "enabled": False,
-        "fields": list(STATIC_CONTEXT_FIELDS),
+        "fields": list(fields),
+        "id_columns": list(static_context_id_columns(fields)),
         "vocab_sizes": {},
     }
 
@@ -819,8 +886,9 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
     static_context_ids: np.memmap | None = None
     static_schema = dict(manifest.get("static_context_schema", {}) or {})
     if bool(static_schema.get("enabled", False)):
+        static_fields = normalize_static_context_fields(static_schema.get("fields") or None)
         static_shape = tuple(int(item) for item in manifest.get("static_context_shape", []))
-        if static_shape != (row_count, len(STATIC_CONTEXT_FIELDS)):
+        if static_shape != (row_count, len(static_fields)):
             raise ValueError(f"forecast memmap manifest has invalid static_context_shape: {manifest_path}")
         static_context_path = _resolve_manifest_path(manifest.get("static_context_path"), manifest_path=manifest_path)
         if not static_context_path.exists():
@@ -886,6 +954,7 @@ def build_forecast_memmap_dataset(
     max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     min_lookback_valid_ratio: float = 0.80,
     include_static_context: bool = False,
+    static_context_fields: tuple[str, ...] | list[str] | str | None = None,
 ) -> ForecastMemmapDataset:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -902,7 +971,13 @@ def build_forecast_memmap_dataset(
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     date_to_pos = {dt: idx for idx, dt in enumerate(dates)}
     stock_to_pos = {stock: idx for idx, stock in enumerate(universe)}
-    static_vocab = build_static_context_vocab(prepared) if bool(include_static_context) else _static_context_schema_disabled()
+    resolved_static_fields = normalize_static_context_fields(static_context_fields)
+    static_id_columns = static_context_id_columns(resolved_static_fields)
+    static_vocab = (
+        build_static_context_vocab(prepared, static_context_fields=resolved_static_fields)
+        if bool(include_static_context)
+        else _static_context_schema_disabled(resolved_static_fields)
+    )
     static_by_stock = _static_context_for_universe(prepared, universe=universe, vocab=static_vocab) if bool(include_static_context) else pd.DataFrame()
     liquidity_bucket_by_date_stock = (
         _cross_section_bucket(prepared.amount.reindex(index=dates, columns=universe), window=20, buckets=5)
@@ -1024,7 +1099,7 @@ def build_forecast_memmap_dataset(
                 )
                 if bool(include_static_context):
                     static_row = static_by_stock.loc[stock]
-                    sample_rows[-1].update({field: int(static_row[field]) for field in STATIC_CONTEXT_FIELDS})
+                    sample_rows[-1].update({field: int(static_row.get(field, 0)) for field in static_id_columns})
                     sample_rows[-1]["liquidity_bucket_id"] = int(
                         liquidity_bucket_by_date_stock.get((pd.Timestamp(signal_dt), str(stock)), 0)
                     )
@@ -1055,16 +1130,16 @@ def build_forecast_memmap_dataset(
     static_context_path = root / "forecast_static_context_ids.dat"
     if bool(include_static_context):
         static_values = (
-            sample_index.reindex(columns=list(STATIC_CONTEXT_FIELDS), fill_value=0)
+            sample_index.reindex(columns=list(static_id_columns), fill_value=0)
             .fillna(0)
             .astype("int64")
             .to_numpy(dtype=np.int64)
         )
-        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="w+", shape=(row_count, len(STATIC_CONTEXT_FIELDS)))
+        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="w+", shape=(row_count, len(static_id_columns)))
         if row_count:
-            static_context_ids[...] = static_values.reshape((row_count, len(STATIC_CONTEXT_FIELDS)))
+            static_context_ids[...] = static_values.reshape((row_count, len(static_id_columns)))
         static_context_ids.flush()
-        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=(row_count, len(STATIC_CONTEXT_FIELDS)))
+        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=(row_count, len(static_id_columns)))
     y_daily = _write_array_memmap(root / "forecast_y_daily_excess.dat", np.asarray(y_daily_rows, dtype=np.float32), (row_count, horizon))
     y_cum = _write_array_memmap(root / "forecast_y_cum_excess.dat", np.asarray(y_cum_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
     y_rank_by_horizon = _write_array_memmap(root / "forecast_y_rank_by_horizon.dat", np.asarray(y_rank_by_horizon_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
@@ -1155,12 +1230,14 @@ def build_forecast_memmap_dataset(
         "normalization": normalization_manifest,
         "static_context_schema": {
             "enabled": bool(include_static_context),
-            "fields": list(STATIC_CONTEXT_FIELDS),
+            "fields": list(resolved_static_fields),
+            "id_columns": list(static_id_columns),
             "vocab_sizes": dict(static_vocab.get("vocab_sizes", {}) or {}),
             "embedding_defaults": {
                 "symbol": 16,
                 "exchange": 4,
                 "industry": 8,
+                "board": 4,
                 "liquidity_bucket": 4,
                 "price_bucket": 4,
                 "dropout": 0.20,
@@ -1173,7 +1250,7 @@ def build_forecast_memmap_dataset(
     }
     if bool(include_static_context):
         manifest["static_context_path"] = str(static_context_path.resolve())
-        manifest["static_context_shape"] = [int(row_count), int(len(STATIC_CONTEXT_FIELDS))]
+        manifest["static_context_shape"] = [int(row_count), int(len(static_id_columns))]
         manifest["static_context_vocab"] = {
             key: value
             for key, value in static_vocab.items()

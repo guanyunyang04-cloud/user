@@ -43,6 +43,8 @@ FORECAST_MODEL_FAMILIES = (
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst")
+FORECAST_LOSS_PROFILES = ("default", "rank_aux", "multitask_v1")
+FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor_20d", "worst_1d_20d", "upside_20d")
 FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
 FORECAST_PROFILE_HORIZON_WEIGHTS: dict[str, dict[int, float]] = {
@@ -185,6 +187,7 @@ def make_forecast_model(
     patch_sizes: tuple[int, ...] | list[int] = (4, 20),
     static_context_vocab_sizes: dict[str, int] | None = None,
     static_context_embedding_dims: dict[str, int] | None = None,
+    static_context_fields: tuple[str, ...] | list[str] | None = None,
     static_context_dropout: float = 0.20,
     slot_count: int = 8,
 ) -> nn.Module:
@@ -228,6 +231,7 @@ def make_forecast_model(
             horizon=horizon,
             vocab_sizes=static_context_vocab_sizes,
             embedding_dims=static_context_embedding_dims,
+            static_fields=static_context_fields,
             static_dropout=static_context_dropout,
             dropout=dropout,
         )
@@ -250,6 +254,7 @@ def make_forecast_model(
             horizon=horizon,
             vocab_sizes=static_context_vocab_sizes,
             embedding_dims=static_context_embedding_dims,
+            static_fields=static_context_fields,
             static_dropout=static_context_dropout,
             dropout=dropout,
         )
@@ -287,6 +292,7 @@ def _forecast_resume_contract(
     model_config: dict[str, Any],
     optimizer_config: dict[str, Any],
     selection_profile: str,
+    loss_profile: str = "default",
     static_context_schema: dict[str, Any] | None = None,
     symbol_vocab_fingerprint: str = "",
     industry_vocab_fingerprint: str = "",
@@ -303,6 +309,7 @@ def _forecast_resume_contract(
         "model_config": _json_ready(model_config),
         "optimizer_config": _json_ready(optimizer_config),
         "selection_profile": str(selection_profile),
+        "loss_profile": str(loss_profile or "default"),
         "static_context_schema": _json_ready(static_context_schema or {"enabled": False}),
         "symbol_vocab_fingerprint": str(symbol_vocab_fingerprint or ""),
         "industry_vocab_fingerprint": str(industry_vocab_fingerprint or ""),
@@ -343,6 +350,7 @@ def _forecast_checkpoint_payload(
     training_config: dict[str, Any],
     optimizer_config: dict[str, Any],
     selection_profile: str,
+    loss_profile: str = "default",
     learning_rows: list[dict[str, Any]],
     static_context_schema: dict[str, Any] | None = None,
     symbol_vocab_fingerprint: str = "",
@@ -379,6 +387,7 @@ def _forecast_checkpoint_payload(
             model_config=model_config,
             optimizer_config=optimizer_config,
             selection_profile=selection_profile,
+            loss_profile=loss_profile,
             static_context_schema=static_context_schema,
             symbol_vocab_fingerprint=symbol_vocab_fingerprint,
             industry_vocab_fingerprint=industry_vocab_fingerprint,
@@ -439,6 +448,7 @@ def _validate_forecast_resume_checkpoint(
     model_config: dict[str, Any],
     optimizer_config: dict[str, Any],
     selection_profile: str,
+    loss_profile: str = "default",
 ) -> None:
     expected = _forecast_resume_contract(
         model_family=model_family,
@@ -450,6 +460,7 @@ def _validate_forecast_resume_checkpoint(
         model_config=model_config,
         optimizer_config=optimizer_config,
         selection_profile=selection_profile,
+        loss_profile=loss_profile,
         static_context_schema=dataset_view.static_context_schema,
         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
         industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
@@ -571,7 +582,12 @@ def _forecast_loss(
     y_daily_scaled: torch.Tensor,
     y_cum_scaled: torch.Tensor,
     y_risk_scaled: torch.Tensor,
+    *,
+    loss_profile: str = "default",
 ) -> torch.Tensor:
+    profile = str(loss_profile or "default").strip().lower()
+    if profile not in FORECAST_LOSS_PROFILES:
+        raise ValueError(f"Unsupported forecast loss profile: {profile}")
     daily_weights = torch.ones((y_daily_scaled.shape[1],), device=y_daily_scaled.device, dtype=y_daily_scaled.dtype)
     daily_weights[:3] = 1.15
     daily_weights[3:5] = 1.05
@@ -585,12 +601,23 @@ def _forecast_loss(
     loss = loss + 0.05 * F.huber_loss(prediction["aux"][:, cum_count : cum_count + 3], y_risk_scaled)
     for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
         weight = float(FORECAST_RANK_LOSS_WEIGHTS.get(int(horizon), 0.0))
+        if profile == "rank_aux":
+            weight *= 1.75
+        elif profile == "multitask_v1":
+            weight *= 2.25
         if weight <= 0.0:
             continue
         score = prediction["mu"][:, : int(horizon)].sum(dim=1)
         target = y_cum_scaled[:, pos]
         loss = loss + weight * pairwise_rank_loss(score, target)
     loss = loss + 0.005 * pairwise_rank_loss(prediction["aux"][:, cum_count + 2], y_risk_scaled[:, 2])
+    if profile == "multitask_v1":
+        direction_target = (y_cum_scaled[:, -1] > 0).to(dtype=prediction["aux"].dtype)
+        direction_logit = prediction["mu"].sum(dim=1)
+        loss = loss + 0.025 * F.binary_cross_entropy_with_logits(direction_logit, direction_target)
+        downside_target = y_risk_scaled[:, 0]
+        downside_score = prediction["aux"][:, cum_count]
+        loss = loss + 0.010 * pairwise_rank_loss(-downside_score, -downside_target)
     return loss
 
 
@@ -1157,6 +1184,224 @@ def forecast_evidence_verdict(
     return "forecast_promising"
 
 
+def _ranking_baseline_feature_frame(
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    indices: np.ndarray,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    idx = np.asarray(indices, dtype=int)
+    if len(idx) == 0:
+        return pd.DataFrame(), np.empty((0,), dtype=np.float32)
+    if isinstance(dataset, ForecastMemmapDataset):
+        store = dataset.open_feature_store()
+        rows: list[np.ndarray] = []
+        for row_idx in idx:
+            window = dataset.input_window(int(row_idx), store=store)
+            rows.append(
+                np.concatenate(
+                    [
+                        window[-1],
+                        np.nanmean(window, axis=0),
+                        np.nanstd(window, axis=0),
+                    ]
+                ).astype(np.float32)
+            )
+        meta = dataset.sample_index.iloc[idx].reset_index(drop=True)
+        x = np.vstack(rows).astype(np.float32) if rows else np.empty((0, 0), dtype=np.float32)
+        y = np.asarray(dataset.y_rank_20d[idx], dtype=np.float32)
+    else:
+        x = np.concatenate(
+            [
+                dataset.x[idx, -1, :],
+                np.nanmean(dataset.x[idx], axis=1),
+                np.nanstd(dataset.x[idx], axis=1),
+            ],
+            axis=1,
+        ).astype(np.float32)
+        y = np.asarray(dataset.y_rank_20d[idx], dtype=np.float32)
+        meta = pd.DataFrame(
+            {
+                "date": [pd.Timestamp(item).strftime("%Y-%m-%d") for item in dataset.date[idx].tolist()],
+                "stock": dataset.stock[idx].astype(str),
+                "role": dataset.role[idx].astype(str),
+            }
+        )
+    columns = [f"ranker_feature_{pos}" for pos in range(x.shape[1])]
+    frame = pd.DataFrame(x, columns=columns)
+    for column in ("date", "stock", "role"):
+        frame[column] = meta[column].astype(str).to_numpy() if column in meta.columns else ""
+    return frame, y
+
+
+def _ranking_prediction_frame(
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    *,
+    indices: np.ndarray,
+    scores: np.ndarray,
+    family: str,
+) -> pd.DataFrame:
+    idx = np.asarray(indices, dtype=int)
+    predictions = {
+        "mu": np.repeat(np.asarray(scores, dtype=np.float32).reshape(-1, 1), PATH20_HORIZON, axis=1),
+        "q10": np.repeat(np.asarray(scores, dtype=np.float32).reshape(-1, 1), PATH20_HORIZON, axis=1),
+        "q50": np.repeat(np.asarray(scores, dtype=np.float32).reshape(-1, 1), PATH20_HORIZON, axis=1),
+        "q90": np.repeat(np.asarray(scores, dtype=np.float32).reshape(-1, 1), PATH20_HORIZON, axis=1),
+        "aux": np.zeros((len(idx), PATH20_FORECAST_AUX_DIM), dtype=np.float32),
+    }
+    return _prediction_frame_for_dataset_indices(
+        dataset,
+        indices=idx,
+        predictions=predictions,
+        family=family,
+        target_scale=1.0,
+    )
+
+
+def run_forecast_ranking_baseline(
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    *,
+    study_root: Path,
+    baseline: str = "none",
+) -> dict[str, Any]:
+    baseline = str(baseline or "none").strip().lower()
+    if baseline == "none":
+        return {"status": "skipped", "baseline": "none"}
+    if baseline not in FORECAST_RANKING_BASELINES:
+        return {
+            "status": "dependency_missing",
+            "baseline": baseline,
+            "reason": "unsupported_ranking_baseline",
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+    study_root.mkdir(parents=True, exist_ok=True)
+    view = _ForecastDatasetView(dataset)
+    train_indices = view.role_indices("train")
+    validation_indices = view.role_indices("validation")
+    test_indices = view.role_indices("test")
+    if len(train_indices) < 2 or len(validation_indices) < 1:
+        summary = {
+            "status": "insufficient_or_incomplete",
+            "baseline": baseline,
+            "reason": "insufficient_role_samples",
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+        write_json(study_root / f"forecast_ranking_baseline_{baseline}.json", _json_ready(summary))
+        return summary
+    try:
+        if baseline == "lightgbm":
+            from lightgbm import LGBMRanker  # type: ignore
+
+            ranker: Any = LGBMRanker(n_estimators=80, learning_rate=0.05, random_state=7)
+        else:
+            from xgboost import XGBRanker  # type: ignore
+
+            ranker = XGBRanker(n_estimators=80, learning_rate=0.05, random_state=7, objective="rank:pairwise")
+    except Exception as exc:
+        summary = {
+            "status": "dependency_missing",
+            "baseline": baseline,
+            "reason": f"{baseline}_import_failed",
+            "error": str(exc),
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+        write_json(study_root / f"forecast_ranking_baseline_{baseline}.json", _json_ready(summary))
+        return summary
+    train_x, train_y = _ranking_baseline_feature_frame(dataset, train_indices)
+    validation_x, _ = _ranking_baseline_feature_frame(dataset, validation_indices)
+    test_x, _ = _ranking_baseline_feature_frame(dataset, test_indices)
+    feature_columns = [column for column in train_x.columns if column.startswith("ranker_feature_")]
+    train_groups = train_x.groupby("date", sort=True).size().to_numpy(dtype=int)
+    try:
+        ranker.fit(train_x[feature_columns].to_numpy(dtype=np.float32), train_y, group=train_groups)
+        validation_scores = np.asarray(ranker.predict(validation_x[feature_columns].to_numpy(dtype=np.float32)), dtype=np.float32)
+        test_scores = (
+            np.asarray(ranker.predict(test_x[feature_columns].to_numpy(dtype=np.float32)), dtype=np.float32)
+            if len(test_indices)
+            else np.empty((0,), dtype=np.float32)
+        )
+    except Exception as exc:
+        summary = {
+            "status": "failed",
+            "baseline": baseline,
+            "reason": "ranker_fit_or_predict_failed",
+            "error": str(exc),
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+        write_json(study_root / f"forecast_ranking_baseline_{baseline}.json", _json_ready(summary))
+        return summary
+    validation_frame = _ranking_prediction_frame(dataset, indices=validation_indices, scores=validation_scores, family=f"{baseline}_ranker")
+    test_frame = _ranking_prediction_frame(dataset, indices=test_indices, scores=test_scores, family=f"{baseline}_ranker")
+    validation_csv = _write_frame(study_root / f"forecast_ranking_baseline_{baseline}_validation.csv", validation_frame)
+    test_csv = _write_frame(study_root / f"forecast_ranking_baseline_{baseline}_test.csv", test_frame)
+    validation_metrics = forecast_prediction_metrics(validation_frame)
+    test_metrics = forecast_prediction_metrics(test_frame) if not test_frame.empty else {"status": "insufficient_or_incomplete"}
+    summary = {
+        "status": "completed",
+        "baseline": baseline,
+        "feature_count": int(len(feature_columns)),
+        "train_rows": int(len(train_indices)),
+        "validation_rows": int(len(validation_indices)),
+        "test_rows": int(len(test_indices)),
+        "validation_metrics": validation_metrics,
+        "test_metrics": test_metrics,
+        "validation_csv": validation_csv,
+        "test_csv": test_csv,
+        "shadow_only": True,
+        "promotion_allowed": False,
+        "active_execution_strategy_expected_diff": "none",
+    }
+    write_json(study_root / f"forecast_ranking_baseline_{baseline}.json", _json_ready(summary))
+    return _json_ready(summary)
+
+
+def _write_slot_diagnostics(
+    path: Path,
+    *,
+    model: nn.Module,
+    dataset: ForecastSequenceDataset | ForecastMemmapDataset,
+    indices: np.ndarray,
+    seed: int,
+) -> str:
+    slot_tensor = getattr(model, "slots", None)
+    slot_count = int(slot_tensor.shape[0]) if isinstance(slot_tensor, torch.Tensor) else 0
+    rows = pd.DataFrame()
+    if isinstance(dataset, ForecastMemmapDataset) and len(indices):
+        rows = dataset.sample_index.iloc[np.asarray(indices, dtype=int)].copy()
+    industry_available = "industry_id" in rows.columns and pd.to_numeric(rows["industry_id"], errors="coerce").fillna(0).ne(0).any()
+    board_available = "board_id" in rows.columns and pd.to_numeric(rows["board_id"], errors="coerce").fillna(0).ne(0).any()
+    payload = {
+        "status": "completed",
+        "slot_semantics": "dynamic_theme_factor_not_static_board",
+        "seed": int(seed),
+        "slot_count": int(slot_count),
+        "row_count": int(len(rows)),
+        "date_count": int(rows["date"].nunique()) if "date" in rows.columns else 0,
+        "industry_available": bool(industry_available),
+        "board_available": bool(board_available),
+        "industry_id_top_counts": {
+            str(key): int(value)
+            for key, value in (
+                rows["industry_id"].value_counts().head(10).items() if "industry_id" in rows.columns else []
+            )
+        },
+        "board_id_top_counts": {
+            str(key): int(value)
+            for key, value in (
+                rows["board_id"].value_counts().head(10).items() if "board_id" in rows.columns else []
+            )
+        },
+    }
+    write_json(path, _json_ready(payload))
+    return str(path.resolve())
+
+
 def _normalize_seeds(seeds: tuple[int, ...] | list[int] | str | None, *, default_seed: int) -> tuple[int, ...]:
     if seeds is None:
         return (int(default_seed),)
@@ -1173,6 +1418,7 @@ def _static_context_model_options(dataset_view: _ForecastDatasetView) -> dict[st
         "static_context_embedding_dims": dict(
             dataset_view.static_context_schema.get("embedding_defaults", {}) or {}
         ),
+        "static_context_fields": tuple(str(item) for item in dataset_view.static_context_schema.get("fields", []) or []),
         "static_context_dropout": float(
             dict(dataset_view.static_context_schema.get("embedding_defaults", {}) or {}).get("dropout", 0.20)
         ),
@@ -1202,6 +1448,7 @@ def _model_config_for_training(
         "patch_sizes": [int(item) for item in patch_sizes],
         "static_context_vocab_sizes": dict(static_model_options.get("static_context_vocab_sizes", {}) or {}),
         "static_context_embedding_dims": dict(static_model_options.get("static_context_embedding_dims", {}) or {}),
+        "static_context_fields": list(static_model_options.get("static_context_fields", ()) or ()),
         "static_context_dropout": float(static_model_options.get("static_context_dropout", 0.20)),
         "slot_count": int(static_model_options.get("slot_count", 8)),
         "static_context_schema": dict(dataset_view.static_context_schema),
@@ -1232,6 +1479,7 @@ def _evaluate_loss(
     device: torch.device,
     amp_enabled: bool,
     target_scale: float = 100.0,
+    loss_profile: str = "default",
 ) -> float:
     if len(indices) == 0:
         return float("inf")
@@ -1262,6 +1510,7 @@ def _evaluate_loss(
                             batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],
                             batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
                             batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
+                            loss_profile=loss_profile,
                         )
                     values.append(float(loss.detach().cpu()))
                     counts.append(int(flat_mask.sum().detach().cpu()))
@@ -1286,7 +1535,7 @@ def _evaluate_loss(
                 )
                 with _autocast_context(device, amp_enabled):
                     pred = _forecast_model_forward(model, batch_x, static_context_ids)
-                    loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                    loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
                 values.append(float(loss.detach().cpu()))
                 counts.append(int(batch_x.shape[0]))
             total = sum(counts)
@@ -1301,7 +1550,7 @@ def _evaluate_loss(
             batch_y_risk = y_risk[batch_idx].to(device, non_blocking=device.type == "cuda")
             with _autocast_context(device, amp_enabled):
                 pred = _forecast_model_forward(model, batch_x)
-                loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
             values.append(float(loss.detach().cpu()))
             counts.append(int(batch_idx.numel()))
     total = sum(counts)
@@ -1457,6 +1706,9 @@ def train_forecast_models(
     save_last_checkpoint: bool = True,
     checkpoint_every_n_epochs: int = 0,
     progress_json_name: str = "forecast_progress.json",
+    loss_profile: str = "default",
+    ranking_baseline: str = "none",
+    slot_diagnostics: bool = False,
 ) -> dict[str, Any]:
     study_root.mkdir(parents=True, exist_ok=True)
     resolved_device = _resolve_device(device)
@@ -1475,7 +1727,24 @@ def train_forecast_models(
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
+    loss_profile = str(loss_profile or "default").strip().lower()
+    if loss_profile not in FORECAST_LOSS_PROFILES:
+        raise ValueError(f"Unsupported forecast loss profile: {loss_profile}")
+    ranking_baseline = str(ranking_baseline or "none").strip().lower()
+    if ranking_baseline not in FORECAST_RANKING_BASELINES:
+        ranking_baseline_summary = {
+            "status": "dependency_missing",
+            "baseline": ranking_baseline,
+            "reason": "unsupported_ranking_baseline",
+            "shadow_only": True,
+            "promotion_allowed": False,
+            "active_execution_strategy_expected_diff": "none",
+        }
+    else:
+        ranking_baseline_summary = {"status": "skipped", "baseline": "none"} if ranking_baseline == "none" else None
     dataset_view = _ForecastDatasetView(dataset)
+    if ranking_baseline_summary is None:
+        ranking_baseline_summary = run_forecast_ranking_baseline(dataset, study_root=study_root, baseline=ranking_baseline)
     cross_section_requested = any(family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES for family in families)
     if cross_section_requested and dataset_view.dataset_mode != "memmap":
         raise ValueError("stock_mixer_sequence and sector_slot_mixer_sequence require forecast memmap date-level batching.")
@@ -1628,6 +1897,7 @@ def train_forecast_models(
                 "weight_decay": float(weight_decay),
                 "grad_clip": float(grad_clip),
                 "grad_accum_steps": int(accum_steps),
+                "loss_profile": str(loss_profile),
             }
             training_config = {
                 "epochs": int(max_epochs),
@@ -1650,6 +1920,9 @@ def train_forecast_models(
                 "feature_profile": feature_profile,
                 "feature_count": int(dataset_view.input_dim),
                 "selection_profile": selection_profile,
+                "loss_profile": str(loss_profile),
+                "ranking_baseline": str(ranking_baseline),
+                "slot_diagnostics": bool(slot_diagnostics),
                 "static_context_schema": dict(dataset_view.static_context_schema),
                 "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
                 "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
@@ -1666,6 +1939,7 @@ def train_forecast_models(
                     model_config=model_config,
                     optimizer_config=optimizer_config,
                     selection_profile=selection_profile,
+                    loss_profile=loss_profile,
                 )
                 model.load_state_dict(resume_payload["state_dict"])
                 optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
@@ -1714,6 +1988,7 @@ def train_forecast_models(
                                 batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],
                                 batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
                                 batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
+                                loss_profile=loss_profile,
                             )
                         batch_count = int(flat_mask.sum().detach().cpu())
                     else:
@@ -1729,7 +2004,7 @@ def train_forecast_models(
                         )
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids)
-                            loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                            loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
                         batch_count = int(batch_x.shape[0])
                     epoch_losses.append(float(loss.detach().cpu()))
                     epoch_counts.append(batch_count)
@@ -1754,6 +2029,7 @@ def train_forecast_models(
                     device=resolved_device,
                     amp_enabled=amp_enabled,
                     target_scale=target_scale,
+                    loss_profile=loss_profile,
                 )
                 validation_predictions = _predict_indices(
                     model,
@@ -1807,6 +2083,7 @@ def train_forecast_models(
                         training_config=training_config,
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
+                        loss_profile=loss_profile,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -1872,6 +2149,7 @@ def train_forecast_models(
                         training_config=training_config,
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
+                        loss_profile=loss_profile,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -1909,6 +2187,7 @@ def train_forecast_models(
                         training_config=training_config,
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
+                        loss_profile=loss_profile,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -1970,6 +2249,7 @@ def train_forecast_models(
                     training_config=training_config,
                     optimizer_config=optimizer_config,
                     selection_profile=selection_profile,
+                    loss_profile=loss_profile,
                     learning_rows=learning_rows,
                     static_context_schema=dataset_view.static_context_schema,
                     symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -2013,6 +2293,15 @@ def train_forecast_models(
             )
             final_validation_metrics = forecast_prediction_metrics(validation_frame)
             final_test_metrics = forecast_prediction_metrics(test_frame)
+            slot_diagnostics_path = ""
+            if bool(slot_diagnostics) and family == "sector_slot_mixer_sequence":
+                slot_diagnostics_path = _write_slot_diagnostics(
+                    study_root / f"forecast_slot_diagnostics_{family}_seed{int(current_seed)}.json",
+                    model=model,
+                    dataset=dataset,
+                    indices=validation_indices,
+                    seed=int(current_seed),
+                )
             final_multiscale_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "multiscale")
             final_trend20_score = _profile_score(final_validation_metrics, best_validation_loss, (0.65, 0.95), "trend20")
             final_short_burst_score = _profile_score(
@@ -2061,6 +2350,7 @@ def train_forecast_models(
                 "last_checkpoint_pt": str(last_checkpoint_path.resolve()) if last_checkpoint_path.exists() else "",
                 "resume_from_checkpoint_pt": resume_from_checkpoint_pt,
                 "resume_start_epoch": int(resume_start_epoch),
+                "slot_diagnostics_path": slot_diagnostics_path,
             }
         model_summaries[family] = {
             "status": "completed",
@@ -2074,6 +2364,8 @@ def train_forecast_models(
             "hidden_dim": int(hidden_dim),
             "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
+            "loss_profile": str(loss_profile),
+            "slot_diagnostics": bool(slot_diagnostics),
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
@@ -2190,6 +2482,9 @@ def train_forecast_models(
             "feature_profile": feature_profile,
             "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
+            "loss_profile": str(loss_profile),
+            "ranking_baseline": str(ranking_baseline),
+            "slot_diagnostics": bool(slot_diagnostics),
             "save_last_checkpoint": bool(save_last_checkpoint),
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
@@ -2202,6 +2497,7 @@ def train_forecast_models(
             ),
         },
         "models": model_summaries,
+        "ranking_baseline_summary": ranking_baseline_summary,
         "family_summary": {family: dict(summary.get("family_summary", {})) for family, summary in model_summaries.items()},
         "selected_model_family": selected_family,
         "selected_seed": int(selected_seed),
