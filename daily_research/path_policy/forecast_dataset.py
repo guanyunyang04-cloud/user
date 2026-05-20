@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,7 @@ class ForecastSequenceDataset:
     feature_columns: list[str]
     normalization_manifest: dict[str, Any]
     manifest: dict[str, Any]
+    static_context_ids: np.ndarray | None = None
 
     @property
     def dates_by_role(self) -> dict[str, list[pd.Timestamp]]:
@@ -63,7 +65,7 @@ class ForecastMemmapTorchDataset(Dataset):
     def __len__(self) -> int:
         return int(len(self.indices))
 
-    def __getitem__(self, item: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
         row_idx = int(self.indices[int(item)])
         if self._feature_store is None:
             self._feature_store = self.dataset.open_feature_store()
@@ -78,13 +80,73 @@ class ForecastMemmapTorchDataset(Dataset):
             ],
             dtype=np.float32,
         ) * self.target_scale
-        return (
+        items: tuple[torch.Tensor, ...] = (
             torch.as_tensor(x, dtype=torch.float32),
             torch.as_tensor(y_daily, dtype=torch.float32),
             torch.as_tensor(y_cum, dtype=torch.float32),
             torch.as_tensor(y_risk, dtype=torch.float32),
             torch.as_tensor(row_idx, dtype=torch.long),
         )
+        if self.dataset.static_context_ids is not None:
+            static_ids = np.asarray(self.dataset.static_context_ids[row_idx], dtype=np.int64).copy()
+            items = (*items, torch.as_tensor(static_ids, dtype=torch.long))
+        return items
+
+
+class ForecastDateBatchTorchDataset(Dataset):
+    """Date-level view for cross-sectional research models."""
+
+    def __init__(self, dataset: "ForecastMemmapDataset", indices: np.ndarray, *, target_scale: float = 100.0) -> None:
+        self.dataset = dataset
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.target_scale = float(target_scale)
+        if len(self.indices):
+            rows = dataset.sample_index.iloc[self.indices]
+            self._groups = [
+                np.asarray(group.index.to_numpy(dtype=np.int64), dtype=np.int64)
+                for _, group in rows.groupby("date", sort=True)
+            ]
+        else:
+            self._groups = []
+        self._feature_store: np.memmap | None = None
+
+    def __len__(self) -> int:
+        return int(len(self._groups))
+
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
+        row_indices = np.asarray(self._groups[int(item)], dtype=np.int64)
+        if self._feature_store is None:
+            self._feature_store = self.dataset.open_feature_store()
+        x = np.stack(
+            [self.dataset.input_window(int(row_idx), store=self._feature_store) for row_idx in row_indices],
+            axis=0,
+        ).astype(np.float32)
+        y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32).copy() * self.target_scale
+        y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32).copy() * self.target_scale
+        y_risk = np.asarray(
+            np.stack(
+                [
+                    self.dataset.y_max_drawdown_20d[row_indices],
+                    self.dataset.y_worst_1d_20d[row_indices],
+                    self.dataset.y_upside_20d[row_indices],
+                ],
+                axis=1,
+            ),
+            dtype=np.float32,
+        ).copy() * self.target_scale
+        mask = np.ones((len(row_indices),), dtype=bool)
+        items: tuple[torch.Tensor, ...] = (
+            torch.as_tensor(x, dtype=torch.float32),
+            torch.as_tensor(mask, dtype=torch.bool),
+            torch.as_tensor(y_daily, dtype=torch.float32),
+            torch.as_tensor(y_cum, dtype=torch.float32),
+            torch.as_tensor(y_risk, dtype=torch.float32),
+            torch.as_tensor(row_indices, dtype=torch.long),
+        )
+        if self.dataset.static_context_ids is not None:
+            static_ids = np.asarray(self.dataset.static_context_ids[row_indices], dtype=np.int64).copy()
+            items = (*items, torch.as_tensor(static_ids, dtype=torch.long))
+        return items
 
 
 @dataclass
@@ -107,6 +169,7 @@ class ForecastMemmapDataset:
     feature_std: np.ndarray
     date_values: np.ndarray
     stock_values: np.ndarray
+    static_context_ids: np.memmap | np.ndarray | None = None
 
     @property
     def row_count(self) -> int:
@@ -159,6 +222,9 @@ class ForecastMemmapDataset:
     def torch_dataset(self, indices: np.ndarray, *, target_scale: float = 100.0) -> ForecastMemmapTorchDataset:
         return ForecastMemmapTorchDataset(self, indices, target_scale=target_scale)
 
+    def date_batch_torch_dataset(self, indices: np.ndarray, *, target_scale: float = 100.0) -> ForecastDateBatchTorchDataset:
+        return ForecastDateBatchTorchDataset(self, indices, target_scale=target_scale)
+
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
@@ -179,6 +245,144 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, float) and not np.isfinite(value):
         return None
     return value
+
+
+STATIC_CONTEXT_FIELDS: tuple[str, ...] = (
+    "symbol_id",
+    "exchange_id",
+    "industry_id",
+    "liquidity_bucket_id",
+    "price_bucket_id",
+)
+
+
+def _fingerprint_mapping(mapping: dict[str, int]) -> str:
+    payload = json.dumps({str(key): int(value) for key, value in sorted(mapping.items())}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def _exchange_for_symbol(symbol: str) -> str:
+    value = str(symbol).strip().upper()
+    if value.endswith(".SH"):
+        return "SH"
+    if value.endswith(".SZ"):
+        return "SZ"
+    if value.endswith(".BJ"):
+        return "BJ"
+    return "UNKNOWN"
+
+
+def _metadata_series(prepared: PreparedPolicyInputs, frame_name: str, value_column: str, universe: list[str]) -> pd.Series:
+    frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get(frame_name)
+    if frame is None or frame.empty or not {"symbol", value_column}.issubset(frame.columns):
+        return pd.Series("", index=universe, dtype=object)
+    work = frame.copy()
+    work["symbol"] = work["symbol"].astype(str).str.strip().str.upper()
+    work[value_column] = work[value_column].astype(str).str.strip()
+    return work.drop_duplicates(subset=["symbol"]).set_index("symbol")[value_column].reindex(universe).fillna("")
+
+
+def build_static_context_vocab(prepared: PreparedPolicyInputs) -> dict[str, Any]:
+    universe = sorted({str(stock).strip().upper() for stock in prepared.universe})
+    industry = _metadata_series(prepared, "industry_map", "industry", universe)
+    board_frame = dict(getattr(prepared, "metadata_frames", {}) or {}).get("board_membership")
+    if board_frame is not None and not board_frame.empty and {"symbol", "board_kind", "board_name"}.issubset(board_frame.columns):
+        board_work = board_frame.copy()
+        board_work["symbol"] = board_work["symbol"].astype(str).str.strip().str.upper()
+        board_work = board_work[board_work["symbol"].isin(universe)]
+        board_work["board_key"] = (
+            board_work["board_kind"].astype(str).str.strip()
+            + ":"
+            + board_work["board_name"].astype(str).str.strip()
+        )
+        board_values = sorted({str(item) for item in board_work["board_key"].dropna().tolist() if str(item).strip()})
+    else:
+        board_values = []
+    symbol_vocab = {"<UNK>": 0, **{symbol: idx + 1 for idx, symbol in enumerate(universe)}}
+    exchange_values = sorted({_exchange_for_symbol(symbol) for symbol in universe if _exchange_for_symbol(symbol) != "UNKNOWN"})
+    exchange_vocab = {"<UNK>": 0, **{value: idx + 1 for idx, value in enumerate(exchange_values)}}
+    industry_values = sorted({str(item) for item in industry.dropna().tolist() if str(item).strip()})
+    industry_vocab = {"<UNK>": 0, **{value: idx + 1 for idx, value in enumerate(industry_values)}}
+    board_vocab = {"<UNK>": 0, **{value: idx + 1 for idx, value in enumerate(board_values)}}
+    bucket_vocab = {"<UNK>": 0, **{str(idx): idx for idx in range(1, 6)}}
+    return {
+        "enabled": True,
+        "fields": list(STATIC_CONTEXT_FIELDS),
+        "symbol_vocab": symbol_vocab,
+        "exchange_vocab": exchange_vocab,
+        "industry_vocab": industry_vocab,
+        "board_vocab": board_vocab,
+        "liquidity_bucket_vocab": dict(bucket_vocab),
+        "price_bucket_vocab": dict(bucket_vocab),
+        "symbol_vocab_fingerprint": _fingerprint_mapping(symbol_vocab),
+        "industry_vocab_fingerprint": _fingerprint_mapping(industry_vocab),
+        "board_vocab_fingerprint": _fingerprint_mapping(board_vocab),
+        "exchange_vocab_fingerprint": _fingerprint_mapping(exchange_vocab),
+        "liquidity_bucket_vocab_fingerprint": _fingerprint_mapping(bucket_vocab),
+        "price_bucket_vocab_fingerprint": _fingerprint_mapping(bucket_vocab),
+        "vocab_sizes": {
+            "symbol": int(len(symbol_vocab)),
+            "exchange": int(len(exchange_vocab)),
+            "industry": int(len(industry_vocab)),
+            "board": int(len(board_vocab)),
+            "liquidity_bucket": int(len(bucket_vocab)),
+            "price_bucket": int(len(bucket_vocab)),
+        },
+    }
+
+
+def _static_context_for_universe(
+    prepared: PreparedPolicyInputs,
+    *,
+    universe: list[str],
+    vocab: dict[str, Any],
+) -> pd.DataFrame:
+    industry = _metadata_series(prepared, "industry_map", "industry", universe)
+    symbol_vocab = dict(vocab.get("symbol_vocab", {}) or {})
+    exchange_vocab = dict(vocab.get("exchange_vocab", {}) or {})
+    industry_vocab = dict(vocab.get("industry_vocab", {}) or {})
+    rows: list[dict[str, Any]] = []
+    for symbol in universe:
+        exchange = _exchange_for_symbol(symbol)
+        rows.append(
+            {
+                "stock": symbol,
+                "symbol_id": int(symbol_vocab.get(symbol, 0)),
+                "exchange_id": int(exchange_vocab.get(exchange, 0)),
+                "industry_id": int(industry_vocab.get(str(industry.get(symbol, "") or ""), 0)),
+                "liquidity_bucket_id": 0,
+                "price_bucket_id": 0,
+            }
+        )
+    return pd.DataFrame(rows).set_index("stock")
+
+
+def _cross_section_bucket(
+    source: pd.DataFrame,
+    *,
+    window: int = 20,
+    buckets: int = 5,
+) -> dict[tuple[pd.Timestamp, str], int]:
+    rolling = source.rolling(max(int(window), 1), min_periods=1).mean()
+    out: dict[tuple[pd.Timestamp, str], int] = {}
+    for dt, row in rolling.iterrows():
+        values = pd.to_numeric(row, errors="coerce")
+        valid = values.replace([np.inf, -np.inf], np.nan).dropna()
+        if valid.empty:
+            continue
+        ranks = valid.rank(method="first", pct=True)
+        for stock, pct in ranks.items():
+            bucket = int(np.ceil(float(pct) * int(buckets)))
+            out[(pd.Timestamp(dt), str(stock))] = max(1, min(int(buckets), bucket))
+    return out
+
+
+def _static_context_schema_disabled() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "fields": list(STATIC_CONTEXT_FIELDS),
+        "vocab_sizes": {},
+    }
 
 
 def _role_for_year(
@@ -286,6 +490,7 @@ def _empty_dataset(
         feature_columns=list(feature_columns),
         normalization_manifest=dict(normalization_manifest),
         manifest=dict(manifest),
+        static_context_ids=None,
     )
 
 
@@ -611,6 +816,23 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
     _validate_memmap_file(root / "forecast_y_max_drawdown_20d.dat", shape=(row_count,), label="forecast_y_max_drawdown_20d")
     _validate_memmap_file(root / "forecast_y_worst_1d_20d.dat", shape=(row_count,), label="forecast_y_worst_1d_20d")
     _validate_memmap_file(root / "forecast_y_upside_20d.dat", shape=(row_count,), label="forecast_y_upside_20d")
+    static_context_ids: np.memmap | None = None
+    static_schema = dict(manifest.get("static_context_schema", {}) or {})
+    if bool(static_schema.get("enabled", False)):
+        static_shape = tuple(int(item) for item in manifest.get("static_context_shape", []))
+        if static_shape != (row_count, len(STATIC_CONTEXT_FIELDS)):
+            raise ValueError(f"forecast memmap manifest has invalid static_context_shape: {manifest_path}")
+        static_context_path = _resolve_manifest_path(manifest.get("static_context_path"), manifest_path=manifest_path)
+        if not static_context_path.exists():
+            raise ValueError(f"forecast memmap manifest missing static_context_path: {static_context_path}")
+        expected_bytes = int(np.prod(static_shape, dtype=np.int64)) * np.dtype("int64").itemsize
+        actual_bytes = int(static_context_path.stat().st_size)
+        if actual_bytes != expected_bytes:
+            raise ValueError(
+                f"forecast memmap manifest has invalid static_context_path size: "
+                f"expected {expected_bytes} bytes for shape {static_shape}, got {actual_bytes} bytes at {static_context_path}"
+            )
+        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=static_shape)
 
     manifest = {**manifest, "artifact_reused": True, "manifest_json": str(manifest_path.resolve())}
     return ForecastMemmapDataset(
@@ -632,6 +854,7 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
         feature_std=feature_std,
         date_values=np.array([], dtype=object),
         stock_values=np.array([], dtype=object),
+        static_context_ids=static_context_ids,
     )
 
 
@@ -662,6 +885,7 @@ def build_forecast_memmap_dataset(
     feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
     max_feature_columns: int = DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     min_lookback_valid_ratio: float = 0.80,
+    include_static_context: bool = False,
 ) -> ForecastMemmapDataset:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -678,6 +902,18 @@ def build_forecast_memmap_dataset(
     universe = [str(stock).strip().upper() for stock in prepared.universe]
     date_to_pos = {dt: idx for idx, dt in enumerate(dates)}
     stock_to_pos = {stock: idx for idx, stock in enumerate(universe)}
+    static_vocab = build_static_context_vocab(prepared) if bool(include_static_context) else _static_context_schema_disabled()
+    static_by_stock = _static_context_for_universe(prepared, universe=universe, vocab=static_vocab) if bool(include_static_context) else pd.DataFrame()
+    liquidity_bucket_by_date_stock = (
+        _cross_section_bucket(prepared.amount.reindex(index=dates, columns=universe), window=20, buckets=5)
+        if bool(include_static_context)
+        else {}
+    )
+    price_bucket_by_date_stock = (
+        _cross_section_bucket(prepared.close.reindex(index=dates, columns=universe), window=20, buckets=5)
+        if bool(include_static_context)
+        else {}
+    )
     next_open_extra_day = 1 if str(execution_mode or "next_open").strip().lower() == "next_open" else 0
     label_forward_offset = horizon + next_open_extra_day
     eligible_dates_by_role = _date_role_boundaries(
@@ -786,6 +1022,15 @@ def build_forecast_memmap_dataset(
                         "lookback_days": int(lookback_days),
                     }
                 )
+                if bool(include_static_context):
+                    static_row = static_by_stock.loc[stock]
+                    sample_rows[-1].update({field: int(static_row[field]) for field in STATIC_CONTEXT_FIELDS})
+                    sample_rows[-1]["liquidity_bucket_id"] = int(
+                        liquidity_bucket_by_date_stock.get((pd.Timestamp(signal_dt), str(stock)), 0)
+                    )
+                    sample_rows[-1]["price_bucket_id"] = int(
+                        price_bucket_by_date_stock.get((pd.Timestamp(signal_dt), str(stock)), 0)
+                    )
                 if role == "train":
                     train_seen_stocks.add(stock)
                 kept_history_values.append(float(valid_ratio))
@@ -806,6 +1051,20 @@ def build_forecast_memmap_dataset(
     sample_index.to_csv(sample_index_path, index=False, encoding="utf-8-sig")
 
     row_count = int(len(sample_index))
+    static_context_ids: np.memmap | None = None
+    static_context_path = root / "forecast_static_context_ids.dat"
+    if bool(include_static_context):
+        static_values = (
+            sample_index.reindex(columns=list(STATIC_CONTEXT_FIELDS), fill_value=0)
+            .fillna(0)
+            .astype("int64")
+            .to_numpy(dtype=np.int64)
+        )
+        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="w+", shape=(row_count, len(STATIC_CONTEXT_FIELDS)))
+        if row_count:
+            static_context_ids[...] = static_values.reshape((row_count, len(STATIC_CONTEXT_FIELDS)))
+        static_context_ids.flush()
+        static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=(row_count, len(STATIC_CONTEXT_FIELDS)))
     y_daily = _write_array_memmap(root / "forecast_y_daily_excess.dat", np.asarray(y_daily_rows, dtype=np.float32), (row_count, horizon))
     y_cum = _write_array_memmap(root / "forecast_y_cum_excess.dat", np.asarray(y_cum_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
     y_rank_by_horizon = _write_array_memmap(root / "forecast_y_rank_by_horizon.dat", np.asarray(y_rank_by_horizon_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
@@ -894,7 +1153,32 @@ def build_forecast_memmap_dataset(
         "history_valid_ratio_summary": _summary_stats(kept_history_values),
         "max_samples_per_role": int(max_samples_per_role),
         "normalization": normalization_manifest,
+        "static_context_schema": {
+            "enabled": bool(include_static_context),
+            "fields": list(STATIC_CONTEXT_FIELDS),
+            "vocab_sizes": dict(static_vocab.get("vocab_sizes", {}) or {}),
+            "embedding_defaults": {
+                "symbol": 16,
+                "exchange": 4,
+                "industry": 8,
+                "liquidity_bucket": 4,
+                "price_bucket": 4,
+                "dropout": 0.20,
+            },
+        },
+        "symbol_vocab_fingerprint": str(static_vocab.get("symbol_vocab_fingerprint", "")),
+        "industry_vocab_fingerprint": str(static_vocab.get("industry_vocab_fingerprint", "")),
+        "board_vocab_fingerprint": str(static_vocab.get("board_vocab_fingerprint", "")),
+        "cross_section_batching_enabled": False,
     }
+    if bool(include_static_context):
+        manifest["static_context_path"] = str(static_context_path.resolve())
+        manifest["static_context_shape"] = [int(row_count), int(len(STATIC_CONTEXT_FIELDS))]
+        manifest["static_context_vocab"] = {
+            key: value
+            for key, value in static_vocab.items()
+            if key.endswith("_vocab") or key == "vocab_sizes"
+        }
     if not row_count:
         manifest["reason"] = "no_forecast_samples"
     manifest_path = root / "forecast_dataset_manifest.json"
@@ -918,6 +1202,7 @@ def build_forecast_memmap_dataset(
         feature_std=feature_std,
         date_values=np.array([dt.strftime("%Y-%m-%d") for dt in dates], dtype=object),
         stock_values=np.array(universe, dtype=object),
+        static_context_ids=static_context_ids,
     )
 
 

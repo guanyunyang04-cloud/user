@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from datetime import datetime, timedelta
+import inspect
 from pathlib import Path
 import time
 from typing import Any
@@ -22,12 +23,25 @@ from daily_research.path_policy.models import (
     PatchTransformerPath20Forecaster,
     PATH20_FORECAST_AUX_DIM,
     Path20ForecasterMLP,
+    SectorSlotMixerPath20Forecaster,
+    StaticContextPath20Forecaster,
+    StockMixerPath20Forecaster,
     pairwise_rank_loss,
     pinball_loss,
 )
 
 
-FORECAST_MODEL_FAMILIES = ("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer")
+FORECAST_MODEL_FAMILIES = (
+    "linear_last_day",
+    "mlp_last_day",
+    "gru_sequence",
+    "patch_transformer",
+    "gru_sequence_static_context",
+    "patch_transformer_static_context",
+    "stock_mixer_sequence",
+    "sector_slot_mixer_sequence",
+)
+FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
 FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst")
 FORECAST_RISK_AUX_NAMES = ("downside_floor_20d", "worst_1d_20d", "upside_20d")
 FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
@@ -47,7 +61,7 @@ class _EagerTorchDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return int(len(self.indices))
 
-    def __getitem__(self, item: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, ...]:
         row_idx = int(self.indices[int(item)])
         y_risk = np.asarray(
             [
@@ -57,13 +71,16 @@ class _EagerTorchDataset(torch.utils.data.Dataset):
             ],
             dtype=np.float32,
         )
-        return (
+        items: tuple[torch.Tensor, ...] = (
             torch.as_tensor(self.dataset.x[row_idx], dtype=torch.float32),
             torch.as_tensor(self.dataset.y_daily_excess[row_idx] * self.target_scale, dtype=torch.float32),
             torch.as_tensor(self.dataset.y_cum_excess[row_idx] * self.target_scale, dtype=torch.float32),
             torch.as_tensor(y_risk * self.target_scale, dtype=torch.float32),
             torch.as_tensor(row_idx, dtype=torch.long),
         )
+        if self.dataset.static_context_ids is not None:
+            items = (*items, torch.as_tensor(self.dataset.static_context_ids[row_idx], dtype=torch.long))
+        return items
 
 
 class _ForecastDatasetView:
@@ -73,6 +90,11 @@ class _ForecastDatasetView:
         self.normalization_manifest = dict(dataset.normalization_manifest)
         self.feature_columns = list(dataset.feature_columns)
         self.dataset_mode = str(self.manifest.get("dataset_mode", "eager"))
+        self.static_context_schema = dict(self.manifest.get("static_context_schema", {}) or {"enabled": False})
+        self.static_context_vocab_sizes = dict(self.static_context_schema.get("vocab_sizes", {}) or {})
+        self.symbol_vocab_fingerprint = str(self.manifest.get("symbol_vocab_fingerprint", "") or "")
+        self.industry_vocab_fingerprint = str(self.manifest.get("industry_vocab_fingerprint", "") or "")
+        self.board_vocab_fingerprint = str(self.manifest.get("board_vocab_fingerprint", "") or "")
         if isinstance(dataset, ForecastMemmapDataset):
             self.row_count = int(dataset.row_count)
             self.input_dim = int(dataset.input_dim)
@@ -91,6 +113,15 @@ class _ForecastDatasetView:
         if isinstance(self.dataset, ForecastMemmapDataset):
             return self.dataset.torch_dataset(indices, target_scale=target_scale)
         return _EagerTorchDataset(self.dataset, indices, target_scale=target_scale)
+
+    def date_batch_torch_dataset(self, indices: np.ndarray, *, target_scale: float) -> torch.utils.data.Dataset:
+        if not isinstance(self.dataset, ForecastMemmapDataset):
+            raise ValueError("date-level forecast batches require a memmap dataset.")
+        return self.dataset.date_batch_torch_dataset(indices, target_scale=target_scale)
+
+    @property
+    def supports_static_context(self) -> bool:
+        return bool(self.static_context_schema.get("enabled", False))
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
@@ -152,6 +183,10 @@ def make_forecast_model(
     transformer_layers: int = 4,
     transformer_heads: int = 6,
     patch_sizes: tuple[int, ...] | list[int] = (4, 20),
+    static_context_vocab_sizes: dict[str, int] | None = None,
+    static_context_embedding_dims: dict[str, int] | None = None,
+    static_context_dropout: float = 0.20,
+    slot_count: int = 8,
 ) -> nn.Module:
     family = str(family).strip()
     if family == "linear_last_day":
@@ -178,6 +213,56 @@ def make_forecast_model(
             num_heads=num_heads,
             dropout=dropout,
         )
+    if family == "gru_sequence_static_context":
+        temporal = GRUPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+            horizon=horizon,
+            num_layers=gru_layers,
+        )
+        return StaticContextPath20Forecaster(
+            temporal_encoder=temporal,
+            temporal_dim=int(hidden_dim) * 2,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            vocab_sizes=static_context_vocab_sizes,
+            embedding_dims=static_context_embedding_dims,
+            static_dropout=static_context_dropout,
+            dropout=dropout,
+        )
+    if family == "patch_transformer_static_context":
+        requested_heads = max(int(transformer_heads), 1)
+        num_heads = requested_heads if int(hidden_dim) % requested_heads == 0 else 1
+        temporal = PatchTransformerPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            patch_sizes=tuple(int(item) for item in patch_sizes if int(item) > 0),
+            num_layers=transformer_layers,
+            num_heads=num_heads,
+            dropout=dropout,
+        )
+        return StaticContextPath20Forecaster(
+            temporal_encoder=temporal,
+            temporal_dim=int(hidden_dim),
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            vocab_sizes=static_context_vocab_sizes,
+            embedding_dims=static_context_embedding_dims,
+            static_dropout=static_context_dropout,
+            dropout=dropout,
+        )
+    if family == "stock_mixer_sequence":
+        return StockMixerPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, horizon=horizon, dropout=dropout)
+    if family == "sector_slot_mixer_sequence":
+        return SectorSlotMixerPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            slot_count=slot_count,
+        )
     raise ValueError(f"Unsupported forecast model family: {family}")
 
 
@@ -202,6 +287,10 @@ def _forecast_resume_contract(
     model_config: dict[str, Any],
     optimizer_config: dict[str, Any],
     selection_profile: str,
+    static_context_schema: dict[str, Any] | None = None,
+    symbol_vocab_fingerprint: str = "",
+    industry_vocab_fingerprint: str = "",
+    board_vocab_fingerprint: str = "",
 ) -> dict[str, Any]:
     return {
         "model_family": str(model_family),
@@ -214,6 +303,10 @@ def _forecast_resume_contract(
         "model_config": _json_ready(model_config),
         "optimizer_config": _json_ready(optimizer_config),
         "selection_profile": str(selection_profile),
+        "static_context_schema": _json_ready(static_context_schema or {"enabled": False}),
+        "symbol_vocab_fingerprint": str(symbol_vocab_fingerprint or ""),
+        "industry_vocab_fingerprint": str(industry_vocab_fingerprint or ""),
+        "board_vocab_fingerprint": str(board_vocab_fingerprint or ""),
     }
 
 
@@ -251,6 +344,10 @@ def _forecast_checkpoint_payload(
     optimizer_config: dict[str, Any],
     selection_profile: str,
     learning_rows: list[dict[str, Any]],
+    static_context_schema: dict[str, Any] | None = None,
+    symbol_vocab_fingerprint: str = "",
+    industry_vocab_fingerprint: str = "",
+    board_vocab_fingerprint: str = "",
     best_checkpoint_pt: Path | None = None,
     best_checkpoint_payload: dict[str, Any] | None = None,
     rng_state: dict[str, Any] | None = None,
@@ -282,6 +379,10 @@ def _forecast_checkpoint_payload(
             model_config=model_config,
             optimizer_config=optimizer_config,
             selection_profile=selection_profile,
+            static_context_schema=static_context_schema,
+            symbol_vocab_fingerprint=symbol_vocab_fingerprint,
+            industry_vocab_fingerprint=industry_vocab_fingerprint,
+            board_vocab_fingerprint=board_vocab_fingerprint,
         ),
         "best_epoch": int(best_epoch),
         "best_score": float(best_score),
@@ -349,6 +450,10 @@ def _validate_forecast_resume_checkpoint(
         model_config=model_config,
         optimizer_config=optimizer_config,
         selection_profile=selection_profile,
+        static_context_schema=dataset_view.static_context_schema,
+        symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
+        industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
+        board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
     )
     actual = dict(payload.get("resume_contract", {}) or {})
     if not actual:
@@ -508,6 +613,78 @@ def _resolve_device(device: str | torch.device) -> torch.device:
     return torch.device(value)
 
 
+def _unpack_forecast_batch(batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    if len(batch) == 6:
+        batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx, static_context_ids = batch
+        return batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx, static_context_ids
+    if len(batch) == 5:
+        batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx = batch
+        return batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx, None
+    raise ValueError(f"forecast batch must contain 5 or 6 tensors, got {len(batch)}.")
+
+
+def _collate_forecast_date_batches(batch: list[tuple[torch.Tensor, ...]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    max_stocks = max(int(item[0].shape[0]) for item in batch) if batch else 0
+    if max_stocks <= 0:
+        raise ValueError("date-level forecast batch is empty.")
+    x_rows: list[torch.Tensor] = []
+    mask_rows: list[torch.Tensor] = []
+    y_daily_rows: list[torch.Tensor] = []
+    y_cum_rows: list[torch.Tensor] = []
+    y_risk_rows: list[torch.Tensor] = []
+    row_index_rows: list[torch.Tensor] = []
+    static_rows: list[torch.Tensor] = []
+    has_static = len(batch[0]) == 7
+    for item in batch:
+        x, mask, y_daily, y_cum, y_risk, row_indices, *maybe_static = item
+        pad = max_stocks - int(x.shape[0])
+        x_rows.append(F.pad(x, (0, 0, 0, 0, 0, pad)))
+        mask_rows.append(F.pad(mask.to(dtype=torch.bool), (0, pad), value=False))
+        y_daily_rows.append(F.pad(y_daily, (0, 0, 0, pad)))
+        y_cum_rows.append(F.pad(y_cum, (0, 0, 0, pad)))
+        y_risk_rows.append(F.pad(y_risk, (0, 0, 0, pad)))
+        row_index_rows.append(F.pad(row_indices.to(dtype=torch.long), (0, pad), value=-1))
+        if has_static:
+            static_rows.append(F.pad(maybe_static[0].to(dtype=torch.long), (0, 0, 0, pad), value=0))
+    static_context = torch.stack(static_rows, dim=0) if has_static else None
+    return (
+        torch.stack(x_rows, dim=0),
+        torch.stack(mask_rows, dim=0),
+        torch.stack(y_daily_rows, dim=0),
+        torch.stack(y_cum_rows, dim=0),
+        torch.stack(y_risk_rows, dim=0),
+        torch.stack(row_index_rows, dim=0),
+        static_context,
+    )
+
+
+def _forecast_model_accepts_static_context(model: nn.Module) -> bool:
+    try:
+        return "static_context_ids" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _forecast_model_forward(
+    model: nn.Module,
+    batch_x: torch.Tensor,
+    static_context_ids: torch.Tensor | None = None,
+    stock_mask: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    if static_context_ids is not None and _forecast_model_accepts_static_context(model):
+        return model(batch_x, static_context_ids=static_context_ids)
+    if stock_mask is not None and _forecast_model_accepts_stock_mask(model):
+        return model(batch_x, stock_mask=stock_mask)
+    return model(batch_x)
+
+
+def _forecast_model_accepts_stock_mask(model: nn.Module) -> bool:
+    try:
+        return "stock_mask" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def _predict_all(
     model: nn.Module,
     x: torch.Tensor,
@@ -523,7 +700,7 @@ def _predict_all(
         for start in range(0, x.shape[0], max(int(batch_size), 1)):
             batch = x[start : start + max(int(batch_size), 1)].to(resolved_device, non_blocking=resolved_device.type == "cuda")
             with _autocast_context(resolved_device, amp_enabled):
-                pred = model(batch)
+                pred = _forecast_model_forward(model, batch)
             for key in chunks:
                 chunks[key].append(pred[key].detach().cpu().numpy())
     empty_shapes = {
@@ -556,6 +733,36 @@ def _predict_indices(
         }
     if isinstance(dataset_view_or_x, _ForecastDatasetView):
         model.eval()
+        if _forecast_model_accepts_stock_mask(model) and dataset_view_or_x.dataset_mode == "memmap":
+            ordered_indices = np.asarray(indices, dtype=np.int64)
+            index_pos = {int(row_idx): pos for pos, row_idx in enumerate(ordered_indices.tolist())}
+            outputs = {
+                "mu": np.empty((len(ordered_indices), PATH20_HORIZON), dtype=np.float32),
+                "q10": np.empty((len(ordered_indices), PATH20_HORIZON), dtype=np.float32),
+                "q50": np.empty((len(ordered_indices), PATH20_HORIZON), dtype=np.float32),
+                "q90": np.empty((len(ordered_indices), PATH20_HORIZON), dtype=np.float32),
+                "aux": np.empty((len(ordered_indices), PATH20_FORECAST_AUX_DIM), dtype=np.float32),
+            }
+            loader = DataLoader(
+                dataset_view_or_x.date_batch_torch_dataset(ordered_indices, target_scale=target_scale),
+                batch_size=1,
+                shuffle=False,
+                pin_memory=device.type == "cuda",
+                collate_fn=_collate_forecast_date_batches,
+            )
+            with torch.no_grad():
+                for batch_x_cpu, stock_mask_cpu, _, _, _, row_indices_cpu, _ in loader:
+                    batch_x = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
+                    stock_mask = stock_mask_cpu.to(device, non_blocking=device.type == "cuda")
+                    with _autocast_context(device, amp_enabled):
+                        pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                    valid = stock_mask.reshape(-1).detach().cpu().numpy().astype(bool)
+                    row_ids = row_indices_cpu.reshape(-1).detach().cpu().numpy().astype(int)[valid]
+                    for key in outputs:
+                        values = pred[key][torch.as_tensor(valid, dtype=torch.bool, device=pred[key].device)].detach().cpu().numpy()
+                        for row_id, value in zip(row_ids.tolist(), values, strict=False):
+                            outputs[key][index_pos[int(row_id)]] = value
+            return outputs
         chunks: dict[str, list[np.ndarray]] = {"mu": [], "q10": [], "q50": [], "q90": [], "aux": []}
         loader = DataLoader(
             dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
@@ -564,10 +771,16 @@ def _predict_indices(
             pin_memory=device.type == "cuda",
         )
         with torch.no_grad():
-            for batch_x, _, _, _, _ in loader:
+            for raw_batch in loader:
+                batch_x, _, _, _, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
                 batch = batch_x.to(device, non_blocking=device.type == "cuda")
+                static_context_ids = (
+                    static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                    if static_context_ids_cpu is not None
+                    else None
+                )
                 with _autocast_context(device, amp_enabled):
-                    pred = model(batch)
+                    pred = _forecast_model_forward(model, batch, static_context_ids)
                 for key in chunks:
                     chunks[key].append(pred[key].detach().cpu().numpy())
         empty_shapes = {
@@ -954,6 +1167,50 @@ def _normalize_seeds(seeds: tuple[int, ...] | list[int] | str | None, *, default
     return parsed or (int(default_seed),)
 
 
+def _static_context_model_options(dataset_view: _ForecastDatasetView) -> dict[str, Any]:
+    return {
+        "static_context_vocab_sizes": dict(dataset_view.static_context_vocab_sizes),
+        "static_context_embedding_dims": dict(
+            dataset_view.static_context_schema.get("embedding_defaults", {}) or {}
+        ),
+        "static_context_dropout": float(
+            dict(dataset_view.static_context_schema.get("embedding_defaults", {}) or {}).get("dropout", 0.20)
+        ),
+        "slot_count": 8,
+    }
+
+
+def _model_config_for_training(
+    *,
+    family: str,
+    hidden_dim: int,
+    dropout: float,
+    gru_layers: int,
+    transformer_layers: int,
+    transformer_heads: int,
+    patch_sizes: tuple[int, ...] | list[int],
+    dataset_view: _ForecastDatasetView,
+    static_model_options: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "model_family": str(family),
+        "hidden_dim": int(hidden_dim),
+        "dropout": float(dropout),
+        "gru_layers": int(gru_layers),
+        "transformer_layers": int(transformer_layers),
+        "transformer_heads": int(transformer_heads),
+        "patch_sizes": [int(item) for item in patch_sizes],
+        "static_context_vocab_sizes": dict(static_model_options.get("static_context_vocab_sizes", {}) or {}),
+        "static_context_embedding_dims": dict(static_model_options.get("static_context_embedding_dims", {}) or {}),
+        "static_context_dropout": float(static_model_options.get("static_context_dropout", 0.20)),
+        "slot_count": int(static_model_options.get("slot_count", 8)),
+        "static_context_schema": dict(dataset_view.static_context_schema),
+        "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
+        "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
+        "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
+    }
+
+
 def _validation_score(
     metrics: dict[str, Any],
     validation_loss: float,
@@ -983,19 +1240,52 @@ def _evaluate_loss(
     counts: list[int] = []
     with torch.no_grad():
         if isinstance(dataset_view_or_x, _ForecastDatasetView):
+            if _forecast_model_accepts_stock_mask(model) and dataset_view_or_x.dataset_mode == "memmap":
+                loader = DataLoader(
+                    dataset_view_or_x.date_batch_torch_dataset(indices, target_scale=target_scale),
+                    batch_size=1,
+                    shuffle=False,
+                    pin_memory=device.type == "cuda",
+                    collate_fn=_collate_forecast_date_batches,
+                )
+                for batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, _ in loader:
+                    batch_x = batch_x_cpu.to(device, non_blocking=device.type == "cuda")
+                    stock_mask = stock_mask_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_daily = batch_y_daily_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_cum = batch_y_cum_cpu.to(device, non_blocking=device.type == "cuda")
+                    batch_y_risk = batch_y_risk_cpu.to(device, non_blocking=device.type == "cuda")
+                    flat_mask = stock_mask.reshape(-1)
+                    with _autocast_context(device, amp_enabled):
+                        pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                        loss = _forecast_loss(
+                            {key: value[flat_mask] for key, value in pred.items()},
+                            batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],
+                            batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
+                            batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
+                        )
+                    values.append(float(loss.detach().cpu()))
+                    counts.append(int(flat_mask.sum().detach().cpu()))
+                total = sum(counts)
+                return float(np.average(values, weights=counts)) if total > 0 else float("inf")
             loader = DataLoader(
                 dataset_view_or_x.torch_dataset(indices, target_scale=target_scale),
                 batch_size=max(int(batch_size), 1),
                 shuffle=False,
                 pin_memory=device.type == "cuda",
             )
-            for batch_x, batch_y_daily, batch_y_cum, batch_y_risk, _ in loader:
+            for raw_batch in loader:
+                batch_x, batch_y_daily, batch_y_cum, batch_y_risk, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
                 batch_x = batch_x.to(device, non_blocking=device.type == "cuda")
                 batch_y_daily = batch_y_daily.to(device, non_blocking=device.type == "cuda")
                 batch_y_cum = batch_y_cum.to(device, non_blocking=device.type == "cuda")
                 batch_y_risk = batch_y_risk.to(device, non_blocking=device.type == "cuda")
+                static_context_ids = (
+                    static_context_ids_cpu.to(device, non_blocking=device.type == "cuda")
+                    if static_context_ids_cpu is not None
+                    else None
+                )
                 with _autocast_context(device, amp_enabled):
-                    pred = model(batch_x)
+                    pred = _forecast_model_forward(model, batch_x, static_context_ids)
                     loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
                 values.append(float(loss.detach().cpu()))
                 counts.append(int(batch_x.shape[0]))
@@ -1010,7 +1300,7 @@ def _evaluate_loss(
             batch_y_cum = y_cum[batch_idx].to(device, non_blocking=device.type == "cuda")
             batch_y_risk = y_risk[batch_idx].to(device, non_blocking=device.type == "cuda")
             with _autocast_context(device, amp_enabled):
-                pred = model(batch_x)
+                pred = _forecast_model_forward(model, batch_x)
                 loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
             values.append(float(loss.detach().cpu()))
             counts.append(int(batch_idx.numel()))
@@ -1186,6 +1476,9 @@ def train_forecast_models(
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
     dataset_view = _ForecastDatasetView(dataset)
+    cross_section_requested = any(family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES for family in families)
+    if cross_section_requested and dataset_view.dataset_mode != "memmap":
+        raise ValueError("stock_mixer_sequence and sector_slot_mixer_sequence require forecast memmap date-level batching.")
     feature_profile = str(dataset_view.manifest.get("feature_profile", ""))
     feature_manifest = dict(dataset_view.manifest.get("feature_manifest", {}))
     if dataset_view.row_count == 0:
@@ -1268,6 +1561,7 @@ def train_forecast_models(
         dataloader_num_workers=int(dataloader_num_workers),
         prefetch_factor=int(prefetch_factor),
     )
+    static_model_options = _static_context_model_options(dataset_view)
 
     for family in families:
         seed_summaries: dict[str, dict[str, Any]] = {}
@@ -1286,16 +1580,23 @@ def train_forecast_models(
                 transformer_layers=int(transformer_layers),
                 transformer_heads=int(transformer_heads),
                 patch_sizes=tuple(int(item) for item in patch_sizes),
+                **static_model_options,
             ).to(resolved_device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
             scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
             generator = torch.Generator()
             generator.manual_seed(int(current_seed))
+            cross_sectional_batching = bool(
+                family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES and dataset_view.dataset_mode == "memmap"
+            )
             train_loader = DataLoader(
-                dataset_view.torch_dataset(train_indices, target_scale=target_scale),
-                batch_size=batch_size,
+                dataset_view.date_batch_torch_dataset(train_indices, target_scale=target_scale)
+                if cross_sectional_batching
+                else dataset_view.torch_dataset(train_indices, target_scale=target_scale),
+                batch_size=1 if cross_sectional_batching else batch_size,
                 shuffle=True,
                 generator=generator,
+                collate_fn=_collate_forecast_date_batches if cross_sectional_batching else None,
                 **loader_kwargs,
             )
             best_checkpoint_path = study_root / f"forecast_model_{family}_seed{int(current_seed)}_best.pt"
@@ -1311,15 +1612,17 @@ def train_forecast_models(
             resume_from_checkpoint_pt = ""
             resume_start_epoch = 1
             best_checkpoint_payload: dict[str, Any] | None = None
-            model_config = {
-                "model_family": family,
-                "hidden_dim": int(hidden_dim),
-                "dropout": float(dropout),
-                "gru_layers": int(gru_layers),
-                "transformer_layers": int(transformer_layers),
-                "transformer_heads": int(transformer_heads),
-                "patch_sizes": [int(item) for item in patch_sizes],
-            }
+            model_config = _model_config_for_training(
+                family=family,
+                hidden_dim=int(hidden_dim),
+                dropout=float(dropout),
+                gru_layers=int(gru_layers),
+                transformer_layers=int(transformer_layers),
+                transformer_heads=int(transformer_heads),
+                patch_sizes=tuple(int(item) for item in patch_sizes),
+                dataset_view=dataset_view,
+                static_model_options=static_model_options,
+            )
             optimizer_config = {
                 "lr": float(lr),
                 "weight_decay": float(weight_decay),
@@ -1332,6 +1635,8 @@ def train_forecast_models(
                 "early_stop_patience": int(patience_limit),
                 "early_stop_min_delta": float(early_stop_min_delta),
                 "batch_size": int(batch_size),
+                "effective_batch_size": int(1 if cross_sectional_batching else batch_size),
+                "cross_section_batching_enabled": bool(cross_sectional_batching),
                 "lr": float(lr),
                 "weight_decay": float(weight_decay),
                 "grad_clip": float(grad_clip),
@@ -1345,6 +1650,11 @@ def train_forecast_models(
                 "feature_profile": feature_profile,
                 "feature_count": int(dataset_view.input_dim),
                 "selection_profile": selection_profile,
+                "static_context_schema": dict(dataset_view.static_context_schema),
+                "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
+                "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
+                "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
+                "cross_section_batching_enabled": bool(cross_sectional_batching),
             }
             if resume_payload is not None:
                 _validate_forecast_resume_checkpoint(
@@ -1388,16 +1698,41 @@ def train_forecast_models(
                 epoch_losses: list[float] = []
                 epoch_counts: list[int] = []
                 optimizer.zero_grad(set_to_none=True)
-                for step, (batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _) in enumerate(train_loader, start=1):
-                    batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
-                    batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
-                    batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
-                    batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
-                    with _autocast_context(resolved_device, amp_enabled):
-                        pred = model(batch_x)
-                        loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                for step, raw_batch in enumerate(train_loader, start=1):
+                    if cross_sectional_batching:
+                        batch_x_cpu, stock_mask_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, _ = raw_batch
+                        batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
+                        stock_mask = stock_mask_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
+                        flat_mask = stock_mask.reshape(-1)
+                        with _autocast_context(resolved_device, amp_enabled):
+                            pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                            loss = _forecast_loss(
+                                {key: value[flat_mask] for key, value in pred.items()},
+                                batch_y_daily.reshape(-1, batch_y_daily.shape[-1])[flat_mask],
+                                batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
+                                batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
+                            )
+                        batch_count = int(flat_mask.sum().detach().cpu())
+                    else:
+                        batch_x_cpu, batch_y_daily_cpu, batch_y_cum_cpu, batch_y_risk_cpu, _, static_context_ids_cpu = _unpack_forecast_batch(raw_batch)
+                        batch_x = batch_x_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_daily = batch_y_daily_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_cum = batch_y_cum_cpu.to(resolved_device, non_blocking=pin_memory)
+                        batch_y_risk = batch_y_risk_cpu.to(resolved_device, non_blocking=pin_memory)
+                        static_context_ids = (
+                            static_context_ids_cpu.to(resolved_device, non_blocking=pin_memory)
+                            if static_context_ids_cpu is not None
+                            else None
+                        )
+                        with _autocast_context(resolved_device, amp_enabled):
+                            pred = _forecast_model_forward(model, batch_x, static_context_ids)
+                            loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk)
+                        batch_count = int(batch_x.shape[0])
                     epoch_losses.append(float(loss.detach().cpu()))
-                    epoch_counts.append(int(batch_x.shape[0]))
+                    epoch_counts.append(batch_count)
                     scaler.scale(loss / float(accum_steps)).backward()
                     if step % accum_steps == 0 or step == len(train_loader):
                         scaler.unscale_(optimizer)
@@ -1473,6 +1808,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         learning_rows=learning_rows,
+                        static_context_schema=dataset_view.static_context_schema,
+                        symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
+                        industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
+                        board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
                     )
                     _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
                 else:
@@ -1534,6 +1873,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         learning_rows=learning_rows,
+                        static_context_schema=dataset_view.static_context_schema,
+                        symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
+                        industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
+                        board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
                         best_checkpoint_pt=best_checkpoint_path,
                         best_checkpoint_payload=best_checkpoint_payload,
                         rng_state=_forecast_rng_state(generator),
@@ -1567,6 +1910,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         learning_rows=learning_rows,
+                        static_context_schema=dataset_view.static_context_schema,
+                        symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
+                        industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
+                        board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
                         best_checkpoint_pt=best_checkpoint_path,
                         best_checkpoint_payload=best_checkpoint_payload,
                         rng_state=_forecast_rng_state(generator),
@@ -1624,6 +1971,10 @@ def train_forecast_models(
                     optimizer_config=optimizer_config,
                     selection_profile=selection_profile,
                     learning_rows=learning_rows,
+                    static_context_schema=dataset_view.static_context_schema,
+                    symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
+                    industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
+                    board_vocab_fingerprint=dataset_view.board_vocab_fingerprint,
                 )
                 _save_forecast_checkpoint_atomic(best_checkpoint_path, best_checkpoint_payload)
             checkpoint = torch.load(best_checkpoint_path, map_location=resolved_device, weights_only=False)
@@ -1718,6 +2069,7 @@ def train_forecast_models(
             "min_epochs": int(min_epochs),
             "early_stop_patience": int(patience_limit),
             "batch_size": int(batch_size),
+            "effective_batch_size": int(1 if family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES else batch_size),
             "lr": float(lr),
             "hidden_dim": int(hidden_dim),
             "feature_count": int(dataset_view.input_dim),
@@ -1725,6 +2077,11 @@ def train_forecast_models(
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
             "test_rows": int(len(test_indices)),
+            "static_context_schema": dict(dataset_view.static_context_schema),
+            "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
+            "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
+            "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
+            "cross_section_batching_enabled": bool(family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES),
             "seed_summaries": seed_summaries,
             "family_summary": _family_summary(seed_summaries),
         }
@@ -1749,6 +2106,7 @@ def train_forecast_models(
             transformer_layers=int(transformer_layers),
             transformer_heads=int(transformer_heads),
             patch_sizes=tuple(int(item) for item in patch_sizes),
+            **static_model_options,
         ).to(resolved_device)
         checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)
         selected_model.load_state_dict(checkpoint["state_dict"])
@@ -1818,6 +2176,7 @@ def train_forecast_models(
             "early_stop_patience": int(patience_limit),
             "early_stop_min_delta": float(early_stop_min_delta),
             "batch_size": int(batch_size),
+            "effective_batch_size": int(1 if selected_family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES else batch_size),
             "lr": float(lr),
             "weight_decay": float(weight_decay),
             "grad_clip": float(grad_clip),
@@ -1834,6 +2193,13 @@ def train_forecast_models(
             "save_last_checkpoint": bool(save_last_checkpoint),
             "checkpoint_every_n_epochs": int(checkpoint_interval),
             "resume_from_checkpoint_pt": str(Path(resume_from).resolve()) if resume_from is not None and str(resume_from).strip() else "",
+            "static_context_schema": dict(dataset_view.static_context_schema),
+            "symbol_vocab_fingerprint": str(dataset_view.symbol_vocab_fingerprint),
+            "industry_vocab_fingerprint": str(dataset_view.industry_vocab_fingerprint),
+            "board_vocab_fingerprint": str(dataset_view.board_vocab_fingerprint),
+            "cross_section_batching_enabled": bool(
+                selected_family in FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES if selected_family else False
+            ),
         },
         "models": model_summaries,
         "family_summary": {family: dict(summary.get("family_summary", {})) for family, summary in model_summaries.items()},

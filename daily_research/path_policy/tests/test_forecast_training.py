@@ -18,7 +18,25 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 
 def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     x = torch.randn(4, 6, 5)
-    for family in ("linear_last_day", "mlp_last_day", "gru_sequence", "patch_transformer"):
+    static_ids = torch.tensor(
+        [
+            [1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2],
+            [3, 1, 0, 3, 2],
+            [4, 2, 1, 4, 3],
+        ],
+        dtype=torch.long,
+    )
+    for family in (
+        "linear_last_day",
+        "mlp_last_day",
+        "gru_sequence",
+        "patch_transformer",
+        "gru_sequence_static_context",
+        "patch_transformer_static_context",
+        "stock_mixer_sequence",
+        "sector_slot_mixer_sequence",
+    ):
         model = make_forecast_model(
             family,
             input_dim=5,
@@ -28,14 +46,137 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
             transformer_layers=2,
             transformer_heads=3,
             patch_sizes=(2, 3),
+            static_context_vocab_sizes={
+                "symbol": 8,
+                "exchange": 4,
+                "industry": 4,
+                "liquidity_bucket": 6,
+                "price_bucket": 6,
+            },
+            static_context_embedding_dims={
+                "symbol": 4,
+                "exchange": 2,
+                "industry": 3,
+                "liquidity_bucket": 2,
+                "price_bucket": 2,
+            },
         )
-        pred = model(x)
+        pred = model(x, static_context_ids=static_ids) if "static_context" in family else model(x)
         assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
         assert pred["mu"].shape == (4, 20)
         assert pred["q10"].shape == (4, 20)
         assert pred["aux"].shape == (4, 8)
         assert torch.all(pred["q10"] <= pred["q50"])
         assert torch.all(pred["q50"] <= pred["q90"])
+
+
+def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    prepared.metadata_frames["industry_map"] = pd.DataFrame(
+        {
+            "symbol": ["AAA.SZ", "BBB.SH", "CCC.SZ"],
+            "industry": ["bank", "electronics", "healthcare"],
+        }
+    )
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+        include_static_context=True,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("gru_sequence_static_context",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["models"]["gru_sequence_static_context"]["status"] == "completed"
+    assert summary["training_config"]["static_context_schema"]["enabled"] is True
+    assert "seen_in_train=true" in summary["validation_stratified_metrics"]
+
+    last_path = tmp_path / "study" / "forecast_model_gru_sequence_static_context_seed7_last.pt"
+    checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["static_context_schema"]["enabled"] is True
+    assert checkpoint["resume_contract"]["symbol_vocab_fingerprint"] == dataset.manifest["symbol_vocab_fingerprint"]
+
+    bad_manifest = {**dataset.manifest, "symbol_vocab_fingerprint": "changed"}
+    dataset.manifest = bad_manifest
+    with pytest.raises(ValueError, match="symbol_vocab_fingerprint"):
+        train_forecast_models(
+            dataset,
+            study_root=tmp_path / "resume_bad",
+            model_families=("gru_sequence_static_context",),
+            epochs=2,
+            min_epochs=2,
+            early_stop_patience=5,
+            batch_size=4,
+            lr=1.0e-3,
+            hidden_dim=24,
+            dropout=0.0,
+            seeds=(7,),
+            device="cpu",
+            amp=False,
+            resume_from=last_path,
+        )
+
+
+def test_stock_mixer_uses_memmap_date_level_batching(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("stock_mixer_sequence",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        dataloader_num_workers=0,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["models"]["stock_mixer_sequence"]["cross_section_batching_enabled"] is True
+    assert summary["models"]["stock_mixer_sequence"]["seed_summaries"]["7"]["status"] == "completed"
+    assert summary["training_config"]["cross_section_batching_enabled"] is True
+    assert summary["training_config"]["effective_batch_size"] == 1
 
 
 def test_train_forecast_models_writes_summary_predictions_and_artifacts(tmp_path) -> None:

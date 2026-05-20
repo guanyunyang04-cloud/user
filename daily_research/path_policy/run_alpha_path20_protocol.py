@@ -627,6 +627,7 @@ def _run_forecast_walkforward_study(
                 max_feature_columns=int(args.forecast_max_feature_columns),
                 max_samples_per_role=int(args.forecast_max_samples_per_role),
                 min_lookback_valid_ratio=float(args.forecast_min_lookback_valid_ratio),
+                include_static_context=bool(args.forecast_include_static_context),
             )
         dataset_manifest = dict(dataset.manifest)
         if not dataset_manifest.get("manifest_json"):
@@ -3323,6 +3324,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-save-last", dest="forecast_save_last", action="store_true", default=True)
     parser.add_argument("--no-forecast-save-last", dest="forecast_save_last", action="store_false")
     parser.add_argument("--forecast-checkpoint-every-n-epochs", type=int, default=0)
+    parser.add_argument(
+        "--forecast-include-static-context",
+        action="store_true",
+        help="Write static symbol/exchange/industry ids into newly built memmap forecast datasets.",
+    )
     parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
     parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)

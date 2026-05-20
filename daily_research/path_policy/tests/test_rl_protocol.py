@@ -113,6 +113,7 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_save_last is True
     assert args.forecast_resume_from == ""
     assert args.forecast_checkpoint_every_n_epochs == 0
+    assert args.forecast_include_static_context is False
 
 
 def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None:
@@ -141,6 +142,31 @@ def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None
     assert args.forecast_resume_from == str(resume_path)
     assert args.forecast_checkpoint_every_n_epochs == 5
     assert args.forecast_save_last is False
+
+
+def test_protocol_accepts_static_context_forecast_family_and_dataset_flag() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-dataset",
+            "--tag",
+            "unit_forecast_static_context",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-dataset-mode",
+            "memmap",
+            "--forecast-model-families",
+            "gru_sequence_static_context,stock_mixer_sequence,sector_slot_mixer_sequence",
+            "--forecast-include-static-context",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_include_static_context is True
+    assert args.forecast_model_families == "gru_sequence_static_context,stock_mixer_sequence,sector_slot_mixer_sequence"
 
 
 def test_protocol_rejects_negative_forecast_checkpoint_interval() -> None:

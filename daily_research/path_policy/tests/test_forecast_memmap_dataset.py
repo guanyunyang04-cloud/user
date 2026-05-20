@@ -6,7 +6,12 @@ import numpy as np
 import torch
 import pytest
 
-from daily_research.path_policy.forecast_dataset import build_forecast_memmap_dataset, load_forecast_memmap_dataset
+from daily_research.path_policy.forecast_dataset import (
+    ForecastDateBatchTorchDataset,
+    build_forecast_memmap_dataset,
+    build_static_context_vocab,
+    load_forecast_memmap_dataset,
+)
 from daily_research.path_policy.tests.fixtures import make_prepared_policy_inputs
 
 
@@ -60,6 +65,107 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(y_risk.shape) == (3,)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
+    prepared.metadata_frames["industry_map"] = __import__("pandas").DataFrame(
+        {
+            "symbol": ["AAA.SZ", "BBB.SH"],
+            "industry": ["bank", "electronics"],
+        }
+    )
+    prepared.metadata_frames["board_membership"] = __import__("pandas").DataFrame(
+        {
+            "symbol": ["AAA.SZ", "AAA.SZ", "BBB.SH"],
+            "board_kind": ["GN", "FG", "GN"],
+            "board_name": ["value", "dividend", "semiconductor"],
+            "board_code": ["GN001", "FG001", "GN002"],
+        }
+    )
+    prepared.raw_cache_meta["sector_board_view"] = {
+        "dataset_id": "policy_sector_board_view__unit",
+        "view_kind": "latest_static_snapshot",
+        "snapshot_semantics": "latest_static_snapshot",
+    }
+
+    first = build_static_context_vocab(prepared)
+    reversed_prepared = make_prepared_policy_inputs(days=420, stocks=("CCC.SZ", "BBB.SH", "AAA.SZ"), start_date="2019-07-01")
+    reversed_prepared.metadata_frames.update(prepared.metadata_frames)
+    second = build_static_context_vocab(reversed_prepared)
+
+    assert first["symbol_vocab_fingerprint"] == second["symbol_vocab_fingerprint"]
+    assert first["industry_vocab_fingerprint"] == second["industry_vocab_fingerprint"]
+    assert first["board_vocab_fingerprint"] == second["board_vocab_fingerprint"]
+
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=6,
+        min_lookback_valid_ratio=0.80,
+        include_static_context=True,
+    )
+
+    assert dataset.manifest["static_context_schema"]["enabled"] is True
+    assert dataset.manifest["symbol_vocab_fingerprint"] == first["symbol_vocab_fingerprint"]
+    assert dataset.manifest["industry_vocab_fingerprint"] == first["industry_vocab_fingerprint"]
+    assert dataset.static_context_ids is not None
+    assert dataset.static_context_ids.shape == (dataset.row_count, 5)
+    assert "static_context_path" in dataset.manifest
+    assert dataset.sample_index["liquidity_bucket_id"].between(1, 5).all()
+    assert dataset.sample_index["price_bucket_id"].between(1, 5).all()
+
+    train_indices = dataset.role_indices("train")
+    x, y_daily, y_cum, y_risk, row_idx, static_ids = dataset.torch_dataset(train_indices[:1], target_scale=100.0)[0]
+
+    assert tuple(x.shape) == (5, dataset.input_dim)
+    assert tuple(static_ids.shape) == (5,)
+    assert int(static_ids[0].item()) == int(dataset.sample_index.iloc[int(row_idx.item())]["symbol_id"])
+    assert tuple(y_daily.shape) == (20,)
+    assert tuple(y_cum.shape) == (5,)
+    assert tuple(y_risk.shape) == (3,)
+
+    loaded = load_forecast_memmap_dataset(tmp_path / "forecast_dataset_manifest.json")
+    assert loaded.static_context_ids is not None
+    _, _, _, _, loaded_row_idx, loaded_static_ids = loaded.torch_dataset(loaded.role_indices("train")[:1], target_scale=100.0)[0]
+    assert int(loaded_row_idx.item()) == int(train_indices[0])
+    assert tuple(loaded_static_ids.shape) == (5,)
+
+
+def test_date_batch_view_groups_memmap_samples_by_signal_date(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ"), start_date="2019-07-01")
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=9,
+        min_lookback_valid_ratio=0.80,
+        include_static_context=True,
+    )
+
+    date_view = ForecastDateBatchTorchDataset(dataset, dataset.role_indices("train"), target_scale=100.0)
+    x, mask, y_daily, y_cum, y_risk, row_indices, static_ids = date_view[0]
+
+    assert x.ndim == 3
+    assert tuple(x.shape[1:]) == (5, dataset.input_dim)
+    assert mask.dtype == torch.bool
+    assert int(mask.sum().item()) == x.shape[0]
+    assert tuple(y_daily.shape) == (x.shape[0], 20)
+    assert tuple(y_cum.shape) == (x.shape[0], 5)
+    assert tuple(y_risk.shape) == (x.shape[0], 3)
+    assert tuple(static_ids.shape) == (x.shape[0], 5)
+    assert len(set(dataset.sample_index.iloc[row_indices.numpy().astype(int)]["date"].astype(str))) == 1
 
 
 def test_forecast_memmap_dataset_filters_low_history_samples(tmp_path) -> None:
