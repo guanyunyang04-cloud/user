@@ -25,6 +25,7 @@ from daily_research.tools.brain_evidence_registry import (
     query_evidence_registry,
     write_evidence_registry,
 )
+from daily_research.tools.frontier_scanner import build_frontier_report
 from daily_research.tools.selective_verification import build_verification_plan
 
 
@@ -68,6 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
     capsule.add_argument("--study-tag", default="")
     capsule.add_argument("--json", action="store_true")
     capsule.add_argument("--write-output", action="store_true")
+
+    frontier = sub.add_parser("current-frontier", help="Scan latest output studies against brain references and registry.")
+    frontier.add_argument("--json", action="store_true")
+    frontier.add_argument("--write-output", action="store_true")
 
     evidence = sub.add_parser("evidence-index", help="Build or read the brain evidence registry.")
     evidence.add_argument("--rebuild", action="store_true")
@@ -127,6 +132,8 @@ def build_payload(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
             workflow=str(getattr(args, "workflow", "") or "brain_handoff"),
             study_tag=str(getattr(args, "study_tag", "") or ""),
         )
+    if args.command == "current-frontier":
+        return "current_frontier", build_frontier_report()
     if args.command == "evidence-index":
         if bool(getattr(args, "rebuild", False)):
             output_path = write_evidence_registry()

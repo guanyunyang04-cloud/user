@@ -12,6 +12,7 @@
 - 最后跑项目守卫：项目特有预检、验证矩阵、证据查询和写回路线由对应分脑与 `daily_research/tools/` 提供。
 - 冲突时先服从项目安全边界：如果通用 skill 默认要求 worktree、commit、写 spec 或扩大执行，而 brain 明确要求 `main`、不提交、不触碰 active artifact，则以 brain 约束为准。
 - brain 只记录项目特例和必要命令索引；不得在主脑正文复制本机 skill 的完整方法正文。
+- brain 是认知真源；但当目标分脑的 output explicit artifacts 晚于 brain references 或未登记进 evidence registry 时，必须先做 freshness reconciliation，再给出“当前状态 / 下一步”结论。
 
 ## 1.1 Mutation 前预检
 - 先确认工作区和分支：

@@ -28,6 +28,9 @@
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --json`
 - API/no-plugin auto workflow capsule：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow capsule --child daily_research --task "<task>" --workflow auto --json`
+- current frontier freshness：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow current-frontier --json`
+- 凡涉及“接管、当前状态、下一步、是否训练、主线推进到哪”的问题，必须先运行 task capsule 或 current frontier；若 `brain_may_be_stale=true`，先读 output explicit tags 与 summary，再回答当前状态。
 - workflow guide：
   `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.tools.brain_workflow workflow-guide --workflow <workflow_id> --json`
 - explicit evidence status：

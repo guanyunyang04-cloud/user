@@ -23,6 +23,8 @@ class BrainCapsuleTest(unittest.TestCase):
         self.assertEqual(payload["active_artifact_guard"]["path"], "daily_research/output/active_execution_strategy.json")
         self.assertIn("branch_line", payload["git"])
         self.assertIsInstance(payload["git"]["on_main"], bool)
+        self.assertIn("frontier_report", payload)
+        self.assertIn("brain_may_be_stale", payload["frontier_report"])
 
     def test_capsule_links_relevant_reference_records(self) -> None:
         payload = build_task_capsule(

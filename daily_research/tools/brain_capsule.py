@@ -15,6 +15,7 @@ from daily_research.tools.brain_platform import (
     select_workflow_for_task,
 )
 from daily_research.tools.brain_rules import run_brain_rules
+from daily_research.tools.frontier_scanner import build_frontier_report
 
 
 KEY_TERMS = (
@@ -85,6 +86,7 @@ def build_task_capsule(*, child: str = "daily_research", task: str = "", workflo
     workflow_guide = build_workflow_guide(workflow_id)
     git = _git_status()
     rules = run_brain_rules(has_explicit_study_tag=bool(study_tag))
+    frontier_report = build_frontier_report()
     terms = _task_terms(task)
     evidence_matches: list[dict[str, Any]] = []
     for term in terms or ["r63"]:
@@ -129,6 +131,7 @@ def build_task_capsule(*, child: str = "daily_research", task: str = "", workflo
         "hard_rules": _text_excerpt("daily_research/brain/knowledge_center.md"),
         "forbidden_actions": workflow_state.get("registry_entry", {}).get("forbidden_actions", []),
         "related_references": related_references,
+        "frontier_report": frontier_report,
         "facts": [
             "daily_research brain is the project fact, state, governance, and evidence source",
             "active_execution_strategy.json is guarded and must not be changed without explicit promotion decision",
@@ -137,6 +140,7 @@ def build_task_capsule(*, child: str = "daily_research", task: str = "", workflo
         "inferences": [
             "Use explicit evidence references before interpreting latest artifacts",
             "Treat smoke, dry-run, failed trial, and realtime-tail labels as non-completed evidence unless proven otherwise",
+            "If frontier_report.brain_may_be_stale is true, reconcile explicit output tags before answering current-state questions",
         ],
         "assumptions": [
             "Work remains on main",

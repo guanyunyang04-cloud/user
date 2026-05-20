@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from daily_research.tools.brain_platform import WORKSPACE_ROOT, resolve_artifact_freshness
+from daily_research.tools.frontier_scanner import build_frontier_report
 
 
 ACTIVE_ARTIFACT = Path("daily_research/output/active_execution_strategy.json")
@@ -78,6 +79,15 @@ def finding_for_stale_latest_without_explicit_tag(*, has_explicit_study_tag: boo
             freshness.mismatch_reason or "latest artifacts are stale-risk; use an explicit study tag",
         )
     return None
+
+
+def finding_for_frontier_staleness() -> BrainRuleFinding | None:
+    report = build_frontier_report()
+    if not bool(report.get("brain_may_be_stale", False)):
+        return None
+    warnings = ", ".join(str(item) for item in report.get("warnings", []) if str(item).strip())
+    detail = warnings or "latest output frontier may be newer than brain references; reconcile explicit tags first"
+    return BrainRuleFinding("warning", "frontier_brain_may_be_stale", detail)
 
 
 def finding_for_full_gold_claim_without_catalog(text: str, *, data_lake_root: str | Path | None = None) -> BrainRuleFinding | None:
@@ -218,6 +228,9 @@ def run_brain_rules(
     stale = finding_for_stale_latest_without_explicit_tag(has_explicit_study_tag=has_explicit_study_tag)
     if stale is not None:
         findings.append(stale)
+    frontier_stale = finding_for_frontier_staleness()
+    if frontier_stale is not None:
+        findings.append(frontier_stale)
     if study_evidence:
         findings.extend(findings_for_failed_completed_trials(study_evidence))
     gold = finding_for_full_gold_claim_without_catalog(claim_text)

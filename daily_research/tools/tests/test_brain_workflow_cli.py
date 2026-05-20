@@ -218,6 +218,27 @@ class BrainWorkflowCliTest(unittest.TestCase):
         self.assertIn("daily_research/path_policy/tests/test_forecast_features.py", joined)
         self.assertIn("always_commands", payload)
 
+    def test_current_frontier_cli_outputs_stable_json(self) -> None:
+        payload = run_cli("current-frontier", "--json")
+
+        self.assertIn("latest_output_studies", payload)
+        self.assertIn("latest_brain_reference_time", payload)
+        self.assertIn("unregistered_latest_tags", payload)
+        self.assertIn("brain_may_be_stale", payload)
+
+    def test_capsule_includes_current_frontier_report(self) -> None:
+        payload = run_cli(
+            "capsule",
+            "--child",
+            "daily_research",
+            "--task",
+            "当前到哪了",
+            "--json",
+        )
+
+        self.assertIn("frontier_report", payload)
+        self.assertIn("brain_may_be_stale", payload["frontier_report"])
+
 
 if __name__ == "__main__":
     unittest.main()
