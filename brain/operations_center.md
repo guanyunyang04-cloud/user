@@ -54,12 +54,13 @@
 - 不依赖“当前 shell 恰好已经处于正确环境”的隐性状态
 
 ## 长时任务运行纪律
-- 工作区级规则：项目任务默认前台运行，任务主进程不得被转入后台规避窗口，也不得中途人为中断。
-- 所有训练、评估、审计、bounded study、confirmatory rerun 和执行任务的前台窗口时限统一扩为 `10` 小时。
+- 工作区级规则：项目长任务必须受监管运行，任务主进程不得脱离 PID、日志、run tag 或产物路径追踪，也不得中途人为中断。
+- 允许使用受监管独立 OS 进程承载训练、评估、审计、bounded study、confirmatory rerun 和执行任务；禁止无追踪、无日志、无 PID 的脱管后台化。
 - 任务启动必须使用目标分脑声明的显式运行环境；当前 `daily_research` 全部 Python 任务必须使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
 - 涉及 GPU 训练的任务必须在完成后核验训练诊断中的 `device = cuda` 与 `cuda_available = true`，不得把未核验环境的结果写成正式证据。
 - 进程存活判断必须绑定 PID、CommandLine、run_tag 或最新产物时间戳；不得用裸 `Get-Process python` 把检查脚本自身或其他短暂 Python 误判为目标任务。
-- 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；默认使用 `Start-Process -PassThru` 记录目标 PID，再用 `Wait-Process -Id <pid> -Timeout 7200` 轮询。
-- `7200` 秒是长任务单轮默认最大等待上限；进程提前自然结束时必须立即返回并解析产物，不得用固定 sleep 取代 PID 绑定等待。
-- 首个 progress 尚未生成、正在排障、用户要求更密集状态或资源风险较高时，可以临时缩短单轮 timeout；每轮状态优先读取 progress、PID、日志、GPU/内存与最新产物时间戳。
+- 启动模板：用 `Start-Process -PassThru` 启动目标命令，记录 PID、stdout/stderr 日志路径、run tag、预期 summary / progress / checkpoint 路径。
+- 轮询模板：默认用 `Wait-Process -Id <pid> -Timeout 7200` 等待；`7200` 秒是长任务单轮默认最大等待上限，进程提前自然结束时必须立即返回并解析产物。
+- 每轮状态必须计算已用时间和预计剩余时间；状态来源优先使用 progress、PID、日志尾部、GPU/内存与最新产物时间戳。
+- 首个 progress 尚未生成、正在排障、用户要求更密集状态或资源风险较高时，可以临时缩短单轮 timeout；不得用固定 sleep 取代 PID 绑定等待。
 - 任务完成后一次性读取日志、summary、checkpoint、evaluation 或 audit 产物，并按目标分脑写回；除 7200s 长任务监控、异常与用户询问外，不做无意义进度轮询。

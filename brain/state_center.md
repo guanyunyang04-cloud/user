@@ -1,6 +1,6 @@
 # 主脑状态中枢
 
-快照日期：`2026-05-11`
+快照日期：`2026-05-20`
 
 ## 当前接管摘要
 - 工作区正式生产研究与执行主线仍是 `daily_research`。
@@ -14,7 +14,7 @@
 - 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
 
 ## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；continuous_policy 最新有效证据基线仍为 r39，r48-r52d 均属 `research / shadow_only`，其中 r52d 已有代码合同、dry-run 与 safe screening-only 证据，但没有 confirmatory / stable verdict，不能 promotion / live / active artifact。
+- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 
@@ -23,19 +23,20 @@
 - 维护主脑作为共享脑核，不让主脑重新长成分脑实验日志。
 - 分脑入口必须精炼；长过程、长命令和历史证据进入 `episodic_memory.md` 或 `brain/references/`。
 - 当前所有 `daily_research` 任务必须显式使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`。
-- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务默认前台运行，窗口时限按 `10` 小时处理，不得中途人为中断；长任务必须保留持久 stdout/stderr 日志，并按 `2` 小时轮询。
+- 训练、评估、审计、bounded study、confirmatory rerun 与执行任务必须受监管运行：允许用 `Start-Process -PassThru` 启动独立 OS 进程，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径，并用 `Wait-Process -Id <pid> -Timeout 7200` 轮询。
+- 长任务禁止无 PID、无日志、无产物定位的脱管后台化；禁止用固定 sleep 替代 PID 绑定等待；每轮轮询必须报告已用时间和预计剩余时间，进程提前结束时立即解析产物。
 
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
-- `daily_research` 的 continuous_policy 最新有效证据基线仍是 r39 `research / shadow_only`；r40 clean rerun 已证明运行通道可用但 stable confirm 为空；r48 已有正式 screening / confirmatory verdict，但同样 stable confirm 为空且 source / exposure / training evidence 未闭合，不得 promotion、不得 live、不得改 active artifact。详细指标只读 `daily_research/brain/state_center.md` 与 `daily_research/brain/operations_center.md`。
+- `daily_research` 的研究证据、rXX references、Path20 / continuous_policy / deep_alpha 状态和验证矩阵只读 `daily_research/brain/` 与对应实验产物；主脑只保留 promotion / live / active artifact 边界。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 
 ## 当前风险
 - 如果主脑继续追加日期日志，接管会重新退化为长文扫描。
 - 如果只改分脑、不改主脑，跨项目规则会再次漂移。
 - 如果兼容入口、README 或教程保留 brain 未收录的规则，后续 agent 会绕过中枢。
-- 如果训练结果未核验 `device = cuda`、`cuda_available = true`、yolos 解释器与持久日志完整性，就不能写成正式证据。
+- 如果长任务没有 PID、日志、progress、summary 或环境诊断可追溯，就不能写成正式证据。
 
 ## 推荐下一步
 - 结构变更先跑 `brain_integrity_check.py --json`，再跑 `doc_guard.py check` 与 `project_consistency_check.py`。

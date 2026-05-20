@@ -16,8 +16,8 @@
 - `simplified-chinese-docs`
   - 工作区内面向人读的项目治理与接管文档默认使用简体中文；英文只保留在代码标识、命令、第三方专名、链接或产品必须的多语言公开文档中
 - `main-branch-only`
-  - 除非用户未来明确撤销该约束，所有后续代码、文档与实验工作都必须在 `main` 分支展开；不得创建或切换到新分支
-  - 实际分支不为 `main` 时，任何 repo-tracked mutation 都必须先纠偏到 `main`，或取得用户对本次任务撤销该规则的明确授权
+  - 所有代码、文档与实验工作默认在 `main` 分支展开；不得自行创建、切换或继续使用非 `main` 分支
+  - 实际分支不为 `main` 时，任何 repo-tracked mutation 都必须先纠偏到 `main`，或取得用户对本次任务使用分支 / worktree 例外的明确授权
 - `skills-home-rule`
   - 通用操作技能归本机 `C:/Users/ASUS/.codex/skills` 维护；brain 不复制 skill 正文，不把 TDD、调试、计划、验证、前端、安全或部署方法写成平行技能库。
 - `brain-cognitive-rule`
@@ -37,9 +37,9 @@
 - 脑内文档铁律：当前层标题、正文、规则、状态和复盘写回必须使用简体中文；命令、路径、指标名、tag、模型名等技术标识保留原文
 - 主分脑结构变更后必须跑 `brain_integrity_check.py --json`，确认父子附着、读序、写回路由、body 映射和编码合同仍一致
 - 主脑 `state_center.md` 只承载当前路由和跨项目边界，不再追加日期型实验日志；分脑高频入口也必须优先保留当前结论，历史细节下沉到 `episodic_memory.md` 或 `brain/references/`
-- 项目任务运行纪律已改为前台优先：训练、评估、审计、bounded study、confirmatory rerun 与执行任务不得默认后台化，不得中途人为中断，单次窗口时限统一按 `10` 小时处理
-- 可能超过外层捕获窗口的长任务必须同步写入持久 stdout/stderr 日志；默认用 `Start-Process -PassThru` 记录 PID，再用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析产物
-- 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，首个 progress 未出现或排障时才临时缩短 timeout
+- 长任务运行纪律是受监管独立进程，不是脱管后台化：训练、评估、审计、bounded study、confirmatory rerun 与执行任务可以用 `Start-Process -PassThru` 启动，但必须记录 PID、持久 stdout/stderr、run tag 或产物路径
+- 长任务默认用 `Wait-Process -Id <pid> -Timeout 7200` 轮询；`7200` 秒是单轮最大等待上限，进程提前自然结束时必须立即返回并解析 progress、日志、summary、checkpoint 或评估产物
+- 固定 sleep 式轮询容易错过提前完成和混淆进程状态；长任务轮询必须绑定 PID、progress、日志、GPU/内存或最新产物时间戳，每轮状态必须计算已用时间和预计剩余时间，首个 progress 未出现或排障时才临时缩短 timeout
 - 当前 `daily_research` 任务必须显式使用 `yolos` 环境；GPU 训练任务完成后必须核验 `training_diagnostics.json` 中 `device = cuda`、`cuda_available = true` 与 `python_executable` 指向 yolos
 - 如果本机 skill 要求建 worktree、写 spec、提交或执行默认流程，但项目脑区要求 `main`、不提交、不触碰 active artifact，则先服从项目脑区安全边界。
 - 如果脑区和本机 skill 对“怎么做 TDD、调试、计划或验证”有重复描述，以本机 skill 为通用操作真源；脑区只记录本工作区和项目特例。
@@ -53,5 +53,5 @@
 
 ## 4. daily_research continuous_policy 路由边界
 - `daily_research` 的 continuous_policy 细节只写入分脑；主脑只保留跨项目边界：该主线在未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
-- r20-r23 执行合同、r31 receiver 可执行闭包、r33 source clean-pass、r39 证据基线与 r40 end-to-end allocation layer 入口均属于 `daily_research` 分脑事实；不得在主脑展开 trial 指标、长 tag 或局部命令。
-- 全局教训：组合级 receiver/source/cash 必须作为同一个资金分配问题处理；单项 smoke、局部 guard 清零或短窗高分不能成为 promotion / live / active artifact 切换依据。
+- rXX references、trial 指标、长 tag、局部命令、Path20 / continuous_policy / deep_alpha 结论均属于 `daily_research` 分脑事实；不得在主脑展开或更新。
+- 全局教训：promotion / live / active artifact 切换不能由局部研究证据、单项 smoke、局部 guard 清零或短窗高分直接触发；必须回到目标分脑的正式 gate 与 active 边界。
