@@ -116,8 +116,46 @@ def test_protocol_parser_accepts_forecast_walkforward_stage_with_neural_policy_d
     assert args.forecast_include_static_context is False
     assert args.forecast_static_fields == "symbol,exchange,industry,liquidity_bucket,price_bucket"
     assert args.forecast_ranking_baseline == "none"
+    assert args.forecast_output_profile == "forecast_path_v1"
     assert args.forecast_loss_profile == "default"
+    assert args.forecast_decision_cost_bps == pytest.approx(20.0)
+    assert args.forecast_decision_hit_threshold_bps == pytest.approx(20.0)
+    assert args.forecast_decision_drawdown_penalty == pytest.approx(0.25)
     assert args.forecast_slot_diagnostics is False
+
+
+def test_protocol_parser_accepts_decision_utility_forecast_contract() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--stage",
+            "forecast-walkforward-study",
+            "--tag",
+            "unit_decision_output",
+            "--data-source",
+            "lake",
+            "--lake-dataset-id",
+            "policy_input_bundle__fixed",
+            "--forecast-loss-profile",
+            "decision_utility_v1",
+            "--forecast-selection-profile",
+            "decision_utility",
+            "--forecast-decision-cost-bps",
+            "25",
+            "--forecast-decision-hit-threshold-bps",
+            "15",
+            "--forecast-decision-drawdown-penalty",
+            "0.4",
+        ]
+    )
+    _validate_protocol_args(parser, args)
+
+    assert args.forecast_output_profile == "decision_utility_v1"
+    assert args.forecast_loss_profile == "decision_utility_v1"
+    assert args.forecast_selection_profile == "decision_utility"
+    assert args.forecast_decision_cost_bps == pytest.approx(25.0)
+    assert args.forecast_decision_hit_threshold_bps == pytest.approx(15.0)
+    assert args.forecast_decision_drawdown_penalty == pytest.approx(0.4)
 
 
 def test_protocol_accepts_forecast_resume_and_checkpoint_flags(tmp_path) -> None:

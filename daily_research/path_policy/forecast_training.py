@@ -21,6 +21,7 @@ from daily_research.path_policy.models import (
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
+    PATH20_DECISION_AUX_DIM,
     PATH20_FORECAST_AUX_DIM,
     Path20ForecasterMLP,
     SectorSlotMixerPath20Forecaster,
@@ -42,8 +43,9 @@ FORECAST_MODEL_FAMILIES = (
     "sector_slot_mixer_sequence",
 )
 FORECAST_CROSS_SECTIONAL_MODEL_FAMILIES = ("stock_mixer_sequence", "sector_slot_mixer_sequence")
-FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst")
-FORECAST_LOSS_PROFILES = ("default", "rank_aux", "multitask_v1")
+FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
+FORECAST_SELECTION_PROFILES = ("multiscale", "trend20", "short_burst", "decision_utility")
+FORECAST_LOSS_PROFILES = ("default", "rank_aux", "multitask_v1", "decision_utility_v1")
 FORECAST_RANKING_BASELINES = ("none", "lightgbm", "xgboost")
 FORECAST_RISK_AUX_NAMES = ("downside_floor_20d", "worst_1d_20d", "upside_20d")
 FORECAST_RANK_LOSS_WEIGHTS = {1: 0.0025, 3: 0.0050, 5: 0.0075, 10: 0.0075, 20: 0.0100}
@@ -127,9 +129,15 @@ class _ForecastDatasetView:
 
 
 class LinearLastDayPath20Forecaster(nn.Module):
-    def __init__(self, input_dim: int, horizon: int = PATH20_HORIZON) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        horizon: int = PATH20_HORIZON,
+        output_profile: str = "forecast_path_v1",
+    ) -> None:
         super().__init__()
-        self.base = LinearPath20Forecaster(input_dim=int(input_dim), horizon=int(horizon))
+        self.output_profile = str(output_profile or "forecast_path_v1").strip().lower()
+        self.base = LinearPath20Forecaster(input_dim=int(input_dim), horizon=int(horizon), output_profile=self.output_profile)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if x.ndim == 3:
@@ -138,13 +146,22 @@ class LinearLastDayPath20Forecaster(nn.Module):
 
 
 class MLPLastDayPath20Forecaster(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 192, dropout: float = 0.15, horizon: int = PATH20_HORIZON) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 192,
+        dropout: float = 0.15,
+        horizon: int = PATH20_HORIZON,
+        output_profile: str = "forecast_path_v1",
+    ) -> None:
         super().__init__()
+        self.output_profile = str(output_profile or "forecast_path_v1").strip().lower()
         self.base = Path20ForecasterMLP(
             input_dim=int(input_dim),
             hidden_dim=int(hidden_dim),
             dropout=float(dropout),
             horizon=int(horizon),
+            output_profile=self.output_profile,
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -190,12 +207,22 @@ def make_forecast_model(
     static_context_fields: tuple[str, ...] | list[str] | None = None,
     static_context_dropout: float = 0.20,
     slot_count: int = 8,
+    output_profile: str = "forecast_path_v1",
 ) -> nn.Module:
     family = str(family).strip()
+    output_profile = str(output_profile or "forecast_path_v1").strip().lower()
+    if output_profile not in FORECAST_OUTPUT_PROFILES:
+        raise ValueError(f"Unsupported forecast output profile: {output_profile}")
     if family == "linear_last_day":
-        return LinearLastDayPath20Forecaster(input_dim=input_dim, horizon=horizon)
+        return LinearLastDayPath20Forecaster(input_dim=input_dim, horizon=horizon, output_profile=output_profile)
     if family == "mlp_last_day":
-        return MLPLastDayPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout, horizon=horizon)
+        return MLPLastDayPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+            horizon=horizon,
+            output_profile=output_profile,
+        )
     if family == "gru_sequence":
         return GRUPath20Forecaster(
             input_dim=input_dim,
@@ -203,6 +230,7 @@ def make_forecast_model(
             dropout=dropout,
             horizon=horizon,
             num_layers=gru_layers,
+            output_profile=output_profile,
         )
     if family == "patch_transformer":
         requested_heads = max(int(transformer_heads), 1)
@@ -215,6 +243,7 @@ def make_forecast_model(
             num_layers=transformer_layers,
             num_heads=num_heads,
             dropout=dropout,
+            output_profile=output_profile,
         )
     if family == "gru_sequence_static_context":
         temporal = GRUPath20Forecaster(
@@ -234,6 +263,7 @@ def make_forecast_model(
             static_fields=static_context_fields,
             static_dropout=static_context_dropout,
             dropout=dropout,
+            output_profile=output_profile,
         )
     if family == "patch_transformer_static_context":
         requested_heads = max(int(transformer_heads), 1)
@@ -257,9 +287,16 @@ def make_forecast_model(
             static_fields=static_context_fields,
             static_dropout=static_context_dropout,
             dropout=dropout,
+            output_profile=output_profile,
         )
     if family == "stock_mixer_sequence":
-        return StockMixerPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, horizon=horizon, dropout=dropout)
+        return StockMixerPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            dropout=dropout,
+            output_profile=output_profile,
+        )
     if family == "sector_slot_mixer_sequence":
         return SectorSlotMixerPath20Forecaster(
             input_dim=input_dim,
@@ -267,6 +304,7 @@ def make_forecast_model(
             horizon=horizon,
             dropout=dropout,
             slot_count=slot_count,
+            output_profile=output_profile,
         )
     raise ValueError(f"Unsupported forecast model family: {family}")
 
@@ -293,6 +331,10 @@ def _forecast_resume_contract(
     optimizer_config: dict[str, Any],
     selection_profile: str,
     loss_profile: str = "default",
+    output_profile: str = "forecast_path_v1",
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
     static_context_schema: dict[str, Any] | None = None,
     symbol_vocab_fingerprint: str = "",
     industry_vocab_fingerprint: str = "",
@@ -310,6 +352,10 @@ def _forecast_resume_contract(
         "optimizer_config": _json_ready(optimizer_config),
         "selection_profile": str(selection_profile),
         "loss_profile": str(loss_profile or "default"),
+        "output_profile": str(output_profile or "forecast_path_v1"),
+        "decision_cost_bps": float(decision_cost_bps),
+        "decision_hit_threshold_bps": float(decision_hit_threshold_bps),
+        "decision_drawdown_penalty": float(decision_drawdown_penalty),
         "static_context_schema": _json_ready(static_context_schema or {"enabled": False}),
         "symbol_vocab_fingerprint": str(symbol_vocab_fingerprint or ""),
         "industry_vocab_fingerprint": str(industry_vocab_fingerprint or ""),
@@ -350,8 +396,12 @@ def _forecast_checkpoint_payload(
     training_config: dict[str, Any],
     optimizer_config: dict[str, Any],
     selection_profile: str,
-    loss_profile: str = "default",
     learning_rows: list[dict[str, Any]],
+    loss_profile: str = "default",
+    output_profile: str = "forecast_path_v1",
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
     static_context_schema: dict[str, Any] | None = None,
     symbol_vocab_fingerprint: str = "",
     industry_vocab_fingerprint: str = "",
@@ -388,6 +438,10 @@ def _forecast_checkpoint_payload(
             optimizer_config=optimizer_config,
             selection_profile=selection_profile,
             loss_profile=loss_profile,
+            output_profile=output_profile,
+            decision_cost_bps=decision_cost_bps,
+            decision_hit_threshold_bps=decision_hit_threshold_bps,
+            decision_drawdown_penalty=decision_drawdown_penalty,
             static_context_schema=static_context_schema,
             symbol_vocab_fingerprint=symbol_vocab_fingerprint,
             industry_vocab_fingerprint=industry_vocab_fingerprint,
@@ -449,6 +503,10 @@ def _validate_forecast_resume_checkpoint(
     optimizer_config: dict[str, Any],
     selection_profile: str,
     loss_profile: str = "default",
+    output_profile: str = "forecast_path_v1",
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> None:
     expected = _forecast_resume_contract(
         model_family=model_family,
@@ -461,6 +519,10 @@ def _validate_forecast_resume_checkpoint(
         optimizer_config=optimizer_config,
         selection_profile=selection_profile,
         loss_profile=loss_profile,
+        output_profile=output_profile,
+        decision_cost_bps=decision_cost_bps,
+        decision_hit_threshold_bps=decision_hit_threshold_bps,
+        decision_drawdown_penalty=decision_drawdown_penalty,
         static_context_schema=dataset_view.static_context_schema,
         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
         industry_vocab_fingerprint=dataset_view.industry_vocab_fingerprint,
@@ -584,6 +646,10 @@ def _forecast_loss(
     y_risk_scaled: torch.Tensor,
     *,
     loss_profile: str = "default",
+    target_scale: float = 100.0,
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> torch.Tensor:
     profile = str(loss_profile or "default").strip().lower()
     if profile not in FORECAST_LOSS_PROFILES:
@@ -618,6 +684,32 @@ def _forecast_loss(
         downside_target = y_risk_scaled[:, 0]
         downside_score = prediction["aux"][:, cum_count]
         loss = loss + 0.010 * pairwise_rank_loss(-downside_score, -downside_target)
+    if profile == "decision_utility_v1":
+        if "decision_aux" not in prediction:
+            raise ValueError("decision_utility_v1 loss requires decision_aux outputs.")
+        decision_aux = prediction["decision_aux"]
+        if int(decision_aux.shape[1]) != PATH20_DECISION_AUX_DIM:
+            raise ValueError(f"decision_aux must have width {PATH20_DECISION_AUX_DIM}.")
+        targets = _decision_utility_targets(
+            y_cum_scaled,
+            y_risk_scaled,
+            target_scale=float(target_scale),
+            cost_bps=float(decision_cost_bps),
+            hit_threshold_bps=float(decision_hit_threshold_bps),
+            drawdown_penalty=float(decision_drawdown_penalty),
+        )
+        utility_pred = decision_aux[:, :cum_count]
+        hit_logits = decision_aux[:, cum_count : cum_count * 2]
+        horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
+        utility_target = targets["utility_scaled"].to(dtype=utility_pred.dtype)
+        hit_target = targets["hit_label"].to(dtype=hit_logits.dtype)
+        best_horizon_index = targets["best_horizon_index"].to(device=horizon_logits.device, dtype=torch.long)
+        pred_decision_score = utility_pred.max(dim=1).values
+        future_decision_score = targets["decision_score_scaled"].to(dtype=pred_decision_score.dtype)
+        loss = loss + 0.20 * F.huber_loss(utility_pred, utility_target)
+        loss = loss + 0.05 * F.binary_cross_entropy_with_logits(hit_logits, hit_target)
+        loss = loss + 0.05 * F.cross_entropy(horizon_logits, best_horizon_index)
+        loss = loss + 0.05 * pairwise_rank_loss(pred_decision_score, future_decision_score)
     return loss
 
 
@@ -648,6 +740,59 @@ def _unpack_forecast_batch(batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tenso
         batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx = batch
         return batch_x, batch_y_daily, batch_y_cum, batch_y_risk, row_idx, None
     raise ValueError(f"forecast batch must contain 5 or 6 tensors, got {len(batch)}.")
+
+
+def _decision_utility_targets(
+    y_cum_scaled: torch.Tensor,
+    y_risk_scaled: torch.Tensor,
+    *,
+    target_scale: float,
+    cost_bps: float,
+    hit_threshold_bps: float,
+    drawdown_penalty: float,
+) -> dict[str, torch.Tensor]:
+    scale = max(float(target_scale), 1.0e-8)
+    y_cum = y_cum_scaled / scale
+    max_drawdown = y_risk_scaled[:, 0] / scale
+    horizons = torch.as_tensor(PATH20_CUMULATIVE_HORIZONS, dtype=y_cum.dtype, device=y_cum.device).reshape(1, -1)
+    horizon_scale = torch.sqrt(horizons / float(PATH20_HORIZON))
+    downside = torch.clamp(-max_drawdown, min=0.0).reshape(-1, 1)
+    utility = y_cum - float(cost_bps) / 10000.0 - float(drawdown_penalty) * downside * horizon_scale
+    hit_label = utility > (float(hit_threshold_bps) / 10000.0)
+    best_horizon_index = torch.argmax(utility, dim=1)
+    decision_score = utility.max(dim=1).values
+    return {
+        "utility": utility,
+        "utility_scaled": utility * scale,
+        "hit_label": hit_label,
+        "best_horizon_index": best_horizon_index,
+        "decision_score": decision_score,
+        "decision_score_scaled": decision_score * scale,
+    }
+
+
+def _decision_utility_targets_np(
+    y_cum: np.ndarray,
+    max_drawdown: np.ndarray,
+    *,
+    cost_bps: float,
+    hit_threshold_bps: float,
+    drawdown_penalty: float,
+) -> dict[str, np.ndarray]:
+    y_cum_arr = np.asarray(y_cum, dtype=np.float64)
+    max_dd = np.asarray(max_drawdown, dtype=np.float64).reshape(-1, 1)
+    horizons = np.asarray(PATH20_CUMULATIVE_HORIZONS, dtype=np.float64).reshape(1, -1)
+    utility = (
+        y_cum_arr
+        - float(cost_bps) / 10000.0
+        - float(drawdown_penalty) * np.maximum(0.0, -max_dd) * np.sqrt(horizons / float(PATH20_HORIZON))
+    )
+    return {
+        "utility": utility,
+        "hit_label": utility > (float(hit_threshold_bps) / 10000.0),
+        "best_horizon_index": np.argmax(utility, axis=1),
+        "decision_score": np.max(utility, axis=1),
+    }
 
 
 def _collate_forecast_date_batches(batch: list[tuple[torch.Tensor, ...]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -728,14 +873,18 @@ def _predict_all(
             batch = x[start : start + max(int(batch_size), 1)].to(resolved_device, non_blocking=resolved_device.type == "cuda")
             with _autocast_context(resolved_device, amp_enabled):
                 pred = _forecast_model_forward(model, batch)
+            if "decision_aux" in pred and "decision_aux" not in chunks:
+                chunks["decision_aux"] = []
             for key in chunks:
-                chunks[key].append(pred[key].detach().cpu().numpy())
+                if key in pred:
+                    chunks[key].append(pred[key].detach().cpu().numpy())
     empty_shapes = {
         "mu": (0, PATH20_HORIZON),
         "q10": (0, PATH20_HORIZON),
         "q50": (0, PATH20_HORIZON),
         "q90": (0, PATH20_HORIZON),
         "aux": (0, PATH20_FORECAST_AUX_DIM),
+        "decision_aux": (0, PATH20_DECISION_AUX_DIM),
     }
     return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
 
@@ -770,6 +919,8 @@ def _predict_indices(
                 "q90": np.empty((len(ordered_indices), PATH20_HORIZON), dtype=np.float32),
                 "aux": np.empty((len(ordered_indices), PATH20_FORECAST_AUX_DIM), dtype=np.float32),
             }
+            if str(getattr(model, "output_profile", "") or "") == "decision_utility_v1":
+                outputs["decision_aux"] = np.empty((len(ordered_indices), PATH20_DECISION_AUX_DIM), dtype=np.float32)
             loader = DataLoader(
                 dataset_view_or_x.date_batch_torch_dataset(ordered_indices, target_scale=target_scale),
                 batch_size=1,
@@ -783,6 +934,8 @@ def _predict_indices(
                     stock_mask = stock_mask_cpu.to(device, non_blocking=device.type == "cuda")
                     with _autocast_context(device, amp_enabled):
                         pred = _forecast_model_forward(model, batch_x, stock_mask=stock_mask)
+                    if "decision_aux" in pred and "decision_aux" not in outputs:
+                        outputs["decision_aux"] = np.empty((len(ordered_indices), PATH20_DECISION_AUX_DIM), dtype=np.float32)
                     valid = stock_mask.reshape(-1).detach().cpu().numpy().astype(bool)
                     row_ids = row_indices_cpu.reshape(-1).detach().cpu().numpy().astype(int)[valid]
                     for key in outputs:
@@ -808,14 +961,18 @@ def _predict_indices(
                 )
                 with _autocast_context(device, amp_enabled):
                     pred = _forecast_model_forward(model, batch, static_context_ids)
+                if "decision_aux" in pred and "decision_aux" not in chunks:
+                    chunks["decision_aux"] = []
                 for key in chunks:
-                    chunks[key].append(pred[key].detach().cpu().numpy())
+                    if key in pred:
+                        chunks[key].append(pred[key].detach().cpu().numpy())
         empty_shapes = {
             "mu": (0, PATH20_HORIZON),
             "q10": (0, PATH20_HORIZON),
             "q50": (0, PATH20_HORIZON),
             "q90": (0, PATH20_HORIZON),
             "aux": (0, PATH20_FORECAST_AUX_DIM),
+            "decision_aux": (0, PATH20_DECISION_AUX_DIM),
         }
         return {key: np.concatenate(values, axis=0) if values else np.empty(empty_shapes[key]) for key, values in chunks.items()}
     x = dataset_view_or_x
@@ -861,6 +1018,48 @@ def _top_bottom_spread_by_date(frame: pd.DataFrame, score_column: str, target_co
     return float(np.mean(values)) if values else 0.0
 
 
+def _add_decision_utility_columns(
+    columns: dict[str, Any],
+    *,
+    predictions: dict[str, np.ndarray],
+    y_cum: np.ndarray,
+    max_drawdown_20d: np.ndarray,
+    target_scale: float,
+    decision_cost_bps: float,
+    decision_hit_threshold_bps: float,
+    decision_drawdown_penalty: float,
+) -> None:
+    if "decision_aux" not in predictions:
+        return
+    decision_aux = np.asarray(predictions["decision_aux"], dtype=np.float64)
+    if decision_aux.size == 0:
+        return
+    cum_count = len(PATH20_CUMULATIVE_HORIZONS)
+    pred_utility = decision_aux[:, :cum_count] / max(float(target_scale), 1.0e-8)
+    hit_logits = decision_aux[:, cum_count : cum_count * 2]
+    horizon_logits = decision_aux[:, cum_count * 2 : cum_count * 3]
+    future = _decision_utility_targets_np(
+        y_cum,
+        max_drawdown_20d,
+        cost_bps=float(decision_cost_bps),
+        hit_threshold_bps=float(decision_hit_threshold_bps),
+        drawdown_penalty=float(decision_drawdown_penalty),
+    )
+    pred_hit_prob = 1.0 / (1.0 + np.exp(-np.clip(hit_logits, -60.0, 60.0)))
+    pred_best_idx = np.argmax(horizon_logits, axis=1)
+    pred_score = np.max(pred_utility, axis=1)
+    for pos, horizon in enumerate(PATH20_CUMULATIVE_HORIZONS):
+        columns[f"pred_decision_utility_{horizon}d"] = pred_utility[:, pos]
+        columns[f"future_decision_utility_{horizon}d"] = future["utility"][:, pos]
+        columns[f"pred_hit_prob_{horizon}d"] = pred_hit_prob[:, pos]
+        columns[f"future_hit_label_{horizon}d"] = future["hit_label"][:, pos].astype(int)
+    horizons = np.asarray(PATH20_CUMULATIVE_HORIZONS, dtype=int)
+    columns["pred_best_horizon"] = horizons[pred_best_idx]
+    columns["future_best_horizon"] = horizons[future["best_horizon_index"].astype(int)]
+    columns["pred_decision_score"] = pred_score
+    columns["future_decision_score"] = future["decision_score"]
+
+
 def _prediction_frame(
     dataset: ForecastSequenceDataset,
     *,
@@ -868,6 +1067,9 @@ def _prediction_frame(
     predictions: dict[str, np.ndarray],
     family: str,
     target_scale: float,
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> pd.DataFrame:
     mask = dataset.role == role
     idx = np.flatnonzero(mask)
@@ -897,6 +1099,16 @@ def _prediction_frame(
         columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
         columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
         columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    _add_decision_utility_columns(
+        columns,
+        predictions=predictions,
+        y_cum=y_cum,
+        max_drawdown_20d=dataset.y_max_drawdown_20d[idx],
+        target_scale=target_scale,
+        decision_cost_bps=decision_cost_bps,
+        decision_hit_threshold_bps=decision_hit_threshold_bps,
+        decision_drawdown_penalty=decision_drawdown_penalty,
+    )
     risk_start = len(PATH20_CUMULATIVE_HORIZONS)
     columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
     columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
@@ -919,6 +1131,9 @@ def _prediction_frame_for_indices(
     predictions: dict[str, np.ndarray],
     family: str,
     target_scale: float,
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> pd.DataFrame:
     if len(indices) == 0:
         return pd.DataFrame()
@@ -947,6 +1162,16 @@ def _prediction_frame_for_indices(
         columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
         columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
         columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+    _add_decision_utility_columns(
+        columns,
+        predictions=predictions,
+        y_cum=y_cum,
+        max_drawdown_20d=dataset.y_max_drawdown_20d[idx],
+        target_scale=target_scale,
+        decision_cost_bps=decision_cost_bps,
+        decision_hit_threshold_bps=decision_hit_threshold_bps,
+        decision_drawdown_penalty=decision_drawdown_penalty,
+    )
     risk_start = len(PATH20_CUMULATIVE_HORIZONS)
     columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
     columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
@@ -969,6 +1194,9 @@ def _prediction_frame_for_dataset_indices(
     predictions: dict[str, np.ndarray],
     family: str,
     target_scale: float,
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> pd.DataFrame:
     if isinstance(dataset, ForecastMemmapDataset):
         if len(indices) == 0:
@@ -1002,6 +1230,16 @@ def _prediction_frame_for_dataset_indices(
             columns[f"future_cum_excess_return_{horizon}d"] = y_cum[:, pos]
             columns[f"pred_cum_mu_{horizon}d"] = mu[:, :horizon].sum(axis=1)
             columns[f"pred_aux_cum_{horizon}d"] = aux[:, pos]
+        _add_decision_utility_columns(
+            columns,
+            predictions=predictions,
+            y_cum=y_cum,
+            max_drawdown_20d=dataset.y_max_drawdown_20d[idx],
+            target_scale=target_scale,
+            decision_cost_bps=decision_cost_bps,
+            decision_hit_threshold_bps=decision_hit_threshold_bps,
+            decision_drawdown_penalty=decision_drawdown_penalty,
+        )
         risk_start = len(PATH20_CUMULATIVE_HORIZONS)
         columns["pred_aux_downside_floor_20d"] = aux[:, risk_start]
         columns["pred_aux_worst_1d_20d"] = aux[:, risk_start + 1]
@@ -1021,6 +1259,9 @@ def _prediction_frame_for_dataset_indices(
         predictions=predictions,
         family=family,
         target_scale=target_scale,
+        decision_cost_bps=decision_cost_bps,
+        decision_hit_threshold_bps=decision_hit_threshold_bps,
+        decision_drawdown_penalty=decision_drawdown_penalty,
     )
 
 
@@ -1077,6 +1318,51 @@ def forecast_prediction_metrics(frame: pd.DataFrame) -> dict[str, Any]:
     else:
         metrics["rank_ic_upside_20d"] = 0.0
         metrics["top_bottom_spread_upside_20d"] = 0.0
+    if {"pred_decision_score", "future_decision_score", "pred_best_horizon", "future_best_horizon"}.issubset(frame.columns):
+        metrics["decision_score_rank_ic"] = _rank_ic_by_date(frame, "pred_decision_score", "future_decision_score")
+        metrics["decision_score_top_bottom_spread"] = _top_bottom_spread_by_date(
+            frame,
+            "pred_decision_score",
+            "future_decision_score",
+        )
+        hit_cols = [f"future_hit_label_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS]
+        if set(hit_cols).issubset(frame.columns):
+            hit_any = frame[hit_cols].apply(pd.to_numeric, errors="coerce").max(axis=1)
+            lifts: list[float] = []
+            for _, group in frame.assign(_future_decision_hit_any=hit_any).groupby("date", sort=True):
+                work = group[["pred_decision_score", "_future_decision_hit_any"]].copy()
+                work["pred_decision_score"] = pd.to_numeric(work["pred_decision_score"], errors="coerce")
+                work["_future_decision_hit_any"] = pd.to_numeric(work["_future_decision_hit_any"], errors="coerce")
+                work = work.dropna()
+                if len(work) < 2:
+                    continue
+                k = max(int(len(work) * 0.20), 1)
+                top_hit = float(work.nlargest(k, "pred_decision_score")["_future_decision_hit_any"].mean())
+                all_hit = float(work["_future_decision_hit_any"].mean())
+                lifts.append(top_hit - all_hit)
+            metrics["decision_hit_lift_top20_mean"] = float(np.mean(lifts)) if lifts else 0.0
+        else:
+            metrics["decision_hit_lift_top20_mean"] = 0.0
+        pred_horizon = pd.to_numeric(frame["pred_best_horizon"], errors="coerce")
+        future_horizon = pd.to_numeric(frame["future_best_horizon"], errors="coerce")
+        valid_horizon = pred_horizon.notna() & future_horizon.notna()
+        metrics["decision_best_horizon_accuracy"] = (
+            float((pred_horizon.loc[valid_horizon] == future_horizon.loc[valid_horizon]).mean())
+            if bool(valid_horizon.any())
+            else 0.0
+        )
+        decision_passed = (
+            float(metrics.get("decision_score_rank_ic", 0.0) or 0.0) > 0.0
+            and float(metrics.get("decision_score_top_bottom_spread", 0.0) or 0.0) > 0.0
+            and float(metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0) > 0.0
+        )
+        metrics["decision_utility_profile_status"] = "passed" if decision_passed else "failed"
+    else:
+        metrics["decision_score_rank_ic"] = 0.0
+        metrics["decision_score_top_bottom_spread"] = 0.0
+        metrics["decision_hit_lift_top20_mean"] = 0.0
+        metrics["decision_best_horizon_accuracy"] = 0.0
+        metrics["decision_utility_profile_status"] = "not_available"
     metrics["selected_signal_profile"] = forecast_signal_profile(metrics)
     return metrics
 
@@ -1138,6 +1424,12 @@ def forecast_signal_profile(metrics: dict[str, Any]) -> str:
 
 def _profile_pass(metrics: dict[str, Any], selection_profile: str) -> bool:
     profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "decision_utility":
+        return bool(
+            float(metrics.get("decision_score_rank_ic", 0.0) or 0.0) > 0.0
+            and float(metrics.get("decision_score_top_bottom_spread", 0.0) or 0.0) > 0.0
+            and float(metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0) > 0.0
+        )
     if profile == "trend20":
         return _horizon_gate(metrics, 20)
     if profile == "short_burst":
@@ -1149,6 +1441,15 @@ def _profile_score(metrics: dict[str, Any], validation_loss: float, coverage_ran
     if metrics.get("status") != "completed":
         return -float(validation_loss)
     profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "decision_utility":
+        gate_bonus = 1_000.0 if _profile_pass(metrics, profile) and _coverage_pass(metrics, coverage_range) else 0.0
+        return float(
+            gate_bonus
+            + float(metrics.get("decision_score_rank_ic", 0.0) or 0.0) * 10.0
+            + float(metrics.get("decision_score_top_bottom_spread", 0.0) or 0.0)
+            + float(metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0)
+            - max(float(validation_loss), 0.0) * 1.0e-3
+        )
     weights = FORECAST_PROFILE_HORIZON_WEIGHTS.get(profile, FORECAST_PROFILE_HORIZON_WEIGHTS["multiscale"])
     rank_score = sum(
         float(weight) * float(metrics.get(f"rank_ic_{int(horizon)}d", 0.0) or 0.0)
@@ -1437,9 +1738,11 @@ def _model_config_for_training(
     patch_sizes: tuple[int, ...] | list[int],
     dataset_view: _ForecastDatasetView,
     static_model_options: dict[str, Any],
+    output_profile: str = "forecast_path_v1",
 ) -> dict[str, Any]:
     return {
         "model_family": str(family),
+        "output_profile": str(output_profile or "forecast_path_v1"),
         "hidden_dim": int(hidden_dim),
         "dropout": float(dropout),
         "gru_layers": int(gru_layers),
@@ -1480,6 +1783,9 @@ def _evaluate_loss(
     amp_enabled: bool,
     target_scale: float = 100.0,
     loss_profile: str = "default",
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
 ) -> float:
     if len(indices) == 0:
         return float("inf")
@@ -1511,6 +1817,10 @@ def _evaluate_loss(
                             batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
                             batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
                             loss_profile=loss_profile,
+                            target_scale=target_scale,
+                            decision_cost_bps=decision_cost_bps,
+                            decision_hit_threshold_bps=decision_hit_threshold_bps,
+                            decision_drawdown_penalty=decision_drawdown_penalty,
                         )
                     values.append(float(loss.detach().cpu()))
                     counts.append(int(flat_mask.sum().detach().cpu()))
@@ -1535,7 +1845,17 @@ def _evaluate_loss(
                 )
                 with _autocast_context(device, amp_enabled):
                     pred = _forecast_model_forward(model, batch_x, static_context_ids)
-                    loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
+                    loss = _forecast_loss(
+                        pred,
+                        batch_y_daily,
+                        batch_y_cum,
+                        batch_y_risk,
+                        loss_profile=loss_profile,
+                        target_scale=target_scale,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
+                    )
                 values.append(float(loss.detach().cpu()))
                 counts.append(int(batch_x.shape[0]))
             total = sum(counts)
@@ -1550,7 +1870,17 @@ def _evaluate_loss(
             batch_y_risk = y_risk[batch_idx].to(device, non_blocking=device.type == "cuda")
             with _autocast_context(device, amp_enabled):
                 pred = _forecast_model_forward(model, batch_x)
-                loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
+                loss = _forecast_loss(
+                    pred,
+                    batch_y_daily,
+                    batch_y_cum,
+                    batch_y_risk,
+                    loss_profile=loss_profile,
+                    target_scale=target_scale,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
+                )
             values.append(float(loss.detach().cpu()))
             counts.append(int(batch_idx.numel()))
     total = sum(counts)
@@ -1583,6 +1913,11 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
         for item in seed_summaries.values()
         if dict(item.get("validation_metrics", {})).get("status") == "completed"
     ]
+    decision_scores = [
+        float(item.get("validation_decision_utility_score", 0.0) or 0.0)
+        for item in seed_summaries.values()
+        if dict(item.get("validation_metrics", {})).get("status") == "completed"
+    ]
     count = max(len(seed_summaries), 1)
     summary: dict[str, Any] = {
         "seed_count": int(len(seed_summaries)),
@@ -1592,6 +1927,7 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
         "validation_multiscale_score_std": float(np.std(multiscale_scores, ddof=0)) if multiscale_scores else 0.0,
         "validation_trend20_score_mean": float(np.mean(trend_scores)) if trend_scores else 0.0,
         "validation_short_burst_score_mean": float(np.mean(short_scores)) if short_scores else 0.0,
+        "validation_decision_utility_score_mean": float(np.mean(decision_scores)) if decision_scores else 0.0,
     }
     profile_counts: dict[str, int] = {"trend_20d": 0, "short_burst": 0, "multiscale": 0, "failed": 0}
     for metrics in completed_metrics:
@@ -1630,6 +1966,8 @@ def _family_summary(seed_summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
 
 def _selection_score_key(selection_profile: str) -> str:
     profile = str(selection_profile or "multiscale").strip().lower()
+    if profile == "decision_utility":
+        return "validation_decision_utility_score"
     if profile == "trend20":
         return "validation_trend20_score"
     if profile == "short_burst":
@@ -1706,7 +2044,11 @@ def train_forecast_models(
     save_last_checkpoint: bool = True,
     checkpoint_every_n_epochs: int = 0,
     progress_json_name: str = "forecast_progress.json",
+    output_profile: str = "forecast_path_v1",
     loss_profile: str = "default",
+    decision_cost_bps: float = 20.0,
+    decision_hit_threshold_bps: float = 20.0,
+    decision_drawdown_penalty: float = 0.25,
     ranking_baseline: str = "none",
     slot_diagnostics: bool = False,
 ) -> dict[str, Any]:
@@ -1727,9 +2069,22 @@ def train_forecast_models(
     selection_profile = str(selection_profile or "multiscale").strip().lower()
     if selection_profile not in FORECAST_SELECTION_PROFILES:
         raise ValueError(f"Unsupported forecast selection profile: {selection_profile}")
+    output_profile = str(output_profile or "forecast_path_v1").strip().lower()
+    if output_profile not in FORECAST_OUTPUT_PROFILES:
+        raise ValueError(f"Unsupported forecast output profile: {output_profile}")
     loss_profile = str(loss_profile or "default").strip().lower()
     if loss_profile not in FORECAST_LOSS_PROFILES:
         raise ValueError(f"Unsupported forecast loss profile: {loss_profile}")
+    if loss_profile == "decision_utility_v1" and output_profile != "decision_utility_v1":
+        raise ValueError("decision_utility_v1 loss requires output_profile=decision_utility_v1.")
+    if selection_profile == "decision_utility" and output_profile != "decision_utility_v1":
+        raise ValueError("decision_utility selection requires output_profile=decision_utility_v1.")
+    decision_config = {
+        "cost_bps": float(decision_cost_bps),
+        "hit_threshold_bps": float(decision_hit_threshold_bps),
+        "drawdown_penalty": float(decision_drawdown_penalty),
+        "horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
+    }
     ranking_baseline = str(ranking_baseline or "none").strip().lower()
     if ranking_baseline not in FORECAST_RANKING_BASELINES:
         ranking_baseline_summary = {
@@ -1849,6 +2204,7 @@ def train_forecast_models(
                 transformer_layers=int(transformer_layers),
                 transformer_heads=int(transformer_heads),
                 patch_sizes=tuple(int(item) for item in patch_sizes),
+                output_profile=output_profile,
                 **static_model_options,
             ).to(resolved_device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
@@ -1891,6 +2247,7 @@ def train_forecast_models(
                 patch_sizes=tuple(int(item) for item in patch_sizes),
                 dataset_view=dataset_view,
                 static_model_options=static_model_options,
+                output_profile=output_profile,
             )
             optimizer_config = {
                 "lr": float(lr),
@@ -1920,7 +2277,9 @@ def train_forecast_models(
                 "feature_profile": feature_profile,
                 "feature_count": int(dataset_view.input_dim),
                 "selection_profile": selection_profile,
+                "output_profile": str(output_profile),
                 "loss_profile": str(loss_profile),
+                "decision_utility": dict(decision_config),
                 "ranking_baseline": str(ranking_baseline),
                 "slot_diagnostics": bool(slot_diagnostics),
                 "static_context_schema": dict(dataset_view.static_context_schema),
@@ -1940,6 +2299,10 @@ def train_forecast_models(
                     optimizer_config=optimizer_config,
                     selection_profile=selection_profile,
                     loss_profile=loss_profile,
+                    output_profile=output_profile,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
                 )
                 model.load_state_dict(resume_payload["state_dict"])
                 optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
@@ -1989,6 +2352,10 @@ def train_forecast_models(
                                 batch_y_cum.reshape(-1, batch_y_cum.shape[-1])[flat_mask],
                                 batch_y_risk.reshape(-1, batch_y_risk.shape[-1])[flat_mask],
                                 loss_profile=loss_profile,
+                                target_scale=target_scale,
+                                decision_cost_bps=decision_cost_bps,
+                                decision_hit_threshold_bps=decision_hit_threshold_bps,
+                                decision_drawdown_penalty=decision_drawdown_penalty,
                             )
                         batch_count = int(flat_mask.sum().detach().cpu())
                     else:
@@ -2004,7 +2371,17 @@ def train_forecast_models(
                         )
                         with _autocast_context(resolved_device, amp_enabled):
                             pred = _forecast_model_forward(model, batch_x, static_context_ids)
-                            loss = _forecast_loss(pred, batch_y_daily, batch_y_cum, batch_y_risk, loss_profile=loss_profile)
+                            loss = _forecast_loss(
+                                pred,
+                                batch_y_daily,
+                                batch_y_cum,
+                                batch_y_risk,
+                                loss_profile=loss_profile,
+                                target_scale=target_scale,
+                                decision_cost_bps=decision_cost_bps,
+                                decision_hit_threshold_bps=decision_hit_threshold_bps,
+                                decision_drawdown_penalty=decision_drawdown_penalty,
+                            )
                         batch_count = int(batch_x.shape[0])
                     epoch_losses.append(float(loss.detach().cpu()))
                     epoch_counts.append(batch_count)
@@ -2030,6 +2407,9 @@ def train_forecast_models(
                     amp_enabled=amp_enabled,
                     target_scale=target_scale,
                     loss_profile=loss_profile,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
                 )
                 validation_predictions = _predict_indices(
                     model,
@@ -2046,6 +2426,9 @@ def train_forecast_models(
                     predictions=validation_predictions,
                     family=family,
                     target_scale=target_scale,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
                 )
                 validation_metrics = forecast_prediction_metrics(validation_frame)
                 score = _validation_score(validation_metrics, validation_loss, (0.65, 0.95), selection_profile)
@@ -2084,6 +2467,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         loss_profile=loss_profile,
+                        output_profile=output_profile,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -2113,6 +2500,13 @@ def train_forecast_models(
                         "rank_ic_upside_20d": float(validation_metrics.get("rank_ic_upside_20d", 0.0) or 0.0),
                         "top_bottom_spread_upside_20d": float(
                             validation_metrics.get("top_bottom_spread_upside_20d", 0.0) or 0.0
+                        ),
+                        "decision_score_rank_ic": float(validation_metrics.get("decision_score_rank_ic", 0.0) or 0.0),
+                        "decision_score_top_bottom_spread": float(
+                            validation_metrics.get("decision_score_top_bottom_spread", 0.0) or 0.0
+                        ),
+                        "decision_hit_lift_top20_mean": float(
+                            validation_metrics.get("decision_hit_lift_top20_mean", 0.0) or 0.0
                         ),
                         "q10_coverage_mean": float(validation_metrics.get("q10_coverage_mean", 0.0) or 0.0),
                         "q90_coverage_mean": float(validation_metrics.get("q90_coverage_mean", 0.0) or 0.0),
@@ -2150,6 +2544,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         loss_profile=loss_profile,
+                        output_profile=output_profile,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -2188,6 +2586,10 @@ def train_forecast_models(
                         optimizer_config=optimizer_config,
                         selection_profile=selection_profile,
                         loss_profile=loss_profile,
+                        output_profile=output_profile,
+                        decision_cost_bps=decision_cost_bps,
+                        decision_hit_threshold_bps=decision_hit_threshold_bps,
+                        decision_drawdown_penalty=decision_drawdown_penalty,
                         learning_rows=learning_rows,
                         static_context_schema=dataset_view.static_context_schema,
                         symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -2250,6 +2652,10 @@ def train_forecast_models(
                     optimizer_config=optimizer_config,
                     selection_profile=selection_profile,
                     loss_profile=loss_profile,
+                    output_profile=output_profile,
+                    decision_cost_bps=decision_cost_bps,
+                    decision_hit_threshold_bps=decision_hit_threshold_bps,
+                    decision_drawdown_penalty=decision_drawdown_penalty,
                     learning_rows=learning_rows,
                     static_context_schema=dataset_view.static_context_schema,
                     symbol_vocab_fingerprint=dataset_view.symbol_vocab_fingerprint,
@@ -2283,6 +2689,9 @@ def train_forecast_models(
                 predictions=validation_predictions,
                 family=family,
                 target_scale=target_scale,
+                decision_cost_bps=decision_cost_bps,
+                decision_hit_threshold_bps=decision_hit_threshold_bps,
+                decision_drawdown_penalty=decision_drawdown_penalty,
             )
             test_frame = _prediction_frame_for_dataset_indices(
                 dataset,
@@ -2290,6 +2699,9 @@ def train_forecast_models(
                 predictions=test_predictions,
                 family=family,
                 target_scale=target_scale,
+                decision_cost_bps=decision_cost_bps,
+                decision_hit_threshold_bps=decision_hit_threshold_bps,
+                decision_drawdown_penalty=decision_drawdown_penalty,
             )
             final_validation_metrics = forecast_prediction_metrics(validation_frame)
             final_test_metrics = forecast_prediction_metrics(test_frame)
@@ -2309,6 +2721,12 @@ def train_forecast_models(
                 best_validation_loss,
                 (0.65, 0.95),
                 "short_burst",
+            )
+            final_decision_utility_score = _profile_score(
+                final_validation_metrics,
+                best_validation_loss,
+                (0.65, 0.95),
+                "decision_utility",
             )
             if bool(write_all_predictions):
                 _write_frame(
@@ -2339,11 +2757,13 @@ def train_forecast_models(
                 "validation_multiscale_score": float(final_multiscale_score),
                 "validation_trend20_score": float(final_trend20_score),
                 "validation_short_burst_score": float(final_short_burst_score),
+                "validation_decision_utility_score": float(final_decision_utility_score),
                 "validation_selection_score": float(
                     {
                         "multiscale": final_multiscale_score,
                         "trend20": final_trend20_score,
                         "short_burst": final_short_burst_score,
+                        "decision_utility": final_decision_utility_score,
                     }[selection_profile]
                 ),
                 "checkpoint_pt": str(best_checkpoint_path.resolve()),
@@ -2364,7 +2784,9 @@ def train_forecast_models(
             "hidden_dim": int(hidden_dim),
             "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
+            "output_profile": str(output_profile),
             "loss_profile": str(loss_profile),
+            "decision_utility": dict(decision_config),
             "slot_diagnostics": bool(slot_diagnostics),
             "train_rows": int(len(train_indices)),
             "validation_rows": int(len(validation_indices)),
@@ -2398,6 +2820,7 @@ def train_forecast_models(
             transformer_layers=int(transformer_layers),
             transformer_heads=int(transformer_heads),
             patch_sizes=tuple(int(item) for item in patch_sizes),
+            output_profile=output_profile,
             **static_model_options,
         ).to(resolved_device)
         checkpoint = torch.load(selected_checkpoint_path, map_location=resolved_device, weights_only=False)
@@ -2426,6 +2849,9 @@ def train_forecast_models(
             predictions=validation_predictions_np,
             family=selected_family,
             target_scale=target_scale,
+            decision_cost_bps=decision_cost_bps,
+            decision_hit_threshold_bps=decision_hit_threshold_bps,
+            decision_drawdown_penalty=decision_drawdown_penalty,
         )
         selected_predictions_test = _prediction_frame_for_dataset_indices(
             dataset,
@@ -2433,6 +2859,9 @@ def train_forecast_models(
             predictions=test_predictions_np,
             family=selected_family,
             target_scale=target_scale,
+            decision_cost_bps=decision_cost_bps,
+            decision_hit_threshold_bps=decision_hit_threshold_bps,
+            decision_drawdown_penalty=decision_drawdown_penalty,
         )
     else:
         selected_predictions_validation = pd.DataFrame()
@@ -2482,7 +2911,9 @@ def train_forecast_models(
             "feature_profile": feature_profile,
             "feature_count": int(dataset_view.input_dim),
             "selection_profile": selection_profile,
+            "output_profile": str(output_profile),
             "loss_profile": str(loss_profile),
+            "decision_utility": dict(decision_config),
             "ranking_baseline": str(ranking_baseline),
             "slot_diagnostics": bool(slot_diagnostics),
             "save_last_checkpoint": bool(save_last_checkpoint),
@@ -2505,6 +2936,9 @@ def train_forecast_models(
         "selection_rule": f"{selection_profile}_validation_score_after_profile_and_coverage_gates_then_seed_score",
         "selected_signal_profile": selected_signal_profile,
         "validation_multiscale_score": float(selected_seed_summary.get("validation_multiscale_score", 0.0) or 0.0),
+        "validation_decision_utility_score": float(
+            selected_seed_summary.get("validation_decision_utility_score", 0.0) or 0.0
+        ),
         "validation_selection_score": float(selected_seed_summary.get("validation_selection_score", 0.0) or 0.0),
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,

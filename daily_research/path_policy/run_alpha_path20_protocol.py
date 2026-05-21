@@ -34,7 +34,13 @@ from daily_research.path_policy.forecast_features import (
     DEFAULT_FORECAST_MAX_FEATURE_COLUMNS,
     FORECAST_FEATURE_PROFILES,
 )
-from daily_research.path_policy.forecast_training import FORECAST_MODEL_FAMILIES, train_forecast_models
+from daily_research.path_policy.forecast_training import (
+    FORECAST_LOSS_PROFILES,
+    FORECAST_MODEL_FAMILIES,
+    FORECAST_OUTPUT_PROFILES,
+    FORECAST_SELECTION_PROFILES,
+    train_forecast_models,
+)
 from daily_research.path_policy.labels import PATH20_HORIZON, build_path20_dataset_frame
 from daily_research.path_policy.models import (
     LinearPath20Forecaster,
@@ -680,7 +686,11 @@ def _run_forecast_walkforward_study(
             resume_from=str(args.forecast_resume_from or ""),
             save_last_checkpoint=bool(args.forecast_save_last),
             checkpoint_every_n_epochs=int(args.forecast_checkpoint_every_n_epochs),
+            output_profile=str(args.forecast_output_profile),
             loss_profile=str(args.forecast_loss_profile),
+            decision_cost_bps=float(args.forecast_decision_cost_bps),
+            decision_hit_threshold_bps=float(args.forecast_decision_hit_threshold_bps),
+            decision_drawdown_penalty=float(args.forecast_decision_drawdown_penalty),
             ranking_baseline=str(args.forecast_ranking_baseline),
             slot_diagnostics=bool(args.forecast_slot_diagnostics),
         )
@@ -3340,9 +3350,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Comma-separated static context fields: symbol,exchange,industry,board,liquidity_bucket,price_bucket.",
     )
     parser.add_argument("--forecast-ranking-baseline", default="none", choices=("none", "lightgbm", "xgboost"))
-    parser.add_argument("--forecast-loss-profile", default="default", choices=("default", "rank_aux", "multitask_v1"))
+    parser.add_argument("--forecast-output-profile", default="forecast_path_v1", choices=FORECAST_OUTPUT_PROFILES)
+    parser.add_argument("--forecast-loss-profile", default="default", choices=FORECAST_LOSS_PROFILES)
+    parser.add_argument("--forecast-decision-cost-bps", type=float, default=20.0)
+    parser.add_argument("--forecast-decision-hit-threshold-bps", type=float, default=20.0)
+    parser.add_argument("--forecast-decision-drawdown-penalty", type=float, default=0.25)
     parser.add_argument("--forecast-slot-diagnostics", action="store_true")
-    parser.add_argument("--forecast-selection-profile", default="multiscale", choices=("multiscale", "trend20", "short_burst"))
+    parser.add_argument("--forecast-selection-profile", default="multiscale", choices=FORECAST_SELECTION_PROFILES)
     parser.add_argument("--forecast-feature-profile", default=DEFAULT_FORECAST_FEATURE_PROFILE, choices=FORECAST_FEATURE_PROFILES)
     parser.add_argument("--forecast-max-feature-columns", type=int, default=DEFAULT_FORECAST_MAX_FEATURE_COLUMNS)
     parser.add_argument("--forecast-max-samples-per-role", type=int, default=0)
@@ -3441,6 +3455,20 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
             normalize_static_context_fields(str(getattr(args, "forecast_static_fields", "")))
         except ValueError as exc:
             parser.error(str(exc))
+        if str(getattr(args, "forecast_loss_profile", "default")) == "decision_utility_v1" or str(
+            getattr(args, "forecast_selection_profile", "multiscale")
+        ) == "decision_utility":
+            args.forecast_output_profile = "decision_utility_v1"
+        if str(getattr(args, "forecast_output_profile", "forecast_path_v1")) == "decision_utility_v1" and str(
+            getattr(args, "forecast_loss_profile", "default")
+        ) == "default":
+            args.forecast_loss_profile = "decision_utility_v1"
+        if float(getattr(args, "forecast_decision_cost_bps", 20.0)) < 0.0:
+            parser.error("--forecast-decision-cost-bps must be non-negative.")
+        if float(getattr(args, "forecast_decision_hit_threshold_bps", 20.0)) < 0.0:
+            parser.error("--forecast-decision-hit-threshold-bps must be non-negative.")
+        if float(getattr(args, "forecast_decision_drawdown_penalty", 0.25)) < 0.0:
+            parser.error("--forecast-decision-drawdown-penalty must be non-negative.")
         resume_from = str(getattr(args, "forecast_resume_from", "") or "").strip()
         if resume_from and not Path(resume_from).exists():
             parser.error("--forecast-resume-from must point to an existing checkpoint.")

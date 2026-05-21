@@ -7,6 +7,7 @@ from daily_research.path_policy.models import (
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     NeuralTargetWeightPolicy,
+    PATH20_DECISION_AUX_DIM,
     PatchTransformerPath20Forecaster,
     Path20ForecasterMLP,
     PathPolicyModelConfig,
@@ -34,6 +35,30 @@ def test_forecaster_variants_emit_path20_contract() -> None:
         assert prediction["aux"].shape == (6, 8)
         assert torch.all(prediction["q10"] <= prediction["q50"])
         assert torch.all(prediction["q50"] <= prediction["q90"])
+
+
+def test_forecaster_variants_emit_optional_decision_utility_head() -> None:
+    x2 = torch.randn(6, 5)
+    x3 = torch.randn(6, 4, 5)
+    models = [
+        LinearPath20Forecaster(input_dim=5, output_profile="decision_utility_v1"),
+        Path20ForecasterMLP(input_dim=5, hidden_dim=16, output_profile="decision_utility_v1"),
+        DLinearPath20Forecaster(input_dim=5, hidden_dim=8, output_profile="decision_utility_v1"),
+        GRUPath20Forecaster(input_dim=5, hidden_dim=8, output_profile="decision_utility_v1"),
+        PatchTransformerPath20Forecaster(
+            input_dim=5,
+            hidden_dim=8,
+            num_heads=2,
+            num_layers=1,
+            output_profile="decision_utility_v1",
+        ),
+    ]
+    for model in models:
+        prediction = model(x3 if model.__class__.__name__ not in {"Path20ForecasterMLP", "LinearPath20Forecaster"} else x2)
+        assert set(prediction) == {"mu", "q10", "q50", "q90", "aux", "decision_aux"}
+        assert prediction["mu"].shape == (6, 20)
+        assert prediction["aux"].shape == (6, 8)
+        assert prediction["decision_aux"].shape == (6, PATH20_DECISION_AUX_DIM)
 
 
 def test_sequence_forecasters_use_temporal_pooling_and_position_information() -> None:

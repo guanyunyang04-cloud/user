@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 44,
+  "record_count": 45,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -37,6 +37,34 @@
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_pool_view__8161f6879815d3a22dd3b3f2"
+      ]
+    },
+    {
+      "id": "alpha_path20_decision_output_result_20260521",
+      "date": "2026-05-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_decision_output_result_20260521.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_decision_output_liquid500_sector_v1_20260521_01"
+      ],
+      "verdict": "Status: `forecast decision-output study / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_decision_output_liquid500_sector_v1_20260521_01`.; Evidence verdict: `forecast_promising`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Inspect why validation decision spread did not transfer to test before increasing universe size or seeds.",
+        "Compare alternative decision score definitions, especially expected utility aggregation versus horizon-logit selected utility.",
+        "Review whether the drawdown penalty or hit threshold is too aggressive for 2024 test distribution.",
+        "If continuing, prefer narrow output-target ablations on liquid500 before moving to liquid800."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
       ]
     },
     {

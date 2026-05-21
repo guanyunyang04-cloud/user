@@ -184,6 +184,132 @@ def test_train_forecast_models_records_loss_profile_in_summary_and_resume_contra
     assert checkpoint["training_config"]["loss_profile"] == "rank_aux"
 
 
+def test_decision_utility_targets_and_loss_are_finite() -> None:
+    from daily_research.path_policy.forecast_training import _decision_utility_targets, _forecast_loss
+
+    y_cum = torch.tensor([[0.010, 0.020, 0.015, 0.030, 0.025]], dtype=torch.float32)
+    y_risk = torch.tensor([[-0.040, -0.020, 0.060]], dtype=torch.float32)
+
+    targets = _decision_utility_targets(
+        y_cum,
+        y_risk,
+        target_scale=1.0,
+        cost_bps=20.0,
+        hit_threshold_bps=20.0,
+        drawdown_penalty=0.25,
+    )
+
+    expected = y_cum - 0.002 - 0.25 * 0.04 * torch.sqrt(torch.tensor([[1, 3, 5, 10, 20]], dtype=torch.float32) / 20.0)
+    assert torch.allclose(targets["utility"], expected, atol=1.0e-7)
+    assert torch.equal(targets["hit_label"], expected > 0.002)
+    assert targets["best_horizon_index"].item() == int(torch.argmax(expected, dim=1).item())
+
+    prediction = {
+        "mu": torch.zeros(4, 20),
+        "q10": torch.full((4, 20), -0.01),
+        "q50": torch.zeros(4, 20),
+        "q90": torch.full((4, 20), 0.01),
+        "aux": torch.zeros(4, 8),
+        "decision_aux": torch.randn(4, 15) * 0.01,
+    }
+    loss = _forecast_loss(
+        prediction,
+        torch.randn(4, 20) * 0.01,
+        torch.randn(4, 5) * 0.01,
+        torch.randn(4, 3) * 0.01,
+        loss_profile="decision_utility_v1",
+        target_scale=1.0,
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=20.0,
+        decision_drawdown_penalty=0.25,
+    )
+    assert torch.isfinite(loss)
+
+
+def test_train_forecast_models_records_decision_output_contract_predictions_and_resume_mismatch(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("linear_last_day",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="decision_utility_v1",
+        selection_profile="decision_utility",
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=20.0,
+        decision_drawdown_penalty=0.25,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["output_profile"] == "decision_utility_v1"
+    assert summary["training_config"]["decision_utility"]["cost_bps"] == pytest.approx(20.0)
+    assert "decision_score_rank_ic" in summary["validation_metrics"]
+    assert "decision_utility_profile_status" in summary["validation_metrics"]
+
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert {
+        "pred_decision_utility_1d",
+        "future_decision_utility_20d",
+        "pred_hit_prob_5d",
+        "future_hit_label_10d",
+        "pred_best_horizon",
+        "future_best_horizon",
+        "pred_decision_score",
+        "future_decision_score",
+    }.issubset(validation_predictions.columns)
+
+    seed_summary = summary["models"]["linear_last_day"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["output_profile"] == "decision_utility_v1"
+    assert checkpoint["resume_contract"]["decision_cost_bps"] == pytest.approx(20.0)
+    assert checkpoint["training_config"]["decision_utility"]["drawdown_penalty"] == pytest.approx(0.25)
+
+    with pytest.raises(ValueError, match="decision_cost_bps"):
+        train_forecast_models(
+            dataset,
+            study_root=tmp_path / "resume_mismatch",
+            model_families=("linear_last_day",),
+            epochs=2,
+            min_epochs=2,
+            early_stop_patience=5,
+            batch_size=4,
+            lr=1.0e-3,
+            hidden_dim=24,
+            dropout=0.0,
+            seeds=(7,),
+            device="cpu",
+            amp=False,
+            output_profile="decision_utility_v1",
+            loss_profile="decision_utility_v1",
+            selection_profile="decision_utility",
+            decision_cost_bps=25.0,
+            decision_hit_threshold_bps=20.0,
+            decision_drawdown_penalty=0.25,
+            resume_from=seed_summary["last_checkpoint_pt"],
+        )
+
+
 def test_ranking_baseline_dependency_missing_reports_status(tmp_path) -> None:
     prepared = make_prepared_policy_inputs(days=420, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2019-07-01")
     dataset = build_forecast_memmap_dataset(
@@ -624,3 +750,34 @@ def test_forecast_prediction_metrics_accepts_amp_float16_predictions() -> None:
     assert metrics["status"] == "completed"
     assert "top_bottom_spread_20d" in metrics
     assert "top_bottom_spread_upside_20d" in metrics
+
+
+def test_forecast_prediction_metrics_scores_decision_utility_columns() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": ["2023-01-03"] * 5,
+            "stock": ["AAA", "BBB", "CCC", "DDD", "EEE"],
+            "pred_decision_score": [0.05, 0.04, 0.01, -0.01, -0.02],
+            "future_decision_score": [0.06, 0.03, 0.00, -0.01, -0.03],
+            "pred_best_horizon": [5, 5, 3, 1, 1],
+            "future_best_horizon": [5, 3, 3, 1, 10],
+        }
+    )
+    for horizon in (1, 3, 5, 10, 20):
+        frame[f"future_cum_excess_return_{horizon}d"] = [0.01, 0.00, -0.01, 0.02, -0.02]
+        frame[f"pred_cum_mu_{horizon}d"] = [0.02, 0.01, -0.02, 0.01, -0.03]
+        frame[f"future_hit_label_{horizon}d"] = [1, 1, 0, 0, 0]
+    frame["future_path_upside_capture_20d"] = [0.02, 0.01, 0.00, -0.01, -0.02]
+    frame["pred_aux_upside_20d"] = [0.02, 0.01, 0.00, -0.01, -0.02]
+    for step in range(1, 21):
+        frame[f"target_excess_{step}d"] = [0.001, 0.001, 0.000, -0.001, -0.001]
+        frame[f"pred_q10_{step}d"] = [-0.01] * 5
+        frame[f"pred_q90_{step}d"] = [0.01] * 5
+
+    metrics = forecast_prediction_metrics(frame)
+
+    assert metrics["decision_score_rank_ic"] > 0.0
+    assert metrics["decision_score_top_bottom_spread"] > 0.0
+    assert metrics["decision_hit_lift_top20_mean"] > 0.0
+    assert metrics["decision_best_horizon_accuracy"] == pytest.approx(0.6)
+    assert metrics["decision_utility_profile_status"] == "passed"
