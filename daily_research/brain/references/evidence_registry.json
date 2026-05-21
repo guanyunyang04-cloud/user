@@ -1,10 +1,90 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 40,
+  "record_count": 44,
   "duplicates": [],
   "missing_paths": [],
   "records": [
+    {
+      "id": "alpha_path20_arch_gain_result_20260521",
+      "date": "2026-05-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_arch_gain_result_20260521.md",
+      "tags": [
+        "path_policy",
+        "data_lake",
+        "gpu"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_arch_gain_liquid800_sector_v1_20260520_01",
+        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid800_gru_seed7_probe_20260519_01"
+      ],
+      "verdict": "Status: `forecast architecture-gain study / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Scope: controlled Path20 forecast architecture comparison on repaired data lake inputs.; `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Review why liquid800 static/sector context improved validation but weakened test versus the old liquid800 GRU baseline.",
+        "Compare raw-context versus sector-context liquid800 under the same family and seed before adding more model families.",
+        "Inspect selection-rule robustness: validation-selected `sector_slot_mixer_sequence` had weak liquid800 test transfer, while `stock_mixer_sequence` had stronger test spread but weaker validation.",
+        "If training continues, prefer a narrow ablation on input/static context and selection rules before increasing seeds, universe size, or allocator complexity."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_pool_view__8161f6879815d3a22dd3b3f2"
+      ]
+    },
+    {
+      "id": "alpha_path20_frontier_outputs_20260520",
+      "date": "2026-05-20",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_frontier_outputs_20260520.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_pool_liquid500_sector_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid800_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid500_gru_seed7_probe_20260519_01",
+        "path20_pool_liquid300_gru_seed7_probe_20260519_01",
+        "path20_memmap_training_smoke_full_gru_reuse_20260518_01",
+        "path20_memmap_training_smoke_cap80_gru_patch_20260518_01",
+        "path20_memmap_training_smoke_cap80_20260518_02",
+        "path20_memmap_dataset_liquid500_sector_probe_20260519_01",
+        "path20_memmap_dataset_liquid800_probe_20260519_01",
+        "path20_memmap_dataset_liquid500_probe_20260519_01",
+        "path20_memmap_dataset_liquid300_probe_20260519_01",
+        "path20_memmap_dataset_full_repaired_20260518_01"
+      ],
+      "verdict": "Status: `frontier output freshness writeback / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Scope: compact registration for recent Path20 memmap datasets and GRU probes from 2026-05-18/19.; `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.",
+      "blockers": [
+        "`path20_memmap_training_smoke_cap80_20260518_02`: completed run with verdict `forecast_failed`; diagnostic only and not completed positive evidence.",
+        "`path20_memmap_dataset_liquid500_sector_probe_20260519_01`: completed memmap dataset build, verdict `insufficient_or_incomplete` because it is dataset-only, dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, pool view `policy_pool_view__c11400fa72ad263f3d1eecfa`, sector/board view `policy_sector_board_view__4b07bb20fe1fbe05b6e13f45`, feature profile `raw_kline_context_sector_v1`, universe size `2430`.",
+        "`path20_memmap_dataset_liquid800_probe_20260519_01`: completed memmap dataset build, verdict `insufficient_or_incomplete` because it is dataset-only, dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, pool view `policy_pool_view__8161f6879815d3a22dd3b3f2`, feature profile `raw_kline_context_v1`, universe size `2813`.",
+        "`path20_memmap_dataset_liquid500_probe_20260519_01`: completed memmap dataset build, verdict `insufficient_or_incomplete` because it is dataset-only, dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, pool view `policy_pool_view__c11400fa72ad263f3d1eecfa`, feature profile `raw_kline_context_v1`.",
+        "`path20_memmap_dataset_liquid300_probe_20260519_01`: completed memmap dataset build, verdict `insufficient_or_incomplete` because it is dataset-only, dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, pool view `policy_pool_view__ef6e9054e28cf5a71c6996e4`, feature profile `raw_kline_context_v1`.",
+        "`path20_memmap_dataset_full_repaired_20260518_01`: completed full repaired memmap dataset build, verdict `insufficient_or_incomplete` because it is dataset-only, dataset id `policy_input_bundle__7c8f58d851bce8179e1e9e2d`, universe size `3070`."
+      ],
+      "next_allowed_actions": [
+        "Run shadow-only liquid500 sector architecture-gain training with `gru_sequence_static_context`, `patch_transformer_static_context`, `stock_mixer_sequence`, and `sector_slot_mixer_sequence`.",
+        "Gate any liquid800 expansion on validation/test-positive Stage 1 evidence."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
+        "policy_pool_view__8161f6879815d3a22dd3b3f2",
+        "policy_pool_view__ef6e9054e28cf5a71c6996e4"
+      ]
+    },
     {
       "id": "alpha_path20_mainline_switch_status_20260517",
       "date": "2026-05-17",
@@ -14,7 +94,11 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_sequence_policy_v1",
+        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01"
+      ],
       "verdict": "Status: `current path20 research mainline pointer / research / shadow-only / neural-policy route`.; User decision on 2026-05-17 switches the current Path20 research mainline pointer to `alpha_path20_neural_policy_v1`.; The Path20 research mainline is intentionally switchable; this record is the current routing state, not a permanent hierarchy.; `alpha_path20_sequence_policy_v1` remains available as a shadow comparison / secondary research route, but is no longer the current Path20 mainline.",
       "blockers": [],
       "next_allowed_actions": [
@@ -37,7 +121,12 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_stage1_formal_cap80_result_20260518",
+        "path20_stage1_formal_cap80_repaired_20260518_01",
+        "alpha_path20_stage1_feature_ablation_result_20260518"
+      ],
       "verdict": "Status: `implemented supervised forecast contract / research / shadow-only / no promotion`.; Current Path20 research mainline pointer remains `alpha_path20_neural_policy_v1`.; Stage 1 scope is only forecast validation: past stock state sequence -> future 20 trading-day excess-return path.; This is not allocator, oracle, replay, or live/default strategy evidence.",
       "blockers": [
         "Training summaries include `selected_signal_profile`, one of `multiscale`, `trend_20d`, `short_burst`, or `failed`.",
@@ -66,7 +155,13 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_mainline_switch_status_20260517",
+        "alpha_path20_sequence_policy_v1",
+        "alpha_path20_neural_policy_v1_tiny_smoke_20260516_01",
+        "alpha_path20_dataset__e96ad3bf15b4df878feb1aca"
+      ],
       "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. See `daily_research/brain/references/alpha_path20_mainline_switch_status_20260517.md`.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; The older 2026-05-16 status below is retained as historical context only.; Superseded 2026-05-16 status: `legacy / diagnostic-only / no-new-mainline-budget`.",
       "blockers": [
         "The negative linear forecaster smoke is expected at 2 epochs on a tiny slice; it should be treated as a baseline plumbing result, not a failure of the full direction."
@@ -92,7 +187,10 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v1",
+        "alpha_path20_neural_policy_v1"
+      ],
       "verdict": "2026-05-17 route-switch update: the current Path20 research mainline pointer is switched to `alpha_path20_neural_policy_v1` by user decision. `alpha_path20_sequence_policy_v1` remains a shadow comparison / secondary research route.; Path20 research mainline is a switchable routing state, not a permanent hierarchy.; Superseded 2026-05-16 status: `main path20 research line / research / shadow-only / sequence-policy RL loop`.; Superseded 2026-05-16 statement: `alpha_path20_sequence_policy_v1` was the only active path20 main research route after the 2026-05-16 route consolidation.",
       "blockers": [
         "Projection mismatch warnings downgrade evidence interpretation to `insufficient_or_incomplete`."
@@ -118,7 +216,13 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v2",
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_sequence_policy_v1",
+        "alpha_path20_sequence_policy_v3_walkforward_matrix_contract_20260517",
+        "alpha_path20_mainline_switch_status_20260517"
+      ],
       "verdict": "2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, this v2 sequence/RL contract is shadow comparison evidence.; v2 sequence/RL evidence becomes current Path20 mainline evidence only after an explicit future pointer switch.; This contract remains valid for annual episode-loop mechanics and leakage/replay boundaries.",
       "blockers": [],
       "next_allowed_actions": [],
@@ -134,7 +238,10 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v3",
+        "path20_v3_full_year_matrix_20260517_01"
+      ],
       "verdict": "The v3 evidence loop is operational, but the strategy has not proved validation alpha.; 2024 positive test numbers must not be interpreted as success because 2022 validation is negative.; Decision Transformer shows low projected gross exposure in validation/test, so exposure collapse is a likely diagnostic target.; GRU has stronger test return but still failed validation, so generalization and 2022 regime behavior need diagnosis before any model promotion discussion.",
       "blockers": [
         "GRU has stronger test return but still failed validation, so generalization and 2022 regime behavior need diagnosis before any model promotion discussion.",
@@ -161,7 +268,10 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v3",
+        "alpha_path20_sequence_policy_v1"
+      ],
       "verdict": "`rl-walkforward-matrix` runs fixed-family comparison for `sequence_gru` and `decision_transformer`.; Verdict levels:; `contract_passed`; `diagnosed_failure`",
       "blockers": [
         "After the 2026-05-17 full-year matrix, v3 must also diagnose failed validation evidence. `contract_passed` means the evidence loop is intact; it does not mean alpha success.",
@@ -183,7 +293,10 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v4",
+        "alpha_path20_sequence_policy_v1"
+      ],
       "verdict": "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.; `contract_passed`: pipeline ran but validation did not prove usefulness.; `diagnosed_failure`: pipeline ran and selected checkpoint exists, but validation is negative or fails baseline comparison.; `validation_promising`: exact 2022 replay is positive, sharpe is positive, and baselines are beaten.",
       "blockers": [
         "`insufficient_or_incomplete`: artifact, data completeness, or projection parity is broken.",
@@ -204,7 +317,10 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_sequence_policy_v5",
+        "alpha_path20_neural_policy_v1"
+      ],
       "verdict": "Status: `research / shadow-only / path20 v5 paper-grade Decision Transformer contract`.; 2026-05-17 route-switch update: while the current Path20 mainline pointer is `alpha_path20_neural_policy_v1`, v5 sequence/DT evidence is shadow comparison evidence, not current Path20 mainline evidence.; v5 adds `decision_transformer_v2` as an architecture and evidence contract; it does not replace the v4 `sequence_gru` validation-first baseline.; The v5 policy is pure utility training: no oracle imitation, no path-label imitation, and no future-feature input.",
       "blockers": [
         "No full-year v5 evidence run has been approved or completed in this contract update.",
@@ -232,7 +348,13 @@
         "gpu"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_stage1_ablation_state_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_context_v1_cap80_repaired_20260518_01",
+        "path20_stage1_ablation_raw_kline_context_no_alpha_prior_v1_cap80_repaired_20260518_01"
+      ],
       "verdict": "Status: `completed feature ablation evidence / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.; Shared window: train `2019-2022`, validation `2023`, test `2024`.",
       "blockers": [],
       "next_allowed_actions": [
@@ -257,7 +379,13 @@
         "path_policy"
       ],
       "workflow": "path_policy",
-      "study_tags": [],
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_stage1_formal_cap80_repaired_20260518_01",
+        "path20_stage1_preflight_cap80_repaired_20260518_01",
+        "path20_stage1_pilot_cap80_repaired_20260518_04",
+        "alpha_path20_stage1_feature_ablation_result_20260518"
+      ],
       "verdict": "Status: `completed capped formal forecast evidence / forecast_test_confirmed / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Study tag: `path20_stage1_formal_cap80_repaired_20260518_01`.; Dataset id: `policy_input_bundle__7c8f58d851bce8179e1e9e2d`.",
       "blockers": [
         "Pilot `_03` exposed a metric dtype bug: AMP/CUDA predictions could reach Pandas as `float16`, and `nlargest/nsmallest` failed during top-bottom spread computation."
@@ -357,6 +485,56 @@
         "policy_input_bundle__4db1a32ab6e7d77ac7b8671c",
         "policy_input_bundle__c4886777fe70bfe6616e1259",
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
+    },
+    {
+      "id": "path20_memory_safe_forecast_dataset_contract_20260518",
+      "date": "2026-05-18",
+      "r_id": "",
+      "path": "daily_research/brain/references/path20_memory_safe_forecast_dataset_contract_20260518.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1"
+      ],
+      "verdict": "Status: `implemented memory-safe forecast dataset/training pipe / research / shadow-only / no promotion`.; Current Path20 research mainline remains `alpha_path20_neural_policy_v1`.; This work repairs full-universe training feasibility; it is not a model-quality or live/default promotion claim.; `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.",
+      "blockers": [
+        "The previous full-universe blocker was not the repaired lake itself, but the eager `[N,252,F]` training sample materialization.",
+        "The new pipe removes the largest RAM blocker by loading lookback windows per batch."
+      ],
+      "next_allowed_actions": [
+        "Run cap80 repaired-bundle memmap dataset smoke.",
+        "Run cap80 repaired-bundle memmap training smoke.",
+        "If both pass, plan a full-universe memmap dataset build before any full-universe training.",
+        "After memory-safe full-universe data is stable, plan day-grouped or cross-stock attention as a separate architecture upgrade."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": []
+    },
+    {
+      "id": "path20_route_consolidation_20260516",
+      "date": "2026-05-16",
+      "r_id": "",
+      "path": "daily_research/brain/references/path20_route_consolidation_20260516.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_mainline_switch_status_20260517",
+        "alpha_path20_sequence_policy_v1"
+      ],
+      "verdict": "",
+      "blockers": [
+        "Annual completeness is part of evidence quality. A year with fewer than 180 trading days is an incomplete artifact, not a failed strategy and not aggregate evidence."
+      ],
+      "next_allowed_actions": [],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
     },
     {

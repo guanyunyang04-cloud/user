@@ -16,7 +16,7 @@ PATH_POLICY_DOC_PATTERN = re.compile(r"^(alpha_path20|path20)_.+\.md$")
 DATA_LAKE_DOC_PATTERN = re.compile(r"^data_lake_.+\.md$")
 BRAIN_NATIVE_DOC_PATTERN = re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$")
 R_ID_PATTERN = re.compile(r"\br\d+[a-z]?\b", re.IGNORECASE)
-STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol)_[A-Za-z0-9_]+")
+STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol|path20|alpha_path20)_[A-Za-z0-9_]+")
 DATASET_ID_PATTERN = re.compile(r"\b[A-Za-z0-9_]+(?:__[A-Za-z0-9_]+)*__[0-9a-f]{16,32}\b")
 
 

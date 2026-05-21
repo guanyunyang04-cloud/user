@@ -45,6 +45,18 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
         self.assertEqual(matches[0]["workflow"], "brain")
         self.assertIn("brain", matches[0]["tags"])
 
+    def test_registry_indexes_path20_study_tags(self) -> None:
+        registry = build_evidence_registry()
+        matches = [record for record in registry["records"] if record["id"] == "alpha_path20_stage1_formal_cap80_result_20260518"]
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("path20_stage1_formal_cap80_repaired_20260518_01", matches[0]["study_tags"])
+        payload = query_evidence_registry("path20_stage1_formal_cap80_repaired_20260518_01")
+        self.assertIn(
+            "alpha_path20_stage1_formal_cap80_result_20260518",
+            {match["id"] for match in payload["matches"]},
+        )
+
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
         matches = [record for record in registry["records"] if record["id"] == "r65"]
