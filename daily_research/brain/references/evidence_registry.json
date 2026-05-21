@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 47,
+  "record_count": 48,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -37,6 +37,46 @@
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_pool_view__8161f6879815d3a22dd3b3f2"
+      ]
+    },
+    {
+      "id": "alpha_path20_architecture_revalidation_20260521",
+      "date": "2026-05-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_architecture_revalidation_20260521.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_architecture_revalidation_audit_20260521",
+        "path20_decision_architecture_gate_20260521",
+        "path20_arch_gain_liquid800_sector_v1_20260520_01",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_patch_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_arch_sector_slot_liquid500_du_cost20_hit10_dd010_20260521_01"
+      ],
+      "verdict": "Status: `forecast decision-output architecture revalidation / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Scope: liquid500 single-family/single-seed architecture check under the same `decision_utility_v1` contract.; Decision: no non-GRU architecture passed the full decision candidate gate; do not run liquid800 or promotion work from this result.",
+      "blockers": [
+        "Under `decision_utility_v1`, simply replacing GRU with patch transformer or sector-slot mixer did not fix decision-score transfer; both failed test decision spread.",
+        "Early best epoch remains a cross-family symptom, not a GRU-only failure. This supports the current diagnosis that target/selection/regime stability is the main bottleneck.",
+        "Treat recurring negative months, especially `2024-01` and `2024-06`, as regime diagnostics rather than architecture-only failures."
+      ],
+      "next_allowed_actions": [
+        "Keep `gru_sequence_static_context` as the liquid500 research anchor for now.",
+        "Do not continue by adding larger architectures. First inspect why `stock_mixer_sequence` has positive decision rank/spread but negative hit lift.",
+        "Compare hit-threshold calibration, top20 hit composition, and score-to-hit monotonicity for GRU versus stock mixer.",
+        "Continue with input/selection stability ablations before any pool expansion: `raw_kline_context_no_alpha_prior_v1` and `raw_kline_context_v1 + gru_sequence`.",
+        "Treat recurring negative months, especially `2024-01` and `2024-06`, as regime diagnostics rather than architecture-only failures."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
       ]
     },
     {
