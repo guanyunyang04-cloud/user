@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 46,
+  "record_count": 47,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -95,6 +95,39 @@
         "Compare alternative decision score definitions, especially expected utility aggregation versus horizon-logit selected utility.",
         "Review whether the drawdown penalty or hit threshold is too aggressive for 2024 test distribution.",
         "If continuing, prefer narrow output-target ablations on liquid500 before moving to liquid800."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
+      ]
+    },
+    {
+      "id": "alpha_path20_decision_output_stability_gate_20260521",
+      "date": "2026-05-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_decision_output_stability_gate_20260521.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01",
+        "path20_decision_output_liquid500_stability_audit_20260521",
+        "path20_decision_output_score_selection_stability_20260521"
+      ],
+      "verdict": "Status: `forecast decision-output stability gate / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Decision: do not run liquid800 and do not run multi-seed yet; liquid500 decision output candidates remain aggregate-positive but month-level stability is insufficient.; `promotion_allowed=false`, `shadow_only=true`, and `active_execution_strategy_expected_diff=none`.",
+      "blockers": [
+        "Decision: do not run liquid800 and do not run multi-seed yet; liquid500 decision output candidates remain aggregate-positive but month-level stability is insufficient.",
+        "The best aggregate candidate remains `cost20/hit10/dd0.10`, but it failed the stricter monthly stability gate with positive spread in only `50%` of 2024 months."
+      ],
+      "next_allowed_actions": [
+        "Do not run liquid800 decision-output expansion until a liquid500 candidate passes monthly stability.",
+        "Next research should use liquid500 input/selection ablations, prioritizing `raw_kline_context_no_alpha_prior_v1` and `raw_kline_context_v1 + gru_sequence`, to determine whether alpha prior or sector/static context is amplifying regime sensitivity.",
+        "Inspect negative months by market regime and predicted horizon distribution before changing target parameters again."
       ],
       "active_artifact_impact": "guarded",
       "dataset_ids": [
