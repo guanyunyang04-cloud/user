@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 45,
+  "record_count": 46,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -37,6 +37,42 @@
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_pool_view__8161f6879815d3a22dd3b3f2"
+      ]
+    },
+    {
+      "id": "alpha_path20_decision_output_ablation_result_20260521",
+      "date": "2026-05-21",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_decision_output_ablation_result_20260521.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_path20_neural_policy_v1",
+        "path20_arch_gain_liquid500_sector_v1_20260520_01",
+        "path20_decision_output_liquid500_sector_v1_20260521_01",
+        "path20_decision_output_liquid500_du_cost10_hit10_dd025_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_decision_output_liquid500_du_cost20_hit20_dd000_20260521_01"
+      ],
+      "verdict": "Status: `forecast decision-output target ablation / research / shadow-only / no promotion`.; Mainline: `alpha_path20_neural_policy_v1`.; Scope: liquid500 single-family/single-seed target-parameter ablation for `decision_utility_v1`.; Evidence result: two ablations passed validation and test decision utility gates; no liquid800 expansion is authorized by this reference.",
+      "blockers": [
+        "Interpretation: the failure was not fixed by a simple score aggregation swap, so target-parameter ablation was justified.",
+        "Baseline `cost20/hit20/dd0.25` learned a validation-positive decision signal but failed on test spread (`-0.004432`).",
+        "`cost10/hit10/dd0.25` also failed test spread (`-0.007138`), so merely lowering cost and hit threshold without relaxing drawdown pressure did not solve transfer.",
+        "Failed: baseline `path20_decision_output_liquid500_sector_v1_20260521_01`, `path20_decision_output_liquid500_du_cost10_hit10_dd025_20260521_01`."
+      ],
+      "next_allowed_actions": [
+        "Prefer `cost20/hit10/dd0.10` as the next decision-output candidate for a separately approved robustness run.",
+        "Before liquid800, inspect score/selection stability by year/month and compare against the forecast-path 20d anchor to avoid overfitting to one decision metric.",
+        "If continuing research, keep `decision_utility_v1` shadow-only and compare it against `forecast_path_v1` in an execution-simulation layer before any live/default discussion."
+      ],
+      "active_artifact_impact": "guarded",
+      "dataset_ids": [
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
       ]
     },
     {
