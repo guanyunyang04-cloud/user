@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 50,
+  "record_count": 51,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -633,6 +633,43 @@
       ],
       "active_artifact_impact": "unchanged",
       "dataset_ids": []
+    },
+    {
+      "id": "brain_system_full_codebase_review_20260522",
+      "date": "2026-05-22",
+      "r_id": "",
+      "path": "daily_research/brain/references/brain_system_full_codebase_review_20260522.md",
+      "tags": [
+        "brain"
+      ],
+      "workflow": "brain",
+      "study_tags": [
+        "alpha_path20_decision_score_diagnostics_20260522",
+        "alpha_path20_neural_policy_v1",
+        "alpha_path20_sequence_policy_v1"
+      ],
+      "verdict": "The current Path20 GRU decision signal is not zero: several aggregate scores; Selection-only calibration has not solved monthly instability.; Longer train windows did not fix the current selection problem.; Stock mixer has stronger ranking/spread stability but failed hit-lift gates.",
+      "blockers": [
+        "The current continuous-policy blocker is behavior quality and evidence",
+        "The current Path20 blocker is target / selection / regime calibration, not",
+        "Stock mixer has stronger ranking/spread stability but failed hit-lift gates.",
+        "Treating smoke, dry-run, unit tests, failed runs, interrupted runs, or",
+        "Solving behavior failures by adding epochs, loss terms, or model width before",
+        "This document does not convert any smoke, dry-run, unit, failed, interrupted,"
+      ],
+      "next_allowed_actions": [
+        "Keep live/default and active artifact frozen unless a future explicit",
+        "For Path20, inspect target calibration first: hit threshold, utility",
+        "If target calibration remains coherent, run liquid500 input contamination",
+        "For `continuous_policy`, continue around feature contract health,",
+        "For governance, keep using task capsule, current-frontier, doc guard,",
+        "For future code changes, expand tests around simulator semantics,"
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
+        "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
+      ]
     },
     {
       "id": "brain_system_refactor_status_20260518",
