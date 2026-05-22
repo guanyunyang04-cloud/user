@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 48,
+  "record_count": 49,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -77,6 +77,37 @@
         "policy_input_bundle__7c8f58d851bce8179e1e9e2d",
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
+      ]
+    },
+    {
+      "id": "alpha_path20_data_length_regime_ablation_20260522",
+      "date": "2026-05-22",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_data_length_regime_ablation_20260522.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "path20_data_length_regime_audit_20260522",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
+        "path20_data_len_liquid500_du_train2016_2022_20260522_01"
+      ],
+      "verdict": "Data length / regime coverage remains a credible contributor: the long `2016-2022` run improved monthly spread positive rate from `50.0%` to `58.3%`.; Data length alone is not sufficient: both longer-window runs flipped aggregate test decision spread negative.; Current bottleneck is more likely a combination of target / selection calibration and input regime contamination than pure sample count.; Repeating larger architecture or liquid800 expansion before target / selection review is not recommended.",
+      "blockers": [],
+      "next_allowed_actions": [
+        "Do a score / selection calibration audit on `decision_utility_v1` before more training:",
+        "compare `pred_decision_score=max utility` against horizon-selected utility, hit-weighted utility, and short-horizon blends;",
+        "require validation/test spread, hit lift, and monthly stability to improve without retraining first.",
+        "If selection-only fixes test spread and monthly stability, then rerun one long-window GRU with the revised selection profile.",
+        "If selection-only cannot fix it, test input contamination next: `alpha_prior` ablation and sector/static context ablation on liquid500."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": [
+        "policy_pool_view__c11400fa72ad263f3d1eecfa",
+        "policy_pool_view__ded4d32f2d835236bad38af9",
+        "policy_pool_view__71f27acacced2dbbd72a547c"
       ]
     },
     {
