@@ -62,9 +62,46 @@ def test_forecast_memmap_dataset_builds_lazy_store_and_batches(tmp_path) -> None
     assert tuple(x.shape) == (5, dataset.input_dim)
     assert tuple(y_daily.shape) == (20,)
     assert tuple(y_cum.shape) == (5,)
-    assert tuple(y_risk.shape) == (3,)
+    assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) == int(train_indices[0])
     assert torch.isfinite(x).all()
+
+
+def test_forecast_memmap_dataset_accepts_custom_horizon_grid_and_horizon_risk(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=900, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path,
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=30,
+        cumulative_horizons=horizons,
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+    )
+
+    assert dataset.manifest["forecast_horizon"] == 30
+    assert dataset.manifest["cumulative_horizons"] == list(horizons)
+    assert dataset.manifest["risk_horizons"] == list(horizons)
+    assert dataset.y_cum_excess.shape == (dataset.row_count, len(horizons))
+    assert dataset.y_drawdown_by_horizon.shape == (dataset.row_count, len(horizons))
+    train_indices = dataset.role_indices("train")
+    x, y_daily, y_cum, y_risk, row_idx = dataset.torch_dataset(train_indices[:1], target_scale=100.0)[0]
+
+    assert tuple(x.shape) == (5, dataset.input_dim)
+    assert tuple(y_daily.shape) == (30,)
+    assert tuple(y_cum.shape) == (len(horizons),)
+    assert tuple(y_risk.shape) == (len(horizons), 3)
+    assert int(row_idx.item()) == int(train_indices[0])
+
+    loaded = load_forecast_memmap_dataset(tmp_path / "forecast_dataset_manifest.json")
+    assert loaded.manifest["cumulative_horizons"] == list(horizons)
+    assert loaded.y_drawdown_by_horizon.shape == (loaded.row_count, len(horizons))
 
 
 def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path) -> None:
@@ -129,7 +166,7 @@ def test_static_context_vocab_is_stable_and_memmap_samples_are_aligned(tmp_path)
     assert int(static_ids[0].item()) == int(dataset.sample_index.iloc[int(row_idx.item())]["symbol_id"])
     assert tuple(y_daily.shape) == (20,)
     assert tuple(y_cum.shape) == (5,)
-    assert tuple(y_risk.shape) == (3,)
+    assert tuple(y_risk.shape) == (5, 3)
 
     loaded = load_forecast_memmap_dataset(tmp_path / "forecast_dataset_manifest.json")
     assert loaded.static_context_ids is not None
@@ -216,7 +253,7 @@ def test_date_batch_view_groups_memmap_samples_by_signal_date(tmp_path) -> None:
     assert int(mask.sum().item()) == x.shape[0]
     assert tuple(y_daily.shape) == (x.shape[0], 20)
     assert tuple(y_cum.shape) == (x.shape[0], 5)
-    assert tuple(y_risk.shape) == (x.shape[0], 3)
+    assert tuple(y_risk.shape) == (x.shape[0], 5, 3)
     assert tuple(static_ids.shape) == (x.shape[0], 5)
     assert len(set(dataset.sample_index.iloc[row_indices.numpy().astype(int)]["date"].astype(str))) == 1
 
@@ -277,7 +314,7 @@ def test_forecast_memmap_dataset_loads_existing_manifest_without_rebuild(tmp_pat
     assert tuple(x.shape) == (5, loaded.input_dim)
     assert tuple(y_daily.shape) == (20,)
     assert tuple(y_cum.shape) == (5,)
-    assert tuple(y_risk.shape) == (3,)
+    assert tuple(y_risk.shape) == (5, 3)
     assert int(row_idx.item()) >= 0
 
 

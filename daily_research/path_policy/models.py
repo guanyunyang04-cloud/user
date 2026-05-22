@@ -7,8 +7,9 @@ from torch import nn
 import torch.nn.functional as F
 
 
-PATH20_FORECAST_AUX_DIM = 8
+PATH20_FORECAST_AUX_DIM = 20
 PATH20_DECISION_AUX_DIM = 15
+PATH20_DEFAULT_CUMULATIVE_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 PATH20_FORECAST_OUTPUT_PROFILES = ("forecast_path_v1", "decision_utility_v1")
 
 
@@ -19,11 +20,46 @@ def normalize_path20_output_profile(output_profile: str | None) -> str:
     return profile
 
 
-def path20_forecast_output_dim(horizon: int, output_profile: str | None = "forecast_path_v1") -> int:
+def normalize_path20_cumulative_horizons(
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    *,
+    horizon: int = 20,
+) -> tuple[int, ...]:
+    max_horizon = int(horizon)
+    if max_horizon <= 0:
+        raise ValueError("horizon must be positive.")
+    if cumulative_horizons is None:
+        values = list(PATH20_DEFAULT_CUMULATIVE_HORIZONS)
+    elif isinstance(cumulative_horizons, str):
+        values = [int(item.strip()) for item in cumulative_horizons.split(",") if item.strip()]
+    else:
+        values = [int(item) for item in cumulative_horizons]
+    if not values:
+        raise ValueError("cumulative_horizons must contain at least one horizon.")
+    resolved = tuple(sorted(dict.fromkeys(values)))
+    invalid = [item for item in resolved if int(item) <= 0 or int(item) > max_horizon]
+    if invalid:
+        raise ValueError(f"cumulative_horizons must be in [1, {max_horizon}], got {invalid}.")
+    return resolved
+
+
+def path20_forecast_aux_dim(cumulative_horizons: tuple[int, ...] | list[int] | str | None = None, *, horizon: int = 20) -> int:
+    return len(normalize_path20_cumulative_horizons(cumulative_horizons, horizon=horizon)) * 4
+
+
+def path20_decision_aux_dim(cumulative_horizons: tuple[int, ...] | list[int] | str | None = None, *, horizon: int = 20) -> int:
+    return len(normalize_path20_cumulative_horizons(cumulative_horizons, horizon=horizon)) * 3
+
+
+def path20_forecast_output_dim(
+    horizon: int,
+    output_profile: str | None = "forecast_path_v1",
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+) -> int:
     profile = normalize_path20_output_profile(output_profile)
-    output_dim = int(horizon) * 4 + PATH20_FORECAST_AUX_DIM
+    output_dim = int(horizon) * 4 + path20_forecast_aux_dim(cumulative_horizons, horizon=int(horizon))
     if profile == "decision_utility_v1":
-        output_dim += PATH20_DECISION_AUX_DIM
+        output_dim += path20_decision_aux_dim(cumulative_horizons, horizon=int(horizon))
     return output_dim
 
 
@@ -45,11 +81,13 @@ class Path20ForecasterMLP(nn.Module):
         dropout: float = 0.10,
         horizon: int = 20,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
-        output_dim = path20_forecast_output_dim(self.horizon, self.output_profile)
+        output_dim = path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)
         self.net = nn.Sequential(
             nn.LayerNorm(int(input_dim)),
             nn.Linear(int(input_dim), int(hidden_dim)),
@@ -63,21 +101,23 @@ class Path20ForecasterMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         raw = self.net(x)
-        return _split_path20_outputs(raw, self.horizon, self.output_profile)
+        return _split_path20_outputs(raw, self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 def _split_path20_outputs(
     raw: torch.Tensor,
     horizon: int,
     output_profile: str | None = "forecast_path_v1",
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
 ) -> dict[str, torch.Tensor]:
     horizon = int(horizon)
+    resolved_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=horizon)
     profile = normalize_path20_output_profile(output_profile)
     mu = raw[:, :horizon]
     q_raw = raw[:, horizon : horizon * 4].reshape(raw.shape[0], horizon, 3)
     q_sorted = torch.sort(q_raw, dim=-1).values
     aux_start = horizon * 4
-    aux_end = aux_start + PATH20_FORECAST_AUX_DIM
+    aux_end = aux_start + path20_forecast_aux_dim(resolved_horizons, horizon=horizon)
     aux = raw[:, aux_start:aux_end]
     output = {
         "mu": mu,
@@ -87,19 +127,26 @@ def _split_path20_outputs(
         "aux": aux,
     }
     if profile == "decision_utility_v1":
-        output["decision_aux"] = raw[:, aux_end : aux_end + PATH20_DECISION_AUX_DIM]
+        output["decision_aux"] = raw[:, aux_end : aux_end + path20_decision_aux_dim(resolved_horizons, horizon=horizon)]
     return output
 
 
 class LinearPath20Forecaster(nn.Module):
-    def __init__(self, input_dim: int, horizon: int = 20, output_profile: str = "forecast_path_v1") -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        horizon: int = 20,
+        output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
-        self.head = nn.Linear(int(input_dim), path20_forecast_output_dim(self.horizon, self.output_profile))
+        self.head = nn.Linear(int(input_dim), path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons))
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        return _split_path20_outputs(self.head(x), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(x), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 class DLinearPath20Forecaster(nn.Module):
@@ -109,13 +156,15 @@ class DLinearPath20Forecaster(nn.Module):
         hidden_dim: int = 64,
         horizon: int = 20,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
         self.seasonal = nn.Linear(int(input_dim), int(hidden_dim))
         self.trend = nn.Linear(int(input_dim), int(hidden_dim))
-        self.head = nn.Linear(int(hidden_dim) * 2, path20_forecast_output_dim(self.horizon, self.output_profile))
+        self.head = nn.Linear(int(hidden_dim) * 2, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons))
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if x.ndim == 2:
@@ -123,7 +172,7 @@ class DLinearPath20Forecaster(nn.Module):
         trend_input = x.mean(dim=1)
         seasonal_input = x[:, -1, :] - trend_input
         encoded = torch.cat([F.gelu(self.trend(trend_input)), F.gelu(self.seasonal(seasonal_input))], dim=-1)
-        return _split_path20_outputs(self.head(encoded), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(encoded), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 class GRUPath20Forecaster(nn.Module):
@@ -135,9 +184,11 @@ class GRUPath20Forecaster(nn.Module):
         horizon: int = 20,
         num_layers: int = 1,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
         self.hidden_dim = int(hidden_dim)
         self.num_layers = max(int(num_layers), 1)
@@ -158,7 +209,7 @@ class GRUPath20Forecaster(nn.Module):
             nn.Linear(self.hidden_dim * 2, self.hidden_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile)),
+            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -169,7 +220,7 @@ class GRUPath20Forecaster(nn.Module):
         attention_weight = torch.softmax(attention_logits, dim=1).unsqueeze(-1)
         pooled = torch.sum(outputs * attention_weight, dim=1)
         encoded = torch.cat([pooled, hidden[-1]], dim=-1)
-        return _split_path20_outputs(self.head(encoded), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(encoded), self.horizon, self.output_profile, self.cumulative_horizons)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim == 2:
@@ -194,9 +245,11 @@ class PatchTransformerPath20Forecaster(nn.Module):
         dropout: float = 0.10,
         max_patches: int = 512,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
         resolved_patch_sizes = tuple(int(item) for item in (patch_sizes or (patch_size,)) if int(item) > 0)
         self.patch_sizes = tuple(dict.fromkeys(resolved_patch_sizes or (max(int(patch_size), 1),)))
@@ -232,7 +285,7 @@ class PatchTransformerPath20Forecaster(nn.Module):
             nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile)),
+            nn.Linear(self.hidden_dim, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
         )
         nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.scale_embeddings, std=0.02)
@@ -264,7 +317,7 @@ class PatchTransformerPath20Forecaster(nn.Module):
         cls = self.cls_token.expand(batch, -1, -1)
         encoded = self.encoder(self.input_dropout(torch.cat([cls, token_sequence], dim=1)))
         pooled = encoded[:, 0, :]
-        return _split_path20_outputs(self.head(pooled), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(pooled), self.horizon, self.output_profile, self.cumulative_horizons)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim == 2:
@@ -354,9 +407,11 @@ class StaticContextPath20Forecaster(nn.Module):
         static_dropout: float = 0.20,
         dropout: float = 0.10,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
         self.temporal_encoder = temporal_encoder
         self.static_encoder = StaticContextEncoder(
@@ -371,13 +426,13 @@ class StaticContextPath20Forecaster(nn.Module):
             nn.Linear(int(temporal_dim) + self.static_encoder.output_dim, int(hidden_dim)),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(hidden_dim), path20_forecast_output_dim(self.horizon, self.output_profile)),
+            nn.Linear(int(hidden_dim), path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
         )
 
     def forward(self, x: torch.Tensor, static_context_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         encoded = self.temporal_encoder.encode(x)
         static = self.static_encoder(static_context_ids, batch_size=int(encoded.shape[0]), device=encoded.device)
-        return _split_path20_outputs(self.head(torch.cat([encoded, static], dim=-1)), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(torch.cat([encoded, static], dim=-1)), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 class StockMixerPath20Forecaster(nn.Module):
@@ -388,11 +443,13 @@ class StockMixerPath20Forecaster(nn.Module):
         horizon: int = 20,
         dropout: float = 0.10,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
-        self.encoder = GRUPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout, horizon=horizon, num_layers=1)
+        self.encoder = GRUPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout, horizon=horizon, num_layers=1, cumulative_horizons=self.cumulative_horizons)
         encoded_dim = int(hidden_dim) * 2
         self.stock_norm = nn.LayerNorm(encoded_dim)
         self.stock_attention = nn.MultiheadAttention(
@@ -407,7 +464,7 @@ class StockMixerPath20Forecaster(nn.Module):
             nn.GELU(),
             nn.Dropout(float(dropout)),
         )
-        self.head = nn.Linear(encoded_dim, path20_forecast_output_dim(self.horizon, self.output_profile))
+        self.head = nn.Linear(encoded_dim, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons))
 
     def forward(self, x: torch.Tensor, stock_mask: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         if x.ndim == 4:
@@ -425,12 +482,12 @@ class StockMixerPath20Forecaster(nn.Module):
                 need_weights=False,
             )
             mixed = self.mixer(encoded + attended).reshape(dates * stocks, -1)
-            return _split_path20_outputs(self.head(mixed), self.horizon, self.output_profile)
+            return _split_path20_outputs(self.head(mixed), self.horizon, self.output_profile, self.cumulative_horizons)
         encoded = self.encoder.encode(x)
         tokens = self.stock_norm(encoded).unsqueeze(0)
         attended, _ = self.stock_attention(tokens, tokens, tokens, need_weights=False)
         mixed = self.mixer(encoded + attended.squeeze(0))
-        return _split_path20_outputs(self.head(mixed), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(mixed), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 class SectorSlotMixerPath20Forecaster(nn.Module):
@@ -442,17 +499,19 @@ class SectorSlotMixerPath20Forecaster(nn.Module):
         dropout: float = 0.10,
         slot_count: int = 8,
         output_profile: str = "forecast_path_v1",
+        cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     ) -> None:
         super().__init__()
         self.horizon = int(horizon)
+        self.cumulative_horizons = normalize_path20_cumulative_horizons(cumulative_horizons, horizon=self.horizon)
         self.output_profile = normalize_path20_output_profile(output_profile)
-        self.encoder = GRUPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout, horizon=horizon, num_layers=1)
+        self.encoder = GRUPath20Forecaster(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout, horizon=horizon, num_layers=1, cumulative_horizons=self.cumulative_horizons)
         self.slots = nn.Parameter(torch.zeros(max(int(slot_count), 1), int(hidden_dim) * 2))
         self.slot_proj = nn.Linear(int(hidden_dim) * 4, int(hidden_dim) * 2)
         self.head = nn.Sequential(
             nn.LayerNorm(int(hidden_dim) * 2),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(hidden_dim) * 2, path20_forecast_output_dim(self.horizon, self.output_profile)),
+            nn.Linear(int(hidden_dim) * 2, path20_forecast_output_dim(self.horizon, self.output_profile, self.cumulative_horizons)),
         )
         nn.init.normal_(self.slots, std=0.02)
 
@@ -480,11 +539,11 @@ class SectorSlotMixerPath20Forecaster(nn.Module):
             encoded = self.encoder.encode(x.reshape(dates * stocks, steps, features)).reshape(dates, stocks, -1)
             context = self._slot_context(encoded, stock_mask=stock_mask)
             fused = F.gelu(self.slot_proj(torch.cat([encoded, context], dim=-1))).reshape(dates * stocks, -1)
-            return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile)
+            return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
         encoded = self.encoder.encode(x)
         context = self._slot_context(encoded, stock_mask=stock_mask)
         fused = F.gelu(self.slot_proj(torch.cat([encoded, context], dim=-1)))
-        return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile)
+        return _split_path20_outputs(self.head(fused), self.horizon, self.output_profile, self.cumulative_horizons)
 
 
 class NeuralTargetWeightPolicy(nn.Module):

@@ -15,12 +15,38 @@ PATH20_QUANTILES: tuple[float, ...] = (0.10, 0.50, 0.90)
 PATH20_CUMULATIVE_HORIZONS: tuple[int, ...] = (1, 3, 5, 10, 20)
 
 
+def normalize_cumulative_horizons(
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
+    *,
+    horizon: int = PATH20_HORIZON,
+) -> tuple[int, ...]:
+    max_horizon = int(horizon or PATH20_HORIZON)
+    if max_horizon <= 0:
+        raise ValueError("horizon must be positive.")
+    if cumulative_horizons is None:
+        values = list(PATH20_CUMULATIVE_HORIZONS)
+    elif isinstance(cumulative_horizons, str):
+        values = [int(item.strip()) for item in cumulative_horizons.split(",") if item.strip()]
+    else:
+        values = [int(item) for item in cumulative_horizons]
+    if not values:
+        raise ValueError("cumulative_horizons must contain at least one horizon.")
+    normalized = tuple(sorted(dict.fromkeys(values)))
+    invalid = [item for item in normalized if int(item) <= 0 or int(item) > max_horizon]
+    if invalid:
+        raise ValueError(f"cumulative_horizons must be in [1, {max_horizon}], got {invalid}.")
+    return normalized
+
+
 @dataclass(frozen=True)
 class Path20LabelBundle:
     daily_return: dict[int, pd.DataFrame]
     daily_excess_return: dict[int, pd.DataFrame]
     cumulative_return: dict[int, pd.DataFrame]
     cumulative_excess_return: dict[int, pd.DataFrame]
+    path_max_drawdown_by_horizon: dict[int, pd.DataFrame]
+    path_worst_1d_by_horizon: dict[int, pd.DataFrame]
+    path_upside_capture_by_horizon: dict[int, pd.DataFrame]
     path_max_drawdown_20d: pd.DataFrame
     path_worst_1d_20d: pd.DataFrame
     path_upside_capture_20d: pd.DataFrame
@@ -119,12 +145,12 @@ def build_path20_labels(
     *,
     execution_mode: str = "next_open",
     horizon: int = PATH20_HORIZON,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     top_frac: float = 0.20,
     bottom_frac: float = 0.20,
 ) -> Path20LabelBundle:
     max_horizon = int(horizon or PATH20_HORIZON)
-    if max_horizon != PATH20_HORIZON:
-        raise ValueError("alpha_path20 currently requires horizon=20.")
+    resolved_horizons = normalize_cumulative_horizons(cumulative_horizons, horizon=max_horizon)
     price = prepared.open_ if str(execution_mode or "next_open").strip().lower() == "next_open" else prepared.close
     benchmark = (
         prepared.benchmark_open
@@ -148,7 +174,7 @@ def build_path20_labels(
     forward_rank: dict[int, pd.DataFrame] = {}
     top_label: dict[int, pd.DataFrame] = {}
     bottom_label: dict[int, pd.DataFrame] = {}
-    for step in PATH20_CUMULATIVE_HORIZONS:
+    for step in resolved_horizons:
         stock_ret, bench_ret = _future_entry_exit_returns(
             price=price,
             benchmark=benchmark,
@@ -169,21 +195,40 @@ def build_path20_labels(
     entry = price_path[0].replace(0.0, np.nan)
     rel_paths = [_safe_div(frame, entry) for frame in price_path[1:]]
     path_returns = [frame.sub(1.0) for frame in rel_paths]
-    stacked = np.stack([frame.to_numpy(dtype=float, copy=False) for frame in path_returns], axis=0)
-    path_max_drawdown = _nan_reduce(stacked, mode="min")
-    path_worst_1d = _nan_reduce(
-        np.stack([daily_return[step].to_numpy(dtype=float, copy=False) for step in range(1, max_horizon + 1)], axis=0),
-        mode="min",
-    )
-    path_upside = _nan_reduce(stacked, mode="max")
-    path_max_drawdown_20d = pd.DataFrame(path_max_drawdown, index=price.index, columns=price.columns)
-    path_worst_1d_20d = pd.DataFrame(path_worst_1d, index=price.index, columns=price.columns)
-    path_upside_capture_20d = pd.DataFrame(path_upside, index=price.index, columns=price.columns)
+    path_arrays = [frame.to_numpy(dtype=float, copy=False) for frame in path_returns]
+    daily_arrays = [daily_return[step].to_numpy(dtype=float, copy=False) for step in range(1, max_horizon + 1)]
+    path_max_drawdown_by_horizon: dict[int, pd.DataFrame] = {}
+    path_worst_1d_by_horizon: dict[int, pd.DataFrame] = {}
+    path_upside_capture_by_horizon: dict[int, pd.DataFrame] = {}
+    for step in resolved_horizons:
+        stacked = np.stack(path_arrays[: int(step)], axis=0)
+        daily_stacked = np.stack(daily_arrays[: int(step)], axis=0)
+        path_max_drawdown_by_horizon[int(step)] = pd.DataFrame(
+            _nan_reduce(stacked, mode="min"),
+            index=price.index,
+            columns=price.columns,
+        )
+        path_worst_1d_by_horizon[int(step)] = pd.DataFrame(
+            _nan_reduce(daily_stacked, mode="min"),
+            index=price.index,
+            columns=price.columns,
+        )
+        path_upside_capture_by_horizon[int(step)] = pd.DataFrame(
+            _nan_reduce(stacked, mode="max"),
+            index=price.index,
+            columns=price.columns,
+        )
+    legacy_risk_horizon = 20 if 20 in path_max_drawdown_by_horizon else max(resolved_horizons)
+    path_max_drawdown_20d = path_max_drawdown_by_horizon[int(legacy_risk_horizon)]
+    path_worst_1d_20d = path_worst_1d_by_horizon[int(legacy_risk_horizon)]
+    path_upside_capture_20d = path_upside_capture_by_horizon[int(legacy_risk_horizon)]
     metadata = {
         "execution_mode": str(execution_mode),
         "max_forward_horizon": int(max_horizon),
         "daily_horizons": list(range(1, max_horizon + 1)),
-        "cumulative_horizons": list(PATH20_CUMULATIVE_HORIZONS),
+        "cumulative_horizons": list(resolved_horizons),
+        "risk_horizons": list(resolved_horizons),
+        "legacy_risk_horizon": int(legacy_risk_horizon),
         "top_frac": float(top_frac),
         "bottom_frac": float(bottom_frac),
         "label_semantics": "next_open_entry_to_future_open" if str(execution_mode) == "next_open" else "close_to_future_close",
@@ -193,6 +238,9 @@ def build_path20_labels(
         daily_excess_return=daily_excess_return,
         cumulative_return=cumulative_return,
         cumulative_excess_return=cumulative_excess_return,
+        path_max_drawdown_by_horizon=path_max_drawdown_by_horizon,
+        path_worst_1d_by_horizon=path_worst_1d_by_horizon,
+        path_upside_capture_by_horizon=path_upside_capture_by_horizon,
         path_max_drawdown_20d=path_max_drawdown_20d,
         path_worst_1d_20d=path_worst_1d_20d,
         path_upside_capture_20d=path_upside_capture_20d,
@@ -206,6 +254,10 @@ def build_path20_labels(
 def path20_label_frame_for_date(bundle: Path20LabelBundle, date: pd.Timestamp | str) -> pd.DataFrame:
     dt = pd.Timestamp(date).normalize()
     rows: dict[str, pd.Series] = {}
+    cumulative_horizons = normalize_cumulative_horizons(
+        bundle.metadata.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS),
+        horizon=bundle.max_forward_horizon,
+    )
     for step in range(1, bundle.max_forward_horizon + 1):
         rows[f"future_return_{step}d"] = bundle.daily_return[step].loc[dt]
         rows[f"future_excess_return_{step}d"] = bundle.daily_excess_return[step].loc[dt]
@@ -213,12 +265,15 @@ def path20_label_frame_for_date(bundle: Path20LabelBundle, date: pd.Timestamp | 
         rows[f"path_q10_{step}d"] = bundle.daily_excess_return[step].loc[dt]
         rows[f"path_q50_{step}d"] = bundle.daily_excess_return[step].loc[dt]
         rows[f"path_q90_{step}d"] = bundle.daily_excess_return[step].loc[dt]
-    for step in PATH20_CUMULATIVE_HORIZONS:
+    for step in cumulative_horizons:
         rows[f"future_cum_return_{step}d"] = bundle.cumulative_return[step].loc[dt]
         rows[f"future_cum_excess_return_{step}d"] = bundle.cumulative_excess_return[step].loc[dt]
         rows[f"future_rank_{step}d"] = bundle.forward_rank[step].loc[dt]
         rows[f"future_top_label_{step}d"] = bundle.top_label[step].loc[dt]
         rows[f"future_bottom_label_{step}d"] = bundle.bottom_label[step].loc[dt]
+        rows[f"future_path_max_drawdown_{step}d"] = bundle.path_max_drawdown_by_horizon[step].loc[dt]
+        rows[f"future_path_worst_1d_{step}d"] = bundle.path_worst_1d_by_horizon[step].loc[dt]
+        rows[f"future_path_upside_capture_{step}d"] = bundle.path_upside_capture_by_horizon[step].loc[dt]
     rows["future_path_max_drawdown_20d"] = bundle.path_max_drawdown_20d.loc[dt]
     rows["future_path_worst_1d_20d"] = bundle.path_worst_1d_20d.loc[dt]
     rows["future_path_upside_capture_20d"] = bundle.path_upside_capture_20d.loc[dt]

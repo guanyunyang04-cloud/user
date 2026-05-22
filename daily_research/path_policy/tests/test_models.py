@@ -8,6 +8,9 @@ from daily_research.path_policy.models import (
     LinearPath20Forecaster,
     NeuralTargetWeightPolicy,
     PATH20_DECISION_AUX_DIM,
+    PATH20_DEFAULT_CUMULATIVE_HORIZONS,
+    path20_decision_aux_dim,
+    path20_forecast_aux_dim,
     PatchTransformerPath20Forecaster,
     Path20ForecasterMLP,
     PathPolicyModelConfig,
@@ -32,7 +35,7 @@ def test_forecaster_variants_emit_path20_contract() -> None:
         assert set(prediction) == {"mu", "q10", "q50", "q90", "aux"}
         assert prediction["mu"].shape == (6, 20)
         assert prediction["q10"].shape == (6, 20)
-        assert prediction["aux"].shape == (6, 8)
+        assert prediction["aux"].shape == (6, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
         assert torch.all(prediction["q10"] <= prediction["q50"])
         assert torch.all(prediction["q50"] <= prediction["q90"])
 
@@ -57,8 +60,45 @@ def test_forecaster_variants_emit_optional_decision_utility_head() -> None:
         prediction = model(x3 if model.__class__.__name__ not in {"Path20ForecasterMLP", "LinearPath20Forecaster"} else x2)
         assert set(prediction) == {"mu", "q10", "q50", "q90", "aux", "decision_aux"}
         assert prediction["mu"].shape == (6, 20)
-        assert prediction["aux"].shape == (6, 8)
+        assert prediction["aux"].shape == (6, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
         assert prediction["decision_aux"].shape == (6, PATH20_DECISION_AUX_DIM)
+
+
+def test_forecaster_variants_emit_dynamic_horizon_contract() -> None:
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    x = torch.randn(6, 4, 5)
+    model = GRUPath20Forecaster(
+        input_dim=5,
+        hidden_dim=8,
+        horizon=30,
+        output_profile="decision_utility_v1",
+        cumulative_horizons=horizons,
+    )
+
+    prediction = model(x)
+
+    assert prediction["mu"].shape == (6, 30)
+    assert prediction["q10"].shape == (6, 30)
+    assert prediction["aux"].shape == (6, path20_forecast_aux_dim(horizons, horizon=30))
+    assert prediction["decision_aux"].shape == (6, path20_decision_aux_dim(horizons, horizon=30))
+    assert prediction["decision_aux"].shape[1] == 27
+
+
+def test_dlinear_dynamic_horizon_contract() -> None:
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    model = DLinearPath20Forecaster(
+        input_dim=5,
+        hidden_dim=8,
+        horizon=30,
+        output_profile="decision_utility_v1",
+        cumulative_horizons=horizons,
+    )
+
+    prediction = model(torch.randn(6, 4, 5))
+
+    assert prediction["mu"].shape == (6, 30)
+    assert prediction["aux"].shape == (6, 36)
+    assert prediction["decision_aux"].shape == (6, 27)
 
 
 def test_sequence_forecasters_use_temporal_pooling_and_position_information() -> None:

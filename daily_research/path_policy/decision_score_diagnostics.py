@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,7 @@ from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS
 
 STUDIES_ROOT = Path("daily_research/output/path_policy/studies")
 DEFAULT_SCORE_NAMES = (
+    "trade_utility_score",
     "max_pred_utility",
     "horizon_selected_utility",
     "hit_weighted_utility",
@@ -56,6 +58,24 @@ def _require_columns(frame: pd.DataFrame, columns: list[str]) -> None:
     missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise ValueError(f"decision_score_diagnostics missing required columns: {missing}")
+
+
+def _infer_horizons(frame: pd.DataFrame) -> tuple[tuple[int, ...], str]:
+    horizons = tuple(
+        sorted(
+            int(match.group(1))
+            for column in frame.columns
+            for match in [re.match(r"pred_decision_utility_(\d+)d$", str(column))]
+            if match is not None
+        )
+    )
+    if horizons:
+        return tuple(dict.fromkeys(horizons)), "columns"
+    return PATH20_CUMULATIVE_HORIZONS, "default"
+
+
+def _hit_label_columns(frame: pd.DataFrame, horizons: tuple[int, ...]) -> list[str]:
+    return [f"future_hit_label_{int(horizon)}d" for horizon in horizons if f"future_hit_label_{int(horizon)}d" in frame.columns]
 
 
 def _rank_ic_by_date(frame: pd.DataFrame, score_column: str, target_column: str) -> float:
@@ -110,8 +130,8 @@ def _monthly_spread_summary(frame: pd.DataFrame, score_column: str, target_colum
     }
 
 
-def _hit_lift_top20(frame: pd.DataFrame, score_column: str) -> float:
-    hit_cols = [f"future_hit_label_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS]
+def _hit_lift_top20(frame: pd.DataFrame, score_column: str, horizons: tuple[int, ...]) -> float:
+    hit_cols = _hit_label_columns(frame, horizons)
     _require_columns(frame, ["date", score_column, *hit_cols])
     work = frame[["date", score_column, *hit_cols]].copy()
     for column in [score_column, *hit_cols]:
@@ -128,7 +148,7 @@ def _hit_lift_top20(frame: pd.DataFrame, score_column: str) -> float:
     return float(np.mean(lifts)) if lifts else 0.0
 
 
-def _top_bottom_payload(frame: pd.DataFrame, score_column: str, target_column: str) -> dict[str, float]:
+def _top_bottom_payload(frame: pd.DataFrame, score_column: str, target_column: str, horizons: tuple[int, ...]) -> dict[str, float]:
     work = frame[[score_column, target_column]].dropna()
     if len(work) < 2:
         return {
@@ -139,7 +159,7 @@ def _top_bottom_payload(frame: pd.DataFrame, score_column: str, target_column: s
     k = max(int(len(work) * 0.20), 1)
     top = frame.loc[work.nlargest(k, score_column).index]
     bottom = frame.loc[work.nsmallest(k, score_column).index]
-    hit_cols = [f"future_hit_label_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS]
+    hit_cols = _hit_label_columns(frame, horizons)
     hit_rate = 0.0
     if set(hit_cols).issubset(frame.columns):
         hit_rate = float(top[hit_cols].apply(pd.to_numeric, errors="coerce").max(axis=1).mean())
@@ -181,40 +201,48 @@ def _negative_month_context(frame: pd.DataFrame, score_column: str, target_colum
 
 
 def add_score_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    horizons, _ = _infer_horizons(frame)
     required = [
         "date",
         "pred_decision_score",
         "future_decision_score",
         "pred_best_horizon",
-        "pred_cum_mu_5d",
-        "pred_cum_mu_20d",
     ]
-    required.extend(f"pred_decision_utility_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS)
-    required.extend(f"pred_hit_prob_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS)
-    required.extend(f"future_hit_label_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS)
+    required.extend(f"pred_decision_utility_{int(horizon)}d" for horizon in horizons)
+    required.extend(f"pred_hit_prob_{int(horizon)}d" for horizon in horizons)
+    required.extend(f"future_hit_label_{int(horizon)}d" for horizon in horizons)
     _require_columns(frame, required)
 
     out = frame.copy()
     out["date"] = pd.to_datetime(out["date"])
-    utility_cols = [f"pred_decision_utility_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS]
-    hit_cols = [f"pred_hit_prob_{int(horizon)}d" for horizon in PATH20_CUMULATIVE_HORIZONS]
+    utility_cols = [f"pred_decision_utility_{int(horizon)}d" for horizon in horizons]
+    hit_cols = [f"pred_hit_prob_{int(horizon)}d" for horizon in horizons]
     out[utility_cols + hit_cols] = out[utility_cols + hit_cols].apply(pd.to_numeric, errors="coerce")
     out["max_pred_utility"] = pd.to_numeric(out["pred_decision_score"], errors="coerce")
+    out["trade_utility_score"] = (
+        pd.to_numeric(out["trade_utility_score"], errors="coerce")
+        if "trade_utility_score" in out.columns
+        else out[utility_cols].max(axis=1)
+    )
 
-    horizon_values = list(PATH20_CUMULATIVE_HORIZONS)
+    horizon_values = list(horizons)
     horizon_to_col = {int(horizon): f"pred_decision_utility_{int(horizon)}d" for horizon in horizon_values}
     out["horizon_selected_utility"] = [
         _finite_float(row.get(horizon_to_col.get(int(_finite_float(row.get("pred_best_horizon"), 1)), ""), np.nan), np.nan)
         for _, row in out.iterrows()
     ]
     out["hit_weighted_utility"] = (out[utility_cols].to_numpy(dtype=float) * out[hit_cols].to_numpy(dtype=float)).max(axis=1)
-    out["short_horizon_blend"] = (
-        0.50 * out["pred_decision_utility_1d"]
-        + 0.30 * out["pred_decision_utility_3d"]
-        + 0.20 * out["pred_decision_utility_5d"]
+    short_weights = (0.50, 0.30, 0.20)
+    short_horizons = [item for item in (1, 3, 5) if f"pred_decision_utility_{item}d" in out.columns]
+    if len(short_horizons) < 3:
+        short_horizons = list(horizons[: min(3, len(horizons))])
+    weight_sum = sum(short_weights[: len(short_horizons)]) or 1.0
+    out["short_horizon_blend"] = sum(
+        (short_weights[pos] / weight_sum) * out[f"pred_decision_utility_{int(horizon)}d"]
+        for pos, horizon in enumerate(short_horizons)
     )
-    out["forecast_5d_mu"] = pd.to_numeric(out["pred_cum_mu_5d"], errors="coerce")
-    out["forecast_20d_mu"] = pd.to_numeric(out["pred_cum_mu_20d"], errors="coerce")
+    out["forecast_5d_mu"] = pd.to_numeric(out["pred_cum_mu_5d"], errors="coerce") if "pred_cum_mu_5d" in out.columns else out["short_horizon_blend"]
+    out["forecast_20d_mu"] = pd.to_numeric(out["pred_cum_mu_20d"], errors="coerce") if "pred_cum_mu_20d" in out.columns else out["max_pred_utility"]
     out["decision_forecast_blend"] = (
         0.50 * out["max_pred_utility"]
         + 0.30 * out["forecast_5d_mu"]
@@ -223,8 +251,15 @@ def add_score_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def summarize_score(frame: pd.DataFrame, score_column: str, *, target_column: str = "future_decision_score") -> dict[str, Any]:
+def summarize_score(
+    frame: pd.DataFrame,
+    score_column: str,
+    *,
+    target_column: str = "future_decision_score",
+    horizons: tuple[int, ...] | None = None,
+) -> dict[str, Any]:
     _require_columns(frame, ["date", score_column, target_column])
+    resolved_horizons = horizons or _infer_horizons(frame)[0]
     work = frame.copy()
     work[score_column] = pd.to_numeric(work[score_column], errors="coerce")
     work[target_column] = pd.to_numeric(work[target_column], errors="coerce")
@@ -234,26 +269,59 @@ def summarize_score(frame: pd.DataFrame, score_column: str, *, target_column: st
         "score": score_column,
         "rank_ic": _rank_ic_by_date(work, score_column, target_column),
         "top_bottom_spread": _top_bottom_spread_by_date(work, score_column, target_column),
-        "hit_lift_top20_mean": _hit_lift_top20(work, score_column),
+        "hit_lift_top20_mean": _hit_lift_top20(work, score_column, resolved_horizons),
         **monthly,
-        **_top_bottom_payload(work, score_column, target_column),
+        **_top_bottom_payload(work, score_column, target_column, resolved_horizons),
         "negative_month_context": _negative_month_context(work, score_column, target_column, negative_months),
     }
 
 
+def _horizon_discovery(scored: pd.DataFrame, horizons: tuple[int, ...]) -> dict[str, Any]:
+    rows: dict[str, Any] = {}
+    for horizon in horizons:
+        score_col = f"pred_decision_utility_{int(horizon)}d"
+        target_col = f"future_decision_utility_{int(horizon)}d"
+        hit_col = f"future_hit_label_{int(horizon)}d"
+        if score_col not in scored.columns or target_col not in scored.columns:
+            continue
+        hit_lift = 0.0
+        if hit_col in scored.columns:
+            work = scored[["date", score_col, hit_col]].copy()
+            work[score_col] = pd.to_numeric(work[score_col], errors="coerce")
+            work[hit_col] = pd.to_numeric(work[hit_col], errors="coerce")
+            lifts: list[float] = []
+            for _, group in work.dropna().groupby("date", sort=True):
+                if len(group) < 2:
+                    continue
+                k = max(int(len(group) * 0.20), 1)
+                lifts.append(float(group.nlargest(k, score_col)[hit_col].mean() - group[hit_col].mean()))
+            hit_lift = float(np.mean(lifts)) if lifts else 0.0
+        rows[str(int(horizon))] = {
+            "rank_ic": _rank_ic_by_date(scored, score_col, target_col),
+            "top_bottom_spread": _top_bottom_spread_by_date(scored, score_col, target_col),
+            "hit_lift_top20_mean": hit_lift,
+        }
+    return rows
+
+
 def summarize_frame(frame: pd.DataFrame, *, score_names: tuple[str, ...] = DEFAULT_SCORE_NAMES) -> dict[str, Any]:
+    horizons, horizon_source = _infer_horizons(frame)
     scored = add_score_columns(frame)
+    score_candidates = tuple(score_name for score_name in score_names if score_name in scored.columns)
     payload = {
         "row_count": int(len(scored)),
         "date_count": int(scored["date"].nunique()),
+        "horizons": [int(item) for item in horizons],
+        "horizon_source": horizon_source,
+        "horizon_discovery": _horizon_discovery(scored, horizons),
         "pred_best_horizon_distribution": _value_counts_payload(scored["pred_best_horizon"]),
         "future_best_horizon_distribution": _value_counts_payload(scored["future_best_horizon"])
         if "future_best_horizon" in scored.columns
         else {},
         "scores": {},
     }
-    for score_name in score_names:
-        payload["scores"][score_name] = summarize_score(scored, score_name)
+    for score_name in score_candidates:
+        payload["scores"][score_name] = summarize_score(scored, score_name, horizons=horizons)
     return payload
 
 

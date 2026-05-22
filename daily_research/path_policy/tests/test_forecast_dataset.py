@@ -52,6 +52,36 @@ def test_forecast_sequence_dataset_builds_roles_with_purge_and_train_normalizati
     assert max(validation_dates) <= prepared.close.loc["2020"].index[-22]
 
 
+def test_forecast_sequence_dataset_accepts_custom_horizon_grid_with_horizon_specific_risk() -> None:
+    prepared = make_prepared_policy_inputs(days=900, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2018-01-02")
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=30,
+        cumulative_horizons=horizons,
+        max_samples_per_role=6,
+    )
+
+    assert dataset.manifest["horizon"] == 30
+    assert dataset.manifest["forecast_horizon"] == 30
+    assert dataset.manifest["cumulative_horizons"] == list(horizons)
+    assert dataset.manifest["role_purge_trading_days"] == 31
+    assert dataset.y_daily_excess.shape == (dataset.x.shape[0], 30)
+    assert dataset.y_cum_excess.shape == (dataset.x.shape[0], len(horizons))
+    assert dataset.y_rank_by_horizon.shape == (dataset.x.shape[0], len(horizons))
+    assert dataset.y_drawdown_by_horizon.shape == (dataset.x.shape[0], len(horizons))
+    assert dataset.y_worst_by_horizon.shape == (dataset.x.shape[0], len(horizons))
+    assert dataset.y_upside_by_horizon.shape == (dataset.x.shape[0], len(horizons))
+    assert np.isfinite(dataset.y_drawdown_by_horizon).all()
+    assert max(dataset.dates_by_role["validation"]) <= prepared.close.loc["2020"].index[-32]
+
+
 def test_forecast_sequence_dataset_validation_inputs_can_use_prior_history_without_crossing_labels() -> None:
     prepared = make_prepared_policy_inputs(days=700, stocks=("AAA", "BBB", "CCC"), start_date="2019-01-02")
 

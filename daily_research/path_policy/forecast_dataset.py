@@ -23,6 +23,7 @@ from daily_research.path_policy.labels import (
     PATH20_CUMULATIVE_HORIZONS,
     PATH20_HORIZON,
     build_path20_labels,
+    normalize_cumulative_horizons,
 )
 
 
@@ -33,6 +34,9 @@ class ForecastSequenceDataset:
     y_cum_excess: np.ndarray
     y_rank_by_horizon: np.ndarray
     y_rank_20d: np.ndarray
+    y_drawdown_by_horizon: np.ndarray
+    y_worst_by_horizon: np.ndarray
+    y_upside_by_horizon: np.ndarray
     y_max_drawdown_20d: np.ndarray
     y_worst_1d_20d: np.ndarray
     y_upside_20d: np.ndarray
@@ -72,14 +76,7 @@ class ForecastMemmapTorchDataset(Dataset):
         x = self.dataset.input_window(row_idx, store=self._feature_store)
         y_daily = self.dataset.y_daily_excess[row_idx] * self.target_scale
         y_cum = self.dataset.y_cum_excess[row_idx] * self.target_scale
-        y_risk = np.asarray(
-            [
-                self.dataset.y_max_drawdown_20d[row_idx],
-                self.dataset.y_worst_1d_20d[row_idx],
-                self.dataset.y_upside_20d[row_idx],
-            ],
-            dtype=np.float32,
-        ) * self.target_scale
+        y_risk = self.dataset.risk_by_horizon(row_idx) * self.target_scale
         items: tuple[torch.Tensor, ...] = (
             torch.as_tensor(x, dtype=torch.float32),
             torch.as_tensor(y_daily, dtype=torch.float32),
@@ -123,17 +120,7 @@ class ForecastDateBatchTorchDataset(Dataset):
         ).astype(np.float32)
         y_daily = np.asarray(self.dataset.y_daily_excess[row_indices], dtype=np.float32).copy() * self.target_scale
         y_cum = np.asarray(self.dataset.y_cum_excess[row_indices], dtype=np.float32).copy() * self.target_scale
-        y_risk = np.asarray(
-            np.stack(
-                [
-                    self.dataset.y_max_drawdown_20d[row_indices],
-                    self.dataset.y_worst_1d_20d[row_indices],
-                    self.dataset.y_upside_20d[row_indices],
-                ],
-                axis=1,
-            ),
-            dtype=np.float32,
-        ).copy() * self.target_scale
+        y_risk = self.dataset.risk_by_horizon(row_indices).copy() * self.target_scale
         mask = np.ones((len(row_indices),), dtype=bool)
         items: tuple[torch.Tensor, ...] = (
             torch.as_tensor(x, dtype=torch.float32),
@@ -159,6 +146,9 @@ class ForecastMemmapDataset:
     y_cum_excess: np.memmap
     y_rank_by_horizon: np.memmap
     y_rank_20d: np.memmap
+    y_drawdown_by_horizon: np.memmap
+    y_worst_by_horizon: np.memmap
+    y_upside_by_horizon: np.memmap
     y_max_drawdown_20d: np.memmap
     y_worst_1d_20d: np.memmap
     y_upside_20d: np.memmap
@@ -215,6 +205,23 @@ class ForecastMemmapDataset:
         window = np.asarray(store[start:end, stock_pos, :], dtype=np.float32)
         normalized = ((window - self.feature_mean.reshape(1, -1)) / self.feature_std.reshape(1, -1)).astype(np.float32)
         return np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
+
+    @property
+    def cumulative_horizons(self) -> tuple[int, ...]:
+        return normalize_cumulative_horizons(
+            self.manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS),
+            horizon=int(self.manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON),
+        )
+
+    def risk_by_horizon(self, row_idx: int | np.ndarray) -> np.ndarray:
+        return np.stack(
+            [
+                np.asarray(self.y_drawdown_by_horizon[row_idx], dtype=np.float32),
+                np.asarray(self.y_worst_by_horizon[row_idx], dtype=np.float32),
+                np.asarray(self.y_upside_by_horizon[row_idx], dtype=np.float32),
+            ],
+            axis=-1,
+        ).astype(np.float32, copy=False)
 
     def role_indices(self, role: str) -> np.ndarray:
         return np.flatnonzero(self.sample_index["role"].astype(str).to_numpy() == str(role))
@@ -536,16 +543,21 @@ def _empty_dataset(
     feature_columns: list[str],
     lookback_days: int,
     horizon: int,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     manifest: dict[str, Any],
     normalization_manifest: dict[str, Any],
 ) -> ForecastSequenceDataset:
+    resolved_horizons = normalize_cumulative_horizons(cumulative_horizons, horizon=horizon)
     x = np.empty((0, int(lookback_days), int(len(feature_columns))), dtype=np.float32)
     return ForecastSequenceDataset(
         x=x,
         y_daily_excess=np.empty((0, int(horizon)), dtype=np.float32),
-        y_cum_excess=np.empty((0, len(PATH20_CUMULATIVE_HORIZONS)), dtype=np.float32),
-        y_rank_by_horizon=np.empty((0, len(PATH20_CUMULATIVE_HORIZONS)), dtype=np.float32),
+        y_cum_excess=np.empty((0, len(resolved_horizons)), dtype=np.float32),
+        y_rank_by_horizon=np.empty((0, len(resolved_horizons)), dtype=np.float32),
         y_rank_20d=np.empty((0,), dtype=np.float32),
+        y_drawdown_by_horizon=np.empty((0, len(resolved_horizons)), dtype=np.float32),
+        y_worst_by_horizon=np.empty((0, len(resolved_horizons)), dtype=np.float32),
+        y_upside_by_horizon=np.empty((0, len(resolved_horizons)), dtype=np.float32),
         y_max_drawdown_20d=np.empty((0,), dtype=np.float32),
         y_worst_1d_20d=np.empty((0,), dtype=np.float32),
         y_upside_20d=np.empty((0,), dtype=np.float32),
@@ -570,6 +582,7 @@ def build_forecast_sequence_dataset(
     test_year: int = 2024,
     lookback_days: int = 252,
     horizon: int = PATH20_HORIZON,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     execution_mode: str = "next_open",
     max_samples_per_role: int = 0,
     feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
@@ -577,8 +590,7 @@ def build_forecast_sequence_dataset(
 ) -> ForecastSequenceDataset:
     lookback_days = int(lookback_days)
     horizon = int(horizon)
-    if horizon != PATH20_HORIZON:
-        raise ValueError("Path20 forecast dataset currently requires horizon=20.")
+    resolved_horizons = normalize_cumulative_horizons(cumulative_horizons, horizon=horizon)
     if lookback_days <= 0:
         raise ValueError("lookback_days must be positive.")
     if int(train_start_year) > int(train_end_year):
@@ -602,13 +614,16 @@ def build_forecast_sequence_dataset(
         feature_profile=feature_profile,
         max_feature_columns=max_feature_columns,
     )
-    labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon)
+    labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon, cumulative_horizons=resolved_horizons)
 
     x_rows: list[np.ndarray] = []
     y_daily_rows: list[list[float]] = []
     y_cum_rows: list[list[float]] = []
     y_rank_by_horizon_rows: list[list[float]] = []
     y_rank_rows: list[float] = []
+    y_drawdown_by_horizon_rows: list[list[float]] = []
+    y_worst_by_horizon_rows: list[list[float]] = []
+    y_upside_by_horizon_rows: list[list[float]] = []
     y_drawdown_rows: list[float] = []
     y_worst_rows: list[float] = []
     y_upside_rows: list[float] = []
@@ -646,13 +661,26 @@ def build_forecast_sequence_dataset(
                 ]
                 cum_target = [
                     _safe_label_value(labels.cumulative_excess_return[step], signal_dt, str(stock))
-                    for step in PATH20_CUMULATIVE_HORIZONS
+                    for step in resolved_horizons
                 ]
                 rank_by_horizon_target = [
                     _safe_label_value(labels.forward_rank[step], signal_dt, str(stock))
-                    for step in PATH20_CUMULATIVE_HORIZONS
+                    for step in resolved_horizons
                 ]
-                rank_target = _safe_label_value(labels.forward_rank[horizon], signal_dt, str(stock))
+                rank_horizon = int(horizon) if int(horizon) in labels.forward_rank else int(resolved_horizons[-1])
+                rank_target = _safe_label_value(labels.forward_rank[rank_horizon], signal_dt, str(stock))
+                drawdown_by_horizon_target = [
+                    _safe_label_value(labels.path_max_drawdown_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
+                worst_by_horizon_target = [
+                    _safe_label_value(labels.path_worst_1d_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
+                upside_by_horizon_target = [
+                    _safe_label_value(labels.path_upside_capture_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
                 drawdown_target = _safe_label_value(labels.path_max_drawdown_20d, signal_dt, str(stock))
                 worst_target = _safe_label_value(labels.path_worst_1d_20d, signal_dt, str(stock))
                 upside_target = _safe_label_value(labels.path_upside_capture_20d, signal_dt, str(stock))
@@ -661,6 +689,9 @@ def build_forecast_sequence_dataset(
                     *cum_target,
                     *rank_by_horizon_target,
                     rank_target,
+                    *drawdown_by_horizon_target,
+                    *worst_by_horizon_target,
+                    *upside_by_horizon_target,
                     drawdown_target,
                     worst_target,
                     upside_target,
@@ -687,6 +718,9 @@ def build_forecast_sequence_dataset(
                 y_cum_rows.append(cum_target)
                 y_rank_by_horizon_rows.append(rank_by_horizon_target)
                 y_rank_rows.append(rank_target)
+                y_drawdown_by_horizon_rows.append(drawdown_by_horizon_target)
+                y_worst_by_horizon_rows.append(worst_by_horizon_target)
+                y_upside_by_horizon_rows.append(upside_by_horizon_target)
                 y_drawdown_rows.append(drawdown_target)
                 y_worst_rows.append(worst_target)
                 y_upside_rows.append(upside_target)
@@ -707,6 +741,7 @@ def build_forecast_sequence_dataset(
         "stage": "forecast_sequence_dataset",
         "lookback_days": int(lookback_days),
         "horizon": int(horizon),
+        "forecast_horizon": int(horizon),
         "execution_mode": str(execution_mode),
         "label_semantics": dict(labels.metadata),
         "role_years": {
@@ -729,8 +764,9 @@ def build_forecast_sequence_dataset(
         "sector_context_feature_count": int(feature_manifest.get("sector_context_feature_count", 0)),
         "source_sector_board_view_id": str(feature_manifest.get("source_sector_board_view_id", "")),
         "alpha_prior_feature_count": int(feature_manifest.get("alpha_prior_feature_count", 0)),
-        "cumulative_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
-        "rank_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
+        "cumulative_horizons": [int(item) for item in resolved_horizons],
+        "rank_horizons": [int(item) for item in resolved_horizons],
+        "risk_horizons": [int(item) for item in resolved_horizons],
         "sample_count_by_role": {key: int(value) for key, value in sample_count_by_role.items()},
         "dropped_target_nan": int(dropped_target_nan),
         "dropped_missing_lookback": int(dropped_missing_lookback),
@@ -744,6 +780,7 @@ def build_forecast_sequence_dataset(
             feature_columns=feature_columns,
             lookback_days=lookback_days,
             horizon=horizon,
+            cumulative_horizons=resolved_horizons,
             manifest=base_manifest,
             normalization_manifest=normalization_manifest,
         )
@@ -788,6 +825,9 @@ def build_forecast_sequence_dataset(
         y_cum_excess=np.asarray(y_cum_rows, dtype=np.float32),
         y_rank_by_horizon=np.asarray(y_rank_by_horizon_rows, dtype=np.float32),
         y_rank_20d=np.asarray(y_rank_rows, dtype=np.float32),
+        y_drawdown_by_horizon=np.asarray(y_drawdown_by_horizon_rows, dtype=np.float32),
+        y_worst_by_horizon=np.asarray(y_worst_by_horizon_rows, dtype=np.float32),
+        y_upside_by_horizon=np.asarray(y_upside_by_horizon_rows, dtype=np.float32),
         y_max_drawdown_20d=np.asarray(y_drawdown_rows, dtype=np.float32),
         y_worst_1d_20d=np.asarray(y_worst_rows, dtype=np.float32),
         y_upside_20d=np.asarray(y_upside_rows, dtype=np.float32),
@@ -861,7 +901,11 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
             f"sample_count={row_count}, sample_index_rows={len(sample_index)} at {manifest_path}"
         )
     horizon = int(manifest.get("horizon", PATH20_HORIZON) or PATH20_HORIZON)
-    cumulative_count = len(manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS))
+    cumulative_horizons = normalize_cumulative_horizons(
+        manifest.get("cumulative_horizons", PATH20_CUMULATIVE_HORIZONS),
+        horizon=horizon,
+    )
+    cumulative_count = len(cumulative_horizons)
     normalization = dict(manifest.get("normalization", {}) or {})
     feature_columns = [str(item) for item in manifest.get("feature_columns", [])]
     feature_mean = np.asarray(normalization.get("feature_mean", []), dtype=np.float32)
@@ -879,6 +923,10 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
     _validate_memmap_file(root / "forecast_y_daily_excess.dat", shape=(row_count, horizon), label="forecast_y_daily_excess")
     _validate_memmap_file(root / "forecast_y_cum_excess.dat", shape=(row_count, cumulative_count), label="forecast_y_cum_excess")
     _validate_memmap_file(root / "forecast_y_rank_by_horizon.dat", shape=(row_count, cumulative_count), label="forecast_y_rank_by_horizon")
+    if (root / "forecast_y_drawdown_by_horizon.dat").exists():
+        _validate_memmap_file(root / "forecast_y_drawdown_by_horizon.dat", shape=(row_count, cumulative_count), label="forecast_y_drawdown_by_horizon")
+        _validate_memmap_file(root / "forecast_y_worst_by_horizon.dat", shape=(row_count, cumulative_count), label="forecast_y_worst_by_horizon")
+        _validate_memmap_file(root / "forecast_y_upside_by_horizon.dat", shape=(row_count, cumulative_count), label="forecast_y_upside_by_horizon")
     _validate_memmap_file(root / "forecast_y_rank_20d.dat", shape=(row_count,), label="forecast_y_rank_20d")
     _validate_memmap_file(root / "forecast_y_max_drawdown_20d.dat", shape=(row_count,), label="forecast_y_max_drawdown_20d")
     _validate_memmap_file(root / "forecast_y_worst_1d_20d.dat", shape=(row_count,), label="forecast_y_worst_1d_20d")
@@ -902,7 +950,42 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
             )
         static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=static_shape)
 
-    manifest = {**manifest, "artifact_reused": True, "manifest_json": str(manifest_path.resolve())}
+    has_dynamic_risk = (root / "forecast_y_drawdown_by_horizon.dat").exists()
+    y_drawdown_by_horizon = (
+        np.memmap(root / "forecast_y_drawdown_by_horizon.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count))
+        if has_dynamic_risk
+        else np.repeat(
+            np.memmap(root / "forecast_y_max_drawdown_20d.dat", dtype="float32", mode="r", shape=(row_count,)).reshape(-1, 1),
+            cumulative_count,
+            axis=1,
+        ).astype(np.float32)
+    )
+    y_worst_by_horizon = (
+        np.memmap(root / "forecast_y_worst_by_horizon.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count))
+        if has_dynamic_risk
+        else np.repeat(
+            np.memmap(root / "forecast_y_worst_1d_20d.dat", dtype="float32", mode="r", shape=(row_count,)).reshape(-1, 1),
+            cumulative_count,
+            axis=1,
+        ).astype(np.float32)
+    )
+    y_upside_by_horizon = (
+        np.memmap(root / "forecast_y_upside_by_horizon.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count))
+        if has_dynamic_risk
+        else np.repeat(
+            np.memmap(root / "forecast_y_upside_20d.dat", dtype="float32", mode="r", shape=(row_count,)).reshape(-1, 1),
+            cumulative_count,
+            axis=1,
+        ).astype(np.float32)
+    )
+    manifest = {
+        **manifest,
+        "artifact_reused": True,
+        "manifest_json": str(manifest_path.resolve()),
+        "cumulative_horizons": [int(item) for item in cumulative_horizons],
+        "risk_horizons": [int(item) for item in cumulative_horizons],
+        "forecast_horizon": int(horizon),
+    }
     return ForecastMemmapDataset(
         root=root,
         feature_store_path=feature_store_path,
@@ -912,6 +995,9 @@ def load_forecast_memmap_dataset(manifest_json: str | Path) -> ForecastMemmapDat
         y_cum_excess=np.memmap(root / "forecast_y_cum_excess.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count)),
         y_rank_by_horizon=np.memmap(root / "forecast_y_rank_by_horizon.dat", dtype="float32", mode="r", shape=(row_count, cumulative_count)),
         y_rank_20d=np.memmap(root / "forecast_y_rank_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
+        y_drawdown_by_horizon=y_drawdown_by_horizon,
+        y_worst_by_horizon=y_worst_by_horizon,
+        y_upside_by_horizon=y_upside_by_horizon,
         y_max_drawdown_20d=np.memmap(root / "forecast_y_max_drawdown_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
         y_worst_1d_20d=np.memmap(root / "forecast_y_worst_1d_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
         y_upside_20d=np.memmap(root / "forecast_y_upside_20d.dat", dtype="float32", mode="r", shape=(row_count,)),
@@ -948,6 +1034,7 @@ def build_forecast_memmap_dataset(
     test_year: int = 2024,
     lookback_days: int = 252,
     horizon: int = PATH20_HORIZON,
+    cumulative_horizons: tuple[int, ...] | list[int] | str | None = None,
     execution_mode: str = "next_open",
     max_samples_per_role: int = 0,
     feature_profile: str = DEFAULT_FORECAST_FEATURE_PROFILE,
@@ -960,8 +1047,7 @@ def build_forecast_memmap_dataset(
     root.mkdir(parents=True, exist_ok=True)
     lookback_days = int(lookback_days)
     horizon = int(horizon)
-    if horizon != PATH20_HORIZON:
-        raise ValueError("Path20 forecast memmap dataset currently requires horizon=20.")
+    resolved_horizons = normalize_cumulative_horizons(cumulative_horizons, horizon=horizon)
     if lookback_days <= 0:
         raise ValueError("lookback_days must be positive.")
     if not (0.0 <= float(min_lookback_valid_ratio) <= 1.0):
@@ -1009,13 +1095,16 @@ def build_forecast_memmap_dataset(
         min_lookback_valid_ratio=float(min_lookback_valid_ratio),
     )
     feature_shape = tuple(int(item) for item in feature_manifest.get("feature_store_shape", [len(dates), len(universe), len(feature_columns)]))
-    labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon)
+    labels = build_path20_labels(prepared, execution_mode=execution_mode, horizon=horizon, cumulative_horizons=resolved_horizons)
 
     sample_rows: list[dict[str, Any]] = []
     y_daily_rows: list[list[float]] = []
     y_cum_rows: list[list[float]] = []
     y_rank_by_horizon_rows: list[list[float]] = []
     y_rank_rows: list[float] = []
+    y_drawdown_by_horizon_rows: list[list[float]] = []
+    y_worst_by_horizon_rows: list[list[float]] = []
+    y_upside_by_horizon_rows: list[list[float]] = []
     y_drawdown_rows: list[float] = []
     y_worst_rows: list[float] = []
     y_upside_rows: list[float] = []
@@ -1056,13 +1145,26 @@ def build_forecast_memmap_dataset(
                 ]
                 cum_target = [
                     _safe_label_value(labels.cumulative_excess_return[step], signal_dt, str(stock))
-                    for step in PATH20_CUMULATIVE_HORIZONS
+                    for step in resolved_horizons
                 ]
                 rank_by_horizon_target = [
                     _safe_label_value(labels.forward_rank[step], signal_dt, str(stock))
-                    for step in PATH20_CUMULATIVE_HORIZONS
+                    for step in resolved_horizons
                 ]
-                rank_target = _safe_label_value(labels.forward_rank[horizon], signal_dt, str(stock))
+                rank_horizon = int(horizon) if int(horizon) in labels.forward_rank else int(resolved_horizons[-1])
+                rank_target = _safe_label_value(labels.forward_rank[rank_horizon], signal_dt, str(stock))
+                drawdown_by_horizon_target = [
+                    _safe_label_value(labels.path_max_drawdown_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
+                worst_by_horizon_target = [
+                    _safe_label_value(labels.path_worst_1d_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
+                upside_by_horizon_target = [
+                    _safe_label_value(labels.path_upside_capture_by_horizon[step], signal_dt, str(stock))
+                    for step in resolved_horizons
+                ]
                 drawdown_target = _safe_label_value(labels.path_max_drawdown_20d, signal_dt, str(stock))
                 worst_target = _safe_label_value(labels.path_worst_1d_20d, signal_dt, str(stock))
                 upside_target = _safe_label_value(labels.path_upside_capture_20d, signal_dt, str(stock))
@@ -1071,6 +1173,9 @@ def build_forecast_memmap_dataset(
                     *cum_target,
                     *rank_by_horizon_target,
                     rank_target,
+                    *drawdown_by_horizon_target,
+                    *worst_by_horizon_target,
+                    *upside_by_horizon_target,
                     drawdown_target,
                     worst_target,
                     upside_target,
@@ -1113,6 +1218,9 @@ def build_forecast_memmap_dataset(
                 y_cum_rows.append(cum_target)
                 y_rank_by_horizon_rows.append(rank_by_horizon_target)
                 y_rank_rows.append(rank_target)
+                y_drawdown_by_horizon_rows.append(drawdown_by_horizon_target)
+                y_worst_by_horizon_rows.append(worst_by_horizon_target)
+                y_upside_by_horizon_rows.append(upside_by_horizon_target)
                 y_drawdown_rows.append(drawdown_target)
                 y_worst_rows.append(worst_target)
                 y_upside_rows.append(upside_target)
@@ -1141,8 +1249,11 @@ def build_forecast_memmap_dataset(
         static_context_ids.flush()
         static_context_ids = np.memmap(static_context_path, dtype="int64", mode="r", shape=(row_count, len(static_id_columns)))
     y_daily = _write_array_memmap(root / "forecast_y_daily_excess.dat", np.asarray(y_daily_rows, dtype=np.float32), (row_count, horizon))
-    y_cum = _write_array_memmap(root / "forecast_y_cum_excess.dat", np.asarray(y_cum_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
-    y_rank_by_horizon = _write_array_memmap(root / "forecast_y_rank_by_horizon.dat", np.asarray(y_rank_by_horizon_rows, dtype=np.float32), (row_count, len(PATH20_CUMULATIVE_HORIZONS)))
+    y_cum = _write_array_memmap(root / "forecast_y_cum_excess.dat", np.asarray(y_cum_rows, dtype=np.float32), (row_count, len(resolved_horizons)))
+    y_rank_by_horizon = _write_array_memmap(root / "forecast_y_rank_by_horizon.dat", np.asarray(y_rank_by_horizon_rows, dtype=np.float32), (row_count, len(resolved_horizons)))
+    y_drawdown_by_horizon = _write_array_memmap(root / "forecast_y_drawdown_by_horizon.dat", np.asarray(y_drawdown_by_horizon_rows, dtype=np.float32), (row_count, len(resolved_horizons)))
+    y_worst_by_horizon = _write_array_memmap(root / "forecast_y_worst_by_horizon.dat", np.asarray(y_worst_by_horizon_rows, dtype=np.float32), (row_count, len(resolved_horizons)))
+    y_upside_by_horizon = _write_array_memmap(root / "forecast_y_upside_by_horizon.dat", np.asarray(y_upside_by_horizon_rows, dtype=np.float32), (row_count, len(resolved_horizons)))
     y_rank = _write_array_memmap(root / "forecast_y_rank_20d.dat", np.asarray(y_rank_rows, dtype=np.float32), (row_count,))
     y_drawdown = _write_array_memmap(root / "forecast_y_max_drawdown_20d.dat", np.asarray(y_drawdown_rows, dtype=np.float32), (row_count,))
     y_worst = _write_array_memmap(root / "forecast_y_worst_1d_20d.dat", np.asarray(y_worst_rows, dtype=np.float32), (row_count,))
@@ -1192,6 +1303,7 @@ def build_forecast_memmap_dataset(
         "source_sector_board_snapshot_semantics": str(sector_board_meta.get("snapshot_semantics", "") or ""),
         "lookback_days": int(lookback_days),
         "horizon": int(horizon),
+        "forecast_horizon": int(horizon),
         "execution_mode": str(execution_mode),
         "label_semantics": dict(labels.metadata),
         "role_years": {
@@ -1217,8 +1329,9 @@ def build_forecast_memmap_dataset(
         "feature_store_path": str(feature_store_path.resolve()),
         "feature_store_shape": [int(item) for item in feature_shape],
         "sample_index_csv": str(sample_index_path.resolve()),
-        "cumulative_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
-        "rank_horizons": [int(item) for item in PATH20_CUMULATIVE_HORIZONS],
+        "cumulative_horizons": [int(item) for item in resolved_horizons],
+        "rank_horizons": [int(item) for item in resolved_horizons],
+        "risk_horizons": [int(item) for item in resolved_horizons],
         "sample_count": int(row_count),
         "sample_count_by_role": {key: int(value) for key, value in sample_count_by_role.items()},
         "dropped_target_nan": int(dropped_target_nan),
@@ -1269,6 +1382,9 @@ def build_forecast_memmap_dataset(
         y_cum_excess=y_cum,
         y_rank_by_horizon=y_rank_by_horizon,
         y_rank_20d=y_rank,
+        y_drawdown_by_horizon=y_drawdown_by_horizon,
+        y_worst_by_horizon=y_worst_by_horizon,
+        y_upside_by_horizon=y_upside_by_horizon,
         y_max_drawdown_20d=y_drawdown,
         y_worst_1d_20d=y_worst,
         y_upside_20d=y_upside,
@@ -1294,6 +1410,9 @@ def save_forecast_sequence_dataset(dataset: ForecastSequenceDataset, root: Path)
         y_cum_excess=dataset.y_cum_excess,
         y_rank_by_horizon=dataset.y_rank_by_horizon,
         y_rank_20d=dataset.y_rank_20d,
+        y_drawdown_by_horizon=dataset.y_drawdown_by_horizon,
+        y_worst_by_horizon=dataset.y_worst_by_horizon,
+        y_upside_by_horizon=dataset.y_upside_by_horizon,
         y_max_drawdown_20d=dataset.y_max_drawdown_20d,
         y_worst_1d_20d=dataset.y_worst_1d_20d,
         y_upside_20d=dataset.y_upside_20d,

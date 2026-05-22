@@ -564,6 +564,27 @@ def _forecast_int_tuple(value: str | None, *, default: tuple[int, ...]) -> tuple
     return tuple(int(item.strip()) for item in text.split(",") if item.strip())
 
 
+def _resolve_forecast_horizon_args(args: argparse.Namespace) -> tuple[int, tuple[int, ...]]:
+    raw_horizons = _forecast_int_tuple(
+        getattr(args, "forecast_cumulative_horizons", ""),
+        default=(1, 3, 5, 10, 20),
+    )
+    cumulative_horizons = tuple(sorted(dict.fromkeys(int(item) for item in raw_horizons)))
+    if not cumulative_horizons:
+        raise ValueError("--forecast-cumulative-horizons must contain at least one horizon.")
+    forecast_horizon = int(getattr(args, "forecast_horizon", 0) or 0)
+    if forecast_horizon <= 0:
+        forecast_horizon = int(max(cumulative_horizons))
+    if int(max(cumulative_horizons)) > forecast_horizon:
+        if int(getattr(args, "forecast_horizon", 0) or 0) > 0:
+            raise ValueError("--forecast-horizon must be >= max(--forecast-cumulative-horizons).")
+        forecast_horizon = int(max(cumulative_horizons))
+    invalid = [item for item in cumulative_horizons if int(item) <= 0 or int(item) > forecast_horizon]
+    if invalid:
+        raise ValueError(f"--forecast-cumulative-horizons values must be in [1, {forecast_horizon}], got {invalid}.")
+    return forecast_horizon, cumulative_horizons
+
+
 def _forecast_manifest_prepared_summary(manifest: dict[str, Any], *, args: argparse.Namespace) -> dict[str, Any]:
     role_years = dict(manifest.get("role_years", {}) or {})
     feature_manifest = dict(manifest.get("feature_manifest", {}) or {})
@@ -614,6 +635,7 @@ def _run_forecast_walkforward_study(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     families = _forecast_model_families(getattr(args, "forecast_model_families", ""))
+    forecast_horizon, cumulative_horizons = _resolve_forecast_horizon_args(args)
     dataset_mode = str(getattr(args, "forecast_dataset_mode", "eager") or "eager").strip().lower()
     if dataset_mode == "memmap":
         manifest_path = str(getattr(args, "forecast_memmap_manifest", "") or "").strip()
@@ -628,7 +650,8 @@ def _run_forecast_walkforward_study(
                 validation_year=int(args.forecast_validation_year),
                 test_year=int(args.forecast_test_year),
                 lookback_days=int(args.forecast_lookback_days),
-                horizon=PATH20_HORIZON,
+                horizon=forecast_horizon,
+                cumulative_horizons=cumulative_horizons,
                 execution_mode=args.execution_mode,
                 feature_profile=str(args.forecast_feature_profile),
                 max_feature_columns=int(args.forecast_max_feature_columns),
@@ -648,7 +671,8 @@ def _run_forecast_walkforward_study(
             validation_year=int(args.forecast_validation_year),
             test_year=int(args.forecast_test_year),
             lookback_days=int(args.forecast_lookback_days),
-            horizon=PATH20_HORIZON,
+            horizon=forecast_horizon,
+            cumulative_horizons=cumulative_horizons,
             execution_mode=args.execution_mode,
             feature_profile=str(args.forecast_feature_profile),
             max_feature_columns=int(args.forecast_max_feature_columns),
@@ -724,8 +748,8 @@ def _run_forecast_walkforward_study(
         "forecast_model_families": list(families),
         "facts": [
             "alpha_path20_neural_policy_v1 is the current Path20 research mainline pointer.",
-            "Stage 1 is strict supervised forecasting: past stock state sequence to future 20d excess-return path.",
-            "Stage 1 now evaluates 1d/3d/5d/10d/20d horizons plus 20d upside opportunity.",
+            f"Stage 1 is strict supervised forecasting: past stock state sequence to future {forecast_horizon}d excess-return path.",
+            f"Stage 1 now evaluates dynamic horizons: {','.join(str(item) for item in cumulative_horizons)}.",
             "Validation evidence is interpreted before test evidence.",
             "Model outputs are trained with target_scale=100 and persisted predictions are restored to return units.",
         ],
@@ -735,7 +759,7 @@ def _run_forecast_walkforward_study(
         ],
         "assumptions": [
             "Past one-year input means the signal date and previous lookback-1 trading days.",
-            "Future 20d labels follow next_open semantics unless --execution-mode close is explicitly selected.",
+            f"Future {forecast_horizon}d labels follow next_open semantics unless --execution-mode close is explicitly selected.",
         ],
         "boundaries": [
             "shadow_only=true",
@@ -3310,6 +3334,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--smoke-epochs", type=int, default=2)
     parser.add_argument("--smoke-lr", type=float, default=None)
     parser.add_argument("--forecast-lookback-days", type=int, default=252)
+    parser.add_argument(
+        "--forecast-horizon",
+        type=int,
+        default=0,
+        help="Maximum forecast horizon. Defaults to max(--forecast-cumulative-horizons).",
+    )
+    parser.add_argument(
+        "--forecast-cumulative-horizons",
+        default="1,3,5,10,20",
+        help="Comma-separated cumulative/decision horizons, e.g. 1,2,3,5,8,10,15,20,30.",
+    )
     parser.add_argument("--forecast-train-start-year", type=int, default=2019)
     parser.add_argument("--forecast-train-end-year", type=int, default=2022)
     parser.add_argument("--forecast-validation-year", type=int, default=2023)
@@ -3415,6 +3450,12 @@ def _validate_protocol_args(parser: argparse.ArgumentParser, args: argparse.Name
     if args.stage in FORECAST_MAINLINE_STAGES:
         if int(getattr(args, "forecast_lookback_days", 252)) <= 0:
             parser.error("--forecast-lookback-days must be positive.")
+        try:
+            forecast_horizon, cumulative_horizons = _resolve_forecast_horizon_args(args)
+        except ValueError as exc:
+            parser.error(str(exc))
+        args.forecast_horizon = int(forecast_horizon)
+        args.forecast_cumulative_horizons = ",".join(str(item) for item in cumulative_horizons)
         if int(getattr(args, "forecast_epochs", 2)) <= 0:
             parser.error("--forecast-epochs must be positive.")
         if int(getattr(args, "forecast_batch_size", 512)) <= 0:

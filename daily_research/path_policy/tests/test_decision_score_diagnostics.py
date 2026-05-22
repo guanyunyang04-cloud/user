@@ -53,6 +53,39 @@ def test_add_score_columns_builds_expected_variants() -> None:
     assert frame["decision_forecast_blend"].iloc[0] == pytest.approx(0.0345)
 
 
+def test_add_score_columns_infers_dynamic_horizons_and_trade_utility_score() -> None:
+    rows = []
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    for idx in range(5):
+        score = 0.05 - idx * 0.01
+        row = {
+            "date": "2024-01-02",
+            "stock": f"S{idx}",
+            "pred_decision_score": score,
+            "future_decision_score": score,
+            "pred_best_horizon": 8,
+            "future_best_horizon": 8,
+            "pred_cum_mu_5d": score * 0.5,
+            "pred_cum_mu_20d": score * 0.2,
+        }
+        for horizon in horizons:
+            row[f"pred_decision_utility_{horizon}d"] = score + horizon * 0.001
+            row[f"future_decision_utility_{horizon}d"] = score + horizon * 0.001
+            row[f"pred_hit_prob_{horizon}d"] = 0.8
+            row[f"future_hit_label_{horizon}d"] = 1 if idx < 2 else 0
+        rows.append(row)
+
+    summary = summarize_frame(pd.DataFrame(rows))
+    frame = add_score_columns(pd.DataFrame(rows))
+
+    assert summary["horizons"] == list(horizons)
+    assert summary["horizon_source"] == "columns"
+    assert "horizon_discovery" in summary
+    assert summary["horizon_discovery"]["30"]["rank_ic"] > 0.0
+    assert frame["trade_utility_score"].iloc[0] == pytest.approx(0.08)
+    assert frame["horizon_selected_utility"].iloc[0] == pytest.approx(0.058)
+
+
 def test_summarize_frame_reports_monthly_spread_and_negative_months() -> None:
     summary = summarize_frame(_fixture_frame())
     max_score = summary["scores"]["max_pred_utility"]

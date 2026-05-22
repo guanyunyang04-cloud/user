@@ -19,6 +19,8 @@ from daily_research.path_policy.tests.fixtures import make_prepared_policy_input
 
 
 def test_forecast_model_families_emit_path20_sequence_contract() -> None:
+    from daily_research.path_policy.models import PATH20_DEFAULT_CUMULATIVE_HORIZONS, path20_forecast_aux_dim
+
     x = torch.randn(4, 6, 5)
     static_ids = torch.tensor(
         [
@@ -70,7 +72,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         assert set(pred) == {"mu", "q10", "q50", "q90", "aux"}
         assert pred["mu"].shape == (4, 20)
         assert pred["q10"].shape == (4, 20)
-        assert pred["aux"].shape == (4, 8)
+        assert pred["aux"].shape == (4, path20_forecast_aux_dim(PATH20_DEFAULT_CUMULATIVE_HORIZONS))
         assert torch.all(pred["q10"] <= pred["q50"])
         assert torch.all(pred["q50"] <= pred["q90"])
 
@@ -232,7 +234,10 @@ def test_decision_utility_targets_and_loss_are_finite() -> None:
     from daily_research.path_policy.forecast_training import _decision_utility_targets, _forecast_loss
 
     y_cum = torch.tensor([[0.010, 0.020, 0.015, 0.030, 0.025]], dtype=torch.float32)
-    y_risk = torch.tensor([[-0.040, -0.020, 0.060]], dtype=torch.float32)
+    y_risk = torch.tensor(
+        [[[-0.040, -0.020, 0.060]] * 5],
+        dtype=torch.float32,
+    )
 
     targets = _decision_utility_targets(
         y_cum,
@@ -253,14 +258,14 @@ def test_decision_utility_targets_and_loss_are_finite() -> None:
         "q10": torch.full((4, 20), -0.01),
         "q50": torch.zeros(4, 20),
         "q90": torch.full((4, 20), 0.01),
-        "aux": torch.zeros(4, 8),
+        "aux": torch.zeros(4, 20),
         "decision_aux": torch.randn(4, 15) * 0.01,
     }
     loss = _forecast_loss(
         prediction,
         torch.randn(4, 20) * 0.01,
         torch.randn(4, 5) * 0.01,
-        torch.randn(4, 3) * 0.01,
+        torch.randn(4, 5, 3) * 0.01,
         loss_profile="decision_utility_v1",
         target_scale=1.0,
         decision_cost_bps=20.0,
@@ -350,6 +355,97 @@ def test_train_forecast_models_records_decision_output_contract_predictions_and_
             decision_cost_bps=25.0,
             decision_hit_threshold_bps=20.0,
             decision_drawdown_penalty=0.25,
+            resume_from=seed_summary["last_checkpoint_pt"],
+        )
+
+
+def test_train_forecast_models_accepts_custom_horizon_decision_utility_contract(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=900, stocks=("AAA.SZ", "BBB.SH", "CCC.SZ", "DDD.SH"), start_date="2018-01-02")
+    horizons = (1, 2, 3, 5, 8, 10, 15, 20, 30)
+    dataset = build_forecast_memmap_dataset(
+        prepared,
+        root=tmp_path / "dataset",
+        train_start_year=2018,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=30,
+        cumulative_horizons=horizons,
+        feature_profile="raw_kline_context_no_alpha_prior_v1",
+        max_samples_per_role=8,
+        min_lookback_valid_ratio=0.80,
+        include_static_context=True,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("gru_sequence_static_context",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+        output_profile="decision_utility_v1",
+        loss_profile="decision_utility_v1",
+        selection_profile="decision_utility",
+        decision_cost_bps=20.0,
+        decision_hit_threshold_bps=10.0,
+        decision_drawdown_penalty=0.10,
+        dataloader_num_workers=0,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["training_config"]["forecast_horizon"] == 30
+    assert summary["training_config"]["cumulative_horizons"] == list(horizons)
+    assert summary["training_config"]["decision_utility"]["horizons"] == list(horizons)
+
+    validation_predictions = pd.read_csv(tmp_path / "study" / "forecast_predictions_validation.csv")
+    assert {
+        "pred_decision_utility_30d",
+        "future_decision_utility_30d",
+        "pred_hit_prob_8d",
+        "future_hit_label_8d",
+        "pred_best_horizon",
+        "future_best_horizon",
+        "trade_utility_score",
+    }.issubset(validation_predictions.columns)
+
+    seed_summary = summary["models"]["gru_sequence_static_context"]["seed_summaries"]["7"]
+    checkpoint = torch.load(seed_summary["last_checkpoint_pt"], map_location="cpu", weights_only=False)
+    assert checkpoint["resume_contract"]["horizon"] == 30
+    assert checkpoint["resume_contract"]["forecast_horizon"] == 30
+    assert checkpoint["resume_contract"]["cumulative_horizons"] == list(horizons)
+
+    bad_dataset = dataset
+    bad_dataset.manifest = {**dataset.manifest, "cumulative_horizons": [1, 3, 5, 10, 20, 30]}
+    with pytest.raises(ValueError, match="cumulative_horizons"):
+        train_forecast_models(
+            bad_dataset,
+            study_root=tmp_path / "resume_bad_horizons",
+            model_families=("gru_sequence_static_context",),
+            epochs=2,
+            min_epochs=2,
+            early_stop_patience=5,
+            batch_size=4,
+            lr=1.0e-3,
+            hidden_dim=24,
+            dropout=0.0,
+            seeds=(7,),
+            device="cpu",
+            amp=False,
+            output_profile="decision_utility_v1",
+            loss_profile="decision_utility_v1",
+            selection_profile="decision_utility",
+            decision_cost_bps=20.0,
+            decision_hit_threshold_bps=10.0,
+            decision_drawdown_penalty=0.10,
             resume_from=seed_summary["last_checkpoint_pt"],
         )
 
