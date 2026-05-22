@@ -1542,6 +1542,30 @@ def _ranking_baseline_feature_frame(
     return frame, y
 
 
+def ranking_relevance_labels(
+    feature_frame: pd.DataFrame,
+    target: pd.Series | np.ndarray,
+    *,
+    relevance_levels: int = 5,
+) -> np.ndarray:
+    levels = max(int(relevance_levels), 2)
+    work = pd.DataFrame(
+        {
+            "date": feature_frame["date"].astype(str).to_numpy() if "date" in feature_frame.columns else "",
+            "target": pd.to_numeric(pd.Series(target), errors="coerce").to_numpy(dtype=float),
+        }
+    )
+    labels = np.zeros(len(work), dtype=np.int32)
+    for _, group in work.dropna(subset=["target"]).groupby("date", sort=False):
+        if len(group) <= 1:
+            labels[group.index.to_numpy(dtype=int)] = levels - 1
+            continue
+        order = group["target"].rank(method="first").to_numpy(dtype=float) - 1.0
+        group_labels = np.rint(order * float(levels - 1) / float(len(group) - 1)).astype(np.int32)
+        labels[group.index.to_numpy(dtype=int)] = np.clip(group_labels, 0, levels - 1)
+    return labels.astype(np.int32)
+
+
 def _ranking_prediction_frame(
     dataset: ForecastSequenceDataset | ForecastMemmapDataset,
     *,
@@ -1627,7 +1651,8 @@ def run_forecast_ranking_baseline(
     feature_columns = [column for column in train_x.columns if column.startswith("ranker_feature_")]
     train_groups = train_x.groupby("date", sort=True).size().to_numpy(dtype=int)
     try:
-        ranker.fit(train_x[feature_columns].to_numpy(dtype=np.float32), train_y, group=train_groups)
+        train_relevance = ranking_relevance_labels(train_x, train_y)
+        ranker.fit(train_x[feature_columns].to_numpy(dtype=np.float32), train_relevance, group=train_groups)
         validation_scores = np.asarray(ranker.predict(validation_x[feature_columns].to_numpy(dtype=np.float32)), dtype=np.float32)
         test_scores = (
             np.asarray(ranker.predict(test_x[feature_columns].to_numpy(dtype=np.float32)), dtype=np.float32)

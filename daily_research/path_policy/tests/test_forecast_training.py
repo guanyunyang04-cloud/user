@@ -11,6 +11,7 @@ from daily_research.path_policy.forecast_training import (
     forecast_evidence_verdict,
     forecast_prediction_metrics,
     make_forecast_model,
+    ranking_relevance_labels,
     run_forecast_ranking_baseline,
     train_forecast_models,
 )
@@ -374,6 +375,23 @@ def test_ranking_baseline_dependency_missing_reports_status(tmp_path) -> None:
     assert summary["baseline"] == "missing_ranker"
     assert summary["shadow_only"] is True
     assert summary["active_execution_strategy_expected_diff"] == "none"
+
+
+def test_ranking_relevance_labels_are_integer_deciles_by_date() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": ["2024-01-02"] * 5 + ["2024-01-03"] * 3,
+            "ranker_feature_0": range(8),
+        }
+    )
+    y = pd.Series([0.10, 0.30, 0.20, 0.50, 0.40, -0.20, 0.00, 0.20], dtype=float)
+
+    labels = ranking_relevance_labels(frame, y, relevance_levels=5)
+
+    assert labels.dtype == "int32"
+    assert labels.tolist() == [0, 2, 1, 4, 3, 0, 2, 4]
+    assert labels.min() >= 0
+    assert labels.max() <= 4
 
 
 def test_sector_slot_diagnostics_handles_missing_metadata(tmp_path) -> None:
