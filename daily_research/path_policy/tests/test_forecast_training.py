@@ -30,6 +30,7 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
     )
     for family in (
         "linear_last_day",
+        "dlinear_sequence",
         "mlp_last_day",
         "gru_sequence",
         "patch_transformer",
@@ -71,6 +72,48 @@ def test_forecast_model_families_emit_path20_sequence_contract() -> None:
         assert pred["aux"].shape == (4, 8)
         assert torch.all(pred["q10"] <= pred["q50"])
         assert torch.all(pred["q50"] <= pred["q90"])
+
+
+def test_train_forecast_models_accepts_dlinear_sequence_checkpoint_and_predictions(tmp_path) -> None:
+    prepared = make_prepared_policy_inputs(days=420, stocks=("AAA", "BBB", "CCC", "DDD"), start_date="2019-07-01")
+    dataset = build_forecast_sequence_dataset(
+        prepared,
+        train_start_year=2019,
+        train_end_year=2019,
+        validation_year=2020,
+        test_year=2021,
+        lookback_days=5,
+        horizon=20,
+        max_samples_per_role=8,
+    )
+
+    summary = train_forecast_models(
+        dataset,
+        study_root=tmp_path / "study",
+        model_families=("dlinear_sequence",),
+        epochs=1,
+        min_epochs=1,
+        early_stop_patience=5,
+        batch_size=4,
+        lr=1.0e-3,
+        hidden_dim=24,
+        dropout=0.0,
+        seeds=(7,),
+        device="cpu",
+        amp=False,
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["models"]["dlinear_sequence"]["status"] == "completed"
+    assert (tmp_path / "study" / "forecast_predictions_validation.csv").exists()
+    assert (tmp_path / "study" / "forecast_predictions_test.csv").exists()
+    checkpoint = torch.load(
+        tmp_path / "study" / "forecast_model_dlinear_sequence_seed7_last.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert checkpoint["model_family"] == "dlinear_sequence"
+    assert checkpoint["resume_contract"]["model_family"] == "dlinear_sequence"
 
 
 def test_train_forecast_models_static_context_checkpoint_contract(tmp_path) -> None:

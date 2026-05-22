@@ -311,7 +311,85 @@ def summarize_study(tag: str, *, studies_root: Path = STUDIES_ROOT) -> dict[str,
     }
 
 
-def build_diagnostics(tags: list[str], *, studies_root: Path = STUDIES_ROOT) -> dict[str, Any]:
+def _load_target_audit_payload(target_audit: str | Path | dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
+    if target_audit is None:
+        return None, ""
+    if isinstance(target_audit, dict):
+        return dict(target_audit), ""
+    path = Path(target_audit)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("target audit payload must be a JSON object.")
+    return payload, str(path.resolve())
+
+
+def _target_audit_context(target_audit: str | Path | dict[str, Any] | None) -> dict[str, Any]:
+    payload, source_path = _load_target_audit_payload(target_audit)
+    if payload is None:
+        return {}
+    study_hints: list[dict[str, Any]] = []
+    for study in payload.get("studies", []) or []:
+        if not isinstance(study, dict):
+            continue
+        for target in study.get("targets", []) or []:
+            if not isinstance(target, dict):
+                continue
+            target_info = target.get("target", {}) if isinstance(target.get("target"), dict) else {}
+            validation = target.get("validation", {}) if isinstance(target.get("validation"), dict) else {}
+            test = target.get("test", {}) if isinstance(target.get("test"), dict) else {}
+            gate = target.get("gate_a", {}) if isinstance(target.get("gate_a"), dict) else {}
+            study_hints.append(
+                {
+                    "tag": str(study.get("tag", "")),
+                    "target": str(target_info.get("name", "")),
+                    "gate_a_passed": bool(gate.get("passed", False)),
+                    "validation_hint": str(validation.get("conclusion_hint", "")),
+                    "test_hint": str(test.get("conclusion_hint", "")),
+                }
+            )
+    gate = payload.get("gate_a", {}) if isinstance(payload.get("gate_a"), dict) else {}
+    return {
+        "source_path": source_path,
+        "schema_version": payload.get("schema_version"),
+        "gate_a_passed": bool(gate.get("passed", False)),
+        "conclusion_hints": [str(item) for item in payload.get("conclusion_hints", []) or []],
+        "study_hints": study_hints,
+    }
+
+
+def _score_target_inconsistency_reasons(target_context: dict[str, Any]) -> list[str]:
+    if not target_context:
+        return []
+    hints = {
+        str(item)
+        for item in target_context.get("conclusion_hints", []) or []
+        if str(item).strip()
+    }
+    for row in target_context.get("study_hints", []) or []:
+        if not isinstance(row, dict):
+            continue
+        for key in ("validation_hint", "test_hint"):
+            value = str(row.get(key, "")).strip()
+            if value:
+                hints.add(value)
+    if "ranking_signal_exists_but_hit_target_is_miscalibrated" in hints:
+        return ["ranking_signal_exists_but_hit_target_is_miscalibrated"]
+    if "ranking_signal_exists_but_hit_or_utility_target_is_miscalibrated" in hints:
+        return ["ranking_signal_exists_but_hit_or_utility_target_is_miscalibrated"]
+    priority = (
+        "hit_label_base_rate_out_of_range",
+        "score_selection_or_regime_instability",
+        "target_calibration_inconclusive",
+    )
+    return [item for item in priority if item in hints]
+
+
+def build_diagnostics(
+    tags: list[str],
+    *,
+    studies_root: Path = STUDIES_ROOT,
+    target_audit: str | Path | dict[str, Any] | None = None,
+) -> dict[str, Any]:
     studies = [summarize_study(tag, studies_root=studies_root) for tag in tags]
     passed = [
         {"tag": study["tag"], "score": score_name}
@@ -329,6 +407,7 @@ def build_diagnostics(tags: list[str], *, studies_root: Path = STUDIES_ROOT) -> 
             and _finite_float(max_score.get("monthly_spread_positive_rate")) >= 0.60
             and _finite_float(max_score.get("hit_lift_top20_mean")) <= 0.0
         )
+    target_context = _target_audit_context(target_audit)
     return {
         "schema_version": 1,
         "purpose": "Path20 decision score diagnostics and selection calibration audit.",
@@ -336,6 +415,8 @@ def build_diagnostics(tags: list[str], *, studies_root: Path = STUDIES_ROOT) -> 
         "studies": studies,
         "passed_score_candidates": passed,
         "stock_mixer_near_miss": bool(stock_mixer_near_miss),
+        "target_audit_context": target_context,
+        "score_target_inconsistency_reasons": _score_target_inconsistency_reasons(target_context),
         "conclusion_hint": _conclusion_hint(passed, stock_mixer_near_miss),
     }
 
@@ -353,12 +434,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tags", required=True, help="Comma-separated completed study tags.")
     parser.add_argument("--studies-root", default=str(STUDIES_ROOT))
     parser.add_argument("--output", required=True, help="Output JSON path.")
+    parser.add_argument("--target-audit", default="", help="Optional target_calibration_audit.py output JSON path.")
     args = parser.parse_args(argv)
 
     tags = [item.strip() for item in str(args.tags).split(",") if item.strip()]
     if not tags:
         parser.error("--tags must include at least one study tag.")
-    payload = build_diagnostics(tags, studies_root=Path(args.studies_root))
+    payload = build_diagnostics(
+        tags,
+        studies_root=Path(args.studies_root),
+        target_audit=Path(args.target_audit) if str(args.target_audit).strip() else None,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")

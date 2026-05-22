@@ -9,6 +9,7 @@ import pytest
 from daily_research.path_policy.decision_score_diagnostics import (
     add_score_columns,
     build_diagnostics,
+    main,
     score_passes_gate,
     summarize_frame,
 )
@@ -123,3 +124,100 @@ def test_build_diagnostics_reads_completed_study_fixture(tmp_path: Path) -> None
         "selection_calibration_candidate_found",
         "no_selection_only_fix_found; inspect target_definition_or_input_regime_contamination",
     }
+
+
+def test_build_diagnostics_includes_target_audit_misalignment_context(tmp_path: Path) -> None:
+    tag = "fixture_stock_mixer"
+    root = tmp_path / "studies"
+    study = root / tag
+    study.mkdir(parents=True)
+    (study / "study_summary.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "evidence_verdict": "forecast_promising",
+                "dataset_manifest": {"role_years": {"train_start_year": 2020}},
+                "model_families": ["stock_mixer_sequence"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    frame = _fixture_frame()
+    frame.to_csv(study / "forecast_predictions_validation.csv", index=False)
+    frame.to_csv(study / "forecast_predictions_test.csv", index=False)
+    target_audit_path = tmp_path / "target_audit.json"
+    target_audit_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "gate_a": {"passed": False},
+                "conclusion_hints": ["ranking_signal_exists_but_hit_target_is_miscalibrated"],
+                "studies": [
+                    {
+                        "tag": tag,
+                        "targets": [
+                            {
+                                "target": {"name": "cost20_hit10_dd0.1"},
+                                "gate_a": {"passed": False},
+                                "validation": {"conclusion_hint": "target_calibration_inconclusive"},
+                                "test": {"conclusion_hint": "ranking_signal_exists_but_hit_target_is_miscalibrated"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_diagnostics([tag], studies_root=root, target_audit=target_audit_path)
+
+    assert payload["target_audit_context"]["source_path"] == str(target_audit_path.resolve())
+    assert payload["target_audit_context"]["gate_a_passed"] is False
+    assert payload["target_audit_context"]["study_hints"][0]["tag"] == tag
+    assert payload["score_target_inconsistency_reasons"] == [
+        "ranking_signal_exists_but_hit_target_is_miscalibrated"
+    ]
+
+
+def test_decision_score_diagnostics_cli_accepts_target_audit(tmp_path: Path) -> None:
+    tag = "fixture_study"
+    root = tmp_path / "studies"
+    study = root / tag
+    study.mkdir(parents=True)
+    (study / "study_summary.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "evidence_verdict": "forecast_promising",
+                "dataset_manifest": {"role_years": {"train_start_year": 2020}},
+                "model_families": ["gru_sequence_static_context"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    frame = _fixture_frame()
+    frame.to_csv(study / "forecast_predictions_validation.csv", index=False)
+    frame.to_csv(study / "forecast_predictions_test.csv", index=False)
+    target_audit = tmp_path / "target_audit.json"
+    target_audit.write_text(
+        json.dumps({"schema_version": 1, "gate_a": {"passed": False}, "conclusion_hints": ["hit_label_base_rate_out_of_range"], "studies": []}),
+        encoding="utf-8",
+    )
+    output = tmp_path / "diagnostics.json"
+
+    assert main(
+        [
+            "--tags",
+            tag,
+            "--studies-root",
+            str(root),
+            "--output",
+            str(output),
+            "--target-audit",
+            str(target_audit),
+        ]
+    ) == 0
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["target_audit_context"]["conclusion_hints"] == ["hit_label_base_rate_out_of_range"]

@@ -18,6 +18,7 @@ from daily_research.continuous_policy.runtime import write_json
 from daily_research.path_policy.forecast_dataset import ForecastMemmapDataset, ForecastSequenceDataset
 from daily_research.path_policy.labels import PATH20_CUMULATIVE_HORIZONS, PATH20_HORIZON
 from daily_research.path_policy.models import (
+    DLinearPath20Forecaster,
     GRUPath20Forecaster,
     LinearPath20Forecaster,
     PatchTransformerPath20Forecaster,
@@ -34,6 +35,7 @@ from daily_research.path_policy.models import (
 
 FORECAST_MODEL_FAMILIES = (
     "linear_last_day",
+    "dlinear_sequence",
     "mlp_last_day",
     "gru_sequence",
     "patch_transformer",
@@ -215,6 +217,13 @@ def make_forecast_model(
         raise ValueError(f"Unsupported forecast output profile: {output_profile}")
     if family == "linear_last_day":
         return LinearLastDayPath20Forecaster(input_dim=input_dim, horizon=horizon, output_profile=output_profile)
+    if family == "dlinear_sequence":
+        return DLinearPath20Forecaster(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            horizon=horizon,
+            output_profile=output_profile,
+        )
     if family == "mlp_last_day":
         return MLPLastDayPath20Forecaster(
             input_dim=input_dim,
