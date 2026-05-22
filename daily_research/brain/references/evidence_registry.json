@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 49,
+  "record_count": 50,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -206,6 +206,35 @@
         "policy_pool_view__c11400fa72ad263f3d1eecfa",
         "policy_sector_board_view__4b07bb20fe1fbe05b6e13f45"
       ]
+    },
+    {
+      "id": "alpha_path20_decision_score_diagnostics_20260522",
+      "date": "2026-05-22",
+      "r_id": "",
+      "path": "daily_research/brain/references/alpha_path20_decision_score_diagnostics_20260522.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "path20_decision_score_diagnostics_20260522",
+        "path20_decision_output_liquid500_du_cost20_hit10_dd010_20260521_01",
+        "path20_data_len_liquid500_du_train2018_2022_20260522_01",
+        "path20_data_len_liquid500_du_train2016_2022_20260522_01",
+        "path20_decision_arch_stock_mixer_liquid500_du_cost20_hit10_dd010_20260521_01"
+      ],
+      "verdict": "The current GRU signal is not zero: rank IC, spread, and hit lift are positive for several aggregate scores.; Selection-only calibration did not solve monthly instability: the GRU baseline, longer train-window GRU runs, and simple score blends all keep recurring weak months, especially early-year and late-2024 months.; Longer train windows did not fix the selection problem. The `2016-2022` run improved some hit-lift and monthly-rate signals, but its aggregate spread stayed weak or negative for most decision scores.; Stock mixer is the most important exception: it has materially stronger test ranking / spread stability (`max_pred_utility` monthly positive rate `83.3%`) but negative hit lift. This suggests ranking signal exists, while the current hit / utility target contract may be miscalibrated.",
+      "blockers": [
+        "Treat stock mixer as a research candidate for ranking stability only; it is not a promotion candidate because hit lift failed."
+      ],
+      "next_allowed_actions": [
+        "Do not run liquid800 or allocator/replay/live from these results.",
+        "First inspect target calibration: hit threshold, utility definition, and how `hit_lift_top20_mean` is computed relative to future utility.",
+        "If target calibration remains coherent, run input contamination ablations on liquid500: `no_alpha_prior` and `no_sector_static`.",
+        "Treat stock mixer as a research candidate for ranking stability only; it is not a promotion candidate because hit lift failed."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "alpha_path20_frontier_outputs_20260520",
