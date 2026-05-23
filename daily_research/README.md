@@ -23,7 +23,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 ## 环境
 
-标准环境是 `yolos`，依赖真源为 [environment.yml](/H:/new_tdx64/PYPlugins/user/daily_research/environment.yml:1)。
+标准环境是 `yolos`，依赖真源为 [environment.yml](daily_research/environment.yml)。
 
 本地数据边界：
 - `daily_research` 正式研究链路不再依赖 `t0_project/tqcenter.py`、`pytdx` 或 `mootdx`。

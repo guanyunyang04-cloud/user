@@ -10,7 +10,7 @@ from daily_research.data_lake.catalog import LakeDatasetRecord, ResearchDataLake
 
 
 DEFAULT_INDUSTRY_SOURCE_PATH = "daily_research/cache/industry_map_tq.csv"
-DEFAULT_BOARD_SOURCE_PATH = "H:/new_tdx64/T0002/hq_cache/infoharbor_block.dat"
+DEFAULT_BOARD_SOURCE_PATH = "daily_research/cache/imported_board_membership/infoharbor_block.dat"
 SNAPSHOT_SEMANTICS = "latest_static_snapshot"
 
 
