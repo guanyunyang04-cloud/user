@@ -37,6 +37,8 @@
 - PathPolicy forecast dataset 全文件慢测源于完整 synthetic feature/label/horizon risk 构造；默认轻量验证应使用快速合同测试，完整慢测保留为 deferred long verification。
 - `daily_research.path_policy.run_alpha_path20_protocol` 的标准入口是 `python -m ...`；直接脚本入口允许作为容错 smoke，但新命令记录和 reference 默认写包级入口。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
+- `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。
+- TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 
 ## 4. 研究主线索引
@@ -66,6 +68,7 @@
 - 每个重大研究结论必须写成 facts / inferences / assumptions / boundary。
 - explicit dataset id、study tag、protocol tag 优先于 loose latest。
 - 新多 horizon utility 实验 tag 应优先使用 `mh_utility_...` 前缀并显式写 horizon grid；旧 `path20_...` tag 只作为历史 / 兼容 evidence 命名，不得让命名把目标拉回固定 20 日路径误差。
+- 正式训练、评估和 diagnostics 必须读取显式 `policy_input_bundle__...` / Gold dataset id；不得在训练或诊断过程中临时在线抓取行情。
 - 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。
 - 若 full Gold 或 realtime Gold 状态变化，必须同时记录 catalog entry、audit、row counts 和 label completeness。
 

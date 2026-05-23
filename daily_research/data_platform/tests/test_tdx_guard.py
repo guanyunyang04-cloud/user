@@ -1,0 +1,53 @@
+import unittest
+from unittest import mock
+
+from daily_research.baseline import data_provider
+from daily_research.baseline.data_provider import get_latest_completed_trading_date
+from daily_research.continuous_policy.state_builder import prepare_policy_inputs
+from daily_research.data_lake import build_research_database
+from daily_research.data_platform.contracts import validate_provider_name
+
+
+class TdxFreeGuardTest(unittest.TestCase):
+    def test_formal_prepare_policy_inputs_rejects_tdx_family_sources(self) -> None:
+        for data_source in ["tq", "tdx", "pytdx", "mootdx"]:
+            with self.subTest(data_source=data_source):
+                with self.assertRaisesRegex(ValueError, "TDX-family.*refresh_daily"):
+                    prepare_policy_inputs(
+                        pool_name="learned_all_a",
+                        start_date="2026-01-05",
+                        end_date="2026-01-06",
+                        data_source=data_source,
+                    )
+
+    def test_build_research_database_parser_no_longer_accepts_tq_source(self) -> None:
+        parser = build_research_database.build_parser()
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--data-source", "tq"])
+
+        args = parser.parse_args(["--data-source", "lake"])
+        self.assertEqual(args.data_source, "lake")
+
+    def test_provider_guard_rejects_tdx_family_aliases(self) -> None:
+        for provider in ["tqcenter", "tq", "tdx", "pytdx", "mootdx"]:
+            with self.subTest(provider=provider):
+                with self.assertRaisesRegex(ValueError, "TDX-family"):
+                    validate_provider_name(provider)
+
+    def test_latest_completed_date_no_longer_imports_tq(self) -> None:
+        with mock.patch(
+            "daily_research.baseline.data_provider._try_import_tq",
+            side_effect=AssertionError("latest date must not import TDX"),
+        ):
+            value = get_latest_completed_trading_date(reference_ts="2026-01-07 16:00")
+
+        self.assertEqual(value, "2026-01-07")
+
+    def test_legacy_tq_import_is_disabled_without_explicit_environment_flag(self) -> None:
+        with mock.patch.dict("os.environ", {"DAILY_RESEARCH_ALLOW_TDX_FAMILY": ""}, clear=False):
+            self.assertIsNone(data_provider._try_import_tq())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -99,6 +99,25 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
 
             self.assertTrue(daily_research_evidence.is_reference_file(path))
 
+    def test_adapter_indexes_tdx_free_data_platform_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tdx_free_data_platform_decision_20260523.md"
+            path.write_text("# TDX-Free Data Platform Decision\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
+
+    def test_registry_indexes_tdx_free_data_platform_decision(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "tdx_free_data_platform_decision_20260523"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "research_data_lake")
+        self.assertIn("data_platform", matches[0]["tags"])
+
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
         matches = [record for record in registry["records"] if record["id"] == "r65"]

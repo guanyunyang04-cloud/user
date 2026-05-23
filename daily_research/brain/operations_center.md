@@ -59,6 +59,16 @@
 - 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
 - 标准代码入口继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`，因为这是包级入口；直接脚本 `daily_research/path_policy/run_alpha_path20_protocol.py` 只作为容错 smoke，不能替代文档推荐入口。
 
+## TDX-Free Data Platform 运行口径
+- `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道，不是每日自动更新方案。
+- 正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`；不得传 `tq/tdx/pytdx/mootdx`。
+- 每日更新入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --symbols 000001.SZ,600000.SH,000300.SH --json`
+- refresh 输出必须包含 `refresh_run_id`、provider chain、Bronze provider parquet、Silver canonical parquet、`source_conflict_report`、coverage report、provider error report 和 manifest。
+- coverage 不足、缺 benchmark、空 canonical market 或严重 source conflict 时，refresh 必须 `blocked`，不得注册 research lake dataset。
+- 训练、评估、diagnostics 只读已注册 lake dataset；禁止在研究流程中临时在线抓取外部行情。
+- 本轮不实现实盘自动交易；后续 paper/live 需要单独设计 QMT/PTrade broker adapter、风控、合规报备和 kill switch。
+
 ## PathPolicy 执行异常处理口径
 - `test_forecast_dataset.py` 是慢集成测试，不是默认轻量合同测试；它的 synthetic fixture 会用 700/820/900 个交易日并走完整 feature、label、cumulative horizon 和 horizon risk 构造，单项可到分钟级。
 - 修改 forecast 相关代码时，默认先跑 selective verification 推荐的快速合同测试；完整 `test_forecast_dataset.py` 与 `test_forecast_training.py` 放入 `deferred_long_commands`，需要长验证、发布前检查或风险升高时再跑。

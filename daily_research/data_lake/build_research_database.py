@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-date", default="auto")
     parser.add_argument("--end-date", default="latest")
     parser.add_argument("--zones", default="strict_train,realtime_research")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
+    parser.add_argument("--data-source", default="lake", choices=("lake",))
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     parser.add_argument("--label-preset", default="holdcash_v3", choices=tuple(sorted(LABEL_CONFIGS)))

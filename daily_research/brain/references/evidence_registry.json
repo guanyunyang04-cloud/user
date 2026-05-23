@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 58,
+  "record_count": 59,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1730,6 +1730,30 @@
         "continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1",
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "tdx_free_data_platform_decision_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/tdx_free_data_platform_decision_20260523.md",
+      "tags": [
+        "research_data_lake",
+        "data_lake",
+        "data_platform"
+      ],
+      "workflow": "research_data_lake",
+      "study_tags": [],
+      "verdict": "Scope: `daily_research` 数据入口、每日更新流水线、正式研究数据边界。; 第一版 provider 计划以非 TDX 源为主：`eastmoney_efinance`、`akshare_eastmoney`、`baostock`、`tushare_http_optional`、`sina_tencent_realtime`；其中 `tushare_http_optional` 仅在 token 配置后启用，`sina_tencent_realtime` 当前只作为后续实时/盘后补充边界。; 正确边界是 `online providers -> Bronze raw -> Silver canonical -> Gold/research lake`，研究和训练只读已落地、可审计、可复现的数据集。",
+      "blockers": [],
+      "next_allowed_actions": [
+        "将 `refresh_daily` 扩展为全 A universe discovery，而不是要求手动 `--symbols`。",
+        "增加交易日历 provider，替代第一版的 business-day 近似。",
+        "将 CSV import 明确接入 Bronze/Silver 补洞通道，不允许训练直接读散落 CSV。",
+        "为行业、概念、估值、ST/退市/停牌、涨跌停、资金/热点分域增加 provider contract 和 quality gate。",
+        "单独设计 paper execution 与后续 QMT/PTrade broker adapter；数据平台不承担下单职责。"
+      ],
+      "active_artifact_impact": "not_stated",
+      "dataset_ids": []
     }
   ]
 }

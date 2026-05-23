@@ -18,6 +18,7 @@ from daily_research.baseline.advanced_ml_runtime import (
 )
 from daily_research.baseline.config import ResearchConfig
 from daily_research.baseline.data_provider import load_universe_from_tq
+from daily_research.data_platform.contracts import ensure_tdx_free_data_source
 from daily_research.baseline.ml_alpha import MLAplhaConfig
 from daily_research.execution.liquidity_universe import build_rolling_liquidity_membership, get_named_pool_file
 from daily_research.execution.strategy_manifest import load_strategy_manifest
@@ -477,7 +478,7 @@ def prepare_policy_inputs(
     start_date: str,
     end_date: str = "",
     benchmark: str = "000300.SH",
-    data_source: str = "tq",
+    data_source: str = "lake",
     csv_folder: str = "",
     lake_dataset_id: str = "",
     data_lake_root: str = "",
@@ -500,7 +501,7 @@ def prepare_policy_inputs(
     progress_desc: str = "continuous policy prepare",
 ) -> PreparedPolicyInputs:
     resolved_pool_name = normalize_policy_pool_name(pool_name)
-    resolved_data_source = str(data_source or "tq").strip().lower()
+    resolved_data_source = ensure_tdx_free_data_source(data_source or "lake")
     if resolved_data_source == "lake":
         from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake, load_policy_inputs_from_lake
 
@@ -532,6 +533,12 @@ def prepare_policy_inputs(
             alpha_prior_target_weight_panel=alpha_prior_target_weight_panel,
             require_benchmark_open=bool(require_lake_benchmark_open),
         )
+    raise ValueError(
+        "formal daily_research policy inputs are lake-first after the TDX-free data platform migration. "
+        f"Unsupported data_source={data_source!r}; refresh Bronze/Silver through "
+        "`python -m daily_research.data_platform.refresh_daily` and use data_source='lake'."
+    )
+
     universe = resolve_policy_universe(
         pool_name=resolved_pool_name,
         extra_stocks=extra_stocks,

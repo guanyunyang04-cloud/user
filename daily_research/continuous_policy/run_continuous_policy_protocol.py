@@ -441,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rolling liquidity pool name, or `all_a` / `learned_all_a` to run learned selection over the whole A-share universe.",
     )
     parser.add_argument("--benchmark", default=defaults["benchmark"] or "000300.SH")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
+    parser.add_argument("--data-source", default="lake", choices=("lake",))
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--lake-dataset-id", default=DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
     parser.add_argument("--data-lake-root", default="")

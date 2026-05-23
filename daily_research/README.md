@@ -14,6 +14,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 - `baseline/`：历史研究链路与仍受支持的交易计划管线
 - `continuous_policy/`：当前连续决策策略的训练、评估、导出与协议编排
+- `data_platform/`：TDX-free 在线 provider、每日 refresh、Bronze/Silver 仲裁与 lake 注册入口
 - `deep_alpha/`：更长周期的模型架构、alpha 与执行策略研究
 - `execution/`：执行应用、任务运行器、Web 控制台与 production 更新入口
 - `tools/`：守卫、报告、维护工具与一致性检查
@@ -24,8 +25,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 标准环境是 `yolos`，依赖真源为 [environment.yml](/H:/new_tdx64/PYPlugins/user/daily_research/environment.yml:1)。
 
-本地前置依赖：
-- `t0_project/tqcenter.py` 是工作区内的数据依赖，不由 Conda 安装；使用 `tq` 数据源时必须存在。
+本地数据边界：
+- `daily_research` 正式研究链路不再依赖 `t0_project/tqcenter.py`、`pytdx` 或 `mootdx`。
+- `lake` 是研究存储真源；在线数据每日更新通过 `daily_research.data_platform.refresh_daily` 进入 Bronze/Silver，再注册为显式 lake dataset id。
+- `csv` 只作为导入或补洞通道，不作为正式训练/评估的在线数据源。
 
 ## 常用入口
 
@@ -33,6 +36,8 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
+- TDX-free 每日数据刷新：
+  `python -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --symbols 000001.SZ,600000.SH,000300.SH --json`
 - 执行应用：
   `python daily_research/execution/run_execution_app.py run --task <task-name> -- ...`
 - 执行 Web 控制台：

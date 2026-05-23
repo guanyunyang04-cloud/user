@@ -3307,7 +3307,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Compatibility no-op retained for old scripts; neural policy stages are now the current Path20 research mainline.",
     )
-    parser.add_argument("--data-source", default="lake", choices=("lake", "csv", "tq"))
+    parser.add_argument("--data-source", default="lake", choices=("lake",))
     parser.add_argument("--lake-dataset-id", default="", help="Required for --data-source lake.")
     parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--csv-folder", default="")

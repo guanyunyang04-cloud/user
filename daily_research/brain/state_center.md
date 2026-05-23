@@ -24,6 +24,7 @@
 - r72 已把 evaluate/shadow/export 接到通用 data lake evaluator；`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通且无 TDX empty blocker，但 source/receiver target 仍为 0，仍不是 r71 behavior acceptance。
 - r73 已把 data lake 接入决策特征利用审计与 r71 collapse 诊断；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通，eval/shadow 均保持 cashflow valid=1、intent conflict=0 且 source/receiver target 非零，但 training evidence 仍 `insufficient`、promotion gate 仍 `shadow_only`，行为质量仍有 cash timing、source quality、receiver-source spread 阻塞。
 - r74 已新增显式 `portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality` 研究线，并完成 tiny lake smoke `protocol_r74_lake_behavior_quality_v5_smoke_20260515_03`；cashflow valid=1、intent conflict=0、source/receiver 非零，source wrong-side sell、reversal、cash timing 与 shadow receiver-source spread 相对 r73 有改善，但 source/receiver 覆盖收缩、feature contract degraded rate=1.0、training evidence 仍 `insufficient`，仍不是 promotion 或 behavior-success verdict。
+- 2026-05-23 已新增 TDX-free data platform 第一版：正式研究入口 lake-first，`tqcenter.py` / `pytdx` / `mootdx` 不再是 daily_research 主链路依赖；online providers 通过 `refresh_daily` 写 Bronze/Silver，再注册为显式 lake dataset id。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -52,7 +53,8 @@
 - P2：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
 - P3：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
 - P4：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
-- P5：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回。
+- P5：补齐 TDX-free data platform 后续域：全 A universe discovery、交易日历、ST/退市/停牌、涨跌停、行业/概念、估值、资金/热点；这些进入 Bronze/Silver 后才能用于研究。
+- P6：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。
@@ -86,6 +88,7 @@
 - 多 Horizon 交易效用命名迁移：`daily_research/brain/references/alpha_multi_horizon_utility_policy_mainline_rename_20260523.md`。
 - 多 Horizon 交易效用首轮结果：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`。
 - PathPolicy 执行异常学习：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`。
+- TDX-free 数据平台决策：`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口

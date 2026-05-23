@@ -91,6 +91,9 @@ def _close_tq_client(tq) -> None:
 
 
 def _try_import_tq():
+    allow = str(os.environ.get("DAILY_RESEARCH_ALLOW_TDX_FAMILY", "") or "").strip().lower()
+    if allow not in {"1", "true", "yes", "on"}:
+        return None
     try:
         from tqcenter import tq  # type: ignore
         return tq
@@ -705,39 +708,7 @@ def get_latest_completed_trading_date(
     market: str = "SH",
     close_time: str = "15:05",
 ) -> str:
-    now_ts = pd.Timestamp(reference_ts).tz_localize(None) if reference_ts is not None else pd.Timestamp.now().tz_localize(None)
-    close_clock = pd.Timestamp(close_time).time()
-    include_today = now_ts.time() >= close_clock
-    anchor_ts = now_ts.normalize()
+    del market
+    from daily_research.data_platform.contracts import latest_completed_business_date
 
-    tq = _try_import_tq()
-    if tq is None:
-        offset = 0 if include_today else 1
-        return (anchor_ts - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
-
-    try:
-        _initialize_tq_client(tq)
-        start_ts = anchor_ts - timedelta(days=40)
-        dates = tq.get_trading_dates(
-            market=str(market).upper(),
-            start_time=start_ts.strftime("%Y%m%d"),
-            end_time=anchor_ts.strftime("%Y%m%d"),
-            count=-1,
-        ) or []
-        normalized = sorted({pd.Timestamp(item).normalize() for item in dates})
-        if include_today:
-            eligible = [dt for dt in normalized if dt <= anchor_ts]
-        else:
-            eligible = [dt for dt in normalized if dt < anchor_ts]
-        if eligible:
-            return eligible[-1].strftime("%Y-%m-%d")
-    except Exception:
-        pass
-    finally:
-        try:
-            _close_tq_client(tq)
-        except Exception:
-            pass
-
-    offset = 0 if include_today else 1
-    return (anchor_ts - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
+    return latest_completed_business_date(reference_ts=reference_ts, close_time=close_time)

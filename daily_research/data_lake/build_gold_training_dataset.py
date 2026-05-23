@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shard-frequency", default="quarter", choices=("month", "quarter", "year", "all"))
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--refresh", action="store_true")
-    parser.add_argument("--data-source", default="tq", choices=("tq", "csv", "lake"))
+    parser.add_argument("--data-source", default="lake", choices=("lake",))
     parser.add_argument("--csv-folder", default="")
     parser.add_argument("--label-preset", default="holdcash_v3", choices=tuple(sorted(LABEL_CONFIGS)))
     parser.add_argument("--execution-semantics", default=DEFAULT_EXECUTION_SEMANTICS)
