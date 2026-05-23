@@ -9,11 +9,11 @@ REGISTRY_PATH = Path("daily_research/brain/references/evidence_registry.json")
 REFERENCE_ROOTS = (Path("daily_research/brain/references"),)
 REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(r\d+[a-z]?|gpu-runtime)-.+\.md$"),
-    re.compile(r"^(alpha_path20|path20)_.+\.md$"),
+    re.compile(r"^(alpha_path20|path20|alpha_multi_horizon)_.+\.md$"),
     re.compile(r"^data_lake_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )
-STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol|path20|alpha_path20)_[A-Za-z0-9_]+")
+STUDY_TAG_PATTERN = re.compile(r"\b(?:self_opt_study|protocol|path20|alpha_path20|mh_utility|alpha_multi_horizon)_[A-Za-z0-9_]+")
 
 
 def is_reference_file(path: Path) -> bool:
@@ -46,7 +46,7 @@ def workflow_from(path: Path, text: str) -> str:
         return "brain"
     if "brain / workflow" in lower or "workflow maintenance" in lower:
         return "brain"
-    if "path_policy" in lower or "alpha_path20" in lower:
+    if "path_policy" in lower or "alpha_path20" in lower or "alpha_multi_horizon" in lower or "mh_utility" in lower:
         return "path_policy"
     if "continuous_policy" in lower or "core_v4" in lower or "release_first" in lower:
         return "continuous_policy"
@@ -66,7 +66,7 @@ def extra_tags(path: Path, text: str, workflow: str) -> list[str]:
     is_portfolio_set_v5 = "portfolio-set" in haystack or "portfolio_set" in haystack or "portfolio set" in haystack
     if "data lake" in haystack or "research_data_lake" in haystack:
         tags.append("data_lake")
-    if "path_policy" in haystack or "alpha_path20" in haystack:
+    if "path_policy" in haystack or "alpha_path20" in haystack or "alpha_multi_horizon" in haystack or "mh_utility" in haystack:
         tags.append("path_policy")
     if "gpu" in haystack or "cuda" in haystack:
         tags.append("gpu")

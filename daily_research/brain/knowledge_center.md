@@ -1,6 +1,6 @@
 # Daily Research 知识中枢
 
-快照日期：`2026-05-15`
+快照日期：`2026-05-23`
 
 ## 1. 稳定事实
 - `daily_research` 同时负责研究、formal 验证、recent 验证、production full-fit、live 执行和接管治理。
@@ -9,7 +9,8 @@
 - `daily_research/environment.yml` 是依赖环境真源；任何程序都必须在 `yolos` 环境下运行。
 - 当前统一权重语义是 `research_raw_target_weight`；当前统一上限语义是 `follow_research_raw_no_global_cap`。
 - 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，旧主线保留为历史或对照证据。
-- Path20 当前研究主线指针是 `alpha_path20_neural_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
+- 多 Horizon 交易效用排序当前研究主线指针是 `alpha_multi_horizon_utility_policy_v1`；这是 research mainline，不是 live/default 或 active execution mainline。
+- `Path20` / `alpha_path20_neural_policy_v1` 是历史证据代号、代码 namespace 和旧 study tag namespace，不再代表当前目标定义；新研究应写成多 horizon utility / ranking / calibration，而不是固定 20 日路径预测。
 - continuous_policy 的终局目标是日级连续交易执行模型，不是固定调仓或人工执行桥。
 - r39 仍是 continuous_policy 有效证据基线；r40-r74 是 research / shadow 升级链或基础设施证据。
 - r64 full-window strict Gold 是当前 reusable training-safe Gold 数据集；realtime Gold 仍不能作为 completed training evidence。
@@ -30,11 +31,15 @@
 - 只追求单项 gate 清零会制造假进展；必须同时看收益、月度质量、drawdown、source count、cash timing、exposure 和 intent conflict。
 - Clean target-sum closure 可以与 release/source/receiver flow disconnected 同时存在；closure 不是行为闭合的充分条件。
 - 更强模型不是自动解决方案；若 target construction、receiver/source semantics 或 evidence route 错，放大模型只会更快放大错误。
+- 固定 horizon 不是目标本体；当前 path_policy 目标已从“20 日路径预测”迁移为“多 horizon 交易效用排序”，后续判断以赚钱相关排序、spread、hit lift、月稳和 calibration 为主。
 - 工程复杂度会制造循环；runner、profile、loss、diagnostics 必须减少活动面，服务明确阻塞点。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 
 ## 4. 研究主线索引
+- `alpha_multi_horizon_utility_policy_v1`：当前 path_policy research pointer；目标是多 horizon 交易效用排序，首轮 horizon grid 为 `1,2,3,5,8,10,15,20,30`，当前 blocker 是 predicted best horizon 向 `30d` 塌缩。
+- `alpha_path20_neural_policy_v1`：2026-05-17 到 2026-05-23 的 Path20 neural-policy 历史主线；其 evidence 仍有效，但新结论必须按 `alpha_multi_horizon_utility_policy_v1` 解释。
+- `alpha_path20_sequence_policy_v1`：shadow comparison / secondary research route；除非未来显式切换，不代表当前主线。
 - r10-r18：action/head + translation guard 改善语义，但不能替代组合资金分配本体。
 - r19-r30：receiver/source/cash ranking、listwise、teacher、release/relief 暴露 source 放宽与休眠问题。
 - r31-r39：receiver executable、source clean-pass、unified allocation、decision-focused objective，形成当前有效证据基线。
@@ -57,6 +62,7 @@
 - 先直接 protocol smoke，再 study dry-run，再 safe screening；不得跳到 confirmatory。
 - 每个重大研究结论必须写成 facts / inferences / assumptions / boundary。
 - explicit dataset id、study tag、protocol tag 优先于 loose latest。
+- 新多 horizon utility 实验 tag 应优先使用 `mh_utility_...` 前缀并显式写 horizon grid；旧 `path20_...` tag 只作为历史 / 兼容 evidence 命名，不得让命名把目标拉回固定 20 日路径误差。
 - 若 source/reduce/exit 仍为 0，结论必须写成行为闭环未打通，不能包装成“更多 epoch/loss”。
 - 若 full Gold 或 realtime Gold 状态变化，必须同时记录 catalog entry、audit、row counts 和 label completeness。
 

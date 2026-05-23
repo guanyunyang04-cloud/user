@@ -14,7 +14,7 @@
 - 分支异常属于 preflight blocker，不属于研究证据、promotion 证据或分脑状态结论。
 
 ## 当前分脑状态
-- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
+- `daily_research`：生产研究与执行主线；active 真源为 `daily_research/output/active_execution_strategy.json`；项目事实、rXX 证据、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 当前结论以 `daily_research/brain/` 为准，主脑不展开 trial 指标、长 tag 或局部命令。
 - `t0_project`：盘中实验与 RL 原型分脑；不得替代 `daily_research` 正式执行默认。
 - `daily_stock_analysis-main`：独立产品分脑；不改写 `daily_research` active artifact 或 promotion gate。
 
@@ -29,7 +29,7 @@
 ## 当前边界
 - 主脑不得记录具体 trial 指标、训练 tag 长列表或局部实验命令；这些属于分脑。
 - 分脑不得改写跨项目读取顺序、主分脑拓扑或统一治理纪律；这些属于主脑。
-- `daily_research` 的研究证据、rXX references、Path20 / continuous_policy / deep_alpha 状态和验证矩阵只读 `daily_research/brain/` 与对应实验产物；主脑只保留 promotion / live / active artifact 边界。
+- `daily_research` 的研究证据、rXX references、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 状态和验证矩阵只读 `daily_research/brain/` 与对应实验产物；主脑只保留 promotion / live / active artifact 边界。
 - 任何疑似中文乱码，先用 UTF-8 工具复核真实文件内容，不把终端编码显示问题当作文件损坏。
 
 ## 当前风险

@@ -53,5 +53,5 @@
 
 ## 4. daily_research continuous_policy 路由边界
 - `daily_research` 的 continuous_policy 细节只写入分脑；主脑只保留跨项目边界：该主线在未过正式 gate 与 stable confirm 前始终是 `research / shadow_only`。
-- rXX references、trial 指标、长 tag、局部命令、Path20 / continuous_policy / deep_alpha 结论均属于 `daily_research` 分脑事实；不得在主脑展开或更新。
+- rXX references、trial 指标、长 tag、局部命令、Path20 历史线 / multi_horizon_utility 当前主线 / continuous_policy / deep_alpha 结论均属于 `daily_research` 分脑事实；不得在主脑展开或更新。
 - 全局教训：promotion / live / active artifact 切换不能由局部研究证据、单项 smoke、局部 guard 清零或短窗高分直接触发；必须回到目标分脑的正式 gate 与 active 边界。

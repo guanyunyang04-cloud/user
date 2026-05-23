@@ -1,8 +1,9 @@
-# Alpha Path20 Horizon Discovery Result - 2026-05-23
+# Alpha Path20 / Multi-Horizon Utility Discovery Result - 2026-05-23
 
 ## Scope
 - Status: `forecast horizon-discovery study / research / shadow-only / no promotion`.
-- Mainline: `alpha_path20_neural_policy_v1`.
+- Mainline at run time: `alpha_path20_neural_policy_v1`.
+- Current mainline after 2026-05-23 naming migration: `alpha_multi_horizon_utility_policy_v1` / 多 Horizon 交易效用排序主线.
 - Study tag: `path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01`.
 - Active artifact impact: `daily_research/output/active_execution_strategy.json` unchanged.
 - Run command used `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol` with `forecast-walkforward-study`, `raw_kline_context_no_alpha_prior_v1`, `gru_sequence_static_context`, liquid500, seed `7`, train `2019-2022`, validation `2023`, test `2024`, `decision_utility_v1`, and horizon grid `1,2,3,5,8,10,15,20,30`.

@@ -1,6 +1,6 @@
 # Daily Research 状态中枢
 
-快照日期：`2026-05-15`
+快照日期：`2026-05-23`
 
 ## 当前结论
 - `daily_research` 是当前正式生产研究与执行主线。
@@ -10,7 +10,8 @@
 - 当前 production root：`daily_research/output/short_expert_policy_v5b_execalign_production_default`。
 - 当前执行权重语义：`research_raw_target_weight`；权重上限语义：`follow_research_raw_no_global_cap`。
 - 所有主线都是可显式切换的当前工作指针；切换后按切换后的主线继续，但不自动代表 live/default、promotion 或 active artifact 变更。
-- Path20 当前研究主线指针：`alpha_path20_neural_policy_v1`（2026-05-17 用户决策切换）；`alpha_path20_sequence_policy_v1` 暂作 shadow comparison / secondary research route；两者均不代表 live/default。
+- 多 Horizon 交易效用排序当前研究主线指针：`alpha_multi_horizon_utility_policy_v1`（2026-05-23 命名迁移）；旧 `alpha_path20_neural_policy_v1` / `Path20` 保留为历史证据代号和代码 / study namespace，不再代表当前目标定义；`alpha_path20_sequence_policy_v1` 暂作 shadow comparison / secondary research route；三者均不代表 live/default。
+- 最新多 Horizon 交易效用候选：`path20_horizon_discovery_no_alpha_gru_liquid500_h1_2_3_5_8_10_15_20_30_du_cost20_hit10_dd010_20260523_01` 完成并 `forecast_test_confirmed`，`trade_utility_score` 通过 validation/test gate；但 predicted best horizon 明显塌缩到 `30d`，仍是 research / shadow-only，不授权 liquid800、multi-seed、allocator、replay、live/default 或 active promotion。
 - continuous_policy 当前仍是 `research / shadow_only`；未过 formal evidence、v2 gate、stable confirm 与 promotion gate 前，不得替代 active 执行链。
 - 当前有效 continuous_policy 研究基线仍是 r39 allocation objective consolidation；r40-r74 均为 research / shadow 升级链或基础设施证据。
 - r64 已产出 full-window strict Gold：`continuous_policy_training_matrices__strict_train__36c234208d5f375ea1cccfc1`，`2010-01-04 -> 2026-04-10` observed strict window，`is_training_safe=true`，audit `ok`。
@@ -33,6 +34,7 @@
 
 ## 当前主问题
 - production 执行侧不是当前阻塞点；默认 active 继续由 `short_expert_policy_v5b` 承担。
+- `alpha_multi_horizon_utility_policy_v1` 的当前 blocker 是 horizon / score calibration：模型已经学习到强的 20-30d 倾向交易效用排序信号，但还不是稳定的逐样本 horizon chooser。
 - continuous_policy 的核心瓶颈是组合日级资金分配：谁是 receiver、谁是 source、留多少 cash、承受多少 turnover / cost / drawdown。
 - r53-r55 解决了部分 cash/exposure closure，但 source/reduce/exit 和 cash timing 没闭合。
 - r56-r61 推进 release-first / core-v4 接线，证明诊断与部分接线有效，但行为仍未闭合。
@@ -47,9 +49,10 @@
 ## 当前优先级
 - P0：冻结 live/default/promotion/active artifact，所有新线先保持 research / shadow-only。
 - P1：保持脑区控制面简洁；长历史、完整复盘、长命令进入 `references/`。
-- P2：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
-- P3：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
-- P4：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回。
+- P2：`alpha_multi_horizon_utility_policy_v1` 下一步只做 constrained horizon-score / calibration 研究；约束后仍保持 spread、hit lift 和月稳，才允许 seeds `7,11,19`，仍不得上 liquid800 或 live/default。
+- P3：围绕 r71/r74 multi-stage regret 与 lake-native decision features 继续验证 receiver/deploy 平衡、cash timing、drawdown/reversal、source quality、feature contract health 与 sufficient training evidence；translation closure、oracle feasibility 和 lake source/receiver collapse 不再是当前主 blocker。
+- P4：继续用 strict Gold dataset id 作为训练数据真源；realtime tail label 只可用于 research/audit。
+- P5：保持 study/protocol 单进程研究框架；长任务可用外部后台启动 + 前台轮询，但研究本体仍应可诊断、可恢复；默认轮询采用 `Wait-Process -Id <pid> -Timeout 7200`，以 PID 绑定等待支持提前完成即返回。
 
 ## 当前边界
 - formal、recent、promotion、live 不得混写。
@@ -80,6 +83,8 @@
 - r72 data lake evaluator：`daily_research/brain/references/r72_data_lake_evaluator_status_20260515.md`。
 - r73 lake-native r71 utilization：`daily_research/brain/references/r73_lake_native_r71_utilization_status_20260515.md`。
 - r74 lake behavior quality：`daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
+- 多 Horizon 交易效用命名迁移：`daily_research/brain/references/alpha_multi_horizon_utility_policy_mainline_rename_20260523.md`。
+- 多 Horizon 交易效用首轮结果：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口

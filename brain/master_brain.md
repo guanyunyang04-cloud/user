@@ -40,4 +40,4 @@
 
 ## 5. 当前主问题
 - 当前最重要的事情不是“有没有脑结构”，而是维持主脑优先的平台入口，不让 capsule、skill、workflow registry 再和某个分脑绑定。
-- 主脑只保存跨项目规则和路由；`daily_research` 的 Path20、continuous_policy、deep_alpha 事实必须留在 `daily_research/brain/`。
+- 主脑只保存跨项目规则和路由；`daily_research` 的 Path20 历史线、multi_horizon_utility 当前主线、continuous_policy、deep_alpha 事实必须留在 `daily_research/brain/`。

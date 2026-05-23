@@ -14,6 +14,7 @@
 ## 项目地图
 - brain 真源：`daily_research/brain/`。
 - research data lake：`daily_research/output/research_data_lake/`。
+- path_policy studies：`daily_research/output/path_policy/studies/`。
 - continuous_policy studies：`daily_research/output/continuous_policy/studies/`。
 - continuous_policy protocols：`daily_research/output/continuous_policy/protocols/`。
 - production active artifact：`daily_research/output/active_execution_strategy.json`。
@@ -50,6 +51,13 @@
 - 若 `protocol_summary.json` 存在但 `study_summary.json` 缺失，只能记为 protocol-level evidence。
 - 后台运行建议只把整个 study 作为一个 OS 后台进程启动；study 内部仍保持 `protocol_runner_mode=in_process`，前台只轮询 progress / PID / logs / summaries。
 - 长训练或 study 的默认轮询实现为 `Start-Process -PassThru` 记录 PID，并用 `Wait-Process -Id <pid> -Timeout 7200` 等待；进程提前结束时立即返回，随后解析 progress、日志、summary、checkpoint 与评估产物。
+
+## Multi Horizon Utility 运行口径
+- 当前 path_policy 研究主线名：`alpha_multi_horizon_utility_policy_v1`，中文名为“多 Horizon 交易效用排序主线”。
+- 旧 `Path20` / `alpha_path20_neural_policy_v1` / `path20_...` study tag 保留为历史证据和代码 namespace；不得批量改写历史 tag，也不得把旧名解释成当前仍以固定 20 日路径预测为目标。
+- 新实验 tag 默认使用 `mh_utility_...` 前缀，并显式写入 pool、feature profile、model、seed、train/validation/test 年份、output/loss、cost/hit/drawdown 参数和 horizon grid。
+- 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
+- 代码入口可继续使用现有 `daily_research.path_policy.run_alpha_path20_protocol`，因为这是兼容代码 namespace；报告、reference 和 brain 当前状态必须使用新主线名。
 
 ## 必跑守卫
 - `git diff -- daily_research/output/active_execution_strategy.json`

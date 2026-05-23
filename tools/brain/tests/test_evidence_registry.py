@@ -74,6 +74,23 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             {match["id"] for match in payload["matches"]},
         )
 
+    def test_registry_indexes_multi_horizon_utility_mainline(self) -> None:
+        registry = build_evidence_registry()
+        matches = [
+            record
+            for record in registry["records"]
+            if record["id"] == "alpha_multi_horizon_utility_policy_mainline_rename_20260523"
+        ]
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["workflow"], "path_policy")
+        self.assertIn("path_policy", matches[0]["tags"])
+        payload = query_evidence_registry("alpha_multi_horizon_utility_policy_v1")
+        self.assertIn(
+            "alpha_multi_horizon_utility_policy_mainline_rename_20260523",
+            {match["id"] for match in payload["matches"]},
+        )
+
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
         matches = [record for record in registry["records"] if record["id"] == "r65"]
