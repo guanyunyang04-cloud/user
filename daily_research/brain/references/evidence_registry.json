@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 57,
+  "record_count": 58,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -911,6 +911,34 @@
       "dataset_ids": [
         "policy_input_bundle__0f116a9b78c92ff045a6853d"
       ]
+    },
+    {
+      "id": "path_policy_execution_issue_learning_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/path_policy_execution_issue_learning_20260523.md",
+      "tags": [
+        "path_policy"
+      ],
+      "workflow": "path_policy",
+      "study_tags": [
+        "alpha_multi_horizon_utility_policy_v1"
+      ],
+      "verdict": "",
+      "blockers": [
+        "Direct script execution of `daily_research/path_policy/run_alpha_path20_protocol.py --help` failed before the fix because package imports could not resolve `daily_research`; module execution with `-m daily_research.path_policy.run_alpha_path20_protocol --help` worked.",
+        "Treating timeout as a test failure without checking process state, logs, and per-test runtime can create false negatives and unnecessary code churn.",
+        "Writing only a brain note would not prevent recurrence: the entrypoint failure and verification over-selection were both fixable in code.",
+        "Direct script import failed because the repo root was not inserted into `sys.path` when `__package__` was empty."
+      ],
+      "next_allowed_actions": [
+        "Use selective verification fast contract tests before long PathPolicy validation.",
+        "Run deferred long forecast tests only when the change touches dataset/training behavior deeply, before release-style completion, or when the user explicitly asks for full validation.",
+        "If another timeout occurs, first inspect residual processes and per-test runtime; do not change code until the slow or failing node is isolated.",
+        "Keep standard command docs on the `-m daily_research.path_policy.run_alpha_path20_protocol` entrypoint."
+      ],
+      "active_artifact_impact": "unchanged",
+      "dataset_ids": []
     },
     {
       "id": "r50",

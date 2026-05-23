@@ -57,7 +57,15 @@
 - 旧 `Path20` / `alpha_path20_neural_policy_v1` / `path20_...` study tag 保留为历史证据和代码 namespace；不得批量改写历史 tag，也不得把旧名解释成当前仍以固定 20 日路径预测为目标。
 - 新实验 tag 默认使用 `mh_utility_...` 前缀，并显式写入 pool、feature profile、model、seed、train/validation/test 年份、output/loss、cost/hit/drawdown 参数和 horizon grid。
 - 当前下一步只允许 constrained horizon-score / calibration 研究；不跑 liquid800、allocator、replay、live/default、promotion，除非新的 liquid500 seed-7 calibration 结果先通过 gate。
-- 代码入口可继续使用现有 `daily_research.path_policy.run_alpha_path20_protocol`，因为这是兼容代码 namespace；报告、reference 和 brain 当前状态必须使用新主线名。
+- 标准代码入口继续使用 `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.run_alpha_path20_protocol`，因为这是包级入口；直接脚本 `daily_research/path_policy/run_alpha_path20_protocol.py` 只作为容错 smoke，不能替代文档推荐入口。
+
+## PathPolicy 执行异常处理口径
+- `test_forecast_dataset.py` 是慢集成测试，不是默认轻量合同测试；它的 synthetic fixture 会用 700/820/900 个交易日并走完整 feature、label、cumulative horizon 和 horizon risk 构造，单项可到分钟级。
+- 修改 forecast 相关代码时，默认先跑 selective verification 推荐的快速合同测试；完整 `test_forecast_dataset.py` 与 `test_forecast_training.py` 放入 `deferred_long_commands`，需要长验证、发布前检查或风险升高时再跑。
+- pytest timeout 后不得直接下失败结论；先查是否有本轮残留 pytest 进程，再单项复现慢测试，区分资源挤占、真实死锁、fixture 慢和代码失败。
+- 手动清理残留进程只允许匹配本轮 pytest 命令行，只清理 pytest 子进程，不碰其他 Python 任务；示例：
+  `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*pytest*daily_research/path_policy/tests/test_forecast_dataset.py*' }`
+- 如果确认要终止本轮残留 pytest，再对上述匹配结果执行 `Stop-Process -Id <ProcessId> -Force`；不要用泛化的 `Stop-Process python`。
 
 ## 必跑守卫
 - `git diff -- daily_research/output/active_execution_strategy.json`

@@ -37,9 +37,14 @@ BRAIN_TOOL_TESTS = (
 
 FORECAST_TESTS = (
     "daily_research/path_policy/tests/test_forecast_features.py",
+    "daily_research/path_policy/tests/test_forecast_dataset.py::test_forecast_sequence_dataset_accepts_custom_horizon_grid_with_horizon_specific_risk",
+    "daily_research/path_policy/tests/test_forecast_training.py::test_train_forecast_models_accepts_custom_horizon_decision_utility_contract",
+    "daily_research/path_policy/tests/test_models.py",
+)
+
+FORECAST_DEFERRED_LONG_TESTS = (
     "daily_research/path_policy/tests/test_forecast_dataset.py",
     "daily_research/path_policy/tests/test_forecast_training.py",
-    "daily_research/path_policy/tests/test_models.py",
 )
 
 RL_PROTOCOL_GROUPS = (
@@ -262,6 +267,10 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
             for group in RL_PROTOCOL_GROUPS:
                 _add_command(selected_commands, _pytest_command(group))
             _add_command(
+                selected_commands,
+                _pytest_command(["daily_research/path_policy/tests/test_run_alpha_path20_protocol_entrypoint.py"]),
+            )
+            _add_command(
                 deferred_long_commands,
                 _pytest_command(["daily_research/path_policy/tests/test_rl_protocol.py"]),
             )
@@ -272,6 +281,7 @@ def build_verification_plan(*, paths: list[str] | None = None, base: str | None 
             name = Path(path).name
             if name.startswith("forecast_") or "forecast" in name:
                 _add_command(selected_commands, _pytest_command(FORECAST_TESTS))
+                _add_command(deferred_long_commands, _pytest_command(FORECAST_DEFERRED_LONG_TESTS))
             elif name.startswith("rl_"):
                 _add_command(
                     selected_commands,

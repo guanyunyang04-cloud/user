@@ -33,6 +33,9 @@
 - 更强模型不是自动解决方案；若 target construction、receiver/source semantics 或 evidence route 错，放大模型只会更快放大错误。
 - 固定 horizon 不是目标本体；当前 path_policy 目标已从“20 日路径预测”迁移为“多 horizon 交易效用排序”，后续判断以赚钱相关排序、spread、hit lift、月稳和 calibration 为主。
 - 工程复杂度会制造循环；runner、profile、loss、diagnostics 必须减少活动面，服务明确阻塞点。
+- 执行异常不是研究结论：pytest timeout、脚本入口失败、残留进程或资源挤占必须先做根因定位；可复现且可修的问题应同时写入 reference、修工程入口或验证选择，并增加防复发测试。
+- PathPolicy forecast dataset 全文件慢测源于完整 synthetic feature/label/horizon risk 构造；默认轻量验证应使用快速合同测试，完整慢测保留为 deferred long verification。
+- `daily_research.path_policy.run_alpha_path20_protocol` 的标准入口是 `python -m ...`；直接脚本入口允许作为容错 smoke，但新命令记录和 reference 默认写包级入口。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 

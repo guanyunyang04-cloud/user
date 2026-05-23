@@ -85,6 +85,7 @@
 - r74 lake behavior quality：`daily_research/brain/references/r74_lake_behavior_quality_status_20260515.md`。
 - 多 Horizon 交易效用命名迁移：`daily_research/brain/references/alpha_multi_horizon_utility_policy_mainline_rename_20260523.md`。
 - 多 Horizon 交易效用首轮结果：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`。
+- PathPolicy 执行异常学习：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口

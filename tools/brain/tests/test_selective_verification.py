@@ -57,17 +57,31 @@ class SelectiveVerificationTest(unittest.TestCase):
 
         joined = "\n".join(payload["selected_commands"])
         self.assertIn("daily_research/path_policy/tests/test_forecast_features.py", joined)
-        self.assertIn("daily_research/path_policy/tests/test_forecast_dataset.py", joined)
-        self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", joined)
+        self.assertIn(
+            "daily_research/path_policy/tests/test_forecast_dataset.py::test_forecast_sequence_dataset_accepts_custom_horizon_grid_with_horizon_specific_risk",
+            joined,
+        )
+        self.assertIn(
+            "daily_research/path_policy/tests/test_forecast_training.py::test_train_forecast_models_accepts_custom_horizon_decision_utility_contract",
+            joined,
+        )
         self.assertIn("daily_research/path_policy/tests/test_models.py", joined)
         self.assertNotIn("daily_research/path_policy/tests/test_rl_protocol.py -q", joined)
+        deferred = "\n".join(payload["deferred_long_commands"])
+        self.assertIn("daily_research/path_policy/tests/test_forecast_dataset.py", deferred)
+        self.assertIn("daily_research/path_policy/tests/test_forecast_training.py", deferred)
 
     def test_rl_protocol_change_uses_nodeid_groups_not_whole_file(self) -> None:
         payload = build_verification_plan(paths=["daily_research/path_policy/run_alpha_path20_protocol.py"])
 
         commands = payload["selected_commands"]
         self.assertGreaterEqual(len(commands), 3)
-        self.assertTrue(all("daily_research/path_policy/tests/test_rl_protocol.py::" in command for command in commands))
+        rl_commands = [command for command in commands if "daily_research/path_policy/tests/test_rl_protocol.py" in command]
+        self.assertTrue(all("daily_research/path_policy/tests/test_rl_protocol.py::" in command for command in rl_commands))
+        self.assertIn(
+            f"{PYTHON} -m pytest daily_research/path_policy/tests/test_run_alpha_path20_protocol_entrypoint.py -q",
+            commands,
+        )
         self.assertFalse(any(command.endswith("daily_research/path_policy/tests/test_rl_protocol.py -q") for command in commands))
 
     def test_continuous_policy_shared_core_marks_high_risk_and_defers_long_suite(self) -> None:

@@ -9,7 +9,7 @@ REGISTRY_PATH = Path("daily_research/brain/references/evidence_registry.json")
 REFERENCE_ROOTS = (Path("daily_research/brain/references"),)
 REFERENCE_FILE_PATTERNS = (
     re.compile(r"^(r\d+[a-z]?|gpu-runtime)-.+\.md$"),
-    re.compile(r"^(alpha_path20|path20|alpha_multi_horizon)_.+\.md$"),
+    re.compile(r"^(alpha_path20|path20|path_policy|alpha_multi_horizon)_.+\.md$"),
     re.compile(r"^data_lake_.+\.md$"),
     re.compile(r"^(brain_native|brain_system|api_agent)_.+\.md$"),
 )

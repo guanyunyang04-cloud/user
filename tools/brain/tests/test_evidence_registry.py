@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import inspect
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -90,6 +91,13 @@ class BrainEvidenceRegistryTest(unittest.TestCase):
             "alpha_multi_horizon_utility_policy_mainline_rename_20260523",
             {match["id"] for match in payload["matches"]},
         )
+
+    def test_adapter_indexes_path_policy_reference_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "path_policy_execution_issue_learning_20260523.md"
+            path.write_text("# Path Policy Execution Issue Learning\n", encoding="utf-8")
+
+            self.assertTrue(daily_research_evidence.is_reference_file(path))
 
     def test_registry_uses_section_aware_tags_and_next_actions(self) -> None:
         registry = build_evidence_registry()
