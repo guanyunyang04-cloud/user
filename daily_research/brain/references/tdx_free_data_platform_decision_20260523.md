@@ -5,6 +5,7 @@
 - Scope: `daily_research` 数据入口、每日更新流水线、正式研究数据边界。
 - Active artifact impact: `daily_research/output/active_execution_strategy.json` 必须保持不变。
 - 本记录不是模型有效性证据、promotion 证据、live/default 变更或自动交易实现。
+- 2026-05-23 V2 successor: `daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。本文件保留为 V1 决策历史，不再代表当前 refresh 完整能力。
 
 ## 事实
 - `lake` 是研究存储真源，不是在线数据源；`csv` 是导入和补洞通道，不是长期自动更新方案。

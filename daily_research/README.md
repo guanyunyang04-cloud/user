@@ -27,8 +27,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 本地数据边界：
 - `daily_research` 正式研究链路不再依赖 `t0_project/tqcenter.py`、`pytdx` 或 `mootdx`。
-- `lake` 是研究存储真源；在线数据每日更新通过 `daily_research.data_platform.refresh_daily` 进入 Bronze/Silver，再注册为显式 lake dataset id。
-- `csv` 只作为导入或补洞通道，不作为正式训练/评估的在线数据源。
+- `lake` 是研究存储真源；在线 provider 每日更新必须先进入 Bronze/Silver，再注册为显式 lake dataset id。
+- `csv` 只作为入湖导入或补洞通道，不允许被正式训练/评估直接读取。
+- V2 数据平台支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`；`--symbols` 只保留为小样本/显式调试入口。
 
 ## 常用入口
 
@@ -36,8 +37,10 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.workflow capsule -
 
 - 连续策略正式协议：
   `python daily_research/continuous_policy/run_continuous_policy_protocol.py ...`
-- TDX-free 每日数据刷新：
-  `python -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --symbols 000001.SZ,600000.SH,000300.SH --json`
+- TDX-free V2 每日数据刷新：
+  `python -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --universe all_a --domains market_daily,trading_calendar,universe_snapshot,security_status,limit_status,industry_concept,valuation --json`
+- CSV 入湖导入：
+  `python -m daily_research.data_platform.import_csv --input <csv_or_folder> --domain market_daily --as-of-date YYYY-MM-DD --source-name manual_csv --json`
 - 执行应用：
   `python daily_research/execution/run_execution_app.py run --task <task-name> -- ...`
 - 执行 Web 控制台：

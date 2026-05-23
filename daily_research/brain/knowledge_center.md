@@ -37,7 +37,7 @@
 - PathPolicy forecast dataset 全文件慢测源于完整 synthetic feature/label/horizon risk 构造；默认轻量验证应使用快速合同测试，完整慢测保留为 deferred long verification。
 - `daily_research.path_policy.run_alpha_path20_protocol` 的标准入口是 `python -m ...`；直接脚本入口允许作为容错 smoke，但新命令记录和 reference 默认写包级入口。
 - 数据集必须可复用、可审计、可查询；pickle/cache 可兼容，但新训练集应进入 DuckDB + Parquet data lake。
-- `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。
+- `lake` 是研究存储真源，不是在线数据源；每日更新源是 `daily_research.data_platform` 的非 TDX online providers，写入 Bronze/Silver 后才能注册为研究 lake dataset。V2 默认使用 `--universe all_a` 和真实交易日历，CSV 只能作为入湖导入/补洞通道，不能被正式研究直接读取。
 - TDX-family 已退出正式研究主链路：`tqcenter.py`、`pytdx`、`mootdx` 不得作为 `daily_research` 默认或正式 provider；若旧脚本保留这些名字，只能视为 legacy/historical path。
 - 脑区是项目事实真源，skills 只是流程入口，不复制长历史。
 

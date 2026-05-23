@@ -24,7 +24,7 @@
 - r72 已把 evaluate/shadow/export 接到通用 data lake evaluator；`protocol_r71_multistage_regret_v5_behavior_lake_smoke_20260515_02` 完整跑通且无 TDX empty blocker，但 source/receiver target 仍为 0，仍不是 r71 behavior acceptance。
 - r73 已把 data lake 接入决策特征利用审计与 r71 collapse 诊断；`protocol_r73_lake_native_r71_collapse_repair_smoke_20260515_02` 完整跑通，eval/shadow 均保持 cashflow valid=1、intent conflict=0 且 source/receiver target 非零，但 training evidence 仍 `insufficient`、promotion gate 仍 `shadow_only`，行为质量仍有 cash timing、source quality、receiver-source spread 阻塞。
 - r74 已新增显式 `portfolio_set_v5_dfl_pg_v1_r74_lake_behavior_quality` 研究线，并完成 tiny lake smoke `protocol_r74_lake_behavior_quality_v5_smoke_20260515_03`；cashflow valid=1、intent conflict=0、source/receiver 非零，source wrong-side sell、reversal、cash timing 与 shadow receiver-source spread 相对 r73 有改善，但 source/receiver 覆盖收缩、feature contract degraded rate=1.0、training evidence 仍 `insufficient`，仍不是 promotion 或 behavior-success verdict。
-- 2026-05-23 已新增 TDX-free data platform 第一版：正式研究入口 lake-first，`tqcenter.py` / `pytdx` / `mootdx` 不再是 daily_research 主链路依赖；online providers 通过 `refresh_daily` 写 Bronze/Silver，再注册为显式 lake dataset id。
+- 2026-05-23 已将 TDX-free data platform 升级到 V2：正式研究入口 lake-first，`tqcenter.py` / `pytdx` / `mootdx` 不再是 daily_research 主链路依赖；`refresh_daily` 支持 `--universe all_a|liquid500|file:<path>|symbols:<csv>`、真实交易日历、多 domain sidecar、Bronze/Silver 仲裁和显式 lake dataset 注册。
 
 ## 当前接管入口
 - 默认读取顺序：`identity_layer.md -> state_center.md -> knowledge_center.md -> continuous_policy_design_contract.md -> operations_center.md -> governance_layer.md`。
@@ -89,6 +89,7 @@
 - 多 Horizon 交易效用首轮结果：`daily_research/brain/references/alpha_path20_horizon_discovery_result_20260523.md`。
 - PathPolicy 执行异常学习：`daily_research/brain/references/path_policy_execution_issue_learning_20260523.md`。
 - TDX-free 数据平台决策：`daily_research/brain/references/tdx_free_data_platform_decision_20260523.md`。
+- TDX-free 数据平台 V2：`daily_research/brain/references/tdx_free_data_platform_v2_20260523.md`。
 - 机器索引：`daily_research/brain/references/evidence_registry.json`。
 
 ## 历史归档入口

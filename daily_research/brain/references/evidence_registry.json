@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "ok",
-  "record_count": 59,
+  "record_count": 60,
   "duplicates": [],
   "missing_paths": [],
   "records": [
@@ -1753,6 +1753,29 @@
         "单独设计 paper execution 与后续 QMT/PTrade broker adapter；数据平台不承担下单职责。"
       ],
       "active_artifact_impact": "not_stated",
+      "dataset_ids": []
+    },
+    {
+      "id": "tdx_free_data_platform_v2_20260523",
+      "date": "2026-05-23",
+      "r_id": "",
+      "path": "daily_research/brain/references/tdx_free_data_platform_v2_20260523.md",
+      "tags": [
+        "research_data_lake",
+        "data_lake",
+        "data_platform"
+      ],
+      "workflow": "research_data_lake",
+      "study_tags": [],
+      "verdict": "Scope: `daily_research.data_platform` 多 domain refresh、CSV 入湖、research lake sidecar metadata 与正式研究数据边界。; 研究、训练和 diagnostics 必须只读 explicit lake dataset id；在线抓取只允许发生在 data platform refresh/import 边界内。",
+      "blockers": [],
+      "next_allowed_actions": [
+        "以真实 provider smoke 或 dry-run health check 校准各免费源的可用性、速率限制和字段稳定性。",
+        "扩展 `money_flow_hotspot`、行业/概念和估值字段的质量门，但仍保持 optional domain 默认不阻断 market daily。",
+        "让 PathPolicy / Multi Horizon Utility / continuous_policy 逐步显式读取 sidecar metadata，禁止 loose latest。",
+        "单独规划 `paper_execution -> broker_adapter -> QMT/PTrade` 自动交易主线；不要把数据平台结果直接解释为可实盘交易能力。"
+      ],
+      "active_artifact_impact": "guarded",
       "dataset_ids": []
     }
   ]

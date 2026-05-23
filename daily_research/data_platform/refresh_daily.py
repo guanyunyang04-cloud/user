@@ -12,11 +12,17 @@ import pandas as pd
 
 from daily_research.data_lake import ResearchDataLake
 from daily_research.data_platform.contracts import (
+    DataDomain,
+    DomainFetchRequest,
     FetchRequest,
     NUMERIC_MARKET_COLUMNS,
     STANDARD_MARKET_COLUMNS,
+    coverage_report_for_domain,
     market_business_dates,
     next_business_date,
+    normalize_domain,
+    normalize_domain_frame,
+    trading_dates_from_calendar,
 )
 from daily_research.data_platform.manager import ProviderManager
 from daily_research.data_platform.providers import build_default_providers
@@ -28,6 +34,9 @@ class RefreshConfig:
     as_of_date: str = ""
     start_date: str = ""
     symbols: tuple[str, ...] = ()
+    universe: str = ""
+    domains: tuple[str, ...] = (DataDomain.MARKET_DAILY,)
+    required_domains: tuple[str, ...] = (DataDomain.MARKET_DAILY,)
     benchmark: str = "000300.SH"
     provider_plan: str = "default_free"
     adjusted_flag: str = "none"
@@ -48,6 +57,7 @@ class RefreshResult:
     silver_market_path: str
     conflict_report_path: str
     registered_market_dataset_id: str = ""
+    registered_domain_dataset_ids: dict[str, str] = field(default_factory=dict)
     coverage_report: dict[str, Any] = field(default_factory=dict)
     conflict_summary: dict[str, Any] = field(default_factory=dict)
     blockers: list[str] = field(default_factory=list)
@@ -62,9 +72,41 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
     silver_root = run_root / "silver"
     bronze_root.mkdir(parents=True, exist_ok=True)
     silver_root.mkdir(parents=True, exist_ok=True)
+    domains = tuple(dict.fromkeys(normalize_domain(item) for item in resolved.domains))
+    required_domains = set(normalize_domain(item) for item in resolved.required_domains)
+    resolved_providers = list(providers) if providers is not None else build_default_providers(resolved.provider_plan)
+    provider_chain = [str(getattr(item, "name", "")) for item in resolved_providers]
+    manager = ProviderManager(
+        resolved_providers,
+        timeout_seconds=resolved.timeout_seconds,
+        allow_tdx_family=resolved.allow_tdx_family,
+    )
 
-    request_symbols = _request_symbols(resolved)
-    request_start = _resolve_incremental_start(lake, resolved)
+    prefetch_results: dict[str, Any] = {}
+    calendar_result = None
+    if DataDomain.TRADING_CALENDAR in domains or _needs_calendar(resolved):
+        calendar_result = manager.fetch_domain(
+            DomainFetchRequest(
+                domain=DataDomain.TRADING_CALENDAR,
+                start_date=resolved.start_date,
+                end_date=resolved.as_of_date,
+            )
+        )
+        prefetch_results[DataDomain.TRADING_CALENDAR] = calendar_result
+    calendar_frame = calendar_result.data if calendar_result is not None else pd.DataFrame()
+
+    universe_result = None
+    if not resolved.symbols and _universe_mode(resolved) == "all_a":
+        universe_result = manager.fetch_domain(
+            DomainFetchRequest(
+                domain=DataDomain.UNIVERSE_SNAPSHOT,
+                start_date=resolved.start_date,
+                end_date=resolved.as_of_date,
+            )
+        )
+        prefetch_results[DataDomain.UNIVERSE_SNAPSHOT] = universe_result
+    request_symbols = _resolve_request_symbols(lake=lake, config=resolved, universe_frame=universe_result.data if universe_result is not None else pd.DataFrame())
+    request_start = _resolve_incremental_start(lake, resolved, request_symbols=request_symbols, calendar=calendar_frame)
     if pd.Timestamp(request_start) > pd.Timestamp(resolved.as_of_date):
         manifest_path = run_root / "refresh_manifest.json"
         payload = {
@@ -73,6 +115,8 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
             "reason": "lake already covers requested as_of_date",
             "as_of_date": resolved.as_of_date,
             "request_start_date": request_start,
+            "domains": list(domains),
+            "provider_chain": provider_chain,
         }
         _write_json(manifest_path, payload)
         return RefreshResult(
@@ -91,47 +135,89 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         end_date=resolved.as_of_date,
         adjusted_flag=resolved.adjusted_flag,
     ).normalized()
-    resolved_providers = list(providers) if providers is not None else build_default_providers(resolved.provider_plan)
-    manager = ProviderManager(
-        resolved_providers,
-        timeout_seconds=resolved.timeout_seconds,
-        allow_tdx_family=resolved.allow_tdx_family,
-    )
-    provider_result = manager.fetch_market_bars(request)
-    bronze_paths = _write_bronze(provider_result.data, bronze_root, [getattr(item, "name", "") for item in resolved_providers])
-    canonical, conflict_report, conflict_summary = _build_silver_market(
-        provider_result.data,
-        provider_priority=[getattr(item, "name", "") for item in resolved_providers],
-        conflict_tolerance_pct=resolved.conflict_tolerance_pct,
-    )
-    silver_market_path = silver_root / "silver_market.parquet"
-    conflict_report_path = silver_root / "source_conflict_report.parquet"
-    canonical.to_parquet(silver_market_path, index=False)
-    conflict_report.to_parquet(conflict_report_path, index=False)
+    domain_outputs: dict[str, dict[str, Any]] = {}
+    provider_error_report: list[dict[str, Any]] = []
+    provider_coverage_report: dict[str, Any] = {}
+    for domain in domains:
+        domain_request = _domain_request(
+            domain=domain,
+            symbols=request_symbols,
+            start_date=request_start,
+            end_date=resolved.as_of_date,
+            adjusted_flag=resolved.adjusted_flag,
+        )
+        provider_result = prefetch_results.get(domain)
+        if provider_result is None:
+            provider_result = manager.fetch_domain(domain_request)
+        provider_error_report.extend(list(provider_result.error_report or []))
+        provider_coverage_report[domain] = provider_result.coverage_report
+        domain_bronze_paths = _write_bronze_domain(provider_result.data, bronze_root / domain, provider_chain, domain=domain)
+        canonical, conflict_report, conflict_summary = _build_silver_domain(
+            provider_result.data,
+            domain=domain,
+            provider_priority=provider_chain,
+            conflict_tolerance_pct=resolved.conflict_tolerance_pct,
+        )
+        domain_silver_path = silver_root / f"silver_{domain}.parquet"
+        domain_conflict_path = silver_root / f"source_conflict_report_{domain}.parquet"
+        canonical.to_parquet(domain_silver_path, index=False)
+        conflict_report.to_parquet(domain_conflict_path, index=False)
+        coverage = _domain_coverage_report(canonical, domain_request, calendar=calendar_frame)
+        domain_outputs[domain] = {
+            "provider_result": provider_result,
+            "bronze_paths": domain_bronze_paths,
+            "canonical": canonical,
+            "conflict_report": conflict_report,
+            "conflict_summary": conflict_summary,
+            "coverage_report": coverage,
+            "silver_path": str(domain_silver_path.resolve()),
+            "conflict_report_path": str(domain_conflict_path.resolve()),
+        }
 
-    coverage_report = _coverage_report(canonical, request)
+    market_output = domain_outputs.get(DataDomain.MARKET_DAILY, {})
+    canonical = market_output.get("canonical", pd.DataFrame(columns=STANDARD_MARKET_COLUMNS))
+    conflict_summary = dict(market_output.get("conflict_summary", {}))
+    coverage_report = dict(market_output.get("coverage_report", {}))
+    bronze_paths = dict(market_output.get("bronze_paths", {}))
+    silver_market_path = Path(str(market_output.get("silver_path", silver_root / "silver_market_daily.parquet")))
+    conflict_report_path = Path(str(market_output.get("conflict_report_path", silver_root / "source_conflict_report_market_daily.parquet")))
     blockers = _refresh_blockers(
         coverage_report=coverage_report,
         conflict_summary=conflict_summary,
         min_coverage_ratio=resolved.min_coverage_ratio,
         severe_conflict_limit=resolved.severe_conflict_limit,
     )
+    for domain in required_domains:
+        output = domain_outputs.get(domain)
+        if output is None or int(output.get("coverage_report", {}).get("row_count", 0) or 0) <= 0:
+            blockers.append(f"required_domain_blocked:{domain}")
     if resolved.benchmark and (
         canonical.empty
         or not canonical["symbol"].astype(str).str.upper().eq(str(resolved.benchmark).upper()).any()
     ):
         blockers.append("missing_benchmark")
     registered_dataset_id = ""
+    registered_domain_dataset_ids: dict[str, str] = {}
     status = "blocked" if blockers else "ok"
     if not blockers:
+        registered_domain_dataset_ids = _register_sidecar_domain_datasets(
+            lake=lake,
+            config=resolved,
+            refresh_run_id=refresh_run_id,
+            provider_chain=provider_chain,
+            domain_outputs=domain_outputs,
+        )
         registered_dataset_id = _register_policy_input_bundle(
             lake=lake,
             config=resolved,
             refresh_run_id=refresh_run_id,
+            request_symbols=request_symbols,
             canonical=canonical,
-            provider_chain=[getattr(item, "name", "") for item in resolved_providers],
+            provider_chain=provider_chain,
             coverage_report=coverage_report,
             conflict_summary=conflict_summary,
+            domain_outputs=domain_outputs,
+            registered_domain_dataset_ids=registered_domain_dataset_ids,
         )
     manifest_path = run_root / "refresh_manifest.json"
     manifest = {
@@ -139,7 +225,10 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         "status": status,
         "refresh_run_id": refresh_run_id,
         "provider_plan": resolved.provider_plan,
-        "provider_chain": [str(getattr(item, "name", "")) for item in resolved_providers],
+        "provider_chain": provider_chain,
+        "domains": list(domains),
+        "required_domains": sorted(required_domains),
+        "universe": resolved.universe,
         "as_of_date": resolved.as_of_date,
         "request_start_date": request.start_date,
         "request_end_date": request.end_date,
@@ -148,15 +237,27 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         "adjusted_flag": resolved.adjusted_flag,
         "requested_symbols": list(request.symbols),
         "refresh_universe_key": _universe_key(request.symbols),
+        "calendar_source": "provider" if not calendar_frame.empty else "business_day_fallback",
         "bronze_paths": bronze_paths,
-        "silver_market_path": str(silver_market_path.resolve()),
-        "conflict_report_path": str(conflict_report_path.resolve()),
+        "domain_outputs": {
+            domain: {
+                "bronze_paths": dict(output["bronze_paths"]),
+                "silver_path": str(output["silver_path"]),
+                "conflict_report_path": str(output["conflict_report_path"]),
+                "coverage_report": dict(output["coverage_report"]),
+                "conflict_summary": dict(output["conflict_summary"]),
+            }
+            for domain, output in domain_outputs.items()
+        },
+        "silver_market_path": str(silver_market_path),
+        "conflict_report_path": str(conflict_report_path),
         "coverage_report": coverage_report,
         "conflict_summary": conflict_summary,
-        "provider_coverage_report": provider_result.coverage_report,
-        "provider_error_report": provider_result.error_report,
+        "provider_coverage_report": provider_coverage_report,
+        "provider_error_report": provider_error_report,
         "blockers": blockers,
         "registered_market_dataset_id": registered_dataset_id,
+        "registered_domain_dataset_ids": registered_domain_dataset_ids,
     }
     _write_json(manifest_path, manifest)
     lake.write_catalog_manifest()
@@ -168,6 +269,7 @@ def run_refresh(config: RefreshConfig, *, providers: Iterable[Any] | None = None
         silver_market_path=str(silver_market_path.resolve()),
         conflict_report_path=str(conflict_report_path.resolve()),
         registered_market_dataset_id=registered_dataset_id,
+        registered_domain_dataset_ids=registered_domain_dataset_ids,
         coverage_report=coverage_report,
         conflict_summary=conflict_summary,
         blockers=blockers,
@@ -179,7 +281,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of-date", required=True)
     parser.add_argument("--start-date", default="")
     parser.add_argument("--provider-plan", default="default_free")
-    parser.add_argument("--symbols", default="", help="Comma-separated symbols. If empty, provider must supply a universe in a later phase.")
+    parser.add_argument("--symbols", default="", help="Comma-separated symbols. Optional when --universe is set.")
+    parser.add_argument("--universe", default="", help="all_a, liquid500, file:<path>, or symbols:<csv>.")
+    parser.add_argument("--domains", default=DataDomain.MARKET_DAILY)
+    parser.add_argument("--required-domains", default=DataDomain.MARKET_DAILY)
     parser.add_argument("--benchmark", default="000300.SH")
     parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--adjusted-flag", default="none")
@@ -194,14 +299,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     symbols = tuple(item.strip().upper() for item in str(args.symbols or "").split(",") if item.strip())
-    if not symbols:
-        raise SystemExit("--symbols is required for the first TDX-free refresh implementation.")
+    if not symbols and not str(args.universe or "").strip():
+        raise SystemExit("Either --symbols or --universe is required for TDX-free refresh.")
     result = run_refresh(
         RefreshConfig(
             lake_root=Path(args.data_lake_root) if str(args.data_lake_root or "").strip() else Path("daily_research/output/research_data_lake"),
             as_of_date=args.as_of_date,
             start_date=args.start_date,
             symbols=symbols,
+            universe=args.universe,
+            domains=_parse_domains(args.domains),
+            required_domains=_parse_domains(args.required_domains),
             benchmark=args.benchmark,
             provider_plan=args.provider_plan,
             adjusted_flag=args.adjusted_flag,
@@ -228,11 +336,16 @@ def main(argv: list[str] | None = None) -> int:
 def _resolve_config(config: RefreshConfig) -> RefreshConfig:
     as_of = pd.Timestamp(config.as_of_date).strftime("%Y-%m-%d")
     start = pd.Timestamp(config.start_date or as_of).strftime("%Y-%m-%d")
+    domains = tuple(dict.fromkeys(normalize_domain(item) for item in (config.domains or (DataDomain.MARKET_DAILY,))))
+    required_domains = tuple(dict.fromkeys(normalize_domain(item) for item in (config.required_domains or (DataDomain.MARKET_DAILY,))))
     return RefreshConfig(
         lake_root=Path(config.lake_root),
         as_of_date=as_of,
         start_date=start,
         symbols=tuple(str(item).strip().upper() for item in config.symbols if str(item).strip()),
+        universe=str(config.universe or "").strip(),
+        domains=domains,
+        required_domains=required_domains,
         benchmark=str(config.benchmark or "000300.SH").strip().upper(),
         provider_plan=str(config.provider_plan or "default_free"),
         adjusted_flag=str(config.adjusted_flag or "none"),
@@ -249,8 +362,14 @@ def _build_run_id(config: RefreshConfig) -> str:
     return f"refresh_daily_{config.provider_plan}_{config.as_of_date.replace('-', '')}_{pd.Timestamp.now().strftime('%H%M%S')}"
 
 
-def _resolve_incremental_start(lake: ResearchDataLake, config: RefreshConfig) -> str:
-    expected_universe_key = _universe_key(_request_symbols(config))
+def _resolve_incremental_start(
+    lake: ResearchDataLake,
+    config: RefreshConfig,
+    *,
+    request_symbols: tuple[str, ...],
+    calendar: pd.DataFrame,
+) -> str:
+    expected_universe_key = _universe_key(request_symbols)
     expected_provider_plan = str(config.provider_plan or "")
     expected_benchmark = str(config.benchmark or "").upper()
     expected_adjusted_flag = str(config.adjusted_flag or "none")
@@ -279,8 +398,120 @@ def _resolve_incremental_start(lake: ResearchDataLake, config: RefreshConfig) ->
         if end_date and (not latest or pd.Timestamp(end_date) > pd.Timestamp(latest)):
             latest = pd.Timestamp(end_date).strftime("%Y-%m-%d")
     if latest:
+        if calendar is not None and not calendar.empty:
+            dates = trading_dates_from_calendar(calendar, latest, config.as_of_date)
+            future_dates = [item for item in dates if pd.Timestamp(item) > pd.Timestamp(latest)]
+            if future_dates:
+                return future_dates[0]
+            return next_business_date(config.as_of_date)
         return next_business_date(latest)
     return config.start_date
+
+
+def _parse_domains(value: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raw = [item.strip() for item in value.split(",") if item.strip()]
+    else:
+        raw = [str(item).strip() for item in value if str(item).strip()]
+    return tuple(dict.fromkeys(normalize_domain(item) for item in (raw or [DataDomain.MARKET_DAILY])))
+
+
+def _needs_calendar(config: RefreshConfig) -> bool:
+    return bool(config.universe) or DataDomain.TRADING_CALENDAR in set(config.domains or ())
+
+
+def _universe_mode(config: RefreshConfig) -> str:
+    raw = str(config.universe or "").strip()
+    if not raw:
+        return "symbols"
+    if raw.lower().startswith("file:"):
+        return "file"
+    if raw.lower().startswith("symbols:"):
+        return "symbols_inline"
+    return raw.lower()
+
+
+def _resolve_request_symbols(
+    *,
+    lake: ResearchDataLake,
+    config: RefreshConfig,
+    universe_frame: pd.DataFrame,
+) -> tuple[str, ...]:
+    if config.symbols:
+        return _request_symbols(config)
+    mode = _universe_mode(config)
+    benchmark = str(config.benchmark or "").strip().upper()
+    symbols: list[str] = []
+    if mode == "all_a":
+        if universe_frame is None or universe_frame.empty or "symbol" not in universe_frame.columns:
+            raise ValueError("universe=all_a requires a non-empty universe_snapshot provider result")
+        statuses = universe_frame["list_status"].fillna("").astype(str).str.upper() if "list_status" in universe_frame.columns else pd.Series(["L"] * len(universe_frame))
+        symbols = [str(item).strip().upper() for item in universe_frame.loc[statuses.isin({"", "L", "LIST", "上市"}), "symbol"] if str(item).strip()]
+    elif mode == "liquid500":
+        symbols = _resolve_liquid_universe_from_lake(lake=lake, benchmark=benchmark, limit=500)
+    elif mode == "file":
+        path = Path(str(config.universe).split(":", 1)[1]).expanduser()
+        if not path.exists():
+            raise ValueError(f"universe file does not exist: {path}")
+        text = path.read_text(encoding="utf-8")
+        symbols = [item.strip().upper() for item in text.replace("\n", ",").split(",") if item.strip()]
+    elif mode == "symbols_inline":
+        symbols = [item.strip().upper() for item in str(config.universe).split(":", 1)[1].split(",") if item.strip()]
+    else:
+        raise ValueError(f"unsupported universe: {config.universe}")
+    return FetchRequest(
+        symbols=tuple(dict.fromkeys([*symbols, benchmark])),
+        start_date=config.start_date,
+        end_date=config.as_of_date,
+        adjusted_flag=config.adjusted_flag,
+    ).normalized().symbols
+
+
+def _resolve_liquid_universe_from_lake(*, lake: ResearchDataLake, benchmark: str, limit: int) -> list[str]:
+    try:
+        rows = lake.list_datasets(dataset_kind="policy_input_bundle")
+    except Exception:
+        rows = pd.DataFrame()
+    if rows.empty:
+        raise ValueError("universe=liquid500 requires an existing policy_input_bundle lake dataset")
+    latest = rows.iloc[-1]
+    metadata = lake.describe_dataset(str(latest["dataset_id"]))
+    market_path = str(dict(metadata.get("content_paths", {}) or {}).get("bronze_market_data", ""))
+    if not market_path or not Path(market_path).exists():
+        raise ValueError("universe=liquid500 could not find bronze_market_data in latest policy_input_bundle")
+    market = pd.read_parquet(market_path)
+    if market.empty or "field" not in market.columns or "value" not in market.columns:
+        raise ValueError("universe=liquid500 market bundle has no long market field/value data")
+    amount = market.loc[market["field"].astype(str).str.lower() == "amount"].copy()
+    if amount.empty:
+        raise ValueError("universe=liquid500 requires amount field in lake market bundle")
+    ranked = amount.groupby("stock")["value"].mean().sort_values(ascending=False)
+    symbols = [str(item).upper() for item in ranked.index if str(item).upper() != benchmark][: int(limit)]
+    if len(symbols) < min(int(limit), 50):
+        raise ValueError("universe=liquid500 has insufficient liquid symbols")
+    return symbols
+
+
+def _domain_request(
+    *,
+    domain: str,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    adjusted_flag: str,
+) -> DomainFetchRequest:
+    domain = normalize_domain(domain)
+    if domain in {DataDomain.TRADING_CALENDAR, DataDomain.UNIVERSE_SNAPSHOT}:
+        request_symbols: tuple[str, ...] = ()
+    else:
+        request_symbols = symbols
+    return DomainFetchRequest(
+        domain=domain,
+        symbols=request_symbols,
+        start_date=start_date,
+        end_date=end_date,
+        adjusted_flag=adjusted_flag,
+    ).normalized()
 
 
 def _write_bronze(data: pd.DataFrame, bronze_root: Path, provider_chain: list[str]) -> dict[str, str]:
@@ -292,6 +523,99 @@ def _write_bronze(data: pd.DataFrame, bronze_root: Path, provider_chain: list[st
         subset.to_parquet(path, index=False)
         paths[str(provider)] = str(path.resolve())
     return paths
+
+
+def _write_bronze_domain(data: pd.DataFrame, bronze_root: Path, provider_chain: list[str], *, domain: str) -> dict[str, str]:
+    bronze_root.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str] = {}
+    columns = data.columns if not data.empty else []
+    for provider in provider_chain:
+        safe = _safe_name(provider)
+        path = bronze_root / f"{safe}.parquet"
+        if not data.empty and "source" in data.columns:
+            subset = data.loc[data["source"].astype(str).str.lower() == str(provider).lower()].copy()
+        else:
+            subset = pd.DataFrame(columns=columns)
+        subset.to_parquet(path, index=False)
+        paths[str(provider)] = str(path.resolve())
+    return paths
+
+
+def _build_silver_domain(
+    data: pd.DataFrame,
+    *,
+    domain: str,
+    provider_priority: list[str],
+    conflict_tolerance_pct: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    domain = normalize_domain(domain)
+    if domain == DataDomain.MARKET_DAILY:
+        return _build_silver_market(
+            data,
+            provider_priority=provider_priority,
+            conflict_tolerance_pct=conflict_tolerance_pct,
+        )
+    canonical = normalize_domain_frame(
+        data,
+        domain=domain,
+        source=str(data["source"].iloc[0] if "source" in data.columns and len(data) else "unknown"),
+        as_of_date="",
+        require_columns=False,
+    )
+    if canonical.empty:
+        return canonical, pd.DataFrame(columns=["trade_date", "symbol", "field", "min_value", "max_value", "relative_diff", "providers"]), {
+            "source_conflict_count": 0,
+            "severe_conflict_count": 0,
+            "conflict_tolerance_pct": float(conflict_tolerance_pct),
+        }
+    priority = {str(provider).lower(): idx for idx, provider in enumerate(provider_priority)}
+    working = canonical.copy()
+    working["_priority"] = working["source"].astype(str).str.lower().map(priority).fillna(9999).astype(int)
+    keys = ["trade_date", "exchange"] if domain == DataDomain.TRADING_CALENDAR else ["trade_date", "symbol"]
+    keys = [key for key in keys if key in working.columns]
+    ordered = working.sort_values([*keys, "_priority"], ascending=True)
+    deduped = ordered.drop_duplicates(subset=keys, keep="first").drop(columns=["_priority"], errors="ignore")
+    conflicts = _domain_conflicts(working.drop(columns=["_priority"], errors="ignore"), keys=keys, tolerance=conflict_tolerance_pct)
+    conflict_report = pd.DataFrame(conflicts)
+    severe = int(len(conflict_report))
+    return deduped.reset_index(drop=True), conflict_report, {
+        "source_conflict_count": severe,
+        "severe_conflict_count": severe,
+        "conflict_tolerance_pct": float(conflict_tolerance_pct),
+    }
+
+
+def _domain_conflicts(data: pd.DataFrame, *, keys: list[str], tolerance: float) -> list[dict[str, Any]]:
+    if data.empty or len(keys) == 0 or "source" not in data.columns:
+        return []
+    numeric_columns = [column for column in data.columns if column not in {*keys, "source"} and pd.api.types.is_numeric_dtype(pd.to_numeric(data[column], errors="coerce"))]
+    conflicts: list[dict[str, Any]] = []
+    for key_values, group in data.groupby(keys):
+        if len(group) <= 1:
+            continue
+        providers = ",".join(sorted(group["source"].astype(str).unique()))
+        key_tuple = key_values if isinstance(key_values, tuple) else (key_values,)
+        base = {key: str(value) for key, value in zip(keys, key_tuple)}
+        for field in numeric_columns:
+            values = pd.to_numeric(group[field], errors="coerce").dropna()
+            if len(values) <= 1:
+                continue
+            min_value = float(values.min())
+            max_value = float(values.max())
+            denom = max(abs(min_value), 1e-12)
+            relative_diff = abs(max_value - min_value) / denom
+            if relative_diff > float(tolerance):
+                conflicts.append(
+                    {
+                        **base,
+                        "field": field,
+                        "min_value": min_value,
+                        "max_value": max_value,
+                        "relative_diff": float(relative_diff),
+                        "providers": providers,
+                    }
+                )
+    return conflicts
 
 
 def _build_silver_market(
@@ -347,8 +671,8 @@ def _build_silver_market(
     }
 
 
-def _coverage_report(canonical: pd.DataFrame, request: FetchRequest) -> dict[str, Any]:
-    expected_dates = market_business_dates(request.start_date, request.end_date)
+def _coverage_report(canonical: pd.DataFrame, request: FetchRequest, *, calendar: pd.DataFrame | None = None) -> dict[str, Any]:
+    expected_dates = trading_dates_from_calendar(calendar, request.start_date, request.end_date) if calendar is not None and not calendar.empty else market_business_dates(request.start_date, request.end_date)
     expected_rows = int(len(request.symbols) * len(expected_dates))
     row_count = int(len(canonical))
     coverage_ratio = float(row_count / expected_rows) if expected_rows else 0.0
@@ -362,6 +686,27 @@ def _coverage_report(canonical: pd.DataFrame, request: FetchRequest) -> dict[str
         "symbol_count": int(canonical["symbol"].nunique()) if not canonical.empty else 0,
         "trade_date_count": int(canonical["trade_date"].nunique()) if not canonical.empty else 0,
     }
+
+
+def _domain_coverage_report(canonical: pd.DataFrame, request: DomainFetchRequest, *, calendar: pd.DataFrame | None = None) -> dict[str, Any]:
+    if request.domain == DataDomain.MARKET_DAILY:
+        return _coverage_report(
+            canonical,
+            FetchRequest(
+                symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                adjusted_flag=request.adjusted_flag,
+            ),
+            calendar=calendar,
+        )
+    report = coverage_report_for_domain(canonical, request, provider="silver")
+    if request.domain != DataDomain.TRADING_CALENDAR and calendar is not None and not calendar.empty and request.symbols:
+        expected_dates = trading_dates_from_calendar(calendar, request.start_date, request.end_date)
+        expected_rows = int(len(request.symbols) * len(expected_dates))
+        report["expected_rows"] = expected_rows
+        report["coverage_ratio"] = float(int(report.get("row_count", 0) or 0) / expected_rows) if expected_rows else 0.0
+    return report
 
 
 def _refresh_blockers(
@@ -386,15 +731,18 @@ def _register_policy_input_bundle(
     lake: ResearchDataLake,
     config: RefreshConfig,
     refresh_run_id: str,
+    request_symbols: tuple[str, ...] | None = None,
     canonical: pd.DataFrame,
     provider_chain: list[str],
     coverage_report: dict[str, Any],
     conflict_summary: dict[str, Any],
+    domain_outputs: dict[str, dict[str, Any]] | None = None,
+    registered_domain_dataset_ids: dict[str, str] | None = None,
 ) -> str:
     benchmark = str(config.benchmark).upper()
     market = canonical.loc[canonical["symbol"] != benchmark].copy()
     benchmark_frame = canonical.loc[canonical["symbol"] == benchmark].copy()
-    request_symbols = _request_symbols(config)
+    request_symbols = tuple(request_symbols or _request_symbols(config))
     if market.empty:
         raise ValueError("refresh_blocked: canonical market has no non-benchmark rows")
     if benchmark_frame.empty:
@@ -411,6 +759,17 @@ def _register_policy_input_bundle(
     close = market_frames["Close"]
     membership = close.notna().astype(bool)
     feature_zero = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+    sidecar_feature_frames = _sidecar_feature_frames(
+        domain_outputs=domain_outputs or {},
+        market_columns=list(close.columns),
+    )
+    feature_frames = {
+        "score_none": feature_zero,
+        "score_v2": feature_zero.copy(),
+        "score_blend": feature_zero.copy(),
+        **sidecar_feature_frames,
+    }
+    sidecar_dataset_ids = dict(registered_domain_dataset_ids or {})
     record = lake.save_market_data_bundle(
         spec={
             "dataset": "policy_input_bundle",
@@ -421,6 +780,11 @@ def _register_policy_input_bundle(
             "adjusted_flag": config.adjusted_flag,
             "requested_symbols": list(request_symbols),
             "refresh_universe_key": _universe_key(request_symbols),
+            "sidecar_domains": sorted(sidecar_dataset_ids),
+            "sidecar_dataset_ids": sidecar_dataset_ids,
+            "calendar_dataset_id": sidecar_dataset_ids.get(DataDomain.TRADING_CALENDAR, ""),
+            "universe_snapshot_dataset_id": sidecar_dataset_ids.get(DataDomain.UNIVERSE_SNAPSHOT, ""),
+            "data_platform_refresh_run_id": refresh_run_id,
             "start_date": str(coverage_report.get("start_date", "")),
             "end_date": str(coverage_report.get("end_date", "")),
             "benchmark": benchmark,
@@ -431,15 +795,82 @@ def _register_policy_input_bundle(
         benchmark_close=_series(benchmark_frame, "close", name=benchmark),
         benchmark_open=_series(benchmark_frame, "open", name=benchmark),
         membership_frame=membership,
-        feature_frames={
-            "score_none": feature_zero,
-            "score_v2": feature_zero.copy(),
-            "score_blend": feature_zero.copy(),
-        },
+        feature_frames=feature_frames,
         source="data_platform_refresh",
         reuse=False,
     )
     return record.dataset_id
+
+
+def _register_sidecar_domain_datasets(
+    *,
+    lake: ResearchDataLake,
+    config: RefreshConfig,
+    refresh_run_id: str,
+    provider_chain: list[str],
+    domain_outputs: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    dataset_ids: dict[str, str] = {}
+    for domain, output in domain_outputs.items():
+        if domain == DataDomain.MARKET_DAILY:
+            continue
+        canonical = output.get("canonical", pd.DataFrame())
+        if canonical is None or canonical.empty:
+            continue
+        record = lake.save_domain_dataset(
+            domain=domain,
+            frame=canonical,
+            spec={
+                "dataset": f"data_platform_{domain}",
+                "source": "data_platform_refresh",
+                "provider_plan": config.provider_plan,
+                "provider_chain": list(provider_chain),
+                "refresh_run_id": refresh_run_id,
+                "start_date": str(output.get("coverage_report", {}).get("start_date", config.start_date)),
+                "end_date": str(output.get("coverage_report", {}).get("end_date", config.as_of_date)),
+                "benchmark": config.benchmark,
+                "coverage_report": dict(output.get("coverage_report", {})),
+                "conflict_summary": dict(output.get("conflict_summary", {})),
+            },
+            source="data_platform_refresh",
+            reuse=False,
+        )
+        dataset_ids[domain] = record.dataset_id
+    return dataset_ids
+
+
+def _sidecar_feature_frames(
+    *,
+    domain_outputs: dict[str, dict[str, Any]],
+    market_columns: list[str],
+) -> dict[str, pd.DataFrame]:
+    features: dict[str, pd.DataFrame] = {}
+    for domain, columns in {
+        DataDomain.SECURITY_STATUS: ["is_st", "is_suspended", "is_delisted"],
+        DataDomain.LIMIT_STATUS: ["is_limit_up", "is_limit_down"],
+        DataDomain.VALUATION: ["total_mv", "circ_mv", "pe", "pb", "turnover_rate"],
+    }.items():
+        frame = domain_outputs.get(domain, {}).get("canonical", pd.DataFrame())
+        if frame is None or frame.empty:
+            continue
+        for column in columns:
+            if column not in frame.columns:
+                continue
+            panel = _pivot(frame.loc[frame["symbol"].isin(market_columns)], column).reindex(columns=market_columns)
+            features[f"{domain}_{column}"] = panel
+    industry = domain_outputs.get(DataDomain.INDUSTRY_CONCEPT, {}).get("canonical", pd.DataFrame())
+    if industry is not None and not industry.empty and {"symbol", "trade_date", "industry"}.issubset(industry.columns):
+        coded = industry.copy()
+        coded["industry_code"] = coded["industry"].map(_stable_small_code)
+        features["industry_concept_industry_code"] = _pivot(coded.loc[coded["symbol"].isin(market_columns)], "industry_code").reindex(columns=market_columns)
+    return features
+
+
+def _stable_small_code(value: Any) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    return (int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16) % 10000) / 10000.0
 
 
 def _pivot(frame: pd.DataFrame, field: str) -> pd.DataFrame:

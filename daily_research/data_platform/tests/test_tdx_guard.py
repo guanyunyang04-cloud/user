@@ -1,5 +1,6 @@
 import unittest
 from unittest import mock
+from pathlib import Path
 
 from daily_research.baseline import data_provider
 from daily_research.baseline.data_provider import get_latest_completed_trading_date
@@ -47,6 +48,27 @@ class TdxFreeGuardTest(unittest.TestCase):
     def test_legacy_tq_import_is_disabled_without_explicit_environment_flag(self) -> None:
         with mock.patch.dict("os.environ", {"DAILY_RESEARCH_ALLOW_TDX_FAMILY": ""}, clear=False):
             self.assertIsNone(data_provider._try_import_tq())
+
+    def test_formal_data_platform_and_policy_entrypoints_do_not_import_tqcenter(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        formal_paths = [
+            repo_root / "daily_research" / "data_platform",
+            repo_root / "daily_research" / "path_policy" / "run_alpha_path20_protocol.py",
+            repo_root / "daily_research" / "continuous_policy" / "evaluate_policy.py",
+            repo_root / "daily_research" / "continuous_policy" / "train_policy.py",
+            repo_root / "daily_research" / "continuous_policy" / "run_continuous_policy_protocol.py",
+        ]
+        offenders = []
+        for path in formal_paths:
+            files = path.rglob("*.py") if path.is_dir() else [path]
+            for file_path in files:
+                if "tests" in file_path.parts:
+                    continue
+                text = file_path.read_text(encoding="utf-8")
+                if "from tqcenter import" in text or "import tqcenter" in text:
+                    offenders.append(str(file_path.relative_to(repo_root)))
+
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

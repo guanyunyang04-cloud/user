@@ -62,10 +62,17 @@
 ## TDX-Free Data Platform 运行口径
 - `lake` 是研究存储真源，不是在线数据源；`csv` 是导入/补洞通道，不是每日自动更新方案。
 - 正式研究入口只使用 `--data-source lake --lake-dataset-id <explicit_id>`；不得传 `tq/tdx/pytdx/mootdx`。
-- 每日更新入口：
-  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --symbols 000001.SZ,600000.SH,000300.SH --json`
-- refresh 输出必须包含 `refresh_run_id`、provider chain、Bronze provider parquet、Silver canonical parquet、`source_conflict_report`、coverage report、provider error report 和 manifest。
-- coverage 不足、缺 benchmark、空 canonical market 或严重 source conflict 时，refresh 必须 `blocked`，不得注册 research lake dataset。
+- V2 每日更新入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_platform.refresh_daily --as-of-date YYYY-MM-DD --provider-plan default_free --universe all_a --domains market_daily,trading_calendar,universe_snapshot,security_status,limit_status,industry_concept,valuation --json`
+- 小样本调试可传 `--symbols 000001.SZ,600000.SH`；正式每日更新默认使用 `--universe all_a`，不再要求显式 symbols。
+- `--universe` 支持 `all_a|liquid500|file:<path>|symbols:<csv>`；`liquid500` 必须从已有 lake/pool view 或 market amount 生成，数据不足时应 blocked。
+- `--domains` 表示本次尝试刷新的数据域；`--required-domains` 表示阻断条件。缺失 optional domain 不阻断 market daily 入湖，缺失 required domain 必须 blocked。
+- V2 domain 包括 `market_daily`、`trading_calendar`、`universe_snapshot`、`security_status`、`limit_status`、`industry_concept`、`valuation`、`money_flow_hotspot`。
+- refresh 输出必须包含 `refresh_run_id`、provider chain、domains、universe key、calendar source、Bronze provider parquet、Silver canonical parquet、`source_conflict_report`、coverage report、provider error report、blockers、registered dataset ids 和 manifest。
+- coverage 不足、缺 benchmark、空 canonical market、required domain 缺失或严重 source conflict 时，refresh 必须 `blocked`，不得注册 research lake dataset。
+- CSV 入湖入口：
+  `C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.data_platform.import_csv --input <csv_or_folder> --domain market_daily --as-of-date YYYY-MM-DD --source-name manual_csv --json`
+- CSV 必须先进 Bronze，再经 Silver normalize / quality gate 后注册 lake dataset；训练、评估、diagnostics 不得直接读散落 CSV。
 - 训练、评估、diagnostics 只读已注册 lake dataset；禁止在研究流程中临时在线抓取外部行情。
 - 本轮不实现实盘自动交易；后续 paper/live 需要单独设计 QMT/PTrade broker adapter、风控、合规报备和 kill switch。
 

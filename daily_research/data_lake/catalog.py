@@ -967,6 +967,87 @@ class ResearchDataLake:
             metadata=metadata,
         )
 
+    def save_domain_dataset(
+        self,
+        *,
+        domain: str,
+        frame: pd.DataFrame,
+        spec: Mapping[str, Any],
+        source: str,
+        reuse: bool = True,
+    ) -> LakeDatasetRecord:
+        dataset_kind = f"data_platform_{str(domain).strip().lower()}"
+        zone = "research"
+        effective_spec = dict(spec)
+        effective_spec["domain"] = str(domain).strip().lower()
+        fingerprint = _stable_hash(
+            {
+                "schema_version": DATA_LAKE_SCHEMA_VERSION,
+                "dataset_kind": dataset_kind,
+                "zone": zone,
+                "spec": effective_spec,
+            }
+        )
+        dataset_id = f"{dataset_kind}__{fingerprint}"
+        dataset_dir = self.parquet_root / "bronze_silver" / dataset_kind / fingerprint
+        content_paths = {
+            "silver_domain_data": str((dataset_dir / f"silver_{str(domain).strip().lower()}.parquet").resolve()),
+        }
+        existing = self._existing_by_fingerprint(fingerprint)
+        if reuse and existing is not None and Path(content_paths["silver_domain_data"]).exists():
+            metadata = self.describe_dataset(str(existing["dataset_id"]))
+            return LakeDatasetRecord(
+                dataset_id=str(metadata["dataset_id"]),
+                dataset_kind=str(metadata["dataset_kind"]),
+                zone=str(metadata["zone"]),
+                fingerprint=str(metadata["fingerprint"]),
+                status="hit",
+                root=self.root,
+                content_paths=dict(metadata.get("content_paths", {}) or {}),
+                row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+                metadata=metadata,
+            )
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        data = frame.copy()
+        data.to_parquet(content_paths["silver_domain_data"], index=False)
+        start_date = str(data["trade_date"].min()) if "trade_date" in data.columns and not data.empty else ""
+        end_date = str(data["trade_date"].max()) if "trade_date" in data.columns and not data.empty else ""
+        row_counts: dict[str, Any] = {
+            "silver_domain_data": int(len(data)),
+            "_date_bounds": {"start_date": start_date, "end_date": end_date},
+        }
+        merged_spec = {
+            **effective_spec,
+            "start_date": str(effective_spec.get("start_date", "") or start_date),
+            "end_date": str(effective_spec.get("end_date", "") or end_date),
+        }
+        self._upsert_dataset(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            domain="bronze_silver",
+            zone=zone,
+            source=str(source or ""),
+            spec=merged_spec,
+            label_completeness_summary={},
+            content_paths=content_paths,
+            row_counts=row_counts,
+            source_cache={},
+            fingerprint=fingerprint,
+            status="stored",
+        )
+        metadata = self.describe_dataset(dataset_id)
+        return LakeDatasetRecord(
+            dataset_id=dataset_id,
+            dataset_kind=dataset_kind,
+            zone=zone,
+            fingerprint=fingerprint,
+            status="stored",
+            root=self.root,
+            content_paths=dict(metadata.get("content_paths", {}) or {}),
+            row_counts={str(key): int(value) for key, value in dict(metadata.get("row_counts", {}) or {}).items()},
+            metadata=metadata,
+        )
+
     @staticmethod
     def _field_to_column(field: str) -> str:
         normalized = str(field or "").strip().lower()
