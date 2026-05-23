@@ -238,9 +238,11 @@ def latest_completed_business_date(
 ) -> str:
     now_ts = pd.Timestamp(reference_ts).tz_localize(None) if reference_ts is not None else pd.Timestamp.now().tz_localize(None)
     close_clock = pd.Timestamp(close_time).time()
-    include_today = now_ts.time() >= close_clock
+    today = now_ts.normalize()
+    is_business_day = today.weekday() < 5
+    include_today = is_business_day and now_ts.time() >= close_clock
     offset = 0 if include_today else 1
-    return (now_ts.normalize() - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
+    return (today - pd.offsets.BDay(offset)).strftime("%Y-%m-%d")
 
 
 def normalize_market_frame(

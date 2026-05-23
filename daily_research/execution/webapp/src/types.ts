@@ -60,6 +60,14 @@ export interface DataSourcesPayload {
     runs_root: string;
     latest_refresh_run: string;
     provider_plan: string;
+    latest_completed_trading_date?: string;
+    recommended_domains?: string[];
+    default_refresh?: {
+      as_of_date: string;
+      universe: string;
+      domains: string[];
+      provider_plan: string;
+    };
   };
 }
 

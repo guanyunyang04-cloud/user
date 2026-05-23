@@ -24,6 +24,12 @@ export function DataPage({ api }: DataPageProps): JSX.Element {
       .getDataSources()
       .then((next) => {
         setPayload(next);
+        const defaults = next.data_platform.default_refresh;
+        if (defaults) {
+          setAsOfDate(defaults.as_of_date || "");
+          setUniverse(defaults.universe || "all_a");
+          setDomains((defaults.domains || []).join(","));
+        }
         setError("");
       })
       .catch((err: Error) => setError(err.message))

@@ -161,6 +161,8 @@ def load_raw_data_with_cache(
     universe: list[str],
     benchmark: str,
     history_window: HistoryWindow,
+    lake_dataset_id: str = "",
+    data_lake_root: str = "",
     use_cache: bool = True,
     refresh_cache: bool = False,
     progress_desc: str = "读取股票日线",
@@ -176,6 +178,8 @@ def load_raw_data_with_cache(
         "benchmark": benchmark,
         "effective_start_date": history_window.effective_start_date,
         "end_date": history_window.end_date,
+        "lake_dataset_id": str(lake_dataset_id or ""),
+        "data_lake_root": str(data_lake_root or ""),
     }
     cache_id = _cache_key(payload)
     cache_path = get_cache_root() / "raw" / f"{cache_id}.pkl"
@@ -203,6 +207,38 @@ def load_raw_data_with_cache(
             progress_position=progress_position,
         )
         raw_df_dict = slice_data_dict(raw_df_dict, history_window.effective_start_date, history_window.end_date)
+    elif data_source == "lake":
+        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
+        from daily_research.data_lake.policy_input_loader import load_policy_inputs_from_lake
+
+        prepared = load_policy_inputs_from_lake(
+            lake=ResearchDataLake(str(data_lake_root or "").strip() or None),
+            dataset_id=str(lake_dataset_id or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID),
+            start_date=history_window.effective_start_date,
+            end_date=history_window.end_date,
+            benchmark=benchmark,
+            universe=list(universe or []),
+            min_trading_days=max(1, int(history_window.required_trading_days or 1)),
+        )
+        selected = list(prepared.close.columns)
+        raw_df_dict = {
+            "Open": prepared.open_.reindex(columns=[*selected, prepared.benchmark]),
+            "High": prepared.high.reindex(columns=[*selected, prepared.benchmark]),
+            "Low": prepared.low.reindex(columns=[*selected, prepared.benchmark]),
+            "Close": prepared.close.reindex(columns=[*selected, prepared.benchmark]),
+            "Volume": prepared.volume.reindex(columns=[*selected, prepared.benchmark]),
+            "Amount": prepared.amount.reindex(columns=[*selected, prepared.benchmark]),
+        }
+        for field in raw_df_dict:
+            if prepared.benchmark not in raw_df_dict[field].columns:
+                if field == "Open":
+                    benchmark_series = prepared.benchmark_open
+                elif field == "Close":
+                    benchmark_series = prepared.benchmark_close
+                else:
+                    benchmark_series = prepared.benchmark_close
+                raw_df_dict[field][prepared.benchmark] = benchmark_series.reindex(raw_df_dict[field].index)
+        raw_df_dict = {field: frame.sort_index() for field, frame in raw_df_dict.items()}
     else:
         raise ValueError(f"Unsupported data_source: {data_source}")
 

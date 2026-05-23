@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
+from daily_research.baseline.data_provider import get_latest_completed_trading_date
 from daily_research.deep_alpha.experiment_guardrails import resolve_project_python_executable
 from daily_research.execution.app_runtime import (
     EVENTS_PATH,
@@ -52,6 +53,15 @@ POSITIONS_EXAMPLE_PATH = EXECUTION_DIR / "current_positions.example.csv"
 ENVIRONMENT_PATH = PROJECT_ROOT / "environment.yml"
 LATEST_TRADE_PLAN_PATH = EXECUTION_DIR / "output" / "latest_trade_plan.txt"
 ACCOUNT_FILE_HEADERS = ("record_type", "stock", "shares", "cost_price", "available_cash")
+FORMAL_DATA_PLATFORM_DOMAINS: tuple[str, ...] = (
+    "market_daily",
+    "trading_calendar",
+    "universe_snapshot",
+    "security_status",
+    "limit_status",
+    "industry_concept",
+    "valuation",
+)
 _ACTIVE_JOB_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_JOB_THREADS_LOCK = threading.Lock()
 
@@ -481,6 +491,11 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
     if platform_runs.exists():
         runs = sorted(platform_runs.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True)
         latest_refresh = str(runs[0].resolve()) if runs else ""
+    try:
+        latest_completed = str(get_latest_completed_trading_date())
+    except Exception:
+        latest_completed = ""
+    recommended_domains = list(FORMAL_DATA_PLATFORM_DOMAINS)
     return {
         "status": "ok",
         "lake_root": str((PROJECT_ROOT / "output" / "research_data_lake").resolve()),
@@ -490,6 +505,14 @@ def data_sources_summary(*, dataset_limit: int = 60) -> dict[str, Any]:
             "runs_root": str(platform_runs.resolve()),
             "latest_refresh_run": latest_refresh,
             "provider_plan": "default_free",
+            "latest_completed_trading_date": latest_completed,
+            "recommended_domains": recommended_domains,
+            "default_refresh": {
+                "as_of_date": latest_completed,
+                "universe": "all_a",
+                "domains": recommended_domains,
+                "provider_plan": "default_free",
+            },
         },
     }
 

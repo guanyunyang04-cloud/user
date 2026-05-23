@@ -4,6 +4,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+FORMAL_DATA_PLATFORM_DOMAINS = [
+    "market_daily",
+    "trading_calendar",
+    "universe_snapshot",
+    "security_status",
+    "limit_status",
+    "industry_concept",
+    "valuation",
+]
+
 
 class TaskRunRequest(BaseModel):
     task_name: str = Field(min_length=1)
@@ -53,7 +63,7 @@ class DataRefreshRequest(BaseModel):
     as_of_date: str = ""
     start_date: str = ""
     universe: str = "all_a"
-    domains: list[str] = Field(default_factory=lambda: ["market_daily"])
+    domains: list[str] = Field(default_factory=lambda: list(FORMAL_DATA_PLATFORM_DOMAINS))
     job_label: str = ""
     force_unlock: bool = False
     background: bool = True

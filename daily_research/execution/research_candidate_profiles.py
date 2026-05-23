@@ -32,6 +32,8 @@ class ResearchCandidateProfile:
     research_candidate_score_panel_csv: str = ""
     trade_plan_candidate_label: str = ""
     data_source: str = "tq"
+    lake_dataset_id: str = ""
+    data_lake_root: str = ""
     benchmark: str = "000300.SH"
     backtest_start_date: str = "20250101"
     trade_plan_start_date: str = "20210101"
@@ -172,10 +174,10 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
     manifest = load_strategy_manifest()
     if not manifest:
         return None
-    source_target_weight = str(manifest.get("source_target_weight_panel_csv", "")).strip()
-    source_score = str(manifest.get("source_score_panel_csv", "")).strip()
-    trade_plan_target_weight = str(manifest.get("trade_plan_target_weight_panel_csv", "")).strip()
-    trade_plan_score = str(manifest.get("trade_plan_score_panel_csv", "")).strip()
+    source_target_weight = _resolve_migrated_project_path(manifest.get("source_target_weight_panel_csv", ""))
+    source_score = _resolve_migrated_project_path(manifest.get("source_score_panel_csv", ""))
+    trade_plan_target_weight = _resolve_migrated_project_path(manifest.get("trade_plan_target_weight_panel_csv", ""))
+    trade_plan_score = _resolve_migrated_project_path(manifest.get("trade_plan_score_panel_csv", ""))
     if not source_target_weight or not source_score or not trade_plan_target_weight or not trade_plan_score:
         return None
     refresh_command_raw = manifest.get("trade_plan_refresh_command")
@@ -193,6 +195,11 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
     execution_policy_label = str(manifest.get("execution_policy_label", "") or manifest.get("execution_alignment_profile", "")).strip()
     target_weight_semantics = str(manifest.get("target_weight_semantics", "")).strip()
     target_weight_cap_mode = str(manifest.get("target_weight_cap_mode", "")).strip()
+    raw_data_source = str(manifest.get("data_source", "lake") or "lake").strip().lower()
+    execution_data_source = "lake" if raw_data_source in {"", "tq", "tdx", "pytdx", "mootdx"} else raw_data_source
+    lake_dataset_id = str(manifest.get("lake_dataset_id", "") or manifest.get("source_market_dataset_id", "") or "").strip()
+    if execution_data_source == "lake" and not lake_dataset_id:
+        lake_dataset_id = _latest_policy_input_lake_dataset_id()
     if strategy_name:
         description = f"{description} strategy={strategy_name}."
     if panel_mode:
@@ -213,13 +220,17 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         trade_plan_target_weight_panel_csv=trade_plan_target_weight,
         trade_plan_score_panel_csv=trade_plan_score,
         research_candidate_target_weight_panel_csv=str(
-            manifest.get("research_candidate_target_weight_panel_csv", "")
+            _resolve_migrated_project_path(manifest.get("research_candidate_target_weight_panel_csv", ""))
         ).strip(),
-        research_candidate_score_panel_csv=str(manifest.get("research_candidate_score_panel_csv", "")).strip(),
+        research_candidate_score_panel_csv=str(
+            _resolve_migrated_project_path(manifest.get("research_candidate_score_panel_csv", ""))
+        ).strip(),
         trade_plan_candidate_label=str(manifest.get("trade_plan_candidate_label", "")).strip()
         or str(manifest.get("candidate_label", "")).strip()
         or "active_execution_strategy",
-        data_source=str(manifest.get("data_source", "tq") or "tq"),
+        data_source=execution_data_source,
+        lake_dataset_id=lake_dataset_id,
+        data_lake_root=str(manifest.get("data_lake_root", "") or "").strip(),
         benchmark=str(manifest.get("benchmark", "000300.SH") or "000300.SH"),
         backtest_start_date=str(manifest.get("backtest_start_date", "20210101") or "20210101"),
         trade_plan_start_date=str(manifest.get("trade_plan_start_date", "20210101") or "20210101"),
@@ -232,11 +243,11 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         target_weight_full_invest=bool(manifest.get("target_weight_full_invest", False)),
         use_market_regime_filter=bool(manifest.get("use_market_regime_filter", False)),
         soft_state_profile=str(manifest.get("soft_state_profile", "")).strip(),
-        refresh_run_dir=str(manifest.get("source_refresh_run_dir", "")).strip()
-        or str(manifest.get("source_run_dir", "")).strip(),
-        trade_plan_refresh_run_dir=str(manifest.get("trade_plan_refresh_run_dir", "")).strip()
-        or str(manifest.get("production_root", "")).strip(),
-        trade_plan_model_manifest_json=str(manifest.get("production_manifest_json", "")).strip(),
+        refresh_run_dir=_resolve_migrated_project_path(manifest.get("source_refresh_run_dir", ""))
+        or _resolve_migrated_project_path(manifest.get("source_run_dir", "")),
+        trade_plan_refresh_run_dir=_resolve_migrated_project_path(manifest.get("trade_plan_refresh_run_dir", ""))
+        or _resolve_migrated_project_path(manifest.get("production_root", "")),
+        trade_plan_model_manifest_json=_resolve_migrated_project_path(manifest.get("production_manifest_json", "")),
         trade_plan_refresh_command=refresh_command,
         liquidity_pool_name=liquidity_pool_name,
         liquidity_pool_size=liquidity_pool_size_from_name(liquidity_pool_name),
@@ -271,7 +282,7 @@ def _build_active_execution_profile() -> ResearchCandidateProfile | None:
         target_weight_cap_mode=target_weight_cap_mode,
         target_weight_cap_note=str(manifest.get("target_weight_cap_note", "")).strip(),
         score_panel_role=str(manifest.get("score_panel_role", "")).strip(),
-        score_reference_metadata_json=str(manifest.get("score_reference_metadata_json", "")).strip(),
+        score_reference_metadata_json=_resolve_migrated_project_path(manifest.get("score_reference_metadata_json", "")),
     )
 
 
@@ -355,6 +366,48 @@ def _load_json_payload(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _resolve_migrated_project_path(raw_path: object) -> str:
+    text = str(raw_path or "").strip()
+    if not text:
+        return ""
+    path = Path(text).expanduser()
+    candidates = [path]
+    normalized = text.replace("\\", "/")
+    marker = "/daily_research/"
+    if marker in normalized:
+        suffix = normalized.split(marker, 1)[1]
+        candidates.append(_DAILY_RESEARCH_ROOT / suffix)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved.exists():
+            return str(resolved)
+    try:
+        return str(path.resolve())
+    except Exception:
+        return text
+
+
+def _latest_policy_input_lake_dataset_id() -> str:
+    try:
+        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID, ResearchDataLake
+
+        lake = ResearchDataLake()
+        frame = lake.list_datasets()
+        if not frame.empty and "dataset_kind" in frame.columns:
+            filtered = frame.loc[frame["dataset_kind"].astype(str).eq("policy_input_bundle")].copy()
+            if not filtered.empty:
+                filtered = filtered.sort_values("created_at", ascending=False)
+                return str(filtered.iloc[0].get("dataset_id", "") or DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+        return str(DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
+    except Exception:
+        from daily_research.data_lake import DEFAULT_POLICY_INPUT_LAKE_DATASET_ID
+
+        return str(DEFAULT_POLICY_INPUT_LAKE_DATASET_ID)
 
 
 def _safe_timestamp(raw: object) -> pd.Timestamp | None:
@@ -619,12 +672,22 @@ def apply_profile_defaults(profile_name: str, *, mode: str, ensure_live_panels: 
         _ensure_live_panels(profile, mode=mode)
     if mode == "backtest":
         inject_default_arg("--data-source", profile.data_source)
+        if profile.data_source == "lake":
+            if profile.lake_dataset_id:
+                inject_default_arg("--lake-dataset-id", profile.lake_dataset_id)
+            if profile.data_lake_root:
+                inject_default_arg("--data-lake-root", profile.data_lake_root)
         inject_default_arg("--benchmark", profile.benchmark)
         inject_default_arg("--start-date", profile.backtest_start_date)
         inject_default_arg("--target-weight-panel-csv", _target_weight_path_for_mode(profile, mode))
         inject_default_arg("--score-panel-csv", _score_path_for_mode(profile, mode))
     elif mode == "trade_plan":
         inject_default_arg("--data-source", profile.data_source)
+        if profile.data_source == "lake":
+            if profile.lake_dataset_id:
+                inject_default_arg("--lake-dataset-id", profile.lake_dataset_id)
+            if profile.data_lake_root:
+                inject_default_arg("--data-lake-root", profile.data_lake_root)
         inject_default_arg("--benchmark", profile.benchmark)
         inject_default_arg("--start-date", profile.trade_plan_start_date)
         inject_default_arg("--external-target-weight-csv", _target_weight_path_for_mode(profile, mode))

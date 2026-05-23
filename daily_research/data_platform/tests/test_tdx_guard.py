@@ -45,6 +45,16 @@ class TdxFreeGuardTest(unittest.TestCase):
 
         self.assertEqual(value, "2026-01-07")
 
+    def test_latest_completed_date_does_not_roll_weekend_to_future(self) -> None:
+        self.assertEqual(
+            get_latest_completed_trading_date(reference_ts="2026-05-23 20:00"),
+            "2026-05-22",
+        )
+        self.assertEqual(
+            get_latest_completed_trading_date(reference_ts="2026-05-24 20:00"),
+            "2026-05-22",
+        )
+
     def test_legacy_tq_import_is_disabled_without_explicit_environment_flag(self) -> None:
         with mock.patch.dict("os.environ", {"DAILY_RESEARCH_ALLOW_TDX_FAMILY": ""}, clear=False):
             self.assertIsNone(data_provider._try_import_tq())

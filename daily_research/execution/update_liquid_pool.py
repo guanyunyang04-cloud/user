@@ -18,6 +18,9 @@ def parse_args():
     parser.add_argument("--start-date", default="20240101")
     parser.add_argument("--signal-date", default="", help="Optional completed trading date override, e.g. 20260320.")
     parser.add_argument("--universe-scope", default="all_a")
+    parser.add_argument("--data-source", choices=["lake", "tq"], default="lake")
+    parser.add_argument("--lake-dataset-id", default="")
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--lookback-days", type=int, default=80)
     parser.add_argument("--min-price", type=float, default=2.0)
     parser.add_argument("--max-price", type=float, default=300.0)
@@ -34,6 +37,9 @@ def main():
         start_date=args.start_date,
         signal_date=args.signal_date or None,
         universe_scope=args.universe_scope,
+        data_source=args.data_source,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
         lookback_days=args.lookback_days,
         min_price=args.min_price,
         max_price=args.max_price,

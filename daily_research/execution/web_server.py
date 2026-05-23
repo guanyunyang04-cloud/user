@@ -270,15 +270,19 @@ def create_app() -> FastAPI:
     @app.post("/api/data-sources/refresh")
     def api_data_sources_refresh(request: DataRefreshRequest) -> JSONResponse:
         try:
+            default_domains = list(app_service.FORMAL_DATA_PLATFORM_DOMAINS)
+            as_of_date = str(request.as_of_date or "").strip() or str(app_service.get_latest_completed_trading_date())
+            universe = str(request.universe or "").strip() or "all_a"
+            domains = [str(item).strip() for item in (request.domains or []) if str(item).strip()] or default_domains
             args: list[str] = []
-            if request.as_of_date:
-                args.extend(["--as-of-date", request.as_of_date])
+            if as_of_date:
+                args.extend(["--as-of-date", as_of_date])
             if request.start_date:
                 args.extend(["--start-date", request.start_date])
-            if request.universe:
-                args.extend(["--universe", request.universe])
-            if request.domains:
-                args.extend(["--domains", ",".join(request.domains)])
+            if universe:
+                args.extend(["--universe", universe])
+            if domains:
+                args.extend(["--domains", ",".join(domains)])
             if request.advanced_args:
                 args.extend(app_service.parse_raw_args_text(request.advanced_args))
             payload = app_service.launch_task_async(

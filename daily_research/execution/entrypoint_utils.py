@@ -136,10 +136,18 @@ def ensure_default_pool_argument(*, pool_name: str = "", pool_size: int = 0) -> 
 
     resolved_pool_size = _resolve_requested_pool_size(pool_name=pool_name, pool_size=pool_size)
     resolved_pool_name = f"liquid{resolved_pool_size}"
+    data_source = str(get_arg_value("--data-source") or "lake").strip().lower()
+    lake_dataset_id = str(get_arg_value("--lake-dataset-id") or "").strip()
+    data_lake_root = str(get_arg_value("--data-lake-root") or "").strip()
     if is_help_request():
         pool_file = get_default_pool_file(resolved_pool_size)
     else:
-        pool_file = ensure_default_pool_file(pool_size=resolved_pool_size)
+        pool_file = ensure_default_pool_file(
+            pool_size=resolved_pool_size,
+            data_source=data_source,
+            lake_dataset_id=lake_dataset_id,
+            data_lake_root=data_lake_root,
+        )
     if not pool_file.exists() and not is_help_request():
         raise FileNotFoundError(
             f"Default {resolved_pool_name} universe file not found after preflight: {pool_file}. "

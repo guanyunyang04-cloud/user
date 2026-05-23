@@ -74,10 +74,12 @@ class AccountStateInput:
     path: str
 
 
-def parse_args():
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate end-of-day trade plan TXT for manual execution")
-    parser.add_argument("--data-source", choices=["tq", "csv"], default="tq")
+    parser.add_argument("--data-source", choices=["tq", "csv", "lake"], default="tq")
     parser.add_argument("--csv-folder", default=None)
+    parser.add_argument("--lake-dataset-id", default="")
+    parser.add_argument("--data-lake-root", default="")
     parser.add_argument("--stocks", default=None)
     parser.add_argument("--stocks-file", default=None, help="Path to txt/csv file containing stock codes.")
     parser.add_argument("--start-date", default="20210101")
@@ -195,7 +197,11 @@ def parse_args():
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--no-auto-trim-history", action="store_true")
-    return parser.parse_args()
+    return parser
+
+
+def parse_args():
+    return build_arg_parser().parse_args()
 
 
 def _load_artifact_meta(artifact_path: Path) -> dict[str, Any]:
@@ -1977,7 +1983,7 @@ def main():
             cfg.universe = load_universe_from_tq(cfg.universe_scope)
         elif not cfg.universe:
             raise ValueError("TQ mode currently requires --universe-scope all_a when --stocks is not provided.")
-    elif not args.csv_folder:
+    elif args.data_source == "csv" and not args.csv_folder:
         raise ValueError("CSV mode requires --csv-folder.")
 
     history_window = resolve_history_window(
@@ -1999,6 +2005,8 @@ def main():
         universe=cfg.universe,
         benchmark=cfg.benchmark,
         history_window=history_window,
+        lake_dataset_id=args.lake_dataset_id,
+        data_lake_root=args.data_lake_root,
         use_cache=not args.no_cache,
         refresh_cache=args.refresh_cache,
     )
@@ -2418,7 +2426,7 @@ def main_with_progress():
                     cfg.universe = load_universe_from_tq(cfg.universe_scope)
                 elif not cfg.universe:
                     raise ValueError("TQ mode without --stocks currently requires --universe-scope all_a.")
-            elif not args.csv_folder:
+            elif args.data_source == "csv" and not args.csv_folder:
                 raise ValueError("CSV mode requires --csv-folder.")
 
         with progress.stage("Resolve inference history window", args.start_date):
@@ -2442,6 +2450,8 @@ def main_with_progress():
                 universe=cfg.universe,
                 benchmark=cfg.benchmark,
                 history_window=history_window,
+                lake_dataset_id=args.lake_dataset_id,
+                data_lake_root=args.data_lake_root,
                 use_cache=not args.no_cache,
                 refresh_cache=args.refresh_cache,
                 progress_desc="Load trade-plan market data",

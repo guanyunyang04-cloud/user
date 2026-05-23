@@ -7,6 +7,17 @@ import pandas as pd
 import pytest
 
 
+FORMAL_REFRESH_DOMAINS = [
+    "market_daily",
+    "trading_calendar",
+    "universe_snapshot",
+    "security_status",
+    "limit_status",
+    "industry_concept",
+    "valuation",
+]
+
+
 def test_trade_plan_summary_handles_missing_latest_artifact(tmp_path: Path) -> None:
     from daily_research.execution import app_service
 
@@ -84,6 +95,51 @@ def test_data_sources_payload_includes_lake_and_platform() -> None:
     assert "lake_root" in payload
     assert "datasets" in payload
     assert "data_platform" in payload
+
+
+def test_data_sources_payload_exposes_default_refresh_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import app_service
+
+    monkeypatch.setattr(app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+
+    payload = app_service.data_sources_summary()
+
+    assert payload["data_platform"]["latest_completed_trading_date"] == "2026-05-22"
+    assert payload["data_platform"]["recommended_domains"] == FORMAL_REFRESH_DOMAINS
+    assert payload["data_platform"]["default_refresh"] == {
+        "as_of_date": "2026-05-22",
+        "universe": "all_a",
+        "domains": FORMAL_REFRESH_DOMAINS,
+        "provider_plan": "default_free",
+    }
+
+
+def test_data_refresh_api_defaults_to_completed_date_and_formal_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from daily_research.execution import web_server
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_launch_task_async(**kwargs):
+        captured["passthrough_args"] = list(kwargs["passthrough_args"])
+        return {"job_id": "job1", "task_name": kwargs["task_name"], "status": "queued"}
+
+    monkeypatch.setattr(web_server.app_service, "get_latest_completed_trading_date", lambda: "2026-05-22", raising=False)
+    monkeypatch.setattr(web_server.app_service, "launch_task_async", fake_launch_task_async)
+
+    client = TestClient(web_server.create_app())
+    response = client.post("/api/data-sources/refresh", json={})
+
+    assert response.status_code == 200
+    assert captured["passthrough_args"] == [
+        "--as-of-date",
+        "2026-05-22",
+        "--universe",
+        "all_a",
+        "--domains",
+        ",".join(FORMAL_REFRESH_DOMAINS),
+    ]
 
 
 def test_status_payload_omits_continuous_policy() -> None:
@@ -222,6 +278,66 @@ def test_trade_plan_profile_defaults_do_not_auto_retrain(monkeypatch: pytest.Mon
     profiles.apply_profile_defaults("active_execution_strategy", mode="trade_plan", ensure_live_panels=True)
 
     assert called["auto"] is False
+
+
+def test_active_profile_uses_current_lake_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_research.execution import research_candidate_profiles as profiles
+
+    project_daily_research = tmp_path / "daily_research"
+    production_dir = project_daily_research / "output" / "short_expert_policy_v5b_execalign_production_default"
+    source_dir = project_daily_research / "output" / "short_alpha_policy_v5_family_formal_review_20260412_r1" / "runs" / "short_expert_policy_v5b"
+    source_dir.mkdir(parents=True)
+    production_dir.mkdir(parents=True)
+    (source_dir / "execution_aligned_daily_live_target_weight_panel.csv").write_text(
+        "date,stock,target_weight\n",
+        encoding="utf-8",
+    )
+    (source_dir / "execution_aligned_daily_live_score_panel.csv").write_text(
+        "date,stock,score\n",
+        encoding="utf-8",
+    )
+    (production_dir / "execution_aligned_daily_live_target_weight_panel.csv").write_text(
+        "date,stock,target_weight\n",
+        encoding="utf-8",
+    )
+    (production_dir / "execution_aligned_daily_live_score_panel.csv").write_text(
+        "date,stock,score\n",
+        encoding="utf-8",
+    )
+    (production_dir / "production_retrain_manifest.json").write_text("{}", encoding="utf-8")
+    (production_dir / "daily_live_score_reference.json").write_text("{}", encoding="utf-8")
+
+    manifest = {
+        "source_target_weight_panel_csv": str(source_dir / "execution_aligned_daily_live_target_weight_panel.csv"),
+        "source_score_panel_csv": str(source_dir / "execution_aligned_daily_live_score_panel.csv"),
+        "trade_plan_target_weight_panel_csv": str(
+            production_dir / "execution_aligned_daily_live_target_weight_panel.csv"
+        ),
+        "trade_plan_score_panel_csv": str(production_dir / "execution_aligned_daily_live_score_panel.csv"),
+        "production_manifest_json": str(production_dir / "production_retrain_manifest.json"),
+        "score_reference_metadata_json": str(production_dir / "daily_live_score_reference.json"),
+        "candidate_label": "active",
+        "liquidity_pool_name": "liquid500",
+        "data_source": "lake",
+        "lake_dataset_id": "policy_input_bundle__x",
+        "data_lake_root": str(project_daily_research / "output" / "research_data_lake"),
+    }
+    monkeypatch.setattr(profiles, "_DAILY_RESEARCH_ROOT", project_daily_research)
+    monkeypatch.setattr(profiles, "load_strategy_manifest", lambda: manifest)
+
+    profile = profiles.get_profile("active_execution_strategy")
+
+    assert profile.trade_plan_target_weight_panel_csv == str(
+        (production_dir / "execution_aligned_daily_live_target_weight_panel.csv").resolve()
+    )
+    assert profile.trade_plan_score_panel_csv == str(
+        (production_dir / "execution_aligned_daily_live_score_panel.csv").resolve()
+    )
+    assert profile.trade_plan_model_manifest_json == str((production_dir / "production_retrain_manifest.json").resolve())
+    assert profile.score_reference_metadata_json == str((production_dir / "daily_live_score_reference.json").resolve())
+    assert profile.data_source == "lake"
+    assert profile.lake_dataset_id == "policy_input_bundle__x"
+    assert profile.data_lake_root == str(project_daily_research / "output" / "research_data_lake")
 
 
 def test_model_freshness_lag_is_informational_not_blocking() -> None:

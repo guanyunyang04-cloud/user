@@ -10,11 +10,11 @@ import pandas as pd
 from daily_research.baseline.advanced_ml_runtime import HistoryWindow, load_raw_data_with_cache
 from daily_research.baseline.data_provider import get_latest_completed_trading_date, load_universe_from_tq
 
-
 DEFAULT_POOL_SIZES: tuple[int, ...] = (300, 500, 800)
 DEFAULT_SIGNAL_LOOKBACK_DAYS = 80
 DEFAULT_POOL_SIZE = 500
 DEFAULT_POOL_NAMES: tuple[str, ...] = tuple(f"liquid{size}" for size in DEFAULT_POOL_SIZES)
+DEFAULT_POLICY_INPUT_LAKE_DATASET_ID = "policy_input_bundle__7c8f58d851bce8179e1e9e2d"
 
 
 @dataclass(frozen=True)
@@ -165,7 +165,7 @@ def build_rolling_liquidity_membership(
     if len(signal_dates) == 0:
         raise RuntimeError("No signal dates available for rolling liquidity pool.")
 
-    adv = amount.rolling(int(adv_window)).mean().reindex(index=close.index, columns=close.columns)
+    adv = amount.rolling(int(adv_window), min_periods=1).mean().reindex(index=close.index, columns=close.columns)
     membership_frame = pd.DataFrame(False, index=signal_dates, columns=close.columns, dtype=bool)
     schedule_rows: list[dict[str, Any]] = []
 
@@ -259,6 +259,9 @@ def build_liquidity_rankings(
     start_date: str = "20240101",
     signal_date: str | None = None,
     universe_scope: str = "all_a",
+    data_source: str = "lake",
+    lake_dataset_id: str = DEFAULT_POLICY_INPUT_LAKE_DATASET_ID,
+    data_lake_root: str = "",
     lookback_days: int = DEFAULT_SIGNAL_LOOKBACK_DAYS,
     min_price: float = 2.0,
     max_price: float = 300.0,
@@ -266,14 +269,19 @@ def build_liquidity_rankings(
     refresh_cache: bool = False,
 ) -> tuple[pd.DataFrame, str, dict[str, Any]]:
     signal_date_str = signal_date or get_latest_completed_trading_date()
-    universe = load_universe_from_tq(universe_scope)
+    normalized_source = str(data_source or "lake").strip().lower()
+    universe: list[str] = []
+    if normalized_source == "tq":
+        universe = load_universe_from_tq(universe_scope)
     history_window = _build_history_window(start_date, signal_date_str, lookback_days)
     raw_df_dict, cache_meta = load_raw_data_with_cache(
-        data_source="tq",
+        data_source=normalized_source,
         csv_folder=None,
         universe=universe,
         benchmark="",
         history_window=history_window,
+        lake_dataset_id=lake_dataset_id,
+        data_lake_root=data_lake_root,
         use_cache=use_cache,
         refresh_cache=refresh_cache,
         progress_desc="Load liquidity-pool market data",
@@ -286,7 +294,7 @@ def build_liquidity_rankings(
     if pd.isna(latest_date):
         raise RuntimeError("No valid latest trading date found while building liquidity pool.")
 
-    adv20 = amount_frame.rolling(20).mean().loc[latest_date]
+    adv20 = amount_frame.rolling(20, min_periods=1).mean().loc[latest_date]
     last_close = close_frame.loc[latest_date]
     valid_mask = adv20.notna() & (adv20 > 0) & last_close.notna()
     if min_price > 0:
@@ -373,6 +381,9 @@ def update_liquidity_pool_files(
     start_date: str = "20240101",
     signal_date: str | None = None,
     universe_scope: str = "all_a",
+    data_source: str = "lake",
+    lake_dataset_id: str = DEFAULT_POLICY_INPUT_LAKE_DATASET_ID,
+    data_lake_root: str = "",
     lookback_days: int = DEFAULT_SIGNAL_LOOKBACK_DAYS,
     min_price: float = 2.0,
     max_price: float = 300.0,
@@ -383,6 +394,9 @@ def update_liquidity_pool_files(
         start_date=start_date,
         signal_date=signal_date,
         universe_scope=universe_scope,
+        data_source=data_source,
+        lake_dataset_id=lake_dataset_id,
+        data_lake_root=data_lake_root,
         lookback_days=lookback_days,
         min_price=min_price,
         max_price=max_price,
@@ -402,6 +416,9 @@ def ensure_default_pool_file(
     pool_size: int = DEFAULT_POOL_SIZE,
     start_date: str = "20240101",
     signal_date: str | None = None,
+    data_source: str = "lake",
+    lake_dataset_id: str = DEFAULT_POLICY_INPUT_LAKE_DATASET_ID,
+    data_lake_root: str = "",
     use_cache: bool = True,
     refresh_cache: bool = False,
     auto_refresh_stale: bool = True,
@@ -440,6 +457,9 @@ def ensure_default_pool_file(
         pool_sizes=DEFAULT_POOL_SIZES,
         start_date=start_date,
         signal_date=expected_signal_date,
+        data_source=data_source,
+        lake_dataset_id=lake_dataset_id,
+        data_lake_root=data_lake_root,
         use_cache=use_cache,
         refresh_cache=refresh_cache,
     )

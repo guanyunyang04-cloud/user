@@ -42,12 +42,21 @@ function pageFromPath(pathname: string): PageKey {
   return "overview";
 }
 
+function selectedJobIdFromPath(pathname: string): string {
+  const normalized = pathname.replace(/\/+$/, "");
+  if (!normalized.startsWith("/jobs/")) {
+    return "";
+  }
+  return decodeURIComponent(normalized.slice("/jobs/".length));
+}
+
 interface AppProps {
   api?: ExecutionApi;
 }
 
 export function App({ api = apiClient }: AppProps): JSX.Element {
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
+  const selectedJobId = page === "jobs" ? selectedJobIdFromPath(window.location.pathname) : "";
   const activeItem = useMemo(() => NAV_ITEMS.find((item) => item.key === page) || NAV_ITEMS[0], [page]);
 
   function navigate(next: PageKey): void {
@@ -88,7 +97,7 @@ export function App({ api = apiClient }: AppProps): JSX.Element {
         {page === "data" ? <DataPage api={api} /> : null}
         {page === "trade-plan" ? <TradePlanPage api={api} /> : null}
         {page === "account" ? <AccountPage api={api} /> : null}
-        {page === "jobs" ? <JobsPage api={api} /> : null}
+        {page === "jobs" ? <JobsPage api={api} selectedJobId={selectedJobId} /> : null}
         {page === "system" ? <SystemPage api={api} /> : null}
       </main>
     </div>

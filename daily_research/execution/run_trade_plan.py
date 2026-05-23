@@ -82,24 +82,22 @@ def main():
         candidate_profile = DEFAULT_EXECUTION_CANDIDATE_PROFILE
 
     pool_name_hint = ""
+    resolved_profile = None
     if candidate_profile:
-        try:
-            pool_name_hint = str(get_profile(candidate_profile).liquidity_pool_name or "").strip()
-        except Exception:
-            pool_name_hint = ""
+        resolved_profile = apply_profile_defaults(
+            candidate_profile,
+            mode="trade_plan",
+            ensure_live_panels=not is_help_request(),
+        )
+        pool_name_hint = str(resolved_profile.liquidity_pool_name or "").strip()
 
     ensure_default_pool_argument(pool_name=pool_name_hint)
     ensure_execution_strategy_defaults()
 
     if candidate_profile:
-        resolved = apply_profile_defaults(
-            candidate_profile,
-            mode="trade_plan",
-            ensure_live_panels=not is_help_request(),
-        )
         if not is_help_request():
             print("execution_mode=research_candidate_default")
-            print(f"candidate_profile={resolved.name}")
+            print(f"candidate_profile={resolved_profile.name if resolved_profile is not None else candidate_profile}")
     else:
         inject_default_arg("--model-artifact", str(model_artifact))
         if legacy_ml or explicit_model_artifact:
